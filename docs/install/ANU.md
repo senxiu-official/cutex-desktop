@@ -40,6 +40,10 @@ with the login of a cutex Claude Profile: the two would keep invalidating each o
 
 ## NCI remote jobs
 
+> **Not usable in the current public release yet.** It needs the cutex Job Service, which the
+> 0.1.x release does not ship. Leave the module off for now; this page will say when a release
+> includes it. 当前公开版还不能用（缺少 Job Service），请先保持关闭。
+
 Only for NCI Gadi users who want jobs that agents submit to Gadi (PBS) to show up on the Jobs page
 and to notify the agent when they finish. The host learns about job ends from PBS's notification
 mail, so you need a mailbox that receives that mail. If you do not use Gadi, or do not want inbound

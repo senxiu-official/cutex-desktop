@@ -7479,8 +7479,8 @@
     },
     {
       "path": "docs/install/ANU.md",
-      "sha256": "74698af295018af10414877283707cc1287120626c129b349625924c9d4ceb12",
-      "size": 3554
+      "sha256": "75098e26392c17b3c3a7a35ead0ff413ea9475f698a95604ce2dc00c8763cff4",
+      "size": 3835
     },
     {
       "path": "docs/install/cutex-release-spare.pub",
