@@ -34,9 +34,10 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "the checkout has local changes; build from a clean checkout" >&2
   exit 1
 fi
-# Paths handed to native Windows programs (node, 7z) are converted explicitly; Git Bash's automatic
-# argument conversion is off so the https URL below reaches node unchanged.
-if [ "$platform" = windows-x64 ]; then export MSYS2_ARG_CONV_EXCL='*'; native() { cygpath -w "$1"; }; else native() { printf '%s' "$1"; }; fi
+# Paths handed to native Windows programs (node, 7z) are converted explicitly. Git Bash's automatic
+# argument conversion is turned off only for the package-portable call below (so its https URL reaches
+# node unchanged): exported globally it also breaks the corepack shim, whose node argument is a /c/... path.
+if [ "$platform" = windows-x64 ]; then native() { cygpath -w "$1"; }; else native() { printf '%s' "$1"; }; fi
 sha256() { if command -v sha256sum > /dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
 
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0 npm_config_update_notifier=false
@@ -57,7 +58,7 @@ name="cutex-desktop-$version-$platform"
 work="$root/../desktop-package"
 rm -rf "${work:?}"
 mkdir -p "$work"
-node scripts/package-portable.mjs "$(native "$work/$name")" --no-source --channel release --release-page "$release_page"
+MSYS2_ARG_CONV_EXCL='*' node scripts/package-portable.mjs "$(native "$work/$name")" --no-source --channel release --release-page "$release_page"
 
 case "$platform" in
   linux-x64)

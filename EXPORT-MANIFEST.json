@@ -14,8 +14,8 @@
     },
     {
       "path": ".github/ci/package-desktop.sh",
-      "sha256": "042d866b856c54b15286d5e4d9496605e2cf97a5d10c14b670ed9d7bba1f6db7",
-      "size": 4304
+      "sha256": "bf1c7ea89ee8d1e4a2061444453165d2395707ef1b305964d8d0cf9bc64ef077",
+      "size": 4432
     },
     {
       "path": ".github/workflows/build-binaries.yml",
