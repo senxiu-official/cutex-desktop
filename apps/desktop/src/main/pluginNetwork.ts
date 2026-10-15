@@ -51,8 +51,12 @@ interface LockdownDeps {
 /** Idempotent; a failed attempt is retried by the next call and never reports success. */
 export function createPluginNetworkLockdown(deps: LockdownDeps) {
   let done: Promise<void> | null = null;
+  let engaged = false;
   return {
+    /** Containment has been started in this run (its process-wide DNS setting stays until exit). */
+    engaged: (): boolean => engaged,
     ensure(): Promise<void> {
+      engaged = true;
       done ??= (async () => {
         deps.configureHostResolver(LOCKDOWN_DNS);
         await deps.setProxy(lockdownProxy(deps.devRendererUrl));

@@ -12,6 +12,8 @@ import { useModelName } from "../../lib/modelDisplay";
 import { ModelName } from "../ModelName";
 
 const EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+/** Claude effort levels cutex takes (`options.claude.effort`) when the model row lists none. */
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const SUMMARIES: ReasoningSummaryMode[] = ["auto", "detailed", "concise", "none"];
 const WEB_SEARCH: WebSearchMode[] = ["disabled", "cached", "live"];
 
@@ -21,6 +23,13 @@ export function ProfileModelFields({ detail, models, cfg, set, searchTool }: { d
   const modelName = useModelName();
   const list = models?.models ?? [];
   const model = cfg.model ?? null;
+  // claude-profile-default-model: a Claude profile's own default model / effort (same PATCH fields;
+  // `cfg` carries the profile item's values, see ProfileEditor). Older cutex: read-only as before.
+  const claude = detail.cliKind === "claude";
+  const claudeDefaults = claude && fieldOffered(detail, "claudeDefaultModel");
+  const modelEditable = claude ? claudeDefaults : fieldEditable(detail, "model");
+  const effortEditable = claude ? claudeDefaults : fieldEditable(detail, "modelReasoningEffort");
+  const override = claudeDefaults ? (detail.detail.claudeNewSessionModel ?? null) : null;
   const selected = list.find((m) => m.id === (model ?? models?.selectedModel));
   const src = (s: string) => t(`agent-config.profile.source.${s}` as MessageKey);
   // Effort ids in the app language (the composer's 低 / 中 / 高 …); unknown ids stay raw.
@@ -31,8 +40,8 @@ export function ProfileModelFields({ detail, models, cfg, set, searchTool }: { d
   const effective = (value: number | null, source: string) => (value ? <span className="text-xs text-subtle tabular-nums">{t("agent-config.profile.effectiveInline", { value: formatWindow(value), source: src(source) })}</span> : null);
   return (
     <>
-      <SettingRow label={t("agent-config.profile.model")}>
-        {!fieldEditable(detail, "model") ? (
+      <SettingRow label={t("agent-config.profile.model")} hint={claudeDefaults ? t(override ? "agent-config.profile.claudeModelOverrideHint" : "agent-config.profile.claudeModelHint", { model: override ? modelName(override, null, detail.id) : "" }) : undefined}>
+        {!modelEditable ? (
           <ModelName id={model ?? detail.model} profile={detail.id} fallback="—" className="font-mono text-xs text-muted" />
         ) : list.length > 0 ? (
           <Select
@@ -50,14 +59,14 @@ export function ProfileModelFields({ detail, models, cfg, set, searchTool }: { d
           <TextInput mono width={FIELD_W.model} value={model ?? ""} onChange={(v) => set({ model: v || null })} />
         )}
       </SettingRow>
-      {fieldEditable(detail, "modelReasoningEffort") && (
+      {effortEditable && (
         <SettingRow label={t("agent-config.profile.effort")}>
           <Select
             width={FIELD_W.model}
             value={cfg.modelReasoningEffort ?? ""}
             options={[
               { value: "", label: selected?.defaultReasoningEffort ? `— (${effortName(selected.defaultReasoningEffort)})` : "—" },
-              ...(selected?.supportedReasoningEfforts.length ? selected.supportedReasoningEfforts : EFFORTS).map((e) => ({ value: e, label: effortName(e) })),
+              ...(selected?.supportedReasoningEfforts.length ? selected.supportedReasoningEfforts : claude ? CLAUDE_EFFORTS : EFFORTS).map((e) => ({ value: e, label: effortName(e) })),
             ]}
             onChange={(v) => set({ modelReasoningEffort: v || null })}
           />

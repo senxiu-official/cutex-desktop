@@ -2,7 +2,7 @@
 // node_modules plus the built app (apps/desktop/out) as resources/app. The main and preload bundles
 // only require electron and node builtins (plus the icon files in resources/icons).
 //
-//   node scripts/package-portable.mjs <dest-dir> [--no-source] [--channel <branch>] [--release-page <https-url>]
+//   node scripts/package-portable.mjs <dest-dir> [--no-source] [--channel <branch>] [--release-page <https-url>] [--version <semver>] [--update-test-hooks]
 //   (run `pnpm --filter @cutex-desktop/app build` first)
 //
 // --no-source: a package for other machines — the builder's checkout and node paths are not recorded
@@ -11,8 +11,14 @@
 // --channel <branch>: the update branch recorded in the package (`release` for colleagues' packages);
 // `<base>/channel` of an install overrides it, and without either the install follows main.
 // --release-page <https-url>: where new packages are published (CI release packages: the GitHub
-// Releases page), recorded as `releasePage`. An install of such a package that cannot update itself
-// (no source checkout, or not in the releases layout) links to it in Settings → 更新与诊断. NOTICE, THIRD_PARTY_NOTICES.md and LICENSES/ ship next to Electron's own
+// Releases page), recorded as `releasePage`. Installed in the releases layout on the `release` channel
+// (Linux / Windows) such a package updates itself from the latest GitHub release of that repository
+// (src/main/binaryUpdate.ts); otherwise Settings → 更新与诊断 links to the page.
+// --version <semver>: the package version recorded as `version` (CI: the release's version, e.g. 0.1.1;
+// default apps/desktop/package.json's). The binary self-update compares it with the latest release tag.
+// --update-test-hooks: local end-to-end tests of the binary self-update only (never CI / releases): the
+// package records `updateTestHooks: true` and then honours CUTEX_DESKTOP_UPDATE_TEST_API (a loopback fake
+// GitHub) and CUTEX_DESKTOP_UPDATE_TEST_PUBKEY (an extra trusted minisign key). NOTICE, THIRD_PARTY_NOTICES.md and LICENSES/ ship next to Electron's own
 // LICENSE / LICENSES.chromium.html in every package.
 //
 // The executable is renamed to cutex(.exe) (macOS: Cutex.app/Contents/MacOS/Cutex) so app.isPackaged
@@ -41,8 +47,14 @@ const channel = channelAt >= 0 ? args[channelAt + 1] : null;
 if (channelAt >= 0 && !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/.test(channel ?? "")) throw new Error("--channel needs a branch name");
 const pageAt = args.indexOf("--release-page");
 const releasePage = pageAt >= 0 ? releasePageUrl(args[pageAt + 1]) : null;
-const destArg = args.find((a, i) => !a.startsWith("--") && (channelAt < 0 || i !== channelAt + 1) && (pageAt < 0 || i !== pageAt + 1));
-if (!destArg) throw new Error("usage: node scripts/package-portable.mjs <dest-dir> [--no-source] [--channel <branch>] [--release-page <https-url>]");
+const versionAt = args.indexOf("--version");
+const versionArg = versionAt >= 0 ? args[versionAt + 1] : null;
+// The same shape the updater accepts (shared/binaryUpdate.ts parseVersion): x.y.z[-pre][+build].
+if (versionAt >= 0 && !/^(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z.-]+)?$/.test(versionArg ?? "")) throw new Error("--version needs a version like 0.1.1");
+const testHooks = args.includes("--update-test-hooks");
+const valueAt = new Set([channelAt, pageAt, versionAt].filter((i) => i >= 0).map((i) => i + 1));
+const destArg = args.find((a, i) => !a.startsWith("--") && !valueAt.has(i));
+if (!destArg) throw new Error("usage: node scripts/package-portable.mjs <dest-dir> [--no-source] [--channel <branch>] [--release-page <https-url>] [--version <semver>] [--update-test-hooks]");
 const dest = resolve(destArg);
 const signIdentity = process.platform === "darwin" ? codesignIdentity(process.env.CUTEX_DESKTOP_CODESIGN_IDENTITY) : null;
 if (existsSync(dest)) throw new Error(`${dest} already exists`);
@@ -98,7 +110,7 @@ try {
 writeFileSync(
   join(target, "package.json"),
   JSON.stringify(
-    { name: pkg.name, productName: pkg.productName, version: pkg.version, private: true, main: pkg.main, commit, committedAt, dirty, sourceDir: noSource ? null : root, nodeDir: noSource ? null : dirname(process.execPath), releaseDir: noSource ? null : dest, ...(channel ? { channel } : {}), ...(releasePage ? { releasePage } : {}), ...(signIdentity && !noSource ? { codesignIdentity: signIdentity } : {}) },
+    { name: pkg.name, productName: pkg.productName, version: versionArg ?? pkg.version, private: true, main: pkg.main, commit, committedAt, dirty, sourceDir: noSource ? null : root, nodeDir: noSource ? null : dirname(process.execPath), releaseDir: noSource ? null : dest, ...(channel ? { channel } : {}), ...(releasePage ? { releasePage } : {}), ...(testHooks ? { updateTestHooks: true } : {}), ...(signIdentity && !noSource ? { codesignIdentity: signIdentity } : {}) },
     null,
     2,
   ) + "\n",
@@ -109,7 +121,7 @@ if (bundle) {
   execFileSync("codesign", ["--force", "--deep", "--sign", signIdentity ?? "-", bundle], { stdio: "pipe" });
   execFileSync("codesign", ["--verify", "--deep", "--strict", bundle], { stdio: "pipe" });
 }
-console.log(`portable ${pkg.productName} ${pkg.version} (${commit?.slice(0, 7)}${dirty ? ", dirty" : ""}${bundle ? `, signed ${signIdentity ?? "ad hoc"}` : ""}) → ${dest}`);
+console.log(`portable ${pkg.productName} ${versionArg ?? pkg.version} (${commit?.slice(0, 7)}${dirty ? ", dirty" : ""}${bundle ? `, signed ${signIdentity ?? "ad hoc"}` : ""}) → ${dest}`);
 
 /** --release-page: an https URL the app opens in the system browser (shared/update.ts parseReleasePage accepts the same). */
 function releasePageUrl(value) {

@@ -32,6 +32,13 @@ export const NO_INDEX_MARKER = ".metadata_never_index";
 export const MAC_RELEASE_SUFFIX = ".noindex";
 export const MAC_BUNDLE = "Cutex.app";
 export const MAC_ARCHIVED_BUNDLE = "Cutex.app.old";
+/**
+ * macOS: next to a launcher cloned from a release package (CI-built, `--no-source`: its package.json
+ * records no `releaseDir`, and the signed bundle must not be edited), `<launcherDir>/.Cutex.app.install.json`
+ * records the release it was cloned from: `{ "releaseDir": "<real path>" }`. Written by syncMacLauncher;
+ * read by the clone at start (launcherSidecarRelease) to find its install.
+ */
+export const LAUNCHER_INSTALL_FILE = ".Cutex.app.install.json";
 /** Suffix of an old release being deleted (renamed first: a locked dir on Windows fails the rename, not half the delete). */
 export const DELETING_SUFFIX = ".deleting";
 /** Releases younger than this stay in releases/ (an install script may still be writing one). */
@@ -249,6 +256,48 @@ function markNoIndex(ops: ReleaseFsOps, style: PathStyle, dir: string): void {
   }
 }
 
+/** Whether a bundle's package.json is a release package (CI-built: records a `releasePage`). */
+export function isReleasePackageJson(packageJson: string | null): boolean {
+  if (!packageJson) return false;
+  try {
+    const v = JSON.parse(packageJson) as { releasePage?: unknown };
+    return typeof v.releasePage === "string" && v.releasePage.startsWith("https://");
+  } catch {
+    return false;
+  }
+}
+
+/** The `releaseDir` of a launcher sidecar file (LAUNCHER_INSTALL_FILE), or null. */
+export function sidecarReleaseDir(text: string | null): string | null {
+  if (!text) return null;
+  try {
+    const v = JSON.parse(text) as { releaseDir?: unknown };
+    return typeof v.releaseDir === "string" && v.releaseDir.startsWith("/") ? v.releaseDir : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The release a launcher clone of a release package runs for: the sidecar's `releaseDir`, provided the
+ * bundle there is the same build as the clone (same commit and version in both package.json files) —
+ * otherwise the sidecar is stale or the clone was replaced by hand, and null.
+ */
+export function launcherSidecarRelease(sidecar: string | null, launcherPackageJson: string | null, releasePackageJson: (releaseDir: string) => string | null): string | null {
+  const dir = sidecarReleaseDir(sidecar);
+  if (!dir || !isReleasePackageJson(launcherPackageJson)) return null;
+  const ident = (text: string | null): string | null => {
+    try {
+      const v = JSON.parse(text ?? "") as { commit?: unknown; version?: unknown };
+      return typeof v.commit === "string" && typeof v.version === "string" ? `${v.commit}@${v.version}` : null;
+    } catch {
+      return null;
+    }
+  };
+  const mine = ident(launcherPackageJson);
+  return mine !== null && mine === ident(releasePackageJson(dir)) ? dir : null;
+}
+
 /** The release a macOS launcher bundle was cloned from, from its Contents/Resources/app/package.json. */
 export function launcherReleaseDir(packageJson: string | null): string | null {
   if (!packageJson) return null;
@@ -291,11 +340,16 @@ export function syncMacLauncher(
   const realReleases = ops.realpath(joinPath(style, opts.baseDir, RELEASES_DIR));
   if (!current || !realReleases || !isDirectChild(realReleases, current, false)) return { action: "failed", launcher, error: "no current release" };
   const source = joinPath(style, current, MAC_BUNDLE);
-  const sourceRelease = launcherReleaseDir(ops.readFile(bundlePackageJson(style, source)));
+  const sourcePackage = ops.readFile(bundlePackageJson(style, source));
+  const sidecar = joinPath(style, opts.launcherDir, LAUNCHER_INSTALL_FILE);
+  // A release package (no releaseDir in its sealed bundle) records its release in the sidecar instead.
+  const viaSidecar = !launcherReleaseDir(sourcePackage) && isReleasePackageJson(sourcePackage);
+  const sourceRelease = launcherReleaseDir(sourcePackage) ?? (viaSidecar ? current : null);
   // A release packaged before `releaseDir` was recorded cannot find its install from a clone.
   if (!sourceRelease) return { action: "noReleaseDir", launcher };
   if (ops.exists(launcher)) {
-    const recorded = launcherReleaseDir(ops.readFile(bundlePackageJson(style, launcher)));
+    const launcherPackage = ops.readFile(bundlePackageJson(style, launcher));
+    const recorded = launcherReleaseDir(launcherPackage) ?? (isReleasePackageJson(launcherPackage) ? sidecarReleaseDir(ops.readFile(sidecar)) : null);
     if (!recorded) return { action: "foreign", launcher };
     const resolved = ops.realpath(recorded) ?? recorded;
     if (samePath(resolved, current, false)) return { action: "current", launcher };
@@ -324,6 +378,13 @@ export function syncMacLauncher(
       // left for the next sync
     }
     return { action: "failed", launcher, error: errorText(error) };
+  }
+  if (viaSidecar) {
+    try {
+      ops.writeFile(sidecar, `${JSON.stringify({ releaseDir: current })}\n`);
+    } catch (error) {
+      return { action: "failed", launcher, error: `launcher cloned, but ${sidecar} not written: ${errorText(error)}` };
+    }
   }
   if (existed) {
     try {

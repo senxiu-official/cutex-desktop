@@ -8,6 +8,10 @@ describe("buildLabel", () => {
     expect(buildLabel({ commit: "c20812e4f00ba7", committedAt: null })).toBe("c20812e");
     expect(buildLabel(null)).toBeNull();
   });
+
+  it("release packages (binary installs) lead with their version", () => {
+    expect(buildLabel({ commit: "c20812e4f00ba7", committedAt: null, version: "0.1.1" })).toBe("0.1.1 · c20812e");
+  });
 });
 
 describe("cutexBuildText", () => {

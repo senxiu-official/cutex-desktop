@@ -27,6 +27,8 @@ export const PROFILE_FEATURES = {
   planLabelOverride: "profile-plan-label-override",
   /** Claude profiles take a manual plan label too (cutex has no live plan for them: manual only). */
   planLabelClaude: "profile-plan-label-claude",
+  /** Claude profiles: PATCH `model` / `modelReasoningEffort` set the profile's default model / effort. */
+  claudeDefaultModel: "claude-profile-default-model",
   providerCategory: "profile-provider-category-v2",
 } as const;
 
@@ -141,4 +143,12 @@ export function localDateTime(iso: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return iso;
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * Whether the profile's default model can be changed from the app: Codex profiles always (their
+ * config's `model`), Claude profiles on a cutex with `claude-profile-default-model`.
+ */
+export function defaultModelEditable(item: Pick<ProfileItem, "cliKind">, features: ReadonlySet<string>): boolean {
+  return item.cliKind === "claude" ? features.has(PROFILE_FEATURES.claudeDefaultModel) : true;
 }

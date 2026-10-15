@@ -25,6 +25,12 @@ export interface ReleaseInfo {
   /** Where new packages of this build are published (`--release-page`, https only; CI release
    *  packages). An install without a source checkout points the owner there instead of updating. */
   releasePage: string | null;
+  /** The package version (`version` of the packaged package.json; CI release packages: the release's
+   *  version, package-portable.mjs --version). Binary self-updates compare it with the latest release. */
+  version: string | null;
+  /** Built with `package-portable.mjs --update-test-hooks` (local end-to-end tests only, never CI): the
+   *  binary updater then honours CUTEX_DESKTOP_UPDATE_TEST_API / CUTEX_DESKTOP_UPDATE_TEST_PUBKEY. */
+  updateTestHooks: boolean;
 }
 
 export function parseReleaseInfo(raw: unknown): ReleaseInfo | { reason: string } {
@@ -36,7 +42,7 @@ export function parseReleaseInfo(raw: unknown): ReleaseInfo | { reason: string }
   if (!commit || !/^[0-9a-f]{40}$/.test(commit)) return { reason: "release has no full commit (packaged before self-update)" };
   // `--no-source` packages write explicit nulls; a release from before self-update has no keys at all.
   if (!("sourceDir" in v) || !("nodeDir" in v)) return { reason: "release has no sourceDir / nodeDir (packaged before self-update)" };
-  return { commit, committedAt: str("committedAt"), sourceDir, nodeDir, channel: parseChannel(v.channel), codesignIdentity: parseCodesignIdentity(v.codesignIdentity), releaseDir: str("releaseDir"), releasePage: parseReleasePage(v.releasePage) };
+  return { commit, committedAt: str("committedAt"), sourceDir, nodeDir, channel: parseChannel(v.channel), codesignIdentity: parseCodesignIdentity(v.codesignIdentity), releaseDir: str("releaseDir"), releasePage: parseReleasePage(v.releasePage), version: str("version"), updateTestHooks: v.updateTestHooks === true };
 }
 
 /** A release page URL to open in the system browser: https only, no credentials, ≤ 2048 chars; else null. */
@@ -260,9 +266,12 @@ export function checkoutPlan(
  * cannot be reached (retryable: a later check may succeed); releasePackage — installed from a release
  * package (it records a `releasePage`) and has no source checkout or is not in the portable layout
  * (e.g. macOS Cutex.app dragged to /Applications): updates are downloaded by hand from the release
- * page (UpdateStatus.releasePage); takes the place of notPortable / noSource for such packages.
+ * page (UpdateStatus.releasePage); takes the place of notPortable / noSource for such packages. A release
+ * package in the portable layout on the `release` channel (Linux / Windows) updates itself from the
+ * GitHub release instead (binary self-update, shared/binaryUpdate.ts); it reports remoteUnreachable when
+ * GitHub cannot be reached and noRelease (retryable, quiet) while the repository has no release yet.
  */
-export type UpdateUnsupportedCode = "devRun" | "noReleaseInfo" | "notPortable" | "noSource" | "releasePackage" | "noGit" | "remoteUnreachable" | "channelMissing";
+export type UpdateUnsupportedCode = "devRun" | "noReleaseInfo" | "notPortable" | "noSource" | "releasePackage" | "noGit" | "remoteUnreachable" | "channelMissing" | "noRelease";
 
 /**
  * Why a `git fetch` of the channel branch failed: git is not installed (spawn ENOENT), the remote has

@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync, existsSync, readFileSync, cpSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync, existsSync, readFileSync, cpSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -20,6 +20,8 @@ import {
   safeChildName,
   staleLauncherTemps,
   syncMacLauncher,
+  LAUNCHER_INSTALL_FILE,
+  launcherSidecarRelease,
   type DirEntryInfo,
   type LauncherOps,
 } from "../src/shared/releases";
@@ -267,6 +269,46 @@ describe("syncMacLauncher (real files, cp stands in for clonefile)", () => {
     point(release("old", null));
     expect(syncMacLauncher(ops(), { launcherDir: apps, baseDir: base, tag: "1" }).action).toBe("noReleaseDir");
     expect(existsSync(apps)).toBe(false);
+  });
+
+  it("release packages (no releaseDir in the sealed bundle): clones and records the release in the sidecar", () => {
+    const pkg = (version: string) => ({ name: "x", version, commit: "c".repeat(40), releasePage: "https://github.com/example-org/cutex-desktop/releases", releaseDir: null });
+    const rel = (name: string, version: string) => {
+      const d = join(base, "releases", name);
+      mkdirSync(join(d, "Cutex.app", "Contents", "Resources", "app"), { recursive: true });
+      writeFileSync(join(d, "Cutex.app", "Contents", "Resources", "app", "package.json"), JSON.stringify(pkg(version)));
+      return realpathSync(d);
+    };
+    const sidecar = () => readFileSync(join(apps, LAUNCHER_INSTALL_FILE), "utf8");
+    const a = rel("0.1.0.noindex", "0.1.0");
+    point(a);
+    expect(syncMacLauncher(ops(), { launcherDir: apps, baseDir: base, tag: "1" }).action).toBe("created");
+    expect(JSON.parse(sidecar())).toEqual({ releaseDir: a });
+    expect(syncMacLauncher(ops(), { launcherDir: apps, baseDir: base, tag: "1" }).action).toBe("current");
+    const b = rel("0.1.1.noindex", "0.1.1");
+    point(b);
+    expect(syncMacLauncher(ops(), { launcherDir: apps, baseDir: base, tag: "2" }).action).toBe("refreshed");
+    expect(JSON.parse(sidecar())).toEqual({ releaseDir: b });
+    expect(readdirSync(apps).sort()).toEqual([LAUNCHER_INSTALL_FILE, "Cutex.app"]);
+    // The clone finds its release through the sidecar while both are the same build.
+    const launcherPkg = readFileSync(join(apps, "Cutex.app", "Contents", "Resources", "app", "package.json"), "utf8");
+    const readRelease = (dir: string) => { try { return readFileSync(join(dir, "Cutex.app", "Contents", "Resources", "app", "package.json"), "utf8"); } catch { return null; } };
+    expect(launcherSidecarRelease(sidecar(), launcherPkg, readRelease)).toBe(b);
+    expect(launcherSidecarRelease(JSON.stringify({ releaseDir: a }), launcherPkg, readRelease)).toBeNull();
+    expect(launcherSidecarRelease(null, launcherPkg, readRelease)).toBeNull();
+    expect(launcherSidecarRelease(sidecar(), JSON.stringify({ commit: "c".repeat(40), version: "0.1.1" }), readRelease)).toBeNull();
+  });
+
+  it("leaves a release-package Cutex.app copied in by hand alone (no sidecar of ours)", () => {
+    const d = join(base, "releases", "0.1.0.noindex");
+    mkdirSync(join(d, "Cutex.app", "Contents", "Resources", "app"), { recursive: true });
+    const body = JSON.stringify({ version: "0.1.0", commit: "c".repeat(40), releasePage: "https://github.com/example-org/cutex-desktop/releases", releaseDir: null });
+    writeFileSync(join(d, "Cutex.app", "Contents", "Resources", "app", "package.json"), body);
+    point(d);
+    mkdirSync(join(apps, "Cutex.app", "Contents", "Resources", "app"), { recursive: true });
+    writeFileSync(join(apps, "Cutex.app", "Contents", "Resources", "app", "package.json"), body);
+    expect(syncMacLauncher(ops(), { launcherDir: apps, baseDir: base, tag: "1" }).action).toBe("foreign");
+    expect(existsSync(join(apps, LAUNCHER_INSTALL_FILE))).toBe(false);
   });
 
   it("restores the old launcher when the swap fails", () => {

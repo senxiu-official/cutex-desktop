@@ -179,7 +179,8 @@ and in the table below; for this release:
 
 | | Linux / Windows / macOS |
 |---|---|
-| `VERSION` (cutex, desktop) | `0.1.0` |
+| `VERSION` (cutex) | `0.1.0` |
+| `DESKTOP_VERSION` (desktop) | `0.1.1` |
 | `NATIVE` (cute-codex) | `0.160.0-r52.2` |
 
 ### B.1 Download and verify
@@ -191,20 +192,20 @@ does not verify must not be used: stop and report it.
 Linux (macOS: only the desktop line, with `macos-arm64` or `macos-x64` and `.zip`):
 
 ```sh
-VERSION=0.1.0 NATIVE=0.160.0-r52.2 PLATFORM=linux-x64
+VERSION=0.1.0 DESKTOP_VERSION=0.1.1 NATIVE=0.160.0-r52.2 PLATFORM=linux-x64
 PUB=RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
 mkdir -p ~/cutex-download && cd ~/cutex-download
 get() { curl -fsSL --retry 3 -O "$1" && curl -fsSL --retry 3 -O "$1.minisig" && minisign -Vm "${1##*/}" -P "$PUB"; }
 get https://github.com/senxiu-official/cutex/releases/download/v$VERSION/cutex-$VERSION-$PLATFORM.tar.gz
 get https://github.com/senxiu-official/cutex/releases/download/v$VERSION/manifest.json
 get https://github.com/senxiu-official/cute-codex/releases/download/cute-codex-v$NATIVE/native-$NATIVE-$PLATFORM.tar.gz
-get https://github.com/senxiu-official/cutex-desktop/releases/download/v$VERSION/cutex-desktop-$VERSION-$PLATFORM.tar.gz
+get https://github.com/senxiu-official/cutex-desktop/releases/download/v$DESKTOP_VERSION/cutex-desktop-$DESKTOP_VERSION-$PLATFORM.tar.gz
 ```
 
 Windows (PowerShell):
 
 ```powershell
-$Version = '0.1.0'; $Native = '0.160.0-r52.2'; $Platform = 'windows-x64'
+$Version = '0.1.0'; $DesktopVersion = '0.1.1'; $Native = '0.160.0-r52.2'; $Platform = 'windows-x64'
 $Pub = 'RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS'
 $Dl = "$env:USERPROFILE\cutex-download"; New-Item -ItemType Directory -Force $Dl | Out-Null; Set-Location $Dl
 function Get-Signed($Url) {
@@ -215,7 +216,7 @@ function Get-Signed($Url) {
 Get-Signed "https://github.com/senxiu-official/cutex/releases/download/v$Version/cutex-$Version-$Platform.tar.gz"
 Get-Signed "https://github.com/senxiu-official/cutex/releases/download/v$Version/manifest.json"
 Get-Signed "https://github.com/senxiu-official/cute-codex/releases/download/cute-codex-v$Native/native-$Native-$Platform.tar.gz"
-Get-Signed "https://github.com/senxiu-official/cutex-desktop/releases/download/v$Version/cutex-desktop-$Version-$Platform.zip"
+Get-Signed "https://github.com/senxiu-official/cutex-desktop/releases/download/v$DesktopVersion/cutex-desktop-$DesktopVersion-$Platform.zip"
 ```
 
 Check: every file prints `Signature and comment signature verified`.
@@ -305,17 +306,17 @@ Then start cutex and check it: **section 6**.
 
 ### B.4 Install the desktop
 
-The package is the same portable layout as section 7, without the `src/` checkout: it cannot pull
-and rebuild itself, and Settings → Updates & diagnostics says so and links to the Releases page
-(updating: B.5).
+The package is the same portable layout as section 7, without the `src/` checkout. Installed as
+below (`releases/<version>` + `current`, channel `release`), it updates itself from the GitHub
+Releases (B.5).
 
 Linux:
 
 ```sh
 DESKTOP_BASE=~/Applications/cutex-desktop
-mkdir -p "$DESKTOP_BASE/releases/$VERSION"
-tar -xzf ~/cutex-download/cutex-desktop-$VERSION-linux-x64.tar.gz -C "$DESKTOP_BASE/releases/$VERSION" --strip-components=1
-ln -sfn "$DESKTOP_BASE/releases/$VERSION" "$DESKTOP_BASE/current"
+mkdir -p "$DESKTOP_BASE/releases/$DESKTOP_VERSION"
+tar -xzf ~/cutex-download/cutex-desktop-$DESKTOP_VERSION-linux-x64.tar.gz -C "$DESKTOP_BASE/releases/$DESKTOP_VERSION" --strip-components=1
+ln -sfn "$DESKTOP_BASE/releases/$DESKTOP_VERSION" "$DESKTOP_BASE/current"
 echo release > "$DESKTOP_BASE/channel"
 test -x "$DESKTOP_BASE/current/cutex" && echo "desktop ok"
 sysctl kernel.apparmor_restrict_unprivileged_userns 2>/dev/null
@@ -347,11 +348,11 @@ Windows:
 
 ```powershell
 $DesktopBase = "$env:LOCALAPPDATA\Programs\cutex-desktop-app"
-$Rel = "$DesktopBase\releases\$Version"
+$Rel = "$DesktopBase\releases\$DesktopVersion"
 New-Item -ItemType Directory -Force "$DesktopBase\releases" | Out-Null
-Expand-Archive "$env:USERPROFILE\cutex-download\cutex-desktop-$Version-windows-x64.zip" -DestinationPath "$DesktopBase\releases\unpack-$Version"
-Move-Item "$DesktopBase\releases\unpack-$Version\cutex-desktop-$Version-windows-x64" $Rel
-Remove-Item "$DesktopBase\releases\unpack-$Version"
+Expand-Archive "$env:USERPROFILE\cutex-download\cutex-desktop-$DesktopVersion-windows-x64.zip" -DestinationPath "$DesktopBase\releases\unpack-$DesktopVersion"
+Move-Item "$DesktopBase\releases\unpack-$DesktopVersion\cutex-desktop-$DesktopVersion-windows-x64" $Rel
+Remove-Item "$DesktopBase\releases\unpack-$DesktopVersion"
 if (Test-Path "$DesktopBase\current") { (Get-Item "$DesktopBase\current").Delete() }
 New-Item -ItemType Junction -Path "$DesktopBase\current" -Target $Rel | Out-Null
 Set-Content -Path "$DesktopBase\channel" -Value release
@@ -362,18 +363,34 @@ Get-ChildItem "$DesktopBase\current\cutex.exe"
 The first start creates the Start-menu shortcut **Cutex**; start the app from there afterwards.
 Windows SmartScreen warns about the downloaded program (B.6).
 
-macOS (the desktop only; connect to your cutex machine as in section 7.4):
+macOS (the desktop only; connect to your cutex machine as in section 7.4). The app lives in
+`~/Applications/cutex-desktop/releases/<version>.noindex/Cutex.app` (`.noindex`: Spotlight lists only
+the launcher); on its first start it creates `~/Applications/Cutex.app`, a copy it keeps on the
+current version, which is the one to start (and pin to the Dock) from then on:
 
 ```sh
 cd ~/cutex-download
+DESKTOP_VERSION=0.1.1
 ARCH=$( [ "$(uname -m)" = arm64 ] && echo arm64 || echo x64 )
-# (download and verify cutex-desktop-$VERSION-macos-$ARCH.zip as in B.1)
-ditto -x -k cutex-desktop-$VERSION-macos-$ARCH.zip .
-mkdir -p ~/Applications && ditto cutex-desktop-$VERSION-macos-$ARCH/Cutex.app ~/Applications/Cutex.app
-open ~/Applications/Cutex.app
+# (download and verify cutex-desktop-$DESKTOP_VERSION-macos-$ARCH.zip as in B.1)
+DESKTOP_BASE=~/Applications/cutex-desktop
+REL="$DESKTOP_BASE/releases/$DESKTOP_VERSION.noindex"
+mkdir -p "$DESKTOP_BASE/releases"
+ditto -x -k cutex-desktop-$DESKTOP_VERSION-macos-$ARCH.zip "$DESKTOP_BASE/releases/unpack-$DESKTOP_VERSION"
+mv "$DESKTOP_BASE/releases/unpack-$DESKTOP_VERSION/cutex-desktop-$DESKTOP_VERSION-macos-$ARCH" "$REL"
+rm -r "$DESKTOP_BASE/releases/unpack-$DESKTOP_VERSION"
+xattr -dr com.apple.quarantine "$REL/Cutex.app"
+codesign --verify --deep --strict "$REL/Cutex.app" && echo "signature ok"
+ln -sfn "$REL" "$DESKTOP_BASE/current"
+echo release > "$DESKTOP_BASE/channel"
+open "$DESKTOP_BASE/current/Cutex.app"
 ```
 
-macOS blocks the first start of a downloaded app that is not notarized (B.6).
+Check: `signature ok`, and about 20 seconds after the window appears `~/Applications/Cutex.app`
+exists. If `~/Applications/Cutex.app` already existed (an earlier install that copied the app there
+by hand), the app leaves it alone and it stays on its old version: quit Cutex, move that copy to the
+Trash, and start `"$DESKTOP_BASE/current/Cutex.app"` once more. If macOS still blocks the first start,
+see B.6.
 
 Then go on with **section 7.3** (first start) and **section 8** (first Profile and agent).
 
@@ -383,11 +400,29 @@ Then go on with **section 7.3** (first start) and **section 8** (first Profile a
   release is published, it downloads it, verifies the signature, waits until no agent is working,
   switches and checks the result (rolling back by itself on failure). By hand: `cutex upgrade check`,
   then `cutex upgrade apply` (`docs/backend-upgrade.md` in the cutex repository).
-- **The desktop**: download and verify the new package (B.1), unpack it next to the old one as
-  `releases/<new version>` and point `current` at it (Linux: the `ln -sfn` line of B.4; Windows: the
-  junction lines of B.4), then quit the app from the tray and start it again. Keep the previous
-  release until the new one works; delete older ones by hand. macOS: quit the app and replace
-  `~/Applications/Cutex.app` with the new one.
+- **The desktop** (Linux, Windows, macOS): when a newer release is published, an **Update** button appears
+  next to Settings, and Settings → Updates & diagnostics shows "New version <version>". The app asks
+  `api.github.com` for the latest release of `senxiu-official/cutex-desktop` (at most once an hour in
+  the background; **Check now** asks at once). **Update** downloads the platform package with its
+  `.minisig`, `SHA256SUMS` and `SHA256SUMS.minisig` into `<desktop base>/.update-download` (only from
+  github.com and GitHub's download hosts), verifies both signatures with the release key above (or
+  the spare key `D12869DA9D6F784E`, `docs/install/cutex-release-spare.pub`) and the package's
+  SHA-256 against the signed `SHA256SUMS`, unpacks it into `releases/<new version>` (macOS:
+  `<new version>.noindex`, unpacked with `ditto`, the quarantine mark removed and the app's signature
+  checked with `codesign --verify --deep --strict`, then `~/Applications/Cutex.app` refreshed), points
+  `current` at it and restarts. If anything does not verify, nothing changes and the button says
+  **Retry update**. If the new version does not come up within 25 seconds, `current` is switched back
+  to the previous release by itself. Older releases are tidied up as in section 9 (Old releases).
+  It needs network access to github.com, nothing else (no git, no Node.js). It uses the computer's
+  proxy settings the way Chrome does (Windows / macOS system proxy including automatic configuration,
+  Linux desktop proxy settings or `HTTPS_PROXY`). A proxy that asks for a user name and password is not
+  supported yet: Settings → Updates & diagnostics then says the update source cannot be reached
+  (update by hand, below).
+
+  The same by hand (e.g. without network access from the app): download and verify the new package
+  (B.1), unpack it next to the old one as `releases/<new version>` and point `current` at it (Linux:
+  the `ln -sfn` line of B.4; Windows: the junction lines of B.4; macOS: the lines of B.4 from `REL=`
+  to `ln -sfn`), then quit the app from the tray and start it again.
 
 ### B.6 Unsigned app warnings
 
@@ -397,7 +432,7 @@ know the publisher:
 
 - **Windows**: SmartScreen says "Windows protected your PC" on the first start: click
   **More info → Run anyway**. To clear the download mark for the whole folder instead:
-  `Get-ChildItem -Recurse "$DesktopBase\releases\$Version" | Unblock-File`.
+  `Get-ChildItem -Recurse "$DesktopBase\releases\$DesktopVersion" | Unblock-File`.
 - **macOS**: "Cutex cannot be opened because the developer cannot be verified" (or "Apple could not
   verify…"). Right-click (Control-click) `Cutex.app` → **Open** → **Open**; on macOS 15 and later,
   open System Settings → Privacy & Security and click **Open Anyway**, then confirm. The keychain
@@ -947,16 +982,20 @@ under Settings → Notifications.
 
 ### The desktop
 
-A desktop installed from a release package (section B) has no `src/` checkout: Settings → Updates &
-diagnostics says "Installed from a release package" and links to the Releases page; update it as
-in **B.5**. The rest of this part is about a desktop built from source (section 7).
+A desktop installed from a release package (section B) has no `src/` checkout: it updates from the
+GitHub Releases (the **Update** button, **B.5**). An app copied somewhere else by hand (outside
+`releases/<version>` + `current`) cannot replace itself; Settings → Updates & diagnostics then links
+to the Releases page. The rest of this part is about a desktop built from source
+(section 7).
 
 Settings → **Updates & diagnostics** shows the version, the channel (`release`) and the update
 state. When the `release` branch moves, an **Update** button appears next to Settings: it pulls
 `<desktop base>/src`, builds a new release, switches `current` and restarts. If the new version does
 not come up, it switches back by itself. It fetches from the `origin` remote of
 `<desktop base>/src` (GitHub, for a clone made in section 7) and builds with the Node 24 the
-install was built with, so it needs git and network access to that remote. It refuses to run while
+install was built with, so it needs git and network access to that remote. Behind a proxy, git
+(for an `https://` remote) and the build's downloads use the computer's proxy settings unless git's
+`http.proxy` or `HTTPS_PROXY` already name one; `ssh` remotes are left to ssh. It refuses to run while
 `src` has local changes (see the check in 7.1).
 
 By hand (the same thing):
@@ -1128,4 +1167,4 @@ also reads `~/.agents/skills`, so cutex agents on that machine may see the skill
 
 ## ANU users
 
-See [ANU.md](ANU.md) for the optional Claude Science and NCI modules. Everyone else can ignore them.
+See [ANU.md](ANU.md) for two optional modules, both off by default: Claude Science (anyone with a Claude Science account) and NCI remote jobs (users of NCI, e.g. Gadi). Skip it if neither applies.

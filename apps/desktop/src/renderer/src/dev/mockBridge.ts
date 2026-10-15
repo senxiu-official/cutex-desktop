@@ -188,7 +188,12 @@ const mockProfiles: Record<string, { name: string; cliKind?: "codex" | "claude";
     name: "claude", cliKind: "claude", authKind: "none", apiKeyPresent: false, color: "#EE7B32", allowSwitch: null, planLabel: "Max 20x",
     modelNames: { opus: "Opus 5.5" },
     config: {},
-    models: ["sonnet", "opus", "haiku"].map((id) => mockModel(id, 200_000, { supportedReasoningEfforts: [], defaultReasoningEffort: null })),
+    models: [
+      ...["sonnet", "opus", "haiku"].map((id) => mockModel(id, 200_000, { supportedReasoningEfforts: [], defaultReasoningEffort: null })),
+      // claude-profile-default-model: full ids from the adapter's reference catalog, with display names.
+      mockModel("claude-opus-5-5", 200_000, { displayName: "Claude Opus 5.5", supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"], defaultReasoningEffort: null }),
+      mockModel("claude-sonnet-5-5", 200_000, { displayName: "Claude Sonnet 5.5", supportedReasoningEfforts: ["low", "medium", "high", "max"], defaultReasoningEffort: null }),
+    ],
   },
   // A second preview-only Claude profile demonstrates the inline account choices.
   "claude-work": {
@@ -211,7 +216,7 @@ const mockProfileItem = (name: string) => {
   const p = mockProfiles[name]!;
   const c = p.config as Record<string, string | number | null>;
   return {
-    id: name, name, cliKind: p.cliKind ?? "codex", source: null, provider: (c.modelProvider as string) ?? null, model: (c.model as string) ?? null, modelProvider: (c.modelProvider as string) ?? null,
+    id: name, name, cliKind: p.cliKind ?? "codex", source: null, provider: (c.modelProvider as string) ?? null, model: (c.model as string) ?? (p.cliKind === "claude" ? "sonnet" : null), modelProvider: (c.modelProvider as string) ?? null,
     baseUrl: (c.providerBaseUrl as string) ?? null, modelReasoningEffort: (c.modelReasoningEffort as string) ?? null,
     modelContextWindow: (c.modelContextWindow as number) ?? null, modelAutoCompactTokenLimit: (c.modelAutoCompactTokenLimit as number) ?? null,
     authPresent: p.authKind === "apiKey" ? p.apiKeyPresent : p.authKind === "chatgpt", authKind: p.authKind, ...mockPlanLabel(p), isDefault: name === mockSettings.defaultProfile,
@@ -266,7 +271,10 @@ const mockProfileDetail = (name: string) => {
   const agentEditable = LEGACY ? {} : { nativeSubagents: !claude, agentUseRequiresApproval: true, delegationWait: true, ...(claude ? { agentTurnQuestions: true, claudeTools: true, claudeFileCheckpointing: true } : {}), planLabel: true, privateChatgptAuthFile: !claude, toolSchemaCompat: !claude };
   // profile-reasoning-summary: OpenAI-family Codex profiles only (DeepSeek-style ones strip the key).
   const summaryEditable = LEGACY ? {} : { modelReasoningSummary: !claude && p.config.modelProvider === "openai", updatePlanEnabled: !claude, webSearch: !claude, searchTool: !claude && p.authKind === "apiKey" };
-  return { ...mockProfileItem(name), model: claude ? "sonnet" : (p.config.model ?? null), detail: { config, apiKeyPresent: p.apiKeyPresent, allowSessionSwitchExplicit: p.allowSwitch, allowSessionSwitchDefault: p.authKind === "apiKey", catalogEditable: p.authKind === "apiKey" || (!LEGACY && !claude), editable: { ...editable, ...agentEditable, ...summaryEditable }, ...agentOptions } } as never;
+  // claude-profile-default-model: the Claude default (built-in sonnet) is editable; no newSessionDefaults override in the mock.
+  const claudeModel = LEGACY || !claude ? {} : { claudeProfileModel: (p.config.model as string) ?? "sonnet", claudeNewSessionModel: null, claudeBuiltinDefaultModel: "sonnet" };
+  if (claude && !LEGACY) (agentEditable as Record<string, boolean>).claudeDefaultModel = true;
+  return { ...mockProfileItem(name), model: (p.config.model as string) ?? (claude ? "sonnet" : null), detail: { ...claudeModel, config, apiKeyPresent: p.apiKeyPresent, allowSessionSwitchExplicit: p.allowSwitch, allowSessionSwitchDefault: p.authKind === "apiKey", catalogEditable: p.authKind === "apiKey" || (!LEGACY && !claude), editable: { ...editable, ...agentEditable, ...summaryEditable }, ...agentOptions } } as never;
 };
 const mockModelsView = (name: string) => {
   const p = mockProfiles[name]!;
@@ -296,7 +304,7 @@ const mockModelsView = (name: string) => {
       const window = profileWindow ? Math.min(profileWindow, m.maxContextWindow ?? profileWindow) : m.contextWindow;
       const compactRaw = profileCompact ?? m.autoCompactTokenLimit;
       return {
-        ...m, effectiveContextWindowPercent: null, isDefault: m.id === p.config.model, discovered: true, ...(LEGACY ? {} : { entryDisplayName: p.modelNames?.[m.id] ?? null }),
+        ...m, effectiveContextWindowPercent: null, isDefault: m.id === ((p.config.model as string) ?? (p.cliKind === "claude" ? "sonnet" : null)), discovered: true, ...(LEGACY ? {} : { entryDisplayName: p.modelNames?.[m.id] ?? null }),
         effective: {
           contextWindow: window, contextWindowSource: profileWindow ? "profile" : m.contextWindow ? "catalog" : "unknown",
           autoCompactTokenLimit: window ? Math.min(compactRaw ?? Infinity, Math.round(window * 0.9)) : compactRaw,
@@ -2698,6 +2706,18 @@ export function installMockBridge(): void {
           p.privateAuthFile = privateChatgptAuthFile;
         }
         if (agentTurnQuestions !== undefined) p.turnQuestions = agentTurnQuestions;
+        if (p.cliKind === "claude" && Object.keys(cfg).length) {
+          // claude-profile-default-model: model / modelReasoningEffort only (older cutex: none).
+          const other = Object.keys(cfg).filter((k) => LEGACY || (k !== "model" && k !== "modelReasoningEffort"));
+          if (other.length) throw new Error("invalid_request: Codex model settings are unavailable for a Claude profile");
+          if (cfg.model !== undefined && cfg.model !== null && (!cfg.model.trim() || /\s/.test(cfg.model.trim()))) throw new Error("invalid_request: model: a Claude model id or alias (1-200 characters, no spaces)");
+          // null = back to the built-in default (sonnet) / the model's own effort.
+          for (const key of ["model", "modelReasoningEffort"] as const) {
+            if (cfg[key] !== null) continue;
+            delete cfg[key];
+            delete p.config[key];
+          }
+        }
         if (apiKey) p.apiKeyPresent = true;
         if (color !== undefined) p.color = color;
         if (allowSessionSwitch !== undefined) p.allowSwitch = allowSessionSwitch;

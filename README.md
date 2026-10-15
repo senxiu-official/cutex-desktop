@@ -6,7 +6,7 @@
 
 <p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
 
-**0.1.0 "First Take"**: the first public release. See [CHANGELOG.md](CHANGELOG.md).
+**0.1.1**: signed desktop packages with one-click updates (0.1.0 "First Take" was the first public release). See [CHANGELOG.md](CHANGELOG.md).
 
 Cutex desktop is the desktop app for [cutex](https://github.com/senxiu-official/cutex), a daemon
 that runs coding agents on your own machines. Agents run on
@@ -94,6 +94,12 @@ own backend updates):
 minisign -Vm <file> -P RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
 ```
 
+A desktop installed from a release package as the install guide describes (section B.4) updates
+itself: when a newer release is published, an **Update** button appears next to Settings
+(also in Settings → Updates & diagnostics). It downloads the new package, checks its signature
+against the same key, switches to it and restarts, and switches back by itself if the new version
+does not start.
+
 The Windows and macOS apps are not code-signed with a paid certificate (no Apple Developer ID or
 notarization, no Windows Authenticode). On the first start Windows SmartScreen says "Windows
 protected your PC": click **More info → Run anyway**. macOS says the developer cannot be verified:
@@ -105,8 +111,9 @@ source stays available, see the guide.
 
 - [docs/install/AGENT-INSTALL.md](docs/install/AGENT-INSTALL.md): install, update and troubleshooting
 - [docs/QUICKSTART.md](docs/QUICKSTART.md): a short tour of the desktop (Chinese, with an English summary)
-- [docs/install/ANU.md](docs/install/ANU.md): optional modules for ANU users (Claude Science, NCI);
-  nobody else needs them
+- [docs/install/ANU.md](docs/install/ANU.md): two optional modules, off by default: Claude Science
+  (for anyone with a Claude Science account) and NCI remote jobs (for users of Australia's National
+  Computational Infrastructure, e.g. Gadi)
 - [docs/DESIGN.md](docs/DESIGN.md): architecture and product decisions
 - [docs/desktop-modules.md](docs/desktop-modules.md) and
   [docs/module-dev-guide.md](docs/module-dev-guide.md): the module contract, and how to write a module

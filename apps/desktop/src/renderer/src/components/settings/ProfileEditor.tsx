@@ -430,7 +430,10 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
         <Loading rows={4} />
       </Section>
     );
-  const cfg = { ...(detail.detail.config ?? {}), ...patch } as ProfileDetail["detail"]["config"];
+  // Claude profiles have no Codex config: their default model / effort are the item's own values
+  // (claude-profile-default-model; ProfileModelFields).
+  const baseConfig = detail.detail.config ?? (kind === "claude" ? { model: detail.model, modelReasoningEffort: detail.modelReasoningEffort } : {});
+  const cfg = { ...baseConfig, ...patch } as ProfileDetail["detail"]["config"];
   const set = (p: ProfilePatch) => {
     setStatus(null);
     setPatch((prev) => ({ ...prev, ...p }));

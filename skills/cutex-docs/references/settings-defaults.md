@@ -19,7 +19,7 @@
 - **已有 agent 不受影响**：每个 agent 保存自己创建时的权限。默认值只影响之后新建的 agent。
 - 想让已有安装也用「自动」：「设置」（Settings）→「新建默认」（New {{agent}} defaults）里选「自动」。改单个 agent：输入框下方的权限模式菜单（「完全访问」/「自动」/「只读」（Read only））。各选项含义见 [agents.md](agents.md#codex-的沙箱审批与网络)。
 - 「新版 cutex 已不再提供旧版」：通知预设里不再有「旧版」。只有连到较旧 cutex 的主机时，才会只读显示「旧版」并提示「选一个预设即可切换」。通知设置在「设置」→「通知」（Notifications）。
-- ANU 用户的两个可选模块（Claude Science、NCI 远程作业）见桌面仓库 `docs/install/ANU.md`；其他人保持关闭即可。
+- 两个默认关闭的可选模块见桌面仓库 `docs/install/ANU.md`：Claude Science（有 Claude Science 账号的人都可以用）和 NCI 远程作业（NCI / Gadi 用户）；用不到就保持关闭。
 
 ## 模块的开关
 

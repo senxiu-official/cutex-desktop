@@ -56,6 +56,7 @@ const CORE_NEW_FEATURES: readonly string[] = [
   "profile-plan-label",
   "profile-plan-label-override",
   "profile-plan-label-claude",
+  "claude-profile-default-model",
   "profile-generic-switches",
   "profile-tool-schema-compat",
   "claude-runtime-features",

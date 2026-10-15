@@ -64,6 +64,10 @@ function sendEvent<K extends keyof DesktopEvents>(event: K, payload: DesktopEven
 const updater = new Updater(
   (status) => sendEvent("updateStatus", status),
   (channel) => resolveUpdateRemote(process.env.CUTEX_DESKTOP_UPDATE_REMOTE, desktopShell.state().prefs, channel),
+  // The updater talks through its own Chromium session (system proxy, main/updateNet.ts); once the
+  // agent-page / plugin containment is engaged its process-wide DNS lockdown stays, and the updater
+  // moves its transfers to Node instead of loosening it.
+  { contained: () => pluginNetwork?.engaged() ?? false },
 );
 desktopShell.onPrefsChanged = (prefs) => updater.schedule(prefs.updateCheckMinutes);
 

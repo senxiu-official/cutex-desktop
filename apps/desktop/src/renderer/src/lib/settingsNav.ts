@@ -20,10 +20,12 @@ export function settingsTab(params: Readonly<Record<string, string | undefined>>
 }
 
 /** "c20812e · 2026-10-07 12:20" for the running desktop build, or null (dev run / unknown). */
-export function buildLabel(current: { commit: string; committedAt: string | null } | null | undefined): string | null {
+export function buildLabel(current: { commit: string; committedAt: string | null; version?: string } | null | undefined): string | null {
   if (!current?.commit) return null;
   const date = current.committedAt ? current.committedAt.slice(0, 16).replace("T", " ") : null;
-  return date ? `${current.commit.slice(0, 7)} · ${date}` : current.commit.slice(0, 7);
+  const build = date ? `${current.commit.slice(0, 7)} · ${date}` : current.commit.slice(0, 7);
+  // Release packages (binary installs): the version first.
+  return current.version ? `${current.version} · ${build}` : build;
 }
 
 /**

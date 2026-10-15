@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build and pack the portable desktop for one platform (a release package: no source checkout recorded,
-# channel `release`, the Releases page recorded for Settings → Updates & diagnostics):
+# channel `release`, the Releases page and the version recorded — Linux / Windows installs in the
+# releases layout update themselves from the latest GitHub release; others link to the Releases page):
 #
 #   cutex-desktop-<version>-linux-x64.tar.gz     cutex-desktop-<version>-linux-x64/cutex, resources/, ...
 #   cutex-desktop-<version>-windows-x64.zip      cutex-desktop-<version>-windows-x64\cutex.exe, ...
@@ -20,7 +21,8 @@ case "$platform" in
   linux-x64 | windows-x64 | macos-arm64 | macos-x64) ;;
   *) echo "unknown platform $platform" >&2; exit 2 ;;
 esac
-[[ "$version" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || { echo "invalid version: $version" >&2; exit 2; }
+# A semver (the in-app updater compares it with the tag of the latest release: v<version>).
+[[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]] || { echo "invalid version (x.y.z[-pre]): $version" >&2; exit 2; }
 release_page="${RELEASE_PAGE:-https://github.com/senxiu-official/cutex-desktop/releases}"
 
 # Git Bash on Windows: directories given as C:\... become /c/... (GitHub passes RUNNER_TEMP that way).
@@ -58,7 +60,7 @@ name="cutex-desktop-$version-$platform"
 work="$root/../desktop-package"
 rm -rf "${work:?}"
 mkdir -p "$work"
-MSYS2_ARG_CONV_EXCL='*' node scripts/package-portable.mjs "$(native "$work/$name")" --no-source --channel release --release-page "$release_page"
+MSYS2_ARG_CONV_EXCL='*' node scripts/package-portable.mjs "$(native "$work/$name")" --no-source --channel release --release-page "$release_page" --version "$version"
 
 case "$platform" in
   linux-x64)

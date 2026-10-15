@@ -30,7 +30,9 @@ export const RELATED_REPO_URLS = [
 ] as const;
 
 /** One-line summary of the update on offer (tooltip / settings hint). */
-export function updateSummary(t: (key: "update.available" | "update.offMain" | "updater.switchChannel" | ChannelLabelKey, vars?: Record<string, string | number>) => string, latest: NonNullable<UpdateStatus["latest"]>, channel = "main"): string {
+export function updateSummary(t: (key: "update.available" | "update.availableVersion" | "update.offMain" | "updater.switchChannel" | ChannelLabelKey, vars?: Record<string, string | number>) => string, latest: NonNullable<UpdateStatus["latest"]>, channel = "main"): string {
+  // A release package (binary install) is offered by version, not by commits.
+  if (latest.version) return t("update.availableVersion", { version: latest.version });
   if (latest.switchChannel) return t("updater.switchChannel", { channel: channelLabel(t, channel), subject: latest.subject });
   return latest.offMain ? t("update.offMain", { subject: latest.subject, branch: channel }) : t("update.available", { count: latest.count, subject: latest.subject });
 }
@@ -43,8 +45,10 @@ export function channelLabel(t: (key: ChannelLabelKey) => string, channel: strin
 }
 
 /** Settings hint for an install that cannot update itself (UpdateStatus.code). */
-export function unsupportedHintKey(code: UpdateStatus["code"]): "updater.unsupported.devRun" | "updater.unsupported.noSource" | "updater.unsupported.releasePackage" | "updater.unsupported.noGit" | "updater.unsupported.remoteUnreachable" | "updater.unsupported.channelMissing" | "updater.unsupported.other" {
+export function unsupportedHintKey(code: UpdateStatus["code"]): "updater.unsupported.devRun" | "updater.unsupported.noSource" | "updater.unsupported.releasePackage" | "updater.unsupported.noGit" | "updater.unsupported.remoteUnreachable" | "updater.unsupported.channelMissing" | "updater.unsupported.noRelease" | "updater.unsupported.other" {
   switch (code) {
+    case "noRelease":
+      return "updater.unsupported.noRelease";
     case "channelMissing":
       return "updater.unsupported.channelMissing";
     case "devRun":

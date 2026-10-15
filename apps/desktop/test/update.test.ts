@@ -14,11 +14,19 @@ describe("parseReleaseInfo", () => {
       codesignIdentity: null,
       releaseDir: null,
       releasePage: null,
+      version: null,
+      updateTestHooks: false,
     });
   });
 
   it("accepts a --no-source package (explicit nulls)", () => {
-    expect(parseReleaseInfo({ commit: FULL, committedAt: null, sourceDir: null, nodeDir: null })).toEqual({ commit: FULL, committedAt: null, sourceDir: null, nodeDir: null, channel: null, codesignIdentity: null, releaseDir: null, releasePage: null });
+    expect(parseReleaseInfo({ commit: FULL, committedAt: null, sourceDir: null, nodeDir: null })).toEqual({ commit: FULL, committedAt: null, sourceDir: null, nodeDir: null, channel: null, codesignIdentity: null, releaseDir: null, releasePage: null, version: null, updateTestHooks: false });
+  });
+
+  it("reads the package version and the test-hooks mark (only a literal true)", () => {
+    const base = { commit: FULL, committedAt: null, sourceDir: null, nodeDir: null };
+    expect(parseReleaseInfo({ ...base, version: "0.1.1", updateTestHooks: true })).toMatchObject({ version: "0.1.1", updateTestHooks: true });
+    expect(parseReleaseInfo({ ...base, updateTestHooks: "true" })).toMatchObject({ updateTestHooks: false });
   });
 
   it("refuses releases packaged before self-update", () => {

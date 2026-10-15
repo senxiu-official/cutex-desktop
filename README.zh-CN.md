@@ -6,7 +6,7 @@
 
 <p align="center"><a href="README.md">English</a> · <b>简体中文</b></p>
 
-**0.1.0「First Take」**：第一个公开版本。更新内容见 [CHANGELOG.md](CHANGELOG.md)。
+**0.1.1**：桌面端提供签名安装包，可在应用内一键更新（0.1.0「First Take」是第一个公开版本）。更新内容见 [CHANGELOG.md](CHANGELOG.md)。
 
 Cutex 桌面端是 [cutex](https://github.com/senxiu-official/cutex) 的桌面应用。cutex 是在你自己的电脑上运行编程智能体的
 后台服务，智能体运行在 [cute-codex](https://github.com/senxiu-official/cute-codex)（OpenAI Codex 的分支）或 Claude Code 上。
@@ -84,6 +84,9 @@ git clone --branch release https://github.com/senxiu-official/cutex-desktop.git 
 minisign -Vm <文件> -P RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
 ```
 
+按安装指南 B.4 装好的桌面端（Linux、Windows、macOS）会自己更新：有新的发布时，「设置」旁边会出现「更新」按钮（设置 → 更新与诊断
+里也有）。点了之后它下载新的安装包，用同一把公钥校验签名，切换过去并重启；新版本起不来会自动切回去。
+
 Windows 和 macOS 的应用没有用付费证书做代码签名（没有 Apple Developer ID 和公证，也没有 Windows Authenticode）。
 第一次启动时，Windows SmartScreen 会提示「Windows 已保护你的电脑」：点 **更多信息 → 仍要运行**。macOS 会提示无法验证
 开发者：右键点应用 → **打开**，或者到 系统设置 → 隐私与安全性 → **仍要打开**。Linux 不需要额外操作（Ubuntu 23.10
@@ -93,7 +96,7 @@ Windows 和 macOS 的应用没有用付费证书做代码签名（没有 Apple D
 
 - [docs/QUICKSTART.md](docs/QUICKSTART.md)：桌面端快速上手
 - [docs/install/AGENT-INSTALL.md](docs/install/AGENT-INSTALL.md)：安装、更新、排错（英文）
-- [docs/install/ANU.md](docs/install/ANU.md)：ANU 用户的可选模块（Claude Science、NCI），其他人用不到
+- [docs/install/ANU.md](docs/install/ANU.md)：两个默认关闭的可选模块：Claude Science（有 Claude Science 账号的人都可以用）和 NCI 远程作业（给使用澳大利亚国家计算基础设施 NCI，例如 Gadi 的用户）
 - [docs/DESIGN.md](docs/DESIGN.md)：架构和产品决策
 - [docs/desktop-modules.md](docs/desktop-modules.md)、[docs/module-dev-guide.md](docs/module-dev-guide.md)：
   模块接口，以及如何写一个模块

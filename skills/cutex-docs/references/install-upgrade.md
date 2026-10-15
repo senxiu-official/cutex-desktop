@@ -2,7 +2,7 @@
 
 适用：用户问怎么装 cutex / 桌面端、怎么更新、更新失败怎么办、日志在哪里。界面引文写作「中文」（English）。
 
-**唯一的安装说明**是桌面仓库的 `docs/install/AGENT-INSTALL.md`（英文，写给人或 coding agent 逐步执行）；ANU 用户另见 `docs/install/ANU.md`；中文简版是 `docs/QUICKSTART.md`。本页只帮你理解和定位，**安装 / 升级的具体命令以 AGENT-INSTALL 为准**，不要自己拼命令，也不要编造下载地址或安装包：目前没有预编译的 cutex / cute-codex / 桌面安装包，一切都从公开仓库的 `release` 分支在用户自己的电脑上构建。
+**唯一的安装说明**是桌面仓库的 `docs/install/AGENT-INSTALL.md`（英文，写给人或 coding agent 逐步执行）；可选模块（Claude Science、NCI 远程作业）另见 `docs/install/ANU.md`；中文简版是 `docs/QUICKSTART.md`。本页只帮你理解和定位，**安装 / 升级的具体命令以 AGENT-INSTALL 为准**，不要自己拼命令，也不要编造下载地址或安装包：两种装法都以 AGENT-INSTALL 为准——用 GitHub Releases 上签名的发布二进制（§B，下载后用 minisign 验签），或从公开仓库的 `release` 分支在自己电脑上构建。
 
 ## 平台
 

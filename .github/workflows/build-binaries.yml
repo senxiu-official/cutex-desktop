@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version in the package names, e.g. 0.1.0"
+        description: "Version in the package names, a semver, e.g. 0.1.0"
         required: true
         type: string
 
@@ -61,7 +61,8 @@ jobs:
           set -euo pipefail
           v="$INPUT_VERSION"
           if [ -z "$v" ] && [ "$REF_TYPE" = tag ]; then v="${REF_NAME#v}"; fi
-          [[ "$v" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || { echo "::error::no valid version (got '$v')"; exit 1; }
+          # A semver: the in-app updater compares it with the tag of the latest release (v<version>).
+          [[ "$v" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::no valid version x.y.z[-pre] (got '$v')"; exit 1; }
           echo "PACKAGE_VERSION=$v" >> "$GITHUB_ENV"
       - name: Build and pack
         run: bash .github/ci/package-desktop.sh "${{ matrix.platform }}" "$PACKAGE_VERSION" "$RUNNER_TEMP/out"

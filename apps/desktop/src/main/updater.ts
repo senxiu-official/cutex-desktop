@@ -8,9 +8,18 @@
 // line in Settings → 更新与诊断, no noisy retries (an unreachable network remote backs off; a missing
 // path remote is not checked again). `CUTEX_DESKTOP_UPDATE_REMOTE` / prefs `updateRemotes[channel]` /
 // `updateRemote` fetch from another remote than the checkout's origin (resolveUpdateRemote).
-// A CI release package records its `releasePage` (package-portable.mjs --release-page): without a
-// source checkout, or outside the releases layout, it reports code `releasePackage` and Settings links
-// to that page (new packages are downloaded by hand; no network check here).
+// A CI release package records its `releasePage` (package-portable.mjs --release-page). Installed in the
+// releases layout on the `release` channel (Linux / Windows / macOS), without a source checkout, it updates
+// itself from the GitHub release of that page's repository (binary self-update, binaryUpdate.ts): the
+// check asks GitHub's API for the latest release (at most hourly in the background, ETag-cached), the
+// update downloads the platform package, verifies its minisign signature with the embedded release keys
+// (minisign.ts) and its sha256 against the signed SHA256SUMS, unpacks it into <base>/releases/<version>
+// and switches `current` like a source update (same relaunch, rollback and old-release housekeeping).
+// macOS too: the release dir holds the ad-hoc signed Cutex.app (unpacked with ditto, quarantine mark
+// stripped, `codesign --verify --deep --strict` required) and the launcher clone finds its release
+// through a sidecar file (shared/releases.ts LAUNCHER_INSTALL_FILE) since the sealed bundle records none.
+// Anywhere else (outside the releases layout, e.g. Cutex.app copied to /Applications by hand, or another
+// channel) it reports code `releasePackage` and Settings links to that page (downloaded by hand).
 //
 // Channel: the branch an install follows — `main` (开发版, the owner's installs, default) or `release`
 // (正式版) — from `<base>/channel`, else the packaged `channel`, else main (shared/update.ts
@@ -31,9 +40,14 @@ import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { app } from "electron";
+import { cleanBinaryLeftovers, installBinaryRelease, LatestReleaseClient, ReleaseCheckError, type BinarySource } from "./binaryUpdate";
+import { parsePublicKey, releaseKeyring } from "./minisign";
+import { createUpdateNet, type UpdateNet } from "./updateNet";
+import { envHasProxy, gitProxyArgs, proxyEnv, type Transport } from "./updateTransport";
+import { BINARY_MIN_CHECK_MINUTES, GITHUB_API, GITHUB_WEB, githubRepoOf, isNewerVersion, parseVersion, releasePlatform, updateAssets, type LatestRelease } from "../shared/binaryUpdate";
 import type { UpdateStatus, UpdateStep } from "../shared/ipc";
 import { ReleaseMaintenance } from "./releaseMaintenance";
-import { OLD_RELEASE_MAX_AGE_DAYS, MAC_RELEASE_SUFFIX } from "../shared/releases";
+import { bundlePackageJson, LAUNCHER_INSTALL_FILE, launcherSidecarRelease, MAC_BUNDLE, OLD_RELEASE_MAX_AGE_DAYS, MAC_RELEASE_SUFFIX } from "../shared/releases";
 import { backoffMinutes, buildSteps, builtChannel, CHANNEL_FILE, channelFileContent, checkoutPlan, corepackEntryIn, displayRemote, fetchArgs, fetchFailure, isKnownChannel, resolveInstallLayout, isOwnClone, isPathRemote, parseReleaseInfo, pathRemotePath, releaseName, resolveChannel, resolveSourceDir, sourceDirtyCheck, spawnPlan, tail, updateOffer, updateRef, type InstallLayout, type ReleaseInfo } from "../shared/update";
 
 const WIN = process.platform === "win32";
@@ -69,13 +83,27 @@ export class Updater {
   private maintaining: Promise<void> | null = null;
   private maintenanceScheduled = false;
 
+  /** Release-package install updating from GitHub releases (null: source updates or none). */
+  private binary: { source: BinarySource; client: LatestReleaseClient; version: string; release: LatestRelease | null } | null = null;
+
   /** The update remote for a channel (null = the checkout's origin); read at every check / update. */
   private readonly remoteFor: (channel: string) => string | null;
 
-  /** `remote`: the update remote override, fixed or per channel (null = the checkout's origin). */
+  /** Chromium-side network access (proxy resolution, transport); created on first use. */
+  private netInstance: UpdateNet | null = null;
+  /** Proxy environment for the build steps of the update in flight (source updates). */
+  private buildProxyEnv: Record<string, string> = {};
+
+  /**
+   * `remote`: the update remote override, fixed or per channel (null = the checkout's origin).
+   * `net.contained`: the agent-page / plugin network containment is engaged (pluginNetwork.ts): Chromium's
+   * DNS is off for the rest of the run, transfers go through Node with Chromium's proxy decision
+   * (updateNet.ts). `net.transport` / `net.updateNet`: replace the Chromium side (tests).
+   */
   constructor(
     private readonly emit: (status: UpdateStatus) => void,
     remote: string | null | ((channel: string) => string | null) = null,
+    private readonly netOpts: { contained?: () => boolean; transport?: Transport; updateNet?: UpdateNet } = {},
   ) {
     this.remoteFor = typeof remote === "function" ? remote : () => remote;
     this.status = { state: "unsupported", code: "devRun", current: null, latest: null };
@@ -92,7 +120,8 @@ export class Updater {
     const info = parseReleaseInfo(raw);
     // Launched through the `current` link: Windows keeps the junction in execPath, Linux resolves it.
     // macOS launcher clone: its recorded release stands in for the running one (resolveInstallLayout).
-    let layout = resolveInstallLayout(realExecPath(), WIN ? "\\" : "/", MAC && !("reason" in info) ? info.releaseDir : null);
+    const execPath = realExecPath();
+    let layout = resolveInstallLayout(execPath, WIN ? "\\" : "/", MAC && !("reason" in info) ? (info.releaseDir ?? (info.releasePage ? launcherSidecarReleaseFor(execPath, raw) : null)) : null);
     // A stale clone (its release already moved to old-releases) still finds the install by its base.
     if (!("reason" in layout) && layout.launcherBundle && !existsSync(layout.currentLink)) layout = { reason: `the launcher's install ${layout.baseDir} has no current link` };
     if (!("reason" in info) && "reason" in layout && info.releasePage) {
@@ -114,9 +143,20 @@ export class Updater {
     const sourceDir = resolveSourceDir(info.sourceDir, layout, WIN ? "\\" : "/", (dir) => existsSync(join(dir, ".git")));
     if (!sourceDir) {
       // Old-release maintenance above keeps running; only updating needs the checkout. A release package
-      // (CI-built, no source) points at its release page instead.
+      // (CI-built, no source) updates from its GitHub release when it can, else points at its page.
+      const binary = info.releasePage ? binarySource(info, channel) : null;
+      if (binary && !("reason" in binary)) {
+        this.binary = { source: binary, client: new LatestReleaseClient(binary, this.transport()), version: info.version!, release: null };
+        try {
+          cleanBinaryLeftovers(layout.baseDir, layout.releasesDir);
+        } catch (error) {
+          this.log(`binary update leftovers: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        this.status = { state: "idle", channel, binary: true, releasePage: info.releasePage!, source: `github.com/${binary.repo.owner}/${binary.repo.repo}`, current: { ...current, version: info.version! }, latest: null };
+        return;
+      }
       this.status = info.releasePage
-        ? { state: "unsupported", code: "releasePackage", reason: "release package without a source checkout", releasePage: info.releasePage, channel, current, latest: null }
+        ? { state: "unsupported", code: "releasePackage", reason: `release package without a source checkout${binary ? `: ${binary.reason}` : ""}`, releasePage: info.releasePage, channel, current: info.version ? { ...current, version: info.version } : current, latest: null }
         : { state: "unsupported", code: "noSource", reason: "no source checkout on this machine", channel, current, latest: null };
       return;
     }
@@ -174,7 +214,9 @@ export class Updater {
     this.minutes = minutes;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
-    if (!this.info || minutes <= 0 || this.stopped()) return;
+    if ((!this.info && !this.binary) || minutes <= 0 || this.stopped()) return;
+    // GitHub's unauthenticated API is shared by everyone behind one address: binary installs check hourly at most.
+    if (this.binary) minutes = Math.max(minutes, BINARY_MIN_CHECK_MINUTES);
     const loop = (delay: number) => {
       this.timer = setTimeout(() => {
         void this.check({ background: true }).finally(() => {
@@ -206,6 +248,7 @@ export class Updater {
   }
 
   private async checkOnce(opts: { background?: boolean }): Promise<UpdateStatus> {
+    if (this.binary) return this.checkBinary(opts);
     const info = this.info;
     if (!info || this.busy || this.status.state === "updating" || this.status.state === "ready") return this.state();
     if (this.stopped()) return this.state();
@@ -217,7 +260,7 @@ export class Updater {
     const channel = this.channel;
     try {
       try {
-        await this.git(fetchArgs(remote, channel));
+        await this.git([...(await this.fetchProxyArgs()), ...fetchArgs(remote, channel)]);
       } catch (error) {
         this.unreachable(error, before);
         return this.state();
@@ -285,6 +328,122 @@ export class Updater {
     });
   }
 
+  /**
+   * Binary install: ask GitHub for the latest release; offer it when its version is newer than this
+   * package's and it carries this platform's files. Unreachable / rate limited → quiet, retryable,
+   * backing off like an unreachable git remote; no release yet → quiet `noRelease`.
+   */
+  private async checkBinary(opts: { background?: boolean }): Promise<UpdateStatus> {
+    const b = this.binary!;
+    if (this.busy || this.status.state === "updating" || this.status.state === "ready" || this.stopped()) return this.state();
+    this.busy = true;
+    const before = this.status.state;
+    if (before !== "available" && !(opts.background && before === "unsupported")) this.set({ state: "checking" });
+    const checkedAt = () => new Date().toISOString();
+    try {
+      const release = await b.client.latest();
+      this.failures = 0;
+      let latest: UpdateStatus["latest"] = null;
+      if (isNewerVersion(release.version, b.version)) {
+        const assets = updateAssets(release, b.source.platform);
+        if ("reason" in assets) {
+          if (b.release?.tag !== release.tag) this.log(`release ${release.tag} not offered: ${assets.reason}`);
+        } else {
+          latest = { commit: "", committedAt: release.publishedAt ?? "", subject: release.name, count: 0, version: release.version };
+        }
+      }
+      b.release = latest ? release : null;
+      this.set({ state: latest ? "available" : "idle", latest, error: undefined, code: undefined, reason: undefined, retryable: undefined, checkedAt: checkedAt() });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof ReleaseCheckError && error.kind === "noRelease") {
+        if (this.status.code !== "noRelease") this.log(`update check: ${message}`);
+        this.failures = 0;
+        b.release = null;
+        this.set({ state: "unsupported", code: "noRelease", reason: message, retryable: true, latest: null, checkedAt: checkedAt() });
+      } else {
+        this.failures++;
+        if (this.failures === 1 || this.failures % 10 === 0) this.log(`update check failed (${this.failures}x): ${message}`);
+        if (before === "available") this.set({ state: "available", checkedAt: checkedAt() });
+        else this.set({ state: "unsupported", code: "remoteUnreachable", reason: tail(message, 2), retryable: true, checkedAt: checkedAt() });
+      }
+    } finally {
+      this.busy = false;
+    }
+    return this.state();
+  }
+
+  /** Binary install: download, verify and unpack the release on offer, then switch and relaunch. */
+  private async applyBinary(): Promise<UpdateStatus> {
+    const b = this.binary!;
+    const layout = this.layout;
+    const release = b.release;
+    if (!layout || !release || this.busy || this.status.state === "updating" || this.status.state === "ready") return this.state();
+    this.busy = true;
+    let step: UpdateStep = "download";
+    try {
+      // Never backwards, even if the offer went stale.
+      if (!isNewerVersion(release.version, b.version)) throw new Error(`release ${release.version} is not newer than ${b.version}`);
+      this.set({ state: "updating", step, error: undefined });
+      this.log(`updating ${b.version} -> ${release.version} from github.com/${b.source.repo.owner}/${b.source.repo.repo}`);
+      const dest = await installBinaryRelease({
+        source: b.source,
+        transport: this.transport(),
+        release,
+        baseDir: layout.baseDir,
+        releasesDir: layout.releasesDir,
+        launcher: layout.launcher,
+        packageJson: MAC ? [layout.launcher[0]!, "Contents", "Resources", "app", "package.json"] : ["resources", "app", "package.json"],
+        win: WIN,
+        mac: MAC,
+        suffix: MAC ? MAC_RELEASE_SUFFIX : "",
+        onStep: (s) => {
+          step = s;
+          this.set({ step });
+        },
+        log: (text) => this.log(text),
+      });
+      step = "switch";
+      this.set({ step });
+      this.switchAndRelaunch(layout, dest);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log(`update failed at ${step}: ${message}`);
+      this.set({ state: "error", step, error: tail(message) });
+    } finally {
+      this.busy = false;
+    }
+    return this.state();
+  }
+
+  private updateNet(): UpdateNet {
+    this.netInstance ??= this.netOpts.updateNet ?? createUpdateNet({ contained: this.netOpts.contained ?? (() => false), testProxy: this.binary?.source.testProxy ?? null });
+    return this.netInstance;
+  }
+
+  /** The binary updater's transport: the injected one (tests), else Chromium's (updateNet.ts). */
+  private transport(): Transport {
+    if (this.netOpts.transport) return this.netOpts.transport;
+    return (url, init) => this.updateNet().transport(url, init);
+  }
+
+  /**
+   * git honours http.proxy / *_PROXY but not the OS proxy settings: for an http(s) remote with neither
+   * set, pass the proxy Chromium resolves for it (`-c http.proxy=…`). ssh and path remotes: nothing.
+   */
+  private async fetchProxyArgs(): Promise<string[]> {
+    try {
+      const url = await this.remoteUrl();
+      if (!url || !/^https?:\/\//i.test(url) || envHasProxy(process.env)) return [];
+      if ((await this.git(["config", "--get", "http.proxy"]).catch(() => "")).trim()) return [];
+      const args = gitProxyArgs(url, await this.updateNet().proxyFor(url));
+      if (args.length) this.log(`git fetch uses the system proxy ${args[1]!.slice("http.proxy=".length)}`);
+      return args;
+    } catch {
+      return [];
+    }
+  }
+
   /** The remote updates fetch from: the override, else origin's URL (null when unknown). */
   private async remoteUrl(): Promise<string | null> {
     if (this.remote) return this.remote;
@@ -296,6 +455,7 @@ export class Updater {
   }
 
   async apply(): Promise<UpdateStatus> {
+    if (this.binary) return this.applyBinary();
     const info = this.info;
     const layout = this.layout;
     if (!info || !layout || this.busy || this.status.state === "updating" || this.status.state === "ready") return this.state();
@@ -314,7 +474,7 @@ export class Updater {
       const remote = this.remote;
       const channel = this.channel;
       const ref = updateRef(remote, channel);
-      await this.git(fetchArgs(remote, channel));
+      await this.git([...(await this.fetchProxyArgs()), ...fetchArgs(remote, channel)]);
       // Onto the channel branch at the fetched head (a channel switch changes branch; never drops commits).
       const headBranch = await this.git(["symbolic-ref", "--quiet", "--short", "HEAD"]).then((b) => b.trim() || null, () => null);
       const branchExists = await this.git(["show-ref", "--verify", "--quiet", `refs/heads/${channel}`]).then(() => true, () => false);
@@ -326,6 +486,9 @@ export class Updater {
       const name = releaseName(commit, (n) => existsSync(join(layout.releasesDir, n)), MAC ? MAC_RELEASE_SUFFIX : "");
       const dest = join(layout.releasesDir, name);
       const steps = buildSteps(dest, channel);
+      // pnpm / corepack / Electron's downloader reach the npm registry and GitHub: the system proxy too.
+      this.buildProxyEnv = envHasProxy(process.env) ? {} : proxyEnv(await this.updateNet().proxyFor("https://registry.npmjs.org/"));
+      if (Object.keys(this.buildProxyEnv).length) this.log(`build steps use the system proxy ${this.buildProxyEnv.HTTPS_PROXY}`);
       for (const s of ["install", "build", "package"] as const) {
         step = s;
         this.set({ step });
@@ -333,20 +496,7 @@ export class Updater {
       }
       step = "switch";
       this.set({ step });
-      // Never point `current` at a release without its executable (a half-written package).
-      const launcher = join(dest, ...layout.launcher);
-      if (!existsSync(launcher)) throw new Error(`the new release has no ${launcher}; keeping ${layout.releaseDir}`);
-      this.switchCurrent(layout.currentLink, dest);
-      const relaunchPath = this.relaunchPath(layout);
-      this.set({ state: "ready" });
-      writeFileSync(this.pendingPath(), JSON.stringify({ from: layout.releaseDir, to: dest, at: new Date().toISOString() } satisfies PendingUpdate));
-      this.log(`switched ${layout.currentLink} -> ${dest}; relaunching ${relaunchPath}`);
-      // Relaunch from the link so the next update finds the same layout; exit skips close-to-tray.
-      // Long enough to read 「更新完成，正在重启…」 (at 600 ms the owner took the relaunch for a crash).
-      setTimeout(() => {
-        app.relaunch({ execPath: relaunchPath, args: process.argv.slice(1) });
-        app.exit(0);
-      }, 2500);
+      this.switchAndRelaunch(layout, dest);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.log(`update failed at ${step}: ${message}`);
@@ -355,6 +505,27 @@ export class Updater {
       this.busy = false;
     }
     return this.state();
+  }
+
+  /**
+   * Point `current` at the new release `dest`, record the pending update (watchLaunch rolls back when it
+   * does not come up) and relaunch through the link. Throws (nothing switched) when `dest` has no launcher.
+   */
+  private switchAndRelaunch(layout: InstallLayout, dest: string): void {
+    // Never point `current` at a release without its executable (a half-written package).
+    const launcher = join(dest, ...layout.launcher);
+    if (!existsSync(launcher)) throw new Error(`the new release has no ${launcher}; keeping ${layout.releaseDir}`);
+    this.switchCurrent(layout.currentLink, dest);
+    const relaunchPath = this.relaunchPath(layout);
+    this.set({ state: "ready" });
+    writeFileSync(this.pendingPath(), JSON.stringify({ from: layout.releaseDir, to: dest, at: new Date().toISOString() } satisfies PendingUpdate));
+    this.log(`switched ${layout.currentLink} -> ${dest}; relaunching ${relaunchPath}`);
+    // Relaunch from the link so the next update finds the same layout; exit skips close-to-tray.
+    // Long enough to read 「更新完成，正在重启…」 (at 600 ms the owner took the relaunch for a crash).
+    setTimeout(() => {
+      app.relaunch({ execPath: relaunchPath, args: process.argv.slice(1) });
+      app.exit(0);
+    }, 2500);
   }
 
   /**
@@ -533,6 +704,7 @@ export class Updater {
     env.COREPACK_ENABLE_DOWNLOAD_PROMPT = "0";
     // No "Update available 10 → 12" banner: the pinned pnpm (packageManager) is the one to use.
     env.npm_config_update_notifier = "false";
+    Object.assign(env, this.buildProxyEnv);
     env.GIT_TERMINAL_PROMPT = "0";
     env.GIT_SSH_COMMAND ??= "ssh -o BatchMode=yes";
     // macOS: sign the next release with the identity this one was signed with (package-portable.mjs).
@@ -564,6 +736,57 @@ export class Updater {
       // logging is best effort
     }
   }
+}
+
+/**
+ * Where a release package installed in the releases layout updates from, or why it cannot update itself:
+ * the `release` channel only, Linux / Windows x64 or macOS arm64 / x64, a github.com release page, a
+ * semver package version. (A macOS Cutex.app copied by hand outside the layout never gets here: it has
+ * no layout, so it keeps the Releases-page link.)
+ *
+ * Packages built with `--update-test-hooks` (local end-to-end tests, never CI) honour
+ * CUTEX_DESKTOP_UPDATE_TEST_API (a loopback http://127.0.0.1:<port> standing in for both api.github.com and
+ * github.com), CUTEX_DESKTOP_UPDATE_TEST_PUBKEY (one more trusted minisign key) and
+ * CUTEX_DESKTOP_UPDATE_TEST_PROXY (a loopback http proxy replacing the system proxy, loopback not
+ * bypassed). Any other package ignores all three.
+ */
+/**
+ * macOS: a process started from a launcher clone of a release package (its sealed bundle records no
+ * releaseDir) finds its release through the sidecar syncMacLauncher wrote next to the clone, provided
+ * the release there is the same build (launcherSidecarRelease). Null anywhere else.
+ */
+function launcherSidecarReleaseFor(execPath: string, ownPackage: unknown): string | null {
+  const parts = execPath.split("/");
+  const n = parts.length;
+  if (n < 5 || parts[n - 2] !== "MacOS" || parts[n - 3] !== "Contents" || !/\.app$/i.test(parts[n - 4]!)) return null;
+  const launcherDir = parts.slice(0, n - 4).join("/");
+  const style = { sep: "/" as const, win: false };
+  return launcherSidecarRelease(readText(join(launcherDir, LAUNCHER_INSTALL_FILE)), ownPackage ? JSON.stringify(ownPackage) : null, (dir) => readText(bundlePackageJson(style, join(dir, MAC_BUNDLE))));
+}
+
+export function binarySource(info: ReleaseInfo, channel: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform, arch: string = process.arch): BinarySource | { reason: string } {
+  if (channel !== "release") return { reason: `binary updates follow the release channel only (this install follows ${channel})` };
+  const releasePlatformName = releasePlatform(platform, arch);
+  if (!releasePlatformName) return { reason: `no release packages for ${platform}-${arch}` };
+  const repo = githubRepoOf(info.releasePage);
+  if (!repo) return { reason: "the release page is not a github.com repository" };
+  if (!info.version || !parseVersion(info.version)) return { reason: "the package records no version" };
+  const source: BinarySource = { repo, platform: releasePlatformName, apiBase: GITHUB_API, downloadBase: GITHUB_WEB, extraOrigins: [], keys: [...releaseKeyring()], testProxy: null };
+  if (info.updateTestHooks) {
+    const api = env.CUTEX_DESKTOP_UPDATE_TEST_API;
+    if (api && /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(api)) Object.assign(source, { apiBase: api, downloadBase: api, extraOrigins: [api] });
+    const proxy = env.CUTEX_DESKTOP_UPDATE_TEST_PROXY;
+    if (proxy && /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(proxy)) source.testProxy = proxy;
+    const key = env.CUTEX_DESKTOP_UPDATE_TEST_PUBKEY;
+    if (key) {
+      try {
+        source.keys.push(parsePublicKey(key));
+      } catch {
+        // not a key: ignored
+      }
+    }
+  }
+  return source;
 }
 
 /**

@@ -1,7 +1,13 @@
-# Optional modules for ANU users
+# Optional modules: Claude Science and NCI remote jobs
 
-**Not at ANU? Skip this page.** Both modules below are off by default and nothing else depends on
-them.
+Two optional modules, written up for ANU users but not limited to them:
+
+- **Claude Science** is useful to anyone with a Claude Science account.
+- **NCI remote jobs** is for users of NCI, Australia's National Computational Infrastructure
+  (e.g. the Gadi supercomputer).
+
+If neither applies to you, skip this page. Both modules are off by default and nothing else depends
+on them.
 
 Turn modules on in the desktop under **Settings → Modules** (zh-CN: 设置 → 模块). The switch applies
 to the desktop on this computer; what each module needs runs on the **host**, the computer whose

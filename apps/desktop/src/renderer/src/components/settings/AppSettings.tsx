@@ -153,7 +153,7 @@ function UpdateChannelRows({ status }: { status: UpdateStatus }) {
         </SettingRow>
       )}
       {status.source && (
-        <SettingRow label={t("updater.source")} hint={t("updater.sourceHint")}>
+        <SettingRow label={t("updater.source")} hint={t(status.binary ? "updater.sourceHint.binary" : "updater.sourceHint")}>
           <span className="flex min-w-0 font-mono text-xs text-muted" title={`${status.source} · ${channel}`}>
             <span className="min-w-0 truncate">{status.source}</span>
             <span className="shrink-0 whitespace-pre"> · {channel}</span>
@@ -258,6 +258,10 @@ export function UpdatesPage() {
               <Button onClick={() => void update.check()} disabled={status.state === "checking" || status.state === "updating"}>
                 {t("updater.updateCheck.now")}
               </Button>
+              {/* Binary installs: the Releases page stays one click away (release notes, manual download). */}
+              {status.releasePage && (
+                <Button onClick={() => void api.openExternal(status.releasePage!)} title={status.releasePage}>{t("updater.releasePage.open")}</Button>
+              )}
             </SettingRow>
             {status.channel && <UpdateChannelRows status={status} />}
             {updateButtonVisible(status) && status.latest && (

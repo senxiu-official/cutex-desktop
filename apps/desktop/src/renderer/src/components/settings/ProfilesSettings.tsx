@@ -12,16 +12,18 @@
 import type { DeleteProfileOptions } from "../../lib/profileRefs";
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { Plus } from "lucide-react";
-import type { CutexRefusal, ProfileItem } from "../../../../shared/ipc";
+import type { CutexRefusal, ProfileItem, ProfilePatch } from "../../../../shared/ipc";
 import { bridge } from "../../bridge";
-import { useI18n } from "../../i18n";
+import { useI18n, type MessageKey } from "../../i18n";
 import { useArmed } from "../../lib/armedConfirm";
 import { openMenuAt, openMenuFrom, promptDialog, type MenuEntry } from "../../lib/contextMenu";
 import { isDefaultProfile, orderProfiles } from "../../lib/profileCards";
 import { applyProfileOrder, canMoveProfile, dropProfile, moveProfile, setProfileOrder, useProfileOrder, type ProfileMove } from "../../lib/profileOrder";
 import { copyName } from "../../lib/profileCreate";
-import { PROFILE_FEATURES } from "../../lib/profileKind";
-import { cachedProfileList, prefetchProfiles, rememberProfileList } from "../../lib/profileSnapshot";
+import { defaultModelEditable, PROFILE_FEATURES } from "../../lib/profileKind";
+import { defaultModelMenu } from "../../lib/profileDefaultModel";
+import { useModelName } from "../../lib/modelDisplay";
+import { cachedProfile, cachedProfileList, prefetchProfiles, rememberProfileList, updateCachedProfile } from "../../lib/profileSnapshot";
 import { QUOTA_UPDATED_EVENT, quotaEventPlanChanged } from "../../lib/quota";
 import { requestSettingsReveal } from "../../lib/settingsSearchView";
 import { SettingsSections } from "../../modules/Outlet";
@@ -36,10 +38,11 @@ import { useTargetApi, useTargetFeatures, useTargetHostId, useTargetLoadQuota } 
 type ProfileList = { defaultProfile: string | null; profiles: ProfileItem[] };
 
 /** One overview card + its armed-delete state (each card arms on its own). */
-function Card({ item, isDefault, menu, onOpen, onDelete }: {
+function Card({ item, isDefault, menu, onOpen, onDelete, onModelMenu }: {
   item: ProfileItem;
   isDefault: boolean;
   menu(item: ProfileItem, arm: () => void): MenuEntry[];
+  onModelMenu?(el: HTMLElement): void;
   onOpen(): void;
   onDelete(): Promise<void>;
 }) {
@@ -52,6 +55,7 @@ function Card({ item, isDefault, menu, onOpen, onDelete }: {
       armed={armed}
       deleting={deleting}
       onOpen={() => !armed && onOpen()}
+      onModelMenu={armed ? undefined : onModelMenu}
       onMenu={(at) => {
         const entries = menu(item, () => setArmed(true));
         if ("el" in at) openMenuFrom(at.el, entries);
@@ -101,6 +105,7 @@ function ProfilesBody() {
   const { t } = useI18n();
   const features = useTargetFeatures();
   const loadQuota = useTargetLoadQuota();
+  const modelName = useModelName();
   const openSettings = useApp((s) => s.openSettings);
   const settingsParams = useApp((s) => (s.view.kind === "page" && s.view.page === SETTINGS_PAGE ? s.view.params : null));
   const page = settingsParams ? profilePageOf(settingsParams) : undefined;
@@ -222,6 +227,42 @@ function ProfilesBody() {
       fail(e);
     }
   };
+  /** The card's 模型 value: pick the default model / effort (saved at once, lib/profileDefaultModel). */
+  const modelMenu = async (p: ProfileItem, el: HTMLElement) => {
+    let view = cachedProfile(p.name, targetHost)?.models ?? null;
+    try {
+      view ??= await api.profileModels(p.name);
+    } catch (e) {
+      return fail(e);
+    }
+    if (!view) return;
+    const effortName = (e: string) => {
+      const key = `composer.effort.${e}` as MessageKey;
+      return t(key) === key ? e : t(key);
+    };
+    openMenuFrom(el, defaultModelMenu({
+      view,
+      profileId: p.id,
+      claude: p.cliKind === "claude",
+      model: p.model,
+      effort: p.modelReasoningEffort,
+      modelName,
+      labels: { current: "✓", effort: t("composer.effortTitle"), effortDefault: t("settings.profile.card.effortDefault"), effortName },
+      onPick: (patch) => void savePick(p, patch),
+    }));
+  };
+  const savePick = async (p: ProfileItem, patch: ProfilePatch) => {
+    try {
+      const detail = await api.patchProfile(p.name, patch);
+      updateCachedProfile(p.name, { detail }, targetHost);
+      api.profileModels(p.name).then((models) => updateCachedProfile(p.name, { models }, targetHost), () => {});
+      await refresh();
+      const shown = detail.model ? modelName(detail.model, null, detail.id) : "—";
+      setNotice({ text: t("settings.profile.card.modelSaved", { name: p.name, model: [shown, detail.modelReasoningEffort].filter(Boolean).join(" · ") }), error: false });
+    } catch (e) {
+      fail(e);
+    }
+  };
   const cardMenu = (p: ProfileItem, arm: () => void): MenuEntry[] => {
     const at = shownIds.indexOf(p.id);
     const moveEntry = (how: ProfileMove, label: string, hint: string): MenuEntry => ({ label, hint, disabled: !canMoveProfile(at, shownIds.length, how), onSelect: () => move(p, how, true) });
@@ -335,7 +376,14 @@ function ProfilesBody() {
               {dropAt?.id === p.id && dragged !== p.id && (
                 <div className={`pointer-events-none absolute right-1 left-1 h-0.5 rounded bg-accent ${dropAt.after ? "-bottom-2" : "-top-2"}`} />
               )}
-              <Card item={p} isDefault={isDefault(p)} menu={cardMenu} onOpen={() => open(p.name)} onDelete={() => remove(p.name)} />
+              <Card
+                item={p}
+                isDefault={isDefault(p)}
+                menu={cardMenu}
+                onOpen={() => open(p.name)}
+                onDelete={() => remove(p.name)}
+                onModelMenu={defaultModelEditable(p, features) ? (el) => void modelMenu(p, el) : undefined}
+              />
             </div>
           ))}
         </div>

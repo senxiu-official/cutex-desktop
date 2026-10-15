@@ -5,6 +5,8 @@
 //                                           │ 行为  可中途切换 · 需我批准      (narrow card: model joins line 2)
 //   ───────────────────────────────────────────────────────────────────────────────────────
 //   5h ▬▬▬▬▬▬▬▬ 62%  2h17m      7d ▬▬▬ 18%  2d21h       (two a row; balances as text)
+// The 模型 value is a button when the default model can be changed here (lib/profileDefaultModel):
+// it opens the profile's model list (+ 推理强度) and saves the pick at once.
 // Every part always takes its height, so a card never grows when its quota arrives.
 import type { KeyboardEvent, MouseEvent } from "react";
 import { MoreHorizontal, Users } from "lucide-react";
@@ -51,7 +53,7 @@ function CardGauge({ gauge: g, view }: { gauge: QuotaGauge; view: QuotaView }) {
   );
 }
 
-export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, onConfirmDelete }: {
+export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, onConfirmDelete, onModelMenu }: {
   item: ProfileItem;
   isDefault: boolean;
   /** Delete armed (lib/armedConfirm): red frame, the ⋯ turns into the confirming button. */
@@ -61,6 +63,8 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
   /** ⋯ button (anchored) or right-click (at the pointer). */
   onMenu(at: { el: HTMLElement } | { x: number; y: number }): void;
   onConfirmDelete(): void;
+  /** Default-model picker anchored at the 模型 value; absent = the value is read-only. */
+  onModelMenu?(el: HTMLElement): void;
 }) {
   const { t } = useI18n();
   const gauges = useTargetQuotas()[item.name];
@@ -110,7 +114,22 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
         {/* middle: what a new agent on this profile starts with */}
         <dl className="hidden min-w-0 flex-1 grid-cols-[2.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 border-l border-border pl-4 text-xs @[34rem]:grid">
           <dt className="text-subtle">{t("settings.profile.card.model")}</dt>
-          <dd className="truncate font-mono text-muted" title={modelTitle}>{model || "—"}</dd>
+          <dd className="min-w-0 truncate font-mono text-muted" title={onModelMenu ? undefined : modelTitle}>
+            {onModelMenu ? (
+              <button
+                type="button"
+                data-profile-model-picker
+                title={`${modelTitle} — ${t("settings.profile.card.modelPick")}`}
+                onClick={(e) => (stop(e), onModelMenu(e.currentTarget))}
+                onKeyDown={(e) => e.stopPropagation()}
+                className="max-w-full truncate rounded px-1 -mx-1 text-left hover:bg-surface-2 hover:text-foreground"
+              >
+                {model || "—"}
+              </button>
+            ) : (
+              model || "—"
+            )}
+          </dd>
           <dt className="text-subtle">{t("settings.profile.card.rules")}</dt>
           <dd className="truncate text-muted" title={rules.join(" · ")}>{rules.length ? rules.join(" · ") : "—"}</dd>
         </dl>

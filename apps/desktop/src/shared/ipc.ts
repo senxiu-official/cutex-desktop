@@ -449,6 +449,12 @@ export interface ProfileDetail extends ProfileItem {
      *  (null = unset) and the default (false; null for Codex). Absent on older cutex. */
     claudeFileCheckpointingExplicit?: boolean | null;
     claudeFileCheckpointingDefault?: boolean | null;
+    /** claude-profile-default-model (Claude profiles): the item's `model` is the effective default of
+     *  new sessions; these are its sources — the profile's own default, the per-profile
+     *  `newSessionDefaults` override (wins; a PATCH `model` drops it) and the built-in default. */
+    claudeProfileModel?: string | null;
+    claudeNewSessionModel?: string | null;
+    claudeBuiltinDefaultModel?: string | null;
   };
   /** Same as `detail.agentTurnQuestions` (cutex may put it at either level). */
   agentTurnQuestions?: AgentTurnQuestions | null;
@@ -1938,8 +1944,9 @@ export interface ShellBridge {
 
 export const UPDATE_CHANNEL = "cutex-desktop:update";
 /** Self-update of a portable install (scripts/package-portable.mjs): git fetch the source checkout,
- *  and on request pull → pnpm install → build → package a new release → switch `current` → relaunch. */
-export type UpdateStep = "pull" | "install" | "build" | "package" | "switch";
+ *  and on request pull → pnpm install → build → package a new release → switch `current` → relaunch.
+ *  A release package (binary install): download → verify (minisign + SHA256SUMS) → unpack → switch. */
+export type UpdateStep = "pull" | "install" | "build" | "package" | "download" | "verify" | "unpack" | "switch";
 export interface UpdateStatus {
   /** unsupported: this install cannot update itself right now (`code` says why, `reason` has the detail
    *  for the tooltip / update.log). Never shown as an error: no sidebar button, a quiet line in Settings. */
@@ -1954,15 +1961,19 @@ export interface UpdateStatus {
   canSwitchChannel?: boolean;
   /** Where updates come from, credentials stripped (displayRemote): the channel's remote or origin's URL. */
   source?: string;
-  /** unsupported `releasePackage` only: the page new packages are downloaded from (https; the package's
-   *  recorded `releasePage`). Settings opens it in the system browser. */
+  /** The page new packages are downloaded from (https; the package's recorded `releasePage`): unsupported
+   *  `releasePackage` installs and binary self-updating ones. Settings opens it in the system browser. */
   releasePage?: string;
-  current: { commit: string; committedAt: string | null } | null;
+  /** A release package that updates itself from GitHub releases (download + verify + unpack; no git). */
+  binary?: boolean;
+  /** `version`: the package version (binary installs). */
+  current: { commit: string; committedAt: string | null; version?: string } | null;
   /** Newest commit on the update source's channel branch when it is ahead of the running build.
    *  `offMain`: the running build is not on that branch at all (packaged by hand from another branch,
    *  or a channel switch); `count` is 0. `switchChannel`: the channel was switched and its head is older
-   *  than the running build — offered (never installed silently) as the switch to that channel. */
-  latest: { commit: string; committedAt: string; subject: string; count: number; offMain?: boolean; switchChannel?: boolean } | null;
+   *  than the running build — offered (never installed silently) as the switch to that channel.
+   *  Binary installs: `version` of the newest release (commit "", count 0, subject = release name). */
+  latest: { commit: string; committedAt: string; subject: string; count: number; offMain?: boolean; switchChannel?: boolean; version?: string } | null;
   step?: UpdateStep;
   /** Last lines of the failing step (state "error"). */
   error?: string;
