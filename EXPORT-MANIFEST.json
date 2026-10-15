@@ -79,13 +79,13 @@
     },
     {
       "path": "README.md",
-      "sha256": "55f5bcb7bb87c6c23bdd6e397cb2c14cd4151064806021ecacb3e4c34f992a9f",
-      "size": 8134
+      "sha256": "4a82cd8c46c17f7a28ad07cb973ba649c5e99e0dde473fa19aa7c875aba02502",
+      "size": 8642
     },
     {
       "path": "README.zh-CN.md",
-      "sha256": "9e5574c5a670cbf5120e654a11cce792d9542b3b60d176745a3774e08493d954",
-      "size": 8032
+      "sha256": "689b000857564a95bf7de32507874c7db66e723a16522e420a00b462b33cf839",
+      "size": 8526
     },
     {
       "path": "apps/desktop/dev/fontSelectionProbe.tsx",

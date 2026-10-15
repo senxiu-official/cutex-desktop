@@ -8,6 +8,13 @@
 
 **0.1.1**: signed desktop packages with one-click updates (0.1.0 "First Take" was the first public release). See [CHANGELOG.md](CHANGELOG.md).
 
+> **Known gaps in 0.1.x** (being fixed; this note goes away when they are):
+> - **Claude agents** need the Claude runtime (`claude-adapter`), which the install guide and the
+>   release packages don't install yet. Codex-based agents work.
+> - **Jobs page and NCI remote jobs** need the Job Service, which this release doesn't ship.
+> - **Phone push / pairing a phone**: there is no public phone app yet.
+> - **Outbound notifications (webhooks)** need `cutex notify run`, which the installer doesn't set up.
+
 Cutex desktop is the desktop app for [cutex](https://github.com/senxiu-official/cutex), a daemon
 that runs coding agents on your own machines. Agents run on
 [cute-codex](https://github.com/senxiu-official/cute-codex) (a fork of OpenAI Codex) or on Claude Code.
