@@ -186,8 +186,15 @@ and in the table below; for this release:
 ### B.1 Download and verify
 
 Install minisign: Ubuntu / Debian `sudo apt install minisign` (ask the person: it needs sudo),
-Windows `winget install jedisct1.minisign`, macOS `brew install minisign`. A file whose signature
-does not verify must not be used: stop and report it.
+Windows `winget install jedisct1.minisign`, macOS `brew install minisign`. Without sudo on Ubuntu /
+Debian, unpack the distribution's own package for your user only:
+
+```sh
+mkdir -p ~/.local/opt/minisign && cd ~/.local/opt/minisign && apt download minisign && dpkg -x minisign_*.deb . && cd -
+export PATH="$HOME/.local/opt/minisign/usr/bin:$PATH"; minisign -v
+```
+
+A file whose signature does not verify must not be used: stop and report it.
 
 Linux (macOS: only the desktop line, with `macos-arm64` or `macos-x64` and `.zip`):
 
@@ -195,11 +202,13 @@ Linux (macOS: only the desktop line, with `macos-arm64` or `macos-x64` and `.zip
 VERSION=0.1.0 DESKTOP_VERSION=0.1.1 NATIVE=0.160.0-r52.2 PLATFORM=linux-x64
 PUB=RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
 mkdir -p ~/cutex-download && cd ~/cutex-download
-get() { curl -fsSL --retry 3 -O "$1" && curl -fsSL --retry 3 -O "$1.minisig" && minisign -Vm "${1##*/}" -P "$PUB"; }
-get https://github.com/senxiu-official/cutex/releases/download/v$VERSION/cutex-$VERSION-$PLATFORM.tar.gz
-get https://github.com/senxiu-official/cutex/releases/download/v$VERSION/manifest.json
-get https://github.com/senxiu-official/cute-codex/releases/download/cute-codex-v$NATIVE/native-$NATIVE-$PLATFORM.tar.gz
-get https://github.com/senxiu-official/cutex-desktop/releases/download/v$DESKTOP_VERSION/cutex-desktop-$DESKTOP_VERSION-$PLATFORM.tar.gz
+get() { curl -fsSL --retry 3 -O "$1" && curl -fsSL --retry 3 -O "$1.minisig" && minisign -Vm "${1##*/}" -P "$PUB" \
+  || { echo "STOP: ${1##*/} did not download or verify; do not use it"; return 1; }; }
+get https://github.com/senxiu-official/cutex/releases/download/v$VERSION/cutex-$VERSION-$PLATFORM.tar.gz &&
+get https://github.com/senxiu-official/cutex/releases/download/v$VERSION/manifest.json &&
+get https://github.com/senxiu-official/cute-codex/releases/download/cute-codex-v$NATIVE/native-$NATIVE-$PLATFORM.tar.gz &&
+get https://github.com/senxiu-official/cutex-desktop/releases/download/v$DESKTOP_VERSION/cutex-desktop-$DESKTOP_VERSION-$PLATFORM.tar.gz &&
+echo "all downloads verified"
 ```
 
 Windows (PowerShell):
@@ -219,7 +228,10 @@ Get-Signed "https://github.com/senxiu-official/cute-codex/releases/download/cute
 Get-Signed "https://github.com/senxiu-official/cutex-desktop/releases/download/v$DesktopVersion/cutex-desktop-$DesktopVersion-$Platform.zip"
 ```
 
-Check: every file prints `Signature and comment signature verified`.
+Check: every file prints `Signature and comment signature verified`, then `all downloads verified`.
+(Each package's own `.minisig` is what proves it; the releases' `SHA256SUMS` files are an extra
+listing for people who check hashes by hand. They share one name, so download them into a
+directory per repository if you want them.)
 
 ### B.2 Install cutex
 
@@ -298,7 +310,9 @@ $env:NATIVE_COMMIT = (Get-Content "$env:N\cute-codex-build.json" | ConvertFrom-J
 ```
 
 Check: `codex-app-server --version` prints `codex-app-server 0.160.0-r52.2`. Now save the Python
-script of section 5.3 as `write-manifest.py` (it reads `N`, `RELEASE_DIR` and `NATIVE_COMMIT`), run
+script of section 5.3 as `~/cutex-download/write-manifest.py` (Windows:
+`%USERPROFILE%\cutex-download\write-manifest.py`; a binary install has no `~/src`; it reads `N`,
+`RELEASE_DIR` and `NATIVE_COMMIT`), run
 it and select the manifest with `cutex human install-runtime` (section 5.3, from "Write the manifest"
 to its check).
 
@@ -323,7 +337,14 @@ sysctl kernel.apparmor_restrict_unprivileged_userns 2>/dev/null
 ```
 
 If the last line prints `= 1` (Ubuntu 23.10 and later), the app needs an AppArmor profile before its
-first start (section 7.1 explains why). Write it, then ask the person to run the two `sudo` commands:
+first start (section 7.1 explains why). First check whether one is already loaded for this path
+(e.g. from an earlier install): if this prints a profile file, skip the rest of this step.
+
+```sh
+grep -ls "$(realpath "$DESKTOP_BASE")/releases/\*/cutex" /etc/apparmor.d/* 2>/dev/null
+```
+
+Otherwise write it, then ask the person to run the two `sudo` commands:
 
 ```sh
 RBASE=$(realpath "$DESKTOP_BASE")
@@ -886,7 +907,8 @@ creates the Start-menu shortcut **Cutex**; start the app from there.
 
 ### 7.3 First start
 
-- **Connected**: the host switcher (top left) shows this computer with a green dot. Go on with
+- **Connected**: the host switcher (top left) shows this computer's name; hovering it says
+  "在线" / "online" (the dot next to it is the host's own colour, not a status light). Go on with
   section 8.
 - **"cutex is not installed on this computer yet"**: `~/.cutex/config.json` or its
   `management_api_token` is missing (section 5.1).
