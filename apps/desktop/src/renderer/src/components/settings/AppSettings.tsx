@@ -29,7 +29,7 @@ import { packageLabel } from "../../lib/runtimePackages";
 import { refreshRuntimePackages } from "../../lib/runtimePackageStore";
 import { useHostRuntimePackages, useOutdatedAgentCount } from "../../lib/runtimePackagesView";
 import { buildLabel, cutexBuildText, settingsAnchorId } from "../../lib/settingsNav";
-import { channelLabel, unsupportedHintKey, updateButtonVisible, updateSummary, useUpdateStatus } from "../../lib/update";
+import { channelLabel, PROJECT_REPO_URL, RELATED_REPO_URLS, unsupportedHintKey, updateButtonVisible, updateSummary, useUpdateStatus } from "../../lib/update";
 import { useApp } from "../../store";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { formatBytes } from "../../../../shared/releases";
@@ -231,6 +231,9 @@ export function UpdatesPage() {
                   {t(status.code === "channelMissing" ? "updater.channel.missing" : "updater.updateCheck.unsupported")}
                 </span>
                 {status.retryable && update && <Button onClick={() => void update.check()}>{t("updater.updateCheck.retry")}</Button>}
+                {status.code === "releasePackage" && status.releasePage && (
+                  <Button onClick={() => void api.openExternal(status.releasePage!)} title={status.releasePage}>{t("updater.releasePage.open")}</Button>
+                )}
               </span>
             </SettingRow>
             {status.current && (
@@ -267,6 +270,17 @@ export function UpdatesPage() {
           </>
         )}
         {status?.oldReleases && status.oldReleases.count > 0 && <OldReleasesRow status={status} />}
+        {/* Every install state (dev run, release package, self-updating): a plain link, never a prompt. */}
+        <SettingRow label={t("updater.project")} hint={t("updater.projectHint")}>
+          <span className="flex items-center gap-3">
+            {RELATED_REPO_URLS.map((r) => (
+              <button key={r.name} type="button" className="text-xs text-muted hover:text-foreground hover:underline" title={r.url} onClick={() => void api.openExternal(r.url)}>
+                {r.name}
+              </button>
+            ))}
+            <Button onClick={() => void api.openExternal(PROJECT_REPO_URL)} title={PROJECT_REPO_URL}>{t("updater.project.open")}</Button>
+          </span>
+        </SettingRow>
       </Section>
       <Section id={settingsAnchorId("diagnostics")} title={t("updater.section.diagnostics")}>
         <SettingRow label={t("updater.errorLog")} hint={t("updater.errorLogHint")}>

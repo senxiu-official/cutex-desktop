@@ -2034,12 +2034,13 @@ export function installMockBridge(): void {
   // Self-update: an update is waiting (?update=none hides it, ?update=fail makes the build fail).
   const updateMode = new URLSearchParams(location.search).get("update");
   // ?update=nosource: a package copied to another machine; ?update=unreachable: its remote is down (retry).
+  // ?update=releasepackage: a CI release package (no source checkout) linking to its Releases page.
   // Channels: switching to 正式版 shows 「这个通道还没有发布」 (?update=release-published: an older release head).
-  const quiet = updateMode === "none" || updateMode === "nosource" || updateMode === "unreachable" || FRESH;
+  const quiet = updateMode === "none" || updateMode === "nosource" || updateMode === "unreachable" || updateMode === "releasepackage" || FRESH;
   let update: UpdateStatus = {
     state: quiet && updateMode !== "none" ? "unsupported" : quiet ? "idle" : "available",
-    ...(updateMode === "unreachable" ? { code: "remoteUnreachable" as const, retryable: true, reason: "fatal: unable to access 'https://example.invalid/cutex-desktop.git/'" } : quiet && updateMode !== "none" ? { code: "noSource" as const, reason: "no source checkout on this machine" } : {}),
-    channel: FRESH || updateMode === "nosource" || updateMode === "unreachable" ? "release" : "main",
+    ...(updateMode === "unreachable" ? { code: "remoteUnreachable" as const, retryable: true, reason: "fatal: unable to access 'https://example.invalid/cutex-desktop.git/'" } : updateMode === "releasepackage" ? { code: "releasePackage" as const, reason: "release package without a source checkout", releasePage: "https://example.invalid/cutex-desktop/releases" } : quiet && updateMode !== "none" ? { code: "noSource" as const, reason: "no source checkout on this machine" } : {}),
+    channel: FRESH || updateMode === "nosource" || updateMode === "unreachable" || updateMode === "releasepackage" ? "release" : "main",
     ...(quiet && updateMode !== "none" ? {} : { canSwitchChannel: true, source: "ssh://buildbox/srv/git/cutex-desktop.git" }),
     current: { commit: "c20812e".padEnd(40, "0"), committedAt: "2026-10-07T12:20:00+11:00" },
     latest: quiet ? null : { commit: "7422695".padEnd(40, "0"), committedAt: "2026-10-07T13:05:00+11:00", subject: "Settings → 通用: 文字对比度", count: 3 },

@@ -8,6 +8,9 @@
 // line in Settings → 更新与诊断, no noisy retries (an unreachable network remote backs off; a missing
 // path remote is not checked again). `CUTEX_DESKTOP_UPDATE_REMOTE` / prefs `updateRemotes[channel]` /
 // `updateRemote` fetch from another remote than the checkout's origin (resolveUpdateRemote).
+// A CI release package records its `releasePage` (package-portable.mjs --release-page): without a
+// source checkout, or outside the releases layout, it reports code `releasePackage` and Settings links
+// to that page (new packages are downloaded by hand; no network check here).
 //
 // Channel: the branch an install follows — `main` (开发版, the owner's installs, default) or `release`
 // (正式版) — from `<base>/channel`, else the packaged `channel`, else main (shared/update.ts
@@ -92,6 +95,12 @@ export class Updater {
     let layout = resolveInstallLayout(realExecPath(), WIN ? "\\" : "/", MAC && !("reason" in info) ? info.releaseDir : null);
     // A stale clone (its release already moved to old-releases) still finds the install by its base.
     if (!("reason" in layout) && layout.launcherBundle && !existsSync(layout.currentLink)) layout = { reason: `the launcher's install ${layout.baseDir} has no current link` };
+    if (!("reason" in info) && "reason" in layout && info.releasePage) {
+      // A release package unpacked outside the releases layout (e.g. Cutex.app dragged to /Applications):
+      // updates are downloaded by hand from its release page.
+      this.status = { state: "unsupported", code: "releasePackage", reason: layout.reason, releasePage: info.releasePage, ...(info.channel ? { channel: info.channel } : {}), current: { commit: info.commit, committedAt: info.committedAt }, latest: null };
+      return;
+    }
     if ("reason" in info || "reason" in layout) {
       this.status.code = "reason" in info ? "noReleaseInfo" : "notPortable";
       this.status.reason = "reason" in info ? info.reason : (layout as { reason: string }).reason;
@@ -104,7 +113,11 @@ export class Updater {
     const current = { commit: info.commit, committedAt: info.committedAt };
     const sourceDir = resolveSourceDir(info.sourceDir, layout, WIN ? "\\" : "/", (dir) => existsSync(join(dir, ".git")));
     if (!sourceDir) {
-      this.status = { state: "unsupported", code: "noSource", reason: "no source checkout on this machine", channel, current, latest: null };
+      // Old-release maintenance above keeps running; only updating needs the checkout. A release package
+      // (CI-built, no source) points at its release page instead.
+      this.status = info.releasePage
+        ? { state: "unsupported", code: "releasePackage", reason: "release package without a source checkout", releasePage: info.releasePage, channel, current, latest: null }
+        : { state: "unsupported", code: "noSource", reason: "no source checkout on this machine", channel, current, latest: null };
       return;
     }
     this.info = { ...info, sourceDir };

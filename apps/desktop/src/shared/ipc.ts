@@ -1954,6 +1954,9 @@ export interface UpdateStatus {
   canSwitchChannel?: boolean;
   /** Where updates come from, credentials stripped (displayRemote): the channel's remote or origin's URL. */
   source?: string;
+  /** unsupported `releasePackage` only: the page new packages are downloaded from (https; the package's
+   *  recorded `releasePage`). Settings opens it in the system browser. */
+  releasePage?: string;
   current: { commit: string; committedAt: string | null } | null;
   /** Newest commit on the update source's channel branch when it is ahead of the running build.
    *  `offMain`: the running build is not on that branch at all (packaged by hand from another branch,

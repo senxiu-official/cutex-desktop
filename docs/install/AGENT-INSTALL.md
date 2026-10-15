@@ -1,11 +1,12 @@
 # Installing Cutex (cutex + cute-codex + the desktop)
 
-This guide installs everything on **your own computer**, from source, for one person. It is written
+This guide installs everything on **your own computer** for one person, either from the signed
+release binaries (section B, about 15 minutes, no compiler) or from source (sections 2 to 7). It is written
 so that you can hand it to an AI coding agent (Claude Code, Codex, ...) and let it work through the
-steps, or follow it yourself. Expect 1 to 2 hours on a first install, most of it Rust compile time
-(much less on a machine with many cores), and 25 to 40 GB of free disk: a measured Linux install
-used about 22 GB, half of it the cute-codex build directory, which you can delete afterwards
-(section 12).
+steps, or follow it yourself. From source, expect 1 to 2 hours on a first install, most of it Rust
+compile time (much less on a machine with many cores), and 25 to 40 GB of free disk: a measured
+Linux install used about 22 GB, half of it the cute-codex build directory, which you can delete
+afterwards (section 12).
 
 ## 0. Read first
 
@@ -32,7 +33,8 @@ used about 22 GB, half of it the cute-codex build directory, which you can delet
 | Windows 10 / 11 x64 | cutex, agents and the desktop |
 | macOS | **the desktop only.** cutex's agent runtime does not support macOS. Run cutex on a Linux or Windows machine you own and connect to it over SSH (section 7.4) |
 
-There are no prebuilt binaries yet; everything below is built from the public repositories:
+Section B installs the binaries attached to the GitHub Releases of these repositories; sections 2
+to 7 build the same programs from them:
 
 | Repository | Branch | What |
 |---|---|---|
@@ -40,8 +42,8 @@ There are no prebuilt binaries yet; everything below is built from the public re
 | `https://github.com/senxiu-official/cute-codex` | `release` | the agent runtime (`codex-app-server`, `codex`, `codex-code-mode-host`) |
 | `https://github.com/senxiu-official/cutex-desktop` | `release` | the desktop app (this repository) |
 
-Use the `release` branch of all three: they are published together and tested together. If one of
-them has no `release` branch yet, stop and ask whoever invited you.
+Use the `release` branch (or the release binaries) of all three: they are published together and
+tested together. If one of them has no `release` branch yet, stop and ask whoever invited you.
 
 ### Rules for an AI agent following this guide
 
@@ -146,7 +148,270 @@ them has no `release` branch yet, stop and ask whoever invited you.
 
 Skip to section 7 on a Mac.
 
+## B. Install from release binaries
+
+This path installs the same programs as sections 2 to 7 without compiling anything: about 15
+minutes and 2 GB of disk. It needs no Rust, no C/C++ toolchain and no Node.js. Prerequisites from
+section 1: Linux `curl`, `python3`, a systemd user session and `~/.local/bin` on PATH; Windows
+Python 3 (`py`); macOS nothing for the desktop. Section 0's rules apply unchanged.
+
+The GitHub Releases carry binaries built by GitHub Actions from the tagged commit of each
+repository:
+
+| Release | Files (`<platform>` = `linux-x64` or `windows-x64`) |
+|---|---|
+| `senxiu-official/cutex` → `v<version>` | `cutex-<version>-<platform>.tar.gz` (`cutex`, `cutex-mcp`), `manifest.json` |
+| `senxiu-official/cute-codex` → `cute-codex-v<native version>` | `native-<native version>-<platform>.tar.gz` (`codex-app-server`, `codex`, `codex-code-mode-host`, the protocol schema) |
+| `senxiu-official/cutex-desktop` → `v<version>` | `cutex-desktop-<version>-linux-x64.tar.gz`, `-windows-x64.zip`, `-macos-arm64.zip` (Apple silicon), `-macos-x64.zip` (Intel) |
+
+Every file has a `<file>.minisig` signature next to it, and each release a `SHA256SUMS` (+
+`.minisig`). The owner signs them offline with the release key; CI never holds it. The public key
+(key id `00A0BD016183F447`) is the one cutex itself trusts for backend updates
+(`src/upgrade/keys.rs` in the cutex repository) and is published as `docs/install/cutex-release.pub`
+in this repository:
+
+```text
+RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
+```
+
+The versions that belong together are the ones in the cutex release's `manifest.json` (`native.version`)
+and in the table below; for this release:
+
+| | Linux / Windows / macOS |
+|---|---|
+| `VERSION` (cutex, desktop) | `0.1.0` |
+| `NATIVE` (cute-codex) | `0.160.0-r52.2` |
+
+### B.1 Download and verify
+
+Install minisign: Ubuntu / Debian `sudo apt install minisign` (ask the person: it needs sudo),
+Windows `winget install jedisct1.minisign`, macOS `brew install minisign`. A file whose signature
+does not verify must not be used: stop and report it.
+
+Linux (macOS: only the desktop line, with `macos-arm64` or `macos-x64` and `.zip`):
+
+```sh
+VERSION=0.1.0 NATIVE=0.160.0-r52.2 PLATFORM=linux-x64
+PUB=RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
+mkdir -p ~/cutex-download && cd ~/cutex-download
+get() { curl -fsSL --retry 3 -O "$1" && curl -fsSL --retry 3 -O "$1.minisig" && minisign -Vm "${1##*/}" -P "$PUB"; }
+get https://github.com/senxiu-official/cutex/releases/download/v$VERSION/cutex-$VERSION-$PLATFORM.tar.gz
+get https://github.com/senxiu-official/cutex/releases/download/v$VERSION/manifest.json
+get https://github.com/senxiu-official/cute-codex/releases/download/cute-codex-v$NATIVE/native-$NATIVE-$PLATFORM.tar.gz
+get https://github.com/senxiu-official/cutex-desktop/releases/download/v$VERSION/cutex-desktop-$VERSION-$PLATFORM.tar.gz
+```
+
+Windows (PowerShell):
+
+```powershell
+$Version = '0.1.0'; $Native = '0.160.0-r52.2'; $Platform = 'windows-x64'
+$Pub = 'RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS'
+$Dl = "$env:USERPROFILE\cutex-download"; New-Item -ItemType Directory -Force $Dl | Out-Null; Set-Location $Dl
+function Get-Signed($Url) {
+  $name = $Url.Split('/')[-1]
+  curl.exe -fsSL --retry 3 -o $name $Url; curl.exe -fsSL --retry 3 -o "$name.minisig" "$Url.minisig"
+  minisign -Vm $name -P $Pub; if ($LASTEXITCODE -ne 0) { throw "signature of $name does not verify" }
+}
+Get-Signed "https://github.com/senxiu-official/cutex/releases/download/v$Version/cutex-$Version-$Platform.tar.gz"
+Get-Signed "https://github.com/senxiu-official/cutex/releases/download/v$Version/manifest.json"
+Get-Signed "https://github.com/senxiu-official/cute-codex/releases/download/cute-codex-v$Native/native-$Native-$Platform.tar.gz"
+Get-Signed "https://github.com/senxiu-official/cutex-desktop/releases/download/v$Version/cutex-desktop-$Version-$Platform.zip"
+```
+
+Check: every file prints `Signature and comment signature verified`.
+
+### B.2 Install cutex
+
+First create `~/.cutex` with its tokens exactly as in **section 5.1**. Then unpack cutex next to
+its `manifest.json` and let `cutex service install` copy both into the install base. The signed
+manifest makes this a managed install of release `$VERSION` (sequence and commit recorded), which is
+what the in-app **Backend updates** need later.
+
+Linux:
+
+```sh
+cd ~/cutex-download
+mkdir -p cutex-$VERSION && tar -xzf cutex-$VERSION-$PLATFORM.tar.gz -C cutex-$VERSION
+cp manifest.json manifest.json.minisig cutex-$VERSION/
+cutex-$VERSION/cutex --version            # cutex 0.1.0 (0.1.0, <commit>)
+cutex-$VERSION/cutex service install --channel release --no-start
+CUTEX_BASE=~/.local/share/cutex
+RELEASE_DIR="$CUTEX_BASE/releases/$VERSION"
+ls "$RELEASE_DIR"                          # cutex  cutex-mcp  manifest.json  manifest.json.minisig
+mkdir -p ~/.local/bin && ln -sfn "$CUTEX_BASE/current/cutex" ~/.local/bin/cutex
+cutex service status
+cutex upgrade status
+grep '"home"' ~/.cutex/archive/fresh-agent-permissions/migration.json
+```
+
+Windows:
+
+```powershell
+Set-Location "$env:USERPROFILE\cutex-download"
+New-Item -ItemType Directory -Force "cutex-$Version" | Out-Null
+tar -xzf "cutex-$Version-$Platform.tar.gz" -C "cutex-$Version"
+Copy-Item manifest.json, manifest.json.minisig "cutex-$Version\"
+& ".\cutex-$Version\cutex.exe" --version
+& ".\cutex-$Version\cutex.exe" service install --channel release --no-start
+$CutexBase = "$env:LOCALAPPDATA\cutex"
+$env:RELEASE_DIR = "$CutexBase\releases\$Version"
+Get-ChildItem $env:RELEASE_DIR
+[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ";$CutexBase\bin", 'User')
+$env:Path += ";$CutexBase\bin"
+cutex service status
+cutex upgrade status
+Select-String '"home"' "$env:USERPROFILE\.cutex\archive\fresh-agent-permissions\migration.json"
+```
+
+Check: `cutex upgrade status` prints `installed  0.1.0` (`cutex upgrade status --json` shows
+`"managed": true` and the release's `sequence` above 0), and the last line prints `"home": "fresh"`
+(section 5.2 explains the record). The services are installed but not started yet.
+
+### B.3 Install the runtime files
+
+Unpack cute-codex into its own `natives/<version>` directory (never over an existing one: agents pin
+these files), then write and select the runtime manifest exactly as in section 5.3.
+
+Linux:
+
+```sh
+N="$CUTEX_BASE/natives/$NATIVE"
+if [ -e "$N/codex-app-server" ]; then echo "natives $NATIVE already installed, not unpacked"; else
+  mkdir -p "$N" && tar -xzf ~/cutex-download/native-$NATIVE-$PLATFORM.tar.gz -C "$N"
+fi
+"$N/codex-app-server" --version
+NATIVE_COMMIT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit"])' "$N/cute-codex-build.json")
+export N RELEASE_DIR NATIVE_COMMIT
+```
+
+Windows:
+
+```powershell
+$env:N = "$CutexBase\natives\$Native"
+if (Test-Path "$env:N\codex-app-server.exe") { "natives $Native already installed, not unpacked" } else {
+  New-Item -ItemType Directory -Force $env:N | Out-Null
+  tar -xzf "$env:USERPROFILE\cutex-download\native-$Native-$Platform.tar.gz" -C $env:N
+}
+& "$env:N\codex-app-server.exe" --version
+$env:NATIVE_COMMIT = (Get-Content "$env:N\cute-codex-build.json" | ConvertFrom-Json).commit
+```
+
+Check: `codex-app-server --version` prints `codex-app-server 0.160.0-r52.2`. Now save the Python
+script of section 5.3 as `write-manifest.py` (it reads `N`, `RELEASE_DIR` and `NATIVE_COMMIT`), run
+it and select the manifest with `cutex human install-runtime` (section 5.3, from "Write the manifest"
+to its check).
+
+Then start cutex and check it: **section 6**.
+
+### B.4 Install the desktop
+
+The package is the same portable layout as section 7, without the `src/` checkout: it cannot pull
+and rebuild itself, and Settings → Updates & diagnostics says so and links to the Releases page
+(updating: B.5).
+
+Linux:
+
+```sh
+DESKTOP_BASE=~/Applications/cutex-desktop
+mkdir -p "$DESKTOP_BASE/releases/$VERSION"
+tar -xzf ~/cutex-download/cutex-desktop-$VERSION-linux-x64.tar.gz -C "$DESKTOP_BASE/releases/$VERSION" --strip-components=1
+ln -sfn "$DESKTOP_BASE/releases/$VERSION" "$DESKTOP_BASE/current"
+echo release > "$DESKTOP_BASE/channel"
+test -x "$DESKTOP_BASE/current/cutex" && echo "desktop ok"
+sysctl kernel.apparmor_restrict_unprivileged_userns 2>/dev/null
+```
+
+If the last line prints `= 1` (Ubuntu 23.10 and later), the app needs an AppArmor profile before its
+first start (section 7.1 explains why). Write it, then ask the person to run the two `sudo` commands:
+
+```sh
+RBASE=$(realpath "$DESKTOP_BASE")
+cat > "$DESKTOP_BASE/apparmor-cutex-desktop" <<EOF
+abi <abi/4.0>,
+include <tunables/global>
+
+profile cutex-desktop "$RBASE/releases/*/cutex" flags=(unconfined) {
+  userns,
+  include if exists <local/cutex-desktop>
+}
+EOF
+echo "sudo install -m 644 \"$DESKTOP_BASE/apparmor-cutex-desktop\" /etc/apparmor.d/cutex-desktop"
+echo "sudo apparmor_parser -r /etc/apparmor.d/cutex-desktop"
+```
+
+(If `/etc/apparmor.d/cutex-desktop` already exists for another install, use another profile name
+in both the file and the commands.) Start the app in the graphical session:
+`"$DESKTOP_BASE/current/cutex"`.
+
+Windows:
+
+```powershell
+$DesktopBase = "$env:LOCALAPPDATA\Programs\cutex-desktop-app"
+$Rel = "$DesktopBase\releases\$Version"
+New-Item -ItemType Directory -Force "$DesktopBase\releases" | Out-Null
+Expand-Archive "$env:USERPROFILE\cutex-download\cutex-desktop-$Version-windows-x64.zip" -DestinationPath "$DesktopBase\releases\unpack-$Version"
+Move-Item "$DesktopBase\releases\unpack-$Version\cutex-desktop-$Version-windows-x64" $Rel
+Remove-Item "$DesktopBase\releases\unpack-$Version"
+if (Test-Path "$DesktopBase\current") { (Get-Item "$DesktopBase\current").Delete() }
+New-Item -ItemType Junction -Path "$DesktopBase\current" -Target $Rel | Out-Null
+Set-Content -Path "$DesktopBase\channel" -Value release
+Get-ChildItem "$DesktopBase\current\cutex.exe"
+& "$DesktopBase\current\cutex.exe"
+```
+
+The first start creates the Start-menu shortcut **Cutex**; start the app from there afterwards.
+Windows SmartScreen warns about the downloaded program (B.6).
+
+macOS (the desktop only; connect to your cutex machine as in section 7.4):
+
+```sh
+cd ~/cutex-download
+ARCH=$( [ "$(uname -m)" = arm64 ] && echo arm64 || echo x64 )
+# (download and verify cutex-desktop-$VERSION-macos-$ARCH.zip as in B.1)
+ditto -x -k cutex-desktop-$VERSION-macos-$ARCH.zip .
+mkdir -p ~/Applications && ditto cutex-desktop-$VERSION-macos-$ARCH/Cutex.app ~/Applications/Cutex.app
+open ~/Applications/Cutex.app
+```
+
+macOS blocks the first start of a downloaded app that is not notarized (B.6).
+
+Then go on with **section 7.3** (first start) and **section 8** (first Profile and agent).
+
+### B.5 Updating a binary install
+
+- **cutex** (and the runtime files it brings): Settings → Host backend updates. When a newer signed
+  release is published, it downloads it, verifies the signature, waits until no agent is working,
+  switches and checks the result (rolling back by itself on failure). By hand: `cutex upgrade check`,
+  then `cutex upgrade apply` (`docs/backend-upgrade.md` in the cutex repository).
+- **The desktop**: download and verify the new package (B.1), unpack it next to the old one as
+  `releases/<new version>` and point `current` at it (Linux: the `ln -sfn` line of B.4; Windows: the
+  junction lines of B.4), then quit the app from the tray and start it again. Keep the previous
+  release until the new one works; delete older ones by hand. macOS: quit the app and replace
+  `~/Applications/Cutex.app` with the new one.
+
+### B.6 Unsigned app warnings
+
+The binaries are signed with the minisign key above, but not with a paid code-signing certificate
+(no Apple Developer ID or notarization, no Windows Authenticode), so the operating system does not
+know the publisher:
+
+- **Windows**: SmartScreen says "Windows protected your PC" on the first start: click
+  **More info → Run anyway**. To clear the download mark for the whole folder instead:
+  `Get-ChildItem -Recurse "$DesktopBase\releases\$Version" | Unblock-File`.
+- **macOS**: "Cutex cannot be opened because the developer cannot be verified" (or "Apple could not
+  verify…"). Right-click (Control-click) `Cutex.app` → **Open** → **Open**; on macOS 15 and later,
+  open System Settings → Privacy & Security and click **Open Anyway**, then confirm. The keychain
+  prompt of section 10 applies too.
+- **Linux**: nothing beyond the AppArmor step of B.4.
+
+The cutex and cute-codex command-line programs get no such warnings (they are not started from
+Explorer or Finder).
+
 ## 2. Get the sources
+
+Sections 2 to 7 are the from-source path. Skip them if you installed from the release binaries
+(section B).
+
 
 Linux:
 
@@ -682,6 +947,10 @@ under Settings → Notifications.
 
 ### The desktop
 
+A desktop installed from a release package (section B) has no `src/` checkout: Settings → Updates &
+diagnostics says "Installed from a release package" and links to the Releases page; update it as
+in **B.5**. The rest of this part is about a desktop built from source (section 7).
+
 Settings → **Updates & diagnostics** shows the version, the channel (`release`) and the update
 state. When the `release` branch moves, an **Update** button appears next to Settings: it pulls
 `<desktop base>/src`, builds a new release, switches `current` and restarts. If the new version does
@@ -722,8 +991,10 @@ in use cannot be moved; it stays in `releases/` and is moved at a later start.
 
 ### cutex and cute-codex
 
-The in-app **Backend updates** page downloads signed cutex releases. cutex 0.1.0 trusts the release
-signing keys, but no signed release packages are published yet, so for now update from source:
+The in-app **Backend updates** page downloads signed cutex releases from the GitHub Releases of
+`senxiu-official/cutex` (managed installs only: every install made with `cutex service install`).
+After a binary install (section B) that is the way to update. A cutex built from source can use it
+too; or update from source:
 
 1. Wait until no agent is working (a restart never loses agents, but do not cut a running turn).
 2. `git pull --ff-only origin release` in both repositories, rebuild cutex (section 4) and, if cute-codex changed, the native
@@ -743,7 +1014,8 @@ signing keys, but no signed release packages are published yet, so for now updat
 
 ## 10. Unsigned app warnings
 
-The packages you build are not signed by a publisher.
+For the downloaded release packages see **B.6**. The packages you build yourself are not signed by
+a publisher either.
 
 - **Windows SmartScreen** normally stays quiet for a program you built yourself (it has no
   "downloaded from the internet" mark). If you copy a package to another computer and SmartScreen
@@ -780,6 +1052,7 @@ The packages you build are not signed by a publisher.
 | Linux (Ubuntu 24.04+): the app does not start, mentioning the sandbox / `chrome-sandbox` | The AppArmor step of section 7.1 was skipped. Ask the person to run the two `sudo` commands there. |
 | `nvm install 24` leaves `node --version` at an older version | `~/.npmrc` sets `prefix`; see the Node 24 item in section 1. |
 | `git pull`: "divergent branches" / "unrelated histories", or `git fetch --tags`: "would clobber existing tag" | The published `release` branch was replaced instead of moved forward (each release is normally a child of the previous one). Keep your old state under another name and follow the new one: `git branch -m release old-release`, `git fetch --force --tags origin`, `git switch -c release --track origin/release`. For the desktop `src`, then rerun the install script (9). |
+| Updates & diagnostics: "Installed from a release package" | A desktop from the release binaries (section B). It does not update itself; see B.5. |
 | Updates & diagnostics: "Not a portable install" | The app was not started from `<desktop base>/current`, or `<desktop base>/src` is missing. Start it from `current`, or reinstall with section 7. |
 | Updates & diagnostics: "The update source has no branch for this channel yet" | The `release` branch is not published on the repository `src` was cloned from. Wait for it, or check `git -C <desktop base>/src remote -v`. |
 | Backend updates: `no_trusted_keys` | A cutex older than 0.1.0, built without the release keys; update from source (section 9). |

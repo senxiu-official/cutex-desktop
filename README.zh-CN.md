@@ -44,8 +44,9 @@ Cutex 桌面端是 [cutex](https://github.com/senxiu-official/cutex) 的桌面�
 
 ## 安装
 
-目前没有预编译的安装包：cutex、cute-codex 和桌面端都在你自己的电脑上从源码构建。安装指南写了每一步，人照着做或者
-交给编程助手（Claude Code、Codex 等）执行都可以。最省事的方式是直接把它交给你的编程助手：
+可以用发布的二进制安装（不用编译，约 15 分钟），也可以在你自己的电脑上从源码构建 cutex、cute-codex 和桌面端。
+安装指南两种方式都写了每一步，人照着做或者交给编程助手（Claude Code、Codex 等）执行都可以。最省事的方式是直接把它
+交给你的编程助手：
 
 **[docs/install/AGENT-INSTALL.md](docs/install/AGENT-INSTALL.md)**（英文）
 
@@ -55,7 +56,7 @@ Cutex 桌面端是 [cutex](https://github.com/senxiu-official/cutex) 的桌面�
 | Windows 10 / 11 x64 | cutex + 智能体 + 桌面端 |
 | macOS | 只有桌面端，通过 SSH 连接你自己的一台运行 cutex 的 Linux / Windows 电脑 |
 
-装好指南里的前置环境后，桌面端只要三条命令（下面是 Linux；Windows 和 macOS 的命令在指南里）：
+从源码安装时，装好指南里的前置环境后，桌面端只要三条命令（下面是 Linux；Windows 和 macOS 的命令在指南里）：
 
 ```sh
 git clone --branch release https://github.com/senxiu-official/cutex-desktop.git ~/Applications/cutex-desktop/src
@@ -65,6 +66,28 @@ git clone --branch release https://github.com/senxiu-official/cutex-desktop.git 
 
 桌面端会自己找到本机的 cutex。先在 设置 → Profile 添加模型账号，再点「新建智能体」。安装会跟随 `release` 分支自动更新：
 有新版本时，侧栏会出现「更新」按钮。
+
+## 发布的二进制
+
+每个 GitHub Release 都附有 GitHub Actions 从对应标签的提交构建的二进制：
+
+| 仓库 | 文件 |
+|---|---|
+| [cutex](https://github.com/senxiu-official/cutex/releases) | `cutex` + `cutex-mcp`，Linux x64 和 Windows x64 |
+| [cute-codex](https://github.com/senxiu-official/cute-codex/releases) | 智能体运行时（`codex-app-server`、`codex`、`codex-code-mode-host`），Linux x64 和 Windows x64 |
+| [cutex-desktop](https://github.com/senxiu-official/cutex-desktop/releases) | 桌面端：Linux x64（`.tar.gz`）、Windows x64（`.zip`）、macOS arm64 / x64（`.zip`） |
+
+每个文件都用 minisign 签名，签名是旁边的 `.minisig` 文件。用发布公钥校验下载的文件（公钥也在
+[docs/install/cutex-release.pub](docs/install/cutex-release.pub)，cutex 后端更新信任的也是这把公钥）：
+
+```sh
+minisign -Vm <文件> -P RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
+```
+
+Windows 和 macOS 的应用没有用付费证书做代码签名（没有 Apple Developer ID 和公证，也没有 Windows Authenticode）。
+第一次启动时，Windows SmartScreen 会提示「Windows 已保护你的电脑」：点 **更多信息 → 仍要运行**。macOS 会提示无法验证
+开发者：右键点应用 → **打开**，或者到 系统设置 → 隐私与安全性 → **仍要打开**。Linux 不需要额外操作（Ubuntu 23.10
+及以后要做指南里的 AppArmor 一步）。从源码构建的方式照旧可用，见安装指南。
 
 ## 文档
 
@@ -83,7 +106,7 @@ git clone --branch release https://github.com/senxiu-official/cutex-desktop.git 
 - **远程访问默认在你自己的网络里。** 机器之间通过 SSH 或你信任的私有 tailnet 连接。用户身份是为了方便和熟人共用主机，
   不是防陌生人的安全边界。
 
-欢迎在 GitHub issue 里报 bug 或修正翻译。
+欢迎在 GitHub issue 里报 bug 或修正翻译。觉得有用的话，欢迎在 GitHub 上点个 Star，方便更多人找到它。
 
 ## 从源码构建（开发）
 

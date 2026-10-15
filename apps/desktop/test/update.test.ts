@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backoffMinutes, buildSteps, builtChannel, channelFileContent, checkoutPlan, cmdQuote, corepackEntryIn, displayRemote, isOwnClone, spawnPlan, fetchArgs, fetchFailure, isKnownChannel, KNOWN_CHANNELS, parseCodesignIdentity, parseUpdateRemotes, resolveUpdateRemote, parseChannel, resolveChannel, installLayout, isPathRemote, parseReleaseInfo, parseUpdateRemote, pathRemotePath, releaseName, resolveInstallLayout, resolveSourceDir, sourceDirtyCheck, tail, updateButtonVisible, updateOffer, updateRef, updateRemoteOverride } from "../src/shared/update";
+import { backoffMinutes, buildSteps, builtChannel, channelFileContent, checkoutPlan, cmdQuote, corepackEntryIn, displayRemote, isOwnClone, spawnPlan, fetchArgs, fetchFailure, isKnownChannel, KNOWN_CHANNELS, parseCodesignIdentity, parseUpdateRemotes, resolveUpdateRemote, parseChannel, resolveChannel, installLayout, isPathRemote, parseReleaseInfo, parseReleasePage, parseUpdateRemote, pathRemotePath, releaseName, resolveInstallLayout, resolveSourceDir, sourceDirtyCheck, tail, updateButtonVisible, updateOffer, updateRef, updateRemoteOverride } from "../src/shared/update";
 
 const FULL = "7422695".padEnd(40, "a");
 
@@ -13,17 +13,37 @@ describe("parseReleaseInfo", () => {
       channel: null,
       codesignIdentity: null,
       releaseDir: null,
+      releasePage: null,
     });
   });
 
   it("accepts a --no-source package (explicit nulls)", () => {
-    expect(parseReleaseInfo({ commit: FULL, committedAt: null, sourceDir: null, nodeDir: null })).toEqual({ commit: FULL, committedAt: null, sourceDir: null, nodeDir: null, channel: null, codesignIdentity: null, releaseDir: null });
+    expect(parseReleaseInfo({ commit: FULL, committedAt: null, sourceDir: null, nodeDir: null })).toEqual({ commit: FULL, committedAt: null, sourceDir: null, nodeDir: null, channel: null, codesignIdentity: null, releaseDir: null, releasePage: null });
   });
 
   it("refuses releases packaged before self-update", () => {
     expect(parseReleaseInfo({ commit: "c20812e" })).toHaveProperty("reason");
     expect(parseReleaseInfo({ commit: FULL })).toHaveProperty("reason");
     expect(parseReleaseInfo(null)).toHaveProperty("reason");
+  });
+});
+
+describe("parseReleaseInfo releasePage", () => {
+  const base = { commit: FULL, sourceDir: null, nodeDir: null };
+  it("keeps an https release page", () => {
+    const page = "https://github.com/senxiu-official/cutex-desktop/releases";
+    expect(parseReleaseInfo({ ...base, releasePage: page })).toMatchObject({ releasePage: page });
+  });
+
+  it("drops anything that is not a plain https URL", () => {
+    for (const bad of ["http://github.com/x/releases", "javascript:alert(1)", "file:///etc/passwd", "https://user:pw@github.com/x", "https://token@github.com/x", "not a url", "https://a b", "", 42, null, `https://example.com/${"a".repeat(2100)}`]) {
+      expect(parseReleasePage(bad)).toBeNull();
+      expect(parseReleaseInfo({ ...base, releasePage: bad })).toMatchObject({ releasePage: null });
+    }
+  });
+
+  it("is null when the package recorded none", () => {
+    expect(parseReleaseInfo(base)).toMatchObject({ releasePage: null });
   });
 });
 

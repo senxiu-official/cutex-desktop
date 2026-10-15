@@ -2,14 +2,17 @@
 // node_modules plus the built app (apps/desktop/out) as resources/app. The main and preload bundles
 // only require electron and node builtins (plus the icon files in resources/icons).
 //
-//   node scripts/package-portable.mjs <dest-dir> [--no-source] [--channel <branch>]
+//   node scripts/package-portable.mjs <dest-dir> [--no-source] [--channel <branch>] [--release-page <https-url>]
 //   (run `pnpm --filter @cutex-desktop/app build` first)
 //
 // --no-source: a package for other machines — the builder's checkout and node paths are not recorded
 // (sourceDir / nodeDir = null), so the in-app updater looks for <base>/src instead and otherwise says
 // 「不支持自动更新」 quietly.
 // --channel <branch>: the update branch recorded in the package (`release` for colleagues' packages);
-// `<base>/channel` of an install overrides it, and without either the install follows main. NOTICE, THIRD_PARTY_NOTICES.md and LICENSES/ ship next to Electron's own
+// `<base>/channel` of an install overrides it, and without either the install follows main.
+// --release-page <https-url>: where new packages are published (CI release packages: the GitHub
+// Releases page), recorded as `releasePage`. An install of such a package that cannot update itself
+// (no source checkout, or not in the releases layout) links to it in Settings → 更新与诊断. NOTICE, THIRD_PARTY_NOTICES.md and LICENSES/ ship next to Electron's own
 // LICENSE / LICENSES.chromium.html in every package.
 //
 // The executable is renamed to cutex(.exe) (macOS: Cutex.app/Contents/MacOS/Cutex) so app.isPackaged
@@ -36,8 +39,10 @@ const noSource = args.includes("--no-source");
 const channelAt = args.indexOf("--channel");
 const channel = channelAt >= 0 ? args[channelAt + 1] : null;
 if (channelAt >= 0 && !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/.test(channel ?? "")) throw new Error("--channel needs a branch name");
-const destArg = args.find((a, i) => !a.startsWith("--") && (channelAt < 0 || i !== channelAt + 1));
-if (!destArg) throw new Error("usage: node scripts/package-portable.mjs <dest-dir> [--no-source] [--channel <branch>]");
+const pageAt = args.indexOf("--release-page");
+const releasePage = pageAt >= 0 ? releasePageUrl(args[pageAt + 1]) : null;
+const destArg = args.find((a, i) => !a.startsWith("--") && (channelAt < 0 || i !== channelAt + 1) && (pageAt < 0 || i !== pageAt + 1));
+if (!destArg) throw new Error("usage: node scripts/package-portable.mjs <dest-dir> [--no-source] [--channel <branch>] [--release-page <https-url>]");
 const dest = resolve(destArg);
 const signIdentity = process.platform === "darwin" ? codesignIdentity(process.env.CUTEX_DESKTOP_CODESIGN_IDENTITY) : null;
 if (existsSync(dest)) throw new Error(`${dest} already exists`);
@@ -93,7 +98,7 @@ try {
 writeFileSync(
   join(target, "package.json"),
   JSON.stringify(
-    { name: pkg.name, productName: pkg.productName, version: pkg.version, private: true, main: pkg.main, commit, committedAt, dirty, sourceDir: noSource ? null : root, nodeDir: noSource ? null : dirname(process.execPath), releaseDir: noSource ? null : dest, ...(channel ? { channel } : {}), ...(signIdentity && !noSource ? { codesignIdentity: signIdentity } : {}) },
+    { name: pkg.name, productName: pkg.productName, version: pkg.version, private: true, main: pkg.main, commit, committedAt, dirty, sourceDir: noSource ? null : root, nodeDir: noSource ? null : dirname(process.execPath), releaseDir: noSource ? null : dest, ...(channel ? { channel } : {}), ...(releasePage ? { releasePage } : {}), ...(signIdentity && !noSource ? { codesignIdentity: signIdentity } : {}) },
     null,
     2,
   ) + "\n",
@@ -105,6 +110,21 @@ if (bundle) {
   execFileSync("codesign", ["--verify", "--deep", "--strict", bundle], { stdio: "pipe" });
 }
 console.log(`portable ${pkg.productName} ${pkg.version} (${commit?.slice(0, 7)}${dirty ? ", dirty" : ""}${bundle ? `, signed ${signIdentity ?? "ad hoc"}` : ""}) → ${dest}`);
+
+/** --release-page: an https URL the app opens in the system browser (shared/update.ts parseReleasePage accepts the same). */
+function releasePageUrl(value) {
+  const v = (value ?? "").trim();
+  let url = null;
+  try {
+    url = new URL(v);
+  } catch {
+    // reported below
+  }
+  if (!url || v.length > 2048 || /[\s\x00-\x1f\x7f]/.test(v) || url.protocol !== "https:" || !url.hostname || url.username || url.password) {
+    throw new Error("--release-page needs an https URL without credentials (at most 2048 characters)");
+  }
+  return url.href;
+}
 
 /** CUTEX_DESKTOP_CODESIGN_IDENTITY: a codesign identity (name or SHA-1); unset / "-" = ad hoc. */
 function codesignIdentity(value) {

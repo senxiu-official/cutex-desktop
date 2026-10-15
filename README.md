@@ -49,9 +49,10 @@ Windows and Linux x64. On macOS it is a front end for one of your own machines t
 
 ## Install
 
-There are no prebuilt installers yet. You build cutex, cute-codex and the desktop from source on your
-own machine. The guide covers every step, and it is written so that either you or an AI coding agent
-(Claude Code, Codex, …) can follow it end to end. The simplest way is to hand it to your agent:
+Install from the release binaries (no compiler, about 15 minutes) or build cutex, cute-codex and the
+desktop from source on your own machine. The guide covers both, and it is written so that either you
+or an AI coding agent (Claude Code, Codex, …) can follow it end to end. The simplest way is to hand
+it to your agent:
 
 **[docs/install/AGENT-INSTALL.md](docs/install/AGENT-INSTALL.md)**
 
@@ -61,7 +62,7 @@ own machine. The guide covers every step, and it is written so that either you o
 | Windows 10 / 11 x64 | cutex + agents + the desktop |
 | macOS | the desktop only, connected over SSH to a Linux or Windows machine of yours that runs cutex |
 
-Once the guide's prerequisites are in place, the desktop part is three commands. They are shown here
+From source, once the guide's prerequisites are in place, the desktop part is three commands. They are shown here
 for Linux; the guide also has the Windows and macOS versions.
 
 ```sh
@@ -73,6 +74,32 @@ git clone --branch release https://github.com/senxiu-official/cutex-desktop.git 
 The desktop finds the local cutex by itself. Add a Profile (Settings → Profiles), then click
 "New agent". The install follows the `release` branch and updates itself: when a new release is out,
 an "Update" button appears in the sidebar.
+
+## Release binaries
+
+Each GitHub Release carries binaries built by GitHub Actions from the tagged commit:
+
+| Repository | Files |
+|---|---|
+| [cutex](https://github.com/senxiu-official/cutex/releases) | `cutex` + `cutex-mcp` for Linux x64 and Windows x64 |
+| [cute-codex](https://github.com/senxiu-official/cute-codex/releases) | the agent runtime (`codex-app-server`, `codex`, `codex-code-mode-host`) for Linux x64 and Windows x64 |
+| [cutex-desktop](https://github.com/senxiu-official/cutex-desktop/releases) | the desktop for Linux x64 (`.tar.gz`), Windows x64 (`.zip`) and macOS arm64 / x64 (`.zip`) |
+
+Every file is signed with minisign; the signature is the `.minisig` file next to it. Verify a
+download with the release public key (also in
+[docs/install/cutex-release.pub](docs/install/cutex-release.pub), and the key cutex trusts for its
+own backend updates):
+
+```sh
+minisign -Vm <file> -P RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
+```
+
+The Windows and macOS apps are not code-signed with a paid certificate (no Apple Developer ID or
+notarization, no Windows Authenticode). On the first start Windows SmartScreen says "Windows
+protected your PC": click **More info → Run anyway**. macOS says the developer cannot be verified:
+right-click the app → **Open**, or open System Settings → Privacy & Security → **Open Anyway**.
+Linux needs nothing extra (on Ubuntu 23.10 and later, the AppArmor step in the guide). Building from
+source stays available, see the guide.
 
 ## Documentation
 
@@ -94,7 +121,8 @@ especially on macOS and in the less-used modules.
   you trust. User identities make it easy to share a host with people you know; they are not a
   security boundary against strangers.
 
-Bug reports and translation fixes are welcome as GitHub issues.
+Bug reports and translation fixes are welcome as GitHub issues. If the project is useful to you, a
+star on GitHub helps others find it.
 
 ## Build from source (development)
 

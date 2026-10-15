@@ -21,6 +21,13 @@ export function useUpdateStatus(): UpdateStatus | null {
   return status;
 }
 
+/** The project's public repositories (Settings → 更新与诊断 → 项目); opened in the system browser. */
+export const PROJECT_REPO_URL = "https://github.com/senxiu-official/cutex-desktop";
+export const RELATED_REPO_URLS = [
+  { name: "cutex", url: "https://github.com/senxiu-official/cutex" },
+  { name: "cute-codex", url: "https://github.com/senxiu-official/cute-codex" },
+] as const;
+
 /** One-line summary of the update on offer (tooltip / settings hint). */
 export function updateSummary(t: (key: "update.available" | "update.offMain" | "updater.switchChannel" | ChannelLabelKey, vars?: Record<string, string | number>) => string, latest: NonNullable<UpdateStatus["latest"]>, channel = "main"): string {
   if (latest.switchChannel) return t("updater.switchChannel", { channel: channelLabel(t, channel), subject: latest.subject });
@@ -35,7 +42,7 @@ export function channelLabel(t: (key: ChannelLabelKey) => string, channel: strin
 }
 
 /** Settings hint for an install that cannot update itself (UpdateStatus.code). */
-export function unsupportedHintKey(code: UpdateStatus["code"]): "updater.unsupported.devRun" | "updater.unsupported.noSource" | "updater.unsupported.noGit" | "updater.unsupported.remoteUnreachable" | "updater.unsupported.channelMissing" | "updater.unsupported.other" {
+export function unsupportedHintKey(code: UpdateStatus["code"]): "updater.unsupported.devRun" | "updater.unsupported.noSource" | "updater.unsupported.releasePackage" | "updater.unsupported.noGit" | "updater.unsupported.remoteUnreachable" | "updater.unsupported.channelMissing" | "updater.unsupported.other" {
   switch (code) {
     case "channelMissing":
       return "updater.unsupported.channelMissing";
@@ -43,6 +50,8 @@ export function unsupportedHintKey(code: UpdateStatus["code"]): "updater.unsuppo
       return "updater.unsupported.devRun";
     case "noSource":
       return "updater.unsupported.noSource";
+    case "releasePackage":
+      return "updater.unsupported.releasePackage";
     case "noGit":
       return "updater.unsupported.noGit";
     case "remoteUnreachable":

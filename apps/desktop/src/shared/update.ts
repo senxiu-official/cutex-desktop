@@ -22,6 +22,9 @@ export interface ReleaseInfo {
    *  (`~/Applications/Cutex.app`, shared/releases.ts syncMacLauncher) finds its install through it.
    *  null in `--no-source` packages and in releases packaged before it was recorded. */
   releaseDir: string | null;
+  /** Where new packages of this build are published (`--release-page`, https only; CI release
+   *  packages). An install without a source checkout points the owner there instead of updating. */
+  releasePage: string | null;
 }
 
 export function parseReleaseInfo(raw: unknown): ReleaseInfo | { reason: string } {
@@ -33,7 +36,22 @@ export function parseReleaseInfo(raw: unknown): ReleaseInfo | { reason: string }
   if (!commit || !/^[0-9a-f]{40}$/.test(commit)) return { reason: "release has no full commit (packaged before self-update)" };
   // `--no-source` packages write explicit nulls; a release from before self-update has no keys at all.
   if (!("sourceDir" in v) || !("nodeDir" in v)) return { reason: "release has no sourceDir / nodeDir (packaged before self-update)" };
-  return { commit, committedAt: str("committedAt"), sourceDir, nodeDir, channel: parseChannel(v.channel), codesignIdentity: parseCodesignIdentity(v.codesignIdentity), releaseDir: str("releaseDir") };
+  return { commit, committedAt: str("committedAt"), sourceDir, nodeDir, channel: parseChannel(v.channel), codesignIdentity: parseCodesignIdentity(v.codesignIdentity), releaseDir: str("releaseDir"), releasePage: parseReleasePage(v.releasePage) };
+}
+
+/** A release page URL to open in the system browser: https only, no credentials, ≤ 2048 chars; else null. */
+export function parseReleasePage(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const v = value.trim();
+  if (!v || v.length > 2048 || /[\s\x00-\x1f\x7f]/.test(v)) return null;
+  let url: URL;
+  try {
+    url = new URL(v);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || !url.hostname || url.username || url.password) return null;
+  return url.href;
 }
 
 /** A codesign identity name / hash (`codesign -s <identity>`); "-" or anything odd = ad hoc (null). */
@@ -239,9 +257,12 @@ export function checkoutPlan(
  * devRun — electron + app path; noReleaseInfo — packaged before self-update; notPortable — not under
  * <base>/releases/<release>; noSource — no git source checkout on this machine (a package copied from
  * another machine); noGit — git is not installed; remoteUnreachable — the checkout's update remote
- * cannot be reached (retryable: a later check may succeed).
+ * cannot be reached (retryable: a later check may succeed); releasePackage — installed from a release
+ * package (it records a `releasePage`) and has no source checkout or is not in the portable layout
+ * (e.g. macOS Cutex.app dragged to /Applications): updates are downloaded by hand from the release
+ * page (UpdateStatus.releasePage); takes the place of notPortable / noSource for such packages.
  */
-export type UpdateUnsupportedCode = "devRun" | "noReleaseInfo" | "notPortable" | "noSource" | "noGit" | "remoteUnreachable" | "channelMissing";
+export type UpdateUnsupportedCode = "devRun" | "noReleaseInfo" | "notPortable" | "noSource" | "releasePackage" | "noGit" | "remoteUnreachable" | "channelMissing";
 
 /**
  * Why a `git fetch` of the channel branch failed: git is not installed (spawn ENOENT), the remote has

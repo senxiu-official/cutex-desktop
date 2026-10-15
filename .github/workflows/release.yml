@@ -1,10 +1,18 @@
 # Creates the GitHub release for a pushed version tag. Title and notes come from the tag's
 # CHANGELOG.md section ("## <version> ..."), else from the release commit message.
+# workflow_dispatch: (re)create or update the release of an existing tag by hand (a tag push does not
+# always start a workflow, e.g. when the tag arrives in the same push as the workflow file).
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to create or update the release for, e.g. v0.1.0"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -14,12 +22,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
       - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
+          case "$TAG" in v*) ;; *) echo "::error::not a release tag: $TAG"; exit 1 ;; esac
+          git rev-parse --verify -q "refs/tags/$TAG" > /dev/null || git fetch --no-tags --depth=1 origin "+refs/tags/$TAG:refs/tags/$TAG"
           version="${TAG#v}"
           title="$version"
           notes=""

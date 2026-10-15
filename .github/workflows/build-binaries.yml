@@ -1,0 +1,106 @@
+# cutex-desktop: pack the portable desktop (release packages: Linux x64 tar.gz, Windows x64 zip,
+# macOS arm64 / x64 zip with an ad-hoc signed Cutex.app) and keep them as workflow artifacts. Nothing is
+# published from here and no signing key is in CI: the owner downloads the artifacts (`gh run download`),
+# signs them offline with minisign and uploads them to the GitHub Release.
+#
+# Version: the `version` input, else the tag name without its leading `v` (v0.2.0 -> 0.2.0).
+name: Build binaries
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version in the package names, e.g. 0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-binaries-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: desktop ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-22.04
+          - platform: windows-x64
+            runner: windows-2022
+          - platform: macos-arm64
+            runner: macos-14
+          # x64 Electron runtime packed on an arm64 runner (the app itself is JavaScript only).
+          - platform: macos-x64
+            runner: macos-14
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24
+      - name: Version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          v="$INPUT_VERSION"
+          if [ -z "$v" ] && [ "$REF_TYPE" = tag ]; then v="${REF_NAME#v}"; fi
+          [[ "$v" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || { echo "::error::no valid version (got '$v')"; exit 1; }
+          echo "PACKAGE_VERSION=$v" >> "$GITHUB_ENV"
+      - name: Build and pack
+        run: bash .github/ci/package-desktop.sh "${{ matrix.platform }}" "$PACKAGE_VERSION" "$RUNNER_TEMP/out"
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: error
+          retention-days: 30
+
+  sums:
+    name: SHA256SUMS
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          pattern: desktop-*
+      - name: Check and combine the per-platform sums
+        run: |
+          set -euo pipefail
+          mkdir out
+          for d in artifacts/desktop-*; do
+            (cd "$d" && sha256sum --check SHA256SUMS-*)
+            cat "$d"/SHA256SUMS-* >> out/SHA256SUMS
+          done
+          sort -k2 -o out/SHA256SUMS out/SHA256SUMS
+          cat out/SHA256SUMS
+          {
+            echo '### desktop packages'
+            echo '```'
+            cat out/SHA256SUMS
+            echo '```'
+            echo 'Unsigned: the owner signs these offline (minisign) before they are attached to a release.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: SHA256SUMS
+          path: out/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
