@@ -4870,7 +4870,7 @@ export const frFR: Partial<Record<keyof typeof zhCN, string>> = {
   "updater.releasePage.open": "Ouvrir la page Releases",
   "updater.project": "Projet",
   "updater.projectHint": "S’il vous est utile, une étoile sur GitHub aide",
-  "updater.project.open": "Voir sur GitHub",
+  "updater.project.open": "⭐ Étoile sur GitHub",
   "updater.unsupported.noGit": "Installez git pour activer les mises à jour automatiques",
   "updater.unsupported.remoteUnreachable": "Source de mise à jour injoignable pour le moment ; nouvel essai plus tard, ou cliquez sur Réessayer",
   "updater.unsupported.other": "Cette installation n’est pas dans la structure <dossier>/releases/<version> ou a été empaquetée sans informations de version",

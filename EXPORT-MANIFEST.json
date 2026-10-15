@@ -1864,8 +1864,8 @@
     },
     {
       "path": "apps/desktop/src/renderer/src/i18n/de-DE.ts",
-      "sha256": "e57ee6d3e2cc48dc82ca90687a578fbba1037e8379f407074fc9d360022ce84a",
-      "size": 376656
+      "sha256": "bc82ac51f4431452f23ee1c51676b189a2983c02041716225d715d69cf6acfeb",
+      "size": 376658
     },
     {
       "path": "apps/desktop/src/renderer/src/i18n/en-AU.ts",
@@ -1879,13 +1879,13 @@
     },
     {
       "path": "apps/desktop/src/renderer/src/i18n/es-ES.ts",
-      "sha256": "d8943745a1cf68886f66cf836a1f574c2a38c78d3c10d1f5f7cc119335422ef2",
-      "size": 367612
+      "sha256": "a8defec98e94b5459518e785dc8c3c502d7299fb8ce0210f3e4b031df4525b32",
+      "size": 367621
     },
     {
       "path": "apps/desktop/src/renderer/src/i18n/fr-FR.ts",
-      "sha256": "f94bdb3867534ad12ac7cb753a02177ffa38f7548a164db8f1acbee0bff11417",
-      "size": 377934
+      "sha256": "89fa214764557bdaddc273099431416f6452caee67aebea51a62371cd2a76058",
+      "size": 377941
     },
     {
       "path": "apps/desktop/src/renderer/src/i18n/index.tsx",
@@ -1894,28 +1894,28 @@
     },
     {
       "path": "apps/desktop/src/renderer/src/i18n/it-IT.ts",
-      "sha256": "3f3804b03110322a2c33a15afd784f953cfe327a38d9e86d66cf5b7c973ae7e7",
-      "size": 364363
+      "sha256": "410c1528c5feee11623a91698c3424a7b9834babe42d15f50f761f88c1373e6b",
+      "size": 364369
     },
     {
       "path": "apps/desktop/src/renderer/src/i18n/ja-JP.ts",
-      "sha256": "0f070ce8d2cfbef039f72628dd554f9ca2cd76914ebae023403bea6448df0ba9",
-      "size": 413524
+      "sha256": "22d82dd9eb9dbeac7b5888927e37e6cbb6bafca22135d3c12285c05fa5a7c093",
+      "size": 413527
     },
     {
       "path": "apps/desktop/src/renderer/src/i18n/ko-KR.ts",
-      "sha256": "45a6a835c0b3dd63dfd6f51da5b7e0458a3bcd2c01a6680333648204ea9ae73f",
-      "size": 377637
+      "sha256": "750205eb5189bf33b4e637e524f256e30711a1187aee27dc691f5879301833a5",
+      "size": 377639
     },
     {
       "path": "apps/desktop/src/renderer/src/i18n/pt-BR.ts",
-      "sha256": "98b905b53997c5423b808c58764cae6f736590a7f399ef1fed405291c72e9438",
-      "size": 358828
+      "sha256": "02131bdf52994b824536745bb098276398429cb0f4b80d6abe1299c49cefdd37",
+      "size": 358836
     },
     {
       "path": "apps/desktop/src/renderer/src/i18n/ru-RU.ts",
-      "sha256": "d7750045189fe430563695abeed3a3049569234893f03bae300d79fa57ae4697",
-      "size": 491291
+      "sha256": "25a2a6191988efbb34273704e9fb67a08f127c03a9d6bd1c2a341816e5dbcbfb",
+      "size": 491293
     },
     {
       "path": "apps/desktop/src/renderer/src/i18n/zh-CN.ts",
@@ -1924,8 +1924,8 @@
     },
     {
       "path": "apps/desktop/src/renderer/src/i18n/zh-Hant-CN.ts",
-      "sha256": "cf4e9a7d83ce5831e41cbb52523113dad4d3d71e9198e8111ca5c35f3db20d24",
-      "size": 348867
+      "sha256": "c83779c38183ceae20271688fd7a889cb7df7af61ab27aefca631a2188763a77",
+      "size": 348870
     },
     {
       "path": "apps/desktop/src/renderer/src/lib/aboutDragon.ts",
@@ -3519,8 +3519,8 @@
     },
     {
       "path": "apps/desktop/src/renderer/src/lib/update.ts",
-      "sha256": "290d922224b80c6d442f756422975393cbfdc7540f26d338f5365fa22cca8420",
-      "size": 3026
+      "sha256": "ce5d9546bc84026ec98a0693b3c188219f4255bc0c62d36c657365e07916fad9",
+      "size": 3078
     },
     {
       "path": "apps/desktop/src/renderer/src/lib/usage.ts",
@@ -5249,8 +5249,8 @@
     },
     {
       "path": "apps/desktop/src/renderer/src/modules/updater/i18n.ts",
-      "sha256": "31bbb608b99ab6ec2d8b971e2e8c90d0fba6a2daf0cf5e7ce7023b2952891084",
-      "size": 7265
+      "sha256": "d34c75182073bfb4bc9fc62f742304ec5aa2cfca4425be325f0868905caf4da5",
+      "size": 7272
     },
     {
       "path": "apps/desktop/src/renderer/src/modules/updater/index.ts",

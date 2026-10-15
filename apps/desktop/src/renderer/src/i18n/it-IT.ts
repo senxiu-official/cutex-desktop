@@ -4871,7 +4871,7 @@ export const itIT: Partial<Record<keyof typeof zhCN, string>> = {
   "updater.releasePage.open": "Apri la pagina Releases",
   "updater.project": "Progetto",
   "updater.projectHint": "Se ti è utile, una stella su GitHub aiuta",
-  "updater.project.open": "Vedi su GitHub",
+  "updater.project.open": "⭐ Stella su GitHub",
   "updater.unsupported.noGit": "Installa git per abilitare gli aggiornamenti automatici",
   "updater.unsupported.remoteUnreachable": "Fonte di aggiornamento non raggiungibile al momento; riproverà più tardi, oppure fai clic su Riprova",
   "updater.unsupported.other": "Questa installazione non segue la struttura <cartella>/releases/<versione> o è stata impacchettata senza informazioni di versione",

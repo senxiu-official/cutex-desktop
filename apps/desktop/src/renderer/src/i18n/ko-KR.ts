@@ -4882,7 +4882,7 @@ export const koKR: Partial<Record<keyof typeof zhCN, string>> = {
   "updater.releasePage.open": "Releases 페이지 열기",
   "updater.project": "프로젝트",
   "updater.projectHint": "도움이 됐다면 GitHub에서 Star를 눌러 주세요",
-  "updater.project.open": "GitHub에서 보기",
+  "updater.project.open": "⭐ GitHub에서 Star",
   "updater.unsupported.noGit": "자동 업데이트를 쓰려면 먼저 git을 설치하세요",
   "updater.unsupported.remoteUnreachable": "지금은 업데이트 원본에 연결할 수 없어요. 잠시 후 다시 시도하거나 「재시도」를 누르세요",
   "updater.unsupported.channelMissing": "업데이트 원본에 이 채널의 브랜치가 아직 없어요. 게시되면 여기에 나타나요. 개발판으로 돌아갈 수도 있어요",

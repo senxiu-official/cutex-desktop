@@ -4872,7 +4872,7 @@ export const ruRU: Partial<Record<keyof typeof zhCN, string>> = {
   "updater.releasePage.open": "Открыть страницу Releases",
   "updater.project": "Проект",
   "updater.projectHint": "Если он вам полезен, звезда на GitHub поможет",
-  "updater.project.open": "Открыть на GitHub",
+  "updater.project.open": "⭐ Звезда на GitHub",
   "updater.unsupported.noGit": "Установите git, чтобы включить автообновление",
   "updater.unsupported.remoteUnreachable": "Источник обновлений сейчас недоступен; попытка повторится позже, или нажмите «Повторить»",
   "updater.unsupported.other": "Эта установка не в структуре <папка>/releases/<версия> или упакована без сведений о версии",

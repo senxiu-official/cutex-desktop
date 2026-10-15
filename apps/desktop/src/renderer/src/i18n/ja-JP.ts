@@ -4869,7 +4869,7 @@ export const jaJP: Partial<Record<keyof typeof zhCN, string>> = {
   "updater.releasePage.open": "Releases ページを開く",
   "updater.project": "プロジェクト",
   "updater.projectHint": "役に立ったら、GitHub でスターをいただけると励みになります",
-  "updater.project.open": "GitHub で見る",
+  "updater.project.open": "⭐ GitHub で Star",
   "updater.unsupported.noGit": "自動更新には git のインストールが必要です",
   "updater.unsupported.remoteUnreachable": "今は更新元に接続できません。しばらくして再試行するか、「再試行」をクリックしてください",
   "updater.unsupported.other": "このインストールは <フォルダー>/releases/<バージョン> 構成ではないか、バージョン情報なしでパッケージ化されています",

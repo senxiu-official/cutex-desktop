@@ -24,6 +24,7 @@ export function useUpdateStatus(): UpdateStatus | null {
 /** The project's public repositories (Settings → 更新与诊断 → 项目); opened in the system browser. */
 export const PROJECT_REPO_URL = "https://github.com/senxiu-official/cutex-desktop";
 export const RELATED_REPO_URLS = [
+  { name: "cutex-desktop", url: PROJECT_REPO_URL },
   { name: "cutex", url: "https://github.com/senxiu-official/cutex" },
   { name: "cute-codex", url: "https://github.com/senxiu-official/cute-codex" },
 ] as const;

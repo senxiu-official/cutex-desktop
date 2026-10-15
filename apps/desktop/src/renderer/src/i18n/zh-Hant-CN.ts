@@ -5094,7 +5094,7 @@ export const zhHantCN: Record<keyof typeof zhCN, string> = {
   "updater.releasePage.open": "打開 Releases 頁面",
   "updater.project": "專案",
   "updater.projectHint": "覺得有用的話，歡迎在 GitHub 上點個 Star",
-  "updater.project.open": "在 GitHub 上查看",
+  "updater.project.open": "⭐ 去 GitHub 點 Star",
   "updater.unsupported.noGit": "需要先安裝 git 才能自動更新",
   "updater.unsupported.remoteUnreachable": "暫時連不上更新來源；會隔一段時間再試，也可以點「重試」",
   "updater.unsupported.other": "這份安裝不在 <目錄>/releases/<版本> 結構下，或打包時沒有記錄版本資訊",

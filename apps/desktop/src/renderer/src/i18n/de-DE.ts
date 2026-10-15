@@ -5030,7 +5030,7 @@ export const deDE: Partial<Record<keyof typeof zhCN, string>> = {
   "updater.releasePage.open": "Releases-Seite öffnen",
   "updater.project": "Projekt",
   "updater.projectHint": "Wenn es dir nützt, hilft ein Stern auf GitHub",
-  "updater.project.open": "Auf GitHub ansehen",
+  "updater.project.open": "⭐ Stern auf GitHub",
   "updater.unsupported.noGit": "Installiere git, um automatische Updates zu aktivieren",
   "updater.unsupported.remoteUnreachable": "Die Update-Quelle ist gerade nicht erreichbar; später wird es erneut versucht, oder klicke auf „Erneut versuchen“",
   "updater.unsupported.other": "Diese Installation liegt nicht im Layout <Ordner>/releases/<Version> oder wurde ohne Versionsinfo gepackt",

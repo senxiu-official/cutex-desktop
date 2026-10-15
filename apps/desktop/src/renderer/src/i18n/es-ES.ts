@@ -4874,7 +4874,7 @@ export const esES: Partial<Record<keyof typeof zhCN, string>> = {
   "updater.releasePage.open": "Abrir la página Releases",
   "updater.project": "Proyecto",
   "updater.projectHint": "Si te resulta útil, una estrella en GitHub ayuda",
-  "updater.project.open": "Ver en GitHub",
+  "updater.project.open": "⭐ Estrella en GitHub",
   "updater.unsupported.noGit": "Instala git para activar las actualizaciones automáticas",
   "updater.unsupported.remoteUnreachable": "No se puede contactar la fuente de actualizaciones; se volverá a intentar más tarde, o pulsa Reintentar",
   "updater.unsupported.other": "Esta instalación no sigue la estructura <carpeta>/releases/<versión> o se empaquetó sin información de versión",

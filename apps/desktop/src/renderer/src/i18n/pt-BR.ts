@@ -4871,7 +4871,7 @@ export const ptBR: Partial<Record<keyof typeof zhCN, string>> = {
   "updater.releasePage.open": "Abrir a página Releases",
   "updater.project": "Projeto",
   "updater.projectHint": "Se for útil para você, uma estrela no GitHub ajuda",
-  "updater.project.open": "Ver no GitHub",
+  "updater.project.open": "⭐ Estrela no GitHub",
   "updater.unsupported.noGit": "Instale o git para ativar as atualizações automáticas",
   "updater.unsupported.remoteUnreachable": "Não foi possível acessar a fonte de atualização agora; será tentado novamente mais tarde, ou clique em Tentar novamente",
   "updater.unsupported.other": "Esta instalação não está na estrutura <pasta>/releases/<versão> ou foi empacotada sem informações de versão",
