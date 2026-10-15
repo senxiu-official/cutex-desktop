@@ -1,0 +1,63 @@
+export const zhCN = {
+  "alarms.title": "闹钟",
+  "alarms.description": "{{agent}}设的提醒：时间、谁给谁、内容，可取消；显示在状态行和胶囊里",
+  "alarms.statusTitle": "闹钟",
+  "alarms.pending": "{n} 个待响",
+  "alarms.next": "下次 {t}",
+  "alarms.chip": "{n} · {t}",
+  "alarms.recentOnly": "{n} 个已响",
+  "alarms.recent": "已响 / 已取消 · {n}",
+  "alarms.rel.now.future": "马上",
+  "alarms.rel.now.past": "刚刚",
+  "alarms.rel.min.future": "{n} 分钟后",
+  "alarms.rel.min.past": "{n} 分钟前",
+  "alarms.rel.hour.future": "{n} 小时后",
+  "alarms.rel.hour.past": "{n} 小时前",
+  "alarms.rel.day.future": "{n} 天后",
+  "alarms.rel.day.past": "{n} 天前",
+  "alarms.self": "给自己",
+  "alarms.owner": "{{owner}}",
+  "alarms.state.queued": "已发出",
+  "alarms.state.cancelled": "已取消",
+  "alarms.cancel": "取消",
+  "alarms.cancelConfirm": "再点一次取消这个闹钟",
+  "alarms.alreadySent": "闹钟已经发出，不能再取消",
+  "alarms.cancelFailed": "取消闹钟失败：{error}",
+  "alarms.retrying": "发送失败，30 秒后重试：{error}",
+  "alarms.unavailable": "读取闹钟失败",
+} as const;
+
+// Adds these keys to MessageKey (modules/i18nCatalog.ts collects the dictionary itself).
+declare module "../i18nCatalog" {
+  interface ModuleMessages extends Messages {}
+}
+type Messages = typeof zhCN;
+
+export const en: Record<keyof typeof zhCN, string> = {
+  "alarms.title": "Alarms",
+  "alarms.description": "Reminders {{agents}} set: time, who to whom, text, with cancel; shown in the status line and capsule",
+  "alarms.statusTitle": "Alarms",
+  "alarms.pending": "{n} pending",
+  "alarms.next": "next {t}",
+  "alarms.chip": "{n} · {t}",
+  "alarms.recentOnly": "{n} went off",
+  "alarms.recent": "Sent / cancelled · {n}",
+  "alarms.rel.now.future": "any moment",
+  "alarms.rel.now.past": "just now",
+  "alarms.rel.min.future": "in {n} min",
+  "alarms.rel.min.past": "{n} min ago",
+  "alarms.rel.hour.future": "in {n} h",
+  "alarms.rel.hour.past": "{n} h ago",
+  "alarms.rel.day.future": "in {n} d",
+  "alarms.rel.day.past": "{n} d ago",
+  "alarms.self": "to itself",
+  "alarms.owner": "{{Owner}}",
+  "alarms.state.queued": "sent",
+  "alarms.state.cancelled": "cancelled",
+  "alarms.cancel": "Cancel",
+  "alarms.cancelConfirm": "Click again to cancel this alarm",
+  "alarms.alreadySent": "The alarm was already sent and can no longer be cancelled",
+  "alarms.cancelFailed": "Couldn't cancel the alarm: {error}",
+  "alarms.retrying": "Sending failed, retrying in 30 s: {error}",
+  "alarms.unavailable": "Couldn't read alarms",
+};

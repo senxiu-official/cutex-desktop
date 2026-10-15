@@ -1,0 +1,68 @@
+Cutex desktop
+Copyright 2026 The Cutex Authors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE; the same text is in
+LICENSES/Apache-2.0.txt). You may not use this project except in compliance with the License.
+Unless required by applicable law or agreed to in writing, software distributed under the License
+is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+implied.
+
+This product includes material from the following projects. License texts are in the LICENSES/
+directory; the npm packages bundled into the app are listed with their license texts in
+THIRD_PARTY_NOTICES.md (generated when the app is packaged). Electron and Chromium are covered by
+LICENSE and LICENSES.chromium.html next to the executable.
+
+-------------------------------------------------------------------------------------------------
+ZCode — https://github.com/zai-org/ZCode
+Copyright 2026 Z.AI Co., Ltd
+Licensed under the Apache License, Version 2.0 (LICENSES/Apache-2.0.txt).
+
+Code adapted from ZCode (reference: ZCode main aac47556, 2026-10-10), modified for Cutex desktop.
+Each file below carries a notice naming the ZCode source and stating that it was modified:
+  - apps/desktop/src/renderer/src/lib/statusCapsule.ts
+      focus window / fold logic adapted from packages/ui/src/v4/ConversationStatusPanel.tsx
+  - apps/desktop/src/renderer/src/modules/status-capsule/StatusCapsule.tsx
+      status capsule panel structure adapted from packages/ui/src/v4/ConversationStatusPanel.tsx
+Other parts of the user interface follow ZCode's interaction patterns and design-token structure
+without copying its code. ZCode's own NOTICE.md contains no further attribution notices beyond its
+copyright line and pointers to its own third-party notices. ZCode, Z.ai and GLM names and service
+endpoints are not used as branding of this product; Z.ai / Zhipu appear only as model provider
+choices.
+
+-------------------------------------------------------------------------------------------------
+OpenAI Codex — https://github.com/openai/codex
+Copyright 2025 OpenAI
+Licensed under the Apache License, Version 2.0 (LICENSES/Apache-2.0.txt).
+
+  - apps/desktop/src/renderer/src/lib/initPrompt.ts contains the Codex `/init` prompt verbatim
+    (codex-rs/tui/assets/prompt_for_init_command.md).
+  - packages/protocol/src/codex/** is generated from the Codex app-server protocol
+    (`codex app-server generate-ts`) of cute-codex, a fork of OpenAI Codex.
+Codex's NOTICE also credits Ratatui (MIT; Copyright (c) 2016-2022 Florian Dehau, Copyright (c)
+2023-2025 The Ratatui Developers) for code in its terminal UI, which this product does not include.
+
+-------------------------------------------------------------------------------------------------
+Lobe Icons — https://github.com/lobehub/lobe-icons
+Copyright (c) 2023 LobeHub
+Licensed under the MIT License (LICENSES/MIT-lobe-icons.txt).
+
+  - apps/desktop/src/renderer/src/assets/providers/*.svg (provider logos from
+    @lobehub/icons-static-svg 1.95.1; codex-color.svg modified). Brand logos remain trademarks of
+    their owners and are used only to identify the provider.
+
+-------------------------------------------------------------------------------------------------
+Fluent Emoji — https://github.com/microsoft/fluentui-emoji
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT License (LICENSES/MIT-fluentui-emoji.txt).
+
+  - apps/desktop/src/renderer/src/assets/emoji/*.svg: 80 emoji of the "Flat" style (repository
+    commit 1ffb34c7, 2026-10-14), optimised with svgo and renamed by code point; used as default
+    and pickable agent avatars (apps/desktop/src/renderer/src/lib/agentEmoji.ts).
+
+-------------------------------------------------------------------------------------------------
+Unicode Character Database — https://www.unicode.org/
+Copyright (c) 1991-2026 Unicode, Inc.
+Licensed under the Unicode License v3 (LICENSES/Unicode-3.0.txt).
+
+  - apps/desktop/src/renderer/src/lib/fontRanges.ts holds tables generated from Scripts.txt and
+    ScriptExtensions.txt of Unicode 17.0.0 (scripts/generate-font-ranges.py).

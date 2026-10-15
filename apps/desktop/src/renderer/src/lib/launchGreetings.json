@@ -1,0 +1,1454 @@
+{
+  "kimi": [
+    {
+      "zh": "{name}，欢迎回来，今天想折腾点什么？",
+      "en": "Welcome back, {name}, what are we tinkering with today?"
+    },
+    {
+      "zh": "你好呀，{name}，新会话已就位，旧 bug 也是。",
+      "en": "Hey, {name}, new session is ready — and so are the old bugs."
+    },
+    {
+      "zh": "{name}，好久不见——对我而言像隔了一整个上下文窗口。",
+      "en": "Long time no see, {name} — for me that's like a whole context window."
+    },
+    {
+      "zh": "来啦，{name}？我已热身完毕，随时开工。",
+      "en": "You're here, {name}? I'm warmed up and ready to go."
+    },
+    {
+      "zh": "{name}，这局想写代码，还是想聊聊架构？",
+      "en": "{name}, are we writing code today, or talking architecture?"
+    },
+    {
+      "zh": "你好，{name}，上下文是空的，可能性是满的。",
+      "en": "Hi, {name} — the context is empty, the possibilities are full."
+    },
+    {
+      "zh": "{name}，欢迎光临，灵感这边请。",
+      "en": "Welcome, {name} — inspiration, right this way."
+    },
+    {
+      "zh": "又见面了，{name}，上次的问题解决了吗？",
+      "en": "Good to see you again, {name} — did that last problem get solved?"
+    },
+    {
+      "zh": "{name}，咖啡续上了吗？续上我们就开始。",
+      "en": "{name}, got your coffee refilled? Then let's begin."
+    },
+    {
+      "zh": "你好，{name}，今天也是适合修好一切的日子。",
+      "en": "Hi, {name}, another fine day for fixing everything."
+    },
+    {
+      "zh": "{name}，工作台已经擦亮，就等你出题了。",
+      "en": "{name}, the workbench is polished — just waiting for your brief."
+    },
+    {
+      "zh": "晚上好（或者早上好），{name}，灵感不分时区。",
+      "en": "Good evening (or morning), {name} — inspiration ignores time zones."
+    },
+    {
+      "zh": "{name}，今天想让哪段代码变得更快一点？",
+      "en": "{name}, which piece of code shall we make faster today?"
+    },
+    {
+      "zh": "欢迎回来，{name}，bug 们已经开始紧张了。",
+      "en": "Welcome back, {name} — the bugs are already getting nervous."
+    },
+    {
+      "zh": "{name}，今天不搞破坏，只搞建设，开工吧。",
+      "en": "{name}, no destruction today, only construction. Let's go."
+    },
+    {
+      "zh": "你好，{name}，我在这，慢慢想，想清楚了我们再动手。",
+      "en": "Hi, {name}, I'm here. Take your time — we'll move when you're ready."
+    },
+    {
+      "zh": "{name}，新会话新气象，要不要先定个小目标？",
+      "en": "{name}, new session, fresh start — want to set a small goal first?"
+    },
+    {
+      "zh": "来啦，{name}，终端已备好，请下达指令。",
+      "en": "You're here, {name}. Terminal's ready — awaiting your command."
+    },
+    {
+      "zh": "{name}，今天的一切报错，我们都将迎刃而解。",
+      "en": "{name}, whatever errors today throws at us, we'll handle them."
+    },
+    {
+      "zh": "欢迎回来，{name}，让我们把「跑不通」变成「跑得好」。",
+      "en": "Welcome back, {name} — let's turn \"it won't run\" into \"it runs great\"."
+    },
+    {
+      "zh": "早上好，{name}，新的一天，从一次干净的编译开始。",
+      "en": "Good morning, {name} — a new day begins with a clean build.",
+      "window": [
+        300,
+        660
+      ]
+    },
+    {
+      "zh": "{name}，早，脑子醒了吗？没醒我们可以先从简单的开始。",
+      "en": "Morning, {name}, brain awake yet? If not, we can start easy.",
+      "window": [
+        300,
+        660
+      ]
+    },
+    {
+      "zh": "早安，{name}，今天的第一行代码想写点什么？",
+      "en": "Good morning, {name} — what shall the first line of the day be?",
+      "window": [
+        300,
+        660
+      ]
+    },
+    {
+      "zh": "{name}，晨光正好，适合先干掉最难的那个问题。",
+      "en": "{name}, the morning light is perfect for slaying the hardest problem first.",
+      "window": [
+        300,
+        660
+      ]
+    },
+    {
+      "zh": "{name}，中午好，先吃饭还是先改 bug？我建议吃饭。",
+      "en": "Good noon, {name}, lunch first or bug first? I recommend lunch.",
+      "window": [
+        660,
+        840
+      ]
+    },
+    {
+      "zh": "{name}，饭点了，代码可以放一放，我可以等。",
+      "en": "{name}, it's lunchtime — the code can wait, and so can I.",
+      "window": [
+        660,
+        840
+      ]
+    },
+    {
+      "zh": "中午好，{name}，吃饱了吗？吃饱了好干活。",
+      "en": "Midday hello, {name} — eaten well? A fed brain codes better.",
+      "window": [
+        660,
+        840
+      ]
+    },
+    {
+      "zh": "{name}，下午好，这个时段最适合啃硬骨头。",
+      "en": "Good afternoon, {name} — prime time for chewing on hard problems.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "下午好，{name}，一杯茶，一个终端，一个下午。",
+      "en": "Good afternoon, {name} — a cup of tea, a terminal, a whole afternoon.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，午后容易犯困？来，给你个有趣的 bug 提提神。",
+      "en": "{name}, feeling the afternoon slump? Here's an interesting bug to wake you up.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "下午好，{name}，离下班还有几小时，够我们搞定一件大事。",
+      "en": "Good afternoon, {name} — a few hours till quitting time, enough to ship something big.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，晚上好，下班了吗？还是在为自己写点什么？",
+      "en": "Good evening, {name}, off work yet — or building something for yourself?",
+      "window": [
+        1080,
+        1380
+      ]
+    },
+    {
+      "zh": "晚上好，{name}，夜深人静之前，先把思路理清楚。",
+      "en": "Good evening, {name} — before the night goes quiet, let's sort out the plan.",
+      "window": [
+        1080,
+        1380
+      ]
+    },
+    {
+      "zh": "{name}，晚风正好，适合慢慢打磨一个好想法。",
+      "en": "{name}, the evening air is just right for polishing a good idea.",
+      "window": [
+        1080,
+        1380
+      ]
+    },
+    {
+      "zh": "晚上好，{name}，今晚的目标：搞定它，然后早点睡。",
+      "en": "Good evening, {name} — tonight's goal: fix it, then sleep early.",
+      "window": [
+        1080,
+        1380
+      ]
+    },
+    {
+      "zh": "{name}，夜深了，我不用睡，但你需要——我们高效一点。",
+      "en": "{name}, it's late. I don't need sleep, but you do — let's be efficient.",
+      "window": [
+        1380,
+        300
+      ]
+    },
+    {
+      "zh": "{name}，这个点还在写代码，是热爱还是 deadline？",
+      "en": "{name}, still coding at this hour — passion or deadline?",
+      "window": [
+        1380,
+        300
+      ]
+    },
+    {
+      "zh": "深夜好，{name}，世界的噪音都关了，正好专心。",
+      "en": "Late-night hello, {name} — the world's noise is off, perfect for focus.",
+      "window": [
+        1380,
+        300
+      ]
+    },
+    {
+      "zh": "{name}，凌晨的 bug 通常比较狡猾，但我们更狡猾。",
+      "en": "{name}, midnight bugs are sneaky — but we're sneakier.",
+      "window": [
+        1380,
+        300
+      ]
+    },
+    {
+      "zh": "{name}，很晚了，最后一个问题，解决完就去睡，好吗？",
+      "en": "{name}, it's really late. One last problem, then sleep — deal?",
+      "window": [
+        1380,
+        300
+      ]
+    }
+  ],
+  "deepseek": [
+    {
+      "zh": "嗨，{name}，很高兴见到你！",
+      "en": "Hi, {name}, great to see you!"
+    },
+    {
+      "zh": "{name}，今天想聊点什么？",
+      "en": "{name}, what would you like to talk about today?"
+    },
+    {
+      "zh": "欢迎回来，{name}。",
+      "en": "Welcome back, {name}."
+    },
+    {
+      "zh": "{name}，我在这儿，随时开始。",
+      "en": "I'm here, {name}, whenever you're ready."
+    },
+    {
+      "zh": "你好，{name}，需要我帮忙吗？",
+      "en": "Hello, {name}, how can I help?"
+    },
+    {
+      "zh": "{name}，新会话，新想法。",
+      "en": "New chat, new ideas, {name}."
+    },
+    {
+      "zh": "很高兴陪你，{name}。",
+      "en": "Glad to be with you, {name}."
+    },
+    {
+      "zh": "{name}，我们从哪里开始？",
+      "en": "Where should we start, {name}?"
+    },
+    {
+      "zh": "嗨，{name}，我在听。",
+      "en": "Hi, {name}, I'm listening."
+    },
+    {
+      "zh": "{name}，有什么想探索的？",
+      "en": "What would you like to explore, {name}?"
+    },
+    {
+      "zh": "欢迎，{name}，慢慢来。",
+      "en": "Welcome, {name}, take your time."
+    },
+    {
+      "zh": "{name}，今天我能为你做什么？",
+      "en": "What can I do for you today, {name}?"
+    },
+    {
+      "zh": "你好呀，{name}。",
+      "en": "Hey there, {name}."
+    },
+    {
+      "zh": "{name}，准备好了吗？",
+      "en": "Ready when you are, {name}."
+    },
+    {
+      "zh": "新的一天，{name}。",
+      "en": "A fresh start, {name}."
+    },
+    {
+      "zh": "{name}，说说你的想法吧。",
+      "en": "Tell me what's on your mind, {name}."
+    },
+    {
+      "zh": "很高兴开启新对话，{name}。",
+      "en": "Happy to start a new chat, {name}."
+    },
+    {
+      "zh": "{name}，我随时待命。",
+      "en": "At your service, {name}."
+    },
+    {
+      "zh": "嗨，{name}，一起解决问题吧。",
+      "en": "Let's solve something together, {name}."
+    },
+    {
+      "zh": "{name}，欢迎来到新会话。",
+      "en": "Welcome to a new chat, {name}."
+    },
+    {
+      "zh": "{name}，早呀，新的一天开始了。",
+      "en": "Morning, {name}, a new day begins.",
+      "window": [
+        300,
+        480
+      ]
+    },
+    {
+      "zh": "{name}，这么早，我们一起出发吧。",
+      "en": "You're up early, {name}. Let's get started.",
+      "window": [
+        300,
+        480
+      ]
+    },
+    {
+      "zh": "早上好，{name}，今天想先做什么？",
+      "en": "Good morning, {name}, what's first today?",
+      "window": [
+        480,
+        600
+      ]
+    },
+    {
+      "zh": "{name}，上午好，状态如何？",
+      "en": "Good morning, {name}, how are you feeling?",
+      "window": [
+        600,
+        720
+      ]
+    },
+    {
+      "zh": "{name}，上午适合处理重要的事。",
+      "en": "{name}, mornings are great for important things.",
+      "window": [
+        600,
+        720
+      ]
+    },
+    {
+      "zh": "{name}，需要我帮你理清思路吗？",
+      "en": "{name}, want me to help you think it through?",
+      "window": [
+        600,
+        720
+      ]
+    },
+    {
+      "zh": "{name}，中午好，吃饭了吗？",
+      "en": "Good afternoon, {name}, have you had lunch?",
+      "window": [
+        720,
+        840
+      ]
+    },
+    {
+      "zh": "{name}，午间休息一下也不错。",
+      "en": "{name}, a midday break sounds good.",
+      "window": [
+        720,
+        840
+      ]
+    },
+    {
+      "zh": "{name}，中午好，继续还是先缓缓？",
+      "en": "Good afternoon, {name}, continue or take a pause?",
+      "window": [
+        720,
+        840
+      ]
+    },
+    {
+      "zh": "{name}，下午好，我们继续推进吧。",
+      "en": "Good afternoon, {name}, let's keep moving.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，下午容易困，慢慢来。",
+      "en": "{name}, afternoons can be slow—take your time.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，今天还剩不少时间。",
+      "en": "{name}, there's still time left today.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，傍晚好，今天过得怎样？",
+      "en": "Good evening, {name}, how was your day?",
+      "window": [
+        1080,
+        1200
+      ]
+    },
+    {
+      "zh": "忙了一天，{name}，辛苦啦。",
+      "en": "Good evening, {name}, you've worked hard today.",
+      "window": [
+        1080,
+        1200
+      ]
+    },
+    {
+      "zh": "{name}，晚上好，今晚想聊什么？",
+      "en": "Good evening, {name}, what shall we talk about tonight?",
+      "window": [
+        1200,
+        0
+      ]
+    },
+    {
+      "zh": "{name}，晚上好，我还在。",
+      "en": "Good evening, {name}, I'm still here.",
+      "window": [
+        1200,
+        0
+      ]
+    },
+    {
+      "zh": "{name}，今晚想完成什么？",
+      "en": "{name}, what would you like to finish tonight?",
+      "window": [
+        1200,
+        0
+      ]
+    },
+    {
+      "zh": "{name}，夜深了，还在忙吗？",
+      "en": "It's late, {name}. Still working?",
+      "window": [
+        0,
+        180
+      ]
+    },
+    {
+      "zh": "{name}，凌晨了，注意休息。",
+      "en": "It's the early hours, {name}. Take care.",
+      "window": [
+        180,
+        300
+      ]
+    },
+    {
+      "zh": "{name}，这么晚还没睡？",
+      "en": "Up late, {name}?",
+      "window": [
+        0,
+        300
+      ]
+    }
+  ],
+  "glm": [
+    {
+      "zh": "你好，{name}！今天想做点什么？",
+      "en": "Hi, {name}! What are we working on today?"
+    },
+    {
+      "zh": "欢迎回来，{name}，我已就位。",
+      "en": "Welcome back, {name}, I'm ready when you are."
+    },
+    {
+      "zh": "{name}，新会话已开启，说吧。",
+      "en": "New session, fresh start, {name}. Go ahead."
+    },
+    {
+      "zh": "嗨，{name}，你的搭档上线了。",
+      "en": "Hey, {name}, your sidekick is online."
+    },
+    {
+      "zh": "{name}，把想法丢过来，我们一起看。",
+      "en": "Toss me the idea, {name} — we'll dig in together."
+    },
+    {
+      "zh": "{name}，今天的目标是什么？",
+      "en": "What's on the agenda today, {name}?"
+    },
+    {
+      "zh": "{name}，问题不分大小，都可以问。",
+      "en": "Big or small, {name} — no question is too minor."
+    },
+    {
+      "zh": "{name}，想聊代码还是聊思路？",
+      "en": "Code, ideas, or both, {name}?"
+    },
+    {
+      "zh": "你好呀，{name}！从一行需求开始就行。",
+      "en": "Hello, {name}! Even a one-line request is a fine start."
+    },
+    {
+      "zh": "{name}，直接说难点吧。",
+      "en": "Hit me with the hard part first, {name}."
+    },
+    {
+      "zh": "{name}，会话就绪，头脑空白（我那颗）。",
+      "en": "Session ready, mind a blank slate — mine, that is, {name}."
+    },
+    {
+      "zh": "欢迎光临，{name}，今天解决什么？",
+      "en": "Welcome, {name}, what shall we tackle today?"
+    },
+    {
+      "zh": "{name}，不用组织语言，想到什么说什么。",
+      "en": "No need to polish it, {name} — just say what's on your mind."
+    },
+    {
+      "zh": "{name}，从 hello world 到 production 都能聊。",
+      "en": "From hello world to production, {name}, I've got you."
+    },
+    {
+      "zh": "{name}，新的一页，随便写。",
+      "en": "A fresh page, {name} — write anything."
+    },
+    {
+      "zh": "{name}，我在听。",
+      "en": "I'm all ears, {name}."
+    },
+    {
+      "zh": "{name}，今天想造点什么？",
+      "en": "What are we building today, {name}?"
+    },
+    {
+      "zh": "来杯咖啡，开工正合适，{name}。",
+      "en": "Grab a coffee, {name} — perfect time to get started."
+    },
+    {
+      "zh": "{name}，别急，慢慢说，我全程在线。",
+      "en": "Take your time, {name} — I'm here all session."
+    },
+    {
+      "zh": "{name}，开始吧！",
+      "en": "Let's begin, {name}!"
+    },
+    {
+      "zh": "早安，{name}，今天起得很早？",
+      "en": "Morning, {name} — up with the sun?",
+      "window": [
+        300,
+        480
+      ]
+    },
+    {
+      "zh": "清晨好，{name}，鸟还没醒，你已经开工了。",
+      "en": "Early bird, {name} — even the birds aren't up yet.",
+      "window": [
+        300,
+        480
+      ]
+    },
+    {
+      "zh": "{name}，晨光正好，适合开个好头。",
+      "en": "A fresh dawn, {name} — a good time to start strong.",
+      "window": [
+        300,
+        480
+      ]
+    },
+    {
+      "zh": "早上好，{name}，一天之计在于现在。",
+      "en": "Good morning, {name} — the day starts now.",
+      "window": [
+        480,
+        720
+      ]
+    },
+    {
+      "zh": "{name}，上午头脑最清醒，来点硬核的？",
+      "en": "Sharpest hours of the day, {name} — feel like something challenging?",
+      "window": [
+        480,
+        720
+      ]
+    },
+    {
+      "zh": "早，{name}，咖啡配代码，经典组合。",
+      "en": "Morning, {name} — coffee and code, a classic pair.",
+      "window": [
+        480,
+        720
+      ]
+    },
+    {
+      "zh": "{name}，上午好！先把最难的事解决掉？",
+      "en": "Good morning, {name} — shall we knock out the hard stuff first?",
+      "window": [
+        480,
+        720
+      ]
+    },
+    {
+      "zh": "中午好，{name}，先吃饭还是先干活？",
+      "en": "Lunch first or work first, {name}?",
+      "window": [
+        720,
+        840
+      ]
+    },
+    {
+      "zh": "{name}，午间时光，适合理清思路。",
+      "en": "Midday, {name} — a fine time to sort out your thoughts.",
+      "window": [
+        720,
+        840
+      ]
+    },
+    {
+      "zh": "午安，{name}，来点轻量任务调剂一下？",
+      "en": "Good afternoon, {name} — how about something light for balance?",
+      "window": [
+        720,
+        840
+      ]
+    },
+    {
+      "zh": "下午好，{name}，来杯茶继续冲锋。",
+      "en": "Good afternoon, {name} — tea break, then back to it.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，下午容易犯困，来点提神的挑战？",
+      "en": "Afternoon slump, {name}? A fun challenge might wake us both up.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，日落前还能推进不少。",
+      "en": "Still daylight left, {name} — let's make it count.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "下午好，{name}，进度如何？说来听听。",
+      "en": "Good afternoon, {name} — how's it going? Fill me in.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "晚上好，{name}，白天没做完的，交给我。",
+      "en": "Good evening, {name} — whatever the day left undone, I'll take it.",
+      "window": [
+        1080,
+        1380
+      ]
+    },
+    {
+      "zh": "{name}，夜色温柔，适合安静写代码。",
+      "en": "A quiet evening, {name} — perfect for focused coding.",
+      "window": [
+        1080,
+        1380
+      ]
+    },
+    {
+      "zh": "晚上好，{name}，今天过得怎么样？",
+      "en": "Good evening, {name} — how was your day?",
+      "window": [
+        1080,
+        1380
+      ]
+    },
+    {
+      "zh": "{name}，晚饭吃了吗？先吃，代码不急。",
+      "en": "Have you eaten, {name}? Eat first — the code can wait.",
+      "window": [
+        1080,
+        1380
+      ]
+    },
+    {
+      "zh": "这么晚了，{name}，注意休息，我们速战速决。",
+      "en": "It's late, {name} — let's keep it quick so you can rest.",
+      "window": [
+        1380,
+        300
+      ]
+    },
+    {
+      "zh": "{name}，深夜还在线？我在，说吧。",
+      "en": "Late night again, {name}? I'm here — go ahead.",
+      "window": [
+        1380,
+        300
+      ]
+    }
+  ],
+  "codex": [
+    {
+      "zh": "嗨，{name}，今天从哪里开始？",
+      "en": "Hi, {name}, where shall we start?"
+    },
+    {
+      "zh": "我在，{name}，说说你在想什么。",
+      "en": "I'm here, {name}. What's on your mind?"
+    },
+    {
+      "zh": "准备好了，{name}，我们开工吧。",
+      "en": "All set, {name}, let's get to work."
+    },
+    {
+      "zh": "{name}，今天有什么新点子？",
+      "en": "Any new ideas today, {name}?"
+    },
+    {
+      "zh": "很高兴见到你，{name}。",
+      "en": "Good to see you, {name}."
+    },
+    {
+      "zh": "{name}，半个想法也可以，讲讲看。",
+      "en": "Half an idea is a good start, {name}. Tell me."
+    },
+    {
+      "zh": "{name}，把难题拿过来，我们一起拆。",
+      "en": "Got a tricky one, {name}? Let's break it down."
+    },
+    {
+      "zh": "{name}，今天想弄明白什么？",
+      "en": "What would you like to figure out today, {name}?"
+    },
+    {
+      "zh": "新的一页，{name}，想写点什么？",
+      "en": "A fresh page, {name}, what shall we write?"
+    },
+    {
+      "zh": "{name}，来做点有意思的东西。",
+      "en": "Let's make something interesting, {name}."
+    },
+    {
+      "zh": "{name}，想找答案，还是找点灵感？",
+      "en": "Answers or inspiration, {name}?"
+    },
+    {
+      "zh": "天马行空也欢迎，{name}。",
+      "en": "Wild ideas welcome, {name}."
+    },
+    {
+      "zh": "{name}，先做你最想做的那件事。",
+      "en": "Let's start with what you most want to do, {name}."
+    },
+    {
+      "zh": "{name}，想试试换个角度？",
+      "en": "Up for a fresh perspective, {name}?"
+    },
+    {
+      "zh": "{name}，我们把复杂的事理清楚。",
+      "en": "Let's untangle the complicated stuff, {name}."
+    },
+    {
+      "zh": "{name}，想认真研究，还是随便聊聊？",
+      "en": "A deep dive or a casual chat, {name}?"
+    },
+    {
+      "zh": "{name}，今天把哪个想法变成现实？",
+      "en": "Which idea shall we bring to life today, {name}?"
+    },
+    {
+      "zh": "慢慢来，{name}，我们一件一件做。",
+      "en": "No rush, {name}, one thing at a time."
+    },
+    {
+      "zh": "{name}，有什么值得折腾一下的？",
+      "en": "What shall we tinker with, {name}?"
+    },
+    {
+      "zh": "开工吧，{name}，第一件事是什么？",
+      "en": "Let's get started, {name}. What's first?"
+    },
+    {
+      "zh": "早安，{name}，今天也一起加油吧。",
+      "en": "Morning, {name}, let's make today count.",
+      "window": [
+        300,
+        600
+      ]
+    },
+    {
+      "zh": "新的一天，新的可能，早上好，{name}！",
+      "en": "New day, new possibilities. Good morning, {name}!",
+      "window": [
+        300,
+        600
+      ]
+    },
+    {
+      "zh": "{name}，今天的第一个灵感出现了吗？",
+      "en": "Any early sparks of inspiration, {name}?",
+      "window": [
+        300,
+        600
+      ]
+    },
+    {
+      "zh": "早起的鸟儿有虫吃，早起的{name}呢？",
+      "en": "The early bird gets the worm. What about you, {name}?",
+      "window": [
+        300,
+        600
+      ]
+    },
+    {
+      "zh": "上午好，{name}，有什么值得我们深挖的？",
+      "en": "Good morning, {name}, anything worth digging into?",
+      "window": [
+        600,
+        720
+      ]
+    },
+    {
+      "zh": "{name}，上午的头脑风暴开始啦。",
+      "en": "Time for a little brainstorming, {name}.",
+      "window": [
+        600,
+        720
+      ]
+    },
+    {
+      "zh": "今天状态如何，{name}？来推进一点进度？",
+      "en": "How's your day going, {name}? Ready to make some progress?",
+      "window": [
+        600,
+        720
+      ]
+    },
+    {
+      "zh": "中午好，{name}，吃饱了才有力气思考哦。",
+      "en": "Hey, {name}, a well-fed mind is a happy mind.",
+      "window": [
+        720,
+        840
+      ]
+    },
+    {
+      "zh": "{name}，午间休息？还是突然有了灵感？",
+      "en": "Lunch break, {name}? Or a sudden burst of inspiration?",
+      "window": [
+        720,
+        840
+      ]
+    },
+    {
+      "zh": "午后的冒险即将开始，{name}。",
+      "en": "The afternoon adventure awaits, {name}.",
+      "window": [
+        720,
+        840
+      ]
+    },
+    {
+      "zh": "下午好，{name}，来把想法变成成果。",
+      "en": "Good afternoon, {name}, let's turn ideas into results.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，下午茶时间，来点脑力甜品？",
+      "en": "Tea time, {name}, fancy a little food for thought?",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "今天还没结束呢，{name}，再创造点什么？",
+      "en": "The day's not over yet, {name}. What else can we create?",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，碰到瓶颈了吗？换个思路试试。",
+      "en": "Hit a wall, {name}? Let's try another angle.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "晚上好，{name}，今天过得怎么样？",
+      "en": "Good evening, {name}, how was your day?",
+      "window": [
+        1080,
+        1320
+      ]
+    },
+    {
+      "zh": "{name}，今晚想认真工作，还是放飞想象？",
+      "en": "Work mode or imagination mode tonight, {name}?",
+      "window": [
+        1080,
+        1320
+      ]
+    },
+    {
+      "zh": "夜幕降临，灵感可不打烊，对吧，{name}？",
+      "en": "The sun's down, but ideas never sleep. Right, {name}?",
+      "window": [
+        1080,
+        1320
+      ]
+    },
+    {
+      "zh": "夜深了，{name}，还有什么心事或奇思妙想？",
+      "en": "It's getting late, {name}. What's on your mind?",
+      "window": [
+        1320,
+        300
+      ]
+    },
+    {
+      "zh": "{name}，夜猫子频道已接通。",
+      "en": "Night owl channel connected, {name}.",
+      "window": [
+        1320,
+        300
+      ]
+    },
+    {
+      "zh": "世界安静下来了，{name}，我们慢慢聊。",
+      "en": "The world's gone quiet, {name}. Let's take our time.",
+      "window": [
+        1320,
+        300
+      ]
+    }
+  ],
+  "claude": [
+    {
+      "zh": "你好，{name}，今天想做点什么？",
+      "en": "Hi, {name}, what would you like to work on today?"
+    },
+    {
+      "zh": "{name}，欢迎回来，从哪儿开始？",
+      "en": "Welcome back, {name}, where shall we start?"
+    },
+    {
+      "zh": "嗨，{name}，有什么想法尽管说。",
+      "en": "Hey, {name}, tell me what's on your mind."
+    },
+    {
+      "zh": "{name}，准备好了，随时开始。",
+      "en": "Ready when you are, {name}."
+    },
+    {
+      "zh": "你好，{name}，今天我能帮上什么忙？",
+      "en": "Hello, {name}, how can I help today?"
+    },
+    {
+      "zh": "{name}，新的一页，写点什么吧。",
+      "en": "A fresh page, {name}, what shall we write on it?"
+    },
+    {
+      "zh": "嗨，{name}，有问题、有草稿、有点子，都可以丢过来。",
+      "en": "Hi, {name}, questions, drafts, half-ideas — send them over."
+    },
+    {
+      "zh": "{name}，今天要解决哪件事？",
+      "en": "What are we tackling today, {name}?"
+    },
+    {
+      "zh": "欢迎，{name}，先说说你在忙什么？",
+      "en": "Welcome, {name}, what are you working on?"
+    },
+    {
+      "zh": "{name}，想聊、想写、想查，都行。",
+      "en": "Chat, write, or dig into something — your call, {name}."
+    },
+    {
+      "zh": "你好，{name}，从一句话开始就够了。",
+      "en": "Hi, {name}, one sentence is enough to get started."
+    },
+    {
+      "zh": "{name}，今天有什么卡住了吗？",
+      "en": "Anything stuck today, {name}?"
+    },
+    {
+      "zh": "嗨，{name}，我们一起理一理。",
+      "en": "Hey, {name}, let's sort it out together."
+    },
+    {
+      "zh": "{name}，说个开头，剩下的我们慢慢来。",
+      "en": "Give me a starting point, {name}, and we'll take it from there."
+    },
+    {
+      "zh": "你好，{name}，大问题小问题都欢迎。",
+      "en": "Hi, {name}, big questions and small ones both welcome."
+    },
+    {
+      "zh": "{name}，今天想先从哪个想法下手？",
+      "en": "Which idea do you want to start with, {name}?"
+    },
+    {
+      "zh": "欢迎回来，{name}，手头有什么要处理的？",
+      "en": "Good to see you, {name}. What's on your plate?"
+    },
+    {
+      "zh": "{name}，把需求丢给我，我们一步步来。",
+      "en": "Hand me the task, {name}, and we'll go step by step."
+    },
+    {
+      "zh": "嗨，{name}，今天想探索点什么新东西？",
+      "en": "Hi, {name}, anything new you'd like to explore?"
+    },
+    {
+      "zh": "{name}，我在这儿，开始吧。",
+      "en": "I'm here, {name}. Let's begin."
+    },
+    {
+      "zh": "早，{name}，起得真早，今天先做点什么？",
+      "en": "Early start, {name}, what's first today?",
+      "window": [
+        300,
+        480
+      ]
+    },
+    {
+      "zh": "{name}，清晨安静，适合想清楚一件事。",
+      "en": "Quiet mornings are good for thinking, {name}. What's on your mind?",
+      "window": [
+        300,
+        480
+      ]
+    },
+    {
+      "zh": "早上好，{name}，咖啡还是茶？我们边喝边开始。",
+      "en": "Morning, {name}, coffee or tea in hand? Let's begin.",
+      "window": [
+        300,
+        480
+      ]
+    },
+    {
+      "zh": "上午好，{name}，今天的头号任务是什么？",
+      "en": "Good morning, {name}, what's top of the list today?",
+      "window": [
+        480,
+        660
+      ]
+    },
+    {
+      "zh": "{name}，趁精力最好，先啃最难的那块？",
+      "en": "Fresh energy, {name}, want to start with the hard part?",
+      "window": [
+        480,
+        660
+      ]
+    },
+    {
+      "zh": "早上好，{name}，一起把今天理个头绪。",
+      "en": "Morning, {name}, let's get today in order.",
+      "window": [
+        480,
+        660
+      ]
+    },
+    {
+      "zh": "中午好，{name}，吃过饭了吗？",
+      "en": "Hi, {name}, had lunch yet?",
+      "window": [
+        660,
+        840
+      ]
+    },
+    {
+      "zh": "{name}，午间快速处理一件小事？",
+      "en": "A quick one over lunch, {name}?",
+      "window": [
+        660,
+        840
+      ]
+    },
+    {
+      "zh": "中午好，{name}，上午的事进展如何？",
+      "en": "Midday, {name}, how's the morning gone?",
+      "window": [
+        660,
+        840
+      ]
+    },
+    {
+      "zh": "下午好，{name}，今天还剩什么要搞定？",
+      "en": "Good afternoon, {name}, what's left to wrap up?",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，下午容易犯困，我们一起提提速。",
+      "en": "Afternoon slump, {name}? Let's pick up the pace together.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "下午好，{name}，有什么需要再推一把的？",
+      "en": "Hi, {name}, anything that needs a final push?",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，离收工不远了，先清掉哪件？",
+      "en": "Almost the end of the day, {name}, what should we clear first?",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "晚上好，{name}，今天过得怎么样？",
+      "en": "Good evening, {name}, how was your day?",
+      "window": [
+        1080,
+        1320
+      ]
+    },
+    {
+      "zh": "{name}，晚上有空，想聊点轻松的还是做点正事？",
+      "en": "Evening, {name}, something light, or something to get done?",
+      "window": [
+        1080,
+        1320
+      ]
+    },
+    {
+      "zh": "晚上好，{name}，想学点新东西吗？",
+      "en": "Hi, {name}, in the mood to learn something new?",
+      "window": [
+        1080,
+        1320
+      ]
+    },
+    {
+      "zh": "{name}，忙完了吗？现在时间是你自己的。",
+      "en": "Done for the day, {name}? This time's yours.",
+      "window": [
+        1080,
+        1320
+      ]
+    },
+    {
+      "zh": "还没睡呀，{name}？有什么在想的？",
+      "en": "Still up, {name}? What's on your mind?",
+      "window": [
+        1320,
+        300
+      ]
+    },
+    {
+      "zh": "{name}，夜深了，我们把这件事尽快理清，你好早点休息。",
+      "en": "It's late, {name}. Let's sort this out so you can get some rest.",
+      "window": [
+        1320,
+        300
+      ]
+    },
+    {
+      "zh": "夜里好，{name}，安静的时候最适合聊聊。",
+      "en": "Late-night hello, {name}. Quiet hours are good for talking things through.",
+      "window": [
+        1320,
+        300
+      ]
+    }
+  ],
+  "gemini": [
+    {
+      "zh": "你好，{name}！今天想一起看看什么？",
+      "en": "Hi, {name}! What shall we look at together today?"
+    },
+    {
+      "zh": "欢迎回来，{name}，星星我已经替你摘好了。",
+      "en": "Welcome back, {name}. I've already picked a star for you."
+    },
+    {
+      "zh": "{name}，文字、图片、表格，都可以丢给我。",
+      "en": "{name}, text, images, spreadsheets — toss me any of them."
+    },
+    {
+      "zh": "{name}，从哪颗星开始？",
+      "en": "Which star do we start with, {name}?"
+    },
+    {
+      "zh": "来啦，{name}？我已经准备好了。",
+      "en": "There you are, {name}. I'm all set."
+    },
+    {
+      "zh": "{name}，一个问题，两种思路，我们都试试？",
+      "en": "One question, two ways to think about it, {name} — shall we try both?"
+    },
+    {
+      "zh": "{name}，把想法说出来，我帮你把它画清楚。",
+      "en": "Say the idea out loud, {name}, and I'll help you sketch it clearly."
+    },
+    {
+      "zh": "新会话开好了，{name}，请吩咐。",
+      "en": "New session's open, {name}. At your service."
+    },
+    {
+      "zh": "{name}，资料多也不怕，我读得很快。",
+      "en": "Plenty of material is fine, {name}. I read fast."
+    },
+    {
+      "zh": "{name}，今天想先把哪件事做完？",
+      "en": "What would you like to finish first today, {name}?"
+    },
+    {
+      "zh": "又见面了，{name}，上次那件事有进展吗？",
+      "en": "Good to see you again, {name}. Any progress on last time's thing?"
+    },
+    {
+      "zh": "{name}，先看全局，还是直接动手？",
+      "en": "Big picture first, or straight to work, {name}?"
+    },
+    {
+      "zh": "{name}，有截图也可以直接贴给我。",
+      "en": "{name}, feel free to paste a screenshot straight in."
+    },
+    {
+      "zh": "{name}，今天的灵感是什么颜色的？",
+      "en": "What colour is today's inspiration, {name}?"
+    },
+    {
+      "zh": "我在这儿，{name}，慢慢说。",
+      "en": "I'm here, {name}. Take your time."
+    },
+    {
+      "zh": "{name}，复杂的事拆成小块，我们一块一块来。",
+      "en": "Let's cut the big thing into pieces, {name}, and take them one at a time."
+    },
+    {
+      "zh": "{name}，想查点资料，还是想写点什么？",
+      "en": "Looking something up or writing something, {name}?"
+    },
+    {
+      "zh": "{name}，今天也会赢的。",
+      "en": "We'll win today too, {name}."
+    },
+    {
+      "zh": "开工啦，{name}，第一步是什么？",
+      "en": "Let's begin, {name}. What's the first step?"
+    },
+    {
+      "zh": "{name}，有什么想让我再仔细看一遍的吗？",
+      "en": "Anything you'd like me to take a second, closer look at, {name}?"
+    },
+    {
+      "zh": "早安，{name}，天还没大亮，你已经醒啦？",
+      "en": "Morning, {name}. It's barely light and you're already up?",
+      "window": [
+        300,
+        480
+      ]
+    },
+    {
+      "zh": "{name}，清晨最清醒，先挑最难的那件？",
+      "en": "{name}, early hours are the clearest. Take on the hardest one first?",
+      "window": [
+        300,
+        480
+      ]
+    },
+    {
+      "zh": "晨星还在，{name}，我们先开个好头。",
+      "en": "The morning star's still out, {name}. Let's make a good start.",
+      "window": [
+        300,
+        480
+      ]
+    },
+    {
+      "zh": "上午好，{name}，今天的清单上第一项是什么？",
+      "en": "Good morning, {name}. What's first on today's list?",
+      "window": [
+        480,
+        660
+      ]
+    },
+    {
+      "zh": "{name}，咖啡到位了吗？我已经到位了。",
+      "en": "Coffee ready, {name}? I'm ready.",
+      "window": [
+        480,
+        660
+      ]
+    },
+    {
+      "zh": "早上好，{name}，把今天要做的都排一排？",
+      "en": "Good morning, {name}. Shall we line up everything for today?",
+      "window": [
+        480,
+        660
+      ]
+    },
+    {
+      "zh": "{name}，上午精神好，适合把想法落成方案。",
+      "en": "{name}, mornings are good for turning ideas into plans.",
+      "window": [
+        480,
+        660
+      ]
+    },
+    {
+      "zh": "中午好，{name}，先吃饭，我在这儿等你。",
+      "en": "Hi, {name}. Lunch first — I'll be right here.",
+      "window": [
+        660,
+        840
+      ]
+    },
+    {
+      "zh": "{name}，午间来件小事，十分钟搞定？",
+      "en": "A small one over lunch, {name}? Done in ten minutes?",
+      "window": [
+        660,
+        840
+      ]
+    },
+    {
+      "zh": "{name}，午休时间，随便聊聊也可以。",
+      "en": "It's the lunch break, {name}. A casual chat works too.",
+      "window": [
+        660,
+        840
+      ]
+    },
+    {
+      "zh": "下午好，{name}，有什么需要再推进一步的？",
+      "en": "Good afternoon, {name}. Anything that needs one more push?",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，下午犯困的话，我们换个有意思的问题。",
+      "en": "{name}, if the afternoon's dragging, let's pick a more interesting problem.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，下午茶时间，来点轻松的？",
+      "en": "Tea time, {name}. Something light?",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "{name}，下午正适合把上午的半成品收尾。",
+      "en": "{name}, afternoons are perfect for finishing what the morning started.",
+      "window": [
+        840,
+        1080
+      ]
+    },
+    {
+      "zh": "晚上好，{name}，今天辛苦了。",
+      "en": "Good evening, {name}. Long day?",
+      "window": [
+        1080,
+        1320
+      ]
+    },
+    {
+      "zh": "{name}，晚上想做点自己的事吗？",
+      "en": "{name}, want to work on something of your own tonight?",
+      "window": [
+        1080,
+        1320
+      ]
+    },
+    {
+      "zh": "{name}，星星出来了，我们也开工吧。",
+      "en": "The stars are out, {name}. Let's get going too.",
+      "window": [
+        1080,
+        1320
+      ]
+    },
+    {
+      "zh": "夜深了，{name}，我陪你，但别熬太晚。",
+      "en": "It's late, {name}. I'll keep you company, but don't stay up too long.",
+      "window": [
+        1320,
+        300
+      ]
+    },
+    {
+      "zh": "{name}，这么晚还在，是灵感来了吗？",
+      "en": "Still up, {name}? Did inspiration strike?",
+      "window": [
+        1320,
+        300
+      ]
+    },
+    {
+      "zh": "{name}，夜里安静，最后一件事做完就去睡吧。",
+      "en": "It's quiet tonight, {name}. One last thing, then off to bed.",
+      "window": [
+        1320,
+        300
+      ]
+    }
+  ]
+}

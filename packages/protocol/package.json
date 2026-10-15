@@ -1,0 +1,14 @@
+{
+  "name": "@cutex-desktop/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./codex": "./src/codex/index.ts",
+    "./codex/v2": "./src/codex/v2/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

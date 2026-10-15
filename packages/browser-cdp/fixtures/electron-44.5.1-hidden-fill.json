@@ -1,0 +1,1179 @@
+{
+  "capture": {
+    "date": "2026-10-10",
+    "electron": "44.5.1",
+    "platform": "win32",
+    "window": "hidden",
+    "diagnosticFixture": true,
+    "source": "services/browser-lab/artifacts/carrier-smoke/*-cdp-transcript.json",
+    "normalization": "First read+fill excerpt; ephemeral IDs and localhost port normalized; AX fields reduced; function bodies omitted (own source). No results invented."
+  },
+  "cases": [
+    {
+      "carrier": "webview",
+      "expectedOutcome": "outcome_unknown",
+      "commands": [
+        {
+          "method": "Page.enable",
+          "params": {},
+          "result": {}
+        },
+        {
+          "method": "DOM.enable",
+          "params": {},
+          "result": {}
+        },
+        {
+          "method": "Runtime.enable",
+          "params": {},
+          "result": {}
+        },
+        {
+          "method": "Page.getFrameTree",
+          "params": {},
+          "result": {
+            "frameTree": {
+              "frame": {
+                "adFrameStatus": {
+                  "adFrameType": "none"
+                },
+                "crossOriginIsolatedContextType": "NotIsolated",
+                "domainAndRegistry": "",
+                "gatedAPIFeatures": [],
+                "id": "id-0",
+                "loaderId": "id-1",
+                "mimeType": "text/html",
+                "secureContextType": "SecureLocalhost",
+                "securityOrigin": "http://127.0.0.1:25399",
+                "securityOriginDetails": {
+                  "isLocalhost": true
+                },
+                "url": "http://127.0.0.1:25399/"
+              }
+            }
+          }
+        },
+        {
+          "method": "Accessibility.getFullAXTree",
+          "params": {
+            "frameId": "id-0"
+          },
+          "result": {
+            "nodes": [
+              {
+                "backendDOMNodeId": 1,
+                "childIds": [
+                  "2"
+                ],
+                "frameId": "id-0",
+                "ignored": false,
+                "name": {
+                  "value": "Cutex I1 fixture"
+                },
+                "nodeId": "1",
+                "role": {
+                  "value": "RootWebArea"
+                }
+              },
+              {
+                "backendDOMNodeId": 2,
+                "childIds": [
+                  "7"
+                ],
+                "ignored": true,
+                "nodeId": "2",
+                "parentId": "1",
+                "role": {
+                  "value": "none"
+                }
+              },
+              {
+                "backendDOMNodeId": 7,
+                "childIds": [
+                  "8",
+                  "9",
+                  "10",
+                  "13",
+                  "14",
+                  "15",
+                  "16"
+                ],
+                "ignored": true,
+                "nodeId": "7",
+                "parentId": "2",
+                "role": {
+                  "value": "none"
+                }
+              },
+              {
+                "backendDOMNodeId": 8,
+                "childIds": [
+                  "18"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "Cutex 内嵌浏览器实验"
+                },
+                "nodeId": "8",
+                "parentId": "7",
+                "role": {
+                  "value": "heading"
+                }
+              },
+              {
+                "backendDOMNodeId": 9,
+                "childIds": [
+                  "19"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": ""
+                },
+                "nodeId": "9",
+                "parentId": "7",
+                "role": {
+                  "value": "paragraph"
+                }
+              },
+              {
+                "backendDOMNodeId": 10,
+                "childIds": [
+                  "20",
+                  "11"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": ""
+                },
+                "nodeId": "10",
+                "parentId": "7",
+                "role": {
+                  "value": "LabelText"
+                }
+              },
+              {
+                "backendDOMNodeId": 13,
+                "childIds": [
+                  "21"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "保存备注"
+                },
+                "nodeId": "13",
+                "parentId": "7",
+                "role": {
+                  "value": "button"
+                }
+              },
+              {
+                "backendDOMNodeId": 14,
+                "childIds": [
+                  "22"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "替换输入框"
+                },
+                "nodeId": "14",
+                "parentId": "7",
+                "role": {
+                  "value": "button"
+                }
+              },
+              {
+                "backendDOMNodeId": 15,
+                "childIds": [
+                  "23"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": ""
+                },
+                "nodeId": "15",
+                "parentId": "7",
+                "role": {
+                  "value": "status"
+                }
+              },
+              {
+                "backendDOMNodeId": 16,
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": ""
+                },
+                "nodeId": "16",
+                "parentId": "7",
+                "role": {
+                  "value": "generic"
+                }
+              },
+              {
+                "backendDOMNodeId": 18,
+                "childIds": [
+                  "-1000000002"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "Cutex 内嵌浏览器实验"
+                },
+                "nodeId": "18",
+                "parentId": "8",
+                "role": {
+                  "value": "StaticText"
+                }
+              },
+              {
+                "backendDOMNodeId": 19,
+                "childIds": [
+                  "-1000000003"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "独立 fixture · 不连接 Cutex daemon 或真实账户"
+                },
+                "nodeId": "19",
+                "parentId": "9",
+                "role": {
+                  "value": "StaticText"
+                }
+              },
+              {
+                "backendDOMNodeId": 20,
+                "childIds": [
+                  "-1000000004"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "备注 "
+                },
+                "nodeId": "20",
+                "parentId": "10",
+                "role": {
+                  "value": "StaticText"
+                }
+              },
+              {
+                "backendDOMNodeId": 11,
+                "childIds": [
+                  "12"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "备注"
+                },
+                "nodeId": "11",
+                "parentId": "10",
+                "role": {
+                  "value": "textbox"
+                }
+              },
+              {
+                "backendDOMNodeId": 21,
+                "childIds": [
+                  "-1000000005"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "保存备注"
+                },
+                "nodeId": "21",
+                "parentId": "13",
+                "role": {
+                  "value": "StaticText"
+                }
+              },
+              {
+                "backendDOMNodeId": 22,
+                "childIds": [
+                  "-1000000006"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "替换输入框"
+                },
+                "nodeId": "22",
+                "parentId": "14",
+                "role": {
+                  "value": "StaticText"
+                }
+              },
+              {
+                "backendDOMNodeId": 23,
+                "childIds": [
+                  "-1000000007"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "尚未保存"
+                },
+                "nodeId": "23",
+                "parentId": "15",
+                "role": {
+                  "value": "StaticText"
+                }
+              },
+              {
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": "Cutex 内嵌浏览器实验"
+                },
+                "nodeId": "-1000000002",
+                "parentId": "18",
+                "role": {
+                  "value": "InlineTextBox"
+                }
+              },
+              {
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": "独立 fixture · 不连接 Cutex daemon 或真实账户"
+                },
+                "nodeId": "-1000000003",
+                "parentId": "19",
+                "role": {
+                  "value": "InlineTextBox"
+                }
+              },
+              {
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": "备注 "
+                },
+                "nodeId": "-1000000004",
+                "parentId": "20",
+                "role": {
+                  "value": "InlineTextBox"
+                }
+              },
+              {
+                "backendDOMNodeId": 12,
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": ""
+                },
+                "nodeId": "12",
+                "parentId": "11",
+                "role": {
+                  "value": "generic"
+                }
+              },
+              {
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": "保存备注"
+                },
+                "nodeId": "-1000000005",
+                "parentId": "21",
+                "role": {
+                  "value": "InlineTextBox"
+                }
+              },
+              {
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": "替换输入框"
+                },
+                "nodeId": "-1000000006",
+                "parentId": "22",
+                "role": {
+                  "value": "InlineTextBox"
+                }
+              },
+              {
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": "尚未保存"
+                },
+                "nodeId": "-1000000007",
+                "parentId": "23",
+                "role": {
+                  "value": "InlineTextBox"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "method": "Page.getFrameTree",
+          "params": {},
+          "result": {
+            "frameTree": {
+              "frame": {
+                "adFrameStatus": {
+                  "adFrameType": "none"
+                },
+                "crossOriginIsolatedContextType": "NotIsolated",
+                "domainAndRegistry": "",
+                "gatedAPIFeatures": [],
+                "id": "id-0",
+                "loaderId": "id-1",
+                "mimeType": "text/html",
+                "secureContextType": "SecureLocalhost",
+                "securityOrigin": "http://127.0.0.1:25399",
+                "securityOriginDetails": {
+                  "isLocalhost": true
+                },
+                "url": "http://127.0.0.1:25399/"
+              }
+            }
+          }
+        },
+        {
+          "method": "DOM.resolveNode",
+          "params": {
+            "backendNodeId": 11
+          },
+          "result": {
+            "object": {
+              "className": "HTMLInputElement",
+              "description": "input#note",
+              "objectId": "id-2",
+              "subtype": "node",
+              "type": "object"
+            }
+          }
+        },
+        {
+          "method": "Runtime.evaluate",
+          "params": {
+            "expression": "window",
+            "returnByValue": false
+          },
+          "result": {
+            "result": {
+              "className": "Window",
+              "description": "Window",
+              "objectId": "id-3",
+              "type": "object"
+            }
+          }
+        },
+        {
+          "method": "Runtime.callFunctionOn",
+          "params": {
+            "objectId": "id-2",
+            "arguments": [
+              {
+                "objectId": "id-3"
+              }
+            ],
+            "returnByValue": true
+          },
+          "result": {
+            "result": {
+              "type": "boolean",
+              "value": true
+            }
+          }
+        },
+        {
+          "method": "Runtime.callFunctionOn",
+          "params": {
+            "objectId": "id-2",
+            "arguments": [
+              {
+                "value": "fill"
+              }
+            ],
+            "returnByValue": true
+          },
+          "result": {
+            "result": {
+              "type": "object",
+              "value": {
+                "x": 168.0729217529297,
+                "y": 150.7708396911621
+              }
+            }
+          }
+        },
+        {
+          "method": "Runtime.callFunctionOn",
+          "params": {
+            "objectId": "id-2",
+            "arguments": [
+              {
+                "value": "fill"
+              },
+              {
+                "value": ""
+              }
+            ],
+            "returnByValue": false
+          },
+          "result": {
+            "result": {
+              "className": "Object",
+              "description": "Object",
+              "objectId": "id-4",
+              "type": "object"
+            }
+          }
+        },
+        {
+          "method": "Emulation.setFocusEmulationEnabled",
+          "params": {
+            "enabled": true
+          },
+          "result": {}
+        },
+        {
+          "method": "DOM.focus",
+          "params": {
+            "backendNodeId": 11
+          },
+          "result": {}
+        },
+        {
+          "method": "Runtime.callFunctionOn",
+          "params": {
+            "objectId": "id-2",
+            "arguments": [],
+            "returnByValue": true
+          },
+          "result": {
+            "result": {
+              "type": "object",
+              "value": {
+                "focused": true
+              }
+            }
+          }
+        },
+        {
+          "method": "Runtime.callFunctionOn",
+          "params": {
+            "objectId": "id-2",
+            "arguments": [],
+            "returnByValue": true
+          },
+          "result": {
+            "result": {
+              "type": "object",
+              "value": {
+                "ok": true
+              }
+            }
+          }
+        },
+        {
+          "method": "Input.insertText",
+          "params": {
+            "text": "Cutex I1 verified"
+          },
+          "result": {}
+        },
+        {
+          "method": "Runtime.callFunctionOn",
+          "params": {
+            "objectId": "id-4",
+            "arguments": [],
+            "returnByValue": true
+          },
+          "result": {
+            "result": {
+              "type": "object",
+              "value": {
+                "connected": true,
+                "seen": false,
+                "value": ""
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "carrier": "WebContentsView",
+      "expectedOutcome": "observed",
+      "commands": [
+        {
+          "method": "Page.enable",
+          "params": {},
+          "result": {}
+        },
+        {
+          "method": "DOM.enable",
+          "params": {},
+          "result": {}
+        },
+        {
+          "method": "Runtime.enable",
+          "params": {},
+          "result": {}
+        },
+        {
+          "method": "Page.getFrameTree",
+          "params": {},
+          "result": {
+            "frameTree": {
+              "frame": {
+                "adFrameStatus": {
+                  "adFrameType": "none"
+                },
+                "crossOriginIsolatedContextType": "NotIsolated",
+                "domainAndRegistry": "",
+                "gatedAPIFeatures": [],
+                "id": "id-0",
+                "loaderId": "id-1",
+                "mimeType": "text/html",
+                "secureContextType": "SecureLocalhost",
+                "securityOrigin": "http://127.0.0.1:25399",
+                "securityOriginDetails": {
+                  "isLocalhost": true
+                },
+                "url": "http://127.0.0.1:25399/"
+              }
+            }
+          }
+        },
+        {
+          "method": "Accessibility.getFullAXTree",
+          "params": {
+            "frameId": "id-0"
+          },
+          "result": {
+            "nodes": [
+              {
+                "backendDOMNodeId": 1,
+                "childIds": [
+                  "2"
+                ],
+                "frameId": "id-0",
+                "ignored": false,
+                "name": {
+                  "value": "Cutex I1 fixture"
+                },
+                "nodeId": "1",
+                "role": {
+                  "value": "RootWebArea"
+                }
+              },
+              {
+                "backendDOMNodeId": 2,
+                "childIds": [
+                  "7"
+                ],
+                "ignored": true,
+                "nodeId": "2",
+                "parentId": "1",
+                "role": {
+                  "value": "none"
+                }
+              },
+              {
+                "backendDOMNodeId": 7,
+                "childIds": [
+                  "8",
+                  "9",
+                  "10",
+                  "13",
+                  "14",
+                  "15",
+                  "16"
+                ],
+                "ignored": true,
+                "nodeId": "7",
+                "parentId": "2",
+                "role": {
+                  "value": "none"
+                }
+              },
+              {
+                "backendDOMNodeId": 8,
+                "childIds": [
+                  "18"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "Cutex 内嵌浏览器实验"
+                },
+                "nodeId": "8",
+                "parentId": "7",
+                "role": {
+                  "value": "heading"
+                }
+              },
+              {
+                "backendDOMNodeId": 9,
+                "childIds": [
+                  "19"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": ""
+                },
+                "nodeId": "9",
+                "parentId": "7",
+                "role": {
+                  "value": "paragraph"
+                }
+              },
+              {
+                "backendDOMNodeId": 10,
+                "childIds": [
+                  "20",
+                  "11"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": ""
+                },
+                "nodeId": "10",
+                "parentId": "7",
+                "role": {
+                  "value": "LabelText"
+                }
+              },
+              {
+                "backendDOMNodeId": 13,
+                "childIds": [
+                  "21"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "保存备注"
+                },
+                "nodeId": "13",
+                "parentId": "7",
+                "role": {
+                  "value": "button"
+                }
+              },
+              {
+                "backendDOMNodeId": 14,
+                "childIds": [
+                  "22"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "替换输入框"
+                },
+                "nodeId": "14",
+                "parentId": "7",
+                "role": {
+                  "value": "button"
+                }
+              },
+              {
+                "backendDOMNodeId": 15,
+                "childIds": [
+                  "23"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": ""
+                },
+                "nodeId": "15",
+                "parentId": "7",
+                "role": {
+                  "value": "status"
+                }
+              },
+              {
+                "backendDOMNodeId": 16,
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": ""
+                },
+                "nodeId": "16",
+                "parentId": "7",
+                "role": {
+                  "value": "generic"
+                }
+              },
+              {
+                "backendDOMNodeId": 18,
+                "childIds": [
+                  "-1000000002"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "Cutex 内嵌浏览器实验"
+                },
+                "nodeId": "18",
+                "parentId": "8",
+                "role": {
+                  "value": "StaticText"
+                }
+              },
+              {
+                "backendDOMNodeId": 19,
+                "childIds": [
+                  "-1000000003"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "独立 fixture · 不连接 Cutex daemon 或真实账户"
+                },
+                "nodeId": "19",
+                "parentId": "9",
+                "role": {
+                  "value": "StaticText"
+                }
+              },
+              {
+                "backendDOMNodeId": 20,
+                "childIds": [
+                  "-1000000004"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "备注 "
+                },
+                "nodeId": "20",
+                "parentId": "10",
+                "role": {
+                  "value": "StaticText"
+                }
+              },
+              {
+                "backendDOMNodeId": 11,
+                "childIds": [
+                  "12"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "备注"
+                },
+                "nodeId": "11",
+                "parentId": "10",
+                "role": {
+                  "value": "textbox"
+                }
+              },
+              {
+                "backendDOMNodeId": 21,
+                "childIds": [
+                  "-1000000005"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "保存备注"
+                },
+                "nodeId": "21",
+                "parentId": "13",
+                "role": {
+                  "value": "StaticText"
+                }
+              },
+              {
+                "backendDOMNodeId": 22,
+                "childIds": [
+                  "-1000000006"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "替换输入框"
+                },
+                "nodeId": "22",
+                "parentId": "14",
+                "role": {
+                  "value": "StaticText"
+                }
+              },
+              {
+                "backendDOMNodeId": 23,
+                "childIds": [
+                  "-1000000007"
+                ],
+                "ignored": false,
+                "name": {
+                  "value": "尚未保存"
+                },
+                "nodeId": "23",
+                "parentId": "15",
+                "role": {
+                  "value": "StaticText"
+                }
+              },
+              {
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": "Cutex 内嵌浏览器实验"
+                },
+                "nodeId": "-1000000002",
+                "parentId": "18",
+                "role": {
+                  "value": "InlineTextBox"
+                }
+              },
+              {
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": "独立 fixture · 不连接 Cutex daemon 或真实账户"
+                },
+                "nodeId": "-1000000003",
+                "parentId": "19",
+                "role": {
+                  "value": "InlineTextBox"
+                }
+              },
+              {
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": "备注 "
+                },
+                "nodeId": "-1000000004",
+                "parentId": "20",
+                "role": {
+                  "value": "InlineTextBox"
+                }
+              },
+              {
+                "backendDOMNodeId": 12,
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": ""
+                },
+                "nodeId": "12",
+                "parentId": "11",
+                "role": {
+                  "value": "generic"
+                }
+              },
+              {
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": "保存备注"
+                },
+                "nodeId": "-1000000005",
+                "parentId": "21",
+                "role": {
+                  "value": "InlineTextBox"
+                }
+              },
+              {
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": "替换输入框"
+                },
+                "nodeId": "-1000000006",
+                "parentId": "22",
+                "role": {
+                  "value": "InlineTextBox"
+                }
+              },
+              {
+                "childIds": [],
+                "ignored": false,
+                "name": {
+                  "value": "尚未保存"
+                },
+                "nodeId": "-1000000007",
+                "parentId": "23",
+                "role": {
+                  "value": "InlineTextBox"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "method": "Page.getFrameTree",
+          "params": {},
+          "result": {
+            "frameTree": {
+              "frame": {
+                "adFrameStatus": {
+                  "adFrameType": "none"
+                },
+                "crossOriginIsolatedContextType": "NotIsolated",
+                "domainAndRegistry": "",
+                "gatedAPIFeatures": [],
+                "id": "id-0",
+                "loaderId": "id-1",
+                "mimeType": "text/html",
+                "secureContextType": "SecureLocalhost",
+                "securityOrigin": "http://127.0.0.1:25399",
+                "securityOriginDetails": {
+                  "isLocalhost": true
+                },
+                "url": "http://127.0.0.1:25399/"
+              }
+            }
+          }
+        },
+        {
+          "method": "DOM.resolveNode",
+          "params": {
+            "backendNodeId": 11
+          },
+          "result": {
+            "object": {
+              "className": "HTMLInputElement",
+              "description": "input#note",
+              "objectId": "id-2",
+              "subtype": "node",
+              "type": "object"
+            }
+          }
+        },
+        {
+          "method": "Runtime.evaluate",
+          "params": {
+            "expression": "window",
+            "returnByValue": false
+          },
+          "result": {
+            "result": {
+              "className": "Window",
+              "description": "Window",
+              "objectId": "id-3",
+              "type": "object"
+            }
+          }
+        },
+        {
+          "method": "Runtime.callFunctionOn",
+          "params": {
+            "objectId": "id-2",
+            "arguments": [
+              {
+                "objectId": "id-3"
+              }
+            ],
+            "returnByValue": true
+          },
+          "result": {
+            "result": {
+              "type": "boolean",
+              "value": true
+            }
+          }
+        },
+        {
+          "method": "Runtime.callFunctionOn",
+          "params": {
+            "objectId": "id-2",
+            "arguments": [
+              {
+                "value": "fill"
+              }
+            ],
+            "returnByValue": true
+          },
+          "result": {
+            "result": {
+              "type": "object",
+              "value": {
+                "x": 168.0729217529297,
+                "y": 150.7708396911621
+              }
+            }
+          }
+        },
+        {
+          "method": "Runtime.callFunctionOn",
+          "params": {
+            "objectId": "id-2",
+            "arguments": [
+              {
+                "value": "fill"
+              },
+              {
+                "value": ""
+              }
+            ],
+            "returnByValue": false
+          },
+          "result": {
+            "result": {
+              "className": "Object",
+              "description": "Object",
+              "objectId": "id-4",
+              "type": "object"
+            }
+          }
+        },
+        {
+          "method": "Emulation.setFocusEmulationEnabled",
+          "params": {
+            "enabled": true
+          },
+          "result": {}
+        },
+        {
+          "method": "DOM.focus",
+          "params": {
+            "backendNodeId": 11
+          },
+          "result": {}
+        },
+        {
+          "method": "Runtime.callFunctionOn",
+          "params": {
+            "objectId": "id-2",
+            "arguments": [],
+            "returnByValue": true
+          },
+          "result": {
+            "result": {
+              "type": "object",
+              "value": {
+                "focused": true
+              }
+            }
+          }
+        },
+        {
+          "method": "Runtime.callFunctionOn",
+          "params": {
+            "objectId": "id-2",
+            "arguments": [],
+            "returnByValue": true
+          },
+          "result": {
+            "result": {
+              "type": "object",
+              "value": {
+                "ok": true
+              }
+            }
+          }
+        },
+        {
+          "method": "Input.insertText",
+          "params": {
+            "text": "Cutex I1 verified"
+          },
+          "result": {}
+        },
+        {
+          "method": "Runtime.callFunctionOn",
+          "params": {
+            "objectId": "id-4",
+            "arguments": [],
+            "returnByValue": true
+          },
+          "result": {
+            "result": {
+              "type": "object",
+              "value": {
+                "connected": true,
+                "seen": true,
+                "value": "Cutex I1 verified"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

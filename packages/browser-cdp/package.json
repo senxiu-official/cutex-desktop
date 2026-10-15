@@ -1,0 +1,9 @@
+{
+  "name": "@cutex-desktop/browser-cdp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@cutex-desktop/browser-protocol": "workspace:*" },
+  "scripts": { "typecheck": "tsc -p tsconfig.json", "test": "vitest run" }
+}

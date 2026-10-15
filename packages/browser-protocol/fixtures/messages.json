@@ -1,0 +1,67 @@
+[
+  {
+    "protocolVersion": 1, "type": "hello", "hostId": "host-local", "deviceId": "device-lab",
+    "providerId": "inApp", "connectionGeneration": 1, "instanceId": "lab-isolated", "endpoint": "browser-lab-private"
+  },
+  {
+    "protocolVersion": 1, "type": "request", "requestId": "request-snapshot", "hostId": "host-local",
+    "deviceId": "device-lab", "cutexSessionId": "lab-session", "turnId": "turn-1", "providerId": "inApp",
+    "connectionGeneration": 1, "guestId": "guest-opaque", "leaseId": "lease-1", "pageGeneration": 1,
+    "deadline": "2026-10-10T12:00:00.000Z", "operation": { "kind": "tab.snapshot" }
+  },
+  {
+    "protocolVersion": 1, "type": "result", "requestId": "request-snapshot", "hostId": "host-local",
+    "deviceId": "device-lab", "providerId": "inApp", "connectionGeneration": 1, "status": "succeeded",
+    "result": { "kind": "tab.snapshot", "pageGeneration": 1, "snapshotId": 1, "url": "http://fixture.svc.localhost:12345/", "truncated": false,
+      "nodes": [{ "ref": "p1.s1.n1", "role": "button", "name": "保存" }] }
+  },
+  {
+    "protocolVersion": 1, "type": "result", "requestId": "request-write", "hostId": "host-local",
+    "deviceId": "device-lab", "providerId": "inApp", "connectionGeneration": 1, "status": "outcome_unknown",
+    "error": { "code": "outcome_unknown", "message": "Transport detached after input dispatch; inspect the page before retrying." }
+  },
+  {
+    "protocolVersion": 1, "type": "cancel", "requestId": "request-write", "hostId": "host-local",
+    "deviceId": "device-lab", "providerId": "inApp", "connectionGeneration": 1, "cutexSessionId": "lab-session", "reason": "user_stop"
+  },
+  {
+    "protocolVersion": 1, "type": "event", "hostId": "host-local", "deviceId": "device-lab",
+    "providerId": "inApp", "connectionGeneration": 1, "eventSeq": 2, "guestId": "guest-opaque", "pageGeneration": 2, "event": "navigated"
+  },
+  {
+    "protocolVersion": 1, "type": "result", "requestId": "request-truncated", "hostId": "host-local",
+    "deviceId": "device-lab", "providerId": "inApp", "connectionGeneration": 1, "status": "succeeded",
+    "result": { "kind": "tab.snapshot", "pageGeneration": 1, "snapshotId": 2, "url": "about:blank", "truncated": true,
+      "nodes": [{ "ref": "p1.s2.n1", "role": "textbox", "name": "Shortened field name", "truncated": true }] }
+  },
+  {
+    "protocolVersion": 1, "type": "result", "requestId": "request-selection", "hostId": "host-local",
+    "deviceId": "device-lab", "providerId": "inApp", "connectionGeneration": 1, "status": "succeeded",
+    "result": { "kind": "tabs.claim", "tab": { "guestId": "guest-opaque", "url": "about:blank", "title": "Selected by owner", "pageGeneration": 1 } }
+  },
+  {
+    "protocolVersion": 1, "type": "request", "requestId": "request-find", "hostId": "host-local",
+    "deviceId": "device-lab", "cutexSessionId": "lab-session", "providerId": "inApp", "connectionGeneration": 1,
+    "guestId": "guest-opaque", "leaseId": "lease-1", "pageGeneration": 1,
+    "deadline": "2026-10-11T12:00:00.000Z", "operation": { "kind": "tab.find", "query": { "role": "button", "name": "保存", "exact": true, "limit": 20 } }
+  },
+  {
+    "protocolVersion": 1, "type": "result", "requestId": "request-find", "hostId": "host-local",
+    "deviceId": "device-lab", "providerId": "inApp", "connectionGeneration": 1, "status": "succeeded",
+    "result": { "kind": "tab.find", "pageGeneration": 1, "snapshotId": 3, "url": "about:blank", "truncated": false,
+      "nodes": [{ "ref": "p1.s3.n1", "role": "button", "name": "保存" }] }
+  },
+  {
+    "protocolVersion": 1, "type": "request", "requestId": "request-next-dialog", "hostId": "host-local",
+    "deviceId": "device-lab", "cutexSessionId": "lab-session", "providerId": "inApp", "connectionGeneration": 1,
+    "guestId": "guest-opaque", "leaseId": "lease-1", "pageGeneration": 1,
+    "deadline": "2026-10-11T12:00:00.000Z", "operation": { "kind": "tab.act", "action": { "kind": "dialog", "response": "dismiss" } }
+  },
+  {
+    "protocolVersion": 1, "type": "result", "requestId": "request-element-image", "hostId": "host-local",
+    "deviceId": "device-lab", "providerId": "inApp", "connectionGeneration": 1, "status": "succeeded",
+    "result": { "kind": "tab.screenshot", "pageGeneration": 1, "mimeType": "image/png", "data": "aGVsbG8=", "width": 480, "height": 270,
+      "viewport": { "width": 1280, "height": 720 }, "captureRect": { "x": 10.5, "y": 20.25, "width": 320, "height": 180 },
+      "imageScale": { "x": 1.5, "y": 1.5 }, "displayScale": 0.4 }
+  }
+]

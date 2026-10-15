@@ -1,0 +1,915 @@
+@import "tailwindcss";
+/* streamdown ships Tailwind class names; let Tailwind see them. */
+@source "../../../node_modules/streamdown/dist/*.js";
+@source "../../../node_modules/@streamdown/code/dist/*.js";
+
+/* Design tokens (structure follows ZCode's @theme tokens; values are our own). */
+@theme {
+  --color-background: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  /* Raised control on a surface-2 track (Segmented selected item): lighter than the track in both themes. */
+  --color-raised: var(--raised);
+  --color-foreground: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-subtle: var(--fg-subtle);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-bubble: var(--bubble);
+  --color-peer: var(--peer);
+  --color-warn: var(--warn);
+  /* Small text in the warn / ok colour (≥ 4.5:1 on --bg and --win); --warn / --ok stay for fills, dots and icons. */
+  --color-warn-text: var(--warn-text);
+  --color-ok: var(--ok);
+  --color-ok-text: var(--ok-text);
+  --color-danger: var(--danger);
+  /* Shell look (会话两侧 RFC §3.2): window background under the cards, quiet hover, card edge. */
+  --color-win: var(--win);
+  --color-hover: var(--hover);
+  --color-card-border: var(--card-border);
+  /* streamdown code-block chrome uses `sidebar`; unregistered, its toolbar border fell back to white. */
+  --color-sidebar: var(--surface);
+  --font-sans: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "Consolas", "Microsoft YaHei Mono", monospace;
+}
+
+:root {
+  --bg: #ffffff;
+  --surface: #f6f6f7;
+  --surface-2: #ececee;
+  --raised: #ffffff;
+  --fg: #1d1d1f;
+  --fg-muted: #5f6066;
+  --fg-subtle: #6a6b71;
+  --border: #e3e3e6;
+  --accent: #3b82f6;
+  --bubble: #f0f0f2;
+  --peer: #eef4ff;
+  --warn: #d97706;
+  --warn-text: #9a4a06;
+  --danger: #dc2626;
+  --ok: #10b981;
+  --ok-text: #047857;
+  --win: #f1f1f3;
+  --hover: rgba(20, 20, 30, 0.06);
+  --card-border: rgba(20, 20, 30, 0.07);
+  --card-shadow: 0 1px 2px rgba(20, 20, 30, 0.04), 0 6px 20px rgba(20, 20, 30, 0.045);
+  --shadow: 0 10px 30px rgba(15, 15, 20, 0.14), 0 2px 6px rgba(15, 15, 20, 0.06);
+  color-scheme: light;
+}
+
+/* Theme: follows the OS unless Settings → General forces light/dark (data-theme on <html>). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161616;
+    --surface: #1c1c1d;
+    --surface-2: #262628;
+    --raised: #3a3a3e;
+    --fg: #ececec;
+    --fg-muted: #a4a4aa;
+    --fg-subtle: #86868d;
+    --border: #2c2c2f;
+    --accent: #60a5fa;
+    --bubble: #262628;
+    --peer: #1f2a3a;
+    --warn: #f59e0b;
+    --warn-text: #f59e0b;
+    --danger: #f87171;
+    --ok: #10b981;
+    --ok-text: #34d399;
+    --win: #0e0e0f;
+    --hover: rgba(255, 255, 255, 0.06);
+    --card-border: rgba(255, 255, 255, 0.06);
+    --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
+    --shadow: 0 12px 34px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161616;
+  --surface: #1c1c1d;
+  --surface-2: #262628;
+  --raised: #3a3a3e;
+  --fg: #ececec;
+  --fg-muted: #a4a4aa;
+  --fg-subtle: #86868d;
+  --border: #2c2c2f;
+  --accent: #60a5fa;
+  --bubble: #262628;
+  --peer: #1f2a3a;
+  --warn: #f59e0b;
+  --warn-text: #f59e0b;
+  --danger: #f87171;
+  --ok: #10b981;
+  --ok-text: #34d399;
+  --win: #0e0e0f;
+  --hover: rgba(255, 255, 255, 0.06);
+  --card-border: rgba(255, 255, 255, 0.06);
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+}
+
+/* Text contrast (Settings → 通用 → 文字对比度): lifts muted / subtle text and the quiet card edge. Light first, then dark
+   (OS dark without a forced light theme, or forced dark); later + more specific rules win. */
+:root[data-contrast="high"] { --fg-muted: #4a4b50; --fg-subtle: #5a5b61; --card-border: rgba(20, 20, 30, 0.16); }
+:root[data-contrast="max"] { --fg-muted: #303135; --fg-subtle: #46474c; --card-border: rgba(20, 20, 30, 0.28); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-contrast="high"] { --fg-muted: #bdbdc3; --fg-subtle: #9a9aa0; --card-border: rgba(255, 255, 255, 0.14); }
+  :root:not([data-theme="light"])[data-contrast="max"] { --fg-muted: #d6d6db; --fg-subtle: #b4b4ba; --card-border: rgba(255, 255, 255, 0.26); }
+}
+:root[data-theme="dark"][data-contrast="high"] { --fg-muted: #bdbdc3; --fg-subtle: #9a9aa0; --card-border: rgba(255, 255, 255, 0.14); }
+:root[data-theme="dark"][data-contrast="max"] { --fg-muted: #d6d6db; --fg-subtle: #b4b4ba; --card-border: rgba(255, 255, 255, 0.26); }
+
+/* Settings → 外观 (lib/appearance.ts sets the variables on <html>). */
+.markdown {
+  font-family: var(--font-chat, var(--font-sans));
+}
+
+/* Conversation prose outside Markdown (bubbles, bus / collab messages, previews). Text without a
+   shared curly quote gets no font-run spans (lib/fontRuns.ts hasSharedQuote), so the container
+   itself must carry the chat font, as `.markdown` does. */
+.font-chat-context {
+  font-family: var(--font-chat, var(--font-sans));
+}
+
+/* These context variables are set at each prose scope; code/pre keep --font-mono. */
+.markdown, .font-chat-context {
+  --font-context-latin: var(--font-chat-latin, var(--font-sans));
+  --font-context-cjk: var(--font-chat-cjk, var(--font-sans));
+}
+.font-run-latin {
+  font-family: var(--font-context-latin, var(--font-sans-latin, var(--font-sans)));
+}
+.font-run-cjk {
+  font-family: var(--font-context-cjk, var(--font-sans-cjk, var(--font-sans)));
+}
+.markdown pre,
+.markdown pre code {
+  font-size: var(--mono-font-size, 13px);
+}
+/* List density: sidebar rows. */
+:root[data-density="compact"] .density-row { padding-top: 1px; padding-bottom: 1px; }
+:root[data-density="comfortable"] .density-row { padding-top: 7px; padding-bottom: 7px; }
+
+/* Project icons (components/ProjectBadge): a soft tint tile — the project colour
+   (`--project-icon-color`) at a low strength as the tile, the glyph / letters in that colour.
+   Light: the ink is darkened a little so pale hues (yellow, pink) stay legible on white; dark: the
+   tile is a touch stronger and the ink lifted a little so deep hues (blue, purple) read on #161616. */
+:root {
+  --project-icon-tint: 14%;
+  --project-icon-ink: 76%;
+  --project-icon-ink-toward: #000;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --project-icon-tint: 18%;
+    --project-icon-ink: 88%;
+    --project-icon-ink-toward: #fff;
+  }
+}
+:root[data-theme="dark"] {
+  --project-icon-tint: 18%;
+  --project-icon-ink: 88%;
+  --project-icon-ink-toward: #fff;
+}
+.project-icon {
+  background: color-mix(in oklab, var(--project-icon-color) var(--project-icon-tint), transparent);
+  color: color-mix(in oklab, var(--project-icon-color) var(--project-icon-ink), var(--project-icon-ink-toward));
+}
+/* 线条 (项目图标样式 = line): the same ink, no tile. */
+.project-icon.project-icon-line {
+  background: transparent;
+}
+
+/* Sidebar 项目分隔 (lib/projectSeparation): a project's section as a block in its own colour
+   (`--project-color` on the section). The strengths are per theme and low enough that status
+   colours (warn / danger / accent) and the selected row on top keep their contrast. */
+:root {
+  /* 标题行: band, its 1px top edge, the rail beside the rows. */
+  --project-band: 14%;
+  --project-band-edge: 30%;
+  --project-band-rail: 45%;
+  /* Extra project-colour layer over a tinted header / row: hover, active (flyout open, folded with the open agent). */
+  --project-hover: 7%;
+  --project-active: 14%;
+  /* 背景色: block, header. */
+  --project-tint: 5%;
+  --project-tint-header: 9%;
+  /* The selected row inside a tinted block: the page background already stands out in light. */
+  --project-selected: var(--bg);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --project-band: 12%;
+    --project-band-edge: 25%;
+    --project-band-rail: 40%;
+    --project-tint: 4%;
+    --project-tint-header: 8%;
+    /* Dark: --bg is barely lighter than a tinted block, so the selection is raised further. */
+    --project-selected: var(--surface-2);
+  }
+}
+:root[data-theme="dark"] {
+  --project-band: 12%;
+  --project-band-edge: 25%;
+  --project-band-rail: 40%;
+  --project-tint: 4%;
+  --project-tint-header: 8%;
+  --project-selected: var(--surface-2);
+}
+/* 标题行: the header as a full-width band. It reaches past the nav's 6px side padding (and the
+   extra inset of a nested list, `--band-extra`) to the sidebar edges. The project icon (fold
+   toggle, components/ProjectIcon: an 18px slot) moves close to the edge: the header button's left
+   padding is 3px, so the icon's centre sits 12px from the sidebar edge (+ `--band-extra`). */
+.project-band {
+  margin-left: calc(-6px - var(--band-extra, 0px));
+  margin-right: -6px;
+  padding-left: var(--band-extra, 0px);
+  padding-right: 6px;
+  border-radius: 0;
+  background: color-mix(in oklab, var(--project-color) var(--project-band), transparent);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--project-color) var(--project-band-edge), transparent);
+}
+.project-band > button:first-child {
+  padding-left: 3px;
+}
+/* The rows under an expanded band stay untinted, with a 2px rail in the project colour running down
+   from the icon: these blocks start at the nav's 6px padding, so the rail at 5px puts its centre on
+   the icon's (6 + 5 + 1 = 12px from the edge). Rows get an 11px indent (avatars from 23px, clear of
+   the rail); the remark / directory line lines up with the project name (27px). */
+.project-band-body {
+  background: linear-gradient(color-mix(in oklab, var(--project-color) var(--project-band-rail), transparent), color-mix(in oklab, var(--project-color) var(--project-band-rail), transparent)) no-repeat 5px 0 / 2px 100%;
+}
+.project-band-rows {
+  padding-left: 11px;
+}
+.project-band-meta {
+  padding-left: 21px;
+}
+/* 图标引线: a full-width header row like the band, with no tint and no top edge; hover / highlight
+   stay the neutral row greys, square at the sidebar edges. The icon sits in from the edge (button
+   padding 9px: its 18px slot spans 9–27px, centre 18px), and the 2px line hangs straight down from
+   under it: the blocks below start at the nav's 6px padding, so the line at 11px is centred on the
+   icon (6 + 11 + 1 = 18px). Rows get a 15px indent (row hover from 21px, avatars from 27px: clear of
+   the line); the remark / directory line lines up with the project name (33px). */
+.project-lead {
+  margin-left: calc(-6px - var(--band-extra, 0px));
+  margin-right: -6px;
+  padding-left: var(--band-extra, 0px);
+  padding-right: 6px;
+  border-radius: 0;
+}
+.project-lead > button:first-child {
+  padding-left: 9px;
+  border-radius: 0;
+}
+/* An expanded header starts the line 3px under the icon's 14px badge (vertically centred in the
+   row), so it reads as hanging from the icon rather than from the next block. */
+.project-lead {
+  position: relative;
+}
+.project-lead:not(.project-lead-row):has(> button[aria-expanded="true"])::after {
+  content: "";
+  position: absolute;
+  top: calc(50% + 10px);
+  bottom: 0;
+  left: calc(17px + var(--band-extra, 0px));
+  width: 2px;
+  background: color-mix(in oklab, var(--project-color) var(--project-band-rail), transparent);
+  pointer-events: none;
+}
+.project-lead-body {
+  background: linear-gradient(color-mix(in oklab, var(--project-color) var(--project-band-rail), transparent), color-mix(in oklab, var(--project-color) var(--project-band-rail), transparent)) no-repeat 11px 0 / 2px 100%;
+}
+.project-lead-rows {
+  padding-left: 15px;
+}
+.project-lead-meta {
+  padding-left: 27px;
+}
+/* 项目标题着色 off (`project-plain`): header bands keep layout, top edge, icon and rail, no tint.
+   A one-row project in 背景色 keeps the block strength. */
+.project-band.project-plain,
+.project-block-tint .project-block-header.project-plain {
+  background-color: transparent;
+}
+.project-block-tint.project-block-row.project-plain {
+  background: color-mix(in oklab, var(--project-color) var(--project-tint), transparent);
+}
+/* Hover / flyout open / folded-with-the-open-agent on a tinted header or one-row project: a stronger
+   layer of the project colour on top of the tint (never the neutral grey that would replace it).
+   The row's own Tailwind bg-surface-2 / hover:bg-surface-2/60 are overridden here. */
+.project-band[data-highlight],
+.project-block-tint .project-block-header[data-highlight] {
+  background-image: linear-gradient(color-mix(in oklab, var(--project-color) var(--project-active), transparent), color-mix(in oklab, var(--project-color) var(--project-active), transparent));
+}
+.project-band-row > button,
+.project-block-tint.project-block-row > button {
+  background: transparent;
+}
+.project-band-row > button {
+  border-radius: 0;
+}
+.project-band-row > button:hover,
+.project-block-tint.project-block-row > button:hover {
+  background: color-mix(in oklab, var(--project-color) var(--project-hover), transparent);
+}
+.project-band-row > button[data-highlight],
+.project-block-tint.project-block-row > button[data-highlight] {
+  background: color-mix(in oklab, var(--project-color) var(--project-active), transparent);
+}
+.project-block-tint [data-row-selected] {
+  background: var(--project-selected);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--project-color) 30%, transparent), var(--card-shadow);
+}
+.project-block {
+  position: relative;
+  border-radius: 8px;
+}
+.project-block-tint {
+  background: color-mix(in oklab, var(--project-color) var(--project-tint), transparent);
+  padding-bottom: 2px;
+}
+.project-block-tint .project-block-header {
+  background: color-mix(in oklab, var(--project-color) var(--project-tint-header), transparent);
+  border-radius: 8px 8px 4px 4px;
+}
+.project-block-rail::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--project-color);
+  pointer-events: none;
+}
+/* A one-row (collapsed) project is only its header: the header strength over the whole row. */
+.project-block-tint.project-block-row {
+  background: color-mix(in oklab, var(--project-color) var(--project-tint-header), transparent);
+  padding-bottom: 0;
+}
+/* A folded group (Sidebar `data-folded`) is only its header too: the same look and height as a
+   one-row project, so starred (never auto-collapsed) projects line up with the collapsed rows. */
+.project-block-tint[data-folded] {
+  background: transparent;
+  padding-bottom: 0;
+}
+.project-block-tint[data-folded] .project-block-header {
+  border-radius: 8px;
+}
+
+/* streamdown uses shadcn token names (`muted` = background there, a text colour here). */
+.markdown {
+  --color-muted: var(--surface-2);
+  --color-muted-foreground: var(--fg-muted);
+  --color-card: var(--surface);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--fg);
+  --color-primary: var(--accent);
+  --color-primary-foreground: #ffffff;
+  --color-sidebar: var(--surface);
+  /* Long unbroken words / URLs / inline code wrap instead of running past the column
+     (code blocks keep scrolling: their white-space is pre). */
+  overflow-wrap: break-word;
+}
+.markdown [data-streamdown="inline-code"] {
+  overflow-wrap: anywhere;
+}
+/* streamdown gives every code block `content-visibility: auto; contain-intrinsic-size: auto 200px`
+   (inline style): a block that has just mounted is laid out 200px tall for a frame, then snaps to
+   its real height — when a fence opens while a reply streams, and again when the finished reply
+   re-renders in static mode at the turn end (measured: +70px for a 4-line block, then back). The
+   timeline renders a window of recent turns anyway, so blocks are always laid out. */
+.markdown [data-streamdown="code-block"] {
+  content-visibility: visible !important;
+}
+/* Headings in chat (UI review #14): near the body size, semibold, with room above. h1 +2px / h2 +1px /
+   h3–h6 = the body size (16 / 15 / 14 px at the default 14px chat font; `em` = the Markdown's own size,
+   so compact reasoning text scales down too). Whole documents (`markdown-document`, side-pane preview)
+   keep streamdown's sizes. */
+.markdown:not(.markdown-document) :is(h1, h2, h3, h4, h5, h6)[data-streamdown^="heading-"] {
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.45;
+  margin-top: 1.6em;
+  margin-bottom: 0.35em;
+}
+.markdown:not(.markdown-document) h1[data-streamdown="heading-1"] {
+  font-size: calc(1em + 2px);
+}
+.markdown:not(.markdown-document) h2[data-streamdown="heading-2"] {
+  font-size: calc(1em + 1px);
+}
+.markdown:not(.markdown-document) > [data-streamdown^="heading-"]:first-child {
+  margin-top: 0;
+}
+/* Code blocks and tables (UI review #10): one frame. A code block is a single bordered box whose top
+   strip holds the language label and the actions (shown on hover / keyboard focus; still in the tab
+   order); the body inside has no second border. Tables lose streamdown's outer card: the table's
+   own bordered scroller is the frame, its copy / download / fullscreen buttons float over the header
+   row on hover / focus. */
+.markdown [data-streamdown="code-block"] {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  border-color: var(--card-border);
+  background: var(--surface);
+}
+.markdown [data-streamdown="code-block-header"] {
+  height: 32px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--card-border);
+  color: var(--fg-muted);
+}
+.markdown [data-streamdown="code-block"] > :has(> [data-streamdown="code-block-actions"]) {
+  top: 0;
+  right: 4px;
+  height: 32px;
+}
+.markdown [data-streamdown="code-block-actions"],
+.markdown [data-streamdown="table-wrapper"] > :first-child {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.markdown [data-streamdown="code-block-actions"] {
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+.markdown [data-streamdown="code-block"]:is(:hover, :focus-within) [data-streamdown="code-block-actions"],
+.markdown [data-streamdown="table-wrapper"]:is(:hover, :focus-within) > :first-child {
+  opacity: 1;
+}
+.markdown [data-streamdown="code-block-body"] {
+  border: 0;
+  border-radius: 0;
+  padding: 12px 16px;
+  background: var(--bg);
+}
+.markdown [data-streamdown="table-wrapper"] {
+  position: relative;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.markdown [data-streamdown="table-wrapper"] > :first-child {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  background: var(--raised);
+}
+.markdown [data-streamdown="table-wrapper"] > .overflow-x-auto {
+  border-color: var(--card-border);
+}
+/* Horizontal-scroll hint: the edge that has more content fades out. A scroll-driven animation moves
+   the fade lengths with the scroll position; when the box does not overflow its timeline is inactive
+   and both stay 0 (no mask). */
+@property --scroll-fade-l {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --scroll-fade-r {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes scroll-edge-fade {
+  0% {
+    --scroll-fade-l: 0px;
+    --scroll-fade-r: 32px;
+  }
+  8%,
+  92% {
+    --scroll-fade-l: 32px;
+    --scroll-fade-r: 32px;
+  }
+  100% {
+    --scroll-fade-l: 32px;
+    --scroll-fade-r: 0px;
+  }
+}
+@supports (animation-timeline: scroll()) {
+  .markdown [data-streamdown="code-block-body"],
+  .markdown [data-streamdown="table-wrapper"] > .overflow-x-auto {
+    mask-image: linear-gradient(to right, transparent, #000 var(--scroll-fade-l), #000 calc(100% - var(--scroll-fade-r)), transparent);
+    animation: scroll-edge-fade linear both;
+    animation-timeline: scroll(self inline);
+  }
+}
+/* Side-pane preview: the line a file link points at (`path:12`, `#L12`). */
+.markdown [data-focus-line] {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--win);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Labels that sit on one centre line with icons (composer status row, avatar initials). The text box
+   is trimmed to the cap-height band, so `items-center` centres the caps / CJK on the rings and
+   avatars next to them whatever the font's ascent / descent (Georgia, Segoe UI and Song fonts put
+   the glyphs at different heights in the same line box). The symmetric padding keeps the centre and
+   gives descenders and CJK tops room under `truncate`. */
+@utility trim-cap {
+  text-box: trim-both cap alphabetic;
+  padding-block: 0.3em;
+}
+
+/* ── Overlay scrollbars (lib/overlayScrollbarManager.ts; owner 2026-10-10) ─────────────────────────
+   Native scrollbars take no layout space anywhere (on Windows they took 10–15 px and content jumped
+   when a box started to overflow); the shell draws thin thumbs over the edge in one fixed layer.
+   `data-native-scrollbar` on an element keeps native bars for it and its descendants (no thumb there).
+   In the base layer so a component's own utility (e.g. `[scrollbar-width:none]`) still wins. */
+@layer base {
+  * {
+    scrollbar-width: none;
+  }
+  [data-native-scrollbar],
+  [data-native-scrollbar] * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+}
+:root {
+  /* Lighter at rest (owner 2026-10-14: the thumb read heavy next to the settings nav). */
+  --scrollbar-thumb: color-mix(in srgb, var(--fg) 18%, transparent);
+  --scrollbar-thumb-active: color-mix(in srgb, var(--fg) 38%, transparent);
+}
+:root[data-contrast="high"] {
+  --scrollbar-thumb: color-mix(in srgb, var(--fg) 38%, transparent);
+  --scrollbar-thumb-active: color-mix(in srgb, var(--fg) 56%, transparent);
+}
+:root[data-contrast="max"] {
+  --scrollbar-thumb: color-mix(in srgb, var(--fg) 52%, transparent);
+  --scrollbar-thumb-active: color-mix(in srgb, var(--fg) 70%, transparent);
+}
+[data-overlay-scrollbars] {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+}
+/* One per thumb: the visible part of its scroller (clips the thumb to it). */
+.osb-clip {
+  position: absolute;
+  overflow: hidden;
+}
+/* The grab strip (THUMB.hit wide); the bar sits THUMB.inset from the scroller's edge. */
+.osb-hit {
+  position: absolute;
+  opacity: 0;
+  transition: opacity 0.3s ease-out; /* THUMB.fadeOut */
+}
+.osb-hit[data-on] {
+  opacity: 1;
+  pointer-events: auto;
+  transition-duration: 0.1s;
+}
+.osb-bar {
+  position: absolute;
+  border-radius: 9999px;
+  background: var(--scrollbar-thumb);
+  transition:
+    width 0.12s,
+    height 0.12s,
+    background-color 0.12s;
+}
+.osb-hit[data-axis="y"] > .osb-bar {
+  top: 0;
+  bottom: 0;
+  right: 3px; /* THUMB.inset */
+  width: 5px; /* THUMB.thin */
+}
+.osb-hit[data-axis="x"] > .osb-bar {
+  left: 0;
+  right: 0;
+  bottom: 3px;
+  height: 5px;
+}
+.osb-hit[data-axis="y"]:hover > .osb-bar,
+.osb-hit[data-axis="y"][data-dragging] > .osb-bar {
+  width: 8px; /* THUMB.wide */
+}
+.osb-hit[data-axis="x"]:hover > .osb-bar,
+.osb-hit[data-axis="x"][data-dragging] > .osb-bar {
+  height: 8px;
+}
+.osb-hit:hover > .osb-bar,
+.osb-hit[data-dragging] > .osb-bar {
+  background: var(--scrollbar-thumb-active);
+}
+@media (prefers-reduced-motion: reduce) {
+  .osb-hit,
+  .osb-bar {
+    transition: none;
+  }
+}
+@media (forced-colors: active) {
+  .osb-bar {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+}
+
+/* Status capsule (modules/status-capsule): the open panel / collapsed capsule fade and scale in from
+   their corner (transform-origin set per corner); no motion under reduced motion. */
+@keyframes capsule-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+.capsule-in {
+  animation: capsule-in 120ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .capsule-in {
+    animation: none;
+  }
+}
+
+/* A pending send's status line (components/PendingSends): a send that lands within ~0.4 s never shows
+   发送中… / 已送达 flipping under its bubble; one that lingers fades its status in once. */
+@keyframes pending-status-in {
+  from {
+    opacity: 0;
+  }
+}
+.pending-status-in {
+  animation: pending-status-in 160ms ease-out 400ms both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pending-status-in {
+    animation: pending-status-in 0s 400ms both;
+  }
+}
+
+/* Running goal: a soft ring breathing out of the target icon (StatusCapsule GoalMark). */
+@keyframes goal-ping {
+  0% {
+    opacity: 0.45;
+    transform: scale(0.7);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+}
+
+/* Live "thinking" text (ReasoningRow): a highlight band sweeps left → right through the text
+   (gradient clipped to the glyphs). Reduced motion: plain muted text. */
+.text-shimmer {
+  color: transparent;
+  background-image: linear-gradient(90deg, var(--fg-muted) 0%, var(--fg-muted) 40%, var(--fg) 50%, var(--fg-muted) 60%, var(--fg-muted) 100%);
+  background-size: 250% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: text-shimmer 2.2s linear infinite;
+}
+@keyframes text-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .text-shimmer {
+    color: var(--fg-muted);
+    background-image: none;
+    animation: none;
+  }
+}
+
+/* Running agent (sidebar v2): an accent arc spinning around the avatar. Reduced motion: a static ring. */
+.agent-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  pointer-events: none;
+  background: conic-gradient(from 0deg, var(--accent), color-mix(in srgb, var(--accent) 10%, transparent) 75%, var(--accent));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  animation: agent-ring-spin 1.4s linear infinite;
+}
+@keyframes agent-ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-ring {
+    animation: none;
+    background: var(--accent);
+  }
+}
+
+/* ── Shell cards and the right side (会话两侧 RFC §3.2, §3.8a) ─────────────────────────────── */
+/* A region of the window: the conversation / page card, each right-side card. */
+.shell-card {
+  background: var(--bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  box-shadow: var(--card-shadow);
+}
+/* The reading column (timeline, 需要你 strip, archived banner, runtime note, composer, dock). Centred
+   in the conversation card; with 右栏与对话 = 让位 (--side-shift = the right side's in-flow width) it is
+   centred as if the card also covered the right side, moves left only when the card's right
+   whitespace no longer absorbs the side, then narrows. --reading-w: none (full width) → margin 0. */
+.side-col {
+  --col-w: var(--reading-w, 48rem);
+  max-width: var(--col-w);
+  margin-left: max(0px, min(calc((100% + var(--side-shift, 0px) - var(--col-w)) / 2), calc(100% - var(--col-w))));
+  margin-right: auto;
+}
+.side-col-composer {
+  --col-w: 48rem;
+}
+/* Page buttons: the grip on a pill's left edge shows its dots on hover. */
+.side-pill-grip i {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.side-pill-grip:hover i,
+.side-pill-grip:focus-visible i {
+  opacity: 0.6;
+}
+@keyframes side-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  80%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+.side-busy::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: var(--ok);
+  animation: side-ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes side-flash {
+  0%,
+  30% {
+    box-shadow: 0 0 0 2px var(--accent), var(--card-shadow);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent, var(--card-shadow);
+  }
+}
+.side-flash {
+  animation: side-flash 1.3s ease-out;
+}
+/* Dragging on the right side (lib/sideDnd.ts): the instance layer (a guest <webview>) never takes the
+   drag's pointer events; no text selection on the way. */
+:root[data-side-dragging] [data-side-instance] {
+  pointer-events: none;
+}
+:root[data-side-dragging] body {
+  user-select: none;
+}
+/* Gap / card-edge resize handles: an accent line in their middle on hover / focus / drag. */
+.side-handle-v::after,
+.side-handle-h::after {
+  content: "";
+  position: absolute;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.12s;
+}
+.side-handle-v::after {
+  left: calc(50% - 1px);
+  top: 30%;
+  bottom: 30%;
+  width: 2px;
+}
+.side-handle-h::after {
+  top: calc(50% - 1px);
+  left: 35%;
+  right: 35%;
+  height: 2px;
+}
+.side-handle-v:hover::after,
+.side-handle-v:focus-visible::after,
+.side-handle-v[data-dragging]::after,
+.side-handle-h:hover::after,
+.side-handle-h:focus-visible::after,
+.side-handle-h[data-dragging]::after {
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .side-busy::after,
+  .side-flash {
+    animation: none;
+  }
+}
+
+/* ── Timeline intro (v1.12 timeline.intro, docs/desktop-modules.md §19.3) ─────────────────────── */
+/* The session's opening above its first turn: portrait (custom → provider artwork) over the
+   greeting, centred like the launcher's entrance. Its own inline-size container drives the narrow
+   behaviour: the portrait shrinks with the reading column and drops out below ~21rem. */
+.timeline-intro {
+  container: timeline-intro / inline-size;
+}
+.timeline-intro-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.75rem 0 0.5rem;
+  text-align: center;
+}
+.timeline-intro-figure {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  height: clamp(8.5rem, 34cqw, 14rem);
+  overflow: hidden;
+  /* The shared lower fade: the figure dissolves into the turns below it. */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 2.25rem), transparent 100%);
+}
+.timeline-intro-figure img {
+  height: 100%;
+  width: auto;
+  max-width: min(62cqw, 24rem);
+  object-fit: contain;
+  object-position: center bottom;
+}
+/* Provider artwork keeps the launcher's monochrome cast; a custom portrait keeps its colours. */
+.timeline-intro-figure.is-provider img {
+  filter: grayscale(1);
+}
+.timeline-intro-greeting {
+  max-width: min(88cqw, 40rem);
+  font-size: clamp(1rem, 2.3cqw, 1.2rem);
+  line-height: 1.55;
+  color: var(--fg-muted);
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+@container timeline-intro (max-width: 30rem) {
+  .timeline-intro-figure {
+    height: clamp(6.5rem, 26cqw, 9rem);
+  }
+}
+@container timeline-intro (max-width: 21rem) {
+  .timeline-intro-figure {
+    display: none;
+  }
+}
+
+/* Notifications never scroll sideways (components/ClampBox, owner 2026-10-15): inside `.wrap-all`
+   Markdown code blocks and tables wrap too, long paths / ids break anywhere. */
+.wrap-all {
+  overflow-wrap: anywhere;
+}
+.wrap-all pre,
+.wrap-all pre code {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere;
+}
+.wrap-all [data-streamdown="code-block-body"],
+.wrap-all .overflow-x-auto {
+  overflow-x: hidden !important;
+}
+.wrap-all table {
+  table-layout: fixed;
+}
+.wrap-all td,
+.wrap-all th {
+  overflow-wrap: anywhere;
+}

@@ -1,0 +1,6 @@
+# Kimi softer chin — built-in imagegen
+
+Input: `kimi-portrait-cutout.png` (previous original cutout, not face-v2).
+Output: `kimi-portrait-soft-chin-v3.png`, 1122×1402 RGBA, transparent exterior.
+
+Use case: precise-object-edit. The supplied image is the ORIGINAL previous Kimi ID portrait cutout and the sole edit target. Make the lower jaw and chin gently rounded and softer: replace the sharp V-shaped chin tip with a natural small smooth U-shaped arc, slightly shorten the chin and retain soft cheek width. Do NOT narrow or elongate the face. Keep a refined adult anime face, not a chibi or baby face. Also carry forward the agreed character detail: exactly one tiny black tear mole below the eye on the VIEWER'S RIGHT side of the image, close below the outer lower eyelid on skin, about 5px diameter at original size. No mole near lips or mouth. Keep original mild smile, eyes, nose, gaze, hair, headgear, K ornaments, all accessories and clothing unchanged. Retain original monochrome ink line art, detailed shading and opaque internal white fills. Preserve exact 1122x1402 canvas, pose, scale, framing, and transparent exterior background. Make only these localized chin/contour and tear-mole changes; do not redraw the rest or add anything else. ID portrait only.

@@ -1,0 +1,268 @@
+/* Big alert window (owner-notify bigAlert). Same palette as styles.css, standalone. */
+:root {
+  --bg: #ffffff;
+  --surface: #f6f6f7;
+  --surface-2: #ececee;
+  --fg: #1b1b1f;
+  --fg-muted: #5b5c63;
+  --border: #e3e3e6;
+  --accent: #3b82f6;
+  --warn: #d97706;
+  --danger: #dc2626;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1c1c1d;
+    --surface: #232325;
+    --surface-2: #2c2c2f;
+    --fg: #ececec;
+    --fg-muted: #a4a4aa;
+    --border: #36363a;
+    --accent: #60a5fa;
+    --warn: #f59e0b;
+    --danger: #f87171;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1c1c1d;
+  --surface: #232325;
+  --surface-2: #2c2c2f;
+  --fg: #ececec;
+  --fg-muted: #a4a4aa;
+  --border: #36363a;
+  --accent: #60a5fa;
+  --warn: #f59e0b;
+  --danger: #f87171;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  user-select: none;
+}
+#alert {
+  height: 100%;
+}
+.card {
+  --level: var(--accent);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border: 1px solid color-mix(in srgb, var(--level) 45%, var(--border));
+  background: var(--bg);
+}
+.card.level-attention {
+  --level: var(--warn);
+}
+.card.level-urgent {
+  --level: var(--danger);
+}
+.stripe {
+  height: 5px;
+  flex-shrink: 0;
+  background: var(--level);
+}
+.card.level-urgent .stripe {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px 8px;
+  -webkit-app-region: drag;
+}
+.avatar {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+}
+.who {
+  min-width: 0;
+  flex: 1;
+}
+.name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.name {
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badge {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--level);
+  background: color-mix(in srgb, var(--level) 14%, transparent);
+}
+.badge-urgent {
+  color: #fff;
+  background: var(--danger);
+}
+.meta {
+  color: var(--fg-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  -webkit-app-region: no-drag;
+}
+.nav {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.body {
+  min-height: 0;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px 18px 8px 70px;
+  user-select: text;
+}
+.text {
+  font-size: 15px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.refs {
+  margin-top: 6px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+.actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px 14px;
+}
+.spacer,
+.needs,
+.hint {
+  flex: 1;
+}
+.needs {
+  color: var(--warn);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.hint {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.btn {
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 16px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.btn.primary {
+  border-color: transparent;
+  background: var(--level);
+  color: #fff;
+  font-weight: 600;
+}
+.btn.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--level) 85%, #000);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.reply {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  padding: 0 18px;
+}
+.reply textarea {
+  height: 72px;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+.reply textarea:focus {
+  border-color: var(--level);
+}
+.btn:focus-visible,
+.nav:focus-visible {
+  outline: 2px solid var(--level);
+  outline-offset: 1px;
+}
+.reply .actions {
+  padding: 8px 0 12px;
+}
+.error {
+  position: absolute;
+  right: 18px;
+  bottom: 52px;
+  max-width: 70%;
+  overflow-wrap: anywhere;
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg));
+  color: var(--danger);
+  font-size: 12px;
+}

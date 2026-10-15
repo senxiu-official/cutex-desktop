@@ -1,0 +1,21 @@
+{
+  "name": "cutex-desktop-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.34.6",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @cutex-desktop/app dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "gen:protocol": "node scripts/gen-protocol.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1",
+    "resedit": "^3.1.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

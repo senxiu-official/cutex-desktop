@@ -1,0 +1,41 @@
+# Creates the GitHub release for a pushed version tag. Title and notes come from the tag's
+# CHANGELOG.md section ("## <version> ..."), else from the release commit message.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          title="$version"
+          notes=""
+          if [ -f CHANGELOG.md ]; then
+            heading=$(grep -m1 -F "## $version" CHANGELOG.md | grep -E "^## ${version//./\\.}( |$)" || true)
+            if [ -n "$heading" ]; then
+              title=$(printf '%s' "${heading#\#\# }" | sed -E 's/ \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$//')
+              notes=$(awk -v h="$heading" '$0 == h { p = 1; next } p && /^## / { exit } p' CHANGELOG.md)
+            fi
+          fi
+          if [ -z "$notes" ]; then
+            notes=$(git log -1 --format=%b "$TAG" | grep -v -i '^co-authored-by:' || true)
+          fi
+          printf '%s\n' "$notes" > "$RUNNER_TEMP/notes.md"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" --title "$title" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$TAG" --verify-tag --title "$title" --notes-file "$RUNNER_TEMP/notes.md"
+          fi

@@ -1,0 +1,15 @@
+{
+  "name": "@cutex-desktop/opaque-frame",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./page": "./src/page.ts",
+    "./documents": "./src/documents.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "apiVersion": 1,
+  "id": "desk-note",
+  "name": "Desk note",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "script": "main.js",
+  "styles": ["style.css"],
+  "capabilities": ["views", "entries", "settings"],
+  "requires": {"hosts": "any"},
+  "contributes": {
+    "main.page": [{"id": "desk-note.main", "title": "Desk note"}],
+    "nav.primary": [{"id": "desk-note.open", "title": "Desk note", "page": "desk-note.main", "order": 1100}]
+  }
+}

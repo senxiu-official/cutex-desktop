@@ -1,0 +1,139 @@
+.launch-page { position: relative; container: launcher / size; isolation: isolate; }
+/* Anchor the welcome art to the page, never to the changing height of the settings below it. */
+.launch-intro { position: absolute; inset-inline: 1rem; top: clamp(1.5rem, calc(26cqh - 4.25rem), 20rem); pointer-events: none; }
+.launch-intro-icon > svg { width: 2rem; height: 2rem; }
+.launch-intro-title { max-width: 44rem; font-size: clamp(1.75rem, 4cqw, 2.5rem); line-height: 1.2; overflow-wrap: anywhere; text-wrap: balance; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.launch-intro-title-long { font-size: clamp(1.125rem, 3cqw, 1.75rem); -webkit-line-clamp: 4; }
+.launch-intro-with-art { top: 1rem; bottom: 23rem; width: calc(100% - 2rem); max-width: 46rem; margin-inline: auto; padding-inline: 0; z-index: 1; }
+.launch-portrait-stage { width: 100%; height: 100%; min-height: 0; pointer-events: auto; }
+.launch-portrait-strip { display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100%; height: 100%; margin-inline: auto; }
+.launch-portrait-card { position: relative; display: grid; grid-row: span 2; grid-template-rows: subgrid; min-width: 0; min-height: 0; background: transparent; border-inline-end: 1px solid color-mix(in srgb, var(--fg-muted) 12%, transparent); isolation: isolate; transition: filter 200ms ease; }
+.launch-portrait-card:last-child { border-inline-end: 0; }
+/* One shared lower crop/fade line; optical scale accounts for different source eye lines. */
+.launch-portrait-pick { position: relative; min-height: 0; width: 100%; }
+.launch-portrait-figure { position: absolute; inset: 0; overflow: hidden; mask-image: linear-gradient(to bottom, #000 calc(100% - 5rem), transparent 100%); }
+/* Keep a small image bleed below the shared crop so optical offsets never lift a raw hem into view. */
+.launch-portrait-card img { position: absolute; max-width: none; height: auto; max-height: calc(100% + 20px); object-fit: contain; object-position: center bottom; left: 50%; bottom: -20px; transform: translateX(-50%); filter: grayscale(1); }
+.launch-portrait-card.is-muted { filter: brightness(.42); }
+.launch-portrait-card:focus-within, .launch-portrait-card:hover { z-index: 3; }
+.launch-portrait-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.launch-portrait-caption { position: relative; min-height: 4.5rem; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: .35rem; padding: .4rem .2rem .5rem; }
+.launch-portrait-name { color: var(--fg); font-family: Georgia, "Times New Roman", serif; font-size: 1.6rem; font-weight: 400; line-height: 1.2; letter-spacing: -.045em; }
+.launch-portrait-profiles { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: center; gap: .15rem; width: 100%; }
+.launch-portrait-profile { display: inline-flex; max-width: 100%; min-width: 0; align-items: center; justify-content: center; border: 0; border-radius: 0; padding: .25rem .5rem; color: var(--fg-muted); font-size: .75rem; line-height: 1.3; }
+.launch-portrait-profile span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launch-portrait-profile:hover, .launch-portrait-profile[aria-pressed=true] { background: transparent; color: var(--fg); }
+.launch-portrait-profile[aria-pressed=true] { box-shadow: none; }
+.launch-portrait-profile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.launch-portrait-profile:disabled { opacity: .45; }
+.launch-portrait-selected { position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100%; height: calc(100% + 1.5rem); }
+.launch-victory { position: relative; width: 100%; height: 100%; min-height: 0; }
+.launch-victory.is-entering { animation: launch-victory-in 350ms ease-out both; }
+.launch-art-greeting { position: absolute; top: 100%; margin-top: 3rem; width: 100%; padding-inline: 1rem; font-size: clamp(1.1rem, 2.5cqw, 1.5rem); line-height: 1.5; font-weight: 400; color: var(--fg-muted); text-wrap: balance; overflow-wrap: anywhere; pointer-events: none; }
+.launch-victory img { position: absolute; top: 0; left: 50%; width: auto; max-width: 100%; height: 100%; object-fit: contain; transform: translateX(-50%); }
+.launch-victory-sharp { filter: grayscale(1); mask-image: linear-gradient(to bottom, #000 84%, transparent 100%), linear-gradient(to right, transparent, #000 4%, #000 96%, transparent); mask-composite: intersect; }
+.launch-victory-soft { filter: grayscale(1) blur(8px); opacity: .45; mask-image: linear-gradient(to bottom, #000 82%, transparent 100%), linear-gradient(to right, transparent, #000 2%, #000 98%, transparent); mask-composite: intersect; }
+@keyframes launch-victory-in { from { opacity: 0; transform: translateY(.5rem) scale(.96); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .launch-portrait-card { transition: none; }
+  .launch-victory.is-entering { animation: none; }
+}
+.launch-page:has(.launch-intro-with-art) > .launch-dock { z-index: 2; }
+.launch-dock { position: relative; z-index: 1; flex-shrink: 0; width: 100%; max-width: 48rem; margin: auto auto 0; padding: 0 1rem .75rem; }
+@container launcher (min-width: 1200px) { .launch-dock { max-width: 56rem; } }
+.launch-toolbar { display: flex; min-width: 0; height: 1.75rem; align-items: center; gap: .125rem; margin-top: .25rem; padding-inline: .125rem; }
+.launch-settings { display: grid; gap: .4rem; min-width: 0; }
+.launch-setting-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; min-width: 0; }
+.launch-setting-row > div { min-width: 0; }
+.launch-setting-single { grid-template-columns: minmax(0, 1fr); }
+.launch-setting-project { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.launch-name-row { display: flex; min-width: 0; align-items: center; gap: .4rem; }
+/* Profile / model / reasoning: the model chip gets twice the room (model ids are long). */
+.launch-setting-model { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); }
+.launch-value { display: flex; min-width: 0; width: 100%; align-items: center; gap: .5rem; white-space: nowrap; text-align: left; }
+/* The label gives way long before the value (shrink weight 100 : 1), down to two glyphs (a whole
+   zh label); the chip's title has both. */
+.launch-value-label { flex: 0 100 auto; min-width: min(2em, 100%); overflow: hidden; text-overflow: clip; }
+.launch-value-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.launch-setting-row > .relative > button,
+.launch-setting-row > button,
+.launch-name-row > .relative > button,
+.launch-name,
+.launch-inline-control,
+.launch-director {
+  display: flex;
+  min-width: 0;
+  min-height: 2.25rem;
+  align-items: center;
+  gap: .5rem;
+  padding: .35rem .65rem;
+  border: 1px solid var(--border);
+  border-radius: .65rem;
+  background: var(--bg);
+  font-size: .75rem;
+  color: var(--fg-muted);
+}
+.launch-setting-row > .relative > button { width: 100%; }
+.launch-setting-row > button:hover, .launch-setting-row > .relative > button:hover { background: var(--surface); }
+.launch-name { flex: 1; }
+.launch-name:focus-within { border-color: var(--accent); }
+.launch-name-row > .relative { flex-shrink: 0; }
+.launch-director { justify-content: space-between; }
+.launch-inline-control { justify-content: space-between; padding-block: .1rem; }
+.launch-profile-bar > div { min-width: 0; }
+/* A <button> sizes to its content: cap it to its shrunk wrapper so the quota text cannot run
+   under the model name; the effort value never shrinks. */
+.launch-profile-bar > div > button { max-width: 100%; overflow: hidden; }
+.launch-profile-bar > div:last-child { flex-shrink: 0; }
+.launch-toolbar:disabled, .launch-settings:disabled { opacity: .6; }
+.launch-popover {
+  position: absolute;
+  bottom: calc(100% + .65rem);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  max-height: min(28rem, calc(100dvh - 26rem));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--bg);
+  box-shadow: 0 8px 32px #00000016, 0 2px 6px #00000008;
+}
+.launch-project-anchor > .launch-popover {
+  bottom: calc(100% + .4rem);
+  right: auto;
+  width: min(36rem, calc(100cqw - 2rem));
+  max-height: min(28rem, calc(100dvh - 15rem));
+}
+.launch-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
+.launch-field { display: flex; min-width: 0; flex-direction: column; gap: .5rem; font-size: .75rem; color: var(--fg-muted); }
+.launch-field :is(input, select) { width: 100%; min-width: 0; max-width: 100%; }
+.launch-field select { text-overflow: ellipsis; }
+.launch-profile-choice { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: 100%; padding: .55rem .65rem; border-radius: .5rem; text-align: left; font-size: .875rem; }
+.launch-profile-choice:hover { background: var(--surface); }
+.launch-profile-choice:disabled { opacity: .4; }
+@container (max-width: 520px) {
+  .launch-portrait-name { font-size: 1.05rem; letter-spacing: -.04em; }
+  .launch-portrait-profile { font-size: .65rem; padding-inline: .15rem; }
+  .launch-intro-with-art { bottom: 27rem; }
+  .launch-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .launch-setting-row:not(.launch-setting-single):not(.launch-setting-project) { display: contents; }
+  .launch-setting-single, .launch-setting-project, .launch-name-row { grid-column: 1 / -1; }
+  /* Two columns: the model chip takes a full row, reasoning backfills beside the profile. */
+  .launch-settings { grid-auto-flow: row dense; }
+  .launch-setting-model > :nth-child(2) { grid-column: 1 / -1; }
+  .launch-setting-project { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .launch-fields { grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+  .launch-value { gap: .3rem; }
+  .launch-setting-row > .relative > button, .launch-setting-row > button { padding-inline: .45rem; }
+}
+@container launcher (max-height: 650px) {
+  .launch-intro { top: 1rem; }
+  .launch-intro-title { font-size: 1.75rem; }
+  .launch-intro-icon, .launch-intro > p { display: none; }
+}
+@container launcher (max-height: 450px) {
+  .launch-intro { display: none; }
+}

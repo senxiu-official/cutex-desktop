@@ -1,0 +1,28 @@
+export const browserHostSettingsZhCN = {
+  "browser.host.settings": "此主机的浏览器权限",
+  "browser.host.approval": "{{agent}}自开页面审批",
+  "browser.host.approvalHint": "立即保存到此主机。只影响新开页面；认领你的标签始终需要批准。独立网页登录池不沿用你的登录态。",
+  "browser.host.off": "无需审批（默认）", "browser.host.ask": "每次审批",
+  "browser.host.unavailable": "需先开启浏览器模块，并连接支持 browser-relay-v1 的主机。",
+  "browser.host.failed": "读取或保存未确认。不会自动重试；重新打开此页面核对实际设置。",
+  "browser.profile.tools": "浏览器工具",
+  "browser.profile.hint": "默认关闭。此开关立即单独保存，在下次启动或工具重载时生效；打开后仍需给{{agent}}授予标签或批准认领",
+  "browser.profile.moduleOff": "浏览器模块已关闭。先在 模块 中打开它，才能为此 Profile 开启浏览器工具",
+  "browser.hold.limit": "同时交给{{agent}}的标签上限",
+  "browser.hold.hint": "与会话两侧的“保持挂载”共用上限（默认 4）；这里不另存副本",
+  "browser.hold.link": "打开会话两侧设置",
+} as const;
+export const browserHostSettingsEn: Record<keyof typeof browserHostSettingsZhCN, string> = {
+  "browser.host.settings": "Browser permissions on this host",
+  "browser.host.approval": "Approval for {{agent}}-opened pages",
+  "browser.host.approvalHint": "Saved immediately on this host. Affects new pages only; claiming your tabs always requires approval. The separate login pool does not reuse your website logins.",
+  "browser.host.off": "No approval (default)", "browser.host.ask": "Ask every time",
+  "browser.host.unavailable": "Enable the browser module and connect to a host supporting browser-relay-v1 first.",
+  "browser.host.failed": "Read or save was not confirmed. No automatic retry; reopen this page to check the actual setting.",
+  "browser.profile.tools": "Browser tools",
+  "browser.profile.hint": "Off by default. Saved immediately and separately; applies on next launch or tool reload. Enabling does not grant control of your tabs: an explicit grant or claim approval is still required.",
+  "browser.profile.moduleOff": "The Browser module is off. Turn it on under Modules first, then browser tools can be enabled for this Profile.",
+  "browser.hold.limit": "Maximum tabs granted to {{agents}}",
+  "browser.hold.hint": "Shares the conversation sides' keep-mounted limit (default 4); no duplicate setting is stored here.",
+  "browser.hold.link": "Open conversation sides settings",
+};

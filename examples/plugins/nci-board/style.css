@@ -1,0 +1,7 @@
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+body { margin: 0; padding: 24px; }
+main { max-width: 800px; margin: auto; }
+p { color: gray; }
+ul { padding-left: 20px; }
+li { margin: 10px 0; }
+button { padding: 7px 12px; border: 1px solid gray; border-radius: 6px; cursor: pointer; }

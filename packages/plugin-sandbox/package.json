@@ -1,0 +1,18 @@
+{
+  "name": "@cutex-desktop/plugin-sandbox",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./document": "./src/document.ts",
+    "./manifest": "./src/manifest.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cutex-desktop/opaque-frame": "workspace:*"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@cutex-desktop/cutex-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cutex-desktop/protocol": "workspace:*"
+  }
+}

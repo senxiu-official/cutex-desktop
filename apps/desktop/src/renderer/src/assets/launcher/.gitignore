@@ -1,0 +1,7 @@
+# Owner-managed artwork is deliberately excluded from the review commit.
+# Copy the ten files with scripts/copy-launcher-art.ps1 / .sh; optional — without them the
+# launcher shows the icon intro (lib/launchArt.ts).
+*.png
+*.jpg
+*.jpeg
+*.webp

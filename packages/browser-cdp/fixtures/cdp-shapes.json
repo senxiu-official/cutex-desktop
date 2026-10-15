@@ -1,0 +1,12 @@
+{
+  "provenance": "Hand-authored deterministic CDP-shaped fixtures, not a claimed browser recording. The real Electron lab records and verifies independently.",
+  "frameTree": { "frameTree": { "frame": { "id": "main", "url": "http://127.0.0.1:25399/fixture", "securityOrigin": "http://127.0.0.1:25399" } } },
+  "ax": { "nodes": [
+    { "nodeId": "1", "backendDOMNodeId": 1, "frameId": "main", "role": { "value": "RootWebArea" }, "name": { "value": "Input fixture" } },
+    { "nodeId": "2", "backendDOMNodeId": 2, "role": { "value": "textbox" }, "name": { "value": "Message" }, "value": { "value": "before" } },
+    { "nodeId": "3", "backendDOMNodeId": 3, "role": { "value": "button" }, "name": { "value": "Submit" } },
+    { "nodeId": "4", "ignored": true, "backendDOMNodeId": 4 },
+    { "nodeId": "5", "backendDOMNodeId": 5, "frameId": "child-process", "role": { "value": "textbox" }, "name": { "value": "OOP child" } }
+  ] },
+  "png": { "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aBXsAAAAASUVORK5CYII=" }
+}

@@ -1,0 +1,28 @@
+export const browserOwnerUiZhCN = {
+  "browser.owner.select": "选择此主机的{{agent}}", "browser.owner.loadAgents": "读取可授予的{{agent}}",
+  "browser.owner.loadingAgents": "正在读取…", "browser.owner.noAgents": "此主机没有可接收控制的{{agent}}",
+  "browser.owner.grant": "交给所选{{agent}}", "browser.owner.resume": "明确继续控制", "browser.owner.revoke": "停止并撤销授予",
+  "browser.owner.granted": "已交给 {name}", "browser.owner.operating": "{name} 正在操作网页", "browser.owner.paused": "{name} 已暂停 · 等待你明确继续",
+  "browser.owner.pending": "正在为 {name} 准备控制", "browser.owner.loginOwner": "此标签沿用此主机上{{owner}}的网页登录态。",
+  "browser.owner.loginAgent": "此标签使用此主机上独立的{{agent}}网页登录池，不沿用手动标签的登录态。",
+  "browser.owner.confirmOwner": "将此标签交给 {name}？此标签沿用此主机上{{owner}}的网页登录态。对方可以读取页面、填写表单并操作网页，可能修改真实数据。仅在你信任这个{{agent}}时继续。",
+  "browser.owner.confirmAgent": "将此标签交给 {name}？此标签使用此主机上独立的{{agent}}网页登录池。对方可以读取页面、填写表单并操作网页，可能修改真实数据。",
+  "browser.owner.failed": "浏览器控制请求未完成。请检查主机连接、标签状态及授权设置；不会自动重试。",
+  "browser.owner.settingsHint": "这些本机选项在下一次明确授予或继续控制时应用；修改设置不会自动授予或恢复控制",
+  "browser.owner.pickerSearch": "搜索{{agent}}或项目", "browser.owner.pickerNoMatch": "没有匹配的{{agent}}",
+  "browser.owner.pickerSuggested": "当前对话与最近授予", "browser.owner.pickerIndependent": "独立{{agent}}", "browser.owner.pickerCurrent": "当前对话",
+} as const;
+export const browserOwnerUiEn: Record<keyof typeof browserOwnerUiZhCN, string> = {
+  "browser.owner.select": "Choose {{an agent}} on this host", "browser.owner.loadAgents": "Read eligible {{agents}}",
+  "browser.owner.loadingAgents": "Reading…", "browser.owner.noAgents": "No eligible {{agents}} on this host",
+  "browser.owner.grant": "Grant to selected {{agent}}", "browser.owner.resume": "Explicitly resume control", "browser.owner.revoke": "Stop and revoke grant",
+  "browser.owner.granted": "Granted to {name}", "browser.owner.operating": "{name} is operating the page", "browser.owner.paused": "{name} is paused · awaiting your explicit resume",
+  "browser.owner.pending": "Preparing control for {name}", "browser.owner.loginOwner": "This tab reuses the {{owner}}'s website logins on this host.",
+  "browser.owner.loginAgent": "This tab uses the host's separate {{agent}} login pool, not manual-tab logins.",
+  "browser.owner.confirmOwner": "Grant this tab to {name}? It reuses the {{owner}}'s website logins on this host. The recipient can read pages, fill forms and operate the page, potentially changing real data. Continue only if you trust this {{agent}}.",
+  "browser.owner.confirmAgent": "Grant this tab to {name}? It uses this host's separate {{agent}} login pool. The recipient can read pages, fill forms and operate the page, potentially changing real data.",
+  "browser.owner.failed": "The browser control request did not complete. Check the host connection, tab and permission settings; it will not retry automatically.",
+  "browser.owner.settingsHint": "These local options apply on your next explicit grant or resume. Changing settings never grants or resumes control automatically.",
+  "browser.owner.pickerSearch": "Search {{agents}} or projects", "browser.owner.pickerNoMatch": "No matching {{agents}}",
+  "browser.owner.pickerSuggested": "Current conversation and recent grants", "browser.owner.pickerIndependent": "Independent {{agents}}", "browser.owner.pickerCurrent": "this conversation",
+};

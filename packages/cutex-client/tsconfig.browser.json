@@ -1,0 +1,10 @@
+{
+  // The main entry as a browser / WebView sees it: DOM lib, no @types/node. Any Node built-in or
+  // `NodeJS.*` / `process` / `Buffer` reachable from src/index.ts fails this check.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "files": ["src/index.ts"]
+}

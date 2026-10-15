@@ -1,0 +1,15 @@
+{
+  "apiVersion": 1,
+  "id": "nci-board",
+  "name": "NCI demo board",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "script": "main.js",
+  "styles": ["style.css"],
+  "capabilities": ["views", "entries", "agents.read", "agents.open"],
+  "requires": {"hosts": "any"},
+  "contributes": {
+    "main.page": [{"id": "nci-board.main", "title": "NCI demo board"}],
+    "nav.primary": [{"id": "nci-board.open", "title": "NCI demo board", "page": "nci-board.main", "order": 1200}]
+  }
+}
