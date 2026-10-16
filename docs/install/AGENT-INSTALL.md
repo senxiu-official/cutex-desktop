@@ -58,8 +58,15 @@ https://github.com/senxiu-official/cutex-desktop/issues) instead of using anothe
    installing system packages) and before changing a system setting.
 4. Do not touch an existing `~/.cutex` without asking: it may hold someone's agents. This guide
    assumes a fresh machine.
-5. Placeholders look like `<this>`. Shell variables set in one step are reused in later steps of
-   the same shell; if you open a new shell, set them again.
+5. Placeholders look like `<this>`. Most agent shell tools start a new shell for every command,
+   so variables and `PATH` changes from one block are gone in the next. Section B therefore writes
+   its settings to a file in B.1, and every later block starts by loading it
+   (`. ~/cutex-download/cutex-install.env`; Windows: the `Invoke-Expression` line). In sections 2 to 7,
+   each block sets what it needs at its top; if a block uses a variable it does not set, rerun the
+   lines that set it in the same command.
+6. Start the desktop app detached (as the commands below do), never as a foreground command: a GUI
+   started in the foreground keeps the shell tool waiting until it times out, which usually kills
+   the app.
 
 ## 1. Prerequisites
 
@@ -154,9 +161,15 @@ Skip to section 7 on a Mac.
 ## B. Install from release binaries
 
 This path installs the same programs as sections 2 to 7 without compiling anything: about 15
-minutes and 2 GB of disk. It needs no Rust, no C/C++ toolchain and no Node.js. Prerequisites from
-section 1: Linux `curl`, `python3`, a systemd user session and `~/.local/bin` on PATH; Windows
-Python 3 (`py`); macOS nothing for the desktop. Section 0's rules apply unchanged.
+minutes and 2 GB of disk. It needs no Rust, no C/C++ toolchain and no Node.js. Prerequisites:
+
+- **Linux**: `curl`, `python3`, a systemd user session and `~/.local/bin` on PATH (section 1), and
+  minisign (B.1).
+- **Windows**: Python 3 (`py`, section 1) and minisign (B.1); `curl.exe` and `tar` ship with
+  Windows 10 / 11.
+- **macOS** (desktop only): minisign (B.1); `curl`, `ditto` and `codesign` ship with macOS.
+
+Section 0's rules apply unchanged.
 
 The GitHub Releases carry binaries built by GitHub Actions from the tagged commit of each
 repository:
@@ -164,8 +177,12 @@ repository:
 | Release | Files (`<platform>` = `linux-x64` or `windows-x64`) |
 |---|---|
 | `senxiu-official/cutex` → `v<version>` | `cutex-<version>-<platform>.tar.gz` (`cutex`, `cutex-mcp`), `manifest.json` |
-| `senxiu-official/cute-codex` → `cute-codex-v<native version>` | `native-<native version>-<platform>.tar.gz` (`codex-app-server`, `codex`, `codex-code-mode-host`, the protocol schema) |
+| `senxiu-official/cute-codex` → `cute-codex-v<native version>` | `native-<native version>-<platform>.tar.gz` (`codex-app-server`, `codex`, `codex-code-mode-host`, the protocol schema, `cute-codex-build.json` with its `version` and `commit`) |
 | `senxiu-official/cutex-desktop` → `v<version>` | `cutex-desktop-<version>-linux-x64.tar.gz`, `-windows-x64.zip`, `-macos-arm64.zip` (Apple silicon), `-macos-x64.zip` (Intel) |
+
+The same native archives are also attached to the `native-<native version>` release of
+`senxiu-official/cutex`, which is where Backend updates download them from. They are the same files
+(same SHA-256; only the signature timestamps differ), so either copy is right.
 
 Every file has a `<file>.minisig` signature next to it, and each release a `SHA256SUMS` (+
 `.minisig`). The owner signs them offline with the release key; CI never holds it. The public key
@@ -177,34 +194,116 @@ in this repository:
 RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
 ```
 
-The versions that belong together are the ones in the cutex release's `manifest.json` (`native.version`)
-and in the table below; for this release:
+The versions that belong together are in the table below. A cutex release's `manifest.json` names
+a `native` block (`native.version`, `native.commit`) only when that release brings a new cute-codex;
+a release without one keeps the native of the newest earlier release that has it. cutex 0.1.1 has
+none and keeps `0.160.0-r52.2` from cutex 0.1.0 (see the `native` block of
+https://github.com/senxiu-official/cutex/releases/download/v0.1.0/manifest.json). The `cute-codex-build.json`
+inside the native archive (`version`, `commit`) says which one you unpacked.
 
-| | Linux / Windows / macOS |
-|---|---|
-| `VERSION` (cutex) | `0.1.1` |
-| `DESKTOP_VERSION` (desktop) | `0.1.2` |
-| `NATIVE` (cute-codex) | `0.160.0-r52.2` |
+| | Linux / Windows | macOS (desktop only) |
+|---|---|---|
+| `VERSION` (cutex) | `0.1.1` | not used |
+| `DESKTOP_VERSION` (desktop) | `0.1.2` | `0.1.2` |
+| `NATIVE` (cute-codex) | `0.160.0-r52.2` | not used |
 
 ### B.1 Download and verify
 
-Install minisign: Ubuntu / Debian `sudo apt install minisign` (ask the person: it needs sudo),
-Windows `winget install jedisct1.minisign`, macOS `brew install minisign`. Without sudo on Ubuntu /
-Debian, unpack the distribution's own package for your user only:
+**Install minisign** (it checks the signatures):
 
-```sh
-mkdir -p ~/.local/opt/minisign && cd ~/.local/opt/minisign && apt download minisign && dpkg -x minisign_*.deb . && cd -
-export PATH="$HOME/.local/opt/minisign/usr/bin:$PATH"; minisign -v
-```
+- **Ubuntu / Debian**: `sudo apt install minisign` (ask the person: it needs sudo). Without sudo,
+  unpack the distribution's own package for your user only (the settings file below puts this
+  directory on PATH):
+
+  ```sh
+  mkdir -p ~/.local/opt/minisign && cd ~/.local/opt/minisign && apt download minisign && dpkg -x minisign_*.deb . && cd -
+  ~/.local/opt/minisign/usr/bin/minisign -v
+  ```
+
+- **Windows**: `winget install jedisct1.minisign`. winget adds it to PATH for shells started
+  afterwards only; the settings file below also adds winget's link directory
+  (`%LOCALAPPDATA%\Microsoft\WinGet\Links`) to the PATH of each block. Check with `minisign -v`
+  after loading it; if it is still not found, ask the person to open a new terminal (or restart the
+  agent) and try again.
+- **macOS**: `brew install minisign`. Without Homebrew, download `minisign-<version>-macos.zip` from
+  https://github.com/jedisct1/minisign/releases, unzip it and copy the `minisign` program from it to
+  `~/.local/bin` (the macOS settings file below puts that directory on PATH). Check with
+  `minisign -v`.
 
 A file whose signature does not verify must not be used: stop and report it.
 
-Linux (macOS: only the desktop line, with `macos-arm64` or `macos-x64` and `.zip`):
+**Write the install settings.** Every later block of section B starts by loading this file, so
+the values survive between commands (rule 5). It only holds versions and paths, no secrets.
+
+Linux:
 
 ```sh
+mkdir -p ~/cutex-download
+cat > ~/cutex-download/cutex-install.env <<'ENV'
 VERSION=0.1.1 DESKTOP_VERSION=0.1.2 NATIVE=0.160.0-r52.2 PLATFORM=linux-x64
 PUB=RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
-mkdir -p ~/cutex-download && cd ~/cutex-download
+# cutex's own default install base: $CUTEX_INSTALL_BASE, else $XDG_DATA_HOME/cutex, else ~/.local/share/cutex
+CUTEX_BASE=${CUTEX_INSTALL_BASE:-${XDG_DATA_HOME:-$HOME/.local/share}/cutex}
+RELEASE_DIR=$CUTEX_BASE/releases/$VERSION
+N=$CUTEX_BASE/natives/$NATIVE
+DESKTOP_BASE=$HOME/Applications/cutex-desktop
+export PATH="$HOME/.local/bin:$HOME/.local/opt/minisign/usr/bin:$PATH"
+if [ -f "$N/cute-codex-build.json" ]; then
+  NATIVE_COMMIT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit"])' "$N/cute-codex-build.json")
+fi
+export N RELEASE_DIR NATIVE_COMMIT
+ENV
+. ~/cutex-download/cutex-install.env && echo "settings ok: cutex $VERSION, base $CUTEX_BASE"
+```
+
+Windows (PowerShell; the file is loaded with `Invoke-Expression`, which works under any script
+execution policy):
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\cutex-download" | Out-Null
+@'
+$Version = '0.1.1'; $DesktopVersion = '0.1.2'; $Native = '0.160.0-r52.2'; $Platform = 'windows-x64'
+$Pub = 'RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS'
+$Dl = "$env:USERPROFILE\cutex-download"
+# cutex's own default install base: $env:CUTEX_INSTALL_BASE, else %LOCALAPPDATA%\cutex
+$CutexBase = if ($env:CUTEX_INSTALL_BASE) { $env:CUTEX_INSTALL_BASE } else { "$env:LOCALAPPDATA\cutex" }
+$env:RELEASE_DIR = "$CutexBase\releases\$Version"
+$env:N = "$CutexBase\natives\$Native"
+$DesktopBase = "$env:LOCALAPPDATA\Programs\cutex-desktop-app"
+foreach ($d in "$CutexBase\bin", "$env:LOCALAPPDATA\Microsoft\WinGet\Links") {
+  if (($env:Path -split ';') -notcontains $d) { $env:Path = "$d;$env:Path" }
+}
+if (Test-Path "$env:N\cute-codex-build.json") {
+  $env:NATIVE_COMMIT = (Get-Content "$env:N\cute-codex-build.json" | ConvertFrom-Json).commit
+}
+'@ | Set-Content -Encoding UTF8 "$env:USERPROFILE\cutex-download\cutex-install.env.ps1"
+Invoke-Expression (Get-Content -Raw "$env:USERPROFILE\cutex-download\cutex-install.env.ps1")
+"settings ok: cutex $Version, base $CutexBase"
+```
+
+macOS (the desktop only):
+
+```sh
+mkdir -p ~/cutex-download
+cat > ~/cutex-download/cutex-install.env <<'ENV'
+DESKTOP_VERSION=0.1.2
+PUB=RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
+# hw.optional.arm64 is 1 on Apple silicon, also in a Rosetta terminal (where uname -m says x86_64)
+ARCH=$( [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] && echo arm64 || echo x64 )
+DESKTOP_BASE=$HOME/Applications/cutex-desktop
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+ENV
+. ~/cutex-download/cutex-install.env && echo "settings ok: desktop $DESKTOP_VERSION macos-$ARCH"
+```
+
+Check: the last line prints `settings ok: …`. If you later need another release, edit the version
+lines of this file; nothing else stores them.
+
+**Download and verify.** Linux:
+
+```sh
+. ~/cutex-download/cutex-install.env
+cd ~/cutex-download
 get() { curl -fsSL --retry 3 -O "$1" && curl -fsSL --retry 3 -O "$1.minisig" && minisign -Vm "${1##*/}" -P "$PUB" \
   || { echo "STOP: ${1##*/} did not download or verify; do not use it"; return 1; }; }
 get https://github.com/senxiu-official/cutex/releases/download/v$VERSION/cutex-$VERSION-$PLATFORM.tar.gz &&
@@ -217,18 +316,29 @@ echo "all downloads verified"
 Windows (PowerShell):
 
 ```powershell
-$Version = '0.1.1'; $DesktopVersion = '0.1.2'; $Native = '0.160.0-r52.2'; $Platform = 'windows-x64'
-$Pub = 'RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS'
-$Dl = "$env:USERPROFILE\cutex-download"; New-Item -ItemType Directory -Force $Dl | Out-Null; Set-Location $Dl
+Invoke-Expression (Get-Content -Raw "$env:USERPROFILE\cutex-download\cutex-install.env.ps1")
+Set-Location $Dl
 function Get-Signed($Url) {
   $name = $Url.Split('/')[-1]
   curl.exe -fsSL --retry 3 -o $name $Url; curl.exe -fsSL --retry 3 -o "$name.minisig" "$Url.minisig"
-  minisign -Vm $name -P $Pub; if ($LASTEXITCODE -ne 0) { throw "signature of $name does not verify" }
+  minisign -Vm $name -P $Pub; if ($LASTEXITCODE -ne 0) { throw "STOP: $name did not download or verify; do not use it" }
 }
 Get-Signed "https://github.com/senxiu-official/cutex/releases/download/v$Version/cutex-$Version-$Platform.tar.gz"
 Get-Signed "https://github.com/senxiu-official/cutex/releases/download/v$Version/manifest.json"
 Get-Signed "https://github.com/senxiu-official/cute-codex/releases/download/cute-codex-v$Native/native-$Native-$Platform.tar.gz"
 Get-Signed "https://github.com/senxiu-official/cutex-desktop/releases/download/v$DesktopVersion/cutex-desktop-$DesktopVersion-$Platform.zip"
+"all downloads verified"
+```
+
+macOS:
+
+```sh
+. ~/cutex-download/cutex-install.env
+cd ~/cutex-download
+F=cutex-desktop-$DESKTOP_VERSION-macos-$ARCH.zip
+curl -fsSLO --retry 3 https://github.com/senxiu-official/cutex-desktop/releases/download/v$DESKTOP_VERSION/$F &&
+curl -fsSLO --retry 3 https://github.com/senxiu-official/cutex-desktop/releases/download/v$DESKTOP_VERSION/$F.minisig &&
+minisign -Vm "$F" -P "$PUB" && echo "all downloads verified"
 ```
 
 Check: every file prints `Signature and comment signature verified`, then `all downloads verified`.
@@ -246,16 +356,16 @@ what the in-app **Backend updates** need later.
 Linux:
 
 ```sh
+. ~/cutex-download/cutex-install.env
 cd ~/cutex-download
 mkdir -p cutex-$VERSION && tar -xzf cutex-$VERSION-$PLATFORM.tar.gz -C cutex-$VERSION
 cp manifest.json manifest.json.minisig cutex-$VERSION/
 cutex-$VERSION/cutex --version            # cutex 0.1.1 (0.1.1, <commit>)
 cutex-$VERSION/cutex service install --channel release --no-start
-CUTEX_BASE=~/.local/share/cutex
-RELEASE_DIR="$CUTEX_BASE/releases/$VERSION"
 ls "$RELEASE_DIR"                          # cutex  cutex-mcp  manifest.json  manifest.json.minisig
 mkdir -p ~/.local/bin && ln -sfn "$CUTEX_BASE/current/cutex" ~/.local/bin/cutex
 cutex service status
+cutex service status | python3 -c 'import json,sys; b=json.load(sys.stdin)["base"]; print("base ok" if b == sys.argv[1] else "STOP: base is " + b)' "$CUTEX_BASE"
 cutex upgrade status
 grep '"home"' ~/.cutex/archive/fresh-agent-permissions/migration.json
 ```
@@ -263,61 +373,88 @@ grep '"home"' ~/.cutex/archive/fresh-agent-permissions/migration.json
 Windows:
 
 ```powershell
-Set-Location "$env:USERPROFILE\cutex-download"
+Invoke-Expression (Get-Content -Raw "$env:USERPROFILE\cutex-download\cutex-install.env.ps1")
+Set-Location $Dl
 New-Item -ItemType Directory -Force "cutex-$Version" | Out-Null
 tar -xzf "cutex-$Version-$Platform.tar.gz" -C "cutex-$Version"
 Copy-Item manifest.json, manifest.json.minisig "cutex-$Version\"
 & ".\cutex-$Version\cutex.exe" --version
 & ".\cutex-$Version\cutex.exe" service install --channel release --no-start
-$CutexBase = "$env:LOCALAPPDATA\cutex"
-$env:RELEASE_DIR = "$CutexBase\releases\$Version"
 Get-ChildItem $env:RELEASE_DIR
+# put cutex on PATH for your user (new terminals pick it up; the settings file covers later blocks)
 [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ";$CutexBase\bin", 'User')
-$env:Path += ";$CutexBase\bin"
 cutex service status
+$b = (cutex service status | ConvertFrom-Json).base; if ($b -eq $CutexBase) { "base ok" } else { "STOP: base is $b" }
 cutex upgrade status
 Select-String '"home"' "$env:USERPROFILE\.cutex\archive\fresh-agent-permissions\migration.json"
 ```
 
-Check: `cutex upgrade status` prints `installed  0.1.1` (`cutex upgrade status --json` shows
-`"managed": true` and the release's `sequence` above 0), and the last line prints `"home": "fresh"`
-(section 5.2 explains the record). The services are installed but not started yet.
+Check:
+
+- `base ok`. If it prints `STOP: base is …`, cutex installed somewhere other than the settings
+  file says: stop and report both paths.
+- `cutex service status` (Linux): `units` shows `ActiveState: inactive` for both services. If
+  either is already `active`, another cutex on this account owns these unit names: stop and ask the
+  person (rule 4).
+- `cutex upgrade status` prints `installed  0.1.1`; `cutex upgrade status --json` shows
+  `"managed": true` and `installed.sequence` 2. (Its `serviceManager` field may say `none` while
+  `cutex service status` says `systemd`; that is fine.)
+- The last line prints `"home": "fresh"` (section 5.2 explains the record).
+
+The services are installed but not started yet.
 
 ### B.3 Install the runtime files
 
 Unpack cute-codex into its own `natives/<version>` directory (never over an existing one: agents pin
-these files), then write and select the runtime manifest exactly as in section 5.3.
+these files), then write and select the runtime manifest (the same steps as section 5.3, with the
+paths of a binary install).
 
 Linux:
 
 ```sh
-N="$CUTEX_BASE/natives/$NATIVE"
+. ~/cutex-download/cutex-install.env
 if [ -e "$N/codex-app-server" ]; then echo "natives $NATIVE already installed, not unpacked"; else
   mkdir -p "$N" && tar -xzf ~/cutex-download/native-$NATIVE-$PLATFORM.tar.gz -C "$N"
 fi
 "$N/codex-app-server" --version
-NATIVE_COMMIT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit"])' "$N/cute-codex-build.json")
-export N RELEASE_DIR NATIVE_COMMIT
 ```
 
 Windows:
 
 ```powershell
-$env:N = "$CutexBase\natives\$Native"
+Invoke-Expression (Get-Content -Raw "$env:USERPROFILE\cutex-download\cutex-install.env.ps1")
 if (Test-Path "$env:N\codex-app-server.exe") { "natives $Native already installed, not unpacked" } else {
   New-Item -ItemType Directory -Force $env:N | Out-Null
-  tar -xzf "$env:USERPROFILE\cutex-download\native-$Native-$Platform.tar.gz" -C $env:N
+  tar -xzf "$Dl\native-$Native-$Platform.tar.gz" -C $env:N
 }
 & "$env:N\codex-app-server.exe" --version
-$env:NATIVE_COMMIT = (Get-Content "$env:N\cute-codex-build.json" | ConvertFrom-Json).commit
 ```
 
-Check: `codex-app-server --version` prints `codex-app-server 0.160.0-r52.2`. Now save the Python
-script of section 5.3 as `~/cutex-download/write-manifest.py` (Windows:
-`%USERPROFILE%\cutex-download\write-manifest.py`; a binary install has no `~/src`; it reads `N`,
-`RELEASE_DIR` and `NATIVE_COMMIT`), run
-it and select the manifest with `cutex human install-runtime` (section 5.3, from "Write the manifest"
-to its check).
+Check: `codex-app-server --version` prints `codex-app-server 0.160.0-r52.2`.
+
+Now save the Python script of section 5.3 (the block under "Write the manifest") as
+`~/cutex-download/write-manifest.py` (Windows: `%USERPROFILE%\cutex-download\write-manifest.py`).
+It reads `N`, `RELEASE_DIR` and `NATIVE_COMMIT`, which the settings file sets (`NATIVE_COMMIT` from
+the unpacked `cute-codex-build.json`, so load the file again after unpacking, as below). Then run it
+and select the manifest:
+
+```sh
+. ~/cutex-download/cutex-install.env
+test -n "$NATIVE_COMMIT" && echo "native commit ok"
+python3 ~/cutex-download/write-manifest.py
+cutex human install-runtime "$RELEASE_DIR/manifests/default.json"
+```
+
+```powershell
+Invoke-Expression (Get-Content -Raw "$env:USERPROFILE\cutex-download\cutex-install.env.ps1")
+if ($env:NATIVE_COMMIT) { "native commit ok" } else { throw "no NATIVE_COMMIT: is $env:N\cute-codex-build.json there?" }
+py "$Dl\write-manifest.py"
+cutex human install-runtime "$env:RELEASE_DIR\manifests\default.json"
+```
+
+Check: `native commit ok`; the script prints `<install base>/releases/0.1.1/manifests/default.json`;
+`install-runtime` prints `native_home` = `~/.cutex/codex-home` and `bundle_manifest` = that same
+file. It verifies every pinned file, so an error here names the file that is wrong.
 
 Then start cutex and check it: **section 6**.
 
@@ -330,7 +467,7 @@ Releases (B.5).
 Linux:
 
 ```sh
-DESKTOP_BASE=~/Applications/cutex-desktop
+. ~/cutex-download/cutex-install.env
 mkdir -p "$DESKTOP_BASE/releases/$DESKTOP_VERSION"
 tar -xzf ~/cutex-download/cutex-desktop-$DESKTOP_VERSION-linux-x64.tar.gz -C "$DESKTOP_BASE/releases/$DESKTOP_VERSION" --strip-components=1
 ln -sfn "$DESKTOP_BASE/releases/$DESKTOP_VERSION" "$DESKTOP_BASE/current"
@@ -340,52 +477,108 @@ sysctl kernel.apparmor_restrict_unprivileged_userns 2>/dev/null
 ```
 
 If the last line prints `= 1` (Ubuntu 23.10 and later), the app needs an AppArmor profile before its
-first start (section 7.1 explains why). First check whether one is already loaded for this path
-(e.g. from an earlier install): if this prints a profile file, skip the rest of this step.
+first start (section 7.1 explains why). First check whether one already exists for this path (e.g.
+from an earlier install) and whether it is loaded:
 
 ```sh
-grep -ls "$(realpath "$DESKTOP_BASE")/releases/\*/cutex" /etc/apparmor.d/* 2>/dev/null
+. ~/cutex-download/cutex-install.env
+A="$(realpath "$DESKTOP_BASE")/releases/*/cutex"
+F=$(grep -Fls -e " $A " -e "\"$A\"" /etc/apparmor.d/* 2>/dev/null | head -n 1)
+if [ -n "$F" ]; then
+  NAME=$(sed -n -E 's/^[[:space:]]*profile[[:space:]]+([^[:space:]"]+)[[:space:]].*/\1/p' "$F" | head -n 1)
+  if ls /sys/kernel/security/apparmor/policy/profiles/ 2>/dev/null | grep -q "^$NAME\."; then
+    echo "profile $NAME loaded ($F)"
+  else
+    echo "profile $NAME NOT loaded; ask the person to run: sudo apparmor_parser -r $F"
+  fi
+else
+  echo "no profile yet"
+fi
 ```
 
-Otherwise write it, then ask the person to run the two `sudo` commands:
+- `profile … loaded`: skip the rest of this step.
+- `NOT loaded`: ask the person to run the printed `sudo apparmor_parser -r …` command, then skip
+  the rest of this step.
+- `no profile yet`: write it as below (the name gets a suffix when another install already owns
+  `/etc/apparmor.d/cutex-desktop`, as the install script of section 7.1 does), then ask the person
+  to run the two printed `sudo` commands.
 
 ```sh
+. ~/cutex-download/cutex-install.env
 RBASE=$(realpath "$DESKTOP_BASE")
-cat > "$DESKTOP_BASE/apparmor-cutex-desktop" <<EOF
+NAME=cutex-desktop
+if [ -e /etc/apparmor.d/$NAME ]; then NAME=cutex-desktop-$(printf '%s' "$RBASE" | sha256sum | cut -c1-8); fi
+cat > "$DESKTOP_BASE/apparmor-cutex-desktop" <<PROFILE
 abi <abi/4.0>,
 include <tunables/global>
 
-profile cutex-desktop "$RBASE/releases/*/cutex" flags=(unconfined) {
+profile $NAME "$RBASE/releases/*/cutex" flags=(unconfined) {
   userns,
-  include if exists <local/cutex-desktop>
+  include if exists <local/$NAME>
 }
-EOF
-echo "sudo install -m 644 \"$DESKTOP_BASE/apparmor-cutex-desktop\" /etc/apparmor.d/cutex-desktop"
-echo "sudo apparmor_parser -r /etc/apparmor.d/cutex-desktop"
+PROFILE
+echo "sudo install -m 644 \"$DESKTOP_BASE/apparmor-cutex-desktop\" /etc/apparmor.d/$NAME"
+echo "sudo apparmor_parser -r /etc/apparmor.d/$NAME"
 ```
 
-(If `/etc/apparmor.d/cutex-desktop` already exists for another install, use another profile name
-in both the file and the commands.) Start the app in the graphical session:
-`"$DESKTOP_BASE/current/cutex"`.
+If the app later aborts at start with `The SUID sandbox helper binary was found, but is not
+configured correctly`, the profile is missing or not loaded: run the check above again.
+
+Start the app detached, in the graphical session (rule 6):
+
+```sh
+. ~/cutex-download/cutex-install.env
+setsid -f "$DESKTOP_BASE/current/cutex" >/dev/null 2>&1 </dev/null
+```
+
+If no window appears, your shell may not belong to the graphical session (`echo
+"$DISPLAY$WAYLAND_DISPLAY"` prints nothing): ask the person to run the same command in a terminal
+of their desktop session.
+
+The Linux package adds no app-menu entry by itself. Optionally (ask the person; if
+`~/.local/share/applications/cutex-desktop.desktop` already exists, leave it alone), add one for
+your user so Cutex can be started from the app menu after a reboot. It points at `current`, so it
+stays valid across updates:
+
+```sh
+. ~/cutex-download/cutex-install.env
+LAUNCHER=~/.local/share/applications/cutex-desktop.desktop
+if [ -e "$LAUNCHER" ]; then echo "launcher already exists, not changed"; else
+  mkdir -p ~/.local/share/applications
+  cat > "$LAUNCHER" <<LAUNCHER_END
+[Desktop Entry]
+Type=Application
+Name=Cutex
+Exec="$DESKTOP_BASE/current/cutex"
+Icon=$DESKTOP_BASE/current/resources/app/resources/icons/icon-256.png
+Terminal=false
+Categories=Development;
+LAUNCHER_END
+  echo "launcher ok"
+fi
+```
+
+Without it, start the app again with the `setsid` line above (or `"$DESKTOP_BASE/current/cutex"`
+in a terminal).
 
 Windows:
 
 ```powershell
-$DesktopBase = "$env:LOCALAPPDATA\Programs\cutex-desktop-app"
+Invoke-Expression (Get-Content -Raw "$env:USERPROFILE\cutex-download\cutex-install.env.ps1")
 $Rel = "$DesktopBase\releases\$DesktopVersion"
 New-Item -ItemType Directory -Force "$DesktopBase\releases" | Out-Null
-Expand-Archive "$env:USERPROFILE\cutex-download\cutex-desktop-$DesktopVersion-windows-x64.zip" -DestinationPath "$DesktopBase\releases\unpack-$DesktopVersion"
+Expand-Archive "$Dl\cutex-desktop-$DesktopVersion-windows-x64.zip" -DestinationPath "$DesktopBase\releases\unpack-$DesktopVersion"
 Move-Item "$DesktopBase\releases\unpack-$DesktopVersion\cutex-desktop-$DesktopVersion-windows-x64" $Rel
 Remove-Item "$DesktopBase\releases\unpack-$DesktopVersion"
 if (Test-Path "$DesktopBase\current") { (Get-Item "$DesktopBase\current").Delete() }
 New-Item -ItemType Junction -Path "$DesktopBase\current" -Target $Rel | Out-Null
 Set-Content -Path "$DesktopBase\channel" -Value release
 Get-ChildItem "$DesktopBase\current\cutex.exe"
-& "$DesktopBase\current\cutex.exe"
+Start-Process "$DesktopBase\current\cutex.exe"
 ```
 
 The first start creates the Start-menu shortcut **Cutex**; start the app from there afterwards.
-Windows SmartScreen warns about the downloaded program (B.6).
+If you downloaded the zip with a browser, Windows SmartScreen may warn on the first start (B.6).
 
 macOS (the desktop only; connect to your cutex machine as in section 7.4). The app lives in
 `~/Applications/cutex-desktop/releases/<version>.noindex/Cutex.app` (`.noindex`: Spotlight lists only
@@ -393,14 +586,13 @@ the launcher); on its first start it creates `~/Applications/Cutex.app`, a copy 
 current version, which is the one to start (and pin to the Dock) from then on:
 
 ```sh
+. ~/cutex-download/cutex-install.env
 cd ~/cutex-download
-DESKTOP_VERSION=0.1.2
-ARCH=$( [ "$(uname -m)" = arm64 ] && echo arm64 || echo x64 )
-# (download and verify cutex-desktop-$DESKTOP_VERSION-macos-$ARCH.zip as in B.1)
-DESKTOP_BASE=~/Applications/cutex-desktop
+F=cutex-desktop-$DESKTOP_VERSION-macos-$ARCH.zip
+minisign -Vm "$F" -P "$PUB"                # downloaded in B.1; verify again before unpacking
 REL="$DESKTOP_BASE/releases/$DESKTOP_VERSION.noindex"
 mkdir -p "$DESKTOP_BASE/releases"
-ditto -x -k cutex-desktop-$DESKTOP_VERSION-macos-$ARCH.zip "$DESKTOP_BASE/releases/unpack-$DESKTOP_VERSION"
+ditto -x -k "$F" "$DESKTOP_BASE/releases/unpack-$DESKTOP_VERSION"
 mv "$DESKTOP_BASE/releases/unpack-$DESKTOP_VERSION/cutex-desktop-$DESKTOP_VERSION-macos-$ARCH" "$REL"
 rm -r "$DESKTOP_BASE/releases/unpack-$DESKTOP_VERSION"
 xattr -dr com.apple.quarantine "$REL/Cutex.app"
@@ -423,7 +615,9 @@ Then go on with **section 7.3** (first start) and **section 8** (first Profile a
 - **cutex** (and the runtime files it brings): Settings → Host backend updates. When a newer signed
   release is published, it downloads it, verifies the signature, waits until no agent is working,
   switches and checks the result (rolling back by itself on failure). By hand: `cutex upgrade check`,
-  then `cutex upgrade apply` (`docs/backend-upgrade.md` in the cutex repository).
+  `cutex upgrade stage` (downloads, verifies and preflights it), then `cutex upgrade apply` (it waits
+  until no agent is working; `--max-wait <secs>` gives up instead, changing nothing). `apply` without
+  a staged release fails with `not_staged` (`docs/backend-upgrade.md` in the cutex repository).
 - **The desktop** (Linux, Windows, macOS): when a newer release is published, an **Update** button appears
   next to Settings, and Settings → Updates & diagnostics shows "New version <version>". The app asks
   `api.github.com` for the latest release of `senxiu-official/cutex-desktop` (at most once an hour in
@@ -454,7 +648,8 @@ The binaries are signed with the minisign key above, but not with a paid code-si
 (no Apple Developer ID or notarization, no Windows Authenticode), so the operating system does not
 know the publisher:
 
-- **Windows**: SmartScreen says "Windows protected your PC" on the first start: click
+- **Windows**: if the zip came through a browser (which marks downloads; `curl.exe` as in B.1 does
+  not), SmartScreen says "Windows protected your PC" on the first start: click
   **More info → Run anyway**. To clear the download mark for the whole folder instead:
   `Get-ChildItem -Recurse "$DesktopBase\releases\$DesktopVersion" | Unblock-File`.
 - **macOS**: "Cutex cannot be opened because the developer cannot be verified" (or "Apple could not
@@ -465,6 +660,15 @@ know the publisher:
 
 The cutex and cute-codex command-line programs get no such warnings (they are not started from
 Explorer or Finder).
+
+### B.7 Known issues
+
+The current list of known issues (with workarounds and planned fixes) is
+[docs/KNOWN-ISSUES.md](https://github.com/senxiu-official/cutex-desktop/blob/release/docs/KNOWN-ISSUES.md);
+the app shows the same list under Settings → About (关于) → Known issues. Read it before reporting a
+problem. Among them: there is no phone app or push yet, the in-app browser refuses LAN / tailnet
+addresses and blocks downloads, the Job Service and NCI jobs run on Linux hosts only, and macOS runs
+the desktop only.
 
 ## 2. Get the sources
 
@@ -753,6 +957,7 @@ recompute everything, so they also work in a new shell.
 Windows:
 
 ```powershell
+$CutexBase = "$env:LOCALAPPDATA\cutex"
 $NativeVersion = ((& "$env:USERPROFILE\src\build\native\codex-rs\target\release\codex-app-server.exe" --version) -split ' ')[1]
 $env:N = "$CutexBase\natives\$NativeVersion"
 # Existing agents pin the files of $env:N: never overwrite them. Copy only into a new version.
@@ -815,6 +1020,10 @@ Two optional components come after cutex runs: the Claude runtime for Claude Cod
 
 ## 6. Start cutex and check it
 
+After a binary install (section B), begin each block of sections 6 and 6.1 / 6.2 with the line
+that loads the settings file (`. ~/cutex-download/cutex-install.env`; Windows: the
+`Invoke-Expression` line of B.1), so `cutex` is on PATH in that shell.
+
 Linux:
 
 ```sh
@@ -858,8 +1067,10 @@ Claude Code CLI. cutex installs and updates it; you install two things it cannot
 
 `npm install -g @anthropic-ai/claude-code` works too. Do not point cutex at the copy bundled inside
 the `claude-agent-sdk` wheels from PyPI. cutex looks for `claude` on PATH, then in `~/.local/bin` (Windows
-`%USERPROFILE%\.local\bin`). If yours is elsewhere, set `CUTEX_CLAUDE_CLI=<path>` for the cutex
-services; `CUTEX_CLAUDE_PYTHON=<path>` does the same for Python.
+`%USERPROFILE%\.local\bin`). If yours is elsewhere, set `CUTEX_CLAUDE_CLI=<path>` in the shell
+where you run `cutex component install claude-runtime` (the install records that path); when you
+install from the desktop's install card instead, set it for the cutex services, which run that
+install. `CUTEX_CLAUDE_PYTHON=<path>` does the same for Python.
 
 Install the component. A binary install (section B) downloads the signed archive that belongs to the
 installed cutex release:
@@ -942,8 +1153,9 @@ finished (`restartPending`). `cutex component remove job-service` stops it and k
 records and output (it refuses while jobs run unless you add `--force`); `cutex component prune
 job-service` deletes versions nothing uses.
 
-NCI remote jobs (the NCI module in [ANU.md](ANU.md)) also build on the Job Service but are not
-usable in the public release yet.
+NCI remote jobs (the NCI module in [ANU.md](ANU.md)) build on the Job Service: available from
+cutex 0.1.1, Linux hosts only. The module is off by default (Settings → Modules); skip it unless
+you use NCI Gadi.
 
 ## 7. Install the desktop
 
@@ -981,7 +1193,7 @@ banner, so do not install another pnpm). Check: the last command prints nothing.
 checkout (for example a changed `pnpm-lock.yaml`) makes every later update refuse to run
 (section 9).
 
-**Linux, Ubuntu 24.04 and later**: Ubuntu blocks the unprivileged user namespaces that Electron's
+**Linux, Ubuntu 23.10 and later**: Ubuntu blocks the unprivileged user namespaces that Electron's
 sandbox needs (`sysctl kernel.apparmor_restrict_unprivileged_userns` prints `= 1`), and the app then
 aborts at start with `The SUID sandbox helper binary was found, but is not configured correctly`.
 In that case the install script has written an AppArmor profile for this install to
@@ -1000,7 +1212,9 @@ does not start, rerun `install-portable.sh`: it prints exactly what is missing. 
 4755 also works, but only for that one release directory: it is lost on every update, and the
 updater's restart then fails.)
 
-Start it, in the graphical session: Linux `"$DESKTOP_BASE/current/cutex"`; macOS
+Start it detached, in the graphical session (rule 6): Linux
+`setsid -f "$DESKTOP_BASE/current/cutex" >/dev/null 2>&1 </dev/null` (the same command starts it
+later; for an app-menu entry see the optional launcher step of B.4); macOS
 `open ~/Applications/Cutex.app` (the script prints the exact command; keep it in the Dock from the
 running icon: Options → Keep in Dock). If `~/Applications/Cutex.app` already belonged to another
 install, the script leaves it alone and prints `open "$DESKTOP_BASE/current/Cutex.app"` instead.
@@ -1248,7 +1462,8 @@ a publisher either.
 | The model answers 401 / `invalid api key` | Re-enter the key in the Profile's Account section. A key change applies to agents started afterwards. |
 | `rate_limit` / quota errors | The provider's limit. Settings → Profiles → the Profile → Quota readers → Refresh shows what the provider reports. |
 | Linux: the window vanished after closing it | Close-to-tray without a visible tray (GNOME needs the AppIndicator extension). Start the app again to show the window; set Settings → General → When closing the window → Quit. |
-| Linux (Ubuntu 24.04+): the app does not start, mentioning the sandbox / `chrome-sandbox` | The AppArmor step of section 7.1 was skipped. Ask the person to run the two `sudo` commands there. |
+| Linux (Ubuntu 23.10+): the app does not start, mentioning the sandbox / `chrome-sandbox` | The AppArmor step of B.4 / section 7.1 was skipped, or its profile is not loaded. Run the check in B.4 and ask the person to run the `sudo` commands it names. |
+| Something that looks like a bug but may be known (no phone push, in-app browser refusing a LAN address or a download, no Jobs on Windows / macOS) | See the known issues (B.7). |
 | `nvm install 24` leaves `node --version` at an older version | `~/.npmrc` sets `prefix`; see the Node 24 item in section 1. |
 | `git pull`: "divergent branches" / "unrelated histories", or `git fetch --tags`: "would clobber existing tag" | The published `release` branch was replaced instead of moved forward (each release is normally a child of the previous one). Keep your old state under another name and follow the new one: `git branch -m release old-release`, `git fetch --force --tags origin`, `git switch -c release --track origin/release`. For the desktop `src`, then rerun the install script (9). |
 | Updates & diagnostics: "Installed from a release package" | A release package that is not in the `releases/<version>` + `current` layout of B.4 (e.g. unpacked somewhere else, or `Cutex.app` dragged to `/Applications`), so it cannot replace itself; the page links to the Releases page. Reinstall it as in B.4 to get the one-click updates of B.5, or update by hand (B.5). |
@@ -1284,6 +1499,11 @@ keys, tokens, `config.json` or `auth.json`, and remove paths or names you do not
 - Linux AppArmor profile (section 7.1), if installed:
   `sudo apparmor_parser -R /etc/apparmor.d/cutex-desktop && sudo rm /etc/apparmor.d/cutex-desktop`.
 
+Download leftovers of a binary install (section B): `~/cutex-download` (Windows
+`%USERPROFILE%\cutex-download`, about 0.4 GB) can go once B.4 is done; everything in it was
+unpacked or copied into the install bases. Keep only `cutex-install.env` (`.ps1`) if you want its
+paths for later.
+
 Build leftovers (Linux paths; Windows uses the same names under `%USERPROFILE%`). After section 5.3
 the binaries are copied, so these can go right after the install, but keeping the sources makes
 the next update (section 9) shorter:
@@ -1315,7 +1535,8 @@ If the person wants it, copy the whole folder into their agent's personal skills
 | Codex CLI (and cute-codex) | `~/.agents/skills/cutex-docs` (older Codex versions read `~/.codex/skills`) |
 | Any other agent | that agent's skills directory; check its documentation |
 
-Linux / macOS (`DESKTOP_BASE` as in B.4 or section 7):
+Linux / macOS (`DESKTOP_BASE` as in B.4 or section 7; after a binary install, first load the
+settings file: `. ~/cutex-download/cutex-install.env`):
 
 ```sh
 mkdir -p ~/.claude/skills
@@ -1327,6 +1548,8 @@ cp -R "$SKILL" ~/.claude/skills/
 Windows:
 
 ```powershell
+# after a binary install: Invoke-Expression (Get-Content -Raw "$env:USERPROFILE\cutex-download\cutex-install.env.ps1")
+# after a source install: $DesktopBase = "$env:LOCALAPPDATA\Programs\cutex-desktop-app"
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills" | Out-Null
 $Skill = "$DesktopBase\current\skills\cutex-docs"
 if (-not (Test-Path $Skill)) { $Skill = "$DesktopBase\src\skills\cutex-docs" }

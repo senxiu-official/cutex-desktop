@@ -80,7 +80,7 @@ git clone --branch release https://github.com/senxiu-official/cutex-desktop.git 
 - 页面显示「不支持自动更新」时，下面会写原因（例如开发运行、连不上更新源），不会反复弹提示。
 
 cutex 本身（后台服务）的更新在 设置 → 后端更新：签名的 cutex 发布版本会在没有智能体工作时自动切换并检查，
-失败会自己回滚；也可以在主机上运行 `cutex upgrade check` / `cutex upgrade apply`。
+失败会自己回滚；也可以在主机上依次运行 `cutex upgrade check`、`cutex upgrade stage`、`cutex upgrade apply`（apply 只激活已 stage 的版本）。
 
 ## 5. 日志在哪里
 

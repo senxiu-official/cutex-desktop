@@ -77,20 +77,6 @@ native runtime". The update itself succeeded; "up to date" further down is corre
 - Workaround: reopen Settings, or press Ctrl+R.
 - Planned fix: desktop 0.1.3 (the empty card: once the cause is found).
 
-## Install guide: a few steps are out of date
-
-In [docs/install/AGENT-INSTALL.md](install/AGENT-INSTALL.md):
-
-- A by-hand backend update is `cutex upgrade check`, then `cutex upgrade stage`, then
-  `cutex upgrade apply`; `apply` without `stage` answers `409 not_staged`.
-- The cutex 0.1.1 `manifest.json` has no `native` block (0.1.1 ships the same native); the native
-  version is in the cutex 0.1.0 `manifest.json`.
-- NCI works from cutex 0.1.1 on Linux hosts; it is off by default (see
-  [docs/install/ANU.md](install/ANU.md)).
-
-- Workaround: follow the corrections above.
-- Planned fix: a corrected guide, published soon.
-
 ## Job Service and NCI remote jobs need a Linux host
 
 The Job Service component, and with it the Jobs page and NCI remote jobs, runs only on Linux cutex
