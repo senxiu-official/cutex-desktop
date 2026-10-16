@@ -50,6 +50,47 @@ cutex's management API still requires its token.
 - Workaround: only open sites you trust in the in-app browser.
 - Planned fix: desktop 0.1.3.
 
+## Windows: plain commands ask for approval in Auto mode
+
+When an agent on a Windows host has no Windows sandbox set up, the native runtime cannot confine
+commands, so in Auto (自动) it asks you before every command.
+
+- Workaround: use Full access for now, or set up the sandbox on that host with cute-codex's
+  `/setup-default-sandbox`.
+- Planned fix: desktop 0.1.3 (a readiness note and a one-click setup without administrator rights in
+  the permission menu; needs the matching cutex).
+
+## Services: Stop on a static service fails
+
+Static web services published by an agent still show Stop / Restart in their menu. cutex answers
+`not_supervised`: it serves those files itself and has no process to stop.
+
+- Workaround: use Delete to remove the service (it only unregisters it; the files stay).
+- Planned fix: desktop 0.1.3.
+
+## Host backend update page shows the wrong state
+
+After a backend update, the Current version card is sometimes only an empty bar (cause still under
+investigation), the top update card stays, and a full update without a new native still says "new
+native runtime". The update itself succeeded; "up to date" further down is correct.
+
+- Workaround: reopen Settings, or press Ctrl+R.
+- Planned fix: desktop 0.1.3 (the empty card: once the cause is found).
+
+## Install guide: a few steps are out of date
+
+In [docs/install/AGENT-INSTALL.md](install/AGENT-INSTALL.md):
+
+- A by-hand backend update is `cutex upgrade check`, then `cutex upgrade stage`, then
+  `cutex upgrade apply`; `apply` without `stage` answers `409 not_staged`.
+- The cutex 0.1.1 `manifest.json` has no `native` block (0.1.1 ships the same native); the native
+  version is in the cutex 0.1.0 `manifest.json`.
+- NCI works from cutex 0.1.1 on Linux hosts; it is off by default (see
+  [docs/install/ANU.md](install/ANU.md)).
+
+- Workaround: follow the corrections above.
+- Planned fix: a corrected guide, published soon.
+
 ## Job Service and NCI remote jobs need a Linux host
 
 The Job Service component, and with it the Jobs page and NCI remote jobs, runs only on Linux cutex
