@@ -1,6 +1,7 @@
 // The shell's 设置 entry and page (step 3): sidebar footer entry + `shell.settings` breadcrumb hooks.
 import { useI18n } from "../../i18n";
 import { useAboutAttention, useOutdatedAgentCount } from "../../lib/runtimePackagesView";
+import { useSettingsAttention } from "../../lib/settingsAttention";
 import { settingsTab } from "../../lib/settingsNav";
 import { profilePageOf, SETTINGS_PAGE, useApp } from "../../store";
 import { services } from "../app";
@@ -9,13 +10,16 @@ import type { PageCrumb, PageParams } from "../slots";
 
 export { openSettingsFromNav } from "../../lib/openSettings";
 
-/** Red dot: agents on an old runtime or a desktop update. */
+/** Red dot: agents on an old runtime, a desktop update, or a module's reason (a host's backend update). */
 export function useSettingsBadge() {
   const { t } = useI18n();
   const dot = useAboutAttention();
   const outdated = useOutdatedAgentCount();
-  if (!dot) return null;
-  return { dot: true, title: outdated > 0 ? t("runtimePackages.dotHint", { n: outdated }) : t("settings.about.attention") };
+  const extra = useSettingsAttention();
+  if (!dot && extra.length === 0) return null;
+  const lines = dot ? [outdated > 0 ? t("runtimePackages.dotHint", { n: outdated }) : t("settings.about.attention")] : [];
+  for (const key of extra) lines.push(t(key as Parameters<typeof t>[0]));
+  return { dot: true, title: lines.join("\n") };
 }
 
 /** 设置 › <page> (› <profile> / 添加 on Settings → Profiles; the page crumb goes back to the overview). */

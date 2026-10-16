@@ -22,6 +22,8 @@ import { hasLocalOutput, JOB_SERVICE_FEATURE, jobOperations, jobSeconds, jobStat
 import { canMarkExternal, NCI_MODULE, sourceLabel } from "../../lib/remoteJobs";
 import { JOB_EXTERNAL_FEATURE } from "../../../../shared/remoteJobs";
 import { MarkExternalDialog } from "./MarkExternalDialog";
+import { componentUsable, JOB_SERVICE_COMPONENT } from "../../lib/componentCard";
+import { componentUsableNow, useComponentStore } from "../../lib/componentStore";
 import { openJobOutput, refreshAllJobs, refreshHostJobs, useHostJobs, useJobs } from "../../lib/jobStore";
 import { useListHosts } from "../../lib/hostLists";
 import { hostKey, type HostKey } from "../../lib/hostScope";
@@ -111,7 +113,12 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
   const focusOps = useJobOps();
   const hostJobs = useHostJobs((s) => s.byHost);
   // Hosts with a Job Service (only Linux hosts have one; the others are simply not listed).
-  const served = useMemo(() => hosts.data.filter((d) => d.features.has(JOB_SERVICE_FEATURE)), [hosts.data]);
+  // …and whose job-service component is usable (cutex `components`; an unread list counts as not yet).
+  const components = useComponentStore((s) => s.byHost);
+  useEffect(() => {
+    for (const d of hosts.data) if (d.features.has(JOB_SERVICE_FEATURE)) componentUsableNow(d.hostId, JOB_SERVICE_COMPONENT, d.features);
+  }, [hosts.data]);
+  const served = useMemo(() => hosts.data.filter((d) => d.features.has(JOB_SERVICE_FEATURE) && componentUsable(d.features, components[d.hostId]?.list, JOB_SERVICE_COMPONENT)), [hosts.data, components]);
   const others = useMemo(() => served.filter((d) => !d.focus).map((d) => d.hostId), [served]);
   const sidebars = useMemo(() => new Map(hosts.data.map((d) => [d.hostId, d.sidebar] as const)), [hosts.data]);
   const { who, projectOf } = useAgents(sidebars);

@@ -18,12 +18,15 @@ import { quotaPresetLabel } from "../../lib/quota";
 import { useProfilePresets } from "../../lib/useProfilePresets";
 import { Button, HintAction, SettingRow, Section, Segmented, Select, TextInput } from "./Form";
 import { NewClaudeAccountRow } from "./ProfileClaudeAccount";
-import { useTargetApi, useTargetFeatures } from "../../lib/targetHost";
+import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
+import { CLAUDE_RUNTIME_COMPONENT } from "../../lib/componentCard";
+import { ComponentNotice } from "../ComponentCard";
 
 export function NewProfileForm({ existing, onCreated, onCancel }: { existing: string[]; onCreated(detail: ProfileDetail): void; onCancel(): void }) {
   const api = useTargetApi();
   const { t } = useI18n();
   const features = useTargetFeatures();
+  const hostId = useTargetHostId();
   const presets = useProfilePresets();
   const providers = officialPresets(presets);
   const relays = relayPresets(presets);
@@ -164,6 +167,8 @@ export function NewProfileForm({ existing, onCreated, onCancel }: { existing: st
           </SettingRow>
         </>
       )}
+      {/* A Claude profile can be created without the runtime; its agents need it (components spec v2 §5). */}
+      {kind === "claude" && <ComponentNotice name={CLAUDE_RUNTIME_COMPONENT} hostId={hostId} className="py-2" />}
       {accounts && kind === "claude" && <NewClaudeAccountRow value={claudeAccount} disabled={false} onChange={(v) => (setClaudeAccount(v), setError(null))} />}
       {/* Fixed-height status line: an error never pushes the form around. */}
       <p className="h-6 truncate pt-1 text-xs text-danger" title={error ?? undefined}>{error}</p>

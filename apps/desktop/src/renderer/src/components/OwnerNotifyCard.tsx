@@ -28,6 +28,7 @@ import { agentHost, selectedFeatures, selectedSidebar, useApp } from "../store";
 import { rowsOf } from "../lib/viewHost";
 import { DelegationTag } from "./DelegationParts";
 import { ClampBox } from "./ClampBox";
+import { SafetyBlockCard } from "./SafetyBlockCard";
 import { Markdown } from "./Markdown";
 import { SystemAvatar } from "./SystemAvatar";
 
@@ -43,6 +44,8 @@ const ROW_BUTTON = "flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs tex
 export function OwnerNotifyCard({ notificationId, sessionId }: { notificationId: string; sessionId: string }) {
   const record = useOwnerNotify((s) => s.byId[notificationId]);
   if (!record) return null;
+  // claude-safety-grants: a stopped command with 批准一次 / 不批准 instead of a message.
+  if (record.safetyBlock) return <SafetyBlockCard record={record} block={record.safetyBlock} />;
   return <Card record={record} sessionId={sessionId} />;
 }
 

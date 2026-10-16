@@ -205,6 +205,11 @@ export class Updater {
     return this.info?.sourceDir ?? null;
   }
 
+  /** The running release directory of a portable install (`<base>/releases/<release>`; null: dev run / not portable). */
+  releaseDir(): string | null {
+    return this.layout?.releaseDir ?? null;
+  }
+
   state(): UpdateStatus {
     return structuredClone(this.status);
   }

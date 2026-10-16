@@ -467,8 +467,46 @@ export interface OwnerNotification {
   notificationEvent?: string;
   /** notification-levels: methods decided at creation (`needsYou`, `mark`, `desktop`, `phone`, `sound`, `bigAlert`); absent = r216 rules. */
   actions?: string[];
-  /** Kind of a cutex notice (origin system): `quarantine`, `deliveryFailed`, `idleDelegation`, … */
+  /** Kind of a cutex notice (origin system): `quarantine`, `deliveryFailed`, `idleDelegation`, `safetyBlock`, … */
   systemKind?: string;
+  /** claude-safety-grants: the runtime safety check this notice is about (`systemKind: safetyBlock`). */
+  safetyBlock?: SafetyBlock;
+}
+
+// ---------- safety grants (capability `claude-safety-grants`; cutex docs/SAFETY-GRANTS.md) ----------
+
+/** Owner-only session methods `cutex/safetyCheck/grant|dismiss {blockId}`; `GET /v2/safety-checks`. */
+export const SAFETY_GRANTS_FEATURE = "claude-safety-grants";
+export const SAFETY_CHECK_GRANT = "cutex/safetyCheck/grant";
+export const SAFETY_CHECK_DISMISS = "cutex/safetyCheck/dismiss";
+/** `systemKind` of a safety-block notice. */
+export const SAFETY_BLOCK_KIND = "safetyBlock";
+/** blocked → granted → used (or expired); blocked → dismissed. */
+export type SafetyBlockState = "blocked" | "granted" | "used" | "dismissed" | "expired";
+
+/** A tool call a runtime safety check declined under full access, and the owner's decision on it. */
+export interface SafetyBlock {
+  blockId: string;
+  /** Runtime family (`claude`). */
+  runtime: string;
+  threadId: string;
+  turnId: string | null;
+  /** The declined tool call (timeline item id). */
+  itemId: string | null;
+  toolName: string;
+  /** The exact tool input that was declined. */
+  toolInput: unknown;
+  /** Display form (the shell command for Bash). */
+  command: string;
+  /** The runtime's own reason (Claude Code's text). */
+  reason: string;
+  state: SafetyBlockState;
+  blockedAt: string;
+  decidedAt: string | null;
+  expiresAt: string | null;
+  usedAt: string | null;
+  /** How long a grant stays valid (1800). */
+  grantSeconds: number;
 }
 
 /** `GET /v2/owner-notifications` */

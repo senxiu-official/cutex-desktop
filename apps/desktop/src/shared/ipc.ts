@@ -41,6 +41,7 @@ import type { UsageSourceCreate, UsageSourceDeleteResult, UsageSourcePatch, Usag
 import type { WorkflowRunAction, WorkflowRunList, WorkflowRunView } from "./workflows";
 import type { RestoreCandidates } from "./runtimeRestore";
 import type { HostServiceInfo, UpgradeApplyRequest, UpgradeResult, UpgradeRollbackRequest, UpgradeRollbackResult, UpgradeRun, UpgradeSettings, UpgradeSettingsPatch, UpgradeStaging, UpgradeStatus } from "./backendUpgrade";
+import type { ComponentAction, ComponentResult, ComponentsList } from "./components";
 import type { QuotaContinueResult, QuotaContinueView } from "./quotaContinue";
 import type { CapabilitiesUser, PeerBindingResult, SelfProfile, SelfProfilePatch, TokenBindingResult, UserCreate, UserPatch, UsersList, UsersResult, UsersSettings, UserWriteResult } from "./users";
 import type { PeerAgents, PeerAuditEntry, PeerCaps, PeerInvite, PeerList, PeerPatch, PeerResult, PeersSettings, PeersSettingsPatch, PeerView } from "./peers";
@@ -385,6 +386,12 @@ export type MutationResult = { ok: true } | { ok: false; error: CutexRefusal };
  */
 export type OwnerNotifyResult = { ok: true; notification: OwnerNotification } | { ok: false; error: CutexRefusal };
 export type OwnerNotifyAction = "ack" | "reply" | "dismiss" | "delete";
+/**
+ * claude-safety-grants: `cutex/safetyCheck/grant|dismiss {blockId}` on the agent's session (owner only). `ok`: the
+ * updated notice; a grant whose follow-up message to the agent failed still stands (`submitError`).
+ */
+export type SafetyCheckDecision = "grant" | "dismiss";
+export type SafetyCheckResult = { ok: true; notification: OwnerNotification; submitError: CutexRefusal | null } | { ok: false; error: CutexRefusal; notification?: OwnerNotification };
 /** Longest owner reply cutex accepts (`cutex/ownerNotify/reply` text 1–20000). */
 export const OWNER_REPLY_MAX = 20000;
 
@@ -1430,6 +1437,11 @@ export interface DaemonApi {
   patchUpgradeSettings(patch: UpgradeSettingsPatch): Promise<UpgradeResult<UpgradeSettings>>;
   /** `GET /v2/host` `serviceManager` / `runtimes`. */
   hostServiceInfo(): Promise<HostServiceInfo>;
+  // Optional components (cutex `components`, shared/components.ts). Owner only; refusals as values.
+  /** `GET /v2/components`; null on a cutex without the route. */
+  components(): Promise<ComponentsList | null>;
+  /** `POST /v2/components/{name}/install|remove` (empty body) → 202 `{operation}`; progress via `cutex/components/updated`. */
+  componentAction(name: string, action: ComponentAction): Promise<ComponentResult>;
   /**
    * Owner command on a delegation (`cutex/ask/stop|close|retry`), sent on the target agent's
    * session. Not via sessionAction: cutex rejects extra fields like expectedRevision.
@@ -1535,6 +1547,8 @@ export interface DaemonApi {
   ownerNotifyAction(agentId: string, action: OwnerNotifyAction, notificationId: string, text?: string): Promise<OwnerNotifyResult>;
   /** `PATCH /v2/settings {ownerNotify}` (only the writable fields are forwarded). */
   patchOwnerNotify(patch: OwnerNotifySettingsPatch): Promise<GlobalSettings>;
+  /** claude-safety-grants: 批准一次 / 不批准 on a safety block of that agent (`cutex/safetyCheck/grant|dismiss`). */
+  safetyCheckDecide(agentId: string, blockId: string, decision: SafetyCheckDecision): Promise<SafetyCheckResult>;
   // ---------- notification levels (capability notification-levels; shared/notificationLevels.ts) ----------
   /** `GET /v2/notification-levels`: registry, stored settings, effective tables; null on a cutex without the route. */
   notificationLevels(): Promise<NotificationLevelsView | null>;
@@ -1864,7 +1878,7 @@ export interface ShellState {
   notificationsSupported?: boolean;
   /** The OS account name (`os.userInfo().username`): the default 「你的名字」 of the identity menu. Never sent anywhere. */
   osUserName?: string | null;
-  /** A local docs/QUICKSTART.md exists (the portable install's source checkout, or the repo of a dev run). */
+  /** Help & docs can open QUICKSTART: a local copy (source checkout, release package, dev repo) or, on a packaged app, the published page. */
   quickstart?: boolean;
 }
 /** A desktop notification raised through main (Electron `Notification`, works while hidden to the tray). */
@@ -1924,7 +1938,7 @@ export interface ShellBridge {
   logError(entry: { kind: "error" | "unhandledrejection" | "reported"; message: string; stack?: string }): Promise<void>;
   /** Open the log folder in the file manager. */
   openLogs(): Promise<void>;
-  /** Open the local docs/QUICKSTART.md (only when `ShellState.quickstart`). */
+  /** Open docs/QUICKSTART.md: the local copy, or the published page on a packaged app (only when `ShellState.quickstart`). */
   openQuickstart?(): Promise<void>;
   /** Quit the app for real (not hide to the tray): the tray menu's 退出. */
   quit?(): Promise<void>;

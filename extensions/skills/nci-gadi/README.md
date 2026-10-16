@@ -13,12 +13,13 @@ repository later. Nothing in the desktop app imports or installs it.
 - A cutex host whose Job Service runs with the `nci` external source enabled
   (`--external-source nci`); otherwise the agent has no `prepare_remote` / `register_remote`
   tools on its `cutex_job` MCP server.
-- For automatic tracking: the desktop's 「NCI 远程作业」 module set up on that host — the inbound
-  mailbox (Settings → 远程作业; this is also the address `prepare_remote` puts in `-M`) and,
-  optionally, qstat verification (a dedicated SSH key for Gadi; needs a cutex build with the
-  `nci-qstat` feature). Verified mail alone does not complete a job: without qstat verification,
-  the owner marks results manually on the 作业 page. Without a mailbox, agents get
-  `mailNotConfigured` and relay the owner hint.
+- For automatic tracking: the desktop's 「NCI 远程作业」 module set up on that host — the
+  qstat check (a dedicated, `qstat`-only SSH key for Gadi; Settings → 工具 → NCI 远程作业, steps
+  ①–④ and ⑥) and, optionally, the PBS mailbox (step ⑤; also the address `prepare_remote` puts in
+  `-M`). The qstat check alone completes jobs (at its interval, default 6 h); mail only makes it
+  look sooner and never completes a job by itself. Without a mailbox, agents get
+  `mailNotConfigured` and relay the owner hint. Without the qstat check, the owner marks results
+  manually on the 作业 page.
 - The agent needs some way to run `qsub` on Gadi (its own shell there, or the owner runs it).
 
 ## Installing it for an agent

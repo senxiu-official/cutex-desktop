@@ -39,6 +39,15 @@ describe("permission modes", () => {
     expect(permissionModeOf({ approvalPolicy: "untrusted", sandboxPolicy: { type: "readOnly" } })).toBe("custom");
     expect(permissionModeOf(null)).toBeNull();
   });
+
+  it("switching to auto keeps the thread's extra writable directories", () => {
+    const current = { approvalPolicy: "on-request", sandboxPolicy: { type: "workspaceWrite", writableRoots: ["/repo/sibling", "/scratch"], networkAccess: false } };
+    const patch = permissionPatch("auto", current as never) as { sandboxPolicy: { writableRoots: string[] } };
+    expect(patch.sandboxPolicy.writableRoots).toEqual(["/repo/sibling", "/scratch"]);
+    const fromFull = permissionPatch("auto", { approvalPolicy: "never", sandboxPolicy: { type: "dangerFullAccess" } } as never) as { sandboxPolicy: { writableRoots: string[] } };
+    expect(fromFull.sandboxPolicy.writableRoots).toEqual([]);
+    expect((permissionPatch("auto") as { sandboxPolicy: { writableRoots: string[] } }).sandboxPolicy.writableRoots).toEqual([]);
+  });
 });
 
 describe("interactions", () => {

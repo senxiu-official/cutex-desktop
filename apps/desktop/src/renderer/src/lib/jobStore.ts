@@ -11,6 +11,8 @@ import { api, apiFor, bridge } from "../bridge";
 import { JOB_SERVICE_FEATURE, mergeJobs } from "./jobs";
 import { focusHostId } from "./hostKeys";
 import { onHostReset } from "./hostSwitch";
+import { JOB_SERVICE_COMPONENT } from "./componentCard";
+import { componentUsableNow } from "./componentStore";
 
 export interface JobsState {
   byId: Record<string, JobRow>;
@@ -46,7 +48,12 @@ const agentInFlight = new Set<string>();
 let eventTimer: ReturnType<typeof setTimeout> | null = null;
 const PAGE = 50;
 
-const supported = () => !!app?.getState().features.has(JOB_SERVICE_FEATURE);
+// The focus host serves jobs: the capability, and (cutex `components`) its job-service component is usable —
+// a missing / installing component means no Job Service to call (components spec v2 §5).
+const supported = () => {
+  const features = app?.getState().features;
+  return !!features?.has(JOB_SERVICE_FEATURE) && componentUsableNow(focusHostId(), JOB_SERVICE_COMPONENT, features);
+};
 
 function noteError<T>(r: JobResult<T>): r is { ok: false; code: string; message: string } {
   if (!r.ok) useJobs.setState({ error: { code: r.code, message: r.message } });

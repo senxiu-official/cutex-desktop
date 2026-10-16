@@ -18,6 +18,11 @@ it("uses the SDK as the one definition of neutral contracts", () => {
   expectTypeOf<ModuleHost<SlotMap>>().toEqualTypeOf<SDK.ModuleHost<SlotMap>>();
 });
 
+// v1.15 (§12.1): a module names the optional cutex component its pages need; the engine does not gate on it.
+export const componentRequiresProbe: AppModule = { id: "probe", titleKey: "jobs.title", requires: { capabilities: ["job-service"], component: "job-service" } };
+// @ts-expect-error A component is one name, not a list.
+export const componentRequiresListProbe: AppModule = { id: "probe", titleKey: "jobs.title", requires: { component: ["job-service"] } };
+
 function compileContract(ctx: AppModuleContext) {
   ctx.contribute("main.page", { id: "probe.page", Page: () => null, useTitle: () => [] });
   ctx.contribute("timeline.received", { id: "probe.received", schemas: ["probe.v1"], Row: () => null });

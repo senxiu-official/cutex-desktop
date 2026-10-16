@@ -1168,6 +1168,16 @@ async function playTurn(sessionId: string, text: string, extra: unknown[] = [], 
   nativeEvent(sessionId, "item/completed", { turnId, item: userItem });
   await sleep(400);
   if (cancelled.has(turnId)) return;
+  // Native retrying a failing model request (`error` with willRetry, lib/retryNotice): localStorage
+  // "cutex-mock-retry" = attempts before the request goes through (of 5), "cutex-mock-retry-ms" = gap.
+  const retries = Math.min(5, Number((() => { try { return localStorage.getItem("cutex-mock-retry"); } catch { return null; } })()) || 0);
+  const retryMs = Number((() => { try { return localStorage.getItem("cutex-mock-retry-ms"); } catch { return null; } })()) || 2500;
+  for (let n = 1; n <= retries; n++) {
+    const details = "unexpected status 524 <none>: error code: 524, url: https://relay.example.invalid/v1/responses, cf-ray: 0000000000000000-SYD";
+    nativeEvent(sessionId, "error", { turnId, willRetry: true, error: { message: `Reconnecting... ${n}/5`, codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 524 } }, additionalDetails: details, misalignment: null } });
+    await sleep(retryMs);
+    if (cancelled.has(turnId)) return;
+  }
   // Live raw reasoning (Kimi / DeepSeek style): streams into a 推理中 row (shimmers while live).
   // localStorage "cutex-mock-reasoning-ms" = ms per chunk (default 90; raise it to inspect the row).
   const chunkMs = Number((() => { try { return localStorage.getItem("cutex-mock-reasoning-ms"); } catch { return null; } })()) || 90;

@@ -1,6 +1,7 @@
-# Preinstalled desktop plugin examples
+# Desktop plugin examples
 
-These packages are development examples, excluded from the production bundle. The desktop has no plugin installer. Desktop plugins are separate from daemon-managed Agent plugins.
+These packages are development examples. They are not part of the desktop packages and nothing is
+installed by default; the desktop has no plugin installer, so you copy them by hand (below). Desktop plugins are separate from daemon-managed Agent plugins.
 
 To try them in an isolated desktop profile:
 

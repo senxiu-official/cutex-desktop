@@ -2,18 +2,20 @@
 // sits in its sender's timeline, and which ones count in 需要你. Pure (unit-tested); the records live
 // in lib/ownerNotifyStore, the card is components/OwnerNotifyCard.
 import type { OwnerNotification } from "@cutex-desktop/protocol";
-import { canReply, isAlerting, isPending } from "../../../shared/ownerNotify";
+import { canReply, isAlerting, isOpenSafetyBlock, isPending } from "../../../shared/ownerNotify";
 
 /**
  * How a note sits in the timeline (quiet pass, owner 2026-10-14): a card only while it asks for a
  * decision — an unread 紧急 note, or one still waiting for the owner's reply. Everything else (read
  * notes, 告知 / 需要你 notes, cutex's own notices) is one quiet row whose actions show on hover / focus.
  */
-export function notePresentation(n: Pick<OwnerNotification, "level" | "needsReply" | "origin" | "state">): "card" | "row" {
+export function notePresentation(n: Pick<OwnerNotification, "level" | "needsReply" | "origin" | "state"> & Partial<Pick<OwnerNotification, "safetyBlock">>): "card" | "row" {
+  // A safety block waits for 批准一次 / 不批准: a card until decided.
+  if (n.safetyBlock) return isOpenSafetyBlock(n) ? "card" : "row";
   return canReply(n) || (n.level === "urgent" && n.state === "open") ? "card" : "row";
 }
 
-export { canReply, isAlerting, isFinal, isPending, isSystemNotice, OWNER_NOTIFY_DELETE_FEATURE, previewText } from "../../../shared/ownerNotify";
+export { canReply, isAlerting, isFinal, isOpenSafetyBlock, isPending, isSystemNotice, OWNER_NOTIFY_DELETE_FEATURE, previewText, safetyBlockState } from "../../../shared/ownerNotify";
 
 export interface OwnerNotePlacement {
   /** Before the first rendered row (older than every loaded turn, and nothing older to load). */
@@ -69,9 +71,20 @@ export function noteTurnOf(r: Pick<OwnerNotification, "turnId" | "createdAt">, t
   return turn;
 }
 
-/** 需要你 reason of a pending record (cutex's own notices are never pending, see isPending). */
-export function ownerNeedReason(n: Pick<OwnerNotification, "needsReply">): "ownerReply" | "ownerMessage" {
+/** 需要你 reason of a pending record (cutex's own notices are pending only as safety blocks, see isPending). */
+export function ownerNeedReason(n: Pick<OwnerNotification, "needsReply"> & Partial<Pick<OwnerNotification, "safetyBlock">>): "ownerReply" | "ownerMessage" | "safetyBlock" {
+  if (n.safetyBlock) return "safetyBlock";
   return n.needsReply ? "ownerReply" : "ownerMessage";
+}
+
+/** The safety-block notice of a declined tool row (`itemId`), the latest when there are several. */
+export function safetyNoteOfItem(byId: Readonly<Record<string, OwnerNotification>>, agentId: string, itemId: string): OwnerNotification | null {
+  let found: OwnerNotification | null = null;
+  for (const r of Object.values(byId)) {
+    if (r.agentId !== agentId || r.safetyBlock?.itemId !== itemId) continue;
+    if (!found || Date.parse(r.createdAt) > Date.parse(found.createdAt)) found = r;
+  }
+  return found;
 }
 
 /** Pending records per sender, oldest first. */

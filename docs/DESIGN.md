@@ -1,5 +1,12 @@
 # cutex-desktop — Design
 
+> **Public repository note.** This is a maintainers' design record, kept as written during
+> development. It cites internal notes and working checkouts that are not published with this
+> repository (`docs/research/…`, `docs/reviews/…`, `docs/handoff/…`, `TODO.md`, `PROGRESS.md`,
+> `PLAN.md`, `upstream/…`, `refs/…`, `.claude/…`); those references are history, not links.
+> "The owner" is the project's maintainer. The current behaviour is in the code, `README.md`,
+> `docs/install/AGENT-INSTALL.md` and the cutex repository's `docs/`.
+
 Status: draft v0.1 (2026-10-06). Decisions below were agreed with the owner in conversation.
 Interface details marked _(pending verification)_ must be checked against `refs/cutex` and
 `upstream/cute-codex` HEAD before implementation.
@@ -41,9 +48,11 @@ Why keep cutex as a separate daemon (instead of folding it into Electron):
 - Runtimes must survive closing the desktop; reconnect resumes via bootstrap + event cursor.
 - Headless Linux hosts and the TUI keep working; no rewrite of cutex in TS.
 
-Daemon supervision (decided): **Windows → persistent-runtime-host service; Linux → systemd user
-service.** Desktop detects a missing daemon and offers to start / shows diagnostics; it does not
-own the daemon's lifetime.
+Daemon supervision: `cutex service install` sets it up. **Linux → systemd user units**
+(`cutex-agent-bus`, `cutex-management-api`); **Windows → a per-user Task Scheduler logon task**
+(`\Cutex\cutex-supervisor`) running cutex's own supervisor (`cutex service run`). The separate
+persistent-runtime-host project is not used or required by Cutex. The desktop detects a missing daemon
+and shows diagnostics (on Windows it may start the logon task); it does not own the daemon's lifetime.
 
 Remote (later): each machine runs its own cutex daemon; desktop connects to several daemons
 (local direct, remote via SSH port-forward). Sidebar can then group by host. Requirement for v1:

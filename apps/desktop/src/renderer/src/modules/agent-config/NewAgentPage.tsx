@@ -37,6 +37,9 @@ import { ProjectIconPicker } from "../../components/ProjectIconPicker";
 import type { ProjectIconChoice } from "../../lib/projectIcons";
 import { setProjectIcon } from "../../lib/prefs";
 import { useHostScope } from "../../lib/useHostScope";
+import { ComponentNotice } from "../../components/ComponentCard";
+import { CLAUDE_RUNTIME_COMPONENT, componentBlocks } from "../../lib/componentCard";
+import { useComponentState } from "../../lib/componentView";
 import { claudeLaunchFromForm, effectiveProfile, HUMAN_AGENT_CLAUDE_FEATURE, isClaudeCreatorRefusal, isClaudeProfile } from "../../lib/newAgentClaude";
 import { NewAgentStepError, NO_PROGRESS, runNewAgentSteps, type NewAgentProgress, type NewAgentStep } from "../../lib/newAgentSteps";
 import { ProjectColorPicker } from "../../components/ProjectColorPicker";
@@ -310,6 +313,10 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   const claude = isClaudeProfile(chosen);
   /** A Claude profile (picked, or the default) on a host that cannot create Claude agents. */
   const claudeBlocked = claude && !claudeOk;
+  // components spec v2 §5: a Claude agent needs the host's claude-runtime component; creating one
+  // cannot work while it is missing / installing / needs the owner (viewing the form never blocks).
+  const runtime = useComponentState(hostId, CLAUDE_RUNTIME_COMPONENT, { active: claude && claudeOk });
+  const runtimeBlocked = claude && claudeOk && componentBlocks(runtime.state);
 
   // Profiles of the target host (another host has other profiles); reloaded when the host changes.
   useEffect(() => {
@@ -411,7 +418,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
     }
   };
   const create = async () => {
-    if (sending.current || imageLoadingRef.current || !online || claudeBlocked || !name.trim() || imageError || missingWorkspace || (newProject && !projectName.trim())) return;
+    if (sending.current || imageLoadingRef.current || !online || claudeBlocked || runtimeBlocked || !name.trim() || imageError || missingWorkspace || (newProject && !projectName.trim())) return;
     sending.current = true;
     setBusy(true);
     setError(null);
@@ -532,7 +539,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   const oversized = images.find((image) => image.bytes > imageLimit);
   const firstInput = draftSubmit({ text: task, images, skills: claude ? [] : pickedSkills });
   const imageError = images.length && !canImages ? t("composer.image.unsupported") : oversized ? t("composer.image.tooLarge", { name: oversized.name }) : firstInput.extra.length > 20 ? t("agent-config.newAgent.tooManyAttachments") : null;
-  const disabled = !online || claudeBlocked || !name.trim() || busy || imageLoading || !!imageError || missingWorkspace || (newProject && !projectName.trim());
+  const disabled = !online || claudeBlocked || runtimeBlocked || !name.trim() || busy || imageLoading || !!imageError || missingWorkspace || (newProject && !projectName.trim());
   /** First thing the owner still has to fill in, shown in the composer. */
   const missing = !name.trim() ? t("agent-config.newAgent.needName") : missingWorkspace ? t("agent-config.newAgent.needWorkspace") : null;
   const addImages = async (files?: File[]) => {
@@ -712,6 +719,8 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
         )}
         {!online && <p className="mb-2 text-xs text-warn">{t("hostPicker.unavailable", { host: hostLabel })}</p>}
         {claudeBlocked && <p className="mb-2 text-xs text-warn">{t("agent-config.newAgent.claudeUnsupported")}</p>}
+        {claude && claudeOk && <ComponentNotice name={CLAUDE_RUNTIME_COMPONENT} hostId={hostId} className="mb-2" />}
+        {runtimeBlocked && <p className="mb-2 text-xs text-warn">{t("modules.component.blocksStart", { component: t("modules.component.claude-runtime.name") })}</p>}
 
         <div ref={optionsRef} className="relative">
           {panel === "model" && detailsPanel}

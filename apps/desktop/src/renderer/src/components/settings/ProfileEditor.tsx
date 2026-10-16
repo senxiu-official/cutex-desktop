@@ -32,6 +32,8 @@ import { ProfileAvatar } from "../ProfileAvatar";
 import { AccountRows } from "./AccountSection";
 import { Button, DefaultableToggleRow, HintAction, Loading, NumberField, SettingRow, Section, Segmented, TextInput, Toggle } from "./Form";
 import { ClaudeAccountRow } from "./ProfileClaudeAccount";
+import { ComponentNotice } from "../ComponentCard";
+import { CLAUDE_RUNTIME_COMPONENT } from "../../lib/componentCard";
 import { ModelList } from "./ProfileModels";
 import { ProfileModelFields } from "./ProfileModelFields";
 import { ProfileAppearance } from "./ProfileAppearance";
@@ -627,6 +629,7 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
           );
         }}
       />
+      {kind === "claude" && <ComponentNotice name={CLAUDE_RUNTIME_COMPONENT} hostId={targetHost} className="mb-3" />}
       <Overview
         detail={detail}
         livePlan={livePlan}

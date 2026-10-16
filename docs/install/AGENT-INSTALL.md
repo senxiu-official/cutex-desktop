@@ -26,6 +26,8 @@ afterwards (section 12).
   under `~/.cutex`. Closing the desktop does not stop your agents.
 - **cute-codex** is the agent runtime (a fork of OpenAI Codex). cutex starts it for each agent.
 - **The desktop** only displays and controls what cutex has. It never installs or starts cutex.
+- **Optional components** that cutex installs on request: the Claude runtime for Claude Code
+  agents (section 6.1) and, on Linux, the Job Service for long-running jobs (section 6.2).
 
 | Your computer | Supported |
 |---|---|
@@ -43,7 +45,8 @@ to 7 build the same programs from them:
 | `https://github.com/senxiu-official/cutex-desktop` | `release` | the desktop app (this repository) |
 
 Use the `release` branch (or the release binaries) of all three: they are published together and
-tested together. If one of them has no `release` branch yet, stop and ask whoever invited you.
+tested together. If one of them has no `release` branch, stop and report it (open an issue on
+https://github.com/senxiu-official/cutex-desktop/issues) instead of using another branch.
 
 ### Rules for an AI agent following this guide
 
@@ -179,8 +182,8 @@ and in the table below; for this release:
 
 | | Linux / Windows / macOS |
 |---|---|
-| `VERSION` (cutex) | `0.1.0` |
-| `DESKTOP_VERSION` (desktop) | `0.1.1` |
+| `VERSION` (cutex) | `0.1.1` |
+| `DESKTOP_VERSION` (desktop) | `0.1.2` |
 | `NATIVE` (cute-codex) | `0.160.0-r52.2` |
 
 ### B.1 Download and verify
@@ -199,7 +202,7 @@ A file whose signature does not verify must not be used: stop and report it.
 Linux (macOS: only the desktop line, with `macos-arm64` or `macos-x64` and `.zip`):
 
 ```sh
-VERSION=0.1.0 DESKTOP_VERSION=0.1.1 NATIVE=0.160.0-r52.2 PLATFORM=linux-x64
+VERSION=0.1.1 DESKTOP_VERSION=0.1.2 NATIVE=0.160.0-r52.2 PLATFORM=linux-x64
 PUB=RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
 mkdir -p ~/cutex-download && cd ~/cutex-download
 get() { curl -fsSL --retry 3 -O "$1" && curl -fsSL --retry 3 -O "$1.minisig" && minisign -Vm "${1##*/}" -P "$PUB" \
@@ -214,7 +217,7 @@ echo "all downloads verified"
 Windows (PowerShell):
 
 ```powershell
-$Version = '0.1.0'; $DesktopVersion = '0.1.1'; $Native = '0.160.0-r52.2'; $Platform = 'windows-x64'
+$Version = '0.1.1'; $DesktopVersion = '0.1.2'; $Native = '0.160.0-r52.2'; $Platform = 'windows-x64'
 $Pub = 'RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS'
 $Dl = "$env:USERPROFILE\cutex-download"; New-Item -ItemType Directory -Force $Dl | Out-Null; Set-Location $Dl
 function Get-Signed($Url) {
@@ -246,7 +249,7 @@ Linux:
 cd ~/cutex-download
 mkdir -p cutex-$VERSION && tar -xzf cutex-$VERSION-$PLATFORM.tar.gz -C cutex-$VERSION
 cp manifest.json manifest.json.minisig cutex-$VERSION/
-cutex-$VERSION/cutex --version            # cutex 0.1.0 (0.1.0, <commit>)
+cutex-$VERSION/cutex --version            # cutex 0.1.1 (0.1.1, <commit>)
 cutex-$VERSION/cutex service install --channel release --no-start
 CUTEX_BASE=~/.local/share/cutex
 RELEASE_DIR="$CUTEX_BASE/releases/$VERSION"
@@ -276,7 +279,7 @@ cutex upgrade status
 Select-String '"home"' "$env:USERPROFILE\.cutex\archive\fresh-agent-permissions\migration.json"
 ```
 
-Check: `cutex upgrade status` prints `installed  0.1.0` (`cutex upgrade status --json` shows
+Check: `cutex upgrade status` prints `installed  0.1.1` (`cutex upgrade status --json` shows
 `"managed": true` and the release's `sequence` above 0), and the last line prints `"home": "fresh"`
 (section 5.2 explains the record). The services are installed but not started yet.
 
@@ -391,7 +394,7 @@ current version, which is the one to start (and pin to the Dock) from then on:
 
 ```sh
 cd ~/cutex-download
-DESKTOP_VERSION=0.1.1
+DESKTOP_VERSION=0.1.2
 ARCH=$( [ "$(uname -m)" = arm64 ] && echo arm64 || echo x64 )
 # (download and verify cutex-desktop-$DESKTOP_VERSION-macos-$ARCH.zip as in B.1)
 DESKTOP_BASE=~/Applications/cutex-desktop
@@ -605,7 +608,7 @@ cargo +1.95.0 build --locked --release --bin cutex --bin cutex-mcp
 .\target\release\cutex.exe --version
 ```
 
-Check: `cutex --version` prints `cutex 0.1.0 (<7-char commit>)` (warnings during the build are
+Check: `cutex --version` prints `cutex 0.1.1 (<7-char commit>)` (warnings during the build are
 expected; only `error:` matters). `CUTEX_COMMIT` names the install
 (`dev-<commit>`) and `CUTEX_CHANNEL=release` records the channel; neither changes behaviour.
 
@@ -669,6 +672,11 @@ registers the background services:
 |---|---|---|
 | Linux | `~/.local/share/cutex` | systemd user units `cutex-agent-bus.service`, `cutex-management-api.service` |
 | Windows | `%LOCALAPPDATA%\cutex` | Task Scheduler task `\Cutex\cutex-supervisor` (runs at logon, no admin rights) |
+
+The Management API also runs the notification worker (webhook delivery and the notification states
+the desktop shows), so there is no separate `cutex notify run` service to set up. On Windows,
+`cutex human service` (the TUI services page) starts and stops both services through the
+`\Cutex\cutex-supervisor` task.
 
 Install without starting yet (the runtime is selected first):
 
@@ -802,8 +810,8 @@ cutex human install-runtime "$env:RELEASE_DIR\manifests\default.json"
 Check: `install-runtime` prints the selection (`bundle_manifest`, `native_home` =
 `~/.cutex/codex-home`). It verifies every pinned file, so an error here names the file that is wrong.
 
-Claude Code agents need a separate runtime (the `claude-adapter` directory of the cutex repository,
-`cutex human claude install`); this guide covers Codex-based agents only.
+Two optional components come after cutex runs: the Claude runtime for Claude Code agents (section
+6.1) and, on Linux, the Job Service for long-running jobs (section 6.2).
 
 ## 6. Start cutex and check it
 
@@ -833,6 +841,109 @@ errors. The management API listens on `127.0.0.1` only; do not change that to a 
 What cutex does by itself once running: it fetches a public model price list once a day (for the
 usage page's cost estimates), and it writes agent scratch directories under `~/.cutex/agents-scratch`
 (never deleted automatically).
+
+### 6.1 Optional: Claude Code agents (the Claude runtime)
+
+Skip this unless you want agents that run Anthropic's Claude Code instead of Codex. The Claude
+runtime is an optional cutex component: a small Python adapter between cutex and the official
+Claude Code CLI. cutex installs and updates it; you install two things it cannot ship for you:
+
+- **Python 3.11 or newer** with the `venv` module. cutex creates a private virtual environment from
+  the wheels in the component archive, offline. Linux: Debian 12+ / Ubuntu 24.04+
+  `sudo apt install -y python3 python3-venv`; Ubuntu 22.04 `sudo apt install -y python3.11 python3.11-venv`.
+  Windows: `winget install Python.Python.3.13` (or the python.org installer); cutex finds it with `py -3`.
+- **The Claude Code CLI** (`claude`), installed by you under your own Anthropic account. Its license does not allow
+  redistribution, so no Cutex archive contains it. Linux: `curl -fsSL https://claude.ai/install.sh | bash`;
+  Windows (PowerShell): `irm https://claude.ai/install.ps1 | iex`. Check with `claude --version`.
+
+`npm install -g @anthropic-ai/claude-code` works too. Do not point cutex at the copy bundled inside
+the `claude-agent-sdk` wheels from PyPI. cutex looks for `claude` on PATH, then in `~/.local/bin` (Windows
+`%USERPROFILE%\.local\bin`). If yours is elsewhere, set `CUTEX_CLAUDE_CLI=<path>` for the cutex
+services; `CUTEX_CLAUDE_PYTHON=<path>` does the same for Python.
+
+Install the component. A binary install (section B) downloads the signed archive that belongs to the
+installed cutex release:
+
+```sh
+cutex component install claude-runtime
+cutex component status claude-runtime
+```
+
+A source install builds it from the checkout instead (this downloads the Python wheels from PyPI):
+
+```sh
+cutex component install claude-runtime --from-source ~/src/cutex
+```
+
+```powershell
+cutex component install claude-runtime --from-source "$env:USERPROFILE\src\cutex"
+```
+
+The desktop does the same from **Settings → Profiles → new Profile → Claude** or the new-agent page
+when the host has no Claude runtime yet: they show an install card with the same steps.
+
+`status` reports `state`. `needsUser` lists the remaining `steps`, which you follow and then install
+again (the prepared environment is reused):
+
+| Code in `detail.needsUser.code` | What to do |
+|---|---|
+| `python_missing`, `python_too_old`, `python_venv_missing` | Install Python 3.11+ with venv (above) |
+| `claude_cli_missing` | Install the Claude Code CLI (above) |
+| `codex_runtime_missing` | Select the Codex runtime first (section 5.3 / B.3) |
+| `claude_login_required` | Log in (below); the runtime itself is ready |
+
+Log in once. Either use a Claude subscription: `cutex human claude account login default` runs the
+official `claude auth login` for cutex's own Claude home (not your `~/.claude`). Or use an API key:
+`cutex human claude account add <label> --api --api-key-stdin` and paste the key on stdin. Then create a
+Profile of kind **Claude** in the desktop (section 8) and an agent on it.
+
+Check: `cutex component status claude-runtime` says `ready`, and
+`cutex human claude account list` shows the account as logged in.
+
+Updates and removal: a backend update (section 9) also downloads the Claude runtime version that
+belongs to the new cutex release and selects it for **new** Claude agents. Existing agents keep the
+version they started on, and `versions[].pinnedBy` counts them. `cutex component remove claude-runtime`
+only deselects it; `cutex component prune` deletes versions no agent uses. The component's README
+(`components/claude-runtime/README.md` in the cutex repository) documents the selected
+`~/.cutex/runtime/claude/deployment.json` and the foreground TUI (`cutex human claude attach`).
+
+### 6.2 Optional: long-running jobs (the Job Service, Linux)
+
+Skip this unless you want agents to start long-running commands (builds, tests, training runs)
+that keep going after their turn ends and report back when they finish: the desktop's **Jobs**
+page. The Job Service is an optional cutex component, Linux only, run as the systemd user unit
+`cutex-job-service.service`. It needs nothing beyond what sections B / 2 to 6 installed: the Codex
+runtime selected in 5.3 / B.3 (its `codex` CLI is the jobs' sandbox launcher).
+
+Install it on a binary install (section B), which downloads the signed archive that belongs to the
+installed cutex release:
+
+```sh
+cutex component install job-service
+cutex component status job-service
+```
+
+A source install builds it from the checkout instead (with the Rust toolchain of section 1):
+
+```sh
+cutex component install job-service --from-source ~/src/cutex
+```
+
+The desktop's **Jobs** page shows an install card with the same **Install** button when the host
+has no Job Service yet.
+
+Check: `cutex component status job-service` says `ready`. Agents created from now on get the job
+tools. If it says `needsUser`, the `steps` name what is missing: no Codex runtime is selected for new
+agents, or the selected one has no `codex` CLI. Fix that (5.3 / B.3), then install again.
+
+Updates and removal: a backend update (section 9) installs the Job Service version that belongs to
+the new cutex release; a restart that would interrupt a running job waits until the job has
+finished (`restartPending`). `cutex component remove job-service` stops it and keeps the job
+records and output (it refuses while jobs run unless you add `--force`); `cutex component prune
+job-service` deletes versions nothing uses.
+
+NCI remote jobs (the NCI module in [ANU.md](ANU.md)) also build on the Job Service but are not
+usable in the public release yet.
 
 ## 7. Install the desktop
 
@@ -924,6 +1035,30 @@ On a Mac the app starts with no host. Click **Add an SSH host** (or the host swi
 host…) and enter `user@machine` for the Linux or Windows computer where you did sections 2 to 6.
 The app uses your existing SSH keys and `~/.ssh/config`, tunnels the connection over SSH and pairs
 with that cutex by itself; no port needs to be opened. Only connect to machines you own.
+
+**A Windows cutex machine** needs the OpenSSH server, which Windows ships but does not turn on.
+Ask the person before these steps: they need an elevated PowerShell (Run as administrator) on the
+Windows machine.
+
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Start-Service sshd
+Set-Service -Name sshd -StartupType Automatic
+Get-NetFirewallRule -Name *OpenSSH-Server* | Select-Object Name, Enabled   # the installer adds an inbound rule for port 22
+```
+
+Then put the Mac's public key (`~/.ssh/id_ed25519.pub`) into the Windows account's
+`%USERPROFILE%\.ssh\authorized_keys`. For an account in the Administrators group, OpenSSH reads
+`C:\ProgramData\ssh\administrators_authorized_keys` instead; that file must be writable only by
+Administrators and SYSTEM:
+`icacls C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"`.
+
+The app runs `cutex management client-token issue` over SSH to pair. OpenSSH runs it in `cmd.exe`
+with the account's PATH, so `%LOCALAPPDATA%\cutex\bin` (added in B.2 / 5.2) must be on the **user**
+PATH; restart the service (`Restart-Service sshd`, elevated) after changing PATH so new sessions see
+it. Check from the Mac: `ssh user@machine cutex --version` prints the cutex version. If it does not,
+the app still looks for `%LOCALAPPDATA%\cutex\bin\cutex.exe` by itself, as long as the account name
+contains no spaces; otherwise fix the PATH.
 
 ### 7.5 The same identity on another computer
 
@@ -1054,7 +1189,8 @@ in use cannot be moved; it stays in `releases/` and is moved at a later start.
 
 The in-app **Backend updates** page downloads signed cutex releases from the GitHub Releases of
 `senxiu-official/cutex` (managed installs only: every install made with `cutex service install`).
-After a binary install (section B) that is the way to update. A cutex built from source can use it
+After a binary install (section B) that is the way to update; it also brings installed optional
+components (6.1, 6.2) to the versions of the new release. A cutex built from source can use it
 too; or update from source:
 
 1. Wait until no agent is working (a restart never loses agents, but do not cut a running turn).
@@ -1072,6 +1208,8 @@ too; or update from source:
    Windows: sign out and back in (the logon task starts the new build), or end and rerun the task:
    `schtasks /End /TN "\Cutex\cutex-supervisor"` then `schtasks /Run /TN "\Cutex\cutex-supervisor"`.
 7. Check with `cutex --version` and section 6.
+8. Optional components installed from source (6.1, 6.2): run their
+   `cutex component install <name> --from-source ~/src/cutex` again to pick up a newer version.
 
 ## 10. Unsigned app warnings
 
@@ -1113,10 +1251,11 @@ a publisher either.
 | Linux (Ubuntu 24.04+): the app does not start, mentioning the sandbox / `chrome-sandbox` | The AppArmor step of section 7.1 was skipped. Ask the person to run the two `sudo` commands there. |
 | `nvm install 24` leaves `node --version` at an older version | `~/.npmrc` sets `prefix`; see the Node 24 item in section 1. |
 | `git pull`: "divergent branches" / "unrelated histories", or `git fetch --tags`: "would clobber existing tag" | The published `release` branch was replaced instead of moved forward (each release is normally a child of the previous one). Keep your old state under another name and follow the new one: `git branch -m release old-release`, `git fetch --force --tags origin`, `git switch -c release --track origin/release`. For the desktop `src`, then rerun the install script (9). |
-| Updates & diagnostics: "Installed from a release package" | A desktop from the release binaries (section B). It does not update itself; see B.5. |
+| Updates & diagnostics: "Installed from a release package" | A release package that is not in the `releases/<version>` + `current` layout of B.4 (e.g. unpacked somewhere else, or `Cutex.app` dragged to `/Applications`), so it cannot replace itself; the page links to the Releases page. Reinstall it as in B.4 to get the one-click updates of B.5, or update by hand (B.5). |
 | Updates & diagnostics: "Not a portable install" | The app was not started from `<desktop base>/current`, or `<desktop base>/src` is missing. Start it from `current`, or reinstall with section 7. |
 | Updates & diagnostics: "The update source has no branch for this channel yet" | The `release` branch is not published on the repository `src` was cloned from. Wait for it, or check `git -C <desktop base>/src remote -v`. |
-| Backend updates: `no_trusted_keys` | A cutex older than 0.1.0, built without the release keys; update from source (section 9). |
+| Backend updates: `no_trusted_keys` | A cutex built without the release keys (a fork, or a build older than 0.1.0). Update it from source once (section 9); later updates can use Backend updates. |
+| Backend updates: `unmanaged_install` | The running cutex was not installed with `cutex service install` (e.g. started by hand from a build directory). Install it as in B.2 or 5.2. |
 | Disk full of `<desktop base>/releases/*` (tens of GB) | An install from before old releases were tidied up. Update once (or rerun the install script): everything but the release in use and the previous one moves to `old-releases/`; then delete it (section 9, **Old releases**). |
 | macOS: Spotlight / the Apps picker lists several **Cutex** | Releases from before `~/Applications/Cutex.app` existed. Update once; open `~/Applications/Cutex.app` from then on and delete `old-releases/` (section 9). The release that was in use before stays listed until the next update moves it. Remove a Dock icon of an old release (Options → Remove from Dock) and keep the running one instead. |
 | macOS: `~/Applications/Cutex.app` is missing after an update | It is created from a release that records its location (built by this version or later), and never over a `Cutex.app` from another install. Check `update.log` (lines starting with `launcher`), move the other app away, and restart the desktop. |
@@ -1135,6 +1274,11 @@ keys, tokens, `config.json` or `auth.json`, and remove paths or names you do not
 - Only the old releases: `old-releases/` can be deleted at any time (section 9).
 - cutex: `cutex service uninstall` removes the services (never data). Then delete the install base
   (`~/.local/share/cutex` or `%LOCALAPPDATA%\cutex`) and `~/.local/bin/cutex`.
+- Claude runtime (6.1): its versions live under `<install base>/components/claude-runtime` and go
+  with the install base; the Claude Code CLI you installed is removed with its own uninstaller.
+- Job Service (6.2): `cutex component remove job-service` before `cutex service uninstall` stops
+  its unit; its versions live under `<install base>/components/job-service`, its job records under
+  `~/.cutex/runtime/job-service`.
 - `~/.cutex` holds every agent, conversation, Profile and credential. Delete it only if you want all
   of that gone.
 - Linux AppArmor profile (section 7.1), if installed:
@@ -1157,7 +1301,9 @@ the next update (section 9) shorter:
 ## 13. Optional: this manual for your own coding agent
 
 The desktop repository contains a usage manual written for AI agents: the skill `skills/cutex-docs`
-(a `SKILL.md` plus `references/`, in Chinese; the agent answers in the person's language). With it,
+(a `SKILL.md` plus `references/`, in Chinese; the agent answers in the person's language). Every
+desktop package carries a copy (`<desktop base>/current/skills/cutex-docs`), and a desktop built
+from source has it in `<desktop base>/src/skills/cutex-docs`. With it,
 the person can ask their own coding agent "how do I … in Cutex?" or "what does this error mean?".
 It is optional and changes nothing in cutex or the desktop.
 
@@ -1169,21 +1315,27 @@ If the person wants it, copy the whole folder into their agent's personal skills
 | Codex CLI (and cute-codex) | `~/.agents/skills/cutex-docs` (older Codex versions read `~/.codex/skills`) |
 | Any other agent | that agent's skills directory; check its documentation |
 
-Linux / macOS:
+Linux / macOS (`DESKTOP_BASE` as in B.4 or section 7):
 
 ```sh
 mkdir -p ~/.claude/skills
-cp -R "$DESKTOP_BASE/src/skills/cutex-docs" ~/.claude/skills/
+SKILL="$DESKTOP_BASE/current/skills/cutex-docs"
+[ -d "$SKILL" ] || SKILL="$DESKTOP_BASE/src/skills/cutex-docs"
+cp -R "$SKILL" ~/.claude/skills/
 ```
 
 Windows:
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills" | Out-Null
-Copy-Item -Recurse -Force "$DesktopBase\src\skills\cutex-docs" "$env:USERPROFILE\.claude\skills\"
+$Skill = "$DesktopBase\current\skills\cutex-docs"
+if (-not (Test-Path $Skill)) { $Skill = "$DesktopBase\src\skills\cutex-docs" }
+Copy-Item -Recurse -Force $Skill "$env:USERPROFILE\.claude\skills\"
 ```
 
-(Use the Codex directory from the table instead if that is the person's agent.) The copy does not
+(Use the Codex directory from the table instead if that is the person's agent. Packages up to
+0.1.1 have no copy: download the folder from the `release` branch of
+`https://github.com/senxiu-official/cutex-desktop` instead.) The copy does not
 update itself: after a desktop update, copy the folder again to refresh it. Note that cute-codex
 also reads `~/.agents/skills`, so cutex agents on that machine may see the skill too; that is harmless.
 

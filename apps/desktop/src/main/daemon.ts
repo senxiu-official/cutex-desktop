@@ -21,9 +21,10 @@ import {
   type DaemonEndpoint,
 } from "@cutex-desktop/cutex-client";
 import type { AdmissionRef, HostSessionRow, SessionList, OwnerNotification, OwnerNotificationList, OwnerNotifyFilter, OwnerNotifySettingsPatch, ProjectsResponse, QueueMoveResult, QueueYieldResult } from "@cutex-desktop/protocol";
+import { SAFETY_CHECK_DISMISS, SAFETY_CHECK_GRANT } from "@cutex-desktop/protocol";
 import { asRecord, isNotificationId, sanitizeOwnerNotifyPatch } from "../shared/ownerNotify";
 import { asDecision, asLevelsView, sanitizeEvaluate, sanitizeLevelsPatch, type NotificationDecision, type NotificationEvaluateRequest, type NotificationLevelsPatch, type NotificationLevelsView } from "../shared/notificationLevels";
-import { OWNER_REPLY_MAX, type OwnerNotifyAction, type OwnerNotifyResult } from "../shared/ipc";
+import { OWNER_REPLY_MAX, type OwnerNotifyAction, type OwnerNotifyResult, type SafetyCheckDecision, type SafetyCheckResult } from "../shared/ipc";
 import type {
   CollaborationModeListResponse,
   CollaborationModeMask,
@@ -50,6 +51,7 @@ import { queueMoveErrorKind, queueMoveErrorMessage } from "../shared/queueMove";
 import { queueSteerErrorDetail, queueSteerErrorKind, queueSteerErrorMessage } from "../shared/queueSteer";
 import type { RuntimesWire } from "../shared/runtimes";
 import type { HostServiceInfo, UpgradeApplyRequest, UpgradeResult, UpgradeRollbackRequest, UpgradeRollbackResult, UpgradeRun, UpgradeSettings, UpgradeSettingsPatch, UpgradeStaging, UpgradeStatus } from "../shared/backendUpgrade";
+import type { ComponentAction, ComponentResult, ComponentsList } from "../shared/components";
 import { claudeAccountCreateBody, claudeAccountId, claudeAccountRenameBody, DEFAULT_CLAUDE_ACCOUNT, type ClaudeAccount, type ClaudeAccountCreate, type ClaudeAccountList, type ClaudeAccountRemoved, type ClaudeAccountRemoveResult, type ClaudeAccountResult, type ProfileQuotaDetail } from "../shared/claudeAccounts";
 import { directorRotationBody, ROTATION_ID } from "../shared/directorRotation";
 import { artifactContentQuery, artifactDiffQuery, artifactId, artifactListQuery, artifactPatchBody, artifactPublishBody, artifactResolveBody, artifactVersionSel, type ArtifactContent, type ArtifactDeleteResult, type ArtifactDetail, type ArtifactDiff, type ArtifactList, type ArtifactListQuery, type ArtifactPatch, type ArtifactPatchResult, type ArtifactPublished, type ArtifactPublishRequest, type ArtifactPublishResult, type ArtifactResolveItem, type ArtifactSummary, type ArtifactUsage } from "../shared/artifactStore";
@@ -1829,6 +1831,17 @@ export class DaemonService implements DaemonApi {
     return this.requireClient().hostServiceInfo();
   }
 
+  // ---------- optional components (cutex `components`, shared/components.ts) ----------
+  // Owner only. The desktop only asks cutex to install / remove; cutex downloads, verifies, starts.
+
+  components(): Promise<ComponentsList | null> {
+    return this.requireClient().components();
+  }
+
+  componentAction(name: string, action: ComponentAction): Promise<ComponentResult> {
+    return this.requireClient().componentAction(name, action);
+  }
+
   // person-identity claim (main/personIdentity.ts only; not renderer IPC: signing stays in main).
   identityChallenge(): Promise<IdentityChallenge> {
     return this.requireClient().identityChallenge();
@@ -2078,6 +2091,27 @@ export class DaemonService implements DaemonApi {
       const refusal = refusalOf(error);
       if (refusal) return { ok: false, error: refusal };
       throw error;
+    }
+  }
+
+  async safetyCheckDecide(agentId: string, blockId: string, decision: SafetyCheckDecision): Promise<SafetyCheckResult> {
+    if (typeof agentId !== "string" || !agentId || agentId.length > 200) throw new Error("bad agent id");
+    if (!isNotificationId(blockId)) throw new Error("bad block id");
+    const method = decision === "grant" ? SAFETY_CHECK_GRANT : decision === "dismiss" ? SAFETY_CHECK_DISMISS : null;
+    if (!method) throw new Error("bad safety check decision");
+    try {
+      const r = await this.requireClient().cutex<{ notification?: unknown; submitError?: { code?: unknown; message?: unknown } }>(agentId, method, { blockId });
+      const notification = asRecord(r?.notification);
+      if (!notification) throw new Error(`${method} returned no notification`);
+      const failed = r?.submitError;
+      const submitError = failed && typeof failed.code === "string" ? { code: failed.code, message: typeof failed.message === "string" ? failed.message : "" } : null;
+      return { ok: true, notification, submitError };
+    } catch (error) {
+      const refusal = refusalOf(error);
+      if (!refusal) throw error;
+      // safety_block_closed carries the notice as the runtime has it (decided elsewhere meanwhile).
+      const notification = error instanceof CutexApiError ? asRecord((error.details as { notification?: unknown } | null | undefined)?.notification) : null;
+      return { ok: false, error: refusal, ...(notification ? { notification } : {}) };
     }
   }
 

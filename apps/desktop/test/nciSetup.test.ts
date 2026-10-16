@@ -49,6 +49,18 @@ describe("NCI setup guide steps", () => {
     expect(states({ nciStatus: on, mailStatus: { ...box, sources: [] } })).toMatchObject({ mailbox: "todo", enable: "blocked" });
   });
 
+  it("the mailbox is optional: no mailbox and the check on is step ⑥ done, and the guide does not hold on ⑤", () => {
+    const on = nci({ configured: true, enabled: true, privateKeyStored: true, publicKey: KEY, username: "ab1234", hostKeys: [KEY], lastSuccessAt: 100 });
+    const steps = nciSteps({ mail: true, verification: true, keygen: true, mailStatus: mail(), nciStatus: on });
+    expect(Object.fromEntries(steps.map((s) => [s.id, s.state]))).toMatchObject({ mailbox: "todo", enable: "done" });
+    expect(currentNciStep(steps)).toBeNull();
+    // Check off and no mailbox: ⑥ is to do (not blocked by ⑤).
+    expect(states({ nciStatus: { ...on, enabled: false } }).enable).toBe("todo");
+    // A configured mailbox with an error still keeps ⑥ open.
+    const broken = mail({ configured: true, enabled: true, sources: ["nci"], lastConnectedAt: 5, errorCode: "mail_authentication_failed" });
+    expect(states({ nciStatus: on, mailStatus: broken }).enable).toBe("todo");
+  });
+
   it("a cutex without nci-verification: Gadi steps unsupported, the mailbox still works", () => {
     const s = states({ verification: false, keygen: false, nciStatus: null, mailStatus: mail({ configured: true, enabled: true, sources: ["nci"], lastConnectedAt: 1 }) });
     expect(s).toEqual({ key: "unsupported", gadi: "unsupported", hostKeys: "unsupported", username: "unsupported", mailbox: "done", enable: "done" });

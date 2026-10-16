@@ -45,8 +45,8 @@ const NAME_TAG = "shrink-0 rounded px-1 text-[10px] leading-4 font-medium";
 
 function Preview({ row, preview }: { row: AgentRow; preview: ActivityPreview | undefined }) {
   const { t } = useI18n();
-  if (!preview) return <span>{t(`status.${row.status}`)}</span>;
-  const tone = preview.kind === "tool" ? "font-mono text-[10.5px]" : preview.kind === "received" ? "text-accent/80" : "";
+  if (!preview?.text.trim()) return <span>{t(`status.${row.status}`)}</span>;
+  const tone = preview.kind === "tool" ? "font-mono text-[10.5px]" : preview.kind === "received" ? "text-accent/80" : preview.kind === "retry" ? "text-warn" : "";
   return <span className={tone}>{preview.kind === "tool" ? preview.text : <ScriptText text={preview.text} />}</span>;
 }
 

@@ -28,6 +28,7 @@ import type {
 import type { DaemonEndpoint } from "./endpoint";
 import type { ClientTokenList, ClientTokenRenamed, HostSummary, PairingCode, PairRequest, PairResponse, SummaryReadResult } from "./summary";
 import { CutexApiError, CutexUnreachableError } from "./errors";
+import { componentName, readComponentOperation, readComponentsList, type ComponentOperation, type ComponentsList } from "./components";
 import { readHostServiceInfo, UPGRADE_RUN_ID, upgradeApplyBody, upgradeRefusalOf, upgradeRollbackBody, upgradeSettingsBody, upgradeStageBody, type HostServiceInfo, type UpgradeApplyRequest, type UpgradeResult, type UpgradeRollbackRequest, type UpgradeRollbackResult, type UpgradeRun, type UpgradeSettings, type UpgradeSettingsPatch, type UpgradeStaging, type UpgradeStatus } from "./upgrade";
 import { AVATAR_CONTENT_TYPES, AVATAR_MAX_BYTES, grantBody, PERSON_PUBLIC_KEY, PERSON_SIGNATURE, personKeysBody, selfProfileBody, DISPLAY_NAME_MAX, IDENTITY_CLAIM_OUTCOMES, type IdentityChallenge, type IdentityClaimOutcome, type IdentityClaimResult, type PersonKeyInput, type PersonKeysResult, type TokenPersonAckResult, userColorBody, userNameBody, USER_ID, type AvatarContentType, type SelfProfile, type SelfProfilePatch, type UserAvatar, type PeerBindingResult, type TokenBindingResult, type UserCreate, type UserPatch, type UsersList, type UsersSettings, type UserWriteResult, type OwnDevices, type OwnDeviceRevoked } from "./users";
 
@@ -949,6 +950,29 @@ export class CutexClient {
       const message = error.message.startsWith(`${error.code}: `) ? error.message.slice(error.code.length + 2) : error.message;
       return { ok: false, error: upgradeRefusalOf(error.status, error.code, message, error.details) };
     }
+  }
+
+  // ---------- optional components (cutex `components`, owner only; components spec v2 §4) ----------
+
+  /** `GET /v2/components`. Null on a cutex without the route (404 / 405). */
+  async components(): Promise<ComponentsList | null> {
+    try {
+      return readComponentsList(await this.request<unknown>("GET", "/v2/components"));
+    } catch (error) {
+      if (isMissingRoute(error)) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * `POST /v2/components/{name}/install|remove` with an empty body → 202 `{operation}`; progress via
+   * `cutex/components/updated`. Refusals (`unmanaged_install`, `component_external`,
+   * `component_source_only`, `component_unsupported_platform`, `upgrade_blocked {reason}`, …) as values.
+   */
+  async componentAction(name: string, action: "install" | "remove"): Promise<UpgradeResult<ComponentOperation | null>> {
+    if (action !== "install" && action !== "remove") throw new Error("bad component action");
+    const path = `/v2/components/${encodeURIComponent(componentName(name))}/${action}`;
+    return this.upgradeCall(async () => readComponentOperation((await this.request<{ operation?: unknown }>("POST", path, { body: {} }))?.operation));
   }
 
   /** `GET /v2/upgrade`. Null on a cutex without the route (404 / 405). */

@@ -77,7 +77,7 @@ import { QUOTA_CONTINUE_FEATURE } from "../../../shared/quotaContinue";
 import { useQuotaContinue } from "../lib/quotaContinue";
 import { runtimeOf } from "../lib/agentList";
 import { QuotaContinueSection } from "./QuotaContinueSection";
-import { useShortWindow } from "../lib/queueChips";
+import { queueAutoCompact, useShortWindow } from "../lib/queueChips";
 import { DelegationSendMenu, DelegationTurnHint } from "./DelegationComposer";
 import { SlashPalette, type PaletteRow } from "./SlashPalette";
 
@@ -515,7 +515,7 @@ export function Composer({
   const shortWindow = useShortWindow();
   const hostId = useApp(agentHost);
   const { text, setText, images, setImages, pickedSkills, setPickedSkills, clearDraft, captureDraft } = useComposerDraft(hostId, sessionId);
-  const { sendKeys, delegationSteerKeys, queueSectionStrip } = useUiPrefs();
+  const { sendKeys, delegationSteerKeys, queueSectionStrip, queuePanelFold } = useUiPrefs();
   // The running turn handles a delegation (agent-asks): hint, guarded shortcuts, send menu.
   const runningDelegation = useDelegationTurn(timeline);
   const delegation = busy ? runningDelegation : null;
@@ -1089,7 +1089,7 @@ export function Composer({
             void queueTakeForEdit(item, sessionId).then(target.setText);
           }}
           stripEnabled={queueSectionStrip}
-          autoCompact={{ short: shortWindow }}
+          autoCompact={queueAutoCompact(queuePanelFold, shortWindow)}
           stopHold={stopHold}
           running={busy}
           ordered={
@@ -1267,7 +1267,7 @@ export function Composer({
           trigger={<span className={`trim-cap whitespace-nowrap ${mode === "full" ? "text-warn" : ""}`}>{mode ? t(`composer.mode.${mode}` as MessageKey) : "…"}</span>}
           items={PERMISSION_MODES.map((m) => ({ value: m, label: t(`composer.mode.${m}` as MessageKey), description: t(`composer.modeHint.${m}` as MessageKey) }))}
           selected={mode}
-          onSelect={(m) => m !== "custom" && void updateSettings(permissionPatch(m))}
+          onSelect={(m) => m !== "custom" && void updateSettings(permissionPatch(m, settings))}
         />
         {collabMode === "plan" && (
           <button

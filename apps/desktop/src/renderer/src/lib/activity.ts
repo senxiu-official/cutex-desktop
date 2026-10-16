@@ -5,8 +5,9 @@ import type { EventEnvelope, SessionResource } from "@cutex-desktop/protocol";
 import { translate } from "../i18n";
 import { senderLabel } from "./systemSenders";
 import { parseExternalInput, type RawItem } from "./timeline";
+import { retryNoticeOf, retryNoticeText } from "./retryNotice";
 
-export type ActivityKind = "output" | "tool" | "input" | "received";
+export type ActivityKind = "output" | "tool" | "input" | "received" | "retry";
 
 export interface ActivityPreview {
   kind: ActivityKind;
@@ -15,6 +16,8 @@ export interface ActivityPreview {
   at: number;
   /** item currently being streamed into `text` (output kind). */
   itemId?: string;
+  /** retry kind: the line it covers, back when the turn ends without new output. */
+  previous?: ActivityPreview;
 }
 
 const MAX = 140;
@@ -92,6 +95,17 @@ export function nextPreview(current: ActivityPreview | undefined, envelope: Even
       if (received) return { kind: "received", text: oneLine(`${senderLabel(translate, received.senderId, received.sourceKind, received.senderName)}: ${received.text}`), at };
       return undefined;
     }
+    case "error": {
+      // Native retries the model request: say so instead of the stale last line (lib/retryNotice).
+      if (params.willRetry !== true) return undefined;
+      const notice = retryNoticeOf(params.error);
+      if (!notice) return undefined;
+      const previous = current?.kind === "retry" ? current.previous : current;
+      return { kind: "retry", text: retryNoticeText(notice, translate), at, ...(previous ? { previous } : {}) };
+    }
+    case "turn/completed":
+      // Retries ended without output (failed / interrupted): the line it covered comes back.
+      return current?.kind === "retry" ? current.previous ?? { kind: "output", text: "", at: current.at } : undefined;
     default:
       return undefined;
   }

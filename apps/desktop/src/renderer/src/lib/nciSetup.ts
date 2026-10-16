@@ -55,11 +55,14 @@ export function nciSteps(input: NciSetupInput): NciStep[] {
   if (!input.mail && !input.verification) enable = "unsupported";
   else if ((input.mail && mail === undefined) || (input.verification && nci === undefined)) enable = "loading";
   else {
-    const mailOk = !input.mail || (mailboxReady(mail) && mail?.lastConnectedAt != null && !mail?.errorCode);
+    // The mailbox is optional when the Gadi check exists (qstat at the interval without mail); a
+    // configured one must be connected without error. Without the check, mail is all there is.
+    const mailOptional = input.verification && !mail?.configured;
+    const mailOk = !input.mail || mailOptional || (mailboxReady(mail) && mail?.lastConnectedAt != null && !mail?.errorCode);
     const verifyOn = !input.verification || (configured && !!nci?.enabled);
     const before = input.verification ? [key, hostKeys, username] : [];
     if (mailOk && verifyOn) enable = "done";
-    else if ((input.mail && mailbox !== "done") || before.some((s) => s !== "done")) enable = "blocked";
+    else if ((input.mail && !mailOptional && mailbox !== "done") || before.some((s) => s !== "done")) enable = "blocked";
     else enable = "todo";
   }
   return [
@@ -72,9 +75,13 @@ export function nciSteps(input: NciSetupInput): NciStep[] {
   ];
 }
 
-/** The step the guide opens on: the first that still needs the owner (null = all done). */
+/**
+ * The step the guide opens on: the first that still needs the owner (null = all done). An unset
+ * mailbox does not hold the guide once the check is on (the mailbox is optional).
+ */
 export function currentNciStep(steps: readonly NciStep[]): NciStepId | null {
-  return steps.find((s) => s.state === "todo" || s.state === "manual")?.id ?? null;
+  const enabled = steps.find((s) => s.id === "enable")?.state === "done";
+  return steps.find((s) => (s.state === "todo" || s.state === "manual") && !(enabled && s.id === "mailbox"))?.id ?? null;
 }
 
 export const GADI_HOME_PLACEHOLDER = "<GADI_HOME>";

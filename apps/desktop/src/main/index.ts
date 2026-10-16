@@ -14,6 +14,7 @@ import { initialWindowBounds, trackWindowState } from "./windowState";
 import { MIN_WINDOW_SIZE } from "../shared/windowBounds";
 import { Updater } from "./updater";
 import { resolveUpdateRemote } from "../shared/update";
+import { resolveQuickstart, type QuickstartTarget } from "../shared/quickstart";
 import { errorFields, logDir, logError } from "./errorLog";
 import { setWindowAppDetails, setWindowsAppId, syncWindowsShortcuts } from "./winShortcuts";
 import { demoOwnerAlertRequested, OwnerAlerts } from "./ownerAlert";
@@ -296,6 +297,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "upgradeRun",
   "patchUpgradeSettings",
   "hostServiceInfo",
+  "components",
+  "componentAction",
   "askCommand",
   "jobs",
   "jobServiceCapabilities",
@@ -356,6 +359,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "pickImages",
   "ownerNotifications",
   "ownerNotifyAction",
+  "safetyCheckDecide",
   "patchOwnerNotify",
   "notificationLevels",
   "patchNotificationLevels",
@@ -392,16 +396,11 @@ ipcMain.handle(INVOKE_CHANNEL, async (event, method: InvokeMethod, args: unknown
 });
 
 /**
- * The local QUICKSTART (identity menu → 帮助与文档): the portable install's source checkout, or the
- * repo of a dev run. No packaged copy and no configured URL: null hides the item.
+ * QUICKSTART for the identity menu's 帮助与文档 (shared/quickstart.ts): the portable install's source
+ * checkout, the release package's own copy, the repo of a dev run, else (packaged) the published page.
  */
-function quickstartPath(): string | null {
-  const roots = [updater.sourceDir(), app.isPackaged ? null : join(app.getAppPath(), "..", "..")];
-  for (const root of roots) {
-    const path = root ? join(root, "docs", "QUICKSTART.md") : null;
-    if (path && existsSync(path)) return path;
-  }
-  return null;
+function quickstartTarget(): QuickstartTarget | null {
+  return resolveQuickstart({ sourceDir: updater.sourceDir(), releaseDir: updater.releaseDir(), appPath: app.getAppPath(), packaged: app.isPackaged }, existsSync, join);
 }
 
 ipcMain.handle(SHELL_CHANNEL, (event, request: ShellRequest) => {
@@ -412,7 +411,7 @@ ipcMain.handle(SHELL_CHANNEL, (event, request: ShellRequest) => {
       event.sender.setZoomFactor(request.factor);
       return;
     case "state":
-      return { ...desktopShell.state(), quickstart: quickstartPath() !== null };
+      return { ...desktopShell.state(), quickstart: quickstartTarget() !== null };
     case "setCloseBehavior":
       if (!isCloseBehavior(request.value)) throw new Error("bad close behavior");
       return desktopShell.setCloseBehavior(request.value);
@@ -429,8 +428,9 @@ ipcMain.handle(SHELL_CHANNEL, (event, request: ShellRequest) => {
       logError({ source: "renderer", message: String(request.message ?? "").slice(0, 2000), stack: typeof request.stack === "string" ? request.stack.slice(0, 4000) : undefined, kind: request.kind });
       return;
     case "openQuickstart": {
-      const path = quickstartPath();
-      if (path) void shell.openPath(path);
+      const target = quickstartTarget();
+      if (target?.kind === "file") void shell.openPath(target.path);
+      else if (target?.kind === "url") void shell.openExternal(target.url);
       return;
     }
     case "quit":

@@ -4,12 +4,21 @@ import { useI18n, type MessageKey } from "../i18n";
 import { useApp } from "../store";
 import { agentJobs, JOB_SERVICE_FEATURE, jobOperations, type AgentJobs, type JobStatus } from "./jobs";
 import { refreshAgentJobs, refreshAllJobs, useJobs } from "./jobStore";
+import { JOB_SERVICE_COMPONENT } from "./componentCard";
+import { useComponentUsable } from "./componentView";
+import { LOCAL_HOST_ID } from "../../../shared/hosts";
 
 /** Poll while something runs, slower otherwise; never while the window is hidden. */
 const FAST_MS = 10_000;
 const SLOW_MS = 30_000;
 
-export const useJobsEnabled = () => useApp((s) => s.features.has(JOB_SERVICE_FEATURE));
+/** The focus host serves jobs: the capability and a usable job-service component (lib/componentCard componentUsable). */
+export function useJobsEnabled(): boolean {
+  const capable = useApp((s) => s.features.has(JOB_SERVICE_FEATURE));
+  const focus = useApp((s) => s.hosts?.active ?? LOCAL_HOST_ID);
+  const usable = useComponentUsable(focus, JOB_SERVICE_COMPONENT, capable);
+  return capable && usable;
+}
 
 function usePoll(run: () => void, enabled: boolean, fast: boolean, key: string) {
   useEffect(() => {

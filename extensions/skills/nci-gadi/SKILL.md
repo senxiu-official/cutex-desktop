@@ -7,8 +7,9 @@ description: Submit and track PBS Pro batch jobs on NCI Gadi through cutex. Use 
 
 cutex tracks Gadi jobs for you: you **prepare** a registration, **submit** with the
 arguments cutex gives you, then **register** the PBS job id. cutex then follows the job
-(NCI's PBS mail as a trigger, plus a slow periodic `qstat` verification) and delivers one
-completion message to you when the job ends. You do not poll.
+(it asks Gadi's scheduler with `qstat` at an interval; PBS mail, when the owner set up a
+mailbox, only makes it ask sooner) and delivers one completion message to you when the job
+ends. You do not poll.
 
 The tools come from the cutex Job Service MCP server (`cutex_job`). They only appear when the
 owner enabled the `nci` source; if `prepare_remote` / `register_remote` are not in your tool
@@ -42,8 +43,8 @@ Rules:
 - Never add, change or ask for a `-M` address. Never ask the owner for their email.
 - If `notificationStatus` is not `configured`: relay the `ownerAction` text to the owner, and
   still submit with `pbsArgs` when the job is authorized. The job is then not tracked by mail;
-  the owner checks it and marks the result manually (or cutex's periodic qstat check catches it,
-  if the owner set that up).
+  cutex's periodic qstat check still catches the end (later than with mail); without that check
+  the owner marks the result manually.
 - One preparation per job. Prepare again for each new qsub (limit: 16 open preparations).
 
 ## 2. Submit

@@ -1,5 +1,6 @@
 // Built-in modules, in registry order (slot ties follow it). Static and ordered; only main.tsx
 // and tests import this file (docs/desktop-modules.md §8).
+import about from "./about";
 import agentBus from "./agent-bus";
 import browser from "./browser";
 import alarms from "./alarms";
@@ -33,6 +34,7 @@ import peers from "./peers";
 import users from "./users";
 import runtimePackages from "./runtime-packages";
 import runtimes from "./runtimes";
+import safetyGrants from "./safety-grants";
 import services from "./services";
 import shell from "./shell";
 import statusCapsule from "./status-capsule";
@@ -94,11 +96,15 @@ export const MODULES: readonly AppModule[] = [
   usage,
   archive,
   ownerNotify,
+  // claude-safety-grants: the owner's decision on a declined tool row (the 需要你 card is core).
+  safetyGrants,
   remoteAccess,
   peers,
   // P1 users and grants: Settings → 用户 (owner only).
   users,
   updater,
+  // Settings → 关于: license, links and the known issues list (sections on the shell's page).
+  about,
   // Settings → 后端更新 (cutex backend-upgrade, owner only): each host's cutex upgrades.
   backendUpgrade,
   runtimePackages,

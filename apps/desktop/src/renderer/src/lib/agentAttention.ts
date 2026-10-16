@@ -16,10 +16,11 @@ import type { TurnMark, TurnMarks } from "./turnUnread";
  * `approval` an owner approval (cutex owner-approvals), `acceptance` a delegation result awaiting
  * the owner's acceptance (待验收), `review` a gated delegation waiting for the owner (待审核),
  * `check` a delegation whose outcome is unknown (待确认), `ownerMessage` an agent → owner message
- * not seen yet (owner-notify), `ownerReply` one that waits for the owner's reply. Notices cutex wrote
- * itself (owner-notify origin system) are records only and never a reason.
+ * not seen yet (owner-notify), `ownerReply` one that waits for the owner's reply, `safetyBlock` a
+ * command a runtime safety check stopped that the owner may approve once (claude-safety-grants). Other
+ * notices cutex wrote itself (owner-notify origin system) are records only and never a reason.
  */
-export type NeedsYouReason = "confirm" | "question" | "approval" | "acceptance" | "review" | "check" | "ownerMessage" | "ownerReply";
+export type NeedsYouReason = "confirm" | "question" | "approval" | "acceptance" | "review" | "check" | "ownerMessage" | "ownerReply" | "safetyBlock";
 
 export interface NeedsYou {
   count: number;

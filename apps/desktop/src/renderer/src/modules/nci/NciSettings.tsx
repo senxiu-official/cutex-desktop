@@ -12,12 +12,14 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Check, ChevronDown, ChevronRight, Circle, Copy } from "lucide-react";
 import type { JobResult } from "../../../../shared/ipc";
 import { INBOUND_MAIL_FEATURE, NCI_HOST_KEYGEN_FEATURE, NCI_MAIL_ADDRESS_FEATURE, NCI_VERIFICATION_FEATURE, type InboundMailStatus, type NciHelper, type NciVerificationStatus } from "../../../../shared/remoteJobs";
+import { ComponentNotice } from "../../components/ComponentCard";
 import { MaskedText } from "../../components/MaskedText";
 import { ArmedRemove, Button, ErrorNote, Loading, Notice, Section, Select, SettingRow, TextArea, TextInput, Toggle } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { copyText } from "../../lib/menus";
 import { authorizedKeysFor, hasNciKey, nciSteps, normalizeGadiHome, sshFingerprint, type NciStepId, type NciStepState } from "../../lib/nciSetup";
 import { intervalLabel, mailboxDraft, mailPasswordRequired, mailToView, NCI_MODULE, parseHostKeys, validMailAddress } from "../../lib/remoteJobs";
+import { JOB_SERVICE_COMPONENT } from "../../lib/componentCard";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
 import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
@@ -54,6 +56,15 @@ const KNOWN_CODES = new Set([
   "qstat_invalid_config",
   "qstat_not_configured",
   "qstat_key_exists",
+  "qstat_ssh_missing",
+  "qstat_host_key_mismatch",
+  "qstat_ssh_auth_failed",
+  "qstat_ssh_connect_failed",
+  "qstat_ssh_failed",
+  "qstat_helper_refused",
+  "qstat_helper_missing",
+  "qstat_job_unknown",
+  "qstat_remote_failed",
   "invalid_reply",
   "unsupported",
 ]);
@@ -719,9 +730,14 @@ export function NciSettings() {
 
   const steps = nciSteps({ mail: hasMail, verification, keygen, mailStatus: hasMail ? mail.value : null, nciStatus: verification ? nci.value : null });
   const stateOf = (id: NciStepId) => steps.find((s) => s.id === id)!.state;
-  const allDone = steps.every((s) => s.state === "done" || s.state === "unsupported");
+  // The mailbox is optional: an unset one does not keep "all done" away once the check is on.
+  const enabled = stateOf("enable") === "done";
+  const allDone = steps.every((s) => s.state === "done" || s.state === "unsupported" || (enabled && s.id === "mailbox"));
+  const hostId = useTargetHostId();
   return (
     <>
+      {/* Jobs reach Gadi through the Job Service component: offer it here too (nothing while ready). */}
+      <ComponentNotice name={JOB_SERVICE_COMPONENT} hostId={hostId} className="mb-3" />
       {!verification && <Notice tone="info">{t("nci.noVerification")}</Notice>}
       {allDone && <Notice tone="info">{t("nci.allDone")}</Notice>}
       {verification && (

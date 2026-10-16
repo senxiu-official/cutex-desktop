@@ -1,5 +1,10 @@
 # 桌面模块开发规范
 
+> **公开仓库说明 / Public repository note.** 本文是维护者开发时的设计记录，保留原样。文中引用的内部笔记和工作副本
+> （`docs/research/…`、`docs/reviews/…`、`docs/handoff/…`、`TODO.md`、`PROGRESS.md`、`PLAN.md`、`upstream/…`、
+> `refs/…`、`.claude/…`）不随本仓库发布，只作历史记录，不是链接。文中的「主人」指项目维护者。This is a maintainers'
+> design record; the internal notes it cites are not published with this repository.
+
 - **规范版本：v1.7**（2026-10-10）
 - **适用契约**：`docs/desktop-modules.md`，`MODULE_API_VERSION = "1.4"`（`packages/plugin-sdk/src/index.ts`）
 - **适用代码**：分支 `feat/side-p1a`（契约 1.4 + §19 宿主）合入 main 之后；只有 `feat/side-p0` 的用 v1.6（§19 插槽还没有宿主，不要贡献），

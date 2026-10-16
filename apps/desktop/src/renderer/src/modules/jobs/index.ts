@@ -14,7 +14,9 @@ export default defineModule({
   id: "jobs",
   titleKey: "jobs.title",
   descriptionKey: "jobs.description",
-  requires: { capabilities: [JOB_SERVICE_FEATURE] },
+  // The Job Service is an optional cutex component (components spec v2): the 作业 page shows the
+  // component card (install / update cutex / …) while the host's job-service is not ready.
+  requires: { capabilities: [JOB_SERVICE_FEATURE], component: "job-service" },
   contributes: {
     "conversation.status": [
       { id: "jobs.status", order: 600, titleKey: "jobs.statusTitle", defaultPlace: "capsule", useStatus: useJobsStatus, Meta: JobsMeta, Body: JobsBody, Bar: JobsStatusBar, icon: Hourglass },

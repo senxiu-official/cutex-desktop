@@ -6,14 +6,19 @@
 
 <p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
 
-**0.1.1**: signed desktop packages with one-click updates (0.1.0 "First Take" was the first public release). See [CHANGELOG.md](CHANGELOG.md).
+**0.1.2**: optional backend components (Job Service, Claude runtime) install from the app; needs
+cutex 0.1.1 for that (0.1.0 "First Take" was the first public release). See [CHANGELOG.md](CHANGELOG.md).
 
-> **Known gaps in 0.1.x** (being fixed; this note goes away when they are):
-> - **Claude agents** need the Claude runtime (`claude-adapter`), which the install guide and the
->   release packages don't install yet. Codex-based agents work.
-> - **Jobs page and NCI remote jobs** need the Job Service, which this release doesn't ship.
+> **Known issues**: see [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) (also in the app: Settings → About).
+> The most important ones:
+> - **In-app browser** cannot open LAN, private or tailnet addresses (fix planned for 0.1.3); open
+>   them in your normal browser.
 > - **Phone push / pairing a phone**: there is no public phone app yet.
-> - **Outbound notifications (webhooks)** need `cutex notify run`, which the installer doesn't set up.
+>
+> Claude agents and the Jobs page need optional cutex components (the Claude runtime; the Job
+> Service, Linux only). Install them with the **Install** button where the app asks for one, or
+> `cutex component install claude-runtime` / `job-service` on the host (cutex 0.1.1, managed
+> install; [install guide](docs/install/AGENT-INSTALL.md) §6.1 / §6.2).
 
 Cutex desktop is the desktop app for [cutex](https://github.com/senxiu-official/cutex), a daemon
 that runs coding agents on your own machines. Agents run on

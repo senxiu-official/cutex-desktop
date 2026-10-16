@@ -2,7 +2,8 @@
 // (「排队 2 · 留言 1 · 委托 3」) instead of the sections, when more than one kind of thing waits or the
 // window is short; a click expands. An explicit collapse (lib/queueView) still wins; an explicit expand
 // lasts for this run (per agent, memory only), so the automatic rule comes back after a restart. Pure
-// except the window-height hook.
+// except the window-height hook. The whole rule is opt-in since 2026-10-16 (pref `queuePanelFold`,
+// Settings → 对话 → 输入框 「「接下来」面板」): ★ 始终展开 never compacts, 自动折叠 applies it.
 import { useSyncExternalStore } from "react";
 import type { AdmissionNextStep } from "@cutex-desktop/protocol";
 import type { AdmissionRow } from "./admissionOrder";
@@ -78,6 +79,16 @@ export function mergeChips(chips: readonly QueueChip[]): QueueChip[] {
  */
 export function autoCompact(chips: readonly QueueChip[], rows: number, short: boolean): boolean {
   return chips.length > 1 || (short && rows > 1);
+}
+
+/** 「接下来」面板 setting: "open" = 始终展开 (★), "auto" = 自动折叠 (the compact rule above). */
+export type QueuePanelFold = "open" | "auto";
+export const DEFAULT_QUEUE_PANEL_FOLD: QueuePanelFold = "open";
+export const migrateQueuePanelFold = (raw: unknown): QueuePanelFold => (raw === "auto" ? "auto" : DEFAULT_QUEUE_PANEL_FOLD);
+
+/** The QueuePanel `autoCompact` prop for a setting: undefined (never compact by itself) under 始终展开. */
+export function queueAutoCompact(fold: QueuePanelFold, short: boolean): { short: boolean } | undefined {
+  return fold === "auto" ? { short } : undefined;
 }
 
 function subscribeResize(listener: () => void): () => void {

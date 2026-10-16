@@ -19,7 +19,7 @@ export function migrateStatusChips(value: unknown): StatusChips {
  * 待验收 / 结果未知 / owner messages, 完成) are neutral text with a small status dot.
  */
 export type ChipTone = "error" | "urgent" | "quiet";
-const URGENT_REASONS: readonly string[] = ["confirm", "question", "approval"];
+const URGENT_REASONS: readonly string[] = ["confirm", "question", "approval", "safetyBlock"];
 
 export function chipTone(signal: AgentSignal, needs: NeedsYou | undefined): ChipTone {
   if (signal === "error") return "error";

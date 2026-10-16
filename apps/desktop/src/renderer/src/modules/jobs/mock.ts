@@ -2,6 +2,8 @@
 // Lead and Mika, cancellable, with synthetic output that grows while a job runs. Jobs only exist on
 // Linux hosts (Workstation); the mock pretends the host has a Job Service with every human operation.
 import type { JobListPage, JobOutputPage, JobResult, JobRow, JobServiceCapabilities, JobStream } from "../../../../shared/ipc";
+import type { DesktopApi } from "../../../../shared/ipc";
+import { COMPONENTS_FEATURE, readComponentOperation, readComponentsList } from "../../../../shared/components";
 import type { ModuleMock } from "../../dev/mockTypes";
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -132,9 +134,102 @@ function mockJobApi(byId: Map<string, JobRow>) {
   };
 }
 
+/**
+ * Optional components (cutex `components`, GET /v2/components; components spec v2). Served here for both
+ * components (the routes are host-wide; one module mock owns them). The 作业 page shows the job-service
+ * card until it is ready; Claude profiles, the new-agent flow and Claude 账户 show the claude-runtime one.
+ * `?component=` (job-service) / `?claude=` (claude-runtime) pick the state:
+ * (none) ready · missing (安装 → progress events → ready) · fail (安装 → degraded) · refused (安装 →
+ * 409 upgrade_blocked) · needsUser · restartPending · degraded · degradedWorking · unmanaged · source ·
+ * unsupported · external · notInManifest · readError (one failed read) · nocap (a cutex without
+ * `components`; `?component=nocap` only: on the Windows mock host "not on Windows", with `&nolocal`
+ * the Linux host says "update cutex"). unmanaged / source apply to the host, so to both components.
+ */
+const QUERY = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
+const COMPONENT_MODE = QUERY.get("component") ?? "";
+const CLAUDE_MODE = QUERY.get("claude") ?? "";
+const HOST_MODE = [COMPONENT_MODE, CLAUDE_MODE].find((m) => m === "unmanaged" || m === "source") ?? "";
+
+const STEPS: Record<string, string[]> = {
+  "job-service": ["Enable lingering for your user so the service keeps running after you log out: loginctl enable-linger", "Then press Check again here."],
+  "claude-runtime": ["Install the Claude Code CLI on the host (npm install -g @anthropic-ai/claude-code).", "Log in once in a terminal on the host: claude", "Then press Check again here."],
+};
+const VERSIONS: Record<string, { old: string; next: string; size: number }> = {
+  "job-service": { old: "0.1.1", next: "0.1.2", size: 9_437_184 },
+  "claude-runtime": { old: "claude-r10", next: "claude-r11", size: 31_457_280 },
+};
+
+function mockComponent(name: string, mode: string) {
+  const v = VERSIONS[name]!;
+  const STATES: Record<string, string> = { needsUser: "needsUser", restartPending: "restartPending", degraded: "degraded", degradedWorking: "degraded", external: "external", notInManifest: "notInManifest" };
+  const state = mode === "" || mode === "nocap" ? "ready" : (STATES[mode] ?? "missing");
+  const selected = state === "ready" ? v.old : mode === "restartPending" ? v.next : mode === "degradedWorking" ? v.old : null;
+  return {
+    name,
+    supported: mode !== "unsupported",
+    state,
+    selected,
+    available: v.next,
+    origin: selected ? "signed" : null,
+    versions: selected ? [{ version: selected, pinnedBy: 3, sizeBytes: v.size }] : [],
+    error: mode.startsWith("degraded") ? `${name} ${v.next}: did not answer within 10 s` : null,
+    steps: mode === "needsUser" ? STEPS[name]! : [],
+  } as { name: string; supported: boolean; state: string; selected: string | null; available: string; origin: string | null; versions: { version: string; pinnedBy: number; sizeBytes: number }[]; error: string | null; steps: string[] };
+}
+
+function mockComponents(emitHost: (method: string, params: Record<string, unknown>) => void): Partial<DesktopApi> {
+  const modes: Record<string, string> = { "job-service": COMPONENT_MODE, "claude-runtime": CLAUDE_MODE };
+  const items = [mockComponent("job-service", COMPONENT_MODE), mockComponent("claude-runtime", CLAUDE_MODE)];
+  let operation: Record<string, unknown> | null = null;
+  const list = () => ({
+    managed: HOST_MODE !== "unmanaged",
+    installFrom: HOST_MODE === "source" ? "source-only" : HOST_MODE === "unmanaged" ? "none" : "release",
+    components: items,
+    operation,
+  });
+  const publish = (name: string, reason: "operation" | "state") =>
+    emitHost("cutex/components/updated", { name, reason, state: items.find((c) => c.name === name)!.state, operation });
+  let failedReads = 0;
+  return {
+    async components() {
+      await delay();
+      if ((COMPONENT_MODE === "readError" || CLAUDE_MODE === "readError") && failedReads++ < 1) throw new Error("connect ECONNRESET");
+      return readComponentsList(structuredClone(list()));
+    },
+    async componentAction(name, action) {
+      await delay();
+      const c = items.find((x) => x.name === name);
+      if (!c) return { ok: false, error: { code: "component_unknown", message: `no component named \`${name}\``, status: 404 } };
+      if (action === "remove") return { ok: false, error: { code: name === "job-service" ? "jobs_running" : "component_pinned", message: "refused by the mock", status: 409 } };
+      if (modes[name] === "refused") return { ok: false, error: { code: "upgrade_blocked", message: "a backend upgrade or another component operation is running", status: 409, reason: "run_in_progress" } };
+      const id = `cop-${Date.now().toString(16)}`;
+      const steps = ["download", "verify", "prepare", "select"];
+      const v = VERSIONS[name]!;
+      operation = { id, name, action, state: "running", step: steps[0], error: null };
+      Object.assign(c, { state: "installing", error: null });
+      publish(name, "operation");
+      steps.forEach((step, i) =>
+        setTimeout(() => {
+          if (i < steps.length - 1) operation = { id, name, action, state: "running", step: steps[i + 1], error: null };
+          else if (modes[name] === "fail") {
+            const error = "prepare: socket path too long (112 > 107 bytes)";
+            operation = { id, name, action, state: "failed", step, error };
+            Object.assign(c, { state: "degraded", error });
+          } else {
+            operation = { id, name, action, state: "done", step: null, error: null };
+            Object.assign(c, { state: "ready", selected: v.next, origin: "signed", versions: [{ version: v.next, pinnedBy: 0, sizeBytes: v.size }] });
+          }
+          publish(name, "operation");
+        }, 1200 * (i + 1)),
+      );
+      return { ok: true, value: readComponentOperation(structuredClone(operation)) };
+    },
+  };
+}
+
 export const mock: ModuleMock = {
-  api: () => mockJobApi(byId),
-  remote: (hostId) => mockJobApi(remoteJobsOf(hostId)),
+  api: (core) => ({ ...mockJobApi(byId), ...mockComponents((method, params) => core.emitHost(method, params)) }),
+  remote: (hostId, emitHost) => ({ ...mockJobApi(remoteJobsOf(hostId)), ...mockComponents(emitHost) }),
   // The NCI rows above are plain Job Service data; inbound mail / the Gadi check are modules/nci/mock.ts.
-  features: { new: ["job-external"] },
+  features: { new: ["job-external", ...(COMPONENT_MODE === "nocap" ? [] : [COMPONENTS_FEATURE])] },
 };

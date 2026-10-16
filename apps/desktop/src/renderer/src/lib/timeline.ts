@@ -7,6 +7,7 @@ import { mergeRateLimits, type RateLimitsLike } from "./quota";
 import { nextPlan } from "./planState";
 import { agentMessageText, deliveryKindOf, type AgentEnvelope, type DeliveryKind } from "./agentMessages";
 import type { InteractionRecord } from "./interactionLog";
+import { retryNoticeOf, type RetryNotice } from "./retryNotice";
 
 export type TurnStatus = "inProgress" | "completed" | "interrupted" | "failed";
 
@@ -82,6 +83,9 @@ export interface TurnView {
   /** A failed turn's error (`turn.error`: message, then additionalDetails), shown after the turn
    *  (TurnErrorRow). Absent / null otherwise. */
   error?: string | null;
+  /** Native is retrying the model request (`error` with willRetry): the latest attempt, shown under
+   *  the running turn until the next output (delta / item) or the turn's end. */
+  retry?: RetryNotice | null;
 }
 
 export interface TimelineState {
@@ -420,6 +424,14 @@ export function isDockEvent(envelope: EventEnvelope): boolean {
   return !!native && (native.kind === "serverRequest" || native.message.method === "serverRequest/resolved");
 }
 
+/** Output arrived again: the turn's retry notice (if any) is over. */
+function clearRetry(state: TimelineState, turnId: string | null | undefined): boolean {
+  const turn = state.turns.find((t) => t.id === (turnId || state.activeTurnId));
+  if (!turn?.retry) return false;
+  turn.retry = null;
+  return true;
+}
+
 export function applyEvent(state: TimelineState, envelope: EventEnvelope): boolean {
   if (envelope.native) {
     const message = envelope.native.message;
@@ -428,6 +440,7 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
       state.pending.set(String(message.id), { id: message.id, method: message.method, params });
       return true;
     }
+    const retryCleared = message.method.startsWith("item/") && clearRetry(state, typeof params.turnId === "string" ? params.turnId : null);
     switch (message.method) {
       case "turn/started": {
         const turn = params.turn as RawTurn;
@@ -442,7 +455,9 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
         const view = ensureTurn(state, turn.id);
         view.status = turn.status;
         view.completedAt = turn.completedAt ?? Date.now() / 1000;
-        view.error = turnErrorText(turn.error);
+        // A final `error` (willRetry false) may have set it already; turn/completed's own wins.
+        view.error = turnErrorText(turn.error) ?? (turn.status === "failed" ? (view.error ?? null) : null);
+        view.retry = null;
         if (state.activeTurnId === turn.id) state.activeTurnId = null;
         for (const id of view.entryIds) {
           const entry = state.entries.get(id);
@@ -506,6 +521,21 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
         upsert(state, { kind: "checklist", id: `checklist:${plan.turnId}`, turnId: plan.turnId, explanation: plan.explanation, steps: plan.steps });
         return true;
       }
+      case "error": {
+        // willRetry: native retries the request (StreamError, "Reconnecting... 3/5") — a transient
+        // notice. Otherwise the turn's final error: turn/completed (failed) carries the same text, kept
+        // here too in case that never arrives (runtime gone).
+        const turnId = typeof params.turnId === "string" && params.turnId ? params.turnId : state.activeTurnId;
+        if (!turnId) return false;
+        const view = ensureTurn(state, turnId);
+        if (params.willRetry === true) {
+          view.retry = retryNoticeOf(params.error);
+          return true;
+        }
+        view.retry = null;
+        view.error = turnErrorText(params.error as RawTurn["error"]) ?? view.error ?? null;
+        return true;
+      }
       case "serverRequest/resolved": {
         const key = String(params.requestId);
         // Answered while our reply was in flight (another client, or ours landed): a failing reply must not put it back.
@@ -540,7 +570,7 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
         return true;
       }
       default:
-        return false;
+        return retryCleared;
     }
   }
   if (envelope.cutex) {

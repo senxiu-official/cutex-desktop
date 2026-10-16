@@ -50,7 +50,7 @@ export const RESTRICTED_FEATURE = "desktop:restricted";
  * notices, creating agents / chats, peers, runtimes, Claude accounts, Director rotation, NCI mail,
  * remote access, the agent bus, structural session actions (fork / delete / revert), delegation
  * pause, quota auto-continue, notification levels, attachments (non-text input), users, backend upgrades,
- * renaming client / device tokens.
+ * renaming client / device tokens, optional components (install / remove).
  */
 export const OWNER_ONLY_CAPABILITIES: readonly string[] = [
   "terminal", "workspace-fs", "fs-dir-browse", "fs-file-read", "session-attachments",
@@ -61,7 +61,7 @@ export const OWNER_ONLY_CAPABILITIES: readonly string[] = [
   "inbound-mail", "listen-settings", "device-pairing", "management-client-tokens", "agent-bus-stuck-messages",
   "session-fork", "session-delete", "session-delete-empty-on-archive", "session-history-revert",
   "asks-pause-v2", "claude-quota-auto-continue", "users", "workflows", "workflow-resume", "backend-upgrade",
-  "client-token-rename",
+  "client-token-rename", "components", "claude-safety-grants",
 ];
 
 /**

@@ -131,7 +131,7 @@ function Checkbox({ state, disabled, title, onClick }: { state: "none" | "some" 
 
 function PreviewLine({ preview }: { preview: ActivityPreview | undefined }) {
   if (!preview?.text.trim()) return null;
-  const tone = preview.kind === "tool" ? "font-mono text-[11px]" : preview.kind === "received" ? "text-accent/70" : "";
+  const tone = preview.kind === "tool" ? "font-mono text-[11px]" : preview.kind === "received" ? "text-accent/70" : preview.kind === "retry" ? "text-warn" : "";
   return <div className={`truncate text-xs text-subtle ${tone}`}>{preview.text}</div>;
 }
 

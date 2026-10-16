@@ -70,4 +70,17 @@ describe("Director candidates", () => {
     expect(slugifyProjectId("My Project!")).toBe("my-project");
     expect(slugifyProjectId("项目")).toMatch(/^project-[a-z0-9]+$/);
   });
+
+  it("names with non-ASCII letters keep distinct, stable ids", () => {
+    const one = slugifyProjectId("ABC中文一");
+    const two = slugifyProjectId("ABC中文二");
+    expect(one).toMatch(/^abc-[a-z0-9]+$/);
+    expect(two).toMatch(/^abc-[a-z0-9]+$/);
+    expect(one).not.toBe(two);
+    expect(slugifyProjectId(" ABC中文一 ")).toBe(one);
+    expect(slugifyProjectId("项目")).toBe(slugifyProjectId("项目"));
+    expect(slugifyProjectId("项目一")).not.toBe(slugifyProjectId("项目二"));
+    for (const id of [one, two, slugifyProjectId("Café"), slugifyProjectId("项目")]) expect(id).toMatch(/^[a-z0-9-]{1,128}$/);
+    expect(slugifyProjectId("My Project")).toBe("my-project");
+  });
 });

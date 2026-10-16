@@ -214,6 +214,7 @@ vi.mock("../src/main/updater", () => ({
     schedule() {}
     watchLaunch() {}
     sourceDir() { return null; }
+    releaseDir() { return null; }
     state() { return { status: "idle" }; }
   }
 }));

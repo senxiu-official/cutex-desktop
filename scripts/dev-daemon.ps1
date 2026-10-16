@@ -3,22 +3,29 @@
 #
 #   .\scripts\dev-daemon.ps1            # serve management on 127.0.0.1:24370
 #   .\scripts\dev-daemon.ps1 -Cutex ... # other cutex args, run against the dev home
+#   .\scripts\dev-daemon.ps1 -CutexExe C:\src\cutex\target\debug\cutex.exe
+#
+# Needs a DEBUG cutex build (release builds refuse the private test home): clone
+# https://github.com/senxiu-official/cutex, `cargo build --locked --bin cutex`, and pass the exe with
+# -CutexExe or CUTEX_DEV_EXE. Default: upstream\cutex\target\debug\cutex.exe (a cutex clone
+# inside this checkout, git-ignored).
 #
 # Desktop dev run against it:
 #   $env:CUTEX_DESKTOP_HOME = "$env:USERPROFILE\.cutex-desktop-dev"; $env:CUTEX_MANAGEMENT_URL = "http://127.0.0.1:24370"; pnpm dev
 param(
     [int]$Port = 24370,
     [int]$AgentBusPort = 24360,
-    [string[]]$Cutex
+    [string[]]$Cutex,
+    [string]$CutexExe = $env:CUTEX_DEV_EXE
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-# Must live under the user profile: cutex requires owner-private ACLs on Windows, and dirs under
-# D:\Programs inherit "Authenticated Users:(M)", which makes agent bus / task service fail (os error 5).
+# Must live under the user profile: cutex requires owner-private ACLs on Windows, and directories
+# that inherit "Authenticated Users:(M)" (common outside the profile) make the agent bus fail (os error 5).
 $home_ = Join-Path $env:USERPROFILE '.cutex-desktop-dev'
 $cutexDir = Join-Path $home_ '.cutex'
-$exe = Join-Path $root 'upstream\cutex\target\debug\cutex.exe'
-if (-not (Test-Path $exe)) { throw "build debug cutex first: cargo build --locked --bin cutex (in upstream\cutex)" }
+$exe = if ($CutexExe) { $CutexExe } else { Join-Path $root 'upstream\cutex\target\debug\cutex.exe' }
+if (-not (Test-Path $exe)) { throw "no debug cutex at ${exe}: build one (cargo build --locked --bin cutex in a cutex clone) and pass -CutexExe <path> or set CUTEX_DEV_EXE" }
 
 New-Item -ItemType Directory -Force $cutexDir | Out-Null
 $marker = Join-Path $home_ '.cutex-test-private-home'
@@ -35,7 +42,7 @@ if (-not (Test-Path $config)) {
     } | ConvertTo-Json | Set-Content $config -Encoding utf8
 }
 
-# Debug cutex honours CUTEX_TEST_PRIVATE_HOME (see upstream/cutex/src/config/paths.rs).
+# Debug cutex honours CUTEX_TEST_PRIVATE_HOME (cutex src/config/paths.rs).
 $env:CUTEX_TEST_PRIVATE_HOME = $home_
 $env:HOME = $home_
 # CLI commands that call the management API default to 24270 = the LIVE daemon. Always pin dev.

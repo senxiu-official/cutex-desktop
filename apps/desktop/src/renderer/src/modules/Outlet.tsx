@@ -5,6 +5,7 @@
 import { Component, useContext, type ErrorInfo, type ReactNode } from "react";
 import { bridge } from "../bridge";
 import { useI18n } from "../i18n";
+import { ComponentGate } from "../components/ComponentCard";
 import { PageBody } from "../components/Page";
 import { Button, EmptyState, Notice, Section } from "../components/settings/Form";
 import { capabilitiesOf } from "../lib/hostGatingView";
@@ -12,6 +13,7 @@ import { settingsSectionGate } from "../lib/settingsGate";
 import { useSettingsGateTarget } from "../lib/settingsGateView";
 import { settingsAnchorId } from "../lib/settingsNav";
 import { TargetHostContext } from "../lib/targetHost";
+import { useHostScope } from "../lib/useHostScope";
 import type { SettingsTab } from "../store";
 import { appModules, services } from "./app";
 import { useOpenPage, useSlot } from "./react";
@@ -153,10 +155,22 @@ export function MainOutlet({ children }: { children: ReactNode }) {
   if (!open) return <>{children}</>;
   if (!open.entry) return open.waiting ? <main className="min-w-0 flex-1" /> : <PageOff />;
   const { Page } = open.entry.item;
+  const requires = appModules().modules.find((m) => m.id === open.entry!.moduleId)?.requires;
+  const page = <Page params={open.params} />;
   return (
     <ItemBoundary moduleId={open.entry.moduleId} resetKey={open.page}>
-      <Page params={open.params} />
+      {requires?.component ? <FocusComponentGate name={requires.component} capabilities={requires.capabilities ?? []}>{page}</FocusComponentGate> : page}
     </ItemBoundary>
+  );
+}
+
+/** v1.15 `requires.component` (§12.1): a main page targets the focus host. */
+function FocusComponentGate({ name, capabilities, children }: { name: string; capabilities: readonly string[]; children: ReactNode }) {
+  const focus = useHostScope().focus;
+  return (
+    <ComponentGate name={name} hostId={focus} moduleCapabilities={capabilities}>
+      {children}
+    </ComponentGate>
   );
 }
 

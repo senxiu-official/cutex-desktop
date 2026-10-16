@@ -584,9 +584,13 @@ export function isValidTokenId(id: unknown): id is string {
  * Where to look when the configured cutex path fails with "command not found": non-interactive ssh
  * commands get a minimal PATH, so a cutex that a login shell finds (profile-added dirs such as
  * a Linux host's ~/Resources/Shortcuts) is not found. In order; labels are shown as "tried".
- * `{name}` is the configured command name.
+ * `{name}` is the configured command name. The last one is a Windows host (OpenSSH Server runs
+ * commands in cmd.exe or PowerShell, never a POSIX sh): the managed install's `bin` (`cutex service
+ * install`), probed by `cutexWindowsDiscoveryCommand` when the POSIX probe found nothing.
  */
-export const CUTEX_CANDIDATES = ["{configured}", "$SHELL -lc 'command -v {name}'", "bash -lc 'command -v {name}'", "~/Resources/Shortcuts/cutex", "~/.local/bin/cutex", "~/.cargo/bin/cutex"] as const;
+export const CUTEX_CANDIDATES = ["{configured}", "$SHELL -lc 'command -v {name}'", "bash -lc 'command -v {name}'", "~/Resources/Shortcuts/cutex", "~/.local/bin/cutex", "~/.cargo/bin/cutex", "%LOCALAPPDATA%\\cutex\\bin\\cutex.exe"] as const;
+/** Index of the Windows candidate in `CUTEX_CANDIDATES`. */
+const WINDOWS_CANDIDATE = 6;
 
 /** Display labels of `CUTEX_CANDIDATES` for this configured path. */
 export function cutexCandidateLabels(configured: string): string[] {
@@ -618,13 +622,24 @@ export function cutexDiscoveryCommand(configured: string): string {
   return `sh -c '${script}'`;
 }
 
+/**
+ * The Windows probe (one ssh round trip): prints `found 6 <path>` when the managed install's
+ * `%LOCALAPPDATA%\\cutex\\bin\\cutex.exe` exists. Written for cmd.exe (OpenSSH Server's default shell)
+ * and started through `cmd /d /c`, so it runs the same when the server's DefaultShell is PowerShell
+ * (no parentheses, `&` or `$` that PowerShell would read). Fixed text: nothing user-supplied.
+ */
+export function cutexWindowsDiscoveryCommand(): string {
+  const path = "%LOCALAPPDATA%\\cutex\\bin\\cutex.exe";
+  return `cmd /d /c if exist "${path}" echo found ${WINDOWS_CANDIDATE} ${path}`;
+}
+
 /** What the discovery script reported: the first hit (absolute path) and the labels it tried. */
 export function parseCutexDiscovery(stdout: string, configured: string): { path: string | null; tried: string[] } {
   const labels = cutexCandidateLabels(configured);
   const tried: string[] = [];
   let path: string | null = null;
   for (const line of stdout.split(/\r?\n/)) {
-    const m = /^(try|found) (\d+)(?: (\/.*))?$/.exec(line.trim());
+    const m = /^(try|found) (\d+)(?: (\/.*|[A-Za-z]:\\.*))?$/.exec(line.trim());
     if (!m) continue;
     const label = labels[Number(m[2])];
     if (!label) continue;
@@ -670,8 +685,14 @@ export async function issueTokenFindingCutex(
     const r = await run(cutexDiscoveryCommand(cutexPath));
     const parsed = parseCutexDiscovery(r.stdout, cutexPath);
     found = { path: parsed.path, tried: parsed.tried.length ? parsed.tried : found.tried };
+    if (!parsed.path) {
+      // A Windows host: OpenSSH Server has no sh (or Git's sh, which does not see the managed install).
+      // On a POSIX host `cmd` is simply not found.
+      const w = await run(cutexWindowsDiscoveryCommand());
+      found = { path: parseCutexDiscovery(w.stdout, cutexPath).path, tried: [...found.tried, cutexCandidateLabels(cutexPath)[WINDOWS_CANDIDATE]!] };
+    }
   } catch {
-    // ssh failed now: report the original not-found
+    // ssh failed now: report the original not-found (and what was tried so far)
   }
   if (!found.path || found.path === cutexPath) return { ok: false, error: { ...first.error, tried: found.tried } };
   return issue(found.path);

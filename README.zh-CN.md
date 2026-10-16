@@ -6,13 +6,13 @@
 
 <p align="center"><a href="README.md">English</a> · <b>简体中文</b></p>
 
-**0.1.1**：桌面端提供签名安装包，可在应用内一键更新（0.1.0「First Take」是第一个公开版本）。更新内容见 [CHANGELOG.md](CHANGELOG.md)。
+**0.1.2**：可选的后端组件（Job Service、Claude 运行时）可以在应用里安装，需要 cutex 0.1.1（0.1.0「First Take」是第一个公开版本）。更新内容见 [CHANGELOG.md](CHANGELOG.md)。
 
 > **0.1.x 的已知缺口**（正在修，修好后删除这段）：
-> - **Claude 智能体**需要 Claude 运行时（`claude-adapter`），安装指南和发布包目前还不会安装它；基于 Codex 的智能体可以正常使用。
-> - **作业页和 NCI 远程作业**需要 Job Service，本版本还没有包含。
+> - **NCI 远程作业**在公开版本里还不能用（[ANU.md](docs/install/ANU.md)）。
 > - **手机推送 / 配对手机**：还没有公开的手机应用。
-> - **外发通知（webhook）**需要 `cutex notify run`，安装程序还不会设置它。
+>
+> Claude 智能体和「作业」页需要 cutex 的可选组件（Claude 运行时；Job Service，仅 Linux）。在应用提示的地方点「安装」，或在主机上运行 `cutex component install claude-runtime` / `job-service`（需要 cutex 0.1.1 的托管安装；见[安装指南](docs/install/AGENT-INSTALL.md) §6.1 / §6.2）。
 
 Cutex 桌面端是 [cutex](https://github.com/senxiu-official/cutex) 的桌面应用。cutex 是在你自己的电脑上运行编程智能体的
 后台服务，智能体运行在 [cute-codex](https://github.com/senxiu-official/cute-codex)（OpenAI Codex 的分支）或 Claude Code 上。

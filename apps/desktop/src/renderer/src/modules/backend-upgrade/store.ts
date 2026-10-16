@@ -7,10 +7,13 @@ import { create } from "zustand";
 import { BACKEND_UPGRADE_FEATURE, upgradeEventOf, type UpgradeEvent, type UpgradeRun, type UpgradeStatus } from "../../../../shared/backendUpgrade";
 import { bridge } from "../../bridge";
 import { onHostReset } from "../../lib/hostSwitch";
+import { scopedHostData } from "../../lib/hostScope";
+import { setSettingsAttention } from "../../lib/settingsAttention";
 import { useHostData } from "../../lib/useHostScope";
+import { useApp } from "../../store";
 import { services } from "../app";
 import type { AppModuleContext } from "../slots";
-import { runActive } from "./model";
+import { runActive, upgradeAttention } from "./model";
 
 export interface HostUpgrade {
   /** undefined: not read yet; null: the host has no upgrade route (older cutex). */
@@ -139,9 +142,41 @@ export function startUpgradeSync(ctx: AppModuleContext): void {
     scheduleReload(hostId);
   });
   const offReset = onHostReset(resetHostUpgrade);
+  // Read each connected host's state once per connection, so the sidebar 设置 dot can say "a backend
+  // update is available" without anyone opening Settings (cutex checks on its own schedule and
+  // publishes the event when its state changes; that keeps it current afterwards).
+  const readOnce = new Set<string>();
+  let seen: unknown[] = [];
+  const syncHosts = () => {
+    const st = useApp.getState();
+    const refs = [st.hosts, st.daemon, st.features, st.byHost];
+    if (refs.every((r, i) => r === seen[i])) return; // most store changes are not about hosts
+    seen = refs;
+    const live = new Set<string>();
+    for (const d of scopedHostData(st)) {
+      if (d.daemon.kind !== "connected" || !d.features.has(BACKEND_UPGRADE_FEATURE)) continue;
+      live.add(d.hostId);
+      if (!readOnce.has(d.hostId)) {
+        readOnce.add(d.hostId);
+        void loadUpgradeStatus(d.hostId);
+      }
+    }
+    for (const id of readOnce) if (!live.has(id)) readOnce.delete(id);
+  };
+  syncHosts();
+  const offHosts = useApp.subscribe(syncHosts);
+  const syncDot = () => {
+    const any = Object.values(useUpgradeStore.getState().byHost).some((u) => upgradeAttention(u.status, u.event) !== "none");
+    setSettingsAttention("backend-upgrade", any ? "backend-upgrade.navAttention" : null);
+  };
+  syncDot();
+  const offDot = useUpgradeStore.subscribe(syncDot);
   ctx.signal.addEventListener("abort", () => {
     off?.();
     offReset();
+    offHosts();
+    offDot();
+    setSettingsAttention("backend-upgrade", null);
     for (const t of timers.values()) clearTimeout(t);
     timers.clear();
     generation++;

@@ -385,6 +385,13 @@ export function ConversationPage() {
           </SettingRow>
         )}
         {admissionOrder && <OwnerMayPassAsksRow />}
+        <SettingRow label={t("queue.panelFold")} hint={t(ui.queuePanelFold === "auto" ? "queue.panelFold.autoHint" : "queue.panelFold.openHint")}>
+          <Segmented
+            value={ui.queuePanelFold}
+            options={(["open", "auto"] as const).map((v) => ({ value: v, label: t(`queue.panelFold.${v}` as MessageKey) }))}
+            onChange={(v) => setUiPref("queuePanelFold", v)}
+          />
+        </SettingRow>
         {admissionOrder && (
           <SettingRow label={t("queue.sectionStrip")} hint={t("queue.sectionStripHint")}>
             <Toggle checked={ui.queueSectionStrip} onChange={(v) => setUiPref("queueSectionStrip", v)} />
@@ -738,6 +745,8 @@ export function AboutPage() {
           <span className="font-mono text-xs text-subtle">NOTICE</span>
         </SettingRow>
       </Section>
+      {/* The about module: license, project links, known issues. */}
+      <SettingsSections page="about" />
       <AboutDragon />
     </>
   );

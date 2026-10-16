@@ -20,6 +20,7 @@ import { claimList, dropLegacy, hostKey, keyFocus, onKeyFocus, parseHostKey, pro
 import type { CurrentPageClick } from "./sideLaneClick";
 import { migrateLauncherPins } from "./sideLaunchers";
 import { DEFAULT_SIDE_PREVIEW, migrateSidePreview, SIDE_PREVIEW_REV, type SidePreview } from "./sidePreviewPref";
+import { DEFAULT_QUEUE_PANEL_FOLD, migrateQueuePanelFold, type QueuePanelFold } from "./queueChips";
 import { DEFAULT_RUNNING_AGENTS, migrateRunningAgents, RUNNING_AGENTS_REV, type RunningAgents } from "./runningAgentsPref";
 
 export type ProjectIconStyle = "tint" | "line";
@@ -53,6 +54,10 @@ export interface UiPrefs {
   delegationSteerKeys: boolean;
   /** 悬停时显示分区名: hovering the queue frame's rail shows the section name as a strip (lib/railStrip). */
   queueSectionStrip: boolean;
+  /** 「接下来」面板: "open" (★ 始终展开, owner 2026-10-16) = never collapses by itself, only the chevron
+   *  folds it (remembered per agent); "auto" = starts as its chip line when several kinds wait or the
+   *  window is short (lib/queueChips autoCompact). */
+  queuePanelFold: QueuePanelFold;
   /** Capsule corner (lib/capsuleLayout); collapsed and open share it. */
   capsuleCorner: CapsuleCorner;
   /** Against the window edge, or the text column edge. */
@@ -215,7 +220,7 @@ export type NoOnlineProjects = "collapse" | "expand";
 export type { RunningAgents };
 
 const KEY = "cutex-desktop.ui";
-const DEFAULTS: UiPrefs = { quotaShowReset: true, composerProfileAvatar: true, quotaView: DEFAULT_QUOTA_VIEW, sidebarOpen: true, agentMessages: "compact", foldedGroups: [], modelPins: {}, lastAgentCwd: "", remoteAgentCwd: {}, sendKeys: "queueFirst", delegationSteerKeys: false, capsuleCorner: DEFAULT_CAPSULE_CORNER, capsuleEdge: DEFAULT_CAPSULE_EDGE, reasoningView: DEFAULT_REASONING_VIEW, reasoningViewRev: REASONING_VIEW_REV, capsuleOpen: false, capsuleFoldedItems: [], timelineTurns: 30, timelineInteractions: true, timelineIntro: true, capsuleAlways: false, projectOrder: [], profileOrder: [], offlineAgents: DEFAULT_OFFLINE_LIMIT, offlineOpen: [],runtimeButton: "all", foldLong: true, foldLines: DEFAULT_FOLD_LINES, foldOlderReplies: false, projectGrouping: "all", noOnlineProjects: "collapse", runningAgents: DEFAULT_RUNNING_AGENTS, runningAgentsRev: RUNNING_AGENTS_REV, foldIdleAgents: true, idleOpen: [], idleUnfolded: [], foldedProjects: [], starredProjects: [], sidebarSections: [], projectRemarks: {}, projectDirectors: {}, projectIcons: {}, sectionCollapsedShows: "summary", projectHoverPreview: true, projectHoverDelay: DEFAULT_FLYOUT_DELAY, projectSeparation: DEFAULT_PROJECT_SEPARATION, projectSeparationRev: PROJECT_SEPARATION_REV, projectHeaderTint: true, projectIconStyle: "tint", statusChips: DEFAULT_STATUS_CHIPS, needsYouStrip: true, titleTwoLines: true, rowPreview: "director", agentAvatarDefault: "emoji", messageImages: "thumbnail", turnSummary: "collapsed", sideMode: "push", sidePageBar: "lane", sidePillAnchor: "top", sideLaneWhenHidden: "keep", sideCurrentPageClick: "stay", sideNarrow: "overlay", sidePreview: DEFAULT_SIDE_PREVIEW, sidePreviewRev: SIDE_PREVIEW_REV, sideRestore: true, sideKeepHidden: 4, sideKeepMounted: 4, sideLauncherPins: {}, navPins: null, peekTarget: "auto", gutterDocked: [], sideHomes: {}, gutterDockWidth: DOCK_WIDTH_DEFAULT, hostMarksSingle: false, hostMarkLocal: false, queueSectionStrip: true, lastCreateHost: "", createHostDefault: "local" };
+const DEFAULTS: UiPrefs = { quotaShowReset: true, composerProfileAvatar: true, quotaView: DEFAULT_QUOTA_VIEW, sidebarOpen: true, agentMessages: "compact", foldedGroups: [], modelPins: {}, lastAgentCwd: "", remoteAgentCwd: {}, sendKeys: "queueFirst", delegationSteerKeys: false, capsuleCorner: DEFAULT_CAPSULE_CORNER, capsuleEdge: DEFAULT_CAPSULE_EDGE, reasoningView: DEFAULT_REASONING_VIEW, reasoningViewRev: REASONING_VIEW_REV, capsuleOpen: false, capsuleFoldedItems: [], timelineTurns: 30, timelineInteractions: true, timelineIntro: true, capsuleAlways: false, projectOrder: [], profileOrder: [], offlineAgents: DEFAULT_OFFLINE_LIMIT, offlineOpen: [],runtimeButton: "all", foldLong: true, foldLines: DEFAULT_FOLD_LINES, foldOlderReplies: false, projectGrouping: "all", noOnlineProjects: "collapse", runningAgents: DEFAULT_RUNNING_AGENTS, runningAgentsRev: RUNNING_AGENTS_REV, foldIdleAgents: true, idleOpen: [], idleUnfolded: [], foldedProjects: [], starredProjects: [], sidebarSections: [], projectRemarks: {}, projectDirectors: {}, projectIcons: {}, sectionCollapsedShows: "summary", projectHoverPreview: true, projectHoverDelay: DEFAULT_FLYOUT_DELAY, projectSeparation: DEFAULT_PROJECT_SEPARATION, projectSeparationRev: PROJECT_SEPARATION_REV, projectHeaderTint: true, projectIconStyle: "tint", statusChips: DEFAULT_STATUS_CHIPS, needsYouStrip: true, titleTwoLines: true, rowPreview: "director", agentAvatarDefault: "emoji", messageImages: "thumbnail", turnSummary: "collapsed", sideMode: "push", sidePageBar: "lane", sidePillAnchor: "top", sideLaneWhenHidden: "keep", sideCurrentPageClick: "stay", sideNarrow: "overlay", sidePreview: DEFAULT_SIDE_PREVIEW, sidePreviewRev: SIDE_PREVIEW_REV, sideRestore: true, sideKeepHidden: 4, sideKeepMounted: 4, sideLauncherPins: {}, navPins: null, peekTarget: "auto", gutterDocked: [], sideHomes: {}, gutterDockWidth: DOCK_WIDTH_DEFAULT, hostMarksSingle: false, hostMarkLocal: false, queueSectionStrip: true, queuePanelFold: DEFAULT_QUEUE_PANEL_FOLD, lastCreateHost: "", createHostDefault: "local" };
 const listeners = new Set<() => void>();
 /**
  * Lists of agent / project / group ids: stored under host keys (lib/hostKeys), shown as the focus
@@ -306,6 +311,7 @@ function load(): UiPrefs {
       runningAgents: migrateRunningAgents(stored.runningAgents, stored.runningAgentsRev),
       runningAgentsRev: RUNNING_AGENTS_REV,
       agentAvatarDefault: stored.agentAvatarDefault === "letter" ? "letter" : "emoji",
+      queuePanelFold: migrateQueuePanelFold(stored.queuePanelFold),
     };
   } catch {
     return DEFAULTS;

@@ -1,6 +1,7 @@
 // Data of Settings → 用户 for the settings target host (lib/targetHost): `GET /v2/users` (users, every
-// token with its binding, peers, settings), re-read after each write and on `cutex/access/changed`
-// (another owner device may have changed bindings). Writes come back as values (UsersResult).
+// token with its binding, peers, settings), re-read after each write, on `cutex/access/changed`
+// (another owner device may have changed bindings) and on `cutex/users/changed` (a paired peer supplied a
+// user's name / avatar; cutex capability `peer-owner-profile`). Writes come back as values (UsersResult).
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UsersList, UsersResult } from "../../../../shared/users";
 import { bridge } from "../../bridge";
@@ -8,6 +9,9 @@ import { useI18n } from "../../i18n";
 import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
 import { useHostData } from "../../lib/useHostScope";
 import { refusalText } from "./model";
+
+/** cutex host event: a user record changed outside this connection (e.g. a peer-sourced profile). */
+export const USERS_CHANGED_EVENT = "cutex/users/changed";
 
 export const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -42,6 +46,12 @@ export function useUsers() {
     if (typeof bridge.on !== "function") return;
     return bridge.on("accessChanged", ({ hostId: from }) => {
       if (from === hostId) void load();
+    });
+  }, [hostId, load]);
+  useEffect(() => {
+    if (typeof bridge.on !== "function") return;
+    return bridge.on("hostEvent", ({ hostId: from, envelope }) => {
+      if (from === hostId && envelope?.cutex?.method === USERS_CHANGED_EVENT) void load();
     });
   }, [hostId, load]);
   return { ...data, load };

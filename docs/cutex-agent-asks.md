@@ -1,5 +1,12 @@
 # cutex agent asks, child agents and approvals — design
 
+> **Public repository note.** This is a maintainers' design record, kept as written during
+> development. It cites internal notes and working checkouts that are not published with this
+> repository (`docs/research/…`, `docs/reviews/…`, `docs/handoff/…`, `TODO.md`, `PROGRESS.md`,
+> `PLAN.md`, `upstream/…`, `refs/…`, `.claude/…`); those references are history, not links.
+> "The owner" is the project's maintainer. The current behaviour is in the code, `README.md`,
+> `docs/install/AGENT-INSTALL.md` and the cutex repository's `docs/`.
+
 Status: **proposed, revised after review** (2026-10-07). The decisions in §2 are owner-approved. The
 Fable 5.1 and Astra reviews are consolidated (§14); the contract changes they asked for are written
 in. §13 marks each remaining default as *adopted (review)* or *decided (owner)*.

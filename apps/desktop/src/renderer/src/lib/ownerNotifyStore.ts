@@ -9,7 +9,7 @@
 // records go when its connection is replaced or it is removed (lib/hostSwitch onHostReset).
 import { create } from "zustand";
 import type { OwnerNotification } from "@cutex-desktop/protocol";
-import type { DaemonApi, OwnerNotifyAction, OwnerNotifyResult } from "../../../shared/ipc";
+import type { DaemonApi, OwnerNotifyAction, OwnerNotifyResult, SafetyCheckDecision, SafetyCheckResult } from "../../../shared/ipc";
 import { deletedIdOfEvent, isAlerting, isPending, isSystemNotice, mergeRecords, OWNER_NOTIFY_CREATED, OWNER_NOTIFY_FEATURE, previewText, recordOfEvent } from "../../../shared/ownerNotify";
 import { api, apiFor, bridge } from "../bridge";
 import { translate } from "../i18n";
@@ -177,6 +177,19 @@ export async function ownerNotifyAct(record: Pick<OwnerNotification, "agentId" |
   if (action === "delete" && (r.ok || r.error.code === "notification_not_found")) remove(hostId, record.notificationId);
   else if (r.ok) merge(hostId, [r.notification]);
   else if (r.error.code === "notification_closed" || r.error.code === "notification_not_found") scheduleRefresh(hostId);
+  return r;
+}
+
+/**
+ * 批准一次 / 不批准 on a safety-block notice (claude-safety-grants) of `hostId`: the returned notice (or, when
+ * it was decided elsewhere meanwhile, the one the refusal carries) is applied at once.
+ */
+export async function safetyCheckAct(record: Pick<OwnerNotification, "agentId" | "safetyBlock">, decision: SafetyCheckDecision, hostId = focusHost()): Promise<SafetyCheckResult> {
+  const blockId = record.safetyBlock?.blockId;
+  if (!blockId) throw new Error("not a safety block");
+  const r = await daemonOf(hostId).safetyCheckDecide(record.agentId, blockId, decision);
+  if (r.notification) merge(hostId, [r.notification]);
+  else if (!r.ok) scheduleRefresh(hostId);
   return r;
 }
 

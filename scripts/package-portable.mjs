@@ -19,7 +19,7 @@
 // --update-test-hooks: local end-to-end tests of the binary self-update only (never CI / releases): the
 // package records `updateTestHooks: true` and then honours CUTEX_DESKTOP_UPDATE_TEST_API (a loopback fake
 // GitHub) and CUTEX_DESKTOP_UPDATE_TEST_PUBKEY (an extra trusted minisign key). NOTICE, THIRD_PARTY_NOTICES.md and LICENSES/ ship next to Electron's own
-// LICENSE / LICENSES.chromium.html in every package.
+// LICENSE / LICENSES.chromium.html in every package, with docs/QUICKSTART.md and skills/cutex-docs/.
 //
 // The executable is renamed to cutex(.exe) (macOS: Cutex.app/Contents/MacOS/Cutex) so app.isPackaged
 // is true (Electron checks the executable's name); userData stays "Cutex" (productName), the same as dev runs.
@@ -95,6 +95,12 @@ cpSync(join(app, "resources/icons"), join(target, "resources/icons"), { recursiv
 cpSync(join(root, "NOTICE"), join(dest, "NOTICE"));
 cpSync(join(root, "LICENSES"), join(dest, "LICENSES"), { recursive: true });
 writeFileSync(join(dest, "THIRD_PARTY_NOTICES.md"), thirdPartyNotices(app));
+// Docs that a package without a source checkout still needs (a few dozen KB): the identity menu's
+// 帮助与文档 opens docs/QUICKSTART.md (src/shared/quickstart.ts), and AGENT-INSTALL §13 copies the
+// skills/cutex-docs manual from <base>/current/skills/cutex-docs.
+mkdirSync(join(dest, "docs"), { recursive: true });
+cpSync(join(root, "docs/QUICKSTART.md"), join(dest, "docs/QUICKSTART.md"));
+cpSync(join(root, "skills/cutex-docs"), join(dest, "skills/cutex-docs"), { recursive: true });
 // Self-update (src/main/updater.ts) pulls and rebuilds in the checkout recorded here, with this node.
 // releaseDir: where this package lives, so a macOS launcher clone of the bundle finds its install
 // (apps/desktop/src/shared/releases.ts syncMacLauncher).

@@ -16,6 +16,8 @@
 // Compact (UI review 2026-10-15 #2, lib/queueChips): with `autoCompact` the card starts as its header
 // line when more than one kind of thing waits (or the window is short), the header then reads
 // 「接下来 · 排队 2 · 留言 1 · 委托 3」; a click on it expands (for this run), the chevron collapses.
+// Composer passes `autoCompact` only under the 「接下来」面板 setting 自动折叠; under ★ 始终展开 the card
+// collapses by the chevron alone (remembered per agent, lib/queueView).
 import { useRef, useState } from "react";
 import { ChevronDown, ChevronUp, CornerDownRight, Pencil, Trash2, UserRound, X } from "lucide-react";
 import type { QueueItem } from "@cutex-desktop/protocol";

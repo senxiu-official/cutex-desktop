@@ -2,6 +2,7 @@
 // tsconfig.browser.json). Node-only helpers (local discovery) live in `@cutex-desktop/cutex-client/node`.
 export * from "./build";
 export * from "./client";
+export * from "./components";
 export * from "./endpoint";
 export * from "./errors";
 export * from "./feed";

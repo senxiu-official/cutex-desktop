@@ -1,6 +1,13 @@
-# Current asset handoff
+# Launcher portraits: what is (not) in this repository
 
-Use docs/handoff/gpt-launcher-review-20261012.md and scripts/copy-launcher-art.ps1 for the current ten-file manifest. Images are intentionally excluded from Git. The notes below are historical generation records; their old statements about active imports are superseded by LaunchPortraits.tsx.
+The portrait and victory PNGs are not in Git (`.gitignore`) and are not part of the public
+repository or the release packages. A build without them works: `lib/launchArt.ts` loads whatever
+files of `LAUNCH_ART_FILES` are present, and a provider without both of its images falls back to the
+icon + greeting intro. The file names the launcher uses are listed in `LAUNCH_ART_FILES`.
+
+The notes below are historical generation records (the `*-prompt*.md` files next to this README are
+the exact prompts). The images they describe are not published, and their statements about which
+files the UI imports are superseded by `lib/launchArt.ts`.
 
 # Launcher artwork
 

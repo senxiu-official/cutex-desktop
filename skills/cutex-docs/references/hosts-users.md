@@ -12,6 +12,7 @@
 - **设置页的来源标签**：每个设置页标题旁写着它存在哪里。「本机」（This computer）= 只存在这台电脑上，只影响这台电脑；「主机 · {host}」（Host · {host}）= 存在那台主机的 cutex 里，对连到它的所有桌面都生效。
 - **主机选择器**：主机类设置页的标题旁有主机选择器（「编辑哪台主机的设置（不改变视图范围）」（Whose settings to edit (does not change the view)））。改设置前先确认选的是哪台。新建 agent 的表单也有一个（「在哪台主机上创建（不改变视图范围）」（Where to create it (does not change the view)））。
 - **添加远程主机**：主机切换器 →「添加 SSH 主机…」（Add SSH host…），或「设置」（Settings）→「主机」（Hosts）。填 `~/.ssh/config` 里的别名或 `user@host[:port]`。桌面用用户现有的 SSH 密钥（BatchMode，不弹密码框）在远端运行一次 cutex 拿到令牌，之后经 SSH 端口转发连接，不需要开放端口。远端 cutex 端口默认 24270。只连用户自己的机器。macOS 只有桌面端，所有 agent 都在 SSH 主机上（见 [安装升级](install-upgrade.md#macos只有桌面端)）。
+- **远程主机是 Windows**：那台机器要先开 OpenSSH 服务器（Windows 自带但默认关，需要管理员 PowerShell），并把 Mac / 另一台电脑的公钥放进 `authorized_keys`（管理员账户是 `C:\ProgramData\ssh\administrators_authorized_keys`）；配对时 cutex 在 `cmd.exe` 里运行，所以 `%LOCALAPPDATA%\cutex\bin` 要在该用户的 PATH 上，用 `ssh user@host cutex --version` 验证。找不到时桌面会自己再试 `%LOCALAPPDATA%\cutex\bin\cutex.exe`（用户名里有空格时不行）。步骤见 AGENT-INSTALL §7.4。
 - 排查某台主机连不上，见 [排错](troubleshooting.md#daemon-连不上)。
 
 ### 需要升级
@@ -63,12 +64,13 @@
   - 设备的网络地址默认打码显示，点一下才显示（「点击显示地址」（Click to show the address））。
   - 设备显示「用的是「{name}」的身份」（Uses the identity of “{name}”）时，表示这台设备出示的身份变了；归属不变，确认后点「知道了」（Got it）。
 - **你的设备**（Your devices）：非 {{owner}} 连接时，「设置」→「用户」里有这一节，列出你自己在这台主机上的电脑和手机，可以自己「移除」（Remove，例如丢了手机）。需要那台主机 cutex 的 `user-own-devices` 能力；较旧的 cutex 上最多只显示这台电脑自己，或不显示。移除这台电脑本身会让它断开这台主机，要再用需重新配对。
-- **配对新设备**：「设置」→「接入」（Access）→「配对设备」（Pair a device）生成一次性配对码，用手机扫码或在另一台电脑上输入；配对后的设备归所选用户。「接入」页只负责配对，已配对的设备在「用户 → 设备」里查看和管理。「用户」页「设备」一节的「配对设备」按钮也通向这里。
+- **配对新设备**：「设置」→「接入」（Access）→「配对设备」（Pair a device）生成一次性配对码，用手机扫码或在另一台电脑上输入；配对后的设备归所选用户。「接入」页只负责配对，已配对的设备在「用户 → 设备」里查看和管理。「用户」页「设备」一节的「配对设备」按钮也通向这里。**目前没有公开发布的手机 App**：界面里的扫码配对、「手机推送」（Phone push）通知方式和「未配对手机」提示要等手机 App 发布后才有用。用户问怎么配对手机或收手机推送时如实说明，不要推荐第三方 App；另一台电脑可以用配对码或 SSH 主机连接。
 - **对端主机**（Linked hosts）：通过「互联」（Peers）页配对的**其他 cutex 主机**，不是电脑或手机。它们发来的委托按所属用户的授权执行。「设置」→「用户」的「对端主机」列表里可以改它属于哪个用户（「在 互联 中管理」（Manage in Peers）跳到管理页）；「互联」页每个对端也显示「属于 {user}」（belongs to {user}）。跨主机默认关闭：要在「互联」里「启用跨主机」（Enable peers），一方「邀请对方」（Invite，一次性配对码，10 分钟内有效），另一方「加入对方」（Join）。
 
 ## 依据
 
 - 基础 i18n `apps/desktop/src/renderer/src/i18n/{zh-CN,en}.ts`：`hostSwitcher.*`、`hostPicker.settingsTitle`、`hostPicker.createTitle`、`settings.source.*`、`hostLists.needsUpgrade`、`side.reason.capability`、`host.add.*`、`host.capabilities.show`、`titlebar.addSsh`、`identity.person.*`（`useElsewhere`、`keyHint`、`fingerprint`、`legacyFile`）、`identity.section`、`identity.name`、`identity.role.*`、`me.access.*`、`device.rename*`、`address.show`、`remote.pair.title`、`remote.pair.hint`、`remote.pair.devicesInUsers`；`modules/i18n.ts` 的 `modules.needsUpgrade`。
+- `apps/desktop/src/shared/hosts.ts`（`CUTEX_CANDIDATES`、`cutexDiscoveryCommand`、`cutexWindowsDiscoveryCommand`）。
 - `apps/desktop/src/main/personIdentity.ts`（`IDENTITY_KEY_CLIPBOARD_MS = 60_000`，密钥不经过渲染进程）。
 - `modules/users/i18n.ts`（`users.pageHint`、`users.attention`、`users.me.title`、`users.manageNotice`、`users.ownerHint`、`users.grant*`、`users.pending.*`、`users.person.*`、`users.devices*`、`users.rebind`、`users.revoke*`、`users.own.*`、`users.peers*`、`users.ownerRequiresApproval*`、`users.project.*`）、`components/settings/MeOnHost.tsx`、`modules/users/ProjectUsersTab.tsx`；`modules/peers/i18n.ts`（`peers.enabled`、`peers.invite*`、`peers.join`）；`modules/remote-access/i18n.ts`。
 - `components/Settings.tsx`（主机页的 `HostPicker`）、`lib/targetHost.ts`。

@@ -1,10 +1,17 @@
 # Thread launch options: cute-codex inventory vs. cutex plumbing
 
+> **Public repository note.** This is a maintainers' design record, kept as written during
+> development. It cites internal notes and working checkouts that are not published with this
+> repository (`docs/research/…`, `docs/reviews/…`, `docs/handoff/…`, `TODO.md`, `PROGRESS.md`,
+> `PLAN.md`, `upstream/…`, `refs/…`, `.claude/…`); those references are history, not links.
+> "The owner" is the project's maintainer. The current behaviour is in the code, `README.md`,
+> `docs/install/AGENT-INSTALL.md` and the cutex repository's `docs/`.
+
 Status 2026-10-06. Sources: `upstream/cute-codex` (`feat/desktop-slim`, ~v0.160) and `upstream/cutex`
 (`feat/desktop-api` + `feat/quick-chat`). This file lists what can be set when a native thread starts,
 and what cutex passes through when it creates or launches an agent or quick chat.
 
-Permission audit, 2026-10-11: see [GPT permission semantics and alignment specification](research/permissions-gpt-20261011.md).
+Permission audit, 2026-10-11 (internal note `docs/research/permissions-gpt-20261011.md`, not published).
 The reviewer row and gap below reflect that audit; other inventory rows retain their dated scope.
 
 ## How cutex launches a thread

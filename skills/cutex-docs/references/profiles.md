@@ -28,7 +28,7 @@ API key 输入框的已设置状态不会回显原 key；填写新 key 并保存
 
 在 Profile 编辑页可点「管理账户」（Manage accounts），账户模块提供「添加 Claude 订阅」（Add Claude subscription）及「API 账户」（API account）。订阅账户按页面引导完成登录；API 账户按页面引导设置 key，不需要执行订阅登录。操作后点「完成」（Done），让桌面请求 cutex 检查对应的登录状态或 key 是否已保存；也可用「检查」（Check）再次核实。改 Profile 的账户绑定只影响保存后新建的 agent，已有 agent 留在原账户上。
 
-**凭据流程边界：**Claude 账户界面引导用户在**目标主机的终端**里登录或设置 API key（界面给出要运行的命令和「复制命令」；key 输入不显示、不进命令历史），桌面不经手这些凭据（「API key 不在这里输入：添加后用终端命令设置」（The API key is not entered here: set it with a terminal command after adding））。这与上面 Codex API-key Profile 的密码框流程不同。不要把 Claude key 粘进聊天，也不要编造一个不存在的桌面 key 输入框或另写凭据脚本。主机的 cutex 没有 Claude 账户接口时，页面显示「这个 cutex 没有 Claude 账户接口，需要升级 cutex」（This cutex has no Claude accounts API; upgrade cutex）。Claude 运行时本身的安装不在同事安装说明的范围内，见 [安装升级](install-upgrade.md#首次安装顺序与验收)。
+**凭据流程边界：**Claude 账户界面引导用户在**目标主机的终端**里登录或设置 API key（界面给出要运行的命令和「复制命令」；key 输入不显示、不进命令历史），桌面不经手这些凭据（「API key 不在这里输入：添加后用终端命令设置」（The API key is not entered here: set it with a terminal command after adding））。这与上面 Codex API-key Profile 的密码框流程不同。不要把 Claude key 粘进聊天，也不要编造一个不存在的桌面 key 输入框或另写凭据脚本。主机的 cutex 没有 Claude 账户接口时，页面显示「这个 cutex 没有 Claude 账户接口，需要升级 cutex」（This cutex has no Claude accounts API; upgrade cutex）。Claude 运行时本身是 cutex 的可选组件（cutex 0.1.1 起；AGENT-INSTALL §6.1），未安装时 Claude Profile / 账户页面显示安装卡片，见 [安装升级](install-upgrade.md#可选组件claude-运行时job-service)。
 
 证据：desktop `components/settings/ProfileClaudeAccount.tsx`、`modules/claude-accounts/ClaudeAccountsSection.tsx`、`modules/claude-accounts/AccountFlow.tsx`；`modules/claude-accounts/i18n.ts` 的 `sectionHint`、`form.apiNote`、`guide.*`、`unsupported`，`modules/agent-config/i18n.ts` 的 `agent-config.profile.claudeAccount.*`。
 

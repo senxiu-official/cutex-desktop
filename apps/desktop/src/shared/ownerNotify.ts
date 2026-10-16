@@ -1,7 +1,7 @@
 // Owner notify (agent → owner messages, capability `owner-notify`; docs/research/owner-notify.md):
 // pure predicates and helpers shared by the main process (big alert, main/ownerAlert.ts) and the
 // renderer (timeline card, 需要你, OS notification, settings). No Electron / DOM imports.
-import type { OwnerNotification, OwnerNotifyChannel, OwnerNotifyLevel, OwnerNotifySettings, OwnerNotifySettingsPatch, OwnerNotifyState } from "@cutex-desktop/protocol";
+import type { OwnerNotification, OwnerNotifyChannel, OwnerNotifyLevel, OwnerNotifySettings, OwnerNotifySettingsPatch, OwnerNotifyState, SafetyBlock, SafetyBlockState } from "@cutex-desktop/protocol";
 import type { OwnerAlertItem } from "./ownerAlert";
 import { OWNER_NOTIFY_CREATED, OWNER_NOTIFY_DELETE_FEATURE, OWNER_NOTIFY_DELETED, OWNER_NOTIFY_FEATURE, OWNER_NOTIFY_UPDATED } from "@cutex-desktop/protocol";
 
@@ -10,6 +10,20 @@ export { OWNER_NOTIFY_CREATED, OWNER_NOTIFY_DELETE_FEATURE, OWNER_NOTIFY_DELETED
 /** A notice cutex wrote itself (delivery failure, reminder): not from the agent, takes no reply. */
 export function isSystemNotice(n: Pick<OwnerNotification, "origin">): boolean {
   return n.origin === "system";
+}
+
+/**
+ * A safety-block notice (claude-safety-grants) still waiting for the owner's 批准一次 / 不批准. Its
+ * block decides, not the record's state: reading the agent only marks it read.
+ */
+export function isOpenSafetyBlock(n: Pick<OwnerNotification, "safetyBlock">): boolean {
+  return n.safetyBlock?.state === "blocked";
+}
+
+/** A granted block whose 30 minutes ran out (cutex keeps `granted`; the adapter reports `expired`). */
+export function safetyBlockState(block: Pick<SafetyBlock, "state" | "expiresAt">, now = Date.now()): SafetyBlockState {
+  if (block.state === "granted" && block.expiresAt && Date.parse(block.expiresAt) <= now) return "expired";
+  return block.state;
 }
 
 /** 回复 is offered: the agent asked for a reply, wrote it itself, and it is not answered / dismissed yet. */
@@ -28,14 +42,18 @@ export function isFinal(state: OwnerNotifyState): boolean {
  * cutex's own notices (origin system) are records only: the owner cannot act on them, so they never
  * count, whatever level / channels an older cutex gave them (notification-levels §2 记录).
  */
-export function isPending(n: Pick<OwnerNotification, "needsReply" | "state" | "channels" | "origin">): boolean {
+export function isPending(n: Pick<OwnerNotification, "needsReply" | "state" | "channels" | "origin"> & Partial<Pick<OwnerNotification, "safetyBlock" | "actions">>): boolean {
+  // A safety block (cutex notice the owner can act on) counts until decided, unless the owner's
+  // notification levels took 需要你 away from it (`actions` without needsYou).
+  if (n.safetyBlock) return isOpenSafetyBlock(n) && (!n.actions || n.actions.includes("needsYou"));
   if (isSystemNotice(n)) return false;
   if (n.needsReply) return n.state === "open" || n.state === "acknowledged";
   return n.state === "open" && n.channels.length > 0;
 }
 
 /** Alerting: an OS notification / big alert may still be showing (never for cutex's own notices). */
-export function isAlerting(n: Pick<OwnerNotification, "state" | "origin">): boolean {
+export function isAlerting(n: Pick<OwnerNotification, "state" | "origin"> & Partial<Pick<OwnerNotification, "safetyBlock">>): boolean {
+  if (n.safetyBlock) return n.state === "open" && isOpenSafetyBlock(n);
   return n.state === "open" && !isSystemNotice(n);
 }
 
@@ -53,9 +71,14 @@ export function wantsDesktopNotification(n: Pick<OwnerNotification, "state" | "c
 const STATE_RANK: Record<OwnerNotifyState, number> = { open: 0, acknowledged: 1, answered: 2, dismissed: 2 };
 
 /** The newer of two copies of a record: a later state wins; on a tie the incoming copy. */
+const BLOCK_RANK: Record<SafetyBlockState, number> = { blocked: 0, granted: 1, dismissed: 1, used: 2, expired: 2 };
+
 export function newerRecord(current: OwnerNotification | undefined, incoming: OwnerNotification): OwnerNotification {
   if (!current) return incoming;
-  return STATE_RANK[incoming.state] >= STATE_RANK[current.state] ? incoming : current;
+  const a = STATE_RANK[incoming.state], b = STATE_RANK[current.state];
+  // Same record state: a safety block's later state wins (a stale list copy cannot reopen it).
+  if (a === b && current.safetyBlock && incoming.safetyBlock) return BLOCK_RANK[incoming.safetyBlock.state] >= BLOCK_RANK[current.safetyBlock.state] ? incoming : current;
+  return a >= b ? incoming : current;
 }
 
 /** Merge records into a map by notificationId (unchanged map when nothing changed). */
@@ -105,6 +128,34 @@ export function asRecord(raw: unknown): OwnerNotification | null {
     ...(typeof r.notificationEvent === "string" ? { notificationEvent: r.notificationEvent } : {}),
     ...(Array.isArray(r.actions) ? { actions: r.actions.filter((a): a is string => typeof a === "string") } : {}),
     ...(typeof r.systemKind === "string" ? { systemKind: r.systemKind } : {}),
+    ...(asSafetyBlock(r.safetyBlock) ? { safetyBlock: asSafetyBlock(r.safetyBlock)! } : {}),
+  };
+}
+
+const BLOCK_STATES = new Set<string>(["blocked", "granted", "used", "dismissed", "expired"]);
+const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+
+/** A safety block from the wire, or null. */
+export function asSafetyBlock(raw: unknown): SafetyBlock | null {
+  const b = raw as Partial<SafetyBlock> | null | undefined;
+  if (!b || typeof b !== "object" || typeof b.blockId !== "string" || typeof b.threadId !== "string" || typeof b.command !== "string" || typeof b.toolName !== "string") return null;
+  if (!BLOCK_STATES.has(b.state as string)) return null;
+  return {
+    blockId: b.blockId,
+    runtime: str(b.runtime) ?? "claude",
+    threadId: b.threadId,
+    turnId: str(b.turnId),
+    itemId: str(b.itemId),
+    toolName: b.toolName,
+    toolInput: b.toolInput ?? null,
+    command: b.command,
+    reason: str(b.reason) ?? "",
+    state: b.state as SafetyBlockState,
+    blockedAt: str(b.blockedAt) ?? "",
+    decidedAt: str(b.decidedAt),
+    expiresAt: str(b.expiresAt),
+    usedAt: str(b.usedAt),
+    grantSeconds: typeof b.grantSeconds === "number" && b.grantSeconds > 0 ? b.grantSeconds : 1800,
   };
 }
 

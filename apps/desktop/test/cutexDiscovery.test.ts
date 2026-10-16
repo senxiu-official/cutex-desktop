@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { cutexCandidateLabels, cutexDiscoveryCommand, issueTokenFindingCutex, parseCutexDiscovery, type RemoteRunner, type SshErrorView } from "../src/shared/hosts";
+import { cutexCandidateLabels, cutexDiscoveryCommand, cutexWindowsDiscoveryCommand, issueTokenFindingCutex, parseCutexDiscovery, type RemoteRunner, type SshErrorView } from "../src/shared/hosts";
 
 const TOKEN_JSON = JSON.stringify({ tokenId: "ct_01", label: "desktop-HOST-A", token: "secret", createdAt: "2026-10-08T00:00:00Z" });
 const toError = (e: unknown): SshErrorView => ({ code: "exited", detail: String(e) });
@@ -11,14 +11,17 @@ const notFound = { code: 127, stdout: "", stderr: "bash: line 1: cutex: command 
 
 /** Fake ssh: `cutex …` at `installed` succeeds, other paths are "command not found"; the discovery
  *  script answers with `discovery`. Records every command. */
-function fakeSsh(installed: string, discovery: string | Error): RemoteRunner & { calls: string[] } {
+function fakeSsh(installed: string, discovery: string | Error, windows?: string): RemoteRunner & { calls: string[] } {
   const calls: string[] = [];
   const run = (async (command: string) => {
     calls.push(command);
     if (command.startsWith("sh -c ")) {
       if (discovery instanceof Error) throw discovery;
+      // A Windows host (cmd.exe) has no sh.
+      if (windows !== undefined) return { code: 1, stdout: "", stderr: "'sh' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n" };
       return { code: 0, stdout: discovery, stderr: "" };
     }
+    if (command.startsWith("cmd /d /c ")) return { code: 0, stdout: windows ?? "", stderr: "" };
     return command.startsWith(`${installed} management client-token issue`) ? { code: 0, stdout: TOKEN_JSON, stderr: "" } : notFound;
   }) as RemoteRunner & { calls: string[] };
   run.calls = calls;
@@ -49,6 +52,39 @@ describe("finding cutex on the remote", () => {
     expect(r.error.code).toBe("cutexNotFound");
     expect(r.error.tried).toEqual(cutexCandidateLabels("cutex"));
     expect(r.error.tried?.[3]).toBe("~/Resources/Shortcuts/cutex");
+  });
+
+  it("finds the managed install on a Windows host (no sh: cmd.exe probe)", async () => {
+    const exe = "C:\\Users\\sam\\AppData\\Local\\cutex\\bin\\cutex.exe";
+    const run = fakeSsh(exe, "", `found 6 ${exe}\r\n`);
+    const r = await issueTokenFindingCutex(run, "cutex", "desktop-HOST-A", toError);
+    expect(r).toMatchObject({ ok: true, cutexPath: exe });
+    expect(run.calls).toEqual([
+      "cutex management client-token issue --label desktop-HOST-A",
+      cutexDiscoveryCommand("cutex"),
+      cutexWindowsDiscoveryCommand(),
+      `${exe} management client-token issue --label desktop-HOST-A`,
+    ]);
+  });
+
+  it("reports the Windows places tried when the managed install is missing too", async () => {
+    const r = await issueTokenFindingCutex(fakeSsh("/nowhere", "", ""), "cutex", "x", toError);
+    expect(r).toMatchObject({ ok: false, error: { code: "cutexNotFound", tried: ["cutex", "%LOCALAPPDATA%\\cutex\\bin\\cutex.exe"] } });
+  });
+
+  it("also probes Windows when a Git sh answered the POSIX probe without a hit", async () => {
+    const exe = "C:\\Users\\sam\\AppData\\Local\\cutex\\bin\\cutex.exe";
+    const tried = [0, 1, 2, 3, 4, 5].map((i) => `try ${i}`).join("\n");
+    const run = fakeSsh(exe, tried);
+    run.calls.length = 0;
+    const r = await issueTokenFindingCutex(async (c) => (c.startsWith("cmd /d /c ") ? { code: 0, stdout: `found 6 ${exe}\r\n`, stderr: "" } : run(c)), "cutex", "x", toError);
+    expect(r).toMatchObject({ ok: true, cutexPath: exe });
+  });
+
+  it("the Windows probe is plain cmd syntax without PowerShell metacharacters", () => {
+    const command = cutexWindowsDiscoveryCommand();
+    expect(command).toBe('cmd /d /c if exist "%LOCALAPPDATA%\\cutex\\bin\\cutex.exe" echo found 6 %LOCALAPPDATA%\\cutex\\bin\\cutex.exe');
+    expect(command).not.toMatch(/[()&|;$`']/);
   });
 
   it("keeps the original error when the probe itself fails", async () => {

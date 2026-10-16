@@ -62,21 +62,61 @@ Claude 的「额度用完后自动继续」（Continue after usage limit）只�
 | 原因（zh-CN / en） | 含义与处理 |
 |---|---|
 | 「开发运行（electron + 源码目录）不会自我更新」（A dev run … does not update itself） | 从源码直接运行的开发版，本来就不自更新。 |
-| 「这份安装包没有可用的更新源…」（This package has no update source…） | 安装目录里没有 `src` 克隆。按 AGENT-INSTALL §7 重装成便携安装，或按 §9 手动更新。 |
-| 「需要先安装 git 才能自动更新」（Install git to enable automatic updates） | 本机没有 git。装 git 后点「重试」（Retry）。 |
+| 「这份安装包没有可用的更新源…」（This package has no update source…） | 不是 GitHub 发布包、安装目录里也没有 `src` 克隆（比如自己打的包）。改用发布包按 AGENT-INSTALL B.4 安装，或按 §7 重装成源码便携安装。 |
+| 「这是从发布包安装的版本。更新时请到 Releases 页面…」（Installed from a release package…） | 发布包不在 B.4 的 `releases/<版本>` + `current` 结构里（解压到别处、`Cutex.app` 拖进了「应用程序」等），不能替换自己。按 B.4 重新安装即可一键更新，或按 B.5 手动更新。B.4 结构里的发布包不会出现这条。 |
+| 「需要先安装 git 才能自动更新」（Install git to enable automatic updates） | 源码安装，本机没有 git。装 git 后点「重试」（Retry）。发布包安装不需要 git。 |
 | 「暂时连不上更新源…」（Can't reach the update source right now…） | 网络或更新源暂时不可达，会自动隔一段时间再试。 |
-| 「更新源上还没有这个通道的分支…」（The update source has no branch for this channel yet…） | 所选通道（正式版 = `release`）还没发布到更新源。等发布，或核对 `src` 的远端地址；不是故障。 |
-| 「这份安装不在 <目录>/releases/<版本> 结构下，或打包时没有记录版本信息」（This install is not in the <folder>/releases/<version> layout…） | 不是从 `<安装目录>/current` 启动的，或不是用安装脚本打的包。从 `current` 启动，或按 AGENT-INSTALL §7 重装。 |
+| 「更新源上还没有这个通道的分支…」（The update source has no branch for this channel yet…） | 源码安装：所选通道（正式版 = `release`）不在 `src` 的远端上。核对 `git -C <安装目录>/src remote -v` 是否指向公开仓库；不是故障。 |
+| 「这份安装不在 <目录>/releases/<版本> 结构下，或打包时没有记录版本信息」（This install is not in the <folder>/releases/<version> layout…） | 不是从 `<安装目录>/current` 启动的，或不是用安装脚本 / 发布流程打的包。从 `current` 启动，或按 AGENT-INSTALL B.4 / §7 重装。 |
 
 这些都不表示 daemon 停止工作，也不证明已经是最新版。不要手工伪造 release 元数据或擅自切换安装目录来消除提示。通道与手动更新见 [安装升级](install-upgrade.md#升级桌面端)。
 
-证据：desktop `apps/desktop/src/main/updater.ts`、`apps/desktop/src/shared/update.ts` 的 `UpdateUnsupportedCode`、`parseReleaseInfo` / `installLayout`；`modules/updater/i18n.ts` 的 `updater.updateCheck.unsupported`、`updater.unsupported.*`。
+证据：desktop `apps/desktop/src/main/updater.ts`（`releasePackage` / `noSource` 的判定）、`apps/desktop/src/shared/update.ts` 的 `UpdateUnsupportedCode`、`parseReleaseInfo` / `installLayout`；`modules/updater/i18n.ts` 的 `updater.updateCheck.unsupported`、`updater.unsupported.*`。
+
+## 组件安装卡片 / Claude agent 建不了 / 「作业」页空着
+
+**含义：**这个功能需要 cutex 的可选组件（Claude 运行时、Job Service），主机上还没装好。卡片上的文字说明是哪种情况：
+
+| 卡片（zh-CN / en 大意） | 处理 |
+|---|---|
+| 「{component} 还没有安装。点「安装」后…」 | 点「安装」（Install）。主机必须是托管安装、cutex 0.1.1 起。 |
+| 「…已安装，还需要你在主机上完成这些步骤」 | 按列出的步骤在**主机**上做（装 Python 3.11+、装 Claude Code CLI、登录 Claude、选定 Codex 运行时），再点「重新检查」（Check again）。代码与步骤见 [安装升级](install-upgrade.md#可选组件claude-运行时job-service)。 |
+| 「这台主机的 cutex 还不能安装可选组件。更新 cutex 后…」 | 那台主机的 cutex 早于 0.1.1，先在「主机后端更新」里更新它。 |
+| 「这台主机当前的 cutex 版本没有附带 {component}」 | `notInManifest`：先更新 cutex。 |
+| 「这台主机的 cutex 是手动部署的…」 | `unmanaged_install`：不是 `cutex service install` 装的，cutex 不替它装组件；按 AGENT-INSTALL 改成托管安装，或手动设置。 |
+| 「…只能在主机上用命令从源码安装…」 | 源码安装：复制卡片上的 `cutex component install <name> --from-source …` 在主机上运行。 |
+| 「{component} 不支持 Windows 主机」 | Job Service 只支持 Linux 主机。 |
+| 「…会在没有作业运行时自动重启生效」 | `restartPending`：新版本已就绪，正在跑的作业不会被打断，等它结束即可。 |
+| 「{component} 安装或更新失败」 / 「更新失败，仍在使用之前的版本」 | `degraded`：看卡片上的错误和 `cutex component status <name>`；Claude 运行时的安装日志在组件版本目录的 `prepared/install.log`。 |
+
+不要为了让卡片消失去手动复制文件、改 `deployment.json` 或删组件目录。NCI 远程作业在公开版本上仍不能用，装了 Job Service 也一样。
+
+证据：desktop `lib/componentCard.ts`、`lib/componentView.ts`、`modules/i18n.ts` 的 `modules.component.*`；cutex `components/README.md`、`src/components/claude_runtime.rs`、`src/components/job_service.rs`。
+
+## webhook 通知没有发出
+
+托管安装（cutex 0.1.1 起）由 Management 服务自带的通知 worker 发 webhook，不需要 `cutex notify run`。先看 `cutex service status` 的 `notificationWorker`（心跳、webhook 是否开启、投递计数）。cutex 0.1.0 的托管安装要等后端更新到 0.1.1 才有这个 worker；手动部署的主机仍要自己运行 `cutex notify run`。
+
+证据：cutex `docs/backend-upgrade.md`（Notifications）、`src/notify/outbound.rs`。
 
 ## 「需要升级」/ 功能不见了
 
 **含义：**所选主机的 cutex 缺少这个功能需要的能力，或者对应的桌面模块被关掉了。
 
 **处理：**先看提示：写着「需要升级」「需要 {feature}」的，是**那台主机的** cutex 太旧，按 [安装升级](install-upgrade.md#升级-cutex-与-cute-codex) 升级它；只更新桌面无效。没有任何提示、整个入口都没有的，到「设置」→「模块」（Modules）看对应模块是否开着。多台主机时先确认页面的主机选择器选的是哪台。详见 [主机与用户](hosts-users.md#需要升级)、[设置与默认值](settings-defaults.md#模块的开关)。
+
+## NCI 远程作业：Gadi 核对报错
+
+NCI 远程作业在公开版本上还不能用时（`docs/install/ANU.md` 顶部的说明），先如实告诉用户。能用的版本里，「设置」→「工具」→「NCI 远程作业」第 ⑥ 步显示原因（来自 `GET /v2/nci-verification` 的 `errorCode`）：
+
+- `qstat_ssh_auth_failed`（Gadi 拒绝了这把密钥）→ 检查 Gadi 上 `~/.ssh/authorized_keys` 里 `cutex-qstat` 那一行是否完整、单独一行；`chmod 600 ~/.ssh/authorized_keys`。
+- `qstat_host_key_mismatch` → 重新用 NCI 官方渠道核对指纹，更新第 ③ 步；不要为了“先跑通”随便接受新指纹。
+- `qstat_helper_missing` / `qstat_helper_refused` → `command="…"` 里的 home 路径不对，或小脚本不是页面给的那份（对 SHA-256）。
+- `qstat_ssh_connect_failed` → 网络 / DNS / 超时，会自动重试；`qstat_ssh_missing` → 主机装 OpenSSH 客户端。
+- `qstat_job_unknown` → PBS 查不到这个作业（作业号错或历史已过期）：在「作业」页手动标记结果。
+- 邮箱是可选的；不配邮箱时按间隔核对（默认 6 小时）。邮箱必须直接收 `pbs.gadi@nci.org.au` 的信，不能转发；ANU / Microsoft 365 邮箱不能用应用专用密码登录 IMAP。
+
+证据：cutex `docs/NCI-REMOTE-JOBS.md`；desktop `modules/nci/i18n.ts` 的 `nci.code.*`。
 
 ## 需要进一步报告时
 

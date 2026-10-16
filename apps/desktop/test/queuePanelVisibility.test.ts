@@ -9,6 +9,8 @@ vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), brid
 vi.mock("../src/renderer/src/store", () => ({ useApp: Object.assign(() => false, { getState: () => ({}) }), selectedFeatures: () => new Set(), agentHost: () => "local", queueItemText: (item: QueueItem) => (item.input as { text: string }[]).map((p) => p.text).join("") }));
 import { QueuePanel } from "../src/renderer/src/components/QueuePanel";
 import { newOutboxEntry, failOutbox } from "../src/renderer/src/lib/outbox";
+import { DEFAULT_QUEUE_PANEL_FOLD, migrateQueuePanelFold, queueAutoCompact } from "../src/renderer/src/lib/queueChips";
+import { resetQueueViewCache, setQueueView } from "../src/renderer/src/lib/queueView";
 
 const at = "2026-10-12T00:00:00Z";
 const queued = (queueId: string): QueueItem => ({ queueId, clientUserMessageId: `cm-${queueId}`, origin: { kind: "other", clientId: "desktop" } as never, input: [{ type: "text", text: `msg-${queueId}` }], position: 0, revision: 1, state: "queued", createdAt: at, updatedAt: at });
@@ -61,5 +63,43 @@ describe("queue card: auto-compact", () => {
     expect(html).not.toContain('data-compact="true"');
     expect(html).toContain('data-testid="outbox-failed"');
     expect(html).toContain("outbox.retry");
+  });
+});
+
+describe("queue card: 「接下来」面板 setting", () => {
+  const twoKinds: Extra = { items: [queued("A")], sendingSteers: [steer] };
+  const panel = (fold: "open" | "auto", short: boolean, sessionId: string) => render({ ...twoKinds, sessionId, autoCompact: queueAutoCompact(fold, short) });
+
+  it("defaults to 始终展开; anything but \"auto\" reads as it", () => {
+    expect(DEFAULT_QUEUE_PANEL_FOLD).toBe("open");
+    expect(migrateQueuePanelFold(undefined)).toBe("open");
+    expect(migrateQueuePanelFold("bogus")).toBe("open");
+    expect(migrateQueuePanelFold("auto")).toBe("auto");
+  });
+  it("始终展开: several kinds waiting, even in a short window, stay expanded", () => {
+    expect(queueAutoCompact("open", true)).toBeUndefined();
+    const html = panel("open", true, "agent-f1");
+    expect(html).not.toContain('data-compact="true"');
+    expect(html).not.toContain("data-collapsed");
+    expect(html).toContain("msg-A");
+    expect(html).toContain("steer me");
+  });
+  it("自动折叠: several kinds start compact; one kind in a short window with two rows too", () => {
+    expect(panel("auto", false, "agent-f2")).toContain('data-compact="true"');
+    const oneKind = render({ items: [queued("A"), queued("B")], sessionId: "agent-f3", autoCompact: queueAutoCompact("auto", true) });
+    expect(oneKind).toContain('data-compact="true"');
+    const tall = render({ items: [queued("A"), queued("B")], sessionId: "agent-f3", autoCompact: queueAutoCompact("auto", false) });
+    expect(tall).not.toContain('data-compact="true"');
+  });
+  it("a manual collapse (chevron, per agent) still holds under both settings", () => {
+    resetQueueViewCache();
+    setQueueView("agent-f4", { collapsed: true });
+    for (const fold of ["open", "auto"] as const) {
+      const html = panel(fold, false, "agent-f4");
+      expect(html).toContain('data-collapsed="true"');
+      expect(html).not.toContain("msg-A");
+    }
+    setQueueView("agent-f4", { collapsed: false });
+    expect(panel("open", false, "agent-f4")).not.toContain("data-collapsed");
   });
 });

@@ -58,6 +58,7 @@ import { TimelineViewContext, useTimelineContext, useTimelineView } from "../mod
 import { toolRendererFor } from "../lib/timelineRenderers";
 import { ScriptText } from "./ScriptText";
 import { turnErrorPlacement } from "../lib/turnErrors";
+import { retryNoticeText } from "../lib/retryNotice";
 import { useActingUser } from "../lib/actingUsers";
 import { identityInitials } from "../lib/identity";
 import { useUserAvatar } from "../lib/userAvatars";
@@ -124,13 +125,15 @@ function TurnTail({ timeline, sessionId }: { timeline: TimelineState; sessionId:
   // When the turn last showed progress (lib/silentGap): a mark change restarts the quiet clock.
   const progress = useRef<{ mark: string | null; at: number } | null>(null);
   progress.current = nextProgressAt(progress.current, turnProgressMark(timeline), now);
-  const silent = silentGapSeconds(typeof activity === "string" ? activity : null, progress.current.at, now);
+  // A retrying request says why it is quiet (RetryNoticeLine): no "still working" guess on top.
+  const silent = turn?.retry ? null : silentGapSeconds(typeof activity === "string" ? activity : null, progress.current.at, now);
   if (!turn?.startedAt || !activity) return null;
   const waiting = activity === "approval" || activity === "question";
   const preview = activity === "reasoning" && reasoningView !== "expanded" ? reasoningPreview(liveReasoning(timeline)) : null;
   // A turn a delegation started: whose delegation this is.
   const handling = activeDelegationAsk(timeline);
   return (
+    <>
     <div className="mt-1.5 flex h-4 min-w-0 items-center gap-2 text-xs text-subtle">
       <BusyDots className="shrink-0" />
       <span className="shrink-0 tabular-nums">{formatDuration(now / 1000 - turn.startedAt)}</span>
@@ -155,6 +158,20 @@ function TurnTail({ timeline, sessionId }: { timeline: TimelineState; sessionId:
           </span>
         </>
       )}
+    </div>
+    {turn.retry && <RetryNoticeLine text={retryNoticeText(turn.retry, t)} />}
+    </>
+  );
+}
+
+/** Native is retrying the model request (lib/retryNotice): a quiet warning under the live line, gone
+ *  with the next output or the turn's end. */
+function RetryNoticeLine({ text }: { text: string }) {
+  const { t } = useI18n();
+  return (
+    <div role="status" data-testid="turn-retry-notice" title={t("turn.retry.hint")} className="mt-1 flex h-4 min-w-0 items-center gap-1.5 text-xs text-warn">
+      <AlertTriangle size={12} className="shrink-0" />
+      <span className="min-w-0 truncate">{text}</span>
     </div>
   );
 }

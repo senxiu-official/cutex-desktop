@@ -9,6 +9,12 @@ export interface ModuleRequires {
   hostKinds?: readonly HostKind[];
   /** v1.5: only the focus host counts (default: any connected host satisfying the requirements activates the module). */
   focusHost?: boolean;
+  /**
+   * v1.15: an optional cutex component (spec name, e.g. "job-service") this module's pages need. The
+   * module still activates on its capabilities; the app renders a component card instead of a page
+   * body while the target host's component is not ready / external. The engine does not gate on it.
+   */
+  component?: string;
 }
 export interface SlotItemBase {
   id: ItemId;

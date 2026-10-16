@@ -1,4 +1,9 @@
-# 桌面插槽与模块约定（v1.14）
+# 桌面插槽与模块约定（v1.15）
+
+> **公开仓库说明 / Public repository note.** 本文是维护者开发时的设计记录，保留原样。文中引用的内部笔记和工作副本
+> （`docs/research/…`、`docs/reviews/…`、`docs/handoff/…`、`TODO.md`、`PROGRESS.md`、`PLAN.md`、`upstream/…`、
+> `refs/…`、`.claude/…`）不随本仓库发布，只作历史记录，不是链接。文中的「主人」指项目维护者。This is a maintainers'
+> design record; the internal notes it cites are not published with this repository.
 
 迁移变更日志（2026-10-09，`gpt/merge-20261009`）：中立源码 SDK/host 替换宿主引擎，原 v1 插槽/生命周期/偏好保持；v1.1 新增动态 `addModules` / `removeModule`（§15），用于隔离外部插件。API 版本与声明快照随实现提交。
 
@@ -51,6 +56,10 @@ v1.14（2026-10-15，`feat/codeblock-run`；主人 2026-10-09「shell 代码块�
 `timeline.codeBlockAction`（A 档，`unavailable: "hide"`，§22）——模块在 agent 回复里的围栏代码块工具条（复制 / 下载旁）
 放一个动作；宿主只给 `{ language, hostId, platform }` 让条目纯函数地决定接不接、再给代码文本。只在 agent 回复里、不在
 只读时间线（归档 / 子 agent 视图）里。第一个贡献者：`terminal` 的 ▶ 运行（`terminal.runCode`）。
+v1.15（2026-10-16，`feat/components-card`；可选组件规格 v2 §5，主人 2026-10-16 确认）：`ModuleRequires.component?: string`——
+模块页面需要的 cutex **可选组件**（`job-service`、`claude-runtime`）。模块照旧按能力激活；它的 `main.page` 在目标主机的组件
+不是 `ready` / `external` 时显示通用的组件卡片（安装 / 更新 cutex / 手动设置指南 / 源码命令 / 找主机主人 …），不显示页面主体（§12.1）。
+引擎不看这个字段。第一个使用者：`jobs`（`component: "job-service"`）。
 
 决定：主人，2026-10-09（总纲 `docs/DESIGN.md` §4.22）。读者：主线开发；GPT（按本文实现宿主包，见
 `docs/research/kutex-brief-for-gpt.md` §3 A；下称 brief）。本文是约定，改格式先改本文。行号 = 2026-10-09 `main`，
@@ -84,6 +93,8 @@ export interface ModuleRequires {
   capabilities?: readonly string[];  // 活动主机 /v2/capabilities featureList 须全部包含
   modules?: readonly ModuleId[];     // 须为 active；决定激活顺序，依赖停 → 本模块停
   hostKinds?: readonly HostKind[];   // 省略 = 任意
+  focusHost?: boolean;               // v1.5：只看焦点主机（§4）
+  component?: string;                // v1.15：页面需要的 cutex 可选组件名（kebab-case，同 cutex components/<name>）；不参与激活，见 §12.1
 }
 export interface ModuleDefinition {
   id: ModuleId;
@@ -343,7 +354,8 @@ export const SLOT_SPECS: { readonly [S in SlotId]: SlotSpec } = { /* nav.primary
 ### 3.4 初始模块划分（建议）
 
 - 锁定：`shell`（应用组设置页含 模块 页、overlay、核心快捷键）、`conversation`（时间线兜底、composer 核心、复制 / 引用 /
-  折叠）、`connection`（主机页、主机切换）、`agent-config`（Profiles / 新建默认 / 指令 / 协作）。
+  折叠）、`connection`（主机页、主机切换）、`agent-config`（Profiles / 新建默认 / 指令 / 协作）、`about`（2026-10-16：设置 → 关于
+  页上的许可证、项目链接和已知问题两个 `settings.section`；列表镜像 `docs/KNOWN-ISSUES.md`，纯静态，无 daemon 数据）。
 - 可关（括号里是 `requires.capabilities`；「条目级」= 只门控部分条目）：`projects`、`quick-chats`
   （`human-create-session`）、`delegations`（`agent-asks`）、`jobs`（`job-service`；导航 `unavailable: "hide"`，只有 Linux
   主机有）、`approvals`（`owner-approvals`）、`owner-notify`（`owner-messages`）、`agent-messages`（`agent-messages-v2`）、
@@ -829,6 +841,38 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
 - 服务自带界面：以后定。候选：(a) 声明式描述（列表 / 表单）由一个通用内置模块渲染；(b) 走 §10 的隔离 frame 宿主。
 - 一个功能 = Codex 插件（agent 侧）+ 服务插件（后台）+ 桌面模块（界面），各自安装、各自升级，靠能力名对上
   （`docs/research/remote-jobs-plugin-brief.md` 的 A / B 两层）。
+- v1.15 修正（可选组件规格 v2）：桌面端可以**请求** cutex 安装 / 移除一个可选组件（`POST /v2/components/{name}/install|remove`，
+  空 body）；下载、校验签名、准备、选用、启动、重启都由 cutex 做。桌面端从不自己下载、启动组件，也不碰主机上的文件。
+
+### 12.1 可选组件卡片（v1.15）
+
+- 数据：`GET /v2/components`（能力 `components`，仅主机主人，在 `shared/users.ts` `OWNER_ONLY_CAPABILITIES`）、
+  `POST /v2/components/{name}/install|remove`（202 `{operation}`，拒绝按值返回）、主机事件 `cutex/components/updated`（收到就重读）。
+  类型与读取器在 `@cutex-desktop/cutex-client` `components.ts`，`shared/components.ts` 转出；主进程 `daemon.ts` 转发，preload 同一桥。
+  渲染端 `lib/componentStore.ts`（每台主机内存状态，卡片挂载时才读、安装进行中慢速轮询兜底）。
+- 出口：`modules/Outlet.tsx` `MainOutlet`——打开的页面属于有 `requires.component` 的模块时，用 `components/ComponentCard.tsx`
+  `ComponentGate` 包住页面，目标主机 = 焦点主机。状态由纯函数 `lib/componentCard.ts` `componentCardState` 决定（`test/componentCard.test.ts`）：
+  未连接 → 页面（页面自己显示离线）；能力未加载 / 首次读取中 → 空；非主人连接 → 「请主机主人安装」；
+  没有 `components` 能力 → 「更新 cutex」（按钮打开 设置 → 主机后端更新，并把设置主机切到这台），Linux 专用组件在 Windows 主机上 →
+  「不支持 Windows」（桌面端自带的小表 `KNOWN_COMPONENT_PLATFORMS`；有能力时以 cutex 的 `supported` 为准）；
+  `ready` / `external` → 页面；安装进行中 → 进度（`operation.step`）；`needsUser` → 步骤（`steps` 或 `detail.steps`）；
+  `restartPending` → 页面上方的横幅（旧版本还在跑，作业要看得见）；`managed: false` 或 `installFrom: none` → 「手动设置，见指南」（组件 README）；
+  `installFrom: source-only` → CLI 命令 `cutex component install <name> --from-source <dir>`；`degraded` → 错误 + 重试（仍有选用版本时为横幅）；
+  `notInManifest` → 「这个 cutex 版本没带，更新 cutex」；`missing` → 「安装」按钮 → 进度 → 结果；不认识的状态 → 原样显示 + 重新检查。
+- 旧主机（没有 `components` 但有模块能力，例如手动部署了 Job Service 的旧 cutex）：「更新 cutex」卡片另有「仍然打开这一页」（本次运行内记住）。
+- 卡片文字按组件名取 i18n（`modules.component.<name>.name|what`），未知组件用通用文字。
+- 只有 `main.page` 走整页卡片。`jobs` 的状态项（胶囊、输入栏）和作业轮询另外跟随组件：`lib/componentCard` `componentUsable`
+  （没有 `components` 能力 = 旧 cutex，照旧；`ready` / `external` / `restartPending` / 仍有选用版本的 `degraded` = 可用；列表未读 = 暂不可用），
+  `lib/jobsView` `useJobsEnabled`、`lib/jobStore` 的 `supported()`、作业页的其他主机都看它——组件缺失时什么都不显示、不调用 Job Service。
+- 紧凑形式 `ComponentNotice`（2026-10-16，`feat/components-claude`）：用到组件但不是它的页面的地方——Claude 运行时（`claude-runtime`）出现在
+  设置 → Profile 的新建表单（类型选 Claude 时）、Claude Profile 详情顶部、Claude 账户分区顶部、新建智能体选了 Claude Profile 时。可用或主机说不清
+  （没有 `components`）时不显示；其他状态同卡片的一行 + 同样的操作（安装、重新检查、指南、命令…）。只挡做不成的事：新建智能体在
+  `componentBlocks`（missing / installing / needsUser / unmanaged / source-only / notInManifest / 不支持的平台 / 没有可用版本的 degraded）时禁用「创建」，
+  并说明原因；查看、建 Profile 不挡。
+- 线上形状（与 cutex 约定，2026-10-16）：POST 202 `{operation: {id, name, action: install|remove, state: running|done|failed, step, error}}`，body `{}`；
+  事件 `cutex/components/updated` 带 `{name, reason: operation|state|startup, state, operation|null}`；`needsUser` 组件带顶层 `steps: string[]`；
+  拒绝码 `unmanaged_install`、`component_unsupported_platform`、`component_external`、`upgrade_blocked`、`component_pinned`、`jobs_running`
+  各有一句中英文说明（`modules.component.refusal.<code>`），其余显示 cutex 原文。
 
 ## 13. 已定的默认（2026-10-09，主人可改）
 
@@ -983,11 +1027,16 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   第一个贡献者 `terminal.runCode`（▶ 运行：按主机系统挑标签、多行两步确认、复用 / 新开工作区终端）。声明快照
   `module-api-1.14.d.ts`（SDK 中立类型仅版本常量变化）；`test/moduleSdkContract.test.ts` 有正反例，`test/modules.test.ts` 钉住插槽快照，
   `test/codeBlockRun.test.ts` 覆盖标签 / 主机匹配与单行 / 多行确认。
+- 2026-10-16 v1.15（§12.1，`feat/components-card`；可选组件规格 v2 §5）：`MODULE_API_VERSION` 1.14 → 1.15。`ModuleRequires` 加
+  `component?: string`（引擎不看它，只由 app 的 `MainOutlet` 用来显示组件卡片）。§12 修正：桌面端可以请求 cutex 安装组件，自己从不
+  下载、启动或碰文件。新增 `GET /v2/components`、`POST /v2/components/{name}/install|remove`、事件 `cutex/components/updated` 的客户端；
+  `components` 进 `OWNER_ONLY_CAPABILITIES`。`jobs` 用 `component: "job-service"`。声明快照 `module-api-1.15.d.ts`（只多了 `component` 与版本常量）；
+  `test/moduleSdkContract.test.ts` 有编译探针，`test/componentCard.test.ts` / `test/componentStore.test.ts` / `packages/cutex-client/test/components.test.ts` 覆盖状态与客户端。
 
 ## 15. 动态模块登记（v1.1，稳定基线后迁移）
 
-唯一引擎为 `@cutex-desktop/plugin-host`；共享类型来自 `@cutex-desktop/plugin-sdk`，`MODULE_API_VERSION = "1.14"`（v1.2 – v1.4、v1.6 – v1.14 只改 app 层插槽，见 §16 – §22、§18.3、§18.13、§18.14、§19.3、§19.6；
-SDK / 引擎的类型除版本常量外不变；v1.5 加多主机输入与 `ctx.hosts`，见 §4、§6）。
+唯一引擎为 `@cutex-desktop/plugin-host`；共享类型来自 `@cutex-desktop/plugin-sdk`，`MODULE_API_VERSION = "1.15"`（v1.2 – v1.4、v1.6 – v1.14 只改 app 层插槽，见 §16 – §22、§18.3、§18.13、§18.14、§19.3、§19.6；
+SDK / 引擎的类型除版本常量外不变；v1.5 加多主机输入与 `ctx.hosts`，见 §4、§6；v1.15 加 `ModuleRequires.component`，引擎不看它，见 §12.1）。
 原有内置模块定义、插槽形状、prefs key、主机和 agent 门控保持 v1 行为。
 
 - `addModules(definitions): Promise<void>`：先校验整批 id、与现有定义的重复及合并后的依赖环；失败时整个批次不登记。

@@ -11,10 +11,27 @@ export const CREATE_ROOT_FEATURE = "project-create-workspace-root";
 
 export const PROJECT_PALETTE = ["cyan", "blue", "green", "magenta", "yellow", "red"] as const;
 
-/** cutex project ids: lowercase ascii, digits and dashes. */
+/**
+ * cutex project ids: lowercase ascii, digits and dashes. Letters outside ASCII (Chinese, accents…)
+ * cannot be kept, so a name with any of them gets a short hash of the whole name: 「ABC中文一」 and
+ * 「ABC中文二」 no longer both become `abc`. Deterministic, so the same name maps to the same id on every
+ * host (sameProjectElsewhere); pure-ASCII names keep their plain slug.
+ */
 export function slugifyProjectId(name: string): string {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
-  return slug || `project-${Math.random().toString(36).slice(2, 8)}`;
+  const full = name.trim().normalize("NFC").toLowerCase();
+  const slug = full.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "");
+  if (!/[^\x00-\x7f]/.test(full)) return slug || `project-${nameHash(full)}`;
+  return `${slug || "project"}-${nameHash(full)}`;
+}
+
+/** FNV-1a (32 bit) of the name's UTF-16 code units, base 36. */
+function nameHash(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36);
 }
 
 /** Badge shown when the user typed none: the first two characters of the name. */

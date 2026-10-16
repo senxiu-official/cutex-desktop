@@ -24,15 +24,19 @@ export function permissionModeOfLaunch(sandbox: string, approval: string): Permi
   return "custom";
 }
 
-/** `thread/settings/update` patch for a mode. */
-export function permissionPatch(mode: Exclude<PermissionMode, "custom">): Record<string, unknown> {
+/**
+ * `thread/settings/update` patch for a mode. `current`: the thread's live settings — switching to
+ * "auto" keeps the extra writable directories it already has (the patch sends the whole sandbox
+ * policy, so an empty list would revoke them and bring their approvals back).
+ */
+export function permissionPatch(mode: Exclude<PermissionMode, "custom">, current?: ThreadSettingsView | null): Record<string, unknown> {
   switch (mode) {
     case "full":
       return { approvalPolicy: "never", sandboxPolicy: { type: "dangerFullAccess" } };
     case "auto":
       return {
         approvalPolicy: "on-request",
-        sandboxPolicy: { type: "workspaceWrite", writableRoots: [], networkAccess: true, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
+        sandboxPolicy: { type: "workspaceWrite", writableRoots: writableRootsOf(current), networkAccess: true, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
       };
     case "readOnly":
       return { approvalPolicy: "on-request", sandboxPolicy: { type: "readOnly", networkAccess: false } };
@@ -45,3 +49,10 @@ export const LAUNCH_FOR_MODE: Record<Exclude<PermissionMode, "custom">, { sandbo
   auto: { sandbox: "workspace-write", approvalPolicy: "on-request" },
   readOnly: { sandbox: "read-only", approvalPolicy: "on-request" },
 };
+
+/** Extra writable directories of a workspace-write sandbox policy (none for any other policy). */
+function writableRootsOf(settings: ThreadSettingsView | null | undefined): string[] {
+  const policy = settings?.sandboxPolicy as { type?: string; writableRoots?: unknown } | null | undefined;
+  if (policy?.type !== "workspaceWrite" || !Array.isArray(policy.writableRoots)) return [];
+  return policy.writableRoots.filter((root): root is string => typeof root === "string" && root.length > 0);
+}

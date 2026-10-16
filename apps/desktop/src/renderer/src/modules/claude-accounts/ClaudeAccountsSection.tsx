@@ -6,6 +6,8 @@
 // credential (docs/research/claude-multi-account.md decision 2), and nothing here moves agents or
 // profiles between accounts (decision 8). The add flow and the guides are AccountFlow.tsx.
 import { useState } from "react";
+import { ComponentNotice } from "../../components/ComponentCard";
+import { CLAUDE_RUNTIME_COMPONENT } from "../../lib/componentCard";
 import { ChevronDown, ChevronRight, ChevronUp, KeyRound, Pencil, UserRound } from "lucide-react";
 import { claudeAccountLabel, type ClaudeAccount, type ClaudeAccountKind, type ClaudeAccountQuota } from "../../../../shared/claudeAccounts";
 import type { CutexRefusal } from "../../../../shared/ipc";
@@ -35,7 +37,7 @@ const TAG = "inline-flex h-4 shrink-0 items-center rounded px-1 text-[10px] whit
 export function ClaudeAccountsSection() {
   // Keyed by host: switching hosts starts over (no late reply from the previous host lands here).
   const hostId = useTargetHostId();
-  return <AccountsSection key={hostId} />;
+  return <AccountsSection key={hostId} hostId={hostId} />;
 }
 
 // Collapsed by default (owner 2026-10-10); the choice is this viewer's convenience, kept in localStorage.
@@ -55,7 +57,7 @@ function writeOpen(open: boolean): void {
   }
 }
 
-function AccountsSection() {
+function AccountsSection({ hostId }: { hostId: string }) {
   const { t } = useI18n();
   const data = useClaudeAccounts();
   const titleOf = useAccountTitle();
@@ -90,6 +92,8 @@ function AccountsSection() {
         </>
       }
     >
+      {/* Claude agents need the claude-runtime component on this host (components spec v2 §5). */}
+      <ComponentNotice name={CLAUDE_RUNTIME_COMPONENT} hostId={hostId} className="mb-2" />
       {!open && (
         <button type="button" aria-expanded={false} onClick={() => toggle(true)} className="flex w-full min-w-0 items-center gap-2 py-2.5 text-left text-sm hover:text-foreground">
           <ChevronRight size={14} className="shrink-0 text-subtle" />
