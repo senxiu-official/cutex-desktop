@@ -1,14 +1,14 @@
 # Known issues
 
-Known issues in **desktop 0.1.3** with **cutex 0.1.2**. The app shows the same list under
+Known issues in **desktop 0.1.3** with **cutex 0.1.3**. The app shows the same list under
 Settings → About → Known issues from [known-issues.json](known-issues.json) (schema in
 `apps/desktop/src/shared/knownIssues.ts`): its built-in copy, and the copy on the `release` branch,
 which it fetches — so a docs push to `release` updates the list in installed apps. Change this file
 and the JSON together (same entries, order, titles and planned fixes; a test checks them).
 
 Each entry: what you see, a workaround if there is one, and the version that is planned to fix it.
-Entries titled "cutex 0.1.1 hosts" apply only while a host still runs cutex 0.1.1; the app hides them for
-a host on cutex 0.1.2 (`appliesTo` in the JSON).
+Entries titled "cutex 0.1.1 hosts" apply only while a host still runs cutex 0.1.1, "hosts before cutex 0.1.3"
+only while it runs 0.1.2 or older; the app hides them for a host on a fixed version (`appliesTo` in the JSON).
 
 ## Phone push / pairing a phone
 
@@ -41,15 +41,18 @@ check requires its own private permissions.
   not the contents).
 - Planned fix: cutex 0.1.2.
 
-## Windows: after the sandbox is set up, commands fail with Store PowerShell
+## Windows (hosts before cutex 0.1.3): after the sandbox is set up, commands fail with Store PowerShell
 
 On a Windows host where PowerShell is the Microsoft Store version, after "Set up sandbox (no
 administrator)" (设置沙箱（无需管理员）) every command an agent runs fails with exit -1: the restricted
-sandbox process cannot start a Store app.
+sandbox process cannot start a Store app. cutex 0.1.3 brings the native runtime cute-codex
+0.160.0-r52.3, which uses an installed PowerShell or Windows PowerShell instead.
 
-- Workaround: install PowerShell on that host with winget (`winget install Microsoft.PowerShell`) or
-  the MSI installer, then restart the agent; or leave the sandbox unset for now.
-- Planned fix: cute-codex 0.160.0-r52.3 (the next native runtime).
+- Workaround: update that host to cutex 0.1.3 (Settings → Host backend updates), then restart the agent
+  (idle agents move to the new runtime by themselves). Until then, install PowerShell on that host with
+  winget (`winget install Microsoft.PowerShell`) or the MSI installer, then restart the agent; or leave
+  the sandbox unset for now.
+- Planned fix: cutex 0.1.3 (native runtime cute-codex 0.160.0-r52.3).
 
 ## Job Service and NCI remote jobs need a Linux host
 

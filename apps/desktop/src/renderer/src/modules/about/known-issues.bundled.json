@@ -61,21 +61,24 @@
     {
       "id": "winStorePowerShell",
       "title": {
-        "zh-CN": "Windows：设置沙箱后，商店版 PowerShell 的命令都失败",
-        "zh-Hant-CN": "Windows：設置沙箱後，商店版 PowerShell 的命令都失敗",
-        "en": "Windows: after the sandbox is set up, commands fail with Store PowerShell"
+        "zh-CN": "Windows（cutex 0.1.3 之前的主机）：设置沙箱后，商店版 PowerShell 的命令都失败",
+        "zh-Hant-CN": "Windows（cutex 0.1.3 之前的主機）：設置沙箱後，商店版 PowerShell 的命令都失敗",
+        "en": "Windows (hosts before cutex 0.1.3): after the sandbox is set up, commands fail with Store PowerShell"
       },
       "body": {
-        "zh-CN": "在 Windows 主机上点了「设置沙箱（无需管理员）」之后，如果那台机器的 PowerShell 是 Microsoft Store 版，{{agent}}运行的每条命令都以 exit -1 失败：受限的沙箱进程不能启动商店应用。",
-        "zh-Hant-CN": "在 Windows 主機上點了「設置沙箱（無需管理員）」之後，如果那臺機器的 PowerShell 是 Microsoft Store 版，{{agent}}運行的每條命令都以 exit -1 失敗：受限的沙箱進程不能啓動商店應用。",
-        "en": "On a Windows host where PowerShell is the Microsoft Store version, after “Set up sandbox (no administrator)” every command {{an agent}} runs fails with exit -1: the restricted sandbox process cannot start a Store app."
+        "zh-CN": "在 Windows 主机上点了「设置沙箱（无需管理员）」之后，如果那台机器的 PowerShell 是 Microsoft Store 版，{{agent}}运行的每条命令都以 exit -1 失败：受限的沙箱进程不能启动商店应用。cutex 0.1.3 带来原生运行时 cute-codex 0.160.0-r52.3，它会改用已安装的 PowerShell 或 Windows PowerShell。",
+        "zh-Hant-CN": "在 Windows 主機上點了「設置沙箱（無需管理員）」之後，如果那臺機器的 PowerShell 是 Microsoft Store 版，{{agent}}運行的每條命令都以 exit -1 失敗：受限的沙箱進程不能啓動商店應用。cutex 0.1.3 帶來原生運行時 cute-codex 0.160.0-r52.3，它會改用已安裝的 PowerShell 或 Windows PowerShell。",
+        "en": "On a Windows host where PowerShell is the Microsoft Store version, after “Set up sandbox (no administrator)” every command {{an agent}} runs fails with exit -1: the restricted sandbox process cannot start a Store app. cutex 0.1.3 brings the native runtime cute-codex 0.160.0-r52.3, which uses an installed PowerShell or Windows PowerShell instead."
       },
       "workaround": {
-        "zh-CN": "在那台主机上用 winget（winget install Microsoft.PowerShell）或 MSI 安装包安装 PowerShell，之后重启{{agent}}；或者先不设置沙箱。",
-        "zh-Hant-CN": "在那臺主機上用 winget（winget install Microsoft.PowerShell）或 MSI 安裝包安裝 PowerShell，之後重啓{{agent}}；或者先不設置沙箱。",
-        "en": "Install PowerShell on that host with winget (winget install Microsoft.PowerShell) or the MSI installer, then restart the {{agent}}; or leave the sandbox unset for now."
+        "zh-CN": "在「设置 → 主机后端更新」里把那台主机更新到 cutex 0.1.3，然后重启{{agent}}（空闲的{{agents}}会自动换到新的运行时）。在那之前，在那台主机上用 winget（winget install Microsoft.PowerShell）或 MSI 安装包安装 PowerShell，之后重启{{agent}}；或者先不设置沙箱。",
+        "zh-Hant-CN": "在「設置 → 主機後端更新」裏把那臺主機更新到 cutex 0.1.3，然後重啓{{agent}}（空閒的{{agents}}會自動換到新的運行時）。在那之前，在那臺主機上用 winget（winget install Microsoft.PowerShell）或 MSI 安裝包安裝 PowerShell，之後重啓{{agent}}；或者先不設置沙箱。",
+        "en": "Update that host to cutex 0.1.3 (Settings → Host backend updates), then restart the {{agent}} (idle {{agents}} move to the new runtime by themselves). Until then, install PowerShell on that host with winget (winget install Microsoft.PowerShell) or the MSI installer, then restart the {{agent}}; or leave the sandbox unset for now."
       },
-      "fixedIn": "cute-codex 0.160.0-r52.3"
+      "fixedIn": "cutex 0.1.3",
+      "appliesTo": {
+        "cutex": "<0.1.3"
+      }
     },
     {
       "id": "jobsLinux",

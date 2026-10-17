@@ -8,13 +8,14 @@
 
 **0.1.3**: an in-app browser you can work in (HTTPS, LAN addresses you type, sharing a tab with an
 agent, downloads and site permissions), 自动 (Auto) decided by Codex's automatic reviewer, one-click
-Windows sandbox setup and copying a Profile to another host; pairs with cutex 0.1.2 (0.1.0 "First
+Windows sandbox setup and copying a Profile to another host; pairs with cutex 0.1.3 (0.1.0 "First
 Take" was the first public release). See [CHANGELOG.md](CHANGELOG.md).
 
 > **Known issues**: see [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) (also in the app: Settings → About).
 > The most important ones:
-> - **Windows sandbox with Microsoft Store PowerShell**: after "Set up sandbox", every command fails
->   with exit -1; install PowerShell with winget or the MSI installer, or leave the sandbox unset.
+> - **Windows sandbox with Microsoft Store PowerShell** (hosts before cutex 0.1.3): after "Set up
+>   sandbox", every command fails with exit -1; update the host to cutex 0.1.3 (Settings → Host backend
+>   updates), then restart the agent.
 > - **Phone push / pairing a phone**: there is no public phone app yet.
 >
 > Claude agents and the Jobs page need optional cutex components (the Claude runtime; the Job
