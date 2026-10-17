@@ -840,11 +840,10 @@ body {
 
 /* ── Timeline intro (v1.12 timeline.intro, docs/desktop-modules.md §19.3) ─────────────────────── */
 /* The session's opening above its first turn: portrait (custom → provider artwork) over the
-   greeting, centred like the launcher's entrance. Its own inline-size container drives the narrow
-   behaviour: the portrait shrinks with the reading column and drops out below ~21rem. */
-.timeline-intro {
-  container: timeline-intro / inline-size;
-}
+   greeting, centred like the launcher's entrance. Its own width drives the narrow behaviour: the
+   portrait shrinks with the reading column and drops out below ~21rem. No CSS size container
+   (lib/sizeFlags): TimelineIntro sets data-compact (≤ 30rem), data-tiny (≤ 21rem) and --cqw (1 % of
+   its width) from a ResizeObserver; the var() fallbacks only cover the first frame. */
 .timeline-intro-block {
   display: flex;
   flex-direction: column;
@@ -857,7 +856,7 @@ body {
   display: flex;
   justify-content: center;
   width: 100%;
-  height: clamp(8.5rem, 34cqw, 14rem);
+  height: clamp(8.5rem, calc(34 * var(--cqw, 1vw)), 14rem);
   overflow: hidden;
   /* The shared lower fade: the figure dissolves into the turns below it. */
   mask-image: linear-gradient(to bottom, #000 calc(100% - 2.25rem), transparent 100%);
@@ -865,7 +864,7 @@ body {
 .timeline-intro-figure img {
   height: 100%;
   width: auto;
-  max-width: min(62cqw, 24rem);
+  max-width: min(calc(62 * var(--cqw, 1vw)), 24rem);
   object-fit: contain;
   object-position: center bottom;
 }
@@ -874,22 +873,18 @@ body {
   filter: grayscale(1);
 }
 .timeline-intro-greeting {
-  max-width: min(88cqw, 40rem);
-  font-size: clamp(1rem, 2.3cqw, 1.2rem);
+  max-width: min(calc(88 * var(--cqw, 1vw)), 40rem);
+  font-size: clamp(1rem, calc(2.3 * var(--cqw, 1vw)), 1.2rem);
   line-height: 1.55;
   color: var(--fg-muted);
   text-wrap: balance;
   overflow-wrap: anywhere;
 }
-@container timeline-intro (max-width: 30rem) {
-  .timeline-intro-figure {
-    height: clamp(6.5rem, 26cqw, 9rem);
-  }
+.timeline-intro[data-compact] .timeline-intro-figure {
+  height: clamp(6.5rem, calc(26 * var(--cqw, 1vw)), 9rem);
 }
-@container timeline-intro (max-width: 21rem) {
-  .timeline-intro-figure {
-    display: none;
-  }
+.timeline-intro[data-tiny] .timeline-intro-figure {
+  display: none;
 }
 
 /* Notifications never scroll sideways (components/ClampBox, owner 2026-10-15): inside `.wrap-all`

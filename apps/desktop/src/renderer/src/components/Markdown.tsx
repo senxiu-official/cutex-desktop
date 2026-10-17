@@ -13,7 +13,7 @@
 import { openModifiers, type OpenModifiers } from "../lib/openModifiers";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
-import { memo, useContext, type AnchorHTMLAttributes, type ComponentType, type HTMLAttributes, type ImgHTMLAttributes, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { createContext, memo, useContext, type AnchorHTMLAttributes, type ComponentType, type HTMLAttributes, type ImgHTMLAttributes, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { rehypeFontRuns } from "../lib/rehypeFontRuns";
 import { createHastCachePlugin } from "../lib/markdownCache";
 import { PreserveTextSelection } from "./PreserveTextSelection";
@@ -122,7 +122,16 @@ interface FileLink {
   read: (() => Promise<FsFile>) | null;
 }
 
+/**
+ * false inside a document read on its own whose relative paths have no base here (an artifact: the
+ * store serves only the artifact itself, not files next to its source). Relative links / images then
+ * render as inert text / an image placeholder instead of resolving against the open agent's workspace.
+ */
+const RelativeFiles = createContext(true);
+const ABSOLUTE_PATH = /^(?:[a-zA-Z]:[\\/]|[\\/]|~(?=$|[\\/]))/;
+
 function useFileLink(href: string | undefined): FileLink | null {
+  const relativeFiles = useContext(RelativeFiles);
   const sidebar = useApp(selectedSidebar);
   const selectedId = useApp((s) => s.selectedId);
   const hostRead = useApp((s) => selectedFeatures(s).has(HOST_FILE_READ_FEATURE));
@@ -136,6 +145,7 @@ function useFileLink(href: string | undefined): FileLink | null {
   const root = scope ? rootFor(sidebar, scope) : null;
   const ref = resolveFileHref(href, root, home);
   if (!ref) return null;
+  if (!relativeFiles && !ABSOLUTE_PATH.test(ref.path)) return null;
   // Inside the agent's workspace: the daemon serves it (fs/file), local or remote host alike.
   if (ref.rel && scope) {
     const rel = ref.rel;
@@ -248,6 +258,7 @@ function FileAwareImage({ src: rawSrc, alt }: ImgHTMLAttributes<HTMLImageElement
   const { t } = useI18n();
   const images = useUiPrefs().messageImages;
   const src = typeof rawSrc === "string" ? unescapeFileHref(rawSrc) : undefined;
+  const relativeFiles = useContext(RelativeFiles);
   const link = useFileLink(src);
   if (link) {
     const label = alt?.trim() || baseName(link.path);
@@ -277,6 +288,14 @@ function FileAwareImage({ src: rawSrc, alt }: ImgHTMLAttributes<HTMLImageElement
       </a>
     );
   }
+  // A relative image in a document without a base (RelativeFiles): a placeholder with its alt text.
+  if (!relativeFiles && src && !/^data:/i.test(src))
+    return (
+      <span title={src} className="inline-flex items-center gap-1 rounded border border-dashed border-border px-1.5 py-0.5 text-[0.9em] text-subtle">
+        <ImageIcon aria-hidden size="1em" strokeWidth={1.75} className="shrink-0 opacity-80" />
+        {alt?.trim() || baseName(src)}
+      </span>
+    );
   // data: images and the like: allowed by the CSP, rendered as-is but bounded.
   if (src && /^data:image\/(png|jpeg|gif|webp|bmp);base64,/i.test(src)) return <img src={src} alt={alt ?? ""} className="my-1.5 block h-auto max-w-[min(100%,320px)] rounded-md border border-border" />;
   return <span title={src}>{alt}</span>;
@@ -316,24 +335,27 @@ const components = { a: MarkdownLink, img: MarkdownImage, code: MarkdownCode };
 /**
  * `document`: a whole file / artifact read on its own (side-pane preview): full-size headings. Everywhere
  * else (chat, cards) headings stay near the body size (UI review #14, styles.css `.markdown` headings).
+ * `relativeFiles = false`: relative links / images have no base (see RelativeFiles) and stay inert.
  */
-export const Markdown = memo(function Markdown({ text, streaming = false, compact = false, document = false }: { text: string; streaming?: boolean; /** 13px (reasoning text). */ compact?: boolean; document?: boolean }) {
+export const Markdown = memo(function Markdown({ text, streaming = false, compact = false, document = false, relativeFiles = true }: { text: string; streaming?: boolean; /** 13px (reasoning text). */ compact?: boolean; document?: boolean; relativeFiles?: boolean }) {
   const translations = useStreamdownTranslations();
   return (
-    <PreserveTextSelection revision={`${streaming ? "streaming" : "static"}:${text}`}>
-      <Streamdown
-        className={`markdown leading-relaxed ${document ? "markdown-document " : ""}${compact ? "text-[length:calc(var(--chat-font-size,14px)-1px)]" : "text-[length:var(--chat-font-size,14px)]"}`}
-        mode={streaming ? "streaming" : "static"}
-        isAnimating={streaming}
-        parseIncompleteMarkdown={streaming}
-        plugins={plugins}
-        components={components}
-        rehypePlugins={streaming ? rehypePlugins : staticRehypePlugins}
-        shikiTheme={["github-light", "github-dark"]}
-        translations={translations}
-      >
-        {text}
-      </Streamdown>
-    </PreserveTextSelection>
+    <RelativeFiles.Provider value={relativeFiles}>
+      <PreserveTextSelection revision={`${streaming ? "streaming" : "static"}:${text}`}>
+        <Streamdown
+          className={`markdown leading-relaxed ${document ? "markdown-document " : ""}${compact ? "text-[length:calc(var(--chat-font-size,14px)-1px)]" : "text-[length:var(--chat-font-size,14px)]"}`}
+          mode={streaming ? "streaming" : "static"}
+          isAnimating={streaming}
+          parseIncompleteMarkdown={streaming}
+          plugins={plugins}
+          components={components}
+          rehypePlugins={streaming ? rehypePlugins : staticRehypePlugins}
+          shikiTheme={["github-light", "github-dark"]}
+          translations={translations}
+        >
+          {text}
+        </Streamdown>
+      </PreserveTextSelection>
+    </RelativeFiles.Provider>
   );
 });

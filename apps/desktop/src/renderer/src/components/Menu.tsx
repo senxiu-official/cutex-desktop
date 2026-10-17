@@ -95,10 +95,13 @@ export function Menu<T>({
   selected,
   onSelect,
   numbered = true,
+  footer,
   ...popover
 }: {
   trigger: ReactNode;
   title?: string;
+  /** Extra content under the items, styled by the caller (a status note with its own action, what is in effect beyond the selected value). */
+  footer?: ReactNode;
   items: MenuItem<T>[];
   selected: T | null;
   onSelect(value: T): void;
@@ -139,6 +142,7 @@ export function Menu<T>({
               {numbered && <span className="w-3 text-right text-xs text-subtle">{i < 9 ? i + 1 : ""}</span>}
             </button>
           ))}
+          {footer}
         </>
       )}
     </Popover>

@@ -1,10 +1,10 @@
-// Sidebar agent rows (sidebar v2): a full row (status avatar, name, Director / 新 tags, status tail,
+// Sidebar agent rows (sidebar v2): a full row (status avatar, name, Director / 📌 / 新 tags, status tail,
 // optional latest-message line), its compact one-line variant (running agents and the expanded
 // 「N 个空闲」 fold: small avatar) and the compact offline row. Every variant puts its avatar in the
 // same fixed column (AVATAR_COL), so names line up whatever the row shows; the status tail follows
 // lib/statusTail (attention pill / running dot / passive text) in a fixed-height line box.
 // Shared by the sidebar, the project flyout and the Projects page.
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, Pin } from "lucide-react";
 import { memo, useMemo, type ReactNode } from "react";
 import { useI18n } from "../i18n";
 import { previewFromResource, type ActivityPreview } from "../lib/activity";
@@ -19,7 +19,7 @@ import { agentMenu } from "../lib/menus";
 import { runningSince, showsRunningRing, type AgentSignal } from "../lib/agentAttention";
 import { statusTail } from "../lib/statusTail";
 import { useRowSignal } from "../lib/attentionView";
-import { showsPreview } from "../lib/sidebarLayout";
+import { pinnedRows, showsPreview } from "../lib/sidebarLayout";
 import { useSidebarHosts } from "../lib/scopedSidebarView";
 import { sidebarMark } from "../lib/hostScope";
 import { HostMark } from "./HostMark";
@@ -42,6 +42,16 @@ function AvatarCell({ children }: { children: ReactNode }) {
 
 /** Same row-local name tag look for 主管 and 新 (they describe the agent, not its state). */
 const NAME_TAG = "shrink-0 rounded px-1 text-[10px] leading-4 font-medium";
+
+/** The 📌 after a pinned row's name (menu 置顶; device-local). */
+function PinMark() {
+  const { t } = useI18n();
+  return (
+    <span className="flex shrink-0 text-subtle" title={t("sidebar.pinned")} data-row-pinned="">
+      <Pin size={10} className="rotate-45" aria-label={t("sidebar.pinned")} />
+    </span>
+  );
+}
 
 function Preview({ row, preview }: { row: AgentRow; preview: ActivityPreview | undefined }) {
   const { t } = useI18n();
@@ -117,7 +127,7 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact = fals
   // Created recently and not opened yet (lib/freshAgents): a small 「新」 marker.
   const fresh = useIsFreshAgent(rowKey(row));
   // 状态标签 自动: re-measured when the line resizes or its content changes (lib/useChipFit).
-  const chipFit = useChipFit(statusChips, [row.name, signal, needs?.count, needs?.reasons.join(), row.isDirector, !!look, fresh]);
+  const chipFit = useChipFit(statusChips, [row.name, signal, needs?.count, needs?.reasons.join(), row.isDirector, row.pinned, !!look, fresh]);
   return (
     <div
       role="button"
@@ -142,6 +152,7 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact = fals
           {look && <HostMark host={look} dotOnly />}
           <span data-fit-name="" className={`truncate text-[13px] ${flagged ? "font-semibold" : signal === "offline" || signal === "unknown" ? "text-muted" : ""}`}><ScriptText text={row.name} /></span>
           {row.isDirector && <span className={`${NAME_TAG} bg-surface-2 text-muted`}>{t("sidebar.director")}</span>}
+          {row.pinned && <PinMark />}
           {fresh && (
             <span className={`${NAME_TAG} bg-accent/10 text-accent`} title={t("sidebar.freshHint")} data-testid="agent-fresh">
               {t("sidebar.fresh")}
@@ -199,6 +210,7 @@ export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
         {look && <HostMark host={look} dotOnly />}
         <span className={`min-w-0 flex-1 truncate text-[12.5px] ${selected ? "text-foreground" : "text-muted group-hover:text-foreground"}`}><ScriptText text={row.name} /></span>
         {row.isDirector && <span className={`${NAME_TAG} bg-surface-2 text-muted`}>{t("sidebar.director")}</span>}
+        {row.pinned && <PinMark />}
         <PassiveText text={relativeTime(lastSeen(row, previewAt))} className="group-hover:hidden" />
         <button
           title={t("menu.more")}
@@ -214,7 +226,18 @@ export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
     </div>
   );
 }, sameAgentRow);
-
+/** The pinned rows (menu 置顶) of a collapsed group, as full rows under its header; nothing without pins. */
+export function PinnedRows({ rows, className }: { rows: readonly AgentRow[]; className?: string }) {
+  const pins = pinnedRows(rows);
+  if (pins.length === 0) return null;
+  return (
+    <div className={className} data-pinned-rows="">
+      {pins.map((row) => (
+        <AgentRowButton key={rowKey(row)} row={row} />
+      ))}
+    </div>
+  );
+}
 
 /** Row tooltip head: the shown name, plus the real name under an alias. */
 function labelOf(row: AgentRow): string {

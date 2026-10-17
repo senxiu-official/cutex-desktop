@@ -58,9 +58,14 @@ import {
 import type { CapabilitiesView, DaemonState, HostApi } from "../shared/ipc";
 import type { DaemonService } from "./daemon";
 import { SshFailure, SshTunnel, TunnelPidFile, openTemporaryTunnel, runSsh } from "./ssh";
+import { SshAskpass, type AskpassSession } from "./sshAskpass";
+import type { SshPromptAnswer, SshPromptView } from "../shared/sshPrompt";
 import type { ClaimTarget, PersonIdentityService } from "./personIdentity";
 import type { IdentityFileResult, IdentityImportTexts, IdentityKeyCopyResult, PersonIdentityView } from "../shared/personIdentity";
 import { loadDevHosts, readDevToken, type DevHostConfig } from "./devHosts";
+import { logError } from "./errorLog";
+import { checkTransferRequest, transferProfile } from "./profileTransfer";
+import type { ProfileTransferRequest, ProfileTransferResult } from "../shared/profileTransfer";
 
 type PublishHosts = (event: "hostsState", payload: HostsState) => void;
 
@@ -141,6 +146,8 @@ export interface HostManagerOptions {
    * none at all (an empty `hosts`: the renderer guides to adding an SSH host).
    */
   localHost?: boolean;
+  /** The open SSH questions changed (main/index.ts → renderer event `sshPrompts`). */
+  onSshPrompts?(prompts: SshPromptView[]): void;
 }
 
 /**
@@ -170,6 +177,8 @@ export class HostManager implements HostApi {
   private readonly tokens: TokenStore;
   private readonly pids: TunnelPidFile;
   private readonly conns = new Map<string, HostConnection>();
+  /** SSH prompts (passphrase / password / host key) → the renderer's dialog; created on first use. */
+  private askpassBroker: SshAskpass | null = null;
   private scope: ViewScope;
   private saving: Promise<void> = Promise.resolve();
   /** DEV ONLY hosts (CUTEX_DESKTOP_DEV_HOSTS; empty in a packaged app); never written to hosts.json. */
@@ -224,6 +233,28 @@ export class HostManager implements HostApi {
       conn.daemon.stop();
     }
     this.conns.clear();
+    this.askpassBroker?.stop();
+  }
+
+  // ---------- SSH prompts (main/sshAskpass.ts) ----------
+
+  private get askpass(): SshAskpass {
+    this.askpassBroker ??= new SshAskpass({ dir: join(app.getPath("userData"), "ssh-askpass"), onChange: (prompts) => this.local.onSshPrompts?.(prompts) });
+    return this.askpassBroker;
+  }
+
+  /** One operation's prompts for a host (closed by the caller, or handed to its connection). */
+  private promptSession(target: string): AskpassSession {
+    return this.askpass.session(target);
+  }
+
+  async sshPrompts(): Promise<SshPromptView[]> {
+    return this.askpassBroker?.prompts() ?? [];
+  }
+
+  /** The dialog's answer (null = cancel); the answer goes only to the ssh process that asked. */
+  async answerSshPrompt(id: string, answer: SshPromptAnswer): Promise<boolean> {
+    return this.askpassBroker?.answer(id, answer) ?? false;
   }
 
   /** The connection of a host (IPC routing); undefined when it is not connected. */
@@ -298,8 +329,12 @@ export class HostManager implements HostApi {
     if (!isValidCutexPath(cutexPath)) return { ok: false, error: { code: "badInput", detail: "cutexPath" } };
     const label = (typeof request.label === "string" && request.label.trim() ? request.label.trim() : defaultHostLabel(request.target)).slice(0, 64);
     if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: { code: "noKeyring", detail: "" } };
-    const issued = await this.issueToken(target, cutexPath);
-    if (!issued.ok) return issued;
+    const prompts = this.promptSession(request.target.trim());
+    const issued = await this.issueToken(target, cutexPath, prompts);
+    if (!issued.ok) {
+      prompts.close();
+      return issued;
+    }
     const id = `ssh-${randomBytes(4).toString("hex")}`;
     this.tokens.set(id, issued.token.token);
     const color = nextHostColor(this.file.hosts.map((h) => h.color));
@@ -311,8 +346,8 @@ export class HostManager implements HostApi {
     // No local host: the first host added becomes the scope (it was the never-connected placeholder).
     const reachable = this.reachableScope(this.scope);
     if (reachable !== this.scope) this.setScopeOnly(reachable);
-    // ★ RFC Q2: a newly paired SSH host auto-connects.
-    this.open(id);
+    // ★ RFC Q2: a newly paired SSH host auto-connects (with the answers given while pairing).
+    this.open(id, prompts);
     this.publish();
     return { ok: true, hostId: id, cutexPath: issued.cutexPath, ...(issued.token.pending ? { pending: true } : {}) };
   }
@@ -322,13 +357,21 @@ export class HostManager implements HostApi {
     const target = host ? parseSshTarget(host.target) : null;
     if (!host || !target) return { ok: false, error: { code: "badInput", detail: "host" } };
     if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: { code: "noKeyring", detail: "" } };
-    const issued = await this.issueToken(target, host.cutexPath);
-    if (!issued.ok) return issued;
+    const prompts = this.promptSession(host.target);
+    const issued = await this.issueToken(target, host.cutexPath, prompts);
+    if (!issued.ok) {
+      prompts.close();
+      return issued;
+    }
     const old = host.tokenId;
     this.tokens.set(host.id, issued.token.token);
     this.patchHost(host.id, { tokenId: issued.token.tokenId, cutexPath: issued.cutexPath });
     // The old token may still be valid (re-pair without a revoke): retire it, best effort.
-    if (old && old !== issued.token.tokenId) void runSsh(target, tokenRevokeCommand(issued.cutexPath, old), 20_000).catch(() => {});
+    if (old && old !== issued.token.tokenId) {
+      // Best effort and in the background: answers from the pairing only, no new questions.
+      prompts.cancelled = true;
+      void runSsh(target, tokenRevokeCommand(issued.cutexPath, old), 20_000, { askpass: prompts }).catch(() => {}).finally(() => prompts.close());
+    } else prompts.close();
     if (this.conns.has(host.id) || this.wanted(host.id)) this.reopen(host.id);
     this.publish();
     return { ok: true, hostId: host.id, cutexPath: issued.cutexPath, ...(issued.token.pending ? { pending: true } : {}) };
@@ -487,15 +530,18 @@ export class HostManager implements HostApi {
     if (!target) return { ok: false, error: { code: "badInput", detail: "target" } };
     if (!token) return { ok: false, error: { code: "noToken", detail: "" } };
     let tunnel: { port: number; close(): void };
+    const prompts = this.promptSession(host.target);
     try {
-      tunnel = await openTemporaryTunnel(target, host.remotePort, this.pids);
+      tunnel = await openTemporaryTunnel(target, host.remotePort, this.pids, undefined, { askpass: prompts });
     } catch (error) {
+      prompts.close();
       return { ok: false, error: errorView(error) };
     }
     try {
       return await this.probe(new CutexClient(this.endpoint(tunnel.port, token, host)), true);
     } finally {
       tunnel.close();
+      prompts.close();
     }
   }
 
@@ -533,6 +579,21 @@ export class HostManager implements HostApi {
 
   async importIdentityKey(text: string, texts: IdentityImportTexts): Promise<IdentityFileResult> {
     return this.local.identity ? this.local.identity.importKeyString(text, texts) : { ok: false, error: "unavailable" };
+  }
+
+  /** 复制到其他主机: export on the source host's connection, import on the target's (main → main). */
+  async copyProfileToHost(request: ProfileTransferRequest): Promise<ProfileTransferResult> {
+    const checked = checkTransferRequest(request);
+    if (typeof checked === "string") return { ok: false, stage: "request", error: { code: "invalid_request", message: checked } };
+    const source = this.conns.get(checked.sourceHostId);
+    const target = this.conns.get(checked.targetHostId);
+    if (!source || !target) return { ok: false, stage: "request", error: { code: "host_not_connected", message: "both hosts must be connected" } };
+    return transferProfile(
+      checked,
+      { exportBundle: (profile, includeCredentials) => source.daemon.exportProfileBundle(profile, includeCredentials) },
+      { importBundle: (bundle, name) => target.daemon.importProfileBundle(bundle, name) },
+      logError,
+    );
   }
 
   async setIdentityName(name: string | null): Promise<void> {
@@ -662,9 +723,10 @@ export class HostManager implements HostApi {
    * once (state "connecting"), so the renderer can bind to it before the endpoint is known; the
    * endpoint (local discovery / SSH tunnel) is installed only while this connection is current.
    */
-  private open(id: string): void {
+  private open(id: string, prompts?: AskpassSession): void {
     const host = this.find(id);
     const dev = this.devHost(id);
+    if (!this.known(id) || !host) prompts?.close();
     if (!this.known(id)) return;
     const epoch = randomBytes(24).toString("hex");
     const daemon = this.createDaemon(id, epoch);
@@ -698,6 +760,7 @@ export class HostManager implements HostApi {
     const target = parseSshTarget(host.target);
     const token = this.tokens.get(host.id);
     if (!target || !token) {
+      prompts?.close();
       const error: SshErrorView = !target ? { code: "badInput", detail: host.target } : { code: safeStorage.isEncryptionAvailable() ? "noToken" : "noKeyring", detail: "" };
       conn.blocked = { ...initialTunnel(), status: "error", error };
       daemon.suspend({ kind: "error", baseUrl: sshUrl, message: sshMessage(error) }, { remote: true });
@@ -707,6 +770,8 @@ export class HostManager implements HostApi {
       target,
       remotePort: host.remotePort,
       pids: this.pids,
+      // The connection's prompts: a reconnect reuses answers given for it; closed with the tunnel.
+      askpass: prompts ?? this.promptSession(host.target),
       onChange: (view) => this.onTunnel(conn, tunnel, host, token, view),
     });
     conn.tunnel = tunnel;
@@ -734,19 +799,29 @@ export class HostManager implements HostApi {
 
   /** Issues a client token; when cutex is not found at `cutexPath` it is looked for (login shell,
    *  well-known dirs) and the absolute path found is returned for the host config. */
-  private issueToken(target: SshTarget, cutexPath: string): Promise<{ ok: true; token: IssuedToken; cutexPath: string } | { ok: false; error: SshErrorView }> {
-    return issueTokenFindingCutex((command) => runSsh(target, command), cutexPath, deviceLabel(hostname(), app.getPath("userData")), errorView);
+  private issueToken(target: SshTarget, cutexPath: string, prompts: AskpassSession): Promise<{ ok: true; token: IssuedToken; cutexPath: string } | { ok: false; error: SshErrorView }> {
+    // Pairing waits for the user while a prompt is open (runSsh pauses its timeout).
+    return issueTokenFindingCutex((command) => runSsh(target, command, 30_000, { askpass: prompts }), cutexPath, deviceLabel(hostname(), app.getPath("userData")), errorView);
   }
 
   /** `DELETE /v2/client-tokens/{id}` through a short tunnel; falls back to the CLI over ssh. */
   private async revoke(host: SshHostConfig, token: string | null): Promise<boolean> {
     const target = parseSshTarget(host.target);
     if (!host.tokenId || !target) return false;
+    const prompts = this.promptSession(host.target);
+    try {
+      return await this.revokeWith(host, host.tokenId, token, target, prompts);
+    } finally {
+      prompts.close();
+    }
+  }
+
+  private async revokeWith(host: SshHostConfig, tokenId: string, token: string | null, target: SshTarget, prompts: AskpassSession): Promise<boolean> {
     if (token) {
       try {
-        const tunnel = await openTemporaryTunnel(target, host.remotePort, this.pids, 15_000);
+        const tunnel = await openTemporaryTunnel(target, host.remotePort, this.pids, 15_000, { askpass: prompts });
         try {
-          await new CutexClient(this.endpoint(tunnel.port, token, host)).request("DELETE", `/v2/client-tokens/${encodeURIComponent(host.tokenId)}`);
+          await new CutexClient(this.endpoint(tunnel.port, token, host)).request("DELETE", `/v2/client-tokens/${encodeURIComponent(tokenId)}`);
           return true;
         } finally {
           tunnel.close();
@@ -756,7 +831,7 @@ export class HostManager implements HostApi {
       }
     }
     try {
-      const r = await runSsh(target, tokenRevokeCommand(host.cutexPath, host.tokenId), 20_000);
+      const r = await runSsh(target, tokenRevokeCommand(host.cutexPath, tokenId), 20_000, { askpass: prompts });
       return r.code === 0;
     } catch {
       return false;

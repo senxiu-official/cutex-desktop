@@ -2,7 +2,8 @@ import { composerDrafts, insertComposerDraft } from "./lib/composerDrafts";
 import { traceSendStage, type SendTraceRecord } from "../../shared/sendTrace";
 import { create } from "zustand";
 import type { AdmissionRef, AsksPause, EventEnvelope, QueueAdmission, QueueItem, QueuePause, SubmitStrategy, UserInputSubmitResult } from "@cutex-desktop/protocol";
-import type { CollaborationModeMask, ThreadGoalStatus } from "@cutex-desktop/protocol/codex/v2";
+import type { ApprovalsReviewer, CollaborationModeMask, ThreadGoalStatus } from "@cutex-desktop/protocol/codex/v2";
+import { LAUNCH_REVIEWER_FEATURE, reviewerForCreate, type PermissionMode } from "./lib/permissionModes";
 import type { ApprovalDecision, ApprovalDecisionResult, ApprovalRecord, DaemonApi, DaemonState, ExtraInput, HostsState, ModelOption, MutationResult, QuotaGauge, ServerRequestReply, SessionActionMethod, SidebarSnapshot, ServiceView } from "../../shared/ipc";
 import type { LaunchOverrides } from "../../shared/launch";
 import { api, apiFor, bridge } from "./bridge";
@@ -33,7 +34,7 @@ import { OUTBOX_STUCK_MS, outboxLingerRecord } from "./lib/outboxDiagnostics";
 import { ADMISSION_ORDER_FEATURE, applyMove } from "./lib/admissionOrder";
 import { stopHeld } from "./lib/stopHold";
 import { parseQueueMoveError, type QueueMoveErrorKind } from "../../shared/queueMove";
-import { untitledChatName } from "./lib/sidebar";
+import { SIDEBAR_GROUP_IDS, untitledChatName } from "./lib/sidebar";
 import { withRetiredDefaults } from "./lib/retiredSession";
 import { isArchived, lifecycleFlip } from "./lib/archivedAgent";
 import { emptyPendingChat, hasDraftContent, pendingChatSteps, type PendingChatState, type PendingDraft } from "./lib/pendingChat";
@@ -334,7 +335,12 @@ interface AppState {
    *  applies plan mode and the goal, then the messages typed meanwhile go out (lib/pendingChat). */
   pendingChat: PendingChatState | null;
   queuePendingChat(draft: PendingDraft): void;
-  setPendingChat(patch: { hostId?: string | null; profile?: string | null; launch?: LaunchOverrides; plan?: boolean; goal?: string | null }): void;
+  setPendingChat(patch: { hostId?: string | null; profile?: string | null; launch?: LaunchOverrides; permissionMode?: PermissionMode | null; plan?: boolean; goal?: string | null }): void;
+  /**
+   * Fallback for hosts without launch-approvals-reviewer: set this reviewer on the new agent's
+   * thread once it is live (applied when its view loads with a running native; lib/permissionModes).
+   */
+  expectApprovalsReviewer(sessionId: string, hostId: string, reviewer: ApprovalsReviewer): void;
   retryPendingChat(): void;
   /** Pin / unpin an agent of `hostId` (default: the focus host). */
   togglePin(sessionId: string, hostId?: string): void;
@@ -419,6 +425,8 @@ function newView(): SessionView {
 const queueTimers = new Map<string, ReturnType<typeof setTimeout>>();
 /** Last collaboration mode seen per agent (AgentKey; lib/threadSettings: fills cutex's resume snapshot gap). */
 const lastCollabMode = new Map<string, NonNullable<ThreadSettingsView["collaborationMode"]>>();
+/** expectApprovalsReviewer: reviewer still to set on a new thread (hostKey → reviewer). */
+const pendingReviewers = new Map<string, ApprovalsReviewer>();
 /**
  * Last context usage (`thread/tokenUsage/updated`) per agent (AgentKey) seen on its host's feed, so a
  * re-bootstrap keeps the composer's context ring: thread/read has none and runtimes only report it
@@ -477,9 +485,11 @@ let sidebarRefresh: CoalescedRefresh | null = null;
 const backgroundRefresh = new Map<string, CoalescedRefresh>();
 /** Per host: running turns and whether the owner wrote into them (notification events turn.owner.* / turn.other.*). */
 const turnTriggers = new Map<string, TurnTriggerState>();
-/** Agent and project ids of a sidebar snapshot (lib/hostKeys claims). */
+/** Agent and project ids of a sidebar snapshot (lib/hostKeys claims), plus the sidebar's own group ids. */
 function snapshotIds(snapshot: SidebarSnapshot): Set<string> {
-  const ids = new Set<string>();
+  // 独立智能体 / 快速会话 / 其他项目 folds etc. stored before host keys: the first host that loads
+  // claims them (otherwise never claimed, they would be dropped with the legacy entries).
+  const ids = new Set<string>(SIDEBAR_GROUP_IDS);
   for (const s of [...snapshot.active, ...snapshot.retired]) ids.add(s.cutexSessionId);
   for (const p of snapshot.projects?.projects ?? []) ids.add(p.project_id);
   return ids;
@@ -934,6 +944,24 @@ export const useApp = create<AppState>((set, get) => {
     }));
   };
 
+  /**
+   * A reviewer expected for this new thread (older cutex: not in the create `launch`): set once the
+   * view loaded with a live native. Failure keeps it for the next load; the native's
+   * thread/settings/updated refreshes the shown mode.
+   */
+  const applyPendingReviewer = (sessionId: string, agent: string, timeline: TimelineState | null, daemon: { updateThreadSettings(sessionId: string, threadId: string, patch: Record<string, unknown>): Promise<unknown> }) => {
+    const wanted = pendingReviewers.get(agent);
+    if (!wanted || !timeline?.threadId) return;
+    if (timeline.settings?.approvalsReviewer === wanted) {
+      pendingReviewers.delete(agent);
+      return;
+    }
+    daemon.updateThreadSettings(sessionId, timeline.threadId, { approvalsReviewer: wanted }).then(
+      () => { if (pendingReviewers.get(agent) === wanted) pendingReviewers.delete(agent); },
+      () => {},
+    );
+  };
+
   const load = async (sessionId: string) => {
     const scope = captureSession(sessionId);
     const daemon = apiOn(scope.host);
@@ -986,6 +1014,7 @@ export const useApp = create<AppState>((set, get) => {
         older,
       }));
       if (!scope.current()) return;
+      applyPendingReviewer(sessionId, agent, boot.native ? timeline : null, daemon);
       settleOutbox(sessionId, bootTick);
       // admission-order: the bootstrap has the owner queue only; the merged order comes from queue/list.
       if (featuresOn(scope.host).has(ADMISSION_ORDER_FEATURE)) refreshQueue(sessionId);
@@ -1667,6 +1696,9 @@ export const useApp = create<AppState>((set, get) => {
       if (pending.applied.plan) next.plan = pending.plan;
       if (pending.applied.goal) next.goal = pending.goal;
       set({ pendingChat: next });
+    },
+    expectApprovalsReviewer(sessionId, hostId, reviewer) {
+      pendingReviewers.set(hostKey(hostId, sessionId), reviewer);
     },
     retryPendingChat() {
       if (get().pendingChat && !get().creatingChat) startPendingChat();
@@ -2662,8 +2694,12 @@ async function createPendingChat(current: () => boolean, finish: () => void): Pr
       // The draft's host (null: the focus host); everything below acts on that host's daemon.
       const host = pending.hostId ?? focusOf(app);
       if (step.kind === "create") {
-        const { profile, launch } = pending;
+        const { profile } = pending;
+        // 自动 = auto reviewer: in `launch` where cutex takes it, else set once the thread runs.
+        const reviewer = reviewerForCreate(pending.launch, pending.permissionMode ?? "custom", featuresOf(app, host).has(LAUNCH_REVIEWER_FEATURE));
+        const launch = reviewer.launch ?? {};
         const { cutexSessionId } = await hostApi(host).createHumanSession({ start: true, ...(profile ? { profile } : {}), ...(Object.keys(launch).length ? { launch } : {}) });
+        if (reviewer.fallback) app.expectApprovalsReviewer(cutexSessionId, host, reviewer.fallback);
         if (!current()) return;
         patch(() => ({ sessionId: cutexSessionId, hostId: host }));
         if (!current()) return;

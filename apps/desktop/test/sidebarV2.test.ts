@@ -106,12 +106,13 @@ describe("sidebar layout", () => {
   it("splits a project's agents into full rows, running avatars, idle fold and offline", () => {
     const [l] = layoutSidebar([busy], ctx()).main;
     expect(l!.mode).toBe("full");
-    expect(l!.full.map((r) => r.id).sort()).toEqual(["dir", "done", "need", "offDone"].sort());
+    expect(l!.full.map((r) => r.id).sort()).toEqual(["dir", "need", "offDone"].sort());
     expect(l!.full[0]!.id).toBe("dir");
     expect(l!.running.map((r) => r.id)).toEqual(["run"]);
-    // The open agent, online idle, stays in the idle fold (marked there).
-    expect(l!.idle.map((r) => r.id)).toEqual(["idle", "sel"]);
+    // The open agent, online idle, stays in the idle fold (marked there); so does a done one (✓).
+    expect(l!.idle.map((r) => r.id)).toEqual(["done", "idle", "sel"]);
     expect(l!.idleSelected).toBe("sel");
+    expect(l!.idleDone).toEqual(["done"]);
     expect(l!.offline.map((r) => r.id)).toEqual(["off"]);
     expect(l).toMatchObject({ runningCount: 1, needsYouCount: 1, attentionCount: 3, hasSelected: true });
   });
@@ -136,25 +137,25 @@ describe("sidebar layout", () => {
   it("「在线空闲不收起」 lists one project's idle agents individually", () => {
     const other = project("other", [row("o1"), row("o2")]);
     const l = layoutSidebar([busy, other], ctx({ idleUnfolded: new Set(["other"]) })).main;
-    expect(l[0]!.idle.map((r) => r.id)).toEqual(["idle", "sel"]);
+    expect(l[0]!.idle.map((r) => r.id)).toEqual(["done", "idle", "sel"]);
     expect(l[1]!.idle).toEqual([]);
     expect(l[1]!.full.map((r) => r.id).sort()).toEqual(["o1", "o2"]);
     const [own] = layoutSidebar([busy], ctx({ idleUnfolded: new Set(["busy"]) })).main;
     expect(own!.idle).toEqual([]);
-    expect(own!.full.map((r) => r.id)).toEqual(expect.arrayContaining(["idle", "sel"]));
+    expect(own!.full.map((r) => r.id)).toEqual(expect.arrayContaining(["done", "idle", "sel"]));
     expect(own!.idleSelected).toBeNull();
   });
 
   it("a fresh agent (lib/freshAgents) stays a full row instead of folding into idle / running", () => {
     const [l] = layoutSidebar([busy], ctx({ isFresh: (key: string) => key === "idle" || key === "run" || key === "off" })).main;
     expect(l!.full.map((r) => r.id)).toEqual(expect.arrayContaining(["idle", "run"]));
-    expect(l!.idle.map((r) => r.id)).toEqual(["sel"]);
+    expect(l!.idle.map((r) => r.id)).toEqual(["done", "sel"]);
     expect(l!.running).toEqual([]);
     // Offline stays in 离线 (nothing to show there yet).
     expect(l!.offline.map((r) => r.id)).toEqual(["off"]);
     // No longer fresh (opened / older than 30 min): folds again.
     const [after] = layoutSidebar([busy], ctx({ isFresh: () => false })).main;
-    expect(after!.idle.map((r) => r.id)).toEqual(["idle", "sel"]);
+    expect(after!.idle.map((r) => r.id)).toEqual(["done", "idle", "sel"]);
   });
 
   it("running full and idle unfolded put them in full rows", () => {

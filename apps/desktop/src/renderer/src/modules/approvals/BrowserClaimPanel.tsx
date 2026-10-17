@@ -16,6 +16,7 @@ import { useApp } from "../../store";
 import { useModulePref } from "../react";
 import type { Json } from "../types";
 import { BrowserClaimController, browserClaimApproval, browserClaimTabDisplay, type BrowserClaimScope } from "./browserClaimUi";
+import { ApprovalSource } from "../../components/ApprovalSource";
 
 const BUTTON = "shrink-0 rounded-md border border-border px-2.5 py-1 text-xs text-foreground enabled:hover:bg-hover disabled:opacity-40";
 const PRIMARY = "shrink-0 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40";
@@ -131,6 +132,7 @@ export function BrowserClaimPanel(props: BrowserClaimPanelProps) {
         {tab && <span className={tab.pool === "agent" ? "text-subtle" : "text-warn"}>{t(tab.pool === "agent" ? "approvals.claim.agentPool" : "approvals.claim.ownerLogin")}</span>}
         <p className="mt-0.5 line-clamp-2 text-xs text-subtle" title={details.reason}>{t("approvals.claim.reason", { reason: details.reason })}</p>
       </div>
+      <ApprovalSource source="cutex" className="mr-5" />
     </div>}
     {props.variant === "page" && tab && <p className={`text-xs ${tab.pool === "agent" ? "text-subtle" : "text-warn"}`}>
       {t("approvals.claim.title", { name: details.agentName, tab: tabName })}{t(tab.pool === "agent" ? "approvals.claim.agentPool" : "approvals.claim.ownerLogin")}</p>}

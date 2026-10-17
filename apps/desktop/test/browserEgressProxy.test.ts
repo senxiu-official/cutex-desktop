@@ -247,3 +247,40 @@ describe("browser-only N2 egress proxy (X1–X3; dev and packaged share this mod
     expect(finished).toBe(false); expect(f.dial).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("0.1.3 owner-admitted LAN authorities through N2", () => {
+  async function lanFixture(policy: { publicAllowed?: () => boolean; lanAllowed?: (hostname: string, port: number) => boolean }, lookup: BrowserEgressLookup) {
+    const origin = httpServer((_req, res) => res.end("lan-fixture")), port = await listen(origin);
+    const dial = vi.fn<BrowserEgressDial>((_target, signal) => createConnection({ host: "127.0.0.1", port, signal }));
+    const proxy = await startBrowserEgressProxy({ lookup: vi.fn(lookup), dial, ...policy }); cleanup.push(proxy.close);
+    return { proxy, dial };
+  }
+  it("dials a LAN literal / LAN answer only for the admitted authority, never a loopback or link-local answer", async () => {
+    const admitted = new Set(["100.64.0.27:8765", "nas.local:80", "box.tail0000.ts.net:80"]);
+    const table: Record<string, string> = { "nas.local": "10.0.0.14", "box.tail0000.ts.net": "100.101.102.103", "other.local": "10.0.0.15" };
+    const f = await lanFixture({ publicAllowed: () => false, lanAllowed: (hostname, port) => admitted.has(`${hostname}:${port}`) },
+      async hostname => [{ address: table[hostname] ?? "127.0.0.1", family: 4 }]);
+    expect(await get(f.proxy, "http://100.64.0.27:8765/x")).toMatch(/^HTTP\/1.1 200 /);
+    expect(await get(f.proxy, "http://nas.local/x")).toMatch(/^HTTP\/1.1 200 /);
+    expect(await get(f.proxy, "http://box.tail0000.ts.net/x")).toMatch(/^HTTP\/1.1 200 /);
+    expect(f.dial.mock.calls.map(([target]) => target.address)).toEqual(["100.64.0.27", "10.0.0.14", "100.101.102.103"]);
+    // Not admitted: another LAN host, another port, a public site while websites are off.
+    for (const url of ["http://other.local/", "http://100.64.0.27:9000/", "http://10.0.0.10/", "http://public.example.com/"])
+      expect(await get(f.proxy, url)).toMatch(/^HTTP\/1.1 403 /);
+    admitted.add("evil.local:80"); // resolves to loopback in this table
+    expect(await get(f.proxy, "http://evil.local/")).toMatch(/^HTTP\/1.1 403 /);
+    admitted.add("169.254.169.254:80");
+    expect(await get(f.proxy, "http://169.254.169.254/")).toMatch(/^HTTP\/1.1 403 /);
+    expect(f.dial).toHaveBeenCalledTimes(3);
+  });
+  it("CONNECT to an admitted tailnet authority tunnels; a non-admitted public name with a LAN answer does not", async () => {
+    const f = await lanFixture({ publicAllowed: () => true, lanAllowed: (hostname, port) => hostname === "box.tail0000.ts.net" && port === 443 },
+      async () => [{ address: "100.101.102.103", family: 4 }]);
+    const tunnel = async (authority: string) => {
+      const c = await client(f.proxy);
+      return c.send(`CONNECT ${authority} HTTP/1.1\r\nHost: ${authority}\r\nProxy-Authorization: ${auth(f.proxy)}\r\n\r\n`);
+    };
+    expect(await tunnel("box.tail0000.ts.net:443")).toMatch(/^HTTP\/1.1 200 /);
+    expect(await tunnel("other.example.com:443")).toMatch(/^HTTP\/1.1 403 /);
+  });
+});

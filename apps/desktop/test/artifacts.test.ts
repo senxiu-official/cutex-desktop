@@ -27,6 +27,7 @@ import { escapeFileHref } from "../src/renderer/src/lib/workspace";
 import {
   arrangeLibrary,
   attributionText,
+  currentTab,
   DEFAULT_LIBRARY,
   diffGap,
   externalGone,
@@ -38,6 +39,7 @@ import {
   parseDelimited,
   parseViewParams,
   previewKind,
+  typePath,
   previousVersion,
   producerKey,
   producerLabel,
@@ -48,6 +50,8 @@ import {
   restoreView,
   sessionName,
   viewKey,
+  viewTabs,
+  withTab,
 } from "../src/renderer/src/modules/artifacts/model";
 
 const ID = "af-3f9a1c2e7b8d4e05a1c2d3e4f5a6b7c8";
@@ -199,6 +203,24 @@ describe("artifacts.view identity and versions (after the research demo's worksp
     expect(restoreView({ ref: "nope" }, 1)).toBeNull();
   });
 
+  it("one tab row: 预览 · 源代码 (rendered text kinds only) · 出处 · 对比", () => {
+    expect(viewTabs("markdown")).toEqual(["preview", "code", "origin", "compare"]);
+    for (const kind of ["html", "csv", "tsv"] as const) expect(viewTabs(kind)).toContain("code");
+    for (const kind of ["text", "image", "binary"] as const) expect(viewTabs(kind)).toEqual(["preview", "origin", "compare"]);
+    const s = { ref: `${ID}@2`, pane: "preview" as const, name: "a.md" };
+    expect(currentTab(s, "markdown")).toBe("preview");
+    const code = withTab(s, "code");
+    expect(code).toEqual({ ...s, pane: "preview", code: true });
+    expect(currentTab(code, "markdown")).toBe("code");
+    // A saved 源代码 state on a kind without a source view shows the preview.
+    expect(currentTab(code, "binary")).toBe("preview");
+    // 出处 keeps the saved pane id "source"; leaving 源代码 drops `code`.
+    expect(withTab(code, "origin")).toEqual({ ...s, pane: "source" });
+    expect(currentTab(withTab(code, "origin"), "markdown")).toBe("origin");
+    expect(withTab(code, "compare")).toEqual({ ...s, pane: "compare" });
+    expect(withTab(code, "preview")).toEqual(s);
+  });
+
   it("latest follows updates, pinned keeps its version, a missing version never falls back to latest", () => {
     const detail: ArtifactDetail = { artifact: summary(ID, "a.md", { latestVersion: 1 }), versions: [ver(1)] };
     expect(resolveVersion(detail, "latest")?.version).toBe(1);
@@ -289,6 +311,31 @@ describe("previews", () => {
     expect(previewKind("", "page.HTM")).toBe("html");
     expect(previewKind("image/png", "odd.html")).toBe("image");
     expect(previewKind("text/markdown", "notes.html")).toBe("markdown");
+  });
+
+  it("a generic stored type (older cutex, a label name without an extension) is typed by the source path", () => {
+    // What desktop 0.1.3 acceptance saw: owner labels, Windows source paths.
+    expect(previewKind("text/plain", "round2-html-artifact", "C:\\work\\acc\\page.html")).toBe("html");
+    expect(viewTabs(previewKind("text/plain", "round2-html-artifact", "C:\\work\\acc\\page.html"))).toEqual(["preview", "code", "origin", "compare"]);
+    expect(previewKind("application/octet-stream", "round2-pdf-artifact", "C:\\work\\acc\\paper.pdf")).toBe("binary");
+    expect(typePath("round2-pdf-artifact", "C:\\work\\acc\\paper.pdf")).toBe("C:\\work\\acc\\paper.pdf");
+    expect(previewKind("application/octet-stream", "Holiday photo", "D:\\pics\\IMG_0001.JPG")).toBe("image");
+    expect(previewKind("text/plain", "notes", "/home/someone/w/notes.md")).toBe("markdown");
+    expect(previewKind("text/plain", "table", "/w/t.csv")).toBe("csv");
+    // No extension anywhere: text/plain stays text, octet-stream stays binary.
+    expect(previewKind("text/plain", "Label", "/w/README")).toBe("text");
+    expect(previewKind("application/octet-stream", "Label", "/w/blob")).toBe("binary");
+    // A text/plain document by its extension is not shown as text.
+    expect(previewKind("text/plain", "Label", "/w/a.docx")).toBe("binary");
+    // The name still types it when the source path has no extension.
+    expect(typePath("fig.png", "/w/fig")).toBe("fig.png");
+    expect(previewKind("application/octet-stream", "fig.png", "/w/fig")).toBe("image");
+    // Aliases.
+    expect(previewKind("image/jpg", "x")).toBe("image");
+    expect(previewKind("image/pjpeg", "x")).toBe("image");
+    // A specific stored type still wins over the extension.
+    expect(previewKind("application/pdf", "Label", "/w/a.html")).toBe("binary");
+    expect(previewKind("text/html", "Label", "/w/a.txt")).toBe("html");
   });
 
   it("the page / source choice of an HTML tab survives restore and re-init of the same ref only", () => {

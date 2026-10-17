@@ -7,13 +7,28 @@ export const RELAY_GENERATION_HEADER = "X-Cutex-Browser-Generation";
 export const RELAY_MAX_BYTES = MAX_MESSAGE_BYTES;
 export const RELAY_MAX_LEASES = 256;
 export const RELAY_CODES = ["invalid_request", "unsupported_operation", "unsupported_provider", "permission_denied", "loopback_only", "browser_disabled", "browser_unavailable", "target_closed", "lease_revoked", "lease_ended_desktop_restarted", "target_hidden", "owner_paused", "scope_unsupported", "scope_invalid", "stale_connection", "stale_request", "stale_ref", "deadline_exceeded", "cancelled", "outcome_unknown", "request_conflict", "request_result_not_retained", "approval_required", "approval_denied", "lease_limit", "lease_conflict", "busy", "idempotency_capacity_exceeded", "external_pages_unavailable", "service_proxy_required", "service_unavailable", "service_auth_failed", "navigation_failed", "browser_identity_unavailable", "invalid_result", "message_too_large"] as const;
-export type RelayErrorCode = typeof RELAY_CODES[number];
+/** Wire codes; the precise refusals only reach a host advertising REFUSAL_REASONS_CAPABILITY. */
+export type RelayErrorCode = typeof RELAY_CODES[number] | BrowserRefusalCode;
 export class BrowserRelayError extends Error {
   constructor(readonly code: RelayErrorCode) { super(code); this.name = "BrowserRelayError"; }
 }
+/** Main's precise admission refusals (network.ts BrowserRefusal minus invalid_url). A host that
+ * advertises browser-refusal-reasons receives them as is; older hosts get the established
+ * external_pages_unavailable (they map unknown codes to invalid_result). */
+export const BROWSER_REFUSAL_CODES = ["external_pages_off", "external_proxy_unavailable", "private_address_blocked", "reserved_address", "protected_endpoint", "remote_loopback"] as const;
+export type BrowserRefusalCode = typeof BROWSER_REFUSAL_CODES[number];
+export class BrowserRefusalError extends Error {
+  constructor(readonly code: BrowserRefusalCode) { super(code); this.name = "BrowserRefusalError"; }
+}
+export const REFUSAL_REASONS_CAPABILITY = "browser-refusal-reasons";
+export const POPUP_GRANT_CAPABILITY = "browser-popup-grant";
+export function isBrowserRefusalCode(code: unknown): code is BrowserRefusalCode { return typeof code === "string" && (BROWSER_REFUSAL_CODES as readonly string[]).includes(code); }
+/** The code a host may receive: precise refusals only where advertised. */
+export function relayWireError(code: RelayErrorCode, precise: boolean): RelayErrorCode { return !precise && isBrowserRefusalCode(code) ? "external_pages_unavailable" : code; }
 export function relayError(error: unknown): RelayErrorCode {
   const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
   if (typeof code === "string" && (RELAY_CODES as readonly string[]).includes(code)) return code as RelayErrorCode;
+  if (isBrowserRefusalCode(code)) return code;
   const aliases: Record<string, RelayErrorCode> = { lease_expired: "lease_revoked", debugger_detached: "target_closed", request_id_conflict: "request_conflict", tab_busy: "busy", transport_error: "browser_unavailable", not_actionable: "invalid_request", unsupported_frame: "unsupported_operation" };
   return typeof code === "string" && Object.hasOwn(aliases, code) ? aliases[code]! : "browser_unavailable";
 }
@@ -41,7 +56,7 @@ export type RelayMessage = RelayCommand
   | (RelayBase & { kind: "lease-revoked"; leaseId: string; reason: string });
 export type RelayState = "accepted" | "dispatched" | "running" | "succeeded" | "failed" | "cancelled" | "outcome_unknown";
 export interface RelayResult { dispatchSeq: number; target: RelayTarget; operationKind: BrowserOperation["kind"]; status: RelayState; metadataOnly?: true; result?: BrowserOperationResult; error?: { code: RelayErrorCode } }
-export interface RelayGrant { deviceId: string; guestId: string; cutexSessionId: string; title: string; url: string; source: { kind: "owner" } | { kind: "claim"; approvalId: string } | { kind: "agent-open"; requestId: string } }
+export interface RelayGrant { deviceId: string; guestId: string; cutexSessionId: string; title: string; url: string; source: { kind: "owner" } | { kind: "claim"; approvalId: string } | { kind: "agent-open"; requestId: string } | { kind: "popup"; openerLeaseId: string } }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function relayId(value: unknown): asserts value is string { if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{1,200}$/.test(value)) throw new BrowserRelayError("invalid_request"); }
 function text(value: unknown, max: number, empty = false): asserts value is string { if (typeof value !== "string" || (!empty && !value) || Array.from(value).length > max || /[\x00-\x1f\x7f]/.test(value)) throw new BrowserRelayError("invalid_request"); }
@@ -98,6 +113,6 @@ export function validateRelayResult(value: BrowserOperationResult, command: Rela
 }
 export function parseRelayGrant(value: unknown, deviceId: string): RelayGrant {
   const v = record(value, ["deviceId", "guestId", "cutexSessionId", "title", "url", "source"]); if (v.deviceId !== deviceId) throw new BrowserRelayError("permission_denied"); relayId(v.guestId); relayId(v.cutexSessionId); text(v.title, 200); text(v.url, 8192);
-  const source = v.source as Record<string, unknown> | undefined, kind = source?.kind; record(source, kind === "owner" ? ["kind"] : kind === "claim" ? ["kind", "approvalId"] : kind === "agent-open" ? ["kind", "requestId"] : []);
-  if (kind === "claim") relayId(source!.approvalId); else if (kind === "agent-open") relayId(source!.requestId); else if (kind !== "owner") throw new BrowserRelayError("invalid_request"); return v as unknown as RelayGrant;
+  const source = v.source as Record<string, unknown> | undefined, kind = source?.kind; record(source, kind === "owner" ? ["kind"] : kind === "claim" ? ["kind", "approvalId"] : kind === "agent-open" ? ["kind", "requestId"] : kind === "popup" ? ["kind", "openerLeaseId"] : []);
+  if (kind === "claim") relayId(source!.approvalId); else if (kind === "agent-open") relayId(source!.requestId); else if (kind === "popup") relayId(source!.openerLeaseId); else if (kind !== "owner") throw new BrowserRelayError("invalid_request"); return v as unknown as RelayGrant;
 }

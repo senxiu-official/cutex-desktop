@@ -6,6 +6,7 @@ import { useI18n } from "../i18n";
 import type { CutexRef } from "../modules/slots";
 import { openMenuFrom } from "../lib/contextMenu";
 import { refActionEntries, useHasRefActions } from "../lib/refActions";
+import { refActionApplies } from "../lib/refActionApplies";
 import { useSlot } from "../modules/react";
 import type { AppSlotEntry } from "../modules/slots";
 import { useApp } from "../store";
@@ -18,7 +19,7 @@ export function RefActionButtons({ kind, build }: { kind: string; build(): Cutex
   const ref = build();
   const onHost = useHostEntryGate(ref?.hostId);
   if (!ref) return null;
-  return <>{entries.filter(e => e.mode === "show" && (!e.item.kinds || e.item.kinds.includes(kind)) && onHost(e)).map(entry => <RefActionButton key={entry.item.id} entry={entry} cref={ref} build={build} />)}</>;
+  return <>{entries.filter(e => refActionApplies(e, kind) && onHost(e)).map(entry => <RefActionButton key={entry.item.id} entry={entry} cref={ref} build={build} />)}</>;
 }
 
 function RefActionButton({ entry, cref, build }: { entry: AppSlotEntry<"ref.action">; cref: CutexRef; build(): CutexRef | null }) {

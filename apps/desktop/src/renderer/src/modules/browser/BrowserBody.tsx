@@ -6,12 +6,14 @@ import type { SideBodyProps } from "../slots";
 import { browserAddressUrl, browserError, browserErrorKey, browserExternalUrl, INVALID_ADDRESS, MAX_BROWSER_INPUT, NOT_WEB_ADDRESS, safeBrowserUrl, type BrowserState } from "./browserState";
 import { guestLifecycle } from "./guestLifecycle";
 import { useBrowserEnabled, useBrowserView } from "./tabs";
+import { browserSitePermissionList } from "./sitePermissionText";
 import { afterBrowserHostsDelivered, browserHostCurrent, useBrowserHostEpoch } from "./hosts";
 import { browserActivation } from "./activation";
 import { BrowserControlBanner, BrowserControlHeader } from "./BrowserControls";
 import { BrowserOwnerCapture } from "./BrowserOwnerCapture";
 import { createBrowserHold } from "./hold";
 import { reserveNewOwnerTab } from "./newOwnerTab";
+import { browserRefusalAction } from "../../../../shared/browser";
 
 const BUTTON = "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-subtle enabled:hover:bg-hover enabled:hover:text-foreground disabled:opacity-35";
 interface BrowserWebview extends HTMLElement { getWebContentsId(): number }
@@ -29,6 +31,9 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   const latest = useRef(props);
   latest.current = props;
   const requestedUrl = useRef<string | null>(null);
+  // The owner's last address-bar submission, so a refusal's single fix can retry exactly it.
+  const submitted = useRef<string | null>(null);
+  const [fixNote, setFixNote] = useState<"browser.refusal.forced" | null>(null);
   const [address, setAddress] = useState(view?.url ?? instance.state.url);
   const editing = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -141,6 +146,7 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
 
   function navigate(): void {
     if (!address.trim()) return;
+    setFixNote(null);
     const typed = browserAddressUrl(address);
     if ("error" in typed) { setError(typed.error); return; }
     const url = typed.url;
@@ -153,8 +159,21 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
       return;
     }
     if (!ready) return;
+    submitted.current = url;
     void run(() => bridge.browser!.forHost(hostId).navigate(tabKey, url));
     editing.current = false;
+  }
+
+  /** The one action that fixes this refusal; others only explain (never a misleading switch). */
+  function fixRefusal(action: "enableExternal" | "retry"): void {
+    if (!hostId || !bridge.browser) return;
+    const browser = bridge.browser, retry = submitted.current;
+    setFixNote(null);
+    void run(async () => {
+      if (action === "enableExternal" && !(await browser.externalPages(true)).enabled) { setFixNote("browser.refusal.forced"); return; }
+      if (retry) await browser.forHost(hostId).navigate(tabKey, retry);
+      else await browser.forHost(hostId).reload(tabKey);
+    });
   }
 
   function reload(): void {
@@ -165,6 +184,7 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
 
   const reason = error ?? view?.error;
   const reasonKey = reason ? browserErrorKey(reason) : null;
+  const fix = reason && ready ? browserRefusalAction(reason) : null;
   // Address-bar text the renderer refused before asking main (never a main / policy refusal).
   const addressKey = reason === NOT_WEB_ADDRESS ? "browser.notWebAddress" : reason === INVALID_ADDRESS ? "browser.invalidUrl" : null;
   const blank = currentUrl === "about:blank" && !view?.loading;
@@ -187,8 +207,17 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
       </form>
       <BrowserControlBanner hostId={hostId} tabKey={tabKey} />
       {(view?.pool === "agent" || instance.state.agentOpened) && <p role="alert" data-browser-isolated-warning className="shrink-0 border-b border-warn bg-background px-3 py-2 text-xs text-warn">{t("browser.origins.doNotSignIn")}</p>}
+      {view?.sitePermission && <p role={view.sitePermission.state === "waiting" ? "status" : "alert"} data-browser-site-permission={view.sitePermission.state}
+        className={`shrink-0 border-b border-border px-3 py-2 text-xs ${view.sitePermission.state === "waiting" ? "text-foreground" : "text-warn"}`}>
+        {t(view.sitePermission.state === "waiting" ? "browser.sitePermission.waiting" : view.sitePermission.state === "hidden" ? "browser.blocked.permissionHidden" : "browser.blocked.permissionTimeout",
+          { origin: view.sitePermission.origin, permissions: browserSitePermissionList(view.sitePermission.permissions) })}</p>}
       {granted && captureFailed && <p role="alert" className="shrink-0 border-b border-border px-3 py-2 text-xs text-danger">{t("browser.ownerCaptureFailed")}</p>}
-      {reason && <p role="alert" data-browser-address-error={addressKey ? reason : undefined} className="shrink-0 break-words border-b border-border px-3 py-2 text-xs text-danger">{addressKey ? t(addressKey) : t("browser.blocked", { reason: t(reasonKey!) })}</p>}
+      {reason && <div role="alert" data-browser-address-error={addressKey ? reason : undefined} data-browser-refusal={addressKey ? undefined : reason}
+        className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-xs text-danger">
+        <span className="min-w-0 flex-1 break-words">{addressKey ? t(addressKey) : t("browser.blocked", { reason: t(reasonKey!) })}{fixNote && <span className="ml-1 text-subtle">{t(fixNote)}</span>}</span>
+        {fix && <button type="button" data-browser-refusal-fix={fix} disabled={working} className="shrink-0 rounded-md border border-border px-2 py-0.5 text-foreground enabled:hover:bg-hover disabled:opacity-40"
+          onClick={() => fixRefusal(fix)}>{t(fix === "enableExternal" ? "browser.refusal.enableExternal" : "browser.refusal.retry")}</button>}
+      </div>}
       {!safeBrowserUrl(currentUrl) && <p role="status" className="shrink-0 border-b border-border px-3 py-1 text-xs text-subtle">{t("browser.longUrl")}</p>}
       <div className="relative min-h-0 flex-1">
         <div ref={host} data-browser-viewport className="absolute inset-0" style={{ visibility: !hostAvailable || crashed || invalidated ? "hidden" : "visible" }} />

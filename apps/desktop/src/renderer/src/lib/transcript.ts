@@ -67,6 +67,7 @@ export function timelineToMarkdown(title: string, entries: readonly TimelineEntr
         flush();
         out.push(...e.steps.map((s) => `- [${s.status === "completed" ? "x" : " "}] ${s.step}`), "");
         break;
+      case "notice":
       case "other":
         break;
     }

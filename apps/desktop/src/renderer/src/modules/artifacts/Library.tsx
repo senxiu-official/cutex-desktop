@@ -8,13 +8,14 @@ import { ArrowLeft, ArrowLeftRight, LayoutGrid, List, Loader2, Search, Star, Upl
 import { ARTIFACT_KINDS, artifactRef, type ArtifactKind, type ArtifactList, type ArtifactScope, type ArtifactSummary } from "../../../../shared/artifactStore";
 import { useI18n } from "../../i18n";
 import { contextMenu } from "../../lib/contextMenu";
+import { imageMimeFor, isGenericMime } from "../../lib/fileKinds";
 import { useThumbnail } from "../../lib/fileThumbnails";
 import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
 import { services } from "../app";
 import { agentHost, useApp } from "../../store";
 import type { SideBodyProps, SideOpen } from "../slots";
 import { artifactMenu, openDelegation, openVersion, refusalText } from "./actions";
-import { arrangeLibrary, DEFAULT_LIBRARY, initView, parseViewParams, VIEW, type ViewState, LIBRARY_SORTS, libraryQuery, libraryScopeKey, producerLabel, producerOptions, type ArchivedFilter, type LibraryScope, type LibrarySort, type LibraryState } from "./model";
+import { arrangeLibrary, DEFAULT_LIBRARY, initView, parseViewParams, previewKind, typePath, VIEW, type ViewState, LIBRARY_SORTS, libraryQuery, libraryScopeKey, producerLabel, producerOptions, type ArchivedFilter, type LibraryScope, type LibrarySort, type LibraryState } from "./model";
 import { KIND_ICON } from "./refTarget";
 import { invalidateArtifact, loadContent, useEpoch } from "./store";
 import { ViewActions, ViewBody } from "./View";
@@ -35,11 +36,11 @@ function useDebounced<T>(value: T, ms: number): T {
 const seconds = (iso: string) => (Date.parse(iso) || 0) / 1000;
 
 function Thumb({ hostId, a }: { hostId: string; a: ArtifactSummary }) {
-  const image = a.latest.mediaType.toLowerCase().startsWith("image/");
+  const image = previewKind(a.latest.mediaType, a.name, a.latest.sourcePath) === "image" || (a.kind === "figure" && isGenericMime(a.latest.mediaType));
   const { ref, state } = useThumbnail(image ? `${hostId}|artifact|${a.artifactId}@${a.latestVersion}` : null, () =>
     loadContent(hostId, a.artifactId, a.latestVersion, 2 * 1024 * 1024).then((c) => {
       if (!c) throw new Error("gone");
-      return { mime: c.mediaType, encoding: c.encoding, content: c.content, size: c.totalBytes, truncated: c.truncated };
+      return { mime: imageMimeFor(c.mediaType, typePath(a.name, a.latest.sourcePath)), encoding: c.encoding, content: c.content, size: c.totalBytes, truncated: c.truncated };
     }),
   );
   const Icon = KIND_ICON[a.kind];

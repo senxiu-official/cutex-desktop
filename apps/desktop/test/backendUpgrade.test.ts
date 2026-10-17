@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UpgradeRun, UpgradeStatus } from "../src/shared/backendUpgrade";
-import { applyRequest, canCancel, formatDuration, intervalChoices, intervalWords, minutesOf, refusalKey, runPhases, runSteps, upgradeAttention } from "../src/renderer/src/modules/backend-upgrade/model";
+import { applyRequest, canCancel, formatDuration, intervalChoices, intervalWords, minutesOf, modeKeys, RECENT_RUN_MS, refusalKey, releaseNative, runDisplay, runModeKeys, runPhases, runRuntime, runSteps, runtimeLine, upgradeAttention } from "../src/renderer/src/modules/backend-upgrade/model";
 import { OWNER_ONLY_CAPABILITIES } from "../src/shared/users";
 
 const SETTINGS = { channel: "release" as const, source: "https://example.invalid", checkIntervalHours: 6, autoStage: true, autoApply: false, packageRun: "after" as const, packageRunBatch: 5, maxWaitSecs: 3600 };
@@ -113,5 +113,59 @@ describe("backend upgrade apply body", () => {
     expect(applyRequest({ release: "r241", forceFull: false, effectiveMode: "full", waitMin: null, packageRun: null, oneWay: false })).toEqual({ release: "r241" });
     expect(applyRequest({ release: "r241", forceFull: true, effectiveMode: "full", waitMin: 5, packageRun: "during", oneWay: true })).toEqual({ release: "r241", mode: "full", maxWaitSecs: 300, packageRun: "during", confirmOneWay: "r241" });
     expect(applyRequest({ release: "r241", forceFull: false, effectiveMode: "reload", waitMin: 0, packageRun: "during", oneWay: false })).toEqual({ release: "r241", maxWaitSecs: 0 });
+  });
+});
+
+describe("backend upgrade: a finished run and the full-mode wording", () => {
+  const end = Date.parse("2026-10-16T05:00:00Z");
+  const done = run({ fromRelease: "0.1.0", toRelease: "0.1.1", mode: "full", phase: "committed", finishedAt: "2026-10-16T05:00:00Z" });
+
+  it("keeps the card only while the run goes or needs the owner; a finished one is a dismissable note for a day", () => {
+    expect(runDisplay(run({ phase: "waiting-idle" }), end, null)).toBe("card");
+    expect(runDisplay(run({ phase: "needs-owner", finishedAt: "2026-10-01T00:00:00Z" }), end, "upg-000000000001")).toBe("card");
+    // Just updated 0.1.0 → 0.1.1: no active card, a note.
+    expect(runDisplay(done, end + 60_000, null)).toBe("note");
+    expect(runDisplay(run({ phase: "rolled-back", finishedAt: "2026-10-16T05:00:00Z" }), end + 60_000, null)).toBe("note");
+    expect(runDisplay(done, end + 60_000, done.runId)).toBeNull();
+    expect(runDisplay(done, end + RECENT_RUN_MS + 1, null)).toBeNull();
+    expect(runDisplay(null, end, null)).toBeNull();
+  });
+
+  it("says new native runtime only when the release brings one", () => {
+    const staged = { release: "0.1.1", sequence: 2, stagedAt: "", manifestSha256: "x", preflightOk: true, nativeVersion: null };
+    const available = { release: "0.1.1", sequence: 2, tag: "v0.1.1", manifestSha256: "x", class: "rollback-safe" as const, mode: "full" as const, nativeVersion: null };
+    expect(releaseNative(status({ staged }), "0.1.1")).toBeNull();
+    expect(releaseNative(status({ available }), "0.1.1")).toBeNull();
+    expect(releaseNative(status({ staged: { ...staged, nativeVersion: "0.162.1-r53" } }), "0.1.1")).toBe("0.162.1-r53");
+    expect(releaseNative(status({ available: { ...available, nativeVersion: "0.162.1-r53" } }), "0.1.1")).toBe("0.162.1-r53");
+    expect(releaseNative(status({ available: { ...available, nativeVersion: "0.162.1-r53" } }), "0.1.2")).toBeNull();
+    expect(modeKeys("full", null)).toEqual({ mode: "backend-upgrade.mode.fullPackage", impact: "backend-upgrade.impact.fullPackage" });
+    expect(modeKeys("full", "0.162.1-r53")).toEqual({ mode: "backend-upgrade.mode.full", impact: "backend-upgrade.impact.full" });
+    expect(modeKeys("reload", "0.162.1-r53")).toEqual({ mode: "backend-upgrade.mode.reload", impact: "backend-upgrade.impact.reload" });
+  });
+
+  it("prefers the run's recorded runtimeChange (upgrade-run-native) over the manifest guess", () => {
+    const base = { mode: "full" as const };
+    // Recorded: wins over any guess, also a wrong one.
+    const pkg = runRuntime({ ...base, runtimeChange: "package", nativeVersion: null, previousNativeVersion: "0.160.0-r51" }, "0.162.1-r53");
+    expect(pkg).toEqual({ change: "package", native: null, previous: "0.160.0-r51", recorded: true });
+    expect(runModeKeys(pkg).mode).toBe("backend-upgrade.mode.fullPackage");
+    expect(runtimeLine(pkg)).toEqual({ key: "backend-upgrade.runtime.package", vars: {} });
+    const nat = runRuntime({ ...base, runtimeChange: "native", nativeVersion: "0.162.1-r53", previousNativeVersion: "0.160.0-r51" }, null);
+    expect(runModeKeys(nat).mode).toBe("backend-upgrade.mode.full");
+    expect(runtimeLine(nat)).toEqual({ key: "backend-upgrade.runtime.nativeFrom", vars: { from: "0.160.0-r51", to: "0.162.1-r53" } });
+    expect(runtimeLine(runRuntime({ ...base, runtimeChange: "native", nativeVersion: "0.162.1-r53", previousNativeVersion: null }, null))).toEqual({ key: "backend-upgrade.runtime.native", vars: { version: "0.162.1-r53" } });
+    const none = runRuntime({ mode: "reload", runtimeChange: "none", nativeVersion: "0.162.1-r53" }, null);
+    expect(runModeKeys(none).mode).toBe("backend-upgrade.mode.reload");
+    expect(runtimeLine(none)).toBeNull();
+    // Older cutex (field absent) or an older record (null) or an unknown value: the guess, and no line.
+    for (const runtimeChange of [undefined, null, "bogus" as never]) {
+      const guessed = runRuntime({ ...base, runtimeChange }, "0.162.1-r53");
+      expect(guessed).toEqual({ change: "native", native: "0.162.1-r53", previous: null, recorded: false });
+      expect(runModeKeys(guessed).mode).toBe("backend-upgrade.mode.full");
+      expect(runtimeLine(guessed)).toBeNull();
+    }
+    expect(runModeKeys(runRuntime(base, null)).mode).toBe("backend-upgrade.mode.fullPackage");
+    expect(runModeKeys(runRuntime({ mode: "reload" }, "0.162.1-r53")).mode).toBe("backend-upgrade.mode.reload");
   });
 });

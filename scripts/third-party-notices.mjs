@@ -5,7 +5,7 @@
 // next to Electron's LICENSE and LICENSES.chromium.html, which cover Electron / Chromium).
 //
 //   node scripts/third-party-notices.mjs [out-file]     (default: print to stdout)
-import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -51,11 +51,18 @@ function repoOf(pkg) {
   return typeof r === "string" ? r.replace(/^git\+/, "") : null;
 }
 
+/** License files of a bundled asset folder one level down (pdfjs-dist: standard_fonts/LICENSE_FOXIT, wasm/LICENSE_OPENJPEG …). */
+const ASSET_LICENSE_FILE = /^(LICEN[CS]E|COPYING|NOTICE)([._-][A-Z0-9_]+)?(\.(txt|md))?$/;
+
 function licenseTexts(dir) {
-  return readdirSync(dir)
-    .filter((f) => LICENSE_FILE.test(f))
-    .sort()
-    .map((f) => ({ file: f, text: readFileSync(join(dir, f), "utf8").replace(/\r\n/g, "\n").trim() }));
+  const read = (f) => ({ file: f, text: readFileSync(join(dir, f), "utf8").replace(/\r\n/g, "\n").trim() });
+  const top = readdirSync(dir).filter((f) => LICENSE_FILE.test(f)).sort();
+  const nested = readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && d.name !== "node_modules" && !d.name.startsWith("."))
+    .flatMap((d) => readdirSync(join(dir, d.name)).filter((f) => ASSET_LICENSE_FILE.test(f)).map((f) => `${d.name}/${f}`))
+    .filter((f) => statSync(join(dir, f)).isFile())
+    .sort();
+  return [...top, ...nested].map(read);
 }
 
 /** The THIRD_PARTY_NOTICES.md text for `appDir` (apps/desktop). */

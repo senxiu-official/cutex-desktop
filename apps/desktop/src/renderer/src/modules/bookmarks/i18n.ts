@@ -1,5 +1,5 @@
 export const zhCN = {
-  "bookmarks.home": "本会话书签", "bookmarks.browseAll": "查看全部", "bookmarks.back": "返回本会话", "bookmarks.close": "收起书签列表",
+  "bookmarks.home": "本会话书签", "bookmarks.homeEmpty": "本会话还没有 · 共 {n} 条", "bookmarks.browseAll": "查看全部","bookmarks.back": "返回本会话", "bookmarks.close": "收起书签列表",
   "bookmarks.projectPin": "在本项目的会话首页显示", "bookmarks.projectHint": "自动关联项目不会让其他会话看见；只有勾选后才加入项目导航",
   "bookmarks.title": "书签", "bookmarks.description": "收藏引用，临时查看内容或聚焦已有工具；保存在此设备", "bookmarks.list": "全部书签", "bookmarks.add": "加书签", "bookmarks.active": "已收藏（点击取消）",
   "bookmarks.saved": "已加书签", "bookmarks.existing": "这条引用已经收藏", "bookmarks.empty": "还没有书签。", "bookmarks.emptyHint": "在一轮回复下方的操作栏点书签图标，或用上方「收藏当前…」", "bookmarks.noMatch": "没有匹配的书签。", "bookmarks.removeArmed": "再点一次删除", "bookmarks.ribbon": "书签：{title} · 在左侧预览", "bookmarks.current": "当前{{agent}}", "bookmarks.other": "其他引用", "bookmarks.here": "收藏当前…", "bookmarks.hereEmpty": "当前没有可收藏的引用",
@@ -14,7 +14,7 @@ export const zhCN = {
 declare module "../i18nCatalog" { interface ModuleMessages extends Messages {} }
 type Messages = typeof zhCN;
 export const en: Record<keyof typeof zhCN, string> = {
-  "bookmarks.home": "Conversation bookmarks", "bookmarks.browseAll": "View all", "bookmarks.back": "Back to conversation", "bookmarks.close": "Close bookmark list",
+  "bookmarks.home": "Conversation bookmarks", "bookmarks.homeEmpty": "None in this conversation · {n} in all","bookmarks.browseAll": "View all", "bookmarks.back": "Back to conversation", "bookmarks.close": "Close bookmark list",
   "bookmarks.projectPin": "Show on this project's conversation home", "bookmarks.projectHint": "Automatic project association does not expose this bookmark in other conversations. Only an explicit selection adds it to project navigation.",
   "bookmarks.title": "Bookmarks", "bookmarks.description": "Save references to peek at content or focus existing tools; stored on this device.", "bookmarks.list": "All bookmarks", "bookmarks.add": "Bookmark", "bookmarks.active": "Bookmarked (click to remove)",
   "bookmarks.saved": "Bookmark saved", "bookmarks.existing": "This reference is already bookmarked", "bookmarks.empty": "No bookmarks yet.", "bookmarks.emptyHint": "Use the bookmark icon in a reply's action bar, or “Bookmark current…” above.", "bookmarks.noMatch": "No matching bookmarks.", "bookmarks.removeArmed": "Click again to remove", "bookmarks.ribbon": "Bookmark: {title} · preview on the left", "bookmarks.current": "Current {{agent}}", "bookmarks.other": "Other references", "bookmarks.here": "Bookmark current…", "bookmarks.hereEmpty": "Nothing referable is currently open",

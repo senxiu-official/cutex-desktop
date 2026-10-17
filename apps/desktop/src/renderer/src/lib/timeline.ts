@@ -1,7 +1,8 @@
 // Projects cute-codex thread history (thread/read) + live app-server notifications into a
 // renderable timeline. Pure and framework-free so it can be unit-tested.
+import { windowsSandboxSetupOutcomeOf, type WindowsSandboxSetupOutcome } from "../../../shared/windowsSandbox";
 import type { EventEnvelope, LatestPlan, LatestTokenUsage, PendingServerRequest } from "@cutex-desktop/protocol";
-import type { ThreadGoal } from "@cutex-desktop/protocol/codex/v2";
+import type { ApprovalsReviewer, GuardianApprovalReviewAction, GuardianApprovalReviewStatus, GuardianRiskLevel, GuardianUserAuthorization, ThreadGoal } from "@cutex-desktop/protocol/codex/v2";
 import { messageImages, type MessageImage } from "../../../shared/input";
 import { mergeRateLimits, type RateLimitsLike } from "./quota";
 import { nextPlan } from "./planState";
@@ -54,7 +55,50 @@ export type TimelineEntry =
   | { kind: "reasoning"; id: string; turnId: string; summary: string[]; content: string[]; streaming: boolean; startedAt: number | null; completedAt: number | null }
   /** A handled server request (question / approval / elicitation) kept as one row (lib/interactionLog). */
   | { kind: "interaction"; id: string; turnId: string; record: InteractionRecord }
+  /**
+   * Native's automatic approval reviewer outside a tool row: a review without a target item (network
+   * access) or a `guardianWarning` no running review accounts for.
+   */
+  | { kind: "notice"; id: string; turnId: string; review?: AutoReview; text?: string }
   | { kind: "other"; id: string; turnId: string; item: RawItem };
+
+/**
+ * One decision of Codex's automatic approval reviewer (`item/autoApprovalReview/started|completed`,
+ * [UNSTABLE] native shape). A review with a target item is shown on that tool row: the item carries it
+ * as `item.autoReview` (desktop-only field, re-attached whenever the item is replaced).
+ */
+export interface AutoReview {
+  reviewId: string;
+  targetItemId: string | null;
+  turnId: string;
+  status: GuardianApprovalReviewStatus;
+  riskLevel: GuardianRiskLevel | null;
+  userAuthorization: GuardianUserAuthorization | null;
+  rationale: string | null;
+  action: GuardianApprovalReviewAction | null;
+}
+
+/** The review a tool item carries (see {@link AutoReview}), else null. */
+export function autoReviewOf(item: RawItem): AutoReview | null {
+  const review = item.autoReview as AutoReview | undefined;
+  return review && typeof review.reviewId === "string" ? review : null;
+}
+
+/** An `item/autoApprovalReview/*` payload as an {@link AutoReview}, else null. */
+export function autoReviewFromParams(params: Record<string, unknown>, fallbackTurnId: string | null): AutoReview | null {
+  const review = params.review as { status?: unknown; riskLevel?: unknown; userAuthorization?: unknown; rationale?: unknown } | undefined;
+  if (typeof params.reviewId !== "string" || !review || typeof review.status !== "string") return null;
+  return {
+    reviewId: params.reviewId,
+    targetItemId: typeof params.targetItemId === "string" && params.targetItemId ? params.targetItemId : null,
+    turnId: typeof params.turnId === "string" && params.turnId ? params.turnId : (fallbackTurnId ?? ""),
+    status: review.status as GuardianApprovalReviewStatus,
+    riskLevel: typeof review.riskLevel === "string" ? (review.riskLevel as GuardianRiskLevel) : null,
+    userAuthorization: typeof review.userAuthorization === "string" ? (review.userAuthorization as GuardianUserAuthorization) : null,
+    rationale: typeof review.rationale === "string" && review.rationale.trim() ? review.rationale.trim() : null,
+    action: params.action && typeof params.action === "object" ? (params.action as GuardianApprovalReviewAction) : null,
+  };
+}
 
 /** One step of the model's `update_plan` todo list (TurnPlanStep on the wire). */
 export interface PlanStep {
@@ -116,6 +160,10 @@ export interface TimelineState {
    * this desktop saw on the host feed, else from cutex `latestPlan` (recovered from the rollout).
    */
   plan: PlanSnapshot | null;
+  /** Last native `windowsSandbox/setupCompleted` of this agent's runtime (cutex windows-sandbox-readiness). */
+  windowsSandboxSetup?: WindowsSandboxSetupOutcome | null;
+  /** Automatic-reviewer decisions seen live, by reviewId (thread/read has none). */
+  autoReviews?: Map<string, AutoReview>;
 }
 
 export interface ThreadSettingsView {
@@ -125,6 +173,8 @@ export interface ThreadSettingsView {
   /** Selected service tier (`priority` = Fast, `default` = standard, null = profile config). */
   serviceTier?: string | null;
   approvalPolicy?: unknown;
+  /** Who reviews escalations (native ThreadSettings / thread resume): `auto_review` = 「自动」. */
+  approvalsReviewer?: ApprovalsReviewer | null;
   sandboxPolicy?: { type?: string } | null;
   activePermissionProfile?: { id?: string } | null;
   cwd?: string | null;
@@ -393,7 +443,30 @@ function ensureTurn(state: TimelineState, turnId: string): TurnView {
 
 function upsert(state: TimelineState, entry: TimelineEntry): void {
   if (!state.entries.has(entry.id) && entry.turnId) ensureTurn(state, entry.turnId).entryIds.push(entry.id);
-  state.entries.set(entry.id, entry);
+  state.entries.set(entry.id, entry.kind === "tool" ? withReview(state, entry) : entry);
+}
+
+/** A tool entry with the latest review of its item attached (a replaced item loses the field). */
+function withReview(state: TimelineState, entry: Extract<TimelineEntry, { kind: "tool" }>): TimelineEntry {
+  let latest: AutoReview | null = null;
+  for (const review of state.autoReviews?.values() ?? []) if (review.targetItemId === entry.item.id) latest = review;
+  if (!latest || entry.item.autoReview === latest) return entry;
+  return { ...entry, item: { ...entry.item, autoReview: latest } };
+}
+
+/** Record a review and show it: on its tool row (now or once the item arrives), else as a notice. */
+function applyAutoReview(state: TimelineState, review: AutoReview): boolean {
+  const reviews = (state.autoReviews ??= new Map());
+  reviews.delete(review.reviewId); // keep insertion order = latest last
+  reviews.set(review.reviewId, review);
+  if (!review.targetItemId) {
+    if (!review.turnId) return true;
+    upsert(state, { kind: "notice", id: `autoReview:${review.reviewId}`, turnId: review.turnId, review });
+    return true;
+  }
+  const entry = state.entries.get(review.targetItemId);
+  if (entry?.kind === "tool") upsert(state, entry);
+  return true;
 }
 
 /**
@@ -542,6 +615,23 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
         state.answering.delete(key);
         return state.pending.delete(key);
       }
+      case "item/autoApprovalReview/started":
+      case "item/autoApprovalReview/completed": {
+        const review = autoReviewFromParams(params, state.activeTurnId);
+        return review ? applyAutoReview(state, review) : false;
+      }
+      case "guardianWarning": {
+        // The reviewer's one-line summary of a decision its review events already show; kept only
+        // when no review of the running turn is in progress (another reviewer message).
+        const turnId = state.activeTurnId;
+        const text = typeof params.message === "string" ? params.message.trim() : "";
+        if (!turnId || !text) return false;
+        for (const review of state.autoReviews?.values() ?? []) if (review.turnId === turnId && review.status === "inProgress") return false;
+        const id = `guardianWarning:${turnId}:${text}`;
+        if (state.entries.has(id)) return false;
+        upsert(state, { kind: "notice", id, turnId, text });
+        return true;
+      }
       case "thread/goal/updated": {
         state.goal = (params.goal as ThreadGoal | undefined) ?? state.goal;
         return true;
@@ -559,6 +649,12 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
         const usage = contextUsageOf(envelope);
         if (!usage) return false;
         state.contextUsage = { used: usage.used, window: usage.window };
+        return true;
+      }
+      case "windowsSandbox/setupCompleted": {
+        const outcome = windowsSandboxSetupOutcomeOf(params);
+        if (!outcome) return false;
+        state.windowsSandboxSetup = outcome;
         return true;
       }
       case "account/rateLimits/updated": {

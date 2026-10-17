@@ -1,5 +1,6 @@
 // Settings → 关于 (about module): the page shows the desktop version, the license and project links, and
-// every known issue (mirrored from docs/KNOWN-ISSUES.md) has zh-CN and en strings.
+// the built-in known issues (docs/known-issues.json, mirrored by docs/KNOWN-ISSUES.md) with zh-CN and en
+// strings. The fetched list (shared/knownIssues.ts, main/knownIssues.ts) is covered in knownIssues.test.ts.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement as h } from "react";
@@ -40,10 +41,15 @@ vi.mock("../src/renderer/src/modules/Outlet", async () => {
 });
 
 const { AboutPage } = await import("../src/renderer/src/components/settings/AppSettings");
-const { KNOWN_ISSUES, ABOUT_LINKS } = await import("../src/renderer/src/modules/about/knownIssues");
-const { zhCN } = await import("../src/renderer/src/i18n/zh-CN");
-const { en } = await import("../src/renderer/src/i18n/en");
+const { BUNDLED_KNOWN_ISSUES, ABOUT_LINKS } = await import("../src/renderer/src/modules/about/knownIssues");
+const { parseKnownIssues } = await import("../src/shared/knownIssues");
+const { applyTerms, DEFAULT_TERMS } = await import("../src/renderer/src/lib/terms");
 const about = (await import("../src/renderer/src/modules/about")).default;
+
+const root = join(__dirname, "../../..");
+const json = JSON.parse(readFileSync(join(root, "docs/known-issues.json"), "utf8")) as { issues: unknown[] };
+const en = (s: string) => applyTerms(s, DEFAULT_TERMS.en, "en");
+const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
 
 describe("about module", () => {
   const html = renderToStaticMarkup(h(AboutPage));
@@ -58,31 +64,44 @@ describe("about module", () => {
     expect(ABOUT_LINKS.find((l) => l.id === "knownIssues")?.url).toBe("https://github.com/senxiu-official/cutex-desktop/blob/release/docs/KNOWN-ISSUES.md");
   });
 
-  it("lists every known issue with its fix-version badge", () => {
-    for (const issue of KNOWN_ISSUES) {
+  it("lists every built-in known issue (no fetched list yet) with its fix-version badge", () => {
+    expect(html).toContain('data-known-issues-source="builtin"');
+    expect(html).toContain("about.sourceBuiltin");
+    for (const issue of BUNDLED_KNOWN_ISSUES.issues) {
       expect(html).toContain(`data-issue="${issue.id}"`);
-      expect(html).toContain(issue.titleKey);
-      expect(html).toContain(issue.bodyKey);
+      expect(html).toContain(escape(en(issue.title.en)));
+      expect(html).toContain(escape(en(issue.body.en)));
       if (issue.fixedIn) expect(html).toContain(`about.fixedIn(${issue.fixedIn})`);
     }
-    expect(new Set(KNOWN_ISSUES.map((i) => i.id)).size).toBe(KNOWN_ISSUES.length);
+    // Term tokens are filled in, never shown raw.
+    expect(html).not.toContain("{{");
   });
 
-  it("every known issue has zh-CN and en strings", () => {
-    const zh = zhCN as Record<string, string>;
-    const enMap = en as Record<string, string>;
-    for (const issue of KNOWN_ISSUES) {
-      for (const key of [issue.titleKey, issue.bodyKey, issue.workaroundKey].filter(Boolean) as string[]) {
-        expect(zh[key]?.trim(), `zh-CN ${key}`).toBeTruthy();
-        expect(enMap[key]?.trim(), `en ${key}`).toBeTruthy();
-        expect(zh[key], key).not.toBe(enMap[key]);
+  it("bundles docs/known-issues.json whole: every entry valid, zh-CN, zh-Hant-CN and en strings", () => {
+    // The app imports a byte-identical copy (app code may not import outside apps/desktop).
+    expect(readFileSync(join(root, "apps/desktop/src/renderer/src/modules/about/known-issues.bundled.json"), "utf8"), "copy docs/known-issues.json to modules/about/known-issues.bundled.json").toBe(readFileSync(join(root, "docs/known-issues.json"), "utf8"));
+    expect(BUNDLED_KNOWN_ISSUES.issues.length).toBeGreaterThan(0);
+    expect(BUNDLED_KNOWN_ISSUES.issues.length).toBe(json.issues.length);
+    expect(parseKnownIssues(json)).toEqual(BUNDLED_KNOWN_ISSUES);
+    for (const issue of BUNDLED_KNOWN_ISSUES.issues) {
+      for (const text of [issue.title, issue.body, issue.workaround].filter((v) => !!v)) {
+        expect(text!["zh-Hant-CN"], `${issue.id} zh-Hant-CN`).toBeTruthy();
+        expect(text!["zh-CN"], issue.id).not.toBe(text!.en);
       }
     }
   });
 
-  it("mirrors docs/KNOWN-ISSUES.md: one heading per entry, same count", () => {
-    const doc = readFileSync(join(__dirname, "../../../docs/KNOWN-ISSUES.md"), "utf8");
-    expect(doc.match(/^## /gm)?.length).toBe(KNOWN_ISSUES.length);
+  it("mirrors docs/KNOWN-ISSUES.md: same entries in the same order, same planned fix", () => {
+    const doc = readFileSync(join(root, "docs/KNOWN-ISSUES.md"), "utf8");
+    const sections = doc.split(/^## /m).slice(1);
+    expect(sections.map((s) => s.split("\n")[0]!.trim())).toEqual(BUNDLED_KNOWN_ISSUES.issues.map((i) => en(i.title.en)));
+    sections.forEach((section, n) => {
+      const issue = BUNDLED_KNOWN_ISSUES.issues[n]!;
+      const planned = /^- Planned fix: (.+)$/m.exec(section)?.[1] ?? "";
+      if (issue.fixedIn) expect(planned, issue.id).toContain(issue.fixedIn);
+      else expect(planned, issue.id).toMatch(/^not scheduled/);
+      expect(/^- Workaround: none/m.test(section), issue.id).toBe(!issue.workaround);
+    });
   });
 
   it("is a required module placing its sections on the shell's 关于 page", () => {

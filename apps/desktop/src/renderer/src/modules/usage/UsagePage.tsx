@@ -18,7 +18,7 @@ import { AddButton, ArmedRemove, Button, ErrorNote, IconButton, Loading, Planned
 import { knownProfileNames, useKnownProfiles } from "../../lib/settingsView";
 import { applyProfileOrder, profileOrderOf, useProfileOrder } from "../../lib/profileOrder";
 import { useUiPrefs } from "../../lib/prefs";
-import { formatBalance, gaugeName, latestObservedAt, observedClock, resetsIn, type QuotaGauge } from "../../lib/quota";
+import { formatBalance, gaugeName, latestObservedAt, observedClock, resetsIn, windowName, type QuotaGauge } from "../../lib/quota";
 import { formatTokens, isoDay, seriesName } from "../../lib/usage";
 import { useModulePref } from "../react";
 import { buckets, buildSeries, change, CURRENCIES, listSep, remainingColor, remainingRatio, formatMoney, niceScale, OTHER, seriesColor, smoothPath, stack, TOKEN_TYPES, type ChartMode, type Metric, type Split } from "./chart";
@@ -69,7 +69,9 @@ function GaugeLine({ g }: { g: QuotaGauge }) {
   const { t } = useI18n();
   const ratio = remainingRatio(g.remainingPercent);
   const win = g.windowLabel?.match(/^(\d+)([hd])$/);
-  const label = win ? t(win[2] === "h" ? "usage.window.hours" : "usage.window.days", { n: win[1]! }) : g.kind === "balance" && g.label.length <= 3 ? t("usage.balance") : gaugeName(g);
+  // A caption with a fixed meaning (`month` → 本月) names the line instead of the reader label.
+  const named = g.windowLabel && windowName(g.windowLabel) !== g.windowLabel ? windowName(g.windowLabel) : null;
+  const label = win ? t(win[2] === "h" ? "usage.window.hours" : "usage.window.days", { n: win[1]! }) : named ?? (g.kind === "balance" && g.label.length <= 3 ? t("usage.balance") : gaugeName(g));
   return (
     <div className={`grid grid-cols-[4.5rem_minmax(0,1fr)_4rem_minmax(0,8rem)] items-center gap-3 py-1 text-sm tabular-nums ${g.stale ? "opacity-60" : ""}`}>
       <span className="truncate text-xs text-muted">{label}</span>

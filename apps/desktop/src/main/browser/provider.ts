@@ -7,7 +7,7 @@ import type { BrowserViewportBounds } from "./visibility";
 
 export type BrowserProviderGuest = Pick<WebContents, "isDestroyed" | "debugger">;
 /** The native keyboard hook remains internal pending D-G V3; it is not an IPC input kind. */
-export type BrowserOwnerTakeoverSource = BrowserOwnerInputKind | "guest-keyboard";
+export type BrowserOwnerTakeoverSource = BrowserOwnerInputKind | "guest-keyboard" | "owner-pause";
 /** Main-only downward override for automatic owner attachments; never supplied by an agent. */
 export type BrowserProviderOperationOptions = OperationOptions & { hiddenTarget?: "reject" };
 export interface BrowserNavigationPreparation {
@@ -33,13 +33,28 @@ export interface InAppProviderOptions {
    * grant. Control never moves focus, so keyboard actions are refused before dispatch instead.
    */
   keyboardFocused?(guestId: string): Promise<boolean>;
+  /** After an agent pointer action moved app focus into this guest: hand it back to where the
+   * owner had it (composer, address bar). Fixed main-owned app-document script; never the page. */
+  restoreFocus?(guestId: string): Promise<void>;
+  now?(): number;
 }
+/** Owner keyboard input this recent counts as "typing": agent writes wait for the quiet. */
+export const BROWSER_OWNER_TYPING_QUIET_MS = 1200;
+/** Guest input this soon after an agent dispatch is attributed to that dispatch (D-G: Electron
+ * cannot tell CDP from native guest input). Errs toward NOT invalidating the agent's refs. */
+const AGENT_INPUT_GRACE_MS = 150;
+const READ_OPERATIONS: ReadonlySet<ExecutorOperation> = new Set(["read", "find", "wait", "screenshot"]);
+/** Reads that run without a visible card (minimized / hidden window). Screenshots still need it. */
+const BACKGROUND_READS: ReadonlySet<ExecutorOperation> = new Set(["read", "find"]);
 const KEYBOARD_OPERATIONS: ReadonlySet<ExecutorOperation> = new Set(["fill", "press"]);
 type Binding = { alive: boolean; retiring: boolean; scale: number; executor?: BrowserCdpExecutor; cleanup: (() => void)[] };
 type Entry = {
   id: string; guest: BrowserProviderGuest; settings: BrowserControlSettings; state: "granted" | "paused";
   grantee: string;
   busy: boolean; operating: boolean; blocked: number; binding?: Binding;
+  /** Co-control: last owner keyboard input in the guest / app, last owner guest input of any kind,
+   * and the end of the agent's own dispatch window (input before then is the agent's). */
+  typingAt: number; agentInputUntil: number; acting: boolean;
   operation?: BrowserProviderOperationOptions;
   idle?: ReturnType<typeof setTimeout>; linger?: ReturnType<typeof setTimeout>;
 };
@@ -105,7 +120,7 @@ export class InAppProvider {
     if (!guest || guest.isDestroyed()) throw closed();
     this.release(guestId);
     const entry: Entry = { id: guestId, guest, settings: { ...settings, viewport: { ...settings.viewport } },
-      state: "granted", grantee: options.grantee ?? "Agent", busy: true, operating: false, blocked: 0 };
+      state: "granted", grantee: options.grantee ?? "Agent", busy: true, operating: false, blocked: 0, typingAt: -Infinity, agentInputUntil: -Infinity, acting: false };
     this.entries.set(guestId, entry);
     this.changed(entry);
     try {
@@ -125,9 +140,33 @@ export class InAppProvider {
   }
 
   /**
-   * Trusted host capture/native-keyboard callers supply provenance; this method only downgrades
-   * existing authority. No host/epoch lookup, input forwarding, timing or operating exemption.
-   * Revoke before cleanup so duplicate/reentrant inputs cannot stop the same binding twice.
+   * Co-control (0.1.3): the owner's own clicks, scrolls and reading never pause the agent. Owner
+   * input in the guest makes the agent's earlier snapshot stale (it must read again before a ref
+   * action); owner typing (guest or app) makes agent writes wait for a short quiet.
+   * kind: where the input happened. Never grants, resumes or forwards anything.
+   */
+  ownerActivity(guestId: string | undefined, kind: "guest-keyboard" | "guest-pointer" | "app-keyboard"): void {
+    const now = this.now();
+    for (const entry of guestId === undefined ? this.entries.values() : [this.entries.get(guestId)].filter(e => !!e) as Entry[]) {
+      const agentEcho = kind !== "app-keyboard" && (entry.acting || now <= entry.agentInputUntil);
+      if (kind !== "guest-pointer" && !agentEcho) entry.typingAt = now;
+      if (kind !== "app-keyboard" && !agentEcho) entry.binding?.executor?.expireRefs();
+    }
+  }
+  /** Input arriving now is the agent's own dispatch (during it or within its short echo window). */
+  agentInput(guestId: string): boolean {
+    const entry = this.entries.get(guestId);
+    return !!entry && (entry.acting || this.now() <= entry.agentInputUntil);
+  }
+  /** True while the owner typed within the quiet window (renderer/tests may read it). */
+  ownerTyping(guestId: string): boolean {
+    const entry = this.entries.get(guestId);
+    return !!entry && this.now() - entry.typingAt < BROWSER_OWNER_TYPING_QUIET_MS;
+  }
+  private now(): number { return this.options.now?.() ?? Date.now(); }
+  /**
+   * The owner's explicit 「暂停智能体」 (and the legacy capture input kinds, now only from an old
+   * renderer): downgrade only. Revoke before cleanup so duplicates cannot stop a binding twice.
    */
   ownerTakeover(guestId: string, _source: BrowserOwnerTakeoverSource): void {
     const entry = this.entries.get(guestId);
@@ -211,6 +250,16 @@ export class InAppProvider {
     });
   }
 
+  private async ownerQuiet(entry: Entry, control: OperationOptions): Promise<void> {
+    for (;;) {
+      const wait = entry.typingAt + BROWSER_OWNER_TYPING_QUIET_MS - this.now();
+      if (wait <= 0) return;
+      if (control.deadline !== undefined && this.now() + wait >= control.deadline)
+        throw new ProtocolError("busy", "The owner is typing in the app; try this action again shortly");
+      await waitOperation(new Promise<void>(resolve => { const timer = setTimeout(resolve, Math.min(wait, 100)); timer.unref?.(); }), control);
+      this.authorize(entry);
+    }
+  }
   private authorize(entry: Entry): void {
     if (this.disposed || this.options.getGuest(entry.id) !== entry.guest || entry.guest.isDestroyed()) throw closed();
     if (this.entries.get(entry.id) !== entry || entry.state !== "granted") throw denied();
@@ -221,13 +270,22 @@ export class InAppProvider {
     if (entry.linger) clearTimeout(entry.linger);
     entry.idle = entry.linger = undefined;
   }
-  private async ensureBinding(entry: Entry, operation: BrowserProviderOperationOptions = {}): Promise<BrowserCdpExecutor> {
+  private async ensureBinding(entry: Entry, operation: BrowserProviderOperationOptions = {}, background = false): Promise<BrowserCdpExecutor> {
     checkOperation(operation);
     await waitOperation(this.retiring.get(entry.guest), operation);
     this.authorize(entry);
     checkOperation(operation);
     const visibleSettings = operation.hiddenTarget === "reject" ? { ...entry.settings, hiddenTarget: "reject" as const } : entry.settings;
-    const bounds = await waitOperation(this.options.ensureVisible(entry.id, visibleSettings, operation), operation);
+    let bounds: BrowserViewportBounds | undefined;
+    try { bounds = await waitOperation(this.options.ensureVisible(entry.id, background ? { ...visibleSettings, hiddenTarget: "reject" } : visibleSettings, operation), operation); }
+    catch (error) {
+      // A minimized / hidden window still answers read and find (DOM only, no input, no reveal).
+      if (!background || (error as { code?: unknown })?.code !== "target_hidden") throw error;
+      this.authorize(entry);
+      checkOperation(operation);
+      if (entry.binding?.alive && entry.binding.executor) return entry.binding.executor;
+      bounds = { width: entry.settings.viewport.width, height: entry.settings.viewport.height };
+    }
     this.authorize(entry);
     checkOperation(operation);
     const scale = this.fitScale(entry, bounds!);
@@ -354,16 +412,30 @@ export class InAppProvider {
     entry.operating = true;
     this.changed(entry);
     const blocked = entry.blocked;
+    const write = !READ_OPERATIONS.has(operation);
+    let focusedBefore: boolean | undefined;
     try {
+      // Co-control: a write waits while the owner is typing (guest or app), never past its deadline.
+      if (write) await this.ownerQuiet(entry, control);
       if (KEYBOARD_OPERATIONS.has(operation) && this.options.keyboardFocused) {
         const focused = await waitOperation(this.options.keyboardFocused(guestId), control);
         this.authorize(entry);
         if (focused !== true) throw new ProtocolError("unsupported_operation",
           "Keyboard input needs this page to hold the app's keyboard focus; the in-app browser never moves focus, so fill/press are unavailable here");
-      }
-      const executor = await this.ensureBinding(entry, control);
+      } else if (write && this.options.restoreFocus && this.options.keyboardFocused)
+        focusedBefore = await waitOperation(this.options.keyboardFocused(guestId), control).catch(() => undefined);
+      const executor = await this.ensureBinding(entry, control, BACKGROUND_READS.has(operation));
       checkOperation(control);
-      const result = await body(executor, control);
+      if (write) await this.ownerQuiet(entry, control); // owner may have started typing meanwhile
+      let result: T;
+      entry.acting = write;
+      try { result = await body(executor, control); }
+      finally {
+        entry.acting = false;
+        if (write) entry.agentInputUntil = this.now() + AGENT_INPUT_GRACE_MS;
+        // A pointer action of the agent can move app focus into the page; give it back.
+        if (focusedBefore === false) void this.options.restoreFocus!(guestId).catch(() => {});
+      }
       // A completed mutating executor result racing owner revocation is not safe to replay.
       try { this.authorize(entry); } catch (error) {
         if (!["read", "find", "wait", "screenshot"].includes(operation))

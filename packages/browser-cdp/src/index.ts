@@ -420,6 +420,11 @@ export class BrowserCdpExecutor {
     });
   }
 
+  /**
+   * The owner interacted with the page (co-control): every ref from an earlier snapshot is stale,
+   * so the next ref action must read again. Page generation is unchanged (no navigation happened).
+   */
+  expireRefs(): void { this.refs.clear(); }
   /** Immediate, terminal revocation. Host separately detaches debugger / releases its lease. */
   stop(): void {
     this.stopped = true;

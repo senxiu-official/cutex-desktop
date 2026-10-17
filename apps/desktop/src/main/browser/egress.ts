@@ -9,8 +9,14 @@ type Loader = () => Promise<{ startBrowserEgressProxy: typeof startBrowserEgress
  * owner switch 「允许浏览外部网页」, re-read on every check: while it is off the proxy module is
  * never imported, no listener exists and no session is touched. Turning it off must be followed
  * by stop(), which closes the listener and restores every configured session synchronously. */
-export function createBrowserEgress(options: { isEnabled: () => boolean; load?: Loader }) {
+export function createBrowserEgress(options: { isEnabled: () => boolean; load?: Loader;
+  /** Owner-admitted LAN / tailnet authorities (main's per-tab admissions). The proxy also runs for
+   * these while websites are off; it then dials only them, never a public target. */
+  lanAllowed?: (hostname: string, port: number) => boolean; hasLan?: () => boolean }) {
   const on = () => { try { return options.isEnabled() === true; } catch { return false; } };
+  const lan = () => { try { return options.hasLan?.() === true; } catch { return false; } };
+  /** Proxy wanted at all: websites on, or at least one admitted LAN target. */
+  const wanted = () => on() || lan();
   let generation = 0, current: Proxy | undefined, starting: Promise<Proxy> | undefined;
   const sessions = new Set<Session>();
   const configured = new Set<Session>();
@@ -41,7 +47,8 @@ export function createBrowserEgress(options: { isEnabled: () => boolean; load?: 
       const module = await (options.load ?? (() => import("./egressProxy")))();
       if (admitted !== generation) throw new Error("browser_egress_revoked");
       let proxy: Proxy | undefined;
-      proxy = await module.startBrowserEgressProxy({ onClosed() { if (proxy && current === proxy) stop(); } });
+      proxy = await module.startBrowserEgressProxy({ onClosed() { if (proxy && current === proxy) stop(); },
+        publicAllowed: on, lanAllowed: (hostname, port) => options.lanAllowed?.(hostname, port) === true });
       if (admitted !== generation) { await proxy.close(); throw new Error("browser_egress_revoked"); }
       current = proxy; return proxy;
     })();
@@ -50,7 +57,7 @@ export function createBrowserEgress(options: { isEnabled: () => boolean; load?: 
   }
   return {
     async enableSession(session: Session): Promise<void> {
-      if (!on() || sessions.has(session)) return;
+      if (!wanted() || sessions.has(session)) return;
       const admitted = generation, sessionGeneration = sessionGenerations.get(session) ?? 0;
       let proxy: Proxy | undefined;
       const check = () => {
@@ -59,11 +66,11 @@ export function createBrowserEgress(options: { isEnabled: () => boolean; load?: 
       };
       try {
         proxy = await start(); check();
-        if (!on()) throw new Error("browser_egress_revoked");
+        if (!wanted()) throw new Error("browser_egress_revoked");
         configured.add(session);
         await queueBrowserSessionProxy(session, async () => {
           check();
-          if (!on()) throw new Error("browser_egress_revoked");
+          if (!wanted()) throw new Error("browser_egress_revoked");
           if (sessions.has(session)) return;
           await session.setProxy({ mode: "fixed_servers", proxyRules: `http://127.0.0.1:${proxy!.port}`,
             proxyBypassRules: BROWSER_LOCAL_PROXY.proxyBypassRules });
@@ -80,12 +87,22 @@ export function createBrowserEgress(options: { isEnabled: () => boolean; load?: 
       }
     },
     isEnabled: on,
+    /** Whether a LAN navigation can use this partition's proxy right now. */
+    lanState(session: Session): "ready" | "unavailable" { return wanted() && sessions.has(session) && !!current ? "ready" : "unavailable"; },
     isAllowed(url: string): boolean { return on() && sessions.size > 0 && current?.isPublicBrowserUrl(url) === true; },
     isSessionAllowed(session: Session, url: string): boolean { return on() && sessions.has(session) && current?.isPublicBrowserUrl(url) === true; },
+    /** For a syntactically public URL: off = owner switch off; unavailable = on, but this
+     * partition's proxy session is not (yet / any more) configured. */
+    sessionState(session: Session, url: string): "ready" | "off" | "unavailable" {
+      if (!on()) return "off";
+      return sessions.has(session) && current?.isPublicBrowserUrl(url) === true ? "ready" : "unavailable";
+    },
+    /** The live N2 listener port (a desktop-loopback control endpoint pages must never reach). */
+    port(): number | undefined { return current?.port; },
     /** Caller separately proves exact registered guest, host fence and session identity. */
     credentialsFor(session: Session, info: AuthInfo): Readonly<{ username: string; password: string }> | undefined {
       const proxy = current;
-      if (!on() || !proxy || !sessions.has(session) || info.isProxy !== true || info.host !== "127.0.0.1"
+      if (!wanted() || !proxy || !sessions.has(session) || info.isProxy !== true || info.host !== "127.0.0.1"
         || info.port !== proxy.port || info.scheme.toLowerCase() !== "basic" || info.realm !== proxy.credentials.realm) return;
       return { username: proxy.credentials.username, password: proxy.credentials.password };
     },

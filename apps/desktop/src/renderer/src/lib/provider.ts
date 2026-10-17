@@ -23,7 +23,7 @@ const KNOWN = new Set<string>(["kimi", "glm", "zai", "claude", "deepseek", "code
 const HOSTS: [RegExp, Provider][] = [
   [/(^|\.)bigmodel\.cn$/, "glm"],
   [/(^|\.)z\.ai$/, "zai"],
-  [/(^|\.)(moonshot\.(cn|ai)|kimi\.com)$/, "kimi"],
+  [/(^|\.)(moonshot\.(cn|ai)|kimi\.(com|ai))$/, "kimi"],
   [/(^|\.)deepseek\.com$/, "deepseek"],
   [/(^|\.)anthropic\.com$/, "claude"],
   [/(^|\.)(dashscope(-intl)?\.aliyuncs\.com|qwen\.ai)$/, "qwen"],
@@ -33,6 +33,8 @@ const HOSTS: [RegExp, Provider][] = [
 const NAMES: [RegExp, Provider][] = [
   [/glm|zhipu|bigmodel/i, "glm"],
   [/kimi|moonshot/i, "kimi"],
+  // Kimi Code's K3 model ids (`k3`, `k3-256k`).
+  [/^k3($|-)/i, "kimi"],
   [/deepseek/i, "deepseek"],
   [/claude|anthropic/i, "claude"],
   [/codex|chatgpt|openai|gpt-/i, "codex"],

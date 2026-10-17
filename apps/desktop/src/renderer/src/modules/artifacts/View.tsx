@@ -1,16 +1,20 @@
-// 成果 view (artifacts.view): one artifact at a pinned version or following its latest — preview
-// (markdown, HTML page in the offline opaque frame with a 源代码 toggle, image, CSV / TSV table, text / code), 来源 (producer, turn, delegation, git, path, sha,
-// note, auto-capture attribution) and 对比 (two text versions; also as a diff card). The version
+// 成果 view (artifacts.view): one artifact at a pinned version or following its latest, in one row of
+// tabs — 预览 (markdown rendered, HTML page in the offline opaque frame, image, CSV / TSV table, text /
+// code, PDF / DOCX), 源代码 (markdown / HTML / CSV / TSV only: the text itself), 出处 (producer, turn,
+// delegation, git, path, sha, note, auto-capture attribution; pane id "source") and 对比 (two text
+// versions; also as a diff card). The version
 // picker opens the other identity as its own tab (pinned and latest are different tabs); an old
 // pinned version says so with a 「看最新」 banner. Never falls back from a missing version to the latest.
 import { useEffect, useState, type ReactNode } from "react";
 import { AlertTriangle, ArrowLeftRight, Copy, ExternalLink, History, Loader2, RefreshCw } from "lucide-react";
 import { artifactRef, parseArtifactRef, type ArtifactContent, type ArtifactDetail, type ArtifactDiff, type ArtifactVersion } from "../../../../shared/artifactStore";
+import { DocumentPreview } from "../../components/DocumentPreview";
 import { Markdown } from "../../components/Markdown";
 import { UnifiedDiff } from "../../components/UnifiedDiff";
 import { useI18n, type MessageKey } from "../../i18n";
 import { contextMenu } from "../../lib/contextMenu";
-import { thumbnailSrc } from "../../lib/fileKinds";
+import { docKindOf, loadWindowedDoc } from "../../lib/docPreview";
+import { extensionOf, thumbnailSrc } from "../../lib/fileKinds";
 import { copyText } from "../../lib/menus";
 import { DIFF_COMPONENT } from "../../lib/sideKinds";
 import { useModelName } from "../../lib/modelDisplay";
@@ -19,9 +23,10 @@ import { languageFor } from "../../lib/workspace";
 import { services } from "../app";
 import type { SideBodyProps, SideOpen } from "../slots";
 import { artifactMenu, copyArtifactLink, explainOpen, openDelegation, openVersion, useDelegationTitle } from "./actions";
-import { attributionText, diffGap, externalGone, fence, formatBytes, isOldVersion, jsonRecordOf, parseDelimited, previewKind, previousVersion, producerLabel, resolveVersion, sessionName, type ViewPane, type ViewState } from "./model";
+import { attributionText, currentTab, diffGap, externalGone, fence, formatBytes, isOldVersion, jsonRecordOf, parseDelimited, previewKind, previousVersion, producerLabel, resolveVersion, sessionName, typePath, viewTabs, withTab, type ViewState, type ViewTab } from "./model";
 import { JsonRecord } from "./JsonRecord";
 import { PageFrame, type PageProblem } from "./PageFrame";
+import { TextPreview } from "./TextPreview";
 import { KIND_ICON } from "./refTarget";
 import { loadContent, loadDiff, useCachedDetail, useDetail } from "./store";
 
@@ -70,8 +75,8 @@ function Table({ rows }: { rows: string[][] }) {
   );
 }
 
-/** 「页面 / 源代码」 of an HTML artifact. */
-function PageToggle({ code, setCode, labels = ["artifacts.page.page", "artifacts.page.code"] }: { code: boolean; setCode(code: boolean): void; labels?: [MessageKey, MessageKey] }) {
+/** 「整理 / 原文」 of a JSON record (Markdown / HTML / tables use the 源代码 tab instead). */
+function PageToggle({ code, setCode, labels }: { code: boolean; setCode(code: boolean): void; labels: [MessageKey, MessageKey] }) {
   const { t } = useI18n();
   const item = (value: boolean, label: string) => (
     <button
@@ -102,9 +107,11 @@ const PAGE_PROBLEM_KEY: Record<PageProblem, MessageKey> = {
   "external-changed": "artifacts.externalGone",
 };
 
-function Preview({ hostId, name, version, code = false, setCode }: { hostId: string; name: string; version: ArtifactVersion; code?: boolean; setCode?(code: boolean): void }) {
+/** `code`: the 源代码 tab (hasCodeView kinds; the caller remounts on a switch, so a page problem is retried). */
+function Preview({ hostId, name, version, code = false }: { hostId: string; name: string; version: ArtifactVersion; code?: boolean }) {
   const { t } = useI18n();
-  const kind = previewKind(version.mediaType, name || version.sourcePath);
+  const typed = typePath(name, version.sourcePath) || version.sourcePath;
+  const kind = previewKind(version.mediaType, name, version.sourcePath);
   const maxBytes = kind === "image" ? IMAGE_BYTES : kind === "csv" || kind === "tsv" ? TABLE_BYTES : TEXT_BYTES;
   const [content, setContent] = useState<{ key: string; value: ArtifactContent | null; error?: string } | null>(null);
   const key = `${version.artifactId}@${version.version}`;
@@ -125,16 +132,28 @@ function Preview({ hostId, name, version, code = false, setCode }: { hostId: str
     };
   }, [hostId, key, kind, maxBytes, version.artifactId, version.version, asPage]);
   const size = formatBytes(version.bytes);
-  const toggle = kind === "html" && setCode ? <PageToggle code={code || !!pageProblem} setCode={(next) => { setProblem(null); setCode(next); }} /> : null;
-  if (asPage)
+  // PDF / DOCX (and the office formats we only describe): components/DocumentPreview.tsx.
+  const doc = kind === "binary" ? docKindOf(typed, version.mediaType) : null;
+  if (doc)
     return (
-      <>
-        {toggle}
-        <PageFrame hostId={hostId} artifactId={version.artifactId} version={version.version} title={name} onProblem={(p) => setProblem({ key, problem: p })} />
-      </>
+      <div className="flex min-h-72 flex-1 flex-col">
+        <DocumentPreview
+          name={extensionOf(name) === extensionOf(typed) ? name : (typed.split(/[\\/]/).pop() ?? name)}
+          mime={version.mediaType}
+          loadKey={`${hostId}|${key}`}
+          load={() =>
+            loadWindowedDoc(doc, typed, version.bytes, async (offset, maxBytes) => {
+              const c = await services.daemonFor(hostId).artifactStoreContent(version.artifactId, version.version, { offset, maxBytes });
+              if (c && externalGone(c)) throw new Error(t("artifacts.externalGone"));
+              return c;
+            })
+          }
+        />
+      </div>
     );
+  if (asPage) return <PageFrame hostId={hostId} artifactId={version.artifactId} version={version.version} title={name} onProblem={(p) => setProblem({ key, problem: p })} />;
   if (kind === "binary") return <Note>{t("artifacts.binary", { type: version.mediaType || "?", size })}</Note>;
-  if (!content || content.key !== key) return <>{toggle}<p className="p-3 text-xs text-subtle">{t("artifacts.loading")}</p></>;
+  if (!content || content.key !== key) return <p className="p-3 text-xs text-subtle">{t("artifacts.loading")}</p>;
   if (content.error) return <Note tone="danger">{t("artifacts.loadFailed", { error: content.error })}</Note>;
   const c = content.value;
   if (!c) return <Note tone="danger">{t("artifacts.versionGone", { n: version.version })}</Note>;
@@ -142,14 +161,13 @@ function Preview({ hostId, name, version, code = false, setCode }: { hostId: str
   if (externalGone(c)) return <Note tone="warn">{t("artifacts.externalGone")}</Note>;
   const warnings = (
     <>
-      {toggle}
       {pageProblem && pageProblem !== "navigated" && <Note tone={pageProblem === "unavailable" ? "muted" : "warn"}>{t(PAGE_PROBLEM_KEY[pageProblem])}</Note>}
       {c.externalChanged && <Note tone="warn">{t("artifacts.externalChanged")}</Note>}
       {c.truncated && kind !== "image" && <Note>{t("artifacts.truncated", { size: formatBytes(c.content.length) })}</Note>}
     </>
   );
   if (kind === "image") {
-    const src = thumbnailSrc({ mime: c.mediaType || version.mediaType, encoding: c.encoding, content: c.content, size: c.totalBytes, truncated: c.truncated });
+    const src = thumbnailSrc({ mime: c.mediaType || version.mediaType, encoding: c.encoding, content: c.content, size: c.totalBytes, truncated: c.truncated }, typed);
     return (
       <>
         {warnings}
@@ -158,7 +176,7 @@ function Preview({ hostId, name, version, code = false, setCode }: { hostId: str
     );
   }
   if (c.encoding === "base64") return <Note>{t("artifacts.binary", { type: version.mediaType || "?", size })}</Note>;
-  if (kind === "csv" || kind === "tsv") {
+  if ((kind === "csv" || kind === "tsv") && !code) {
     const { rows, more } = parseDelimited(c.content, kind === "csv" ? "," : "\t", CSV_ROWS + 1);
     return (
       <>
@@ -188,13 +206,13 @@ function Preview({ hostId, name, version, code = false, setCode }: { hostId: str
     <>
       {warnings}
       <div className="px-3 py-1">
-        <Markdown document={kind === "markdown"} text={kind === "markdown" ? c.content : fence(c.content, kind === "html" ? "html" : languageFor(name || version.sourcePath))} />
+        <TextPreview kind={kind} text={c.content} code={code} lang={kind === "html" ? "html" : languageFor(typed)} />
       </div>
     </>
   );
 }
 
-// ── 来源 ─────────────────────────────────────────────────────────────────────────────────────────
+// ── 出处 ─────────────────────────────────────────────────────────────────────────────────────────
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -378,7 +396,7 @@ function Compare({ hostId, detail, version, open }: { hostId: string; detail: Ar
 
 // ── the card ─────────────────────────────────────────────────────────────────────────────────────
 
-const PANES: readonly ViewPane[] = ["preview", "source", "compare"];
+const TAB_LABEL: Record<ViewTab, MessageKey> = { preview: "artifacts.pane.preview", code: "artifacts.page.code", origin: "artifacts.pane.origin", compare: "artifacts.pane.compare" };
 
 export function ViewBody({ instance, hostId, setState, open }: SideBodyProps<ViewState>) {
   const { t, locale } = useI18n();
@@ -399,6 +417,8 @@ export function ViewBody({ instance, hostId, setState, open }: SideBodyProps<Vie
   const a = detail.artifact;
   const version = resolveVersion(detail, parts.version);
   const Icon = KIND_ICON[a.kind];
+  const kind = version ? previewKind(version.mediaType, a.name, version.sourcePath) : "binary";
+  const selected = currentTab(state, kind);
   const pickVersion = (value: string) => openVersion(open, artifactRef(a.artifactId, value === "latest" ? "latest" : Number(value)), a.name);
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -444,15 +464,17 @@ export function ViewBody({ instance, hostId, setState, open }: SideBodyProps<Vie
       ) : (
         <>
           <div role="tablist" className="flex shrink-0 gap-0.5 px-2 pt-1">
-            {PANES.map((p) => (
+            {viewTabs(kind).map((tab) => (
               <button
-                key={p}
+                key={tab}
                 role="tab"
-                aria-selected={state.pane === p}
-                onClick={() => setState({ ...state, pane: p })}
-                className={`rounded-md px-2 py-0.5 text-[11.5px] ${state.pane === p ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:bg-hover"}`}
+                data-tab={tab}
+                aria-selected={selected === tab}
+                title={tab === "origin" ? t("artifacts.pane.originHint") : undefined}
+                onClick={() => setState(withTab(state, tab))}
+                className={`shrink-0 rounded-md px-2 py-0.5 text-[11.5px] whitespace-nowrap ${selected === tab ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:bg-hover"}`}
               >
-                {t(`artifacts.pane.${p}`)}
+                {t(TAB_LABEL[tab])}
               </button>
             ))}
             <span className="ml-auto self-center truncate pl-2 text-[11px] text-subtle" title={producerLabel(version.producer, t)}>
@@ -467,16 +489,7 @@ export function ViewBody({ instance, hostId, setState, open }: SideBodyProps<Vie
             ) : (
               <>
                 {version.storage === "external" && <Note>{t("artifacts.externalNote")}</Note>}
-                <Preview
-                  hostId={hostId}
-                  name={a.name}
-                  version={version}
-                  code={!!state.code}
-                  setCode={(code) => {
-                    const { code: _old, ...rest } = state;
-                    setState(code ? { ...rest, code: true } : rest);
-                  }}
-                />
+                <Preview key={selected} hostId={hostId} name={a.name} version={version} code={selected === "code"} />
               </>
             )}
           </div>

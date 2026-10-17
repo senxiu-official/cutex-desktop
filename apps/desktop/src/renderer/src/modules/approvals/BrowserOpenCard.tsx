@@ -8,6 +8,7 @@ import { browserOwnerErrorKey } from "../../../../shared/browser";
 import { bridge } from "../../bridge";
 import { useI18n, type MessageKey } from "../../i18n";
 import { approvalFacts } from "../../lib/approvals";
+import { ApprovalSource } from "../../components/ApprovalSource";
 
 export function BrowserOpenCard({ hostId, approval }: { hostId: string; approval: ApprovalRecord }) {
   const { t } = useI18n();
@@ -36,6 +37,7 @@ export function BrowserOpenCard({ hostId, approval }: { hostId: string; approval
       <div className="flex items-center gap-2 pr-5 text-sm font-medium">
         <Globe size={14} className="shrink-0 text-accent" />
         <span className="min-w-0 truncate">{t("approvals.open.title", { name: approval.requesterName ?? "" })}</span>
+        <ApprovalSource source="cutex" className="ml-auto" />
       </div>
       {facts.length > 0 && (
         <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">

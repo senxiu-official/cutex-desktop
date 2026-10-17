@@ -180,7 +180,21 @@ export interface UpgradeRun {
   runnerPid?: number | null;
   displaced?: string[];
   selectionBackup?: string;
+  // Capability `upgrade-run-native` (recorded when the run is prepared; null on older records, absent
+  // on older cutex):
+  /** The cute-codex native the target release carries (apply: staged manifest; rollback: target's installed one). */
+  nativeVersion?: string | null;
+  /** Apply: the native selected for new agents then; rollback: the running release's. */
+  previousNativeVersion?: string | null;
+  /** native = full + another native; package = full, same native (runtime package only); none = reload. */
+  runtimeChange?: UpgradeRuntimeChange | null;
 }
+
+/** What a run does to the runtime new agents get (`UpgradeRun.runtimeChange`). */
+export type UpgradeRuntimeChange = "native" | "package" | "none";
+export const UPGRADE_RUNTIME_CHANGES: readonly UpgradeRuntimeChange[] = ["native", "package", "none"];
+/** Capability: run records carry `nativeVersion` / `previousNativeVersion` / `runtimeChange`. */
+export const UPGRADE_RUN_NATIVE_FEATURE = "upgrade-run-native";
 
 /** After a full-mode commit: idle outdated agents move in batches (`packageRun: after`). */
 export interface UpgradeFollowUp {

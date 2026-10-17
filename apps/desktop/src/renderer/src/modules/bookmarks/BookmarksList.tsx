@@ -11,7 +11,7 @@ import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
 import { agentHost, sidebarOf, useApp } from "../../store";
 import { services } from "../app";
 import type { GutterBodyProps, GutterTriggerProps, SideBodyProps } from "../slots";
-import { homeBookmarks, groupBookmarks, matchingBookmarks, type BookmarkRecord, type ListState } from "./model";
+import { bookmarkable, homeBookmarks, groupBookmarks, matchingBookmarks, type BookmarkRecord, type ListState } from "./model";
 import { refusalKey } from "./hooks";
 import { currentRefs, editBookmark, openBookmark, problemKey, removeBookmark, resetBookmarkData, saveBookmark, useBookmarks } from "./state";
 import { bookmarkContext, bookmarkProject } from "./context";
@@ -71,14 +71,21 @@ function SaveCurrent({ hostId, sessionId }: { hostId: string; sessionId?: string
   const [projectPin, setProjectPin] = useState(false);
   const projectId = sessionId ? bookmarkProject(hostId, sessionId) : undefined;
   return <div className="space-y-1"><Button onClick={(e) => {
-    const refs = currentRefs();
+    // An agent is kept at hand by 置顶 in the sidebar, not as a bookmark (owner 2026-10-16).
+    const refs = currentRefs().filter(bookmarkable);
     openMenuFrom(e.currentTarget, refs.length ? refs.map((ref) => ({ label: ref.title, hint: ref.kind, onSelect: () => { saveBookmark(ref, { ...bookmarkContext(ref), ...(projectPin && projectId && ref.hostId === hostId ? { projectId, projectExplicit: true } : {}) }); } })) : [{ label: t("bookmarks.hereEmpty"), disabled: true, onSelect: () => {} }]);
   }}><Plus size={12} className="mr-1 inline" />{t("bookmarks.here")}</Button>{projectId && <label className="flex items-center gap-1.5 text-[11px] text-subtle" title={t("bookmarks.projectHint")}><Checkbox label={t("bookmarks.projectPin")} checked={projectPin} onChange={setProjectPin} />{t("bookmarks.projectPin")}</label>}</div>;
 }
 
-function Groups({ records, hostId, sessionId, onPicked, searching }: { records: BookmarkRecord[]; hostId: string; sessionId?: string; onPicked?(): void; searching?: boolean }) {
+/** `others`: the gutter's 本会话 view — how many bookmarks exist elsewhere and how to list them all. */
+function Groups({ records, hostId, sessionId, onPicked, searching, others }: { records: BookmarkRecord[]; hostId: string; sessionId?: string; onPicked?(): void; searching?: boolean; others?: { total: number; showAll(): void } }) {
   const { t } = useI18n();
   const groups = groupBookmarks(records, hostId, sessionId);
+  // Nothing for this conversation, but bookmarks elsewhere (e.g. older agent bookmarks): say so and link 全部.
+  if (!groups.length && !searching && others && others.total > 0) return <p className="flex flex-wrap items-center justify-center gap-x-1 px-3 py-4 text-center text-xs text-subtle" data-bookmarks-home-empty="">
+    <span>{t("bookmarks.homeEmpty", { n: others.total })}</span>
+    <button className="rounded px-0.5 text-accent hover:underline" onClick={others.showAll}>→ {t("bookmarks.browseAll")}</button>
+  </p>;
   if (!groups.length) return searching ? <p className="px-3 py-4 text-center text-xs text-subtle">{t("bookmarks.noMatch")}</p> : <div className="flex flex-col items-center gap-1.5 px-4 py-6 text-center">
     <Bookmark size={18} className="text-subtle" aria-hidden />
     <p className="text-xs text-muted">{t("bookmarks.empty")}</p>
@@ -112,7 +119,7 @@ function BookmarksGutterBody({ hostId, sessionId, close, docked }: GutterBodyPro
     {all && <IconButton label={t("bookmarks.back")} onClick={() => { setAll(false); setQuery(""); }}><ArrowLeft size={13} /></IconButton>}
     <h3 className="min-w-0 flex-1 truncate px-1 text-xs font-medium">{t(all ? "bookmarks.list" : "bookmarks.home")}</h3>{!all && <button className="rounded px-1 text-xs text-accent hover:underline" onClick={() => setAll(true)}>{t("bookmarks.browseAll")}</button>}<IconButton label={t("bookmarks.close")} onClick={close}><X size={13} /></IconButton>
     </div><div className="px-1 pt-1"><SaveCurrent hostId={hostId} sessionId={sessionId} /></div>{all && <div className="flex min-w-0 items-center gap-2 px-1"><Search size={13} className="shrink-0 text-subtle" /><input autoFocus aria-label={t("bookmarks.search")} placeholder={t("bookmarks.search")} value={query} maxLength={500} onChange={e => setQuery(e.target.value)} className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs outline-none focus:border-accent" onKeyDown={(e) => { if (e.key === "Escape" && query && !e.repeat && !e.nativeEvent.isComposing && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); setQuery(""); } }} /></div>}
-    <Errors /><Groups records={records} hostId={hostId} sessionId={sessionId} searching={all && !!query.trim()} onPicked={() => { if (!docked) close(); }} /></div>;
+    <Errors /><Groups records={records} hostId={hostId} sessionId={sessionId} searching={all && !!query.trim()} onPicked={() => { if (!docked) close(); }} others={all ? undefined : { total: document.records.length, showAll: () => setAll(true) }} /></div>;
 }
 export function BookmarksGutter(props: GutterBodyProps) { return <BookmarksGutterBody key={JSON.stringify([props.hostId, props.sessionId])} {...props} />; }
 export function BookmarksList({ hostId, instance, setState }: SideBodyProps<ListState>) {

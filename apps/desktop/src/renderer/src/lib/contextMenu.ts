@@ -150,6 +150,30 @@ export function closeMenu(): void {
   if (state.menu) set({ menu: null });
 }
 
+/**
+ * Close the open menu on the window losing focus or resizing, and on the user scrolling outside it
+ * (wheel / touch). Not on `scroll` events: code scrolls all the time — a streaming timeline sticking
+ * to the bottom, scroll anchoring after a sidebar re-render — and a menu must survive those (it is
+ * position: fixed, so nothing under it moving changes where it is). A scrollbar drag starts with a
+ * mousedown, which closes it already; wheel / touch inside the menu (a long submenu) keeps it.
+ */
+export function watchMenuDismiss(menu: () => Element | null, close: () => void, win: Window = window): () => void {
+  const outside = (e: Event) => {
+    if (!menu()?.contains(e.target as Node)) close();
+  };
+  const opts = { capture: true, passive: true } as const;
+  win.addEventListener("blur", close);
+  win.addEventListener("resize", close);
+  win.document.addEventListener("wheel", outside, opts);
+  win.document.addEventListener("touchmove", outside, opts);
+  return () => {
+    win.removeEventListener("blur", close);
+    win.removeEventListener("resize", close);
+    win.document.removeEventListener("wheel", outside, opts);
+    win.document.removeEventListener("touchmove", outside, opts);
+  };
+}
+
 /** What selecting a row does now: arm it in place first (`armed` rows), else run it. */
 export function selectStep(action: MenuAction, armedNow: MenuAction | null): "arm" | "run" {
   return action.armed && !action.disabled && !action.submenu && !action.flyout && armedNow !== action ? "arm" : "run";

@@ -69,6 +69,13 @@ export interface ModuleMock {
   /** Text of a host file (`GET /v2/fs/file`) this module mocks, e.g. a SKILL.md; null = not mine. */
   hostFile?(path: string): string | null;
   /**
+   * File bodies (binary too) this module serves to the core's `fsFile` / `hostFile`: the fs/file body
+   * of a workspace-relative or host path, honouring `maxBytes` like cutex (null = not mine).
+   */
+  files?: {
+    read(path: string, maxBytes?: number): import("../../../shared/ipc").FsFile | null;
+  };
+  /**
    * Methods another (SSH) mock host answers differently from the shared world (`bridge.apiFor`;
    * multi-host P1: workstation has its own services / jobs). `emitHost` = a host-feed event of that host.
    */

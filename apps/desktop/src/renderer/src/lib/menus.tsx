@@ -413,16 +413,17 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
       ...refActionEntries(agentRef(host, id, session.displayName), true),
     ];
   }
+  // Grouped (owner 2026-10-16): this device's view (置顶, 标为已读, module ref actions) · open / copy ·
+  // change the agent · its runtime (停止 / 重启) · archive / delete. Runtime and danger rows sit in
+  // their own groups, so a stray click near a view action never arms 停止运行时.
   return [
+    // ── view (this device only) ──
     !retired && { label: pinned ? t("menu.unpin") : t("menu.pin"), icon: pinned ? <PinOff size={ICON} /> : <Pin size={ICON} />, onSelect: () => app.togglePin(id, host) },
-    {
-      label: t("menu.rename"),
-      icon: <Pencil size={ICON} />,
-      onSelect: guarded(() => renameAgent(session, t, undefined, host)),
-    },
-    { label: t("menu.editInfo"), icon: <StickyNote size={ICON} />, onSelect: guarded(() => editAgentInfo(session, host)) },
     unread && { label: t("menu.markRead"), icon: <MailCheck size={ICON} />, onSelect: () => markSeenOn(host, id) },
+    // The modules' `ref.action` items for the agent (§19.8).
+    ...refActionEntries(agentRef(host, id, session.displayName)),
     "separator",
+    // ── open / copy ──
     !retired && {
       label: t("menu.openFiles"),
       icon: <FolderOpen size={ICON} />,
@@ -432,12 +433,6 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
       },
     },
     projectId && { label: t("menu.openProject"), icon: <FolderKanban size={ICON} />, onSelect: () => app.openPage("projects.page", { project: projectId, ...(focus ? {} : { host }) }) },
-    canFork && {
-      label: t("menu.forkAgent"),
-      icon: <GitFork size={ICON} />,
-      ...(block ? { disabled: true, hint: t("structural.busyHint"), title: structuralBlockText(block) } : {}),
-      onSelect: guarded(() => app.forkSession(id, null)),
-    },
     {
       label: t("menu.copy"),
       icon: <Copy size={ICON} />,
@@ -448,15 +443,30 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
         { label: t("menu.copyId"), icon: <Hash size={ICON} />, onSelect: () => copyText(id) },
       ],
     },
+    "separator",
+    // ── change the agent ──
+    {
+      label: t("menu.rename"),
+      icon: <Pencil size={ICON} />,
+      onSelect: guarded(() => renameAgent(session, t, undefined, host)),
+    },
+    { label: t("menu.editInfo"), icon: <StickyNote size={ICON} />, onSelect: guarded(() => editAgentInfo(session, host)) },
+    canFork && {
+      label: t("menu.forkAgent"),
+      icon: <GitFork size={ICON} />,
+      ...(block ? { disabled: true, hint: t("structural.busyHint"), title: structuralBlockText(block) } : {}),
+      onSelect: guarded(() => app.forkSession(id, null)),
+    },
     !retired && claudeToolsItem(session, t, host),
     !retired && quotaContinueItem(session, t, host),
     asksPauseItem,
     rotateItem,
-    // The modules' `ref.action` items for the agent (§19.8).
-    ...refActionEntries(agentRef(host, id, session.displayName), true),
     "separator",
+    // ── runtime ──
     runtimeItem(session, t, host),
     restartItem(session, t, host),
+    "separator",
+    // ── archive / delete ──
     retired && { label: t("menu.restore"), icon: <ArchiveRestore size={ICON} />, onSelect: guarded(() => restoreWithDirector(session, t, host)) },
     retired && canDelete && deleteItem,
     // 归档 stays a plain, clickable row; 删除… sits one level down under 更多 › (a row with "›" reads

@@ -3,6 +3,7 @@ import { Conversation } from "./components/Conversation";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Overlays } from "./components/Overlays";
+import { SshPromptDialog } from "./components/SshPromptDialog";
 import { AgentListDialog } from "./components/AgentListDialog";
 import { JobOutputDialog } from "./components/JobParts";
 import { TitleBar } from "./components/TitleBar";
@@ -115,6 +116,7 @@ export function App() {
           <AgentListDialog />
           <JobOutputDialog />
           <Overlays />
+          <SshPromptDialog />
           {/* The window background holds the cards: the main card (conversation / page) and the right
               side (page buttons + cards) in the work area, 8 px apart. */}
           <div className={`flex min-h-0 flex-1 pr-2 pb-2 ${sidebarOpen && !fullWindow ? "" : "pl-2"}`}>

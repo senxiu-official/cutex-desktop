@@ -14,6 +14,15 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     if (Object.keys(value).some(k => !["op", "enabled"].includes(k)) || (value.enabled !== undefined && typeof value.enabled !== "boolean")) throw Error("invalid_browser_request");
     return value.enabled === undefined ? { op: "externalPages" } : { op: "externalPages", enabled: value.enabled };
   }
+  if (value.op === "sitePermissions") {
+    const forget = value.forget as Record<string, unknown> | string | undefined;
+    if (Object.keys(value).some(k => !["op", "forget"].includes(k))) throw Error("invalid_browser_request");
+    if (forget === undefined) return { op: "sitePermissions" };
+    if (forget === "all") return { op: "sitePermissions", forget: "all" };
+    if (!forget || typeof forget !== "object" || Array.isArray(forget) || Object.keys(forget).length !== 2 || (forget.pool !== "owner" && forget.pool !== "agent")
+      || typeof forget.origin !== "string" || !forget.origin || forget.origin.length > 300 || /[\x00-\x1f\x7f]/.test(forget.origin)) throw Error("invalid_browser_request");
+    return { op: "sitePermissions", forget: { pool: forget.pool, origin: forget.origin } };
+  }
   const validId = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9._:-]{1,200}$/.test(v);
   if (value.op === "settings") {
     if (Object.keys(value).some(k => !["op", "agentOpenApproval"].includes(k)) || (value.agentOpenApproval !== undefined && value.agentOpenApproval !== "off" && value.agentOpenApproval !== "ask")) throw Error("invalid_browser_request");
@@ -46,8 +55,8 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     if (Object.keys(value).some(k => !["op", "requestId", "code"].includes(k)) || !validId(value.requestId) || !["lease_limit", "scope_invalid", "scope_unsupported", "target_closed", "stale_connection", "browser_disabled", "invalid_request"].includes(value.code as string)) throw Error("invalid_browser_request");
     return value as unknown as BrowserRequest;
   }
-  if (["grantAgent", "holdReady", "releaseLease", "resumeLease"].includes(value.op as string)) {
-    const fields = value.op === "grantAgent" ? ["sessionId", "settings", "approvalId", "expected", "remember"] : value.op === "holdReady" ? ["leaseId", "held"] : value.op === "resumeLease" ? ["leaseId", "settings"] : ["leaseId", "owner"];
+  if (["grantAgent", "holdReady", "releaseLease", "resumeLease", "pauseLease"].includes(value.op as string)) {
+    const fields = value.op === "grantAgent" ? ["sessionId", "settings", "approvalId", "expected", "remember"] : value.op === "holdReady" ? ["leaseId", "held"] : value.op === "resumeLease" ? ["leaseId", "settings"] : value.op === "pauseLease" ? ["leaseId"] : ["leaseId", "owner"];
     if (Object.keys(value).some(k => !["op", "tabKey", ...fields].includes(k)) || !validId(value.tabKey) || !validId(value.op === "grantAgent" ? value.sessionId : value.leaseId)
       || (value.op === "holdReady" && typeof value.held !== "boolean") || ((value.op === "grantAgent" || value.op === "resumeLease") && !isBrowserControlSettings(value.settings))
       || (value.approvalId !== undefined && !validId(value.approvalId)) || (value.remember !== undefined && (value.remember !== true || value.approvalId === undefined))
@@ -117,7 +126,9 @@ export function createBrowserChannel<E, D extends { readonly generation: number 
   /** Owner switch, host-independent and reachable while the module is off (it only narrows or
    * widens what a later browser tab may reach; main enforces it on every request). */
   externalPages?(enabled?: boolean): unknown;
-  execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" }>, hostId: string, fence?: HostFence<D>): Promise<unknown>;
+  /** Remembered site permissions (host-independent, owner UI only). */
+  sitePermissions?(forget?: Extract<BrowserRequest, { op: "sitePermissions" }>["forget"]): unknown;
+  execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "sitePermissions" }>, hostId: string, fence?: HostFence<D>): Promise<unknown>;
 }) {
   return async (event: E, raw: unknown, binding: HostBinding | null | undefined): Promise<unknown> => {
     if (!options.isAppSender(event)) throw new Error("untrusted_sender");
@@ -126,6 +137,10 @@ export function createBrowserChannel<E, D extends { readonly generation: number 
     if (request.op === "externalPages") {
       if (!options.externalPages) throw Error("unsupported_operation");
       return options.externalPages(request.enabled);
+    }
+    if (request.op === "sitePermissions") {
+      if (!options.sitePermissions) throw Error("unsupported_operation");
+      return options.sitePermissions(request.forget);
     }
     // Lifecycle denial precedes host admission, including otherwise-exempt stop/close.
     if (!options.isEnabled()) throw new Error("module_disabled");

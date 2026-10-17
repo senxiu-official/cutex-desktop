@@ -36,6 +36,7 @@ import { BusMessage } from "./BusMessage";
 import { BusyDots } from "./BusyDots";
 import { Markdown } from "./Markdown";
 import { ReasoningRow, ToolRow, WorkGroup } from "./WorkGroup";
+import { AutoReviewNotice } from "./AutoReview";
 import { InteractionRow } from "./InteractionRow";
 import { latestReplyIds, type FoldRole } from "../lib/messageFold";
 import { useMessageFold, type MessageFold } from "../lib/foldView";
@@ -358,6 +359,8 @@ function Entry({ entry, pending, nameOf, sessionId, readOnly, actionable, bar, d
     case "checklist":
       // Sub-agent views (readOnly) have no status capsule: keep the full list there.
       return readOnly ? <Checklist explanation={entry.explanation} steps={entry.steps} /> : <ChecklistEntry explanation={entry.explanation} steps={entry.steps} />;
+    case "notice":
+      return <AutoReviewNotice review={entry.review} text={entry.text} />;
     case "other":
       return null;
   }

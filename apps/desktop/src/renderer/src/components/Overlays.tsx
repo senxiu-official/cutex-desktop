@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState
 import { ChevronRight } from "lucide-react";
 import { useI18n } from "../i18n";
 import { ARMED_TIMEOUT_MS } from "../lib/armedConfirm";
-import { closeDialog, closeMenu, normalizeEntries, runAction, selectStep, useOverlayState, type DialogCheck, type MenuAction, type MenuEntry, type MenuToggle } from "../lib/contextMenu";
+import { closeDialog, closeMenu, normalizeEntries, runAction, selectStep, useOverlayState, watchMenuDismiss, type DialogCheck, type MenuAction, type MenuEntry, type MenuToggle } from "../lib/contextMenu";
 import { placeFlyout, samePlace, type FlyoutPlace } from "../lib/flyoutPlacement";
 import { AgentInfoDialog } from "./AgentInfoDialog";
 import { FolderBrowser } from "./FolderBrowser";
@@ -106,15 +106,12 @@ function ContextMenuView({ x, y, items, above, minWidth }: { x: number; y: numbe
     };
     document.addEventListener("mousedown", onDown, true);
     document.addEventListener("keydown", onKey);
-    window.addEventListener("blur", closeMenu);
-    window.addEventListener("resize", closeMenu);
-    document.addEventListener("scroll", closeMenu, true);
+    // Not on any `scroll`: a streaming timeline scrolls itself to the bottom (lib/contextMenu.ts).
+    const unwatch = watchMenuDismiss(() => ref.current, closeMenu);
     return () => {
       document.removeEventListener("mousedown", onDown, true);
       document.removeEventListener("keydown", onKey);
-      window.removeEventListener("blur", closeMenu);
-      window.removeEventListener("resize", closeMenu);
-      document.removeEventListener("scroll", closeMenu, true);
+      unwatch();
     };
   });
 

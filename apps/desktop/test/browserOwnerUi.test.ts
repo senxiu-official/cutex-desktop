@@ -12,7 +12,7 @@ const lease = { leaseId: "lease-1", sessionId: selected.sessionId, agentName: se
 function setup(patch: Partial<BrowserTabView> = {}) {
   let snapshot: BrowserOwnerSnapshot = { enabled: true, epoch: scope.epoch, view: view(patch) };
   const api = { agents: vi.fn(async (): Promise<BrowserAgentView[]> => [selected]), grantAgent: vi.fn(async () => {}),
-    resumeLease: vi.fn(async () => {}), releaseLease: vi.fn(async () => {}) };
+    resumeLease: vi.fn(async () => {}), releaseLease: vi.fn(async () => {}), pauseLease: vi.fn(async () => {}) };
   const apiFor = vi.fn((_host: string) => api), afterHostsDelivered = vi.fn(async () => {});
   const controller = new BrowserOwnerController({ snapshot: () => snapshot, api: apiFor, afterHostsDelivered });
   return { controller, api, apiFor, afterHostsDelivered, update: (next: Partial<BrowserOwnerSnapshot>) => { snapshot = { ...snapshot, ...next }; } };
@@ -71,32 +71,38 @@ describe("same-host owner browser control", () => {
     await Promise.resolve(); f.update({ epoch: "new-epoch" }); reply.resolve([selected]);
     expect(await result).toEqual([]); expect(f.api.grantAgent).not.toHaveBeenCalled();
   });
-  it("resumes only an active paused lease after explicit confirmation", async () => {
+  it("resumes an active paused lease with one click (same agent, same lease: no second confirmation)", async () => {
     const f = setup({ lease, control: { grantee: selected.name, state: "paused", operating: false } });
-    const confirm = vi.fn(async () => false);
-    expect(await f.controller.resume(scope, settings, confirm)).toBe(false);
-    expect(f.api.resumeLease).not.toHaveBeenCalled(); confirm.mockResolvedValue(true);
-    expect(await f.controller.resume(scope, settings, confirm)).toBe(true);
+    expect(await f.controller.resume(scope, settings)).toBe(true);
     expect(f.api.resumeLease).toHaveBeenCalledExactlyOnceWith(scope.tabKey, lease.leaseId, settings);
     expect(f.api.grantAgent).not.toHaveBeenCalled();
   });
+  it("explicit pause keeps the lease and is separate from revoke", async () => {
+    const f = setup({ lease, control: { grantee: selected.name, state: "granted", operating: false } });
+    f.update({ enabled: false, epoch: null }); // authority-reducing: allowed off / on an old epoch
+    await f.controller.pause(scope.hostId, scope.tabKey, lease.leaseId);
+    expect(f.api.pauseLease).toHaveBeenCalledExactlyOnceWith(scope.tabKey, lease.leaseId);
+    expect(f.api.releaseLease).not.toHaveBeenCalled();
+  });
   it("never resumes pending, already-running or replaced leases", async () => {
     for (const patch of [{ lease: { ...lease, state: "pending" as const } }, { lease, control: { grantee: selected.name, state: "granted" as const, operating: false } }]) {
-      const f = setup(patch); expect(await f.controller.resume(scope, settings, async () => true)).toBe(false);
+      const f = setup(patch); expect(await f.controller.resume(scope, settings)).toBe(false);
       expect(f.api.resumeLease).not.toHaveBeenCalled();
     }
-    const f = setup({ lease, control: { grantee: selected.name, state: "paused", operating: false } }), confirm = deferred<boolean>();
-    const resumed = f.controller.resume(scope, settings, () => confirm.promise);
+    const f = setup({ lease, control: { grantee: selected.name, state: "paused", operating: false } }), delivered = deferred<void>();
+    f.afterHostsDelivered.mockImplementationOnce(() => delivered.promise);
+    const resumed = f.controller.resume(scope, settings);
     f.update({ view: view({ lease: { ...lease, leaseId: "replacement" }, control: { grantee: selected.name, state: "paused", operating: false } }) });
-    confirm.resolve(true); expect(await resumed).toBe(false); expect(f.api.resumeLease).not.toHaveBeenCalled();
+    delivered.resolve(); expect(await resumed).toBe(false); expect(f.api.resumeLease).not.toHaveBeenCalled();
   });
   it("revoke remains available off/old-epoch and invalidates a pending resume", async () => {
-    const f = setup({ lease, control: { grantee: selected.name, state: "paused", operating: false } }), decision = deferred<boolean>();
-    const resumed = f.controller.resume(scope, settings, () => decision.promise);
+    const f = setup({ lease, control: { grantee: selected.name, state: "paused", operating: false } }), delivered = deferred<void>();
+    f.afterHostsDelivered.mockImplementationOnce(() => delivered.promise);
+    const resumed = f.controller.resume(scope, settings);
     f.update({ enabled: false, epoch: null });
     await f.controller.revoke(scope.hostId, scope.tabKey, lease.leaseId);
     expect(f.api.releaseLease).toHaveBeenCalledExactlyOnceWith(scope.tabKey, lease.leaseId, true);
-    decision.resolve(true); expect(await resumed).toBe(false); expect(f.api.resumeLease).not.toHaveBeenCalled();
+    delivered.resolve(); expect(await resumed).toBe(false); expect(f.api.resumeLease).not.toHaveBeenCalled();
   });
   it("unmount/cancel invalidates confirmation without affecting another tab", async () => {
     const f = setup(), decision = deferred<boolean>();

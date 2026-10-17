@@ -48,8 +48,8 @@ export function browserVisibilityScript(guestId: string): string {
       }
     }
     if (node) return false;
-    // D-G's owner-input shield is not an occluding shell overlay. Accept only the
-    // unique, empty, same-guest sibling covering this viewport in its granted card.
+    // Co-control marker (0.1.3): a passive, input-transparent sibling covering this viewport in its
+    // granted card, ready once the renderer's focus guard is installed. Owner input reaches the page.
     const viewport = guest.parentElement;
     const card = guest.closest('[data-browser-card]');
     const layers = Array.from(document.querySelectorAll('[data-browser-owner-capture]'))
@@ -61,17 +61,18 @@ export function browserVisibilityScript(guestId: string): string {
         && layer.closest('[data-browser-card]') === card && layer.childElementCount === 0
         && !layer.hidden && !layer.inert && layer.getAttribute('aria-hidden') !== 'true'
         && style.display !== 'none' && style.visibility === 'visible' && Number(style.opacity) > 0
-        && style.contentVisibility !== 'hidden' && style.pointerEvents !== 'none'
+        && style.contentVisibility !== 'hidden' && style.pointerEvents === 'none'
         && ['left','top','right','bottom','width','height'].every(key => Number.isFinite(box[key]) && Math.abs(box[key]-rect[key]) <= 1)) capture = layer;
     }
     // Ancestor visibility is the primary overlay gate; sampled hit testing also rejects a
     // covering app overlay. Inset samples avoid the card's rounded border corners.
-    let shielded = !!capture && card?.getAttribute('data-browser-granted') === 'true'
+    const shielded = !!capture && card?.getAttribute('data-browser-granted') === 'true'
       && capture.getAttribute('data-browser-owner-ready') === 'true';
+    // The marker is input-transparent, so every sample must land on the guest itself: any app
+    // overlay (menu, dialog, toast) covering the card denies dispatch.
     for (const x of [.15,.5,.85]) for (const y of [.15,.5,.85]) {
       const hit = document.elementFromPoint(rect.left + rect.width*x, rect.top + rect.height*y);
-      if (hit === guest) shielded = false;
-      else if (!capture || hit !== capture) return false;
+      if (hit !== guest) return false;
     }
     // Only provider control uses this gate. A bare visible guest is not safe to dispatch
     // into: publication/render/listener installation may still be in flight after grant.
@@ -138,6 +139,25 @@ export async function ensureBrowserVisible(options: BrowserVisibilityOptions): P
   throw hidden();
 }
 
+/** Fixed main-owned app-document script: if this guest holds focus, return it to the element the
+ * renderer marked as the owner's last focus outside it (data-browser-focus-return), else blur. */
+export function browserFocusRestoreScript(guestId: string): string {
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(guestId)) throw hidden();
+  return `(() => { const active = document.activeElement;
+    if (!active || String(active.tagName).toUpperCase() !== 'WEBVIEW' || active.getAttribute('data-browser-guest') !== ${JSON.stringify(guestId)}) return false;
+    const back = Array.from(document.querySelectorAll('[data-browser-focus-return]'))
+      .find(node => node.getAttribute('data-browser-focus-return') === ${JSON.stringify(guestId)});
+    if (back && back.isConnected && typeof back.focus === 'function') back.focus({ preventScroll: true });
+    if (document.activeElement === active) active.blur();
+    return true; })()`;
+}
+/** After an agent pointer action pulled app focus into the guest: give it back (never to the page). */
+export async function restoreBrowserAppFocus(window: VisibilityWindow, guestId: string): Promise<void> {
+  try {
+    if (window.isDestroyed() || window.webContents.isDestroyed()) return;
+    await window.webContents.executeJavaScriptInIsolatedWorld(1005, [{ code: browserFocusRestoreScript(guestId) }], false);
+  } catch { /* Best effort: keyboard actions still require the guest to hold focus. */ }
+}
 /** Fixed main-owned check of the app document (never the guest page): is this guest the focused element? */
 export function browserKeyboardFocusScript(guestId: string): string {
   if (!/^[A-Za-z0-9_-]{16,128}$/.test(guestId)) throw hidden();

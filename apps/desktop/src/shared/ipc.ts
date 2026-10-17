@@ -94,19 +94,23 @@ export interface QuotaReaderConfig {
   auth: "profile_api_key" | "none";
   label: string;
   refresh_seconds: number;
-  mode: "remaining_and_limit" | "used_and_limit" | "remaining_percent" | "used_percent" | "balance";
+  /** `used_ratio`: used share 0..1 (cutex `kimi-code-plan`; e.g. the Kimi Code monthly total). */
+  mode: "remaining_and_limit" | "used_and_limit" | "remaining_percent" | "used_percent" | "used_ratio" | "balance";
   value_pointer: string;
   limit_pointer: string;
   reset_pointer: string;
   reset_format: "rfc3339" | "unix_seconds" | "unix_millis";
   window_label?: string | null;
+  /** cutex `kimi-code-plan`: a window the response may leave out; never read → no gauge. Absent = false. */
+  optional?: boolean;
 }
 
 /**
- * cutex `profile-generic-switches`: explicit quota readers (`quota-config` `preset`). `usage_endpoint` and
- * `zhipu_coding_plan` follow the profile's Base URL; the balance readers use their fixed endpoint.
+ * cutex `profile-generic-switches`: explicit quota readers (`quota-config` `preset`). `usage_endpoint`,
+ * `zhipu_coding_plan` and `kimi_code_plan` follow the profile's Base URL; the balance readers use their fixed
+ * endpoint.
  */
-export type QuotaReaderName = "usage_endpoint" | "deepseek_balance" | "moonshot_balance" | "moonshot_cn_balance" | "zhipu_coding_plan" | "openrouter_key";
+export type QuotaReaderName = "usage_endpoint" | "deepseek_balance" | "moonshot_balance" | "moonshot_cn_balance" | "zhipu_coding_plan" | "openrouter_key" | "kimi_code_plan";
 
 export interface QuotaConfigView {
   profile: { id: string; name: string };
@@ -1066,6 +1070,10 @@ export interface HostApi {
   saveHostGroups(groups: HostGroupDraft[]): Promise<HostsState>;
   testHost(hostId: string): Promise<HostTestResult>;
   setHostStartOn(value: HostStartOn): Promise<HostsState>;
+  /** SSH questions waiting for the user (key passphrase, password, unknown host key …; event `sshPrompts`). */
+  sshPrompts(): Promise<import("./sshPrompt").SshPromptView[]>;
+  /** Answer one (null = cancel). The answer goes only to the ssh process that asked; main keeps no copy beyond that operation. */
+  answerSshPrompt(id: string, answer: import("./sshPrompt").SshPromptAnswer): Promise<boolean>;
   // P2 person identity (main/personIdentity.ts; the private key never crosses IPC).
   /** This desktop's public key / fingerprint and each connected host's claim state. */
   identityState(): Promise<import("./personIdentity").PersonIdentityView>;
@@ -1079,12 +1087,21 @@ export interface HostApi {
   importIdentityKey(text: string, texts: import("./personIdentity").IdentityImportTexts): Promise<import("./personIdentity").IdentityFileResult>;
   /** 「你」's name, sent with identity claims (null: none set); pending devices are claimed again with it. */
   setIdentityName(name: string | null): Promise<void>;
+  /**
+   * 复制到其他主机 (cutex `profile-transfer` on both hosts): main exports the profile on the source host
+   * and imports it on the target; the bundle (maybe with an API key) never reaches the renderer. Failures
+   * are a result, not a throw.
+   */
+  copyProfileToHost(request: import("./profileTransfer").ProfileTransferRequest): Promise<import("./profileTransfer").ProfileTransferResult>;
 }
 
 /** HostApi method names: served by main `HostManager`, never routed to a daemon (main + preload). */
-export const HOST_METHOD_NAMES = ["hosts", "sshConfigHosts", "addSshHost", "pairSshHost", "updateSshHost", "removeSshHost", "switchHost", "setScope", "reconnectHost", "connectHost", "setHostAutoConnect", "setHostAppearance", "saveHostGroups", "testHost", "setHostStartOn", "identityState", "exportIdentity", "importIdentity", "copyIdentityKey", "importIdentityKey", "setIdentityName"] as const satisfies readonly (keyof HostApi)[];
+export const HOST_METHOD_NAMES = ["hosts", "sshConfigHosts", "addSshHost", "pairSshHost", "updateSshHost", "removeSshHost", "switchHost", "setScope", "reconnectHost", "connectHost", "setHostAutoConnect", "setHostAppearance", "saveHostGroups", "testHost", "setHostStartOn", "sshPrompts", "answerSshPrompt", "identityState", "exportIdentity", "importIdentity", "copyIdentityKey", "importIdentityKey", "setIdentityName", "copyProfileToHost"] as const satisfies readonly (keyof HostApi)[];
 
 /** Request/response calls (renderer → main). */
+/** Native Windows sandbox readiness (`windowsSandbox/readiness`; cutex windows-sandbox-readiness). */
+export type WindowsSandboxReadiness = "ready" | "notConfigured" | "updateRequired";
+
 export interface DesktopApi extends DaemonApi, HostApi {}
 
 /** Daemon calls (main `DaemonService`, against the active host). */
@@ -1139,6 +1156,19 @@ export interface DaemonApi {
    * used only while cutex lacks `profile-quota-native`. null on any error.
    */
   readRateLimits(sessionId: string): Promise<Record<string, unknown> | null>;
+  /**
+   * cutex windows-sandbox-readiness: native `windowsSandbox/readiness` on this agent's runtime (its
+   * native home's config as the runtime started with it). null on any error (older cutex, Claude
+   * runtime, offline).
+   */
+  windowsSandboxReadiness(sessionId: string): Promise<WindowsSandboxReadiness | null>;
+  /**
+   * Native `windowsSandbox/setupStart {mode: "unelevated"}` on this agent's runtime (owner only; no
+   * administrator rights; writes `[windows] sandbox = "unelevated"` to that agent's native home).
+   * Answers `{started}`; the outcome arrives as the session's native `windowsSandbox/setupCompleted`.
+   * The running thread keeps its sandbox level until the agent is relaunched.
+   */
+  setupWindowsSandbox(sessionId: string): Promise<{ started: boolean }>;
   quotaConfig(profile: string): Promise<QuotaConfigView>;
   putQuotaConfig(profile: string, patch: { preset?: QuotaConfigView["preset"]; primary?: QuotaReaderConfig; extras?: QuotaReaderConfig[] }): Promise<QuotaConfigView>;
   /** `/v2/capabilities`; null when the daemon predates it. */
@@ -1643,7 +1673,7 @@ export interface ServiceView {
   path: string | null;
   ownerCutexSessionId: string | null;
   projectId: string | null;
-  runtime: "external" | "managed";
+  runtime: "external" | "managed" | "static";
   portAllocated?: boolean;
   createdAt: string;
   updatedAt?: string;
@@ -1765,6 +1795,8 @@ export interface DesktopEvents {
   notifyClick: { key: string };
   /** P2 person identity: key or per-host claim state changed (main/personIdentity.ts). */
   identityState: import("./personIdentity").PersonIdentityView;
+  /** The open SSH questions changed (main/sshAskpass.ts; the whole list, oldest first). */
+  sshPrompts: { prompts: import("./sshPrompt").SshPromptView[] };
 }
 
 /** `DesktopEvents` keys whose payload carries a `HostTag` (daemon events and main-side per-host events such as the browser's). */
@@ -1800,6 +1832,10 @@ export interface PreloadBridge {
   shell?: ShellBridge;
   /** Self-update (portable installs). Absent in the browser preview unless mocked. */
   update?: UpdateBridge;
+  /** Settings → 关于 → 已知问题 from the release branch (shared/knownIssues.ts). Absent in the browser preview. */
+  knownIssues?: import("./knownIssues").KnownIssuesBridge;
+  /** Settings → 外观 → 启动页立绘: imported launcher art (shared/launchArt.ts). Absent in a plain browser. */
+  launchArt?: import("./launchArt").LaunchArtBridge;
 }
 
 export const WINDOW_CHANNEL = "cutex-desktop:window";

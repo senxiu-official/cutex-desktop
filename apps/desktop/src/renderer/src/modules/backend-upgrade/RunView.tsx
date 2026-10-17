@@ -13,7 +13,7 @@ import { settingsAnchorId } from "../../lib/settingsNav";
 import { formatAbsolute, formatWhen, useClock, useNow } from "../../lib/time";
 import { useTargetApi } from "../../lib/targetHost";
 import { useUpgradeAction } from "./hooks";
-import { canCancel, formatDuration, runActive, runSteps, secondsSince, servicesDown, unixOf, type StepState } from "./model";
+import { canCancel, formatDuration, runActive, runModeKeys, runRuntime, runSteps, runtimeLine, secondsSince, servicesDown, unixOf, type StepState } from "./model";
 import { loadUpgradeStatus } from "./store";
 
 /** "12 分钟前" with the full time as tooltip. */
@@ -164,8 +164,50 @@ export function RunDetail({ run }: { run: UpgradeRun }) {
   );
 }
 
-/** The current run (or the last one, while recent / needing the owner), with cancel. */
-export function RunSection({ hostId, run }: { hostId: string; run: UpgradeRun }) {
+/**
+ * A finished run of the last day as one line at the top (model runDisplay): the outcome, where its
+ * steps are, and a dismiss (remembered per host for this run). Not for needs-owner (that keeps the card).
+ */
+export function RunNote({ run, onDismiss }: { run: UpgradeRun; onDismiss(): void }) {
+  const { t } = useI18n();
+  return (
+    <Section id={settingsAnchorId("run")}>
+      <div className="flex items-start gap-2" data-upgrade-run-note={run.phase}>
+        <div className="min-w-0 flex-1">
+          <Outcome run={run} />
+          {run.error && <p className="-mt-1 pb-2 text-xs break-words text-danger">{`${run.error.code}: ${run.error.message}`}</p>}
+          {run.phase === "committed" && <RuntimeNote run={run} className="-mt-1 pb-2 text-xs text-muted" />}
+          <p className="-mt-1 pb-2 text-xs text-subtle">
+            <When iso={run.finishedAt ?? run.createdAt} /> · {t("backend-upgrade.note.details")}
+          </p>
+        </div>
+        <span className="pt-1.5">
+          <IconButton label={t("backend-upgrade.note.dismiss")} onClick={onDismiss}>
+            <X size={13} />
+          </IconButton>
+        </span>
+      </div>
+    </Section>
+  );
+}
+
+/** What the run gives new agents (cutex's record only, model runtimeLine); nothing on older records. */
+function RuntimeNote({ run, className }: { run: UpgradeRun; className: string }) {
+  const { t } = useI18n();
+  const line = runtimeLine(runRuntime(run, null));
+  if (!line) return null;
+  return (
+    <p className={className} data-upgrade-runtime={run.runtimeChange ?? ""}>
+      {t(line.key, line.vars)}
+    </p>
+  );
+}
+
+/**
+ * The current run (or one that needs the owner), with cancel. `native`: the version a full run brings
+ * as the manifest facts say (model releaseNative) — only used when the run carries no `runtimeChange`.
+ */
+export function RunSection({ hostId, run, native = null }: { hostId: string; run: UpgradeRun; native?: string | null }) {
   const { t } = useI18n();
   const api = useTargetApi();
   const action = useUpgradeAction();
@@ -183,7 +225,7 @@ export function RunSection({ hostId, run }: { hostId: string; run: UpgradeRun })
     <Section
       id={settingsAnchorId("run")}
       title={title}
-      hint={t(`backend-upgrade.mode.${run.mode}` as MessageKey)}
+      hint={t(runModeKeys(runRuntime(run, native)).mode)}
       actions={
         active && cancellable ? (
           <span ref={anchor} className="inline-flex">
@@ -221,7 +263,7 @@ function HistoryRow({ run }: { run: UpgradeRun }) {
           {t(run.kind === "rollback" ? "backend-upgrade.history.rollback" : "backend-upgrade.history.apply", { from: run.fromRelease, to: run.toRelease })}
         </span>
         <span className={`shrink-0 text-xs ${tone}`}>{t(phaseKey(run.phase))}</span>
-        {downtime && <span className="hidden shrink-0 text-xs text-subtle tabular-nums @sm:inline">{t("backend-upgrade.history.downtime", { downtime })}</span>}
+        {downtime && <span className="shrink-0 text-xs text-subtle tabular-nums group-data-[narrow]/card:hidden">{t("backend-upgrade.history.downtime", { downtime })}</span>}
         <span className="w-24 shrink-0 text-right text-xs text-subtle tabular-nums">
           <When iso={run.finishedAt ?? run.createdAt} />
         </span>
@@ -232,6 +274,7 @@ function HistoryRow({ run }: { run: UpgradeRun }) {
             {run.runId} · {t(`backend-upgrade.class.${run.class}` as MessageKey)} · {t(`backend-upgrade.mode.short.${run.mode}` as MessageKey)}
             {run.requestedBy ? ` · ${run.requestedBy}` : ""}
           </p>
+          <RuntimeNote run={run} className="pt-1 text-xs text-muted" />
           <RunDetail run={run} />
         </div>
       )}

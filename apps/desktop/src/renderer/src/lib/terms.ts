@@ -211,5 +211,7 @@ export function useTermOverrides(): TermOverrides {
       return () => listeners.delete(l);
     },
     () => current,
+    // Server snapshot (static rendering in tests): the same overrides.
+    () => current,
   );
 }

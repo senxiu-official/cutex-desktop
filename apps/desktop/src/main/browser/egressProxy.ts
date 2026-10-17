@@ -7,7 +7,7 @@ import { lookup as systemLookup } from "node:dns/promises";
 import { Agent, createServer, request, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import { createConnection, isIP, type Socket } from "node:net";
 import { Transform } from "node:stream";
-import { isPublicEgressAddress, matchesEgressHost, parsePublicBrowserUrl, parsePublicConnectAuthority, type BrowserEgressTarget } from "./egressAddress";
+import { isAllowedEgressAddress, matchesEgressHost, parseLanBrowserUrl, parsePublicBrowserUrl, parsePublicConnectAuthority, type BrowserEgressTarget } from "./egressAddress";
 
 export const BROWSER_EGRESS_LIMITS = Object.freeze({ connections: 64, lookups: 16, addresses: 32,
   headerBytes: 16 * 1024, headBytes: 64 * 1024, bodyBytes: 32 * 1024 * 1024,
@@ -43,7 +43,23 @@ function bodyLimit(): Transform {
   } });
 }
 
-export async function startBrowserEgressProxy(options: { lookup?: BrowserEgressLookup; dial?: BrowserEgressDial; onClosed?: () => void } = {}): Promise<BrowserEgressProxy> {
+export interface BrowserEgressPolicy {
+  /** The owner switch 「允许浏览外部网页」, re-read per connection (default: on). */
+  publicAllowed?: () => boolean;
+  /** An authority main admitted after an owner navigation (LAN / tailnet). Only such a target may
+   * use a LAN-class literal / name or LAN DNS answers; never loopback, link-local or reserved. */
+  lanAllowed?: (hostname: string, port: number) => boolean;
+}
+export async function startBrowserEgressProxy(options: { lookup?: BrowserEgressLookup; dial?: BrowserEgressDial; onClosed?: () => void } & BrowserEgressPolicy = {}): Promise<BrowserEgressProxy> {
+  const publicAllowed = () => { try { return options.publicAllowed?.() ?? true; } catch { return false; } };
+  const lanAllowed = (hostname: string, port: number) => { try { return options.lanAllowed?.(hostname, port) === true; } catch { return false; } };
+  /** Per connection: an owner-admitted LAN authority, else a public one while websites are on. */
+  const admitTarget = (parse: (lan: boolean) => BrowserEgressTarget | undefined): (BrowserEgressTarget & { lan: boolean }) | undefined => {
+    const lan = parse(true);
+    if (lan && lanAllowed(lan.hostname, lan.port)) return { ...lan, lan: true };
+    const target = publicAllowed() ? parse(false) : undefined;
+    return target && { ...target, lan: false };
+  };
   const credentials = Object.freeze({ username: randomBytes(16).toString("hex"), password: randomBytes(32).toString("hex"), realm: `cutex-browser-${randomBytes(16).toString("hex")}` });
   const expectedAuth = Buffer.from(`Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString("base64")}`);
   const lookup = options.lookup ?? (async hostname => (await systemLookup(hostname, { all: true, verbatim: true })) as BrowserEgressAddress[]);
@@ -70,7 +86,7 @@ export async function startBrowserEgressProxy(options: { lookup?: BrowserEgressL
     socket.setTimeout(BROWSER_EGRESS_LIMITS.idleMs);
     return context;
   };
-  const upstream = async (target: BrowserEgressTarget, client: Socket, context: Connection): Promise<Socket> => {
+  const upstream = async (target: BrowserEgressTarget & { lan: boolean }, client: Socket, context: Connection): Promise<Socket> => {
     const check = () => { if (closed || client.destroyed || context.controller.signal.aborted) throw new Error("closed"); };
     check();
     const setupTimer = setTimeout(() => { context.controller.abort(); client.destroy(); }, BROWSER_EGRESS_LIMITS.setupMs); setupTimer.unref();
@@ -88,7 +104,7 @@ export async function startBrowserEgressProxy(options: { lookup?: BrowserEgressL
       }
       check();
       if (!Array.isArray(addresses) || !addresses.length || addresses.length > BROWSER_EGRESS_LIMITS.addresses ||
-        addresses.some(item => !item || isIP(item.address) !== item.family || !isPublicEgressAddress(item.address))) throw new Error("denied");
+        addresses.some(item => !item || isIP(item.address) !== item.family || !isAllowedEgressAddress(item.address, target.lan))) throw new Error("denied");
       const selected = addresses[0]!;
       const socket = dial({ address: selected.address, family: selected.family, port: target.port }, context.controller.signal);
       context.upstreams.add(socket);
@@ -110,7 +126,7 @@ export async function startBrowserEgressProxy(options: { lookup?: BrowserEgressL
     if (remoteHead.length) client.write(remoteHead);
     client.pipe(remote); remote.pipe(client); client.resume(); remote.resume();
   };
-  const forward = async (req: IncomingMessage, client: Socket, context: Connection, target: BrowserEgressTarget, response?: ServerResponse, head?: Buffer) => {
+  const forward = async (req: IncomingMessage, client: Socket, context: Connection, target: BrowserEgressTarget & { lan: boolean }, response?: ServerResponse, head?: Buffer) => {
     const remote = await upstream(target, client, context);
     // A dedicated non-environment Agent, exactly one pinned socket and no retries.
     // https://nodejs.org/docs/latest-v24.x/api/http.html#built-in-proxy-support
@@ -161,8 +177,8 @@ export async function startBrowserEgressProxy(options: { lookup?: BrowserEgressL
   });
   const handleRequest = (req: IncomingMessage, res: ServerResponse) => {
     const client = req.socket, context = admit(req, client); if (!context) return;
-    const target = parsePublicBrowserUrl(req.url, false);
-    if (!target || target.protocol !== "http:" || !matchesEgressHost(req.headers.host, target) || req.method === "CONNECT" ||
+    const target = admitTarget(lan => lan ? parseLanBrowserUrl(req.url, false) : parsePublicBrowserUrl(req.url, false));
+    if (!target || target.protocol !== "http:" || !matchesEgressHost(req.headers.host, target, target.lan) || req.method === "CONNECT" ||
       req.headers.upgrade !== undefined || req.headers.expect !== undefined || Number(req.headers["content-length"] || 0) > BROWSER_EGRESS_LIMITS.bodyBytes) { deny(client, 403); return; }
     void forward(req, client, context, target, res).catch(() => deny(client, 403));
   };
@@ -171,16 +187,16 @@ export async function startBrowserEgressProxy(options: { lookup?: BrowserEgressL
   server.on("checkContinue", handleRequest); server.on("checkExpectation", handleRequest);
   server.on("connect", (req, stream, head) => {
     const client = stream as Socket, context = admit(req, client); if (!context) return;
-    const target = parsePublicConnectAuthority(req.url);
-    if (!target || !matchesEgressHost(req.headers.host, target) || head.length > BROWSER_EGRESS_LIMITS.headBytes ||
+    const target = admitTarget(lan => parsePublicConnectAuthority(req.url, lan));
+    if (!target || !matchesEgressHost(req.headers.host, target, target.lan) || head.length > BROWSER_EGRESS_LIMITS.headBytes ||
       req.headers["transfer-encoding"] !== undefined || Number(req.headers["content-length"] || 0) !== 0) { deny(client, 403); return; }
     client.pause();
     void upstream(target, client, context).then(remote => { client.write("HTTP/1.1 200 Connection Established\r\n\r\n"); connectStreams(client, remote, head); }).catch(() => deny(client, 403));
   });
   server.on("upgrade", (req, stream, head) => {
     const client = stream as Socket, context = admit(req, client); if (!context) return;
-    const target = parsePublicBrowserUrl(req.url, false), key = req.headers["sec-websocket-key"];
-    if (!target || !["ws:", "http:"].includes(target.protocol) || !matchesEgressHost(req.headers.host, target) || req.method !== "GET" ||
+    const target = admitTarget(lan => lan ? parseLanBrowserUrl(req.url, false) : parsePublicBrowserUrl(req.url, false)), key = req.headers["sec-websocket-key"];
+    if (!target || !["ws:", "http:"].includes(target.protocol) || !matchesEgressHost(req.headers.host, target, target.lan) || req.method !== "GET" ||
       req.headers.upgrade?.toLowerCase() !== "websocket" || !tokens(req.headers.connection).includes("upgrade") ||
       req.headers["sec-websocket-version"] !== "13" || typeof key !== "string" || !/^[A-Za-z0-9+/]{22}==$/.test(key) ||
       Buffer.from(key, "base64").toString("base64") !== key || head.length > BROWSER_EGRESS_LIMITS.headBytes ||

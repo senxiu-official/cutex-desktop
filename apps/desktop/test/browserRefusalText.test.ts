@@ -8,6 +8,7 @@ it("says why and what works for refusals the owner can act on; others keep the g
   expect(browserTimelineRefusalKey("browser_disabled")).toBe("browser.timeline.refused.disabled");
   expect(browserTimelineRefusalKey("busy")).toBeNull();
   expect(browserTimelineRefusalKey(null)).toBeNull();
-  expect(browserTimelineZhCN["browser.timeline.refused.external"]).toContain("cutex:service/");
-  expect(browserTimelineEn["browser.timeline.refused.external"]).toContain("cutex:service/");
+  // The daemon's generic code covers several causes: never claim one (e.g. "turn on websites").
+  expect(browserTimelineZhCN["browser.timeline.refused.external"]).toContain("具体原因");
+  expect(browserTimelineEn["browser.timeline.refused.external"]).toContain("exact reason");
 });

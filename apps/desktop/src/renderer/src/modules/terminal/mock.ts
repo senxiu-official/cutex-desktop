@@ -14,6 +14,24 @@ interface MockTerm {
   scrollback: string;
 }
 
+/** `colors` / `palette`: the 16 ANSI colours as text, bold, and as fills (the palette check in the preview). */
+function colorDemo(): string {
+  const names = ["blk", "red", "grn", "yel", "blu", "mag", "cyn", "wht"];
+  const row = (base: number, label: string) =>
+    `${label.padEnd(7)}${names.map((n, i) => `\x1b[${base + i}m${n.padEnd(5)}\x1b[0m`).join("")}\r\n`;
+  const fills = (base: number) => `${"fill".padEnd(7)}${names.map((_, i) => `\x1b[${base + i}m${String(base + i).padStart(4)} \x1b[0m`).join("")}\r\n`;
+  return [
+    row(30, "normal"),
+    row(90, "bright"),
+    `${"bold".padEnd(7)}${names.map((n, i) => `\x1b[1;${30 + i}m${n.padEnd(5)}\x1b[0m`).join("")}\r\n`,
+    fills(40),
+    fills(100),
+    "\x1b[2mdim text\x1b[0m  \x1b[3mitalic\x1b[0m  \x1b[4munderline\x1b[0m  \x1b[7minverse\x1b[0m\r\n",
+    "\x1b[32m✓ 128 passed\x1b[0m  \x1b[33m⚠ 3 warnings\x1b[0m  \x1b[31m✗ 1 failed\x1b[0m  \x1b[90m(4.21 s)\x1b[0m\r\n",
+    "\x1b[1;34mdiff --git\x1b[0m a/src/x.ts b/src/x.ts\r\n\x1b[36m@@ -1,3 +1,3 @@\x1b[0m\r\n\x1b[31m-const a = 1;\x1b[0m\r\n\x1b[32m+const a = 2;\x1b[0m\r\n",
+  ].join("");
+}
+
 const encode = (text: string) => btoa(unescape(encodeURIComponent(text)));
 
 const REPLY = [
@@ -79,7 +97,7 @@ export const mock: ModuleMock = {
         // Unique across preview reloads, like the daemon's ids (a restored tab never meets a new PTY of its id).
         const id = `term-${Date.now().toString(36)}-${seq}`;
         const summary: TerminalSummary = { terminalId: id, scope: scope.kind, rootId: scope.id, cwd: "D:/Apps/cutex-desktop", shell: "pwsh.exe", pid: 4240 + seq, cols, rows, createdAt: new Date().toISOString(), exited: false, exitCode: null };
-        terms.set(id, { summary, line: "", scrollback: `PowerShell 7.5 (mock)\r\n${PROMPT}` });
+        terms.set(id, { summary, line: "", scrollback: `PowerShell 7.5 (mock) — type \x1b[1mcolors\x1b[0m for the ANSI palette\r\n${PROMPT}` });
         return summary;
       },
       async terminalAttach(id) {
@@ -101,7 +119,8 @@ export const mock: ModuleMock = {
               core.emit("terminalExit", { terminalId: id, exitCode: 0 });
               return;
             }
-            out(id, `\r\n${cmd ? `mock: ${cmd}\r\n` : ""}${PROMPT}`);
+            const reply = cmd === "colors" || cmd === "palette" ? colorDemo() : cmd ? `mock: ${cmd}\r\n` : "";
+            out(id, `\r\n${reply}${PROMPT}`);
           } else if (ch === "\x7f") {
             if (t.line) {
               t.line = t.line.slice(0, -1);

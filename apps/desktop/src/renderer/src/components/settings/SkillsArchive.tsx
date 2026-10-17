@@ -6,7 +6,7 @@ import type { SkillArchiveRecord } from "../../../../shared/skillsArchive";
 import { useI18n } from "../../i18n";
 import { ARMED_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { formatAbsolute, formatWhen } from "../../lib/time";
-import { Button, IconButton, ListRow } from "./Form";
+import { Button, Card, IconButton, ListRow } from "./Form";
 
 /** Row action: first click arms (「再点一次归档」), the second archives. Restorable, so one confirm. */
 export function ArchiveSkillButton({ name, disabled, onArchive }: { name: string; disabled?: boolean; onArchive(): void }) {
@@ -48,7 +48,7 @@ export function ArchivedSkills({ archives, busy, onRestore }: { archives: SkillA
       {open && (
         <>
           <p className="mb-2 text-xs text-subtle">{t("codex-config.skills.archivedHint")}</p>
-          <div className="@container rounded-xl border border-card-border bg-surface px-4 py-1">
+          <Card>
             {archives.map((a) => {
               const at = Date.parse(a.archivedAt) / 1000;
               return (
@@ -70,7 +70,7 @@ export function ArchivedSkills({ archives, busy, onRestore }: { archives: SkillA
                 />
               );
             })}
-          </div>
+          </Card>
         </>
       )}
     </section>

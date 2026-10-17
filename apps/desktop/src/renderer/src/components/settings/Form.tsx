@@ -6,7 +6,10 @@
 //   • draft + save bar: multi-field forms that validate together (Profile detail).
 // Rows: every setting is a `SettingRow` (label + hint | control column | reset slot), so controls
 // line up on one right edge on every page; entity lists use `ListRow` with click-twice removal.
-import { createContext, useContext, useId, useRef, useState, type ReactNode } from "react";
+import { Component, createContext, useContext, useId, useRef, useState, type ErrorInfo, type ReactNode } from "react";
+import { bridge } from "../../bridge";
+import { CARD_FLAGS } from "../../lib/narrowCard";
+import { dataFlags, useSizeFlags } from "../../lib/sizeFlags";
 import { ArrowRight, Check, Plus, RotateCcw, RotateCw, X } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { ARMED_BUTTON, useArmed } from "../../lib/armedConfirm";
@@ -84,8 +87,53 @@ export function Section({ title, hint, source, children, actions, id }: { title?
           {hint && <p className="text-xs text-subtle">{hint}</p>}
         </div>
       )}
-      <div className="@container rounded-xl border border-card-border bg-surface px-4 py-1">{children}</div>
+      <Card>{children}</Card>
     </section>
+  );
+}
+
+/**
+ * The card frame of a section (and of loose cards like the skills archive): `group/card` with
+ * `data-narrow` below 28rem (lib/narrowCard + lib/sizeFlags; deliberately no CSS size container, see there). A render
+ * error inside shows in the card with a retry instead of taking the page down.
+ */
+export function Card({ children, className = "rounded-xl border border-card-border bg-surface px-4 py-1" }: { children: ReactNode; className?: string }) {
+  const [ref, flags] = useSizeFlags(CARD_FLAGS);
+  return (
+    <div ref={ref} {...dataFlags(flags)} className={`group/card ${className}`}>
+      <CardBoundary>{children}</CardBoundary>
+    </div>
+  );
+}
+
+/** Catches a render error of one card's content: the error text + 重试, logged like an uncaught one (errors.jsonl). */
+export class CardBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error: error instanceof Error ? error : new Error(String(error)) };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    const stack = [error.stack, info.componentStack].filter(Boolean).join("\n");
+    void bridge?.shell?.logError({ kind: "error", message: `[settings card] ${error.message}`, stack }).catch(() => {});
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return <CardError message={this.state.error.message || String(this.state.error)} onRetry={() => this.setState({ error: null })} />;
+  }
+}
+
+function CardError({ message, onRetry }: { message: string; onRetry(): void }) {
+  const { t } = useI18n();
+  return (
+    <div role="alert" data-card-error="" className="flex items-start gap-2 py-2.5 text-xs text-danger">
+      <span className="min-w-0 flex-1 break-words select-text">{t("settings.cardError", { message })}</span>
+      <button type="button" onClick={onRetry} className={`shrink-0 rounded px-1.5 py-0.5 text-muted hover:bg-surface-2 hover:text-foreground ${FOCUS}`}>
+        {t("settings.cardRetry")}
+      </button>
+    </div>
   );
 }
 
@@ -100,7 +148,7 @@ export function SettingRow({ label, hint, children, reset, sample }: { label: Re
   const hintId = hint ? `${id}h` : undefined;
   return (
     <div
-      className={`grid grid-cols-[minmax(9rem,1fr)_auto_1.5rem] gap-x-3 gap-y-1.5 border-b border-border/60 py-3 last:border-b-0 @max-[28rem]:grid-cols-[minmax(0,1fr)_1.5rem] ${sample ? "items-start" : "items-center"}`}
+      className={`grid grid-cols-[minmax(9rem,1fr)_auto_1.5rem] gap-x-3 gap-y-1.5 border-b border-border/60 py-3 last:border-b-0 group-data-[narrow]/card:grid-cols-[minmax(0,1fr)_1.5rem] ${sample ? "items-start" : "items-center"}`}
     >
       <div className="min-w-0">
         <div id={labelId} className="text-sm">
@@ -114,11 +162,11 @@ export function SettingRow({ label, hint, children, reset, sample }: { label: Re
         {sample}
       </div>
       <RowA11yContext value={{ labelId, hintId }}>
-        <div className="flex min-w-0 items-center justify-end gap-2 @max-[28rem]:col-span-1 @max-[28rem]:row-start-2 @max-[28rem]:flex-wrap @max-[28rem]:justify-start">
+        <div className="flex min-w-0 items-center justify-end gap-2 group-data-[narrow]/card:col-span-1 group-data-[narrow]/card:row-start-2 group-data-[narrow]/card:flex-wrap group-data-[narrow]/card:justify-start">
           {children}
         </div>
       </RowA11yContext>
-      <div className="flex h-full w-6 items-center justify-center @max-[28rem]:col-start-2 @max-[28rem]:row-start-1">{reset}</div>
+      <div className="flex h-full w-6 items-center justify-center group-data-[narrow]/card:col-start-2 group-data-[narrow]/card:row-start-1">{reset}</div>
     </div>
   );
 }

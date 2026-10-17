@@ -2,6 +2,7 @@
 // PermissionDialog / ElicitationDialog): shows the first pending server request, keyboard driven.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useI18n, type MessageKey } from "../i18n";
+import { ApprovalSource } from "./ApprovalSource";
 import {
   approvalKeyAction,
   elicitationReply,
@@ -59,7 +60,10 @@ function Approval({ model, onReply }: { model: Extract<InteractionModel, { kind:
   const escape = model.cancelIndex === null ? null : model.choices[model.cancelIndex];
   return (
     <Card onKeyDown={onKeyDown}>
-      <div className="mb-2 text-sm font-semibold">{t(`interaction.title.${model.title}` as MessageKey)}</div>
+      <div className="mb-2 flex items-start gap-2">
+        <span className="min-w-0 flex-1 text-sm font-semibold">{t(`interaction.title.${model.title}` as MessageKey)}</span>
+        <ApprovalSource source="native" />
+      </div>
       {model.reason && <p className="mb-2 text-sm text-muted">{model.reason}</p>}
       {model.subject && (
         <pre className="mb-2 max-h-48 overflow-auto rounded-lg bg-background p-2 font-mono text-xs whitespace-pre-wrap">{model.subject}</pre>
@@ -119,6 +123,7 @@ function Questions({ model, onReply }: { model: Extract<InteractionModel, { kind
       <div className="mb-1 flex items-center text-xs text-subtle">
         <span className="font-semibold uppercase tracking-wide">{question.header}</span>
         {model.questions.length > 1 && <span className="ml-auto">{index + 1} / {model.questions.length}</span>}
+        <ApprovalSource source="model" className={model.questions.length > 1 ? "ml-2" : "ml-auto"} />
       </div>
       <p className="mb-3 text-sm whitespace-pre-wrap">{question.question}</p>
       <div className="flex flex-col gap-1.5">
@@ -177,7 +182,10 @@ function Elicitation({ model, onReply }: { model: Extract<InteractionModel, { ki
   };
   return (
     <Card onKeyDown={(e) => e.key === "Escape" && onReply(elicitationReply("cancel"))}>
-      <div className="mb-1 text-xs text-subtle">{t("interaction.title.elicitation", { server: p.serverName })}</div>
+      <div className="mb-1 flex items-center gap-2 text-xs text-subtle">
+        <span className="min-w-0 flex-1">{t("interaction.title.elicitation", { server: p.serverName })}</span>
+        <ApprovalSource source="mcp" />
+      </div>
       {message && <p className="mb-3 text-sm whitespace-pre-wrap">{message}</p>}
       {url && (
         <a href={url} target="_blank" rel="noreferrer" className="mb-3 block truncate text-sm text-accent underline">

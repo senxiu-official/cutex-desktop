@@ -68,7 +68,8 @@ function ownerPicker(s: ServiceView, t: T, run: (fn: () => Promise<unknown>) => 
 export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, toggleLogs?: () => void, hostId?: string): MenuEntry[] {
   const api = daemonOf(hostId);
   const run = (fn: () => Promise<unknown>) => void fn().catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)));
-  const supervised = s.runtime !== "external";
+  // Only `managed` services run under cutex; `external` and `static` (files cutex serves) have nothing to start or stop — cutex answers 409 not_supervised.
+  const supervised = s.runtime === "managed";
   const running = s.health === "reachable" || s.health === "starting";
   return [
     { label: t("services.open"), onSelect: () => run(() => openService(s, hostId)) },

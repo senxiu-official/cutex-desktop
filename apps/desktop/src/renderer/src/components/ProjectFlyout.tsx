@@ -23,7 +23,7 @@ import { sidebarMark } from "../lib/hostScope";
 import { sidebarOf, useApp } from "../store";
 import { HostMark } from "./HostMark";
 import { ProjectIcon } from "./ProjectIcon";
-import { AgentRowButton, OfflineRow } from "./AgentRows";
+import { AgentRowButton, OfflineRow, PinnedRows } from "./AgentRows";
 import { ScriptText } from "./ScriptText";
 
 const FLYOUT_WIDTH = 288;
@@ -48,6 +48,7 @@ export function CollapsedProject({ layout }: { layout: GroupLayout }) {
   const block = projectBlockLook(prefs.projectSeparation, group.kind === "project" ? group.color : NEUTRAL_GROUP, prefs.projectHeaderTint);
 
   return (
+    <>
     <div ref={fly.rowRef} {...fly.hover} className={block.rowClassName || undefined} style={block.style} onContextMenu={contextMenu(() => projectMenu(group, root, true, null, t))}>
       <button
         onClick={() => fly.setPinned(!fly.pinned)}
@@ -71,6 +72,9 @@ export function CollapsedProject({ layout }: { layout: GroupLayout }) {
       </button>
       <ProjectFlyoutPanel layout={layout} fly={fly} />
     </div>
+    {/* Pins stay listed under the one row (never folded away; outside the hover area). */}
+    <PinnedRows rows={layout.full} className="pl-1" />
+    </>
   );
 }
 

@@ -76,7 +76,7 @@ export function quotaEventPlanChanged(params: unknown): string[] {
 export const PROFILE_GENERIC_SWITCHES_FEATURE = "profile-generic-switches";
 
 /** The readers this build knows (cutex `src/profiles/quota.rs` Reader::ALL, in that order). */
-export const QUOTA_READERS: readonly QuotaReaderName[] = ["usage_endpoint", "deepseek_balance", "moonshot_balance", "moonshot_cn_balance", "zhipu_coding_plan", "openrouter_key"];
+export const QUOTA_READERS: readonly QuotaReaderName[] = ["usage_endpoint", "deepseek_balance", "moonshot_balance", "moonshot_cn_balance", "zhipu_coding_plan", "openrouter_key", "kimi_code_plan"];
 
 export function isKnownQuotaReader(value: string | null | undefined): value is QuotaReaderName {
   return (QUOTA_READERS as readonly string[]).includes(value ?? "");
@@ -90,7 +90,7 @@ export function quotaPresetLabel(t: (key: MessageKey) => string, preset: string)
 
 /** Readers whose endpoint is derived from the profile's Base URL (the others use a fixed endpoint). */
 export function readerFollowsBaseUrl(reader: string): boolean {
-  return reader === "usage_endpoint" || reader === "zhipu_coding_plan";
+  return reader === "usage_endpoint" || reader === "zhipu_coding_plan" || reader === "kimi_code_plan";
 }
 
 /** Does this quota-config view (or the host's capability) use explicit readers instead of `auto`? */
@@ -203,15 +203,27 @@ export function gaugeName(g: Pick<QuotaGauge, "label"> & { id?: string }): strin
   return g.id === "codex-credits" ? translate("quota.credits") : g.label;
 }
 
+/** Window captions with a fixed meaning shown in the app language: `month` (the calendar-month quota a cutex
+ *  reader names, e.g. the Kimi Code monthly total) → 本月 / This month. Rolling windows ("5h", "7d", "week") and
+ *  user-chosen captions stay as they are. */
+const WINDOW_NAMES: Record<string, MessageKey> = { month: "quota.window.month" };
+
+/** A window caption in the app language (see WINDOW_NAMES); null / empty stays empty. */
+export function windowName(window: string | null | undefined): string {
+  if (!window) return "";
+  const key = WINDOW_NAMES[window.trim().toLowerCase()];
+  return key ? translate(key) : window;
+}
+
 /** Display name of a gauge: "GLM 5h", or just "7d" when label and window are the same. */
 export function gaugeLabel(g: GaugeNaming): string {
   const label = gaugeName(g);
-  return g.windowLabel && g.windowLabel !== g.label ? `${label} ${g.windowLabel}` : label;
+  return g.windowLabel && g.windowLabel !== g.label ? `${label} ${windowName(g.windowLabel)}` : label;
 }
 
 /** Inside one profile's own view the provider prefix repeats the profile: "5h" instead of "GLM 5h". */
 export function gaugeShortLabel(g: GaugeNaming): string {
-  return g.windowLabel || gaugeName(g);
+  return windowName(g.windowLabel) || gaugeName(g);
 }
 
 /** cutex: a quota reader's label is 1–6 ASCII letters / digits (profiles/quota.rs `validate`). */

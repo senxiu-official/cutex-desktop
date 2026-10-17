@@ -13,6 +13,7 @@ import {
   FolderKanban,
   Hash,
   MailCheck,
+  PanelLeft,
   Pencil,
   Plus,
   Power,
@@ -179,8 +180,14 @@ export function projectMenu(group: SidebarGroup, workspaceRoot: string | null, c
     // ── display (this device) ──
     toggle && { label: collapsed ? t("menu.expand") : t("menu.collapse"), icon: collapsed ? <ChevronsUpDown size={ICON} /> : <ChevronsDownUp size={ICON} />, onSelect: toggle },
     { label: starred ? t("menu.unstar") : t("menu.star"), icon: starred ? <StarOff size={ICON} /> : <Star size={ICON} />, onSelect: () => toggleStarred(group.id, host) },
-    // Only meaningful while 收起在线空闲 is on (Settings → 外观 → 侧栏).
-    getUiPrefs().foldIdleAgents && { label: t("menu.idleUnfolded"), icon: unfolded ? <SquareCheck size={ICON} /> : <Square size={ICON} />, title: t("menu.idleUnfoldedHint"), onSelect: () => toggleIdleUnfolded(group.id, host) },
+    // Only meaningful while 收起在线空闲 is on (Settings → 外观 → 侧栏). One level down (侧栏显示 ›), so
+    // a stray click on the main menu never unfolds the project's idle agents.
+    getUiPrefs().foldIdleAgents && {
+      label: t("menu.sidebarDisplay"),
+      icon: <PanelLeft size={ICON} />,
+      onSelect: () => {},
+      submenu: [{ label: t("menu.idleUnfolded"), icon: unfolded ? <SquareCheck size={ICON} /> : <Square size={ICON} />, title: t("menu.idleUnfoldedHint"), onSelect: () => toggleIdleUnfolded(group.id, host) }],
+    },
     // Sidebar sections (pure UI): keyed by host + project, so each host's entry moves on its own.
     project && moveToSectionEntry(hostKey(host, group.id), t),
     // The notification mute is the focus host's setting only (notificationLevelsStore).

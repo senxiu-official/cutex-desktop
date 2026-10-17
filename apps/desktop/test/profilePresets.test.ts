@@ -171,6 +171,8 @@ describe("cutex profile-presets-v2 list", () => {
     { id: "zhipu", label: "Zhipu BigModel (GLM Coding Plan)", providerId: "zhipu", baseUrl: "https://open.bigmodel.cn/api/v1", providerFamily: "zhipu", modelCatalog: true, webSearch: null },
     { id: "moonshot", aliases: ["kimi"], label: "Moonshot (Kimi)", providerId: "moonshot", baseUrl: "https://api.moonshot.ai/v1", providerFamily: "moonshot", modelCatalog: true },
     { id: "moonshot-cn", aliases: ["kimi-cn"], label: "Moonshot (Kimi, China)", providerId: "moonshot", baseUrl: "https://api.moonshot.cn/v1", providerFamily: "moonshot", modelCatalog: true },
+    { id: "kimi-code", aliases: ["kimi-for-coding"], label: "Kimi Code (membership plan)", providerId: "kimi-code", baseUrl: "https://api.kimi.ai/coding/v1", defaultModel: "kimi-for-coding", providerFamily: "kimi-code", providerFamilyLabel: "Kimi Code", autoQuota: true, quotaReader: "kimi_code_plan", modelCatalog: true, webSearch: "live" },
+    { id: "kimi-code-cn", label: "Kimi Code (membership plan, China)", providerId: "kimi-code", baseUrl: "https://api.kimi.com/coding/v1", defaultModel: "kimi-for-coding", providerFamily: "kimi-code", providerFamilyLabel: "Kimi Code", autoQuota: true, quotaReader: "kimi_code_plan", modelCatalog: true, webSearch: "live" },
     { id: "minimax", label: "MiniMax", providerId: "minimax", baseUrl: "https://api.minimax.io/v1", providerFamily: "minimax", modelCatalog: true },
     { id: "minimax-cn", label: "MiniMax (China)", providerId: "minimax", baseUrl: "https://api.minimaxi.com/v1", providerFamily: "minimax", modelCatalog: true },
     { id: "xai", label: "xAI (Grok)", providerId: "xai", baseUrl: "https://api.x.ai/v1", providerFamily: "xai", modelCatalog: true, webSearch: "disabled" },
@@ -193,6 +195,17 @@ describe("cutex profile-presets-v2 list", () => {
     expect(v2id("https://api.minimax.io/v1")).toBe("minimax");
     expect(v2id("https://api.x.ai/v1")).toBe("xai");
     expect(v2id("https://api.z.ai/api/v1")).toBe("zai");
+  });
+
+  it("Kimi Code (kimi.com / kimi.ai) is its own official provider, not the Open Platform", () => {
+    expect(v2id("https://api.kimi.ai/coding/v1")).toBe("kimi-code");
+    expect(v2id("https://api.kimi.com/coding/v1")).toBe("kimi-code-cn");
+    // The Anthropic-compatible path on the same host is still Kimi Code's own API.
+    expect(v2id("https://api.kimi.com/coding/")).toBe("kimi-code-cn");
+    expect(presetById("kimi-code", v2)).toMatchObject({ quotaReader: "kimi_code_plan", autoQuota: true, webSearch: "live" });
+    const kimi = createUrlState(presetById("kimi-code", v2), "", v2);
+    expect(kimi.choices.map((c) => [c.preset.id, c.region])).toEqual([["kimi-code-cn", "cn"]]);
+    expect(profileKindLabel({ cliKind: "codex", authKind: "apiKey", baseUrl: "https://api.kimi.com/coding/v1" }, "自定义", v2)).toBe("API Key · Kimi Code");
   });
 
   it("the create form offers each other official endpoint once", () => {

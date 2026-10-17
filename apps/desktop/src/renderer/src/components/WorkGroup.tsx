@@ -1,13 +1,17 @@
 // Tool and reasoning steps and their folding (DESIGN §4.14): a closed work group is one summary line;
 // an open group (nothing after it yet) shows its newest steps; failures stay visible even when folded.
 import { memo, useEffect, useRef, useState } from "react";
-import { Brain, Check, ChevronDown, ChevronRight, Loader2, X } from "lucide-react";
+import { Brain, Check, ChevronDown, ChevronRight, Loader2, ShieldAlert, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useUiPrefs } from "../lib/prefs";
 import { reasoningLastLine, reasoningText, type ReasoningEntry } from "../lib/reasoning";
 import { useNow } from "../lib/time";
-import type { RawItem } from "../lib/timeline";
+import { autoReviewOf, type RawItem } from "../lib/timeline";
+import { AutoReviewLine } from "./AutoReview";
 import { isFailed, type StepEntry, type WorkSummary } from "../lib/workGroups";
+import { safetyNoteOfItem } from "../lib/ownerNotify";
+import { useHostOwnerNotes } from "../lib/ownerNotifyStore";
+import { agentHost, useApp } from "../store";
 import { Markdown } from "./Markdown";
 import { ToolOutlet } from "../modules/TimelineOutlet";
 
@@ -75,7 +79,14 @@ function StepRow({ step, sessionId }: { step: StepEntry; sessionId: string }) {
 }
 
 export function ToolRow({ item, sessionId }: { item: RawItem; sessionId: string }) {
-  return <ToolOutlet item={item} sessionId={sessionId} />;
+  const review = autoReviewOf(item);
+  if (!review) return <ToolOutlet item={item} sessionId={sessionId} />;
+  return (
+    <>
+      <ToolOutlet item={item} sessionId={sessionId} />
+      <AutoReviewLine review={review} />
+    </>
+  );
 }
 
 function summaryText(s: WorkSummary, t: (k: MessageKey, v?: Record<string, string | number>) => string): string {
@@ -96,6 +107,7 @@ export const WorkGroup = memo(WorkGroupView, (a, b) => a.sessionId === b.session
 function WorkGroupView({ steps, open: openGroup, summary, sessionId }: { steps: StepEntry[]; open: boolean; summary: WorkSummary; sessionId: string }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState<boolean | null>(null);
+  const notes = useHostOwnerNotes(useApp(agentHost));
   // A single step gains nothing from folding.
   if (steps.length === 1) return <StepRow sessionId={sessionId} step={steps[0]!} />;
   if (openGroup && expanded === null) {
@@ -116,13 +128,17 @@ function WorkGroupView({ steps, open: openGroup, summary, sessionId }: { steps: 
   }
   const open = expanded === true;
   const failedRows = steps.filter((e) => e.kind === "tool" && isFailed(e.item));
+  // Calls a safety check stopped (claude-safety-grants notice) are not failures: 已拦截, not red.
+  const blocked = failedRows.filter((e) => e.kind === "tool" && safetyNoteOfItem(notes, sessionId, e.item.id)?.safetyBlock).length;
+  const failedCount = Math.max(0, summary.failed - blocked);
   return (
     <div className="my-1">
       <button onClick={() => setExpanded(!open)} className="my-0.5 flex max-w-full items-center gap-1.5 text-xs text-muted hover:text-foreground">
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        {summary.failed ? <X size={13} className="text-danger" /> : <Check size={13} className="text-ok" />}
+        {failedCount ? <X size={13} className="text-danger" /> : blocked ? <ShieldAlert size={13} className="text-warn-text" /> : <Check size={13} className="text-ok" />}
         <span className="truncate">{summaryText(summary, t)}</span>
-        {summary.failed > 0 && <span className="shrink-0 text-danger">· {t("work.failed", { n: summary.failed })}</span>}
+        {failedCount > 0 && <span className="shrink-0 text-danger">· {t("work.failed", { n: failedCount })}</span>}
+        {blocked > 0 && <span className="shrink-0 text-muted">· {t("work.safetyBlocked", { n: blocked })}</span>}
         {summary.durationMs !== null && <span className="shrink-0 text-subtle">· {formatMs(summary.durationMs)}</span>}
       </button>
       {open ? (
@@ -133,7 +149,7 @@ function WorkGroupView({ steps, open: openGroup, summary, sessionId }: { steps: 
         </div>
       ) : (
         failedRows.length > 0 && (
-          <div className="ml-2 border-l border-danger/40 pl-2.5">
+          <div className={`ml-2 border-l pl-2.5 ${failedCount ? "border-danger/40" : "border-border"}`}>
             {failedRows.map((e) => (
               <StepRow sessionId={sessionId} key={e.id} step={e} />
             ))}

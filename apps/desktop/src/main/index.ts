@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain, Menu, nativeTheme, protocol, session, shell, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, session, shell, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
 import { EVENT_CHANNEL, HOST_METHOD_NAMES, INVOKE_CHANNEL, SHELL_CHANNEL, TITLEBAR_HEIGHT, UPDATE_CHANNEL, WINDOW_CHANNEL, type DaemonApi, type DaemonEvents, type DesktopApi, type DesktopEvents, type HostApi, type InvokeMethod, type ShellRequest, type UpdateRequest, type WindowAction } from "../shared/ipc";
 import { isCloseBehavior, isShellLocale, isUpdateCheckMinutes } from "../shared/shell";
 import { CutexApiError } from "@cutex-desktop/cutex-client";
@@ -13,6 +13,10 @@ import { DesktopShell } from "./shell";
 import { initialWindowBounds, trackWindowState } from "./windowState";
 import { MIN_WINDOW_SIZE } from "../shared/windowBounds";
 import { Updater } from "./updater";
+import { handleKnownIssuesRequest, KnownIssuesSource } from "./knownIssues";
+import { KNOWN_ISSUES_CHANNEL, type KnownIssuesRequest } from "../shared/knownIssues";
+import { handleLaunchArtRequest, LaunchArtStore } from "./launchArt";
+import { LAUNCH_ART_CHANNEL, LAUNCH_ART_DIR, type LaunchArtRequest } from "../shared/launchArt";
 import { resolveUpdateRemote } from "../shared/update";
 import { resolveQuickstart, type QuickstartTarget } from "../shared/quickstart";
 import { errorFields, logDir, logError } from "./errorLog";
@@ -59,6 +63,8 @@ const desktopShell = new DesktopShell(
 
 function sendEvent<K extends keyof DesktopEvents>(event: K, payload: DesktopEvents[K]): void {
   if (event === "hostsState" || event === "daemonState") syncBrowserHosts();
+  // An SSH question (passphrase / password / host key) needs the window, also from the tray.
+  if (event === "sshPrompts" && (payload as DesktopEvents["sshPrompts"]).prompts.length > 0) desktopShell.show();
   mainWindow?.webContents.send(EVENT_CHANNEL, event, payload);
 }
 
@@ -132,12 +138,15 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "saveHostGroups",
   "testHost",
   "setHostStartOn",
+  "sshPrompts",
+  "answerSshPrompt",
   "identityState",
   "exportIdentity",
   "importIdentity",
   "copyIdentityKey",
   "importIdentityKey",
   "setIdentityName",
+  "copyProfileToHost",
   "daemonState",
   "browseDirs",
   "approvals",
@@ -197,6 +206,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "duplicateProfile",
   "deleteProfile",
   "readRateLimits",
+  "windowsSandboxReadiness",
+  "setupWindowsSandbox",
   "quotaConfig",
   "putQuotaConfig",
   "capabilities",
@@ -486,6 +497,27 @@ ipcMain.handle(UPDATE_CHANNEL, (event, request: UpdateRequest) => {
   }
 });
 
+// Settings → 关于 → 已知问题: the release branch's list, fetched here through the updater's transport.
+let knownIssues: KnownIssuesSource | null = null;
+ipcMain.handle(KNOWN_ISSUES_CHANNEL, (event, request: KnownIssuesRequest) => {
+  if (!isAppSender(event)) throw new Error("untrusted sender");
+  knownIssues ??= new KnownIssuesSource({ transport: updater.transport(), cacheFile: join(app.getPath("userData"), "known-issues.json") });
+  return handleKnownIssuesRequest(knownIssues, request);
+});
+
+// Settings → 外观 → 启动页立绘: imported launcher art in userData (main/launchArt.ts); the folder comes
+// from main's own dialog, never from the renderer.
+let launchArt: LaunchArtStore | null = null;
+ipcMain.handle(LAUNCH_ART_CHANNEL, (event, request: LaunchArtRequest) => {
+  if (!isAppSender(event)) throw new Error("untrusted sender");
+  launchArt ??= new LaunchArtStore(join(app.getPath("userData"), LAUNCH_ART_DIR));
+  return handleLaunchArtRequest(launchArt, request, async () => {
+    const options = { properties: ["openDirectory"] as "openDirectory"[] };
+    const picked = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+    return picked.canceled ? null : (picked.filePaths[0] ?? null);
+  });
+});
+
 ipcMain.handle(PLUGINS_CHANNEL, async (event, request: PluginRequest) => {
   if (!isAppSender(event)) throw new Error("untrusted sender");
   if (!pluginResources || !pluginNetwork) throw new Error("plugin catalog unavailable");
@@ -580,7 +612,7 @@ function createWindow(): void {
       nodeIntegration: false,
     },
   });
-  installBrowser(mainWindow, () => hosts, isAppSender, sendEvent);
+  installBrowser(mainWindow, () => hosts, isAppSender, sendEvent, () => desktopShell.locale);
   mainWindow.once("ready-to-show", () => {
     if (initial.maximized) mainWindow?.maximize();
     mainWindow?.show();
@@ -686,6 +718,7 @@ app.whenReady().then(async () => {
     // macOS is front-end only: no implicit local host unless a local cutex is configured (main/localHost.ts).
     localHost: hasImplicitLocalHost(process.platform, localCutexConfigured(localProbe)),
     onDisconnect: (hostId) => ownerAlerts.forgetHost(hostId),
+    onSshPrompts: (prompts) => sendEvent("sshPrompts", { prompts }),
   });
   // Dev only: sample big alerts without a daemon (screenshots).
   if (demoOwnerAlertRequested()) setTimeout(() => ownerAlerts.showDemo(), 1500);

@@ -14,11 +14,16 @@ describe("browser popup owner input gate", () => {
     now = 600; gate.observe("mouseUp", true); expect(gate.consume()).toBe(false); expect(gate.rejection).toBe("rate_limited");
     now = 1501; gate.observe("mouseUp", true); expect(gate.consume()).toBe(true);
   });
-  it("denies while agent-leased and never replays a lease-era gesture", () => {
-    let leased = false; const gate = new BrowserPopupInput(() => 0, () => leased);
-    gate.observe("keyDown", true); leased = true; expect(gate.consume()).toBe(false);
-    gate.observe("mouseUp", true); leased = false; expect(gate.consume()).toBe(false);
+  it("ignores the agent's own dispatched input and never replays it as an owner gesture", () => {
+    let agent = false; const gate = new BrowserPopupInput(() => 0, () => agent);
+    gate.observe("keyDown", true); agent = true; expect(gate.consume()).toBe(false); expect(gate.rejection).toBe("agent_input");
+    gate.observe("mouseUp", true); agent = false; expect(gate.consume()).toBe(false);
     gate.observe("mouseUp", true); expect(gate.consume()).toBe(true);
+  });
+  it("rate limits agent-caused popups to one per second", () => {
+    let now = 0; const gate = new BrowserPopupInput(() => now, () => true);
+    expect(gate.consumeAgent()).toBe(true); now = 500; expect(gate.consumeAgent()).toBe(false);
+    now = 1000; expect(gate.consumeAgent()).toBe(true);
   });
   it("revokes and ignores unrecognized events", () => {
     const gate = new BrowserPopupInput(() => 0);

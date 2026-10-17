@@ -33,6 +33,7 @@ import { channelLabel, PROJECT_REPO_URL, RELATED_REPO_URLS, unsupportedHintKey, 
 import { useApp } from "../../store";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { formatBytes } from "../../../../shared/releases";
+import { effectiveUpdateCheckMinutes, updateCheckChoices } from "../../../../shared/binaryUpdate";
 import { Avatar } from "../Avatar";
 import { UpdateButton } from "../UpdateButton";
 import { AboutDragon } from "./AboutDragon";
@@ -110,7 +111,14 @@ function CloseBehaviorRow() {
   );
 }
 
-const UPDATE_INTERVALS = [0, 5, 10, 30, 60];
+/** A 检查更新 choice in words: 从不 / 每 10 分钟 / 每小时 / 每 6 小时 / 每天. */
+function updateIntervalLabel(t: (key: MessageKey, vars?: Record<string, string | number>) => string, minutes: number): string {
+  if (minutes <= 0) return t("updater.updateCheck.off");
+  if (minutes === 60) return t("updater.updateCheck.hourly");
+  if (minutes === 1440) return t("updater.updateCheck.daily");
+  if (minutes % 60 === 0) return t("updater.updateCheck.hours", { n: minutes / 60 });
+  return t("updater.updateCheck.minutes", { n: minutes });
+}
 
 /** The branch this install follows (read-only: set per install, `<base>/channel`). */
 /**
@@ -248,8 +256,10 @@ export function UpdatesPage() {
           <>
             <SettingRow label={t("updater.updateCheck")} hint={t("updater.updateCheckHint")}>
               <Select
-                value={String(UPDATE_INTERVALS.includes(minutes) ? minutes : 10)}
-                options={UPDATE_INTERVALS.map((n) => ({ value: String(n), label: n === 0 ? t("updater.updateCheck.off") : n === 60 ? t("updater.updateCheck.hourly") : t("updater.updateCheck.minutes", { n }) }))}
+                // Binary installs check at most hourly (GitHub's unauthenticated API limit, main/updater.ts):
+                // only offer what really happens, and show a stored shorter value as the hour it runs at.
+                value={String(effectiveUpdateCheckMinutes(minutes, !!status.binary))}
+                options={updateCheckChoices(minutes, !!status.binary).map((n) => ({ value: String(n), label: updateIntervalLabel(t, n) }))}
                 onChange={(v) => shell.setUpdateCheckMinutes(Number(v)).then(setState, () => {})}
               />
             </SettingRow>

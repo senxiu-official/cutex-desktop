@@ -8,6 +8,9 @@
 // The 模型 value is a button when the default model can be changed here (lib/profileDefaultModel):
 // it opens the profile's model list (+ 推理强度) and saves the pick at once.
 // Every part always takes its height, so a card never grows when its quota arrives.
+// Width breakpoints come from lib/sizeFlags (`data-md` / `data-lg` / `data-wide` on the card,
+// `group-data-[…]/profile:`), not from a CSS size container: a quota refresh re-renders every card
+// in one commit, the pattern that left Chromium size containers' children without layout boxes.
 import type { KeyboardEvent, MouseEvent } from "react";
 import { MoreHorizontal, Users } from "lucide-react";
 import type { ProfileItem, QuotaGauge } from "../../../../shared/ipc";
@@ -22,6 +25,7 @@ import { useProfilePresets } from "../../lib/useProfilePresets";
 import { sessionsUsingProfile } from "../../lib/profileKind";
 import { formatBalance, gaugeShortLabel, quotaFill, quotaTextKey, resetsInCompact, type QuotaView } from "../../lib/quota";
 import { profileColor } from "../../lib/profileLook";
+import { dataFlags, useSizeFlags, widthAtLeast } from "../../lib/sizeFlags";
 import { Avatar } from "../Avatar";
 import { GaugeBar } from "../GaugeBar";
 import { ProfileAvatar } from "../ProfileAvatar";
@@ -29,6 +33,9 @@ import { useTargetHostId, useTargetQuotas, useTargetSelect, useTargetSidebar } f
 
 /** Agent pictures shown before the count. */
 const STACK = 4;
+
+/** Card widths (content box): gauges two a row (28rem), reset times (32rem), the middle 模型 / 行为 column (34rem). */
+const CARD_SIZES = { md: widthAtLeast(28), lg: widthAtLeast(32), wide: widthAtLeast(34) } as const;
 
 function CardGauge({ gauge: g, view }: { gauge: QuotaGauge; view: QuotaView }) {
   const { t } = useI18n();
@@ -45,7 +52,7 @@ function CardGauge({ gauge: g, view }: { gauge: QuotaGauge; view: QuotaView }) {
         <>
           <GaugeBar ratio={fill} view={view} className="h-1.5 min-w-10 flex-1" />
           <span className="min-w-9 shrink-0 text-right text-foreground">{t(quotaTextKey(view), { percent: Math.round(fill * 100) })}</span>
-          <span className="hidden w-10 shrink-0 text-subtle @lg:inline">{reset}</span>
+          <span className="hidden w-10 shrink-0 text-subtle group-data-[lg]/profile:inline">{reset}</span>
         </>
       )}
       {g.error && <span className="text-danger">!</span>}
@@ -82,22 +89,25 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
   const model = [modelShown, item.modelReasoningEffort, contextLabel(item.modelContextWindow)].filter(Boolean).join(" · ");
   const modelTitle = item.model && modelShown !== item.model ? `${model} (${item.model})` : model;
   const rules = profileRules(item, cachedProfile(item.name, targetHost)?.detail ?? null).map((r) => t(`settings.profile.rule.${r}` as MessageKey));
+  const [sizeRef, size] = useSizeFlags(CARD_SIZES);
   const stop = (e: MouseEvent) => e.stopPropagation();
   const onKey = (e: KeyboardEvent) => {
     if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) (e.preventDefault(), onOpen());
   };
   return (
     <div
+      ref={sizeRef}
+      {...dataFlags(size)}
       role="button"
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={onKey}
       onContextMenu={(e) => (e.preventDefault(), onMenu({ x: e.clientX, y: e.clientY }))}
-      className={`@container cursor-pointer rounded-xl border outline-none focus-visible:border-accent ${armed ? ARMED_FRAME : "border-border bg-surface hover:border-foreground/20"}`}
+      className={`group/profile cursor-pointer rounded-xl border outline-none focus-visible:border-accent ${armed ? ARMED_FRAME : "border-border bg-surface hover:border-foreground/20"}`}
     >
       <div className="flex items-center gap-3.5 px-4 pt-4 pb-3.5">
         <ProfileAvatar profile={item} size={44} badge />
-        <div className="min-w-0 flex-1 @[34rem]:max-w-52">
+        <div className="min-w-0 flex-1 group-data-[wide]/profile:max-w-52">
           <div className="flex h-6 items-center gap-2">
             <span className="min-w-0 truncate text-[15px] font-semibold">{item.name}</span>
             {isDefault && <span className="shrink-0 rounded-full bg-accent/15 px-2 text-[11px] leading-5 text-accent">{t("agent-config.profile.default")}</span>}
@@ -108,11 +118,11 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
           <div className="mt-0.5 truncate text-xs text-subtle" title={kindLine}>
             {kindLine}
             {/* narrow card: no middle column, the model joins this line */}
-            {model && <span className="@[34rem]:hidden"> · {model}</span>}
+            {model && <span className="group-data-[wide]/profile:hidden"> · {model}</span>}
           </div>
         </div>
         {/* middle: what a new agent on this profile starts with */}
-        <dl className="hidden min-w-0 flex-1 grid-cols-[2.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 border-l border-border pl-4 text-xs @[34rem]:grid">
+        <dl className="hidden min-w-0 flex-1 grid-cols-[2.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 border-l border-border pl-4 text-xs group-data-[wide]/profile:grid">
           <dt className="text-subtle">{t("settings.profile.card.model")}</dt>
           <dd className="min-w-0 truncate font-mono text-muted" title={onModelMenu ? undefined : modelTitle}>
             {onModelMenu ? (
@@ -173,7 +183,7 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
         </span>
       </div>
       {/* Two gauges a row (Claude can have 5h / 7d / Opus 7d / credits: two rows). */}
-      <div className="grid min-h-10 grid-cols-1 content-center gap-x-8 gap-y-2 border-t border-border px-4 py-2.5 text-xs @md:grid-cols-2">
+      <div className="grid min-h-10 grid-cols-1 content-center gap-x-8 gap-y-2 border-t border-border px-4 py-2.5 text-xs group-data-[md]/profile:grid-cols-2">
         {gauges === undefined ? null : gauges.length ? (
           gauges.map((g) => <CardGauge key={g.id} gauge={g} view={view} />)
         ) : (

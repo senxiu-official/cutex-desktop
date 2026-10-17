@@ -300,6 +300,7 @@ const mockSkills: { name: string; description: string; scope: string; pluginId: 
 const skillPath = (name: string) => `${SKILLS_DIR}\\${name.replace(/[:]/g, "-")}\\SKILL.md`;
 const skillEnabled: Record<string, boolean> = { [skillPath("xlsx")]: false };
 
+let sharedWindowsSandbox: "ready" | "notConfigured" = "notConfigured";
 const codexFeatures: Record<string, boolean> = { goals: true, collaboration_modes: true, js_repl: false };
 
 // skills-archive: archived user skills (cutex moves the folder to <cutex home>/archive/skills/<id>/skill).
@@ -323,6 +324,13 @@ export const mock: ModuleMock = {
     async codexRequest(method, params) {
       const p = (params ?? {}) as { keyPath?: string; value?: unknown; mergeStrategy?: string; path?: string; enabled?: boolean; edits?: { keyPath: string; value: unknown; mergeStrategy: string }[] };
       switch (method) {
+        // windows-sandbox-readiness: the shared home starts without a sandbox; setup sets the unelevated one.
+        case "windowsSandbox/readiness":
+          return { status: sharedWindowsSandbox };
+        case "windowsSandbox/setupStart":
+          await new Promise((r) => setTimeout(r, 600));
+          sharedWindowsSandbox = "ready";
+          return { started: true, completed: { mode: "unelevated", success: true, error: null } };
         case "config/read":
           return { config: { ...(redact(mockConfig) as object), features: codexFeatures, marketplaces: mockMarketplaceConfig() }, origins: {}, layers: null };
         case "config/value/write": {

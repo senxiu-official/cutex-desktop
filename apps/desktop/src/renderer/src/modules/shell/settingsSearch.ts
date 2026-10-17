@@ -43,6 +43,7 @@ export const APPEARANCE_SEARCH: Search = {
       keywords: ["appearance.uiFont", "appearance.cjkFont", "appearance.chatFont", "appearance.chatCjkFont", "appearance.chatFontSize", "appearance.monoFont", "appearance.monoFontSize"],
     },
     { anchor: "layout", titleKey: "appearance.layout", keywords: ["appearance.fullWidth", "appearance.readingWidth", "appearance.density"] },
+    { anchor: "launchArt", titleKey: "appearance.launchArt", keywords: ["appearance.launchArt.import", "appearance.launchArt.source.imported", "appearance.launchArt.source.bundled"] },
   ],
 };
 

@@ -27,7 +27,7 @@ function guestMock() {
   let open: any;
   const webRTC = vi.fn();
   const setWindowOpenHandler = vi.fn((fn: any) => { open = fn; });
-  Object.assign(guest, { setWebRTCIPHandlingPolicy: webRTC, setWindowOpenHandler });
+  Object.assign(guest, { id: 7, setWebRTCIPHandlingPolicy: webRTC, setWindowOpenHandler });
   return { guest: guest as unknown as WebContents, emitter: guest, webRTC, setWindowOpenHandler,
     open: (url: string, extra = {}) => open({ url, frameName: "_blank", disposition: "new-window", features: "", ...extra }) };
 }
@@ -79,13 +79,21 @@ describe("browser local URL policy", () => {
 });
 describe("browser dedicated session hardening", () => {
   const options = () => ({ partition: "persist:browser-local", registeredHostIds: ["local"],
-    policy: createBrowserUrlPolicy({ getHost: () => ({ kind: "local" }) }), acceptWebContents: (id: number) => id === 7 });
+    policy: createBrowserUrlPolicy({ getHost: () => ({ kind: "local" }), admitted: () => true }), acceptWebContents: (id: number) => id === 7 });
   it("denies permissions/devices and invalid certificates, cancels downloads", async () => {
     const mock = sessionMock(); await installBrowserSessionPolicy(mock.session, options());
     expect(mock.permission()).toBe(false); expect(mock.check()).toBe(false); expect(mock.device()).toBe(false);
     expect(mock.cert(-202, "CERT_AUTHORITY_INVALID")).toBe(-2);
     expect(mock.cert(0, "NOT_OK")).toBe(-2);
     expect(mock.cert(0, "OK")).toBe(-3); // Default Chromium verification, not unconditional trust.
+    // Electron 44 really reports net::ErrorToString(): "net::OK" for a valid chain (the docs say "OK").
+    // Matching only "OK" refused every HTTPS page (Windows acceptance E4, 0.1.3).
+    expect(mock.cert(0, "net::OK")).toBe(-3);
+    expect(mock.cert(-202, "net::ERR_CERT_AUTHORITY_INVALID")).toBe(-2);
+    expect(mock.cert(0, "net::ERR_CERT_REVOKED")).toBe(-2);
+    expect(mock.cert(-200, "net::OK")).toBe(-2);
+    expect(mock.cert(0, "net::net::OK")).toBe(-2);
+    expect(mock.cert(0, "xnet::OK")).toBe(-2);
     const event = { preventDefault: vi.fn() }, item = { cancel: vi.fn() };
     mock.emitter.emit("will-download", event, item);
     expect(event.preventDefault).toHaveBeenCalledOnce(); expect(item.cancel).toHaveBeenCalledOnce();
@@ -172,7 +180,7 @@ describe("browser dedicated session hardening", () => {
   });
 });
 describe("browser guest navigation and popup denial", () => {
-  const policy = () => createBrowserUrlPolicy({ getHost: () => ({ kind: "local" }) });
+  const policy = () => createBrowserUrlPolicy({ getHost: () => ({ kind: "local" }), admitted: () => true });
   it.each([0, 1, 2])("rejects client certificate selection with %s offered identities, before later guest hardening", count => {
     const mock = guestMock(), order: string[] = [];
     denyBrowserClientCertificates(mock.guest);
@@ -218,7 +226,7 @@ describe("browser guest navigation and popup denial", () => {
   });
   it("always denies a BrowserWindow, forwarding only admitted HTTP owner activation under same host", () => {
     const mock = guestMock(), onNewTab = vi.fn(); let activation = false;
-    let current: BrowserPopupPolicyOptions | undefined = { hostId: "local", policy: policy(), onNewTab,
+    let current: BrowserPopupPolicyOptions | undefined = { hostId: "local", webContentsId: 7, policy: policy(), onNewTab,
       consumeOwnerGesture: () => { const yes = activation; activation = false; return yes; } };
     mock.guest.setWindowOpenHandler(createBrowserWindowOpenHandler(() => current));
     const dispose = hardenBrowserGuest(mock.guest, { hostId: "local", policy: policy() });
@@ -238,7 +246,7 @@ describe("browser guest navigation and popup denial", () => {
   });
   it("no activation source means deny; page-supplied userGesture never grants forwarding", () => {
     const mock = guestMock(), onNewTab = vi.fn();
-    mock.guest.setWindowOpenHandler(createBrowserWindowOpenHandler(() => ({ hostId: "local", policy: policy(), onNewTab })));
+    mock.guest.setWindowOpenHandler(createBrowserWindowOpenHandler(() => ({ hostId: "local", webContentsId: 7, policy: policy(), onNewTab })));
     expect(mock.open("http://localhost:26111/", { userGesture: true })).toEqual({ action: "deny" });
     expect(onNewTab).not.toHaveBeenCalled();
   });
@@ -248,7 +256,7 @@ describe("browser guest navigation and popup denial", () => {
     mock.guest.setWindowOpenHandler(createBrowserWindowOpenHandler(() => current, diagnostic));
     expect(mock.open("http://localhost/?ticket=secret")).toEqual({ action: "deny" });
     expect(diagnostic).toHaveBeenLastCalledWith("unavailable");
-    current = { hostId: "local", policy: policy(), consumeOwnerGesture, onNewTab };
+    current = { hostId: "local", webContentsId: 7, policy: policy(), consumeOwnerGesture, onNewTab };
     for (const url of ["about:blank", "javascript:alert(1)", "data:text/html,secret", "file:///secret", "cutex:service/docs/", "ws://localhost/"])
       expect(mock.open(url)).toEqual({ action: "deny" });
     expect(diagnostic).toHaveBeenLastCalledWith("invalid_url");
@@ -276,7 +284,7 @@ describe("browser guest navigation and popup denial", () => {
   it.each(["options", "policy", "gesture", "forwarder", "diagnostic"])("%s exceptions still return native-window denial", stage => {
     const mock = guestMock(), diagnostic = vi.fn(() => { if (stage === "diagnostic") throw new Error("ignore"); });
     const explode = () => { throw new Error("ignore"); };
-    const options = { hostId: "local", policy: stage === "policy" ? { isNavigationAllowed: explode, isRequestAllowed: explode } : policy(),
+    const options = { hostId: "local", policy: stage === "policy" ? { isNavigationAllowed: explode, isRequestAllowed: explode, refusal: explode } : policy(),
       consumeOwnerGesture: stage === "gesture" ? explode : () => true, onNewTab: stage === "forwarder" ? explode : vi.fn() };
     mock.guest.setWindowOpenHandler(createBrowserWindowOpenHandler(stage === "options" ? explode : () => options, diagnostic));
     expect(mock.open(stage === "diagnostic" ? "about:blank" : "http://localhost/")).toEqual({ action: "deny" });
@@ -284,7 +292,7 @@ describe("browser guest navigation and popup denial", () => {
   });
   it("missing forwarding callback never spends owner activation", () => {
     const mock = guestMock(), consumeOwnerGesture = vi.fn(() => true), diagnostic = vi.fn();
-    mock.guest.setWindowOpenHandler(createBrowserWindowOpenHandler(() => ({ hostId: "local", policy: policy(), consumeOwnerGesture }), diagnostic));
+    mock.guest.setWindowOpenHandler(createBrowserWindowOpenHandler(() => ({ hostId: "local", webContentsId: 7, policy: policy(), consumeOwnerGesture }), diagnostic));
     expect(mock.open("http://localhost/")).toEqual({ action: "deny" });
     expect(diagnostic).toHaveBeenCalledWith("no_forwarder"); expect(consumeOwnerGesture).not.toHaveBeenCalled();
   });

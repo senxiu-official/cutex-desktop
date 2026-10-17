@@ -10,6 +10,13 @@ export type BrowserHostEventCoverage = AssertNoMissingHostEvents<Exclude<HostTag
  * owner's choice (default on); `forced` is a development-run override (CUTEX_DESKTOP_BROWSER_EGRESS
  * = n2 / off), never honoured by packaged builds; `enabled` is what main enforces right now. */
 export interface BrowserExternalPagesView { enabled: boolean; stored: boolean; forced?: "on" | "off" }
+/** Site permissions the owner can grant a page's own origin (camera, microphone, …). */
+export const BROWSER_SITE_PERMISSIONS = ["camera", "microphone", "geolocation", "notifications", "clipboard-read", "midi", "midi-sysex", "pointer-lock", "keyboard-lock",
+  "idle-detection", "window-management", "storage-access", "speaker-selection", "protected-media"] as const;
+export type BrowserSitePermission = typeof BROWSER_SITE_PERMISSIONS[number];
+/** One remembered owner decision, per login pool (owner / agent) and origin. */
+export interface BrowserSitePermissionView { pool: "owner" | "agent"; origin: string; permission: BrowserSitePermission; allow: boolean }
+export type BrowserSitePermissionForget = "all" | { pool: "owner" | "agent"; origin: string };
 export const DEFAULT_BROWSER_EXTERNAL_PAGES = true;
 
 export interface BrowserControlSettings {
@@ -83,7 +90,11 @@ export interface BrowserTabView {
   pool?: "owner" | "agent";
   /** Exact main-confirmed open correlation, never inferred from a locally active lease. */
   confirmedOpen?: string;
+  /** A site-permission request of this tab: main's native dialog is open (waiting), or the last one
+   * ended without the owner (hidden window / unanswered). Display only; the owner answers in main. */
+  sitePermission?: BrowserSitePermissionPromptView;
 }
+export interface BrowserSitePermissionPromptView { state: "waiting" | "hidden" | "timeout"; origin: string; permissions: BrowserSitePermission[] }
 export interface BrowserTabMount {
   guestId: string;
   tabKey: string;
@@ -96,7 +107,13 @@ export interface BrowserTabMount {
 }
 /** Main opens an owner tab for a claim: the renderer shows it (held) in the requesting agent's lane. */
 export interface BrowserClaimOpenIntent { tabKey: string; url: string; sessionId: string }
-export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-tab" | "diagnostic" | "reveal" | "agent-open" | "agent-open-cancel" | "agent-open-confirm" | "claim-open" | "claim-granted"; newTabUrl?: string; newTabKey?: string; popupDiscardReason?: string; openIntent?: BrowserOpenIntent; openRequestId?: string;
+export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-tab" | "diagnostic" | "reveal" | "agent-open" | "agent-open-cancel" | "agent-open-confirm" | "claim-open" | "claim-granted" | "blocked"; newTabUrl?: string;
+  /** new-tab: the opener's agent caused this popup (its own click), not the owner. */
+  newTabAgent?: true;
+  /** new-tab: the host granted it to that agent under the opener's lease (browser-popup-grant). */
+  newTabGranted?: true;
+  /** blocked: what main stopped without the owner's action (shown once as a notice). */
+  blocked?: "popup" | "download" | "download-hidden" | "permission-waiting" | "permission-hidden" | "permission-timeout"; newTabKey?: string; popupDiscardReason?: string; openIntent?: BrowserOpenIntent; openRequestId?: string;
   claimOpen?: BrowserClaimOpenIntent; claimGrant?: { agentName: string; reason: BrowserClaimAutoReason } };
 /** Completion of a one-use owner UI mount, not an agent target identifier. */
 export interface BrowserAttachReceipt { src: string; webContentsId: number }
@@ -104,6 +121,7 @@ export type BrowserRequest =
   | { op: "setEnabled"; enabled: boolean }
   | { op: "resetOrigins" }
   | { op: "externalPages"; enabled?: boolean }
+  | { op: "sitePermissions"; forget?: BrowserSitePermissionForget }
   | { op: "reserveOwnerTab" }
   | { op: "list" }
   | { op: "turnShots"; sessionId: string; turnId: string }
@@ -121,6 +139,7 @@ export type BrowserRequest =
   | { op: "holdReady"; tabKey: string; leaseId: string; held: boolean }
   | { op: "releaseLease"; tabKey: string; leaseId: string; owner?: true }
   | { op: "resumeLease"; tabKey: string; leaseId: string; settings: BrowserControlSettings }
+  | { op: "pauseLease"; tabKey: string; leaseId: string }
   | { op: "openRefused"; requestId: string; code: BrowserOpenRefusal }
   | { op: "clearIdempotency"; cutexSessionId?: string }
   | { op: "open"; tabKey: string; url: string; receipt?: BrowserAttachReceipt; identity?: BrowserMountIdentity }
@@ -151,7 +170,10 @@ export interface HostBrowserBridge {
   holdReady(tabKey: string, leaseId: string, held: boolean): Promise<void>;
   /** owner: the owner's 停止并撤销授予 (also ends that agent's 一直允许 for the tab's origin). */
   releaseLease(tabKey: string, leaseId: string, owner?: boolean): Promise<void>;
+  /** One click, same agent + lease: no second confirmation (the grant itself was confirmed). */
   resumeLease(tabKey: string, leaseId: string, settings: BrowserControlSettings): Promise<void>;
+  /** The owner's explicit 「暂停智能体」: keeps the lease (unlike revoke); 「继续」 resumes it. */
+  pauseLease(tabKey: string, leaseId: string): Promise<void>;
   openRefused(requestId: string, code: BrowserOpenRefusal): Promise<void>;
   open(tabKey: string, url: string, receipt?: BrowserAttachReceipt, identity?: BrowserMountIdentity): Promise<BrowserTabMount>;
   navigate(tabKey: string, url: string): Promise<void>;
@@ -170,12 +192,19 @@ export interface BrowserBridge {
   resetOrigins(): Promise<void>;
   /** Owner switch 「允许浏览外部网页」: read (no argument) or set. Host-independent. */
   externalPages(enabled?: boolean): Promise<BrowserExternalPagesView>;
+  /** Remembered per-origin site permissions; forget one origin (all its permissions) or all. */
+  sitePermissions(forget?: BrowserSitePermissionForget): Promise<BrowserSitePermissionView[]>;
   forHost(hostId: string): HostBrowserBridge;
   subscribe(listener: (event: BrowserEvent) => void): () => void;
 }
 
 /** Fixed UI keys only; no page/daemon message is ever an owner-facing fallback. */
-export type BrowserOwnerErrorKey = "browser.error.invalid" | "browser.error.unsupported" | "browser.error.permission" | "browser.error.loopbackOnly" | "browser.error.disabled" | "browser.error.unavailable" | "browser.error.revoked" | "browser.error.desktopRestarted" | "browser.error.hidden" | "browser.error.paused" | "browser.error.scope" | "browser.error.stale" | "browser.error.deadline" | "browser.error.cancelled" | "browser.error.unknownOutcome" | "browser.error.conflict" | "browser.error.notRetained" | "browser.error.approvalRequired" | "browser.error.approvalDenied" | "browser.error.leaseLimit" | "browser.error.busy" | "browser.error.capacity" | "browser.error.tooLarge" | "browser.error.identityUnavailable" | "browser.error.identityRecovered" | "browser.error.serviceUnavailable" | "browser.externalUnavailable" | "browser.serviceProxyRequired" | "browser.noHost" | "browser.unavailable" | "browser.navigationFailed" | "browser.serviceAuthFailed" | "browser.invalidReceipt" | "browser.error.unknown";
+export type BrowserOwnerErrorKey = "browser.error.invalid" | "browser.error.unsupported" | "browser.error.permission" | "browser.error.loopbackOnly" | "browser.error.disabled" | "browser.error.unavailable" | "browser.error.revoked" | "browser.error.desktopRestarted" | "browser.error.hidden" | "browser.error.paused" | "browser.error.scope" | "browser.error.stale" | "browser.error.deadline" | "browser.error.cancelled" | "browser.error.unknownOutcome" | "browser.error.conflict" | "browser.error.notRetained" | "browser.error.approvalRequired" | "browser.error.approvalDenied" | "browser.error.leaseLimit" | "browser.error.busy" | "browser.error.capacity" | "browser.error.tooLarge" | "browser.error.identityUnavailable" | "browser.error.identityRecovered" | "browser.error.serviceUnavailable" | "browser.externalUnavailable" | "browser.refusal.externalOff" | "browser.refusal.proxyUnavailable" | "browser.refusal.privateAddress" | "browser.refusal.reservedAddress" | "browser.refusal.protectedEndpoint" | "browser.refusal.remoteLoopback" | "browser.serviceProxyRequired" | "browser.noHost" | "browser.unavailable" | "browser.navigationFailed" | "browser.serviceAuthFailed" | "browser.invalidReceipt" | "browser.error.unknown";
+/** The one owner action that actually fixes a refusal (none: explain only). */
+export type BrowserRefusalAction = "enableExternal" | "retry" | null;
+export function browserRefusalAction(code: unknown): BrowserRefusalAction {
+  return code === "external_pages_off" ? "enableExternal" : code === "external_proxy_unavailable" ? "retry" : null;
+}
 export function browserOwnerErrorKey(error: unknown): BrowserOwnerErrorKey {
   const message = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : error instanceof Error ? error.message : String(error);
   const code = message.replace(/^Error invoking remote method '[^']+': (?:[A-Za-z]*Error: )?/, "");
@@ -207,6 +236,12 @@ export function browserOwnerErrorKey(error: unknown): BrowserOwnerErrorKey {
     case "browser_identity_recovered": return "browser.error.identityRecovered";
     case "service_unavailable": case "service_not_found": case "service_start_failed": return "browser.error.serviceUnavailable";
     case "external_pages_unavailable": return "browser.externalUnavailable";
+    case "external_pages_off": return "browser.refusal.externalOff";
+    case "external_proxy_unavailable": return "browser.refusal.proxyUnavailable";
+    case "private_address_blocked": return "browser.refusal.privateAddress";
+    case "reserved_address": return "browser.refusal.reservedAddress";
+    case "protected_endpoint": return "browser.refusal.protectedEndpoint";
+    case "remote_loopback": return "browser.refusal.remoteLoopback";
     case "service_proxy_required": return "browser.serviceProxyRequired";
     case "host_offline": return "browser.noHost";
     case "target_closed": case "debugger_detached": return "browser.unavailable";

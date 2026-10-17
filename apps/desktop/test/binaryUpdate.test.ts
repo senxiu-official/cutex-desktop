@@ -1,7 +1,7 @@
 // Release-package (binary) self-update: the pure parts (shared/binaryUpdate.ts) and which installs
 // update from GitHub at all (main/updater.ts binarySource).
 import { describe, expect, it, vi } from "vitest";
-import { assetUrl, compareVersions, downloadUrlAllowed, githubRepoOf, isNewerVersion, latestReleaseUrl, packageNames, parseLatestRelease, parseSha256Sums, parseVersion, releasePlatform, unsafeArchiveMembers, updateAssets, versionOfTag, versionReleaseName, type LatestRelease } from "../src/shared/binaryUpdate";
+import { assetUrl, BINARY_MIN_CHECK_MINUTES, BINARY_UPDATE_CHECK_CHOICES, compareVersions, effectiveUpdateCheckMinutes, updateCheckChoices, downloadUrlAllowed, githubRepoOf, isNewerVersion, latestReleaseUrl, packageNames, parseLatestRelease, parseSha256Sums, parseVersion, releasePlatform, unsafeArchiveMembers, updateAssets, versionOfTag, versionReleaseName, type LatestRelease } from "../src/shared/binaryUpdate";
 import type { ReleaseInfo } from "../src/shared/update";
 
 vi.mock("electron", () => ({ app: { isPackaged: false, getAppPath: () => "", getPath: () => "", relaunch: () => {}, exit: () => {} } }));
@@ -216,5 +216,24 @@ describe("renderer wording of a binary update", () => {
     const t = (key: string, vars?: Record<string, string | number>) => `${key}:${JSON.stringify(vars ?? {})}`;
     expect(updateSummary(t, { commit: "", committedAt: "", subject: "Cutex 0.1.1", count: 0, version: "0.1.1" }, "release")).toBe('update.availableVersion:{"version":"0.1.1"}');
     expect(unsupportedHintKey("noRelease")).toBe("updater.unsupported.noRelease");
+  });
+});
+
+describe("check interval (Settings → 更新与诊断 检查更新)", () => {
+  it("a binary install never checks more often than hourly; off stays off; source installs keep their minutes", () => {
+    expect(effectiveUpdateCheckMinutes(10, true)).toBe(BINARY_MIN_CHECK_MINUTES);
+    expect(effectiveUpdateCheckMinutes(360, true)).toBe(360);
+    expect(effectiveUpdateCheckMinutes(0, true)).toBe(0);
+    expect(effectiveUpdateCheckMinutes(10, false)).toBe(10);
+  });
+
+  it("offers a binary install no interval below the hourly floor and shows a stored 10 min as hourly", () => {
+    const choices = updateCheckChoices(10, true);
+    expect(choices.filter((n) => n > 0 && n < BINARY_MIN_CHECK_MINUTES)).toEqual([]);
+    expect(choices).toEqual([...BINARY_UPDATE_CHECK_CHOICES]);
+    expect(choices).toContain(effectiveUpdateCheckMinutes(10, true));
+    expect(updateCheckChoices(10, false)).toEqual([0, 5, 10, 30, 60]);
+    // A value set elsewhere stays selectable.
+    expect(updateCheckChoices(120, true)).toEqual([0, 60, 120, 360, 1440]);
   });
 });

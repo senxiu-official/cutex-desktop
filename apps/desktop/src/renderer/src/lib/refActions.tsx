@@ -11,12 +11,13 @@ import { RefActionLabel } from "../components/RefActionLabel";
 import type { MenuEntry } from "./contextMenu";
 import { useApp } from "../store";
 import { entryGateNow } from "./hostGatingView";
+import { refActionApplies } from "./refActionApplies";
 
 type ActionEntry = AppSlotEntry<"ref.action">;
 
 const ICON = 14;
 
-const applies = (e: ActionEntry, kind: string) => e.mode === "show" && (!e.item.kinds || e.item.kinds.includes(kind));
+const applies = refActionApplies;
 
 /** The `ref.action` items for a ref kind now (shown items, by order); none before the module host starts. */
 export function refActionsFor(kind: string): ActionEntry[] {

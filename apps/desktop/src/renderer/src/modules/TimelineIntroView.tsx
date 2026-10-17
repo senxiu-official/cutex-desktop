@@ -9,6 +9,7 @@
 import { memo, useMemo } from "react";
 import { profileOf } from "../lib/agentList";
 import { useUiPrefs } from "../lib/prefs";
+import { dataFlags, useSizeFlags, type SizeTest } from "../lib/sizeFlags";
 import { bridge } from "../bridge";
 import { agentHost, sidebarOf, useApp } from "../store";
 import { useSlot } from "./react";
@@ -17,6 +18,12 @@ import { pickTimelineIntroItem, timelineAtStart } from "./timelineIntroLogic";
 import type { AppSlotEntry, TimelineIntroProps } from "./slots";
 
 type Entry = AppSlotEntry<"timeline.intro">;
+
+/** styles.css `.timeline-intro`: a smaller portrait at ≤ 30rem, none at ≤ 21rem (+ `--cqw`); no CSS size container (lib/sizeFlags). */
+const INTRO_SIZES = {
+  compact: (box, rem) => box.width <= 30 * rem,
+  tiny: (box, rem) => box.width <= 21 * rem,
+} as const satisfies Record<string, SizeTest>;
 
 /** One bad item must not take the timeline down (the boundary keeps mount-phase errors; these are
  *  the pick and factory calls, which run during this component's own render). */
@@ -74,9 +81,10 @@ export const TimelineIntro = memo(function TimelineIntro({ sessionId, hiddenTurn
   const entries = useSlot("timeline.intro");
   const identity = useIntroIdentity(sessionId);
   const props = useMemo(() => ({ sessionId, ...identity }), [sessionId, identity]);
+  const [sizeRef, size] = useSizeFlags(INTRO_SIZES, { units: true });
   if (!enabled || loading || failed || !timelineAtStart(hiddenTurns, olderCursor)) return null;
   return (
-    <section data-timeline-intro={sessionId} className="timeline-intro">
+    <section ref={sizeRef} {...dataFlags(size)} data-timeline-intro={sessionId} className="timeline-intro">
       {/* key: switching sessions within a host remounts the item (a broken image, the pool sample
           and the profile lookup all start fresh per session). */}
       <IntroItem key={`${identity.hostId}\u0000${sessionId}`} entries={entries} props={props} />

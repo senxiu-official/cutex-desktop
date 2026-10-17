@@ -16,6 +16,7 @@ import { useI18n, type MessageKey } from "../../i18n";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { peerPartyText, summaryFromRecord } from "../../lib/delegations";
 import { useTargetApi, useTargetSidebar } from "../../lib/targetHost";
+import { dataFlags, useSizeFlags, widthBelow } from "../../lib/sizeFlags";
 import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
 import { usePeerResource, usePeerWrite, usePeerWrites } from "./hooks";
 import { exportChoices, exportMode, hasExport, inflightEffect, peerErrorText, policyPatch, toggleExport, withExportMode, type ExportChoice, type ExportMode } from "./model";
@@ -83,6 +84,8 @@ function Check({ checked, disabled, onChange, children }: { checked: boolean; di
   );
 }
 
+const EXPORT_LIST_SIZES = { narrow: widthBelow(36) } as const;
+
 function ExportsEditor({ exports, disabled, onCommit }: { exports: PeerExport[]; disabled: boolean; onCommit(next: PeerExport[]): void }) {
   const { t } = useI18n();
   const sidebar = useTargetSidebar();
@@ -90,6 +93,8 @@ function ExportsEditor({ exports, disabled, onCommit }: { exports: PeerExport[];
   const [picking, setPicking] = useState<ExportMode | null>(null);
   const mode = picking ?? exportMode(exports);
   const choices = exportChoices(sidebar, exports);
+  // One column below 36rem, measured on the list itself (lib/sizeFlags; the card is no size container).
+  const [listRef, listSize] = useSizeFlags(EXPORT_LIST_SIZES);
   const choose = (m: ExportMode) => {
     setPicking(m === "some" ? m : null);
     const next = withExportMode(exports, m);
@@ -118,7 +123,7 @@ function ExportsEditor({ exports, disabled, onCommit }: { exports: PeerExport[];
         />
       </SettingRow>
       {mode === "some" && (
-        <div className="grid grid-cols-2 gap-x-6 border-b border-border py-2 @max-[36rem]:grid-cols-1" data-testid="peer-exports">
+        <div ref={listRef} {...dataFlags(listSize)} className="grid grid-cols-2 gap-x-6 border-b border-border py-2 data-[narrow]:grid-cols-1" data-testid="peer-exports">
           <div className="min-w-0">
             <div className="mb-0.5 text-xs text-subtle">{t("peers.policy.export.projects")}</div>
             <div className="max-h-64 overflow-y-auto pr-1">{choices.projects.length ? choices.projects.map(row) : <p className="text-xs text-subtle">—</p>}</div>

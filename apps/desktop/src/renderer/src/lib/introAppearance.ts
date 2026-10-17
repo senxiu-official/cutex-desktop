@@ -6,7 +6,7 @@
 // custom portrait wins over the provider's launcher artwork (lib/launchArt), a custom greeting over
 // the provider greeting pool (lib/providerGreetings).
 import { useSyncExternalStore } from "react";
-import { LAUNCH_ART, type LaunchArt } from "./launchArt";
+import type { LaunchArt } from "./launchArt";
 import { portraitProvider, type PortraitProvider } from "./launchPortraits";
 import { providerGreetings } from "./providerGreetings";
 import type { Provider } from "./provider";
@@ -190,8 +190,8 @@ export function useIntroAppearanceOf(host: string, profileId: string | null | un
 
 // ── pure resolution (the intro item and the settings preview share it) ─────────────────────────
 
-/** The portrait actually shown: the profile's custom one, else the provider's launcher artwork. */
-export function resolveIntroPortrait(custom: string | null, provider: Provider | null, art: LaunchArt = LAUNCH_ART): string | null {
+/** The portrait actually shown: the profile's custom one, else the provider's launcher artwork (lib/launchArt `useLaunchArt`). */
+export function resolveIntroPortrait(custom: string | null, provider: Provider | null, art: LaunchArt): string | null {
   if (custom && validIntroPortrait(custom)) return custom;
   const key: PortraitProvider | null = portraitProvider(provider);
   return key ? art[key]?.portrait ?? null : null;

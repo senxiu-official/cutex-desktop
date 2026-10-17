@@ -19,6 +19,7 @@ import { useApp } from "../../store";
 import { LOCAL_HOST_ID } from "../../../../shared/hosts";
 import { Avatar } from "../../components/Avatar";
 import { HostMark } from "../../components/HostMark";
+import { ApprovalSource } from "../../components/ApprovalSource";
 import { MissingHosts, RowHost } from "../../components/HostListParts";
 import { PageBody, PageToolbar } from "../../components/Page";
 import { Button, Segmented } from "../../components/settings/Form";
@@ -156,6 +157,7 @@ function PendingCard({ record, origin }: { record: ApprovalRecord; origin: Origi
         {origin.mark && origin.look && <HostMark host={origin.look} className="mt-0.5 shrink-0" />}
         <KindChip kind={record.kind} />
         <h3 className="min-w-0 flex-1 text-sm font-medium break-words">{record.summary}</h3>
+        <ApprovalSource source="cutex" />
         <When iso={record.createdAt} />
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">

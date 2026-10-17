@@ -35,6 +35,8 @@ export default defineConfig({
       alias: { "@": resolve(__dirname, "src/renderer/src") },
     },
     build: {
+      // pdf.js CMaps / fonts / wasm (lib/pdfjs.ts) stay separate files, read only when a PDF needs one.
+      assetsInlineLimit: (file: string) => (/[\\/]pdfjs-dist[\\/]/.test(file) ? false : undefined),
       rollupOptions: {
         input: { index: resolve(__dirname, "src/renderer/index.html"), ownerAlert: resolve(__dirname, "src/renderer/owner-alert.html") },
         // The browser-preview mocks (dev/, modules/<id>/mock.ts) only run from installMockBridge(),

@@ -9,14 +9,41 @@ import type { Provider } from "../lib/provider";
 import type { ProfileItem } from "../../../shared/ipc";
 import { portraitChoices, portraitProvider } from "../lib/launchPortraits";
 import { LaunchPortraits } from "./LaunchPortraits";
-import { LAUNCH_ART } from "../lib/launchArt";
+import { useLaunchArtView } from "../lib/launchArt";
 import { useUiPrefs } from "../lib/prefs";
 import { useModuleEnabled } from "../modules/react";
+import { CARD_FLAGS } from "../lib/narrowCard";
+import { dataFlags, useSizeFlags, type SizeTest } from "../lib/sizeFlags";
 import "./LaunchPage.css";
+
+/**
+ * Page sizes (content box) for LaunchPage.css: `data-narrow` ≤ 520px (two-column settings),
+ * `data-wide` ≥ 1200px (wider dock), `data-short` ≤ 650px / `data-shorter` ≤ 450px tall (smaller /
+ * no welcome text), plus `--cqw` / `--cqh` for the fluid sizes. These were CSS container queries
+ * (`container: launcher / size`); lib/sizeFlags says why the renderer has no size containers.
+ */
+const PAGE_SIZES = {
+  narrow: (box) => box.width <= 520,
+  wide: (box) => box.width >= 1200,
+  short: (box) => box.height <= 650,
+  shorter: (box) => box.height <= 450,
+} as const satisfies Record<string, SizeTest>;
+/** A launch popover's field box: `data-stack` ≤ 520px stacks `.launch-fields`; `data-narrow` (< 28rem) is the settings-row one. */
+const FIELDS_SIZES = { ...CARD_FLAGS, stack: (box) => box.width <= 520 } as const satisfies Record<string, SizeTest>;
 
 /** Shared chat-first frame; the welcome art and bottom dock have independent anchors. */
 export function LaunchPage({ intro, children }: { intro?: ReactNode; children: ReactNode }) {
-  return <main className="launch-page flex min-h-0 min-w-0 flex-1 flex-col">{intro}{children}</main>;
+  const [ref, flags] = useSizeFlags(PAGE_SIZES, { units: true });
+  return <main ref={ref} {...dataFlags(flags)} className="launch-page flex min-h-0 min-w-0 flex-1 flex-col">{intro}{children}</main>;
+}
+
+/**
+ * The content of a launch popover panel: `.launch-fields` stack in one column when it is narrow,
+ * and its SettingRows stack like in a settings card (`group/card`).
+ */
+export function LaunchFieldsBox({ children }: { children: ReactNode }) {
+  const [ref, flags] = useSizeFlags(FIELDS_SIZES);
+  return <div ref={ref} {...dataFlags(flags)} className="launch-fields-box group/card">{children}</div>;
 }
 
 /** One bottom inset and width for both launchers; settings grow above this shared composer. */
@@ -80,14 +107,16 @@ export function LaunchIntro({ icon, title, hint, greeting, provider, portraits, 
   const copy = !introOn ? undefined : greeting ?? (provider !== undefined ? { messages: providerGreetings(provider, locale, minute) } : undefined);
   const welcome = resolveLaunchGreeting(copy, title, resolveTerms(terms, locale).owner.one, sample);
   const longGreeting = copy && welcome.length > (locale === "en" ? 56 : 26);
-  // Only providers whose artwork is present on this checkout (lib/launchArt); none = icon intro.
-  const choices = introOn ? portraitChoices(portraits?.profiles ?? []).filter((c) => LAUNCH_ART[c.provider]) : [];
+  // Only providers with artwork, bundled or imported (lib/launchArt); none = icon intro.
+  const { art, ready: artReady } = useLaunchArtView();
+  const choices = introOn ? portraitChoices(portraits?.profiles ?? []).filter((c) => art[c.provider]) : [];
   const selectedProvider = portraits?.selected ? portraitProvider(provider) : null;
-  const selected = selectedProvider && LAUNCH_ART[selectedProvider] ? selectedProvider : null;
+  const selected = selectedProvider && art[selectedProvider] ? selectedProvider : null;
   const hasArt = introOn && portraits && (portraits.selected ? !!selected : choices.length > 0);
-  // While the profile list loads, art may be about to show: hold the frame empty rather than paint the
-  // icon intro and swap it for the portraits a moment later (the flicker on entering a launcher).
-  if (introOn && portraits && !portraits.profiles && Object.keys(LAUNCH_ART).length > 0) return null;
+  // While the profile list or the imported art loads, art may be about to show: hold the frame empty
+  // rather than paint the icon intro and swap it for the portraits a moment later (the flicker on
+  // entering a launcher).
+  if (introOn && portraits && (!artReady || (!portraits.profiles && Object.keys(art).length > 0))) return null;
   return (
     <div className={`launch-intro flex flex-col items-center px-6 text-center${hasArt ? " launch-intro-with-art" : ""}`}>
       {hasArt ? <LaunchPortraits choices={choices} selected={selected} profileId={portraits.profileId} disabled={portraits.disabled} onSelect={portraits.onSelect} /> :

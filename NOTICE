@@ -42,6 +42,16 @@ Codex's NOTICE also credits Ratatui (MIT; Copyright (c) 2016-2022 Florian Dehau,
 2023-2025 The Ratatui Developers) for code in its terminal UI, which this product does not include.
 
 -------------------------------------------------------------------------------------------------
+PDF.js — https://github.com/mozilla/pdf.js
+Copyright Mozilla Foundation
+Licensed under the Apache License, Version 2.0 (LICENSES/Apache-2.0.txt).
+
+  - apps/desktop/src/renderer/src/components/docPreview.css: the text-layer rules are a modified
+    subset of pdfjs-dist/web/pdf_viewer.css (6.4.299). pdfjs-dist itself, with its bundled CMaps,
+    standard fonts and image-decoder wasm and their license files, is listed in
+    THIRD_PARTY_NOTICES.md.
+
+-------------------------------------------------------------------------------------------------
 Lobe Icons — https://github.com/lobehub/lobe-icons
 Copyright (c) 2023 LobeHub
 Licensed under the MIT License (LICENSES/MIT-lobe-icons.txt).

@@ -24,7 +24,7 @@ export const browserTimelineZhCN = {
   "browser.timeline.running": "浏览器操作进行中", "browser.timeline.done": "浏览器操作已返回",
   "browser.timeline.turnShots": "本轮结束时的网页截图", "browser.timeline.ownerOnly": "仅供你查看，不会发送给模型",
   "browser.timeline.showShot": "查看轮末截图", "browser.timeline.hideShot": "收起截图",
-  "browser.timeline.refused.external": "被拦下：外部网页已关闭（设置 → 浏览器 →「允许浏览外部网页」），或这是局域网 / 私有地址；{{agent}}的浏览器现在只能打开本机地址（localhost / 127.0.0.1）或 cutex:service/ 链接。想给你看的页面或图片，可以作为成果发布。",
+  "browser.timeline.refused.external": "被拦下：这个地址现在不对{{agent}}开放——可能是外部网页已关闭、局域网 / tailnet / 私有地址、cutex 的控制端口，或浏览器外网中转还没就绪（打开内嵌浏览器标签可看到具体原因）。想给你看的页面或图片，可以作为成果发布。",
   "browser.timeline.refused.serviceProxy": "被拦下：这台主机不是你这台电脑，它的 127.0.0.1 在这里打不开。只能用 cutex:service/<服务名>/ 链接（先登记服务）。",
   "browser.timeline.refused.disabled": "被拦下：这台设备的内嵌浏览器没开，或这个 Profile 没开浏览器工具。",
 } as const;
@@ -42,7 +42,7 @@ export const browserTimelineEn: Record<keyof typeof browserTimelineZhCN, string>
   "browser.timeline.running": "Browser operation in progress", "browser.timeline.done": "Browser operation returned",
   "browser.timeline.turnShots": "Page screenshots at the end of this turn", "browser.timeline.ownerOnly": "For you only; not sent to the model",
   "browser.timeline.showShot": "View end-of-turn screenshot", "browser.timeline.hideShot": "Hide screenshot",
-  "browser.timeline.refused.external": "Refused: websites are turned off (Settings → Browser → Allow websites), or this is a LAN / private address; the {{agent}}'s browser can only open local addresses (localhost / 127.0.0.1) or cutex:service/ links right now. A page or picture meant for you can be published as an artifact.",
+  "browser.timeline.refused.external": "Refused: this address isn't open to the {{agent}} right now — websites may be off, it may be a LAN / tailnet / private address or a cutex control port, or the browser's internet proxy isn't ready (the in-app browser tab shows the exact reason). A page or picture meant for you can be published as an artifact.",
   "browser.timeline.refused.serviceProxy": "Refused: this host is not your computer, so its 127.0.0.1 cannot be opened here. Only cutex:service/<service name>/ links work (register the service first).",
   "browser.timeline.refused.disabled": "Refused: the in-app browser is off on this device, or this Profile has browser tools off.",
 };

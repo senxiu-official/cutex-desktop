@@ -875,7 +875,24 @@ order) is [`docs/desktop-modules.md`](desktop-modules.md).
   (default on, stored and enforced by main in `userData/browser-external.json`; turning it off
   closes the listener and restores the browser sessions' black-hole proxy at once). In dev runs
   `CUTEX_DESKTOP_BROWSER_EGRESS=n2|off` overrides the switch; packaged builds ignore it. LAN /
-  private addresses stay refused (X2). The app-level plugin DNS / proxy lockdown is unchanged.
+  private addresses stay refused (X2) except as below. The app-level plugin DNS / proxy lockdown is
+  unchanged.
+  **0.1.3 network admission (2026-10-16).** Every guest request is attributed by `webContentsId` +
+  Chromium's `initiatorOrigin`. A loopback, LAN or tailnet origin is reachable only in the tab where
+  main admitted it (the owner's own navigation; an agent tool for loopback, never LAN) and only from
+  that origin's own documents. Host control endpoints (management, bus, proxy ports, `/__cutex`) are
+  never browser targets; link-local / reserved addresses are always refused. An owner-typed LAN /
+  tailnet origin goes through N2 in LAN-only mode, which dials that origin alone, even with websites
+  off; no per-domain rules, no "trust the LAN" setting. Refusals carry one of six owner-facing
+  reasons (`browser-refusal-reasons` on the host passes them to agents). Co-control: owner clicks /
+  scrolling / reading never pause the agent; owner input expires the agent's element refs; agent
+  writes wait out owner typing (1.2 s); reads run while hidden, writes need the tab visible; Pause /
+  Resume are explicit, one click. New windows become app tabs in the opener's pool after an owner
+  gesture (main redeems the exact URL + POST body once); a tab the leased agent's own click opened
+  is granted to it under the opener lease (`browser-popup-grant`). Downloads always go through a
+  save dialog (owner gesture, or the active agent's own action with the window visible). Site
+  permissions are granted per pool + origin by the owner in a native main dialog
+  (`userData/browser-site-permissions.json`); device, capture and fullscreen access stay off.
 - **Gating.** A module declares `requires.capabilities` (`/v2/capabilities`, evaluated per active
   host), `requires.modules` and `requires.hostKinds`. If a requirement is missing, the module is
   unavailable and its items are hidden, or greyed where the slot says so.

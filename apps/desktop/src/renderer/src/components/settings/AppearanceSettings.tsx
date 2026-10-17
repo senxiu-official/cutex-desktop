@@ -11,6 +11,7 @@ import { Avatar } from "../Avatar";
 import { ScriptText } from "../ScriptText";
 import { AppearanceNumberRow, FontRow } from "./AppearanceRows";
 import { NumberField, ResetButton, Section, Segmented, SettingRow, Toggle } from "./Form";
+import { LaunchArtSection } from "./LaunchArtSettings";
 
 const LATIN = ["Inter", "IBM Plex Sans", "Segoe UI", "Source Sans 3", "Noto Sans", "Source Serif 4", "Lora", "Georgia"];
 const CJK = ["Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "LXGW WenKai", "Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif SC", "KingHwa_OldSong"];
@@ -120,6 +121,8 @@ export function AppearancePage() {
           />
         </SettingRow>
       </Section>
+
+      <LaunchArtSection />
     </>
   );
 }

@@ -8,7 +8,7 @@ import { bridge } from "../../bridge";
 import { getAppearance, subscribeFontChanges, useAppearance } from "../../lib/appearance";
 import { noteFocused, showTerminal, terminalApi } from "./terminals";
 import { passThroughKey } from "./terminalState";
-import { concat, decodeBase64, terminalTheme, watchTheme } from "./xtermTheme";
+import { concat, decodeBase64, TERMINAL_MIN_CONTRAST, terminalTheme, watchTheme } from "./xtermTheme";
 
 export function XtermView({ hostId, terminalId, instanceId, visible, revealed }: { hostId: string; terminalId: string; instanceId: string; visible: boolean; revealed: number }) {
   const host = useRef<HTMLDivElement>(null);
@@ -26,6 +26,7 @@ export function XtermView({ hostId, terminalId, instanceId, visible, revealed }:
       cursorBlink: true,
       scrollback: 5000,
       theme: terminalTheme(),
+      minimumContrastRatio: TERMINAL_MIN_CONTRAST,
     });
     const fit = new FitAddon();
     termRef.current = term;

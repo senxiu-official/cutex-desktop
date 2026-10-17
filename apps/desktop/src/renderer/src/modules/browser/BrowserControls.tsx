@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Hand, RotateCw, Square } from "lucide-react";
+import { Hand, Pause, Play, RotateCw, Square } from "lucide-react";
 import type { BrowserAgentView } from "../../../../shared/browser";
 import { bridge } from "../../bridge";
 import { useI18n } from "../../i18n";
@@ -39,9 +39,9 @@ function useControl({ hostId, tabKey }: ControlProps) {
     return () => { generation.current++; if (hostId) controller.cancel({ hostId, tabKey }); };
   }, [hostId, tabKey, epoch, view?.guestId]);
   const scope: BrowserOwnerScope | null = hostId && epoch ? { hostId, tabKey, epoch } : null;
-  const confirm = (resume: boolean) => (name: string, pool: "owner" | "agent") => confirmDialog(
+  const confirm = (name: string, pool: "owner" | "agent") => confirmDialog(
     t(pool === "agent" ? "browser.owner.confirmAgent" : "browser.owner.confirmOwner", { name }), false,
-    { ok: t(resume ? "browser.owner.resume" : "browser.owner.grant"), cancel: t("browser.cancelControl") });
+    { ok: t("browser.owner.grant"), cancel: t("browser.cancelControl") });
   async function run(action: () => Promise<unknown>) {
     if (pending) return;
     const token = ++generation.current;
@@ -50,21 +50,23 @@ function useControl({ hostId, tabKey }: ControlProps) {
     finally { if (generation.current === token) setPending(false); }
   }
   const grant = (agent: BrowserAgentView) => scope ? run(async () => {
-    if (await controller.grant(scope, agent, settings, confirm(false))) rememberGrant(scope.hostId, agent.sessionId);
+    if (await controller.grant(scope, agent, settings, confirm)) rememberGrant(scope.hostId, agent.sessionId);
   }) : Promise.resolve();
-  const resume = () => scope ? run(() => controller.resume(scope, settings, confirm(true))) : Promise.resolve();
+  // Same agent, same lease: one click, no second confirmation.
+  const resume = () => scope ? run(() => controller.resume(scope, settings)) : Promise.resolve();
+  const pause = () => hostId && view?.lease ? run(() => controller.pause(hostId, tabKey, view.lease!.leaseId)) : Promise.resolve();
   // Revoke cancels pending confirmation in either header or banner, without waiting behind it.
   async function revoke() {
     if (!hostId || !view?.lease) return;
     const token = ++generation.current; setPending(false); setFailed(null);
     try { await controller.revoke(hostId, tabKey, view.lease.leaseId); } catch (reason) { if (generation.current === token) setFailed(browserErrorKey(reason)); }
   }
-  return { t, view, scope, grant, resume, revoke, failed, pending,
+  return { t, view, scope, grant, resume, pause, revoke, failed, pending,
     canGrant: enabled && !!scope && view?.status === "attached" && !pending };
 }
 
 function Header({ hostId, tabKey }: ControlProps) {
-  const { t, view, scope, grant, resume, revoke, failed, pending, canGrant } = useControl({ hostId, tabKey });
+  const { t, view, scope, grant, resume, pause, revoke, failed, pending, canGrant } = useControl({ hostId, tabKey });
   const [agents, setAgents] = useState<BrowserAgentView[]>([]), [selected, setSelected] = useState("");
   const [loading, setLoading] = useState(false), [loaded, setLoaded] = useState(false);
   const [loadFailed, setLoadFailed] = useState<ReturnType<typeof browserErrorKey> | null>(null);
@@ -86,7 +88,9 @@ function Header({ hostId, tabKey }: ControlProps) {
     {(failed || loadFailed) && <span role="alert" className="max-w-40 truncate text-xs text-danger" title={t(failed ?? loadFailed!)}>{t(failed ?? loadFailed!)}</span>}
     {view.lease ? <>
       {view.lease.state === "active" && view.control?.state === "paused" && <button type="button" data-browser-resume className={BUTTON} disabled={!canGrant}
-        onClick={() => void resume()}>{t("browser.owner.resume")}</button>}
+        aria-label={t("browser.owner.resume")} title={t("browser.owner.resume")} onClick={() => void resume()}><Play size={12} /></button>}
+      {view.lease.state === "active" && view.control?.state === "granted" && <button type="button" data-browser-pause className={BUTTON}
+        aria-label={t("browser.owner.pause")} title={t("browser.owner.pause")} onClick={() => void pause()}><Pause size={12} /></button>}
       <button type="button" data-browser-revoke className={BUTTON} aria-label={t("browser.owner.revoke")}
         title={t("browser.owner.revoke")} onClick={() => void revoke()}><Square size={12} /></button>
     </> : <>
@@ -106,7 +110,7 @@ export function BrowserControlHeader(props: ControlProps) {
 }
 
 export function BrowserControlBanner(props: ControlProps) {
-  const { t, view, resume, revoke, failed, canGrant } = useControl(props);
+  const { t, view, resume, pause, revoke, failed, canGrant } = useControl(props);
   if (!view?.lease) return null;
   const state = view.lease.state === "pending" ? "pending" : view.control?.state === "paused" ? "paused" : view.control?.operating ? "operating" : "granted";
   return <div data-browser-control={view.control?.state ?? view.lease.state} className="shrink-0 border-b border-border bg-hover px-3 py-2 text-xs">
@@ -114,9 +118,11 @@ export function BrowserControlBanner(props: ControlProps) {
       <span role="status" className="min-w-0 flex-1 text-foreground">{t(`browser.owner.${state}`, { name: view.lease.agentName })}
         {view.lease.auto && <span data-browser-auto-grant={view.lease.auto} className="ml-2 text-subtle">{t("browser.claim.auto", { reason: t(`browser.claim.reason.${view.lease.auto}`) })}</span>}</span>
       {state === "paused" && <button type="button" data-browser-resume className={BUTTON} disabled={!canGrant} onClick={() => void resume()}>{t("browser.owner.resume")}</button>}
+      {(state === "granted" || state === "operating") && <button type="button" data-browser-pause className={BUTTON} onClick={() => void pause()}>{t("browser.owner.pause")}</button>}
       <button type="button" data-browser-revoke className={BUTTON} onClick={() => void revoke()}>{t("browser.owner.revoke")}</button>
     </div>
     <p className="mt-1 text-subtle">{t(view.pool === "agent" ? "browser.owner.loginAgent" : "browser.owner.loginOwner")}</p>
+    {(state === "granted" || state === "operating") && <p data-browser-cocontrol className="mt-1 text-subtle">{t("browser.ownerCapture")}</p>}
     {failed && <p role="alert" className="mt-1 text-danger">{t(failed)}</p>}
   </div>;
 }

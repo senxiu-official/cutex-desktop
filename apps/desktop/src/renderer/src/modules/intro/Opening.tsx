@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "../../i18n";
 import { resolveIntroGreeting, resolveIntroPortrait, useIntroAppearanceOf } from "../../lib/introAppearance";
+import { useLaunchArt } from "../../lib/launchArt";
 import { profileProvider, PROVIDER_SVG, type Provider } from "../../lib/provider";
 import { resolveTerms, useTermOverrides } from "../../lib/terms";
 import { daemonApiOf, useFocusHostId } from "../../lib/targetHost";
@@ -59,10 +60,11 @@ export function Opening({ sessionId, hostId, profileName, providerKind, agentNam
   const [sample] = useState(() => Math.random());
   const [minute] = useState(() => new Date().getHours() * 60 + new Date().getMinutes());
   const [broken, setBroken] = useState(false);
+  const art = useLaunchArt();
   if (profileName && !ready) return null;
   const provider = asProvider(providerKind) ?? entry?.provider ?? null;
   const custom = entry?.id ? stored : null;
-  const portrait = broken ? null : resolveIntroPortrait(custom?.portrait ?? null, provider);
+  const portrait = broken ? null : resolveIntroPortrait(custom?.portrait ?? null, provider, art);
   const greeting = resolveIntroGreeting({
     custom: custom?.greeting ?? null,
     provider,

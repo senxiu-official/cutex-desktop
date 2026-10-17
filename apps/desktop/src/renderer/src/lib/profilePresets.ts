@@ -100,6 +100,8 @@ const REGIONS: Record<string, "cn" | "intl"> = {
   "api.z.ai": "intl",
   "api.minimaxi.com": "cn",
   "api.minimax.io": "intl",
+  "api.kimi.com": "cn",
+  "api.kimi.ai": "intl",
 };
 
 /** Provider domains (cutex providers.rs `family_for_host`): any host under them is the provider's own. */
@@ -114,6 +116,8 @@ const OFFICIAL_DOMAINS: readonly [string, string][] = [
   ["minimax.io", "minimax"],
   ["minimaxi.com", "minimax"],
   ["x.ai", "xai"],
+  ["kimi.com", "kimi-code"],
+  ["kimi.ai", "kimi-code"],
 ];
 
 const HTTP_URL = /^https?:\/\/[^\s/]+/i;
@@ -178,7 +182,7 @@ export function familyPreset(family: string | null | undefined, presets: readonl
 }
 
 /** "DeepSeek" / "GLM" / "Kimi" for the profile cards' "API Key · …" line. */
-const SHORT_FAMILY: Record<string, string> = { deepseek: "DeepSeek", zhipu: "GLM", moonshot: "Kimi", openrouter: "OpenRouter", "openai-api": "OpenAI", minimax: "MiniMax", xai: "Grok" };
+const SHORT_FAMILY: Record<string, string> = { deepseek: "DeepSeek", zhipu: "GLM", moonshot: "Kimi", openrouter: "OpenRouter", "openai-api": "OpenAI", minimax: "MiniMax", xai: "Grok", "kimi-code": "Kimi Code" };
 
 export function shortPresetLabel(p: ProfilePreset): string {
   return (p.providerFamily && SHORT_FAMILY[p.providerFamily]) || p.label;

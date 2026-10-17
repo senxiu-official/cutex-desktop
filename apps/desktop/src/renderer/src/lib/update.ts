@@ -1,6 +1,7 @@
 // Self-update status for the sidebar button (portable installs; see src/main/updater.ts).
 import { useEffect, useState } from "react";
 import type { UpdateStatus } from "../../../shared/ipc";
+import { PROJECT_REPO_URL as SHARED_PROJECT_REPO_URL } from "../../../shared/project";
 import { bridge } from "../bridge";
 
 export { updateButtonVisible } from "../../../shared/update";
@@ -22,7 +23,7 @@ export function useUpdateStatus(): UpdateStatus | null {
 }
 
 /** The project's public repositories (Settings → 更新与诊断 → 项目); opened in the system browser. */
-export const PROJECT_REPO_URL = "https://github.com/senxiu-official/cutex-desktop";
+export const PROJECT_REPO_URL = SHARED_PROJECT_REPO_URL;
 export const RELATED_REPO_URLS = [
   { name: "cutex-desktop", url: PROJECT_REPO_URL },
   { name: "cutex", url: "https://github.com/senxiu-official/cutex" },

@@ -1,9 +1,13 @@
-.launch-page { position: relative; container: launcher / size; isolation: isolate; }
+/* No CSS size container here (Chromium can drop the layout boxes of a size container's children
+   after a multi-element commit; lib/sizeFlags): LaunchPage sets data-narrow (≤ 520px), data-wide
+   (≥ 1200px), data-short (≤ 650px tall), data-shorter (≤ 450px tall) and --cqw / --cqh (1 % of the
+   page's content box) from a ResizeObserver. The var() fallbacks only cover the first frame. */
+.launch-page { position: relative; isolation: isolate; }
 /* Anchor the welcome art to the page, never to the changing height of the settings below it. */
-.launch-intro { position: absolute; inset-inline: 1rem; top: clamp(1.5rem, calc(26cqh - 4.25rem), 20rem); pointer-events: none; }
+.launch-intro { position: absolute; inset-inline: 1rem; top: clamp(1.5rem, calc(26 * var(--cqh, 1vh) - 4.25rem), 20rem); pointer-events: none; }
 .launch-intro-icon > svg { width: 2rem; height: 2rem; }
-.launch-intro-title { max-width: 44rem; font-size: clamp(1.75rem, 4cqw, 2.5rem); line-height: 1.2; overflow-wrap: anywhere; text-wrap: balance; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.launch-intro-title-long { font-size: clamp(1.125rem, 3cqw, 1.75rem); -webkit-line-clamp: 4; }
+.launch-intro-title { max-width: 44rem; font-size: clamp(1.75rem, calc(4 * var(--cqw, 1vw)), 2.5rem); line-height: 1.2; overflow-wrap: anywhere; text-wrap: balance; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.launch-intro-title-long { font-size: clamp(1.125rem, calc(3 * var(--cqw, 1vw)), 1.75rem); -webkit-line-clamp: 4; }
 .launch-intro-with-art { top: 1rem; bottom: 23rem; width: calc(100% - 2rem); max-width: 46rem; margin-inline: auto; padding-inline: 0; z-index: 1; }
 .launch-portrait-stage { width: 100%; height: 100%; min-height: 0; pointer-events: auto; }
 .launch-portrait-strip { display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100%; height: 100%; margin-inline: auto; }
@@ -14,7 +18,12 @@
 .launch-portrait-figure { position: absolute; inset: 0; overflow: hidden; mask-image: linear-gradient(to bottom, #000 calc(100% - 5rem), transparent 100%); }
 /* Keep a small image bleed below the shared crop so optical offsets never lift a raw hem into view. */
 .launch-portrait-card img { position: absolute; max-width: none; height: auto; max-height: calc(100% + 20px); object-fit: contain; object-position: center bottom; left: 50%; bottom: -20px; transform: translateX(-50%); filter: grayscale(1); }
-.launch-portrait-card.is-muted { filter: brightness(.42); }
+.launch-portrait-card.is-muted { filter: brightness(.72); }
+/* The pointed-at portrait rises and its name is underlined: dimming alone read as "the dark one is picked". */
+.launch-portrait-figure { transition: transform 200ms ease; }
+.launch-portrait-name { text-decoration: underline 2px transparent; text-underline-offset: .3em; transition: text-decoration-color 200ms ease; }
+.launch-portrait-card:hover .launch-portrait-figure, .launch-portrait-card:focus-within .launch-portrait-figure { transform: translateY(-6px); }
+.launch-portrait-card:hover .launch-portrait-name, .launch-portrait-card:focus-within .launch-portrait-name { text-decoration-color: var(--accent); }
 .launch-portrait-card:focus-within, .launch-portrait-card:hover { z-index: 3; }
 .launch-portrait-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 .launch-portrait-caption { position: relative; min-height: 4.5rem; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: .35rem; padding: .4rem .2rem .5rem; }
@@ -29,18 +38,18 @@
 .launch-portrait-selected { position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100%; height: calc(100% + 1.5rem); }
 .launch-victory { position: relative; width: 100%; height: 100%; min-height: 0; }
 .launch-victory.is-entering { animation: launch-victory-in 350ms ease-out both; }
-.launch-art-greeting { position: absolute; top: 100%; margin-top: 3rem; width: 100%; padding-inline: 1rem; font-size: clamp(1.1rem, 2.5cqw, 1.5rem); line-height: 1.5; font-weight: 400; color: var(--fg-muted); text-wrap: balance; overflow-wrap: anywhere; pointer-events: none; }
+.launch-art-greeting { position: absolute; top: 100%; margin-top: 3rem; width: 100%; padding-inline: 1rem; font-size: clamp(1.1rem, calc(2.5 * var(--cqw, 1vw)), 1.5rem); line-height: 1.5; font-weight: 400; color: var(--fg-muted); text-wrap: balance; overflow-wrap: anywhere; pointer-events: none; }
 .launch-victory img { position: absolute; top: 0; left: 50%; width: auto; max-width: 100%; height: 100%; object-fit: contain; transform: translateX(-50%); }
 .launch-victory-sharp { filter: grayscale(1); mask-image: linear-gradient(to bottom, #000 84%, transparent 100%), linear-gradient(to right, transparent, #000 4%, #000 96%, transparent); mask-composite: intersect; }
 .launch-victory-soft { filter: grayscale(1) blur(8px); opacity: .45; mask-image: linear-gradient(to bottom, #000 82%, transparent 100%), linear-gradient(to right, transparent, #000 2%, #000 98%, transparent); mask-composite: intersect; }
 @keyframes launch-victory-in { from { opacity: 0; transform: translateY(.5rem) scale(.96); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .launch-portrait-card { transition: none; }
+  .launch-portrait-card, .launch-portrait-figure, .launch-portrait-name { transition: none; }
   .launch-victory.is-entering { animation: none; }
 }
 .launch-page:has(.launch-intro-with-art) > .launch-dock { z-index: 2; }
 .launch-dock { position: relative; z-index: 1; flex-shrink: 0; width: 100%; max-width: 48rem; margin: auto auto 0; padding: 0 1rem .75rem; }
-@container launcher (min-width: 1200px) { .launch-dock { max-width: 56rem; } }
+.launch-page[data-wide] .launch-dock { max-width: 56rem; }
 .launch-toolbar { display: flex; min-width: 0; height: 1.75rem; align-items: center; gap: .125rem; margin-top: .25rem; padding-inline: .125rem; }
 .launch-settings { display: grid; gap: .4rem; min-width: 0; }
 .launch-setting-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; min-width: 0; }
@@ -104,7 +113,7 @@
 .launch-project-anchor > .launch-popover {
   bottom: calc(100% + .4rem);
   right: auto;
-  width: min(36rem, calc(100cqw - 2rem));
+  width: min(36rem, calc(100 * var(--cqw, 1vw) - 2rem));
   max-height: min(28rem, calc(100dvh - 15rem));
 }
 .launch-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
@@ -114,26 +123,23 @@
 .launch-profile-choice { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: 100%; padding: .55rem .65rem; border-radius: .5rem; text-align: left; font-size: .875rem; }
 .launch-profile-choice:hover { background: var(--surface); }
 .launch-profile-choice:disabled { opacity: .4; }
-@container (max-width: 520px) {
-  .launch-portrait-name { font-size: 1.05rem; letter-spacing: -.04em; }
-  .launch-portrait-profile { font-size: .65rem; padding-inline: .15rem; }
-  .launch-intro-with-art { bottom: 27rem; }
-  .launch-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .launch-setting-row:not(.launch-setting-single):not(.launch-setting-project) { display: contents; }
-  .launch-setting-single, .launch-setting-project, .launch-name-row { grid-column: 1 / -1; }
-  /* Two columns: the model chip takes a full row, reasoning backfills beside the profile. */
-  .launch-settings { grid-auto-flow: row dense; }
-  .launch-setting-model > :nth-child(2) { grid-column: 1 / -1; }
-  .launch-setting-project { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .launch-fields { grid-template-columns: minmax(0, 1fr); gap: .75rem; }
-  .launch-value { gap: .3rem; }
-  .launch-setting-row > .relative > button, .launch-setting-row > button { padding-inline: .45rem; }
-}
-@container launcher (max-height: 650px) {
-  .launch-intro { top: 1rem; }
-  .launch-intro-title { font-size: 1.75rem; }
-  .launch-intro-icon, .launch-intro > p { display: none; }
-}
-@container launcher (max-height: 450px) {
-  .launch-intro { display: none; }
-}
+/* Narrow page (≤ 520px). */
+.launch-page[data-narrow] .launch-portrait-name { font-size: 1.05rem; letter-spacing: -.04em; }
+.launch-page[data-narrow] .launch-portrait-profile { font-size: .65rem; padding-inline: .15rem; }
+.launch-page[data-narrow] .launch-intro-with-art { bottom: 27rem; }
+.launch-page[data-narrow] .launch-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.launch-page[data-narrow] .launch-setting-row:not(.launch-setting-single):not(.launch-setting-project) { display: contents; }
+.launch-page[data-narrow] :is(.launch-setting-single, .launch-setting-project, .launch-name-row) { grid-column: 1 / -1; }
+/* Two columns: the model chip takes a full row, reasoning backfills beside the profile. */
+.launch-page[data-narrow] .launch-settings { grid-auto-flow: row dense; }
+.launch-page[data-narrow] .launch-setting-model > :nth-child(2) { grid-column: 1 / -1; }
+.launch-page[data-narrow] .launch-setting-project { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.launch-page[data-narrow] .launch-value { gap: .3rem; }
+.launch-page[data-narrow] :is(.launch-setting-row > .relative > button, .launch-setting-row > button) { padding-inline: .45rem; }
+/* A narrow popover panel (LaunchFieldsBox, ≤ 520px of its own width). */
+.launch-fields-box[data-stack] .launch-fields { grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+/* Short page. */
+.launch-page[data-short] .launch-intro { top: 1rem; }
+.launch-page[data-short] .launch-intro-title { font-size: 1.75rem; }
+.launch-page[data-short] :is(.launch-intro-icon, .launch-intro > p) { display: none; }
+.launch-page[data-shorter] .launch-intro { display: none; }

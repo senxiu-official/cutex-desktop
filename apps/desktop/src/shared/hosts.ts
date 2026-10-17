@@ -152,7 +152,7 @@ export type TunnelStatus = "idle" | "starting" | "up" | "retrying" | "error";
 
 export type SshErrorCode =
   | "noSsh" // no OpenSSH client found
-  | "auth" // BatchMode: no usable key / agent (needs interactive auth)
+  | "auth" // no usable key / agent, wrong password / passphrase, or a prompt was cancelled
   | "hostKey" // unknown or changed host key
   | "resolve"
   | "refused"
@@ -543,14 +543,22 @@ export function defaultHostLabel(target: string): string {
 
 // ---------- ssh command lines ----------
 
-const COMMON = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"];
+/**
+ * `interactive`: ssh may ask (key passphrase, password, keyboard-interactive, unknown host key)
+ * through SSH_ASKPASS (main/sshAskpass.ts); otherwise BatchMode, never a question. Either way ssh
+ * resolves the destination like a terminal ssh does: ~/.ssh/config (alias or not), ssh-agent and
+ * the default identity files.
+ */
+function common(interactive: boolean): string[] {
+  return ["-o", interactive ? "BatchMode=no" : "BatchMode=yes", "-o", "ConnectTimeout=15", ...(interactive ? ["-o", "NumberOfPasswordPrompts=3"] : [])];
+}
 
 /** `ssh -N -L 127.0.0.1:<local>:127.0.0.1:<remote> … -- <destination>` (no remote command). */
-export function tunnelArgs(target: SshTarget, localPort: number, remotePort: number): string[] {
+export function tunnelArgs(target: SshTarget, localPort: number, remotePort: number, interactive = false): string[] {
   return [
     "-N",
     "-T",
-    ...COMMON,
+    ...common(interactive),
     "-o", "ExitOnForwardFailure=yes",
     "-o", "ServerAliveInterval=15",
     "-o", "ServerAliveCountMax=3",
@@ -562,8 +570,8 @@ export function tunnelArgs(target: SshTarget, localPort: number, remotePort: num
 }
 
 /** One-shot remote command (`ssh -T … -- <destination> <command>`); the command is one string. */
-export function execArgs(target: SshTarget, command: string): string[] {
-  return ["-T", ...COMMON, ...(target.port ? ["-p", String(target.port)] : []), "--", target.destination, command];
+export function execArgs(target: SshTarget, command: string, interactive = false): string[] {
+  return ["-T", ...common(interactive), ...(target.port ? ["-p", String(target.port)] : []), "--", target.destination, command];
 }
 
 export function tokenIssueCommand(cutexPath: string, label: string): string {

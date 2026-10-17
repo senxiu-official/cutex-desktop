@@ -9,6 +9,7 @@ import { createBrowserAgentOpens } from "./agentOpen";
 import { agentHost, useApp } from "../../store";
 import { translate } from "../../i18n";
 import type { BrowserEvent } from "../../../../shared/browser";
+import { browserSitePermissionList } from "./sitePermissionText";
 import { openClaimTab } from "./claimOpen";
 
 /** A preview intentionally has no browser bridge, hence no real webview or website requests. */
@@ -37,6 +38,18 @@ export async function startBrowser(context: AppModuleContext): Promise<void> {
     if (context.signal.aborted || !browserHostCurrent(event.hostId, event.epoch)) return;
     // Rejected popup diagnostics are for developers, not owner-facing tab state or notifications.
     if (event.kind === "diagnostic") return;
+    // Something main stopped on its own (popup / download without your action): say it once.
+    if (event.kind === "blocked") {
+      const agent = browserTitle(event.lease?.agentName ?? "");
+      if (event.blocked === "popup") context.services.ui.notice(translate("browser.blocked.popup"));
+      else if (event.blocked === "download") context.services.ui.notice(translate("browser.blocked.download"));
+      else if (event.blocked === "download-hidden") context.services.ui.notice(translate("browser.blocked.downloadHidden", { name: agent }));
+      else if (event.sitePermission && (event.blocked === "permission-waiting" || event.blocked === "permission-hidden" || event.blocked === "permission-timeout")) {
+        const key = event.blocked === "permission-waiting" ? "browser.blocked.permissionWaiting" : event.blocked === "permission-hidden" ? "browser.blocked.permissionHidden" : "browser.blocked.permissionTimeout";
+        context.services.ui.notice(translate(key, { origin: browserTitle(event.sitePermission.origin), permissions: browserSitePermissionList(event.sitePermission.permissions) }));
+      }
+      return;
+    }
     if (event.kind === "agent-open") { if (event.openIntent) opens.open(event.openIntent); return; }
     if (event.kind === "agent-open-cancel") { if (event.openRequestId) opens.cancelled(event.hostId, event.openRequestId); return; }
     if (event.kind === "agent-open-confirm") { if (event.openRequestId) opens.confirmed(event.hostId, event.openRequestId); }
@@ -55,8 +68,11 @@ export async function startBrowser(context: AppModuleContext): Promise<void> {
     if (event.kind === "new-tab") {
       const url = browserNavigationUrl(event.newTabUrl);
       if (!url || !/^https?:/.test(url) || (event.pool === "agent" && !isBrowserTabKey(event.newTabKey))) return;
-      context.services.side.open(BROWSER_TAB, { url, ...(event.pool === "agent" ? { tabKey: event.newTabKey!, agentOpened: true } : {}) },
-        { binding: { kind: "host", hostId: event.hostId }, focus: false });
+      // Main minted the new tab's key in the opener's pool (and holds the exact URL / form body for it).
+      const params: Record<string, string | boolean> = event.pool === "agent" ? { url, tabKey: event.newTabKey!, agentOpened: true }
+        : isBrowserTabKey(event.newTabKey) ? { url, tabKey: event.newTabKey, ownerTab: true } : { url };
+      context.services.side.open(BROWSER_TAB, params, { binding: { kind: "host", hostId: event.hostId }, focus: false });
+      if (event.newTabAgent) context.services.ui.notice(translate(event.newTabGranted ? "browser.newTab.agentGranted" : "browser.newTab.agent", { name: browserTitle(event.lease?.agentName ?? "") }));
     }
   });
   off = () => { offHosts(); offBrowser(); };
@@ -77,3 +93,4 @@ function claimGrantedNotice(context: AppModuleContext, event: BrowserEvent): voi
   const view = browserCache.get(event.hostId, event.tabKey);
   context.services.ui.notice(translate("browser.claim.toast", { tab: view?.title || view?.url || "", name: browserTitle(event.claimGrant.agentName), reason }));
 }
+

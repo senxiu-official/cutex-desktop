@@ -34,6 +34,8 @@ import { noteNewAgentProfile, useKeptNewAgentDraft } from "../../lib/newAgentRet
 import { ProfileCard } from "./ProfileCard";
 import { ProfileEditor } from "./ProfileEditor";
 import { useTargetApi, useTargetFeatures, useTargetHostId, useTargetLoadQuota } from "../../lib/targetHost";
+import { useTransferTargets } from "../../lib/useTransferTargets";
+import { CopyProfileToHostDialog } from "./CopyProfileToHostDialog";
 
 type ProfileList = { defaultProfile: string | null; profiles: ProfileItem[] };
 
@@ -191,6 +193,9 @@ function ProfilesBody() {
   const canCreate = features.has(PROFILE_FEATURES.create);
   const canDuplicate = features.has(PROFILE_FEATURES.duplicate);
   const canDelete = features.has(PROFILE_FEATURES.delete);
+  // 复制到其他主机 (profile-transfer): only while another connected host takes a copy.
+  const transferTargets = useTransferTargets(targetHost);
+  const [transferring, setTransferring] = useState<ProfileItem | null>(null);
   const fail = (e: unknown) => setNotice({ text: e instanceof Error ? e.message : String(e), error: true });
   const open = (name: string) => openSettings("profiles", { profile: name });
   const toOverview = () => openSettings("profiles");
@@ -269,6 +274,7 @@ function ProfilesBody() {
     return [
     { label: t("agent-config.profile.makeDefault"), disabled: isDefault(p), onSelect: () => void api.patchSettings({ defaultProfile: p.name }).then(refresh, fail) },
     { label: t("agent-config.profile.duplicate"), disabled: !canDuplicate, hint: canDuplicate ? undefined : needsCutex, onSelect: () => void duplicate(p) },
+    ...(transferTargets.length ? [{ label: t("agent-config.profile.transfer.menu"), onSelect: () => setTransferring(p) }] : []),
     {
       label: t("agent-config.profile.delete"),
       danger: true,
@@ -394,6 +400,7 @@ function ProfilesBody() {
       <div className="mt-6">
         <SettingsSections page="profiles" />
       </div>
+      {transferring && <CopyProfileToHostDialog item={transferring} sourceHostId={targetHost} onClose={() => setTransferring(null)} />}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { fastTierOf } from "../shared/fastMode";
 import { logError } from "./errorLog";
 import { RecentFeedTraffic, submitHttpTraceBuffer } from "./sendDiagnostics";
 import { notesApi, sideApi } from "./notesSideApi";
+import type { ExportReply, ImportReply } from "./profileTransfer";
 import { remoteJobsApi } from "./remoteJobsApi";
 import type { InboundMailInput, MarkExternalInput, NciVerificationInput } from "../shared/remoteJobs";
 import type { NoteCreate, NotesQuery, NoteUpdate } from "../shared/notes";
@@ -67,7 +68,8 @@ import { userAccessOf, type TokenPersonAckResult } from "../shared/users";
 import { PEER_ID, peerAddBody, peerInviteBody, peerPatchBody, peersSettingsBody, type PeerAgents, type PeerAuditEntry, type PeerInvite, type PeerList, type PeerPatch, type PeerResult, type PeersSettingsPatch, type PeerView } from "../shared/peers";
 import { asStuckDiscarded, asStuckView, cleanMinAge, stuckDiscardRequest } from "../shared/agentBusStuck";
 import { sanitizeLaunch, type NewThreadDefaultsPatch } from "../shared/launch";
-import type { ClientTokenView, PairingCodeView } from "../shared/ipc";
+import type { ClientTokenView, PairingCodeView, WindowsSandboxReadiness } from "../shared/ipc";
+import { windowsSandboxReadinessOf } from "../shared/windowsSandbox";
 import { localDaemonSetup } from "../shared/hosts";
 import { isValidTokenId } from "../shared/hosts";
 import { servicesSettingsPatch } from "../shared/servicesSettings";
@@ -122,6 +124,8 @@ export type DaemonEmit = <K extends keyof DaemonEvents>(event: K, payload: Daemo
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 /** Read-only connection probes must not strand a host in `connecting` forever. */
 const CONNECTION_READ_TIMEOUT_MS = 15_000;
+/** Workspace watch: no message or keepalive (cutex: every 15 s) for this long = reconnect. */
+const WATCH_IDLE_TIMEOUT_MS = 45_000;
 const IMAGE_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp" };
 
 /**
@@ -663,6 +667,20 @@ export class DaemonService implements DaemonApi {
     }
   }
 
+  async windowsSandboxReadiness(sessionId: string): Promise<WindowsSandboxReadiness | null> {
+    try {
+      // No params: the app-server schema wants none for this method.
+      const result = await this.requireClient().native<{ status?: unknown }>(sessionId, "windowsSandbox/readiness", undefined);
+      return windowsSandboxReadinessOf(result?.status);
+    } catch {
+      return null;
+    }
+  }
+
+  setupWindowsSandbox(sessionId: string): Promise<{ started: boolean }> {
+    return this.requireClient().native<{ started: boolean }>(sessionId, "windowsSandbox/setupStart", { mode: "unelevated" });
+  }
+
   quotaConfig(profile: string): Promise<QuotaConfigView> {
     return this.requireClient().request<QuotaConfigView>("GET", `/v2/profiles/${encodeURIComponent(profile)}/quota-config`);
   }
@@ -792,17 +810,25 @@ export class DaemonService implements DaemonApi {
 
   async watchWorkspace(scope: WorkspaceScope): Promise<string> {
     const watchId = randomUUID();
+    let readies = 0;
     const handle = openStream(
       this.requireClient(),
       `${this.scopePath(scope)}/fs/watch`,
       {
         onMessage: (message) => {
+          // `ready` again = the stream reconnected (dropped, or idle past the keepalive): changes in
+          // the gap were not reported, so the views reload everything they show once.
+          if (message.event === "ready") {
+            if (readies++ > 0) this.emit("workspaceChanged", { watchId, paths: [], gitChanged: true, overflow: true });
+            return;
+          }
           if (message.event !== "changed") return;
           const data = JSON.parse(message.data) as { paths: string[]; gitChanged: boolean; overflow: boolean };
           this.emit("workspaceChanged", { watchId, paths: data.paths, gitChanged: data.gitChanged, overflow: data.overflow });
         },
       },
-      { reconnect: true },
+      // cutex sends `: keepalive` every 15 s: three missed = a half-open connection, reconnect.
+      { reconnect: true, idleTimeoutMs: WATCH_IDLE_TIMEOUT_MS },
     );
     this.watches.set(watchId, handle);
     return watchId;
@@ -950,6 +976,19 @@ export class DaemonService implements DaemonApi {
 
   async duplicateProfile(profile: string, name: string): Promise<ProfileDetail> {
     return profileOf(await this.requireClient().request<{ profile: ProfileDetail }>("POST", this.profilePath(profile, "/duplicate"), { body: { name: name.trim() } }));
+  }
+
+  /**
+   * profile-transfer, MAIN ONLY (never an IPC method: not in DaemonApi / ALLOWED): the reply's bundle
+   * may hold an API key. Used by main/profileTransfer.ts through HostManager.copyProfileToHost.
+   */
+  exportProfileBundle(profile: string, includeCredentials: boolean): Promise<ExportReply> {
+    return this.requireClient().request<ExportReply>("POST", this.profilePath(profile, "/export"), { body: { includeCredentials } });
+  }
+
+  /** profile-transfer, MAIN ONLY: create a new profile from a bundle (cutex refuses a name clash). */
+  importProfileBundle(bundle: unknown, name: string): Promise<ImportReply> {
+    return this.requireClient().request<ImportReply>("POST", "/v2/profiles/import", { body: { bundle, name: name.trim(), onConflict: "fail" } });
   }
 
   deleteProfile(profile: string, options?: { archived?: "detach" }): Promise<MutationResult> {

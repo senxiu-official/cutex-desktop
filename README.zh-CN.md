@@ -6,13 +6,13 @@
 
 <p align="center"><a href="README.md">English</a> · <b>简体中文</b></p>
 
-**0.1.2**：可选的后端组件（Job Service、Claude 运行时）可以在应用里安装，需要 cutex 0.1.1（0.1.0「First Take」是第一个公开版本）。更新内容见 [CHANGELOG.md](CHANGELOG.md)。
+**0.1.3**：内置浏览器可以正常使用（HTTPS、手动输入的局域网地址、和智能体共用标签、下载与网站权限）；「自动」由 Codex 自动审批员决定；Windows 沙箱一键设置；Profile 可复制到其他主机。配合 cutex 0.1.2 使用（0.1.0「First Take」是第一个公开版本）。更新内容见 [CHANGELOG.md](CHANGELOG.md)。
 
-> **0.1.x 的已知缺口**（正在修，修好后删除这段）：
-> - **NCI 远程作业**在公开版本里还不能用（[ANU.md](docs/install/ANU.md)）。
+> **已知问题**：见 [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md)（应用里：设置 → 关于）。最重要的几条：
+> - **Windows 沙箱与商店版 PowerShell**：点「设置沙箱」后每条命令都以 exit -1 失败；用 winget 或 MSI 安装包装 PowerShell，或先不设置沙箱。
 > - **手机推送 / 配对手机**：还没有公开的手机应用。
 >
-> Claude 智能体和「作业」页需要 cutex 的可选组件（Claude 运行时；Job Service，仅 Linux）。在应用提示的地方点「安装」，或在主机上运行 `cutex component install claude-runtime` / `job-service`（需要 cutex 0.1.1 的托管安装；见[安装指南](docs/install/AGENT-INSTALL.md) §6.1 / §6.2）。
+> Claude 智能体和「作业」页需要 cutex 的可选组件（Claude 运行时；Job Service，仅 Linux）。在应用提示的地方点「安装」，或在主机上运行 `cutex component install claude-runtime` / `job-service`（需要 cutex 0.1.1 起的托管安装；见[安装指南](docs/install/AGENT-INSTALL.md) §6.1 / §6.2）。
 
 Cutex 桌面端是 [cutex](https://github.com/senxiu-official/cutex) 的桌面应用。cutex 是在你自己的电脑上运行编程智能体的
 后台服务，智能体运行在 [cute-codex](https://github.com/senxiu-official/cute-codex)（OpenAI Codex 的分支）或 Claude Code 上。

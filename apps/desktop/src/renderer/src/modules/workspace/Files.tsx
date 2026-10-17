@@ -8,7 +8,8 @@ import { FILE_KIND_ICON } from "../../lib/fileKindIcons";
 import type { FsEntry, WorkspaceScope } from "../../../../shared/ipc";
 import { useI18n } from "../../i18n";
 import { openFile } from "../../lib/sideOpen";
-import { useSelectedWorkspace, workspaceError } from "../../lib/workspaceView";
+import { useDirVersion, useSelectedWorkspace, workspaceError } from "../../lib/workspaceView";
+import { sameEntries } from "../../lib/workspaceRefresh";
 import type { SideBodyProps } from "../slots";
 import { PREVIEW, useCurrentField, useFileMenu } from "./shared";
 
@@ -20,7 +21,7 @@ function EntryIcon({ path, isDir, open = false }: { path: string; isDir: boolean
   return <Icon aria-hidden size={14} strokeWidth={1.75} className={`shrink-0 ${isDir ? "text-accent/80" : "text-subtle"}`} />;
 }
 
-function DirNode({ scope, entry, depth, revision, current }: { scope: WorkspaceScope; entry: FsEntry; depth: number; revision: number; current: string | null }) {
+function DirNode({ scope, entry, depth, current }: { scope: WorkspaceScope; entry: FsEntry; depth: number; current: string | null }) {
   const [open, setOpen] = useState(false);
   const isDir = entry.kind === "dir" || entry.targetKind === "dir";
   const menu = useFileMenu(scope);
@@ -48,31 +49,41 @@ function DirNode({ scope, entry, depth, revision, current }: { scope: WorkspaceS
         <EntryIcon path={entry.path} isDir={isDir} open={open} />
         <span className="truncate">{entry.name}</span>
       </button>
-      {isDir && open && <DirChildren scope={scope} path={entry.path} depth={depth + 1} revision={revision} current={current} />}
+      {isDir && open && <DirChildren scope={scope} path={entry.path} depth={depth + 1} current={current} />}
     </>
   );
 }
 
-function DirChildren({ scope, path, depth, revision, current }: { scope: WorkspaceScope; path: string; depth: number; revision: number; current: string | null }) {
+function DirChildren({ scope, path, depth, current }: { scope: WorkspaceScope; path: string; depth: number; current: string | null }) {
   const [entries, setEntries] = useState<FsEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { api } = useSelectedWorkspace();
+  const { api, dirs } = useSelectedWorkspace();
+  // Bumps only when this folder (or everything) changed: lib/workspaceRefresh.ts.
+  const version = useDirVersion(dirs, path);
+  const loaded = useRef(false);
   useEffect(() => {
     let cancelled = false;
     api.fsDir(scope, path).then(
-      (d) => !cancelled && setEntries(d.entries),
-      (e: unknown) => !cancelled && setError(workspaceError(e)),
+      (d) => {
+        if (cancelled) return;
+        loaded.current = true;
+        // A reload that found nothing new keeps the rendered rows as they are.
+        setEntries((prev) => (sameEntries(prev, d.entries) ? prev : d.entries));
+        setError(null);
+      },
+      // A failed reload keeps the listing it had (the folder itself going away reloads its parent).
+      (e: unknown) => !cancelled && !loaded.current && setError(workspaceError(e)),
     );
     return () => {
       cancelled = true;
     };
-  }, [api, scope, path, revision]);
+  }, [api, scope, path, version]);
   if (error) return <div className="px-2 py-1 text-xs text-danger" style={{ paddingLeft: 8 + depth * 12 }}>{error}</div>;
   if (!entries) return <div className="px-2 py-1 text-xs text-subtle" style={{ paddingLeft: 8 + depth * 12 }}>…</div>;
   return (
     <>
       {entries.map((entry) => (
-        <DirNode key={entry.path} scope={scope} entry={entry} depth={depth} revision={revision} current={current} />
+        <DirNode key={entry.path} scope={scope} entry={entry} depth={depth} current={current} />
       ))}
     </>
   );
@@ -140,7 +151,7 @@ export function FilesBody({ instance, setState }: SideBodyProps<FilesState>) {
             </button>
           ))
         ) : (
-          <DirChildren scope={scope} path="" depth={0} revision={revision} current={current} />
+          <DirChildren scope={scope} path="" depth={0} current={current} />
         )}
       </div>
     </div>

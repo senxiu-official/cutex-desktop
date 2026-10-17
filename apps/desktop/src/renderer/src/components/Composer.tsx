@@ -23,12 +23,13 @@ import { useComposerDraft } from "../lib/composerDrafts";
 import { candidateIndex, composerCandidateKey, mentionPathsFor, startMentionSearch, type MentionResults } from "../lib/composerMentions";
 import { createComposerEnterTrace, type EnterDecision } from "../lib/composerEnterTrace";
 import { archiveAgent, renameAgent } from "../lib/menus";
-import { PERMISSION_MODES, permissionModeOf, permissionPatch } from "../lib/permissionModes";
+import { PERMISSION_MODES, effectivePermissionLines, effectivePermissions, permissionModeOf, permissionPatch } from "../lib/permissionModes";
+import { PermissionDetail } from "./PermissionDetail";
 import { cachedProfileList, loadProfileList } from "../lib/profileSnapshot";
 import { useOrderedProfiles } from "../lib/profileOrder";
 import { useImagePickBlocked } from "../lib/remoteMode";
 import { PROFILE_FAMILY_FEATURE, switchTargets } from "../lib/profileCreate";
-import { formatBalance, gaugeName, gaugesFromRateLimits, latestObservedAt, mergeGauges, observedClock, resetsIn, resetsInCompact, quotaFill, quotaPercent, quotaTextKey, wantsNativeQuotaFallback, type QuotaGauge, type RateLimitsLike } from "../lib/quota";
+import { formatBalance, gaugeName, gaugesFromRateLimits, latestObservedAt, mergeGauges, observedClock, resetsIn, resetsInCompact, quotaFill, quotaPercent, quotaTextKey, wantsNativeQuotaFallback, windowName, type QuotaGauge, type RateLimitsLike } from "../lib/quota";
 import { appendToken } from "../lib/composerTools";
 import { useModelName } from "../lib/modelDisplay";
 import { setUiPref, useUiPrefs } from "../lib/prefs";
@@ -57,6 +58,10 @@ import { ProfileAvatar } from "./ProfileAvatar";
 import { Segmented, Toggle } from "./settings/Form";
 import { Ring } from "./Ring";
 import { Menu, Popover } from "./Menu";
+import { WindowsSandboxMenuNote } from "./WindowsSandboxNotice";
+import { useSessionWindowsSandbox } from "../lib/windowsSandboxView";
+import { useHostPlatform } from "../lib/codeBlockActions";
+import { WINDOWS_SANDBOX_FEATURE, windowsSandboxWarns } from "../../../shared/windowsSandbox";
 import { ModelPicker } from "./ModelPicker";
 import { QueuePanel } from "./QueuePanel";
 import { PendingMessagesSection } from "./PendingMessagesSection";
@@ -135,7 +140,7 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
   const base = mergeGauges(cutexGauges ?? [], nativeQuota ? gaugesFromRateLimits(nativeQuota.limits, nativeQuota.at) : []);
   const gauges = mergeGauges(base, gaugesFromRateLimits(rateLimits, rateLimitsAt));
   const observed = latestObservedAt(gauges);
-  const title = (g: QuotaGauge) => (g.windowLabel && g.windowLabel !== g.label ? `${gaugeName(g)} · ${g.windowLabel}` : gaugeName(g));
+  const title = (g: QuotaGauge) => (g.windowLabel && g.windowLabel !== g.label ? `${gaugeName(g)} · ${windowName(g.windowLabel)}` : gaugeName(g));
   // With no gauge yet, a dim ring keeps the chip's size, so nothing shifts when quota lands.
   const view = prefs.quotaView;
   const visible = gauges.some((g) => g.kind === "balance" || quotaFill(g, view) !== null);
@@ -604,6 +609,7 @@ export function Composer({
 
   const settings = timeline?.settings ?? null;
   const mode = permissionModeOf(settings);
+  const effective = effectivePermissions(settings);
   const collabMode = settings?.collaborationMode?.mode ?? "default";
   const currentModel = settings?.model ?? null;
   const modelInfo = models?.find((m) => m.model === currentModel || m.id === currentModel);
@@ -621,6 +627,10 @@ export function Composer({
   // 额度用完 · HH:MM 自动继续 · 取消 (claude-quota-auto-continue, lib/quotaContinue).
   const quotaApplies = useApp((s) => featuresOf(s, hostId).has(QUOTA_CONTINUE_FEATURE)) && !!session && runtimeOf(session) === "claude";
   const quotaView = useQuotaContinue(hostId, sessionId, quotaApplies);
+  // Windows sandbox readiness (windows-sandbox-readiness): asked when the permission menu opens.
+  const hostPlatform = useHostPlatform(hostId);
+  const winSandboxApplies = useApp((s) => featuresOf(s, hostId).has(WINDOWS_SANDBOX_FEATURE)) && hostPlatform === "windows" && !!session && runtimeOf(session) !== "claude" && online;
+  const winSandbox = useSessionWindowsSandbox(sessionId, winSandboxApplies, timeline?.windowsSandboxSetup);
   const noSteer = lacks(agent, "turnSteer");
   const noSkills = lacks(agent, "skillInput");
   const unsupportedHint = t("composer.tools.agentUnsupported");
@@ -1265,9 +1275,24 @@ export function Composer({
           // nowrap: the chip never gives up width to a crowded toolbar by breaking 完全访问 mid-word; the model
           // name (truncate) and the right-hand group give way first.
           trigger={<span className={`trim-cap whitespace-nowrap ${mode === "full" ? "text-warn" : ""}`}>{mode ? t(`composer.mode.${mode}` as MessageKey) : "…"}</span>}
+          // What the mode name does not say: reviewer, network, extra directories (lib/permissionModes).
+          triggerTitle={effective ? [t("composer.permissionTitle"), ...effectivePermissionLines(effective).map((line) => t(line.key, line.params)), ...effective.writableRoots].join("\n") : undefined}
           items={PERMISSION_MODES.map((m) => ({ value: m, label: t(`composer.mode.${m}` as MessageKey), description: t(`composer.modeHint.${m}` as MessageKey) }))}
           selected={mode}
           onSelect={(m) => m !== "custom" && void updateSettings(permissionPatch(m, settings))}
+          onOpen={winSandbox.load}
+          footer={
+            <>
+              {effective && (
+                <div className="mt-1 border-t border-border px-2.5 pt-1.5 pb-1">
+                  <PermissionDetail effective={effective} />
+                </div>
+              )}
+              {winSandboxApplies && winSandbox.readiness && windowsSandboxWarns(hostPlatform, winSandbox.readiness, mode) && (
+                <WindowsSandboxMenuNote readiness={winSandbox.readiness} phase={winSandbox.phase} onSetup={() => void winSandbox.setup()} />
+              )}
+            </>
+          }
         />
         {collabMode === "plan" && (
           <button

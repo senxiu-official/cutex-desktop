@@ -14,8 +14,11 @@ import { HOST_TAGGED_EVENTS, MESSAGES_WAKE_METHOD } from "../../../shared/ipc";
 import { HOST_PALETTE, normalizeHostGroups, scopeAfterRemoval, scopeHosts, type HostConnView, type ViewScope } from "../../../shared/hosts";
 import { BUILTIN_THREAD_DEFAULTS, LAUNCH_FIELDS, THREAD_KINDS, type LaunchPermissions, type NewThreadDefaults } from "../../../shared/launch";
 import { presetById } from "../lib/profilePresets";
+import type { ProfileTransferWarning } from "../../../shared/profileTransfer";
+import { classifySshPrompt, type SshPromptAnswer, type SshPromptView } from "../../../shared/sshPrompt";
 import { MOCK_BASE_FEATURES, MOCK_NEW_FEATURES } from "./mockFeatures";
 import { MODULE_MOCKS } from "./mockModules";
+import { mockLaunchArt } from "./mockLaunchArt";
 import { registerMockTokenList, renameMockToken } from "./mockTokenNames";
 import type { MockCore, MockEvents, MockProfileRef } from "./mockTypes";
 
@@ -32,6 +35,8 @@ const MOCK_PRESETS: ProfilePreset[] = [
   mp("zhipu", "Zhipu BigModel (GLM Coding Plan)", "zhipu", "https://open.bigmodel.cn/api/v1", "glm-5.3", "zhipu", MOCK_GLM_FAMILY, { aliases: ["bigmodel"], quotaReader: "zhipu_coding_plan", modelCatalog: true }),
   mp("moonshot", "Moonshot (Kimi)", "moonshot", "https://api.moonshot.ai/v1", "kimi-k3", "moonshot", "Moonshot (Kimi)", { aliases: ["kimi"], quotaReader: "moonshot_balance", modelCatalog: true }),
   mp("moonshot-cn", "Moonshot (Kimi, China)", "moonshot", "https://api.moonshot.cn/v1", "kimi-k3", "moonshot", "Moonshot (Kimi)", { aliases: ["kimi-cn"], quotaReader: "moonshot_cn_balance", modelCatalog: true }),
+  mp("kimi-code", "Kimi Code (membership plan)", "kimi-code", "https://api.kimi.ai/coding/v1", "kimi-for-coding", "kimi-code", "Kimi Code", { aliases: ["kimi-for-coding"], quotaReader: "kimi_code_plan", modelCatalog: true, webSearch: "live" }),
+  mp("kimi-code-cn", "Kimi Code (membership plan, China)", "kimi-code", "https://api.kimi.com/coding/v1", "kimi-for-coding", "kimi-code", "Kimi Code", { quotaReader: "kimi_code_plan", modelCatalog: true, webSearch: "live" }),
   mp("minimax", "MiniMax", "minimax", "https://api.minimax.io/v1", "MiniMax-M3.1-Flash-Preview", "minimax", "MiniMax", { modelCatalog: true }),
   mp("minimax-cn", "MiniMax (China)", "minimax", "https://api.minimaxi.com/v1", "MiniMax-M3.1-Flash-Preview", "minimax", "MiniMax", { modelCatalog: true }),
   mp("xai", "xAI (Grok)", "xai", "https://api.x.ai/v1", "grok-4.7", "xai", "xAI (Grok)", { aliases: ["grok", "x.ai"], modelCatalog: true, webSearch: "disabled" }),
@@ -70,7 +75,7 @@ const FRESH_DOWN = { kind: "unreachable" as const, baseUrl: "http://127.0.0.1:24
 const full = { approvalPolicy: "never", sandboxPolicy: { type: "dangerFullAccess" } };
 const MOCK_SETTINGS: Record<string, Record<string, unknown>> = {
   omega: { model: "deepseek-v4-flash", modelProvider: "deepseek", effort: "high", ...full },
-  gamma: { model: "gpt-5.5", modelProvider: "openai", effort: "medium", approvalPolicy: "on-request", sandboxPolicy: { type: "workspaceWrite" } },
+  gamma: { model: "gpt-5.5", modelProvider: "openai", effort: "medium", approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandboxPolicy: { type: "workspaceWrite" } },
   GLM: { model: "glm-5.3", modelProvider: "zai", effort: "high", ...full },
   claude: { model: "sonnet", modelProvider: "anthropic", effort: "high", ...full },
 };
@@ -120,6 +125,8 @@ const MOCK_QUOTA: Record<string, QuotaGauge[]> = {
   Kimi: [
     gauge("primary", "Kimi", { windowLabel: "5h", remainingPercent: 7, resetAt: inHours(0.6) }),
     gauge("extra-0", "Kimi", { windowLabel: "7d", remainingPercent: 41, resetAt: inHours(96) }),
+    // cutex kimi-code-plan: the membership's monthly total (window caption `month` → 本月).
+    gauge("extra-1", "Kimi", { windowLabel: "month", remainingPercent: 83, resetAt: inHours(330) }),
   ],
   "claude-work": [gauge("primary", "5h", { windowLabel: "5h", remainingPercent: 100, resetAt: inHours(5) }), gauge("extra-0", "7d", { windowLabel: "7d", remainingPercent: 96, resetAt: inHours(150) })],
   // cutex-native ChatGPT quota (profile-quota-native), read 6 minutes ago; live
@@ -249,7 +256,7 @@ function mockAutoQuotaError(name: string): string | null {
   return `No automatic quota preset for provider "${String(p.config.modelProvider)}" / base URL "${baseUrl}"`;
 }
 /** profile-generic-switches readers (cutex src/profiles/quota.rs Reader::ALL). */
-const MOCK_READER_NAMES = ["usage_endpoint", "deepseek_balance", "moonshot_balance", "moonshot_cn_balance", "zhipu_coding_plan", "openrouter_key"];
+const MOCK_READER_NAMES = ["usage_endpoint", "deepseek_balance", "moonshot_balance", "moonshot_cn_balance", "zhipu_coding_plan", "openrouter_key", "kimi_code_plan"];
 /** Starting quota source per fixture profile: a relay /usage reader, official balances, one unresolved legacy `auto`. */
 const MOCK_QUOTA_READERS: Record<string, string> = { GLM: "usage_endpoint", omega: "deepseek_balance", Kimi: "moonshot_balance", relay: "auto" };
 /** Saved quota-config drafts (preview session only). */
@@ -340,13 +347,13 @@ const clonePerms = (d: LaunchPermissions): LaunchPermissions => ({ ...d, writabl
 // The mock host is a current cutex (fresh-agent-auto-permissions): its built-in agent default is the
 // composer's 自动 mode; the configured agent default is full access, as an existing home keeps it.
 const MOCK_BUILTIN_THREAD_DEFAULTS: NewThreadDefaults = {
-  agent: { sandbox: "workspace-write", approvalPolicy: "on-request", networkAccess: true, writableRoots: [] },
-  quickChat: clonePerms(BUILTIN_THREAD_DEFAULTS.quickChat),
+  agent: { sandbox: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review", networkAccess: true, writableRoots: [] },
+  quickChat: { ...clonePerms(BUILTIN_THREAD_DEFAULTS.quickChat), approvalsReviewer: "auto_review" },
 };
 // Configured newThreadDefaults: quick chats get network access here so the reset UI shows.
 const mockThreadDefaults: NewThreadDefaults = {
-  agent: clonePerms(BUILTIN_THREAD_DEFAULTS.agent),
-  quickChat: { ...clonePerms(BUILTIN_THREAD_DEFAULTS.quickChat), networkAccess: true },
+  agent: { ...clonePerms(BUILTIN_THREAD_DEFAULTS.agent), approvalsReviewer: "auto_review" },
+  quickChat: { ...clonePerms(BUILTIN_THREAD_DEFAULTS.quickChat), approvalsReviewer: "auto_review", networkAccess: true },
 };
 const settingsView = () => (LEGACY ? mockSettings : { ...mockSettings, queue: { ownerMayPassAsks: true, ...(mockSettings as { queue?: object }).queue }, queueDefault: { ownerMayPassAsks: true }, ...moduleSettings(), newThreadDefaults: structuredClone(mockThreadDefaults), newThreadDefaultsBuiltin: structuredClone(MOCK_BUILTIN_THREAD_DEFAULTS), agentSecurity: structuredClone(mockSecurity) });
 const QUICK_CHAT_SETTINGS = { model: "deepseek-v4-flash", modelProvider: "deepseek", effort: "high", approvalPolicy: "on-request", sandboxPolicy: { type: "workspaceWrite", writableRoots: [], networkAccess: false } };
@@ -612,8 +619,8 @@ const projectSessions: [SessionResource, string][] = [
   [offlineAgent("demo-cs-1", "demo-cs-writer", 70), "demo-cs"],
   [offlineAgent("vcc-1", "vcc-runner", 3 * 1440), "vcc-2026"],
 ];
-// `?manydemo`: a dozen more demo-* members sharing the prefix (default avatars at a glance).
-if (typeof location !== "undefined" && new URLSearchParams(location.search).has("manydemo")) {
+// `?manydemo`: a dozen more demo-* members sharing the prefix (default avatars at a glance); `?sidebarpins` too.
+if (typeof location !== "undefined" && (new URLSearchParams(location.search).has("manydemo") || new URLSearchParams(location.search).has("sidebarpins"))) {
   for (const name of ["demo-ui-r3", "demo-quant-config-r1", "demo-quant-engine-r1", "demo-quant-integration-r1", "demo-quant-review-r1", "demo-analysis-retina-r1", "demo-analysis-public-r1", "demo-analysis-spatial-r1", "demo-analysis-protocol-r1", "demo-polyadb-human-glm-r1", "demo-kidney-glm-r2", "demo-heart-nuclei-claude-r3"])
     projectSessions.push([session(`${name}-sid`, name, { cwd: "D:\\Research\\demo" }), "demo"]);
 }
@@ -637,6 +644,26 @@ snapshot = {
   },
   hostRows: { ...snapshot.hostRows, ...Object.fromEntries(projectSessions.map(([s, p]) => [s.cutexSessionId, hostRow(s.cutexSessionId, p)])) },
 };
+
+/**
+ * `?sidebarpins` (with the `?manydemo` members): the device-local sidebar state for pins and folds
+ * (seeded before the store reads it; bare ids = legacy entries the local host claims): a pinned online
+ * idle agent (demo-ui-r3) and pinned offline ones (demo-stats; kks-web in a collapsed project), a
+ * pinned older quick chat (东京三日行程, sorts first), and unseen done turns on idle agents
+ * (demo-quant-engine-r1, demo-quant-config-r1, Lead) that stay in the collapsed 「N 个空闲」 with a ✓.
+ * The agent bookmark
+ * (Mika) comes from the bookmarks module's preview data.
+ */
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("sidebarpins")) {
+  try {
+    localStorage.setItem("cutex-desktop.pinned", JSON.stringify(["demo-ui-r3-sid", "demo-idle2", "kks-web", "chat-trip"]));
+    const at = Date.now() - 5 * 60_000;
+    const done = (turnId: string, ago = 0) => ({ at: at - ago, failed: false, turnId });
+    localStorage.setItem("cutex-desktop.turnMarks", JSON.stringify({ "demo-quant-engine-r1-sid": done("dqe-t3"), "demo-quant-config-r1-sid": done("dqc-t2", 60_000), lead: done("lead-t5", 120_000) }));
+  } catch {
+    // preview storage can be disabled
+  }
+}
 
 /** A done turn (demo-writer) and a failed one (ifm-ema-plots) shortly after start: 完成 / 出错 pills. */
 function startSidebarTurns() {
@@ -1133,6 +1160,15 @@ function emit<K extends keyof MockEvents>(event: K, payload: MockEvents[K]) {
   const host = sessionId ? mockViewHosts.get(sessionId) : undefined;
   emitOn(host && mockConn(host)?.epoch ? host : mockHosts.active, event, payload);
 }
+/** SSH questions (main/sshAskpass.ts): a target containing "askpass" asks for a host key and a passphrase. */
+let mockSshPrompts: SshPromptView[] = [];
+const mockSshWaiters = new Map<string, (answer: SshPromptAnswer) => void>();
+function mockSshAsk(target: string, message: string): Promise<SshPromptAnswer> {
+  const id = `p-${Math.random().toString(16).slice(2, 10)}`;
+  mockSshPrompts = [...mockSshPrompts, { id, target, createdAt: Date.now(), ...classifySshPrompt(message) }];
+  emit("sshPrompts", { prompts: mockSshPrompts });
+  return new Promise((resolve) => mockSshWaiters.set(id, resolve));
+}
 /** Sessions subscribed through another host's `apiFor` → that host. */
 const mockViewHosts = new Map<string, string>();
 
@@ -1555,6 +1591,24 @@ async function wakeTurn(sessionId: string) {
   nativeEvent(sessionId, "turn/completed", { turn: { id: turnId, status: "completed", completedAt: Date.now() / 1000 } });
   currentTurn.delete(sessionId);
   busy.delete(sessionId);
+}
+
+function startAutoReviewDemo() {
+  const review = (status: string, extra: Record<string, unknown> = {}) => ({ status, riskLevel: null, userAuthorization: null, rationale: null, ...extra });
+  // Starts after a few seconds so Eva's timeline is open (events for an unloaded timeline are not kept).
+  const run = (at: number, method: string, params: Record<string, unknown>) => setTimeout(() => nativeEvent("eva", method, { threadId: "thread-eva", turnId: "turn-4", ...params }), 6000 + at);
+  const allow = { type: "command", source: "unifiedExec", command: "cp dist/report.html ~/shared/report.html", cwd: "/work" };
+  run(800, "item/started", { item: { type: "commandExecution", id: "ar1", command: allow.command, status: "inProgress" } });
+  run(900, "item/autoApprovalReview/started", { reviewId: "rv-a", targetItemId: "ar1", startedAtMs: Date.now(), action: allow, review: review("inProgress") });
+  run(2200, "item/autoApprovalReview/completed", { reviewId: "rv-a", targetItemId: "ar1", startedAtMs: Date.now(), completedAtMs: Date.now(), decisionSource: "agent", action: allow, review: review("approved", { riskLevel: "low", userAuthorization: "medium", rationale: "Copies a build artifact into the user's shared folder, as asked." }) });
+  run(2400, "item/completed", { item: { type: "commandExecution", id: "ar1", command: allow.command, status: "completed", exitCode: 0, durationMs: 40 } });
+  const deny = { type: "command", source: "unifiedExec", command: "rm -rf ~/.cache/cutex-build", cwd: "/work" };
+  run(3000, "item/autoApprovalReview/started", { reviewId: "rv-d", targetItemId: "ar2", startedAtMs: Date.now(), action: deny, review: review("inProgress") });
+  run(3100, "guardianWarning", { message: "Automatic approval review denied (risk: high, authorization: low): deleting a cache outside the workspace was not requested." });
+  run(3200, "item/autoApprovalReview/completed", { reviewId: "rv-d", targetItemId: "ar2", startedAtMs: Date.now(), completedAtMs: Date.now(), decisionSource: "agent", action: deny, review: review("denied", { riskLevel: "high", userAuthorization: "low", rationale: "Deleting a cache outside the workspace was not requested by the user." }) });
+  run(3300, "item/completed", { item: { type: "commandExecution", id: "ar2", command: deny.command, status: "declined", exitCode: null, aggregatedOutput: null } });
+  const net = { type: "networkAccess", target: "https://registry.npmjs.org", host: "registry.npmjs.org", protocol: "https", port: 443 };
+  run(4000, "item/autoApprovalReview/completed", { reviewId: "rv-n", targetItemId: null, startedAtMs: Date.now(), completedAtMs: Date.now(), decisionSource: "agent", action: net, review: review("approved", { riskLevel: "low", userAuthorization: "high", rationale: "Package install the user asked for." }) });
 }
 
 /** Alden keeps "working" in the background so the sidebar's live activity line visibly changes. */
@@ -2044,6 +2098,9 @@ export function installMockBridge(): void {
   }
   startBackgroundActivity();
   startSidebarTurns();
+  // ?autoreview: Codex's automatic reviewer (「自动」) decides two escalations in Eva's running turn —
+  // one approved, one declined with its reason — and a network request without a tool row.
+  if (new URLSearchParams(location.search).has("autoreview")) startAutoReviewDemo();
   for (const { mock } of MODULE_MOCKS) mock.start?.(core);
   // ?gutter: the two-sides demo (dev/devGutter.tsx: sample refs in the left gutter, a margin note).
   if (new URLSearchParams(location.search).has("gutter")) void import("./devGutter").then((m) => m.installDevGutter());
@@ -2066,6 +2123,8 @@ export function installMockBridge(): void {
     // Old releases moved out of releases/ (?update=none: none left).
     ...(FRESH || updateMode === "none" ? {} : { oldReleases: { count: 18, bytes: 6.9e9, autoDeleteDays: 30, dir: "/home/sam/Applications/cutex-desktop/old-releases" } }),
   };
+  // ?update=binary: a GitHub-release (binary) install, up to date: checks at most hourly (main/updater.ts).
+  if (updateMode === "binary") update = { ...update, state: "idle", binary: true, channel: "release", canSwitchChannel: false, source: "github.com/example-org/cutex-desktop", latest: null, releasePage: "https://example.invalid/cutex-desktop/releases" };
   const setUpdate = (patch: Partial<UpdateStatus>) => {
     update = { ...update, ...patch };
     emit("updateStatus", structuredClone(update));
@@ -2107,6 +2166,7 @@ export function installMockBridge(): void {
         return structuredClone(shellState);
       },
     },
+    launchArt: mockLaunchArt(),
     update: {
       async state() {
         return structuredClone(update);
@@ -2162,6 +2222,13 @@ export function installMockBridge(): void {
         await new Promise((r) => setTimeout(r, 1200));
         const target = request.target.trim();
         if (!target) return { ok: false, error: { code: "badInput", detail: "target" } };
+        if (target.includes("askpass")) {
+          const host = target.replace(/^.*@/, "");
+          const trust = await mockSshAsk(target, `The authenticity of host '${host} (192.0.2.10)' can't be established.\nED25519 key fingerprint is SHA256:Xq3M2b8u1mZ0eV7tq0n8yJm1lI0p9yX4cQm7a2Kc9sE.\nThis key is not known by any other names.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? `);
+          if (trust !== "yes") return { ok: false, error: { code: "hostKey", detail: "Host key verification failed." } };
+          const pass = await mockSshAsk(target, "Enter passphrase for key '/home/sam/.ssh/id_ed25519': ");
+          if (pass === null) return { ok: false, error: { code: "auth", detail: `${target}: Permission denied (publickey).` } };
+        }
         if (target.includes("nokey")) return { ok: false, error: { code: "auth", detail: `${target}: Permission denied (publickey).` } };
         if (target.includes("old")) return { ok: false, error: { code: "cutexTooOld", detail: "error: unrecognized subcommand 'client-token'\n\nUsage: cutex management <COMMAND>" } };
         if (target.includes("nosuch")) return { ok: false, error: { code: "resolve", detail: `ssh: Could not resolve hostname ${target}: No such host is known.` } };
@@ -2239,12 +2306,41 @@ export function installMockBridge(): void {
         mockSetScope(scopeAfterRemoval(mockHosts.scope, { hosts: mockHosts.hosts.filter((h) => h.kind !== "local").map((h) => h.id), groups: r.groups }));
         return mockHostsOut();
       },
+      // profile-transfer (main → main in the app): the mock profiles are shared by every mock host, so the
+      // copy lands in the same list under its new name; warnings as cutex answers them.
+      async copyProfileToHost(request) {
+        await new Promise((r) => setTimeout(r, 900));
+        const src = mockProfiles[request.profile];
+        if (!src) return { ok: false, stage: "export", error: { code: "profile_not_found", message: `no profile ${request.profile}` } };
+        if (mockProfiles[request.name]) return { ok: false, stage: "import", error: { code: "profile_name_conflict", status: 409, message: `a profile named ${request.name} already exists` } };
+        const claude = src.cliKind === "claude";
+        const keyCopied = !claude && src.authKind === "apiKey" && src.apiKeyPresent && request.includeApiKey;
+        mockProfiles[request.name] = { ...structuredClone(src), name: request.name, apiKeyPresent: keyCopied };
+        if (src.authKind === "chatgpt") mockLoggedOut.add(request.name);
+        const warnings: ProfileTransferWarning[] = claude
+          ? [{ code: "claudeAccountRebound", matched: false, account: "default", accountLabel: null, sourceLabel: "work", loggedIn: true }]
+          : src.authKind === "chatgpt" ? [{ code: "needsLogin", credential: "chatgpt" }]
+          : keyCopied ? [] : [{ code: "needsLogin", credential: "apiKey" }];
+        console.info("[mock] profile-transfer", request.sourceHostId, "→", request.targetHostId, request.profile, "as", request.name);
+        return { ok: true, profile: { id: `mock-${request.name}`, name: request.name }, credentialKind: claude ? "claude" : src.authKind, credentialsCopied: keyCopied, warnings };
+      },
       async testHost(hostId) {
         await new Promise((r) => setTimeout(r, 700));
         const host = mockHosts.hosts.find((h) => h.id === hostId);
         if (!host) return { ok: false, error: { code: "badInput", detail: "host" } };
         if (host.kind === "local") return { ok: true, cutexBuild: MOCK_CUTEX_BUILD, hostId: "HOST-A", missing: [] };
         return { ok: true, cutexBuild: OLD_REMOTE ? null : MOCK_CUTEX_BUILD, hostId: host.label.toUpperCase(), missing: OLD_REMOTE ? ["session-attachments", "fs-dir-browse"] : [] };
+      },
+      async sshPrompts() {
+        return mockSshPrompts;
+      },
+      async answerSshPrompt(id, answer) {
+        const waiter = mockSshWaiters.get(id);
+        mockSshWaiters.delete(id);
+        mockSshPrompts = mockSshPrompts.filter((p) => p.id !== id);
+        emit("sshPrompts", { prompts: mockSshPrompts });
+        waiter?.(answer);
+        return !!waiter;
       },
       async setHostStartOn(value) {
         mockHosts = { ...mockHosts, startOn: value };
@@ -2513,25 +2609,9 @@ export function installMockBridge(): void {
         mockQuotaConfigs[profile] = { preset, primary: patch.primary ?? current.primary, extras: patch.extras ?? current.extras };
         return this.quotaConfig(profile);
       },
-      async fsDir(_scope, path) {
-        broadRootRefusal();
-        const tree: Record<string, [string, "file" | "dir"][]> = {
-          "": [["apps", "dir"], ["docs", "dir"], ["AGENTS.md", "file"], ["PLAN.md", "file"], ["package.json", "file"]],
-          docs: [["research", "dir"], ["DESIGN.md", "file"]],
-          "docs/research": [["zcode-ui.md", "file"]],
-          apps: [["desktop", "dir"]],
-          "apps/desktop": [["src", "dir"], ["package.json", "file"]],
-          "apps/desktop/src": [["main", "dir"], ["renderer", "dir"]],
-          "apps/desktop/src/main": [["daemon.ts", "file"], ["index.ts", "file"]],
-          "apps/desktop/src/renderer": [["index.html", "file"]],
-        };
-        return {
-          root: "D:\\Apps\\cutex-desktop",
-          path,
-          entries: (tree[path] ?? []).map(([name, kind]) => ({ name, path: path ? `${path}/${name}` : name, kind, targetKind: null, size: kind === "file" ? 1200 : null, modifiedAt: new Date().toISOString(), ignored: false })),
-        };
-      },
-      async fsFile(_scope, path) {
+      async fsFile(_scope, path, maxBytes) {
+        const moduleFile = MODULE_MOCKS.map(({ mock }) => mock.files?.read(path, maxBytes) ?? null).find((f) => f !== null);
+        if (moduleFile) return moduleFile;
         const image = await mockImageFile(path);
         if (image) return image;
         const md = `# ${path.split("/").pop()}\n\n预览示例。代码引用：[daemon.ts](apps/desktop/src/main/daemon.ts:42)。\n\n| 项 | 说明 |\n|---|---|\n| scope | project / session |\n`;
@@ -2539,10 +2619,12 @@ export function installMockBridge(): void {
         const content = path.endsWith(".md") ? md : path.endsWith(".json") ? `{\n  "name": "cutex-desktop",\n  "private": true\n}\n` : ts;
         return { path, size: content.length, modifiedAt: new Date().toISOString(), encoding: "utf8", content, truncated: false, mime: "text/plain" };
       },
-      async hostFile(path) {
+      async hostFile(path, maxBytes) {
         // cutex fs-file-read: any absolute path on the active host (owner-only).
         await new Promise((r) => setTimeout(r, 120));
         if (/missing/i.test(path)) throw new Error("path_not_found: the path does not exist");
+        const moduleFile = MODULE_MOCKS.map(({ mock }) => mock.files?.read(path, maxBytes) ?? null).find((f) => f !== null);
+        if (moduleFile) return moduleFile;
         const owned = MODULE_MOCKS.map(({ mock }) => mock.hostFile?.(path) ?? null).find((text) => text !== null);
         if (owned != null) return { path, size: owned.length, modifiedAt: new Date().toISOString(), encoding: "utf8", content: owned, truncated: false, mime: "text/markdown" };
         const image = await mockImageFile(path);
@@ -2572,10 +2654,6 @@ export function installMockBridge(): void {
       async gitDiff(_scope, path) {
         return { path: path ?? null, staged: false, truncated: false, diff: `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,3 +1,4 @@\n import x from "y";\n-const a = 1;\n+const a = 2;\n+const b = 3;\n export { a };\n` };
       },
-      async watchWorkspace() {
-        return "mock-watch";
-      },
-      async unwatchWorkspace() {},
       async profileAccount(profile) {
         if (mockProfiles[profile]?.cliKind === "claude") return null;
         if (profile === "gamma" && !mockAccounts.has(profile) && !mockLoggedOut.has(profile)) {
@@ -2628,7 +2706,7 @@ export function installMockBridge(): void {
         const model = request.launch?.model ? { model: request.launch.model } : {};
         const effort = request.launch?.reasoningEffort ? { effort: request.launch.reasoningEffort } : {};
         chat.profile = profile;
-        chat.runtime = { ...chat.runtime, status: request.start ? "online" : "offline", threadSettings: { ...base, ...model, ...effort, approvalPolicy: perms.approvalPolicy, sandboxPolicy: { type: sandboxType, writableRoots: perms.writableRoots, networkAccess: perms.networkAccess } } };
+        chat.runtime = { ...chat.runtime, status: request.start ? "online" : "offline", threadSettings: { ...base, ...model, ...effort, approvalPolicy: perms.approvalPolicy, approvalsReviewer: perms.approvalsReviewer ?? "user", sandboxPolicy: { type: sandboxType, writableRoots: perms.writableRoots, networkAccess: perms.networkAccess } } };
         chat.displayNameOverride = request.displayName ?? null;
         snapshot = { ...snapshot, active: [...snapshot.active, chat], hostRows: { ...snapshot.hostRows, [id]: { ...hostRow(id, null), kind: "Session" } } };
         emptyChats.add(id);
@@ -3035,6 +3113,17 @@ export function installMockBridge(): void {
       },
       async readRateLimits(sessionId) {
         return (MOCK_LIMITS[profileOf(sessionId)] as Record<string, unknown> | undefined) ?? null;
+      },
+      // windows-sandbox-readiness: HOST-A (windows) agents have no sandbox; setup succeeds but the
+      // running runtime keeps reporting its start config (like native) until a relaunch.
+      async windowsSandboxReadiness() {
+        if (LEGACY) return null;
+        return "notConfigured";
+      },
+      async setupWindowsSandbox(sessionId) {
+        if (LEGACY) throw new Error("403 native_method_denied: windowsSandbox/setupStart");
+        setTimeout(() => nativeEvent(sessionId, "windowsSandbox/setupCompleted", { mode: "unelevated", success: true, error: null }), 700);
+        return { started: true };
       },
       async createProfile(request) {
         if (LEGACY) throw new Error("404 not_found: POST /v2/profiles");

@@ -54,13 +54,13 @@ import { useApp } from "../../store";
 import { bridge } from "../../bridge";
 import type { PageParams } from "../slots";
 import { WritableRootsEditor } from "../../components/LaunchOptions";
-import { LaunchAttachments, LaunchComposer, LaunchDock, LaunchIntro, LaunchPage } from "../../components/LaunchPage";
+import { LaunchAttachments, LaunchComposer, LaunchDock, LaunchFieldsBox, LaunchIntro, LaunchPage } from "../../components/LaunchPage";
 import { profileProvider } from "../../lib/provider";
 import { ChipDivider, EffortPicker, ProfileQuota } from "../../components/Composer";
 import { ComposerTools } from "../../components/ComposerTools";
 import { Menu, Popover } from "../../components/Menu";
 import { ModelPicker } from "../../components/ModelPicker";
-import { LAUNCH_FOR_MODE, PERMISSION_MODES, permissionModeOfLaunch } from "../../lib/permissionModes";
+import { LAUNCH_FOR_MODE, LAUNCH_REVIEWER_FEATURE, PERMISSION_MODES, permissionModeOfLaunch, reviewerForCreate } from "../../lib/permissionModes";
 import { Button, Segmented, SettingRow, Select, TextInput, Toggle } from "../../components/settings/Form";
 
 const INDEPENDENT = "";
@@ -106,7 +106,7 @@ function LaunchModelPanel({ profile, catalog, form, touched, onChange, onReset }
     return t(key) === key ? e : t(key);
   };
   return (
-    <div className="@container">
+    <LaunchFieldsBox>
         <div className="launch-fields">
           <label className="launch-field">
             {t("composer.modelTitle")}
@@ -126,7 +126,7 @@ function LaunchModelPanel({ profile, catalog, form, touched, onChange, onReset }
           </label>
         </div>
       {touched && <div className="mt-3 flex justify-end"><Button onClick={onReset}>{t("agent-config.newAgent.advancedReset")}</Button></div>}
-    </div>
+    </LaunchFieldsBox>
   );
 }
 
@@ -466,8 +466,13 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
       let fresh: SidebarSnapshot | null = null;
       const agent = await runNewAgentSteps(
         {
-          create: async (startNow) =>
-            (await api.createAgent({ name: name.trim(), projectId: target ?? undefined, cwd: cwd.trim() || undefined, profile: profile || undefined, start: startNow, launch: !canLaunch ? undefined : claude ? claudeLaunchFromForm(launch, launchTouched) : launchFromForm(launch, launchTouched) })).cutexSessionId,
+          create: async (startNow) => {
+            // 自动 = auto reviewer: in `launch` where cutex takes it, else set once the thread runs.
+            const reviewer = reviewerForCreate(launchFromForm(launch, launchTouched), permissionModeOfLaunch(launch.sandbox, launch.approvalPolicy, launch.approvalsReviewer), features.has(LAUNCH_REVIEWER_FEATURE));
+            const id = (await api.createAgent({ name: name.trim(), projectId: target ?? undefined, cwd: cwd.trim() || undefined, profile: profile || undefined, start: startNow, launch: !canLaunch ? undefined : claude ? claudeLaunchFromForm(launch, launchTouched) : reviewer.launch })).cutexSessionId;
+            if (canLaunch && !claude && reviewer.fallback) useApp.getState().expectApprovalsReviewer(id, hostId, reviewer.fallback);
+            return id;
+          },
           saveAppearance: avatar ? async (id) => {
             if (picture) {
               try { saveAgentPicture(avatar, picture); }
@@ -591,7 +596,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   const effortLabel = effort ? (t(effortKey) === effortKey ? effort : t(effortKey)) : unspecified;
   const workspace = !claude && launch.sandbox === "workspace-write";
   const network = launch.sandbox === "danger-full-access" || (workspace && launch.networkAccess);
-  const mode = permissionModeOfLaunch(launch.sandbox, launch.approvalPolicy);
+  const mode = permissionModeOfLaunch(launch.sandbox, launch.approvalPolicy, launch.approvalsReviewer);
   const patchLaunch = (patch: Partial<LaunchForm>) => {
     if (locked) return;
     setLaunch((f) => ({ ...f, ...patch }));
@@ -646,7 +651,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
               </div>
               <fieldset disabled={busy || !!createdAgent} className="min-w-0">
                 {panel === "project" && (
-                  <div className="@container">
+                  <LaunchFieldsBox>
                     <div className="launch-fields">
                       <label className="launch-field">
                         {t("agent-config.newAgent.project")}
@@ -682,7 +687,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
                     <SettingRow label={t("agent-config.newAgent.start")} hint={hasTask ? t("agent-config.newAgent.taskStarts") : undefined}>
                       <input type="checkbox" checked={start || hasTask} disabled={hasTask} onChange={(e) => setStart(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />
                     </SettingRow>
-                  </div>
+                  </LaunchFieldsBox>
                 )}
                 {panel === "model" && (
                   <LaunchModelPanel

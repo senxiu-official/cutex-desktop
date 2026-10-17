@@ -21,8 +21,11 @@ function dom() {
     closest: () => card, getBoundingClientRect: () => rect };
   const capture = { isConnected: true, hidden: false, inert: false, parentElement: ancestor.parentElement, childElementCount: 0,
     closest: () => card, getAttribute: (name: string): string | null => name === "data-browser-owner-capture" ? guestId : name === "data-browser-owner-ready" ? "true" : null, getBoundingClientRect: () => rect };
-  const document = { visibilityState: "visible", querySelectorAll: (selector: string): any[] => selector.startsWith("webview") ? [guest] : [capture], elementFromPoint: (): any => capture };
-  return { guest, capture, card, ancestor, rect, style, document, context: { document, innerWidth: 1000, innerHeight: 800, getComputedStyle: (_node?: unknown) => style } };
+  const document = { visibilityState: "visible", querySelectorAll: (selector: string): any[] => selector.startsWith("webview") ? [guest] : [capture], elementFromPoint: (): any => guest };
+  // 0.1.3 co-control: the marker is input-transparent (pointer-events: none); samples hit the guest.
+  const markerStyle = { ...style, pointerEvents: "none" };
+  return { guest, capture, card, ancestor, rect, style, markerStyle, document, context: { document, innerWidth: 1000, innerHeight: 800,
+    getComputedStyle: (node?: unknown) => node === capture ? markerStyle : style } };
 }
 afterEach(() => vi.useRealTimers());
 describe("main-owned browser visibility gate", () => {
@@ -88,16 +91,16 @@ describe("main-owned browser visibility gate", () => {
   it("does not interpolate unvalidated script or selectors", () => {
     expect(() => browserVisibilityScript('guest\"];alert(1);//')).toThrow();
   });
-  it("accepts only the exact owner's capture layer as a non-occluding hit", () => {
+  it("accepts the exact passive marker with every sample on the guest itself", () => {
     const f = dom();
-    f.document.querySelectorAll = selector => selector.startsWith("webview") ? [f.guest] : [f.capture];
-    f.document.elementFromPoint = () => f.capture;
     expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toEqual({ width: 640, height: 360 });
+    // A marker that would intercept the owner's input is no co-control marker.
+    f.markerStyle.pointerEvents = "auto";
+    expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toEqual({ capturePending: true });
   });
   it.each(["different-guest", "duplicate", "wrong-parent", "wrong-card", "no-viewport", "partial", "child", "detached", "hidden", "inert", "transparent", "shell-overlay"])("rejects capture exception for %s", reason => {
     const f = dom();
     f.document.querySelectorAll = selector => selector.startsWith("webview") ? [f.guest] : [f.capture];
-    f.document.elementFromPoint = () => f.capture;
     if (reason === "different-guest") f.capture.getAttribute = () => "another-guest";
     if (reason === "duplicate") f.document.querySelectorAll = selector => selector.startsWith("webview") ? [f.guest] : [f.capture, f.capture];
     if (reason === "wrong-parent") f.capture.parentElement = {} as any;
@@ -108,19 +111,21 @@ describe("main-owned browser visibility gate", () => {
     if (reason === "detached") f.capture.isConnected = false;
     if (reason === "hidden") f.capture.hidden = true;
     if (reason === "inert") f.capture.inert = true;
-    if (reason === "transparent") f.context.getComputedStyle = node => node === f.capture ? { ...f.style, opacity: "0" } : f.style;
-    if (reason === "shell-overlay") f.document.elementFromPoint = () => ({});
-    expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toBe(false);
+    if (reason === "transparent") f.markerStyle.opacity = "0";
+    if (reason === "shell-overlay") { f.document.elementFromPoint = () => ({}); expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toBe(false); return; }
+    expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toEqual({ capturePending: true });
   });
-  it.each(["missing", "not-ready", "not-granted", "bare-guest-hit", "one-bare-guest-hit"])("never returns actionable bounds when capture is %s", reason => {
+  it.each(["missing", "not-ready", "not-granted"])("never returns actionable bounds when capture is %s", reason => {
     const f = dom();
-    if (reason === "missing") { f.document.querySelectorAll = selector => selector.startsWith("webview") ? [f.guest] : []; f.document.elementFromPoint = () => f.guest; }
+    if (reason === "missing") f.document.querySelectorAll = selector => selector.startsWith("webview") ? [f.guest] : [];
     if (reason === "not-ready") f.capture.getAttribute = name => name === "data-browser-owner-capture" ? guestId : null;
     if (reason === "not-granted") f.card.getAttribute = () => null;
-    if (reason === "bare-guest-hit") f.document.elementFromPoint = () => f.guest;
-    let hits = 0;
-    if (reason === "one-bare-guest-hit") f.document.elementFromPoint = () => ++hits === 5 ? f.guest : f.capture;
     expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toEqual({ capturePending: true });
+  });
+  it("one covered sample (app menu, dialog, the old shield) denies dispatch", () => {
+    const f = dom(); let hits = 0;
+    f.document.elementFromPoint = () => ++hits === 5 ? f.capture : f.guest;
+    expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toBe(false);
   });
   it("waits for visible capture readiness in reject mode without revealing or retrying an action", async () => {
     vi.useFakeTimers(); const f = fixture(); f.inspect.mockResolvedValueOnce({ capturePending: true } as any);

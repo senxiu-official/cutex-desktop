@@ -44,7 +44,7 @@ import { cleanBinaryLeftovers, installBinaryRelease, LatestReleaseClient, Releas
 import { parsePublicKey, releaseKeyring } from "./minisign";
 import { createUpdateNet, type UpdateNet } from "./updateNet";
 import { envHasProxy, gitProxyArgs, proxyEnv, type Transport } from "./updateTransport";
-import { BINARY_MIN_CHECK_MINUTES, GITHUB_API, GITHUB_WEB, githubRepoOf, isNewerVersion, parseVersion, releasePlatform, updateAssets, type LatestRelease } from "../shared/binaryUpdate";
+import { effectiveUpdateCheckMinutes, GITHUB_API, GITHUB_WEB, githubRepoOf, isNewerVersion, parseVersion, releasePlatform, updateAssets, type LatestRelease } from "../shared/binaryUpdate";
 import type { UpdateStatus, UpdateStep } from "../shared/ipc";
 import { ReleaseMaintenance } from "./releaseMaintenance";
 import { bundlePackageJson, LAUNCHER_INSTALL_FILE, launcherSidecarRelease, MAC_BUNDLE, OLD_RELEASE_MAX_AGE_DAYS, MAC_RELEASE_SUFFIX } from "../shared/releases";
@@ -221,7 +221,7 @@ export class Updater {
     this.timer = null;
     if ((!this.info && !this.binary) || minutes <= 0 || this.stopped()) return;
     // GitHub's unauthenticated API is shared by everyone behind one address: binary installs check hourly at most.
-    if (this.binary) minutes = Math.max(minutes, BINARY_MIN_CHECK_MINUTES);
+    minutes = effectiveUpdateCheckMinutes(minutes, !!this.binary);
     const loop = (delay: number) => {
       this.timer = setTimeout(() => {
         void this.check({ background: true }).finally(() => {
@@ -426,8 +426,9 @@ export class Updater {
     return this.netInstance;
   }
 
-  /** The binary updater's transport: the injected one (tests), else Chromium's (updateNet.ts). */
-  private transport(): Transport {
+  /** The binary updater's transport: the injected one (tests), else Chromium's (updateNet.ts). Also used
+   *  for the known-issues list (knownIssues.ts): the same proxy-aware session. */
+  transport(): Transport {
     if (this.netOpts.transport) return this.netOpts.transport;
     return (url, init) => this.updateNet().transport(url, init);
   }

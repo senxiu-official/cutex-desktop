@@ -19,6 +19,12 @@ export function checkedScope(raw: unknown): BookmarkScope {
   return { ...(typeof raw.sessionId === "string" ? { sessionId: raw.sessionId } : {}), ...(typeof raw.projectId === "string" ? { projectId: raw.projectId } : {}), projectExplicit: raw.projectExplicit === true };
 }
 export const refKey = (ref: CutexRef): string => JSON.stringify([ref.hostId, ref.kind, ref.key]);
+/**
+ * Ref kinds no longer offered for new bookmarks: an agent is kept at hand by 置顶 in the sidebar (owner
+ * 2026-10-16). Existing agent bookmarks stay readable and listed under 全部书签.
+ */
+export const UNBOOKMARKED_KINDS: readonly string[] = ["agent"];
+export const bookmarkable = (ref: Pick<CutexRef, "kind">): boolean => !UNBOOKMARKED_KINDS.includes(ref.kind);
 export function checkedRef(raw: unknown, parse: RefParser): CutexRef {
   const ref = parse(raw);
   // The obsolete frozen-copy target is never a valid new bookmark, even if syntactically valid.

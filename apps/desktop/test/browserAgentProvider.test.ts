@@ -42,8 +42,9 @@ describe("agent-open deferred in-app grants", () => {
     await expect(f.provider.screenshot(guestId, { hiddenTarget: "reject" })).rejects.toMatchObject({ code: "target_hidden" });
     expect(f.visible).toHaveBeenCalledWith(guestId, expect.objectContaining({ hiddenTarget: "reject" }), expect.objectContaining({ hiddenTarget: "reject" }));
     expect(f.debug.attach).not.toHaveBeenCalled();
-    await expect(f.provider.snapshot(guestId)).rejects.toMatchObject({ code: "target_hidden" });
-    expect(f.visible).toHaveBeenNthCalledWith(2, guestId, expect.objectContaining({ hiddenTarget: "reveal" }), expect.any(Object));
+    // 0.1.3: a read of a hidden card is answered in the background, never by revealing it.
+    await expect(f.provider.snapshot(guestId)).resolves.toMatchObject({ pageGeneration: expect.any(Number) });
+    expect(f.visible).toHaveBeenNthCalledWith(2, guestId, expect.objectContaining({ hiddenTarget: "reject" }), expect.any(Object));
     f.provider.dispose();
   });
   it("creates only authority and the actual grantee label: no visibility, CDP, metrics or idle timer", async () => {
@@ -65,15 +66,22 @@ describe("agent-open deferred in-app grants", () => {
       await expect(f.provider.grant(guestId, settings, options as never)).rejects.toMatchObject({ code: "invalid_request" });
     expect(f.provider.controlView(guestId)?.grantee).toBe("Original"); f.provider.dispose();
   });
-  it("does not turn a hidden grant into permission to act, read or screenshot", async () => {
+  it("does not turn a hidden grant into permission to act or screenshot", async () => {
     const f = setup(); f.visible.mockRejectedValue(Object.assign(new Error(), { code: "target_hidden" }));
     await f.provider.grant(guestId, settings, { grantee: "Background", deferBinding: true });
-    for (const run of [() => f.provider.snapshot(guestId), () => f.provider.find(guestId, { text: "Message" }),
-      () => f.provider.act(guestId, "old-ref", "click"), () => f.provider.screenshot(guestId),
+    for (const run of [() => f.provider.act(guestId, "old-ref", "click"), () => f.provider.screenshot(guestId),
       () => f.provider.navigate(guestId, "about:blank")])
       await expect(run()).rejects.toMatchObject({ code: "target_hidden" });
-    expect(f.visible).toHaveBeenCalledTimes(5); expect(f.debug.attach).not.toHaveBeenCalled();
+    expect(f.visible).toHaveBeenCalledTimes(3); expect(f.debug.attach).not.toHaveBeenCalled();
     expect(f.debug.sendCommand).not.toHaveBeenCalled(); f.provider.dispose();
+  });
+  it("0.1.3: a minimized / hidden window still answers read and find, without revealing", async () => {
+    const f = setup(); f.visible.mockRejectedValue(Object.assign(new Error(), { code: "target_hidden" }));
+    await f.provider.grant(guestId, settings, { grantee: "Background", deferBinding: true });
+    await expect(f.provider.snapshot(guestId)).resolves.toMatchObject({ pageGeneration: expect.any(Number) });
+    await expect(f.provider.find(guestId, { text: "Message" })).resolves.toBeDefined();
+    for (const call of f.visible.mock.calls as unknown[][]) expect(call[1]).toMatchObject({ hiddenTarget: "reject" });
+    f.provider.dispose();
   });
   it("owner takeover pauses an unbound grant idempotently and requires explicit regrant", async () => {
     const f = setup(); await f.provider.grant(guestId, settings, { grantee: "Alpha", deferBinding: true });

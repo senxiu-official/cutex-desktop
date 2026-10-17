@@ -15,11 +15,27 @@ import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { cutexBuildText, settingsAnchorId } from "../../lib/settingsNav";
 import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
 import { useHostServiceInfo, useUpgradeAction } from "./hooks";
-import { applyRequest, intervalChoices, intervalWords, minutesOf, runActive } from "./model";
-import { CommandLine, HistorySection, RunSection, When } from "./RunView";
+import { applyRequest, intervalChoices, intervalWords, minutesOf, modeKeys, releaseNative, runActive, runDisplay } from "./model";
+import { CommandLine, HistorySection, RunNote, RunSection, When } from "./RunView";
 import { loadUpgradeRuns, loadUpgradeStatus, putUpgradeStatus, useHostUpgrade } from "./store";
 
-const RECENT_RUN_MS = 24 * 3600 * 1000;
+// The run whose "just finished" note the owner dismissed, per host (a per-viewer convenience: an
+// unavailable storage only means the note shows again).
+const DISMISSED_KEY = (hostId: string) => `cutex-desktop.backend-upgrade.dismissedRun.${hostId}`;
+function readDismissed(hostId: string): string | null {
+  try {
+    return localStorage.getItem(DISMISSED_KEY(hostId));
+  } catch {
+    return null;
+  }
+}
+function writeDismissed(hostId: string, runId: string): void {
+  try {
+    localStorage.setItem(DISMISSED_KEY(hostId), runId);
+  } catch {
+    // ignore: shown again next time
+  }
+}
 
 /** The check interval in words (model intervalWords): 每小时 / 每天 / 每 3 天 / 每周 … */
 function useIntervalText(): (hours: number) => string {
@@ -190,7 +206,7 @@ function ReleaseFacts({ available }: { available: UpgradeAvailable }) {
         )}
       </div>
       {notes && <p className="text-xs whitespace-pre-wrap text-muted">{notes}</p>}
-      <p className="text-xs text-subtle">{t(`backend-upgrade.impact.${available.mode}` as MessageKey)}</p>
+      <p className="text-xs text-subtle">{t(modeKeys(available.mode, available.nativeVersion ?? null).impact)}</p>
       {(available.nativeVersion || available.claudeRuntime) && (
         <p className="text-xs text-subtle">
           {available.nativeVersion && t("backend-upgrade.update.native", { version: available.nativeVersion })}
@@ -343,7 +359,7 @@ function UpdateSection({ hostId, status, busyRun }: { hostId: string; status: Up
               )}
             </>
           )}
-          <SettingRow label={t("backend-upgrade.apply.label", { release: target.release })} hint={t(`backend-upgrade.impact.${effectiveMode}` as MessageKey)}>
+          <SettingRow label={t("backend-upgrade.apply.label", { release: target.release })} hint={t(modeKeys(effectiveMode, releaseNative(status, target.release)).impact)}>
             <ArmedButton
               primary
               resetKey={`${target.release}|${confirmText}`}
@@ -504,12 +520,13 @@ export function BackendUpgradePage() {
   useEffect(() => {
     if (u.connected && u.supported && showHistory) void loadUpgradeRuns(hostId);
   }, [hostId, u.connected, u.supported, showHistory]);
-  const recent = useMemo(() => {
-    if (!run) return false;
-    if (runActive(run) || run.phase === "needs-owner") return true;
-    const end = Date.parse(run.finishedAt ?? run.createdAt);
-    return Number.isFinite(end) && Date.now() - end < RECENT_RUN_MS;
-  }, [run]);
+  const [dismissed, setDismissed] = useState<string | null>(() => readDismissed(hostId));
+  useEffect(() => setDismissed(readDismissed(hostId)), [hostId]);
+  const display = useMemo(() => runDisplay(run, Date.now(), dismissed), [run, dismissed]);
+  const dismiss = (runId: string) => {
+    writeDismissed(hostId, runId);
+    setDismissed(runId);
+  };
 
   if (!u.connected) {
     // Mid-upgrade the services restart: say so instead of a bare "not connected".
@@ -543,7 +560,8 @@ export function BackendUpgradePage() {
   return (
     <>
       {u.error && <ErrorNote>{u.error}</ErrorNote>}
-      {run && recent && <RunSection hostId={hostId} run={run} />}
+      {run && display === "card" && <RunSection hostId={hostId} run={run} native={releaseNative(status, run.toRelease)} />}
+      {run && display === "note" && <RunNote run={run} onDismiss={() => dismiss(run.runId)} />}
       <StatusSection status={status} info={info} onCheck={status.managed ? () => void doCheck() : undefined} checking={check.busy} checkError={check.error} />
       {!status.managed ? (
         <UnmanagedSection />

@@ -11,7 +11,7 @@ vi.mock("../src/renderer/src/lib/terms", () => ({
 vi.mock("../src/renderer/src/modules/react", () => ({ useModuleEnabled: () => state.module }));
 vi.mock("../src/renderer/src/lib/prefs", () => ({ useUiPrefs: () => ({ timelineIntro: state.display }) }));
 vi.mock("../src/renderer/src/lib/providerGreetings", () => ({ providerGreetings: () => ["Provider welcome, {name}"] }));
-vi.mock("../src/renderer/src/lib/launchArt", () => ({ LAUNCH_ART: {} }));
+vi.mock("../src/renderer/src/lib/launchArt", () => ({ useLaunchArtView: () => ({ art: {}, imported: {}, ready: true }) }));
 vi.mock("../src/renderer/src/components/LaunchPortraits", () => ({ LaunchPortraits: () => null }));
 
 import { LaunchIntro } from "../src/renderer/src/components/LaunchPage";

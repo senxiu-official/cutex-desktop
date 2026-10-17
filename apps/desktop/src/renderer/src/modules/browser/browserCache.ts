@@ -26,6 +26,9 @@ export function createBrowserCache() {
         pool: view.pool === "agent" ? "agent" : "owner",
         lease: view.lease ? Object.freeze({ ...view.lease }) : undefined,
         confirmedOpen: view.confirmedOpen,
+        sitePermission: view.sitePermission && ["waiting", "hidden", "timeout"].includes(view.sitePermission.state) && typeof view.sitePermission.origin === "string"
+          ? Object.freeze({ state: view.sitePermission.state, origin: browserTitle(view.sitePermission.origin), permissions: view.sitePermission.permissions.slice(0, 4) })
+          : undefined,
         control: view.control ? Object.freeze({ grantee: view.control.grantee, state: view.control.state, operating: view.control.operating }) : undefined,
       }));
       notify();

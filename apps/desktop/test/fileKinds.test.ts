@@ -1,7 +1,7 @@
 // File links in messages: icon kinds, image detection, thumbnail src and the thumbnail cache.
 import { describe, expect, it, vi } from "vitest";
 import { escapeFileHref, unescapeFileHref } from "../src/renderer/src/lib/workspace";
-import { extensionOf, fileKind, isThumbnailPath, THUMBNAIL_MAX_BYTES, thumbnailSrc } from "../src/renderer/src/lib/fileKinds";
+import { canonicalMime, extensionOf, fileKind, imageMimeFor, isGenericMime, isThumbnailPath, sniffImageMime, THUMBNAIL_MAX_BYTES, thumbnailSrc } from "../src/renderer/src/lib/fileKinds";
 import { loadThumbnail } from "../src/renderer/src/lib/fileThumbnails";
 import type { FsFile } from "../src/shared/ipc";
 
@@ -53,7 +53,7 @@ describe("thumbnailSrc", () => {
   it("refuses truncated, oversized, non-image and malformed bodies", () => {
     expect(thumbnailSrc(file({ truncated: true }))).toBeNull();
     expect(thumbnailSrc(file({ size: THUMBNAIL_MAX_BYTES + 1 }))).toBeNull();
-    expect(thumbnailSrc(file({ mime: "application/octet-stream" }))).toBeNull();
+    expect(thumbnailSrc(file({ mime: "application/octet-stream", content: "AAAAAAAAAAA=" }))).toBeNull();
     expect(thumbnailSrc(file({ mime: "image/x-icon" }))).toBeNull();
     expect(thumbnailSrc(file({ content: "not base64!" }))).toBeNull();
     expect(thumbnailSrc(file({ content: "" }))).toBeNull();
@@ -61,6 +61,31 @@ describe("thumbnailSrc", () => {
     expect(thumbnailSrc(file({ encoding: "utf8", mime: "image/svg+xml", content: "not an svg" }))).toBeNull();
     // A text body labelled as png is not trusted as an image.
     expect(thumbnailSrc(file({ encoding: "utf8", content: "<svg></svg>" }))).toBeNull();
+  });
+});
+
+describe("thumbnailSrc: aliases and generic types (artifacts stored by older cutex)", () => {
+  const JPEG = "/9j/4AAQSkZJRgABAQ==";
+  it("accepts common aliases under their standard type", () => {
+    expect(thumbnailSrc(file({ mime: "image/jpg", content: JPEG }))).toBe(`data:image/jpeg;base64,${JPEG}`);
+    expect(thumbnailSrc(file({ mime: "IMAGE/PJPEG; q=1", content: JPEG }))).toBe(`data:image/jpeg;base64,${JPEG}`);
+    expect(thumbnailSrc(file({ mime: "image/x-png" }))).toBe("data:image/png;base64,iVBORw0KGgo=");
+    expect(canonicalMime("image/x-ms-bmp")).toBe("image/bmp");
+  });
+  it("a generic type takes the name's extension (Windows or POSIX path), else the bytes' signature", () => {
+    expect(thumbnailSrc(file({ mime: "application/octet-stream", content: JPEG }), "C:\\w\\photo.JPG")).toBe(`data:image/jpeg;base64,${JPEG}`);
+    expect(thumbnailSrc(file({ mime: "application/octet-stream", content: JPEG }), "Holiday photo")).toBe(`data:image/jpeg;base64,${JPEG}`);
+    expect(thumbnailSrc(file({ mime: "text/plain" }), "/w/fig")).toBe("data:image/png;base64,iVBORw0KGgo=");
+    expect(thumbnailSrc(file({ mime: "", content: "R0lGODlhAQABAA==" }))).toBe("data:image/gif;base64,R0lGODlhAQABAA==");
+    expect(thumbnailSrc(file({ encoding: "utf8", mime: "text/plain", content: '<svg xmlns="http://www.w3.org/2000/svg"/>' }), "logo.svg")?.startsWith("data:image/svg+xml;")).toBe(true);
+    // A specific non-image type is never overridden by the bytes.
+    expect(thumbnailSrc(file({ mime: "application/pdf" }))).toBeNull();
+    expect(imageMimeFor("application/octet-stream", "D:\\out\\x.jpeg")).toBe("image/jpeg");
+    expect(imageMimeFor("application/pdf", "x.png")).toBe("application/pdf");
+    expect(sniffImageMime("UklGRhAAAABXRUJQVlA4IA==")).toBe("image/webp");
+    expect(sniffImageMime("JVBERi0xLjQ=")).toBeNull();
+    expect(isGenericMime("Application/Octet-Stream")).toBe(true);
+    expect(isGenericMime("image/jpeg")).toBe(false);
   });
 });
 

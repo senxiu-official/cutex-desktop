@@ -7,7 +7,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Copy, Plus, X } from "lucide-react";
 import { CLAUDE_KEY_ENVS, type ClaudeAccount, type ClaudeAccountKind, type ClaudeKeyEnv } from "../../../../shared/claudeAccounts";
-import { Button, IconButton, Segmented, Select, SettingRow, TextArea, TextInput } from "../../components/settings/Form";
+import { Button, Card, IconButton, Segmented, Select, SettingRow, TextArea, TextInput } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { useOverlayState } from "../../lib/contextMenu";
 import { useTrackOverlay } from "../../lib/openOverlays";
@@ -230,7 +230,7 @@ export function AddForm({ kind, onCancel, onCreated, dialog }: { kind: ClaudeAcc
   };
   const keyEnvLabel: Record<ClaudeKeyEnv, MessageKey> = { ANTHROPIC_API_KEY: "claude-accounts.form.keyEnvApiKey", ANTHROPIC_AUTH_TOKEN: "claude-accounts.form.keyEnvAuthToken" };
   return (
-    <div className={dialog ? "@container px-5 pt-1" : "@container -mx-4 border-b border-border bg-surface-2/40 px-4 pt-1"}>
+    <Card className={dialog ? "px-5 pt-1" : "-mx-4 border-b border-border bg-surface-2/40 px-4 pt-1"}>
       <SettingRow label={t("claude-accounts.form.label")} hint={t(kind === "api" ? "claude-accounts.form.apiNote" : "claude-accounts.form.subscriptionNote")}>
         <TextInput
           autoFocus
@@ -267,7 +267,7 @@ export function AddForm({ kind, onCancel, onCreated, dialog }: { kind: ClaudeAcc
         </Button>
         {!dialog && <Button onClick={onCancel}>{t("dialog.cancel")}</Button>}
       </div>
-    </div>
+    </Card>
   );
 }
 

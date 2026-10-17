@@ -44,8 +44,9 @@ describe("browser capture effect initialization diagnostics", () => {
     mocks.install.mockReturnValueOnce(off);
     const f = render(guest);
     expect(f.failed).not.toHaveBeenCalled();
-    expect(mocks.install).toHaveBeenCalledExactlyOnceWith(mocks.layer, guest, (mocks.layer as { ownerDocument: unknown }).ownerDocument,
-      expect.any(Function), expect.any(Function));
+    expect(mocks.install).toHaveBeenCalledExactlyOnceWith(mocks.layer, guest, (mocks.layer as { ownerDocument: unknown }).ownerDocument, guestId);
+    // Co-control: an input-transparent marker, never a focusable shield over the page.
+    expect(f.element.props.className).toContain("pointer-events-none"); expect(f.element.props.tabIndex).toBeUndefined();
     expect(f.cleanup).toBe(off); f.cleanup?.(); expect(off).toHaveBeenCalledOnce();
   });
   it("reports installation errors while retaining an unready capture layer", () => {

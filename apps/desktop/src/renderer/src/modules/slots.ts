@@ -679,6 +679,7 @@ export interface CodeBlockActionProps extends CodeBlockMatch {
 export interface RefActionItem extends SlotItemBase {
   // default unavailable "hide"
   kinds?: readonly string[]; // ref kinds this applies to; omitted = all
+  excludeKinds?: readonly string[]; // ref kinds this never applies to (with `kinds` omitted: all but these)
   icon: Icon;
   titleKey: MessageKey;
   /** Live state for the current ref, e.g. "already bookmarked" (filled icon, other title). */

@@ -14,6 +14,9 @@ import { Button, EmptyState, ErrorNote, LinkRow, Loading, Notice, Section, Segme
 import { ThreadDefaultRows } from "./ThreadDefaults";
 import { useTargetApi, useTargetFeatures, useTargetHostId, useTargetSidebar, useTargetIsFocus } from "../../lib/targetHost";
 import { useOrderedProfiles } from "../../lib/profileOrder";
+import { useHostPlatform } from "../../lib/codeBlockActions";
+import { WINDOWS_SANDBOX_FEATURE } from "../../../../shared/windowsSandbox";
+import { WindowsSandboxSection } from "../WindowsSandboxNotice";
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -40,6 +43,8 @@ export function DefaultsPage() {
   const threads = useThreadDefaults();
   const profiles = useProfiles();
   const focus = useApp((s) => s.settingsFocus);
+  const windowsHost = useHostPlatform(useTargetHostId()) === "windows";
+  const windowsSandbox = useTargetFeatures().has(WINDOWS_SANDBOX_FEATURE);
   // openSettings("defaults", { anchor: "quickWork" }) scrolls to the 快速启动 section.
   useEffect(() => {
     if (!focus?.anchor || !settings) return;
@@ -67,6 +72,7 @@ export function DefaultsPage() {
         </SettingRow>
         {threads.state && <ThreadDefaultRows kind="agent" current={threads.state.current.agent} builtin={threads.state.builtin.agent} onPatch={(f) => void threads.patch("agent", f)} />}
       </Section>
+      {windowsHost && <WindowsSandboxSection supported={windowsSandbox} />}
       <QuickWorkSection profiles={names} quickChatDefaultProfile={settings.quickChatDefaultProfile ?? null} onProfile={(v) => void patch({ quickChatDefaultProfile: v })} threads={threads} />
       <ThreadTitleSection />
     </>

@@ -20,6 +20,7 @@ const HANDOFF = "af-0a1b2c3d4e5f60718293a4b5c6d7e8f9";
 const DRAFT = "af-d4a7b1e9c3f5082e6a4d1c7b9e3f5a20";
 const ACCEPT = "af-7c3e9a1b5d2f4086e1a9c7b3d5f2e480";
 const DOODLE = "af-7d00d1e0a1b2c3d4e5f60718293a4b5c";
+const SUMMARY_PDF = "af-9a8b7c6d5e4f30211203f4e5d6c7b8a9";
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const bytes = (text: string) => new TextEncoder().encode(text).length;
@@ -75,6 +76,15 @@ const report = (n: number) =>
     "## Findings",
     "",
     n >= 2 ? "The dose effect is stable after the exclusion; power at n = 400 is 0.86." : "The dose effect is positive; power at n = 400 is about 0.83.",
+    "",
+    "- **Dose**: positive and stable across sites.",
+    "- **Age**: a small negative effect.",
+    "",
+    "![power curve](figures/power-curve.svg)",
+    "",
+    "```r",
+    "glmer(response ~ dose + age + (1 | site), family = binomial)",
+    "```",
     ...(n >= 3 ? ["", "_Owner: wording of the findings checked; see table 2 for the per-site numbers._"] : []),
     ...(n >= 4 ? ["", "## Section 2: sensitivity", "", "Dropping site C moves the dose estimate by less than 0.02."] : []),
     "",
@@ -142,7 +152,36 @@ const DRAFT_TEXT = "# Old draft\n\nSuperseded by reports/regression.md.\n";
 
 interface Stored {
   summary: Omit<ArtifactSummary, "latest" | "latestVersion">;
-  versions: (ArtifactVersion & { text: string })[]; // oldest first
+  versions: MockVersion[]; // oldest first
+}
+
+/** `b64`: `text` is the base64 of a binary version (a PDF), served as base64 windows. */
+type MockVersion = ArtifactVersion & { text: string; b64?: true };
+
+/** A one-page PDF (Helvetica, ASCII) as base64, built here for the PDF preview of an artifact. */
+function tinyPdf(lines: string[]): string {
+  const ops = lines.flatMap((l, i) => [...(i ? ["/F1 12 Tf", "0 -24 Td"] : []), `(${l}) Tj`]);
+  const stream = ["BT", "/F1 20 Tf", "72 720 Td", ...ops, "ET", "0.39 0.4 0.95 rg", "72 520 300 120 re f"].join("\n");
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ];
+  let out = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objs.forEach((o, i) => {
+    offsets.push(out.length);
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return btoa(out);
+}
+
+function binaryVersion(v: ArtifactVersion & { text: string }): MockVersion {
+  return { ...v, b64: true, bytes: atob(v.text).length };
 }
 
 function version(artifactId: string, n: number, text: string, mediaType: string, path: string, producer: ArtifactProducer, at: string, extra: Partial<ArtifactVersion> = {}): ArtifactVersion & { text: string } {
@@ -182,12 +221,15 @@ function seed(): Map<string, Stored> {
     ]),
     make(HANDOFF, "handoff/notes.md", "handoff", [version(HANDOFF, 1, HANDOFF_TEXT, "text/markdown", "handoff/notes.md", auto("unknown", []), ago(8))]),
     make(DOODLE, "figures/dose-response.html", "figure", [version(DOODLE, 1, doodle(1), "text/html", "figures/dose-response.html", writer("demo-t10"), ago(3), { note: "interactive sketch" })]),
+    make(SUMMARY_PDF, "reports/dose-response-summary.pdf", "report", [
+      binaryVersion(version(SUMMARY_PDF, 1, tinyPdf(["Dose-response summary", "Generated in the browser preview (mock artifact).", "Pooled slope 0.42 per mg; see table2.csv."]), "application/pdf", "reports/dose-response-summary.pdf", writer("demo-t9"), ago(20), { note: "PDF export of the report" })),
+    ]),
     make(ACCEPT, "reviews/a1-acceptance.txt", "report", [version(ACCEPT, 1, ACCEPT_TEXT, "text/plain", "reviews/a1-acceptance.txt", writer("demo-t9"), ago(23), { note: "A1 tail sensitivity Director acceptance" })]),
     make(DRAFT, "reports/old-draft.md", "report", [version(DRAFT, 1, DRAFT_TEXT, "text/markdown", "reports/old-draft.md", writer("demo-t4"), ago(300))], { archivedAt: ago(100) }),
   ]);
 }
 
-const strip = ({ text: _text, ...v }: ArtifactVersion & { text: string }): ArtifactVersion => v;
+const strip = ({ text: _text, b64: _b64, ...v }: MockVersion): ArtifactVersion => v;
 const summaryOf = (s: Stored): ArtifactSummary => ({ ...s.summary, latestVersion: s.versions.length, latest: strip(s.versions[s.versions.length - 1]!) });
 
 /** A small unified diff (LCS over lines; one hunk) for the mock's diff route. */
@@ -364,6 +406,11 @@ function storeApi(store: Map<string, Stored>, home: ArtifactScope, homeSessions:
       if (!v) return null;
       const offset = opts?.offset ?? 0;
       const max = opts?.maxBytes ?? 262_144;
+      if (v.b64) {
+        const bin = atob(v.text);
+        const part = bin.slice(offset, offset + max);
+        return { version: v.version, encoding: "base64", content: btoa(part), offset, totalBytes: bin.length, truncated: offset + part.length < bin.length, mediaType: v.mediaType, sha256: v.sha256, externalChanged: null };
+      }
       const content = v.text.slice(offset, offset + max);
       return { version: v.version, encoding: "utf8", content, offset, totalBytes: v.bytes, truncated: offset + content.length < v.text.length, mediaType: v.mediaType, sha256: v.sha256, externalChanged: v.storage === "external" ? false : null };
     },

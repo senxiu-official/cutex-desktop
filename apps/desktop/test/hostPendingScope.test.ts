@@ -386,6 +386,54 @@ describe("pending operations retain their host and run", () => {
     expect(store.getState().creatingChat).toBe(true);
     if (stage !== "submit") expect(submit).not.toHaveBeenCalled();
   });
+  it.each([true, false])("a quick chat in 自动 gets the auto reviewer (cutex takes it in launch: %s)", async (supported) => {
+    const { emptyPendingChat } = await import("../src/renderer/src/lib/pendingChat");
+    mock.api.createHumanSession.mockResolvedValue({ cutexSessionId: "new" });
+    const expectApprovalsReviewer = vi.fn();
+    store.setState({
+      features: new Set(supported ? ["launch-approvals-reviewer"] : []),
+      pendingChat: { ...emptyPendingChat(null), launch: { sandbox: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review" }, permissionMode: "auto", drafts: [{ text: "hi", images: [], skills: [] }] },
+      select: vi.fn(async () => {}),
+      submit: vi.fn(async () => null),
+      refreshHostSidebar: vi.fn(async () => {}),
+      expectApprovalsReviewer,
+    });
+    store.getState().retryPendingChat();
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    const sent = (mock.api.createHumanSession.mock.calls[0] as unknown as [{ launch: Record<string, unknown> }])[0].launch;
+    if (supported) {
+      expect(sent).toEqual({ sandbox: "workspace-write", approvalPolicy: "on-request", approvalsReviewer: "auto_review" });
+      expect(expectApprovalsReviewer).not.toHaveBeenCalled();
+    } else {
+      // An older cutex refuses unknown launch fields: set after creation instead.
+      expect(sent).toEqual({ sandbox: "workspace-write", approvalPolicy: "on-request" });
+      expect(expectApprovalsReviewer).toHaveBeenCalledWith("new", "local", "auto_review");
+    }
+  });
+
+  it("an expected reviewer is set once the new thread loads live, then forgotten", async () => {
+    const timeline = { turns: [], data: [] };
+    mock.api.bootstrap.mockResolvedValue({
+      native: { result: { thread: { id: "thread-new", turns: [] } } },
+      cutexState: { pendingServerRequests: [], runtime: { runtimeGeneration: 1 }, userInputQueue: [], agentBusMessages: [], agentBusSentMessages: [], ownerNotifications: [] },
+      checkpoint: { streamId: "s", cursor: 0 },
+      historyPage: null,
+      ...timeline,
+    });
+    mock.api.updateThreadSettings.mockResolvedValue(undefined);
+    mock.api.subscribe.mockResolvedValue(undefined);
+    mock.api.unsubscribe.mockResolvedValue(undefined);
+    store.getState().expectApprovalsReviewer("fresh", "local", "auto_review");
+    await store.getState().select("fresh", "local");
+    for (let i = 0; i < 40; i++) await Promise.resolve();
+    expect(mock.api.updateThreadSettings).toHaveBeenCalledWith("fresh", "thread-new", { approvalsReviewer: "auto_review" });
+    mock.api.updateThreadSettings.mockClear();
+    await store.getState().reloadSession("fresh");
+    for (let i = 0; i < 40; i++) await Promise.resolve();
+    expect(mock.api.bootstrap).toHaveBeenCalledTimes(2);
+    expect(mock.api.updateThreadSettings).not.toHaveBeenCalled();
+  });
+
   it("completes same-host creation and drafts appended during creation, without duplicating the create", async () => {
     const create = deferred<{
       cutexSessionId: string;

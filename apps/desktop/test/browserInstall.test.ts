@@ -16,7 +16,13 @@ const electron = vi.hoisted(() => ({
   packaged: false,
   proxies: [] as any[],
   startProxy: vi.fn(),
+  messageBox: vi.fn(async (..._args: any[]) => ({ response: 1, checkboxChecked: false })),
 }));
+vi.mock("../src/main/browser/sitePermissions", async importOriginal => {
+  const actual = await importOriginal<typeof import("../src/main/browser/sitePermissions")>();
+  // In-memory store: tests never write browser-site-permissions.json under the cwd.
+  return { ...actual, BrowserSitePermissionStore: class extends actual.BrowserSitePermissionStore { constructor() { super(null); } } };
+});
 vi.mock("../src/main/browser/externalPages", async importOriginal => {
   const actual = await importOriginal<typeof import("../src/main/browser/externalPages")>();
   // In-memory store (default on): tests never write a browser-external.json under the cwd.
@@ -29,6 +35,7 @@ vi.mock("../src/main/browser/tabIdentity", async importOriginal => {
 });
 vi.mock("electron", () => ({
   BrowserWindow: electron.nativeWindows,
+  dialog: { showMessageBox: electron.messageBox },
   ipcMain: {
     handle: (name: string, handler: (...args: any[]) => Promise<any>) => { electron.handlers.set(name, handler); },
     removeHandler: (name: string) => { electron.handlers.delete(name); },
@@ -51,6 +58,7 @@ vi.mock("electron", () => ({
   },
 }));
 
+function sameOrigin(url: string): string { const parsed = new URL(url); return `${parsed.protocol.replace(/^ws/, "http")}//${parsed.host}`; }
 class SessionMock extends EventEmitter {
   setProxy = vi.fn(async (_options: unknown) => {});
   closeAllConnections = vi.fn(async () => {});
@@ -64,10 +72,11 @@ class SessionMock extends EventEmitter {
     onBeforeRequest: (_filter: unknown, fn: SessionMock["before"]) => { this.before = fn; },
     onHeadersReceived: (_filter: unknown, fn: SessionMock["headers"]) => { this.headers = fn; },
   };
-  denied(webContentsId: number, url = "http://localhost:26111/", resourceType = "mainFrame"): boolean {
+  /** initiator: Electron's initiatorOrigin. Default = a same-origin subresource / browser-started main frame. */
+  denied(webContentsId: number, url = "http://localhost:26180/", resourceType = "mainFrame", initiator: string | null = resourceType === "mainFrame" ? null : sameOrigin(url)): boolean {
     const result: { cancel?: boolean }[] = [];
     if (!this.before) throw new Error("Session was not configured");
-    this.before({ webContentsId, url, resourceType }, value => result.push(value));
+    this.before({ webContentsId, url, resourceType, ...(initiator === null ? {} : { initiatorOrigin: initiator }) }, value => result.push(value));
     expect(result).toHaveLength(1);
     return result[0]!.cancel === true;
   }
@@ -137,7 +146,9 @@ function fixture(session = new SessionMock(), permissiveAppSender = false) {
   const conns = new Map([["local", { routingEpoch: "epoch-a", daemon }]]);
   const hosts = { connection: (hostId: string) => conns.get(hostId), focus: () => "local",
     state: () => ({ hosts: [...conns.keys()].map(id => ({ id, kind: id === "local" ? "local" : "dev-direct" })) }) };
-  installBrowser(Object.assign(new EventEmitter(), { webContents: owner, isDestroyed: () => owner.dead, isVisible: () => true, isMinimized: () => false, isFullScreen: () => false, setFullScreen: vi.fn() }) as unknown as BrowserWindow,
+  const windowState = { visible: true, focused: true, flashFrame: vi.fn() };
+  installBrowser(Object.assign(new EventEmitter(), { webContents: owner, isDestroyed: () => owner.dead, isVisible: () => windowState.visible, isMinimized: () => false,
+    isFocused: () => windowState.focused, flashFrame: windowState.flashFrame, isFullScreen: () => false, setFullScreen: vi.fn() }) as unknown as BrowserWindow,
     () => hosts as unknown as HostManager,
     event => permissiveAppSender || (event.sender === owner as unknown && event.senderFrame === owner.mainFrame as unknown),
     (_name, event) => { events.push(event); });
@@ -147,7 +158,7 @@ function fixture(session = new SessionMock(), permissiveAppSender = false) {
     return handler({ sender: options.sender ?? owner, senderFrame: Object.hasOwn(options, "frame") ? options.frame : owner.mainFrame } as unknown as IpcMainInvokeEvent,
       raw, { hostId: options.hostId ?? "local", epoch: options.epoch ?? conns.get("local")?.routingEpoch ?? "" });
   };
-  const reserve = (tabKey = "side-one", url = "http://localhost:26111/") => ipc({ op: "open", tabKey, url }) as Promise<BrowserTabMount>;
+  const reserve = (tabKey = "side-one", url = "http://localhost:26180/") => ipc({ op: "open", tabKey, url }) as Promise<BrowserTabMount>;
   const willAttach = (mount: BrowserTabMount, overrides: Record<string, unknown> = {}) => {
     const event = { sender: owner, preventDefault: vi.fn() };
     const params = { partition: mount.partition, src: mount.src, ...overrides };
@@ -161,16 +172,16 @@ function fixture(session = new SessionMock(), permissiveAppSender = false) {
     owner.emit("did-attach-webview", {}, guest);
     return guest;
   };
-  const receipt = (mount: BrowserTabMount, guest: ContentsMock, url = "http://localhost:26111/") =>
+  const receipt = (mount: BrowserTabMount, guest: ContentsMock, url = "http://localhost:26180/") =>
     ipc({ op: "open", tabKey: mount.tabKey, url, receipt: { src: mount.src, webContentsId: guest.id } });
-  const mount = async (tabKey = "side-one", url = "http://localhost:26111/") => {
+  const mount = async (tabKey = "side-one", url = "http://localhost:26180/") => {
     const reserved = await reserve(tabKey, url);
     expect(willAttach(reserved).denied).toBe(false);
     const guest = didAttach(); await receipt(reserved, guest, url); await flush();
     return { reserved, guest };
   };
   cleanup.push(() => owner.close());
-  return { session, owner, events, request, client, daemon, conns, ipc, reserve, willAttach, didAttach, receipt, mount };
+  return { session, owner, events, request, client, daemon, conns, ipc, reserve, willAttach, didAttach, receipt, mount, windowState };
 }
 beforeEach(() => {
   electron.handlers.clear(); electron.sessions.clear(); electron.appListeners.clear(); electron.nativeWindows.mockClear(); electron.packaged = false;
@@ -266,8 +277,8 @@ describe("installed browser owner IPC / Electron boundary", () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
     expect(await f.ipc({ op: "externalPages", enabled: false })).toEqual({ enabled: false, stored: false });
     const { guest } = await f.mount();
-    await expect(f.reserve("external", "https://example.test/")).rejects.toThrow("external_pages_unavailable");
-    await expect(f.ipc({ op: "navigate", tabKey: "side-one", url: "https://example.test/" })).rejects.toThrow("external_pages_unavailable");
+    await expect(f.reserve("external", "https://example.test/")).rejects.toThrow("external_pages_off");
+    await expect(f.ipc({ op: "navigate", tabKey: "side-one", url: "https://example.test/" })).rejects.toThrow("external_pages_off");
     expect(f.session.denied(guest.id, "https://example.test/resource", "script")).toBe(true);
     expect(electron.startProxy).not.toHaveBeenCalled(); expect(f.session.closeAllConnections).not.toHaveBeenCalled();
     expect(await f.ipc({ op: "externalPages", enabled: true })).toEqual({ enabled: true, stored: true });
@@ -285,7 +296,10 @@ describe("installed browser owner IPC / Electron boundary", () => {
     await f.ipc({ op: "externalPages", enabled: false });
     expect(proxy.close).toHaveBeenCalledOnce();
     expect(f.session.denied(guest.id, "https://example.test/resource", "script")).toBe(true);
-    expect(f.session.denied(guest.id, "http://localhost:26111/", "mainFrame")).toBe(false);
+    // Loopback is reachable only once main itself navigated this tab there (owner address bar).
+    expect(f.session.denied(guest.id, "http://localhost:26180/", "mainFrame")).toBe(true);
+    await f.ipc({ op: "navigate", tabKey: "side-one", url: "http://localhost:26180/" });
+    expect(f.session.denied(guest.id, "http://localhost:26180/", "mainFrame")).toBe(false);
     await flush(); expect(f.session.setProxy).toHaveBeenLastCalledWith(expect.objectContaining({ proxyRules: "socks5://127.0.0.1:9" }));
     const info = { isProxy: true, host: "127.0.0.1", port: proxy.port, scheme: "basic", realm: proxy.credentials.realm }, callback = vi.fn();
     for (const listener of electron.appListeners.get("login") ?? []) listener({ preventDefault() {} }, guest, {}, info, callback);
@@ -385,7 +399,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     await expect(f.reserve()).rejects.toThrow("module_disabled");
     await f.ipc({ op: "setEnabled", enabled: true });
     const mounted = await f.mount();
-    expect(mounted.guest.loads).toEqual(["http://localhost:26111/"]);
+    expect(mounted.guest.loads).toEqual(["http://localhost:26180/"]);
     await expect(f.ipc({ op: "setEnabled", enabled: false }, { frame: {} })).rejects.toThrow("untrusted_sender");
     expect(f.session.denied(mounted.guest.id)).toBe(false);
   });
@@ -406,9 +420,9 @@ describe("installed browser owner IPC / Electron boundary", () => {
     const admitted = f.willAttach(reserved);
     expect(admitted.denied).toBe(false); expect(admitted.params.src).toBe("about:blank");
     expect(admitted.preferences).toMatchObject({ nodeIntegration: false, contextIsolation: true, sandbox: true });
-    await expect(f.ipc({ op: "open", tabKey: reserved.tabKey, url: "http://localhost:26111/",
+    await expect(f.ipc({ op: "open", tabKey: reserved.tabKey, url: "http://localhost:26180/",
       receipt: { src: "about:blank", webContentsId: guest.id } })).rejects.toMatchObject({ code: "invalid_request" });
-    await expect(f.ipc({ op: "open", tabKey: reserved.tabKey, url: "http://localhost:26111/",
+    await expect(f.ipc({ op: "open", tabKey: reserved.tabKey, url: "http://localhost:26180/",
       receipt: { src: reserved.src, webContentsId: guest.id } }, { frame: {} })).rejects.toThrow("untrusted_sender");
     expect(f.session.denied(guest.id)).toBe(true);
     await f.receipt(reserved, guest); await flush();
@@ -418,29 +432,29 @@ describe("installed browser owner IPC / Electron boundary", () => {
   });
   it("binds concurrent same-partition mounts by receipt rather than did-attach arrival order", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
-    const a = await f.reserve("a", "http://localhost:26111/a"), b = await f.reserve("b", "http://localhost:26111/b");
+    const a = await f.reserve("a", "http://localhost:26180/a"), b = await f.reserve("b", "http://localhost:26180/b");
     expect(f.willAttach(a).denied).toBe(false); expect(f.willAttach(b).denied).toBe(false);
     const gb = f.didAttach(), ga = f.didAttach();
-    await f.receipt(a, ga, "http://localhost:26111/a"); await f.receipt(b, gb, "http://localhost:26111/b"); await flush();
-    expect(ga.loads).toEqual(["http://localhost:26111/a"]); expect(gb.loads).toEqual(["http://localhost:26111/b"]);
+    await f.receipt(a, ga, "http://localhost:26180/a"); await f.receipt(b, gb, "http://localhost:26180/b"); await flush();
+    expect(ga.loads).toEqual(["http://localhost:26180/a"]); expect(gb.loads).toEqual(["http://localhost:26180/b"]);
   });
   it("denies client certificates before the first admitted network load and retains the guard on close", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
     const reserved = await f.reserve(), admission = f.willAttach(reserved);
     expect(admission.params.src).toBe("about:blank");
     const guest = f.didAttach();
-    expect(f.session.denied(guest.id, "https://localhost:26111/", "mainFrame")).toBe(true);
+    expect(f.session.denied(guest.id, "https://localhost:26180/", "mainFrame")).toBe(true);
     const originalLoad = guest.loadURL.bind(guest);
     vi.spyOn(guest, "loadURL").mockImplementation(async url => {
       expect(guest.listenerCount("select-client-certificate")).toBe(1);
       const event = { preventDefault: vi.fn() }, callback = vi.fn();
-      guest.emit("select-client-certificate", event, "https://localhost:26111/", [{ subjectName: "Private owner identity" }], callback);
+      guest.emit("select-client-certificate", event, "https://localhost:26180/", [{ subjectName: "Private owner identity" }], callback);
       expect(event.preventDefault).toHaveBeenCalledOnce();
       expect(callback.mock.calls).toEqual([[]]); // Never hand any OS certificate to the server.
       return originalLoad(url);
     });
     await f.receipt(reserved, guest); await flush();
-    expect(guest.loads).toEqual(["http://localhost:26111/"]);
+    expect(guest.loads).toEqual(["http://localhost:26180/"]);
     await f.ipc({ op: "close", tabKey: "side-one" });
     expect(guest.listenerCount("select-client-certificate")).toBe(1);
     expect(JSON.stringify(f.events)).not.toContain("Private owner identity");
@@ -456,7 +470,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     await expect(f.receipt(reserved, guest)).rejects.toMatchObject({ code: "invalid_request" });
     expect(guest.dead).toBe(true); expect(guest.loads).toEqual([]);
     expect(f.session.denied(guest.id)).toBe(true);
-    await expect(f.ipc({ op: "navigate", tabKey: "side-one", url: "http://localhost:26111/" })).rejects.toThrow("target_closed");
+    await expect(f.ipc({ op: "navigate", tabKey: "side-one", url: "http://localhost:26180/" })).rejects.toThrow("target_closed");
   });
   it.each(["missing-creation", "throwing-setter"])("closes a guest with %s instead of attaching without its early popup guard", async failure => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
@@ -477,25 +491,27 @@ describe("installed browser owner IPC / Electron boundary", () => {
     const guest = new ContentsMock(nextContentsId++, f.session); guest.hostWebContents = f.owner;
     for (const listener of electron.appListeners.get("web-contents-created") ?? []) listener({}, guest);
     expect(guest.setWindowOpenHandler).toHaveBeenCalledOnce();
-    expect(guest.popup("http://localhost:26111/before-admission")).toEqual({ action: "deny" });
+    expect(guest.popup("http://localhost:26180/before-admission")).toEqual({ action: "deny" });
     expect(f.events.filter(event => event.kind === "new-tab")).toHaveLength(0);
     f.didAttach(guest, false); await f.receipt(reserved, guest); await flush();
     expect(guest.setWindowOpenHandler).toHaveBeenCalledOnce(); // Receipt/hardening cannot replace the early handler.
-    expect(guest.popup("http://localhost:26111/no-input?token=secret", { userGesture: true })).toEqual({ action: "deny" });
+    expect(guest.popup("http://localhost:26180/no-input?token=secret", { userGesture: true })).toEqual({ action: "deny" });
     expect(f.events.filter(event => event.kind === "new-tab")).toHaveLength(0);
-    const diagnostic = f.events.at(-1);
+    const diagnostic = f.events.findLast(event => event.kind === "diagnostic");
     expect(diagnostic).toMatchObject({ kind: "diagnostic", popupDiscardReason: "no_owner_input" });
     expect(JSON.stringify(diagnostic)).not.toContain("secret");
+    // The owner hears about a page's own popup once (Chromium-style popup blocking).
+    expect(f.events.at(-1)).toMatchObject({ kind: "blocked", blocked: "popup" });
     guest.emit("before-mouse-event", {}, { type: "mouseDown" });
-    expect(guest.popup("http://localhost:26111/owner-link")).toEqual({ action: "deny" });
-    expect(guest.popup("http://localhost:26111/second-link")).toEqual({ action: "deny" });
-    expect(f.events.filter(event => event.kind === "new-tab")).toEqual([expect.objectContaining({ hostId: "local", newTabUrl: "http://localhost:26111/owner-link" })]);
+    expect(guest.popup("http://localhost:26180/owner-link")).toEqual({ action: "deny" });
+    expect(guest.popup("http://localhost:26180/second-link")).toEqual({ action: "deny" });
+    expect(f.events.filter(event => event.kind === "new-tab")).toEqual([expect.objectContaining({ hostId: "local", newTabUrl: "http://localhost:26180/owner-link" })]);
     guest.emit("before-input-event", {}, { type: "keyDown" });
-    expect(guest.popup("http://localhost:26111/rate-limited")).toEqual({ action: "deny" });
+    expect(guest.popup("http://localhost:26180/rate-limited")).toEqual({ action: "deny" });
     expect(f.events.at(-1)).toMatchObject({ kind: "diagnostic", popupDiscardReason: "rate_limited" });
     expect(f.events.filter(event => event.kind === "new-tab")).toHaveLength(1);
     await f.ipc({ op: "setEnabled", enabled: false });
-    expect(guest.popup("http://localhost:26111/after-disable")).toEqual({ action: "deny" });
+    expect(guest.popup("http://localhost:26180/after-disable")).toEqual({ action: "deny" });
     expect(f.events.filter(event => event.kind === "new-tab")).toHaveLength(1);
     expect(electron.nativeWindows).not.toHaveBeenCalled();
   });
@@ -509,7 +525,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     const wrongEmbedder = f.didAttach(); wrongEmbedder.hostWebContents = unknown;
     await expect(f.receipt(reserved, wrongEmbedder)).rejects.toMatchObject({ code: "invalid_request" });
     const guest = f.didAttach();
-    await expect(f.receipt(reserved, guest, "http://localhost:26111/other")).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(f.receipt(reserved, guest, "http://localhost:26180/other")).rejects.toMatchObject({ code: "invalid_request" });
     expect(guest.loads).toHaveLength(0); expect(f.session.denied(guest.id)).toBe(true);
   });
   it("module disable synchronously clears mounted, unbound and reserved guests and denies old tickets", async () => {
@@ -568,7 +584,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     expect(f.session.denied(guest.id)).toBe(false);
     f.conns.set("local", { routingEpoch: "epoch-b", daemon: { ...f.daemon, generation: 1 } });
     expect(f.session.denied(guest.id)).toBe(true); // No timer advance and no IPC call between replacement/request.
-    await expect(f.ipc({ op: "navigate", tabKey: "side-one", url: "http://localhost:26111/next" }, { epoch: "epoch-a" })).rejects.toThrow();
+    await expect(f.ipc({ op: "navigate", tabKey: "side-one", url: "http://localhost:26180/next" }, { epoch: "epoch-a" })).rejects.toThrow();
     await f.ipc({ op: "close", tabKey: "side-one" }, { epoch: "epoch-a" });
     expect(guest.dead).toBe(true);
   });
@@ -637,19 +653,19 @@ describe("installed browser owner IPC / Electron boundary", () => {
     expect(guest.dead).toBe(false); expect(service.guest.dead).toBe(false);
     expect(guest.debugger.detach).not.toHaveBeenCalled();
     expect(f.events.slice(eventCount).some(event => event.status === "closed")).toBe(false);
-    expect(f.session.denied(guest.id, "http://localhost:26111/next.js", "script")).toBe(false);
+    expect(f.session.denied(guest.id, "http://localhost:26180/next.js", "script")).toBe(false);
     expect(f.session.denied(service.guest.id, "http://docs.svc.localhost:26111/events", "xhr")).toBe(true);
     await expect(f.ipc({ op: "navigate", tabKey: "side-one", url: "cutex:service/docs/" })).rejects.toThrow("service_unavailable");
     await expect(f.ipc({ op: "reload", tabKey: "service" })).rejects.toThrow("service_unavailable");
     expect(f.request).toHaveBeenCalledTimes(daemonCalls);
     expect(f.willAttach(pending).denied).toBe(false);
     const waiting = f.didAttach(); await f.receipt(pending, waiting); await flush();
-    expect(waiting.dead).toBe(false); expect(waiting.loads).toEqual(["http://localhost:26111/"]);
+    expect(waiting.dead).toBe(false); expect(waiting.loads).toEqual(["http://localhost:26180/"]);
     const beforeCaps = f.daemon.capabilities.mock.calls.length;
     const offlineNew = await f.mount("new-local-tab");
     expect(offlineNew.guest.dead).toBe(false); expect(f.daemon.capabilities).toHaveBeenCalledTimes(beforeCaps);
-    await f.ipc({ op: "navigate", tabKey: "side-one", url: "http://localhost:26111/next#kept" });
-    expect(guest.getURL()).toBe("http://localhost:26111/next#kept");
+    await f.ipc({ op: "navigate", tabKey: "side-one", url: "http://localhost:26180/next#kept" });
+    expect(guest.getURL()).toBe("http://localhost:26180/next#kept");
     f.daemon.currentState = { kind: "connected" }; syncBrowserHosts();
     // N1: service traffic remains denied until the post-recovery capability read completes.
     expect(f.session.denied(service.guest.id, "http://docs.svc.localhost:26111/events", "xhr")).toBe(true);
@@ -670,7 +686,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     f.daemon.currentState = { kind: "unreachable" }; syncBrowserHosts();
     ticket.resolve({ hostLabel: "docs.svc.localhost", authPath: "/__cutex/auth?ticket=fixture-late&next=%2F" });
     await rejected; await flush();
-    expect(guest.dead).toBe(false); expect(guest.loads).toEqual(["http://localhost:26111/"]);
+    expect(guest.dead).toBe(false); expect(guest.loads).toEqual(["http://localhost:26180/"]);
     expect(f.request).toHaveBeenCalledWith("DELETE", "/v2/services/docs/lease/lease-docs");
   });
   it("learns service capabilities after an offline-first tab recovers without requiring another open", async () => {
@@ -695,25 +711,25 @@ describe("installed browser owner IPC / Electron boundary", () => {
     const rejected = expect(navigating).rejects.toThrow("target_closed");
     await until(() => f.daemon.capabilities.mock.calls.length === 1);
     if (action === "stop") await f.ipc({ op: "stop", tabKey: "side-one" });
-    else if (action === "navigate") await f.ipc({ op: "navigate", tabKey: "side-one", url: "http://localhost:26111/new" });
+    else if (action === "navigate") await f.ipc({ op: "navigate", tabKey: "side-one", url: "http://localhost:26180/new" });
     else await f.ipc({ op: "setEnabled", enabled: false });
     capabilities.resolve({ featureList: ["services-proxy", "services-lifetime"] });
     await rejected;
     expect(f.request).not.toHaveBeenCalled();
-    expect(guest.loads).toEqual(action === "navigate" ? ["http://localhost:26111/", "http://localhost:26111/new"] : ["http://localhost:26111/"]);
+    expect(guest.loads).toEqual(action === "navigate" ? ["http://localhost:26180/", "http://localhost:26180/new"] : ["http://localhost:26180/"]);
   });
   it("reload checks and reloads the live document without reconstructing its query or fragment from display state", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
-    const raw = "http://localhost:26111/form?zipcode=2000&author=owner&accessToken=private#section";
+    const raw = "http://localhost:26180/form?zipcode=2000&author=owner&accessToken=private#section";
     const { guest } = await f.mount("side-one", raw);
-    expect((await f.ipc({ op: "list" }))[0].url).toBe("http://localhost:26111/form?zipcode=2000&author=owner");
+    expect((await f.ipc({ op: "list" }))[0].url).toBe("http://localhost:26180/form?zipcode=2000&author=owner");
     await f.ipc({ op: "reload", tabKey: "side-one" });
     expect(guest.reload).toHaveBeenCalledOnce(); expect(guest.getURL()).toBe(raw);
     expect(guest.loads).toEqual([raw]);
     expect(JSON.stringify(f.events)).not.toContain("private");
-    for (const blocked of ["https://example.com/", "file:///private/test.html", "javascript:alert(1)"]) {
-      guest.url = blocked;
-      await expect(f.ipc({ op: "reload", tabKey: "side-one" })).rejects.toThrow("external_pages_unavailable");
+    for (const [blocked, code] of [["https://example.com/", "external_pages_off"], ["file:///private/test.html", "invalid_request"], ["javascript:alert(1)", "invalid_request"]]) {
+      guest.url = blocked!;
+      await expect(f.ipc({ op: "reload", tabKey: "side-one" })).rejects.toThrow(code);
     }
     expect(guest.reload).toHaveBeenCalledOnce();
   });
@@ -743,7 +759,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     expect(f.events.some(event => event.status === "pending")).toBe(false);
     const { guest } = await f.mount();
     expect(f.session.denied(guest.id)).toBe(false);
-    expect(guest.loads).toEqual(["http://localhost:26111/"]);
+    expect(guest.loads).toEqual(["http://localhost:26180/"]);
   });
   it("Stop cancels service ticket completion instead of starting a later navigation", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
@@ -757,7 +773,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     ticket.resolve({ hostLabel: "docs.svc.localhost", authPath: "/__cutex/auth?ticket=fixture-late&next=%2F" });
     await rejected; await flush();
     expect(guest.stop).toHaveBeenCalledOnce();
-    expect(guest.loads).toEqual(["http://localhost:26111/"]);
+    expect(guest.loads).toEqual(["http://localhost:26180/"]);
     expect(f.request).toHaveBeenCalledWith("DELETE", "/v2/services/docs/lease/lease-docs");
   });
   it("reauthenticates the currently displayed service path, not its original path", async () => {
@@ -775,7 +791,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     f.request.mockImplementation(async (_method, path) => path.endsWith("view-ticket") ? ticket.promise : { leaseId: "lease-docs" });
     const navigation = f.ipc({ op: "navigate", tabKey: "side-one", url: "cutex:service/docs/next" });
     await until(() => f.request.mock.calls.some(([, path]) => path.endsWith("view-ticket")));
-    expect(guest.getURL()).toBe("http://localhost:26111/"); // New navigation has not committed yet.
+    expect(guest.getURL()).toBe("http://localhost:26180/"); // New navigation has not committed yet.
     guest.emit("did-start-loading"); guest.emit("page-title-updated", {}, "Old document title"); guest.emit("did-stop-loading");
     expect(f.request.mock.calls.some(([method]) => method === "DELETE")).toBe(false);
     expect((await f.ipc({ op: "list" }))[0]).toMatchObject({ url: "cutex:service/docs/next" });
@@ -814,7 +830,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
     const { guest } = await f.mount("service", "cutex:service/docs/");
     const calls = f.request.mock.calls.length, loads = guest.loads.length;
-    f.session.response(guest, "http://localhost:26111/unrelated", 401, { "X-Cutex-Service-Auth": ["ticket-required"] });
+    f.session.response(guest, "http://localhost:26180/unrelated", 401, { "X-Cutex-Service-Auth": ["ticket-required"] });
     await flush();
     expect(f.request).toHaveBeenCalledTimes(calls); expect(guest.loads).toHaveLength(loads);
   });
@@ -833,7 +849,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     const { guest } = await replacing; await flush();
     expect(shared.denied(guest.id)).toBe(false);
     expect(shared.setProxy).toHaveBeenCalledTimes(2);
-    expect(guest.loads).toEqual(["http://localhost:26111/"]);
+    expect(guest.loads).toEqual(["http://localhost:26180/"]);
   });
   it("page redirects, iframe navigation and subresource egress cannot open external pages", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
@@ -843,8 +859,83 @@ describe("installed browser owner IPC / Electron boundary", () => {
       guest.emit(kind, event); expect(event.preventDefault).toHaveBeenCalledOnce();
     }
     expect(f.session.denied(guest.id, "https://example.com/script.js", "script")).toBe(true);
-    await expect(f.ipc({ op: "navigate", tabKey: "side-one", url: "https://example.com/" })).rejects.toThrow("external_pages_unavailable");
-    expect(guest.loads).toEqual(["http://localhost:26111/"]);
+    await expect(f.ipc({ op: "navigate", tabKey: "side-one", url: "https://example.com/" })).rejects.toThrow("external_pages_off");
+    expect(guest.loads).toEqual(["http://localhost:26180/"]);
+  });
+  it("0.1.3: the owner's own loopback dev server opens; the host's control ports never do", async () => {
+    const f = fixture(); (f.daemon as any).getSettings = vi.fn(async () => ({ agentBusEffectivePort: 26160, agentBusPort: null }));
+    await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount();
+    expect(guest.loads).toEqual(["http://localhost:26180/"]);
+    // The fixture's management endpoint is 127.0.0.1:26111; the bus port came from /v2/settings.
+    for (const url of ["http://127.0.0.1:26111/v2/health", "http://localhost:26111/", "http://[::1]:26160/"])
+      await expect(f.ipc({ op: "navigate", tabKey: "side-one", url })).rejects.toThrow("protected_endpoint");
+    await expect(f.reserve("other", "http://localhost:26160/")).rejects.toThrow("protected_endpoint");
+    await expect(f.ipc({ op: "navigate", tabKey: "side-one", url: "http://169.254.169.254/" })).rejects.toThrow("reserved_address");
+    expect(guest.loads).toEqual(["http://localhost:26180/"]);
+  });
+  it("0.1.3: pages reach only the loopback origins main admitted for their own tab, same-origin", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const first = await f.mount();
+    const second = await f.mount("side-two", "http://localhost:26190/");
+    expect(f.session.denied(first.guest.id, "http://localhost:26180/app.js", "script")).toBe(false);
+    expect(f.session.denied(first.guest.id, "ws://localhost:26180/hmr", "webSocket")).toBe(false);
+    // Another tab's admitted origin, another port, a foreign initiator, a control port: refused.
+    expect(f.session.denied(second.guest.id, "http://localhost:26180/app.js", "script")).toBe(true);
+    expect(f.session.denied(first.guest.id, "http://localhost:26181/", "xhr", "http://localhost:26180")).toBe(true);
+    expect(f.session.denied(first.guest.id, "http://localhost:26180/api", "xhr", "https://example.test")).toBe(true);
+    expect(f.session.denied(first.guest.id, "http://127.0.0.1:26111/v2/sessions", "xhr", "http://127.0.0.1:26111")).toBe(true);
+    // A page-initiated top-level jump to an unadmitted loopback port reports why, without the URL.
+    const before = f.events.length;
+    expect(f.session.denied(first.guest.id, "http://localhost:9222/json", "mainFrame", "http://localhost:26180")).toBe(true);
+    expect(f.events.slice(before).at(-1)).toMatchObject({ error: "private_address_blocked" });
+    expect(JSON.stringify(f.events.slice(before))).not.toContain("9222");
+    // Closing the tab drops its admission; a remount re-admits through main's own navigation.
+    await f.ipc({ op: "close", tabKey: "side-two" });
+    const again = await f.mount("side-two", "http://localhost:26190/");
+    expect(f.session.denied(again.guest.id, "http://localhost:26190/x.js", "script")).toBe(false);
+  });
+  it("0.1.3: a page navigation event to an unadmitted loopback port is refused with its reason", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount();
+    const event = { url: "http://localhost:5555/", isMainFrame: true, preventDefault: vi.fn() };
+    guest.emit("will-navigate", event); expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(f.events.at(-1)).toMatchObject({ error: "private_address_blocked" });
+    const same = { url: "http://localhost:26180/next", isMainFrame: true, preventDefault: vi.fn() };
+    guest.emit("will-navigate", same); expect(same.preventDefault).not.toHaveBeenCalled();
+  });
+  it("0.1.3: an owner-typed tailnet / LAN URL opens without a prompt (websites off), scoped to that tab and origin", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    expect((await f.ipc({ op: "externalPages" })).enabled).toBe(false);
+    const { guest } = await f.mount();
+    const other = await f.mount("side-two", "http://localhost:26190/");
+    await f.ipc({ op: "navigate", tabKey: "side-one", url: "http://100.64.0.27:8765/" });
+    expect(guest.loads.at(-1)).toBe("http://100.64.0.27:8765/");
+    // N2 runs for this LAN authority alone (websites stay off) and the partition uses it.
+    expect(electron.startProxy).toHaveBeenCalledOnce();
+    const options = electron.startProxy.mock.calls[0]![0] as { lanAllowed(h: string, p: number): boolean; publicAllowed(): boolean };
+    expect(options.lanAllowed("100.64.0.27", 8765)).toBe(true); expect(options.lanAllowed("100.64.0.27", 9000)).toBe(false);
+    expect(options.publicAllowed()).toBe(false);
+    expect(f.session.setProxy).toHaveBeenLastCalledWith(expect.objectContaining({ proxyRules: `http://127.0.0.1:${electron.proxies[0].port}` }));
+    const own = "http://100.64.0.27:8765";
+    expect(f.session.denied(guest.id, `${own}/api`, "xhr")).toBe(false);
+    expect(f.session.denied(guest.id, `${own}/`, "mainFrame")).toBe(false);
+    // Same partition, other tab / other origin / other LAN target: refused.
+    expect(f.session.denied(other.guest.id, `${own}/api`, "xhr", "http://localhost:26190")).toBe(true);
+    expect(f.session.denied(guest.id, `${own}/api`, "xhr", "https://example.test")).toBe(true);
+    expect(f.session.denied(guest.id, "http://10.0.0.10/", "xhr", own)).toBe(true);
+    expect(f.session.denied(guest.id, "http://10.0.0.10/", "mainFrame", own)).toBe(true);
+    // Websites stay off for public targets even in this tab.
+    await expect(f.ipc({ op: "navigate", tabKey: "side-one", url: "https://example.test/" })).rejects.toThrow("external_pages_off");
+    await f.ipc({ op: "close", tabKey: "side-one" });
+    expect(options.lanAllowed("100.64.0.27", 8765)).toBe(false);
+  });
+  it("0.1.3: an owner LAN URL opens a fresh tab too; reserved and control addresses never", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("lan", "http://10.0.0.11:8080/");
+    expect(guest.loads).toEqual(["http://10.0.0.11:8080/"]);
+    expect(f.session.denied(guest.id, "http://10.0.0.11:8080/app.js", "script")).toBe(false);
+    await expect(f.reserve("meta", "http://169.254.169.254/")).rejects.toThrow("reserved_address");
   });
   it("emits host-tagged lifecycle views with opaque guest IDs, not numeric Electron IDs", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
@@ -855,5 +946,106 @@ describe("installed browser owner IPC / Electron boundary", () => {
     expect(f.events.every(event => event.hostId === "local" && event.epoch === "epoch-a")).toBe(true);
     await f.ipc({ op: "close", tabKey: "side-one" });
     expect(f.events.at(-1)).toMatchObject({ status: "closed", guestId: reserved.guestId, epoch: "epoch-a" });
+  });
+});
+
+describe("installed controlled tabs, downloads and site permissions (0.1.3)", () => {
+  it("an owner-clicked POST popup becomes an owner tab that replays the exact URL and body once", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "http://localhost:26180/");
+    guest.emit("before-mouse-event", {}, { type: "mouseDown" });
+    expect(guest.popup("http://localhost:26180/submit?token=secret", { postBody: { contentType: "application/x-www-form-urlencoded", data: [{ type: "rawData", bytes: Buffer.from("q=1") }] } }))
+      .toEqual({ action: "deny" });
+    const event = f.events.findLast(item => item.kind === "new-tab")!;
+    expect(event).toMatchObject({ pool: "owner", newTabUrl: "http://localhost:26180/submit" });
+    expect(event.newTabKey).toMatch(/^[0-9a-f-]{36}$/); expect(JSON.stringify(event)).not.toContain("secret");
+    const load = vi.spyOn(ContentsMock.prototype, "loadURL");
+    try {
+      const next = await f.mount(event.newTabKey!, event.newTabUrl!);
+      expect(next.reserved.partition).toBe("persist:browser-local");
+      expect(load).toHaveBeenLastCalledWith("http://localhost:26180/submit?token=secret",
+        { postData: [{ type: "rawData", bytes: Buffer.from("q=1") }], extraHeaders: "Content-Type: application/x-www-form-urlencoded\n" });
+      // Redeemed once: the same key opening again only gets what the renderer asks for.
+      await f.ipc({ op: "close", tabKey: event.newTabKey! });
+      await f.mount(event.newTabKey!, event.newTabUrl!);
+      expect(load).toHaveBeenLastCalledWith("http://localhost:26180/submit", undefined);
+    } finally { load.mockRestore(); }
+  });
+  it("downloads: the owner's click opens the save dialog, a page's own download is cancelled with one notice", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "http://localhost:26180/");
+    const download = (contents: unknown, name = "report.csv") => {
+      const event = { preventDefault: vi.fn() }, item = { cancel: vi.fn(), getFilename: () => name, getURL: () => "http://localhost:26180/report.csv", setSaveDialogOptions: vi.fn() };
+      f.session.emit("will-download", event, item, contents);
+      return { cancelled: event.preventDefault.mock.calls.length > 0 && item.cancel.mock.calls.length > 0, options: item.setSaveDialogOptions.mock.calls[0]?.[0] };
+    };
+    // The owner's own navigation (the mount) counts as a gesture for 10 s; move past it.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 11_000);
+    cleanup.push(() => clock.mockRestore());
+    expect(download(guest).cancelled).toBe(true);
+    expect(f.events.at(-1)).toMatchObject({ kind: "blocked", blocked: "download" });
+    const notices = f.events.filter(item => item.kind === "blocked").length;
+    expect(download(guest).cancelled).toBe(true);
+    expect(f.events.filter(item => item.kind === "blocked")).toHaveLength(notices); // one notice per 10 s
+    expect(download(new ContentsMock(nextContentsId++, f.session)).cancelled).toBe(true);
+    guest.emit("before-mouse-event", {}, { type: "mouseDown" });
+    const allowed = download(guest, "../..\\evil:name?.exe");
+    expect(allowed.cancelled).toBe(false);
+    expect(allowed.options).toEqual({ title: "Save download", defaultPath: expect.stringMatching(/memory-only-user-data[\\/]_.._evil_name_.exe$/) });
+  });
+  it("site permissions: the owner answers a native dialog; a ticked choice is remembered for that origin and can be forgotten", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "http://localhost:26180/");
+    const request = f.session.setPermissionRequestHandler.mock.calls.at(-1)![0] as (...args: any[]) => void;
+    const check = f.session.setPermissionCheckHandler.mock.calls.at(-1)![0] as (...args: any[]) => boolean;
+    const ask = async (permission: string, details: Record<string, unknown>) => {
+      const callback = vi.fn(); request(guest, permission, callback, details);
+      for (let i = 0; i < 50 && !callback.mock.calls.length; i++) await Promise.resolve();
+      return callback.mock.calls[0]?.[0];
+    };
+    electron.messageBox.mockClear().mockResolvedValueOnce({ response: 0, checkboxChecked: true });
+    expect(await ask("media", { mediaTypes: ["audio"], requestingUrl: "http://localhost:26180/" })).toBe(true);
+    expect(electron.messageBox).toHaveBeenCalledOnce();
+    expect(electron.messageBox.mock.calls[0]![1]).toMatchObject({ message: "http://localhost:26180 wants to use: microphone", buttons: ["Allow", "Block"], cancelId: 1 });
+    expect(await ask("media", { mediaTypes: ["audio"] })).toBe(true);
+    expect(electron.messageBox).toHaveBeenCalledOnce();
+    expect(check(guest, "media", "http://localhost:26180", { mediaType: "audio" })).toBe(true);
+    expect(await ask("media", { mediaTypes: ["audio"], requestingUrl: "http://localhost:26181/" })).toBe(false); // cross-origin frame
+    expect(electron.messageBox).toHaveBeenCalledOnce();
+    expect(await f.ipc({ op: "sitePermissions" })).toEqual([{ pool: "owner", origin: "http://localhost:26180", permission: "microphone", allow: true }]);
+    expect(await f.ipc({ op: "sitePermissions", forget: "all" })).toEqual([]);
+    expect(check(guest, "media", "http://localhost:26180", { mediaType: "audio" })).toBe(false);
+    await expect(f.ipc({ op: "sitePermissions", forget: { pool: "root", origin: "x" } })).rejects.toThrow();
+  });
+  it("site permissions: a prompt the owner may not see is announced in the app; a hidden window denies with a notice (Windows E4)", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "http://localhost:26180/");
+    const request = f.session.setPermissionRequestHandler.mock.calls.at(-1)![0] as (...args: any[]) => void;
+    const ask = async (permission: string, details: Record<string, unknown>) => {
+      const callback = vi.fn(); request(guest, permission, callback, details);
+      for (let i = 0; i < 50 && !callback.mock.calls.length; i++) await Promise.resolve();
+      return callback.mock.calls[0]?.[0];
+    };
+    const notices = () => f.events.filter(event => event.kind === "blocked").map(event => [event.blocked, event.sitePermission]);
+    const shown = () => f.events.filter(event => event.kind === "changed" && event.tabKey === "side-one").map(event => event.sitePermission?.state ?? null);
+    f.windowState.focused = false;
+    let answer!: (value: { response: number; checkboxChecked: boolean }) => void;
+    electron.messageBox.mockClear().mockImplementationOnce(() => new Promise(resolve => { answer = resolve; }));
+    const pending = ask("media", { mediaTypes: ["video"], requestingUrl: "http://localhost:26180/" });
+    for (let i = 0; i < 50 && !answer; i++) await Promise.resolve();
+    // While the dialog is open the tab says so; the owner is pointed at it when the window is not in front.
+    expect(shown().at(-1)).toBe("waiting");
+    expect(electron.messageBox.mock.calls[0]![1]).toMatchObject({ signal: expect.any(AbortSignal) });
+    expect(notices()).toEqual([["permission-waiting", { state: "waiting", origin: "http://localhost:26180", permissions: ["camera"] }]]);
+    answer({ response: 1, checkboxChecked: false });
+    expect(await pending).toBe(false);
+    expect(shown().at(-1)).toBeNull();
+    expect(f.windowState.flashFrame.mock.calls).toEqual([[true], [false]]);
+    f.windowState.visible = false;
+    expect(await ask("notifications", { requestingUrl: "http://localhost:26180/" })).toBe(false);
+    expect(electron.messageBox).toHaveBeenCalledOnce();
+    expect(notices().at(-1)).toEqual(["permission-hidden", { state: "hidden", origin: "http://localhost:26180", permissions: ["notifications"] }]);
+    expect(shown().at(-1)).toBe("hidden");
+    expect(await f.ipc({ op: "sitePermissions" })).toEqual([]);
   });
 });

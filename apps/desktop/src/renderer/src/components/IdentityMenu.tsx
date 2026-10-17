@@ -189,14 +189,14 @@ export function IdentityButton() {
         const footer = e.currentTarget.closest("footer");
         openMenuAbove(e.currentTarget, entries(), { owner: MENU_OWNER, minWidth: Math.max(224, footer ? footer.getBoundingClientRect().width - 16 : 0) });
       }}
-      className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/50 @max-[12rem]:flex-none ${open ? "bg-surface-2" : ""}`}
+      className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/50 group-data-[tight]/footer:flex-none ${open ? "bg-surface-2" : ""}`}
     >
       <IdentityAvatar identity={identity} size={22} />
-      <span className="flex min-w-0 flex-1 items-baseline gap-1.5 @max-[12rem]:hidden">
+      <span className="flex min-w-0 flex-1 items-baseline gap-1.5 group-data-[tight]/footer:hidden">
         <span className="min-w-0 truncate text-[13px] text-foreground">{identity.name}</span>
         {suffix && <span className="shrink-0 text-[11px] text-subtle">{suffix}</span>}
       </span>
-      <ChevronsUpDown size={12} className="shrink-0 text-subtle @max-[12rem]:hidden" />
+      <ChevronsUpDown size={12} className="shrink-0 text-subtle group-data-[tight]/footer:hidden" />
     </button>
   );
 }

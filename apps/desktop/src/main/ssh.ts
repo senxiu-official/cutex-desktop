@@ -1,7 +1,9 @@
 // System OpenSSH client for remote hosts: one-shot remote commands (pairing / revoke) and the
-// management port forward (`ssh -N -L`). BatchMode only — never an interactive prompt; the user's
-// keys / agent / ~/.ssh/config do the authentication. Pure argument building and error
-// classification live in shared/hosts.ts.
+// management port forward (`ssh -N -L`). The user's ~/.ssh/config, ssh-agent and default identity
+// files do the authentication, for an alias and a typed `user@host[:port]` alike. With an
+// `AskpassSession` ssh may also ask (key passphrase, password, keyboard-interactive, unknown host
+// key) through the desktop's prompt dialog (main/sshAskpass.ts); without one it runs in BatchMode
+// and never asks. Pure argument building and error classification live in shared/hosts.ts.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { rename, writeFile } from "node:fs/promises";
@@ -18,6 +20,40 @@ import {
   type TunnelEvent,
   type TunnelView,
 } from "../shared/hosts";
+import type { AskpassSession, AskpassSpawn } from "./sshAskpass";
+
+export interface SshRunOptions {
+  /** Prompts go to the desktop's dialog; timeouts pause while a question is open. */
+  askpass?: AskpassSession | null;
+  /** Tests only: extra ssh options (before `--`). */
+  extraArgs?: string[];
+}
+
+function withExtra(args: string[], extra: string[] | undefined): string[] {
+  if (!extra?.length) return args;
+  const i = args.indexOf("--");
+  return [...args.slice(0, i), ...extra, ...args.slice(i)];
+}
+
+/** env + token for one ssh process (null = BatchMode, no prompts: none wanted, or the bridge failed). */
+async function askpassSpawn(options: SshRunOptions | undefined): Promise<AskpassSpawn | null> {
+  if (!options?.askpass) return null;
+  try {
+    return await options.askpass.spawn();
+  } catch {
+    return null;
+  }
+}
+
+/** A deadline that moves while the user is answering a prompt (counted again from the answer). */
+function deadline(timeoutMs: number, askpass: AskpassSession | null | undefined): () => boolean {
+  let until = Date.now() + timeoutMs;
+  return () => {
+    const now = Date.now();
+    if (askpass) until = Math.max(until, (askpass.waiting ? now : askpass.lastAnswerAt) + timeoutMs);
+    return now > until;
+  };
+}
 
 /** Windows: prefer the inbox OpenSSH (PATH may hold Git's ssh, which ignores the Windows agent). */
 export function resolveSshBinary(): string {
@@ -41,12 +77,19 @@ export interface ExecResult {
 }
 
 /** Run `ssh … <destination> <command>`; stdout is returned to the caller only (never logged). */
-export function runSsh(target: SshTarget, command: string, timeoutMs = 30_000): Promise<ExecResult> {
-  return new Promise((resolve, reject) => {
+export async function runSsh(target: SshTarget, command: string, timeoutMs = 30_000, options?: SshRunOptions): Promise<ExecResult> {
+  const ask = options?.askpass ? await askpassSpawn(options) : null;
+  return new Promise<ExecResult>((resolve, reject) => {
     let child: ChildProcess;
     try {
-      child = spawn(resolveSshBinary(), execArgs(target, command), { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+      // Detached on POSIX with a prompt: no controlling terminal, so ssh can only ask through askpass.
+      child = spawn(resolveSshBinary(), withExtra(execArgs(target, command, !!ask), options?.extraArgs), {
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+        ...(ask ? { env: ask.env, detached: process.platform !== "win32" } : {}),
+      });
     } catch (error) {
+      ask?.done();
       reject(new SshFailure({ code: "noSsh", detail: String(error) }));
       return;
     }
@@ -58,16 +101,21 @@ export function runSsh(target: SshTarget, command: string, timeoutMs = 30_000): 
     child.stderr!.on("data", (d: Buffer) => {
       stderr = (stderr + d.toString("utf8")).slice(-8192);
     });
-    const timer = setTimeout(() => {
+    const expired = deadline(timeoutMs, options?.askpass);
+    const timer = setInterval(() => {
+      if (!expired()) return;
+      clearInterval(timer);
       killTree(child);
       reject(new SshFailure({ code: "timeout", detail: `no answer within ${Math.round(timeoutMs / 1000)} s` }));
-    }, timeoutMs);
+    }, Math.min(250, timeoutMs));
     child.on("error", (error: NodeJS.ErrnoException) => {
-      clearTimeout(timer);
+      clearInterval(timer);
+      ask?.done();
       reject(new SshFailure({ code: error.code === "ENOENT" ? "noSsh" : "exited", detail: error.message }));
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
+      clearInterval(timer);
+      ask?.done();
       resolve({ code, stdout, stderr });
     });
   });
@@ -207,8 +255,12 @@ export interface SshTunnelOptions {
   remotePort: number;
   pids: TunnelPidFile;
   onChange(view: TunnelView): void;
-  /** How long one attempt may take to come up before it is killed and retried. */
+  /** How long one attempt may take to come up before it is killed and retried (paused while a prompt is open). */
   readyTimeoutMs?: number;
+  /** Prompts for this connection (owned by the tunnel: closed by stop()). */
+  askpass?: AskpassSession | null;
+  /** Tests only: extra ssh options. */
+  extraArgs?: string[];
 }
 
 /**
@@ -240,6 +292,7 @@ export class SshTunnel {
     if (this.stopped || this.child) return;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
+    this.options.askpass?.reset();
     void this.attempt();
   }
 
@@ -253,6 +306,7 @@ export class SshTunnel {
       killTree(child);
       this.options.pids.remove(child.pid);
     }
+    this.options.askpass?.close();
     this.dispatch({ type: "stop" });
   }
 
@@ -271,14 +325,24 @@ export class SshTunnel {
       return;
     }
     this.stderr = "";
+    let ask: AskpassSpawn | null = null;
+    if (this.options.askpass) {
+      ask = await askpassSpawn(this.options);
+      if (this.stopped || this.child) {
+        ask?.done();
+        return;
+      }
+    }
     let child: ChildProcess;
     try {
-      child = spawn(resolveSshBinary(), tunnelArgs(this.options.target, port, this.options.remotePort), {
+      child = spawn(resolveSshBinary(), withExtra(tunnelArgs(this.options.target, port, this.options.remotePort, !!ask), this.options.extraArgs), {
         stdio: ["ignore", "ignore", "pipe"],
         windowsHide: true,
         detached: process.platform !== "win32",
+        ...(ask ? { env: ask.env } : {}),
       });
     } catch (error) {
+      ask?.done();
       this.fail({ code: "noSsh", detail: String(error) });
       return;
     }
@@ -291,6 +355,7 @@ export class SshTunnel {
     let spawnError: NodeJS.ErrnoException | null = null;
     child.on("error", (error: NodeJS.ErrnoException) => (spawnError = error));
     child.on("close", (code) => {
+      ask?.done();
       this.options.pids.remove(child.pid);
       if (this.child !== child) return;
       this.child = null;
@@ -299,13 +364,13 @@ export class SshTunnel {
       this.fail(err?.code === "ENOENT" ? { code: "noSsh", detail: err.message } : classifySshFailure(code, this.stderr, "tunnel"));
     });
     // Ready = ssh accepts on the local port (it binds only after authentication).
-    const deadline = Date.now() + (this.options.readyTimeoutMs ?? 30_000);
+    const expired = deadline(this.options.readyTimeoutMs ?? 30_000, this.options.askpass);
     while (this.child === child && !this.stopped) {
       if (await portListening(port, 800)) {
         if (this.child === child && !this.stopped) this.dispatch({ type: "ready", now: Date.now() });
         return;
       }
-      if (Date.now() > deadline) {
+      if (expired()) {
         this.stderr += "\ntimed out waiting for the port forward";
         killTree(child);
         return;
@@ -329,12 +394,19 @@ export class SshTunnel {
  * A short-lived forward for one-off checks (test connection / revoke on a host that is not
  * active). Resolves once the port accepts; `close()` kills it.
  */
-export async function openTemporaryTunnel(target: SshTarget, remotePort: number, pids: TunnelPidFile, timeoutMs = 25_000): Promise<{ port: number; close(): void }> {
+export async function openTemporaryTunnel(target: SshTarget, remotePort: number, pids: TunnelPidFile, timeoutMs = 25_000, options?: SshRunOptions): Promise<{ port: number; close(): void }> {
   const port = await freeLocalPort();
+  const ask = options?.askpass ? await askpassSpawn(options) : null;
   let child: ChildProcess;
   try {
-    child = spawn(resolveSshBinary(), tunnelArgs(target, port, remotePort), { stdio: ["ignore", "ignore", "pipe"], windowsHide: true, detached: process.platform !== "win32" });
+    child = spawn(resolveSshBinary(), withExtra(tunnelArgs(target, port, remotePort, !!ask), options?.extraArgs), {
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+      detached: process.platform !== "win32",
+      ...(ask ? { env: ask.env } : {}),
+    });
   } catch (error) {
+    ask?.done();
     throw new SshFailure({ code: "noSsh", detail: String(error) });
   }
   pids.add(child.pid);
@@ -348,16 +420,17 @@ export async function openTemporaryTunnel(target: SshTarget, remotePort: number,
   child.on("error", (error: NodeJS.ErrnoException) => (exited = { code: null, error }));
   child.on("close", (code) => {
     exited ??= { code, error: null };
+    ask?.done();
     pids.remove(child.pid);
   });
-  const deadline = Date.now() + timeoutMs;
+  const expired = deadline(timeoutMs, options?.askpass);
   for (;;) {
     if (exited) {
       const e = exited as { code: number | null; error: NodeJS.ErrnoException | null };
       throw new SshFailure(e.error?.code === "ENOENT" ? { code: "noSsh", detail: e.error.message } : classifySshFailure(e.code, stderr, "tunnel"));
     }
     if (await portListening(port, 800)) return { port, close };
-    if (Date.now() > deadline) {
+    if (expired()) {
       close();
       throw new SshFailure({ code: "timeout", detail: classifySshFailure(null, stderr, "tunnel").detail || "timed out waiting for the port forward" });
     }

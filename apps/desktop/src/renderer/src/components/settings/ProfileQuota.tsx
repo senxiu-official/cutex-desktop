@@ -12,7 +12,7 @@ import { GaugeChip } from "../GaugeBar";
 import { Button, Loading, NumberField, RefreshButton, SettingRow, Section, Segmented, Select, TextInput, Toggle } from "./Form";
 import { useTargetFeatures, useTargetLoadQuota, useTargetQuotas } from "../../lib/targetHost";
 
-const MODES: QuotaReaderConfig["mode"][] = ["remaining_and_limit", "used_and_limit", "remaining_percent", "used_percent", "balance"];
+const MODES: QuotaReaderConfig["mode"][] = ["remaining_and_limit", "used_and_limit", "remaining_percent", "used_percent", "used_ratio", "balance"];
 const RESET_FORMATS: QuotaReaderConfig["reset_format"][] = ["rfc3339", "unix_seconds", "unix_millis"];
 
 function blankReader(label: string): QuotaReaderConfig {

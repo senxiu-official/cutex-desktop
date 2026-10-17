@@ -199,6 +199,24 @@ export function latestReleaseUrl(apiBase: string, repo: { owner: string; repo: s
  */
 export const BINARY_MIN_CHECK_MINUTES = 60;
 
+/** 检查更新 choices (minutes; 0 = never) of a source (git) install. */
+export const SOURCE_UPDATE_CHECK_CHOICES: readonly number[] = [0, 5, 10, 30, 60];
+/** Binary installs: nothing below BINARY_MIN_CHECK_MINUTES (the updater would round it up anyway). */
+export const BINARY_UPDATE_CHECK_CHOICES: readonly number[] = [0, 60, 360, 1440];
+
+/** The interval the background check really uses: a binary install never checks more often than hourly; 0 stays off. */
+export function effectiveUpdateCheckMinutes(minutes: number, binary: boolean): number {
+  if (!(minutes > 0)) return 0;
+  return binary ? Math.max(minutes, BINARY_MIN_CHECK_MINUTES) : minutes;
+}
+
+/** The 检查更新 options for this install, with the effective current value kept when it is something else. */
+export function updateCheckChoices(minutes: number, binary: boolean): number[] {
+  const base = [...(binary ? BINARY_UPDATE_CHECK_CHOICES : SOURCE_UPDATE_CHECK_CHOICES)];
+  const current = effectiveUpdateCheckMinutes(minutes, binary);
+  return base.includes(current) ? base : [...base, current].sort((a, b) => a - b);
+}
+
 /** Release directory name for a version: the version, suffixed -2, -3 … when taken (+ macOS `.noindex`). */
 export function versionReleaseName(version: string, taken: (name: string) => boolean, suffix = ""): string {
   if (!taken(version + suffix)) return version + suffix;

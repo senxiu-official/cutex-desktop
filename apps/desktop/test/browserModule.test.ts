@@ -183,6 +183,14 @@ describe("browser passive metadata cache", () => {
     expect(browserCacheKey("a|b", "c") === browserCacheKey("a", "b|c")).toBe(false);
   });
 
+  it("keeps a tab's site-permission prompt state for display only, bounded", () => {
+    const cache = createBrowserCache();
+    cache.update(view({ sitePermission: { state: "waiting", origin: "https://cam.example", permissions: ["camera", "microphone"] } }));
+    expect(cache.get("ssh-other", "instance-1")?.sitePermission).toEqual({ state: "waiting", origin: "https://cam.example", permissions: ["camera", "microphone"] });
+    cache.update(view({ sitePermission: { state: "bogus" as "waiting", origin: "https://cam.example", permissions: [] } }));
+    expect(cache.get("ssh-other", "instance-1")?.sitePermission).toBeUndefined();
+  });
+
   it("drops stale page generations without refetching or rolling back metadata", () => {
     const cache = createBrowserCache();
     const listener = vi.fn();
@@ -652,6 +660,10 @@ describe("I2a module integration", () => {
     expect(browserCache.get("ssh-other", "instance-1")?.title).toBe("Page");
     for (const listener of fakes.listeners) listener({ ...event, newTabUrl: "javascript:alert(1)" });
     expect(open).toHaveBeenCalledTimes(1);
+    // 0.1.3: main mints the owner tab's key (it holds the exact URL / form body for it).
+    const key = "0b9c7c58-35a8-4d0e-9c1e-3c0f5d3a1e2f";
+    for (const listener of fakes.listeners) listener({ ...event, newTabUrl: "http://localhost:8080/post", newTabKey: key });
+    expect(open).toHaveBeenLastCalledWith("browser.tab", { url: "http://localhost:8080/post", tabKey: key, ownerTab: true }, { binding: { kind: "host", hostId: "ssh-other" }, focus: false });
     controller.abort();
     expect(fakes.browser.setEnabled).toHaveBeenLastCalledWith(false);
     expect(browserActivation.get()).toBe(false);

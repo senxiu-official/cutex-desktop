@@ -7,6 +7,7 @@ import type { ProfileDetail, ProfilePatch } from "../../../../shared/ipc";
 import { useI18n } from "../../i18n";
 import { useProfileAvatar } from "../../lib/profileAvatar";
 import { INTRO_GREETING_MAX, resolveIntroGreeting, resolveIntroPortrait, useIntroAppearanceOf, type IntroDraft } from "../../lib/introAppearance";
+import { useLaunchArt } from "../../lib/launchArt";
 import { PROFILE_FEATURES } from "../../lib/profileKind";
 import { inkOn, PROFILE_COLORS } from "../../lib/profileLook";
 import { PROVIDER_LABEL, profileProvider, type Provider } from "../../lib/provider";
@@ -78,7 +79,8 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
   const [introSample] = useState(() => Math.random());
   const ownerTerm = resolveTerms(useTermOverrides(), locale).owner.one;
   const introProvider = profileProvider(previewProfile);
-  const introPortrait = resolveIntroPortrait(shownIntroPortrait, introProvider);
+  const launchArt = useLaunchArt();
+  const introPortrait = resolveIntroPortrait(shownIntroPortrait, introProvider, launchArt);
   const introGreeting = resolveIntroGreeting({
     custom: intro.greeting !== undefined ? intro.greeting.trim() || null : storedIntro.greeting,
     provider: introProvider,

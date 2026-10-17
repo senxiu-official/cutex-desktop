@@ -1,5 +1,5 @@
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { BellOff, ChevronRight, CircleCheck, MessageSquare, Settings2, Star, TriangleAlert, User } from "lucide-react";
+import { BellOff, Check, ChevronRight, CircleCheck, MessageSquare, Settings2, Star, TriangleAlert, User } from "lucide-react";
 import { useI18n } from "../i18n";
 import { groupKey, moveProject, orderGroups, rowKey, type AgentRow, type SidebarGroup } from "../lib/sidebar";
 import { hostListKeys, setHostListKeys, toggleIdleOpen, toggleOfflineOpen, toggleProjectFolded, updateSections, useUiPrefs, type RunningAgents as RunningAgentsMode } from "../lib/prefs";
@@ -21,7 +21,7 @@ import { agentMenu } from "../lib/menus";
 import { projectMenu } from "../lib/projectMenus";
 import { rootFor } from "../lib/workspace";
 import { AttentionContext } from "../lib/attentionView";
-import { layoutSidebar, type GroupLayout, type LayoutContext } from "../lib/sidebarLayout";
+import { foldLabel, layoutSidebar, type GroupLayout, type LayoutContext } from "../lib/sidebarLayout";
 import { computeFresh, markAgentOpened, publishFresh, useFreshAgents } from "../lib/freshAgents";
 import { NEUTRAL_GROUP, projectBlockLook } from "../lib/projectSeparation";
 import { useProjectMuted } from "../lib/notificationLevelsStore";
@@ -34,7 +34,7 @@ import type { AppSlotEntry, NavArea, NavItem } from "../modules/slots";
 import { StatusAvatar } from "./AgentStatus";
 import { ProjectIcon } from "./ProjectIcon";
 import { RestoreBanner } from "./RestoreBanner";
-import { AgentRowButton, OfflineRow } from "./AgentRows";
+import { AgentRowButton, OfflineRow, PinnedRows } from "./AgentRows";
 import { CollapsedProject, ProjectFlyoutPanel } from "./ProjectFlyout";
 import { FlyoutGateContext, hoverOpensFlyout, isCollapsedRow, useFlyoutGate, useProjectFlyout } from "../lib/projectFlyout";
 import { UpdateButton } from "./UpdateButton";
@@ -45,6 +45,26 @@ import { PaneResizer } from "./PaneResizer";
 import { ScriptText } from "./ScriptText";
 import { useHostAccess } from "../lib/hostAccess";
 import { realAgentName } from "../lib/agentAlias";
+import { dataFlags, useSizeFlags, widthBelow } from "../lib/sizeFlags";
+
+/** Footer narrower than 12rem (content box): the identity button shows only its avatar. */
+const FOOTER_SIZES = { tight: widthBelow(12) } as const;
+
+/**
+ * Identity (its menu) on the left; the update button and the footer entries (⚙ 设置: one click, also
+ * Ctrl+,) as icons. `data-tight` (lib/sizeFlags, `group-data-[tight]/footer:`) instead of a CSS size
+ * container: the footer re-renders together with the rest of the sidebar.
+ */
+function SidebarFooter() {
+  const [ref, flags] = useSizeFlags(FOOTER_SIZES);
+  return (
+    <footer ref={ref} {...dataFlags(flags)} className="group/footer flex items-center gap-1 border-t border-border px-2 py-1.5 text-xs text-muted">
+      <IdentityButton />
+      <UpdateButton />
+      <PrimaryNav area="footer" />
+    </footer>
+  );
+}
 
 /**
  * Offline agents under a group: a divider (离线 N ── 全部 ›), the newest K as compact rows
@@ -138,16 +158,20 @@ function RunningAgents({ rows, mode }: { rows: AgentRow[]; mode: RunningAgentsMo
  * shows their overlapping avatars; expanded, only the chevron and count, with the agents below as
  * compact rows. The open agent stays in the fold (lib/sidebarLayout `idleSelected`): collapsed, the
  * header is highlighted with its avatar first (ringed) and its name; expanded, its own row shows as
- * selected.
+ * selected. Agents with a finished turn not seen yet stay in it too (`done`): a ✓ on their avatar
+ * (shown before the others) and 「· N 完成」 on the header (lib/sidebarLayout `foldLabel`).
  */
-function IdleFold({ groupId, hostId, rows, selected }: { groupId: string; hostId?: string; rows: AgentRow[]; selected: string | null }) {
+function IdleFold({ groupId, hostId, rows, selected, done }: { groupId: string; hostId?: string; rows: AgentRow[]; selected: string | null; done: readonly string[] }) {
   const { t } = useI18n();
   const prefs = useUiPrefs();
   const open = hostId ? hostListKeys("idleOpen", [hostId]).includes(hostKey(hostId, groupId)) : prefs.idleOpen.includes(groupId);
   if (rows.length === 0) return null;
   const current = selected === null ? null : (rows.find((r) => rowKey(r) === selected) ?? null);
   const marked = !open && current !== null;
-  const avatars = current ? [current, ...rows.filter((r) => r !== current)] : rows;
+  const isDone = (r: AgentRow) => done.includes(rowKey(r));
+  const rest = rows.filter((r) => r !== current);
+  const avatars = [...(current ? [current] : []), ...rest.filter(isDone), ...rest.filter((r) => !isDone(r))];
+  const label = foldLabel(rows.length, done.length);
   return (
     <div>
       <button
@@ -162,13 +186,22 @@ function IdleFold({ groupId, hostId, rows, selected }: { groupId: string; hostId
         {!open && (
           <span data-idle-stack="" className="flex shrink-0 -space-x-1.5">
             {avatars.slice(0, 4).map((r) => (
-              <span key={rowKey(r)} data-idle-open={marked && r === current ? "" : undefined} className={`flex rounded-full ${marked && r === current ? "relative z-10 ring-[1.5px] ring-accent ring-offset-1 ring-offset-background" : ""}`}>
+              <span key={rowKey(r)} data-idle-open={marked && r === current ? "" : undefined} className={`relative flex rounded-full ${marked && r === current ? "z-10 ring-[1.5px] ring-accent ring-offset-1 ring-offset-background" : isDone(r) ? "z-[5]" : ""}`}>
                 <StatusAvatar name={r.name} initial={r.initial} color={r.color} avatar={r.session.avatar} seed={r.session.cutexSessionId} size={14} signal="idle" />
+                {isDone(r) && (
+                  <span data-idle-done="" className="absolute -right-1 -bottom-1 flex size-[9px] items-center justify-center rounded-full bg-accent text-background ring-1 ring-background" aria-label={t("agentStatus.done")}>
+                    <Check size={7} strokeWidth={4} />
+                  </span>
+                )}
               </span>
             ))}
           </span>
         )}
-        <span className={`${open ? "" : "ml-1 "}shrink-0`}>{t("sidebar.idleCount", { count: rows.length })}</span>
+        <span className={`${open ? "" : "ml-1 "}shrink-0`}>
+          {label.idle > 0 && t("sidebar.idleCount", { count: label.idle })}
+          {label.idle > 0 && label.done > 0 && " · "}
+          {label.done > 0 && t("sidebar.idleDoneCount", { count: label.done })}
+        </span>
         {marked && (
           <span className="min-w-0 truncate">
             · <ScriptText text={current.name} />
@@ -326,6 +359,8 @@ const Group = memo(function Group({ layout, dragKey, dragging: dragged, searchin
         )}
       </div>
       {!open && <ProjectFlyoutPanel layout={layout} fly={fly} />}
+      {/* Folded by its header: pins stay listed (never folded away). */}
+      {!open && <PinnedRows rows={layout.full} className={block.bodyClassName} />}
       {open && remark && (
         // 本机备注 under the header. The project directory is never a sidebar line (owner 2026-10-14: it
         // only shifted the list when a project got selected): it stays in the header / remark tooltips
@@ -340,7 +375,7 @@ const Group = memo(function Group({ layout, dragKey, dragging: dragged, searchin
             <AgentRowButton key={rowKey(row)} row={row} />
           ))}
           <RunningAgents rows={layout.running} mode={prefs.runningAgents} />
-          <IdleFold groupId={group.id} hostId={own ? undefined : group.hostId} rows={layout.idle} selected={layout.idleSelected} />
+          <IdleFold groupId={group.id} hostId={own ? undefined : group.hostId} rows={layout.idle} selected={layout.idleSelected} done={layout.idleDone} />
           {/* While searching, every offline match is listed. The full list dialog opens on the group's host. */}
           <OfflineSection rows={layout.offline} searching={searching} onAll={() => openAgentList(group.id, "offline", own ? undefined : group.hostId)} foldId={group.id} hostId={own ? undefined : group.hostId} />
         </div>
@@ -485,12 +520,14 @@ function ChatsGroup({ rows }: { rows: AgentRow[] }) {
           <span className="ml-auto text-[10px] text-subtle">{rows.length}</span>
         </button>
       </div>
-      {open && (
+      {open ? (
         <div className={block.bodyClassName}>
           {rows.map((row) => (
             <AgentRowButton key={rowKey(row)} row={row} />
           ))}
         </div>
+      ) : (
+        <PinnedRows rows={rows} className={block.bodyClassName} />
       )}
     </section>
   );
@@ -770,12 +807,7 @@ export function Sidebar() {
         </nav>
         </ProjectDragContext.Provider>
         </FlyoutGateContext.Provider>
-        {/* Identity (its menu) on the left; the update button and the footer entries (⚙ 设置: one click, also Ctrl+,) as icons. */}
-        <footer className="@container flex items-center gap-1 border-t border-border px-2 py-1.5 text-xs text-muted">
-          <IdentityButton />
-          <UpdateButton />
-          <PrimaryNav area="footer" />
-        </footer>
+        <SidebarFooter />
       </aside>
     </AttentionContext.Provider>
     </SidebarHostsContext.Provider>

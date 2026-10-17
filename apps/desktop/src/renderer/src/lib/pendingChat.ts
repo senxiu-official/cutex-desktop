@@ -6,6 +6,7 @@
 import type { ExtraInput, ProfileItem } from "../../../shared/ipc";
 import { imageInputItems, type DraftImage } from "../../../shared/input";
 import type { LaunchOverrides } from "../../../shared/launch";
+import type { PermissionMode } from "./permissionModes";
 import { profileKind } from "./profileKind";
 import { boundSkills } from "./slashCommands";
 
@@ -25,6 +26,11 @@ export interface PendingChatState {
   hostId: string | null;
   profile: string | null;
   launch: LaunchOverrides;
+  /**
+   * The composer mode the draft shows (launch over the host's quick-chat defaults). On a cutex
+   * without launch-approvals-reviewer, 自动 gets its reviewer after creation (lib/permissionModes).
+   */
+  permissionMode?: PermissionMode | null;
   /** Start in plan mode (collaboration mode set before the first message). */
   plan: boolean;
   /** Goal objective set on the new thread before the first message; null = none. */

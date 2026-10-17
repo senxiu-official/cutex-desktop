@@ -9,7 +9,10 @@
 //   ?upgrade=deferred    the agents stay busy: the run is deferred
 //   ?upgrade=uptodate    nothing available
 //   ?upgrade=nokeys      no trusted key (checks fail closed)
-import { BACKEND_UPGRADE_FEATURE, isUpgradeTerminal, type HostServiceInfo, type UpgradeApplyRequest, type UpgradePhase, type UpgradeRefusal, type UpgradeResult, type UpgradeRollbackPreview, type UpgradeRun, type UpgradeStatus } from "../../../../shared/backendUpgrade";
+//   ?upgrade=justupdated a full update without a native (0.1.0 → 0.1.1) committed a minute ago; idle
+//                        agents still move over in batches (followUp) — what a host shows right after
+//                        an in-app update
+import { BACKEND_UPGRADE_FEATURE, UPGRADE_RUN_NATIVE_FEATURE, isUpgradeTerminal, type HostServiceInfo, type UpgradeApplyRequest, type UpgradePhase, type UpgradeRefusal, type UpgradeResult, type UpgradeRollbackPreview, type UpgradeRun, type UpgradeStatus } from "../../../../shared/backendUpgrade";
 import type { MockCore, ModuleMock } from "../../dev/mockTypes";
 
 const MODE = typeof location !== "undefined" ? new URLSearchParams(location.search).get("upgrade") : null;
@@ -52,7 +55,58 @@ function history(): UpgradeRun[] {
   return [run("r239", "r240", 3, "committed"), run("r239", "r240", 4, "deferred"), run("r238", "r239", 9, "committed", { mode: "full", packageRunId: "rpu-5c2e1a7d9b30" })];
 }
 
+/** A committed full-mode apply without a native (cutex 0.1.0 → 0.1.1, the first public update). */
+function justUpdated(): UpgradeStatus {
+  const phases: UpgradePhase[] = ["queued", "waiting-idle", "stopping", "backing-up", "swapping", "starting", "waiting-ready", "verifying", "committed"];
+  const run: UpgradeRun = {
+    runId: runId(),
+    kind: "apply",
+    fromRelease: "0.1.0",
+    toRelease: "0.1.1",
+    mode: "full",
+    class: "rollback-safe",
+    phase: "committed",
+    createdAt: iso(90),
+    finishedAt: iso(50),
+    maxWaitSecs: 3600,
+    packageRun: "after",
+    requestedBy: "management-api",
+    waitingFor: [],
+    cancelRequested: false,
+    timeline: phases.map((p, i) => ({ phase: p, at: iso(90 - i * 5) })),
+    downtimeMs: 9100,
+    backupDir: "~/.local/share/cutex/upgrade/runs/upg-…/backup",
+    packageRunId: null,
+    error: null,
+    needsOwner: null,
+    displaced: [],
+    // upgrade-run-native: full, no native in the manifest → only the runtime package changed.
+    nativeVersion: null,
+    previousNativeVersion: "0.160.0-r51",
+    runtimeChange: "package",
+  };
+  return {
+    managed: true,
+    base: "~/.local/share/cutex",
+    serviceManager: "systemd",
+    build: { version: "0.1.1", release: "0.1.1", commit: "3736d2ee5a1c9b04", builtAt: "2026-10-16T05:12:00Z", profile: "release", channel: "release" },
+    installed: { release: "0.1.1", sequence: 2, commit: "3736d2ee5a1c9b04", manifestSha256: "5d1e…" },
+    previousRelease: "0.1.0",
+    installedReleases: ["0.1.0", "0.1.1"],
+    lastCheckAt: iso(120),
+    lastCheckError: null,
+    available: null,
+    staged: null,
+    staging: null,
+    run,
+    followUp: { upgradeRunId: run.runId, startedAt: iso(50), lastBatchAt: iso(40), packageRunIds: ["rpu-1f0c3b2a9d84"], done: false },
+    settings: { ...SETTINGS },
+    trustedKeys: ["8A3F5C21D0E9B746"],
+  };
+}
+
 function initial(): UpgradeStatus {
+  if (MODE === "justupdated") return justUpdated();
   const managed = MODE !== "unmanaged";
   const oneWay = MODE === "oneway";
   return {
@@ -121,7 +175,7 @@ const ok = <T>(value: T): UpgradeResult<T> => ({ ok: true, value });
 function world(emitHost: (method: string, params: Record<string, unknown>) => void, managedOverride?: boolean) {
   const state = initial();
   if (managedOverride === false) Object.assign(state, { managed: false, base: null, serviceManager: "none", previousRelease: null, installedReleases: ["r240"], available: null, lastCheckAt: null });
-  const past = state.managed ? history() : [];
+  const past = MODE === "justupdated" && state.run ? [clone(state.run)] : state.managed ? history() : [];
   const emit = (reason: "startup" | "state" = "state") =>
     emitHost("cutex/upgrade/updated", {
       reason,
@@ -259,6 +313,10 @@ function world(emitHost: (method: string, params: Record<string, unknown>) => vo
         needsOwner: null,
         runnerPid: 41872,
         displaced: [],
+        // upgrade-run-native, as cutex RuntimeChange::of records it when the run is prepared.
+        nativeVersion: staged.nativeVersion ?? null,
+        previousNativeVersion: HOST_INFO.runtimes?.native?.selected ?? null,
+        runtimeChange: mode === "reload" ? "none" : staged.nativeVersion && staged.nativeVersion !== HOST_INFO.runtimes?.native?.selected ? "native" : "package",
       };
       const run = state.run;
       void drive(applySteps, () => {
@@ -386,7 +444,7 @@ function world(emitHost: (method: string, params: Record<string, unknown>) => vo
 }
 
 export const mock: ModuleMock = {
-  features: { new: [BACKEND_UPGRADE_FEATURE] },
+  features: { new: [BACKEND_UPGRADE_FEATURE, UPGRADE_RUN_NATIVE_FEATURE] },
   api: (core: MockCore) => world((method, params) => core.emitHost(method, params)),
   // SSH mock hosts: hand-deployed (the read-only page).
   remote: (_hostId, emitHost) => world(emitHost, false),

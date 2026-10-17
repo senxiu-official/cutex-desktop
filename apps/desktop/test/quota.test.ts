@@ -1,5 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_QUOTA_VIEW, defaultQuotaLabel, fillColor, gaugesFromRateLimits, mergeRateLimits, migrateQuotaView, quotaFill, quotaPercent, quotaTextKey, remainingColor, remainingRatio, resetsIn, resetsInCompact, usageColor, quotaLabelProblem, quotaLabelValid, usedRatio, windowLabel, withQuotaLabel, type QuotaGauge } from "../src/renderer/src/lib/quota";
+import { DEFAULT_QUOTA_VIEW, defaultQuotaLabel, fillColor, gaugeLabel, gaugeShortLabel, gaugesFromRateLimits, mergeRateLimits, migrateQuotaView, QUOTA_READERS, quotaFill, quotaPercent, quotaTextKey, readerFollowsBaseUrl, remainingColor, remainingRatio, resetsIn, resetsInCompact, usageColor, quotaLabelProblem, quotaLabelValid, usedRatio, windowLabel, windowName, withQuotaLabel, type QuotaGauge } from "../src/renderer/src/lib/quota";
+import { translate } from "../src/renderer/src/i18n";
+import { zhCN } from "../src/renderer/src/i18n/zh-CN";
+import { en } from "../src/renderer/src/i18n/en";
+
+describe("Kimi Code plan windows (cutex kimi-code-plan)", () => {
+  it("names the month window 本月 / This month and leaves rolling windows alone", () => {
+    expect(zhCN["quota.window.month"]).toBe("本月");
+    expect(en["quota.window.month"]).toBe("This month");
+    const month = translate("quota.window.month");
+    expect(windowName("month")).toBe(month);
+    expect(windowName(" Month ")).toBe(month);
+    for (const raw of ["5h", "7d", "week", "mon"]) expect(windowName(raw)).toBe(raw);
+    expect(windowName(null)).toBe("");
+    expect(gaugeLabel({ label: "Kimi", windowLabel: "month" })).toBe(`Kimi ${month}`);
+    expect(gaugeShortLabel({ label: "Kimi", windowLabel: "month" })).toBe(month);
+    expect(gaugeShortLabel({ label: "Kimi", windowLabel: "5h" })).toBe("5h");
+  });
+
+  it("knows the kimi_code_plan reader, which follows the profile's Base URL", () => {
+    expect(QUOTA_READERS).toContain("kimi_code_plan");
+    expect(readerFollowsBaseUrl("kimi_code_plan")).toBe(true);
+    expect(zhCN["agent-config.quota.reader.kimi_code_plan"]).toBe("Kimi Code 会员套餐额度");
+  });
+});
 
 const gauge = (remainingPercent: number | null): QuotaGauge => ({ id: "g", label: "g", kind: "window", remainingPercent, balance: null, resetAt: null, windowLabel: null, observedAt: null, stale: false });
 

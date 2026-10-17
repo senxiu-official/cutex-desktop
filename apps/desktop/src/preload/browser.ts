@@ -1,4 +1,4 @@
-import { BROWSER_CHANNEL, type BrowserBridge, type BrowserEvent, type BrowserRequest, type BrowserTabMount, type BrowserTabView, type BrowserTurnShot, type BrowserImage, type BrowserToolItem, type BrowserAgentView, type BrowserHostSettings, type BrowserIdempotencyClearResult, type BrowserClaimPolicyView, type BrowserClaimAllowView, type BrowserClaimAuditView, type BrowserExternalPagesView } from "../shared/browser";
+import { BROWSER_CHANNEL, type BrowserBridge, type BrowserEvent, type BrowserRequest, type BrowserTabMount, type BrowserTabView, type BrowserTurnShot, type BrowserImage, type BrowserToolItem, type BrowserAgentView, type BrowserHostSettings, type BrowserIdempotencyClearResult, type BrowserClaimPolicyView, type BrowserClaimAllowView, type BrowserClaimAuditView, type BrowserExternalPagesView, type BrowserSitePermissionView } from "../shared/browser";
 import type { HostBinding } from "../shared/hosts";
 
 export interface BrowserPreloadOptions {
@@ -12,6 +12,7 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
     setEnabled: enabled => options.invoke(BROWSER_CHANNEL, { op: "setEnabled", enabled }, null) as Promise<void>,
     resetOrigins: () => options.invoke(BROWSER_CHANNEL, { op: "resetOrigins" }, null) as Promise<void>,
     externalPages: enabled => options.invoke(BROWSER_CHANNEL, enabled === undefined ? { op: "externalPages" } : { op: "externalPages", enabled }, null) as Promise<BrowserExternalPagesView>,
+    sitePermissions: forget => options.invoke(BROWSER_CHANNEL, forget === undefined ? { op: "sitePermissions" } : { op: "sitePermissions", forget }, null) as Promise<BrowserSitePermissionView[]>,
     forHost(hostId) {
       const call = (request: BrowserRequest) => {
         const observed = options.binding(hostId);
@@ -39,6 +40,7 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
         holdReady: (tabKey, leaseId, held) => call({ op: "holdReady", tabKey, leaseId, held }) as Promise<void>,
         releaseLease: (tabKey, leaseId, owner) => call({ op: "releaseLease", tabKey, leaseId, ...(owner ? { owner: true as const } : {}) }) as Promise<void>,
         resumeLease: (tabKey, leaseId, settings) => call({ op: "resumeLease", tabKey, leaseId, settings }) as Promise<void>,
+        pauseLease: (tabKey, leaseId) => call({ op: "pauseLease", tabKey, leaseId }) as Promise<void>,
         openRefused: (requestId, code) => call({ op: "openRefused", requestId, code }) as Promise<void>,
         open: (tabKey, url, receipt, identity) => call({ op: "open", tabKey, url, ...(receipt ? { receipt } : {}), ...(identity ? { identity } : {}) }) as Promise<BrowserTabMount>,
         navigate: (tabKey, url) => call({ op: "navigate", tabKey, url }) as Promise<void>,

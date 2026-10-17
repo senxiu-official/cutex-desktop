@@ -91,7 +91,7 @@ export function ClaudeAccountRow({ detail, patch, onChoose, saveError }: {
 /** The select with its links underneath (管理账户, 「+ 添加订阅」), so a narrow card still fits them. */
 function AccountControl({ select, links }: { select: ReactNode; links: ReactNode }) {
   return (
-    <div className="flex min-w-0 flex-col items-end gap-1 @max-[28rem]:items-start">
+    <div className="flex min-w-0 flex-col items-end gap-1 group-data-[narrow]/card:items-start">
       {select}
       <div className="flex items-center gap-3 empty:hidden">{links}</div>
     </div>

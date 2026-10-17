@@ -3,7 +3,30 @@
 The portrait and victory PNGs are not in Git (`.gitignore`) and are not part of the public
 repository or the release packages. A build without them works: `lib/launchArt.ts` loads whatever
 files of `LAUNCH_ART_FILES` are present, and a provider without both of its images falls back to the
-icon + greeting intro. The file names the launcher uses are listed in `LAUNCH_ART_FILES`.
+icon + greeting intro. The file names the launcher uses are listed in `LAUNCH_ART_FILES`
+(`src/shared/launchArt.ts`).
+
+## Getting the art into an installed app (no rebuild)
+
+Release builds bundle none of these images. Put the PNGs in one folder with the exact
+`LAUNCH_ART_FILES` names, then in the app open 设置 → 外观 → 启动页立绘 (Settings → Appearance →
+Launcher artwork) and click 「从文件夹导入…」 ("Import from folder…"). The main process (`main/launchArt.ts`):
+
+- reads only those exact names at the top of the chosen folder; other files and sub-folders are ignored;
+- accepts a file only if it is a regular file (not a symlink), at most 10 MiB, starting with the PNG signature;
+- imports a provider only when both its portrait and its victory image pass; a lone file is reported, not used;
+- copies them into `<userData>/launcher-art/` (the app's single userData: `%APPDATA%\Cutex`,
+  `~/.config/Cutex`, or `CUTEX_DESKTOP_USER_DATA` for side instances), replacing that provider's earlier import;
+- hands them to the window as `data:image/png` URLs over IPC (the renderer CSP is unchanged).
+
+Imported art overrides bundled art per provider. 「清除」 ("Clear") deletes the imported files: the
+bundled art shows again, else the icon + greeting intro. Each Settings row shows the provider's
+source (已导入 / 内置 / 无) and the two file names it expects.
+
+## Bundling the art into a local build
+
+`scripts/copy-launcher-art.ps1` / `.sh` copy the owner's files into this folder before a build; the
+eager glob in `lib/launchArt.ts` picks them up.
 
 The notes below are historical generation records (the `*-prompt*.md` files next to this README are
 the exact prompts). The images they describe are not published, and their statements about which

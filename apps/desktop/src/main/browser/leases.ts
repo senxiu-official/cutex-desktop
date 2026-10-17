@@ -1,5 +1,5 @@
 import type { BrowserControlSettings, BrowserLeaseView } from "../../shared/browser";
-import { BrowserRelayError, type RelayGrant, type RelayLease } from "./relayTypes";
+import { BrowserRelayError, relayError, type RelayErrorCode, type RelayGrant, type RelayLease } from "./relayTypes";
 
 export interface BrowserLeasePeer {
   grantLease(input: RelayGrant): Promise<RelayLease>;
@@ -75,7 +75,14 @@ export class BrowserLeases {
       if (!this.current(entry)) throw new BrowserRelayError("lease_revoked");
       entry.phase = "active"; if (entry.timer) clearTimeout(entry.timer); entry.timer = undefined;
       this.options.changed(guestId); entry.resolve();
-    } catch (error) { if (this.entries.get(leaseId) === entry) this.revoke(leaseId, "lease_revoked"); throw error; }
+    } catch (error) {
+      // Say WHY the grant ended (e.g. target_hidden: the window / card is not visible; permission_denied
+      // or browser_disabled from the host) instead of a bare lease_revoked, to the owner's grant
+      // call and to this readiness call alike. Unknown failures stay lease_revoked.
+      const reason = grantFailure(error);
+      if (this.entries.get(leaseId) === entry) this.revoke(leaseId, "lease_revoked", true, reason);
+      throw new BrowserRelayError(reason);
+    }
   }
   async resume(guestId: string, leaseId: string, settings: BrowserControlSettings): Promise<void> {
     const entry = this.entries.get(leaseId);
@@ -84,11 +91,11 @@ export class BrowserLeases {
     if (!this.current(entry)) throw new BrowserRelayError("lease_revoked");
   }
   /** Close admission synchronously. Called by the peer too; notify=false avoids recursion. */
-  revoke(leaseId: string, reason: "lease_revoked" | "stale_connection" | "target_closed" | "lease_limit", notify = true): void {
+  revoke(leaseId: string, reason: "lease_revoked" | "stale_connection" | "target_closed" | "lease_limit", notify = true, cause: RelayErrorCode = reason): void {
     const entry = this.entries.get(leaseId); if (!entry) return;
     this.entries.delete(leaseId); this.attempts.delete(entry.lease.target.guestId);
     if (entry.timer) clearTimeout(entry.timer);
-    entry.reject(new BrowserRelayError(reason));
+    entry.reject(new BrowserRelayError(cause));
     this.options.releaseProvider(entry.lease.target.guestId, leaseId); this.options.changed(entry.lease.target.guestId);
     if (notify) void entry.peer.revokeLease(leaseId).catch(() => {});
   }
@@ -96,4 +103,12 @@ export class BrowserLeases {
   dispose(): void { this.attempts.clear(); for (const id of [...this.entries.keys()]) this.revoke(id, "stale_connection"); }
   private current(entry: Entry): boolean { return this.entries.get(entry.lease.leaseId) === entry && this.options.current(entry.lease)
     && (entry.phase === "active" || entry.admissionCurrent()); }
+}
+
+/** A readiness / activation failure as the owner-facing reason a grant ended. */
+function grantFailure(error: unknown): RelayErrorCode {
+  const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined;
+  if (typeof code !== "string") return "lease_revoked";
+  const reason = relayError(error);
+  return reason === "browser_unavailable" && code !== "browser_unavailable" ? "lease_revoked" : reason;
 }

@@ -33,7 +33,7 @@ export function turnActivity(timeline: TimelineView, backgroundItemIds: readonly
   const pending = [...timeline.pending.values()];
   if (pending.length > 0) return pending.some((r) => !QUESTION_METHODS.has(r.method)) ? "approval" : "question";
   for (const entry of trailing(timeline)) {
-    if (entry.kind === "other" || entry.kind === "checklist" || entry.kind === "interaction") continue;
+    if (entry.kind === "other" || entry.kind === "checklist" || entry.kind === "interaction" || entry.kind === "notice") continue;
     if (entry.kind === "tool") {
       if (isRunning(entry.item) && !backgroundItemIds.includes(entry.id)) return activity?.(entry.item) ?? TOOL_ACTIVITY[entry.item.type] ?? "tool";
       continue;

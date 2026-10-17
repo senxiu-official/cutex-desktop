@@ -1,27 +1,54 @@
-// Known issues shown on Settings → 关于 → 已知问题. Source of truth: docs/KNOWN-ISSUES.md — keep this
-// list (and the strings in ./i18n.ts) in sync with it: same entries, same order, same fix versions.
+// Known issues shown on Settings → 关于 → 已知问题. Source of truth: docs/known-issues.json (schema in
+// shared/knownIssues.ts; docs/KNOWN-ISSUES.md is its readable twin, test/aboutModule.test.tsx keeps them
+// in step). The built-in list is that file, bundled at build time; main also fetches the release
+// branch's copy (main/knownIssues.ts), which wins when it is valid.
+import { useEffect, useState } from "react";
+// A copy of docs/known-issues.json (app code stays inside apps/desktop; test/aboutModule.test.tsx keeps them identical).
+import bundledJson from "./known-issues.bundled.json";
+import { parseKnownIssues, type KnownIssueEntry, type KnownIssuesDoc, type KnownIssuesResult } from "../../../../shared/knownIssues";
+import { bridge } from "../../bridge";
 import type { MessageKey } from "../../i18n";
 import { INSTALL_GUIDE_URL } from "../../lib/firstRun";
 import { PROJECT_REPO_URL } from "../../lib/update";
 
-export interface KnownIssue {
-  id: string;
-  titleKey: MessageKey;
-  bodyKey: MessageKey;
-  workaroundKey?: MessageKey;
-  /** The version planned to fix it ("0.1.3" = this desktop app; "cutex 0.1.2" = the backend); unset = not scheduled. */
-  fixedIn?: string;
+/** The list compiled into this build (an invalid file would fail test/aboutModule.test.tsx). */
+export const BUNDLED_KNOWN_ISSUES: KnownIssuesDoc = parseKnownIssues(bundledJson) ?? { schema: 1, issues: [] };
+
+export interface KnownIssuesView {
+  issues: readonly KnownIssueEntry[];
+  /** github: the release branch's list (fetchedAt; stale = the latest refresh failed); builtin: this build's. */
+  source: "github" | "builtin";
+  fetchedAt?: string;
+  stale?: boolean;
 }
 
-export const KNOWN_ISSUES: readonly KnownIssue[] = [
-  { id: "phone", titleKey: "about.issue.phone.title", bodyKey: "about.issue.phone.body" },
-  { id: "browserPrivate", titleKey: "about.issue.browserPrivate.title", bodyKey: "about.issue.browserPrivate.body", workaroundKey: "about.issue.browserPrivate.workaround", fixedIn: "0.1.3" },
-  { id: "browserShared", titleKey: "about.issue.browserShared.title", bodyKey: "about.issue.browserShared.body", workaroundKey: "about.issue.browserShared.workaround", fixedIn: "0.1.3" },
-  { id: "browserBlocked", titleKey: "about.issue.browserBlocked.title", bodyKey: "about.issue.browserBlocked.body", workaroundKey: "about.issue.browserBlocked.workaround", fixedIn: "0.1.3" },
-  { id: "browserLoopback", titleKey: "about.issue.browserLoopback.title", bodyKey: "about.issue.browserLoopback.body", workaroundKey: "about.issue.browserLoopback.workaround", fixedIn: "0.1.3" },
-  { id: "jobsLinux", titleKey: "about.issue.jobsLinux.title", bodyKey: "about.issue.jobsLinux.body" },
-  { id: "macos", titleKey: "about.issue.macos.title", bodyKey: "about.issue.macos.body" },
-];
+/** The list to show for main's answer (null = none yet / no bridge): the fetched copy, else the built-in one. */
+export function knownIssuesView(result: KnownIssuesResult | null): KnownIssuesView {
+  if (result?.source === "github") {
+    // Main validated it already; checked again here (the renderer trusts only its own parser).
+    const doc = parseKnownIssues(result.doc);
+    if (doc) return { issues: doc.issues, source: "github", fetchedAt: result.fetchedAt, ...(result.stale ? { stale: true } : {}) };
+  }
+  return { issues: BUNDLED_KNOWN_ISSUES.issues, source: "builtin" };
+}
+
+/** The known issues to show: built-in at once, the release branch's list once main has it. */
+export function useKnownIssues(): KnownIssuesView {
+  const [result, setResult] = useState<KnownIssuesResult | null>(null);
+  useEffect(() => {
+    const source = bridge.knownIssues;
+    if (!source) return;
+    let live = true;
+    source.get().then(
+      (r) => live && setResult(r),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  return knownIssuesView(result);
+}
 
 const RELEASE_BLOB = `${PROJECT_REPO_URL}/blob/release`;
 /** The project links of the 关于 page (opened in the system browser; docs on the `release` branch). */

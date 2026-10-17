@@ -5,7 +5,7 @@ import { BookmarkRibbon } from "./BookmarkRibbon";
 import { BookmarksGutter, BookmarksList, BookmarksTrigger } from "./BookmarksList";
 import { BookmarksSettings } from "./BookmarksSettings";
 import { useBookmarkAction, useBookmarksTab } from "./hooks";
-import { BOOKMARKS, parseList, type ListState } from "./model";
+import { BOOKMARKS, parseList, UNBOOKMARKED_KINDS, type ListState } from "./model";
 import { activateBookmarks, toggleBookmark } from "./state";
 import { bookmarkContext } from "./context";
 
@@ -15,7 +15,8 @@ export default defineModule({
     "conversation.gutter": [{ id: "bookmarks.gutter", side: "left", anchor: "top", order: 100, dockMinWidth: 240, titleKey: "bookmarks.title", icon: Bookmark, Trigger: BookmarksTrigger, Body: BookmarksGutter }],
     "side.component": [{ id: BOOKMARKS, titleKey: "bookmarks.list", icon: Bookmark, instances: "singleton", defaultBinding: "host", placement: { home: "reference" }, parseParams: parseList,
       init: (params: ListState, previous: ListState | null) => ({ ...previous, ...params }), restore: (raw) => parseList(raw), useTab: useBookmarksTab, Body: BookmarksList, launcher: { order: 400, params: () => ({}) } }],
-    "ref.action": [{ id: "bookmarks.toggle", icon: Bookmark, titleKey: "bookmarks.add", useState: useBookmarkAction, run: ref => toggleBookmark(ref, bookmarkContext(ref)) }],
+    // Not on agents (the sidebar agent menu): 置顶 keeps an agent at hand (owner 2026-10-16).
+    "ref.action": [{ id: "bookmarks.toggle", icon: Bookmark, titleKey: "bookmarks.add", excludeKinds: UNBOOKMARKED_KINDS, useState: useBookmarkAction, run: ref => toggleBookmark(ref, bookmarkContext(ref)) }],
     "timeline.turnAttachment": [{ id: "bookmarks.ribbon", order: 100, margin: { side: "left", minWidth: 24 }, Attachment: BookmarkRibbon }],
     "settings.section": [{ id: "bookmarks.settings", page: "sidebar", titleKey: "bookmarks.settings", keywords: ["bookmarks.showRibbon", "bookmarks.showRibbonHint"], Section: BookmarksSettings }],
   }, activate: activateBookmarks,

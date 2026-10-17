@@ -6,18 +6,20 @@
 
 <p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
 
-**0.1.2**: optional backend components (Job Service, Claude runtime) install from the app; needs
-cutex 0.1.1 for that (0.1.0 "First Take" was the first public release). See [CHANGELOG.md](CHANGELOG.md).
+**0.1.3**: an in-app browser you can work in (HTTPS, LAN addresses you type, sharing a tab with an
+agent, downloads and site permissions), 自动 (Auto) decided by Codex's automatic reviewer, one-click
+Windows sandbox setup and copying a Profile to another host; pairs with cutex 0.1.2 (0.1.0 "First
+Take" was the first public release). See [CHANGELOG.md](CHANGELOG.md).
 
 > **Known issues**: see [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) (also in the app: Settings → About).
 > The most important ones:
-> - **In-app browser** cannot open LAN, private or tailnet addresses (fix planned for 0.1.3); open
->   them in your normal browser.
+> - **Windows sandbox with Microsoft Store PowerShell**: after "Set up sandbox", every command fails
+>   with exit -1; install PowerShell with winget or the MSI installer, or leave the sandbox unset.
 > - **Phone push / pairing a phone**: there is no public phone app yet.
 >
 > Claude agents and the Jobs page need optional cutex components (the Claude runtime; the Job
 > Service, Linux only). Install them with the **Install** button where the app asks for one, or
-> `cutex component install claude-runtime` / `job-service` on the host (cutex 0.1.1, managed
+> `cutex component install claude-runtime` / `job-service` on the host (cutex 0.1.1+, managed
 > install; [install guide](docs/install/AGENT-INSTALL.md) §6.1 / §6.2).
 
 Cutex desktop is the desktop app for [cutex](https://github.com/senxiu-official/cutex), a daemon

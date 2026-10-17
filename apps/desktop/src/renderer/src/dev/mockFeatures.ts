@@ -20,6 +20,7 @@ const CORE_BASE_FEATURES: readonly string[] = [
 
 /** Newer cutex only (absent under `?legacy`). */
 const CORE_NEW_FEATURES: readonly string[] = [
+  "windows-sandbox-readiness",
   "agent-avatar-color",
   "session-fast-mode",
   "runtime-restore-candidates",
@@ -34,6 +35,7 @@ const CORE_NEW_FEATURES: readonly string[] = [
   "claude-tool-defaults",
   "new-thread-defaults",
   "fresh-agent-auto-permissions",
+  "launch-approvals-reviewer",
   "profile-quota-native",
   "session-history-revert",
   "session-fork",
@@ -41,6 +43,7 @@ const CORE_NEW_FEATURES: readonly string[] = [
   "session-delete-empty-on-archive",
   "profile-create",
   "profile-duplicate",
+  "profile-transfer",
   "profile-model-variants",
   "profile-model-display-names",
   "profile-delete",

@@ -1,0 +1,117 @@
+{
+  "schema": 1,
+  "issues": [
+    {
+      "id": "phone",
+      "title": {
+        "zh-CN": "手机推送 / 配对手机",
+        "zh-Hant-CN": "手機推送 / 配對手機",
+        "en": "Phone push / pairing a phone"
+      },
+      "body": {
+        "zh-CN": "还没有公开的手机应用，所以暂时不能配对手机，也收不到手机推送。",
+        "zh-Hant-CN": "還沒有公開的手機應用，所以暫時不能配對手機，也收不到手機推送。",
+        "en": "There is no public phone app yet, so you cannot pair a phone or get push notifications on it."
+      }
+    },
+    {
+      "id": "winSandbox",
+      "title": {
+        "zh-CN": "Windows（cutex 0.1.1 主机）：「自动」模式下普通命令也要审批",
+        "zh-Hant-CN": "Windows（cutex 0.1.1 主機）：「自動」模式下普通命令也要審批",
+        "en": "Windows (cutex 0.1.1 hosts): plain commands ask for approval in Auto mode"
+      },
+      "body": {
+        "zh-CN": "Windows 主机上的{{agent}}还没有设置 Windows 沙箱时，原生运行时没法限制命令，只能每条都问你。cutex 0.1.2 起，权限菜单会提示沙箱未就绪，并提供一键设置（无需管理员）；cutex 0.1.1 的主机没有这个设置入口。",
+        "zh-Hant-CN": "Windows 主機上的{{agent}}還沒有設置 Windows 沙箱時，原生運行時沒法限制命令，只能每條都問你。cutex 0.1.2 起，權限菜單會提示沙箱未就緒，並提供一鍵設置（無需管理員）；cutex 0.1.1 的主機沒有這個設置入口。",
+        "en": "When {{an agent}} on a Windows host has no Windows sandbox set up, the native runtime cannot confine commands, so it asks you before every one. From cutex 0.1.2 the permission menu says the sandbox is not ready and sets it up in one click (no administrator rights); a cutex 0.1.1 host has no such setup."
+      },
+      "workaround": {
+        "zh-CN": "在「设置 → 主机后端更新」里把那台主机更新到 cutex 0.1.2；或者暂时改用「完全访问」，或在那台主机上用 cute-codex 的 /setup-default-sandbox 设置沙箱。",
+        "zh-Hant-CN": "在「設置 → 主機後端更新」裏把那臺主機更新到 cutex 0.1.2；或者暫時改用「完全訪問」，或在那臺主機上用 cute-codex 的 /setup-default-sandbox 設置沙箱。",
+        "en": "Update that host to cutex 0.1.2 (Settings → Host backend updates); or use Full access for now, or set up the sandbox on that host with cute-codex's /setup-default-sandbox."
+      },
+      "fixedIn": "cutex 0.1.2",
+      "appliesTo": {
+        "cutex": "<0.1.2"
+      }
+    },
+    {
+      "id": "winProfileKey",
+      "title": {
+        "zh-CN": "Windows（cutex 0.1.1 主机）：保存过的 API key Profile 无法创建智能体",
+        "zh-Hant-CN": "Windows（cutex 0.1.1 主機）：保存過的 API key Profile 無法創建智能體",
+        "en": "Windows (cutex 0.1.1 hosts): a saved API-key Profile cannot start agents"
+      },
+      "body": {
+        "zh-CN": "在 Windows 上保存 API key Profile 的设置之后，创建智能体时报「object DACL is not service-private」。cutex 写这个凭据文件时没有给它设独立的私有权限，只继承了上级目录的权限，而启动时的检查要求独立权限。",
+        "zh-Hant-CN": "在 Windows 上保存 API key Profile 的設置之後，創建智能體時報「object DACL is not service-private」。cutex 寫這個憑據文件時沒有給它設獨立的私有權限，只繼承了上級目錄的權限，而啓動時的檢查要求獨立權限。",
+        "en": "On Windows, after an API-key Profile's settings are saved, creating an agent fails with “object DACL is not service-private”: cutex wrote the credential file with only inherited permissions, and the launch check requires its own private permissions."
+      },
+      "workaround": {
+        "zh-CN": "在「设置 → 主机后端更新」里把那台主机更新到 cutex 0.1.2，它会自动修好。在那之前，在 PowerShell 里对报错里的 auth.json 运行：icacls \"<报错里的路径>\" /inheritance:r /grant:r \"$env:USERNAME`:F\"（只改权限，不碰内容）。",
+        "zh-Hant-CN": "在「設置 → 主機後端更新」裏把那臺主機更新到 cutex 0.1.2，它會自動修好。在那之前，在 PowerShell 裏對報錯裏的 auth.json 運行：icacls \"<報錯裏的路徑>\" /inheritance:r /grant:r \"$env:USERNAME`:F\"（只改權限，不碰內容）。",
+        "en": "Update that host to cutex 0.1.2 (Settings → Host backend updates); it repairs the file by itself. Until then, in PowerShell, run on the auth.json named in the error: icacls \"<path from the error>\" /inheritance:r /grant:r \"$env:USERNAME`:F\" (changes permissions only, not the contents)."
+      },
+      "fixedIn": "cutex 0.1.2",
+      "appliesTo": {
+        "cutex": "<0.1.2"
+      }
+    },
+    {
+      "id": "winStorePowerShell",
+      "title": {
+        "zh-CN": "Windows：设置沙箱后，商店版 PowerShell 的命令都失败",
+        "zh-Hant-CN": "Windows：設置沙箱後，商店版 PowerShell 的命令都失敗",
+        "en": "Windows: after the sandbox is set up, commands fail with Store PowerShell"
+      },
+      "body": {
+        "zh-CN": "在 Windows 主机上点了「设置沙箱（无需管理员）」之后，如果那台机器的 PowerShell 是 Microsoft Store 版，{{agent}}运行的每条命令都以 exit -1 失败：受限的沙箱进程不能启动商店应用。",
+        "zh-Hant-CN": "在 Windows 主機上點了「設置沙箱（無需管理員）」之後，如果那臺機器的 PowerShell 是 Microsoft Store 版，{{agent}}運行的每條命令都以 exit -1 失敗：受限的沙箱進程不能啓動商店應用。",
+        "en": "On a Windows host where PowerShell is the Microsoft Store version, after “Set up sandbox (no administrator)” every command {{an agent}} runs fails with exit -1: the restricted sandbox process cannot start a Store app."
+      },
+      "workaround": {
+        "zh-CN": "在那台主机上用 winget（winget install Microsoft.PowerShell）或 MSI 安装包安装 PowerShell，之后重启{{agent}}；或者先不设置沙箱。",
+        "zh-Hant-CN": "在那臺主機上用 winget（winget install Microsoft.PowerShell）或 MSI 安裝包安裝 PowerShell，之後重啓{{agent}}；或者先不設置沙箱。",
+        "en": "Install PowerShell on that host with winget (winget install Microsoft.PowerShell) or the MSI installer, then restart the {{agent}}; or leave the sandbox unset for now."
+      },
+      "fixedIn": "cute-codex 0.160.0-r52.3"
+    },
+    {
+      "id": "jobsLinux",
+      "title": {
+        "zh-CN": "Job Service 和 NCI 远程作业只支持 Linux 主机",
+        "zh-Hant-CN": "Job Service 和 NCI 遠程作業只支持 Linux 主機",
+        "en": "Job Service and NCI remote jobs need a Linux host"
+      },
+      "body": {
+        "zh-CN": "Job Service 组件（作业页、NCI 远程作业都依赖它）只能装在 Linux 的 cutex 主机上。",
+        "zh-Hant-CN": "Job Service 組件（作業頁、NCI 遠程作業都依賴它）只能裝在 Linux 的 cutex 主機上。",
+        "en": "The Job Service component (needed by the Jobs page and NCI remote jobs) runs only on Linux cutex hosts."
+      },
+      "workaround": {
+        "zh-CN": "在 Linux 主机上使用这些功能。",
+        "zh-Hant-CN": "在 Linux 主機上使用這些功能。",
+        "en": "Run these from a Linux host."
+      }
+    },
+    {
+      "id": "macos",
+      "title": {
+        "zh-CN": "macOS：只有桌面端",
+        "zh-Hant-CN": "macOS：只有桌面端",
+        "en": "macOS: front end only"
+      },
+      "body": {
+        "zh-CN": "macOS 上的应用只是前端：cutex 本身运行在另一台（Linux 或 Windows）机器上，通过 SSH 连接。",
+        "zh-Hant-CN": "macOS 上的應用只是前端：cutex 本身運行在另一臺（Linux 或 Windows）機器上，通過 SSH 連接。",
+        "en": "On macOS the app is a front end only: cutex runs on another machine (Linux or Windows) that you connect to over SSH."
+      },
+      "workaround": {
+        "zh-CN": "在一台 Linux 或 Windows 机器上运行 cutex，再把它添加为主机。",
+        "zh-Hant-CN": "在一臺 Linux 或 Windows 機器上運行 cutex，再把它添加爲主機。",
+        "en": "Run cutex on a Linux or Windows machine and add it as a host."
+      }
+    }
+  ]
+}

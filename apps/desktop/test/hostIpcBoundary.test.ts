@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { INVOKE_CHANNEL, SHELL_CHANNEL, UPDATE_CHANNEL, WINDOW_CHANNEL } from "../src/shared/ipc";
 import { PLUGINS_CHANNEL } from "../src/shared/plugins";
+import { KNOWN_ISSUES_CHANNEL } from "../src/shared/knownIssues";
+import { LAUNCH_ART_CHANNEL } from "../src/shared/launchArt";
 import type { PluginCatalog, PluginFrameResource } from "../src/shared/plugins";
 import type { DaemonService } from "../src/main/daemon";
 import type { PreloadBridge } from "../src/shared/ipc";
@@ -216,6 +218,8 @@ vi.mock("../src/main/updater", () => ({
     sourceDir() { return null; }
     releaseDir() { return null; }
     state() { return { status: "idle" }; }
+    // The known-issues fetch rides on the updater's transport: here an offline one.
+    transport() { return () => Promise.reject(new Error("offline")); }
   }
 }));
 vi.mock("../src/main/errorLog", () => ({
@@ -521,6 +525,10 @@ const channelCases = [
   },
   { name: "desktop shell", channel: SHELL_CHANNEL, args: [{ op: "state" }] },
   { name: "updater", channel: UPDATE_CHANNEL, args: [{ op: "state" }] },
+  { name: "known issues", channel: KNOWN_ISSUES_CHANNEL, args: [{ op: "get" }] },
+  { name: "launch art state", channel: LAUNCH_ART_CHANNEL, args: [{ op: "state" }] },
+  { name: "launch art import", channel: LAUNCH_ART_CHANNEL, args: [{ op: "import" }] },
+  { name: "launch art clear", channel: LAUNCH_ART_CHANNEL, args: [{ op: "clear" }] },
   { name: "window controls", channel: WINDOW_CHANNEL, args: ["control", "minimize"] },
   { name: "plugin catalog", channel: PLUGINS_CHANNEL, args: [{ op: "list" }] },
   { name: "plugin preparation", channel: PLUGINS_CHANNEL, args: [{ op: "prepare" }] },
@@ -539,6 +547,12 @@ describe("main IPC authority belongs to the app's exact top frame", () => {
   it("keeps non-daemon interfaces available to the legitimate app frame", async () => {
     await expect(invokeAs(appEvent(), SHELL_CHANNEL, { op: "state" })).resolves.toMatchObject({ prefs: {} });
     await expect(invokeAs(appEvent(), UPDATE_CHANNEL, { op: "state" })).resolves.toEqual({ status: "idle" });
+    await expect(fake.bridge!.knownIssues!.get()).resolves.toEqual({ source: "none", error: "offline" });
+    await expect(invokeAs(appEvent(), KNOWN_ISSUES_CHANNEL, { op: "drop" })).rejects.toThrow("unknown known-issues op");
+    await expect(fake.bridge!.launchArt!.state()).resolves.toEqual({ imported: {} });
+    await expect(invokeAs(appEvent(), LAUNCH_ART_CHANNEL, { op: "drop" })).rejects.toThrow("unknown launch-art op");
+    // The folder comes from main's dialog only: a renderer-named folder is refused.
+    await expect(invokeAs(appEvent(), LAUNCH_ART_CHANNEL, { op: "import", folder: fake.userData })).rejects.toThrow("unknown launch-art op");
     await expect(invokeAs(appEvent(), WINDOW_CHANNEL, "control", "minimize")).resolves.toBeUndefined();
     expect(fake.windowActions).toEqual(["minimize"]);
     await expect(fake.bridge!.plugins!.list()).resolves.toEqual({ plugins: [], errors: [] });

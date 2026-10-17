@@ -4,7 +4,7 @@ export interface BrowserOwnerScope { hostId: string; epoch: string; tabKey: stri
 export interface BrowserOwnerSnapshot { enabled: boolean; epoch: string | null; view?: BrowserTabView }
 export interface BrowserOwnerControllerDeps {
   snapshot(scope: BrowserOwnerScope): BrowserOwnerSnapshot;
-  api(hostId: string): Pick<HostBrowserBridge, "agents" | "grantAgent" | "resumeLease" | "releaseLease">;
+  api(hostId: string): Pick<HostBrowserBridge, "agents" | "grantAgent" | "resumeLease" | "releaseLease" | "pauseLease">;
   afterHostsDelivered(): Promise<void>;
 }
 const safeName = (value: unknown): value is string => typeof value === "string" && !!value.trim()
@@ -60,19 +60,23 @@ export class BrowserOwnerController {
       return true;
     } finally { if (this.pending.get(key) === token) this.pending.delete(key); }
   }
-  async resume(scope: BrowserOwnerScope, settings: BrowserControlSettings,
-    confirm: (name: string, pool: "owner" | "agent") => Promise<boolean>): Promise<boolean> {
+  /** One click: the same agent's same lease, which the owner already confirmed at grant time. */
+  async resume(scope: BrowserOwnerScope, settings: BrowserControlSettings): Promise<boolean> {
     const original = this.current(scope), lease = original?.lease;
     if (!original || !lease || lease.state !== "active" || original.control?.state !== "paused") return false;
     const token = {}, key = this.key(scope); this.pending.set(key, token);
     try {
-      if (!(await confirm(lease.agentName, original.pool === "agent" ? "agent" : "owner"))) return false;
       await this.deps.afterHostsDelivered();
       const current = this.current(scope, original);
       if (this.pending.get(key) !== token || !current || current.lease?.state !== "active" || current.control?.state !== "paused") return false;
       await this.deps.api(scope.hostId).resumeLease(scope.tabKey, lease.leaseId, settings);
       return true;
     } finally { if (this.pending.get(key) === token) this.pending.delete(key); }
+  }
+  /** Explicit pause keeps the lease; authority-reducing, so no epoch gate (like revoke). */
+  async pause(hostId: string, tabKey: string, leaseId: string): Promise<void> {
+    this.pending.delete(this.key({ hostId, tabKey }));
+    await this.deps.api(hostId).pauseLease(tabKey, leaseId);
   }
   /** Revocation is not blocked by an obsolete epoch or module-off state. Exact lease only. */
   async revoke(hostId: string, tabKey: string, leaseId: string): Promise<void> {

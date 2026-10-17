@@ -1,10 +1,14 @@
 # Known issues
 
-Known issues in **desktop 0.1.2** with **cutex 0.1.1**. The app shows the same list under
-Settings → About → Known issues (`apps/desktop/src/renderer/src/modules/about/knownIssues.ts`);
-keep both in sync.
+Known issues in **desktop 0.1.3** with **cutex 0.1.2**. The app shows the same list under
+Settings → About → Known issues from [known-issues.json](known-issues.json) (schema in
+`apps/desktop/src/shared/knownIssues.ts`): its built-in copy, and the copy on the `release` branch,
+which it fetches — so a docs push to `release` updates the list in installed apps. Change this file
+and the JSON together (same entries, order, titles and planned fixes; a test checks them).
 
 Each entry: what you see, a workaround if there is one, and the version that is planned to fix it.
+Entries titled "cutex 0.1.1 hosts" apply only while a host still runs cutex 0.1.1; the app hides them for
+a host on cutex 0.1.2 (`appliesTo` in the JSON).
 
 ## Phone push / pairing a phone
 
@@ -14,68 +18,38 @@ available.
 - Workaround: none.
 - Planned fix: not scheduled.
 
-## In-app browser: LAN, private and tailnet addresses do not open
-
-The in-app browser only opens public sites, loopback addresses and the host's cutex services.
-Addresses on your local network, private ranges and tailnets (for example `192.168.x.x`, `10.x.x.x`,
-`100.64.0.0/10`) are refused. The error message also mixes several causes ("external pages are
-off" and "private address" read alike).
-
-- Workaround: open these pages in your normal browser, or expose them as a cutex service.
-- Planned fix: desktop 0.1.3.
-
-## In-app browser: sharing a tab with an agent
-
-On a tab an agent controls, any click, scroll or key press by you pauses the agent. The first click
-only takes the tab over and does not reach the page. Resuming the agent asks for a second
-confirmation.
-
-- Workaround: none; click once to take over, then use the page.
-- Planned fix: desktop 0.1.3 (you and the agent can both use the tab, an explicit Pause, one-click
-  Resume).
-
-## In-app browser: downloads, device permissions and POST pop-ups are blocked
-
-Downloads, camera / microphone / other device permission prompts, and pop-up windows that submit a
-form (POST) are blocked.
-
-- Workaround: open the page in your normal browser.
-- Planned fix: desktop 0.1.3 (a save dialog for downloads, per-site permissions you grant).
-
-## In-app browser: pages can reach loopback ports
-
-A web page open in the in-app browser can send requests to loopback ports on the desktop machine.
-cutex's management API still requires its token.
-
-- Workaround: only open sites you trust in the in-app browser.
-- Planned fix: desktop 0.1.3.
-
-## Windows: plain commands ask for approval in Auto mode
+## Windows (cutex 0.1.1 hosts): plain commands ask for approval in Auto mode
 
 When an agent on a Windows host has no Windows sandbox set up, the native runtime cannot confine
-commands, so in Auto (自动) it asks you before every command.
+commands, so in Auto (自动) it asks you before every command. From cutex 0.1.2 the permission menu says
+the sandbox is not ready and sets it up in one click (no administrator rights); a cutex 0.1.1 host has
+no such setup.
 
-- Workaround: use Full access for now, or set up the sandbox on that host with cute-codex's
-  `/setup-default-sandbox`.
-- Planned fix: desktop 0.1.3 (a readiness note and a one-click setup without administrator rights in
-  the permission menu; needs the matching cutex).
+- Workaround: update that host to cutex 0.1.2 (Settings → Host backend updates); or use Full access for
+  now, or set up the sandbox on that host with cute-codex's `/setup-default-sandbox`.
+- Planned fix: cutex 0.1.2 (with desktop 0.1.3).
 
-## Services: Stop on a static service fails
+## Windows (cutex 0.1.1 hosts): a saved API-key Profile cannot start agents
 
-Static web services published by an agent still show Stop / Restart in their menu. cutex answers
-`not_supervised`: it serves those files itself and has no process to stop.
+On Windows, after an API-key Profile's settings are saved, creating an agent fails with "object DACL
+is not service-private": cutex wrote the credential file with only inherited permissions, and the launch
+check requires its own private permissions.
 
-- Workaround: use Delete to remove the service (it only unregisters it; the files stay).
-- Planned fix: desktop 0.1.3.
+- Workaround: update that host to cutex 0.1.2 (Settings → Host backend updates); it repairs the file by
+  itself. Until then, in PowerShell, run on the auth.json named in the error
+  `` icacls "<path from the error>" /inheritance:r /grant:r "$env:USERNAME`:F" `` (changes permissions only,
+  not the contents).
+- Planned fix: cutex 0.1.2.
 
-## Host backend update page shows the wrong state
+## Windows: after the sandbox is set up, commands fail with Store PowerShell
 
-After a backend update, the Current version card is sometimes only an empty bar (cause still under
-investigation), the top update card stays, and a full update without a new native still says "new
-native runtime". The update itself succeeded; "up to date" further down is correct.
+On a Windows host where PowerShell is the Microsoft Store version, after "Set up sandbox (no
+administrator)" (设置沙箱（无需管理员）) every command an agent runs fails with exit -1: the restricted
+sandbox process cannot start a Store app.
 
-- Workaround: reopen Settings, or press Ctrl+R.
-- Planned fix: desktop 0.1.3 (the empty card: once the cause is found).
+- Workaround: install PowerShell on that host with winget (`winget install Microsoft.PowerShell`) or
+  the MSI installer, then restart the agent; or leave the sandbox unset for now.
+- Planned fix: cute-codex 0.160.0-r52.3 (the next native runtime).
 
 ## Job Service and NCI remote jobs need a Linux host
 

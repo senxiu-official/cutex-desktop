@@ -3,7 +3,7 @@ import type { ProfileItem } from "../../../shared/ipc";
 import { useI18n } from "../i18n";
 import { PROVIDER_LABEL } from "../lib/provider";
 import type { portraitChoices, PortraitProvider } from "../lib/launchPortraits";
-import { LAUNCH_ART } from "../lib/launchArt";
+import { useLaunchArt } from "../lib/launchArt";
 
 // Art direction for this cast, not official provider character measurements.
 const HEIGHT_CM: Record<PortraitProvider, number> = {
@@ -56,7 +56,8 @@ export function LaunchPortraits({ choices, selected, profileId, disabled, onSele
     setEntering(selected !== null);
   }
   const selectedProfiles = choices.find((c) => c.provider === selected)?.profiles ?? [];
-  const victory = selected ? LAUNCH_ART[selected]?.victory : undefined;
+  const art = useLaunchArt();
+  const victory = selected ? art[selected]?.victory : undefined;
   return <div className="launch-portrait-stage">
     {selected && victory ? <div key={selected} className="launch-portrait-selected">
     <div className={`launch-victory${entering ? " is-entering" : ""}`}>
@@ -74,7 +75,7 @@ export function LaunchPortraits({ choices, selected, profileId, disabled, onSele
           aria-label={t("launch.portrait.select", { provider: PROVIDER_LABEL[provider], profile: profile.name })}
           onClick={() => onSelect(profile.id)}>
           <div className="launch-portrait-figure">
-            <img src={LAUNCH_ART[provider]?.portrait} style={{
+            <img src={art[provider]?.portrait} style={{
               width: `${260 * HEIGHT_CM[provider] / 174 * (1 - EYE_LINE.codex) / (1 - EYE_LINE[provider])}%`,
               ...(provider === "codex" ? { transform: "translate(-50%, -10px) scale(0.94)", transformOrigin: "center bottom" } : {}),
               ...(HEAD_ZOOM[provider] ? { transform: `translateX(-50%) scale(${HEAD_ZOOM[provider]})`, transformOrigin: `center ${EYE_LINE[provider] * 100}%` } : {}),

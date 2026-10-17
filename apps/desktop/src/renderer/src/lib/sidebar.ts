@@ -79,6 +79,12 @@ export function sameAgentRow(a: { row: AgentRow }, b: { row: AgentRow }): boolea
   return keys.length === Object.keys(b.row).length && keys.every((k) => a.row[k] === b.row[k]);
 }
 
+/**
+ * The sidebar's own group ids (not daemon ids) that host-keyed prefs store: 独立智能体, the 快速会话
+ * list, 其他项目. Every host's snapshot claims them (store `snapshotIds`, lib/hostKeys).
+ */
+export const SIDEBAR_GROUP_IDS: readonly string[] = ["__independent__", "__chats__", "__other__"];
+
 /** A row's / group's key across hosts (hand-built ones without a host: their bare id). */
 export const rowKey = (row: Pick<AgentRow, "id" | "key">): string => row.key ?? row.id;
 export const groupKey = (group: Pick<SidebarGroup, "id" | "key">): string => group.key ?? group.id;
@@ -101,9 +107,9 @@ export function untitledChatName(session: SessionResource, label: string): strin
   return isQuickChat(session) && PLACEHOLDER_CHAT_NAME.test(session.displayName) ? label : null;
 }
 
-/** Newest first: last activity, then creation time, then id for a stable order. */
+/** Pinned first (menu 置顶), then newest first: last activity, then creation time, then id for a stable order. */
 export function compareChats(a: AgentRow, b: AgentRow): number {
-  return b.lastActivity - a.lastActivity || timestamp(b.session.createdAt) - timestamp(a.session.createdAt) || a.id.localeCompare(b.id);
+  return Number(b.pinned) - Number(a.pinned) || b.lastActivity - a.lastActivity ||timestamp(b.session.createdAt) - timestamp(a.session.createdAt) || a.id.localeCompare(b.id);
 }
 
 type PendingViews = Record<string, { timeline: { pending: { size: number } } }>;

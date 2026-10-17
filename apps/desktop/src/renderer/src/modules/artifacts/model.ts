@@ -3,6 +3,7 @@
 // attribution text, preview kinds, a small CSV reader, and the `artifact_publish` tool call.
 // Wire shapes: shared/artifactStore.ts (docs/research/artifacts-api-v1.md).
 import { ARTIFACT_KINDS, ARTIFACT_PUBLISH_TOOL, parseArtifactRef, type ArtifactContent, type ArtifactDetail, type ArtifactDiff, type ArtifactKind, type ArtifactListQuery, type ArtifactProducer, type ArtifactSummary, type ArtifactVersion } from "../../../../shared/artifactStore";
+import { canonicalMime, isGenericMime } from "../../lib/fileKinds";
 import { toolArgs, toolResult } from "../../lib/taskRows";
 import type { MessageKey } from "../../i18n";
 import type { RawItem } from "../../lib/timeline";
@@ -32,7 +33,7 @@ export interface ViewState {
   ref: string;
   pane: ViewPane;
   name?: string;
-  /** An HTML page shown as its source code instead of the rendered page (「源代码」). */
+  /** The 源代码 tab: an HTML page / Markdown document / CSV table shown as its source text (pane "preview"). */
   code?: true;
 }
 
@@ -213,7 +214,7 @@ export function attributionText(p: ArtifactProducer, t: T): string | null {
 
 // ── preview ──────────────────────────────────────────────────────────────────────────────────────
 
-/** `html`: a page rendered in the offline opaque frame (§10.2), with its source a toggle away. */
+/** `html`: a page rendered in the offline opaque frame (§10.2), with its source a tab away. */
 export type PreviewKind = "markdown" | "html" | "image" | "csv" | "tsv" | "text" | "binary";
 
 const TEXT_APPS = /^application\/(json|xml|x-yaml|yaml|toml|javascript|x-javascript|x-sh|x-python|sql|x-tex|ld\+json)$|\+(json|xml)$/;
@@ -225,17 +226,66 @@ function extOf(name: string): string {
   return dot > 0 ? last.slice(dot + 1).toLowerCase() : "";
 }
 
-/** How to preview a version: by media type first, then by the name's extension. */
-export function previewKind(mediaType: string, name: string): PreviewKind {
-  const mime = (mediaType.split(";")[0] ?? "").trim().toLowerCase();
-  const ext = extOf(name);
-  if (mime === "text/markdown" || mime === "text/x-markdown" || ext === "md" || ext === "markdown") return "markdown";
+const EXT_IMAGE = /^(png|jpe?g|gif|webp|bmp|svg)$/;
+/** Documents shown by components/DocumentPreview.tsx (lib/docPreview.ts), never as text. */
+const DOC_EXT = /^(pdf|docx?|dotx?|xlsx?|pptx?|od[tsp]|rtf)$/;
+
+/**
+ * The path whose extension types a version: its source file when that has an extension (the file
+ * cutex read), else the artifact name (an owner-chosen label may have none). Windows and POSIX
+ * separators both count.
+ */
+export function typePath(name: string, sourcePath = ""): string {
+  return extOf(sourcePath) ? sourcePath : name;
+}
+
+/**
+ * How to preview a version: by a specific media type first; a generic one (octet-stream,
+ * text/plain, none — what older cutex stored when the name was a label without an extension) is
+ * decided by the extension of [`typePath`]. Aliases such as `image/jpg` count as their standard type.
+ */
+export function previewKind(mediaType: string, name: string, sourcePath = ""): PreviewKind {
+  const mime = canonicalMime(mediaType);
+  const ext = extOf(typePath(name, sourcePath));
+  if (mime === "text/markdown" || mime === "text/x-markdown") return "markdown";
   if (mime.startsWith("image/")) return "image";
-  if (mime === "text/html" || mime === "application/xhtml+xml" || ext === "html" || ext === "htm" || ext === "xhtml") return "html";
-  if (mime === "text/csv" || ext === "csv") return "csv";
-  if (mime === "text/tab-separated-values" || ext === "tsv") return "tsv";
-  if (mime.startsWith("text/") || TEXT_APPS.test(mime) || EXT_TEXT.test(ext)) return "text";
-  return "binary";
+  if (mime === "text/html" || mime === "application/xhtml+xml") return "html";
+  if (mime === "text/csv") return "csv";
+  if (mime === "text/tab-separated-values") return "tsv";
+  if (!isGenericMime(mime)) return mime.startsWith("text/") || TEXT_APPS.test(mime) ? "text" : "binary";
+  if (ext === "md" || ext === "markdown") return "markdown";
+  if (EXT_IMAGE.test(ext)) return "image";
+  if (ext === "html" || ext === "htm" || ext === "xhtml") return "html";
+  if (ext === "csv") return "csv";
+  if (ext === "tsv") return "tsv";
+  if (EXT_TEXT.test(ext)) return "text";
+  return mime === "text/plain" && !DOC_EXT.test(ext) ? "text" : "binary";
+}
+
+/** Text kinds whose preview is not the text itself (rendered Markdown, a page, a table): they get a 源代码 tab. */
+export function hasCodeView(kind: PreviewKind): boolean {
+  return kind === "markdown" || kind === "html" || kind === "csv" || kind === "tsv";
+}
+
+/** The view's tabs (one row): 预览 · 源代码 (hasCodeView kinds only) · 出处 (pane "source") · 对比. */
+export type ViewTab = "preview" | "code" | "origin" | "compare";
+
+export function viewTabs(kind: PreviewKind): ViewTab[] {
+  return hasCodeView(kind) ? ["preview", "code", "origin", "compare"] : ["preview", "origin", "compare"];
+}
+
+/** The selected tab of a view state (`code` counts only where the kind has a source view). */
+export function currentTab(state: Pick<ViewState, "pane" | "code">, kind: PreviewKind): ViewTab {
+  if (state.pane === "source") return "origin";
+  if (state.pane === "compare") return "compare";
+  return state.code && hasCodeView(kind) ? "code" : "preview";
+}
+
+/** The view state after picking `tab` (the pane id "source" stays for saved tabs; `code` only on 源代码). */
+export function withTab<S extends Pick<ViewState, "pane" | "code">>(state: S, tab: ViewTab): S {
+  const { code: _code, ...rest } = state;
+  if (tab === "code") return { ...rest, pane: "preview", code: true } as S;
+  return { ...rest, pane: tab === "origin" ? "source" : tab } as S;
 }
 
 /** Rows of a CSV / TSV text (quotes, doubled quotes, CRLF), at most `maxRows`; `more` = there were further rows. */

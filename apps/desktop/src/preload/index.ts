@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from "electron";
 import { browserBridge } from "./browser";
 import { PLUGINS_CHANNEL, type PluginRequest } from "../shared/plugins";
 import { FRAMES_CHANNEL, type FrameRequest } from "../shared/frames";
+import { KNOWN_ISSUES_CHANNEL, type KnownIssuesRequest } from "../shared/knownIssues";
+import { LAUNCH_ART_CHANNEL, type LaunchArtRequest } from "../shared/launchArt";
 import {
   EVENT_CHANNEL,
   HOST_METHOD_NAMES,
@@ -36,12 +38,15 @@ const METHODS: InvokeMethod[] = [
   "saveHostGroups",
   "testHost",
   "setHostStartOn",
+  "sshPrompts",
+  "answerSshPrompt",
   "identityState",
   "exportIdentity",
   "importIdentity",
   "copyIdentityKey",
   "importIdentityKey",
   "setIdentityName",
+  "copyProfileToHost",
   "daemonState",
   "browseDirs",
   "approvals",
@@ -101,6 +106,8 @@ const METHODS: InvokeMethod[] = [
   "duplicateProfile",
   "deleteProfile",
   "readRateLimits",
+  "windowsSandboxReadiness",
+  "setupWindowsSandbox",
   "quotaConfig",
   "putQuotaConfig",
   "capabilities",
@@ -385,6 +392,14 @@ const bridge: PreloadBridge = {
   frames: {
     prepareArtifactPage: (input) => ipcRenderer.invoke(FRAMES_CHANNEL, { op: "artifactPage", hostId: input.hostId, artifactId: input.artifactId, version: input.version } satisfies FrameRequest),
     release: (id) => ipcRenderer.invoke(FRAMES_CHANNEL, { op: "release", id } satisfies FrameRequest),
+  },
+  knownIssues: {
+    get: (refresh) => ipcRenderer.invoke(KNOWN_ISSUES_CHANNEL, { op: "get", refresh: refresh === true } satisfies KnownIssuesRequest),
+  },
+  launchArt: {
+    state: () => ipcRenderer.invoke(LAUNCH_ART_CHANNEL, { op: "state" } satisfies LaunchArtRequest),
+    import: () => ipcRenderer.invoke(LAUNCH_ART_CHANNEL, { op: "import" } satisfies LaunchArtRequest),
+    clear: () => ipcRenderer.invoke(LAUNCH_ART_CHANNEL, { op: "clear" } satisfies LaunchArtRequest),
   },
   on(event, listener) {
     const set = listeners.get(event) ?? new Set();

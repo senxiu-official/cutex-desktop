@@ -11,7 +11,7 @@ import { MessageSquarePlus, Target, X } from "lucide-react";
 import type { SkillMetadata, SkillsListResponse } from "@cutex-desktop/protocol/codex/v2";
 import type { ProfileItem, ProfileModelsView } from "../../../../shared/ipc";
 import type { DraftImage } from "../../../../shared/input";
-import { BUILTIN_THREAD_DEFAULTS, readNewThreadDefaults, type LaunchPermissions } from "../../../../shared/launch";
+import { BUILTIN_THREAD_DEFAULTS, readNewThreadDefaults, type LaunchOverrides, type LaunchPermissions } from "../../../../shared/launch";
 import { useI18n, type MessageKey } from "../../i18n";
 import { en } from "../../i18n/en";
 import { zhCN } from "../../i18n/zh-CN";
@@ -52,6 +52,9 @@ onHostSwitch(() => catalogs.clear());
 /** Last `quickChatDefaultProfile` per host: a revisit picks the same profile (portrait, greeting) in
  *  its first frame instead of the host default until the settings arrive. */
 const quickDefaults = new Map<string, string | null>();
+/** The picked composer mode survives a profile / host switch (model and effort do not). */
+const keptMode = (launch: LaunchOverrides): LaunchOverrides =>
+  launch.sandbox ? { sandbox: launch.sandbox, approvalPolicy: launch.approvalPolicy, ...(launch.approvalsReviewer ? { approvalsReviewer: launch.approvalsReviewer } : {}) } : {};
 onHostSwitch(() => quickDefaults.clear());
 let imageSeq = 0;
 
@@ -178,7 +181,11 @@ function PendingChatBody({ target }: { target: CreateHost }) {
   const row = models.find((m) => m.id === model);
   const shownModel = modelName(model, row?.displayName, item?.id);
   const effort = launch.reasoningEffort ?? (launch.model ? row?.defaultReasoningEffort : (item?.modelReasoningEffort ?? row?.defaultReasoningEffort)) ?? null;
-  const mode = permissionModeOfLaunch(launch.sandbox ?? quick.sandbox, launch.approvalPolicy ?? quick.approvalPolicy);
+  const mode = permissionModeOfLaunch(launch.sandbox ?? quick.sandbox, launch.approvalPolicy ?? quick.approvalPolicy, launch.approvalsReviewer ?? quick.approvalsReviewer);
+  // The store creates the session from this (自动's reviewer on an older cutex: lib/permissionModes).
+  useEffect(() => {
+    if (pending && !pending.sessionId && pending.permissionMode !== mode) update({ permissionMode: mode });
+  }, [pending, mode, update]);
   const drafts = pending?.drafts ?? [];
   // Session-shaping choices lock with the first send; plan / goal until they were applied.
   const locked = creating || drafts.length > 0 || !!pending?.sessionId;
@@ -387,7 +394,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
       onPick={(p) => {
         setPortraitSelected(true);
         // Model / effort belong to the profile: reset them, keep the permission choice.
-        update({ profile: p.id, launch: { ...(launch.sandbox ? { sandbox: launch.sandbox, approvalPolicy: launch.approvalPolicy } : {}) } });
+        update({ profile: p.id, launch: keptMode(launch) });
         close();
       }}
     />
@@ -399,7 +406,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
   };
 
   return (
-    <LaunchPage intro={drafts.length === 0 ? <LaunchIntro showArtGreeting portraits={{ profileId: item?.id, profiles: ordered, selected: portraitSelected, disabled: locked, onSelect: (id) => { if (locked) return; setPortraitSelected(true); update({ profile: id, launch: { ...(launch.sandbox ? { sandbox: launch.sandbox, approvalPolicy: launch.approvalPolicy } : {}) } }); } }} provider={item ? profileProvider(item) : undefined} icon={<MessageSquarePlus size={24} />} title={t("quick-chats.title")} hint={t("chat.draftHint")} /> : null}>
+    <LaunchPage intro={drafts.length === 0 ? <LaunchIntro showArtGreeting portraits={{ profileId: item?.id, profiles: ordered, selected: portraitSelected, disabled: locked, onSelect: (id) => { if (locked) return; setPortraitSelected(true); update({ profile: id, launch: keptMode(launch) }); } }} provider={item ? profileProvider(item) : undefined} icon={<MessageSquarePlus size={24} />} title={t("quick-chats.title")} hint={t("chat.draftHint")} /> : null}>
       <div className="relative min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-6 pt-4 pb-8">
           {drafts.map((d, i) => (
@@ -508,7 +515,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
             up
             onChange={(h) => {
               target.setHostId(h);
-              update({ hostId: h, profile: null, launch: { ...(launch.sandbox ? { sandbox: launch.sandbox, approvalPolicy: launch.approvalPolicy } : {}) } });
+              update({ hostId: h, profile: null, launch: keptMode(launch) });
             }}
           />
           <ComposerTools

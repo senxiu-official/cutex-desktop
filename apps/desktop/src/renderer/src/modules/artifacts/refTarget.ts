@@ -6,7 +6,8 @@ import { ARTIFACT_CONTENT_MAX, parseArtifactRef, type ArtifactKind } from "../..
 import { useI18n } from "../../i18n";
 import { services } from "../app";
 import type { CutexRef, Icon, RefImage, RefLinkView, RefOpenResult } from "../slots";
-import { VIEW } from "./model";
+import { previewKind, VIEW } from "./model";
+import { imageMimeFor, isGenericMime } from "../../lib/fileKinds";
 import { loadContent, resolveNow, useArtifactCache, useResolved } from "./store";
 
 export const KIND_ICON: Record<ArtifactKind, Icon> = {
@@ -52,8 +53,10 @@ export async function artifactThumbnail(ref: CutexRef, maxBytes: number): Promis
   const parts = parseArtifactRef(ref.key);
   if (!parts) return null;
   const item = await resolveNow(ref.hostId, ref.key);
-  if (!item?.ok || !item.mediaType.toLowerCase().startsWith("image/")) return null;
+  // A figure stored with a generic type (older cutex, a label name without an extension) is tried
+  // too: thumbnailSrc reads the image signature of its bytes.
+  if (!item?.ok || (previewKind(item.mediaType, item.name) !== "image" && !(item.kind === "figure" && isGenericMime(item.mediaType)))) return null;
   const content = await loadContent(ref.hostId, item.artifactId, item.version, Math.min(maxBytes, ARTIFACT_CONTENT_MAX));
   if (!content || content.truncated) return null;
-  return { mime: content.mediaType || item.mediaType, encoding: content.encoding, content: content.content, size: content.totalBytes, truncated: content.truncated };
+  return { mime: imageMimeFor(content.mediaType || item.mediaType, item.name), encoding: content.encoding, content: content.content, size: content.totalBytes, truncated: content.truncated };
 }

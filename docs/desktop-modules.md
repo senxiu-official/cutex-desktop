@@ -1712,6 +1712,7 @@ interface RefImage { mime: string; encoding: "utf8" | "base64"; content: string;
 - `useState(ref)` 只影响显示：菜单行（`MenuAction.labelNode`：另一个标题、✓、`disabledReason` 变灰）、图标按钮（`active` = 实心图标，另一个标题作提示，`disabledReason` = 禁用并作提示；批注：这一轮已有批注时实心）；`run` 要自己再判断一次。
 - `run` 抛错 → 一行错误通知。宿主未启动时（测试、启动早期）没有条目。
 - 服务行的引用动作延后：P2 之前没有服务的引用种类。
+- `excludeKinds`（可选，2026-10-16）：条目在这些引用种类上不出现，即使 `kinds` 包含它们（`lib/refActionApplies.ts`）。书签模块用它把 `agent` 排除：给 agent 的「收藏」并入侧栏置顶，书签只留给对话等引用。
 
 ### 19.9 `services.refs`
 

@@ -5,8 +5,10 @@
 // 源码 / 复制绝对路径.
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { FsFile } from "../../../../shared/ipc";
+import { DocumentPreview } from "../../components/DocumentPreview";
 import { Markdown } from "../../components/Markdown";
 import { useI18n } from "../../i18n";
+import { docKindOf, loadFsDoc } from "../../lib/docPreview";
 import { isThumbnailPath, THUMBNAIL_MAX_BYTES, thumbnailSrc } from "../../lib/fileKinds";
 import { HOST_FILE_READ_FEATURE, languageFor, rootFor } from "../../lib/workspace";
 import { useSelectedWorkspace, workspaceError } from "../../lib/workspaceView";
@@ -55,10 +57,12 @@ export function PreviewBody(props: SideBodyProps<PreviewState>) {
   const [error, setError] = useState<string | null>(null);
   const body = useRef<HTMLDivElement>(null);
   const canRead = host ? hostRead : !!scope;
+  // PDF / DOCX / other office formats: components/DocumentPreview.tsx reads them itself.
+  const doc = docKindOf(path);
   useEffect(() => {
     setFile(null);
     setError(null);
-    if (!canRead) return;
+    if (!canRead || doc) return;
     // Images up to the message-thumbnail limit (the default 2 MiB would cut a larger one off).
     const maxBytes = isThumbnailPath(path) ? THUMBNAIL_MAX_BYTES : undefined;
     const read = host ? api.hostFile(path, maxBytes) : api.fsFile(scope!, path, maxBytes);
@@ -70,7 +74,7 @@ export function PreviewBody(props: SideBodyProps<PreviewState>) {
     return () => {
       live = false;
     };
-  }, [api, scope, path, host, canRead]);
+  }, [api, scope, path, host, canRead, doc]);
   const isMarkdown = /\.(md|markdown|mdx)$/i.test(path);
   // SVG comes back as text: shown as an image (<img> from a data: URL), with 源码 as for Markdown.
   const image = file ? thumbnailSrc(file) : null;
@@ -94,6 +98,19 @@ export function PreviewBody(props: SideBodyProps<PreviewState>) {
         </span>
         <PathActions {...props} />
       </div>
+      {doc ? (
+        <div className="min-h-0 flex-1">
+          <DocumentPreview
+            name={path}
+            loadKey={`${host ? "host" : `${scope?.kind}:${scope?.id}`}|${path}`}
+            load={() =>
+              loadFsDoc(doc, path, (maxBytes) => (host ? api.hostFile(path, maxBytes) : api.fsFile(scope!, path, maxBytes))).catch((e: unknown) => {
+                throw new Error(workspaceError(e));
+              })
+            }
+          />
+        </div>
+      ) : (
       <div ref={body} className="min-h-0 flex-1 overflow-auto px-3 py-2 text-sm">
         {error && <p className="text-xs text-danger">{error}</p>}
         {!file && !error && <p className="text-xs text-subtle">…</p>}
@@ -102,6 +119,7 @@ export function PreviewBody(props: SideBodyProps<PreviewState>) {
         {file && file.encoding === "utf8" && !(isSvg && !source) && (isMarkdown && !source ? <Markdown text={file.content} document /> : <Markdown text={fence(languageFor(file.path), file.content)} />)}
         {file?.truncated && <p className="mt-2 text-xs text-warn">{t("workspace.truncated")}</p>}
       </div>
+      )}
     </div>
   );
 }

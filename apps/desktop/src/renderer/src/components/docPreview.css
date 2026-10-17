@@ -1,0 +1,100 @@
+/* Document previews (components/PdfViewer.tsx, components/DocxView.tsx). */
+
+/* pdf.js text layer: a minimal subset of pdfjs-dist/web/pdf_viewer.css (Apache-2.0, Mozilla; modified
+   for Cutex desktop: scoped under .pdf-page, editor / highlight rules dropped, see NOTICE) that
+   positions the transparent, selectable text over the canvas. */
+.pdf-page {
+  --user-unit: 1;
+  --total-scale-factor: calc(var(--scale-factor, 1) * var(--user-unit));
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  color-scheme: only light;
+}
+.pdf-page .textLayer {
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 0;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.pdf-page .textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+.pdf-page .textLayer > :not(.markedContent),
+.pdf-page .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.pdf-page .textLayer .markedContent {
+  display: contents;
+}
+.pdf-page .textLayer span[role="img"] {
+  user-select: none;
+  cursor: default;
+}
+.pdf-page .textLayer ::selection {
+  background: color-mix(in srgb, AccentColor, transparent 60%);
+  color: transparent;
+}
+.pdf-page .textLayer br::selection {
+  background: transparent;
+}
+.pdf-page .textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+.pdf-page .textLayer.selecting .endOfContent {
+  top: 0;
+}
+
+/* DOCX: mammoth's semantic HTML (sanitised), shown like a plain document page. */
+.docx-preview {
+  user-select: text;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.docx-preview :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.1em 0 0.5em;
+}
+.docx-preview h1 { font-size: 1.5em; }
+.docx-preview h2 { font-size: 1.25em; }
+.docx-preview h3 { font-size: 1.1em; }
+.docx-preview :is(h4, h5, h6) { font-size: 1em; }
+.docx-preview > :first-child { margin-top: 0; }
+.docx-preview p { margin: 0.5em 0; }
+.docx-preview :is(ul, ol) { margin: 0.5em 0; padding-left: 1.6em; }
+.docx-preview ul { list-style: disc; }
+.docx-preview ol { list-style: decimal; }
+.docx-preview a { text-decoration: underline; text-decoration-style: dotted; cursor: help; }
+.docx-preview table { border-collapse: collapse; margin: 0.75em 0; max-width: 100%; }
+.docx-preview :is(td, th) { border: 1px solid var(--color-border, #ccc); padding: 0.25em 0.5em; vertical-align: top; }
+.docx-preview :is(td, th) > p { margin: 0; }
+.docx-preview img { max-width: 100%; height: auto; display: inline-block; }
+.docx-preview blockquote { border-left: 3px solid var(--color-border, #ccc); padding-left: 0.75em; color: var(--fg-muted, inherit); }
+.docx-preview hr { border: 0; border-top: 1px solid var(--color-border, #ccc); margin: 1em 0; }

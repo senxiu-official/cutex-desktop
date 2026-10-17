@@ -12,15 +12,22 @@ export type ApprovalPolicy = (typeof APPROVAL_POLICIES)[number];
 export type ThreadKind = "agent" | "quickChat";
 export const THREAD_KINDS: readonly ThreadKind[] = ["agent", "quickChat"];
 
+/** Native approvals reviewer cutex launches with (cutex launch-approvals-reviewer). */
+export const APPROVALS_REVIEWERS = ["user", "auto_review"] as const;
+export type LaunchApprovalsReviewer = (typeof APPROVALS_REVIEWERS)[number];
+
 /** Effective permissions of one thread kind (`newThreadDefaults.<kind>`). */
 export interface LaunchPermissions {
   sandbox: SandboxMode;
   approvalPolicy: ApprovalPolicy;
+  /** Absent on a cutex without launch-approvals-reviewer (the profile's reviewer, native `user`). */
+  approvalsReviewer?: LaunchApprovalsReviewer | null;
   networkAccess: boolean;
   writableRoots: string[];
 }
 
-export type LaunchField = keyof LaunchPermissions;
+/** Fields Settings → 新建 edits one by one (the reviewer follows the composer mode instead). */
+export type LaunchField = "sandbox" | "approvalPolicy" | "networkAccess" | "writableRoots";
 export const LAUNCH_FIELDS: readonly LaunchField[] = ["sandbox", "approvalPolicy", "networkAccess", "writableRoots"];
 
 export interface NewThreadDefaults {
@@ -42,6 +49,8 @@ export const BUILTIN_THREAD_DEFAULTS: NewThreadDefaults = {
 export interface LaunchOverrides {
   sandbox?: SandboxMode;
   approvalPolicy?: ApprovalPolicy;
+  /** cutex launch-approvals-reviewer only (an older cutex refuses the field). */
+  approvalsReviewer?: LaunchApprovalsReviewer;
   networkAccess?: boolean;
   writableRoots?: string[];
   model?: string;
@@ -68,6 +77,7 @@ export function sanitizeLaunch(raw: unknown): LaunchOverrides | null {
   const out: LaunchOverrides = {};
   if (typeof x.sandbox === "string" && (SANDBOX_MODES as readonly string[]).includes(x.sandbox)) out.sandbox = x.sandbox as SandboxMode;
   if (typeof x.approvalPolicy === "string" && (APPROVAL_POLICIES as readonly string[]).includes(x.approvalPolicy)) out.approvalPolicy = x.approvalPolicy as ApprovalPolicy;
+  if (typeof x.approvalsReviewer === "string" && (APPROVALS_REVIEWERS as readonly string[]).includes(x.approvalsReviewer)) out.approvalsReviewer = x.approvalsReviewer as LaunchApprovalsReviewer;
   if (typeof x.networkAccess === "boolean") out.networkAccess = x.networkAccess;
   if (Array.isArray(x.writableRoots)) {
     out.writableRoots = [...new Set(x.writableRoots.filter((p): p is string => typeof p === "string" && visible(p) && isAbsolutePath(p)))].slice(0, 32);
@@ -106,6 +116,7 @@ export function launchFromForm(form: LaunchForm, touched: boolean): LaunchOverri
     networkAccess: form.networkAccess,
     writableRoots: [...form.writableRoots],
   };
+  if (form.approvalsReviewer) launch.approvalsReviewer = form.approvalsReviewer;
   if (form.model.trim()) launch.model = form.model.trim();
   if (form.reasoningEffort) launch.reasoningEffort = form.reasoningEffort;
   return launch;

@@ -7,6 +7,7 @@ import type { RelayBinding, RelayCommand, RelayGrant, RelayLease } from "../src/
 import type { BrowserEvent, BrowserMountIdentity, BrowserTabMount, BrowserTabView } from "../src/shared/browser";
 import { BROWSER_CHANNEL, BROWSER_OWNER_INPUT_KINDS, DEFAULT_BROWSER_CONTROL_SETTINGS } from "../src/shared/browser";
 import { browserHostEvent, installBrowser, syncBrowserHosts } from "../src/main/browser/install";
+import { InAppProvider } from "../src/main/browser/provider";
 import type { ApprovalRecord } from "../src/shared/ipc";
 
 // This suite exercises the installed owner IPC boundary and the real registry, lease
@@ -182,7 +183,7 @@ function fixture(hostIds = ["local"], relayCapability = true, kinds: Record<stri
     for (const fn of mocks.appListeners.get("web-contents-created") ?? []) fn({}, guest);
     owner.emit("did-attach-webview", {}, guest); return guest;
   };
-  const mount = async (tabKey = "owner-one", url = "http://localhost:26111/", hostId = hostIds[0]!, identity?: BrowserMountIdentity) => {
+  const mount = async (tabKey = "owner-one", url = "http://localhost:26180/", hostId = hostIds[0]!, identity?: BrowserMountIdentity) => {
     const reserved = await ipc({ op: "open", tabKey, url, ...(identity ? { identity } : {}) }, { hostId }) as BrowserTabMount;
     const guest = attach(reserved);
     await ipc({ op: "open", tabKey, url, ...(identity ? { identity } : {}), receipt: { src: reserved.src, webContentsId: guest.id } }, { hostId });
@@ -213,7 +214,7 @@ async function pendingOwnerGrant(f: ReturnType<typeof fixture>, tabKey = "owner-
   const row = (await f.list(hostId)).find(item => item.tabKey === tabKey)!;
   return { grant, leaseId: row.lease!.leaseId, row };
 }
-async function pendingAgentOpen(f: ReturnType<typeof fixture>, url = "http://localhost:26111/new?token=private&view=one#private", hostId = "local") {
+async function pendingAgentOpen(f: ReturnType<typeof fixture>, url = "http://localhost:26180/new?token=private&view=one#private", hostId = "local") {
   const peer = f.peer(hostId), ctx = context(), request = command(peer, { kind: "tabs.open", url });
   const result = peer.options.execute(request, ctx.value); void result.catch(() => {});
   await until(() => f.events.some(event => event.kind === "agent-open" && event.openIntent?.requestId === request.requestId));
@@ -245,7 +246,7 @@ async function serviceModelFixture(kind: "local" | "ssh" | "dev-direct" = "local
   };
   client.request.mockImplementation(respond);
   // Remote browser bootstrap must not use a direct desktop-loopback document.
-  await f.enable(); const { guest, reserved } = await f.mount("owner-one", kind === "ssh" ? "about:blank" : "http://localhost:26111/");
+  await f.enable(); const { guest, reserved } = await f.mount("owner-one", kind === "ssh" ? "about:blank" : "http://localhost:26180/");
   const commit = (url: string) => { guest.url = tickets.get(url) ?? url; guest.emit("did-navigate", {}, guest.url); };
   vi.spyOn(guest, "loadURL").mockImplementation(async url => { guest.loads.push(url); commit(url); });
   guest.debugger.sendCommand.mockImplementation(async (method, params: any) => { if (method === "Page.navigate") commit(params.url); return {}; });
@@ -379,7 +380,7 @@ describe("installed I3 per-host relay lifetime", () => {
   });
   it.each(["epoch", "generation", "disconnect", "remove"])("%s retires only the affected host relay and its authority", async change => {
     const f = fixture(["local", "dev-b"]); await f.enable();
-    const first = await f.mount(), second = await f.mount("other", "http://localhost:26112/", "dev-b");
+    const first = await f.mount(), second = await f.mount("other", "http://localhost:26181/", "dev-b");
     const pending = await pendingOwnerGrant(f);
     await f.ipc({ op: "holdReady", tabKey: "owner-one", leaseId: pending.leaseId, held: true }); await pending.grant;
     const old = f.peer(), unaffected = f.peer("dev-b"), conn = f.connections.get("local")!;
@@ -409,28 +410,38 @@ describe("installed I3 owner two-phase grants and IPC identity", () => {
     const f = fixture(); await f.enable(); const { guest } = await f.mount(); const pending = await pendingOwnerGrant(f);
     guest.emit("did-start-navigation", {}, guest.getURL(), false, true);
     await expect(f.ipc({ op: "holdReady", tabKey: "owner-one", leaseId: pending.leaseId, held: true })).rejects.toMatchObject({ code: "stale_connection" });
-    await expect(pending.grant).rejects.toMatchObject({ code: "lease_revoked" });
+    // The owner's grant call learns why it ended, not a bare revocation.
+    await expect(pending.grant).rejects.toMatchObject({ code: "stale_connection" });
     expect(f.peer().activateLease).not.toHaveBeenCalled(); expect(guest.debugger.attach).not.toHaveBeenCalled();
   });
-  it.each(BROWSER_OWNER_INPUT_KINDS)("actual relay grant pauses for main-frame %s once, without cross-host/guest authority", async kind => {
+  it.each(BROWSER_OWNER_INPUT_KINDS)("0.1.3 co-control: owner %s (capture IPC, guest mouse / keyboard) never pauses the grant", async kind => {
     const f = fixture(); await f.enable(); const { guest } = await f.mount(), pending = await pendingOwnerGrant(f);
     await f.ipc({ op: "holdReady", tabKey: "owner-one", leaseId: pending.leaseId, held: true }); await pending.grant;
     const input = { op: "ownerInput", tabKey: "owner-one", kind };
     for (const source of [{ frame: {} }, { frame: null }, { sender: guest }])
       await expect(f.ipc(input, source)).rejects.toThrow("untrusted_sender");
-    await f.ipc(input, { hostId: "other", epoch: "old" }); await f.ipc({ ...input, tabKey: "other" });
-    expect((await f.list())[0]?.control?.state).toBe("granted");
-    for (const type of ["mouseDown", "mouseUp", "mouseMove", "mouseWheel"]) guest.emit("before-mouse-event", {}, { type });
-    expect((await f.list())[0]?.control?.state).toBe("granted");
     await f.ipc(input, { epoch: "old" }); await flush();
-    expect((await f.list())[0]?.control?.state).toBe("paused"); expect(guest.debugger.isAttached()).toBe(false);
-    const pauses = () => f.events.filter(event => event.control?.state === "paused").length;
-    const count = pauses(); await f.ipc(input, { epoch: "older" }); expect(pauses()).toBe(count);
-    expect(f.peer().activateLease).toHaveBeenCalledOnce();
-    await f.ipc({ op: "releaseLease", tabKey: "owner-one", leaseId: pending.leaseId });
-    await f.ipc(input); expect((await f.list())[0]?.control).toBeUndefined();
+    for (const type of ["mouseDown", "mouseUp", "mouseMove", "mouseWheel"]) guest.emit("before-mouse-event", {}, { type });
+    guest.emit("before-input-event", {}, { type: "keyDown" });
+    expect((await f.list())[0]?.control?.state).toBe("granted");
+    expect(f.peer().revokeLease).not.toHaveBeenCalled();
   });
 
+  it("0.1.3: explicit pause keeps the lease; one-click resume continues the same lease; revoke is separate", async () => {
+    const f = fixture(); await f.enable(); const { guest } = await f.mount(), pending = await pendingOwnerGrant(f);
+    await f.ipc({ op: "holdReady", tabKey: "owner-one", leaseId: pending.leaseId, held: true }); await pending.grant;
+    await f.ipc({ op: "pauseLease", tabKey: "owner-one", leaseId: "someone-else" });
+    expect((await f.list())[0]?.control?.state).toBe("granted");
+    await f.ipc({ op: "pauseLease", tabKey: "owner-one", leaseId: pending.leaseId }); await flush();
+    const paused = (await f.list())[0]!;
+    expect(paused.control?.state).toBe("paused"); expect(paused.lease?.leaseId).toBe(pending.leaseId);
+    expect(guest.debugger.isAttached()).toBe(false); expect(f.peer().revokeLease).not.toHaveBeenCalled();
+    await f.ipc({ op: "resumeLease", tabKey: "owner-one", leaseId: pending.leaseId, settings: DEFAULT_BROWSER_CONTROL_SETTINGS });
+    const resumed = (await f.list())[0]!;
+    expect(resumed.control?.state).toBe("granted"); expect(resumed.lease?.leaseId).toBe(pending.leaseId);
+    expect(f.peer().activateLease).toHaveBeenCalledOnce();
+    await f.ipc({ op: "pauseLease", tabKey: "missing", leaseId: pending.leaseId }); // idempotent no-op
+  });
   it("requires pending lease then exact holdReady before provider preparation and activation", async () => {
     const f = fixture(); await f.enable(); const { guest } = await f.mount(), pending = await pendingOwnerGrant(f), peer = f.peer();
     expect(pending.row.pool).toBe("owner"); expect(pending.row.lease?.state).toBe("pending");
@@ -450,7 +461,7 @@ describe("installed I3 owner two-phase grants and IPC identity", () => {
   });
   it("rejects wrong frames, guest senders, forged leases and cross-host readiness without activating", async () => {
     const f = fixture(["local", "dev-b"]); await f.enable(); const { guest } = await f.mount();
-    await f.mount("owner-one", "http://localhost:26112/", "dev-b"); const pending = await pendingOwnerGrant(f);
+    await f.mount("owner-one", "http://localhost:26181/", "dev-b"); const pending = await pendingOwnerGrant(f);
     const hold = { op: "holdReady", tabKey: "owner-one", leaseId: pending.leaseId, held: true };
     for (const source of [{ frame: {} }, { frame: null }, { sender: guest }]) {
       await expect(f.ipc({ op: "grantAgent", tabKey: "owner-one", sessionId: "session-two", settings: DEFAULT_BROWSER_CONTROL_SETTINGS, expected: { guestId: pending.row.guestId, pageGeneration: pending.row.pageGeneration } }, source)).rejects.toThrow("untrusted_sender");
@@ -508,11 +519,19 @@ describe("installed I3 owner two-phase grants and IPC identity", () => {
     expect(peer.options.localLeases()).toEqual([]); expect((await f.list())[0]?.lease).toBeUndefined();
     expect((await f.list()).find((row: any) => row.guestId === pending.row.guestId)?.control).toBeUndefined(); expect(guest.debugger.isAttached()).toBe(false);
   });
+  it("a grant to a tab the owner cannot see ends with target_hidden, not a bare revocation (Windows E5)", async () => {
+    const f = fixture(); await f.enable(); const { guest } = await f.mount(), pending = await pendingOwnerGrant(f), peer = f.peer();
+    f.window.isVisible.mockReturnValue(false); // e.g. a Windows window fully covered by another app (Chromium occlusion)
+    await expect(f.ipc({ op: "holdReady", tabKey: "owner-one", leaseId: pending.leaseId, held: true })).rejects.toMatchObject({ code: "target_hidden" });
+    await expect(pending.grant).rejects.toMatchObject({ code: "target_hidden" }); await flush();
+    expect(peer.activateLease).not.toHaveBeenCalled(); expect(peer.revokeLease).toHaveBeenCalledWith(pending.leaseId);
+    expect((await f.list())[0]?.lease).toBeUndefined(); expect(guest.debugger.isAttached()).toBe(false);
+  });
   it("activation refusal cleans provider and local lease without retrying grant or activation", async () => {
     const f = fixture(); await f.enable(); const { guest } = await f.mount(), pending = await pendingOwnerGrant(f), peer = f.peer();
     peer.activateLease.mockRejectedValueOnce(Object.assign(Error("approval_denied"), { code: "approval_denied" }));
     await expect(f.ipc({ op: "holdReady", tabKey: "owner-one", leaseId: pending.leaseId, held: true })).rejects.toMatchObject({ code: "approval_denied" });
-    await expect(pending.grant).rejects.toMatchObject({ code: "lease_revoked" }); await flush();
+    await expect(pending.grant).rejects.toMatchObject({ code: "approval_denied" }); await flush();
     expect(peer.grantLease).toHaveBeenCalledOnce(); expect(peer.activateLease).toHaveBeenCalledOnce(); expect(peer.revokeLease).toHaveBeenCalledWith(pending.leaseId);
     expect((await f.list())[0]?.control).toBeUndefined(); expect(guest.debugger.isAttached()).toBe(false);
   });
@@ -539,19 +558,27 @@ describe("installed I3 held background agent-open", () => {
     expect(JSON.stringify([result, f.events, open.peer.grantLease.mock.calls])).not.toMatch(/__cutex|ticket|private-bootstrap/);
     expect(guest.debugger.attach).not.toHaveBeenCalled();
   });
-  it.each([["https://example.com/", "external_pages_unavailable"], ["http://docs.svc.localhost/first", "service_proxy_required"],
+  it.each([["https://example.com/", "external_pages_off"], ["http://100.64.0.27:8765/", "private_address_blocked"], ["http://nas.local/", "private_address_blocked"], ["http://docs.svc.localhost/first", "service_proxy_required"],
     ["cutex:service/docs/first", "service_proxy_required"]])("pre-dispatch refusal of %s is immediate and allocates no card/provenance", async (url, code) => {
+    // A host without browser-refusal-reasons gets the established external_pages_unavailable.
+    const legacy = code === "external_pages_off" || code === "private_address_blocked" ? "external_pages_unavailable" : code;
     const f = fixture(); await f.enable(); const peer = f.peer();
-    await expect(peer.options.execute(command(peer, { kind: "tabs.open", url }), context().value)).rejects.toMatchObject({ code });
+    await expect(peer.options.execute(command(peer, { kind: "tabs.open", url }), context().value)).rejects.toMatchObject({ code: legacy });
     expect(f.events.some(event => event.kind === "agent-open")).toBe(false); expect(await f.list()).toEqual([]);
     expect(mocks.storageWrites).toEqual([]); expect(peer.grantLease).not.toHaveBeenCalled();
+  });
+  it.each([["https://example.com/", "external_pages_off"], ["http://nas.local/", "private_address_blocked"]])("a host advertising browser-refusal-reasons receives the precise refusal for %s", async (url, code) => {
+    const f = fixture(), conn = f.connections.get("local")!;
+    conn.daemon.capabilities.mockResolvedValue({ featureList: ["browser-relay-v1", "browser-refusal-reasons"] });
+    await f.enable(); const peer = f.peer();
+    await expect(peer.options.execute(command(peer, { kind: "tabs.open", url }), context().value)).rejects.toMatchObject({ code });
   });
   it("a forged receipt from the main frame rejects the pending open immediately and rolls back only its unconfirmed provenance", async () => {
     const original = JSON.stringify([["local", "12345678-1234-4234-8234-123456789abc"]]); mocks.identity = original;
     const f = fixture(); await f.enable(); const open = await pendingAgentOpen(f);
     const identity = { pendingOpen: open.intent.requestId, agentOpened: true as const };
     const reserved = await f.ipc({ op: "open", tabKey: open.intent.tabKey, url: open.intent.url, identity }); const guest = f.attach(reserved);
-    await expect(f.ipc({ op: "open", tabKey: open.intent.tabKey, url: "http://localhost:26111/forged", identity,
+    await expect(f.ipc({ op: "open", tabKey: open.intent.tabKey, url: "http://localhost:26180/forged", identity,
       receipt: { src: reserved.src, webContentsId: guest.id } })).rejects.toMatchObject({ code: "invalid_request" });
     await expect(open.result).rejects.toMatchObject({ code: "invalid_request" });
     expect(await f.list()).toEqual([]); expect(mocks.identity).toBe(original); expect(guest.loads).toEqual([]);
@@ -587,7 +614,7 @@ describe("installed I3 held background agent-open", () => {
   it("main deadline also cancels a post-mount grant before its own longer hold timeout", async () => {
     vi.useFakeTimers(); const f = fixture(); await f.enable(); const peer = f.peer(), ctx = context();
     ctx.value.remainingMs = () => 1000;
-    const result = peer.options.execute(command(peer, { kind: "tabs.open", url: "http://localhost:26111/" }), ctx.value); void result.catch(() => {});
+    const result = peer.options.execute(command(peer, { kind: "tabs.open", url: "http://localhost:26180/" }), ctx.value); void result.catch(() => {});
     await until(() => f.events.some(event => event.kind === "agent-open")); const intent = f.events.find(event => event.openIntent)!.openIntent!;
     const { guest } = await f.mount(intent.tabKey, intent.url, "local", { pendingOpen: intent.requestId, agentOpened: true });
     await until(() => peer.options.localLeases().length === 1);
@@ -697,7 +724,7 @@ describe("installed I3 held background agent-open", () => {
   it("mounts the exact receipt in agent partition, preserves raw URL only for navigation, confirms after hold without revealing or attaching CDP", async () => {
     const f = fixture(); await f.enable(); const open = await pendingAgentOpen(f), intent = open.intent;
     const raw = (open.request.operation as { kind: "tabs.open"; url: string }).url;
-    expect(intent.url).toBe("http://localhost:26111/new?view=one"); expect(open.event.pool).toBe("agent");
+    expect(intent.url).toBe("http://localhost:26180/new?view=one"); expect(open.event.pool).toBe("agent");
     expect(mocks.storageWrites).toHaveLength(1); expect(JSON.parse(mocks.storageWrites[0]!)).toEqual([["local", intent.tabKey]]);
     f.window.isVisible.mockReturnValue(false); // A truly hidden host cannot accidentally pass visibility.
     const identity = { pendingOpen: intent.requestId, agentOpened: true as const };
@@ -728,25 +755,53 @@ describe("installed I3 held background agent-open", () => {
     expect(open.peer.grantLease).not.toHaveBeenCalled(); expect(f.events.some(event => event.kind === "agent-open-confirm")).toBe(false);
     expect(f.events.some(event => event.kind === "agent-open-cancel" && event.openRequestId === open.intent.requestId)).toBe(true);
   });
-  it("owner popup after agent lease release stays in the agent pool, without inheriting a lease or opener", async () => {
+  it("an owner click in a shared agent tab opens its popup in the agent pool, without inheriting a lease or opener", async () => {
     const f = fixture(); await f.enable(); const open = await pendingAgentOpen(f);
     const { guest } = await f.mount(open.intent.tabKey, open.intent.url, "local", { pendingOpen: open.intent.requestId, agentOpened: true });
     await until(() => open.peer.options.localLeases().length === 1); const lease = open.peer.options.localLeases()[0]!;
     await f.ipc({ op: "holdReady", tabKey: open.intent.tabKey, leaseId: lease.leaseId, held: true }); await open.result;
     const handler = (guest.setWindowOpenHandler.mock.calls as unknown as [(details: { url: string }) => { action: string }][])[0]![0];
+    // Co-control: the owner's own click during the lease is the owner's gesture (not the agent's).
     guest.emit("before-mouse-event", {}, { type: "mouseDown" });
-    expect(handler({ url: "http://localhost:26111/popup" })).toEqual({ action: "deny" });
-    expect(f.events.some(event => event.kind === "new-tab")).toBe(false);
-    await f.ipc({ op: "releaseLease", tabKey: open.intent.tabKey, leaseId: lease.leaseId });
-    guest.emit("before-mouse-event", {}, { type: "mouseDown" });
-    expect(handler({ url: "http://localhost:26111/popup" })).toEqual({ action: "deny" });
+    expect(handler({ url: "http://localhost:26180/popup?code=secret" })).toEqual({ action: "deny" });
     const event = f.events.findLast(event => event.kind === "new-tab")!;
-    expect(event.pool).toBe("agent"); expect(event.newTabKey).not.toBe(open.intent.tabKey);
+    expect(event.pool).toBe("agent"); expect(event.newTabKey).not.toBe(open.intent.tabKey); expect(event.newTabAgent).toBeUndefined();
+    expect(event.newTabUrl).toBe("http://localhost:26180/popup"); // display URL only; main keeps the exact one
     const next = await f.mount(event.newTabKey!, event.newTabUrl!, "local", { agentOpened: true });
     expect(next.reserved.partition).toBe("persist:browser-agent-local");
+    expect(next.guest.loads.at(-1)).toBe("http://localhost:26180/popup?code=secret");
     expect((await f.list()).find(row => row.tabKey === event.newTabKey)?.lease).toBeUndefined();
     expect(f.peer().grantLease).toHaveBeenCalledOnce();
     expect(guest.setWindowOpenHandler).toHaveBeenCalledOnce();
+  });
+  it("the leased agent's own click opens a tab granted to it under the opener lease when the host has browser-popup-grant", async () => {
+    const f = fixture(), conn = f.connections.get("local")!;
+    conn.daemon.capabilities.mockResolvedValue({ featureList: ["browser-relay-v1", "browser-popup-grant"] });
+    await f.enable(); const open = await pendingAgentOpen(f);
+    const { guest } = await f.mount(open.intent.tabKey, open.intent.url, "local", { pendingOpen: open.intent.requestId, agentOpened: true });
+    await until(() => open.peer.options.localLeases().length === 1); const lease = open.peer.options.localLeases()[0]!;
+    await f.ipc({ op: "holdReady", tabKey: open.intent.tabKey, leaseId: lease.leaseId, held: true }); await open.result;
+    const handler = (guest.setWindowOpenHandler.mock.calls as unknown as [(details: { url: string }) => { action: string }][])[0]![0];
+    const acting = vi.spyOn(InAppProvider.prototype, "agentInput").mockReturnValue(true);
+    try { expect(handler({ url: "http://localhost:26180/child" })).toEqual({ action: "deny" }); } finally { acting.mockRestore(); }
+    const event = f.events.findLast(item => item.kind === "new-tab")!;
+    expect(event).toMatchObject({ pool: "agent", newTabAgent: true, newTabGranted: true });
+    await f.mount(event.newTabKey!, event.newTabUrl!, "local", { agentOpened: true });
+    await until(() => open.peer.grantLease.mock.calls.length === 2);
+    expect(open.peer.grantLease.mock.calls[1]![0]).toMatchObject({ cutexSessionId: lease.cutexSessionId, source: { kind: "popup", openerLeaseId: lease.leaseId } });
+  });
+  it("without browser-popup-grant the agent's popup tab stays ungranted", async () => {
+    const f = fixture(); await f.enable(); const open = await pendingAgentOpen(f);
+    const { guest } = await f.mount(open.intent.tabKey, open.intent.url, "local", { pendingOpen: open.intent.requestId, agentOpened: true });
+    await until(() => open.peer.options.localLeases().length === 1); const lease = open.peer.options.localLeases()[0]!;
+    await f.ipc({ op: "holdReady", tabKey: open.intent.tabKey, leaseId: lease.leaseId, held: true }); await open.result;
+    const handler = (guest.setWindowOpenHandler.mock.calls as unknown as [(details: { url: string }) => { action: string }][])[0]![0];
+    const acting = vi.spyOn(InAppProvider.prototype, "agentInput").mockReturnValue(true);
+    try { handler({ url: "http://localhost:26180/child" }); } finally { acting.mockRestore(); }
+    const event = f.events.findLast(item => item.kind === "new-tab")!;
+    expect(event.newTabAgent).toBe(true); expect(event.newTabGranted).toBeUndefined();
+    await f.mount(event.newTabKey!, event.newTabUrl!, "local", { agentOpened: true }); await flush();
+    expect(open.peer.grantLease).toHaveBeenCalledOnce();
   });
   it("abort before receipt rejects the old intent and closes pending registry state", async () => {
     const f = fixture(); await f.enable(); const open = await pendingAgentOpen(f); open.ctx.controller.abort();
@@ -804,27 +859,27 @@ describe("browser claims decided in main", () => {
     await f.ipc({ op: "holdReady", tabKey, leaseId, held: true }); return leaseId;
   }
   it("auto-grants a loopback owner tab matching the urlHint with the claim's approval, then tells the owner", async () => {
-    const f = fixture(); await f.enable(); await f.mount("owner-one", "http://localhost:26111/");
-    feed(claim("apr-local", "session-local", "http://localhost:26111/"));
+    const f = fixture(); await f.enable(); await f.mount("owner-one", "http://localhost:26180/");
+    feed(claim("apr-local", "session-local", "http://localhost:26180/"));
     await holdLease(f, "owner-one");
     await until(() => f.events.some(event => event.kind === "claim-granted"));
     expect(f.peer().grantLease).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ cutexSessionId: "session-local", source: { kind: "claim", approvalId: "apr-local" } }));
     expect(f.events.findLast(event => event.kind === "claim-granted")?.claimGrant).toEqual({ agentName: "Reader", reason: "local" });
     expect((await f.list())[0]?.lease?.auto).toBe("local");
-    expect(await f.ipc({ op: "claimAudit" })).toEqual([expect.objectContaining({ approvalId: "apr-local", reason: "local", origin: "http://localhost:26111" })]);
+    expect(await f.ipc({ op: "claimAudit" })).toEqual([expect.objectContaining({ approvalId: "apr-local", reason: "local", origin: "http://localhost:26180" })]);
   });
   it("leaves a non-local claim to the owner card: no lease, no new tab", async () => {
-    const f = fixture(); await f.enable(); await f.mount("owner-one", "http://localhost:26111/");
+    const f = fixture(); await f.enable(); await f.mount("owner-one", "http://localhost:26180/");
     feed(claim("apr-mail", "session-mail", "https://mail.example.com/inbox")); await flush(); await new Promise(resolve => setTimeout(resolve, 20));
     expect(f.peer().grantLease).not.toHaveBeenCalled();
     expect(f.events.some(event => event.kind === "claim-open" || event.kind === "claim-granted")).toBe(false);
   });
   it("opens a claim's local urlHint in a new owner tab, waits for it to attach, then grants that exact tab", async () => {
     const f = fixture(); await f.enable();
-    feed(claim("apr-open", "session-open", "http://localhost:26111/yemao"));
+    feed(claim("apr-open", "session-open", "http://localhost:26180/yemao"));
     await until(() => f.events.some(event => event.kind === "claim-open"));
     const intent = f.events.find(event => event.kind === "claim-open")!.claimOpen!;
-    expect(intent).toMatchObject({ url: "http://localhost:26111/yemao", sessionId: "session-open" });
+    expect(intent).toMatchObject({ url: "http://localhost:26180/yemao", sessionId: "session-open" });
     await f.mount(intent.tabKey, intent.url); // the renderer's held card mounting main's reserved owner key
     for (let i = 0; i < 40 && !f.peer().grantLease.mock.calls.length; i++) await new Promise(resolve => setTimeout(resolve, 50));
     expect(f.peer().grantLease).toHaveBeenCalledWith(expect.objectContaining({ cutexSessionId: "session-open", source: { kind: "claim", approvalId: "apr-open" } }));
@@ -832,7 +887,7 @@ describe("browser claims decided in main", () => {
     expect((await f.list()).find(tab => tab.tabKey === intent.tabKey)).toMatchObject({ pool: "owner", lease: { auto: "local" } });
   });
   it("a forged renderer cannot grant beyond policy", async () => {
-    const f = fixture(); await f.enable(); await f.mount("owner-one", "http://localhost:26111/");
+    const f = fixture(); await f.enable(); await f.mount("owner-one", "http://localhost:26180/");
     const target = (await f.list())[0]!, expected = { guestId: target.guestId, pageGeneration: target.pageGeneration };
     // 一直允许 only rides on a claim cutex consumes; a page URL is never renderer-chosen.
     await expect(f.ipc({ op: "grantAgent", tabKey: "owner-one", sessionId: "s", settings: DEFAULT_BROWSER_CONTROL_SETTINGS, expected, remember: true })).rejects.toThrow("invalid_browser_request");
@@ -846,14 +901,14 @@ describe("browser claims decided in main", () => {
     expect(f.peer().grantLease).not.toHaveBeenCalled(); expect(f.events.some(event => event.kind === "claim-open")).toBe(false);
   });
   it("一直允许 is recorded only after the claim grant succeeds, and the owner's revoke ends it", async () => {
-    const f = fixture(); await f.enable(); await f.mount("owner-one", "http://localhost:26111/");
+    const f = fixture(); await f.enable(); await f.mount("owner-one", "http://localhost:26180/");
     const target = (await f.list())[0]!, expected = { guestId: target.guestId, pageGeneration: target.pageGeneration };
     f.peer().grantLease.mockRejectedValueOnce(new Error("approval_denied"));
     await expect(f.ipc({ op: "grantAgent", tabKey: "owner-one", sessionId: "session-remember", settings: DEFAULT_BROWSER_CONTROL_SETTINGS, approvalId: "apr-r1", expected, remember: true })).rejects.toThrow();
     expect(await f.ipc({ op: "claimAllows" })).toEqual([]);
     const grant = f.ipc({ op: "grantAgent", tabKey: "owner-one", sessionId: "session-remember", settings: DEFAULT_BROWSER_CONTROL_SETTINGS, approvalId: "apr-r2", expected, remember: true });
     const leaseId = await holdLease(f, "owner-one"); await grant;
-    expect(await f.ipc({ op: "claimAllows" })).toEqual([expect.objectContaining({ sessionId: "session-remember", origin: "http://localhost:26111" })]);
+    expect(await f.ipc({ op: "claimAllows" })).toEqual([expect.objectContaining({ sessionId: "session-remember", origin: "http://localhost:26180" })]);
     await f.ipc({ op: "releaseLease", tabKey: "owner-one", leaseId, owner: true });
     expect(await f.ipc({ op: "claimAllows" })).toEqual([]);
   });

@@ -1,8 +1,8 @@
 export const browserOwnerUiZhCN = {
   "browser.owner.select": "选择此主机的{{agent}}", "browser.owner.loadAgents": "读取可授予的{{agent}}",
   "browser.owner.loadingAgents": "正在读取…", "browser.owner.noAgents": "此主机没有可接收控制的{{agent}}",
-  "browser.owner.grant": "交给所选{{agent}}", "browser.owner.resume": "明确继续控制", "browser.owner.revoke": "停止并撤销授予",
-  "browser.owner.granted": "已交给 {name}", "browser.owner.operating": "{name} 正在操作网页", "browser.owner.paused": "{name} 已暂停 · 等待你明确继续",
+  "browser.owner.grant": "交给所选{{agent}}", "browser.owner.resume": "继续", "browser.owner.pause": "暂停{{agent}}", "browser.owner.revoke": "停止并撤销授予",
+  "browser.owner.granted": "已交给 {name}", "browser.owner.operating": "{name} 正在操作网页", "browser.owner.paused": "{name} 已暂停 · 点「继续」即恢复同一授权",
   "browser.owner.pending": "正在为 {name} 准备控制", "browser.owner.loginOwner": "此标签沿用此主机上{{owner}}的网页登录态。",
   "browser.owner.loginAgent": "此标签使用此主机上独立的{{agent}}网页登录池，不沿用手动标签的登录态。",
   "browser.owner.confirmOwner": "将此标签交给 {name}？此标签沿用此主机上{{owner}}的网页登录态。对方可以读取页面、填写表单并操作网页，可能修改真实数据。仅在你信任这个{{agent}}时继续。",
@@ -15,8 +15,8 @@ export const browserOwnerUiZhCN = {
 export const browserOwnerUiEn: Record<keyof typeof browserOwnerUiZhCN, string> = {
   "browser.owner.select": "Choose {{an agent}} on this host", "browser.owner.loadAgents": "Read eligible {{agents}}",
   "browser.owner.loadingAgents": "Reading…", "browser.owner.noAgents": "No eligible {{agents}} on this host",
-  "browser.owner.grant": "Grant to selected {{agent}}", "browser.owner.resume": "Explicitly resume control", "browser.owner.revoke": "Stop and revoke grant",
-  "browser.owner.granted": "Granted to {name}", "browser.owner.operating": "{name} is operating the page", "browser.owner.paused": "{name} is paused · awaiting your explicit resume",
+  "browser.owner.grant": "Grant to selected {{agent}}", "browser.owner.resume": "Resume", "browser.owner.pause": "Pause {{agent}}", "browser.owner.revoke": "Stop and revoke grant",
+  "browser.owner.granted": "Granted to {name}", "browser.owner.operating": "{name} is operating the page", "browser.owner.paused": "{name} is paused · Resume continues the same grant",
   "browser.owner.pending": "Preparing control for {name}", "browser.owner.loginOwner": "This tab reuses the {{owner}}'s website logins on this host.",
   "browser.owner.loginAgent": "This tab uses the host's separate {{agent}} login pool, not manual-tab logins.",
   "browser.owner.confirmOwner": "Grant this tab to {name}? It reuses the {{owner}}'s website logins on this host. The recipient can read pages, fill forms and operate the page, potentially changing real data. Continue only if you trust this {{agent}}.",

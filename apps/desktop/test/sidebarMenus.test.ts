@@ -67,7 +67,7 @@ describe("project menu", () => {
       "|",
       "menu.collapse",
       "menu.star",
-      "menu.idleUnfolded",
+      "menu.sidebarDisplay",
       "menu.moveToSection",
       "|",
       "menu.copy",
@@ -115,13 +115,16 @@ describe("project menu", () => {
     await seed();
     const prefs = await import("../src/renderer/src/lib/prefs");
     const { projectMenu } = await import("../src/renderer/src/lib/projectMenus");
-    find(projectMenu(group, null, false, null, t), "menu.idleUnfolded")!.onSelect();
+    // One level down, under 侧栏显示 › (not a stray click on the main menu).
+    const item = () => find(find(projectMenu(group, null, false, null, t), "menu.sidebarDisplay")!.submenu!, "menu.idleUnfolded")!;
+    expect(find(projectMenu(group, null, false, null, t), "menu.idleUnfolded")).toBeUndefined();
+    item().onSelect();
     expect(prefs.hostListKeys("idleUnfolded", ["local"])).toHaveLength(1);
     expect(prefs.getUiPrefs().idleUnfolded).toEqual(["p1"]);
-    find(projectMenu(group, null, false, null, t), "menu.idleUnfolded")!.onSelect();
+    item().onSelect();
     expect(prefs.getUiPrefs().idleUnfolded).toEqual([]);
     prefs.setUiPref("foldIdleAgents", false);
-    expect(find(projectMenu(group, null, false, null, t), "menu.idleUnfolded")).toBeUndefined();
+    expect(find(projectMenu(group, null, false, null, t), "menu.sidebarDisplay")).toBeUndefined();
     prefs.setUiPref("foldIdleAgents", true);
   });
 
@@ -196,6 +199,24 @@ describe("agent menu additions", () => {
     expect(labels(agentMenu(session("a"), t, "local"))).toContain("menu.forkAgent");
     // Offline: no restart.
     expect(labels(agentMenu(session("a", { status: "offline" }), t, "local"))).not.toContain("menu.restart");
+  });
+
+  it("groups view-only actions apart from the runtime ones (owner 2026-10-16)", async () => {
+    await seed(["session-fork"]);
+    const unread = await import("../src/renderer/src/lib/turnUnread");
+    unread.recordTurnEnd("a", { turnId: "t7", status: "completed" }, false);
+    const { agentMenu } = await import("../src/renderer/src/lib/menus");
+    const groups = labels(agentMenu(session("a"), t, "local")).join(" ").split(" | ").map((g) => g.split(" "));
+    expect(groups).toEqual([
+      ["menu.pin", "menu.markRead"],
+      ["menu.openFiles", "menu.openProject", "menu.copy"],
+      ["menu.rename", "menu.editInfo", "menu.forkAgent"],
+      ["menu.stop", "menu.restart"],
+      ["menu.archive"],
+    ]);
+    // No bookmark entry for an agent (pin instead).
+    expect(groups.flat().some((l) => l.startsWith("bookmarks."))).toBe(false);
+    find(agentMenu(session("a"), t, "local"), "menu.markRead")!.onSelect();
   });
 
   it("标为已读 with a turn mark", async () => {
