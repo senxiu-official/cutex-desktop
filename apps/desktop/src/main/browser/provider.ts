@@ -36,6 +36,13 @@ export interface InAppProviderOptions {
   /** After an agent pointer action moved app focus into this guest: hand it back to where the
    * owner had it (composer, address bar). Fixed main-owned app-document script; never the page. */
   restoreFocus?(guestId: string): Promise<void>;
+  /** True for a guest that shares no input focus with the app (main's offscreen background carrier
+   * of an agent tab): the owner typing in the app's composer cannot collide with it. */
+  isolated?(guestId: string): boolean;
+  /** Right before the provider attaches the guest's debugger / right after it let it go: a
+   * background carrier's dialog guard hands the debugger over (carrier.ts). Never grants anything. */
+  beforeAttach?(guestId: string): void;
+  afterDetach?(guestId: string): void;
   now?(): number;
 }
 /** Owner keyboard input this recent counts as "typing": agent writes wait for the quiet. */
@@ -52,6 +59,8 @@ type Entry = {
   id: string; guest: BrowserProviderGuest; settings: BrowserControlSettings; state: "granted" | "paused";
   grantee: string;
   busy: boolean; operating: boolean; blocked: number; binding?: Binding;
+  /** Carrier hand-over in progress: new operations are refused (busy), the running one finishes. */
+  draining: number;
   /** Co-control: last owner keyboard input in the guest / app, last owner guest input of any kind,
    * and the end of the agent's own dispatch window (input before then is the agent's). */
   typingAt: number; agentInputUntil: number; acting: boolean;
@@ -120,7 +129,7 @@ export class InAppProvider {
     if (!guest || guest.isDestroyed()) throw closed();
     this.release(guestId);
     const entry: Entry = { id: guestId, guest, settings: { ...settings, viewport: { ...settings.viewport } },
-      state: "granted", grantee: options.grantee ?? "Agent", busy: true, operating: false, blocked: 0, typingAt: -Infinity, agentInputUntil: -Infinity, acting: false };
+      state: "granted", grantee: options.grantee ?? "Agent", busy: true, operating: false, blocked: 0, draining: 0, typingAt: -Infinity, agentInputUntil: -Infinity, acting: false };
     this.entries.set(guestId, entry);
     this.changed(entry);
     try {
@@ -148,6 +157,7 @@ export class InAppProvider {
   ownerActivity(guestId: string | undefined, kind: "guest-keyboard" | "guest-pointer" | "app-keyboard"): void {
     const now = this.now();
     for (const entry of guestId === undefined ? this.entries.values() : [this.entries.get(guestId)].filter(e => !!e) as Entry[]) {
+      if (kind === "app-keyboard" && this.options.isolated?.(entry.id)) continue;
       const agentEcho = kind !== "app-keyboard" && (entry.acting || now <= entry.agentInputUntil);
       if (kind !== "guest-pointer" && !agentEcho) entry.typingAt = now;
       if (kind !== "app-keyboard" && !agentEcho) entry.binding?.executor?.expireRefs();
@@ -191,6 +201,25 @@ export class InAppProvider {
     this.clearTimers(entry);
     this.detach(entry);
     this.changed(entry);
+  }
+  /**
+   * Carrier hand-over (background carrier <-> visible webview): wait until the operation now running
+   * on this guest has finished (it is never split across two pages), and refuse new ones with busy
+   * until the returned release is called (or the entry is released / re-granted). No grant: no-op.
+   */
+  async drain(guestId: string, deadline: number): Promise<() => void> {
+    const entry = this.entries.get(guestId);
+    if (!entry) return () => {};
+    entry.draining++;
+    let released = false;
+    const release = () => { if (!released) { released = true; entry.draining = Math.max(0, entry.draining - 1); } };
+    try {
+      while (entry.busy && this.entries.get(guestId) === entry) {
+        if (Date.now() >= deadline) throw new ProtocolError("busy", "The agent's current browser action did not finish in time; try again shortly");
+        await new Promise<void>(resolve => { const timer = setTimeout(resolve, 20); timer.unref?.(); });
+      }
+      return release;
+    } catch (error) { release(); throw error; }
   }
   /** Registry owns closing WebContents. This hook only revokes its main-owned control binding. */
   close(guestId: string): void { this.release(guestId); }
@@ -303,6 +332,7 @@ export class InAppProvider {
       return binding.executor!;
     }
     const debug = entry.guest.debugger;
+    try { this.options.beforeAttach?.(entry.id); } catch { /* The attach below decides. */ }
     if (debug.isAttached()) throw new ProtocolError("tab_busy", "A different debugger already controls this guest");
     try { debug.attach("1.3"); } catch { throw new ProtocolError("tab_busy", "Could not attach the browser debugger"); }
     const binding: Binding = { alive: true, retiring: false, scale, cleanup: [] };
@@ -333,6 +363,7 @@ export class InAppProvider {
       if (entry.idle) clearTimeout(entry.idle);
       entry.idle = undefined;
       this.changed(entry);
+      this.afterDetach(entry);
     };
     debug.on("detach", detached);
     binding.cleanup.push(() => debug.removeListener("detach", detached));
@@ -358,6 +389,7 @@ export class InAppProvider {
       return binding.executor;
     } catch (error) { if (entry.binding === binding) this.detach(entry); throw error; }
   }
+  private afterDetach(entry: Entry): void { try { this.options.afterDetach?.(entry.id); } catch { /* Observers cannot restore authority. */ } }
   private fitScale(entry: Entry, bounds: BrowserViewportBounds): number {
     if (!bounds || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) || bounds.width < 1 || bounds.height < 1)
       throw new ProtocolError("target_hidden", "Browser card bounds are unavailable");
@@ -384,6 +416,7 @@ export class InAppProvider {
         binding.alive = false;
         for (const clean of binding.cleanup.splice(0)) clean();
         try { if (!entry.guest.isDestroyed() && debug.isAttached()) debug.detach(); } catch { /* Already detached/closed. */ }
+        this.afterDetach(entry);
       }
     })();
     this.retiring.set(entry.guest, cleanup);
@@ -406,6 +439,7 @@ export class InAppProvider {
     const control = { ...options, deadline: options?.deadline ?? Date.now() + 10_000 };
     checkOperation(control);
     if (entry.busy) throw new ProtocolError("busy", "One operation per guest is allowed");
+    if (entry.draining > 0) throw new ProtocolError("busy", "This tab is moving between background and front; try again shortly");
     entry.busy = true;
     entry.operation = control;
     this.clearTimers(entry);

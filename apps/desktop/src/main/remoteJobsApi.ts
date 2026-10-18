@@ -5,6 +5,7 @@
 // cutex at all: only its public half and fingerprint come back. No reply shape carries a credential:
 // cutex never returns one, and statuses are passed through only after dropping unexpected
 // credential-like keys.
+import { appWindows } from "./appWindows";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { BrowserWindow, dialog } from "electron";
 import { CutexApiError, type CutexClient } from "@cutex-desktop/cutex-client";
@@ -65,7 +66,7 @@ function mailBody(input: InboundMailInput): Record<string, unknown> {
 }
 
 async function pickPrivateKey(): Promise<string | null> {
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const win = BrowserWindow.getFocusedWindow() ?? appWindows()[0];
   const options = { title: "SSH private key for Gadi", properties: ["openFile", "showHiddenFiles"] as ("openFile" | "showHiddenFiles")[] };
   const r = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
   if (r.canceled || !r.filePaths[0]) return null;
@@ -170,7 +171,7 @@ export function remoteJobsApi(client: CutexClient): Pick<DaemonApi, "markExterna
       if (!r.ok) return r;
       const helper = helperOf(r.value);
       if (!helper) return { ok: false, code: "invalid_reply", message: "unexpected helper reply" };
-      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+      const win = BrowserWindow.getFocusedWindow() ?? appWindows()[0];
       const options = { defaultPath: helper.fileName, filters: [{ name: "Python", extensions: ["py"] }] };
       const picked = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
       if (picked.canceled || !picked.filePath) return { ok: false, code: "cancelled", message: "" };

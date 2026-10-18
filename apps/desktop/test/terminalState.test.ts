@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { TerminalSummary } from "../src/shared/ipc";
 import {
   initTerminal,
+  isTerminalReply,
   missingTerminals,
   parseTerminalParams,
   passThroughKey,
@@ -96,5 +97,18 @@ describe("keys a focused terminal lets through (§3.11)", () => {
     expect(passThroughKey(key({ key: "c", code: "KeyC", ctrlKey: true }))).toBe(false);
     expect(passThroughKey(key({ key: "ArrowLeft", code: "ArrowLeft", altKey: true }))).toBe(false);
     expect(passThroughKey(key({ key: "F11", code: "F11" }))).toBe(false);
+  });
+});
+
+describe("isTerminalReply", () => {
+  it("matches xterm's answers to terminal queries", () => {
+    for (const reply of ["\x1b[12;40R", "\x1b[0n", "\x1b[?1;2c", "\x1b[>0;276;0c", "\x1b[?2004;2$y", "\x1b[8;24;80t", "\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\", "\x1b]10;rgb:ffff/ffff/ffff\x07", "\x1bP1$r0m\x1b\\", "\x1b[3;1R\x1b[?1;2c"]) {
+      expect(isTerminalReply(reply)).toBe(true);
+    }
+  });
+  it("never matches keystrokes or text", () => {
+    for (const key of ["a", "ls\r", "\x1b[A", "\x1bOA", "\x1b[3~", "\x1b[1;5C", "\x1b", "\x7f", "\x1b[200~paste\x1b[201~"]) {
+      expect(isTerminalReply(key)).toBe(false);
+    }
   });
 });

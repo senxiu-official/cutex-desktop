@@ -153,7 +153,7 @@ export const zhCN = {
   "backend-upgrade.history.downtime": "中断 {downtime}",
   // ---- rollback ----
   "backend-upgrade.rollback.title": "回滚",
-  "backend-upgrade.rollback.hint": "切回本机保留的旧版本；先预览会发生什么",
+  "backend-upgrade.rollback.hint": "切回主机上保留的旧版本；先预览会发生什么",
   "backend-upgrade.rollback.none": "本机没有保留可以回滚的旧版本",
   "backend-upgrade.rollback.target": "回滚到",
   "backend-upgrade.rollback.previous": "上一个版本：{release}",
@@ -208,6 +208,15 @@ export const zhCN = {
   "backend-upgrade.refusal.upgrade_unavailable": "cutex 暂时无法完成这个操作",
   "backend-upgrade.refusal.invalid_request": "请求无效",
   "backend-upgrade.refusal.owner_required": "只有主机{{owner}}可以管理后端更新",
+  "backend-upgrade.state.upToDateAt": "已是最新版本 · {time}检查过",
+  "backend-upgrade.state.available": "有新版本 {release}，可以在下面下载",
+  "backend-upgrade.state.staged": "{release} 已下载，可以在下面安装",
+  "backend-upgrade.state.running": "正在更新到 {release}",
+  "backend-upgrade.state.needsOwner": "上一次更新需要你处理，见上方",
+  "backend-upgrade.state.unmanaged": "手动部署：只能在主机上更新",
+  "backend-upgrade.notes.label": "{release} 带来了什么",
+  "backend-upgrade.status.release": "发布",
+  "backend-upgrade.status.sequence": "序号 {n}",
 } as const;
 
 // Adds these keys to MessageKey (modules/i18nCatalog.ts collects the dictionary itself).
@@ -426,4 +435,13 @@ export const en: Record<keyof typeof zhCN, string> = {
   "backend-upgrade.refusal.upgrade_unavailable": "cutex can't do this right now",
   "backend-upgrade.refusal.invalid_request": "Invalid request",
   "backend-upgrade.refusal.owner_required": "Only the host {{owner}} can manage backend updates",
+  "backend-upgrade.state.upToDateAt": "Up to date · checked {time}",
+  "backend-upgrade.state.available": "{release} is available; download it below",
+  "backend-upgrade.state.staged": "{release} is downloaded; install it below",
+  "backend-upgrade.state.running": "Updating to {release}",
+  "backend-upgrade.state.needsOwner": "The last update needs you; see above",
+  "backend-upgrade.state.unmanaged": "Hand-deployed: update it on the host",
+  "backend-upgrade.notes.label": "What {release} brought",
+  "backend-upgrade.status.release": "Release",
+  "backend-upgrade.status.sequence": "sequence {n}",
 };

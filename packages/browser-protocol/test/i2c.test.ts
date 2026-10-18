@@ -146,6 +146,10 @@ describe('Z2 find creates a bounded observation, never a selector execution surf
     invalid(() => parseBrowserOperationResult({ ...find, hostId: 'model-supplied' }));
     invalid(() => parseBrowserOperationResult({ ...find, url: 'file:///private' }));
     invalid(() => parseBrowserOperationResult({ kind: 'tab.act', pageGeneration: 1, leaseId: 'forged' }));
+    const scrolled = { kind: 'tab.act', pageGeneration: 2, scroll: { dx: 0, dy: -812, atEdge: true } };
+    expect(parseBrowserOperationResult(scrolled)).toEqual(scrolled);
+    invalid(() => parseBrowserOperationResult({ ...scrolled, scroll: { dx: 0, dy: 1.5, atEdge: true } }));
+    invalid(() => parseBrowserOperationResult({ ...scrolled, scroll: { dx: 0, dy: 1, atEdge: true, extra: 1 } }));
   });
 });
 

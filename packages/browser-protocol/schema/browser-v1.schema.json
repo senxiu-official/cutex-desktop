@@ -1107,6 +1107,30 @@
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 9007199254740991
+                    },
+                    "scroll": {
+                      "type": "object",
+                      "properties": {
+                        "dx": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "dy": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "atEdge": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "dx",
+                        "dy",
+                        "atEdge"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [

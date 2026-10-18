@@ -15,6 +15,12 @@ export const SUBAGENT_THREAD_COMPONENT: ItemId = "subagents.thread";
  */
 export const TURN_PEEK: ItemId = "conversation.turnPeek";
 export const SIDE_CHAT_COMPONENT: ItemId = "side-chat.chat";
+/**
+ * Core (module `conversation`, ungated): another agent's live conversation in the side area, bound to
+ * its host (docs/research/side-agent-view-20261018.md). Params: the agent's session id.
+ */
+export const SIDE_AGENT_COMPONENT: ItemId = "conversation.agent";
+export type SideAgentParams = { sessionId: string };
 
 /** The title-bar toggle on an empty right side opens these (D28: one 工作区 page, 文件 / 改动). */
 export const DEFAULT_SIDE_COMPONENTS: readonly ItemId[] = [FILES_COMPONENT, CHANGES_COMPONENT];

@@ -62,7 +62,9 @@ export function RailRow({ rail, children, className = "", testId, ...rest }: { r
 /**
  * Section actions at the row end: no room and invisible until the row is hovered or one of them has
  * focus (clipped, not display:none, so Tab still reaches them), so the row's meta stays at its end.
+ * No wrapping: at zero width CJK labels (继续发送) would break per character into a tall column,
+ * and the row's height would then flip with hover (owner 2026-10-18: the paused divider jittered).
  */
 export function HoverActions({ children }: { children: React.ReactNode }) {
-  return <span className="flex max-w-0 shrink-0 items-center gap-0.5 overflow-hidden opacity-0 group-hover:max-w-none group-hover:overflow-visible group-hover:opacity-100 focus-within:max-w-none focus-within:overflow-visible focus-within:opacity-100">{children}</span>;
+  return <span className="flex max-w-0 shrink-0 items-center gap-0.5 overflow-hidden whitespace-nowrap opacity-0 group-hover:max-w-none group-hover:overflow-visible group-hover:opacity-100 focus-within:max-w-none focus-within:overflow-visible focus-within:opacity-100">{children}</span>;
 }

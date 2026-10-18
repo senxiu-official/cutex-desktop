@@ -1,5 +1,5 @@
 // Owner pause of delegations (cutex asks-pause-v2): store actions, the agent menu item, and the
-// queue tray's 插入 guard during a delegation turn.
+// queue tray's 插话 guard during a delegation turn.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { queueSendNowMode } from "../src/renderer/src/lib/delegationTurn";
 import { normalizeEntries, type MenuAction } from "../src/renderer/src/lib/contextMenu";
@@ -58,7 +58,7 @@ describe("asks pause (asks-pause-v2)", () => {
   });
 });
 
-describe("queue tray 插入 during a delegation turn", () => {
+describe("queue tray 插话 during a delegation turn", () => {
   it("asks first only in a delegation turn with the steer-keys setting off", () => {
     expect(queueSendNowMode({ delegation: true, allowSteerKeys: false })).toBe("confirm");
     expect(queueSendNowMode({ delegation: true, allowSteerKeys: true })).toBe("steer");

@@ -168,7 +168,7 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
                   <span className="mr-0.5 flex">
                     {agents.slice(0, STACK).map((a) => (
                       <span key={a.cutexSessionId} className="-ml-1.5 rounded-full ring-2 ring-surface first:ml-0">
-                        <Avatar name={a.displayName} avatar={a.avatar} seed={a.cutexSessionId} color={profileColor(item)} size={20} />
+                        <Avatar name={a.displayName} avatar={a.avatar} seed={a.cutexSessionId} color={profileColor(item)} size={20} minor />
                       </span>
                     ))}
                   </span>

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PROJECT_SEPARATION, groupColor, migrateProjectSeparation, NEUTRAL_GROUP, PROJECT_SEPARATION_REV, PROJECT_SEPARATIONS, projectBlockLook } from "../src/renderer/src/lib/projectSeparation";
 
-describe("项目分隔 pref", () => {
+describe("项目颜色 pref (was 项目分隔)", () => {
   it("defaults to none (quiet pass) and keeps only known values", () => {
     expect(DEFAULT_PROJECT_SEPARATION).toBe("none");
-    expect(PROJECT_SEPARATIONS).toEqual(["header", "iconLine", "tint", "rail", "none"]);
+    // Settings order: quietest to strongest.
+    expect(PROJECT_SEPARATIONS).toEqual(["none", "iconLine", "rail", "tint", "header"]);
     expect(migrateProjectSeparation(undefined)).toBe("none");
     expect(migrateProjectSeparation("bogus")).toBe("none");
     for (const v of PROJECT_SEPARATIONS) expect(migrateProjectSeparation(v, PROJECT_SEPARATION_REV)).toBe(v);
@@ -16,6 +17,18 @@ describe("项目分隔 pref", () => {
     expect(migrateProjectSeparation("header", PROJECT_SEPARATION_REV)).toBe("header");
     expect(migrateProjectSeparation("tint")).toBe("tint");
     expect(migrateProjectSeparation("iconLine", 0)).toBe("iconLine");
+  });
+
+  it("rev 2: 项目标题着色 is gone; an untinted header band (the same look) becomes 图标下竖线", () => {
+    expect(PROJECT_SEPARATION_REV).toBe(2);
+    expect(migrateProjectSeparation("header", 1, false)).toBe("iconLine");
+    expect(migrateProjectSeparation("header", 1, true)).toBe("header");
+    expect(migrateProjectSeparation("header", 1)).toBe("header");
+    // A band picked after the change stays a band, whatever the old switch said.
+    expect(migrateProjectSeparation("header", 2, false)).toBe("header");
+    // Before rev 1 a stored band was the old default: none, as before.
+    expect(migrateProjectSeparation("header", 0, false)).toBe("none");
+    expect(migrateProjectSeparation("tint", 1, false)).toBe("tint");
   });
 
   it("标题行: full-width band header, untinted rows with the rail, band for one-row projects", () => {
@@ -37,7 +50,6 @@ describe("项目分隔 pref", () => {
     expect(look.rowClassName).toBe("project-lead project-lead-row");
     expect(look.style).toEqual({ "--project-color": "#4c8dff" });
     // No header tint to drop: 项目标题着色 does not change it.
-    expect(projectBlockLook("iconLine", "blue", false)).toEqual(look);
     expect(projectBlockLook("iconLine", NEUTRAL_GROUP).style).toEqual({ "--project-color": "var(--fg-muted)" });
   });
 
@@ -78,12 +90,4 @@ describe("项目分隔 pref", () => {
     expect(look.style).toEqual({ "--project-color": "var(--fg-muted)" });
   });
 
-  it("项目标题着色 off drops only the header tint", () => {
-    expect(projectBlockLook("header", "blue", false).headerClassName).toBe("project-band project-plain");
-    expect(projectBlockLook("header", "blue", false).rowClassName).toBe("project-band project-band-row project-plain");
-    expect(projectBlockLook("header", "blue", false).bodyClassName).toBe("project-band-body project-band-rows");
-    expect(projectBlockLook("tint", "blue", false).headerClassName).toBe("project-block-header project-plain");
-    expect(projectBlockLook("tint", "blue", false).className).toBe("project-block project-block-tint");
-    expect(projectBlockLook("rail", "blue", false)).toEqual(projectBlockLook("rail", "blue"));
-  });
 });

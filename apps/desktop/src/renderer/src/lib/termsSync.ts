@@ -1,4 +1,4 @@
-// Tray / taskbar text follows the owner's terms (Settings → 通用 → 称呼): main keeps a transport
+// Tray / taskbar text follows the owner's terms (Settings → 通用 → 术语): main keeps a transport
 // copy of the resolved terms in the desktop prefs (this push); localStorage (lib/terms) stays the
 // only store. Without it the tray could never follow a custom word (audit 2026-10-13 §problem 2).
 import { useEffect } from "react";

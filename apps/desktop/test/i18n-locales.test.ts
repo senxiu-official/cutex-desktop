@@ -60,8 +60,8 @@ describe("i18n locale catalogs", () => {
 
   it("zh-Hant-CN tracks zh-CN completely (regenerate it when zh-CN grows)", () => {
     expect(Object.keys(zhHantCN).sort()).toEqual(Object.keys(zhCN).sort());
-    expect(zhHantCN["appearance.uiFont"]).toBe("界面 · 非 CJK 字體");
-    expect(zhHantCN["appearance.monoFont"]).toBe("代碼字體");
+    expect(zhHantCN["appearance.uiFont"]).toBe("界面 · 西文字體");
+    expect(zhHantCN["appearance.monoFont"]).toBe("代碼 · 西文字體");
   });
 
   describe("partial catalogs (en fallback)", () => {

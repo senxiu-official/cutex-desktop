@@ -8,8 +8,9 @@ type Search = Pick<SettingsPageItem, "keywords" | "sections">;
 
 export const GENERAL_SEARCH: Search = {
   sections: [
-    { anchor: "startup", titleKey: "shell.general.startup", keywords: ["shell.language", "shell.closeWindow", "shell.closeWindow.tray"] },
+    { anchor: "language", titleKey: "shell.general.language", keywords: ["shell.language", "shell.dateFormat", "shell.numberFormat"] },
     { anchor: "terms", titleKey: "terms.title", keywords: ["terms.singular", "terms.plural"] },
+    { anchor: "window", titleKey: "shell.general.window", keywords: ["shell.closeWindow", "shell.closeWindow.tray"] },
   ],
 };
 
@@ -36,35 +37,23 @@ export const USERS_SEARCH: Search = {
 
 export const APPEARANCE_SEARCH: Search = {
   sections: [
-    { anchor: "overall", titleKey: "appearance.overall", keywords: ["shell.theme", "shell.theme.dark", "shell.theme.light", "shell.contrast", "appearance.zoom", "appearance.projectIconStyle", "appearance.projectIconStyle.tint", "appearance.projectIconStyle.line", "appearance.agentAvatar"] },
+    { anchor: "colors", titleKey: "appearance.colors", keywords: ["shell.theme", "shell.theme.dark", "shell.theme.light", "appearance.lightPalette", "appearance.darkPalette", "shell.contrast"] },
     {
       anchor: "fonts",
       titleKey: "appearance.fonts",
       keywords: ["appearance.uiFont", "appearance.cjkFont", "appearance.chatFont", "appearance.chatCjkFont", "appearance.chatFontSize", "appearance.monoFont", "appearance.monoFontSize"],
     },
-    { anchor: "layout", titleKey: "appearance.layout", keywords: ["appearance.fullWidth", "appearance.readingWidth", "appearance.density"] },
+    { anchor: "layout", titleKey: "appearance.layout", keywords: ["appearance.zoom", "appearance.width.full", "appearance.readingWidth", "appearance.density"] },
     { anchor: "launchArt", titleKey: "appearance.launchArt", keywords: ["appearance.launchArt.import", "appearance.launchArt.source.imported", "appearance.launchArt.source.bundled"] },
   ],
 };
 
 export const SIDEBAR_SEARCH: Search = {
   sections: [
-    {
-      anchor: "sidebar",
-      titleKey: "appearance.sidebar",
-      keywords: [
-        "appearance.projectGrouping",
-        "appearance.noOnlineProjects",
-        "appearance.runningAgents",
-        "appearance.rowPreview",
-        "appearance.foldIdleAgents",
-        "appearance.offlineAgents",
-        "appearance.sectionCollapsed",
-        "appearance.sidebarWidth",
-        "appearance.projectOrder",
-      ],
-    },
-    { anchor: "titleBar", titleKey: "shell.sidebar.titleBar", keywords: ["appearance.titleTwoLines", "appearance.runtimeButton"] },
+    { anchor: "projects", titleKey: "appearance.sidebar.projects", keywords: ["appearance.projectGrouping", "appearance.noOnlineProjects", "appearance.sectionCollapsed", "appearance.projectOrderReset"] },
+    { anchor: "agentRows", titleKey: "appearance.sidebar.agentRows", keywords: ["appearance.runningAgents", "appearance.statusChips", "appearance.rowPreview", "appearance.foldIdleAgents", "appearance.agentAvatar", "appearance.offlineAgents"] },
+    { anchor: "sidebarStyle", titleKey: "appearance.sidebar.style", keywords: ["appearance.projectIconStyle", "appearance.projectIconStyle.tint", "appearance.projectIconStyle.line", "appearance.projectSeparation", "appearance.sidebarWidth"] },
+    { anchor: "hoverPreview", titleKey: "appearance.sidebar.hoverPreview", keywords: ["appearance.projectHoverPreview", "appearance.projectHoverDelay"] },
   ],
 };
 
@@ -80,11 +69,18 @@ export const SIDES_SEARCH: Search = {
   ],
 };
 
-export const STATUS_SEARCH: Search = {
+export const COMPOSER_SEARCH: Search = {
   sections: [
-    { anchor: "places", titleKey: "shell.capsule.places" },
-    { anchor: "aboveInput", titleKey: "shell.status.aboveInput", keywords: ["appearance.needsYouStrip"] },
+    { anchor: "send", titleKey: "shell.composer.send", keywords: ["settings.sendKeys", "conversation.delegationSteerKeys"] },
+    { anchor: "queueOrder", titleKey: "queue.orderSection", keywords: ["queue.ownerMayPassAsks"] },
+    { anchor: "queuePanel", titleKey: "queue.panelFold", keywords: ["queue.panelFold.open", "queue.panelFold.auto", "queue.sectionStrip"] },
+    { anchor: "aboveInput", titleKey: "shell.status.aboveInput", keywords: ["appearance.needsYouStrip", "shell.composer.barItems"] },
+    { anchor: "inputBar", titleKey: "shell.composer.inputBar", keywords: ["shell.composer.quotaReset", "composer.profileAvatar"] },
   ],
+};
+
+export const STATUS_SEARCH: Search = {
+  sections: [{ anchor: "places", titleKey: "shell.capsule.places", keywords: ["shell.statusPlace.bar", "shell.statusPlace.capsule"] }],
 };
 
 /** One card per shortcut group (ShortcutsPage renders them with these anchors). */
@@ -98,5 +94,5 @@ export const SHORTCUTS_SEARCH: Search = {
 };
 
 export const ABOUT_SEARCH: Search = {
-  keywords: ["shell.about.native", "shell.about.licenses"],
+  keywords: ["shell.about.native", "shell.about.desktop", "shell.about.desktopBuild"],
 };

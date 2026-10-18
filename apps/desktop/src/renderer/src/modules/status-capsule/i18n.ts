@@ -1,6 +1,6 @@
 export const zhCN = {
   "status-capsule.moduleTitle": "状态胶囊",
-  "status-capsule.description": "对话区上方的悬浮状态胶囊。关闭后，放在胶囊里的状态不再常驻显示（输入栏、目标、作业等照常），胶囊的位置和大小会保留",
+  "status-capsule.description": "对话区上方的悬浮状态胶囊。关闭后，放在胶囊里的状态不再常驻显示（状态行、目标、作业等照常），胶囊的位置和大小会保留",
   "status-capsule.title": "状态胶囊",
   "status-capsule.collapse": "收起为胶囊",
   "status-capsule.expand": "展开状态面板",
@@ -8,10 +8,10 @@ export const zhCN = {
   "status-capsule.more": "胶囊位置、大小与内容",
   "status-capsule.items": "在胶囊里显示",
   "status-capsule.shortcut": "Ctrl+. 展开 / 收起",
-  "status-capsule.section": "胶囊外观",
+  "status-capsule.section": "胶囊",
   "status-capsule.always": "始终显示胶囊",
-  "status-capsule.always.hint": "关：只在有内容时显示",
-  "status-capsule.corner": "胶囊位置",
+  "status-capsule.always.hint": "没有内容时也显示",
+  "status-capsule.corner": "位置",
   "status-capsule.corner.hint": "折叠和展开都在这个角，展开时向另一侧长；面板「…」里也能改",
   "status-capsule.corner.topLeft": "左上",
   "status-capsule.corner.topRight": "右上",
@@ -27,7 +27,7 @@ export const zhCN = {
   "status-capsule.size.large": "大",
   "status-capsule.size.xlarge": "特大",
   "status-capsule.scale": "大小",
-  "status-capsule.scaleHint": "胶囊「…」菜单里的大小预设改的也是它",
+  "status-capsule.scaleHint": "和胶囊「…」菜单里的大小是同一个设置",
 } as const;
 
 declare module "../i18nCatalog" {
@@ -45,10 +45,10 @@ export const en: Record<keyof typeof zhCN, string> = {
   "status-capsule.more": "Capsule position, size and content",
   "status-capsule.items": "Shown in the capsule",
   "status-capsule.shortcut": "Ctrl+. expands / collapses",
-  "status-capsule.section": "Capsule appearance",
+  "status-capsule.section": "Capsule",
   "status-capsule.always": "Always show the capsule",
-  "status-capsule.always.hint": "Off: only while something is running",
-  "status-capsule.corner": "Capsule position",
+  "status-capsule.always.hint": "Also when nothing is running",
+  "status-capsule.corner": "Position",
   "status-capsule.corner.hint": "Collapsed and open stay in this corner; the panel grows away from it. Also in the panel’s … menu",
   "status-capsule.corner.topLeft": "Top left",
   "status-capsule.corner.topRight": "Top right",
@@ -64,5 +64,5 @@ export const en: Record<keyof typeof zhCN, string> = {
   "status-capsule.size.large": "Large",
   "status-capsule.size.xlarge": "Extra large",
   "status-capsule.scale": "Size",
-  "status-capsule.scaleHint": "The size presets in the capsule's “…” menu change the same value",
+  "status-capsule.scaleHint": "The same setting as the size in the capsule's “…” menu",
 };

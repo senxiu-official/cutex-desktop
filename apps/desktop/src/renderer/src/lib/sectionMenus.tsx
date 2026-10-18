@@ -3,6 +3,7 @@
 import { ArrowDown, ArrowUp, Check, ChevronsDownUp, ChevronsUpDown, FolderInput, FolderMinus, FolderPlus, Pencil, Trash2 } from "lucide-react";
 import type { MessageKey } from "../i18n";
 import { promptDialog, type MenuEntry } from "./contextMenu";
+import { customizeSidebarItem } from "./customizeMenu";
 import { getUiPrefs, updateSections } from "./prefs";
 import { assignSection, createSection, deleteSection, moveSection, renameSection, sectionOf, setSectionCollapsed, type SidebarSection } from "./sidebarSections";
 
@@ -58,5 +59,7 @@ export function sectionMenu(section: SidebarSection, visible: readonly string[],
     { label: t("menu.moveSectionDown"), icon: <ArrowDown size={ICON} />, disabled: at < 0 || at >= visible.length - 1, onSelect: () => updateSections((list) => moveSection(list, section.id, 1, visible)) },
     "separator",
     { label: t("menu.deleteSection"), icon: <Trash2 size={ICON} />, danger: true, onSelect: () => updateSections((list) => deleteSection(list, section.id)) },
+    "separator",
+    customizeSidebarItem(t),
   ];
 }

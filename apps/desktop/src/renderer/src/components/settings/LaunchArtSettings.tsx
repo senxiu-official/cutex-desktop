@@ -46,6 +46,9 @@ export function LaunchArtSection() {
     <Section
       id={settingsAnchorId("launchArt")}
       title={t("appearance.launchArt")}
+      // Legacy (owner 2026-10-18): this module will be redone (its ties to 对话 → 会话开场 and the Profile
+      // art, the file-name rule, which page); left as it is until then.
+      tag={{ label: t("settings.legacy"), title: t("settings.legacyHint") }}
       hint={t("appearance.launchArtHint")}
       actions={
         <>

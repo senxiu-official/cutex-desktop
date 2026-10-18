@@ -5,7 +5,9 @@ export const BROWSER_TAB = "browser.tab";
 export const MAX_BROWSER_URL = 2000;
 export const MAX_BROWSER_INPUT = 8000;
 export type BrowserParams = { url: string; pendingOpen?: string; tabKey?: string; agentOpened?: true; ownerTab?: true };
-export type BrowserState = { url: string; title: string; tabKey: string; pendingOpen?: string; agentOpened?: true; newOwner?: true };
+/** front: an agent tab the owner brought into the card's webview (otherwise agent tabs run in main's
+ * background carrier). Only meaningful with agentOpened; never selects a cookie pool. */
+export type BrowserState = { url: string; title: string; tabKey: string; pendingOpen?: string; agentOpened?: true; newOwner?: true; front?: true };
 // The shell's instance id is only scope-local. This key identifies the page across scopes;
 // it is not a lease, a guest id, a partition selector or an authorization credential.
 export function isBrowserTabKey(value: unknown): value is string {
@@ -174,7 +176,7 @@ export function restoreBrowser(raw: Json, version: number): BrowserState | null 
   // different, fresh UUID. This is a workflow hint, not authority over the supplied key.
   const params = parseBrowserParams(raw);
   return params ? { url: params.url, title: browserTitle(raw.title), tabKey: isBrowserTabKey(raw.tabKey) ? raw.tabKey : crypto.randomUUID(),
-    ...(raw.agentOpened === true ? { agentOpened: true as const } : {}) } : null;
+    ...(raw.agentOpened === true ? { agentOpened: true as const, ...(raw.front === true ? { front: true as const } : {}) } : {}) } : null;
 }
 
 export function browserRef(state: BrowserState): { key: string; title: string; params: { url: string } } | null {
@@ -185,6 +187,11 @@ export function browserRef(state: BrowserState): { key: string; title: string; p
 export function browserExternalUrl(raw: unknown): string | null {
   const url = safeBrowserUrl(raw, MAX_BROWSER_INPUT);
   return url?.startsWith("http:") || url?.startsWith("https:") ? url : null;
+}
+
+/** A background agent tab's live thumbnail: only main's bounded JPEG data URL, never a remote URL. */
+export function safeBrowserThumbnail(raw: unknown): string | undefined {
+  return typeof raw === "string" && raw.length <= 256 * 1024 && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(raw) ? raw : undefined;
 }
 
 /** No favicon request may run in the privileged app session. Main supplies bounded image bytes. */

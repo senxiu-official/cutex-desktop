@@ -49,6 +49,7 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
         forward: tabKey => call({ op: "forward", tabKey }) as Promise<void>,
         reload: tabKey => call({ op: "reload", tabKey }) as Promise<void>,
         stop: tabKey => call({ op: "stop", tabKey }) as Promise<void>,
+        toBackground: tabKey => call({ op: "toBackground", tabKey }) as Promise<void>,
         close: (tabKey, value) => call({ op: "close", tabKey, unmount: value?.unmount === true }) as Promise<void>,
       };
     },

@@ -6,10 +6,10 @@
 
 <p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
 
-**0.1.3**: an in-app browser you can work in (HTTPS, LAN addresses you type, sharing a tab with an
-agent, downloads and site permissions), 自动 (Auto) decided by Codex's automatic reviewer, one-click
-Windows sandbox setup and copying a Profile to another host; pairs with cutex 0.1.3 (0.1.0 "First
-Take" was the first public release). See [CHANGELOG.md](CHANGELOG.md).
+**0.1.4**: messages and approvals that wait for you show up right in the conversation, Claude agents
+get Claude Code's own permission modes, skills, settings and subagent transcripts, agent browser tabs
+work in the background, plus a Network proxy page, signed module packs and theme palettes; pairs with
+cutex 0.1.4 (the 0.1.x series is "First Take"; 0.1.0 was the first public release). See [CHANGELOG.md](CHANGELOG.md).
 
 > **Known issues**: see [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) (also in the app: Settings → About).
 > The most important ones:

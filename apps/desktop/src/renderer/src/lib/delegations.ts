@@ -5,7 +5,7 @@
 // kept by lib/delegationStore. Wire names (askId, AskSummary, …) are kept as cutex sends them.
 import type { AskAttemptView, AskClosed, AskDetail, AskExecution, AskHold, AskLateAnswer, AskQuestion, AskRemote, AskRequester, AskReview, AskSummary } from "../../../shared/ipc";
 import { isSessionRef, parseIdRef, sameId } from "./shortIds";
-import { toolArgs, toolResult } from "./taskRows";
+import { resultDelegationId, toolArgs, toolResult } from "./taskRows";
 import type { ExternalMessage, RawItem, TimelineEntry, TimelineState, TurnView } from "./timeline";
 
 export type { AskSummary } from "../../../shared/ipc";
@@ -609,7 +609,7 @@ export function delegateCallOf(item: RawItem): DelegateCall | null {
   const refused = r?.ok === false || obj(item.result)?.isError === true || item.status === "failed";
   const target = asParty(str(a.target));
   return {
-    askId: refused ? null : (str(r?.delegation_id) ?? str(r?.ask_id)),
+    askId: refused ? null : resultDelegationId(r),
     title: str(a.title) ?? str(r?.title),
     brief: str(a.text),
     targetId: str(r?.target_id) ?? target.id,
@@ -671,12 +671,12 @@ export function inferDelegations(entries: Iterable<TimelineEntry>): Map<string, 
     if (WAIT_TOOLS.has(tool) && r) {
       for (const v of Array.isArray(r.delegations) ? r.delegations : Array.isArray(r.asks) ? r.asks : []) {
         const view = obj(v);
-        const id = view ? (str(view.delegation_id) ?? str(view.ask_id)) : null;
+        const id = resultDelegationId(view);
         if (view && id) merge(id, fromRequesterView(view));
       }
       for (const x of Array.isArray(r.results) ? r.results : []) {
         const item = obj(x);
-        const id = item ? (str(item.delegation_id) ?? str(item.ask_id)) : null;
+        const id = resultDelegationId(item);
         if (!item || !id || item.kind !== "answer") continue;
         const answer = str(item.answer);
         merge(id, {
@@ -687,7 +687,7 @@ export function inferDelegations(entries: Iterable<TimelineEntry>): Map<string, 
       }
     } else if (CLOSE_TOOLS.has(tool) && r && r.ok !== false && obj(e.item.result)?.isError !== true) {
       const a = toolArgs(e.item);
-      const id = str(a.delegation) ?? str(a.delegation_id) ?? str(a.ask) ?? str(a.ask_id) ?? str(r.delegation_id) ?? str(r.ask_id);
+      const id = str(a.delegation) ?? str(a.delegation_id) ?? str(a.ask) ?? str(a.ask_id) ?? resultDelegationId(r);
       const outcome = str(a.outcome);
       if (id && outcome) merge(id, { closed: outcome === "stop" ? "stopped" : (outcome as AskClosed) });
     }

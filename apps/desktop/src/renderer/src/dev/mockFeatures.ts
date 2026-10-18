@@ -20,7 +20,11 @@ const CORE_BASE_FEATURES: readonly string[] = [
 
 /** Newer cutex only (absent under `?legacy`). */
 const CORE_NEW_FEATURES: readonly string[] = [
+  "profile-avatar",
   "windows-sandbox-readiness",
+  "session-conversation-activity",
+  "session-sandbox-extras",
+  "claude-permission-rules",
   "agent-avatar-color",
   "session-fast-mode",
   "runtime-restore-candidates",
@@ -63,6 +67,8 @@ const CORE_NEW_FEATURES: readonly string[] = [
   "profile-generic-switches",
   "profile-tool-schema-compat",
   "claude-runtime-features",
+  "claude-session-skills",
+  "claude-rewind-files",
   "delegation-tools",
   "fs-file-read",
   "agent-messages-v2",

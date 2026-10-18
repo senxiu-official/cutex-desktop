@@ -11,7 +11,9 @@ import { openSubagentThread } from "../../lib/sideOpen";
 import { childStatusFromThreadRead, SubAgentContext, subAgentMetaFromThreadRead, subAgentName, subAgentTooltip } from "../../lib/subagents";
 import { recordSubAgentMeta, useSubAgentMeta } from "../../lib/subagentMetaStore";
 import { orderedEntries, timelineFromThreadRead } from "../../lib/timeline";
-import { sessionApi, useApp } from "../../store";
+import { CLAUDE_SUBAGENT_TRANSCRIPTS_CAPABILITY } from "../../lib/agentFeatures";
+import { isClaudeTaskRef } from "../../lib/claudeTasks";
+import { sessionApi, selectedFeatures, useApp } from "../../store";
 import type { SideBodyProps } from "../slots";
 import { useBoundSubAgents, type ThreadState } from "./threadState";
 
@@ -32,7 +34,12 @@ export function SubagentThreadBody({ instance, sessionId }: SideBodyProps<Thread
   const setSubTimeline = useApp((s) => s.setSubTimeline);
   const generation = useAgentRuntimeGeneration(sessionId);
   const [error, setError] = useState<string | null>(null);
+  const [truncated, setTruncated] = useState(false);
   const timeline = sub?.timeline ?? null;
+  const claude = isClaudeTaskRef(threadId);
+  // A Claude transcript's live frames need cutex `claude-subagent-transcripts`; an older cutex: re-read while it runs.
+  const poll = useApp((s) => claude && !selectedFeatures(s).has(CLAUDE_SUBAGENT_TRANSCRIPTS_CAPABILITY));
+  const [tick, setTick] = useState(0);
 
   // Read once on open (and to settle when the parent sees the subagent finish, or its runtime
   // restarted). After that the store applies this thread's live events, which cutex forwards on the
@@ -45,6 +52,7 @@ export function SubagentThreadBody({ instance, sessionId }: SideBodyProps<Thread
         if (cancelled) return;
         setSubTimeline(threadId, timelineFromThreadRead(r));
         setError(null);
+        setTruncated((r as { thread?: { transcriptTruncated?: unknown } } | null)?.thread?.transcriptTruncated === true);
         recordSubAgentMeta(threadId, subAgentMetaFromThreadRead(r));
         const settled = childStatusFromThreadRead(r);
         if (settled) useApp.getState().setSubAgentStatus(threadId, settled, generation);
@@ -54,7 +62,14 @@ export function SubagentThreadBody({ instance, sessionId }: SideBodyProps<Thread
     return () => {
       cancelled = true;
     };
-  }, [sessionId, threadId, info?.status, generation, setSubTimeline]);
+  }, [sessionId, threadId, info?.status, generation, setSubTimeline, tick]);
+
+  const running = (info?.status ?? "running") === "running" || info?.status === "pendingInit";
+  useEffect(() => {
+    if (!poll || !running) return;
+    const timer = setInterval(() => setTick((n) => n + 1), 5000);
+    return () => clearInterval(timer);
+  }, [poll, running]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const entries = useMemo(() => (timeline ? orderedEntries(timeline) : []), [timeline, sub?.version]);
@@ -74,7 +89,8 @@ export function SubagentThreadBody({ instance, sessionId }: SideBodyProps<Thread
             </span>
             <span className={`shrink-0 text-xs ${STATUS_TONE[status] ?? "text-muted"}`}>{t(`sub.status.${status}` as MessageKey)}</span>
           </div>
-          <p className="mt-1 text-[11px] text-subtle">{t("sub.readOnly")}</p>
+          <p className="mt-1 text-[11px] text-subtle">{t(claude ? "subagents.claude.readOnly" : "sub.readOnly")}</p>
+          {truncated && <p className="mt-0.5 text-[11px] text-warn-text">{t("subagents.claude.truncated")}</p>}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-[13px]">
           {error && <p className="text-xs text-danger">{error}</p>}

@@ -116,6 +116,7 @@ export interface SummaryAgent {
   status: SummaryAgentStatus;
   needs: SummaryNeed[];
   preview: string | null;
+  /** Last real conversation activity (cutex session-conversation-activity; older cutex: also runtime events / updatedAt). */
   lastActivityAt: string | null;
   lastTurn: SummaryLastTurn | null;
   unreadTurns: number;

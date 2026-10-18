@@ -1,4 +1,5 @@
-// Mock owner-notify (agent → owner messages) for the browser preview: a few records on Eva / Mika,
+// Mock owner-notify (agent → owner messages) for the browser preview: a few records on Eva / Mika
+// (ntf-a0: a reply still pending from Eva's oldest turn),
 // the settings block, and the session methods. `?ownerdemo` adds a new urgent message after 5 s.
 // ntf-s1 / ntf-s2 are cutex system notices (origin system: no 回复); every record can be deleted.
 import type { OwnerNotification, OwnerNotifySettings } from "@cutex-desktop/protocol";
@@ -31,6 +32,19 @@ function record(over: Partial<OwnerNotification> & Pick<OwnerNotification, "noti
 }
 
 const mockOwnerNotes: OwnerNotification[] = [
+  // Still waiting for a reply from the oldest turn, many turns up (owner report 2026-10-18): the
+  // composer's 等你回复 row (components/PendingOwnerNotes) jumps to it / answers it in place.
+  record({
+    notificationId: "ntf-a0",
+    agentId: "eva",
+    agentName: "Eva",
+    turnId: "turn-0",
+    createdAt: iso(1450),
+    level: "attention",
+    channels: ["desktop", "phone"],
+    needsReply: true,
+    text: "手机掉线了：请用 USB 重新连上并打开 **adb 调试**，连好后回复我一声，我再继续装 APK。",
+  }),
   record({ notificationId: "ntf-a1", agentId: "eva", agentName: "Eva", turnId: "turn-1", createdAt: iso(880), state: "acknowledged", acknowledgedAt: iso(800), text: "协议类型已经从 `codex app-server generate-ts` 重新生成，**没有手写改动**。" }),
   record({
     notificationId: "ntf-a2",

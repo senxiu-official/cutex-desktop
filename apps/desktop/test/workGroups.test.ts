@@ -6,6 +6,17 @@ const tool = (id: string, item: Record<string, unknown>, turnId = "t1"): Timelin
 const agent = (id: string, turnId = "t1"): TimelineEntry => ({ kind: "agent", id, text: "…", turnId, streaming: false });
 
 describe("segmentEntries", () => {
+  it("counts a Claude agent's Agent / Task calls as subagent actions, not tools", () => {
+    const segs = segmentEntries([
+      tool("a", { type: "commandExecution", command: "ls", status: "completed", exitCode: 0 }),
+      tool("b", { type: "dynamicToolCall", namespace: "claude", tool: "Agent", status: "completed" }),
+      tool("c", { type: "dynamicToolCall", namespace: "claude", tool: "Task", status: "inProgress" }),
+      tool("d", { type: "dynamicToolCall", namespace: "claude", tool: "WebSearch", status: "completed" }),
+      agent("m1"),
+    ]);
+    const first = segs[0] as Extract<(typeof segs)[number], { kind: "work" }>;
+    expect(first.summary).toMatchObject({ commands: 1, tools: 1, agents: 2 });
+  });
   it("closes a work group when the agent writes text and summarizes it", () => {
     const segs = segmentEntries(
       [

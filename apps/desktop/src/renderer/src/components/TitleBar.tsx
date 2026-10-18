@@ -5,13 +5,14 @@
 // Windows keeps native caption buttons (titleBarOverlay, recolored to the theme); macOS keeps the
 // traffic lights; Linux gets drawn buttons.
 import { useEffect, useRef, useState } from "react";
-import { Bell, BellOff, BellRing, Check, ChevronDown, Globe, PanelLeft, PanelLeftClose, Power, Star, X } from "lucide-react";
+import { Bell, BellOff, BellRing, Check, ChevronDown, Globe, Loader2, PanelLeft, PanelLeftClose, Power, Star, X } from "lucide-react";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import type { GitStatus, NotificationLevel } from "../../../shared/ipc";
 import { api, bridge } from "../bridge";
 import { useI18n } from "../i18n";
 import { openMenuFrom, runAction } from "../lib/contextMenu";
 import { useArmed } from "../lib/armedConfirm";
+import { useRuntimeStartSince } from "../lib/runtimeStart";
 import { ArmedHint } from "./ArmedHint";
 import { agentMenu, runtimeItem } from "../lib/menus";
 import { openService } from "../lib/services";
@@ -48,21 +49,26 @@ const win = bridge.window;
 const NO_DRAG = "[app-region:no-drag]";
 const ICON_BTN = `${NO_DRAG} rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground`;
 
-/** Keep the native Windows caption buttons in the app's colors (theme can change at runtime). */
+/**
+ * Keep the native window in the app's colours (theme and palette can change at runtime): the Windows
+ * caption buttons, and on every platform the window background main paints before the page (no flash of
+ * the default colour at the next start with 宣纸 / 暮色 …).
+ */
 function useChromeColors() {
   useEffect(() => {
-    if (!win || win.nativeControls !== "right") return;
+    if (!win) return;
     const sync = () => {
       const css = getComputedStyle(document.documentElement);
       const color = css.getPropertyValue("--win").trim();
       const symbolColor = css.getPropertyValue("--fg").trim();
-      if (color && symbolColor) void win.setChrome({ color, symbolColor });
+      if (color && symbolColor && win.nativeControls === "right") void win.setChrome({ color, symbolColor });
+      if (color) void win.setBackground?.(color);
     };
     sync();
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     media.addEventListener("change", sync);
     const observer = new MutationObserver(sync);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-light-palette", "data-dark-palette"] });
     return () => {
       media.removeEventListener("change", sync);
       observer.disconnect();
@@ -168,11 +174,13 @@ function RuntimeButton({ session }: { session: SessionResource }) {
   const host = useApp((s) => selectedSidebar(s)?.hostRows[session.cutexSessionId]);
   const ref = useRef<HTMLButtonElement>(null);
   const [armed, setArmed] = useArmed(`${session.cutexSessionId}:${session.runtime.status}`);
+  // Re-render while our start runs (runtimeItem then offers 正在启动… instead of 启动).
+  const starting = useRuntimeStartSince(useApp(agentHost), session.cutexSessionId) !== null;
   if (runtimeButton === "off" || (runtimeButton === "independent" && (host?.projectId || isQuickChat(session, host)))) return null;
   const item = runtimeItem(session, t);
   if (!item) return null;
   const online = session.runtime.status === "online";
-  const tip = t(online ? "titlebar.runtimeOnline" : "titlebar.runtimeOffline");
+  const tip = starting && !online ? t("menu.starting") : t(online ? "titlebar.runtimeOnline" : "titlebar.runtimeOffline");
   const click = () => {
     if (item.armed && !armed) return setArmed(true);
     setArmed(false);
@@ -185,9 +193,10 @@ function RuntimeButton({ session }: { session: SessionResource }) {
         onClick={click}
         title={armed ? undefined : tip}
         aria-label={armed && item.armed ? item.armed : tip}
-        className={`${NO_DRAG} shrink-0 rounded-md p-1 ${armed ? "bg-danger text-white" : `hover:bg-surface-2 ${online ? "text-ok hover:text-danger" : "text-subtle hover:text-accent"}`}`}
+        disabled={item.disabled}
+        className={`${NO_DRAG} shrink-0 rounded-md p-1 ${armed ? "bg-danger text-white" : starting && !online ? "text-accent" : `hover:bg-surface-2 ${online ? "text-ok hover:text-danger" : "text-subtle hover:text-accent"}`}`}
       >
-        <Power size={14} />
+        {starting && !online ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
       </button>
       {armed && item.armed && <ArmedHint anchor={ref} text={item.armed} />}
     </>

@@ -80,9 +80,9 @@ class SessionMock extends EventEmitter {
     expect(result).toHaveLength(1);
     return result[0]!.cancel === true;
   }
-  response(guest: ContentsMock, url: string, statusCode: number, responseHeaders: Record<string, string[]>): void {
+  response(guest: ContentsMock, url: string, statusCode: number, responseHeaders: Record<string, string[]>, resourceType = "mainFrame"): void {
     if (!this.headers) throw new Error("Missing headers handler");
-    this.headers({ webContentsId: guest.id, resourceType: "mainFrame", url, statusCode, responseHeaders }, () => {});
+    this.headers({ webContentsId: guest.id, resourceType, url, statusCode, responseHeaders }, () => {});
   }
 }
 class DebuggerMock extends EventEmitter {
@@ -825,6 +825,46 @@ describe("installed browser owner IPC / Electron boundary", () => {
     expect(f.request).toHaveBeenCalledWith("POST", "/v2/services/report/lease", { body: { holder: "desktop-browser" } });
     expect(f.request).toHaveBeenCalledWith("POST", "/v2/services/report/view-ticket", { body: { path: "/next", start: false, routing: "host" } });
     expect(guest.loads.at(-1)).toContain("http://report.svc.localhost:26111/__cutex/auth?");
+  });
+  it("a service page's fetch 401 ticket-required re-tickets the top-level page once per minute", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+      const { guest } = await f.mount("service", "cutex:service/docs/");
+      guest.url = "http://docs.svc.localhost:26111/board?x=1"; guest.emit("did-navigate", {}, guest.url);
+      await flush();
+      const tickets = () => f.request.mock.calls.filter(([, path]) => path === "/v2/services/docs/view-ticket").length;
+      const before = tickets(), loads = guest.loads.length;
+      const challenge = { "X-Cutex-Service-Auth": ["ticket-required"] };
+      f.session.response(guest, "http://docs.svc.localhost:26111/api/items", 401, challenge, "xhr");
+      f.session.response(guest, "http://docs.svc.localhost:26111/api/more", 401, challenge, "xhr");
+      await flush();
+      expect(tickets()).toBe(before + 1);
+      expect(f.request).toHaveBeenLastCalledWith("POST", "/v2/services/docs/view-ticket", { body: { path: "/board?x=1", start: false, routing: "host" } });
+      expect(guest.loads.length).toBe(loads + 1);
+      expect(guest.loads.at(-1)).toContain("http://docs.svc.localhost:26111/__cutex/auth?");
+      // Still failing within the minute: no further automatic attempt (no loop).
+      vi.setSystemTime(Date.now() + 30_000);
+      f.session.response(guest, "http://docs.svc.localhost:26111/api/items", 401, challenge, "fetch");
+      await flush();
+      expect(tickets()).toBe(before + 1);
+      vi.setSystemTime(Date.now() + 31_000);
+      f.session.response(guest, "http://docs.svc.localhost:26111/api/items", 401, challenge, "fetch");
+      await flush();
+      expect(tickets()).toBe(before + 2);
+    } finally { vi.useRealTimers(); }
+  });
+  it("ignores a subresource 401 of another service or a non-service page", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("service", "cutex:service/docs/");
+    const calls = f.request.mock.calls.length, loads = guest.loads.length;
+    f.session.response(guest, "http://report.svc.localhost:26111/api", 401, { "X-Cutex-Service-Auth": ["ticket-required"] }, "xhr");
+    f.session.response(guest, "http://localhost:26180/api", 401, { "X-Cutex-Service-Auth": ["ticket-required"] }, "xhr");
+    // A subresource's service error header never fails the tab (e.g. a missing static file).
+    f.session.response(guest, "http://docs.svc.localhost:26111/favicon.ico", 404, { "X-Cutex-Service-Error": ["static_not_found"] }, "image");
+    await flush();
+    expect(f.request).toHaveBeenCalledTimes(calls); expect(guest.loads).toHaveLength(loads);
+    expect((await f.ipc({ op: "list" }))[0]?.error).toBeUndefined();
   });
   it("does not turn an unrelated local page's spoofed service header into a ticket exchange", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });

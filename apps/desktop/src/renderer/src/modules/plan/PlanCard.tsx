@@ -1,6 +1,7 @@
 // Plan mode's proposed plan as a card, with the TUI's "Implement this plan?" choices on the latest
 // one; and the `update_plan` checklist. ("Clear context and implement" is left out: one agent =
-// one thread, no /clear.)
+// one thread, no /clear.) A Claude agent gets Claude Code's plan approval choices instead
+// (ClaudePlanChoices: auto-accept edits / approve edits manually / keep planning with feedback).
 import { useState } from "react";
 import { Check, ChevronDown, ChevronRight, Circle, CircleDot, ListChecks, NotebookPen } from "lucide-react";
 import { useI18n } from "../../i18n";
@@ -10,6 +11,7 @@ import { planProgress, type PlanStep } from "../../lib/statusCapsule";
 import { captureHostAction } from "../../lib/hostSwitch";
 import { useApp } from "../../store";
 import { Markdown } from "../../components/Markdown";
+import { PlanChoicesGate } from "./ClaudePlanChoices";
 
 /** Same user message the TUI sends (PLAN_IMPLEMENTATION_CODING_MESSAGE). */
 const IMPLEMENT_MESSAGE = "Implement the plan.";
@@ -62,6 +64,8 @@ export function PlanCard({ sessionId, text, streaming, actionable }: { sessionId
         </div>
       )}
       {pending && (
+        // A Claude agent gets Claude Code's plan approval choices instead of these (PlanChoicesGate).
+        <PlanChoicesGate sessionId={sessionId} current={current} onDecided={decide}>
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
           <span className="mr-auto text-xs text-subtle">{t("plan.question")}</span>
           <button onClick={decide} className="rounded-md bg-surface-2 px-2.5 py-1 text-xs text-muted hover:text-foreground" title={t("plan.stayHint")}>
@@ -71,6 +75,7 @@ export function PlanCard({ sessionId, text, streaming, actionable }: { sessionId
             {t("plan.implement")}
           </button>
         </div>
+        </PlanChoicesGate>
       )}
       {error && <p className="mt-2 text-xs text-danger">{error}</p>}
     </div>

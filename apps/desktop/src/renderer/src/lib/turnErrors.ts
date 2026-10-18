@@ -11,16 +11,35 @@ import type { TurnView } from "./timeline";
  * Returns segment index → the failed turns (with an error text) whose last segment it is.
  */
 export function turnErrorPlacement(segmentTurnIds: readonly (string | null | undefined)[], turns: readonly TurnView[]): Map<number, TurnView[]> {
-  const failed = new Map(turns.filter((turn) => turn.status === "failed" && turn.error).map((turn) => [turn.id, turn]));
+  return placeAtTurnEnd(segmentTurnIds, turns, (turn) => turn.status === "failed" && !!turn.error);
+}
+
+/**
+ * Where interrupted turns say so (TurnInterruptedRow): after the turn's last rendered segment, like a
+ * failed turn's error. The "已停止" header sits above the turn's work, so a turn cut off mid-reply (a
+ * stop, a runtime restart that settled the turn `interrupted`) ended on half a sentence with nothing
+ * under it (r243 acceptance, claude-r17). Same in the live view and after a reload: both come from
+ * the turn's status.
+ */
+export function turnInterruptedPlacement(segmentTurnIds: readonly (string | null | undefined)[], turns: readonly TurnView[]): Map<number, TurnView[]> {
+  return placeAtTurnEnd(segmentTurnIds, turns, (turn) => turn.status === "interrupted");
+}
+
+function placeAtTurnEnd(
+  segmentTurnIds: readonly (string | null | undefined)[],
+  turns: readonly TurnView[],
+  pick: (turn: TurnView) => boolean,
+): Map<number, TurnView[]> {
+  const chosen = new Map(turns.filter(pick).map((turn) => [turn.id, turn]));
   const placed = new Map<number, TurnView[]>();
-  if (failed.size === 0) return placed;
+  if (chosen.size === 0) return placed;
   const last = new Map<string, number>();
   segmentTurnIds.forEach((id, index) => {
-    if (id && failed.has(id)) last.set(id, index);
+    if (id && chosen.has(id)) last.set(id, index);
   });
   for (const [id, index] of last) {
     const list = placed.get(index) ?? [];
-    list.push(failed.get(id)!);
+    list.push(chosen.get(id)!);
     placed.set(index, list);
   }
   return placed;

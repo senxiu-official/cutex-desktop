@@ -36,7 +36,14 @@ const mocks = vi.hoisted(() => ({
   storageArchives: [] as string[],
   storageFailure: false,
   device: vi.fn(() => "device-fixture"),
+  // Background carriers (carrier.ts) as created by main; the real module is guard-tested in browserCarrier.test.ts.
+  createCarrier: vi.fn(),
+  carriers: [] as { options: any; guest: any; destroy: Mock }[],
+  startProxy: vi.fn(),
 }));
+vi.mock("../src/main/browser/carrier", async importOriginal => ({ ...await importOriginal<typeof import("../src/main/browser/carrier")>(),
+  createBrowserCarrier: (options: unknown) => mocks.createCarrier(options) }));
+vi.mock("../src/main/browser/egressProxy", () => ({ startBrowserEgressProxy: mocks.startProxy }));
 vi.mock("../src/main/browser/externalPages", async importOriginal => {
   const actual = await importOriginal<typeof import("../src/main/browser/externalPages")>();
   // In-memory store (default on): tests never write a browser-external.json under the cwd.
@@ -223,6 +230,17 @@ async function pendingAgentOpen(f: ReturnType<typeof fixture>, url = "http://loc
 }
 beforeEach(() => {
   mocks.handlers.clear(); mocks.sessions.clear(); mocks.appListeners.clear(); mocks.relays.length = 0;
+  mocks.carriers.length = 0;
+  mocks.createCarrier.mockReset().mockImplementation((options: any) => {
+    const guest = new ContentsMock(mocks.sessions.get(`persist:browser-agent-${options.hostId}`) as SessionMock);
+    guest.getType = () => "window";
+    const destroy = vi.fn(() => guest.close());
+    options.guard(guest);
+    mocks.carriers.push({ options, guest, destroy });
+    return { guest, destroy };
+  });
+  mocks.startProxy.mockReset().mockImplementation(async () => ({ port: 26391, credentials: { username: "test-only", password: "not-a-real-credential", realm: "test-realm" },
+    isPublicBrowserUrl: (url: string) => /^https:\/\/example\.test\//.test(url), close: vi.fn(async () => {}) }));
   mocks.identity = undefined; mocks.identityOwnerRouting = false; mocks.storageWrites.length = 0; mocks.storageArchives.length = 0; mocks.storageFailure=false; mocks.device.mockClear();
   // These relay tests pin the local-only tier (development override); N2 coverage is in browserInstall.
   vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "off");
@@ -911,5 +929,142 @@ describe("browser claims decided in main", () => {
     expect(await f.ipc({ op: "claimAllows" })).toEqual([expect.objectContaining({ sessionId: "session-remember", origin: "http://localhost:26180" })]);
     await f.ipc({ op: "releaseLease", tabKey: "owner-one", leaseId, owner: true });
     expect(await f.ipc({ op: "claimAllows" })).toEqual([]);
+  });
+});
+
+// Owner option C (2026-10-18): agent-opened tabs run in main's offscreen background carrier and are
+// operated while hidden; owner tabs (and owner tabs granted to an agent) keep the visible-only rule.
+describe("background carrier for agent tabs", () => {
+  const PAGE = "http://localhost:26180/page?token=private-one";
+  async function backgroundAgentTab(f: ReturnType<typeof fixture>, url = PAGE) {
+    const open = await pendingAgentOpen(f, url);
+    const identity = { pendingOpen: open.intent.requestId, agentOpened: true as const, carrier: "background" as const };
+    const mount = await f.ipc({ op: "open", tabKey: open.intent.tabKey, url: open.intent.url, identity }) as BrowserTabMount;
+    const carrier = mocks.carriers.at(-1)!;
+    await until(() => open.peer.options.localLeases().length === 1);
+    const lease = open.peer.options.localLeases()[0]!;
+    await f.ipc({ op: "holdReady", tabKey: open.intent.tabKey, leaseId: lease.leaseId, held: true });
+    await open.result;
+    const frame = (guest: ContentsMock, wait?: Promise<void>) => guest.debugger.sendCommand.mockImplementation(async (method: string) => {
+      if (method === "Page.getFrameTree") { await wait; return { frameTree: { frame: { id: "main", url: guest.url } } }; }
+      return {};
+    });
+    const act = (url = PAGE) => open.peer.options.execute(command(open.peer, { kind: "tab.act", action: { kind: "wait", condition: { kind: "url", url } } },
+      { leaseId: lease.leaseId, requestId: `request-${Math.random()}`, target: { hostId: "local", deviceId: open.peer.options.deviceId, guestId: mount.guestId } }), context().value);
+    return { open, mount, carrier, guest: carrier.guest as ContentsMock, lease, act, frame, tabKey: open.intent.tabKey };
+  }
+  it("main creates the carrier itself: agent partition session, popup / WebRTC guard, exact main-only URL, no webview", async () => {
+    const f = fixture(); await f.enable();
+    const { mount, carrier, guest } = await backgroundAgentTab(f);
+    expect(mount).toMatchObject({ carrier: "background", pool: "agent", partition: "persist:browser-agent-local", src: "" });
+    expect(mocks.createCarrier).toHaveBeenCalledOnce(); expect(carrier.options.hostId).toBe("local");
+    expect(guest.session).toBe(mocks.sessions.get("persist:browser-agent-local"));
+    expect(guest.setWindowOpenHandler).toHaveBeenCalledOnce(); expect(guest.setWebRTCIPHandlingPolicy).toHaveBeenCalledWith("disable_non_proxied_udp");
+    expect(guest.loads).toEqual([PAGE]);
+    // The same partition session hooks attribute (and only admit) the carrier by its webContents id.
+    const agentSession = mocks.sessions.get("persist:browser-agent-local") as SessionMock;
+    const before = agentSession.webRequest.onBeforeRequest.mock.calls[0]![1] as (details: unknown, done: (value: { cancel?: boolean }) => void) => void;
+    const denied = (webContentsId: number, url: string) => { let cancel: boolean | undefined; before({ webContentsId, url, resourceType: "script", initiatorOrigin: "http://localhost:26180" }, value => { cancel = value.cancel; }); return cancel === true; };
+    expect(denied(guest.id, "http://localhost:26180/app.js")).toBe(false);
+    expect(denied(guest.id + 999, "http://localhost:26180/app.js")).toBe(true);
+    expect(denied(guest.id, "http://localhost:26111/v2/sessions")).toBe(true); // the host's control endpoint
+    expect((await f.list())[0]).toMatchObject({ carrier: "background", pool: "agent" });
+    expect(JSON.stringify(f.events)).not.toContain("private-one");
+    // The card's re-render gets the same carrier back, never a second one.
+    await expect(f.ipc({ op: "open", tabKey: mount.tabKey, url: "http://localhost:26180/page", identity: { agentOpened: true, carrier: "background" } })).resolves.toMatchObject({ carrier: "background", guestId: mount.guestId });
+    expect(mocks.createCarrier).toHaveBeenCalledOnce();
+  });
+  it("the agent acts while the app window is hidden; the visibility probe never runs and app focus is untouched", async () => {
+    const f = fixture(); await f.enable();
+    const { guest, act, frame } = await backgroundAgentTab(f);
+    f.window.isVisible.mockReturnValue(false); f.owner.executeJavaScriptInIsolatedWorld.mockClear(); frame(guest);
+    await expect(act()).resolves.toMatchObject({ kind: "tab.act" });
+    // The carrier's dialog guard held the debugger and handed it to the provider (no tab_busy).
+    expect(guest.debugger.attach).toHaveBeenCalledTimes(2); expect(guest.debugger.detach).toHaveBeenCalledOnce();
+    expect(guest.debugger.sendCommand).toHaveBeenCalledWith("Emulation.setDeviceMetricsOverride", { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false, scale: 1 });
+    expect(f.owner.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
+  });
+  it("while no agent binding holds it, the carrier's guard dismisses page dialogs (none reaches the owner's desktop)", async () => {
+    const f = fixture(); await f.enable();
+    const { guest, act, frame } = await backgroundAgentTab(f);
+    expect(guest.debugger.isAttached()).toBe(true);
+    expect(guest.debugger.sendCommand.mock.calls.some(([method]) => method === "Page.enable")).toBe(true);
+    guest.debugger.emit("message", {}, "Page.javascriptDialogOpening", { type: "confirm", message: "page dialog" });
+    expect(guest.debugger.sendCommand).toHaveBeenCalledWith("Page.handleJavaScriptDialog", { accept: false });
+    // Bound: the guard is out of the way; exactly one answer comes (the executor's own dismissal).
+    frame(guest); await act(); guest.debugger.sendCommand.mockClear();
+    guest.debugger.emit("message", {}, "Page.javascriptDialogOpening", { type: "alert", message: "x" });
+    await vi.waitFor(() => expect(guest.debugger.sendCommand.mock.calls.filter(([method]) => method === "Page.handleJavaScriptDialog")).toHaveLength(1));
+  });
+  it("an owner tab never gets a background carrier and keeps target_hidden when granted", async () => {
+    const f = fixture(); await f.enable();
+    await expect(f.ipc({ op: "open", tabKey: "owner-x", url: "http://localhost:26180/", identity: { carrier: "background" } })).rejects.toMatchObject({ code: "permission_denied" });
+    await expect(f.ipc({ op: "open", tabKey: "owner-x", url: "http://localhost:26180/", identity: { carrier: "background" }, receipt: { src: "x", webContentsId: 1 } })).rejects.toThrow("invalid_browser_request");
+    expect(mocks.createCarrier).not.toHaveBeenCalled();
+    const { guest, reserved } = await f.mount();
+    await expect(f.ipc({ op: "toBackground", tabKey: "owner-one" })).rejects.toMatchObject({ code: "permission_denied" });
+    const pending = await pendingOwnerGrant(f); await f.ipc({ op: "holdReady", tabKey: "owner-one", leaseId: pending.leaseId, held: true }); await pending.grant;
+    f.window.isVisible.mockReturnValue(false);
+    guest.debugger.sendCommand.mockImplementation(async (method: string) => method === "Page.getFrameTree" ? { frameTree: { frame: { id: "main", url: guest.url } } } : {});
+    await expect(f.peer().options.execute(command(f.peer(), { kind: "tab.act", action: { kind: "wait", condition: { kind: "url", url: guest.url } } },
+      { leaseId: pending.leaseId, target: { hostId: "local", deviceId: f.peer().options.deviceId, guestId: reserved.guestId } }), context().value)).rejects.toMatchObject({ code: "target_hidden" });
+    expect(mocks.createCarrier).not.toHaveBeenCalled();
+  });
+  it("bring to front: the running action finishes first, new ones are busy, the lease survives and the webview reopens the exact URL", async () => {
+    const f = fixture(); await f.enable();
+    const { guest, act, frame, tabKey, lease, mount } = await backgroundAgentTab(f);
+    const gate = deferred<void>(); frame(guest, gate.promise);
+    const running = act(); let runningDone = false; void running.then(() => { runningDone = true; }, () => {});
+    await until(() => guest.debugger.sendCommand.mock.calls.some(([method]) => method === "Page.getFrameTree"));
+    let reserved: BrowserTabMount | undefined;
+    const front = f.ipc({ op: "open", tabKey, url: "http://localhost:26180/page", identity: { agentOpened: true } }).then((value: BrowserTabMount) => { reserved = value; });
+    await flush();
+    expect(reserved).toBeUndefined(); expect((await f.list())[0]?.handover).toBe(true);
+    await expect(act()).rejects.toMatchObject({ code: "busy" });
+    gate.resolve(); await running; expect(runningDone).toBe(true);
+    await front;
+    expect(reserved).toMatchObject({ guestId: mount.guestId, pool: "agent" }); expect(reserved!.carrier).toBeUndefined();
+    const webview = f.attach(reserved!);
+    await f.ipc({ op: "open", tabKey, url: "http://localhost:26180/page", identity: { agentOpened: true }, receipt: { src: reserved!.src, webContentsId: webview.id } });
+    await until(() => webview.loads.length === 1); await flush();
+    expect(webview.loads).toEqual([PAGE]); expect(guest.dead).toBe(true);
+    expect(f.peer().options.localLeases().map(item => item.leaseId)).toEqual([lease.leaseId]);
+    const row = (await f.list())[0]!;
+    expect(row).toMatchObject({ guestId: mount.guestId, pool: "agent", lease: { leaseId: lease.leaseId, state: "active" }, control: { state: "granted" } });
+    expect(row.carrier).toBeUndefined(); expect(row.handover).toBeUndefined();
+    // In front the visible-only rule applies again.
+    f.window.isVisible.mockReturnValue(false); frame(webview);
+    await expect(act()).rejects.toMatchObject({ code: "target_hidden" });
+  });
+  it("run in background: the webview page moves into a new carrier, the lease and a pause survive", async () => {
+    const f = fixture(); await f.enable(); const open = await pendingAgentOpen(f, PAGE);
+    const { guest: webview, reserved } = await f.mount(open.intent.tabKey, open.intent.url, "local", { pendingOpen: open.intent.requestId, agentOpened: true });
+    await until(() => open.peer.options.localLeases().length === 1); const lease = open.peer.options.localLeases()[0]!;
+    await f.ipc({ op: "holdReady", tabKey: open.intent.tabKey, leaseId: lease.leaseId, held: true }); await open.result;
+    await f.ipc({ op: "pauseLease", tabKey: open.intent.tabKey, leaseId: lease.leaseId });
+    await f.ipc({ op: "toBackground", tabKey: open.intent.tabKey });
+    const carrier = mocks.carriers.at(-1)!;
+    expect(webview.dead).toBe(true); expect(carrier.guest.loads).toEqual([PAGE]);
+    const row = (await f.list())[0]!;
+    expect(row).toMatchObject({ guestId: reserved.guestId, carrier: "background", lease: { leaseId: lease.leaseId }, control: { state: "paused" } });
+    await f.ipc({ op: "resumeLease", tabKey: open.intent.tabKey, leaseId: lease.leaseId, settings: DEFAULT_BROWSER_CONTROL_SETTINGS });
+    f.window.isVisible.mockReturnValue(false);
+    carrier.guest.debugger.sendCommand.mockImplementation(async (method: string) => method === "Page.getFrameTree" ? { frameTree: { frame: { id: "main", url: carrier.guest.url } } } : {});
+    await expect(open.peer.options.execute(command(open.peer, { kind: "tab.act", action: { kind: "wait", condition: { kind: "url", url: PAGE } } },
+      { leaseId: lease.leaseId, target: { hostId: "local", deviceId: open.peer.options.deviceId, guestId: reserved.guestId } }), context().value)).resolves.toMatchObject({ kind: "tab.act" });
+    // Closing the tab destroys the carrier and ends the lease.
+    await f.ipc({ op: "close", tabKey: open.intent.tabKey });
+    expect(carrier.guest.dead).toBe(true); expect(open.peer.options.localLeases()).toEqual([]);
+  });
+  it("N2 answers the proxy challenge for the exact carrier only (no hostWebContents), never for a stray window", async () => {
+    vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "n2");
+    const f = fixture(); await f.enable();
+    const { guest } = await backgroundAgentTab(f, "https://example.test/page");
+    expect(guest.hostWebContents).toBeUndefined(); await flush();
+    const info = { isProxy: true, host: "127.0.0.1", port: 26391, scheme: "basic", realm: "test-realm" };
+    const challenge = (contents: unknown) => { const callback = vi.fn(); for (const fn of mocks.appListeners.get("login") ?? []) fn({ preventDefault() {} }, contents, {}, info, callback); return callback.mock.calls; };
+    expect(challenge(guest)).toEqual([["test-only", "not-a-real-credential"]]);
+    const stray = new ContentsMock(mocks.sessions.get("persist:browser-agent-local") as SessionMock);
+    expect(challenge(stray)).toEqual([[]]); expect(challenge(f.owner)).toEqual([[]]);
   });
 });

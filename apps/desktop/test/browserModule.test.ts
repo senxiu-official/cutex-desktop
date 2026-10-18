@@ -591,7 +591,7 @@ describe("I2a module integration", () => {
     const component = browserModule.contributes!["side.component"]![0]!;
     expect(browserModule.id).toBe("browser");
     expect(browserModule.defaultEnabled ?? true).toBe(true);
-    expect(component).toMatchObject({ id: "browser.tab", instances: "multi", defaultBinding: "host", keepAlive: "hidden", placement: { home: "browser" } });
+    expect(component).toMatchObject({ id: "browser.tab", instances: "multi", defaultBinding: "host", keepAlive: "hidden", placement: { home: "browser" }, tabRow: "always" });
     expect(component.launcher!.params()).toEqual({ url: "about:blank" });
     expect(component.peekable).toBeUndefined();
     expect(component.dedupeKey).toBeUndefined();

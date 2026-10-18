@@ -11,7 +11,7 @@ import { MessageSquarePlus, Target, X } from "lucide-react";
 import type { SkillMetadata, SkillsListResponse } from "@cutex-desktop/protocol/codex/v2";
 import type { ProfileItem, ProfileModelsView } from "../../../../shared/ipc";
 import type { DraftImage } from "../../../../shared/input";
-import { BUILTIN_THREAD_DEFAULTS, readNewThreadDefaults, type LaunchOverrides, type LaunchPermissions } from "../../../../shared/launch";
+import { BUILTIN_THREAD_DEFAULTS, readNewThreadDefaults, type ClaudeLaunchMode, type LaunchOverrides, type LaunchPermissions } from "../../../../shared/launch";
 import { useI18n, type MessageKey } from "../../i18n";
 import { en } from "../../i18n/en";
 import { zhCN } from "../../i18n/zh-CN";
@@ -20,6 +20,7 @@ import { useImagePickBlocked } from "../../lib/remoteMode";
 import { onHostSwitch } from "../../lib/hostSwitch";
 import { imageFileToDataUrl } from "../../lib/images";
 import { draftOffersGoal, draftSlashCommands, pendingSettingLocked } from "../../lib/pendingChat";
+import { claudeLaunchModes, isClaudeProfile, shownClaudeMode } from "../../lib/newAgentClaude";
 import { LAUNCH_FOR_MODE, PERMISSION_MODES, permissionModeOfLaunch } from "../../lib/permissionModes";
 import { cachedProfile, cachedProfileList, loadProfileList } from "../../lib/profileSnapshot";
 import { useOrderedProfiles } from "../../lib/profileOrder";
@@ -53,8 +54,10 @@ onHostSwitch(() => catalogs.clear());
  *  its first frame instead of the host default until the settings arrive. */
 const quickDefaults = new Map<string, string | null>();
 /** The picked composer mode survives a profile / host switch (model and effort do not). */
-const keptMode = (launch: LaunchOverrides): LaunchOverrides =>
-  launch.sandbox ? { sandbox: launch.sandbox, approvalPolicy: launch.approvalPolicy, ...(launch.approvalsReviewer ? { approvalsReviewer: launch.approvalsReviewer } : {}) } : {};
+const keptMode = (launch: LaunchOverrides): LaunchOverrides => ({
+  ...(launch.sandbox ? { sandbox: launch.sandbox, approvalPolicy: launch.approvalPolicy, ...(launch.approvalsReviewer ? { approvalsReviewer: launch.approvalsReviewer } : {}) } : {}),
+  ...(launch.claudePermissionMode ? { claudePermissionMode: launch.claudePermissionMode } : {}),
+});
 onHostSwitch(() => quickDefaults.clear());
 let imageSeq = 0;
 
@@ -182,10 +185,18 @@ function PendingChatBody({ target }: { target: CreateHost }) {
   const shownModel = modelName(model, row?.displayName, item?.id);
   const effort = launch.reasoningEffort ?? (launch.model ? row?.defaultReasoningEffort : (item?.modelReasoningEffort ?? row?.defaultReasoningEffort)) ?? null;
   const mode = permissionModeOfLaunch(launch.sandbox ?? quick.sandbox, launch.approvalPolicy ?? quick.approvalPolicy, launch.approvalsReviewer ?? quick.approvalsReviewer);
-  // The store creates the session from this (自动's reviewer on an older cutex: lib/permissionModes).
+  // Claude profiles: Claude Code's own modes (same names as the composer); an older cutex shows the
+  // profile's rules only (Codex presets would be refused for a Claude profile).
+  const claude = isClaudeProfile(item);
+  const claudeModes = useMemo(() => claudeLaunchModes(item), [item]);
+  const claudeMode = shownClaudeMode(launch.claudePermissionMode, claudeModes);
+  // The store creates the session from this (自动's reviewer on an older cutex: lib/permissionModes;
+  // a Claude profile's launch: lib/newAgentClaude).
   useEffect(() => {
-    if (pending && !pending.sessionId && pending.permissionMode !== mode) update({ permissionMode: mode });
-  }, [pending, mode, update]);
+    if (!pending || pending.sessionId) return;
+    const same = pending.permissionMode === mode && !!pending.claude === claude && JSON.stringify(pending.claudeModes ?? null) === JSON.stringify(claudeModes);
+    if (!same) update({ permissionMode: mode, claude, claudeModes });
+  }, [pending, mode, claude, claudeModes, update]);
   const drafts = pending?.drafts ?? [];
   // Session-shaping choices lock with the first send; plan / goal until they were applied.
   const locked = creating || drafts.length > 0 || !!pending?.sessionId;
@@ -533,7 +544,24 @@ function PendingChatBody({ target }: { target: CreateHost }) {
             goal={offersGoal ? { label: goal ?? t("composer.tools.goal.unset"), disabledReason: goalLocked ? t("chat.draft.locked") : null, onClick: openGoal } : undefined}
             onManage={(tab) => useApp.getState().openSettings(tab)}
           />
-          {locked ? (
+          {claude && claudeModes && claudeMode ? (locked ? (
+            <span className={`${staticChip} whitespace-nowrap ${claudeMode === "bypassPermissions" ? "text-warn" : ""}`}>
+              <span className="trim-cap">{t(`composer.claudeMode.${claudeMode}` as MessageKey)}</span>
+            </span>
+          ) : (
+            <Menu<ClaudeLaunchMode>
+              title={t("composer.permissionTitle")}
+              trigger={<span className={`trim-cap whitespace-nowrap ${claudeMode === "bypassPermissions" ? "text-warn" : ""}`} data-testid="draft-claude-mode">{t(`composer.claudeMode.${claudeMode}` as MessageKey)}</span>}
+              items={claudeModes.map((m) => ({ value: m, label: t(`composer.claudeMode.${m}` as MessageKey), description: t(`composer.claudeModeHint.${m}` as MessageKey) }))}
+              selected={claudeMode}
+              onSelect={(m) => update({ launch: { ...launch, claudePermissionMode: m } })}
+              footer={<p className="px-2.5 py-1.5 text-[11px] text-subtle">{t("composer.claudeLaunch.footer")}</p>}
+            />
+          )) : claude ? (
+            <span className={`${staticChip} whitespace-nowrap text-muted`} title={t("composer.claudeLaunch.rulesHint")}>
+              <span className="trim-cap">{t("composer.claudeLaunch.rules")}</span>
+            </span>
+          ) : locked ? (
             <span className={`${staticChip} whitespace-nowrap ${mode === "full" ? "text-warn" : ""}`}>
               <span className="trim-cap">{t(`composer.mode.${mode}` as MessageKey)}</span>
             </span>

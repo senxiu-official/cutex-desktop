@@ -146,7 +146,9 @@ export function defaultEmoji(seed: string): AvatarEmoji {
   return AVATAR_EMOJI_SET[seedHash(seed) % AVATAR_EMOJI_SET.length]!;
 }
 
-/** Background behind an avatar emoji: the agent colour softened so the picture reads in both themes. */
+/** Background behind an avatar emoji: the agent colour softened so the picture reads in both themes.
+ * 55 % (lead handoff 2026-10-18; was 30 %, where a pink Profile read grey-brown on the dark theme): the
+ * colour is recognisable in both themes and orange / yellow emoji still stand out on their own colour. */
 export function emojiTint(color: string): string {
-  return `color-mix(in srgb, ${color} 30%, var(--surface))`;
+  return `color-mix(in srgb, ${color} 55%, var(--surface))`;
 }

@@ -1,6 +1,8 @@
 // Settings → Profiles → <profile> → 外观: colour and provider (cutex PATCH color / providerCategory),
-// then a sub-section tagged 本机 with the picture and the opening (portrait + greeting,
-// lib/introAppearance), which stay on this device. All are drafts saved with the page's sticky bar.
+// then 头像与开场: 头像主题, the picture and the opening (portrait + greeting, lib/introAppearance). A
+// host with cutex `profile-avatar` stores them (lib/profileLooks useProfileLooksSynced); an older one
+// leaves them on this device, and only then is the card tagged 本机. All are drafts saved with the
+// page's sticky bar.
 import { Check, Pipette } from "lucide-react";
 import { useState } from "react";
 import type { ProfileDetail, ProfilePatch } from "../../../../shared/ipc";
@@ -14,10 +16,51 @@ import { PROVIDER_LABEL, profileProvider, type Provider } from "../../lib/provid
 import { resolveTerms, useTermOverrides } from "../../lib/terms";
 import { ProfileAvatar } from "../ProfileAvatar";
 import { ProviderIcon } from "../ProviderIcon";
-import { Button, SettingRow, Section, Select, TextArea } from "./Form";
+import { Button, ResetButton, SettingRow, Section, Select, TextArea } from "./Form";
 import { useTargetFeatures } from "../../lib/targetHost";
+import { AVATAR_THEME_IDS, defaultAvatarThemes, themePreview, type AvatarThemeId } from "../../lib/avatarThemes";
+import { emojiTint } from "../../lib/agentEmoji";
+import { avatarThemesOverride, useUiPrefs } from "../../lib/prefs";
+import { useProfileLooksSynced } from "../../lib/profileLooks";
+import { EmojiGlyph } from "../Avatar";
 
 const CATEGORIES: (Provider | "other")[] = ["kimi", "glm", "zai", "claude", "deepseek", "codex", "other"];
+
+const sameThemes = (a: readonly AvatarThemeId[] | null, b: readonly AvatarThemeId[] | null) => (a === null || b === null ? a === b : a.length === b.length && a.every((x) => b.includes(x)));
+
+/**
+ * 头像主题 (owner spec via the lead, 2026-10-18): one toggle per theme, each on / off, at least one on;
+ * each shows a few of its emoji. The default emoji comes from the union of the ticked themes.
+ */
+function ThemeToggles({ shown, onToggle }: { shown: readonly AvatarThemeId[]; onToggle(id: AvatarThemeId): void }) {
+  const { t } = useI18n();
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={t("settings.profile.avatarTheme")}>
+      {AVATAR_THEME_IDS.map((id) => {
+        const on = shown.includes(id);
+        const last = on && shown.length === 1;
+        return (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={on}
+            disabled={last}
+            title={last ? t("settings.profile.avatarTheme.keepOne") : undefined}
+            onClick={() => onToggle(id)}
+            className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default ${on ? "border-accent/60 bg-accent/12 text-foreground" : "border-border text-muted hover:bg-surface-2 hover:text-foreground"}`}
+          >
+            <span className={`flex gap-0.5 ${on ? "" : "opacity-50 grayscale"}`} aria-hidden>
+              {themePreview(id, 3).map((e) => (
+                <EmojiGlyph key={e.code} glyph={e.glyph} size={13} />
+              ))}
+            </span>
+            {t(`avatarTheme.${id}`)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function Swatch({ color, selected, title, onClick, children }: { color: string; selected: boolean; title: string; onClick(): void; children?: React.ReactNode }) {
   return (
@@ -35,7 +78,7 @@ function Swatch({ color, selected, title, onClick, children }: { color: string; 
   );
 }
 
-export function ProfileAppearance({ detail, patch, set, host, picture, setPicture, onPicture, intro, setIntro, onIntroPortrait, introError }: {
+export function ProfileAppearance({ detail, patch, set, host, picture, setPicture, onPicture, intro, setIntro, onIntroPortrait, introError, theme, setTheme }: {
   detail: ProfileDetail;
   patch: ProfilePatch;
   set(p: ProfilePatch): void;
@@ -51,6 +94,9 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
   onIntroPortrait(): void;
   /** Why the last pick or save failed; null = none. */
   introError: "type" | "tooLarge" | "bad" | "full" | null;
+  /** 头像主题 draft (lib/avatarThemes): undefined = unchanged, null = by model family, else the ticked themes (never empty). */
+  theme: AvatarThemeId[] | null | undefined;
+  setTheme(theme: AvatarThemeId[] | null | undefined): void;
 }) {
   const { t, locale } = useI18n();
   const features = useTargetFeatures();
@@ -65,6 +111,23 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
   const auto = detail.appearance.effectiveColor ?? PROFILE_COLORS[0]!;
   const shownColor = chosen ?? auto;
   const custom = !!chosen && !PROFILE_COLORS.includes(chosen.toLowerCase());
+
+  // 头像主题: the owner's choice (on the host when it stores looks, else this device) or by model family.
+  // Ticking exactly the model family's themes stores nothing (null = default), so 恢复默认 is that set.
+  useUiPrefs();
+  const synced = useProfileLooksSynced(host);
+  const storedThemes = avatarThemesOverride(host, detail.id);
+  const chosenThemes = theme !== undefined ? theme : storedThemes;
+  const autoThemes = defaultAvatarThemes({ model: patch.model !== undefined ? patch.model : detail.model, cliKind: detail.cliKind });
+  const shownThemes = chosenThemes ?? autoThemes;
+  const pickThemes = (next: AvatarThemeId[] | null) => {
+    const value = next && sameThemes(next, autoThemes) ? null : next;
+    setTheme(sameThemes(value, storedThemes) ? undefined : value);
+  };
+  const toggleTheme = (id: AvatarThemeId) => {
+    const next = shownThemes.includes(id) ? shownThemes.filter((x) => x !== id) : AVATAR_THEME_IDS.filter((x) => x === id || shownThemes.includes(x));
+    if (next.length) pickThemes(next);
+  };
 
   // Provider: "" = automatic (what cutex infers).
   const canProvider = features.has(PROFILE_FEATURES.providerCategory);
@@ -136,7 +199,33 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
           </span>
         </SettingRow>
       </Section>
-      <Section title={t("agent-config.profile.localLook")} source="local">
+      {/* 本机 only while the host keeps none of this (older cutex); the title row has a fixed height, so the
+          tag arriving once the host's Profile list loads moves nothing. */}
+      <Section title={t("agent-config.profile.localLook")} source={synced ? undefined : "local"}>
+        <SettingRow
+          label={t("settings.profile.avatarTheme")}
+          hint={t("settings.profile.avatarTheme.hint")}
+          reset={<ResetButton disabled={sameThemes(shownThemes, autoThemes)} onClick={() => pickThemes(null)} />}
+          sample={<ThemeToggles shown={shownThemes} onToggle={toggleTheme} />}
+        >
+          <span className="flex flex-col items-end gap-1.5">
+            <button
+              type="button"
+              disabled={shownThemes.length === AVATAR_THEME_IDS.length}
+              onClick={() => pickThemes([...AVATAR_THEME_IDS])}
+              className="rounded text-xs text-accent hover:underline disabled:text-subtle disabled:no-underline"
+            >
+              {t("avatarTheme.all")}
+            </button>
+            <span className="flex gap-1" data-theme-preview={shownThemes.join(",")} aria-hidden>
+              {themePreview(shownThemes).map((e) => (
+                <span key={e.code} className="flex size-[22px] items-center justify-center rounded-full" style={{ background: emojiTint(shownColor) }} title={e.name}>
+                  <EmojiGlyph glyph={e.glyph} size={14} />
+                </span>
+              ))}
+            </span>
+          </span>
+        </SettingRow>
         <SettingRow label={t("settings.profile.picture")} hint={t("settings.profile.picture.hint")}>
           <ProfileAvatar profile={previewProfile} size={32} badge picture={shownPicture} color={shownColor} />
           <Button onClick={onPicture}>{shownPicture ? t("settings.profile.picture.change") : t("settings.profile.picture.upload")}</Button>

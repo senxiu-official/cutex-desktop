@@ -1,6 +1,6 @@
 // The 计划 status category (DESIGN §4.20): the model's latest `update_plan` snapshot in its own
 // order, focus-windowed (已完成 / 待处理 disclosures). Capsule header = done/total; status row chip
-// 进程 2/4 opening the same list. The last non-empty list stays (lib/planState): greyed with 已清空
+// 进度 2/4 opening the same list. The last non-empty list stays (lib/planState): greyed with 已清空
 // once the agent emptied it; the eye-off button hides it until a different list arrives.
 import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, EyeOff, ListChecks } from "lucide-react";
@@ -9,7 +9,7 @@ import { StatusChip } from "../../components/StatusChip";
 import { ProgressLine } from "../../components/ProgressLine";
 import { CAPSULE_LINE, CAPSULE_ROW_ICON } from "../../lib/capsuleRows";
 import { useI18n, type MessageKey } from "../../i18n";
-import { focusWindow, foldKind, latestPlan, planProgress, type PlanSnapshot, type PlanStep } from "../../lib/statusCapsule";
+import { focusWindow, foldKind, hiddenPlan, latestPlan, planProgress, type PlanSnapshot, type PlanStep } from "../../lib/statusCapsule";
 import { useSessionTimeline } from "../../lib/statusItemsView";
 import { useApp } from "../../store";
 import type { StatusBarProps } from "../slots";
@@ -107,12 +107,29 @@ export function PlanBody({ data: plan }: { sessionId: string; data: PlanSnapshot
   return <PlanList plan={plan} />;
 }
 
-/** Status-row chip 进程 2/4 with the list floating up. */
+/** Status-row chip 进度 2/4 with the list floating up; a hidden list leaves a muted icon to show it again. */
 export function PlanStatusBar({ sessionId, inline }: StatusBarProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const plan = latestPlan(useSessionTimeline(sessionId));
-  if (!inline || !plan) return null;
+  const timeline = useSessionTimeline(sessionId);
+  const plan = latestPlan(timeline);
+  const hidden = plan ? null : hiddenPlan(timeline);
+  if (!inline) return null;
+  if (hidden) {
+    // The owner hid it: one muted icon brings it back (until then a new list shows by itself).
+    const { done, total } = planProgress(hidden.steps);
+    return (
+      <button
+        onClick={() => useApp.getState().restorePlan(sessionId)}
+        title={t("plan.restoreHint", { done, total })}
+        aria-label={t("plan.restore")}
+        className="flex items-center gap-1 rounded px-1 text-xs text-subtle opacity-60 hover:bg-surface-2 hover:text-foreground hover:opacity-100"
+      >
+        <ListChecks size={13} />
+      </button>
+    );
+  }
+  if (!plan) return null;
   const { done, total } = planProgress(plan.steps);
   return (
     <StatusChip

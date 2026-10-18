@@ -1,6 +1,6 @@
 // Docked interaction card above the composer (pattern from ZCode's V4InteractionDialogs /
 // PermissionDialog / ElicitationDialog): shows the first pending server request, keyboard driven.
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useI18n, type MessageKey } from "../i18n";
 import { ApprovalSource } from "./ApprovalSource";
 import {
@@ -26,9 +26,15 @@ const TONE: Record<Choice["tone"], string> = {
   danger: "border border-danger/40 text-danger hover:bg-danger/10",
 };
 
+/** Whether a new card takes the keyboard focus (false: a side agent's dock must not steal it from the main composer). */
+const TakeFocus = createContext(true);
+
 function Card({ children, onKeyDown }: { children: React.ReactNode; onKeyDown?: (e: KeyboardEvent<HTMLDivElement>) => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => ref.current?.focus(), []);
+  const takeFocus = useContext(TakeFocus);
+  useEffect(() => {
+    if (takeFocus) ref.current?.focus();
+  }, [takeFocus]);
   return (
     <div
       ref={ref}
@@ -78,7 +84,10 @@ function Approval({ model, onReply }: { model: Extract<InteractionModel, { kind:
             className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm ${TONE[choice.tone]} ${selected === i ? "ring-2 ring-accent/50" : ""}`}
           >
             <span className="w-4 text-xs opacity-60">{i + 1}</span>
-            {choice.literal ? choice.label : t(`interaction.choice.${choice.label}` as MessageKey)}
+            <span className="min-w-0">
+              {choice.literal ? choice.label : t(`interaction.choice.${choice.label}` as MessageKey)}
+              {choice.detail && <span className="block truncate font-mono text-[11px] opacity-70" title={choice.detail}>{choice.detail}</span>}
+            </span>
           </button>
         ))}
       </div>
@@ -92,6 +101,7 @@ function Approval({ model, onReply }: { model: Extract<InteractionModel, { kind:
 
 function Questions({ model, onReply }: { model: Extract<InteractionModel, { kind: "questions" }>; onReply: (result: unknown) => void }) {
   const { t } = useI18n();
+  const takeFocus = useContext(TakeFocus);
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [other, setOther] = useState("");
@@ -145,7 +155,7 @@ function Questions({ model, onReply }: { model: Extract<InteractionModel, { kind
             className="flex gap-2"
           >
             <input
-              autoFocus={options.length === 0}
+              autoFocus={options.length === 0 && takeFocus}
               type={question.isSecret ? "password" : "text"}
               value={other}
               onChange={(e) => setOther(e.target.value)}
@@ -264,9 +274,12 @@ function Elicitation({ model, onReply }: { model: Extract<InteractionModel, { ki
 export function InteractionDock({
   pending,
   onReply,
+  takeFocus = true,
 }: {
   pending: PendingRequest[];
   onReply: (request: PendingRequest, reply: { result: unknown } | { error: { code: number; message: string } }) => void;
+  /** A new card takes the keyboard focus (default); the side agent view passes false. */
+  takeFocus?: boolean;
 }) {
   const { t } = useI18n();
   const first = pending[0];
@@ -274,6 +287,7 @@ export function InteractionDock({
   const model = toInteraction(first);
   const reply = (result: unknown) => onReply(first, { result });
   return (
+    <TakeFocus.Provider value={takeFocus}>
     <div data-gutter-anchor="dock" className="side-col side-col-composer w-full px-4 pb-2">
       {pending.length > 1 && <p className="mb-1 text-[11px] text-subtle">{t("pending.title", { count: pending.length })}</p>}
       {model.kind === "approval" && <Approval key={String(first.id)} model={model} onReply={reply} />}
@@ -291,5 +305,6 @@ export function InteractionDock({
         </Card>
       )}
     </div>
+    </TakeFocus.Provider>
   );
 }

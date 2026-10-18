@@ -15,7 +15,8 @@ import { useComposerHost } from "../lib/targetHost";
 
 type Item = Pick<ModelOption, "model" | "displayName" | "description">;
 
-export function ModelPicker({ profile, models, current, label, trigger, triggerTitle, header, onOpen, onSelect, openSignal }: { profile: string | null; models: Item[]; current: string | null; label: string; trigger?: ReactNode; triggerTitle?: string; header?: (close: () => void) => ReactNode; onOpen(): void; onSelect(model: string): void; openSignal?: number }) {
+/** `note`: a line under the title (e.g. the agent's runtime is offline: no model list to show yet). */
+export function ModelPicker({ profile, models, current, label, trigger, triggerTitle, header, note, onOpen, onSelect, openSignal }: { profile: string | null; models: Item[]; current: string | null; label: string; trigger?: ReactNode; triggerTitle?: string; header?: (close: () => void) => ReactNode; note?: string; onOpen(): void; onSelect(model: string): void; openSignal?: number }) {
   const { t } = useI18n();
   const modelName = useModelName();
   const key = profile ?? "";
@@ -82,7 +83,8 @@ export function ModelPicker({ profile, models, current, label, trigger, triggerT
           {header?.(close)}
           <div className="px-2.5 pt-1.5 pb-1 text-xs text-subtle">{t("composer.modelTitle")}</div>
           {pinned.map((m, i) => row(m, close, i))}
-          {pinned.length === 0 && <p className="px-2.5 py-1.5 text-xs text-subtle">{t("composer.model.noPins")}</p>}
+          {note && <p className="px-2.5 py-1.5 text-xs text-subtle" data-model-note="">{note}</p>}
+          {pinned.length === 0 && !(note && models.length === 0) && <p className="px-2.5 py-1.5 text-xs text-subtle">{t("composer.model.noPins")}</p>}
           {rest.length > 0 && (
             <div className="relative mt-1 border-t border-border pt-1" onMouseEnter={() => setMore(true)} onMouseLeave={() => setMore(false)}>
               <button onClick={() => setMore(!more)} className={`flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-surface-2 ${more ? "bg-surface-2" : ""}`}>

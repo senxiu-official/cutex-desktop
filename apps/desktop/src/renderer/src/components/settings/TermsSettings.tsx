@@ -1,36 +1,101 @@
-// 通用 → 称呼: the words the UI uses for agent / sub-agent / Director / owner (lib/terms), per language. One
-// row per term for the language picked at the top (the current UI language by default; owner 2026-10-15:
-// not two languages × five rows), and one sample sentence under them. A field commits on Enter / blur
-// ("" = default) and the whole UI follows at once.
-import { useState } from "react";
+// 通用 → 术语 (Terminology; was 称呼 until 2026-10-18): the words the UI uses for agent / sub-agent /
+// director / owner (lib/terms), per language. One row per term for the current UI language only (owner
+// 2026-10-18: no picker for other languages), then a live preview band (PreviewBand): a few pieces of the
+// real UI in the current words. Hovering / focusing a row marks its word in the preview; the band's
+// 「标出术语」 switch marks them all. A field commits on Enter / blur ("" = default) and the whole UI
+// follows at once.
+import { useState, type ReactNode } from "react";
 import { loadedCatalog, useI18n, type MessageKey } from "../../i18n";
 import { en } from "../../i18n/en";
-import { applyTerms, DEFAULT_TERMS, resetTerm, resolveTerms, setTerm, subagentDefault, TERM_IDS, TERM_LOCALES, TERM_MAX, useTermOverrides, type TermId, type TermLocale } from "../../lib/terms";
+import { PreviewMarkContext } from "../../lib/previewMark";
+import { DEFAULT_TERMS, resetTerm, resolveTerms, setTerm, splitTerms, subagentDefault, TERM_IDS, TERM_MAX, useTermOverrides, type TermId, type TermLocale } from "../../lib/terms";
 import { settingsAnchorId } from "../../lib/settingsNav";
-import { ResetButton, Section, Select, SettingRow, TextField } from "./Form";
+import { Avatar } from "../Avatar";
+import { ResetButton, Section, SettingRow, TextField, Toggle } from "./Form";
+import { PreviewBand, PreviewTerm } from "./PreviewBand";
 
-const LANGUAGE: Record<TermLocale, string> = { "zh-CN": "简体中文", "zh-Hant-CN": "繁體中文", en: "English", "en-AU": "English (AU)", "ru-RU": "Русский", "fr-FR": "Français", "es-ES": "Español", "pt-BR": "Português", "it-IT": "Italiano", "de-DE": "Deutsch", "ja-JP": "日本語", "ko-KR": "한국어" };
-const SAMPLE_KEY: MessageKey = "terms.sample";
-// Partial, lazily loaded catalogs (see i18n/index.tsx): the sample sentence falls back to en when the
-// picked language's catalog is not loaded.
+/**
+ * A term row label: the built-in word of the UI language plus a second language so the concept is clear
+ * whatever it was renamed to (owner 2026-10-18): Chinese → / English, English → / 简体中文, others → / English.
+ */
+export function termLabel(locale: TermLocale, id: TermId): string {
+  const second: TermLocale = locale.startsWith("zh") ? "en" : locale.startsWith("en") ? "zh-CN" : "en";
+  // A label, so each word starts upper-case (the stored defaults are mid-sentence lower case).
+  const up = (w: string) => w.charAt(0).toLocaleUpperCase() + w.slice(1);
+  return `${up(DEFAULT_TERMS[locale][id].one)} / ${up(DEFAULT_TERMS[second][id].one)}`;
+}
 
 export function TermsSection() {
   const { t, locale } = useI18n();
-  // The language being edited follows the UI language; a language picked here holds only until the UI
-  // language changes again.
-  const [pick, setPick] = useState<{ ui: TermLocale; loc: TermLocale } | null>(null);
-  const loc = pick && pick.ui === locale ? pick.loc : locale;
-  const setLoc = (next: TermLocale) => setPick({ ui: locale, loc: next });
-  const overrides = useTermOverrides();
-  const resolved = resolveTerms(overrides, loc);
+  const loc: TermLocale = locale;
+  const [markAll, setMarkAll] = useState(false);
+  const [focus, setFocus] = useState<TermId | null>(null);
   return (
     <Section id={settingsAnchorId("terms")} title={t("terms.title")} hint={t("terms.hint")}>
-      <SettingRow label={t("terms.language")}>
-        <Select width="w-40" label={t("terms.language")} value={loc} options={TERM_LOCALES.map((l) => ({ value: l, label: LANGUAGE[l] }))} onChange={(v) => setLoc(v as TermLocale)} />
-      </SettingRow>
-      {TERM_IDS.map((id) => <TermRow key={`${loc}.${id}`} locale={loc} id={id} />)}
-      <p data-testid={`terms-sample-${loc}`} className="pt-2 text-xs text-muted">{t("terms.preview", { text: applyTerms(loadedCatalog(loc)?.[SAMPLE_KEY] ?? en[SAMPLE_KEY], resolved, loc) })}</p>
+      <PreviewMarkContext value={{ all: markAll, focus, setFocus }}>
+        {/* Rows in their own box: the last one draws no rule, the preview band is the divider. */}
+        <div>
+          {TERM_IDS.map((id) => (
+            <div
+              key={`${loc}.${id}`}
+              className="border-b border-border/60 last:border-b-0 empty:hidden"
+              onMouseEnter={() => setFocus(id)}
+              onMouseLeave={() => setFocus(null)}
+              onFocusCapture={() => setFocus(id)}
+              onBlurCapture={() => setFocus(null)}
+            >
+              <TermRow locale={loc} id={id} />
+            </div>
+          ))}
+        </div>
+        <PreviewBand
+          control={
+            <label className="inline-flex cursor-pointer items-center gap-1.5">
+              {t("terms.markAll")}
+              <Toggle label={t("terms.markAll")} checked={markAll} onChange={setMarkAll} />
+            </label>
+          }
+        >
+          <TermsSample locale={loc} />
+        </PreviewBand>
+      </PreviewMarkContext>
     </Section>
+  );
+}
+
+// Partial, lazily loaded catalogs (see i18n/index.tsx): a sample piece falls back to en when the
+// language's catalog lacks it.
+const raw = (locale: TermLocale, key: MessageKey) => loadedCatalog(locale)?.[key] ?? en[key];
+
+/** A sample piece with its term placeholders as marked words. */
+function Piece({ locale, k }: { locale: TermLocale; k: MessageKey }) {
+  const terms = resolveTerms(useTermOverrides(), locale);
+  return <>{splitTerms(raw(locale, k), terms, locale).map((p, i) => (typeof p === "string" ? p : <PreviewTerm key={i} id={p.id}>{p.text}</PreviewTerm>))}</>;
+}
+
+/** Pieces of the real UI (new-agent entry, counts, a director badge, a waiting chip) in one wrapping line. */
+function TermsSample({ locale }: { locale: TermLocale }) {
+  const terms = resolveTerms(useTermOverrides(), locale);
+  const muted = (children: ReactNode) => <span className="text-xs text-muted">{children}</span>;
+  return (
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2.5 text-[13px]">
+      <span className="inline-flex h-6 items-center rounded-md border border-border bg-surface px-2 text-xs">
+        <span>＋ <Piece locale={locale} k="terms.sample.new" /></span>
+      </span>
+      {muted(<Piece locale={locale} k="terms.sample.online" />)}
+      <span className="inline-flex items-center gap-1.5">
+        <Avatar name="Eva" seed="Eva" size={20} />
+        <span className="font-medium">Eva</span>
+        <span className="rounded bg-surface-2 px-1 text-[11px] text-muted">
+          <PreviewTerm id="director">{terms.director.one}</PreviewTerm>
+        </span>
+      </span>
+      {muted(<Piece locale={locale} k="terms.sample.working" />)}
+      {muted(<Piece locale={locale} k="terms.sample.reportsTo" />)}
+      <span className="inline-flex h-6 items-center rounded-md bg-warn/15 px-2 text-xs text-warn-text">
+        <span><Piece locale={locale} k="terms.sample.waiting" /></span>
+      </span>
+    </div>
   );
 }
 
@@ -44,9 +109,11 @@ function TermRow({ locale, id }: { locale: TermLocale; id: TermId }) {
   const plural = !locale.startsWith("zh") && !locale.startsWith("ja") && !locale.startsWith("ko");
   return (
     <SettingRow
-      label={DEFAULT_TERMS[locale][id].one}
-      // The label is the built-in word; the hint only when the default says more (plural, a renamed agent word).
-      hint={plural || defaults.one !== DEFAULT_TERMS[locale][id].one ? t("terms.default", { value: plural ? `${defaults.one} / ${defaults.many}` : defaults.one }) : undefined}
+      label={termLabel(locale, id)}
+      // The default as a hint only where it says more than the placeholder: the plural forms (always shown, so
+      // the row never changes height). The derived sub word (子 + a renamed agent word) is the placeholder
+      // itself; a hint appearing only then made the rows below jump (owner 2026-10-18).
+      hint={plural ? t("terms.default", { value: `${defaults.one} / ${defaults.many}` }) : undefined}
       reset={<ResetButton disabled={!saved.one && !saved.many} onClick={() => resetTerm(locale, id)} title={t("terms.reset")} />}
     >
       <TextField value={saved.one ?? ""} placeholder={defaults.one} maxLength={TERM_MAX} width="w-32" label={plural ? t("terms.singular") : undefined} onCommit={(v) => setTerm(locale, id, "one", v)} />

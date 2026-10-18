@@ -84,13 +84,13 @@ function NeedsUpgrade({ id, titleKey, missing }: { id: string; titleKey: NonNull
  * target host (module ∪ item capabilities; the slot's own mode only asks whether any host of the scope
  * has them) and is the owner's. Without a target (app pages) the slot mode decides.
  */
-export function SettingsSections({ page }: { page: SettingsTab }) {
+export function SettingsSections({ page, only }: { page: SettingsTab; /** Only these item ids (a mixed page placing its halves). */ only?: readonly string[] }) {
   const entries = useSlot("settings.section");
   const target = useSettingsGateTarget(useContext(TargetHostContext));
   return (
     <>
       {entries
-        .filter((e) => e.item.page === page)
+        .filter((e) => e.item.page === page && (!only || only.includes(e.item.id)))
         .map((e) => {
           const gate = settingsSectionGate(e, capabilitiesOf(e.moduleId, e.item), target);
           if (gate.kind === "hidden") return null;

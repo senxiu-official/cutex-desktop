@@ -86,6 +86,31 @@ describe("nodeTransport", () => {
     }
   });
 
+  it("the manual update proxy's Basic login goes in Proxy-Authorization (CONNECT and plain http), never in proxyUrl", async () => {
+    const seen: string[] = [];
+    const proxy = createServer((req, res) => {
+      seen.push(`${req.method} ${req.url} ${req.headers["proxy-authorization"] ?? "-"}`);
+      res.writeHead(204).end();
+    });
+    proxy.on("connect", (req, socket) => {
+      seen.push(`CONNECT ${req.url} ${req.headers["proxy-authorization"] ?? "-"}`);
+      socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+    });
+    await new Promise<void>((r) => proxy.listen(0, "127.0.0.1", () => r()));
+    try {
+      const server = { scheme: "http" as const, host: "127.0.0.1", port: (proxy.address() as { port: number }).port, auth: { username: "alice", password: "s3cret" } };
+      const res = await nodeTransport(server)("http://updates.example/latest", { headers: {}, signal: signal() });
+      expect(res.status).toBe(204);
+      res.cancel();
+      await expect(nodeTransport(server)("https://updates.example/latest", { headers: {}, signal: signal() })).rejects.toThrow(/answered 403/);
+      const basic = `Basic ${Buffer.from("alice:s3cret").toString("base64")}`;
+      expect(seen).toEqual([`GET http://updates.example/latest ${basic}`, `CONNECT updates.example:443 ${basic}`]);
+      expect(proxyUrl(server)).toBe(`http://127.0.0.1:${server.port}`);
+    } finally {
+      await new Promise((r) => proxy.close(r));
+    }
+  });
+
   it("refuses proxy kinds it cannot speak", async () => {
     await expect(nodeTransport({ scheme: "socks5", host: "127.0.0.1", port: 1 })("https://github.com/", { headers: {}, signal: signal() })).rejects.toThrow(/socks5 proxies are not supported/);
   });

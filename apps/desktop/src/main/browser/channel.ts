@@ -97,9 +97,11 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     let identity: Extract<BrowserRequest, {op:"open"}>["identity"];
     if (value.op === "open" && value.identity !== undefined) {
       const raw = value.identity as Record<string, unknown>;
-      if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).some(k => !["pendingOpen", "agentOpened"].includes(k))
-        || (raw.pendingOpen !== undefined && !validId(raw.pendingOpen)) || (raw.agentOpened !== undefined && raw.agentOpened !== true)) throw Error("invalid_browser_request");
-      identity = { ...(raw.pendingOpen !== undefined ? { pendingOpen: raw.pendingOpen as string } : {}), ...(raw.agentOpened === true ? { agentOpened: true as const } : {}) };
+      if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).some(k => !["pendingOpen", "agentOpened", "carrier"].includes(k))
+        || (raw.pendingOpen !== undefined && !validId(raw.pendingOpen)) || (raw.agentOpened !== undefined && raw.agentOpened !== true)
+        || (raw.carrier !== undefined && (raw.carrier !== "background" || value.receipt !== undefined))) throw Error("invalid_browser_request");
+      identity = { ...(raw.pendingOpen !== undefined ? { pendingOpen: raw.pendingOpen as string } : {}), ...(raw.agentOpened === true ? { agentOpened: true as const } : {}),
+        ...(raw.carrier === "background" ? { carrier: "background" as const } : {}) };
     }
     if (value.op === "open" && value.receipt !== undefined) {
       const r = value.receipt as Record<string, unknown>;
@@ -114,7 +116,7 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     if (value.unmount !== undefined && typeof value.unmount !== "boolean") throw new Error("invalid_browser_request");
     return { op: "close", tabKey, unmount: value.unmount === true };
   }
-  if (value.op === "back" || value.op === "forward" || value.op === "reload" || value.op === "stop") return { op: value.op, tabKey };
+  if (value.op === "back" || value.op === "forward" || value.op === "reload" || value.op === "stop" || value.op === "toBackground") return { op: value.op, tabKey };
   throw new Error("invalid_browser_request");
 }
 export function createBrowserChannel<E, D extends { readonly generation: number }>(options: {

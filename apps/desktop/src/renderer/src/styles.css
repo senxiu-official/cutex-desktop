@@ -1,3 +1,6 @@
+/* Layer order, before Tailwind's own: signed module packs put the utilities the app does not generate in
+   `cutex-pack`, below `utilities`, so a pack only fills gaps and never beats an app class (desktop-modules §23.8). */
+@layer theme, base, components, cutex-pack, utilities;
 @import "tailwindcss";
 /* streamdown ships Tailwind class names; let Tailwind see them. */
 @source "../../../node_modules/streamdown/dist/*.js";
@@ -58,6 +61,33 @@
   color-scheme: light;
 }
 
+/* Light palettes (Settings → 外观 → 浅色配色; lib/theme). 素白 (plain) is the block above. Declared before the
+   dark blocks so those win in dark mode. */
+:root[data-light-palette="paper"] {
+  --bg: #faf9f5;
+  --surface: #f3f1ea;
+  --surface-2: #e8e5da;
+  --raised: #fffdf8;
+  --fg: #2d2b26;
+  --fg-muted: #69655b;
+  --fg-subtle: #7b766b;
+  --border: #e2ddd0;
+  --bubble: #eeebe1;
+  --peer: #edf1f8;
+  --win: #efede5;
+  --hover: rgba(70, 55, 30, 0.06);
+  --card-border: rgba(70, 55, 30, 0.09);
+}
+:root[data-light-palette="mist"] {
+  --bg: #f8f8f7;
+  --surface: #f1f1ef;
+  --surface-2: #e6e6e3;
+  --raised: #fdfdfc;
+  --border: #dfdfdb;
+  --bubble: #ebebe8;
+  --win: #ececea;
+}
+
 /* Theme: follows the OS unless Settings → General forces light/dark (data-theme on <html>). */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -108,6 +138,140 @@
   --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
   --shadow: 0 12px 34px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
   color-scheme: dark;
+}
+
+/* Dark palettes (Settings → 外观 → 深色配色; lib/theme, swatches in PALETTE_SWATCH). 石墨 (graphite) is the dark
+   block above; these apply in OS dark without a forced light theme, and in forced dark. 烟灰 smoke = a touch
+   warm, 暮色 dusk = half warm, 茶色 tea = warm (yellowish), 檀木 sandalwood = warm toward red-brown. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-dark-palette="smoke"] {
+    --bg: #212120;
+    --surface: #272726;
+    --surface-2: #313130;
+    --raised: #3d3d3b;
+    --fg: #ececea;
+    --fg-muted: #a7a6a2;
+    --fg-subtle: #8b8a86;
+    --border: #343432;
+    --bubble: #2f2f2d;
+    --win: #191918;
+    --card-border: rgba(255, 253, 248, 0.065);
+  }
+  :root:not([data-theme="light"])[data-dark-palette="dusk"] {
+    --bg: #252524;
+    --surface: #2b2b2a;
+    --surface-2: #353534;
+    --raised: #403f3e;
+    --fg: #eceae6;
+    --fg-muted: #a8a6a1;
+    --fg-subtle: #8d8b86;
+    --border: #383735;
+    --bubble: #333331;
+    --peer: #2a3140;
+    --win: #1d1d1c;
+    --card-border: rgba(255, 252, 245, 0.07);
+  }
+  :root:not([data-theme="light"])[data-dark-palette="tea"] {
+    --bg: #262624;
+    --surface: #2c2c2a;
+    --surface-2: #363633;
+    --raised: #40403c;
+    --fg: #ece9e2;
+    --fg-muted: #aaa59a;
+    --fg-subtle: #8f8a80;
+    --border: #3a3935;
+    --bubble: #353531;
+    --peer: #2a3140;
+    --win: #1f1e1c;
+    --card-border: rgba(255, 250, 235, 0.07);
+  }
+  :root:not([data-theme="light"])[data-dark-palette="sandalwood"] {
+    --bg: #262423;
+    --surface: #2c2a29;
+    --surface-2: #363332;
+    --raised: #403d3b;
+    --fg: #ece8e5;
+    --fg-muted: #aaa29d;
+    --fg-subtle: #8f8883;
+    --border: #3a3634;
+    --bubble: #35312f;
+    --win: #1f1d1c;
+    --card-border: rgba(255, 245, 240, 0.07);
+  }
+  :root:not([data-theme="light"])[data-dark-palette="ink"] {
+    --bg: #000000;
+    --surface: #0b0b0c;
+    --surface-2: #18181a;
+    --raised: #26262a;
+    --border: #1f1f22;
+    --bubble: #161618;
+    --win: #000000;
+    --card-border: rgba(255, 255, 255, 0.08);
+  }
+}
+:root[data-theme="dark"][data-dark-palette="smoke"] {
+  --bg: #212120;
+  --surface: #272726;
+  --surface-2: #313130;
+  --raised: #3d3d3b;
+  --fg: #ececea;
+  --fg-muted: #a7a6a2;
+  --fg-subtle: #8b8a86;
+  --border: #343432;
+  --bubble: #2f2f2d;
+  --win: #191918;
+  --card-border: rgba(255, 253, 248, 0.065);
+}
+:root[data-theme="dark"][data-dark-palette="dusk"] {
+  --bg: #252524;
+  --surface: #2b2b2a;
+  --surface-2: #353534;
+  --raised: #403f3e;
+  --fg: #eceae6;
+  --fg-muted: #a8a6a1;
+  --fg-subtle: #8d8b86;
+  --border: #383735;
+  --bubble: #333331;
+  --peer: #2a3140;
+  --win: #1d1d1c;
+  --card-border: rgba(255, 252, 245, 0.07);
+}
+:root[data-theme="dark"][data-dark-palette="tea"] {
+  --bg: #262624;
+  --surface: #2c2c2a;
+  --surface-2: #363633;
+  --raised: #40403c;
+  --fg: #ece9e2;
+  --fg-muted: #aaa59a;
+  --fg-subtle: #8f8a80;
+  --border: #3a3935;
+  --bubble: #353531;
+  --peer: #2a3140;
+  --win: #1f1e1c;
+  --card-border: rgba(255, 250, 235, 0.07);
+}
+:root[data-theme="dark"][data-dark-palette="sandalwood"] {
+  --bg: #262423;
+  --surface: #2c2a29;
+  --surface-2: #363332;
+  --raised: #403d3b;
+  --fg: #ece8e5;
+  --fg-muted: #aaa29d;
+  --fg-subtle: #8f8883;
+  --border: #3a3634;
+  --bubble: #35312f;
+  --win: #1f1d1c;
+  --card-border: rgba(255, 245, 240, 0.07);
+}
+:root[data-theme="dark"][data-dark-palette="ink"] {
+  --bg: #000000;
+  --surface: #0b0b0c;
+  --surface-2: #18181a;
+  --raised: #26262a;
+  --border: #1f1f22;
+  --bubble: #161618;
+  --win: #000000;
+  --card-border: rgba(255, 255, 255, 0.08);
 }
 
 /* Text contrast (Settings → 通用 → 文字对比度): lifts muted / subtle text and the quiet card edge. Light first, then dark
@@ -287,15 +451,6 @@
 }
 .project-lead-meta {
   padding-left: 27px;
-}
-/* 项目标题着色 off (`project-plain`): header bands keep layout, top edge, icon and rail, no tint.
-   A one-row project in 背景色 keeps the block strength. */
-.project-band.project-plain,
-.project-block-tint .project-block-header.project-plain {
-  background-color: transparent;
-}
-.project-block-tint.project-block-row.project-plain {
-  background: color-mix(in oklab, var(--project-color) var(--project-tint), transparent);
 }
 /* Hover / flyout open / folded-with-the-open-agent on a tinted header or one-row project: a stronger
    layer of the project colour on top of the tint (never the neutral grey that would replace it).
@@ -907,4 +1062,12 @@ body {
 .wrap-all td,
 .wrap-all th {
   overflow-wrap: anywhere;
+}
+
+/* 在主界面调整 (components/CustomizeHost): a faint outline on the region whose panel is open (RFC 3.3);
+   an outline, so the region's layout does not move. The host sets data-customizing. */
+[data-customize-region][data-customizing] {
+  outline: 1px solid color-mix(in oklab, var(--color-accent) 40%, transparent);
+  outline-offset: -1px;
+  border-radius: 8px;
 }

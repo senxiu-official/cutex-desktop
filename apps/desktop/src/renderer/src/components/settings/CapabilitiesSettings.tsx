@@ -540,7 +540,14 @@ function HookRow({ hook, busy, onWrite }: { hook: HookMetadata; busy: boolean; o
               {t("codex-config.hooks.revoke")}
             </Button>
           )}
-          <Toggle label={title} disabled={busy || hook.isManaged} checked={hook.enabled} onChange={(v) => onWrite([hookEnabledEdit(hook.key, v)])} />
+          {/* An untrusted / modified hook does not run whatever its switch says: shown off until trusted. */}
+          {!hook.isManaged && hookNeedsReview(hook) ? (
+            <span title={t("codex-config.hooks.runsOnceTrusted")}>
+              <Toggle label={title} disabled checked={false} onChange={() => {}} />
+            </span>
+          ) : (
+            <Toggle label={title} disabled={busy || hook.isManaged} checked={hook.enabled} onChange={(v) => onWrite([hookEnabledEdit(hook.key, v)])} />
+          )}
         </>
       }
     />

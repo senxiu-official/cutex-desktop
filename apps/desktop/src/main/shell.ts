@@ -9,7 +9,9 @@ import { readFileSync } from "node:fs";
 import { rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { userInfo } from "node:os";
-import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, powerMonitor, Tray, type NativeImage } from "electron";
+import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, powerMonitor, safeStorage, Tray, type NativeImage } from "electron";
+import { chromiumProxyRules, isProxyParseError, parseProxyUrl, type UpdateProxyRequest } from "../shared/proxy";
+import type { UpdateProxyConfig } from "./updateNet";
 import type { CloseBehavior, DesktopPrefs, ShellCommand, ShellLocale, ShellState } from "../shared/ipc";
 import { parseDeviceOff, type DeviceOff } from "../shared/notificationLevels";
 import { attentionCount, closeAction, editMenuLabels, effectiveCloseBehavior, overlayDescription, parseNameHasOwner, parsePrefs, parseTerms, resolveLocale, trayMenuLabels, trayNoticeText, trayTooltip, type TrayHost } from "../shared/shell";
@@ -216,7 +218,8 @@ export class DesktopShell {
       // not available on this platform
     }
     const trayHostMissing = process.platform === "linux" && this.trayHost === "absent";
-    const prefs = { ...this.prefs, closeBehavior: effectiveCloseBehavior(this.prefs, process.platform, this.trayHost) };
+    const { updateProxyAuth: _auth, ...stored } = this.prefs;
+    const prefs = { ...stored, closeBehavior: effectiveCloseBehavior(this.prefs, process.platform, this.trayHost) };
     return { prefs, trayAvailable: this.tray !== null, ...(trayHostMissing ? { trayHostMissing } : {}), notificationsSupported, osUserName: osUserName() };
   }
 
@@ -246,6 +249,60 @@ export class DesktopShell {
 
   /** Main wires this to the updater (interval changes). */
   onPrefsChanged: ((prefs: DesktopPrefs) => void) | null = null;
+
+  /**
+   * This desktop's update proxy (Settings → 网络代理): system (default) / none / manual URL. Basic
+   * credentials in a manual URL are kept with safeStorage (never in the clear, never sent back to the
+   * renderer); without a keyring a URL with credentials is refused.
+   */
+  setUpdateProxy(value: UpdateProxyRequest): ShellState {
+    const { updateProxy: old, updateProxyAuth: oldAuth, ...rest } = this.prefs;
+    // The manual URL (and its login) stays when switching to system / none (owner Q16 ②).
+    const kept = old?.url ? { url: old.url, ...(old.hasCredentials && oldAuth ? { hasCredentials: true } : {}) } : null;
+    const keptAuth = kept?.hasCredentials ? { updateProxyAuth: oldAuth! } : {};
+    if (value?.mode === "manual") {
+      const parsed = parseProxyUrl(value.url ?? old?.url ?? "");
+      if (isProxyParseError(parsed)) throw new Error(`invalid proxy URL (${parsed.error})`);
+      let auth: string | undefined;
+      if (parsed.username !== null || parsed.password !== null) {
+        if (!safeStorage.isEncryptionAvailable()) throw new Error("noKeyring: proxy credentials need the system keyring");
+        auth = safeStorage.encryptString(JSON.stringify({ username: parsed.username ?? "", password: parsed.password ?? "" })).toString("base64");
+      } else if (kept?.hasCredentials && kept.url === parsed.display) {
+        // The same proxy re-saved from its shown (credential-free) URL keeps the stored credentials.
+        auth = oldAuth;
+      }
+      this.prefs = { ...rest, updateProxy: { mode: "manual", url: parsed.display, ...(auth ? { hasCredentials: true } : {}) }, ...(auth ? { updateProxyAuth: auth } : {}) };
+    } else if (value?.mode === "none") {
+      this.prefs = { ...rest, updateProxy: { mode: "none", ...kept }, ...keptAuth };
+    } else {
+      this.prefs = kept ? { ...rest, updateProxy: { mode: "system", ...kept }, ...keptAuth } : { ...rest };
+    }
+    this.save();
+    this.onUpdateProxyChanged?.();
+    return this.state();
+  }
+
+  /** Main wires this to the updater (its session re-applies the proxy). */
+  onUpdateProxyChanged: (() => void) | null = null;
+
+  /** The update proxy as the updater applies it (credentials decrypted here, main only). */
+  updateProxyConfig(): UpdateProxyConfig {
+    const pref = this.prefs.updateProxy;
+    if (pref?.mode === "none") return { mode: "none" };
+    if (pref?.mode !== "manual" || !pref.url) return { mode: "system" };
+    const parsed = parseProxyUrl(pref.url);
+    if (isProxyParseError(parsed)) return { mode: "system" };
+    let auth: { username: string; password: string } | undefined;
+    if (this.prefs.updateProxyAuth && safeStorage.isEncryptionAvailable()) {
+      try {
+        const value = JSON.parse(safeStorage.decryptString(Buffer.from(this.prefs.updateProxyAuth, "base64"))) as { username?: unknown; password?: unknown };
+        if (typeof value.username === "string" && typeof value.password === "string") auth = { username: value.username, password: value.password };
+      } catch {
+        // unreadable (other keyring / profile): the proxy then answers 407 and the check says so
+      }
+    }
+    return { mode: "manual", rules: chromiumProxyRules(parsed), server: { scheme: parsed.scheme, host: parsed.host, port: parsed.port, ...(auth ? { auth } : {}) } };
+  }
 
   setLocale(value: ShellLocale): void {
     if (this.prefs.locale === value) return;

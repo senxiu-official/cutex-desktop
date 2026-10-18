@@ -63,6 +63,20 @@ describe("usage price table: 按另一个模型计价 (usage-model-map)", () => 
     expect([...byName]).toEqual([["Gemini Flash (relay)", ["gemini-3.8-flash"]]]);
   });
 
+  it("model names differing only in case are one series (an older cutex reports GLM-5.3 and glm-5.3)", () => {
+    const report: UsageReport = {
+      from: "2026-10-01", to: "2026-10-07", groupBy: ["model"], totals: amounts, recordingSince: null, warnings: [],
+      rows: [
+        { key: { model: "GLM-5.3" }, ...amounts },
+        { key: { model: "glm-5.3" }, ...amounts },
+        { key: { model: "gpt-5.5" }, ...amounts },
+      ],
+    };
+    const shown = withShownModels(report, (id) => id);
+    expect(shown.report.rows.map((r) => r.key.model)).toEqual(["GLM-5.3", "GLM-5.3", "gpt-5.5"]);
+    expect(shown.ids.get("GLM-5.3")).toEqual(["GLM-5.3", "glm-5.3"]);
+  });
+
   it("mock: mapped rows carry pricedAs, a PUT without modelMap keeps the map", async () => {
     const api = mock.api!({} as never) as Required<ReturnType<NonNullable<typeof mock.api>>>;
     const r = (await api.usage({ from: "2026-10-01", to: "2026-10-07", groupBy: ["model"] } as never))!;

@@ -19,7 +19,7 @@ import { PROFILE_FAMILY_FEATURE, refusalText } from "../../lib/profileCreate";
 const PROFILE_TOOL_SCHEMA_COMPAT_FEATURE = "profile-tool-schema-compat";
 import { defaultableState, fieldEditable, fieldOffered, headerPlan, MAX_PLAN_LABEL_CHARS, planLabelPatch, planLabelReset, planLabelResettable, PROFILE_AGENT_FEATURES, PROFILE_FEATURES, profileKind, sessionsUsingProfile, type ProfileKind } from "../../lib/profileKind";
 import { baseUrlState, urlRegion, validBaseUrl } from "../../lib/profilePresets";
-import { useUiPrefs } from "../../lib/prefs";
+import { setAvatarThemeOverride, useUiPrefs } from "../../lib/prefs";
 import { setProfileAvatar, useHostKey } from "../../lib/profileAvatar";
 import { INTRO_PORTRAIT_TOO_LARGE, introPortraitProblem, prepareIntroPortrait, setIntroAppearance, type IntroDraft } from "../../lib/introAppearance";
 import { profileKindLabel } from "../../lib/profileCards";
@@ -36,6 +36,7 @@ import { ComponentNotice } from "../ComponentCard";
 import { CLAUDE_RUNTIME_COMPONENT } from "../../lib/componentCard";
 import { ModelList } from "./ProfileModels";
 import { ProfileModelFields } from "./ProfileModelFields";
+import type { AvatarThemeId } from "../../lib/avatarThemes";
 import { ProfileAppearance } from "./ProfileAppearance";
 import { ProfilePictureCrop } from "./ProfilePictureCrop";
 import { ProfileInUse } from "./ProfileInUse";
@@ -43,6 +44,8 @@ import type { DeleteProfileOptions } from "../../lib/profileRefs";
 import { OfficialQuotaSection, QuotaConfigSection } from "./ProfileQuota";
 import { useTargetApi, useTargetFeatures, useTargetHostId, useTargetLoadQuota, useTargetQuotas, useTargetSelect, useTargetSidebar } from "../../lib/targetHost";
 import { BrowserProfileClaimMode, BrowserProfileTools } from "./ProfileBrowserTools";
+import { ProfileProxy, ProfileProxySummary } from "./ProfileProxy";
+import { ClaudeCodeSourceRows, ClaudeSkillsImportRow } from "./ProfileClaudeCode";
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -210,7 +213,7 @@ function Overview({ detail, livePlan, patch, set, picture, onPicture, isDefault,
           {agents.length === 0 && <span className="text-subtle">{t("settings.profile.inUseNone")}</span>}
           {agents.slice(0, SHOWN_AGENTS).map((a) => (
             <button key={a.cutexSessionId} onClick={() => void select(a.cutexSessionId)} className="flex max-w-40 items-center gap-1.5 rounded-full bg-surface-2 py-0.5 pr-2 pl-0.5 hover:text-accent">
-              <Avatar name={a.displayName} avatar={a.avatar} seed={a.cutexSessionId} color={color ?? detail.appearance.effectiveColor} size={18} />
+              <Avatar name={a.displayName} avatar={a.avatar} seed={a.cutexSessionId} color={color ?? detail.appearance.effectiveColor} size={18} minor />
               <span className="truncate">{a.displayName}</span>
             </button>
           ))}
@@ -223,6 +226,7 @@ function Overview({ detail, livePlan, patch, set, picture, onPicture, isDefault,
             </button>
           )}
         </div>
+        <ProfileProxySummary detail={detail} />
       </div>
       {refusal && (
         <div className="border-t border-border px-4 py-3 text-xs">
@@ -380,6 +384,8 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
   /** Opening draft (portrait + greeting, lib/introAppearance): saved with the sticky bar like the picture. */
   const [intro, setIntroState] = useState<IntroDraft>({ portrait: undefined, greeting: undefined });
   const [introError, setIntroError] = useState<"type" | "tooLarge" | "bad" | "full" | null>(null);
+  /** 头像主题 draft (lib/avatarThemes): undefined = unchanged, null = automatic; saved with the sticky bar, device-local. */
+  const [avatarTheme, setAvatarTheme] = useState<AvatarThemeId[] | null | undefined>(undefined);
   const introFile = useRef<HTMLInputElement>(null);
   /** Picture drafts save under the focus host's daemon key (lib/profileAvatar); the opening under the edited host (targetHost). */
   const host = useHostKey();
@@ -453,7 +459,7 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
   /** API-key profiles: the saved Base URL (the profile's config, else the list item's). */
   const storedUrl = detail.detail.config?.providerBaseUrl ?? detail.baseUrl ?? null;
   const quotaDirty = quotaDraft !== null && JSON.stringify(quotaDraft) !== JSON.stringify(quota);
-  const dirty = Object.keys(patch).some((k) => (k === "apiKey" ? !!patch.apiKey : true)) || quotaDirty || picture !== undefined || intro.portrait !== undefined || intro.greeting !== undefined;
+  const dirty = Object.keys(patch).some((k) => (k === "apiKey" ? !!patch.apiKey : true)) || quotaDirty || picture !== undefined || intro.portrait !== undefined || intro.greeting !== undefined || avatarTheme !== undefined;
   /** Sets one part of the opening draft (empty patch parts keep their previous value); any new
    *  draft action clears the old picker / save error, removing a portrait included. */
   const setIntro = (patchIntro: Partial<IntroDraft>) => {
@@ -521,6 +527,8 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
       }
       if (picture !== undefined) setProfileAvatar(host, detail.id, picture);
       setPicture(undefined);
+      if (avatarTheme !== undefined) setAvatarThemeOverride(targetHost, detail.id, avatarTheme);
+      setAvatarTheme(undefined);
       if (intro.portrait !== undefined || intro.greeting !== undefined) {
         // The opening is keyed by the edited host (targetHost), like the timeline outlet reads it.
         // A refused write (store full / quota) keeps the draft and shows the failure; the daemon
@@ -555,6 +563,7 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
     setAccountError(null);
     setPatch({});
     setPicture(undefined);
+    setAvatarTheme(undefined);
     setIntroState({ portrait: undefined, greeting: undefined });
     setIntroError(null);
     setQuotaDraft(quota);
@@ -765,12 +774,15 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
           />
         </SettingRow>
         <AgentBehaviourRows detail={detail} kind={kind} patch={patch} set={set} />
+        {kind === "claude" && <ClaudeCodeSourceRows detail={detail} patch={patch} set={set} />}
+        {kind === "claude" && <ClaudeSkillsImportRow />}
         <BrowserProfileTools key={profile} profile={profile} />
       </Section>
       <BrowserProfileClaimMode key={`claim:${profile}`} profile={profile} />
+      <ProfileProxy key={`proxy:${profile}`} profile={profile} detail={detail} onSaved={setDetail} />
 
       {/* Looks last (review UI-04): account and connection come first, a new profile is signed in before it is styled. */}
-      <ProfileAppearance detail={detail} patch={patch} set={set} host={targetHost} picture={picture} setPicture={(p) => (setStatus(null), setPicture(p))} onPicture={() => pictureFile.current?.click()} intro={intro} setIntro={setIntro} onIntroPortrait={() => introFile.current?.click()} introError={introError} />
+      <ProfileAppearance detail={detail} patch={patch} set={set} host={targetHost} picture={picture} setPicture={(p) => (setStatus(null), setPicture(p))} onPicture={() => pictureFile.current?.click()} intro={intro} setIntro={setIntro} onIntroPortrait={() => introFile.current?.click()} introError={introError} theme={avatarTheme} setTheme={(v) => (setStatus(null), setAvatarTheme(v))} />
 
       {kind === "apiKey" && (
         <Section title={t("agent-config.profile.advanced")}>

@@ -23,6 +23,19 @@ export const componentRequiresProbe: AppModule = { id: "probe", titleKey: "jobs.
 // @ts-expect-error A component is one name, not a list.
 export const componentRequiresListProbe: AppModule = { id: "probe", titleKey: "jobs.title", requires: { component: ["job-service"] } };
 
+// v1.16 (§23): a signed pack's entry exports the range, an ordinary definition and its own messages.
+export const packEntryProbe: SDK.ModulePackEntry<SlotMap, ModuleServices, MessageKey> = { moduleApi: "^1.16", module: componentRequiresProbe, messages: { en: { "probe.title": "Probe" } } };
+// @ts-expect-error A pack entry must say which MODULE_API_VERSION range it was built for.
+export const packEntryNoRangeProbe: SDK.ModulePackEntry<SlotMap, ModuleServices, MessageKey> = { module: componentRequiresProbe };
+it("v1.16 pack ranges: ^ / ~ / comparator sets, and which side must update", async () => {
+  const { moduleApiSatisfies, moduleApiVerdict, MODULE_API_VERSION, MODULE_PACK_HOST_GLOBAL } = await import("@cutex-desktop/plugin-sdk");
+  expect(MODULE_API_VERSION).toBe("1.16");
+  expect(MODULE_PACK_HOST_GLOBAL).toBe("__CUTEX_MODULE_HOST__");
+  expect(moduleApiSatisfies(`^${MODULE_API_VERSION}`, MODULE_API_VERSION)).toBe(true);
+  expect(moduleApiVerdict("^1.17", MODULE_API_VERSION)).toBe("needsNewerApp");
+  expect(moduleApiVerdict("~1.15", MODULE_API_VERSION)).toBe("needsNewerModule");
+});
+
 function compileContract(ctx: AppModuleContext) {
   ctx.contribute("main.page", { id: "probe.page", Page: () => null, useTitle: () => [] });
   ctx.contribute("timeline.received", { id: "probe.received", schemas: ["probe.v1"], Row: () => null });
@@ -173,6 +186,8 @@ it("pins the declared slot defaults and placement choices", () => {
   }]))).toEqual({
     "settings.page": { unavailable: "hide" },
     "settings.section": { unavailable: "hide" },
+    // Renderer-internal (not in the SDK): 在主界面调整 panels.
+    "customize.region": { unavailable: "hide" },
     "conversation.status": { unavailable: "hide", placement: { values: ["bar", "capsule", "both", "off"], default: "bar" } },
     // v1.2 (§16): status surface providers and the trusted conversation overlay.
     "conversation.statusSurface": { unavailable: "hide" },

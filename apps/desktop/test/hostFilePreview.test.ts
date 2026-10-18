@@ -11,7 +11,8 @@ vi.mock("../src/renderer/src/lib/sideServices", () => ({ sideOpen: (...args: unk
 
 const t = (key: string) => key;
 
-describe("host file preview", () => {
+// Tests here import renderer modules on demand (menus, side pages): slow under a loaded full run.
+describe("host file preview", { timeout: 20_000 }, () => {
   it("names the capability and labels host paths by their last segment", () => {
     expect(HOST_FILE_READ_FEATURE).toBe("fs-file-read");
     expect(baseName("/home/jy/.cutex/reports/issue 42.md")).toBe("issue 42.md");

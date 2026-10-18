@@ -165,7 +165,12 @@ export interface BrowserSessionOptions {
   /** Unknown guests and workers without a current registry association fail closed. */
   acceptWebContents: (id: number) => boolean;
   /** Main-only response observation; never log raw authentication URLs or headers. */
-  onResponse?: (webContentsId: number, details: { url: string; statusCode: number; headers: Record<string, string[]> }) => void;
+  /**
+   * Main-frame responses of a current guest, plus a subresource (fetch / XHR / image …) only when it is
+   * a 401 carrying `x-cutex-service-auth: ticket-required` (a service tab whose cookie the daemon no
+   * longer accepts, e.g. after a restart). `resourceType` tells them apart.
+   */
+  onResponse?: (webContentsId: number, details: { url: string; statusCode: number; headers: Record<string, string[]>; resourceType: string }) => void;
   /** A refused main-frame request of an admitted guest (reason enum only; never the URL). */
   onRefused?: (webContentsId: number, reason: BrowserRefusal) => void;
   /** Main's attribution of a download (owner / agent), or false to cancel it. Omitted = cancel
@@ -260,11 +265,15 @@ export function installBrowserSessionPolicy(session: Session, options: BrowserSe
   session.webRequest.onHeadersReceived({ urls: ["<all_urls>"] }, (details, callback) => {
     callback({});
     try {
-      if (!active || details.resourceType !== "mainFrame" || typeof details.webContentsId !== "number" || !options.acceptWebContents(details.webContentsId)) return;
+      if (!active || typeof details.webContentsId !== "number") return;
+      const mainFrame = details.resourceType === "mainFrame";
+      if (!mainFrame && details.statusCode !== 401) return;
+      if (!options.acceptWebContents(details.webContentsId)) return;
       const headers: Record<string, string[]> = Object.create(null);
       for (const [key, value] of Object.entries(details.responseHeaders ?? {}))
         headers[key.toLowerCase()] = Array.isArray(value) ? [...value] : [value];
-      options.onResponse?.(details.webContentsId, { url: details.url, statusCode: details.statusCode, headers });
+      if (!mainFrame && !headers["x-cutex-service-auth"]?.includes("ticket-required")) return;
+      options.onResponse?.(details.webContentsId, { url: details.url, statusCode: details.statusCode, headers, resourceType: details.resourceType });
     } catch { /* Observation must not interfere with the response or open an admission gate. */ }
   });
   const registration: SessionRegistration = { partition: options.partition, ready: undefined!, active: () => active, revoke() {

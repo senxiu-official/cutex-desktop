@@ -97,7 +97,7 @@ export interface TaskRowModel {
  * approval_required | conflict), `code` and `detail`.
  */
 export interface TaskRowOutcome {
-  kind: "failed" | "uncertain" | "approval";
+  kind: "failed" | "uncertain" | "approval" | "declined";
   code: string | null;
   detail: string | null;
 }
@@ -188,8 +188,16 @@ function party(ref: string | null): { id: string | null; name: string | null } {
   return isSessionRef(ref) ? { id: ref, name: null } : { id: null, name: ref };
 }
 
+/**
+ * The delegation id a tool result object carries: `delegation` since cutex prompt revision A8
+ * (117b2c8, value `delegation-<hex>`), `delegation_id` before, `ask_id` on the oldest daemons.
+ */
+export function resultDelegationId(r: Record<string, unknown> | null | undefined): string | null {
+  return r ? (str(r.delegation) ?? str(r.delegation_id) ?? str(r.ask_id)) : null;
+}
+
 function delegationId(a: Record<string, unknown>, r: Record<string, unknown> | null): string | null {
-  return str(a.delegation) ?? str(a.delegation_id) ?? str(a.ask) ?? str(a.ask_id) ?? str(r?.delegation_id) ?? str(r?.ask_id);
+  return str(a.delegation) ?? str(a.delegation_id) ?? str(a.ask) ?? str(a.ask_id) ?? resultDelegationId(r);
 }
 
 /** The delegation's title; `id` may be full or short (the delegate result and later calls can differ). */
@@ -212,7 +220,7 @@ function agentToolRow(item: RawItem, tool: string, a: Record<string, unknown>): 
       const who = { id: str(r?.target_id) ?? target.id, name: str(r?.target) ?? target.name };
       const title = str(a.title) ?? str(r?.title);
       const brief = str(a.text);
-      const id = str(r?.delegation_id) ?? str(r?.ask_id);
+      const id = resultDelegationId(r);
       const label = title ?? brief;
       if (id && label) delegations.set(id, label);
       return row("delegate", who, [title, brief].filter(Boolean).join("\n\n") || null);
@@ -226,7 +234,7 @@ function agentToolRow(item: RawItem, tool: string, a: Record<string, unknown>): 
         const e = obj(entry);
         const answer = str(e?.answer);
         if (!e || !answer) return [];
-        const label = str(e.title) ?? delegationLabel(str(e.delegation_id) ?? str(e.ask_id));
+        const label = str(e.title) ?? delegationLabel(resultDelegationId(e));
         return [label ? `${label}: ${answer}` : answer];
       });
       // The line only says it waited (the delegation card shows the result); expanding shows what came.
@@ -311,6 +319,8 @@ export function taskRowOutcome(item: RawItem): TaskRowOutcome | null {
   const detail =
     str(failure?.detail) ?? str(envelope?.detail) ?? str(r?.detail) ?? str(r?.message) ?? str(error) ?? str(obj(error)?.message) ?? plain ?? str(obj(item.error)?.message);
   if (status === "approval_required" || state === "pendingReview") return { kind: "approval", code, detail };
+  // The owner turned the request down: declined, not a failure of the call.
+  if (status === "approval_denied" || code === "approval_denied") return { kind: "declined", code, detail };
   // Management reports an unknown outcome as no_write with code response_uncertain.
   if (status === "response_uncertain" || (envelope && code === "response_uncertain")) return { kind: "uncertain", code, detail };
   const itemStatus = item.status;

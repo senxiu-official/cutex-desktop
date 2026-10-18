@@ -7,18 +7,31 @@ import { useI18n } from "../i18n";
 import { formatElapsed, type AgentSignal, type NeedsYou } from "../lib/agentAttention";
 import { signalLabel, useNow } from "../lib/attentionView";
 import { Avatar } from "./Avatar";
+import { agentPictureOf } from "../lib/agentPicture";
+import { minorDotSize } from "../lib/avatarDefault";
+import { useMinorDot } from "../lib/agentLook";
 
-/** `running`: ring even when another signal wins (a running agent that also needs the owner). */
-export function StatusAvatar({ name, initial, color, avatar, size, signal, running, seed }: { name: string; initial?: string; color?: string | null; avatar?: SessionAvatar | null; seed?: string | null; size: number; signal: AgentSignal; running?: boolean }) {
+/** `running`: ring even when another signal wins (a running agent that also needs the owner).
+ *  `minor`: a list row (Avatar `minor`); a minor agent's ring hugs its dot. */
+export function StatusAvatar({ name, initial, color, avatar, size, signal, running, seed, minor }: { name: string; initial?: string; color?: string | null; avatar?: SessionAvatar | null; seed?: string | null; size: number; signal: AgentSignal; running?: boolean; minor?: boolean }) {
   const { t } = useI18n();
   const offline = signal === "offline";
   // Not confirmed yet (lib/sidebar `unknown`): dimmed, with a hollow grey dot — 「连接中」, not offline.
   const unknown = signal === "unknown";
   const dot = Math.max(5, Math.round(size * 0.32));
+  const minorDot = useMinorDot(seed, avatar, agentPictureOf(avatar), minor);
+  const ring = <span className="agent-ring" aria-hidden />;
   return (
     <span className={`relative inline-flex shrink-0 ${offline ? "opacity-50 grayscale" : unknown ? "opacity-60" : ""}`} title={unknown ? t("status.unknown") : undefined} data-status-unknown={unknown ? "" : undefined}>
-      <Avatar name={name} initial={initial} color={color} avatar={avatar} seed={seed} size={size} />
-      {(running ?? signal === "running") && <span className="agent-ring" aria-hidden />}
+      <Avatar name={name} initial={initial} color={color} avatar={avatar} seed={seed} size={size} minor={minor} />
+      {(running ?? signal === "running") &&
+        (minorDot ? (
+          <span className="absolute inset-0 flex items-center justify-center" aria-hidden>
+            <span className="relative block" style={{ width: minorDotSize(size), height: minorDotSize(size) }}>{ring}</span>
+          </span>
+        ) : (
+          ring
+        ))}
       {unknown && (
         <span role="img" aria-label={t("status.unknown")} className="absolute -right-0.5 -bottom-0.5 rounded-full border-[1.5px] border-subtle bg-background" style={{ width: dot, height: dot }} />
       )}

@@ -1,11 +1,12 @@
 // The 子 agent status category: the agent's working sub-agents (collab). A row opens the sub-agent
-// (a Claude task's row does not: lib/claudeTasks). `/ps` hands over here when there is no
+// (a Claude task's row only when its adapter keeps transcripts: lib/claudeTasks). `/ps` hands over here when there is no
 // background terminal (`ps` "agents").
 import { useState } from "react";
 import { Bot } from "lucide-react";
 import { StatusChip } from "../../components/StatusChip";
 import { useI18n } from "../../i18n";
-import { isClaudeTaskRef } from "../../lib/claudeTasks";
+import { canOpenSubAgent } from "../../lib/claudeTasks";
+import { useAgentFeatures } from "../../lib/agentFeaturesView";
 import { subAgentTooltip, type SubAgentInfo } from "../../lib/subagents";
 import { useUiSignal } from "../../lib/uiSignal";
 import { useApp } from "../../store";
@@ -16,8 +17,9 @@ import { CAPSULE_DOT, CAPSULE_ROW, CAPSULE_ROW_ICON, CAPSULE_ROW_META_STATIC } f
 
 /** One row per sub-agent (lib/capsuleRows): status dot · name · what it does now (else its task) ·
  *  the status word. */
-function SubAgentRows({ agents }: { agents: SubAgentInfo[] }) {
+function SubAgentRows({ sessionId, agents }: { sessionId: string; agents: SubAgentInfo[] }) {
   const { t } = useI18n();
+  const features = useAgentFeatures(sessionId);
   return (
     <div>
       {agents.map((a) => {
@@ -35,13 +37,13 @@ function SubAgentRows({ agents }: { agents: SubAgentInfo[] }) {
           </>
         );
         const tip = [a.task, a.message].filter(Boolean).join("\n");
-        // A Claude task lives inside this session: status only, nothing to open.
-        return isClaudeTaskRef(a.threadId) ? (
+        // A Claude task of an adapter without transcripts: status only, nothing to open.
+        return !canOpenSubAgent(a.threadId, features) ? (
           <div key={a.threadId} data-capsule-row="" title={[t("sub.claudeTask"), tip].filter(Boolean).join("\n")} className={CAPSULE_ROW}>
             {body}
           </div>
         ) : (
-          <button key={a.threadId} data-capsule-row="" title={subAgentTooltip(a.threadId, a)} onClick={() => void openSubagentThread(a.threadId)} className={`${CAPSULE_ROW} w-full text-left hover:bg-hover`}>
+          <button key={a.threadId} data-capsule-row="" title={subAgentTooltip(a.threadId, a)} onClick={() => void openSubagentThread(a.threadId, sessionId)} className={`${CAPSULE_ROW} w-full text-left hover:bg-hover`}>
             {body}
           </button>
         );
@@ -54,8 +56,8 @@ export function SubagentsMeta({ data }: { sessionId: string; data: SubAgentInfo[
   return <span>{data.length}</span>;
 }
 
-export function SubagentsBody({ data }: { sessionId: string; data: SubAgentInfo[] }) {
-  return <SubAgentRows agents={data} />;
+export function SubagentsBody({ sessionId, data }: { sessionId: string; data: SubAgentInfo[] }) {
+  return <SubAgentRows sessionId={sessionId} agents={data} />;
 }
 
 /** Status-row chip「N 子代理」+ the `/ps` hand-over. */
@@ -81,7 +83,7 @@ export function SubagentsStatusBar({ sessionId, inline, reveal }: StatusBarProps
         </>
       }
     >
-      <SubAgentRows agents={agents} />
+      <SubAgentRows sessionId={sessionId} agents={agents} />
     </StatusChip>
   );
 }

@@ -28,6 +28,8 @@ export interface Choice {
   literal?: boolean;
   tone: ChoiceTone;
   result: unknown;
+  /** Shown under the label (mono): e.g. the Claude permission rules an "always allow" choice keeps. */
+  detail?: string;
 }
 
 export type InteractionModel =
@@ -55,7 +57,27 @@ const COMMAND_LABEL: Record<string, { label: string; tone: ChoiceTone }> = {
   cancel: { label: "cancel", tone: "neutral" },
 };
 
+/**
+ * Claude "always allow in this project" (cutex `claude-permission-rules`): the adapter offers Claude
+ * permission rules (`claudePermissionRules`) and the decision `{acceptWithClaudeRules: {rules}}`; cutex
+ * keeps the rules for the agent's workspace (never in the repo) and the session allows them at once.
+ */
+export const CLAUDE_RULE_DECISION = "acceptWithClaudeRules";
+
+function claudeRulesOf(params: unknown): string[] {
+  const rules = (params as { claudePermissionRules?: unknown } | null)?.claudePermissionRules;
+  return Array.isArray(rules) ? rules.filter((r): r is string => typeof r === "string" && r.length > 0) : [];
+}
+
+function claudeRuleChoice(rules: string[]): Choice {
+  return { label: "acceptForProject", tone: "neutral", detail: rules.join("\n"), result: { decision: { [CLAUDE_RULE_DECISION]: { rules } } } };
+}
+
 function decisionChoice(decision: CommandExecutionApprovalDecision | FileChangeApprovalDecision): Choice | null {
+  if (typeof decision === "object" && decision !== null && CLAUDE_RULE_DECISION in decision) {
+    const kept = claudeRulesOf({ claudePermissionRules: (decision as unknown as Record<string, { rules?: unknown }>)[CLAUDE_RULE_DECISION]?.rules });
+    return kept.length ? claudeRuleChoice(kept) : null;
+  }
   if (typeof decision === "string") {
     const meta = COMMAND_LABEL[decision];
     return meta ? { ...meta, result: { decision } } : null;
@@ -124,6 +146,10 @@ export function toInteraction(request: PendingRequest): InteractionModel {
     case "item/fileChange/requestApproval": {
       const p = request.params as FileChangeRequestApprovalParams;
       const decisions: FileChangeApprovalDecision[] = ["accept", "acceptForSession", "decline"];
+      const choices = decisions.map(decisionChoice).filter((c): c is Choice => !!c);
+      // A Claude edit offers rules too (no availableDecisions on file changes): after "this session".
+      const rules = claudeRulesOf(p);
+      if (rules.length) choices.splice(2, 0, claudeRuleChoice(rules));
       return {
         kind: "approval",
         request,
@@ -131,7 +157,7 @@ export function toInteraction(request: PendingRequest): InteractionModel {
         reason: p.reason ?? null,
         subject: p.grantRoot ?? null,
         cwd: null,
-        ...withCancel(decisions.map(decisionChoice).filter((c): c is Choice => !!c)),
+        ...withCancel(choices),
       };
     }
     case "item/permissions/requestApproval": {

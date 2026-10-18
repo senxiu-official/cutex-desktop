@@ -1,12 +1,12 @@
 // Core tool fallback: always available even when a specialized module is disabled.
 import { openModifiers } from "../lib/openModifiers";
 import { useState } from "react";
-import { Bot, ChevronDown, ChevronRight, CircleStop, FilePen, Globe, Loader2, ShieldAlert, SquareTerminal, Wrench, X } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, CircleStop, FilePen, Globe, Loader2, ShieldAlert, ShieldX, SquareTerminal, Wrench, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { contextMenu } from "../lib/contextMenu";
 import { toolMenu } from "../lib/menus";
 import type { RawItem } from "../lib/timeline";
-import { isFailed, isRunning, toolDetail, toolLiveness, toolOutput } from "../lib/workGroups";
+import { approvalOutcome, isFailed, isRunning, toolDetail, toolLiveness, toolOutput } from "../lib/workGroups";
 import { parseFileLink, rootFor, scopeFor } from "../lib/workspace";
 import { selectedSidebar, useApp } from "../store";
 import { toolErrorText } from "../lib/taskRows";
@@ -47,11 +47,13 @@ export interface ToolSafetyBlock {
   reason: string | null;
 }
 
-function ToolIcon({ item, liveness, blocked }: { item: RawItem; liveness: ReturnType<typeof toolLiveness>; blocked: boolean }) {
+function ToolIcon({ item, liveness, blocked, approval }: { item: RawItem; liveness: ReturnType<typeof toolLiveness>; blocked: boolean; approval: ReturnType<typeof approvalOutcome> }) {
   if (liveness === "background") return <SquareTerminal size={13} className="text-accent" />;
   if (liveness === "interrupted") return <CircleStop size={13} className="text-subtle" />;
   if (isRunning(item)) return <Loader2 size={13} className="animate-spin text-accent" />;
   if (blocked) return <ShieldAlert size={13} className="text-warn-text" />;
+  if (approval === "required") return <ShieldAlert size={13} className="text-warn-text" />;
+  if (approval === "denied") return <ShieldX size={13} className="text-subtle" />;
   if (isFailed(item)) return <X size={13} className="text-danger" />;
   const Icon = item.type === "commandExecution" ? SquareTerminal : item.type === "fileChange" ? FilePen : item.type === "collabAgentToolCall" ? Bot : item.type === "webSearch" ? Globe : Wrench;
   return <Icon size={13} className="text-subtle" />;
@@ -72,6 +74,9 @@ export function PlainToolRow({ item, safetyBlock = null }: { item: RawItem; safe
   const running = liveness === "running";
   const blocked = safetyBlock !== null && !running;
   const failed = !blocked && isFailed(item);
+  // A gated cutex call that answered approval_required / approval_denied: not a failure. The row says
+  // 需要审批 / 已拒绝; the approvals module's line under it carries the request (no raw refusal line).
+  const approval = blocked || running ? null : approvalOutcome(item);
   // A failed MCP / dynamic tool call: its error text on a muted line, in full when expanded. A
   // safety-stopped call shows the check's reason there instead.
   const error = blocked ? (safetyBlock.reason?.trim() || null) : failed && (item.type === "mcpToolCall" || item.type === "dynamicToolCall") ? toolErrorText(item) : null;
@@ -82,10 +87,12 @@ export function PlainToolRow({ item, safetyBlock = null }: { item: RawItem; safe
       {/* Failed (UI review #13): only the ✕ and 「失败」 are red; the rest of the row stays muted. */}
       <div className="flex max-w-full items-center gap-1.5 text-muted">
         <button onClick={() => setOpen(!open)} className="flex shrink-0 items-center gap-1.5 hover:text-foreground">
-          <ToolIcon item={item} liveness={liveness} blocked={blocked} />
+          <ToolIcon item={item} liveness={liveness} blocked={blocked} approval={approval} />
           <span className="font-medium">{t(key)}</span>
         </button>
         {failed && <span className="shrink-0 text-danger">· {t(item.status === "declined" ? "tool.declined" : "taskrow.outcome.failed")}</span>}
+        {approval === "required" && <span data-tool-approval="required" className="shrink-0 text-warn-text">· {t("tool.approvalRequired")}</span>}
+        {approval === "denied" && <span data-tool-approval="denied" className="shrink-0 text-muted">· {t("tool.declined")}</span>}
         {blocked && <span data-tool-blocked className="shrink-0 text-muted">· {t("tool.safetyBlocked")}</span>}
         {liveness === "background" && (
           <button onClick={() => useApp.getState().signal("ps")} title={t("tool.backgroundHint")} className="shrink-0 rounded bg-accent/10 px-1 text-[11px] text-accent hover:underline">
@@ -120,7 +127,7 @@ export function PlainToolRow({ item, safetyBlock = null }: { item: RawItem; safe
       {/* Expanded, a safety-stopped call shows what the agent was told (the reason and the hint). */}
       {open && error && !blocked && <ToolErrorText text={error} className="mt-1 ml-5" />}
       {open && (blocked || !(error && output)) && (
-        <pre className="mt-1 ml-5 max-h-72 overflow-auto rounded-md bg-surface p-2 font-mono text-[11px] whitespace-pre-wrap text-muted">{output ?? JSON.stringify(item, null, 2)}</pre>
+        <pre className="mt-1 ml-5 max-h-72 overflow-auto rounded-md bg-surface p-2 font-mono text-[11px] whitespace-pre-wrap text-muted">{output ?? (approval ? toolErrorText(item) : null) ?? JSON.stringify(item, null, 2)}</pre>
       )}
     </div>
   );

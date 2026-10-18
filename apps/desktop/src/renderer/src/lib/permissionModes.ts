@@ -153,3 +153,14 @@ function writableRootsOf(settings: ThreadSettingsView | null | undefined): strin
   if (policy?.type !== "workspaceWrite" || !Array.isArray(policy.writableRoots)) return [];
   return policy.writableRoots.filter((root): root is string => typeof root === "string" && root.length > 0);
 }
+
+/**
+ * Network / extra writable directories are adjustable on this running agent (composer permission menu,
+ * cutex `session-sandbox-extras`): the host supports it, a Codex agent (Claude has its own write /
+ * command rules), online, and the live sandbox is workspace-write (they mean nothing under read only or
+ * full access, and switching modes rebuilds them).
+ */
+export function liveExtrasApply(opts: { feature: boolean; claude: boolean; online: boolean; settings: ThreadSettingsView | null | undefined }): boolean {
+  const policy = opts.settings?.sandboxPolicy as { type?: string } | null | undefined;
+  return opts.feature && !opts.claude && opts.online && policy?.type === "workspaceWrite";
+}

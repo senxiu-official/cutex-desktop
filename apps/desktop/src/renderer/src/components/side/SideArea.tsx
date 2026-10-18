@@ -161,7 +161,7 @@ function SideArea({ frame, areaWidth }: { frame: SideFrame; areaWidth: number })
   return (
     <>
       {spacer > 0 && <div className="shrink-0" style={{ width: spacer }} />}
-      <div ref={box} data-side-root data-side-box className={boxClass} style={style} aria-label={t("side.column")}>
+      <div ref={box} data-side-root data-side-box data-customize-region="sides" className={boxClass} style={style} aria-label={t("side.column")}>
         {frame.kind === "fullscreen" && <FullTitleRow ctx={ctx} />}
         {/* The seam handle fills the 8 px left padding: the cards' (and the tab row's) left edge is flush against it. With the
             lane beside the open column the lane is the gap, the handle a thin strip over its left edge. */}

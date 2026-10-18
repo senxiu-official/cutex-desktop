@@ -2,7 +2,7 @@
 import { useMemo } from "react";
 import { featuresOf, focusSessionViews, pinnedOn, sidebarOf, useApp, viewHostOf } from "../store";
 import { useFocusHostId, useTargetHostId } from "./targetHost";
-import { buildSidebar, needsInputIds, type AgentStatus } from "./sidebar";
+import { buildSidebar, needsInputIds, pendingByAgent, type AgentStatus } from "./sidebar";
 
 export const STATUS_DOT: Record<AgentStatus, string> = {
   needsInput: "bg-warn",
@@ -34,13 +34,15 @@ export function useSidebarModel() {
   const focusPinned = useApp((s) => s.pinned);
   const sessions = useApp((s) => s.sessions);
   const hosts = useApp((s) => s.hosts);
+  // The focus host's agents waiting per its host feed (also those not open here).
+  const hostWaiting = useApp((s) => s.hostWaiting);
   const chats = useApp((s) => featuresOf(s, hostId).has("human-create-session"));
   // Other hosts' pins are read from storage; the store's `pinned` gets a new set when any host's change.
   const pinned = useMemo(() => (own ? focusPinned : pinnedOn(hostId)), [own, focusPinned, hostId]);
   // That host's agent views only (`sessions` may also hold an open agent of another host).
   const needsInput = useMemo(
-    () => needsInputIds(own ? focusSessionViews({ hosts, sessions }) : Object.fromEntries(Object.entries(sessions).filter(([id]) => viewHostOf(id) === hostId))),
-    [own, hostId, hosts, sessions],
+    () => (own ? new Set(Object.keys(pendingByAgent(focusSessionViews({ hosts, sessions }), hostWaiting))) : needsInputIds(Object.fromEntries(Object.entries(sessions).filter(([id]) => viewHostOf(id) === hostId)))),
+    [own, hostId, hosts, sessions, hostWaiting],
   );
   return useMemo(
     () => (snapshot ? buildSidebar(snapshot, { pinned, needsInput, chats, ...(own ? {} : { hostId }) }) : { groups: [], chats: [], archived: [] }),

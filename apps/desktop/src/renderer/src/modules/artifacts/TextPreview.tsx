@@ -6,5 +6,5 @@ import { fence, type PreviewKind } from "./model";
 
 export function TextPreview({ kind, text, lang, code = false }: { kind: PreviewKind; text: string; /** Fence language for non-Markdown text. */ lang: string; code?: boolean }) {
   if (kind === "markdown" && !code) return <Markdown document relativeFiles={false} text={text} />;
-  return <Markdown text={fence(text, kind === "markdown" ? "markdown" : lang)} />;
+  return <Markdown text={fence(text, kind === "markdown" ? "markdown" : lang)} uncappedCode />;
 }

@@ -9,6 +9,8 @@ import { listedInSettings, revealUnlistedModules } from "../settingsVisibility";
 import { isExternalModuleId } from "../external";
 import { ExternalBadge } from "../ExternalBadge";
 import type { ModuleState } from "../types";
+import { packRow, usePackRuntime } from "../packs";
+import { PackActions, PackBelow, PackIndexHeader, PackOnlyRows, PackSourceTag } from "./ModulePacks";
 
 const DOT: Record<ModuleState["kind"], string> = {
   active: "bg-ok",
@@ -48,12 +50,17 @@ export function ModulesPage() {
     return def ? (def.displayName ?? t(def.titleKey)) : id;
   };
   const reveal = revealUnlistedModules();
+  const packs = usePackRuntime();
+  // Signed packs (§23.9): only with a module-pack bridge (Electron, or the preview's mock).
+  const packRowOf = (id: string) => (packs.view ? packRow(id, packs, packs.bundled ? id in packs.bundled : true, packs.bundled?.[id] ?? null) : null);
   return (
     <Section>
+      <PackIndexHeader />
       {host.modules.filter((def) => listedInSettings(def.id, host.isEnabled(def.id), reveal)).map((def) => {
         const status = statuses.get(def.id);
         const state = status?.state ?? { kind: "disabled" as const };
         const title = def.displayName ?? t(def.titleKey);
+        const pack = def.required || isExternalModuleId(def.id) ? null : packRowOf(def.id);
         return (
           <ListRow
             key={def.id}
@@ -62,6 +69,7 @@ export function ModulesPage() {
               <span className="flex min-w-0 items-center gap-2">
                 <span className="truncate">{title}</span>
                 {isExternalModuleId(def.id) && <ExternalBadge />}
+                {pack && <PackSourceTag row={pack} />}
                 {state.kind !== "active" && state.kind !== "disabled" && (
                   <span className={`shrink-0 text-xs ${state.kind === "failed" ? "text-danger" : "text-subtle"}`} title={stateText(state)}>
                     {stateText(state)}
@@ -71,15 +79,19 @@ export function ModulesPage() {
             }
             detail={def.descriptionKey ? t(def.descriptionKey) : undefined}
             below={
-              status?.lastError ? (
-                <p className="pb-0.5 pl-[18px] text-xs text-warn" title={status.lastError.message}>
-                  {t("modules.lastError", { message: status.lastError.message })}
-                </p>
-              ) : undefined
+              <>
+                {status?.lastError && (
+                  <p className="pb-0.5 pl-[18px] text-xs text-warn" title={status.lastError.message}>
+                    {t("modules.lastError", { message: status.lastError.message })}
+                  </p>
+                )}
+                {pack && <PackBelow row={pack} />}
+              </>
             }
             actions={
               <>
                 {(state.kind === "failed" || status?.lastError) && <Button onClick={() => void host.retry(def.id)}>{t("modules.retry")}</Button>}
+                {pack && <PackActions row={pack} name={title} />}
                 {def.required ? (
                   <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-subtle">{t("modules.core")}</span>
                 ) : (
@@ -90,6 +102,7 @@ export function ModulesPage() {
           />
         );
       })}
+      <PackOnlyRows known={new Set(host.modules.map((m) => m.id))} />
     </Section>
   );
 }

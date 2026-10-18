@@ -46,9 +46,27 @@ export function LaunchFieldsBox({ children }: { children: ReactNode }) {
   return <div ref={ref} {...dataFlags(flags)} className="launch-fields-box group/card">{children}</div>;
 }
 
+/**
+ * The dock's border-box height as `--launch-dock-h` on the page (its parent): the absolutely
+ * placed intro / portraits keep at least that much room below them, so notices and errors that
+ * grow the dock (a create error, Claude warnings) push the art up instead of being drawn over.
+ */
+export function measureLaunchDock(el: HTMLElement | null): (() => void) | undefined {
+  const page = el?.parentElement;
+  if (!el || !page || typeof ResizeObserver === "undefined") return undefined;
+  const set = (height: number) => { if (height > 0) page.style.setProperty("--launch-dock-h", `${Math.ceil(height)}px`); };
+  set(el.getBoundingClientRect().height);
+  const observer = new ResizeObserver((entries) => {
+    const entry = entries[entries.length - 1];
+    set(entry?.borderBoxSize?.[0]?.blockSize ?? el.getBoundingClientRect().height);
+  });
+  observer.observe(el, { box: "border-box" });
+  return () => { observer.disconnect(); page.style.removeProperty("--launch-dock-h"); };
+}
+
 /** One bottom inset and width for both launchers; settings grow above this shared composer. */
 export function LaunchDock({ children }: { children: ReactNode }) {
-  return <div className="launch-dock">{children}</div>;
+  return <div ref={measureLaunchDock} className="launch-dock">{children}</div>;
 }
 
 export function LaunchAttachments({ images, disabled = false, onRemove }: { images: DraftImage[]; disabled?: boolean; onRemove(id: string): void }) {
@@ -118,7 +136,7 @@ export function LaunchIntro({ icon, title, hint, greeting, provider, portraits, 
   // entering a launcher).
   if (introOn && portraits && (!artReady || (!portraits.profiles && Object.keys(art).length > 0))) return null;
   return (
-    <div className={`launch-intro flex flex-col items-center px-6 text-center${hasArt ? " launch-intro-with-art" : ""}`}>
+    <div className={`launch-intro flex flex-col items-center px-6 text-center${hasArt ? " launch-intro-with-art" : ""}${hasArt && showArtGreeting ? " launch-intro-with-greeting" : ""}`}>
       {hasArt ? <LaunchPortraits choices={choices} selected={selected} profileId={portraits.profileId} disabled={portraits.disabled} onSelect={portraits.onSelect} /> :
         <div className="launch-intro-icon mb-5 flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-accent/8 text-accent">{icon}</div>}
       {hasArt && showArtGreeting && <div className="launch-art-greeting">{welcome}</div>}

@@ -195,7 +195,7 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
         <PageToggle code={rawJson} setCode={setRawJson} labels={["artifacts.json.record", "artifacts.json.raw"]} />
         {rawJson ? (
           <div className="px-3 py-1">
-            <Markdown text={fence(JSON.stringify(record, null, 2), "json")} />
+            <Markdown text={fence(JSON.stringify(record, null, 2), "json")} uncappedCode />
           </div>
         ) : (
           <JsonRecord value={record} />

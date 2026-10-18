@@ -8,7 +8,7 @@ import { ASKS_FEATURE } from "./delegations";
 import { useFocusDelegations } from "./delegationStore";
 import { useOwnerNotify } from "./ownerNotifyStore";
 import { OWNER_NOTIFY_FEATURE } from "../../../shared/ownerNotify";
-import type { AgentRow } from "./sidebar";
+import { pendingByAgent, type AgentRow } from "./sidebar";
 import { useSidebarModel } from "./sidebarView";
 import { getTurnMarks, markSeen, pruneTurnMarks, useTurnMarks, type TurnMarks } from "./turnUnread";
 
@@ -41,6 +41,8 @@ export function useAttention(): Attention {
   // The focus host's agents (`sessions` may also hold an open agent of another host).
   const sessions = useMemo(() => focusSessionViews({ hosts, sessions: allSessions }), [hosts, allSessions]);
   const approvals = useApp((s) => s.approvals);
+  // Requests seen on the host feed: agents not open here wait for the owner too.
+  const hostWaiting = useApp((s) => s.hostWaiting);
   const asks = useApp((s) => s.features.has(ASKS_FEATURE));
   // The focus host's records (the store may also hold the open agent's host's).
   const byId = useFocusDelegations();
@@ -49,10 +51,9 @@ export function useAttention(): Attention {
   const marks = useTurnMarks();
   const rows = useMemo(() => [...model.groups.flatMap((g) => [...g.online, ...g.offline]), ...model.chats], [model]);
   const needs = useMemo(() => {
-    const pending: Record<string, string[]> = {};
-    for (const [id, v] of Object.entries(sessions)) if (v.timeline.pending.size > 0) pending[id] = [...v.timeline.pending.values()].map((p) => p.method);
+    const pending = pendingByAgent(sessions, hostWaiting);
     return needsYouByAgent({ pending, approvals, delegations: asks ? Object.values(byId) : null, ownerNotes: ownerNotify ? Object.values(notes) : null });
-  }, [sessions, approvals, asks, byId, ownerNotify, notes]);
+  }, [sessions, hostWaiting, approvals, asks, byId, ownerNotify, notes]);
   const signals = useMemo(() => new Map(rows.map((r) => [r.id, agentSignal(r, needs.get(r.id), marks[r.id])])), [rows, needs, marks]);
   return { rows, signals, needs, marks };
 }

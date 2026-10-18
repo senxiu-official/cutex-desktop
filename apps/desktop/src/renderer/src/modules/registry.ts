@@ -30,6 +30,7 @@ import plugins from "./plugins";
 import projects from "./projects";
 import quickChats from "./quick-chats";
 import remoteAccess from "./remote-access";
+import proxy from "./proxy";
 import peers from "./peers";
 import users from "./users";
 import runtimePackages from "./runtime-packages";
@@ -42,6 +43,7 @@ import type { AppModule } from "./slots";
 import subagents from "./subagents";
 import taskService from "./task-service";
 import terminal from "./terminal";
+import threadSearch from "./thread-search";
 import updater from "./updater";
 import backendUpgrade from "./backend-upgrade";
 import usage from "./usage";
@@ -70,6 +72,8 @@ export const MODULES: readonly AppModule[] = [
   artifacts,
   notes,
   bookmarks,
+  // Conversation search (native thread/searchOccurrences; cutex thread-search-occurrences).
+  threadSearch,
   sideChat,
   // Status categories (step 2); their order in the capsule / status row is the items' `order`.
   goal,
@@ -99,6 +103,8 @@ export const MODULES: readonly AppModule[] = [
   // claude-safety-grants: the owner's decision on a declined tool row (the 需要你 card is core).
   safetyGrants,
   remoteAccess,
+  // Settings → 网络代理: this desktop's update proxy + the host's cutex proxy (proxy-modes).
+  proxy,
   peers,
   // P1 users and grants: Settings → 用户 (owner only).
   users,

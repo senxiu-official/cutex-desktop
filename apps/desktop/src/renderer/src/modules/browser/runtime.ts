@@ -11,6 +11,7 @@ import { translate } from "../../i18n";
 import type { BrowserEvent } from "../../../../shared/browser";
 import { browserSitePermissionList } from "./sitePermissionText";
 import { openClaimTab } from "./claimOpen";
+import { browserThumbnails } from "./thumbnails";
 
 /** A preview intentionally has no browser bridge, hence no real webview or website requests. */
 export async function startBrowser(context: AppModuleContext): Promise<void> {
@@ -29,6 +30,7 @@ export async function startBrowser(context: AppModuleContext): Promise<void> {
     opens.dispose();
     if (!browserActivation.end(activation)) return;
     browserCache.clear();
+    browserThumbnails.clear();
     void browser.setEnabled(false).catch(() => {});
   }, { once: true });
   await browser.setEnabled(true);
@@ -50,6 +52,8 @@ export async function startBrowser(context: AppModuleContext): Promise<void> {
       }
       return;
     }
+    // A background agent tab's live frame: display only, no tab-state change.
+    if (event.kind === "thumbnail") { browserThumbnails.set(event.hostId, event.tabKey, event.thumbnail); return; }
     if (event.kind === "agent-open") { if (event.openIntent) opens.open(event.openIntent); return; }
     if (event.kind === "agent-open-cancel") { if (event.openRequestId) opens.cancelled(event.hostId, event.openRequestId); return; }
     if (event.kind === "agent-open-confirm") { if (event.openRequestId) opens.confirmed(event.hostId, event.openRequestId); }
@@ -82,6 +86,7 @@ export async function startBrowser(context: AppModuleContext): Promise<void> {
 export async function closeBrowser(hostId: string, tabKey: string): Promise<boolean> {
   if (bridge.browser) await guestLifecycle.close(hostId, tabKey, bridge.browser.forHost(hostId));
   browserCache.remove(hostId, tabKey);
+  browserThumbnails.remove(hostId, tabKey);
   return true;
 }
 

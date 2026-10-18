@@ -45,7 +45,7 @@ export function CollapsedProject({ layout }: { layout: GroupLayout }) {
   const { dragging } = useFlyoutGate();
   const fly = useProjectFlyout({ available: !dragging, hoverEnabled: hoverOpensFlyout({ collapsed: isCollapsedRow(layout, false), hoverPreview: prefs.projectHoverPreview, dragging }), delay: prefs.projectHoverDelay });
   const hint = t(prefs.projectHoverPreview ? "sidebar.flyoutPin" : "sidebar.flyoutPinClick");
-  const block = projectBlockLook(prefs.projectSeparation, group.kind === "project" ? group.color : NEUTRAL_GROUP, prefs.projectHeaderTint);
+  const block = projectBlockLook(prefs.projectSeparation, group.kind === "project" ? group.color : NEUTRAL_GROUP);
 
   return (
     <>

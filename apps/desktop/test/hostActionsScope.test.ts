@@ -515,6 +515,39 @@ describe("route-scoped actual menu/store/preload/main actions", () => {
     expect(await pending).toBe(true);
     expect(store.getState().selectedId).toBe("another-session");
   });
+  it("runtime start is shown while cutex works and a failure stays visible on the agent", async () => {
+    const agent = resource("LOCAL OLD AGENT", 7);
+    agent.runtime.status = "offline";
+    store.setState({ sessions: { "same-session": { startError: null, queue: [], version: 0 } as never } });
+    const alert = vi.fn();
+    vi.stubGlobal("window", { cutex: fake.bridge, alert });
+    let fail!: (error: Error) => void;
+    fake.reply = new Promise((_resolve, reject) => {
+      fail = reject;
+    });
+    const start = menus.runtimeItem(agent, key => key);
+    expect(start?.label).toBe("menu.start");
+    const run = overlays.runAction(start!);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    // Waiting for cutex: offered as 正在启动…, not as a second start.
+    const pending = menus.runtimeItem(agent, key => key);
+    expect(pending?.label).toBe("menu.starting");
+    expect(pending?.disabled).toBe(true);
+    fail(new Error("runtime_start_failed: object DACL is not service-private"));
+    await run;
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(store.getState().sessions["same-session"]?.startError).toContain("object DACL is not service-private");
+    expect(alert).toHaveBeenCalledWith(expect.stringContaining("object DACL is not service-private"));
+    expect(menus.runtimeItem(agent, key => key)?.label).toBe("menu.start");
+  });
+  it("a runtime start answered with a non-online status counts as failed", async () => {
+    const agent = resource("LOCAL OLD AGENT", 7);
+    agent.runtime.status = "offline";
+    store.setState({ sessions: { "same-session": { startError: null, queue: [], version: 0 } as never } });
+    fake.reply = Promise.resolve({ runtimeGeneration: 2, status: "error" });
+    await expect(store.getState().sessionAction("same-session", "cutex/runtime/online", { openVisibleTerminal: false })).rejects.toThrow(/error/);
+    expect(store.getState().sessions["same-session"]?.startError).toMatch(/error/);
+  });
   it("runtime stop (click twice) preserves the originally displayed runtime generation", async () => {
     const agent = resource("LOCAL OLD AGENT", 7);
     agent.runtime.status = "online";

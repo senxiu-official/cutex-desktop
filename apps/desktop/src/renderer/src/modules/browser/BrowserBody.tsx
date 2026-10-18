@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Copy, ExternalLink, Globe, LoaderCircle, RotateCw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Copy, ExternalLink, EyeOff, Globe, LoaderCircle, RotateCw, X } from "lucide-react";
 import { bridge } from "../../bridge";
 import { useI18n } from "../../i18n";
 import type { SideBodyProps } from "../slots";
@@ -14,6 +14,8 @@ import { BrowserOwnerCapture } from "./BrowserOwnerCapture";
 import { createBrowserHold } from "./hold";
 import { reserveNewOwnerTab } from "./newOwnerTab";
 import { browserRefusalAction } from "../../../../shared/browser";
+import { BrowserBackgroundView } from "./BrowserBackgroundView";
+import { BROWSER_PREVIEW_BACKGROUND } from "./thumbnails";
 
 const BUTTON = "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-subtle enabled:hover:bg-hover enabled:hover:text-foreground disabled:opacity-35";
 interface BrowserWebview extends HTMLElement { getWebContentsId(): number }
@@ -41,13 +43,20 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   const [retry, setRetry] = useState(0);
   const [working, setWorking] = useState(false);
   const [captureFailed, setCaptureFailed] = useState(false);
+  // A refused front hand-over remounts the background view; its reason survives that remount.
+  const carriedError = useRef<string | null>(null);
   const preview = !bridge.browser && import.meta.env.DEV;
+  // Preview only (`?browserBackground`, mock.ts): show the background agent-tab card instead.
+  const previewBackground = preview && typeof location !== "undefined" && new URLSearchParams(location.search).has("browserBackground");
   const crashed = view?.status === "crashed";
   const invalidated = view?.status === "closed" || view?.status === "unmounted";
   const recoverable = mountFailed || crashed || invalidated;
   const currentUrl = view?.url ?? instance.state.url;
   const ready = enabled && !!bridge.browser && hostAvailable && view?.status === "attached";
   const granted = ready && view?.control?.state === "granted";
+  // Agent tabs run in main's offscreen background carrier unless the owner brought one to the front.
+  const wantBackground = !!instance.state.agentOpened && !instance.state.front;
+  const background = view?.carrier === "background";
   const hold = useRef<ReturnType<typeof createBrowserHold> | null>(null);
   useEffect(() => {
     if (!hostId || !epoch || !bridge.browser || !enabled) return;
@@ -80,13 +89,24 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   useEffect(() => {
     const container = host.current;
     setWorking(false);
-    setError(null);
+    setError(carriedError.current);
+    carriedError.current = null;
     if (!enabled || !container || !hostId || !epoch || !bridge.browser) return;
     setMountFailed(false);
     const api = bridge.browser.forHost(hostId);
     const mountFailure = (reason: unknown) => {
+      const state = latest.current.instance.state;
+      // A refused front hand-over (e.g. the agent's action ran too long): main still carries the
+      // page in the background. Show it there again with the reason, never close it.
+      if (state.agentOpened && state.front && !state.pendingOpen) {
+        carriedError.current = browserError(reason);
+        guestLifecycle.keepNext(hostId, tabKey);
+        const next = { ...state }; delete next.front;
+        latest.current.setState(next);
+        return;
+      }
       setMountFailed(true); setError(browserError(reason));
-      const pending = latest.current.instance.state.pendingOpen;
+      const pending = state.pendingOpen;
       if (pending) void api.openRefused(pending, "invalid_request").catch(() => {});
     };
     if (latest.current.instance.state.newOwner) {
@@ -104,6 +124,12 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
       // neither metadata updates, hidden state nor card moves may replace this element or its src.
       const agentPool = mount.pool === "agent" || latest.current.instance.state.agentOpened;
       const expectedPartition = agentPool ? `persist:browser-agent-${hostId}` : `persist:browser-${hostId}`;
+      // Main's background carrier: no element at all; the card shows its live thumbnail.
+      if (mount.carrier === "background") {
+        if (mount.tabKey !== tabKey || mount.pool !== "agent" || mount.partition !== `persist:browser-agent-${hostId}`) throw new Error("Invalid browser mount reservation");
+        if (mount.recovery) setError(mount.recovery);
+        return;
+      }
       if (mount.tabKey !== tabKey || mount.partition !== expectedPartition || !/^about:blank#cutex-browser-attach=[a-f0-9]{64}$/.test(mount.src)) throw new Error("Invalid browser mount reservation");
       if (mount.recovery) setError(mount.recovery);
       element = document.createElement("webview") as BrowserWebview;
@@ -121,7 +147,8 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
       offReady = () => guest.removeEventListener("dom-ready", onReady);
       container.appendChild(element);
     }, mountFailure, () => browserActivation.get() && browserHostCurrent(hostId, epoch),
-      latest.current.instance.state.agentOpened ? { agentOpened: true, ...(latest.current.instance.state.pendingOpen ? { pendingOpen: latest.current.instance.state.pendingOpen } : {}) } : undefined);
+      latest.current.instance.state.agentOpened ? { agentOpened: true, ...(latest.current.instance.state.pendingOpen ? { pendingOpen: latest.current.instance.state.pendingOpen } : {}),
+        ...(wantBackground ? { carrier: "background" as const } : {}) } : undefined);
     return () => {
       offReady();
       element?.remove();
@@ -130,7 +157,26 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
     // This is an instance lifetime, not a navigation/render effect. Even locale changes only affect
     // the surrounding controls. The shell's instance layer supplies stable placement and hidden LRU.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, hostId, epoch, tabKey, retry]);
+  }, [enabled, hostId, epoch, tabKey, retry, wantBackground]);
+
+  /** Owner: show this background agent tab in the card (main finishes the agent's running action
+   * first, then reopens the page in the webview; the agent keeps its lease). */
+  function toFront(): void {
+    if (!hostId || !background || view?.handover) return;
+    setError(null);
+    guestLifecycle.keepNext(hostId, tabKey);
+    props.setState({ ...instance.state, front: true });
+  }
+  /** Owner: hand this agent tab back to main's background carrier (same lease, page reopens there). */
+  function toBackground(): void {
+    if (!hostId || !bridge.browser || background || view?.pool !== "agent") return;
+    void run(async () => {
+      await bridge.browser!.forHost(hostId).toBackground(tabKey);
+      guestLifecycle.keepNext(hostId, tabKey);
+      const next = { ...latest.current.instance.state, agentOpened: true as const }; delete next.front;
+      latest.current.setState(next);
+    });
+  }
 
   async function run(action: () => Promise<void>): Promise<void> {
     if (!browserActivation.get() || !browserHostCurrent(hostId, epoch)) return;
@@ -165,11 +211,12 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   }
 
   /** The one action that fixes this refusal; others only explain (never a misleading switch). */
-  function fixRefusal(action: "enableExternal" | "retry"): void {
+  function fixRefusal(action: "enableExternal" | "retry" | "reload"): void {
     if (!hostId || !bridge.browser) return;
     const browser = bridge.browser, retry = submitted.current;
     setFixNote(null);
     void run(async () => {
+      if (action === "reload") { await browser.forHost(hostId).reload(tabKey); return; }
       if (action === "enableExternal" && !(await browser.externalPages(true)).enabled) { setFixNote("browser.refusal.forced"); return; }
       if (retry) await browser.forHost(hostId).navigate(tabKey, retry);
       else await browser.forHost(hostId).reload(tabKey);
@@ -204,6 +251,8 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
         </span>
         <input value={address} onChange={(event) => setAddress(event.target.value)} onFocus={() => { editing.current = true; }} onBlur={() => { editing.current = false; }} aria-label={t("browser.address")} spellCheck={false} autoComplete="off" autoCapitalize="off" maxLength={MAX_BROWSER_INPUT} disabled={!hostAvailable || !bridge.browser} className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-subtle disabled:opacity-60" />
         <button type="submit" disabled={!hostAvailable || (!ready && !recoverable) || working || preview} className="h-7 shrink-0 rounded-md px-2 text-xs text-muted enabled:hover:bg-hover disabled:opacity-35">{t("browser.go")}</button>
+        {ready && view?.pool === "agent" && !background && <button type="button" className={BUTTON} data-browser-to-background title={t("browser.background.send")} aria-label={t("browser.background.send")}
+          disabled={working || !!view.handover} onClick={toBackground}><EyeOff size={14} /></button>}
       </form>
       <BrowserControlBanner hostId={hostId} tabKey={tabKey} />
       {(view?.pool === "agent" || instance.state.agentOpened) && <p role="alert" data-browser-isolated-warning className="shrink-0 border-b border-warn bg-background px-3 py-2 text-xs text-warn">{t("browser.origins.doNotSignIn")}</p>}
@@ -216,14 +265,18 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
         className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-xs text-danger">
         <span className="min-w-0 flex-1 break-words">{addressKey ? t(addressKey) : t("browser.blocked", { reason: t(reasonKey!) })}{fixNote && <span className="ml-1 text-subtle">{t(fixNote)}</span>}</span>
         {fix && <button type="button" data-browser-refusal-fix={fix} disabled={working} className="shrink-0 rounded-md border border-border px-2 py-0.5 text-foreground enabled:hover:bg-hover disabled:opacity-40"
-          onClick={() => fixRefusal(fix)}>{t(fix === "enableExternal" ? "browser.refusal.enableExternal" : "browser.refusal.retry")}</button>}
+          onClick={() => fixRefusal(fix)}>{t(fix === "enableExternal" ? "browser.refusal.enableExternal" : fix === "reload" ? "browser.reload" : "browser.refusal.retry")}</button>}
       </div>}
       {!safeBrowserUrl(currentUrl) && <p role="status" className="shrink-0 border-b border-border px-3 py-1 text-xs text-subtle">{t("browser.longUrl")}</p>}
       <div className="relative min-h-0 flex-1">
         <div ref={host} data-browser-viewport className="absolute inset-0" style={{ visibility: !hostAvailable || crashed || invalidated ? "hidden" : "visible" }} />
-        {granted && hostId && view && <BrowserOwnerCapture key={view.guestId} hostId={hostId} tabKey={tabKey} guestId={view.guestId} viewport={host}
+        {background && hostId && <BrowserBackgroundView hostId={hostId} tabKey={tabKey} title={view?.title || currentUrl} handover={!!view?.handover}
+          operating={!!view?.control?.operating} agentName={view?.lease?.agentName} onFront={toFront} />}
+        {granted && !background && hostId && view && <BrowserOwnerCapture key={view.guestId} hostId={hostId} tabKey={tabKey} guestId={view.guestId} viewport={host}
           failed={() => setCaptureFailed(true)} />}
-        {(preview || !hostAvailable || !bridge.browser || recoverable || blank) && (
+        {previewBackground && <BrowserBackgroundView hostId={BROWSER_PREVIEW_BACKGROUND.hostId} tabKey={BROWSER_PREVIEW_BACKGROUND.tabKey} title="Agent page" handover={false}
+          operating agentName="Reader" onFront={() => {}} />}
+        {!previewBackground && (preview || !hostAvailable || !bridge.browser || recoverable || (blank && !background)) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center text-xs text-subtle">
             <Globe size={24} strokeWidth={1.4} />
             <p className="max-w-sm">{preview ? t("browser.preview") : !hostAvailable ? t("browser.noHost") : !bridge.browser ? t("browser.unavailable") : crashed ? t("browser.crashed") : recoverable ? t("browser.unavailable") : t("browser.blank")}</p>

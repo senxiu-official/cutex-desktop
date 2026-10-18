@@ -1,5 +1,6 @@
 // Pure desktop-shell logic (tray labels, close decision, prefs parsing) — used by the main process,
 // kept free of Electron imports so it is unit-testable.
+import { parseUpdateProxyPref } from "./proxy";
 import type { CloseBehavior, DesktopPrefs, ShellLocale } from "./ipc";
 import type { ShellTermForms, ShellTerms, ShellTermsPref } from "./ipc";
 import { DEVICE_OFF_NONE, parseDeviceOff } from "./notificationLevels";
@@ -43,6 +44,8 @@ export function parsePrefs(raw: unknown): DesktopPrefs {
     ...(value.trayNoticeShown === true ? { trayNoticeShown: true } : {}),
     ...(parseUpdateRemote(value.updateRemote) ? { updateRemote: parseUpdateRemote(value.updateRemote)! } : {}),
     ...(parseUpdateRemotes(value.updateRemotes) ? { updateRemotes: parseUpdateRemotes(value.updateRemotes)! } : {}),
+    ...(parseUpdateProxyPref(value.updateProxy) ? { updateProxy: parseUpdateProxyPref(value.updateProxy)! } : {}),
+    ...(parseUpdateProxyPref(value.updateProxy)?.hasCredentials && typeof value.updateProxyAuth === "string" && value.updateProxyAuth ? { updateProxyAuth: value.updateProxyAuth } : {}),
   };
 }
 

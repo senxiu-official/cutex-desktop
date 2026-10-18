@@ -74,6 +74,9 @@ describe("project menu", () => {
       "menu.renameProject",
       "remark.menu",
       "projects.addMember…",
+      // Last, after a separator: 在主界面调整 (lead 2026-10-18).
+      "|",
+      "customize.sidebar.menu",
     ]);
     const open = find(projectMenu(group, "/w", false, null, t), "menu.openProjectPage")!;
     expect(labels(open.submenu!)).toEqual(["projects.tab.overview", "projects.tab.agents", "projects.tab.tasks", "projects.tab.memory", "projects.tab.settings"]);
@@ -183,6 +186,39 @@ describe("project menu", () => {
     await find(projectMenu(group, null, false, null, t), "projects.clearDirector")!.onSelect();
     await vi.waitFor(() => expect(notify).toHaveBeenCalledWith("projects.clearDirectorFailed(conflict: project_has_agent_operators)"));
     useRotations.setState({ byProject: {} });
+  });
+});
+
+describe("升级运行时 (claude-runtime-repin)", () => {
+  // The menu is built synchronously: an agent never opened has no cached runtime view.
+  const sora = (claudeRuntime?: { release: string; pendingRelease: string | null }) => ({
+    ...session("sora"),
+    runtime: { status: "online", activeTurnId: null, runtimeGeneration: 1, backend: "claude_subscription", ...(claudeRuntime ? { claudeRuntime } : {}) },
+  }) as unknown as SessionResource;
+  async function seedClaude(agent: SessionResource, selectedRelease?: string) {
+    const { useApp } = await import("../src/renderer/src/store");
+    useApp.setState({
+      features: new Set(["claude-runtime-repin", "session-claude-runtime"]),
+      sidebar: { active: [agent], retired: [], hostRows: {}, projects: null, ...(selectedRelease ? { claudeRuntime: { selectedRelease } } : {}) } as never,
+    });
+  }
+
+  it("shows on the first right-click of a Claude agent never opened (from the agent list)", async () => {
+    const agent = sora({ release: "claude-r17", pendingRelease: null });
+    await seedClaude(agent, "claude-r19");
+    const { agentMenu } = await import("../src/renderer/src/lib/menus");
+    const item = find(agentMenu(agent, t, "local"), "menu.upgradeRuntime");
+    expect(item?.hint).toBe("claude-r17 → claude-r19");
+  });
+
+  it("not when already on the selected release or the repin is pending", async () => {
+    const { agentMenu } = await import("../src/renderer/src/lib/menus");
+    const pending = sora({ release: "claude-r17", pendingRelease: "claude-r19" });
+    await seedClaude(pending, "claude-r19");
+    expect(find(agentMenu(pending, t, "local"), "menu.upgradeRuntime")).toBeUndefined();
+    const current = sora({ release: "claude-r19", pendingRelease: null });
+    await seedClaude(current, "claude-r19");
+    expect(find(agentMenu(current, t, "local"), "menu.upgradeRuntime")).toBeUndefined();
   });
 });
 

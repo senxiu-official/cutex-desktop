@@ -125,8 +125,13 @@ const BRIEFS: Record<string, string> = {
 
 // ---------- transcripts ----------
 
-/** `agent_delegate` as the requester's transcript has it (result = requester view, ask_id → delegation_id). */
+/**
+ * `agent_delegate` as the requester's transcript has it: the requester view, the id under
+ * `delegation` (cutex prompt revision A8; `delegation_id` before). A delegation to a wider target
+ * (pendingReview) answers with the review's approval id and no queue fields (r236 shape).
+ */
 function delegateCall(id: string, a: AskSummary): Record<string, unknown> {
+  const reviewed = a.execution === "pendingReview";
   return {
     type: "mcpToolCall",
     id,
@@ -137,7 +142,9 @@ function delegateCall(id: string, a: AskSummary): Record<string, unknown> {
     arguments: { target: a.targetName, title: a.title, text: BRIEFS[a.askId] ?? `${a.title}。完成后简短汇报。` },
     result: {
       content: [],
-      structuredContent: { ok: true, created: true, delegation_id: a.askId, target: a.targetName, target_id: a.target, title: a.title, state: a.execution === "running" ? "queued" : a.execution, hold: null, queue_position: 1, review: null, attempt: null, closed: null },
+      structuredContent: reviewed
+        ? { approval_id: "apr-5e1f0a7c", delegation: a.askId, detail: `${a.targetName} can do more than you, so the owner reviews each delegation to it before it runs (this one included). Nothing to do now: continue or end your turn.`, ok: true, state: "pendingReview", target: a.targetName }
+        : { ok: true, created: true, delegation: a.askId, target: a.targetName, target_id: a.target, title: a.title, state: a.execution === "running" ? "queued" : a.execution, hold: null, queue_position: 1, review: null, attempt: null, closed: null },
     },
   };
 }
@@ -197,7 +204,7 @@ function leadThread() {
             delegateCall("ld1", a("ask-done")),
             delegateCall("ld2", a("ask-review")),
             delegateCall("ld3", a("ask-accept")),
-            { type: "mcpToolCall", id: "lw1", server: "cutex", tool: "delegation_wait", status: "completed", durationMs: 3300, arguments: { delegations: ["ask-done"] }, result: { content: [], structuredContent: { ok: true, reason: "result", results: [{ kind: "answer", delegation_id: "ask-done", title: a("ask-done").title, answer: a("ask-done").answerPreview, awaiting_acceptance: false }], delegations: [] } } },
+            { type: "mcpToolCall", id: "lw1", server: "cutex", tool: "delegation_wait", status: "completed", durationMs: 3300, arguments: { delegations: ["ask-done"] }, result: { content: [], structuredContent: { ok: true, reason: "result", results: [{ kind: "answer", delegation: "ask-done", title: a("ask-done").title, answer: a("ask-done").answerPreview, awaiting_acceptance: false }], delegations: [] } } },
             { type: "agentMessage", id: "la2", text: "Helper 找到 3 处调用，两处没校验 revision。接下来让它直接改。" },
           ],
         },

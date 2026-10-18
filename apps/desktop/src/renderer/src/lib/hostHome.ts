@@ -7,7 +7,8 @@ import { agentHost, hostApi, useApp } from "../store";
 const homes = new Map<string, string | null>();
 const pending = new Map<string, Promise<string | null>>();
 
-function loadHome(hostId: string): Promise<string | null> {
+/** The host's home (cached once known); null on older cutex or while the daemon is down. */
+export function loadHostHome(hostId: string): Promise<string | null> {
   let p = pending.get(hostId);
   if (!p) {
     p = hostApi(hostId).browseDirs().then(
@@ -29,7 +30,11 @@ function loadHome(hostId: string): Promise<string | null> {
 
 /** Home of the open agent's host (the focus host without one); only fetched when `needed` (a link starts with `~`). */
 export function useHostHome(needed: boolean): string | null {
-  const hostId = useApp(agentHost);
+  return useHostHomeOf(useApp(agentHost), needed);
+}
+
+/** Home of `hostId`; only fetched when `needed`. */
+export function useHostHomeOf(hostId: string, needed: boolean): string | null {
   const [home, setHome] = useState<string | null>(() => homes.get(hostId) ?? null);
   useEffect(() => {
     if (!needed) return;
@@ -38,7 +43,7 @@ export function useHostHome(needed: boolean): string | null {
       return;
     }
     let live = true;
-    void loadHome(hostId).then((h) => live && setHome(h));
+    void loadHostHome(hostId).then((h) => live && setHome(h));
     return () => {
       live = false;
     };

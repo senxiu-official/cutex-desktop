@@ -4,7 +4,7 @@
 // restart with `reason: startup`) triggers a re-read; a slow poll covers a missed one while a run goes.
 import { useEffect } from "react";
 import { create } from "zustand";
-import { BACKEND_UPGRADE_FEATURE, upgradeEventOf, type UpgradeEvent, type UpgradeRun, type UpgradeStatus } from "../../../../shared/backendUpgrade";
+import { BACKEND_UPGRADE_FEATURE, UPGRADE_INSTALLED_NOTES_FEATURE, upgradeEventOf, type UpgradeEvent, type UpgradeRun, type UpgradeStatus } from "../../../../shared/backendUpgrade";
 import { bridge } from "../../bridge";
 import { onHostReset } from "../../lib/hostSwitch";
 import { scopedHostData } from "../../lib/hostScope";
@@ -14,6 +14,7 @@ import { useApp } from "../../store";
 import { services } from "../app";
 import type { AppModuleContext } from "../slots";
 import { runActive, upgradeAttention } from "./model";
+import { rememberReleaseNotes } from "./releaseNotes";
 
 export interface HostUpgrade {
   /** undefined: not read yet; null: the host has no upgrade route (older cutex). */
@@ -34,6 +35,8 @@ export const useUpgradeStore = create<{ byHost: Record<string, HostUpgrade> }>((
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 function patch(hostId: string, change: Partial<HostUpgrade>): void {
+  // Keep the offered release's notes for after it is installed (cutex reports notes only while on offer).
+  if (change.status) rememberReleaseNotes(change.status);
   useUpgradeStore.setState((s) => ({ byHost: { ...s.byHost, [hostId]: { ...(s.byHost[hostId] ?? EMPTY), ...change } } }));
 }
 
@@ -192,10 +195,12 @@ const RUN_POLL_MS = 5_000;
  * The host's upgrade state, read while `active`, the host is connected and has the capability (again
  * after every reconnect: a finished upgrade restarts the daemons). Polls while a run is going.
  */
-export function useHostUpgrade(hostId: string, active = true): HostUpgrade & { supported: boolean; connected: boolean } {
+export function useHostUpgrade(hostId: string, active = true): HostUpgrade & { supported: boolean; connected: boolean; installedNotes: boolean } {
   const data = useHostData(hostId);
   const connected = data?.daemon.kind === "connected";
   const supported = !!data?.features.has(BACKEND_UPGRADE_FEATURE);
+  // `installed.notes` / `publishedAt` from cutex itself (upgrade-installed-notes).
+  const installedNotes = !!data?.features.has(UPGRADE_INSTALLED_NOTES_FEATURE);
   const entry = useUpgradeStore((s) => s.byHost[hostId]) ?? EMPTY;
   const enabled = active && connected && supported;
   useEffect(() => {
@@ -209,5 +214,5 @@ export function useHostUpgrade(hostId: string, active = true): HostUpgrade & { s
     }, RUN_POLL_MS);
     return () => clearInterval(id);
   }, [enabled, going, hostId]);
-  return { ...entry, supported, connected };
+  return { ...entry, supported, connected, installedNotes };
 }

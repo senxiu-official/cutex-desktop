@@ -2,7 +2,7 @@
 // sits in its sender's timeline, and which ones count in 需要你. Pure (unit-tested); the records live
 // in lib/ownerNotifyStore, the card is components/OwnerNotifyCard.
 import type { OwnerNotification } from "@cutex-desktop/protocol";
-import { canReply, isAlerting, isOpenSafetyBlock, isPending } from "../../../shared/ownerNotify";
+import { canReply, isAlerting, isOpenSafetyBlock, isPending, previewText } from "../../../shared/ownerNotify";
 
 /**
  * How a note sits in the timeline (quiet pass, owner 2026-10-14): a card only while it asks for a
@@ -75,6 +75,43 @@ export function noteTurnOf(r: Pick<OwnerNotification, "turnId" | "createdAt">, t
 export function ownerNeedReason(n: Pick<OwnerNotification, "needsReply"> & Partial<Pick<OwnerNotification, "safetyBlock">>): "ownerReply" | "ownerMessage" | "safetyBlock" {
   if (n.safetyBlock) return "safetyBlock";
   return n.needsReply ? "ownerReply" : "ownerMessage";
+}
+
+/** Order of the open agent's pending notices: a stopped command first, then replies, then plain messages. */
+const NEED_RANK: Record<ReturnType<typeof ownerNeedReason>, number> = { safetyBlock: 0, ownerReply: 1, ownerMessage: 2 };
+
+/**
+ * The open agent's notices that wait for the owner (the composer's 等你回复 / 需要你 row, the sidebar
+ * status of the open agent): the same `isPending` rule as the sidebar's 需要你, most actionable first
+ * (safety block, reply, message), oldest first within each.
+ */
+export function openAgentPendingNotes(byId: Readonly<Record<string, OwnerNotification>>, agentId: string): OwnerNotification[] {
+  return Object.values(byId)
+    .filter((r) => r.agentId === agentId && isPending(r))
+    .sort((a, b) => NEED_RANK[ownerNeedReason(a)] - NEED_RANK[ownerNeedReason(b)] || byCreated(a, b));
+}
+
+/** The label of a pending notice in the composer row: 等你回复 when it takes a reply, else 需要你. */
+export function pendingNoteLabel(n: Pick<OwnerNotification, "needsReply" | "origin" | "state"> & Partial<Pick<OwnerNotification, "safetyBlock">>): "awaitsReply" | "needsYou" {
+  return !n.safetyBlock && canReply(n) ? "awaitsReply" : "needsYou";
+}
+
+/** The first non-empty line of a notice, without the usual Markdown marks (headings, emphasis, code ticks, list bullets), at most `max` characters. */
+export function noteFirstLine(text: string, max = 80): string {
+  const line = text.split(/\r?\n/).find((l) => l.trim() && !/^\s*(```|~~~)/.test(l)) ?? "";
+  const plain = line
+    .replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/, "")
+    .replace(/(\*\*|__|`)/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+  return previewText(plain, max);
+}
+
+/**
+ * A focus request for a notice whose turn is older than every loaded turn: page older history in
+ * (when there is more) before looking for its card.
+ */
+export function noteNeedsOlderHistory(r: Pick<OwnerNotification, "turnId" | "createdAt">, turns: readonly { id: string; startedAt: number | null }[], hasOlder: boolean): boolean {
+  return hasOlder && noteTurnOf(r, turns) === null;
 }
 
 /** The safety-block notice of a declined tool row (`itemId`), the latest when there are several. */

@@ -30,6 +30,35 @@ function write(state: WindowState): void {
   }
 }
 
+function backgroundFile(): string {
+  return join(app.getPath("userData"), "window-background.json");
+}
+
+/** The window colour the renderer last reported (theme + palette), or null before the first report. */
+export function loadWindowBackground(): string | null {
+  try {
+    const color = (JSON.parse(readFileSync(backgroundFile(), "utf8")) as { color?: unknown }).color;
+    return typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color) ? color : null;
+  } catch {
+    return null;
+  }
+}
+
+let savedBackground: string | null = null;
+
+/** Persist the window colour for the next start (only when it changed). */
+export function saveWindowBackground(color: string): void {
+  if (color === savedBackground) return;
+  savedBackground = color;
+  try {
+    const target = backgroundFile();
+    writeFileSync(`${target}.tmp`, `${JSON.stringify({ color })}\n`, "utf8");
+    renameSync(`${target}.tmp`, target);
+  } catch (error) {
+    console.warn("[cutex-desktop] saving the window background failed", error);
+  }
+}
+
 /** Initial BrowserWindow bounds (call after app ready) and whether to maximize once shown. */
 export function initialWindowBounds(): { bounds: Partial<Rect> & { width: number; height: number }; maximized: boolean } {
   let areas: Rect[] = [];

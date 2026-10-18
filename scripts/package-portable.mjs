@@ -38,6 +38,9 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { thirdPartyNotices } from "./third-party-notices.mjs";
 
+/** The packaged app's copyright line (Windows version info, macOS Info.plist); same as NOTICE. */
+const COPYRIGHT = "Copyright 2026 The Cutex Authors";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const app = join(root, "apps/desktop");
 const args = process.argv.slice(2);
@@ -167,6 +170,7 @@ function stampAppBundle(bundle) {
   pb("Set", ":CFBundleName", "Cutex");
   try { pb("Set", ":CFBundleDisplayName", "Cutex"); } catch { pb("Add", ":CFBundleDisplayName", "string", "Cutex"); }
   pb("Set", ":CFBundleIdentifier", "dev.cutex.desktop");
+  try { pb("Set", ":NSHumanReadableCopyright", COPYRIGHT); } catch { pb("Add", ":NSHumanReadableCopyright", "string", COPYRIGHT); }
   // app.isPackaged is false while the executable is called "Electron" (the updater would then call the
   // install a dev run). The helper apps keep their names: Electron finds "Electron Helper.app" first.
   renameSync(join(bundle, "Contents", "MacOS", "Electron"), join(bundle, "Contents", "MacOS", "Cutex"));
@@ -209,7 +213,8 @@ async function stampExe(exePath, icoPath, pkg) {
   Resource.IconGroupEntry.replaceIconsForResource(res.entries, group.id, group.lang, ico.icons.map((i) => i.data));
   const vi = Resource.VersionInfo.fromEntries(res.entries)[0] ?? Resource.VersionInfo.createEmpty();
   const name = pkg.productName ?? "Cutex";
-  const strings = { FileDescription: name, ProductName: name, CompanyName: name, InternalName: "cutex", OriginalFilename: "cutex.exe", FileVersion: pkg.version, ProductVersion: pkg.version };
+  // LegalCopyright replaces Electron's own ("GitHub, Inc."), which would otherwise show in Explorer → Properties.
+  const strings = { FileDescription: name, ProductName: name, CompanyName: name, LegalCopyright: COPYRIGHT, InternalName: "cutex", OriginalFilename: "cutex.exe", FileVersion: pkg.version, ProductVersion: pkg.version };
   const langs = vi.getAllLanguagesForStringValues();
   for (const lang of langs.length ? langs : [{ lang: 1033, codepage: 1200 }]) vi.setStringValues(lang, strings);
   const numeric = String(pkg.version).match(/^\d+(\.\d+){0,3}/)?.[0] ?? "0.0.0";

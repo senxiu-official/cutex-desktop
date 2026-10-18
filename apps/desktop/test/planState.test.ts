@@ -1,6 +1,6 @@
 // The kept 进程 snapshot (lib/planState) and its per-agent cache (lib/planCache).
 import { describe, expect, it } from "vitest";
-import { bootPlan, dismissPlan, nextPlan, planSignature, planTurnGone, revertDropsPlan } from "../src/renderer/src/lib/planState";
+import { bootPlan, dismissPlan, nextPlan, restorePlan, planSignature, planTurnGone, revertDropsPlan } from "../src/renderer/src/lib/planState";
 import { cachePut, parseCache, planKey } from "../src/renderer/src/lib/planCache";
 import type { PlanSnapshot, PlanStep } from "../src/renderer/src/lib/timeline";
 
@@ -128,5 +128,22 @@ describe("plan cache (LRU)", () => {
     expect(planKey("local", "agent-1")).not.toBe(key);
     expect(parseCache({}).size).toBe(0);
     expect(parseCache([["a", plan("x", steps("pending"))], ["b", plan("y", steps("pending"))]], 1).size).toBe(1);
+  });
+});
+
+describe("restorePlan / hiddenPlan", () => {
+  it("undoes the owner's hide and the status row can find the hidden list", async () => {
+    const { hiddenPlan, latestPlan } = await import("../src/renderer/src/lib/statusCapsule");
+    const shown = plan("a", steps("inProgress"));
+    const hidden = dismissPlan(shown)!;
+    const state = (p: PlanSnapshot) => ({ plan: p }) as unknown as Parameters<typeof latestPlan>[0];
+    expect(latestPlan(state(hidden))).toBeNull();
+    expect(hiddenPlan(state(hidden))).toBe(hidden);
+    const back = restorePlan(hidden)!;
+    expect(back.dismissed).toBeUndefined();
+    expect(latestPlan(state(back))).toEqual(back);
+    expect(hiddenPlan(state(back))).toBeNull();
+    expect(restorePlan(shown)).toBe(shown);
+    expect(restorePlan(null)).toBeNull();
   });
 });

@@ -58,6 +58,8 @@ describe("componentCardState", () => {
   it("unmanaged / installFrom none: set up by hand; source-only: the CLI command", () => {
     expect(componentCardState(input({ list: list({ managed: false }) }))).toEqual({ kind: "unmanaged" });
     expect(componentCardState(input({ list: list({ installFrom: "none" }) }))).toEqual({ kind: "unmanaged" });
+    // A runtime set up by hand on that host (claude-runtime: /v2/runtimes names a selected one): usable.
+    expect(componentCardState(input({ list: list({ managed: false }), handConfigured: true }))).toEqual({ kind: "body" });
     expect(componentCardState(input({ list: list({ installFrom: "source-only" }) }))).toEqual({ kind: "sourceOnly", command: "cutex component install job-service --from-source <dir>" });
     expect(sourceInstallCommand("claude-runtime")).toBe("cutex component install claude-runtime --from-source <dir>");
   });

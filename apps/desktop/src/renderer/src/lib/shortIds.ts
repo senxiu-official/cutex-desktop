@@ -1,6 +1,7 @@
 // Short cutex ids in agent-facing tool text (cutex task 06 "short ids"). Since that release the
 // MCP tool results an agent sees — and so the desktop parses from its transcript — carry short
-// ids: a session as its tail (`cutex.…3f9a1c`), every other kind as a prefix (`ask-123456`,
+// ids: a session as its tail (`cutex.…3f9a1c`), every other kind as a prefix (`ask-123456`, since
+// cutex prompt revision A8 `delegation-123456`,
 // `q-…`, `doc-…`, `art-…`), at least 6 hex characters and longer only when needed to stay
 // unique. Agents may also *write* a bare unique prefix / suffix (`019ab1`, `…abc123`, `...abc123`).
 // Management v2 HTTP and the external-input views still carry full ids, so a parsed short id is
@@ -13,6 +14,8 @@ export type IdKind = "session" | "ask" | "question" | "document" | "artifact";
 const KIND_PREFIX: readonly (readonly [IdKind, string])[] = [
   ["session", "cutex."],
   ["ask", "ask-"],
+  // cutex prompt revision A8 (117b2c8): agents see a delegation id as `delegation-<hex>` (stored `ask-`).
+  ["ask", "delegation-"],
   ["question", "q-"],
   ["document", "doc-"],
   ["artifact", "art-"],

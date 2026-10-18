@@ -13,7 +13,6 @@
 import { useState } from "react";
 import { Bell, BellRing, Check, CornerDownRight, MessageSquareReply, Trash2, X } from "lucide-react";
 import type { OwnerNotification } from "@cutex-desktop/protocol";
-import { OWNER_REPLY_MAX } from "../../../shared/ipc";
 import { useI18n, type MessageKey } from "../i18n";
 import { contextMenu } from "../lib/contextMenu";
 import { openDelegationDetail } from "../lib/delegationOpen";
@@ -30,6 +29,7 @@ import { DelegationTag } from "./DelegationParts";
 import { ClampBox } from "./ClampBox";
 import { SafetyBlockCard } from "./SafetyBlockCard";
 import { Markdown } from "./Markdown";
+import { OwnerReplyBox } from "./OwnerReplyBox";
 import { SystemAvatar } from "./SystemAvatar";
 
 const TONE: Record<OwnerNotification["level"], { frame: string; icon: string; badge: string; dot: string }> = {
@@ -62,7 +62,6 @@ function Card({ record: r, sessionId }: { record: OwnerNotification; sessionId: 
     system ? (rowsOf(s.sidebar, selectedSidebar(s)).find((x) => x.cutexSessionId === r.agentId)?.displayName ?? r.agentName ?? r.agentId) : null,
   );
   const [replying, setReplying] = useState(false);
-  const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<null | "ack" | "reply" | "dismiss" | "delete">(null);
   const [deleteArmed, setDeleteArmed] = useArmed(r.state);
   const tone = TONE[r.level];
@@ -73,24 +72,16 @@ function Card({ record: r, sessionId }: { record: OwnerNotification; sessionId: 
   const card = notePresentation(r) === "card";
   const button = card ? CARD_BUTTON : ROW_BUTTON;
 
-  const act = async (action: "ack" | "reply" | "dismiss" | "delete", text?: string) => {
+  const act = async (action: "ack" | "dismiss" | "delete") => {
     setBusy(action);
     try {
-      const result = await ownerNotifyAct(r, action, text);
+      const result = await ownerNotifyAct(r, action);
       if (!result.ok) notify(result.error.code === "notification_closed" ? t("ownerNotify.closedMeanwhile") : result.error.message || result.error.code, "error");
-      else if (action === "reply") {
-        setReplying(false);
-        setDraft("");
-      }
     } catch (e) {
       notify(e instanceof Error ? e.message : String(e), "error");
     } finally {
       setBusy(null);
     }
-  };
-  const send = () => {
-    const text = draft.trim();
-    if (text && !busy) void act("reply", text);
   };
 
   const note = r.muted
@@ -104,10 +95,11 @@ function Card({ record: r, sessionId }: { record: OwnerNotification; sessionId: 
       data-owner-note={r.notificationId}
       data-origin={system ? "system" : "agent"}
       data-note-look={card ? "card" : "row"}
+      tabIndex={-1}
       className={
         card
-          ? `my-3 rounded-xl border px-3.5 py-2.5 transition-colors ${deleteArmed ? ARMED_FRAME : tone.frame}`
-          : `group/note relative my-2 border-l-2 py-0.5 pl-3 transition-colors ${deleteArmed ? `rounded-r-lg pr-2 ${ARMED_FRAME}` : "border-border"}`
+          ? `my-3 rounded-xl border outline-none px-3.5 py-2.5 transition-colors ${deleteArmed ? ARMED_FRAME : tone.frame}`
+          : `group/note relative my-2 outline-none border-l-2 py-0.5 pl-3 transition-colors ${deleteArmed ? `rounded-r-lg pr-2 ${ARMED_FRAME}` : "border-border"}`
       }
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
@@ -169,30 +161,7 @@ function Card({ record: r, sessionId }: { record: OwnerNotification; sessionId: 
       )}
       {replyable && replying && (
         <div className="mt-2">
-          <textarea
-            autoFocus
-            value={draft}
-            maxLength={OWNER_REPLY_MAX}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                send();
-              } else if (e.key === "Escape") setReplying(false);
-            }}
-            placeholder={t("ownerNotify.replyPlaceholder")}
-            rows={3}
-            className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-          <div className="mt-1 flex items-center justify-end gap-2">
-            <span className="mr-auto text-[11px] text-subtle">{t("ownerNotify.replyHint")}</span>
-            <button onClick={() => setReplying(false)} className="rounded-lg px-3 py-1 text-sm text-muted hover:bg-surface-2 hover:text-foreground">
-              {t("ownerNotify.cancel")}
-            </button>
-            <button onClick={send} disabled={!draft.trim() || !!busy} className="rounded-lg bg-accent px-3 py-1 text-sm text-white disabled:opacity-40">
-              {busy === "reply" ? t("ownerNotify.sending") : t("ownerNotify.send")}
-            </button>
-          </div>
+          <OwnerReplyBox record={r} onClose={() => setReplying(false)} onBusy={(b) => setBusy(b ? "reply" : null)} />
         </div>
       )}
       {deleteArmed ? (
@@ -228,7 +197,7 @@ function Card({ record: r, sessionId }: { record: OwnerNotification; sessionId: 
             </button>
           )}
           {replyable && !replying && (
-            <button onClick={() => setReplying(true)} disabled={!!busy} className={button}>
+            <button data-note-reply="" onClick={() => setReplying(true)} disabled={!!busy} className={button}>
               <MessageSquareReply size={13} />
               {t("ownerNotify.reply")}
             </button>

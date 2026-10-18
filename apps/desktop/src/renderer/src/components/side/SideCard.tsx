@@ -1,5 +1,6 @@
 // One right-side card (docs/desktop-modules.md §18.4): header (category icon = the card's handle,
-// a tab row only when it holds several instances of its kind, the component's Actions, ⤢ ⛶ ⋯ on
+// a tab row only when it holds several instances of its kind — or always, with a ＋ after the last
+// tab, for a `tabRow: "always"` kind (the browser) — the component's Actions, ⤢ ⛶ ⋯ on
 // hover, ▾ only when the page has more than one card, ×) and a placeholder body. The instance itself
 // renders in the instance layer (SideInstanceLayer) aligned to the placeholder, so moving, maximising
 // or going full screen never remounts it.
@@ -7,7 +8,7 @@
 // single-instance card = that one instance. The header is a drop target (above / below, or a tab
 // joining a card of its kind).
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ChevronDown, Expand, Maximize2, Minimize2, MoreHorizontal, Shrink, X } from "lucide-react";
+import { ChevronDown, Expand, Maximize2, Minimize2, MoreHorizontal, Plus, Shrink, X } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { contextMenu, openMenuFrom } from "../../lib/contextMenu";
 import { ARMED_BUTTON, useArmed } from "../../lib/armedConfirm";
@@ -16,7 +17,7 @@ import { useSideBodyProps } from "../../lib/sideBody";
 import type { SideComponentEntry } from "../../lib/sideComponents";
 import { activateTab, pinInstance, setCollapsed, type SideCard as Card, type SideInstance, type SidePage } from "../../lib/sideLayout";
 import { setFocusedCard, updateLayout, useSide } from "../../lib/sideLayoutStore";
-import { cardMenu, tabMenu } from "../../lib/sideMenus";
+import { cardMenu, cardNewTabParams, newTabInCard, tabMenu } from "../../lib/sideMenus";
 import { closeWarnings } from "../../lib/sideServices";
 import { registerSideSlot } from "../../lib/sideSlots";
 import { useSideWidthHandle } from "../../lib/sideResize";
@@ -163,6 +164,9 @@ export function SideCardView({
     return () => clearTimeout(timer);
   }, [flash]);
 
+  // Browser-style header: the tab row even with one tab, and a ＋ (a new tab of this card).
+  const alwaysTabs = entry.item.tabRow === "always" && tabs.length > 0;
+  const canNewTab = alwaysTabs && cardNewTabParams(entry.item) !== null;
   const transient = (id: string) => !!entry.item.transient && !instances[id]?.pinned;
   const label = (id: string) => tabInfo[id]?.title || title;
   const modeButton = (kind: "maximised" | "fullscreen") => {
@@ -201,11 +205,18 @@ export function SideCardView({
           <Icon size={15} />
         </button>
         {/* Tab strip: no bar at all (not even an overlay thumb over the tabs); wheel / touchpad scroll it. */}
-        {tabs.length > 1 ? (
-          <div role="tablist" data-native-scrollbar className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
-            {tabs.map((id) => (
-              <Tab key={id} id={id} active={id === shown} title={label(id)} transient={transient(id)} info={tabInfo[id]} />
-            ))}
+        {tabs.length > 1 || alwaysTabs ? (
+          <div className="flex min-w-0 flex-1 items-center gap-0.5">
+            <div role="tablist" data-native-scrollbar className="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
+              {tabs.map((id) => (
+                <Tab key={id} id={id} active={id === shown} title={label(id)} transient={transient(id)} info={tabInfo[id]} />
+              ))}
+            </div>
+            {canNewTab && (
+              <button data-side-new-tab onClick={() => newTabInCard(card.id)} title={t("side.newTab")} aria-label={t("side.newTab")} className={ICON_BTN}>
+                <Plus size={13} />
+              </button>
+            )}
           </div>
         ) : (
           <div

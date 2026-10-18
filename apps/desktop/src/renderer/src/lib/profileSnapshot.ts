@@ -9,6 +9,7 @@ import { focusHostId } from "./hostKeys";
 import { onHostReset, onHostSwitch } from "./hostSwitch";
 import { noteCatalogNames, setProfileModelNames, setProfileNamesLoader } from "./modelDisplay";
 import { profileKind } from "./profileKind";
+import { noteProfileLooks, setProfileLooksApi, setProfileLooksLoader } from "./profileLooks";
 
 export interface ProfileSnapshot {
   detail: ProfileDetail;
@@ -58,6 +59,8 @@ export function cachedProfileList(hostId = focusHostId()): ProfileList | null {
 
 export function rememberProfileList(list: ProfileList | null, hostId = focusHostId()): void {
   lastLists.set(hostId, list);
+  // Avatars (colour, 头像主题) of every host's agents read their Profile from here (lib/profileLooks).
+  if (list) noteProfileLooks(hostId, list.profiles);
   // Per-entry model display names (lib/modelDisplay) come with every profile list (the focus host's).
   if (list && hostId === focusHostId()) setProfileModelNames(list.profiles);
   const names = new Set(list?.profiles.map((p) => keyOf(hostId, p.name)) ?? []);
@@ -80,6 +83,11 @@ export function loadProfileList(hostId = focusHostId()): Promise<ProfileList | n
 
 // The first model name shown loads the list (and with it the profiles' entry names).
 setProfileNamesLoader(() => void loadProfileList().catch(() => {}));
+// The first avatar of a host's agent loads that host's list (colour and 头像主题 of its Profile).
+setProfileLooksLoader((hostId) => void loadProfileList(hostId).catch(() => {}));
+// cutex `profile-avatar`: the looks stored on a host (pictures, intro portraits, 头像主题, greetings) are
+// read and written through that host's connection (lib/profileImages, lib/profileAvatar, lib/prefs).
+setProfileLooksApi((hostId) => daemonOf(hostId));
 
 /** Fetch detail + models (+ account / quota config by kind) in parallel; deduped per profile. */
 export function loadProfileSnapshot(item: ProfileItem, hostId = focusHostId()): Promise<ProfileSnapshot> {

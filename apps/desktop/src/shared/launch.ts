@@ -55,7 +55,13 @@ export interface LaunchOverrides {
   writableRoots?: string[];
   model?: string;
   reasoningEffort?: string;
+  /** Claude profiles, cutex `claude-launch-permission-mode`: the Claude Code mode the new agent starts in. */
+  claudePermissionMode?: ClaudeLaunchMode;
 }
+
+/** Claude Code permission modes a Claude agent can be created in (cutex `launch.claudePermissionMode`). */
+export const CLAUDE_LAUNCH_MODES = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"] as const;
+export type ClaudeLaunchMode = (typeof CLAUDE_LAUNCH_MODES)[number];
 
 /** PATCH /v2/settings `newThreadDefaults`: absent = unchanged, field null = built-in, kind null = reset kind. */
 export type NewThreadDefaultsPatch = Partial<Record<ThreadKind, { [K in LaunchField]?: LaunchPermissions[K] | null } | null>>;
@@ -84,6 +90,7 @@ export function sanitizeLaunch(raw: unknown): LaunchOverrides | null {
   }
   if (typeof x.model === "string" && visible(x.model)) out.model = x.model;
   if (typeof x.reasoningEffort === "string" && visible(x.reasoningEffort) && /^[A-Za-z0-9_-]+$/.test(x.reasoningEffort)) out.reasoningEffort = x.reasoningEffort;
+  if (typeof x.claudePermissionMode === "string" && (CLAUDE_LAUNCH_MODES as readonly string[]).includes(x.claudePermissionMode)) out.claudePermissionMode = x.claudePermissionMode as ClaudeLaunchMode;
   return Object.keys(out).length ? out : null;
 }
 

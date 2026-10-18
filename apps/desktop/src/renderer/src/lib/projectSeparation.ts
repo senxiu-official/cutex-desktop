@@ -2,35 +2,38 @@ import type { CSSProperties } from "react";
 import { projectColor } from "./sidebar";
 
 /**
- * How the sidebar sets one project's section (header + agents + 运行中 / 空闲 / 离线 rows) apart
- * (Settings → 侧栏 → 项目分隔):
- * - 标题行 (header): the header as a full-width band in the project colour, the rows below
+ * Where the sidebar uses a project's colour besides its icon (Settings → 左侧栏 → 项目颜色; owner
+ * 2026-10-18 merged 项目分隔 and 项目标题着色 into this one choice):
+ * - 标题色带 (header): the header as a full-width band in the project colour, the rows below
  *   untinted with a thin rail in the project colour down their left side;
- * - 图标引线 (iconLine): the same full-width header row without any tint, the icon set in from the
+ * - 图标下竖线 (iconLine): the same full-width header row without any tint, the icon set in from the
  *   edge, and the line in the project colour hanging straight down from under the icon (centred on
  *   it) beside the rows, which are indented past it;
- * - 背景色 (tint): a rounded block tinted with the project colour;
+ * - 整块底色 (tint): a rounded block tinted with the project colour;
  * - 左侧色条 (rail): a 2px rail in that colour on the block's left edge;
- * - 无 (none, default since the quiet pass 2026-10-14): a neutral header; the project colour stays
- *   only in the header's initial badge (components/ProjectIcon).
+ * - 只在图标 (none, default since the quiet pass 2026-10-14): a neutral header; the project colour
+ *   stays only in the header's initial badge (components/ProjectIcon).
  * The strengths are theme variables (`--project-band`, `--project-band-rail`, `--project-tint`,
  * `--project-tint-header` in styles.css), mixed with `color-mix(in oklab, …)`.
- * 独立智能体 / 工作 get the same treatment in a neutral colour (NEUTRAL_GROUP); 项目标题着色 off drops
- * the header tint only (图标引线 has none).
+ * 独立智能体 / 工作 get the same treatment in a neutral colour (NEUTRAL_GROUP).
  */
 export type ProjectSeparation = "header" | "iconLine" | "tint" | "rail" | "none";
-export const PROJECT_SEPARATIONS: readonly ProjectSeparation[] = ["header", "iconLine", "tint", "rail", "none"];
+/** In the settings' order: from the quietest to the strongest. */
+export const PROJECT_SEPARATIONS: readonly ProjectSeparation[] = ["none", "iconLine", "rail", "tint", "header"];
 export const DEFAULT_PROJECT_SEPARATION: ProjectSeparation = "none";
 /**
- * The default was "header" (a band in the project colour) before the quiet pass (owner 2026-10-14:
- * one accent, neutral surfaces). A stored "header" from then switches once to the new default
- * (projectSeparationRev, like runningAgentsRev); any other or later explicit choice is kept.
+ * Rev 1: the default was "header" (a band in the project colour) before the quiet pass (owner
+ * 2026-10-14: one accent, neutral surfaces); a stored "header" from then switches once to the new
+ * default. Rev 2 (2026-10-18): 项目标题着色 is gone; "header" with it off (`headerTint` false: an
+ * untinted header with the rail) looked like 图标下竖线 and becomes that. Any later choice is kept.
  */
-export const PROJECT_SEPARATION_REV = 1;
+export const PROJECT_SEPARATION_REV = 2;
 
-export function migrateProjectSeparation(value: unknown, rev?: unknown): ProjectSeparation {
+export function migrateProjectSeparation(value: unknown, rev?: unknown, headerTint?: unknown): ProjectSeparation {
   if (!(PROJECT_SEPARATIONS as readonly unknown[]).includes(value)) return DEFAULT_PROJECT_SEPARATION;
-  if (value === "header" && (typeof rev !== "number" || rev < PROJECT_SEPARATION_REV)) return DEFAULT_PROJECT_SEPARATION;
+  const old = typeof rev === "number" ? rev : 0;
+  if (value === "header" && old < 1) return DEFAULT_PROJECT_SEPARATION;
+  if (value === "header" && old < 2 && headerTint === false) return "iconLine";
   return value as ProjectSeparation;
 }
 
@@ -69,22 +72,18 @@ export function groupColor(color: string): string {
   return color === NEUTRAL_GROUP ? "var(--fg-muted)" : projectColor(color);
 }
 
-/**
- * The look of a group: `color` is a project's raw colour, NEUTRAL_GROUP, or null (no separation).
- * `headerTint` (项目标题着色) off: header bands keep their layout, icon and rail, without the tint.
- */
-export function projectBlockLook(separation: ProjectSeparation, color: string | null, headerTint = true): ProjectBlockLook {
+/** The look of a group: `color` is a project's raw colour, NEUTRAL_GROUP, or null (no separation). */
+export function projectBlockLook(separation: ProjectSeparation, color: string | null): ProjectBlockLook {
   if (color === null || separation === "none") return NO_BLOCK;
   const style = { "--project-color": groupColor(color) } as CSSProperties;
-  const plain = headerTint ? "" : " project-plain";
   switch (separation) {
     case "header":
       return {
         className: "",
-        headerClassName: `project-band${plain}`,
+        headerClassName: "project-band",
         metaClassName: "project-band-body project-band-meta",
         bodyClassName: "project-band-body project-band-rows",
-        rowClassName: `project-band project-band-row${plain}`,
+        rowClassName: "project-band project-band-row",
         gapClassName: "mb-1",
         foldedGapClassName: "",
         style,
@@ -103,10 +102,10 @@ export function projectBlockLook(separation: ProjectSeparation, color: string | 
     case "tint":
       return {
         className: "project-block project-block-tint",
-        headerClassName: `project-block-header${plain}`,
+        headerClassName: "project-block-header",
         metaClassName: "",
         bodyClassName: "pr-0.5 pl-4",
-        rowClassName: `mb-0.5 project-block project-block-tint project-block-row${plain}`,
+        rowClassName: "mb-0.5 project-block project-block-tint project-block-row",
         gapClassName: "mb-2",
         foldedGapClassName: "mb-0.5",
         style,

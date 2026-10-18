@@ -17,6 +17,10 @@ export const zhCN = {
   "subagents.working": "工作中",
   "subagents.none": "没有后台终端或{{subagent}}在运行",
   "subagents.thread": "{{subagent}}线程",
+  "subagents.claude.agent": "{{subagent}}",
+  "subagents.claude.open": "查看这个{{subagent}}的过程",
+  "subagents.claude.readOnly": "只读 · Claude 前台{{subagent}}的消息和工具调用（输出只保留摘要）",
+  "subagents.claude.truncated": "记录太长，后面的内容没有保存",
 } as const;
 
 // Adds these keys to MessageKey (modules/i18nCatalog.ts collects the dictionary itself).
@@ -44,4 +48,8 @@ export const en: Record<keyof typeof zhCN, string> = {
   "subagents.working": "working",
   "subagents.none": "No background terminals or {{subagents}} running",
   "subagents.thread": "{{Subagent}} thread",
+  "subagents.claude.agent": "{{Subagent}}",
+  "subagents.claude.open": "Open this {{subagent}}'s transcript",
+  "subagents.claude.readOnly": "Read-only · a Claude foreground {{subagent}}'s messages and tool calls (outputs as previews)",
+  "subagents.claude.truncated": "Long transcript: later entries were not kept",
 };

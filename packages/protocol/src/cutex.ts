@@ -61,6 +61,22 @@ export interface SessionRuntime {
   tuiAttached: boolean;
   lastEventAt: string | null;
   lastError: unknown;
+  /**
+   * Claude sessions (cutex `session-claude-runtime`): the pinned Claude runtime (`claude-r17`) and a
+   * repin waiting for the next fresh runtime start. Absent on other sessions and on older cutex.
+   */
+  claudeRuntime?: SessionClaudeRuntime;
+}
+
+export interface SessionClaudeRuntime {
+  release: string;
+  pendingRelease: string | null;
+}
+
+/** `GET /v2/sessions` `claudeRuntime` (cutex `session-claude-runtime`): the release for new Claude sessions. */
+export interface HostClaudeRuntime {
+  /** null: no usable Claude runtime installed. */
+  selectedRelease: string | null;
 }
 
 
@@ -107,6 +123,8 @@ export interface SessionList {
   contractVersion: 2;
   hostId: string;
   management: unknown;
+  /** cutex `session-claude-runtime`; absent on older cutex. */
+  claudeRuntime?: HostClaudeRuntime;
   sessions: SessionResource[];
 }
 

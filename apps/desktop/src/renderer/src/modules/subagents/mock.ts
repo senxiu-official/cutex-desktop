@@ -108,7 +108,38 @@ function staleChildThread(generation: number): unknown {
   };
 }
 
+// Sora's (Claude) foreground subagent: the adapter's stored transcript (subagent_transcripts.py),
+// answered for `claude:<session>:task:<id>` with `parentThreadId` = the agent's thread.
+const CLAUDE_SUB = "claude:mock-sora:task:task-docs";
+subThreads[CLAUDE_SUB] = {
+  thread: {
+    id: CLAUDE_SUB,
+    parentThreadId: "thread-sora",
+    agentNickname: "核对文档",
+    agentRole: "Explore",
+    status: { type: "idle" },
+    source: { subAgent: { thread_spawn: { parent_thread_id: "thread-sora", depth: 1, agent_nickname: "核对文档", agent_role: "Explore" } } },
+    transcriptTruncated: false,
+    turns: [
+      {
+        id: "subagent:toolu_docs_review",
+        status: "completed",
+        startedAt: now - 890,
+        completedAt: now - 842,
+        items: [
+          { type: "userMessage", id: "cs-u", content: [{ type: "text", text: "读 docs/DESKTOP_PARITY.md 和 timeline 的工具行代码，列出 dynamicToolCall 显示上还缺什么。只读。" }] },
+          { type: "reasoning", id: "cs-r", summary: ["先看文档里对 dynamicToolCall 的要求，再对照 PlainToolRow。"], content: [] },
+          { type: "commandExecution", id: "cs-c1", command: "Read docs/DESKTOP_PARITY.md", commandActions: [{ type: "read", command: "Read docs/DESKTOP_PARITY.md", name: "DESKTOP_PARITY.md", path: "docs/DESKTOP_PARITY.md" }], status: "completed", exitCode: 0, aggregatedOutput: "## What the desktop should change\n2. Render dynamicToolCall as namespace.tool …" },
+          { type: "commandExecution", id: "cs-c2", command: 'Grep "dynamicToolCall" in src/renderer', commandActions: [{ type: "search", command: 'Grep "dynamicToolCall"', query: "dynamicToolCall", path: "src/renderer" }], status: "completed", exitCode: 0, aggregatedOutput: "components/PlainToolRow.tsx:23\nlib/taskRows.ts:330" },
+          { type: "agentMessage", id: "cs-a", text: "缺两处：\n\n1. `dynamicToolCall` 没显示 namespace（应为 `claude.WebFetch`）；\n2. 失败时错误文本被截断。\n\n其余与 DESKTOP_PARITY 一致。" },
+        ],
+      },
+    ],
+  },
+};
+
 export const mock: ModuleMock = {
+  features: { new: ["claude-subagent-transcripts"] },
   thread: (sessionId) => (sessionId === STALE_PARENT ? staleParentThread() : null),
   api: (core) => ({
     async subAgentThread(sessionId, threadId, opts) {

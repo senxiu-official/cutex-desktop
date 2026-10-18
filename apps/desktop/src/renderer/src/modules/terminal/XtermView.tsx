@@ -7,7 +7,7 @@ import "@xterm/xterm/css/xterm.css";
 import { bridge } from "../../bridge";
 import { getAppearance, subscribeFontChanges, useAppearance } from "../../lib/appearance";
 import { noteFocused, showTerminal, terminalApi } from "./terminals";
-import { passThroughKey } from "./terminalState";
+import { isTerminalReply, passThroughKey } from "./terminalState";
 import { concat, decodeBase64, TERMINAL_MIN_CONTRAST, terminalTheme, watchTheme } from "./xtermTheme";
 
 export function XtermView({ hostId, terminalId, instanceId, visible, revealed }: { hostId: string; terminalId: string; instanceId: string; visible: boolean; revealed: number }) {
@@ -41,16 +41,31 @@ export function XtermView({ hostId, terminalId, instanceId, visible, revealed }:
     };
     paintViewport();
     const api = terminalApi(hostId);
+    // Replays in flight. Replayed scrollback can hold the shell's old terminal queries (cursor position,
+    // device attributes, colours); xterm answers them through onData, and those stale answers would reach
+    // the live shell as input (PSReadLine rings the bell on Windows). While a replay is parsed, xterm's
+    // replies are dropped; keystrokes still go through.
+    let replaying = 0;
     const offOut = bridge.on("terminalOutput", (e) => {
       if (e.terminalId !== terminalId || e.hostId !== hostId) return;
       // A replay starts over. ESC c (full reset) goes through the write queue, so output still queued
       // from an earlier stream is not drawn after it (term.reset() would run before that).
-      term.write(e.reset ? concat("\x1bc", decodeBase64(e.data)) : decodeBase64(e.data));
+      if (!e.reset) {
+        term.write(decodeBase64(e.data));
+        return;
+      }
+      replaying++;
+      term.write(concat("\x1bc", decodeBase64(e.data)), () => {
+        replaying--;
+      });
     });
     const offExit = bridge.on("terminalExit", (e) => {
       if (e.terminalId === terminalId && e.hostId === hostId) term.write(`\r\n\x1b[2m[exited${e.exitCode === null ? "" : ` ${e.exitCode}`}]\x1b[0m\r\n`);
     });
-    const input = term.onData((data) => void api.terminalInput(terminalId, data).catch(() => {}));
+    const input = term.onData((data) => {
+      if (replaying > 0 && isTerminalReply(data)) return;
+      void api.terminalInput(terminalId, data).catch(() => {});
+    });
     const onFocus = () => noteFocused(instanceId);
     term.textarea?.addEventListener("focus", onFocus);
     let timer: ReturnType<typeof setTimeout> | undefined;

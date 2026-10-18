@@ -31,6 +31,7 @@ import { STATUS_COMPONENT_PREFIX } from "./sideKinds";
 import { newInstanceKey, newInstanceOpts, PLAIN_OPEN, type OpenModifiers } from "./openModifiers";
 import { sideRegistry, sideViewNow, specFrom } from "./sideComponents";
 import {
+  activateTab,
   DEFAULT_ORDER,
   findCard,
   findPage,
@@ -121,6 +122,29 @@ export function launchable(): Launchable[] {
 /** Opens a launcher entry: into `pageId` (explicit page, beats overrides) or by the rules. */
 export function launch(kind: ItemId, params: Json, pageId: string | null): void {
   openSide(kind, params, { ...(pageId ? { page: pageId } : {}), focus: true, reveal: true });
+}
+
+/** The params a `tabRow: "always"` card's ＋ opens (§18.4), or null when it offers no ＋ now. */
+export function cardNewTabParams(item: SideComponentItem): Json | null {
+  const launcher = item.launcher;
+  if (item.tabRow !== "always" || item.instances !== "multi" || !launcher) return null;
+  return safeParams(launcher.newParams) ?? safeParams(() => launcher.params());
+}
+
+/** A `tabRow: "always"` card's ＋: a new instance of its kind as a tab of THIS card (same page, same binding as the
+ * tab it shows), shown and focused. The shown tab is touched first so placement's "most recently used card of the
+ * kind" is this one even when the page holds two cards of the kind. */
+export function newTabInCard(cardId: string): void {
+  const layout = useSide.getState().layout;
+  const at = findCard(layout, cardId);
+  const shown = at?.card.active ?? at?.card.tabs[0];
+  const inst = shown ? layout.instances[shown] : undefined;
+  const entry = inst ? sideRegistry().get(inst.kind) : undefined;
+  if (!at || !shown || !inst || !entry) return;
+  const params = cardNewTabParams(entry.item);
+  if (params === null) return;
+  updateLayout((l) => activateTab(l, shown, Date.now()));
+  openSide(inst.kind, params, { page: at.page.id, binding: inst.binding, focus: true, reveal: true });
 }
 
 /** The page a launcher works on: the page in view, or the one the closed column would show. */

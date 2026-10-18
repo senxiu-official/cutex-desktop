@@ -1,0 +1,153 @@
+# Builds the signed first-party module packs of this repository (apps/desktop/scripts/module-packs/
+# build.mjs: every module with a pack.json, or the ones named) and publishes them on the `modules-release`
+# GitHub release: the new archives, then modules.json (published entries kept, serial forward) and its
+# minisign signature (docs/desktop-modules.md §23.10). The desktop app checks this index only when the
+# owner opens Settings → Modules, and downloads a pack only when the owner chooses Download / Update.
+#
+# The build job has no secrets. The sign job runs only from the default branch, in the `release`
+# environment, with MINISIGN_SECRET_KEY / MINISIGN_PASSWORD (as sign-release.yml): the key is written to a
+# 0600 file under RUNNER_TEMP and deleted at the end; the passphrase reaches minisign on stdin only.
+# `modules-release` is never marked latest (the binary updater reads /releases/latest).
+#
+# dry_run (default): build, check the published index, sign and verify, print the upload commands.
+name: Module packs
+
+on:
+  workflow_dispatch:
+    inputs:
+      modules:
+        description: "Module ids to build, space separated (empty = every module with a pack.json)"
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: "Dry run: build, sign and check, print the upload commands, upload nothing"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: modules-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24
+      - name: Build the packs
+        env:
+          MODULES: ${{ inputs.modules }}
+        run: |
+          set -euo pipefail
+          export COREPACK_ENABLE_DOWNLOAD_PROMPT=0 npm_config_update_notifier=false
+          corepack pnpm install --frozen-lockfile
+          read -r -a ids <<< "$MODULES"
+          for id in "${ids[@]}"; do [[ "$id" =~ ^[a-z][a-z0-9-]*$ ]] || { echo "::error::bad module id $id"; exit 1; }; done
+          [ "${#ids[@]}" -gt 0 ] || ids=(--all)
+          node apps/desktop/scripts/module-packs/build.mjs "${ids[@]}" --out "$RUNNER_TEMP/packs"
+          (cd "$RUNNER_TEMP/packs" && sha256sum -- *.tar.gz *.pack.json | tee SHA256SUMS)
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: module-packs
+          path: ${{ runner.temp }}/packs/
+          if-no-files-found: error
+          retention-days: 14
+
+  sign:
+    needs: build
+    # Only the default branch's workflow (and so its script and public key) may use the key.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: module-packs
+          path: ${{ runner.temp }}/packs
+      - name: Install dependencies, minisign and check stdin passphrases
+        run: |
+          set -euo pipefail
+          (cd "$RUNNER_TEMP/packs" && sha256sum --check SHA256SUMS)
+          export COREPACK_ENABLE_DOWNLOAD_PROMPT=0 npm_config_update_notifier=false
+          corepack pnpm install --frozen-lockfile
+          sudo apt-get update -q
+          sudo apt-get install -y -q minisign
+          minisign -v
+          # A throwaway key with a password: this minisign must read the passphrase from stdin.
+          t="$RUNNER_TEMP/minisign-selftest"
+          mkdir -p "$t"
+          pw="selftest-$RANDOM$RANDOM$RANDOM"
+          printf '%s\n%s\n' "$pw" "$pw" | minisign -G -p "$t/t.pub" -s "$t/t.key" > /dev/null
+          echo selftest > "$t/f"
+          printf '%s\n' "$pw" | minisign -S -s "$t/t.key" -m "$t/f" > /dev/null
+          minisign -V -q -p "$t/t.pub" -m "$t/f"
+          rm -rf "$t"
+          [ -f .github/ci/modules-release.sh ] && [ -f .github/ci/cutex-release.pub ] || { echo "::error::missing .github/ci/modules-release.sh or cutex-release.pub"; exit 1; }
+      - name: Write the signing key
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$MINISIGN_SECRET_KEY" ] || { echo "::error::secret MINISIGN_SECRET_KEY is not set"; exit 1; }
+          umask 077
+          key="$RUNNER_TEMP/minisign-release.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          line=$(sed -n 2p "$key")
+          [ -n "$line" ] && echo "::add-mask::$line"
+          head -n 1 "$key" | grep -q '^untrusted comment: ' || { echo "::error::MINISIGN_SECRET_KEY is not a minisign key file"; exit 1; }
+      - name: Sign and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          args=(--packs "$RUNNER_TEMP/packs" --dir "$RUNNER_TEMP/modules" --key "$RUNNER_TEMP/minisign-release.key"
+            --password-env MINISIGN_PASSWORD --owner "${GITHUB_REPOSITORY%%/*}" --repo "${GITHUB_REPOSITORY#*/}")
+          [ "$DRY_RUN" = true ] || args+=(--upload)
+          bash .github/ci/modules-release.sh "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/modules.log"
+          {
+            if [ "$DRY_RUN" = true ]; then echo "### Dry run: nothing uploaded"; else echo "### Module packs published"; fi
+            echo '```'
+            tail -n 60 "$RUNNER_TEMP/modules.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the signed index
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: modules-release-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/modules.log
+            ${{ runner.temp }}/modules/out/modules.json
+            ${{ runner.temp }}/modules/out/modules.json.minisig
+            ${{ runner.temp }}/modules/out/SHA256SUMS
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Delete the signing key
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/minisign-release.key"

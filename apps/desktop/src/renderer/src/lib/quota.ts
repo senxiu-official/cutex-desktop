@@ -135,8 +135,15 @@ export function mergeGauges(base: QuotaGauge[], live: QuotaGauge[]): QuotaGauge[
   const out = [...base];
   for (const g of live) {
     const i = out.findIndex((x) => x.id === g.id);
-    if (i < 0) out.push(g);
-    else if ((g.observedAt ?? 0) > (out[i]!.observedAt ?? 0)) out[i] = g;
+    if (i >= 0) {
+      if ((g.observedAt ?? 0) > (out[i]!.observedAt ?? 0)) out[i] = g;
+      continue;
+    }
+    // A runtime's Codex-shaped 5h / 7d summary (gaugesFromRateLimits) is the same window as a cutex gauge
+    // with that caption (a Claude account's "Claude · 7d"): refresh that one instead of adding a second.
+    const same = g.id.startsWith("codex-") && g.kind === "window" && g.windowLabel ? out.findIndex((x) => x.kind === "window" && x.windowLabel === g.windowLabel) : -1;
+    if (same < 0) out.push(g);
+    else if ((g.observedAt ?? 0) > (out[same]!.observedAt ?? 0)) out[same] = { ...out[same]!, remainingPercent: g.remainingPercent, resetAt: g.resetAt ?? out[same]!.resetAt, observedAt: g.observedAt, stale: false };
   }
   return out;
 }

@@ -118,7 +118,8 @@ vi.mock("electron", () => ({
   nativeTheme: {},
   protocol: {
     registerSchemesAsPrivileged() {},
-    handle: (_scheme: string, respond: (request: Request) => Response) => { fake.respond = respond; }
+    // Plugin frame documents only; the module-pack scheme has its own tests (modulePacks*.test.ts).
+    handle: (scheme: string, respond: (request: Request) => Response) => { if (scheme === "cutex-plugin") fake.respond = respond; }
   },
   session: {
     defaultSession: {
@@ -128,7 +129,7 @@ vi.mock("electron", () => ({
         fake.proxies.push(config);
       },
       webRequest: {
-        onBeforeRequest: (_filter: unknown, listener: typeof fake.beforeRequest) => { fake.beforeRequest = listener; }
+        onBeforeRequest: (filter: { urls: string[] }, listener: typeof fake.beforeRequest) => { if (filter.urls.some((u) => u.startsWith("cutex-plugin:"))) fake.beforeRequest = listener; }
       }
     }
   },

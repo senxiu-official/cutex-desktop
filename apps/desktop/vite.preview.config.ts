@@ -6,6 +6,9 @@ import react from "@vitejs/plugin-react";
 import { randomUUID } from "node:crypto";
 import { buildOfflinePageDocument } from "@cutex-desktop/opaque-frame/page";
 import { defineConfig, type Plugin } from "vite";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 
 /**
  * Agent pages in the preview (dev/mockFrames.ts): main's one-use frame documents, played by this
@@ -59,9 +62,52 @@ function mockFrames(): Plugin {
   };
 }
 
+/**
+ * Module packs in the preview (dev/mockModulePacks.ts): `/__mock-pack/<id>/<version>/index.js` is the
+ * real pack of that module, built on first request with scripts/module-packs/build.mjs (the version in
+ * the URL is the mock's; the code is this checkout's). Same origin, so the page CSP's 'self' admits it.
+ */
+function mockModulePacks(): Plugin {
+  const built = new Map<string, Promise<Buffer>>();
+  return {
+    name: "mock-module-packs",
+    configureServer(server) {
+      server.middlewares.use("/__mock-pack", (req, res) => {
+        const m = /^\/([a-z][a-z0-9-]*)\/\d+\.\d+\.\d+\/index\.js$/.exec((req.url ?? "").split("?")[0]!);
+        if (req.method !== "GET" || !m) {
+          res.statusCode = 404;
+          res.end("not found");
+          return;
+        }
+        const id = m[1]!;
+        if (!built.has(id)) {
+          built.set(id, (async () => {
+            // A runtime import (not bundled into the config): the builder resolves the app from its own location.
+            const { buildPack } = (await import(/* @vite-ignore */ pathToFileURL(resolve(__dirname, "scripts/module-packs/build.mjs")).href)) as typeof import("./scripts/module-packs/build.mjs");
+            const { files } = await buildPack(id, mkdtempSync(resolve(tmpdir(), "cutex-preview-pack-")), { logLevel: "warn" });
+            return files.find((f) => f.path === "index.js")!.data;
+          })());
+        }
+        built.get(id)!.then(
+          (js) => {
+            res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+            res.setHeader("Cache-Control", "no-store");
+            res.end(js);
+          },
+          (error: unknown) => {
+            built.delete(id);
+            res.statusCode = 404;
+            res.end(String(error));
+          },
+        );
+      });
+    },
+  };
+}
+
 export default defineConfig({
   root: resolve(__dirname, "src/renderer"),
-  plugins: [react(), tailwindcss(), mockFrames()],
+  plugins: [react(), tailwindcss(), mockFrames(), mockModulePacks()],
   resolve: { alias: { "@": resolve(__dirname, "src/renderer/src") } },
   // Polling: the native Windows watcher kept missing edits made by tools (stale modules served).
   server: { port: 5199, strictPort: true, host: "127.0.0.1", watch: { usePolling: true, interval: 300 } },

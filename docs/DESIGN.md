@@ -886,8 +886,18 @@ order) is [`docs/desktop-modules.md`](desktop-modules.md).
   off; no per-domain rules, no "trust the LAN" setting. Refusals carry one of six owner-facing
   reasons (`browser-refusal-reasons` on the host passes them to agents). Co-control: owner clicks /
   scrolling / reading never pause the agent; owner input expires the agent's element refs; agent
-  writes wait out owner typing (1.2 s); reads run while hidden, writes need the tab visible; Pause /
-  Resume are explicit, one click. New windows become app tabs in the opener's pool after an owner
+  writes wait out owner typing (1.2 s); Pause / Resume are explicit, one click. Visibility per tab
+  kind (2026-10-18, owner option C): an owner tab granted to an agent runs reads while hidden but
+  writes only while visible (co-control capture checks unchanged); an agent-opened tab (agent pool)
+  runs in the **background carrier** by default: main's never-shown offscreen BrowserWindow in the
+  same `persist:browser-agent-<hostId>` session with exactly the webview hardening (no preload / Node,
+  sandbox, same session policy, popup / WebRTC / navigation guards, N2 credentials only for that exact
+  guest), its own CDP input (no app focus, isolated from owner typing) and a dialog guard that
+  dismisses JS dialogs while no agent binding holds the debugger. The side card shows a 1 fps
+  thumbnail and Bring to front; front = the normal webview path, Send to background returns it. A
+  hand-over drains the in-flight action first (new ones answer `busy`), reloads the exact URL and
+  keeps the lease and its paused state (spike + risks:
+  `docs/research/browser-background-tabs-spike-20261018.md`). New windows become app tabs in the opener's pool after an owner
   gesture (main redeems the exact URL + POST body once); a tab the leased agent's own click opened
   is granted to it under the opener lease (`browser-popup-grant`). Downloads always go through a
   save dialog (owner gesture, or the active agent's own action with the window visible). Site

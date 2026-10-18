@@ -93,10 +93,48 @@ export function countKey(key: string, vars: Record<string, string | number> | un
   return catalog?.[key] === undefined && fallback[one] !== undefined ? one : key;
 }
 
+// Messages of loaded signed module packs (docs/desktop-modules.md §23.6), per module id. A pack's text
+// wins over the bundled catalog for its own keys: pack (locale) → app catalog (locale) → pack (en) → app en.
+const packMessages = new Map<string, Partial<Record<Locale, Readonly<Record<string, string>>>>>();
+let packOverlay: Partial<Record<Locale, Record<string, string>>> = {};
+
+function rebuildPackOverlay(): void {
+  const next: Partial<Record<Locale, Record<string, string>>> = {};
+  for (const byLocale of packMessages.values()) {
+    for (const [locale, entries] of Object.entries(byLocale) as [Locale, Record<string, string>][]) Object.assign((next[locale] ??= {}), entries);
+  }
+  packOverlay = next;
+}
+
+/**
+ * Registers a loaded pack's messages (replacing earlier ones of that module). Only keys of the module's
+ * own prefix (`<moduleId>.`) and known locales are taken; anything else is refused with an error.
+ */
+export function registerModuleMessages(moduleId: string, messages: Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined): void {
+  const byLocale: Partial<Record<Locale, Record<string, string>>> = {};
+  for (const [locale, entries] of Object.entries(messages ?? {})) {
+    if (!isAppLocale(locale)) throw new Error(`pack ${moduleId}: unknown locale ${locale}`);
+    if (!entries || typeof entries !== "object" || Array.isArray(entries)) throw new Error(`pack ${moduleId}: bad messages for ${locale}`);
+    const out: Record<string, string> = {};
+    for (const [key, text] of Object.entries(entries)) {
+      if (!key.startsWith(`${moduleId}.`) || typeof text !== "string") throw new Error(`pack ${moduleId}: message ${key} is not its own`);
+      out[key] = text;
+    }
+    byLocale[locale] = out;
+  }
+  packMessages.set(moduleId, byLocale);
+  rebuildPackOverlay();
+}
+
+export function unregisterModuleMessages(moduleId: string): void {
+  if (packMessages.delete(moduleId)) rebuildPackOverlay();
+}
+
 /** One message: catalog lookup (en fallback), display terms (lib/terms `{{agent}}` …), then `{var}`s. */
 function format(locale: Locale, terms: TermSet, key: MessageKey, vars?: Record<string, string | number>): string {
+  // (Counted `.one` variants are looked up in the app catalogs only.)
   key = countKey(key, vars, catalogs[locale], en) as MessageKey;
-  const template = applyTerms(catalogs[locale]?.[key] ?? en[key] ?? key, terms, locale);
+  const template = applyTerms(packOverlay[locale]?.[key] ?? catalogs[locale]?.[key] ?? packOverlay.en?.[key] ?? en[key] ?? key, terms, locale);
   return vars ? template.replace(/\{(\w+)\}/g, (_, name: string) => String(vars[name] ?? `{${name}}`)) : template;
 }
 

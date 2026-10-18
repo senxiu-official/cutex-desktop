@@ -4,7 +4,8 @@
 // takes the requests (slash commands, chips) for it: `reveal` picks the surface (the capsule when it
 // alone shows the item, else the Bar's own panel). Items with `barSide: "start"` grow on the left,
 // the rest sit on the right. Each panel floats up over the timeline, positioned against this row.
-// Always mounted (an empty row has no height).
+// Always mounted (an empty row has no height). The open agent's pending owner notices
+// (components/PendingOwnerNotes) lead the start side.
 import { useI18n } from "../i18n";
 import { ItemBoundary } from "../modules/Outlet";
 import type { RevealIntent } from "../modules/slots";
@@ -12,6 +13,7 @@ import { shownOn, type PlacedStatus } from "../lib/statusItems";
 import { revealStatusItem, useStatusItems } from "../lib/statusItemsView";
 import { legacyHome } from "../lib/statusSurfaces";
 import { agentHost, useApp } from "../store";
+import { PendingOwnerNotes } from "./PendingOwnerNotes";
 
 function BarPart({ sessionId, hostId, placed }: { sessionId: string; hostId: string; placed: PlacedStatus }) {
   const { t } = useI18n();
@@ -41,7 +43,11 @@ export function StatusBar({ sessionId }: { sessionId: string }) {
       .map((p) => <BarPart key={p.item.id} sessionId={sessionId} hostId={hostId} placed={p} />);
   return (
     <div className="side-col side-col-composer relative flex w-full items-center gap-4 px-6">
-      <div className="flex min-w-0 flex-1 items-center gap-4">{side("start")}</div>
+      <div className="flex min-w-0 flex-1 items-center gap-4">
+        {/* The open agent's notices waiting for the owner (等你回复 / 需要你): first, before the items. */}
+        <PendingOwnerNotes sessionId={sessionId} hostId={hostId} />
+        {side("start")}
+      </div>
       <div className="ml-auto flex shrink-0 items-center gap-4">{side("end")}</div>
     </div>
   );

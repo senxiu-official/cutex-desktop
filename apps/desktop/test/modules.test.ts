@@ -139,18 +139,20 @@ describe("module registry", () => {
     expect(current.host.snapshot("timeline.received").map((e) => e.item.id)).toEqual(["task-service.received", "conversation.delegationAsk", "conversation.delegationResults"]);
     // v1.7: the artifact publish card (order 150) needs cutex `artifacts` (a new feature).
     // claude-safety-grants (a new feature): the owner's decision under a declined tool row (order 400).
-    expect(current.host.snapshot("timeline.tool").map((e) => e.item.id)).toEqual(["delegations.tool", "browser.tool", "artifacts.tool", "task-service.tool", "conversation.agentTools", "subagents.tool", "safety-grants.tool"]);
+    // owner-approvals (a new feature): the approval line under a cutex call that answered approval_required (order 350).
+    expect(current.host.snapshot("timeline.tool").map((e) => e.item.id)).toEqual(["delegations.tool", "browser.tool", "artifacts.tool", "task-service.tool", "conversation.agentTools", "subagents.tool", "subagents.claudeAgent", "approvals.tool", "safety-grants.tool"]);
     for (const features of [[...MOCK_REMOTE, ...MOCK_BASE_FEATURES], null]) {
       const { host } = await gated(features);
       // Delegation ASK / results render by schema regardless of agent-asks (baseline, O6).
       expect(host.snapshot("timeline.received").map((e) => e.item.id)).toEqual(["task-service.received", "conversation.delegationAsk", "conversation.delegationResults"]);
-      expect(host.snapshot("timeline.tool").map((e) => e.item.id)).toEqual(["browser.tool", "task-service.tool", "conversation.agentTools", "subagents.tool"]);
+      expect(host.snapshot("timeline.tool").map((e) => e.item.id)).toEqual(["browser.tool", "task-service.tool", "conversation.agentTools", "subagents.tool", "subagents.claudeAgent"]);
     }
     await current.host.setEnabled("delegations", false);
     await current.host.setEnabled("task-service", false);
     await current.host.setEnabled("subagents", false);
     await current.host.setEnabled("artifacts", false);
     await current.host.setEnabled("safety-grants", false);
+    await current.host.setEnabled("approvals", false);
     expect(current.host.snapshot("timeline.received").map((e) => e.item.id)).toEqual(["conversation.delegationAsk", "conversation.delegationResults"]);
     // The core (required) cutex agent-tool line stays: the baseline formatted these rows unconditionally.
     await current.host.setEnabled("browser", false);
@@ -202,6 +204,14 @@ describe("module registry", () => {
     for (const item of lines) expect(toolRendererFor(item, tools)?.item.id, item.tool).toBe("conversation.agentTools");
     expect(toolRendererFor(delegate, tools)?.item).toMatchObject({ id: "delegations.tool" });
     expect(toolRendererFor(delegate, tools)?.item.standalone?.(delegate)).toBe(true);
+    // A8 result shapes (owner report 2026-10-18): a reviewed delegation carries an approval id but
+    // no approval_required: the delegation card keeps it, the approvals line does not claim it.
+    const reviewed = { ...call("agent_delegate", { target: "test1018-claude", text: "Review" }), result: { content: [], structuredContent: { approval_id: "apr-0123abcd", delegation: "delegation-e0eee0", detail: "test1018-claude can do more than you, so the owner reviews each delegation to it before it runs (this one included). Nothing to do now: continue or end your turn.", ok: true, state: "pendingReview", target: "test1018-claude" } } };
+    const queued = { ...call("agent_delegate", { target: "Kimi", text: "Review" }), result: { content: [], structuredContent: { ok: true, created: true, delegation: "delegation-1a2b3c", state: "queued" } } };
+    for (const item of [reviewed, queued]) {
+      expect(toolRendererFor(item, tools)?.item.id).toBe("delegations.tool");
+      expect(toolRendererFor(item, tools)?.item.standalone?.(item)).toBe(true);
+    }
   });
 
   it("the core modules are locked", () => {
@@ -377,7 +387,7 @@ describe("module import boundaries", () => {
         .snapshot("side.component")
         .map((e) => `${e.item.id} (${e.mode})`)
         .sort(),
-    ).toEqual(["artifacts.library (show)", "artifacts.view (show)", "bookmarks.list (show)", "browser.tab (show)", "conversation.turnPeek (show)", "delegations.detail (show)", "diff.view (show)", "notes.list (show)", "notes.note (show)", "side-chat.chat (show)", "subagents.thread (show)", "terminal.pty (show)", "workspace.changes (show)", "workspace.files (show)", "workspace.preview (show)"]);
+    ).toEqual(["artifacts.library (show)", "artifacts.view (show)", "bookmarks.list (show)", "browser.tab (show)", "conversation.agent (show)", "conversation.turnPeek (show)", "delegations.detail (show)", "diff.view (show)", "notes.list (show)", "notes.note (show)", "side-chat.chat (show)", "subagents.thread (show)", "terminal.pty (show)", "workspace.changes (show)", "workspace.files (show)", "workspace.preview (show)"]);
     // A referable component (toRef) needs an id refs accept as a kind (lowercase, §19.6).
     const referable = host.snapshot("side.component").filter((e) => e.item.toRef);
     expect(referable.length).toBeGreaterThan(0);
@@ -413,15 +423,17 @@ describe("module gating snapshot (mock featureLists)", () => {
   const ALL_PAGES = [
     "shell.general",
     "shell.appearance",
-    "conversation.settings",
     "shell.sidebar",
-    "shell.sides",
+    "conversation.settings",
+    "shell.composer",
     "shell.status",
+    "shell.sides",
     "notifications.settings",
     "shell.me",
     "connection.hosts",
     "shell.users",
     "remote-access.page",
+    "proxy.page",
     "peers.page",
     "agent-config.profiles",
     "agent-config.defaults",
@@ -519,14 +531,14 @@ describe("module gating snapshot (mock featureLists)", () => {
     // 更新与诊断 on 通用; the capsule's own settings on 状态显示 (v1.2); 远程访问's three sections; Claude 账户 after the
     // Profile list (claude-accounts); on 协作 轮换主管 (owner-rotation), 服务 (services-persistent-approval), 消息投递
     // and the 高级 card (消息总线 + 卡住的消息 with agent-bus-stuck-messages) last — page order is by `order`.
-    expect(sections).toEqual(["notes.settings", "side-chat.settings", "artifacts.settings", "bookmarks.settings", "status-capsule.settings", "owner-notify.settings", "users.manage", "remote-access.listen", "remote-access.cors", "remote-access.pairing", "claude-accounts.accounts", "projects.rotation.settings", "services.persistApproval.settings", "agent-bus.delivery", "agent-bus.advanced", "runtime-packages.settings", "runtimes.installed", "about.links", "about.knownIssues"]);
+    expect(sections).toEqual(["notes.settings", "side-chat.settings", "status-capsule.settings", "bookmarks.settings", "artifacts.settings", "owner-notify.settings", "users.manage", "remote-access.listen", "remote-access.cors", "remote-access.pairing", "proxy.update", "proxy.host", "claude-accounts.accounts", "projects.rotation.settings", "services.persistApproval.settings", "agent-bus.delivery", "agent-bus.advanced", "runtime-packages.settings", "runtimes.installed", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual([...BASE_STATUS, "delegations.status", "jobs.status", "alarms.status"]);
   });
 
   it("?legacy: same pages but 跨主机; owner-notify / runtime packages / CORS hidden; listen + pairing + installed runtimes say 需要升级; no 委托 / 作业", async () => {
     const { host, pages, sections, status } = await gated([...MOCK_REMOTE, ...MOCK_BASE_FEATURES]);
     expect(pages).toEqual(BASE_PAGES);
-    expect(sections).toEqual(["bookmarks.settings", "status-capsule.settings", "remote-access.listen (notice: listen-settings)", "remote-access.pairing (notice: device-pairing)", "agent-bus.delivery", "agent-bus.advanced", "runtimes.installed (notice: runtimes-view)", "about.links", "about.knownIssues"]);
+    expect(sections).toEqual(["status-capsule.settings", "bookmarks.settings", "remote-access.listen (notice: listen-settings)", "remote-access.pairing (notice: device-pairing)", "proxy.update", "proxy.host (notice: proxy-modes)", "agent-bus.delivery", "agent-bus.advanced", "runtimes.installed (notice: runtimes-view)", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual(BASE_STATUS);
     expect(host.statuses().get("owner-notify")!.state).toEqual({ kind: "unavailable", missing: { capabilities: ["owner-messages"], modules: [], hostKind: false, waiting: false } });
     expect(host.statuses().get("runtime-packages")!.state.kind).toBe("unavailable");
@@ -538,7 +550,7 @@ describe("module gating snapshot (mock featureLists)", () => {
   it("before capabilities load: capability modules wait, notices are flagged waiting", async () => {
     const { host, pages, sections, status } = await gated(null);
     expect(pages).toEqual(BASE_PAGES);
-    expect(sections).toEqual(["bookmarks.settings", "status-capsule.settings", "remote-access.listen (notice, waiting: listen-settings)", "remote-access.pairing (notice, waiting: device-pairing)", "agent-bus.delivery", "agent-bus.advanced", "runtimes.installed (notice, waiting: runtimes-view)", "about.links", "about.knownIssues"]);
+    expect(sections).toEqual(["status-capsule.settings", "bookmarks.settings", "remote-access.listen (notice, waiting: listen-settings)", "remote-access.pairing (notice, waiting: device-pairing)", "proxy.update", "proxy.host (notice, waiting: proxy-modes)", "agent-bus.delivery", "agent-bus.advanced", "runtimes.installed (notice, waiting: runtimes-view)", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual(BASE_STATUS);
     expect(host.statuses().get("owner-notify")!.state).toMatchObject({ kind: "unavailable", missing: { waiting: true } });
   });

@@ -413,15 +413,16 @@ describe("switching the focus between connected hosts", () => {
     expect(Object.keys(notes.useOwnerNotify.getState().byId)).toEqual(["ntf-t1"]);
     await settle();
     s = store.getState();
-    // local apr-1 + workstation apr-t1 + workstation note; the waiting request now shows as the focus host's
-    // timeline (none open here), so it no longer counts from the host feed.
-    expect(shell.appAttention()).toBe(3);
+    // local apr-1 + workstation apr-t1 + workstation note + the waiting request: taken over with the focus,
+    // it still counts from the host feed although no timeline of it is open here (r244 issue 3).
+    expect(store.getState().hostWaiting).toEqual({ w1: ["item/commandExecution/requestApproval"] });
+    expect(shell.appAttention()).toBe(4);
     // The old focus keeps notifying, now with its name.
     transport.host("local", cutex("cutex.host", "cutex/approvals/changed", { reason: "requested", approval: approval("apr-2", "a1") }));
     expect(store.getState().byHost.local!.approvals?.map((a) => a.approvalId).sort()).toEqual(["apr-1", "apr-2"]);
     expect(occurrences.at(-1)).toMatchObject({ key: "approval:apr-2", hostId: "local" });
     expect(occurrences.at(-1)!.title.startsWith("HOST-A · ")).toBe(true);
-    expect(shell.appAttention()).toBe(4);
+    expect(shell.appAttention()).toBe(5);
     // And back: local is taken over again with what it gathered meanwhile; workstation' still pending
     // request (followed on its feed all along) counts again from the host feed.
     transport.hosts("local");

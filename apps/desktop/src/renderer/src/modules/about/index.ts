@@ -1,8 +1,9 @@
-// About: the license, project links and the known issues list on the shell's Settings → 关于 page
-// (`settings.section` items; the page itself — versions, third-party licenses — stays the shell's).
-// Static data only, no daemon calls; required so the known issues are always reachable.
+// About: the known issues list, this desktop's changelog (更新记录, bundled from CHANGELOG.md) and the
+// project card (repositories + star, install guide, license, third-party notices) on the shell's
+// Settings → 关于 page (`settings.section` items; the version card on top stays the shell's). Static data
+// only, no daemon calls; required so the known issues and the changelog are always reachable.
 import { defineModule } from "../slots";
-import { AboutLinksSection, KnownIssuesSection } from "./AboutSections";
+import { AboutLinksSection, ChangelogSection, KnownIssuesSection } from "./AboutSections";
 
 export default defineModule({
   id: "about",
@@ -11,8 +12,9 @@ export default defineModule({
   required: true,
   contributes: {
     "settings.section": [
-      { id: "about.links", page: "about", order: 100, titleKey: "about.links.section", keywords: ["about.license", "about.links", "about.link.changelog", "about.link.install"], Section: AboutLinksSection },
-      { id: "about.knownIssues", page: "about", order: 200, titleKey: "about.knownIssues", keywords: ["about.link.knownIssues"], Section: KnownIssuesSection },
+      { id: "about.knownIssues", page: "about", order: 100, titleKey: "about.knownIssues", keywords: ["about.link.knownIssues"], Section: KnownIssuesSection },
+      { id: "about.changelog", page: "about", order: 200, titleKey: "about.changelog", keywords: ["about.link.changelog", "about.changelog.keywords"], Section: ChangelogSection },
+      { id: "about.links", page: "about", order: 300, titleKey: "about.links.section", keywords: ["about.license", "about.source", "about.star", "about.link.install", "about.thirdParty"], Section: AboutLinksSection },
     ],
   },
 });

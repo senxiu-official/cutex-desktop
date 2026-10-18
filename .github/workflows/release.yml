@@ -3,9 +3,10 @@
 # workflow_dispatch: (re)create or update the release of an existing tag by hand (a tag push does not
 # always start a workflow, e.g. when the tag arrives in the same push as the workflow file).
 #
-# Repositories whose binaries are attached later (they have .github/workflows/build-binaries.yml; the
-# owner signs and uploads offline with sign-and-upload.sh) get a DRAFT release: an asset-less published
-# release would become /releases/latest, hide the older ones and make the desktop updater offer nothing.
+# Repositories whose binaries are attached later (they have .github/workflows/build-binaries.yml; they
+# are signed and uploaded by sign-and-upload.sh, run by the Sign release workflow or offline) get a DRAFT
+# release: an asset-less published release would become /releases/latest, hide the older ones and make
+# the desktop updater offer nothing.
 # sign-and-upload.sh publishes the draft (and marks it latest) once every asset is uploaded and
 # verified. An existing release keeps its draft / published state; only title and notes are updated.
 name: Release

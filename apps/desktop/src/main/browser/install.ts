@@ -26,15 +26,16 @@ import { BrowserExternalPagesStore, createBrowserExternalPages } from "./externa
 import { BrowserLanTargets } from "./lanTargets";
 import { browserGuestKeyboardFocused, ensureBrowserVisible, restoreBrowserAppFocus } from "./visibility";
 import { BrowserRegistry, type BrowserGuestRecord } from "./registry";
-import { BrowserServiceSession, browserServiceError, parseBrowserServiceUrl, serviceDisplayUrl, type BrowserServiceTarget } from "./services";
+import { BrowserServiceSession, browserServiceError, parseBrowserServiceUrl, serviceDisplayUrl, subresourceReticketDue, type BrowserServiceTarget } from "./services";
 import { BrowserRelay, type RelayExecutionContext } from "./relay";
-import { BrowserRefusalError, BrowserRelayError, browserServiceRelayError, isBrowserRefusalCode, POPUP_GRANT_CAPABILITY, REFUSAL_REASONS_CAPABILITY, relayError, relayWireError, RELAY_CAPABILITY, type RelayCommand } from "./relayTypes";
+import { BrowserRefusalError, BrowserRelayError, browserServiceRelayError, isBrowserRefusalCode, POPUP_GRANT_CAPABILITY, REFUSAL_REASONS_CAPABILITY, SCROLL_OUTCOME_CAPABILITY, relayError, relayWireError, RELAY_CAPABILITY, type RelayCommand } from "./relayTypes";
 import { BrowserLeases } from "./leases";
 import { loadBrowserDeviceId } from "./device";
 import { createBrowserTabIdentity, browserTabIdentityStorage } from "./tabIdentity";
 import { createBrowserOwnerApi } from "./ownerApi";
 import { modelScreenshot } from "./modelOutput";
 import { BrowserClaimAudit, BrowserClaimCoordinator, BrowserClaimPolicyStore, BrowserClaimSessionAllows } from "./claims";
+import { createBrowserCarrier, guardBrowserCarrierDialogs, type BrowserCarrier, type BrowserCarrierDialogGuard } from "./carrier";
 
 type Reservation = BrowserAttachReservation & { guestId: string; epoch: string; tabKey: string; url: string; requestUrl: string; admitted: boolean; expires: number; actor: BrowserActor; post?: BrowserPopupPost; popupGrant?: PopupGrant };
 /** A popup main turned into an app tab: the exact URL (display URLs drop secrets) and form body,
@@ -45,7 +46,14 @@ type PopupGrant = { openerLeaseId: string; sessionId: string };
 /** An owner gesture (click / key in the tab, or an owner navigation) makes a download the owner's
  * for this long; Chromium may start it after a redirect chain. */
 const OWNER_DOWNLOAD_GESTURE_MS = 10_000;
-type TabData = { url: string; title: string; confirmedOpen?: string; sitePermission?: BrowserSitePermissionPromptView; documentEpoch?: number; favicon?: string; error?: string; service?: BrowserServiceSession; navigation: number; authRetries: number; dispose?: () => void };
+/**
+ * A carrier hand-over of one agent tab (background carrier <-> card webview). While it runs, agent
+ * actions answer busy; the action already running finished first (provider.drain). The exact page
+ * address stays here, in main. The lease survives: control is re-prepared on the new guest.
+ */
+type Handover = { to: "front" | "background"; url: string; leaseId?: string; settings?: BrowserControlSettings; paused: boolean; release(): void; timer?: ReturnType<typeof setTimeout> };
+const HANDOVER_TIMEOUT_MS = 15_000;
+type TabData = { url: string; title: string; confirmedOpen?: string; sitePermission?: BrowserSitePermissionPromptView; documentEpoch?: number; favicon?: string; error?: string; service?: BrowserServiceSession; navigation: number; authRetries: number; subresourceReticketAt?: number; dispose?: () => void };
 const AUTH_PATH = "/__cutex/auth";
 const SECRET = /(?:^|[-_])(?:access[-_]?token|refresh[-_]?token|id[-_]?token|token|auth|authorization|password|passwd|secret|signature|sig|jwt|bearer|otp|credential|api[-_]?key|key|code|ticket|session|sessionid)(?:$|[-_])/i;
 let previousWindow: (() => void) | undefined;
@@ -143,18 +151,44 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
   const tabIdentities = () => identities ??= createBrowserTabIdentity(browserTabIdentityStorage(app.getPath("userData")));
   let popupGuardInstalled = false;
   let disposed = false;
+  // Main's offscreen background carriers (agent tabs only), by guestId, and running hand-overs.
+  const carriers = new Map<string, BrowserCarrier>();
+  const handovers = new Map<string, Handover>();
+  const guestDisposers = new WeakMap<WebContents, () => void>();
+  // Each carrier's dialog guard (no native page dialog on the owner's desktop while unbound).
+  const dialogGuards = new WeakMap<WebContents, BrowserCarrierDialogGuard>();
+  const dialogGuard = (guestId: string) => { const guest = carriers.get(guestId)?.guest; return guest && dialogGuards.get(guest); };
+  /** The per-tab-kind gate: only main's own carrier of an agent-pool tab is operated off screen.
+   * Owner tabs (and owner tabs granted to an agent) keep the visible-only rule and capture layer. */
+  function isBackground(guestId: string): boolean {
+    const record = registry.get(guestId), carrier = carriers.get(guestId), guest = registry.getWebContents(guestId);
+    return !!record && record.pool === "agent" && record.partition === `persist:browser-agent-${record.hostId}` && !!carrier && !!guest && carrier.guest === guest && !guest.isDestroyed();
+  }
   let moduleEnabled = false;
   let lifecycle = 0;
   const registry = new BrowserRegistry<WebContents>({
-    onRevoke(record, _reason, guest) {
-      const oldLease = leases.forGuest(record.guestId); if (oldLease) adapters.delete(oldLease.leaseId);
-      leases.revokeGuest(record.guestId);
+    onRevoke(record, reason, guest) {
+      // A carrier hand-over keeps the tab's lease (same tab, same agent pool, same agent); every
+      // other detach ends it. Control on the old guest ends either way.
+      const replaced = reason === "replaced";
+      if (!replaced) {
+        const oldLease = leases.forGuest(record.guestId); if (oldLease) adapters.delete(oldLease.leaseId);
+        leases.revokeGuest(record.guestId);
+        const handover = handovers.get(record.guestId);
+        if (handover) { handovers.delete(record.guestId); if (handover.timer) clearTimeout(handover.timer); handover.release(); }
+      }
       provider.release(record.guestId);
       const tab = data.get(record.guestId);
-      if (tab) { tab.navigation++; tab.service?.dispose(); tab.service = undefined; tab.dispose?.(); tab.dispose = undefined; }
+      // Remove exactly the old guest's listeners (a hand-over may already have wired the new one).
+      const own = guest ? guestDisposers.get(guest as WebContents) : undefined, legacy = tab?.dispose;
+      if (guest) guestDisposers.delete(guest as WebContents);
+      if (tab) { tab.navigation++; tab.service?.dispose(); tab.service = undefined; if (!own || legacy === own) tab.dispose = undefined; }
+      (own ?? legacy)?.();
       if (guest && "debugger" in guest) { try { (guest as WebContents).debugger.detach(); } catch { /* Already detached. */ } }
       if (guest) popupInputs.get(guest)?.revoke();
-      for (const [key, value] of reservations) if (value.guestId === record.guestId) reservations.delete(key);
+      const carrier = carriers.get(record.guestId);
+      if (carrier && (!guest || carrier.guest === guest)) { carriers.delete(record.guestId); carrier.destroy(); }
+      if (!replaced) for (const [key, value] of reservations) if (value.guestId === record.guestId) reservations.delete(key);
     },
     onEvent(record) {
       // Retired host/partition connections are actively flushed even if another host
@@ -173,7 +207,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       return registry.getWebContents(guestId);
     },
     nextPageGeneration: guestId => registry.nextPageGeneration(guestId),
-    ensureVisible: (guestId, settings, operation) => ensureBrowserVisible({ window, guestId, hiddenTarget: settings.hiddenTarget, ...operation,
+    ensureVisible: (guestId, settings, operation) => isBackground(guestId) ? backgroundBounds(settings, operation) : ensureBrowserVisible({ window, guestId, hiddenTarget: settings.hiddenTarget, ...operation,
       reveal: () => {
         const record = registry.get(guestId);
         if (!record || !moduleEnabled || disposed || owner.isDestroyed() || provider.controlView(guestId)?.state !== "granted") return;
@@ -190,9 +224,20 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       return { url: prepared.target, cancel: prepared.cancel };
     },
     onChanged(guestId) { const record = registry.get(guestId); if (record) publish(record); },
-    keyboardFocused: guestId => browserGuestKeyboardFocused(window, guestId),
-    restoreFocus: guestId => restoreBrowserAppFocus(window, guestId),
+    // A background carrier is its own widget: CDP key input reaches only that page, never the
+    // app's composer, so it needs no app focus (and the app's focus is never touched).
+    keyboardFocused: guestId => isBackground(guestId) ? Promise.resolve(true) : browserGuestKeyboardFocused(window, guestId),
+    restoreFocus: guestId => isBackground(guestId) ? Promise.resolve() : restoreBrowserAppFocus(window, guestId),
+    isolated: guestId => isBackground(guestId),
+    beforeAttach: guestId => dialogGuard(guestId)?.yieldTo(),
+    afterDetach: guestId => { if (isBackground(guestId)) dialogGuard(guestId)?.resume(); },
   });
+  /** Off-screen viewport of a background carrier: the configured size, scale 1; nothing revealed. */
+  async function backgroundBounds(settings: BrowserControlSettings, operation?: { signal?: AbortSignal; deadline?: number }) {
+    if (operation?.signal?.aborted) throw new BrowserRelayError("cancelled");
+    if (operation?.deadline !== undefined && (!Number.isFinite(operation.deadline) || Date.now() >= operation.deadline)) throw new BrowserRelayError("deadline_exceeded");
+    return { width: settings.viewport.width, height: settings.viewport.height };
+  }
   const leases = new BrowserLeases({
     current(lease) {
       const record = registry.get(lease.target.guestId), relay = relays.get(lease.target.hostId);
@@ -221,7 +266,8 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       status: status ?? record.status, control: provider.controlView(record.guestId), pool: record.pool, lease: leaseView(record.guestId),
       ...(tab?.confirmedOpen ? { confirmedOpen: tab.confirmedOpen } : {}),
       ...(tab?.sitePermission ? { sitePermission: { ...tab.sitePermission, permissions: [...tab.sitePermission.permissions] } } : {}),
-      ...(tab?.error ? { error: tab.error } : {}), ...(tab?.favicon ? { favicon: tab.favicon } : {}) };
+      ...(tab?.error ? { error: tab.error } : {}), ...(tab?.favicon ? { favicon: tab.favicon } : {}),
+      ...(isBackground(record.guestId) ? { carrier: "background" as const } : {}), ...(handovers.has(record.guestId) ? { handover: true as const } : {}) };
   }
   function publish(record: BrowserGuestRecord, status?: BrowserTabView["status"], newTabUrl?: string): void {
     if (disposed || owner.isDestroyed()) return;
@@ -336,6 +382,8 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     const record = registry.get(lease.target.guestId);
     if (!record || record.status !== "attached") throw new BrowserRelayError("target_closed");
     if (command.operation.kind === "tab.release") { leases.revoke(lease.leaseId, "lease_revoked"); adapters.delete(lease.leaseId); return { kind: "tab.release" }; }
+    // The owner is moving this tab between background and front: nothing was dispatched; retry.
+    if (handovers.has(record.guestId)) throw new BrowserRelayError("busy");
     if (!command.operation.kind.startsWith("tab.")) throw new BrowserRelayError("unsupported_operation");
     if (provider.controlView(record.guestId)?.state === "paused") throw new BrowserRelayError("owner_paused");
     if (command.purpose === "owner-turn-shot") {
@@ -346,7 +394,9 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     let adapter = adapters.get(lease.leaseId);
     if (!adapter) {
       const leaseId = lease.leaseId;
-      adapter = createBrowserModelAdapter({ provider, decodeImage: bytes => nativeImage.createFromBuffer(bytes), tabs: () => {
+      const hostId = record.hostId;
+      adapter = createBrowserModelAdapter({ provider, decodeImage: bytes => nativeImage.createFromBuffer(bytes),
+        scrollOutcome: () => hostCapabilities.get(hostId)?.has(SCROLL_OUTCOME_CAPABILITY) === true, tabs: () => {
         const current = leases.forGuest(record.guestId), target = registry.get(record.guestId);
         if (!current || current.leaseId !== leaseId || current.state !== "active" || !target || target.status !== "attached") throw new BrowserRelayError("lease_revoked");
         return [publicSummary(target)];
@@ -665,8 +715,10 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     } });
   // Installed in web-contents-created, before any page can run or navigate. did-attach only
   // verifies the proof; it must never be the first place a popup handler is installed.
-  const guardCreatedGuest = (_event: unknown, guest: WebContents) => {
-    if (guest.getType() !== "webview") return;
+  const guardCreatedGuest = (_event: unknown, guest: WebContents) => { if (guest.getType() === "webview") guardGuest(guest); };
+  /** The early popup guard of every guest: webviews at web-contents-created, background carriers
+   * synchronously at creation (before their first URL). */
+  const guardGuest = (guest: WebContents) => {
     // Co-control: an owner click in a shared tab is the owner's gesture; only the provider's own
     // dispatch window is the agent's (an unregistered guest counts as neither: no gesture).
     const input = new BrowserPopupInput(undefined, () => {
@@ -730,7 +782,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     let credentials: Readonly<{ username: string; password: string }> | undefined;
     try {
       if (moduleEnabled && !disposed && contents && !contents.isDestroyed() && record?.status === "attached"
-        && registry.getWebContents(record.guestId) === contents && contents.hostWebContents === owner
+        && registry.getWebContents(record.guestId) === contents && (contents.hostWebContents === owner || (isBackground(record.guestId) && carriers.get(record.guestId)?.guest === contents))
         && contents.session === session.fromPartition(record.partition) && networkHost(record.hostId)) {
         currentFence(record).check(); credentials = egress.credentialsFor(contents.session, info);
       }
@@ -773,6 +825,24 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     if (target.isNavigationAllowed(url, { actor })) return;
     throw refusalError(target.refusal(url, { actor }));
   }
+  /**
+   * A service page's own subresource lost its authentication (the daemon restarted: its cookie is no
+   * longer accepted). Re-ticket the top-level page through the usual flow (new lease + ticket, no
+   * start), at most once per tab per minute; a resource of another service or a non-service page is
+   * ignored (reloading this page would not fix it).
+   */
+  function reticketFromSubresource(record: BrowserGuestRecord, tab: TabData, url: string): void {
+    const port = networkHost(record.hostId)?.connectionPort;
+    const resource = parseBrowserServiceUrl(url, port);
+    const guest = registry.getWebContents(record.guestId);
+    if (!resource || !guest || guest.isDestroyed()) return;
+    const top = tab.service?.target.slug === resource.slug ? { ...tab.service.target } : parseBrowserServiceUrl(guest.getURL(), port);
+    if (!top || top.slug !== resource.slug) return;
+    const now = Date.now();
+    if (!subresourceReticketDue(tab.subresourceReticketAt, now)) return;
+    tab.subresourceReticketAt = now;
+    void navigate(record, serviceDisplayUrl(top), true).catch(error => fail(record, browserServiceError(error)));
+  }
   async function ensureSession(record: BrowserGuestRecord): Promise<Session> {
     const admitted = lifecycle;
     const check = () => {
@@ -793,6 +863,11 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
         onResponse: (id, response) => {
           const current = registry.getByWebContentsId(id), tab = current && data.get(current.guestId);
           if (!current || !tab) return;
+          if (response.resourceType !== "mainFrame") {
+            // A fetch / XHR of a service page answered 401 ticket-required (network.ts forwards only those).
+            if (response.statusCode === 401 && response.headers["x-cutex-service-auth"]?.includes("ticket-required")) reticketFromSubresource(current, tab, response.url);
+            return;
+          }
           if (response.statusCode === 401 && response.headers["x-cutex-service-auth"]?.includes("ticket-required")) {
             const target = parseBrowserServiceUrl(response.url, networkHost(current.hostId)?.connectionPort);
             if (!target || tab.authRetries++ >= 1) { fail(current, "service_auth_failed"); return; }
@@ -877,7 +952,8 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       preparedService = service;
       tab.url = displayService(serviceTarget);
       try { operation?.markEffect(); target = await service.start(!authenticationRetry); }
-      catch (error) { cancel(); operation?.check(); throw new BrowserRelayError(browserServiceRelayError(error)); }
+      // The relay gets the collapsed code; the owner's tab / IPC message keeps cutex's precise one.
+      catch (error) { cancel(); operation?.check(); throw new BrowserRelayError(browserServiceRelayError(error), browserServiceError(error)); }
     } else { tab.url = browserDisplayUrl(url); admit(record, url); }
     try { check(); registry.nextPageGeneration(record.guestId); publish(registry.get(record.guestId)!); }
     catch (error) { cancel(); throw error; }
@@ -892,6 +968,103 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     const options = post && target === url ? { postData: [{ type: "rawData" as const, bytes: post.data }], extraHeaders: `Content-Type: ${post.contentType}\n` } : undefined;
     // Navigation errors never echo the raw (possibly ticket-bearing) URL into renderer/logs.
     try { check(); await guest.loadURL(target, options); check(); } catch { check(); throw new BrowserRelayError("navigation_failed"); }
+  }
+  /** A hand-over's new page starts with the tab's title / open correlation, fresh page state. */
+  function freshTab(previous: TabData | undefined): TabData {
+    return { url: previous?.url ?? "about:blank", title: previous?.title ?? "", navigation: 0, authRetries: 0,
+      ...(previous?.confirmedOpen ? { confirmedOpen: previous.confirmedOpen } : {}) };
+  }
+  /** Main's offscreen carrier for an agent-pool tab (carrier.ts): guarded before its first URL. */
+  function openCarrier(record: BrowserGuestRecord): BrowserCarrier {
+    if (record.pool !== "agent") throw new BrowserRelayError("permission_denied");
+    const lease = leases.forGuest(record.guestId), settings = (lease && leases.settings(lease.leaseId)) ?? lastSettings;
+    let carrier: BrowserCarrier | undefined;
+    carrier = createBrowserCarrier({ hostId: record.hostId, viewport: settings.viewport,
+      guard: guest => { guardGuest(guest); if (guest.isDestroyed()) throw new BrowserRelayError("invalid_request"); guest.setWebRTCIPHandlingPolicy("disable_non_proxied_udp"); },
+      wanted: () => moduleEnabled && !disposed && ownerWindowVisible(),
+      thumbnail: image => {
+        const current = registry.get(record.guestId);
+        if (!current || !carrier || carriers.get(record.guestId) !== carrier || disposed || owner.isDestroyed()) return;
+        emit("browserEvent", { ...view(current), epoch: current.epoch, kind: "thumbnail", thumbnail: image });
+      } });
+    const created = carrier;
+    const guard = guardBrowserCarrierDialogs(created.guest);
+    dialogGuards.set(created.guest, guard);
+    created.guest.once("destroyed", () => { guard.dispose(); if (carriers.get(record.guestId) === created) carriers.delete(record.guestId); });
+    return created;
+  }
+  /**
+   * Start a carrier hand-over: refuse new agent actions at once (busy), wait for the running one to
+   * finish (never split it), then note the exact live address (main-only) and the lease to keep.
+   */
+  async function beginHandover(record: BrowserGuestRecord, to: Handover["to"]): Promise<Handover> {
+    const guest = registry.getWebContents(record.guestId);
+    if (record.pool !== "agent") throw new BrowserRelayError("permission_denied");
+    if (!guest || guest.isDestroyed()) throw new BrowserRelayError("target_closed");
+    if (handovers.has(record.guestId) || leases.view(record.guestId)?.state === "pending"
+      || [...pendingOpens.values()].some(p => p.record.guestId === record.guestId && !p.confirmed)) throw new BrowserRelayError("busy");
+    const handover: Handover = { to, url: "about:blank", paused: false, release: () => {} };
+    handovers.set(record.guestId, handover);
+    publish(record);
+    try { handover.release = await provider.drain(record.guestId, Date.now() + HANDOVER_TIMEOUT_MS); }
+    catch (error) { cancelHandover(record.guestId, handover); throw error; }
+    if (handovers.get(record.guestId) !== handover || registry.getWebContents(record.guestId) !== guest || guest.isDestroyed()) {
+      cancelHandover(record.guestId, handover); throw new BrowserRelayError("target_closed");
+    }
+    const tab = data.get(record.guestId);
+    // Like reload: a service page goes through its ticket flow again; others keep the exact URL.
+    const raw = tab?.service ? serviceDisplayUrl(tab.service.target) : guest.getURL();
+    handover.url = raw && raw !== "about:blank" && !raw.startsWith("chrome-error:") ? raw : tab?.url && tab.url !== "about:blank" ? tab.url : "about:blank";
+    const lease = leases.forGuest(record.guestId);
+    if (lease?.state === "active") { handover.leaseId = lease.leaseId; handover.settings = leases.settings(lease.leaseId); }
+    handover.paused = provider.controlView(record.guestId)?.state === "paused";
+    handover.timer = setTimeout(() => cancelHandover(record.guestId, handover), HANDOVER_TIMEOUT_MS); handover.timer.unref?.();
+    return handover;
+  }
+  function cancelHandover(guestId: string, handover: Handover): void {
+    if (handovers.get(guestId) !== handover) return;
+    handovers.delete(guestId); if (handover.timer) clearTimeout(handover.timer); handover.release();
+    const record = registry.get(guestId); if (record) publish(record);
+  }
+  /** The new guest is attached: re-prepare the kept lease on it (paused stays paused). */
+  async function finishHandover(guestId: string, handover: Handover): Promise<void> {
+    if (handovers.get(guestId) !== handover) return;
+    handovers.delete(guestId); if (handover.timer) clearTimeout(handover.timer); handover.release();
+    const lease = leases.forGuest(guestId);
+    if (lease && lease.leaseId === handover.leaseId && lease.state === "active" && !disposed && moduleEnabled) {
+      try {
+        await leases.resume(guestId, lease.leaseId, handover.settings ?? lastSettings);
+        if (handover.paused) provider.ownerTakeover(guestId, "owner-pause");
+      } catch {
+        // Control could not be re-established on the new page: end it explicitly (never silently).
+        if (leases.forGuest(guestId)?.leaseId === lease.leaseId) { adapters.delete(lease.leaseId); leases.revoke(lease.leaseId, "lease_revoked"); }
+      }
+    }
+    const record = registry.get(guestId); if (record) publish(record);
+  }
+  /** Owner's 「放到后台」 on an agent tab shown in its card: same page, reopened in main's carrier. */
+  async function moveToBackground(record: BrowserGuestRecord): Promise<void> {
+    if (isBackground(record.guestId)) return;
+    if (record.pool !== "agent" || record.status !== "attached") throw new BrowserRelayError("permission_denied");
+    const handover = await beginHandover(record, "background");
+    let carrier: BrowserCarrier | undefined;
+    try {
+      await ensureSession(record);
+      if (handovers.get(record.guestId) !== handover) throw new BrowserRelayError("target_closed");
+      carrier = openCarrier(record);
+      const previous = data.get(record.guestId);
+      registry.attach(record.guestId, carrier.guest, { replace: true });
+      carriers.set(record.guestId, carrier);
+      data.set(record.guestId, freshTab(previous));
+      wireGuest(registry.get(record.guestId)!, carrier.guest);
+    } catch (error) {
+      if (carrier && carriers.get(record.guestId) !== carrier) carrier.destroy();
+      cancelHandover(record.guestId, handover);
+      throw error instanceof BrowserRelayError ? error : new BrowserRelayError("invalid_request");
+    }
+    try { await navigate(registry.get(record.guestId)!, handover.url, false, "agent"); }
+    catch (error) { fail(record, browserServiceError(error)); }
+    finally { await finishHandover(record.guestId, handover); }
   }
   function wireGuest(record: BrowserGuestRecord, guest: WebContents): void {
     const tab = data.get(record.guestId)!;
@@ -957,12 +1130,16 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     guest.on("page-favicon-updated", favicon);
     guest.on("page-title-updated", title); guest.on("did-start-loading", loading); guest.on("did-stop-loading", loading);
     guest.on("enter-html-full-screen", () => { if (!window.isDestroyed() && window.isFullScreen()) window.setFullScreen(false); });
+    let wired = true;
     tab.dispose = () => {
+      if (!wired) return;
+      wired = false;
       stopPolicy(); guest.removeListener("before-input-event", keyboardInput); guest.removeListener("before-mouse-event", mouseInput);
       guest.removeListener("did-start-navigation", documentStarted); guest.removeListener("did-navigate", navigated); guest.removeListener("did-navigate-in-page", inPage);
       guest.removeListener("page-favicon-updated", favicon);
       guest.removeListener("page-title-updated", title); guest.removeListener("did-start-loading", loading); guest.removeListener("did-stop-loading", loading);
     };
+    guestDisposers.set(guest, tab.dispose);
   }
   async function execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "sitePermissions" }>, hostId: string, fence?: HostFence<DaemonService>): Promise<unknown> {
     if (!moduleEnabled || disposed) throw new BrowserRelayError("browser_disabled");
@@ -1063,14 +1240,20 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
           || reservation.requestUrl !== request.url || reservation.guestId !== record?.guestId || reservation.epoch !== record.epoch || !pending
           || !popupGuards.has(pending.guest) || pending.guest.hostWebContents !== owner || pending.guest.session !== session.fromPartition(reservation.partition)) throw new BrowserRelayError("invalid_request");
         reservations.delete(key!); unbound.delete(pending.guest.id);
-        registry.attach(record.guestId, pending.guest);
+        // Front hand-over: this webview replaces main's background carrier of the same tab.
+        const handover = handovers.get(record.guestId), replacing = handover?.to === "front" && isBackground(record.guestId);
+        if (handover && !replacing) cancelHandover(record.guestId, handover);
+        const previous = data.get(record.guestId);
+        registry.attach(record.guestId, pending.guest, { replace: replacing });
+        if (replacing) data.set(record.guestId, freshTab(previous));
         try { wireGuest(record, pending.guest); }
         catch { registry.close(record.guestId); throw new BrowserRelayError("invalid_request"); }
         const agentOpen = request.identity?.pendingOpen && pendingOpens.get(openKey(hostId, request.identity.pendingOpen));
         void navigate(registry.get(record.guestId)!, reservation.url, false, reservation.actor, reservation.post).then(() => {
           if (reservation.popupGrant) void grantPopup(record, reservation.popupGrant).catch(() => { /* the tab stays the owner's to hand over */ });
           if (agentOpen && agentOpen.record.guestId === record.guestId) agentOpen.ready();
-        }).catch(error => { fail(record, browserServiceError(error)); if (agentOpen && agentOpen.record.guestId === record.guestId) agentOpen.reject(new BrowserRelayError(relayError(error))); });
+        }).catch(error => { fail(record, browserServiceError(error)); if (agentOpen && agentOpen.record.guestId === record.guestId) agentOpen.reject(new BrowserRelayError(relayError(error))); })
+          .finally(() => { if (replacing) void finishHandover(record.guestId, handover!); });
         return { guestId: record.guestId, tabKey: record.tabKey, partition: record.partition, pool: record.pool, src: request.receipt.src } satisfies BrowserTabMount;
       }
       await prepareHost(hostId, fence);
@@ -1098,7 +1281,19 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       fence.check();
       checkLifecycle();
       const record = registry.ensure(hostId, request.tabKey, agentOrigin ? "agent" : "owner");
-      if (registry.getWebContents(record.guestId)) throw new BrowserRelayError("busy");
+      // The background carrier is for agent-pool tabs only: an owner tab (or an owner tab granted
+      // to an agent) keeps the visible webview path, whatever the renderer asks for.
+      const background = request.identity?.carrier === "background";
+      if (background && record.pool !== "agent") throw new BrowserRelayError("permission_denied");
+      let handover: Handover | undefined;
+      if (registry.getWebContents(record.guestId)) {
+        // A card re-render of a tab main already carries in the background (after its hand-over).
+        if (background && isBackground(record.guestId)) return { guestId: record.guestId, tabKey: record.tabKey, partition: record.partition, pool: record.pool, src: "", carrier: "background" } satisfies BrowserTabMount;
+        // The card wants the page in its webview again: hand it over (never splits a running action).
+        if (!background && isBackground(record.guestId) && !request.identity?.pendingOpen) handover = await beginHandover(record, "front");
+        else throw new BrowserRelayError("busy");
+      }
+      const target = handover?.url ?? url, targetActor: BrowserActor = handover ? "agent" : actor;
       if (!agentOrigin && canonical) {
         try { tabIdentities().registerOwner(hostId, request.tabKey); }
         catch (error) {
@@ -1110,23 +1305,45 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
         }
       }
       try {
-        await ensureSession(record); fence.check(); checkLifecycle(); if (!lanUrl) checkTarget(hostId, url, record.partition, actor);
-      } catch (error) { registry.close(record.guestId); throw error; }
+        await ensureSession(record); fence.check(); checkLifecycle(); if (!lanUrl || handover) checkTarget(hostId, target, record.partition, targetActor);
+      } catch (error) { if (handover) cancelHandover(record.guestId, handover); else registry.close(record.guestId); throw error; }
       if (!registry.get(record.guestId)) throw new BrowserRelayError("browser_disabled");
+      const serviceTarget = parseBrowserServiceUrl(url, networkHost(hostId)?.connectionPort);
+      const initialTab = (): TabData => ({ url: serviceTarget ? displayService(serviceTarget) : browserDisplayUrl(url), title: "", navigation: 0, authRetries: 0,
+        ...(recovery ? { error: "browser_identity_recovered" } : {}) });
+      if (background) {
+        // Main's own offscreen carrier: no webview, reservation or renderer receipt. Same partition,
+        // session hooks and per-guest hardening as a webview of this pool (registry attribution).
+        const carrier = openCarrier(record);
+        try { registry.attach(record.guestId, carrier.guest); }
+        catch { carrier.destroy(); registry.close(record.guestId); throw new BrowserRelayError("invalid_request"); }
+        carriers.set(record.guestId, carrier);
+        data.set(record.guestId, initialTab());
+        try { wireGuest(record, carrier.guest); }
+        catch { registry.close(record.guestId); throw new BrowserRelayError("invalid_request"); }
+        publish(registry.get(record.guestId)!);
+        void navigate(registry.get(record.guestId)!, url, false, actor, fromPopup?.post).then(() => {
+          if (fromPopup?.grant) void grantPopup(record, fromPopup.grant).catch(() => { /* the tab stays the owner's to hand over */ });
+          if (agentOpen && agentOpen.record.guestId === record.guestId) agentOpen.ready();
+        }).catch(error => { fail(record, browserServiceError(error)); if (agentOpen && agentOpen.record.guestId === record.guestId) agentOpen.reject(new BrowserRelayError(relayError(error))); });
+        return { guestId: record.guestId, tabKey: record.tabKey, partition: record.partition, pool: record.pool,
+          ...(recovery ? { recovery: "browser_identity_recovered" as const } : {}), src: "", carrier: "background" } satisfies BrowserTabMount;
+      }
       const attachId = randomBytes(32).toString("hex");
       for (const [key, value] of reservations) if (value.guestId === record.guestId) reservations.delete(key);
       reservations.set(attachId, { attachId, hostId, guestId: record.guestId, epoch: record.epoch, tabKey: record.tabKey,
-        partition: record.partition, url, requestUrl: request.url, admitted: false, expires: Date.now() + 30_000, actor, ...(fromPopup?.post ? { post: fromPopup.post } : {}), ...(fromPopup?.grant ? { popupGrant: fromPopup.grant } : {}) });
-      const serviceTarget = parseBrowserServiceUrl(url, networkHost(hostId)?.connectionPort);
-      data.set(record.guestId, { url: serviceTarget ? displayService(serviceTarget) : browserDisplayUrl(url), title: "", navigation: 0, authRetries: 0,
-        ...(recovery ? { error: "browser_identity_recovered" } : {}) });
-      publish(record, "pending");
+        partition: record.partition, url: target, requestUrl: request.url, admitted: false, expires: Date.now() + 30_000, actor: targetActor,
+        ...(!handover && fromPopup?.post ? { post: fromPopup.post } : {}), ...(!handover && fromPopup?.grant ? { popupGrant: fromPopup.grant } : {}) });
+      // A hand-over keeps the carrier's tab state until the webview's receipt replaces it.
+      if (!handover) { data.set(record.guestId, initialTab()); publish(record, "pending"); }
+      else publish(record);
       return { guestId: record.guestId, tabKey: record.tabKey, partition: record.partition, pool: record.pool,
         ...(recovery ? { recovery: "browser_identity_recovered" as const } : {}), src: browserAttachSource(attachId) } satisfies BrowserTabMount;
     }
     const record = registry.getByTab(hostId, request.tabKey), guest = record && registry.getWebContents(record.guestId);
     if (!record || !guest || guest.isDestroyed()) throw new BrowserRelayError("target_closed");
     if (request.op === "navigate") return navigate(record, request.url);
+    if (request.op === "toBackground") return moveToBackground(record);
     if (request.op === "reload") {
       const tab = data.get(record.guestId);
       const raw = guest.getURL();
@@ -1222,6 +1439,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
   timer.unref();
   const reset = () => {
     lifecycle++;
+    for (const [guestId, handover] of [...handovers]) cancelHandover(guestId, handover);
     for (const pending of pendingOpens.values()) pending.reject(new BrowserRelayError("browser_disabled"));
     for (const entry of relays.values()) entry.relay?.dispose(); relays.clear(); relayRetryAfter.clear();
     leases.dispose(); adapters.clear(); autoReasons.clear();
@@ -1238,6 +1456,9 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     if (disposed) return;
     reset(); disposed = true; clearInterval(timer); ipcMain.removeHandler(BROWSER_CHANNEL);
     provider.dispose();
+    // Background carriers are hidden windows: they would keep the app alive past the last app window.
+    for (const carrier of [...carriers.values()]) { try { carrier.destroy(); } catch { /* Already gone. */ } }
+    carriers.clear();
     if (syncCurrentHosts === syncHosts) syncCurrentHosts = undefined;
     currentHostEvent = undefined;
     popupGuardInstalled = false;

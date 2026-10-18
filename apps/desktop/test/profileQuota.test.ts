@@ -164,3 +164,15 @@ describe("explicit quota readers (cutex profile-generic-switches)", () => {
     expect(isKnownQuotaReader("future_reader")).toBe(false);
   });
 });
+
+describe("mergeGauges same window (Claude account + runtime summary)", () => {
+  const w = (id: string, label: string, windowLabel: string, remainingPercent: number, observedAt: number): QuotaGauge =>
+    ({ id, label, kind: "window", remainingPercent, balance: null, resetAt: 1000, windowLabel, observedAt, stale: false }) as QuotaGauge;
+  it("refreshes the cutex Claude 7d gauge instead of adding a bare 7d", () => {
+    const base = [w("claude-0", "Claude", "5h", 41, 100), w("claude-1", "Claude", "7d", 76, 100), w("claude-2", "Claude", "Fable 7d", 7, 100)];
+    const merged = mergeGauges(base, [w("codex-secondary", "7d", "7d", 70, 200)]);
+    expect(merged.map((g) => `${g.label} ${g.windowLabel}`)).toEqual(["Claude 5h", "Claude 7d", "Claude Fable 7d"]);
+    expect(merged[1]!.remainingPercent).toBe(70);
+    expect(mergeGauges(base, [w("codex-secondary", "7d", "7d", 10, 50)])[1]!.remainingPercent).toBe(76);
+  });
+});

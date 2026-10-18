@@ -58,7 +58,7 @@ function open(layout: SideLayout, kind: ItemId, o: { key?: string | null; bindin
 }
 
 /**
- * Three pages: 工作区 [files, changes, jobs, terminal(t1, t2)], 浏览器 [browser], 侧聊 [chat];
+ * Three pages: 工作区 [files, changes, jobs, terminal(t1, t2)], 浏览器 [browser], 侧边对话 [chat];
  * the workspace page is in view.
  */
 function world() {

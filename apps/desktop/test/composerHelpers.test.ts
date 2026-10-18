@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitPinned, togglePinned } from "../src/renderer/src/lib/models";
+import { composerEfforts, splitPinned, togglePinned } from "../src/renderer/src/lib/models";
 import { formatBalance } from "../src/renderer/src/lib/quota";
 
 const models = ["a", "b", "c", "d", "e", "f"].map((model) => ({ model }));
@@ -27,5 +27,21 @@ describe("formatBalance", () => {
     expect(formatBalance("¥49.59", true)).toBe("¥49.59");
     expect(formatBalance("abc")).toBe("abc");
     expect(formatBalance(null)).toBe("—");
+  });
+});
+
+describe("composer effort levels", () => {
+  const models = [
+    { model: "claude-opus-4-8", efforts: ["none", "low", "medium", "high", "xhigh", "max"] },
+    { model: "claude-haiku-4-5-20251001", efforts: [] },
+  ];
+  it("offers only what the current model advertises", () => {
+    expect(composerEfforts(models, "claude-opus-4-8")).toEqual({ efforts: models[0]!.efforts, empty: null });
+  });
+  it("says why the list is empty instead of guessing levels the runtime rejects", () => {
+    expect(composerEfforts(models, "claude-haiku-4-5-20251001")).toEqual({ efforts: [], empty: "none" });
+    expect(composerEfforts(models, "opus")).toEqual({ efforts: [], empty: "unlisted" });
+    expect(composerEfforts(null, "claude-opus-4-8")).toEqual({ efforts: [], empty: "unlisted" });
+    expect(composerEfforts(models, null)).toEqual({ efforts: [], empty: "unlisted" });
   });
 });

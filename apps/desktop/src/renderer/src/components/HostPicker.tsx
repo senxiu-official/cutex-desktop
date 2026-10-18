@@ -31,11 +31,13 @@ function HostFace({ host }: { host: HostLook }) {
  */
 /** `up`: the list opens above the trigger (a picker at the bottom of the window, e.g. under an input). */
 /**
+ * `chip`: the right half of a scope tag (settings: 「cutex 后端 · ● HOST-A ▾」, owner 2026-10-18 Q2b) —
+ * chip-sized, host colour dot and name only.
  * `all`: a first row 「全部主机」 (a settings page that can show every host at once; lib/settingsAllHosts).
  * While `all.selected` the trigger shows it; picking a host (also `value`) calls `onChange`.
  * `only`: list just these hosts (e.g. the ones a 「全部主机」 view includes).
  */
-export function HostPicker({ value, onChange, mode, title, prefix = false, up = false, only, all }: { value: string; onChange(hostId: string): void; mode: HostPickerMode; title: string; prefix?: boolean; up?: boolean; only?: readonly string[]; all?: { label: string; hint?: string; selected: boolean; onSelect(): void } }) {
+export function HostPicker({ value, onChange, mode, title, prefix = false, up = false, only, all, chip = false }: { value: string; onChange(hostId: string): void; mode: HostPickerMode; title: string; prefix?: boolean; up?: boolean; only?: readonly string[]; all?: { label: string; hint?: string; selected: boolean; onSelect(): void }; chip?: boolean }) {
   const { t } = useI18n();
   const scope = useHostScope();
   const [open, setOpen] = useState(false);
@@ -56,6 +58,20 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
   }, [open]);
   if (mode === "none" || !current) return null;
   const label = prefix && <span className="shrink-0 text-subtle">{t("hostPicker.label")}：</span>;
+  const chipFace = (
+    <>
+      <HostDot color={current.color} status={current.indicator.status} size={6} />
+      <span className="min-w-0 truncate">
+        <ScriptText text={current.label} />
+      </span>
+    </>
+  );
+  if (mode === "label" && chip)
+    return (
+      <span title={title} className="inline-flex h-5 max-w-48 items-center gap-1 rounded-r bg-accent/12 pr-1.5 text-[11px] text-accent">
+        {chipFace}
+      </span>
+    );
   if (mode === "label")
     return (
       <span title={title} className="inline-flex h-6 items-center gap-1.5 text-[13px]">
@@ -95,7 +111,11 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className={`inline-flex h-7 max-w-64 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-[13px] hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none ${open ? "bg-surface-2" : ""}`}
+        className={
+          chip
+            ? `inline-flex h-5 max-w-48 items-center gap-1 rounded-r bg-accent/12 pr-1.5 text-[11px] text-accent hover:brightness-125 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${open ? "brightness-125" : ""}`
+            : `inline-flex h-7 max-w-64 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-[13px] hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none ${open ? "bg-surface-2" : ""}`
+        }
       >
         {label}
         {all?.selected ? (
@@ -103,13 +123,15 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
             <Layers size={13} className="shrink-0 text-muted" />
             <span className="min-w-0 truncate">{all.label}</span>
           </>
+        ) : chip ? (
+          chipFace
         ) : (
           <>
             <HostFace host={current} />
             {status(current) && <span className="shrink-0 text-xs text-subtle">{status(current)}</span>}
           </>
         )}
-        <ChevronDown size={13} className="shrink-0 text-subtle" />
+        <ChevronDown size={chip ? 11 : 13} className={`shrink-0 ${chip ? "" : "text-subtle"}`} />
       </button>
       {open && (
         <div role="listbox" aria-label={title} className={`absolute ${up ? "bottom-full mb-1" : "top-full mt-1"} left-0 z-40 max-h-80 min-w-64 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl`}>

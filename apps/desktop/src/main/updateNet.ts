@@ -11,9 +11,12 @@
 // more, so the transfer moves to Node (OS resolver) through the proxy Chromium resolved for that URL;
 // the lockdown itself stays exactly as it is.
 //
+// Settings → 网络代理 picks the mode (system / none / manual, `UpdateProxyConfig` below); it applies to this
+// session only — never to desktop → cutex calls (Node fetch, loopback / SSH tunnel, always direct).
+//
 // Test builds only (`--update-test-hooks` packages, binarySource): CUTEX_DESKTOP_UPDATE_TEST_PROXY =
 // http://127.0.0.1:<port> replaces the system proxy with that fixed proxy, loopback not bypassed.
-import { app, net, session, type ClientRequestConstructorOptions, type Session } from "electron";
+import { app, net, session, type ClientRequestConstructorOptions, type ProxyConfig, type Session } from "electron";
 import type { Readable } from "node:stream";
 import { nodeTransport, parseResolvedProxy, ProxyAuthError, type ProxyServer, type Transport, type TransportResponse } from "./updateTransport";
 
@@ -23,44 +26,78 @@ export interface UpdateNet {
   transport: Transport;
   /** The proxy Chromium would use for `url` (null = DIRECT / unknown). */
   proxyFor(url: string): Promise<ProxyServer | null>;
+  /** Re-apply the update proxy setting (Settings → 网络代理 changed). */
+  reconfigure?(): Promise<void>;
 }
 
-export function createUpdateNet(opts: { contained: () => boolean; testProxy?: string | null }): UpdateNet {
+/**
+ * This desktop's update proxy (desktop-prefs.json `updateProxy`, main/shell.ts `updateProxyConfig`):
+ * the OS settings (default), direct, or one manual proxy (Chromium `proxyRules`, plus the Basic
+ * credentials answered once to its `login` challenge). Loopback stays direct in every mode.
+ */
+export type UpdateProxyConfig = { mode: "system" } | { mode: "none" } | { mode: "manual"; rules: string; server: ProxyServer };
+
+export function chromiumProxyConfig(config: UpdateProxyConfig): ProxyConfig {
+  if (config.mode === "none") return { mode: "direct" };
+  if (config.mode === "manual") return { mode: "fixed_servers", proxyRules: config.rules };
+  return { mode: "system" };
+}
+
+export function createUpdateNet(opts: { contained: () => boolean; testProxy?: string | null; proxy?: () => UpdateProxyConfig }): UpdateNet {
   let ready: Promise<Session> | null = null;
+  const config = (): UpdateProxyConfig => opts.proxy?.() ?? { mode: "system" };
+  const apply = async (s: Session) => {
+    if (opts.testProxy) await s.setProxy({ mode: "fixed_servers", proxyRules: opts.testProxy, proxyBypassRules: "<-loopback>" });
+    else await s.setProxy(chromiumProxyConfig(config()));
+  };
   const ses = (): Promise<Session> =>
     (ready ??= (async () => {
       await app.whenReady();
       const s = session.fromPartition(UPDATER_PARTITION, { cache: false });
-      if (opts.testProxy) await s.setProxy({ mode: "fixed_servers", proxyRules: opts.testProxy, proxyBypassRules: "<-loopback>" });
-      else await s.setProxy({ mode: "system" });
+      await apply(s);
       return s;
     })().catch((error) => {
       ready = null;
       throw error;
     }));
+  const manualServer = (): ProxyServer | null => {
+    const c = config();
+    return c.mode === "manual" ? c.server : null;
+  };
   const proxyFor = async (url: string): Promise<ProxyServer | null> => {
     try {
-      return parseResolvedProxy(await (await ses()).resolveProxy(url));
+      const resolved = parseResolvedProxy(await (await ses()).resolveProxy(url));
+      // The manual proxy's credentials ride along for the Node fallback (never into git / pnpm URLs).
+      const manual = manualServer();
+      return resolved && manual?.auth && resolved.host === manual.host && resolved.port === manual.port ? { ...resolved, auth: manual.auth } : resolved;
     } catch {
       return null;
     }
   };
   const transport: Transport = async (url, init) => {
     const s = await ses();
-    if (!opts.contained()) return chromiumRequest(s, url, init);
+    if (!opts.contained()) return chromiumRequest(s, url, init, manualServer()?.auth ?? null);
     return nodeTransport(await proxyFor(url))(url, init);
   };
-  return { transport, proxyFor };
+  const reconfigure = async () => {
+    if (!ready) return;
+    const s = await ready.catch(() => null);
+    if (!s) return;
+    await apply(s);
+    await s.closeAllConnections().catch(() => {});
+  };
+  return { transport, proxyFor, reconfigure };
 }
 
 /** One GET through Chromium on `ses`: redirects are returned (never followed), no cookies, no credentials. */
-function chromiumRequest(ses: Session, url: string, init: { headers: Record<string, string>; signal: AbortSignal }): Promise<TransportResponse> {
+function chromiumRequest(ses: Session, url: string, init: { headers: Record<string, string>; signal: AbortSignal }, proxyCredentials: { username: string; password: string } | null): Promise<TransportResponse> {
   return new Promise((resolve, reject) => {
     const options: ClientRequestConstructorOptions = { url, method: "GET", session: ses, redirect: "manual", credentials: "omit", useSessionCookies: false, cache: "no-store" };
     const req = net.request(options);
     for (const [k, v] of Object.entries(init.headers)) req.setHeader(k, v);
     let settled = false;
     let proxyAuth: string | null = null;
+    let answered = false;
     const done = (fn: () => void) => {
       if (settled) return;
       settled = true;
@@ -73,8 +110,13 @@ function chromiumRequest(ses: Session, url: string, init: { headers: Record<stri
         // already finished
       }
     };
-    // No prompt in v1: an authenticating proxy fails the request (cancelled auth → 407 / error).
+    // No prompt in v1: the manual proxy's Basic credentials are answered once; otherwise (or when
+    // they are refused) an authenticating proxy fails the request (cancelled auth → 407 / error).
     req.on("login", (info, callback) => {
+      if (info.isProxy && proxyCredentials && !answered) {
+        answered = true;
+        return callback(proxyCredentials.username, proxyCredentials.password);
+      }
       if (info.isProxy) proxyAuth = `${info.host}:${info.port}`;
       callback();
     });

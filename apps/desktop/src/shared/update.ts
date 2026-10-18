@@ -209,6 +209,77 @@ export function sourceDirtyCheck(porcelain: string, ownClone = true): { state: "
   return { state: "dirty", files: lines.map((l) => l.slice(3)) };
 }
 
+/**
+ * Recorded in `<base>/.update-pull.json` (PULL_MARKER_FILE) right before the updater moves the source
+ * checkout (`git merge --ff-only` / `git checkout`) and removed once that succeeded. Left behind, it says
+ * the checkout may hold a half-written pull (e.g. the disk filled up mid-merge, 2026-10-18).
+ * `untracked`: the non-ignored untracked files that were already there before the pull (never removed).
+ */
+export interface PullMarker {
+  from: string;
+  to: string;
+  untracked: string[];
+  at: string;
+}
+
+export const PULL_MARKER_FILE = ".update-pull.json";
+
+export function parsePullMarker(raw: unknown): PullMarker | null {
+  if (!raw || typeof raw !== "object") return null;
+  const v = raw as Record<string, unknown>;
+  const sha = (s: unknown) => typeof s === "string" && /^[0-9a-f]{40,64}$/.test(s);
+  if (!sha(v.from) || !sha(v.to) || !Array.isArray(v.untracked) || !v.untracked.every((p) => typeof p === "string")) return null;
+  return { from: v.from as string, to: v.to as string, untracked: v.untracked as string[], at: typeof v.at === "string" ? v.at : "" };
+}
+
+/** Entries of `git status --porcelain -z --untracked-files=all`: status code and path(s) (a rename lists both). */
+export function parsePorcelainZ(out: string): { code: string; paths: string[] }[] {
+  const tokens = out.split("\0");
+  const entries: { code: string; paths: string[] }[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]!;
+    if (t.length < 4) continue;
+    const code = t.slice(0, 2);
+    const paths = [t.slice(3)];
+    // Renames / copies: the original path follows as its own token.
+    if (code[0] === "R" || code[0] === "C") paths.push(tokens[++i] ?? "");
+    entries.push({ code, paths: paths.filter(Boolean) });
+  }
+  return entries;
+}
+
+/**
+ * Whether the dirty state left by an interrupted pull may be discarded (the updater then runs
+ * `git reset --hard` and removes exactly `untracked`): HEAD is still the marker's `from`, and every
+ * dirty / untracked (non-ignored) path is one the target commit changes relative to `from` (`changed` =
+ * `git diff --name-only --no-renames from to`) or a file the install itself rewrites
+ * (INSTALL_REWRITTEN_FILES), and no untracked path was already there before the pull. Anything else is
+ * someone's own edit: refuse (reason) and leave the checkout alone.
+ */
+export function interruptedPullHeal(marker: PullMarker, head: string, porcelainZ: string, changed: string[]): { heal: true; dirty: string[]; untracked: string[] } | { heal: false; reason: string } {
+  if (head !== marker.from) return { heal: false, reason: `HEAD ${head.slice(0, 12)} is not the commit the interrupted update started from (${marker.from.slice(0, 12)})` };
+  const allowed = new Set<string>([...changed, ...INSTALL_REWRITTEN_FILES]);
+  const before = new Set(marker.untracked);
+  const dirty: string[] = [];
+  const untracked: string[] = [];
+  const foreign: string[] = [];
+  for (const e of parsePorcelainZ(porcelainZ)) {
+    for (const p of e.paths) {
+      dirty.push(p);
+      if (!allowed.has(p) || (e.code === "??" && before.has(p))) foreign.push(p);
+      else if (e.code === "??") untracked.push(p);
+    }
+  }
+  if (foreign.length) return { heal: false, reason: `not part of the interrupted update: ${foreign.join(", ")}` };
+  return { heal: true, dirty, untracked };
+}
+
+/** A pull that failed to write files: say the disk may be full (git: `unable to write` / `No space left`). */
+export function pullFailureMessage(message: string): string {
+  if (!/unable to write|no space left|ENOSPC|disk quota exceeded/i.test(message)) return message;
+  return `${message}\ngit could not write files: check the free disk space of the source checkout. The next update discards the half-written pull and retries.`;
+}
+
 /** Last `max` non-empty lines of a step's output (for the error tooltip). */
 export function tail(output: string, max = 12): string {
   return output

@@ -23,6 +23,8 @@ export class BrowserLeases {
   constructor(private options: BrowserLeasesOptions) {}
   list(hostId?: string): RelayLease[] { return [...this.entries.values()].filter(e => !hostId || e.lease.target.hostId === hostId).map(e => ({ ...e.lease })); }
   forGuest(guestId: string): RelayLease | undefined { return [...this.entries.values()].find(e => e.lease.target.guestId === guestId)?.lease; }
+  /** The control settings this lease was granted with (a carrier hand-over re-prepares with them). */
+  settings(leaseId: string): BrowserControlSettings | undefined { const s = this.entries.get(leaseId)?.settings; return s && { ...s, viewport: { ...s.viewport } }; }
   view(guestId: string): BrowserLeaseView | undefined { const entry = [...this.entries.values()].find(e => e.lease.target.guestId === guestId), l = entry?.lease; return l && { leaseId: l.leaseId, sessionId: l.cutexSessionId, agentName: l.agentName, state: entry!.phase === "active" ? "active" : "pending", origin: l.origin }; }
   /**
    * The relay may accept a command before the activation HTTP reply, but must await this

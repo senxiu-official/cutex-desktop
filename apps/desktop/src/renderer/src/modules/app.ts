@@ -47,6 +47,7 @@ export const services: ModuleServices = {
     openSettings: (page, focus) => useApp.getState().openSettings(page, focus),
     openPage: (page, params) => useApp.getState().openPage(page, params),
     closePage: () => useApp.getState().closePage(),
+    customize: (region) => useApp.getState().openCustomize(region),
   },
   side: {
     open: (kind, params, opts) => sideOpen(kind, params, opts),
@@ -108,6 +109,7 @@ export function startAppModules(modules: readonly AppModule[]): AppModuleHost {
           openSettings: guard.write(services.ui.openSettings),
           openPage: guard.write(services.ui.openPage),
           closePage: guard.write(services.ui.closePage),
+          customize: guard.write(services.ui.customize),
         },
         // Calls after the module stopped are refused (read: throws AbortError; write: no-op).
         side: {

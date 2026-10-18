@@ -25,6 +25,7 @@ export default defineModule({
         icon: Network,
         titleKey: "peers.title",
         source: "host",
+        hintKey: "peers.pageHint",
         Page: PeersPage,
         keywords: ["peers.policy.exports", "peers.policy.review", "peers.audit"],
         sections: [

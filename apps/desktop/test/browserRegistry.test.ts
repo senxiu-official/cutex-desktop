@@ -123,3 +123,21 @@ describe("browser guest registry", () => {
     expect(() => registry.attach(record.guestId, guest)).toThrow();
   });
 });
+describe("carrier hand-over (replace)", () => {
+  it("replaces the guest under the same identity: old one closed and revoked as replaced, generation retired", () => {
+    const { registry, revoked, events } = setup();
+    const record = registry.ensure("local", "agent-tab", "agent"), carrier = new Guest(41), webview = new Guest(42);
+    registry.attach(record.guestId, carrier);
+    const before = registry.get(record.guestId)!.pageGeneration;
+    registry.attach(record.guestId, webview, { replace: true });
+    expect(carrier.closes).toBe(1); expect(registry.getWebContents(record.guestId)).toBe(webview);
+    expect(revoked).toEqual([`${record.guestId}:replaced`]);
+    expect(events.map(e => e.kind)).toContain("replaced");
+    expect(registry.get(record.guestId)).toMatchObject({ status: "attached", guestId: record.guestId, partition: "persist:browser-agent-local" });
+    expect(registry.get(record.guestId)!.pageGeneration).toBeGreaterThan(before);
+    expect(registry.getByWebContentsId(41)).toBeUndefined(); expect(registry.getByWebContentsId(42)?.guestId).toBe(record.guestId);
+    // Without replace an attach over a live guest stays an ordinary unmount.
+    registry.attach(record.guestId, new Guest(43));
+    expect(revoked.at(-1)).toBe(`${record.guestId}:unmounted`);
+  });
+});

@@ -172,11 +172,22 @@ describe("browser dedicated session hardening", () => {
     const headers = { "X-Cutex-Service-Error": ["authentication_required"] };
     const details = { url: "http://localhost:26111/", statusCode: 401, webContentsId: 7, resourceType: "mainFrame", responseHeaders: headers };
     expect(mock.response(details)).toHaveBeenCalledWith({});
-    expect(onResponse).toHaveBeenCalledWith(7, { url: details.url, statusCode: 401, headers: { "x-cutex-service-error": ["authentication_required"] } });
+    expect(onResponse).toHaveBeenCalledWith(7, { url: details.url, statusCode: 401, headers: { "x-cutex-service-error": ["authentication_required"] }, resourceType: "mainFrame" });
     headers["X-Cutex-Service-Error"].push("changed");
     expect(onResponse.mock.calls[0]![1].headers["x-cutex-service-error"]).toHaveLength(1);
     mock.response({ ...details, resourceType: "subFrame" }); mock.response({ ...details, webContentsId: 8 });
     expect(onResponse).toHaveBeenCalledOnce();
+  });
+  it("forwards a subresource only when it is a 401 ticket-required of a current guest", async () => {
+    const mock = sessionMock(), onResponse = vi.fn();
+    await installBrowserSessionPolicy(mock.session, { ...options(), onResponse });
+    const base = { url: "http://docs.svc.localhost:26111/api/data", webContentsId: 7, resourceType: "xhr" };
+    mock.response({ ...base, statusCode: 401, responseHeaders: { "X-Cutex-Service-Error": ["ticket_required"] } });
+    mock.response({ ...base, statusCode: 404, responseHeaders: { "X-Cutex-Service-Auth": ["ticket-required"] } });
+    mock.response({ ...base, statusCode: 401, webContentsId: 8, responseHeaders: { "X-Cutex-Service-Auth": ["ticket-required"] } });
+    expect(onResponse).not.toHaveBeenCalled();
+    mock.response({ ...base, statusCode: 401, responseHeaders: { "X-Cutex-Service-Auth": ["ticket-required"] } });
+    expect(onResponse).toHaveBeenCalledWith(7, { url: base.url, statusCode: 401, headers: { "x-cutex-service-auth": ["ticket-required"] }, resourceType: "xhr" });
   });
 });
 describe("browser guest navigation and popup denial", () => {

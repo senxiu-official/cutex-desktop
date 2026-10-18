@@ -23,6 +23,7 @@ export type AgentFeature =
   | "imageInput"
   | "planMode"
   | "compact"
+  | "threadSearch"
   | "sideChat";
 // Side needs an explicit Claude capability: its ephemeral fork is not part of the adapter subset.
 
@@ -48,6 +49,55 @@ export function agentFeaturesOf(resource: { native?: { schema?: SchemaLike } | n
 export function lacks(f: AgentFeatures, feature: AgentFeature): boolean {
   if (feature === "sideChat" && f.runtime === "claude") return f.map?.sideChat !== true;
   return f.map?.[feature] === false;
+}
+
+/** cutex `claude-session-skills`: `GET /v2/sessions/{id}/skills` lists a Claude agent's managed skills. */
+export const CLAUDE_SESSION_SKILLS_CAPABILITY = "claude-session-skills";
+/** cutex `claude-rewind-files`: `cutex/session/history/revert` takes `rewindFiles` for Claude agents. */
+export const CLAUDE_REWIND_FILES_CAPABILITY = "claude-rewind-files";
+
+type HostFeatures = { has(feature: string): boolean };
+
+/** True only when a Claude adapter declares `feature` (absent / unknown = no). */
+function declares(f: AgentFeatures, feature: string): boolean {
+  return f.runtime === "claude" && f.map?.[feature] === true;
+}
+
+/**
+ * Where the composer's skill picker reads skills for this agent: Codex agents the host's Codex catalog
+ * (`skills/list`), Claude agents their own managed catalog when cutex lists it and the adapter loads
+ * managed skills, otherwise none (cutex hides `skillInput` for Claude: the Codex catalog's paths would
+ * be refused).
+ */
+export function skillSource(f: AgentFeatures, host: HostFeatures): "codex" | "claude" | null {
+  if (f.runtime !== "claude") return lacks(f, "skillInput") ? null : "codex";
+  return declares(f, "managedSkills") && host.has(CLAUDE_SESSION_SKILLS_CAPABILITY) ? "claude" : null;
+}
+
+/** 回退 can also restore files (Claude Code checkpoints): Claude adapter `fileRewind` + cutex `claude-rewind-files`. */
+export function canRewindFiles(f: AgentFeatures, host: HostFeatures): boolean {
+  return declares(f, "fileRewind") && host.has(CLAUDE_REWIND_FILES_CAPABILITY);
+}
+
+/** Claude Code fast mode through the Fast service tier (adapter `fastMode`; it keeps the choice itself). */
+export function claudeFastMode(f: AgentFeatures): boolean {
+  return declares(f, "fastMode");
+}
+
+/**
+ * A Claude agent's foreground subagents (`claude:<session>:task:<id>`) open as read-only transcripts
+ * (adapter `subagentTranscripts`: `thread/read` answers them). Older adapters: status rows only.
+ */
+export function opensClaudeSubagents(f: AgentFeatures): boolean {
+  return declares(f, "subagentTranscripts");
+}
+
+/** cutex `claude-subagent-transcripts`: the adapter's live transcript frames reach the stream (else re-read). */
+export const CLAUDE_SUBAGENT_TRANSCRIPTS_CAPABILITY = "claude-subagent-transcripts";
+
+/** Claude adapter reports the model that actually answered (`claude/model/status`, `claude/model/observed`). */
+export function observesModel(f: AgentFeatures): boolean {
+  return declares(f, "modelObservation");
 }
 
 /** Per-image byte limit for this agent's composer. */

@@ -6,7 +6,8 @@ import { diffKey, diffLabel, diffName, initDiff, parseDiffParams, restoreDiff, t
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 
-describe("workspace.preview", () => {
+// Tests here import renderer modules on demand (menus, side pages): slow under a loaded full run.
+describe("workspace.preview", { timeout: 20_000 }, () => {
   it("accepts a path (+ line, host) and nothing else", () => {
     expect(parsePreviewParams({ path: "docs/DESIGN.md", line: 12 })).toEqual({ path: "docs/DESIGN.md", line: 12, host: false });
     expect(parsePreviewParams({ path: "/home/jy/r.md", host: true })).toEqual({ path: "/home/jy/r.md", line: null, host: true });
@@ -87,6 +88,10 @@ describe("subagents.thread", () => {
     expect(parseThreadParams({ threadId: "th-1" })).toEqual({ threadId: "th-1" });
     expect(parseThreadParams({ threadId: "" })).toBeNull();
     expect(parseThreadParams({ threadId: "x".repeat(201) })).toBeNull();
+    // A Claude subagent transcript reference (adapter subagentTranscripts); other claude: ids are not.
+    expect(parseThreadParams({ threadId: "claude:4f1d2c3b:task:task-a" })).toEqual({ threadId: "claude:4f1d2c3b:task:task-a" });
+    expect(parseThreadParams({ threadId: "claude:4f1d2c3b" })).toBeNull();
+    expect(parseThreadParams({ threadId: "claude:s:agent:a" })).toBeNull();
     expect(restoreThread({ threadId: "th-1" }, 1)).toEqual({ threadId: "th-1" });
     expect(restoreThread({ threadId: "th-1" }, 2)).toBeNull();
   });

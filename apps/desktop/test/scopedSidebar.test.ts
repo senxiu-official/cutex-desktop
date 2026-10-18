@@ -32,11 +32,11 @@ function snapshot(agents: [id: string, projectId: string | null, over?: Paramete
 }
 
 const local = snapshot(
-  [["lead", "p1"], ["w", "p1"], ["solo", null], ["chat-l", null, { registrationClass: "local_only", formalAgentName: null, updatedAt: "2026-10-05T10:00:00Z" }]],
+  [["lead", "p1"], ["w", "p1"], ["solo", null], ["chat-l", null, { registrationClass: "local_only", formalAgentName: null, createdAt: "2026-10-05T10:00:00Z" }]],
   [project("p1", "Bravo", "lead")],
 );
 const workstation = snapshot(
-  [["kks-lead", "kks"], ["busy", "kks", { activeTurnId: "t1" }], ["same", "p1"], ["ops", null], ["chat-t", null, { registrationClass: "local_only", formalAgentName: null, updatedAt: "2026-10-06T10:00:00Z" }]],
+  [["kks-lead", "kks"], ["busy", "kks", { activeTurnId: "t1" }], ["same", "p1"], ["ops", null], ["chat-t", null, { registrationClass: "local_only", formalAgentName: null, createdAt: "2026-10-06T10:00:00Z" }]],
   [project("kks", "Alpha", "kks-lead"), project("p1", "Charlie", null)],
 );
 

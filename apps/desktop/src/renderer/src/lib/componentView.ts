@@ -2,8 +2,9 @@
 // of a component on a host (lib/componentCard.ts) and whether it can be used now.
 import { useEffect, useMemo } from "react";
 import { COMPONENTS_FEATURE, isOperationRunning } from "../../../shared/components";
-import { componentCardState, componentUsable, type ComponentCardState } from "./componentCard";
+import { CLAUDE_RUNTIME_COMPONENT, componentCardState, componentUsable, type ComponentCardState } from "./componentCard";
 import { EMPTY_COMPONENTS, loadComponents, retainEvents, useComponentStore, type HostComponents } from "./componentStore";
+import { refreshRuntimes, useRuntimesStore } from "./runtimesStore";
 import { useHostData, useHostLook } from "./useHostScope";
 
 const NO_FEATURES: ReadonlySet<string> = new Set();
@@ -16,6 +17,19 @@ export function useComponentState(hostId: string, name: string, opts: { active?:
   const entry = useHostComponents(hostId, active);
   const caps = opts.moduleCapabilities;
   const capsKey = caps?.join("\n") ?? "";
+  // An unmanaged host may have its Claude runtime set up by hand (deployment kits): ask /v2/runtimes.
+  const list = entry.list;
+  const unmanagedMissing =
+    active &&
+    name === CLAUDE_RUNTIME_COMPONENT &&
+    !!list &&
+    (!list.managed || list.installFrom === "none") &&
+    list.components.some((c) => c.name === name && c.state === "missing");
+  const runtimes = useRuntimesStore((s) => s.byHost[hostId]);
+  useEffect(() => {
+    if (unmanagedMissing && !runtimes?.view && !runtimes?.loading && !runtimes?.error) void refreshRuntimes(hostId);
+  }, [unmanagedMissing, hostId, runtimes]);
+  const handConfigured = unmanagedMissing && !!runtimes?.view?.claude.some((r) => r.selected && !r.missing);
   const state = useMemo(
     () =>
       componentCardState({
@@ -28,9 +42,10 @@ export function useComponentState(hostId: string, name: string, opts: { active?:
         list: entry.list,
         listError: entry.error,
         pending: entry.pending?.name === name,
+        handConfigured,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- capsKey stands for caps
-    [name, data, look?.platform, capsKey, entry.list, entry.error, entry.pending],
+    [name, data, look?.platform, capsKey, entry.list, entry.error, entry.pending, handConfigured],
   );
   return { state, entry };
 }

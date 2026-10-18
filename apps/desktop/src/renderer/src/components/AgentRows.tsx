@@ -14,6 +14,10 @@ import { useUiPrefs } from "../lib/prefs";
 import { relativeTime } from "../lib/sidebarView";
 import { lastSeen } from "../lib/offlineAgents";
 import { useApp } from "../store";
+import { openAgentPendingNotes } from "../lib/ownerNotify";
+import { focusOwnerNote, useHostOwnerNotes } from "../lib/ownerNotifyStore";
+import { openModifiers } from "../lib/openModifiers";
+import { openAgentSide } from "../lib/sideOpen";
 import { contextMenu, openMenuFrom } from "../lib/contextMenu";
 import { agentMenu } from "../lib/menus";
 import { runningSince, showsRunningRing, type AgentSignal } from "../lib/agentAttention";
@@ -64,10 +68,14 @@ function Preview({ row, preview }: { row: AgentRow; preview: ActivityPreview | u
  * Right side of a row, one tier of lib/statusTail: the attention pill (needs-you / 出错) or 完成, the
  * running dot + elapsed time, else the last activity. Activity / passive text gives way to ⋯ on hover.
  */
-function RowTail({ row, signal, last, needs, compact, fit }: { row: AgentRow; signal: AgentSignal; last: number; needs: ReturnType<typeof useRowSignal>["needs"]; compact: boolean; fit: boolean }) {
+function RowTail({ row, signal, last, needs, compact, fit, openHost }: { row: AgentRow; signal: AgentSignal; last: number; needs: ReturnType<typeof useRowSignal>["needs"]; compact: boolean; fit: boolean; openHost: string | null }) {
   const { t } = useI18n();
   const tail = statusTail(signal, signal === "running" ? runningSince(row) : null);
-  if (tail.tier === "attention" || (tail.tier === "passive" && tail.kind === "done")) return <StatusPill signal={signal} needs={needs} compact={compact} fit={fit} />;
+  if (tail.tier === "attention" || (tail.tier === "passive" && tail.kind === "done")) {
+    const pill = <StatusPill signal={signal} needs={needs} compact={compact} fit={fit} />;
+    // The open agent's 等…回复 / 需要你 from a message: the pill jumps to that card (selecting it again does nothing else).
+    return openHost && needs?.notificationIds?.length ? <NoteJump agentId={row.id} hostId={openHost}>{pill}</NoteJump> : pill;
+  }
   if (tail.tier === "activity") {
     return tail.since !== null ? (
       <RunningTime since={tail.since} dot className="group-hover:hidden" />
@@ -78,6 +86,31 @@ function RowTail({ row, signal, last, needs, compact, fit }: { row: AgentRow; si
     );
   }
   return <PassiveText text={relativeTime(last)} className="group-hover:hidden" />;
+}
+
+/** The pill of the open agent's row as a button to its first pending owner notice (lib/ownerNotify openAgentPendingNotes). */
+function NoteJump({ agentId, hostId, children }: { agentId: string; hostId: string; children: ReactNode }) {
+  const { t } = useI18n();
+  const byId = useHostOwnerNotes(hostId);
+  const target = useMemo(() => openAgentPendingNotes(byId, agentId)[0], [byId, agentId]);
+  if (!target) return <>{children}</>;
+  return (
+    <button
+      type="button"
+      data-row-note-jump=""
+      // Counted as the chip slot by 状态标签 自动 (lib/useChipFit skips it among the line's children).
+      data-fit-chip=""
+      title={t("ownerNotify.pending.jump")}
+      onClick={(e) => {
+        e.stopPropagation();
+        focusOwnerNote(agentId, target.notificationId, hostId);
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+      className="flex shrink-0 rounded-full hover:brightness-95 focus-visible:outline-2 focus-visible:outline-accent"
+    >
+      {children}
+    </button>
+  );
 }
 
 /**
@@ -100,11 +133,15 @@ function useRowHost(row: AgentRow) {
   const label = hosts?.look(row.hostId)?.label ?? host;
   return {
     selected,
+    host,
     preview: own ? live : seeded,
     look,
     unavailable,
-    open: () => {
-      if (!unavailable) void select(row.id, host);
+    /** Ctrl/⌘-click, middle click, Ctrl/⌘+Enter: in the side area beside the open agent (lib/sideOpen openAgentSide). */
+    open: (e?: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; button?: number }) => {
+      if (unavailable) return;
+      if (e && openModifiers(e).newInstance) return void openAgentSide(row.id, host);
+      void select(row.id, host);
     },
     menu: () => agentMenu(row.session, t, host),
     offlineTitle: unavailable ? t("sidebar.hostRowOffline", { host: label }) : null,
@@ -118,7 +155,7 @@ const sameRowButton = (a: { row: AgentRow; compact?: boolean }, b: { row: AgentR
 /** `compact`: one short line (16px avatar centred in the avatar column, no latest-message line). */
 export const AgentRowButton = memo(function AgentRowButton({ row, compact = false }: { row: AgentRow; compact?: boolean }) {
   const { t } = useI18n();
-  const { selected, preview, look, unavailable, open, menu, offlineTitle } = useRowHost(row);
+  const { selected, host, preview, look, unavailable, open, menu, offlineTitle } = useRowHost(row);
   const { rowPreview, statusChips } = useUiPrefs();
   const { signal, needs } = useRowSignal(row);
   const last = Math.max(row.lastActivity, preview?.at ?? 0);
@@ -133,8 +170,10 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact = fals
       role="button"
       tabIndex={0}
       aria-disabled={unavailable || undefined}
-      onClick={open}
-      onKeyDown={(e) => e.key === "Enter" && open()}
+      onClick={(e) => open(e)}
+      onAuxClick={(e) => e.button === 1 && open(e)}
+      onMouseDown={(e) => e.button === 1 && e.preventDefault()}
+      onKeyDown={(e) => e.key === "Enter" && open(e)}
       onContextMenu={contextMenu(menu)}
       data-row-selectable=""
       data-row-selected={selected ? "" : undefined}
@@ -145,7 +184,7 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact = fals
       } ${unavailable ? "opacity-50 grayscale" : ""}`}
     >
       <AvatarCell>
-        <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={compact ? 16 : AVATAR_COL} signal={signal} running={showsRunningRing(signal, row.session)} />
+        <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={compact ? 16 : AVATAR_COL} minor signal={signal} running={showsRunningRing(signal, row.session)} />
       </AvatarCell>
       <div className="min-w-0 flex-1 leading-tight">
         <div ref={chipFit.lineRef} className="flex h-5 items-center gap-1">
@@ -159,7 +198,7 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact = fals
             </span>
           )}
           <span className="ml-auto" />
-          <RowTail row={row} signal={signal} last={last} needs={needs} compact={chipFit.compact} fit={statusChips === "auto"} />
+          <RowTail row={row} signal={signal} last={last} needs={needs} compact={chipFit.compact} fit={statusChips === "auto"} openHost={selected ? host : null} />
           <button
             data-fit-skip=""
             title={t("menu.more")}
@@ -194,8 +233,10 @@ export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
       tabIndex={0}
       aria-disabled={unavailable || undefined}
       title={offlineTitle ?? [labelOf(row), row.session.note].filter(Boolean).join("\n")}
-      onClick={open}
-      onKeyDown={(e) => e.key === "Enter" && open()}
+      onClick={(e) => open(e)}
+      onAuxClick={(e) => e.button === 1 && open(e)}
+      onMouseDown={(e) => e.button === 1 && e.preventDefault()}
+      onKeyDown={(e) => e.key === "Enter" && open(e)}
       onContextMenu={contextMenu(menu)}
       data-row-selectable=""
       data-row-selected={selected ? "" : undefined}
@@ -203,7 +244,7 @@ export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
     >
       <AvatarCell>
         <span className={`flex grayscale ${selected ? "" : "opacity-55 group-hover:opacity-90"}`}>
-          <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={18} signal="idle" />
+          <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={18} minor signal="idle" />
         </span>
       </AvatarCell>
       <div className="flex h-5 min-w-0 flex-1 items-center gap-1">

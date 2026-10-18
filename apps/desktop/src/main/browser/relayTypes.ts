@@ -10,7 +10,12 @@ export const RELAY_CODES = ["invalid_request", "unsupported_operation", "unsuppo
 /** Wire codes; the precise refusals only reach a host advertising REFUSAL_REASONS_CAPABILITY. */
 export type RelayErrorCode = typeof RELAY_CODES[number] | BrowserRefusalCode;
 export class BrowserRelayError extends Error {
-  constructor(readonly code: RelayErrorCode) { super(code); this.name = "BrowserRelayError"; }
+  /**
+   * `ownerCode`: a more precise code for the owner's own UI (the message, which IPC carries to the
+   * renderer, and the tab's error), e.g. cutex's service_reclaimed behind the relay's service_unavailable.
+   * The relay only ever sends `code` (cutex maps unknown relay codes to invalid_result).
+   */
+  constructor(readonly code: RelayErrorCode, readonly ownerCode?: string) { super(ownerCode ?? code); this.name = "BrowserRelayError"; }
 }
 /** Main's precise admission refusals (network.ts BrowserRefusal minus invalid_url). A host that
  * advertises browser-refusal-reasons receives them as is; older hosts get the established
@@ -22,6 +27,8 @@ export class BrowserRefusalError extends Error {
 }
 export const REFUSAL_REASONS_CAPABILITY = "browser-refusal-reasons";
 export const POPUP_GRANT_CAPABILITY = "browser-popup-grant";
+/** The host accepts the optional tab.act `scroll` outcome ({dx, dy, atEdge}). */
+export const SCROLL_OUTCOME_CAPABILITY = "browser-scroll-outcome";
 export function isBrowserRefusalCode(code: unknown): code is BrowserRefusalCode { return typeof code === "string" && (BROWSER_REFUSAL_CODES as readonly string[]).includes(code); }
 /** The code a host may receive: precise refusals only where advertised. */
 export function relayWireError(code: RelayErrorCode, precise: boolean): RelayErrorCode { return !precise && isBrowserRefusalCode(code) ? "external_pages_unavailable" : code; }

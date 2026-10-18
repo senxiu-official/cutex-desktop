@@ -63,6 +63,9 @@ function pictureId(avatar: SessionAvatar | null | undefined): string | null {
   return avatar?.kind === "icon" && /^desktop-picture:[0-9a-f-]{36}$/.test(avatar.value) ? avatar.value : null;
 }
 
+/** A device-local picture avatar (whether or not this device holds the picture). */
+export const isPictureAvatar = (avatar: SessionAvatar | null | undefined): boolean => !!pictureId(avatar);
+
 export function newPictureAvatar(): SessionAvatar {
   return { kind: "icon", value: `${PREFIX}${crypto.randomUUID()}` };
 }

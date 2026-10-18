@@ -1,10 +1,12 @@
-// Settings → 会话两侧 (its own page since 2026-10-15; docs/desktop-modules.md §18.12): 右栏 (width,
+// Settings → 右侧栏与留白 (was 会话两侧; its own page since 2026-10-15; docs/desktop-modules.md §18.12): 右栏 (width,
 // modes, keep-loaded limits, reset), 打开位置 (files, the reference card, and each component's default
 // page group — editable, per device: UiPrefs.sideHomes — with the moved-to page and 恢复默认), and
 // 留白 (§19: which gutter lists stay docked when the gutter is wide enough).
+import { useState } from "react";
 import { useI18n, type MessageKey } from "../../i18n";
 import type { ItemId } from "../../modules/types";
 import { useSlot } from "../../modules/react";
+import { SettingsSections } from "../../modules/Outlet";
 import { setUiPref, useUiPrefs } from "../../lib/prefs";
 import { pageLabel } from "../../lib/sideActions";
 import { useSideRegistry } from "../../lib/sideComponents";
@@ -34,6 +36,11 @@ function DefaultsTable() {
   if (!rows.length) return <p className="py-2 text-xs text-subtle">{t("shell.sides.defaults.none")}</p>;
   // The page groups the available components declare (workspace, reference, artifacts, …).
   const homes = [...new Set(["workspace", ...rows.map(({ item }) => item.placement.home)])];
+  // Only the components you changed (another default group, or moved) until 全部显示 (owner 2026-10-18:
+  // twenty rows of selects made the page mostly this table).
+  const [all, setAll] = useState(false);
+  const changed = rows.filter(({ item }) => sideHomes[item.id] !== undefined || layout.overrides[item.id]);
+  const shown = all ? rows : changed;
   // A new default group re-places the open ones too (their moved-to page, if any, is forgotten).
   const setHome = (kind: ItemId, home: string, declared: string) => {
     const next = { ...sideHomes };
@@ -44,7 +51,8 @@ function DefaultsTable() {
   };
   return (
     <div className="divide-y divide-border">
-      {rows.map(({ item }) => {
+      {!all && changed.length === 0 && <p className="py-2 text-xs text-subtle">{t("shell.sides.defaults.allDefault")}</p>}
+      {shown.map(({ item }) => {
         const Icon = item.icon;
         const override = layout.overrides[item.id];
         const page = override ? findPage(layout, override.page) : null;
@@ -72,6 +80,11 @@ function DefaultsTable() {
           </div>
         );
       })}
+      <div className="py-1.5">
+        <button type="button" onClick={() => setAll(!all)} className="rounded text-xs text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none">
+          {all ? t("shell.sides.defaults.onlyChanged") : t("shell.sides.defaults.showAll", { n: rows.length })}
+        </button>
+      </div>
     </div>
   );
 }
@@ -163,6 +176,8 @@ export function SidesPage() {
           <DefaultsTable />
         </div>
       </Section>
+      {/* 智能体发布成果时 (module artifacts; from 对话, owner 2026-10-18): it opens on the right side. */}
+      <SettingsSections page="sides" only={["artifacts.settings"]} />
 
       <Section id={settingsAnchorId("gutter")} title={t("shell.sides.gutter")} hint={t("shell.sides.gutterHint")}>
         <div>
@@ -174,6 +189,8 @@ export function SidesPage() {
           <NumberField slider value={clampDockPref(ui.gutterDockWidth)} range={DOCK_WIDTH_RANGE} step={4} unit="px" onCommit={(v) => v !== null && setUiPref("gutterDockWidth", clampDockPref(v))} />
         </SettingRow>
       </Section>
+      {/* 书签条 (module bookmarks; from 对话): the little bookmarks sit in the gutter. */}
+      <SettingsSections page="sides" only={["bookmarks.settings"]} />
     </>
   );
 }

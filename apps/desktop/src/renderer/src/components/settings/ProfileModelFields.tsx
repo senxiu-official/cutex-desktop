@@ -10,10 +10,9 @@ import { SettingRow, Select, TextInput, Toggle } from "./Form";
 import { CompactInput, WindowInput } from "./ProfileContextInputs";
 import { useModelName } from "../../lib/modelDisplay";
 import { ModelName } from "../ModelName";
+import { claudeEffortLevels } from "../../lib/profileModels";
 
 const EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
-/** Claude effort levels cutex takes (`options.claude.effort`) when the model row lists none. */
-const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const SUMMARIES: ReasoningSummaryMode[] = ["auto", "detailed", "concise", "none"];
 const WEB_SEARCH: WebSearchMode[] = ["disabled", "cached", "live"];
 
@@ -37,6 +36,13 @@ export function ProfileModelFields({ detail, models, cfg, set, searchTool }: { d
     const key = `composer.effort.${e}` as MessageKey;
     return t(key) === key ? e : t(key);
   };
+  // Claude: only the levels the model offers (none for e.g. Haiku 4.5); Codex: the row's, else all.
+  const levels = claude ? claudeEffortLevels(selected) : selected?.supportedReasoningEfforts.length ? selected.supportedReasoningEfforts : EFFORTS;
+  const storedEffort = cfg.modelReasoningEffort ?? null;
+  // "" = no stored effort: the model's own default (Claude: Claude Code picks it per model).
+  const defaultLabel = selected?.defaultReasoningEffort
+    ? t("agent-config.profile.effortDefaultIs", { effort: effortName(selected.defaultReasoningEffort) })
+    : t("agent-config.profile.effortDefault");
   const effective = (value: number | null, source: string) => (value ? <span className="text-xs text-subtle tabular-nums">{t("agent-config.profile.effectiveInline", { value: formatWindow(value), source: src(source) })}</span> : null);
   return (
     <>
@@ -60,13 +66,15 @@ export function ProfileModelFields({ detail, models, cfg, set, searchTool }: { d
         )}
       </SettingRow>
       {effortEditable && (
-        <SettingRow label={t("agent-config.profile.effort")}>
+        <SettingRow label={t("agent-config.profile.effort")} hint={levels.length === 0 ? t("agent-config.profile.effortNone") : undefined}>
           <Select
             width={FIELD_W.model}
-            value={cfg.modelReasoningEffort ?? ""}
+            value={storedEffort ?? ""}
             options={[
-              { value: "", label: selected?.defaultReasoningEffort ? `— (${effortName(selected.defaultReasoningEffort)})` : "—" },
-              ...(selected?.supportedReasoningEfforts.length ? selected.supportedReasoningEfforts : claude ? CLAUDE_EFFORTS : EFFORTS).map((e) => ({ value: e, label: effortName(e) })),
+              { value: "", label: defaultLabel },
+              ...levels.map((e) => ({ value: e, label: effortName(e) })),
+              // A stored level the model does not list stays visible so it can be cleared.
+              ...(storedEffort && !levels.includes(storedEffort) ? [{ value: storedEffort, label: effortName(storedEffort) }] : []),
             ]}
             onChange={(v) => set({ modelReasoningEffort: v || null })}
           />

@@ -25,6 +25,8 @@ export interface MockCore {
   nativeEvent(sessionId: string, method: string, params: unknown): void;
   /** The session's current cutex `runtimeGeneration` (advanced by each runtime start after a stop). */
   runtimeGeneration(sessionId: string): number;
+  /** The session's native `thread/read` (with turns) as the core scripts it (reverts / forks applied). */
+  threadRead(sessionId: string): unknown;
   /** The session runs this native turn: sends queue / steer like on a live agent. */
   markBusy(sessionId: string, turnId: string): void;
   /** The session's turn ended (the turn id stays as the last one). */
@@ -62,6 +64,11 @@ export interface ModuleMock {
   admission?(sessionId: string, core: MockCore): MockAdmissionEntry[];
   /** admission-order: the session's running turn when this module owns it (e.g. a delegation's); null = not mine. */
   currentTurn?(sessionId: string): import("@cutex-desktop/protocol").AdmissionCurrentTurn | null;
+  /**
+   * The local host's agent list as this module's daemon side extends it (fields of `GET /v2/sessions`
+   * and its session resources, e.g. a Claude agent's `runtime.claudeRuntime`); returns a new snapshot.
+   */
+  sidebar?(snapshot: import("../../../shared/ipc").SidebarSnapshot, core: MockCore): import("../../../shared/ipc").SidebarSnapshot;
   /** Extra GET /v2/settings fields (not under `?legacy`, which reports the core settings only). */
   settings?(core: MockCore): Record<string, unknown>;
   /** featureList entries this module's daemon side reports: `base` always, `new` not under `?legacy`. */

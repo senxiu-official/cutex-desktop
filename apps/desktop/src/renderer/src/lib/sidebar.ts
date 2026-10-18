@@ -119,6 +119,20 @@ export function needsInputIds(sessions: PendingViews): Set<string> {
   return new Set(Object.entries(sessions).filter(([, v]) => v.timeline.pending.size > 0).map(([id]) => id));
 }
 
+type MethodViews = Record<string, { timeline: { pending: ReadonlyMap<string, { method: string }> } }>;
+
+/**
+ * Pending native requests per agent (agent → methods): the loaded timelines' (`views`), then the host
+ * feed's (`feed`, store `hostWaiting`) for agents whose view has none — not open here, so its feed is
+ * not subscribed (or a cached view went stale) — a new approval of any agent shows at once.
+ */
+export function pendingByAgent(views: MethodViews, feed?: Readonly<Record<string, readonly string[]>>): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [id, v] of Object.entries(views)) if (v.timeline.pending.size > 0) out[id] = [...v.timeline.pending.values()].map((p) => p.method);
+  for (const [id, methods] of Object.entries(feed ?? {})) if (!out[id] && methods.length) out[id] = [...methods];
+  return out;
+}
+
 /** Tray / taskbar attention count; same rule as the sidebar's ⚠ rows. */
 export function waitingAgentCount(sessions: PendingViews): number {
   let count = 0;
@@ -183,6 +197,22 @@ function timestamp(value: string | null | undefined): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+/**
+ * When the agent last had real conversation activity (ms): cutex's `activity.lastConversationAt`
+ * (capability session-conversation-activity: turns started / ended, output, tool calls, file changes).
+ * Older cutex: the newest of the activity projection's turn / item times. Never the runtime's
+ * `lastEventAt` (a restart or reconnect) nor `updatedAt` (rename, profile, settings, lifecycle);
+ * an agent without any activity yet: its creation time.
+ */
+export function conversationActivity(session: SessionResource): number {
+  const a = session.activity as Record<string, unknown> | null;
+  if (a && typeof a.lastConversationAt === "string") return timestamp(a.lastConversationAt) || timestamp(session.createdAt);
+  const at = (v: unknown) => (typeof v === "string" ? timestamp(v) : 0);
+  const nested = (v: unknown) => (v && typeof v === "object" ? at((v as { updatedAt?: unknown }).updatedAt) : 0);
+  const legacy = a ? Math.max(at(a.lastTurnStartedAt), at(a.lastOutputAt), at(a.lastOutputCompletedAt), at(a.lastTurnCompletedAt), at(a.lastFileChangeAt), nested(a.lastOutput), nested(a.lastToolCall)) : 0;
+  return legacy || timestamp(session.createdAt);
+}
+
 function rowStatus(session: SessionResource, options: SidebarOptions): AgentStatus {
   const id = session.cutexSessionId;
   if (!options.statusUnknown || session.lifecycle === "retired") return agentStatus(session, options.needsInput?.has(id) ?? false);
@@ -208,7 +238,7 @@ function rowFor(
     status: rowStatus(session, options),
     isDirector: directors.has(session.cutexSessionId),
     pinned: options.pinned?.has(session.cutexSessionId) ?? false,
-    lastActivity: Math.max(timestamp(session.runtime.lastEventAt), timestamp(session.updatedAt)),
+    lastActivity: conversationActivity(session),
     profile: session.launchedProfile ?? session.configuredProfile,
     color: typeof style?.color === "string" ? style.color : null,
     session,

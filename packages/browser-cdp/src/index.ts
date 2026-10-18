@@ -8,6 +8,14 @@ import { exceedsCodePointLimit, serializedBytes, snapshotNode } from './limits.j
 import type { SnapshotNode } from './limits.js';
 export type { SnapshotNode } from './limits.js';
 
+const MOTION_POLL_MS = 50;
+/** ~1.5 s: covers rAF-aligned delivery and a smooth-scroll animation of a large wheel delta. */
+const MOTION_MAX_POLLS = 30;
+/** Unchanged position over this many consecutive polls (~150 ms) counts as settled. */
+const MOTION_STABLE_POLLS = 3;
+/** Stop polling early enough that the command's own deadline cannot turn a seen input unknown. */
+const MOTION_DEADLINE_MARGIN_MS = 250;
+
 export interface CdpEvent { method: string; params?: Record<string, unknown> }
 export interface CdpTransport {
   send(method: string, params?: Record<string, unknown>): Promise<unknown>;
@@ -35,7 +43,10 @@ export interface ScreenshotOptions extends OperationOptions { ref?: string; form
 export interface ScreenshotResult { mimeType: 'image/png' | 'image/jpeg'; data: string; pageGeneration: number;
   viewport: { width: number; height: number }; captureRect: { x: number; y: number; width: number; height: number }; imageScale: { x: number; y: number } }
 export interface BrowserSnapshot { pageGeneration: number; snapshotId: number; url: string; nodes: SnapshotNode[]; truncated: boolean }
-export interface DispatchResult { status: 'dispatched'; observed?: true; pageGeneration: number }
+/** Observed effect of a wheel scroll on the container that moved (or would have): CSS px moved
+ * and whether it now sits at the edge in the requested direction (e.g. the bottom for `down`). */
+export interface ScrollOutcome { dx: number; dy: number; atEdge: boolean }
+export interface DispatchResult { status: 'dispatched'; observed?: true; pageGeneration: number; scroll?: ScrollOutcome }
 type Ref = { backendNodeId: number; generation: number; expiresAt: number; frameId: string; unsupported: boolean };
 type Active = { operation: ExecutorOperation; controller: AbortController; sideEffects: boolean; generation: number; deadline: number; refExpiresAt?: number; focusEmulationSent?: boolean; focusResetAttempt?: Promise<boolean>; allowNavigation?: boolean };
 type FocusResetFlight = { wait: Promise<boolean>; pending: boolean; timedOut: boolean };
@@ -194,7 +205,8 @@ export class BrowserCdpExecutor {
         }
         return { status: 'dispatched', pageGeneration: this.generation };
       }
-      const work = async (objectId: string) => {
+      let scroll: ScrollOutcome | undefined;
+      const work = async (objectId: string): Promise<DispatchResult> => {
         if (input.kind === 'scrollIntoView') {
           this.pageResult(await this.call(ctx, objectId, SCROLL_INTO_VIEW, [], true));
           this.pageResult(await this.call(ctx, objectId, INSPECT, ['hover']));
@@ -218,7 +230,8 @@ export class BrowserCdpExecutor {
               throw error('outcome_unknown', 'Checkbox state not observed; never replay');
           } else if (input.kind === 'hover' || input.kind === 'scroll') {
             const armed = await this.send(ctx, 'Runtime.callFunctionOn', { objectId, functionDeclaration: ARM_MOTION,
-              arguments: [{ value: input.kind }], returnByValue: false }) as Json;
+              arguments: [{ value: input.kind }, { value: position.x }, { value: position.y },
+                { value: input.kind === 'scroll' ? input.direction : 'none' }], returnByValue: false }) as Json;
             const receiptId = armed.result?.objectId;
             if (!receiptId || armed.exceptionDetails) throw error('not_actionable', 'Input receipt could not be armed');
             try {
@@ -228,15 +241,16 @@ export class BrowserCdpExecutor {
                 : { type: 'mouseWheel', x: position.x, y: position.y,
                   deltaX: input.direction === 'left' ? -amount : input.direction === 'right' ? amount : 0,
                   deltaY: input.direction === 'up' ? -amount : input.direction === 'down' ? amount : 0 }, true);
-              if (!(await this.call(ctx, receiptId, 'function() { return this.read(); }')).seen)
-                throw error('outcome_unknown', 'Motion input not observed; never replay');
+              const reading = await this.motionReceipt(ctx, receiptId, input.kind === 'scroll');
+              if (input.kind === 'scroll' && Number.isSafeInteger(reading.dx) && Number.isSafeInteger(reading.dy) && typeof reading.atEdge === 'boolean')
+                scroll = { dx: reading.dx, dy: reading.dy, atEdge: reading.atEdge };
             } finally {
               this.cleanupRemote('Runtime.callFunctionOn', { objectId: receiptId, functionDeclaration: 'function() { this.cleanup(); }' });
               this.cleanupRemote('Runtime.releaseObject', { objectId: receiptId });
             }
           }
         }
-        return { status: 'dispatched' as const, observed: true as const, pageGeneration: this.generation };
+        return { status: 'dispatched' as const, observed: true as const, pageGeneration: this.generation, ...(scroll ? { scroll } : {}) };
       };
       if ('ref' in input && input.ref) return this.withRef(ctx, input.ref, work);
       const world = await this.ensureIsolatedWorld(ctx);
@@ -574,6 +588,27 @@ export class BrowserCdpExecutor {
     } finally {
       if (objectId) this.cleanupRemote('Runtime.releaseObject', { objectId });
       if (windowId) this.cleanupRemote('Runtime.releaseObject', { objectId: windowId });
+    }
+  }
+  /** Poll the motion receipt after the input was acknowledged. Wheel events are delivered to
+   * passive listeners after CDP's acknowledgement (rAF-aligned), so a single immediate read can
+   * miss an event that did happen. For scroll, also wait (bounded) for the position to settle so
+   * the reported delta is final; a scroll in the requested direction is evidence too. Reads are
+   * side-effect free and may cross a same-document navigation (e.g. a scroll-spy URL update). */
+  private async motionReceipt(ctx: Active, receiptId: string, scroll: boolean): Promise<Json> {
+    ctx.allowNavigation = true;
+    let last: string | undefined, stable = 0, reading: Json = {};
+    for (let poll = 0; ; poll++) {
+      reading = await this.call(ctx, receiptId, 'function() { return this.read(); }');
+      const evidence = reading.seen === true || scroll && reading.moved === true;
+      const position = typeof reading.position === 'string' ? reading.position : '';
+      stable = position === last ? stable + 1 : 0; last = position;
+      if (evidence && (!scroll || stable >= MOTION_STABLE_POLLS)) return reading;
+      if (poll >= MOTION_MAX_POLLS || ctx.deadline - this.now() <= MOTION_DEADLINE_MARGIN_MS) {
+        if (evidence) return reading;
+        throw error('outcome_unknown', 'Motion input not observed; never replay');
+      }
+      await this.wait(ctx, new Promise<void>(resolve => setTimeout(resolve, MOTION_POLL_MS)));
     }
   }
   private async viewport(ctx: Active): Promise<{ width: number; height: number; x: number; y: number; pageX: number; pageY: number }> {

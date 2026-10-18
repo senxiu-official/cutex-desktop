@@ -14,11 +14,11 @@ describe("applyTerms", () => {
   it("resolves singular / plural / capitalised / article forms in en", () => {
     expect(applyTerms("New {{agent}}", enTerms, "en")).toBe("New agent");
     expect(applyTerms("{{Agents}} online", enTerms, "en")).toBe("Agents online");
-    expect(applyTerms("Ask the {{director}}", enTerms, "en")).toBe("Ask the Director");
+    expect(applyTerms("Ask the {{director}}", enTerms, "en")).toBe("Ask the director");
     expect(applyTerms("{{Directors}}", enTerms, "en")).toBe("Directors");
     expect(applyTerms("Pick {{an agent}}", enTerms, "en")).toBe("Pick an agent");
-    expect(applyTerms("{{A director}} is set", enTerms, "en")).toBe("A Director is set");
-    expect(applyTerms("{{subagents}} · {{Subagent}}", enTerms, "en")).toBe("sub-agents · Sub-agent");
+    expect(applyTerms("{{A director}} is set", enTerms, "en")).toBe("A director is set");
+    expect(applyTerms("{{subagents}} · {{Subagent}}", enTerms, "en")).toBe("subagents · Subagent");
     expect(applyTerms("{{Owner}} notices · ask the {{owner}}", enTerms, "en")).toBe("Owner notices · ask the owner");
     expect(applyTerms("等待{{owner}}", DEFAULT_TERMS["zh-CN"], "zh-CN")).toBe("等待主人");
   });
@@ -61,7 +61,15 @@ describe("applyTerms", () => {
  * Keys whose text names the word on purpose (a literal tool / product name, a native concept that
  * is not one of our agents). Each entry says why; keep it short.
  */
-const ALLOWED: Record<string, string> = {};
+const ALLOWED: Record<string, string> = {
+  // 通用 → 术语: the example names the built-in word itself (a {{agent}} would read 「助手 → 助手」 once renamed).
+  "terms.hint": "example of renaming the built-in word",
+};
+/** Whole key families that use a banned word in another sense. */
+const ALLOWED_PREFIXES: Record<string, string> = {
+  // 代理 here is the network proxy (Settings → 网络代理), never one of our agents.
+  "proxy.": "network proxy settings",
+};
 
 /** Strips what is not prose: `code`, identifiers with _ - . / (agent_tell, cutex-agent-bus, AGENTS.md), placeholders. */
 function prose(text: string): string {
@@ -77,7 +85,7 @@ const EN_BANNED = /\b(sub-?)?agents?\b|\bdirectors?\b|\bowners?\b/i;
 
 function offenders(catalog: Record<string, string>, banned: RegExp): string[] {
   return Object.entries(catalog)
-    .filter(([key, text]) => !ALLOWED[key] && banned.test(prose(text)))
+    .filter(([key, text]) => !ALLOWED[key] && !Object.keys(ALLOWED_PREFIXES).some((prefix) => key.startsWith(prefix) && banned === ZH_BANNED) && banned.test(prose(text)))
     .map(([key, text]) => `${key}: ${text}`);
 }
 

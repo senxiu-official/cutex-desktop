@@ -11,7 +11,20 @@ const browserClaim = (approvalId: string, session: string, name: string, reason:
   details: { version: 1, cutexSessionId: session, agentName: name, requestId: `req-${approvalId}`, deviceId: "desktop-local", hostId: "local",
     connectionGeneration: "gen-1", threadId: `thr-${session}`, runtimeGeneration: 1, intentDigest: claimDigest, reason, urlHint, sharesOwnerLogin: true },
 });
+// ifm-ema-figures asked to keep its preview service (service_register lifetime persistent): the tool
+// call in its conversation answered approval_required; the card sits in its dock (BrowserClaimOverlay).
+const FIG_AGENT = "ifm-figures";
+const figApprovalId = "apr-5e7a0c3f9b2d4e61a8c07f1d2b3e4a59";
+const figSummary = "Keep service ifm-figs-preview persistently; run its command unrestricted as the owner";
+const HOLD_ID = "apr-7f3a91c2";
+const HOLD_MS = 95_000;
 const mockApprovals: MockApproval[] = [
+  {
+    approvalId: figApprovalId, kind: "service_lifetime", reason: "persistent_service", requesterCutexSessionId: FIG_AGENT, requesterName: "ifm-ema-figures", projectId: "ifm-ema",
+    summary: figSummary,
+    details: { op: "register", slug: "ifm-figs-preview", lifetime: "persistent", managedExecution: true, command: "python -m http.server {port}", cwd: "D:\\Research\\ifm-ema\\figures", envKeys: [], grants: "persistent lifetime and unrestricted execution of this exact command/cwd/env" },
+    requestSha256: "a51f…", state: "pending", createdAt: iso(70),
+  },
   // workflows: Mika's run plan (modules/workflows/mock.ts run #8 waits for it).
   {
     approvalId: "apr-wf000008", kind: "workflow_run", reason: "workflow_run", requesterCutexSessionId: "mika", requesterName: "Mika", projectId: "desktop",
@@ -32,10 +45,19 @@ const mockApprovals: MockApproval[] = [
     requestSha256: "5d1e…", state: "pending", createdAt: iso(90),
   },
   {
-    approvalId: "apr-7f3a91c2", kind: "managed_service", reason: "outside_caller_envelope", requesterCutexSessionId: "mika", requesterName: "Mika", projectId: "desktop",
+    approvalId: "apr-3b8d2e71", kind: "static_root", reason: "static_root_outside_workspace", requesterCutexSessionId: "scratch", requesterName: "scratch", projectId: null,
+    summary: "register static service tokyo-notes: serve C:\\Users\\sam\\Documents\\tokyo (outside the agent's cwd / project workspace)",
+    details: { op: "register", slug: "tokyo-notes", staticRoot: "C:\\Users\\sam\\Documents\\tokyo", allowedRoots: ["C:\\Users\\sam\\scratch"], grants: "serving every file under this exact root to the owner's browser" },
+    requestSha256: "3b8d…", state: "pending", createdAt: iso(400),
+  },
+  // cutex approval-wait: Mika's service_register is holding for the owner right now (countdown card in
+  // its dock; at 0 the call answers approval_required and the card leaves the conversation).
+  {
+    approvalId: HOLD_ID, kind: "managed_service", reason: "outside_caller_envelope", requesterCutexSessionId: "mika", requesterName: "Mika", projectId: "desktop",
     summary: "register managed service kks-preview: pnpm --filter kks dev --port {port}",
     details: { op: "register", slug: "kks-preview", runtime: "managed", command: "pnpm --filter kks dev --port {port}", cwd: "D:\\Apps\\kks", port: null, envKeys: ["KKS_TOKEN", "NODE_ENV"] },
-    requestSha256: "9b1e…", state: "pending", createdAt: iso(240),
+    requestSha256: "9b1e…", state: "pending", createdAt: iso(25),
+    wait: { id: "w-mock", startedAt: iso(25), until: new Date(Date.now() + HOLD_MS).toISOString(), threadId: "thread-mika", turnId: null },
   },
   {
     approvalId: "apr-2c84d0aa", kind: "agent_profile", reason: "profile_requires_approval", requesterCutexSessionId: "wave", requesterName: "Wave-Director", projectId: "waveline",
@@ -63,6 +85,13 @@ function emitApprovalChange(core: MockCore, reason: string, approval: MockApprov
 /** A new request arrives a little after start, so the live badge / notification can be seen. */
 function startApprovalRequests(core: MockCore) {
   if (core.legacy) return;
+  // The hold runs out: cutex ends it (wait.end = timeout) and publishes wait_ended.
+  setTimeout(() => {
+    const held = mockApprovals.find((a) => a.approvalId === HOLD_ID);
+    if (!held?.wait || held.wait.end || held.state !== "pending") return;
+    held.wait = { ...held.wait, end: "timeout", endedAt: new Date().toISOString() };
+    emitApprovalChange(core, "wait_ended", held);
+  }, HOLD_MS);
   setTimeout(() => {
     const a: MockApproval = {
       approvalId: "apr-b6d2f019", kind: "managed_service", reason: "outside_caller_envelope", requesterCutexSessionId: "alden", requesterName: "Alden", projectId: "desktop",
@@ -75,7 +104,46 @@ function startApprovalRequests(core: MockCore) {
   }, 15_000);
 }
 
+const sec = (secondsAgo: number) => Math.floor(Date.now() / 1000) - secondsAgo;
+const figRefusal = {
+  ok: false, status: "approval_required", code: "approval_required", approval_id: figApprovalId,
+  detail: `Nothing was done yet: this needs the owner's approval (${figSummary}). The owner sees the request in the cutex desktop. When the owner decides you get a message from cutex; after an approval retry the same call (until then it answers approval_required). Do not poll in a loop: end your turn or continue with other work.`,
+};
+// An earlier request the owner declined (approval_denied): the row reads 未执行（已拒绝）, not 失败.
+const figDenied = {
+  ok: false, status: "approval_denied", code: "approval_denied", approval_id: "apr-1d0c9b8a7f6e5d4c",
+  detail: "The owner declined this request (open http://127.0.0.1:8000 in the owner's browser). Do not retry it.",
+};
+function figuresThread() {
+  return {
+    thread: {
+      id: `thread-${FIG_AGENT}`,
+      turns: [{
+        id: "ifm-fig-t0", status: "completed", startedAt: sec(400), completedAt: sec(380),
+        items: [
+          { type: "userMessage", id: "ifm-fig-u0", content: [{ type: "text", text: "图做好了给我看看。" }] },
+          { type: "mcpToolCall", id: "ifm-fig-c0", server: "cutex", tool: "browser_open", status: "failed",
+            arguments: { url: "http://127.0.0.1:8000" },
+            result: { content: [{ type: "text", text: JSON.stringify(figDenied) }], isError: true }, error: null, durationMs: 80 },
+          { type: "agentMessage", id: "ifm-fig-a0", text: "你没有同意在浏览器里打开。图在 [标注服务](cutex:service/denia-score-annotator/scores/index.html) 里，想看时点开。" },
+        ],
+      }, {
+        id: "ifm-fig-t1", status: "completed", startedAt: sec(95), completedAt: sec(60),
+        items: [
+          { type: "userMessage", id: "ifm-fig-u1", content: [{ type: "text", text: "把三张图挂成一个预览服务，我明天还要看。" }] },
+          { type: "mcpToolCall", id: "ifm-fig-c1", server: "cutex", tool: "service_register", status: "failed",
+            arguments: { slug: "ifm-figs-preview", name: "IFM figures", runtime: "managed", command: "python -m http.server {port}", cwd: "D:\\Research\\ifm-ema\\figures", lifetime: "persistent" },
+            result: { content: [{ type: "text", text: JSON.stringify(figRefusal) }], isError: true }, error: null, durationMs: 120 },
+          { type: "agentMessage", id: "ifm-fig-a1", text: "常驻的预览服务需要你批准。我先结束这一轮；你决定后 cutex 会通知我，批准了我就原样重试。" },
+        ],
+      }],
+    },
+  };
+}
+
 export const mock: ModuleMock = {
+  features: { new: ["approvals-live", "approval-decision-notice", "approval-wait"] },
+  thread: (sessionId) => (sessionId === FIG_AGENT ? figuresThread() : null),
   api: (core) => ({
     async approvals(state) {
       if (core.legacy) return null;
@@ -87,6 +155,17 @@ export const mock: ModuleMock = {
       if (a.state !== "pending") return { ok: false, error: { code: "approval_not_pending", message: "the approval was already decided or expired" } };
       Object.assign(a, { state: decision === "approve" ? "approved" : "denied", decidedAt: new Date().toISOString(), note: note?.trim() || null });
       emitApprovalChange(core, decision === "approve" ? "approved" : "denied", a);
+      // approval-wait: the holding call takes the decision itself (an approval is used at once, no notice).
+      if (a.wait && !a.wait.end && Date.parse(a.wait.until) > Date.now()) {
+        a.wait = { ...a.wait, end: decision === "approve" ? "approved" : "denied", endedAt: new Date().toISOString() };
+        if (decision === "approve") {
+          Object.assign(a, { state: "consumed", consumedAt: new Date().toISOString() });
+          emitApprovalChange(core, "consumed", a);
+        }
+        return { ok: true, approval: structuredClone(a) };
+      }
+      // cutex approval-decision-notice: the requester is told (alarm scheduler, after_turn).
+      if (!core.legacy && ["managed_service", "service_lifetime", "agent_profile", "browser_open"].includes(a.kind)) console.info(`[mock] approval notice → ${a.requesterCutexSessionId}: the owner ${decision === "approve" ? "approved" : "denied"} ${a.approvalId}`);
       // A workflow run plan: modules/workflows/mock.ts starts or rejects the run (cutex consumes the approval).
       if (a.kind === "workflow_run") (globalThis as { __cutexMockWorkflowDecision?: (id: string, approved: boolean) => void }).__cutexMockWorkflowDecision?.(a.approvalId, decision === "approve");
       return { ok: true, approval: structuredClone(a) };

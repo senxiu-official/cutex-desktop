@@ -70,7 +70,7 @@ export const mock: ModuleMock = {
         event(chat, "item/completed", { threadId: chat.threadId, turnId, item: { id: `${turnId}-user`, type: "userMessage", content: [{ type: "text", text: input.text }] } });
         const answer = /standalone note|总结|summariz/i.test(input.text)
           ? "# Notes 的查找规则\n\n- 默认保存为会话笔记。\n- 项目和主机总览自然收录它。\n- Pin 是额外标记，取消不会删除笔记。\n\n未决事项：无。"
-          : "侧聊与主聊天隔离。未标记的笔记也能在项目和主机的全部笔记里找到；标记只帮助查找。";
+          : "侧边对话与主对话隔离。未标记的笔记也能在项目和主机的全部笔记里找到；标记只帮助查找。";
         if (/审批演示|approval demo/i.test(input.text)) {
           chat.pendingRequests.push({ id: `approve-${turnId}`, method: "item/commandExecution/requestApproval", params: { threadId: chat.threadId, turnId, itemId: "mock-command", command: "Get-ChildItem", cwd: "D:\\demo", availableDecisions: ["accept", "decline"] } }); changed(chat);
         } else setTimeout(() => finish(chat, turnId, answer), 650);
@@ -87,7 +87,7 @@ export const mock: ModuleMock = {
         const chat = get(sessionId, chatId);
         if (!chat.pendingRequests.some(r => r.id === requestId)) throw new Error("side_request_not_found");
         chat.pendingRequests = chat.pendingRequests.filter(r => r.id !== requestId); changed(chat);
-        if (chat.activeTurnId) finish(chat, chat.activeTurnId, "审批回复只发送给了侧聊，主聊天未受影响。");
+        if (chat.activeTurnId) finish(chat, chat.activeTurnId, "审批回复只发送给了侧边对话，主对话未受影响。");
         return copy(chat);
       },
       async sideClose(sessionId, chatId) { const chat = get(sessionId, chatId); chat.status = "closed"; chat.activeTurnId = null; chat.pendingRequests = []; changed(chat); return { closed: true }; },

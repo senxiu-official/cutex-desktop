@@ -80,6 +80,15 @@ describe("relay internal model adapter", () => {
       await expect(f.adapter.execute(f.tab.guestId, { kind: "tab.snapshot" }, {})).rejects.toMatchObject({ code: "permission_denied" });
     }
   });
+  it("passes the scroll outcome only to a host that reads it", async () => {
+    for (const supported of [true, false]) {
+      const f = fixture(), scroll = { dx: 0, dy: 812, atEdge: true };
+      f.provider.action.mockResolvedValue({ status: "dispatched", pageGeneration: 2, scroll } as any);
+      const adapter = createBrowserModelAdapter({ provider: f.provider, tabs: f.tabs, decodeImage: vi.fn(), scrollOutcome: () => supported });
+      expect(await adapter.execute(f.tab.guestId, { kind: "tab.act", action: { kind: "scroll", direction: "down", amount: 1500 } }, {}))
+        .toEqual(supported ? { kind: "tab.act", pageGeneration: 2, scroll } : { kind: "tab.act", pageGeneration: 2 });
+    }
+  });
   it("forwards strict action objects once and never grants or resumes", async () => {
     const f = fixture(), action = { kind: "check" as const, ref: "private-ref" };
     await f.adapter.execute(f.tab.guestId, { kind: "tab.snapshot" }, {});

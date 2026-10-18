@@ -82,6 +82,10 @@ export interface UpgradeInstalled {
   sequence?: number;
   commit?: string | null;
   manifestSha256?: string | null;
+  /** Capability upgrade-installed-notes: the installed manifest's notes (language tag -> text); null when unknown. */
+  notes?: Record<string, string> | null;
+  /** Capability upgrade-installed-notes: the installed manifest's publishedAt; null when unknown. */
+  publishedAt?: string | null;
 }
 
 export interface UpgradeAvailable {
@@ -195,6 +199,8 @@ export type UpgradeRuntimeChange = "native" | "package" | "none";
 export const UPGRADE_RUNTIME_CHANGES: readonly UpgradeRuntimeChange[] = ["native", "package", "none"];
 /** Capability: run records carry `nativeVersion` / `previousNativeVersion` / `runtimeChange`. */
 export const UPGRADE_RUN_NATIVE_FEATURE = "upgrade-run-native";
+/** Capability: `GET /v2/upgrade` `installed` carries `notes` / `publishedAt` from the installed manifest. */
+export const UPGRADE_INSTALLED_NOTES_FEATURE = "upgrade-installed-notes";
 
 /** After a full-mode commit: idle outdated agents move in batches (`packageRun: after`). */
 export interface UpgradeFollowUp {

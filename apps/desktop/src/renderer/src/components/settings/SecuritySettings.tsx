@@ -97,7 +97,7 @@ function ProjectGrants({ projectId, security, patch, saving, showProject }: { pr
         const where = pid ? (sidebar?.projects?.projects.find((p) => p.project_id === pid)?.presentation.display_name ?? pid) : t("security.independent");
         return (
           <div key={g.agent} className="flex h-8 items-center gap-2 pl-1">
-            <Avatar name={s?.displayName ?? g.agent} avatar={s?.avatar} seed={g.agent} size={18} />
+            <Avatar name={s?.displayName ?? g.agent} avatar={s?.avatar} seed={g.agent} size={18} minor />
             <button disabled={!s} onClick={() => void select(g.agent)} className="min-w-0 truncate text-left text-sm enabled:hover:underline" title={g.agent}>
               {s?.displayName ?? g.agent}
             </button>

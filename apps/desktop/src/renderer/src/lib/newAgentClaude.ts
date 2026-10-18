@@ -2,9 +2,11 @@
 // profiles in POST /v2/human/agents (`unsupported_profile: Claude subscription profiles are not
 // supported by this creator`), so the form greys them out on such a host. With it, Claude agents
 // use the profile's own write / exec rules: the Codex-only launch fields (sandbox, approval,
-// network, writable roots) are not sent.
+// network, writable roots) are not sent. With cutex `claude-launch-permission-mode` (the profile lists
+// `claudeLaunchPermissionModes`) the new agent / quick chat can start in one of Claude Code's own
+// permission modes (`launch.claudePermissionMode`), shown with the composer's Claude mode names.
 import type { ProfileItem } from "../../../shared/ipc";
-import { launchFromForm, type LaunchForm, type LaunchOverrides } from "../../../shared/launch";
+import { CLAUDE_LAUNCH_MODES, launchFromForm, type ClaudeLaunchMode, type LaunchForm, type LaunchOverrides } from "../../../shared/launch";
 
 export const HUMAN_AGENT_CLAUDE_FEATURE = "human-agent-claude";
 
@@ -18,14 +20,49 @@ export function effectiveProfile(profiles: { defaultProfile: string | null; prof
   return d ? (list.find((p) => p.name === d || p.id === d) ?? null) : null;
 }
 
-/** Launch overrides for a Claude agent: only model / effort (Claude uses the profile's rules). */
-export function claudeLaunchFromForm(form: LaunchForm, touched: boolean): LaunchOverrides | undefined {
-  const full = launchFromForm(form, touched);
-  if (!full) return undefined;
-  const launch: LaunchOverrides = {};
-  if (full.model) launch.model = full.model;
-  if (full.reasoningEffort) launch.reasoningEffort = full.reasoningEffort;
-  return Object.keys(launch).length ? launch : undefined;
+/** The mode a Claude agent starts in when none is picked (the adapter's default). */
+export const CLAUDE_DEFAULT_LAUNCH_MODE: ClaudeLaunchMode = "bypassPermissions";
+
+/**
+ * Claude modes a new agent of `profile` can start in (display order), or null: a Codex profile, an
+ * older cutex (no `claudeLaunchPermissionModes`) or a Claude runtime that offers none.
+ */
+export function claudeLaunchModes(profile: Pick<ProfileItem, "cliKind" | "claudeLaunchPermissionModes"> | null | undefined): ClaudeLaunchMode[] | null {
+  if (!isClaudeProfile(profile)) return null;
+  const listed = profile?.claudeLaunchPermissionModes;
+  if (!Array.isArray(listed)) return null;
+  const modes = CLAUDE_LAUNCH_MODES.filter((m) => listed.includes(m));
+  return modes.length ? modes : null;
+}
+
+/** The mode to show / send: the pick when this profile offers it, else the default (when offered), else the first. */
+export function shownClaudeMode(picked: ClaudeLaunchMode | null | undefined, modes: readonly ClaudeLaunchMode[] | null): ClaudeLaunchMode | null {
+  if (!modes) return null;
+  if (picked && modes.includes(picked)) return picked;
+  return modes.includes(CLAUDE_DEFAULT_LAUNCH_MODE) ? CLAUDE_DEFAULT_LAUNCH_MODE : modes[0]!;
+}
+
+/**
+ * A create request's `launch` for a Claude profile: model / effort and, when offered, the picked
+ * starting mode. Codex-only fields are dropped (cutex refuses them for Claude profiles).
+ */
+export function claudeOnlyLaunch(launch: LaunchOverrides | undefined, modes: readonly ClaudeLaunchMode[] | null): LaunchOverrides | undefined {
+  const out: LaunchOverrides = {};
+  if (launch?.model) out.model = launch.model;
+  if (launch?.reasoningEffort) out.reasoningEffort = launch.reasoningEffort;
+  if (launch?.claudePermissionMode && modes?.includes(launch.claudePermissionMode)) out.claudePermissionMode = launch.claudePermissionMode;
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** A Codex profile's `launch`: without the Claude starting mode (cutex refuses it there). */
+export function codexOnlyLaunch(launch: LaunchOverrides): LaunchOverrides {
+  const { claudePermissionMode: _dropped, ...rest } = launch;
+  return rest;
+}
+
+/** Launch overrides for a Claude agent: model / effort (when Advanced was touched) and the picked mode. */
+export function claudeLaunchFromForm(form: LaunchForm, touched: boolean, mode: ClaudeLaunchMode | null = null, modes: readonly ClaudeLaunchMode[] | null = null): LaunchOverrides | undefined {
+  return claudeOnlyLaunch({ ...launchFromForm(form, touched), ...(mode ? { claudePermissionMode: mode } : {}) }, modes);
 }
 
 /** cutex without `human-agent-claude` refusing a Claude profile. */

@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { bridge } from "../bridge";
 import type { Locale } from "../i18n";
 import { focusSessionViews, useApp } from "../store";
-import { waitingAgentCount } from "./sidebar";
+import { pendingByAgent } from "./sidebar";
 import { useOwnerNotify } from "./ownerNotifyStore";
 import { isPending, OWNER_NOTIFY_FEATURE } from "../../../shared/ownerNotify";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
@@ -17,13 +17,13 @@ export function appAttention(state = useApp.getState(), notes = useOwnerNotify.g
   return sumHosts(Object.values(attentionByHost(state, notes, others)), (n) => n);
 }
 
-type AttentionState = Pick<ReturnType<typeof useApp.getState>, "sessions" | "approvals" | "features" | "byHost" | "hosts">;
+type AttentionState = Pick<ReturnType<typeof useApp.getState>, "sessions" | "approvals" | "features" | "byHost" | "hosts"> & Partial<Pick<ReturnType<typeof useApp.getState>, "hostWaiting">>;
 
 /** appAttention per connected host (the focus host under its id; 需要你 「其他主机 N 项」 sums the hosts outside the scope). */
 export function attentionByHost(state: AttentionState = useApp.getState(), notes = useOwnerNotify.getState().byId, others = useOwnerNotify.getState().others): Record<string, number> {
   const pending = (records: Record<string, Parameters<typeof isPending>[0]>) => Object.values(records).filter(isPending).length;
   const out: Record<string, number> = { [state.hosts?.active ?? LOCAL_HOST_ID]: // An open agent of another host is counted with that host (its slice), not here.
-    waitingAgentCount(focusSessionViews(state)) + (state.approvals?.length ?? 0) + (state.features.has(OWNER_NOTIFY_FEATURE) ? pending(notes) : 0) };
+    Object.keys(pendingByAgent(focusSessionViews(state), state.hostWaiting)).length + (state.approvals?.length ?? 0) + (state.features.has(OWNER_NOTIFY_FEATURE) ? pending(notes) : 0) };
   for (const [hostId, slice] of Object.entries(state.byHost ?? {})) {
     out[hostId] = Object.keys(slice.waiting).length + (slice.approvals?.length ?? 0) + (slice.features.has(OWNER_NOTIFY_FEATURE) ? pending(others[hostId] ?? {}) : 0);
   }

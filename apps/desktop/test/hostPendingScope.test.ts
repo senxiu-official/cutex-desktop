@@ -580,7 +580,9 @@ describe("pending operations retain their host and run", () => {
       model: "bad"
     })).toBe(false);
     expect(store.getState().sessions.same!.timeline.settings).toBe(previous);
-    expect(store.getState().sessions.same!.error).toBe("normal failure");
+    // A refused settings change is a notice, not the conversation's load error (owner 2026-10-18).
+    expect(store.getState().sessions.same!.error ?? null).toBeNull();
+    expect(store.getState().notice).toMatchObject({ tone: "error", text: expect.stringContaining("normal failure") });
   });
   it("keeps a same-thread goal reply when normal streaming replaces the view wrapper", async () => {
     const goal = deferred<unknown>();

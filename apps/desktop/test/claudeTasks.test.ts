@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { isClaudeTaskRef } from "../src/renderer/src/lib/claudeTasks";
-import { activeSubAgents, subAgentsOf } from "../src/renderer/src/lib/subagents";
+import { canOpenSubAgent, isClaudeAgentTool, isClaudeTaskRef } from "../src/renderer/src/lib/claudeTasks";
+import { agentFeaturesOf, CLAUDE_PROTOCOL, CODEX_FEATURES, opensClaudeSubagents } from "../src/renderer/src/lib/agentFeatures";
+import { activeSubAgents, subAgentsOf, takeSubAgentReads } from "../src/renderer/src/lib/subagents";
 import { timelineFromThreadRead } from "../src/renderer/src/lib/timeline";
 import { en } from "../src/renderer/src/i18n/en";
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";
@@ -41,5 +42,34 @@ describe("isClaudeTaskRef", () => {
   it("explains it in both locales", () => {
     expect(zhCN["sub.claudeTask"]).toBeTruthy();
     expect(en["sub.claudeTask"]).toBeTruthy();
+  });
+});
+
+const claude = (features: Record<string, unknown> | null) => agentFeaturesOf({ native: { schema: { protocol: CLAUDE_PROTOCOL, capabilities: { features } } } });
+
+describe("Claude subagent transcripts (adapter subagentTranscripts)", () => {
+  it("opens a Claude task only when the adapter keeps transcripts; Codex children always", () => {
+    expect(opensClaudeSubagents(claude({ subagentTranscripts: true }))).toBe(true);
+    for (const f of [claude({ subagentTranscripts: false }), claude({}), claude(null), CODEX_FEATURES]) expect(opensClaudeSubagents(f)).toBe(false);
+    expect(canOpenSubAgent(TASK, claude({ subagentTranscripts: true }))).toBe(true);
+    expect(canOpenSubAgent(TASK, claude({ subagents: true }))).toBe(false);
+    expect(canOpenSubAgent(CODEX_CHILD, CODEX_FEATURES)).toBe(true);
+  });
+
+  it("reads Claude tasks (settle / name) only when asked to", () => {
+    const item = { type: "subAgentActivity", id: "a1", kind: "started", agentThreadId: TASK, agentPath: "/claude/x" };
+    const timeline = timelineFromThreadRead({ thread: { id: "t", turns: [{ id: "t1", status: "inProgress", items: [item] }] } });
+    const agents = [...subAgentsOf(timeline).values()];
+    const log = () => ({ settle: new Set<string>(), name: new Map<string, { at: number; tries: number }>() });
+    expect(takeSubAgentReads("s", agents, {}, {}, log(), 0, 1)).toEqual([]);
+    expect(takeSubAgentReads("s", agents, {}, {}, log(), 0, 1, true)).toEqual([{ threadId: TASK, settle: true }]);
+  });
+
+  it("matches the adapter's Agent / Task tool calls", () => {
+    expect(isClaudeAgentTool({ type: "dynamicToolCall", id: "c", namespace: "claude", tool: "Agent" })).toBe(true);
+    expect(isClaudeAgentTool({ type: "dynamicToolCall", id: "c", namespace: "claude", tool: "Task" })).toBe(true);
+    expect(isClaudeAgentTool({ type: "dynamicToolCall", id: "c", namespace: "claude", tool: "WebFetch" })).toBe(false);
+    expect(isClaudeAgentTool({ type: "dynamicToolCall", id: "c", namespace: "mcp", tool: "Agent" })).toBe(false);
+    expect(isClaudeAgentTool({ type: "collabAgentToolCall", id: "c", tool: "spawnAgent" })).toBe(false);
   });
 });

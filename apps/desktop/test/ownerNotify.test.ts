@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OwnerNotification, OwnerNotifySettings } from "@cutex-desktop/protocol";
 import { applyAlertRecord, asRecord, isAlerting, isPending, mergeRecords, ownerNotifyPatch, previewText, reconcileAlerts, recordOfEvent, sanitizeOwnerNotifyPatch, toggleChannel, wantsBigAlert, wantsDesktopNotification } from "../src/shared/ownerNotify";
-import { notePresentation, noteTurnOf, pendingByAgent, placeOwnerNotes, ownerNoteActions } from "../src/renderer/src/lib/ownerNotify";
+import { noteFirstLine, noteNeedsOlderHistory, notePresentation, noteTurnOf, openAgentPendingNotes, pendingByAgent, pendingNoteLabel, placeOwnerNotes, ownerNoteActions } from "../src/renderer/src/lib/ownerNotify";
 import { needsYouByAgent } from "../src/renderer/src/lib/agentAttention";
 import { alertStrings, chimeNotes, pickFirst, refsLine, timeLabel } from "../src/renderer/src/ownerAlert/model";
 
@@ -172,5 +172,62 @@ describe("timeline presentation (quiet pass)", () => {
     expect(notePresentation(rec("f", { level: "attention", state: "open" }))).toBe("row");
     expect(notePresentation(rec("g", { level: "info", state: "open" }))).toBe("row");
     expect(notePresentation(rec("h", { level: "attention", needsReply: true, state: "open", origin: "system" }))).toBe("row");
+  });
+});
+
+describe("open agent pending notices (composer 等你回复 row)", () => {
+  const byIdOf = (...records: OwnerNotification[]) => Object.fromEntries(records.map((r) => [r.notificationId, r]));
+  const at = (min: number) => new Date(Date.UTC(2026, 9, 18, 10, min)).toISOString();
+
+  it("keeps only that agent's pending notices, by the sidebar's isPending rule", () => {
+    const byId = byIdOf(
+      rec("reply", { needsReply: true, createdAt: at(2) }),
+      rec("acked-reply", { needsReply: true, state: "acknowledged", createdAt: at(3) }),
+      rec("answered", { needsReply: true, state: "answered", createdAt: at(1) }),
+      rec("read", { state: "acknowledged", createdAt: at(4) }),
+      rec("muted", { channels: [], createdAt: at(5) }),
+      rec("system", { origin: "system", needsReply: true, createdAt: at(6) }),
+      rec("other", { agentId: "mika", needsReply: true, createdAt: at(0) }),
+    );
+    const ids = openAgentPendingNotes(byId, "eva").map((r) => r.notificationId);
+    expect(ids).toEqual(["reply", "acked-reply"]);
+    expect(ids).toEqual(pendingByAgent(Object.values(byId)).get("eva")!.map((r) => r.notificationId));
+    expect(openAgentPendingNotes(byId, "nobody")).toEqual([]);
+  });
+
+  it("puts a stopped command first, then replies, then messages, oldest first in each", () => {
+    const block = { blockId: "b1", itemId: "i1", state: "blocked" } as unknown as OwnerNotification["safetyBlock"];
+    const byId = byIdOf(
+      rec("msg-old", { createdAt: at(0) }),
+      rec("reply-new", { needsReply: true, createdAt: at(9) }),
+      rec("reply-old", { needsReply: true, createdAt: at(1) }),
+      rec("block", { origin: "system", safetyBlock: block, createdAt: at(8) }),
+    );
+    expect(openAgentPendingNotes(byId, "eva").map((r) => r.notificationId)).toEqual(["block", "reply-old", "reply-new", "msg-old"]);
+  });
+
+  it("labels 等你回复 only what takes a reply", () => {
+    expect(pendingNoteLabel(rec("a", { needsReply: true }))).toBe("awaitsReply");
+    expect(pendingNoteLabel(rec("a", { needsReply: true, state: "acknowledged" }))).toBe("awaitsReply");
+    expect(pendingNoteLabel(rec("a"))).toBe("needsYou");
+    expect(pendingNoteLabel(rec("a", { needsReply: true, origin: "system" }))).toBe("needsYou");
+  });
+
+  it("shows the first text line without Markdown marks", () => {
+    expect(noteFirstLine("\n\n## 手机掉线了\n请重连")).toBe("手机掉线了");
+    expect(noteFirstLine("请打开 **adb 调试**，然后 `adb devices`")).toBe("请打开 adb 调试，然后 adb devices");
+    expect(noteFirstLine("```text\nError\n```")).toBe("Error");
+    expect(noteFirstLine("- see [the log](https://x.test/log)")).toBe("see the log");
+    expect(noteFirstLine("x".repeat(100), 10)).toBe(`${"x".repeat(9)}…`);
+  });
+
+  it("pages older history in for a notice older than every loaded turn", () => {
+    const turns = [{ id: "t5", startedAt: Date.parse(at(30)) / 1000 }, { id: "t6", startedAt: Date.parse(at(40)) / 1000 }];
+    const old = rec("old", { turnId: "t1", createdAt: at(2) });
+    expect(noteNeedsOlderHistory(old, turns, true)).toBe(true);
+    expect(noteNeedsOlderHistory(old, turns, false)).toBe(false);
+    expect(noteNeedsOlderHistory(rec("loaded", { turnId: "t5", createdAt: at(2) }), turns, true)).toBe(false);
+    expect(noteNeedsOlderHistory(rec("later", { createdAt: at(35) }), turns, true)).toBe(false);
+    expect(noteNeedsOlderHistory(old, [], true)).toBe(true);
   });
 });

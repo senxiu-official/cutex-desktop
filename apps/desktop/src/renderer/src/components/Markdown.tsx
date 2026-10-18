@@ -337,7 +337,7 @@ const components = { a: MarkdownLink, img: MarkdownImage, code: MarkdownCode };
  * else (chat, cards) headings stay near the body size (UI review #14, styles.css `.markdown` headings).
  * `relativeFiles = false`: relative links / images have no base (see RelativeFiles) and stay inert.
  */
-export const Markdown = memo(function Markdown({ text, streaming = false, compact = false, document = false, relativeFiles = true }: { text: string; streaming?: boolean; /** 13px (reasoning text). */ compact?: boolean; document?: boolean; relativeFiles?: boolean }) {
+export const Markdown = memo(function Markdown({ text, streaming = false, compact = false, document = false, relativeFiles = true, uncappedCode = false }: { text: string; streaming?: boolean; /** 13px (reasoning text). */ compact?: boolean; document?: boolean; relativeFiles?: boolean; /** Code blocks grow to their full height (a whole file shown as one block; `document` implies it, and uncaps tables too); default: streamdown's 400px cap with an inner scroll. */ uncappedCode?: boolean }) {
   const translations = useStreamdownTranslations();
   return (
     <RelativeFiles.Provider value={relativeFiles}>
@@ -352,6 +352,10 @@ export const Markdown = memo(function Markdown({ text, streaming = false, compac
           rehypePlugins={streaming ? rehypePlugins : staticRehypePlugins}
           shikiTheme={["github-light", "github-dark"]}
           translations={translations}
+          // A whole document or file (side preview, artifact) scrolls as one: no inner height caps on its code
+          // blocks and tables (streamdown defaults: 400px / 300px). Chat keeps them.
+          {...(uncappedCode || document ? { codeBlockMaxHeight: Number.POSITIVE_INFINITY } : {})}
+          {...(document ? { tableMaxHeight: Number.POSITIVE_INFINITY } : {})}
         >
           {text}
         </Streamdown>

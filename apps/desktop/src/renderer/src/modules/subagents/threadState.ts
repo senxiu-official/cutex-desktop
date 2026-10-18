@@ -1,7 +1,6 @@
 // subagents.thread params / state and its tab (kept out of the .tsx file).
 import { useMemo } from "react";
 import { useSubAgentLive } from "../../lib/background";
-import { isClaudeTaskRef } from "../../lib/claudeTasks";
 import { subAgentName, subAgentsOf, subAgentTooltip, type SubAgentInfo } from "../../lib/subagents";
 import { useSubAgentMeta } from "../../lib/subagentMetaStore";
 import { useApp } from "../../store";
@@ -10,11 +9,15 @@ import type { Json } from "../types";
 
 export type ThreadState = { threadId: string };
 
-/** A Claude task (`claude:<session>:task:<id>`) is not a thread: never a card, nor a restored one. */
+const CLAUDE_REF = /^claude:[^:\s]+:task:\S+$/;
+
+/** A Codex sub-agent thread id, or a Claude subagent reference `claude:<session>:task:<id>` (opened only
+ *  for adapters with transcripts: lib/sideOpen; a restored card of another agent says the read failed). */
 export function parseThreadParams(raw: Json): ThreadState | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const id = raw.threadId;
-  return typeof id === "string" && id.length > 0 && id.length <= 200 && !isClaudeTaskRef(id) ? { threadId: id } : null;
+  if (typeof id !== "string" || id.length === 0 || id.length > 200) return null;
+  return !id.startsWith("claude:") || CLAUDE_REF.test(id) ? { threadId: id } : null;
 }
 
 export function restoreThread(raw: Json, version: number): ThreadState | null {

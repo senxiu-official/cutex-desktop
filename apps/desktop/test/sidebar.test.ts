@@ -120,7 +120,7 @@ describe("buildSidebar", () => {
   });
 
   it("splits quick chats into their own newest-first list only when enabled", () => {
-    const chat = (id: string, at: string) => session(id, { registrationClass: "local_only", formalAgentName: null, updatedAt: at });
+    const chat = (id: string, at: string) => session(id, { registrationClass: "local_only", formalAgentName: null, createdAt: at });
     const snapshot = {
       active: [
         session("agent"),

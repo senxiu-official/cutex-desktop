@@ -39,6 +39,11 @@ export function toggleColumn(whenEmpty?: () => void): void {
   updateLayout((l) => setOpen(l, !l.open));
 }
 
+/** Opens the right column if it is closed (调整右侧栏, components/CustomizeHost; closing that panel leaves it open). */
+export function openSideColumn(): void {
+  if (!useSide.getState().layout.open) updateLayout((l) => setOpen(l, true));
+}
+
 export function closeColumn(): void {
   if (useSide.getState().mode) setMode(null);
   updateLayout((l) => setOpen(l, false));

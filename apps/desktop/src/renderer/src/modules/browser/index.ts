@@ -36,6 +36,8 @@ export default defineModule({
       useTab: useBrowserTab,
       Body: BrowserBody,
       Actions: BrowserActions,
+      // Chrome-like: the tab row shows with one tab too, ＋ = a new blank owner tab in this card.
+      tabRow: "always",
       onClose: (instance) => closeBrowser(instance.binding.hostId, instance.state.tabKey),
       launcher: { order: 700, pin: "default", params: () => ({ url: "about:blank" }) },
     }],

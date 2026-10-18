@@ -91,3 +91,14 @@ export function passThroughKey(e: Pick<KeyboardEvent, "key" | "code" | "ctrlKey"
   if (e.key === "F6" && !mod && !e.altKey) return true;
   return false;
 }
+
+/**
+ * Whether `data` from xterm's onData is xterm answering a terminal query rather than a keystroke:
+ * cursor position / status reports (`CSI … R`, `CSI … n`), device attributes (`CSI ? … c`, `CSI > … c`),
+ * mode reports (`CSI ? … $ y`), window reports (`CSI … t`), OSC colour answers (`OSC … rgb:…`) and DCS
+ * replies. Keys (arrows, function keys, pasted text) never match.
+ */
+export function isTerminalReply(data: string): boolean {
+  // eslint-disable-next-line no-control-regex -- terminal control sequences
+  return /^(?:\x1b\[[\d;]*[Rnt]|\x1b\[[?>][\d;]*c|\x1b\[\??[\d;]*\$y|\x1b\][^\x07\x1b]*rgb:[^\x07\x1b]*(?:\x07|\x1b\\)|\x1bP[\s\S]*\x1b\\)+$/.test(data);
+}

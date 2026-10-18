@@ -6,7 +6,7 @@ import { sessionApi, useApp } from "../store";
 import { viewRow } from "./viewHost";
 import { childStatusFromThreadRead, liveAtGeneration, subAgentMetaFromThreadRead, subAgentsOf, takeSubAgentReads, type SubAgentLive, type SubAgentReadLog } from "./subagents";
 import { recordSubAgentMeta, useSubAgentMeta } from "./subagentMetaStore";
-import { lacks } from "./agentFeatures";
+import { lacks, opensClaudeSubagents } from "./agentFeatures";
 import { agentFeaturesFor } from "./agentFeaturesView";
 import type { TimelineState } from "./timeline";
 import { RequestCoalescer, terminalsRefreshKey } from "./terminalsFetch";
@@ -40,15 +40,16 @@ export function useSubAgentLive(sessionId: string | null): SubAgentLive {
  *  is online, read each sub-agent that still looks active and has no child-thread status yet once
  *  per runtime generation (`thread/read` on the child) and record the settled status. The same read
  *  gives the child's nickname / role; a sub-agent whose nickname is still unknown gets one light read
- *  (no turns) for it. A Claude task is not a thread (nothing to read; the adapter's own
- *  `subAgentActivity` items say when it ends): never read. */
+ *  (no turns) for it. A Claude task is read only when its adapter keeps subagent transcripts
+ *  (lib/claudeTasks); otherwise the adapter's own `subAgentActivity` items say when it ends. */
 export function useSettleSubAgents(sessionId: string | null, timeline: TimelineState | null, version: number, online: boolean): void {
   const live = useSubAgentLive(sessionId);
   const generation = useAgentRuntimeGeneration(sessionId);
   const meta = useSubAgentMeta();
   useEffect(() => {
     if (!sessionId || !online) return;
-    for (const { threadId, settle } of takeSubAgentReads(sessionId, subAgentsOf(timeline).values(), live, meta, subAgentReads, Date.now(), generation)) {
+    const claudeReads = opensClaudeSubagents(agentFeaturesFor(sessionId));
+    for (const { threadId, settle } of takeSubAgentReads(sessionId, subAgentsOf(timeline).values(), live, meta, subAgentReads, Date.now(), generation, claudeReads)) {
       sessionApi(sessionId).subAgentThread(sessionId, threadId, settle ? undefined : { includeTurns: false }).then(
         (result) => {
           recordSubAgentMeta(threadId, subAgentMetaFromThreadRead(result));

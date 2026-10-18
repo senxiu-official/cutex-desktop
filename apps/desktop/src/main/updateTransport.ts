@@ -36,6 +36,9 @@ export interface ProxyServer {
   scheme: "http" | "https" | "socks4" | "socks5";
   host: string;
   port: number;
+  /** Basic credentials of the manual update proxy (Settings → 网络代理); only this transport sends them —
+   *  `proxyUrl` (git / pnpm) never includes them. */
+  auth?: { username: string; password: string };
 }
 
 /**
@@ -80,7 +83,8 @@ export function nodeTransport(proxy: ProxyServer | null = null): Transport {
       const u = new URL(url);
       const secure = u.protocol === "https:";
       const port = Number(u.port || (secure ? 443 : 80));
-      const headers = { ...init.headers, host: u.host };
+      const proxyAuth = proxy?.auth ? { "proxy-authorization": `Basic ${Buffer.from(`${proxy.auth.username}:${proxy.auth.password}`).toString("base64")}` } : {};
+      const headers = { ...init.headers, host: u.host, ...(proxy && !secure ? proxyAuth : {}) };
       const send = (tunnel?: Socket) => {
         const opts: RequestOptions = { method: "GET", headers, signal: init.signal, agent: false };
         if (proxy && !secure) Object.assign(opts, { host: proxy.host, port: proxy.port, path: url });
@@ -98,7 +102,7 @@ export function nodeTransport(proxy: ProxyServer | null = null): Transport {
       };
       if (!proxy || !secure) return send();
       const authority = `${u.hostname.includes(":") ? `[${u.hostname}]` : u.hostname}:${port}`;
-      const connect = httpRequest({ host: proxy.host, port: proxy.port, method: "CONNECT", path: authority, headers: { host: authority }, signal: init.signal, agent: false });
+      const connect = httpRequest({ host: proxy.host, port: proxy.port, method: "CONNECT", path: authority, headers: { host: authority, ...proxyAuth }, signal: init.signal, agent: false });
       connect.on("connect", (res, socket) => {
         if (res.statusCode === 407) {
           socket.destroy();

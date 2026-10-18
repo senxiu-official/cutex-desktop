@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 
 // Workspace packages are TS sources; bundle them instead of externalizing.
-const workspace = ["@cutex-desktop/protocol", "@cutex-desktop/cutex-client", "@cutex-desktop/plugin-sandbox", "@cutex-desktop/opaque-frame", "@cutex-desktop/browser-protocol", "@cutex-desktop/browser-cdp"];
+const workspace = ["@cutex-desktop/protocol", "@cutex-desktop/plugin-sdk", "@cutex-desktop/cutex-client", "@cutex-desktop/plugin-sandbox", "@cutex-desktop/opaque-frame", "@cutex-desktop/browser-protocol", "@cutex-desktop/browser-cdp"];
 const isPreviewMock = (id: string) => /[\\/]src[\\/]renderer[\\/]src[\\/](dev[\\/]|modules[\\/][^\\/]+[\\/]mock\.ts$)/.test(id);
 
 export default defineConfig({

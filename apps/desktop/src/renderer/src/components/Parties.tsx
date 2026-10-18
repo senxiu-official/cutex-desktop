@@ -66,7 +66,7 @@ export function Who({ id: ref, name, size = 14, quiet = false }: { id: string | 
       onKeyDown={(e) => e.key === "Enter" && (e.stopPropagation(), id && void select(id, host))}
       className={`inline-flex min-w-0 shrink-0 cursor-pointer items-center gap-1 hover:underline ${quiet ? "" : "text-foreground"}`}
     >
-      <Avatar name={label} avatar={session?.avatar} seed={id} size={size} />
+      <Avatar name={label} avatar={session?.avatar} seed={id} size={size} minor />
       <span className="truncate">{label}</span>
     </span>
   );

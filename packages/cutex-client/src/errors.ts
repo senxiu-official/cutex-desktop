@@ -16,7 +16,13 @@ export class CutexApiError extends Error {
     this.details = details;
   }
 
-  static fromBody(status: number, body: unknown): CutexApiError {
+  /**
+   * `viaProxy`: the response carried proxy headers (`Via`, `Proxy-Authenticate`, `Proxy-Agent`). An
+   * answer without cutex's error shape that looks like a proxy's (407, 502, 504, or proxy headers)
+   * says so in the message: a proxy between the desktop and cutex is a common cause of "nothing
+   * works" on a machine with a system / environment proxy.
+   */
+  static fromBody(status: number, body: unknown, viaProxy = false): CutexApiError {
     const error = (body as Partial<CutexErrorBody> | undefined)?.error;
     if (error && typeof error.code === "string") {
       return new CutexApiError(status, error.code, error.message ?? "", !!error.retryable, error.details);
@@ -26,7 +32,16 @@ export class CutexApiError extends Error {
     if (flat && typeof flat === "object" && typeof flat.code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(flat.code)) {
       return new CutexApiError(status, flat.code, typeof flat.message === "string" ? flat.message : "", flat.retryable === true, flat.details);
     }
-    return new CutexApiError(status, `http_${status}`, typeof body === "string" ? body : "request failed");
+    const raw = typeof body === "string" ? body : "request failed";
+    if (viaProxy || status === 407 || status === 502 || status === 504) {
+      return new CutexApiError(status, `http_${status}`, `${PROXY_HINT}${raw ? ` (${textSnippet(raw)})` : ""}`, false, { proxyLike: true });
+    }
+    return new CutexApiError(status, `http_${status}`, raw);
+  }
+
+  /** The answer did not look like cutex's but like a proxy's (see fromBody). */
+  get proxyLike(): boolean {
+    return (this.details as { proxyLike?: unknown } | null | undefined)?.proxyLike === true;
   }
 
   /** Errors that mean our cursor/stream view is invalid and the session must be re-bootstrapped. */
@@ -55,7 +70,26 @@ export const IDEMPOTENCY_CAPACITY_EXCEEDED = "idempotency_capacity_exceeded";
 /** The daemon could not be reached at all (not running, wrong port, ...). */
 export class CutexUnreachableError extends Error {
   constructor(readonly baseUrl: string, cause: unknown) {
-    super(`cutex management API unreachable at ${baseUrl}`, { cause });
+    const reason = causeText(cause);
+    super(`cutex management API unreachable at ${baseUrl}${reason ? ` (${reason})` : ""}`, { cause });
     this.name = "CutexUnreachableError";
   }
+}
+
+/** Shown when an answer looks like a proxy's rather than cutex's. */
+export const PROXY_HINT = "the answer did not come from cutex — a proxy may be in the way (requests to this host must not go through a proxy; check the system / HTTP(S)_PROXY settings)";
+
+/** The low-level reason of a failed fetch (`ECONNREFUSED`, `UND_ERR_SOCKET`, …), short. */
+function causeText(cause: unknown): string {
+  const inner = (cause as { cause?: { code?: unknown; message?: unknown } } | null | undefined)?.cause;
+  if (inner && typeof inner.code === "string") return inner.code;
+  if (inner && typeof inner.message === "string") return inner.message.slice(0, 120);
+  const code = (cause as { code?: unknown } | null | undefined)?.code;
+  return typeof code === "string" ? code : "";
+}
+
+/** A one-line, tag-free excerpt of a non-cutex body (an HTML error page of a proxy). */
+function textSnippet(text: string): string {
+  const plain = text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  return plain.length > 160 ? `${plain.slice(0, 160)}…` : plain;
 }

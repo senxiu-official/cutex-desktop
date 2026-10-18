@@ -18,6 +18,7 @@ import { useAgentNames, useAgentProfile, useCardDelegation, useDelegationContext
 import { OwnerSteeredBadge } from "./DelegationComposer";
 import { focusTurn } from "../lib/focusRequest";
 import { useP2Access } from "../lib/p2Access";
+import { APPROVALS_FEATURE } from "../lib/approvals";
 import type { RawItem } from "../lib/timeline";
 import { useNow } from "../lib/time";
 import { agentHost, featuresOf, useApp } from "../store";
@@ -274,6 +275,8 @@ export function DelegationCard({ item, sessionId }: { item: RawItem; sessionId: 
   const title = d.title || call.title || call.brief || "";
   const waited = held && d.createdAt ? formatSpan(waitSeconds(d, now) ) : null;
   const ownerSteered = useOwnerSteered(askId, live && !!d.answerId);
+  // Delegating to a wider target waits for the owner first (cutex state pendingReview): say where.
+  const reviewing = !d.closed && !stopPending(d) && d.execution === "pendingReview";
   return (
     <div className="my-2" data-ask-id={askId} onContextMenu={contextMenu(() => delegationMenu(d, t, nameOf, { host, here: sessionId, views }))}>
       <button onClick={() => setOpen(!open)} className="flex w-full max-w-full items-center gap-1.5 rounded-md py-0.5 text-left text-xs text-muted hover:text-foreground">
@@ -304,7 +307,26 @@ export function DelegationCard({ item, sessionId }: { item: RawItem; sessionId: 
           <DelegationHoldLine status={status} name={targetName} waited={waited} />
         </div>
       )}
+      {reviewing && <DelegationReviewLine />}
       {open && <DelegationDetailBody d={d} brief={call.brief} here={sessionId} host={host} />}
+    </div>
+  );
+}
+
+/** Under a delegation that waits for the owner's review (pendingReview): where to decide it. */
+function DelegationReviewLine() {
+  const { t } = useI18n();
+  const approvals = useApp((s) => featuresOf(s, agentHost(s)).has(APPROVALS_FEATURE));
+  const hint = t("delegation.pendingReviewHint");
+  return (
+    <div className="ml-5 text-[11px] text-warn" data-testid="delegation-review-line">
+      {approvals ? (
+        <button onClick={() => useApp.getState().openPage("approvals.page")} className="hover:underline">
+          {hint}
+        </button>
+      ) : (
+        hint
+      )}
     </div>
   );
 }

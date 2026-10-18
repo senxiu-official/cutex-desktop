@@ -57,7 +57,9 @@ export interface BrowserAgentView { sessionId: string; name: string }
 export interface BrowserGrantTarget { guestId: string; pageGeneration: number }
 export interface BrowserHostSettings { agentOpenApproval: "off" | "ask" }
 export interface BrowserIdempotencyClearResult { deleted: number; outcomeUnknown: number; abandonedForwarded: number; scope: "session" | "all"; warning: string }
-export interface BrowserMountIdentity { pendingOpen?: string; agentOpened?: true }
+/** carrier "background": an agent-pool tab main renders off screen (agents act on it while the card
+ * or window is hidden); main refuses it for owner tabs. Omitted: the visible webview path. */
+export interface BrowserMountIdentity { pendingOpen?: string; agentOpened?: true; carrier?: "background" }
 export interface BrowserOpenIntent { requestId: string; hostId: string; epoch: string; tabKey: string; cutexSessionId: string; url: string; remainingMs: number }
 export type BrowserOpenRefusal = "lease_limit" | "scope_invalid" | "scope_unsupported" | "target_closed" | "stale_connection" | "browser_disabled" | "invalid_request";
 /** Owner-only history projection; no filesystem path, arbitrary RPC or agent access. */
@@ -93,6 +95,11 @@ export interface BrowserTabView {
   /** A site-permission request of this tab: main's native dialog is open (waiting), or the last one
    * ended without the owner (hidden window / unanswered). Display only; the owner answers in main. */
   sitePermission?: BrowserSitePermissionPromptView;
+  /** "background": main's offscreen carrier of an agent tab (live thumbnail in the card, agents act
+   * while it is hidden). Absent: a webview in the card (visible-only agent control). */
+  carrier?: "background";
+  /** A carrier hand-over is running: agent actions wait (busy) until the page reopened. */
+  handover?: true;
 }
 export interface BrowserSitePermissionPromptView { state: "waiting" | "hidden" | "timeout"; origin: string; permissions: BrowserSitePermission[] }
 export interface BrowserTabMount {
@@ -102,12 +109,16 @@ export interface BrowserTabMount {
   /** Main-authoritative pool, including safe isolated recovery of corrupt provenance. */
   pool?: "owner" | "agent";
   recovery?: "browser_identity_recovered";
-  /** One-use main-issued about:blank admission envelope; never persisted. */
+  /** One-use main-issued about:blank admission envelope; never persisted. Empty for a background carrier. */
   src: string;
+  /** Main created an offscreen carrier for this agent tab: the renderer creates no webview. */
+  carrier?: "background";
 }
 /** Main opens an owner tab for a claim: the renderer shows it (held) in the requesting agent's lane. */
 export interface BrowserClaimOpenIntent { tabKey: string; url: string; sessionId: string }
-export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-tab" | "diagnostic" | "reveal" | "agent-open" | "agent-open-cancel" | "agent-open-confirm" | "claim-open" | "claim-granted" | "blocked"; newTabUrl?: string;
+export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-tab" | "diagnostic" | "reveal" | "agent-open" | "agent-open-cancel" | "agent-open-confirm" | "claim-open" | "claim-granted" | "blocked" | "thumbnail"; newTabUrl?: string;
+  /** thumbnail: a bounded data:image/jpeg of a background agent tab (at most ~1 per second). */
+  thumbnail?: string;
   /** new-tab: the opener's agent caused this popup (its own click), not the owner. */
   newTabAgent?: true;
   /** new-tab: the host granted it to that agent under the opener's lease (browser-popup-grant). */
@@ -145,7 +156,7 @@ export type BrowserRequest =
   | { op: "open"; tabKey: string; url: string; receipt?: BrowserAttachReceipt; identity?: BrowserMountIdentity }
   | { op: "navigate"; tabKey: string; url: string }
   | { op: "ownerInput"; tabKey: string; kind: BrowserOwnerInputKind }
-  | { op: "back" | "forward" | "reload" | "stop"; tabKey: string }
+  | { op: "back" | "forward" | "reload" | "stop" | "toBackground"; tabKey: string }
   | { op: "close"; tabKey: string; unmount?: boolean };
 export interface HostBrowserBridge {
   /** Main allocates a fresh identity; callers cannot nominate or promote an old tab key. */
@@ -183,6 +194,9 @@ export interface HostBrowserBridge {
   forward(tabKey: string): Promise<void>;
   reload(tabKey: string): Promise<void>;
   stop(tabKey: string): Promise<void>;
+  /** Agent tabs only: move the page from the card's webview to main's background carrier (the
+   * running agent action finishes first; the page reloads at its current address). */
+  toBackground(tabKey: string): Promise<void>;
   close(tabKey: string, options?: { unmount?: boolean }): Promise<void>;
 }
 export interface BrowserBridge {
@@ -199,10 +213,17 @@ export interface BrowserBridge {
 }
 
 /** Fixed UI keys only; no page/daemon message is ever an owner-facing fallback. */
-export type BrowserOwnerErrorKey = "browser.error.invalid" | "browser.error.unsupported" | "browser.error.permission" | "browser.error.loopbackOnly" | "browser.error.disabled" | "browser.error.unavailable" | "browser.error.revoked" | "browser.error.desktopRestarted" | "browser.error.hidden" | "browser.error.paused" | "browser.error.scope" | "browser.error.stale" | "browser.error.deadline" | "browser.error.cancelled" | "browser.error.unknownOutcome" | "browser.error.conflict" | "browser.error.notRetained" | "browser.error.approvalRequired" | "browser.error.approvalDenied" | "browser.error.leaseLimit" | "browser.error.busy" | "browser.error.capacity" | "browser.error.tooLarge" | "browser.error.identityUnavailable" | "browser.error.identityRecovered" | "browser.error.serviceUnavailable" | "browser.externalUnavailable" | "browser.refusal.externalOff" | "browser.refusal.proxyUnavailable" | "browser.refusal.privateAddress" | "browser.refusal.reservedAddress" | "browser.refusal.protectedEndpoint" | "browser.refusal.remoteLoopback" | "browser.serviceProxyRequired" | "browser.noHost" | "browser.unavailable" | "browser.navigationFailed" | "browser.serviceAuthFailed" | "browser.invalidReceipt" | "browser.error.unknown";
+export type BrowserOwnerErrorKey = "browser.error.invalid" | "browser.error.unsupported" | "browser.error.permission" | "browser.error.loopbackOnly" | "browser.error.disabled" | "browser.error.unavailable" | "browser.error.revoked" | "browser.error.desktopRestarted" | "browser.error.hidden" | "browser.error.paused" | "browser.error.scope" | "browser.error.stale" | "browser.error.deadline" | "browser.error.cancelled" | "browser.error.unknownOutcome" | "browser.error.conflict" | "browser.error.notRetained" | "browser.error.approvalRequired" | "browser.error.approvalDenied" | "browser.error.leaseLimit" | "browser.error.busy" | "browser.error.capacity" | "browser.error.tooLarge" | "browser.error.identityUnavailable" | "browser.error.identityRecovered" | "browser.error.serviceUnavailable" | "browser.error.serviceReclaimed" | "browser.error.serviceStopped" | "browser.error.serviceNotFound" | "browser.error.serviceStartFailed" | "browser.error.serviceCrashLooped" | "browser.error.serviceChanged" | "browser.error.upstreamUnreachable" | "browser.error.staticNotFound" | "browser.externalUnavailable" | "browser.refusal.externalOff" | "browser.refusal.proxyUnavailable" | "browser.refusal.privateAddress" | "browser.refusal.reservedAddress" | "browser.refusal.protectedEndpoint" | "browser.refusal.remoteLoopback" | "browser.serviceProxyRequired" | "browser.noHost" | "browser.unavailable" | "browser.navigationFailed" | "browser.serviceAuthFailed" | "browser.invalidReceipt" | "browser.error.unknown";
 /** The one owner action that actually fixes a refusal (none: explain only). */
-export type BrowserRefusalAction = "enableExternal" | "retry" | null;
+export type BrowserRefusalAction = "enableExternal" | "retry" | "reload" | null;
+/**
+ * Service errors a reload can fix: reloading a service tab goes through the ticket flow again with
+ * `start: true` (an on-demand / stopped managed service starts, a moved port is picked up). Not for a
+ * reclaimed or unknown service (nothing to reload into).
+ */
+const RELOAD_FIXES: ReadonlySet<string> = new Set(["service_stopped", "service_start_failed", "service_crash_looped", "service_changed", "upstream_unreachable", "service_unavailable", "services_store_unavailable", "proxy_busy"]);
 export function browserRefusalAction(code: unknown): BrowserRefusalAction {
+  if (typeof code === "string" && RELOAD_FIXES.has(code)) return "reload";
   return code === "external_pages_off" ? "enableExternal" : code === "external_proxy_unavailable" ? "retry" : null;
 }
 export function browserOwnerErrorKey(error: unknown): BrowserOwnerErrorKey {
@@ -234,7 +255,16 @@ export function browserOwnerErrorKey(error: unknown): BrowserOwnerErrorKey {
     case "message_too_large": return "browser.error.tooLarge";
     case "browser_identity_unavailable": case "invalid_browser_identity": return "browser.error.identityUnavailable";
     case "browser_identity_recovered": return "browser.error.identityRecovered";
-    case "service_unavailable": case "service_not_found": case "service_start_failed": return "browser.error.serviceUnavailable";
+    // Service tabs: cutex's codes from the lease / view-ticket routes and the proxy's x-cutex-service-error header.
+    case "service_unavailable": case "services_store_unavailable": case "services_supervisor_unavailable": case "proxy_busy": return "browser.error.serviceUnavailable";
+    case "service_reclaimed": return "browser.error.serviceReclaimed";
+    case "service_stopped": return "browser.error.serviceStopped";
+    case "service_not_found": return "browser.error.serviceNotFound";
+    case "service_start_failed": case "cwd_not_found": case "port_in_use": case "no_free_port": return "browser.error.serviceStartFailed";
+    case "service_crash_looped": case "crash_looped": return "browser.error.serviceCrashLooped";
+    case "service_changed": return "browser.error.serviceChanged";
+    case "upstream_unreachable": return "browser.error.upstreamUnreachable";
+    case "static_not_found": return "browser.error.staticNotFound";
     case "external_pages_unavailable": return "browser.externalUnavailable";
     case "external_pages_off": return "browser.refusal.externalOff";
     case "external_proxy_unavailable": return "browser.refusal.proxyUnavailable";

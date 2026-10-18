@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { appWindows } from "./appWindows";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, session, shell, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
 import { EVENT_CHANNEL, HOST_METHOD_NAMES, INVOKE_CHANNEL, SHELL_CHANNEL, TITLEBAR_HEIGHT, UPDATE_CHANNEL, WINDOW_CHANNEL, type DaemonApi, type DaemonEvents, type DesktopApi, type DesktopEvents, type HostApi, type InvokeMethod, type ShellRequest, type UpdateRequest, type WindowAction } from "../shared/ipc";
@@ -6,11 +7,12 @@ import { isCloseBehavior, isShellLocale, isUpdateCheckMinutes } from "../shared/
 import { CutexApiError } from "@cutex-desktop/cutex-client";
 import { unsupportedFeatureOf, unsupportedMessage } from "../shared/unsupported";
 import { DaemonService } from "./daemon";
+import { applyLoopbackNoProxy } from "../shared/loopbackNoProxy";
 import { HostManager } from "./hosts";
 import { hasImplicitLocalHost, localCutexConfigured } from "./localHost";
 import { PersonIdentityService } from "./personIdentity";
 import { DesktopShell } from "./shell";
-import { initialWindowBounds, trackWindowState } from "./windowState";
+import { initialWindowBounds, trackWindowState, loadWindowBackground, saveWindowBackground } from "./windowState";
 import { MIN_WINDOW_SIZE } from "../shared/windowBounds";
 import { Updater } from "./updater";
 import { handleKnownIssuesRequest, KnownIssuesSource } from "./knownIssues";
@@ -30,6 +32,11 @@ import { PLUGINS_CHANNEL, type PluginRequest } from "../shared/plugins";
 import { FRAMES_CHANNEL, type FrameRequest } from "../shared/frames";
 import { createFrameDocumentStore, type FrameDocumentStore } from "@cutex-desktop/opaque-frame/documents";
 import { createArtifactPageService } from "./frames";
+import { MODULE_API_VERSION } from "@cutex-desktop/plugin-sdk";
+import { ModulePackService, modulePackRequestAllowed, modulePackSource, PackError } from "./modulePacks";
+import { createUpdateNet } from "./updateNet";
+import { MODULE_PACK_SCHEME, MODULE_PACKS_CHANNEL, parseModulePacksRequest } from "../shared/modulePacks";
+import { parseReleaseInfo } from "../shared/update";
 
 import type { HostBinding } from "../shared/hosts";
 import { admitHostBinding } from "./hostFence";
@@ -41,8 +48,18 @@ let pluginResources: ReturnType<typeof createPluginResourceService> | null = nul
 let frameDocuments: FrameDocumentStore | null = null;
 let artifactPages: ReturnType<typeof createArtifactPageService> | null = null;
 let pluginNetwork: ReturnType<typeof createPluginNetworkLockdown> | null = null;
+// Signed first-party module packs (main/modulePacks.ts, docs/desktop-modules.md §23).
+let modulePacks: ModulePackService | null = null;
 // This scheme serves only one-use, main-owned documents. It never bypasses CSP.
-protocol.registerSchemesAsPrivileged([{ scheme: PLUGIN_SCHEME, privileges: { standard: true, secure: true } }]);
+// Loopback (cutex, SSH tunnels) never through a proxy: explicit NO_PROXY for Node and child processes.
+applyLoopbackNoProxy(process.env);
+
+// cutex-module serves only files of verified signed packs to the app window's main frame (§23.5): CORS
+// for module scripts, no fetch API, no CSP bypass.
+protocol.registerSchemesAsPrivileged([
+  { scheme: PLUGIN_SCHEME, privileges: { standard: true, secure: true } },
+  { scheme: MODULE_PACK_SCHEME, privileges: { standard: true, secure: true, corsEnabled: true } },
+]);
 
 // Windows taskbar grouping: an explicit AppUserModelID shared with the launchers (before any window).
 setWindowsAppId();
@@ -74,9 +91,11 @@ const updater = new Updater(
   // The updater talks through its own Chromium session (system proxy, main/updateNet.ts); once the
   // agent-page / plugin containment is engaged its process-wide DNS lockdown stays, and the updater
   // moves its transfers to Node instead of loosening it.
-  { contained: () => pluginNetwork?.engaged() ?? false },
+  // Its proxy is this desktop's own update proxy (Settings → 网络代理: system / none / manual).
+  { contained: () => pluginNetwork?.engaged() ?? false, proxy: () => desktopShell.updateProxyConfig() },
 );
 desktopShell.onPrefsChanged = (prefs) => updater.schedule(prefs.updateCheckMinutes);
+desktopShell.onUpdateProxyChanged = () => updater.reconfigureProxy();
 
 /**
  * One daemon service per host connection (multi-host RFC §4.3): its events are tagged with the host
@@ -327,12 +346,25 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "nciHelper",
   "saveNciHelper",
   "subAgentThread",
+  "searchThread",
   "backgroundTerminals",
   "terminateBackgroundTerminal",
   "putUserInstructions",
   "userInstructions",
   "agentHarness",
+  "claudeCodeSources",
+  "claudeRuntime",
+  "repinClaudeRuntime",
+  "sessionSkills",
+  "claudeModelStatus",
+  "sessionSandboxExtras",
+  "setSessionSandboxExtras",
+  "claudePermissionRules",
+  "setClaudePermissionRules",
+  "claudeSkillsImportList",
+  "importClaudeSkills",
   "patchSettings",
+  "patchProxySettings",
   "getSettings",
   "createPairingCode",
   "clientTokens",
@@ -344,6 +376,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "discoverModels",
   "profileModels",
   "patchProfile",
+  "profileImage",
+  "putProfileImage",
   "getProfile",
   "listProfiles",
   "queueList",
@@ -457,6 +491,8 @@ ipcMain.handle(SHELL_CHANNEL, (event, request: ShellRequest) => {
     case "setUpdateCheckMinutes":
       if (!isUpdateCheckMinutes(request.value)) throw new Error("bad update interval");
       return desktopShell.setUpdateCheckMinutes(request.value);
+    case "setUpdateProxy":
+      return desktopShell.setUpdateProxy(request.value);
     case "setNotifyOff": {
       const state = desktopShell.setNotifyOff(request.value);
       ownerAlerts.onNotifyOffChanged();
@@ -540,6 +576,27 @@ ipcMain.handle(PLUGINS_CHANNEL, async (event, request: PluginRequest) => {
   }
 });
 
+ipcMain.handle(MODULE_PACKS_CHANNEL, async (event, raw: unknown) => {
+  if (!isAppSender(event)) throw new Error("untrusted sender");
+  if (!modulePacks) throw new Error("module packs unavailable");
+  const request = parseModulePacksRequest(raw);
+  try {
+    switch (request.op) {
+      case "state":
+        return modulePacks.view();
+      case "check":
+        return await modulePacks.check();
+      case "install":
+        return await modulePacks.install(request);
+      case "remove":
+        return await modulePacks.remove(request);
+    }
+  } catch (error) {
+    // Only "busy" reaches here (operation failures come back in the view's lastError).
+    throw new Error(error instanceof PackError ? `${error.code}: ${error.message}` : "module pack request failed");
+  }
+});
+
 ipcMain.handle(FRAMES_CHANNEL, async (event, request: FrameRequest) => {
   if (!isAppSender(event)) throw new Error("untrusted sender");
   if (!artifactPages) throw new Error("frames unavailable");
@@ -557,7 +614,7 @@ ipcMain.handle(FRAMES_CHANNEL, async (event, request: FrameRequest) => {
   }
 });
 
-ipcMain.handle(WINDOW_CHANNEL, (event, kind: "control" | "chrome", arg: unknown) => {
+ipcMain.handle(WINDOW_CHANNEL, (event, kind: "control" | "chrome" | "background", arg: unknown) => {
   if (!isAppSender(event)) throw new Error("untrusted sender");
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
@@ -566,6 +623,11 @@ ipcMain.handle(WINDOW_CHANNEL, (event, kind: "control" | "chrome", arg: unknown)
     if (action === "minimize") win.minimize();
     else if (action === "toggleMaximize") (win.isMaximized() ? win.unmaximize() : win.maximize());
     else if (action === "close") win.close();
+  } else if (kind === "background") {
+    if (typeof arg === "string" && /^#[0-9a-f]{6}$/i.test(arg)) {
+      win.setBackgroundColor(arg);
+      saveWindowBackground(arg);
+    }
   } else if (kind === "chrome" && process.platform === "win32") {
     const { color, symbolColor } = arg as { color: string; symbolColor: string };
     if (/^#[0-9a-f]{6}$/i.test(color) && /^#[0-9a-f]{6}$/i.test(symbolColor)) win.setTitleBarOverlay({ color, symbolColor, height: TITLEBAR_HEIGHT });
@@ -593,7 +655,8 @@ function createWindow(): void {
     minWidth: MIN_WINDOW_SIZE.width,
     minHeight: MIN_WINDOW_SIZE.height,
     show: false,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#161616" : "#ffffff",
+    // The colour the page last reported (theme + palette, window-background.json), else the OS theme's.
+    backgroundColor: loadWindowBackground() ?? (nativeTheme.shouldUseDarkColors ? "#0e0e0f" : "#f1f1f3"),
     title: "Cutex",
     icon: desktopShell.appIcon(),
     autoHideMenuBar: true,
@@ -669,6 +732,16 @@ function createWindow(): void {
   else void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
 }
 
+/** The release page the packaged app records (package.json), for the module index's repository. */
+function ownReleasePage(): string | null {
+  try {
+    const info = parseReleaseInfo(JSON.parse(readFileSync(join(app.getAppPath(), "package.json"), "utf8")));
+    return "reason" in info ? null : (info.releasePage ?? null);
+  } catch {
+    return null;
+  }
+}
+
 app.on("second-instance", () => desktopShell.show());
 
 // No UDP WebRTC in any of our webContents; plugin frames share the app window's (pluginNetwork.ts).
@@ -693,7 +766,26 @@ app.whenReady().then(async () => {
     ensureContained: () => network.ensure(),
   });
   protocol.handle(PLUGIN_SCHEME, request => frameDocuments!.respond(request));
-  session.defaultSession.webRequest.onBeforeRequest({ urls: [`${PLUGIN_SCHEME}://*/*`] }, (request, callback) => {
+  modulePacks = new ModulePackService({
+    root: join(app.getPath("userData"), "modules"),
+    source: modulePackSource({ releasePage: app.isPackaged ? ownReleasePage() : null, packaged: app.isPackaged, env: process.env }),
+    // The updater's own Chromium session (system / manual update proxy); Node once plugin containment is engaged.
+    transport: createUpdateNet({ contained: () => pluginNetwork?.engaged() ?? false, proxy: () => desktopShell.updateProxyConfig() }).transport,
+    appModuleApi: MODULE_API_VERSION,
+    onChange: (view) => sendEvent("modulePacks", view),
+    log: (text) => console.log(`[module-packs] ${text}`),
+  });
+  const packs = modulePacks;
+  protocol.handle(MODULE_PACK_SCHEME, request => packs.respond(request));
+  // Electron keeps ONE onBeforeRequest listener per session (a second call replaces the first), so both
+  // privileged schemes share this one; each branch decides only for its own scheme.
+  session.defaultSession.webRequest.onBeforeRequest({ urls: [`${MODULE_PACK_SCHEME}://*/*`, `${PLUGIN_SCHEME}://*/*`] }, (request, callback) => {
+    if (request.url.startsWith(`${MODULE_PACK_SCHEME}:`)) {
+      // Pack code is for the app window's own document: no plugin / agent-page frame, worker, fetch or other window.
+      const main = mainWindow?.webContents;
+      callback({ cancel: !modulePackRequestAllowed(request, main ? { id: main.id, mainFrame: main.mainFrame } : null) });
+      return;
+    }
     // A frame URL is not authority to fetch it from another window, the parent, or a worker.
     callback({ cancel: request.resourceType !== "subFrame" || !mainWindow
       || request.webContentsId !== mainWindow.webContents.id
@@ -724,7 +816,7 @@ app.whenReady().then(async () => {
   if (demoOwnerAlertRequested()) setTimeout(() => ownerAlerts.showDemo(), 1500);
   await hosts.start();
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (appWindows().length === 0) createWindow();
     else desktopShell.show();
   });
 });

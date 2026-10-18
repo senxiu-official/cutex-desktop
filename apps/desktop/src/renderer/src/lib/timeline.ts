@@ -1,5 +1,6 @@
 // Projects cute-codex thread history (thread/read) + live app-server notifications into a
 // renderable timeline. Pure and framework-free so it can be unit-tested.
+import type { ClaudeModelStatus } from "./observedModel";
 import { windowsSandboxSetupOutcomeOf, type WindowsSandboxSetupOutcome } from "../../../shared/windowsSandbox";
 import type { EventEnvelope, LatestPlan, LatestTokenUsage, PendingServerRequest } from "@cutex-desktop/protocol";
 import type { ApprovalsReviewer, GuardianApprovalReviewAction, GuardianApprovalReviewStatus, GuardianRiskLevel, GuardianUserAuthorization, ThreadGoal } from "@cutex-desktop/protocol/codex/v2";
@@ -164,6 +165,8 @@ export interface TimelineState {
   windowsSandboxSetup?: WindowsSandboxSetupOutcome | null;
   /** Automatic-reviewer decisions seen live, by reviewId (thread/read has none). */
   autoReviews?: Map<string, AutoReview>;
+  /** Last live `claude/model/observed` status (Claude adapters with modelObservation; lib/observedModel). */
+  modelObservation?: ClaudeModelStatus | null;
 }
 
 export interface ThreadSettingsView {
@@ -411,7 +414,7 @@ export function turnErrorText(error: RawTurn["error"]): string | null {
  * Build initial state from bootstrap `native.result` (thread/read) and
  * `cutexState.pendingServerRequests` (each `{runtimeGeneration, native: {id, method, params}}`).
  */
-export function timelineFromThreadRead(result: unknown, pending: readonly PendingServerRequest[] = []): TimelineState {
+export function timelineFromThreadRead(result: unknown, pending: readonly PendingServerRequest[] = [], opts: { runtimeLive?: boolean } = {}): TimelineState {
   const state = emptyTimeline();
   const thread = (result as { thread?: { id?: string; turns?: RawTurn[] } } | null)?.thread;
   state.threadId = thread?.id ?? null;
@@ -424,12 +427,45 @@ export function timelineFromThreadRead(result: unknown, pending: readonly Pendin
     for (const item of turn.items ?? []) upsert(state, entryFromItem(item, turn.id));
     if (turn.status === "inProgress") state.activeTurnId = turn.id;
   }
+  // Only the newest turn of a live runtime can still run; older ones a runtime left "inProgress"
+  // (an adapter killed mid-turn, older Claude runtimes) were cut off. Offline history: none runs.
+  settleStaleTurns(state, opts.runtimeLive === false ? null : (state.turns.at(-1)?.id ?? null), null);
   for (const request of pending) {
     const native = request.native;
     if (native && (typeof native.id === "string" || typeof native.id === "number") && typeof native.method === "string")
       state.pending.set(String(native.id), { id: native.id, method: native.method, params: native.params ?? {} });
   }
   return state;
+}
+
+/**
+ * Mark every still-running turn except `keepTurnId` as interrupted: a thread runs one turn at a time,
+ * so a turn that is still "inProgress" when a newer one starts, or when its runtime was replaced or
+ * went offline, was cut off without its turn/completed (a runtime restarted mid-turn: older Claude
+ * adapters never report it). Its streaming rows stop; its tool rows, still "inProgress", then read
+ * 已中断 (toolLiveness: the turn is no longer running). A turn/completed arriving later still wins.
+ * Returns true if anything changed.
+ */
+export function settleStaleTurns(state: TimelineState, keepTurnId: string | null, at: number | null = Date.now() / 1000): boolean {
+  let changed = false;
+  for (const turn of state.turns) {
+    if (turn.status !== "inProgress" || turn.id === keepTurnId) continue;
+    turn.status = "interrupted";
+    turn.completedAt ??= at;
+    turn.retry = null;
+    if (state.activeTurnId === turn.id) state.activeTurnId = null;
+    stopStreaming(state, turn);
+    changed = true;
+  }
+  return changed;
+}
+
+function stopStreaming(state: TimelineState, view: TurnView): void {
+  for (const id of view.entryIds) {
+    const entry = state.entries.get(id);
+    if ((entry?.kind === "agent" || entry?.kind === "plan") && entry.streaming) state.entries.set(id, { ...entry, streaming: false });
+    if (entry?.kind === "reasoning" && entry.streaming) state.entries.set(id, { ...entry, streaming: false, completedAt: entry.startedAt === null ? null : view.completedAt });
+  }
 }
 
 function ensureTurn(state: TimelineState, turnId: string): TurnView {
@@ -517,6 +553,7 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
     switch (message.method) {
       case "turn/started": {
         const turn = params.turn as RawTurn;
+        settleStaleTurns(state, turn.id);
         const view = ensureTurn(state, turn.id);
         view.status = "inProgress";
         view.startedAt = turn.startedAt ?? Date.now() / 1000;
@@ -532,11 +569,7 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
         view.error = turnErrorText(turn.error) ?? (turn.status === "failed" ? (view.error ?? null) : null);
         view.retry = null;
         if (state.activeTurnId === turn.id) state.activeTurnId = null;
-        for (const id of view.entryIds) {
-          const entry = state.entries.get(id);
-          if ((entry?.kind === "agent" || entry?.kind === "plan") && entry.streaming) state.entries.set(id, { ...entry, streaming: false });
-          if (entry?.kind === "reasoning" && entry.streaming) state.entries.set(id, { ...entry, streaming: false, completedAt: entry.startedAt === null ? null : view.completedAt });
-        }
+        stopStreaming(state, view);
         return true;
       }
       case "item/started":
@@ -639,6 +672,10 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
       case "thread/goal/cleared": {
         if (!state.goal) return false;
         state.goal = null;
+        return true;
+      }
+      case "claude/model/observed": {
+        state.modelObservation = params as ClaudeModelStatus;
         return true;
       }
       case "thread/settings/updated": {

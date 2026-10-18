@@ -1,4 +1,4 @@
-# 桌面插槽与模块约定（v1.15）
+# 桌面插槽与模块约定（v1.16）
 
 > **公开仓库说明 / Public repository note.** 本文是维护者开发时的设计记录，保留原样。文中引用的内部笔记和工作副本
 > （`docs/research/…`、`docs/reviews/…`、`docs/handoff/…`、`TODO.md`、`PROGRESS.md`、`PLAN.md`、`upstream/…`、
@@ -60,6 +60,11 @@ v1.15（2026-10-16，`feat/components-card`；可选组件规格 v2 §5，主人
 模块页面需要的 cutex **可选组件**（`job-service`、`claude-runtime`）。模块照旧按能力激活；它的 `main.page` 在目标主机的组件
 不是 `ready` / `external` 时显示通用的组件卡片（安装 / 更新 cutex / 手动设置指南 / 源码命令 / 找主机主人 …），不显示页面主体（§12.1）。
 引擎不看这个字段。第一个使用者：`jobs`（`component: "job-service"`）。
+v1.16（2026-10-18，`feat/module-packs`；主人 2026-10-18「长痛不如短痛」）：可下载的第一方**模块包**（§23）——发布密钥签名的索引
+`modules.json`（GitHub release `modules-release`），main 下载、验签、验哈希、原子解包到 `userData/modules/<id>/<version>/`、每次启动复验，
+经特权 scheme `cutex-module://` 只送给主窗口主 frame；renderer 用宿主对象（`__CUTEX_MODULE_HOST__`，共享 React / zustand / app 文件）
+`import()` 入口，经 §15 的 `removeModule` / `addModules` 覆盖内置版本，失败退回内置。SDK 新增 `packs.ts`（`ModulePackEntry`、
+`ModulePackHost`、`MODULE_PACK_HOST_GLOBAL`、`moduleApiSatisfies` / `moduleApiVerdict`）。试点 `claude-science`。
 
 决定：主人，2026-10-09（总纲 `docs/DESIGN.md` §4.22）。读者：主线开发；GPT（按本文实现宿主包，见
 `docs/research/kutex-brief-for-gpt.md` §3 A；下称 brief）。本文是约定，改格式先改本文。行号 = 2026-10-09 `main`，
@@ -70,7 +75,7 @@ v1.15（2026-10-16，`feat/components-card`；可选组件规格 v2 §5，主人
 - 主线按「插槽 + 模块」组织：每个功能是一个**模块**，向命名的**插槽**贡献条目；外壳（`App` / `Sidebar` /
   `Conversation` / `Settings` / `TitleBar` / `StatusCapsule` / `Timeline` / `Composer`）只按注册表渲染，不再有按功能的分支和
   `features.has(...)`（现在约 90 处、约 40 个文件）。
-- **v1 的主 renderer 只有内置模块**：仓库内、随包构建、可信。v1.1 动态登记仍只接受受信任 adapter 创建的定义，外部代码不进入主 renderer。
+- **v1 的主 renderer 只有内置模块**：仓库内、随包构建、可信。v1.1 动态登记仍只接受受信任 adapter 创建的定义，外部代码不进入主 renderer。v1.16 起另有**签名的第一方模块包**（§23）：发布密钥签名、main 校验后才进入主 renderer，信任等于内置模块。
 - **外部插件 v1.1 接入**：安装入口默认关闭，一律隔离运行（§10），与未来 MCP Apps（`ui://`）共享隔离机制，当前不声称实现完整 MCP Apps 协议。
 - 三层归属（brief §1）：界面扩展 = 桌面模块 / 插件；agent 侧能力（skills / MCP / hooks）= Codex 插件，由 daemon
   安装；受信任后台 = daemon 进程外服务插件（§12）。
@@ -1032,11 +1037,16 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   下载、启动或碰文件。新增 `GET /v2/components`、`POST /v2/components/{name}/install|remove`、事件 `cutex/components/updated` 的客户端；
   `components` 进 `OWNER_ONLY_CAPABILITIES`。`jobs` 用 `component: "job-service"`。声明快照 `module-api-1.15.d.ts`（只多了 `component` 与版本常量）；
   `test/moduleSdkContract.test.ts` 有编译探针，`test/componentCard.test.ts` / `test/componentStore.test.ts` / `packages/cutex-client/test/components.test.ts` 覆盖状态与客户端。
+- 2026-10-18 v1.16（§23，`feat/module-packs`）：`MODULE_API_VERSION` 1.15 → 1.16。SDK 加 `packs.ts`：`ModulePackEntry`（包入口的导出：
+  `moduleApi`、`module`、`messages`）、`ModulePackHost` / `MODULE_PACK_HOST_GLOBAL`（宿主对象）、`moduleApiSatisfies` / `moduleApiVerdict`
+  （semver 范围对 `MODULE_API_VERSION` 求值）。插槽、`ModuleDefinition`、引擎都不变（`SLOT_SPECS` 快照不动）；包经 §15 的动态登记进入同一个宿主。
+  声明快照 `module-api-1.16.d.ts`；测试：`test/modulePacks*.test.ts`（索引 / 签名 / 哈希 / 篡改 / 错误密钥 / 降级 / 中断解包 / 范围、协议、加载与回退、
+  构建 → 签名 → 本机服务 → 下载 → 加载的端到端）、`packages/plugin-sdk/test/packs.test.ts`，`test/moduleSdkContract.test.ts` 有 v1.16 编译探针（`ModulePackEntry`）。
 
 ## 15. 动态模块登记（v1.1，稳定基线后迁移）
 
-唯一引擎为 `@cutex-desktop/plugin-host`；共享类型来自 `@cutex-desktop/plugin-sdk`，`MODULE_API_VERSION = "1.15"`（v1.2 – v1.4、v1.6 – v1.14 只改 app 层插槽，见 §16 – §22、§18.3、§18.13、§18.14、§19.3、§19.6；
-SDK / 引擎的类型除版本常量外不变；v1.5 加多主机输入与 `ctx.hosts`，见 §4、§6；v1.15 加 `ModuleRequires.component`，引擎不看它，见 §12.1）。
+唯一引擎为 `@cutex-desktop/plugin-host`；共享类型来自 `@cutex-desktop/plugin-sdk`，`MODULE_API_VERSION = "1.16"`（v1.2 – v1.4、v1.6 – v1.14 只改 app 层插槽，见 §16 – §22、§18.3、§18.13、§18.14、§19.3、§19.6；
+SDK / 引擎的类型除版本常量外不变；v1.5 加多主机输入与 `ctx.hosts`，见 §4、§6；v1.15 加 `ModuleRequires.component`，引擎不看它，见 §12.1；v1.16 加模块包入口 / 宿主对象类型和 `moduleApi` 范围求值，见 §23）。
 原有内置模块定义、插槽形状、prefs key、主机和 agent 门控保持 v1 行为。
 
 - `addModules(definitions): Promise<void>`：先校验整批 id、与现有定义的重复及合并后的依赖环；失败时整个批次不登记。
@@ -1309,6 +1319,7 @@ interface NotifyDelivery { key: string; event: string; eventTitle: string; level
 
 - 卡片头：类别图标（= 卡片把手，右键 = 卡片菜单）、多于一个实例时是标签行（否则是标题）、组件的 `Actions`、悬停时 ⤢ ⛶ ⋯、
   页上多于一张卡片时折叠 ▾、×。同种组件在一页里只有一张卡片（「拆到新卡片」后才会有第二张；打开时落到最近用过的那张）。
+- 2026-10-18 `SideComponentItem.tabRow?: "always"`（app 层可选字段，SDK / 引擎类型不变，`MODULE_API_VERSION` 不升；主人报「浏览器侧栏没有 tab 和新建 tab」）：只对 `multi` 组件有效——卡片头一个实例时也是标签行，最后一个标签后有 ＋（「新标签页」），打开 `launcher.newParams ?? launcher.params` 作为**这张卡片**的新标签（同页、同当前标签的绑定；先触碰当前标签，所以同页有两张同种卡片时也落到这张）。现在只有 `browser.tab` 声明它；其他组件不变（单实例 = 标题，≥ 2 个才是标签行）。
 - 高度 = 比例 `share`；卡片间 8 px 缝可拖（双击均分，方向键调整），折叠卡片只剩头部；放不下时最下面的卡片先折叠。
 - 最大化（⤢，Ctrl+Shift+M）= 盖住工作区；全屏（⛶，Shift+F11）= 盖住整个窗口，自带 40 px 标题行（拖动区、三平台窗口按钮、还原）。
   对象 = 卡片（卡片上的按钮 / 焦点所在卡片）或当前页（标题栏按钮）；模式中点别的页按钮 = 跟着切页。模式不跨重启。
@@ -1357,6 +1368,7 @@ type SidePageCandidate = { group: string } | { containing: ItemId } | "active";
 | `reference` | 参考卡片 / 书签（GPT，§19） |
 | `artifacts` | `artifacts.library`（成果库）、`artifacts.view`（成果预览，v1.7）；对比打开的 `diff.view` 落在同一页 |
 | `delegations` | `delegations.detail`（一个委托的详情，`ref.target` 种类 `delegation` 打开它，2026-10-13） |
+| `agents` | `conversation.agent`（另一个 agent 的实时对话，核心、不受门控；2026-10-18，`feat/side-agent-view`，`docs/research/side-agent-view-20261018.md`） |
 
 ### 18.7 覆盖、菜单与重置
 
@@ -1387,6 +1399,12 @@ type SidePageCandidate = { group: string } | { containing: ItemId } | "active";
 - v1.7：`artifacts.library`（成果库，singleton，`workspace` 绑定）与 `artifacts.view`（成果预览，multi，transient，peekable，`host` 绑定，
   dedupeKey = 成果引用，固定版本和 `@latest` 是两个标签身份），页组 `artifacts`。
 
+- 2026-10-18（`feat/side-agent-view`，主人：想在右栏同时看两个 agent；设计记录 `docs/research/side-agent-view-20261018.md`）：核心组件
+  `conversation.agent`（`multi`，`host` 绑定，dedupeKey = session id，`keepAlive: "hidden"`，页组 `agents`）：另一个 agent 的时间线（行操作留在主区）、
+  状态行、待回答的审批 / 提问（不抢焦点）、「接下来」与一个简单输入框（Enter 发送：运行中插入，不能插入的 agent 排队；停止）；头部「在主区打开」= 与主区的
+  agent 互换。主区选中的正是它时，标签显示「已在主区打开 · 换回」。入口：agent 菜单「在侧边打开」（`conversation.openAgentSide`，`agent` 引用的
+  `ref.action`）、侧栏 agent 行 Ctrl/⌘ 单击 / 中键单击 / Ctrl/⌘+Enter（`lib/sideOpen.ts` `openAgentSide`；别的主机的 agent 在主区打开）。store 从「只订阅选中的
+  agent」改为 N 条会话流（`retainSideAgent` / `setSideAgentVisible`，`sideAgents`）；可见的侧边 agent 算「在看」（通知、回合结束标记）。不改契约，`MODULE_API_VERSION` 不变。
 - 「新开而不替换」全应用统一按浏览器习惯（v1.11，主人 2026-10-12，`lib/openModifiers.ts`）：**Ctrl/⌘ + 单击、中键单击** = 新开一个保留的（非预览）标签，
   后台打开（`{ pin: true, background: true }`，当前标签留在视野里）；**Ctrl/⌘ + Shift + 单击** = 同样新开，但显示并聚焦；普通单击不变（复用 / 替换预览标签）。
   适用：Markdown 文件链接与图片、文件树（含搜索结果；聚焦的行上 Ctrl/⌘ + Enter = Ctrl/⌘ + 单击）、改动列表的 ↗、回合摘要的文件、工具行的文件、标题栏启动器（§18.3）。
@@ -1659,7 +1677,7 @@ interface SideHoldLocator { readonly scope: string; readonly instanceId: string;
 - 种类归属：每个种类一个提供者。内置种类 `turn` / `agent` / `main.page` / `side.page` 与所有 `side.component` id 已被占用；
   `ref.target` 声明别的种类，重复的在登记前拒绝（`checkRefContributions`）。模块关掉时种类仍归它（不被别人接管）。
 - 组件引用：kind = 组件 id，所以**可引用的组件 id 只能小写**（`toRef` 存在时 `modules.test` 检查）；`conversation.turnPeek` 例外，
-  它产生的是 `turn` 引用。已有 `toRef` / `fromRef` 的：`workspace.preview`、`diff.view`、`terminal.pty`（key `pty:<id>`）、`artifacts.view`（key = 成果引用 `af-…@3` / `af-…@latest`，v1.7）、`delegations.detail`（key = ask id；模块种类 `delegation` 也打开它，2026-10-13）。`subagents.thread` 不加（`fromRef` 带不回父 agent 的绑定，延后）。
+  它产生的是 `turn` 引用。已有 `toRef` / `fromRef` 的：`workspace.preview`、`diff.view`、`terminal.pty`（key `pty:<id>`）、`artifacts.view`（key = 成果引用 `af-…@3` / `af-…@latest`，v1.7）、`delegations.detail`（key = ask id；模块种类 `delegation` 也打开它，2026-10-13）。服务模块的种类 `service`（key = `<slug>` 或 `<slug>/<路径>`，没有组件；`cutex:service/…` 链接在右侧内置浏览器标签里打开服务、保留路径，浏览器模块关着时退回系统浏览器，2026-10-17）。`subagents.thread` 不加（`fromRef` 带不回父 agent 的绑定，延后）。
 
 **Markdown 里的 `cutex:` 链接（v1.7）**。agent 回复、报告、记忆里的 `[文字](cutex:<种类>/<key>)` 与 `![替代文字](cutex:<种类>/<key>)`
 （例：`[regression.md v4](cutex:artifact/af-0123…@4)`，成果库 wire 契约 `docs/research/artifacts-api-v1.md`）：
@@ -1870,3 +1888,237 @@ export interface CodeBlockActionProps extends CodeBlockMatch {
   没有工作目录 → 提示 `terminal.noWorkspace`。
 - 测试：`test/moduleSdkContract.test.ts`（插槽默认值、编译探针）、`test/modules.test.ts`（新 / 未加载 featureList 下的插槽快照）、
   `test/codeBlockRun.test.ts`（标签 × 主机系统、单行 / 多行确认、换行转换）。
+
+## 23. 可下载的第一方模块包（v1.16）
+
+主人 2026-10-18：可选的第一方桌面模块要能在 app 里下载，做成签名的模块包（「长痛不如短痛」，直接做真的，不做过渡方案）。
+lead 定的边界：包是**第一方、可信**的 renderer 代码，信任等于 app 自己的打包；只接受发布密钥签名的包；第三方代码仍然只在
+不透明 frame 里（§10），本功能从不加载未签名或第三方代码；不另起模块引擎，经 §15 的动态登记进入同一个宿主。
+
+### 23.1 来源：内置 / 包 / 内置 + 更新的包
+
+- 一个模块的代码来源三选一：**内置**（`registry.ts`，随 app 构建，今天所有模块）、**包**（只有下载的包，app 不带）、
+  **内置 + 更新的包**（app 带一份，下载的包更新时覆盖它）。
+- 能做成包的模块在目录里放 `modules/<id>/pack.json`：`{ "version": "1.0.0", "moduleApi": "^1.16" }`（版本 = 这份源码的版本，
+  `M.m.p`，没有预发布后缀）。内置时这个版本就是「内置版本」（renderer 用 `import.meta.glob("./*/pack.json")` 读，`modules/packVersions.ts`）。
+- 生效规则（renderer，`modules/packs.ts` 纯函数 `packDecision`）：已安装、校验通过、`moduleApi` 兼容、宿主导入齐全（§23.6）、
+  且**版本严格大于内置版本**（没有内置 = 任何版本）的包生效；否则用内置。包加载 / 激活失败 → 本次运行退回内置，设置里显示原因。
+- 第一版：所有现有模块照旧内置。试点 = `claude-science`（默认关闭；跨目录导入最少：不被别的模块引用，只用 `lib/` / 共享组件 /
+  `store` / `bridge`），同时构建成包，用来证明覆盖路径端到端可用。`nci` 落选：`jobs` 按它是否启用显示 NCI 部分，耦合更多。
+- 不做：自动下载（v1 只有主人点「下载 / 更新」才下载；检查索引可以自动）、模块市场、第三方包、包之间的依赖解析（包的
+  `requires.modules` 照常按 §6 处理，缺依赖就是 `unavailable`）。
+
+### 23.2 包格式
+
+一个包 = 一个版本 = 一个 `.tar.gz`（资产名 `<id>-<version>.tar.gz`），解开后：
+
+```
+index.js        入口，单个 ES 模块（构建时内联所有动态导入，没有懒加载 chunk）
+index.css       可选：包自己的样式（§23.8）
+pack.json       包清单：{ id, version, moduleApi, entry, styles, host }（与索引里这一项相同的字段，便于离线检查）
+```
+
+- tar 只允许普通文件（ustar typeflag `0` / `\0`），路径 `^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$`，不以 `.` 开头
+  （`.signed/` 留给 main），没有 `..`、绝对路径、链接、设备、目录项以外的东西；成员集合必须与索引的 `files` **完全相同**（不多不少、
+  不重复），大小与 sha256 都对上。上限：每包 ≤ 64 个文件、单文件 ≤ 4 MiB、解开总计 ≤ 16 MiB、压缩包 ≤ 16 MiB。
+- 入口导出（类型 `ModulePackEntry`，SDK `packs.ts`）：
+
+```ts
+export const moduleApi: string;                      // 与索引、pack.json 相同的范围，renderer 再核对一次
+export const module: ModuleDefinition;               // id = 包 id；不得 required、不得用 external- 前缀
+export const messages: Record<string, Record<string, string>>; // 语言 → { "<id>.<key>": 文案 }，只许本模块前缀
+```
+
+- 包不带自己的 React / zustand / app 代码：这些经宿主对象共享（§23.6）。`lucide-react` 图标、`shared/` 与 `@cutex-desktop/*`
+  的纯函数包打进包里（无状态，重复一份无害）。
+
+### 23.3 签名索引 `modules.json`
+
+发布渠道 = 公开桌面仓库（`senxiu-official/cutex-desktop`）的 GitHub release **`modules-release`**（对应 cutex 的 `channel-release`）：
+资产 `modules.json`、`modules.json.minisig` 和各包的 `.tar.gz`。地址
+`https://github.com/<owner>/<repo>/releases/download/modules-release/modules.json`；`<owner>/<repo>` 取自安装包记录的
+`releasePage`（同二进制更新），没有记录（开发运行、源码安装）时用 `senxiu-official/cutex-desktop`。
+
+```jsonc
+{
+  "schema": 1,
+  "serial": 1760745600,               // 单调递增（生成时的 Unix 秒，且 > 上一份已发布的）；main 记住见过的最大值，更小的索引拒绝
+  "generatedAt": "2026-10-18T00:00:00Z",
+  "packs": [                          // 同一 id 可以有多个版本（主人可以明确选旧版）
+    {
+      "id": "claude-science", "version": "1.0.0", "moduleApi": "^1.16",
+      "title": { "en": "Claude Science", "zh-CN": "Claude Science" },     // 可选：没内置的模块在设置里显示用
+      "description": { "en": "…", "zh-CN": "…" },                         // 可选
+      "entry": "index.js", "styles": [],
+      "host": { "react": ["useState"], "@cutex-desktop/app/store": ["useApp"] },  // 宿主导入清单（§23.6）
+      "files": [{ "path": "index.js", "size": 12345, "sha256": "…" }, { "path": "pack.json", "size": 321, "sha256": "…" }],
+      "archive": { "name": "claude-science-1.0.0.tar.gz", "url": "https://github.com/…/modules-release/claude-science-1.0.0.tar.gz", "size": 6789, "sha256": "…" }
+    }
+  ]
+}
+```
+
+- 签名：minisign（预哈希 `ED`），trusted comment 的 `file:` 必须是 `modules.json`（`main/minisign.ts` `verifyData(…, "modules.json")`），
+  所以别的签名文件不能顶替索引。索引 ≤ 1 MiB、≤ 256 项。
+- 信任的公钥：内置的发布密钥（`docs/install/cutex-release.pub` 与备用 `cutex-release-spare.pub`，`RELEASE_PUBLIC_KEYS`，同二进制更新与
+  cutex 后端更新）。**测试密钥**（`shared/modulePacks.ts` `MODULE_PACK_TEST_PUBLIC_KEY`，私钥由公开的种子推出，任何人都能签）只在
+  `!app.isPackaged`（开发运行、测试）时加入；打包后的 app 从不信任它，测试检查这一点。
+- 包的 `url` 只能是 GitHub 下载主机（`DOWNLOAD_HOSTS`，同二进制更新：https、无端口、无凭据，跳转逐跳检查）；开发运行可用
+  `CUTEX_DESKTOP_MODULES_INDEX=http://127.0.0.1:<port>/modules.json` 指向本机假服务（只在 `!app.isPackaged` 生效，并只放行这个源）。
+
+### 23.4 main：检查、下载、校验、存储
+
+`main/modulePacks.ts`（`ModulePackService`；网络 = 更新器的 `Transport`，即 `cutex-updater` 会话 + Settings → 网络代理，
+插件封网后改走 Node，同 `updateNet.ts`）。
+
+- **检查**（`check`）：下载 `modules.json` 与 `.minisig`（各有上限、超时），验签，解析并逐字段校验（`shared/modulePacks.ts`
+  `parseModuleIndex`，任何一项不合格 = 整份拒绝），`serial` 不得小于见过的最大值。结果只在内存（加 `checkedAt`），不落盘；
+  见过的最大 `serial` 记在 `state.json`。设置页打开时检查一次，之后主人点「检查」。
+- **安装**（`install(id, version?, { allowOlder })`）：`version` 省略 = 索引里兼容的最高版本。步骤（进度事件 `download` → `verify` → `unpack`）：
+  1. 下载压缩包到 `userData/modules/.download-<id>-<version>-<pid>`（`binaryUpdate.ts` 的 `download`：宣布的大小、上限、停滞超时、跳转检查）；
+  2. 压缩包 sha256 = 索引；gunzip（上限）+ 严格 tar 解析（§23.2）+ 每个文件大小 / sha256 = 索引；
+  3. 写进 `userData/modules/.staging-<id>-<version>-<pid>-<rand>/`，另写 `.signed/modules.json` 和 `.signed/modules.json.minisig`
+     （**验过签的原始字节**），然后 `rename` 成 `userData/modules/<id>/<version>/`（同卷原子）；同版本重装先把旧目录挪开再换；
+  4. 写 `state.json`（临时文件 + `rename`）：`active[id] = version`；最后删掉这个 id 的其他版本目录。
+  任何一步失败：删掉下载 / staging，已有安装不变。同一时间只做一个操作（再来一个 → `busy`）。
+- **降级**：目标版本低于当前已安装版本时拒绝（`downgrade_refused`），除非主人在设置里明确选了那个旧版本（`allowOlder: true`）。
+  索引里看到更低的版本不会自动做任何事。
+- **移除**（`remove(id)`）：删 `userData/modules/<id>/`、去掉 `active[id]`；有内置的模块退回内置。只删本 app 自己的缓存目录。
+- **启动复验**：每次运行第一次 `list` 时，对每个 `<id>/<version>/`：用内置公钥重新验 `.signed/` 里的签名、在那份索引里找到 `id + version`、
+  目录内容（除 `.signed/`）与 `files` 完全相同、每个文件 sha256 一致；通过的才进入「已校验」表，失败的列为 `broken`（原因 + 「移除」）。
+  当前版本 = `state.json` 的 `active[id]`（存在且通过）否则通过的最高版本；其他版本目录删掉。残留的 `.download-*` / `.staging-*` 启动时删掉
+  （中断的解包不会留下半个包：没 `rename` 的都在 staging）。
+- **送文件时再查一次**：协议每次读文件都重算 sha256 与已校验表对比，不一致 → 404 并把这个包标成 `broken`（运行中被改也拦得住）。
+
+### 23.5 协议与 CSP
+
+- 特权 scheme `cutex-module`（`standard`、`secure`、`corsEnabled`；**不带** `supportFetchAPI`、`bypassCSP`），URL
+  `cutex-module://pack/<id>/<version>/<path>`。main 的 `protocol.handle` 只送「已校验」表里的文件（`text/javascript` / `text/css`，
+  `nosniff`、`no-store`、`Access-Control-Allow-Origin: *`——跨源模块脚本要 CORS；内容是公开的第一方代码）；其余一律 404。
+- `session.defaultSession.webRequest.onBeforeRequest` 对 `cutex-module://*/*` 只放行**主窗口主 frame**、`resourceType` 为 `script` /
+  `stylesheet` 的请求；插件 / agent 页面 frame（同一 webContents 的子 frame）、其他窗口、worker、`fetch` 全部取消。不透明 frame 的 CSP
+  本来也不允许这个 scheme。Electron 每个 session 只保留**一个** `onBeforeRequest` 监听（后一次调用顶掉前一次），所以 `cutex-module` 与
+  `cutex-plugin` 共用一个监听（过滤器列两个 scheme，按 scheme 分支；包的判断是 `main/modulePacks.ts` `modulePackRequestAllowed`），
+  测试守住 default session 只注册一次。Electron 44.5.1 实测（Linux，xvfb，2026-10-18）：主 frame 的 `import()` 经过它放行，页面里的
+  `fetch(cutex-module://…)` 被拒。
+- 父页面 CSP（`renderer/index.html`）只加这个 scheme：`script-src 'self' cutex-module:`、`style-src 'self' 'unsafe-inline' cutex-module:`。
+  `connect-src`、`frame-src` 不变。
+- IPC（`shared/modulePacks.ts`，频道 `cutex-desktop:module-packs`，preload `bridge.modulePacks`，只收主窗口）：
+  `state()`、`check()`、`install({ id, version?, allowOlder? })`、`remove({ id })`，都返回 `ModulePacksView`；事件 `modulePacks`
+  推同一个视图（进度）。参数逐字段校验；renderer 拿不到路径、密钥、下载地址以外的任何东西，也不能让 main 读任意文件。
+
+### 23.6 renderer：宿主对象、加载、覆盖与回退
+
+- **宿主对象**（import map 式垫片）：`globalThis.__CUTEX_MODULE_HOST__ = { apiVersion, get(specifier) }`（常量
+  `MODULE_PACK_HOST_GLOBAL`，类型 `ModulePackHost`，SDK）。表在 `modules/packHost.ts`，静态 `import * as`：
+  - `react`、`react/jsx-runtime`、`react-dom`、`zustand`；
+  - `@cutex-desktop/app/<路径>` = `src/renderer/src/<路径>`（去掉扩展名），只列包可以用的文件（试点用到的 `store`、`bridge`、`i18n`、
+    `modules/slots`、`modules/react`、`lib/…`、`components/…`）。不列 `dev/`、`registry.ts`、别的模块目录。
+  包构建时这些导入变成对宿主对象的属性读取（rollup `syntheticNamedExports`），产物里没有裸导入；每个用到的说明符和名字记进
+  `host` 清单。
+- **宿主导入检查**：加载前 renderer 对清单逐项检查——说明符在表里、每个名字在那个命名空间上（`default` / `*` 同理）。缺 → 不加载，
+  判「需要更新 app」。这是比 `moduleApi` 更细的兼容检查：`@cutex-desktop/app/*` 是 app 内部文件，会改名；改了不升
+  `MODULE_API_VERSION`，靠这个检查拦住，再加上加载失败退回内置。
+- **加载**（`modules/packs.ts` `startModulePacks(host, bundled)`，`main.tsx` 在 `startAppModules` 之后调用，不挡首屏）：取 `state()`；
+  对每个生效的包（§23.1）：装上宿主对象、插入样式 `<link>`、`import(entryUrl)`、核对导出（`moduleApi` 与索引相同且兼容、
+  `module.id` = 包 id、非 required、非 `external-`、`messages` 只有本模块前缀）、登记文案（`i18n` `registerModuleMessages`，查找顺序：
+  包文案 → app 词典 → 包的 en → app 的 en），然后 **`removeModule(id)` → `addModules([包定义])`**（§15；开关、放置、模块 prefs 都按 id 保留）。
+  动态登记的模块排在注册表末尾，同 `order` 的条目排序可能变（条目都写了 `order`，实际无影响）。
+- **回退**：导入 / 核对失败 → 不动内置；`addModules` 失败或包模块进入 `failed`（激活抛错 / 超时，在加载时或之后主人打开它时）→
+  `removeModule(id)` → `addModules([内置定义])`，撤掉包文案，本次运行不再试这个版本。渲染出错（`lastError`）不触发回退。
+- **运行中安装 / 更新 / 移除**：设置页操作完成后立即按新视图重做上面的判断：换成新版本的包（新 URL = 新的 ES 模块实例）、或退回内置。
+  旧版本已求值的代码留在内存里直到重启（单文件包没有懒加载 chunk，所以删掉旧文件不影响它）。
+
+### 23.7 兼容
+
+- `moduleApi` 是 semver 范围（`^1.16`、`~1.16`、`>=1.16 <2`、`1.16`；空格分隔的比较式为「且」；版本 `M.m[.p]`），对 app 的
+  `MODULE_API_VERSION` 求值（SDK `moduleApiSatisfies`）。不满足时：范围的下限高于 app → 「需要更新 app」；否则 → 「需要更新模块」
+  （`moduleApiVerdict`）。main（列出可下载版本）和 renderer（加载前）各判一次。
+- 契约规则（§14、§15）不变：插槽 / 定义 / 服务的不兼容改动升主版本，增加升次版本；包按自己构建时的 `MODULE_API_VERSION` 写 `^当前`。
+- 宿主导入清单见 §23.6。
+
+### 23.8 样式
+
+- 包默认用 app 的样式表（Tailwind 工具类由 app 构建生成）。包里用到 app 没生成的类时，包构建用 Tailwind 只扫描这个模块的源码，
+  生成 `index.css`，整份放进 cascade layer `cutex-pack`；app 在 `styles.css` 最前面（Tailwind 的 `@import` 之前）先声明层顺序
+  `@layer theme, base, components, cutex-pack, utilities;`，所以包的规则**只补空缺、从不覆盖** app 的工具类（同一元素上 app 已有的类总是赢）。
+  主题变量（`--color-*`）来自 app（包的样式以 `@reference` 引用 app 的 `styles.css`，不输出 theme / base）。模块在 `pack.json` 写
+  `"styles": true` 才生成（`build.mjs --styles` 可强制）；试点不需要（它的类 app 本来就生成）。
+
+### 23.9 设置 → 模块
+
+- 每个可选（非 required）模块一行，多一段「来源」：`内置`、`内置 v1.0.0`、`已下载 v1.2.0`（生效中）、`已下载 v1.1.0（比内置旧，未使用）`、
+  `已下载 v1.2.0 · 需要更新 app / 需要更新模块 / 加载失败，已用内置：<原因>`、`已下载 · 已损坏：<原因>`。
+- 操作：`下载`（索引里有这个模块的兼容版本、本机没装）、`更新到 vX`（有比已装 / 内置都新的兼容版本）、`移除`（已装）、`⋯ → 安装旧版本 vY`
+  （确认对话框写明是降级）。只在索引里出现、app 没内置的模块也列出（标题 / 说明取索引的 `title` / `description`）。
+- 进度与错误同 主机后端更新：步骤行（下载 / 校验 / 解包，当前步骤转圈）、红字错误 + 「重试」（重试 = 原样再发一次：`lastError.retry`
+  记着当时选的版本和降级确认；有错误时不再并排显示「下载 / 更新」）。页头一行：索引状态（上次检查时间、
+  「检查更新」、检查失败原因；还没有发布 = 「还没有可下载的模块」）。开发运行信任测试密钥时页头标「测试密钥」。
+
+### 23.10 构建与发布
+
+- 包构建：`apps/desktop/scripts/module-packs/build.mjs <id…> | --all --out DIR [--styles]`（vite build，单个 ES 入口，没有 chunk，资源内联；
+  esbuild 生产 JSX）→ `DIR/<id>-<version>.tar.gz` + `DIR/<id>-<version>.pack.json`（索引项，`url` 待填；`title` / `description` 取模块
+  `i18n.ts` 的 `<id>.title` / `<id>.description` 的 zh-CN 与 en）。tar 内容确定（文件按路径排序、mtime 0、uid / gid 0、gzip mtime 0），
+  同一份源码重建得到同样的字节（测试检查）。
+  - 宿主表从 `modules/packHost.ts` 读（`import * as` 行 + `PACK_HOST_MODULES`），所以构建和 app 不会对「提供什么」有分歧；导入解析到表里的
+    文件 / 包 → 虚拟模块 `host.get(spec)`（rollup `syntheticNamedExports`，`default` 是纯读取，没人导入就不读），编译后（TS / JSX 之后）
+    每个模块读的名字记进 `host`（静态导入的上界：被摇掉的名字也算，检查只会更严）。
+  - 拒绝：解析到 `src/renderer/src` 里、本模块目录之外、又不在宿主表里的文件（别的模块、`registry.ts`、`dev/`、没列的 app 文件），以及宿主表之外的
+    `react*` / `react-dom*` / `zustand*` / `scheduler` 入口（第二份 React 会让 hooks 失效）；`src/shared`、`@cutex-desktop/*` 包、`lucide-react`
+    等纯代码打进包。`mock.ts` 不进包。
+  - 文案：模块 `i18n.ts` 的 `zhCN` / `en`，加上其他已翻译目录（`i18n/<locale>.ts`，zh-CN / en 以外）里这个模块前缀的条目（纯 JSON 字符串字面量）。
+  - 构建后检查：恰好一个 `index.js`、没有 `import` / 动态 `import()`；当前 `MODULE_API_VERSION` 满足 `pack.json` 的范围。
+- 索引：`apps/desktop/scripts/module-packs/index.mjs --packs DIR --base-url URL [--previous modules.json] --out modules.json`：合并上一份
+  已发布的索引（**调用方先验签**；保留旧版本项及其 URL，所以主人能选旧版），同一 `id + version` 已发布且字节不同 → 停（换版本号）；
+  `serial` = max(现在, 上一份 + 1)；写之前用 app 自己的 `parseModuleIndex` 校验（新包的 URL 必须是 GitHub 下载主机，或本机夹具的
+  `http://127.0.0.1:<port>`）。`--new-list FILE` = 这次新增、需要上传的压缩包；`--test-sign` 用测试密钥签（本地端到端用）；正式签名只在 CI。
+- 本地端到端（`test/modulePacksBuild.test.ts`）：真构建试点 → 测试密钥签名 → 本机 HTTP 夹具 → `ModulePackService` 检查 / 下载 / 校验 /
+  入库 → 重启复验 → `cutex-module://` 送文件 → `import` → 真模块宿主经加载器换上包定义；同一份索引在打包 app 的来源下验签失败。
+  渲染预览（`vite.preview.config.ts` 插件 `mock-module-packs` + `dev/mockModulePacks.ts`）同样真构建试点并导入。
+- CI：公开仓库的 `.github/workflows/modules-release.yml`（`scripts/public-export/projects/cutex-desktop/ci/modules-release.yml`）：
+  `workflow_dispatch`，`dry_run` 默认 true。build job 装依赖、构建包；sign job（`environment: release`，只在默认分支）用
+  `MINISIGN_SECRET_KEY` / `MINISIGN_PASSWORD`（同 CI-SIGNING.md）跑 `.github/ci/modules-release.sh`：取已发布的 `modules.json` 并用
+  `cutex-release.pub` 验签（并要求 trusted comment 的 `file:` = `modules.json`）、生成新索引、签名并验签，然后（非 dry run）先传包
+  （release 上已有同名包 → 必须字节相同，从不覆盖）、重新下载比对，最后传 `modules.json` + `.minisig` 并比对 + 验签。没有新包 → 什么都不做。
+  `modules-release` 建成**非草稿、`--latest=false`** 的 release：绝不能让它变成 latest（二进制更新器读 `/releases/latest`；上传后脚本检查，
+  变成 latest 就失败）。输入 `modules` 留空 = 构建所有带 `pack.json` 的模块：已发布版本必须重建出同样字节，所以只发布某个模块时写它的 id
+  （共享代码变了而版本没变的包会让索引生成停下）。导出：`project.json` 把 workflow 与脚本放到 `.github/workflows/` / `.github/ci/`，公钥已在
+  `.github/ci/cutex-release.pub`。测试：`scripts/public-export/test_modules_release.py`（假 gh + 临时密钥）。
+- 发布第一份 `modules-release` 要主人 / 发布步骤做的事见交付报告；本次不发布任何东西。
+
+### 23.11 失败模式
+
+| 情况 | 结果 |
+|---|---|
+| 没有网络 / GitHub 404（还没发布）/ 限流 | 检查失败或「还没有可下载的模块」；已装的包照常（离线可用） |
+| 索引签名错 / 未知密钥 / `file:` 不对 / 字段不合格 / `serial` 回退 | 整份索引拒绝，显示原因；已装的包不受影响 |
+| 压缩包大小 / sha256 不对、tar 有多余或缺少文件、路径越界、链接 | 安装失败，staging 删掉，已有安装不变 |
+| 安装中途退出 / 断电 | 下次启动删掉 `.download-*` / `.staging-*`；`rename` 之前旧版本仍是当前版本 |
+| 已装的文件被改 / 签名材料被改 | 启动复验失败 → `broken`，用内置；运行中被改 → 协议 404、标 `broken` |
+| `moduleApi` 不兼容 / 宿主导入缺 | 不加载，显示「需要更新 app / 模块」，用内置 |
+| 导入抛错 / 导出不合格 / 激活失败 | 本次运行退回内置，显示原因 |
+| 选了比当前旧的版本 | 不确认就拒绝（`downgrade_refused`） |
+| 包版本不比内置新 | 用内置，提示「比内置旧，未使用」，可移除 |
+
+### 23.12 安全论证
+
+- 包代码的权力 = app 自己的 renderer 代码（同一 realm，可用 `bridge`），所以唯一的门是**谁能让代码进来**：只有用内置发布公钥签过的索引
+  所列、哈希逐字节一致的文件，经 main 校验、存储、送出；renderer 不能指定路径、URL 或密钥，main 不接受 renderer 给的字节。
+- 签名链：发布私钥（CI secret / 主人本机）→ `modules.json`（每个文件的 sha256 与大小）→ 文件。下载通道（GitHub、代理）不可信也无妨。
+  索引回放：`serial` 不回退；降级要主人明确选择；更旧的已签名包最多是「主人能选的旧版本」。
+- 本地持久化：签名材料随包存放，每次启动重新验签 + 验哈希，运行中送文件再验哈希；能改 userData 的本地进程本来就能改 app 自己，
+  不在威胁模型内，但改坏的包不会被送出。
+- 隔离不变：外部插件 / agent 页面仍在不透明 frame（§10），它们的 CSP 不允许 `cutex-module:`，main 的 `onBeforeRequest` 也只放行主 frame；
+  这个 scheme 不 `bypassCSP`、不支持 `fetch`。测试密钥只在未打包的 app 里有效。
+- 第三方代码：本功能不加载任何第三方代码；包构建只从本仓库的模块源码生成，CI 只在默认分支签名。
+
+### 23.13 未决问题（已选默认）
+
+1. 包能不能新增 app 没有的模块（纯「包」来源）？**能**（格式和加载都支持；设置页按索引的标题列出），第一版没有这样的包。
+2. 运行中更新要不要提示重启？**不需要**：直接热替换（§23.6），旧代码留在内存直到重启。
+3. 宿主表要不要版本化？**不单独版本化**：靠每包的宿主导入清单精确检查 + 加载失败退回内置（§23.6）。
+4. 检查频率？**设置 → 模块 打开时一次 + 手动**；不在后台定时检查（v1 不自动下载，没有需要提醒的东西）。
+5. 旧版本保留几个？**只留当前一个**；要回旧版本就从索引重新下载（索引保留旧版本项）。
+6. 包要不要 minAppVersion？**不要**：`moduleApi` + 宿主导入清单已经能说「需要更新 app」。
+7. 内置模块的版本从哪来？**`pack.json`**；没有 `pack.json` 的模块不能被包覆盖（加载时拒绝，避免覆盖不打算做包的模块）。

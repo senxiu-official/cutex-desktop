@@ -1,4 +1,4 @@
-// Queue tray 插入: queue-steer (cutex/userInput/queue/steer) instead of remove + submit `auto`, which
+// Queue tray 插话: queue-steer (cutex/userInput/queue/steer) instead of remove + submit `auto`, which
 // cutex re-queues while an ask holds the session; refusals keep the item and read as notices.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -120,10 +120,10 @@ describe("queue-steer notices", () => {
     const wrapped = "Error invoking remote method 'invoke': Error: queue_steer_refused:delegationTurn";
     expect(parseQueueSteerError(wrapped)).toEqual({ kind: "delegationTurn", detail: "" });
     expect(parseQueueSteerError("queue_steer_refused:bogus")).toBeNull();
-    expect(queueSteerNotice(wrapped, zh)).toBe("委托占用中（委托回合在跑，或委托结果正在送达），暂时不能插入；已留在队列");
+    expect(queueSteerNotice(wrapped, zh)).toBe("委托占用中（委托回合在跑，或委托结果正在送达），暂时不能插话；已留在队列");
     expect(queueSteerNotice("Error: queue_steer_refused:turnConflict", zh)).toBe("回合刚变化，请再试一次");
-    expect(queueSteerNotice("queue_steer_refused:runtimeRefused cannot steer a review turn", zh)).toBe("运行时拒绝插入（cannot steer a review turn）；已留在队列");
-    expect(queueSteerNotice("queue_steer_refused:runtimeRefused", zh)).toBe("运行时拒绝插入；已留在队列");
+    expect(queueSteerNotice("queue_steer_refused:runtimeRefused cannot steer a review turn", zh)).toBe("运行时拒绝插话（cannot steer a review turn）；已留在队列");
+    expect(queueSteerNotice("queue_steer_refused:runtimeRefused", zh)).toBe("运行时拒绝插话；已留在队列");
     expect(queueSteerNotice("queue item changed or already sent", zh)).toBeNull();
     for (const key of Object.keys(zhCN).filter((k) => k.startsWith("queue.steer."))) expect((en as Record<string, string>)[key]).toBeTruthy();
   });

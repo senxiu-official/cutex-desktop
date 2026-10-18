@@ -50,7 +50,20 @@ export interface BrowserServiceOptions {
   idempotentLease?(): boolean;
   onError(code: string): void;
 }
+/**
+ * A service page's fetch / XHR answered 401 ticket-required (the daemon restarted and forgot the
+ * tab's cookie): main re-tickets the top-level page once. At most one such automatic attempt per tab
+ * per minute, so a page that keeps failing never loops.
+ */
+export const SUBRESOURCE_RETICKET_INTERVAL_MS = 60_000;
+export function subresourceReticketDue(lastAt: number | undefined, now: number): boolean {
+  return lastAt === undefined || now - lastAt >= SUBRESOURCE_RETICKET_INTERVAL_MS || now < lastAt;
+}
+
 export function browserServiceError(error: unknown): string {
+  // A relay error that carries the daemon's precise service code (relayTypes BrowserRelayError.ownerCode).
+  const owner = (error as { ownerCode?: unknown } | null)?.ownerCode;
+  if (typeof owner === "string" && /^[a-z_]{1,64}$/.test(owner)) return owner;
   const code = (error as { code?: unknown } | null)?.code;
   if (typeof code === "string" && /^[a-z_]{1,64}$/.test(code)) return code;
   const message = error instanceof Error ? error.message : "";

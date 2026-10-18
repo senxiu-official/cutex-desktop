@@ -1,6 +1,6 @@
 # CLI：查询与常用 human 操作
 
-以下语法已对照 2026-10-14 安装的 cutex `--help` 和 2026-10-17 的 cutex 开发源码（0.1.3）核对。执行前用用户安装的 `cutex --version`、相应子命令的 `--help` 确认差异；不要把开发源码里的能力当成用户已安装的能力。
+以下语法已对照 2026-10-14 安装的 cutex `--help` 和 2026-10-18 的 cutex 开发源码（0.1.4）核对。执行前用用户安装的 `cutex --version`、相应子命令的 `--help` 确认差异；不要把开发源码里的能力当成用户已安装的能力。
 
 命令里的 `AGENT_ID`、`ACTION_ID`、`ROTATION_ID`、`PROJECT_ID`、`NAME`、`MODEL_ID` 和 `WORKSPACE` 都是待替换占位符，不是 shell 变量；路径有空格时加引号。示例不包含凭据。`human` 表示以用户管理意图操作，不需要另造一个 Director 身份。
 
@@ -8,7 +8,7 @@
 
 | 命令 | 作用 / 注意事项 |
 |---|---|
-| `cutex --version` | 显示当前 PATH 命中的 cutex 版本（发布二进制形如 `cutex 0.1.3 (0.1.3, <commit>)`，从源码构建的通常是 `cutex 0.1.3 (<7 位 commit>)`）；不等于远端 daemon 或桌面版本。 |
+| `cutex --version` | 显示当前 PATH 命中的 cutex 版本（发布二进制形如 `cutex 0.1.4 (0.1.4, <commit>)`，从源码构建的通常是 `cutex 0.1.4 (<7 位 commit>)`）；不等于远端 daemon 或桌面版本。 |
 | `cutex service status` | 查看 `cutex service install` 写的安装记录和服务 / supervisor 状态（只读）。 |
 | `cutex upgrade status` | 查看已安装 / 可用的发布和当前运行（只读）。`managed: false` 表示不是托管安装，不能用 `cutex upgrade` 更新；`no_trusted_keys` 只出现在没有内置发布公钥的构建上。见 [安装升级](install-upgrade.md#升级-cutex-与-cute-codex)。 |
 | `cutex upgrade check` / `cutex upgrade apply` | 托管安装：检查签名发布 / 等所有 agent 空闲后安装并验证（失败自动回滚）。会停一次服务，属于改变状态的操作，用户要求时才执行。 |

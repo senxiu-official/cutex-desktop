@@ -4,7 +4,7 @@ import { ProtocolError, MAX_SNAPSHOT_NODES } from '@cutex-desktop/browser-protoc
 import type { BrowserAction } from '@cutex-desktop/browser-protocol';
 import { BrowserCdpExecutor } from '../src/index.js';
 import type { CdpTransport, CdpEvent, ExecutorOptions } from '../src/index.js';
-import { SELECT_VALUE, SELECT_OPTIONS } from '../src/page-functions.js';
+import { SELECT_VALUE, SELECT_OPTIONS, ARM_MOTION } from '../src/page-functions.js';
 import { imageDimensions } from '../src/image.js';
 
 type Json = Record<string, any>;
@@ -153,6 +153,58 @@ describe('I2c Z1 actions and S2 email', () => {
     expect(transport.input()[0]?.params).toMatchObject({ type: 'mouseWheel', deltaX: -99, deltaY: 0, x: 400 });
     await executor.action({ kind: 'scroll', direction: 'down', ref: await getRef(executor) });
     expect(transport.input()[1]?.params).toMatchObject({ deltaY: 500, x: 20 });
+  });
+  it('a wheel receipt delivered after the CDP acknowledgement is still observed (passive listener)', async () => {
+    const { executor, transport } = setup(); let reads = 0;
+    transport.handler = (method, params) => method === 'Runtime.callFunctionOn' && params.functionDeclaration.includes('return this.read()')
+      ? { result: { value: ++reads < 3 ? { seen: false, moved: false, position: '0:0,0', dx: 0, dy: 0, atEdge: false }
+        : { seen: true, moved: true, position: '0:0,812', dx: 0, dy: 812, atEdge: true } } } : undefined;
+    await expect(executor.action({ kind: 'scroll', direction: 'down', amount: 1500 }))
+      .resolves.toMatchObject({ observed: true, scroll: { dx: 0, dy: 812, atEdge: true } });
+    expect(reads).toBeGreaterThanOrEqual(6); // seen, then settled over consecutive unchanged reads
+    const arm = transport.calls.find(call => call.params.functionDeclaration?.includes('let seen=false'));
+    expect(arm?.params.arguments.map((a: Json) => a.value)).toEqual(['scroll', 400, 200, 'down']);
+  });
+  it('a scroll in the requested direction counts as evidence; nothing at all stays unknown', async () => {
+    const { executor, transport } = setup();
+    transport.handler = (method, params) => method === 'Runtime.callFunctionOn' && params.functionDeclaration.includes('return this.read()')
+      ? { result: { value: { seen: false, moved: true, position: '1:0,300', dx: 0, dy: 300, atEdge: false } } } : undefined;
+    await expect(executor.action({ kind: 'scroll', direction: 'down' })).resolves.toMatchObject({ scroll: { dy: 300, atEdge: false } });
+    const quiet = setup();
+    quiet.transport.handler = (method, params) => method === 'Runtime.callFunctionOn' && params.functionDeclaration.includes('return this.read()')
+      ? { result: { value: { seen: false, moved: false, position: '0:0,0', dx: 0, dy: 0, atEdge: false } } } : undefined;
+    const started = Date.now();
+    await expect(quiet.executor.action({ kind: 'scroll', direction: 'down' }, { deadline: Date.now() + 500 })).rejects.toMatchObject({ code: 'outcome_unknown' });
+    expect(Date.now() - started).toBeLessThan(500); // stops before the command deadline, not at it
+  });
+  it('a same-document navigation while the scroll settles does not lose the outcome', async () => {
+    const { executor, transport } = setup(); let reads = 0;
+    transport.handler = (method, params) => {
+      if (method !== 'Runtime.callFunctionOn' || !params.functionDeclaration.includes('return this.read()')) return undefined;
+      if (++reads === 1) transport.event('Page.navigatedWithinDocument', { frameId: 'main', url: 'https://fixture.invalid/#section-2' });
+      return { result: { value: { seen: true, moved: true, position: '0:0,700', dx: 0, dy: 700, atEdge: false } } };
+    };
+    const before = (await executor.read()).pageGeneration;
+    const result = await executor.action({ kind: 'scroll', direction: 'down' });
+    expect(result).toMatchObject({ observed: true, scroll: { dy: 700 } });
+    expect(result.pageGeneration).toBeGreaterThan(before);
+  });
+  it('ARM_MOTION reports the moved container delta and the requested edge', () => {
+    const run = (direction: string, scrollTo: number, inner: boolean) => runInNewContext(`
+      const root={nodeType:1,scrollLeft:0,scrollTop:${inner ? 0 : 100},scrollHeight:2000,clientHeight:400,scrollWidth:800,clientWidth:800,parentElement:null};
+      const box={nodeType:1,scrollLeft:0,scrollTop:0,scrollHeight:900,clientHeight:300,scrollWidth:500,clientWidth:500,parentElement:root};
+      const leaf={nodeType:1,scrollLeft:0,scrollTop:0,scrollHeight:10,clientHeight:10,scrollWidth:10,clientWidth:10,parentElement:box};
+      const win={getComputedStyle:el=>({overflowY:el===box?'auto':'visible',overflowX:'visible'})};
+      const doc={defaultView:win,scrollingElement:root,documentElement:root,elementFromPoint:()=>leaf,addEventListener(){},removeEventListener(){}};
+      win.document=doc;
+      const receipt=(${ARM_MOTION}).call(win,'scroll',400,200,direction);
+      (${inner ? 'box' : 'root'}).scrollTop=${scrollTo};
+      receipt.read();`, { direction });
+    expect(run('down', 1600, false)).toMatchObject({ moved: true, dy: 1500, atEdge: true });
+    expect(run('down', 600, true)).toMatchObject({ moved: true, dy: 600, atEdge: true });
+    expect(run('down', 0, true)).toMatchObject({ moved: false, dy: 0, atEdge: false }); // box can still scroll
+    expect(run('up', 100, false)).toMatchObject({ moved: false, atEdge: true }); // nothing moved: innermost scrollable box is at its top
+    expect(run('up', 40, false)).toMatchObject({ moved: true, dy: -60, atEdge: false });
   });
   it.each(['back', 'forward', 'reload'] as const)('%s invalidates old refs and honors navigation policy', async kind => {
     const { executor, transport } = setup(); const ref = await getRef(executor);

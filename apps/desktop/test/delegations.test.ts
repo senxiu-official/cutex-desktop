@@ -327,6 +327,32 @@ describe("transcript", () => {
     expect(isStandalone(refused)).toBe(false);
   });
 
+  // Owner report 2026-10-18: since cutex prompt revision A8 (117b2c8) the delegate result carries
+  // the id as `delegation` (`delegation-<hex>`), which the card never read: every delegation fell
+  // back to a plain task line inside the work group. Exact shapes of a reviewed and a normal call.
+  const reviewed = done(
+    "agent_delegate",
+    { target: "test1018-claude", title: "Check the parser", text: "Review it" },
+    { approval_id: "apr-0123abcd", delegation: "delegation-e0eee0", detail: "test1018-claude can do more than you, so the owner reviews each delegation to it before it runs (this one included). Nothing to do now: continue or end your turn.", ok: true, state: "pendingReview", target: "test1018-claude" },
+    "c2",
+    "t1",
+  );
+  const queuedA8 = done("agent_delegate", { target: "Helper", title: "Parser review", text: "Review it" }, { ok: true, created: true, delegation: "delegation-1a2b3c", target: "Helper", target_id: "cutex.…a1b2c3", state: "queued", queue_position: 1 }, "c3", "t1");
+
+  it("reads the A8 `delegation` id: a pendingReview call and a queued one are both cards", () => {
+    expect(delegateCallOf(itemOf(reviewed))).toMatchObject({ askId: "delegation-e0eee0", title: "Check the parser", targetName: "test1018-claude", snapshot: { execution: "pendingReview" } });
+    expect(isStandalone(reviewed)).toBe(true);
+    expect(delegateCallOf(itemOf(queuedA8))).toMatchObject({ askId: "delegation-1a2b3c", snapshot: { execution: "queued", queuePosition: 1 } });
+    expect(isStandalone(queuedA8)).toBe(true);
+    const refused = done("agent_delegate", { target: "Helper", text: "x" }, { ok: false, code: "delegation_cycle", delegation: "delegation-1a2b3c" });
+    expect(delegateCallOf(itemOf(refused))?.askId).toBeNull();
+  });
+
+  it("infers A8 wait results under `delegation`", () => {
+    const wait = done("delegation_wait", {}, { results: [{ kind: "answer", delegation: "delegation-e0eee0", status: "answered", answer: "done" }], delegations: [] }, "w2", "t2");
+    expect(inferDelegations([reviewed, wait]).get("delegation-e0eee0")).toMatchObject({ execution: "answered", answerPreview: "done" });
+  });
+
   it("keeps delegation cards out of work groups", () => {
     const cmd: TimelineEntry = { kind: "tool", id: "x", turnId: "t1", item: { id: "x", type: "commandExecution", command: "ls", status: "completed" } as never };
     const segs = segmentEntries([cmd, delegate, cmd], { standalone: (item) => isStandalone({ kind: "tool", id: item.id, turnId: "t1", item }) });

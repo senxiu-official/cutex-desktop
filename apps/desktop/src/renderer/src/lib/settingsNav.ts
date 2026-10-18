@@ -9,6 +9,13 @@ import type { SettingsTab } from "../store"; // type only (erased)
 /** Where a page's settings live (the page-header tag). */
 export type SettingsSource = "local" | "host" | "codex";
 
+/**
+ * Whether agents feel a page's (or section's) settings, the second scope chip (owner 2026-10-18):
+ * none = only the UI; next = agents started (or restarted) afterwards; now = running agents at once;
+ * access = not the agents but who can reach the host (devices, users, peers).
+ */
+export type SettingsAgents = "none" | "next" | "now" | "access";
+
 export type SettingsGroupId = "app" | "connection" | "agents" | "tools" | "data" | "system";
 
 /** Group order of the settings nav (the shell owns it). */

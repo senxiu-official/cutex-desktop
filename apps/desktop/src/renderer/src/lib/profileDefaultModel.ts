@@ -6,9 +6,7 @@
 import type { ProfileModelsView, ProfilePatch } from "../../../shared/ipc";
 import type { MenuEntry } from "./contextMenu";
 import type { ModelNameFn } from "./modelDisplay";
-
-/** Claude effort levels cutex takes when the model row lists none. */
-export const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+import { claudeEffortLevels } from "./profileModels";
 
 export interface DefaultModelMenuInput {
   view: ProfileModelsView;
@@ -43,7 +41,7 @@ export function defaultModelMenu(input: DefaultModelMenuInput): MenuEntry[] {
     onSelect: () => onPick(effort && !offers(r.id, effort) ? { model: r.id, modelReasoningEffort: null } : { model: r.id }),
   }));
   const row = view.models.find((m) => m.id === current);
-  const levels = row?.supportedReasoningEfforts.length ? row.supportedReasoningEfforts : claude ? [...CLAUDE_EFFORT_LEVELS] : [];
+  const levels = claude ? claudeEffortLevels(row) : (row?.supportedReasoningEfforts ?? []);
   if (levels.length) {
     const ownDefault = row?.defaultReasoningEffort && !effort ? row.defaultReasoningEffort : null;
     entries.push("separator", {

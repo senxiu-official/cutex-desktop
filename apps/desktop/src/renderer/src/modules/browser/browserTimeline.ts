@@ -1,5 +1,6 @@
 // Pure projections of browser history. Never stringify arguments/results into the UI:
 // fill values, page bodies, raw errors, URLs and request authority are not summaries.
+import { approvalOutcome } from "../../lib/workGroups";
 import type { RawItem } from "../../lib/timeline";
 import type { BrowserTurnShot } from "../../../../shared/browser";
 
@@ -103,6 +104,8 @@ const ERRORS = new Set(["invalid_request", "unsupported_operation", "permission_
 export interface BrowserToolView {
   tool: BrowserTimelineTool; title: string; summary: BrowserTimelineKey; state: "running" | "done" | "failed";
   errorCode: string | null; image: string | null; imageState: "none" | "ready" | "not-loaded" | "invalid";
+  /** The call stopped for the owner (approval_required) or the owner declined it: not shown as a failure. */
+  approval: "required" | "denied" | null;
 }
 
 export function browserToolView(item: RawItem): BrowserToolView | null {
@@ -137,7 +140,8 @@ export function browserToolView(item: RawItem): BrowserToolView | null {
   if (item.truncated === true && imageState === "ready") { image = null; imageState = "not-loaded"; }
   const running = item.status === "inProgress" || item.status === "running";
   const failed = item.success === false || result.isError === true || item.error != null || ["failed", "errored", "declined"].includes(String(item.status)) || errorCode !== null;
-  return { tool: name, title, summary, state: running ? "running" : failed ? "failed" : "done", errorCode, image, imageState };
+  const approval = running ? null : errorCode === "approval_required" ? "required" : errorCode === "approval_denied" ? "denied" : approvalOutcome(item);
+  return { tool: name, title, summary, state: running ? "running" : failed ? "failed" : "done", errorCode, image, imageState, approval };
 }
 
 /** A late full-item response must never replace another item's row. */

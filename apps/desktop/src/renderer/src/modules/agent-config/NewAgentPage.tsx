@@ -16,7 +16,7 @@ import { Check, ChevronDown, FolderOpen, LoaderCircle, Plus, Sparkles, UserRound
 import { LOCAL_HOST_ID } from "../../../../shared/hosts";
 import { CLAUDE_MAX_IMAGE_BYTES, MAX_IMAGE_BYTES, type ProfileItem, type ProfileModelsView, type SidebarSnapshot } from "../../../../shared/ipc";
 import { dataUrlBytes, type DraftImage } from "../../../../shared/input";
-import { SANDBOX_MODES, BUILTIN_THREAD_DEFAULTS, launchFromForm, readNewThreadDefaults, type LaunchForm, type LaunchPermissions } from "../../../../shared/launch";
+import { SANDBOX_MODES, BUILTIN_THREAD_DEFAULTS, launchFromForm, readNewThreadDefaults, type ClaudeLaunchMode, type LaunchForm, type LaunchPermissions } from "../../../../shared/launch";
 import { useI18n, type MessageKey } from "../../i18n";
 import { modelControlTitle, useModelName } from "../../lib/modelDisplay";
 import { cachedProfileList, loadProfileList } from "../../lib/profileSnapshot";
@@ -40,7 +40,7 @@ import { useHostScope } from "../../lib/useHostScope";
 import { ComponentNotice } from "../../components/ComponentCard";
 import { CLAUDE_RUNTIME_COMPONENT, componentBlocks } from "../../lib/componentCard";
 import { useComponentState } from "../../lib/componentView";
-import { claudeLaunchFromForm, effectiveProfile, HUMAN_AGENT_CLAUDE_FEATURE, isClaudeCreatorRefusal, isClaudeProfile } from "../../lib/newAgentClaude";
+import { claudeLaunchFromForm, claudeLaunchModes, effectiveProfile, HUMAN_AGENT_CLAUDE_FEATURE, isClaudeCreatorRefusal, isClaudeProfile, shownClaudeMode } from "../../lib/newAgentClaude";
 import { NewAgentStepError, NO_PROGRESS, runNewAgentSteps, type NewAgentProgress, type NewAgentStep } from "../../lib/newAgentSteps";
 import { ProjectColorPicker } from "../../components/ProjectColorPicker";
 import { ProjectBadge } from "../../components/ProjectBadge";
@@ -172,6 +172,8 @@ interface NewAgentDraft {
   start: boolean;
   launch: LaunchForm;
   launchTouched: boolean;
+  /** Claude profiles (cutex claude-launch-permission-mode): the picked starting mode; null = the default. */
+  claudeMode?: ClaudeLaunchMode | null;
   projectName: string;
   projectBadge: string;
   projectColorName: string;
@@ -258,6 +260,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   const [defaults, setDefaults] = useState<LaunchPermissions>(BUILTIN_THREAD_DEFAULTS.agent);
   const [launch, setLaunch] = useState<LaunchForm>(() => restored?.launch ?? formFrom(BUILTIN_THREAD_DEFAULTS.agent));
   const [launchTouched, setLaunchTouched] = useState(restored?.launchTouched ?? false);
+  const [claudeMode, setClaudeMode] = useState<ClaudeLaunchMode | null>(restored?.claudeMode ?? null);
   const [cwdTouched, setCwdTouched] = useState(restored?.cwdTouched ?? false);
   const remote = hostId !== LOCAL_HOST_ID;
   const hostLabel = target.look?.label ?? "";
@@ -311,6 +314,9 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
     return () => { alive = false; };
   }, [api, hostId, chosen?.id]);
   const claude = isClaudeProfile(chosen);
+  /** Claude Code modes the new agent can start in (same names as the composer's Claude mode menu). */
+  const claudeModes = useMemo(() => claudeLaunchModes(chosen), [chosen]);
+  const shownMode = shownClaudeMode(claudeMode, claudeModes);
   /** A Claude profile (picked, or the default) on a host that cannot create Claude agents. */
   const claudeBlocked = claude && !claudeOk;
   // components spec v2 §5: a Claude agent needs the host's claude-runtime component; creating one
@@ -469,7 +475,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
           create: async (startNow) => {
             // 自动 = auto reviewer: in `launch` where cutex takes it, else set once the thread runs.
             const reviewer = reviewerForCreate(launchFromForm(launch, launchTouched), permissionModeOfLaunch(launch.sandbox, launch.approvalPolicy, launch.approvalsReviewer), features.has(LAUNCH_REVIEWER_FEATURE));
-            const id = (await api.createAgent({ name: name.trim(), projectId: target ?? undefined, cwd: cwd.trim() || undefined, profile: profile || undefined, start: startNow, launch: !canLaunch ? undefined : claude ? claudeLaunchFromForm(launch, launchTouched) : reviewer.launch })).cutexSessionId;
+            const id = (await api.createAgent({ name: name.trim(), projectId: target ?? undefined, cwd: cwd.trim() || undefined, profile: profile || undefined, start: startNow, launch: !canLaunch ? undefined : claude ? claudeLaunchFromForm(launch, launchTouched, claudeMode && claudeModes?.includes(claudeMode) ? claudeMode : null, claudeModes) : reviewer.launch })).cutexSessionId;
             if (canLaunch && !claude && reviewer.fallback) useApp.getState().expectApprovalsReviewer(id, hostId, reviewer.fallback);
             return id;
           },
@@ -605,7 +611,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   /** Settings → Profiles (添加 or the list) on the form's host; the draft waits in lib/newAgentReturn. */
   const toProfiles = (create: boolean) => {
     if (locked) return;
-    const form: NewAgentDraft = { name, avatar, picture, task, images, pickedSkills, project, cwd, cwdTouched, profile, portraitSelected, start, launch, launchTouched, projectName, projectBadge, projectColorName, projectIconChoice, asDirector };
+    const form: NewAgentDraft = { name, avatar, picture, task, images, pickedSkills, project, cwd, cwdTouched, profile, portraitSelected, start, launch, launchTouched, claudeMode, projectName, projectBadge, projectColorName, projectIconChoice, asDirector };
     keepNewAgentDraft({ hostId, params, form });
     // Host pages open on the form's host (the settings host picker; reset when Settings closes).
     if (hostId !== scope.focus) setSettingsHost(hostId);
@@ -854,7 +860,13 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
             goal={{ label: t("composer.tools.goal.unset"), disabledReason: t("chat.draft.afterCreate"), onClick: () => {} }}
             onManage={(tab) => useApp.getState().openSettings(tab)} />}
           {canLaunch && <>
-            {claude ? <span className="px-1.5 py-0.5 text-xs text-muted">{t("agent-config.newAgent.claudeRules")}</span> : (
+            {claude && claudeModes && shownMode ? (
+              <Menu<ClaudeLaunchMode> title={t("composer.permissionTitle")} onOpen={() => setPanel(null)}
+                trigger={<span className={`trim-cap whitespace-nowrap ${shownMode === "bypassPermissions" ? "text-warn" : ""}`} data-testid="new-agent-claude-mode">{t(`composer.claudeMode.${shownMode}` as MessageKey)}</span>}
+                items={claudeModes.map((m) => ({ value: m, label: t(`composer.claudeMode.${m}` as MessageKey), description: t(`composer.claudeModeHint.${m}` as MessageKey) }))}
+                selected={shownMode} onSelect={(m) => !locked && setClaudeMode(m)}
+                footer={<p className="px-2.5 py-1.5 text-[11px] text-subtle">{t("composer.claudeLaunch.footer")}</p>} />
+            ) : claude ? <span className="px-1.5 py-0.5 text-xs text-muted">{t("agent-config.newAgent.claudeRules")}</span> : (
               <Menu title={t("composer.permissionTitle")} onOpen={() => setPanel(null)}
                 trigger={<span className={`trim-cap whitespace-nowrap ${mode === "full" ? "text-warn" : ""}`}>{t(`composer.mode.${mode}` as MessageKey)}</span>}
                 items={PERMISSION_MODES.map((m) => ({ value: m, label: t(`composer.mode.${m}` as MessageKey), description: t(`composer.modeHint.${m}` as MessageKey) }))}

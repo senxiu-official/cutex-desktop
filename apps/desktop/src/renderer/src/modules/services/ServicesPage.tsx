@@ -159,7 +159,7 @@ function ServicesTable({ project }: { project?: { hostId: string; projectId: str
         if (!owner) return <span className="text-xs text-subtle">—</span>;
         return (
           <button onClick={() => openHostAgent(r.hostId, owner.row.cutexSessionId)} className={`flex min-w-0 items-center gap-1 text-xs hover:text-foreground ${owner.retired ? "text-subtle" : "text-muted"}`} title={owner.retired ? t("services.ownerRetired") : undefined}>
-            <Avatar name={owner.row.displayName} avatar={owner.row.avatar} seed={owner.row.cutexSessionId} size={16} />
+            <Avatar name={owner.row.displayName} avatar={owner.row.avatar} seed={owner.row.cutexSessionId} size={16} minor />
             <span className="truncate">{owner.row.displayName}</span>
             {owner.retired && <span className="shrink-0 text-[10px] text-warn-text">{t("services.retiredTag")}</span>}
           </button>

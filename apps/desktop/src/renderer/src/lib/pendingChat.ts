@@ -5,7 +5,7 @@
 // already created instead of creating another. Pure, unit-tested.
 import type { ExtraInput, ProfileItem } from "../../../shared/ipc";
 import { imageInputItems, type DraftImage } from "../../../shared/input";
-import type { LaunchOverrides } from "../../../shared/launch";
+import type { ClaudeLaunchMode, LaunchOverrides } from "../../../shared/launch";
 import type { PermissionMode } from "./permissionModes";
 import { profileKind } from "./profileKind";
 import { boundSkills } from "./slashCommands";
@@ -31,6 +31,13 @@ export interface PendingChatState {
    * without launch-approvals-reviewer, 自动 gets its reviewer after creation (lib/permissionModes).
    */
   permissionMode?: PermissionMode | null;
+  /**
+   * The resolved profile is a Claude profile (synced by the draft page): the create request then
+   * carries only model / effort and the Claude starting mode (lib/newAgentClaude claudeOnlyLaunch).
+   */
+  claude?: boolean;
+  /** Claude starting modes the profile offers (cutex claude-launch-permission-mode); null = none. */
+  claudeModes?: ClaudeLaunchMode[] | null;
   /** Start in plan mode (collaboration mode set before the first message). */
   plan: boolean;
   /** Goal objective set on the new thread before the first message; null = none. */

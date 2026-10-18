@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Camera, Globe, LoaderCircle, X } from "lucide-react";
+import { Camera, Globe, LoaderCircle, ShieldAlert, ShieldX, X } from "lucide-react";
 import type { BrowserTurnShot } from "../../../../shared/browser";
 import { browserErrorKey } from "./browserState";
 import { bridge } from "../../bridge";
@@ -49,14 +49,18 @@ function ToolRow({ item, sessionId, hostId, epoch }: { item: RawItem; sessionId:
     } catch (error) { if (token === generation.current) setFailed(browserErrorKey(error)); }
     finally { if (token === generation.current) setLoading(false); }
   };
-  const Icon = model.state === "running" ? LoaderCircle : model.state === "failed" ? X : Globe;
-  return <div className="my-1 min-w-0 text-xs" data-browser-tool={model.tool}>
-    <div className={`flex min-w-0 items-center gap-1.5 ${model.state === "failed" ? "text-danger" : "text-muted"}`}>
-      <Icon size={13} className={model.state === "running" ? "shrink-0 animate-spin" : "shrink-0"} aria-label={t(`browser.timeline.${model.state}`)} />
+  // Waiting for / declined by the owner is not a failure: amber / muted, no ✕ (approvals: the request's card).
+  const approval = model.approval;
+  const Icon = model.state === "running" ? LoaderCircle : approval === "required" ? ShieldAlert : approval === "denied" ? ShieldX : model.state === "failed" ? X : Globe;
+  const tone = approval === "required" ? "text-warn-text" : approval === "denied" ? "text-muted" : model.state === "failed" ? "text-danger" : "text-muted";
+  return <div className="my-1 min-w-0 text-xs" data-browser-tool={model.tool} data-browser-tool-approval={approval ?? undefined}>
+    <div className={`flex min-w-0 items-center gap-1.5 ${tone}`}>
+      <Icon size={13} className={model.state === "running" ? "shrink-0 animate-spin" : "shrink-0"} aria-label={approval ? t(approval === "required" ? "tool.approvalRequired" : "tool.declined") : t(`browser.timeline.${model.state}`)} />
       <span className="min-w-0 truncate font-medium">{model.title || t(model.summary)}</span>
       {model.title && <span className="shrink-0 text-subtle">{t(model.summary)}</span>}
+      {approval && <span className="shrink-0">· {t(approval === "required" ? "tool.approvalRequired" : "tool.declined")}</span>}
     </div>
-    {model.errorCode && <p className="ml-5 text-[11px] text-danger">{t(browserTimelineRefusalKey(model.errorCode) ?? browserErrorKey(model.errorCode))}</p>}
+    {model.errorCode && <p className={`ml-5 text-[11px] ${approval ? "text-subtle" : "text-danger"}`}>{t(browserTimelineRefusalKey(model.errorCode) ?? browserErrorKey(model.errorCode))}</p>}
     {model.image && <Screenshot key={model.image} src={model.image} />}
     {model.imageState === "not-loaded" && !failed && <button type="button" onClick={() => void load()}
       disabled={loading || !turnId || !epoch} className="mt-1 flex items-center gap-1 text-accent enabled:hover:underline disabled:text-subtle">

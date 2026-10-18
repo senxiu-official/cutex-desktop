@@ -92,10 +92,47 @@ export const SELECT_OPTIONS = `function(by, values, apply) {
 export const CHECKED_STATE = `function() {
   return {checked:this.tagName==='INPUT'&&Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'checked').get.call(this)};
 }`;
-export const ARM_MOTION = `function(kind) {
-  const node=this, doc=this.ownerDocument||this.document;
+/** Motion receipt. Wheel listeners on a document are passive, so Chromium may acknowledge
+ * Input.dispatchMouseEvent before the trusted event reaches this listener: the executor polls
+ * read(). For scroll it also records the scroll chain under the wheel point (viewport/client
+ * coordinates) and reports the moved container's delta and whether it is at the requested edge. */
+export const ARM_MOTION = `function(kind, x, y, direction) {
+  const node=this, doc=this.ownerDocument||this.document, win=doc.defaultView;
   let seen=false; const type=kind==='hover'?'mousemove':'wheel';
-  const listener=e=>{if(e.isTrusted&&(node===doc.defaultView||e.target===node||node.contains(e.target)))seen=true};
+  const listener=e=>{if(e.isTrusted&&(node===win||e.target===node||node.contains(e.target)))seen=true};
   doc.addEventListener(type,listener,true);
-  return {read:()=>({seen}),cleanup:()=>doc.removeEventListener(type,listener,true)};
+  const chain=[], starts=[], vertical=direction==='up'||direction==='down', forward=direction==='down'||direction==='right';
+  if(kind==='scroll'){
+    const root=doc.scrollingElement||doc.documentElement;
+    let el=Number.isFinite(x)&&Number.isFinite(y)?doc.elementFromPoint(x,y):null;
+    for(let i=0;el&&i<512;i++){
+      if(el.nodeType===1&&el!==root)chain.push(el);
+      el=el.parentElement||(el.parentNode&&el.parentNode.host)||null;
+    }
+    if(root)chain.push(root);
+    for(const el of chain)starts.push([el.scrollLeft,el.scrollTop]);
+  }
+  const scrollable=el=>{
+    const size=vertical?el.scrollHeight-el.clientHeight:el.scrollWidth-el.clientWidth;
+    if(!(size>0))return false;
+    if(el===chain[chain.length-1])return true;
+    const style=win.getComputedStyle(el), overflow=vertical?style.overflowY:style.overflowX;
+    return overflow==='auto'||overflow==='scroll'||overflow==='overlay';
+  };
+  const read=()=>{
+    if(kind!=='scroll')return {seen};
+    let index=-1, fallback=-1;
+    for(let i=0;i<chain.length;i++){
+      const el=chain[i];
+      if(el.scrollLeft!==starts[i][0]||el.scrollTop!==starts[i][1]){index=i;break;}
+      if(fallback<0&&scrollable(el))fallback=i;
+    }
+    const i=index>=0?index:fallback;
+    if(i<0)return {seen,moved:false,position:'none',dx:0,dy:0,atEdge:true};
+    const el=chain[i], left=el.scrollLeft, top=el.scrollTop, dx=Math.round(left-starts[i][0]), dy=Math.round(top-starts[i][1]);
+    const pos=Math.abs(vertical?top:left), max=vertical?el.scrollHeight-el.clientHeight:el.scrollWidth-el.clientWidth;
+    const delta=vertical?dy:dx;
+    return {seen,moved:index>=0&&(forward?delta>0:delta<0),position:i+':'+left+','+top,dx,dy,atEdge:forward?pos>=max-1:pos<=1};
+  };
+  return {read,cleanup:()=>doc.removeEventListener(type,listener,true)};
 }`;

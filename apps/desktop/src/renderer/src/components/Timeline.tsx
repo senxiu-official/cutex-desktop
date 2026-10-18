@@ -1,6 +1,7 @@
 // Timeline rendering shared by the conversation and the read-only sub-agent view: turn headers
 // (duration + time), work groups (§4.14), messages incl. compact agent-bus rows (§4.15), and the
 // running turn's live line at the end of the stream.
+import { createPortal } from "react-dom";
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Image as ImageIcon, SearchCheck } from "lucide-react";
 import { LOOKUP_PAGES } from "../lib/turnFetch";
@@ -47,7 +48,7 @@ import { clearFocusRequest, flashElement, useFocusRequest } from "../lib/focusRe
 import { RepliedBadge } from "./DelegationRows";
 import { DelegationTag } from "./DelegationParts";
 import { OwnerNotifyCard } from "./OwnerNotifyCard";
-import { noteTurnOf, placeOwnerNotes, recordsOf } from "../lib/ownerNotify";
+import { noteNeedsOlderHistory, noteTurnOf, placeOwnerNotes, recordsOf } from "../lib/ownerNotify";
 import { useHostOwnerNotes } from "../lib/ownerNotifyStore";
 import { OWNER_NOTIFY_FEATURE } from "../../../shared/ownerNotify";
 import { ReceivedOutlet } from "../modules/TimelineOutlet";
@@ -58,7 +59,7 @@ import { turnRefNow } from "../lib/refServices";
 import { TimelineViewContext, useTimelineContext, useTimelineView } from "../modules/timelineItemsView";
 import { toolRendererFor } from "../lib/timelineRenderers";
 import { ScriptText } from "./ScriptText";
-import { turnErrorPlacement } from "../lib/turnErrors";
+import { turnErrorPlacement, turnInterruptedPlacement } from "../lib/turnErrors";
 import { retryNoticeText } from "../lib/retryNotice";
 import { useActingUser } from "../lib/actingUsers";
 import { identityInitials } from "../lib/identity";
@@ -102,6 +103,17 @@ function TurnErrorRow({ turn }: { turn: TurnView }) {
         <div className="font-medium">{t("conversation.turnFailed")}</div>
         <div className="whitespace-pre-wrap break-words text-muted">{turn.error}</div>
       </div>
+    </div>
+  );
+}
+
+/** An interrupted turn's end mark, after its last row (lib/turnErrors): a stop or a runtime restart
+ *  cut it off, so its last reply may end mid-sentence. */
+function TurnInterruptedRow() {
+  const { t } = useI18n();
+  return (
+    <div data-testid="turn-interrupted" className="my-1 text-xs text-subtle">
+      {t("conversation.turnInterrupted")}
     </div>
   );
 }
@@ -199,6 +211,12 @@ function SentMessage({ entry, name, onContextMenu }: { entry: Extract<TimelineEn
 /** Image parts of a user message: thumbnails (click → full size); local paths as file chips. */
 function MessageImages({ images }: { images: MessageImage[] }) {
   const [zoom, setZoom] = useState<string | null>(null);
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setZoom(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoom]);
   return (
     <div className="flex max-w-[75%] flex-wrap justify-end gap-1.5">
       {images.map((img, i) =>
@@ -213,11 +231,14 @@ function MessageImages({ images }: { images: MessageImage[] }) {
           </span>
         ),
       )}
-      {zoom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-8" onClick={() => setZoom(null)}>
-          <img src={zoom} alt="" className="max-h-full max-w-full rounded-lg shadow-2xl" />
-        </div>
-      )}
+      {/* Portaled: inside the conversation column a `fixed` overlay is boxed by it, and the right side pane cut the image off. */}
+      {zoom &&
+        createPortal(
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-8" onClick={() => setZoom(null)} data-testid="message-image-zoom">
+            <img src={zoom} alt="" className="max-h-full max-w-full rounded-lg shadow-2xl" />
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -371,14 +392,15 @@ function Entry({ entry, pending, nameOf, sessionId, readOnly, actionable, bar, d
  * Turns, work groups and messages of one thread. Shared by the conversation and the read-only
  * sub-agent view (`readOnly`: no edit & resend, no reply affordances).
  */
-export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf, readOnly = false, older = null, onLoadOlder, pendingSends = false, onRelease }: { timeline: TimelineState; entries: TimelineEntry[]; sessionId: string; nameOf: (id: string) => string; readOnly?: boolean; /** History pages still on the host (lib/historyPages). */ older?: OlderHistory | null; onLoadOlder?: () => void; /** Show the user's sends not in the thread yet (lib/outbox placement "turn"): placed by timelineTail, never below the live line, keyed like the message that replaces them. */ pendingSends?: boolean; /** Let go of stick-to-bottom (a focus request scrolls up to a turn). */ onRelease?: () => void }) {
+export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf, readOnly = false, ownerNotes = !readOnly, older = null, onLoadOlder, pendingSends = false, onRelease }: { timeline: TimelineState; entries: TimelineEntry[]; sessionId: string; nameOf: (id: string) => string; readOnly?: boolean; /** The agent's owner-notify cards (default: not in read-only views). The side agent view is read-only for row actions but keeps them: a card is where the owner answers the agent. */ ownerNotes?: boolean; /** History pages still on the host (lib/historyPages). */ older?: OlderHistory | null; onLoadOlder?: () => void; /** Show the user's sends not in the thread yet (lib/outbox placement "turn"): placed by timelineTail, never below the live line, keyed like the message that replaces them. */ pendingSends?: boolean; /** Let go of stick-to-bottom (a focus request scrolls up to a turn). */ onRelease?: () => void }) {
   const { t } = useI18n();
   const { reasoningView, timelineTurns, timelineInteractions } = useUiPrefs();
   // Host, agent features and renderers once per timeline, shared by every row (TimelineViewContext).
   const view = useTimelineView(sessionId);
   const tools = view.tools;
-  // owner-notify: the agent's messages to the owner, placed among its turns (not in sub-agent views).
-  const ownerNotify = useApp((s) => !readOnly && selectedFeatures(s).has(OWNER_NOTIFY_FEATURE));
+  // owner-notify: the agent's messages to the owner, placed among its turns (not in sub-agent views;
+  // the side agent view keeps them).
+  const ownerNotify = useApp((s) => ownerNotes && selectedFeatures(s).has(OWNER_NOTIFY_FEATURE));
   const notesById = useHostOwnerNotes(view.hostId);
   const notes = useMemo(() => (ownerNotify ? recordsOf(notesById, sessionId) : []), [ownerNotify, notesById, sessionId]);
   // Long histories render only the latest turns (Settings → 通用 → 长对话); 显示更早 adds more.
@@ -414,11 +436,14 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
     const card = request.askId ? delegateEntryOf(allEntries, request.askId) : null;
     if (request.askId) turnId = card?.turnId ?? askRowTurnOf(allEntries, request.askId);
     const index = turnId ? timeline.turns.findIndex((x) => x.id === turnId) : -1;
-    // A message older than every loaded turn sits at the top (no turn to widen to).
-    if (index < 0 && !(request.notificationId && note)) {
+    // A message older than every loaded turn: page its turn in first while there is older history
+    // (an open agent's pending notice from many turns ago, composer 等你回复 row); fully loaded, it sits
+    // at the top (no turn to widen to).
+    const noteOlder = !!note && noteNeedsOlderHistory(note, timeline.turns, !!older?.cursor && !older.error && !!onLoadOlder);
+    if (index < 0 && (!(request.notificationId && note) || noteOlder)) {
       // Not among the loaded turns: page older history in (≤ LOOKUP_PAGES per request, like 跳过去) and
       // look again once the page lands; a thread fully loaded (no cursor) or a failed page is a miss.
-      if (!request.notificationId && older?.cursor && !older.error && onLoadOlder) {
+      if ((!request.notificationId || noteOlder) && older?.cursor && !older.error && onLoadOlder) {
         if (older.loading) return;
         if (paged.current.nonce !== request.nonce) paged.current = { nonce: request.nonce, pages: 0 };
         if (paged.current.pages < LOOKUP_PAGES) {
@@ -449,6 +474,8 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
       onRelease?.();
       if (request.land) request.land(el);
       else flashElement(el);
+      // An owner note: keyboard focus on its 回复 (else the card) so Enter / Space answers it.
+      if (request.notificationId && !request.land) (el.querySelector<HTMLElement>("[data-note-reply]") ?? (el as HTMLElement)).focus?.({ preventScroll: true });
       request.onDone?.(true);
     });
     return () => cancelAnimationFrame(frame);
@@ -499,7 +526,11 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
     const turnId = segTurn(segments[i]!);
     return turnId && !readOnly && lastSegOf.get(turnId) === i && !barTurns.has(turnId) ? <TurnAttachments sessionId={sessionId} turnId={turnId} /> : null;
   };
-  const errorRows = (i: number) => turnErrors.get(i)?.map((turn) => <TurnErrorRow key={`error-${turn.id}`} turn={turn} />);
+  const turnStops = turnInterruptedPlacement(segments.map(segTurn), timeline.turns);
+  const errorRows = (i: number) => [
+    ...(turnErrors.get(i)?.map((turn) => <TurnErrorRow key={`error-${turn.id}`} turn={turn} />) ?? []),
+    ...(turnStops.get(i)?.map((turn) => <TurnInterruptedRow key={`stopped-${turn.id}`} />) ?? []),
+  ];
   const noteCards = (list: readonly { notificationId: string }[] | undefined) => list?.map((r) => <OwnerNotifyCard key={r.notificationId} notificationId={r.notificationId} sessionId={sessionId} />);
   // The user's pending sends: same row component and key (lib/outbox sendRowKey) as the timeline's
   // user message that replaces them, in the same flat list, so the handoff is a prop change.

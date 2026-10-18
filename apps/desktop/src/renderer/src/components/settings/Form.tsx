@@ -6,17 +6,17 @@
 //   • draft + save bar: multi-field forms that validate together (Profile detail).
 // Rows: every setting is a `SettingRow` (label + hint | control column | reset slot), so controls
 // line up on one right edge on every page; entity lists use `ListRow` with click-twice removal.
-import { Component, createContext, useContext, useId, useRef, useState, type ErrorInfo, type ReactNode } from "react";
+import { Component, createContext, isValidElement, useCallback, useContext, useEffect, useId, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 import { bridge } from "../../bridge";
 import { CARD_FLAGS } from "../../lib/narrowCard";
 import { dataFlags, useSizeFlags } from "../../lib/sizeFlags";
-import { ArrowRight, Check, Plus, RotateCcw, RotateCw, X } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronDown, ChevronRight, KeyRound, Layers, Monitor, Plus, RotateCcw, RotateCw, Server, X } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { ARMED_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { FIELD_W } from "../../lib/fieldWidths";
 import { shownSettingsSource } from "../../lib/hosts";
 import { parseClamped, radioKeyTarget, RowA11yContext, useRowA11y } from "../../lib/formA11y";
-import type { SettingsSource } from "../../lib/settingsNav";
+import type { SettingsAgents, SettingsSource } from "../../lib/settingsNav";
 import { useTargetHostId } from "../../lib/targetHost";
 import { useApp } from "../../store";
 
@@ -38,56 +38,229 @@ export function SourceTag({ source }: { source: SettingsSource }) {
   );
 }
 
-/** The page header's source (SettingsPage): a section tag repeating it is left out. */
+/** The page header's scope (SettingsPage): a section chip repeating it is left out. */
 const PageSourceContext = createContext<SettingsSource | undefined>(undefined);
+const PageAgentsContext = createContext<SettingsAgents | undefined>(undefined);
+/** A card reports here while its scope chip differs from its page's (SettingsPage: the page chip mentions it). */
+const PageExceptionsContext = createContext<((id: string, on: boolean) => void) | null>(null);
+
+/** A mixed page half (SettingsHostFrame parts) states its scope once: its sections do not repeat it. */
+export function PartSource({ source, agents, children }: { source: SettingsSource; agents?: SettingsAgents; children: ReactNode }) {
+  return (
+    <PageSourceContext value={source}>
+      <PageAgentsContext value={agents}>{children}</PageAgentsContext>
+    </PageSourceContext>
+  );
+}
+
+const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] whitespace-nowrap";
+const CHIP_TONE = { plain: "bg-surface-2 text-muted", quiet: "bg-surface-2 text-subtle", host: "bg-accent/12 text-accent", agents: "bg-warn/15 text-warn-text" } as const;
+
+/** A scope chip: a click floats a short explanation under it; an outside click or Esc closes it. */
+/** `joined`: the left half of a tag whose right half is a host picker (HostPicker `chip`), e.g. 「cutex 后端 · ● HOST-A ▾」. */
+export function ScopeChip({ tone, icon, label, title, body, joined }: { tone: keyof typeof CHIP_TONE; icon: ReactNode; label: string; title: string; body: string; joined?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  const id = useId();
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", down);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", down);
+      document.removeEventListener("keydown", key);
+    };
+  }, [open]);
+  return (
+    <span ref={ref} className="relative inline-flex">
+      <button type="button" aria-expanded={open} aria-controls={id} onClick={() => setOpen((v) => !v)} className={`${CHIP} ${CHIP_TONE[tone]} cursor-pointer hover:brightness-125 ${joined ? "rounded-r-none pr-1" : ""} ${FOCUS}`}>
+        {icon}
+        {label}
+      </button>
+      {open && (
+        <span id={id} role="note" className="absolute top-full left-0 z-30 mt-1.5 w-72 rounded-lg border border-border bg-raised p-3 text-xs shadow-lg">
+          <span className="mb-1 block font-medium text-foreground">{title}</span>
+          <span className="block leading-relaxed text-muted">{body}</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Where the settings live: 本机 / cutex 后端 · X / Codex 设置 · X / 本设备 + 主机 (a mixed page). `short`: the left half of a tag with a host picker (the picker names the host). */
+function WhereChip({ source, short, except }: { source: SettingsSource | undefined; short?: boolean; except?: boolean }) {
+  const { t } = useI18n();
+  const hostId = useTargetHostId();
+  const host = useApp((s) => s.hosts?.hosts.find((h) => h.id === hostId)?.label) ?? "—";
+  // No local host (macOS without a local cutex): 「这台电脑」 instead of a 「本机」 that is not in the host list.
+  const localShown = useApp((s) => shownSettingsSource(source, s.hosts));
+  // A page with a card tagged elsewhere (owner 2026-10-18): the page chip says the cards' tags win.
+  const withExcept = (body: string) => (except ? `${body}${t("settings.scope.except")}` : body);
+  if (source === "local") {
+    const label = localShown ? t("settings.source.local") : t("settings.scope.thisComputer");
+    return <ScopeChip tone="plain" icon={<Monitor size={11} aria-hidden />} label={label} title={t("settings.scope.local.title")} body={withExcept(t("settings.scope.local.body"))} />;
+  }
+  if (source === "host" || source === "codex") {
+    const label = short ? `${t(`settings.scope.${source}.short`)} ·` : t(`settings.scope.${source}.label`, { host });
+    return <ScopeChip tone="host" joined={short} icon={<Server size={11} aria-hidden />} label={label} title={t(`settings.scope.${source}.label`, { host })} body={withExcept(t(`settings.scope.${source}.body`, { host }))} />;
+  }
+  return <ScopeChip tone="plain" icon={<Layers size={11} aria-hidden />} label={t("settings.scope.mixedTag")} title={t("settings.scope.mixedTag")} body={t("settings.scope.mixed")} />;
+}
+
+/** Whether (and when) agents feel these settings: 不影响 / 新启动的 / 运行中的 · 立即 / 影响访问 (follows the agent term). */
+function AgentsChip({ agents }: { agents: SettingsAgents }) {
+  const { t } = useI18n();
+  const icon = agents === "access" ? <KeyRound size={11} aria-hidden /> : <Bot size={11} aria-hidden />;
+  const tone = agents === "none" ? "quiet" : agents === "access" ? "plain" : "agents";
+  return <ScopeChip tone={tone} icon={icon} label={t(`settings.scope.agents.${agents}`)} title={t(`settings.scope.agents.${agents}.title`)} body={t(`settings.scope.agents.${agents}.body`)} />;
+}
 
 /**
- * Page header: the source tag and an optional page-wide note. The page name is in the breadcrumb.
- * `host`: the host picker of a host page (multi-host; replaces the 主机 · name tag, kept for codex config).
- * `link`: a related page at the header's end (the page item's `headerLink`, e.g. 运行时 → 后端更新).
+ * The scope chips (owner 2026-10-18, variant F): where the settings live (on a host page / part one
+ * tag, 「cutex 后端 · ● host ▾」: the where-chip joined to the host picker, Q2b) and whether agents feel them. Each chip floats its explanation
+ * on click. Page headers and the halves of a mixed page (SettingsHostFrame parts) share it; `agents`
+ * unset = the page is not reviewed yet (no chip).
  */
-export function SettingsPage({ source, hint, host, link, children }: { source?: SettingsSource; hint?: ReactNode; host?: ReactNode; link?: ReactNode; children: ReactNode }) {
-  // No local host (macOS without a local cutex): no 「本机」 tag (lib/hosts shownSettingsSource).
-  const shown = useApp((s) => shownSettingsSource(source, s.hosts));
+export function ScopeLine({ source, picker, agents, except }: { source?: SettingsSource; picker?: ReactNode; agents?: SettingsAgents; except?: boolean }) {
+  return (
+    <div data-settings-scope={source ?? "mixed"} className="flex min-h-6 flex-wrap items-center gap-1.5">
+      {picker ? (
+        <span className="inline-flex items-center">
+          <WhereChip source={source} short except={except} />
+          {picker}
+        </span>
+      ) : (
+        <WhereChip source={source} except={except} />
+      )}
+      {agents && <AgentsChip agents={agents} />}
+    </div>
+  );
+}
+
+/**
+ * Page header: what the page is for (`hint`, one line) and the scope chips. The page name is in the
+ * breadcrumb. `host`: the host picker of a host page (multi-host). `link`: a related page at the
+ * header's end (the page item's `headerLink`, e.g. 运行时 → 后端更新).
+ */
+export function SettingsPage({ source, agents, hint, host, link, children }: { source?: SettingsSource; agents?: SettingsAgents; hint?: ReactNode; host?: ReactNode; link?: ReactNode; children: ReactNode }) {
+  // Cards whose own scope chip differs from the page's (Section `source`), e.g. a host card on 输入区.
+  const [exceptions, setExceptions] = useState<ReadonlySet<string>>(() => new Set());
+  const reportException = useCallback((id: string, on: boolean) => {
+    setExceptions((prev) => {
+      if (prev.has(id) === on) return prev;
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
   return (
     <>
-      {(shown || hint || host || link) && (
-        <div className={`mb-4 flex min-h-5 flex-wrap gap-2 ${host ? "items-center" : "items-start"}`}>
-          {host}
-          {shown && !(host && shown === "host") && <SourceTag source={shown} />}
-          {hint && <p className="min-w-0 pt-0.5 text-xs text-subtle">{hint}</p>}
-          {link && <span className="ml-auto shrink-0 pt-0.5">{link}</span>}
-        </div>
-      )}
-      <PageSourceContext value={source}>{children}</PageSourceContext>
+      <div data-settings-header className="mb-5 space-y-1.5 border-b border-border/60 pb-3">
+        {(hint || link) && (
+          <div className="flex min-h-5 items-start gap-3">
+            {hint && <p className="min-w-0 text-[13px] text-muted">{hint}</p>}
+            {/* The link (在主界面调整, 后端更新 →) must not make the line taller: the chips sit at the same height on every page (owner 2026-10-18). */}
+            {link && <span className="-my-1.5 ml-auto flex shrink-0 items-center">{link}</span>}
+          </div>
+        )}
+        <ScopeLine source={source} picker={host} agents={agents} except={exceptions.size > 0} />
+      </div>
+      <PageSourceContext value={source}>
+        <PageAgentsContext value={agents}>
+          <PageExceptionsContext value={reportException}>{children}</PageExceptionsContext>
+        </PageAgentsContext>
+      </PageSourceContext>
     </>
   );
 }
 
 /**
- * A card with a title row (title · source tag · actions on the right) and a one-line hint. `source`
- * tags a section whose settings live elsewhere than the page's (a mixed page: every section tags);
- * the same source as the page header is not repeated.
+ * A card with a title row (title · scope chips · actions on the right) and a one-line hint. `source` /
+ * `agents` chip a section whose scope differs from the page's (owner 2026-10-18: per page, a section
+ * only when it differs, never per row); the same as the page header is not repeated.
  */
-export function Section({ title, hint, source, children, actions, id }: { title?: string; hint?: ReactNode; source?: SettingsSource; children: ReactNode; actions?: ReactNode; id?: string }) {
+export function Section({ title, hint, source, agents, children, actions, id, tag, picker }: { title?: string; hint?: ReactNode; source?: SettingsSource; agents?: SettingsAgents; children: ReactNode; actions?: ReactNode; id?: string; /** A muted label after the title, e.g. 旧版 for a card that will be redone (title = tooltip). */ tag?: { label: string; title?: string }; /** A host card's host picker before its (then short) source chip (components/SettingsHostFrame SettingsHostSection). */ picker?: ReactNode }) {
+  const { t } = useI18n();
+  // 「只看你修改过的设置」 (owner 2026-10-18): per card, offered only while a row in it is modified.
+  const [modified, setModified] = useState<ReadonlySet<string>>(() => new Set());
+  const [only, setOnly] = useState(false);
+  const report = useCallback((rowId: string, on: boolean) => {
+    setModified((prev) => {
+      if (prev.has(rowId) === on) return prev;
+      const next = new Set(prev);
+      if (on) next.add(rowId);
+      else next.delete(rowId);
+      return next;
+    });
+  }, []);
+  const filter =
+    modified.size > 0 || only ? (
+      <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted">
+        {t("settings.onlyModified", { n: modified.size })}
+        <Toggle label={t("settings.onlyModified", { n: modified.size })} checked={only} onChange={setOnly} />
+      </label>
+    ) : null;
   const pageSource = useContext(PageSourceContext);
+  const pageAgents = useContext(PageAgentsContext);
   const shown = useApp((s) => shownSettingsSource(source, s.hosts));
   if (source && source === pageSource) source = undefined;
   else source = shown;
+  if (agents === pageAgents) agents = undefined;
+  const compact = useContext(CompactContext);
+  const reportException = useContext(PageExceptionsContext);
+  const sectionId = useId();
+  const differs = !!source;
+  useEffect(() => {
+    if (!reportException) return;
+    reportException(sectionId, differs);
+    return () => reportException(sectionId, false);
+  }, [reportException, sectionId, differs]);
   return (
-    <section className="mb-6" id={id}>
-      {(title || actions || source) && (
-        <div className="mb-2">
-          {/* Fixed-height title row whether or not there are actions, so a button appearing never moves the page. */}
-          <div className="flex h-7 items-center gap-2">
-            {title && <h3 className="min-w-0 truncate text-sm font-semibold">{title}</h3>}
-            {source && <SourceTag source={source} />}
-            {actions && <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>}
+    // Compact (a 在主界面调整 panel): the settings page may be mounted too, so the anchor is not an id there.
+    <section className={compact ? "mb-3" : "mb-6"} id={compact ? undefined : id} data-settings-anchor={compact ? id : undefined}>
+      {(title || actions || source || agents || filter || picker) && (
+        <div className={compact ? "mb-1" : "mb-2"}>
+          {/* Fixed-height title row whether or not there are actions / the 「只看你修改过的设置」 switch,
+              so one appearing never moves the page (owner 2026-10-18: a little taller for that switch). */}
+          <div className={`mb-0.5 flex items-center gap-2 ${compact ? "h-7" : "h-8"}`}>
+            {title && <h3 className={`min-w-0 truncate font-semibold ${compact ? "text-[13px]" : "text-sm"}`}>{title}</h3>}
+            {tag && (
+              <span title={tag.title} className="inline-flex h-5 shrink-0 items-center rounded border border-dashed border-border px-1.5 text-[11px] text-subtle">
+                {tag.label}
+              </span>
+            )}
+            {picker ? (
+              <span className="inline-flex shrink-0 items-center">
+                {source && <WhereChip source={source} short />}
+                {picker}
+              </span>
+            ) : (
+              source && <WhereChip source={source} />
+            )}
+            {agents && <AgentsChip agents={agents} />}
+            {(actions || filter) && (
+              <div className="ml-auto flex shrink-0 items-center gap-3">
+                {filter}
+                {actions}
+              </div>
+            )}
           </div>
           {hint && <p className="text-xs text-subtle">{hint}</p>}
         </div>
       )}
-      <Card>{children}</Card>
+      <ModifiedContext value={{ only, report }}>
+        <Card>
+          {children}
+          {only && modified.size === 0 && <p className="py-3 text-xs text-subtle">{t("settings.noneModified")}</p>}
+        </Card>
+      </ModifiedContext>
     </section>
   );
 }
@@ -97,7 +270,9 @@ export function Section({ title, hint, source, children, actions, id }: { title?
  * `data-narrow` below 28rem (lib/narrowCard + lib/sizeFlags; deliberately no CSS size container, see there). A render
  * error inside shows in the card with a retry instead of taking the page down.
  */
-export function Card({ children, className = "rounded-xl border border-card-border bg-surface px-4 py-1" }: { children: ReactNode; className?: string }) {
+export function Card({ children, className }: { children: ReactNode; className?: string }) {
+  const compact = useContext(CompactContext);
+  className ??= compact ? "rounded-lg border border-card-border bg-surface px-3" : "rounded-xl border border-card-border bg-surface px-4 py-1";
   const [ref, flags] = useSizeFlags(CARD_FLAGS);
   return (
     <div ref={ref} {...dataFlags(flags)} className={`group/card ${className}`}>
@@ -138,21 +313,60 @@ function CardError({ message, onRetry }: { message: string; onRetry(): void }) {
 }
 
 /**
- * The one settings row: label (+ hint, + optional sample) | control column (right-aligned) | a
- * fixed 24px reset slot (kept empty when there is no reset, so every page shares one right edge).
- * In a narrow card (< 28rem) the controls drop under the label, left-aligned.
+ * Compact layout for the same cards outside the settings page: a 在主界面调整 panel (components/
+ * CustomizeHost). Smaller titles, tighter rows and card padding; marks, 恢复默认 and 「只看你修改过的设置」
+ * behave as on the page.
+ */
+const CompactContext = createContext(false);
+
+export function CompactSettings({ children }: { children: ReactNode }) {
+  return <CompactContext value={true}>{children}</CompactContext>;
+}
+
+/** True inside a 在主界面调整 panel: a page shared with it leaves out what the panel must not hold (host settings). */
+export function useCompactSettings(): boolean {
+  return useContext(CompactContext);
+}
+
+/** Which rows a card shows (Section's 「只看你修改过的设置」) and how its rows report being modified. */
+const ModifiedContext = createContext<{ only: boolean; report(id: string, modified: boolean): void } | null>(null);
+
+/**
+ * The one settings row: label (+ hint, + optional sample) | control column (right-aligned); the card's
+ * right margin is as narrow as its left (owner 2026-10-18: no reset column). `reset` is a ResetButton:
+ * while it is enabled the setting is modified, shown by a short bar at the card's inner left edge (our
+ * mark for 「改过」), and 「↺ 恢复默认」 appears after the label on hover / keyboard focus, so the control
+ * never moves. In a narrow card (< 28rem) the controls drop under the label, left-aligned.
  */
 export function SettingRow({ label, hint, children, reset, sample }: { label: ReactNode; hint?: ReactNode; children?: ReactNode; reset?: ReactNode; sample?: ReactNode }) {
   const id = useId();
   const labelId = `${id}l`;
   const hintId = hint ? `${id}h` : undefined;
+  const reset$ = isValidElement<{ disabled?: boolean; onClick(): void; title?: string }>(reset) ? reset.props : null;
+  const modified = !!reset$ && !reset$.disabled;
+  const card = useContext(ModifiedContext);
+  const compact = useContext(CompactContext);
+  const report = card?.report;
+  useEffect(() => {
+    if (!report) return;
+    report(id, modified);
+    return () => report(id, false);
+  }, [report, id, modified]);
+  if (card?.only && !modified) return null;
   return (
     <div
-      className={`grid grid-cols-[minmax(9rem,1fr)_auto_1.5rem] gap-x-3 gap-y-1.5 border-b border-border/60 py-3 last:border-b-0 group-data-[narrow]/card:grid-cols-[minmax(0,1fr)_1.5rem] ${sample ? "items-start" : "items-center"}`}
+      data-setting-row=""
+      data-modified={modified ? "" : undefined}
+      className={`group/row relative grid grid-cols-[minmax(9rem,1fr)_auto] gap-x-3 border-b border-border/60 last:border-b-0 group-data-[narrow]/card:grid-cols-[minmax(0,1fr)] ${compact ? "gap-y-1 py-2" : "gap-y-1.5 py-3"} ${sample ? "items-start" : "items-center"}`}
     >
-      <div className="min-w-0">
+      <div className="relative min-w-0">
+        {modified && <ModifiedMark compact={compact} />}
         <div id={labelId} className="text-sm">
-          {label}
+          {/* The restore button floats after the label: showing / hiding it never reflows the row. */}
+          <span className="relative">
+            {label}
+            {modified && <RestoreDefault onClick={reset$!.onClick} title={reset$!.title} />}
+          </span>
         </div>
         {hint && (
           <div id={hintId} className="text-xs text-subtle">
@@ -162,12 +376,39 @@ export function SettingRow({ label, hint, children, reset, sample }: { label: Re
         {sample}
       </div>
       <RowA11yContext value={{ labelId, hintId }}>
-        <div className="flex min-w-0 items-center justify-end gap-2 group-data-[narrow]/card:col-span-1 group-data-[narrow]/card:row-start-2 group-data-[narrow]/card:flex-wrap group-data-[narrow]/card:justify-start">
+        <div className="flex min-w-0 items-center justify-end gap-2 group-data-[narrow]/card:row-start-2 group-data-[narrow]/card:flex-wrap group-data-[narrow]/card:justify-start">
           {children}
         </div>
       </RowA11yContext>
-      <div className="flex h-full w-6 items-center justify-center group-data-[narrow]/card:col-start-2 group-data-[narrow]/card:row-start-1">{reset}</div>
     </div>
+  );
+}
+
+/**
+ * The 「改过」 mark: a short accent bar (14px) at the card's inner left edge, level with the label's first
+ * line (owner 2026-10-18: H4 for now; diamond / triangle variants stay in /settings-variants.html).
+ * Rows sit in the card's 1rem padding (compact: 0.75rem), so minus that is the inner edge.
+ */
+function ModifiedMark({ compact }: { compact: boolean }) {
+  const { t } = useI18n();
+  return <span role="img" aria-label={t("settings.modified")} title={t("settings.modified")} className={`absolute top-[3px] h-3.5 w-0.5 rounded-r bg-accent ${compact ? "-left-3" : "-left-4"}`} />;
+}
+
+/** 「↺ 恢复默认」 after a modified row's label: shown on row hover and while it has keyboard focus. */
+function RestoreDefault({ onClick, title }: { onClick(): void; title?: string }) {
+  const { t } = useI18n();
+  const label = title ?? t("appearance.reset");
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      className={`absolute top-1/2 left-full z-10 ml-1.5 inline-flex h-5 -translate-y-1/2 items-center gap-1 rounded bg-surface px-1 text-[11px] whitespace-nowrap text-subtle opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 hover:bg-surface-2 hover:text-foreground focus-visible:opacity-100 ${FOCUS}`}
+    >
+      <RotateCcw size={12} aria-hidden />
+      {t("appearance.reset")}
+    </button>
   );
 }
 
@@ -178,6 +419,29 @@ export function TextLink({ children, onClick }: { children: ReactNode; onClick()
       {children}
       <ArrowRight size={12} aria-hidden />
     </button>
+  );
+}
+
+/**
+ * 「详细信息」: developer facts of a card (hashes, sequences, paths, channels) folded at its end, so the
+ * card leads with what a person acts on. Collapsed by default; the rows inside are ordinary SettingRows.
+ */
+export function Details({ children, label }: { children: ReactNode; label?: string }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <div className="border-b border-border/60 last:border-b-0" data-details={open ? "open" : "closed"}>
+      <button type="button" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)} className={`-mx-1 my-1.5 flex items-center gap-1 rounded px-1 py-1 text-xs text-muted hover:text-foreground ${FOCUS}`}>
+        {open ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
+        {label ?? t("settings.details")}
+      </button>
+      {open && (
+        <div id={id} className="border-t border-border/60">
+          {children}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -329,7 +593,7 @@ export function PlannedCard({ api, children }: { api: string; children: ReactNod
   );
 }
 
-export function Segmented<T extends string>({ value, options, onChange, disabled, label }: { value: T; options: { value: NoInfer<T>; label: string }[]; onChange(v: NoInfer<T>): void; disabled?: boolean; label?: string }) {
+export function Segmented<T extends string>({ value, options, onChange, disabled, label }: { value: T; options: { value: NoInfer<T>; label: string; /** What the choice means, as a tooltip (the row hint says what the setting is). */ title?: string }[]; onChange(v: NoInfer<T>): void; disabled?: boolean; label?: string }) {
   const aria = useRowA11y(label);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const selected = Math.max(
@@ -348,6 +612,7 @@ export function Segmented<T extends string>({ value, options, onChange, disabled
             }}
             role="radio"
             aria-checked={on}
+            title={o.title}
             tabIndex={i === selected ? 0 : -1}
             disabled={disabled}
             onClick={() => onChange(o.value)}
@@ -450,9 +715,21 @@ export function TextField({ value, onCommit, placeholder, mono, width = "w-64", 
  * A number setting: optional slider + a number box + unit suffix. The box keeps what is typed as a
  * draft and applies it (clamped) on Enter / blur, so typing "120" never applies 1 → 12 → 120.
  */
-export function NumberField({ value, range, unit, step = 1, slider, onCommit, disabled, label, placeholder }: { value: number | null; range: readonly [number, number]; unit?: string; step?: number; slider?: boolean; onCommit(v: number | null): void; disabled?: boolean; label?: string; placeholder?: string }) {
+/**
+ * A number with an optional slider. `commitOnRelease`: the slider applies only when let go (pointer up,
+ * key up, blur) and shows the value it is dragged to meanwhile, for a value that moves the slider itself
+ * while it applies (界面缩放 rescales the whole window, the thumb ran away from the pointer).
+ */
+export function NumberField({ value, range, unit, step = 1, slider, onCommit, disabled, label, placeholder, commitOnRelease }: { value: number | null; range: readonly [number, number]; unit?: string; step?: number; slider?: boolean; onCommit(v: number | null): void; disabled?: boolean; label?: string; placeholder?: string; commitOnRelease?: boolean }) {
   const aria = useRowA11y(label);
   const [draft, setDraft] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<number | null>(null);
+  const release = () => {
+    if (dragging === null) return;
+    if (dragging !== value) onCommit(dragging);
+    setDragging(null);
+  };
+  const shown = dragging ?? value;
   const commit = () => {
     if (draft === null) return;
     const n = parseClamped(draft, range);
@@ -468,9 +745,12 @@ export function NumberField({ value, range, unit, step = 1, slider, onCommit, di
           min={range[0]}
           max={range[1]}
           step={step}
-          value={value ?? range[0]}
+          value={shown ?? range[0]}
           disabled={disabled}
-          onChange={(e) => onCommit(Number(e.target.value))}
+          onChange={(e) => (commitOnRelease ? setDragging(Number(e.target.value)) : onCommit(Number(e.target.value)))}
+          onPointerUp={commitOnRelease ? release : undefined}
+          onKeyUp={commitOnRelease ? release : undefined}
+          onBlur={commitOnRelease ? release : undefined}
           className={`w-40 accent-[var(--accent)] ${FOCUS}`}
         />
       )}
@@ -480,7 +760,7 @@ export function NumberField({ value, range, unit, step = 1, slider, onCommit, di
         {...aria}
         disabled={disabled}
         placeholder={placeholder}
-        value={draft ?? (value === null ? "" : String(value))}
+        value={draft ?? (shown === null ? "" : String(shown))}
         onFocus={(e) => e.currentTarget.select()}
         onChange={(e) => setDraft(e.target.value.replace(/[^\d]/g, ""))}
         onBlur={commit}
@@ -492,6 +772,42 @@ export function NumberField({ value, range, unit, step = 1, slider, onCommit, di
       />
       {unit !== undefined && <span className="w-6 text-xs text-subtle">{unit}</span>}
     </>
+  );
+}
+
+/**
+ * Colour palette picker (外观 → 浅色 / 深色配色): a wrapping row of choices, each a two-tone dot (page and
+ * card colour) and its name; a radio group, arrow keys move the choice.
+ */
+export function SwatchPicker<T extends string>({ value, options, onChange, label }: { value: T; options: { value: T; label: string; colors: readonly [string, string] }[]; onChange(v: T): void; label?: string }) {
+  const aria = useRowA11y(label);
+  return (
+    <div role="radiogroup" {...aria} className="flex max-w-[30rem] flex-wrap justify-end gap-1.5">
+      {options.map((o, i) => {
+        const on = o.value === value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            tabIndex={on ? 0 : -1}
+            onClick={() => onChange(o.value)}
+            onKeyDown={(e) => {
+              const next = radioKeyTarget(e.key, i, options.length);
+              if (next === null) return;
+              e.preventDefault();
+              onChange(options[next]!.value);
+              (e.currentTarget.parentElement?.children[next] as HTMLElement | undefined)?.focus();
+            }}
+            className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs ${on ? "border-accent bg-accent/10 text-foreground" : "border-border text-muted hover:text-foreground"} ${FOCUS}`}
+          >
+            <span aria-hidden className="h-3.5 w-3.5 shrink-0 rounded-full ring-1 ring-border" style={{ background: `linear-gradient(135deg, ${o.colors[0]} 50%, ${o.colors[1]} 50%)` }} />
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

@@ -5,10 +5,15 @@
 .launch-page { position: relative; isolation: isolate; }
 /* Anchor the welcome art to the page, never to the changing height of the settings below it. */
 .launch-intro { position: absolute; inset-inline: 1rem; top: clamp(1.5rem, calc(26 * var(--cqh, 1vh) - 4.25rem), 20rem); pointer-events: none; }
+/* The icon intro stops above the dock (--launch-dock-h) and clips there rather than run under it. */
+.launch-intro:not(.launch-intro-with-art) { bottom: calc(var(--launch-dock-h, 0px) + .75rem); overflow: hidden; }
 .launch-intro-icon > svg { width: 2rem; height: 2rem; }
 .launch-intro-title { max-width: 44rem; font-size: clamp(1.75rem, calc(4 * var(--cqw, 1vw)), 2.5rem); line-height: 1.2; overflow-wrap: anywhere; text-wrap: balance; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .launch-intro-title-long { font-size: clamp(1.125rem, calc(3 * var(--cqw, 1vw)), 1.75rem); -webkit-line-clamp: 4; }
-.launch-intro-with-art { top: 1rem; bottom: 23rem; width: calc(100% - 2rem); max-width: 46rem; margin-inline: auto; padding-inline: 0; z-index: 1; }
+/* The art keeps its fixed anchor unless the dock (--launch-dock-h, measured by LaunchDock) grows
+   past it: then it shrinks so it never runs under an error or notice at the top of the dock (2.5rem:
+   the picked pose and its caption hang 1.5rem below the box, .launch-portrait-selected). */
+.launch-intro-with-art { top: 1rem; bottom: max(23rem, calc(var(--launch-dock-h, 0px) + 2.5rem)); width: calc(100% - 2rem); max-width: 46rem; margin-inline: auto; padding-inline: 0; z-index: 1; }
 .launch-portrait-stage { width: 100%; height: 100%; min-height: 0; pointer-events: auto; }
 .launch-portrait-strip { display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100%; height: 100%; margin-inline: auto; }
 .launch-portrait-card { position: relative; display: grid; grid-row: span 2; grid-template-rows: subgrid; min-width: 0; min-height: 0; background: transparent; border-inline-end: 1px solid color-mix(in srgb, var(--fg-muted) 12%, transparent); isolation: isolate; transition: filter 200ms ease; }
@@ -126,7 +131,10 @@
 /* Narrow page (≤ 520px). */
 .launch-page[data-narrow] .launch-portrait-name { font-size: 1.05rem; letter-spacing: -.04em; }
 .launch-page[data-narrow] .launch-portrait-profile { font-size: .65rem; padding-inline: .15rem; }
-.launch-page[data-narrow] .launch-intro-with-art { bottom: 27rem; }
+.launch-page[data-narrow] .launch-intro-with-art { bottom: max(27rem, calc(var(--launch-dock-h, 0px) + 2.5rem)); }
+/* The quick-chat greeting hangs 3rem below the art (two lines at most): keep its room above the dock. */
+.launch-page .launch-intro-with-greeting { bottom: max(23rem, calc(var(--launch-dock-h, 0px) + 8rem)); }
+.launch-page[data-narrow] .launch-intro-with-greeting { bottom: max(27rem, calc(var(--launch-dock-h, 0px) + 8rem)); }
 .launch-page[data-narrow] .launch-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .launch-page[data-narrow] .launch-setting-row:not(.launch-setting-single):not(.launch-setting-project) { display: contents; }
 .launch-page[data-narrow] :is(.launch-setting-single, .launch-setting-project, .launch-name-row) { grid-column: 1 / -1; }

@@ -1,5 +1,5 @@
-Cutex desktop
-Copyright 2026 The Cutex Authors
+Cutex desktop — https://github.com/senxiu-official/cutex-desktop
+Copyright 2026 The Cutex Authors (https://github.com/senxiu-official)
 
 Licensed under the Apache License, Version 2.0 (see LICENSE; the same text is in
 LICENSES/Apache-2.0.txt). You may not use this project except in compliance with the License.
@@ -76,3 +76,5 @@ Licensed under the Unicode License v3 (LICENSES/Unicode-3.0.txt).
 
   - apps/desktop/src/renderer/src/lib/fontRanges.ts holds tables generated from Scripts.txt and
     ScriptExtensions.txt of Unicode 17.0.0 (scripts/generate-font-ranges.py).
+
+祀小姐真可爱。

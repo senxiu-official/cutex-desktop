@@ -1,5 +1,5 @@
 // Action rows under messages (ZCode-like; UI review #15, side actions back inline 2026-10-15). Agent
-// reply (bottom-left): 复制 · 分叉 · the modules' `ref.action` items (侧聊, 批注, 书签 … as icons; live
+// reply (bottom-left): 复制 · 分叉 · the modules' `ref.action` items (侧边对话, 批注, 书签 … as icons; live
 // state as a filled icon) · 「…」; user bubble (bottom-right): 复制 · 编辑并重发 · the same items · 「…」.
 // The 「…」 menu (components/Menu) keeps the rare ones: 折叠 / 展开, 引用 and 回退到这里.
 // The latest reply's row always shows; other rows on hover / keyboard focus only. The rows always take
@@ -7,7 +7,7 @@
 // history-rewriting actions (回退 / 编辑并重发) arm first (lib/armedConfirm): picking 回退 in the menu
 // puts its armed confirm button into the row. Right-click entries stay available too.
 import { useEffect, useState, type ReactNode } from "react";
-import { Check, ChevronsDownUp, ChevronsUpDown, Copy, GitFork, History, MessageSquareQuote, MoreHorizontal, PencilLine } from "lucide-react";
+import { Check, ChevronsDownUp, ChevronsUpDown, Copy, FileClock, GitFork, History, MessageSquareQuote, MoreHorizontal, PencilLine } from "lucide-react";
 import type { MessageFold } from "../lib/foldView";
 import { useI18n } from "../i18n";
 import { ARMED_BUTTON, useArmed } from "../lib/armedConfirm";
@@ -15,7 +15,7 @@ import { quoteText, SESSION_FEATURES } from "../lib/menus";
 import { copyQuietly } from "../lib/copyFeedback";
 import type { ReplyBar } from "../lib/replyActions";
 import { selectedFeatures, useApp } from "../store";
-import { lacks } from "../lib/agentFeatures";
+import { canRewindFiles, lacks } from "../lib/agentFeatures";
 import { useAgentFeatures } from "../lib/agentFeaturesView";
 import { structuralBlockText, structuralErrorText, useStructuralBlock } from "../lib/structuralGateView";
 import { turnRefNow } from "../lib/refServices";
@@ -149,6 +149,9 @@ export function ReplyActions({ sessionId, bar, readOnly, fold }: { sessionId: st
   const agent = useAgentFeatures(sessionId);
   const canFork = useApp((s) => selectedFeatures(s).has(SESSION_FEATURES.fork)) && !readOnly && !lacks(agent, "fork");
   const canRevert = useApp((s) => selectedFeatures(s).has(SESSION_FEATURES.revert)) && !readOnly && !!bar.nextTurnId && !lacks(agent, "historyRevert");
+  // Claude agents: 回退 can also restore the files from Claude Code's checkpoints (claude-rewind-files).
+  const canRevertFiles = useApp((s) => canRewindFiles(agent, selectedFeatures(s))) && canRevert;
+  const [withFiles, setWithFiles] = useState(false);
   // A busy Claude agent refuses fork / revert (lib/structuralGate): shown disabled with the reason.
   const block = useStructuralBlock(sessionId, agent);
   const blocked = block ? structuralBlockText(block) : null;
@@ -162,7 +165,8 @@ export function ReplyActions({ sessionId, bar, readOnly, fold }: { sessionId: st
   const more = [
     foldAction(fold, t),
     !readOnly && { value: "quote", label: t("reply.quote"), icon: <MessageSquareQuote size={ICON} />, run: () => useApp.getState().insertIntoComposer(sessionId, quoteText(bar.text), "append") },
-    canRevert && { value: "revert", label: t("reply.revert"), icon: <History size={ICON} />, disabled: !!blocked, title: blocked ?? t("reply.revertHint", { n: bar.laterTurns }), run: () => setArmed(true) },
+    canRevert && { value: "revert", label: t("reply.revert"), icon: <History size={ICON} />, disabled: !!blocked, title: blocked ?? t("reply.revertHint", { n: bar.laterTurns }), run: () => (setWithFiles(false), setArmed(true)) },
+    canRevertFiles && { value: "revertFiles", label: t("reply.revertWithFiles"), icon: <FileClock size={ICON} />, disabled: !!blocked, title: blocked ?? t("reply.revertFilesHint", { n: bar.laterTurns }), run: () => (setWithFiles(true), setArmed(true)) },
   ].filter((a): a is MoreAction => !!a);
   const shown = bar.latest || armed || forking ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100";
   return (
@@ -179,11 +183,11 @@ export function ReplyActions({ sessionId, bar, readOnly, fold }: { sessionId: st
         <>
           <Divider />
           <ArmedConfirm
-            icon={<History size={ICON} />}
-            title={t("reply.revertHint", { n: bar.laterTurns })}
-            label={t("reply.revertArmed", { n: bar.laterTurns })}
+            icon={withFiles && canRevertFiles ? <FileClock size={ICON} /> : <History size={ICON} />}
+            title={t(withFiles && canRevertFiles ? "reply.revertFilesHint" : "reply.revertHint", { n: bar.laterTurns })}
+            label={t(withFiles && canRevertFiles ? "reply.revertFilesArmed" : "reply.revertArmed", { n: bar.laterTurns })}
             onDone={() => setArmed(false)}
-            onConfirm={() => useApp.getState().revertTo(sessionId, bar.nextTurnId!).catch(report)}
+            onConfirm={() => useApp.getState().revertTo(sessionId, bar.nextTurnId!, withFiles && canRevertFiles ? { rewindFiles: true } : undefined).catch(report)}
           />
         </>
       )}

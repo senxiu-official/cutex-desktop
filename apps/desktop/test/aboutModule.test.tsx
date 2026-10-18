@@ -7,7 +7,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-const fx = vi.hoisted(() => ({ opened: [] as string[], state: { daemon: { kind: "disconnected" }, hosts: null } as Record<string, unknown> }));
+const fx = vi.hoisted(() => ({ opened: [] as string[], state: { daemon: { kind: "disconnected" }, hosts: null, features: new Set<string>(), openSettings: () => {} } as Record<string, unknown> }));
 
 vi.mock("../src/renderer/src/bridge", () => ({
   api: { openExternal: (url: string) => void fx.opened.push(url), capabilities: () => Promise.resolve(null) },
@@ -36,8 +36,8 @@ vi.mock("../src/renderer/src/lib/runtimePackageStore", async (importOriginal) =>
 vi.mock("../src/renderer/src/components/settings/AboutDragon", () => ({ AboutDragon: () => null }));
 // The page places the module's sections through the slot outlet; here they are rendered directly.
 vi.mock("../src/renderer/src/modules/Outlet", async () => {
-  const { AboutLinksSection, KnownIssuesSection } = await import("../src/renderer/src/modules/about/AboutSections");
-  return { SettingsSections: ({ page }: { page: string }) => (page === "about" ? h("div", null, h(AboutLinksSection), h(KnownIssuesSection)) : null) };
+  const { AboutLinksSection, ChangelogSection, KnownIssuesSection } = await import("../src/renderer/src/modules/about/AboutSections");
+  return { SettingsSections: ({ page }: { page: string }) => (page === "about" ? h("div", null, h(KnownIssuesSection), h(ChangelogSection), h(AboutLinksSection)) : null) };
 });
 
 const { AboutPage } = await import("../src/renderer/src/components/settings/AppSettings");
@@ -52,11 +52,28 @@ const en = (s: string) => applyTerms(s, DEFAULT_TERMS.en, "en");
 const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
 
 describe("about module", () => {
+  it("shows the bundled changelog with the installed version open and marked", () => {
+    const page = renderToStaticMarkup(h(AboutPage));
+    expect(page).toContain('data-changelog=""');
+    expect(page).toContain('data-release="0.1.3"');
+    expect(page).toContain('data-release="0.1.2"');
+    // 0.1.2 is installed (the mocked update status): its entry is expanded and badged.
+    expect(page).toMatch(/aria-expanded="true" aria-controls="changelog-0\.1\.2"/);
+    expect(page).toContain("about.changelog.installed");
+    expect(page).toContain(`title="https://github.com/senxiu-official/cutex-desktop/blob/release/CHANGELOG.md"`);
+  });
+
   const html = renderToStaticMarkup(h(AboutPage));
 
-  it("shows the desktop version, the license and every project link", () => {
-    expect(html).toContain("0.1.2 · abcdef1");
+  it("leads with the desktop version (exact build folded under 详细信息), then license, notices and every project link", () => {
+    expect(html).toContain(">0.1.2<");
+    expect(html).toContain("settings.details");
+    expect(html).not.toContain("0.1.2 · abcdef1");
     expect(html).toContain("Apache-2.0");
+    expect(html).toContain("about.thirdParty");
+    // One project card: the three repositories and the star button (no second copy on 更新与诊断).
+    for (const name of ["cutex-desktop", "cutex", "cute-codex"]) expect(html).toContain(`>${name}<`);
+    expect(html).toContain("about.star");
     for (const link of ABOUT_LINKS) {
       expect(html).toContain(`title="${link.url}"`);
       expect(link.url.startsWith("https://github.com/senxiu-official/cutex-desktop")).toBe(true);
@@ -106,6 +123,7 @@ describe("about module", () => {
 
   it("is a required module placing its sections on the shell's 关于 page", () => {
     expect(about.required).toBe(true);
-    expect(about.contributes?.["settings.section"]?.map((s) => s.page)).toEqual(["about", "about"]);
+    expect(about.contributes?.["settings.section"]?.map((s) => s.page)).toEqual(["about", "about", "about"]);
+    expect(about.contributes?.["settings.section"]?.map((s) => s.id)).toEqual(["about.knownIssues", "about.changelog", "about.links"]);
   });
 });

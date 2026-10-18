@@ -282,13 +282,13 @@ describe("S6 turning the capsule off releases it", () => {
 });
 
 describe("S7 settings with the capsule off", () => {
-  it("the placement page 状态显示 (`status`) stays, only the capsule's own section goes", async () => {
+  it("the placement table (输入区 `composer`, was 状态显示) stays, only the capsule's own section goes", async () => {
     const host = await appHost();
     await host.setEnabled("status-capsule", false);
-    const page = host.snapshot("settings.page").find((e) => e.item.page === "status");
-    expect(page?.item.id).toBe("shell.status");
+    const page = host.snapshot("settings.page").find((e) => e.item.page === "composer");
+    expect(page?.item.id).toBe("shell.composer");
     expect(page?.mode).toBe("show");
-    expect(host.snapshot("settings.section").filter((e) => e.item.page === "status")).toEqual([]);
+    expect(host.snapshot("settings.section").filter((e) => e.item.page === "composer")).toEqual([]);
   });
 
   it("capsule / both cannot be picked as a new choice; a saved one stays readable with its reason", () => {

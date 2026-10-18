@@ -7,7 +7,7 @@ import { useI18n, type MessageKey } from "../../i18n";
 import { formatWindow } from "../../lib/contextPresets";
 import { localDateTime, upstreamModelsNotice } from "../../lib/profileKind";
 import { modelLabel, useModelName } from "../../lib/modelDisplay";
-import { canCreateModelVariant, MODEL_NAMES_FEATURE, modelsSourceText, upstreamSource } from "../../lib/profileModels";
+import { canCreateModelVariant, MODEL_NAMES_FEATURE, modelListColumns, modelsSourceText, upstreamSource } from "../../lib/profileModels";
 import { AddButton, ArmedRemove, Button, IconButton } from "./Form";
 import { ProfileModelDialog } from "./ProfileModelDialog";
 import { useTargetApi, useTargetFeatures } from "../../lib/targetHost";
@@ -57,7 +57,12 @@ function UpstreamNotice({ view }: { view: ProfileModelsView }) {
   );
 }
 
-const GRID = "grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_7.5rem] items-center gap-2";
+/** Model column, then the limit columns this list shows (lib/profileModels modelListColumns), then actions. */
+const GRIDS: Record<number, string> = {
+  0: "grid grid-cols-[minmax(0,1fr)_7.5rem] items-center gap-2",
+  1: "grid grid-cols-[minmax(0,1fr)_5.5rem_7.5rem] items-center gap-2",
+  2: "grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_7.5rem] items-center gap-2",
+};
 
 /** Per-model edits save immediately; existing runtimes keep their launch snapshot. */
 export function ModelList({ profile, view, setView }: { profile: string; view: ProfileModelsView; setView(v: ProfileModelsView): void }) {
@@ -75,6 +80,8 @@ export function ModelList({ profile, view, setView }: { profile: string; view: P
   // The view is fresher than the profile list right after an edit, so rows use its entry name.
   const rowName = (m: CatalogModel) => modelLabel(m.id, m.displayName, m.entryDisplayName);
   const discovery = view.discoverySupported ?? editable;
+  const cols = modelListColumns(view);
+  const GRID = GRIDS[Number(cols.context) + Number(cols.compact)]!;
   const run = async (fn: () => Promise<ProfileModelsView>) => {
     setBusy(true);
     setError(null);
@@ -95,7 +102,9 @@ export function ModelList({ profile, view, setView }: { profile: string; view: P
   const sourceTitle = src?.kind === "nativeCache" && src.clientVersion ? `cute-codex ${src.clientVersion}` : src?.kind === "nativeBundled" && src.cliSha256 ? `sha256 ${src.cliSha256.slice(0, 12)}` : undefined;
   // One hint line; the other notes go in its tooltip (settings audit 2026-10-15 #49).
   const notes = [
-    (names || editable) && t("agent-config.profile.entryHint"),
+    editable ? t("agent-config.profile.entryHint") : names && t("agent-config.profile.entryNamesListHint"),
+    cols.claude && cols.context && t("agent-config.profile.claudeContextHint"),
+    cols.claude && t("agent-config.profile.claudeCompactHint"),
     variants && t("agent-config.profile.variantsHint"),
     variants && t("agent-config.profile.variantSwitchHint"),
     view.followsUpstream && editable && t("agent-config.profile.followsUpstreamHint"),
@@ -106,7 +115,8 @@ export function ModelList({ profile, view, setView }: { profile: string; view: P
         <span className="shrink-0 text-sm">{t("agent-config.profile.models")}</span>
         <span className="min-w-0 truncate text-xs text-subtle" title={sourceTitle}>
           {source}
-          {!editable && ` · ${t("agent-config.profile.modelsReadOnly")}`}
+          {/* Read-only list, but per-entry display names stay editable (profile-model-display-names). */}
+          {!editable && ` · ${t(names ? "agent-config.profile.modelsNamesOnly" : "agent-config.profile.modelsReadOnly")}`}
         </span>
         {editable && (
           <span className="ml-auto flex shrink-0 gap-2">
@@ -132,8 +142,8 @@ export function ModelList({ profile, view, setView }: { profile: string; view: P
         <div className="rounded-lg border border-border px-3">
           <div className={`${GRID} border-b border-border py-1.5 text-[11px] text-subtle`}>
             <span>{t("agent-config.defaults.profileModel")}</span>
-            <span className="text-right">{t("agent-config.profile.colContext")}</span>
-            <span className="text-right">{t("agent-config.profile.colCompact")}</span>
+            {cols.context && <span className="text-right">{t("agent-config.profile.colContext")}</span>}
+            {cols.compact && <span className="text-right">{t("agent-config.profile.colCompact")}</span>}
             <span />
           </div>
           {view.models.map((m) => (
@@ -146,8 +156,13 @@ export function ModelList({ profile, view, setView }: { profile: string; view: P
                 {m.inputModalities.includes("image") && <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">{t("agent-config.profile.vision")}</span>}
                 {m.id === view.selectedModel && <span className="shrink-0 text-[11px] text-accent">{t("agent-config.profile.selected")}</span>}
               </span>
-              <span className="text-right text-xs text-muted tabular-nums" title={t(`agent-config.profile.source.${m.effective.contextWindowSource}` as MessageKey)}>{formatWindow(m.effective.contextWindow)}</span>
-              <span className="text-right text-xs text-muted tabular-nums" title={t(`agent-config.profile.source.${m.effective.autoCompactTokenLimitSource}` as MessageKey)}>{formatWindow(m.effective.autoCompactTokenLimit)}</span>
+              {cols.context && (cols.claude && m.effective.contextWindow == null ? (
+                // A Claude alias / default resolves per account: no fixed window to show.
+                <span className="text-right text-xs text-subtle" title={t("agent-config.profile.claudeWindowVariesTitle")}>{t("agent-config.profile.claudeWindowVaries")}</span>
+              ) : (
+                <span className="text-right text-xs text-muted tabular-nums" title={t(`agent-config.profile.source.${m.effective.contextWindowSource}` as MessageKey)}>{formatWindow(m.effective.contextWindow)}</span>
+              ))}
+              {cols.compact && <span className="text-right text-xs text-muted tabular-nums" title={t(`agent-config.profile.source.${m.effective.autoCompactTokenLimitSource}` as MessageKey)}>{formatWindow(m.effective.autoCompactTokenLimit)}</span>}
               <span className="flex items-center justify-end gap-1 opacity-60 group-focus-within:opacity-100 group-hover:opacity-100">
                 {variants && <IconButton label={t("agent-config.profile.addVariantFor", { model: rowName(m) })} disabled={busy} onClick={() => setEditing({ model: m, variant: true })}><CopyPlus size={14} /></IconButton>}
                 {(editable || names) && <button disabled={busy} onClick={() => setEditing({ model: m })} className="rounded px-1.5 text-xs hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none">{t("agent-config.profile.edit")}</button>}

@@ -13,7 +13,10 @@ import { useI18n, type MessageKey } from "../i18n";
 import { AVATAR_PALETTE, AVATAR_VALUE_MAX, cleanAvatar, hashColor, isHexColor, type AgentInfo, type AgentInfoOptions } from "../lib/avatar";
 import { DISPLAY_NAME_MAX } from "../lib/agentAlias";
 import { agentPictureOf, avatarSourceProblem, newPictureAvatar, saveAgentPicture } from "../lib/agentPicture";
-import { bundledEmoji, defaultEmoji } from "../lib/agentEmoji";
+import { bundledEmoji } from "../lib/agentEmoji";
+import { drawsEmoji } from "../lib/avatarDefault";
+import { themedEmoji } from "../lib/avatarThemes";
+import { useAgentLook } from "../lib/agentLook";
 import { closeDialog } from "../lib/contextMenu";
 import { useUiPrefs } from "../lib/prefs";
 import { Avatar } from "./Avatar";
@@ -30,6 +33,9 @@ const FIELD = "w-full rounded-md border border-border bg-background px-2.5 py-1.
 export function AgentInfoDialog({ name, color, seed, initial, options, resolve }: { name: string; color: string | null; seed: string; initial: AgentInfo; options: AgentInfoOptions; resolve(v: AgentInfo | null): void }) {
   const { t } = useI18n();
   const { agentAvatarDefault } = useUiPrefs();
+  // 仅重要智能体 draws the emoji too (the dot is a list-row thing, never this preview).
+  const emojiMode = drawsEmoji(agentAvatarDefault);
+  const theme = useAgentLook(seed)?.themes;
   const { combineColor, editName, realName } = options;
   const start = initial.avatar;
   const [kind, setKind] = useState<Kind>(!start ? "default" : start.kind === "icon" ? "picture" : start.kind);
@@ -116,7 +122,7 @@ export function AgentInfoDialog({ name, color, seed, initial, options, resolve }
             <Avatar {...preview} size={20} />
             <span className="truncate text-sm">{shownName}</span>
           </div>
-          <div className="truncate px-0.5 text-[11px] text-subtle">{previewCaption(shown, agentAvatarDefault, emoji, !!shownPicture, t)}{combineColor && tint ? ` · ${t("info.avatar.ownColor")}` : ""}</div>
+          <div className="truncate px-0.5 text-[11px] text-subtle">{previewCaption(shown, emojiMode, emoji, !!shownPicture, t)}{combineColor && tint ? ` · ${t("info.avatar.ownColor")}` : ""}</div>
         </div>
       </div>
       <div className="mt-2.5">
@@ -128,14 +134,14 @@ export function AgentInfoDialog({ name, color, seed, initial, options, resolve }
             setKind(k);
             if (k !== "color") setFace(k);
             // Start 表情 from the emoji the agent shows now, so 「确定」 right away keeps the look.
-            if (k === "emoji" && !emoji.trim() && agentAvatarDefault === "emoji") setEmoji(defaultEmoji(seed).glyph);
+            if (k === "emoji" && !emoji.trim() && emojiMode) setEmoji(themedEmoji(seed, theme).glyph);
             setError(null);
           }}
         />
       </div>
       <div className="mt-2 min-h-[4.5rem]">
         {kind === "default" && (
-          <p className="text-xs text-subtle">{t(agentAvatarDefault === "emoji" ? "info.avatar.defaultHintEmoji" : "info.avatar.defaultHintLetter")}</p>
+          <p className="text-xs text-subtle">{t(agentAvatarDefault === "important" ? "info.avatar.defaultHintImportant" : emojiMode ? "info.avatar.defaultHintEmoji" : "info.avatar.defaultHintLetter")}</p>
         )}
         {kind === "emoji" && (
           <div className="space-y-2">
@@ -221,8 +227,8 @@ export function AgentInfoDialog({ name, color, seed, initial, options, resolve }
   );
 }
 
-function previewCaption(kind: Kind, mode: "emoji" | "letter", emoji: string, hasPicture: boolean, t: (key: MessageKey) => string): string {
-  if (kind === "default" || kind === "color" || (kind === "emoji" && !emoji.trim()) || (kind === "picture" && !hasPicture)) return t(mode === "emoji" ? "info.avatar.followsEmoji" : "info.avatar.followsLetter");
+function previewCaption(kind: Kind, emojiMode: boolean, emoji: string, hasPicture: boolean, t: (key: MessageKey) => string): string {
+  if (kind === "default" || kind === "color" || (kind === "emoji" && !emoji.trim()) || (kind === "picture" && !hasPicture)) return t(emojiMode ? "info.avatar.followsEmoji" : "info.avatar.followsLetter");
   if (kind === "emoji") return t(bundledEmoji(emoji) ? "info.avatar.bundledEmoji" : "info.avatar.systemEmoji");
   return t("info.avatar.pictureLocal");
 }

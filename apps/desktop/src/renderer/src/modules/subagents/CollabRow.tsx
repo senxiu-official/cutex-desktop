@@ -1,13 +1,15 @@
 // Native collaboration rows retain the baseline layout and sub-agent navigation.
 import { useState, type ReactNode } from "react";
 import { ArrowDownLeft, ArrowUpRight, Bot, ChevronDown, ChevronRight, CircleStop, Hourglass, Loader2 } from "lucide-react";
-import { isClaudeTaskRef } from "../../lib/claudeTasks";
+import { canOpenSubAgent, isClaudeTaskRef } from "../../lib/claudeTasks";
+import { useAgentFeatures } from "../../lib/agentFeaturesView";
 import { subAgentName, subAgentTooltip, useSubAgents } from "../../lib/subagents";
 import { useSubAgentMeta } from "../../lib/subagentMetaStore";
 import { useI18n, type MessageKey } from "../../i18n";
 import { isRunning } from "../../lib/workGroups";
 import type { RawItem } from "../../lib/timeline";
 import { ScriptText } from "../../components/ScriptText";
+import { openSubagentThread } from "../../lib/sideOpen";
 
 const COLLAB_VERB: Record<string, MessageKey> = {
   spawnAgent: "subagents.timeline.spawn",
@@ -121,3 +123,60 @@ function SubAgentResult({ threadId, status, message }: { threadId: string; statu
   );
 }
 
+
+const str = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value.trim() : null);
+
+/**
+ * A Claude agent's Agent / Task call (a foreground subagent): `↗ 派出 🤖 description · type  prompt ›`.
+ * The name opens the subagent's transcript when the adapter keeps one (`agentThreadId`, lib/claudeTasks);
+ * expanded: the prompt and the subagent's answer (the tool result).
+ */
+export function ClaudeAgentRow({ item, sessionId }: { item: RawItem; sessionId: string }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const features = useAgentFeatures(sessionId);
+  const args = (item.arguments && typeof item.arguments === "object" ? item.arguments : {}) as Record<string, unknown>;
+  const role = str(args.subagent_type);
+  const name = str(args.description) ?? role ?? t("subagents.claude.agent");
+  const prompt = str(args.prompt);
+  const ref = typeof item.agentThreadId === "string" ? item.agentThreadId : null;
+  const openable = !!ref && canOpenSubAgent(ref, features);
+  const running = isRunning(item);
+  const failed = item.status === "failed";
+  const contents = Array.isArray(item.contentItems) ? (item.contentItems as { text?: unknown }[]) : [];
+  const result = contents.map((c) => (typeof c?.text === "string" ? c.text : "")).join("\n").trim() || null;
+  const label = role && role !== name ? `${name} · ${role}` : name;
+  const chip = (
+    <>
+      <Bot size={13} className="text-subtle" />
+      <span className="truncate">{label}</span>
+    </>
+  );
+  return (
+    <div className="my-0.5 text-xs" data-claude-agent-row="">
+      <ToggleRow onToggle={() => (prompt || result) && setOpen(!open)}>
+        {running ? <Loader2 size={13} className="shrink-0 animate-spin text-accent" /> : <ArrowUpRight size={13} className={`shrink-0 ${failed ? "text-danger" : "text-subtle"}`} />}
+        <span className="shrink-0">{t("subagents.timeline.spawn")}</span>
+        {openable ? (
+          <button
+            title={t("subagents.claude.open")}
+            onClick={(e) => {
+              e.stopPropagation();
+              void openSubagentThread(ref!, sessionId);
+            }}
+            className="flex max-w-[45%] min-w-0 shrink-0 items-center gap-1 rounded px-0.5 font-medium text-foreground hover:bg-surface-2 hover:text-accent"
+          >
+            {chip}
+          </button>
+        ) : (
+          <span className="flex max-w-[45%] min-w-0 shrink-0 items-center gap-1 px-0.5 font-medium text-foreground">{chip}</span>
+        )}
+        {failed && <span className="shrink-0 text-danger">· {t("sub.status.errored")}</span>}
+        {prompt && !open && <span className="min-w-0 truncate text-subtle"><ScriptText text={prompt.replace(/\s+/g, " ")} /></span>}
+        {(prompt || result) && (open ? <ChevronDown size={13} className="ml-auto shrink-0" /> : <ChevronRight size={13} className="ml-auto shrink-0" />)}
+      </ToggleRow>
+      {open && prompt && <div className="font-chat-context mt-1 ml-5 max-w-[75%] rounded-xl border border-dashed border-border px-3 py-1.5 whitespace-pre-wrap text-muted"><ScriptText text={prompt} /></div>}
+      {open && result && <div className="font-chat-context mt-1 ml-5 max-w-[75%] rounded-xl border border-border bg-peer px-3 py-1.5 whitespace-pre-wrap"><ScriptText text={result} /></div>}
+    </div>
+  );
+}

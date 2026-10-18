@@ -117,14 +117,17 @@ describe("sidebar layout", () => {
     expect(l).toMatchObject({ runningCount: 1, needsYouCount: 1, attentionCount: 3, hasSelected: true });
   });
 
-  it("the open agent leaves the running avatars / offline list but not the idle fold", () => {
+  it("opening an agent never moves it: running avatars, offline list and idle fold keep it", () => {
     const [run] = layoutSidebar([busy], ctx({ selectedId: "run" })).main;
-    expect(run!.full.map((r) => r.id)).toContain("run");
-    expect(run!.running).toEqual([]);
+    expect(run!.full.map((r) => r.id)).not.toContain("run");
+    expect(run!.running.map((r) => r.id)).toContain("run");
     expect(run!.idleSelected).toBeNull();
     const [off] = layoutSidebar([busy], ctx({ selectedId: "off" })).main;
-    expect(off!.full.map((r) => r.id)).toContain("off");
-    expect(off!.offline).toEqual([]);
+    expect(off!.full.map((r) => r.id)).not.toContain("off");
+    expect(off!.offline.map((r) => r.id)).toContain("off");
+    // The same rows in the same places as with nothing open.
+    const [none] = layoutSidebar([busy], ctx({ selectedId: null })).main;
+    for (const l of [run!, off!]) for (const k of ["full", "running", "offline"] as const) expect(l[k].map((r) => r.id)).toEqual(none![k].map((r) => r.id));
     const [idle] = layoutSidebar([busy], ctx({ selectedId: "idle" })).main;
     expect(idle!.full.map((r) => r.id)).not.toContain("idle");
     expect(idle).toMatchObject({ idleSelected: "idle", hasSelected: true });

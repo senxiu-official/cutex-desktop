@@ -3,11 +3,150 @@
 // marked `agentUseRequiresApproval` waits for the owner. The agent retries the same call after the
 // decision. Pure helpers: the pending-list reducer for `cutex/approvals/changed` and display rows.
 import type { EventEnvelope } from "@cutex-desktop/protocol";
-import type { ApprovalRecord } from "../../../shared/ipc";
+import type { ApprovalDecision, ApprovalDecisionOrigin, ApprovalRecord } from "../../../shared/ipc";
 import type { PeerCaps } from "../../../shared/peers";
 
 export const APPROVALS_FEATURE = "owner-approvals";
 export const APPROVALS_CHANGED_EVENT = "cutex/approvals/changed";
+/**
+ * cutex watches its approval store, so approvals the Agent Bus requested (services, agent profiles)
+ * reach the host stream live. Older cutex only published those in the Bus process — never live: the
+ * desktop then reads them from the tool result (lib/approvals `approvalOfTool`) and reloads the list.
+ */
+export const APPROVALS_LIVE_FEATURE = "approvals-live";
+/** cutex tells the requesting agent when the owner decided (retry now / do not retry). */
+export const APPROVAL_NOTICE_FEATURE = "approval-decision-notice";
+/**
+ * cutex holds the agent's gated tool call up to 120 s for the decision (record `wait`): approved in
+ * the window the call simply goes on; after that it answers approval_required as before.
+ */
+export const APPROVAL_WAIT_FEATURE = "approval-wait";
+/**
+ * cutex records who decided (`decidedBy`) and takes the deciding client's facts (`client`): the desktop
+ * then says where (inline dock card / 审批) and how (pointer / touch / keyboard) the owner decided.
+ */
+export const APPROVAL_DECIDED_BY_FEATURE = "approval-decided-by";
+
+/**
+ * How a decision button was activated. Chromium dispatches a keyboard-activated click (Enter / Space on
+ * the focused button) with `detail` 0 and no pointer type; a mouse / pen / touch click has `detail` ≥ 1.
+ */
+export function decisionInput(event: { detail: number; nativeEvent?: unknown }): ApprovalDecisionOrigin["input"] {
+  const pointerType = (event.nativeEvent as { pointerType?: unknown } | undefined)?.pointerType;
+  if (pointerType === "touch") return "touch";
+  if (pointerType === "mouse" || pointerType === "pen") return "pointer";
+  if (event.detail === 0) return "keyboard";
+  return event.detail > 0 ? "pointer" : "unknown";
+}
+
+/** One errors.jsonl line (`reported`) per owner decision on this desktop: no note text, no details. */
+export function approvalDecisionTrace(record: Pick<ApprovalRecord, "approvalId" | "kind" | "requesterCutexSessionId">, decision: ApprovalDecision, origin: ApprovalDecisionOrigin, hostId: string): string {
+  return JSON.stringify({ source: "approval-decision", approvalId: record.approvalId, kind: record.kind, requester: record.requesterCutexSessionId, hostId, decision, ...origin });
+}
+
+/** Milliseconds the requesting call still holds for this decision (cutex approval-wait), else null. */
+export function holdLeftMs(record: Pick<ApprovalRecord, "wait">, nowMs: number): number | null {
+  const wait = record.wait;
+  if (!wait || wait.end) return null;
+  const until = Date.parse(wait.until);
+  if (!Number.isFinite(until)) return null;
+  const left = until - nowMs;
+  return left > 0 ? left : null;
+}
+
+/** The call held for this request and stopped holding (timed out, its turn ended, …): it answered approval_required. */
+export function holdEnded(record: Pick<ApprovalRecord, "wait">, nowMs: number): boolean {
+  return !!record.wait && holdLeftMs(record, nowMs) === null;
+}
+
+/** "1:42" for a hold's remaining time (rounded up to whole seconds). */
+export function formatHold(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** An owner approval a cutex tool call answered with (`approval_required` / `approval_denied`). */
+export interface ToolApproval {
+  approvalId: string;
+  code: "approval_required" | "approval_denied";
+  /** What it asks for, from the refusal text (cutex record summary), if readable. */
+  summary: string | null;
+}
+
+const APPROVAL_ID = /\bapr-[0-9a-f]{8,64}\b/;
+
+function resultText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return "";
+  const content = (value as { content?: unknown }).content;
+  if (Array.isArray(content)) return content.map((c) => (c && typeof c === "object" && typeof (c as { text?: unknown }).text === "string" ? (c as { text: string }).text : "")).join("\n");
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The owner approval behind a finished cutex tool call (mcpToolCall on server `cutex`, Codex and
+ * Claude alike), read from its result alone — works with every cutex since owner-approvals. Covers
+ * the plain refusal (`{status: approval_required, approval_id}`) and Agent Management's receipt text
+ * (`… (approval_id apr-…)`). Null for anything else. Pure and cheap enough for `timeline.tool` match.
+ */
+export function approvalOfTool(item: { type: string; server?: unknown; status?: unknown; result?: unknown; error?: unknown }): ToolApproval | null {
+  if (item.type !== "mcpToolCall" || item.server !== "cutex") return null;
+  if (item.status === "inProgress" || item.status === "running") return null;
+  const text = resultText(item.result) || resultText(item.error);
+  const code = text.includes("approval_required") ? "approval_required" : text.includes("approval_denied") ? "approval_denied" : null;
+  if (!code) return null;
+  const id = APPROVAL_ID.exec(text)?.[0];
+  if (!id) return null;
+  const summary = /needs the owner's approval \((.+?)\)\. The owner/.exec(text)?.[1] ?? null;
+  return { approvalId: id, code, summary: summary ? summary.replace(/\\"/g, "\"") : null };
+}
+
+/** The tool approval carried by a host / session event (a cutex tool call finished), or null. */
+export function approvalOfToolEvent(envelope: EventEnvelope): { item: ToolApproval; threadId: string | null } | null {
+  const message = envelope.native?.message;
+  if (!message || message.method !== "item/completed") return null;
+  const params = message.params as { item?: { type?: unknown }; threadId?: unknown } | undefined;
+  const item = params?.item;
+  if (!item || typeof item !== "object" || typeof item.type !== "string") return null;
+  const found = approvalOfTool(item as { type: string });
+  return found ? { item: found, threadId: typeof params?.threadId === "string" ? params.threadId : null } : null;
+}
+
+/** Kinds whose requester retries its own call after the decision (cutex approval-decision-notice tells it). */
+export const RETRYING_KINDS: ReadonlySet<string> = new Set(["managed_service", "service_lifetime", "static_root", "agent_profile", "browser_open"]);
+
+/** Decisions seen this run (approvalId → state): the pending list drops them, the tool line still says what happened. */
+const decided = new Map<string, ApprovalRecord["state"]>();
+
+/** Remember a record's decided state (cutex/approvals/changed, a decision made here). */
+export function noteApprovalState(record: Pick<ApprovalRecord, "approvalId" | "state">): void {
+  if (record.state === "pending") return;
+  decided.delete(record.approvalId);
+  decided.set(record.approvalId, record.state);
+  if (decided.size > 500) decided.delete(decided.keys().next().value!);
+}
+
+/** The decided state seen this run, if any. */
+export function knownApprovalState(approvalId: string): ApprovalRecord["state"] | undefined {
+  return decided.get(approvalId);
+}
+
+/**
+ * Pending approvals of one agent that its own conversation shows as a card (browser claims have their own).
+ * With cutex approval-wait (`holds`), a request whose call already stopped holding leaves the conversation —
+ * the call answered approval_required, the request stays on 审批 and the tool line links there — and a
+ * holding one comes first (the agent is waiting on it right now).
+ */
+export function agentPendingApprovals(pending: readonly ApprovalRecord[] | null, sessionId: string, nowMs: number, holds = false): ApprovalRecord[] {
+  const mine = livePending(pending, nowMs).filter((a) => a.requesterCutexSessionId === sessionId);
+  if (!holds) return mine;
+  const shown = mine.filter((a) => !holdEnded(a, nowMs));
+  return [...shown.filter((a) => holdLeftMs(a, nowMs) !== null), ...shown.filter((a) => holdLeftMs(a, nowMs) === null)];
+}
 
 export interface ApprovalChange {
   reason: "requested" | "approved" | "denied" | (string & {});
@@ -53,13 +192,20 @@ export function livePending(pending: readonly ApprovalRecord[] | null, nowMs: nu
  * Approving grants authority the agent does not have itself: a managed service runs unsandboxed as
  * the owner; an approval-gated profile launches an agent on it. The approve button names it.
  */
-export function grantKind(record: Pick<ApprovalRecord, "kind">): "runAsOwner" | "useProfile" | "claimBrowser" | "openBrowser" | "runWorkflow" | "other" {
+export function grantKind(record: Pick<ApprovalRecord, "kind"> & { details?: ApprovalRecord["details"] }): "runAsOwner" | "useProfile" | "claimBrowser" | "openBrowser" | "runWorkflow" | "serveRoot" | "other" {
+  // A static service root outside the agent's cwd / project workspace: every file under it is served.
+  if (record.kind === "static_root") return "serveRoot";
+  // A persistent service whose managed command the agent could not run unsandboxed itself: one
+  // approval covers both, so the button names the larger grant.
+  if (record.kind === "service_lifetime") return record.details?.managedExecution === true ? "runAsOwner" : typeof record.details?.staticRoot === "string" ? "serveRoot" : "other";
   return record.kind === "managed_service" ? "runAsOwner" : record.kind === "agent_profile" ? "useProfile"
     : record.kind === "browser_claim" ? "claimBrowser" : record.kind === "browser_open" ? "openBrowser" : record.kind === "workflow_run" ? "runWorkflow" : "other";
 }
 
 /** Fields of `details` in display order (known keys first), as label / text pairs; empty values skipped. */
-const ORDER = ["op", "operation", "slug", "name", "runtime", "command", "cwd", "port", "envKeys", "profile", "model", "sandboxMode", "approvalPolicy"];
+const ORDER = ["op", "operation", "slug", "name", "staticRoot", "allowedRoots", "lifetime", "runtime", "command", "cwd", "port", "envKeys", "profile", "model", "sandboxMode", "approvalPolicy", "grants"];
+/** Service records: shown by the approve button / warning line already, not as a raw fact. */
+const HIDDEN = new Set(["managedExecution"]);
 
 /** Shown by their own line (peers-v2 review cards), not as raw facts. */
 const OWN_LINE = new Set(["claimedCaps", "claimedCapsLabel", "differences"]);
@@ -85,7 +231,7 @@ export function approvalFacts(details: ApprovalRecord["details"], kind?: Approva
     });
   }
   if (kind === "workflow_run") return workflowFacts(details);
-  const keys = [...ORDER.filter((k) => k in details), ...Object.keys(details).filter((k) => !ORDER.includes(k) && !OWN_LINE.has(k)).sort()];
+  const keys = [...ORDER.filter((k) => k in details), ...Object.keys(details).filter((k) => !ORDER.includes(k) && !OWN_LINE.has(k) && !HIDDEN.has(k)).sort()];
   const out: { key: string; value: string; mono: boolean }[] = [];
   for (const key of keys) {
     const raw = details[key];

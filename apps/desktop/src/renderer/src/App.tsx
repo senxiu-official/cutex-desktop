@@ -5,6 +5,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Overlays } from "./components/Overlays";
 import { SshPromptDialog } from "./components/SshPromptDialog";
 import { AgentListDialog } from "./components/AgentListDialog";
+import { CustomizeHost } from "./components/CustomizeHost";
 import { JobOutputDialog } from "./components/JobParts";
 import { TitleBar } from "./components/TitleBar";
 import { HostAccessBanner } from "./components/AccessNotices";
@@ -119,7 +120,7 @@ export function App() {
           <SshPromptDialog />
           {/* The window background holds the cards: the main card (conversation / page) and the right
               side (page buttons + cards) in the work area, 8 px apart. */}
-          <div className={`flex min-h-0 flex-1 pr-2 pb-2 ${sidebarOpen && !fullWindow ? "" : "pl-2"}`}>
+          <div className={`relative flex min-h-0 flex-1 pr-2 pb-2 ${sidebarOpen && !fullWindow ? "" : "pl-2"}`}>
             {sidebarOpen && !fullWindow && <Sidebar />}
             <SideWorkArea side={!fullWindow}>
               {/* A page that fails to render shows a notice here; the sidebar stays usable to move on. */}
@@ -129,6 +130,8 @@ export function App() {
                 </MainOutlet>
               </ErrorBoundary>
             </SideWorkArea>
+            {/* 在主界面调整: the region panel, placed in this row (not on a full-window page). */}
+            {!fullWindow && <CustomizeHost />}
           </div>
         </div>
         <SideInstanceLayer />

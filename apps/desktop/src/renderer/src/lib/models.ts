@@ -30,3 +30,15 @@ export function withPins(all: ModelPins, hostId: string, profile: string, pins: 
   const current = host && typeof host === "object" && !Array.isArray(host) ? host : {};
   return { ...all, [hostId]: { ...current, [profile]: pins } };
 }
+
+/**
+ * The effort levels the composer offers: only what the current model advertises (`model/list`).
+ * An empty list says why: `unlisted` (the list is not loaded / does not name the current model) or
+ * `none` (the model advertises no levels) — never guessed levels the runtime then rejects
+ * (owner 2026-10-18: a Claude agent refused "does not advertise the selected effort").
+ */
+export function composerEfforts(models: readonly { model: string; id?: string; efforts: string[] }[] | null | undefined, current: string | null): { efforts: string[]; empty: "unlisted" | "none" | null } {
+  const row = current ? models?.find((m) => m.model === current || m.id === current) : undefined;
+  if (!row) return { efforts: [], empty: "unlisted" };
+  return { efforts: row.efforts, empty: row.efforts.length ? null : "none" };
+}

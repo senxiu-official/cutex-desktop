@@ -1,5 +1,5 @@
-// Display terms (术语): the words the UI uses for "agent" and "Director", configurable per language
-// (Settings → 通用 → 称呼; owner 2026-10-09: "用户爱叫啥叫啥"). UI text only — nothing the agents or
+// Display terms (术语): the words the UI uses for "agent" and "director", configurable per language
+// (Settings → 通用 → 术语; owner 2026-10-09: "用户爱叫啥叫啥"). UI text only — nothing the agents or
 // the model see changes.
 //
 // i18n strings write a term as a placeholder, resolved before `{var}` substitution (i18n/index.tsx):
@@ -11,8 +11,9 @@
 //   {{owner}} …    same set for the owner (the human the UI belongs to, as a party: 主人通知,
 //                  等待主人, requester = owner); direct address stays 「你」 / "you"
 //
-// The stored form is the mid-sentence form: en defaults are "agent", "Director" (a role name, so
-// capitalised everywhere) and "owner". zh has no plural or case: every form is the one word.
+// The stored form is the mid-sentence form: en defaults are "agent", "director" and "owner", all
+// lower case (owner 2026-10-18: one rule, no capitalised role name; {{Director}} capitalises a sentence
+// start). German keeps its capitalised nouns. zh has no plural or case: every form is the one word.
 //   {{subagent}} …  a native sub-agent; unless set on its own it is derived from the agent term
 //                  (「子」 + agent / "sub-" + agent), so a custom agent word can get a better sub word
 //                  (owner 2026-10-12: Maid → not 「子Maid」). Never write 「子{{agent}}」 / "sub-{{agent}}".
@@ -36,16 +37,16 @@ export type TermSet = Record<TermId, TermForms>;
 
 export const DEFAULT_TERMS: Record<TermLocale, TermSet> = {
   "zh-CN": { agent: { one: "智能体", many: "智能体" }, subagent: { one: "子智能体", many: "子智能体" }, parentagent: { one: "父智能体", many: "父智能体" }, director: { one: "主管", many: "主管" }, owner: { one: "主人", many: "主人" } },
-  en: { agent: { one: "agent", many: "agents" }, subagent: { one: "sub-agent", many: "sub-agents" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "Director", many: "Directors" }, owner: { one: "owner", many: "owners" } },
+  en: { agent: { one: "agent", many: "agents" }, subagent: { one: "subagent", many: "subagents" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "director", many: "directors" }, owner: { one: "owner", many: "owners" } },
   "zh-Hant-CN": { agent: { one: "智能體", many: "智能體" }, subagent: { one: "子智能體", many: "子智能體" }, parentagent: { one: "父智能體", many: "父智能體" }, director: { one: "主管", many: "主管" }, owner: { one: "主人", many: "主人" } },
-  "en-AU": { agent: { one: "agent", many: "agents" }, subagent: { one: "sub-agent", many: "sub-agents" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "Director", many: "Directors" }, owner: { one: "owner", many: "owners" } },
-  "ru-RU": { agent: { one: "агент", many: "агенты" }, subagent: { one: "субагент", many: "субагенты" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "Директор", many: "Директоры" }, owner: { one: "владелец", many: "владельцы" } },
-  "fr-FR": { agent: { one: "agent", many: "agents" }, subagent: { one: "sous-agent", many: "sous-agents" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "Directeur", many: "Directeurs" }, owner: { one: "propriétaire", many: "propriétaires" } },
-  "es-ES": { agent: { one: "agente", many: "agentes" }, subagent: { one: "subagente", many: "subagentes" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "Director", many: "Directores" }, owner: { one: "propietario", many: "propietarios" } },
-  "pt-BR": { agent: { one: "agente", many: "agentes" }, subagent: { one: "subagente", many: "subagentes" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "Diretor", many: "Diretores" }, owner: { one: "proprietário", many: "proprietários" } },
-  "it-IT": { agent: { one: "agente", many: "agenti" }, subagent: { one: "sottoagente", many: "sottoagenti" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "Direttore", many: "Direttori" }, owner: { one: "proprietario", many: "proprietari" } },
-  "de-DE": { agent: { one: "Agent", many: "Agenten" }, subagent: { one: "Sub-Agent", many: "Sub-Agenten" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "Leiter", many: "Leiter" }, owner: { one: "Besitzer", many: "Besitzer" } },
-  "ja-JP": { agent: { one: "エージェント", many: "エージェント" }, subagent: { one: "サブエージェント", many: "サブエージェント" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "ディレクター", many: "ディレクター" }, owner: { one: "オーナー", many: "オーナー" } },
+  "en-AU": { agent: { one: "agent", many: "agents" }, subagent: { one: "subagent", many: "subagents" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "director", many: "directors" }, owner: { one: "owner", many: "owners" } },
+  "ru-RU": { agent: { one: "агент", many: "агенты" }, subagent: { one: "субагент", many: "субагенты" }, parentagent: { one: "родительский агент", many: "родительские агенты" }, director: { one: "директор", many: "директоры" }, owner: { one: "владелец", many: "владельцы" } },
+  "fr-FR": { agent: { one: "agent", many: "agents" }, subagent: { one: "sous-agent", many: "sous-agents" }, parentagent: { one: "agent parent", many: "agents parents" }, director: { one: "directeur", many: "directeurs" }, owner: { one: "propriétaire", many: "propriétaires" } },
+  "es-ES": { agent: { one: "agente", many: "agentes" }, subagent: { one: "subagente", many: "subagentes" }, parentagent: { one: "agente padre", many: "agentes padre" }, director: { one: "director", many: "directores" }, owner: { one: "propietario", many: "propietarios" } },
+  "pt-BR": { agent: { one: "agente", many: "agentes" }, subagent: { one: "subagente", many: "subagentes" }, parentagent: { one: "agente pai", many: "agentes pai" }, director: { one: "diretor", many: "diretores" }, owner: { one: "proprietário", many: "proprietários" } },
+  "it-IT": { agent: { one: "agente", many: "agenti" }, subagent: { one: "sottoagente", many: "sottoagenti" }, parentagent: { one: "agente padre", many: "agenti padre" }, director: { one: "direttore", many: "direttori" }, owner: { one: "proprietario", many: "proprietari" } },
+  "de-DE": { agent: { one: "Agent", many: "Agenten" }, subagent: { one: "Sub-Agent", many: "Sub-Agenten" }, parentagent: { one: "übergeordneter Agent", many: "übergeordnete Agenten" }, director: { one: "Leiter", many: "Leiter" }, owner: { one: "Besitzer", many: "Besitzer" } },
+  "ja-JP": { agent: { one: "エージェント", many: "エージェント" }, subagent: { one: "サブエージェント", many: "サブエージェント" }, parentagent: { one: "親エージェント", many: "親エージェント" }, director: { one: "ディレクター", many: "ディレクター" }, owner: { one: "オーナー", many: "オーナー" } },
   "ko-KR": { agent: { one: "에이전트", many: "에이전트" }, subagent: { one: "하위 에이전트", many: "하위 에이전트" }, parentagent: { one: "상위 에이전트", many: "상위 에이전트" }, director: { one: "디렉터", many: "디렉터" }, owner: { one: "소유자", many: "소유자" } },
 };
 
@@ -84,8 +85,13 @@ export function resolveTerms(overrides: TermOverrides, locale: TermLocale): Term
 /** The sub-agent prefix per language: 「子」智能体 / "sub-" agent / sous-agent / サブエージェント … */
 const SUB_PREFIX: Record<TermLocale, string> = { "zh-CN": "子", "zh-Hant-CN": "子", en: "sub-", "en-AU": "sub-", "ru-RU": "суб-", "fr-FR": "sous-", "es-ES": "sub", "pt-BR": "sub", "it-IT": "sotto-", "de-DE": "Sub-", "ja-JP": "サブ", "ko-KR": "하위 " };
 
-/** The sub-agent word derived from the agent word: 「子」 + agent / "sub-" + agent / … */
+/**
+ * The sub-agent word derived from the agent word: 「子」 + agent / "sub-" + agent / … The default agent
+ * word gets the language's own default (en "subagent", owner 2026-10-18: no hyphen); a custom word
+ * keeps the prefix so it stays readable ("sub-maid").
+ */
 export function subagentDefault(agent: TermForms, locale: TermLocale): TermForms {
+  if (agent.one === DEFAULT_TERMS[locale].agent.one) return DEFAULT_TERMS[locale].subagent;
   const p = SUB_PREFIX[locale];
   return { one: `${p}${agent.one}`, many: `${p}${agent.many}` };
 }
@@ -113,6 +119,24 @@ export function applyTerms(template: string, terms: TermSet, locale: TermLocale)
     const a = article(word);
     return `${art[0] === "A" ? upperFirst(a) : a} ${word}`;
   });
+}
+
+/**
+ * applyTerms in pieces: the words a placeholder became carry their term id, so a preview can mark them
+ * (通用 → 术语). Joining the texts gives applyTerms' result.
+ */
+export function splitTerms(template: string, terms: TermSet, locale: TermLocale): (string | { id: TermId; text: string })[] {
+  const out: (string | { id: TermId; text: string })[] = [];
+  let last = 0;
+  for (const m of template.matchAll(TOKEN)) {
+    const form = FORMS[m[2]!.toLowerCase()];
+    if (!form) continue;
+    if (m.index > last) out.push(template.slice(last, m.index));
+    out.push({ id: form[0], text: applyTerms(m[0], terms, locale) });
+    last = m.index + m[0].length;
+  }
+  if (last < template.length) out.push(template.slice(last));
+  return out;
 }
 
 /** Daemon-supplied Chinese text (cutex writes the default words: 智能体 / 子智能体 / 主管 / 主人) in

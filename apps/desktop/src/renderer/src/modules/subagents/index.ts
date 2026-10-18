@@ -1,6 +1,7 @@
 // 子 agent (collab sub-agents at work): its status category, and a sub-agent's thread as a right-side card.
 import { Bot } from "lucide-react";
-import { CollabRow } from "./CollabRow";
+import { ClaudeAgentRow, CollabRow } from "./CollabRow";
+import { isClaudeAgentTool } from "../../lib/claudeTasks";
 import { defineModule } from "../slots";
 import { SubagentsBody, SubagentsMeta, SubagentsStatusBar } from "./SubagentsStatus";
 import { SubagentThreadBody } from "./SubagentThread";
@@ -12,7 +13,11 @@ export default defineModule({
   titleKey: "subagents.title",
   descriptionKey: "subagents.description",
   contributes: {
-    "timeline.tool": [{ id: "subagents.tool", order: 300, match: (item) => item.type === "collabAgentToolCall", Row: CollabRow, activity: () => "turn.activity.subagent" }],
+    "timeline.tool": [
+      { id: "subagents.tool", order: 300, match: (item) => item.type === "collabAgentToolCall", Row: CollabRow, activity: () => "turn.activity.subagent" },
+      // A Claude agent's Agent / Task call: its subagent, openable when the adapter keeps transcripts.
+      { id: "subagents.claudeAgent", order: 310, match: isClaudeAgentTool, Row: ClaudeAgentRow, activity: () => "turn.activity.subagent" },
+    ],
     "conversation.status": [
       { id: "subagents.status", order: 400, titleKey: "subagents.statusTitle", defaultPlace: "capsule", useStatus: useSubagentsStatus, Meta: SubagentsMeta, Body: SubagentsBody, Bar: SubagentsStatusBar, icon: Bot },
     ],

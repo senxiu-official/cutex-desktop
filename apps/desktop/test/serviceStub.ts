@@ -6,7 +6,7 @@ export function stubServices(): ModuleServices {
     daemonFor: () => {
       throw new Error("no daemon in this test");
     },
-    ui: { notice() {}, openSettings() {}, openPage() {}, closePage() {} },
+    ui: { notice() {}, openSettings() {}, openPage() {}, closePage() {}, customize() {} },
     side: { open: () => ({ status: "unavailable", reason: "unknown-kind" }), reveal: () => ({ status: "unavailable", reason: "gone" }), close() {}, closePeek() {}, list: () => [], openHeld: () => ({ status: "unavailable", reason: "unknown-kind" }), releaseHold: () => false },
     timeline: { focusTurn: async () => ({ status: "stale" }) },
     refs: { open: async () => ({ status: "stale" }), here: () => [], parse: () => null },

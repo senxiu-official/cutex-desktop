@@ -2,6 +2,7 @@
 // periodically `git fetch` the source checkout the running release was built from; on request pull,
 // pnpm install, build, package a new release next to the running one, repoint `current` and relaunch.
 // Any failure leaves the running release and `current` untouched.
+// A pull cut short (e.g. disk full mid-merge) is recovered by the next update (healInterruptedPull).
 //
 // A package copied to another machine (no source checkout there, git missing, or an update remote it
 // cannot reach) reports state "unsupported" with a code instead of failing: no sidebar button, a quiet
@@ -42,13 +43,13 @@ import { join } from "node:path";
 import { app } from "electron";
 import { cleanBinaryLeftovers, installBinaryRelease, LatestReleaseClient, ReleaseCheckError, type BinarySource } from "./binaryUpdate";
 import { parsePublicKey, releaseKeyring } from "./minisign";
-import { createUpdateNet, type UpdateNet } from "./updateNet";
+import { createUpdateNet, type UpdateNet, type UpdateProxyConfig } from "./updateNet";
 import { envHasProxy, gitProxyArgs, proxyEnv, type Transport } from "./updateTransport";
 import { effectiveUpdateCheckMinutes, GITHUB_API, GITHUB_WEB, githubRepoOf, isNewerVersion, parseVersion, releasePlatform, updateAssets, type LatestRelease } from "../shared/binaryUpdate";
 import type { UpdateStatus, UpdateStep } from "../shared/ipc";
 import { ReleaseMaintenance } from "./releaseMaintenance";
 import { bundlePackageJson, LAUNCHER_INSTALL_FILE, launcherSidecarRelease, MAC_BUNDLE, OLD_RELEASE_MAX_AGE_DAYS, MAC_RELEASE_SUFFIX } from "../shared/releases";
-import { backoffMinutes, buildSteps, builtChannel, CHANNEL_FILE, channelFileContent, checkoutPlan, corepackEntryIn, displayRemote, fetchArgs, fetchFailure, isKnownChannel, resolveInstallLayout, isOwnClone, isPathRemote, parseReleaseInfo, pathRemotePath, releaseName, resolveChannel, resolveSourceDir, sourceDirtyCheck, spawnPlan, tail, updateOffer, updateRef, type InstallLayout, type ReleaseInfo } from "../shared/update";
+import { backoffMinutes, buildSteps, builtChannel, CHANNEL_FILE, channelFileContent, checkoutPlan, corepackEntryIn, displayRemote, fetchArgs, fetchFailure, interruptedPullHeal, isKnownChannel, resolveInstallLayout, isOwnClone, isPathRemote, parsePorcelainZ, parsePullMarker, parseReleaseInfo, pathRemotePath, PULL_MARKER_FILE, pullFailureMessage, releaseName, resolveChannel, resolveSourceDir, sourceDirtyCheck, spawnPlan, tail, updateOffer, updateRef, type InstallLayout, type PullMarker, type ReleaseInfo } from "../shared/update";
 
 const WIN = process.platform === "win32";
 const MAC = process.platform === "darwin";
@@ -103,7 +104,7 @@ export class Updater {
   constructor(
     private readonly emit: (status: UpdateStatus) => void,
     remote: string | null | ((channel: string) => string | null) = null,
-    private readonly netOpts: { contained?: () => boolean; transport?: Transport; updateNet?: UpdateNet } = {},
+    private readonly netOpts: { contained?: () => boolean; transport?: Transport; updateNet?: UpdateNet; proxy?: () => UpdateProxyConfig } = {},
   ) {
     this.remoteFor = typeof remote === "function" ? remote : () => remote;
     this.status = { state: "unsupported", code: "devRun", current: null, latest: null };
@@ -422,8 +423,13 @@ export class Updater {
   }
 
   private updateNet(): UpdateNet {
-    this.netInstance ??= this.netOpts.updateNet ?? createUpdateNet({ contained: this.netOpts.contained ?? (() => false), testProxy: this.binary?.source.testProxy ?? null });
+    this.netInstance ??= this.netOpts.updateNet ?? createUpdateNet({ contained: this.netOpts.contained ?? (() => false), testProxy: this.binary?.source.testProxy ?? null, proxy: this.netOpts.proxy });
     return this.netInstance;
+  }
+
+  /** Settings → 网络代理 changed: the updater session re-applies it (nothing to do before first use). */
+  reconfigureProxy(): void {
+    void this.netInstance?.reconfigure?.().catch((error: unknown) => this.log(`update proxy change failed: ${error instanceof Error ? error.message : String(error)}`));
   }
 
   /** The binary updater's transport: the injected one (tests), else Chromium's (updateNet.ts). Also used
@@ -469,8 +475,11 @@ export class Updater {
     let step: UpdateStep = "pull";
     try {
       this.set({ state: "updating", step, error: undefined });
-      // Only the install's own clone <base>/src gets its lockfile restored; a developer's tree is left alone.
-      const dirty = sourceDirtyCheck(await this.git(["status", "--porcelain", "--untracked-files=no"]), isOwnClone(realPath(info.sourceDir), { baseDir: realPath(layout.baseDir) }, WIN));
+      // Only the install's own clone <base>/src gets its lockfile restored (or a half-written pull
+      // discarded); a developer's tree is left alone.
+      const ownClone = isOwnClone(realPath(info.sourceDir), { baseDir: realPath(layout.baseDir) }, WIN);
+      await this.healInterruptedPull(layout, ownClone);
+      const dirty = sourceDirtyCheck(await this.git(["status", "--porcelain", "--untracked-files=no"]), ownClone);
       if (dirty.state === "restore") {
         // Only the lockfile a previous install rewrote: put it back so the pull can proceed.
         this.log(`restoring ${dirty.files.join(", ")} rewritten by an earlier pnpm install`);
@@ -486,7 +495,20 @@ export class Updater {
       const branchExists = await this.git(["show-ref", "--verify", "--quiet", `refs/heads/${channel}`]).then(() => true, () => false);
       const plan = checkoutPlan(channel, ref, { headBranch, branchExists, branchBehindRef: branchExists && (await this.isAncestor(`refs/heads/${channel}`, ref)) });
       if ("reason" in plan) throw new Error(`${plan.reason} (${info.sourceDir})`);
-      for (const args of plan) await this.git(args);
+      // A pull cut short (disk full: git wrote part of the new commit's files and stopped) leaves HEAD
+      // behind with those files dirty; the marker lets the next update recognise and discard them.
+      this.writePullMarker(layout, {
+        from: (await this.git(["rev-parse", "HEAD"])).trim(),
+        to: (await this.git(["rev-parse", ref])).trim(),
+        untracked: parsePorcelainZ(await this.git(["status", "--porcelain", "-z", "--untracked-files=all"])).filter((e) => e.code === "??").flatMap((e) => e.paths),
+        at: new Date().toISOString(),
+      });
+      try {
+        for (const args of plan) await this.git(args);
+      } catch (error) {
+        throw new Error(pullFailureMessage(error instanceof Error ? error.message : String(error)));
+      }
+      rmSync(this.pullMarkerPath(layout), { force: true });
       const commit = (await this.git(["rev-parse", "HEAD"])).trim();
       if (commit !== (await this.git(["rev-parse", ref])).trim()) throw new Error(`source checkout is not at the ${channel} head after the pull: ${info.sourceDir}`);
       const name = releaseName(commit, (n) => existsSync(join(layout.releasesDir, n)), MAC ? MAC_RELEASE_SUFFIX : "");
@@ -511,6 +533,65 @@ export class Updater {
       this.busy = false;
     }
     return this.state();
+  }
+
+  private pullMarkerPath(layout: InstallLayout): string {
+    return join(layout.baseDir, PULL_MARKER_FILE);
+  }
+
+  private writePullMarker(layout: InstallLayout, marker: PullMarker): void {
+    writeFileSync(this.pullMarkerPath(layout), JSON.stringify(marker));
+  }
+
+  /**
+   * An earlier update's pull was interrupted (its marker is still there): when HEAD is still where that
+   * pull started and every dirty / untracked path is one the target commit changes (interruptedPullHeal),
+   * discard them — `git reset --hard` plus removing exactly those untracked files, never a blanket clean —
+   * so this update can pull again. Anything else is left alone (the dirty check then refuses as before).
+   * Only the install's own clone; the marker goes once HEAD has moved on or the checkout is clean.
+   */
+  private async healInterruptedPull(layout: InstallLayout, ownClone: boolean): Promise<void> {
+    const path = this.pullMarkerPath(layout);
+    if (!existsSync(path)) return;
+    let marker: PullMarker | null = null;
+    try {
+      marker = parsePullMarker(JSON.parse(readFileSync(path, "utf8")));
+    } catch {
+      // unreadable: dropped below
+    }
+    if (!marker || !ownClone) {
+      this.log(`interrupted pull marker ignored (${marker ? "not the install's own clone" : "unreadable"})`);
+      rmSync(path, { force: true });
+      return;
+    }
+    const sourceDir = this.info!.sourceDir;
+    const head = (await this.git(["rev-parse", "HEAD"])).trim();
+    if (head !== marker.from) {
+      // The pull went through (or the checkout was moved by hand): nothing to recover.
+      rmSync(path, { force: true });
+      return;
+    }
+    const porcelain = await this.git(["status", "--porcelain", "-z", "--untracked-files=all"]);
+    if (!porcelain.replace(/\0/g, "").trim()) {
+      rmSync(path, { force: true });
+      return;
+    }
+    let changed: string[];
+    try {
+      changed = (await this.git(["diff", "--name-only", "-z", "--no-renames", marker.from, marker.to])).split("\0").filter(Boolean);
+    } catch (error) {
+      this.log(`interrupted pull ${marker.from.slice(0, 12)} -> ${marker.to.slice(0, 12)}: cannot list its files, not recovering: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    const verdict = interruptedPullHeal(marker, head, porcelain, changed);
+    if (!verdict.heal) {
+      this.log(`interrupted pull ${marker.from.slice(0, 12)} -> ${marker.to.slice(0, 12)} left changes, not recovering: ${verdict.reason}`);
+      return;
+    }
+    this.log(`recovering the interrupted pull ${marker.from.slice(0, 12)} -> ${marker.to.slice(0, 12)}: discarding ${verdict.dirty.join(", ")}`);
+    await this.git(["reset", "--hard", "--quiet", "HEAD"]);
+    for (const file of verdict.untracked) rmSync(join(sourceDir, ...file.split("/")), { force: true });
+    rmSync(path, { force: true });
   }
 
   /**

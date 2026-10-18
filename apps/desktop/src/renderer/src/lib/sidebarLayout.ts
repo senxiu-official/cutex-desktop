@@ -1,10 +1,14 @@
 // Sidebar v2 layout (pure): which agents of a project show as full rows, which fold into the
 // 运行中 rows / 「N 个空闲」 / 离线 N, and which projects collapse to one row (hover
-// flyout) or go under 其他项目. Settings → 外观 → 侧栏 picks the modes (lib/prefs).
+// flyout) or go under 其他项目. Settings → 外观 → 侧栏 picks the modes (lib/prefs). An online idle
+// agent folds only once it has been idle for IDLE_FOLD_AFTER_MS (a just-finished one stays a row).
 import type { AgentSignal } from "./agentAttention";
 import { agentSignal, wantsOwner } from "./agentAttention";
 import { agentStatus, compareRows, groupKey, rowKey, type AgentRow, type SidebarGroup } from "./sidebar";
 import type { NoOnlineProjects, ProjectGrouping, RunningAgents } from "./prefs";
+
+/** An online idle agent stays a full row until its last conversation activity is this old. */
+export const IDLE_FOLD_AFTER_MS = 30 * 60_000;
 
 export interface LayoutPrefs {
   grouping: ProjectGrouping;
@@ -22,7 +26,7 @@ export interface GroupLayout {
   full: AgentRow[];
   /** Running agents that need nothing: compact rows or the 运行中 avatar row (`prefs.running`). */
   running: AgentRow[];
-  /** Online idle agents folded into 「N 个空闲」 (the open agent and finished turns not seen yet stay in here too; unconfirmed rows their snapshot put here). */
+  /** Online idle agents idle for IDLE_FOLD_AFTER_MS or longer, folded into 「N 个空闲」 (the open agent and finished turns not seen yet stay in here too; unconfirmed rows their snapshot put here). */
   idle: AgentRow[];
   /** Row key of the open agent when it sits in `idle` (the fold marks it while collapsed). */
   idleSelected: string | null;
@@ -59,7 +63,14 @@ export interface LayoutContext {
   searching?: boolean;
   /** Group keys of projects set to 「在线空闲不收起」 (their idle agents are listed one by one). */
   idleUnfolded?: ReadonlySet<string>;
+  /** A row's last conversation activity (ms; default `row.lastActivity`). */
   lastOf?(row: AgentRow): number;
+  /**
+   * The clock (ms) the idle fold is decided at: an online idle agent active within IDLE_FOLD_AFTER_MS
+   * of it stays a full row. Absent: every online idle agent folds (no recency rule). Advance it with
+   * `nextIdleFold` so rows move into the fold by themselves.
+   */
+  now?: number;
   /**
    * Freshly created agents the owner has not opened yet (lib/freshAgents): a full row, never folded
    * into 「N 个空闲」 / the 运行中 rows, so a new agent does not seem to vanish after its first turn.
@@ -99,17 +110,19 @@ export function layoutGroup(group: SidebarGroup, ctx: LayoutContext, starred: bo
     if (wantsOwner(signal)) attentionCount++;
     const selected = rowKey(row) === ctx.selectedId;
     if (selected) hasSelected = true;
-    lastActivity = Math.max(lastActivity, ctx.lastOf?.(row) ?? row.lastActivity);
+    const last = ctx.lastOf?.(row) ?? row.lastActivity;
+    lastActivity = Math.max(lastActivity, last);
     const runningRow = isRunning || (unconfirmed && placed === "running");
     const idleRow = !runningRow && !off && !unplaced;
+    // Idle only a short while (just finished, likely to be continued): a full row, not folded yet.
+    const folds = foldIdle && !(idleRow && recentlyActive(last, ctx.now));
     // A finished turn not seen yet (完成) on an online idle agent stays in a collapsed 「N 个空闲」 (an
     // avatar with a ✓, 「· N 完成」 on the header; the 需要你 strip still lists it): collapsed means collapsed.
-    const foldedDone = signal === "done" && idleRow && foldIdle;
+    const foldedDone = signal === "done" && idleRow && folds;
     // A full row whatever the folds: the Director, the owner's pins (menu 置顶: never folded into
-    // 「N 个空闲」 / the 运行中 rows / 离线 N), agents that want the owner, fresh ones. The open agent
-    // leaves the 运行中 rows / 离线 list for a full row, but an online idle one stays in 「N 个空闲」
-    // (the fold marks it), so opening an agent doesn't reshuffle the list.
-    const keepFull = row.isDirector || row.pinned || (wantsOwner(signal) && !foldedDone) || (selected && !(idleRow && foldIdle)) || (!off && !!ctx.isFresh?.(rowKey(row)));
+    // 「N 个空闲」 / the 运行中 rows / 离线 N), agents that want the owner, fresh ones. Opening an agent
+    // never moves it (owner 2026-10-18): it stays in the 运行中 rows, 「N 个空闲」 or 离线 N, which mark it.
+    const keepFull = row.isDirector || row.pinned || (wantsOwner(signal) && !foldedDone) || (!off && !!ctx.isFresh?.(rowKey(row)));
     if (ctx.searching) {
       (off ? offline : full).push(row);
     } else if (keepFull || unplaced) {
@@ -119,7 +132,7 @@ export function layoutGroup(group: SidebarGroup, ctx: LayoutContext, starred: bo
     } else if (runningRow) {
       (ctx.prefs.running === "full" ? full : running).push(row);
     } else {
-      if (!foldIdle) full.push(row);
+      if (!folds) full.push(row);
       else {
         idle.push(row);
         if (selected) idleSelected = rowKey(row);
@@ -129,6 +142,26 @@ export function layoutGroup(group: SidebarGroup, ctx: LayoutContext, starred: bo
   }
   full.sort(compareRows);
   return { group, starred, full, running, idle, idleSelected, idleDone, offline, runningCount, needsYouCount, attentionCount, hasSelected, lastActivity };
+}
+
+function recentlyActive(last: number, now: number | undefined): boolean {
+  return now !== undefined && now - last < IDLE_FOLD_AFTER_MS;
+}
+
+/**
+ * When the idle fold changes next after `now` (ms): the earliest moment an online agent's last
+ * activity becomes IDLE_FOLD_AFTER_MS old, or null when none will. The caller re-lays the sidebar
+ * out at that time (`LayoutContext.now`). Counts every online row (running ones too: harmless).
+ */
+export function nextIdleFold(groups: readonly SidebarGroup[], now: number, lastOf: (row: AgentRow) => number = (r) => r.lastActivity): number | null {
+  let next: number | null = null;
+  for (const g of groups) {
+    for (const row of g.online) {
+      const at = lastOf(row) + IDLE_FOLD_AFTER_MS;
+      if (at > now && (next === null || at < next)) next = at;
+    }
+  }
+  return next;
 }
 
 /**

@@ -1,4 +1,6 @@
+import { appWindows } from "./appWindows";
 import { randomUUID } from "node:crypto";
+import type { HostProxyPatch } from "../shared/proxy";
 import { traceSendStage } from "../shared/sendTrace";
 import { fastTierOf } from "../shared/fastMode";
 import { logError } from "./errorLog";
@@ -11,7 +13,9 @@ import type { NoteCreate, NotesQuery, NoteUpdate } from "../shared/notes";
 import type { SideMessageInput, SideOpenInput, SideReply } from "../shared/sideChat";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { basename, extname, isAbsolute } from "node:path";
-import { BrowserWindow, dialog, shell } from "electron";
+import { app, BrowserWindow, dialog, shell } from "electron";
+import { hostname } from "node:os";
+import { approvalClientFacts } from "../shared/approvalOrigin";
 import {
   CutexApiError,
   CutexClient,
@@ -20,6 +24,10 @@ import {
   openStream,
   type StreamHandle,
   type DaemonEndpoint,
+  PROFILE_IMAGE_KINDS,
+  PROFILE_IMAGE_MAX_BYTES,
+  type AvatarContentType,
+  type ProfileImageKind,
 } from "@cutex-desktop/cutex-client";
 import type { AdmissionRef, HostSessionRow, SessionList, OwnerNotification, OwnerNotificationList, OwnerNotifyFilter, OwnerNotifySettingsPatch, ProjectsResponse, QueueMoveResult, QueueYieldResult } from "@cutex-desktop/protocol";
 import { SAFETY_CHECK_DISMISS, SAFETY_CHECK_GRANT } from "@cutex-desktop/protocol";
@@ -43,7 +51,7 @@ import type {
 } from "@cutex-desktop/protocol/codex/v2";
 import type { ThreadMemoryMode } from "@cutex-desktop/protocol/codex";
 import { checkDefaultsPatch } from "../shared/sessionDefaults";
-import { MAX_IMAGE_BYTES, SESSION_ACTION_METHODS, type DaemonApi, type DirBrowse, type ExtraInput, type ExperimentalFeaturesView, type PickedImage, type QueuePromoteResult, type SessionActionMethod, type SubmitOptions } from "../shared/ipc";
+import { MAX_IMAGE_BYTES, SESSION_ACTION_METHODS, type DaemonApi, type DirBrowse, type ExtraInput, type ExperimentalFeaturesView, type PickedImage, type QueuePromoteResult, type SessionActionMethod, type SubmitOptions, type ThreadSearchHit, type ThreadSearchPage } from "../shared/ipc";
 import { ASK_COMMAND_METHODS, type ArtifactView, type AskAnswerPage, type AskCommandMethod, type AskDetail, type AskFilter, type AskSummary } from "../shared/ipc";
 import type { JobListPage, JobOutputPage, JobResult, JobRow, JobServiceCapabilities, JobStream } from "../shared/ipc";
 import { dataUrlImage, sanitizeExtraInput, uploadKind } from "../shared/input";
@@ -73,7 +81,8 @@ import { windowsSandboxReadinessOf } from "../shared/windowsSandbox";
 import { localDaemonSetup } from "../shared/hosts";
 import { isValidTokenId } from "../shared/hosts";
 import { servicesSettingsPatch } from "../shared/servicesSettings";
-import type { AgentSecurityPatch, ApprovalDecision, ApprovalDecisionResult, ApprovalRecord, CutexRefusal, RuntimePackageRun, RuntimePackageRunResult, RuntimePackagesView, MutationResult, ProfileCreateRequest, ProfilePreset, NotificationLevel, ProfileAccountView, ServiceView, ServicesList, ServicesSettings, ServicesSettingsPatch, ProfileLogin, TerminalSummary, ProjectMemoryView, ProjectMutationOperation, BackgroundTerminal, CapabilitiesView, CatalogModelPatch, GlobalSettings, ProfileDetail, ProfileItem, ProfileModelsView, ProfilePatch, UserInstructions, AgentHarnessPreview, FsDir, FsFile, GitStatus, UsageDimension, UsagePrices, UsageReport, UsageSourceFilter, WorkspaceScope, DaemonState, DesktopApi, DaemonEvents, ModelOption, QuotaConfigView, QuotaGauge, ServerRequestReply, SidebarSnapshot, DirectorRotation, DirectorRotationResult, DirectorRotationStart, StuckBusDiscardRequest, StuckBusDiscardResult, StuckBusView } from "../shared/ipc";
+import type { ClaudeRepinDone, ClaudeRepinResult, ClaudeRuntimeView } from "../shared/claudeRepin";
+import type { AgentSecurityPatch, ApprovalDecision, ApprovalDecisionOrigin, ApprovalDecisionResult, ApprovalRecord, CutexRefusal, RuntimePackageRun, RuntimePackageRunResult, RuntimePackagesView, MutationResult, ProfileCreateRequest, ProfilePreset, NotificationLevel, ProfileAccountView, ServiceView, ServicesList, ServicesSettings, ServicesSettingsPatch, ProfileLogin, TerminalSummary, ProjectMemoryView, ProjectMutationOperation, BackgroundTerminal, CapabilitiesView, CatalogModelPatch, GlobalSettings, ProfileDetail, ProfileItem, ProfileModelsView, ProfilePatch, UserInstructions, AgentHarnessPreview, ClaudeCodeSources, ClaudePermissionRules, ClaudeSkillsImportList, ClaudeSkillsImportResult, SessionSandboxExtras, SessionSandboxExtrasPatch, FsDir, FsFile, GitStatus, UsageDimension, UsagePrices, UsageReport, UsageSourceFilter, WorkspaceScope, DaemonState, DesktopApi, DaemonEvents, ModelOption, QuotaConfigView, QuotaGauge, ServerRequestReply, SidebarSnapshot, DirectorRotation, DirectorRotationResult, DirectorRotationStart, StuckBusDiscardRequest, StuckBusDiscardResult, StuckBusView } from "../shared/ipc";
 
 /**
  * A 4xx cutex error as a refusal the renderer can explain. Thrown errors lose their code and
@@ -486,7 +495,9 @@ export class DaemonService implements DaemonApi {
       // filtered summary instead, so the sidebar still groups its agents by project.
       this.allHostRows().catch((error: unknown) => (error instanceof CutexApiError && error.status === 403 ? this.summaryHostRows() : {})),
     ]);
-    return { active: active.sessions, retired: retired.sessions, projects, hostRows };
+    // session-claude-runtime: the release for new Claude sessions, read with the agents' pins.
+    const claudeRuntime = active.claudeRuntime;
+    return { active: active.sessions, retired: retired.sessions, projects, hostRows, ...(claudeRuntime ? { claudeRuntime } : {}) };
   }
 
   /** Host rows of the agents a non-owner user sees (`GET /v2/summary`, filtered by cutex); {} on any error. */
@@ -585,7 +596,7 @@ export class DaemonService implements DaemonApi {
 
   private async chooseImages(maxBytes?: number): Promise<PickedImage[]> {
     const limit = typeof maxBytes === "number" && maxBytes > 0 ? Math.min(maxBytes, MAX_IMAGE_BYTES) : MAX_IMAGE_BYTES;
-    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    const win = BrowserWindow.getFocusedWindow() ?? appWindows()[0];
     const options = { properties: ["openFile", "multiSelections"] as ("openFile" | "multiSelections")[], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] }] };
     const r = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
     if (r.canceled) return [];
@@ -951,6 +962,21 @@ export class DaemonService implements DaemonApi {
     return (await this.requireClient().request<{ profile: ProfileDetail }>("PATCH", this.profilePath(profile), { body: patch })).profile;
   }
 
+  // cutex `profile-avatar`: the picture / intro portrait of a profile (owner only, like every profile route).
+  async profileImage(profileId: string, kind: ProfileImageKind): Promise<{ dataUrl: string; etag: string | null } | null> {
+    const image = await this.requireClient().profileImage(profileId, kind);
+    return image ? { dataUrl: `data:${image.contentType};base64,${image.data}`, etag: image.etag } : null;
+  }
+
+  async putProfileImage(profileId: string, kind: ProfileImageKind, dataUrl: string | null): Promise<{ etag: string | null }> {
+    if (!PROFILE_IMAGE_KINDS.includes(kind)) throw new Error("bad profile image kind");
+    if (dataUrl === null) return this.requireClient().putProfileImage(profileId, kind, null);
+    const match = typeof dataUrl === "string" ? /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+=*)$/.exec(dataUrl) : null;
+    // base64 grows 4/3; cutex checks the decoded size and the image itself.
+    if (!match || match[2]!.length > Math.ceil(PROFILE_IMAGE_MAX_BYTES[kind] / 3) * 4) throw new Error("bad profile image");
+    return this.requireClient().putProfileImage(profileId, kind, { contentType: match[1] as AvatarContentType, data: match[2]! });
+  }
+
   async createProfile(request: ProfileCreateRequest): Promise<ProfileDetail> {
     // Forward only the known fields (cutex validates kind / preset / URL).
     const body: Record<string, unknown> = { name: request.name.trim(), kind: request.kind };
@@ -1037,10 +1063,12 @@ export class DaemonService implements DaemonApi {
     return this.requireClient().approvals<ApprovalRecord>(state);
   }
 
-  async decideApproval(approvalId: string, decision: ApprovalDecision, note?: string): Promise<ApprovalDecisionResult> {
+  async decideApproval(approvalId: string, decision: ApprovalDecision, note?: string, origin?: ApprovalDecisionOrigin): Promise<ApprovalDecisionResult> {
     const client = this.requireClient();
+    // approval-decided-by: the renderer passes an origin only to a cutex that has it (older ones refuse `client`).
+    const facts = approvalClientFacts(origin, app.getVersion(), hostname());
     try {
-      return { ok: true, approval: await client.decideApproval<ApprovalRecord>(approvalId, decision, note) };
+      return { ok: true, approval: await client.decideApproval<ApprovalRecord>(approvalId, decision, note, facts) };
     } catch (error) {
       const refusal = refusalOf(error);
       if (refusal) return { ok: false, error: refusal };
@@ -1229,9 +1257,19 @@ export class DaemonService implements DaemonApi {
       agentBusRange: _agentBusRange,
       // peers-v2: through patchPeersSettings (loopback-only; a stray copy must not make every save fail remotely).
       peers: _peers,
+      // proxy-modes: through patchProxySettings (the view carries read-only fields; owner credential only).
+      proxy: _proxy,
       ...rest
     } = patch;
     return this.requireClient().request<GlobalSettings & { restartRequired: string[] }>("PATCH", "/v2/settings", { body: rest });
+  }
+
+  patchProxySettings(patch: HostProxyPatch): Promise<GlobalSettings> {
+    // Forward only the known fields; cutex validates the URL and keeps an omitted url / noProxy.
+    const proxy: Record<string, unknown> = { mode: patch.mode };
+    if (patch.url !== undefined) proxy.url = patch.url;
+    if (patch.noProxy !== undefined) proxy.noProxy = patch.noProxy;
+    return this.requireClient().request<GlobalSettings>("PATCH", "/v2/settings", { body: { proxy } });
   }
 
   patchNewThreadDefaults(patch: NewThreadDefaultsPatch): Promise<GlobalSettings & { restartRequired: string[] }> {
@@ -1247,6 +1285,69 @@ export class DaemonService implements DaemonApi {
 
   agentHarness(sessionId: string): Promise<AgentHarnessPreview> {
     return this.requireClient().request<AgentHarnessPreview>("GET", `/v2/sessions/${encodeURIComponent(sessionId)}/harness`);
+  }
+
+  claudeCodeSources(sessionId: string): Promise<ClaudeCodeSources> {
+    return this.requireClient().request<ClaudeCodeSources>("GET", `/v2/sessions/${encodeURIComponent(sessionId)}/claude-code`);
+  }
+
+  claudeRuntime(sessionId: string): Promise<ClaudeRuntimeView> {
+    return this.requireClient().request<ClaudeRuntimeView>("GET", `/v2/sessions/${encodeURIComponent(sessionId)}/claude-runtime`);
+  }
+
+  async repinClaudeRuntime(sessionId: string, target: string): Promise<ClaudeRepinResult> {
+    if (typeof target !== "string" || !target || target.length > 200) throw new Error("bad runtime target");
+    try {
+      const done = await this.requireClient().request<ClaudeRepinDone>("POST", `/v2/sessions/${encodeURIComponent(sessionId)}/claude-runtime/repin`, { body: { target } });
+      return { ok: true, done };
+    } catch (error) {
+      const refusal = refusalOf(error);
+      if (refusal) return { ok: false, error: refusal };
+      throw error;
+    }
+  }
+
+  async claudeModelStatus(sessionId: string, threadId: string): Promise<unknown> {
+    return this.requireClient()
+      .native<unknown>(sessionId, "claude/model/status", { threadId })
+      .catch((e: unknown) => {
+        if (e instanceof CutexApiError && e.code === "session_offline") return null;
+        throw e;
+      });
+  }
+
+  sessionSkills(sessionId: string): Promise<unknown> {
+    return this.requireClient().request<unknown>("GET", `/v2/sessions/${encodeURIComponent(sessionId)}/skills`);
+  }
+
+  sessionSandboxExtras(sessionId: string): Promise<SessionSandboxExtras> {
+    return this.requireClient().request<SessionSandboxExtras>("GET", `/v2/sessions/${encodeURIComponent(sessionId)}/sandbox-extras`);
+  }
+
+  setSessionSandboxExtras(sessionId: string, patch: SessionSandboxExtrasPatch): Promise<SessionSandboxExtras> {
+    return this.requireClient().request<SessionSandboxExtras>("PATCH", `/v2/sessions/${encodeURIComponent(sessionId)}/sandbox-extras`, { body: { ...patch } });
+  }
+
+  claudePermissionRules(sessionId: string): Promise<ClaudePermissionRules> {
+    return this.requireClient().request<ClaudePermissionRules>("GET", `/v2/sessions/${encodeURIComponent(sessionId)}/claude-permission-rules`);
+  }
+
+  setClaudePermissionRules(sessionId: string, allow: string[], expectedRevision?: number): Promise<ClaudePermissionRules> {
+    return this.requireClient().request<ClaudePermissionRules>("PUT", `/v2/sessions/${encodeURIComponent(sessionId)}/claude-permission-rules`, {
+      body: expectedRevision === undefined ? { allow } : { allow, expectedRevision },
+    });
+  }
+
+  claudeSkillsImportList(source?: string): Promise<ClaudeSkillsImportList> {
+    const query = source ? `?source=${encodeURIComponent(source)}` : "";
+    return this.requireClient().request<ClaudeSkillsImportList>("GET", `/v2/claude/skills/import${query}`);
+  }
+
+  importClaudeSkills(names: string[], options?: { source?: string; overwrite?: boolean }): Promise<ClaudeSkillsImportResult> {
+    const body: Record<string, unknown> = { names };
+    if (options?.source) body.source = options.source;
+    if (options?.overwrite) body.overwrite = true;
+    return this.requireClient().request<ClaudeSkillsImportResult>("POST", "/v2/claude/skills/import", { body });
   }
 
   putUserInstructions(content: string, expectedRevision: string): Promise<UserInstructions> {
@@ -1367,8 +1468,10 @@ export class DaemonService implements DaemonApi {
     return mutation(() => this.sessionAction(sessionId, "cutex/session/delete", expectedRevision === undefined ? {} : { expectedRevision }));
   }
 
-  async revertHistory(sessionId: string, beforeTurnId: string, expectedRevision: number) {
-    return this.requireClient().cutex<unknown>(sessionId, "cutex/session/history/revert", { beforeTurnId, expectedRevision });
+  async revertHistory(sessionId: string, beforeTurnId: string, expectedRevision: number, options?: { rewindFiles?: boolean }) {
+    // Only sent when requested: older cutex rejects the unknown parameter.
+    const params = options?.rewindFiles === true ? { beforeTurnId, expectedRevision, rewindFiles: true } : { beforeTurnId, expectedRevision };
+    return this.requireClient().cutex<unknown>(sessionId, "cutex/session/history/revert", params);
   }
 
   async backgroundTerminals(sessionId: string, threadId: string): Promise<BackgroundTerminal[]> {
@@ -1388,6 +1491,11 @@ export class DaemonService implements DaemonApi {
 
   async subAgentThread(sessionId: string, threadId: string, opts?: { includeTurns?: boolean }): Promise<unknown> {
     return this.requireClient().native<unknown>(sessionId, "thread/read", { threadId, includeTurns: opts?.includeTurns !== false });
+  }
+
+  async searchThread(sessionId: string, threadId: string, term: string, cursor?: string | null): Promise<ThreadSearchPage> {
+    const page = await this.requireClient().native<{ data?: ThreadSearchHit[]; nextCursor?: string | null }>(sessionId, "thread/searchOccurrences", { threadId, searchTerm: term, cursor: cursor ?? null, limit: 50 });
+    return { data: Array.isArray(page?.data) ? page.data : [], nextCursor: typeof page?.nextCursor === "string" ? page.nextCursor : null };
   }
 
   async projectMutation(projectId: string, expected: { authorityEpoch: number; projectRevision: number }, operation: ProjectMutationOperation) {
@@ -1910,7 +2018,7 @@ export class DaemonService implements DaemonApi {
   // Local host only: on a remote host the renderer browses the host's folders (browseDirs).
   async pickFolder(defaultPath?: string): Promise<string | null> {
     if (this.remote) throw new Error("the active host is remote: use the in-app folder browser");
-    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    const win = BrowserWindow.getFocusedWindow() ?? appWindows()[0];
     const options = { properties: ["openDirectory", "createDirectory"] as ("openDirectory" | "createDirectory")[], defaultPath: defaultPath || undefined };
     const r = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
     return r.canceled ? null : (r.filePaths[0] ?? null);
@@ -2183,7 +2291,7 @@ export class DaemonService implements DaemonApi {
 
   // Export always goes to this machine's disk (also when the active host is remote).
   async saveMarkdown(defaultName: string, content: string): Promise<string | null> {
-    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    const win = BrowserWindow.getFocusedWindow() ?? appWindows()[0];
     const safe = defaultName.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "_").slice(0, 120) || "conversation.md";
     const options = { defaultPath: safe.endsWith(".md") ? safe : `${safe}.md`, filters: [{ name: "Markdown", extensions: ["md"] }] };
     const r = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
@@ -2192,4 +2300,5 @@ export class DaemonService implements DaemonApi {
     return r.filePath;
   }
 }
+
 

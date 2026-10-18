@@ -3,6 +3,8 @@
 // message, an agent-bus message — closes the group: it renders as one summary line. A group with
 // nothing after it (still running, or the tail of a finished / interrupted turn) stays open: newest
 // steps + "N earlier". Pure, so it is unit-tested.
+import { approvalOfTool } from "./approvals";
+import { isClaudeAgentTool } from "./claudeTasks";
 import { reasoningText, type ReasoningEntry } from "./reasoning";
 import { taskRowOutcome, taskToolRow } from "./taskRows";
 import type { RawItem, TimelineEntry } from "./timeline";
@@ -13,7 +15,7 @@ export interface WorkSummary {
   files: number;
   /** MCP / dynamic / web-search / image tools. */
   tools: number;
-  /** collabAgentToolCall items (sub-agent spawn / message / wait …). */
+  /** collabAgentToolCall items (sub-agent spawn / message / wait …) and Claude Agent / Task calls. */
   agents: number;
   failed: number;
   /** Sum of command durations, ms (null when none reported). */
@@ -71,7 +73,22 @@ export function toolOutput(item: RawItem): string | null {
   return null;
 }
 
+/**
+ * A finished cutex tool call that stopped for the owner: `required` = it answered approval_required
+ * (the request waits on 审批; the approvals module's line under the row says what became of it),
+ * `denied` = approval_denied. Neither is a failure. While cutex approval-wait holds the call it is
+ * still running (approvalOfTool is null for running rows).
+ */
+export function approvalOutcome(item: RawItem): "required" | "denied" | null {
+  if (item.type !== "mcpToolCall" || item.server !== "cutex" || isRunning(item)) return null;
+  // The approval's id in the text (approvals module line), else just the refusal's code (e.g. a
+  // browser relay error `{error: {code: "approval_required"}}`).
+  const code = approvalOfTool(item)?.code ?? taskRowOutcome(item)?.code;
+  return code === "approval_required" ? "required" : code === "approval_denied" ? "denied" : null;
+}
+
 export function isFailed(item: RawItem): boolean {
+  if (approvalOutcome(item)) return false;
   const status = item.status as string | undefined;
   if (status === "failed" || status === "declined" || status === "errored") return true;
   // cutex tools answer a refusal as a completed call with `ok: false`.
@@ -109,7 +126,7 @@ export function summarize(steps: StepEntry[]): WorkSummary {
       if (typeof item.durationMs === "number") s.durationMs = (s.durationMs ?? 0) + item.durationMs;
     } else if (item.type === "fileChange") {
       for (const c of (item.changes as { path: string }[] | undefined) ?? []) files.add(c.path);
-    } else if (item.type === "collabAgentToolCall") s.agents += 1;
+    } else if (item.type === "collabAgentToolCall" || isClaudeAgentTool(item)) s.agents += 1;
     else s.tools += 1;
     if (isFailed(item)) s.failed += 1;
   }

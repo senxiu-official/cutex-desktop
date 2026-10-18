@@ -7,7 +7,7 @@ import { overlayDescription, trayTooltip } from "../src/shared/shell";
 
 const { zhCN } = await import("../src/renderer/src/i18n/zh-CN");
 const { en } = await import("../src/renderer/src/i18n/en");
-const { applyTerms, DEFAULT_TERMS, parseOverrides, resolveTerms, resetTerm, setTerm } = await import("../src/renderer/src/lib/terms");
+const { applyTerms, DEFAULT_TERMS, parseOverrides, resolveTerms, resetTerm, setTerm, splitTerms } = await import("../src/renderer/src/lib/terms");
 
 /** Strips what is not prose: term placeholders, {var}s. */
 function prose(text: string): string {
@@ -56,13 +56,18 @@ describe("localization audit guards (2026-10-13)", () => {
 
   // The parent agent has its own term (owner 2026-10-13): a custom agent word must not leak into
   // it (Maid → not 「父Maid」), and an old terms store without the term keeps the default.
-  it("parentagent is an independent term with per-language defaults and en fallback elsewhere", () => {
+  it("parentagent is an independent term with its own default in every language", () => {
     expect(DEFAULT_TERMS["zh-CN"].parentagent).toEqual({ one: "父智能体", many: "父智能体" });
     expect(DEFAULT_TERMS["zh-Hant-CN"].parentagent).toEqual({ one: "父智能體", many: "父智能體" });
     expect(DEFAULT_TERMS.en.parentagent).toEqual({ one: "parent agent", many: "parent agents" });
-    for (const locale of ["ru-RU", "fr-FR", "es-ES", "pt-BR", "it-IT", "de-DE", "ja-JP"] as const) {
-      expect(DEFAULT_TERMS[locale].parentagent).toEqual({ one: "parent agent", many: "parent agents" });
-    }
+    // Translated 2026-10-18 (they were the en words before).
+    expect(DEFAULT_TERMS["ru-RU"].parentagent).toEqual({ one: "родительский агент", many: "родительские агенты" });
+    expect(DEFAULT_TERMS["fr-FR"].parentagent).toEqual({ one: "agent parent", many: "agents parents" });
+    expect(DEFAULT_TERMS["es-ES"].parentagent).toEqual({ one: "agente padre", many: "agentes padre" });
+    expect(DEFAULT_TERMS["pt-BR"].parentagent).toEqual({ one: "agente pai", many: "agentes pai" });
+    expect(DEFAULT_TERMS["it-IT"].parentagent).toEqual({ one: "agente padre", many: "agenti padre" });
+    expect(DEFAULT_TERMS["de-DE"].parentagent).toEqual({ one: "übergeordneter Agent", many: "übergeordnete Agenten" });
+    expect(DEFAULT_TERMS["ja-JP"].parentagent).toEqual({ one: "親エージェント", many: "親エージェント" });
     expect(DEFAULT_TERMS["ko-KR"].parentagent).toEqual({ one: "상위 에이전트", many: "상위 에이전트" });
   });
 
@@ -86,8 +91,8 @@ describe("localization audit guards (2026-10-13)", () => {
     Reflect.deleteProperty(globalThis, "localStorage");
   });
 
-  it("terms.sample previews the parentagent word (review 2026-10-13: custom previews, reset restores)", () => {
-    const sample = zhCN["terms.sample"];
+  it("the 术语 preview shows the parentagent word and marks it (review 2026-10-13; preview band 2026-10-18)", () => {
+    const sample = zhCN["terms.sample.reportsTo"];
     expect(sample).toContain("{{parentagent}}");
     const custom = resolveTerms(parseOverrides({ "zh-CN": { parentagent: { one: "上司" } } }), "zh-CN");
     const shown = applyTerms(sample, custom, "zh-CN");
@@ -97,7 +102,12 @@ describe("localization audit guards (2026-10-13)", () => {
     // the sample word never derives from the agent term
     const maid = resolveTerms(parseOverrides({ "zh-CN": { agent: { one: "Maid" }, parentagent: { one: "上司" } } }), "zh-CN");
     expect(applyTerms(sample, maid, "zh-CN")).toContain("上司");
-    const enSample = applyTerms(en["terms.sample"], resolveTerms(parseOverrides({ en: { parentagent: { one: "boss agent" } } }), "en"), "en");
+    const enSample = applyTerms(en["terms.sample.reportsTo"], resolveTerms(parseOverrides({ en: { parentagent: { one: "boss agent" } } }), "en"), "en");
     expect(enSample).toContain("boss agent");
+    // the pieces carry the term id, and join back to applyTerms
+    const pieces = splitTerms(sample, custom, "zh-CN");
+    expect(pieces).toEqual(["汇报给", { id: "parentagent", text: "上司" }]);
+    expect(pieces.map((p) => (typeof p === "string" ? p : p.text)).join("")).toBe(shown);
+    expect(splitTerms("Waiting for {{an owner}} · {{Agents}}", resolveTerms({}, "en"), "en")).toEqual(["Waiting for ", { id: "owner", text: "an owner" }, " · ", { id: "agent", text: "Agents" }]);
   });
 });

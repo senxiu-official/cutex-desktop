@@ -94,7 +94,8 @@ export const browserScreenshotMetadataSchema: Schema = object(screenshotMetadata
 const results: Schema[] = [
   object({ kind: literal('tab.snapshot'), ...snapshotFields }),
   object({ kind: literal('tab.find'), ...snapshotFields, nodes: { type: 'array', items: pageNode, maxItems: MAX_FIND_RESULTS } }),
-  object({ kind: literal('tab.act'), pageGeneration: generation }),
+  object({ kind: literal('tab.act'), pageGeneration: generation, scroll: object({
+    dx: integer(-Number.MAX_SAFE_INTEGER), dy: integer(-Number.MAX_SAFE_INTEGER), atEdge: { type: 'boolean' } }) }, ['scroll']),
   object({ kind: literal('tab.navigate'), pageGeneration: generation, url }),
   object(screenshotFields),
   object({ ...screenshotFields, ...screenshotMetadataFields }),

@@ -37,6 +37,7 @@ import { projectMuted, projectMuteSupported, toggleProjectMuted } from "./notifi
 import type { AgentRow, SidebarGroup } from "./sidebar";
 import { openAgentList } from "./agentListDialog";
 import { moveToSectionEntry } from "./sectionMenus";
+import { customizeSidebarItem } from "./customizeMenu";
 import { markSeenOn, turnMarksOn } from "./turnUnread";
 import { runLimited, START_CONCURRENCY } from "./agentList";
 import { captureHostAction } from "./hostSwitch";
@@ -235,5 +236,7 @@ export function projectMenu(group: SidebarGroup, workspaceRoot: string | null, c
       armed: t("projects.clearDirectorArmed", { name: director.displayName }),
       onSelect: () => void clearProjectDirector(group.id, host, t),
     },
+    "separator",
+    customizeSidebarItem(t),
   ];
 }

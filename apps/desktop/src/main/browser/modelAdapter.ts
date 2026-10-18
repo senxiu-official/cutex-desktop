@@ -9,6 +9,9 @@ export interface BrowserModelAdapterOptions {
   /** Return admitted current-identity targets with sanitized, policy-allowed public URLs only. */
   tabs(): BrowserTabSummary[];
   decodeImage: BrowserImageDecoder;
+  /** True when the host reads the optional tab.act `scroll` outcome (browser-scroll-outcome);
+   * an older host rejects the unknown field, so it must not be sent there. */
+  scrollOutcome?: () => boolean;
 }
 /** Decode the sanitized CutexRef key once; never expose an auth/tunnel URL or invent a port. */
 export function publicBrowserServiceUrl(displayUrl: string, connectionPort: number | undefined): string {
@@ -99,7 +102,8 @@ export function createBrowserModelAdapter(options: BrowserModelAdapterOptions) {
           if ("ref" in operation.action && operation.action.ref !== undefined) requireReturnedRef(guestId, operation.action.ref);
           if (["back", "forward", "reload", "wait"].includes(operation.action.kind)) snapshots.delete(guestId);
           const value = await provider.action(guestId, operation.action, control);
-          return { kind: operation.kind, pageGeneration: value.pageGeneration };
+          return { kind: operation.kind, pageGeneration: value.pageGeneration,
+            ...(value.scroll && options.scrollOutcome?.() ? { scroll: value.scroll } : {}) };
         }
         case "tab.navigate": {
           snapshots.delete(guestId);

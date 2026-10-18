@@ -6,7 +6,7 @@
 // SettingsNav as its Aside. Multi-host (P1 step 2c, RFC §9.3): host pages get a host picker in their
 // header (lib/settingsHost) and read / write that host (lib/targetHost provider).
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { ArrowLeft, Search, X } from "lucide-react";
+import { ArrowLeft, Search, SlidersHorizontal, X } from "lucide-react";
 import { bridge } from "../bridge";
 import { useI18n, type MessageKey } from "../i18n";
 import { resetDragonSize } from "../lib/aboutDragon";
@@ -25,6 +25,7 @@ import { ItemBoundary } from "../modules/Outlet";
 import { useSlot } from "../modules/react";
 import type { AppSlotEntry, PageParams } from "../modules/slots";
 import { useApp } from "../store";
+import { noteCustomizeOpener, type CustomizeRegion } from "../lib/customize";
 import { PageBody, SUBNAV_ITEM, SUBNAV_OFF, SUBNAV_ON } from "./Page";
 import { EmptyState, Button, Section, SettingsPage, TextLink } from "./settings/Form";
 
@@ -182,6 +183,8 @@ function SettingsSearchResults({ query, input, current }: { query: string; input
   const settingsHost = scope.host(useSettingsHost());
   const hostSuffix = (page: string) => (settingsHost && hostPickerMode(scope, settingsHost.id) === "picker" && SETTINGS_HOST_PAGES.has(page as never) ? settingsHost.label : null);
   const groups = useMemo(() => searchSettings(docs, query), [docs, query]);
+  const regions = useSlot("customize.region");
+  const regionOf = (page: string) => regions.find((e) => e.mode === "show" && e.item.settingsPage === page)?.item.region;
   const rows = useMemo(() => flattenResults(groups), [groups]);
   const [active, setActive] = useState(0);
   const list = useRef<HTMLDivElement>(null);
@@ -229,6 +232,7 @@ function SettingsSearchResults({ query, input, current }: { query: string; input
                 {hostSuffix(g.page) && <span className="font-normal text-subtle"> · {hostSuffix(g.page)}</span>}
               </span>
               {g.pageHit && g.pageHit.text !== g.pageTitle && <Detail hit={g.pageHit} />}
+              {regionOf(g.page) && !g.disabled && <CustomizeButton region={regionOf(g.page)!} small />}
             </ResultRow>
             {g.sections.map((h) => {
               const i = index++;
@@ -279,6 +283,47 @@ function ResultRow({ index, active, disabled, current, indent, onOpen, onHover, 
   );
 }
 
+/** The 在主界面调整 region of a settings page (`customize.region` settingsPage), if it has one. */
+function useCustomizeRegionOf(page: string): CustomizeRegion | undefined {
+  return useSlot("customize.region").find((e) => e.mode === "show" && e.item.settingsPage === page)?.item.region;
+}
+
+/**
+ * 「在主界面调整」: closes Settings and opens the region's panel beside it (lead 2026-10-18). On a page
+ * header, and `small` in a settings search result of that page.
+ */
+function CustomizeButton({ region, small }: { region: CustomizeRegion; small?: boolean }) {
+  const { t } = useI18n();
+  const open = () => {
+    // The button goes away with Settings: the focus goes to the region when the panel closes.
+    noteCustomizeOpener(null);
+    useApp.getState().openCustomize(region);
+  };
+  if (small) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          open();
+        }}
+        className="mt-0.5 inline-flex w-fit items-center gap-1 rounded text-[11px] text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none"
+      >
+        <SlidersHorizontal size={11} aria-hidden />
+        {t("customize.openInMain")}
+      </button>
+    );
+  }
+  return (
+    <Button title={t("customize.openInMainHint")} onClick={open}>
+      <span className="inline-flex items-center gap-1.5">
+        <SlidersHorizontal size={13} aria-hidden />
+        {t("customize.openInMain")}
+      </span>
+    </Button>
+  );
+}
+
 /** The selected settings page (its nav is `SettingsNav`). */
 export function Settings({ params }: { params: PageParams }) {
   const tab = settingsTab(params);
@@ -288,6 +333,7 @@ export function Settings({ params }: { params: PageParams }) {
   const entry = pages.find((e) => e.item.page === tab && e.mode === "show");
   const headerLink = entry?.item.headerLink;
   const linked = headerLink && pages.some((e) => e.item.page === headerLink.page && e.mode === "show") ? headerLink : null;
+  const customize = useCustomizeRegionOf(tab);
   // A picked host that goes offline stays the target (shown unavailable, no edits; UI-01).
   const target = useSettingsTarget();
   const hostId = target.hostId;
@@ -317,19 +363,36 @@ export function Settings({ params }: { params: PageParams }) {
   const scrollKey = [tab, hostPage ? hostId : "", params.profile ?? "", params.create ?? ""].join("|");
   return (
     <main className="flex min-w-0 flex-1">
-      <PageBody scrollKey={scrollKey}>
+      <PageBody
+        scrollKey={scrollKey}
+        aside={
+          item.Aside ? (
+            <ItemBoundary moduleId={entry.moduleId} resetKey={tab}>
+              <item.Aside />
+            </ItemBoundary>
+          ) : undefined
+        }
+      >
         <TargetHostContext.Provider value={hostPage ? hostId : null}>
           <AllHostsContext.Provider value={hostPage && allHosts.on ? allHosts.offered : null}>
             {/* A page per host: switching hosts starts the page over (no state of one host shown for another). */}
             <SettingsPage
               key={hostPage ? `${tab}|${allHosts.on ? "*" : hostId}` : tab}
               source={item.source ?? undefined}
+              agents={item.agents}
               hint={item.hintKey ? t(item.hintKey) : undefined}
-              link={linked ? <TextLink onClick={() => openSettings(linked.page)}>{t(linked.labelKey)}</TextLink> : undefined}
+              link={
+                linked || customize ? (
+                  <span className="flex items-center gap-3">
+                    {linked && <TextLink onClick={() => openSettings(linked.page)}>{t(linked.labelKey)}</TextLink>}
+                    {customize && <CustomizeButton region={customize} />}
+                  </span>
+                ) : undefined
+              }
               host={
                 hostPage && mode !== "none" ? (
                   <HostPicker
-                    prefix
+                    chip
                     value={hostId}
                     onChange={(id) => {
                       if (allHosts.on) allHosts.set(false);

@@ -116,7 +116,7 @@ export function PreviewBody(props: SideBodyProps<PreviewState>) {
         {!file && !error && <p className="text-xs text-subtle">…</p>}
         {file && image && (!isSvg || !source) && <img alt={file.path} src={image} className="max-w-full" />}
         {file && file.encoding === "base64" && !file.mime.startsWith("image/") && <p className="text-xs text-subtle">{t("workspace.binary", { mime: file.mime, size: file.size })}</p>}
-        {file && file.encoding === "utf8" && !(isSvg && !source) && (isMarkdown && !source ? <Markdown text={file.content} document /> : <Markdown text={fence(languageFor(file.path), file.content)} />)}
+        {file && file.encoding === "utf8" && !(isSvg && !source) && (isMarkdown && !source ? <Markdown text={file.content} document /> : <Markdown text={fence(languageFor(file.path), file.content)} uncappedCode />)}
         {file?.truncated && <p className="mt-2 text-xs text-warn">{t("workspace.truncated")}</p>}
       </div>
       )}

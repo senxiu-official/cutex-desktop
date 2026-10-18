@@ -27,6 +27,15 @@ describe("parseIdRef / isShortId", () => {
     expect(isShortId("ask-123456")).toBe(true);
   });
 
+  it("reads the A8 delegation spelling (`delegation-<hex>`, cutex 117b2c8) as an ask id", () => {
+    expect(parseIdRef("delegation-123456")).toEqual({ kind: "ask", hex: "123456", mode: "either" });
+    expect(parseIdRef("DELEGATION-123456abcdef00000000000000000000")).toMatchObject({ kind: "ask", mode: "full" });
+    expect(parseIdRef("delegation-related")).toBeNull();
+    expect(sameId("delegation-123456", ASK)).toBe(true);
+    expect(sameId("delegation-123456", DOC)).toBe(false);
+    expect(resolveId("delegation-123456", [ASK, DOC])).toBe(ASK);
+  });
+
   it("reads what agents may write: bare prefixes / suffixes, three dots, other spellings of a full id", () => {
     expect(parseIdRef("...abc123")).toEqual({ kind: null, hex: "abc123", mode: "suffix" });
     expect(parseIdRef("…00000000b1")).toEqual({ kind: null, hex: "00000000b1", mode: "suffix" });

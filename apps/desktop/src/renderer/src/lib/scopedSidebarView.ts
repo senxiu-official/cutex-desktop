@@ -12,7 +12,7 @@ import type { HostLook, HostScope } from "./hostScope";
 import { useHostScope } from "./useHostScope";
 import { useOwnerNotify } from "./ownerNotifyStore";
 import { mergeHostSidebars, scopedSignals, type HostAttentionPart, type HostSidebarPart, type ScopedSidebarModel } from "./scopedSidebar";
-import { liveStatuses, needsInputIds } from "./sidebar";
+import { liveStatuses, needsInputIds, pendingByAgent } from "./sidebar";
 import { turnMarksOn, useTurnMarks } from "./turnUnread";
 
 // Last snapshot seen per host this run (never persisted): a host that disconnects keeps its rows, greyed.
@@ -63,6 +63,8 @@ export function useScopedSidebar(): ScopedSidebar {
   const hostsState = useApp((s) => s.hosts);
   const pinned = useApp((s) => s.pinned);
   const sessions = useApp((s) => s.sessions);
+  // The focus host's requests seen on its host feed: agents not open here are ⚠ rows too.
+  const hostWaiting = useApp((s) => s.hostWaiting);
   return useMemo(() => {
     const source = { hosts: hostsState, sidebar, byHost, features };
     const parts: HostSidebarPart[] = [];
@@ -73,12 +75,12 @@ export function useScopedSidebar(): ScopedSidebar {
       const state = hostSidebarState(look, current);
       const focus = look.id === scope.focus;
       const views = Object.fromEntries(Object.entries(sessions).filter(([id]) => viewHostOf(id) === look.id));
-      parts.push({ hostId: look.id, snapshot, pinned: focus ? pinned : pinnedOn(look.id), needsInput: needsInputIds(views), chats: featuresOf(source, look.id).has("human-create-session"), statusUnknown: state === "loading", liveStatus: state === "loading" ? liveStatuses(views) : undefined });
+      parts.push({ hostId: look.id, snapshot, pinned: focus ? pinned : pinnedOn(look.id), needsInput: focus ? new Set(Object.keys(pendingByAgent(views, hostWaiting))) : needsInputIds(views), chats: featuresOf(source, look.id).has("human-create-session"), statusUnknown: state === "loading", liveStatus: state === "loading" ? liveStatuses(views) : undefined });
       hosts.push({ look, state, hasRows: !!snapshot });
     }
     const stateOf = (hostId: string | undefined) => hosts.find((h) => h.look.id === (hostId ?? scope.focus))?.state ?? "live";
     return { scope, model: mergeHostSidebars(parts), hosts, stateOf };
-  }, [scope, sidebar, byHost, features, hostsState, pinned, sessions]);
+  }, [scope, sidebar, byHost, features, hostsState, pinned, sessions, hostWaiting]);
 }
 
 /** Signals / needs-you of the merged rows (keyed by row key), each from its own host's sources. */
@@ -86,6 +88,7 @@ export function useScopedAttention(model: ScopedSidebarModel, scope: HostScope):
   const sessions = useApp((s) => s.sessions);
   const hostsState = useApp((s) => s.hosts);
   const approvals = useApp((s) => s.approvals);
+  const hostWaiting = useApp((s) => s.hostWaiting);
   const byHost = useApp((s) => s.byHost);
   const features = useApp((s) => s.features);
   const delegations = useDelegations((s) => s.byKey);
@@ -97,9 +100,9 @@ export function useScopedAttention(model: ScopedSidebarModel, scope: HostScope):
   const result = useMemo(() => {
     const parts: HostAttentionPart[] = scope.hostsInScope.map((look) => {
       const focus = look.id === scope.focus;
-      const pending: Record<string, string[]> = {};
       const views = focus ? focusSessionViews({ hosts: hostsState, sessions }) : Object.fromEntries(Object.entries(sessions).filter(([id]) => viewHostOf(id) === look.id));
-      for (const [id, v] of Object.entries(views)) if (v.timeline.pending.size > 0) pending[id] = [...v.timeline.pending.values()].map((p) => p.method);
+      // The focus host: also its requests seen on its host feed (agents not open here).
+      const pending = pendingByAgent(views, focus ? hostWaiting : undefined);
       // Another host: its requests seen on its host feed (methods unknown: a confirmation).
       if (!focus) for (const [id, requests] of Object.entries(byHost[look.id]?.waiting ?? {})) if (!pending[id] && requests.length) pending[id] = requests.map(() => "");
       return {
@@ -113,7 +116,7 @@ export function useScopedAttention(model: ScopedSidebarModel, scope: HostScope):
       };
     });
     return scopedSignals(rows, parts, scope.focus);
-  }, [rows, scope, hostsState, sessions, approvals, byHost, features, delegations, ownerNotify, notes, otherNotes, marks]);
+  }, [rows, scope, hostsState, sessions, hostWaiting, approvals, byHost, features, delegations, ownerNotify, notes, otherNotes, marks]);
   return { rows, signals: result.signals, needs: result.needs, marks };
 }
 

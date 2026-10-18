@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { SLOW_START_MS, useElapsed, useRuntimeStartSince } from "../lib/runtimeStart";
 import { ArrowDown } from "lucide-react";
 import type { WorkspaceScope } from "../../../shared/ipc";
 import { useI18n } from "../i18n";
@@ -53,6 +54,9 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
     () => [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((s) => s.cutexSessionId === selectedId),
     [sidebar, selectedId],
   );
+  // Our own 启动运行时 still waiting for cutex (lib/runtimeStart); after a while the note says so.
+  const startSince = useRuntimeStartSince(hostId, selectedId);
+  const startSlow = useElapsed(startSince, SLOW_START_MS);
   const nameOf = useMemo(() => {
     const names = new Map([...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].map((s) => [s.cutexSessionId, s.displayName]));
     return (id: string) => names.get(id) ?? id;
@@ -256,7 +260,9 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   const runtimeNote = archived
     ? null
     : view?.startError
-      ? { tone: "text-danger", text: t("conversation.startFailed", { error: view.startError }) }
+      ? { tone: "text-danger", text: t(view.startErrorQueueIds?.length || view.queue.length ? "conversation.startFailed" : "conversation.runtimeStartFailed", { error: view.startError }) }
+      : startSince !== null && runtimeStatus !== "online"
+        ? { tone: "text-accent", text: startSlow ? t("conversation.startingSlow") : t(view?.queue.length ? "conversation.startingQueued" : "conversation.starting") }
       : runtimeStatus === "starting"
         ? { tone: "text-accent", text: t(view?.queue.length ? "conversation.startingQueued" : "conversation.starting") }
         : runtimeStatus && runtimeStatus !== "online" && canAutoStart && view?.timeline.threadId
@@ -267,7 +273,7 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
     <SubAgentContext.Provider value={subAgents}>
     <ConversationDockContext.Provider value={dock}>
     <main className="relative flex min-w-0 flex-1 flex-col">
-      <div ref={frame} className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={frame} data-timeline-frame className="relative flex min-h-0 flex-1 flex-col">
       {/* Content dissolves into the composer area instead of being cut by a hard edge (a mask, so it
           works on any background / theme); the extra bottom padding keeps the last line clear of it. */}
       <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto [mask-image:linear-gradient(to_bottom,black_calc(100%-28px),transparent)]">
@@ -328,11 +334,11 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
       {archived && session && <ArchivedBanner session={session} />}
       {!archived && readOnly && <ReadOnlyComposerNote hostId={hostId} />}
       {/* Kept mounted (draft survives) but hidden while an interaction blocks — ZCode pattern. */}
-      <div className={archived || readOnly || (view && view.timeline.pending.size > 0) ? "hidden" : undefined}>
+      <div data-composer-block className={archived || readOnly || (view && view.timeline.pending.size > 0) ? "hidden" : undefined}>
         {runtimeNote && (
           <p className={`side-col px-6 pb-1 text-xs ${runtimeNote.tone}`}>
             {runtimeNote.text}
-            {access.isOwner && runtimeStatus && runtimeStatus !== "online" && runtimeStatus !== "starting" && (
+            {access.isOwner && runtimeStatus && runtimeStatus !== "online" && runtimeStatus !== "starting" && startSince === null && (
               <button onClick={() => void sessionAction(selectedId, "cutex/runtime/online", { openVisibleTerminal: false }).catch(() => {})} className="ml-2 text-accent hover:underline">
                 {t("menu.start")}
               </button>

@@ -1,5 +1,5 @@
 // Usage-page view of model names: the 模型 split shows the names of Settings → 通用 → 模型显示名
-// (lib/modelDisplay), and ids shown alike (glm-5.3 and GLM-5.3 → "GLM 5.3") add up in one series /
+// (lib/modelDisplay), and ids shown alike (glm-5.3 and GLM-5.3 → "GLM 5.3", or names differing only in case) add up in one series /
 // row. Display only: the ledger, the price table and the requests keep the raw ids.
 import type { UsageReport } from "../../../../shared/ipc";
 
@@ -11,11 +11,16 @@ export interface ShownModels {
 
 export function withShownModels(report: UsageReport, label: (id: string) => string): ShownModels {
   const ids = new Map<string, string[]>();
+  // Names that differ only in case are one series, shown in the first spelling met (a current cutex
+  // already reports one lowercase id; an older host, or 「全部主机」 across hosts, may not).
+  const spelling = new Map<string, string>();
   let changed = false;
   const rows = report.rows.map((r) => {
     const id = r.key.model;
     if (!id) return r;
-    const shown = label(id) || id;
+    const named = label(id) || id;
+    const shown = spelling.get(named.toLowerCase()) ?? named;
+    spelling.set(named.toLowerCase(), shown);
     const list = ids.get(shown) ?? [];
     if (!list.includes(id)) list.push(id);
     ids.set(shown, list);

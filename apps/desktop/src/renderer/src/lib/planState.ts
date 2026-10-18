@@ -37,6 +37,14 @@ export function dismissPlan(plan: PlanSnapshot | null | undefined): PlanSnapshot
   return plan.dismissed ? plan : { ...plan, dismissed: true };
 }
 
+/** Undo the owner's hide: the same snapshot shows again. */
+export function restorePlan(plan: PlanSnapshot | null | undefined): PlanSnapshot | null {
+  if (!plan) return null;
+  if (!plan.dismissed) return plan;
+  const { dismissed: _d, ...rest } = plan;
+  return rest;
+}
+
 /**
  * Was the turn of a kept plan reverted? Known only when the previous view of the same thread had the
  * turn loaded and the rebuilt one lacks it although an older turn survived (or the whole history is

@@ -20,7 +20,7 @@ export interface BrowserGuestRecord {
   readonly status: BrowserGuestStatus;
 }
 export type BrowserRegistryEvent = BrowserGuestRecord & {
-  kind: "created" | "attached" | "unmounted" | "destroyed" | "crashed" | "closed" | "host_changed" | "host_removed";
+  kind: "created" | "attached" | "unmounted" | "replaced" | "destroyed" | "crashed" | "closed" | "host_changed" | "host_removed";
 };
 export interface BrowserRegistryOptions {
   newGuestId?: () => string;
@@ -98,12 +98,17 @@ export class BrowserRegistry<G extends BrowserGuestHandle = BrowserGuestHandle> 
     entry.record = Object.freeze({ ...entry.record, pageGeneration: entry.record.pageGeneration + 1 });
     return entry.record.pageGeneration;
   }
-  attach(guestId: string, guest: G): BrowserGuestRecord {
+  /**
+   * replace: a carrier hand-over of the same tab (background carrier <-> visible webview). The old
+   * guest is closed and its page generation retired like an unmount, but onRevoke learns it was
+   * "replaced" so main keeps the tab's lease (it re-prepares control on the new guest itself).
+   */
+  attach(guestId: string, guest: G, options: { replace?: boolean } = {}): BrowserGuestRecord {
     const entry = this.require(guestId);
     if (guest.isDestroyed() || !Number.isSafeInteger(guest.id) || guest.id <= 0) throw new Error("Invalid browser guest");
     if (entry.guest === guest) return entry.record;
     if (this.contents.has(guest.id)) throw new Error("WebContents already belongs to a guest");
-    if (entry.guest) this.detachEntry(entry, "unmounted", true);
+    if (entry.guest) this.detachEntry(entry, options.replace === true ? "replaced" : "unmounted", true);
     this.nextPageGeneration(guestId);
     entry.guest = guest;
     entry.record = Object.freeze({ ...entry.record, status: "attached" });

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import { browserBridge } from "./browser";
 import { PLUGINS_CHANNEL, type PluginRequest } from "../shared/plugins";
 import { FRAMES_CHANNEL, type FrameRequest } from "../shared/frames";
+import { MODULE_PACKS_CHANNEL, type ModulePacksRequest } from "../shared/modulePacks";
 import { KNOWN_ISSUES_CHANNEL, type KnownIssuesRequest } from "../shared/knownIssues";
 import { LAUNCH_ART_CHANNEL, type LaunchArtRequest } from "../shared/launchArt";
 import {
@@ -227,12 +228,25 @@ const METHODS: InvokeMethod[] = [
   "nciHelper",
   "saveNciHelper",
   "subAgentThread",
+  "searchThread",
   "backgroundTerminals",
   "terminateBackgroundTerminal",
   "putUserInstructions",
   "userInstructions",
   "agentHarness",
+  "claudeCodeSources",
+  "claudeRuntime",
+  "repinClaudeRuntime",
+  "sessionSkills",
+  "claudeModelStatus",
+  "sessionSandboxExtras",
+  "setSessionSandboxExtras",
+  "claudePermissionRules",
+  "setClaudePermissionRules",
+  "claudeSkillsImportList",
+  "importClaudeSkills",
   "patchSettings",
+  "patchProxySettings",
   "getSettings",
   "createPairingCode",
   "clientTokens",
@@ -244,6 +258,8 @@ const METHODS: InvokeMethod[] = [
   "discoverModels",
   "profileModels",
   "patchProfile",
+  "profileImage",
+  "putProfileImage",
   "getProfile",
   "listProfiles",
   "queueList",
@@ -393,6 +409,13 @@ const bridge: PreloadBridge = {
     prepareArtifactPage: (input) => ipcRenderer.invoke(FRAMES_CHANNEL, { op: "artifactPage", hostId: input.hostId, artifactId: input.artifactId, version: input.version } satisfies FrameRequest),
     release: (id) => ipcRenderer.invoke(FRAMES_CHANNEL, { op: "release", id } satisfies FrameRequest),
   },
+  modulePacks: {
+    state: () => ipcRenderer.invoke(MODULE_PACKS_CHANNEL, { op: "state" } satisfies ModulePacksRequest),
+    check: () => ipcRenderer.invoke(MODULE_PACKS_CHANNEL, { op: "check" } satisfies ModulePacksRequest),
+    install: (input) => ipcRenderer.invoke(MODULE_PACKS_CHANNEL, { op: "install", id: input.id, ...(input.version !== undefined ? { version: input.version } : {}), ...(input.allowOlder ? { allowOlder: true } : {}) } satisfies ModulePacksRequest),
+    remove: (input) => ipcRenderer.invoke(MODULE_PACKS_CHANNEL, { op: "remove", id: input.id } satisfies ModulePacksRequest),
+    onState: (listener) => bridge.on("modulePacks", listener),
+  },
   knownIssues: {
     get: (refresh) => ipcRenderer.invoke(KNOWN_ISSUES_CHANNEL, { op: "get", refresh: refresh === true } satisfies KnownIssuesRequest),
   },
@@ -411,6 +434,7 @@ const bridge: PreloadBridge = {
   window: {
     control: (action) => ipcRenderer.invoke(WINDOW_CHANNEL, "control", action),
     setChrome: (colors) => ipcRenderer.invoke(WINDOW_CHANNEL, "chrome", colors),
+    setBackground: (color) => ipcRenderer.invoke(WINDOW_CHANNEL, "background", color),
     nativeControls: process.platform === "win32" ? "right" : process.platform === "darwin" ? "left" : null,
   },
   shell: {
@@ -420,6 +444,7 @@ const bridge: PreloadBridge = {
     setTerms: (value) => shellInvoke({ op: "setTerms", value }),
     setAttention: (count) => shellInvoke({ op: "setAttention", count }),
     setUpdateCheckMinutes: (value) => shellInvoke({ op: "setUpdateCheckMinutes", value }),
+    setUpdateProxy: (value) => shellInvoke({ op: "setUpdateProxy", value }),
     logError: (entry) => shellInvoke({ op: "logError", ...entry }),
     openLogs: () => shellInvoke({ op: "openLogs" }),
     openQuickstart: () => shellInvoke({ op: "openQuickstart" }),

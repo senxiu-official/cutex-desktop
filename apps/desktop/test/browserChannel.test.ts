@@ -129,7 +129,7 @@ describe("browser preload bindings", () => {
     const bridge = browserBridge({ invoke, binding: () => ({ hostId: "remote", epoch: "epoch", focus: true }), subscribe: () => () => {} });
     const browser = bridge.forHost("remote");
     expect(browser).not.toHaveProperty("grant");
-    expect(Object.keys(browser).sort()).toEqual(["agents", "back", "claimAllowRevoke", "claimAllows", "claimAudit", "claimOpen", "claimPolicy", "clearIdempotency", "close", "forward", "grantAgent", "holdReady", "list", "navigate", "open", "openRefused", "ownerInput", "pauseLease", "profileTools", "releaseLease", "reload", "reserveOwnerTab", "resumeLease", "settings", "stop", "toolItem", "turnShot", "turnShots"]);
+    expect(Object.keys(browser).sort()).toEqual(["agents", "back", "claimAllowRevoke", "claimAllows", "claimAudit", "claimOpen", "claimPolicy", "clearIdempotency", "close", "forward", "grantAgent", "holdReady", "list", "navigate", "open", "openRefused", "ownerInput", "pauseLease", "profileTools", "releaseLease", "reload", "reserveOwnerTab", "resumeLease", "settings", "stop", "toBackground", "toolItem", "turnShot", "turnShots"]);
     expect(invoke).not.toHaveBeenCalled();
   });
   it("re-reads target host binding for every call and never includes focus", async () => {

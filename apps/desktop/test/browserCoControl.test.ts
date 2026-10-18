@@ -130,3 +130,43 @@ describe("main-owned focus restore script", () => {
     expect(() => browserFocusRestoreScript("x\"];alert(1)//")).toThrow();
   });
 });
+
+// Background carriers (owner option C, 2026-10-18): hand-over draining and focus isolation.
+describe("background carrier hand-over at the provider", () => {
+  it("drain waits for the running action, refuses new ones until released, never cancels the running one", async () => {
+    const f = fixture(); await f.provider.grant(guestId);
+    const target = await ref(f);
+    let open!: () => void; const gate = new Promise<void>(resolve => { open = resolve; });
+    const original = f.debug.sendCommand.getMockImplementation()!;
+    f.debug.sendCommand.mockImplementation(async (method: string, params?: any) => { if (method === "Input.dispatchMouseEvent") await gate; return original(method, params); });
+    const running = f.provider.act(guestId, target, "click");
+    await vi.waitFor(() => expect(f.debug.sendCommand.mock.calls.some(([method]) => method === "Input.dispatchMouseEvent")).toBe(true));
+    let drained: (() => void) | undefined;
+    const draining = f.provider.drain(guestId, Date.now() + 5_000).then(release => { drained = release; });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(drained).toBeUndefined();
+    open(); await expect(running).resolves.toMatchObject({ status: "dispatched" });
+    await draining; expect(drained).toBeTypeOf("function");
+    await expect(f.provider.snapshot(guestId)).rejects.toMatchObject({ code: "busy" });
+    drained!();
+    await expect(f.provider.snapshot(guestId)).resolves.toBeDefined();
+  });
+  it("drain gives up at its deadline with busy (and releases), and is a no-op without a grant", async () => {
+    const f = fixture(); await f.provider.grant(guestId);
+    const target = await ref(f);
+    const original = f.debug.sendCommand.getMockImplementation()!;
+    f.debug.sendCommand.mockImplementation(async (method: string, params?: any) => method === "Input.dispatchMouseEvent" ? new Promise(() => {}) : original(method, params));
+    void f.provider.act(guestId, target, "click").catch(() => {});
+    await vi.waitFor(() => expect(f.debug.sendCommand.mock.calls.some(([method]) => method === "Input.dispatchMouseEvent")).toBe(true));
+    await expect(f.provider.drain(guestId, Date.now() + 40)).rejects.toMatchObject({ code: "busy" });
+    const other = fixture();
+    await expect(other.provider.drain(guestId, Date.now() + 40)).resolves.toBeTypeOf("function");
+  });
+  it("owner typing in the app does not hold back writes on an isolated (background) guest", async () => {
+    const f = fixture({ isolated: () => true }); await f.provider.grant(guestId);
+    f.provider.ownerActivity(undefined, "app-keyboard");
+    expect(f.provider.ownerTyping(guestId)).toBe(false);
+    f.provider.ownerActivity(guestId, "guest-keyboard");
+    expect(f.provider.ownerTyping(guestId)).toBe(true);
+  });
+});

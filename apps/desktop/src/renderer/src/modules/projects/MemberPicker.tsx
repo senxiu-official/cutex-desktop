@@ -118,7 +118,7 @@ function PickRow({
         aria-label={c.row.name}
         className="h-3.5 w-3.5 accent-[var(--accent)] disabled:opacity-30"
       />
-      <Avatar name={c.row.name} initial={c.row.initial} color={c.row.color} avatar={s.avatar} size={26} />
+      <Avatar name={c.row.name} initial={c.row.initial} color={c.row.color} avatar={s.avatar} seed={s.cutexSessionId} size={26} />
       <div className="min-w-0 leading-snug">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[c.row.status]}`} title={t(`status.${c.row.status}` as const)} />

@@ -1,0 +1,132 @@
+# Signs the binaries of one "build binaries" run of this repository with the release minisign key and
+# attaches them to the run's GitHub release (cutex-desktop and cute-codex; cutex has its own
+# sign-release.yml with the backend-update options). It runs sign-and-upload.sh, the same script and
+# checks as an interactive signing run: every file checked against the run's SHA256SUMS, every signature
+# verified with the committed public key (cutex-release.pub next to the script) before anything is
+# uploaded, the draft release published only after its uploaded assets were downloaded again and checked.
+#
+# Secrets (the `release` environment's or the repository's): MINISIGN_SECRET_KEY = the minisign secret
+# key file, MINISIGN_PASSWORD = its passphrase. The key is written to a 0600 file under RUNNER_TEMP and
+# deleted at the end; the passphrase reaches minisign on stdin only.
+#
+# dry_run (default): download, check and sign, print the gh commands instead of uploading.
+name: Sign release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ID of this repository's build binaries run to sign"
+        required: true
+        type: string
+      tag:
+        description: "Release tag the files go to (its draft release must exist), e.g. v0.1.4"
+        required: true
+        type: string
+      dry_run:
+        description: "Dry run: sign and check, print the upload commands, upload nothing"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: sign-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sign:
+    # Only the default branch's workflow (and so its script and public key) may use the key.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install minisign and check stdin passphrases
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q minisign
+          minisign -v
+          # A throwaway key with a password: this minisign must read the passphrase from stdin.
+          t="$RUNNER_TEMP/minisign-selftest"
+          mkdir -p "$t"
+          pw="selftest-$RANDOM$RANDOM$RANDOM"
+          printf '%s\n%s\n' "$pw" "$pw" | minisign -G -p "$t/t.pub" -s "$t/t.key" > /dev/null
+          echo selftest > "$t/f"
+          printf '%s\n' "$pw" | minisign -S -s "$t/t.key" -m "$t/f" > /dev/null
+          minisign -V -q -p "$t/t.pub" -m "$t/f"
+          rm -rf "$t"
+      - name: Check inputs
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          case "${GITHUB_REPOSITORY#*/}" in
+            cutex-desktop) script=.github/ci/sign-and-upload.sh ;;
+            cute-codex) script=.github/cute-codex/sign-and-upload.sh ;;
+            *) echo "::error::this workflow signs cutex-desktop or cute-codex, not $GITHUB_REPOSITORY"; exit 1 ;;
+          esac
+          [ -f "$script" ] && [ -f "$(dirname "$script")/cutex-release.pub" ] || { echo "::error::missing $script or its cutex-release.pub"; exit 1; }
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::run_id must be a number"; exit 1; }
+          [[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "::error::bad tag"; exit 1; }
+      - name: Write the signing key
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$MINISIGN_SECRET_KEY" ] || { echo "::error::secret MINISIGN_SECRET_KEY is not set"; exit 1; }
+          umask 077
+          key="$RUNNER_TEMP/minisign-release.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          line=$(sed -n 2p "$key")
+          [ -n "$line" ] && echo "::add-mask::$line"
+          head -n 1 "$key" | grep -q '^untrusted comment: ' || { echo "::error::MINISIGN_SECRET_KEY is not a minisign key file"; exit 1; }
+      - name: Sign and upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          RUN_ID: ${{ inputs.run_id }}
+          TAG: ${{ inputs.tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          project="${GITHUB_REPOSITORY#*/}"
+          script=.github/ci/sign-and-upload.sh
+          [ "$project" != cute-codex ] || script=.github/cute-codex/sign-and-upload.sh
+          args=("$project" --run "$RUN_ID" --tag "$TAG" --key "$RUNNER_TEMP/minisign-release.key"
+            --password-env MINISIGN_PASSWORD --owner "${GITHUB_REPOSITORY%%/*}" --dir "$RUNNER_TEMP/sign")
+          [ "$DRY_RUN" = true ] || args+=(--upload)
+          bash "$script" "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/sign.log"
+          {
+            if [ "$DRY_RUN" = true ]; then echo "### Dry run: nothing uploaded"; else echo "### Signed and uploaded"; fi
+            echo '```'
+            tail -n 60 "$RUNNER_TEMP/sign.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the signed checksums
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: sign-release-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/sign.log
+            ${{ runner.temp }}/sign/release/SHA256SUMS
+            ${{ runner.temp }}/sign/release/SHA256SUMS.minisig
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Delete the signing key
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/minisign-release.key"

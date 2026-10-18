@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backoffMinutes, buildSteps, builtChannel, channelFileContent, checkoutPlan, cmdQuote, corepackEntryIn, displayRemote, isOwnClone, spawnPlan, fetchArgs, fetchFailure, isKnownChannel, KNOWN_CHANNELS, parseCodesignIdentity, parseUpdateRemotes, resolveUpdateRemote, parseChannel, resolveChannel, installLayout, isPathRemote, parseReleaseInfo, parseReleasePage, parseUpdateRemote, pathRemotePath, releaseName, resolveInstallLayout, resolveSourceDir, sourceDirtyCheck, tail, updateButtonVisible, updateOffer, updateRef, updateRemoteOverride } from "../src/shared/update";
+import { backoffMinutes, interruptedPullHeal, parsePorcelainZ, parsePullMarker, pullFailureMessage, buildSteps, builtChannel, channelFileContent, checkoutPlan, cmdQuote, corepackEntryIn, displayRemote, isOwnClone, spawnPlan, fetchArgs, fetchFailure, isKnownChannel, KNOWN_CHANNELS, parseCodesignIdentity, parseUpdateRemotes, resolveUpdateRemote, parseChannel, resolveChannel, installLayout, isPathRemote, parseReleaseInfo, parseReleasePage, parseUpdateRemote, pathRemotePath, releaseName, resolveInstallLayout, resolveSourceDir, sourceDirtyCheck, tail, updateButtonVisible, updateOffer, updateRef, updateRemoteOverride } from "../src/shared/update";
 
 const FULL = "7422695".padEnd(40, "a");
 
@@ -360,5 +360,43 @@ describe("resolveInstallLayout", () => {
     expect(resolveInstallLayout("/u/a/Applications/Cutex.app/Contents/MacOS/Cutex", "/", null)).toHaveProperty("reason");
     expect(resolveInstallLayout("/opt/cutex/cutex", "/", release)).toHaveProperty("reason");
     expect(resolveInstallLayout("/u/a/Applications/Cutex.app/Contents/MacOS/Cutex", "/", "/u/a/elsewhere/7422695")).toHaveProperty("reason");
+  });
+});
+
+describe("interruptedPullHeal / pullFailureMessage", () => {
+  const from = "a".repeat(40);
+  const to = "b".repeat(40);
+  const marker = { from, to, untracked: ["notes.txt"], at: "" };
+  const changed = ["a.txt", "b.txt", "dir/new.txt"];
+
+  it("parses porcelain -z entries, renames with both paths", () => {
+    expect(parsePorcelainZ(" M a.txt\0R  new.txt\0old.txt\0?? dir/x\0")).toEqual([
+      { code: " M", paths: ["a.txt"] },
+      { code: "R ", paths: ["new.txt", "old.txt"] },
+      { code: "??", paths: ["dir/x"] },
+    ]);
+  });
+
+  it("heals when every leftover path belongs to the incoming commit", () => {
+    expect(interruptedPullHeal(marker, from, " M a.txt\0 D b.txt\0?? dir/new.txt\0 M pnpm-lock.yaml\0", changed)).toEqual({ heal: true, dirty: ["a.txt", "b.txt", "dir/new.txt", "pnpm-lock.yaml"], untracked: ["dir/new.txt"] });
+  });
+
+  it("refuses unrelated paths, untracked files from before the pull, and a moved HEAD", () => {
+    expect(interruptedPullHeal(marker, from, " M a.txt\0 M keep.txt\0", changed)).toEqual({ heal: false, reason: "not part of the interrupted update: keep.txt" });
+    expect(interruptedPullHeal({ ...marker, untracked: ["dir/new.txt"] }, from, "?? dir/new.txt\0", changed)).toMatchObject({ heal: false });
+    expect(interruptedPullHeal(marker, to, " M a.txt\0", changed)).toMatchObject({ heal: false });
+  });
+
+  it("parses only well-formed markers", () => {
+    expect(parsePullMarker(marker)).toEqual(marker);
+    expect(parsePullMarker({ from: "--x", to, untracked: [] })).toBeNull();
+    expect(parsePullMarker({ from, to })).toBeNull();
+    expect(parsePullMarker(null)).toBeNull();
+  });
+
+  it("mentions free disk space when git could not write", () => {
+    expect(pullFailureMessage("git merge exited 128\nerror: unable to write file a.txt")).toMatch(/free disk space/);
+    expect(pullFailureMessage("fatal: No space left on device")).toMatch(/free disk space/);
+    expect(pullFailureMessage("fatal: Not possible to fast-forward, aborting.")).toBe("fatal: Not possible to fast-forward, aborting.");
   });
 });

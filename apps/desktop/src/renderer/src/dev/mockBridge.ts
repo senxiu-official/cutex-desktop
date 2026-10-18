@@ -9,7 +9,8 @@
 import type { CutexBuild } from "@cutex-desktop/cutex-client";
 import type { EventEnvelope, QueueItem, SessionBootstrap, SessionResource } from "@cutex-desktop/protocol";
 import { mockFrames } from "./mockFrames";
-import type { DesktopApi, DesktopEvents, ModelOption, PreloadBridge, ProfilePreset, QuotaGauge, QuotaReaderConfig, ShellState, SidebarSnapshot, UnavailableModel, UpdateStatus } from "../../../shared/ipc";
+import { mockModulePacks } from "./mockModulePacks";
+import type { DesktopApi, DesktopEvents, ModelOption, PreloadBridge, ProfilePreset, QuotaGauge, QuotaReaderConfig, SessionSandboxExtras, ShellState, SidebarSnapshot, UnavailableModel, UpdateStatus } from "../../../shared/ipc";
 import { HOST_TAGGED_EVENTS, MESSAGES_WAKE_METHOD } from "../../../shared/ipc";
 import { HOST_PALETTE, normalizeHostGroups, scopeAfterRemoval, scopeHosts, type HostConnView, type ViewScope } from "../../../shared/hosts";
 import { BUILTIN_THREAD_DEFAULTS, LAUNCH_FIELDS, THREAD_KINDS, type LaunchPermissions, type NewThreadDefaults } from "../../../shared/launch";
@@ -18,6 +19,7 @@ import type { ProfileTransferWarning } from "../../../shared/profileTransfer";
 import { classifySshPrompt, type SshPromptAnswer, type SshPromptView } from "../../../shared/sshPrompt";
 import { MOCK_BASE_FEATURES, MOCK_NEW_FEATURES } from "./mockFeatures";
 import { MODULE_MOCKS } from "./mockModules";
+import { mockClaudeRules, mockRememberClaudeRules, mockSetClaudeRules, soraPendingApproval } from "./mockClaudePermissions";
 import { mockLaunchArt } from "./mockLaunchArt";
 import { registerMockTokenList, renameMockToken } from "./mockTokenNames";
 import type { MockCore, MockEvents, MockProfileRef } from "./mockTypes";
@@ -75,10 +77,18 @@ const FRESH_DOWN = { kind: "unreachable" as const, baseUrl: "http://127.0.0.1:24
 const full = { approvalPolicy: "never", sandboxPolicy: { type: "dangerFullAccess" } };
 const MOCK_SETTINGS: Record<string, Record<string, unknown>> = {
   omega: { model: "deepseek-v4-flash", modelProvider: "deepseek", effort: "high", ...full },
-  gamma: { model: "gpt-5.5", modelProvider: "openai", effort: "medium", approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandboxPolicy: { type: "workspaceWrite" } },
+  gamma: { model: "gpt-5.5", modelProvider: "openai", effort: "medium", approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandboxPolicy: { type: "workspaceWrite", writableRoots: [], networkAccess: true, excludeTmpdirEnvVar: false, excludeSlashTmp: false } },
   GLM: { model: "glm-5.3", modelProvider: "zai", effort: "high", ...full },
   claude: { model: "sonnet", modelProvider: "anthropic", effort: "high", ...full },
 };
+/** session-sandbox-extras view of a mock agent (from its profile's live thread settings). */
+function mockSandboxExtras(sessionId: string): SessionSandboxExtras {
+  const profile = profileOf(sessionId);
+  const policy = (MOCK_SETTINGS[profile]?.sandboxPolicy ?? {}) as { type?: string; networkAccess?: boolean; writableRoots?: string[] };
+  const workspace = policy.type === "workspaceWrite";
+  const reason = profile === "claude" ? "unsupported_runtime" : workspace ? null : "sandbox_not_workspace_write";
+  return { cutexSessionId: sessionId, sandbox: workspace ? "workspace-write" : policy.type === "readOnly" ? "read-only" : "danger-full-access", networkAccess: !!policy.networkAccess, writableRoots: policy.writableRoots ?? [], editable: !reason, reason };
+}
 const effortsOf = (...e: string[]) => e;
 const RAW_MODELS: Record<string, Omit<ModelOption, "inputModalities">[]> = {
   omega: [
@@ -100,7 +110,7 @@ const RAW_MODELS: Record<string, Omit<ModelOption, "inputModalities">[]> = {
   ],
   claude: [
     { id: "sonnet", model: "sonnet", displayName: "Claude Sonnet", description: "", efforts: effortsOf("low", "medium", "high"), defaultEffort: "high", isDefault: true },
-    { id: "opus", model: "opus", displayName: "Claude Opus", description: "", efforts: effortsOf("low", "medium", "high"), defaultEffort: "high", isDefault: false },
+    { id: "opus", model: "opus", displayName: "Claude Opus", description: "", efforts: effortsOf("low", "medium", "high"), defaultEffort: "high", isDefault: false, fastTier: "priority" },
   ],
 };
 const MOCK_MODELS: Record<string, ModelOption[]> = Object.fromEntries(
@@ -145,7 +155,7 @@ const REVIEW_TEXT = `**1 个问题**
 const PNG_1PX = "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64"><rect width="96" height="64" fill="#6c8cff"/><circle cx="30" cy="28" r="10" fill="#fff"/></svg>');
 
 // Profiles / model catalogs / global settings / user instructions (cutex settings routes).
-type MockModel = { id: string; requestModel?: string | null; displayName: string | null; contextWindow: number | null; maxContextWindow: number | null; autoCompactTokenLimit: number | null; inputModalities: string[]; supportedReasoningEfforts: string[]; defaultReasoningEffort: string | null };
+type MockModel = { id: string; requestModel?: string | null; displayName: string | null; contextWindow: number | null; maxContextWindow: number | null; autoCompactTokenLimit: number | null; inputModalities: string[]; supportedReasoningEfforts: string[]; defaultReasoningEffort: string | null; /** Claude reference rows */ kind?: string; effortSupportKnown?: boolean };
 const mockModel = (id: string, contextWindow: number, over: Partial<MockModel> = {}): MockModel => ({
   id, displayName: null, contextWindow, maxContextWindow: contextWindow, autoCompactTokenLimit: null, inputModalities: ["text"], supportedReasoningEfforts: ["low", "medium", "high", "max"], defaultReasoningEffort: "high", ...over,
 });
@@ -195,11 +205,15 @@ const mockProfiles: Record<string, { name: string; cliKind?: "codex" | "claude";
     name: "claude", cliKind: "claude", authKind: "none", apiKeyPresent: false, color: "#EE7B32", allowSwitch: null, planLabel: "Max 20x",
     modelNames: { opus: "Opus 5.5" },
     config: {},
+    // claude-profile-default-model: the adapter's reference catalog as cutex lists it (claude-model-context:
+    // nominal windows, null for aliases; Haiku 4.5 knowingly has no effort levels).
     models: [
-      ...["sonnet", "opus", "haiku"].map((id) => mockModel(id, 200_000, { supportedReasoningEfforts: [], defaultReasoningEffort: null })),
-      // claude-profile-default-model: full ids from the adapter's reference catalog, with display names.
-      mockModel("claude-opus-5-5", 200_000, { displayName: "Claude Opus 5.5", supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"], defaultReasoningEffort: null }),
-      mockModel("claude-sonnet-5-5", 200_000, { displayName: "Claude Sonnet 5.5", supportedReasoningEfforts: ["low", "medium", "high", "max"], defaultReasoningEffort: null }),
+      mockModel("claude-opus-5-5", 1_000_000, { displayName: "Opus 5.5", kind: "pinned", effortSupportKnown: true, inputModalities: ["text", "image"], supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"], defaultReasoningEffort: null }),
+      mockModel("claude-sonnet-5-5", 1_000_000, { displayName: "Sonnet 5.5", kind: "pinned", effortSupportKnown: true, inputModalities: ["text", "image"], supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"], defaultReasoningEffort: null }),
+      mockModel("claude-opus-4-6", 200_000, { displayName: "Opus 4.6", kind: "pinned", effortSupportKnown: true, inputModalities: ["text", "image"], supportedReasoningEfforts: ["low", "medium", "high", "max"], defaultReasoningEffort: null }),
+      mockModel("claude-haiku-4-5-20251001", 200_000, { displayName: "Haiku 4.5", kind: "pinned", effortSupportKnown: true, inputModalities: ["text", "image"], supportedReasoningEfforts: [], defaultReasoningEffort: null }),
+      ...[["sonnet", "Sonnet (alias)"], ["opus", "Opus (alias)"], ["haiku", "Haiku (alias)"]].map(([id, name]) => ({ ...mockModel(id!, 0, { displayName: name!, kind: "alias", effortSupportKnown: false, inputModalities: ["text", "image"], supportedReasoningEfforts: [], defaultReasoningEffort: null }), contextWindow: null, maxContextWindow: null })),
+      { ...mockModel("opus[1m]", 1_000_000, { displayName: "Opus 1M (alias)", kind: "alias", effortSupportKnown: false, inputModalities: ["text", "image"], supportedReasoningEfforts: [], defaultReasoningEffort: null }), maxContextWindow: null },
     ],
   },
   // A second preview-only Claude profile demonstrates the inline account choices.
@@ -219,6 +233,24 @@ function mockPlanLabel(p: (typeof mockProfiles)[string]): { planLabel: string | 
   if (p.authKind === "chatgpt" && !p.planLabel) return { planLabel: "pro", planLabelSource: "account" };
   return { planLabel: p.planLabel ?? null, planLabelSource: p.planLabel ? "manual" : null };
 }
+// cutex `profile-avatar`: Profile looks the mock host stores (by profile id = name here).
+const mockLooks: Record<string, { avatar?: { dataUrl: string; etag: string }; intro?: { dataUrl: string; etag: string }; avatarThemes?: string[]; introGreeting?: string }> = {};
+const MOCK_AVATAR_THEMES = ["animals", "sea", "gems", "plants", "food", "sky", "birds", "insects", "fantasy", "prehistoric", "desserts", "seasons", "transport", "music", "cats"];
+/** A stable 16-hex ETag of a data URL (not cutex's SHA-256; the mock only needs change detection). */
+function mockEtag(text: string): string {
+  let a = 0x811c9dc5, b = 0x01000193;
+  for (let i = 0; i < text.length; i++) {
+    a = Math.imul(a ^ text.charCodeAt(i), 0x01000193) >>> 0;
+    b = Math.imul(b ^ text.charCodeAt(text.length - 1 - i), 0x811c9dc5) >>> 0;
+  }
+  return a.toString(16).padStart(8, "0") + b.toString(16).padStart(8, "0");
+}
+const mockLookFields = (name: string) =>
+  LEGACY
+    ? {}
+    : { avatarEtag: mockLooks[name]?.avatar?.etag ?? null, introPortraitEtag: mockLooks[name]?.intro?.etag ?? null };
+const mockLookAppearance = (name: string) => (LEGACY ? {} : { avatarThemes: mockLooks[name]?.avatarThemes ?? null, introGreeting: mockLooks[name]?.introGreeting ?? null });
+
 const mockProfileItem = (name: string) => {
   const p = mockProfiles[name]!;
   const c = p.config as Record<string, string | number | null>;
@@ -227,7 +259,7 @@ const mockProfileItem = (name: string) => {
     baseUrl: (c.providerBaseUrl as string) ?? null, modelReasoningEffort: (c.modelReasoningEffort as string) ?? null,
     modelContextWindow: (c.modelContextWindow as number) ?? null, modelAutoCompactTokenLimit: (c.modelAutoCompactTokenLimit as number) ?? null,
     authPresent: p.authKind === "apiKey" ? p.apiKeyPresent : p.authKind === "chatgpt", authKind: p.authKind, ...mockPlanLabel(p), isDefault: name === mockSettings.defaultProfile,
-    appearance: { color: p.color, effectiveColor: p.color, providerCategory: null }, quotaEnabled: p.authKind === "apiKey",
+    appearance: { color: p.color, effectiveColor: p.color, providerCategory: null, ...mockLookAppearance(name) }, quotaEnabled: p.authKind === "apiKey", ...mockLookFields(name),
     allowSessionSwitch: p.allowSwitch ?? p.authKind === "apiKey", lastUsedAt: null,
     // profile-switch-family: Responses-API key profiles swap among themselves; chat-wire relay is its own.
     ...(LEGACY ? {} : mockFamily(p)),
@@ -296,12 +328,12 @@ const mockModelsView = (name: string) => {
   const modelsSource = p.authKind === "apiKey"
     ? { kind: "catalog" }
     : p.cliKind === "claude"
-      ? { kind: "claudeAliases" }
+      ? (LEGACY ? { kind: "claudeAliases" } : { kind: "claudeReference", updatedAt: "2026-10-18" })
       : followsUpstream && p.models.some((m) => m.requestModel)
         ? { kind: "overlay", upstream: nativeCache }
         : nativeCache;
   return {
-    profile: { id: name, name }, catalogSupported: catalog, catalogPresent: catalog && p.models.length > 0, selectedModel: (p.config.model as string) ?? (p.cliKind === "claude" ? "sonnet" : null),
+    profile: { id: name, name }, catalogSupported: catalog, ...(!LEGACY && p.cliKind === "claude" ? { autoCompactApplies: false } : {}), catalogPresent: catalog && p.models.length > 0, selectedModel: (p.config.model as string) ?? (p.cliKind === "claude" ? "sonnet" : null),
     modelsSource, modelsUnavailableReason: null, ...(!LEGACY ? { modelVariantsSupported: variants, discoverySupported: p.authKind === "apiKey" } : {}),
     ...(!LEGACY ? { followsUpstream, catalogOverlay: modelsSource.kind === "overlay" ? { entries: p.models.filter((m) => m.requestModel).length, migratedFrom: null } : null, unavailableModels: p.unavailable ?? [] } : {}),
     profileOverrides: { modelContextWindow: profileWindow, modelAutoCompactTokenLimit: profileCompact },
@@ -312,7 +344,10 @@ const mockModelsView = (name: string) => {
       const compactRaw = profileCompact ?? m.autoCompactTokenLimit;
       return {
         ...m, effectiveContextWindowPercent: null, isDefault: m.id === ((p.config.model as string) ?? (p.cliKind === "claude" ? "sonnet" : null)), discovered: true, ...(LEGACY ? {} : { entryDisplayName: p.modelNames?.[m.id] ?? null }),
-        effective: {
+        effective: p.cliKind === "claude" ? {
+          contextWindow: LEGACY ? null : m.contextWindow, contextWindowSource: !LEGACY && m.contextWindow ? "reference" : "unknown",
+          autoCompactTokenLimit: null, autoCompactTokenLimitSource: "notApplicable",
+        } : {
           contextWindow: window, contextWindowSource: profileWindow ? "profile" : m.contextWindow ? "catalog" : "unknown",
           autoCompactTokenLimit: window ? Math.min(compactRaw ?? Infinity, Math.round(window * 0.9)) : compactRaw,
           autoCompactTokenLimitSource: profileCompact ? "profile" : m.autoCompactTokenLimit ? "catalog" : "default90Percent",
@@ -359,7 +394,7 @@ const settingsView = () => (LEGACY ? mockSettings : { ...mockSettings, queue: { 
 const QUICK_CHAT_SETTINGS = { model: "deepseek-v4-flash", modelProvider: "deepseek", effort: "high", approvalPolicy: "on-request", sandboxPolicy: { type: "workspaceWrite", writableRoots: [], networkAccess: false } };
 /** A quick chat as cutex reports it: local-only owned session, no formal agent name, scratch cwd. */
 function quickChat(id: string, name: string, minutesAgo: number, over: { output?: string } = {}): SessionResource {
-  const s = session(id, name, { cwd: `C:\\Users\\sam\\.cutex\\chats\\${id}`, output: over.output });
+  const s = session(id, name, { cwd: `C:\\Users\\sam\\.cutex\\chats\\${id}`, output: over.output, idle: minutesAgo });
   const at = new Date(Date.now() - minutesAgo * 60_000).toISOString();
   return { ...s, registrationClass: "local_only", formalAgentName: null, threadName: name, createdAt: at, updatedAt: at, runtime: { ...s.runtime, lastEventAt: at, threadSettings: QUICK_CHAT_SETTINGS } };
 }
@@ -368,10 +403,15 @@ let mockInstructions = "# 用户级指令\n\n- 用中文回复。\n- 提交前�
 /** A hidden agent (not in GET /v2/sessions) still on the claude profile: profile_in_use names it, delete works by id. */
 const mockHiddenRefs = new Map([["hidden-claude", { profile: "claude", displayName: "explicit-launch-probe" }]]);
 const profileOf = (id: string) => [...snapshot.active, ...snapshot.retired].find((s) => s.cutexSessionId === id)?.profile ?? "omega";
-function session(id: string, name: string, over: { status?: string; turn?: string | null; lifecycle?: "active" | "retired"; cwd?: string; output?: string; tool?: string; profile?: string } = {}): SessionResource {
-  const at = new Date(Date.now() - Math.random() * 3_600_000).toISOString();
-  const activity = over.output || over.tool
-    ? { lastOutput: over.output ? { displayText: over.output, updatedAt: at } : undefined, lastToolCall: over.tool ? { displayText: over.tool, updatedAt: at } : undefined }
+/**
+ * `idle`: minutes since the agent's last conversation activity (cutex activity.lastConversationAt);
+ * without it an agent with output / a tool call was active at a random time in the last hour, one
+ * without any has no activity yet. The sidebar folds online idle agents only after 30 minutes.
+ */
+function session(id: string, name: string, over: { status?: string; turn?: string | null; lifecycle?: "active" | "retired"; cwd?: string; output?: string; tool?: string; profile?: string; idle?: number } = {}): SessionResource {
+  const at = new Date(Date.now() - (over.idle !== undefined ? over.idle * 60_000 : Math.random() * 3_600_000)).toISOString();
+  const activity = over.output || over.tool || over.idle !== undefined
+    ? { lastOutput: over.output ? { displayText: over.output, updatedAt: at } : undefined, lastToolCall: over.tool ? { displayText: over.tool, updatedAt: at } : undefined, ...(LEGACY ? {} : { lastConversationAt: at }) }
     : null;
   return {
     contractVersion: 2,
@@ -417,15 +457,33 @@ function session(id: string, name: string, over: { status?: string; turn?: strin
 
 /**
  * A Claude agent (cutex claude-runtime-features): native.schema is the adapter's Codex subset and
- * lists unsupported features (steer, goals, review, skills, background terminals, fork, revert).
- * memoryMode is left unknown (null) so the "not available for this agent" notice can be tried
- * through /memories.
+ * lists unsupported features (goals, review, background terminals, fork). skillInput is false
+ * as cutex reports it (hidden from older desktops); the picker uses managedSkills + cutex
+ * claude-session-skills instead. Revert with files (fileRewind), Fast (fastMode on Opus) and the
+ * answering-model badge (modelObservation) are on, as in claude-r14+. memoryMode is left unknown (null)
+ * so the "not available for this agent" notice can be tried through /memories. Steer (read after the
+ * next tool call), Claude Code's own permission modes and persistent allow rules
+ * (dev/mockClaudePermissions.ts) are on too.
  */
 const CLAUDE_FEATURES = {
-  turnStart: true, turnSteer: false, queueWhileBusy: true, turnInterrupt: true, imageInput: true, skillInput: false, agentMessageStreaming: true,
+  turnStart: true, turnSteer: true, queueWhileBusy: true, turnInterrupt: true, imageInput: true, skillInput: false, agentMessageStreaming: true,
   reasoning: true, commandItems: true, fileChangeItems: true, turnDiff: true, commandOutputStreaming: false, approvals: true, userInputRequests: true,
   planMode: true, planChecklist: true, goals: false, review: false, compact: true, modelList: true, effort: true, tokenUsage: true, rateLimits: true,
-  history: true, historyRevert: false, fork: false, backgroundTerminals: false, memoryMode: null, permissionPresets: ["full", "auto", "readOnly"],
+  history: true, historyRevert: true, fork: false, backgroundTerminals: false, memoryMode: null, permissionPresets: ["full", "auto", "readOnly"],
+  managedSkills: true, fileRewind: true, fileCheckpointing: true, fastMode: true, modelObservation: true,
+  subagents: true, subagentTranscripts: true, threadSearch: true,
+  claudePermissionModes: ["default", "acceptEdits", "plan", "auto", "bypassPermissions"], livePermissionMode: true, permissionRules: true,
+};
+/** `GET /v2/sessions/{id}/skills` of the mock Claude agent (Codex skills/list shape). */
+const MOCK_CLAUDE_SKILLS = {
+  data: [{
+    cwd: "/work/cutex-desktop",
+    skills: [
+      { name: "release-notes", description: "Write the CHANGELOG entry for the current branch", shortDescription: "CHANGELOG entry", path: "/work/cutex-desktop/.agents/skills/release-notes/SKILL.md", scope: "repo", enabled: true, pluginId: null },
+      { name: "pdf-extract", description: "Extract tables and text from PDF files", path: "/home/owner/.cutex/claude-skills/pdf-extract/SKILL.md", scope: "user", enabled: true, pluginId: null },
+    ],
+    errors: [],
+  }],
 };
 function claudeSession(id: string, name: string, output: string): SessionResource {
   const s = session(id, name, { profile: "claude", output });
@@ -447,15 +505,16 @@ const hostRow = (id: string, projectId: string | null) => ({
 
 let snapshot: SidebarSnapshot = {
   active: [
-    session("eva", "Eva", { profile: "gamma", output: "收到，我切到生成的类型上。顺便通知 Mika 开始做 composer。" }),
+    // Idle 5 minutes (just finished): a full row; Lead, idle 2 hours, folds into 「N 个空闲」.
+    session("eva", "Eva", { profile: "gamma", output: "收到，我切到生成的类型上。顺便通知 Mika 开始做 composer。", idle: 5 }),
     session("alden", "Alden", { turn: "turn-live", tool: "$ cargo build --locked --bin cutex" }),
-    session("mika", "Mika", { profile: "GLM", output: "Composer 的队列面板已经接上 cutex/userInput/queue/list。" }),
+    session("mika", "Mika", { profile: "GLM", output: "Composer 的队列面板已经接上 cutex/userInput/queue/list。", idle: 140 }),
     session("rei", "Rei", { status: "offline", output: "迁移脚本已完成。" }),
     session("scratch", "scratch", { cwd: "C:\\Users\\sam\\scratch" }),
     session("wave", "Wave-Director", { tool: "✎ release-notes.md" }),
-    claudeSession("sora", "Sora", "WebFetch 读完了 adapter 的 DESKTOP_PARITY.md。"),
+    { ...claudeSession("sora", "Sora", "WebFetch 读完了 adapter 的 DESKTOP_PARITY.md。"), activity: { lastOutput: { displayText: "WebFetch 读完了 adapter 的 DESKTOP_PARITY.md。", updatedAt: new Date(Date.now() - 70 * 60_000).toISOString() }, ...(LEGACY ? {} : { lastConversationAt: new Date(Date.now() - 70 * 60_000).toISOString() }) } },
     // Delegations (modules/delegations/mock.ts): Lead delegates, Helper handles.
-    session("lead", "Lead", { profile: "gamma", output: "三件都交出去了，结果回来我再汇总。" }),
+    session("lead", "Lead", { profile: "gamma", output: "三件都交出去了，结果回来我再汇总。", idle: 120 }),
     session("helper", "Helper", { turn: "helper-t2", tool: "$ cargo test --lib management::v2::user_input" }),
     quickChat("chat-rust", "Rust 生命周期报错", 3, { output: "这个 borrow 的问题在于返回值活得比 buf 久…" }),
     quickChat("chat-trip", "东京三日行程", 180, { output: "第二天建议先去浅草寺，人少。" }),
@@ -529,7 +588,7 @@ function offlineAgent(id: string, name: string, minutesAgo: number, over: { note
     effectiveNextLaunch: over.claude ? { profile: null, source: "claude_subscription", model: over.model ?? "sonnet" } : base.effectiveNextLaunch,
     runtime: { ...base.runtime, status: "offline", appServerConnected: false, threadSettings: null, lastEventAt: at },
     runtimeDefaults: over.model && !over.claude ? { ...(base.runtimeDefaults ?? {}), model: over.model } : base.runtimeDefaults,
-    activity: activity as SessionResource["activity"],
+    activity: { ...(activity ?? {}), ...(LEGACY ? {} : { lastConversationAt: at }) } as SessionResource["activity"],
     createdAt: created,
     updatedAt: at,
   };
@@ -597,14 +656,16 @@ const SCP_MORE: [string, string, number, Parameters<typeof offlineAgent>[3]][] =
 const projectSessions: [SessionResource, string][] = [
   [session("demo-dir", "demo-director-r2", { turn: "demo-t1", tool: "$ python power.py --n 400", cwd: "D:\\Research\\demo" }), "demo"],
   [session("demo-run", "demo-sampler", { turn: "demo-t2", tool: "$ Rscript sample.R", cwd: "D:\\Research\\demo" }), "demo"],
-  [session("demo-done", "demo-writer", { output: "第二节改完了，等你看。", cwd: "D:\\Research\\demo" }), "demo"],
+  // Finished 3 minutes ago: stays a full row (folds into 「N 个空闲」 after 30 minutes idle).
+  [session("demo-done", "demo-writer", { output: "第二节改完了，等你看。", cwd: "D:\\Research\\demo", idle: 3 }), "demo"],
   [offlineAgent("demo-idle", "demo-lit", 40, { output: "文献表更新到 42 篇。" }), "demo"],
   [offlineAgent("demo-idle2", "demo-stats", 75), "demo"],
   // A big project (the agent tab as member management): 17 members, 3 online, shared "demo-" prefix.
   ...SCP_MORE.map(([id, name, minutes, over]) => [offlineAgent(id, name, minutes, over), "demo"] as [SessionResource, string]),
-  [session("ifm-dir", "ifm-director", { output: "图表的任务已经交给 figures。", cwd: "D:\\Research\\ifm-ema" }), "ifm-ema"],
-  [session("ifm-figures", "ifm-ema-figures", { output: "三张图重画完了。", cwd: "D:\\Research\\ifm-ema" }), "ifm-ema"],
-  [session("ifm-plot", "ifm-ema-plots", { output: "开始重跑 bootstrap。", cwd: "D:\\Research\\ifm-ema" }), "ifm-ema"],
+  // ifm-ema-figures finished 6 minutes ago (a full row), ifm-ema-plots has been idle 95 minutes (folded).
+  [session("ifm-dir", "ifm-director", { output: "图表的任务已经交给 figures。", cwd: "D:\\Research\\ifm-ema", idle: 50 }), "ifm-ema"],
+  [session("ifm-figures", "ifm-ema-figures", { output: "三张图重画完了。", cwd: "D:\\Research\\ifm-ema", idle: 6 }), "ifm-ema"],
+  [session("ifm-plot", "ifm-ema-plots", { output: "开始重跑 bootstrap。", cwd: "D:\\Research\\ifm-ema", idle: 95 }), "ifm-ema"],
   // Freshly created by ifm-director 4 minutes ago, idle after its first turn, never opened: a full row
   // with the 「新」 marker instead of folding into 「N 个空闲」 (lib/freshAgents).
   [{ ...session("ifm-review", "ifm-ema-review", { output: "初稿审完了，意见写在 review.md。", cwd: "D:\\Research\\ifm-ema" }), createdAt: new Date(Date.now() - 4 * 60_000).toISOString() }, "ifm-ema"],
@@ -923,8 +984,22 @@ const soraRead = {
           { type: "commandExecution", id: "sc1", command: "rg -n dynamicToolCall src", status: "completed", exitCode: 0, durationMs: 210, aggregatedOutput: "src/renderer/src/components/WorkGroup.tsx:35:      return { key: \"tool.other\", detail: item.type };" },
           { type: "fileChange", id: "sf1", status: "completed", changes: [{ path: "src/renderer/src/components/WorkGroup.tsx", kind: { type: "update", move_path: null }, diff: "@@ -35 +35 @@\n-      return { key: \"tool.other\", detail: item.type };\n+      return { key: \"tool.mcp\", detail: ns + \".\" + tool };" }] },
           { type: "agentMessage", id: "sa1", text: "改好了：dynamicToolCall 现在显示成 `claude.WebFetch`，展开能看到返回的文本。" },
-          // A Claude SDK task (claude-r8): listed in the 子 agent status category, not openable (lib/claudeTasks).
-          { type: "subAgentActivity", id: "sta1", kind: "started", agentThreadId: "claude:mock-sora:task:toolu_docs_review", agentPath: "/claude/toolu_docs_review" },
+          // A Claude foreground subagent (Agent tool): its card and the 子 agent status row open the
+          // transcript (adapter subagentTranscripts; modules/subagents/mock.ts). `?legacy`: status only.
+          { type: "dynamicToolCall", id: "toolu_docs_review", namespace: "claude", tool: "Agent", arguments: { description: "核对文档", subagent_type: "Explore", prompt: "读 docs/DESKTOP_PARITY.md 和 timeline 的工具行代码，列出 dynamicToolCall 显示上还缺什么。只读。" }, status: "completed", contentItems: [{ type: "inputText", text: "缺两处：1. dynamicToolCall 没显示 namespace；2. 失败时错误文本被截断。其余与 DESKTOP_PARITY 一致。" }], success: true, durationMs: 48_000, ...(LEGACY ? {} : { agentThreadId: "claude:mock-sora:task:task-docs" }) },
+          { type: "subAgentActivity", id: "sta1", kind: "started", agentThreadId: "claude:mock-sora:task:task-docs", agentPath: "/claude/task-docs" },
+          { type: "subAgentActivity", id: "sta2", kind: "completed", agentThreadId: "claude:mock-sora:task:task-docs", agentPath: "/claude/task-docs" },
+        ],
+      },
+      // A finished plan: Claude Code's plan approval choices (modules/plan/ClaudePlanChoices).
+      {
+        id: "sora-t2",
+        status: "completed",
+        startedAt: Date.now() / 1000 - 300,
+        completedAt: Date.now() / 1000 - 280,
+        items: [
+          { type: "userMessage", id: "su2", content: [{ type: "text", text: "规划一下：给 PlanCard 加 Claude 的三个审批选项。" }] },
+          { type: "plan", id: "sp2", text: "## PlanCard 的 Claude 审批选项\n\n1. Claude agent 显示「执行，自动接受编辑」「执行，编辑逐个审批」「继续规划」。\n2. 模式与计划模式在一次 thread/settings/update 里切换。\n3. 补单元测试。" },
         ],
       },
     ],
@@ -1050,6 +1125,8 @@ const MOCK_PENDING: Record<string, { message: { id: number; method: string; para
       },
     },
   ],
+  // Claude: a command approval offering "always allow in this project" (claudePermissionRules).
+  sora: LEGACY ? [] : [soraPendingApproval("D:\\Apps\\cutex-desktop")],
   alden: [
     {
       message: {
@@ -1919,7 +1996,7 @@ function mockApiFor(api: DesktopApi, hostId: string): DesktopApi {
       return mockDaemonOf(hostId);
     },
     async sidebar() {
-      return hostId === "local" ? { ...snapshot, retired: snapshot.retired.map(retiredProjection) } : remoteSnapshot();
+      return hostId === "local" ? moduleSidebar({ ...snapshot, retired: snapshot.retired.map(retiredProjection) }) : remoteSnapshot();
     },
     async subscribe(sessionId, from) {
       await api.subscribe(sessionId, from);
@@ -2042,6 +2119,7 @@ const core: MockCore = {
   },
   nativeEvent,
   runtimeGeneration: runtimeGenerationOf,
+  threadRead: (sessionId) => mockThread(sessionId),
   markBusy(sessionId, turnId) {
     busy.add(sessionId);
     currentTurn.set(sessionId, turnId);
@@ -2056,6 +2134,10 @@ const core: MockCore = {
 };
 function moduleSettings(): Record<string, unknown> {
   return Object.assign({}, ...MODULE_MOCKS.map(({ mock }) => mock.settings?.(core) ?? {}));
+}
+/** The local agent list with the modules' fields (ModuleMock.sidebar). */
+function moduleSidebar(base: SidebarSnapshot): SidebarSnapshot {
+  return MODULE_MOCKS.reduce((s, { mock }) => mock.sidebar?.(s, core) ?? s, base);
 }
 function moduleCutexState(sessionId: string): Record<string, unknown> {
   return Object.assign({}, ...MODULE_MOCKS.map(({ mock }) => mock.cutexState?.(sessionId, core) ?? {}));
@@ -2124,7 +2206,7 @@ export function installMockBridge(): void {
     ...(FRESH || updateMode === "none" ? {} : { oldReleases: { count: 18, bytes: 6.9e9, autoDeleteDays: 30, dir: "/home/sam/Applications/cutex-desktop/old-releases" } }),
   };
   // ?update=binary: a GitHub-release (binary) install, up to date: checks at most hourly (main/updater.ts).
-  if (updateMode === "binary") update = { ...update, state: "idle", binary: true, channel: "release", canSwitchChannel: false, source: "github.com/example-org/cutex-desktop", latest: null, releasePage: "https://example.invalid/cutex-desktop/releases" };
+  if (updateMode === "binary") update = { ...update, state: "idle", binary: true, channel: "release", canSwitchChannel: false, source: "github.com/example-org/cutex-desktop", latest: null, releasePage: "https://example.invalid/cutex-desktop/releases", current: { ...update.current!, version: "0.1.2" } };
   const setUpdate = (patch: Partial<UpdateStatus>) => {
     update = { ...update, ...patch };
     emit("updateStatus", structuredClone(update));
@@ -2161,6 +2243,21 @@ export function installMockBridge(): void {
         console.info("[mock] quit");
       },
       async rendererReady() {},
+      async setUpdateProxy(value) {
+        // Like main/shell.ts: the URL is kept without its login (hasCredentials says one was given), and
+        // stays when switching to system / none.
+        const old = shellState.prefs.updateProxy;
+        const kept = old?.url ? { url: old.url, ...(old.hasCredentials ? { hasCredentials: true } : {}) } : null;
+        if (value.mode === "manual") {
+          const m = /^(?:([a-z0-9+.-]+):\/\/)?(?:([^@/]*)@)?([^/:@]+(?::\d+)?)\/?$/i.exec((value.url ?? old?.url ?? "").trim());
+          if (!m || (m[1] && !/^(https?|socks5h?|socks4a?)$/i.test(m[1]))) throw new Error("invalid proxy URL (invalid)");
+          const keep = !m[2] && shellState.prefs.updateProxy?.hasCredentials;
+          shellState.prefs.updateProxy = { mode: "manual", url: `${(m[1] ?? "http").toLowerCase()}://${m[3]}`, ...(m[2] || keep ? { hasCredentials: true } : {}) };
+        } else if (value.mode === "none") shellState.prefs.updateProxy = { mode: "none", ...kept };
+        else if (kept) shellState.prefs.updateProxy = { mode: "system", ...kept };
+        else delete shellState.prefs.updateProxy;
+        return structuredClone(shellState);
+      },
       async setUpdateCheckMinutes(value) {
         shellState.prefs.updateCheckMinutes = value;
         return structuredClone(shellState);
@@ -2353,7 +2450,7 @@ export function installMockBridge(): void {
         return mockBrowse(path);
       },
       async sidebar() {
-        return mockRemote() ? remoteSnapshot() : { ...snapshot, retired: snapshot.retired.map(retiredProjection) };
+        return mockRemote() ? remoteSnapshot() : moduleSidebar({ ...snapshot, retired: snapshot.retired.map(retiredProjection) });
       },
       async bootstrap(id, turnLimit) {
         // Like cutex: bootstrap only knows active sessions (archived ones read GET /history).
@@ -2565,6 +2662,30 @@ export function installMockBridge(): void {
       async listModels(sessionId) {
         return MOCK_MODELS[profileOf(sessionId)] ?? [];
       },
+      // session-sandbox-extras: network / extra writable roots of a workspace-write agent, pushed to the
+      // live thread (thread/settings/updated) like cutex does.
+      async sessionSandboxExtras(sessionId) {
+        return mockSandboxExtras(sessionId);
+      },
+      async setSessionSandboxExtras(sessionId, patch) {
+        const current = mockSandboxExtras(sessionId);
+        if (!current.editable) throw new Error(current.reason === "unsupported_runtime" ? "Claude agents use their own write / command rules" : "network access and extra writable directories apply only to workspace-write");
+        const roots = patch.writableRoots?.map((r) => r.replace(/[\\/]+$/, "") || r);
+        if (roots?.some((r) => !/^(\/|[A-Za-z]:[\\/])/.test(r))) throw new Error("writableRoots entries must be absolute paths");
+        if (roots?.some((r) => /[\\/]\.cutex([\\/]|$)/.test(r))) throw new Error("writable root is inside the cutex home");
+        const profile = profileOf(sessionId);
+        const policy = (MOCK_SETTINGS[profile]?.sandboxPolicy ?? {}) as Record<string, unknown>;
+        const next = { ...policy, networkAccess: patch.networkAccess ?? current.networkAccess, writableRoots: roots ? [...new Set(roots)] : current.writableRoots };
+        MOCK_SETTINGS[profile] = { ...MOCK_SETTINGS[profile], sandboxPolicy: next };
+        setTimeout(() => nativeEvent(sessionId, "thread/settings/updated", { threadSettings: MOCK_SETTINGS[profile] }), 150);
+        return { ...mockSandboxExtras(sessionId), changed: true, live: { status: "applied" as const } };
+      },
+      async claudePermissionRules(sessionId) {
+        return mockClaudeRules(sessionId, snapshot.active.find((s) => s.cutexSessionId === sessionId)?.cwd ?? "");
+      },
+      async setClaudePermissionRules(sessionId, allow, expectedRevision) {
+        return mockSetClaudeRules(sessionId, snapshot.active.find((s) => s.cutexSessionId === sessionId)?.cwd ?? "", allow, expectedRevision);
+      },
       async updateThreadSettings(sessionId, _threadId, patch) {
         const profile = profileOf(sessionId);
         MOCK_SETTINGS[profile] = { ...MOCK_SETTINGS[profile], ...patch };
@@ -2747,8 +2868,32 @@ export function installMockBridge(): void {
       async getProfile(name) {
         return mockProfileDetail(name);
       },
-      async patchProfile(name, patch) {
+      async profileImage(profileId, kind) {
+        if (LEGACY) return null;
+        const image = kind === "avatar" ? mockLooks[profileId]?.avatar : mockLooks[profileId]?.intro;
+        return image ? { dataUrl: image.dataUrl, etag: image.etag } : null;
+      },
+      async putProfileImage(profileId, kind, dataUrl) {
+        if (LEGACY || !mockProfiles[profileId]) throw new Error("profile_not_found: no such profile");
+        const looks = (mockLooks[profileId] ??= {});
+        const image = dataUrl ? { dataUrl, etag: mockEtag(dataUrl) } : undefined;
+        if (kind === "avatar") looks.avatar = image;
+        else looks.intro = image;
+        console.info(`[mock] ${dataUrl ? "PUT" : "DELETE"} /v2/profiles/${profileId}/${kind}`);
+        return { etag: image?.etag ?? null };
+      },
+      async patchProfile(name, rawPatch) {
         const p = mockProfiles[name]!;
+        const { avatarThemes, introGreeting, ...patch } = rawPatch;
+        if (avatarThemes !== undefined || introGreeting !== undefined) {
+          if (LEGACY) throw new Error("invalid_request: unsupported field avatarThemes");
+          const looks = (mockLooks[name] ??= {});
+          if (avatarThemes !== undefined) {
+            if (avatarThemes !== null && (!avatarThemes.length || new Set(avatarThemes).size !== avatarThemes.length || avatarThemes.some((t) => !MOCK_AVATAR_THEMES.includes(t)))) throw new Error("invalid_request: avatarThemes: must list unique known themes");
+            looks.avatarThemes = avatarThemes ? MOCK_AVATAR_THEMES.filter((t) => avatarThemes.includes(t)) : undefined;
+          }
+          if (introGreeting !== undefined) looks.introGreeting = introGreeting?.trim() || undefined;
+        }
         const { apiKey, color, allowSessionSwitch, nativeSubagents, delegationWait, agentUseRequiresApproval, agentTurnQuestions, planLabel, claudeAllowWrite, claudeAllowExec, claudeFileCheckpointing, modelDisplayNames, searchTool, privateChatgptAuthFile, toolSchemaCompat, ...cfg } = moduleProfilePatch(mockProfileRef(name), patch);
         if (modelDisplayNames) {
           if (LEGACY) throw new Error("invalid_request: unknown field modelDisplayNames");
@@ -2939,11 +3084,22 @@ export function installMockBridge(): void {
         snapshot = { ...snapshot };
         return {};
       },
-      async revertHistory(sessionId, beforeTurnId) {
-        unsupportedFor(sessionId, "historyRevert");
+      async revertHistory(sessionId, beforeTurnId, _expectedRevision, options) {
+        if (profileOf(sessionId) !== "claude" || LEGACY) unsupportedFor(sessionId, "historyRevert");
         revertedFrom.set(sessionId, beforeTurnId);
-        console.info("[mock] cutex/session/history/revert", sessionId, beforeTurnId);
-        return {};
+        console.info("[mock] cutex/session/history/revert", sessionId, beforeTurnId, options ?? {});
+        // Claude revert receipt: claude-rewind-files restores files when asked.
+        return profileOf(sessionId) === "claude" ? { native: { method: "claude/thread/revert", result: { rewindFilesRequested: !!options?.rewindFiles, filesRewound: !!options?.rewindFiles } } } : {};
+      },
+      async sessionSkills(sessionId) {
+        if (profileOf(sessionId) !== "claude") throw new Error("unsupported_runtime: only Claude agents have a session skill catalog");
+        return MOCK_CLAUDE_SKILLS;
+      },
+      async claudeModelStatus(sessionId) {
+        // The selection (alias) and the pinned model that actually answered.
+        const model = (MOCK_SETTINGS[profileOf(sessionId)]?.model as string | undefined) ?? "sonnet";
+        const answered: Record<string, string> = { sonnet: "claude-sonnet-5-5", opus: "claude-opus-5-5" };
+        return { requestedModel: model, observedForRequestedModel: model, observedModels: [answered[model] ?? model], lastObservedModel: answered[model] ?? model };
       },
       async projectMutation(projectId, _expected, op) {
         // project-optional-director. Preview failure paths: a project name containing "fail" is
@@ -3069,7 +3225,8 @@ export function installMockBridge(): void {
       },
       async pickFolder() {
         if (mockRemote()) throw new Error("the active host is remote: use the in-app folder browser");
-        return "D:\\Projects\\picked-folder";
+        // `?pickedFolder=/home/alex`: e.g. a directory that contains the mock home's ~/.cutex (Q11 warning).
+        return new URLSearchParams(location.search).get("pickedFolder") ?? "D:\\Projects\\picked-folder";
       },
       async revealPath(path) {
         if (mockRemote()) throw new Error("the active host is remote: its files are not on this machine");
@@ -3204,8 +3361,10 @@ export function installMockBridge(): void {
       },
       // Like cutex: the reply lands, then the resolved event arrives (store.respond keeps the
       // answered row; lib/interactionLog). A later bootstrap no longer carries the request.
-      async respond(sessionId, _generation, requestId) {
+      async respond(sessionId, _generation, requestId, reply) {
         mockResolved.add(String(requestId));
+        // claude-permission-rules: cutex keeps the rules an "always allow in this project" answer chose.
+        if (sessionId === "sora" && reply && "result" in reply) mockRememberClaudeRules("D:\\Apps\\cutex-desktop", reply.result);
         const params = (MOCK_PENDING[sessionId] ?? []).find((p) => String(p.message.id) === String(requestId))?.message.params as { threadId?: string } | undefined;
         nativeEvent(sessionId, "serverRequest/resolved", { threadId: params?.threadId ?? `thread-${sessionId}`, requestId });
       },
@@ -3257,6 +3416,8 @@ export function installMockBridge(): void {
   bridge.apiFor = (hostId) => mockApiFor(bridge.api, hostId);
   // Agent pages: the preview server stands in for main's frame documents (dev/mockFrames.ts).
   bridge.frames = mockFrames((hostId, id, version) => bridge.apiFor!(hostId).artifactStoreContent(id, version, { maxBytes: 4 * 1024 * 1024 }));
+  // Signed module packs: the preview plays main's store; the pilot pack is really built + imported (dev/mockModulePacks.ts).
+  bridge.modulePacks = mockModulePacks();
   window.cutex = bridge;
   if (MULTI_HOST !== null) mockConnect(WORKSTATION);
   mockConnect(ALPHA);

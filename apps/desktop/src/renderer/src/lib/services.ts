@@ -28,7 +28,8 @@ export async function openService(s: Pick<ServiceView, "slug">, hostId = focusId
   await openServiceExternal(s, hostId, path);
 }
 
-function openInApp(slug: string, hostId: string, path: string): boolean {
+/** The in-app browser tab only (false = it cannot open: browser module off, another host's side). */
+export function openInApp(slug: string, hostId: string, path: string): boolean {
   // The right side shows the open agent's host only: another host's tab would open out of view.
   if (!sideShowsHost(hostId)) return false;
   try {

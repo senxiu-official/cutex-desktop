@@ -18,6 +18,6 @@ export default defineModule({
     // Not on agents (the sidebar agent menu): 置顶 keeps an agent at hand (owner 2026-10-16).
     "ref.action": [{ id: "bookmarks.toggle", icon: Bookmark, titleKey: "bookmarks.add", excludeKinds: UNBOOKMARKED_KINDS, useState: useBookmarkAction, run: ref => toggleBookmark(ref, bookmarkContext(ref)) }],
     "timeline.turnAttachment": [{ id: "bookmarks.ribbon", order: 100, margin: { side: "left", minWidth: 24 }, Attachment: BookmarkRibbon }],
-    "settings.section": [{ id: "bookmarks.settings", page: "sidebar", titleKey: "bookmarks.settings", keywords: ["bookmarks.showRibbon", "bookmarks.showRibbonHint"], Section: BookmarksSettings }],
+    "settings.section": [{ id: "bookmarks.settings", page: "sides", titleKey: "bookmarks.settings", keywords: ["bookmarks.showRibbon", "bookmarks.showRibbonHint"], Section: BookmarksSettings }],
   }, activate: activateBookmarks,
 });

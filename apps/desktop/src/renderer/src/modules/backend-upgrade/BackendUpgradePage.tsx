@@ -1,6 +1,7 @@
-// Settings → 后端更新 (连接 group right after 主机, host page): the settings target host's cutex — installed release,
-// channel, managed or hand-deployed, service manager, the runtimes new agents get (the one place
-// the cutex build and those runtimes show; 运行时 links here); check / download (stage) / update (apply, one-way
+// Settings → 主机后端更新 (系统 group, host page): the settings target host's cutex — the installed release with
+// where it stands in one sentence, what it brought (cutex `installed.notes`, else notes saved while it was on offer), the runtimes new
+// agents get (the one place the cutex build and those runtimes show; 运行时 links here); build, commit,
+// install kind and service manager under 详细信息; check / download (stage) / update (apply, one-way
 // typed confirmation) / cancel / roll back (dry-run preview first); the run by phase; history; the
 // automatic-update settings. cutex does all the work (`cutex upgrade …` runner, docs/backend-upgrade.md);
 // this page only reads its state and triggers it. A hand-deployed host (managed: false) is read-only.
@@ -9,13 +10,15 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { UPGRADE_CHECK_INTERVAL_MAX, UPGRADE_PACKAGE_RUN_BATCH_MAX, UPGRADE_PACKAGE_RUNS, upgradeNoteText, type HostServiceInfo, type UpgradeAvailable, type UpgradeMigration, type UpgradeMode, type UpgradePackageRun, type UpgradeRollbackPreview, type UpgradeSettings, type UpgradeSettingsPatch, type UpgradeStatus } from "../../../../shared/backendUpgrade";
 import { readCutexBuild } from "@cutex-desktop/cutex-client";
 import { ArmedHint } from "../../components/ArmedHint";
-import { Button, EmptyState, ErrorNote, Loading, Notice, NumberField, Section, Segmented, Select, SettingRow, TextInput, Toggle } from "../../components/settings/Form";
+import { Button, Details, EmptyState, ErrorNote, Loading, Notice, NumberField, Section, Segmented, Select, SettingRow, TextInput, Toggle } from "../../components/settings/Form";
+import { formatWhen } from "../../lib/time";
 import { useI18n, type MessageKey } from "../../i18n";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { cutexBuildText, settingsAnchorId } from "../../lib/settingsNav";
 import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
 import { useHostServiceInfo, useUpgradeAction } from "./hooks";
-import { applyRequest, intervalChoices, intervalWords, minutesOf, modeKeys, releaseNative, runActive, runDisplay } from "./model";
+import { applyRequest, intervalChoices, intervalWords, minutesOf, modeKeys, releaseNative, runActive, runDisplay, unixOf } from "./model";
+import { installedReleaseNotes } from "./releaseNotes";
 import { CommandLine, HistorySection, RunNote, RunSection, When } from "./RunView";
 import { loadUpgradeRuns, loadUpgradeStatus, putUpgradeStatus, useHostUpgrade } from "./store";
 
@@ -86,8 +89,23 @@ function Migrations({ list }: { list: readonly UpgradeMigration[] }) {
 
 // ---------- status ----------
 
-function StatusSection({ status, info, onCheck, checking, checkError }: { status: UpgradeStatus; info: HostServiceInfo | null; onCheck?(): void; checking: boolean; checkError: string | null }) {
-  const { t } = useI18n();
+/** The host's update state in one sentence (the 已安装版本 row's hint). */
+function useStateLine(status: UpgradeStatus): { text: string; tone?: "accent" | "warn" } {
+  const { t, locale } = useI18n();
+  const installed = status.installed?.release ?? null;
+  const phase = status.run?.phase ?? null;
+  if (phase === "needs-owner") return { text: t("backend-upgrade.state.needsOwner"), tone: "warn" };
+  if (!status.managed) return { text: t("backend-upgrade.state.unmanaged") };
+  if (status.run && runActive(status.run)) return { text: t("backend-upgrade.state.running", { release: status.run.toRelease }), tone: "accent" };
+  if (status.staged && status.staged.release !== installed) return { text: t("backend-upgrade.state.staged", { release: status.staged.release }), tone: "accent" };
+  if (status.available && status.available.release !== installed) return { text: t("backend-upgrade.state.available", { release: status.available.release }), tone: "accent" };
+  const at = unixOf(status.lastCheckAt);
+  if (at === null) return { text: t("backend-upgrade.update.notChecked") };
+  return { text: t("backend-upgrade.state.upToDateAt", { time: formatWhen(at, Date.now(), locale) }) };
+}
+
+function StatusSection({ status, info, onCheck, checking, checkError, installedNotes }: { status: UpgradeStatus; info: HostServiceInfo | null; onCheck?(): void; checking: boolean; checkError: string | null; installedNotes: boolean }) {
+  const { t, locale } = useI18n();
   const intervalText = useIntervalText();
   const build = readCutexBuild({ cutexBuild: status.build });
   const installed = status.installed?.release ?? build?.release ?? null;
@@ -96,6 +114,12 @@ function StatusSection({ status, info, onCheck, checking, checkError }: { status
   const native = info?.runtimes?.native;
   const claude = info?.runtimes?.claude;
   const olderNative = native ? native.inUse.filter((u) => !u.selected).reduce((n, u) => n + u.agents, 0) : 0;
+  const state = useStateLine(status);
+  // What the installed release brought: cutex's own `installed.notes` (capability
+  // upgrade-installed-notes), else the notes this desktop saw while it was on offer (./releaseNotes.ts);
+  // nothing when neither knows them.
+  const saved = installedReleaseNotes(status.installed, installedNotes);
+  const notes = saved ? upgradeNoteText(saved.notes, locale) : null;
   return (
     <Section
       id={settingsAnchorId("status")}
@@ -108,21 +132,15 @@ function StatusSection({ status, info, onCheck, checking, checkError }: { status
         ) : undefined
       }
     >
-      <SettingRow label={t("backend-upgrade.status.installed")} hint={t("backend-upgrade.status.installedHint")}>
-        <Value title={status.installed?.manifestSha256 ?? status.base}>
-          {installed ?? t("backend-upgrade.status.unknown")}
-          {status.installed?.commit ? ` · ${status.installed.commit.slice(0, 7)}` : ""}
-        </Value>
+      <SettingRow label={t("backend-upgrade.status.installed")} hint={<span className={state.tone === "accent" ? "text-accent" : state.tone === "warn" ? "text-warn" : undefined}>{state.text}</span>}>
+        <span className="font-mono text-sm tabular-nums select-text">{installed ?? t("backend-upgrade.status.unknown")}</span>
       </SettingRow>
-      <SettingRow label={t("backend-upgrade.status.build")}>
-        <Value>{cutexBuildText(build, { dev: t("cutexBuild.dev"), legacy: t("cutexBuild.legacy") })}</Value>
-      </SettingRow>
-      <SettingRow label={t("backend-upgrade.status.install")} hint={status.managed ? t("backend-upgrade.status.managedHint", { base: status.base ?? "—" }) : t("backend-upgrade.status.unmanagedHint")}>
-        <Tag tone={status.managed ? "ok" : "warn"}>{t(status.managed ? "backend-upgrade.status.managed" : "backend-upgrade.status.unmanaged")}</Tag>
-      </SettingRow>
-      <SettingRow label={t("backend-upgrade.status.serviceManager")} hint={sm?.unit ?? undefined}>
-        <Value>{t(`backend-upgrade.serviceManager.${["systemd", "cutex-supervisor", "runtime-host", "none"].includes(smKind) ? smKind : "other"}` as MessageKey, { kind: smKind })}</Value>
-      </SettingRow>
+      {notes && (
+        <div className="border-b border-border/60 py-3 last:border-b-0" data-installed-notes="">
+          <p className="text-sm">{t("backend-upgrade.notes.label", { release: status.installed!.release })}</p>
+          <p className="mt-0.5 text-xs whitespace-pre-wrap text-muted">{notes}</p>
+        </div>
+      )}
       {native && (
         <SettingRow label={t("backend-upgrade.status.runtimes")} hint={olderNative > 0 ? t("backend-upgrade.status.olderNative", { n: olderNative }) : info?.runtimes?.unpinnedAgents ? t("backend-upgrade.status.unpinned", { n: info.runtimes.unpinnedAgents }) : undefined}>
           <Value title={native.latest ? t("backend-upgrade.status.nativeLatest", { release: native.latest }) : null}>
@@ -130,18 +148,34 @@ function StatusSection({ status, info, onCheck, checking, checkError }: { status
           </Value>
         </SettingRow>
       )}
-      {status.managed && (
-        <>
-          <SettingRow label={t("backend-upgrade.status.lastCheck")} hint={status.lastCheckError ? undefined : status.settings.checkIntervalHours > 0 ? t("backend-upgrade.status.lastCheckHint", { interval: intervalText(status.settings.checkIntervalHours) }) : t("backend-upgrade.status.lastCheckOff")}>
+      {status.managed && status.lastCheckError && <ErrorNote>{t("backend-upgrade.status.lastCheckError", { code: status.lastCheckError.code, message: status.lastCheckError.message })}</ErrorNote>}
+      {status.managed && status.trustedKeys.length === 0 && <Notice>{t("backend-upgrade.status.noKeys")}</Notice>}
+      {checkError && <ErrorNote>{checkError}</ErrorNote>}
+      <Details>
+        <SettingRow label={t("backend-upgrade.status.build")}>
+          <Value>{cutexBuildText(build, { dev: t("cutexBuild.dev"), legacy: t("cutexBuild.legacy") })}</Value>
+        </SettingRow>
+        {(status.installed?.commit || status.installed?.sequence || status.installed?.manifestSha256) && (
+          <SettingRow label={t("backend-upgrade.status.release")}>
+            <Value title={status.installed?.manifestSha256 ?? null}>
+              {[status.installed?.commit ? status.installed.commit.slice(0, 7) : null, status.installed?.sequence ? t("backend-upgrade.status.sequence", { n: status.installed.sequence }) : null, status.installed?.manifestSha256 ? `sha256 ${status.installed.manifestSha256.slice(0, 12)}` : null].filter(Boolean).join(" · ")}
+            </Value>
+          </SettingRow>
+        )}
+        <SettingRow label={t("backend-upgrade.status.install")} hint={status.managed ? t("backend-upgrade.status.managedHint", { base: status.base ?? "—" }) : t("backend-upgrade.status.unmanagedHint")}>
+          <Tag tone={status.managed ? "ok" : "warn"}>{t(status.managed ? "backend-upgrade.status.managed" : "backend-upgrade.status.unmanaged")}</Tag>
+        </SettingRow>
+        <SettingRow label={t("backend-upgrade.status.serviceManager")} hint={sm?.unit ?? undefined}>
+          <Value>{t(`backend-upgrade.serviceManager.${["systemd", "cutex-supervisor", "runtime-host", "none"].includes(smKind) ? smKind : "other"}` as MessageKey, { kind: smKind })}</Value>
+        </SettingRow>
+        {status.managed && (
+          <SettingRow label={t("backend-upgrade.status.lastCheck")} hint={status.settings.checkIntervalHours > 0 ? t("backend-upgrade.status.lastCheckHint", { interval: intervalText(status.settings.checkIntervalHours) }) : t("backend-upgrade.status.lastCheckOff")}>
             <span className="text-xs text-muted">
               <When iso={status.lastCheckAt} />
             </span>
           </SettingRow>
-          {status.lastCheckError && <ErrorNote>{t("backend-upgrade.status.lastCheckError", { code: status.lastCheckError.code, message: status.lastCheckError.message })}</ErrorNote>}
-          {status.trustedKeys.length === 0 && <Notice>{t("backend-upgrade.status.noKeys")}</Notice>}
-        </>
-      )}
-      {checkError && <ErrorNote>{checkError}</ErrorNote>}
+        )}
+      </Details>
     </Section>
   );
 }
@@ -486,19 +520,21 @@ function SettingsSection({ hostId, settings }: { hostId: string; settings: Upgra
           <NumberField label={t("backend-upgrade.settings.batch")} value={settings.packageRunBatch} range={[1, UPGRADE_PACKAGE_RUN_BATCH_MAX]} disabled={action.busy} onCommit={(v) => v !== null && void save({ packageRunBatch: v })} />
         </SettingRow>
       )}
-      <SettingRow
-        label={t("backend-upgrade.settings.source")}
-        hint={
-          <>
-            {t("backend-upgrade.settings.sourceHint")}
-            <span className="mt-1 block">
-              <CommandLine text="cutex upgrade config --source <url>" />
-            </span>
-          </>
-        }
-      >
-        <Value title={settings.source}>{settings.source}</Value>
-      </SettingRow>
+      <Details>
+        <SettingRow
+          label={t("backend-upgrade.settings.source")}
+          hint={
+            <>
+              {t("backend-upgrade.settings.sourceHint")}
+              <span className="mt-1 block">
+                <CommandLine text="cutex upgrade config --source <url>" />
+              </span>
+            </>
+          }
+        >
+          <Value title={settings.source}>{settings.source}</Value>
+        </SettingRow>
+      </Details>
       {action.error && <ErrorNote>{action.error}</ErrorNote>}
     </Section>
   );
@@ -562,7 +598,7 @@ export function BackendUpgradePage() {
       {u.error && <ErrorNote>{u.error}</ErrorNote>}
       {run && display === "card" && <RunSection hostId={hostId} run={run} native={releaseNative(status, run.toRelease)} />}
       {run && display === "note" && <RunNote run={run} onDismiss={() => dismiss(run.runId)} />}
-      <StatusSection status={status} info={info} onCheck={status.managed ? () => void doCheck() : undefined} checking={check.busy} checkError={check.error} />
+      <StatusSection status={status} info={info} onCheck={status.managed ? () => void doCheck() : undefined} checking={check.busy} checkError={check.error} installedNotes={u.installedNotes} />
       {!status.managed ? (
         <UnmanagedSection />
       ) : (

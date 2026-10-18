@@ -1,7 +1,7 @@
 // Task rows (DESIGN §4.18): one mechanical line per cutex task action or delivery —
 // 📋 verb [avatar] counterpart #N title. Own actions fold with other tools; deliveries don't.
 import { useState } from "react";
-import { ChevronDown, ChevronRight, CircleQuestionMark, ClipboardList, Hourglass, Loader2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleQuestionMark, ClipboardList, Hourglass, Loader2, ShieldX, X } from "lucide-react";
 import type { MessageKey } from "../i18n";
 import { useI18n } from "../i18n";
 import { toolErrorText, type TaskRowModel, type TaskRowOutcome } from "../lib/taskRows";
@@ -31,7 +31,7 @@ function Tag({ task }: { task: TaskRowModel }) {
 }
 
 // The outcome word only (UI review #13): the reason after it stays muted, the row text too.
-const OUTCOME_TONE: Record<TaskRowOutcome["kind"], string> = { failed: "text-danger", uncertain: "text-warn-text", approval: "text-warn-text" };
+const OUTCOME_TONE: Record<TaskRowOutcome["kind"], string> = { failed: "text-danger", uncertain: "text-warn-text", approval: "text-warn-text", declined: "text-muted" };
 
 function RowIcon({ running, outcome }: { running: boolean; outcome: TaskRowOutcome | null }) {
   if (running) return <Loader2 size={13} className="shrink-0 animate-spin text-accent" />;
@@ -39,6 +39,7 @@ function RowIcon({ running, outcome }: { running: boolean; outcome: TaskRowOutco
   if (outcome?.kind === "failed") return <X size={13} className="shrink-0 text-danger" />;
   if (outcome?.kind === "uncertain") return <CircleQuestionMark size={13} className="shrink-0 text-warn" />;
   if (outcome?.kind === "approval") return <Hourglass size={13} className="shrink-0 text-warn" />;
+  if (outcome?.kind === "declined") return <ShieldX size={13} className="shrink-0 text-subtle" />;
   return <ClipboardList size={13} className="shrink-0 text-subtle" />;
 }
 

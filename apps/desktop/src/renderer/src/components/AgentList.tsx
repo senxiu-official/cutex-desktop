@@ -240,9 +240,9 @@ function Row({
     >
       <Checkbox state={checked ? "all" : "none"} disabled={!selectable} onClick={onToggle} />
       {online ? (
-        <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={session.avatar} seed={session.cutexSessionId} size={28} signal={signal} running={showsRunningRing(signal, session)} />
+        <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={session.avatar} seed={session.cutexSessionId} size={28} minor signal={signal} running={showsRunningRing(signal, session)} />
       ) : (
-        <Avatar name={row.name} initial={row.initial} color={row.color} avatar={session.avatar} seed={session.cutexSessionId} size={28} />
+        <Avatar name={row.name} initial={row.initial} color={row.color} avatar={session.avatar} seed={session.cutexSessionId} size={28} minor />
       )}
       <div className="min-w-0 leading-snug">
         <div className="flex min-w-0 items-center gap-1.5">

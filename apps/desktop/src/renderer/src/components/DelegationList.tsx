@@ -114,7 +114,7 @@ function useColumns(compact: boolean): Column<AskSummary>[] {
                 <span className="shrink-0 font-medium text-foreground">{t("delegation.you")}</span>
               ) : (
                 <button onClick={() => requester && void select(requester)} title={from.name} className="shrink-0">
-                  <Avatar name={from.name} avatar={from.avatar} seed={requester} size={16} />
+                  <Avatar name={from.name} avatar={from.avatar} seed={requester} size={16} minor />
                 </button>
               ))}
             {!compact && <ArrowRight size={11} className="shrink-0 text-subtle" />}
@@ -122,7 +122,7 @@ function useColumns(compact: boolean): Column<AskSummary>[] {
               <PeerParty text={peer.name} label={peer.label} size={16} quiet />
             ) : (
               <button onClick={() => void select(d.target)} className="flex min-w-0 items-center gap-1 hover:text-foreground">
-                <Avatar name={d.targetName ?? to.name} avatar={to.avatar} seed={d.target} size={16} />
+                <Avatar name={d.targetName ?? to.name} avatar={to.avatar} seed={d.target} size={16} minor />
                 <span className="truncate">{d.targetName ?? to.name}</span>
               </button>
             )}

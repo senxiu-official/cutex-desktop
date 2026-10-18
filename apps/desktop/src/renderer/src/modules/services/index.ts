@@ -4,7 +4,8 @@
 // for a persistent service needs the owner's approval (PersistApprovalSection).
 // 项目 page: a 服务 tab (`project.tab`, §21) with the project's services and a count for the overview.
 // An agent's reveal request (`service_register` reveal: true) → a card 「… 想给你看：… · 打开」 in its
-// conversation that opens the service in an owner browser tab (live.ts).
+// conversation that opens the service in an owner browser tab (live.ts). `cutex:service/…` links in
+// chat open the same tab (ref.target kind `service`, refTarget.ts).
 import { Globe } from "lucide-react";
 import { SERVICES_PERSIST_APPROVAL_FEATURE } from "../../../../shared/servicesSettings";
 import { pageTitle } from "../react";
@@ -14,6 +15,7 @@ import { ProjectServicesTab, ServicesPage } from "./ServicesPage";
 import { useProjectServicesSummary } from "./summary";
 import { startServiceReveals } from "./live";
 import { ServiceToasts } from "./Toasts";
+import { openServiceRef, SERVICE_REF_KIND, useServiceLink } from "./refTarget";
 
 export default defineModule({
   id: "services",
@@ -36,6 +38,8 @@ export default defineModule({
         Section: PersistApprovalSection,
       },
     ],
+    // `cutex:service/<slug>[/path]` links in conversations → the in-app browser tab (refTarget.ts).
+    "ref.target": [{ id: "services.ref", kind: SERVICE_REF_KIND, role: "content", open: openServiceRef, useLink: useServiceLink }],
   },
   activate: (ctx) => startServiceReveals(ctx),
 });

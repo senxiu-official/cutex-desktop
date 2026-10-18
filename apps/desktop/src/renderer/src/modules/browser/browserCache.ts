@@ -30,6 +30,8 @@ export function createBrowserCache() {
           ? Object.freeze({ state: view.sitePermission.state, origin: browserTitle(view.sitePermission.origin), permissions: view.sitePermission.permissions.slice(0, 4) })
           : undefined,
         control: view.control ? Object.freeze({ grantee: view.control.grantee, state: view.control.state, operating: view.control.operating }) : undefined,
+        carrier: view.carrier === "background" ? "background" : undefined,
+        handover: view.handover === true ? true : undefined,
       }));
       notify();
       return true;

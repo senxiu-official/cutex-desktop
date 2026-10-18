@@ -22,9 +22,12 @@ import { migrateLauncherPins } from "./sideLaunchers";
 import { DEFAULT_SIDE_PREVIEW, migrateSidePreview, SIDE_PREVIEW_REV, type SidePreview } from "./sidePreviewPref";
 import { DEFAULT_QUEUE_PANEL_FOLD, migrateQueuePanelFold, type QueuePanelFold } from "./queueChips";
 import { DEFAULT_RUNNING_AGENTS, migrateRunningAgents, RUNNING_AGENTS_REV, type RunningAgents } from "./runningAgentsPref";
+import { normalizeAvatarThemes, type AvatarThemeId } from "./avatarThemes";
+import { onProfileLooksNoted, patchProfileLook, profileLookOf, profileLooksApi, profileLooksSynced } from "./profileLooks";
+import { AGENT_AVATAR_DEFAULT_REV, migrateAgentAvatarDefault, type AgentAvatarDefault } from "./avatarDefault";
 
 export type ProjectIconStyle = "tint" | "line";
-export type AgentAvatarDefault = "emoji" | "letter";
+export type { AgentAvatarDefault };
 
 export interface UiPrefs {
   /** Show the reset countdown next to quota rings in the composer row. */
@@ -139,13 +142,11 @@ export interface UiPrefs {
   projectHoverPreview: boolean;
   /** Pointer rest time before that preview opens (ms). */
   projectHoverDelay: FlyoutDelay;
-  /** 项目分隔: each project section as a block tinted with its colour, a left colour rail, or nothing (lib/projectSeparation). */
+  /** 项目颜色: where a project's colour shows besides its icon (lib/projectSeparation). */
   projectSeparation: ProjectSeparation;
   /** Migration marker for the projectSeparation default change (lib/projectSeparation PROJECT_SEPARATION_REV). */
   projectSeparationRev: number;
-  /** 项目标题着色: header bands (标题行, the 背景色 header) tinted with the group colour; off: same layout, no tint. */
-  projectHeaderTint: boolean;
-  /** 项目图标样式 (Settings → 外观): a soft tint tile, or the glyph / letters alone in the same box (components/ProjectBadge). */
+  /** 项目图标样式 (Settings → 左侧栏): a soft tint tile, or the glyph / letters alone in the same box (components/ProjectBadge). */
   projectIconStyle: ProjectIconStyle;
   /** 状态标签: agent rows' status chips as text, icon only, or automatic by row width (lib/statusChips). */
   statusChips: StatusChips;
@@ -155,8 +156,16 @@ export interface UiPrefs {
   titleTwoLines: boolean;
   /** Latest message as a second line under the agent name: never, Director rows only, every row. */
   rowPreview: RowPreview;
-  /** 默认头像 of agents without their own avatar: a bundled emoji picked from the id (lib/agentEmoji) or the initial. */
+  /** 默认头像 of agents without their own avatar: a bundled emoji picked from the id (lib/agentEmoji), the
+   *  initial, or (★ "important") the emoji for important agents only and a Profile-coloured dot in list
+   *  rows for the rest (lib/avatarDefault). */
   agentAvatarDefault: AgentAvatarDefault;
+  /** Which `agentAvatarDefault` default was saved under (lib/avatarDefault migration). */
+  agentAvatarDefaultRev: number;
+  /** 头像主题 per Profile (lib/avatarThemes): hostKey(host id, profile id) → ticked themes (canonical,
+   *  never empty); absent = by model family. Only for hosts without cutex `profile-avatar` (a syncing
+   *  host stores the choice itself; local entries are uploaded once). Always host keys. */
+  avatarThemes: Record<string, AvatarThemeId[]>;
   /** Image file links in messages: an inline thumbnail (read through cutex fs/file) or the link only. */
   messageImages: "thumbnail" | "link";
   /** 轮尾摘要 under a finished turn's last reply (lib/turnSummary): collapsed, the latest one expanded, or off. */
@@ -220,7 +229,7 @@ export type NoOnlineProjects = "collapse" | "expand";
 export type { RunningAgents };
 
 const KEY = "cutex-desktop.ui";
-const DEFAULTS: UiPrefs = { quotaShowReset: true, composerProfileAvatar: true, quotaView: DEFAULT_QUOTA_VIEW, sidebarOpen: true, agentMessages: "compact", foldedGroups: [], modelPins: {}, lastAgentCwd: "", remoteAgentCwd: {}, sendKeys: "queueFirst", delegationSteerKeys: false, capsuleCorner: DEFAULT_CAPSULE_CORNER, capsuleEdge: DEFAULT_CAPSULE_EDGE, reasoningView: DEFAULT_REASONING_VIEW, reasoningViewRev: REASONING_VIEW_REV, capsuleOpen: false, capsuleFoldedItems: [], timelineTurns: 30, timelineInteractions: true, timelineIntro: true, capsuleAlways: false, projectOrder: [], profileOrder: [], offlineAgents: DEFAULT_OFFLINE_LIMIT, offlineOpen: [],runtimeButton: "all", foldLong: true, foldLines: DEFAULT_FOLD_LINES, foldOlderReplies: false, projectGrouping: "all", noOnlineProjects: "collapse", runningAgents: DEFAULT_RUNNING_AGENTS, runningAgentsRev: RUNNING_AGENTS_REV, foldIdleAgents: true, idleOpen: [], idleUnfolded: [], foldedProjects: [], starredProjects: [], sidebarSections: [], projectRemarks: {}, projectDirectors: {}, projectIcons: {}, sectionCollapsedShows: "summary", projectHoverPreview: true, projectHoverDelay: DEFAULT_FLYOUT_DELAY, projectSeparation: DEFAULT_PROJECT_SEPARATION, projectSeparationRev: PROJECT_SEPARATION_REV, projectHeaderTint: true, projectIconStyle: "tint", statusChips: DEFAULT_STATUS_CHIPS, needsYouStrip: true, titleTwoLines: true, rowPreview: "director", agentAvatarDefault: "emoji", messageImages: "thumbnail", turnSummary: "collapsed", sideMode: "push", sidePageBar: "lane", sidePillAnchor: "top", sideLaneWhenHidden: "keep", sideCurrentPageClick: "stay", sideNarrow: "overlay", sidePreview: DEFAULT_SIDE_PREVIEW, sidePreviewRev: SIDE_PREVIEW_REV, sideRestore: true, sideKeepHidden: 4, sideKeepMounted: 4, sideLauncherPins: {}, navPins: null, peekTarget: "auto", gutterDocked: [], sideHomes: {}, gutterDockWidth: DOCK_WIDTH_DEFAULT, hostMarksSingle: false, hostMarkLocal: false, queueSectionStrip: true, queuePanelFold: DEFAULT_QUEUE_PANEL_FOLD, lastCreateHost: "", createHostDefault: "local" };
+const DEFAULTS: UiPrefs = { quotaShowReset: true, composerProfileAvatar: true, quotaView: DEFAULT_QUOTA_VIEW, sidebarOpen: true, agentMessages: "compact", foldedGroups: [], modelPins: {}, lastAgentCwd: "", remoteAgentCwd: {}, sendKeys: "queueFirst", delegationSteerKeys: false, capsuleCorner: DEFAULT_CAPSULE_CORNER, capsuleEdge: DEFAULT_CAPSULE_EDGE, reasoningView: DEFAULT_REASONING_VIEW, reasoningViewRev: REASONING_VIEW_REV, capsuleOpen: false, capsuleFoldedItems: [], timelineTurns: 30, timelineInteractions: true, timelineIntro: true, capsuleAlways: false, projectOrder: [], profileOrder: [], offlineAgents: DEFAULT_OFFLINE_LIMIT, offlineOpen: [],runtimeButton: "all", foldLong: true, foldLines: DEFAULT_FOLD_LINES, foldOlderReplies: false, projectGrouping: "all", noOnlineProjects: "collapse", runningAgents: DEFAULT_RUNNING_AGENTS, runningAgentsRev: RUNNING_AGENTS_REV, foldIdleAgents: true, idleOpen: [], idleUnfolded: [], foldedProjects: [], starredProjects: [], sidebarSections: [], projectRemarks: {}, projectDirectors: {}, projectIcons: {}, sectionCollapsedShows: "summary", projectHoverPreview: true, projectHoverDelay: DEFAULT_FLYOUT_DELAY, projectSeparation: DEFAULT_PROJECT_SEPARATION, projectSeparationRev: PROJECT_SEPARATION_REV, projectIconStyle: "tint", statusChips: DEFAULT_STATUS_CHIPS, needsYouStrip: true, titleTwoLines: true, rowPreview: "director", agentAvatarDefault: "important", agentAvatarDefaultRev: AGENT_AVATAR_DEFAULT_REV, avatarThemes: {}, messageImages: "thumbnail", turnSummary: "collapsed", sideMode: "push", sidePageBar: "lane", sidePillAnchor: "top", sideLaneWhenHidden: "keep", sideCurrentPageClick: "stay", sideNarrow: "overlay", sidePreview: DEFAULT_SIDE_PREVIEW, sidePreviewRev: SIDE_PREVIEW_REV, sideRestore: true, sideKeepHidden: 4, sideKeepMounted: 4, sideLauncherPins: {}, navPins: null, peekTarget: "auto", gutterDocked: [], sideHomes: {}, gutterDockWidth: DOCK_WIDTH_DEFAULT, hostMarksSingle: false, hostMarkLocal: false, queueSectionStrip: true, queuePanelFold: DEFAULT_QUEUE_PANEL_FOLD, lastCreateHost: "", createHostDefault: "local" };
 const listeners = new Set<() => void>();
 /**
  * Lists of agent / project / group ids: stored under host keys (lib/hostKeys), shown as the focus
@@ -276,8 +285,9 @@ function migrateSideHomes(raw: unknown): Record<string, string> {
 
 function load(): UiPrefs {
   try {
-    const stored = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<UiPrefs> & { capsuleAnchor?: unknown };
-    const { capsuleAnchor, ...rest } = stored;
+    const stored = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<UiPrefs> & { capsuleAnchor?: unknown; projectHeaderTint?: unknown };
+    // projectHeaderTint (项目标题着色, removed 2026-10-18) only feeds the projectSeparation migration.
+    const { capsuleAnchor, projectHeaderTint, ...rest } = stored;
     const anchor = stored.capsuleCorner ? null : migrateCapsuleAnchor(capsuleAnchor);
     return {
       ...DEFAULTS,
@@ -298,9 +308,8 @@ function load(): UiPrefs {
       projectHoverPreview: stored.projectHoverPreview !== false,
       projectHoverDelay: migrateFlyoutDelay(stored.projectHoverDelay),
       gutterDockWidth: clampDockPref(stored.gutterDockWidth),
-      projectSeparation: migrateProjectSeparation(stored.projectSeparation, stored.projectSeparationRev),
+      projectSeparation: migrateProjectSeparation(stored.projectSeparation, stored.projectSeparationRev, projectHeaderTint),
       projectSeparationRev: PROJECT_SEPARATION_REV,
-      projectHeaderTint: stored.projectHeaderTint !== false,
       projectIconStyle: stored.projectIconStyle === "line" ? "line" : "tint",
       statusChips: migrateStatusChips(stored.statusChips),
       sideLauncherPins: migrateLauncherPins(stored.sideLauncherPins),
@@ -310,7 +319,9 @@ function load(): UiPrefs {
       sidePreviewRev: SIDE_PREVIEW_REV,
       runningAgents: migrateRunningAgents(stored.runningAgents, stored.runningAgentsRev),
       runningAgentsRev: RUNNING_AGENTS_REV,
-      agentAvatarDefault: stored.agentAvatarDefault === "letter" ? "letter" : "emoji",
+      agentAvatarDefault: migrateAgentAvatarDefault(stored.agentAvatarDefault, stored.agentAvatarDefaultRev),
+      agentAvatarDefaultRev: AGENT_AVATAR_DEFAULT_REV,
+      avatarThemes: migrateAvatarThemes(stored.avatarThemes),
       queuePanelFold: migrateQueuePanelFold(stored.queuePanelFold),
     };
   } catch {
@@ -321,6 +332,11 @@ function load(): UiPrefs {
 export function setUiPref<K extends keyof UiPrefs>(key: K, value: UiPrefs[K]): void {
   // Host-scoped id lists: the value is the focus host's list (what getUiPrefs shows).
   persist({ ...stored, [key]: isHostList(key) ? writeList(stored[key], value as string[], keyFocus()) : value });
+}
+
+/** The default of a pref (a settings row's 恢复默认 and 「改过」 mark). */
+export function uiPrefDefault<K extends keyof UiPrefs>(key: K): UiPrefs[K] {
+  return DEFAULTS[key];
 }
 
 export function getUiPrefs(): UiPrefs {
@@ -403,6 +419,95 @@ export function toggleStarred(groupId: string, hostId?: string): void {
 export function updateSections(update: (sections: readonly SidebarSection[]) => SidebarSection[]): void {
   persist({ ...stored, sidebarSections: update(stored.sidebarSections) });
 }
+
+/** Host keys with known themes only; a single id (before the multi-select) becomes `[id]`, "all" every theme. */
+function migrateAvatarThemes(value: unknown): Record<string, AvatarThemeId[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, AvatarThemeId[]> = {};
+  for (const [key, themes] of Object.entries(value as Record<string, unknown>)) {
+    const ids = parseHostKey(key) ? normalizeAvatarThemes(themes) : null;
+    if (ids) out[key] = ids;
+  }
+  return out;
+}
+
+/** This device's 头像主题 for a Profile of `hostId` (older hosts; the one-time import source). */
+export function localAvatarThemes(hostId: string, profileId: string): AvatarThemeId[] | null {
+  return current.avatarThemes[hostKey(hostId, profileId)] ?? null;
+}
+
+/**
+ * The owner's 头像主题 for a Profile of `hostId` (hosts-list id): the host's choice when it stores
+ * looks (cutex `profile-avatar`; ids this desktop has no pictures for are left out), else this
+ * device's; null = by model family.
+ */
+export function avatarThemesOverride(hostId: string, profileId: string): AvatarThemeId[] | null {
+  if (!profileLooksSynced(hostId)) return localAvatarThemes(hostId, profileId);
+  return normalizeAvatarThemes(profileLookOf(hostId, profileId)?.appearance.avatarThemes ?? null);
+}
+
+/** Single-theme view for the old one-of picker: the theme when exactly one is ticked, else null. */
+export function avatarThemeOverride(hostId: string, profileId: string): AvatarThemeId | null {
+  const themes = avatarThemesOverride(hostId, profileId);
+  return themes?.length === 1 ? themes[0]! : null;
+}
+
+/**
+ * Sets (one theme or several; an empty list = automatic) / clears (null = automatic, by model family)
+ * a Profile's 头像主题: on the host when it stores looks (in the background, shown at once), else on
+ * this device.
+ */
+export function setAvatarThemeOverride(hostId: string, profileId: string, theme: AvatarThemeId | readonly AvatarThemeId[] | null): void {
+  const themes = normalizeAvatarThemes(theme);
+  if (profileLooksSynced(hostId)) {
+    void writeHostThemes(hostId, profileId, themes);
+    return;
+  }
+  setLocalThemes(hostId, profileId, themes);
+}
+
+function setLocalThemes(hostId: string, profileId: string, themes: AvatarThemeId[] | null): void {
+  const key = hostKey(hostId, profileId);
+  if ((stored.avatarThemes[key] ?? null)?.join() === themes?.join()) return;
+  const next = { ...stored.avatarThemes };
+  if (themes) next[key] = themes;
+  else delete next[key];
+  persist({ ...stored, avatarThemes: next });
+}
+
+async function writeHostThemes(hostId: string, profileId: string, themes: AvatarThemeId[] | null): Promise<boolean> {
+  const api = profileLooksApi(hostId);
+  if (!api) return false;
+  const before = profileLookOf(hostId, profileId)?.appearance.avatarThemes ?? null;
+  patchProfileLook(hostId, profileId, { appearance: { avatarThemes: themes } });
+  try {
+    const detail = await api.patchProfile(profileId, { avatarThemes: themes });
+    patchProfileLook(hostId, profileId, { appearance: { avatarThemes: detail.appearance.avatarThemes ?? null } });
+    return true;
+  } catch {
+    patchProfileLook(hostId, profileId, { appearance: { avatarThemes: before } });
+    return false;
+  }
+}
+
+/** One-time per host and run: upload this device's 头像主题 of Profiles a syncing host has none for, then drop the local entry. */
+export async function importLocalAvatarThemes(hostId: string, looks: readonly { id: string; appearance: { avatarThemes?: string[] | null } }[]): Promise<void> {
+  if (!profileLooksSynced(hostId)) return;
+  for (const look of looks) {
+    const themes = look.id ? localAvatarThemes(hostId, look.id) : null;
+    if (!themes || look.appearance.avatarThemes) continue;
+    if (await writeHostThemes(hostId, look.id, themes)) setLocalThemes(hostId, look.id, null);
+  }
+}
+
+const themesImported = new Set<string>();
+onProfileLooksNoted((hostId, looks) => {
+  if (themesImported.has(hostId) || !profileLooksSynced(hostId)) return;
+  const prefix = hostKey(hostId, "").slice(0, -3); // `["<host>",` of this host's keys
+  if (!Object.keys(stored.avatarThemes).some((key) => key.startsWith(prefix))) return;
+  themesImported.add(hostId);
+  void importLocalAvatarThemes(hostId, looks);
+});
 
 /** Host keys with a non-empty session id only. */
 function migrateProjectDirectors(value: unknown): Record<string, string> {

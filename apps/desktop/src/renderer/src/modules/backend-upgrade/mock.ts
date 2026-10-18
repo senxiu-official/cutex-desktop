@@ -12,7 +12,7 @@
 //   ?upgrade=justupdated a full update without a native (0.1.0 → 0.1.1) committed a minute ago; idle
 //                        agents still move over in batches (followUp) — what a host shows right after
 //                        an in-app update
-import { BACKEND_UPGRADE_FEATURE, UPGRADE_RUN_NATIVE_FEATURE, isUpgradeTerminal, type HostServiceInfo, type UpgradeApplyRequest, type UpgradePhase, type UpgradeRefusal, type UpgradeResult, type UpgradeRollbackPreview, type UpgradeRun, type UpgradeStatus } from "../../../../shared/backendUpgrade";
+import { BACKEND_UPGRADE_FEATURE, UPGRADE_INSTALLED_NOTES_FEATURE, UPGRADE_RUN_NATIVE_FEATURE, isUpgradeTerminal, type HostServiceInfo, type UpgradeApplyRequest, type UpgradePhase, type UpgradeRefusal, type UpgradeResult, type UpgradeRollbackPreview, type UpgradeRun, type UpgradeStatus } from "../../../../shared/backendUpgrade";
 import type { MockCore, ModuleMock } from "../../dev/mockTypes";
 
 const MODE = typeof location !== "undefined" ? new URLSearchParams(location.search).get("upgrade") : null;
@@ -21,6 +21,16 @@ const clone = <T>(x: T): T => structuredClone(x);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let runSeq = 0x3a1f00;
 const runId = () => `upg-${(runSeq++).toString(16).padStart(12, "0")}`;
+
+// Installed manifests' notes (upgrade-installed-notes: `installed.notes` / `publishedAt`).
+const INSTALLED_NOTES: Record<string, Record<string, string>> = {
+  r238: { en: "Usage ledger counts Claude turns.", "zh-CN": "用量账本计入 Claude 回合。" },
+  r239: { en: "Alarms API; quieter idle CPU.", "zh-CN": "新增闹钟 API；空闲 CPU 更低。" },
+  r240: { en: "Notes and side chats; Claude tool defaults on.", "zh-CN": "新增笔记与旁聊；Claude 写入 / 执行默认开启。" },
+  "0.1.1": { en: "Backend updates keep optional components in step.", "zh-CN": "后端更新时可选组件同步更新。" },
+};
+const installedNotes = (release: string, daysAgo: number) =>
+  INSTALLED_NOTES[release] ? { notes: { ...INSTALLED_NOTES[release] }, publishedAt: iso(daysAgo * 86400) } : { notes: null, publishedAt: null };
 
 const SETTINGS = { channel: "release" as const, source: "https://github.com/example-org/cutex/releases/download", checkIntervalHours: 6, autoStage: true, autoApply: false, packageRun: "after" as const, packageRunBatch: 5, maxWaitSecs: 3600 };
 
@@ -90,7 +100,7 @@ function justUpdated(): UpgradeStatus {
     base: "~/.local/share/cutex",
     serviceManager: "systemd",
     build: { version: "0.1.1", release: "0.1.1", commit: "3736d2ee5a1c9b04", builtAt: "2026-10-16T05:12:00Z", profile: "release", channel: "release" },
-    installed: { release: "0.1.1", sequence: 2, commit: "3736d2ee5a1c9b04", manifestSha256: "5d1e…" },
+    installed: { release: "0.1.1", sequence: 2, commit: "3736d2ee5a1c9b04", manifestSha256: "5d1e…", ...installedNotes("0.1.1", 1) },
     previousRelease: "0.1.0",
     installedReleases: ["0.1.0", "0.1.1"],
     lastCheckAt: iso(120),
@@ -114,7 +124,7 @@ function initial(): UpgradeStatus {
     base: managed ? "~/.local/share/cutex" : null,
     serviceManager: managed ? "systemd" : "none",
     build: { version: "0.1.0", release: "r240", commit: "4c7d21e0b9a3f5d6", builtAt: "2026-10-12T09:20:00Z", profile: "release", channel: "release" },
-    installed: { release: "r240", sequence: 240, commit: "4c7d21e0b9a3f5d6", manifestSha256: "9f2c…" },
+    installed: { release: "r240", sequence: 240, commit: "4c7d21e0b9a3f5d6", manifestSha256: "9f2c…", ...(managed ? installedNotes("r240", 3) : { notes: null, publishedAt: null }) },
     previousRelease: managed ? "r239" : null,
     installedReleases: managed ? ["r238", "r239", "r240"] : ["r240"],
     lastCheckAt: managed && MODE !== "nokeys" ? iso(40 * 60) : null,
@@ -337,7 +347,7 @@ function world(emitHost: (method: string, params: Record<string, unknown>) => vo
         run.downtimeMs = 7400;
         enter("committed", `${from} → ${run.toRelease}`);
         state.previousRelease = from;
-        state.installed = { release: run.toRelease, sequence: staged.sequence, commit: "7be0c4a1d29f3e85", manifestSha256: staged.manifestSha256 };
+        state.installed = { release: run.toRelease, sequence: staged.sequence, commit: "7be0c4a1d29f3e85", manifestSha256: staged.manifestSha256, notes: facts?.notes ?? null, publishedAt: facts?.publishedAt ?? null };
         state.build = { ...state.build, release: run.toRelease, commit: "7be0c4a1d29f3e85", builtAt: new Date().toISOString() };
         if (!state.installedReleases.includes(run.toRelease)) state.installedReleases.push(run.toRelease);
         state.available = null;
@@ -409,7 +419,7 @@ function world(emitHost: (method: string, params: Record<string, unknown>) => vo
           run.downtimeMs = 5100;
           run.displaced = preview.movedAside.map((p) => `upgrade/runs/${run.runId}/displaced/${p}`);
           enter("committed", `rolled back to ${to}`);
-          state.installed = { release: to, sequence: Number(to.slice(1)) || 0, commit: "4c7d21e0b9a3f5d6", manifestSha256: null };
+          state.installed = { release: to, sequence: Number(to.slice(1)) || 0, commit: "4c7d21e0b9a3f5d6", manifestSha256: INSTALLED_NOTES[to] ? "7a0e…" : null, ...installedNotes(to, 6) };
           state.build = { ...state.build, release: to };
           state.previousRelease = state.installedReleases.filter((r) => r < to).at(-1) ?? null;
           past.unshift(clone(run));
@@ -444,7 +454,7 @@ function world(emitHost: (method: string, params: Record<string, unknown>) => vo
 }
 
 export const mock: ModuleMock = {
-  features: { new: [BACKEND_UPGRADE_FEATURE, UPGRADE_RUN_NATIVE_FEATURE] },
+  features: { new: [BACKEND_UPGRADE_FEATURE, UPGRADE_RUN_NATIVE_FEATURE, UPGRADE_INSTALLED_NOTES_FEATURE] },
   api: (core: MockCore) => world((method, params) => core.emitHost(method, params)),
   // SSH mock hosts: hand-deployed (the read-only page).
   remote: (_hostId, emitHost) => world(emitHost, false),

@@ -81,6 +81,12 @@ export interface ComponentCardInput {
   listError: string | null;
   /** This desktop asked for an install / remove of `name` that has not shown up in the list yet. */
   pending: boolean;
+  /**
+   * Set up by hand on an unmanaged (hand-deployed) host although cutex lists it as missing (claude-runtime:
+   * `GET /v2/runtimes` names a selected Claude runtime). cutex before the components fix reported those as
+   * missing, which blocked creating Claude agents.
+   */
+  handConfigured?: boolean;
 }
 
 /**
@@ -160,7 +166,7 @@ export function componentCardState(input: ComponentCardInput): ComponentCardStat
   if (step !== false) return { kind: "installing", step };
   if (component.state === "needsUser") return { kind: "needsUser", steps: component.steps };
   if (component.state === "restartPending") return { kind: "restartPending", version: component.selected };
-  if (!list.managed || list.installFrom === "none") return { kind: "unmanaged" };
+  if (!list.managed || list.installFrom === "none") return input.handConfigured ? { kind: "body" } : { kind: "unmanaged" };
   if (list.installFrom === "source-only") return { kind: "sourceOnly", command: sourceInstallCommand(name) };
   if (input.pending) return { kind: "installing", step: null };
   if (component.state === "degraded") return { kind: "degraded", error: component.error, working: component.selected !== null };

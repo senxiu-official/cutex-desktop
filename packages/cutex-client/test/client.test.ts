@@ -361,6 +361,25 @@ describe("notifications", () => {
     expect(err).toMatchObject({ status: 503, code: "peer_unreachable", retryable: true, message: "peer_unreachable: peer unreachable" });
     expect(CutexApiError.fromBody(503, { code: "Not A Code" }).code).toBe("http_503");
   });
+
+  it("says a proxy may be in the way when the answer is not cutex's", async () => {
+    const bad = await mockClient(() => [502, "<html><body><h1>502 Bad Gateway</h1> squid</body></html>"]).client.capabilities().catch((e) => e);
+    expect(bad).toBeInstanceOf(CutexApiError);
+    expect(bad).toMatchObject({ status: 502, code: "http_502", proxyLike: true });
+    expect(bad.message).toContain("proxy may be in the way");
+    expect(bad.message).toContain("502 Bad Gateway squid");
+    expect(CutexApiError.fromBody(407, "").proxyLike).toBe(true);
+    expect(CutexApiError.fromBody(503, "busy", true).proxyLike).toBe(true);
+    // cutex's own errors and plain bodies stay as they were
+    expect(CutexApiError.fromBody(502, apiError("upstream_failed")).code).toBe("upstream_failed");
+    expect(CutexApiError.fromBody(500, "boom")).toMatchObject({ code: "http_500", message: "http_500: boom", proxyLike: false });
+  });
+
+  it("names the low-level reason of an unreachable host", () => {
+    const cause = Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+    expect(new CutexUnreachableError("http://127.0.0.1:24270", cause).message).toBe("cutex management API unreachable at http://127.0.0.1:24270 (ECONNREFUSED)");
+    expect(new CutexUnreachableError("http://127.0.0.1:24270", new Error("x")).message).toBe("cutex management API unreachable at http://127.0.0.1:24270");
+  });
 });
 
 describe("uploadAttachment", () => {
@@ -566,6 +585,31 @@ describe("self-service profile (users-self-profile)", () => {
     expect(await fetchWith(() => new Response("<svg/>", { status: 200, headers: { "Content-Type": "image/svg+xml" } })).userAvatar("owner")).toBeNull();
     expect(await fetchWith(() => new Response(new Uint8Array(49 * 1024), { status: 200, headers: { "Content-Type": "image/png" } })).userAvatar("owner")).toBeNull();
     await expect(fetchWith(() => new Response("{}")).userAvatar("../x")).rejects.toThrow("bad user id");
+  });
+
+  it("profile-avatar: fetches a profile's picture / intro portrait with their own size caps; PUT / DELETE answer the ETag", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const seen: string[] = [];
+    const fetchWith = (response: () => Response) => new CutexClient({ baseUrl: "http://h:1", token: "tok" }, { fetch: (async (input: string | URL | Request) => (seen.push(String(input)), response())) as typeof globalThis.fetch, clientId: "c" });
+    const ok = await fetchWith(() => new Response(png, { status: 200, headers: { "Content-Type": "image/png", ETag: '"00000000000000aa"' } })).profileImage("p 1", "avatar");
+    expect(ok).toEqual({ contentType: "image/png", data: Buffer.from(png).toString("base64"), etag: "00000000000000aa" });
+    expect(seen).toEqual(["http://h:1/v2/profiles/p%201/avatar"]);
+    // 100 KiB: too big for a picture, fine for an intro portrait (≤ 2 MiB).
+    const big = () => new Response(new Uint8Array(100 * 1024), { status: 200, headers: { "Content-Type": "image/webp" } });
+    expect(await fetchWith(big).profileImage("p1", "avatar")).toBeNull();
+    expect(await fetchWith(big).profileImage("p1", "intro-portrait")).not.toBeNull();
+    expect(await fetchWith(() => new Response(JSON.stringify(apiError("avatar_not_found")), { status: 404 })).profileImage("p1", "intro-portrait")).toBeNull();
+    await expect(fetchWith(() => new Response("{}")).profileImage("a/b", "avatar")).rejects.toThrow("bad profile id");
+    await expect(fetchWith(() => new Response("{}")).profileImage("p1", "banner" as never)).rejects.toThrow("bad profile image kind");
+
+    const { client, calls } = mockClient((c) => [200, c.method === "PUT" ? { profileId: "p1", avatarEtag: "00000000000000bb" } : { profileId: "p1", introPortraitEtag: null }]);
+    expect(await client.putProfileImage("p1", "avatar", { contentType: "image/png", data: "AAAA" })).toEqual({ etag: "00000000000000bb" });
+    expect(await client.putProfileImage("p1", "intro-portrait", null)).toEqual({ etag: null });
+    expect(calls.map((c) => [c.method, c.url, c.body ? JSON.parse(String(c.body)) : null])).toEqual([
+      ["PUT", "http://h:1/v2/profiles/p1/avatar", { contentType: "image/png", data: "AAAA" }],
+      ["DELETE", "http://h:1/v2/profiles/p1/intro-portrait", null],
+    ]);
+    await expect(mockClient(() => [413, apiError("avatar_too_large")]).client.putProfileImage("p1", "avatar", { contentType: "image/png", data: "AAAA" })).rejects.toMatchObject({ code: "avatar_too_large" });
   });
 });
 

@@ -134,7 +134,9 @@ export type BrowserScreenshotResult = BrowserScreenshotPayload & (BrowserScreens
 export type BrowserOperationResult =
   | ({ kind: 'tab.snapshot' } & BrowserSnapshot)
   | ({ kind: 'tab.find' } & BrowserSnapshot)
-  | { kind: 'tab.act'; pageGeneration: number }
+  /** `scroll` (wheel scroll only, sent only to a host advertising browser-scroll-outcome): CSS px
+   * the scrolled container moved and whether it is at the edge in the requested direction. */
+  | { kind: 'tab.act'; pageGeneration: number; scroll?: { dx: number; dy: number; atEdge: boolean } }
   | { kind: 'tab.navigate'; pageGeneration: number; url: string }
   | ({ kind: 'tab.screenshot' } & BrowserScreenshotResult)
   | { kind: 'tab.release' }

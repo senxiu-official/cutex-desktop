@@ -11,12 +11,13 @@
 import type { ComponentType, ReactNode } from "react";
 import type { MessageKey } from "../i18n";
 import type { AgentFeature } from "../lib/agentFeatures";
-import type { SettingsGroupId, SettingsSource } from "../lib/settingsNav";
+import type { SettingsAgents, SettingsGroupId, SettingsSource } from "../lib/settingsNav";
 import type { ExternalMessage, RawItem } from "../lib/timeline";
 import type { DeviceMethod, NotificationLevel } from "../../../shared/notificationLevels";
 import type { DaemonApi, ProfileCreateRequest, ProfilePatch } from "../../../shared/ipc";
 import type { HostPlatform } from "../../../shared/hosts";
 import type { SettingsTab } from "../store";
+import type { CustomizeRegion, CustomizeSide } from "../lib/customize";
 import type { ItemId, Json, ModuleContext, ModuleDefinition, ModuleHost, PageParams, SlotEntry, SlotItemBase, SlotSpec } from "./types";
 
 export type { PageParams } from "./types";
@@ -30,7 +31,11 @@ export interface SettingsPageItem extends SlotItemBase {
   icon: Icon;
   titleKey: MessageKey; // nav label + breadcrumb
   source: SettingsSource | null; // page-header source tag; null = sections tag themselves
-  hintKey?: MessageKey; // page-wide note under the source tag
+  hintKey?: MessageKey; // what the page is for, one line above the scope chips
+  /** Second scope chip: do agents feel this page (lib/settingsNav SettingsAgents)? Unset = not reviewed yet, no chip. */
+  agents?: SettingsAgents;
+  /** A live preview beside the page when the column is wide, after it when narrow (components/Page PageBody). */
+  Aside?: ComponentType;
   /** A link at the end of the page header to a related page (运行时 → 后端更新); shown only while that page is. */
   headerLink?: { page: SettingsTab; labelKey: MessageKey };
   /**
@@ -72,6 +77,26 @@ export interface SettingsSearchSection {
   access?: "owner" | "member";
   /** On an app page with `hostPart`: the card sits in that part (Settings target host, owner only). */
   part?: "host";
+}
+
+/**
+ * 在主界面调整 (docs/research/rfc-in-place-settings-20261018.md): a region of the main window whose local
+ * settings open in a panel beside it (components/CustomizeHost). Renderer-internal, beside `settings.page`;
+ * not in the plugin SDK. `settingsPage`: 全部设置 → and that page's header button 在主界面调整.
+ */
+export interface CustomizeRegionItem extends SlotItemBase {
+  // default unavailable "hide"
+  region: CustomizeRegion;
+  titleKey: MessageKey; // the panel title, e.g. 调整左侧栏
+  settingsPage: SettingsTab;
+  /** Which side of the region the panel sits on (lib/customize placeCustomizePanel); the region element is `[data-customize-region="<region>"]`. */
+  side: CustomizeSide;
+  /** The panel's width when there is room (px; default CUSTOMIZE_PANEL_W). */
+  width?: number;
+  /** Shows the region when the panel opens on it while it is hidden (closing the panel leaves it shown). */
+  reveal?(): void;
+  /** The panel body: the same cards as the settings page, under <CompactSettings>. */
+  Panel: ComponentType;
 }
 
 export interface SettingsSectionItem extends SlotItemBase {
@@ -451,6 +476,10 @@ export interface SideComponentItem<S extends Json = any, P extends Json = any> e
   Body: ComponentType<SideBodyProps<S>>;
   /** Extra buttons in the card header while this tab is active (＋ new terminal, 源码 / 渲染, reload …). */
   Actions?: ComponentType<SideBodyProps<S>>;
+  /** Browser-style card header (§18.4, multi only): the tab row shows even with one tab, and a ＋ after
+   *  the last tab opens `launcher.newParams ?? launcher.params` as a new tab of this card (same binding).
+   *  Omitted: the tab row appears only with ≥ 2 tabs (a single instance shows its title). */
+  tabRow?: "always";
   /** Called on close (tab ×, card ×, page close). Terminal: kills the PTY here. false = keep open. */
   onClose?(instance: SideInstanceInfo<S>): boolean | Promise<boolean>;
   /** Bulk closes only (card ×, 关闭页, 关闭其他): a one-line warning shown by their in-place click-twice confirm, or null. */
@@ -770,6 +799,8 @@ export interface RefImage {
 export interface SlotMap {
   "settings.page": SettingsPageItem;
   "settings.section": SettingsSectionItem;
+  // Renderer-internal: 在主界面调整 panels (lead 2026-10-18).
+  "customize.region": CustomizeRegionItem;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- each item has its own data type
   "conversation.status": StatusItem<any>;
   // v1.2: status surfaces + the overlay that hosts the capsule.
@@ -804,6 +835,7 @@ export type SlotItem<S extends SlotId> = SlotMap[S];
 export const SLOT_SPECS: { readonly [S in SlotId]: SlotSpec } = {
   "settings.page": { unavailable: "hide" },
   "settings.section": { unavailable: "hide" },
+  "customize.region": { unavailable: "hide" },
   "conversation.status": { unavailable: "hide", placement: { values: STATUS_PLACES, default: (item) => (item as StatusItem).defaultPlace } },
   "conversation.statusSurface": { unavailable: "hide" },
   "conversation.overlay": { unavailable: "hide" },
@@ -838,6 +870,8 @@ export interface ModuleServices {
     openPage(page: ItemId, params?: PageParams): void;
     /** Back to the conversation (closes the open page). */
     closePage(): void;
+    /** 在主界面调整: opens the panel of a `customize.region` (an open page closes first); open on it already: closes it. */
+    customize(region: CustomizeRegion): void;
   };
   /** v1.4 (§18.8): the right side. Never "opened" without something visible. */
   side: {

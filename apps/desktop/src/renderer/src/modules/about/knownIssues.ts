@@ -51,10 +51,15 @@ export function useKnownIssues(): KnownIssuesView {
 }
 
 const RELEASE_BLOB = `${PROJECT_REPO_URL}/blob/release`;
-/** The project links of the 关于 page (opened in the system browser; docs on the `release` branch). */
+/** The known issues document on GitHub (release branch): the section's secondary 「在 GitHub 上查看」 link. */
+export const KNOWN_ISSUES_URL = `${RELEASE_BLOB}/docs/KNOWN-ISSUES.md`;
+/**
+ * Every external link of the 关于 page (opened in the system browser; docs on the `release` branch):
+ * github / install in 项目, changelog / knownIssues as the 「在 GitHub 上查看」 links of 更新记录 / 已知问题.
+ */
 export const ABOUT_LINKS: readonly { id: string; labelKey: MessageKey; url: string }[] = [
   { id: "github", labelKey: "about.link.github", url: PROJECT_REPO_URL },
   { id: "changelog", labelKey: "about.link.changelog", url: `${RELEASE_BLOB}/CHANGELOG.md` },
   { id: "install", labelKey: "about.link.install", url: INSTALL_GUIDE_URL },
-  { id: "knownIssues", labelKey: "about.link.knownIssues", url: `${RELEASE_BLOB}/docs/KNOWN-ISSUES.md` },
+  { id: "knownIssues", labelKey: "about.link.knownIssues", url: KNOWN_ISSUES_URL },
 ];

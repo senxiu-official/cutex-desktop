@@ -2,9 +2,11 @@
 // and never talks to the daemon directly; everything goes through these calls.
 import type { InboundMailInput, InboundMailStatus, MarkExternalInput, NciHelper, NciVerificationInput, NciVerificationStatus } from "./remoteJobs";
 import type { AppLocale } from "./locales";
+import type { HostProxyPatch, HostProxyView, ProfileProxyPatch, ProfileProxyView, UpdateProxyPref, UpdateProxyRequest } from "./proxy";
 import type {
   AdmissionRef,
   EventEnvelope,
+  HostClaudeRuntime,
   HostSessionRow,
   ProjectsResponse,
   QueueItem,
@@ -24,7 +26,7 @@ import type {
   OwnerNotifySettings,
   OwnerNotifySettingsPatch,
 } from "@cutex-desktop/protocol";
-import type { CutexBuild } from "@cutex-desktop/cutex-client";
+import type { CutexBuild, ProfileImageKind } from "@cutex-desktop/cutex-client";
 import type { ThreadMemoryMode } from "@cutex-desktop/protocol/codex";
 import type { CollaborationModeMask, ReviewTarget, ThreadGoal, ThreadGoalStatus } from "@cutex-desktop/protocol/codex/v2";
 import type { AddSshHostRequest, DirBrowse, HostAppearancePatch, HostGroupDraft, HostResult, HostsState, HostStartOn, HostTestResult, SshHostPatch, ViewScope } from "./hosts";
@@ -43,6 +45,7 @@ import type { RestoreCandidates } from "./runtimeRestore";
 import type { HostServiceInfo, UpgradeApplyRequest, UpgradeResult, UpgradeRollbackRequest, UpgradeRollbackResult, UpgradeRun, UpgradeSettings, UpgradeSettingsPatch, UpgradeStaging, UpgradeStatus } from "./backendUpgrade";
 import type { ComponentAction, ComponentResult, ComponentsList } from "./components";
 import type { QuotaContinueResult, QuotaContinueView } from "./quotaContinue";
+import type { ClaudeRepinResult, ClaudeRuntimeView } from "./claudeRepin";
 import type { CapabilitiesUser, PeerBindingResult, SelfProfile, SelfProfilePatch, TokenBindingResult, UserCreate, UserPatch, UsersList, UsersResult, UsersSettings, UserWriteResult } from "./users";
 import type { PeerAgents, PeerAuditEntry, PeerCaps, PeerInvite, PeerList, PeerPatch, PeerResult, PeersSettings, PeersSettingsPatch, PeerView } from "./peers";
 import type { ArtifactContent, ArtifactDeleteResult, ArtifactDetail, ArtifactDiff, ArtifactList, ArtifactListQuery, ArtifactPatch, ArtifactPatchResult, ArtifactPublishRequest, ArtifactPublishResult, ArtifactResolveItem, ArtifactUsage } from "./artifactStore";
@@ -68,6 +71,8 @@ export interface SidebarSnapshot {
   projects: ProjectsResponse | null;
   /** cutexSessionId → host-session row (project membership + appearance), from /v2/host/sessions. */
   hostRows: Record<string, HostSessionRow>;
+  /** The host's Claude runtime for new sessions (`GET /v2/sessions` `claudeRuntime`); absent on older cutex. */
+  claudeRuntime?: HostClaudeRuntime;
 }
 
 
@@ -250,6 +255,8 @@ export interface ProfileItem {
   id: string;
   name: string;
   cliKind: string;
+  /** cutex `profile-proxy` (shared/proxy.ts): the Profile's own proxy and what it resolves to. */
+  proxy?: ProfileProxyView;
   source: string | null;
   provider: string | null;
   model: string | null;
@@ -267,7 +274,20 @@ export interface ProfileItem {
   isDefault: boolean;
   /** `providerCategory` = set by hand (null = inferred); `effectiveProviderCategory` = what counts
    *  (cutex profile-provider-category-v2: kimi / glm / zai / claude / deepseek / codex / other). */
-  appearance: { color: string | null; effectiveColor: string | null; providerCategory: string | null; effectiveProviderCategory?: string | null };
+  appearance: {
+    color: string | null;
+    effectiveColor: string | null;
+    providerCategory: string | null;
+    effectiveProviderCategory?: string | null;
+    /** cutex `profile-avatar`: the owner's 头像主题 (theme ids, never empty); null = by model family. Absent on older cutex. */
+    avatarThemes?: string[] | null;
+    /** cutex `profile-avatar`: the custom intro greeting; null = the provider pool. Absent on older cutex. */
+    introGreeting?: string | null;
+  };
+  /** cutex `profile-avatar`: ETag of `GET /v2/profiles/{id}/avatar` (null = no picture). Absent on older cutex. */
+  avatarEtag?: string | null;
+  /** cutex `profile-avatar`: ETag of `GET /v2/profiles/{id}/intro-portrait` (null = none). Absent on older cutex. */
+  introPortraitEtag?: string | null;
   quotaEnabled: boolean;
   allowSessionSwitch: boolean;
   lastUsedAt: string | null;
@@ -317,6 +337,19 @@ export interface ProfileItem {
   claudeAllowExec?: boolean | null;
   /** Claude profiles: effective file checkpoints (null for Codex profiles); absent on older cutex. */
   claudeFileCheckpointing?: boolean | null;
+  /**
+   * cutex `claude-launch-permission-mode` (Claude profiles): the Claude Code permission modes a new
+   * agent / quick chat of this profile can start in (`launch.claudePermissionMode`), from the host's
+   * Claude runtime; [] = none offered. null for Codex profiles, absent on older cutex.
+   */
+  claudeLaunchPermissionModes?: string[] | null;
+  /**
+   * cutex `claude-code-sources` (Claude profiles): Claude Code settings sources new launches read —
+   * `project` (CLAUDE.md / .claude/ of the workspace), `user` (the Claude account home, never
+   * ~/.claude) — and whether the login's claude.ai connectors load. null for Codex profiles.
+   */
+  claudeSettingSources?: ClaudeSettingSource[] | null;
+  claudeAiConnectors?: boolean | null;
   /**
    * cutex `profile-model-display-names`: this profile's own display name per model entry
    * (model id → name). Display only; absent on older cutex.
@@ -460,6 +493,9 @@ export interface ProfileDetail extends ProfileItem {
      *  (null = unset) and the default (false; null for Codex). Absent on older cutex. */
     claudeFileCheckpointingExplicit?: boolean | null;
     claudeFileCheckpointingDefault?: boolean | null;
+    /** claude-code-sources: stored sources (null = the default) and the default ([]; null for Codex). */
+    claudeSettingSourcesExplicit?: ClaudeSettingSource[] | null;
+    claudeSettingSourcesDefault?: ClaudeSettingSource[] | null;
     /** claude-profile-default-model (Claude profiles): the item's `model` is the effective default of
      *  new sessions; these are its sources — the profile's own default, the per-profile
      *  `newSessionDefaults` override (wins; a PATCH `model` drops it) and the built-in default. */
@@ -483,6 +519,10 @@ export type ProfilePatch = Partial<{ [K in Exclude<keyof ProfileConfig, "modelCa
   color?: string | null;
   /** profile-provider-category-v2: kimi / glm / zai / claude / deepseek / codex / other; null = infer again. */
   providerCategory?: string | null;
+  /** profile-avatar: 头像主题 ids (non-empty, unique, known to the host); null = by model family. */
+  avatarThemes?: string[] | null;
+  /** profile-avatar: the intro greeting (≤ 300 chars); null / "" = the provider pool. */
+  introGreeting?: string | null;
   allowSessionSwitch?: boolean | null;
   apiKey?: string;
   /** Rename — only sent when cutex reports `detail.editable.name === true`. */
@@ -506,15 +546,22 @@ export type ProfilePatch = Partial<{ [K in Exclude<keyof ProfileConfig, "modelCa
   claudeAllowExec?: boolean | null;
   /** Claude profiles (`detail.editable.claudeFileCheckpointing`): null = clear (off); applies at the next runtime launch. */
   claudeFileCheckpointing?: boolean | null;
+  /** claude-code-sources (Claude profiles): the full source list; null = back to the default (none). Next launch. */
+  claudeSettingSources?: ClaudeSettingSource[] | null;
+  /** claude-code-sources (Claude profiles): claude.ai connectors of a subscription login. Next launch. */
+  claudeAiConnectors?: boolean;
   /** profile-plan-label (Codex profiles, ≤ 40 chars): null clears the stored label. */
   planLabel?: string | null;
   /** claude-accounts (Claude profiles): `ca-…`, or null / `default` = the shared account; an unknown id → 400. */
   claudeAccount?: string | null;
   /** profile-model-display-names: merge; a string sets that entry's name, null removes it. */
   modelDisplayNames?: Record<string, string | null>;
+  /** profile-proxy: inherit / none / manual (omitted url keeps the stored one); null = inherit. */
+  proxy?: ProfileProxyPatch | null;
 };
 
-export type ContextSource = "profile" | "catalog" | "default90Percent" | "unknown";
+/** `reference` / `notApplicable`: Claude rows (the adapter's nominal window; Claude Code decides compaction). */
+export type ContextSource = "profile" | "catalog" | "default90Percent" | "unknown" | "reference" | "notApplicable";
 
 export interface CatalogModel {
   id: string;
@@ -533,6 +580,10 @@ export interface CatalogModel {
   isDefault: boolean;
   discovered: boolean;
   effective: { contextWindow: number | null; contextWindowSource: ContextSource; autoCompactTokenLimit: number | null; autoCompactTokenLimitSource: ContextSource };
+  /** Claude reference rows: `alias` / `pinned` / `default` / `custom`; absent on Codex rows. */
+  kind?: string;
+  /** Claude reference rows: false when the model's effort levels are unknown (aliases); true + no levels = it has none. */
+  effortSupportKnown?: boolean;
 }
 
 /**
@@ -542,7 +593,9 @@ export interface CatalogModel {
  * cute-codex) and `notInBundled` (cached slugs missing from the compiled list).
  */
 export interface ModelsSource {
-  kind: "catalog" | "nativeCache" | "nativeBundled" | "claudeAliases" | "overlay" | (string & {});
+  kind: "catalog" | "nativeCache" | "nativeBundled" | "claudeReference" | "claudeAliases" | "overlay" | (string & {});
+  /** `claudeReference`: the adapter catalog's date. */
+  updatedAt?: string | null;
   clientVersion?: string | null;
   fetchedAt?: string | null;
   cliSha256?: string | null;
@@ -578,6 +631,8 @@ export interface ProfileModelsView {
   catalogOverlay?: { entries: number; migratedFrom: string | null } | null;
   unavailableModels?: UnavailableModel[];
   selectedModel: string | null;
+  /** false: the runtime decides compaction itself (Claude profiles); absent on older cutex. */
+  autoCompactApplies?: boolean;
   profileOverrides: { modelContextWindow: number | null; modelAutoCompactTokenLimit: number | null };
   discovery: { sourceUrl: string; fetchedAt: string; models: string[] } | null;
   models: CatalogModel[];
@@ -598,6 +653,8 @@ export interface UserInstructions {
 }
 
 export interface GlobalSettings {
+  /** cutex `proxy-modes` (shared/proxy.ts); changed only through `patchProxySettings`. Older cutex: another shape or null. */
+  proxy?: HostProxyView | null;
   defaultProfile: string | null;
   defaultProfileDirectLaunch: boolean;
   newSessionDefaults: Record<string, { model: string | null; reasoning: string | null }>;
@@ -661,6 +718,125 @@ export interface GlobalSettings {
    *  (`passing_not_allowed`). PATCH `{queue: {ownerMayPassAsks}}`. */
   queue?: { ownerMayPassAsks: boolean };
   queueDefault?: { ownerMayPassAsks: boolean };
+}
+
+/** cutex capability for {@link SessionSandboxExtras}: live network / extra writable roots of a session. */
+export const SESSION_SANDBOX_EXTRAS_FEATURE = "session-sandbox-extras";
+
+/**
+ * `GET|PATCH /v2/sessions/{id}/sandbox-extras` (cutex `session-sandbox-extras`, owner): network access
+ * and extra writable roots of a workspace-write Codex session, stored on the session (kept across
+ * restarts). `editable` false: `reason` = sandbox_not_workspace_write | unsupported_runtime | session_retired.
+ */
+export interface SessionSandboxExtras {
+  cutexSessionId: string;
+  sandbox: string | null;
+  networkAccess: boolean;
+  writableRoots: string[];
+  editable: boolean;
+  reason: string | null;
+  /** PATCH only: the stored values changed. */
+  changed?: boolean;
+  /** PATCH only: applied = on the running thread from its next turn; offline / failed = at the next start. */
+  live?: { status: "applied" | "offline" | "failed"; diagnostic?: unknown };
+}
+
+/** cutex capability for {@link ClaudePermissionRules}: persistent "always allow" rules of Claude agents. */
+export const CLAUDE_PERMISSION_RULES_FEATURE = "claude-permission-rules";
+
+/**
+ * `GET|PUT /v2/sessions/{id}/claude-permission-rules` (cutex `claude-permission-rules`, owner): the
+ * Claude permission rules (`Bash(git status:*)`, `Edit(src/**)`, …) kept by cutex for the agent's
+ * workspace — shared by every Claude agent with that working directory, never written into the repo.
+ * `supported` false: the agent's adapter predates them (it keeps asking).
+ */
+export interface ClaudePermissionRules {
+  cutexSessionId: string;
+  workspace: string;
+  revision: number;
+  updatedAt: string | null;
+  allow: string[];
+  supported: boolean;
+  /** PUT only: what each Claude agent of the workspace did with the new list. */
+  sessions?: { cutexSessionId: string; status: "live" | "nextStart" | "unsupported" }[];
+}
+
+/** One skill of `GET /v2/claude/skills/import` (cutex `claude-skills-import`). */
+export interface ClaudeSkillImportItem {
+  /** Directory name (what is imported and how it is named in ~/.cutex/claude-skills). */
+  name: string;
+  /** `name` / `description` from its SKILL.md front matter. */
+  title: string | null;
+  description: string | null;
+  bytes: number | null;
+  files: number | null;
+  /** A skill of that name is already in the shared directory (skipped unless overwrite). */
+  exists: boolean;
+  importable: boolean;
+  /** Why not importable: symlinkOutsideSource | tooLarge | tooManyFiles | tooDeep | skillFileTooLarge. */
+  reason?: string;
+  /** Links inside the skill that are left out (outside the source, or directories). */
+  skippedLinks: number;
+}
+
+export interface ClaudeSkillsImportList {
+  source: string;
+  defaultSource: string | null;
+  sourceExists: boolean;
+  target: string;
+  skills: ClaudeSkillImportItem[];
+  truncated: boolean;
+}
+
+export interface ClaudeSkillsImportResult {
+  imported: string[];
+  skipped: { name: string; reason: string }[];
+  failed: { name: string; reason: string; message: string }[];
+  target: string;
+}
+
+export interface SessionSandboxExtrasPatch {
+  networkAccess?: boolean;
+  writableRoots?: string[];
+}
+
+/** cutex `claude-code-sources`: a Claude Code settings source a Claude profile can turn on. */
+export type ClaudeSettingSource = "project" | "user";
+
+/** What one Claude launch passes (`next`) or passed (`launched`); no secret values. */
+export interface ClaudeCodeLaunchSummary {
+  settingSources: ClaudeSettingSource[];
+  claudeAiConnectors: boolean;
+  /** External MCP servers (merged global / project / agent layers) the adapter gets. */
+  mcpServers: string[];
+  skipped: { name: string; reason: string | null }[];
+  launchedAt?: string;
+}
+
+/** One merged MCP layer entry and what happens to it for this Claude agent. */
+export interface ClaudeCodeServer {
+  name: string;
+  layers: ("global" | "project" | "agent")[];
+  transport: "stdio" | "http" | "unknown";
+  status: "included" | "disabled" | "skipped";
+  /** disabled: agent | config; skipped: reserved | name | transport | unsupportedRuntime | limit */
+  reason: string | null;
+  ignoredFields: string[];
+}
+
+/** `GET /v2/sessions/{id}/claude-code` (cutex `claude-code-sources`, root): Claude Code sources / MCP of one Claude agent. */
+export interface ClaudeCodeSources {
+  cutexSessionId: string;
+  profile: string | null;
+  adapterSupports: { settingSources: boolean; mcpServers: boolean; claudeAiConnectors: boolean };
+  profileSettingSources: ClaudeSettingSource[];
+  profileClaudeAiConnectors: boolean;
+  next: ClaudeCodeLaunchSummary;
+  servers: ClaudeCodeServer[];
+  /** What the running / last adapter got; null before its first launch by a cutex with this feature. */
+  launched: ClaudeCodeLaunchSummary | null;
+  running: boolean;
+  restartNeeded: boolean;
 }
 
 /** Section ids of `GET /v2/sessions/{id}/harness`, in launch order. */
@@ -749,7 +925,7 @@ export interface AgentSecurityPatch {
 /** cutex owner approval (`GET /v2/approvals`, feature `owner-approvals`). */
 export interface ApprovalRecord {
   approvalId: string;
-  kind: "managed_service" | "agent_profile" | "browser_claim" | "browser_open" | "workflow_run" | (string & {});
+  kind: "managed_service" | "service_lifetime" | "static_root" | "agent_profile" | "ask_delivery" | "browser_claim" | "browser_open" | "workflow_run" | (string & {});
   /** `outside_caller_envelope`, `profile_requires_approval`, … */
   reason: string;
   requesterCutexSessionId: string;
@@ -764,10 +940,36 @@ export interface ApprovalRecord {
   createdAt: string;
   decidedAt?: string | null;
   note?: string | null;
+  /** cutex approval-decided-by: who decided (`client` = the deciding client's own, unverified facts). */
+  decidedBy?: { by: string; connection?: "loopback" | "remote"; peer?: string; client?: Record<string, string> } | null;
   consumedAt?: string | null;
+  /** cutex approval-wait: the requesting tool call holds for the decision until `until`; `end` once it stopped. */
+  wait?: ApprovalWait | null;
+}
+
+/** One tool call holding for the owner's decision (cutex `approval-wait`). */
+export interface ApprovalWait {
+  id: string;
+  startedAt: string;
+  until: string;
+  threadId?: string | null;
+  turnId?: string | null;
+  endedAt?: string | null;
+  /** `approved` | `denied` (returned by the call) | `timeout` | `disconnected` | `turn_ended` | `runtime_changed`. */
+  end?: string | null;
 }
 
 export type ApprovalDecision = "approve" | "deny";
+/**
+ * cutex `approval-decided-by`: where on this desktop the owner decided (main adds app / version / device
+ * and sends it as the decision's `client`; cutex stores it as `decidedBy.client`).
+ */
+export interface ApprovalDecisionOrigin {
+  /** `inline` = the dock card in the requesting agent's conversation; `page` = 审批. */
+  surface: "inline" | "page";
+  /** How the button was activated: a mouse / pen / touch click, or Enter / Space on the focused button. */
+  input: "pointer" | "touch" | "keyboard" | "unknown";
+}
 export type ApprovalDecisionResult = { ok: true; approval: ApprovalRecord } | { ok: false; error: CutexRefusal };
 
 /** Browser approval facts from cutex; identity is checked again by main/daemon, never model input. */
@@ -1105,6 +1307,19 @@ export type WindowsSandboxReadiness = "ready" | "notConfigured" | "updateRequire
 export interface DesktopApi extends DaemonApi, HostApi {}
 
 /** Daemon calls (main `DaemonService`, against the active host). */
+/** One message hit of native `thread/searchOccurrences`; `snippetMatchRange` is in UTF-16 code units of `snippet`. */
+export interface ThreadSearchHit {
+  turnId: string;
+  itemId: string;
+  snippet: string;
+  snippetMatchRange: { start: number; end: number };
+  turnCursor: string;
+}
+export interface ThreadSearchPage {
+  data: ThreadSearchHit[];
+  nextCursor: string | null;
+}
+
 export interface DaemonApi {
   notesList(query?: NotesQuery): Promise<NotesResult>;
   notesGet(id: string): Promise<Note>;
@@ -1242,6 +1457,10 @@ export interface DaemonApi {
   listProfiles(): Promise<{ defaultProfile: string | null; profiles: ProfileItem[] } | null>;
   getProfile(profile: string): Promise<ProfileDetail>;
   patchProfile(profile: string, patch: ProfilePatch): Promise<ProfileDetail>;
+  /** cutex `profile-avatar`: a profile's picture / intro portrait as a data: URL (null: none / older cutex). */
+  profileImage(profileId: string, kind: ProfileImageKind): Promise<{ dataUrl: string; etag: string | null } | null>;
+  /** cutex `profile-avatar`: upload (data: URL) / remove (null) → the stored ETag; refusals throw. */
+  putProfileImage(profileId: string, kind: ProfileImageKind, dataUrl: string | null): Promise<{ etag: string | null }>;
   /**
    * Profile lifecycle. The UI only calls these when cutex advertises `profile-create` /
    * `profile-duplicate` / `profile-delete`. A duplicate carries no credentials.
@@ -1267,7 +1486,7 @@ export interface DaemonApi {
   /** `GET /v2/approvals?state=` (feature owner-approvals); null when the daemon predates it. */
   approvals(state: "pending" | "all"): Promise<ApprovalRecord[] | null>;
   /** `POST /v2/approvals/{id}/approve|deny`; `approval_not_found` / `approval_not_pending` come back as a refusal. */
-  decideApproval(approvalId: string, decision: ApprovalDecision, note?: string): Promise<ApprovalDecisionResult>;
+  decideApproval(approvalId: string, decision: ApprovalDecision, note?: string, origin?: ApprovalDecisionOrigin): Promise<ApprovalDecisionResult>;
   /** `GET /v2/runtime-packages` (feature runtime-package-upgrade, root); null when the daemon predates it. */
   runtimePackages(): Promise<RuntimePackagesView | null>;
   /** `GET /v2/runtime-packages/runs/{runId}`; null when unknown or the daemon predates it. */
@@ -1305,6 +1524,8 @@ export interface DaemonApi {
   /** `GET /v2/profiles/{p}/quota` with `source` + `nativeQuota` (Claude account windows / API usage); null when the route is missing. */
   profileQuotaDetail(profile: string): Promise<ProfileQuotaDetail | null>;
   patchSettings(patch: Partial<GlobalSettings>): Promise<GlobalSettings & { restartRequired: string[] }>;
+  /** `PATCH /v2/settings {proxy}` (cutex `proxy-modes`; 403 `proxy_owner_credential_required` on a paired device). */
+  patchProxySettings(patch: HostProxyPatch): Promise<GlobalSettings>;
   /** `PATCH /v2/settings {newThreadDefaults}` (feature new-thread-defaults); a null field = back to built-in. */
   patchNewThreadDefaults(patch: NewThreadDefaultsPatch): Promise<GlobalSettings & { restartRequired: string[] }>;
   /** `POST /v2/pairing-codes` (feature device-pairing; loopback, which includes the SSH tunnel). */
@@ -1318,6 +1539,34 @@ export interface DaemonApi {
   userInstructions(): Promise<UserInstructions>;
   /** `GET /v2/sessions/{id}/harness` (feature agent-harness, root token). */
   agentHarness(sessionId: string): Promise<AgentHarnessPreview>;
+  /** `GET /v2/sessions/{id}/claude-code` (feature claude-code-sources, root token; Claude agents). */
+  claudeCodeSources(sessionId: string): Promise<ClaudeCodeSources>;
+  /** `GET /v2/sessions/{id}/claude-runtime` (cutex `claude-runtime-repin`, root; Claude agents): pin, selected runtime, dry run. */
+  claudeRuntime(sessionId: string): Promise<ClaudeRuntimeView>;
+  /**
+   * `POST /v2/sessions/{id}/claude-runtime/repin` `{target}` (owner): move a Claude agent to the selected runtime
+   * (`target` = the release the dialog showed); a refusal (409 claude_repin_refused, claude_runtime_changed, …) as `ok: false`.
+   */
+  repinClaudeRuntime(sessionId: string, target: string): Promise<ClaudeRepinResult>;
+  /**
+   * `GET /v2/sessions/{id}/skills` (cutex `claude-session-skills`, root): a Claude agent's managed skills in
+   * the Codex `skills/list` shape (works while its runtime is offline).
+   */
+  sessionSkills(sessionId: string): Promise<unknown>;
+  /** Claude adapter `claude/model/status` (modelObservation): the model that actually answered; null when offline. */
+  claudeModelStatus(sessionId: string, threadId: string): Promise<unknown>;
+  /** `GET /v2/sessions/{id}/sandbox-extras` (feature session-sandbox-extras, owner). */
+  sessionSandboxExtras(sessionId: string): Promise<SessionSandboxExtras>;
+  /** `PATCH /v2/sessions/{id}/sandbox-extras`: store + apply to the running thread (next turn). */
+  setSessionSandboxExtras(sessionId: string, patch: SessionSandboxExtrasPatch): Promise<SessionSandboxExtras>;
+  /** `GET /v2/sessions/{id}/claude-permission-rules` (feature claude-permission-rules, owner). */
+  claudePermissionRules(sessionId: string): Promise<ClaudePermissionRules>;
+  /** `PUT /v2/sessions/{id}/claude-permission-rules`: replace the workspace's list (CAS on `expectedRevision`). */
+  setClaudePermissionRules(sessionId: string, allow: string[], expectedRevision?: number): Promise<ClaudePermissionRules>;
+  /** `GET /v2/claude/skills/import` (cutex `claude-skills-import`, owner): skills in `source` (default: the host user's ~/.claude/skills). */
+  claudeSkillsImportList(source?: string): Promise<ClaudeSkillsImportList>;
+  /** `POST /v2/claude/skills/import`: copy the named skills into the host's ~/.cutex/claude-skills. */
+  importClaudeSkills(names: string[], options?: { source?: string; overwrite?: boolean }): Promise<ClaudeSkillsImportResult>;
   putUserInstructions(content: string, expectedRevision: string): Promise<UserInstructions>;
   /** Allowlisted cutex session mutations for menus: metadata/update, retire, restore, visibility/*, runtime/offline|online. */
   sessionAction(sessionId: string, method: SessionActionMethod, params: Record<string, unknown>): Promise<unknown>;
@@ -1331,8 +1580,11 @@ export interface DaemonApi {
    * Without `expectedRevision` it applies to the current revision (agents the desktop doesn't list).
    */
   deleteSession(sessionId: string, expectedRevision?: number): Promise<MutationResult>;
-  /** `cutex/session/history/revert`: drop turns from `beforeTurnId` on, on the live runtime (no restart). */
-  revertHistory(sessionId: string, beforeTurnId: string, expectedRevision: number): Promise<unknown>;
+  /**
+   * `cutex/session/history/revert`: drop turns from `beforeTurnId` on, on the live runtime (no restart).
+   * `rewindFiles` (Claude agents, cutex `claude-rewind-files`): also restore files from Claude Code's checkpoint.
+   */
+  revertHistory(sessionId: string, beforeTurnId: string, expectedRevision: number, options?: { rewindFiles?: boolean }): Promise<unknown>;
   /** cute-codex `thread/backgroundTerminals/list` (long-running commands of this thread). */
   backgroundTerminals(sessionId: string, threadId: string): Promise<BackgroundTerminal[]>;
   /** cute-codex `thread/backgroundTerminals/terminate` (needs the cutex allowlist entry). */
@@ -1340,6 +1592,9 @@ export interface DaemonApi {
   /** cute-codex `thread/read` of a sub-agent thread spawned by this agent (cutex `subagent-threads`). Raw native result.
    *  `includeTurns: false` = the thread only (nickname / role / status), no history. */
   subAgentThread(sessionId: string, threadId: string, opts?: { includeTurns?: boolean }): Promise<unknown>;
+  /** Native `thread/searchOccurrences` on the agent's own thread (cutex `thread-search-occurrences`): visible user and final
+   *  assistant messages containing `term` (case-insensitive), oldest first, one page. */
+  searchThread(sessionId: string, threadId: string, term: string, cursor?: string | null): Promise<ThreadSearchPage>;
   /** cutex project mutation (add_member / detach_member / set_workspace_root / archive / restore). */
   projectMutation(projectId: string, expected: { authorityEpoch: number; projectRevision: number }, operation: ProjectMutationOperation): Promise<unknown>;
   /** cutex project presentation update (name / badge / color). */
@@ -1797,6 +2052,8 @@ export interface DesktopEvents {
   identityState: import("./personIdentity").PersonIdentityView;
   /** The open SSH questions changed (main/sshAskpass.ts; the whole list, oldest first). */
   sshPrompts: { prompts: import("./sshPrompt").SshPromptView[] };
+  /** Signed module packs: the whole view after any change (check / install progress / remove; main/modulePacks.ts, §23). */
+  modulePacks: import("./modulePacks").ModulePacksView;
 }
 
 /** `DesktopEvents` keys whose payload carries a `HostTag` (daemon events and main-side per-host events such as the browser's). */
@@ -1824,6 +2081,8 @@ export interface PreloadBridge {
   plugins?: import("./plugins").PluginBridge;
   /** Agent pages: one-use opaque frame documents of HTML artifacts (shared/frames.ts, §10.2). */
   frames?: import("./frames").FramesBridge;
+  /** Signed first-party module packs (shared/modulePacks.ts, docs/desktop-modules.md §23). Absent in plain browser previews unless mocked. */
+  modulePacks?: import("./modulePacks").ModulePacksBridge;
   on<K extends keyof DesktopEvents>(event: K, listener: (payload: DesktopEvents[K]) => void): () => void;
   platform: NodeJS.Platform;
   /** Window chrome (custom title bar). Absent in the browser preview. */
@@ -1845,6 +2104,12 @@ export interface WindowBridge {
   control(action: WindowAction): Promise<void>;
   /** Recolor the native Windows caption buttons to match the app theme. */
   setChrome(colors: { color: string; symbolColor: string }): Promise<void>;
+  /**
+   * The window colour (theme + palette, `--win`): main paints the window with it now and at the next
+   * start before the page draws, so a 宣纸 / 暮色 window does not flash white / grey first. Optional:
+   * older preloads and the browser preview lack it.
+   */
+  setBackground?(color: string): Promise<void>;
   /** Native caption buttons drawn by the OS (Windows overlay / macOS traffic lights) and their side. */
   nativeControls: "right" | "left" | null;
 }
@@ -1902,6 +2167,10 @@ export interface DesktopPrefs {
   updateRemotes?: { main?: string; release?: string };
   /** Device methods this device turned off for itself (Settings → 通知 → 本设备); main skips them too (big alert). */
   notifyOff: DeviceOff;
+  /** This desktop's update proxy (shared/proxy.ts); absent = follow the system. Credentials are kept by main. */
+  updateProxy?: UpdateProxyPref;
+  /** Main only (never in ShellState): the manual update proxy's `user:password`, safeStorage-encrypted, base64. */
+  updateProxyAuth?: string;
 }
 export interface ShellState {
   prefs: DesktopPrefs;
@@ -1951,6 +2220,7 @@ export type ShellRequest =
   | { op: "setTerms"; value: ShellTermsPref | null }
   | { op: "setAttention"; count: number }
   | { op: "setUpdateCheckMinutes"; value: number }
+  | { op: "setUpdateProxy"; value: UpdateProxyRequest }
   | { op: "logError"; kind: "error" | "unhandledrejection" | "reported"; message: string; stack?: string }
   | { op: "openLogs" }
   | { op: "openQuickstart" }
@@ -1970,6 +2240,8 @@ export interface ShellBridge {
   /** Number of agents waiting for the user (approval / question); sent only on change. */
   setAttention(count: number): Promise<void>;
   setUpdateCheckMinutes(value: number): Promise<ShellState>;
+  /** This desktop's update proxy (updater requests only); throws on an invalid URL or, with credentials, no keyring. */
+  setUpdateProxy?(value: UpdateProxyRequest): Promise<ShellState>;
   /** Append to the desktop error log (userData/logs/errors.jsonl). */
   logError(entry: { kind: "error" | "unhandledrejection" | "reported"; message: string; stack?: string }): Promise<void>;
   /** Open the log folder in the file manager. */

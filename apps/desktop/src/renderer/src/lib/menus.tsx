@@ -32,8 +32,12 @@ import {
   Type,
   Undo2,
   X,
+  FileClock,
+  CircleArrowUp,
+  CircleDot,
+  Smile,
 } from "lucide-react";
-import type { SessionResource } from "@cutex-desktop/protocol";
+import type { SessionAvatar, SessionResource } from "@cutex-desktop/protocol";
 import { translate, type MessageKey } from "../i18n";
 import { agentHost, featuresOf, hostApi, pinnedOn, sidebarOf, useApp, viewHostOf } from "../store";
 import type { FileRef } from "./workspace";
@@ -46,7 +50,7 @@ import { AVATAR_COLOR_FEATURE, agentInfoPatch } from "./avatar";
 import { realAgentName } from "./agentAlias";
 import { fieldsUnchanged, isRevisionConflict } from "./metadataRetry";
 import { refusalText } from "./profileCreate";
-import { lacks } from "./agentFeatures";
+import { canRewindFiles, lacks } from "./agentFeatures";
 import { agentFeaturesFor } from "./agentFeaturesView";
 import { structuralBlockFor, structuralBlockText, structuralErrorText } from "./structuralGateView";
 import { markSeenOn, turnMarksOn } from "./turnUnread";
@@ -63,6 +67,12 @@ import type { MutationResult } from "../../../shared/ipc";
 import { asksPauseKind } from "./stopHold";
 import { loadQuotaContinue, quotaContinueNow, setQuotaContinue } from "./quotaContinue";
 import { isOwnerFeatures } from "../../../shared/users";
+import { runtimeStartSince } from "./runtimeStart";
+import { repinApplies, repinMenuOffer, runRepinFlow } from "./claudeRepin";
+import { avatarSwitchOf, hiddenAvatar, shownAvatar } from "./avatarDefault";
+import { themedEmoji } from "./avatarThemes";
+import { agentThemesNow } from "./agentLook";
+import { getUiPrefs } from "./prefs";
 
 type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
 const ICON = 14;
@@ -223,6 +233,31 @@ async function editAgentInfo(session: SessionResource, host: string): Promise<vo
   if (Object.keys(patch).length) await updateMetadata(session, host, patch, { avatar: before.avatar, note: before.note, displayNameOverride: session.displayNameOverride ?? null });
 }
 
+/**
+ * 显示头像 / 隐藏头像 (默认头像 = 仅重要智能体): the owner's explicit, synced choice — writes the theme's
+ * default emoji as the agent's cutex avatar, or clears it back to the dot. Needs `session-metadata`
+ * (the avatar field of cutex/session/metadata/update); Directors / pinned agents and pictures get none.
+ */
+function avatarSwitchItem(session: SessionResource, t: T, host: string, features: ReadonlySet<string>, pinned: boolean): MenuAction | null {
+  if (!features.has("session-metadata")) return null;
+  const id = session.cutexSessionId;
+  const isDirector = !!sidebarOf(useApp.getState(), host)?.projects?.projects.some((p) => p.director_cutex_session_id === id);
+  const current = session.avatar ?? null;
+  const which = avatarSwitchOf(getUiPrefs().agentAvatarDefault, { isDirector, pinned, avatar: current });
+  if (!which) return null;
+  const avatar = which === "show" ? shownAvatar(themedEmoji(id, agentThemesNow(id)).glyph, current, features.has(AVATAR_COLOR_FEATURE)) : hiddenAvatar(current);
+  return {
+    label: t(which === "show" ? "menu.showAvatar" : "menu.hideAvatar"),
+    icon: which === "show" ? <Smile size={ICON} /> : <CircleDot size={ICON} />,
+    onSelect: guarded(() => setAgentAvatar(session, host, avatar)),
+  };
+}
+
+/** One avatar write through the same fenced metadata update as 编辑信息. */
+export async function setAgentAvatar(session: SessionResource, host: string, avatar: SessionAvatar | null): Promise<void> {
+  await updateMetadata(session, host, { avatar }, { avatar: session.avatar ?? null });
+}
+
 /** Archive with the same confirmation as the menu item (`/archive`); false when cancelled. */
 export async function archiveAgent(session: SessionResource, t: T, host = hostOfSession(session)): Promise<boolean> {
   const current = fenceOf(host);
@@ -309,6 +344,8 @@ export function runtimeItem(session: SessionResource, t: T, host = hostOfSession
   const status = session.runtime.status;
   if (session.lifecycle === "retired" || status === "starting") return null;
   if (status !== "online") {
+    // A start of ours still waiting for cutex's answer (lib/runtimeStart): shown, not offered again.
+    if (runtimeStartSince(host, id) !== null) return { label: t("menu.starting"), icon: <Power size={ICON} />, disabled: true, onSelect: () => {} };
     // The desktop is the front end: no "attach from a terminal" step.
     return { label: t("menu.start"), icon: <Power size={ICON} />, onSelect: guarded(() => app.sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, host)) };
   }
@@ -338,6 +375,47 @@ function restartItem(session: SessionResource, t: T, host: string): MenuAction |
       await app.sessionAction(id, "cutex/runtime/offline", { expectedRuntimeGeneration: session.runtime.runtimeGeneration }, host);
       if (!current()) return;
       await app.sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, host);
+    }),
+  };
+}
+
+/**
+ * 升级运行时 (cutex claude-runtime-repin, lib/claudeRepin): a Claude agent whose pinned runtime is older than
+ * the host's selected one ("claude-r17 → claude-r19"). Decided from the agent list (cutex
+ * session-claude-runtime; older cutex: the cached view, loaded now for the next open); the click reloads
+ * the view, confirms and repins; a running agent is offered the restart.
+ */
+function repinItem(session: SessionResource, t: T, host: string): MenuAction | null {
+  const app = useApp.getState();
+  if (!repinApplies(featuresOf(app, host), session)) return null;
+  const id = session.cutexSessionId;
+  const sidebar = sidebarOf(app, host);
+  // The list's row is the freshest copy of the agent (the caller's may predate a reload).
+  const row = sidebar?.active.find((s) => s.cutexSessionId === id) ?? session;
+  const offer = repinMenuOffer(() => hostApi(host), host, row, sidebar?.claudeRuntime);
+  if (!offer) return null;
+  return {
+    label: t("menu.upgradeRuntime"),
+    icon: <CircleArrowUp size={ICON} />,
+    hint: `${offer.from} → ${offer.to}`,
+    onSelect: guarded(async () => {
+      const current = fenceOf(host);
+      await runRepinFlow({
+        api: hostApi(host),
+        hostId: host,
+        session,
+        t,
+        confirm: (message, labels, danger) => confirmDialog(message, danger, labels),
+        notice: noticeDialog,
+        notify: (message) => useApp.getState().notify(message),
+        restart: async () => {
+          if (!current()) return;
+          const live = useApp.getState();
+          await live.sessionAction(id, "cutex/runtime/offline", undefined, host);
+          if (!current()) return;
+          await live.sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, host);
+        },
+      });
     }),
   };
 }
@@ -451,6 +529,7 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
       onSelect: guarded(() => renameAgent(session, t, undefined, host)),
     },
     { label: t("menu.editInfo"), icon: <StickyNote size={ICON} />, onSelect: guarded(() => editAgentInfo(session, host)) },
+    !retired && avatarSwitchItem(session, t, host, features, pinned),
     canFork && {
       label: t("menu.forkAgent"),
       icon: <GitFork size={ICON} />,
@@ -465,6 +544,7 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
     // ── runtime ──
     runtimeItem(session, t, host),
     restartItem(session, t, host),
+    repinItem(session, t, host),
     "separator",
     // ── archive / delete ──
     retired && { label: t("menu.restore"), icon: <ArchiveRestore size={ICON} />, onSelect: guarded(() => restoreWithDirector(session, t, host)) },
@@ -534,6 +614,18 @@ export function messageMenu(m: MessageMenuInput, t: T, canRevert: boolean): Menu
         danger: true,
         confirm: t("menu.revertConfirm", { n: m.laterTurns ?? 0 }),
         onSelect: guarded(() => app.revertTo(m.sessionId, m.nextTurnId!)),
+        ...blocked,
+      },
+    // Claude agents with file rewind (claude-rewind-files): the same revert, files restored too.
+    m.kind === "agent" &&
+      canRevert &&
+      m.nextTurnId &&
+      canRewindFiles(agentFeaturesFor(m.sessionId), app.features) && {
+        label: t("reply.revertWithFiles"),
+        icon: <FileClock size={ICON} />,
+        danger: true,
+        confirm: t("menu.revertFilesConfirm", { n: m.laterTurns ?? 0 }),
+        onSelect: guarded(() => app.revertTo(m.sessionId, m.nextTurnId!, { rewindFiles: true })),
         ...blocked,
       },
   ];

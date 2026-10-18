@@ -18,6 +18,12 @@ export function latestPlan(state: TimelineState | null): PlanSnapshot | null {
   return plan && plan.steps.length > 0 && !plan.dismissed ? plan : null;
 }
 
+/** The plan the owner hid (non-empty, dismissed), or null: the status row offers to show it again. */
+export function hiddenPlan(state: TimelineState | null): PlanSnapshot | null {
+  const plan = state?.plan ?? null;
+  return plan && plan.steps.length > 0 && plan.dismissed ? plan : null;
+}
+
 export function planProgress(steps: readonly PlanStep[]): { done: number; total: number } {
   return { done: steps.filter((s) => s.status === "completed").length, total: steps.length };
 }

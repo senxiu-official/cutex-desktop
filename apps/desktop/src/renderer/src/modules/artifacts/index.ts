@@ -74,7 +74,7 @@ export default defineModule({
     // An agent's live publish: opened beside its conversation / a card with 查看 (live.ts, autoOpen.ts).
     "conversation.overlay": [{ id: "artifacts.toasts", order: 300, Overlay: ArtifactToasts }],
     "settings.section": [
-      { id: "artifacts.settings", page: "conversation", order: 450, titleKey: "artifacts.settings", keywords: ["artifacts.autoOpen", "artifacts.autoOpenHint", "artifacts.autoOpen.open", "artifacts.autoOpen.notify", "artifacts.autoOpen.off"], Section: ArtifactSettings },
+      { id: "artifacts.settings", page: "sides", order: 450, titleKey: "artifacts.settings", keywords: ["artifacts.autoOpen", "artifacts.autoOpenHint", "artifacts.autoOpen.open", "artifacts.autoOpen.notify", "artifacts.autoOpen.off"], Section: ArtifactSettings },
     ],
     "project.tab": [{ id: "artifacts.projectTab", tab: "artifacts", order: 310, titleKey: "artifacts.library", Body: ProjectLibraryTab, useSummary: useProjectArtifactsSummary }],
     "timeline.tool": [

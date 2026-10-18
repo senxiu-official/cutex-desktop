@@ -6,7 +6,8 @@ import { translate, type MessageKey } from "../i18n";
 import type { SideOpenOptions, SideOpenResult } from "../modules/slots";
 import type { ItemId, Json } from "../modules/types";
 import { useApp } from "../store";
-import { isClaudeTaskRef } from "./claudeTasks";
+import { agentFeaturesFor } from "./agentFeaturesView";
+import { canOpenSubAgent } from "./claudeTasks";
 import { getUiPrefs } from "./prefs";
 import { newInstanceOpts, PLAIN_OPEN, type OpenModifiers } from "./openModifiers";
 import { toggleColumn } from "./sideActions";
@@ -16,12 +17,14 @@ import {
   DEFAULT_SIDE_COMPONENTS,
   DIFF_COMPONENT,
   PREVIEW_COMPONENT,
+  SIDE_AGENT_COMPONENT,
   SUBAGENT_THREAD_COMPONENT,
   type DiffParams,
   type PreviewParams,
+  type SideAgentParams,
   type SubagentThreadParams,
 } from "./sideKinds";
-import { sideOpen } from "./sideServices";
+import { sideOpen, sideShowsHost } from "./sideServices";
 
 /** services.side.open + a notice when it cannot open (unknown / off / capability / agent …). */
 export function openSide(kind: ItemId, params: Json = null, opts: SideOpenOptions = {}): SideOpenResult {
@@ -73,12 +76,13 @@ export function openChanges(): SideOpenResult {
 }
 
 /**
- * A sub-agent's thread, read-only (sub-agent chips, the status category's rows). A Claude task
- * (`claude:<session>:task:<id>`, lib/claudeTasks) is not a thread: the callers render it as not
- * openable; should one still get here, it says why and opens nothing.
+ * A sub-agent's thread, read-only (sub-agent chips, the status category's rows, a Claude Agent tool
+ * card). A Claude task (`claude:<session>:task:<id>`, lib/claudeTasks) opens only when the agent's
+ * adapter keeps subagent transcripts; otherwise the callers render it as not openable, and should
+ * one still get here, it says why and opens nothing.
  */
-export function openSubagentThread(threadId: string): SideOpenResult {
-  if (isClaudeTaskRef(threadId)) {
+export function openSubagentThread(threadId: string, sessionId: string | null = useApp.getState().selectedId): SideOpenResult {
+  if (!canOpenSubAgent(threadId, agentFeaturesFor(sessionId))) {
     useApp.getState().notify(translate("sub.claudeTask"), "info");
     return { status: "unavailable", reason: "bad-params" };
   }
@@ -96,4 +100,17 @@ export function toggleSideColumn(): void {
     // Nothing available (no workspace, module off): show the empty column with its launchers.
     if (!opened) toggleColumn();
   });
+}
+
+/**
+ * Another agent's live conversation in the side area (agent menu 「在侧边打开」, middle / Ctrl(⌘)-click on a
+ * sidebar row). The side area shows the open agent's host only: an agent of another host opens in the
+ * main area instead. `background`: open without taking the view (the card / page button flashes).
+ */
+export function openAgentSide(sessionId: string, hostId: string, background = false): SideOpenResult | null {
+  if (!sideShowsHost(hostId)) {
+    void useApp.getState().openAgent(sessionId, hostId);
+    return null;
+  }
+  return openSide(SIDE_AGENT_COMPONENT, { sessionId } satisfies SideAgentParams, { binding: { kind: "host", hostId }, pin: true, ...(background ? { background: true } : {}) });
 }

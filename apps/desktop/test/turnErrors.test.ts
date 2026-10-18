@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import { applyEvent, orderedEntries, timelineFromThreadRead, turnErrorText } from "../src/renderer/src/lib/timeline";
-import { turnErrorPlacement } from "../src/renderer/src/lib/turnErrors";
+import { turnErrorPlacement, turnInterruptedPlacement } from "../src/renderer/src/lib/turnErrors";
 
 function native(method: string, params: unknown): EventEnvelope {
   return {
@@ -51,6 +51,36 @@ describe("failed turns", () => {
       { id: "c", status: "failed" as const, startedAt: 5, completedAt: 6, entryIds: [], error: null },
     ];
     const placed = turnErrorPlacement(["a", "a", null, "b", "c"], turns);
+    expect([...placed.keys()]).toEqual([1]);
+  });
+});
+
+// r243 acceptance (claude-r17): a runtime restart mid-reply settled the turn `interrupted`; its reply
+// ended mid-sentence and nothing under it said the turn was cut off, live or after a reload.
+describe("interrupted turns", () => {
+  const agentItem = { type: "agentMessage", id: "a1", text: "流过平的", phase: "commentary" };
+  const cutTurn = { id: "t1", status: "interrupted", startedAt: 100, completedAt: 106, items: [userItem, agentItem], itemsView: "full", error: null };
+
+  it("marks the end of a turn interrupted mid-reply (live)", () => {
+    const state = timelineFromThreadRead({ thread: { id: "th", turns: [] } });
+    applyEvent(state, native("turn/started", { threadId: "th", turn: { id: "t1", status: "inProgress", startedAt: 100, items: [] } }));
+    applyEvent(state, native("item/completed", { threadId: "th", turnId: "t1", item: userItem }));
+    applyEvent(state, native("item/completed", { threadId: "th", turnId: "t1", item: agentItem }));
+    applyEvent(state, native("turn/completed", { threadId: "th", turn: cutTurn }));
+    const segmentTurnIds = orderedEntries(state).map((entry) => entry.turnId);
+    const placed = turnInterruptedPlacement(segmentTurnIds, state.turns);
+    expect([...placed.entries()].map(([i, turns]) => [i, turns.map((t) => t.id)])).toEqual([[segmentTurnIds.length - 1, ["t1"]]]);
+  });
+
+  it("marks it after a reload too, and never a completed or failed turn", () => {
+    const state = timelineFromThreadRead({ thread: { id: "th", turns: [cutTurn, { id: "t2", status: "completed", items: [] }] } });
+    const segmentTurnIds = orderedEntries(state).map((entry) => entry.turnId);
+    expect([...turnInterruptedPlacement(segmentTurnIds, state.turns).values()].flat().map((t) => t.id)).toEqual(["t1"]);
+    const turns = [
+      { id: "a", status: "interrupted" as const, startedAt: 1, completedAt: 2, entryIds: [] },
+      { id: "b", status: "failed" as const, startedAt: 3, completedAt: 4, entryIds: [], error: "boom" },
+    ];
+    const placed = turnInterruptedPlacement(["a", "a", "b"], turns);
     expect([...placed.keys()]).toEqual([1]);
   });
 });

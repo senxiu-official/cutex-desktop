@@ -7,7 +7,7 @@
 // needed); plan mode and goal need the live native thread. Project memory comes from cutex
 // `GET /v2/projects/{id}/memory` (read-only here; edited on the Projects page).
 import { useState, type ReactNode } from "react";
-import { AtSign, BookOpen, Brain, ChevronRight, Flag, FolderKanban, ImagePlus, ListChecks, Plug, Plus, Sparkles, Wand2 } from "lucide-react";
+import { AtSign, BookOpen, Brain, ChevronRight, Download, Flag, FolderKanban, ImagePlus, ListChecks, Plug, Plus, Sparkles, Wand2 } from "lucide-react";
 import type { ListMcpServerStatusResponse, McpServerStatus, SkillMetadata } from "@cutex-desktop/protocol/codex/v2";
 import { useI18n, type MessageKey } from "../i18n";
 import { mcpState, mcpSummary, skillsSummary, sortSkills, type McpTone } from "../lib/composerTools";
@@ -90,6 +90,13 @@ export interface ComposerToolsProps {
   onInsertSkill(skill: SkillMetadata): void;
   /** Why skill inputs are unavailable for this agent (Claude: `skillInput: false`); null = available. */
   skillRefDisabledReason?: string | null;
+  /**
+   * The skills are a Claude agent's own managed catalog (cutex claude-session-skills): no per-skill
+   * switches (those write the shared Codex config) and no 管理 link; the header names the roots.
+   */
+  skillsManaged?: boolean;
+  /** Managed Claude skills on a host with cutex `claude-skills-import`: 「从 ~/.claude/skills 导入…」. */
+  onImportSkills?: () => void;
   plan: { available: boolean; on: boolean; disabledReason: string | null; set(on: boolean): void };
   /** Omitted (a Claude-profile draft: that runtime has no goals) → the 目标 row is hidden. */
   goal?: { label: string; disabledReason: string | null; onClick(): void };
@@ -107,7 +114,7 @@ export interface ComposerToolsProps {
   onManage(tab: "skills" | "mcp"): void;
 }
 
-export function ComposerTools({ canImages, imagePickBlocked, canFiles, filesDisabledReason, onPickImages, onMention, skills, skillsError, onLoadSkills, onInsertSkill, skillRefDisabledReason, plan, goal, memory, onManage }: ComposerToolsProps) {
+export function ComposerTools({ canImages, imagePickBlocked, canFiles, filesDisabledReason, onPickImages, onMention, skills, skillsError, onLoadSkills, onInsertSkill, skillRefDisabledReason, skillsManaged, onImportSkills, plan, goal, memory, onManage }: ComposerToolsProps) {
   const { t } = useI18n();
   const [fly, setFly] = useState<FlyoutId | null>(null);
   const [mcp, setMcp] = useState<McpServerStatus[] | null>(null);
@@ -293,10 +300,18 @@ export function ComposerTools({ canImages, imagePickBlocked, canFiles, filesDisa
               header={
                 <div className="px-2.5 pt-1.5 pb-1">
                   <div className="text-xs text-subtle">{t("composer.tools.skills")}</div>
-                  <div className="text-[11px] text-subtle">{t("composer.tools.skillsScope")}</div>
+                  <div className="text-[11px] text-subtle">{t(skillsManaged ? "composer.tools.skillsClaudeScope" : "composer.tools.skillsScope")}</div>
                 </div>
               }
-              footer={<Row
+              footer={skillsManaged ? (onImportSkills ? <Row
+                  icon={<Download size={14} />}
+                  label={t("composer.tools.skillsImport")}
+                  hint={t("composer.tools.skillsImportHint")}
+                  onClick={() => {
+                    close();
+                    onImportSkills();
+                  }}
+                /> : undefined) : <Row
                   icon={<ChevronRight size={14} />}
                   label={t("composer.tools.manage")}
                   onClick={() => {
@@ -317,7 +332,7 @@ export function ComposerTools({ canImages, imagePickBlocked, canFiles, filesDisa
                       {s.pluginId ? ` · ${s.pluginId}` : ""} · {skillDesc(s)}
                     </span>
                   </span>
-                  <Toggle checked={s.enabled} disabled={pending.has(s.path)} onChange={(v) => void toggleSkill(s, v)} />
+                  {!skillsManaged && <Toggle checked={s.enabled} disabled={pending.has(s.path)} onChange={(v) => void toggleSkill(s, v)} />}
                 </div>
               ))}
             </FlyoutRow>

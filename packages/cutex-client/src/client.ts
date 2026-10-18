@@ -30,7 +30,7 @@ import type { ClientTokenList, ClientTokenRenamed, HostSummary, PairingCode, Pai
 import { CutexApiError, CutexUnreachableError } from "./errors";
 import { componentName, readComponentOperation, readComponentsList, type ComponentOperation, type ComponentsList } from "./components";
 import { readHostServiceInfo, UPGRADE_RUN_ID, upgradeApplyBody, upgradeRefusalOf, upgradeRollbackBody, upgradeSettingsBody, upgradeStageBody, type HostServiceInfo, type UpgradeApplyRequest, type UpgradeResult, type UpgradeRollbackRequest, type UpgradeRollbackResult, type UpgradeRun, type UpgradeSettings, type UpgradeSettingsPatch, type UpgradeStaging, type UpgradeStatus } from "./upgrade";
-import { AVATAR_CONTENT_TYPES, AVATAR_MAX_BYTES, grantBody, PERSON_PUBLIC_KEY, PERSON_SIGNATURE, personKeysBody, selfProfileBody, DISPLAY_NAME_MAX, IDENTITY_CLAIM_OUTCOMES, type IdentityChallenge, type IdentityClaimOutcome, type IdentityClaimResult, type PersonKeyInput, type PersonKeysResult, type TokenPersonAckResult, userColorBody, userNameBody, USER_ID, type AvatarContentType, type SelfProfile, type SelfProfilePatch, type UserAvatar, type PeerBindingResult, type TokenBindingResult, type UserCreate, type UserPatch, type UsersList, type UsersSettings, type UserWriteResult, type OwnDevices, type OwnDeviceRevoked } from "./users";
+import { AVATAR_CONTENT_TYPES, AVATAR_ETAG, AVATAR_MAX_BYTES, grantBody, PROFILE_IMAGE_KINDS, PROFILE_IMAGE_MAX_BYTES, profileImagePath, type AvatarUpload, type ProfileImageKind, PERSON_PUBLIC_KEY, PERSON_SIGNATURE, personKeysBody, selfProfileBody, DISPLAY_NAME_MAX, IDENTITY_CLAIM_OUTCOMES, type IdentityChallenge, type IdentityClaimOutcome, type IdentityClaimResult, type PersonKeyInput, type PersonKeysResult, type TokenPersonAckResult, userColorBody, userNameBody, USER_ID, type AvatarContentType, type SelfProfile, type SelfProfilePatch, type UserAvatar, type PeerBindingResult, type TokenBindingResult, type UserCreate, type UserPatch, type UsersList, type UsersSettings, type UserWriteResult, type OwnDevices, type OwnDeviceRevoked } from "./users";
 
 /** Web Crypto UUID: available in Node ≥ 19, Electron, browsers and Android WebView (secure context). */
 function randomUUID(): string {
@@ -251,7 +251,7 @@ export class CutexClient {
       parsed = false;
     }
     if (trace) emitSubmitHttpTrace(trace, { stage: "response-parse", elapsedMs: performance.now() - parseStarted, outcome: "completed", status: response.status, parsed });
-    if (!response.ok) throw CutexApiError.fromBody(response.status, body);
+    if (!response.ok) throw CutexApiError.fromBody(response.status, body, viaProxy(response));
     return body as T;
   }
 
@@ -612,12 +612,25 @@ export class CutexClient {
     }
   }
 
-  /** `POST /v2/approvals/{id}/{approve|deny}` with an optional note (trimmed, ≤1000 chars). Returns `approval`. */
-  async decideApproval<T = JsonObject>(approvalId: string, decision: ApprovalDecisionKind, note?: string): Promise<T> {
+  /**
+   * `POST /v2/approvals/{id}/{approve|deny}` with an optional note (trimmed, ≤1000 chars). Returns `approval`.
+   * `client` (cutex `approval-decided-by` only; an older cutex refuses the field): what this client says
+   * about itself (`app`, `version`, `device`, `surface`, `input`; one line, ≤ 80 chars each).
+   */
+  async decideApproval<T = JsonObject>(approvalId: string, decision: ApprovalDecisionKind, note?: string, client?: Record<string, string>): Promise<T> {
     if (!APPROVAL_ID.test(approvalId)) throw new Error("bad approval id");
     if (decision !== "approve" && decision !== "deny") throw new Error("bad decision");
     const text = note?.trim();
-    const r = await this.request<{ approval: T }>("POST", `/v2/approvals/${approvalId}/${decision}`, { body: text ? { note: text.slice(0, 1000) } : {} });
+    const body: JsonObject = text ? { note: text.slice(0, 1000) } : {};
+    if (client) {
+      const facts: Record<string, string> = {};
+      for (const key of ["app", "version", "device", "surface", "input"]) {
+        const value = client[key]?.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 80);
+        if (value) facts[key] = value;
+      }
+      if (Object.keys(facts).length) body.client = facts;
+    }
+    const r = await this.request<{ approval: T }>("POST", `/v2/approvals/${approvalId}/${decision}`, { body });
     return r.approval;
   }
 
@@ -1204,7 +1217,35 @@ export class CutexClient {
    */
   async userAvatar(userId: string): Promise<UserAvatar | null> {
     if (!USER_ID.test(userId)) throw new Error("bad user id");
-    const url = this.url(`/v2/users/${encodeURIComponent(userId)}/avatar`);
+    return this.fetchImage(`/v2/users/${encodeURIComponent(userId)}/avatar`, AVATAR_MAX_BYTES);
+  }
+
+  /**
+   * cutex `profile-avatar`: `GET /v2/profiles/{id}/avatar | intro-portrait` (null: none, or a cutex
+   * without the route). Owner only, like every profile route.
+   */
+  async profileImage(profileId: string, kind: ProfileImageKind): Promise<UserAvatar | null> {
+    if (!PROFILE_IMAGE_KINDS.includes(kind)) throw new Error("bad profile image kind");
+    return this.fetchImage(profileImagePath(profileId, kind), PROFILE_IMAGE_MAX_BYTES[kind]);
+  }
+
+  /**
+   * cutex `profile-avatar`: `PUT` (upload) / `DELETE` (null) a profile's picture or intro portrait →
+   * the stored ETag (null = none). 400 invalid_avatar, 413 avatar_too_large, 404 profile_not_found.
+   */
+  async putProfileImage(profileId: string, kind: ProfileImageKind, upload: AvatarUpload | null): Promise<{ etag: string | null }> {
+    if (!PROFILE_IMAGE_KINDS.includes(kind)) throw new Error("bad profile image kind");
+    const path = profileImagePath(profileId, kind);
+    const reply = upload
+      ? await this.request<Record<string, unknown>>("PUT", path, { body: { contentType: upload.contentType, data: upload.data } })
+      : await this.request<Record<string, unknown>>("DELETE", path);
+    const etag = reply[kind === "avatar" ? "avatarEtag" : "introPortraitEtag"];
+    return { etag: typeof etag === "string" && AVATAR_ETAG.test(etag) ? etag : null };
+  }
+
+  /** An image route: PNG / JPEG / WebP up to `maxBytes`, else null; 404 / 403 / 405 = null. */
+  private async fetchImage(path: string, maxBytes: number): Promise<UserAvatar | null> {
+    const url = this.url(path);
     let response: Response;
     try {
       response = await this.fetchImpl(url, { headers: this.headers({ Accept: "image/*" }) });
@@ -1223,7 +1264,7 @@ export class CutexClient {
     const contentType = (response.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase() as AvatarContentType;
     if (!AVATAR_CONTENT_TYPES.includes(contentType)) return null;
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.length === 0 || bytes.length > AVATAR_MAX_BYTES) return null;
+    if (bytes.length === 0 || bytes.length > maxBytes) return null;
     let binary = "";
     for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     const etag = response.headers.get("etag")?.replace(/^W\//, "").replace(/"/g, "") ?? null;
@@ -1336,4 +1377,10 @@ export class CutexClient {
     const length = bytes instanceof Blob ? bytes.size : bytes.byteLength;
     return { attachmentId: String(r.attachmentId ?? ""), path: r.path, mime: String(r.mime ?? mime), size: Number(r.size ?? length) };
   }
+}
+
+/** The response passed a proxy (or came from one): headers no cutex answer carries. */
+function viaProxy(response: Response): boolean {
+  const headers = response.headers;
+  return !!headers && (headers.has("via") || headers.has("proxy-authenticate") || headers.has("proxy-agent"));
 }

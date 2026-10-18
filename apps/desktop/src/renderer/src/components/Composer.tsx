@@ -5,7 +5,7 @@
 //          menu: profile switch on top, models below) · reasoning effort · context-window ring
 // Quota and context are deliberately separate (unlike Claude, which merges them).
 // `/` opens the command palette (lib/slashCommands), `@` the workspace file search (DESIGN §4.3).
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowUp, X, Zap } from "lucide-react";
 import type { QueueItem } from "@cutex-desktop/protocol";
 import type { SkillMetadata, SkillsListResponse } from "@cutex-desktop/protocol/codex/v2";
@@ -23,8 +23,17 @@ import { useComposerDraft } from "../lib/composerDrafts";
 import { candidateIndex, composerCandidateKey, mentionPathsFor, startMentionSearch, type MentionResults } from "../lib/composerMentions";
 import { createComposerEnterTrace, type EnterDecision } from "../lib/composerEnterTrace";
 import { archiveAgent, renameAgent } from "../lib/menus";
-import { PERMISSION_MODES, effectivePermissionLines, effectivePermissions, permissionModeOf, permissionPatch } from "../lib/permissionModes";
+import { PERMISSION_MODES, effectivePermissionLines, effectivePermissions, liveExtrasApply, permissionModeOf, permissionPatch } from "../lib/permissionModes";
+import { claudeModeOf, claudeModePatch, claudeModesOf, claudeToolSwitches, type ClaudeMode } from "../lib/claudePermissionModes";
+import { ClaudeRulesChip } from "./ClaudeRulesChip";
+import { useSizeFlags, widthBelow } from "../lib/sizeFlags";
+import { ClaudeSkillsImportDialog } from "./ClaudeSkillsImportDialog";
+import { CLAUDE_SKILLS_IMPORT_FEATURE } from "../lib/claudeSkillsImport";
+import { CLAUDE_PERMISSION_RULES_FEATURE } from "../../../shared/ipc";
+import { SESSION_SANDBOX_EXTRAS_FEATURE } from "../../../shared/ipc";
+import { LiveSandboxExtras } from "./LiveSandboxExtras";
 import { PermissionDetail } from "./PermissionDetail";
+import { ClaudeCodeSourcesNote } from "./ClaudeCodeSourcesNote";
 import { cachedProfileList, loadProfileList } from "../lib/profileSnapshot";
 import { useOrderedProfiles } from "../lib/profileOrder";
 import { useImagePickBlocked } from "../lib/remoteMode";
@@ -33,7 +42,9 @@ import { formatBalance, gaugeName, gaugesFromRateLimits, latestObservedAt, merge
 import { appendToken } from "../lib/composerTools";
 import { useModelName } from "../lib/modelDisplay";
 import { setUiPref, useUiPrefs } from "../lib/prefs";
-import { agentFeaturesOf, lacks, maxImageBytes, steerAction, type AgentFeatures } from "../lib/agentFeatures";
+import { agentFeaturesOf, CLAUDE_SESSION_SKILLS_CAPABILITY, claudeFastMode, lacks, maxImageBytes, skillSource, steerAction, type AgentFeatures } from "../lib/agentFeatures";
+import { useObservedModel } from "../lib/observedModelView";
+import { shortModelId } from "../lib/observedModel";
 import { structuralErrorText } from "../lib/structuralGateView";
 import { boundSkills, insertMention, mentionAt, paletteQuery, parseSlash, rankEntries, runSlash, SLASH_COMMANDS, slashSpec, slashUnavailable, type PaletteEntry, type SlashContext } from "../lib/slashCommands";
 import { anyOverlayOpen } from "../lib/openOverlays";
@@ -47,7 +58,8 @@ import { orderedEntries, type TimelineState } from "../lib/timeline";
 import { hasUnlandedTurn, outboxAt, visibleQueue } from "../lib/outbox";
 import { useHeldBusy } from "../lib/busyHold";
 import { lastAssistantText, timelineToMarkdown } from "../lib/transcript";
-import { agentHost, featuresOf, interruptWithFeedback, queueItemText, selectedFeatures, selectedSidebar, sessionApi, useApp } from "../store";
+import { agentHost, featuresOf, interruptWithFeedback, queueItemText, selectedFeatures, selectedSidebar, sessionApi, sidebarOf, useApp } from "../store";
+import { offlineRuntime } from "../lib/runtimeStart";
 import { hostPageParam, useComposerHost, useHostLoadQuota, useHostQuotas } from "../lib/targetHost";
 import { services } from "../modules/app";
 import { setSettingsHost } from "../lib/settingsHost";
@@ -80,13 +92,14 @@ import { ComposerTriggers } from "./gutter/ComposerTriggers";
 import { ASKS_PAUSE_FEATURE } from "../lib/asksPause";
 import { QUOTA_CONTINUE_FEATURE } from "../../../shared/quotaContinue";
 import { useQuotaContinue } from "../lib/quotaContinue";
+import { pinInSession, repinApplies, useClaudeRuntimePreload } from "../lib/claudeRepin";
 import { runtimeOf } from "../lib/agentList";
 import { QuotaContinueSection } from "./QuotaContinueSection";
 import { queueAutoCompact, useShortWindow } from "../lib/queueChips";
 import { DelegationSendMenu, DelegationTurnHint } from "./DelegationComposer";
 import { SlashPalette, type PaletteRow } from "./SlashPalette";
+import { composerEfforts } from "../lib/models";
 
-const DEFAULT_EFFORTS = ["low", "medium", "high", "xhigh"];
 
 const Bar = GaugeBar;
 
@@ -395,7 +408,11 @@ export interface FastModeControl {
   onToggle(on: boolean): void;
 }
 
-export function EffortPicker({ effort, efforts, onChange, fast }: { effort: string | null; efforts: string[]; onChange(e: string): void; fast?: FastModeControl }) {
+/**
+ * `offline`: the agent's runtime is not running — nothing to read the effort from or send it to; the
+ * chip shows "—" instead of a loading "…" and the panel says to start the runtime first.
+ */
+export function EffortPicker({ effort, efforts, onChange, fast, offline, empty, onOpen }: { effort: string | null; efforts: string[]; onChange(e: string): void; fast?: FastModeControl; offline?: string; /** Why `efforts` is empty (shown instead of the track). */ empty?: string; onOpen?(): void }) {
   const { t } = useI18n();
   // Localized name when we have one, else the model's raw value (models add new levels, e.g. "ultra").
   const label = (e: string) => {
@@ -412,10 +429,11 @@ export function EffortPicker({ effort, efforts, onChange, fast }: { effort: stri
     <Popover
       align="right"
       width="w-80"
+      onOpen={onOpen}
       trigger={
         <span className="trim-cap inline-flex items-center gap-0.5" title={fast?.on ? t("composer.fast.on") : undefined}>
           {fast?.on && <Zap size={12} className="shrink-0 fill-current text-warn" aria-label={t("composer.fast.on")} />}
-          {effort ? label(effort) : "…"}
+          {effort ? label(effort) : offline ? "—" : "…"}
         </span>
       }
       onKey={(e) => {
@@ -431,18 +449,25 @@ export function EffortPicker({ effort, efforts, onChange, fast }: { effort: stri
             <span className="text-subtle">{t("composer.effortTitle")}</span> <span className="font-medium">{effort ? label(effort) : ""}</span>
             {effort && label(effort) !== effort && <span className="ml-1.5 font-mono text-xs text-subtle">{effort}</span>}
           </div>
-          <div className="flex justify-between text-xs text-subtle">
-            <span>{t("composer.effort.faster")}</span>
-            <span>{t("composer.effort.smarter")}</span>
-          </div>
-          <EffortTrack efforts={efforts} index={index} label={label} onCommit={(i) => efforts[i] && efforts[i] !== effort && onChange(efforts[i]!)} />
-          <div className="flex text-[11px] text-subtle">
-            {efforts.map((e) => (
-              <span key={e} className={`flex-1 text-center font-mono ${e === effort ? "text-foreground" : ""}`}>
-                {e}
-              </span>
-            ))}
-          </div>
+          {efforts.length > 0 ? (
+            <>
+              <div className="flex justify-between text-xs text-subtle">
+                <span>{t("composer.effort.faster")}</span>
+                <span>{t("composer.effort.smarter")}</span>
+              </div>
+              <EffortTrack efforts={efforts} index={index} label={label} onCommit={(i) => efforts[i] && efforts[i] !== effort && onChange(efforts[i]!)} />
+              <div className="flex text-[11px] text-subtle">
+                {efforts.map((e) => (
+                  <span key={e} className={`flex-1 text-center font-mono ${e === effort ? "text-foreground" : ""}`}>
+                    {e}
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : (
+            !offline && empty && <p className="text-xs text-subtle" data-effort-empty="">{empty}</p>
+          )}
+          {offline && <p className="border-t border-border pt-2 text-xs text-subtle" data-offline-note="">{offline}</p>}
           {fast && (
             <label className="flex cursor-pointer items-center gap-2 border-t border-border pt-3 text-sm">
               <Zap size={14} className={`shrink-0 ${fast.on ? "fill-current text-warn" : "text-subtle"}`} />
@@ -466,6 +491,8 @@ type PopoverKind = "model" | "permissions" | "quota";
 
 const PANELS = new Set<string>(["status", "memories", "experimental"]);
 const POPOVERS = new Set<string>(["model", "permissions", "quota"]);
+/** The settings row below the input: narrow = the Claude rules chip shows its icon only (lib/sizeFlags). */
+const TOOLBAR_SIZES = { narrow: widthBelow(34) } as const;
 
 /** Command entries with both locales' descriptions as search keywords (zh and en both match). */
 function commandEntries(t: (k: MessageKey, v?: Record<string, string | number>) => string, features: ReadonlySet<string>, agent: AgentFeatures, busy: boolean): PaletteItem[] {
@@ -571,6 +598,8 @@ export function Composer({
     (record) => bridge.shell?.logError({ kind: "reported", message: JSON.stringify(record) })));
   // All skills (enabled + disabled) for the agent's cwd; the palette lists the enabled ones.
   const [allSkills, setAllSkills] = useState<SkillMetadata[] | null>(null);
+  /** 从 ~/.claude/skills 导入… open (Claude agents, cutex claude-skills-import). */
+  const [importingSkills, setImportingSkills] = useState(false);
   const [skillsError, setSkillsError] = useState<string | null>(null);
   const [selected, setSelected] = useState(0);
   // Esc hides the palette for exactly this draft; typing on reopens it.
@@ -582,13 +611,36 @@ export function Composer({
   const [shownNotice, setShownNotice] = useState<typeof notice>(null);
   const [dragOver, setDragOver] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  // The input grows with its wrapped text (not only its line breaks) up to max-h-60, then scrolls:
+  // counting "\n" alone left long wrapped paragraphs scrolling inside a short box (owner 2026-10-18).
+  useLayoutEffect(() => {
+    const el = textarea.current;
+    if (!el) return;
+    const fit = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    };
+    fit();
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fit();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text]);
 
   const online = !!timeline?.threadId;
+  // The runtime itself (a thread id also comes from the offline history reader): models are asked
+  // again when it comes up, and an offline agent's chips say "start it first" instead of loading.
+  const runtimeStatus = useApp((s) => selectedSidebar(s)?.active.find((r) => r.cutexSessionId === sessionId)?.runtime.status ?? null);
+  const runtimeDown = offlineRuntime(runtimeStatus);
   useEffect(() => {
-    if (!online) return;
+    if (!online || runtimeDown) return;
     void loadModels();
     void loadCollabModes();
-  }, [sessionId, online, loadModels, loadCollabModes]);
+  }, [sessionId, online, runtimeDown, loadModels, loadCollabModes]);
 
   // Notices from commands / store actions: visible for a few seconds.
   useEffect(() => {
@@ -615,24 +667,44 @@ export function Composer({
   const modelInfo = models?.find((m) => m.model === currentModel || m.id === currentModel);
   // The profile's entry name, else the catalog name (lib/modelDisplay); "" = no model yet.
   const modelShown = modelName(currentModel, modelInfo?.displayName, profile);
-  const efforts = modelInfo?.efforts.length ? modelInfo.efforts : DEFAULT_EFFORTS;
-  // Fast mode: only where cutex keeps the tier across restarts and the model offers a Fast tier.
+  const { efforts, empty: effortsEmpty } = composerEfforts(models, currentModel);
   const fastFeature = useApp((s) => featuresOf(s, hostId).has(SESSION_FAST_MODE_FEATURE));
-  const fastTier = fastFeature ? (modelInfo?.fastTier ?? null) : null;
   const modelItems: Pick<ModelOption, "model" | "displayName" | "description">[] =
     models ?? (currentModel ? [{ model: currentModel, displayName: currentModel, description: "" }] : []);
   const session = useApp((s) => [...(selectedSidebar(s)?.active ?? []), ...(selectedSidebar(s)?.retired ?? [])].find((r) => r.cutexSessionId === sessionId));
   // Claude agents (claude-runtime-features): hide what the adapter reports as unsupported.
   const agent = useMemo(() => agentFeaturesOf(session), [session]);
+  const claudeAgent = !!session && runtimeOf(session) === "claude";
+  // Fast mode where the model offers a Fast tier and the choice survives restarts: Codex through cutex
+  // `session-fast-mode`, Claude through its adapter (`fastMode`: Claude Code fast mode, kept per thread).
+  const fastTier = (claudeAgent ? claudeFastMode(agent) : fastFeature) ? (modelInfo?.fastTier ?? null) : null;
+  // The model that actually answered (Claude adapters with modelObservation), when it differs from the selection.
+  const observedModel = useObservedModel(sessionId, agent, online, timeline, currentModel);
   // 额度用完 · HH:MM 自动继续 · 取消 (claude-quota-auto-continue, lib/quotaContinue).
   const quotaApplies = useApp((s) => featuresOf(s, hostId).has(QUOTA_CONTINUE_FEATURE)) && !!session && runtimeOf(session) === "claude";
   const quotaView = useQuotaContinue(hostId, sessionId, quotaApplies);
+  // 升级运行时 (claude-runtime-repin, lib/claudeRepin): keep the open Claude agent's runtime view cached for the agent menu.
+  // Not needed when the agent list carries the pin (cutex session-claude-runtime).
+  const repinOn = useApp((s) => repinApplies(featuresOf(s, hostId), session) && !pinInSession(session, sidebarOf(s, hostId)?.claudeRuntime));
+  useClaudeRuntimePreload(() => sessionApi(sessionId), hostId, sessionId, repinOn, session?.runtime.status);
   // Windows sandbox readiness (windows-sandbox-readiness): asked when the permission menu opens.
   const hostPlatform = useHostPlatform(hostId);
   const winSandboxApplies = useApp((s) => featuresOf(s, hostId).has(WINDOWS_SANDBOX_FEATURE)) && hostPlatform === "windows" && !!session && runtimeOf(session) !== "claude" && online;
   const winSandbox = useSessionWindowsSandbox(sessionId, winSandboxApplies, timeline?.windowsSandboxSetup);
+  // Network / extra writable directories of this running agent (session-sandbox-extras).
+  const liveExtrasFeature = useApp((s) => featuresOf(s, hostId).has(SESSION_SANDBOX_EXTRAS_FEATURE));
+  const liveExtras = liveExtrasApply({ feature: liveExtrasFeature, claude: !!session && runtimeOf(session) === "claude", online, settings });
   const noSteer = lacks(agent, "turnSteer");
-  const noSkills = lacks(agent, "skillInput");
+  // Claude agents whose adapter offers Claude Code's own modes (lib/claudePermissionModes).
+  const claudeModes = useMemo(() => claudeModesOf(agent), [agent]);
+  const claudeMode = claudeModes ? claudeModeOf(settings) : null;
+  const claudeRulesFeature = useApp((s) => featuresOf(s, hostId).has(CLAUDE_PERMISSION_RULES_FEATURE)) && agent.map?.permissionRules === true;
+  const [toolbarRef, toolbarFlags] = useSizeFlags(TOOLBAR_SIZES);
+  // Skill picker source: Codex catalog, the Claude agent's own managed catalog (cutex claude-session-skills), or none.
+  const sessionSkillsCap = useApp((s) => featuresOf(s, hostId).has(CLAUDE_SESSION_SKILLS_CAPABILITY));
+  const skillsFrom = skillSource(agent, { has: (f) => f === CLAUDE_SESSION_SKILLS_CAPABILITY && sessionSkillsCap });
+  const noSkills = skillsFrom === null;
+  const skillsImport = useApp((s) => featuresOf(s, hostId).has(CLAUDE_SKILLS_IMPORT_FEATURE)) && skillsFrom === "claude";
   const unsupportedHint = t("composer.tools.agentUnsupported");
   // A model missing from the list (stale catalog, list not loaded) is unknown, not text-only:
   // allow images and let the native refuse them.
@@ -651,7 +723,8 @@ export function Composer({
   const paletteOpen = query !== null;
   const loadSkills = () => {
     const cwd = session?.cwd;
-    sessionApi(sessionId).codexRequest("skills/list", cwd ? { cwds: [cwd] } : {}).then(
+    const request = skillsFrom === "claude" ? sessionApi(sessionId).sessionSkills(sessionId) : sessionApi(sessionId).codexRequest("skills/list", cwd ? { cwds: [cwd] } : {});
+    request.then(
       (r) => {
         setSkillsError(null);
         setAllSkills((r as SkillsListResponse).data.flatMap((e) => e.skills));
@@ -1045,7 +1118,9 @@ export function Composer({
   const hasContent = !!text.trim() || images.length > 0;
   return (
     <div className="side-col side-col-composer w-full px-4 pb-3">
-      <div className="relative">
+      {importingSkills && <ClaudeSkillsImportDialog hostId={hostId} onClose={() => setImportingSkills(false)} onImported={loadSkills} />}
+      {/* 在主界面调整: the input card is the 输入区 region (its panel opens above it, components/CustomizeHost). */}
+      <div className="relative" data-customize-region="composer">
         {paletteOpen && (
           <SlashPalette
             title={t("slash.title")}
@@ -1195,9 +1270,9 @@ export function Composer({
               onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
               onKeyDown={onKeyDown}
               onPaste={onPaste}
-              rows={Math.min(8, Math.max(2, text.split("\n").length))}
+              rows={2}
               placeholder={delegation ? "" : busyLook ? t("composer.placeholderBusy") : t("composer.placeholder", { name })}
-              className="max-h-60 flex-1 resize-none bg-transparent py-1 outline-none placeholder:text-subtle"
+              className="max-h-60 flex-1 resize-none bg-transparent py-1 pr-2.5 outline-none placeholder:text-subtle"
             />
             {busyLook && (
               <button
@@ -1227,7 +1302,7 @@ export function Composer({
         </div>
       </div>
 
-      <div className="mt-1 flex min-w-0 items-center gap-0.5 px-0.5">
+      <div ref={toolbarRef} className="mt-1 flex min-w-0 items-center gap-0.5 px-0.5">
         {/* Gutter items when the gutters are too narrow for them (§19.2). */}
         <ComposerTriggers hostId={hostId} sessionId={sessionId} side="left" />
         <ComposerTools
@@ -1243,6 +1318,8 @@ export function Composer({
           skillsError={skillsError}
           onLoadSkills={loadSkills}
           skillRefDisabledReason={noSkills ? unsupportedHint : null}
+          skillsManaged={skillsFrom === "claude"}
+          onImportSkills={skillsImport ? () => setImportingSkills(true) : undefined}
           onInsertSkill={(s) => pickSkill(s, "append")}
           plan={{ available: planAvailable, on: collabMode === "plan", disabledReason: online ? null : t("composer.tools.needsOnline"), set: (on) => void setPlan(on) }}
           goal={{
@@ -1269,12 +1346,22 @@ export function Composer({
           }}
           onManage={(tab) => useApp.getState().openSettings(tab)}
         />
+        {claudeModes ? (
+          <Menu<ClaudeMode>
+            title={t("composer.permissionTitle")}
+            openSignal={sig("permissions")}
+            trigger={<span className={`trim-cap whitespace-nowrap ${claudeMode === "bypassPermissions" ? "text-warn" : ""}`}>{claudeMode ? t(`composer.claudeMode.${claudeMode}` as MessageKey) : runtimeDown ? "—" : "…"}</span>}
+            items={claudeModes.map((m) => ({ value: m, label: t(`composer.claudeMode.${m}` as MessageKey), description: t(`composer.claudeModeHint.${m}` as MessageKey) }))}
+            selected={claudeMode}
+            onSelect={(m) => m !== claudeMode && void updateSettings(claudeModePatch(m, settings))}
+          />
+        ) : (
         <Menu
           title={t("composer.permissionTitle")}
           openSignal={sig("permissions")}
           // nowrap: the chip never gives up width to a crowded toolbar by breaking 完全访问 mid-word; the model
           // name (truncate) and the right-hand group give way first.
-          trigger={<span className={`trim-cap whitespace-nowrap ${mode === "full" ? "text-warn" : ""}`}>{mode ? t(`composer.mode.${mode}` as MessageKey) : "…"}</span>}
+          trigger={<span className={`trim-cap whitespace-nowrap ${mode === "full" ? "text-warn" : ""}`}>{mode ? t(`composer.mode.${mode}` as MessageKey) : runtimeDown ? "—" : "…"}</span>}
           // What the mode name does not say: reviewer, network, extra directories (lib/permissionModes).
           triggerTitle={effective ? [t("composer.permissionTitle"), ...effectivePermissionLines(effective).map((line) => t(line.key, line.params)), ...effective.writableRoots].join("\n") : undefined}
           items={PERMISSION_MODES.map((m) => ({ value: m, label: t(`composer.mode.${m}` as MessageKey), description: t(`composer.modeHint.${m}` as MessageKey) }))}
@@ -1285,8 +1372,12 @@ export function Composer({
             <>
               {effective && (
                 <div className="mt-1 border-t border-border px-2.5 pt-1.5 pb-1">
-                  <PermissionDetail effective={effective} />
+                  <PermissionDetail effective={effective} editable={liveExtras} />
                 </div>
+              )}
+              <ClaudeCodeSourcesNote hostId={hostId} sessionId={sessionId} />
+              {liveExtras && effective && (
+                <LiveSandboxExtras hostId={hostId} sessionId={sessionId} network={effective.network ?? false} roots={effective.writableRoots} />
               )}
               {winSandboxApplies && winSandbox.readiness && windowsSandboxWarns(hostPlatform, winSandbox.readiness, mode) && (
                 <WindowsSandboxMenuNote readiness={winSandbox.readiness} phase={winSandbox.phase} onSetup={() => void winSandbox.setup()} />
@@ -1294,6 +1385,17 @@ export function Composer({
             </>
           }
         />
+        )}
+        {/* Claude agents: tools / always-allow rules / Claude Code sources, beside the modes (ClaudeRulesChip). */}
+        {claudeModes && (
+          <ClaudeRulesChip
+            hostId={hostId}
+            sessionId={sessionId}
+            {...claudeToolSwitches(session?.runtimeDefaults as Record<string, unknown> | null | undefined)}
+            rulesFeature={claudeRulesFeature}
+            iconOnly={toolbarFlags.narrow}
+          />
+        )}
         {collabMode === "plan" && (
           <button
             onClick={() => void setPlan(false)}
@@ -1312,9 +1414,15 @@ export function Composer({
             profile={profile}
             models={modelItems}
             current={currentModel}
-            label={modelShown || "…"}
-            trigger={<span className="trim-cap max-w-40 truncate">{modelShown || "…"}</span>}
-            triggerTitle={currentModel && modelShown !== currentModel ? `${t("composer.modelTitle")} · ${currentModel}` : t("composer.modelTitle")}
+            label={modelShown || (runtimeDown ? "—" : "…")}
+            trigger={
+              <span className="flex min-w-0 items-center gap-1">
+                <span className="trim-cap max-w-40 truncate">{modelShown || (runtimeDown ? "—" : "…")}</span>
+                {observedModel && observedModel !== currentModel && <span className="trim-cap max-w-28 truncate text-[10px] text-subtle" data-testid="observed-model">{shortModelId(observedModel)}</span>}
+              </span>
+            }
+            triggerTitle={[runtimeDown ? `${t("composer.modelTitle")} · ${t("composer.model.offline")}` : currentModel && modelShown !== currentModel ? `${t("composer.modelTitle")} · ${currentModel}` : t("composer.modelTitle"), observedModel ? t("composer.model.observed", { model: observedModel }) : null].filter(Boolean).join("\n")}
+            note={runtimeDown ? t("composer.model.offline") : observedModel ? t("composer.model.observed", { model: observedModel }) : undefined}
             onOpen={() => void loadModels(true)}
             onSelect={(model) => void updateSettings({ model })}
             openSignal={sig("model")}
@@ -1323,7 +1431,10 @@ export function Composer({
             effort={settings?.effort ?? null}
             efforts={efforts}
             onChange={(effort) => void updateSettings({ effort })}
-            fast={fastTier && session && runtimeOf(session) !== "claude" ? { on: isFastTier(settings?.serviceTier, fastTier), onToggle: (on) => void updateSettings(fastModePatch(on, fastTier)) } : undefined}
+            offline={runtimeDown ? t("composer.model.offline") : undefined}
+            empty={effortsEmpty === "none" ? t("composer.effort.noneOffered") : effortsEmpty === "unlisted" ? t("composer.effort.unlisted") : undefined}
+            onOpen={effortsEmpty === "unlisted" && !runtimeDown ? () => void loadModels(true) : undefined}
+            fast={fastTier && session ? { on: isFastTier(settings?.serviceTier, fastTier), onToggle: (on) => void updateSettings(fastModePatch(on, fastTier)) } : undefined}
           />
           <ContextMeter usage={timeline?.contextUsage ?? null} onCompact={() => void compact()} />
         </div>

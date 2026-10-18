@@ -17,11 +17,13 @@ import { lastSeen, offlineSlice } from "../lib/offlineAgents";
 import { openAgentList } from "../lib/agentListDialog";
 import { sidebarOf, useApp } from "../store";
 import { contextMenu } from "../lib/contextMenu";
+import { noteCustomizeOpener } from "../lib/customize";
+import { customizeSidebarItem } from "../lib/customizeMenu";
 import { agentMenu } from "../lib/menus";
 import { projectMenu } from "../lib/projectMenus";
 import { rootFor } from "../lib/workspace";
 import { AttentionContext } from "../lib/attentionView";
-import { foldLabel, layoutSidebar, type GroupLayout, type LayoutContext } from "../lib/sidebarLayout";
+import { foldLabel, layoutSidebar, nextIdleFold, type GroupLayout, type LayoutContext } from "../lib/sidebarLayout";
 import { computeFresh, markAgentOpened, publishFresh, useFreshAgents } from "../lib/freshAgents";
 import { NEUTRAL_GROUP, projectBlockLook } from "../lib/projectSeparation";
 import { useProjectMuted } from "../lib/notificationLevelsStore";
@@ -128,6 +130,7 @@ export function OfflineSection({ rows, searching, onAll, foldId, hostId }: { row
 function RunningAgents({ rows, mode }: { rows: AgentRow[]; mode: RunningAgentsMode }) {
   const { t } = useI18n();
   const select = useApp((s) => s.select);
+  const selectedId = useApp((s) => s.selectedId);
   const hosts = useSidebarHosts();
   if (rows.length === 0) return null;
   if (mode !== "avatars") return <>{rows.map((row) => <AgentRowButton key={rowKey(row)} row={row} compact />)}</>;
@@ -143,7 +146,9 @@ function RunningAgents({ rows, mode }: { rows: AgentRow[]; mode: RunningAgentsMo
             disabled={hosts?.stateOf(row.hostId) === "offline"}
             onClick={() => void select(row.id, row.hostId)}
             onContextMenu={contextMenu(() => agentMenu(row.session, t, row.hostId))}
-            className="rounded-full"
+            // The open agent stays here (opening never moves a row): ringed.
+            className={`rounded-full ${row.id === selectedId ? "ring-2 ring-accent ring-offset-1 ring-offset-surface" : ""}`}
+            aria-current={row.id === selectedId ? "true" : undefined}
           >
             <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={20} signal="running" />
           </button>
@@ -297,7 +302,7 @@ const Group = memo(function Group({ layout, dragKey, dragging: dragged, searchin
   const drag = useContext(ProjectDragContext);
   const dropLine = useDropAt(drag, dragKey);
   const dropAt = dragKey && !dragged ? dropLine : null;
-  const block = projectBlockLook(prefs.projectSeparation, group.kind === "project" ? group.color : NEUTRAL_GROUP, prefs.projectHeaderTint);
+  const block = projectBlockLook(prefs.projectSeparation, group.kind === "project" ? group.color : NEUTRAL_GROUP);
   const fly = useProjectFlyout({ available: !open && !dragging, hoverEnabled: hoverOpensFlyout({ collapsed: isCollapsedRow(layout, !open), hoverPreview: prefs.projectHoverPreview, dragging }), delay: prefs.projectHoverDelay });
   return (
     <section className={`relative ${open ? block.gapClassName : block.foldedGapClassName} ${block.className} ${dragged ? "opacity-40" : ""}`} style={block.style} data-project-block={block.style ? prefs.projectSeparation : undefined} data-folded={open ? undefined : ""}>
@@ -505,7 +510,7 @@ function ChatsGroup({ rows }: { rows: AgentRow[] }) {
   const [open, toggleOpen] = useGroupOpen("__chats__");
   const prefs = useUiPrefs();
   // A section header like 独立智能体: the project header treatment in the neutral colour.
-  const block = projectBlockLook(prefs.projectSeparation, NEUTRAL_GROUP, prefs.projectHeaderTint);
+  const block = projectBlockLook(prefs.projectSeparation, NEUTRAL_GROUP);
   return (
     <section className={`relative ${open ? block.gapClassName : block.foldedGapClassName} ${block.className}`} style={block.style} data-project-block={block.style ? prefs.projectSeparation : undefined} data-folded={open ? undefined : ""}>
       <div className={`flex items-center rounded-md ${block.headerClassName}`}>
@@ -606,6 +611,9 @@ function PrimaryNav({ area }: { area: NavArea }) {
   );
 }
 
+/** What a right-click / press in the sidebar can return the focus to (lib/customize opener). */
+const FOCUSABLE = "button, a[href], input, [tabindex]:not([tabindex='-1'])";
+
 export function Sidebar() {
   const { t } = useI18n();
   // Every host of the view scope, merged (multi-host RFC §8; one host = today's sidebar). Rows and
@@ -661,6 +669,17 @@ export function Sidebar() {
     const timer = setTimeout(() => setFreshTick((n) => n + 1), Math.max(0, fresh.nextChange - Date.now()) + 50);
     return () => clearTimeout(timer);
   }, [fresh]);
+  // The idle fold's clock: advanced when an online agent's last activity turns IDLE_FOLD_AFTER_MS
+  // old (lib/sidebarLayout nextIdleFold), so a row moves into 「N 个空闲」 by itself. A stale clock
+  // (rows changed since) is caught up at once: their crossing is already past.
+  const lastOfRow = (r: AgentRow) => lastSeen(r, previewOf(r)?.at);
+  const [foldNow, setFoldNow] = useState(() => Date.now());
+  const nextFold = useMemo(() => nextIdleFold(model.groups, foldNow, lastOfRow), [model.groups, activity, foldNow, scope.focus]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (nextFold === null) return;
+    const timer = setTimeout(() => setFoldNow(Date.now()), Math.max(0, nextFold - Date.now()) + 50);
+    return () => clearTimeout(timer);
+  }, [nextFold]);
   const layoutCtx = useMemo<LayoutContext>(
     () => ({
       signalOf: (key) => attention.signals.get(key),
@@ -669,10 +688,11 @@ export function Sidebar() {
       prefs: { grouping: prefs.projectGrouping, noOnline: prefs.noOnlineProjects, running: prefs.runningAgents, foldIdle: prefs.foldIdleAgents },
       searching,
       idleUnfolded,
-      lastOf: (r) => lastSeen(r, previewOf(r)?.at),
+      lastOf: lastOfRow,
+      now: foldNow,
       isFresh: (key) => fresh.keys.has(key) || key === openedFresh,
     }),
-    [fresh, openedFresh, attention.signals, selectedKey, starredKeys, idleUnfolded, prefs.projectGrouping, prefs.noOnlineProjects, prefs.runningAgents, prefs.foldIdleAgents, searching, activity], // eslint-disable-line react-hooks/exhaustive-deps
+    [fresh, openedFresh, attention.signals, selectedKey, starredKeys, idleUnfolded, prefs.projectGrouping, prefs.noOnlineProjects, prefs.runningAgents, prefs.foldIdleAgents, searching, activity, foldNow], // eslint-disable-line react-hooks/exhaustive-deps
   );
   // Sections (pure UI prefs, lib/sidebarSections): their projects leave the main list and render
   // under the section's header, laid out by the same rules.
@@ -749,7 +769,16 @@ export function Sidebar() {
   return (
     <SidebarHostsContext.Provider value={hostsCtx}>
     <AttentionContext.Provider value={attention}>
-      <aside data-resizable-pane className="relative flex h-full w-[var(--sidebar-w,16rem)] max-w-[calc(100%-360px)] min-w-[180px] shrink-0 flex-col bg-transparent">
+      {/* 在主界面调整: the region the 调整左侧栏 panel adjusts (a faint outline while it is open, styles.css; no layout
+          change); a right-click / press inside is remembered as the entry the focus returns to. */}
+      <aside
+        data-resizable-pane
+        data-customize-region="sidebar"
+        tabIndex={-1}
+        onContextMenuCapture={(e) => noteCustomizeOpener((e.target as Element).closest(FOCUSABLE) ?? e.currentTarget)}
+        onPointerDownCapture={(e) => noteCustomizeOpener((e.target as Element).closest(FOCUSABLE) ?? e.currentTarget)}
+        className="relative flex h-full w-[var(--sidebar-w,16rem)] max-w-[calc(100%-360px)] min-w-[180px] shrink-0 flex-col bg-transparent outline-none"
+      >
         <PaneResizer field="sidebarWidth" edge="right" />
         <RestoreBanner compact />
         <div className="p-2">
@@ -765,7 +794,8 @@ export function Sidebar() {
         </div>
         <FlyoutGateContext.Provider value={flyGate}>
         <ProjectDragContext.Provider value={projectDrag}>
-        <nav className="flex-1 overflow-y-auto px-1.5 pt-1 pb-2">
+        {/* The list's empty area: a menu with only 调整左侧栏… (rows and headers have their own menus). */}
+        <nav className="flex-1 overflow-y-auto px-1.5 pt-1 pb-2" onContextMenu={contextMenu(() => [customizeSidebarItem(t)])}>
           {groups.length === 0 && chats.length === 0 && hostOnly.length === 0 ? (
             <p className="px-2 py-6 text-center text-sm text-subtle">{focusAccess.pending ? t("users.access.pendingEmpty") : t("sidebar.empty")}</p>
           ) : (

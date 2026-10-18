@@ -1,6 +1,7 @@
 {
   "name": "@cutex-desktop/service-plugin-host",
   "version": "0.0.0",
+  "license": "Apache-2.0",
   "private": true,
   "description": "Experimental in-memory capability controller over an injected supervisor; not a daemon protocol or process host",
   "type": "module",

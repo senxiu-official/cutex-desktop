@@ -226,12 +226,12 @@ export interface SubAgentReadLog {
  * that still looks active with no child-thread status yet, once per parent runtime `generation` (a
  * restarted runtime has its own answer) — it settles the status and names it too.
  * Otherwise a light read (no turns) for one whose nickname is unknown (not in `meta`). A Claude
- * task is not a thread: never read.
+ * task is read only when the adapter keeps transcripts (`claudeReads`, lib/claudeTasks); else never.
  */
-export function takeSubAgentReads(sessionId: string, agents: Iterable<SubAgentInfo>, live: SubAgentLive, meta: SubAgentMetaMap, log: SubAgentReadLog, now: number, generation = 0): { threadId: string; settle: boolean }[] {
+export function takeSubAgentReads(sessionId: string, agents: Iterable<SubAgentInfo>, live: SubAgentLive, meta: SubAgentMetaMap, log: SubAgentReadLog, now: number, generation = 0, claudeReads = false): { threadId: string; settle: boolean }[] {
   const due: { threadId: string; settle: boolean }[] = [];
   for (const agent of agents) {
-    if (isClaudeTaskRef(agent.threadId)) continue;
+    if (isClaudeTaskRef(agent.threadId) && !claudeReads) continue;
     const key = `${sessionId}:${agent.threadId}`;
     const settleKey = `${key}@${generation}`;
     const settle = ACTIVE_SUBAGENT.has(agent.status) && !live[agent.threadId] && !log.settle.has(settleKey);

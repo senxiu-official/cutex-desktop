@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CatalogModel, ProfileModelsView } from "../src/shared/ipc";
-import { canCreateModelVariant, entryNamePatch, modelDraft, modelNameTaken, modelsSourceText, modelVariantPatch, upstreamSource } from "../src/renderer/src/lib/profileModels";
+import { canCreateModelVariant, claudeEffortLevels, entryNamePatch, modelDraft, modelListColumns, modelNameTaken, modelsSourceText, modelVariantPatch, upstreamSource } from "../src/renderer/src/lib/profileModels";
 import { upstreamModelsNotice } from "../src/renderer/src/lib/profileKind";
 import { modelLabel } from "../src/renderer/src/lib/modelDisplay";
 
@@ -64,5 +64,42 @@ describe("profile model configurations", () => {
     expect(upstreamModelsNotice(upstreamSource(view.modelsSource))?.missing).toEqual(["gpt-6.1-sol"]);
     expect(upstreamSource({ kind: "nativeBundled" })).toEqual({ kind: "nativeBundled" });
     expect(upstreamSource(null)).toBeNull();
+  });
+});
+describe("Claude profile model list", () => {
+  const row = (id: string, window: number | null, efforts: string[], known?: boolean): CatalogModel => ({
+    ...astra, id, displayName: id, contextWindow: window, maxContextWindow: null, supportedReasoningEfforts: efforts, defaultReasoningEffort: null,
+    ...(known === undefined ? {} : { effortSupportKnown: known }),
+    effective: { contextWindow: window, contextWindowSource: window ? "reference" : "unknown", autoCompactTokenLimit: null, autoCompactTokenLimitSource: "notApplicable" },
+  });
+  const claudeView = (models: CatalogModel[], extra: Partial<ProfileModelsView> = {}): ProfileModelsView => ({
+    profile: { id: "c", name: "c" }, catalogSupported: false, catalogPresent: false, selectedModel: "opus", profileOverrides: { modelContextWindow: null, modelAutoCompactTokenLimit: null },
+    discovery: null, models, unsupportedModelFields: [], precedence: null, modelsSource: { kind: "claudeReference", updatedAt: "2026-10-18" }, ...extra,
+  });
+
+  it("hides auto-compact for Claude and shows context only when cutex reports reference windows", () => {
+    const withWindows = claudeView([row("claude-opus-5-5", 1_000_000, ["low"]), row("opus", null, [])], { autoCompactApplies: false });
+    expect(modelListColumns(withWindows)).toEqual({ claude: true, context: true, compact: false });
+    // Older cutex (r244): no windows and no autoCompactApplies — no columns of bare "—".
+    const legacy = claudeView([row("claude-opus-5-5", null, ["low"])]);
+    expect(modelListColumns(legacy)).toEqual({ claude: true, context: false, compact: false });
+    expect(modelListColumns(claudeView([], { modelsSource: { kind: "claudeAliases" } })).claude).toBe(true);
+    // Codex lists keep both columns.
+    const codex = claudeView([astra], { modelsSource: { kind: "nativeCache" } });
+    expect(modelListColumns(codex)).toEqual({ claude: false, context: true, compact: true });
+  });
+
+  it("names the Claude reference source", () => {
+    const t = (key: string, args?: Record<string, string | number>) => (args ? `${key} ${JSON.stringify(args)}` : key);
+    expect(modelsSourceText(t as never, claudeView([]))).toBe('agent-config.profile.modelsSource.claudeReferenceAt {"at":"2026-10-18"}');
+    expect(modelsSourceText(t as never, claudeView([], { modelsSource: { kind: "claudeReference" } }))).toBe("agent-config.profile.modelsSource.claudeReference");
+  });
+
+  it("offers a Claude model's own effort levels, none when it has none, all only when unknown", () => {
+    expect(claudeEffortLevels(row("claude-opus-4-6", 200_000, ["low", "medium", "high", "max"], true))).toEqual(["low", "medium", "high", "max"]);
+    expect(claudeEffortLevels(row("claude-haiku-4-5-20251001", 200_000, [], true))).toEqual([]);
+    expect(claudeEffortLevels(row("opus", null, [], false))).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(claudeEffortLevels(row("legacy", null, []))).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(claudeEffortLevels(undefined)).toEqual(["low", "medium", "high", "xhigh", "max"]);
   });
 });

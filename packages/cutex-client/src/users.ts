@@ -17,6 +17,24 @@ export type AvatarContentType = (typeof AVATAR_CONTENT_TYPES)[number];
 export const DISPLAY_NAME_MAX = 60;
 /** A cutex avatar ETag (16 hex: the first 8 bytes of the image's SHA-256). */
 export const AVATAR_ETAG = /^[0-9a-f]{16}$/;
+
+// ---------- Profile looks (cutex `profile-avatar`) ----------
+
+/** A Profile's two images: the round picture and the intro (opening) portrait. */
+export const PROFILE_IMAGE_KINDS = ["avatar", "intro-portrait"] as const;
+export type ProfileImageKind = (typeof PROFILE_IMAGE_KINDS)[number];
+/** cutex limits: the picture like a user avatar (square, 16–512 px); the portrait any aspect, ≤ 1024 px. */
+export const PROFILE_IMAGE_MAX_BYTES: Record<ProfileImageKind, number> = { avatar: AVATAR_MAX_BYTES, "intro-portrait": 2 * 1024 * 1024 };
+/** Avatar theme ids cutex accepts (`detail.avatarThemeOptions` lists the host's own; this is the r245 list). */
+export const PROFILE_AVATAR_THEMES = ["animals", "sea", "gems", "plants", "food", "sky", "birds", "insects", "fantasy", "prehistoric", "desserts", "seasons", "transport", "music", "cats"] as const;
+/** Intro greeting cap (characters, after trim). */
+export const PROFILE_INTRO_GREETING_MAX = 300;
+
+/** `/v2/profiles/{id}/avatar | intro-portrait` (the id percent-encoded; ids are UUIDs, names work too). */
+export function profileImagePath(profileId: string, kind: ProfileImageKind): string {
+  if (typeof profileId !== "string" || !profileId || profileId.length > 200 || /[\u0000-\u001f/]/.test(profileId)) throw new Error("bad profile id");
+  return `/v2/profiles/${encodeURIComponent(profileId)}/${kind}`;
+}
 /** The built-in owner user (no grant: implicitly everything). */
 export const OWNER_USER_ID = "owner";
 /**

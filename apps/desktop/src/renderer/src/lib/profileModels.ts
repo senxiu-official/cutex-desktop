@@ -47,6 +47,8 @@ export function modelsSourceText(t: (key: MessageKey, args?: Record<string, stri
       return src.fetchedAt ? t("agent-config.profile.modelsSource.nativeCacheAt", { at: localDateTime(src.fetchedAt) }) : t("agent-config.profile.modelsSource.nativeCache");
     case "nativeBundled":
       return t("agent-config.profile.modelsSource.nativeBundled");
+    case "claudeReference":
+      return src.updatedAt ? t("agent-config.profile.modelsSource.claudeReferenceAt", { at: src.updatedAt }) : t("agent-config.profile.modelsSource.claudeReference");
     case "claudeAliases":
       return t("agent-config.profile.modelsSource.claudeAliases");
     default:
@@ -61,4 +63,37 @@ export function entryNamePatch(id: string, name: string, before: string | null):
   const next = name.trim().replace(/\s+/g, " ");
   if (next === (before ?? "")) return null;
   return { [id]: next || null };
+}
+
+/** A Claude profile's list (the adapter's reference catalog, or its alias fallback). */
+export function isClaudeModelsView(view: ProfileModelsView): boolean {
+  const kind = upstreamSource(view.modelsSource)?.kind;
+  return kind === "claudeReference" || kind === "claudeAliases";
+}
+
+/**
+ * Which limit columns the model list shows. Claude Code decides compaction itself (cutex
+ * `autoCompactApplies: false`), so a Claude list has no 自动压缩 column; its 上下文 column only
+ * when cutex reports reference windows (older cutex: none, so no column of bare "—").
+ */
+export function modelListColumns(view: ProfileModelsView): { claude: boolean; context: boolean; compact: boolean } {
+  const claude = isClaudeModelsView(view);
+  return {
+    claude,
+    context: !claude || view.models.some((m) => m.effective.contextWindow != null),
+    compact: view.autoCompactApplies ?? !claude,
+  };
+}
+
+/** Claude effort levels cutex takes (`options.claude.effort`). */
+export const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+/**
+ * Effort levels a Claude profile can store for a model: the row's own levels; none for a model
+ * known to have none (e.g. Haiku 4.5); the full Claude set only where support is unknown (aliases,
+ * custom ids, older cutex without `effortSupportKnown`).
+ */
+export function claudeEffortLevels(row: CatalogModel | undefined): string[] {
+  if (row?.supportedReasoningEfforts.length) return row.supportedReasoningEfforts;
+  return row?.effortSupportKnown === true ? [] : [...CLAUDE_EFFORT_LEVELS];
 }

@@ -7,9 +7,9 @@ export const mock: ModuleMock = {
   api: (core) => {
     const now = new Date().toISOString();
     const notes = new Map<string, Note>([
-      ["note-preview-1", { id: "note-preview-1", title: "旁注与聊天分开", body: "这份批注不会进入主聊天的上下文。\n\n- 默认保留在会话中\n- 项目和主机可以汇总找到\n- 标记只影响查找，不改变来源", scope: { kind: "session", id: "eva" }, anchor: { sessionId: "eva", threadId: "thread-eva", turnId: "turn-1" }, pins: [], anchorState: "ok", anchorStateAt: null, revision: 1, createdAt: now, updatedAt: now }],
+      ["note-preview-1", { id: "note-preview-1", title: "旁注与聊天分开", body: "这份批注不会进入主对话的上下文。\n\n- 默认保留在会话中\n- 项目和主机可以汇总找到\n- 标记只影响查找，不改变来源", scope: { kind: "session", id: "eva" }, anchor: { sessionId: "eva", threadId: "thread-eva", turnId: "turn-1" }, pins: [], anchorState: "ok", anchorStateAt: null, revision: 1, createdAt: now, updatedAt: now }],
       ["note-preview-2", { id: "note-preview-2", title: "后续核对事项", body: "验证回退不会删除批注，取消标记后批注仍在全部列表中。", scope: { kind: "session", id: "eva" }, anchor: { sessionId: "eva", threadId: "thread-eva", turnId: "reverted-preview-turn" }, pins: [{ kind: "project", id: "desktop" }, { kind: "host" }], anchorState: "reverted", anchorStateAt: now, revision: 1, createdAt: now, updatedAt: now }],
-      ["note-preview-3", { id: "note-preview-3", title: "项目备忘", body: "独立批注不需要先开侧聊。", scope: { kind: "project", id: "desktop" }, anchor: null, pins: [], anchorState: "ok", anchorStateAt: null, revision: 1, createdAt: now, updatedAt: now }],
+      ["note-preview-3", { id: "note-preview-3", title: "项目备忘", body: "独立批注不需要先开侧边对话。", scope: { kind: "project", id: "desktop" }, anchor: null, pins: [], anchorState: "ok", anchorStateAt: null, revision: 1, createdAt: now, updatedAt: now }],
     ]);
     const nonces = new Map<string, string>();
     const membership: Record<string, string> = { eva: "desktop", alden: "desktop", mika: "desktop", rei: "desktop", old1: "desktop", wave: "waveline" };
