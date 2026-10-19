@@ -42,6 +42,7 @@ export function parsePrefs(raw: unknown): DesktopPrefs {
     notifyOff: parseDeviceOff(value.notifyOff),
     ...(value.closeBehaviorChosen === true ? { closeBehaviorChosen: true } : {}),
     ...(value.trayNoticeShown === true ? { trayNoticeShown: true } : {}),
+    ...(value.allowRemoteClose === false ? { allowRemoteClose: false } : {}),
     ...(parseUpdateRemote(value.updateRemote) ? { updateRemote: parseUpdateRemote(value.updateRemote)! } : {}),
     ...(parseUpdateRemotes(value.updateRemotes) ? { updateRemotes: parseUpdateRemotes(value.updateRemotes)! } : {}),
     ...(parseUpdateProxyPref(value.updateProxy) ? { updateProxy: parseUpdateProxyPref(value.updateProxy)! } : {}),

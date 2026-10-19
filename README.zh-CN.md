@@ -6,7 +6,7 @@
 
 <p align="center"><a href="README.md">English</a> · <b>简体中文</b></p>
 
-**0.1.4**：等你回复的消息和审批直接出现在对话里；Claude 智能体支持 Claude Code 的权限模式、技能、设置和子智能体过程；智能体的浏览器标签可在后台操作；新增网络代理设置、签名模块包和主题配色。配合 cutex 0.1.4 使用（0.1.x 系列名为「First Take」，0.1.0 是第一个公开版本）。更新内容见 [CHANGELOG.md](CHANGELOG.md)。
+**0.1.5**：两个对话可以并排，右侧栏改为工具列；委托在对话里直接审核；主人的设备可分级授权；主机写明主人，可以成员身份连接；其他主机的留言；远程关闭桌面；Claude 智能体支持侧边对话和忙时分叉；从 CC Switch 导入 Profile；首次使用有简短引导。配合 cutex 0.1.5 使用（0.1.x 系列名为「First Take」，0.1.0 是第一个公开版本）。更新内容见 [CHANGELOG.md](CHANGELOG.md)。
 
 > **已知问题**：见 [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md)（应用里：设置 → 关于）。最重要的几条：
 > - **Windows 沙箱与商店版 PowerShell**（cutex 0.1.3 之前的主机）：点「设置沙箱」后每条命令都以 exit -1 失败；在「设置 → 主机后端更新」里把主机更新到 cutex 0.1.3，然后重启智能体。

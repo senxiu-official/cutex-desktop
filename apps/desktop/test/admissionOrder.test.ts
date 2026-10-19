@@ -4,11 +4,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdmissionItem, AdmissionNextStep, QueueAdmission, QueueItem } from "@cutex-desktop/protocol";
 import type { AskSummary } from "../src/shared/ipc";
-import { admittedAskIds, applyMove, askWithAdmissionPosition, atBoundary, beforeForSlot, canMoveTo, currentTurnOf, insertRefusal, moveTargets, pausedFrom, turnStopped, readOwnerMayPassAsks, rideAlongAsk, rideAlongLabel, rideAlongTiming, rideAlongView, foldQueueRows, foldRow, pendingMessagesSectionShown, slotForGroup, turnGroups } from "../src/renderer/src/lib/admissionOrder";
+import { admittedAskIds, applyMove, askWithAdmissionPosition, atBoundary, beforeForSlot, canMoveTo, currentTurnOf, insertRefusal, moveTargets, pausedFrom, turnStopped, readOwnerMayPassAsks, rideAlongAsk, rideAlongLabel, rideAlongTiming, rideAlongView, foldQueueRows, foldRow, pendingSectionMessages, slotForGroup, turnGroups } from "../src/renderer/src/lib/admissionOrder";
 import { stripInside, STRIP_ROOM } from "../src/renderer/src/lib/railStrip";
 import { parseQueueMoveError, queueMoveErrorKind, queueMoveErrorMessage } from "../src/shared/queueMove";
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";
 import { en } from "../src/renderer/src/i18n/en";
+import { viewKey } from "../src/renderer/src/lib/viewKey";
 
 const api = vi.hoisted(() => ({
   queueMove: vi.fn(async (..._args: unknown[]): Promise<unknown> => ({})),
@@ -103,11 +104,15 @@ describe("fold row, strips, old 待读留言 section", () => {
     expect(stripInside(STRIP_ROOM + 200)).toBe(false);
   });
 
-  it("the old 待读留言 section is only the fallback without admission-order", () => {
-    expect(pendingMessagesSectionShown(new Set(["agent-messages-v2"]), 2)).toBe(true);
-    expect(pendingMessagesSectionShown(new Set(["agent-messages-v2", "admission-order"]), 2)).toBe(false);
-    expect(pendingMessagesSectionShown(new Set(["agent-messages-v2"]), 0)).toBe(false);
-    expect(pendingMessagesSectionShown(new Set([]), 2)).toBe(false);
+  it("the 待读留言 section: every unread row without admission-order, with it those nextStep does not list (notes)", () => {
+    const rows = [{ messageId: "note-1" }, { messageId: "wake-1" }, { messageId: "ptell-1" }];
+    const nextStep = [{ id: "wake-1" }];
+    expect(pendingSectionMessages(new Set(["agent-messages-v2"]), rows, nextStep).map((m) => m.messageId)).toEqual(["note-1", "wake-1", "ptell-1"]);
+    // Passive notes are never ride-along items in cutex (user-input-delivery §3): they stay in the section.
+    expect(pendingSectionMessages(new Set(["agent-messages-v2", "admission-order"]), rows, nextStep).map((m) => m.messageId)).toEqual(["note-1", "ptell-1"]);
+    expect(pendingSectionMessages(new Set(["agent-messages-v2", "admission-order"]), rows, undefined)).toHaveLength(3);
+    expect(pendingSectionMessages(new Set(["agent-messages-v2"]), [], nextStep)).toEqual([]);
+    expect(pendingSectionMessages(new Set([]), rows, nextStep)).toEqual([]);
   });
 });
 
@@ -242,7 +247,7 @@ describe("store queueMove", () => {
 
   async function seed() {
     const { useApp } = await import("../src/renderer/src/store");
-    useApp.setState({ selectedId: "s", features: new Set(["admission-order"]), sessions: { s: { queue: [queued("A"), queued("c"), queued("e")], admission } as never } });
+    useApp.setState({ selectedId: "s", features: new Set(["admission-order"]), sessions: { [viewKey("local", "s")]: { queue: [queued("A"), queued("c"), queued("e")], admission } as never } });
     return useApp;
   }
 
@@ -252,16 +257,16 @@ describe("store queueMove", () => {
     let release!: (v: unknown) => void;
     api.queueMove.mockImplementationOnce(() => new Promise((r) => (release = r)));
     const done = useApp.getState().queueMove(queued("c"), { kind: "owner", id: "A" });
-    expect(ids(useApp.getState().sessions.s!.admission!)).toBe("cABDe");
+    expect(ids(useApp.getState().sessions[viewKey("local", "s")]!.admission!)).toBe("cABDe");
     expect(api.queueMove).toHaveBeenCalledWith("s", "c", 17, { kind: "owner", id: "A" });
     release({ revision: 18, admission: answer });
     await done;
-    expect(useApp.getState().sessions.s!.admission).toEqual(answer);
+    expect(useApp.getState().sessions[viewKey("local", "s")]!.admission).toEqual(answer);
   });
 
   it("sends the order revision (not the snapshot revision) as the move's CAS", async () => {
     const { useApp } = await import("../src/renderer/src/store");
-    useApp.setState({ selectedId: "s", features: new Set(["admission-order"]), sessions: { s: { queue: [queued("A"), queued("c"), queued("e")], admission: { ...admission, revision: 40, orderRevision: 9 } } as never } });
+    useApp.setState({ selectedId: "s", features: new Set(["admission-order"]), sessions: { [viewKey("local", "s")]: { queue: [queued("A"), queued("c"), queued("e")], admission: { ...admission, revision: 40, orderRevision: 9 } } as never } });
     api.queueMove.mockResolvedValueOnce({});
     await useApp.getState().queueMove(queued("c"), { kind: "owner", id: "A" });
     expect(api.queueMove).toHaveBeenCalledWith("s", "c", 9, { kind: "owner", id: "A" });
@@ -271,7 +276,7 @@ describe("store queueMove", () => {
     const useApp = await seed();
     api.queueMove.mockRejectedValueOnce(new Error("Error invoking remote method: Error: queue_move_refused:conflict"));
     const error = await useApp.getState().queueMove(queued("e"), { kind: "ask", id: "B" }).catch((e: Error & { moveRefusal?: string }) => e);
-    expect(useApp.getState().sessions.s!.admission).toBe(admission);
+    expect(useApp.getState().sessions[viewKey("local", "s")]!.admission).toBe(admission);
     expect(error).toMatchObject({ moveRefusal: "conflict" });
     expect((error as Error).message).not.toContain("queue_move_refused");
     api.queueMove.mockRejectedValueOnce(new Error("queue_move_refused:passingNotAllowed"));
@@ -279,13 +284,13 @@ describe("store queueMove", () => {
     const other = new Error("ssh tunnel closed");
     api.queueMove.mockRejectedValueOnce(other);
     await expect(useApp.getState().queueMove(queued("A"), null)).rejects.toBe(other);
-    expect(useApp.getState().sessions.s!.admission).toBe(admission);
+    expect(useApp.getState().sessions[viewKey("local", "s")]!.admission).toBe(admission);
   });
 
   it("does nothing for a no-op or without an admission list", async () => {
     const useApp = await seed();
     await useApp.getState().queueMove(queued("e"), null);
-    useApp.setState({ sessions: { s: { queue: [queued("A")], admission: null } as never } });
+    useApp.setState({ sessions: { [viewKey("local", "s")]: { queue: [queued("A")], admission: null } as never } });
     await useApp.getState().queueMove(queued("A"), null);
     expect(api.queueMove).not.toHaveBeenCalled();
   });

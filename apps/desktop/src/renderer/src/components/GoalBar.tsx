@@ -14,6 +14,7 @@ import { useTrackOverlay } from "../lib/openOverlays";
 import { goalRequest, useUiSignal, type GoalRequest } from "../lib/uiSignal";
 import type { RevealIntent } from "../modules/slots";
 import { useApp } from "../store";
+import { useConvHost, useConvSession } from "../lib/conversationScope";
 import { GoalMark } from "./GoalMark";
 
 /**
@@ -33,9 +34,13 @@ export function GoalCard({ goal, request, pauseOnly = false, className, idleBord
   const save = () => void act(() => setGoal({ objective: draft.trim(), ...(budgetChanged ? { tokenBudget: budget } : {}) }));
   const canSave = !!draft.trim() && budget !== undefined;
   const [armed, setArmed] = useArmed();
-  const setGoal = useApp((s) => s.setGoal);
-  const clearGoal = useApp((s) => s.clearGoal);
-  const replaceGoal = useApp((s) => s.replaceGoal);
+  // The conversation's agent (lib/conversationScope): its goal, whichever agent is selected.
+  const sessionId = useConvSession() ?? undefined;
+  const hostId = useConvHost();
+  const store = useApp.getState;
+  const setGoal = (patch: Parameters<ReturnType<typeof store>["setGoal"]>[0]) => store().setGoal(patch, sessionId, hostId);
+  const clearGoal = () => store().clearGoal(sessionId, hostId);
+  const replaceGoal = (objective: string) => store().replaceGoal(objective, sessionId, hostId);
   useEffect(() => {
     if (!request) return;
     setMode(request.mode);

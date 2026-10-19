@@ -8,7 +8,7 @@ import { StatusChip } from "../../components/StatusChip";
 import { useI18n } from "../../i18n";
 import { ARMED_BUTTON, ARMED_FRAME, useArmed } from "../../lib/armedConfirm";
 import { useUiSignal } from "../../lib/uiSignal";
-import { sessionApi, useApp } from "../../store";
+import { convApi, convNotify, convSignal, useConvScope } from "../../lib/conversationScope";
 import { CAPSULE_ROW, CAPSULE_ROW_ACTION, CAPSULE_ROW_ICON, CAPSULE_ROW_META, capsuleRowActions } from "../../lib/capsuleRows";
 import type { StatusBarProps } from "../slots";
 import { useTerminals, type TerminalsData } from "./useTerminalsStatus";
@@ -57,12 +57,13 @@ function TerminalRow({ term, onTerminate }: { term: BackgroundTerminal; onTermin
 
 function TerminalRows({ sessionId, data }: { sessionId: string; data: TerminalsData }) {
   const { threadId, terminals, refresh } = data;
+  const conv = useConvScope();
   const terminate = async (processId: string) => {
     if (!threadId) return;
     try {
-      await sessionApi(sessionId).terminateBackgroundTerminal(sessionId, threadId, processId);
+      await convApi(conv, sessionId).terminateBackgroundTerminal(sessionId, threadId, processId);
     } catch (e) {
-      useApp.getState().notify(e instanceof Error ? e.message : String(e), "error");
+      convNotify(conv, e instanceof Error ? e.message : String(e), "error");
     }
     refresh();
   };
@@ -89,9 +90,11 @@ export function TerminalsStatusBar({ sessionId, inline, reveal }: StatusBarProps
   const [open, setOpen] = useState(false);
   const data = useTerminals(sessionId);
   const n = data.terminals.length;
+  const conv = useConvScope();
   useUiSignal("ps", (arg) => {
     if (arg === "agents") return;
-    if (n === 0) return useApp.getState().signal("ps", "agents");
+    // Passed on to this conversation's sub-agent list (not whichever conversation has the focus).
+    if (n === 0) return convSignal(conv, "ps", "agents");
     reveal("view", () => setOpen(true));
   });
   if (n === 0 || (!inline && !open)) return null;

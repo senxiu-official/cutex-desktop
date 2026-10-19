@@ -105,7 +105,7 @@ describe("host object", () => {
     const target: Record<string, unknown> = {};
     const host = installPackHost(target);
     expect(installPackHost(target)).toBe(host);
-    expect(host.apiVersion).toBe("1.16");
+    expect(host.apiVersion).toBe("1.17");
     expect(host.get("react").useState).toBe(React.useState);
     expect(() => host.get("fs")).toThrow(/not provided/);
     expect(() => host.get("__proto__")).toThrow(/not provided/);

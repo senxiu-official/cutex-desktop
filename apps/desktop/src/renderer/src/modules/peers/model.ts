@@ -92,6 +92,9 @@ export function policyPatch(before: PeerPolicy, after: PeerPolicy): NonNullable<
   if (bi.assumedCaps.sandbox !== ai.assumedCaps.sandbox || bi.assumedCaps.networkAccess !== ai.assumedCaps.networkAccess || bi.assumedCaps.unrestrictedServices !== ai.assumedCaps.unrestrictedServices) inbound.assumedCaps = { ...ai.assumedCaps };
   if (bi.maxOpenAsks !== ai.maxOpenAsks) inbound.maxOpenAsks = ai.maxOpenAsks;
   if (bi.asksPerHour !== ai.asksPerHour) inbound.asksPerHour = ai.asksPerHour;
+  // cross-host-tell-wake (only set when the host has it: the UI shows the switch only then).
+  if ((bi.tellWake ?? false) !== (ai.tellWake ?? false)) inbound.tellWake = ai.tellWake ?? false;
+  if (ai.tellWakesPerHour !== undefined && bi.tellWakesPerHour !== ai.tellWakesPerHour) inbound.tellWakesPerHour = ai.tellWakesPerHour;
   const out: NonNullable<PeerPatch["policy"]> = {};
   if (Object.keys(inbound).length) out.inbound = inbound;
   if (before.outbound.visibility !== after.outbound.visibility) out.outbound = { visibility: after.outbound.visibility };

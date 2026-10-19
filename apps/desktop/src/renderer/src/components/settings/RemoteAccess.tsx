@@ -7,7 +7,7 @@
 // Everything is host-side state read / written over the daemon API; no token is ever shown here
 // except the one-time pairing code.
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { KeyRound, Smartphone } from "lucide-react";
+import { KeyRound, Lock, ShieldAlert, Smartphone } from "lucide-react";
 import type { ClientTokenView, GlobalSettings, ListenEntry, PairingCodeView } from "../../../../shared/ipc";
 import { MaskedAddress } from "../MaskedAddress";
 import { RenameTokenButton, TokenTitle } from "./TokenName";
@@ -32,11 +32,11 @@ import {
 } from "../../lib/remoteAccess";
 import { formatWhen, useClock, useNow } from "../../lib/time";
 import { useApp } from "../../store";
-import { SettingsSections } from "../../modules/Outlet";
 import { AddButton, ArmedRemove, Button, EmptyState, ErrorNote, ListRow, Loading, Notice, RefreshButton, ResetButton, Section, Select, TextInput, TextLink } from "./Form";
 import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
-import { OWNER_USER_ID, shownUserName, USERS_FEATURE, type UserRecord } from "../../../../shared/users";
-import { useScrollToSettingsAnchor } from "../../lib/settingsFocus";
+import { OWNER_USER_ID, shownUserName, USERS_FEATURE, type UserRecord, accessRefusalOf, DEVICE_SCOPE_FEATURE, OWNER_DEVICE_NOTICE_FEATURE, type DeviceScope } from "../../../../shared/users";
+import { accessRefusalText, scopeOptions, useOwnerLocalLock } from "./OwnerDevices";
+import { useHostScope } from "../../lib/useHostScope";
 import { useHostData } from "../../lib/useHostScope";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -118,13 +118,6 @@ function ListenRow({ row, active, canRemove, busy, onRemove }: { row: ListenEntr
       actions={canRemove ? <ArmedRemove title={t("remote.remove")} disabled={busy} onRemove={onRemove} /> : <span className="text-[11px] text-subtle" title={t("remote.keepLoopbackHint")}>{t("remote.required")}</span>}
     />
   );
-}
-
-/** Settings → 接入: the module's sections (监听地址, CORS, 配对手机) in slot order. */
-export function RemoteAccessPage() {
-  // openSettings("remote", { anchor: "remote-access.pairing" }) from 用户 → 设备 → 配对设备.
-  useScrollToSettingsAnchor();
-  return <SettingsSections page="remote" />;
 }
 
 export function RemoteAccessSection() {
@@ -274,6 +267,44 @@ export function CorsSection() {
 }
 
 /** The pairing payload as a QR code: dark on white in both themes (phones need the contrast). */
+/** 设备权限 at pairing: one radio per scope with what it means (the owner's default: 完全控制). */
+function PairScope({ value, ownerDevice, onChange }: { value: DeviceScope; ownerDevice: boolean; onChange(scope: DeviceScope): void }) {
+  const { t } = useI18n();
+  return (
+    <div className="-mx-4 border-b border-border px-4 py-2.5" role="radiogroup" aria-label={t("ownerDev.scope")}>
+      <div className="mb-1 text-sm">{t("ownerDev.scope")}</div>
+      {scopeOptions(t, ownerDevice, true).map((o) => (
+        <label key={o.value} className="flex cursor-pointer items-start gap-2 py-1 text-sm">
+          <input type="radio" name="pair-scope" checked={value === o.value} onChange={() => onChange(o.value)} className="mt-1 accent-[var(--color-accent)]" />
+          <span>
+            {o.label}
+            {o.value === "full" && ownerDevice && <span className="ml-1 text-xs text-subtle">{t("ownerDev.scope.ownerDefault")}</span>}
+            <span className="block text-xs text-subtle">{o.value === "full" && !ownerDevice ? t("ownerDev.scope.byUser.hint") : o.title}</span>
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+/** Before generating an owner code with full control: what it gives (owner 2026-10-19, three points). */
+function OwnerCodeWarning({ host }: { host: string }) {
+  const { t } = useI18n();
+  return (
+    <div className="-mx-4 border-b border-border bg-warn/10 px-4 py-3 text-xs text-warn-text" data-testid="owner-code-warning">
+      <div className="mb-1 flex items-center gap-1.5 text-sm font-medium">
+        <ShieldAlert size={14} className="shrink-0" />
+        {t("ownerDev.code.title", { host })}
+      </div>
+      <ul className="list-disc space-y-0.5 pl-5">
+        <li>{t("ownerDev.code.commands")}</li>
+        <li>{t("ownerDev.code.once")}</li>
+        <li>{t("ownerDev.code.notice", { host })}</li>
+      </ul>
+    </div>
+  );
+}
+
 function QrCode({ text, label }: { text: string; label: string }) {
   const { size, d } = useMemo(() => qrPath(text), [text]);
   const quiet = 4;
@@ -300,6 +331,7 @@ function PairingCard({ code, onClose, onRenew, busy }: { code: PairingCodeView; 
           <div className={`font-mono text-3xl font-semibold tracking-[0.2em] select-all ${expired ? "text-subtle line-through" : ""}`}>{code.code}</div>
           <p className={`text-xs tabular-nums ${expired ? "text-danger" : left < 60 ? "text-warn" : "text-subtle"}`}>
             {expired ? t("remote.pair.expired") : t("remote.pair.expiresIn", { time: formatCountdown(left) })}
+            {code.ownerDevice ? ` · ${t("ownerDev.code.onceShort")}` : ""}
             {code.label ? ` · ${code.label}` : ""}
           </p>
           {code.urls.length > 0 ? (
@@ -387,6 +419,11 @@ export function PairingSection() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [users, setUsers] = useState<UserRecord[] | null>(null);
   const [forUser, setForUser] = useState<string>(OWNER_USER_ID);
+  // device-scope: what the paired device may do (never above its user's grant).
+  const withScope = features.has(DEVICE_SCOPE_FEATURE);
+  const [scope, setScope] = useState<DeviceScope>("full");
+  const lock = useOwnerLocalLock(targetHost);
+  const hostLabel = useHostScope().host(targetHost)?.view.label ?? targetHost;
   useEffect(() => {
     setUsers(null);
     setForUser(OWNER_USER_ID);
@@ -437,10 +474,10 @@ export function PairingSection() {
     try {
       const list = (await load()) ?? tokens ?? [];
       known.current = new Set(list.map((x) => x.tokenId));
-      setCode(await api.createPairingCode(label.trim() || undefined, users && forUser !== OWNER_USER_ID ? forUser : undefined));
+      setCode(await api.createPairingCode(label.trim() || undefined, users && forUser !== OWNER_USER_ID ? forUser : undefined, withScope ? scope : undefined));
     } catch (e) {
       const text = errorText(e);
-      setError(text.includes("loopback_only") ? t("remote.pair.loopbackOnly") : text.includes("too_many_pairing_codes") ? t("remote.pair.tooMany") : text);
+      setError(accessRefusalText(t, accessRefusalOf(e, { action: "pairingCode" }), hostLabel) ?? (text.includes("too_many_pairing_codes") ? t("remote.pair.tooMany") : text));
     } finally {
       setBusy(false);
     }
@@ -477,13 +514,16 @@ export function PairingSection() {
       ) : (
         <div className="-mx-4 flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
           <TextInput width="w-48" label={t("remote.pair.label")} value={label} maxLength={60} placeholder={t("remote.pair.labelPlaceholder")} onChange={setLabel} />
-          {users && users.length > 1 && <Select<string> width="w-36" label={t("users.pairFor")} value={forUser} options={users.map((u) => ({ value: u.id, label: u.isOwner ? `${shownUserName(u)} · ${t("users.ownerBadge")}` : shownUserName(u) }))} onChange={setForUser} />}
-          <Button primary disabled={busy} onClick={() => void generate()}>
+          {users && users.length > 1 && <Select<string> width="w-36" label={t("users.pairFor")} value={forUser} options={users.map((u) => ({ value: u.id, label: u.isOwner ? `${shownUserName(u)} · ${t("host.info.owner")}` : shownUserName(u) }))} onChange={setForUser} />}
+          <Button primary disabled={busy || lock.locked} title={lock.hint ?? undefined} onClick={() => void generate()}>
             {busy ? t("remote.pair.generating") : t("remote.pair.generate")}
           </Button>
           {paired && <span className="text-xs text-ok-text">{t("remote.pair.paired", { name: tokenName(paired, t) })}</span>}
+          {lock.hint && <span className="flex basis-full items-center gap-1 text-xs text-subtle"><Lock size={12} />{lock.hint}</span>}
         </div>
       )}
+      {!code && withScope && !lock.locked && <PairScope value={scope} ownerDevice={forUser === OWNER_USER_ID} onChange={setScope} />}
+      {!code && !lock.locked && forUser === OWNER_USER_ID && (!withScope || scope === "full") && features.has(OWNER_DEVICE_NOTICE_FEATURE) && <OwnerCodeWarning host={hostLabel} />}
       {error && <ErrorNote>{error}</ErrorNote>}
       {/* With users, every device is managed in 用户 → 设备 (with its user); an older host keeps the list here. */}
       {withUsers ? (

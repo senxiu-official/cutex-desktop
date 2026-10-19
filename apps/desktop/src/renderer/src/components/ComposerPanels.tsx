@@ -7,7 +7,9 @@ import type { ExperimentalFeaturesView, ProjectMemoryView } from "../../../share
 import { useI18n } from "../i18n";
 import { confirmDialog } from "../lib/contextMenu";
 import { describeError } from "../lib/agentFeatures";
-import { agentHost, hostApi, sessionApi, unsupportedNotice, useApp } from "../store";
+import { hostApi, unsupportedNotice } from "../store";
+import { convApi, useConvScope } from "../lib/conversationScope";
+import { useConvHost } from "../lib/conversationScope";
 import { services } from "../modules/app";
 import { hostPageParam } from "../lib/targetHost";
 import { ProjectMemoryList } from "./ProjectMemory";
@@ -64,6 +66,7 @@ export function StatusPanel({ rows, onClose }: { rows: StatusRow[]; onClose(): v
 }
 
 export function MemoriesPanel({ sessionId, threadId, onClose }: { sessionId: string; threadId: string; onClose(): void }) {
+  const conv = useConvScope();
   const { t } = useI18n();
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
   const run = async (fn: () => Promise<void>, done: string) => {
@@ -81,17 +84,17 @@ export function MemoriesPanel({ sessionId, threadId, onClose }: { sessionId: str
     <Panel title={t("slash.memories.title")} onClose={onClose}>
       <p className="mb-2 text-xs text-subtle">{t("slash.memories.hint")}</p>
       <div className="flex flex-wrap gap-1.5">
-        <button className={btn} onClick={() => void run(() => sessionApi(sessionId).setMemoryMode(sessionId, threadId, "enabled"), t("slash.memories.enabledDone"))}>
+        <button className={btn} onClick={() => void run(() => convApi(conv, sessionId).setMemoryMode(sessionId, threadId, "enabled"), t("slash.memories.enabledDone"))}>
           {t("slash.memories.enable")}
         </button>
-        <button className={btn} onClick={() => void run(() => sessionApi(sessionId).setMemoryMode(sessionId, threadId, "disabled"), t("slash.memories.disabledDone"))}>
+        <button className={btn} onClick={() => void run(() => convApi(conv, sessionId).setMemoryMode(sessionId, threadId, "disabled"), t("slash.memories.disabledDone"))}>
           {t("slash.memories.disable")}
         </button>
         <button
           className={`${btn} text-danger`}
           onClick={() =>
             void (async () => {
-              if (await confirmDialog(t("slash.memories.resetConfirm"), true)) await run(() => sessionApi(sessionId).resetMemory(sessionId), t("slash.memories.resetDone"));
+              if (await confirmDialog(t("slash.memories.resetConfirm"), true)) await run(() => convApi(conv, sessionId).resetMemory(sessionId), t("slash.memories.resetDone"));
             })()
           }
         >
@@ -108,7 +111,7 @@ export function ProjectMemoryPanel({ projectId, projectName, onClose }: { projec
   const { t } = useI18n();
   const [memory, setMemory] = useState<ProjectMemoryView | null | undefined>(undefined);
   // The open agent's project: on that agent's host.
-  const hostId = useApp(agentHost);
+  const hostId = useConvHost();
   useEffect(() => {
     let cancelled = false;
     setMemory(undefined);
@@ -144,17 +147,18 @@ export function ProjectMemoryPanel({ projectId, projectName, onClose }: { projec
 }
 
 export function ExperimentalPanel({ sessionId, threadId, onClose }: { sessionId: string; threadId: string | null; onClose(): void }) {
+  const conv = useConvScope();
   const { t } = useI18n();
   const [view, setView] = useState<ExperimentalFeaturesView | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const load = () => sessionApi(sessionId).experimentalFeatures(sessionId, threadId).then(setView, (e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+  const load = () => convApi(conv, sessionId).experimentalFeatures(sessionId, threadId).then(setView, (e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, threadId]);
   const toggle = async (name: string, enabled: boolean) => {
     try {
-      await sessionApi(sessionId).setExperimentalFeature(name, enabled);
+      await convApi(conv, sessionId).setExperimentalFeature(name, enabled);
       setView((v) => (v ? { ...v, features: v.features.map((f) => (f.name === name ? { ...f, enabled } : f)) } : v));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

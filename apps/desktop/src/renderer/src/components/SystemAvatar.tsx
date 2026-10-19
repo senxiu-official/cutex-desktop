@@ -3,7 +3,8 @@
 import type { SessionAvatar } from "@cutex-desktop/protocol";
 import cutexLogo from "../assets/cutex-logo-64.png";
 import { systemSender, type SystemSender } from "../lib/systemSenders";
-import { selectedSidebar, useApp } from "../store";
+import { useApp } from "../store";
+import { convSidebarOf, useConvScope } from "../lib/conversationScope";
 import { rowsOf } from "../lib/viewHost";
 import { Avatar } from "./Avatar";
 
@@ -32,6 +33,7 @@ export function SystemAvatar({ kind, size = 28 }: { kind: SystemSender; size?: n
 export function SenderAvatar({ id, sourceKind, name, avatar, size = 28 }: { id: string | null | undefined; sourceKind?: string | null; name: string; avatar?: SessionAvatar | null; size?: number }) {
   const system = systemSender(id, sourceKind);
   // The sender's own avatar when the caller has none (timeline messages carry only the id).
-  const own = useApp((s) => (avatar === undefined && id && !system ? (rowsOf(s.sidebar, selectedSidebar(s)).find((r) => r.cutexSessionId === id)?.avatar ?? null) : null));
+  const conv = useConvScope();
+  const own = useApp((s) => (avatar === undefined && id && !system ? (rowsOf(s.sidebar, convSidebarOf(conv, s)).find((r) => r.cutexSessionId === id)?.avatar ?? null) : null));
   return system ? <SystemAvatar kind={system} size={size} /> : <Avatar name={name} avatar={avatar ?? own} seed={id} size={size} />;
 }

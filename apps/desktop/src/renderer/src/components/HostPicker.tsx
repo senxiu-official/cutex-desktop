@@ -9,6 +9,7 @@ import type { HostLook } from "../lib/hostScope";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { useHostScope } from "../lib/useHostScope";
 import { HostDot, HostPlatformIcon } from "./HostMark";
+import { holdPageBody } from "./Page";
 import { ScriptText } from "./ScriptText";
 
 function HostFace({ host }: { host: HostLook }) {
@@ -82,7 +83,10 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
   const pick = (h: HostLook | undefined) => {
     if (!h || !canTargetHost(h)) return;
     setOpen(false);
-    if (h.id !== value || all?.selected) onChange(h.id);
+    if (h.id !== value || all?.selected) {
+      if (chip) holdPageBody(ref.current);
+      onChange(h.id);
+    }
   };
   const pickAll = () => {
     setOpen(false);

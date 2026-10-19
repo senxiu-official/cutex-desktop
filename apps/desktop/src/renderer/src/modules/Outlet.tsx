@@ -16,9 +16,9 @@ import { TargetHostContext } from "../lib/targetHost";
 import { useHostScope } from "../lib/useHostScope";
 import type { SettingsTab } from "../store";
 import { appModules, services } from "./app";
-import { useOpenPage, useSlot } from "./react";
+import { useOpenPage, usePageOf, useSlot, type OpenPage } from "./react";
 import type { ProfileOwnedField, SettingsSectionItem } from "./slots";
-import type { ModuleId } from "./types";
+import type { ItemId, ModuleId, PageParams } from "./types";
 
 interface BoundaryProps {
   moduleId: ModuleId;
@@ -151,7 +151,15 @@ function PageOff() {
  * is open. Nothing while the page's module only waits for capabilities; 「模块已关闭」 when it is off.
  */
 export function MainOutlet({ children }: { children: ReactNode }) {
-  const open = useOpenPage();
+  return <PageOutlet open={useOpenPage()}>{children}</PageOutlet>;
+}
+
+/** v1.17 (§24.4): the page a conversation pane shows over its conversation (another pane than the focused one). */
+export function PaneOutlet({ page, children }: { page: { page: ItemId; params: PageParams } | null; children: ReactNode }) {
+  return <PageOutlet open={usePageOf(page)}>{children}</PageOutlet>;
+}
+
+function PageOutlet({ open, children }: { open: OpenPage | null; children: ReactNode }) {
   if (!open) return <>{children}</>;
   if (!open.entry) return open.waiting ? <main className="min-w-0 flex-1" /> : <PageOff />;
   const { Page } = open.entry.item;

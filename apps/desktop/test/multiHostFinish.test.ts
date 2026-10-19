@@ -6,7 +6,6 @@ import { attentionChips, type AgentSignal } from "../src/renderer/src/lib/agentA
 import { hostDelegations } from "../src/renderer/src/lib/delegationStore";
 import { hostKey } from "../src/renderer/src/lib/hostKeys";
 import { emptyPendingChat } from "../src/renderer/src/lib/pendingChat";
-import { viewKey } from "../src/renderer/src/lib/sideLayout";
 import type { AgentRow } from "../src/renderer/src/lib/sidebar";
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
@@ -16,14 +15,8 @@ function row(id: string, hostId: string): AgentRow {
   return { id, key: hostKey(hostId, id), hostId, name: `${id}@${hostId}`, subtitle: "", status: "idle", isDirector: false, pinned: false, lastActivity: 0, profile: null, color: null, session };
 }
 
-describe("side layout view keys", () => {
-  it("keys another host's open agent by host, the focus host's by id", () => {
-    expect(viewKey("a", "local", "local")).toBe("a");
-    expect(viewKey("a", "workstation", "local")).toBe(hostKey("workstation", "a"));
-    expect(viewKey("a", "workstation", "local")).not.toBe(viewKey("a", "local", "local"));
-    expect(viewKey("a")).toBe("a");
-  });
-});
+// (v1.17, docs/desktop-modules.md §24: the side layout's per-agent view keys are gone with §18.5's views;
+// the panes key conversation views by host + id in lib/viewKey, test/viewKey.test.ts.)
 
 describe("delegations per host", () => {
   const ask = (askId: string) => ({ askId }) as unknown as AskSummary;

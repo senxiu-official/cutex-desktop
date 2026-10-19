@@ -10,7 +10,7 @@ import { COLUMN_PADDING, marginWidth } from "../lib/gutterLayout";
 import { useTurnAttachmentItems } from "../lib/gutterItems";
 import { useGutter } from "../lib/gutterStore";
 import { registerMargin } from "../lib/marginLayout";
-import { agentHost, useApp } from "../store";
+import { useConvHost } from "../lib/conversationScope";
 import { ItemBoundary } from "./Outlet";
 import type { AppSlotEntry } from "./slots";
 
@@ -26,7 +26,7 @@ function useWhere(entry: Entry): { where: "inline" | "margin"; width: number } {
 }
 
 function MarginBox({ entry, sessionId, turnId, width }: { entry: Entry; sessionId: string; turnId: string; width: number }) {
-  const hostId = useApp(agentHost);
+  const hostId = useConvHost();
   const box = useRef<HTMLDivElement>(null);
   const side = entry.item.margin!.side;
   useLayoutEffect(() => {
@@ -57,7 +57,7 @@ function MarginItem({ entry, sessionId, turnId }: { entry: Entry; sessionId: str
 }
 
 function InlineItem({ entry, sessionId, turnId }: { entry: Entry; sessionId: string; turnId: string }) {
-  const hostId = useApp(agentHost);
+  const hostId = useConvHost();
   const { where, width } = useWhere(entry);
   if (where !== "inline") return null;
   const Attachment = entry.item.Attachment;

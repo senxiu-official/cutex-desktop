@@ -5,6 +5,9 @@
 // connection cutex does not see as loopback: every peer write there answers 403 loopback_only.
 // `?peerdemo`: 10 s after an invite is created, the other host joins (pending → online).
 // Ids / labels match the cross-host delegations of modules/delegations/mock.ts.
+// cross-host-tell-wake: workstation-lab lets its tells wake agents here (30 / hour); the others keep the
+// default (off). owner-local-only: under `?ownerdevice` (this desktop is a paired owner device on HOST-A)
+// pairing / enabling peers answers 403 owner_local_only {action: peerPair | peerEnable | peersEnable}.
 import type { AskDetail, CutexRefusal, GlobalSettings } from "../../../../shared/ipc";
 import { PEER_POLICY_DEFAULT, PEERS_SETTINGS_DEFAULT, type PeerAgents, type PeerAuditEntry, type PeerPatch, type PeerResult, type PeersSettings, type PeerView } from "../../../../shared/peers";
 import type { MockCore, ModuleMock } from "../../dev/mockTypes";
@@ -51,7 +54,7 @@ const peers: PeerView[] = [
     urls: ["http://100.64.0.97:24270", "http://workstation.tail1234.ts.net:24270"],
     inflight: { outbound: 2, inbound: 2 },
     policyRevision: 4,
-    policy: { inbound: { exports: [{ project: "desktop" }, { agent: "helper" }], accept: true, review: "always", assumedCaps: { sandbox: "read-only", networkAccess: false, unrestrictedServices: false }, maxOpenAsks: 20, asksPerHour: 60 }, outbound: { visibility: "all" } },
+    policy: { inbound: { exports: [{ project: "desktop" }, { agent: "helper" }], accept: true, review: "always", assumedCaps: { sandbox: "read-only", networkAccess: false, unrestrictedServices: false }, maxOpenAsks: 20, asksPerHour: 60, tellWake: true, tellWakesPerHour: 30 }, outbound: { visibility: "all" } },
   }),
   peer(GPU_BOX, "gpu-box", "GPU-BOX", "linux", {
     state: "unreachable",
@@ -95,6 +98,11 @@ const agents: Record<string, PeerAgents> = {
       { cutexSessionId: "cutex.9b2e4f1d77", name: "proj-research", short: "9b2e4f", status: "idle", runtime: "codex" },
       { cutexSessionId: "cutex.c0de11aa22", name: "proj-director", short: "c0de11", status: "idle", runtime: "claude" },
       { cutexSessionId: "cutex.ee77ff0011", name: "proj-glm-research", short: "ee77ff", status: "offline", runtime: "codex" },
+      // A host that exports a few hundred agents (owner report 2026-10-19) — the list must stay usable.
+      ...Array.from({ length: 300 }, (_, i) => {
+        const hex = (0x100000 + i * 7919).toString(16).slice(-6);
+        return { cutexSessionId: `cutex.${hex}0000`, name: `worker-${String(i + 1).padStart(3, "0")}`, short: hex, status: i % 11 === 0 ? "busy" : i % 3 === 0 ? "offline" : "idle", runtime: i % 4 === 0 ? "claude" : "codex" };
+      }),
     ],
   },
   [GPU_BOX]: { fetchedAt: iso(14 * 3600), agents: [{ cutexSessionId: "cutex.77aa01bc3d", name: "trainer", short: "77aa01", status: "idle", runtime: "codex" }] },
@@ -132,9 +140,16 @@ function audit(p: PeerView): PeerAuditEntry[] {
   return rows;
 }
 
-function refusal(code: string, message: string): { ok: false; error: CutexRefusal } {
-  return { ok: false, error: { code, message } };
+function refusal(code: string, message: string, access?: CutexRefusal["access"]): { ok: false; error: CutexRefusal } {
+  return { ok: false, error: { code, message, ...(access ? { access } : {}) } };
 }
+
+/** `?ownerdevice` (no value / `local`): HOST-A is reached with a paired owner device token (dev/mockBridge.ts). */
+const pairedHere = () => {
+  const q = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
+  return q.has("ownerdevice") && (q.get("ownerdevice") || "local") === "local" && !q.has("noownerlocal");
+};
+const ownerLocalOnly = (action: "peerPair" | "peerEnable" | "peersEnable") => refusal("owner_local_only", "only on the host itself or over SSH", { action, issuedVia: "pairing" });
 
 const LABEL = /^[a-z0-9-]{1,32}$/;
 
@@ -170,6 +185,7 @@ function localApi(core: MockCore) {
       return { peers: clone(peers.map((p) => ({ ...p, outboxOldestAgeSecs: p.outboxOldestAt ? Math.floor((Date.now() - Date.parse(p.outboxOldestAt)) / 1000) : null }))) };
     },
     async createPeerInvite(request: { label?: string }): Promise<PeerResult<import("../../../../shared/peers").PeerInvite>> {
+      if (pairedHere()) return ownerLocalOnly("peerPair");
       const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
       // Same shape as cutex (management/v2/pairing.rs): 8 chars of this alphabet, shown as XXXX-XXXX.
       const raw = Array.from({ length: 8 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
@@ -191,6 +207,7 @@ function localApi(core: MockCore) {
     },
     async addPeer(request: { url: string; code: string; label?: string }): Promise<PeerResult<PeerView>> {
       await new Promise((r) => setTimeout(r, 400));
+      if (pairedHere()) return ownerLocalOnly("peerPair");
       // cutex compares the code without separators, case-insensitively.
       if (!/^[A-Z0-9]{8}$/i.test(request.code.replace(/[^A-Za-z0-9]/g, ""))) return refusal("invalid_pairing_code", "invalid pairing code");
       if (!/^http:\/\/(127\.0\.0\.1|100\.\d+\.\d+\.\d+|[a-z0-9.-]+\.ts\.net)(:\d+)?\/?$/i.test(request.url)) return refusal("peer_url_insecure", "peer url insecure");
@@ -207,6 +224,7 @@ function localApi(core: MockCore) {
     async patchPeer(peerId: string, body: PeerPatch): Promise<PeerResult<PeerView>> {
       const p = find(peerId);
       if (!p) return refusal("peer_not_found", "no such peer");
+      if (body.enabled === true && pairedHere()) return ownerLocalOnly("peerEnable");
       if (body.label !== undefined && !LABEL.test(body.label)) return refusal("invalid_request", "label must match ^[a-z0-9-]{1,32}$");
       if (body.label !== undefined && peers.some((x) => x !== p && x.label === body.label)) return refusal("invalid_request", "label already used");
       applyPatch(p, body);
@@ -236,6 +254,7 @@ function localApi(core: MockCore) {
       return p ? audit(p) : [];
     },
     async patchPeersSettings(patch: Partial<PeersSettings>): Promise<PeerResult<GlobalSettings>> {
+      if (patch.enabled === true && pairedHere()) return ownerLocalOnly("peersEnable");
       Object.assign(settings, patch);
       return { ok: true, value: hostSettingsView(core) };
     },
@@ -284,7 +303,7 @@ export const mock: ModuleMock = {
   api: (core) => localApi(core),
   remote: (hostId, emitHost) => remoteApi(hostId, emitHost),
   settings: () => ({ peers: { ...settings } }),
-  features: { new: ["peers", "peers-v2", "cross-host-asks"] },
+  features: { new: ["peers", "peers-v2", "cross-host-asks", "cross-host-tell-wake"] },
   start(core) {
     if (core.legacy) return;
     emitChanged = (peerId, reason) => core.emitHost("cutex/peers/changed", { peerId, reason });

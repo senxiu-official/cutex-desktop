@@ -5,6 +5,7 @@
 // Shell code: no feature names.
 import type { ItemId } from "../modules/types";
 import {
+  cardCount,
   findCard,
   findPage,
   locate,
@@ -15,9 +16,12 @@ import {
   reorderCard,
   reorderPage,
   splitInstanceTo,
+  MAX_CARDS,
+  MAX_PAGES,
   type SideCard,
   type SideLayout,
 } from "./sideLayout";
+import { MAX_TOOL_PANES } from "./paneLayout";
 
 /** What is being dragged (§3.7: three handles inside the side, plus a handle from outside it). */
 export type SideDrag =
@@ -82,7 +86,7 @@ export type SideDropTarget =
   | { kind: "gap"; pageId: string; before: string | null }
   /** External handle onto the column: pinned into the page in view. */
   | { kind: "column"; pageId: string }
-  /** Not accepted here (a tab over another kind's card: one kind per tab bar). */
+  /** Not accepted here (a tab over another kind's card: one kind per tab bar; v1.17: no room — a full column, the panes' or columns' limit). */
   | { kind: "refuse" }
   /** Accepted, does nothing: the composer (later: quote into the message), the drag's own origin. */
   | { kind: "noop"; why: "composer" | "origin" };
@@ -105,6 +109,21 @@ export function aloneOnPage(layout: SideLayout, drag: SideDrag): boolean {
     return !!at && at.page.cards.length === 1 && at.card.tabs.length === 1;
   }
   return false;
+}
+
+/**
+ * v1.17 (§24 限额): a card / tab drag can make a pane in `pageId` (null: a new column) — ≤ 3 panes per
+ * column, ≤ MAX_TOOL_PANES in all, ≤ MAX_PAGES columns. A whole card (or a card's only tab) moves its
+ * pane; any other tab makes one more.
+ */
+function fitsInto(layout: SideLayout, drag: SideDrag, src: { card: SideCard; pageId: string }, pageId: string | null): boolean {
+  const leaves = drag.type === "card" || src.card.tabs.length === 1;
+  const total = cardCount(layout) + (leaves ? 0 : 1);
+  if (total > MAX_TOOL_PANES) return false;
+  if (pageId === null) return layout.pages.length < MAX_PAGES || (leaves && (findPage(layout, src.pageId)?.cards.length ?? 0) === 1);
+  const page = findPage(layout, pageId);
+  if (!page) return false;
+  return page.cards.length + (src.pageId === pageId && leaves ? 0 : 1) <= MAX_CARDS;
 }
 
 /** The kind and own card of a card / tab drag (null for page / external drags or a vanished source). */
@@ -178,7 +197,14 @@ export function resolveDrop(layout: SideLayout, drag: SideDrag, hit: SideHit, po
   if ((drag.type === "card" || drag.type === "tab") && !src) return null;
   if (drag.type === "page" && !findPage(layout, drag.pageId)) return null;
   const movable = drag.type === "card" || drag.type === "tab" || drag.type === "external";
-  const newPage = (via: NewPageVia): SideDropTarget | null => (movable ? { kind: "new", via, unchanged: aloneOnPage(layout, drag) } : null);
+  const newPage = (via: NewPageVia): SideDropTarget | null => {
+    if (!movable) return null;
+    const unchanged = aloneOnPage(layout, drag);
+    if (!unchanged && src && !fitsInto(layout, drag, src, null)) return { kind: "refuse" };
+    return { kind: "new", via, unchanged };
+  };
+  /** A target that makes a pane in `pageId`, or the refusal when the limits leave no room there. */
+  const fit = (pageId: string, target: SideDropTarget): SideDropTarget => (src && !fitsInto(layout, drag, src, pageId) ? { kind: "refuse" } : target);
   switch (hit.at) {
     case "pill": {
       const page = findPage(layout, hit.pageId);
@@ -200,7 +226,7 @@ export function resolveDrop(layout: SideLayout, drag: SideDrag, hit: SideHit, po
       }
       const { before, line } = pillInsertion(hit, pos);
       if (drag.type === "card" && own && reorderCard(layout, card.id, before) === layout) return null;
-      return { kind: "pill", pageId: page.id, op: "insert", before, line, own };
+      return fit(page.id, { kind: "pill", pageId: page.id, op: "insert", before, line, own });
     }
     case "lane":
     case "tail":
@@ -221,7 +247,7 @@ export function resolveDrop(layout: SideLayout, drag: SideDrag, hit: SideHit, po
       const op = pos < hit.top + hit.height / 2 ? "above" : "below";
       const before = op === "above" ? at.card.id : nextCard(layout, at.card.id);
       if (at.page.id === src!.pageId && reorderCard(layout, card.id, before) === layout) return null;
-      return { kind: "head", cardId: at.card.id, op };
+      return fit(at.page.id, { kind: "head", cardId: at.card.id, op });
     }
     case "gap": {
       if (!findPage(layout, hit.pageId)) return null;
@@ -233,7 +259,7 @@ export function resolveDrop(layout: SideLayout, drag: SideDrag, hit: SideHit, po
         const single = drag.type === "card" || card.tabs.length === 1;
         if (single && reorderCard(layout, card.id, hit.before) === layout) return null;
       }
-      return { kind: "gap", pageId: hit.pageId, before: hit.before };
+      return fit(hit.pageId, { kind: "gap", pageId: hit.pageId, before: hit.before });
     }
     case "column":
       return drag.type === "external" && findPage(layout, hit.pageId) ? { kind: "column", pageId: hit.pageId } : null;

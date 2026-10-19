@@ -3,23 +3,36 @@
 // - A launcher (lib/sideLaunchers launcherClickAction): on the current page → the page-button icon rule;
 //   on another page → reveal it there; nowhere → open it here; Ctrl/⌘ / middle click = a new instance (multi, background; + Shift = shown). Right-click = 新… /
 //   从标题栏取消固定. Badges = the kind's visible instances' useTab probes (no polling of its own).
-// - ＋ = the launcher menu (every launchable kind with a pin toggle, 「新…」, 新页面, 本页 ▸).
-// - The toggle (Ctrl+Alt+B) carries the page's summary badge while the column is closed with one page.
+// - ＋ = the launcher menu (every launchable kind with a pin toggle, 「新…」, 新的一列, 本列 ▸).
+// - The toggle (Ctrl+Alt+B) carries the column's summary badge while the tool area is hidden with one column.
 // Narrow windows: pinned launchers that do not fit move into ＋ (lib/sideLauncherView useLauncherFit).
-// Page actions (钉住, ⤢ ⛶ ⋯) live at the right end of the page tab row (SideTabStrip) and in ＋ → 本页.
+// Column actions (钉住, ⤢ ⛶, 列菜单) live in ＋ → 本列 (v1.17: no page buttons, every tool column is on screen).
 import { useRef, type MouseEvent } from "react";
 import { PanelRight, PanelRightClose, Plus } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { contextMenu, openMenuFrom } from "../../lib/contextMenu";
 import { useSideView } from "../../lib/sideComponents";
-import { pageInView, visibleCards } from "../../lib/sideLayout";
+import { shownPages, visibleCards } from "../../lib/sideLayout";
 import { useSide } from "../../lib/sideLayoutStore";
 import { useLauncherFit, useLaunchers } from "../../lib/sideLauncherView";
 import { launcherContextMenu, launcherMenu, pressLauncher, type Launchable } from "../../lib/sideMenus";
 import { toggleSideColumn } from "../../lib/sideOpen";
 import { newInstanceKey, openModifiers, PLAIN_OPEN } from "../../lib/openModifiers";
 import { attentionText, kindBadges, pillContent } from "../../lib/sidePills";
-import { Badges } from "./SideLane";
+
+/** A launcher's badges: red count (attention), else the unread dot; busy = a green pulse. */
+function Badges({ attention, unread, busy }: { attention: number; unread: boolean; busy: boolean }) {
+  const ring = "shadow-[0_0_0_2px_var(--win)]";
+  return (
+    <>
+      {attention > 0 && (
+        <span className={`absolute -top-[3px] -right-[5px] z-[1] h-3.5 min-w-3.5 rounded-[7px] bg-danger px-[3px] text-center text-[9px] leading-[14px] font-bold text-white ${ring}`}>{attentionText(attention)}</span>
+      )}
+      {attention === 0 && unread && <span className={`absolute top-px right-px h-[7px] w-[7px] rounded-full bg-accent ${ring}`} />}
+      {busy && <span className="side-busy absolute right-px bottom-px h-1.5 w-1.5 rounded-full bg-ok" />}
+    </>
+  );
+}
 
 const BTN = "[app-region:no-drag] relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-foreground";
 
@@ -51,7 +64,7 @@ function Launcher({ item, inView }: { item: Launchable; inView: boolean }) {
       className={`${BTN} ${inView ? "bg-hover text-foreground" : ""}`}
     >
       <Icon size={16} />
-      <Badges attention={badges.attention} unread={badges.unread} busy={badges.busy} active={false} />
+      <Badges attention={badges.attention} unread={badges.unread} busy={badges.busy} />
     </button>
   );
 }
@@ -67,9 +80,8 @@ export function TitleBarLaunchers() {
   const shown = pinned.slice(0, fit);
   const hidden = pinned.length - shown.length;
 
-  // Kinds with a visible card on the page in view (pressed look).
-  const page = layout.open ? pageInView(layout, ctx) : null;
-  const inView = new Set(page ? visibleCards(layout, page, ctx).map((c) => c.kind) : []);
+  // Kinds with a visible pane in a tool column on screen (pressed look).
+  const inView = new Set(shownPages(layout, ctx).flatMap((page) => visibleCards(layout, page, ctx).flatMap((c) => c.tabs.map((id) => layout.instances[id]?.kind ?? c.kind))));
 
   // Closed, one page: its summary (attention count or unread dot) on the toggle.
   let badge: { attention: number; unread: boolean } | null = null;

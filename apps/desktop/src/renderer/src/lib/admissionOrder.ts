@@ -207,11 +207,17 @@ export function foldRow(boundaryRows: number, queueRows: number, expanded: boole
 }
 
 /**
- * The old 待读留言 section (agent-messages-v2) in the queue area: only without admission-order — with
- * it those unread bus messages are the turn frame's ride-along items (admission.nextStep).
+ * The rows of the 待读留言 section (agent-messages-v2) in the queue area. Without admission-order:
+ * every unread message. With it the turn frame lists the turn-starting ones (admission.nextStep:
+ * wakes, alarms …), but never a passive note (cutex user-input-delivery §3: `tell` = non-passive
+ * agent messages only), so the section keeps every row nextStep does not have: unread notes (local or
+ * from another host) and failures seen live. Empty without agent-messages-v2.
  */
-export function pendingMessagesSectionShown(features: ReadonlySet<string>, pending: number): boolean {
-  return features.has(AGENT_MESSAGES_V2) && !features.has(ADMISSION_ORDER_FEATURE) && pending > 0;
+export function pendingSectionMessages<T extends { messageId: string }>(features: ReadonlySet<string>, pending: readonly T[], nextStep: readonly Pick<AdmissionNextStep, "id">[] | null | undefined): T[] {
+  if (!features.has(AGENT_MESSAGES_V2)) return [];
+  if (!features.has(ADMISSION_ORDER_FEATURE)) return [...pending];
+  const inFrame = new Set((nextStep ?? []).map((n) => n.id));
+  return pending.filter((m) => !inFrame.has(m.messageId));
 }
 
 /** Whether a turn will not start by itself (paused, or an owner item held). */

@@ -5,13 +5,15 @@
 // which; a wake cutex already fixed to after the turn (system alarms) or to the next step says
 // that instead, lib/agentMessages `timing`). A row leaves when it is read in (messageDelivered, or its external_event item shows up in
 // the timeline). Failures seen live stay, marked 失败, until dismissed. 唤醒 (owner): start a turn on
-// the idle agent so it reads its pending notes in.
+// the idle agent so it reads its pending notes in. A note from an agent on another host (peers
+// cross-host tell, `remote`) shows its `name@host` sender with a small 另一台主机 tag.
 import { useState } from "react";
 import { ArrowDownLeft } from "lucide-react";
 import { useI18n } from "../i18n";
 import { wakeableNotes, type AgentMessageRecord } from "../lib/agentMessages";
 import { useAgentMessages } from "../lib/agentMessageStore";
-import { selectedSidebar, useApp } from "../store";
+import { useApp } from "../store";
+import { convNotify, convSidebarOf, useConvScope, useConvViewHost } from "../lib/conversationScope";
 import { rowsOf } from "../lib/viewHost";
 import { MESSAGES_WAKE_METHOD } from "../../../shared/ipc";
 import { senderLabel } from "../lib/systemSenders";
@@ -38,7 +40,8 @@ function rowLabel(message: AgentMessageRecord, section: PendingWakeLabel): Pendi
 function MessageRow({ message, busy, label }: { message: AgentMessageRecord; busy: boolean; label: PendingWakeLabel }) {
   const { t } = useI18n();
   const wake = wakeTexts(t, rowLabel(message, label));
-  const agentName = useApp((s) => message.senderName ?? rowsOf(s.sidebar, selectedSidebar(s)).find((r) => r.cutexSessionId === message.from)?.displayName ?? message.from ?? "?");
+  const conv = useConvScope();
+  const agentName = useApp((s) => message.senderName ?? rowsOf(s.sidebar, convSidebarOf(conv, s)).find((r) => r.cutexSessionId === message.from)?.displayName ?? message.from ?? "?");
   const name = senderLabel(t, message.from, message.sourceKind, agentName);
   const failed = message.state === "failed";
   return (
@@ -47,6 +50,11 @@ function MessageRow({ message, busy, label }: { message: AgentMessageRecord; bus
       <span className="shrink-0 text-muted">{t("conversation.from")}</span>
       <SenderAvatar id={message.from} sourceKind={message.sourceKind} name={name} size={16} />
       <span className="shrink-0 font-medium">{name}</span>
+      {message.remote && (
+        <span className="shrink-0 rounded bg-surface-2 px-1 text-[10px] text-subtle" title={t("agentMsg.remoteHint", { host: message.remote.host })} data-testid="pending-message-remote">
+          {t("agentMsg.remote")}
+        </span>
+      )}
       <KindTag kind={message.kind} wakeHint={wake.hint} />
       <span className="min-w-0 flex-1 truncate text-subtle">{message.body.replace(/\s+/g, " ")}</span>
       {failed ? (
@@ -70,15 +78,17 @@ function MessageRow({ message, busy, label }: { message: AgentMessageRecord; bus
 export function PendingMessagesSection({ sessionId, messages, busy, runtime = "codex" }: { sessionId: string; messages: AgentMessageRecord[]; busy: boolean; runtime?: "codex" | "claude" }) {
   const { t } = useI18n();
   const [waking, setWaking] = useState(false);
+  const conv = useConvScope();
+  const hostId = useConvViewHost(sessionId);
   const busyWait = useWakeBusyWait(messages.some((m) => m.kind === "wake"));
   const label = pendingWakeLabel(busyWait.supported, runtime, busyWait.wait);
   const notes = wakeableNotes(messages);
   const wake = async () => {
     setWaking(true);
     try {
-      await useApp.getState().sessionAction(sessionId, MESSAGES_WAKE_METHOD);
+      await useApp.getState().sessionAction(sessionId, MESSAGES_WAKE_METHOD, {}, hostId);
     } catch (e) {
-      useApp.getState().notify(t("agentMsg.wakeFailed", { error: e instanceof Error ? e.message : String(e) }), "error");
+      convNotify(conv, t("agentMsg.wakeFailed", { error: e instanceof Error ? e.message : String(e) }), "error");
     } finally {
       setWaking(false);
     }

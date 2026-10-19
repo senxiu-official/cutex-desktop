@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import { applyEvent, timelineFromThreadRead } from "../src/renderer/src/lib/timeline";
 import { translate } from "../src/renderer/src/i18n";
+import { viewKey } from "../src/renderer/src/lib/viewKey";
 
 const api = vi.hoisted(() => ({
   respond: vi.fn<(...args: unknown[]) => Promise<void>>(),
@@ -22,7 +23,7 @@ const resolvedEvent = (requestId: number) =>
 async function seed() {
   const { useApp } = await import("../src/renderer/src/store");
   const timeline = timelineFromThreadRead({ thread: { id: "t", turns: [] } }, [{ runtimeGeneration: 3, native: REQUEST }]);
-  useApp.setState({ selectedId: "a", sessions: { a: { timeline, runtimeGeneration: 3, version: 0 } as never }, notice: null });
+  useApp.setState({ selectedId: "a", sessions: { [viewKey("local", "a")]: { timeline, runtimeGeneration: 3, version: 0 } as never }, notice: null });
   return { useApp, timeline };
 }
 
@@ -91,7 +92,7 @@ describe("store.respond with several clients", () => {
     await useApp.getState().respond(7, ACCEPT);
     expect(timeline.pending.has("7")).toBe(false);
     expect(api.bootstrap.mock.calls.map((call) => call[0])).toEqual(["a"]);
-    expect(useApp.getState().sessions.a?.resyncing).toBe(true);
+    expect(useApp.getState().sessions[viewKey("local", "a")]?.resyncing).toBe(true);
     expect(useApp.getState().notice).toMatchObject({ text: translate("interaction.err.stale"), tone: "info" });
   });
 });

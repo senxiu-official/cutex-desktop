@@ -4,7 +4,7 @@
 // same fixed column (AVATAR_COL), so names line up whatever the row shows; the status tail follows
 // lib/statusTail (attention pill / running dot / passive text) in a fixed-height line box.
 // Shared by the sidebar, the project flyout and the Projects page.
-import { MoreHorizontal, Pin } from "lucide-react";
+import { Columns2, MoreHorizontal, Pin } from "lucide-react";
 import { memo, useMemo, type ReactNode } from "react";
 import { useI18n } from "../i18n";
 import { previewFromResource, type ActivityPreview } from "../lib/activity";
@@ -16,8 +16,8 @@ import { lastSeen } from "../lib/offlineAgents";
 import { useApp } from "../store";
 import { openAgentPendingNotes } from "../lib/ownerNotify";
 import { focusOwnerNote, useHostOwnerNotes } from "../lib/ownerNotifyStore";
-import { openModifiers } from "../lib/openModifiers";
-import { openAgentSide } from "../lib/sideOpen";
+import { newInstanceKey, openModifiers } from "../lib/openModifiers";
+import { openAgentBeside } from "../lib/paneStore";
 import { contextMenu, openMenuFrom } from "../lib/contextMenu";
 import { agentMenu } from "../lib/menus";
 import { runningSince, showsRunningRing, type AgentSignal } from "../lib/agentAttention";
@@ -137,15 +137,43 @@ function useRowHost(row: AgentRow) {
     preview: own ? live : seeded,
     look,
     unavailable,
-    /** Ctrl/⌘-click, middle click, Ctrl/⌘+Enter: in the side area beside the open agent (lib/sideOpen openAgentSide). */
+    /**
+     * Plain click: the focused conversation pane shows it (or the pane already showing it gets the
+     * focus). Ctrl/⌘-click, middle click, Ctrl/⌘+Enter: in a conversation pane beside the focused one
+     * (lib/paneStore openAgentBeside, panes step 2).
+     */
     open: (e?: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; button?: number }) => {
       if (unavailable) return;
-      if (e && openModifiers(e).newInstance) return void openAgentSide(row.id, host);
+      if (e && openModifiers(e).newInstance) return openAgentBeside(host, row.id);
       void select(row.id, host);
+    },
+    /** The row's hover 「在旁边打开」. */
+    beside: () => {
+      if (!unavailable) openAgentBeside(host, row.id);
     },
     menu: () => agentMenu(row.session, t, host),
     offlineTitle: unavailable ? t("sidebar.hostRowOffline", { host: label }) : null,
   };
+}
+
+/** A row's hover 「在旁边打开」 (panes step 2): the agent in a conversation pane beside the focused one. */
+function BesideButton({ onOpen, size = 14 }: { onOpen(): void; size?: number }) {
+  const { t } = useI18n();
+  return (
+    <button
+      data-fit-skip=""
+      data-open-beside=""
+      title={t("pane.openBesideHint", { key: newInstanceKey() })}
+      aria-label={t("pane.openBeside")}
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen();
+      }}
+      className="hidden shrink-0 rounded px-0.5 text-subtle group-hover:block hover:bg-surface hover:text-foreground"
+    >
+      <Columns2 size={size} />
+    </button>
+  );
 }
 
 /** Same row content and variant (the memo of AgentRowButton). */
@@ -155,7 +183,7 @@ const sameRowButton = (a: { row: AgentRow; compact?: boolean }, b: { row: AgentR
 /** `compact`: one short line (16px avatar centred in the avatar column, no latest-message line). */
 export const AgentRowButton = memo(function AgentRowButton({ row, compact = false }: { row: AgentRow; compact?: boolean }) {
   const { t } = useI18n();
-  const { selected, host, preview, look, unavailable, open, menu, offlineTitle } = useRowHost(row);
+  const { selected, host, preview, look, unavailable, open, beside, menu, offlineTitle } = useRowHost(row);
   const { rowPreview, statusChips } = useUiPrefs();
   const { signal, needs } = useRowSignal(row);
   const last = Math.max(row.lastActivity, preview?.at ?? 0);
@@ -199,6 +227,7 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact = fals
           )}
           <span className="ml-auto" />
           <RowTail row={row} signal={signal} last={last} needs={needs} compact={chipFit.compact} fit={statusChips === "auto"} openHost={selected ? host : null} />
+          {!unavailable && <BesideButton onOpen={beside} />}
           <button
             data-fit-skip=""
             title={t("menu.more")}
@@ -225,7 +254,7 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact = fals
 /** An offline agent as one compact dimmed line: small avatar, name, last activity; ⋯ / right-click = agent menu. */
 export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
   const { t } = useI18n();
-  const { selected, preview, look, unavailable, open, menu, offlineTitle } = useRowHost(row);
+  const { selected, preview, look, unavailable, open, beside, menu, offlineTitle } = useRowHost(row);
   const previewAt = preview?.at;
   return (
     <div
@@ -253,6 +282,7 @@ export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
         {row.isDirector && <span className={`${NAME_TAG} bg-surface-2 text-muted`}>{t("sidebar.director")}</span>}
         {row.pinned && <PinMark />}
         <PassiveText text={relativeTime(lastSeen(row, previewAt))} className="group-hover:hidden" />
+        {!unavailable && <BesideButton onOpen={beside} size={13} />}
         <button
           title={t("menu.more")}
           onClick={(e) => {

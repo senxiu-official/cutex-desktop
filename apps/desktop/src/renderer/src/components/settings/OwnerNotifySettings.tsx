@@ -11,13 +11,15 @@ import { OWNER_NOTIFY_CHANNELS, OWNER_NOTIFY_LEVELS, type OwnerNotifyAgentOverri
 import type { GlobalSettings } from "../../../../shared/ipc";
 import { ownerNotifyPatch, toggleChannel, type OwnerNotifyDraft } from "../../../../shared/ownerNotify";
 import { useI18n, type MessageKey } from "../../i18n";
-import { Button, Checkbox, ErrorNote, IconButton, Loading, NumberField, Section, Select, SettingRow, Toggle } from "./Form";
+import { Button, Checkbox, ErrorNote, IconButton, Loading, NumberField, ResetButton, Section, Select, SettingRow, Toggle } from "./Form";
 import { useTargetApi, useTargetFeatures, useTargetSidebar } from "../../lib/targetHost";
 import { LEGACY_PRESET, NOTIFICATION_LEVELS_FEATURE, NOTIFICATION_PRESETS_NO_LEGACY_FEATURE } from "../../../../shared/notificationLevels";
 import { useNotificationLevels } from "../../lib/notificationLevelsStore";
 import { settingsAnchorId } from "../../lib/settingsNav";
 
 const AUDIENCES: OwnerNotifyToolAudience[] = ["ownerFacing", "everyone", "directors", "none"];
+/** cutex's default audience for owner_notify (docs/research/notification-levels.md §4.3). */
+const DEFAULT_AUDIENCE: OwnerNotifyToolAudience = "ownerFacing";
 
 export function OwnerNotifySection({ settings, onSettings }: { settings: GlobalSettings | null; onSettings(next: GlobalSettings): void }) {
   const api = useTargetApi();
@@ -41,24 +43,26 @@ export function OwnerNotifySection({ settings, onSettings }: { settings: GlobalS
     }
   };
   return (
-    <Section title={t("owner-notify.settings.ownerNotify.title")} hint={t("owner-notify.hint")} source="host">
+    // Who gets the owner_notify tool changes what agents can call (at their next start): tagged like that.
+    <Section title={t("owner-notify.settings.ownerNotify.title")} hint={t("owner-notify.hint")} source="host" agents="next" tools={[{ name: "owner_notify", desc: t("owner-notify.toolDesc") }]}>
       {error && <ErrorNote>{error}</ErrorNote>}
       {!settings && !error && <Loading rows={3} />}
       {on && (
         <>
-          {legacy ? (
+          {/* Newer hosts: the page's 通知方式 decides; no row pointing there (owner 2026-10-19). */}
+          {legacy && (
             <>
               <DeliveryMatrix settings={on} note={levelsSupported} onChange={(delivery) => void save({ delivery })} />
               <SettingRow label={t("owner-notify.sound")} hint={t("owner-notify.soundHint")}>
                 <Toggle checked={on.bigAlertSound} onChange={(v) => void save({ bigAlertSound: v })} />
               </SettingRow>
             </>
-          ) : (
-            <SettingRow label={t("owner-notify.delivery")} hint={t("owner-notify.byLevels")}>
-              <Button onClick={() => document.getElementById(settingsAnchorId("levels"))?.scrollIntoView({ block: "start", behavior: "smooth" })}>{t("owner-notify.showLevels")}</Button>
-            </SettingRow>
           )}
-          <SettingRow label={t("owner-notify.audience")} hint={t("owner-notify.audienceHint")}>
+          <SettingRow
+            label={t("owner-notify.audience")}
+            hint={t("owner-notify.audienceHint")}
+            reset={<ResetButton disabled={on.toolAudience === DEFAULT_AUDIENCE} onClick={() => void save({ toolAudience: DEFAULT_AUDIENCE })} />}
+          >
             <Select
               value={on.toolAudience}
               width="w-72"
@@ -72,7 +76,7 @@ export function OwnerNotifySection({ settings, onSettings }: { settings: GlobalS
           <SettingRow label={t("owner-notify.urgentPerHour")} hint={t("owner-notify.urgentPerHourHint")}>
             <NumberField value={on.rateLimit.urgentPerHour} range={[0, 100]} unit={t("owner-notify.perHourUnit")} onCommit={(v) => v !== null && void save({ rateLimit: { urgentPerHour: v } })} />
           </SettingRow>
-          <Overrides overrides={on.agentOverrides} onChange={(agentOverrides) => void save({ agentOverrides })} />
+          {/* 单个智能体 (mute / force) waits for a sub-page with a searchable agent list (owner 2026-10-19); stored overrides still apply. */}
         </>
       )}
     </Section>
@@ -129,7 +133,7 @@ function DeliveryMatrix({ settings, note, onChange }: { settings: OwnerNotifySet
 }
 
 /** Per-agent mute / force: a short list plus an agent picker. */
-function Overrides({ overrides, onChange }: { overrides: Record<string, OwnerNotifyAgentOverride>; onChange(next: Record<string, OwnerNotifyAgentOverride>): void }) {
+export function Overrides({ overrides, onChange }: { overrides: Record<string, OwnerNotifyAgentOverride>; onChange(next: Record<string, OwnerNotifyAgentOverride>): void }) {
   const { t } = useI18n();
   const sidebar = useTargetSidebar();
   const agents = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])];

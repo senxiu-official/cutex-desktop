@@ -29,11 +29,7 @@ export const LEGACY_SECTION_HINTS: ReadonlySet<string> = new Set<string>([
   "hostGroups.hint",
   "identity.sectionHint",
   "me.access.hint",
-  "notifications.device.hint",
-  "notifications.events.hint",
-  "notifications.matrix.hint",
   "notifications.mute.hint",
-  "owner-notify.hint",
   "peers.agentsHint",
   "peers.auditHint",
   "projects.mcpHint",
@@ -76,6 +72,5 @@ export const LEGACY_ROW_HINTS: ReadonlySet<string> = new Set<string>([
   "nci.mail.nciHint",
   "nci.mail.serverHint",
   "nci.mail.usernameHint",
-  "notes.showTimelineHint",
   "services.persistApproval.hint",
 ]);

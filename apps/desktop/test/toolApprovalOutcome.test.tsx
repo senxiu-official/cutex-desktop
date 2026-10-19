@@ -10,7 +10,8 @@ vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) 
 vi.mock("../src/renderer/src/store", () => {
   const state = { selectedId: "s1", sessions: {}, backgroundItems: {} };
   const useApp = Object.assign((sel: (s: typeof state) => unknown) => sel(state), { getState: () => state });
-  return { useApp, selectedSidebar: () => null };
+  // lib/conversationScope reads the host / sidebar through these (no provider here: the selection's).
+  return { useApp, agentState: () => undefined, selectedSidebar: () => null, sidebarOf: () => null, featuresOf: () => new Set(), agentHost: () => "local", viewHostIn: () => "local", viewOf: () => undefined };
 });
 import { PlainToolRow } from "../src/renderer/src/components/PlainToolRow";
 import { approvalOutcome, isFailed, summarize, type ToolEntry } from "../src/renderer/src/lib/workGroups";

@@ -17,7 +17,8 @@ import { attemptSeconds, delegationActions, delegationStatus, formatSpan, isDele
 import { hasDelegationViews } from "../../lib/delegationStore";
 import { useAgentDelegations, useAgentHost, useAgentNames, useDelegationContext, useStatusWord } from "../../lib/delegationsView";
 import { formatWhen, useNow } from "../../lib/time";
-import { selectedFeatures, useApp } from "../../store";
+import { useApp } from "../../store";
+import { convFeaturesOf, useConvScope } from "../../lib/conversationScope";
 import { services } from "../app";
 import type { StatusBarProps } from "../slots";
 import { CAPSULE_LINE, CAPSULE_ROW, CAPSULE_ROW_ACTION, CAPSULE_ROW_MAIN, capsuleRowActions } from "../../lib/capsuleRows";
@@ -40,7 +41,8 @@ function rowTime(d: AskSummary, ctx: DelegationContext, now: number, locale?: Lo
 function Row({ d, sessionId, mine }: { d: AskSummary; sessionId: string; mine: boolean }) {
   const { t, locale } = useI18n();
   const nameOf = useAgentNames();
-  const views = useApp((s) => hasDelegationViews(selectedFeatures(s)));
+  const conv = useConvScope();
+  const views = useApp((s) => hasDelegationViews(convFeaturesOf(conv, s)));
   const now = useNow(true);
   const ctx = useDelegationContext()(d);
   const [armed, setArmed] = useArmed();

@@ -39,6 +39,11 @@ export interface AgentMessageRecord {
    * nextStep = at its next step (frozen `soon`); null = not decided yet (the wake-busy-wait setting).
    */
   timing: "afterTurn" | "nextStep" | null;
+  /**
+   * A cross-host note (cutex `remote`, peers `agent_tell to="name@host"`): the sender is an agent on
+   * another host, `from` / `senderName` its `name@host` label, never a local session or a service.
+   */
+  remote: RemoteSender | null;
   /** cutex-reported names (`sender.name` / `recipient.name`); null → the sidebar name. */
   senderName: string | null;
   recipientName: string | null;
@@ -61,6 +66,13 @@ export interface AgentMessageRecord {
   failedLive: boolean;
 }
 
+/** cutex `remote` of a cross-host note: this host's label for the sending host, its instance id and the sender's session id there. */
+export interface RemoteSender {
+  host: string;
+  peerId: string | null;
+  senderId: string | null;
+}
+
 export type MessageMap = Readonly<Record<string, AgentMessageRecord>>;
 
 const RANK: Record<MessageState, number> = { pending: 0, delivered: 1, failed: 1 };
@@ -76,6 +88,14 @@ const party = (v: unknown): { id: string | null; name: string | null } => {
   const o = (v && typeof v === "object" ? v : {}) as { id?: unknown; name?: unknown };
   return { id: str(o.id), name: str(o.name) };
 };
+
+/** cutex `remote: {host, peerId, senderId}` (cross-host note), null when absent or without a host. */
+export function remoteOf(v: unknown): RemoteSender | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as { host?: unknown; peerId?: unknown; senderId?: unknown };
+  const host = str(o.host);
+  return host ? { host, peerId: str(o.peerId), senderId: str(o.senderId) } : null;
+}
 
 /** cutex error values are objects ({code, message, …}) or strings. */
 export function errorText(error: unknown): string | null {
@@ -107,14 +127,15 @@ const SERVICE_KINDS = new Set(["alarm_service", "job_service", "task_service"]);
  */
 function receivedOrigin(m: Record<string, unknown>): Pick<AgentMessageRecord, "sourceKind" | "timing"> & { serviceId: string | null } {
   const frozen = ((m.externalInput as { message?: unknown } | null | undefined)?.message ?? {}) as { source?: { kind?: unknown; id?: unknown }; delivery?: unknown };
-  const agentSent = !!str(m.fromCutexSessionId);
+  // A cross-host note is from an agent too (on another host), never a service.
+  const agentSent = !!str(m.fromCutexSessionId) || remoteOf(m.remote) !== null;
   const sourceKind = agentSent ? null : (str(frozen.source?.kind) ?? (SERVICE_KINDS.has(m.senderKind as string) ? "service" : null));
   const timing = m.afterTurnOnly === true || frozen.delivery === "after_turn" ? "afterTurn" : frozen.delivery === "soon" ? "nextStep" : null;
   return { sourceKind: sourceKind === "service" ? "service" : null, timing, serviceId: agentSent ? null : str(frozen.source?.id) };
 }
 
 function blank(messageId: string): AgentMessageRecord {
-  return { messageId, from: null, to: null, sourceKind: null, timing: null, senderName: null, recipientName: null, kind: null, downgraded: false, body: "", state: "pending", sentAt: null, deliveredAt: null, turnId: null, error: null, failedLive: false };
+  return { messageId, from: null, to: null, sourceKind: null, timing: null, remote: null, senderName: null, recipientName: null, kind: null, downgraded: false, body: "", state: "pending", sentAt: null, deliveredAt: null, turnId: null, error: null, failedLive: false };
 }
 
 /**
@@ -127,6 +148,7 @@ function merge(map: MessageMap, messageId: string, patch: Partial<AgentMessageRe
   for (const [k, v] of Object.entries(patch) as [keyof AgentMessageRecord, unknown][]) {
     if (k === "state") continue;
     if (v === null || v === undefined || v === "") continue;
+    if (k === "remote" && prev.remote) continue; // fills in once (a fresh object would always differ)
     (next as unknown as Record<string, unknown>)[k] = v;
   }
   // Final states stick: a late queued / sent event never turns a read-in message back to 未读.
@@ -151,6 +173,7 @@ export function applyMessageEvent(map: MessageMap, method: string, params: Recor
   const base: Partial<AgentMessageRecord> = {
     from: str(params.fromCutexSessionId) ?? sender.id,
     to: str(params.toCutexSessionId) ?? recipient.id,
+    remote: remoteOf(params.remote),
     senderName: sender.name,
     recipientName: recipient.name,
     kind: deliveryKindOf(params.deliveryKind, params.deliveryMode),
@@ -188,6 +211,7 @@ export function seedMessages(map: MessageMap, sessionId: string, received: unkno
       to: str(m.toCutexSessionId) ?? sessionId,
       sourceKind: origin.sourceKind,
       timing: origin.timing,
+      remote: remoteOf(m.remote),
       senderName: sender.name,
       recipientName: party(m.recipient).name,
       kind: deliveryKindOf(m.deliveryKind, m.deliveryMode),

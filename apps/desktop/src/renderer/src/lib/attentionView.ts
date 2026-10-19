@@ -10,7 +10,7 @@ import { useOwnerNotify } from "./ownerNotifyStore";
 import { OWNER_NOTIFY_FEATURE } from "../../../shared/ownerNotify";
 import { pendingByAgent, type AgentRow } from "./sidebar";
 import { useSidebarModel } from "./sidebarView";
-import { getTurnMarks, markSeen, pruneTurnMarks, useTurnMarks, type TurnMarks } from "./turnUnread";
+import { getTurnMarks, markSeen, markSeenOn, pruneTurnMarks, turnMarksOn, useTurnMarks, type TurnMarks } from "./turnUnread";
 
 export interface Attention {
   /** Every agent row of the sidebar (groups + quick chats). */
@@ -59,7 +59,7 @@ export function useAttention(): Attention {
 }
 
 /**
- * App-level upkeep: the open agent's mark clears when the window gets focus again (it ended while
+ * App-level upkeep: the open agents' marks (the focused conversation and every other one on screen) clear when the window gets focus again (it ended while
  * the window was in the background), and marks of agents that no longer exist are dropped.
  */
 export function useTurnMarkUpkeep(): void {
@@ -67,7 +67,10 @@ export function useTurnMarkUpkeep(): void {
   useEffect(() => {
     const onFocus = () => {
       const s = useApp.getState();
-      if (s.selectedId && s.view.kind === "conversation" && getTurnMarks()[s.selectedId]) markSeen(s.selectedId);
+      if (s.view.kind !== "conversation") return;
+      if (s.selectedId && getTurnMarks()[s.selectedId]) markSeen(s.selectedId);
+      // Every conversation on screen is looked at (panes step 2: the other column too).
+      for (const v of Object.values(s.views)) if (v.visible && turnMarksOn(v.hostId)[v.sessionId]) markSeenOn(v.hostId, v.sessionId);
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);

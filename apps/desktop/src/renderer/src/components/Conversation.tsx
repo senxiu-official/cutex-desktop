@@ -7,7 +7,8 @@ import { SubAgentContext, subAgentsOf } from "../lib/subagents";
 import { useSubAgentMeta } from "../lib/subagentMetaStore";
 import { useAgentOnline, useSettleSubAgents, useSubAgentLive } from "../lib/background";
 import { orderedEntries } from "../lib/timeline";
-import { agentHost, selectedFeatures, selectedSidebar, useApp } from "../store";
+import { agentState, useApp, viewOf } from "../store";
+import { useConvFeatures, useConvHost, useConvScope, useConvSession, useConvSidebar } from "../lib/conversationScope";
 import { Composer } from "./Composer";
 import { InteractionDock } from "./InteractionDock";
 import { StatusBar } from "./StatusBar";
@@ -39,13 +40,14 @@ import { onFollowAfterSend, pendingFollowKey, scrollFollow } from "../lib/stickT
 
 export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   const { t } = useI18n();
-  const selectedId = useApp((s) => s.selectedId);
-  const hostId = useApp(agentHost);
+  // The scope's agent and host (lib/conversationScope; the main pane's = the selection).
+  const selectedId = useConvSession();
+  const hostId = useConvHost();
   // users: a non-owner whose grant has no `send` only reads this host's agents.
   const access = useHostAccess(hostId);
   const readOnly = !canSend(access);
-  const view = useApp((s) => (s.selectedId ? s.sessions[s.selectedId] : undefined));
-  const sidebar = useApp(selectedSidebar);
+  const view = useApp((s) => (selectedId ? viewOf(s, hostId, selectedId) : undefined));
+  const sidebar = useConvSidebar();
   const respond = useApp((s) => s.respond);
   const loadOlder = useApp((s) => s.loadOlder);
   const scroller = useRef<HTMLDivElement>(null);
@@ -65,7 +67,7 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const entries = useMemo(() => (view ? orderedEntries(view.timeline) : []), [view?.version, view?.timeline]);
   // The owner's pending sends (outbox, not timeline entries): followed like new entries.
-  const pendingSends = useApp((s) => (s.selectedId ? pendingFollowKey(s.outbox[s.selectedId]) : ""));
+  const pendingSends = useApp((s) => (selectedId ? pendingFollowKey(agentState(s.outbox, hostId, selectedId)) : ""));
 
   // Stick to the bottom while the user is there: on entering an agent, on new entries, and when
   // content grows after layout (markdown, code blocks, images). Scrolling up releases it; the
@@ -138,8 +140,10 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   // into it, or stuck at the bottom.
   const toBottomRef = useRef(toBottom);
   toBottomRef.current = toBottom;
+  // One viewport is registered at a time: the focused conversation's (panes step 2).
+  const paneFocused = useConvScope()?.focused ?? true;
   useEffect(() => {
-    if (!selectedId) return;
+    if (!selectedId || !paneFocused) return;
     return registerViewport({
       sessionId: selectedId,
       scroller: () => scroller.current,
@@ -159,7 +163,7 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
         return { turnId, offset, atBottom: stick.current };
       },
     });
-  }, [selectedId]);
+  }, [selectedId, paneFocused]);
   useLayoutEffect(() => {
     stick.current = true;
     setAtBottom(true);
@@ -211,7 +215,7 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
     return () => ro.disconnect();
   }, [selectedId]);
 
-  const features = useApp(selectedFeatures);
+  const features = useConvFeatures();
   const daemon = useApp((s) => s.daemon);
   const remote = useApp((s) => isRemote(s.hosts));
   const agentCount = useApp((s) => (s.sidebar ? s.sidebar.active.length + s.sidebar.retired.length : null));
@@ -294,7 +298,7 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
           )}
           {view?.historySource === "offline" && <p className="mb-2 text-center text-xs text-subtle">{t("conversation.offlineHistory")}</p>}
           {view?.historySource === "archived" && view.timeline.turns.length > 0 && <p className="mb-2 text-center text-xs text-subtle">{t("archive.history.note")}</p>}
-          {view && <TimelineBody timeline={view.timeline} entries={entries} sessionId={selectedId} nameOf={nameOf} older={view.older} onLoadOlder={() => void loadOlder(selectedId)} pendingSends onRelease={release} />}
+          {view && <TimelineBody timeline={view.timeline} entries={entries} sessionId={selectedId} nameOf={nameOf} older={view.older} onLoadOlder={() => void loadOlder(selectedId, { hostId })} pendingSends onRelease={release} />}
         </div>
       </div>
       {/* 到底部 + 回到 (after a jump, §19.7) share the bottom centre. */}
@@ -327,7 +331,9 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
       {view && view.timeline.pending.size > 0 && (
         <InteractionDock
           pending={[...view.timeline.pending.values()]}
-          onReply={(request, reply) => void respond(request.id, reply)}
+          // Only the focused conversation's card takes the keyboard (the other column must not steal it).
+          takeFocus={paneFocused}
+          onReply={(request, reply) => void respond(request.id, reply, selectedId, hostId)}
         />
       )}
       {/* Archived: read-only; restoring brings the composer back. */}
@@ -339,7 +345,7 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
           <p className={`side-col px-6 pb-1 text-xs ${runtimeNote.tone}`}>
             {runtimeNote.text}
             {access.isOwner && runtimeStatus && runtimeStatus !== "online" && runtimeStatus !== "starting" && startSince === null && (
-              <button onClick={() => void sessionAction(selectedId, "cutex/runtime/online", { openVisibleTerminal: false }).catch(() => {})} className="ml-2 text-accent hover:underline">
+              <button onClick={() => void sessionAction(selectedId, "cutex/runtime/online", { openVisibleTerminal: false }, hostId).catch(() => {})} className="ml-2 text-accent hover:underline">
                 {t("menu.start")}
               </button>
             )}
@@ -382,7 +388,7 @@ function LoadError({ sessionId, hostId, error }: { sessionId: string; hostId: st
         disabled={busy}
         onClick={() => {
           setBusy(true);
-          void reload(sessionId).finally(() => setBusy(false));
+          void reload(sessionId, hostId).finally(() => setBusy(false));
         }}
         className="rounded-md px-2 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-50"
       >

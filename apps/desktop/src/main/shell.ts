@@ -234,6 +234,22 @@ export class DesktopShell {
     return this.state();
   }
 
+  /** Settings → 通用 → 允许远程关闭这个桌面 (absent = allowed). */
+  get allowRemoteClose(): boolean {
+    return this.prefs.allowRemoteClose !== false;
+  }
+
+  setAllowRemoteClose(value: boolean): ShellState {
+    const { allowRemoteClose: _old, ...rest } = this.prefs;
+    this.prefs = value ? rest : { ...rest, allowRemoteClose: false };
+    this.save();
+    this.onAllowRemoteCloseChanged?.(value);
+    return this.state();
+  }
+
+  /** Main wires this to the client presence (re-sent to every host at once). */
+  onAllowRemoteCloseChanged: ((allowed: boolean) => void) | null = null;
+
   setCloseBehavior(value: CloseBehavior): ShellState {
     this.prefs = { ...this.prefs, closeBehavior: value, closeBehaviorChosen: true };
     this.save();

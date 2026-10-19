@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import type { DaemonState, HostsState } from "../src/shared/ipc";
 import type { NotifyOccurrence } from "../src/renderer/src/lib/notifyEvents";
+import { viewKey } from "../src/renderer/src/lib/viewKey";
 
 const mock = vi.hoisted(() => {
   const listeners = new Map<string, Set<(value: unknown) => void>>();
@@ -152,7 +153,7 @@ describe("r244 issue 2: a steer that landed while the agent was not open", () =>
     mock.responses.set("submit", () => ({ disposition: "steered", turnId: "t1" }));
     await store.getState().submit("删掉了，已经", "auto");
     await settle();
-    const steer = store.getState().pendingSteers.a1?.[0];
+    const steer = store.getState().pendingSteers[viewKey("local", "a1")]?.[0];
     expect(steer).toMatchObject({ text: "删掉了，已经", turnId: "t1", state: "waiting" });
     // The owner opens another agent before cute-codex reads the steer (its next sampling step):
     // the Director's feed is closed, so the userMessage and turn/completed are not seen here.
@@ -164,8 +165,8 @@ describe("r244 issue 2: a steer that landed while the agent was not open", () =>
     mock.calls.length = 0;
     await store.getState().select("a1");
     await settle();
-    expect(store.getState().sessions.a1!.timeline.activeTurnId).toBeNull();
-    expect(store.getState().pendingSteers.a1 ?? []).toEqual([]);
+    expect(store.getState().sessions[viewKey("local", "a1")]!.timeline.activeTurnId).toBeNull();
+    expect(store.getState().pendingSteers[viewKey("local", "a1")] ?? []).toEqual([]);
     // Recorded in the history it was read with: no second history read (the lost-steer check).
     expect(mock.calls.filter((c) => c.method === "bootstrap")).toHaveLength(1);
   });
@@ -183,7 +184,7 @@ describe("r244 issue 2: a steer that landed while the agent was not open", () =>
     mock.responses.set("bootstrap", () => thread("a1", [turn("t1", "interrupted", [])]));
     await store.getState().select("a1");
     await settle();
-    expect(store.getState().pendingSteers.a1?.map((p) => [p.text, p.state])).toEqual([["lost", "undelivered"]]);
+    expect(store.getState().pendingSteers[viewKey("local", "a1")]?.map((p) => [p.text, p.state])).toEqual([["lost", "undelivered"]]);
   });
 });
 
@@ -217,7 +218,7 @@ describe("r244 issue 3: an approval of an agent that is not open", () => {
     mock.responses.set("bootstrap", () => thread("a1", []));
     await store.getState().select("a1");
     // b2's cached view (no pending, feed closed) stays; a new request still counts.
-    expect(store.getState().sessions.b2).toBeDefined();
+    expect(store.getState().sessions[viewKey("local", "b2")]).toBeDefined();
     transport.host(request("b2", 3, "item/fileChange/requestApproval"));
     expect(shell.appAttention()).toBe(1);
     // Opened again: its view has the request (bootstrap) — one agent, counted once.
@@ -225,11 +226,11 @@ describe("r244 issue 3: an approval of an agent that is not open", () => {
     await store.getState().select("b2");
     mock.responses.set("bootstrap", () => thread("a1", []));
     await store.getState().select("a1");
-    expect(store.getState().sessions.b2!.timeline.pending.size).toBe(1);
+    expect(store.getState().sessions[viewKey("local", "b2")]!.timeline.pending.size).toBe(1);
     expect(shell.appAttention()).toBe(1);
     // Answered on the phone while b2 is not open: its cached view lets go of it too.
     transport.host(native("b2", "serverRequest/resolved", { requestId: 3 }));
-    expect(store.getState().sessions.b2!.timeline.pending.size).toBe(0);
+    expect(store.getState().sessions[viewKey("local", "b2")]!.timeline.pending.size).toBe(0);
     expect(shell.appAttention()).toBe(0);
   });
 });

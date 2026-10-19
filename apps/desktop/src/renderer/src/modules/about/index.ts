@@ -4,6 +4,11 @@
 // only, no daemon calls; required so the known issues and the changelog are always reachable.
 import { defineModule } from "../slots";
 import { AboutLinksSection, ChangelogSection, KnownIssuesSection } from "./AboutSections";
+import { provideReleases } from "../../lib/onboarding";
+import { BUNDLED_CHANGELOG } from "./changelog";
+
+// The onboarding's 新功能 dialog reads this desktop's releases from here (lib/onboarding).
+provideReleases(BUNDLED_CHANGELOG.releases);
 
 export default defineModule({
   id: "about",

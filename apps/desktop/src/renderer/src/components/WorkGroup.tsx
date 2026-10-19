@@ -11,7 +11,7 @@ import { AutoReviewLine } from "./AutoReview";
 import { isFailed, type StepEntry, type WorkSummary } from "../lib/workGroups";
 import { safetyNoteOfItem } from "../lib/ownerNotify";
 import { useHostOwnerNotes } from "../lib/ownerNotifyStore";
-import { agentHost, useApp } from "../store";
+import { useConvHost } from "../lib/conversationScope";
 import { Markdown } from "./Markdown";
 import { ToolOutlet } from "../modules/TimelineOutlet";
 
@@ -107,7 +107,7 @@ export const WorkGroup = memo(WorkGroupView, (a, b) => a.sessionId === b.session
 function WorkGroupView({ steps, open: openGroup, summary, sessionId }: { steps: StepEntry[]; open: boolean; summary: WorkSummary; sessionId: string }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState<boolean | null>(null);
-  const notes = useHostOwnerNotes(useApp(agentHost));
+  const notes = useHostOwnerNotes(useConvHost());
   // A single step gains nothing from folding.
   if (steps.length === 1) return <StepRow sessionId={sessionId} step={steps[0]!} />;
   if (openGroup && expanded === null) {

@@ -19,6 +19,8 @@ vi.mock("../src/renderer/src/store", () => ({ useApp: { getState: () => fake.sta
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock("../src/renderer/src/lib/statusItemsView", () => ({ useStatusPlace: () => "off" }));
 vi.mock("../src/renderer/src/components/Markdown", () => ({ Markdown: () => null }));
+// Outside any conversation provider: the scope falls back to the global selection (lib/conversationScope).
+vi.mock("../src/renderer/src/lib/conversationScope", () => ({ useConvScope: () => null, useConvViewHost: () => "local", convLiveOf: () => ({ hostId: "local", sessionId: fake.state.selectedId }), convViewOf: (_scope: unknown, s: typeof fake.state, id: "a" | "b") => s.sessions[id] }));
 import { PlanCard } from "../src/renderer/src/modules/plan/PlanCard";
 import { fireHostSwitch } from "../src/renderer/src/lib/hostSwitch";
 
@@ -91,8 +93,8 @@ describe("plan implementation retains the clicked conversation", () => {
     fake.state.setCollabMode.mockResolvedValue(true);
     clickImplement();
     await settle();
-    expect(fake.state.setCollabMode).toHaveBeenCalledWith("default");
-    expect(fake.state.submit).toHaveBeenCalledExactlyOnceWith("Implement the plan.", "auto");
+    expect(fake.state.setCollabMode).toHaveBeenCalledWith("default", "a", "local");
+    expect(fake.state.submit).toHaveBeenCalledExactlyOnceWith("Implement the plan.", "auto", [], { sessionId: "a", hostId: "local" });
     expect(fake.updates).toContain(true);
   });
 

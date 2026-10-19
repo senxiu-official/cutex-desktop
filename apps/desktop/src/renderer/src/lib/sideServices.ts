@@ -53,7 +53,7 @@ export function whyUnavailable(kind: ItemId): Unavailable {
   const host = appModules();
   const statusItem = kind.startsWith(STATUS_COMPONENT_PREFIX) ? kind.slice(STATUS_COMPONENT_PREFIX.length) : null;
   const owner = host.modules.find((m) =>
-    statusItem ? m.contributes?.["conversation.status"]?.some((i) => i.id === statusItem) : m.contributes?.["side.component"]?.some((i) => i.id === kind),
+    statusItem ? m.contributes?.["conversation.status"]?.some((i) => i.id === statusItem) : m.contributes?.["side.component"]?.some((i) => i.id === kind) || m.contributes?.["pane.kind"]?.some((i) => i.id === kind),
   );
   if (!owner) return "unknown-kind";
   const state = host.statuses().get(owner.id)?.state;

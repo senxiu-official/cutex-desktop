@@ -20,6 +20,7 @@ const CORE_BASE_FEATURES: readonly string[] = [
 
 /** Newer cutex only (absent under `?legacy`). */
 const CORE_NEW_FEATURES: readonly string[] = [
+  "host-owner-person",
   "profile-avatar",
   "windows-sandbox-readiness",
   "session-conversation-activity",
@@ -52,6 +53,7 @@ const CORE_NEW_FEATURES: readonly string[] = [
   "profile-model-display-names",
   "profile-delete",
   "profile-delete-detach-archived",
+  "profile-import-cc-switch",
   "profile-switch-family",
   "quick-chat-default-profile",
   "auto-thread-titles",

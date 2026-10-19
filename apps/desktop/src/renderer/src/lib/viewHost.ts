@@ -3,7 +3,8 @@
 // the open conversation (delegation cards, bus messages, parties) come from both hosts' sidebars.
 import { useMemo } from "react";
 import type { SidebarSnapshot } from "../../../shared/ipc";
-import { selectedSidebar, useApp } from "../store";
+import { sidebarOf, useApp } from "../store";
+import { useConvSidebar } from "./conversationScope";
 
 export type SessionRow = SidebarSnapshot["active"][number];
 
@@ -14,15 +15,18 @@ export function rowsOf(...sidebars: (SidebarSnapshot | null | undefined)[]): Ses
   return [...byId.values()];
 }
 
-/** The agents of the focus host and of the open agent's host (the latter wins on equal ids). */
+/** The agents of the focus host and of the open agent's host (the latter wins on equal ids; lib/conversationScope). */
 export function useViewRows(): SessionRow[] {
   const focus = useApp((s) => s.sidebar);
-  const selected = useApp(selectedSidebar);
+  const selected = useConvSidebar();
   return useMemo(() => (focus === selected ? rowsOf(focus) : rowsOf(focus, selected)), [focus, selected]);
 }
 
-/** One agent row of the focus host or the open agent's host (non-React selectors). */
-export function viewRow(s: Parameters<typeof selectedSidebar>[0], id: string): SessionRow | undefined {
+/**
+ * One agent row of `hostId` (the agent's host: a conversation's scope host, else the open agent's) or,
+ * failing that, of the focus host (non-React selectors).
+ */
+export function viewRow(s: Parameters<typeof sidebarOf>[0], hostId: string, id: string): SessionRow | undefined {
   const find = (sidebar: SidebarSnapshot | null) => [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((r) => r.cutexSessionId === id);
-  return find(selectedSidebar(s)) ?? find(s.sidebar);
+  return find(sidebarOf(s, hostId)) ?? find(s.sidebar);
 }

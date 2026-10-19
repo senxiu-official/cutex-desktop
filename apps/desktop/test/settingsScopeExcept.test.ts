@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-// Page scope chip (components/settings/Form SettingsPage): while a card on the page carries its own,
-// different scope chip (e.g. a host card on the local 输入区 page), the page chip's explanation adds
-// that the cards' tags win (owner 2026-10-18); without such a card it does not.
+// Page scope (components/settings/Form SettingsPage; owner 2026-10-19, one rule): a page lives in one
+// place, or — as soon as one card lives elsewhere (e.g. a host card on the local 输入区 page) — it is
+// 混合设置 and every titled card shows where it lives. On a one-place page no card shows a place.
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -36,20 +36,19 @@ afterEach(() => {
   container.remove();
 });
 
-const pageChipNote = () => {
-  const chip = container.querySelector<HTMLButtonElement>("[data-settings-header] [data-settings-scope] button")!;
-  act(() => chip.click());
-  return container.querySelector("[data-settings-header] [role=note]")?.textContent ?? "";
-};
+const pageChip = () => container.querySelector("[data-settings-header] [data-settings-scope]")?.textContent ?? "";
+const cardTags = () => [...container.querySelectorAll("section")].map((s) => s.querySelector("button")?.textContent ?? "");
 
-describe("page scope chip with cards tagged elsewhere", () => {
-  it("adds that the cards' tags win while such a card is on the page", () => {
+describe("page scope: one place, or 混合设置 with every card tagged", () => {
+  it("a card elsewhere makes the page 混合设置, and every card shows its place", () => {
     act(() => root.render(page(card("a"), card("b", "host"))));
-    expect(pageChipNote()).toContain("settings.scope.except");
+    expect(pageChip()).toContain("settings.scope.mixedTag");
+    expect(cardTags()).toEqual(["settings.scope.local.label", "settings.scope.host.label"]);
   });
 
-  it("says nothing more without one (a card with the page's own scope is no exception)", () => {
+  it("a one-place page: its place in the header, no card tagged (a card naming the page's place is no exception)", () => {
     act(() => root.render(page(card("a"), card("b", "local"))));
-    expect(pageChipNote()).not.toContain("settings.scope.except");
+    expect(pageChip()).toContain("settings.scope.local.label");
+    expect(cardTags()).toEqual(["", ""]);
   });
 });

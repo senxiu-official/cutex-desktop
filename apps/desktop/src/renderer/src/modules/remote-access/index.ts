@@ -1,9 +1,13 @@
-// 接入 (cutex listen-settings / device-pairing): its own page Settings → 接入 (group 连接, after 用户) with
-// listen addresses, CORS (the same listener, so right after it) and device pairing as sections. 互联
-// (module peers) is its own page; the old link row at the end was dropped (settings audit 2026-10-15 #59). A cutex without the capability gets 「需要升级 cutex」 instead (CORS just hides).
-import { MonitorSmartphone } from "lucide-react";
-import { CorsSection, PairingSection, RemoteAccessPage, RemoteAccessSection } from "../../components/settings/RemoteAccess";
+// 接入 (cutex listen-settings / device-pairing): Settings → 访问管理 → 接入方式 (formerly its own page 接入,
+// folded into 访问管理 in the 连接 restructure 2026-10-19 — old `openSettings("remote")` links land there)
+// with listen addresses, CORS (the same listener, so right after it) and device pairing as sections. A
+// cutex without the capability gets 「需要升级 cutex」 instead (CORS just hides). On 用户: 在线的桌面
+// (client-remote-close; hidden on an older cutex) before 配对设备.
+import { CorsSection, PairingSection, RemoteAccessSection } from "../../components/settings/RemoteAccess";
+import { OnlineDesktopsSection } from "../../components/settings/OnlineDesktops";
 import { LISTEN_FEATURE, PAIRING_FEATURE } from "../../lib/remoteAccess";
+import { ONLINE_DESKTOPS_ANCHOR } from "../../lib/remoteClose";
+import { REMOTE_CLOSE_FEATURE } from "../../../../shared/remoteClose";
 import { defineModule } from "../slots";
 
 export default defineModule({
@@ -11,11 +15,20 @@ export default defineModule({
   titleKey: "remote-access.title",
   descriptionKey: "remote-access.description",
   contributes: {
-    "settings.page": [{ id: "remote-access.page", page: "remote", group: "connection", order: 260, icon: MonitorSmartphone, titleKey: "remote-access.title", source: "host", Page: RemoteAccessPage }],
     "settings.section": [
-      { id: "remote-access.listen", page: "remote", order: 100, requires: { capabilities: [LISTEN_FEATURE] }, unavailable: "notice", titleKey: "remote.title", keywords: ["remote.addAddress"], Section: RemoteAccessSection },
-      { id: "remote-access.pairing", page: "remote", order: 200, requires: { capabilities: [PAIRING_FEATURE] }, unavailable: "notice", titleKey: "remote.pair.title", keywords: ["remote.pair.label", "remote.pair.devicesInUsers"], Section: PairingSection },
-      { id: "remote-access.cors", page: "remote", order: 150, requires: { capabilities: [LISTEN_FEATURE] }, titleKey: "remote.cors.title", keywords: ["remote.cors.add"], Section: CorsSection },
+      { id: "remote-access.listen", page: "access", order: 300, requires: { capabilities: [LISTEN_FEATURE] }, unavailable: "notice", titleKey: "remote.title", keywords: ["remote.addAddress"], Section: RemoteAccessSection },
+      { id: "remote-access.cors", page: "access", order: 310, requires: { capabilities: [LISTEN_FEATURE] }, titleKey: "remote.cors.title", keywords: ["remote.cors.add"], Section: CorsSection },
+      // client-remote-close: the cutex desktops registered on the host, 「关闭」 for each (after 已登录设备, 110).
+      {
+        id: "remote-access.onlineDesktops",
+        page: "users",
+        order: 115,
+        requires: { capabilities: [REMOTE_CLOSE_FEATURE] },
+        titleKey: "remoteClose.list",
+        sections: [{ anchor: ONLINE_DESKTOPS_ANCHOR, titleKey: "remoteClose.list", keywords: ["remoteClose.close", "remoteClose.thisComputer", "remoteClose.listHint"] }],
+        Section: OnlineDesktopsSection,
+      },
+      { id: "remote-access.pairing", page: "users", order: 120, requires: { capabilities: [PAIRING_FEATURE] }, unavailable: "notice", titleKey: "remote.pair.title", keywords: ["remote.pair.label", "remote.pair.devicesInUsers"], Section: PairingSection },
     ],
   },
 });

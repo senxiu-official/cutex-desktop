@@ -36,6 +36,13 @@ describe("openPage routing", () => {
     expect(settingsTab({})).toBe("general");
   });
 
+  it("接入 / 互联 links land on 主机; 用户 is its own page (连接 D plan 2026-10-19)", () => {
+    for (const tab of ["remote", "peers"]) expect(settingsTab({ tab })).toBe("access");
+    expect(settingsTab({ tab: "users" })).toBe("users");
+    expect(settingsTab({ tab: "access" })).toBe("access");
+    expect(settingsTab({ tab: "hosts" })).toBe("hosts");
+  });
+
   it("newQuickChat opens the draft page", async () => {
     await useApp.getState().newQuickChat();
     expect(pageOf(useApp.getState().view)).toBe(DRAFT_CHAT_PAGE);

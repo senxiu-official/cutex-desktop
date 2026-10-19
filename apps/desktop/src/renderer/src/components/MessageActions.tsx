@@ -14,7 +14,8 @@ import { ARMED_BUTTON, useArmed } from "../lib/armedConfirm";
 import { quoteText, SESSION_FEATURES } from "../lib/menus";
 import { copyQuietly } from "../lib/copyFeedback";
 import type { ReplyBar } from "../lib/replyActions";
-import { selectedFeatures, useApp } from "../store";
+import { useApp } from "../store";
+import { convFeaturesOf, convNotify, useConvScope, useConvViewHost } from "../lib/conversationScope";
 import { canRewindFiles, lacks } from "../lib/agentFeatures";
 import { useAgentFeatures } from "../lib/agentFeaturesView";
 import { structuralBlockText, structuralErrorText, useStructuralBlock } from "../lib/structuralGateView";
@@ -137,9 +138,10 @@ function Divider() {
 
 /** Fork / revert failures: a Claude agent's busy refusal as information, anything else as an error. */
 function useReport() {
+  const conv = useConvScope();
   return (e: unknown) => {
     const { text, refused } = structuralErrorText(e);
-    useApp.getState().notify(text, refused ? "info" : "error");
+    convNotify(conv, text, refused ? "info" : "error");
   };
 }
 
@@ -147,24 +149,29 @@ function useReport() {
 export function ReplyActions({ sessionId, bar, readOnly, fold }: { sessionId: string; bar: ReplyBar; readOnly: boolean; fold?: MessageFold }) {
   const { t } = useI18n();
   const agent = useAgentFeatures(sessionId);
-  const canFork = useApp((s) => selectedFeatures(s).has(SESSION_FEATURES.fork)) && !readOnly && !lacks(agent, "fork");
-  const canRevert = useApp((s) => selectedFeatures(s).has(SESSION_FEATURES.revert)) && !readOnly && !!bar.nextTurnId && !lacks(agent, "historyRevert");
+  const conv = useConvScope();
+  const hostId = useConvViewHost(sessionId);
+  const canFork = useApp((s) => convFeaturesOf(conv, s).has(SESSION_FEATURES.fork)) && !readOnly && !lacks(agent, "fork");
+  const canRevert = useApp((s) => convFeaturesOf(conv, s).has(SESSION_FEATURES.revert)) && !readOnly && !!bar.nextTurnId && !lacks(agent, "historyRevert");
   // Claude agents: 回退 can also restore the files from Claude Code's checkpoints (claude-rewind-files).
-  const canRevertFiles = useApp((s) => canRewindFiles(agent, selectedFeatures(s))) && canRevert;
+  const canRevertFiles = useApp((s) => canRewindFiles(agent, convFeaturesOf(conv, s))) && canRevert;
   const [withFiles, setWithFiles] = useState(false);
-  // A busy Claude agent refuses fork / revert (lib/structuralGate): shown disabled with the reason.
-  const block = useStructuralBlock(sessionId, agent);
+  // A busy Claude agent refuses revert, and fork without forkWhileBusy (lib/structuralGate): shown
+  // disabled with the reason.
+  const block = useStructuralBlock(sessionId, agent, "revert");
   const blocked = block ? structuralBlockText(block) : null;
+  const forkBlock = useStructuralBlock(sessionId, agent, "fork");
+  const forkBlocked = forkBlock ? structuralBlockText(forkBlock) : null;
   const [forking, setForking] = useState(false);
   const [armed, setArmed] = useArmed(blocked);
   const report = useReport();
   const fork = () => {
     setForking(true);
-    useApp.getState().forkSession(sessionId, bar.turnId).catch(report).finally(() => setForking(false));
+    useApp.getState().forkSession(sessionId, bar.turnId, hostId).catch(report).finally(() => setForking(false));
   };
   const more = [
     foldAction(fold, t),
-    !readOnly && { value: "quote", label: t("reply.quote"), icon: <MessageSquareQuote size={ICON} />, run: () => useApp.getState().insertIntoComposer(sessionId, quoteText(bar.text), "append") },
+    !readOnly && { value: "quote", label: t("reply.quote"), icon: <MessageSquareQuote size={ICON} />, run: () => useApp.getState().insertIntoComposer(sessionId, quoteText(bar.text), "append", undefined, hostId) },
     canRevert && { value: "revert", label: t("reply.revert"), icon: <History size={ICON} />, disabled: !!blocked, title: blocked ?? t("reply.revertHint", { n: bar.laterTurns }), run: () => (setWithFiles(false), setArmed(true)) },
     canRevertFiles && { value: "revertFiles", label: t("reply.revertWithFiles"), icon: <FileClock size={ICON} />, disabled: !!blocked, title: blocked ?? t("reply.revertFilesHint", { n: bar.laterTurns }), run: () => (setWithFiles(true), setArmed(true)) },
   ].filter((a): a is MoreAction => !!a);
@@ -173,7 +180,7 @@ export function ReplyActions({ sessionId, bar, readOnly, fold }: { sessionId: st
     <div className={`flex h-7 items-center gap-0.5 transition-opacity ${shown}`}>
       <CopyButton text={bar.text} />
       {canFork && (
-        <IconButton title={blocked ?? t("reply.fork")} disabled={forking || !!blocked} onClick={fork}>
+        <IconButton title={forkBlocked ?? t("reply.fork")} disabled={forking || !!forkBlocked} onClick={fork}>
           <GitFork size={ICON} />
         </IconButton>
       )}
@@ -187,7 +194,7 @@ export function ReplyActions({ sessionId, bar, readOnly, fold }: { sessionId: st
             title={t(withFiles && canRevertFiles ? "reply.revertFilesHint" : "reply.revertHint", { n: bar.laterTurns })}
             label={t(withFiles && canRevertFiles ? "reply.revertFilesArmed" : "reply.revertArmed", { n: bar.laterTurns })}
             onDone={() => setArmed(false)}
-            onConfirm={() => useApp.getState().revertTo(sessionId, bar.nextTurnId!, withFiles && canRevertFiles ? { rewindFiles: true } : undefined).catch(report)}
+            onConfirm={() => useApp.getState().revertTo(sessionId, bar.nextTurnId!, { hostId, ...(withFiles && canRevertFiles ? { rewindFiles: true } : {}) }).catch(report)}
           />
         </>
       )}
@@ -203,6 +210,7 @@ export function UserActions({ sessionId, text, turnId, dropped, canRevert, block
   const { t } = useI18n();
   const [armed, setArmed] = useState(false);
   const report = useReport();
+  const hostId = useConvViewHost(sessionId);
   const more = [foldAction(fold, t)].filter((a): a is MoreAction => !!a);
   return (
     <div className={`flex h-6 items-center justify-end gap-0.5 transition-opacity ${armed ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
@@ -214,7 +222,7 @@ export function UserActions({ sessionId, text, turnId, dropped, canRevert, block
           armedLabel={t("reply.editResendArmed", { n: dropped })}
           blocked={blocked}
           onArmedChange={setArmed}
-          onConfirm={() => useApp.getState().editAndResend(sessionId, turnId, text).catch(report)}
+          onConfirm={() => useApp.getState().editAndResend(sessionId, turnId, text, hostId).catch(report)}
         />
       )}
       {turnId && <RefActionButtons kind="turn" build={() => turnRefNow(sessionId, turnId, text)} />}

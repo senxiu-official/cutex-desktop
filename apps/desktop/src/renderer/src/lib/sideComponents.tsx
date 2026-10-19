@@ -1,4 +1,5 @@
-// The right side's component registry (docs/desktop-modules.md §18): `side.component` items plus one
+// The tool area's component registry (docs/desktop-modules.md §18, §24): `side.component` items, the
+// contract-1.17 `pane.kind` items (adapted by lib/paneKinds `sideItemOf`), plus one
 // shell-derived component per `conversation.status` category (`status:<item id>`, §18.9), and the
 // view context (selected agent, host, workspace) that decides which instances are visible. Kept out
 // of components/*.tsx (Fast Refresh): the derived Bodies live here with the adapter that makes them.
@@ -15,6 +16,7 @@ import { agentFeaturesFor } from "./agentFeaturesView";
 import { lacks } from "./agentFeatures";
 import { SINGLETON_KEY, placeSpec, type PlaceSpec, type SideViewContext } from "./sideLayout";
 import { STATUS_COMPONENT_PREFIX } from "./sideKinds";
+import { sideItemOf } from "./paneKinds";
 import { scopeFor, scopeKey } from "./workspace";
 
 export interface SideComponentEntry {
@@ -84,31 +86,34 @@ export function statusComponent(item: StatusItem): SideComponentItem | null {
 
 // ── Registry ────────────────────────────────────────────────────────────────────────────────────
 
-let cache: { side: unknown; status: unknown; value: SideRegistry } | null = null;
+let cache: { side: unknown; status: unknown; panes: unknown; value: SideRegistry } | null = null;
 
-function build(side: readonly AppSlotEntry<"side.component">[], status: readonly AppSlotEntry<"conversation.status">[]): SideRegistry {
-  if (cache && cache.side === side && cache.status === status) return cache.value;
+function build(side: readonly AppSlotEntry<"side.component">[], status: readonly AppSlotEntry<"conversation.status">[], panes: readonly AppSlotEntry<"pane.kind">[]): SideRegistry {
+  if (cache && cache.side === side && cache.status === status && cache.panes === panes) return cache.value;
   const map = new Map<ItemId, SideComponentEntry>();
   for (const entry of side) if (entry.mode === "show") map.set(entry.item.id, { item: entry.item, moduleId: entry.moduleId });
+  // v1.17 (§24.3): a contributed pane kind opens in the tool area like a side component.
+  for (const entry of panes) if (entry.mode === "show" && !map.has(entry.item.id)) map.set(entry.item.id, { item: sideItemOf(entry.item), moduleId: entry.moduleId });
   for (const entry of status) {
     if (entry.mode !== "show") continue;
     const component = statusComponent(entry.item);
     if (component && !map.has(component.id)) map.set(component.id, { item: component, moduleId: entry.moduleId });
   }
-  cache = { side, status, value: map };
+  cache = { side, status, panes, value: map };
   return map;
 }
 
 /** The available components now (outside React: services). */
 export function sideRegistry(): SideRegistry {
   const host = appModules();
-  return build(host.snapshot("side.component"), host.snapshot("conversation.status"));
+  return build(host.snapshot("side.component"), host.snapshot("conversation.status"), host.snapshot("pane.kind"));
 }
 
 export function useSideRegistry(): SideRegistry {
   const side = useSlot("side.component");
   const status = useSlot("conversation.status");
-  return build(side, status);
+  const panes = useSlot("pane.kind");
+  return build(side, status, panes);
 }
 
 /** A component's placement with defaults; unknown kinds → null. */

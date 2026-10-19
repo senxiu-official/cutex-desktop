@@ -16,6 +16,17 @@ import { InputSplitTopic } from "./inputSplitTopic";
 import { InputLeftoversTopic } from "./inputLeftoversTopic";
 import { NotifyTopic } from "./notifyTopic";
 import { TintTopic } from "./tintTopic";
+import { NotifyNamesTopic } from "./notifyNamesTopic";
+import { CardTagsTopic } from "./cardTagsTopic";
+import { LabelSpecTopic } from "./labelSpecTopic";
+import { HostPickTopic } from "./hostPickTopic";
+import { LabelRulesTopic } from "./labelRulesTopic";
+import { EventGroupsTopic } from "./eventGroupsTopic";
+import { ConvTopic } from "./convTopic";
+import { ConnTopic } from "./connTopic";
+import { OwnerTopic } from "./ownerTopic";
+import { HostPageTopic } from "./hostPageTopic";
+import { OwnerDevicesTopic } from "./ownerDevicesTopic";
 import "../styles.css";
 
 const q = new URLSearchParams(location.search);
@@ -1059,21 +1070,21 @@ function FontPickTopic() {
   );
 }
 
-const TOPICS = { tint: "表情底色", notify: "通知页结构", leftovers: "输入区收尾", inputsplit: "输入区拆页", fontpick: "自定义字体", palettes: "主题配色", fonts: "字体（外观页）", reset: "恢复默认", preview: "预览控件（已选 B6 + L1 + M3）", header: "页头「说明 + 影响」（已选 F）" } as const;
+const TOPICS = { ownerdev: "主人的设备", hostpage: "连接：你 · 主机", owner: "所有者页", conn: "连接：新结构", conv: "对话页：新结构", events: "事件分级：分组和控件", rules: "标签规则：所有情况", hostpick: "主机切换放哪", labels: "标签设计", tags: "卡片标签", names: "通知两张表的名字", tint: "表情底色", notify: "通知页结构", leftovers: "输入区收尾", inputsplit: "输入区拆页", fontpick: "自定义字体", palettes: "主题配色", fonts: "字体（外观页）", reset: "恢复默认", preview: "预览控件（已选 B6 + L1 + M3）", header: "页头「说明 + 影响」（已选 F）" } as const;
 
 function Preview() {
-  const [topic, setTopic] = useState<keyof typeof TOPICS>((q.get("topic") as keyof typeof TOPICS | null) ?? "notify");
+  const [topic, setTopic] = useState<keyof typeof TOPICS>((q.get("topic") as keyof typeof TOPICS | null) ?? "ownerdev");
   return (
     <I18nProvider>
       <main className="mx-auto max-w-[1000px] px-6 py-6">
         <h1 className="text-lg font-semibold">设置页方案预览</h1>
         <p className="mt-1 text-xs text-subtle">研发预览，用真实设置组件。每个主题几个方案，点按钮切换。</p>
-        <div className="mt-4 flex gap-1 border-b border-border">
+        <div className="mt-4 flex flex-wrap gap-x-1 border-b border-border">
           {(Object.keys(TOPICS) as (keyof typeof TOPICS)[]).map((k) => (
-            <button key={k} onClick={() => setTopic(k)} className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${k === topic ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"}`}>{TOPICS[k]}</button>
+            <button key={k} onClick={() => setTopic(k)} className={`-mb-px border-b-2 px-3 py-1.5 text-sm whitespace-nowrap ${k === topic ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"}`}>{TOPICS[k]}</button>
           ))}
         </div>
-        {topic === "tint" ? <TintTopic /> : topic === "notify" ? <NotifyTopic /> : topic === "leftovers" ? <InputLeftoversTopic /> : topic === "inputsplit" ? <InputSplitTopic /> : topic === "fontpick" ? <FontPickTopic /> : topic === "palettes" ? <PalettesTopic /> : topic === "fonts" ? <FontsTopic /> : topic === "reset" ? <ResetTopic /> : topic === "preview" ? <PreviewTopic /> : <HeaderTopic />}
+        {topic === "ownerdev" ? <OwnerDevicesTopic /> : topic === "hostpage" ? <HostPageTopic /> : topic === "owner" ? <OwnerTopic /> : topic === "conn" ? <ConnTopic /> : topic === "conv" ? <ConvTopic /> : topic === "events" ? <EventGroupsTopic /> : topic === "rules" ? <LabelRulesTopic /> : topic === "hostpick" ? <HostPickTopic /> : topic === "labels" ? <LabelSpecTopic /> : topic === "tags" ? <CardTagsTopic /> : topic === "names" ? <NotifyNamesTopic /> : topic === "tint" ? <TintTopic /> : topic === "notify" ? <NotifyTopic /> : topic === "leftovers" ? <InputLeftoversTopic /> : topic === "inputsplit" ? <InputSplitTopic /> : topic === "fontpick" ? <FontPickTopic /> : topic === "palettes" ? <PalettesTopic /> : topic === "fonts" ? <FontsTopic /> : topic === "reset" ? <ResetTopic /> : topic === "preview" ? <PreviewTopic /> : <HeaderTopic />}
       </main>
     </I18nProvider>
   );

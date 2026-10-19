@@ -56,6 +56,31 @@ const subThreads: Record<string, unknown> = {
   },
 };
 
+// A failed sub-agent (eva's 最近完成 group): its span gives the row's duration.
+subThreads["thread-sub-bench"] = {
+  thread: {
+    id: "thread-sub-bench",
+    agentNickname: "Gauss",
+    agentRole: "worker",
+    status: { type: "notLoaded" },
+    createdAt: now - 180,
+    updatedAt: now - 120,
+    turns: [
+      {
+        id: "sbt1",
+        status: "failed",
+        startedAt: now - 178,
+        completedAt: now - 121,
+        items: [
+          { type: "userMessage", id: "sbu1", content: [{ type: "text", text: "跑一遍 queue 的基准测试，对比 flush 加 CAS 前后的吞吐" }] },
+          { type: "commandExecution", id: "sbc1", command: "cargo bench --bench queue_flush", status: "failed", exitCode: 101, durationMs: 52000, aggregatedOutput: "error[E0432]: unresolved import `criterion`" },
+          { type: "agentMessage", id: "sbm1", text: "cargo bench 编译失败：缺少 criterion 依赖。" },
+        ],
+      },
+    ],
+  },
+};
+
 // Stale-running repro (ifm-ema-figures): the agent spawned a sub-agent, the owner interrupted the
 // turn while it still worked, then stopped and restarted the runtime (停止运行时 → 启动运行时). The
 // child ran inside the old runtime (generation 3); after the restart cute-codex no longer has it

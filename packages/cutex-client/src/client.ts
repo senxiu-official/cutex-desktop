@@ -28,9 +28,10 @@ import type {
 import type { DaemonEndpoint } from "./endpoint";
 import type { ClientTokenList, ClientTokenRenamed, HostSummary, PairingCode, PairRequest, PairResponse, SummaryReadResult } from "./summary";
 import { CutexApiError, CutexUnreachableError } from "./errors";
+import { CLIENT_INSTANCE_ID, clientPresenceBody, closeGraceSeconds, readClientPresenceReply, readClientState, readOnlineClients, type ClientClosingOutcome, type ClientPresence, type ClientPresenceReply, type ClientState, type OnlineClient } from "./clients";
 import { componentName, readComponentOperation, readComponentsList, type ComponentOperation, type ComponentsList } from "./components";
 import { readHostServiceInfo, UPGRADE_RUN_ID, upgradeApplyBody, upgradeRefusalOf, upgradeRollbackBody, upgradeSettingsBody, upgradeStageBody, type HostServiceInfo, type UpgradeApplyRequest, type UpgradeResult, type UpgradeRollbackRequest, type UpgradeRollbackResult, type UpgradeRun, type UpgradeSettings, type UpgradeSettingsPatch, type UpgradeStaging, type UpgradeStatus } from "./upgrade";
-import { AVATAR_CONTENT_TYPES, AVATAR_ETAG, AVATAR_MAX_BYTES, grantBody, PROFILE_IMAGE_KINDS, PROFILE_IMAGE_MAX_BYTES, profileImagePath, type AvatarUpload, type ProfileImageKind, PERSON_PUBLIC_KEY, PERSON_SIGNATURE, personKeysBody, selfProfileBody, DISPLAY_NAME_MAX, IDENTITY_CLAIM_OUTCOMES, type IdentityChallenge, type IdentityClaimOutcome, type IdentityClaimResult, type PersonKeyInput, type PersonKeysResult, type TokenPersonAckResult, userColorBody, userNameBody, USER_ID, type AvatarContentType, type SelfProfile, type SelfProfilePatch, type UserAvatar, type PeerBindingResult, type TokenBindingResult, type UserCreate, type UserPatch, type UsersList, type UsersSettings, type UserWriteResult, type OwnDevices, type OwnDeviceRevoked } from "./users";
+import { AVATAR_CONTENT_TYPES, AVATAR_ETAG, AVATAR_MAX_BYTES, grantBody, PROFILE_IMAGE_KINDS, PROFILE_IMAGE_MAX_BYTES, profileImagePath, type AvatarUpload, type ProfileImageKind, PERSON_PUBLIC_KEY, PERSON_SIGNATURE, personKeysBody, selfProfileBody, DISPLAY_NAME_MAX, IDENTITY_CLAIM_OUTCOMES, type IdentityChallenge, type IdentityClaimOutcome, type IdentityClaimResult, type PersonKeyInput, type PersonKeysResult, type TokenPersonAckResult, userColorBody, userNameBody, USER_ID, type AvatarContentType, type SelfProfile, type SelfProfilePatch, type UserAvatar, type PeerBindingResult, type TokenBindingResult, type UserCreate, type UserPatch, type UsersList, type UsersSettings, type UserWriteResult, type OwnDevices, type OwnDeviceRevoked, DEVICE_SCOPES, type DeviceScope } from "./users";
 
 /** Web Crypto UUID: available in Node ≥ 19, Electron, browsers and Android WebView (secure context). */
 function randomUUID(): string {
@@ -516,17 +517,50 @@ export class CutexClient {
     return client.request<PairResponse>("POST", "/v2/pair", { body: request, ...(signal ? { signal } : {}) });
   }
 
+  // ---------- desktop presence / remote close (capability `client-remote-close`, clients.ts) ----------
+
+  /** `POST /v2/clients/presence`: register this client instance; a repeat is the heartbeat. */
+  async clientPresence(presence: ClientPresence, options: { signal?: AbortSignal } = {}): Promise<ClientPresenceReply> {
+    const body = clientPresenceBody(presence);
+    return readClientPresenceReply(await this.request<unknown>("POST", "/v2/clients/presence", { body, ...(options.signal ? { signal: options.signal } : {}) }), body.instanceId);
+  }
+
+  /** `GET /v2/clients`: the owner sees every registered client, other users only their own. */
+  async onlineClients(): Promise<OnlineClient[]> {
+    return readOnlineClients(await this.request<unknown>("GET", "/v2/clients"));
+  }
+
+  /** `POST /v2/clients/{instanceId}/close` → 202 `{instanceId, state}`; 403 client_close_forbidden / 409 remote_close_disabled / 404 client_not_found throw. */
+  async closeClient(instanceId: string, graceSeconds?: number): Promise<{ instanceId: string; state: ClientState }> {
+    if (!CLIENT_INSTANCE_ID.test(instanceId)) throw new Error("bad instance id");
+    const body = graceSeconds === undefined ? {} : { graceSeconds: closeGraceSeconds(graceSeconds) };
+    const r = await this.request<{ instanceId?: unknown; state?: unknown }>("POST", `/v2/clients/${encodeURIComponent(instanceId)}/close`, { body });
+    return { instanceId: typeof r?.instanceId === "string" ? r.instanceId : instanceId, state: r?.state === undefined ? "closeRequested" : readClientState(r.state) };
+  }
+
+  /** `POST /v2/clients/{instanceId}/closing` `{outcome}`: only the closing client itself may report. */
+  async reportClientClosing(instanceId: string, outcome: ClientClosingOutcome, options: { signal?: AbortSignal } = {}): Promise<void> {
+    if (!CLIENT_INSTANCE_ID.test(instanceId)) throw new Error("bad instance id");
+    if (outcome !== "closing" && outcome !== "cancelled") throw new Error("bad outcome");
+    await this.request<unknown>("POST", `/v2/clients/${encodeURIComponent(instanceId)}/closing`, { body: { outcome }, ...(options.signal ? { signal: options.signal } : {}) });
+  }
+
   /**
    * `POST /v2/pairing-codes` (capability `device-pairing`; root or client token on the loopback
    * listener — 403 `loopback_only` elsewhere). The reply's `code` is a one-time secret: never log it.
    */
-  async createPairingCode(label?: string, options: { userId?: string } = {}): Promise<PairingCode> {
+  async createPairingCode(label?: string, options: { userId?: string; scope?: DeviceScope } = {}): Promise<PairingCode> {
     const text = label?.trim();
     const body: Record<string, string> = text ? { label: text.slice(0, 60) } : {};
     // users: the user the paired device is bound to (cutex default: owner). Only sent when given.
     if (options.userId !== undefined) {
       if (!USER_ID.test(options.userId)) throw new Error("bad user id");
       body.userId = options.userId;
+    }
+    // device-scope: the paired device's scope (cutex default: full). Only sent when given.
+    if (options.scope !== undefined) {
+      if (!DEVICE_SCOPES.includes(options.scope)) throw new Error("bad scope");
+      body.scope = options.scope;
     }
     return this.request("POST", "/v2/pairing-codes", { body });
   }

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DaemonApi, WindowsSandboxReadiness } from "../../../shared/ipc";
 import { windowsSandboxReadinessOf, windowsSandboxSetupOutcomeOf, type WindowsSandboxSetupOutcome } from "../../../shared/windowsSandbox";
-import { sessionApi } from "../store";
+import { convApi, useConvScope } from "./conversationScope";
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -18,6 +18,7 @@ export type SetupPhase = { kind: "idle" } | { kind: "running" } | { kind: "start
  * config its runtime started with), so a finished setup shows "relaunch to apply" instead.
  */
 export function useSessionWindowsSandbox(sessionId: string, enabled: boolean, completed: WindowsSandboxSetupOutcome | null | undefined) {
+  const conv = useConvScope();
   const [readiness, setReadiness] = useState<WindowsSandboxReadiness | null>(null);
   const [phase, setPhase] = useState<SetupPhase>({ kind: "idle" });
   const current = useRef(sessionId);
@@ -38,7 +39,7 @@ export function useSessionWindowsSandbox(sessionId: string, enabled: boolean, co
   const load = useCallback(() => {
     if (!enabled) return;
     const id = sessionId;
-    void sessionApi(id)
+    void convApi(conv, id)
       .windowsSandboxReadiness(id)
       .then((r) => current.current === id && setReadiness(r), () => current.current === id && setReadiness(null));
   }, [sessionId, enabled]);
@@ -46,7 +47,7 @@ export function useSessionWindowsSandbox(sessionId: string, enabled: boolean, co
     const id = sessionId;
     setPhase({ kind: "running" });
     try {
-      await sessionApi(id).setupWindowsSandbox(id);
+      await convApi(conv, id).setupWindowsSandbox(id);
       if (current.current === id) setPhase((p) => (p.kind === "running" ? { kind: "started" } : p));
     } catch (e) {
       if (current.current === id) setPhase({ kind: "failed", message: errorText(e) });

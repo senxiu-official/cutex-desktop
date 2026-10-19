@@ -41,8 +41,16 @@ const mockApprovals: MockApproval[] = [
   {
     approvalId: "apr-9e41c7d0", kind: "ask_delivery", reason: "target_capabilities_not_subset", requesterCutexSessionId: "peer:ci-7a3f01c2b4d5e6f708192a3b4c5d6e7f:cutex.9b2e4f", requesterName: "proj-research@workstation-lab", projectId: "desktop",
     summary: "委托 proj-research@workstation-lab → Helper: 复现 host-a 上的 ws 断线",
-    details: { askId: "ask-0f3c9e2a1b4d5c6e7f8091a2b3c4d5e6", target: "helper", targetName: "Helper", title: "复现 host-a 上的 ws 断线", brief: "在 host-a 上跑一遍 ws 重连测试，记录断线时的日志。", differences: [{ field: "sandbox", requester: "read-only", target: "workspace-write" }], claimedCaps: { sandbox: "workspace-write", networkAccess: true, unrestrictedServices: false }, claimedCapsLabel: "对端声称（仅展示，不作为审批依据）" },
+    details: { askId: "ask-pin-review", target: "helper", targetName: "Helper", title: "复现 host-a 上的 ws 断线", brief: "在 host-a 上跑一遍 ws 重连测试，记录断线时的日志。", differences: [{ field: "sandbox", requester: "read-only", target: "workspace-write" }], claimedCaps: { sandbox: "workspace-write", networkAccess: true, unrestrictedServices: false }, claimedCapsLabel: "对端声称（仅展示，不作为审批依据）" },
     requestSha256: "5d1e…", state: "pending", createdAt: iso(90),
+  },
+  // A local delegation to a wider target (modules/delegations/mock.ts ask-review, Lead → Alden): its
+  // card in Lead's conversation, the row in Alden's queue and the side detail decide it too.
+  {
+    approvalId: "apr-5e1f0a7c", kind: "ask_delivery", reason: "target_capabilities_not_subset", requesterCutexSessionId: "lead", requesterName: "Lead", projectId: "desktop",
+    summary: "委托 Lead → Alden: 构建 r208 release",
+    details: { askId: "ask-review", target: "alden", targetName: "Alden", title: "构建 r208 release", brief: "构建 r208 release。完成后简短汇报。", differences: [{ field: "sandbox", requester: "workspace-write", target: "danger-full-access" }], grants: "delivery of this one ask, once, under the target's existing permissions; each action in its turn still follows the target's approval policy" },
+    requestSha256: "77c1…", state: "pending", createdAt: iso(1500),
   },
   {
     approvalId: "apr-3b8d2e71", kind: "static_root", reason: "static_root_outside_workspace", requesterCutexSessionId: "scratch", requesterName: "scratch", projectId: null,
@@ -168,6 +176,8 @@ export const mock: ModuleMock = {
       if (!core.legacy && ["managed_service", "service_lifetime", "agent_profile", "browser_open"].includes(a.kind)) console.info(`[mock] approval notice → ${a.requesterCutexSessionId}: the owner ${decision === "approve" ? "approved" : "denied"} ${a.approvalId}`);
       // A workflow run plan: modules/workflows/mock.ts starts or rejects the run (cutex consumes the approval).
       if (a.kind === "workflow_run") (globalThis as { __cutexMockWorkflowDecision?: (id: string, approved: boolean) => void }).__cutexMockWorkflowDecision?.(a.approvalId, decision === "approve");
+      // A delegation review: modules/delegations/mock.ts queues or rejects the delegation.
+      if (a.kind === "ask_delivery" && typeof a.details?.askId === "string") (globalThis as { __cutexMockAskReview?: (askId: string, approved: boolean) => void }).__cutexMockAskReview?.(a.details.askId, decision === "approve");
       return { ok: true, approval: structuredClone(a) };
     },
   }),

@@ -11,7 +11,7 @@ const harness = vi.hoisted(() => ({
   },
 }));
 vi.mock("../src/renderer/src/modules/app", () => ({ services: { daemonFor: vi.fn(() => harness.api) } }));
-vi.mock("../src/renderer/src/store", () => ({ useApp: { getState: () => ({ hosts: { active: harness.host }, sessions: {} }) }, viewHostOf: () => harness.host }));
+vi.mock("../src/renderer/src/store", () => ({ useApp: { getState: () => ({ hosts: { active: harness.host }, sessions: {} }) }, viewHostOf: () => harness.host, viewOf: () => undefined }));
 
 
 import { sideErrorText } from "../src/renderer/src/modules/side-chat/errors";
@@ -111,6 +111,24 @@ describe("Side request identity and lifecycle", () => {
     // The failed open is not cached: a retry asks cutex again.
     harness.api.sideOpen.mockResolvedValue({ chat: chat({ id: "side-2" }) });
     await expect(openSideChat("blocked-card", "host-a", "parent-1")).resolves.toBe("side-2");
+  });
+  it("maps Claude Side refusals to readable text (docs/SIDE-CHATS.md \"Claude agents\")", () => {
+    const t = (key: string) => key;
+    const ipc = (text: string) => `Error invoking remote method 'cutex-desktop:invoke': CutexApiError: ${text}`;
+    expect(sideErrorText(ipc("side_runtime_unsupported: claude adapter lacks sideChat"), t)).toBe("side-chat.runtimeUnsupported");
+    expect(sideErrorText(ipc("side_runtime_offline: parent is not connected"), t)).toBe("side-chat.offline");
+    expect(sideErrorText(ipc("side_chat_not_found: no such side chat"), t)).toBe("side-chat.stale");
+    expect(sideErrorText(ipc("side_boundary_changed: the running turn has just started; retry in a moment"), t)).toBe("side-chat.boundaryChanged");
+    expect(sideErrorText("native_transcript_behind", t)).toBe("side-chat.boundaryChanged");
+    // Codes are matched whole: a longer code is not one of them.
+    expect(sideErrorText("side_runtime_offline_x: other", t)).toBe("side_runtime_offline_x: other");
+  });
+  it("a send to a chat lost to an adapter restart (404 side_chat_not_found) marks it stale, not an error", async () => {
+    seed();
+    harness.api.sideSend.mockRejectedValueOnce(new Error("CutexApiError: side_chat_not_found: side chat not found"));
+    await sendSide("host-a", "side-1");
+    expect(current().chat.status).toBe("stale");
+    expect(current().error).toBeNull();
   });
   it("hiding stops new polls without closing, and a late reply marks unread", async () => {
     const response = deferred<{ chat: SideChat }>();

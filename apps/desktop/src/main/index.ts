@@ -41,6 +41,8 @@ import { parseReleaseInfo } from "../shared/update";
 import type { HostBinding } from "../shared/hosts";
 import { admitHostBinding } from "./hostFence";
 import { browserHostEvent, installBrowser, syncBrowserHosts } from "./browser/install";
+import { ClientPresenceService, presenceIdentity } from "./clientPresence";
+import { RemoteCloseCountdown, type RemoteCloseView } from "../shared/remoteClose";
 
 let mainWindow: BrowserWindow | null = null;
 let pluginResources: ReturnType<typeof createPluginResourceService> | null = null;
@@ -110,6 +112,7 @@ function createDaemon(hostId: string, epoch: string): DaemonService {
       const state = payload as DaemonEvents["daemonState"];
       manager.onDaemonState(hostId, epoch, state);
       ownerAlerts.onDaemonState(hostId, state);
+      clientPresence?.onDaemonState(hostId, state);
       return sendEvent("daemonState", { ...tag, state });
     }
     if (event === "hostEvent") {
@@ -118,6 +121,8 @@ function createDaemon(hostId: string, epoch: string): DaemonService {
       ownerAlerts.onHostEvent(hostId, envelope);
       // browser_claim approvals: main may grant by policy (local page / 一直允许 / profile setting).
       browserHostEvent(hostId, envelope);
+      // client-remote-close: a close request for this desktop instance starts the countdown (main-owned).
+      clientPresence?.onHostEvent(hostId, envelope);
       return sendEvent("hostEvent", { ...tag, envelope });
     }
     sendEvent(event, { ...tag, ...(payload as object) } as DesktopEvents[typeof event]);
@@ -133,6 +138,41 @@ const ownerAlerts = new OwnerAlerts({
   openEvent: (key) => sendEvent("notifyClick", { key }),
 });
 
+/**
+ * Remote close (cutex `client-remote-close`, main/clientPresence.ts): the countdown is main's, so it
+ * runs out also when no window can show it (hidden to the tray, never created, renderer gone). Its
+ * end quits the desktop app only — the quit path (before-quit / will-quit below) stops SSH tunnels and
+ * feeds, never a cutex daemon, runtime-host or service.
+ */
+const remoteClose = new RemoteCloseCountdown({
+  now: () => Date.now(),
+  setTimer: (run, ms) => setTimeout(run, ms),
+  clearTimer: (handle) => clearTimeout(handle as NodeJS.Timeout),
+  report: (hostId, instanceId, outcome) => clientPresence?.report(hostId, instanceId, outcome) ?? Promise.resolve(),
+  quit: () => desktopShell.quit(),
+  onChange: (view) => {
+    sendEvent("remoteClose", { view });
+    if (view && !view.closing) revealForRemoteClose();
+  },
+});
+
+/** The countdown must be seen to be cancelled: a hidden / minimised window comes up (without taking focus). */
+function revealForRemoteClose(): void {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  if (!win.isVisible()) win.showInactive();
+  if (!win.isFocused()) win.flashFrame(true);
+}
+
+/** Created after app ready (userData for the install id). */
+let clientPresence: ClientPresenceService | null = null;
+desktopShell.onAllowRemoteCloseChanged = (allowed) => {
+  clientPresence?.resendAll();
+  // Switched off while a countdown runs: the desktop stays (the hosts hear `cancelled`).
+  if (!allowed && remoteClose.view()) void remoteClose.cancel();
+};
+
 // Desktop notifications the renderer's notifications module raises (shell op `notify`).
 const desktopNotifications = new DesktopNotifications(desktopShell, (key) => sendEvent("notifyClick", { key }));
 
@@ -146,6 +186,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "sshConfigHosts",
   "addSshHost",
   "pairSshHost",
+  "setSshConnectAs",
   "updateSshHost",
   "removeSshHost",
   "switchHost",
@@ -223,6 +264,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "createProfile",
   "profilePresets",
   "duplicateProfile",
+  "ccSwitchImportList",
+  "ccSwitchImport",
   "deleteProfile",
   "readRateLimits",
   "windowsSandboxReadiness",
@@ -327,6 +370,9 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "upgradeRun",
   "patchUpgradeSettings",
   "hostServiceInfo",
+  "hostOwner",
+  "setOwnerPerson",
+  "clearOwnerPerson",
   "components",
   "componentAction",
   "askCommand",
@@ -370,6 +416,11 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "clientTokens",
   "revokeClientToken",
   "renameClientToken",
+  "updateClientToken",
+  "ownerNewDevices",
+  "ackOwnerNewDevice",
+  "onlineClients",
+  "closeOnlineClient",
   "resetModel",
   "deleteModel",
   "patchModel",
@@ -481,6 +532,14 @@ ipcMain.handle(SHELL_CHANNEL, (event, request: ShellRequest) => {
     case "quit":
       desktopShell.quit();
       return;
+    case "setAllowRemoteClose":
+      if (typeof request.value !== "boolean") throw new Error("bad value");
+      return desktopShell.setAllowRemoteClose(request.value);
+    case "remoteClose":
+      return remoteClose.view() satisfies RemoteCloseView | null;
+    case "answerRemoteClose":
+      if (request.action !== "cancel" && request.action !== "now") throw new Error("bad action");
+      return remoteClose.answer(request.action);
     case "rendererReady":
       updater.confirmReady();
       return;
@@ -804,12 +863,22 @@ app.whenReady().then(async () => {
   const personIdentity = new PersonIdentityService(join(app.getPath("userData"), "identity"), (view) => sendEvent("identityState", view), () => mainWindow, () => hosts?.claimTargets() ?? []);
   identity = personIdentity;
   const localProbe = { home: process.env.CUTEX_DESKTOP_HOME || undefined, baseUrl: process.env.CUTEX_MANAGEMENT_URL || undefined };
+  clientPresence = new ClientPresenceService({
+    daemonFor: (hostId) => hosts?.connection(hostId)?.daemon ?? null,
+    allowRemoteClose: () => desktopShell.allowRemoteClose,
+    identity: () => presenceIdentity(join(app.getPath("userData"), "client-install.json"), app.getVersion(), process.platform),
+    onCloseRequested: (hostId, request) => void remoteClose.request(hostId, request),
+  });
   hosts = new HostManager(sendEvent, createDaemon, {
     identity: personIdentity,
     ...localProbe,
     // macOS is front-end only: no implicit local host unless a local cutex is configured (main/localHost.ts).
     localHost: hasImplicitLocalHost(process.platform, localCutexConfigured(localProbe)),
-    onDisconnect: (hostId) => ownerAlerts.forgetHost(hostId),
+    onDisconnect: (hostId) => {
+      ownerAlerts.forgetHost(hostId);
+      clientPresence?.forgetHost(hostId);
+      remoteClose.forgetHost(hostId);
+    },
     onSshPrompts: (prompts) => sendEvent("sshPrompts", { prompts }),
   });
   // Dev only: sample big alerts without a daemon (screenshots).
@@ -828,6 +897,8 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   if (!primaryInstance) return;
   // Synchronous kill: no ssh tunnel may outlive the app (every connection: tunnels, feeds, daemons).
+  // "daemons" = this app's DaemonService connections (HTTP feeds); cutex itself keeps running.
+  clientPresence?.stop();
   hosts?.stop();
 });
 app.on("will-quit", (event) => {
@@ -838,5 +909,6 @@ app.on("will-quit", (event) => {
     return;
   }
   ownerAlerts.dispose();
+  remoteClose.dispose();
   desktopShell.dispose();
 });

@@ -9,7 +9,8 @@ import { apiFor } from "../bridge";
 import { closePeek } from "../lib/peekStore";
 import { checkRefContributions, parseRef } from "../lib/refs";
 import { refsHere, refsOpen, timelineFocusTurn } from "../lib/refServices";
-import { closeSideInstances, sideList, sideOpen, sideOpenHeld, sideReleaseHold, sideReveal } from "../lib/sideServices";
+import { closeSideInstances, sideList, sideOpenHeld, sideReleaseHold, sideReveal } from "../lib/sideServices";
+import { panesOpen, sideOpenAlias } from "../lib/paneServices";
 import { checkStatusContributions } from "../lib/statusSurfaces";
 import { useApp } from "../store";
 import { pinFlippedDefaults } from "./defaultFlips";
@@ -49,8 +50,12 @@ export const services: ModuleServices = {
     closePage: () => useApp.getState().closePage(),
     customize: (region) => useApp.getState().openCustomize(region),
   },
+  // v1.17 (§24.5): any pane kind; services.side.open stays as its alias for tool kinds.
+  panes: {
+    open: (kind, params, opts) => panesOpen(kind, params, opts),
+  },
   side: {
-    open: (kind, params, opts) => sideOpen(kind, params, opts),
+    open: (kind, params, opts) => sideOpenAlias(kind, params, opts),
     reveal: (target) => sideReveal(target),
     close: (instanceId) => void closeSideInstances([instanceId]),
     closePeek: () => closePeek(),
@@ -112,6 +117,7 @@ export function startAppModules(modules: readonly AppModule[]): AppModuleHost {
           customize: guard.write(services.ui.customize),
         },
         // Calls after the module stopped are refused (read: throws AbortError; write: no-op).
+        panes: { open: guard.read(services.panes.open) },
         side: {
           open: guard.read(services.side.open),
           reveal: guard.read(services.side.reveal),

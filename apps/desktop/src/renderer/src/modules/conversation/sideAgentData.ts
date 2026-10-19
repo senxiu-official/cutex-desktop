@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import type { SideAgentParams } from "../../lib/sideKinds";
-import { agentHost, sidebarOf, useApp } from "../../store";
+import { agentHost, sidebarOf, useApp, viewOf } from "../../store";
+import { conversationPanes, paneShowing } from "../../lib/paneLayout";
+import { usePanes } from "../../lib/paneStore";
+import { viewKey } from "../../lib/viewKey";
 import type { Json } from "../types";
 import type { SideTabInfo, SideTabProps } from "../slots";
 
@@ -23,9 +26,13 @@ export function useAgentResource(hostId: string, sessionId: string): SessionReso
   });
 }
 
-/** The agent is the main area's agent right now (the side tab then shows a placeholder). */
+/**
+ * The agent is shown in the main area right now — the focused conversation or another conversation
+ * pane on screen (panes step 2) — so the side tab shows a placeholder.
+ */
 export function useInMain(hostId: string, sessionId: string): boolean {
-  return useApp((s) => s.selectedId === sessionId && agentHost(s) === hostId && s.view.kind === "conversation");
+  const inPane = usePanes((p) => conversationPanes(p.layout).length > 1 && paneShowing(p.layout, hostId, sessionId) !== null);
+  return useApp((s) => s.view.kind === "conversation" && ((s.selectedId === sessionId && agentHost(s) === hostId) || inPane));
 }
 
 /** Tab / card title = the agent's name; busy while it runs; its pending approvals / questions as attention. */
@@ -33,7 +40,7 @@ export function useSideAgentTab({ instance, hostId }: SideTabProps<SideAgentPara
   const host = useApp((s) => hostId ?? s.hosts?.active ?? "local");
   const id = instance.state.sessionId;
   const resource = useAgentResource(host, id);
-  const view = useApp((s) => (s.sideAgents[id]?.hostId === host || (s.selectedId === id && agentHost(s) === host) ? s.sessions[id] : undefined));
+  const view = useApp((s) => (s.views[viewKey(host, id)] || (s.selectedId === id && agentHost(s) === host) ? viewOf(s, host, id) : undefined));
   const name = resource?.displayName ?? id;
   const busy = !!(view ? view.timeline.activeTurnId : resource?.runtime.activeTurnId);
   const attention = view?.timeline.pending.size ?? 0;

@@ -17,14 +17,13 @@ import {
   DEFAULT_SIDE_COMPONENTS,
   DIFF_COMPONENT,
   PREVIEW_COMPONENT,
-  SIDE_AGENT_COMPONENT,
   SUBAGENT_THREAD_COMPONENT,
   type DiffParams,
   type PreviewParams,
-  type SideAgentParams,
   type SubagentThreadParams,
 } from "./sideKinds";
-import { sideOpen, sideShowsHost } from "./sideServices";
+import { openAgentBeside } from "./paneStore";
+import { sideOpen } from "./sideServices";
 
 /** services.side.open + a notice when it cannot open (unknown / off / capability / agent …). */
 export function openSide(kind: ItemId, params: Json = null, opts: SideOpenOptions = {}): SideOpenResult {
@@ -103,14 +102,11 @@ export function toggleSideColumn(): void {
 }
 
 /**
- * Another agent's live conversation in the side area (agent menu 「在侧边打开」, middle / Ctrl(⌘)-click on a
- * sidebar row). The side area shows the open agent's host only: an agent of another host opens in the
- * main area instead. `background`: open without taking the view (the card / page button flashes).
+ * Another agent's live conversation beside the focused one (agent menu 「在侧边打开」, ＋ ▸ 智能体): v1.17
+ * (§24.4) the v1.16 side agent card is a conversation pane — a column beside the focused conversation
+ * (lib/paneStore openAgentBeside, as Ctrl/⌘ + click on a sidebar row). `background`: the focus stays.
  */
 export function openAgentSide(sessionId: string, hostId: string, background = false): SideOpenResult | null {
-  if (!sideShowsHost(hostId)) {
-    void useApp.getState().openAgent(sessionId, hostId);
-    return null;
-  }
-  return openSide(SIDE_AGENT_COMPONENT, { sessionId } satisfies SideAgentParams, { binding: { kind: "host", hostId }, pin: true, ...(background ? { background: true } : {}) });
+  openAgentBeside(hostId, sessionId, { focus: !background });
+  return null;
 }

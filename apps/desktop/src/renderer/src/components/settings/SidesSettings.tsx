@@ -74,7 +74,7 @@ function DefaultsTable() {
               width="w-36"
               label={t(item.titleKey)}
               value={home}
-              options={homes.map((h) => ({ value: h, label: h === declared ? t("shell.sides.defaults.declared", { group: homeLabel(h) }) : homeLabel(h) }))}
+              options={homes.map((h) => ({ value: h, label: homeLabel(h) }))}
               onChange={(v) => setHome(item.id, v, declared)}
             />
           </div>
@@ -114,7 +114,7 @@ export function SidesPage() {
   const ui = useUiPrefs();
   const keepHidden = clampSetting(ui.sideKeepHidden, KEEP_HIDDEN_RANGE, KEEP_HIDDEN_DEFAULT);
   const keepMounted = clampSetting(ui.sideKeepMounted, KEEP_MOUNTED_RANGE, KEEP_MOUNTED_DEFAULT);
-  const choice = <K extends "sideMode" | "sidePageBar" | "sidePillAnchor" | "sideLaneWhenHidden" | "sideCurrentPageClick" | "sideNarrow" | "peekTarget">(key: K, values: readonly string[], prefix: string) => (
+  const choice = <K extends "sideMode" | "sideNarrow" | "peekTarget">(key: K, values: readonly string[], prefix: string) => (
     <Segmented
       value={ui[key] as string}
       options={values.map((v) => ({ value: v, label: t(`${prefix}.${v}` as MessageKey) }))}
@@ -128,18 +128,8 @@ export function SidesPage() {
         <SettingRow label={t("shell.sides.mode")} hint={t("shell.sides.modeHint")}>
           {choice("sideMode", ["push", "yield", "float"], "shell.sides.mode")}
         </SettingRow>
-        <SettingRow label={t("side.pageBar")} hint={t("side.pageBarHint")}>
-          {choice("sidePageBar", ["lane", "tabs"], "side.pageBar")}
-        </SettingRow>
-        <SettingRow label={t("shell.sides.pillAnchor")} hint={t("shell.sides.pillAnchorHint")}>
-          {choice("sidePillAnchor", ["top", "center", "bottom"], "shell.sides.pillAnchor")}
-        </SettingRow>
-        <SettingRow label={t("shell.sides.laneWhenHidden")} hint={t("shell.sides.laneWhenHiddenHint")}>
-          {choice("sideLaneWhenHidden", ["keep", "hide"], "shell.sides.laneWhenHidden")}
-        </SettingRow>
-        <SettingRow label={t("shell.sides.currentPageClick")} hint={t("shell.sides.currentPageClickHint")}>
-          {choice("sideCurrentPageClick", ["stay", "collapse"], "shell.sides.currentPageClick")}
-        </SettingRow>
+        {/* v1.17 (§24): no page buttons any more (every tool column is on screen) — 右栏布局 / 页按钮位置 /
+            右栏收起时 / 点击当前页图标 are gone from here; their stored prefs are left alone. */}
         <SettingRow label={t("shell.sides.narrow")} hint={t("shell.sides.narrowHint")}>
           {choice("sideNarrow", ["overlay", "auto-collapse"], "shell.sides.narrow")}
         </SettingRow>

@@ -102,7 +102,7 @@ export function BrowserSettings() {
   // agent permissions (the host pages' picker; never the focus host in its place).
   return <><SettingsDevicePart title={t("browser.part.device")} hint={t("browser.part.deviceHint")}><Section title={t("browser.settings")} hint={t("browser.owner.settingsHint")} source="local"
     actions={<ResetButton onClick={() => save(DEFAULT_BROWSER_CONTROL_SETTINGS)} title={t("browser.settingsReset")} />}>
-    <SettingRow label={t("browser.hiddenTarget")} hint={t("browser.hiddenTargetHint")}>
+    <SettingRow label={t("browser.hiddenTarget")} hint={t("browser.hiddenTargetHint")} reset={<ResetButton disabled={settings.hiddenTarget === DEFAULT_BROWSER_CONTROL_SETTINGS.hiddenTarget} onClick={() => save({ ...settings, hiddenTarget: DEFAULT_BROWSER_CONTROL_SETTINGS.hiddenTarget })} />}>
       <Select value={settings.hiddenTarget} label={t("browser.hiddenTarget")} options={[
         { value: "reveal", label: t("browser.hiddenReveal") }, { value: "reject", label: t("browser.hiddenReject") },
       ]} onChange={(hiddenTarget) => save({ ...settings, hiddenTarget })} />

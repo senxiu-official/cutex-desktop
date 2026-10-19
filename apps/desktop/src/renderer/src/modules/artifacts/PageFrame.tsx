@@ -11,7 +11,8 @@ import { useI18n } from "../../i18n";
 
 export type PageProblem = ArtifactPageRefusal | "unavailable" | "failed" | "navigated";
 
-export function PageFrame({ hostId, artifactId, version, title, onProblem }: { hostId: string; artifactId: string; version: number; title: string; onProblem?(problem: PageProblem): void }) {
+/** `large`: the owner chose to show a page over ARTIFACT_PAGE_PROMPT_BYTES (main reads it in windows). */
+export function PageFrame({ hostId, artifactId, version, title, large = false, onProblem }: { hostId: string; artifactId: string; version: number; title: string; large?: boolean; onProblem?(problem: PageProblem): void }) {
   const { t } = useI18n();
   const box = useRef<HTMLDivElement>(null);
   const [navigated, setNavigated] = useState(false);
@@ -36,7 +37,7 @@ export function PageFrame({ hostId, artifactId, version, title, onProblem }: { h
       frame.remove();
       setNavigated(true);
     });
-    void frames.prepareArtifactPage({ hostId, artifactId, version }).then(
+    void frames.prepareArtifactPage({ hostId, artifactId, version, ...(large ? { large } : {}) }).then(
       (result) => {
         if (result.ok) release = () => void frames.release(result.frame.id).catch(() => {});
         if (!live) return release?.();
@@ -52,7 +53,7 @@ export function PageFrame({ hostId, artifactId, version, title, onProblem }: { h
       frame.remove();
       release?.();
     };
-  }, [hostId, artifactId, version, title, mount]);
+  }, [hostId, artifactId, version, title, large, mount]);
   return (
     <div className="relative min-h-72 flex-1">
       <div ref={box} className="absolute inset-0" />

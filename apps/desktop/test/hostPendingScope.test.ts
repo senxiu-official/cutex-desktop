@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import type { HostsState, ExtraInput } from "../src/shared/ipc";
 import type { SessionView } from "../src/renderer/src/store";
 import { emptyTimeline } from "../src/renderer/src/lib/timeline";
+import { viewKey } from "../src/renderer/src/lib/viewKey";
 const mock = vi.hoisted(() => ({
   listeners: new Map<string, (value: unknown) => void>(),
   api: {
@@ -120,11 +121,11 @@ function seed() {
   store.setState({
     selectedId: "same",
     sessions: {
-      same: view
+      [viewKey("local", "same")]: view
     },
     features: new Set(["queue-pause"]),
     pendingSteers: {
-      same: [{
+      [viewKey("local", "same")]: [{
         id: "steer-a",
         text: "accepted steer",
         turnId: "turn-a",
@@ -140,7 +141,7 @@ function sentinel() {
     pendingSteers: {},
     outbox: {},
     queueHandoff: {
-      same: true
+      [viewKey("local", "same")]: true
     }
   });
   return store.getState();
@@ -213,7 +214,7 @@ describe("pending operations retain their host and run", () => {
     mock.api.submit.mockReturnValue(sent.promise);
     store.setState({
       pendingSteers: {
-        same: [{
+        [viewKey("local", "same")]: [{
           id: "old",
           text: "A private",
           extra: extras,
@@ -267,7 +268,7 @@ describe("pending operations retain their host and run", () => {
     mock.api.submit.mockRejectedValue(Error("offline"));
     store.setState({
       pendingSteers: {
-        same: [{
+        [viewKey("local", "same")]: [{
           id: "old",
           text: "A private",
           extra: extras,
@@ -279,8 +280,8 @@ describe("pending operations retain their host and run", () => {
       }
     });
     await store.getState().resendSteer("old");
-    expect(store.getState().pendingSteers.same?.[0]?.extra).toEqual(extras);
-    expect(store.getState().pendingSteers.same?.[0]?.state).toBe("undelivered");
+    expect(store.getState().pendingSteers[viewKey("local", "same")]?.[0]?.extra).toEqual(extras);
+    expect(store.getState().pendingSteers[viewKey("local", "same")]?.[0]?.state).toBe("undelivered");
     expect(mock.api.submit).toHaveBeenCalledWith("same", "A private", "auto", false, {
       extra: extras,
       clientUserMessageId: "old"
@@ -291,7 +292,7 @@ describe("pending operations retain their host and run", () => {
     mock.api.submit.mockReturnValue(sent.promise);
     store.setState({
       pendingSteers: {
-        same: [{
+        [viewKey("local", "same")]: [{
           id: "old",
           text: "A private",
           turnId: "turn-a",
@@ -478,7 +479,7 @@ describe("pending operations retain their host and run", () => {
     seed();
     store.setState({
       collabModes: {
-        same: [{
+        [viewKey("local", "same")]: [{
           name: "Plan",
           mode: "plan",
           model: "B-model",
@@ -527,13 +528,13 @@ describe("pending operations retain their host and run", () => {
     });
     switchHost("remote");
     seed();
-    const previous = store.getState().sessions.same;
+    const previous = store.getState().sessions[viewKey("local", "same")];
     goal.resolve({
       objective: "A",
       status: "active"
     });
     await operation;
-    expect(store.getState().sessions.same).toBe(previous);
+    expect(store.getState().sessions[viewKey("local", "same")]).toBe(previous);
     expect(previous!.timeline.goal).toBeNull();
   });
   it("actual settings rejection leaves new-host same-ID view and notice untouched", async () => {
@@ -547,7 +548,7 @@ describe("pending operations retain their host and run", () => {
     const previous = store.getState();
     update.reject(Error("host switched"));
     expect(await operation).toBe(false);
-    expect(store.getState().sessions.same).toBe(previous.sessions.same);
+    expect(store.getState().sessions[viewKey("local", "same")]).toBe(previous.sessions[viewKey("local", "same")]);
     expect(store.getState().notice).toBe(previous.notice);
   });
   it("actual helpers still set Plan and goal on the current host", async () => {
@@ -571,17 +572,17 @@ describe("pending operations retain their host and run", () => {
     await store.getState().setGoal({
       objective: "current"
     });
-    expect(store.getState().sessions.same!.timeline.goal?.objective).toBe("current");
+    expect(store.getState().sessions[viewKey("local", "same")]!.timeline.goal?.objective).toBe("current");
   });
   it("rolls back same-host rejected settings after the optimistic view replacement", async () => {
-    const previous = store.getState().sessions.same!.timeline.settings;
+    const previous = store.getState().sessions[viewKey("local", "same")]!.timeline.settings;
     mock.api.updateThreadSettings.mockRejectedValue(Error("normal failure"));
     expect(await store.getState().updateSettings({
       model: "bad"
     })).toBe(false);
-    expect(store.getState().sessions.same!.timeline.settings).toBe(previous);
+    expect(store.getState().sessions[viewKey("local", "same")]!.timeline.settings).toBe(previous);
     // A refused settings change is a notice, not the conversation's load error (owner 2026-10-18).
-    expect(store.getState().sessions.same!.error ?? null).toBeNull();
+    expect(store.getState().sessions[viewKey("local", "same")]!.error ?? null).toBeNull();
     expect(store.getState().notice).toMatchObject({ tone: "error", text: expect.stringContaining("normal failure") });
   });
   it("keeps a same-thread goal reply when normal streaming replaces the view wrapper", async () => {
@@ -590,10 +591,10 @@ describe("pending operations retain their host and run", () => {
     const operation = store.getState().setGoal({
       objective: "current"
     });
-    const view = store.getState().sessions.same!;
+    const view = store.getState().sessions[viewKey("local", "same")]!;
     store.setState({
       sessions: {
-        same: {
+        [viewKey("local", "same")]: {
           ...view,
           version: view.version + 1
         }
@@ -604,7 +605,7 @@ describe("pending operations retain their host and run", () => {
       status: "active"
     });
     await operation;
-    expect(store.getState().sessions.same!.timeline.goal?.objective).toBe("current");
+    expect(store.getState().sessions[viewKey("local", "same")]!.timeline.goal?.objective).toBe("current");
   });
   it("actual select bootstrap rejection cannot set error on a new-host same-ID view", async () => {
     const boot = deferred<never>();
@@ -615,10 +616,10 @@ describe("pending operations retain their host and run", () => {
     const operation = store.getState().select("same");
     switchHost("remote");
     seed();
-    const previous = store.getState().sessions.same;
+    const previous = store.getState().sessions[viewKey("local", "same")];
     boot.reject(Error("host switched"));
     await operation;
-    expect(store.getState().sessions.same).toBe(previous);
+    expect(store.getState().sessions[viewKey("local", "same")]).toBe(previous);
   });
   it("actual select cannot start fallback history on the new host after old bootstrap", async () => {
     const boot = deferred<unknown>();

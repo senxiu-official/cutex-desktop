@@ -1,13 +1,14 @@
 // Right-side menus (docs/desktop-modules.md §18.7): tab, card and page menus, the title bar's ＋ and
 // the launcher lists. The menu way to every user override (移到页 / 移到新页面 / 拆到新卡片 / 合并到 /
 // 恢复默认位置 / 重置右栏布局) — drag and drop (P1b) runs the same reducers. Shell code: no feature names.
-import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, Combine, Expand, Layers, Maximize2, Pencil, Pin, PinOff, Plus, RotateCcw, Split, X } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, Bot, ChevronDown, Combine, Expand, Layers, Maximize2, Pencil, Pin, PinOff, Plus, RotateCcw, Split, X } from "lucide-react";
 import { translate } from "../i18n";
 import type { ItemId, Json } from "../modules/types";
 import type { SideComponentItem } from "../modules/slots";
 import { closeWarnings, sideReveal } from "./sideServices";
 import { promptDialog, type MenuAction, type MenuEntry } from "./contextMenu";
-import { openSide } from "./sideOpen";
+import { openAgentSide, openSide } from "./sideOpen";
+import { buildSidebar, type AgentRow } from "./sidebar";
 import {
   cardCloseWarnings,
   cardName,
@@ -51,6 +52,7 @@ import {
   setCollapsed,
   shownTab,
   splitInstance,
+  switchPage,
   visibleCards,
   visibleTabs,
   type MoveTarget,
@@ -147,9 +149,16 @@ export function newTabInCard(cardId: string): void {
   openSide(inst.kind, params, { page: at.page.id, binding: inst.binding, focus: true, reveal: true });
 }
 
-/** The page a launcher works on: the page in view, or the one the closed column would show. */
+/** The column a launcher works on: the focused tool column, or the one the hidden tool area would show. */
 function launcherPage(): SidePage | null {
   return pageInView(useSide.getState().layout, sideViewNow());
+}
+
+/** v1.17 (§24): every tool column is on screen — the column with a visible pane of `kind`, else the focused one. */
+function launcherPageFor(kind: ItemId): SidePage | null {
+  const { layout } = useSide.getState();
+  const ctx = sideViewNow();
+  return lanePages(layout, ctx).find((p) => visibleCards(layout, p, ctx).some((c) => c.kind === kind)) ?? launcherPage();
 }
 
 /** The most recently used instance of `kind` the current agent can see, outside `page`. */
@@ -182,8 +191,11 @@ export function pressLauncher(kind: ItemId, mods: OpenModifiers = PLAIN_OPEN): v
   const entry = sideRegistry().get(kind);
   const launcher = entry?.item.launcher;
   if (!entry || !launcher) return;
+  // v1.17 (§24): every tool column is on screen — the column holding a visible pane of this kind becomes
+  // the focused one, and the same-column rule applies there (collapsed → expand, visible → focus + flash).
+  const page = launcherPageFor(kind);
+  if (page && useSide.getState().layout.open && page.id !== useSide.getState().layout.activePage && cardOnPage(page, kind)) updateLayout((l) => switchPage(l, page.id));
   const s = useSide.getState();
-  const page = launcherPage();
   const card = cardOnPage(page, kind);
   const action = launcherClickAction({
     newInstance,
@@ -249,6 +261,34 @@ function pinToggle(item: Launchable, pinned: boolean): MenuAction["toggle"] {
 }
 
 /**
+ * ＋ ▸ 智能体: the focus host's agents (online ones by project, then 未在线 ▸), each opened in the side area
+ * beside the open agent (lib/sideOpen openAgentSide; the same as Ctrl/⌘-click in the sidebar). The agent
+ * open in the main area is left out.
+ */
+export function agentsSubmenu(): MenuEntry[] {
+  const { sidebar, hosts, selectedId } = useApp.getState();
+  const hostId = hosts?.active ?? "local";
+  if (!sidebar) return [title(translate("side.agentsNone"))];
+  const { groups } = buildSidebar(sidebar, { hostId });
+  const row = (r: AgentRow): MenuAction => ({ label: r.name, onSelect: () => void openAgentSide(r.id, hostId) });
+  const shown = (rows: AgentRow[]) => rows.filter((r) => r.id !== selectedId);
+  const online: MenuEntry[] = [];
+  for (const g of groups) {
+    const rows = shown(g.online);
+    if (!rows.length) continue;
+    if (online.length) online.push("separator");
+    online.push(title(g.kind === "project" ? g.name : translate("titlebar.independent")), ...rows.map(row));
+  }
+  const offline = groups.flatMap((g) => shown(g.offline));
+  if (!online.length && !offline.length) return [title(translate("side.agentsNone"))];
+  return [
+    ...online,
+    offline.length > 0 && "separator",
+    offline.length > 0 && { label: translate("side.agentsOffline", { n: offline.length }), onSelect: () => {}, submenu: offline.map(row) },
+  ];
+}
+
+/**
  * Title bar ＋ (the launcher menu): every launchable component (pinned first, by order; each with a pin
  * toggle), 「新…」 for multi-instance ones, 新页面, and the page in view's actions (最大化 / 全屏 / 钉住 / 页菜单).
  */
@@ -273,6 +313,7 @@ export function launcherMenu(): MenuEntry[] {
     ...statuses.map((i) => row(i, false)),
     "separator",
     ...fresh.map((i) => ({ label: newLabel(i.label), icon: <Plus size={ICON} />, hint: newHint(), onSelect: () => pressLauncher(i.kind, NEW_SHOWN) })),
+    { label: translate("side.agents"), icon: <Bot size={ICON} />, onSelect: () => {}, submenu: agentsSubmenu() },
     "separator",
     { label: translate("side.newPage"), icon: <Layers size={ICON} />, hint: "Ctrl+Shift+N", onSelect: newPage },
     page && {

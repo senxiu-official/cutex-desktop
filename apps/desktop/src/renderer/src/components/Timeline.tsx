@@ -29,7 +29,8 @@ import { OlderHistoryRow } from "./OlderHistoryRow";
 import { reasoningPreview } from "../lib/reasoning";
 import { liveReasoning, turnActivity } from "../lib/turnActivity";
 import { nextProgressAt, silentGapSeconds, turnProgressMark } from "../lib/silentGap";
-import { agentHost, selectedFeatures, useApp } from "../store";
+import { agentState, useApp } from "../store";
+import { convNotify, useConvFeatures, useConvHost, useConvScope, useConvView } from "../lib/conversationScope";
 import { CodeBlockScope } from "../lib/codeBlockScope";
 import { isArchived } from "../lib/archivedAgent";
 import { viewRow } from "../lib/viewHost";
@@ -130,10 +131,10 @@ const NO_ITEMS: string[] = [];
 function TurnTail({ timeline, sessionId }: { timeline: TimelineState; sessionId: string }) {
   const { t } = useI18n();
   const { reasoningView } = useUiPrefs();
-  const background = useApp((s) => s.backgroundItems[sessionId] ?? NO_ITEMS);
+  const { tools, hostId } = useTimelineContext();
+  const background = useApp((s) => agentState(s.backgroundItems, hostId, sessionId) ?? NO_ITEMS);
   const turn = timeline.turns.find((x) => x.id === timeline.activeTurnId);
   const now = useNow(!!turn);
-  const { tools } = useTimelineContext();
   const activity = turnActivity(timeline, background, (item) => toolRendererFor(item, tools)?.item.activity?.(item) ?? null);
   // When the turn last showed progress (lib/silentGap): a mark change restarts the quiet clock.
   const progress = useRef<{ mark: string | null; at: number } | null>(null);
@@ -279,8 +280,8 @@ const MemoEntry = memo(Entry, (a, b) => a.entry === b.entry && a.pending === b.p
  * Archived agents' history is read-only: no scope there.
  */
 function ReplyMarkdown({ sessionId, text, streaming }: { sessionId: string; text: string; streaming: boolean }) {
-  const hostId = useApp(agentHost);
-  const archived = useApp((s) => isArchived(viewRow(s, sessionId)));
+  const hostId = useConvHost();
+  const archived = useApp((s) => isArchived(viewRow(s, hostId, sessionId)));
   const scope = useMemo(() => (archived ? null : { sessionId, hostId }), [archived, sessionId, hostId]);
   return (
     <CodeBlockScope.Provider value={scope}>
@@ -300,14 +301,14 @@ function Entry({ entry, pending, nameOf, sessionId, readOnly, actionable, bar, d
   const { t } = useI18n();
   const fold = useMessageFold(sessionId, entry.id, foldRole);
   // Claude agents without history revert (features.historyRevert = false) get no edit & resend / revert.
-  const { agent } = useTimelineContext();
-  const canRevert = useApp((s) => selectedFeatures(s).has(SESSION_FEATURES.revert)) && !readOnly && !lacks(agent, "historyRevert");
+  const { agent, hostId } = useTimelineContext();
+  const canRevert = useConvFeatures().has(SESSION_FEATURES.revert) && !readOnly && !lacks(agent, "historyRevert");
   // A busy Claude agent refuses it (lib/structuralGate): disabled with the reason (the menu checks on open).
-  const block = useStructuralBlock(sessionId, agent);
+  const block = useStructuralBlock(sessionId, agent, "revert");
   // + the modules' `ref.action` items for the turn (§19.8) on the owner's / the agent's messages.
   const menu = (kind: "user" | "agent" | "received" | "sent", text: string) =>
     contextMenu(() => [
-      ...messageMenu({ sessionId, kind, text, turnId: entry.turnId ?? null, nextTurnId: bar?.nextTurnId ?? null, laterTurns: bar?.laterTurns ?? 0, fold: kind === "user" || kind === "agent" ? foldAction(fold) : null }, t, canRevert),
+      ...messageMenu({ sessionId, hostId, kind, text, turnId: entry.turnId ?? null, nextTurnId: bar?.nextTurnId ?? null, laterTurns: bar?.laterTurns ?? 0, fold: kind === "user" || kind === "agent" ? foldAction(fold) : null }, t, canRevert),
       ...(!readOnly && entry.turnId && (kind === "user" || kind === "agent") ? refActionEntries(turnRefNow(sessionId, entry.turnId, text), true) : []),
     ]);
   switch (entry.kind) {
@@ -394,13 +395,15 @@ function Entry({ entry, pending, nameOf, sessionId, readOnly, actionable, bar, d
  */
 export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf, readOnly = false, ownerNotes = !readOnly, older = null, onLoadOlder, pendingSends = false, onRelease }: { timeline: TimelineState; entries: TimelineEntry[]; sessionId: string; nameOf: (id: string) => string; readOnly?: boolean; /** The agent's owner-notify cards (default: not in read-only views). The side agent view is read-only for row actions but keeps them: a card is where the owner answers the agent. */ ownerNotes?: boolean; /** History pages still on the host (lib/historyPages). */ older?: OlderHistory | null; onLoadOlder?: () => void; /** Show the user's sends not in the thread yet (lib/outbox placement "turn"): placed by timelineTail, never below the live line, keyed like the message that replaces them. */ pendingSends?: boolean; /** Let go of stick-to-bottom (a focus request scrolls up to a turn). */ onRelease?: () => void }) {
   const { t } = useI18n();
+  const conv = useConvScope();
   const { reasoningView, timelineTurns, timelineInteractions } = useUiPrefs();
   // Host, agent features and renderers once per timeline, shared by every row (TimelineViewContext).
   const view = useTimelineView(sessionId);
   const tools = view.tools;
   // owner-notify: the agent's messages to the owner, placed among its turns (not in sub-agent views;
   // the side agent view keeps them).
-  const ownerNotify = useApp((s) => ownerNotes && selectedFeatures(s).has(OWNER_NOTIFY_FEATURE));
+  const features = useConvFeatures();
+  const ownerNotify = ownerNotes && features.has(OWNER_NOTIFY_FEATURE);
   const notesById = useHostOwnerNotes(view.hostId);
   const notes = useMemo(() => (ownerNotify ? recordsOf(notesById, sessionId) : []), [ownerNotify, notesById, sessionId]);
   // Long histories render only the latest turns (Settings → 通用 → 长对话); 显示更早 adds more.
@@ -417,9 +420,9 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
   const replied = handlerReplies(entries, timeline.turns);
   // focusTurn / focusDelegation (lib/focusRequest): widen the window to the target, then scroll + flash.
   const request = useFocusRequest((s) => (!readOnly && s.request?.sessionId === sessionId ? s.request : null));
-  const loading = useApp((s) => s.sessions[sessionId]?.loading ?? false);
+  const loading = useConvView(sessionId, (v) => v?.loading ?? false);
   // The session view's failed load gates the opening too (below); TimelineBody's own error row is Conversation's.
-  const failed = useApp((s) => !!s.sessions[sessionId]?.error);
+  const failed = useConvView(sessionId, (v) => !!v?.error);
   // Older pages this focus request has fetched (a target before every loaded turn pages history in).
   const paged = useRef({ nonce: 0, pages: 0 });
   useEffect(() => {
@@ -427,7 +430,7 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
     const miss = (key: MessageKey) => {
       clearFocusRequest(request.nonce);
       if (request.onDone) request.onDone(false);
-      else useApp.getState().notify(t(key));
+      else convNotify(conv, t(key));
     };
     let turnId = request.turnId ?? null;
     const note = request.notificationId ? notesById[request.notificationId] : undefined;
@@ -531,10 +534,10 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
     ...(turnErrors.get(i)?.map((turn) => <TurnErrorRow key={`error-${turn.id}`} turn={turn} />) ?? []),
     ...(turnStops.get(i)?.map((turn) => <TurnInterruptedRow key={`stopped-${turn.id}`} />) ?? []),
   ];
-  const noteCards = (list: readonly { notificationId: string }[] | undefined) => list?.map((r) => <OwnerNotifyCard key={r.notificationId} notificationId={r.notificationId} sessionId={sessionId} />);
+  const noteCards = (list: readonly { notificationId: string }[] | undefined) => list?.map((r) => <OwnerNotifyCard key={r.notificationId} notificationId={r.notificationId} sessionId={sessionId} hostId={view.hostId} />);
   // The user's pending sends: same row component and key (lib/outbox sendRowKey) as the timeline's
   // user message that replaces them, in the same flat list, so the handoff is a prop change.
-  const outbox = useApp((s) => (pendingSends ? s.outbox[sessionId] : undefined));
+  const outbox = useApp((s) => (pendingSends ? agentState(s.outbox, view.hostId, sessionId) : undefined));
   const pendingRows = pendingSends ? pendingTail(outbox, timeline) : [];
   const usedKeys = new Set<string>();
   const rowKeyOf = (entry: TimelineEntry) => {

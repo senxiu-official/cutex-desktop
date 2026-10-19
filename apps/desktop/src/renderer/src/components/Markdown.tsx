@@ -23,7 +23,8 @@ import type { FsFile } from "../../../shared/ipc";
 import { baseName, escapeFileHref, HOST_FILE_READ_FEATURE, resolveFileHref, rootFor, scopeFor, scopeKey, unescapeFileHref } from "../lib/workspace";
 import { useHostHome } from "../lib/hostHome";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
-import { agentHost, hostApi, selectedFeatures, selectedSidebar, useApp } from "../store";
+import { hostApi, useApp } from "../store";
+import { convFeaturesOf, useConvHost, useConvScope, useConvSession, useConvSidebar } from "../lib/conversationScope";
 import { api } from "../bridge";
 import { useI18n } from "../i18n";
 import { contextMenu, openMenuFrom, type MenuEntry } from "../lib/contextMenu";
@@ -132,11 +133,13 @@ const ABSOLUTE_PATH = /^(?:[a-zA-Z]:[\\/]|[\\/]|~(?=$|[\\/]))/;
 
 function useFileLink(href: string | undefined): FileLink | null {
   const relativeFiles = useContext(RelativeFiles);
-  const sidebar = useApp(selectedSidebar);
-  const selectedId = useApp((s) => s.selectedId);
-  const hostRead = useApp((s) => selectedFeatures(s).has(HOST_FILE_READ_FEATURE));
+  // The conversation's agent / host (lib/conversationScope; elsewhere: the selected agent's).
+  const sidebar = useConvSidebar();
+  const selectedId = useConvSession();
+  const conv = useConvScope();
+  const hostRead = useApp((s) => convFeaturesOf(conv, s).has(HOST_FILE_READ_FEATURE));
   // The open agent's host (it may not be the focus host).
-  const hostId = useApp(agentHost);
+  const hostId = useConvHost();
   const remote = hostId !== LOCAL_HOST_ID;
   const { t } = useI18n();
   const home = useHostHome(!!href && /^~(?=$|[\\/])/.test(href));

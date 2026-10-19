@@ -12,18 +12,20 @@ import type { RevealIntent } from "../modules/slots";
 import { shownOn, type PlacedStatus } from "../lib/statusItems";
 import { revealStatusItem, useStatusItems } from "../lib/statusItemsView";
 import { legacyHome } from "../lib/statusSurfaces";
-import { agentHost, useApp } from "../store";
+import { useApp } from "../store";
+import { convNotify, useConvHost, useConvScope } from "../lib/conversationScope";
 import { PendingOwnerNotes } from "./PendingOwnerNotes";
 
 function BarPart({ sessionId, hostId, placed }: { sessionId: string; hostId: string; placed: PlacedStatus }) {
   const { t } = useI18n();
   const { item, moduleId, resolved } = placed;
+  const conv = useConvScope();
   const Bar = item.Bar;
   if (!Bar) return null;
   const reveal = (intent: RevealIntent, openBarPanel?: () => void) => {
-    const result = revealStatusItem({ hostId, sessionId }, item.id, intent, openBarPanel);
+    const result = revealStatusItem({ hostId, sessionId }, item.id, intent, openBarPanel, conv);
     // Never "nothing happened": the caller asked to see it.
-    if (result.status === "unavailable" && openBarPanel) useApp.getState().notify(t("status.revealUnavailable", { item: t(item.titleKey) }));
+    if (result.status === "unavailable" && openBarPanel) convNotify(conv, t("status.revealUnavailable", { item: t(item.titleKey) }));
     return result;
   };
   return (
@@ -35,8 +37,8 @@ function BarPart({ sessionId, hostId, placed }: { sessionId: string; hostId: str
 
 export function StatusBar({ sessionId }: { sessionId: string }) {
   const items = useStatusItems(sessionId);
-  // The open agent's host (it may not be the focus host).
-  const hostId = useApp(agentHost);
+  // The conversation's host (it may not be the focus host; lib/conversationScope).
+  const hostId = useConvHost();
   const side = (s: "start" | "end") =>
     items
       .filter((p) => (p.item.barSide ?? "end") === s)

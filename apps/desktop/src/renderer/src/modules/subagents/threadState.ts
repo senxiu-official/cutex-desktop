@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { useSubAgentLive } from "../../lib/background";
 import { subAgentName, subAgentsOf, subAgentTooltip, type SubAgentInfo } from "../../lib/subagents";
 import { useSubAgentMeta } from "../../lib/subagentMetaStore";
-import { useApp } from "../../store";
+import { sessionViewOf, useApp } from "../../store";
 import type { SideTabInfo, SideTabProps } from "../slots";
 import type { Json } from "../types";
 
@@ -26,7 +26,7 @@ export function restoreThread(raw: Json, version: number): ThreadState | null {
 
 /** The bound agent's sub-agents (its own timeline + the children's live status and nicknames). */
 export function useBoundSubAgents(sessionId: string | null): Map<string, SubAgentInfo> {
-  const view = useApp((s) => (sessionId ? s.sessions[sessionId] : undefined));
+  const view = useApp((s) => (sessionId ? sessionViewOf(s, sessionId) : undefined));
   const live = useSubAgentLive(sessionId);
   const meta = useSubAgentMeta();
   // eslint-disable-next-line react-hooks/exhaustive-deps

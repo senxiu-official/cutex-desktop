@@ -106,6 +106,8 @@ export type DelegationStatusKey =
   | "superseded"
   | "waitingForEvent"
   | "pendingReview"
+  // peers-v2: an outgoing mirror whose destination waits for its own owner's review (「等 <host> 的主人审核」)
+  | "remoteReview"
   | "queued"
   | "queuedAt"
   | "waitTurn"
@@ -154,6 +156,8 @@ export interface DelegationStatus {
   glyph: StatusGlyph;
   /** Queue position for `queuedAt`. */
   n?: number;
+  /** The other host's label for `remoteReview`. */
+  host?: string;
   /** The word itself in danger colour (offline / blocked) while the glyph stays quiet. */
   dangerText?: boolean;
 }
@@ -215,6 +219,25 @@ function holdStatus(hold: AskHold | null | undefined, queuePosition: number | nu
   }
 }
 
+/**
+ * Waits for this host's owner's review (cutex pendingReview: a local delegation to a wider target, or
+ * an incoming cross-host one its peer policy gates) — never an outgoing mirror, whose review (if any)
+ * is the other host's owner's.
+ */
+export function awaitsOwnerReview(d: StatusInput): boolean {
+  return !d.closed && !d.remote && d.execution === "pendingReview";
+}
+
+/**
+ * An outgoing mirror (peers-v2) whose destination waits for its owner's review. cutex applies the
+ * destination's snapshot to the mirror (`execution` pendingReview) and keeps it as
+ * `remote.remoteState`; either says so. A local overlay hold (peer unreachable, …) wins: it is newer news.
+ */
+export function awaitsRemoteReview(d: StatusInput): boolean {
+  if (d.closed || !d.remote || d.hold) return false;
+  return d.execution === "pendingReview" || ((d.execution === "queued" || d.execution === "admitted") && d.remote.remoteState?.execution === "pendingReview");
+}
+
 /** Status word + glyph (never colour alone) of a delegation; the table in DESIGN §4.21. */
 export function delegationStatus(d: StatusInput, ctx: DelegationContext = {}): DelegationStatus {
   if (d.closed === "accepted") return { key: "accepted", tone: "green", glyph: "check" };
@@ -233,8 +256,11 @@ export function delegationStatus(d: StatusInput, ctx: DelegationContext = {}): D
   // show a neutral end until the outcome is known, never the stale running / queued state.
   if (d.closed && (d.execution === "pendingReview" || d.execution === "queued" || d.execution === "admitted" || d.execution === "running"))
     return { key: "ended", tone: "neutral", glyph: "dot" };
+  if (awaitsRemoteReview(d)) return { key: "remoteReview", tone: "muted", glyph: "hollow", host: d.remote!.label };
   switch (d.execution) {
     case "pendingReview":
+      // A mirror held by a local overlay (peer unreachable, …): that hold, not the remote review.
+      if (d.remote) return holdStatus(d.hold, d.queuePosition);
       return { key: "pendingReview", tone: "warn", glyph: "hollow" };
     case "queued":
       return holdStatus(d.hold, d.queuePosition);
@@ -282,7 +308,9 @@ type BucketInput = StatusInput & Pick<AskSummary, "requester"> & Partial<Pick<As
  */
 export function delegationBucket(d: BucketInput, ctx: DelegationContext = {}): DelegationBucket {
   if (d.closed || TERMINAL.has(d.execution)) return "done";
-  if (d.execution === "pendingReview" || (d.ownerQuestions ?? 0) > 0) return "needsYou";
+  if (awaitsOwnerReview(d) || (d.ownerQuestions ?? 0) > 0) return "needsYou";
+  // A mirror waiting for the other host's owner: nothing to do here.
+  if (d.execution === "pendingReview") return "waiting";
   if (d.execution === "interrupted") return interruptReasonOf(d) === "outcomeUnknown" ? "needsYou" : "waiting";
   if (d.execution === "answered") {
     if (d.review === "awaitingAcceptance") return isOwnerRequest(d.requester) ? "needsYou" : "waiting";

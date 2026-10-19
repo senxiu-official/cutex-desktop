@@ -9,6 +9,7 @@ import { LOCAL_HOST_ID } from "../../../shared/hosts";
 import type { DaemonApi, QuotaGauge, SidebarSnapshot } from "../../../shared/ipc";
 import { api, apiFor, bridge } from "../bridge";
 import { agentHost, featuresOf, useApp } from "../store";
+import { useConvHost } from "./conversationScope";
 import { QUOTA_NATIVE_FEATURE, QUOTA_UPDATED_EVENT, quotaEventProfiles } from "./quota";
 import { onHostReset } from "./hostSwitch";
 import { useHostData } from "./useHostScope";
@@ -111,7 +112,8 @@ export function useTargetLoadQuota(): (profile: string, refresh?: boolean) => Pr
  */
 export function useComposerHost(): string {
   const target = useContext(TargetHostContext);
-  const agent = useApp(agentHost);
+  // The conversation's host (lib/conversationScope; outside one: the selected agent's).
+  const agent = useConvHost();
   return target ?? agent;
 }
 

@@ -5,6 +5,7 @@
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import type { ApprovalDecision, ApprovalDecisionOrigin, ApprovalRecord } from "../../../shared/ipc";
 import type { PeerCaps } from "../../../shared/peers";
+import { deviceScopeOf, type HostUserAccess } from "../../../shared/users";
 
 export const APPROVALS_FEATURE = "owner-approvals";
 export const APPROVALS_CHANGED_EVENT = "cutex/approvals/changed";
@@ -114,6 +115,25 @@ export function approvalOfToolEvent(envelope: EventEnvelope): { item: ToolApprov
   if (!item || typeof item !== "object" || typeof item.type !== "string") return null;
   const found = approvalOfTool(item as { type: string });
   return found ? { item: found, threadId: typeof params?.threadId === "string" ? params.threadId : null } : null;
+}
+
+/**
+ * This connection may decide owner approvals on a host: the host has owner-approvals in this
+ * connection's feature set (owner-only, so a non-owner connection never has it — the 审批 page's own
+ * gate) and the device scope is `full` (a `chat` / `read` owner device cannot approve; an unknown
+ * scope = an older cutex = not narrowed).
+ */
+export function canDecideApprovals(features: ReadonlySet<string>, access: HostUserAccess): boolean {
+  return features.has(APPROVALS_FEATURE) && (deviceScopeOf(access) ?? "full") === "full";
+}
+
+/**
+ * The owner review of a delegation (cutex pendingReview → an `ask_delivery` approval whose
+ * `details.askId` names it; peers-v2 incoming asks the peer policy gates are the same kind) in a
+ * host's pending list; null when the list is not loaded or has none for it.
+ */
+export function askReviewApproval(pending: readonly ApprovalRecord[] | null | undefined, askId: string): ApprovalRecord | null {
+  return pending?.find((a) => a.kind === "ask_delivery" && a.state === "pending" && a.details?.askId === askId) ?? null;
 }
 
 /** Kinds whose requester retries its own call after the decision (cutex approval-decision-notice tells it). */

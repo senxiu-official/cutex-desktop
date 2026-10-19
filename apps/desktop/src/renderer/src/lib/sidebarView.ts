@@ -1,6 +1,6 @@
 // Non-component sidebar helpers (kept out of component files so React Fast Refresh works).
 import { useMemo } from "react";
-import { featuresOf, focusSessionViews, pinnedOn, sidebarOf, useApp, viewHostOf } from "../store";
+import { featuresOf, focusSessionViews, hostSessionViews, pinnedOn, sidebarOf, useApp } from "../store";
 import { useFocusHostId, useTargetHostId } from "./targetHost";
 import { buildSidebar, needsInputIds, pendingByAgent, type AgentStatus } from "./sidebar";
 
@@ -41,7 +41,7 @@ export function useSidebarModel() {
   const pinned = useMemo(() => (own ? focusPinned : pinnedOn(hostId)), [own, focusPinned, hostId]);
   // That host's agent views only (`sessions` may also hold an open agent of another host).
   const needsInput = useMemo(
-    () => (own ? new Set(Object.keys(pendingByAgent(focusSessionViews({ hosts, sessions }), hostWaiting))) : needsInputIds(Object.fromEntries(Object.entries(sessions).filter(([id]) => viewHostOf(id) === hostId)))),
+    () => (own ? new Set(Object.keys(pendingByAgent(focusSessionViews({ hosts, sessions }), hostWaiting))) : needsInputIds(hostSessionViews(sessions, hostId))),
     [own, hostId, hosts, sessions, hostWaiting],
   );
   return useMemo(

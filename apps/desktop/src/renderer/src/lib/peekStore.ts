@@ -87,5 +87,5 @@ export function closePeek(opts: { focus?: boolean; fallback?: () => HTMLElement 
   usePeek.setState({ peek: null });
   const target = returnFocus?.isConnected ? returnFocus : (opts.fallback?.() ?? null);
   returnFocus = null;
-  if (opts.focus !== false && focusWasInside) (target ?? document.querySelector<HTMLElement>("[data-composer-input]"))?.focus();
+  if (opts.focus !== false && focusWasInside) (target ?? (document.querySelector<HTMLElement>("[data-pane-focused] [data-composer-input]") ?? document.querySelector<HTMLElement>("[data-composer-input]")))?.focus();
 }

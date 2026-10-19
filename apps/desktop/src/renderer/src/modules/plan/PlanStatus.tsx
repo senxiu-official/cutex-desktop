@@ -12,6 +12,7 @@ import { useI18n, type MessageKey } from "../../i18n";
 import { focusWindow, foldKind, hiddenPlan, latestPlan, planProgress, type PlanSnapshot, type PlanStep } from "../../lib/statusCapsule";
 import { useSessionTimeline } from "../../lib/statusItemsView";
 import { useApp } from "../../store";
+import { useConvViewHost } from "../../lib/conversationScope";
 import type { StatusBarProps } from "../slots";
 
 /** "已完成 3 项" / "待处理 4 项": a disclosure whose rows open right below it (DESIGN §4.17). */
@@ -60,6 +61,7 @@ function PlanSteps({ steps }: { steps: PlanStep[] }) {
  */
 function PlanTools({ sessionId, plan }: { sessionId: string; plan: PlanSnapshot }) {
   const { t } = useI18n();
+  const hostId = useConvViewHost(sessionId);
   return (
     <>
       {plan.cleared && (
@@ -68,7 +70,7 @@ function PlanTools({ sessionId, plan }: { sessionId: string; plan: PlanSnapshot 
         </span>
       )}
       <button
-        onClick={() => useApp.getState().dismissPlan(sessionId)}
+        onClick={() => useApp.getState().dismissPlan(sessionId, hostId)}
         title={t("plan.dismissHint")}
         aria-label={t("plan.dismiss")}
         className="flex size-5 items-center justify-center rounded text-subtle hover:bg-surface-2 hover:text-foreground"
@@ -110,6 +112,7 @@ export function PlanBody({ data: plan }: { sessionId: string; data: PlanSnapshot
 /** Status-row chip 进度 2/4 with the list floating up; a hidden list leaves a muted icon to show it again. */
 export function PlanStatusBar({ sessionId, inline }: StatusBarProps) {
   const { t } = useI18n();
+  const hostId = useConvViewHost(sessionId);
   const [open, setOpen] = useState(false);
   const timeline = useSessionTimeline(sessionId);
   const plan = latestPlan(timeline);
@@ -120,7 +123,7 @@ export function PlanStatusBar({ sessionId, inline }: StatusBarProps) {
     const { done, total } = planProgress(hidden.steps);
     return (
       <button
-        onClick={() => useApp.getState().restorePlan(sessionId)}
+        onClick={() => useApp.getState().restorePlan(sessionId, hostId)}
         title={t("plan.restoreHint", { done, total })}
         aria-label={t("plan.restore")}
         className="flex items-center gap-1 rounded px-1 text-xs text-subtle opacity-60 hover:bg-surface-2 hover:text-foreground hover:opacity-100"

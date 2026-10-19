@@ -8,14 +8,22 @@ export interface ArtifactPageInput {
   artifactId: string;
   /** A concrete version (a `@latest` view resolves it first, so a republish gets a new document). */
   version: number;
+  /** The owner chose to show a page over ARTIFACT_PAGE_PROMPT_BYTES (it is read in windows, up to ARTIFACT_PAGE_MAX_BYTES). */
+  large?: boolean;
 }
+/** Above this a page is shown only after the owner asks for it (one content window of the host). */
+export const ARTIFACT_PAGE_PROMPT_BYTES = 4 * 1024 * 1024;
+/** Hard bound of a page main assembles in memory (pages with embedded audio / video can be large). */
+export const ARTIFACT_PAGE_MAX_BYTES = 256 * 1024 * 1024;
 export interface FrameResource {
   id: string;
   url: string;
 }
 /** Why main did not prepare a page; the view shows the source instead. */
 export type ArtifactPageRefusal = "not-found" | "host-offline" | "not-text" | "too-large" | "external-changed";
-export type ArtifactPageResult = { ok: true; frame: FrameResource } | { ok: false; reason: ArtifactPageRefusal };
+export type ArtifactPageResult =
+  | { ok: true; frame: FrameResource }
+  | { ok: false; reason: ArtifactPageRefusal; /** too-large: the page's size */ totalBytes?: number };
 
 export interface FramesBridge {
   prepareArtifactPage(input: ArtifactPageInput): Promise<ArtifactPageResult>;

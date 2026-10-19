@@ -15,6 +15,12 @@
 // users-p2-access (`?nonowner=send`: read-only files, image attach, delegation commands; `?nop2`: without).
 // client-token-rename: the desktops carry real `desktop-…` labels (「WORKSTATION」, 「kai-laptop 上的
 // cutex_dev」); renames arrive through MockCore clientTokenNames (remote-access's mock serves the method).
+// Owner devices (cutex 21123b6; docs/research/owner-devices-desktop-api-20261019.md): tokens carry
+// `scope` / `issuedVia`; the owner's new iPhone 16 (paired 10 min ago) is an unacknowledged new owner
+// device (`ownerNewDevices` / `ackOwnerNewDevice`; a revoke or a narrowed scope drops it, like cutex);
+// `?ownerdevicedemo[=s]`: s seconds (default 8) after start a "Galaxy S25" pairs as an owner device and
+// `cutex/access/ownerDeviceAdded` arrives on HOST-A's feed. workstation has no new devices. `?scope=chat|read`:
+// ack refused (device_scope_denied). `?noownerlocal`: an older cutex (no fields, no features, no route).
 import type { IdentityKeyErrorCode, PersonIdentityView } from "../../../../shared/personIdentity";
 import type { PersonKeyRecord, SelfProfile, UserGrant, UserPeerRecord, UserRecord, UsersList, UserTokenRecord } from "../../../../shared/users";
 import type { ModuleMock } from "../../dev/mockTypes";
@@ -36,6 +42,9 @@ const FINGERPRINTS: Record<string, string> = { [KEY_SELF]: "116df1968daccae0", [
 const NO_IDENTITY = typeof location !== "undefined" && new URLSearchParams(location.search).has("noidentity");
 const NO_P2 = typeof location !== "undefined" && new URLSearchParams(location.search).has("nop2");
 const NO_OWN = typeof location !== "undefined" && new URLSearchParams(location.search).has("noown");
+const NO_OWNER_LOCAL = typeof location !== "undefined" && new URLSearchParams(location.search).has("noownerlocal");
+const OWNER_DEVICE_DEMO = typeof location !== "undefined" ? new URLSearchParams(location.search).get("ownerdevicedemo") : null;
+const owned = (scope: "full" | "chat" | "read", issuedVia: "hostCli" | "pairing") => (NO_OWNER_LOCAL ? {} : { scope, issuedVia });
 const personKey = (publicKey: string, daysAgo: number, label?: string): PersonKeyRecord => ({ publicKey, fingerprint: FINGERPRINTS[publicKey] ?? "0000000000000000", addedAt: iso(daysAgo * 86400), ...(label ? { label } : {}) });
 
 const state: UsersList = {
@@ -46,13 +55,14 @@ const state: UsersList = {
     { id: "u-a83d4e61c0f2", name: "Kai", color: "green", builtin: false, isOwner: false, grant: { projects: "all", standaloneAgents: [], send: true }, createdAt: iso(3 * 86400), updatedAt: iso(3 * 86400), displayName: "Kai Nakamura", avatarEtag: "a83d4e61c0f20001" },
   ],
   tokens: [
-    { tokenId: "mct-1a2b3c4d5e6f7a8b", label: "Pixel 9", kind: "device", deviceName: "Pixel 9", platform: "android", createdAt: iso(3 * 86400), lastUsedAt: iso(720), lastAddress: "100.64.0.7", userId: "owner", pending: false },
-    { tokenId: "mct-9f8e7d6c5b4a3f2e", label: "desktop-WORKSTATION-Cutex-4f9a1c", kind: "client", deviceName: null, platform: null, createdAt: iso(20 * 86400), lastUsedAt: iso(86400), lastAddress: "100.64.0.97", userId: "owner", pending: false },
-    { tokenId: "mct-3c4d5e6f7a8b9c0d", label: "Mia's iPad", kind: "device", deviceName: "iPad", platform: "ios", createdAt: iso(2 * 86400), lastUsedAt: iso(3600), lastAddress: "100.64.0.12", userId: "u-5f1c2a9e0b7d", pending: false },
+    { tokenId: "mct-1a2b3c4d5e6f7a8b", label: "Pixel 9", kind: "device", deviceName: "Pixel 9", platform: "android", createdAt: iso(3 * 86400), lastUsedAt: iso(720), lastAddress: "100.64.0.7", userId: "owner", pending: false, ...owned("full", "pairing") },
+    { tokenId: "mct-9f8e7d6c5b4a3f2e", label: "desktop-WORKSTATION-Cutex-4f9a1c", kind: "client", deviceName: null, platform: null, createdAt: iso(20 * 86400), lastUsedAt: iso(86400), lastAddress: "100.64.0.97", userId: "owner", pending: false, ...owned("full", "hostCli") },
+    { tokenId: "mct-6f7a8b9c0d1e2f30", label: "iPhone 16", kind: "device", deviceName: "iPhone 16", platform: "ios", createdAt: iso(600), lastUsedAt: iso(240), lastAddress: "100.64.0.21", userId: "owner", pending: false, ...owned("full", "pairing") },
+    { tokenId: "mct-3c4d5e6f7a8b9c0d", label: "Mia's iPad", kind: "device", deviceName: "iPad", platform: "ios", createdAt: iso(2 * 86400), lastUsedAt: iso(3600), lastAddress: "100.64.0.12", userId: "u-5f1c2a9e0b7d", pending: false, ...owned("chat", "pairing") },
     // Mia's laptop: this desktop under `?nonowner` (C1 user.token, dev/mockBridge.ts mockConnectionUser).
-    { tokenId: "mct-5d6e7f8091a2b3c4", label: "desktop-mia-laptop-Cutex-71c0de", kind: "client", deviceName: null, ownerName: "Mia 的笔记本", platform: null, createdAt: iso(2 * 86400), lastUsedAt: iso(120), lastAddress: "100.64.0.15", userId: "u-5f1c2a9e0b7d", pending: false },
-    { tokenId: "mct-7e6d5c4b3a291807", label: "desktop-kai-laptop-cutex_dev-3b7e02", kind: "client", deviceName: null, platform: null, createdAt: iso(40 * 60), lastUsedAt: iso(30 * 60), lastAddress: "100.64.0.31", userId: null, pending: true },
-    { tokenId: "mct-0a1b2c3d4e5f6071", label: "Galaxy Tab", kind: "device", deviceName: "Galaxy Tab S10", platform: "android", createdAt: iso(5 * 60), lastUsedAt: null, lastAddress: null, userId: null, pending: true },
+    { tokenId: "mct-5d6e7f8091a2b3c4", label: "desktop-mia-laptop-Cutex-71c0de", kind: "client", deviceName: null, ownerName: "Mia 的笔记本", platform: null, createdAt: iso(2 * 86400), lastUsedAt: iso(120), lastAddress: "100.64.0.15", userId: "u-5f1c2a9e0b7d", pending: false, ...owned("full", "hostCli") },
+    { tokenId: "mct-7e6d5c4b3a291807", label: "desktop-kai-laptop-cutex_dev-3b7e02", kind: "client", deviceName: null, platform: null, createdAt: iso(40 * 60), lastUsedAt: iso(30 * 60), lastAddress: "100.64.0.31", userId: null, pending: true, ...owned("full", "hostCli") },
+    { tokenId: "mct-0a1b2c3d4e5f6071", label: "Galaxy Tab", kind: "device", deviceName: "Galaxy Tab S10", platform: "android", createdAt: iso(5 * 60), lastUsedAt: null, lastAddress: null, userId: null, pending: true, ...owned("read", "pairing") },
   ],
   peers: [
     { peerId: "ci-7a3f01c2b4d5e6f708192a3b4c5d6e7f", label: "workstation-lab", hostId: "WORKSTATION", status: "online", userId: "owner" },
@@ -76,7 +86,17 @@ if (!NO_IDENTITY) {
   state.users[2]!.personKeys = [];
 }
 
-/** client-token-rename: this list's tokens take renames (no api method of its own). */
+/** owner-device-notice: tokens that became the owner's and are not acknowledged yet (cutex users-v1.json `newOwnerDevices`). */
+const newOwnerDevices: { tokenId: string; at: string; via: "pairing" | "assigned" | "personKey" | "ssh" }[] = [{ tokenId: "mct-6f7a8b9c0d1e2f30", at: iso(600), via: "pairing" }];
+/** `?ownerdevice` (HOST-A): this desktop's own paired owner token (dev/mockBridge.ts mockConnectionUser). */
+const PAIRED_SELF_ID = "mct-2b3c4d5e6f708192";
+if (typeof location !== "undefined" && !NO_OWNER_LOCAL && new URLSearchParams(location.search).has("ownerdevice") && (new URLSearchParams(location.search).get("ownerdevice") || "local") === "local") {
+  state.tokens.push({ tokenId: PAIRED_SELF_ID, label: "desktop-sam-laptop-Cutex-5a2c11", kind: "device", deviceName: "sam-laptop", platform: "linux", createdAt: iso(5 * 86400), lastUsedAt: iso(5), lastAddress: "127.0.0.1", userId: "owner", pending: false, ...owned("full", "pairing") });
+}
+/** This connection's scope on HOST-A (`?scope=chat|read`). */
+const connectionScope = (): "full" | "chat" | "read" => (NO_OWNER_LOCAL ? "full" : ((["chat", "read"] as const).find((v) => v === q().get("scope")) ?? "full"));
+
+/** client-token-rename / device-scope / revoke: this list's tokens follow the token methods (no api method of their own). */
 function registerTokens(core: Parameters<NonNullable<ModuleMock["api"]>>[0]): Record<string, never> {
   core.clientTokenNames.register({
     rename(tokenId, ownerName) {
@@ -85,8 +105,39 @@ function registerTokens(core: Parameters<NonNullable<ModuleMock["api"]>>[0]): Re
       token.ownerName = ownerName;
       return true;
     },
+    setScope(tokenId, scope) {
+      const token = state.tokens.find((t) => t.tokenId === tokenId);
+      if (!token) return false;
+      token.scope = scope;
+      // cutex: a narrowed owner device is no longer a "new device with full rights" notice.
+      if (scope !== "full") dropNewDevice(tokenId);
+      return true;
+    },
+    revoke(tokenId) {
+      const i = state.tokens.findIndex((t) => t.tokenId === tokenId);
+      dropNewDevice(tokenId);
+      if (i < 0) return false;
+      state.tokens.splice(i, 1);
+      bump();
+      return true;
+    },
   });
   return {};
+}
+
+function dropNewDevice(tokenId: string): boolean {
+  const i = newOwnerDevices.findIndex((d) => d.tokenId === tokenId);
+  if (i >= 0) newOwnerDevices.splice(i, 1);
+  return i >= 0;
+}
+
+/** `GET /v2/users/owner/new-devices` items (a `/v2/users` token item + at / via / current). */
+function newDevicesView(): import("../../../../shared/users").OwnerNewDevice[] {
+  const current = q().has("ownerdevice") ? PAIRED_SELF_ID : null;
+  return newOwnerDevices.flatMap((d) => {
+    const token = listing().tokens.find((t) => t.tokenId === d.tokenId && t.userId === "owner");
+    return token ? [{ ...token, at: d.at, via: d.via, current: token.tokenId === current }] : [];
+  });
 }
 
 function listing(): UsersList {
@@ -179,13 +230,14 @@ async function result<T>(run: () => T) {
     return { ok: true as const, value: run() };
   } catch (e) {
     if (!(e instanceof Refusal)) throw e;
-    return { ok: false as const, error: { code: e.code, message: e.message.slice(e.code.length + 2), ...(e.tokens ? { tokens: e.tokens } : {}), ...(e.peers ? { peers: e.peers } : {}), ...(e.holder ?? {}) } };
+    const access = (e as Refusal & { access?: import("../../../../shared/users").AccessRefusalDetails }).access;
+    return { ok: false as const, error: { code: e.code, message: e.message.slice(e.code.length + 2), ...(e.tokens ? { tokens: e.tokens } : {}), ...(e.peers ? { peers: e.peers } : {}), ...(e.holder ?? {}), ...(access ? { access } : {}) } };
   }
 }
 
 let workstationKnowsSelf = false;
 /** workstation's own listing: HOST-A's, plus this desktop's client token there (hosts.json tokenId of workstation). */
-const WORKSTATION_SELF: UserTokenRecord = { tokenId: "mct-4b5c6d7e8f901a2b", label: "desktop-HOST-A-Cutex-9c1d2e", kind: "client", deviceName: null, platform: null, createdAt: iso(30 * 86400), lastUsedAt: iso(30), lastAddress: "100.64.0.2", userId: "owner", pending: false };
+const WORKSTATION_SELF: UserTokenRecord = { tokenId: "mct-4b5c6d7e8f901a2b", label: "desktop-HOST-A-Cutex-9c1d2e", kind: "client", deviceName: null, platform: null, createdAt: iso(30 * 86400), lastUsedAt: iso(30), lastAddress: "100.64.0.2", userId: "owner", pending: false, ...owned("full", "hostCli") };
 
 export const mock: ModuleMock = {
   remote: (hostId) =>
@@ -203,11 +255,31 @@ export const mock: ModuleMock = {
             const user = state.users.find((u) => u.id === userId);
             return { ok: true as const, value: { userId, personKeys: clone(user?.personKeys ?? []) } };
           },
+          // owner-device-notice: nothing new on workstation.
+          async ownerNewDevices() {
+            return { ok: true as const, value: NO_OWNER_LOCAL ? null : [] };
+          },
+          ackOwnerNewDevice(tokenId) {
+            return result(() => ({ tokenId, acknowledged: false }));
+          },
         }
       : {},
   // users-p2-access (r236): `?nop2` = an older host (a non-owner gets no files / images / delegation commands).
   // cutex C1 / C2 (user-own-token, user-own-devices): `?noown` = a host without them.
-  features: { new: [...(NO_IDENTITY ? ["users", "users-self-profile"] : ["users", "users-self-profile", "person-identity", "person-identity-ack"]), ...(NO_P2 ? [] : ["users-p2-access"]), ...(NO_OWN ? [] : ["user-own-token", "user-own-devices"])] },
+  features: { new: [...(NO_IDENTITY ? ["users", "users-self-profile"] : ["users", "users-self-profile", "person-identity", "person-identity-ack"]), ...(NO_P2 ? [] : ["users-p2-access"]), ...(NO_OWN ? [] : ["user-own-token", "user-own-devices"]), ...(NO_OWNER_LOCAL ? [] : ["owner-local-only", "owner-device-notice", "device-scope"])] },
+  start(core) {
+    // `?ownerdevicedemo[=s]`: a new owner device pairs on HOST-A after s seconds (default 8).
+    if (core.legacy || NO_OWNER_LOCAL || OWNER_DEVICE_DEMO === null) return;
+    setTimeout(() => {
+      const tokenId = "mct-8091a2b3c4d5e6f7";
+      if (state.tokens.some((t) => t.tokenId === tokenId)) return;
+      const at = now();
+      state.tokens.push({ tokenId, label: "Galaxy S25", kind: "device", deviceName: "Galaxy S25", platform: "android", createdAt: at, lastUsedAt: at, lastAddress: "100.64.0.44", userId: "owner", pending: false, scope: "full", issuedVia: "pairing" });
+      newOwnerDevices.push({ tokenId, at, via: "pairing" });
+      bump();
+      core.emitHost("cutex/access/ownerDeviceAdded", { tokenId, label: "Galaxy S25", deviceName: "Galaxy S25", platform: "android", scope: "full", at, via: "pairing" });
+    }, (Number(OWNER_DEVICE_DEMO) || 8) * 1000);
+  },
   api: (core) => ({
     ...registerTokens(core),
     async identityState() {
@@ -257,6 +329,22 @@ export const mock: ModuleMock = {
     },
     async users() {
       return listing();
+    },
+    // owner-device-notice (owner principals; a read / chat owner device may read, only full may ack).
+    ownerNewDevices() {
+      return result(() => {
+        if (NO_OWNER_LOCAL) return null;
+        if (meId() !== "owner") throw new Refusal(meId() ? "owner_required" : "user_pending", "owner only");
+        return newDevicesView();
+      });
+    },
+    ackOwnerNewDevice(tokenId) {
+      return result(() => {
+        if (NO_OWNER_LOCAL) throw new Refusal("route_not_found", "management v2 route not found");
+        if (meId() !== "owner") throw new Refusal(meId() ? "owner_required" : "user_pending", "owner only");
+        if (connectionScope() !== "full") throw Object.assign(new Refusal("device_scope_denied", "this device's scope does not allow this"), { access: { scope: connectionScope(), required: "full" } });
+        return { tokenId, acknowledged: dropNewDevice(tokenId) };
+      });
     },
     createUser(request) {
       return result(() => {
@@ -362,6 +450,10 @@ export const mock: ModuleMock = {
     },
     patchUsersSettings(patch) {
       return result(() => {
+        // owner-local-only: turning approval off is a root-identity action (`?ownerdevice`: this desktop is a paired device).
+        if (patch.ownerRequiresApproval === false && q().has("ownerdevice") && (q().get("ownerdevice") || "local") === "local" && !NO_OWNER_LOCAL) {
+          throw Object.assign(new Refusal("owner_local_only", "only on the host itself or over SSH"), { access: { action: "disableOwnerApproval", issuedVia: "pairing" } });
+        }
         state.settings = { ownerRequiresApproval: patch.ownerRequiresApproval };
         bump();
         return { settings: clone(state.settings) };

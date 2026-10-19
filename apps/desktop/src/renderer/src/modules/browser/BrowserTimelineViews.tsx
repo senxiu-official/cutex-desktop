@@ -5,7 +5,7 @@ import { browserErrorKey } from "./browserState";
 import { bridge } from "../../bridge";
 import { useI18n } from "../../i18n";
 import type { RawItem } from "../../lib/timeline";
-import { useApp } from "../../store";
+import { useApp, viewOf } from "../../store";
 import type { TurnAttachmentProps } from "../slots";
 import { useTimelineContext } from "../timelineItemsView";
 import { afterBrowserHostsDelivered, browserHostCurrent, useBrowserHostEpoch } from "./hosts";
@@ -26,7 +26,7 @@ function Screenshot({ src }: { src: string }) {
 /** Browser tool output has no raw-JSON fallback: summaries cannot reveal filled values. */
 function ToolRow({ item, sessionId, hostId, epoch }: { item: RawItem; sessionId: string; hostId: string; epoch: string | null }) {
   const { t } = useI18n();
-  const turnId = useApp(state => state.sessions[sessionId]?.timeline.entries.get(item.id)?.turnId ?? null);
+  const turnId = useApp(state => viewOf(state, hostId, sessionId)?.timeline.entries.get(item.id)?.turnId ?? null);
   const [full, setFull] = useState<RawItem | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState<ReturnType<typeof browserErrorKey> | null>(null);
@@ -115,7 +115,7 @@ function TurnShots({ hostId, sessionId, turnId, where, width, epoch }: TurnAttac
   const { t } = useI18n();
   const [shots, setShots] = useState<BrowserTurnShot[]>([]);
   const turnState = useApp(state => {
-    const timeline = state.sessions[sessionId]?.timeline, turn = timeline?.turns.find(entry => entry.id === turnId);
+    const timeline = viewOf(state, hostId, sessionId)?.timeline, turn = timeline?.turns.find(entry => entry.id === turnId);
     const used = turn?.entryIds.some(id => { const entry = timeline?.entries.get(id); return entry?.kind === "tool" && isBrowserTool(entry.item); });
     return `${turn?.status ?? "unknown"}|${turn?.completedAt ?? 0}|${used ? 1 : 0}`;
   });

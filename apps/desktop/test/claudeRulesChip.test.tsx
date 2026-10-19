@@ -24,7 +24,8 @@ vi.mock("../src/renderer/src/store", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   featuresOf: () => fx.features,
   useApp: Object.assign((select: (s: unknown) => unknown) => select({}), { getState: () => ({}), setState: () => {}, subscribe: () => () => {} }),
-  sessionApi: () => ({
+  // The agent's host's api (panes step 2: lib/conversationScope convApi → hostApi).
+  hostApi: () => ({
     claudePermissionRules: async (id: string) => {
       fx.reads++;
       return { cutexSessionId: id, workspace: "/w", revision: 1, updatedAt: null, allow: fx.allow, supported: true };

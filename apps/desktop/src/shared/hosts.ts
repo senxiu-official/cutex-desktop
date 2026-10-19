@@ -135,6 +135,82 @@ export interface SshHostConfig {
   autoConnect: boolean;
   color: string;
   platform: HostPlatform | null;
+  /**
+   * Which kind of client token this desktop holds there (docs/research/host-ownership-20261019.md §2):
+   * "owner" = `client-token issue` without a flag (today's behaviour: the owner's when the host
+   * grants it), "member" = issued `--pending` (a member or a pending device, never the owner).
+   * Absent (older hosts.json / test fixtures) = "owner"; `parseHostsFile` fills it in.
+   */
+  connectAs?: SshConnectAs;
+}
+
+/** How this desktop connects to an SSH host (host ownership §2). */
+export type SshConnectAs = "owner" | "member";
+/** What the add form asks for: "auto" (default) = member when the host's confirmed owner person is someone else, else owner. */
+export type SshConnectAsRequest = SshConnectAs | "auto";
+
+export function isSshConnectAs(value: unknown): value is SshConnectAs {
+  return value === "owner" || value === "member";
+}
+
+/** cutex capability: `/v2/host.owner` + `PUT/DELETE /v2/users/owner-person` (host ownership §1.2). */
+export const HOST_OWNER_FEATURE = "host-owner-person";
+
+/**
+ * The host's owner person (cutex `GET /v2/host` `owner`; readable by every principal, pending
+ * tokens included). `confirmed` false = cutex could not tell who it is (several owner keys, no audit):
+ * the local desktop may confirm it (`PUT /v2/users/owner-person`).
+ */
+export interface HostOwner {
+  displayName: string | null;
+  /** First 16 hex of SHA-256 over the owner person's public key (as `PersonIdentityView.fingerprint`). */
+  fingerprint: string | null;
+  confirmed: boolean;
+  source: "firstRootClaim" | "firstPairing" | "local" | "audit" | null;
+}
+
+const OWNER_SOURCES: readonly NonNullable<HostOwner["source"]>[] = ["firstRootClaim", "firstPairing", "local", "audit"];
+
+/**
+ * `owner` of a `/v2/host` reply (or of a `PUT /v2/users/owner-person` reply), read defensively:
+ * null when absent / not an object (an older cutex); bad fields become null / false.
+ */
+export function readHostOwner(host: unknown): HostOwner | null {
+  const raw = host && typeof host === "object" ? (host as { owner?: unknown }).owner : undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const name = typeof o.displayName === "string" && o.displayName.trim() ? o.displayName.trim().slice(0, 200) : null;
+  const fingerprint = typeof o.fingerprint === "string" && /^[0-9a-f]{8,64}$/i.test(o.fingerprint.trim()) ? o.fingerprint.trim().toLowerCase() : null;
+  const source = OWNER_SOURCES.includes(o.source as NonNullable<HostOwner["source"]>) ? (o.source as HostOwner["source"]) : null;
+  return { displayName: name, fingerprint, confirmed: o.confirmed === true && fingerprint !== null, source };
+}
+
+/**
+ * Is the host's owner person this desktop? true / false only for a confirmed owner with a
+ * fingerprint and a known own fingerprint; null otherwise (unknown, unconfirmed, older cutex).
+ */
+export function ownerIsMe(owner: HostOwner | null | undefined, myFingerprint: string | null | undefined): boolean | null {
+  if (!owner?.confirmed || !owner.fingerprint || !myFingerprint) return null;
+  return owner.fingerprint.toLowerCase() === myFingerprint.replace(/\s+/g, "").toLowerCase();
+}
+
+/** What the "auto" pairing learnt over the pending token (null `owner`: none reported). */
+export type OwnerProbe =
+  | { ok: true; capability: boolean; owner: HostOwner | null; myFingerprint: string | null }
+  | { ok: false; reason: string };
+
+/**
+ * The "auto" decision (host ownership §2.1): keep the member token only when the host has the
+ * capability and a confirmed owner person who is not this desktop; otherwise (owner is me,
+ * unconfirmed, older cutex, own key unknown, probe failed) connect as owner — today's behaviour.
+ */
+export function decideConnectAs(probe: OwnerProbe): { connectAs: SshConnectAs; reason: "ownerIsSomeoneElse" | "ownerIsMe" | "ownerUnconfirmed" | "noCapability" | "noOwnKey" | "probeFailed" } {
+  if (!probe.ok) return { connectAs: "owner", reason: "probeFailed" };
+  if (!probe.capability || !probe.owner) return { connectAs: "owner", reason: "noCapability" };
+  if (!probe.owner.confirmed || !probe.owner.fingerprint) return { connectAs: "owner", reason: "ownerUnconfirmed" };
+  const mine = ownerIsMe(probe.owner, probe.myFingerprint);
+  if (mine === null) return { connectAs: "owner", reason: "noOwnKey" };
+  return mine ? { connectAs: "owner", reason: "ownerIsMe" } : { connectAs: "member", reason: "ownerIsSomeoneElse" };
 }
 
 /** userData/hosts.json v2 (v1 → v2 on read: `lastActive` → `scope`; one-way, RFC §6.4). */
@@ -203,6 +279,8 @@ export interface HostView {
   autoConnect?: boolean;
   color?: string;
   platform?: HostPlatform | null;
+  /** SSH hosts: the kind of token this desktop holds there (`SshHostConfig.connectAs`); absent for others. */
+  connectAs?: SshConnectAs;
   /** This host's connection; absent / `epoch: null` = not connected. */
   conn?: HostConnView;
 }
@@ -274,6 +352,8 @@ export interface AddSshHostRequest {
   label?: string;
   remotePort?: number;
   cutexPath?: string;
+  /** Connect as owner / member, or "auto" (default; host ownership §2.1, `decideConnectAs`). */
+  connectAs?: SshConnectAsRequest;
 }
 
 export interface SshHostPatch {
@@ -284,7 +364,14 @@ export interface SshHostPatch {
 
 /** `cutexPath`: what the host now uses (the discovered absolute path when the given one failed). */
 /** `pending` (cutex users): the new token waits for the host owner to assign it to a user. */
-export type HostResult = { ok: true; hostId: string; cutexPath?: string; pending?: boolean } | { ok: false; error: SshErrorView };
+/**
+ * `connectAs` (pairing calls): the kind of token now held; `userId`: the user the new token belongs
+ * to when cutex reports it (null = pending; absent = an older cutex); `autoReason`: why "auto" chose
+ * `connectAs` (`decideConnectAs`).
+ */
+export type HostResult =
+  | { ok: true; hostId: string; cutexPath?: string; pending?: boolean; connectAs?: SshConnectAs; userId?: string | null; autoReason?: ReturnType<typeof decideConnectAs>["reason"] }
+  | { ok: false; error: SshErrorView };
 
 export interface HostTestResult {
   ok: boolean;
@@ -372,6 +459,8 @@ export function parseHostsFile(raw: unknown): HostsFile {
       autoConnect: v1 || typeof x.autoConnect !== "boolean" ? true : x.autoConnect,
       color,
       platform: !v1 && isHostPlatform(x.platform) ? x.platform : null,
+      // Entries from before host ownership: today's behaviour (an owner token).
+      connectAs: x.connectAs === "member" ? "member" : "owner",
     });
   }
   const known = (id: unknown): id is string => typeof id === "string" && (id === LOCAL_HOST_ID || seen.has(id));
@@ -574,8 +663,9 @@ export function execArgs(target: SshTarget, command: string, interactive = false
   return ["-T", ...common(interactive), ...(target.port ? ["-p", String(target.port)] : []), "--", target.destination, command];
 }
 
-export function tokenIssueCommand(cutexPath: string, label: string): string {
-  return `${cutexPath} management client-token issue --label ${label}`;
+/** `client-token issue`; "member" adds `--pending` (never the owner's, host ownership §2.1). */
+export function tokenIssueCommand(cutexPath: string, label: string, connectAs: SshConnectAs = "owner"): string {
+  return `${cutexPath} management client-token issue --label ${label}${connectAs === "member" ? " --pending" : ""}`;
 }
 
 export function tokenRevokeCommand(cutexPath: string, tokenId: string): string {
@@ -673,10 +763,11 @@ export async function issueTokenFindingCutex(
   cutexPath: string,
   label: string,
   toError: (error: unknown) => SshErrorView,
+  connectAs: SshConnectAs = "owner",
 ): Promise<{ ok: true; token: IssuedToken; cutexPath: string } | { ok: false; error: SshErrorView }> {
   const issue = async (path: string): Promise<{ ok: true; token: IssuedToken; cutexPath: string } | { ok: false; error: SshErrorView }> => {
     try {
-      const r = await run(tokenIssueCommand(path, label));
+      const r = await run(tokenIssueCommand(path, label, connectAs));
       if (r.code !== 0) return { ok: false, error: classifySshFailure(r.code, r.stderr, "exec") };
       const token = parseTokenIssue(r.stdout);
       // Never echo stdout: it may hold the token in a shape we did not recognise.
@@ -715,6 +806,8 @@ export interface IssuedToken {
   createdAt: string;
   /** cutex `users`: not assigned to any user yet (connects, sees nothing until an owner device assigns it). */
   pending?: boolean;
+  /** The user the token belongs to (null: pending); absent when cutex does not report it (older cutex). */
+  userId?: string | null;
 }
 
 /** `client-token issue` stdout: one JSON object (possibly after banner lines). */
@@ -725,7 +818,8 @@ export function parseTokenIssue(stdout: string): IssuedToken | null {
     try {
       const v = JSON.parse(text) as Record<string, unknown>;
       if (typeof v.token === "string" && v.token.length > 0 && v.token.length <= 4096 && isValidTokenId(v.tokenId)) {
-        return { tokenId: v.tokenId, label: typeof v.label === "string" ? v.label : "", token: v.token, createdAt: typeof v.createdAt === "string" ? v.createdAt : "", ...(v.pending === true ? { pending: true } : {}) };
+        const userId = typeof v.userId === "string" && v.userId ? v.userId : v.userId === null ? null : undefined;
+        return { tokenId: v.tokenId, label: typeof v.label === "string" ? v.label : "", token: v.token, createdAt: typeof v.createdAt === "string" ? v.createdAt : "", ...(v.pending === true ? { pending: true } : {}), ...(userId !== undefined ? { userId } : {}) };
       }
     } catch {
       // try the next candidate

@@ -1,4 +1,4 @@
-import { agentHost, sidebarOf, useApp, viewHostOf } from "../../store";
+import { agentHost, sidebarOf, useApp, viewHostOf, viewOf } from "../../store";
 import { useI18n } from "../../i18n";
 import { agentFeaturesOf, lacks } from "../../lib/agentFeatures";
 import { useAgentFeatures } from "../../lib/agentFeaturesView";
@@ -13,7 +13,8 @@ export function parentResource(s: State, hostId: string, sessionId: string | nul
 }
 export function launcherParams() {
   const s = useApp.getState(), resource = parentResource(s, agentHost(s), s.selectedId);
-  return resource?.runtime.status === "online" && agentFeaturesOf(resource).runtime === "codex" ? {} : null;
+  // Codex agents, and Claude agents whose adapter declares sideChat (claude-r21+).
+  return resource?.runtime.status === "online" && !lacks(agentFeaturesOf(resource), "sideChat") ? {} : null;
 }
 export function useFromTurnState(ref: CutexRef) {
   const { t } = useI18n();
@@ -22,7 +23,7 @@ export function useFromTurnState(ref: CutexRef) {
   const viewHost = useApp(s => ref.params.sessionId ? viewHostOf(ref.params.sessionId) : agentHost(s));
   const resource = useApp(s => parentResource(s, ref.hostId, ref.params.sessionId ?? null));
   const features = ref.hostId === viewHost ? focusFeatures : agentFeaturesOf(resource);
-  return lacks(features, "sideChat") ? { disabledReason: t("side-chat.codexOnly") }
+  return lacks(features, "sideChat") ? { disabledReason: t("side-chat.runtimeUnsupported") }
     : resource?.runtime.status !== "online" ? { disabledReason: t("side-chat.offline") } : null;
 }
 export function useSideTab({ instance, hostId }: SideTabProps<SideState>) {
@@ -33,8 +34,7 @@ export function useSideTab({ instance, hostId }: SideTabProps<SideState>) {
 export function useTurnLabel(hostId: string, sessionId: string, turnId: string | null | undefined) {
   return useApp(s => {
     if (!turnId) return "—";
-    if (viewHostOf(sessionId) !== hostId) return turnId;
-    const view = s.sessions[sessionId], index = view?.timeline.turns.findIndex(t => t.id === turnId) ?? -1;
+    const view = viewOf(s, hostId, sessionId), index = view?.timeline.turns.findIndex(t => t.id === turnId) ?? -1;
     return view && !view.older && index >= 0 ? `#${index + 1}` : turnId;
   });
 }

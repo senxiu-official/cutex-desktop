@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import type { DaemonState, HostsState } from "../src/shared/ipc";
 import type { NotifyOccurrence } from "../src/renderer/src/lib/notifyEvents";
+import { viewKey } from "../src/renderer/src/lib/viewKey";
 
 const mock = vi.hoisted(() => {
   const listeners = new Map<string, Set<(value: unknown) => void>>();
@@ -260,12 +261,67 @@ describe("an agent of a host other than the focus (multi-host sidebar, P1 2a)", 
     expect(sessionCalls.every((c) => c.host === WORKSTATION)).toBe(true);
     expect(sessionCalls.map((c) => c.method)).toContain("subscribe");
     // An event of the same id from the focus host is not this view's.
-    const before = store.getState().sessions.w1;
+    const before = store.getState().sessions[viewKey(WORKSTATION, "w1")];
     expect(before).toBeDefined();
     fire("sessionStatus", { hostId: "local", epoch: "local-1", sessionId: "w1", status: "retrying" });
-    expect(store.getState().sessions.w1).toBe(before);
+    expect(store.getState().sessions[viewKey(WORKSTATION, "w1")]).toBe(before);
     fire("sessionStatus", { hostId: WORKSTATION, epoch: `${WORKSTATION}-1`, sessionId: "w1", status: "retrying" });
-    expect(store.getState().sessions.w1?.connection).toBe("retrying");
+    expect(store.getState().sessions[viewKey(WORKSTATION, "w1")]?.connection).toBe("retrying");
+  });
+
+  // Panes step 1c: views are keyed by host + id (lib/viewKey), so the same id on two hosts keeps two views.
+  const BOOT = () => ({ native: null, historyPage: null, checkpoint: { streamId: "s", cursor: 0 }, cutexState: { runtime: { runtimeGeneration: 1 }, userInputQueue: [], pendingServerRequests: [], agentBusMessages: [], agentBusSentMessages: [], ownerNotifications: [] } });
+  it("the same session id on two hosts keeps two views: opening one neither replaces nor evicts the other's", async () => {
+    mock.responses.set(`${WORKSTATION}:sidebar`, sidebarOf([["a1", "Workstation Alpha"]]));
+    mock.responses.set("bootstrap", BOOT);
+    await start();
+    allDevices();
+    await settle();
+    await store.getState().select("a1", "local");
+    await settle();
+    const local = store.getState().sessions[viewKey("local", "a1")];
+    expect(local?.loading).toBe(false);
+    mock.calls.length = 0;
+    await store.getState().select("a1", WORKSTATION);
+    await settle();
+    let s = store.getState();
+    expect(s.selectedHost).toBe(WORKSTATION);
+    // The local view stays cached as it was; the workstation one is its own.
+    expect(s.sessions[viewKey("local", "a1")]).toBe(local);
+    const remote = s.sessions[viewKey(WORKSTATION, "a1")];
+    expect(remote).toBeDefined();
+    expect(remote).not.toBe(local);
+    expect(mock.calls.filter((c) => c.method === "bootstrap").map((c) => c.host)).toEqual([WORKSTATION]);
+    // An event of the local agent does not touch the workstation view (and vice versa).
+    fire("sessionStatus", { hostId: "local", epoch: "local-1", sessionId: "a1", status: "retrying" });
+    expect(store.getState().sessions[viewKey(WORKSTATION, "a1")]).toBe(remote);
+    // Back to the local agent: its cached view shows at once (no "loading history").
+    await store.getState().select("a1", "local");
+    s = store.getState();
+    expect(s.sessions[viewKey("local", "a1")]?.loading).toBe(false);
+    expect(s.sessions[viewKey(WORKSTATION, "a1")]).toBeDefined();
+  });
+
+  it("retainView keys the live view by host; another host's agent with the same id keeps its own", async () => {
+    mock.responses.set(`${WORKSTATION}:sidebar`, sidebarOf([["w1", "Wave"], ["b2", "Workstation Beta"]]));
+    mock.responses.set("bootstrap", BOOT);
+    await start();
+    allDevices();
+    await settle();
+    await store.getState().select("w1", WORKSTATION);
+    await settle();
+    mock.calls.length = 0;
+    const release = store.getState().retainView(WORKSTATION, "b2");
+    await settle();
+    expect(store.getState().views).toEqual({ [viewKey(WORKSTATION, "b2")]: { hostId: WORKSTATION, sessionId: "b2", visible: false } });
+    expect(mock.calls.filter((c) => c.method === "subscribe").map((c) => [c.host, c.args[0]])).toEqual([[WORKSTATION, "b2"]]);
+    expect(store.getState().sessions[viewKey(WORKSTATION, "b2")]).toBeDefined();
+    expect(store.getState().sessions[viewKey("local", "b2")]).toBeUndefined();
+    release();
+    await settle();
+    expect(store.getState().views).toEqual({});
+    expect(mock.calls.filter((c) => c.method === "unsubscribe").map((c) => [c.host, c.args[0]])).toEqual([[WORKSTATION, "b2"]]);
+    expect(store.getState().sessions[viewKey(WORKSTATION, "b2")]).toBeUndefined();
   });
 
   // 2026-10-13 (host-a): a Workstation agent opened from a link in a Workstation agent's timeline (delegation card,
@@ -281,7 +337,7 @@ describe("an agent of a host other than the focus (multi-host sidebar, P1 2a)", 
     await settle();
     const s = store.getState();
     expect(s.selectedHost).toBe(WORKSTATION);
-    expect(s.sessions.w1?.error).toBeNull();
+    expect(s.sessions[viewKey(WORKSTATION, "w1")]?.error).toBeNull();
     const sessionCalls = mock.calls.filter((c) => (c.args[0] as unknown) === "w1");
     expect(sessionCalls.map((c) => c.method)).toContain("bootstrap");
     expect(sessionCalls.every((c) => c.host === WORKSTATION)).toBe(true);
@@ -325,7 +381,7 @@ describe("an agent of a host other than the focus (multi-host sidebar, P1 2a)", 
     await store.getState().select("w1");
     await settle();
     expect(store.getState().selectedHost).toBe("local");
-    expect(store.getState().sessions.w1?.error).toMatch(/^session_not_found/);
+    expect(store.getState().sessions[viewKey("local", "w1")]?.error).toMatch(/^session_not_found/);
     // Its snapshot arrives; 重新加载 moves the view to workstation.
     mock.responses.set(`${WORKSTATION}:sidebar`, sidebarOf([["w1", "Wave"]]));
     await store.getState().refreshHostSidebar(WORKSTATION);
@@ -336,7 +392,7 @@ describe("an agent of a host other than the focus (multi-host sidebar, P1 2a)", 
     const s = store.getState();
     expect(s.selectedId).toBe("w1");
     expect(s.selectedHost).toBe(WORKSTATION);
-    expect(s.sessions.w1?.error).toBeNull();
+    expect(s.sessions[viewKey(WORKSTATION, "w1")]?.error).toBeNull();
     expect(mock.calls.filter((c) => c.method === "bootstrap").map((c) => c.host)).toEqual([WORKSTATION]);
     expect(mock.calls.filter((c) => c.method === "unsubscribe").map((c) => [c.host, c.args[0]])).toEqual([["local", "w1"]]);
   });
@@ -349,12 +405,12 @@ describe("an agent of a host other than the focus (multi-host sidebar, P1 2a)", 
     mock.responses.set(`${WORKSTATION}:bootstrap`, () => (fail ? Promise.reject(new Error("cutex management API unreachable")) : { native: null, historyPage: null, checkpoint: { streamId: "s", cursor: 0 }, cutexState: { runtime: { runtimeGeneration: 1 }, userInputQueue: [], pendingServerRequests: [], agentBusMessages: [], agentBusSentMessages: [], ownerNotifications: [] } }));
     await store.getState().select("w1", WORKSTATION);
     await settle();
-    expect(store.getState().sessions.w1?.error).toMatch(/unreachable/);
+    expect(store.getState().sessions[viewKey(WORKSTATION, "w1")]?.error).toMatch(/unreachable/);
     fail = false;
     mock.calls.length = 0;
     await store.getState().reloadSession("w1");
     await settle();
-    expect(store.getState().sessions.w1?.error).toBeNull();
+    expect(store.getState().sessions[viewKey(WORKSTATION, "w1")]?.error).toBeNull();
     expect(mock.calls.filter((c) => c.method === "bootstrap").map((c) => c.host)).toEqual([WORKSTATION]);
   });
 
@@ -529,33 +585,33 @@ describe("runtime recovery after an offline-start conflict", () => {
     await open();
     sessionEvent("a1", failed());
     await settle();
-    expect(store.getState().sessions.a1?.startError).toBe(error);
+    expect(store.getState().sessions[viewKey("local", "a1")]?.startError).toBe(error);
     sessionEvent("a1", started());
-    expect(store.getState().sessions.a1?.startError).toBeNull();
+    expect(store.getState().sessions[viewKey("local", "a1")]?.startError).toBeNull();
   });
 
   it("does not let a replayed old-generation turn lower the runtime fence or dismiss a current failure", async () => {
     await open();
     sessionEvent("a1", failed());
     sessionEvent("a1", started("a1", 2));
-    expect(store.getState().sessions.a1?.runtimeGeneration).toBe(3);
-    expect(store.getState().sessions.a1?.startError).toBe(error);
+    expect(store.getState().sessions[viewKey("local", "a1")]?.runtimeGeneration).toBe(3);
+    expect(store.getState().sessions[viewKey("local", "a1")]?.startError).toBe(error);
   });
 
   it("a child turn does not dismiss the parent's startup failure", async () => {
     await open();
-    const view = store.getState().sessions.a1!;
+    const view = store.getState().sessions[viewKey("local", "a1")]!;
     view.timeline.threadId = "thread-a1";
     sessionEvent("a1", failed());
     sessionEvent("a1", started("a1", 3, "child-thread"));
-    expect(store.getState().sessions.a1?.startError).toBe(error);
+    expect(store.getState().sessions[viewKey("local", "a1")]?.startError).toBe(error);
   });
 
   it.each(["cutex/runtime/online", "cutex/runtime/onlineRequested"])("clears failure on %s", async (method) => {
     await open();
     sessionEvent("a1", failed());
     sessionEvent("a1", { ...cutex("a1", method, {}), correlation: { runtimeGeneration: 4 } });
-    expect(store.getState().sessions.a1?.startError).toBeNull();
+    expect(store.getState().sessions[viewKey("local", "a1")]?.startError).toBeNull();
   });
 
   it("a late failure without a generation rechecks runtime state and clears when another launch already succeeded", async () => {
@@ -563,7 +619,7 @@ describe("runtime recovery after an offline-start conflict", () => {
     mock.responses.set("local:sidebar", () => snapshot("a1", "online", 4));
     sessionEvent("a1", failed());
     await settle();
-    expect(store.getState().sessions.a1?.startError).toBeNull();
+    expect(store.getState().sessions[viewKey("local", "a1")]?.startError).toBeNull();
     expect(store.getState().sidebar?.active[0]?.runtime.status).toBe("online");
   });
 
@@ -571,8 +627,8 @@ describe("runtime recovery after an offline-start conflict", () => {
     await open();
     sessionEvent("a1", failed());
     await settle();
-    expect(store.getState().sessions.a1?.startError).toBe(error);
-    expect(store.getState().sessions.a1?.queue.map((q) => q.queueId)).toEqual(["q1"]);
+    expect(store.getState().sessions[viewKey("local", "a1")]?.startError).toBe(error);
+    expect(store.getState().sessions[viewKey("local", "a1")]?.queue.map((q) => q.queueId)).toEqual(["q1"]);
     expect(mock.calls.filter((c) => c.method === "sessionAction" || c.method === "submitInput")).toEqual([]);
   });
 
@@ -583,7 +639,7 @@ describe("runtime recovery after an offline-start conflict", () => {
     mock.responses.set("queueList", () => ({ items }));
     sessionEvent("a1", cutex("a1", "cutex/userInput/removed", {}));
     await settle();
-    expect(store.getState().sessions.a1?.startError).toBeNull();
+    expect(store.getState().sessions[viewKey("local", "a1")]?.startError).toBeNull();
   });
 
   it("reconciles on the agent's own host, leaving the focus host alone", async () => {
@@ -596,7 +652,7 @@ describe("runtime recovery after an offline-start conflict", () => {
     mock.responses.set(`${WORKSTATION}:sidebar`, () => snapshot("w1", "online", 4));
     sessionEvent("w1", failed("w1"), WORKSTATION);
     await settle();
-    expect(store.getState().sessions.w1?.startError).toBeNull();
+    expect(store.getState().sessions[viewKey(WORKSTATION, "w1")]?.startError).toBeNull();
     expect(store.getState().byHost[WORKSTATION]?.sidebar?.active[0]?.runtime.status).toBe("online");
     expect(mock.calls.filter((c) => c.method === "sidebar").map((c) => c.host)).toEqual([WORKSTATION]);
   });
@@ -641,10 +697,10 @@ describe("runtime recovery after an offline-start conflict", () => {
     finish({ items: [] });
     // Do not run the newer queue timer yet: its authoritative reply still has q1.
     for (let i = 0; i < 10; i++) await Promise.resolve();
-    expect(store.getState().sessions.a1?.startError).toBe(error);
+    expect(store.getState().sessions[viewKey("local", "a1")]?.startError).toBe(error);
     mock.responses.set("queueList", () => ({ items: [queued("q1")] }));
     await settle();
-    expect(store.getState().sessions.a1?.startError).toBe(error);
+    expect(store.getState().sessions[viewKey("local", "a1")]?.startError).toBe(error);
   });
 
   it("refreshes a rejected runtime action without replaying the mutation", async () => {

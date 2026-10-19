@@ -4,7 +4,7 @@
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
 import type { SessionHistory } from "@cutex-desktop/protocol";
-import { agentHost, hostApi, useApp, viewHostOf, type SessionView } from "../store";
+import { agentHost, hostApi, useApp, viewOf, type SessionView } from "../store";
 import { findTurn, LOOKUP_PAGE_TURNS, PageCache, singleTurn, type PageReader, type TurnLookup } from "./turnFetch";
 
 export type TurnRefResult = TurnLookup | { status: "loading" } | { status: "host-offline" } | { status: "error"; message: string };
@@ -77,7 +77,7 @@ export function lookupTurn(target: TurnTarget, retry = false): Promise<TurnRefRe
     turnId: target.turnId,
     threadId: target.threadId,
     ordinal: target.ordinal,
-    loaded: viewHostOf(target.sessionId) === target.hostId ? loadedOf(useApp.getState().sessions[target.sessionId]) : null,
+    loaded: loadedOf(viewOf(useApp.getState(), target.hostId, target.sessionId)),
     cache: referenceCache,
     read,
   }).then(
@@ -91,9 +91,9 @@ export function lookupTurn(target: TurnTarget, retry = false): Promise<TurnRefRe
 
 /** The reference card's turn: live from the loaded timeline when it is there, else looked up. */
 export function useTurnRef(target: TurnTarget): TurnRefResult {
-  const view = useApp((s) => s.sessions[target.sessionId]);
-  // The loaded view is used only when it is that host's agent (views of two hosts may share an id).
-  const host = useApp((s) => (s.sessions[target.sessionId] ? viewHostOf(target.sessionId) : null));
+  // That host's view (views are keyed by host + id: two hosts may share an id).
+  const view = useApp((s) => viewOf(s, target.hostId, target.sessionId));
+  const host = view ? target.hostId : null;
   const version = view?.version;
   const live = useMemo<TurnRefResult | null>(() => {
     if (target.hostId !== host || !view || view.loading || view.error) return null;

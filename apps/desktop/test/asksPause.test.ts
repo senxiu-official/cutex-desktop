@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { queueSendNowMode } from "../src/renderer/src/lib/delegationTurn";
 import { normalizeEntries, type MenuAction } from "../src/renderer/src/lib/contextMenu";
+import { viewKey } from "../src/renderer/src/lib/viewKey";
 
 const PAUSE = { since: "2026-10-08T12:00:00Z", by: "owner", origin: "ownerPause" as const };
 const api = vi.hoisted(() => ({
@@ -15,7 +16,7 @@ const t = (key: string) => key;
 
 async function seed(features: string[], asksPaused: typeof PAUSE | null = null) {
   const { useApp } = await import("../src/renderer/src/store");
-  useApp.setState({ features: new Set(features), sessions: { a: { asksPaused } as never } });
+  useApp.setState({ features: new Set(features), sessions: { [viewKey("local", "a")]: { asksPaused } as never } });
   return useApp;
 }
 
@@ -31,10 +32,10 @@ describe("asks pause (asks-pause-v2)", () => {
     const useApp = await seed(["asks-pause-v2"]);
     await useApp.getState().pauseAsks("a");
     expect(api.asksPause).toHaveBeenCalledWith("a");
-    expect(useApp.getState().sessions.a?.asksPaused).toEqual(PAUSE);
+    expect(useApp.getState().sessions[viewKey("local", "a")]?.asksPaused).toEqual(PAUSE);
     await useApp.getState().resumeAsks("a");
     expect(api.asksResume).toHaveBeenCalledWith("a");
-    expect(useApp.getState().sessions.a?.asksPaused).toBeNull();
+    expect(useApp.getState().sessions[viewKey("local", "a")]?.asksPaused).toBeNull();
   });
 
   it("older daemons: no calls", async () => {

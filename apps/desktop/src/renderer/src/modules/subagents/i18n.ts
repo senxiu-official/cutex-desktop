@@ -21,6 +21,13 @@ export const zhCN = {
   "subagents.claude.open": "查看这个{{subagent}}的过程",
   "subagents.claude.readOnly": "只读 · Claude 前台{{subagent}}的消息和工具调用（输出只保留摘要）",
   "subagents.claude.truncated": "记录太长，后面的内容没有保存",
+  "subagents.recent": "最近完成 · {n}",
+  "subagents.recentTitle": "最近完成的{{subagent}}",
+  "subagents.recent.background": "后台运行，没有过程记录",
+  "subagents.recent.noTranscript": "没有保存这个{{subagent}}的过程记录",
+  "subagents.outcome.completed": "完成",
+  "subagents.outcome.failed": "失败",
+  "subagents.outcome.stopped": "已停止",
 } as const;
 
 // Adds these keys to MessageKey (modules/i18nCatalog.ts collects the dictionary itself).
@@ -52,4 +59,11 @@ export const en: Record<keyof typeof zhCN, string> = {
   "subagents.claude.open": "Open this {{subagent}}'s transcript",
   "subagents.claude.readOnly": "Read-only · a Claude foreground {{subagent}}'s messages and tool calls (outputs as previews)",
   "subagents.claude.truncated": "Long transcript: later entries were not kept",
+  "subagents.recent": "Recently finished · {n}",
+  "subagents.recentTitle": "Recently finished {{subagents}}",
+  "subagents.recent.background": "Ran in the background: no transcript was kept",
+  "subagents.recent.noTranscript": "No transcript of this {{subagent}} was kept",
+  "subagents.outcome.completed": "done",
+  "subagents.outcome.failed": "failed",
+  "subagents.outcome.stopped": "stopped",
 };

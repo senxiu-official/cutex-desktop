@@ -5,7 +5,8 @@ import { createElement, useEffect, useMemo, useState } from "react";
 import { Copy, ExternalLink, FileText, FolderOpen, type LucideIcon } from "lucide-react";
 import { api, apiFor } from "../bridge";
 import { useI18n } from "../i18n";
-import { agentHost, hostApi, selectedFeatures, selectedSidebar, useApp } from "../store";
+import { hostApi, useApp } from "../store";
+import { convNotify, useConvFeatures, useConvHost, useConvScope, useConvSidebar } from "./conversationScope";
 import type { MenuEntry } from "./contextMenu";
 import { openMenuFrom } from "./contextMenu";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
@@ -43,7 +44,7 @@ function checkExists(hostId: string, abs: string): Promise<boolean> {
 
 /** `links` minus the ones whose existence check failed or is still running. */
 export function useExistingLinks(links: readonly TurnLink[]): TurnLink[] {
-  const hostId = useApp(agentHost);
+  const hostId = useConvHost();
   const [, setTick] = useState(0);
   const toCheck = links.filter((l) => l.verify && l.abs);
   const signature = toCheck.map((l) => l.abs).join("\n");
@@ -75,9 +76,11 @@ export interface FileActions {
 /** What the summary can do with paths of `sessionId`'s workspace. */
 export function useFileActions(sessionId: string): (path: string) => FileActions {
   const { t } = useI18n();
-  const sidebar = useApp(selectedSidebar);
-  const hostRead = useApp((s) => selectedFeatures(s).has(HOST_FILE_READ_FEATURE));
-  const remote = useApp((s) => agentHost(s) !== LOCAL_HOST_ID);
+  // The conversation's host (lib/conversationScope).
+  const sidebar = useConvSidebar();
+  const hostRead = useConvFeatures().has(HOST_FILE_READ_FEATURE);
+  const remote = useConvHost() !== LOCAL_HOST_ID;
+  const conv = useConvScope();
   return useMemo(() => {
     const scope = scopeFor(sidebar, sessionId);
     const root = scope ? rootFor(sidebar, scope) : null;
@@ -90,7 +93,7 @@ export function useFileActions(sessionId: string): (path: string) => FileActions
       const full = abs ?? path;
       const menu = (): MenuEntry[] => [
         preview && { label: t("conversation.turnSummary.sidePreview"), icon: icon(FileText), onSelect: () => preview() },
-        !remote && abs && { label: t("conversation.turnSummary.reveal"), icon: icon(FolderOpen), onSelect: () => void apiFor(LOCAL_HOST_ID).revealPath(abs).catch((e: unknown) => app.notify(e instanceof Error ? e.message : String(e), "error")) },
+        !remote && abs && { label: t("conversation.turnSummary.reveal"), icon: icon(FolderOpen), onSelect: () => void apiFor(LOCAL_HOST_ID).revealPath(abs).catch((e: unknown) => convNotify(conv, e instanceof Error ? e.message : String(e), "error")) },
         { label: t("conversation.turnSummary.copyPath"), icon: icon(Copy), onSelect: () => copyText(full) },
       ];
       return {
@@ -101,7 +104,7 @@ export function useFileActions(sessionId: string): (path: string) => FileActions
         menu,
       };
     };
-  }, [sidebar, sessionId, hostRead, remote, t]);
+  }, [sidebar, sessionId, hostRead, remote, t, conv]);
 }
 
 /** Default click and 打开方式 entries of a picked link. */

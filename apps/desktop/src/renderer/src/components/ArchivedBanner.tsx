@@ -8,11 +8,13 @@ import { useI18n } from "../i18n";
 import { archivedProjectOf } from "../lib/archivedAgent";
 import { restoreArchived } from "../lib/menus";
 import { restoreWithDirector } from "../lib/projectArchive";
-import { selectedSidebar, useApp } from "../store";
+import { useApp } from "../store";
+import { convSidebarOf, useConvScope } from "../lib/conversationScope";
 
 export function ArchivedBanner({ session }: { session: SessionResource }) {
   const { t } = useI18n();
-  const projects = useApp((s) => selectedSidebar(s)?.projects);
+  const conv = useConvScope();
+  const projects = useApp((s) => convSidebarOf(conv, s)?.projects);
   const project = archivedProjectOf(session, projects);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import type { DaemonState, HostsState } from "../src/shared/ipc";
 import type { NotifyOccurrence } from "../src/renderer/src/lib/notifyEvents";
+import { viewKey } from "../src/renderer/src/lib/viewKey";
 
 const mock = vi.hoisted(() => {
   const listeners = new Map<string, Set<(value: unknown) => void>>();
@@ -178,7 +179,7 @@ describe("queue row actions act on the agent they were clicked for", () => {
     await store.getState().queueRemove(queueItem("q2", "cm-2", "bye"), "a1");
     const calls = mock.calls.filter((c) => c.method === "queuePromote" || c.method === "queueRemove");
     expect(calls.map((c) => [c.host, c.method, c.args[0]])).toEqual([["local", "queuePromote", "a1"], ["local", "queueRemove", "a1"]]);
-    expect(store.getState().queueHidden.b2 ?? []).toEqual([]);
+    expect(store.getState().queueHidden[viewKey("local", "b2")] ?? []).toEqual([]);
   });
 });
 
@@ -188,9 +189,9 @@ describe("cutex/userInput/submitted for a send still in the outbox", () => {
     await store.getState().select("a1");
     await settle();
     const { newOutboxEntry } = await import("../src/renderer/src/lib/outbox");
-    store.setState({ outbox: { a1: [newOutboxEntry(null, { id: "cm-q", text: "later", strategy: "queue", placement: "queue" })] } });
+    store.setState({ outbox: { [viewKey("local", "a1")]: [newOutboxEntry(null, { id: "cm-q", text: "later", strategy: "queue", placement: "queue" })] } });
     sessionEvent("a1", cutex("a1", "cutex/userInput/submitted", { clientUserMessageId: "cm-q", input: [{ type: "text", text: "later" }], disposition: "started", turnId: "t9" }));
-    expect(store.getState().outbox.a1).toMatchObject([{ id: "cm-q", placement: "turn", state: "confirmed", turnId: "t9", promoted: true }]);
+    expect(store.getState().outbox[viewKey("local", "a1")]).toMatchObject([{ id: "cm-q", placement: "turn", state: "confirmed", turnId: "t9", promoted: true }]);
   });
 });
 
@@ -202,15 +203,15 @@ describe("interrupt & send on a followed host whose connection is replaced durin
     await settle();
     await store.getState().select("w1", WORKSTATION);
     await settle();
-    const view = store.getState().sessions.w1!;
+    const view = store.getState().sessions[viewKey(WORKSTATION, "w1")]!;
     view.timeline.activeTurnId = "turn-w";
     view.timeline.threadId = "thread-w1";
-    store.setState({ pendingSteers: { w1: [{ id: "steer-w", text: "steer text", turnId: "turn-w", baseline: 0, imageCount: 0, state: "waiting" }] } });
+    store.setState({ pendingSteers: { [viewKey(WORKSTATION, "w1")]: [{ id: "steer-w", text: "steer text", turnId: "turn-w", baseline: 0, imageCount: 0, state: "waiting" }] } });
     let release!: (v: unknown) => void;
     mock.responses.set(`${WORKSTATION}:stopTurn`, () => new Promise((r) => (release = r)));
     const operation = store.getState().interruptAndSend("tail text", []);
     await settle();
-    expect(store.getState().outbox.w1).toMatchObject([{ stage: "stopping" }]);
+    expect(store.getState().outbox[viewKey(WORKSTATION, "w1")]).toMatchObject([{ stage: "stopping" }]);
     // The workstation connection is replaced (focus stays local).
     epochs[WORKSTATION]!++;
     fire("hostsState", { ...hostsState("local"), scope: { kind: "all" } });
@@ -218,8 +219,8 @@ describe("interrupt & send on a followed host whose connection is replaced durin
     release({ paused: true, alreadyPaused: false });
     expect(await operation).toBe(false);
     await settle();
-    expect(store.getState().outbox.w1 ?? []).toEqual([]);
-    expect(store.getState().queueHandoff.w1).toBe(false);
+    expect(store.getState().outbox[viewKey(WORKSTATION, "w1")] ?? []).toEqual([]);
+    expect(store.getState().queueHandoff[viewKey(WORKSTATION, "w1")]).toBe(false);
     const drafts = await draftsOf();
     const draft = drafts.composerDrafts.read(drafts.composerDraftKey(WORKSTATION, "w1")).text;
     expect(draft).toContain("steer text");

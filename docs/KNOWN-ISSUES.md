@@ -1,6 +1,6 @@
 # Known issues
 
-Known issues in **desktop 0.1.4** with **cutex 0.1.4**. The app shows the same list under
+Known issues in **desktop 0.1.5** with **cutex 0.1.5**. The app shows the same list under
 Settings → About → Known issues from [known-issues.json](known-issues.json) (schema in
 `apps/desktop/src/shared/knownIssues.ts`): its built-in copy, and the copy on the `release` branch,
 which it fetches — so a docs push to `release` updates the list in installed apps. Change this file

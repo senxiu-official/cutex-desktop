@@ -21,9 +21,16 @@ export type SettingsGroupId = "app" | "connection" | "agents" | "tools" | "data"
 /** Group order of the settings nav (the shell owns it). */
 export const SETTINGS_GROUP_ORDER: readonly SettingsGroupId[] = ["app", "connection", "agents", "tools", "data", "system"];
 
+/**
+ * Pages folded into 主机 (连接 D plan 2026-10-19): 接入 and 互联 are its cards now (用户 is its own page
+ * again). Old links (`openSettings("peers", { anchor })`, saved params) land there; anchors unchanged.
+ */
+const FOLDED_INTO_ACCESS: ReadonlySet<string> = new Set(["remote", "peers"]);
+
 /** The settings page of the `shell.settings` main page params (default 通用). */
 export function settingsTab(params: Readonly<Record<string, string | undefined>>): SettingsTab {
-  return (params.tab as SettingsTab | undefined) ?? "general";
+  const tab = (params.tab as SettingsTab | undefined) ?? "general";
+  return FOLDED_INTO_ACCESS.has(tab) ? "access" : tab;
 }
 
 /** "c20812e · 2026-10-07 12:20" for the running desktop build, or null (dev run / unknown). */

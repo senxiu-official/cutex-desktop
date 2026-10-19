@@ -7,15 +7,16 @@
 import { useRef, useState } from "react";
 import { ArrowLeft, Plus } from "lucide-react";
 import type { AskDetail } from "../../../../shared/ipc";
-import { PEER_LABEL, PEER_LIMITS, PEER_REVIEWS, PEER_URLS_MAX, type PeerExport, type PeerPolicy, type PeerReview, type PeerView } from "../../../../shared/peers";
+import { CROSS_HOST_TELL_WAKE_FEATURE, PEER_LABEL, PEER_LIMITS, PEER_REVIEWS, PEER_URLS_MAX, peerTellWakeOf, type PeerExport, type PeerPolicy, type PeerRemoteAgent, type PeerReview, type PeerView } from "../../../../shared/peers";
 import { MaskedText } from "../../components/MaskedText";
 import { ArmedHint } from "../../components/ArmedHint";
 import { PeerParty } from "../../components/PeerParty";
 import { ArmedRemove, Button, Checkbox, EmptyState, ErrorNote, IconButton, Loading, Notice, NumberField, RefreshButton, Section, Segmented, Select, SettingRow, TextField, TextInput, Toggle } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
-import { peerPartyText, summaryFromRecord } from "../../lib/delegations";
-import { useTargetApi, useTargetSidebar } from "../../lib/targetHost";
+import { summaryFromRecord } from "../../lib/delegations";
+import { useTargetApi, useTargetFeatures, useTargetHostId, useTargetSidebar } from "../../lib/targetHost";
+import { useOwnerLocalLock } from "../../components/settings/OwnerDevices";
 import { dataFlags, useSizeFlags, widthBelow } from "../../lib/sizeFlags";
 import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
 import { usePeerResource, usePeerWrite, usePeerWrites } from "./hooks";
@@ -148,6 +149,9 @@ function PolicySections({ peer, disabled, save }: { peer: PeerView; disabled: bo
   const p = peer.policy;
   const set = (inbound: Partial<PeerPolicy["inbound"]>, outbound?: Partial<PeerPolicy["outbound"]>) => save({ inbound: { ...p.inbound, ...inbound }, outbound: { ...p.outbound, ...outbound } });
   const caps = p.inbound.assumedCaps;
+  // cross-host-tell-wake: the peer's notes may start a turn here (default off); never sent to an older cutex.
+  const wakeSupported = useTargetFeatures().has(CROSS_HOST_TELL_WAKE_FEATURE);
+  const wake = peerTellWakeOf(p);
   const sandboxKnown = SANDBOXES.some((s) => s.value === caps.sandbox);
   return (
     <>
@@ -180,6 +184,18 @@ function PolicySections({ peer, disabled, save }: { peer: PeerView; disabled: bo
         <SettingRow label={t("peers.policy.asksPerHour")}>
           <NumberField value={p.inbound.asksPerHour} range={PEER_LIMITS.asksPerHour} disabled={disabled} label={t("peers.policy.asksPerHour")} onCommit={(v) => v !== null && set({ asksPerHour: v })} />
         </SettingRow>
+        {wakeSupported && (
+          <>
+            <SettingRow label={t("peers.policy.tellWake")} hint={t("peers.policy.tellWakeHint", { label: peer.label })}>
+              <Toggle checked={wake.tellWake} disabled={disabled} label={t("peers.policy.tellWake")} onChange={(tellWake) => set({ tellWake })} />
+            </SettingRow>
+            {wake.tellWake && (
+              <SettingRow label={t("peers.policy.tellWakesPerHour")} hint={t("peers.policy.tellWakesPerHourHint")}>
+                <NumberField value={wake.tellWakesPerHour} range={PEER_LIMITS.tellWakesPerHour} disabled={disabled} label={t("peers.policy.tellWakesPerHour")} onCommit={(v) => v !== null && set({ tellWakesPerHour: v })} />
+              </SettingRow>
+            )}
+          </>
+        )}
       </Section>
       <Section title={t("peers.policy.outbound")}>
         <SettingRow label={t("peers.policy.visibility")} hint={t("peers.policy.visibilityHint", { label: peer.label })}>
@@ -213,11 +229,49 @@ function AgentsSection({ peer }: { peer: PeerView }) {
         </p>
       )}
       {r.value && r.value.agents.length === 0 && <EmptyState>{t("peers.agentsNone")}</EmptyState>}
-      {r.value && r.value.agents.length > 0 && (
-        <ul className="py-1" data-testid="peer-agents">
-          {r.value.agents.map((a) => (
+      {r.value && r.value.agents.length > 0 && <PeerAgentList peer={peer} agents={r.value.agents} />}
+    </Section>
+  );
+}
+
+/** Past this many, the list gets a search box and a status filter. */
+const AGENTS_FILTER_FROM = 10;
+const STATUS_ORDER: Record<string, number> = { busy: 0, idle: 1, offline: 2 };
+type AgentFilter = "all" | "busy" | "idle" | "offline";
+
+/** The peer's exported agents: busy first, in a scroll box; searchable past AGENTS_FILTER_FROM. */
+function PeerAgentList({ peer, agents }: { peer: PeerView; agents: readonly PeerRemoteAgent[] }) {
+  const { t } = useI18n();
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<AgentFilter>("all");
+  const many = agents.length > AGENTS_FILTER_FROM;
+  const count = (st: AgentFilter) => (st === "all" ? agents.length : agents.filter((a) => a.status === st).length);
+  const q = query.trim().toLowerCase();
+  const shown = [...agents]
+    .filter((a) => filter === "all" || a.status === filter)
+    .filter((a) => !q || [a.name, a.short, a.cutexSessionId, a.runtime].some((x) => x?.toLowerCase().includes(q)))
+    .sort((a, b) => (STATUS_ORDER[a.status] ?? 3) - (STATUS_ORDER[b.status] ?? 3) || (a.name ?? a.short).localeCompare(b.name ?? b.short));
+  return (
+    <>
+      {many && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border/60 py-2">
+          <TextInput width="w-56" value={query} placeholder={t("peers.agentsSearch")} onChange={setQuery} />
+          <Segmented
+            value={filter}
+            label={t("peers.agentsFilter")}
+            options={(["all", "busy", "idle", "offline"] as const).map((st) => ({ value: st, label: `${t(st === "all" ? "peers.agentsAll" : (`peers.agent.${st}` as MessageKey))} ${count(st)}` }))}
+            onChange={setFilter}
+          />
+        </div>
+      )}
+      {shown.length === 0 ? (
+        <EmptyState>{t("peers.agentsNoMatch")}</EmptyState>
+      ) : (
+        <ul className={`py-1 ${many ? "max-h-80 overflow-y-auto" : ""}`} data-testid="peer-agents">
+          {shown.map((a) => (
             <li key={a.cutexSessionId} className="flex items-center gap-2 border-b border-border py-1.5 text-sm last:border-b-0">
-              <PeerParty text={peerPartyText(a.name, a.short || a.cutexSessionId, peer.label)} label={peer.label} size={16} />
+              {/* On this peer's own page every agent is @peer: the name alone. */}
+              <PeerParty text={a.name || a.short || a.cutexSessionId} label={peer.label} size={16} />
               <span className="font-mono text-[11px] text-subtle">{a.short}</span>
               <span className="text-xs text-subtle">{a.runtime}</span>
               <span className={`ml-auto text-xs ${a.status === "busy" ? "text-accent" : a.status === "offline" ? "text-subtle" : "text-muted"}`}>
@@ -227,7 +281,7 @@ function AgentsSection({ peer }: { peer: PeerView }) {
           ))}
         </ul>
       )}
-    </Section>
+    </>
   );
 }
 
@@ -353,6 +407,8 @@ export function PeerDetail({ peer, onBack, onChanged, onDeleted }: { peer: PeerV
   const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const disabled = readOnly || busy;
+  // Enabling a peer is a root-identity action (this machine or SSH only); disabling stays open.
+  const lock = useOwnerLocalLock(useTargetHostId());
   const patch = async (body: Parameters<typeof api.patchPeer>[1], quiet = false) => {
     setBusy(true);
     setError(null);
@@ -391,8 +447,8 @@ export function PeerDetail({ peer, onBack, onChanged, onDeleted }: { peer: PeerV
             }}
           />
         </SettingRow>
-        <SettingRow label={t("peers.enable")} hint={peer.enabled ? undefined : t("peers.stateHint.disabled")}>
-          <Toggle checked={peer.enabled} disabled={disabled || peer.state === "removedByPeer"} label={t("peers.enable")} onChange={(enabled) => void patch({ enabled }, true)} />
+        <SettingRow label={t("peers.enable")} hint={peer.enabled ? undefined : (lock.hint ?? t("peers.stateHint.disabled"))}>
+          <Toggle checked={peer.enabled} disabled={disabled || peer.state === "removedByPeer" || (lock.locked && !peer.enabled)} label={t("peers.enable")} onChange={(enabled) => void patch({ enabled }, true)} />
         </SettingRow>
         <SettingRow label={t("peers.detail.urls")} hint={t("peers.detail.urlsHint")}>
           <UrlsEditor urls={peer.urls} disabled={disabled} onCommit={(urls) => void patch({ urls }, true)} />

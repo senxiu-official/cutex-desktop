@@ -4,7 +4,7 @@
 import { createContext, useContext, useMemo } from "react";
 import type { SidebarSnapshot } from "../../../shared/ipc";
 import { OWNER_NOTIFY_FEATURE } from "../../../shared/ownerNotify";
-import { featuresOf, focusSessionViews, pinnedOn, sidebarOf, useApp, viewHostOf } from "../store";
+import { featuresOf, focusSessionViews, hostSessionViews, pinnedOn, sidebarOf, useApp } from "../store";
 import type { Attention } from "./attentionView";
 import { ASKS_FEATURE } from "./delegations";
 import { hostDelegations, useDelegations } from "./delegationStore";
@@ -74,7 +74,7 @@ export function useScopedSidebar(): ScopedSidebar {
       const snapshot = current ?? lastKnown.get(look.id) ?? null;
       const state = hostSidebarState(look, current);
       const focus = look.id === scope.focus;
-      const views = Object.fromEntries(Object.entries(sessions).filter(([id]) => viewHostOf(id) === look.id));
+      const views = hostSessionViews(sessions, look.id);
       parts.push({ hostId: look.id, snapshot, pinned: focus ? pinned : pinnedOn(look.id), needsInput: focus ? new Set(Object.keys(pendingByAgent(views, hostWaiting))) : needsInputIds(views), chats: featuresOf(source, look.id).has("human-create-session"), statusUnknown: state === "loading", liveStatus: state === "loading" ? liveStatuses(views) : undefined });
       hosts.push({ look, state, hasRows: !!snapshot });
     }
@@ -100,7 +100,7 @@ export function useScopedAttention(model: ScopedSidebarModel, scope: HostScope):
   const result = useMemo(() => {
     const parts: HostAttentionPart[] = scope.hostsInScope.map((look) => {
       const focus = look.id === scope.focus;
-      const views = focus ? focusSessionViews({ hosts: hostsState, sessions }) : Object.fromEntries(Object.entries(sessions).filter(([id]) => viewHostOf(id) === look.id));
+      const views = focus ? focusSessionViews({ hosts: hostsState, sessions }) : hostSessionViews(sessions, look.id);
       // The focus host: also its requests seen on its host feed (agents not open here).
       const pending = pendingByAgent(views, focus ? hostWaiting : undefined);
       // Another host: its requests seen on its host feed (methods unknown: a confirmation).

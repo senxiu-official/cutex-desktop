@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DaemonService } from "../src/main/daemon";
 import type { PreloadBridge } from "../src/shared/ipc";
 import type { HostsState } from "../src/shared/hosts";
+import { viewKey } from "../src/renderer/src/lib/viewKey";
 /** The one host connection of these tests (multi-host P0: main routes by the binding's host). */
 type TestConn = { hostId: string; routingEpoch: string; daemon: DaemonService };
 /** One shown, connected host (the transport shape; P0 scope = that host). */
@@ -518,7 +519,7 @@ describe("route-scoped actual menu/store/preload/main actions", () => {
   it("runtime start is shown while cutex works and a failure stays visible on the agent", async () => {
     const agent = resource("LOCAL OLD AGENT", 7);
     agent.runtime.status = "offline";
-    store.setState({ sessions: { "same-session": { startError: null, queue: [], version: 0 } as never } });
+    store.setState({ sessions: { [viewKey("local", "same-session")]: { startError: null, queue: [], version: 0 } as never } });
     const alert = vi.fn();
     vi.stubGlobal("window", { cutex: fake.bridge, alert });
     let fail!: (error: Error) => void;
@@ -536,17 +537,17 @@ describe("route-scoped actual menu/store/preload/main actions", () => {
     fail(new Error("runtime_start_failed: object DACL is not service-private"));
     await run;
     for (let i = 0; i < 20; i++) await Promise.resolve();
-    expect(store.getState().sessions["same-session"]?.startError).toContain("object DACL is not service-private");
+    expect(store.getState().sessions[viewKey("local", "same-session")]?.startError).toContain("object DACL is not service-private");
     expect(alert).toHaveBeenCalledWith(expect.stringContaining("object DACL is not service-private"));
     expect(menus.runtimeItem(agent, key => key)?.label).toBe("menu.start");
   });
   it("a runtime start answered with a non-online status counts as failed", async () => {
     const agent = resource("LOCAL OLD AGENT", 7);
     agent.runtime.status = "offline";
-    store.setState({ sessions: { "same-session": { startError: null, queue: [], version: 0 } as never } });
+    store.setState({ sessions: { [viewKey("local", "same-session")]: { startError: null, queue: [], version: 0 } as never } });
     fake.reply = Promise.resolve({ runtimeGeneration: 2, status: "error" });
     await expect(store.getState().sessionAction("same-session", "cutex/runtime/online", { openVisibleTerminal: false })).rejects.toThrow(/error/);
-    expect(store.getState().sessions["same-session"]?.startError).toMatch(/error/);
+    expect(store.getState().sessions[viewKey("local", "same-session")]?.startError).toMatch(/error/);
   });
   it("runtime stop (click twice) preserves the originally displayed runtime generation", async () => {
     const agent = resource("LOCAL OLD AGENT", 7);

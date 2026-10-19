@@ -6,7 +6,6 @@ import { defineModule } from "../slots";
 import type { Json } from "../types";
 import { LIST, NOTE, parseList, parseNote, type ListState, type NoteState } from "./model";
 import { NotesListCard } from "./NotesListBody";
-import { NotesSettings } from "./NotesSettings";
 import { NoteActions, NoteView } from "./NoteView";
 import { draftFromTurn, startNotesSync, useTurnNotesState } from "./store";
 import { useListTab, useNoteTab } from "./tabs";
@@ -30,7 +29,6 @@ export default defineModule({
     "ref.action": [{ id: "notes.addToTurn", kinds: ["turn"], icon: StickyNote, titleKey: "notes.addToTurn", useState: useTurnNotesState, run: draftFromTurn }],
     // Inline at the end of the turn (like its file-changes line), never in a margin: owner, 2026-10-15.
     "timeline.turnAttachment": [{ id: "notes.turn", order: 200, Attachment: TurnNotes }],
-    "settings.section": [{ id: "notes.settings", page: "conversation", titleKey: "notes.settings", keywords: ["notes.showTimeline", "notes.showTimelineHint"], Section: NotesSettings }],
   },
   activate: startNotesSync,
 });

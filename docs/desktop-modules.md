@@ -1,4 +1,4 @@
-# 桌面插槽与模块约定（v1.16）
+# 桌面插槽与模块约定（v1.17）
 
 > **公开仓库说明 / Public repository note.** 本文是维护者开发时的设计记录，保留原样。文中引用的内部笔记和工作副本
 > （`docs/research/…`、`docs/reviews/…`、`docs/handoff/…`、`TODO.md`、`PROGRESS.md`、`PLAN.md`、`upstream/…`、
@@ -65,6 +65,14 @@ v1.16（2026-10-18，`feat/module-packs`；主人 2026-10-18「长痛不如短�
 经特权 scheme `cutex-module://` 只送给主窗口主 frame；renderer 用宿主对象（`__CUTEX_MODULE_HOST__`，共享 React / zustand / app 文件）
 `import()` 入口，经 §15 的 `removeModule` / `addModules` 覆盖内置版本，失败退回内置。SDK 新增 `packs.ts`（`ModulePackEntry`、
 `ModulePackHost`、`MODULE_PACK_HOST_GLOBAL`、`moduleApiSatisfies` / `moduleApiVerdict`）。试点 `claude-science`。
+v1.17（2026-10-20，窗格第 3 步；设计 `docs/research/panes-20261019.md` §2、§7 第 3 行，主人 2026-10-20 的决定在其开头）：**窗格**（§24）——
+整个窗口是窗格的摆放：左边停靠智能体列表，工作区是对话窗格（≤ 2 列），右边是工具列（原右栏）。新插槽 `pane.kind`（A 档，
+`unavailable: "hide"`）；每个 `side.component` 派生同 id 的窗格种类，每个不带 `Aside` 的 `main.page` 派生 `page:<id>`；`core.conversation`
+是外壳自己的多实例种类，右栏 `conversation.agent` 并进它（固定在那个 agent 上的对话窗格）。右栏的页 → 卡片 → 标签变成工具列 → 窗格 →
+标签：去掉多页切换（所有工具列同时在屏幕上），工具进最右一列、往下分到 3 行、再多变成最下面窗格的标签。新服务
+`services.panes.open(kind, params, { beside?, focus?, background? })`，`services.side.open` 保留为它对工具种类的别名；`services.ui.openPage`
+在聚焦的对话窗格里打开页面。§18.5 的每 agent 一份视图废止（布局全局一份）。布局只存本机 `cutex-desktop.panes`，旧 `cutex-desktop.side`
+一次性迁过去并留备份键。只加不删：`side.component` / `main.page` / `services.side` 不变。
 
 决定：主人，2026-10-09（总纲 `docs/DESIGN.md` §4.22）。读者：主线开发；GPT（按本文实现宿主包，见
 `docs/research/kutex-brief-for-gpt.md` §3 A；下称 brief）。本文是约定，改格式先改本文。行号 = 2026-10-09 `main`，
@@ -179,9 +187,10 @@ export interface SlotEntry<T extends SlotItemBase> {  // snapshot(slot) 的一�
 | B | `composer.queueSection` | `Composer.tsx:936–943`（注释里已叫 Slot 0–2） | agent 留言 v2、待处理委托、委托暂停 |
 | B | `menu.agent` | `lib/menus.tsx:191–244` | 核心、Claude 工具、委托暂停、运行时、生命周期 |
 | B | `message.action` | `lib/menus.tsx:282–317`，`MessageActions.tsx:105–171` | 复制 / 引用 / 折叠；fork / 回退 / 编辑重发 |
-| A | `side.component`（v1.4，§18） | `components/side/*`，`lib/sideLayout.ts`（原 `SidePane.tsx` 已删） | 工作区（文件、改动、预览）、diff、subagent 线程、状态分类（适配 `status:<id>`） |
+| A | `side.component`（v1.4，§18；v1.17 起它的实例是工具列里的窗格，§24） | `components/side/*`，`lib/sideLayout.ts`（原 `SidePane.tsx` 已删） | 工作区（文件、改动、预览）、diff、subagent 线程、状态分类（适配 `status:<id>`） |
 | A | `conversation.gutter` / `timeline.turnAttachment` / `ref.action` / `ref.target`（v1.4，§19） | 已声明，宿主随 P1a 接入 | 书签、批注、侧聊（GPT 返工，RFC §7.14）；成果（`artifacts`：`ref.target` 种类 `artifact` + `ref.action`，v1.7）；委托（`delegations`：`ref.target` 种类 `delegation`，2026-10-13） |
 | A | `timeline.intro`（v1.13，§19.3） | `Timeline.tsx` 会话开头出口 `modules/TimelineIntro.tsx` | intro（开场：profile 立绘 + 开场白） |
+| A | `pane.kind`（v1.17，§24） | `components/PaneHost.tsx`（工作区与工具列），`lib/paneKinds.tsx`（种类表：核心 + 贡献 + 派生），`lib/paneLayout.ts` / `lib/paneStore.ts` / `lib/paneFile.ts`，`lib/paneServices.ts`（`services.panes`） | 还没有模块直接贡献；派生：每个 `side.component`（同 id）、每个不带 `Aside` 的 `main.page`（`page:<id>`）；核心 `core.conversation` |
 | A | `timeline.codeBlockAction`（v1.14，§22） | `Markdown.tsx` 的代码块（`components.code`）→ `ReplyCodeBlock.tsx`，出口 `modules/CodeBlockActions.tsx`；范围由 `Timeline.tsx` 的 agent 回复给 | terminal ▶ 运行（Copy / Download 是 streamdown 自带，不是条目） |
 | B | `attention.source` | `lib/agentAttention.ts:56–73`，`lib/attentionView.ts:35–53` | 原生请求、审批、委托、主人通知 |
 | B | `app.overlay` | `App.tsx:94–96` | agent 列表、作业输出、菜单 / 对话框 |
@@ -781,7 +790,7 @@ PlanCard/ChecklistEntry实现在plan模块，核心plan/checklist条目仍走唯
   'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none';
   object-src / frame-src / child-src / worker-src / manifest-src / base-uri / form-action 'none'`——**完全不联网，loopback 也不行**，
   不允许 `unsafe-eval`。文档开头是宿主的 charset + CSP meta + 删 `RTC*` / `WebTransport` 构造器的脚本，再接页面原文（去掉它自己的
-  doctype）；上限 4 MiB（= `ARTIFACT_CONTENT_MAX`）。没有 bootstrap bridge、MessagePort、nonce：页面能跑自己的内联脚本，但没有任何可调用的东西。
+  doctype）；默认上限 4 MiB（= `ARTIFACT_CONTENT_MAX`），调用方可传更大的上限（分段读出的大页面，≤ 256 MiB）。没有 bootstrap bridge、MessagePort、nonce：页面能跑自己的内联脚本，但没有任何可调用的东西。
 - `./documents`（main）：`createFrameDocumentStore({ scheme })`——一次性文档（30 s 未取即过期，总数 32、每个 renderer 8），
   只出一次，响应头 `CSP; sandbox allow-scripts` + `nosniff` + `no-referrer`，URL 是该 webContents 的导航租约直到 release。
   **插件文档和 agent 页面共用 main 里同一个 store**（同一个 `cutex-plugin://frame/<id>/index.html` scheme、同一个
@@ -792,7 +801,7 @@ agent 页面（`artifacts.view` 的 `html` 预览，`text/html` / `application/x
 - renderer 只发 `{ hostId, artifactId, version }`（具体版本；`@latest` 标签先解析）到 IPC `cutex-desktop:frames`
   （`shared/frames.ts`，preload `bridge.frames`）；main（`main/frames.ts`）自己从那台主机的 `/v2/artifact-store/…/content` 取字节、
   在第一份文档之前跑 `pluginNetwork.ensure()`（WebRTC / 代理黑洞 / DoH，与插件相同），再放进共享 store。HTML 不经 renderer → main，
-  token 不离开 main。外部文件已变、非 UTF-8、被截断（> 4 MiB）→ 返回原因，视图改显示源代码。
+  token 不离开 main。外部文件已变、非 UTF-8 → 返回原因，视图改显示源代码。超过 4 MiB（`ARTIFACT_PAGE_PROMPT_BYTES`，一个内容窗口）的页面先在视图里问主人（常是内嵌音频 / 视频），主人点「显示页面」后请求带 `large: true`，main 按 4 MiB 窗口逐段读取（每段校验版本、sha256、总长和接续的 offset；cutex 在字符边界切窗口）再拼成文档，上限 256 MiB（`ARTIFACT_PAGE_MAX_BYTES`），超过仍显示源代码。
 - 视图头上「页面 / 源代码」切换（`ViewState.code`）；页面自己跳走（链接、刷新）被 main 拦下，视图显示「已拦下 · 重新加载」。
 - 不需要审批：它什么都碰不到。需要联网的东西是服务（`service_register`），由主人在自己的浏览器标签里打开。
 
@@ -817,8 +826,9 @@ agent 页面（`artifacts.view` 的 `html` 预览，`text/html` / `application/x
 | dependencies；缺失 / 循环失败；部分失败只回滚本次 | `requires.modules`，同 | 依赖不可用时级联 `unavailable` |
 | registerView（page / left / right / dialog / floating） | `main.page`、`side.component`（right，§18）、`app.overlay`；left = `conversation.gutter`（§19） | 无 floating |
 | 视图实例（JSON state、stateVersion、migrateState） | 右侧组件实例 + 放置规则（`stateVersion` / `restore`，§18）；页面仍只在内存 | — |
+| registerLayout（可摆放的视图区） | v1.17 `pane.kind` + 窗格布局（§24）：两层列 / 行，限额固定（≤ 6 个、每列 ≤ 3 个），不是任意平铺树 | 无自由浮动、无多窗口（弹出是第 6 步） |
 | registerCommand / registerEntry | `command`（`keybinding`、`composer.slash` 引用）/ `nav.primary` | 徽标 hook、`unavailable: "disable"` |
-| registerLayout / registerSurface | 不做，外壳固定 | — |
+| registerSurface | 不做，外壳固定 | — |
 | context global / project / agent，binding fixed / follow-selection，调用时冻结 | 插槽参数带上下文（`sessionId`），外壳传当前 agent；同样冻结 | — |
 | `services.agents`、`services.browser` | `services.app / agents / daemon / events / ui / notify`；无 browser | 补这些服务 |
 | 字符串标题 | `titleKey: MessageKey`（类型化 i18n） | 支持 key |
@@ -1042,10 +1052,20 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   （semver 范围对 `MODULE_API_VERSION` 求值）。插槽、`ModuleDefinition`、引擎都不变（`SLOT_SPECS` 快照不动）；包经 §15 的动态登记进入同一个宿主。
   声明快照 `module-api-1.16.d.ts`；测试：`test/modulePacks*.test.ts`（索引 / 签名 / 哈希 / 篡改 / 错误密钥 / 降级 / 中断解包 / 范围、协议、加载与回退、
   构建 → 签名 → 本机服务 → 下载 → 加载的端到端）、`packages/plugin-sdk/test/packs.test.ts`，`test/moduleSdkContract.test.ts` 有 v1.16 编译探针（`ModulePackEntry`）。
+- 2026-10-20 v1.17（§24，窗格第 3 步）：`MODULE_API_VERSION` 1.16 → 1.17，只加不删。app 层：新插槽 `pane.kind`（`PaneKindItem`、`PaneKindBinding`、
+  `PaneTitle`）、`ModuleServices.panes.open`（`PaneOpenOptions`、`PaneOpenResult`）；`SLOT_SPECS["pane.kind"] = { unavailable: "hide" }`。
+  外壳：右栏的页变成工具列（全部同时显示，去掉页按钮 `SideLane` / `SideTabStrip`、设置「右栏布局 / 页按钮位置 / 右栏收起时 / 点击当前页图标」），
+  卡片变成窗格（每列 ≤ 3 个、全部 ≤ 4 个，满了进最下面窗格做标签，可以混种类），最多 2 个工具列；放置规则（§18.6）的「otherwise 新页」
+  改成「最右一列」；§18.5 每 agent 一份视图废止；`conversation.agent` 不再是右侧组件（并进 `core.conversation`，`services.side.open` 照旧
+  接受它的 id）；页面在聚焦的对话窗格里打开（`MainView` 仍在，现在是聚焦窗格的页面）；布局存 `cutex-desktop.panes`，`cutex-desktop.side`
+  一次性迁移（§24.7）。插槽 `side.component` / `main.page`、`services.side`、`ModuleDefinition`、引擎都不变。声明快照 `module-api-1.17.d.ts`
+  （SDK 中立类型只有版本常量变化）；`test/moduleSdkContract.test.ts` 有 `pane.kind` / `services.panes` 正反例并钉住 `SLOT_SPECS`，
+  `test/modules.test.ts` 钉住插槽快照与派生种类表；`test/sideLayout.test.ts` / `test/sideDrop.test.ts` 按 §24 改写（场景编号不变，见 §24.9），
+  `test/panesStep3.test.ts`（工具区 JSON、页面窗格、迁移）、`test/panesStep2Store.test.ts`（页面跟着聚焦窗格）、`test/sideAgentViews.test.ts`（全局一份）。
 
 ## 15. 动态模块登记（v1.1，稳定基线后迁移）
 
-唯一引擎为 `@cutex-desktop/plugin-host`；共享类型来自 `@cutex-desktop/plugin-sdk`，`MODULE_API_VERSION = "1.16"`（v1.2 – v1.4、v1.6 – v1.14 只改 app 层插槽，见 §16 – §22、§18.3、§18.13、§18.14、§19.3、§19.6；
+唯一引擎为 `@cutex-desktop/plugin-host`；共享类型来自 `@cutex-desktop/plugin-sdk`，`MODULE_API_VERSION = "1.17"`（v1.2 – v1.4、v1.6 – v1.14、v1.17 只改 app 层插槽，见 §16 – §22、§24、§18.3、§18.13、§18.14、§19.3、§19.6；
 SDK / 引擎的类型除版本常量外不变；v1.5 加多主机输入与 `ctx.hosts`，见 §4、§6；v1.15 加 `ModuleRequires.component`，引擎不看它，见 §12.1；v1.16 加模块包入口 / 宿主对象类型和 `moduleApi` 范围求值，见 §23）。
 原有内置模块定义、插槽形状、prefs key、主机和 agent 门控保持 v1 行为。
 
@@ -1224,6 +1244,13 @@ interface NotifyDelivery { key: string; event: string; eventTitle: string; level
 
 ## 18. 右侧区 `side.component`（v1.4）
 
+> **v1.17 起被 §24 取代的部分**（窗格）：右侧区是工作区右边的**工具列**。页 = 工具列（≤ 2 列，**全部同时在屏幕上**，没有页按钮 /
+> 页标签条 / 多页切换，§18.3 的页按钮、页操作、「右栏布局」等设置作废）；卡片 = 窗格（每列 ≤ 3 个、全部 ≤ 4 个，再多 = 最下面窗格的标签，
+> 可以混种类，§18.4「同种组件在一页里只有一张卡片 / 永不混放」作废）；放置（§18.6）的「otherwise: 新页」改为最右一列，满了见 §24.5；
+> §18.5 的每 agent 一份视图**废止**；持久化（§18.11）改存 `cutex-desktop.panes` 的工具区（§24.6）。其余照旧有效：条目类型与 Body 参数
+> （§18.2）、绑定与可见性规则（§18.5 表格）、覆盖与菜单（§18.7，「页」读作「列」）、打开服务（§18.8）、状态分类（§18.9）、实例层（§18.10）、
+> 保持挂载与后台持有（§18.13、§18.14）。
+
 规范来源：RFC `docs/research/right-panel-rfc-20261009.md` §3–§5（设计理由、例子、风险都在那里）；本节是约定的摘要，
 改格式先改本节。P0 实现：`feat/side-p0`。
 
@@ -1337,7 +1364,11 @@ interface NotifyDelivery { key: string; event: string; eventTitle: string; level
 可见卡片的页（别的 agent 的内容、只剩休眠实例）**不出现在页按钮里**（主人 2026-10-11，RFC §13 D27′，取代「变暗留在原位」）。
 `host` / `workspace` / `follow` 绑定的页对它适用的每个 agent 都出现。这修掉了旧 `sidePane` 的串台。
 
-**每个 agent 一份视图**（D27′）：右栏开 / 关和在看的页按 agent 记住（`layout.views[<cutex session id>] = { open, page, at }`，
+**v1.17 废止**（§24：布局全局一份，主人 2026-10-20）：下面这段「每 agent 一份视图」不再成立——工具列的开 / 关和聚焦的列对所有 agent
+都一样，切 agent 不换视图，只按绑定换内容（没有当前 agent 可见内容的列不上屏幕；当前 agent 的最后内容关掉时工具区收起，
+`closeIfEmptied` 照旧）；`layout.views` 不再读写，旧存档里的 `views` 只在迁移时用一次（§24.7）。原文留作记录：
+
+~~**每个 agent 一份视图**（D27′）~~：右栏开 / 关和在看的页按 agent 记住（`layout.views[<cutex session id>] = { open, page, at }`，
 没有选中 agent 时键 `∅`），切 agent = 存下旧的、换上新的；最大化 / 全屏也按 agent，只在内存。没有记录的新 agent = 收起；
 恢复时它在这里已经没有内容 = 收起（例外：它自己特意打开的空右栏 / 启动页，记成 `page: null`，仍打开）；在当前 agent 上关掉它最后的
 内容 = 它的右栏收起；再打开任何东西 = 重新打开。启动页（空页）属于打开它的 agent，切走时丢掉。全窗口 / 普通页面（设置等）不改选中
@@ -2122,3 +2153,165 @@ export const messages: Record<string, Record<string, string>>; // 语言 → { "
 5. 旧版本保留几个？**只留当前一个**；要回旧版本就从索引重新下载（索引保留旧版本项）。
 6. 包要不要 minAppVersion？**不要**：`moduleApi` + 宿主导入清单已经能说「需要更新 app」。
 7. 内置模块的版本从哪来？**`pack.json`**；没有 `pack.json` 的模块不能被包覆盖（加载时拒绝，避免覆盖不打算做包的模块）。
+
+## 24. 窗格（v1.17）
+
+设计与主人决定：`docs/research/panes-20261019.md`（§1 概念、§2 契约、§4 摆放、§7 第 3 行；开头是主人 2026-10-20 的回答：右栏多页去掉；
+布局全局一份，窗格分「跟随对话」和「固定」；布局只存本机）。本节是约定；第 4 步起（小片托盘、最大化、LRU 限额、拖放分割合并、键盘）
+改这里。
+
+### 24.1 概念与外壳文件
+
+**窗格**：屏幕上的一个矩形，带标题头，可以有多个标签；每个标签是一个**实例** `{ kind, binding, params, state }`。整个窗口是窗格的摆放，
+两层：一行**列**，每列竖着分若干**行**（窗格）。列分两个区域：
+
+| 区域 | 列 | 谁管 | 宽度 |
+|---|---|---|---|
+| 左停靠 | 智能体列表（`core.agents`，`dock: "left"`，不参与平铺） | `Sidebar.tsx` | `sidebarWidth`，Ctrl+B 开合（第 5 步：头像细栏） |
+| 工作区 | 对话窗格，≤ 2 列，每列 1 个窗格（第 2 步） | `lib/paneStore.ts`（跟着选中的 agent） | 份额，列之间的分隔条可拖 |
+| 工具区 | 工具列（原右栏的页），≤ 2 列，每列 ≤ 3 个窗格（原卡片） | `lib/sideLayout.ts`（纯函数，页 = 列、卡片 = 窗格）+ `lib/sideLayoutStore.ts` | `appearance.sidePaneWidth` = **一个**工具列的宽度，两列在屏幕上时工具区 = 2 × 它（不超过对话留下的地方）；把手拖的是整个工具区；「并排 / 让位 / 悬浮 / 窄窗口抽屉」照 §18.3 |
+
+外壳文件（不点名功能，`test/modules.test.ts` 扫描）：`components/PaneHost.tsx`（工作行）、`components/side/*`（工具列，`SideArea.tsx` 并排画出
+每个工具列 = `SidePageView.tsx`）、`lib/paneLayout.ts`（布局模型、JSON 校验、工具区与 JSON 互转）、`lib/paneStore.ts`、`lib/paneFile.ts`
+（存储与迁移）、`lib/paneKinds.tsx`（种类表）、`lib/paneServices.ts`（`services.panes`）。实例照旧画在根部固定层
+（`SideInstanceLayer`，§18.10）：窗格只放占位，在列之间 / 行之间移动、合并、最大化都只换占位，**实例不重挂载**（终端、浏览器状态都在）。
+
+**跟随 / 固定**：工具窗格的内容按绑定（§18.5 表格）跟着**聚焦的对话**走——文件树、改动、状态分类（`follow`），某 agent 的预览、diff、
+侧聊（`agent`：那个 agent 聚焦时可见），工作区终端（`workspace`），主机级的浏览器、成果预览（`host`：固定，对那台主机的所有 agent 都在）。
+对话窗格是固定的：每个绑着一个 agent。没有聚焦 agent 可见内容的窗格不上屏幕，整列都没有就整列不上屏幕（形状不变，内容按绑定）。
+
+### 24.2 插槽 `pane.kind`
+
+`modules/slots.ts`：
+
+```ts
+type PaneKindBinding = "agent" | "host" | "follow" | "none";
+interface PaneTitle extends SideTabInfo { icon?: Icon }                // 标签、小片（第 4 步）、标题栏共用
+
+interface PaneKindItem<S extends Json, P extends Json> extends SessionItemBase {   // 条目 id = 种类 id
+  titleKey: MessageKey; icon: Icon;
+  instances: "single" | "multi";
+  binding: PaneKindBinding;
+  parseParams(params: Json): P | null; dedupeKey?(p: P): string;
+  init(p: P, previous: S | null): S; restore?(raw: Json, version: number): S | null; stateVersion?: number; persist?: boolean; // state ≤ 4 KiB
+  useTitle(props: SideTabProps<S>): PaneTitle;
+  Body: ComponentType<SideBodyProps<S>>; Actions?: ComponentType<SideBodyProps<S>>;
+  minSize?: { w: number; h: number };   // 缺省 280 × 120
+  tile?: boolean;                        // 能进平铺（缺省 true）
+  dock?: "left" | null;                  // 只有智能体列表是 "left"
+  popOut?: boolean;                      // 能弹出成独立窗口（第 6 步，缺省 false）
+  keepAlive?: "unmount" | "hidden"; onClose?; closeConfirm?; toRef?; fromRef?; launcher?: SideLauncher;
+}
+```
+
+- 是 `SideComponentItem`（§18.2）的超集，字段语义相同；不同的只有 `instances`（`single` = 原 `singleton`）、`binding`（四种模式，代替
+  `defaultBinding`：`follow` = 跟着聚焦的对话；`agent` = 绑一个 agent；`host` = 绑主机；`none` = 不绑，页面）和 `useTitle`（= `useTab`）。
+- `unavailable: "hide"`：模块停止 → 它的实例休眠（保留、不显示），模块回来自动恢复，同 §18.2。
+- 贡献的种类由工具区放置（`lib/paneKinds.tsx` `sideItemOf` 把它当成一个 side 组件交给 §18 的引擎：页组 = 种类 id，没有这个页组的列时进最右一列，
+  `binding: "none"` 按焦点主机的 `host` 绑定）。v1.17 还没有模块直接贡献 `pane.kind`。
+
+### 24.3 布局 JSON
+
+```json
+{ "v": 1,
+  "dock": { "left": { "kind": "core.agents", "mode": "open", "width": 256 } },
+  "cols": [ { "w": 0.5, "rows": [ { "pane": "main", "h": 1 } ] },
+            { "w": 0.5, "rows": [ { "pane": "c2", "h": 1 } ] },
+            { "w": 1, "area": "tools", "id": "p1", "groups": ["workspace"], "rows": [ { "pane": "t-c2", "h": 0.4 }, { "pane": "t-c4", "h": 0.6 } ] } ],
+  "panes": { "main": { "tabs": ["main"], "active": "main", "at": 1739 },
+             "t-c2": { "tabs": ["t-i1"], "active": "t-i1", "at": 1700, "kind": "workspace.files", "collapsed": false } },
+  "instances": { "main": { "kind": "core.conversation", "binding": { "kind": "agent", "hostId": "local", "sessionId": "…" }, "params": {}, "state": null },
+                 "t-i1": { "kind": "workspace.files", "binding": { "kind": "follow", "hostId": "local" }, "params": {}, "state": null, "key": "∅", "v": 1, "pinned": false, "at": 1700 } },
+  "tools": { "open": true, "focus": "p1", "overrides": {}, "seq": 4 },
+  "chips": [], "focus": "main", "max": null }
+```
+
+- 工作区的列没有 `area`；工具列 `area: "tools"`，带引擎的页 id、页组、名字；**每个区域的 `w` 各自合计为 1**（工具区的像素宽度是
+  屏幕上的工具列数 × `appearance.sidePaneWidth`）。每列 1–3 行，`h` 合计为 1；屏幕上 ≤ 6 个窗格；工具列 ≤ 2 个。
+- 工具区的窗格 / 实例 id 前缀 `t-`（引擎的 `c…` / `i…`）；窗格的 `kind` = 它的家种类（最初为它而建的种类：排序、最小高度、菜单名），
+  `collapsed` = 折叠成标题头；实例多 `key`（去重键）、`v`（state 版本）、`pinned`（保留，不是预览）、`at`（最近使用）。`tools` = 工具区开 / 关、
+  聚焦的工具列、覆盖（§18.7）、id 计数。
+- 绑定比种类的模式多一种 `workspace`（实例的具体绑定，§18.5）。
+- 校验 `validateLayout`（不信任存档）；`splitLayout` / `joinLayout` 拆成两个区域 / 合回去；`toolPartOf` / `toolRawOf` 是引擎布局与工具区 JSON 的
+  无损互转（读回经 `sanitizeLayout`）。
+
+### 24.4 种类从哪来
+
+| 来源 | 种类 id | instances / binding | 画在哪 |
+|---|---|---|---|
+| 外壳 | `core.conversation` | multi / agent（去重 = 主机 + session） | 工作区（`PaneHost` 自己画，带 `ConversationScope`） |
+| `pane.kind` 条目 | 条目 id | 条目自己的 | 工具区 |
+| 每个 `side.component`（含状态分类派生的 `status:<id>`，§18.9） | **同 id** | singleton → single，multi → multi；`agent` / `workspace` / `follow` → follow，`host` → host | 工具区（就是原来的 side 组件实例） |
+| 每个不带 `Aside` 的 `main.page` | `page:<页面 id>` | single / none；params = `PageParams`，只在内存 | 聚焦的对话窗格里，盖在它的对话上 |
+
+- 带 `Aside` 的页面（设置）**不派生**，仍是全窗口页（Aside 代替智能体列表，工具区隐藏）。
+- 右栏的 `conversation.agent`（另一个 agent 的实时对话，2026-10-18）**并进 `core.conversation`**：它不再是 side 组件；agent 菜单「在侧边打开」、
+  ＋ ▸ 智能体、`services.side.open("conversation.agent", { sessionId }, { binding: { kind: "host", hostId } })` 都打开一个固定在那个 agent 上的对话窗格
+  （在聚焦对话的旁边；`background` = 不抢焦点）。
+- **页面在窗格里**：`services.ui.openPage(page, params)` 把页面作为聚焦对话窗格的一个标签打开、盖在对话上（对话标签还在）；每个窗格最多一个页面，
+  每个页面最多在一个窗格里（在别的窗格开同一页 = 从那里移过来）。`closePage`、普通打开 agent（`select`）、窗格头的 × = 关掉页面、露出对话。
+  聚焦另一个窗格时 `view` 变成那个窗格的页面或对话。store 的 `MainView`（`view`）保留给它的读者，现在 = 聚焦窗格的页面（完全退休留到以后）。
+
+### 24.5 打开规则、服务与限额
+
+```ts
+services.panes.open(kind: string, params?: Json, opts?: { beside?: boolean; focus?: boolean; background?: boolean }): PaneOpenResult;
+type PaneOpenResult = { status: "opened"; kind: string; paneId: string | null; instanceId: string | null }
+  | { status: "unavailable"; reason: /* services.side.open 的原因 */ } | { status: "stale" };
+```
+
+- `core.conversation`：params `{ sessionId, hostId? }`（缺省 = 选中 agent 的主机）。普通 = 在聚焦的对话窗格里（已经开着 = 聚焦那个窗格）；
+  `beside` = 在它旁边新开一列（满 2 列 = 替换另一列）；`background` = 同 `beside` 但焦点不动。
+- `page:<id>`：= `services.ui.openPage`（聚焦的对话窗格里）。
+- 工具种类：= `services.side.open(kind, params, { reveal: true, focus, background })`（§18.8）。`services.side.open` 保留，是工具种类的别名
+  （外加上面的 `conversation.agent`）。
+- **工具放置**（`lib/sideLayout.ts` `place()`，§18.6 的顺序不变，「页」= 列）：复用 → 预览就地替换 → 选列（显式 → 覆盖 → `prefer` →
+  otherwise：`active-page` = 聚焦的列，缺省 = **最右一列**；一列都没有才新建一列；新列只来自覆盖、显式、菜单「移到新的一列」和拖放）→ 选窗格
+  （这一列有这种的窗格 → 加标签；还有空间 → 按 `order` 新开一个窗格；**这一列满了** → 别的列里这种的窗格 → 别的列还有空间 → 这一列最下面窗格的
+  标签，可以混种类）。
+- **限额**（`lib/paneLayout.ts` 常量）：屏幕上 ≤ 6 个窗格（`MAX_VISIBLE_PANES`）、每列 ≤ 3 个（`MAX_ROWS`）、对话 ≤ 2 列、工具列 ≤ 2 列
+  （`MAX_TOOL_COLUMNS`）、工具窗格合计 ≤ 4（`MAX_TOOL_PANES` = 6 − 2 列对话）。所有改布局的操作之后 `fitLayout` 保证限额（多出来的窗格
+  变成第三个窗格的标签）；拖放和菜单要超出限额时拒绝（拖动提示「不能放这里」）。小片托盘、LRU 收起、`minSize` 的列宽判断是第 4 步。
+- 已经开着：聚焦并闪一下（启动器、`reveal`）。所有工具列都在屏幕上，所以启动器的「当前页」= 有这种可见窗格的列（没有 = 聚焦的列），
+  规则同 §18.3（折叠 → 展开，可见 → 聚焦并闪一下）。Ctrl+Shift+1…9 = 聚焦第 n 个工具列；Ctrl+Shift+N = 新的一列（空列，放启动器）。
+
+### 24.6 持久化
+
+localStorage `cutex-desktop.panes` = `{ v: 1, layouts: { "host:<焦点主机>": Layout } }`：**只存本机**、按焦点主机一份、**对所有 agent 一份**。
+两个 store 各写自己的区域、保留存档里另一个区域（同一个键的读改写）：`lib/paneStore.ts` 写工作区（不存页面标签），`lib/sideLayoutStore.ts`
+写工具区（`prepareForSave`：不存 `persist: false`、超过 4 KiB 的 state、空的启动器列；每范围 ≤ 200 个实例、覆盖 ≤ 100 条，§18.11）。恢复时丢掉
+已删除 agent 的对话窗格和工具实例、`restore` 返回 null 的实例；最大化 / 全屏不恢复；「启动时恢复」关掉时只留覆盖。
+
+### 24.7 从 `cutex-desktop.side` 迁移（一次）
+
+两个 store 第一次读之前都调 `migrateSideOnce()`（`lib/paneFile.ts`，幂等）：
+
+1. 读 `cutex-desktop.side`（v1.16：页 → 卡片 → 标签，带每 agent 视图）；每个范围 `host:<id>`：
+2. **聚焦的 agent** = `views` 里最近用过的那个；它在看的页成为**唯一的工具列**（没有视图记录 = 存档的 `activePage`），它的开 / 关 = 工具区的开 / 关。
+3. 别的页的卡片按页的顺序并进这一列：有同种的窗格 → 成为它的标签；这一列还有空间 → 成为新窗格；否则 → 最下面窗格的标签。页组合并，
+   覆盖指向这一列。**不丢任何实例**：参数 / state、去重键、保留标记、最近使用都原样带过来。
+4. `conversation.agent` 卡片离开工具区，它们的 agent 成为工作区的对话列（在已有对话旁边，满 2 列为止；不抢焦点）。
+5. 写进 `cutex-desktop.panes` 的同一范围（已有的工作区保留；已有工具区的范围不覆盖），原值整份放到备份键 `cutex-desktop.side.v1-backup`
+   （应用不再读它），删掉 `cutex-desktop.side`。
+
+### 24.8 外壳行为摘要
+
+- 工作区一个对话窗格时 DOM 与以前相同（没有窗格头）；两列时每列一个细窗格头（agent、主机、页面名、×：有页面时 × 关页面）。
+- 工具区：`SideArea.tsx` 把屏幕上的工具列（`columnsOnScreen`：对聚焦 agent 有内容的列 + 聚焦的空列）并排画，列之间 8 px；每列是
+  `SidePageView.tsx`（窗格、行间可拖的缝）；窗格头 = `SideCard.tsx`（标签行；混种类时用当前标签的种类画图标和操作）。工具区开着但没有
+  任何窗格时显示空状态和启动器；开着、只有别的 agent 的内容时不显示。
+- 拖放（§18.7 表格，`lib/sideDrop.ts` / `sideDnd.ts`）照旧：窗格头 / 窗格之间的缝 = 列内移动或移到别的列；工具区左缘条带与工具区以外 =
+  新的一列（到 2 列就拒绝）；会超出限额的放下被拒绝。页按钮那几行（药丸、标签条）已经没有可拖的目标。
+
+### 24.9 测试
+
+`test/paneLayout.test.ts`（布局、校验、对话列）、`test/panesStep3.test.ts`（工具区 JSON 互转、两个区域的拆合、页面窗格、迁移、两个 store 互不覆盖）、
+`test/panesStep2Store.test.ts`（页面跟着聚焦窗格、不存页面）、`test/sideLayout.test.ts`（§18.6 / RFC §4.4 的 13 个场景按本节改写，编号不变；
+`foldPages`）、`test/sideDrop.test.ts`（§3.7 表格，两列的世界，超限拒绝）、`test/sideAgentViews.test.ts`（全局一份）、`test/sideLaunchers.test.ts`、
+`test/modules.test.ts`（`pane.kind` 快照与派生种类表、外壳扫描）、`test/moduleSdkContract.test.ts`（类型正反例、`SLOT_SPECS`）。
+
+### 24.10 延后（第 4 步起）
+
+小片托盘与「—」、最大化窗格（今天的 ⤢ / ⛶ 仍是 §18.4 的卡片 / 列模式）、LRU 限额、拖窗格头 / 标签分割合并（四边 30 %）与工作区边缘新开一列、
+对话窗格里放工具标签、键盘（Ctrl+T / Ctrl+W / Ctrl+Alt+方向键 / Ctrl+Shift+D）、`minSize` 的列宽判断、左栏细栏与桌面底层（第 5 步）、弹出窗口（第 6 步）、
+`MainView` 完全退休、`lib/sideDrop.ts` / `sideDnd.ts` 里页按钮那部分的清理。

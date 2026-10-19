@@ -53,13 +53,25 @@ export function pageTitle(key: MessageKey): () => readonly PageCrumb[] {
  * The open `main.page` (null in the conversation). `entry` is undefined while the page's module
  * is off / unavailable (or the id is unknown); `waiting` = only because capabilities have not loaded.
  */
-export function useOpenPage(): { page: ItemId; params: PageParams; entry: AppSlotEntry<"main.page"> | undefined; waiting: boolean } | null {
+export function useOpenPage(): OpenPage | null {
   const view = useApp((s) => s.view);
+  return usePageOf(view.kind === "page" ? view : null);
+}
+
+export interface OpenPage {
+  page: ItemId;
+  params: PageParams;
+  entry: AppSlotEntry<"main.page"> | undefined;
+  waiting: boolean;
+}
+
+/** v1.17 (§24.4): a page a pane shows (null: none) — its entry, or why there is none (as useOpenPage). */
+export function usePageOf(target: { page: ItemId; params: PageParams } | null): OpenPage | null {
   const pages = useSlot("main.page");
   const statuses = useModuleStatuses();
-  if (view.kind !== "page") return null;
-  const entry = pages.find((e) => e.item.id === view.page);
-  const state = statuses.get(view.page.split(".")[0]!)?.state;
+  if (!target) return null;
+  const entry = pages.find((e) => e.item.id === target.page);
+  const state = statuses.get(target.page.split(".")[0]!)?.state;
   const waiting = !entry && state?.kind === "unavailable" && state.missing.waiting;
-  return { page: view.page, params: view.params, entry, waiting };
+  return { page: target.page, params: target.params, entry, waiting };
 }

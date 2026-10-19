@@ -13,7 +13,7 @@ import { USERS_FEATURE } from "../../../../shared/users";
 import { defineModule } from "../slots";
 import { ProjectUsersTab } from "./ProjectUsersTab";
 import { DEVICES_ANCHOR, PEERS_ANCHOR, USERS_ANCHOR } from "./shared";
-import { UsersPage } from "./UsersPage";
+import { UsersDevicesPart, UsersPeersPart, UsersPeoplePart } from "./UsersPage";
 
 export default defineModule({
   id: "users",
@@ -23,21 +23,35 @@ export default defineModule({
   contributes: {
     // Before 设置 (500): who sees the project, beside its members.
     "project.tab": [{ id: "users.projectTab", tab: "users", order: 450, titleKey: "users.project.tab", Body: ProjectUsersTab }],
-    // The 用户 page itself is the shell's (「你」 shows for every connection); this module adds the
-    // owner's management under it.
+    // The 访问管理 page is the shell's (a member sees their own part there); this module adds the owner's
+    // management as three of its parts: 人, 设备 and, with peers, 别的主机 → 对端主机. One `/v2/users` read
+    // (UsersPeoplePart) feeds all three.
     "settings.section": [
       {
-        id: "users.manage",
+        id: "users.people",
         page: "users",
         order: 100,
         titleKey: "users.list",
-        // Settings search finds its three cards (UsersPage, DevicesSection, PeersSection) rather than the whole section.
-        sections: [
-          { anchor: USERS_ANCHOR, titleKey: "users.list", keywords: ["users.grant", "users.alias", "users.add", "users.selfName", "users.person.title"] },
-          { anchor: DEVICES_ANCHOR, titleKey: "users.devices", keywords: ["users.devices.hint", "users.devices.pendingChip", "users.devices.pair", "users.ownerRequiresApproval", "users.revoke"] },
-          { anchor: PEERS_ANCHOR, titleKey: "users.peers", keywords: ["users.peers.hint", "users.peers.manage"], requires: { capabilities: [PEERS_FEATURE] } },
-        ],
-        Section: UsersPage,
+        sections: [{ anchor: USERS_ANCHOR, titleKey: "users.list", keywords: ["users.grant", "users.alias", "users.add", "users.selfName", "users.person.title"] }],
+        Section: UsersPeoplePart,
+      },
+      {
+        id: "users.devices",
+        page: "users",
+        order: 110,
+        titleKey: "users.devices",
+        sections: [{ anchor: DEVICES_ANCHOR, titleKey: "users.devices", keywords: ["users.devices.hint", "users.devices.pendingChip", "users.devices.pair", "users.ownerRequiresApproval", "users.revoke"] }],
+        Section: UsersDevicesPart,
+      },
+      {
+        id: "users.peers",
+        page: "access",
+        // After 互联's own cards (peers.access, 200): which user each linked host belongs to.
+        order: 250,
+        titleKey: "users.peers",
+        requires: { capabilities: [PEERS_FEATURE] },
+        sections: [{ anchor: PEERS_ANCHOR, titleKey: "users.peers", keywords: ["users.peers.hint", "users.peers.manage"] }],
+        Section: UsersPeersPart,
       },
     ],
   },

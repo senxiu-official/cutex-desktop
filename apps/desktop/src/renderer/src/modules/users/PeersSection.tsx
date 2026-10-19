@@ -21,7 +21,7 @@ export function PeersSection({ list, write, userId, onAll }: { list: UsersList; 
   const api = useTargetApi();
   const [error, setError] = useState<string | null>(null);
   const users = userOptions(list.users);
-  const openPeers = () => useApp.getState().openSettings("peers");
+  const openPeers = () => useApp.getState().openSettings("access", { anchor: "peers-list" });
   const peers = userId ? list.peers.filter((p) => p.userId === userId) : list.peers;
   return (
     <Section id={settingsAnchorId(PEERS_ANCHOR)} title={t("users.peers")} hint={t("users.peers.hint")} actions={

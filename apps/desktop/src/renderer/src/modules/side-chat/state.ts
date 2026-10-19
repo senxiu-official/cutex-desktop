@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { SIDE_FORK_BLOCKED, type SideChat, type SideOpenInput, type SideReply } from "../../../../shared/sideChat";
 import { NOTE_BODY_LIMIT, type NoteAnchor, type NoteCreate } from "../../../../shared/notes";
-import { useApp, viewHostOf } from "../../store";
+import { useApp, viewOf } from "../../store";
 import { timelineFromThreadRead } from "../../lib/timeline";
 import { services } from "../app";
 import { completedSummary, sideTimeline } from "./model";
@@ -31,6 +31,12 @@ function patch(key: string, fields: Partial<SideView>) {
   const prior = useSides.getState().views[key];
   if (prior && prior.chat.status !== "closed") useSides.setState(s => ({ views: { ...s.views, [key]: { ...prior, ...fields } } }));
 }
+/** A failed call: a chat the host no longer has (e.g. a Claude adapter restart) turns stale, else the error shows. */
+function fail(key: string, e: unknown) {
+  const view = useSides.getState().views[key];
+  if (isSideGone(e) && view) patch(key, { chat: { ...view.chat, status: "stale" } });
+  else patch(key, { error: errorText(e) });
+}
 export function sideModuleActive(active: boolean) { live = active; epoch++; watches.clear(); }
 export function setSideDraft(hostId: string, chatId: string, draft: string) { patch(sideKey(hostId, chatId), { draft }); }
 export function receiveSide(hostId: string, chat: SideChat) {
@@ -39,7 +45,7 @@ export function receiveSide(hostId: string, chat: SideChat) {
   lease(key);
   const newReply = chat.events.some(e => e.seq > (old?.chat.events.at(-1)?.seq ?? 0) && ["item/agentMessage/delta", "item/completed"].includes(e.method));
   const app = useApp.getState();
-  const parentThreadId = old?.parentThreadId ?? (viewHostOf(chat.sessionId) === hostId ? app.sessions[chat.sessionId]?.timeline.threadId ?? undefined : undefined);
+  const parentThreadId = old?.parentThreadId ?? (viewOf(app, hostId, chat.sessionId)?.timeline.threadId ?? undefined);
   useSides.setState(s => ({ views: { ...s.views, [key]: { ...(old ?? { draft: "", sending: false, summary: null, pendingMessage: null }), chat, error: null, parentThreadId,
     unread: visible.has(key) ? false : !!old?.unread || newReply } } }));
   void saveSummary(hostId, chat.id);
@@ -61,9 +67,7 @@ export function watchSide(hostId: string, chatId: string) {
       }
     } catch (e) {
       if (generation === epoch) {
-        const view = useSides.getState().views[key];
-        if (isSideGone(e) && view) patch(key, { chat: { ...view.chat, status: "stale" } });
-        else patch(key, { error: errorText(e) });
+        fail(key, e);
       }
     } finally { if (watches.get(key) === token) watches.delete(key); }
   })();
@@ -123,20 +127,20 @@ export async function sendSide(hostId: string, chatId: string): Promise<void> {
     patch(key, { pendingMessage: null });
     if (useSides.getState().views[key]?.draft === pendingMessage.text) patch(key, { draft: "" });
     watchSide(hostId, chatId);
-  } catch (e) { patch(key, { error: errorText(e) }); }
+  } catch (e) { fail(key, e); }
   finally { patch(key, { sending: false }); }
 }
 export async function interruptSide(hostId: string, chatId: string) {
   const key = sideKey(hostId, chatId), view = useSides.getState().views[key]; if (!view) return;
   const token = lease(key);
   try { const { chat } = await services.daemonFor(hostId).sideInterrupt(view.chat.sessionId, chatId); if (leases.get(key) === token) receiveSide(hostId, chat); }
-  catch (e) { patch(key, { error: errorText(e) }); }
+  catch (e) { fail(key, e); }
 }
 export async function respondSide(hostId: string, chatId: string, requestId: string | number, reply: SideReply) {
   const key = sideKey(hostId, chatId), view = useSides.getState().views[key]; if (!view) return;
   const token = lease(key);
   try { const { chat } = await services.daemonFor(hostId).sideRespond(view.chat.sessionId, chatId, requestId, reply); if (leases.get(key) === token) receiveSide(hostId, chat); }
-  catch (e) { patch(key, { error: errorText(e) }); }
+  catch (e) { fail(key, e); }
 }
 export async function closeSideChat(hostId: string, sessionId: string, chatId: string): Promise<boolean> {
   const key = sideKey(hostId, chatId);

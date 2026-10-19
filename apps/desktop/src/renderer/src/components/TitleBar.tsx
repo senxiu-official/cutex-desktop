@@ -30,7 +30,7 @@ import { openChanges } from "../lib/sideOpen";
 import { shortenHome } from "../lib/workspace";
 import { diffTotals } from "../lib/workspaceView";
 import { useOpenPage } from "../modules/react";
-import { agentHost, selectedSidebar, sessionApi, useApp } from "../store";
+import { agentHost, selectedSidebar, sessionApi, useApp, viewOf } from "../store";
 import { PageTitle } from "./PageTitle";
 import { ProjectBadge } from "./ProjectBadge";
 import { CaptionSpace, LinuxControls } from "./WindowControls";
@@ -227,7 +227,7 @@ function AgentTitle({ git }: { git: GitStatus | null }) {
   const { t } = useI18n();
   const selectedId = useApp((s) => s.selectedId);
   const sidebar = useApp(selectedSidebar);
-  const connection = useApp((s) => (s.selectedId ? s.sessions[s.selectedId] : undefined));
+  const connection = useApp((s) => (s.selectedId ? viewOf(s, agentHost(s), s.selectedId) : undefined));
   const { titleTwoLines } = useUiPrefs();
   const session = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((s) => s.cutexSessionId === selectedId);
   if (!selectedId || !session) return null;
@@ -313,7 +313,7 @@ function ProjectChip({ session }: { session: SessionResource }) {
  */
 function AgentTitleTwoLines({ session, git }: { session: SessionResource; git: GitStatus | null }) {
   const { t } = useI18n();
-  const connection = useApp((s) => s.sessions[session.cutexSessionId]);
+  const connection = useApp((s) => viewOf(s, agentHost(s), session.cutexSessionId));
   const director = useApp((s) => !!selectedSidebar(s)?.projects?.projects.some((p) => p.director_cutex_session_id === session.cutexSessionId));
   const d = git?.isRepo ? diffTotals(git) : null;
   const cwd = session.cwd ?? "";

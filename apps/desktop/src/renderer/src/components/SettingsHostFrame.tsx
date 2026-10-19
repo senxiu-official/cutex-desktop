@@ -15,7 +15,7 @@ import { setSettingsHost, useSettingsTarget, type SettingsTarget } from "../lib/
 import { TargetHostContext, useTargetFeatures } from "../lib/targetHost";
 import { useHostData, useHostScope } from "../lib/useHostScope";
 import { HostPicker } from "./HostPicker";
-import { EmptyState, Notice, PartSource, ScopeLine, Section } from "./settings/Form";
+import { EmptyState, Notice, PartSource, ScopeLine, Section, useReportsHost } from "./settings/Form";
 
 // The last data each host reported while its capabilities were known (kept across page visits:
 // opening a page of a host that is offline now still shows what it had).
@@ -64,12 +64,14 @@ function PartHeading({ title, hint, source, picker }: { title: string; hint?: st
   );
 }
 
-/** Heading of a mixed page's 「本设备」 half (its sections tag themselves 本机). */
-export function SettingsDevicePart({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+/** A mixed page's 「本设备」 half. `title` omitted: no heading, its cards tag themselves 本机 (owner 2026-10-19). */
+export function SettingsDevicePart({ title, hint, children }: { title?: string; hint?: string; children: ReactNode }) {
   return (
     <div data-settings-part="device" className="mb-4">
-      <PartHeading title={title} hint={hint} source="local" />
-      <PartSource source="local">{children}</PartSource>
+      {/* No part headings (owner 2026-10-19: one rule — a 混合设置 page's cards are tagged). */}
+      <PartSource source="local" cards>
+        {children}
+      </PartSource>
     </div>
   );
 }
@@ -103,6 +105,7 @@ export function SettingsHostSection({ id, title, hint, requires, children }: { i
   const access = useHostAccess(target.hostId);
   const label = scope.host(target.hostId)?.label ?? target.hostId;
   const picker = <HostPicker chip value={target.hostId} onChange={(hostId) => setSettingsHost(hostId)} mode={mode === "none" ? "label" : mode} title={t("hostPicker.settingsTitle")} />;
+  useReportsHost();
   return (
     <Section id={id} title={title} hint={hint} source="host" picker={picker}>
       {!access.isOwner ? (
@@ -133,17 +136,19 @@ function CardRequiresGate({ requires, children }: { requires: readonly string[];
 /**
  * A mixed page's host half: heading + the Settings host picker (always shows which host), then the
  * frame on the Settings target. `requires`: capabilities the whole half needs (else 「需要升级 cutex」).
+ * `title` omitted (owner 2026-10-19): no heading; each host card carries the picker in its scope tag.
  */
-export function SettingsHostPart({ title, hint, requires, children }: { title: string; hint?: string; requires?: readonly string[]; children: ReactNode }) {
+export function SettingsHostPart({ title, hint, requires, children }: { title?: string; hint?: string; requires?: readonly string[]; children: ReactNode }) {
   const { t } = useI18n();
   const target = useSettingsTarget();
   const scope = useHostScope();
   const mode = hostPickerMode(scope, target.hostId);
   const access = useHostAccess(target.hostId);
   const label = scope.host(target.hostId)?.label ?? target.hostId;
+  const picker = <HostPicker chip value={target.hostId} onChange={(id) => setSettingsHost(id)} mode={mode === "none" ? "label" : mode} title={t("hostPicker.settingsTitle")} />;
+  useReportsHost();
   return (
     <div data-settings-part="host" data-settings-part-host={target.hostId}>
-      <PartHeading title={title} hint={hint} source="host" picker={<HostPicker chip value={target.hostId} onChange={(id) => setSettingsHost(id)} mode={mode === "none" ? "label" : mode} title={t("hostPicker.settingsTitle")} />} />
       {!access.isOwner ? (
         <Section>
           <EmptyState>{t(access.pending ? "users.access.pendingSettings" : "users.access.notOwnerSettings", { host: label })}</EmptyState>
@@ -151,7 +156,9 @@ export function SettingsHostPart({ title, hint, requires, children }: { title: s
       ) : (
         // A host per frame: an explicit switch starts the half over (no state of one host shown for another).
         <SettingsHostFrame key={target.hostId} target={target}>
-          <PartSource source="host">{requires?.length ? <RequiresGate requires={requires}>{children}</RequiresGate> : children}</PartSource>
+          <PartSource source="host" cards picker={picker}>
+            {requires?.length ? <RequiresGate requires={requires}>{children}</RequiresGate> : children}
+          </PartSource>
         </SettingsHostFrame>
       )}
     </div>

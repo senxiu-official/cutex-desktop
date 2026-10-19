@@ -17,7 +17,7 @@ import { useApp } from "../../store";
 import { Avatar } from "../Avatar";
 import { SettingsSections } from "../../modules/Outlet";
 import { MessageTemplatesSection } from "./GlobalSettings";
-import { AddButton, ArmedRemove, Button, EmptyState, ErrorNote, Loading, Notice, SettingRow, Section, Segmented, Select } from "./Form";
+import { AddButton, ArmedRemove, Button, EmptyState, ErrorNote, Loading, Notice, ResetButton, SettingRow, Section, Segmented, Select } from "./Form";
 import { useTargetFeatures, useTargetHostId, useTargetSelect, useTargetSidebar } from "../../lib/targetHost";
 import { projectIcon } from "../../lib/projectIcons";
 import { useUiPrefs } from "../../lib/prefs";
@@ -248,10 +248,14 @@ function BoundarySections() {
     <>
       {error && <p className="mb-3 text-xs text-danger">{error}</p>}
       <Section id={settingsAnchorId("boundary")} title={t("security.boundary")} hint={t("security.boundary.hint")}>
-        <SettingRow label={t("security.crossProject")} hint={t(host ? "security.crossProject.hostHint" : "security.crossProject.isolatedHint")}>
+        <SettingRow
+          label={t("security.crossProject")}
+          hint={t(host ? "security.crossProject.hostHint" : "security.crossProject.isolatedHint")}
+          reset={<ResetButton disabled={security.crossProjectAccess === def} onClick={() => void patch({ crossProjectAccess: def })} />}
+        >
           <Segmented<"isolated" | "host">
             value={security.crossProjectAccess}
-            options={(security.crossProjectAccessOptions ?? ["isolated", "host"]).map((v) => ({ value: v, label: `${t(`security.crossProject.${v}` as MessageKey)}${v === def ? ` ${t("security.default")}` : ""}` }))}
+            options={(security.crossProjectAccessOptions ?? ["isolated", "host"]).map((v) => ({ value: v, label: t(`security.crossProject.${v}` as MessageKey) }))}
             onChange={(v) => void patch({ crossProjectAccess: v })}
           />
         </SettingRow>

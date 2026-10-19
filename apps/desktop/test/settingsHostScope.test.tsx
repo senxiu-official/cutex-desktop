@@ -55,6 +55,7 @@ import { resolveHostScope } from "../src/renderer/src/lib/hostScope";
 import { daemonApiOf, TargetHostContext, useTargetFeatures, useTargetHostId, useTargetSidebar } from "../src/renderer/src/lib/targetHost";
 import { HeldHostDataContext } from "../src/renderer/src/lib/heldHostData";
 import { SettingsHostFrame, SettingsHostPart } from "../src/renderer/src/components/SettingsHostFrame";
+import { Section } from "../src/renderer/src/components/settings/Form";
 import { patchHostNotificationLevels, projectMutePatch } from "../src/renderer/src/modules/notifications/targetLevels";
 import { NotificationsPage } from "../src/renderer/src/modules/notifications/NotificationsPage";
 
@@ -165,7 +166,8 @@ describe("UI-01: a picked Settings host that disconnects stays the target", () =
 });
 
 describe("UI-02: host parts edit the Settings target, not the focus host", () => {
-  const part = (children: ReactNode, requires?: string[]) => renderToStaticMarkup(h(SettingsHostPart, { title: "part.host", requires, children }));
+  // Parts have no heading (owner 2026-10-19): the host is named by its cards' tags.
+  const part = (children: ReactNode, requires?: string[]) => renderToStaticMarkup(h(SettingsHostPart, { title: "part.host", requires, children: [children, h(Section, { key: "card", title: "card", source: "host", children: "x" })] }));
 
   it("target ≠ focus: the part's pages read A and say so", () => {
     setState("online");
@@ -202,13 +204,13 @@ describe("UI-02: host parts edit the Settings target, not the focus host", () =>
     expect(html).not.toContain("data-probe");
   });
 
-  it("notifications: target ≠ focus lists A's projects and patches A only", async () => {
+  it("notifications: target ≠ focus patches A only (按项目通知 is hidden until its sub-page, owner 2026-10-19)", async () => {
     setState("online");
     setSettingsHost(A);
     const html = renderToStaticMarkup(h(NotificationsPage));
     expect(html).toContain('data-settings-part="device"');
     expect(html).toContain(`data-settings-part-host="${A}"`);
-    expect(html).toContain("project alpha-project");
+    expect(html).not.toContain("project alpha-project");
     expect(html).not.toContain("project focus-project");
     await patchHostNotificationLevels(A, B, projectMutePatch(null, "alpha-project"));
     expect(fx.calls).toEqual([{ host: A, method: "patchNotificationLevels", arg: { projectOverrides: { "alpha-project": "mute" } } }]);

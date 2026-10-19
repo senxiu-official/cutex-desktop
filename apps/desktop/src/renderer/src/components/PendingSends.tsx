@@ -12,12 +12,13 @@ import { turnActivity } from "../lib/turnActivity";
 import { useNow } from "../lib/time";
 import type { TimelineState } from "../lib/timeline";
 import { useApp } from "../store";
+import { useConvView } from "../lib/conversationScope";
 
 const NO_TIMELINE: TimelineState | null = null;
 
 /** Seconds the running turn has been silent (lib/silentGap), while `active`; else null. */
 function useSilentSeconds(sessionId: string, active: boolean): number | null {
-  const timeline = useApp((s) => (active ? s.sessions[sessionId]?.timeline : undefined) ?? NO_TIMELINE);
+  const timeline = useConvView(sessionId, (v) => (active ? v?.timeline : undefined) ?? NO_TIMELINE);
   const now = useNow(active && !!timeline?.activeTurnId);
   const progress = useRef<{ mark: string | null; at: number } | null>(null);
   if (!timeline) return null;

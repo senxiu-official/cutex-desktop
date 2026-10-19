@@ -2,6 +2,7 @@
 import { useI18n } from "../../i18n";
 import { useAboutAttention, useOutdatedAgentCount } from "../../lib/runtimePackagesView";
 import { useSettingsAttention } from "../../lib/settingsAttention";
+import { useOwnerDevicesAttention } from "../../components/settings/OwnerDevices";
 import { settingsTab } from "../../lib/settingsNav";
 import { profilePageOf, SETTINGS_PAGE, useApp } from "../../store";
 import { services } from "../app";
@@ -16,9 +17,12 @@ export function useSettingsBadge() {
   const dot = useAboutAttention();
   const outdated = useOutdatedAgentCount();
   const extra = useSettingsAttention();
-  if (!dot && extra.length === 0) return null;
+  // A new owner device (full control) on the focus host: 连接 → 用户 announces it.
+  const ownerDevice = useOwnerDevicesAttention();
+  if (!dot && extra.length === 0 && !ownerDevice) return null;
   const lines = dot ? [outdated > 0 ? t("runtimePackages.dotHint", { n: outdated }) : t("settings.about.attention")] : [];
   for (const key of extra) lines.push(t(key as Parameters<typeof t>[0]));
+  if (ownerDevice) lines.push(t("ownerDev.navAttention"));
   return { dot: true, title: lines.join("\n") };
 }
 

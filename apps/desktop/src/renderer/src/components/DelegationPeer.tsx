@@ -65,8 +65,10 @@ export function DelegationPeerSection({ d, hostId }: { d: AskSummary; hostId: st
   const remoteExec = remote?.remoteState?.execution ?? null;
   const remoteHold = remote?.remoteState?.hold?.raw ?? remote?.remoteState?.hold?.reason ?? null;
   const stateWord = (state: string) => {
-    const key = peerStateKey(state);
-    return key ? t(`delegation.status.${key}` as MessageKey, { name: remote?.targetName ?? d.targetName ?? d.target }) : state;
+    const word = peerStateKey(state);
+    // The destination's pendingReview waits for that host's owner, not for you.
+    const key = word === "pendingReview" && remote ? "remoteReview" : word;
+    return key ? t(`delegation.status.${key}` as MessageKey, { name: remote?.targetName ?? d.targetName ?? d.target, host: label }) : state;
   };
   return (
     <div className="mt-2 first:mt-0" data-testid="delegation-peer">

@@ -76,5 +76,5 @@ export function useOwnTokenId(): string | null {
 
 /** Settings → 接入 → 配对设备. */
 export function openPairing() {
-  useApp.getState().openSettings("remote", { anchor: "remote-access.pairing" });
+  useApp.getState().openSettings("users", { anchor: "remote-access.pairing" });
 }

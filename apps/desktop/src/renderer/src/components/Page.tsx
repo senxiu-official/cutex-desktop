@@ -1,11 +1,27 @@
 // Shared page chrome so every non-conversation page has the same gutters and width. The page
 // title lives in the title bar (breadcrumb), never repeated inside the page.
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { useSizeFlags, widthAtLeast } from "../lib/sizeFlags";
 
 /** Scrolling content column: same width and padding on Tasks, Services, Projects, Settings….
  *  Scrollbars are overlays (lib/overlayScrollbarManager.ts) and take no width, so content never
  *  shifts sideways when a page grows past the viewport height. */
+// ---- hold the old page until the new one is ready (owner 2026-10-19) ----
+
+/** The longest the old page is held while the new one loads (ms). */
+const HOLD_MAX = 800;
+let holdBody: ((from: Element | null) => void) | null = null;
+
+/**
+ * Call right before switching what the page column shows (another settings page, another Settings host):
+ * a still copy of the column stays on screen until the new content has no `[data-settings-loading]` left
+ * (or HOLD_MAX), so it replaces the old one at once instead of building up. `from`: the control used, when
+ * it sits in a card (`section[id]`) — that card is kept where it was once the new page shows.
+ */
+export function holdPageBody(from: Element | null = null): void {
+  holdBody?.(from);
+}
+
 /** The column is wide enough for the page (48rem) and an aside (20rem) side by side, with gaps and padding. */
 const BODY_FLAGS = { wide: widthAtLeast(73) };
 
@@ -22,7 +38,40 @@ export function PageBody({ children, scrollKey, aside }: { children: ReactNode; 
     if (scroller.current) scroller.current.scrollTop = 0;
   }, [scrollKey]);
   const wide = !!aside && flags.wide;
+  const veil = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const take = (from: Element | null) => {
+      const box = scroller.current;
+      const cover = veil.current;
+      if (!box || !cover || !box.firstElementChild) return;
+      const card = from?.closest<HTMLElement>("section[id]") ?? null;
+      const anchor = card ? { id: card.id, top: card.getBoundingClientRect().top } : null;
+      const copy = box.firstElementChild.cloneNode(true) as HTMLElement;
+      copy.style.transform = `translateY(${-box.scrollTop}px)`;
+      cover.replaceChildren(copy);
+      cover.hidden = false;
+      const started = performance.now();
+      let calm = 0;
+      const check = () => {
+        const loading = !!scroller.current?.querySelector("[data-settings-loading]");
+        calm = loading ? 0 : calm + 1;
+        if (calm < 2 && performance.now() - started < HOLD_MAX) return void requestAnimationFrame(check);
+        const el = anchor && document.getElementById(anchor.id);
+        const now = scroller.current;
+        if (el && now) now.scrollTop += el.getBoundingClientRect().top - anchor.top;
+        cover.hidden = true;
+        cover.replaceChildren();
+      };
+      // Wait for the switch to render first.
+      requestAnimationFrame(() => requestAnimationFrame(check));
+    };
+    holdBody = take;
+    return () => {
+      if (holdBody === take) holdBody = null;
+    };
+  }, []);
   return (
+    <div className="relative flex min-w-0 flex-1">
     <div
       ref={(el) => {
         scroller.current = el;
@@ -34,6 +83,9 @@ export function PageBody({ children, scrollKey, aside }: { children: ReactNode; 
         <div className="min-w-0">{children}</div>
         {aside && <aside className={wide ? "sticky top-2" : "mt-2"}>{aside}</aside>}
       </div>
+    </div>
+      {/* The held still copy (holdPageBody): over the column, not interactive, gone once the new page is ready. */}
+      <div ref={veil} hidden aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden bg-background" />
     </div>
   );
 }

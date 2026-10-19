@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import type { DaemonState, HostsState } from "../src/shared/ipc";
 import type { NotifyOccurrence } from "../src/renderer/src/lib/notifyEvents";
+import { viewKey } from "../src/renderer/src/lib/viewKey";
 
 const mock = vi.hoisted(() => {
   const listeners = new Map<string, Set<(value: unknown) => void>>();
@@ -157,7 +158,7 @@ async function twoLive() {
   threads.set("b2", thread("b2", [turn("s1", "inProgress", [])]));
   mock.responses.set("bootstrap", bootById);
   await store.getState().select("a1");
-  const release = store.getState().retainSideAgent("b2", "local");
+  const release = store.getState().retainView("local", "b2");
   await settle();
   return release;
 }
@@ -167,16 +168,16 @@ describe("side agent view: N live session feeds (docs/research/side-agent-view-2
     await twoLive();
     expect(calls("subscribe", "a1")).toHaveLength(1);
     expect(calls("subscribe", "b2")).toHaveLength(1);
-    expect(store.getState().sideAgents).toEqual({ b2: { hostId: "local", visible: false } });
+    expect(store.getState().views).toEqual({ [viewKey("local", "b2")]: { hostId: "local", sessionId: "b2", visible: false } });
     transport.session("a1", item("a1", "t1", reply("m-a", "from alpha")));
     transport.session("b2", item("b2", "s1", reply("m-b", "from beta")));
     transport.session("b2", completed("b2", "s1"));
     const s = store.getState();
-    expect(s.sessions.a1!.timeline.entries.has("m-a")).toBe(true);
-    expect(s.sessions.b2!.timeline.entries.has("m-b")).toBe(true);
-    expect(s.sessions.a1!.timeline.entries.has("m-b")).toBe(false);
-    expect(s.sessions.b2!.timeline.activeTurnId).toBeNull();
-    expect(s.sessions.a1!.timeline.activeTurnId).toBe("t1");
+    expect(s.sessions[viewKey("local", "a1")]!.timeline.entries.has("m-a")).toBe(true);
+    expect(s.sessions[viewKey("local", "b2")]!.timeline.entries.has("m-b")).toBe(true);
+    expect(s.sessions[viewKey("local", "a1")]!.timeline.entries.has("m-b")).toBe(false);
+    expect(s.sessions[viewKey("local", "b2")]!.timeline.activeTurnId).toBeNull();
+    expect(s.sessions[viewKey("local", "a1")]!.timeline.activeTurnId).toBe("t1");
   });
 
   it("moving the main area on keeps the side agent live; leaving the side page unsubscribes it", async () => {
@@ -187,13 +188,13 @@ describe("side agent view: N live session feeds (docs/research/side-agent-view-2
     expect(calls("unsubscribe", "b2")).toHaveLength(0);
     // Still live after the main area moved: events keep arriving.
     transport.session("b2", item("b2", "s1", reply("m-b2", "still here")));
-    expect(store.getState().sessions.b2!.timeline.entries.has("m-b2")).toBe(true);
+    expect(store.getState().sessions[viewKey("local", "b2")]!.timeline.entries.has("m-b2")).toBe(true);
     release();
     await settle();
     expect(calls("unsubscribe", "b2")).toHaveLength(1);
-    expect(store.getState().sideAgents).toEqual({});
+    expect(store.getState().views).toEqual({});
     // Not a recently viewed agent: its view goes with the side page.
-    expect(store.getState().sessions.b2).toBeUndefined();
+    expect(store.getState().sessions[viewKey("local", "b2")]).toBeUndefined();
     // A second release is a no-op.
     release();
     expect(calls("unsubscribe", "b2")).toHaveLength(1);
@@ -211,12 +212,12 @@ describe("side agent view: N live session feeds (docs/research/side-agent-view-2
     release();
     await settle();
     expect(calls("unsubscribe", "b2")).toHaveLength(0);
-    expect(store.getState().sessions.b2).toBeDefined();
+    expect(store.getState().sessions[viewKey("local", "b2")]).toBeDefined();
   });
 
   it("the selected agent opened in the side too stays live when the main area moves on", async () => {
     await twoLive();
-    const releaseA = store.getState().retainSideAgent("a1", "local");
+    const releaseA = store.getState().retainView("local", "a1");
     await settle();
     // Live already (selected): not subscribed twice.
     expect(calls("subscribe", "a1")).toHaveLength(1);
@@ -228,6 +229,30 @@ describe("side agent view: N live session feeds (docs/research/side-agent-view-2
     expect(calls("unsubscribe", "a1")).toHaveLength(1);
   });
 
+  it("the main conversation pane retains its agent too (components/PaneHost): moving on unsubscribes it once, on release", async () => {
+    await twoLive();
+    // What the main pane's effect does for the selected agent: registers it, no second load.
+    let releaseMain = store.getState().retainView("local", "a1");
+    await settle();
+    expect(calls("subscribe", "a1")).toHaveLength(1);
+    expect(calls("bootstrap", "a1")).toHaveLength(1);
+    await store.getState().select("c3");
+    await settle();
+    // Still held by the pane until its effect lets go (after the render).
+    expect(calls("unsubscribe", "a1")).toHaveLength(0);
+    releaseMain();
+    releaseMain = store.getState().retainView("local", "c3");
+    await settle();
+    expect(calls("unsubscribe", "a1")).toHaveLength(1);
+    expect(calls("subscribe", "c3")).toHaveLength(1);
+    // A recently viewed agent: its view stays cached.
+    expect(store.getState().sessions[viewKey("local", "a1")]).toBeDefined();
+    releaseMain();
+    await settle();
+    // Releasing the selected agent never closes its feed.
+    expect(calls("unsubscribe", "c3")).toHaveLength(0);
+  });
+
   it("steers and optimistic sends settle for both agents from their own feeds", async () => {
     await twoLive();
     mock.responses.set("submit", () => ({ disposition: "steered", turnId: "t1" }));
@@ -235,24 +260,24 @@ describe("side agent view: N live session feeds (docs/research/side-agent-view-2
     mock.responses.set("submit", () => ({ disposition: "steered", turnId: "s1" }));
     await store.getState().submit("to beta", "auto", [], { sessionId: "b2" });
     await settle();
-    const sa = store.getState().pendingSteers.a1?.[0];
-    const sb = store.getState().pendingSteers.b2?.[0];
+    const sa = store.getState().pendingSteers[viewKey("local", "a1")]?.[0];
+    const sb = store.getState().pendingSteers[viewKey("local", "b2")]?.[0];
     expect(sa).toMatchObject({ text: "to alpha", turnId: "t1" });
     expect(sb).toMatchObject({ text: "to beta", turnId: "s1" });
     expect(calls("submit", "b2")).toHaveLength(1);
     transport.session("a1", item("a1", "t1", user("u-a", "to alpha", sa!.id)));
     transport.session("b2", item("b2", "s1", user("u-b", "to beta", sb!.id)));
     await settle();
-    expect(store.getState().pendingSteers.a1 ?? []).toEqual([]);
-    expect(store.getState().pendingSteers.b2 ?? []).toEqual([]);
-    expect(store.getState().outbox.a1 ?? []).toEqual([]);
-    expect(store.getState().outbox.b2 ?? []).toEqual([]);
+    expect(store.getState().pendingSteers[viewKey("local", "a1")] ?? []).toEqual([]);
+    expect(store.getState().pendingSteers[viewKey("local", "b2")] ?? []).toEqual([]);
+    expect(store.getState().outbox[viewKey("local", "a1")] ?? []).toEqual([]);
+    expect(store.getState().outbox[viewKey("local", "b2")] ?? []).toEqual([]);
   });
 
   it("answers and stops go to the side agent when it is named", async () => {
     await twoLive();
     transport.session("b2", request("b2", 9, "item/commandExecution/requestApproval"));
-    expect(store.getState().sessions.b2!.timeline.pending.size).toBe(1);
+    expect(store.getState().sessions[viewKey("local", "b2")]!.timeline.pending.size).toBe(1);
     await store.getState().respond(9, { decision: "accept" } as never, "b2");
     expect(calls("respond", "b2")).toHaveLength(1);
     expect(calls("respond", "a1")).toHaveLength(0);
@@ -264,10 +289,10 @@ describe("side agent view: N live session feeds (docs/research/side-agent-view-2
   it("notifications treat a visible side agent as looked at, a hidden one not", async () => {
     vi.stubGlobal("document", { hasFocus: () => true });
     await twoLive();
-    store.getState().setSideAgentVisible("b2", true);
+    store.getState().setViewVisible("local", "b2", true);
     transport.host(completed("b2", "s1"));
     expect(occurrences.at(-1)).toMatchObject({ agentId: "b2", looking: true });
-    store.getState().setSideAgentVisible("b2", false);
+    store.getState().setViewVisible("local", "b2", false);
     transport.host(completed("b2", "s2"));
     expect(occurrences.at(-1)).toMatchObject({ agentId: "b2", looking: false });
     // An agent neither selected nor in the side.
@@ -282,7 +307,7 @@ describe("side agent view: N live session feeds (docs/research/side-agent-view-2
     const release = await twoLive();
     transport.hosts("remote", true);
     await settle();
-    expect(store.getState().sideAgents).toEqual({});
+    expect(store.getState().views).toEqual({});
     // The stale release does nothing (no unsubscribe on the new host).
     mock.calls.length = 0;
     release();

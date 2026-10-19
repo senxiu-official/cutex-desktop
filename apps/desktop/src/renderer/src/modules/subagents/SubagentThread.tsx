@@ -9,7 +9,8 @@ import { useI18n, type MessageKey } from "../../i18n";
 import { useAgentRuntimeGeneration } from "../../lib/background";
 import { openSubagentThread } from "../../lib/sideOpen";
 import { childStatusFromThreadRead, SubAgentContext, subAgentMetaFromThreadRead, subAgentName, subAgentTooltip } from "../../lib/subagents";
-import { recordSubAgentMeta, useSubAgentMeta } from "../../lib/subagentMetaStore";
+import { recordSubAgentMeta, recordSubAgentSpan, useSubAgentMeta } from "../../lib/subagentMetaStore";
+import { subAgentSpanFromThreadRead } from "../../lib/finishedSubagents";
 import { orderedEntries, timelineFromThreadRead } from "../../lib/timeline";
 import { CLAUDE_SUBAGENT_TRANSCRIPTS_CAPABILITY } from "../../lib/agentFeatures";
 import { isClaudeTaskRef } from "../../lib/claudeTasks";
@@ -54,6 +55,7 @@ export function SubagentThreadBody({ instance, sessionId }: SideBodyProps<Thread
         setError(null);
         setTruncated((r as { thread?: { transcriptTruncated?: unknown } } | null)?.thread?.transcriptTruncated === true);
         recordSubAgentMeta(threadId, subAgentMetaFromThreadRead(r));
+        recordSubAgentSpan(threadId, subAgentSpanFromThreadRead(r));
         const settled = childStatusFromThreadRead(r);
         if (settled) useApp.getState().setSubAgentStatus(threadId, settled, generation);
       },

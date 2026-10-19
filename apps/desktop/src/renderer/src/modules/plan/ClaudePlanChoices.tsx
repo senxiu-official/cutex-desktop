@@ -9,20 +9,24 @@ import { useState, type ReactNode } from "react";
 import { useI18n, type MessageKey } from "../../i18n";
 import { agentFeaturesOf } from "../../lib/agentFeatures";
 import { planApprovalPatch, planKeepMode } from "../../lib/claudePermissionModes";
-import { selectedSidebar, useApp } from "../../store";
+import { useApp } from "../../store";
+import { convSidebarOf, convViewOf, useConvScope, useConvViewHost } from "../../lib/conversationScope";
 
 /** Same user message the TUI sends (PLAN_IMPLEMENTATION_CODING_MESSAGE). */
 const IMPLEMENT_MESSAGE = "Implement the plan.";
 
 /** Claude agents: ClaudePlanChoices; any other agent: `children` (the TUI's implement / keep planning). */
 export function PlanChoicesGate({ sessionId, current, onDecided, children }: { sessionId: string; current: () => boolean; onDecided: () => void; children: ReactNode }) {
-  const claude = useApp((s) => agentFeaturesOf(selectedSidebar(s)?.active.find((r) => r.cutexSessionId === sessionId)).runtime === "claude");
+  const conv = useConvScope();
+  const claude = useApp((s) => agentFeaturesOf(convSidebarOf(conv, s)?.active.find((r) => r.cutexSessionId === sessionId)).runtime === "claude");
   return claude ? <ClaudePlanChoices sessionId={sessionId} current={current} onDecided={onDecided} /> : <>{children}</>;
 }
 
 export function ClaudePlanChoices({ sessionId, current, onDecided }: { sessionId: string; current: () => boolean; onDecided: () => void }) {
   const { t } = useI18n();
-  const settings = useApp((s) => s.sessions[sessionId]?.timeline.settings ?? null);
+  const conv = useConvScope();
+  const hostId = useConvViewHost(sessionId);
+  const settings = useApp((s) => convViewOf(conv, s, sessionId)?.timeline.settings ?? null);
   const keep = planKeepMode(settings);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -34,12 +38,12 @@ export function ClaudePlanChoices({ sessionId, current, onDecided }: { sessionId
     setError(null);
     try {
       const app = useApp.getState();
-      const applied = await app.updateSettings(planApprovalPatch(then, app.sessions[sessionId]?.timeline.settings ?? null));
+      const applied = await app.updateSettings(planApprovalPatch(then, convViewOf(conv, app, sessionId)?.timeline.settings ?? null), sessionId, hostId);
       if (!current()) return;
       if (!applied) return setError(t("plan.defaultUnavailable"));
       onDecided();
       // Optimistic send (lib/outbox): a failure stays on the message with retry / edit / discard.
-      await app.submit(IMPLEMENT_MESSAGE, "auto").catch(() => {});
+      await app.submit(IMPLEMENT_MESSAGE, "auto", [], { sessionId, hostId }).catch(() => {});
     } catch (e) {
       if (current()) setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -51,7 +55,7 @@ export function ClaudePlanChoices({ sessionId, current, onDecided }: { sessionId
     if (!current()) return;
     const text = feedback?.trim() ?? "";
     onDecided();
-    if (text) await useApp.getState().submit(text, "auto").catch(() => {});
+    if (text) await useApp.getState().submit(text, "auto", [], { sessionId, hostId }).catch(() => {});
   };
 
   const button = "rounded-md px-2.5 py-1 text-left text-xs disabled:opacity-50";

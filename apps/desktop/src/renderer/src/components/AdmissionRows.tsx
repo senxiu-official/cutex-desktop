@@ -28,7 +28,8 @@ import { openDelegationDetail } from "../lib/delegationOpen";
 import { heldKeys } from "../lib/stopHold";
 import { QUEUE_ROW, ROW_META } from "../lib/queueRow";
 import { formatWhen, useClock, useNow } from "../lib/time";
-import { agentHost, selectedFeatures, useApp } from "../store";
+import { useApp } from "../store";
+import { convFeaturesOf, useConvHost, useConvScope } from "../lib/conversationScope";
 import { DelegationTag } from "./DelegationParts";
 import { DelegationRow } from "./DelegationQueue";
 import { Who } from "./Parties";
@@ -160,9 +161,10 @@ function HeldSymbol({ held }: { held: AdmissionHeld }) {
 function RideAlongAskParts({ d, info, sessionId }: { d: AskSummary; info: RideAlongAsk; sessionId: string }) {
   const { t } = useI18n();
   const nameOf = useAgentNames();
-  const views = useApp((s) => hasDelegationViews(selectedFeatures(s)));
+  const conv = useConvScope();
+  const views = useApp((s) => hasDelegationViews(convFeaturesOf(conv, s)));
   // This session's host's record (lib/agentHostRoute re-routes); its card is in the requester's timeline there.
-  const host = useApp(agentHost);
+  const host = useConvHost();
   const requester = requesterSession(d.requester);
   const show = () => openDelegationDetail(host, d.askId, { title: info.title || d.title });
   const peer = peerSideOf(d);

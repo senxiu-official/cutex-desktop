@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "../i18n";
 import { TargetHostContext } from "../lib/targetHost";
-import { sessionApi } from "../store";
+import { hostApi } from "../store";
 import { WritableRootsEditor } from "./LaunchOptions";
 import { Toggle } from "./settings/Form";
 
@@ -26,7 +26,7 @@ export function LiveSandboxExtras({ hostId, sessionId, network, roots }: { hostI
     setSaving(true);
     setPending(next);
     try {
-      const result = await sessionApi(sessionId).setSessionSandboxExtras(sessionId, patch);
+      const result = await hostApi(hostId).setSessionSandboxExtras(sessionId, patch);
       const applied = result.live?.status === "applied";
       setNote({ kind: applied ? "nextTurn" : "stored" });
       // Applied: thread/settings/updated replaces the values shortly. Otherwise keep what cutex stored.

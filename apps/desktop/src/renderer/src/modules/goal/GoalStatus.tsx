@@ -13,6 +13,7 @@ import { formatGoalSeconds, formatGoalTokens } from "../../lib/goalBudget";
 import { goalTone } from "../../lib/goalStatus";
 import { useSessionTimeline } from "../../lib/statusItemsView";
 import { useApp } from "../../store";
+import { useConvViewHost } from "../../lib/conversationScope";
 import type { StatusBarProps } from "../slots";
 
 const ICON_BUTTON = "flex size-6 shrink-0 items-center justify-center rounded-md text-subtle hover:bg-surface-2 hover:text-foreground";
@@ -27,22 +28,23 @@ export function GoalBudgetRing({ goal }: { goal: ThreadGoal }) {
   );
 }
 
-export function GoalMeta({ data: goal }: { sessionId: string; data: ThreadGoal }) {
+export function GoalMeta({ sessionId, data: goal }: { sessionId: string; data: ThreadGoal }) {
   const { t } = useI18n();
   const setGoal = useApp((s) => s.setGoal);
+  const hostId = useConvViewHost(sessionId);
   const active = goal.status === "active";
   return (
     <>
       {/* The budget is the bar under the objective (GoalBody). */}
       <span>{formatGoalSeconds(goal.timeUsedSeconds)}</span>
       {active ? (
-        <button className={ICON_BUTTON} title={t("goal.pause")} aria-label={t("goal.pause")} onClick={() => void setGoal({ status: "paused" })}>
+        <button className={ICON_BUTTON} title={t("goal.pause")} aria-label={t("goal.pause")} onClick={() => void setGoal({ status: "paused" }, sessionId, hostId)}>
           <Pause size={13} />
         </button>
       ) : goal.status === "complete" ? (
         <CircleCheck size={14} className="shrink-0 text-ok" aria-label={t("goal.status.complete")} />
       ) : (
-        <button className={ICON_BUTTON} title={t("goal.resume")} aria-label={t("goal.resume")} onClick={() => void setGoal({ status: "active" })}>
+        <button className={ICON_BUTTON} title={t("goal.resume")} aria-label={t("goal.resume")} onClick={() => void setGoal({ status: "active" }, sessionId, hostId)}>
           <Play size={13} />
         </button>
       )}

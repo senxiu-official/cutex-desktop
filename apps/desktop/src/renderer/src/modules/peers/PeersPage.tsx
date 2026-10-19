@@ -5,6 +5,7 @@
 // last seen, in-flight / outbox counts, the user it belongs to — linked to 用户 → 对端主机 —, enable)
 // and, for one peer, PeerDetail. Writes are
 // loopback-only in cutex: a `loopback_only` refusal turns the page read-only for that connection.
+import { useOwnerLocalLock } from "../../components/settings/OwnerDevices";
 import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { PEER_LABEL, PEERS_SETTINGS_RANGE, type PeerInvite, type PeersSettings, type PeerView } from "../../../../shared/peers";
@@ -29,6 +30,7 @@ function GlobalSection() {
   const { readOnly } = usePeerWrites();
   const { value, setValue, error, setError } = usePeersSettings();
   const [saving, setSaving] = useState(false);
+  const lock = useOwnerLocalLock(useTargetHostId());
   const save = async (patch: Partial<PeersSettings>) => {
     setSaving(true);
     setError(null);
@@ -48,8 +50,8 @@ function GlobalSection() {
       {value === null && <Notice>{t("peers.unsupported")}</Notice>}
       {value && (
         <>
-          <SettingRow label={t("peers.enabled")} hint={t("peers.enabledHint")}>
-            <Toggle checked={value.enabled} disabled={readOnly || saving} label={t("peers.enabled")} onChange={(on) => void save({ enabled: on })} />
+          <SettingRow label={t("peers.enabled")} hint={lock.locked && !value.enabled ? lock.hint! : t("peers.enabledHint")}>
+            <Toggle checked={value.enabled} disabled={readOnly || saving || (lock.locked && !value.enabled)} label={t("peers.enabled")} onChange={(on) => void save({ enabled: on })} />
           </SettingRow>
           {number("outboxMaxAgeHours", "hours", "peers.outboxMaxAgeHoursHint")}
           {number("maxHops", null, "peers.maxHopsHint")}
@@ -73,6 +75,7 @@ function InviteRow() {
   const [busy, setBusy] = useState(false);
   const now = useNow(!!invite);
   const badLabel = !!label && !PEER_LABEL.test(label);
+  const lock = useOwnerLocalLock(useTargetHostId());
   const create = async () => {
     setBusy(true);
     setError(null);
@@ -83,9 +86,9 @@ function InviteRow() {
   const left = invite ? Math.max(0, Math.floor((Date.parse(invite.expiresAt) - now) / 1000)) : 0;
   return (
     <div className="border-b border-border py-2.5" data-testid="peers-invite">
-      <SettingRow label={t("peers.invite")} hint={t("peers.inviteHint")}>
-        <TextInput value={label} onChange={setLabel} placeholder={t("peers.inviteLabelPlaceholder")} width="w-40" label={t("peers.inviteLabel")} disabled={readOnly || busy} />
-        <Button primary onClick={() => void create()} disabled={readOnly || busy || badLabel}>
+      <SettingRow label={t("peers.invite")} hint={lock.hint ?? t("peers.inviteHint")}>
+        <TextInput value={label} onChange={setLabel} placeholder={t("peers.inviteLabelPlaceholder")} width="w-40" label={t("peers.inviteLabel")} disabled={readOnly || busy || lock.locked} />
+        <Button primary onClick={() => void create()} disabled={readOnly || busy || badLabel || lock.locked}>
           {t("peers.inviteCreate")}
         </Button>
       </SettingRow>
@@ -142,6 +145,7 @@ function JoinRow({ onJoined }: { onJoined(peer: PeerView): void }) {
   const [busy, setBusy] = useState(false);
   const badLabel = !!label.trim() && !PEER_LABEL.test(label.trim());
   const target = url.trim() ? urlTarget(url) : null;
+  const lock = useOwnerLocalLock(useTargetHostId());
   // Pasting the one-line invite (`<url> <code>`) into either field fills both.
   const take = (v: string, set: (v: string) => void) => {
     if (!isFullInvite(v)) return set(v);
@@ -163,14 +167,14 @@ function JoinRow({ onJoined }: { onJoined(peer: PeerView): void }) {
   return (
     <div className="py-2.5" data-testid="peers-join">
       <div className="text-sm">{t("peers.join")}</div>
-      <div className="text-xs text-subtle">{t("peers.joinHint")}</div>
+      <div className="text-xs text-subtle">{lock.hint ?? t("peers.joinHint")}</div>
       <div className="mt-2 flex">
         <TextInput value={url} onChange={(v) => take(v, setUrl)} placeholder={t("peers.joinUrlPlaceholder")} mono width="w-full min-w-0" label={t("peers.joinUrl")} disabled={readOnly || busy} />
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <TextInput value={code} onChange={(v) => take(v, setCode)} placeholder={t("peers.joinCode")} mono width="w-40" label={t("peers.joinCode")} disabled={readOnly || busy} />
         <TextInput value={label} onChange={setLabel} placeholder={t("peers.joinLabelPlaceholder")} width="w-52" label={t("peers.joinLabel")} disabled={readOnly || busy} />
-        <Button primary onClick={() => void submit()} disabled={readOnly || busy || !target || !code.trim() || badLabel}>
+        <Button primary onClick={() => void submit()} disabled={readOnly || busy || !target || !code.trim() || badLabel || lock.locked}>
           {t("peers.joinSubmit")}
         </Button>
       </div>
@@ -222,9 +226,12 @@ function usePeerOwners(peerIds: string): ReadonlyMap<string, string> {
 }
 
 /** 用户 → 对端主机 (where a peer's user is changed). */
-const openPeerUsers = () => useApp.getState().openSettings("users", { anchor: "users-peers" });
+const openPeerUsers = () => useApp.getState().openSettings("access", { anchor: "users-peers" });
 
 function PeerRow({ peer, owner, maxAgeHours, onOpen, onToggle, readOnly }: { peer: PeerView; owner: string | undefined; maxAgeHours: number | null; onOpen(): void; onToggle(on: boolean): void; readOnly: boolean }) {
+  const lockState = useOwnerLocalLock(useTargetHostId());
+  const lockEnable = lockState.locked;
+  const lockHint = lockState.hint;
   const { t, locale } = useI18n();
   const now = useClock();
   const seen = peer.lastSeenAt ? Date.parse(peer.lastSeenAt) / 1000 : NaN;
@@ -271,7 +278,7 @@ function PeerRow({ peer, owner, maxAgeHours, onOpen, onToggle, readOnly }: { pee
       detail={detail}
       actions={
         <>
-          <Toggle checked={peer.enabled} disabled={readOnly || peer.state === "removedByPeer"} label={t("peers.enable")} onChange={onToggle} />
+          <Toggle checked={peer.enabled} disabled={readOnly || peer.state === "removedByPeer" || (lockEnable && !peer.enabled)} label={lockEnable && !peer.enabled ? lockHint! : t("peers.enable")} onChange={onToggle} />
           <button onClick={onOpen} aria-label={t("peers.open")} title={t("peers.open")} className="flex h-6 w-6 items-center justify-center rounded text-subtle hover:bg-surface-2 hover:text-foreground">
             <ChevronRight size={14} />
           </button>

@@ -15,7 +15,7 @@ import { externalDragHandle, useSideDnd, type ExternalDragSpec } from "../../lib
 import { closePeek, currentPeekTarget, setPeekWhere, usePeek, type PeekInstance } from "../../lib/peekStore";
 import { useUiPrefs } from "../../lib/prefs";
 import { useSideRegistry, type SideComponentEntry } from "../../lib/sideComponents";
-import { agentHost, useApp } from "../../store";
+import { useConvHost } from "../../lib/conversationScope";
 import { ItemBoundary } from "../../modules/Outlet";
 import type { GutterBox } from "./GutterHost";
 
@@ -156,8 +156,8 @@ function Card({ entry, peek, style, overlay }: { entry: SideComponentEntry; peek
 export function PeekHost({ geometry, box }: { geometry: GutterGeometry; box: GutterBox }) {
   const peek = usePeek((s) => s.peek);
   const registry = useSideRegistry();
-  // Peeks belong to the open agent's host (lib/sideServices).
-  const host = useApp(agentHost);
+  // Peeks belong to the open agent's host (lib/sideServices): the conversation's (lib/conversationScope).
+  const host = useConvHost();
   const { peekTarget: setting } = useUiPrefs();
   const stackTop = useGutter((s) => s.stackTop.left);
   const topStackBottom = useGutter((s) => s.topStackBottom.left);

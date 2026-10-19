@@ -12,11 +12,13 @@ import { returnLabel } from "../../lib/returnPoint";
 import { sideOpenPeek } from "../../lib/sideServices";
 import { TURN_PEEK } from "../../lib/sideKinds";
 import { useApp } from "../../store";
+import { convNotify, useConvScope } from "../../lib/conversationScope";
 
 const CHIP = "pointer-events-auto flex h-7 items-center gap-1.5 rounded-full border border-border bg-background pr-3 pl-2.5 text-xs text-foreground shadow-md hover:bg-surface";
 
 export function ReturnChip({ sessionId }: { sessionId: string }) {
   const { t } = useI18n();
+  const conv = useConvScope();
   const back = useJump((s) => s.back);
   const miss = useJump((s) => s.miss);
   const busy = useJump((s) => s.busy);
@@ -57,7 +59,7 @@ export function ReturnChip({ sessionId }: { sessionId: string }) {
               onClick={() => {
                 dismissMiss();
                 const r = sideOpenPeek(TURN_PEEK, { hostId: missHere.hostId, sessionId: missHere.sessionId, turnId: missHere.turnId }, getUiPrefs().peekTarget, { focus: true });
-                if (r.status !== "opened") useApp.getState().notify(t("side.unavailable", { what: t("gutter.peek"), reason: t(r.status === "stale" ? "side.reason.stale" : (`side.reason.${r.reason}` as MessageKey)) }), "error");
+                if (r.status !== "opened") convNotify(conv, t("side.unavailable", { what: t("gutter.peek"), reason: t(r.status === "stale" ? "side.reason.stale" : (`side.reason.${r.reason}` as MessageKey)) }), "error");
               }}
               className="ml-1 flex items-center gap-1 rounded-full px-2 py-0.5 text-accent hover:bg-hover"
             >

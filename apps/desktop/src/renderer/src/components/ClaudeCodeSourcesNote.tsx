@@ -8,20 +8,22 @@ import type { ClaudeCodeLaunchSummary, ClaudeCodeSources } from "../../../shared
 import { useI18n, type MessageKey } from "../i18n";
 import { runtimeOf } from "../lib/agentList";
 import { CLAUDE_CODE_SOURCES_FEATURE, claudeCodeShown } from "../lib/claudeCodeSources";
-import { featuresOf, selectedSidebar, sessionApi, useApp } from "../store";
+import { featuresOf, useApp } from "../store";
+import { convApi, convSidebarOf, useConvScope } from "../lib/conversationScope";
 
 export function ClaudeCodeSourcesNote({ hostId, sessionId }: { hostId: string | null | undefined; sessionId: string }) {
   const { t } = useI18n();
   const supported = useApp((s) => featuresOf(s, hostId).has(CLAUDE_CODE_SOURCES_FEATURE));
+  const conv = useConvScope();
   const claude = useApp((s) => {
-    const row = [...(selectedSidebar(s)?.active ?? []), ...(selectedSidebar(s)?.retired ?? [])].find((r) => r.cutexSessionId === sessionId);
+    const row = [...(convSidebarOf(conv, s)?.active ?? []), ...(convSidebarOf(conv, s)?.retired ?? [])].find((r) => r.cutexSessionId === sessionId);
     return !!row && runtimeOf(row) === "claude";
   });
   const [view, setView] = useState<ClaudeCodeSources | null>(null);
   useEffect(() => {
     if (!supported || !claude) return;
     let live = true;
-    sessionApi(sessionId).claudeCodeSources(sessionId).then(
+    convApi(conv, sessionId).claudeCodeSources(sessionId).then(
       (v) => live && setView(v),
       () => undefined, // An unreadable answer: no note (the permission lines stay).
     );

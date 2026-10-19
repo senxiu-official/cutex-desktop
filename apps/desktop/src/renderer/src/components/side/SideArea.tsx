@@ -1,11 +1,11 @@
-// The right side at App level (docs/desktop-modules.md §18; RFC §3.8–§3.9): the work area holds the
-// conversation / page card and the side — the column of cards and, with ≥ 2 pages, the page buttons:
-// 右栏布局 = 竖条 + 标签页 (★) the vertical lane (SideLane) beside the column, open or closed; 仅标签页 the
-// tab row at the column's top (SideTabStrip), the lane only while it is closed. One box whose
-// placement follows the frame (lib/sideFrame.ts): in the row (并排 / 让位), over the conversation
-// (悬浮), a drawer (narrow window), over the work area (maximised) or the whole window (full screen).
-// Instances never live here: cards hold placeholders, SideInstanceLayer draws the instances.
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+// The tool area at App level (docs/desktop-modules.md §24; §18 for what it keeps; RFC §3.8–§3.9): the
+// work area holds the conversation panes and, right of them, the tool columns (the former right side's
+// pages — ALL on screen side by side, no page switcher since v1.17), each a stack of ≤ 3 panes (the
+// former cards) with their tabs. One box whose placement follows the frame (lib/sideFrame.ts): in the
+// row (并排 / 让位), over the conversation (悬浮), a drawer (narrow window), over the work area
+// (maximised) or the whole window (full screen); its width (appearance.sidePaneWidth) is shared by the
+// columns. Instances never live here: panes hold placeholders, SideInstanceLayer draws the instances.
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Shrink } from "lucide-react";
 import cutexLogo from "../../assets/cutex-logo-64.png";
 import { bridge } from "../../bridge";
@@ -16,15 +16,13 @@ import { useUiPrefs } from "../../lib/prefs";
 import { cardName, closeColumn, pageLabel } from "../../lib/sideActions";
 import { useSideRegistry, useSideView, type SideRegistry } from "../../lib/sideComponents";
 import { sideFrame, type SideFrame } from "../../lib/sideFrame";
-import { findCard, lanePages, pageInView, pageVisibility, setOpen, visibleCards, type SidePage, type SideViewContext } from "../../lib/sideLayout";
+import { CARD_GAP, columnsOnScreen, findCard, findPage, setOpen, toolAreaShown, visibleCards, type SidePage, type SideViewContext } from "../../lib/sideLayout";
 import { setMode, setNarrow, updateLayout, useSide } from "../../lib/sideLayoutStore";
 import { launch, launchable } from "../../lib/sideMenus";
-import { setSideWorkWidth, useSideWidthHandle } from "../../lib/sideResize";
+import { setSideColumns, setSideWorkWidth, useSideWidthHandle } from "../../lib/sideResize";
 import { registerSideAnchor } from "../../lib/sideSlots";
 import { CaptionSpace, LinuxControls } from "../WindowControls";
-import { SideLane } from "./SideLane";
 import { SidePageView } from "./SidePageView";
-import { SideTabStrip } from "./SideTabStrip";
 
 const win = bridge.window;
 
@@ -57,31 +55,14 @@ function EmptyCard({ title, hint, children, edge }: { title: string; hint?: stri
   );
 }
 
-/** The column: the page in view (or the mode's card), the launcher page, or an empty state. */
-function SideColumn({ frame, registry, ctx, currentWidth }: { frame: SideFrame; registry: SideRegistry; ctx: SideViewContext; currentWidth: () => number }) {
+/** One tool column: its panes (or, for the launcher column, the launchers). */
+function SideColumn({ page, only, frame, registry, ctx, first, currentWidth }: { page: SidePage; only: string | null; frame: SideFrame; registry: SideRegistry; ctx: SideViewContext; first: boolean; currentWidth: () => number }) {
   const { t } = useI18n();
   const layout = useSide((s) => s.layout);
-  const mode = useSide((s) => s.mode);
   const width = useSideWidthHandle(currentWidth);
-  const resizable = frame.kind === "flow" || frame.kind === "float" || frame.kind === "drawer";
+  const resizable = first && (frame.kind === "flow" || frame.kind === "float" || frame.kind === "drawer");
   const edge = resizable ? <div title={t("side.resizeHint")} className="side-handle-v absolute top-3.5 bottom-3.5 left-0 z-10 w-[5px] cursor-col-resize" {...width} /> : null;
-  if (!layout.pages.length) {
-    return (
-      <EmptyCard title={t("side.empty.title")} hint={t("side.empty.hint")} edge={edge}>
-        <Launchers pageId={null} />
-      </EmptyCard>
-    );
-  }
-  const page = pageInView(layout, ctx);
-  if (!page) {
-    return (
-      <EmptyCard title={t("side.empty.title")} hint={t("side.empty.hint")} edge={edge}>
-        <Launchers pageId={null} />
-      </EmptyCard>
-    );
-  }
-  const visibility = pageVisibility(layout, page, ctx);
-  if (visibility === "launcher") {
+  if (!page.cards.length) {
     return (
       <EmptyCard title={t("side.launcher.title")} hint={t("side.launcher.hint")} edge={edge}>
         <Launchers pageId={page.id} />
@@ -89,9 +70,40 @@ function SideColumn({ frame, registry, ctx, currentWidth }: { frame: SideFrame; 
     );
   }
   let cards = visibleCards(layout, page, ctx);
-  const modeCard = mode?.card && page.cards.some((c) => c.id === mode.card) ? mode.card : null;
-  if (modeCard) cards = cards.filter((c) => c.id === modeCard);
+  if (only) cards = cards.filter((c) => c.id === only);
   return <SidePageView page={page} cards={cards} registry={registry} ctx={ctx} edge={resizable} currentWidth={currentWidth} />;
+}
+
+/** The tool columns side by side (8 px apart), or the empty state. */
+function SideColumns({ frame, registry, ctx, currentWidth }: { frame: SideFrame; registry: SideRegistry; ctx: SideViewContext; currentWidth: () => number }) {
+  const { t } = useI18n();
+  const layout = useSide((s) => s.layout);
+  const mode = useSide((s) => s.mode);
+  const width = useSideWidthHandle(currentWidth);
+  const columns = columnsOnScreen(layout, ctx, mode);
+  if (!columns.length) {
+    const resizable = frame.kind === "flow" || frame.kind === "float" || frame.kind === "drawer";
+    const edge = resizable ? <div title={t("side.resizeHint")} className="side-handle-v absolute top-3.5 bottom-3.5 left-0 z-10 w-[5px] cursor-col-resize" {...width} /> : null;
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-side-column="">
+        <EmptyCard title={t("side.empty.title")} hint={t("side.empty.hint")} edge={edge}>
+          <Launchers pageId={null} />
+        </EmptyCard>
+      </div>
+    );
+  }
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1" data-side-columns="">
+      {columns.map(({ page, only }, i) => (
+        <Fragment key={page.id}>
+          {i > 0 && <div className="shrink-0" style={{ width: CARD_GAP }} />}
+          <div className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col" data-side-column={page.id} data-side-column-focused={page.id === layout.activePage ? "" : undefined}>
+            <SideColumn page={page} only={only} frame={frame} registry={registry} ctx={ctx} first={i === 0} currentWidth={currentWidth} />
+          </div>
+        </Fragment>
+      ))}
+    </div>
+  );
 }
 
 /** Full screen: the window's own 40 px title row (drag region, caption buttons) with 还原. */
@@ -99,8 +111,8 @@ function FullTitleRow({ ctx }: { ctx: SideViewContext }) {
   const { t } = useI18n();
   const layout = useSide((s) => s.layout);
   const mode = useSide((s) => s.mode);
-  const page = pageInView(layout, ctx);
   const at = mode?.card ? findCard(layout, mode.card) : null;
+  const page = at?.page ?? findPage(layout, layout.activePage);
   const shownCards = page ? visibleCards(layout, page, ctx) : [];
   const card = at?.card ?? (shownCards.length === 1 ? shownCards[0] : null);
   return (
@@ -130,13 +142,9 @@ function SideArea({ frame, areaWidth }: { frame: SideFrame; areaWidth: number })
   const box = useRef<HTMLDivElement>(null);
   const currentWidth = () => box.current?.offsetWidth ?? 0;
   const gap = useSideWidthHandle(currentWidth);
-  const pages = lanePages(layout, ctx);
-  const column = frame.kind !== "closed";
-  const lane = frame.lane && pages.length >= 2;
-  const strip = frame.strip && pages.length >= 2;
-  const { sidePageBar } = useUiPrefs();
+  void layout;
   const resizable = frame.kind === "flow" || frame.kind === "float" || frame.kind === "drawer";
-  if (frame.kind === "closed" && !lane) return null;
+  if (frame.kind === "closed") return null;
 
   let boxClass = "relative flex shrink-0";
   let style: CSSProperties = { width: frame.width };
@@ -165,7 +173,7 @@ function SideArea({ frame, areaWidth }: { frame: SideFrame; areaWidth: number })
         {frame.kind === "fullscreen" && <FullTitleRow ctx={ctx} />}
         {/* The seam handle fills the 8 px left padding: the cards' (and the tab row's) left edge is flush against it. With the
             lane beside the open column the lane is the gap, the handle a thin strip over its left edge. */}
-        <div className={`relative flex min-h-0 min-w-0 flex-1 ${frame.kind === "fullscreen" ? "px-2 pb-2" : ""} ${resizable && !(lane && column) ? "pl-2" : ""}`}>
+        <div className={`relative flex min-h-0 min-w-0 flex-1 ${frame.kind === "fullscreen" ? "px-2 pb-2" : ""} ${resizable ? "pl-2" : ""}`}>
           {resizable && (
             <div
               role="separator"
@@ -173,19 +181,11 @@ function SideArea({ frame, areaWidth }: { frame: SideFrame; areaWidth: number })
               aria-label={t("pane.width")}
               tabIndex={0}
               title={t("side.resizeHint")}
-              className={`side-handle-v absolute inset-y-0 left-0 z-10 cursor-col-resize outline-none ${lane ? "w-1" : "w-2"}`}
+              className="side-handle-v absolute inset-y-0 left-0 z-10 w-2 cursor-col-resize outline-none"
               {...gap}
             />
           )}
-          {lane && <SideLane pages={pages} open={column} actions={sidePageBar !== "tabs"} registry={registry} ctx={ctx} />}
-          {column && (
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              {strip && <SideTabStrip pages={pages} registry={registry} ctx={ctx} />}
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-side-column={pageInView(layout, ctx)?.id ?? ""}>
-                <SideColumn frame={frame} registry={registry} ctx={ctx} currentWidth={currentWidth} />
-              </div>
-            </div>
-          )}
+          <SideColumns frame={frame} registry={registry} ctx={ctx} currentWidth={currentWidth} />
         </div>
       </div>
       {frame.kind === "drawer" && areaWidth > 0 && (
@@ -205,7 +205,7 @@ export function SideWorkArea({ side, children }: { side: boolean; children: Reac
   const ref = useRef<HTMLDivElement>(null);
   const [areaWidth, setAreaWidth] = useState(0);
   const { sidePaneWidth } = useAppearance();
-  const { sideMode, sideLaneWhenHidden, sideNarrow, sidePageBar } = useUiPrefs();
+  const { sideMode, sideNarrow } = useUiPrefs();
   const ctx = useSideView();
   const layout = useSide((s) => s.layout);
   const mode = useSide((s) => s.mode);
@@ -226,13 +226,17 @@ export function SideWorkArea({ side, children }: { side: boolean; children: Reac
       off();
     };
   }, []);
+  // §24: appearance.sidePaneWidth is one tool column's width; the tool area holds the columns on screen.
+  const columns = side ? Math.max(1, columnsOnScreen(layout, ctx, mode).length) : 1;
+  useEffect(() => setSideColumns(columns), [columns]);
   const frame = sideFrame({
     areaWidth,
-    stored: sidePaneWidth,
-    open: side && layout.open,
-    pages: side ? lanePages(layout, ctx).length : 0,
-    laneWhenHidden: sideLaneWhenHidden,
-    pageBar: sidePageBar,
+    stored: sidePaneWidth * columns,
+    open: side && toolAreaShown(layout, ctx),
+    // §24: no page buttons any more (every tool column is on screen).
+    pages: 0,
+    laneWhenHidden: "hide",
+    pageBar: "tabs",
     mode: sideMode,
     layered: side ? (mode?.kind ?? null) : null,
   });

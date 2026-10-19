@@ -59,7 +59,7 @@ export const CLAUDE_REWIND_FILES_CAPABILITY = "claude-rewind-files";
 type HostFeatures = { has(feature: string): boolean };
 
 /** True only when a Claude adapter declares `feature` (absent / unknown = no). */
-function declares(f: AgentFeatures, feature: string): boolean {
+export function declares(f: AgentFeatures, feature: string): boolean {
   return f.runtime === "claude" && f.map?.[feature] === true;
 }
 

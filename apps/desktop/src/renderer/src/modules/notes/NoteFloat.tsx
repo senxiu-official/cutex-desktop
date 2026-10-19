@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { StickyNote, X } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { useTrackOverlay } from "../../lib/openOverlays";
-import { agentHost, useApp } from "../../store";
+import { useConvHost } from "../../lib/conversationScope";
 import type { OverlayLayout } from "../slots";
 import { closeTurnNotes, finishTurnNote, noteFloatPosition, useNoteFloat, type NoteFloat as FloatState } from "./floating";
 import { trackNoteFloat } from "./floatAnchor";
@@ -70,7 +70,7 @@ function FloatingCard({ active }: { active: FloatState }) {
 
 /** Existing conversation.overlay slot, but always zero reserved space. */
 export function NoteFloatHost({ sessionId, reserve }: { sessionId: string; reserve(layout: OverlayLayout | null): void }) {
-  const hostId = useApp(agentHost);
+  const hostId = useConvHost();
   const active = useNoteFloat(s => s.active);
   useEffect(() => {
     reserve(null);

@@ -1,4 +1,4 @@
-// Settings → 用户, the management part (cutex `users`, docs/research/user-isolation-p1-20261014.md §9;
+// Settings → 访问管理, the users module's parts (人 · 设备 · 别的主机 → 对端主机; formerly 用户) (cutex `users`, docs/research/user-isolation-p1-20261014.md §9;
 // layout per docs/research/identity-settings-review-20261015.md §4.2), host-scoped, owner only (the page
 // shows the non-owner view instead on a host where this device is not the owner): an attention strip
 // while devices wait to be assigned, the user list (owner first; each row shows the name and picture that
@@ -8,7 +8,8 @@
 // every token with its user, 待分配 first, the 新设备先待分配 switch). cutex `person-identity` (P2,
 // docs/research/person-identity-p2-20261014.md §5): each user lists the person keys it is known by
 // (fingerprint, remove) and the unknown keys its devices brought (「认作此用户」).
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { create as createStore } from "zustand";
 import { ChevronDown, ChevronRight, Fingerprint } from "lucide-react";
 import { PEERS_FEATURE } from "../../../../shared/peers";
 import { shownUserName, USERS_P2_ACCESS_FEATURE, type PersonKeyRecord, type UserGrant, type UserRecord, type UsersList } from "../../../../shared/users";
@@ -27,24 +28,41 @@ import { changePersonKeys } from "./personKeyWrites";
 import { PeersSection } from "./PeersSection";
 import { UserDot } from "./UserDot";
 
-export function UsersPage() {
+/**
+ * Settings → 访问管理 places the users module's cards in three of its parts (人 / 设备 / 别的主机), each a
+ * `settings.section` of its own. They share one `/v2/users` read: the 人 part reads it (useUsers) and
+ * mirrors it here; the 设备 and 对端主机 parts render from it, and their writes reload it. Also the
+ * cross-card state: the 设备 filter and the 对端主机 user. Settings remounts the page per host.
+ */
+interface SharedUsers {
+  list: UsersList | null;
+  load: (() => Promise<void>) | null;
+  filter: DeviceFilter;
+  /** A user's 「1 个对端主机」 narrows 对端主机 to that user (null: every linked host). */
+  peerUser: string | null;
+}
+const FRESH: SharedUsers = { list: null, load: null, filter: { kind: "all" }, peerUser: null };
+const useShared = createStore<SharedUsers>(() => FRESH);
+const noLoad = async () => {};
+
+/** 人: the attention strip and the user list; reads the listing the other parts share. */
+export function UsersPeoplePart() {
   const { t } = useI18n();
   const { list, unsupported, error, load } = useUsers();
   const write = useUsersWrite(load);
-  const [filter, setFilter] = useState<DeviceFilter>({ kind: "all" });
-  // A user's 「1 个对端主机」 narrows 对端主机 to that user (null: every linked host).
-  const [peerUser, setPeerUser] = useState<string | null>(null);
   const withPeers = useTargetFeatures().has(PEERS_FEATURE);
+  useEffect(() => useShared.setState({ list, load }), [list, load]);
+  useEffect(() => () => useShared.setState(FRESH, true), []);
   if (error && !list) return <Section><ErrorNote>{error}</ErrorNote></Section>;
   if (unsupported) return <Section><Notice>{t("users.unsupported")}</Notice></Section>;
   if (!list) return <Section><Loading rows={3} /></Section>;
   // A user's 「2 台设备」 shows that user's devices in 设备.
   const showDevices = (next: DeviceFilter) => {
-    setFilter(next);
+    useShared.setState({ filter: next });
     requestAnimationFrame(() => document.getElementById(settingsAnchorId(DEVICES_ANCHOR))?.scrollIntoView({ block: "start", behavior: "smooth" }));
   };
   const showPeers = (userId: string) => {
-    setPeerUser(userId);
+    useShared.setState({ peerUser: userId });
     requestAnimationFrame(() => document.getElementById(settingsAnchorId(PEERS_ANCHOR))?.scrollIntoView({ block: "start", behavior: "smooth" }));
   };
   const waiting = list.tokens.filter(isUnassigned).length;
@@ -57,10 +75,24 @@ export function UsersPage() {
         </div>
       )}
       <UsersSection list={list} write={write} reload={load} onShowDevices={showDevices} onShowPeers={withPeers ? showPeers : undefined} />
-      <DevicesSection list={list} write={write} filter={filter} onFilter={setFilter} />
-      {withPeers && <PeersSection list={list} write={write} userId={peerUser} onAll={() => setPeerUser(null)} />}
     </>
   );
+}
+
+/** 设备: every device with its user (the 人 part's listing). */
+export function UsersDevicesPart() {
+  const { list, load, filter } = useShared();
+  const write = useUsersWrite(load ?? noLoad);
+  if (!list) return null;
+  return <DevicesSection list={list} write={write} filter={filter} onFilter={(next) => useShared.setState({ filter: next })} />;
+}
+
+/** 别的主机 → 对端主机: each linked host with the user it belongs to (the 人 part's listing). */
+export function UsersPeersPart() {
+  const { list, load, peerUser } = useShared();
+  const write = useUsersWrite(load ?? noLoad);
+  if (!list) return null;
+  return <PeersSection list={list} write={write} userId={peerUser} onAll={() => useShared.setState({ peerUser: null })} />;
 }
 
 function UsersSection({ list, write, reload, onShowDevices, onShowPeers }: { list: UsersList; write: Write; reload: () => Promise<void>; onShowDevices(filter: DeviceFilter): void; onShowPeers?(userId: string): void }) {

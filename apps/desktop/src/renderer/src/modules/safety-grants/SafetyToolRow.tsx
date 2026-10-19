@@ -9,13 +9,13 @@ import { useI18n } from "../../i18n";
 import type { RawItem } from "../../lib/timeline";
 import { safetyNoteOfItem } from "../../lib/ownerNotify";
 import { focusOwnerNote, useHostOwnerNotes } from "../../lib/ownerNotifyStore";
-import { agentHost, useApp } from "../../store";
+import { useConvHost } from "../../lib/conversationScope";
 import { TimelineFallbackContext } from "../timelineFallback";
 
 export function SafetyToolRow({ item, sessionId }: { item: RawItem; sessionId: string }) {
   const { t } = useI18n();
   const fallback = useContext(TimelineFallbackContext);
-  const host = useApp(agentHost);
+  const host = useConvHost();
   const notes = useHostOwnerNotes(host);
   const note = safetyNoteOfItem(notes, sessionId, item.id);
   const state = note?.safetyBlock?.state;

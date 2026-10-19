@@ -57,6 +57,7 @@ import { getUiPrefs, setUiPref } from "./lib/prefs";
 import { agentManagementToolCompleted, coalescedRefresh, sidebarRefreshesForMethod, type CoalescedRefresh } from "./lib/coalescedRefresh";
 import type { ItemId, PageParams } from "./modules/types";
 import type { CustomizeRegion } from "./lib/customize";
+import { isViewOf, viewKey, viewKeyParts, type ViewKey } from "./lib/viewKey";
 
 /** Notices of the move refusals cutex names (shared/queueMove). */
 const QUEUE_MOVE_NOTICES: Record<QueueMoveErrorKind, MessageKey> = {
@@ -90,6 +91,17 @@ export interface SessionView {
   startErrorQueueIds?: string[];
   /** History pages: older turns still on the host (lib/historyPages); null = all loaded. */
   older: OlderHistory | null;
+}
+
+/** An agent of a host: what per-agent actions, signals and notices address (panes step 2). */
+export interface AgentAddress {
+  hostId: string;
+  sessionId: string;
+}
+
+/** An agent's entry in a per-agent map of the store (outbox, steers, queue rows, models …: keyed by view key). */
+export function agentState<T>(map: Readonly<Record<ViewKey, T>>, hostId: string, sessionId: string): T | undefined {
+  return map[viewKey(hostId, sessionId)];
 }
 
 /** Plain text of a queued input (cute-codex UserInput[]). */
@@ -131,6 +143,7 @@ export type SettingsTab =
   // 连接
   | "me"
   | "hosts"
+  | "access"
   | "remote"
   | "proxy"
   | "peers"
@@ -192,17 +205,26 @@ interface AppState {
    * calls go to that host, see `sessionApi`); null when none is selected.
    */
   selectedHost: string | null;
-  sessions: Record<string, SessionView>;
   /**
-   * Agents shown live in the right side area (the 「智能体」 side page, docs/research/side-agent-view-20261018.md):
-   * session id → its host and whether it is on screen. Their views are loaded and subscribed like the
-   * selected agent's (N live feeds); `select` keeps them live when the owner moves on.
+   * Agent views (timeline, queue, …) by view key `<host>\n<session id>` (lib/viewKey; panes step 1c):
+   * the selected agent's, the recently viewed ones' (cached) and the retained ones'. Read them with
+   * `viewOf(s, hostId, sessionId)`; never by a bare session id (the same id may exist on two hosts).
    */
-  sideAgents: Record<string, { hostId: string; visible: boolean }>;
-  /** A side page shows this agent live: load + subscribe it (ref-counted); returns the release. */
-  retainSideAgent(sessionId: string, hostId: string): () => void;
-  /** The side page of this agent is on screen (notifications treat it as looked at). */
-  setSideAgentVisible(sessionId: string, visible: boolean): void;
+  sessions: Record<ViewKey, SessionView>;
+  /**
+   * Views kept live by a pane (retainView): the main conversation pane and the 「智能体」 side page
+   * (docs/research/side-agent-view-20261018.md), by view key → host, agent and whether a side page shows it
+   * on screen. They are loaded and subscribed like the selected agent's (N live feeds); `select` keeps
+   * them live when the owner moves on.
+   */
+  views: Record<ViewKey, { hostId: string; sessionId: string; visible: boolean }>;
+  /**
+   * A pane shows this agent live: load + subscribe it (ref-counted; the selected agent is live already,
+   * its retain only registers it); returns the release.
+   */
+  retainView(hostId: string, sessionId: string): () => void;
+  /** A side page showing this agent is on screen (notifications treat it as looked at). */
+  setViewVisible(hostId: string, sessionId: string, visible: boolean): void;
   pinned: Set<string>;
   /** Sidebar "latest activity" line per agent. */
   activity: Record<string, ActivityPreview>;
@@ -223,59 +245,70 @@ interface AppState {
    * Read the open agent again (its view's 重新加载 after a failed load): from the host that lists it now
    * (lib/agentHostRoute; a view opened on the wrong host moves to its own), else from the same host.
    */
-  reloadSession(sessionId: string): Promise<void>;
+  reloadSession(sessionId: string, hostId?: string): Promise<void>;
   /**
    * `extra`: image / skill input items. Optimistic (lib/outbox): the message shows up at once where
    * it will land, marked as sending, and is replaced by cutex's item; sends of one agent go out in
    * order. Rejects on failure (the entry stays, failed). `keepFailed: false` drops it instead (the
    * new-chat draft keeps its own copy).
    */
-  submit(text: string, strategy: SubmitStrategy, extra?: ExtraInput[], opts?: { keepFailed?: boolean; sessionId?: string }): Promise<UserInputSubmitResult | null>;
+  submit(text: string, strategy: SubmitStrategy, extra?: ExtraInput[], opts?: { keepFailed?: boolean; sessionId?: string; hostId?: string }): Promise<UserInputSubmitResult | null>;
+  /*
+   * PER-AGENT STATE (panes step 2): every map below is keyed by view key `<host>\n<session id>`
+   * (lib/viewKey `viewKey(hostId, sessionId)`), so the same session id on two hosts never shares sends,
+   * steers, queue rows, models or modes. Read them with `agentState(map, hostId, sessionId)`.
+   * PER-AGENT ACTIONS: `sessionId` + `hostId` name the agent to act on — a conversation passes its
+   * scope's (lib/conversationScope); without `sessionId` the selected agent (and its host); a bare id
+   * without `hostId` means the host of its latest view (COMPATIBILITY, `viewHostOf`).
+   */
   /** Optimistic sends per agent not yet visible as cutex items (lib/outbox). */
-  outbox: Record<string, OutboxEntry[]>;
+  outbox: Record<ViewKey, OutboxEntry[]>;
   /** Queue rows hidden while their removal / edit / "立即" is in flight (queue ids per agent). */
-  queueHidden: Record<string, string[]>;
+  queueHidden: Record<ViewKey, string[]>;
   /** Failed send: again under the same clientUserMessageId (cutex dedupes it). */
-  retrySend(sessionId: string, id: string): void;
+  retrySend(sessionId: string, id: string, hostId?: string): void;
   /** Failed send: back into the composer (appended), removed from the outbox. */
-  editSend(sessionId: string, id: string): void;
-  discardSend(sessionId: string, id: string): void;
+  editSend(sessionId: string, id: string, hostId?: string): void;
+  discardSend(sessionId: string, id: string, hostId?: string): void;
   /** `sessionId`: default the selected agent (the side view passes its own). */
-  interrupt(sessionId?: string): Promise<void>;
+  interrupt(sessionId?: string, hostId?: string): Promise<void>;
   /** Steered messages not yet recorded by the native, per agent (lib/pendingSteers; queue area). */
-  pendingSteers: Record<string, PendingSteer[]>;
+  pendingSteers: Record<ViewKey, PendingSteer[]>;
   /** Native item ids of this agent's live background terminals (lib/background; tool rows). */
-  backgroundItems: Record<string, string[]>;
-  setBackgroundItems(sessionId: string, itemIds: string[]): void;
+  backgroundItems: Record<ViewKey, string[]>;
+  setBackgroundItems(sessionId: string, itemIds: string[], hostId?: string): void;
   /** Re-send an undelivered steer of the selected agent (same clientUserMessageId: no duplicates). */
-  resendSteer(id: string, sessionId?: string): Promise<void>;
+  resendSteer(id: string, sessionId?: string, hostId?: string): Promise<void>;
   /** Remove an undelivered steer from the queue panel. */
-  dismissSteer(id: string, sessionId?: string): void;
+  dismissSteer(id: string, sessionId?: string, hostId?: string): void;
   /** collaborationMode/list presets per agent (`/plan`, composer mode chip). */
-  collabModes: Record<string, CollaborationModeMask[]>;
-  loadCollabModes(): Promise<void>;
+  collabModes: Record<ViewKey, CollaborationModeMask[]>;
+  loadCollabModes(sessionId?: string, hostId?: string): Promise<void>;
   /**
    * Switch the selected agent's collaboration mode (`thread/settings/update`); false if the mode is
    * unknown or the native did not take it; null (stale, nothing applied, say nothing) when the host
    * or the selection changed while the mode list loaded.
    */
-  setCollabMode(mode: string): Promise<boolean | null>;
+  setCollabMode(mode: string, sessionId?: string, hostId?: string): Promise<boolean | null>;
   /** `/goal`: set objective / status of the selected agent's thread goal. */
-  setGoal(patch: { objective?: string; status?: ThreadGoalStatus; tokenBudget?: number | null }): Promise<void>;
+  setGoal(patch: { objective?: string; status?: ThreadGoalStatus; tokenBudget?: number | null }, sessionId?: string, hostId?: string): Promise<void>;
   /** A fresh goal in place of the current one (clear + set, so usage counters restart) — TUI `/goal <new>`. */
-  replaceGoal(objective: string): Promise<void>;
-  clearGoal(): Promise<void>;
+  replaceGoal(objective: string, sessionId?: string, hostId?: string): Promise<void>;
+  clearGoal(sessionId?: string, hostId?: string): Promise<void>;
   /** `/review`: inline review of uncommitted changes (or custom instructions). */
-  startReview(instructions: string | null): Promise<void>;
+  startReview(instructions: string | null, sessionId?: string, hostId?: string): Promise<void>;
   /** `/stop`: terminate every background terminal of the selected agent; returns how many. */
-  stopBackgroundTerminals(): Promise<number>;
-  /** One-shot UI requests across components ("open the model picker", "open /ps"). */
-  /** One-shot "open this UI" request; `arg` carries a mode/payload (e.g. the goal card's edit / replace). */
-  uiSignal: { target: string; nonce: number; arg?: string } | null;
-  signal(target: string, arg?: string): void;
-  /** Short line above the composer (command feedback, errors). */
-  notice: { text: string; tone: "info" | "error"; nonce: number } | null;
-  notify(text: string, tone?: "info" | "error"): void;
+  stopBackgroundTerminals(sessionId?: string, hostId?: string): Promise<number>;
+  /**
+   * One-shot "open this UI" request ("open the model picker", "open /ps"); `arg` carries a mode/payload
+   * (e.g. the goal card's edit / replace). `agent`: the conversation it is meant for (view key; panes
+   * step 2) — only that conversation reacts; none = the focused conversation (lib/uiSignal).
+   */
+  uiSignal: { target: string; nonce: number; arg?: string; agent?: ViewKey } | null;
+  signal(target: string, arg?: string, agent?: AgentAddress): void;
+  /** Short line above the composer (command feedback, errors); `agent`: the conversation whose composer shows it (none = the focused one). */
+  notice: { text: string; tone: "info" | "error"; nonce: number; agent?: ViewKey } | null;
+  notify(text: string, tone?: "info" | "error", agent?: AgentAddress): void;
   /** Where Settings should land (e.g. `/logout` → this profile's account section). */
   settingsFocus: { profile?: string; anchor?: string } | null;
   /** 在主界面调整 (components/CustomizeHost): the region whose panel is open, or null. */
@@ -284,63 +317,63 @@ interface AppState {
   openCustomize(region: CustomizeRegion): void;
   closeCustomize(): void;
   /** Answer a pending server request (approval / question / elicitation) of the selected agent. */
-  respond(requestId: string | number, reply: ServerRequestReply, sessionId?: string): Promise<void>;
+  respond(requestId: string | number, reply: ServerRequestReply, sessionId?: string, hostId?: string): Promise<void>;
   /** Models available to the selected agent (cached per agent and runtime generation). */
-  models: Record<string, ModelOption[]>;
+  models: Record<ViewKey, ModelOption[]>;
   /** Load the selected agent's models; `refresh` refetches even when cached (the list stays shown). */
-  loadModels(refresh?: boolean): Promise<void>;
+  loadModels(refresh?: boolean, sessionId?: string, hostId?: string): Promise<void>;
   /** Optimistically apply + send a `thread/settings/update` patch for the selected agent. */
-  updateSettings(patch: Record<string, unknown>): Promise<boolean>;
+  updateSettings(patch: Record<string, unknown>, sessionId?: string, hostId?: string): Promise<boolean>;
   /** Start a native context compaction for the selected agent. */
-  compact(): Promise<void>;
+  compact(sessionId?: string, hostId?: string): Promise<void>;
   /** cutex quota gauges per profile name (refreshed on select + every minute while shown). */
   quotas: Record<string, QuotaGauge[]>;
   loadQuota(profile: string, refresh?: boolean): Promise<void>;
   /** `sessionId`: the agent whose queue row was clicked (default: the selected one, read at call time). */
-  queueRemove(item: QueueItem, sessionId?: string): Promise<void>;
+  queueRemove(item: QueueItem, sessionId?: string, hostId?: string): Promise<void>;
   /** Remove from the queue and return its text so the composer can edit it. */
-  queueTakeForEdit(item: QueueItem, sessionId?: string): Promise<string>;
+  queueTakeForEdit(item: QueueItem, sessionId?: string, hostId?: string): Promise<string>;
   /**
    * "Steer" a queued item into the running turn (main: queuePromote): with queue-steer cutex's
    * atomic `queue/steer` (a refusal keeps it queued and throws a readable notice); older cutex:
    * CAS-remove + submit `auto` under the item's own clientUserMessageId/origin, so it can't be sent twice.
    */
-  queueSendNow(item: QueueItem, sessionId?: string): Promise<void>;
+  queueSendNow(item: QueueItem, sessionId?: string, hostId?: string): Promise<void>;
   /**
    * admission-order: move an owner queued item in front of `before` (null = to the end). Optimistic:
    * the panel shows the new order at once and goes back if cutex refuses; the error is a readable
    * notice with `moveRefusal` (shared/queueMove) when cutex named the reason.
    */
-  queueMove(item: QueueItem, before: AdmissionRef | null): Promise<void>;
+  queueMove(item: QueueItem, before: AdmissionRef | null, sessionId?: string, hostId?: string): Promise<void>;
   /** admission-owner-yield: the selected agent's waiting ride-alongs go before the owner's queued turns once. */
-  queueYield(): Promise<void>;
+  queueYield(sessionId?: string, hostId?: string): Promise<void>;
   /**
    * "Interrupt & send" for the steers still waiting in the queue area: stop the turn; cute-codex
    * discards unread steer input on interrupt, so exactly those it dropped are re-sent as one new
    * message (those it recorded first are not).
    */
-  interruptAndSendSteers(sessionId?: string): Promise<void>;
+  interruptAndSendSteers(sessionId?: string, hostId?: string): Promise<void>;
   /**
    * Ctrl+Shift+Enter with steers waiting (queue-pause): stop the turn, merge the steers it dropped
    * and `text` into one message as the new turn; the queue keeps going after it (not paused).
    * Without waiting steers or the capability: a plain submit with strategy `interrupt`.
    */
-  interruptAndSend(text: string, extra: ExtraInput[]): Promise<boolean>;
+  interruptAndSend(text: string, extra: ExtraInput[], sessionId?: string, hostId?: string): Promise<boolean>;
   /** 暂停委托 (asks-pause-v2): hold new delegations to this agent until resumed. */
-  pauseAsks(sessionId: string): Promise<void>;
+  pauseAsks(sessionId: string, hostId?: string): Promise<void>;
   /** 继续委托 (asks-pause-v2): release the asks pause. */
-  resumeAsks(sessionId: string): Promise<void>;
+  resumeAsks(sessionId: string, hostId?: string): Promise<void>;
   /**
    * 继续发送: undelivered steers as one new message, then resume the cutex queue (also when only an
    * owner stop hold is on: queue resume releases it, stop-holds-ridealongs). Default: the selected agent.
    */
-  resumePaused(sessionId?: string): Promise<void>;
+  resumePaused(sessionId?: string, hostId?: string): Promise<void>;
   /** 放回输入框: paused texts (steers, then queued items) into the composer; removed from the queue. */
-  restorePaused(sessionId?: string): Promise<void>;
+  restorePaused(sessionId?: string, hostId?: string): Promise<void>;
   /** 清空: discard undelivered steers and the paused queue items (the UI confirms first). */
-  discardPaused(sessionId?: string): Promise<void>;
-  /** Sessions whose queue is transiently stopped by interrupt-and-send (not shown as paused). */
-  queueHandoff: Record<string, boolean>;
+  discardPaused(sessionId?: string, hostId?: string): Promise<void>;
+  /** Agents whose queue is transiently stopped by interrupt-and-send (not shown as paused). */
+  queueHandoff: Record<ViewKey, boolean>;
   /** `focus.profile` (tab "profiles") opens that profile's detail page; `focus.create` the 添加 form. */
   openSettings(tab?: SettingsTab, focus?: { profile?: string; anchor?: string; create?: boolean }): void;
   /** Shows a `main.page` item (= services.ui.openPage, modules/app.ts). */
@@ -375,21 +408,21 @@ interface AppState {
    * Fork (session-fork): a new agent from this one's thread up to `afterTurnId` (null = latest),
    * selected afterwards with a short notice. Non-destructive: no confirmation.
    */
-  forkSession(sessionId: string, afterTurnId: string | null): Promise<void>;
+  forkSession(sessionId: string, afterTurnId: string | null, hostId?: string): Promise<void>;
   /**
    * Roll the thread back so the turn before `beforeTurnId` is the last (history, live). `rewindFiles`
    * (Claude agents with file rewind): also restore the files from Claude Code's checkpoint.
    */
-  revertTo(sessionId: string, beforeTurnId: string, options?: { rewindFiles?: boolean }): Promise<void>;
+  revertTo(sessionId: string, beforeTurnId: string, options?: { rewindFiles?: boolean; hostId?: string }): Promise<void>;
   /** The owner's × on 进程: hidden until a different non-empty plan arrives (lib/planState). */
-  dismissPlan(sessionId: string): void;
+  dismissPlan(sessionId: string, hostId?: string): void;
   /** Show the plan the owner hid again. */
-  restorePlan(sessionId: string): void;
+  restorePlan(sessionId: string, hostId?: string): void;
   /** Permanent delete (session-delete); a refusal comes back for the caller to explain. */
   deleteSession(sessionId: string, expectedRevision?: number, hostId?: string): Promise<MutationResult>;
   /** Put text into the current host/session's window-local draft ("edit & resend", "quote"). */
   /** `extra`: image / skill input items to attach to the draft (放回输入框). */
-  insertIntoComposer(sessionId: string, text: string, mode?: "replace" | "append", extra?: unknown[]): void;
+  insertIntoComposer(sessionId: string, text: string, mode?: "replace" | "append", extra?: unknown[], hostId?: string): void;
   /** Live timelines of subagent threads opened in the side pane, keyed by thread id (§4.16). */
   subTimelines: Record<string, { timeline: TimelineState; version: number }>;
   setSubTimeline(threadId: string, timeline: TimelineState): void;
@@ -408,7 +441,7 @@ interface AppState {
   services: ServiceView[] | null;
   refreshServices(): Promise<void>;
   /** Revert the thread to before `turnId` (live, no restart) and put its text back in the composer. */
-  editAndResend(sessionId: string, turnId: string, text: string): Promise<void>;
+  editAndResend(sessionId: string, turnId: string, text: string, hostId?: string): Promise<void>;
   /** Pending owner approvals (cutex owner-approvals), newest first; null until loaded / unsupported. */
   approvals: ApprovalRecord[] | null;
   /**
@@ -429,18 +462,19 @@ interface AppState {
    * History pages: prepend the next older page of turns to the agent's timeline (scrolled to the top).
    * `opts` (jumps, lib/jump.ts): another page size, a reader that may answer from the reference cache.
    */
-  loadOlder(sessionId: string, opts?: { limit?: number; read?(cursor: string): Promise<SessionHistory | null> }): Promise<void>;
+  loadOlder(sessionId: string, opts?: { limit?: number; read?(cursor: string): Promise<SessionHistory | null>; hostId?: string }): Promise<void>;
   /** The agent's whole thread (older pages fetched into a copy; the view is untouched), e.g. for export. */
-  completeTimeline(sessionId: string): Promise<TimelineState | null>;
+  completeTimeline(sessionId: string, hostId?: string): Promise<TimelineState | null>;
 }
 
 /** Timelines kept in memory for agents viewed recently (most recent first). */
 const CACHED_SESSIONS = 12;
-let recentSessions: string[] = [];
-/** Side pages holding an agent live (retainSideAgent), by `<host>\n<session id>`. */
-const sideRefs = new Map<string, number>();
-/** Runtime generation each cached model list was fetched for. */
-const modelsGeneration = new Map<string, number>();
+/** View keys (lib/viewKey) of the agents viewed recently in the main area, most recent first. */
+let recentViews: ViewKey[] = [];
+/** Panes holding an agent live (retainView), by view key. */
+const viewRefs = new Map<ViewKey, number>();
+/** Runtime generation each cached model list was fetched for (by view key). */
+const modelsGeneration = new Map<ViewKey, number>();
 
 /** Whether a Claude revert receipt (`native.result.filesRewound`, cutex claude-rewind-files) restored the files. */
 function filesRewound(result: unknown): boolean {
@@ -467,7 +501,8 @@ function newView(): SessionView {
   };
 }
 
-const queueTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/** Coalesced queue re-reads per agent (by view key). */
+const queueTimers = new Map<ViewKey, ReturnType<typeof setTimeout>>();
 /** Last collaboration mode seen per agent (AgentKey; lib/threadSettings: fills cutex's resume snapshot gap). */
 const lastCollabMode = new Map<string, NonNullable<ThreadSettingsView["collaborationMode"]>>();
 /** expectApprovalsReviewer: reviewer still to set on a new thread (hostKey → reviewer). */
@@ -487,8 +522,8 @@ function dropHostEntries(map: Map<string, unknown>, hostId: string): void {
 const resendTurns = new Set<string>();
 /** Order stamps for outbox confirmations vs. queue lists (lib/outbox). */
 let outboxTick = 0;
-/** Per-agent chain of submits, so optimistic sends reach cutex in the order they were made. */
-const sendChains = new Map<string, Promise<unknown>>();
+/** Per-agent chain of submits (by view key), so optimistic sends reach cutex in the order they were made. */
+const sendChains = new Map<ViewKey, Promise<unknown>>();
 /** Sends already reported by the outbox-linger diagnostic (bounded). */
 const lingerReported = new Set<string>();
 const logSendTrace = (record: SendTraceRecord) => bridge.shell?.logError({ kind: "reported", message: JSON.stringify(record) });
@@ -518,10 +553,11 @@ function mergeOrphans(outbox: Record<string, OutboxEntry[]>, restored: Record<st
   for (const [agent, list] of Object.entries(restored)) next[agent] = [...(next[agent] ?? []).filter((e) => !list.some((r) => r.id === e.id)), ...list];
   return next;
 }
-function takeOrphanedSends(host: string): Record<string, OutboxEntry[]> {
+/** A host's stashed failed sends, keyed for the outbox (view keys). */
+function takeOrphanedSends(host: string): Record<ViewKey, OutboxEntry[]> {
   const byAgent = orphanedSends.get(host);
   orphanedSends.delete(host);
-  return byAgent ? Object.fromEntries(byAgent) : {};
+  return byAgent ? Object.fromEntries([...byAgent].map(([agent, list]) => [viewKey(host, agent), list])) : {};
 }
 
 // Host-event driven sidebar reloads: first 400 ms after an event, then at most every 2 s.
@@ -549,9 +585,11 @@ function preparedSidebar(snapshot: SidebarSnapshot): SidebarSnapshot {
   return sidebar;
 }
 /**
- * Host of each agent view the store holds (`sessions`; multi-host P1: an agent of any host in the scope
- * can be open). Views are keyed by session id: an agent of another host with the same id replaces the
- * view (select). Missing = the focus host.
+ * COMPATIBILITY (panes steps 1c, 2): the host a bare session id means — the host of the latest view
+ * opened for that id (select / retainView; multi-host P1: an agent of any host in the scope can be
+ * open). Views, per-agent state (outbox, steers, queue rows, models …) and actions are keyed by host +
+ * id, so the same id on two hosts keeps two of each and both can be live; this only routes callers
+ * that name no host (outside a conversation: menus, older paths). Missing = the focus host.
  */
 const sessionHosts = new Map<string, string>();
 function sessionHostOf(sessionId: string, focus: string): string {
@@ -581,8 +619,8 @@ export const useApp = create<AppState>((set, get) => {
   const focusHost = () => get().hosts?.active ?? "local";
   /** The host of an agent's view (the focus host unless it was opened from another host). */
   const hostOf = (sessionId: string) => sessionHostOf(sessionId, focusHost());
-  /** Calls about an agent go to its host (the focus api for the focus host: focus-fenced as before). */
-  const apiOf = (sessionId: string): DaemonApi => apiOn(hostOf(sessionId));
+  /** An agent's view on `host` (default: `hostOf`). */
+  const viewOn = (sessionId: string, host = hostOf(sessionId)): SessionView | undefined => get().sessions[viewKey(host, sessionId)];
   const apiOn = (hostId: string): DaemonApi => (hostId === focusHost() ? api : apiFor(hostId));
   /** The agent's own operation fence (its host's connection). */
   const captureSession = (sessionId: string) => captureHost(hostOf(sessionId));
@@ -622,11 +660,11 @@ export const useApp = create<AppState>((set, get) => {
   const reconcileStartErrors = (host: string, sidebar: SidebarSnapshot) => {
     for (const resource of sidebar.active) {
       const id = resource.cutexSessionId;
-      const view = get().sessions[id];
-      if (hostOf(id) !== host || !view?.startError) continue;
+      const view = viewOn(id, host);
+      if (!view?.startError) continue;
       const runtime = resource.runtime;
       if (runtime.status === "online" && runtime.appServerConnected !== false && runtime.runtimeGeneration >= view.runtimeGeneration)
-        patchSession(id, { startError: null, startErrorQueueIds: undefined });
+        patchSession(id, { startError: null, startErrorQueueIds: undefined }, host);
     }
   };
   /**
@@ -636,13 +674,13 @@ export const useApp = create<AppState>((set, get) => {
   const reconcileStaleTurns = (host: string, sidebar: SidebarSnapshot) => {
     for (const resource of sidebar.active) {
       const id = resource.cutexSessionId;
-      const view = get().sessions[id];
-      if (hostOf(id) !== host || !view || view.loading) continue;
+      const view = viewOn(id, host);
+      if (!view || view.loading) continue;
       const runtime = resource.runtime;
       // A snapshot older than what this view saw live (a read that raced a restart) proves nothing.
       const offline = runtime.status === "offline" && runtime.runtimeGeneration >= view.runtimeGeneration;
       if (!offline && !(runtime.runtimeGeneration > view.runtimeGeneration)) continue;
-      if (settleStaleTurns(view.timeline, null)) patchSession(id, (v) => ({ version: v.version + 1 }));
+      if (settleStaleTurns(view.timeline, null)) patchSession(id, (v) => ({ version: v.version + 1 }), host);
     }
   };
   const startPendingChat = () => {
@@ -664,43 +702,62 @@ export const useApp = create<AppState>((set, get) => {
       if (text.trim() || extra.length) insertComposerDraft(scope.host, sessionId, text, "append", extra);
     };
   };
-  const patchSession = (id: string, patch: Partial<SessionView> | ((v: SessionView) => Partial<SessionView>)) =>
+  /** Patch an agent's view on `host` (default: `hostOf`); nothing without one. */
+  const patchSession = (id: string, patch: Partial<SessionView> | ((v: SessionView) => Partial<SessionView>), host = hostOf(id)) =>
     set((state) => {
-      const current = state.sessions[id];
+      const key = viewKey(host, id);
+      const current = state.sessions[key];
       if (!current) return state;
       const next = typeof patch === "function" ? patch(current) : patch;
-      return { sessions: { ...state.sessions, [id]: { ...current, ...next } } };
+      return { sessions: { ...state.sessions, [key]: { ...current, ...next } } };
     });
 
-  /** An agent shown live in the side area on `hostId` (docs/research/side-agent-view-20261018.md). */
-  const sideLive = (sessionId: string, hostId = hostOf(sessionId)) => get().sideAgents[sessionId]?.hostId === hostId;
+  /** An agent on `hostId` held live by a pane (retainView). */
+  const viewLive = (sessionId: string, hostId = hostOf(sessionId)) => !!get().views[viewKey(hostId, sessionId)];
   const isSelected = (sessionId: string, hostId: string) => get().selectedId === sessionId && (get().selectedHost ?? focusHost()) === hostId;
-  /** Views the store keeps: the recently viewed agents and the side-live ones. */
-  const viewIds = () => [...new Set([...recentSessions, ...Object.keys(get().sideAgents)])];
-  const openSideAgent = (sessionId: string, hostId: string) => {
-    // Views are keyed by id: another host's agent with the same id that is live keeps it.
-    const other = sessionHosts.get(sessionId);
-    if (other !== undefined && other !== hostId && (isSelected(sessionId, other) || sideLive(sessionId, other))) return;
-    if (other !== undefined && other !== hostId) set((state) => ({ sessions: withoutKey(state.sessions, sessionId) }));
-    set((state) => ({ sideAgents: { ...state.sideAgents, [sessionId]: { hostId, visible: false } } }));
+  /** Views the store keeps: the recently viewed agents and the retained ones. */
+  const viewKeys = () => [...new Set([...recentViews, ...Object.keys(get().views)])];
+  /**
+   * The agent a per-agent action addresses (panes step 2): `sessionId` on `hostId`; without `sessionId`
+   * the selected agent on its host; a bare id without `hostId` on the host of its latest view (`hostOf`).
+   */
+  const agentRef = (sessionId?: string | null, hostId?: string): { id: string; host: string; key: ViewKey } | null => {
+    const id = sessionId ?? get().selectedId;
+    if (!id) return null;
+    const host = hostId ?? (sessionId == null ? (get().selectedHost ?? focusHost()) : hostOf(id));
+    return { id, host, key: viewKey(host, id) };
+  };
+  /** A notice about an agent: shown by the composer of the conversation showing it (else the focused one's). */
+  const notifyAgent = (sessionId: string, host: string, text: string, tone: "info" | "error" = "info") => get().notify(text, tone, { hostId: host, sessionId });
+  const openView = (sessionId: string, hostId: string) => {
+    // Views, per-agent state and actions are keyed by host + id (panes step 2): the same id live on two
+    // hosts keeps two feeds, two outboxes, two queues.
+    const key = viewKey(hostId, sessionId);
+    set((state) => ({ views: { ...state.views, [key]: { hostId, sessionId, visible: false } } }));
     // The selected agent is live already.
     if (isSelected(sessionId, hostId)) return;
     sessionHosts.set(sessionId, hostId);
-    if (!get().sessions[sessionId]) set((state) => ({ sessions: { ...state.sessions, [sessionId]: newView() } }));
-    retainSessions(viewIds());
-    void load(sessionId);
+    if (!get().sessions[key]) set((state) => ({ sessions: { ...state.sessions, [key]: newView() } }));
+    retainSessions(viewKeys());
+    void load(sessionId, hostId);
   };
-  const closeSideAgent = (sessionId: string, hostId: string) => {
-    if (!sideLive(sessionId, hostId)) return;
-    set((state) => ({ sideAgents: withoutKey(state.sideAgents, sessionId) }));
+  const closeView = (sessionId: string, hostId: string) => {
+    if (!viewLive(sessionId, hostId)) return;
+    const key = viewKey(hostId, sessionId);
+    set((state) => ({ views: withoutKey(state.views, key) }));
     // Still the main area's agent: its feed stays.
     if (isSelected(sessionId, hostId)) return;
     void apiOn(hostId).unsubscribe(sessionId).catch(() => {});
-    if (recentSessions.includes(sessionId)) return;
-    sessionHosts.delete(sessionId);
-    clearTimeout(queueTimers.get(sessionId));
-    set((state) => ({ sessions: withoutKey(state.sessions, sessionId) }));
-    retainSessions(viewIds());
+    if (recentViews.includes(key)) return;
+    if (sessionHosts.get(sessionId) === hostId) {
+      // The bare id now means another live view of it, if any (COMPATIBILITY routing).
+      const other = Object.values(get().views).find((v) => v.sessionId === sessionId);
+      if (other) sessionHosts.set(sessionId, other.hostId);
+      else sessionHosts.delete(sessionId);
+    }
+    clearTimeout(queueTimers.get(key));
+    set((state) => ({ sessions: withoutKey(state.sessions, key) }));
+    retainSessions(viewKeys());
   };
 
   /**
@@ -708,23 +765,24 @@ export const useApp = create<AppState>((set, get) => {
    * (upsert rules there), then the row into the live view's timeline. No view (agent not open):
    * the record alone; load() seeds it when the agent is opened again this run.
    */
-  const putInteraction = (sessionId: string, record: InteractionRecord) => {
-    if (!putRecord(sessionId, record)) return;
-    const view = get().sessions[sessionId];
-    if (view && insertInteraction(view.timeline, record)) patchSession(sessionId, (v) => ({ version: v.version + 1 }));
+  const putInteraction = (sessionId: string, record: InteractionRecord, host = hostOf(sessionId)) => {
+    if (!putRecord(viewKey(host, sessionId), record)) return;
+    const view = viewOn(sessionId, host);
+    if (view && insertInteraction(view.timeline, record)) patchSession(sessionId, (v) => ({ version: v.version + 1 }), host);
   };
 
-  const refreshQueue = (sessionId: string) => {
-    const scope = captureSession(sessionId);
-    clearTimeout(queueTimers.get(sessionId));
+  const refreshQueue = (sessionId: string, host: string) => {
+    const scope = captureHost(host);
+    const key = viewKey(host, sessionId);
+    clearTimeout(queueTimers.get(key));
     queueTimers.set(
-      sessionId,
+      key,
       setTimeout(async () => {
         if (!scope.current()) return;
         try {
           const tick = ++outboxTick;
-          const startError = get().sessions[sessionId]?.startError;
-          const failedIds = get().sessions[sessionId]?.startErrorQueueIds;
+          const startError = viewOn(sessionId, scope.host)?.startError;
+          const failedIds = viewOn(sessionId, scope.host)?.startErrorQueueIds;
           const { items, pause, asksPaused, admission } = await apiOn(scope.host).queueList(sessionId);
           if (!scope.current()) return;
           patchSession(sessionId, (v) => ({
@@ -733,8 +791,8 @@ export const useApp = create<AppState>((set, get) => {
             ...(v.startError === startError && v.startErrorQueueIds === failedIds
               && (!items.length || (failedIds && !items.some((item) => failedIds.includes(item.queueId))))
               ? { startError: null, startErrorQueueIds: undefined } : {}),
-          }));
-          settleOutbox(sessionId, tick);
+          }), scope.host);
+          settleOutbox(sessionId, tick, scope.host);
         } catch {
           // transient; next event retries
         }
@@ -742,97 +800,107 @@ export const useApp = create<AppState>((set, get) => {
     );
   };
 
-  const setSteers = (sessionId: string, update: (list: PendingSteer[]) => PendingSteer[]) =>
-    set((state) => ({ pendingSteers: { ...state.pendingSteers, [sessionId]: update(state.pendingSteers[sessionId] ?? []) } }));
+  const setSteers = (sessionId: string, host: string, update: (list: PendingSteer[]) => PendingSteer[]) => {
+    const key = viewKey(host, sessionId);
+    set((state) => ({ pendingSteers: { ...state.pendingSteers, [key]: update(state.pendingSteers[key] ?? []) } }));
+  };
+  const steersOf = (sessionId: string, host: string): PendingSteer[] | undefined => get().pendingSteers[viewKey(host, sessionId)];
+  const outboxOf = (sessionId: string, host: string): OutboxEntry[] | undefined => get().outbox[viewKey(host, sessionId)];
 
   // ---------- optimistic sends (lib/outbox) ----------
-  const setOutbox = (sessionId: string, update: (list: OutboxEntry[]) => OutboxEntry[]) => {
-    const before = get().outbox[sessionId] ?? [];
+  const setOutbox = (sessionId: string, host: string, update: (list: OutboxEntry[]) => OutboxEntry[]) => {
+    const key = viewKey(host, sessionId);
+    const before = get().outbox[key] ?? [];
     set((state) => {
-      const list = state.outbox[sessionId] ?? [];
+      const list = state.outbox[key] ?? [];
       const next = update(list);
-      return next === list ? state : { outbox: { ...state.outbox, [sessionId]: next } };
+      return next === list ? state : { outbox: { ...state.outbox, [key]: next } };
     });
-    const after = get().outbox[sessionId] ?? [];
-    if (after !== before) watchOutbox(sessionId, before, after);
+    const after = get().outbox[key] ?? [];
+    if (after !== before) watchOutbox(sessionId, host, before, after);
   };
 
   /** One outbox-linger record per send visible > 3 s (lib/outboxDiagnostics): when it leaves, or at 30 s. */
-  const reportLinger = (sessionId: string, entry: OutboxEntry, outcome: "left" | "visible") => {
+  const reportLinger = (sessionId: string, host: string, entry: OutboxEntry, outcome: "left" | "visible") => {
     if (lingerReported.has(entry.id)) return;
-    const record = outboxLingerRecord(sessionId, entry, get().sessions[sessionId]?.timeline ?? null, Date.now(), outcome);
+    const record = outboxLingerRecord(sessionId, entry, viewOn(sessionId, host)?.timeline ?? null, Date.now(), outcome);
     if (!record) return;
     lingerReported.add(entry.id);
     if (lingerReported.size > 500) lingerReported.delete(lingerReported.values().next().value!);
     try { void Promise.resolve(bridge.shell?.logError({ kind: "reported", message: JSON.stringify(record) })).catch(() => {}); } catch { /* best effort */ }
   };
-  const watchOutbox = (sessionId: string, before: readonly OutboxEntry[], after: readonly OutboxEntry[]) => {
+  const watchOutbox = (sessionId: string, host: string, before: readonly OutboxEntry[], after: readonly OutboxEntry[]) => {
     const now = new Set(after.map((e) => e.id));
     const was = new Set(before.map((e) => e.id));
-    for (const e of before) if (!now.has(e.id)) reportLinger(sessionId, e, "left");
+    for (const e of before) if (!now.has(e.id)) reportLinger(sessionId, host, e, "left");
     for (const e of after) {
       if (was.has(e.id)) continue;
       setTimeout(() => {
-        const current = get().outbox[sessionId]?.find((x) => x.id === e.id);
-        if (current) reportLinger(sessionId, current, "visible");
+        const current = outboxOf(sessionId, host)?.find((x) => x.id === e.id);
+        if (current) reportLinger(sessionId, host, current, "visible");
       }, OUTBOX_STUCK_MS);
     }
   };
 
   /** Drop sends whose cutex item is visible now; `queueTick`: the queue list just applied (+ unhide rows it no longer has). */
-  const settleOutbox = (sessionId: string, queueTick: number | null = null) => {
-    const view = get().sessions[sessionId];
+  const settleOutbox = (sessionId: string, queueTick: number | null, host: string) => {
+    const view = viewOn(sessionId, host);
     if (!view) return;
-    setOutbox(sessionId, (list) => reconcileOutbox(list, view.timeline, view.queue, queueTick));
-    const hidden = get().queueHidden[sessionId];
+    setOutbox(sessionId, host, (list) => reconcileOutbox(list, view.timeline, view.queue, queueTick));
+    const key = viewKey(host, sessionId);
+    const hidden = get().queueHidden[key];
     if (queueTick !== null && hidden?.length) {
       const kept = pruneHidden(hidden, view.queue);
-      if (kept !== hidden) set((state) => ({ queueHidden: { ...state.queueHidden, [sessionId]: kept } }));
+      if (kept !== hidden) set((state) => ({ queueHidden: { ...state.queueHidden, [key]: kept } }));
     }
   };
 
-  const hideQueued = (sessionId: string, queueIds: string[], show = false) =>
+  const hideQueued = (sessionId: string, host: string, queueIds: string[], show = false) =>
     set((state) => {
-      const current = state.queueHidden[sessionId] ?? [];
+      const key = viewKey(host, sessionId);
+      const current = state.queueHidden[key] ?? [];
       const next = show ? current.filter((id) => !queueIds.includes(id)) : [...current, ...queueIds.filter((id) => !current.includes(id))];
       // A confirmed send shown from the submit response is hidden with its outbox entry gone.
-      const outbox = show ? state.outbox : { ...state.outbox, [sessionId]: (state.outbox[sessionId] ?? []).filter((e) => !e.queueItem || !queueIds.includes(e.queueItem.queueId)) };
-      return { queueHidden: { ...state.queueHidden, [sessionId]: next }, outbox };
+      const outbox = show ? state.outbox : { ...state.outbox, [key]: (state.outbox[key] ?? []).filter((e) => !e.queueItem || !queueIds.includes(e.queueItem.queueId)) };
+      return { queueHidden: { ...state.queueHidden, [key]: next }, outbox };
     });
 
   /** Where a send will land on this agent now (an unlanded new-turn send counts as busy). */
-  const placementFor = (sessionId: string, strategy: SubmitStrategy, offlineQueued: boolean) => {
-    const view = get().sessions[sessionId];
-    const resource = sidebarOn(hostOf(sessionId))?.active.find((s) => s.cutexSessionId === sessionId);
-    const busy = !!view?.timeline.activeTurnId || hasUnlandedTurn(get().outbox[sessionId]);
+  const placementFor = (sessionId: string, host: string, strategy: SubmitStrategy, offlineQueued: boolean) => {
+    const view = viewOn(sessionId, host);
+    const resource = sidebarOn(host)?.active.find((s) => s.cutexSessionId === sessionId);
+    const busy = !!view?.timeline.activeTurnId || hasUnlandedTurn(outboxOf(sessionId, host));
     return predictPlacement(strategy, busy, { offlineQueued, noSteer: lacks(agentFeaturesOf(resource), "turnSteer") });
   };
 
   /**
    * Submit an outbox entry (already shown) after the agent's earlier sends; on the response it is
    * confirmed / handed over to the pending-steer row, on failure marked failed (or dropped).
+   * `scope`: the agent's host operation (its host is the agent's).
    */
-  const dispatchSend = (sessionId: string, entry: OutboxEntry, keepFailed = true, scope = captureSession(sessionId), cancelled = restoreUnsent(scope, sessionId, entry.text, entry.extra)): Promise<UserInputSubmitResult | null> => {
-    const trace = { hostId: scope.host, sessionId, clientUserMessageId: entry.id };
-    const previous = sendChains.get(sessionId);
-    if (previous) setOutbox(sessionId, (list) => markOutboxWaiting(list, entry.id, true));
+  const dispatchSend = (sessionId: string, entry: OutboxEntry, keepFailed: boolean, scope: HostOperation, cancelled = restoreUnsent(scope, sessionId, entry.text, entry.extra)): Promise<UserInputSubmitResult | null> => {
+    const host = scope.host;
+    const chainKey = viewKey(host, sessionId);
+    const trace = { hostId: host, sessionId, clientUserMessageId: entry.id };
+    const previous = sendChains.get(chainKey);
+    if (previous) setOutbox(sessionId, host, (list) => markOutboxWaiting(list, entry.id, true));
     const run = async () => {
       // Earlier submits may keep this callback queued past a host switch.
       if (!scope.current()) { cancelled(); throw staleHost(); }
-      setOutbox(sessionId, (list) => markOutboxDispatched(list, entry.id));
+      setOutbox(sessionId, host, (list) => markOutboxDispatched(list, entry.id));
       let answered = false;
       try {
         const result = await traceSendStage({ ...trace, stage: "ipc-submit" }, logSendTrace,
-          () => apiOn(scope.host).submit(sessionId, entry.text, entry.strategy, entry.startIfOffline, { extra: entry.extra as ExtraInput[], clientUserMessageId: entry.id }));
+          () => apiOn(host).submit(sessionId, entry.text, entry.strategy, entry.startIfOffline, { extra: entry.extra as ExtraInput[], clientUserMessageId: entry.id }));
         answered = true;
         // The request already left: acceptance may be unknown. Never make a new draft copy.
         if (!scope.current()) throw staleHost();
-        setOutbox(sessionId, (list) => confirmOutbox(list, entry.id, result, ++outboxTick));
-        trackSteer(sessionId, result, entry.id, entry.text, entry.extra);
-        settleOutbox(sessionId);
-        if (result?.disposition === "queued") refreshQueue(sessionId);
+        setOutbox(sessionId, host, (list) => confirmOutbox(list, entry.id, result, ++outboxTick));
+        trackSteer(sessionId, host, result, entry.id, entry.text, entry.extra);
+        settleOutbox(sessionId, null, host);
+        if (result?.disposition === "queued") refreshQueue(sessionId, host);
         // queue-idle-start: the item waits behind a stop's pause (older cutex: no `paused` field).
-        if (submitLandedPaused(result)) get().notify(translate("queue.addedToPaused"));
+        if (submitLandedPaused(result)) notifyAgent(sessionId, host, translate("queue.addedToPaused"));
         return result;
       } catch (e) {
         const message = sendErrorText(e, () => translate("outbox.capacityExceeded"), (code) => translate(`users.access.${code}`));
@@ -840,40 +908,41 @@ export const useApp = create<AppState>((set, get) => {
           // The text must not vanish: keep it as a failed row of its own host (same id, see
           // orphanedSends); already back on that host (A → B → A) → show it now.
           if (keepFailed && !answered) {
-            stashOrphanedSend(scope.host, sessionId, { ...entry, state: "failed", error: message, queueItem: undefined, confirmedTick: undefined });
-            if ((get().hosts?.active ?? "local") === scope.host) {
-              const restored = takeOrphanedSends(scope.host);
+            stashOrphanedSend(host, sessionId, { ...entry, state: "failed", error: message, queueItem: undefined, confirmedTick: undefined });
+            if ((get().hosts?.active ?? "local") === host) {
+              const restored = takeOrphanedSends(host);
               set((state) => ({ outbox: mergeOrphans(state.outbox, restored) }));
             }
           }
           throw staleHost();
         }
-        setOutbox(sessionId, (list) => (keepFailed ? failOutbox(list, entry.id, message) : removeOutbox(list, entry.id)));
+        setOutbox(sessionId, host, (list) => (keepFailed ? failOutbox(list, entry.id, message) : removeOutbox(list, entry.id)));
         throw e;
       }
     };
     const next = traceSendStage({ ...trace, stage: "chain-wait" }, logSendTrace, () => previous ?? Promise.resolve()).then(run);
     const tail = next.then(() => {}, () => {});
-    sendChains.set(sessionId, tail);
-    void tail.then(() => { if (sendChains.get(sessionId) === tail) sendChains.delete(sessionId); });
+    sendChains.set(chainKey, tail);
+    void tail.then(() => { if (sendChains.get(chainKey) === tail) sendChains.delete(chainKey); });
     return next;
   };
 
   /** A "steered" submit waits in the queue panel until the native records it (lib/pendingSteers). */
-  const trackSteer = (sessionId: string, result: UserInputSubmitResult | null, clientUserMessageId: string, text: string, extra: unknown[]) => {
-    const view = get().sessions[sessionId];
+  const trackSteer = (sessionId: string, host: string, result: UserInputSubmitResult | null, clientUserMessageId: string, text: string, extra: unknown[]) => {
+    const view = viewOn(sessionId, host);
     if (result?.disposition !== "steered" || !view) return;
     const images = (extra as { type?: string }[]).filter((x) => x.type === "image" || x.type === "localImage").length;
     const pending = { ...newPendingSteer(view.timeline, clientUserMessageId, text, images, result.turnId ?? null), extra };
     // The item may already have arrived while the request was in flight.
-    const before = (get().pendingSteers[sessionId] ?? []).filter((p) => p.id !== clientUserMessageId);
-    settleSteers(sessionId, settlePendingSteers([...before, pending], view.timeline), null);
+    const before = (steersOf(sessionId, host) ?? []).filter((p) => p.id !== clientUserMessageId);
+    settleSteers(sessionId, host, settlePendingSteers([...before, pending], view.timeline), null);
   };
 
   /** Apply a settlement; steers whose turn ended unrecorded are re-checked against the history. */
-  const settleSteers = (sessionId: string, settled: SteerSettlement, previous: PendingSteer[] | null) => {
-    if (settled.pending !== previous) set((state) => ({ pendingSteers: { ...state.pendingSteers, [sessionId]: settled.pending } }));
-    if (settled.lost.length) void verifyLostSteers(sessionId, settled.lost);
+  const settleSteers = (sessionId: string, host: string, settled: SteerSettlement, previous: PendingSteer[] | null) => {
+    const key = viewKey(host, sessionId);
+    if (settled.pending !== previous) set((state) => ({ pendingSteers: { ...state.pendingSteers, [key]: settled.pending } }));
+    if (settled.lost.length) void verifyLostSteers(sessionId, host, settled.lost);
   };
 
   /**
@@ -882,8 +951,8 @@ export const useApp = create<AppState>((set, get) => {
    * gone from the panel. Not recorded → the native dropped it: re-sent when "interrupt & send" asked
    * for that turn, else shown as undelivered with resend / dismiss. Never dropped silently.
    */
-  const verifyLostSteers = async (sessionId: string, lost: PendingSteer[]) => {
-    const scope = captureSession(sessionId);
+  const verifyLostSteers = async (sessionId: string, host: string, lost: PendingSteer[]) => {
+    const scope = captureHost(host);
     const ids = new Set(lost.map((p) => p.id));
     let recorded = new Set<string>();
     try {
@@ -898,10 +967,10 @@ export const useApp = create<AppState>((set, get) => {
     const resend = missing.filter((p) => !!p.turnId && resendTurns.has(p.turnId));
     for (const p of resend) resendTurns.delete(p.turnId!);
     const resendIds = new Set(resend.map((p) => p.id));
-    setSteers(sessionId, (list) => resolveChecked(list, ids, new Set([...recorded, ...resendIds]), "undelivered"));
+    setSteers(sessionId, host, (list) => resolveChecked(list, ids, new Set([...recorded, ...resendIds]), "undelivered"));
     const undelivered = missing.length - resend.length;
-    if (undelivered > 0) get().notify(translate("steer.undeliveredNotice", { n: undelivered }), "error");
-    if (resend.length) await sendMergedSteers(sessionId, resend);
+    if (undelivered > 0) notifyAgent(sessionId, host, translate("steer.undeliveredNotice", { n: undelivered }), "error");
+    if (resend.length) await sendMergedSteers(sessionId, host, resend);
   };
 
   /**
@@ -909,23 +978,23 @@ export const useApp = create<AppState>((set, get) => {
    * order into one message, start the next turn. Sent once: the turn's resend mark is consumed
    * above, and only steers the history re-check did not find are included.
    */
-  const sendMergedSteers = async (sessionId: string, steers: PendingSteer[], tail: { text: string; extra: unknown[] } | null = null, outboxId?: string, scope = captureSession(sessionId), cancelled: () => void = () => {}): Promise<boolean> => {
+  const sendMergedSteers = async (sessionId: string, host: string, steers: PendingSteer[], tail: { text: string; extra: unknown[] } | null = null, outboxId?: string, scope = captureHost(host), cancelled: () => void = () => {}): Promise<boolean> => {
     if (!scope.current()) { cancelled?.(); return false; }
     const text = interruptSendText(steers, tail?.text ?? "");
     const extra = [...steers.flatMap((p) => p.extra ?? []), ...(tail?.extra ?? [])];
     if (!text && extra.length === 0) {
-      if (outboxId) setOutbox(sessionId, (list) => removeOutbox(list, outboxId));
+      if (outboxId) setOutbox(sessionId, host, (list) => removeOutbox(list, outboxId));
       return true;
     }
     // Optimistic: one pending message (lib/outbox); a failure keeps it there with retry / edit / discard.
-    const shown = outboxId ? get().outbox[sessionId]?.find((e) => e.id === outboxId) : undefined;
+    const shown = outboxId ? outboxOf(sessionId, host)?.find((e) => e.id === outboxId) : undefined;
     let entry: OutboxEntry;
     if (shown) {
-      setOutbox(sessionId, (list) => updateOutbox(list, shown.id, { text, extra }));
+      setOutbox(sessionId, host, (list) => updateOutbox(list, shown.id, { text, extra }));
       entry = { ...shown, text, extra };
     } else {
-      entry = newOutboxEntry(get().sessions[sessionId]?.timeline ?? null, { id: crypto.randomUUID(), text, extra, strategy: "auto", placement: placementFor(sessionId, "auto", false) });
-      setOutbox(sessionId, (list) => [...list, entry]);
+      entry = newOutboxEntry(viewOn(sessionId, host)?.timeline ?? null, { id: crypto.randomUUID(), text, extra, strategy: "auto", placement: placementFor(sessionId, host, "auto", false) });
+      setOutbox(sessionId, host, (list) => [...list, entry]);
     }
     try {
       await dispatchSend(sessionId, entry, true, scope, cancelled);
@@ -935,22 +1004,22 @@ export const useApp = create<AppState>((set, get) => {
     }
   };
 
-  /** The selected agent's paused section (lib/queuePause). */
-  const pausedOf = (sessionId: string) => {
-    const view = get().sessions[sessionId];
-    return pausedSection(get().pendingSteers[sessionId] ?? [], view?.queue ?? [], view?.queuePause ?? null, !!get().queueHandoff[sessionId]);
+  /** An agent's paused section (lib/queuePause). */
+  const pausedOf = (sessionId: string, host: string) => {
+    const view = viewOn(sessionId, host);
+    return pausedSection(steersOf(sessionId, host) ?? [], view?.queue ?? [], view?.queuePause ?? null, !!get().queueHandoff[viewKey(host, sessionId)]);
   };
 
   /** Remove queued items at their revision; returns the ones actually removed. */
-  const removeQueued = async (sessionId: string, items: QueueItem[]) => {
+  const removeQueued = async (sessionId: string, host: string, items: QueueItem[]) => {
     // Rows leave the panel at once; the removals go out together (one round trip, not one each).
-    hideQueued(sessionId, items.map((i) => i.queueId));
-    const results = await Promise.allSettled(items.map((item) => apiOf(sessionId).queueRemove(sessionId, item.queueId, item.revision)));
+    hideQueued(sessionId, host, items.map((i) => i.queueId));
+    const results = await Promise.allSettled(items.map((item) => apiOn(host).queueRemove(sessionId, item.queueId, item.revision)));
     const removed = items.filter((_, i) => results[i]!.status === "fulfilled");
     // Changed, flushed or already removed meanwhile: shown again until cutex's list says otherwise.
     const failed = items.filter((_, i) => results[i]!.status === "rejected");
-    if (failed.length) hideQueued(sessionId, failed.map((i) => i.queueId), true);
-    refreshQueue(sessionId);
+    if (failed.length) hideQueued(sessionId, host, failed.map((i) => i.queueId), true);
+    refreshQueue(sessionId, host);
     return removed;
   };
 
@@ -958,16 +1027,16 @@ export const useApp = create<AppState>((set, get) => {
    * (Re)send a steer under its own clientUserMessageId: cutex answers "deduplicated" if the thread
    * already has it, so a text is never recorded twice. Failure → back to undelivered.
    */
-  const sendSteerAgain = async (sessionId: string, p: PendingSteer) => {
-    const scope = captureSession(sessionId);
+  const sendSteerAgain = async (sessionId: string, host: string, p: PendingSteer) => {
+    const scope = captureHost(host);
     try {
       const result = await apiOn(scope.host).submit(sessionId, p.text, "auto", false, { extra: (p.extra ?? []) as ExtraInput[], clientUserMessageId: p.id });
       if (!scope.current()) return;
-      trackSteer(sessionId, result, p.id, p.text, p.extra ?? []);
+      trackSteer(sessionId, host, result, p.id, p.text, p.extra ?? []);
     } catch (e) {
       if (!scope.current()) return;
-      setSteers(sessionId, (list) => [...list.filter((x) => x.id !== p.id), { ...p, state: "undelivered" }]);
-      get().notify(sendErrorText(e, () => translate("outbox.capacityExceeded"), (code) => translate(`users.access.${code}`)), "error");
+      setSteers(sessionId, host, (list) => [...list.filter((x) => x.id !== p.id), { ...p, state: "undelivered" }]);
+      notifyAgent(sessionId, host, sendErrorText(e, () => translate("outbox.capacityExceeded"), (code) => translate(`users.access.${code}`)), "error");
     }
   };
 
@@ -975,25 +1044,24 @@ export const useApp = create<AppState>((set, get) => {
    * `cutex/session/history/revert` from `beforeTurnId` on (live runtime, no restart), then re-read
    * the thread so the timeline drops the reverted turns. `after` runs once cutex accepted it.
    */
-  const revertAndReload = async (sessionId: string, beforeTurnId: string, after?: () => void, options?: { rewindFiles?: boolean }) => {
-    const host = hostOf(sessionId);
+  const revertAndReload = async (sessionId: string, host: string, beforeTurnId: string, after?: () => void, options?: { rewindFiles?: boolean }) => {
     const resource = sidebarOn(host)?.active.find((r) => r.cutexSessionId === sessionId);
     if (!resource) throw new Error(`unknown session ${sessionId}`);
-    const shown = get().sessions[sessionId]?.timeline;
+    const shown = viewOn(sessionId, host)?.timeline;
     const result = await apiOn(host).revertHistory(sessionId, beforeTurnId, resource.revision, options);
-    if (options?.rewindFiles) get().notify(translate(filesRewound(result) ? "reply.revertFilesDone" : "reply.revertFilesNot"), filesRewound(result) ? "info" : "error");
+    if (options?.rewindFiles) notifyAgent(sessionId, host, translate(filesRewound(result) ? "reply.revertFilesDone" : "reply.revertFilesNot"), filesRewound(result) ? "info" : "error");
     // A kept 进程 of a reverted turn goes with it (cutex's latestPlan is trimmed the same way).
     const kept = getCachedPlan(host, sessionId);
     if (kept && shown && kept.threadId === shown.threadId && revertDropsPlan(kept.turnId, shown.turns.map((t) => t.id), beforeTurnId)) setCachedPlan(host, sessionId, null);
     after?.();
     await refreshHostSidebar(host);
-    if ((get().selectedId === sessionId || sideLive(sessionId, host)) && hostOf(sessionId) === host) {
+    if (isSelected(sessionId, host) || viewLive(sessionId, host)) {
       await apiOn(host).unsubscribe(sessionId);
-      set((state) => ({ sessions: { ...state.sessions, [sessionId]: newView() } }));
-      await load(sessionId);
+      const key = viewKey(host, sessionId);
+      set((state) => ({ sessions: { ...state.sessions, [key]: newView() } }));
+      await load(sessionId, host);
     }
   };
-
   /**
    * A rebuilt timeline's 进程: the kept snapshot (lib/planCache) or cutex `latestPlan`, whichever is
    * newer (lib/planState.bootPlan); a kept one whose turn is known reverted is dropped. The result is
@@ -1034,7 +1102,7 @@ export const useApp = create<AppState>((set, get) => {
       startError: null,
       startErrorQueueIds: undefined,
       older,
-    }));
+    }), scope.host);
   };
 
   /**
@@ -1055,11 +1123,12 @@ export const useApp = create<AppState>((set, get) => {
     );
   };
 
-  const load = async (sessionId: string) => {
-    const scope = captureSession(sessionId);
+  /** (Re)build the agent's view on `host` (default: `hostOf`) from its bootstrap and subscribe its feed. */
+  const load = async (sessionId: string, host = hostOf(sessionId)) => {
+    const scope = captureHost(host);
     const daemon = apiOn(scope.host);
     // What was shown before (resync / re-open): tells a reverted plan turn from one not loaded yet.
-    const previous = get().sessions[sessionId]?.timeline;
+    const previous = viewOn(sessionId, scope.host)?.timeline;
     const bootTick = ++outboxTick;
     try {
       // History pages: only the newest turns (a cutex without history-pages ignores turnLimit and
@@ -1090,7 +1159,7 @@ export const useApp = create<AppState>((set, get) => {
       seedKeptPlan(scope.host, sessionId, timeline, previous, boot.cutexState.latestPlan ?? history?.cutexState?.latestPlan, !!older?.cursor);
       // This run's handled-interaction rows go back into the rebuilt timeline (in-memory only:
       // cutex keeps no handled server requests — lib/interactionLog).
-      seedInteractions(timeline, recordsOf(sessionId));
+      seedInteractions(timeline, recordsOf(viewKey(scope.host, sessionId)));
       patchSession(sessionId, (v) => ({
         loading: false,
         error: null,
@@ -1105,17 +1174,17 @@ export const useApp = create<AppState>((set, get) => {
         startError: null,
         startErrorQueueIds: undefined,
         older,
-      }));
+      }), scope.host);
       if (!scope.current()) return;
       applyPendingReviewer(sessionId, agent, boot.native ? timeline : null, daemon);
-      settleOutbox(sessionId, bootTick);
+      settleOutbox(sessionId, bootTick, scope.host);
       // Steers sent before the owner left this agent: their userMessage may have landed while its
       // feed was closed (only the open agent is subscribed), and no live event will settle them then.
       // The re-read history does: recorded → gone from 接下来; their turn ended without them → re-checked.
-      const steers = get().pendingSteers[sessionId];
-      if ((boot.native || history) && steers?.length) settleSteers(sessionId, settlePendingSteers(steers, timeline), steers);
+      const steers = steersOf(sessionId, scope.host);
+      if ((boot.native || history) && steers?.length) settleSteers(sessionId, scope.host, settlePendingSteers(steers, timeline), steers);
       // admission-order: the bootstrap has the owner queue only; the merged order comes from queue/list.
-      if (featuresOn(scope.host).has(ADMISSION_ORDER_FEATURE)) refreshQueue(sessionId);
+      if (featuresOn(scope.host).has(ADMISSION_ORDER_FEATURE)) refreshQueue(sessionId, scope.host);
       // Agent messages v2: pending incoming messages (待读留言) + the status of its sent ones (the
       // agent-messages store follows the focus host and the open agent's host).
       useAgentMessages.getState().seed(sessionId, boot.cutexState.agentBusMessages, boot.cutexState.agentBusSentMessages);
@@ -1130,17 +1199,17 @@ export const useApp = create<AppState>((set, get) => {
         daemon.threadGoal(sessionId, threadId).then(
           (goal) => {
             if (!scope.current()) return;
-            const view = get().sessions[sessionId];
+            const view = viewOn(sessionId, scope.host);
             if (!view || view.timeline.threadId !== threadId) return;
             view.timeline.goal = goal;
-            patchSession(sessionId, (v) => ({ version: v.version + 1 }));
+            patchSession(sessionId, (v) => ({ version: v.version + 1 }), scope.host);
           },
           () => {}, // goals feature off / older runtime: no goal chip
         );
       }
     } catch (error) {
       if (!scope.current()) return;
-      patchSession(sessionId, { loading: false, error: error instanceof Error ? error.message : String(error) });
+      patchSession(sessionId, { loading: false, error: error instanceof Error ? error.message : String(error) }, scope.host);
     }
   };
 
@@ -1167,7 +1236,7 @@ export const useApp = create<AppState>((set, get) => {
     useJobs.getState().reset();
     useAgentMessages.getState().reset();
     sessionHosts.clear();
-    sideRefs.clear();
+    viewRefs.clear();
     const view = get().view;
     set(() => ({
       pinned: loadPinned(),
@@ -1175,7 +1244,7 @@ export const useApp = create<AppState>((set, get) => {
       selectedId: null,
       selectedHost: null,
       sessions: {},
-      sideAgents: {},
+      views: {},
       activity: {},
       // Settings stays open (on the same tab) across a host switch; any other page closes.
       view: view.kind === "page" && view.page === SETTINGS_PAGE ? { kind: "page", page: SETTINGS_PAGE, params: { tab: view.params.tab } } : { kind: "conversation" },
@@ -1226,18 +1295,19 @@ export const useApp = create<AppState>((set, get) => {
    */
   const forgetHostViews = (hostId: string, unsubscribe = false) => {
     if (hostId === focusHost()) return;
-    const ids = [...sessionHosts].filter(([, h]) => h === hostId).map(([id]) => id);
-    if (!ids.length && !Object.values(get().sideAgents).some((a) => a.hostId === hostId)) return;
+    const keys = Object.keys(get().sessions).filter((key) => isViewOf(key, hostId));
+    const live = Object.keys(get().views).filter((key) => isViewOf(key, hostId));
+    if (!keys.length && !live.length) return;
     const selected = get().selectedHost === hostId ? get().selectedId : null;
-    // Side-live agents of that host go too (their side pages retain them again when it is back).
-    const side = Object.entries(get().sideAgents).filter(([, a]) => a.hostId === hostId).map(([id]) => id);
-    for (const id of side) sideRefs.delete(`${hostId}\n${id}`);
-    for (const id of ids) sessionHosts.delete(id);
-    recentSessions = recentSessions.filter((id) => !ids.includes(id));
+    // Live agents of that host go too (their panes retain them again when it is back).
+    for (const key of live) viewRefs.delete(key);
+    for (const [id, h] of [...sessionHosts]) if (h === hostId) sessionHosts.delete(id);
+    recentViews = recentViews.filter((key) => !isViewOf(key, hostId));
+    const side = live.map((key) => viewKeyParts(key).sessionId);
     if (unsubscribe) for (const id of new Set([...(selected ? [selected] : []), ...side])) afterHostsDelivered(() => void apiFor(hostId).unsubscribe(id).catch(() => {}));
     set((state) => ({
-      sessions: withoutKeys(state.sessions, ids),
-      sideAgents: withoutKeys(state.sideAgents, side),
+      sessions: withoutKeys(state.sessions, keys),
+      views: withoutKeys(state.views, live),
       ...(selected ? { selectedId: null, selectedHost: null } : {}),
     }));
     retainSessions(Object.keys(get().sessions));
@@ -1247,7 +1317,11 @@ export const useApp = create<AppState>((set, get) => {
   const stashFocus = (hostId: string, epoch: string) => {
     const s = get();
     const waiting = waitingRecord(hostId);
-    for (const [id, view] of Object.entries(s.sessions)) if (view.timeline.pending.size) waiting[id] = [...new Set([...(waiting[id] ?? []), ...view.timeline.pending.keys()])];
+    for (const [key, view] of Object.entries(s.sessions)) {
+      if (!isViewOf(key, hostId) || !view.timeline.pending.size) continue;
+      const id = viewKeyParts(key).sessionId;
+      waiting[id] = [...new Set([...(waiting[id] ?? []), ...view.timeline.pending.keys()])];
+    }
     set({ byHost: { ...s.byHost, [hostId]: { epoch, daemon: s.daemon, features: s.features, featuresKnown: s.featuresKnown, sidebar: s.sidebar, approvals: s.approvals, services: s.services, waiting } } });
     // Left before its capabilities arrived: load the slice (a later connect event also does).
     if (s.daemon.kind === "connected" && !s.featuresKnown) void loadSlice(hostId, epoch);
@@ -1490,25 +1564,26 @@ export const useApp = create<AppState>((set, get) => {
     selectedId: null,
     selectedHost: null,
     sessions: {},
-    sideAgents: {},
-    retainSideAgent(sessionId, hostId) {
-      const key = `${hostId}\n${sessionId}`;
-      const refs = sideRefs.get(key) ?? 0;
-      sideRefs.set(key, refs + 1);
-      if (refs === 0) openSideAgent(sessionId, hostId);
+    views: {},
+    retainView(hostId, sessionId) {
+      const key = viewKey(hostId, sessionId);
+      const refs = viewRefs.get(key) ?? 0;
+      viewRefs.set(key, refs + 1);
+      if (refs === 0) openView(sessionId, hostId);
       let released = false;
       return () => {
         if (released) return;
         released = true;
-        const left = (sideRefs.get(key) ?? 1) - 1;
-        if (left > 0) return void sideRefs.set(key, left);
-        sideRefs.delete(key);
-        closeSideAgent(sessionId, hostId);
+        const left = (viewRefs.get(key) ?? 1) - 1;
+        if (left > 0) return void viewRefs.set(key, left);
+        viewRefs.delete(key);
+        closeView(sessionId, hostId);
       };
     },
-    setSideAgentVisible(sessionId, visible) {
-      const entry = get().sideAgents[sessionId];
-      if (entry && entry.visible !== visible) set((state) => ({ sideAgents: { ...state.sideAgents, [sessionId]: { ...entry, visible } } }));
+    setViewVisible(hostId, sessionId, visible) {
+      const key = viewKey(hostId, sessionId);
+      const entry = get().views[key];
+      if (entry && entry.visible !== visible) set((state) => ({ views: { ...state.views, [key]: { ...entry, visible } } }));
     },
     pinned: loadPinned(),
     activity: {},
@@ -1556,10 +1631,10 @@ export const useApp = create<AppState>((set, get) => {
         if (failed) throw new Error(translate("runtime.startNotOnline", { status: failed }));
         return result;
       } catch (error) {
-        if (starting && scope.current() && hostOf(sessionId) === scope.host && get().sessions[sessionId]) {
+        if (starting && scope.current() && viewOn(sessionId, scope.host)) {
           const message = error instanceof Error ? error.message : String(error);
           // A failed send-start (queued inputs) keeps its own, more specific line.
-          patchSession(sessionId, (v) => (v.startErrorQueueIds?.length ? {} : { startError: message, startErrorQueueIds: undefined }));
+          patchSession(sessionId, (v) => (v.startErrorQueueIds?.length ? {} : { startError: message, startErrorQueueIds: undefined }), scope.host);
         }
         throw error;
       } finally {
@@ -1570,61 +1645,66 @@ export const useApp = create<AppState>((set, get) => {
       }
     },
 
-    async forkSession(sessionId, afterTurnId) {
-      const host = hostOf(sessionId);
+    async forkSession(sessionId, afterTurnId, hostId) {
+      const host = hostId ?? hostOf(sessionId);
       const { cutexSessionId } = await apiOn(host).forkSession(sessionId, { afterTurnId });
       await refreshHostSidebar(host);
       await get().select(cutexSessionId, host);
       const s = sidebarOn(host)?.active.find((r) => r.cutexSessionId === cutexSessionId);
-      get().notify(translate("fork.done", { name: s?.displayName ?? cutexSessionId }));
+      notifyAgent(cutexSessionId, host, translate("fork.done", { name: s?.displayName ?? cutexSessionId }));
     },
 
     async revertTo(sessionId, beforeTurnId, options) {
-      await revertAndReload(sessionId, beforeTurnId, undefined, options);
+      const { hostId, ...rest } = options ?? {};
+      await revertAndReload(sessionId, hostId ?? hostOf(sessionId), beforeTurnId, undefined, rest);
     },
-    dismissPlan(sessionId) {
-      const view = get().sessions[sessionId];
+    dismissPlan(sessionId, hostId) {
+      const host = hostId ?? hostOf(sessionId);
+      const view = viewOn(sessionId, host);
       const plan = dismissedPlan(view?.timeline.plan);
       if (!view || !plan || plan === view.timeline.plan) return;
       view.timeline.plan = plan;
-      setCachedPlan(hostOf(sessionId), sessionId, plan);
-      patchSession(sessionId, (v) => ({ version: v.version + 1 }));
+      setCachedPlan(host, sessionId, plan);
+      patchSession(sessionId, (v) => ({ version: v.version + 1 }), host);
     },
-    restorePlan(sessionId) {
-      const view = get().sessions[sessionId];
+    restorePlan(sessionId, hostId) {
+      const host = hostId ?? hostOf(sessionId);
+      const view = viewOn(sessionId, host);
       const plan = restoredPlan(view?.timeline.plan);
       if (!view || !plan || plan === view.timeline.plan) return;
       view.timeline.plan = plan;
-      setCachedPlan(hostOf(sessionId), sessionId, plan);
-      patchSession(sessionId, (v) => ({ version: v.version + 1 }));
+      setCachedPlan(host, sessionId, plan);
+      patchSession(sessionId, (v) => ({ version: v.version + 1 }), host);
     },
 
     async loadOlder(sessionId, opts) {
-      const view = get().sessions[sessionId];
+      const host = opts?.hostId ?? hostOf(sessionId);
+      const view = viewOn(sessionId, host);
       const cursor = view?.older?.cursor;
       if (!view || !cursor || view.older?.loading) return;
       const timeline = view.timeline;
       // A reload (resync, revert, runtime online) replaces the timeline: drop a page that arrives late.
-      const current = () => get().sessions[sessionId]?.timeline === timeline;
-      patchSession(sessionId, (v) => ({ older: v.older && { ...v.older, loading: true, error: null } }));
+      const current = () => viewOn(sessionId, host)?.timeline === timeline;
+      patchSession(sessionId, (v) => ({ older: v.older && { ...v.older, loading: true, error: null } }), host);
       try {
-        const page = opts?.read ? await opts.read(cursor) : await apiOf(sessionId).history(sessionId, cursor, opts?.limit ?? historyPageSize(getUiPrefs().timelineTurns) ?? MAX_PAGE_TURNS);
+        const page = opts?.read ? await opts.read(cursor) : await apiOn(host).history(sessionId, cursor, opts?.limit ?? historyPageSize(getUiPrefs().timelineTurns) ?? MAX_PAGE_TURNS);
         if (!current()) return;
-        if (!page) return patchSession(sessionId, (v) => ({ older: v.older && { ...v.older, loading: false, cursor: null } }));
+        if (!page) return patchSession(sessionId, (v) => ({ older: v.older && { ...v.older, loading: false, cursor: null } }), host);
         const added = prependHistory(timeline, page.native.result);
-        patchSession(sessionId, (v) => ({ version: v.version + 1, older: olderAfterPage(v.older, page.page, added, cursor) }));
+        patchSession(sessionId, (v) => ({ version: v.version + 1, older: olderAfterPage(v.older, page.page, added, cursor) }), host);
       } catch (e) {
-        if (current()) patchSession(sessionId, (v) => ({ older: v.older && { ...v.older, loading: false, error: e instanceof Error ? e.message : String(e) } }));
+        if (current()) patchSession(sessionId, (v) => ({ older: v.older && { ...v.older, loading: false, error: e instanceof Error ? e.message : String(e) } }), host);
       }
     },
 
-    async completeTimeline(sessionId) {
-      const view = get().sessions[sessionId];
+    async completeTimeline(sessionId, hostId) {
+      const host = hostId ?? hostOf(sessionId);
+      const view = viewOn(sessionId, host);
       if (!view) return null;
       const full = cloneTimeline(view.timeline);
       let cursor = view.older?.cursor ?? null;
       for (let pages = 0; cursor && pages < 1000; pages++) {
-        const page = await apiOf(sessionId).history(sessionId, cursor, MAX_PAGE_TURNS);
+        const page = await apiOn(host).history(sessionId, cursor, MAX_PAGE_TURNS);
         if (!page) break;
         prependHistory(full, page.native.result);
         cursor = olderAfterPage(null, page.page, 0, cursor).cursor;
@@ -1639,7 +1719,7 @@ export const useApp = create<AppState>((set, get) => {
       // cutex resolves it by id and applies the delete to its current revision.
       const result = await apiOn(scope.host).deleteSession(sessionId, expectedRevision ?? resource?.revision);
       if (!result.ok || !scope.current()) return result;
-      if (get().selectedId === sessionId && hostOf(sessionId) === scope.host) {
+      if (isSelected(sessionId, scope.host)) {
         void apiOn(scope.host).unsubscribe(sessionId);
         set({ selectedId: null, selectedHost: null });
       }
@@ -1687,9 +1767,9 @@ export const useApp = create<AppState>((set, get) => {
         // keep the last list
       }
     },
-    async editAndResend(sessionId, turnId, text) {
-      const host = hostOf(sessionId);
-      await revertAndReload(sessionId, turnId, () => insertComposerDraft(host, sessionId, text, "replace"));
+    async editAndResend(sessionId, turnId, text, hostId) {
+      const host = hostId ?? hostOf(sessionId);
+      await revertAndReload(sessionId, host, turnId, () => insertComposerDraft(host, sessionId, text, "replace"));
     },
 
     subTimelines: {},
@@ -1710,8 +1790,8 @@ export const useApp = create<AppState>((set, get) => {
         ...(genChanged ? { subAgentLiveGen: { ...state.subAgentLiveGen, [threadId]: generation } } : {}),
       }));
     },
-    insertIntoComposer(sessionId, text, mode = "replace", extra) {
-      insertComposerDraft(hostOf(sessionId), sessionId, text, mode, extra);
+    insertIntoComposer(sessionId, text, mode = "replace", extra, hostId) {
+      insertComposerDraft(hostId ?? hostOf(sessionId), sessionId, text, mode, extra);
     },
 
     openSettings(tab = "general", focus) {
@@ -1734,78 +1814,85 @@ export const useApp = create<AppState>((set, get) => {
       set({ customize: null });
     },
     uiSignal: null,
-    signal(target, arg) {
-      set({ uiSignal: { target, nonce: Date.now() + Math.random(), arg } });
+    signal(target, arg, agent) {
+      set({ uiSignal: { target, nonce: Date.now() + Math.random(), arg, ...(agent ? { agent: viewKey(agent.hostId, agent.sessionId) } : {}) } });
     },
     notice: null,
-    notify(text, tone = "info") {
+    notify(text, tone = "info", agent) {
+      const to = agent ? { agent: viewKey(agent.hostId, agent.sessionId) } : {};
       // "Not available for this agent" (a Claude agent without that Codex feature) is information.
       const feature = parseUnsupported(text);
-      if (feature !== null) return set({ notice: { text: unsupportedNotice(feature), tone: "info", nonce: Date.now() + Math.random() } });
-      set({ notice: { text, tone, nonce: Date.now() + Math.random() } });
+      if (feature !== null) return set({ notice: { text: unsupportedNotice(feature), tone: "info", nonce: Date.now() + Math.random(), ...to } });
+      set({ notice: { text, tone, nonce: Date.now() + Math.random(), ...to } });
     },
 
     pendingSteers: {},
     outbox: {},
     queueHidden: {},
-    retrySend(sessionId, id) {
-      const entry = get().outbox[sessionId]?.find((e) => e.id === id && e.state === "failed");
+    retrySend(sessionId, id, hostId) {
+      const host = hostId ?? hostOf(sessionId);
+      const entry = outboxOf(sessionId, host)?.find((e) => e.id === id && e.state === "failed");
       if (!entry) return;
       // cutex "queue" never starts a turn on an idle agent: an idle agent gets it as a new turn.
-      const busy = !!get().sessions[sessionId]?.timeline.activeTurnId;
+      const busy = !!viewOn(sessionId, host)?.timeline.activeTurnId;
       const strategy = entry.strategy === "queue" && !busy && !entry.startIfOffline ? "auto" : entry.strategy;
-      const placement = placementFor(sessionId, strategy, entry.startIfOffline);
-      setOutbox(sessionId, (list) => retryOutbox(list, id, strategy, placement));
+      const placement = placementFor(sessionId, host, strategy, entry.startIfOffline);
+      setOutbox(sessionId, host, (list) => retryOutbox(list, id, strategy, placement));
       // A retry may already have been accepted under this ID; never clone it into a new draft.
-      void dispatchSend(sessionId, { ...entry, strategy, placement }, true, captureSession(sessionId), () => {}).catch(() => {});
+      void dispatchSend(sessionId, { ...entry, strategy, placement }, true, captureHost(host), () => {}).catch(() => {});
     },
-    editSend(sessionId, id) {
-      const entry = get().outbox[sessionId]?.find((e) => e.id === id && e.state === "failed");
+    editSend(sessionId, id, hostId) {
+      const host = hostId ?? hostOf(sessionId);
+      const entry = outboxOf(sessionId, host)?.find((e) => e.id === id && e.state === "failed");
       if (!entry) return;
-      setOutbox(sessionId, (list) => removeOutbox(list, id));
-      get().insertIntoComposer(sessionId, entry.text, "append", entry.extra.length ? entry.extra : undefined);
+      setOutbox(sessionId, host, (list) => removeOutbox(list, id));
+      get().insertIntoComposer(sessionId, entry.text, "append", entry.extra.length ? entry.extra : undefined, host);
     },
-    discardSend(sessionId, id) {
-      setOutbox(sessionId, (list) => removeOutbox(list, id));
+    discardSend(sessionId, id, hostId) {
+      setOutbox(sessionId, hostId ?? hostOf(sessionId), (list) => removeOutbox(list, id));
     },
     backgroundItems: {},
-    setBackgroundItems(sessionId, itemIds) {
-      const prev = get().backgroundItems[sessionId] ?? [];
+    setBackgroundItems(sessionId, itemIds, hostId) {
+      const key = viewKey(hostId ?? hostOf(sessionId), sessionId);
+      const prev = get().backgroundItems[key] ?? [];
       if (prev.length === itemIds.length && prev.every((x, i) => x === itemIds[i])) return;
-      set((state) => ({ backgroundItems: { ...state.backgroundItems, [sessionId]: itemIds } }));
+      set((state) => ({ backgroundItems: { ...state.backgroundItems, [key]: itemIds } }));
     },
-    async resendSteer(id, agent) {
-      const sessionId = agent ?? get().selectedId;
-      const p = sessionId ? (get().pendingSteers[sessionId] ?? []).find((x) => x.id === id && x.state === "undelivered") : undefined;
-      if (!sessionId || !p) return;
-      setSteers(sessionId, (list) => list.filter((x) => x.id !== id));
-      await sendSteerAgain(sessionId, p);
+    async resendSteer(id, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      const p = agent ? (steersOf(agent.id, agent.host) ?? []).find((x) => x.id === id && x.state === "undelivered") : undefined;
+      if (!agent || !p) return;
+      setSteers(agent.id, agent.host, (list) => list.filter((x) => x.id !== id));
+      await sendSteerAgain(agent.id, agent.host, p);
     },
-    dismissSteer(id, agent) {
-      const sessionId = agent ?? get().selectedId;
-      if (sessionId) setSteers(sessionId, (list) => list.filter((x) => x.id !== id));
+    dismissSteer(id, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      if (agent) setSteers(agent.id, agent.host, (list) => list.filter((x) => x.id !== id));
     },
     collabModes: {},
-    async loadCollabModes() {
-      const id = get().selectedId;
-      if (!id || get().collabModes[id]) return;
-      const scope = captureSession(id);
+    async loadCollabModes(sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      if (!agent || get().collabModes[agent.key]) return;
+      const scope = captureHost(agent.host);
       try {
-        const modes = await apiOn(scope.host).collaborationModes(id);
+        const modes = await apiOn(scope.host).collaborationModes(agent.id);
         if (!scope.current()) return;
-        set((state) => ({ collabModes: { ...state.collabModes, [id]: modes } }));
+        set((state) => ({ collabModes: { ...state.collabModes, [agent.key]: modes } }));
       } catch {
         // offline / older runtime: no mode chip
       }
     },
-    async setCollabMode(mode) {
-      const id = get().selectedId;
-      const scope = captureHost(id ? hostOf(id) : undefined);
-      const settings = id ? get().sessions[id]?.timeline.settings : null;
-      if (!id) return false;
-      await get().loadCollabModes();
-      if (!scope.current() || get().selectedId !== id) return null;
-      const mask = (get().collabModes[id] ?? []).find((m) => m.mode === mode);
+    async setCollabMode(mode, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      if (!agent) return false;
+      const { id, host } = agent;
+      const scope = captureHost(host);
+      const settings = viewOn(id, host)?.timeline.settings;
+      // Still shown: the selected agent (no agent named) or the named agent's view on its host.
+      const shown = () => (sessionId == null ? isSelected(id, host) : !!viewOn(id, host));
+      await get().loadCollabModes(id, host);
+      if (!scope.current() || !shown()) return null;
+      const mask = (get().collabModes[agent.key] ?? []).find((m) => m.mode === mode);
       if (!mask) return false;
       // Mask fields left null keep the thread's current model / effort (like the TUI). False when the
       // native did not take it (e.g. runtime offline): "执行计划" must not then submit, or the
@@ -1815,50 +1902,53 @@ export const useApp = create<AppState>((set, get) => {
           mode,
           settings: { model: mask.model ?? settings?.model ?? "", reasoning_effort: mask.reasoning_effort ?? settings?.effort ?? null, developer_instructions: null },
         },
-      });
+      }, id, host);
     },
 
-    async setGoal(patch) {
-      const id = get().selectedId;
-      const view = id ? get().sessions[id] : undefined;
+    async setGoal(patch, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      const view = agent ? viewOn(agent.id, agent.host) : undefined;
       const threadId = view?.timeline.threadId;
-      if (!id || !view || !threadId) return;
-      const scope = captureSession(id);
+      if (!agent || !view || !threadId) return;
+      const { id, host } = agent;
+      const scope = captureHost(host);
       const goal = await apiOn(scope.host).setThreadGoal(id, threadId, patch);
-      if (!scope.current() || get().sessions[id]?.timeline !== view.timeline) return;
+      if (!scope.current() || viewOn(id, host)?.timeline !== view.timeline) return;
       view.timeline.goal = goal;
-      patchSession(id, (v) => ({ version: v.version + 1 }));
+      patchSession(id, (v) => ({ version: v.version + 1 }), host);
     },
-    async replaceGoal(objective) {
-      if (get().selectedId && get().sessions[get().selectedId!]?.timeline.goal) await get().clearGoal();
-      await get().setGoal({ objective, status: "active" });
+    async replaceGoal(objective, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      if (!agent) return;
+      if (viewOn(agent.id, agent.host)?.timeline.goal) await get().clearGoal(agent.id, agent.host);
+      await get().setGoal({ objective, status: "active" }, agent.id, agent.host);
     },
-    async clearGoal() {
-      const id = get().selectedId;
-      const view = id ? get().sessions[id] : undefined;
+    async clearGoal(sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      const view = agent ? viewOn(agent.id, agent.host) : undefined;
       const threadId = view?.timeline.threadId;
-      if (!id || !view || !threadId) return;
-      await apiOf(id).clearThreadGoal(id, threadId);
+      if (!agent || !view || !threadId) return;
+      await apiOn(agent.host).clearThreadGoal(agent.id, threadId);
       view.timeline.goal = null;
-      patchSession(id, (v) => ({ version: v.version + 1 }));
+      patchSession(agent.id, (v) => ({ version: v.version + 1 }), agent.host);
     },
-    async startReview(instructions) {
-      const id = get().selectedId;
-      const threadId = id ? get().sessions[id]?.timeline.threadId : null;
-      if (!id || !threadId) return;
-      await apiOf(id).startReview(id, threadId, instructions ? { type: "custom", instructions } : { type: "uncommittedChanges" });
+    async startReview(instructions, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      const threadId = agent ? viewOn(agent.id, agent.host)?.timeline.threadId : null;
+      if (!agent || !threadId) return;
+      await apiOn(agent.host).startReview(agent.id, threadId, instructions ? { type: "custom", instructions } : { type: "uncommittedChanges" });
     },
-    async stopBackgroundTerminals() {
-      const id = get().selectedId;
-      const threadId = id ? get().sessions[id]?.timeline.threadId : null;
-      if (!id || !threadId) return 0;
+    async stopBackgroundTerminals(sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      const threadId = agent ? viewOn(agent.id, agent.host)?.timeline.threadId : null;
+      if (!agent || !threadId) return 0;
+      const id = agent.id;
       // cutex forwards list + terminate (not `clean`), so terminate each.
-      const daemon = apiOf(id);
+      const daemon = apiOn(agent.host);
       const terminals = await daemon.backgroundTerminals(id, threadId);
       const results = await Promise.allSettled(terminals.map((t) => daemon.terminateBackgroundTerminal(id, threadId, t.processId)));
       return results.filter((r) => r.status === "fulfilled").length;
     },
-
     openPage(page, params = {}) {
       set({ view: { kind: "page", page, params } });
     },
@@ -1965,9 +2055,9 @@ export const useApp = create<AppState>((set, get) => {
         }
         // A cached view of an agent not open now gets no session events (only the open agent is
         // subscribed): a request answered elsewhere, or ended with its turn, must not keep it 需要你.
-        if (state.selectedId !== id && hostOf(id) === hostId && !sideLive(id, hostId)) {
-          const cached = state.sessions[id];
-          if (cached && cached.timeline.pending.size > 0 && dropEndedRequests(cached.timeline.pending, envelope, !!turnEnd)) patchSession(id, (v) => ({ version: v.version + 1 }));
+        if (!isSelected(id, hostId) && !viewLive(id, hostId)) {
+          const cached = state.sessions[viewKey(hostId, id)];
+          if (cached && cached.timeline.pending.size > 0 && dropEndedRequests(cached.timeline.pending, envelope, !!turnEnd)) patchSession(id, (v) => ({ version: v.version + 1 }), hostId);
         }
         // Hosts outside the scope (P0: the hosts not shown) say which host it is.
         const label = focus ? null : (state.hosts?.hosts.find((h) => h.id === hostId)?.label ?? hostId);
@@ -2104,11 +2194,12 @@ export const useApp = create<AppState>((set, get) => {
       // Session streams, statuses and resyncs: of the agent views' own hosts (the focus host's, and an
       // open agent of another host in the scope; main closes a host's views when the focus leaves it).
       const shown = (hostId: string) => hostId === focusHost();
-      const ownView = (hostId: string, sessionId: string) => hostOf(sessionId) === hostId;
+      /** A feed of an agent the store holds a view of on that host (views and per-agent state: host + id). */
+      const ownView = (hostId: string, sessionId: string) => !!viewOn(sessionId, hostId);
       bridge.on("sessionEvent", ({ hostId, sessionId, envelope }) => {
         if (shown(hostId) || hostId === get().selectedHost) useAgentMessages.getState().apply(envelope);
         if (!ownView(hostId, sessionId)) return;
-        const view = get().sessions[sessionId];
+        const view = viewOn(sessionId, hostId);
         if (!view) return;
         const generation = envelope.correlation.runtimeGeneration;
         const currentRuntime = generation != null && generation >= view.runtimeGeneration;
@@ -2116,7 +2207,7 @@ export const useApp = create<AppState>((set, get) => {
         // a current startup failure when replayed through this subscription.
         // A newer runtime generation: whatever turn still shows as running belonged to the replaced
         // runtime (a restart mid-turn) and was cut off.
-        if (currentRuntime && generation > view.runtimeGeneration && settleStaleTurns(view.timeline, null)) patchSession(sessionId, (v) => ({ version: v.version + 1 }));
+        if (currentRuntime && generation > view.runtimeGeneration && settleStaleTurns(view.timeline, null)) patchSession(sessionId, (v) => ({ version: v.version + 1 }), hostId);
         if (currentRuntime) view.runtimeGeneration = generation;
         // Subagent threads share the parent's stream. Their approvals (and serverRequest/resolved) still
         // go to the parent's dock (the user must answer them); everything else updates that subagent's
@@ -2135,13 +2226,13 @@ export const useApp = create<AppState>((set, get) => {
         if (envelope.native?.message.method === "serverRequest/resolved") {
           const requestId = (envelope.native.message.params as { requestId?: unknown } | undefined)?.requestId;
           const seen = requestId === undefined ? undefined : view.timeline.pending.get(String(requestId));
-          if (seen) putInteraction(sessionId, elsewhereRecord(seen, requestTurnId(view.timeline, seen), Date.now() / 1000));
+          if (seen) putInteraction(sessionId, elsewhereRecord(seen, requestTurnId(view.timeline, seen), Date.now() / 1000), hostId);
         }
         if (applyEvent(view.timeline, envelope)) {
-          patchSession(sessionId, (v) => ({ version: v.version + 1 }));
-          const pending = get().pendingSteers[sessionId];
-          if (pending?.length) settleSteers(sessionId, settlePendingSteers(pending, view.timeline), pending);
-          if (get().outbox[sessionId]?.length) settleOutbox(sessionId);
+          patchSession(sessionId, (v) => ({ version: v.version + 1 }), hostId);
+          const pending = steersOf(sessionId, hostId);
+          if (pending?.length) settleSteers(sessionId, hostId, settlePendingSteers(pending, view.timeline), pending);
+          if (outboxOf(sessionId, hostId)?.length) settleOutbox(sessionId, null, hostId);
           const mode = envelope.native?.message.method === "thread/settings/updated" ? collaborationModeOf(view.timeline.settings) : null;
           if (mode) lastCollabMode.set(hostKey(hostId, sessionId), mode);
         }
@@ -2151,40 +2242,40 @@ export const useApp = create<AppState>((set, get) => {
         if (cm === "cutex/userInput/submitted") {
           const params = envelope.cutex?.params as { clientUserMessageId?: string } | undefined;
           const id = params?.clientUserMessageId;
-          if (id && get().outbox[sessionId]?.some((e) => e.id === id)) {
+          if (id && outboxOf(sessionId, hostId)?.some((e) => e.id === id)) {
             // Still our optimistic queued send (cutex flushed it before its queue row was ever listed):
             // it becomes the pending new-turn bubble in place, never shown nowhere.
-            setOutbox(sessionId, (list) => flushOutbox(list, get().sessions[sessionId]?.timeline ?? null, params, ++outboxTick));
-          } else if (id && get().sessions[sessionId]?.queue.some((q) => q.clientUserMessageId === id)) {
-            const entry = flushedOutboxEntry(get().sessions[sessionId]?.timeline ?? null, params, ++outboxTick);
-            if (entry) setOutbox(sessionId, (list) => [...list, entry]);
+            setOutbox(sessionId, hostId, (list) => flushOutbox(list, viewOn(sessionId, hostId)?.timeline ?? null, params, ++outboxTick));
+          } else if (id && viewOn(sessionId, hostId)?.queue.some((q) => q.clientUserMessageId === id)) {
+            const entry = flushedOutboxEntry(viewOn(sessionId, hostId)?.timeline ?? null, params, ++outboxTick);
+            if (entry) setOutbox(sessionId, hostId, (list) => [...list, entry]);
           }
         }
-        if (cm?.startsWith("cutex/userInput/")) refreshQueue(sessionId);
+        if (cm?.startsWith("cutex/userInput/")) refreshQueue(sessionId, hostId);
         // admission-order: delegations to this agent (and their pauses) are in the same list.
         // admission-order: delegations to this agent and its unread bus messages are in the same list.
-        else if (cm && (cm.startsWith("cutex/ask/") || cm.startsWith("cutex/asks/") || cm.startsWith("cutex/agentBus/")) && featuresOn(hostId).has(ADMISSION_ORDER_FEATURE)) refreshQueue(sessionId);
+        else if (cm && (cm.startsWith("cutex/ask/") || cm.startsWith("cutex/asks/") || cm.startsWith("cutex/agentBus/")) && featuresOn(hostId).has(ADMISSION_ORDER_FEATURE)) refreshQueue(sessionId, hostId);
         // …and say whose turn runs, and what rides along with it (turn groups).
         const nm = envelope.native?.message.method;
-        if ((nm === "turn/started" || nm === "turn/completed") && featuresOn(hostId).has(ADMISSION_ORDER_FEATURE)) refreshQueue(sessionId);
+        if ((nm === "turn/started" || nm === "turn/completed") && featuresOn(hostId).has(ADMISSION_ORDER_FEATURE)) refreshQueue(sessionId, hostId);
         if (cm === "cutex/userInput/startFailed") {
           const failed = envelope.cutex?.params as { error?: { message?: string }; queueIds?: string[] } | undefined;
           if (generation == null || currentRuntime)
-            patchSession(sessionId, { startError: failed?.error?.message ?? "start failed", startErrorQueueIds: failed?.queueIds });
+            patchSession(sessionId, { startError: failed?.error?.message ?? "start failed", startErrorQueueIds: failed?.queueIds }, hostId);
           // The offline-start worker can lose a race to another successful launch. Its failure
           // event has no generation: ask the daemon whether the runtime and queue recovered.
           void refreshHostSidebar(hostId);
         }
         if (cm === "cutex/asks/pauseChanged") {
           const p = envelope.cutex?.params as { asksPaused?: AsksPause | null } | undefined;
-          patchSession(sessionId, { asksPaused: p?.asksPaused ?? null });
+          patchSession(sessionId, { asksPaused: p?.asksPaused ?? null }, hostId);
         }
         if (((cm === "cutex/runtime/onlineRequested" || cm === "cutex/runtime/online") && (generation == null || currentRuntime))
           || (nm === "turn/started" && currentRuntime)) {
-          patchSession(sessionId, { startError: null, startErrorQueueIds: undefined });
+          patchSession(sessionId, { startError: null, startErrorQueueIds: undefined }, hostId);
         }
         // History came from the offline reader: rebuild from the live runtime once it is up.
-        if (cm === "cutex/runtime/online" && get().sessions[sessionId]?.historySource === "offline") void load(sessionId);
+        if (cm === "cutex/runtime/online" && viewOn(sessionId, hostId)?.historySource === "offline") void load(sessionId, hostId);
       });
       // users: this connection's user or grant changed (the host feed ended with cutex/access/changed):
       // read its capabilities and lists again (the session feeds re-bootstrap on their own resync).
@@ -2196,12 +2287,12 @@ export const useApp = create<AppState>((set, get) => {
         } else if (sliceCurrent(hostId, epoch)) void loadSlice(hostId, epoch);
       });
       bridge.on("sessionStatus", ({ hostId, sessionId, status }) => {
-        if (ownView(hostId, sessionId)) patchSession(sessionId, { connection: status });
+        if (ownView(hostId, sessionId)) patchSession(sessionId, { connection: status }, hostId);
       });
       bridge.on("sessionResync", ({ hostId, sessionId }) => {
         if (!ownView(hostId, sessionId)) return;
-        patchSession(sessionId, { resyncing: true });
-        void load(sessionId);
+        patchSession(sessionId, { resyncing: true }, hostId);
+        void load(sessionId, hostId);
       });
       // No host at all (macOS without a local cutex, lib/hosts hasNoHost): there is no connection to ask.
       void hostReady.then(() => (get().hosts?.hosts.length === 0 ? null : api.daemonState())).then((daemon) => {
@@ -2233,13 +2324,13 @@ export const useApp = create<AppState>((set, get) => {
         // The selected agent was archived or restored: it now reads from another source (history only
         // vs bootstrap + feed), so reload it.
         const focusSelected = (get().selectedHost ?? scope.host) === scope.host ? get().selectedId : null;
-        // …and so does a side-live agent of this host.
-        const side = Object.entries(get().sideAgents).filter(([id, a]) => a.hostId === scope.host && id !== focusSelected).map(([id]) => id);
+        // …and so does a live agent of this host in another pane.
+        const side = Object.values(get().views).filter((v) => v.hostId === scope.host && v.sessionId !== focusSelected).map((v) => v.sessionId);
         for (const id of [focusSelected, ...side]) {
           const flip = lifecycleFlip(before, sidebar, id);
           if (!flip) continue;
           if (flip === "archived") void api.unsubscribe(id!);
-          void load(id!);
+          void load(id!, scope.host);
         }
         const projectKey = (sidebar.projects?.projects ?? []).map((p) => p.project_id).join(",");
         if (projectKey !== lastProjectKey) {
@@ -2260,16 +2351,17 @@ export const useApp = create<AppState>((set, get) => {
       });
     },
 
-    async reloadSession(sessionId) {
-      const selected = get().selectedId === sessionId;
-      if (!selected && !sideLive(sessionId)) return;
-      const current = hostOf(sessionId);
-      // A side view reloads from its own host (no re-route: the side page names it).
-      const host = selected ? agentHostFor(sessionId, current) : current;
-      if (host !== current) return get().select(sessionId, host);
-      void apiOn(current).unsubscribe(sessionId).catch(() => {});
-      patchSession(sessionId, { loading: true, error: null });
-      await load(sessionId);
+    async reloadSession(sessionId, hostId) {
+      const host = hostId ?? hostOf(sessionId);
+      const selected = isSelected(sessionId, host);
+      if (!selected && !viewLive(sessionId, host)) return;
+      // A pane's view reloads from its own host (no re-route: the pane names it); the selected agent
+      // may move to the host that lists it.
+      const target = selected ? agentHostFor(sessionId, host) : host;
+      if (target !== host) return get().select(sessionId, target);
+      void apiOn(host).unsubscribe(sessionId).catch(() => {});
+      patchSession(sessionId, { loading: true, error: null }, host);
+      await load(sessionId, host);
     },
 
     async select(sessionId, hostId) {
@@ -2281,67 +2373,55 @@ export const useApp = create<AppState>((set, get) => {
       set({ view: { kind: "conversation" } });
       markSeenOn(host, sessionId);
       if (previous === sessionId && previousHost === host) return;
-      // Another host's agent with the same id held this view: its per-agent state goes (views are keyed by id).
-      const other = sessionHosts.has(sessionId) && sessionHosts.get(sessionId) !== host;
-      if (other) {
-        set((state) => ({
-          sessions: withoutKey(state.sessions, sessionId),
-          models: withoutKey(state.models, sessionId),
-          collabModes: withoutKey(state.collabModes, sessionId),
-          outbox: withoutKey(state.outbox, sessionId),
-          pendingSteers: withoutKey(state.pendingSteers, sessionId),
-          queueHidden: withoutKey(state.queueHidden, sessionId),
-          backgroundItems: withoutKey(state.backgroundItems, sessionId),
-        }));
-        clearTimeout(queueTimers.get(sessionId));
-        sendChains.delete(sessionId);
-      }
+      const key = viewKey(host, sessionId);
       // Coming back to a recently viewed agent: show its cached timeline at once and refresh it in
       // the background (load replaces it from a fresh bootstrap) instead of "loading history".
-      const cached = get().sessions[sessionId];
+      const cached = get().sessions[key];
       const reusable = !!cached && !cached.loading && !cached.error && !!cached.timeline.threadId;
-      recentSessions = [sessionId, ...recentSessions.filter((id) => id !== sessionId)].slice(0, CACHED_SESSIONS);
-      for (const id of [...sessionHosts.keys()]) if (!recentSessions.includes(id) && !get().sideAgents[id]) sessionHosts.delete(id);
+      recentViews = [key, ...recentViews.filter((k) => k !== key)].slice(0, CACHED_SESSIONS);
+      for (const [id, h] of [...sessionHosts]) if (!recentViews.includes(viewKey(h, id)) && !get().views[viewKey(h, id)]) sessionHosts.delete(id);
       sessionHosts.set(sessionId, host);
-      // Live in the side area already: its view is current (no re-bootstrap).
-      const live = reusable && sideLive(sessionId, host);
+      // Live in another pane already: its view is current (no re-bootstrap).
+      const live = reusable && viewLive(sessionId, host);
       // Sends of this host that failed while it was not shown (orphanedSends) are shown again.
       const restored = host !== focusHost() ? takeOrphanedSends(host) : {};
       set((state) => {
-        const sessions: Record<string, SessionView> = {};
-        for (const id of viewIds()) {
-          const view = id === sessionId ? (reusable ? cached : newView()) : state.sessions[id];
-          if (view) sessions[id] = view;
+        const sessions: Record<ViewKey, SessionView> = {};
+        for (const k of viewKeys()) {
+          const view = k === key ? (reusable ? cached : newView()) : state.sessions[k];
+          if (view) sessions[k] = view;
         }
         // Quota gauges are per profile name of one host.
         return { selectedId: sessionId, selectedHost: host, sessions, ...(host !== previousHost ? { quotas: {} } : {}), ...(Object.keys(restored).length ? { outbox: mergeOrphans(state.outbox, restored) } : {}) };
       });
       // Interaction rows live exactly as long as the cached timeline views (lib/interactionLog).
-      retainSessions(viewIds());
-      // The previous agent's feed closes unless a side page still shows it.
-      if (previous && (previous !== sessionId || previousHost !== host) && !sideLive(previous, previousHost)) void apiOn(previousHost).unsubscribe(previous).catch(() => {});
-      if (!live) await load(sessionId);
+      retainSessions(viewKeys());
+      // The previous agent's feed closes unless another pane still shows it.
+      if (previous && (previous !== sessionId || previousHost !== host) && !viewLive(previous, previousHost)) void apiOn(previousHost).unsubscribe(previous).catch(() => {});
+      if (!live) await load(sessionId, host);
     },
 
     async submit(text, strategy, extra = [], opts = {}) {
-      const id = opts.sessionId ?? get().selectedId;
-      if (!id || (!text.trim() && extra.length === 0)) return null;
-      const sidebar = sidebarOn(hostOf(id));
+      const agent = agentRef(opts.sessionId, opts.hostId);
+      if (!agent || (!text.trim() && extra.length === 0)) return null;
+      const { id, host } = agent;
+      const sidebar = sidebarOn(host);
       // Archived: read-only until restored (the composer is replaced by the archived banner).
       if (isArchived(sidebar?.retired.find((s) => s.cutexSessionId === id))) return null;
       // Offline agent: cutex queues the message and starts the runtime (offline-submit).
       const resource = sidebar?.active.find((s) => s.cutexSessionId === id);
       const offline = resource ? resource.runtime.status !== "online" : false;
-      const startIfOffline = offline && featuresOn(hostOf(id)).has("offline-submit");
-      const entry = newOutboxEntry(get().sessions[id]?.timeline ?? null, { id: crypto.randomUUID(), text, extra, strategy, startIfOffline, placement: placementFor(id, strategy, startIfOffline) });
-      setOutbox(id, (list) => [...list, entry]);
-      return dispatchSend(id, entry, opts.keepFailed ?? true);
+      const startIfOffline = offline && featuresOn(host).has("offline-submit");
+      const entry = newOutboxEntry(viewOn(id, host)?.timeline ?? null, { id: crypto.randomUUID(), text, extra, strategy, startIfOffline, placement: placementFor(id, host, strategy, startIfOffline) });
+      setOutbox(id, host, (list) => [...list, entry]);
+      return dispatchSend(id, entry, opts.keepFailed ?? true, captureHost(host));
     },
 
-    async respond(requestId, reply, sessionId) {
-      const id = sessionId ?? get().selectedId;
-      const view = id ? get().sessions[id] : undefined;
-      if (!id || !view) return;
+    async respond(requestId, reply, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      const view = agent ? viewOn(agent.id, agent.host) : undefined;
+      if (!agent || !view) return;
+      const { id, host } = agent;
       // Optimistic: the dock advances at once (serverRequest/resolved confirms it); the request waits
       // in `answering` and comes back only if the reply fails for a reason a retry can fix.
       const { timeline } = view;
@@ -2350,32 +2430,32 @@ export const useApp = create<AppState>((set, get) => {
       if (request) {
         timeline.pending.delete(key);
         timeline.answering.add(key);
-        patchSession(id, (v) => ({ version: v.version + 1 }));
+        patchSession(id, (v) => ({ version: v.version + 1 }), host);
       }
       try {
-        await apiOf(id).respond(id, view.runtimeGeneration, requestId, reply);
+        await apiOn(host).respond(id, view.runtimeGeneration, requestId, reply);
         // Timeline row: answered here. Upgrades an 已在别处处理 row that a resolved event wrote
         // while the reply was in flight but the reply landed anyway (event order is not guaranteed).
-        if (request) putInteraction(id, answeredRecord(request, reply, requestTurnId(timeline, request), Date.now() / 1000));
+        if (request) putInteraction(id, answeredRecord(request, reply, requestTurnId(timeline, request), Date.now() / 1000), host);
       } catch (e) {
         // Settled elsewhere — another client (phone, second desktop) answered first, it is gone, or
         // serverRequest/resolved arrived while the reply was in flight: never put it back.
         const failure = answerFailureOf(e);
         const resolvedMeanwhile = !!request && !timeline.answering.has(key);
-        const current = get().sessions[id]?.timeline === timeline;
+        const current = viewOn(id, host)?.timeline === timeline;
         if (failure === "retry" && !resolvedMeanwhile && request && current && !timeline.pending.has(key)) {
           timeline.pending.set(key, request);
-          patchSession(id, (v) => ({ version: v.version + 1 }));
+          patchSession(id, (v) => ({ version: v.version + 1 }), host);
         }
         if (failure === "stale" && current) {
           // The runtime restarted: re-read the agent (the request returns if it is still pending).
-          patchSession(id, { resyncing: true });
-          void load(id);
+          patchSession(id, { resyncing: true }, host);
+          void load(id, host);
         }
         // Another client answered first, or the request left without our reply: keep a row saying so.
-        if ((failure === "resolved" || failure === "gone") && request) putInteraction(id, elsewhereRecord(request, requestTurnId(timeline, request), Date.now() / 1000));
-        if (failure !== "retry") get().notify(translate(`interaction.err.${failure}`));
-        else if (!resolvedMeanwhile) get().notify(e instanceof Error ? e.message : String(e), "error");
+        if ((failure === "resolved" || failure === "gone") && request) putInteraction(id, elsewhereRecord(request, requestTurnId(timeline, request), Date.now() / 1000), host);
+        if (failure !== "retry") notifyAgent(id, host, translate(`interaction.err.${failure}`));
+        else if (!resolvedMeanwhile) notifyAgent(id, host, e instanceof Error ? e.message : String(e), "error");
       } finally {
         timeline.answering.delete(key);
       }
@@ -2383,53 +2463,55 @@ export const useApp = create<AppState>((set, get) => {
 
     models: {},
 
-    async loadModels(refresh = false) {
-      const id = get().selectedId;
-      if (!id) return;
+    async loadModels(refresh = false, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      if (!agent) return;
+      const { id, host, key } = agent;
       // A relaunch (profile switch, native update) can change the list: key the cache by generation.
-      const generation = get().sessions[id]?.runtimeGeneration ?? 0;
-      if (!refresh && get().models[id] && modelsGeneration.get(id) === generation) return;
+      const generation = viewOn(id, host)?.runtimeGeneration ?? 0;
+      if (!refresh && get().models[key] && modelsGeneration.get(key) === generation) return;
       try {
-        const models = await apiOf(id).listModels(id);
-        modelsGeneration.set(id, generation);
+        const models = await apiOn(host).listModels(id);
+        modelsGeneration.set(key, generation);
         noteCatalogNames(models.map((m) => ({ id: m.model, displayName: m.displayName })));
-        set((state) => ({ models: { ...state.models, [id]: models } }));
+        set((state) => ({ models: { ...state.models, [key]: models } }));
       } catch {
         // offline agent: menu shows only the current model
       }
     },
 
-    async updateSettings(patch) {
-      const id = get().selectedId;
-      const view = id ? get().sessions[id] : undefined;
+    async updateSettings(patch, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      const view = agent ? viewOn(agent.id, agent.host) : undefined;
       const threadId = view?.timeline.threadId;
-      if (!id || !view || !threadId) return false;
-      const scope = captureSession(id);
+      if (!agent || !view || !threadId) return false;
+      const { id, host } = agent;
+      const scope = captureHost(host);
       const previous = view.timeline.settings;
       view.timeline.settings = { ...(previous ?? {}), ...patch };
-      patchSession(id, (v) => ({ version: v.version + 1 }));
+      patchSession(id, (v) => ({ version: v.version + 1 }), host);
       try {
         if (!scope.current()) return false;
         await apiOn(scope.host).updateThreadSettings(id, threadId, patch);
         return scope.current();
       } catch (error) {
-        if (!scope.current() || get().sessions[id]?.timeline !== view.timeline) return false;
+        if (!scope.current() || viewOn(id, host)?.timeline !== view.timeline) return false;
         view.timeline.settings = previous;
         const message = error instanceof Error ? error.message : String(error);
         // Not available for this agent: a notice above the composer, not a broken conversation.
         if (parseUnsupported(message) !== null) {
-          get().notify(message);
-          patchSession(id, (v) => ({ version: v.version + 1 }));
+          notifyAgent(id, host, message);
+          patchSession(id, (v) => ({ version: v.version + 1 }), host);
         } else if (offlineRuntime(resourceOf(id, scope.host)?.runtime.status)) {
           // Thread settings live in the running native: with the runtime offline the change had nowhere
           // to go. A notice that says so, not an error box over the conversation.
-          get().notify(translate("composer.offlineSettings"), "error");
-          patchSession(id, (v) => ({ version: v.version + 1 }));
+          notifyAgent(id, host, translate("composer.offlineSettings"), "error");
+          patchSession(id, (v) => ({ version: v.version + 1 }), host);
         } else {
           // A refused change (e.g. an effort the model does not offer) is a notice: the conversation
           // itself loaded fine, so no 「从「host」加载失败」 box over it (owner 2026-10-18).
-          get().notify(translate("composer.settingsFailed", { error: message }), "error");
-          patchSession(id, (v) => ({ version: v.version + 1 }));
+          notifyAgent(id, host, translate("composer.settingsFailed", { error: message }), "error");
+          patchSession(id, (v) => ({ version: v.version + 1 }), host);
         }
         return false;
       }
@@ -2446,113 +2528,116 @@ export const useApp = create<AppState>((set, get) => {
       }
     },
 
-    async compact() {
-      const id = get().selectedId;
-      const threadId = id ? get().sessions[id]?.timeline.threadId : null;
-      if (!id || !threadId) return;
-      await apiOf(id).compactThread(id, threadId);
+    async compact(sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      const threadId = agent ? viewOn(agent.id, agent.host)?.timeline.threadId : null;
+      if (!agent || !threadId) return;
+      await apiOn(agent.host).compactThread(agent.id, threadId);
     },
 
-    async queueRemove(item, sessionId) {
+    async queueRemove(item, sessionId, hostId) {
       // Agent and host as of the click (a confirm dialog or a slow round trip may outlive the selection).
-      const id = sessionId ?? get().selectedId;
-      if (!id) return;
-      const host = hostOf(id);
+      const agent = agentRef(sessionId, hostId);
+      if (!agent) return;
+      const { id, host } = agent;
       // Optimistic: the row leaves at once; back (with the error) if cutex refuses.
-      hideQueued(id, [item.queueId]);
+      hideQueued(id, host, [item.queueId]);
       try {
         await apiOn(host).queueRemove(id, item.queueId, item.revision);
       } catch (e) {
-        hideQueued(id, [item.queueId], true);
+        hideQueued(id, host, [item.queueId], true);
         throw e;
       } finally {
-        refreshQueue(id);
+        refreshQueue(id, host);
       }
     },
 
-    async queueTakeForEdit(item, sessionId) {
-      const id = sessionId ?? get().selectedId;
+    async queueTakeForEdit(item, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
       // The text goes to the composer at once; the removal follows. If it fails (sent or changed
       // meanwhile) the row comes back and a notice says the draft is a copy.
-      if (id)
+      if (agent)
         void get()
-          .queueRemove(item, id)
-          .catch(() => get().notify(translate("queue.editFailed"), "error"));
+          .queueRemove(item, agent.id, agent.host)
+          .catch(() => notifyAgent(agent.id, agent.host, translate("queue.editFailed"), "error"));
       return queueItemText(item);
     },
 
-    async queueSendNow(item, sessionId) {
-      const id = sessionId ?? get().selectedId;
-      if (!id) return;
-      const host = hostOf(id);
+    async queueSendNow(item, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      if (!agent) return;
+      const { id, host } = agent;
       // Optimistic: the row moves to the steers section at once — or, idle, to the timeline as a new
       // turn (立即发送) — (same clientUserMessageId), while main does list + CAS remove + submit.
       const input = item.input as { type: string }[];
-      const entry = newOutboxEntry(get().sessions[id]?.timeline ?? null, { id: item.clientUserMessageId, text: queueItemText({ ...item, input: input.filter((x) => x.type === "text") }), extra: input.filter((x) => x.type !== "text"), strategy: "auto", placement: placementFor(id, "auto", false), promoted: true });
-      hideQueued(id, [item.queueId]);
-      setOutbox(id, (list) => [...list.filter((e) => e.id !== entry.id), entry]);
+      const entry = newOutboxEntry(viewOn(id, host)?.timeline ?? null, { id: item.clientUserMessageId, text: queueItemText({ ...item, input: input.filter((x) => x.type === "text") }), extra: input.filter((x) => x.type !== "text"), strategy: "auto", placement: placementFor(id, host, "auto", false), promoted: true });
+      hideQueued(id, host, [item.queueId]);
+      setOutbox(id, host, (list) => [...list.filter((e) => e.id !== entry.id), entry]);
       try {
         const promoted = await apiOn(host).queuePromote(id, item.queueId, item.revision, featuresOn(host).has(QUEUE_STEER_FEATURE));
         const text = queueItemText({ ...item, input: (promoted.input as { type: string }[]).filter((x) => x.type === "text") });
         const extra = (promoted.input as { type: string }[]).filter((x) => x.type !== "text");
-        setOutbox(id, (list) => confirmOutbox(list, entry.id, promoted.result, ++outboxTick));
-        trackSteer(id, promoted.result, promoted.clientUserMessageId, text, extra);
-        settleOutbox(id);
+        setOutbox(id, host, (list) => confirmOutbox(list, entry.id, promoted.result, ++outboxTick));
+        trackSteer(id, host, promoted.result, promoted.clientUserMessageId, text, extra);
+        settleOutbox(id, null, host);
       } catch (e) {
         // Not promoted (changed / already sent / steer refused): the queue row is shown again as
         // cutex lists it.
-        setOutbox(id, (list) => removeOutbox(list, entry.id));
-        hideQueued(id, [item.queueId], true);
+        setOutbox(id, host, (list) => removeOutbox(list, entry.id));
+        hideQueued(id, host, [item.queueId], true);
         const notice = queueSteerNotice(e instanceof Error ? e.message : String(e), translate);
         throw notice === null ? e : new Error(notice);
       } finally {
-        refreshQueue(id);
+        refreshQueue(id, host);
       }
     },
 
-    async queueMove(item, before) {
-      const id = get().selectedId;
-      const admission = id ? get().sessions[id]?.admission : null;
-      if (!id || !admission) return;
+    async queueMove(item, before, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      const admission = agent ? viewOn(agent.id, agent.host)?.admission : null;
+      if (!agent || !admission) return;
+      const { id, host } = agent;
       const next = applyMove(admission, item.queueId, before);
       if (next === admission) return;
       // Optimistic: the row takes its new place at once; back to the old order if cutex refuses.
-      patchSession(id, { admission: next });
+      patchSession(id, { admission: next }, host);
       try {
-        const result = await apiOf(id).queueMove(id, item.queueId, admission.orderRevision ?? admission.revision, before);
-        if (result?.admission && get().sessions[id]?.admission === next) patchSession(id, { admission: result.admission });
+        const result = await apiOn(host).queueMove(id, item.queueId, admission.orderRevision ?? admission.revision, before);
+        if (result?.admission && viewOn(id, host)?.admission === next) patchSession(id, { admission: result.admission }, host);
       } catch (e) {
-        if (get().sessions[id]?.admission === next) patchSession(id, { admission });
+        if (viewOn(id, host)?.admission === next) patchSession(id, { admission }, host);
         const kind = parseQueueMoveError(e instanceof Error ? e.message : String(e));
         if (kind === null) throw e;
         throw Object.assign(new Error(translate(QUEUE_MOVE_NOTICES[kind])), { moveRefusal: kind });
       } finally {
-        refreshQueue(id);
+        refreshQueue(id, host);
       }
     },
 
-    async queueYield() {
-      const id = get().selectedId;
-      if (!id) return;
+    async queueYield(sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      if (!agent) return;
+      const { id, host } = agent;
       try {
-        const result = await apiOf(id).queueYield(id);
-        if (result?.admission) patchSession(id, { admission: result.admission });
+        const result = await apiOn(host).queueYield(id);
+        if (result?.admission) patchSession(id, { admission: result.admission }, host);
       } finally {
-        refreshQueue(id);
+        refreshQueue(id, host);
       }
     },
 
-    async interruptAndSendSteers(sessionId) {
-      const id = sessionId ?? get().selectedId;
-      const view = id ? get().sessions[id] : undefined;
+    async interruptAndSendSteers(sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      const view = agent ? viewOn(agent.id, agent.host) : undefined;
       const turnId = view?.timeline.activeTurnId;
-      if (!id || !view?.timeline.threadId || !turnId) return;
-      if (!(get().pendingSteers[id] ?? []).some((p) => p.turnId === turnId && p.state === "waiting")) return;
-      // interruptAndSend is the selected agent's (the side view only offers the plain stop + resend).
-      if (featuresOn(hostOf(id)).has("queue-pause") && id === get().selectedId) return void (await get().interruptAndSend("", []));
+      if (!agent || !view?.timeline.threadId || !turnId) return;
+      const { id, host } = agent;
+      if (!(steersOf(id, host) ?? []).some((p) => p.turnId === turnId && p.state === "waiting")) return;
+      // With queue-pause: stop + merge (interruptAndSend), for any pane showing this agent.
+      if (featuresOn(host).has("queue-pause")) return void (await get().interruptAndSend("", [], id, host));
       resendTurns.add(turnId);
       try {
-        await apiOf(id).interrupt(id, view.timeline.threadId, turnId);
+        await apiOn(host).interrupt(id, view.timeline.threadId, turnId);
       } catch (e) {
         resendTurns.delete(turnId);
         throw e;
@@ -2561,49 +2646,50 @@ export const useApp = create<AppState>((set, get) => {
 
     queueHandoff: {},
 
-    async interruptAndSend(text, extra) {
-      const id = get().selectedId;
-      const view = id ? get().sessions[id] : undefined;
+    async interruptAndSend(text, extra, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      const view = agent ? viewOn(agent.id, agent.host) : undefined;
       const turnId = view?.timeline.activeTurnId ?? null;
-      if (!id || !view) return false;
-      const scope = captureSession(id);
+      if (!agent || !view) return false;
+      const { id, host, key } = agent;
+      const scope = captureHost(host);
       const daemon = apiOn(scope.host);
       const restoreTail = restoreUnsent(scope, id, text, extra);
-      const waiting = (get().pendingSteers[id] ?? []).filter((p) => p.turnId === turnId && (p.state ?? "waiting") === "waiting");
+      const waiting = (steersOf(id, host) ?? []).filter((p) => p.turnId === turnId && (p.state ?? "waiting") === "waiting");
       if (!turnId || waiting.length === 0 || !featuresOn(scope.host).has("queue-pause")) {
         // Optimistic send: a failure stays visible on the message itself (retry / edit / discard).
-        if (text.trim() || extra.length) void get().submit(text, turnId ? "interrupt" : "auto", extra).catch(() => {});
+        if (text.trim() || extra.length) void get().submit(text, turnId ? "interrupt" : "auto", extra, { sessionId: id, hostId: host }).catch(() => {});
         return true;
       }
       // Take the steers out of the panel first so the turn's end does not report them undelivered.
       // They show up at once as one pending message (merged with `text`) at the end of the timeline;
       // its text is corrected below if the native recorded some of them before the stop.
       const ids = new Set(waiting.map((p) => p.id));
-      setSteers(id, (list) => list.filter((p) => !ids.has(p.id)));
+      setSteers(id, host, (list) => list.filter((p) => !ids.has(p.id)));
       const outboxId = crypto.randomUUID();
       // Not sent yet: 正在停止当前回合… until the stop returns, then 正在核对… (lib/outbox stage).
       const merged = newOutboxEntry(view.timeline, { id: outboxId, text: interruptSendText(waiting, text), extra: [...waiting.flatMap((p) => p.extra ?? []), ...extra], strategy: "auto", placement: "turn", stage: "stopping" });
-      setOutbox(id, (list) => [...list, merged]);
+      setOutbox(id, host, (list) => [...list, merged]);
       const wasPaused = !!view.queuePause;
-      set((state) => ({ queueHandoff: { ...state.queueHandoff, [id]: true } }));
+      set((state) => ({ queueHandoff: { ...state.queueHandoff, [key]: true } }));
       // A non-focus host's connection replaced meanwhile (the focus did not change, so nothing reset
       // this agent's send state): take back what this operation put there instead of leaving the merged
       // message at 正在停止… forever (hasUnlandedTurn would read the agent as busy) and its steers gone.
-      // Never dispatched: the message leaves; its steers go back to their section while the view is
-      // still this host's agent (they settle against the new connection), else their text goes back
-      // into the composer draft of that host's agent. Dispatched with unknown acceptance: a failed row
-      // (retry is deduped by its id) — or, the view gone, dispatchSend's stashed copy alone.
+      // Never dispatched: the message leaves; its steers go back to their section while the store
+      // still holds this agent's view on that host (they settle against the new connection), else their
+      // text goes back into the composer draft of that host's agent. Dispatched with unknown acceptance:
+      // a failed row (retry is deduped by its id) — or, the view gone, dispatchSend's stashed copy alone.
       // A focus change resets that state itself (left untouched, as before).
       const focusAtStart = focusHost();
       /** `restore`: puts the unsent tail back into the composer (after the steers, in their order). */
       const stale = (restore: () => void = () => {}) => {
         if (scope.host === focusAtStart || focusHost() !== focusAtStart) { restore(); return false; }
-        const ours = sessionHosts.get(id) === scope.host;
-        const entry = get().outbox[id]?.find((e) => e.id === outboxId);
+        const ours = !!viewOn(id, scope.host);
+        const entry = outboxOf(id, host)?.find((e) => e.id === outboxId);
         const unsent = !!entry && entry.dispatchedAt === undefined;
         if (unsent) {
-          setOutbox(id, (list) => removeOutbox(list, outboxId));
-          if (ours) setSteers(id, (list) => [...waiting.filter((p) => !list.some((q) => q.id === p.id)), ...list]);
+          setOutbox(id, host, (list) => removeOutbox(list, outboxId));
+          if (ours) setSteers(id, host, (list) => [...waiting.filter((p) => !list.some((q) => q.id === p.id)), ...list]);
           else {
             const steerText = interruptSendText(waiting, "");
             const steerExtra = waiting.flatMap((p) => p.extra ?? []);
@@ -2611,8 +2697,8 @@ export const useApp = create<AppState>((set, get) => {
           }
         }
         restore();
-        if (!unsent && entry?.state === "sending") setOutbox(id, (list) => (ours ? failOutbox(list, outboxId, staleHost().message) : removeOutbox(list, outboxId)));
-        if (ours || !get().sessions[id]) set((state) => ({ queueHandoff: { ...state.queueHandoff, [id]: false } }));
+        if (!unsent && entry?.state === "sending") setOutbox(id, host, (list) => (ours ? failOutbox(list, outboxId, staleHost().message) : removeOutbox(list, outboxId)));
+        set((state) => ({ queueHandoff: { ...state.queueHandoff, [key]: false } }));
         return false;
       };
       try {
@@ -2623,13 +2709,13 @@ export const useApp = create<AppState>((set, get) => {
           if (!scope.current()) return stale(restoreTail);
         } catch (e) {
           if (!scope.current()) return stale(restoreTail);
-          setSteers(id, (list) => [...waiting, ...list]);
+          setSteers(id, host, (list) => [...waiting, ...list]);
           // Not stopped: the steers are back in their section, the new text back in the composer.
-          setOutbox(id, (list) => removeOutbox(list, outboxId));
+          setOutbox(id, host, (list) => removeOutbox(list, outboxId));
           restoreTail();
           throw e;
         }
-        setOutbox(id, (list) => setOutboxStage(list, outboxId, "checking"));
+        setOutbox(id, host, (list) => setOutboxStage(list, outboxId, "checking"));
         // Exactly the steers the native dropped (those it recorded first are not re-sent). They all
         // belong to the stopped turn, the newest one: a short page is enough (a 10-turn read took
         // seconds right after an abort, docs/research/send-latency-r233-20261014.md).
@@ -2643,7 +2729,7 @@ export const useApp = create<AppState>((set, get) => {
         }
         if (!scope.current()) return stale(restoreTail);
         const dropped = waiting.filter((p) => !recorded.has(p.id));
-        const sent = await sendMergedSteers(id, dropped, { text, extra }, outboxId, scope, restoreTail);
+        const sent = await sendMergedSteers(id, host, dropped, { text, extra }, outboxId, scope, restoreTail);
         if (!scope.current()) return stale();
         // Interrupt-and-send does not pause: continue the queue after the new turn.
         // Only the owner queue: with asks-pause-v2 a stop never pauses delegations (and the new message
@@ -2652,105 +2738,112 @@ export const useApp = create<AppState>((set, get) => {
         return sent;
       } finally {
         if (scope.current()) {
-          set((state) => ({ queueHandoff: { ...state.queueHandoff, [id]: false } }));
-          refreshQueue(id);
+          set((state) => ({ queueHandoff: { ...state.queueHandoff, [key]: false } }));
+          refreshQueue(id, host);
         }
       }
     },
 
-    async resumePaused(sessionId) {
-      const id = sessionId ?? get().selectedId;
-      const view = id ? get().sessions[id] : undefined;
-      if (!id || !view) return;
-      const scope = captureSession(id);
-      const { steers } = pausedOf(id);
+    async resumePaused(sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      const view = agent ? viewOn(agent.id, agent.host) : undefined;
+      if (!agent || !view) return;
+      const { id, host } = agent;
+      const scope = captureHost(host);
+      const { steers } = pausedOf(id, host);
       if (steers.length) {
         const ids = new Set(steers.map((p) => p.id));
-        setSteers(id, (list) => list.filter((p) => !ids.has(p.id)));
-        if (!(await sendMergedSteers(id, steers))) return;
+        setSteers(id, host, (list) => list.filter((p) => !ids.has(p.id)));
+        if (!(await sendMergedSteers(id, host, steers))) return;
       }
       // Owner queue only on asks-pause-v2 (delegations have their own 继续委托); older daemons
       // resume the asks together with it, as before.
       if (!scope.current()) return;
       // A stop hold (stop-holds-ridealongs) is released by a queue resume too, even with nothing queued.
       if (view.queuePause || stopHeld(view.asksPaused)) await apiOn(scope.host).queueResume(id);
-      if (scope.current()) refreshQueue(id);
+      if (scope.current()) refreshQueue(id, host);
     },
 
-    async pauseAsks(id) {
-      if (!featuresOn(hostOf(id)).has("asks-pause-v2")) return;
-      const { asksPaused } = await apiOf(id).asksPause(id);
-      patchSession(id, { asksPaused });
+    async pauseAsks(id, hostId) {
+      const host = hostId ?? hostOf(id);
+      if (!featuresOn(host).has("asks-pause-v2")) return;
+      const { asksPaused } = await apiOn(host).asksPause(id);
+      patchSession(id, { asksPaused }, host);
     },
 
-    async resumeAsks(id) {
-      if (!featuresOn(hostOf(id)).has("asks-pause-v2")) return;
-      const { asksPaused } = await apiOf(id).asksResume(id);
-      patchSession(id, { asksPaused });
+    async resumeAsks(id, hostId) {
+      const host = hostId ?? hostOf(id);
+      if (!featuresOn(host).has("asks-pause-v2")) return;
+      const { asksPaused } = await apiOn(host).asksResume(id);
+      patchSession(id, { asksPaused }, host);
     },
 
-    async restorePaused(sessionId) {
-      const id = sessionId ?? get().selectedId;
-      if (!id) return;
-      const host = hostOf(id);
-      const paused = pausedOf(id);
+    async restorePaused(sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      if (!agent) return;
+      const { id, host } = agent;
+      const paused = pausedOf(id, host);
       const planned = restorePlan(paused.steers, paused.items);
-      const removed = await removeQueued(id, planned.take);
+      const removed = await removeQueued(id, host, planned.take);
       const plan = restorePlan(paused.steers, removed);
       const ids = new Set(plan.steerIds);
-      setSteers(id, (list) => list.filter((p) => !ids.has(p.id)));
+      setSteers(id, host, (list) => list.filter((p) => !ids.has(p.id)));
       if (plan.text || plan.extra.length) insertComposerDraft(host, id, plan.text, "append", plan.extra);
       const failed = planned.take.length - removed.length;
-      if (planned.keep.length) get().notify(translate("paused.restoreKept", { n: planned.keep.length }), "error");
-      else if (failed > 0) get().notify(translate("paused.restoreFailed", { n: failed }), "error");
+      if (planned.keep.length) notifyAgent(id, host, translate("paused.restoreKept", { n: planned.keep.length }), "error");
+      else if (failed > 0) notifyAgent(id, host, translate("paused.restoreFailed", { n: failed }), "error");
     },
 
-    async discardPaused(sessionId) {
-      const id = sessionId ?? get().selectedId;
-      if (!id) return;
-      const paused = pausedOf(id);
+    async discardPaused(sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      if (!agent) return;
+      const { id, host } = agent;
+      const paused = pausedOf(id, host);
       const ids = new Set(paused.steers.map((p) => p.id));
-      setSteers(id, (list) => list.filter((p) => !ids.has(p.id)));
-      await removeQueued(id, paused.items);
+      setSteers(id, host, (list) => list.filter((p) => !ids.has(p.id)));
+      await removeQueued(id, host, paused.items);
     },
 
-    async interrupt(sessionId) {
-      const id = sessionId ?? get().selectedId;
-      const view = id ? get().sessions[id] : undefined;
+    async interrupt(sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      const view = agent ? viewOn(agent.id, agent.host) : undefined;
       const turnId = view?.timeline.activeTurnId;
-      if (!id || !view?.timeline.threadId || !turnId) return;
+      if (!agent || !view?.timeline.threadId || !turnId) return;
+      const { id, host } = agent;
       // 停止 = 全部暂停: cutex pauses the queue, then interrupts (no auto-send afterwards).
-      if (featuresOn(hostOf(id)).has("queue-pause")) {
-        await apiOf(id).stopTurn(id);
-        refreshQueue(id);
+      if (featuresOn(host).has("queue-pause")) {
+        await apiOn(host).stopTurn(id);
+        refreshQueue(id, host);
         return;
       }
-      await apiOf(id).interrupt(id, view.timeline.threadId, turnId);
+      await apiOn(host).interrupt(id, view.timeline.threadId, turnId);
     },
   };
 });
 
 /**
  * The owner is looking at this agent now (notifications stay quiet, a turn end leaves no unread mark):
- * a focused window showing it in the main area, or its side page on screen (docs/research/side-agent-view-20261018.md).
+ * a focused window showing it — the focused conversation (the selection), any other conversation pane
+ * on screen (panes step 2: 「在看」 is a set) or its side page on screen (`views[…].visible`).
  */
-export function looksAt(s: Pick<AppState, "selectedId" | "selectedHost" | "hosts" | "view" | "sideAgents">, hostId: string, id: string): boolean {
+export function looksAt(s: Pick<AppState, "selectedId" | "selectedHost" | "hosts" | "view" | "views">, hostId: string, id: string): boolean {
   if (!document.hasFocus() || s.view.kind !== "conversation") return false;
   if (s.selectedId === id && hostId === (s.selectedHost ?? s.hosts?.active ?? "local")) return true;
-  const side = s.sideAgents[id];
-  return !!side && side.hostId === hostId && side.visible;
+  return !!s.views[viewKey(hostId, id)]?.visible;
 }
 
 /** Interrupt + brief "interrupted" feedback (stop button, Esc in the composer). */
-export async function interruptWithFeedback(t: (key: "composer.interrupted" | "composer.interrupting") => string, sessionId?: string): Promise<void> {
+export async function interruptWithFeedback(t: (key: "composer.interrupted" | "composer.interrupting") => string, sessionId?: string, hostId?: string): Promise<void> {
   const app = useApp.getState();
+  // The notices go to the conversation showing that agent (panes step 2).
+  const agent = sessionId && hostId ? { hostId, sessionId } : undefined;
   // Feedback at once; the stop takes a round trip (slow over SSH).
-  app.notify(t("composer.interrupting"));
+  app.notify(t("composer.interrupting"), "info", agent);
   try {
-    await app.interrupt(sessionId);
-    app.notify(t("composer.interrupted"));
+    await app.interrupt(sessionId, hostId);
+    app.notify(t("composer.interrupted"), "info", agent);
   } catch (e) {
-    app.notify(e instanceof Error ? e.message : String(e), "error");
+    app.notify(e instanceof Error ? e.message : String(e), "error", agent);
   }
 }
 
@@ -2814,17 +2907,40 @@ export function selectedFeatures(s: HostReadSource & Pick<AppState, "selectedHos
   return featuresOf(s, agentHost(s));
 }
 
-/** The host of an agent view the store holds (the focus host when none). */
+/**
+ * COMPATIBILITY (panes step 1c): the host a bare session id means — the host of its latest view the
+ * store holds (the focus host when none). Prefer passing the host you know (a conversation scope's,
+ * a side page's) to `viewOf`.
+ */
 export function viewHostOf(sessionId: string): string {
-  return sessionHostOf(sessionId, focusOf(useApp.getState()));
+  return viewHostIn(useApp.getState(), sessionId);
 }
 
-/** The store's agent views of the focus host only (`sessions` may also hold an open agent of another host). */
-export function focusSessionViews(s: Pick<AppState, "hosts" | "sessions">): Record<string, SessionView> {
-  const focus = focusOf(s);
+/** `viewHostOf` for a selector's state. */
+export function viewHostIn(s: Pick<AppState, "hosts">, sessionId: string): string {
+  return sessionHostOf(sessionId, focusOf(s));
+}
+
+/** An agent's view on a host (views are keyed by host + id, lib/viewKey); undefined when the store holds none. */
+export function viewOf(s: Pick<AppState, "sessions">, hostId: string, sessionId: string): SessionView | undefined {
+  return s.sessions[viewKey(hostId, sessionId)];
+}
+
+/** COMPATIBILITY: the view a bare session id means now (on `viewHostOf`'s host). Prefer `viewOf` with the host. */
+export function sessionViewOf(s: Pick<AppState, "sessions" | "hosts">, sessionId: string): SessionView | undefined {
+  return s.sessions[viewKey(viewHostIn(s, sessionId), sessionId)];
+}
+
+/** The store's agent views of one host, by session id (`sessions` holds the views of every host). */
+export function hostSessionViews(sessions: Readonly<Record<ViewKey, SessionView>>, hostId: string): Record<string, SessionView> {
   const out: Record<string, SessionView> = {};
-  for (const [id, view] of Object.entries(s.sessions)) if (sessionHostOf(id, focus) === focus) out[id] = view;
+  for (const [key, view] of Object.entries(sessions)) if (isViewOf(key, hostId)) out[viewKeyParts(key).sessionId] = view;
   return out;
+}
+
+/** The store's agent views of the focus host only, by session id (`sessions` may also hold agents of other hosts). */
+export function focusSessionViews(s: Pick<AppState, "hosts" | "sessions">): Record<string, SessionView> {
+  return hostSessionViews(s.sessions, focusOf(s));
 }
 
 /**
@@ -2905,8 +3021,8 @@ function activityOf(sidebar: SidebarSnapshot | null, current: Record<string, Act
 }
 
 /** Resolves with the session's native thread id once known (plan mode / goal need it), or null after `ms`. */
-function waitForThread(sessionId: string, ms = 15_000): Promise<string | null> {
-  const current = () => useApp.getState().sessions[sessionId]?.timeline.threadId ?? null;
+function waitForThread(hostId: string, sessionId: string, ms = 15_000): Promise<string | null> {
+  const current = () => viewOf(useApp.getState(), hostId, sessionId)?.timeline.threadId ?? null;
   if (current()) return Promise.resolve(current());
   return new Promise((resolve) => {
     let finished = false;
@@ -2974,7 +3090,7 @@ async function createPendingChat(current: () => boolean, finish: () => void): Pr
         await app.select(sessionId, host);
         if (!current()) return;
       }
-      if ((step.kind === "plan" || step.kind === "goal") && !(await waitForThread(sessionId))) throw new Error(translate("chat.draft.noThread"));
+      if ((step.kind === "plan" || step.kind === "goal") && !(await waitForThread(host, sessionId))) throw new Error(translate("chat.draft.noThread"));
       if (!current()) return;
       if (step.kind === "plan") {
         const applied = await app.setCollabMode("plan");

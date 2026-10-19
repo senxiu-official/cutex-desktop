@@ -1,22 +1,34 @@
-// Settings → 主机 (DESIGN §4.5, §2 remote; multi-host RFC §7.5): one card per host (OS icon, color dot
-// with status ring, name, ssh target; color swatches + custom color, auto-connect, connect / disconnect,
-// show it (scope), test, edit, re-pair, remove click-twice; its connection status, endpoint and cutex
-// version, group tags), 添加 SSH 主机 (pairing over ssh), 分组 (HostGroupsSection), the view on launch, host marks, and 诊断 (focus host).
+// Settings → 设备 (page "hosts"; DESIGN §4.5, §2 remote; multi-host RFC §7.5). An overview (owner
+// 2026-10-19: one place per host, reached from here): the hosts in two cards by your role there —
+// 我的设备 (you own it) and 我能访问的设备 (another user's, chip 你是成员); this machine's host has the chip
+// 此设备; the split follows host ownership (lib/hostOwnership: the owner person is you, or someone else,
+// SSH owner rights included). Each row is compact (OS icon, name, chips, status) and opens that host's page 主机 (page
+// "access", components/settings/AccessSettings) on that host. Then 添加 SSH 主机 (pairing over ssh), 分组
+// (HostGroupsSection), the view on launch, host marks, and 诊断 (focus host).
+// HostConnectionSection is 主机 → 连接: the full host row (color swatches + custom color, auto-connect,
+// connect / disconnect, show it (scope), test, edit, re-pair, remove click-twice; its connection status,
+// endpoint and cutex version, group tags; how this desktop is connected and what it is there, connect as —
+// docs/research/host-ownership-ui-contract-20261019.md) for the selected host.
 // Tokens never reach this page — main stores them (safeStorage) and only reports "paired".
 import { useEffect, useState } from "react";
-import { Copy, Layers } from "lucide-react";
-import { DEFAULT_CUTEX_PATH, DEFAULT_REMOTE_PORT, groupsOfHost, sameScope, type HostGroup, type HostTestResult, type SshErrorView } from "../../../../shared/hosts";
+import { ChevronRight, Copy, Layers } from "lucide-react";
+import { DEFAULT_CUTEX_PATH, DEFAULT_REMOTE_PORT, groupsOfHost, sameScope, type HostGroup, type HostOwner, type HostResult, type HostTestResult, type SshConnectAsRequest, type SshErrorView } from "../../../../shared/hosts";
 import type { CapabilitiesView } from "../../../../shared/ipc";
 import { api } from "../../bridge";
 import { useI18n, type MessageKey } from "../../i18n";
 import { ARMED_FORM_BUTTON, ARMED_FRAME, useArmed } from "../../lib/armedConfirm";
 import { hostVersionTitle, singleHostScope, type HostLook } from "../../lib/hostScope";
 import { hasLocalHost, hasNoHost, missingRemoteFeatures } from "../../lib/hosts";
+import { useHostOwnership, useHostOwnershipGroups, type HostOwnership } from "../../lib/hostOwnership";
 import { setUiPref, useUiPrefs } from "../../lib/prefs";
 import { cutexBuildText, settingsAnchorId } from "../../lib/settingsNav";
 import { formatWhen, useClock } from "../../lib/time";
 import { setHostAppearance, setHostAutoConnect, setHostConnected, setViewScope, useHostScope } from "../../lib/useHostScope";
 import { useApp } from "../../store";
+import { useNonOwnerHosts, lastAccessOf } from "../../lib/hostAccess";
+import { setSettingsHost } from "../../lib/settingsHost";
+import type { MyAccessRow } from "../../lib/myAccess";
+import type { HostUserAccess } from "../../../../shared/users";
 import { HostDot, HostPlatformIcon } from "../HostMark";
 import { Button, EmptyState, IconButton, SettingRow, Section, Segmented, TextInput, Toggle } from "./Form";
 import { HostGroupsSection, hostGroupRowId, SwatchPicker } from "./HostGroupsSection";
@@ -33,7 +45,7 @@ function useCapabilities(): CapabilitiesView | null | undefined {
 }
 
 /** One line for an ssh / pairing failure: what it means, then the stderr tail. */
-function ProblemText({ error }: { error: SshErrorView }) {
+export function ProblemText({ error }: { error: SshErrorView }) {
   const { t } = useI18n();
   return (
     <div className="mt-1 text-xs text-danger">
@@ -74,6 +86,42 @@ function ConnectionLine({ look }: { look: HostLook }) {
       {indicator.detail && <pre className="mt-1 max-h-24 overflow-auto font-mono text-[11px] whitespace-pre-wrap text-subtle">{indicator.detail}</pre>}
     </div>
   );
+}
+
+/** The owner person's name for a sentence (a name, else the fingerprint, else 「另一个人」). */
+export function ownerName(owner: HostOwner | null, someone: string): string {
+  return owner?.displayName || owner?.fingerprint || someone;
+}
+
+/** What this desktop is on the host (UI contract §2), or null when not known yet. */
+export function roleKey(o: HostOwnership): MessageKey | null {
+  if (o.mine === true && o.role === "owner") return "host.own.role.self";
+  if (o.ownerRightsOnly || o.role === "owner" || o.role === "older") return "host.own.role.rights";
+  if (o.role === "member") return "host.own.role.member";
+  if (o.role === "pending") return "host.own.role.pending";
+  return null;
+}
+
+/** 「这是我的设备」 (the fallback grouping): for a remote host whose cutex cannot report its owner person. */
+function OwnedByMeToggle({ hostId }: { hostId: string }) {
+  const { t } = useI18n();
+  const o = useHostOwnership(hostId);
+  if (o.connection === "local" || o.capability === true) return null;
+  return (
+    <span className="flex items-center gap-2" title={t("host.own.markMineHint")}>
+      {t("host.own.markMine")}
+      <Toggle checked={o.ownedByMe} label={t("host.own.markMine")} onChange={o.setOwnedByMe} />
+    </span>
+  );
+}
+
+type T = ReturnType<typeof useI18n>["t"];
+
+/** The toast after pairing with a connect-as (UI contract §2 / §3); null: nothing particular to say. */
+export function connectResultText(t: T, r: Extract<HostResult, { ok: true }>, host: string): string | null {
+  if (r.connectAs === "member") return r.userId ? t("host.own.result.memberBound", { host }) : t("host.own.result.memberPending", { host });
+  if (r.connectAs === "owner" && r.autoReason && r.autoReason !== "ownerIsSomeoneElse") return t(`host.own.result.${r.autoReason}` as MessageKey, { host });
+  return null;
 }
 
 /** Host color: the palette swatches + a custom color (RFC §7.5, §8.1). */
@@ -177,8 +225,15 @@ function TestResult({ result }: { result: HostTestResult }) {
   return <div className="mt-1 text-xs text-danger">{result.message ?? t("host.problem.exited")}</div>;
 }
 
-/** One host card. `shown`: the view scope is exactly this host. */
-function HostRow({ look, shown, onRemoved }: { look: HostLook; shown: boolean; onRemoved(message: { text: string; ok: boolean }): void }) {
+/** You are another user on that host (not its owner): its known access, else the last known role. */
+function isMemberHost(access: HostUserAccess | undefined, hostId: string): boolean {
+  if (access) return !access.isOwner;
+  const last = lastAccessOf<MyAccessRow>(hostId)?.role;
+  return last === "member" || last === "pending";
+}
+
+/** One host card. `shown`: the view scope is exactly this host; `member`: you are another user there (not its owner). */
+function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: boolean; member?: boolean; onRemoved(message: { text: string; ok: boolean }): void }) {
   const { t, locale } = useI18n();
   const now = useClock();
   const host = look.view;
@@ -216,8 +271,10 @@ function HostRow({ look, shown, onRemoved }: { look: HostLook; shown: boolean; o
         setForm((f) => ({ ...f, cutexPath: r.cutexPath! }));
         notify(t("host.add.cutexFound", { path: r.cutexPath }));
       }
-      // users: the new token waits for the host owner to assign it.
-      if (r.ok && r.pending) notify(t("users.pairedPending", { host: host.label }));
+      // users: the new token waits for the host owner to assign it (a member token: said by connectResultText).
+      const said = r.ok ? connectResultText(t, r, host.label) : null;
+      if (said) notify(said);
+      else if (r.ok && r.pending) notify(t("users.pairedPending", { host: host.label }));
     });
   const remove = () =>
     run("remove", async () => {
@@ -242,6 +299,7 @@ function HostRow({ look, shown, onRemoved }: { look: HostLook; shown: boolean; o
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-sm">
             <span className="truncate">{host.label}</span>
+            {host.kind === "local" && <span className="shrink-0 rounded bg-accent/15 px-1.5 text-[10px] text-accent">{t("connection.thisDevice")}</span>}
             {shown ? <span className="rounded bg-accent/15 px-1.5 text-[10px] text-accent">{t("host.active")}</span> : look.inScope && <span className="rounded bg-surface-2 px-1.5 text-[10px] text-muted">{t("host.inScope")}</span>}
             {host.kind === "ssh" && !host.paired && <span className="rounded bg-warn/15 px-1.5 text-[10px] text-warn-text">{t("host.notPaired")}</span>}
             {look.version && <span className="font-mono text-[10px] text-subtle">{look.version}</span>}
@@ -304,6 +362,7 @@ function HostRow({ look, shown, onRemoved }: { look: HostLook; shown: boolean; o
           {t("host.autoConnect")}
           <Toggle checked={look.autoConnect} label={t("host.autoConnect")} onChange={(on) => void setHostAutoConnect(host.id, on)} />
         </span>
+        <OwnedByMeToggle hostId={host.id} />
       </div>
       <ConnectionLine look={look} />
       {editing && host.kind === "ssh" && (
@@ -325,6 +384,72 @@ function HostRow({ look, shown, onRemoved }: { look: HostLook; shown: boolean; o
   );
 }
 
+/** 设备: one compact host row; the whole row opens the host's page 主机 on that host. */
+/** 设备 overview row: how this desktop is connected and what it is there, one muted line (as 主机 → 连接). */
+function OverviewOwnership({ hostId, label }: { hostId: string; label: string }) {
+  const { t } = useI18n();
+  const o = useHostOwnership(hostId);
+  const how = o.connection === "local" ? null : o.connection === "ssh" ? t("host.own.how.ssh", { target: o.sshTarget ?? label }) : o.connection === "dev" ? t("host.own.how.dev") : t("host.own.how.paired");
+  const role = roleKey(o);
+  // 可访问的主机: whose it is first (主人：ema), then how you connect and what you can do.
+  const owner = o.group === "access" && o.owner ? t("host.own.ownerIs", { owner: ownerName(o.owner, t("host.own.someone")) }) : null;
+  const text = [owner, how, role && t(role)].filter(Boolean).join(" · ");
+  return text ? <span className="min-w-0 truncate text-xs text-subtle">{text}</span> : null;
+}
+
+function HostOverviewRow({ look }: { look: HostLook; member?: boolean }) {
+  const { t } = useI18n();
+  const host = look.view;
+  const status = look.indicator.status;
+  const tone = status === "online" ? "text-ok-text" : status === "connecting" || status === "retrying" ? "text-warn" : status === "disconnected" ? "text-subtle" : "text-danger";
+  const open = () => {
+    setSettingsHost(host.id);
+    useApp.getState().openSettings("access");
+  };
+  return (
+    <button
+      type="button"
+      data-host-row={host.id}
+      title={t("connection.openHost", { host: host.label })}
+      onClick={open}
+      className="-mx-4 flex w-[calc(100%+2rem)] items-center gap-2 border-b border-border px-4 py-2.5 text-left last:border-b-0 hover:bg-surface-2/60 focus-visible:bg-surface-2/60 focus-visible:outline-none"
+    >
+      <HostPlatformIcon platform={look.platform} className="text-muted" />
+      <span className="min-w-0 truncate text-sm">{host.label}</span>
+      {host.kind === "local" && <span className="shrink-0 rounded bg-accent/15 px-1.5 text-[10px] text-accent">{t("connection.thisDevice")}</span>}
+      <OverviewOwnership hostId={host.id} label={host.label} />
+      {host.kind === "ssh" && !host.paired && <span className="shrink-0 rounded bg-warn/15 px-1.5 text-[10px] text-warn-text">{t("host.notPaired")}</span>}
+      <span className={`ml-auto flex shrink-0 items-center gap-1.5 text-xs ${tone}`}>
+        <HostDot color={look.color} status={status} size={8} />
+        {t(`host.status.${status}` as MessageKey)}
+      </span>
+      <ChevronRight size={14} className="shrink-0 text-subtle" aria-hidden />
+    </button>
+  );
+}
+
+/**
+ * 主机 → 连接 (local): this desktop's connection to `hostId` — the full host row (status, connect /
+ * disconnect, reconnect, test, edit, re-pair, color, auto-connect, remove). After a remove: back to 设备.
+ */
+export function HostConnectionSection({ hostId }: { hostId: string }) {
+  const { t } = useI18n();
+  const scope = useHostScope();
+  const accessMap = useNonOwnerHosts();
+  const look = scope.host(hostId);
+  const onRemoved = (message: { text: string; ok: boolean }) => {
+    const app = useApp.getState();
+    app.notify(message.text, message.ok ? "info" : "error");
+    setSettingsHost(null);
+    app.openSettings("hosts");
+  };
+  return (
+    <Section id={settingsAnchorId("hostConnection")} title={t("shell.access.connection")} hint={t("shell.access.connectionHint")} source="local">
+      {look ? <HostRow look={look} shown={sameScope(scope.scope, singleHostScope(hostId))} member={isMemberHost(accessMap[hostId], hostId)} onRemoved={onRemoved} /> : <EmptyState>{t("shell.access.noHost")}</EmptyState>}
+    </Section>
+  );
+}
+
 function AddHostForm({ onDone }: { onDone(): void }) {
   const { t } = useI18n();
   const [aliases, setAliases] = useState<string[]>([]);
@@ -332,6 +457,7 @@ function AddHostForm({ onDone }: { onDone(): void }) {
   const [label, setLabel] = useState("");
   const [port, setPort] = useState("");
   const [cutexPath, setCutexPath] = useState("");
+  const [connectAs, setConnectAs] = useState<SshConnectAsRequest>("auto");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<SshErrorView | null>(null);
   const notify = useApp((s) => s.notify);
@@ -342,7 +468,7 @@ function AddHostForm({ onDone }: { onDone(): void }) {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.addSshHost({ target: target.trim(), label: label.trim() || undefined, remotePort: port ? Number(port) : undefined, cutexPath: cutexPath.trim() || undefined });
+      const r = await api.addSshHost({ target: target.trim(), label: label.trim() || undefined, remotePort: port ? Number(port) : undefined, cutexPath: cutexPath.trim() || undefined, connectAs });
       if (!r.ok) {
         setError(r.error);
         return;
@@ -352,7 +478,10 @@ function AddHostForm({ onDone }: { onDone(): void }) {
         setCutexPath(r.cutexPath);
         notify(t("host.add.cutexFound", { path: r.cutexPath }));
       }
-      if (r.pending) notify(t("users.pairedPending", { host: label.trim() || target.trim() }));
+      const name = label.trim() || target.trim();
+      const said = connectResultText(t, r, name);
+      if (said) notify(said);
+      else if (r.pending) notify(t("users.pairedPending", { host: name }));
       onDone();
       if (connect) await setViewScope(singleHostScope(r.hostId));
     } catch (e) {
@@ -392,6 +521,17 @@ function AddHostForm({ onDone }: { onDone(): void }) {
       <SettingRow label={t("host.add.label")}>
         <TextInput width="w-64" value={label} placeholder={t("host.add.labelPlaceholder")} onChange={setLabel} />
       </SettingRow>
+      <SettingRow label={t("host.add.connectAs")} hint={t("host.add.connectAsHint")}>
+        <Segmented
+          value={connectAs}
+          options={[
+            { value: "auto" as const, label: t("host.add.connectAs.auto") },
+            { value: "member" as const, label: t("host.add.connectAs.member") },
+            { value: "owner" as const, label: t("host.add.connectAs.owner") },
+          ]}
+          onChange={setConnectAs}
+        />
+      </SettingRow>
       <SettingRow label={t("host.add.port")} hint={t("host.add.portHint")}>
         <TextInput width="w-24" mono value={port} placeholder={String(DEFAULT_REMOTE_PORT)} onChange={(v) => setPort(v.replace(/\D/g, "").slice(0, 5))} />
       </SettingRow>
@@ -419,38 +559,47 @@ export function HostsPage() {
   const { t } = useI18n();
   const hosts = useApp((s) => s.hosts);
   const scope = useHostScope();
+  const accessMap = useNonOwnerHosts();
   const { hostMarksSingle: marksSingle, hostMarkLocal, createHostDefault } = useUiPrefs();
   const focus = useApp((s) => s.settingsFocus);
   // No local host (macOS without a local cutex): no 「本机」 choices and no 本机-mark toggle.
   const localHost = hasLocalHost(hosts);
+  const groups = useHostOwnershipGroups();
   const [adding, setAdding] = useState(false);
-  /** Result of the last remove (was the token revoked on the remote?). */
-  const [removed, setRemoved] = useState<{ text: string; ok: boolean } | null>(null);
   // Title bar → 添加 SSH 主机… lands here with the form open.
   useEffect(() => {
     if (focus?.anchor !== "addHost") return;
     setAdding(true);
     useApp.setState({ settingsFocus: null });
+    requestAnimationFrame(() => document.getElementById(settingsAnchorId("hostAdd"))?.scrollIntoView({ block: "start" }));
   }, [focus]);
+  // 我的设备 / 我能访问的设备: your role on each host (lib/hostAccess; a host not read yet counts as yours,
+  // a disconnected one keeps its last known role).
+  const member = (id: string) => isMemberHost(accessMap[id], id);
+  const row = (h: HostLook) => <HostOverviewRow key={h.id} look={h} member={member(h.id)} />;
+  // Split by host ownership (lib/hostOwnership): the owner person is you, or someone else (SSH owner rights included).
+  const access = new Set(groups.access);
+  const mine = scope.hosts.filter((h) => !access.has(h.id));
+  const others = scope.hosts.filter((h) => access.has(h.id));
   return (
     <>
-      <Section
-        id={settingsAnchorId("hostList")}
-        title={t("host.list")}
-        hint={t("host.listHint")}
-        actions={
-          <Button disabled={adding} onClick={() => setAdding(true)}>
-            {t("titlebar.addSsh")}
-          </Button>
-        }
-      >
-        {adding && <AddHostForm onDone={() => setAdding(false)} />}
-        {!adding && hasNoHost(hosts) && <EmptyState>{t("firstRun.noHost.title")}</EmptyState>}
-        {scope.hosts.map((h) => (
-          <HostRow key={h.id} look={h} shown={sameScope(scope.scope, singleHostScope(h.id))} onRemoved={setRemoved} />
-        ))}
+      <Section id={settingsAnchorId("hostList")} title={t("connection.mine")} hint={t("connection.mineHint")}>
+        {hasNoHost(hosts) && <EmptyState>{t("firstRun.noHost.title")}</EmptyState>}
+        {mine.map(row)}
         {hosts && !localHost && !hasNoHost(hosts) && <p className="py-2 text-xs text-subtle">{t("host.noLocalBackend")}</p>}
-        {removed && <p className={`py-2 text-xs ${removed.ok ? "text-subtle" : "text-warn"}`}>{removed.text}</p>}
+      </Section>
+      <Section id={settingsAnchorId("hostOthers")} title={t("connection.others")} hint={t("connection.othersHint")}>
+        {others.length === 0 && <EmptyState>{t("connection.othersNone")}</EmptyState>}
+        {others.map(row)}
+      </Section>
+      <Section id={settingsAnchorId("hostAdd")} title={t("connection.add")} hint={t("connection.addHint")}>
+        {adding ? (
+          <AddHostForm onDone={() => setAdding(false)} />
+        ) : (
+          <SettingRow label={t("host.add.target")}>
+            <Button onClick={() => setAdding(true)}>{t("titlebar.addSsh")}</Button>
+          </SettingRow>
+        )}
         {hosts?.weakSecretStorage && <p className="py-2 text-xs text-warn">{t("host.weakStorage")}</p>}
       </Section>
       <HostGroupsSection />

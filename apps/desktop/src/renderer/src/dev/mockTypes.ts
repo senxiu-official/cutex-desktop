@@ -42,8 +42,12 @@ export interface MockCore {
    * registers at install; `rename` sets / clears `ownerName` wherever the token is (throws 400 / 404).
    */
   readonly clientTokenNames: {
-    register(list: { rename(tokenId: string, ownerName: string | null): boolean }): void;
+    register(list: import("./mockTokenNames").MockTokenList): void;
     rename(tokenId: string, name: string | null): { tokenId: string; ownerName: string | null };
+    /** device-scope: set a token's scope in every list (false: unknown token). */
+    setScope(tokenId: string, scope: "full" | "chat" | "read"): boolean;
+    /** A revoke: every list drops the token (false: no list had it). */
+    revoke(tokenId: string): boolean;
   };
 }
 

@@ -6,7 +6,7 @@ import { useI18n } from "../../i18n";
 import { contextMenu } from "../../lib/contextMenu";
 import { toolErrorText } from "../../lib/taskRows";
 import type { RawItem } from "../../lib/timeline";
-import { agentHost, useApp } from "../../store";
+import { useConvHost } from "../../lib/conversationScope";
 import { services } from "../app";
 import { artifactCutexRef, copyArtifactLink, explainOpen } from "./actions";
 import { publishCallOf } from "./model";
@@ -14,7 +14,7 @@ import { useArtifactLink } from "./refTarget";
 
 function Published({ name, refKey, newVersion, version }: { name: string; refKey: string; newVersion: boolean | null; version: number | null }) {
   const { t } = useI18n();
-  const hostId = useApp(agentHost);
+  const hostId = useConvHost();
   const label = version ? `${name} v${version}` : name;
   const cref = { ...artifactCutexRef(refKey, label), hostId };
   const view = useArtifactLink(cref);

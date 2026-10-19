@@ -64,6 +64,10 @@ describe("applyTerms", () => {
 const ALLOWED: Record<string, string> = {
   // 通用 → 术语: the example names the built-in word itself (a {{agent}} would read 「助手 → 助手」 once renamed).
   "terms.hint": "example of renaming the built-in word",
+  // Onboarding wording presets: each option names the words it sets.
+  "onboarding.preset.default": "wording preset name",
+  "onboarding.preset.daili": "wording preset name",
+  "onboarding.preset.english": "wording preset name",
 };
 /** Whole key families that use a banned word in another sense. */
 const ALLOWED_PREFIXES: Record<string, string> = {

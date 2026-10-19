@@ -16,7 +16,8 @@ import { useListHosts } from "../../lib/hostLists";
 import { useConnectedHostData } from "../../lib/hostLists";
 import { useClock, useNow } from "../../lib/time";
 import { useConversationDock } from "../../lib/conversationDock";
-import { agentHost, featuresOf, useApp } from "../../store";
+import { featuresOf, useApp } from "../../store";
+import { useConvHost } from "../../lib/conversationScope";
 import type { OverlayLayout } from "../slots";
 import { BrowserClaimPanel } from "./BrowserClaimPanel";
 import { BrowserOpenCard } from "./BrowserOpenCard";
@@ -27,7 +28,7 @@ export const CLAIM_CARD_DELAY_MS = 1500;
 
 export function BrowserClaimOverlay({ sessionId }: { sessionId: string; reserve(layout: OverlayLayout | null): void }) {
   const { t } = useI18n();
-  const hostId = useApp(agentHost);
+  const hostId = useConvHost();
   const data = useConnectedHostData().find(d => d.hostId === hostId);
   const clock = useClock();
   // cutex approval-wait: a call holding for the owner shows first with a countdown; once it stops holding

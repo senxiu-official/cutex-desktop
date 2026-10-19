@@ -73,7 +73,21 @@ export interface CapabilitiesUser {
   avatarEtag?: string | null;
   /** cutex `user-own-token`: this credential's own token (null: the root credential; absent: older host). */
   token?: SelfToken | null;
+  /** cutex `device-scope`: this connection's scope (the root credential: `full`; absent: older host). */
+  scope?: DeviceScope;
+  /** cutex `owner-local-only`: this connection counts as the host itself (absent: older host = unknown). */
+  ownerLocal?: boolean;
 }
+
+/**
+ * cutex `device-scope`: what a client / device token may do on top of its user's rights — `full`
+ * (default), `chat` (read + talk), `read` (read only). The root credential is always `full`.
+ */
+export type DeviceScope = "full" | "chat" | "read";
+export const DEVICE_SCOPES: readonly DeviceScope[] = ["full", "chat", "read"];
+/** cutex `owner-local-only`: where a token came from (`hostCli`: `client-token issue` on the host, e.g. over SSH; `pairing`: a pairing code). */
+export type TokenIssuedVia = "hostCli" | "pairing" | "unknown";
+export const TOKEN_ISSUED_VIA: readonly TokenIssuedVia[] = ["hostCli", "pairing", "unknown"];
 
 /** `GET /v2/capabilities` → `user.token` (cutex `user-own-token`): owners, members and pending devices alike. */
 export interface SelfToken {
@@ -82,6 +96,10 @@ export interface SelfToken {
   deviceName: string | null;
   ownerName: string | null;
   platform: string | null;
+  /** cutex `device-scope` (absent: older host). */
+  scope?: DeviceScope;
+  /** cutex `owner-local-only` (absent: older host). */
+  issuedVia?: TokenIssuedVia;
 }
 
 /** What a user set on their own desktop (users-self-profile; absent fields = an older host). */
@@ -133,6 +151,10 @@ export interface UserTokenRecord {
   pending: boolean;
   /** person-identity: the identity this token presented (null: none; absent: older host). */
   person?: TokenPerson | null;
+  /** cutex `device-scope` (absent: older host). */
+  scope?: DeviceScope;
+  /** cutex `owner-local-only` (absent: older host). */
+  issuedVia?: TokenIssuedVia;
 }
 
 /** `GET /v2/users` `tokens[].person`: the last identity claim of a token. */

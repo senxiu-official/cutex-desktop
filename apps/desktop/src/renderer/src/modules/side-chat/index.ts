@@ -8,7 +8,7 @@ import { defineModule } from "../slots";
 import { initSide, parseSideParams, restoreSide, type SideParams, type SideState } from "./cardState";
 import { launcherParams, useFromTurnState, useSideTab } from "./hooks";
 import { SideChatCard } from "./SideChatCard";
-import { SideSettings } from "./SideSettings";
+import { SideChatSettings, SideSummarySettings } from "./SideSettings";
 import { closeSideInstance, sideModuleActive } from "./state";
 
 export default defineModule({
@@ -32,8 +32,13 @@ export default defineModule({
         services.side.open("side-chat.chat", { turnId: ref.params.turnId }, { focus: true, binding: { kind: "agent", hostId: ref.hostId, sessionId: ref.params.sessionId } });
       },
     }],
-    "settings.section": [{ id: "side-chat.settings", page: "conversation", titleKey: "side-chat.title", order: 400,
-      keywords: ["side-chat.summaryPrompt", "side-chat.summaryHint", "side-chat.anchorSetting", "side-chat.anchorStart", "side-chat.anchorLatest", "side-chat.scopeSetting", "side-chat.scopeAll", "side-chat.scopeThrough", "side-chat.modelSetting", "side-chat.modelHint", "side-chat.modelSame"], Section: SideSettings }],
+    // Two cards on 对话 after 长对话和长消息 (owner 2026-10-19): the side chat itself, then saving it as a note.
+    "settings.section": [
+      { id: "side-chat.settings", page: "conversation", titleKey: "side-chat.title", order: 400,
+        keywords: ["side-chat.settingsHint", "side-chat.scopeSetting", "side-chat.scopeAll", "side-chat.scopeThrough", "side-chat.scopeHint"], Section: SideChatSettings },
+      { id: "side-chat.summarySettings", page: "conversation", titleKey: "side-chat.summary", order: 410,
+        keywords: ["side-chat.summarySettingsHint", "side-chat.summaryPrompt", "side-chat.editPrompt", "side-chat.anchorSetting", "side-chat.anchorStart", "side-chat.anchorLatest"], Section: SideSummarySettings },
+    ],
   },
   activate: ctx => { sideModuleActive(true); ctx.signal.addEventListener("abort", () => sideModuleActive(false), { once: true }); },
 });

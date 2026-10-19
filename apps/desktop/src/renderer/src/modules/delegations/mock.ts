@@ -65,6 +65,8 @@ function peerAsks(): AskSummary[] {
     ask("ask-px-held", "在 gpu-box 上重跑 proj-r12 的评估", ["cutex.77aa01bc3d", "trainer"], "queued", { ago: 1900, hops: 1, hold: { reason: "peerUnreachable" }, ...mirror(GPU_BOX, ["cutex.77aa01bc3d", "trainer"], "peer_unreachable", { lastError: "connect to http://100.64.0.97:24270 timed out after 5 s" }) }),
     ask("ask-px-unknown", "核对 Workstation 的 asks 存储", worker, "queued", { ago: 2600, hops: 1, hold: { reason: "peerUnknown", raw: "execution=pausedByDirector" }, ...mirror(WORKSTATION_LAB, worker, "remoteStateUnknown", { lastError: "对端状态：execution=pausedByDirector（本机版本不认识）" }) }),
     ask("ask-px-removed", "整理 Alpha 的照片索引", ["cutex.a1b2c3d4e5", "photo-indexer"], "interrupted", { ago: 9000, hops: 1, closed: "stopped", closedAt: iso(8000), ...mirror(ALPHA, ["cutex.a1b2c3d4e5", "photo-indexer"], "removedByPeer", { interruptReason: "removedByPeer" }) }),
+    // Waits for workstation-lab's owner to review it (the destination's snapshot says pendingReview).
+    ask("ask-px-review", "在 Workstation 上用完整权限重建 CUDA 镜像", worker, "pendingReview", { ago: 240, hops: 1, ...mirror(WORKSTATION_LAB, worker, "synced", { remoteState: { execution: "pendingReview" } }) }),
     ask("ask-px-late", "统计 Workstation 上一周的 GPU 占用", worker, "interrupted", { ago: 200000, hops: 1, closed: "stopped", closedAt: iso(110000), ...mirror(WORKSTATION_LAB, worker, "outcomeUnknown", { interruptReason: "outcomeUnknown", remoteState: { execution: "answered" } }), lateAnswer: { artifactId: LATE_ARTIFACT, preview: "一周 GPU 平均占用 63%，峰值在周三晚上（训练任务 proj-r12）。", execution: "answered" } }),
     // Incoming: agents on workstation-lab / alpha-home delegating to agents here.
     ask("ask-pin-review", "复现 host-a 上的 ws 断线", HELPER, "pendingReview", { ago: 90, hops: 1, ...fromPeer(WORKSTATION_LAB, "proj-research") }),
@@ -131,7 +133,8 @@ const BRIEFS: Record<string, string> = {
  * (pendingReview) answers with the review's approval id and no queue fields (r236 shape).
  */
 function delegateCall(id: string, a: AskSummary): Record<string, unknown> {
-  const reviewed = a.execution === "pendingReview";
+  // An outgoing mirror is reviewed on the other host: its call says queued there.
+  const reviewed = a.execution === "pendingReview" && !a.remote;
   return {
     type: "mcpToolCall",
     id,
@@ -144,7 +147,7 @@ function delegateCall(id: string, a: AskSummary): Record<string, unknown> {
       content: [],
       structuredContent: reviewed
         ? { approval_id: "apr-5e1f0a7c", delegation: a.askId, detail: `${a.targetName} can do more than you, so the owner reviews each delegation to it before it runs (this one included). Nothing to do now: continue or end your turn.`, ok: true, state: "pendingReview", target: a.targetName }
-        : { ok: true, created: true, delegation: a.askId, target: a.targetName, target_id: a.target, title: a.title, state: a.execution === "running" ? "queued" : a.execution, hold: null, queue_position: 1, review: null, attempt: null, closed: null },
+        : { ok: true, created: true, delegation: a.askId, target: a.targetName, target_id: a.target, title: a.title, state: a.execution === "running" || a.remote ? "queued" : a.execution, hold: null, queue_position: 1, review: null, attempt: null, closed: null },
     },
   };
 }
@@ -264,6 +267,7 @@ function leadThread() {
             delegateCall("ld24", a("ask-px-unknown")),
             delegateCall("ld25", a("ask-px-removed")),
             delegateCall("ld26", a("ask-px-late")),
+            delegateCall("ld27", a("ask-px-review")),
             { type: "agentMessage", id: "la5", text: "三件都交出去了，结果回来我再汇总。" },
           ],
         },
@@ -404,6 +408,15 @@ function mockDelegationApi() {
     },
   };
 }
+
+// The owner decided a delegation's review (modules/approvals/mock.ts decideApproval): cutex queues it
+// for its target, or rejects it.
+(globalThis as { __cutexMockAskReview?: (askId: string, approved: boolean) => void }).__cutexMockAskReview = (askId, approved) => {
+  const d = byId.get(askId);
+  if (!d || d.execution !== "pendingReview") return;
+  if (approved) update(askId, { execution: "queued", hold: { reason: "targetBusy", position: 1 }, queuePosition: 1 });
+  else update(askId, { execution: "rejected", hold: null, closed: "cancelled", closedAt: new Date().toISOString() });
+};
 
 // ---------- replay ----------
 

@@ -67,8 +67,15 @@ export function needsYouByAgent(input: NeedsYouInput): Map<string, NeedsYou> {
     out.set(id, n);
   };
   for (const [id, methods] of Object.entries(input.pending ?? {})) for (const m of methods) add(id, pendingReason(m));
-  for (const a of input.approvals ?? []) if (a.state === "pending") add(a.requesterCutexSessionId, "approval");
   const asks = [...(input.delegations ?? [])].filter((d) => delegationBucket(d) === "needsYou").sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  // A delegation's owner review (`ask_delivery`) counts once, as the delegation's 待审核 on its target
+  // (decided on the delegation itself), not also as an approval of its requester.
+  const reviewed = new Set(asks.filter((d) => d.execution === "pendingReview").map((d) => d.askId));
+  for (const a of input.approvals ?? []) {
+    if (a.state !== "pending") continue;
+    if (a.kind === "ask_delivery" && typeof a.details?.askId === "string" && reviewed.has(a.details.askId)) continue;
+    add(a.requesterCutexSessionId, "approval");
+  }
   for (const d of asks) add(d.target, delegationReason(d), d.askId);
   const notes = [...(input.ownerNotes ?? [])].filter(isPending).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
   for (const r of notes) add(r.agentId, ownerNeedReason(r), undefined, r.notificationId);

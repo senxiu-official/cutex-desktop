@@ -1,20 +1,32 @@
 // The right side's width handles (docs/desktop-modules.md §18.3): the gap between the conversation
 // and the column, and every card's left edge (a 5 px hot zone). Same state (appearance.sidePaneWidth),
 // same limits; drag live, stored on release; double-click = the default width; arrows when focused.
+// v1.17 (§24): the stored width is ONE tool column's; with two columns on screen the handles move the
+// whole tool area and store half of it.
 import { useRef, type KeyboardEvent, type PointerEvent } from "react";
 import { DEFAULT_APPEARANCE, getAppearance, RANGES, setAppearance } from "./appearance";
-import { clampPaneWidth } from "./appearanceModel";
+import { clampPaneWidth, MIN_CONVERSATION_W } from "./appearanceModel";
 
 const STEP = 16;
 let workWidth = Number.POSITIVE_INFINITY;
+/** Tool columns on screen (§24): the stored width is one column's; the handles move the whole tool area. */
+let columns = 1;
+
+/** The tool columns on screen now (components/side/SideArea). */
+export function setSideColumns(n: number): void {
+  columns = Math.max(1, Math.floor(n) || 1);
+}
 
 /** The work area's width (conversation card + right side), measured by the side's work area. */
 export function setSideWorkWidth(width: number): void {
   workWidth = width > 0 ? width : Number.POSITIVE_INFINITY;
 }
 
+/** `width` = the whole tool area; stored per column (appearance.sidePaneWidth), so 1 ↔ 2 columns keeps each column's width. */
 function set(width: number, persist: boolean): void {
-  setAppearance({ sidePaneWidth: clampPaneWidth(width, RANGES.sidePaneWidth, workWidth) }, persist);
+  // Each column may take its share of what the conversation leaves (clampPaneWidth keeps MIN_CONVERSATION_W out of `room`).
+  const room = (workWidth - MIN_CONVERSATION_W) / columns + MIN_CONVERSATION_W;
+  setAppearance({ sidePaneWidth: clampPaneWidth(width / columns, RANGES.sidePaneWidth, room) }, persist);
 }
 
 export interface WidthHandle {
@@ -42,7 +54,7 @@ export function useSideWidthHandle(current: () => number): WidthHandle {
       e.stopPropagation();
       e.currentTarget.setPointerCapture(e.pointerId);
       e.currentTarget.setAttribute("data-dragging", "");
-      drag.current = { x: e.clientX, width: current() || getAppearance().sidePaneWidth };
+      drag.current = { x: e.clientX, width: current() || getAppearance().sidePaneWidth * columns };
     },
     onPointerMove(e) {
       const d = drag.current;
@@ -52,13 +64,13 @@ export function useSideWidthHandle(current: () => number): WidthHandle {
     onPointerUp: end,
     onLostPointerCapture: end,
     onDoubleClick() {
-      set(DEFAULT_APPEARANCE.sidePaneWidth, true);
+      set(DEFAULT_APPEARANCE.sidePaneWidth * columns, true);
     },
     onKeyDown(e) {
       const dir = e.key === "ArrowLeft" ? 1 : e.key === "ArrowRight" ? -1 : 0;
       if (!dir) return;
       e.preventDefault();
-      set((current() || getAppearance().sidePaneWidth) + dir * (e.shiftKey ? STEP * 4 : STEP), true);
+      set((current() || getAppearance().sidePaneWidth * columns) + dir * (e.shiftKey ? STEP * 4 : STEP) * columns, true);
     },
   };
 }

@@ -27,12 +27,13 @@ export const componentRequiresListProbe: AppModule = { id: "probe", titleKey: "j
 export const packEntryProbe: SDK.ModulePackEntry<SlotMap, ModuleServices, MessageKey> = { moduleApi: "^1.16", module: componentRequiresProbe, messages: { en: { "probe.title": "Probe" } } };
 // @ts-expect-error A pack entry must say which MODULE_API_VERSION range it was built for.
 export const packEntryNoRangeProbe: SDK.ModulePackEntry<SlotMap, ModuleServices, MessageKey> = { module: componentRequiresProbe };
-it("v1.16 pack ranges: ^ / ~ / comparator sets, and which side must update", async () => {
+it("v1.16 pack ranges: ^ / ~ / comparator sets, and which side must update (v1.17: additive, ^1.16 packs still load)", async () => {
   const { moduleApiSatisfies, moduleApiVerdict, MODULE_API_VERSION, MODULE_PACK_HOST_GLOBAL } = await import("@cutex-desktop/plugin-sdk");
-  expect(MODULE_API_VERSION).toBe("1.16");
+  expect(MODULE_API_VERSION).toBe("1.17");
   expect(MODULE_PACK_HOST_GLOBAL).toBe("__CUTEX_MODULE_HOST__");
   expect(moduleApiSatisfies(`^${MODULE_API_VERSION}`, MODULE_API_VERSION)).toBe(true);
-  expect(moduleApiVerdict("^1.17", MODULE_API_VERSION)).toBe("needsNewerApp");
+  expect(moduleApiSatisfies("^1.16", MODULE_API_VERSION)).toBe(true);
+  expect(moduleApiVerdict("^1.18", MODULE_API_VERSION)).toBe("needsNewerApp");
   expect(moduleApiVerdict("~1.15", MODULE_API_VERSION)).toBe("needsNewerModule");
 });
 
@@ -174,6 +175,33 @@ function compileContract(ctx: AppModuleContext) {
   ctx.contribute("timeline.codeBlockAction", { id: "probe.codeRun", Action: () => null });
   // @ts-expect-error The platform is the host list's HostPlatform, not a Node platform name.
   ctx.contribute("timeline.codeBlockAction", { id: "probe.codeRun", match: ({ platform }) => platform === "win32", Action: () => null });
+  // v1.17 (§24): a pane kind — single / multi, its binding mode, a title hook and its Body (SideBodyProps).
+  ctx.contribute("pane.kind", {
+    id: "probe.pane",
+    titleKey: "side.column",
+    icon: () => null,
+    instances: "single",
+    binding: "follow",
+    parseParams: (p) => (typeof p === "string" ? p : null),
+    init: (p) => p,
+    useTitle: ({ instance }) => ({ title: String(instance.state), attention: 1 }),
+    Body: ({ instance, setState, visible }) => (visible ? (setState(instance.state), null) : null),
+    minSize: { w: 320, h: 160 },
+    tile: true,
+    dock: null,
+    popOut: false,
+  });
+  // @ts-expect-error A pane kind's binding is agent / host / follow / none (no side `workspace` binding).
+  ctx.contribute("pane.kind", { id: "probe.pane", titleKey: "side.column", icon: () => null, instances: "single", binding: "workspace", parseParams: () => null, init: () => null, useTitle: () => ({ title: "" }), Body: () => null });
+  // @ts-expect-error instances is single / multi (not the side slot's singleton).
+  ctx.contribute("pane.kind", { id: "probe.pane", titleKey: "side.column", icon: () => null, instances: "singleton", binding: "none", parseParams: () => null, init: () => null, useTitle: () => ({ title: "" }), Body: () => null });
+  // v1.17 (§24.5): open any pane kind; side.open stays (its alias for tool kinds).
+  const opened = ctx.services.panes.open("core.conversation", { sessionId: "s2", hostId: "local" }, { beside: true });
+  if (opened.status === "opened") void [opened.kind, opened.paneId, opened.instanceId];
+  ctx.services.panes.open("page:probe.page", { mode: "compact" }, { focus: true });
+  ctx.services.panes.open("probe.side", "a.ts", { background: true });
+  // @ts-expect-error No pane open option for the side's placement targets.
+  ctx.services.panes.open("probe.side", "a.ts", { target: "maximised" });
 }
 
 void compileContract;
@@ -212,5 +240,7 @@ it("pins the declared slot defaults and placement choices", () => {
     "timeline.intro": { unavailable: "hide" },
     // v1.14 (§22): actions in a reply's code-block toolbar.
     "timeline.codeBlockAction": { unavailable: "hide" },
+    // v1.17 (§24): pane kinds (side.component / main.page items derive theirs).
+    "pane.kind": { unavailable: "hide" },
   });
 });

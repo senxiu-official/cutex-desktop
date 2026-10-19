@@ -3,7 +3,7 @@
 // `SlashContext`) so it is unit-tested; the Composer wires the context to store actions.
 import { INIT_PROMPT } from "./initPrompt";
 import { lacks, type AgentFeatures, type AgentFeature } from "./agentFeatures";
-import { structuralBlock, type StructuralBlock } from "./structuralGate";
+import { structuralBlock, type StructuralBlock, type StructuralOp } from "./structuralGate";
 
 export type SlashId =
   | "goal"
@@ -49,8 +49,8 @@ export interface SlashCommandSpec {
   enabledBy?: string;
   /** Agent feature (Claude adapter features.json) the command needs; `false` there disables it. */
   agentFeature?: AgentFeature;
-  /** A fork / revert: not while a Claude agent is busy (lib/structuralGate). */
-  structural?: boolean;
+  /** A fork / revert: gated while a Claude agent is busy (lib/structuralGate). */
+  structural?: StructuralOp;
 }
 
 export type SlashUnavailable = NonNullable<SlashCommandSpec["unavailable"]> | "agentUnsupported" | StructuralBlock;
@@ -63,7 +63,7 @@ export function slashUnavailable(spec: SlashCommandSpec, features: ReadonlySet<s
   const gap = spec.enabledBy && features.has(spec.enabledBy) ? undefined : spec.unavailable;
   if (gap) return gap;
   if (agent && spec.agentFeature && lacks(agent, spec.agentFeature)) return "agentUnsupported";
-  return (agent && spec.structural && structuralBlock(agent, busy)) || undefined;
+  return (agent && spec.structural && structuralBlock(agent, busy, spec.structural)) || undefined;
 }
 
 /** Palette order (most used first, like the TUI / the reference screenshot). */
@@ -84,7 +84,7 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   { id: "export", pick: "run" },
   { id: "rename", pick: "insert" },
   { id: "new", pick: "run" },
-  { id: "fork", pick: "run", unavailable: "forkGap", enabledBy: "session-fork", agentFeature: "fork", structural: true },
+  { id: "fork", pick: "run", unavailable: "forkGap", enabledBy: "session-fork", agentFeature: "fork", structural: "fork" },
   { id: "side", aliases: ["btw"], pick: "insert", needsThread: true, unavailable: "sideGap", enabledBy: "side-chat", agentFeature: "sideChat" },
   { id: "archive", pick: "run" },
   { id: "memories", pick: "run", needsThread: true, agentFeature: "memoryMode" },
@@ -277,14 +277,15 @@ export type SlashNotice =
   | "slash.notice.reviewStarted"
   | "slash.notice.unavailable"
   | "slash.notice.agentUnsupported"
-  | "structural.claudeBusy";
+  | "structural.claudeBusy"
+  | "structural.claudeBusyRevert";
 
 export async function runSlash(id: SlashId, args: string, ctx: SlashContext): Promise<void> {
   const spec = slashSpec(id);
   if (!spec) return;
   const unavailable = slashUnavailable(spec, ctx.features, ctx.agent, ctx.busy);
   if (unavailable === "agentUnsupported") return ctx.notify("slash.notice.agentUnsupported", { name: id });
-  if (unavailable === "claudeBusy") return ctx.notify("structural.claudeBusy");
+  if (unavailable === "claudeBusy" || unavailable === "claudeBusyRevert") return ctx.notify(`structural.${unavailable}`);
   if (unavailable) return ctx.notify("slash.notice.unavailable", { name: id });
   if (spec.needsThread && !ctx.online) return ctx.notify("slash.notice.needsOnline", { name: id });
   switch (id) {

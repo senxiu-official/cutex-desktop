@@ -9,10 +9,12 @@ import agentConfig from "./agent-config";
 import archive from "./archive";
 import artifacts from "./artifacts";
 import notes from "./notes";
+import onboarding from "./onboarding";
 import bookmarks from "./bookmarks";
 import sideChat from "./side-chat";
 import backgroundTerminals from "./background-terminals";
 import claudeAccounts from "./claude-accounts";
+import profileImport from "./profile-import";
 import claudeScience from "./claude-science";
 import codexConfig from "./codex-config";
 import connection from "./connection";
@@ -111,10 +113,14 @@ export const MODULES: readonly AppModule[] = [
   updater,
   // Settings → 关于: license, links and the known issues list (sections on the shell's page).
   about,
+  // The one-time introduction and per-version 新功能 (its card on Settings → 关于).
+  onboarding,
   // Settings → 后端更新 (cutex backend-upgrade, owner only): each host's cutex upgrades.
   backendUpgrade,
   runtimePackages,
   runtimes,
   claudeAccounts,
+  // 从 CC Switch 导入 (cutex profile-import-cc-switch): a section of Settings → Profile after Claude 账户.
+  profileImport,
   plugins,
 ];

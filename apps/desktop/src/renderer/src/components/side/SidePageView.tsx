@@ -1,4 +1,4 @@
-// The cards of the page in view, top → bottom, with the 8 px gaps between them as height handles
+// The panes of one tool column (the former cards of a page, §24), top → bottom, with the 8 px gaps between them as height handles
 // (docs/desktop-modules.md §18.4): drag = resize the two cards, double-click = split evenly, arrows
 // when focused. Heights come from lib/sideLayout cardHeights (collapsed / folded cards = header only).
 // The gaps are also drop targets while a card / tab is dragged (data-side-gap = the card below).
@@ -79,7 +79,9 @@ export function SidePageView({ page, cards, registry, ctx, edge, currentWidth }:
   return (
     <div ref={box} className="flex min-h-0 flex-1 flex-col">
       {cards.map((card, k) => {
-        const entry = registry.get(card.kind);
+        // A full column's bottom pane may hold another kind's tab (§24): the shown tab's kind draws the header.
+        const shown = shownTab(layout, card, ctx);
+        const entry = registry.get((shown && layout.instances[shown]?.kind) || card.kind) ?? registry.get(card.kind);
         if (!entry) return null;
         const b = boxes[k];
         const resizable = k > 0 && !!pair(k) && !b?.folded && !boxes[k - 1]?.folded;
@@ -111,7 +113,7 @@ export function SidePageView({ page, cards, registry, ctx, edge, currentWidth }:
               card={card}
               entry={entry}
               tabs={visibleTabs(layout, card, ctx)}
-              shown={shownTab(layout, card, ctx)}
+              shown={shown}
               height={single || !height ? null : Math.max(0, Math.floor(b?.height ?? 0))}
               folded={!single && !!b?.folded}
               single={single}

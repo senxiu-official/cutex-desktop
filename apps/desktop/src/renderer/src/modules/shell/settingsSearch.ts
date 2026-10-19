@@ -10,7 +10,7 @@ export const GENERAL_SEARCH: Search = {
   sections: [
     { anchor: "language", titleKey: "shell.general.language", keywords: ["shell.language", "shell.dateFormat", "shell.numberFormat"] },
     { anchor: "terms", titleKey: "terms.title", keywords: ["terms.singular", "terms.plural"] },
-    { anchor: "window", titleKey: "shell.general.window", keywords: ["shell.closeWindow", "shell.closeWindow.tray"] },
+    { anchor: "window", titleKey: "shell.general.window", keywords: ["shell.closeWindow", "shell.closeWindow.tray", "remoteClose.allow"] },
   ],
 };
 
@@ -24,13 +24,22 @@ export const ME_SEARCH: Search = {
 };
 
 /**
- * 用户: 你在这台主机上 (every connection) and, on a member's connection, 你的设备 (MeOnHost); the owner's
- * management cards are the users module's settings.section items.
+ * 访问管理: on a member's connection 你在这台主机上 and 你的设备 (MeOnHost); the owner's parts (人, 设备,
+ * 别的主机, 接入方式) are the users / peers / remote-access modules' settings.section items.
  */
+export const ACCESS_SEARCH: Search = {
+  sections: [
+    { anchor: "hostInfo", titleKey: "host.info.title", keywords: ["host.info.owner", "host.info.version", "host.info.system"] },
+    { anchor: "hostRights", titleKey: "host.rights.title", keywords: ["host.own.role.rights", "host.own.role.member", "host.own.toMember", "host.rights.manageUsers"] },
+    { anchor: "hostConnection", titleKey: "shell.access.connection", keywords: ["host.connect", "host.disconnect", "host.reconnect", "host.test", "host.edit", "host.repair", "host.color", "host.autoConnect", "host.remove"] },
+  ],
+};
+
+/** 用户 (on the Settings host): the owner finds its cards in the users module; a member their own user and devices. */
 export const USERS_SEARCH: Search = {
   sections: [
     { anchor: "users-me", titleKey: "users.me.title", keywords: ["me.access.role.pending", "me.access.device.root"] },
-    // A member's own devices (MeOnHost OwnDevicesSection); the owner finds 设备 in the users module's cards.
+    // A member's own devices (MeOnHost OwnDevicesSection); the owner finds 已登录设备 in the users module's cards.
     { anchor: "users-own-devices", titleKey: "users.own.title", keywords: ["users.devices", "users.own.hint", "users.revoke"], access: "member" },
   ],
 };
@@ -72,7 +81,6 @@ export const SIDES_SEARCH: Search = {
 export const COMPOSER_SEARCH: Search = {
   sections: [
     { anchor: "send", titleKey: "shell.composer.send", keywords: ["settings.sendKeys", "conversation.delegationSteerKeys"] },
-    { anchor: "queueOrder", titleKey: "queue.orderSection", keywords: ["queue.ownerMayPassAsks"] },
     { anchor: "queuePanel", titleKey: "queue.panelFold", keywords: ["queue.panelFold.open", "queue.panelFold.auto", "queue.sectionStrip"] },
     { anchor: "aboveInput", titleKey: "shell.status.aboveInput", keywords: ["appearance.needsYouStrip", "shell.composer.barItems"] },
     { anchor: "inputBar", titleKey: "shell.composer.inputBar", keywords: ["shell.composer.quotaReset", "composer.profileAvatar"] },

@@ -22,7 +22,8 @@ export const OFFLINE_PAGE_CSP = [
   "form-action 'none'",
 ].join("; ");
 
-/** Same bound as the artifact store's content page limit (ARTIFACT_CONTENT_MAX). */
+/** Default bound: the artifact store's content page limit (ARTIFACT_CONTENT_MAX); a caller that read a page in
+ * several windows passes its own (larger) bound. */
 export const OFFLINE_PAGE_MAX_BYTES = 4 * 1024 * 1024;
 
 // CSP does not cover WebRTC; the Electron host disables UDP WebRTC and black-holes TCP / DNS for
@@ -34,9 +35,9 @@ const STRIP_RTC = `for(const n of Object.getOwnPropertyNames(window)){if(/^(?:we
  * A leading BOM / doctype of the page is dropped (the parser merges a later <html> / <head> into
  * ours); a page cannot loosen the policy, CSPs only add up.
  */
-export function buildOfflinePageDocument(page: string): { html: string; csp: string } {
+export function buildOfflinePageDocument(page: string, maxBytes = OFFLINE_PAGE_MAX_BYTES): { html: string; csp: string } {
   if (typeof page !== "string") throw new Error("Page must be text");
-  if (new TextEncoder().encode(page).length > OFFLINE_PAGE_MAX_BYTES) throw new Error("Page too large");
+  if (new TextEncoder().encode(page).length > maxBytes) throw new Error("Page too large");
   const body = page.replace(/^﻿?\s*(?:<!doctype[^>]*>)?/i, "");
   const head = `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${OFFLINE_PAGE_CSP}"><meta name="referrer" content="no-referrer"><script>${STRIP_RTC}</script>`;
   return { html: head + body, csp: OFFLINE_PAGE_CSP };

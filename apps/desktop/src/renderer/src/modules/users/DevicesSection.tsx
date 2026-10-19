@@ -8,16 +8,19 @@
 // counts), 配对设备 (Settings → 接入), and the 新设备先待分配 switch at the bottom.
 import { useState } from "react";
 import { Fingerprint } from "lucide-react";
-import { PERSON_IDENTITY_ACK_FEATURE, shownUserName, type UsersList, type UsersResult, type UserTokenRecord } from "../../../../shared/users";
+import { accessRefusalOf, DEVICE_SCOPE_FEATURE, PERSON_IDENTITY_ACK_FEATURE, shownUserName, type DeviceScope, type UsersList, type UsersResult, type UserTokenRecord } from "../../../../shared/users";
 import { groupFingerprint } from "../../../../shared/personIdentity";
 import { MaskedText } from "../../components/MaskedText";
-import { ArmedRemove, Button, Checkbox, EmptyState, ErrorNote, ListRow, Section, Select, SettingRow, TextInput, Toggle } from "../../components/settings/Form";
+import { ArmedRemove, Button, Checkbox, EmptyState, ErrorNote, ListRow, Section, Select, SettingRow, TextInput, TextLink, Toggle } from "../../components/settings/Form";
+import { accessRefusalText, DeviceScopeRow, scopeLabel, useOwnerLocalLock } from "../../components/settings/OwnerDevices";
+import { useOwnerNewDevices } from "../../lib/ownerDevices";
+import { useHostScope } from "../../lib/useHostScope";
 import { RenameTokenButton, ThisComputerBadge, TokenDetail, TokenIcon, TokenTitle } from "../../components/settings/TokenName";
 import { useI18n } from "../../i18n";
 import { useFingerprint } from "../../lib/personIdentity";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
-import { createUserAndAssign, deviceRows, isUnassigned, newUserDefaultName, personKeyOwners, rememberKeyFor, tokenPerson, USER_NAME_MAX, withPersonKey, type DeviceFilter } from "./model";
+import { createUserAndAssign, deviceRows, grantSummary, isUnassigned, newUserDefaultName, personKeyOwners, rememberKeyFor, tokenPerson, USER_NAME_MAX, withPersonKey, type DeviceFilter } from "./model";
 import { DEVICES_ANCHOR, nameIn, openPairing, PENDING, useOwnTokenId, useRename, useRevoke, userOptions, useT, type Write } from "./shared";
 import { changePersonKeys } from "./personKeyWrites";
 import { UserDot } from "./UserDot";
@@ -44,6 +47,18 @@ export function DevicesSection({ list, write, filter, onFilter }: { list: UsersL
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const rows = deviceRows(list.tokens, filter, own);
+  // device-scope: each device narrows its user's grant; set in the device's detail (owner 2026-10-19).
+  const withScope = useTargetFeatures().has(DEVICE_SCOPE_FEATURE);
+  const [detail, setDetail] = useState<string | null>(null);
+  const fresh = new Set(useOwnerNewDevices(hostId).devices.map((d) => d.tokenId));
+  const host = useHostScope().host(hostId)?.view.label ?? hostId;
+  const setScope = (tokenId: string, scope: DeviceScope) =>
+    void write(async () => {
+      const r = await api.updateClientToken(tokenId, { scope });
+      if (!r.ok) setError(accessRefusalText(t, accessRefusalOf(r), host) ?? t("users.error.other", { message: r.error.message || r.error.code }));
+      // A refusal is worded above (access rules); the list reloads either way.
+      return { ok: true as const, value: null };
+    }, setError);
   const users = userOptions(list.users);
   const owners = personKeyOwners(list.users);
   // Assign; with 「以后认出这个人」 (default on) an unknown presented key is added to that user too.
@@ -104,6 +119,8 @@ export function DevicesSection({ list, write, filter, onFilter }: { list: UsersL
                   <>
                     {unassigned && <span className="shrink-0 rounded bg-warn/15 px-1.5 text-[11px] text-warn">{t("users.devices.pendingChip")}</span>}
                     {mine && <ThisComputerBadge />}
+                    {withScope && token.scope && !unassigned && <span className="shrink-0 rounded border border-border px-1.5 text-[11px] text-muted" title={t("ownerDev.scope")}>{scopeLabel(t, token.scope, ownerOf(list, token.userId))}</span>}
+                    {fresh.has(token.tokenId) && <span className="shrink-0 rounded bg-warn/15 px-1.5 text-[11px] text-warn-text">{t("ownerDev.newChip")}</span>}
                   </>
                 }
               />
@@ -123,12 +140,16 @@ export function DevicesSection({ list, write, filter, onFilter }: { list: UsersL
                   )}
                 </>
               ) : (
-                <TokenPersonNote list={list} token={token} write={write} onError={setError} />
+                <>
+                  <TokenPersonNote list={list} token={token} write={write} onError={setError} />
+                  {detail === token.tokenId && <DeviceDetail list={list} token={token} own={mine} onScope={(scope) => setScope(token.tokenId, scope)} />}
+                </>
               )
             }
             actions={
               <>
                 {rename.can && rename.editing !== token.tokenId && <RenameTokenButton onClick={() => rename.setEditing(token.tokenId)} />}
+                {withScope && !unassigned && token.scope && <Button onClick={() => setDetail((open) => (open === token.tokenId ? null : token.tokenId))}>{detail === token.tokenId ? t("ownerDev.detailClose") : t("ownerDev.detail")}</Button>}
                 {unassigned ? (
                   <>
                     <Select<string> value="" width="w-36" options={[{ value: "", label: t("users.pending.assign"), disabled: true }, ...users]} label={t("users.pending.assign")} onChange={(userId) => void assign(token, userId)} />
@@ -148,19 +169,47 @@ export function DevicesSection({ list, write, filter, onFilter }: { list: UsersL
   );
 }
 
+/** The owner user owns this token (its first scope tier reads 完全控制, not 按用户授权). */
+function ownerOf(list: UsersList, userId: string | null): boolean {
+  return !!userId && !!list.users.find((u) => u.id === userId)?.isOwner;
+}
+
+/** A device's detail: its projects follow its user's grant (read-only here), its scope narrows that. */
+function DeviceDetail({ list, token, own, onScope }: { list: UsersList; token: UserTokenRecord; own: boolean; onScope(scope: DeviceScope): void }) {
+  const { t } = useI18n();
+  const tt = useT();
+  const user = list.users.find((u) => u.id === token.userId);
+  if (!user || !token.scope) return null;
+  const owner = !!user.isOwner;
+  return (
+    <div className="mt-2 ml-7 rounded-lg border border-border/70 px-3" data-testid="device-detail">
+      <SettingRow label={t("ownerDev.projects")} hint={t("ownerDev.projectsHint", { name: shownUserName(user) })}>
+        <span className="flex items-center gap-2 text-xs text-muted">
+          {owner ? t("users.ownerBadge") : grantSummary(user.grant, tt)}
+          <TextLink onClick={() => document.getElementById(settingsAnchorId("users-list"))?.scrollIntoView({ block: "start", behavior: "smooth" })}>{t("ownerDev.openUser", { name: shownUserName(user) })}</TextLink>
+        </span>
+      </SettingRow>
+      <DeviceScopeRow scope={token.scope} ownerDevice={owner} canSend={owner || !!user.grant?.send} own={own} onChange={onScope} />
+    </div>
+  );
+}
+
 /** 新设备先待分配 (`ownerRequiresApproval`), the list's footer row. */
 function ApprovalSetting({ list, write }: { list: UsersList; write: Write }) {
   const { t } = useI18n();
   const api = useTargetApi();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Turning it off is a root-identity action (this machine or SSH only); turning it on is not.
+  const lock = useOwnerLocalLock(useTargetHostId());
+  const locked = lock.locked && list.settings.ownerRequiresApproval;
   return (
     <div className="-mx-4 border-t border-border px-4">
       {error && <ErrorNote>{error}</ErrorNote>}
-      <SettingRow label={t("users.ownerRequiresApproval")} hint={t("users.ownerRequiresApprovalHint")}>
+      <SettingRow label={t("users.ownerRequiresApproval")} hint={locked ? lock.hint! : t("users.ownerRequiresApprovalHint")}>
         <Toggle
           checked={list.settings.ownerRequiresApproval}
-          disabled={busy}
+          disabled={busy || locked}
           label={t("users.ownerRequiresApproval")}
           onChange={(next) => {
             setBusy(true);

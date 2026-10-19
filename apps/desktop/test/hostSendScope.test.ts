@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import type { HostsState, ExtraInput } from "../src/shared/ipc";
 import type { SessionView } from "../src/renderer/src/store";
 import { emptyTimeline } from "../src/renderer/src/lib/timeline";
+import { viewKey } from "../src/renderer/src/lib/viewKey";
 const mock = vi.hoisted(() => ({
   listeners: new Map<string, (value: unknown) => void>(),
   api: {
@@ -121,11 +122,11 @@ function seed() {
   store.setState({
     selectedId: "same",
     sessions: {
-      same: view
+      [viewKey("local", "same")]: view
     },
     features: new Set(["queue-pause"]),
     pendingSteers: {
-      same: [{
+      [viewKey("local", "same")]: [{
         id: "steer-a",
         text: "accepted steer",
         turnId: "turn-a",
@@ -141,7 +142,7 @@ function sentinel() {
     pendingSteers: {},
     outbox: {},
     queueHandoff: {
-      same: true
+      [viewKey("local", "same")]: true
     }
   });
   return store.getState();
@@ -212,18 +213,18 @@ describe("host-scoped send continuations", () => {
     const two = store.getState().submit("second", "auto");
     await Promise.resolve();
     expect(mock.api.submit).toHaveBeenCalledTimes(1);
-    const entries = store.getState().outbox.same!;
+    const entries = store.getState().outbox[viewKey("local", "same")]!;
     expect(entries.find((entry) => entry.text === "first")?.waitingForPrevious).toBe(false);
     expect(entries.find((entry) => entry.text === "second")?.waitingForPrevious).toBe(true);
     first.resolve(null);
     await one;
     for (let i = 0; i < 6; i++) await Promise.resolve();
     expect(mock.api.submit).toHaveBeenCalledTimes(2);
-    expect(store.getState().outbox.same!.find((entry) => entry.text === "second")?.waitingForPrevious).toBe(false);
+    expect(store.getState().outbox[viewKey("local", "same")]!.find((entry) => entry.text === "second")?.waitingForPrevious).toBe(false);
     second.resolve(null);
     await two;
     const three = store.getState().submit("third", "auto");
-    expect(store.getState().outbox.same!.find((entry) => entry.text === "third")?.waitingForPrevious).not.toBe(true);
+    expect(store.getState().outbox[viewKey("local", "same")]!.find((entry) => entry.text === "third")?.waitingForPrevious).not.toBe(true);
     await three;
     expect(mock.api.submit.mock.calls.map((call) => call[1])).toEqual(["first", "second", "third"]);
   });
@@ -247,7 +248,7 @@ describe("host-scoped send continuations", () => {
       // Back on the same host (A → B → A): the failed, already-dispatched send is shown again as a
       // failed row under its original id (retry is deduped), never re-sent nor made a new draft.
       const sentId = (mock.api.submit.mock.calls[0]![4] as { clientUserMessageId: string }).clientUserMessageId;
-      expect(store.getState().outbox.same).toMatchObject([{ id: sentId, text: "already dispatched", state: "failed", error: "acceptance unknown" }]);
+      expect(store.getState().outbox[viewKey("local", "same")]).toMatchObject([{ id: sentId, text: "already dispatched", state: "failed", error: "acceptance unknown" }]);
       expect(store.getState().pendingSteers).toBe(previous.pendingSteers);
       expect(store.getState().queueHandoff).toBe(previous.queueHandoff);
     }
@@ -270,7 +271,7 @@ describe("host-scoped send continuations", () => {
     expect(drafts.composerDrafts.read(drafts.composerDraftKey("local", "same")).text).toBe("");
     expect(drafts.composerDrafts.read(drafts.composerDraftKey("remote", "same")).text).toBe("");
     switchHost("local");
-    expect(store.getState().outbox.same).toMatchObject([{ id: sentId, text: "in flight", state: "failed" }]);
+    expect(store.getState().outbox[viewKey("local", "same")]).toMatchObject([{ id: sentId, text: "in flight", state: "failed" }]);
     // Restored once; from then on it is ordinary outbox state (a host switch resets it, O2).
     switchHost("remote");
     switchHost("local");
@@ -303,7 +304,7 @@ describe("host-scoped send continuations", () => {
   it("does not turn a queued retry with unknown acceptance into a new-ID draft", async () => {
     mock.api.submit.mockRejectedValueOnce(Error("acceptance unknown"));
     await store.getState().submit("uncertain retry", "auto").catch(() => {});
-    const failed = store.getState().outbox.same![0]!;
+    const failed = store.getState().outbox[viewKey("local", "same")]![0]!;
     const blocker = deferred<null>();
     mock.api.submit.mockReturnValue(blocker.promise);
     const blocking = store.getState().submit("blocker", "auto").catch(() => {});

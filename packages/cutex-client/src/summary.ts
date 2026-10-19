@@ -45,6 +45,14 @@ export interface PairingCode {
   urls: string[];
   /** `cutex-pair:v1?h=…&u=…&c=…` — the QR payload. */
   qr: string;
+  /** cutex `owner-device-notice`: lifetime in seconds (owner codes 300, member codes 600; absent: older host). */
+  ttlSeconds?: number;
+  /** cutex `users`: the user the device will be bound to. */
+  userId?: string | null;
+  /** cutex `device-scope`: the paired device's scope (absent: older host = full). */
+  scope?: import("./users").DeviceScope;
+  /** cutex `owner-device-notice`: the code pairs a device with the owner's full rights. */
+  ownerDevice?: boolean;
 }
 
 /** One `GET /v2/client-tokens` record (never the token itself). */
@@ -60,6 +68,10 @@ export interface ClientTokenRecord {
   createdAt: string;
   lastUsedAt?: string | null;
   lastAddress?: string | null;
+  /** cutex `device-scope` (absent: older host). */
+  scope?: import("./users").DeviceScope;
+  /** cutex `owner-local-only` (absent: older host). */
+  issuedVia?: import("./users").TokenIssuedVia;
 }
 
 /** cutex `client-token-rename`: `PATCH /v2/client-tokens/{id}` `{name}` (owner). */

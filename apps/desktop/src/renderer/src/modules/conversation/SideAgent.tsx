@@ -2,7 +2,7 @@
 // live conversation in a right-side card — header (avatar, name, status line, 在主区打开), its timeline
 // (row actions stay in the main area; the agent's messages to the owner keep their cards with 回复), its
 // approvals / questions, the 「接下来」 queue and a slim composer.
-// The store keeps it live while this body is mounted (retainSideAgent). The agent open in the main area
+// The store keeps it live while this body is mounted (retainView). The agent open in the main area
 // shows a placeholder here (已在主区打开 · 换回) instead of rendering twice.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftRight, ArrowUp, Square } from "lucide-react";
@@ -21,7 +21,8 @@ import { SIDE_AGENT_COMPONENT, type SideAgentParams } from "../../lib/sideKinds"
 import { stopHeld } from "../../lib/stopHold";
 import { orderedEntries } from "../../lib/timeline";
 import { markSeenOn } from "../../lib/turnUnread";
-import { agentHost, useApp, type SessionView } from "../../store";
+import { agentHost, agentState, useApp, viewOf, type SessionView } from "../../store";
+import { viewKey } from "../../lib/viewKey";
 import { canSend } from "../../../../shared/users";
 import { Avatar } from "../../components/Avatar";
 import { InteractionDock } from "../../components/InteractionDock";
@@ -46,12 +47,12 @@ export function SideAgentBody({ instance, hostId, visible, open, close }: SideBo
   // Live while mounted and its host is connected; again after a host switch / reconnect dropped it (the
   // store forgets that host's views).
   const ready = useApp((s) => (host === focus ? s.daemon : s.byHost[host]?.daemon)?.kind === "connected");
-  useEffect(() => (ready ? useApp.getState().retainSideAgent(sessionId, host) : undefined), [ready, sessionId, host, conn, focus]);
-  const live = useApp((s) => s.sideAgents[sessionId]?.hostId === host);
+  useEffect(() => (ready ? useApp.getState().retainView(host, sessionId) : undefined), [ready, sessionId, host, conn, focus]);
+  const live = useApp((s) => !!s.views[viewKey(host, sessionId)]);
   const shown = visible && !inMain;
   useEffect(() => {
-    if (live) useApp.getState().setSideAgentVisible(sessionId, shown);
-  }, [live, sessionId, shown]);
+    if (live) useApp.getState().setViewVisible(host, sessionId, shown);
+  }, [live, host, sessionId, shown]);
   // Looking at it takes back its alerts and its done / failed mark, like opening it in the main area.
   useEffect(() => {
     if (!shown) return;
@@ -106,7 +107,7 @@ export function SideAgentBody({ instance, hostId, visible, open, close }: SideBo
         <Avatar name={name} avatar={resource?.avatar} seed={sessionId} size={24} />
         <div className="min-w-0 flex-1 leading-tight">
           <div className="truncate text-sm font-semibold">{name}</div>
-          <StatusLine sessionId={sessionId} resource={resource} />
+          <StatusLine sessionId={sessionId} hostId={host} resource={resource} />
         </div>
         <button
           onClick={toMain}
@@ -123,9 +124,9 @@ export function SideAgentBody({ instance, hostId, visible, open, close }: SideBo
 }
 
 /** 运行中 · 1m / 空闲 / 离线 / 已归档 under the name. */
-function StatusLine({ sessionId, resource }: { sessionId: string; resource: SessionResource | undefined }) {
+function StatusLine({ sessionId, hostId, resource }: { sessionId: string; hostId: string; resource: SessionResource | undefined }) {
   const { t } = useI18n();
-  const view = useApp((s) => s.sessions[sessionId]);
+  const view = useApp((s) => viewOf(s, hostId, sessionId));
   const active = view?.timeline.activeTurnId ?? null;
   const startedAt = active ? (view?.timeline.turns.find((x) => x.id === active)?.startedAt ?? null) : null;
   const elapsed = useSince(startedAt === null ? null : startedAt * 1000);
@@ -144,11 +145,11 @@ function StatusLine({ sessionId, resource }: { sessionId: string; resource: Sess
 
 function SideAgentConversation({ sessionId, hostId, name, resource }: { sessionId: string; hostId: string; name: string; resource: SessionResource | undefined }) {
   const { t } = useI18n();
-  const view = useApp((s) => s.sessions[sessionId]);
+  const view = useApp((s) => viewOf(s, hostId, sessionId));
   const names = useNames(hostId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const entries = useMemo(() => (view ? orderedEntries(view.timeline) : []), [view?.version, view?.timeline]);
-  const pendingSends = useApp((s) => pendingFollowKey(s.outbox[sessionId]));
+  const pendingSends = useApp((s) => pendingFollowKey(agentState(s.outbox, hostId, sessionId)));
   // Stick to the bottom while the owner is there (scrolling up lets go).
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -184,7 +185,7 @@ function SideAgentConversation({ sessionId, hostId, name, resource }: { sessionI
           {view?.error && (
             <p role="alert" className="text-xs text-danger">
               {view.error}{" "}
-              <button onClick={() => void useApp.getState().reloadSession(sessionId)} className="text-muted underline hover:text-foreground">
+              <button onClick={() => void useApp.getState().reloadSession(sessionId, hostId)} className="text-muted underline hover:text-foreground">
                 {t("conversation.reload")}
               </button>
             </p>
@@ -206,7 +207,7 @@ function SideAgentConversation({ sessionId, hostId, name, resource }: { sessionI
           )}
         </div>
       </div>
-      {pending && <InteractionDock pending={pending} takeFocus={false} onReply={(request, reply) => void useApp.getState().respond(request.id, reply, sessionId)} />}
+      {pending && <InteractionDock pending={pending} takeFocus={false} onReply={(request, reply) => void useApp.getState().respond(request.id, reply, sessionId, hostId)} />}
       {archived ? (
         <p className="shrink-0 px-3 pb-2 text-xs text-subtle">{t("conversation.agent.archived")}</p>
       ) : !canSend(access) ? null : (
@@ -222,10 +223,10 @@ function SideAgentConversation({ sessionId, hostId, name, resource }: { sessionI
 function SideComposer({ sessionId, hostId, name, view, resource }: { sessionId: string; hostId: string; name: string; view: SessionView; resource: SessionResource | undefined }) {
   const { t } = useI18n();
   const { text, setText } = useComposerDraft(hostId, sessionId);
-  const outbox = useApp((s) => s.outbox[sessionId]);
-  const queueHidden = useApp((s) => s.queueHidden[sessionId]);
-  const pendingSteers = useApp((s) => s.pendingSteers[sessionId]);
-  const handoff = useApp((s) => !!s.queueHandoff[sessionId]);
+  const outbox = useApp((s) => agentState(s.outbox, hostId, sessionId));
+  const queueHidden = useApp((s) => agentState(s.queueHidden, hostId, sessionId));
+  const pendingSteers = useApp((s) => agentState(s.pendingSteers, hostId, sessionId));
+  const handoff = useApp((s) => !!agentState(s.queueHandoff, hostId, sessionId));
   const [error, setError] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const busy = !!view.timeline.activeTurnId;
@@ -243,11 +244,11 @@ function SideComposer({ sessionId, hostId, name, view, resource }: { sessionId: 
     // Only the text: images / skills picked in the main composer stay in the draft there.
     setText("");
     setError(null);
-    void app().submit(value, sendBusy && noSteer ? "queue" : "auto", [], { sessionId }).catch(report);
+    void app().submit(value, sendBusy && noSteer ? "queue" : "auto", [], { sessionId, hostId }).catch(report);
   };
   const stop = () => {
     setStopping(true);
-    void app().interrupt(sessionId).catch(report).finally(() => setStopping(false));
+    void app().interrupt(sessionId, hostId).catch(report).finally(() => setStopping(false));
   };
   return (
     <div className="shrink-0 px-2 pb-2">
@@ -257,22 +258,22 @@ function SideComposer({ sessionId, hostId, name, view, resource }: { sessionId: 
         sendingSteers={outboxAt(outbox, "steer")}
         sendingQueue={outboxAt(outbox, "queue")}
         outbox={{
-          onRetry: (id) => app().retrySend(sessionId, id),
-          onEdit: (id) => app().editSend(sessionId, id),
-          onDiscard: (id) => app().discardSend(sessionId, id),
+          onRetry: (id) => app().retrySend(sessionId, id, hostId),
+          onEdit: (id) => app().editSend(sessionId, id, hostId),
+          onDiscard: (id) => app().discardSend(sessionId, id, hostId),
         }}
-        onInterruptSendSteers={() => void app().interruptAndSendSteers(sessionId).catch(report)}
-        onDismissSteer={(id) => app().dismissSteer(id, sessionId)}
+        onInterruptSendSteers={() => void app().interruptAndSendSteers(sessionId, hostId).catch(report)}
+        onDismissSteer={(id) => app().dismissSteer(id, sessionId, hostId)}
         paused={paused}
-        onResumePaused={() => void app().resumePaused(sessionId).catch(report)}
-        onRestorePaused={() => void app().restorePaused(sessionId).catch(report)}
-        onClearPaused={() => void app().discardPaused(sessionId).catch(report)}
+        onResumePaused={() => void app().resumePaused(sessionId, hostId).catch(report)}
+        onRestorePaused={() => void app().restorePaused(sessionId, hostId).catch(report)}
+        onClearPaused={() => void app().discardPaused(sessionId, hostId).catch(report)}
         items={shownQueue}
         canEdit={!text.trim()}
-        onSendNow={noSteer && sendBusy ? undefined : (item) => void app().queueSendNow(item, sessionId).catch(report)}
+        onSendNow={noSteer && sendBusy ? undefined : (item) => void app().queueSendNow(item, sessionId, hostId).catch(report)}
         sendNowStartsTurn={!sendBusy}
-        onDelete={(item) => void app().queueRemove(item, sessionId).catch(report)}
-        onEdit={(item) => void app().queueTakeForEdit(item, sessionId).then((value) => setText(value), report)}
+        onDelete={(item) => void app().queueRemove(item, sessionId, hostId).catch(report)}
+        onEdit={(item) => void app().queueTakeForEdit(item, sessionId, hostId).then((value) => setText(value), report)}
         stopHold={stopHeld(view.asksPaused)}
         running={busy}
       />

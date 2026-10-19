@@ -199,15 +199,15 @@ a `native` block (`native.version`, `native.commit`) only when that release brin
 a release without one keeps the native of the newest earlier release that has it. cutex 0.1.1 and
 0.1.2 had none (they kept `0.160.0-r52.2` from cutex 0.1.0); cutex 0.1.3 brings `0.160.0-r52.3` (see the
 `native` block of https://github.com/senxiu-official/cutex/releases/download/v0.1.3/manifest.json). cutex
-0.1.4 has none: hosts that update keep `0.160.0-r52.3`, and a fresh install of 0.1.4 uses that same
-native, which B.1 downloads from the `cute-codex-v0.160.0-r52.3` release (its commit is the one in the
-0.1.3 manifest's `native` block; the 0.1.4 manifest names none). The `cute-codex-build.json`
+0.1.4 and 0.1.5 have none: hosts that update keep `0.160.0-r52.3`, and a fresh install of 0.1.5 uses that
+same native, which B.1 downloads from the `cute-codex-v0.160.0-r52.3` release (its commit is the one in the
+0.1.3 manifest's `native` block; the 0.1.4 and 0.1.5 manifests name none). The `cute-codex-build.json`
 inside the native archive (`version`, `commit`) says which one you unpacked.
 
 | | Linux / Windows | macOS (desktop only) |
 |---|---|---|
-| `VERSION` (cutex) | `0.1.4` | not used |
-| `DESKTOP_VERSION` (desktop) | `0.1.4` | `0.1.4` |
+| `VERSION` (cutex) | `0.1.5` | not used |
+| `DESKTOP_VERSION` (desktop) | `0.1.5` | `0.1.5` |
 | `NATIVE` (cute-codex) | `0.160.0-r52.3` | not used |
 
 ### B.1 Download and verify
@@ -243,7 +243,7 @@ Linux:
 ```sh
 mkdir -p ~/cutex-download
 cat > ~/cutex-download/cutex-install.env <<'ENV'
-VERSION=0.1.4 DESKTOP_VERSION=0.1.4 NATIVE=0.160.0-r52.3 PLATFORM=linux-x64
+VERSION=0.1.5 DESKTOP_VERSION=0.1.5 NATIVE=0.160.0-r52.3 PLATFORM=linux-x64
 PUB=RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
 # cutex's own default install base: $CUTEX_INSTALL_BASE, else $XDG_DATA_HOME/cutex, else ~/.local/share/cutex
 CUTEX_BASE=${CUTEX_INSTALL_BASE:-${XDG_DATA_HOME:-$HOME/.local/share}/cutex}
@@ -265,7 +265,7 @@ execution policy):
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\cutex-download" | Out-Null
 @'
-$Version = '0.1.4'; $DesktopVersion = '0.1.4'; $Native = '0.160.0-r52.3'; $Platform = 'windows-x64'
+$Version = '0.1.5'; $DesktopVersion = '0.1.5'; $Native = '0.160.0-r52.3'; $Platform = 'windows-x64'
 $Pub = 'RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS'
 $Dl = "$env:USERPROFILE\cutex-download"
 # cutex's own default install base: $env:CUTEX_INSTALL_BASE, else %LOCALAPPDATA%\cutex
@@ -289,7 +289,7 @@ macOS (the desktop only):
 ```sh
 mkdir -p ~/cutex-download
 cat > ~/cutex-download/cutex-install.env <<'ENV'
-DESKTOP_VERSION=0.1.4
+DESKTOP_VERSION=0.1.5
 PUB=RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
 # hw.optional.arm64 is 1 on Apple silicon, also in a Rosetta terminal (where uname -m says x86_64)
 ARCH=$( [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] && echo arm64 || echo x64 )
@@ -363,7 +363,7 @@ Linux:
 cd ~/cutex-download
 mkdir -p cutex-$VERSION && tar -xzf cutex-$VERSION-$PLATFORM.tar.gz -C cutex-$VERSION
 cp manifest.json manifest.json.minisig cutex-$VERSION/
-cutex-$VERSION/cutex --version            # cutex 0.1.4 (0.1.4, <commit>)
+cutex-$VERSION/cutex --version            # cutex 0.1.5 (0.1.5, <commit>)
 cutex-$VERSION/cutex service install --channel release --no-start
 ls "$RELEASE_DIR"                          # cutex  cutex-mcp  manifest.json  manifest.json.minisig
 mkdir -p ~/.local/bin && ln -sfn "$CUTEX_BASE/current/cutex" ~/.local/bin/cutex
@@ -399,8 +399,8 @@ Check:
 - `cutex service status` (Linux): `units` shows `ActiveState: inactive` for both services. If
   either is already `active`, another cutex on this account owns these unit names: stop and ask the
   person (rule 4).
-- `cutex upgrade status` prints `installed  0.1.4`; `cutex upgrade status --json` shows
-  `"managed": true` and `installed.sequence` 6. (Its `serviceManager` field may say `none` while
+- `cutex upgrade status` prints `installed  0.1.5`; `cutex upgrade status --json` shows
+  `"managed": true` and `installed.sequence` 7. (Its `serviceManager` field may say `none` while
   `cutex service status` says `systemd`; that is fine.)
 - The last line prints `"home": "fresh"` (section 5.2 explains the record).
 
@@ -455,7 +455,7 @@ py "$Dl\write-manifest.py"
 cutex human install-runtime "$env:RELEASE_DIR\manifests\default.json"
 ```
 
-Check: `native commit ok`; the script prints `<install base>/releases/0.1.4/manifests/default.json`;
+Check: `native commit ok`; the script prints `<install base>/releases/0.1.5/manifests/default.json`;
 `install-runtime` prints `native_home` = `~/.cutex/codex-home` and `bundle_manifest` = that same
 file. It verifies every pinned file, so an error here names the file that is wrong.
 
@@ -815,7 +815,7 @@ cargo +1.95.0 build --locked --release --bin cutex --bin cutex-mcp
 .\target\release\cutex.exe --version
 ```
 
-Check: `cutex --version` prints `cutex 0.1.4 (<7-char commit>)` (warnings during the build are
+Check: `cutex --version` prints `cutex 0.1.5 (<7-char commit>)` (warnings during the build are
 expected; only `error:` matters). `CUTEX_COMMIT` names the install
 (`dev-<commit>`) and `CUTEX_CHANNEL=release` records the channel; neither changes behaviour.
 

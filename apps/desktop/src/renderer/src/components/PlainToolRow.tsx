@@ -8,7 +8,8 @@ import { toolMenu } from "../lib/menus";
 import type { RawItem } from "../lib/timeline";
 import { approvalOutcome, isFailed, isRunning, toolDetail, toolLiveness, toolOutput } from "../lib/workGroups";
 import { parseFileLink, rootFor, scopeFor } from "../lib/workspace";
-import { selectedSidebar, useApp } from "../store";
+import { agentState, useApp, viewOf } from "../store";
+import { convSignal, useConvHost, useConvScope, useConvSession, useConvSidebar } from "../lib/conversationScope";
 import { toolErrorText } from "../lib/taskRows";
 import { ToolErrorText } from "./ToolErrorText";
 import { openFile } from "../lib/sideOpen";
@@ -26,16 +27,17 @@ function toolLabel(item: RawItem): { key: MessageKey; detail: string } {
 
 const NO_ITEMS: string[] = [];
 
-/** toolLiveness for a row of the selected agent's timeline (subagent rows: "running" as before). */
+/** toolLiveness for a row of the conversation's timeline (lib/conversationScope; subagent rows: "running" as before). */
 function useToolLiveness(item: RawItem) {
-  const selectedId = useApp((s) => s.selectedId);
+  const selectedId = useConvSession();
+  const hostId = useConvHost();
   const turnRunning = useApp((s) => {
-    const tl = selectedId ? s.sessions[selectedId]?.timeline : undefined;
+    const tl = selectedId ? viewOf(s, hostId, selectedId)?.timeline : undefined;
     const entry = tl?.entries.get(item.id);
     const turn = entry?.turnId ? tl!.turns.find((x) => x.id === entry.turnId) : undefined;
     return !turn || turn.status === "inProgress";
   });
-  const background = useApp((s) => (selectedId ? s.backgroundItems[selectedId] : undefined) ?? NO_ITEMS);
+  const background = useApp((s) => (selectedId ? agentState(s.backgroundItems, hostId, selectedId) : undefined) ?? NO_ITEMS);
   return toolLiveness(item, turnRunning, background);
 }
 
@@ -61,9 +63,10 @@ function ToolIcon({ item, liveness, blocked, approval }: { item: RawItem; livene
 
 export function PlainToolRow({ item, safetyBlock = null }: { item: RawItem; safetyBlock?: ToolSafetyBlock | null }) {
   const { t } = useI18n();
+  const conv = useConvScope();
   const [open, setOpen] = useState(false);
-  const sidebar = useApp(selectedSidebar);
-  const selectedId = useApp((s) => s.selectedId);
+  const sidebar = useConvSidebar();
+  const selectedId = useConvSession();
   const { key, detail } = toolLabel(item);
   const output = toolOutput(item);
   const scope = scopeFor(sidebar, selectedId);
@@ -95,7 +98,7 @@ export function PlainToolRow({ item, safetyBlock = null }: { item: RawItem; safe
         {approval === "denied" && <span data-tool-approval="denied" className="shrink-0 text-muted">· {t("tool.declined")}</span>}
         {blocked && <span data-tool-blocked className="shrink-0 text-muted">· {t("tool.safetyBlocked")}</span>}
         {liveness === "background" && (
-          <button onClick={() => useApp.getState().signal("ps")} title={t("tool.backgroundHint")} className="shrink-0 rounded bg-accent/10 px-1 text-[11px] text-accent hover:underline">
+          <button onClick={() => convSignal(conv, "ps")} title={t("tool.backgroundHint")} className="shrink-0 rounded bg-accent/10 px-1 text-[11px] text-accent hover:underline">
             {t("tool.background")}
           </button>
         )}

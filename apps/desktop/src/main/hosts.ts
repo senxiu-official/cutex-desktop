@@ -17,9 +17,11 @@ import { discoverLocalDaemon } from "@cutex-desktop/cutex-client/node";
 import {
   DEFAULT_CUTEX_PATH,
   DEFAULT_REMOTE_PORT,
+  HOST_OWNER_FEATURE,
   LOCAL_HOST_ID,
   REMOTE_FEATURES,
   defaultHostLabel,
+  decideConnectAs,
   deviceLabel,
   focusHostOf,
   hostPlatformOf,
@@ -28,12 +30,14 @@ import {
   isHostColor,
   isValidCutexPath,
   isValidPort,
+  isSshConnectAs,
   nextHostColor,
   normalizeHostGroups,
   parseHostsFile,
   parseSshConfigHosts,
   parseSshTarget,
   issueTokenFindingCutex,
+  readHostOwner,
   scopeAfterRemoval,
   tokenRevokeCommand,
   type AddSshHostRequest,
@@ -48,6 +52,9 @@ import {
   type HostTestResult,
   type HostView,
   type IssuedToken,
+  type OwnerProbe,
+  type SshConnectAs,
+  type SshConnectAsRequest,
   type SshErrorView,
   type SshHostConfig,
   type SshHostPatch,
@@ -68,6 +75,23 @@ import { checkTransferRequest, transferProfile } from "./profileTransfer";
 import type { ProfileTransferRequest, ProfileTransferResult } from "../shared/profileTransfer";
 
 type PublishHosts = (event: "hostsState", payload: HostsState) => void;
+
+/** Where an SSH host's cutex is (a stored host, or one being added). */
+type SshWhere = Pick<SshHostConfig, "target" | "remotePort" | "cutexPath">;
+
+/** A token issued for a connect-as mode (`autoReason`: what "auto" decided on). */
+type Issued = { ok: true; token: IssuedToken; cutexPath: string; connectAs: SshConnectAs; autoReason?: ReturnType<typeof decideConnectAs>["reason"] };
+
+/** The HostResult fields of a successful pairing. */
+function issuedResult(issued: Issued): Omit<Extract<HostResult, { ok: true }>, "ok" | "hostId"> {
+  return {
+    cutexPath: issued.cutexPath,
+    connectAs: issued.connectAs,
+    ...(issued.token.pending ? { pending: true } : {}),
+    ...(issued.token.userId !== undefined ? { userId: issued.token.userId } : {}),
+    ...(issued.autoReason ? { autoReason: issued.autoReason } : {}),
+  };
+}
 
 /** DEV ONLY: a direct loopback host (main/devHosts.ts) with its in-memory desktop settings. */
 type DevHost = DevHostConfig & { autoConnect: boolean; color: string; platform: HostPlatform | null };
@@ -328,9 +352,11 @@ export class HostManager implements HostApi {
     const cutexPath = typeof request.cutexPath === "string" && request.cutexPath.trim() ? request.cutexPath.trim() : DEFAULT_CUTEX_PATH;
     if (!isValidCutexPath(cutexPath)) return { ok: false, error: { code: "badInput", detail: "cutexPath" } };
     const label = (typeof request.label === "string" && request.label.trim() ? request.label.trim() : defaultHostLabel(request.target)).slice(0, 64);
+    const mode = request.connectAs ?? "auto";
+    if (mode !== "auto" && !isSshConnectAs(mode)) return { ok: false, error: { code: "badInput", detail: "connectAs" } };
     if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: { code: "noKeyring", detail: "" } };
     const prompts = this.promptSession(request.target.trim());
-    const issued = await this.issueToken(target, cutexPath, prompts);
+    const issued = await this.issueAs({ target: request.target.trim(), remotePort, cutexPath }, target, mode, prompts);
     if (!issued.ok) {
       prompts.close();
       return issued;
@@ -340,7 +366,7 @@ export class HostManager implements HostApi {
     const color = nextHostColor(this.file.hosts.map((h) => h.color));
     this.file = {
       ...this.file,
-      hosts: [...this.file.hosts, { id, label, target: request.target.trim(), remotePort, cutexPath: issued.cutexPath, tokenId: issued.token.tokenId, createdAt: new Date().toISOString(), lastConnectedAt: null, autoConnect: true, color, platform: null }],
+      hosts: [...this.file.hosts, { id, label, target: request.target.trim(), remotePort, cutexPath: issued.cutexPath, tokenId: issued.token.tokenId, createdAt: new Date().toISOString(), lastConnectedAt: null, autoConnect: true, color, platform: null, connectAs: issued.connectAs }],
     };
     this.save();
     // No local host: the first host added becomes the scope (it was the never-connected placeholder).
@@ -349,23 +375,34 @@ export class HostManager implements HostApi {
     // ★ RFC Q2: a newly paired SSH host auto-connects (with the answers given while pairing).
     this.open(id, prompts);
     this.publish();
-    return { ok: true, hostId: id, cutexPath: issued.cutexPath, ...(issued.token.pending ? { pending: true } : {}) };
+    return { ok: true, hostId: id, ...issuedResult(issued) };
   }
 
+  /** Re-pair: a fresh token of the kind the host already uses (`connectAs`, default owner). */
   async pairSshHost(hostId: string): Promise<HostResult> {
+    return this.reissue(hostId, this.find(hostId)?.connectAs ?? "owner");
+  }
+
+  /** 改为以成员 / 主人身份连接: a token of that kind replaces the current one (revoked, best effort). */
+  async setSshConnectAs(hostId: string, mode: SshConnectAs): Promise<HostResult> {
+    if (!isSshConnectAs(mode)) return { ok: false, error: { code: "badInput", detail: "connectAs" } };
+    return this.reissue(hostId, mode);
+  }
+
+  private async reissue(hostId: string, mode: SshConnectAs): Promise<HostResult> {
     const host = this.find(hostId);
     const target = host ? parseSshTarget(host.target) : null;
     if (!host || !target) return { ok: false, error: { code: "badInput", detail: "host" } };
     if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: { code: "noKeyring", detail: "" } };
     const prompts = this.promptSession(host.target);
-    const issued = await this.issueToken(target, host.cutexPath, prompts);
+    const issued = await this.issueAs(host, target, mode, prompts);
     if (!issued.ok) {
       prompts.close();
       return issued;
     }
     const old = host.tokenId;
     this.tokens.set(host.id, issued.token.token);
-    this.patchHost(host.id, { tokenId: issued.token.tokenId, cutexPath: issued.cutexPath });
+    this.patchHost(host.id, { tokenId: issued.token.tokenId, cutexPath: issued.cutexPath, connectAs: issued.connectAs });
     // The old token may still be valid (re-pair without a revoke): retire it, best effort.
     if (old && old !== issued.token.tokenId) {
       // Best effort and in the background: answers from the pairing only, no new questions.
@@ -374,7 +411,7 @@ export class HostManager implements HostApi {
     } else prompts.close();
     if (this.conns.has(host.id) || this.wanted(host.id)) this.reopen(host.id);
     this.publish();
-    return { ok: true, hostId: host.id, cutexPath: issued.cutexPath, ...(issued.token.pending ? { pending: true } : {}) };
+    return { ok: true, hostId: host.id, ...issuedResult(issued) };
   }
 
   async updateSshHost(hostId: string, patch: SshHostPatch): Promise<HostResult> {
@@ -620,7 +657,7 @@ export class HostManager implements HostApi {
     const l = this.file.local;
     const local: HostView = { id: LOCAL_HOST_ID, kind: "local", label: hostname(), target: null, remotePort: null, cutexPath: null, paired: true, lastConnectedAt: null, autoConnect: l.autoConnect, color: l.color, platform: l.platform, conn: view(LOCAL_HOST_ID) };
     const ssh = this.file.hosts.map(
-      (h): HostView => ({ id: h.id, kind: "ssh", label: h.label, target: h.target, remotePort: h.remotePort, cutexPath: h.cutexPath, paired: this.tokens.has(h.id), lastConnectedAt: h.lastConnectedAt, tokenId: h.tokenId, autoConnect: h.autoConnect, color: h.color, platform: h.platform, conn: view(h.id) }),
+      (h): HostView => ({ id: h.id, kind: "ssh", label: h.label, target: h.target, remotePort: h.remotePort, cutexPath: h.cutexPath, paired: this.tokens.has(h.id), lastConnectedAt: h.lastConnectedAt, tokenId: h.tokenId, autoConnect: h.autoConnect, color: h.color, platform: h.platform, connectAs: h.connectAs ?? "owner", conn: view(h.id) }),
     );
     const dev = this.devHosts().map(
       (h): HostView => ({ id: h.id, kind: "dev-direct", label: h.name, target: h.baseUrl, remotePort: null, cutexPath: null, paired: true, lastConnectedAt: null, autoConnect: h.autoConnect, color: h.color, platform: h.platform, conn: view(h.id) }),
@@ -692,7 +729,7 @@ export class HostManager implements HostApi {
     }
   }
 
-  private endpoint(port: number, token: string, host: SshHostConfig): DaemonEndpoint {
+  private endpoint(port: number, token: string, host: Pick<SshHostConfig, "target">): DaemonEndpoint {
     return { baseUrl: `http://127.0.0.1:${port}`, token, configPath: `ssh:${host.target}` };
   }
 
@@ -799,9 +836,65 @@ export class HostManager implements HostApi {
 
   /** Issues a client token; when cutex is not found at `cutexPath` it is looked for (login shell,
    *  well-known dirs) and the absolute path found is returned for the host config. */
-  private issueToken(target: SshTarget, cutexPath: string, prompts: AskpassSession): Promise<{ ok: true; token: IssuedToken; cutexPath: string } | { ok: false; error: SshErrorView }> {
+  private issueToken(target: SshTarget, cutexPath: string, prompts: AskpassSession, connectAs: SshConnectAs = "owner"): Promise<{ ok: true; token: IssuedToken; cutexPath: string } | { ok: false; error: SshErrorView }> {
     // Pairing waits for the user while a prompt is open (runSsh pauses its timeout).
-    return issueTokenFindingCutex((command) => runSsh(target, command, 30_000, { askpass: prompts }), cutexPath, deviceLabel(hostname(), app.getPath("userData")), errorView);
+    return issueTokenFindingCutex((command) => runSsh(target, command, 30_000, { askpass: prompts }), cutexPath, deviceLabel(hostname(), app.getPath("userData")), errorView, connectAs);
+  }
+
+  /**
+   * A token of the requested kind (host ownership §2.1). "owner" / "member": one `client-token issue`
+   * (member = `--pending`). "auto": a member token first; over a short tunnel with it, `/v2/host.owner`
+   * and `/v2/capabilities` decide (`decideConnectAs`): a confirmed owner person who is someone else
+   * keeps the member token; anything else (owner is me, unconfirmed, older cutex, any probe failure)
+   * issues an owner token — today's behaviour — and revokes the member one.
+   */
+  private async issueAs(where: SshWhere, target: SshTarget, mode: SshConnectAsRequest, prompts: AskpassSession): Promise<Issued | { ok: false; error: SshErrorView }> {
+    if (mode !== "auto") {
+      const r = await this.issueToken(target, where.cutexPath, prompts, mode);
+      return r.ok ? { ...r, connectAs: mode } : r;
+    }
+    const member = await this.issueToken(target, where.cutexPath, prompts, "member");
+    if (!member.ok) {
+      // A cutex that does not take `--pending` (or answers oddly): today's owner token. ssh problems
+      // (auth, host key, not found …) would fail the same way again: report them.
+      if (member.error.code !== "cutexTooOld" && member.error.code !== "exited" && member.error.code !== "badOutput") return member;
+      logError({ source: "host-ownership", method: "addSshHost", message: `auto: member token refused (${member.error.code}); issuing an owner token`, target: where.target });
+      const owner = await this.issueToken(target, where.cutexPath, prompts, "owner");
+      return owner.ok ? { ...owner, connectAs: "owner", autoReason: "probeFailed" } : owner;
+    }
+    const at = { ...where, cutexPath: member.cutexPath };
+    let tunnel: { port: number; close(): void } | null = null;
+    try {
+      let probe: OwnerProbe;
+      try {
+        tunnel = await openTemporaryTunnel(target, at.remotePort, this.pids, 15_000, { askpass: prompts });
+        probe = await this.ownerProbe(tunnel.port, member.token.token, at);
+      } catch (error) {
+        probe = { ok: false, reason: error instanceof Error ? error.message : String(error) };
+      }
+      const decision = decideConnectAs(probe);
+      if (!probe.ok) logError({ source: "host-ownership", method: "addSshHost", message: `auto: owner probe failed (${probe.reason.slice(0, 300)}); connecting as owner`, target: where.target });
+      else console.info("[cutex-desktop] host ownership: auto connect-as", where.target, decision.connectAs, decision.reason);
+      if (decision.connectAs === "member") return { ...member, connectAs: "member", autoReason: decision.reason };
+      const owner = await this.issueToken(target, at.cutexPath, prompts, "owner");
+      // The member token is not kept either way (as removing a host: API, then the CLI).
+      const revoked = await this.revokeWith(at, member.token.tokenId, owner.ok ? owner.token.token : member.token.token, target, prompts, tunnel?.port);
+      if (!revoked) logError({ source: "host-ownership", method: "addSshHost", message: "auto: revoking the member token failed", target: where.target, tokenId: member.token.tokenId });
+      return owner.ok ? { ...owner, connectAs: "owner", autoReason: decision.reason } : owner;
+    } finally {
+      tunnel?.close();
+    }
+  }
+
+  /** What the "auto" pairing reads over the new member token: `/v2/host.owner`, the capability, this desktop's fingerprint. */
+  private async ownerProbe(port: number, token: string, where: SshWhere): Promise<OwnerProbe> {
+    const client = new CutexClient(this.endpoint(port, token, where));
+    const host = await client.request<unknown>("GET", "/v2/host");
+    const caps = await client.request<CapabilitiesView>("GET", "/v2/capabilities").catch(() => null);
+    const owner = readHostOwner(host);
+    // Capabilities unreadable for this token: the field itself (absent on an older cutex) tells.
+    const capability = Array.isArray(caps?.featureList) ? caps.featureList.includes(HOST_OWNER_FEATURE) : owner !== null;
+    return { ok: true, capability, owner, myFingerprint: this.local.identity?.view().fingerprint ?? null };
   }
 
   /** `DELETE /v2/client-tokens/{id}` through a short tunnel; falls back to the CLI over ssh. */
@@ -816,12 +909,17 @@ export class HostManager implements HostApi {
     }
   }
 
-  private async revokeWith(host: SshHostConfig, tokenId: string, token: string | null, target: SshTarget, prompts: AskpassSession): Promise<boolean> {
+  /** `port`: a tunnel that is already open (the "auto" pairing's); otherwise a short one is opened. */
+  private async revokeWith(host: SshWhere, tokenId: string, token: string | null, target: SshTarget, prompts: AskpassSession, port?: number): Promise<boolean> {
     if (token) {
       try {
+        if (port !== undefined) {
+          await this.deleteToken(port, token, host, tokenId);
+          return true;
+        }
         const tunnel = await openTemporaryTunnel(target, host.remotePort, this.pids, 15_000, { askpass: prompts });
         try {
-          await new CutexClient(this.endpoint(tunnel.port, token, host)).request("DELETE", `/v2/client-tokens/${encodeURIComponent(tokenId)}`);
+          await this.deleteToken(tunnel.port, token, host, tokenId);
           return true;
         } finally {
           tunnel.close();
@@ -836,6 +934,11 @@ export class HostManager implements HostApi {
     } catch {
       return false;
     }
+  }
+
+  /** `DELETE /v2/client-tokens/{id}` with `token` through a tunnel at `port`. */
+  private async deleteToken(port: number, token: string, host: SshWhere, tokenId: string): Promise<void> {
+    await new CutexClient(this.endpoint(port, token, host)).request("DELETE", `/v2/client-tokens/${encodeURIComponent(tokenId)}`);
   }
 
   private async probe(client: CutexClient, remote: boolean): Promise<HostTestResult> {

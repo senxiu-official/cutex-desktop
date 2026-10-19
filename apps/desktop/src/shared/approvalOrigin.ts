@@ -3,7 +3,7 @@
 // renderer's origin (where and how the button was activated); anything malformed sends nothing.
 import type { ApprovalDecisionOrigin } from "./ipc";
 
-const SURFACES: readonly string[] = ["inline", "page"] satisfies ApprovalDecisionOrigin["surface"][];
+const SURFACES: readonly string[] = ["inline", "page", "delegation"] satisfies ApprovalDecisionOrigin["surface"][];
 const INPUTS: readonly string[] = ["pointer", "touch", "keyboard", "unknown"] satisfies ApprovalDecisionOrigin["input"][];
 
 /** `client` of a decision made on this desktop; undefined = send none (no / bad origin). */

@@ -1,5 +1,6 @@
 // Queue panel section 待处理委托 (slot 1 of QueuePanel `sections`): delegations to this agent that
-// have not started yet (owner review, queued, admitted). Row: ↙ Lead · #3 title · 排队第 1 位. The tag
+// have not started yet (owner review, queued, admitted). Row: ↙ Lead · #3 title · 排队第 1 位; one
+// waiting for the owner's review has 批准 / 拒绝 before its status (components/DelegationReview). The tag
 // opens its detail on the right side; right click = the delegation menu (跳到委托卡片). With cutex admission-order the
 // rows of delegations in the admission list are rendered in the merged queue list (QueuePanel
 // `ordered`, DelegationRow); this section keeps only the pending ones that list does not have.
@@ -13,17 +14,20 @@ import { delegationStatus, isOwnerRequest, peerSideOf, requesterName, requesterS
 import { hasDelegationViews } from "../lib/delegationStore";
 import { useAgentHost, useAgentNames } from "../lib/delegationsView";
 import { openDelegationDetail } from "../lib/delegationOpen";
-import { selectedFeatures, useApp } from "../store";
+import { useApp } from "../store";
+import { convFeaturesOf, convViewOf, useConvScope, useConvView, useConvViewHost } from "../lib/conversationScope";
 import { ASKS_PAUSE_FEATURE, asksPauseAction } from "../lib/asksPause";
 import { asksPausedKeys, STOP_HOLD_FEATURE } from "../lib/stopHold";
 import { DelegationStatusMark, DelegationTag } from "./DelegationParts";
+import { DelegationReviewActions } from "./DelegationReview";
 import { Who } from "./Parties";
 import { PeerParty } from "./PeerParty";
 
 export function DelegationRow({ d, sessionId, dense = false, children }: { d: AskSummary; sessionId: string; /** 24px row (turn cards). */ dense?: boolean; /** Extra parts before the status mark (e.g. the included-tells chip). */ children?: React.ReactNode }) {
   const { t } = useI18n();
   const nameOf = useAgentNames();
-  const views = useApp((s) => hasDelegationViews(selectedFeatures(s)));
+  const conv = useConvScope();
+  const views = useApp((s) => hasDelegationViews(convFeaturesOf(conv, s)));
   // The open agent's queue: `d` is its host's record.
   const host = useAgentHost();
   const requester = requesterSession(d.requester);
@@ -40,6 +44,8 @@ export function DelegationRow({ d, sessionId, dense = false, children }: { d: As
         {d.title}
       </span>
       {children}
+      {/* Waiting for this owner's review (local or an incoming cross-host one): 批准 / 拒绝 right here. */}
+      <DelegationReviewActions d={d} host={host} variant="row" />
       <DelegationStatusMark status={delegationStatus(d)} name={d.targetName ?? nameOf(d.target)} className="shrink-0" />
     </div>
   );
@@ -48,11 +54,13 @@ export function DelegationRow({ d, sessionId, dense = false, children }: { d: As
 /** 暂停委托 (asks-pause-v2): offered while nothing is paused; the paused section has 继续. */
 export function PauseAsksButton({ sessionId }: { sessionId: string }) {
   const { t } = useI18n();
-  const canPause = useApp((s) => selectedFeatures(s).has(ASKS_PAUSE_FEATURE) && !s.sessions[sessionId]?.asksPaused);
-  const stopHolds = useApp((s) => selectedFeatures(s).has(STOP_HOLD_FEATURE));
+  const conv = useConvScope();
+  const hostId = useConvViewHost(sessionId);
+  const canPause = useApp((s) => convFeaturesOf(conv, s).has(ASKS_PAUSE_FEATURE) && !convViewOf(conv, s, sessionId)?.asksPaused);
+  const stopHolds = useApp((s) => convFeaturesOf(conv, s).has(STOP_HOLD_FEATURE));
   if (!canPause) return null;
   return (
-    <button onClick={() => void asksPauseAction(() => useApp.getState().pauseAsks(sessionId))} title={t(stopHolds ? "asksPause.pauseHintStop" : "asksPause.pauseHint")} className="rounded-md px-1.5 py-0.5 text-xs text-muted hover:text-warn" data-testid="asks-pause">
+    <button onClick={() => void asksPauseAction(() => useApp.getState().pauseAsks(sessionId, hostId))} title={t(stopHolds ? "asksPause.pauseHintStop" : "asksPause.pauseHint")} className="rounded-md px-1.5 py-0.5 text-xs text-muted hover:text-warn" data-testid="asks-pause">
       {t("asksPause.pause")}
     </button>
   );
@@ -98,10 +106,11 @@ export function DelegationQueueSection({ rows, sessionId, pauseButton = true, ra
  */
 export function AsksPausedSection({ sessionId, railed = false }: { sessionId: string; /** Turn cards: ❚❚ in the queue rail column, like the paused divider. */ railed?: boolean }) {
   const { t } = useI18n();
-  const pause = useApp((s) => s.sessions[sessionId]?.asksPaused ?? null);
+  const pause = useConvView(sessionId, (v) => v?.asksPaused ?? null);
+  const hostId = useConvViewHost(sessionId);
   if (!pause) return null;
   const keys = asksPausedKeys(pause);
-  const resume = keys.resume === "queue" ? () => useApp.getState().resumePaused(sessionId) : () => useApp.getState().resumeAsks(sessionId);
+  const resume = keys.resume === "queue" ? () => useApp.getState().resumePaused(sessionId, hostId) : () => useApp.getState().resumeAsks(sessionId, hostId);
   // On the queue's grid: the glyph in the rail column (22px, turn cards) or the heading glyph cell
   // (16px, as QueuePanel's paused heading), the title where every other section's text starts.
   const body = (

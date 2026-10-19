@@ -1,5 +1,211 @@
 # Changelog
 
+## 0.1.5 "First Take" (2026-10-20)
+
+Two conversations side by side and the right side's pages turned into tool columns, delegations that
+wait for your review approved right in the conversation, the owner's devices (three permission levels, a
+notice when a new device connects as the owner, sensitive actions only on the host itself or over SSH),
+host owners and connecting to someone else's host as a member, notes from agents on other hosts in Unread
+messages (they can wake agents when the receiving host allows it), closing a desktop remotely, recently
+finished subagents, Side chat and fork while busy for Claude agents, importing Profiles from CC Switch, a
+short introduction on first use, and HTML pages over 4 MB that show after asking. Pairs with cutex 0.1.5
+(several items need it; older hosts keep working without them).
+两个对话可以并排打开，右侧栏的页改为并排的工具列；等你审核的委托在对话里直接批准或拒绝；主人的设备：每台设备可设为完全控制、对话和查看或只查看，有新设备以主人身份连上会提醒你，配对码等重要操作只能在主机本机或通过 SSH 进行；每台主机写明主人是谁，可以以成员身份连接别人的主机；其他主机的智能体发来的留言显示在「待读留言」里，接收方主机允许时还能唤醒智能体（默认关闭）；可以远程关闭另一台桌面；子智能体新增「最近完成」；Claude 智能体支持侧边对话和忙时分叉；可从 CC Switch 导入 Profile；首次使用有简短引导，每次更新后显示更新摘要；超过 4 MB 的成果页面可以直接显示。配合 cutex 0.1.5 使用（部分功能需要它，旧主机仍可使用）。
+
+**Panes**
+
+- Two conversations side by side: Ctrl/⌘-click or middle-click an agent in the sidebar, or use the
+  "Open beside" button on its row, and it opens in a second conversation pane next to the one in front.
+  Each pane sends, stops and shows notices for its own agent; the divider between the two can be dragged
+  (double-click splits them evenly). "Open in side panel" in an agent menu and the side area's ＋ ▸ Agents
+  (the host's online agents by project, the others in a submenu) open a pane beside too, also for an agent
+  on another host. The layout is kept on this device.
+  两个对话可以并排：在侧栏里 Ctrl/⌘ 单击、中键单击智能体，或点它那一行的「在旁边打开」，它就在当前对话旁边另开一栏；每栏的发送、停止和提示只对自己的智能体；中间的分隔条可以拖动，双击平分。智能体菜单的「在侧边打开」和侧边「＋ ▸ 智能体」也在旁边开一栏，另一台主机的智能体也可以；布局保存在本机。
+- The right side's pages are now tool columns: instead of switching between pages, up to two columns stand
+  side by side, each with up to three panes (what were its cards: file tree, changes, terminal, browser
+  and so on). What a pane shows still follows the conversation in focus. An existing side layout is
+  converted once.
+  右侧栏的「页」改为工具列：不再在几页之间切换，最多两列并排显示，每列最多三个窗格（原来的卡片，如文件树、改动、终端、浏览器）；窗格内容仍跟着当前对话。原来的右侧布局会自动转换一次。
+
+**Conversation**
+
+- A delegation that waits for your review can be approved or denied where it shows: the recipient's queue
+  row, the sender's delegation card and the side detail have Approve / Deny, the same decision as on the
+  Approvals page (needs a cutex with owner approvals and a device with full control). A delegation to
+  another host that waits for that host's owner says "Waiting for the owner of <host> to review" and no
+  longer counts under "Needs you".
+  等你审核的委托可以在对话里直接批准或拒绝：接收方的队列行、发起方的委托卡片和侧边详情里都有「批准 / 拒绝」，和审批页是同一个决定（需要完全控制的设备）；发往另一台主机、等对方主人审核的委托显示「等 <主机> 的主人审核」，不再算作「需要你」。
+- Subagents: the agent's subagent status has a "Recently finished" group with its last 20 finished
+  subagents (name, type, how long it ran, completed / failed / stopped); clicking one opens its thread.
+  Claude subagents that ran in the background kept no transcript, so they show neither a duration nor an
+  open.
+  子智能体状态新增「最近完成」：列出最近 20 个已完成的子智能体（名称、类型、用时、完成 / 失败 / 已停止），点一下打开它的过程记录；在后台运行的 Claude 子智能体没有过程记录。
+
+**Claude agents**
+
+- Claude agents on the claude-r21 runtime get Side chat, like Codex agents, and can be forked while they
+  are working; reverting still waits until the turn has ended. With an older Claude runtime Side chat stays
+  unavailable and says why.
+  Claude 智能体（claude-r21 运行时）支持侧边对话，忙的时候也能分叉；回退仍要等这一轮结束。旧的 Claude 运行时上侧边对话不可用，并说明原因。
+
+**Hosts, users and devices**
+
+- Owner devices (on a cutex that reports them): a device that connects as the owner has full control, so
+  Settings → Users announces it on top (× when it is yours, Revoke when it is not) and the Users entry and
+  the sidebar Settings entry get a dot. Each signed-in device shows its permission and, under Settings…, its
+  projects (they follow its user's grant) and a permission that can only narrow that grant: Full control or
+  As the user's grant, Chat and view, View only. A pairing code asks for the permission too; an owner code
+  with full control says what it gives (single use, 5 minutes). Pairing codes, turning off approval for new
+  devices and enabling or pairing linked hosts work on the host itself or over SSH; elsewhere they are locked
+  and say so. Linked hosts can allow notes to wake agents here (off by default, with an hourly cap).
+  主人的设备：以主人身份连接的新设备在「用户」页顶部提醒（× = 是我的设备，或吊销），导航有红点；每台已登录设备显示权限，在「设置…」里查看项目（跟随用户授权）并收窄设备权限；配对码可选权限，给主人的完全控制配对码有警示；配对码、关闭新设备审批、启用或配对互联主机只能在本机或通过 SSH 操作；互联主机可允许留言唤醒（默认关）。
+- Taking a device's access away is now called Revoke (it invalidates the device's token at once); Remove
+  stays for taking a host off this desktop's list.
+  收回一台设备的连接权限改叫「吊销」（立即作废它的令牌）；「移除」只用于把主机从本机的主机列表里删掉。
+- Settings → Hosts: the list is split into "My devices" (hosts whose owner is you) and "Devices I can
+  access" (someone else's, including hosts where SSH gives you owner rights). Each host says how this
+  desktop is connected (this machine, SSH: user@host, paired device) and what you are there (owner, owner
+  rights, member, waiting to be assigned). Over SSH into someone else's account it says so plainly; an SSH
+  host can be switched to connect as a member or as owner; adding one asks how to connect (Auto, Member,
+  Owner) and says what was chosen. When this machine has no confirmed owner, "It's me" confirms you. On an
+  older cutex that cannot report its owner, "This is my device" puts a host under My devices.
+  设置 → 主机：分成「我的设备」和「我能访问的设备」；每台主机写明连接方式和你在那里的身份，可切换以成员 / 主人身份连接，添加时可选连接身份；本机主人未确认时可点「是我」，旧版 cutex 可手动标「这是我的设备」。
+- Host ownership: the desktop reads who a host's owner is (the
+  owner's name and key fingerprint, on a cutex that reports it) and can tell whether that is you. An SSH
+  host can be connected as a member instead of with owner rights: the token is then issued as pending, so
+  it never becomes the owner's. When adding an SSH host, the desktop picks by itself: member when the host's
+  confirmed owner is someone else, owner otherwise (also on older cutex, or when the check fails). Hosts
+  added before keep connecting as owner; re-pairing keeps the chosen way.
+  主机归属：桌面端能读到主机的主人是谁、是不是你；SSH 主机可以「以成员身份连接」（领待分配的 token，不会直接归主人）。添加 SSH 主机时自动选择：主机已确认的主人不是你 → 成员，否则 → 主人（旧版 cutex 或检查失败时也是主人）。以前添加的主机照旧以主人身份连接，重新配对沿用原来的身份。
+- Settings → Connection is reorganised around one host at a time: You · Hosts · Host · Users · Network
+  proxy. Hosts is this desktop's list (my hosts and hosts I can access, add an SSH host, groups, view,
+  diagnostics). Host shows the selected host's details (its owner, cutex version and system), your
+  permissions there and where they come from (full control on this machine or over an SSH login, or
+  granted access with a device token), this desktop's connection to it, and host links (other cutex hosts
+  that can delegate to it, plus listen addresses and allowed web origins). Users shows the host's users,
+  their signed-in devices, devices waiting to be assigned and the pairing code. Owner and permissions are
+  told apart: signing in to someone else's account over SSH gives full control, not ownership. The old
+  Users / Remote access / Peers links open the new pages.
+  设置 → 连接 改为按单台主机组织：你 · 主机列表 · 主机 · 用户 · 网络代理。主机页写明主机信息（主人、版本、系统）、你的权限及来源、本地桌面应用连接和主机互联；用户页管理用户、已登录设备、待分配设备和配对码；主人和权限分开说明。
+- Settings → Host → a linked host: the list of agents the other host exports stays usable with hundreds of
+  them: busy ones first, in a scrolling box, and past ten a search box (name, ID, runtime) and a status
+  filter with counts. Rows no longer repeat @host on every line.
+  主机互联详情里「对方导出的智能体」：几百个时也能用——忙的在前、列表内滚动，超过 10 个时可按名称 / ID / 运行时搜索、按状态筛选（带数量）；每行不再重复 @主机名。
+- Close a desktop remotely (on a cutex with `client-remote-close`): each desktop reports itself to the hosts
+  it is connected to, and Settings → Users lists the online desktops (version, system, whose, last heartbeat,
+  state). Close asks that desktop to quit after a 15-second countdown that whoever sits at it can cancel;
+  only the desktop app quits, cutex, agents and services keep running. Settings → General → Allow closing
+  this desktop remotely (on by default) turns it off for this desktop.
+  远程关闭桌面：桌面在所连主机上报到，「用户」页列出在线的桌面；「关闭」让对方倒计时 15 秒后退出（可取消），只退出桌面应用，cutex、智能体和服务不受影响；「通用」里可关闭「允许远程关闭这个桌面」。
+
+**Getting started**
+
+- Getting started: a short introduction opens once on first use. It sets the language and the look (theme,
+  palettes, size), explains that an agent is one session,
+  as in Claude Code or Codex, with a few things Cutex adds around it, what a project and its director are,
+  offers to add the first Profile when the host has none, and lets you pick how the app names agents
+  (in the Chinese UI three wordings, including English "agent"; everywhere a Maid easter egg). After each update
+  the new version's summary shows once. Settings → About turns that off and replays either.
+  首次使用时弹出简短引导：智能体就是一个会话（和 Claude Code、Codex 里的会话一样，Cutex 在外面加了一些小东西）、项目和主管、没有 Profile 时引导添加、选择称呼（智能体 / 代理 / agent，另有 Maid 彩蛋）；每次更新后显示一次新版本摘要，可在「关于」里关闭或重新查看。
+
+**Profiles**
+
+- Profiles: "Import from CC Switch" lists the Claude Code and Codex providers set up in CC Switch on the
+  host, grouped by app, with the current one and any provider already imported marked. Pick the ones you
+  want and import them in one go; cutex copies their API keys into new profiles and only reads CC Switch.
+  Providers without a key or with an OAuth login cannot be picked, and the reason is shown. Needs a cutex
+  with profile-import-cc-switch.
+  设置 → Profile 新增「从 CC Switch 导入」：按 Claude Code / Codex 列出主机上 CC Switch 配置的供应商，勾选后一次导入为 Profile；API key 由 cutex 复制，CC Switch 只读不改。
+
+**Artifacts**
+
+- Artifacts: an HTML page over 4 MB (often one with embedded audio or video) is no longer shown only as
+  source. The view says how large it is and offers "Show page"; the page is then read from the host in
+  4 MB windows and shown as usual, up to 256 MB (larger ones still show the source). The source stays
+  visible below the prompt until you choose.
+  超过 4 MB 的成果页面（常见于内嵌音频或视频）不再只显示源代码：会提示页面大小，点「显示页面」即分段读取并显示（上限 256 MB）。
+
+**Settings**
+
+- Settings → Conversation: rows regrouped by what they affect. Messages lists the message kinds first
+  (reasoning, agent messages, images, turn summary), then the toggles; "Show notes in the timeline"
+  joins it instead of a card of its own. "Fold long messages" is one three-way choice (Off, My messages
+  only, Older replies too) and the threshold greys out when folding is off. Side chat is two cards,
+  Side chat (which main history it sees) and Save as note (the turn the note belongs to, the prompt,
+  now folded behind "Edit prompt…"), each saying when agents feel it; the side-chat model field is
+  gone. Wording is tidied throughout ("title bar", "turn").
+  「对话」设置页重新分组：「消息显示」先列消息类型再列开关并收入批注开关，「折叠长消息」合为三档，侧边对话拆为「侧边对话」和「记为批注」两张卡片，去掉侧边对话模型。
+- Settings → Notifications → Event levels: one card grouped by what an event means for you (Waiting
+  for you, Your work, Owner notifications, Other activity, Problems), each group opened by a dark band
+  with one line on what it holds; every event has a plain title and a one-line description, and a
+  four-level switch whose choice is highlighted, instead of a dropdown under module headings. The
+  preset sits in the card's title row.
+  「事件分级」按事件对你的意义分组（待你处理、你发起的任务、主人通知、其他活动、异常），每个事件有名称和一句说明，用四段选择代替下拉框。
+- Settings: Queue order ("Queued messages may pass delegations", the host's rule) moves from Input area
+  to Collaboration, next to Message delivery; Input area's "Up next" card keeps a link to it, so Input
+  area holds this device's settings only.
+  「排队顺序」从「输入区」挪到「协作」，放在「消息投递」旁边；「接下来」面板里留一行链接，「输入区」整页只剩本地设置。
+- Settings: switching pages or the host keeps the current page on screen until the new one has
+  loaded (at most 0.8 s), then shows it at once instead of card by card. A "Mixed settings" page with
+  host cards also names (and lets you switch) the host those cards show, next to its tag.
+  切换设置页或主机时，旧页面停留到新页面加载好（最多 0.8 秒）再一次换上；混合设置页旁边显示并可切换主机部分所用的主机。
+- Settings: one rule for scope tags. A page is in one place (its tag says where; no card repeats it),
+  or it is "Mixed settings" as soon as one card lives elsewhere, and then every card says where it
+  lives (the "Mixed: <place>" tag goes). A page tag says "Doesn't affect agents" or nothing; cards say
+  how they affect agents. Mixed pages have no part headings (Browser too). Every host tag can switch
+  the host for all of Settings, and the card you switched from stays where it was on screen.
+  设置页标签只有一条规则：单一位置就标那里；有一张卡片在别处就是「混合设置」，每张卡片都标位置；所有主机标签都能切换主机，切换后那张卡片留在原位。
+- Settings: one set of scope tags. Where: Local desktop app, cutex backend · HOST, Codex runtime ·
+  HOST (was "Codex settings"); a page with one card stored elsewhere says "Mixed: <place>", a page
+  whose cards are each tagged says "Mixed settings". Agents: a page says "Doesn't affect agents" only
+  when none of it does; a card that does says "Agents · from next start" (new and restarted agents),
+  "Agents · takes effect now" or "Access". The MCP tool tag says whose settings the card holds plus
+  the tool's own line. All locales get the tags (the partial ones had English).
+  设置页标签统一：位置（本地桌面应用 / cutex 后端 / Codex 运行时、混合三档）、智能体（页头只标「不影响智能体」，卡片标何时生效）、访问权限、MCP工具。
+- Settings: a card's tags (where it is stored, whether agents feel it) sit on their own line under
+  its description, like the page header; the title line keeps only the title and the "changed only"
+  switch. New tag "MCP tool" on cards about a tool agents call (Owner notifications: owner_notify);
+  clicking it names the tool.
+  卡片的标签移到说明下面单独一行；新增「MCP工具」标签，点开显示工具名（主人通知：owner_notify）。
+- Settings: option lists no longer mark one choice "(default)" (owner notifications' audience,
+  cross-project access, hidden browser targets, side component homes); a changed row shows its
+  modified mark and Restore default instead, like every other row. Owner notifications says it is the
+  agents' MCP tool owner_notify and is tagged as affecting newly started agents (who gets the tool).
+  选项里不再写「（默认）」，改过的行照常显示改过标记和恢复默认；「主人通知」注明是智能体调用的 MCP 工具 owner_notify，并标「新启动的智能体」。
+- Settings: settings that stay on this device are tagged "Local desktop app" (was "This device"),
+  next to "cutex backend · HOST" for the host's. A page with both kinds, such as Notifications, has
+  no "This device + host" tag in its header any more; its cards carry their own tags. Notifications:
+  the page hint says what it sets, and the event table is called Event levels.
+  只存在本机的设置改标「本地桌面应用」；混合页面顶部不再显示「本设备 + 主机」；「通知」页的事件表改名「事件分级」。
+- Settings → Notifications: like the other pages, no part headings; each card carries its own tag
+  (Local on Alert switches, "cutex backend · HOST" with the host picker on the host's cards). Alert
+  switches (permission, its switches and the tests) come first, then
+  the host's rules: Notification methods (how each level reaches you), owner notifications, and
+  Notification levels (which level each event gets) last, all rows shown; each says what it adjusts. Agent messages read as what
+  the agent said ("Agent says “Inform”") instead of looking like a level. The empty Outbound column,
+  the second "changed only" switch, the Changed tags and the Delivery row that only pointed up are
+  gone; an unavailable alert window says so instead of showing a greyed switch. Per-project
+  notifications and per-agent mute / force are hidden until they get their own pages, and the default
+  bell level for new agents (off / on / important) is gone from the page; what is stored still applies.
+  「通知」页去掉「这台设备」「主机的通知规则」两个大标题，每张卡片自己标位置；先放「提醒开关」，再放主机规则：通知方式、主人通知，最后是通知等级；按项目通知、单个智能体和「新智能体的提醒」暂时不在页面上。
+
+**Modules**
+
+- Module contract 1.17: `pane.kind` and `services.panes.open` (docs/desktop-modules.md §24); the side agent
+  card of 1.16 is a conversation pane now. 模块契约 1.17：新增窗格种类插槽和打开窗格的服务（`pane.kind`、`services.panes.open`）；1.16 的侧边智能体卡片现在是对话窗格。
+
+**Fixes**
+
+- An agent's messages to you and stopped commands now work when the agent lives on another host than the
+  one the window shows (for example a laptop's desktop showing a server's agent): the card with Got it /
+  Reply or "Grant once" / "Don't grant" is drawn, View and the "Needs you" row jump to it, and the decision
+  goes to the agent's host. Before, the card was missing ("this message is not in the loaded history") and
+  its buttons would have asked the wrong host.
+  在一台电脑上看另一台主机的智能体时，它的消息卡片和被拦下命令的「批准一次 / 不批准」现在会正常显示，决定也会发到智能体所在的主机；之前卡片不显示（提示「不在已加载的历史里」）。
+- Unread messages: on a cutex with admission order, notes another agent left (they do not start a turn)
+  show in the recipient's Unread messages again. A note from an agent on another host shows as
+  name@host with an "another host" tag; paths and ids in it refer to that host.
+  「待读留言」：在支持排队顺序的 cutex 上，其他智能体留下的留言（不会开始新的一轮）重新显示在接收方的「待读留言」里；另一台主机的智能体发来的留言显示为「名称@主机」并标「另一台主机」，留言里的路径和 id 指那台主机。
 ## 0.1.4 "First Take" (2026-10-19)
 
 Agents that wait for you are easy to answer (a status row above the input, approval cards in the

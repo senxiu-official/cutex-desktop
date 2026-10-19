@@ -105,6 +105,30 @@ describe("seedMessages / pendingMessagesFor", () => {
     expect(pendingMessagesFor(map, "b", (id) => id === "alarm-1").map((m) => m.messageId)).not.toContain("alarm-1");
   });
 
+  it("shows a cross-host note as from name@host (remote), not a service, until it is read in", () => {
+    const remote = { host: "alpha", peerId: "ci-0123456789abcdef0123456789abcdef", senderId: "cutex.remote" };
+    // Bootstrap shape (cutex agent_bus_state snapshot of a peer tell): no fromCutexSessionId; a frozen
+    // native envelope names the cutex-peers service source.
+    const boot = [{ messageId: "ptell-1", fromCutexSessionId: null, toCutexSessionId: "b", deliveryMode: "passive", deliveryKind: "note", content: "see /tmp/x", body: "see /tmp/x", state: "pending",
+      queuedAt: "2026-10-19T00:00:00Z", sender: { id: "worker@alpha", name: "worker@alpha", runtime: null }, remote,
+      externalInput: { message: { source: { kind: "service", id: "cutex-peers" }, delivery: "passive" } } }];
+    let map = seedMessages({}, "b", boot, []);
+    expect(map["ptell-1"]).toMatchObject({ from: "worker@alpha", senderName: "worker@alpha", sourceKind: null, remote, kind: "note", body: "see /tmp/x", state: "pending" });
+    const rows = pendingMessagesFor(map, "b");
+    expect(rows.map((m) => m.messageId)).toEqual(["ptell-1"]);
+    // The owner's 唤醒 counts it like any passive note.
+    expect(wakeableNotes(rows)).toBe(1);
+    // Live: messageQueued (no bootstrap) gives the same record; a repeat changes nothing.
+    const queued = { messageId: "ptell-2", fromCutexSessionId: null, toCutexSessionId: "b", deliveryMode: "passive", deliveryKind: "note", content: "hi", body: "hi", queuedAt: "2026-10-19T00:01:00Z", sender: { id: "worker@alpha", name: "worker@alpha", runtime: null }, remote };
+    map = applyMessageEvent(map, "cutex/agentBus/messageQueued", queued, 9);
+    expect(map["ptell-2"]).toMatchObject({ from: "worker@alpha", senderName: "worker@alpha", sourceKind: null, remote, kind: "note", state: "pending" });
+    expect(applyMessageEvent(map, "cutex/agentBus/messageQueued", queued, 10)).toBe(map);
+    expect(pendingMessagesFor(map, "b").map((m) => m.messageId)).toEqual(["ptell-1", "ptell-2"]);
+    // Read in: the delivered event, or its item in the timeline.
+    map = applyMessageEvent(map, "cutex/agentBus/messageDelivered", { messageId: "ptell-2", fromCutexSessionId: null, toCutexSessionId: "b", turnId: "t1", deliveredAt: "2026-10-19T00:02:00Z", remote }, 11);
+    expect(pendingMessagesFor(map, "b", (id) => id === "ptell-1")).toEqual([]);
+  });
+
   it("maps snapshot states", () => {
     expect(stateOf("pending")).toBe("pending");
     expect(stateOf("inbox_accepted")).toBe("pending");

@@ -7,7 +7,8 @@ import { useModuleStatuses, usePlacement, useSlot } from "../modules/react";
 import type { RevealIntent, RevealResult, StatusItem, StatusPlace } from "../modules/slots";
 import { useAgentFeatures } from "./agentFeaturesView";
 import type { TimelineState } from "./timeline";
-import { agentHost, useApp } from "../store";
+import { useApp } from "../store";
+import { convLiveOf, useConvView, type ConversationScopeValue } from "./conversationScope";
 import { placedStatusItems, type PlacedStatus } from "./statusItems";
 import { itemSurfaces, resolvePlacement, revealStatus, surfaceProviders, type ResolvedPlacement, type RevealScope, type SurfaceProviders } from "./statusSurfaces";
 
@@ -54,15 +55,17 @@ function currentProviders(): SurfaceProviders {
 
 /**
  * `statusPresentation.reveal` (§16.4) bound to the app: the scope is the host + agent the caller
- * rendered for. The item is looked up with the agent's features, as the status row sees it.
+ * rendered for. The item is looked up with the agent's features, as the status row sees it. `conv`: the
+ * caller's conversation (lib/conversationScope): what it shows at call time is the stale check's "current".
  */
-export function revealStatusItem(scope: RevealScope, itemId: string, intent: RevealIntent, openBarPanel?: () => void): RevealResult {
+export function revealStatusItem(scope: RevealScope, itemId: string, intent: RevealIntent, openBarPanel: (() => void) | undefined, conv: ConversationScopeValue | null): RevealResult {
   const host = appModules();
   return revealStatus(
     {
       current: () => {
         const s = useApp.getState();
-        return { hostId: agentHost(s), sessionId: s.view.kind === "conversation" ? s.selectedId : null };
+        const live = convLiveOf(conv, s);
+        return { hostId: live.hostId, sessionId: s.view.kind === "conversation" ? live.sessionId : null };
       },
       providers: currentProviders,
       item: (id) => {
@@ -83,6 +86,6 @@ export function revealStatusItem(scope: RevealScope, itemId: string, intent: Rev
  * to its `version` (every change re-renders the caller).
  */
 export function useSessionTimeline(sessionId: string): TimelineState | null {
-  useApp((s) => s.sessions[sessionId]?.version ?? 0);
-  return useApp((s) => s.sessions[sessionId]?.timeline ?? null);
+  useConvView(sessionId, (v) => v?.version ?? 0);
+  return useConvView(sessionId, (v) => v?.timeline ?? null);
 }

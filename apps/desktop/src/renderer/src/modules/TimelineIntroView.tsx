@@ -11,7 +11,8 @@ import { profileOf } from "../lib/agentList";
 import { useUiPrefs } from "../lib/prefs";
 import { dataFlags, useSizeFlags, type SizeTest } from "../lib/sizeFlags";
 import { bridge } from "../bridge";
-import { agentHost, sidebarOf, useApp } from "../store";
+import { sidebarOf, useApp } from "../store";
+import { useConvHost } from "../lib/conversationScope";
 import { useSlot } from "./react";
 import { ItemBoundary } from "./Outlet";
 import { pickTimelineIntroItem, timelineAtStart } from "./timelineIntroLogic";
@@ -62,7 +63,7 @@ function sessionRow(s: ReturnType<typeof useApp.getState>, hostId: string, sessi
 
 /** The opening's read-only props: who this session is (host, profile name, provider hint, name). */
 function useIntroIdentity(sessionId: string): Pick<TimelineIntroProps, "hostId" | "profileName" | "providerKind" | "agentName"> {
-  const hostId = useApp(agentHost);
+  const hostId = useConvHost();
   const profileName = useApp((s) => {
     const row = sessionRow(s, hostId, sessionId);
     return row ? profileOf(row) : null;

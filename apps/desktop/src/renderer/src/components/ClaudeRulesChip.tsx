@@ -13,7 +13,8 @@ import type { ClaudePermissionRules } from "../../../shared/ipc";
 import { useI18n } from "../i18n";
 import { CLAUDE_CODE_SOURCES_FEATURE } from "../lib/claudeCodeSources";
 import { claudeRulesChipShown, claudeToolsOff } from "../lib/claudePermissionModes";
-import { featuresOf, sessionApi, useApp } from "../store";
+import { featuresOf, useApp } from "../store";
+import { convApi, useConvScope } from "../lib/conversationScope";
 import { ClaudeCodeSourcesNote } from "./ClaudeCodeSourcesNote";
 import { Popover } from "./Menu";
 
@@ -36,6 +37,7 @@ export function ClaudeRulesChip({
   iconOnly?: boolean;
 }) {
   const { t } = useI18n();
+  const conv = useConvScope();
   const sourcesFeature = useApp((s) => featuresOf(s, hostId).has(CLAUDE_CODE_SOURCES_FEATURE));
   const off = claudeToolsOff({ write, exec });
   // The count on the chip: read once per agent, then kept current by the popover's list.
@@ -44,7 +46,7 @@ export function ClaudeRulesChip({
     setCount(null);
     if (!rulesFeature) return;
     let live = true;
-    sessionApi(sessionId).claudePermissionRules(sessionId).then(
+    convApi(conv, sessionId).claudePermissionRules(sessionId).then(
       (v) => live && setCount(v.allow.length),
       () => undefined, // Unreadable: no count; the popover shows the error.
     );
@@ -92,6 +94,7 @@ export function ClaudeRulesChip({
 }
 
 export function ClaudeAllowRules({ sessionId, onView }: { sessionId: string; /** Every list cutex answered (load / save). */ onView?(view: ClaudePermissionRules): void }) {
+  const conv = useConvScope();
   const { t } = useI18n();
   const [view, setView] = useState<ClaudePermissionRules | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,7 +106,7 @@ export function ClaudeAllowRules({ sessionId, onView }: { sessionId: string; /**
     let live = true;
     setView(null);
     setError(null);
-    sessionApi(sessionId).claudePermissionRules(sessionId).then(
+    convApi(conv, sessionId).claudePermissionRules(sessionId).then(
       (v) => live && setView(v),
       (e: unknown) => live && setError(e instanceof Error ? e.message : String(e)),
     );
@@ -116,14 +119,14 @@ export function ClaudeAllowRules({ sessionId, onView }: { sessionId: string; /**
     if (!view) return;
     setSaving(true);
     try {
-      const next = await sessionApi(sessionId).setClaudePermissionRules(sessionId, allow, view.revision);
+      const next = await convApi(conv, sessionId).setClaudePermissionRules(sessionId, allow, view.revision);
       setView(next);
       const mine = next.sessions?.find((s) => s.cutexSessionId === sessionId);
       setNote({ kind: mine?.status === "live" ? "live" : "nextStart" });
     } catch (e) {
       setNote({ kind: "failed", error: e instanceof Error ? e.message : String(e) });
       // A conflict or refusal: show what cutex has now.
-      void sessionApi(sessionId).claudePermissionRules(sessionId).then(setView, () => {});
+      void convApi(conv, sessionId).claudePermissionRules(sessionId).then(setView, () => {});
     } finally {
       setSaving(false);
     }

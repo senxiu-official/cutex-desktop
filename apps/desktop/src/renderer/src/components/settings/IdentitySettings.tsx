@@ -1,9 +1,6 @@
-// Settings → 用户 (shell page): 你在这台主机上 (components/settings/MeOnHost) for every connection, then on a
-// host this device owns the users module's sections (`settings.section` page "users": users and grants,
-// devices, linked hosts); on any other connection 你的设备 and a note that the rest is the owner's. 「你」 — your name and picture, set on
-// this desktop (lib/identityPrefs) and published to every connected host with cutex
-// `users-self-profile` (lib/identitySync), plus your person identity (P2: fingerprint, export / import,
-// lib/personIdentity) — is its own local page, Settings → 你 (components/settings/MeSettings.tsx).
+// 「你」 — your name and picture, set on this desktop (lib/identityPrefs) and published to every connected
+// host with cutex `users-self-profile` (lib/identitySync), plus your person identity (P2: fingerprint,
+// export / import, lib/personIdentity) — the identity card of Settings → 你 (components/settings/MeSettings.tsx).
 import { useEffect, useRef, useState } from "react";
 import { USERS_SELF_PROFILE_FEATURE } from "../../../../shared/users";
 import { bridge } from "../../bridge";
@@ -15,44 +12,13 @@ import { useIdentitySyncStatus } from "../../lib/identitySync";
 import { identityInitials, identityName } from "../../lib/identity";
 import { IDENTITY_NAME_MAX, setIdentityPrefs, useIdentityPrefs } from "../../lib/identityPrefs";
 import { settingsAnchorId } from "../../lib/settingsNav";
-import { useScrollToSettingsAnchor } from "../../lib/settingsFocus";
 import { useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
 import { useUserAvatar } from "../../lib/userAvatars";
 import { useHostScope } from "../../lib/useHostScope";
-import { SettingsSections } from "../../modules/Outlet";
 import { Avatar } from "../Avatar";
-import { Button, ErrorNote, Notice, Section, SettingRow, TextInput } from "./Form";
-import { MeHereSection, OwnDevicesSection } from "./MeOnHost";
+import { Button, ErrorNote, Section, SettingRow, TextInput } from "./Form";
 import { PersonIdentityRows } from "./PersonIdentityRows";
 import { ProfilePictureCrop } from "./ProfilePictureCrop";
-
-/**
- * Settings → 用户: 你在这台主机上 for every connection; then on a host this device owns the users module's
- * sections (users and grants, devices, linked hosts), on any other connection 你的设备 (cutex
- * `user-own-devices`) and a note that users, grants and other devices are the owner's.
- */
-export function UsersHubPage() {
-  const { t } = useI18n();
-  const hostId = useTargetHostId();
-  const access = useHostAccess(hostId);
-  const scope = useHostScope();
-  const host = scope.host(hostId)?.label ?? hostId;
-  // openSettings("users", { anchor: "users-peers" }) from 互联 / 可见用户.
-  useScrollToSettingsAnchor();
-  return (
-    <>
-      <MeHereSection hostId={hostId} />
-      {access.isOwner ? (
-        <SettingsSections page="users" />
-      ) : (
-        <>
-          {!access.pending && <OwnDevicesSection hostId={hostId} />}
-          <Notice tone="info">{access.pending ? t("users.access.pendingSettings", { host }) : t("users.manageNotice")}</Notice>
-        </>
-      )}
-    </>
-  );
-}
 
 export function IdentitySection() {
   const { t } = useI18n();

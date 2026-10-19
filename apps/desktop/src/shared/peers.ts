@@ -12,6 +12,13 @@ import type { CutexRefusal } from "./ipc";
 
 export const PEERS_FEATURE = "peers-v2";
 export const PEERS_CHANGED_EVENT = "cutex/peers/changed";
+/**
+ * cutex `cross-host-tell-wake` (c9fa3bc; cutex docs/PEERS.md "Cross-host wake"): a peer's
+ * `agent_tell wake:true` may start a turn here when that peer's `inbound.tellWake` is on (default
+ * off), capped by `inbound.tellWakesPerHour` (beyond it the wake arrives as a note). Only send these
+ * policy fields to a host with the capability (an older cutex rejects unknown keys).
+ */
+export const CROSS_HOST_TELL_WAKE_FEATURE = "cross-host-tell-wake";
 /** A peer's id = the remote durable instance id. */
 export const PEER_ID = /^ci-[a-fA-F0-9]{32}$/;
 /** cutex peer label (`^[a-z0-9-]{1,32}$`). */
@@ -41,15 +48,30 @@ export interface PeerPolicy {
     assumedCaps: PeerCaps;
     maxOpenAsks: number;
     asksPerHour: number;
+    /** cross-host-tell-wake: this peer's tells may wake agents here (absent: older host = off). */
+    tellWake?: boolean;
+    /** cross-host-tell-wake: wakes per hour from this peer (absent: older host). */
+    tellWakesPerHour?: number;
   };
   outbound: { visibility: PeerVisibility };
 }
 
 export const PEER_POLICY_DEFAULT: PeerPolicy = {
-  inbound: { exports: [], accept: true, review: "always", assumedCaps: { sandbox: "read-only", networkAccess: false, unrestrictedServices: false }, maxOpenAsks: 20, asksPerHour: 60 },
+  inbound: { exports: [], accept: true, review: "always", assumedCaps: { sandbox: "read-only", networkAccess: false, unrestrictedServices: false }, maxOpenAsks: 20, asksPerHour: 60, tellWake: false, tellWakesPerHour: 60 },
   outbound: { visibility: "none" },
 };
-export const PEER_LIMITS = { maxOpenAsks: [1, 10_000], asksPerHour: [1, 100_000] } as const;
+export const PEER_LIMITS = { maxOpenAsks: [1, 10_000], asksPerHour: [1, 100_000], tellWakesPerHour: [1, 100_000] } as const;
+export const PEER_TELL_WAKE_DEFAULT = { tellWake: false, tellWakesPerHour: 60 } as const;
+
+/** A peer policy's wake settings with cutex's defaults for absent fields (off, 60 / hour). */
+export function peerTellWakeOf(policy: Pick<PeerPolicy, "inbound"> | null | undefined): { tellWake: boolean; tellWakesPerHour: number } {
+  const i = policy?.inbound;
+  const perHour = i?.tellWakesPerHour;
+  return {
+    tellWake: i?.tellWake === true,
+    tellWakesPerHour: typeof perHour === "number" && Number.isInteger(perHour) && perHour >= PEER_LIMITS.tellWakesPerHour[0] && perHour <= PEER_LIMITS.tellWakesPerHour[1] ? perHour : PEER_TELL_WAKE_DEFAULT.tellWakesPerHour,
+  };
+}
 
 export interface PeerError {
   code: string;
@@ -233,6 +255,14 @@ export function peerPatchBody(patch: unknown): PeerPatch {
       if ("asksPerHour" in i) {
         if (!intIn(i.asksPerHour, PEER_LIMITS.asksPerHour)) throw new Error("bad asksPerHour");
         inbound.asksPerHour = i.asksPerHour;
+      }
+      if ("tellWake" in i) {
+        if (typeof i.tellWake !== "boolean") throw new Error("bad peer tellWake");
+        inbound.tellWake = i.tellWake;
+      }
+      if ("tellWakesPerHour" in i) {
+        if (!intIn(i.tellWakesPerHour, PEER_LIMITS.tellWakesPerHour)) throw new Error("bad tellWakesPerHour");
+        inbound.tellWakesPerHour = i.tellWakesPerHour;
       }
       policy.inbound = inbound;
     }

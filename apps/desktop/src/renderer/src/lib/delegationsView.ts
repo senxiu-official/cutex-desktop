@@ -2,7 +2,8 @@
 import { useEffect, useMemo } from "react";
 import type { AskSummary } from "../../../shared/ipc";
 import { useI18n, type MessageKey } from "../i18n";
-import { agentHost, selectedFeatures, selectedSidebar, useApp } from "../store";
+import { useApp } from "../store";
+import { convSidebarOf, useConvFeatures, useConvHost, useConvScope, useConvView } from "./conversationScope";
 import { useViewRows, viewRow } from "./viewHost";
 import { agentDelegations, ASKS_FEATURE, fallbackSummary, inferDelegations, needsYouCount, ownerSteeredOf, pendingForAgent, type ContextOf, type DelegateCall, type DelegationStatus } from "./delegations";
 import { loadDelegationDetail, useDelegation, useDelegations, useFocusDelegations, useHostRecords } from "./delegationStore";
@@ -14,7 +15,7 @@ import { orderedEntries, type TimelineState } from "./timeline";
 /** The status word with `{name}` / `{n}` filled in. */
 export function useStatusWord(): (status: DelegationStatus, name: string) => string {
   const { t } = useI18n();
-  return (status, name) => t(`delegation.status.${status.key}` as MessageKey, { name, n: status.n ?? "" });
+  return (status, name) => t(`delegation.status.${status.key}` as MessageKey, { name, n: status.n ?? "", host: status.host ?? "" });
 }
 
 /** Display name of an agent id (sidebar), else the id. */
@@ -45,11 +46,15 @@ export function useDelegationContext(): ContextOf {
 
 /** The target's profile (model fallback when the attempt has no model snapshot). */
 export function useAgentProfile(id: string | null): string | null {
-  return useApp((s) => (id ? (viewRow(s, id)?.profile ?? null) : null));
+  const host = useAgentHost();
+  return useApp((s) => (id ? (viewRow(s, host, id)?.profile ?? null) : null));
 }
 
-/** The host of the open agent (its timeline, composer, queue): delegation lookups of those views use its records. */
-export const useAgentHost = (): string => useApp(agentHost);
+/**
+ * The host of the open agent (its timeline, composer, queue): delegation lookups of those views use its
+ * records. The enclosing conversation's host (lib/conversationScope; outside one: the selected agent's).
+ */
+export const useAgentHost = (): string => useConvHost();
 
 /**
  * A requester card's delegation: the live record (store; the open agent's host's), else what this
@@ -58,8 +63,8 @@ export const useAgentHost = (): string => useApp(agentHost);
 export function useCardDelegation(askId: string, call: DelegateCall, sessionId: string): { d: AskSummary; live: boolean } {
   const record = useDelegation(useAgentHost(), askId);
   // Only scanned while there is no record (purged > 30 days, or before the first load).
-  const version = useApp((s) => (record ? 0 : (s.sessions[sessionId]?.version ?? 0)));
-  const timeline = useApp((s) => (record ? null : (s.sessions[sessionId]?.timeline ?? null)));
+  const version = useConvView(sessionId, (v) => (record ? 0 : (v?.version ?? 0)));
+  const timeline = useConvView(sessionId, (v) => (record ? null : (v?.timeline ?? null)));
   // A short target from the call result (`cutex.…3f9a1c`): the sidebar's full id, else no link.
   const targetId = useResolvedSessionId(record ? null : call.targetId);
   const fallback = useMemo(() => {
@@ -87,9 +92,10 @@ export function useResolvedAskId(ref: string, hostId?: string): string {
 
 /** The sidebar's full session id for a (possibly short) session reference; null when unknown or ambiguous. */
 export function useResolvedSessionId(ref: string | null | undefined): string | null {
+  const scope = useConvScope();
   return useApp((s) => {
     if (!ref) return null;
-    const ids = [...new Set([s.sidebar, selectedSidebar(s)].flatMap((sb) => [...(sb?.active ?? []), ...(sb?.retired ?? [])].map((x) => x.cutexSessionId)))];
+    const ids = [...new Set([s.sidebar, convSidebarOf(scope, s)].flatMap((sb) => [...(sb?.active ?? []), ...(sb?.retired ?? [])].map((x) => x.cutexSessionId)))];
     return resolveId(ref, ids);
   });
 }
@@ -104,7 +110,7 @@ export function useNeedsYouCount(): number | null {
 
 /** An agent's unfinished delegations by direction + finished count (capsule / status row). */
 export function useAgentDelegations(sessionId: string) {
-  const enabled = useApp((s) => selectedFeatures(s).has(ASKS_FEATURE));
+  const enabled = useConvFeatures().has(ASKS_FEATURE);
   const byId = useHostRecords(useAgentHost());
   const ctxOf = useDelegationContext();
   return useMemo(() => (enabled ? agentDelegations(byId, sessionId, undefined, ctxOf) : { mine: [], toMe: [], done: [], finished: 0 }), [enabled, byId, sessionId, ctxOf]);
@@ -112,7 +118,7 @@ export function useAgentDelegations(sessionId: string) {
 
 /** The queue panel's 待处理委托 of an agent. */
 export function usePendingDelegations(sessionId: string) {
-  const enabled = useApp((s) => selectedFeatures(s).has(ASKS_FEATURE));
+  const enabled = useConvFeatures().has(ASKS_FEATURE);
   const byId = useHostRecords(useAgentHost());
   return useMemo(() => (enabled ? pendingForAgent(byId, sessionId) : []), [enabled, byId, sessionId]);
 }
@@ -123,7 +129,7 @@ export function usePendingDelegations(sessionId: string) {
  * 查看完整 use).
  */
 export function useOwnerSteered(askId: string, load: boolean): boolean {
-  const enabled = useApp((s) => selectedFeatures(s).has(ASKS_FEATURE));
+  const enabled = useConvFeatures().has(ASKS_FEATURE);
   const hostId = useAgentHost();
   const detail = useDelegations((s) => s.details[hostKey(hostId, askId)]);
   useEffect(() => {
@@ -137,7 +143,7 @@ export function useOwnerSteered(askId: string, load: boolean): boolean {
  * is updated in place; the scan covers only the running turn's entries.
  */
 export function useDelegationTurn(timeline: TimelineState | null): DelegationTurn | null {
-  const features = useApp(selectedFeatures);
+  const features = useConvFeatures();
   const byId = useHostRecords(useAgentHost());
   return currentDelegationTurn(timeline, byId, features);
 }

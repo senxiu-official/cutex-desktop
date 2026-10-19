@@ -11,7 +11,8 @@ import { useI18n, type MessageKey } from "../i18n";
 import { safetyBlockState } from "../lib/ownerNotify";
 import { safetyCheckAct } from "../lib/ownerNotifyStore";
 import { formatAbsolute, formatWhen, useClock } from "../lib/time";
-import { selectedSidebar, useApp } from "../store";
+import { useApp } from "../store";
+import { convNotify, convSidebarOf, useConvScope } from "../lib/conversationScope";
 import { rowsOf } from "../lib/viewHost";
 import { ClampBox } from "./ClampBox";
 import { SystemAvatar } from "./SystemAvatar";
@@ -23,11 +24,13 @@ const REFUSALS: Record<string, MessageKey> = {
   safety_block_not_found: "safetyBlock.error.closed",
 };
 
-export function SafetyBlockCard({ record: r, block }: { record: OwnerNotification; block: SafetyBlock }) {
+/** `hostId`: the agent's host; the decision goes there (components/OwnerNotifyCard). */
+export function SafetyBlockCard({ record: r, block, hostId }: { record: OwnerNotification; block: SafetyBlock; hostId: string }) {
   const { t, locale } = useI18n();
   const now = useClock();
-  const notify = useApp((s) => s.notify);
-  const agentName = useApp((s) => rowsOf(s.sidebar, selectedSidebar(s)).find((x) => x.cutexSessionId === r.agentId)?.displayName ?? r.agentName ?? r.agentId);
+  const conv = useConvScope();
+  const notify = (text: string, tone?: "info" | "error") => convNotify(conv, text, tone);
+  const agentName = useApp((s) => rowsOf(s.sidebar, convSidebarOf(conv, s)).find((x) => x.cutexSessionId === r.agentId)?.displayName ?? r.agentName ?? r.agentId);
   const [busy, setBusy] = useState<null | "grant" | "dismiss">(null);
   const state = safetyBlockState(block, now);
   const open = state === "blocked";
@@ -38,7 +41,7 @@ export function SafetyBlockCard({ record: r, block }: { record: OwnerNotificatio
   const decide = async (decision: "grant" | "dismiss") => {
     setBusy(decision);
     try {
-      const result = await safetyCheckAct(r, decision);
+      const result = await safetyCheckAct(r, decision, hostId);
       if (!result.ok) notify(REFUSALS[result.error.code] ? t(REFUSALS[result.error.code]!) : result.error.message || result.error.code, "error");
       else if (result.submitError) notify(t("safetyBlock.error.message", { error: result.submitError.message || result.submitError.code }), "error");
     } catch (e) {

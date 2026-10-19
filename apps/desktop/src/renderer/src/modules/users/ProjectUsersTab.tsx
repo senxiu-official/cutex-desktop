@@ -30,7 +30,7 @@ function useOpenUsersSettings() {
   const hostId = useTargetHostId();
   return () => {
     if (hostId !== (useApp.getState().hosts?.active ?? "local")) setSettingsHost(hostId);
-    useApp.getState().openSettings("users", { anchor: USERS_ANCHOR });
+    useApp.getState().openSettings("access", { anchor: USERS_ANCHOR });
   };
 }
 

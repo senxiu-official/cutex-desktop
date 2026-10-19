@@ -39,7 +39,7 @@ import {
 } from "lucide-react";
 import type { SessionAvatar, SessionResource } from "@cutex-desktop/protocol";
 import { translate, type MessageKey } from "../i18n";
-import { agentHost, featuresOf, hostApi, pinnedOn, sidebarOf, useApp, viewHostOf } from "../store";
+import { agentHost, featuresOf, hostApi, pinnedOn, sidebarOf, useApp, viewHostOf, viewOf } from "../store";
 import type { FileRef } from "./workspace";
 import { apiFor } from "../bridge";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
@@ -52,6 +52,7 @@ import { fieldsUnchanged, isRevisionConflict } from "./metadataRetry";
 import { refusalText } from "./profileCreate";
 import { canRewindFiles, lacks } from "./agentFeatures";
 import { agentFeaturesFor } from "./agentFeaturesView";
+import type { StructuralOp } from "./structuralGate";
 import { structuralBlockFor, structuralBlockText, structuralErrorText } from "./structuralGateView";
 import { markSeenOn, turnMarksOn } from "./turnUnread";
 import { parseUnsupported } from "../../../shared/unsupported";
@@ -435,18 +436,17 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
   const busy = !!session.runtime.activeTurnId;
   const pinned = (focus ? app.pinned : pinnedOn(host)).has(id);
   const canDelete = features.has(SESSION_FEATURES.delete);
-  // 暂停委托 / 继续委托 (asks-pause-v2): the explicit owner pause of new delegations to this agent. It
-  // reads / patches the store's agent view, so only for the agent the view belongs to (or a focus agent).
-  const ownView = viewHostOf(id) === host;
-  const asksPaused = ownView && !!app.sessions[id]?.asksPaused;
+  // 暂停委托 / 继续委托 (asks-pause-v2): the explicit owner pause of new delegations to this agent (its
+  // view on this host, keyed by host + id: panes step 2).
+  const asksPaused = !!viewOf(app, host, id)?.asksPaused;
   // 已随停止暂停 (stop-holds-ridealongs, lib/stopHold): 继续发送 (queue resume releases the stop hold).
-  const stopOnly = ownView && asksPauseKind(app.sessions[id]?.asksPaused) === "stop";
+  const stopOnly = asksPauseKind(viewOf(app, host, id)?.asksPaused) === "stop";
   // A closed runtime gate (runtime-gate-pause): 恢复输入 = asks resume (reopens the gate).
-  const gate = ownView && asksPauseKind(app.sessions[id]?.asksPaused) === "gate";
-  const asksPauseItem: MenuAction | false = !retired && ownView && features.has("asks-pause-v2") && {
+  const gate = asksPauseKind(viewOf(app, host, id)?.asksPaused) === "gate";
+  const asksPauseItem: MenuAction | false = !retired && features.has("asks-pause-v2") && {
     label: t(stopOnly ? "paused.resume" : gate ? "asksPause.gateResumeMenu" : asksPaused ? "asksPause.resume" : "asksPause.pause"),
     icon: <Hourglass size={ICON} />,
-    onSelect: guarded(() => (stopOnly ? app.resumePaused(id) : asksPaused ? app.resumeAsks(id) : app.pauseAsks(id))),
+    onSelect: guarded(() => (stopOnly ? app.resumePaused(id, host) : asksPaused ? app.resumeAsks(id, host) : app.pauseAsks(id, host))),
   };
   // 轮换主管… (owner-rotation): the Director of an active project; the dialog lives on the project page,
   // whose rotation store follows the focus host only.
@@ -468,9 +468,9 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
   // 标为已读: a done / failed turn mark on this host (lib/turnUnread; the same clear as opening it).
   const unread = id in turnMarksOn(host);
   // 分叉为新 agent (from the latest turn): store.forkSession routes by the open view's host, so only
-  // for an agent whose view belongs to `host`; a busy Claude agent refuses (lib/structuralGate).
-  const canFork = !retired && ownView && features.has(SESSION_FEATURES.fork) && !lacks(agentFeaturesFor(id), "fork");
-  const block = canFork ? structuralBlockFor(id) : null;
+  // for an agent whose view belongs to `host`; a busy Claude agent without forkWhileBusy refuses (lib/structuralGate).
+  const canFork = !retired && features.has(SESSION_FEATURES.fork) && !lacks(agentFeaturesFor(id, host), "fork");
+  const block = canFork ? structuralBlockFor(id, "fork", host) : null;
   const projectId = sidebarOf(app, host)?.hostRows[id]?.projectId ?? null;
   // users: on a host where this device is not the owner, only this device's own view actions remain
   // (pin, read mark, open project, copy, module ref actions); everything that changes the agent is the owner's.
@@ -534,7 +534,7 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
       label: t("menu.forkAgent"),
       icon: <GitFork size={ICON} />,
       ...(block ? { disabled: true, hint: t("structural.busyHint"), title: structuralBlockText(block) } : {}),
-      onSelect: guarded(() => app.forkSession(id, null)),
+      onSelect: guarded(() => app.forkSession(id, null, host)),
     },
     !retired && claudeToolsItem(session, t, host),
     !retired && quotaContinueItem(session, t, host),
@@ -558,6 +558,8 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
 
 export interface MessageMenuInput {
   sessionId: string;
+  /** The agent's host (panes step 2: the conversation's; default the host of its latest view). */
+  hostId?: string;
   kind: "user" | "agent" | "received" | "sent";
   text: string;
   turnId: string | null;
@@ -578,13 +580,19 @@ export function quoteText(text: string): string {
 
 export function messageMenu(m: MessageMenuInput, t: T, canRevert: boolean): MenuEntry[] {
   const app = useApp.getState();
-  const canFork = app.features.has(SESSION_FEATURES.fork) && !lacks(agentFeaturesFor(m.sessionId), "fork");
-  // A busy Claude agent refuses fork / revert (lib/structuralGate): offered disabled, with the reason.
-  const block = structuralBlockFor(m.sessionId);
-  const blocked = block ? { disabled: true, hint: t("structural.busyHint"), title: structuralBlockText(block) } : {};
+  const host = m.hostId ?? viewHostOf(m.sessionId);
+  const canFork = featuresOf(app, host).has(SESSION_FEATURES.fork) && !lacks(agentFeaturesFor(m.sessionId, host), "fork");
+  // A busy Claude agent refuses revert, and fork without forkWhileBusy (lib/structuralGate): offered
+  // disabled, with the reason.
+  const blockedBy = (op: StructuralOp) => {
+    const block = structuralBlockFor(m.sessionId, op, host);
+    return block ? { disabled: true, hint: t("structural.busyHint"), title: structuralBlockText(block) } : {};
+  };
+  const blocked = blockedBy("revert");
+  const forkBlocked = blockedBy("fork");
   return [
     { label: t("menu.copy"), icon: <Copy size={ICON} />, onSelect: () => copyText(m.text) },
-    { label: t("menu.quote"), icon: <MessageSquareQuote size={ICON} />, onSelect: () => app.insertIntoComposer(m.sessionId, quoteText(m.text), "append") },
+    { label: t("menu.quote"), icon: <MessageSquareQuote size={ICON} />, onSelect: () => app.insertIntoComposer(m.sessionId, quoteText(m.text), "append", undefined, host) },
     m.fold && { label: t(m.fold.folded ? "fold.unfold" : "fold.fold"), icon: m.fold.folded ? <ChevronsUpDown size={ICON} /> : <ChevronsDownUp size={ICON} />, onSelect: m.fold.toggle },
     m.kind === "user" && "separator",
     m.kind === "user" && {
@@ -593,7 +601,7 @@ export function messageMenu(m: MessageMenuInput, t: T, canRevert: boolean): Menu
       hint: canRevert ? undefined : "·",
       disabled: !canRevert || !m.turnId,
       confirm: t("menu.editResendConfirm"),
-      onSelect: guarded(() => app.editAndResend(m.sessionId, m.turnId!, m.text)),
+      onSelect: guarded(() => app.editAndResend(m.sessionId, m.turnId!, m.text, host)),
       ...(canRevert ? blocked : {}),
     },
     m.kind === "agent" && "separator",
@@ -603,8 +611,8 @@ export function messageMenu(m: MessageMenuInput, t: T, canRevert: boolean): Menu
       icon: <GitFork size={ICON} />,
       hint: canFork ? undefined : "·",
       disabled: !canFork || !m.turnId,
-      onSelect: guarded(() => app.forkSession(m.sessionId, m.turnId)),
-      ...(canFork ? blocked : {}),
+      onSelect: guarded(() => app.forkSession(m.sessionId, m.turnId, host)),
+      ...(canFork ? forkBlocked : {}),
     },
     m.kind === "agent" &&
       canRevert &&
@@ -613,19 +621,19 @@ export function messageMenu(m: MessageMenuInput, t: T, canRevert: boolean): Menu
         icon: <History size={ICON} />,
         danger: true,
         confirm: t("menu.revertConfirm", { n: m.laterTurns ?? 0 }),
-        onSelect: guarded(() => app.revertTo(m.sessionId, m.nextTurnId!)),
+        onSelect: guarded(() => app.revertTo(m.sessionId, m.nextTurnId!, { hostId: host })),
         ...blocked,
       },
     // Claude agents with file rewind (claude-rewind-files): the same revert, files restored too.
     m.kind === "agent" &&
       canRevert &&
       m.nextTurnId &&
-      canRewindFiles(agentFeaturesFor(m.sessionId), app.features) && {
+      canRewindFiles(agentFeaturesFor(m.sessionId, host), featuresOf(app, host)) && {
         label: t("reply.revertWithFiles"),
         icon: <FileClock size={ICON} />,
         danger: true,
         confirm: t("menu.revertFilesConfirm", { n: m.laterTurns ?? 0 }),
-        onSelect: guarded(() => app.revertTo(m.sessionId, m.nextTurnId!, { rewindFiles: true })),
+        onSelect: guarded(() => app.revertTo(m.sessionId, m.nextTurnId!, { rewindFiles: true, hostId: host })),
         ...blocked,
       },
   ];

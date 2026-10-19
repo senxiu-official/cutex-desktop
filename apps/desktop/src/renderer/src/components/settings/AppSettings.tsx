@@ -38,10 +38,10 @@ import { SidebarSettingsCards } from "./regions/SidebarSettings";
 import { OwnerNotifySection } from "./OwnerNotifySettings";
 import { ArmedRemove, Button, Details, useCompactSettings, EmptyState, ErrorNote, HintAction, LinkRow, ListRow, Section, Segmented, Select, SettingRow, TextLink, Toggle } from "./Form";
 import { StatusPlaceTable } from "./StatusPlaceTable";
-import { SettingsHostSection } from "../SettingsHostFrame";
 import { TermsSection } from "./TermsSettings";
 import { SettingsSections } from "../../modules/Outlet";
 import { services } from "../../modules/app";
+import { useModuleEnabled, useModulePref } from "../../modules/react";
 
 function useCapabilities(): CapabilitiesView | null | undefined {
   const daemon = useApp((s) => s.daemon);
@@ -117,6 +117,7 @@ function WindowSection() {
   return (
     <Section id={settingsAnchorId("window")} title={t("shell.general.window")}>
       <CloseBehaviorRow />
+      <AllowRemoteCloseRow />
     </Section>
   );
 }
@@ -138,6 +139,30 @@ function CloseBehaviorRow() {
         onChange={(v) => {
           setState({ ...state, prefs: { ...state.prefs, closeBehavior: v } });
           shell.setCloseBehavior(v).then(setState, () => {});
+        }}
+      />
+    </SettingRow>
+  );
+}
+
+/**
+ * 允许远程关闭这个桌面 (cutex `client-remote-close`; stored by main, default on): sent with this desktop's
+ * presence to every host; switching it re-sends at once (and off cancels a running countdown).
+ */
+function AllowRemoteCloseRow() {
+  const { t } = useI18n();
+  const shell = bridge.shell;
+  const [state, setState] = useShellState();
+  if (!shell?.setAllowRemoteClose || !state) return null;
+  const allowed = state.prefs.allowRemoteClose !== false;
+  return (
+    <SettingRow label={t("remoteClose.allow")} hint={t("remoteClose.allowHint")}>
+      <Toggle
+        checked={allowed}
+        label={t("remoteClose.allow")}
+        onChange={(next) => {
+          setState({ ...state, prefs: { ...state.prefs, allowRemoteClose: next } });
+          shell.setAllowRemoteClose!(next).then(setState, () => {});
         }}
       />
     </SettingRow>
@@ -389,6 +414,15 @@ export function UpdatesPage() {
 export function ConversationPage() {
   const { t } = useI18n();
   const ui = useUiPrefs();
+  // 在时间线里显示批注 is the notes module's pref, shown in 消息显示 while that module is on (owner 2026-10-19).
+  const notesOn = useModuleEnabled("notes");
+  const [showNotes, setShowNotes] = useModulePref<boolean>("notes", "showTimeline", true);
+  // 折叠长消息: one three-way choice over the foldLong / foldOlderReplies prefs (no pref of its own).
+  const fold = !ui.foldLong ? "off" : ui.foldOlderReplies ? "all" : "mine";
+  const setFold = (v: "off" | "mine" | "all") => {
+    setUiPref("foldLong", v !== "off");
+    if (v !== "off") setUiPref("foldOlderReplies", v === "all");
+  };
   return (
     <>
       {/* 对话顶部 (moved from 侧栏与顶栏, owner 2026-10-18: settings grouped by screen region). */}
@@ -404,6 +438,7 @@ export function ConversationPage() {
           />
         </SettingRow>
       </Section>
+      {/* 消息显示 (owner 2026-10-19): by message kind, then the toggles. */}
       <Section id={settingsAnchorId("display")} title={t("conversation.display")}>
         <SettingRow label={t("conversation.reasoningView")} hint={t("conversation.reasoningView.hint")}>
           <Segmented
@@ -411,9 +446,6 @@ export function ConversationPage() {
             options={(["expanded", "collapsed", "hidden"] as const).map((v) => ({ value: v, label: t(`conversation.reasoningView.${v}` as MessageKey) }))}
             onChange={(v) => setUiPref("reasoningView", v)}
           />
-        </SettingRow>
-        <SettingRow label={t("conversation.interactions")} hint={t("conversation.interactionsHint")}>
-          <Toggle checked={ui.timelineInteractions} onChange={(v) => setUiPref("timelineInteractions", v)} />
         </SettingRow>
         <SettingRow label={t("conversation.agentMessages")} hint={t("conversation.agentMessages.hint")}>
           <Segmented
@@ -425,8 +457,12 @@ export function ConversationPage() {
             onChange={(v) => setUiPref("agentMessages", v)}
           />
         </SettingRow>
-        <SettingRow label={t("conversation.timelineIntro")} hint={t("conversation.timelineIntroHint")}>
-          <Toggle checked={ui.timelineIntro} onChange={(v) => setUiPref("timelineIntro", v)} />
+        <SettingRow label={t("appearance.messageImages")} hint={t("appearance.messageImagesHint")}>
+          <Segmented
+            value={ui.messageImages}
+            options={(["thumbnail", "link"] as const).map((v) => ({ value: v, label: t(`appearance.messageImages.${v}` as MessageKey) }))}
+            onChange={(v) => setUiPref("messageImages", v)}
+          />
         </SettingRow>
         <SettingRow label={t("conversation.turnSummary")} hint={t("conversation.turnSummary.hint")}>
           <Segmented
@@ -435,12 +471,25 @@ export function ConversationPage() {
             onChange={(v) => setUiPref("turnSummary", v)}
           />
         </SettingRow>
-        <SettingRow label={t("appearance.messageImages")} hint={t("appearance.messageImagesHint")}>
-          <Segmented
-            value={ui.messageImages}
-            options={(["thumbnail", "link"] as const).map((v) => ({ value: v, label: t(`appearance.messageImages.${v}` as MessageKey) }))}
-            onChange={(v) => setUiPref("messageImages", v)}
-          />
+        <SettingRow label={t("conversation.interactions")} hint={t("conversation.interactionsHint")}>
+          <Toggle checked={ui.timelineInteractions} onChange={(v) => setUiPref("timelineInteractions", v)} />
+        </SettingRow>
+        {notesOn && (
+          <SettingRow label={t("notes.showTimeline")} hint={t("notes.showTimelineHint")}>
+            <Toggle
+              checked={showNotes}
+              onChange={(next) => {
+                try {
+                  setShowNotes(next);
+                } catch (e) {
+                  services.ui.notice(String(e), "error");
+                }
+              }}
+            />
+          </SettingRow>
+        )}
+        <SettingRow label={t("conversation.timelineIntro")} hint={t("conversation.timelineIntroHint")}>
+          <Toggle checked={ui.timelineIntro} onChange={(v) => setUiPref("timelineIntro", v)} />
         </SettingRow>
       </Section>
 
@@ -454,7 +503,11 @@ export function ConversationPage() {
           />
         </SettingRow>
         <SettingRow label={t("appearance.foldLong")} hint={t("appearance.foldLongHint")}>
-          <Toggle checked={ui.foldLong} onChange={(v) => setUiPref("foldLong", v)} />
+          <Segmented
+            value={fold}
+            options={(["off", "mine", "all"] as const).map((v) => ({ value: v, label: t(`appearance.foldLong.${v}` as MessageKey) }))}
+            onChange={setFold}
+          />
         </SettingRow>
         <SettingRow label={t("appearance.foldLines")} hint={t("appearance.foldLinesHint")}>
           <Segmented
@@ -464,12 +517,9 @@ export function ConversationPage() {
             onChange={(v) => setUiPref("foldLines", migrateFoldLines(Number(v)))}
           />
         </SettingRow>
-        <SettingRow label={t("appearance.foldOlderReplies")} hint={t("appearance.foldOlderRepliesHint")}>
-          <Toggle checked={ui.foldOlderReplies} disabled={!ui.foldLong} onChange={(v) => setUiPref("foldOlderReplies", v)} />
-        </SettingRow>
       </Section>
 
-      {/* Module sections on this page (批注, 侧边对话). 输入框 moved to 输入区; 书签条 and 成果 to 右侧栏与留白 (owner 2026-10-18). */}
+      {/* Module sections on this page (侧边对话, 记为批注). 输入框 moved to 输入区; 书签条 and 成果 to 右侧栏与留白 (owner 2026-10-18). */}
       <SettingsSections page="conversation" />
     </>
   );
@@ -493,6 +543,18 @@ function OwnerMayPassAsksRow() {
     <SettingRow label={t("queue.ownerMayPassAsks")} hint={error ?? t("queue.ownerMayPassAsksHint")}>
       <Toggle disabled={value === undefined} checked={value ?? true} onChange={(v) => void patch({ queue: { ownerMayPassAsks: v } })} />
     </SettingRow>
+  );
+}
+
+/** 协作 → 排队顺序 (owner 2026-10-19; was a host card on 输入区): next to 消息投递. */
+export function QueueOrderSection() {
+  const { t } = useI18n();
+  const supported = useTargetFeatures().has(ADMISSION_ORDER_FEATURE);
+  if (!supported) return null;
+  return (
+    <Section id={settingsAnchorId("queueOrder")} title={t("queue.orderSection")} hint={t("queue.orderSectionHint")}>
+      <OwnerMayPassAsksRow />
+    </Section>
   );
 }
 
@@ -540,13 +602,6 @@ export function ComposerPage() {
           </SettingRow>
         )}
       </Section>
-      {/* A host setting on this local page (owner 2026-10-18): its own card with the host chip; not in the
-          panel, which holds local settings only. */}
-      {!panel && (
-        <SettingsHostSection id={settingsAnchorId("queueOrder")} title={t("queue.orderSection")} requires={[ADMISSION_ORDER_FEATURE]}>
-          <OwnerMayPassAsksRow />
-        </SettingsHostSection>
-      )}
       <Section id={settingsAnchorId("queuePanel")} title={t("queue.panelFold")}>
         <SettingRow label={t("shell.composer.panelOpen")} hint={t(ui.queuePanelFold === "auto" ? "queue.panelFold.autoHint" : "queue.panelFold.openHint")}>
           <Segmented
@@ -560,6 +615,8 @@ export function ComposerPage() {
             <Toggle checked={ui.queueSectionStrip} onChange={(v) => setUiPref("queueSectionStrip", v)} />
           </SettingRow>
         )}
+        {/* 排队顺序 is the host's (owner 2026-10-19: on 协作, next to 消息投递); here only a way there. */}
+        {admissionOrder && !panel && <LinkRow label={t("queue.ownerMayPassAsks")} link={t("queue.orderLink")} onClick={() => openSettings("collab", { anchor: "queueOrder" })} />}
       </Section>
       {/* Names (owner 2026-10-18, N3): 状态行 right above the input, 底栏 below it; each section says where. */}
       <Section id={settingsAnchorId("aboveInput")} title={t("shell.status.aboveInput")} hint={t("shell.status.aboveInputHint")}>

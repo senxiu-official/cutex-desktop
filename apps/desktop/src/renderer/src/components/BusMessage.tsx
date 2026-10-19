@@ -2,7 +2,8 @@
 import { useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronRight } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
-import { selectedFeatures, useApp } from "../store";
+import { useApp } from "../store";
+import { convFeaturesOf, useConvScope } from "../lib/conversationScope";
 import { useUiPrefs } from "../lib/prefs";
 import { AGENT_MESSAGES_V2, deliveryKindOf, stripLegacyPrefix, type AgentEnvelope, type DeliveryKind } from "../lib/agentMessages";
 import { senderLabel } from "../lib/systemSenders";
@@ -21,7 +22,8 @@ import { ScriptText } from "./ScriptText";
  */
 export function BusMessage({ direction, name: rawName, mode, text: raw, onContextMenu, kind = null, downgraded = false, messageId = null, envelope = null, senderId = null, sourceKind = null, recipientRuntime = "codex" }: { direction: "in" | "out"; name: string; mode: string | null; text: string; onContextMenu: React.MouseEventHandler; kind?: DeliveryKind | null; downgraded?: boolean; messageId?: string | null; envelope?: AgentEnvelope | null; /** Received only: the sender id / source kind, so cutex services show as 委托系统 / Cutex 系统 (lib/systemSenders). */ senderId?: string | null; sourceKind?: string | null; /** The runtime of the agent the message went to (a Claude agent always waits for the turn end). */ recipientRuntime?: "codex" | "claude" }) {
   const { t } = useI18n();
-  const v2 = useApp((s) => selectedFeatures(s).has(AGENT_MESSAGES_V2));
+  const conv = useConvScope();
+  const v2 = useApp((s) => convFeaturesOf(conv, s).has(AGENT_MESSAGES_V2));
   // History from before v2: drop the exact default `[message from X] ` prefix (contract §6.6).
   const text = v2 && direction === "in" && !envelope ? stripLegacyPrefix(raw, rawName) : raw;
   const { agentMessages } = useUiPrefs();

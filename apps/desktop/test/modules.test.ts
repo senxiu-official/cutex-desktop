@@ -47,6 +47,11 @@ async function gated(features: readonly string[] | null) {
 
 const MOCK_REMOTE = ["management-client-tokens", "session-attachments", "fs-dir-browse"];
 
+/** The side components' derived pane kinds (v1.17, §24.4): id, single / multi, binding (agent / workspace / follow → follow, host → host). */
+const SIDE_KINDS = ["artifacts.library single follow", "artifacts.view multi host", "bookmarks.list single host", "browser.tab multi host", "conversation.turnPeek multi host", "delegations.detail multi host", "diff.view multi follow", "notes.list single host", "notes.note multi host", "side-chat.chat single follow", "status:alarms.status single follow", "status:background-terminals.status single follow", "status:delegations.status single follow", "status:goal.status single follow", "status:jobs.status single follow", "status:plan.status single follow", "status:subagents.status single follow", "subagents.thread multi follow", "terminal.pty multi follow", "workspace.changes single follow", "workspace.files single follow", "workspace.preview multi follow"];
+/** The page kinds the mock install derives (`page:<main.page id>`, pages without an Aside). */
+const PAGE_KINDS = ["page:agent-config.newAgent", "page:approvals.page", "page:delegations.page", "page:jobs.page", "page:projects.page", "page:quick-chats.draft", "page:services.page"];
+
 describe("module registry", () => {
   it("ids are valid and unique; dependencies exist and have no cycle; every module activates", async () => {
     const ids = MODULES.map((m) => m.id);
@@ -215,7 +220,7 @@ describe("module registry", () => {
   });
 
   it("the core modules are locked", () => {
-    expect(MODULES.filter((m) => m.required).map((m) => m.id)).toEqual(["shell", "conversation", "connection", "agent-config", "notifications", "about"]);
+    expect(MODULES.filter((m) => m.required).map((m) => m.id)).toEqual(["shell", "conversation", "connection", "agent-config", "notifications", "about", "onboarding"]);
   });
 });
 
@@ -291,8 +296,8 @@ describe("module import boundaries", () => {
     }
   });
 
-  it("the page / nav shell (App, Sidebar, PageTitle) names no feature (迁完, §9 step 3)", () => {
-    for (const rel of ["App.tsx", "components/Sidebar.tsx", "components/PageTitle.tsx"]) {
+  it("the page / nav shell (App, Sidebar, PageTitle, PaneHost + its layout model, store, file, kinds and services) names no feature (迁完, §9 step 3; panes steps 1b, 2, 3)", () => {
+    for (const rel of ["App.tsx", "components/Sidebar.tsx", "components/PageTitle.tsx", "components/PaneHost.tsx", "lib/paneLayout.ts", "lib/paneStore.ts", "lib/paneFile.ts", "lib/paneKinds.tsx", "lib/paneServices.ts"]) {
       const code = readFileSync(join(SRC, rel), "utf8")
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
@@ -369,6 +374,24 @@ describe("module import boundaries", () => {
     }
   });
 
+  it("pane kinds (v1.17, §24): core.conversation, one per side component (same id), page:<id> per main.page without an Aside; no module contributes pane.kind yet", async () => {
+    const { derivePaneKinds } = await import("../src/renderer/src/lib/paneKinds");
+    const { host } = await gated([...MOCK_REMOTE, ...MOCK_BASE_FEATURES, ...MOCK_NEW_FEATURES]);
+    expect(host.snapshot("pane.kind")).toEqual([]);
+    expect(SLOT_SPECS["pane.kind"].unavailable).toBe("hide");
+    const kinds = derivePaneKinds({ panes: host.snapshot("pane.kind"), side: host.snapshot("side.component"), status: host.snapshot("conversation.status"), pages: host.snapshot("main.page") });
+    expect(kinds[0]).toMatchObject({ id: "core.conversation", source: "core", instances: "multi", binding: "agent", item: null });
+    expect(kinds.filter((k) => k.source === "side").map((k) => `${k.id} ${k.instances} ${k.binding}`).sort()).toEqual(SIDE_KINDS);
+    const sideIds = [...host.snapshot("side.component").filter((e) => e.mode === "show").map((e) => e.item.id), ...host.snapshot("conversation.status").filter((e) => e.mode === "show" && e.item.side !== false).map((e) => `status:${e.item.id}`)].sort();
+    expect(kinds.filter((k) => k.source === "side").map((k) => k.id).sort()).toEqual(sideIds);
+    const pages = host.snapshot("main.page").filter((e) => e.mode === "show");
+    expect(kinds.filter((k) => k.source === "page").map((k) => k.id).sort()).toEqual(pages.filter((e) => !e.item.Aside).map((e) => `page:${e.item.id}`).sort());
+    expect(kinds.filter((k) => k.source === "page").every((k) => k.instances === "single" && k.binding === "none")).toBe(true);
+    // 设置 (an Aside) stays a full-window page: no pane kind.
+    expect(kinds.some((k) => k.id === "page:shell.settings")).toBe(false);
+    expect(kinds.filter((k) => k.source === "page").map((k) => k.id).sort()).toEqual(PAGE_KINDS);
+  });
+
   it("side components: ids unique next to the status categories' (status:<id>), placements valid", async () => {
     for (const features of [[...MOCK_REMOTE, ...MOCK_BASE_FEATURES, ...MOCK_NEW_FEATURES], [...MOCK_BASE_FEATURES]]) {
       const { host } = await gated(features);
@@ -387,7 +410,7 @@ describe("module import boundaries", () => {
         .snapshot("side.component")
         .map((e) => `${e.item.id} (${e.mode})`)
         .sort(),
-    ).toEqual(["artifacts.library (show)", "artifacts.view (show)", "bookmarks.list (show)", "browser.tab (show)", "conversation.agent (show)", "conversation.turnPeek (show)", "delegations.detail (show)", "diff.view (show)", "notes.list (show)", "notes.note (show)", "side-chat.chat (show)", "subagents.thread (show)", "terminal.pty (show)", "workspace.changes (show)", "workspace.files (show)", "workspace.preview (show)"]);
+    ).toEqual(["artifacts.library (show)", "artifacts.view (show)", "bookmarks.list (show)", "browser.tab (show)", "conversation.turnPeek (show)", "delegations.detail (show)", "diff.view (show)", "notes.list (show)", "notes.note (show)", "side-chat.chat (show)", "subagents.thread (show)", "terminal.pty (show)", "workspace.changes (show)", "workspace.files (show)", "workspace.preview (show)"]);
     // A referable component (toRef) needs an id refs accept as a kind (lowercase, §19.6).
     const referable = host.snapshot("side.component").filter((e) => e.item.toRef);
     expect(referable.length).toBeGreaterThan(0);
@@ -431,10 +454,9 @@ describe("module gating snapshot (mock featureLists)", () => {
     "notifications.settings",
     "shell.me",
     "connection.hosts",
+    "shell.access",
     "shell.users",
-    "remote-access.page",
     "proxy.page",
-    "peers.page",
     "agent-config.profiles",
     "agent-config.defaults",
     "agent-config.instructions",
@@ -453,10 +475,10 @@ describe("module gating snapshot (mock featureLists)", () => {
     "updater.page",
     "shell.about",
   ];
-  // 互联 (module peers) is its own page right after 接入 (settings audit 2026-10-15) and needs peers-v2. 用户 is
-  // the shell's; its management is the users module's section. NCI 远程作业 (module nci) is off by default.
+  // 访问管理 (连接 restructure 2026-10-19) is the shell's; 用户 / 接入 / 互联 are its parts (users / remote-access /
+  // peers sections), no pages of their own. NCI 远程作业 (module nci) is off by default.
   // 后端更新 (backend-upgrade, in 系统 right before 更新与诊断 since 2026-10-15) needs its capability.
-  const BASE_PAGES = ALL_PAGES.filter((p) => p !== "backend-upgrade.page" && p !== "peers.page");
+  const BASE_PAGES = ALL_PAGES.filter((p) => p !== "backend-upgrade.page");
 
   // Status categories (step 2): 目标 / 计划 / 后台终端 / 子 agent / 委托 / 作业, in this order.
   const BASE_STATUS = ["goal.status", "plan.status", "background-terminals.status", "subagents.status"];
@@ -529,16 +551,16 @@ describe("module gating snapshot (mock featureLists)", () => {
     // Claude 账户 is a section of Profile, not a page (owner 2026-10-10): the same pages as ?legacy.
     expect(pages).toEqual(ALL_PAGES);
     // 更新与诊断 on 通用; the capsule's own settings on 状态显示 (v1.2); 远程访问's three sections; Claude 账户 after the
-    // Profile list (claude-accounts); on 协作 轮换主管 (owner-rotation), 服务 (services-persistent-approval), 消息投递
+    // Profile list (claude-accounts) and 从 CC Switch 导入 after it (profile-import); on 协作 轮换主管 (owner-rotation), 服务 (services-persistent-approval), 消息投递
     // and the 高级 card (消息总线 + 卡住的消息 with agent-bus-stuck-messages) last — page order is by `order`.
-    expect(sections).toEqual(["notes.settings", "side-chat.settings", "status-capsule.settings", "bookmarks.settings", "artifacts.settings", "owner-notify.settings", "users.manage", "remote-access.listen", "remote-access.cors", "remote-access.pairing", "proxy.update", "proxy.host", "claude-accounts.accounts", "projects.rotation.settings", "services.persistApproval.settings", "agent-bus.delivery", "agent-bus.advanced", "runtime-packages.settings", "runtimes.installed", "about.knownIssues", "about.changelog", "about.links"]);
+    expect(sections).toEqual(["side-chat.settings", "side-chat.summarySettings", "status-capsule.settings", "bookmarks.settings", "artifacts.settings", "owner-notify.settings", "peers.access", "users.peers", "remote-access.listen", "remote-access.cors", "users.people", "users.devices", "remote-access.onlineDesktops", "remote-access.pairing", "proxy.update", "proxy.host", "claude-accounts.accounts", "profile-import.ccSwitch", "projects.rotation.settings", "services.persistApproval.settings", "agent-bus.delivery", "shell.queueOrder", "agent-bus.advanced", "runtime-packages.settings", "runtimes.installed", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual([...BASE_STATUS, "delegations.status", "jobs.status", "alarms.status"]);
   });
 
   it("?legacy: same pages but 跨主机; owner-notify / runtime packages / CORS hidden; listen + pairing + installed runtimes say 需要升级; no 委托 / 作业", async () => {
     const { host, pages, sections, status } = await gated([...MOCK_REMOTE, ...MOCK_BASE_FEATURES]);
     expect(pages).toEqual(BASE_PAGES);
-    expect(sections).toEqual(["status-capsule.settings", "bookmarks.settings", "remote-access.listen (notice: listen-settings)", "remote-access.pairing (notice: device-pairing)", "proxy.update", "proxy.host (notice: proxy-modes)", "agent-bus.delivery", "agent-bus.advanced", "runtimes.installed (notice: runtimes-view)", "about.knownIssues", "about.changelog", "about.links"]);
+    expect(sections).toEqual(["status-capsule.settings", "bookmarks.settings", "remote-access.listen (notice: listen-settings)", "remote-access.pairing (notice: device-pairing)", "proxy.update", "proxy.host (notice: proxy-modes)", "agent-bus.delivery", "shell.queueOrder", "agent-bus.advanced", "runtimes.installed (notice: runtimes-view)", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual(BASE_STATUS);
     expect(host.statuses().get("owner-notify")!.state).toEqual({ kind: "unavailable", missing: { capabilities: ["owner-messages"], modules: [], hostKind: false, waiting: false } });
     expect(host.statuses().get("runtime-packages")!.state.kind).toBe("unavailable");
@@ -550,7 +572,7 @@ describe("module gating snapshot (mock featureLists)", () => {
   it("before capabilities load: capability modules wait, notices are flagged waiting", async () => {
     const { host, pages, sections, status } = await gated(null);
     expect(pages).toEqual(BASE_PAGES);
-    expect(sections).toEqual(["status-capsule.settings", "bookmarks.settings", "remote-access.listen (notice, waiting: listen-settings)", "remote-access.pairing (notice, waiting: device-pairing)", "proxy.update", "proxy.host (notice, waiting: proxy-modes)", "agent-bus.delivery", "agent-bus.advanced", "runtimes.installed (notice, waiting: runtimes-view)", "about.knownIssues", "about.changelog", "about.links"]);
+    expect(sections).toEqual(["status-capsule.settings", "bookmarks.settings", "remote-access.listen (notice, waiting: listen-settings)", "remote-access.pairing (notice, waiting: device-pairing)", "proxy.update", "proxy.host (notice, waiting: proxy-modes)", "agent-bus.delivery", "shell.queueOrder", "agent-bus.advanced", "runtimes.installed (notice, waiting: runtimes-view)", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual(BASE_STATUS);
     expect(host.statuses().get("owner-notify")!.state).toMatchObject({ kind: "unavailable", missing: { waiting: true } });
   });

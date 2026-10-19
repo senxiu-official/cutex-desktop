@@ -1,25 +1,31 @@
-// The right side's pure layout model (lib/sideLayout.ts; docs/desktop-modules.md §18; RFC
+// The tool area's pure layout model (lib/sideLayout.ts; docs/desktop-modules.md §24, §18; RFC
 // right-panel-rfc-20261009 §4.3–§4.4, test list §8.4): place(), the reducers, visibility, heights,
 // persistence. Layouts are plain JSON, so every case builds one by opening components in order.
+// v1.17 port (§24): a page is a tool COLUMN (≤ MAX_PAGES = 2, all on screen), a card a PANE (≤ 3 per
+// column, ≤ MAX_TOOL_PANES = 4 in all, then tabs of the bottom pane), and there are no per-agent views.
+// Each RFC scenario keeps its number; what it now expects (and why) is said in its title.
 import { describe, expect, it } from "vitest";
 import type { SideBinding, SidePlacement } from "../src/renderer/src/modules/slots";
 import type { ItemId } from "../src/renderer/src/modules/types";
 import {
   applyOpen,
   cardHeights,
+  cardHolds,
   closeIfEmptied,
   closeInstances,
   CARD_GAP,
   CARD_HEADER,
+  columnsOnScreen,
   DEFAULT_ORDER,
   dragGap,
   dropDeletedAgents,
   dropEmptyPage,
-  dropViews,
   emptyLayout,
   equalizeCards,
   findCard,
   findPage,
+  fitLayout,
+  foldPages,
   hasContentFor,
   instanceVisible,
   isNarrow,
@@ -29,14 +35,12 @@ import {
   MAX_INSTANCES,
   MAX_OVERRIDES,
   MAX_PAGES,
-  MAX_VIEWS,
-  mergePages,
   MIN_CARD_HEIGHT,
+  mergePages,
   moveCard,
   moveInstance,
   movePage,
   newCardIndex,
-  NO_AGENT,
   openLauncherPage,
   pageInView,
   pageName,
@@ -51,24 +55,24 @@ import {
   restoreDefault,
   restoreInstances,
   restoreKindDefault,
-  restoreView,
   sanitizeLayout,
-  saveView,
   setCardSizes,
   setCollapsed,
+  shownPages,
   shownTab,
   sideWidth,
   SINGLETON_KEY,
   splitInstance,
   STATE_LIMIT,
-  switchAgentView,
   switchPage,
+  toolAreaShown,
   visibleCards,
   type PlaceSpec,
   type SideLayout,
   type SidePlaceDecision,
   type SideViewContext,
 } from "../src/renderer/src/lib/sideLayout";
+import { MAX_TOOL_PANES } from "../src/renderer/src/lib/paneLayout";
 
 // ── Fixtures: the §4.4 default declarations ────────────────────────────────────────────────────
 
@@ -142,7 +146,10 @@ function ctx(over: Partial<SideViewContext> = {}): SideViewContext {
   return { hostId: "local", sessionId: "A", workspaceKey: "w1", available: () => true, ...over };
 }
 
-/** S0 of §4.4: one page「工作区」with files / changes / status / terminal [t1, t2]; column open. */
+/**
+ * S0 of §4.4, v1.17: one tool column「工作区」with files / changes / terminal [t1, t2] — three panes, the
+ * column is full — and the status category as a tab of the bottom pane (§24: down to 3 rows, then tabs).
+ */
 function s0() {
   let l = emptyLayout();
   const files = open(l, "workspace.files");
@@ -158,8 +165,32 @@ function s0() {
   return { layout: l, files: files.id, changes: changes.id, t1: t1.id, t2: t2.id, jobs: jobs.id };
 }
 
+/** S1: a column with room — files / changes (two panes). */
+function s1() {
+  let l = emptyLayout();
+  const files = open(l, "workspace.files");
+  l = files.layout;
+  const changes = open(l, "workspace.changes");
+  l = changes.layout;
+  return { layout: l, files: files.id, changes: changes.id };
+}
+
+/** `kind` opened into a new (launcher) column of its own: the second tool column. */
+function inNewColumn(layout: SideLayout, kind: ItemId, o: OpenOpts = {}) {
+  const made = openLauncherPage(layout);
+  return open(made.layout, kind, { ...o, page: made.pageId! });
+}
+
+/** Every pane holds tabs of its own kind (no full column took another kind's tab). */
 function assertNeverMixed(layout: SideLayout) {
   for (const page of layout.pages) for (const card of page.cards) for (const id of card.tabs) expect(layout.instances[id]!.kind).toBe(card.kind);
+}
+
+/** The limits of §24: ≤ MAX_PAGES columns, ≤ 3 panes each, ≤ MAX_TOOL_PANES in all. */
+function assertLimits(layout: SideLayout) {
+  expect(layout.pages.length).toBeLessThanOrEqual(MAX_PAGES);
+  for (const page of layout.pages) expect(page.cards.length).toBeLessThanOrEqual(MAX_CARDS);
+  expect(layout.pages.reduce((n, p) => n + p.cards.length, 0)).toBeLessThanOrEqual(MAX_TOOL_PANES);
 }
 
 function sizesSum(layout: SideLayout) {
@@ -168,73 +199,92 @@ function sizesSum(layout: SideLayout) {
 
 // ── S0 ─────────────────────────────────────────────────────────────────────────────────────────
 
-describe("S0 (declared order, one page)", () => {
-  it("builds the workspace page in declared order; the terminal card holds two tabs", () => {
-    const { layout, t1, t2 } = s0();
+describe("S0 (declared order, one column)", () => {
+  it("builds the workspace column in declared order, three panes; the terminal pane holds two tabs, then the status tab (column full)", () => {
+    const { layout, t1, t2, jobs } = s0();
     expect(layout.pages).toHaveLength(1);
     expect(layout.pages[0]!.groups).toEqual(["workspace"]);
-    expect(kinds(layout)).toEqual(["workspace.files", "workspace.changes", "status:jobs.tasks", "terminal.pty"]);
-    expect(cardOf(layout, t1).tabs).toEqual([t1, t2]);
-    expect(cardOf(layout, t1).active).toBe(t2);
+    expect(kinds(layout)).toEqual(["workspace.files", "workspace.changes", "terminal.pty"]);
+    expect(cardOf(layout, t1).tabs).toEqual([t1, t2, jobs]);
+    expect(cardOf(layout, jobs).active).toBe(jobs);
     expect(layout.open).toBe(true);
     expect(layout.activePage).toBe(layout.pages[0]!.id);
     sizesSum(layout).forEach((s) => expect(s).toBeCloseTo(1));
-    assertNeverMixed(layout);
+    assertLimits(layout);
+  });
+
+  it("S1: down to 3 rows first — a column with room gets a new pane at its declared order", () => {
+    const { layout } = s1();
+    const t = open(layout, "terminal.pty", { binding: ws("w1"), key: "t1" });
+    expect(t.decision).toMatchObject({ op: "insert", card: { new: { index: 2 } } });
+    expect(kinds(t.layout)).toEqual(["workspace.files", "workspace.changes", "terminal.pty"]);
+    assertNeverMixed(t.layout);
   });
 });
 
 // ── §4.4 scenarios ─────────────────────────────────────────────────────────────────────────────
 
-describe("§4.4 scenarios", () => {
-  it("1: a file link → a preview card under 改动 (order 300); the next unpinned preview replaces it in place", () => {
-    const { layout } = s0();
+describe("§4.4 scenarios (v1.17: one column, ≤ 3 panes, then tabs)", () => {
+  it("1: a file link → a preview pane under 改动 (order 300) while there is room; full column → a tab of the bottom pane; the next unpinned preview replaces it in place", () => {
+    const room = open(s1().layout, "workspace.preview", { key: "a.ts", transient: true });
+    expect(room.decision).toMatchObject({ op: "insert", via: "rule", card: { new: { index: 2 } } });
+    expect(kinds(room.layout)).toEqual(["workspace.files", "workspace.changes", "workspace.preview"]);
+    const { layout, t1 } = s0();
     const a = open(layout, "workspace.preview", { key: "a.ts", transient: true });
-    expect(a.decision).toMatchObject({ op: "insert", via: "rule", card: { new: { index: 2 } } });
-    expect(kinds(a.layout)).toEqual(["workspace.files", "workspace.changes", "workspace.preview", "status:jobs.tasks", "terminal.pty"]);
+    expect(a.decision).toMatchObject({ op: "insert", via: "limit", card: { id: cardOf(layout, t1).id } });
+    expect(kinds(a.layout)).toEqual(["workspace.files", "workspace.changes", "terminal.pty"]);
     const b = open(a.layout, "workspace.preview", { key: "b.ts", transient: true });
     expect(b.decision).toEqual({ op: "replace", instance: a.id });
     expect(b.id).not.toBe(a.id);
     expect(b.layout.instances[a.id]).toBeUndefined();
-    expect(cardOf(b.layout, b.id).tabs).toEqual([b.id]);
+    expect(cardOf(b.layout, b.id).tabs).toContain(b.id);
     expect(b.layout.instances[b.id]!.key).toBe("b.ts");
+    assertLimits(b.layout);
   });
 
-  it("2: 改动 → b.ts opens a diff card (order 400); c.ts is a new tab of the same card", () => {
-    const { layout } = s0();
+  it("2: 改动 → b.ts opens a diff (order 400): the column is full after the preview → a tab of its bottom pane; c.ts joins that same pane", () => {
+    const { layout } = s1();
     const p = open(layout, "workspace.preview", { key: "a.ts", transient: true });
     const b = open(p.layout, "diff.view", { key: "git:b.ts" });
-    expect(b.decision).toMatchObject({ op: "insert", via: "rule" });
-    expect(kinds(b.layout)).toEqual(["workspace.files", "workspace.changes", "workspace.preview", "diff.view", "status:jobs.tasks", "terminal.pty"]);
+    expect(b.decision).toMatchObject({ op: "insert", via: "limit", card: { id: cardOf(p.layout, p.id).id } });
+    expect(kinds(b.layout)).toEqual(["workspace.files", "workspace.changes", "workspace.preview"]);
     const c = open(b.layout, "diff.view", { key: "git:c.ts" });
     expect(cardOf(c.layout, c.id).id).toBe(cardOf(b.layout, b.id).id);
-    expect(cardOf(c.layout, c.id).tabs).toEqual([b.id, c.id]);
+    expect(cardOf(c.layout, c.id).tabs).toEqual([p.id, b.id, c.id]);
+    expect(cardHolds(c.layout, cardOf(c.layout, c.id), "diff.view")).toBe(true);
   });
 
-  it("3: 查看变更 (turn diff) joins the git diff card", () => {
+  it("3: 查看变更 (turn diff) joins the pane holding the git diff", () => {
     const { layout } = s0();
     const git = open(layout, "diff.view", { key: "git:a.ts" });
     const turn = open(git.layout, "diff.view", { key: "turn:t9:a.ts" });
-    expect(cardOf(turn.layout, turn.id).tabs).toEqual([git.id, turn.id]);
+    expect(cardOf(turn.layout, turn.id).id).toBe(cardOf(git.layout, git.id).id);
+    expect(cardOf(turn.layout, turn.id).tabs.slice(-2)).toEqual([git.id, turn.id]);
   });
 
-  it("4: ＋ in the terminal card (explicit page) adds a tab after the active one", () => {
-    const { layout, t1, t2 } = s0();
+  it("4: ＋ in the terminal pane (explicit column) adds a tab after the active one", () => {
+    const { layout, t1, t2, jobs } = s0();
     const page = layout.pages[0]!.id;
     const t3 = open(layout, "terminal.pty", { binding: ws("w1"), key: "t3", page });
     expect(t3.decision).toMatchObject({ via: "explicit", card: { id: cardOf(layout, t1).id } });
-    expect(cardOf(t3.layout, t3.id).tabs).toEqual([t1, t2, t3.id]);
+    expect(cardOf(t3.layout, t3.id).tabs).toEqual([t1, t2, jobs, t3.id]);
     // after the ACTIVE tab, not at the end
     const l2 = applyOpen(t3.layout, { op: "activate", instance: t1 }, { kind: "terminal.pty", binding: ws("w1"), key: "t1", state: null, v: 1, pinned: false }, ++clock, { reveal: true }).layout;
     const t4 = open(l2, "terminal.pty", { binding: ws("w1"), key: "t4", page });
-    expect(cardOf(t4.layout, t4.id).tabs).toEqual([t1, t4.id, t2, t3.id]);
+    expect(cardOf(t4.layout, t4.id).tabs).toEqual([t1, t4.id, t2, jobs, t3.id]);
   });
 
-  it("5: a browser tab (no matching page) → new page [browser], appended and switched to", () => {
+  it("5: a browser tab (no column of its group) → the right-most column (§24: no new column of its own); full → a tab there", () => {
     const { layout } = s0();
     const docs = open(layout, "browser.tab", { key: "service:docs" });
-    expect(docs.decision).toMatchObject({ via: "otherwise", page: { new: { groups: ["browser"], index: 1 } } });
-    expect(docs.layout.pages.map((p) => p.groups)).toEqual([["workspace"], ["browser"]]);
-    expect(docs.layout.activePage).toBe(docs.layout.pages[1]!.id);
+    expect(docs.decision).toMatchObject({ page: { id: layout.pages[0]!.id } });
+    expect(docs.layout.pages.map((p) => p.groups)).toEqual([["workspace"]]);
+    const roomy = open(s1().layout, "browser.tab", { key: "service:docs" });
+    expect(roomy.decision).toMatchObject({ via: "otherwise", page: { id: roomy.layout.pages[0]!.id }, card: { new: {} } });
+    // the right-most of two columns
+    const two = inNewColumn(s1().layout, "side-chat.chat");
+    const right = open(two.layout, "browser.tab", { key: "service:docs" });
+    expect(right.decision).toMatchObject({ via: "otherwise", page: { id: two.layout.pages[1]!.id } });
   });
 
   it("6: a system event opens nothing (badges are pill-side; see sidePills.test.ts)", () => {
@@ -242,33 +292,36 @@ describe("§4.4 scenarios", () => {
     expect(layout.pages).toHaveLength(1);
   });
 
-  it("7: side chat per agent: new page [chat]; again for A = activate; B = another tab of the same card", () => {
+  it("7: side chat per agent: into the column (a tab of its bottom pane when full); again for A = activate; B = another tab of the same pane", () => {
     const { layout } = s0();
     const a = open(layout, "side-chat.chat");
-    expect(a.layout.pages.map((p) => p.groups[0])).toEqual(["workspace", "chat"]);
+    expect(a.layout.pages).toHaveLength(1);
     const again = open(a.layout, "side-chat.chat");
     expect(again.decision).toEqual({ op: "activate", instance: a.id });
     const b = open(a.layout, "side-chat.chat", { binding: agent("B") });
     expect(b.decision).toMatchObject({ op: "insert", card: { id: cardOf(a.layout, a.id).id } });
-    expect(cardOf(b.layout, b.id).tabs).toEqual([a.id, b.id]);
+    expect(cardOf(b.layout, b.id).tabs.slice(-2)).toEqual([a.id, b.id]);
     // only A's tab is visible while A is selected
     const card = cardOf(b.layout, b.id);
     expect(shownTab(b.layout, card, ctx({ sessionId: "A" }))).toBe(a.id);
     expect(shownTab(b.layout, card, ctx({ sessionId: "B" }))).toBe(b.id);
   });
 
-  it("8: switching to agent C hides the chat page (D27′: nothing of C's on it); the follow page stays", () => {
+  it("8: focusing agent C hides a column with nothing of C's (one layout for every agent, §24); the follow column stays", () => {
     const { layout } = s0();
-    const a = open(layout, "side-chat.chat");
+    const a = inNewColumn(layout, "side-chat.chat");
     const b = open(a.layout, "side-chat.chat", { binding: agent("B") });
     const chat = findPage(b.layout, pageOf(b.layout, a.id))!;
+    expect(pageOf(b.layout, b.id)).toBe(chat.id);
     const c = ctx({ sessionId: "C" });
     expect(pageVisibility(b.layout, chat, c)).toBe("hidden");
     expect(lanePages(b.layout, c).map((p) => p.id)).toEqual([layout.pages[0]!.id]);
     expect(visibleCards(b.layout, chat, c)).toEqual([]);
+    // for A both columns are on screen, side by side
+    expect(shownPages(b.layout, ctx({ sessionId: "A" })).map((p) => p.id)).toEqual(b.layout.pages.map((p) => p.id));
   });
 
-  it("9: files moved to a new page [user:P]; closed (the page goes) and reopened → a new page with that group; the override follows", () => {
+  it("9: files moved to a new column [user:P]; closed (the column goes) and reopened → a new column with that group; the override follows", () => {
     const { layout, files } = s0();
     const card = cardOf(layout, files).id;
     const moved = moveCard(layout, card, { newPage: true }, ++clock, orderOf);
@@ -283,16 +336,16 @@ describe("§4.4 scenarios", () => {
     const p5 = pageOf(again.layout, again.id);
     expect(p5).not.toBe(p4);
     expect(again.layout.overrides["workspace.files"]!.page).toBe(p5);
-    // next time: the page is there → used directly
     const changes = again.layout.pages[0]!.cards[0]!.tabs[0]!;
     expect(again.layout.instances[changes]!.kind).toBe("workspace.changes");
   });
 
-  it("10: merging the chat page into the workspace page unites groups and re-points overrides; later chats land there", () => {
-    const { layout } = s0();
-    const a = open(layout, "side-chat.chat");
+  it("10: merging the chat column into the workspace column unites groups and re-points overrides; later chats land there", () => {
+    const first = open(emptyLayout(), "workspace.files");
+    const a = inNewColumn(first.layout, "side-chat.chat");
     const chatPage = pageOf(a.layout, a.id);
     const workPage = a.layout.pages[0]!.id;
+    expect(findPage(a.layout, chatPage)!.groups).toEqual(["chat"]);
     const withOv = { ...a.layout, overrides: { "side-chat.chat": { page: chatPage, groups: ["chat"], at: 1 } } };
     const merged = mergePages(withOv, chatPage, workPage);
     expect(merged.pages).toHaveLength(1);
@@ -302,30 +355,46 @@ describe("§4.4 scenarios", () => {
     sizesSum(merged).forEach((s) => expect(s).toBeCloseTo(1));
     const d = open({ ...merged, overrides: {} }, "side-chat.chat", { binding: agent("D") });
     expect(pageOf(d.layout, d.id)).toBe(workPage);
+    // merging a full column into another: the panes beyond 3 become tabs of the third
+    const full = inNewColumn(s0().layout, "side-chat.chat");
+    const into = mergePages(full.layout, full.layout.pages[1]!.id, full.layout.pages[0]!.id);
+    assertLimits(into);
+    expect(cardOf(into, full.id).id).toBe(into.pages[0]!.cards[2]!.id);
   });
 
-  it("11: a full page (6 cards) → a new page with the page's groups; never into another kind's card", () => {
-    let l = s0().layout;
-    l = open(l, "workspace.preview", { key: "a.ts" }).layout;
-    l = open(l, "diff.view", { key: "git:a.ts" }).layout;
-    expect(l.pages[0]!.cards).toHaveLength(MAX_CARDS);
-    const wt = open(l, "workspace.worktrees");
-    expect(wt.decision).toMatchObject({ via: "limit", page: { new: { groups: ["workspace"] } } });
-    expect(wt.layout.pages).toHaveLength(2);
-    expect(kinds(wt.layout, 1)).toEqual(["workspace.worktrees"]);
-    assertNeverMixed(wt.layout);
+  it("11: a full column (3 panes) → a tab of its bottom pane (mixed kinds; an empty column gets a new pane first); never more than MAX_TOOL_PANES in all", () => {
+    const { layout, t1 } = s0();
+    const wt = open(layout, "workspace.worktrees");
+    expect(wt.decision).toMatchObject({ via: "limit", page: { id: layout.pages[0]!.id }, card: { id: cardOf(layout, t1).id } });
+    expect(wt.layout.pages).toHaveLength(1);
+    assertLimits(wt.layout);
+    // an empty (launcher) column next to it takes it as a new pane
+    const launcher = openLauncherPage(layout);
+    const wt1 = open({ ...launcher.layout, activePage: layout.pages[0]!.id }, "workspace.worktrees");
+    expect(wt1.decision).toMatchObject({ via: "limit", page: { id: launcher.pageId }, card: { new: {} } });
+    // 3 + 1 panes = MAX_TOOL_PANES: no room anywhere, the next kind is a tab of the column it goes to
+    const two = inNewColumn(layout, "side-chat.chat");
+    expect(two.layout.pages.reduce((n, p) => n + p.cards.length, 0)).toBe(MAX_TOOL_PANES);
+    const wt2 = open({ ...two.layout, activePage: two.layout.pages[0]!.id }, "workspace.worktrees");
+    expect(wt2.decision).toMatchObject({ via: "limit", page: { id: two.layout.pages[0]!.id }, card: { id: cardOf(layout, t1).id } });
+    // (its group's column first: the workspace column, full → its bottom pane)
+    const sub = open(two.layout, "subagents.thread", { key: "th1" });
+    expect(sub.decision).toMatchObject({ op: "insert", page: { id: layout.pages[0]!.id }, card: { id: cardOf(layout, t1).id } });
+    assertLimits(sub.layout);
   });
 
-  it("12: a reference card (turn.peek) falls back to the page in view at order 150; the next one replaces it", () => {
-    const { layout } = s0();
+  it("12: a reference card (turn.peek) falls back to the focused column at order 150 (full: a tab); the next one replaces it; column hidden → the right-most column", () => {
+    const { layout, t1 } = s0();
     const peek = open(layout, "turn.peek", { key: "turn:local:A:36", transient: true });
-    expect(peek.decision).toMatchObject({ via: "rule", page: { id: layout.activePage } });
-    expect(kinds(peek.layout)).toEqual(["workspace.files", "turn.peek", "workspace.changes", "status:jobs.tasks", "terminal.pty"]);
+    expect(peek.decision).toMatchObject({ page: { id: layout.activePage }, card: { id: cardOf(layout, t1).id } });
     const next = open(peek.layout, "turn.peek", { key: "turn:local:A:40", transient: true });
     expect(next.decision).toEqual({ op: "replace", instance: peek.id });
-    // the column closed: "active" does not match → otherwise new page [reference]
+    const roomy = open(s1().layout, "turn.peek", { key: "turn:local:A:36", transient: true });
+    expect(kinds(roomy.layout)).toEqual(["workspace.files", "turn.peek", "workspace.changes"]);
+    // the column hidden: "active" does not match → otherwise the right-most column (no new column)
     const closed = open({ ...layout, open: false }, "turn.peek", { key: "turn:local:A:36", transient: true });
-    expect(closed.decision).toMatchObject({ via: "otherwise", page: { new: { groups: ["reference"] } } });
+    expect(closed.decision).toMatchObject({ via: "limit", page: { id: layout.pages[0]!.id } });
+    expect(open(emptyLayout(), "turn.peek", { key: "k", transient: true }).decision).toMatchObject({ via: "otherwise", page: { new: { groups: ["reference"] } } });
   });
 
   it("13: reset clears overrides / names / order / sizes, replays by lastActiveAt, closes nothing; deterministic", () => {
@@ -334,9 +403,10 @@ describe("§4.4 scenarios", () => {
     const chat = open(l, "side-chat.chat");
     l = chat.layout;
     l = moveCard(l, cardOf(l, base.files).id, { newPage: true }, ++clock, orderOf);
-    l = mergePages(l, pageOf(l, chat.id), l.pages[0]!.id);
+    l = mergePages(l, l.pages[1]!.id, l.pages[0]!.id);
     l = renamePage(l, l.pages[0]!.id, "Mine");
     l = setCardSizes(l, l.pages[0]!.id, { [l.pages[0]!.cards[0]!.id]: 5 });
+    l = moveCard(l, cardOf(l, base.changes).id, { newPage: true }, ++clock, orderOf);
     l = movePage(l, l.pages[1]!.id, -1);
     const before = Object.keys(l.instances).sort();
     const r1 = resetLayout(l, specOf, 99);
@@ -344,13 +414,13 @@ describe("§4.4 scenarios", () => {
     expect(r1).toEqual(r2);
     expect(r1.overrides).toEqual({});
     expect(Object.keys(r1.instances).sort()).toEqual(before);
-    expect(r1.pages.map((p) => p.groups)).toEqual([["workspace"], ["chat"]]);
+    expect(r1.pages.map((p) => p.groups)).toEqual([["workspace"]]);
     expect(r1.pages.every((p) => p.name === undefined)).toBe(true);
-    expect(kinds(r1)).toEqual(["workspace.files", "workspace.changes", "status:jobs.tasks", "terminal.pty"]);
-    expect(cardOf(r1, base.t1).tabs).toEqual([base.t1, base.t2]);
+    expect(kinds(r1)).toEqual(["workspace.files", "workspace.changes", "terminal.pty"]);
+    expect(cardOf(r1, base.t1).tabs.slice(0, 2)).toEqual([base.t1, base.t2]);
     expect(r1.instances[base.t1]!.lastActiveAt).toBe(l.instances[base.t1]!.lastActiveAt);
     sizesSum(r1).forEach((s) => expect(s).toBeCloseTo(1));
-    // the open state is kept
+    assertLimits(r1);
     expect(r1.open).toBe(true);
   });
 });
@@ -369,17 +439,17 @@ describe("place: reuse and transient", () => {
   });
 
   it("activate updates the state (init result), keeps pinned, touches lastActiveAt, makes it the active tab", () => {
-    const { layout, t1, t2 } = s0();
+    const { layout, t1, jobs } = s0();
     const at = ++clock;
     const out = applyOpen(layout, { op: "activate", instance: t1 }, { kind: "terminal.pty", binding: ws("w1"), key: "t1", state: { x: 1 }, v: 2, pinned: false }, at, { reveal: false });
     expect(out.reused).toBe(true);
     expect(out.layout.instances[t1]).toMatchObject({ state: { x: 1 }, v: 2, lastActiveAt: at });
     expect(cardOf(out.layout, t1).active).toBe(t1);
-    expect(cardOf(layout, t2).active).toBe(t2); // input untouched
+    expect(cardOf(layout, t1).active).toBe(jobs); // input untouched
   });
 
   it("a pinned preview is not replaced: the next transient one is a new tab; pin: true opens pinned", () => {
-    const { layout } = s0();
+    const { layout } = s1();
     const a = open(layout, "workspace.preview", { key: "a.ts", transient: true });
     const pinned = pinInstance(a.layout, a.id);
     const b = open(pinned, "workspace.preview", { key: "b.ts", transient: true });
@@ -406,61 +476,63 @@ describe("place: reuse and transient", () => {
   });
 });
 
-describe("place: page choice", () => {
-  it("override: its page → a page with one of its groups → a new page with its groups", () => {
-    const { layout } = s0();
-    const b = open(layout, "browser.tab", { key: "u1" });
+describe("place: column choice", () => {
+  it("override: its column → a column with one of its groups → a new column with its groups", () => {
+    const { layout } = s1();
+    const b = inNewColumn(layout, "browser.tab", { key: "u1" });
     const workPage = layout.pages[0]!.id;
     const browserPage = pageOf(b.layout, b.id);
     const ov = (page: string, groups: string[]) => ({ ...b.layout, overrides: { "workspace.preview": { page, groups, at: 1 } } });
     expect(decide(ov(browserPage, ["x"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { id: browserPage } });
     expect(decide(ov("p999", ["browser"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { id: browserPage } });
     expect(decide(ov("p999", ["workspace", "browser"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { id: workPage } });
-    expect(decide(ov("p999", ["user:p999"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { new: { groups: ["user:p999"] } } });
+    // a new column is refused at MAX_PAGES: the right-most column
+    expect(decide(ov("p999", ["user:p999"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "limit", page: { id: browserPage } });
+    expect(decide({ ...layout, overrides: { "workspace.preview": { page: "p999", groups: ["user:p999"], at: 1 } } }, "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { new: { groups: ["user:p999"] } } });
   });
 
-  it("an explicit page wins over overrides and rules; an unknown explicit page is ignored", () => {
-    const { layout } = s0();
-    const b = open(layout, "browser.tab", { key: "u1" });
+  it("an explicit column wins over overrides and rules; an unknown explicit column is ignored", () => {
+    const { layout } = s1();
+    const b = inNewColumn(layout, "browser.tab", { key: "u1" });
     const browserPage = pageOf(b.layout, b.id);
     const l = { ...b.layout, overrides: { "workspace.preview": { page: layout.pages[0]!.id, groups: ["workspace"], at: 1 } } };
     expect(decide(l, "workspace.preview", { key: "a", page: browserPage })).toMatchObject({ via: "explicit", page: { id: browserPage } });
     expect(decide(l, "workspace.preview", { key: "a", page: "p404" })).toMatchObject({ via: "override" });
   });
 
-  it("prefer is tried in order: diff.view goes to the page containing 改动, not the first workspace page", () => {
+  it("prefer is tried in order: diff.view goes to the column containing 改动, not the first workspace column", () => {
     let l = emptyLayout();
-    l = open(l, "workspace.files").layout; // P1 [workspace] (files only)
+    l = open(l, "workspace.files").layout;
     const ch = open(l, "workspace.changes", { page: undefined });
-    l = moveCard(ch.layout, cardOf(ch.layout, ch.id).id, { newPage: true }, ++clock, orderOf); // changes on its own page
+    l = moveCard(ch.layout, cardOf(ch.layout, ch.id).id, { newPage: true }, ++clock, orderOf);
     const changesPage = pageOf(l, ch.id);
     l = { ...l, overrides: {} };
     expect(decide(l, "diff.view", { key: "git:a" })).toMatchObject({ via: "rule", page: { id: changesPage } });
-    // no changes card anywhere → second candidate (group workspace)
     const noChanges = closeInstances(l, [ch.id]);
     expect(decide(noChanges, "diff.view", { key: "git:a" })).toMatchObject({ via: "rule", page: { id: noChanges.pages[0]!.id } });
   });
 
-  it("otherwise: new-page (default) vs active-page (new page when none is in view)", () => {
-    const { layout } = s0();
-    expect(decide(layout, "browser.tab", { key: "x" })).toMatchObject({ via: "otherwise", page: { new: { groups: ["browser"] } } });
+  it("otherwise: the right-most column (never a new one); active-page: the focused column; a new column only without any", () => {
+    const { layout } = s1();
+    expect(decide(layout, "browser.tab", { key: "x" })).toMatchObject({ via: "otherwise", page: { id: layout.pages[0]!.id } });
     expect(decide(layout, "notes.note", { key: "n1" })).toMatchObject({ via: "otherwise", page: { id: layout.activePage } });
+    const two = inNewColumn(layout, "side-chat.chat");
+    const focusedLeft = { ...two.layout, activePage: two.layout.pages[0]!.id };
+    expect(decide(focusedLeft, "browser.tab", { key: "x" })).toMatchObject({ via: "otherwise", page: { id: two.layout.pages[1]!.id } });
+    expect(decide(focusedLeft, "notes.note", { key: "n1" })).toMatchObject({ via: "otherwise", page: { id: two.layout.pages[0]!.id } });
     expect(decide(emptyLayout(), "notes.note", { key: "n1" })).toMatchObject({ via: "otherwise", page: { new: { groups: ["notes"] } } });
   });
 
-  it("at 9 pages a new page is refused: the page in view, else the last page (via limit)", () => {
+  it(`at ${MAX_PAGES} columns a new column is refused: the right-most column (via limit)`, () => {
     const l = pagesLayout(MAX_PAGES, 1);
-    l.activePage = l.pages[2]!.id;
-    expect(decide(l, "side-chat.chat")).toMatchObject({ via: "limit", page: { id: l.pages[2]!.id } });
-    const noActive = { ...l, activePage: null };
-    expect(decide(noActive, "side-chat.chat")).toMatchObject({ via: "limit", page: { id: l.pages[MAX_PAGES - 1]!.id } });
-    // an override's new page is refused the same way
     const ov = { ...l, overrides: { "side-chat.chat": { page: "p404", groups: ["user:p404"], at: 1 } } };
-    expect(decide(ov, "side-chat.chat")).toMatchObject({ via: "limit", page: { id: l.pages[2]!.id } });
+    expect(decide(ov, "side-chat.chat")).toMatchObject({ via: "limit", page: { id: l.pages[MAX_PAGES - 1]!.id } });
+    expect(openLauncherPage(l).pageId).toBeNull();
+    expect(moveCard(l, l.pages[0]!.cards[0]!.id, { newPage: true }, ++clock, orderOf)).toBe(l);
   });
 });
 
-/** n pages (groups g0…), each with `cards` subagent-thread cards of one tab (built as JSON). */
+/** n columns (groups g0…), each with `cards` subagent-thread panes of one tab (built as JSON). */
 function pagesLayout(n: number, cards: number): SideLayout {
   const l = emptyLayout();
   for (let p = 0; p < n; p++) {
@@ -477,62 +549,56 @@ function pagesLayout(n: number, cards: number): SideLayout {
   return l;
 }
 
-describe("place: card choice and full pages", () => {
-  it("a new card goes after the last card whose order ≤ its order — also after the user reordered", () => {
+describe("place: pane choice and full columns", () => {
+  it("a new pane goes after the last pane whose order ≤ its order — also after the user reordered", () => {
     const cards = (ks: ItemId[]) => ks.map((kind, k) => ({ id: `c${k}`, kind, tabs: [`i${k}`], active: `i${k}`, size: 1, collapsed: false }));
     expect(newCardIndex(cards(["workspace.files", "workspace.changes"]), 300, orderOf)).toBe(2);
     expect(newCardIndex(cards(["workspace.files", "workspace.changes"]), 150, orderOf)).toBe(1);
     expect(newCardIndex(cards(["workspace.files", "workspace.changes"]), 50, orderOf)).toBe(0);
-    // reordered: changes above files → a 150 card goes after files (the last ≤ 150), i.e. at the bottom
     expect(newCardIndex(cards(["workspace.changes", "workspace.files"]), 150, orderOf)).toBe(2);
-    const { layout } = s0();
-    const up = moveCard(layout, layout.pages[0]!.cards[3]!.id, { delta: -1 }, ++clock, orderOf);
-    expect(kinds(up)).toEqual(["workspace.files", "workspace.changes", "terminal.pty", "status:jobs.tasks"]);
-    const p = open(up, "workspace.preview", { key: "a" });
-    expect(kinds(p.layout)).toEqual(["workspace.files", "workspace.changes", "workspace.preview", "terminal.pty", "status:jobs.tasks"]);
+    const { layout } = s1();
+    const up = moveCard(layout, layout.pages[0]!.cards[1]!.id, { delta: -1 }, ++clock, orderOf);
+    expect(kinds(up)).toEqual(["workspace.changes", "workspace.files"]);
+    const p = open(up, "turn.peek", { key: "a" });
+    expect(kinds(p.layout)).toEqual(["workspace.changes", "workspace.files", "turn.peek"]);
   });
 
-  it("two same-kind cards on the page: the tab goes to the one used most recently", () => {
-    const { layout, t1, t2 } = s0();
-    const split = splitInstance(layout, t2, ++clock);
-    const c1 = cardOf(split, t1).id;
-    const c2 = cardOf(split, t2).id;
+  it("two same-kind panes in the column: the tab goes to the one used most recently", () => {
+    let l = open(emptyLayout(), "workspace.files").layout;
+    const t1 = open(l, "terminal.pty", { binding: ws("w1"), key: "t1" });
+    const t2 = open(t1.layout, "terminal.pty", { binding: ws("w1"), key: "t2" });
+    l = t2.layout;
+    const split = splitInstance(l, t2.id, ++clock);
+    const c1 = cardOf(split, t1.id).id;
+    const c2 = cardOf(split, t2.id).id;
     expect(c1).not.toBe(c2);
     expect(decide(split, "terminal.pty", { binding: ws("w1"), key: "t3" })).toMatchObject({ card: { id: c2 } });
-    const used = applyOpen(split, { op: "activate", instance: t1 }, { kind: "terminal.pty", binding: ws("w1"), key: "t1", state: null, v: 1, pinned: false }, ++clock, { reveal: false }).layout;
+    const used = applyOpen(split, { op: "activate", instance: t1.id }, { kind: "terminal.pty", binding: ws("w1"), key: "t1", state: null, v: 1, pinned: false }, ++clock, { reveal: false }).layout;
     expect(decide(used, "terminal.pty", { binding: ws("w1"), key: "t3" })).toMatchObject({ card: { id: c1 } });
   });
 
-  it("full page step 1: another page with a shared group takes it (same-kind card → tab; else a new card)", () => {
-    let l = s0().layout;
-    l = open(l, "workspace.preview", { key: "a.ts" }).layout;
-    l = open(l, "diff.view", { key: "git:a.ts" }).layout; // P1 full
-    const wt = open(l, "workspace.worktrees"); // → P2 [workspace]
-    l = wt.layout;
-    l = switchPage(l, l.pages[0]!.id);
-    const sub = open(l, "subagents.thread", { key: "th1" });
-    expect(sub.decision).toMatchObject({ via: "limit", page: { id: l.pages[1]!.id }, card: { new: {} } });
-    expect(kinds(sub.layout, 1)).toEqual(["subagents.thread", "workspace.worktrees"]);
-    const sub2 = open(switchPage(sub.layout, sub.layout.pages[0]!.id), "subagents.thread", { key: "th2" });
-    // prefer finds P1 first (group workspace); it is full → P2 (same group) has a subagents card → a tab there
-    expect(sub2.decision).toMatchObject({ via: "limit", page: { id: l.pages[1]!.id }, card: { id: cardOf(sub.layout, sub.id).id } });
-    expect(cardOf(sub2.layout, sub2.id).id).toBe(cardOf(sub.layout, sub.id).id);
+  it("full column step 1: another column's pane of the kind takes it as a tab", () => {
+    const { layout } = s0();
+    const sub = inNewColumn(layout, "subagents.thread", { key: "th1" });
+    const l = { ...sub.layout, activePage: sub.layout.pages[0]!.id };
+    const sub2 = open(l, "subagents.thread", { key: "th2" });
+    expect(sub2.decision).toMatchObject({ via: "limit", page: { id: l.pages[1]!.id }, card: { id: cardOf(l, sub.id).id } });
   });
 
-  it("full page step 2: no page shares a group → a new page with the full page's groups", () => {
-    const l = pagesLayout(2, MAX_CARDS);
-    const d = decide(l, "notes.note", { key: "n" }); // otherwise active-page → page 1 (full)
-    expect(d).toMatchObject({ via: "limit", page: { new: { groups: ["g0"], index: 2 } } });
+  it("full column step 2: another column with room (an empty launcher column; the panes in all are capped) → a new pane there", () => {
+    const l = pagesLayout(1, MAX_CARDS);
+    const made = openLauncherPage(l);
+    const full = { ...made.layout, activePage: l.pages[0]!.id };
+    const d = decide(full, "notes.note", { key: "n" }); // otherwise active-page → column 1 (full)
+    expect(d).toMatchObject({ via: "limit", page: { id: made.pageId }, card: { new: {} } });
   });
 
-  it("full page step 3: 9 pages and all full → the page anyway, beyond the soft cap, expanded; never mixed", () => {
-    const l = pagesLayout(MAX_PAGES, MAX_CARDS);
-    const wt = open(l, "notes.note", { key: "n" });
-    expect(wt.decision).toMatchObject({ via: "limit", page: { id: l.pages[0]!.id }, card: { new: { collapsed: false } } });
-    expect(wt.layout.pages[0]!.cards).toHaveLength(MAX_CARDS + 1);
-    expect(wt.layout.pages).toHaveLength(MAX_PAGES);
-    assertNeverMixed(wt.layout);
-    // a same-kind card on the full page is still used (a tab, not a card)
+  it("full column step 3: no room anywhere → a tab of the bottom pane (mixed kinds); a pane of the kind is still used first", () => {
+    const l = pagesLayout(1, MAX_CARDS);
+    const n = open(l, "notes.note", { key: "n" });
+    expect(n.decision).toMatchObject({ via: "limit", page: { id: l.pages[0]!.id }, card: { id: l.pages[0]!.cards.at(-1)!.id } });
+    expect(n.layout.pages[0]!.cards).toHaveLength(MAX_CARDS);
+    expect(cardHolds(n.layout, n.layout.pages[0]!.cards.at(-1)!, "notes.note")).toBe(true);
     const sub = decide(l, "subagents.thread", { key: "new" });
     expect(sub).toMatchObject({ op: "insert", card: { id: l.pages[0]!.cards.at(-1)!.id } });
   });
@@ -554,41 +620,46 @@ describe("reducers", () => {
     renamePage(layout, layout.pages[0]!.id, "x");
     equalizeCards(layout, layout.pages[0]!.id);
     openLauncherPage(layout);
+    foldPages(layout, null);
     expect(JSON.stringify(layout)).toBe(snapshot);
   });
 
-  it("moving a tab to a new page: user group, override, the old card keeps the other tabs", () => {
-    const { layout, t1, t2 } = s0();
+  it("moving a tab to a new column: user group, override, the old pane keeps the other tabs", () => {
+    const { layout, t1, t2, jobs } = s0();
     const out = moveInstance(layout, t1, { newPage: true }, ++clock, orderOf);
     const page = findPage(out, pageOf(out, t1))!;
     expect(page.groups).toEqual([`user:${page.id}`]);
-    expect(cardOf(out, t2).tabs).toEqual([t2]);
+    expect(cardOf(out, t2).tabs).toEqual([t2, jobs]);
     expect(out.overrides["terminal.pty"]!.page).toBe(page.id);
     expect(out.activePage).toBe(page.id);
-    // moving to an existing page joins its same-kind card
     const back = moveInstance(out, t1, { page: out.pages[0]!.id }, ++clock, orderOf);
-    expect(cardOf(back, t1).tabs.sort()).toEqual([t1, t2].sort());
-    expect(back.pages).toHaveLength(1); // the emptied page is gone
+    expect(cardOf(back, t1).tabs.sort()).toEqual([t1, t2, jobs].sort());
+    expect(back.pages).toHaveLength(1);
   });
 
-  it("split: the tab becomes its own same-kind card right below; no override; a single tab cannot split", () => {
-    const { layout, t1, t2, files } = s0();
-    const out = splitInstance(layout, t1, ++clock);
-    const idx = locate(out, t1)!.cardIndex;
-    expect(locate(out, t2)!.cardIndex).toBe(idx - 1);
+  it("split: the tab becomes its own pane of its kind right below while the column has room; no override; a single tab / a full column cannot split", () => {
+    let l = open(emptyLayout(), "workspace.files").layout;
+    const files = Object.keys(l.instances)[0]!;
+    const t1 = open(l, "terminal.pty", { binding: ws("w1"), key: "t1" });
+    const t2 = open(t1.layout, "terminal.pty", { binding: ws("w1"), key: "t2" });
+    l = t2.layout;
+    const out = splitInstance(l, t1.id, ++clock);
+    expect(locate(out, t1.id)!.cardIndex).toBe(locate(out, t2.id)!.cardIndex + 1);
     expect(out.overrides).toEqual({});
-    expect(splitInstance(layout, files, ++clock)).toBe(layout);
+    expect(splitInstance(l, files, ++clock)).toBe(l);
     assertNeverMixed(out);
+    const full = s0();
+    expect(splitInstance(full.layout, full.t1, ++clock)).toBe(full.layout);
   });
 
-  it("moveCard into a page with a same-kind card merges the tabs; up / down reorder; a 1-card page cannot go to a new page", () => {
+  it("moveCard into a column with a pane of its kind merges the tabs; up / down reorder; a 1-pane column cannot go to a new column", () => {
     const { layout, files } = s0();
     const own = moveCard(layout, cardOf(layout, files).id, { newPage: true }, ++clock, orderOf);
     expect(moveCard(own, cardOf(own, files).id, { newPage: true }, ++clock, orderOf)).toBe(own);
     const top = moveCard(layout, cardOf(layout, files).id, { delta: -1 }, ++clock, orderOf);
     expect(top).toBe(layout);
     const down = moveCard(layout, cardOf(layout, files).id, { delta: 1 }, ++clock, orderOf);
-    expect(kinds(down)).toEqual(["workspace.changes", "workspace.files", "status:jobs.tasks", "terminal.pty"]);
+    expect(kinds(down)).toEqual(["workspace.changes", "workspace.files", "terminal.pty"]);
   });
 
   it("restore default forgets the override and re-places by the rules", () => {
@@ -598,7 +669,7 @@ describe("reducers", () => {
     const back = restoreDefault(moved, files, specOf, ++clock);
     expect(back.overrides["workspace.files"]).toBeUndefined();
     expect(back.pages).toHaveLength(1);
-    expect(kinds(back)).toEqual(["workspace.files", "workspace.changes", "status:jobs.tasks", "terminal.pty"]);
+    expect(kinds(back)).toEqual(["workspace.files", "workspace.changes", "terminal.pty"]);
     expect(back.instances[files]).toEqual(moved.instances[files]);
   });
 
@@ -607,7 +678,7 @@ describe("reducers", () => {
     const moved = moveCard(layout, cardOf(layout, files).id, { newPage: true }, ++clock, orderOf);
     const back = restoreKindDefault(moved, "workspace.files", specOf, ++clock);
     expect(back.overrides["workspace.files"]).toBeUndefined();
-    expect(kinds(back)).toEqual(["workspace.files", "workspace.changes", "status:jobs.tasks", "terminal.pty"]);
+    expect(kinds(back)).toEqual(["workspace.files", "workspace.changes", "terminal.pty"]);
     const closed = closeInstances(moved, [files]);
     expect(closed.overrides["workspace.files"]).toBeDefined();
     const forgot = restoreKindDefault(closed, "workspace.files", specOf, ++clock);
@@ -616,9 +687,9 @@ describe("reducers", () => {
     expect(restoreKindDefault(layout, "workspace.files", specOf, ++clock).overrides).toEqual(layout.overrides);
   });
 
-  it("closing the last instance of a page drops the page (neighbour in view); the last page closes the column", () => {
+  it("closing the last instance of a column drops the column (neighbour focused); the last column hides the tool area", () => {
     const { layout } = s0();
-    const b = open(layout, "browser.tab", { key: "u" });
+    const b = inNewColumn(layout, "browser.tab", { key: "u" });
     const closed = closeInstances(b.layout, [b.id]);
     expect(closed.pages).toHaveLength(1);
     expect(closed.activePage).toBe(layout.pages[0]!.id);
@@ -626,16 +697,16 @@ describe("reducers", () => {
     expect(all.pages).toEqual([]);
     expect(all.open).toBe(false);
     expect(all.activePage).toBeNull();
-    expect(all.seq).toBe(closed.seq); // ids are never reused
+    expect(all.seq).toBe(closed.seq);
   });
 
   it("closing the active tab activates its neighbour", () => {
-    const { layout, t1, t2 } = s0();
-    const out = closeInstances(layout, [t2]);
-    expect(cardOf(out, t1).active).toBe(t1);
+    const { layout, t2, jobs } = s0();
+    const out = closeInstances(layout, [jobs]);
+    expect(cardOf(out, t2).active).toBe(t2);
   });
 
-  it("a launcher page: in view while empty, takes the first component's group, dropped when left empty", () => {
+  it("a launcher column: focused while empty, takes the first component's group, dropped when left empty", () => {
     const { layout } = s0();
     const { layout: l, pageId } = openLauncherPage(layout);
     expect(l.activePage).toBe(pageId);
@@ -646,7 +717,6 @@ describe("reducers", () => {
     expect(findPage(filled.layout, pageId)!.groups).toEqual(["browser"]);
     expect(findPage(filled.layout, pageId)!.launcher).toBeUndefined();
     expect(dropEmptyPage(l, pageId!).pages).toHaveLength(1);
-    // only one launcher at a time; refused at 9 pages
     expect(openLauncherPage(l).pageId).toBe(pageId);
   });
 
@@ -662,10 +732,10 @@ describe("reducers", () => {
     sizesSum(sized).forEach((s) => expect(s).toBeCloseTo(1));
     expect(findCard(sized, id)!.card.size).toBeGreaterThan(0.5);
     const eq = equalizeCards(sized, layout.pages[0]!.id);
-    expect(eq.pages[0]!.cards.map((c) => c.size)).toEqual([0.25, 0.25, 0.25, 0.25]);
+    eq.pages[0]!.cards.forEach((c) => expect(c.size).toBeCloseTo(1 / 3));
   });
 
-  it("a share puts the new card at that share; the others shrink in proportion", () => {
+  it("a share puts the new pane at that share; the others shrink in proportion", () => {
     let l = open(emptyLayout(), "workspace.files").layout;
     l = open(l, "terminal.pty", { binding: ws("w1"), key: "t1" }).layout;
     expect(l.pages[0]!.cards.map((c) => +c.size.toFixed(2))).toEqual([0.65, 0.35]);
@@ -680,6 +750,15 @@ describe("reducers", () => {
     expect(out.instances[a.id]).toBeDefined();
     expect(out.instances[b.id]).toBeUndefined();
     expect(out.instances[other.id]).toBeDefined();
+  });
+
+  it("the limits hold whatever the reducers do (fitLayout): > 3 panes in a column become tabs of the third", () => {
+    const l = pagesLayout(1, 5);
+    const fitted = fitLayout(l);
+    assertLimits(fitted);
+    expect(fitted.pages[0]!.cards[2]!.tabs).toHaveLength(3);
+    expect(Object.keys(fitted.instances)).toHaveLength(5);
+    expect(fitLayout(fitted)).toBe(fitted);
   });
 });
 
@@ -718,9 +797,9 @@ describe("visibility (bindings, dormant, hidden)", () => {
     expect(instanceVisible(layout, files, ctx({ lacks: (kind, s) => kind === "workspace.files" && s === "A" }))).toBe(false);
   });
 
-  it("dormant (module off) or another host's: the page leaves the lane", () => {
+  it("dormant (module off) or another host's: the column leaves the screen", () => {
     const { layout } = s0();
-    const b = open(layout, "browser.tab", { key: "u" });
+    const b = inNewColumn(layout, "browser.tab", { key: "u" });
     const browserPage = findPage(b.layout, pageOf(b.layout, b.id))!;
     const off = ctx({ available: (k) => k !== "browser.tab" });
     expect(pageVisibility(b.layout, browserPage, off)).toBe("hidden");
@@ -743,7 +822,7 @@ describe("visibility (bindings, dormant, hidden)", () => {
 
   it("scopes are isolated: another host's bindings never show here", () => {
     const { layout } = s0();
-    const other = open(layout, "browser.tab", { binding: host("workstation"), key: "u" });
+    const other = inNewColumn(layout, "browser.tab", { binding: host("workstation"), key: "u" });
     const page = findPage(other.layout, pageOf(other.layout, other.id))!;
     expect(pageVisibility(other.layout, page, ctx())).toBe("hidden");
     expect(pageVisibility(other.layout, page, ctx({ hostId: "workstation" }))).toBe("shown");
@@ -793,7 +872,7 @@ describe("geometry", () => {
   it("page names: the user's, else the first two distinct card names + n", () => {
     const { layout } = s0();
     const name = (c: { kind: string }) => c.kind.split(".").pop()!;
-    expect(pageName(layout.pages[0]!, name, "New page")).toBe("files · changes +2");
+    expect(pageName(layout.pages[0]!, name, "New page")).toBe("files · changes +1");
     expect(pageName({ ...layout.pages[0]!, name: "Mine" }, name, "New page")).toBe("Mine");
     expect(pageName({ id: "p1", groups: [], cards: [] }, name, "New page")).toBe("New page");
   });
@@ -810,7 +889,7 @@ describe("persistence", () => {
     expect(sanitizeLayout(saved)).toEqual(prepareForSave(layout, all));
   });
 
-  it("sanitize drops bad parts, never throws, keeps seq above every id, drops orphans and mixed tabs", () => {
+  it("sanitize drops bad parts, never throws, keeps seq above every id, drops orphans; keeps a full column's mixed tabs (§24); drops v1.16 per-agent views", () => {
     expect(sanitizeLayout(null)).toEqual(emptyLayout());
     expect(sanitizeLayout("x")).toEqual(emptyLayout());
     const raw = {
@@ -836,11 +915,10 @@ describe("persistence", () => {
     const l = sanitizeLayout(raw);
     expect(l.pages).toHaveLength(1);
     expect(l.pages[0]!.groups).toEqual(["workspace"]);
-    expect(l.pages[0]!.cards).toEqual([{ id: "c2", kind: "workspace.files", tabs: ["i3"], active: "i3", size: 1, collapsed: false }]);
-    expect(Object.keys(l.instances)).toEqual(["i3"]);
+    expect(l.pages[0]!.cards).toEqual([{ id: "c2", kind: "workspace.files", tabs: ["i3", "i5"], active: "i3", size: 1, collapsed: false }]);
+    expect(Object.keys(l.instances).sort()).toEqual(["i3", "i5"]);
     expect(l.overrides).toEqual({ "workspace.files": { page: "p1", groups: ["workspace"], at: 3 } });
-    // C's page is gone: closed (not an empty column opened on purpose); D's launcher column stays open
-    expect(l.views).toEqual({ A: { open: true, page: "p1", at: 4 }, C: { open: false, page: null, at: 2 }, D: { open: true, page: null, at: 0 } });
+    expect("views" in l).toBe(false);
     expect(l.activePage).toBe("p1");
     expect(l.open).toBe(true);
     expect(l.seq).toBeGreaterThanOrEqual(8); // i8 (a valid record, dropped as an orphan) still counts
@@ -856,6 +934,7 @@ describe("persistence", () => {
     const saved = prepareForSave(openLauncherPage(big).layout, { persist: (k) => k !== "terminal.pty" });
     expect(saved.instances[files]).toBeUndefined();
     expect(saved.instances[t1]).toBeUndefined();
+    // the terminal pane keeps its status tab: it is that kind's pane now (its home kind follows its tabs)
     expect(kinds(saved)).toEqual(["workspace.changes", "status:jobs.tasks"]);
     expect(saved.pages).toHaveLength(1);
     expect(saved.activePage).toBe(saved.pages[0]!.id);
@@ -895,109 +974,103 @@ describe("persistence", () => {
   });
 });
 
-// ── Per-agent views (owner 2026-10-11, RFC §13 D27′) ──────────────────────────────────────────
+// ── One layout for every agent (§24; replaces §18.5's per-agent views, RFC §13 D27′) ────────────
 
-describe("per-agent views", () => {
+describe("one layout for every agent (v1.17: no per-agent views)", () => {
   const bctx = (sessionId: string | null, workspaceKey: string | null = "w1") => ({ hostId: "local", sessionId, workspaceKey });
 
-  /** A: a side chat (agent-bound) on its own page; nothing follow / host / workspace-bound. */
-  function chatOfA() {
-    const a = open(emptyLayout(), "side-chat.chat");
-    return { layout: saveView(a.layout, "A", ++clock), chat: a.id, page: pageOf(a.layout, a.id) };
-  }
-
-  it("switching restores each agent's view: A open on its page → B closed with nothing of A's → A restored", () => {
-    const { layout, page } = chatOfA();
-    expect(layout.open).toBe(true);
-    const onB = switchAgentView(layout, "A", "B", bctx("B"), ++clock);
-    expect(onB.open).toBe(false);
-    expect(lanePages(onB, ctx({ sessionId: "B" }))).toEqual([]);
-    expect(onB.views!.A).toMatchObject({ open: true, page });
-    expect(onB.views!.B).toMatchObject({ open: false });
-    const back = switchAgentView(onB, "B", "A", bctx("A"), ++clock);
-    expect(back.open).toBe(true);
-    expect(back.activePage).toBe(page);
+  it("focusing B keeps the tool area as it is: a column with nothing of B's leaves the screen; A sees it again", () => {
+    const files = open(emptyLayout(), "workspace.files");
+    const chat = inNewColumn(files.layout, "side-chat.chat");
+    const l = chat.layout;
+    expect(l.open).toBe(true);
+    expect(shownPages(l, ctx({ sessionId: "A" })).map((p) => p.id)).toEqual(l.pages.map((p) => p.id));
+    expect(shownPages(l, ctx({ sessionId: "B" })).map((p) => p.id)).toEqual([l.pages[0]!.id]);
+    expect(columnsOnScreen(l, ctx({ sessionId: "B" }), null).map((c) => c.page.id)).toEqual([l.pages[0]!.id]);
+    expect(shownPages({ ...l, open: false }, ctx())).toEqual([]);
   });
 
-  it("the page in view is per agent", () => {
-    let l = open(emptyLayout(), "workspace.files").layout; // follow: every agent sees it
-    const filesPage = l.activePage!;
-    const br = open(l, "browser.tab", { key: "u" }); // host-bound
-    l = saveView(br.layout, "A", ++clock);
-    const browserPage = pageOf(l, br.id);
-    expect(l.activePage).toBe(browserPage);
-    l = switchAgentView(l, "A", "B", bctx("B"), ++clock);
-    expect(l.open).toBe(false); // a new agent starts closed
-    l = saveView(switchPage(l, filesPage), "B", ++clock);
-    expect(l).toMatchObject({ open: true, activePage: filesPage });
-    l = switchAgentView(l, "B", "A", bctx("A"), ++clock);
-    expect(l).toMatchObject({ open: true, activePage: browserPage });
-    l = switchAgentView(l, "A", "B", bctx("B"), ++clock);
-    expect(l).toMatchObject({ open: true, activePage: filesPage });
-  });
-
-  it("host- and workspace-bound pages show for every agent they apply to", () => {
+  it("host- and workspace-bound columns show for every agent they apply to", () => {
     const br = open(emptyLayout(), "browser.tab", { key: "u" });
-    const t = open(br.layout, "terminal.pty", { binding: ws("w1"), key: "t" });
+    const t = inNewColumn(br.layout, "terminal.pty", { binding: ws("w1"), key: "t" });
     const l = t.layout;
     expect(lanePages(l, ctx({ sessionId: "B", workspaceKey: "w9" })).map((p) => p.id)).toEqual([pageOf(l, br.id)]);
     expect(lanePages(l, ctx({ sessionId: "C", workspaceKey: "w1" })).map((p) => p.id)).toEqual(l.pages.map((p) => p.id));
     expect(lanePages(l, ctx({ sessionId: null, workspaceKey: null })).map((p) => p.id)).toEqual([pageOf(l, br.id)]);
-    // an agent whose stored view was open on the terminal page, now in another workspace: the browser page
-    const v = { ...l, views: { C: { open: true, page: pageOf(l, t.id), at: 1 } } };
-    expect(restoreView(v, "C", bctx("C", "w9"))).toMatchObject({ open: true, activePage: pageOf(l, br.id) });
   });
 
-  it("an agent whose content is gone restores closed; a column opened empty on purpose stays open", () => {
-    const { layout, chat } = chatOfA();
-    const onB = switchAgentView(layout, "A", "B", bctx("B"), ++clock);
-    const closed = closeInstances(onB, [chat]); // e.g. dropped elsewhere
-    expect(restoreView(closed, "A", bctx("A"))).toMatchObject({ open: false });
-    const launcher = { ...emptyLayout(), views: { A: { open: true, page: null, at: 1 } } };
-    expect(restoreView(launcher, "A", bctx("A"))).toMatchObject({ open: true, activePage: null });
+  it("the tool area shows with a column for this agent, or (open) with nothing placed at all — not when only others' content is left", () => {
+    const a = open(emptyLayout(), "side-chat.chat");
+    expect(toolAreaShown(a.layout, ctx({ sessionId: "A" }))).toBe(true);
+    expect(toolAreaShown(a.layout, ctx({ sessionId: "B" }))).toBe(false);
+    expect(toolAreaShown({ ...emptyLayout(), open: true }, ctx())).toBe(true);
+    expect(toolAreaShown(emptyLayout(), ctx())).toBe(false);
   });
 
-  it("closing the agent's last content closes its column, even when other agents' pages remain", () => {
-    const { layout } = chatOfA();
-    const b = open(layout, "side-chat.chat", { binding: agent("B") });
-    const onA = { ...b.layout, activePage: pageOf(b.layout, b.id) };
-    const aId = Object.keys(onA.instances).find((id) => onA.instances[id]!.binding.kind === "agent" && (onA.instances[id]!.binding as { sessionId: string }).sessionId === "A")!;
-    const next = closeInstances(onA, [aId]);
-    expect(next.open).toBe(true); // B's page keeps the layout's pages
+  it("closing the agent's last content hides the tool area, even when other agents' content remains", () => {
+    const a = open(emptyLayout(), "side-chat.chat");
+    const b = open(a.layout, "side-chat.chat", { binding: agent("B") });
+    const next = closeInstances(b.layout, [a.id]);
+    expect(next.open).toBe(true);
     expect(hasContentFor(next, bctx("A"))).toBe(false);
-    expect(closeIfEmptied(onA, next, bctx("A")).open).toBe(false);
-    // a launcher page opened on purpose with nothing else stays open
-    const empty = { ...emptyLayout(), views: {} };
+    expect(closeIfEmptied(b.layout, next, bctx("A")).open).toBe(false);
+    const empty = emptyLayout();
     const opened = openLauncherPage(empty).layout;
     expect(closeIfEmptied(empty, opened, bctx("A")).open).toBe(true);
   });
 
-  it("a launcher page is the agent's own: other agents do not see it; it is dropped on switch", () => {
-    const { layout } = chatOfA();
-    const withLauncher = openLauncherPage(layout).layout;
-    const launcherId = withLauncher.activePage!;
-    expect(lanePages(withLauncher, ctx()).map((p) => p.id)).toContain(launcherId);
-    expect(lanePages({ ...withLauncher, activePage: layout.activePage }, ctx()).map((p) => p.id)).not.toContain(launcherId);
-    const onB = switchAgentView(withLauncher, "A", "B", bctx("B"), ++clock);
-    expect(findPage(onB, launcherId)).toBeNull();
-    expect(onB.views!.A).toMatchObject({ open: true, page: null });
+  it("maximise / full screen on screen: a card = its column with that card; the focused column", () => {
+    const { layout, files } = s0();
+    const b = inNewColumn(layout, "browser.tab", { key: "u" });
+    const l = b.layout;
+    const card = cardOf(l, files).id;
+    expect(columnsOnScreen(l, ctx(), { card })).toEqual([{ page: l.pages[0]!, only: card }]);
+    expect(columnsOnScreen({ ...l, activePage: l.pages[1]!.id }, ctx(), { card: null })).toEqual([{ page: l.pages[1]!, only: null }]);
+    expect(columnsOnScreen(l, ctx(), null)).toHaveLength(2);
   });
+});
 
-  it("no agent selected (NO_AGENT) has its own view; views of deleted agents are pruned and the count is capped", () => {
-    const { layout } = chatOfA();
-    const none = switchAgentView(layout, "A", NO_AGENT, bctx(null, null), ++clock);
-    expect(none.open).toBe(false);
-    const pruned = dropViews(none, (id) => id !== "A");
-    expect(Object.keys(pruned.views!)).toEqual([NO_AGENT]);
-    let l: SideLayout = emptyLayout();
-    for (let k = 0; k < MAX_VIEWS + 5; k++) l = saveView(l, `s${k}`, k);
-    expect(Object.keys(l.views!)).toHaveLength(MAX_VIEWS);
-    expect(l.views!.s0).toBeUndefined();
-    expect(l.views![`s${MAX_VIEWS + 4}`]).toBeDefined();
-  });
+// ── v1.16 → v1.17: folding the pages into one column (§24 迁移) ─────────────────────────────────
 
-  it("saveView leaves an unchanged view alone (same object)", () => {
-    const { layout } = chatOfA();
-    expect(saveView(layout, "A", ++clock)).toBe(layout);
+describe("foldPages (the v1.16 right side as one tool column)", () => {
+  it("keeps the given page; the other pages' cards join it as panes, tabs of their kind's pane, else tabs of its bottom pane; nothing is lost", () => {
+    // v1.16 shape: a workspace page (files, changes), a browser page, a chat page; built as JSON.
+    const l = emptyLayout();
+    const inst = (kind: string, binding: SideBinding) => {
+      const id = `i${++l.seq}`;
+      l.instances[id] = { kind: kind as ItemId, binding, key: SINGLETON_KEY, state: { kind }, v: 1, pinned: false, lastActiveAt: l.seq };
+      return id;
+    };
+    const card = (kind: string, tabs: string[]) => ({ id: `c${++l.seq}`, kind: kind as ItemId, tabs, active: tabs[0]!, size: 1, collapsed: false });
+    const f = inst("workspace.files", FOLLOW);
+    const ch = inst("workspace.changes", FOLLOW);
+    const br = inst("browser.tab", host());
+    const t = inst("terminal.pty", ws("w1"));
+    const sc = inst("side-chat.chat", agent("A"));
+    const sc2 = inst("side-chat.chat", agent("B"));
+    l.pages = [
+      { id: "p90", groups: ["workspace"], cards: [card("workspace.files", [f]), card("workspace.changes", [ch])] },
+      { id: "p91", groups: ["browser"], cards: [card("browser.tab", [br]), card("terminal.pty", [t])] },
+      { id: "p92", groups: ["chat"], cards: [card("side-chat.chat", [sc, sc2])] },
+    ];
+    l.activePage = "p92";
+    l.open = true;
+    l.overrides = { "browser.tab": { page: "p91", groups: ["browser"], at: 1 } };
+    const out = foldPages(l, "p91");
+    expect(out.pages.map((p) => p.id)).toEqual(["p91"]);
+    expect(out.pages[0]!.groups).toEqual(["browser", "workspace", "chat"]);
+    assertLimits(out);
+    // browser, terminal + files (room for a third pane); changes and the chats: tabs of the bottom pane
+    expect(kinds(out)).toEqual(["browser.tab", "terminal.pty", "workspace.files"]);
+    expect(out.pages[0]!.cards[2]!.tabs).toEqual([f, ch, sc, sc2]);
+    expect(Object.keys(out.instances).sort()).toEqual(Object.keys(l.instances).sort());
+    for (const id of Object.keys(l.instances)) expect(out.instances[id]).toEqual(l.instances[id]);
+    expect(out.overrides["browser.tab"]!.page).toBe("p91");
+    expect(out.activePage).toBe("p91");
+    // an unknown page: the active page is kept
+    expect(foldPages(l, "p404").pages.map((p) => p.id)).toEqual(["p92"]);
+    // sanitize keeps up to 9 pages for this (legacy), and folds a stored layout with more than MAX_PAGES columns
+    expect(sanitizeLayout(JSON.parse(JSON.stringify(l)), "local", { legacy: true }).pages).toHaveLength(3);
+    expect(sanitizeLayout(JSON.parse(JSON.stringify(l))).pages).toHaveLength(1);
   });
 });

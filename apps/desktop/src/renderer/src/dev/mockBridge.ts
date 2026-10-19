@@ -6,13 +6,14 @@
 // settings. Module-owned daemon data (delegations, jobs, services, approvals, …) lives in
 // `modules/<id>/mock.ts` (dev/mockTypes.ts ModuleMock), collected by dev/mockModules.ts and merged in
 // below through `core` — a new module adds its own mock.ts and never edits this file.
+import { mockRemoteCloseShell } from "./mockRemoteClose";
 import type { CutexBuild } from "@cutex-desktop/cutex-client";
 import type { EventEnvelope, QueueItem, SessionBootstrap, SessionResource } from "@cutex-desktop/protocol";
 import { mockFrames } from "./mockFrames";
 import { mockModulePacks } from "./mockModulePacks";
 import type { DesktopApi, DesktopEvents, ModelOption, PreloadBridge, ProfilePreset, QuotaGauge, QuotaReaderConfig, SessionSandboxExtras, ShellState, SidebarSnapshot, UnavailableModel, UpdateStatus } from "../../../shared/ipc";
 import { HOST_TAGGED_EVENTS, MESSAGES_WAKE_METHOD } from "../../../shared/ipc";
-import { HOST_PALETTE, normalizeHostGroups, scopeAfterRemoval, scopeHosts, type HostConnView, type ViewScope } from "../../../shared/hosts";
+import { HOST_PALETTE, normalizeHostGroups, scopeAfterRemoval, scopeHosts, type HostConnView, type HostOwner, type SshConnectAs, type ViewScope } from "../../../shared/hosts";
 import { BUILTIN_THREAD_DEFAULTS, LAUNCH_FIELDS, THREAD_KINDS, type LaunchPermissions, type NewThreadDefaults } from "../../../shared/launch";
 import { presetById } from "../lib/profilePresets";
 import type { ProfileTransferWarning } from "../../../shared/profileTransfer";
@@ -21,7 +22,7 @@ import { MOCK_BASE_FEATURES, MOCK_NEW_FEATURES } from "./mockFeatures";
 import { MODULE_MOCKS } from "./mockModules";
 import { mockClaudeRules, mockRememberClaudeRules, mockSetClaudeRules, soraPendingApproval } from "./mockClaudePermissions";
 import { mockLaunchArt } from "./mockLaunchArt";
-import { registerMockTokenList, renameMockToken } from "./mockTokenNames";
+import { registerMockTokenList, renameMockToken, revokeMockToken, scopeMockToken } from "./mockTokenNames";
 import type { MockCore, MockEvents, MockProfileRef } from "./mockTypes";
 
 /** cutex profile-presets-v2 `GET /v2/profile-presets` (src/profiles/providers.rs presets_json). */
@@ -163,6 +164,19 @@ const mockModel = (id: string, contextWindow: number, over: Partial<MockModel> =
 // endpoint (deepseek) and on relays (GLM: provider "zai" on a third-party relay with a /usage endpoint → custom;
 // relay: a chat-wire relay).
 type MockProfileAgentOptions = { nativeSubagents?: boolean | null; delegationWait?: boolean | null; agentApproval?: boolean; turnQuestions?: "decide" | "wait"; planLabel?: string | null; /** claude-tool-defaults: null / absent = unset (on). */ claudeWrite?: boolean | null; claudeExec?: boolean | null; claudeCheckpoints?: boolean | null; /** profile-search-tool (Codex API-key profiles) */ searchTool?: boolean; /** profile-generic-switches (Codex profiles) */ privateAuthFile?: boolean; /** profile-tool-schema-compat (Codex profiles) */ toolSchemaCompat?: "strict" | null };
+/**
+ * cutex profile-import-cc-switch `GET /v2/profile-imports/cc-switch`: CC Switch's providers on the mock
+ * host (never with keys). DeepSeek was imported before (profile omega); Claude Official is an OAuth
+ * login cutex cannot copy; Kimi has no key; `?legacy`: no such route.
+ */
+const MOCK_CC_SWITCH: import("../../../shared/ccSwitchImport").CcSwitchProvider[] = [
+  { id: "c-official", app: "claude", name: "Claude Official", baseUrl: null, model: null, current: false, hasKey: false, supported: false, reason: "OAuth login: sign in to Claude in a Claude profile instead", existingProfile: null },
+  { id: "c-glm", app: "claude", name: "Zhipu GLM", baseUrl: "https://open.bigmodel.cn/api/anthropic", model: "glm-5.3", current: true, hasKey: true, supported: true, reason: null, existingProfile: null },
+  { id: "c-kimi", app: "claude", name: "Kimi", baseUrl: "https://api.moonshot.cn/anthropic", model: "kimi-k3", current: false, hasKey: false, supported: true, reason: null, existingProfile: null },
+  { id: "x-deepseek", app: "codex", name: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-v4-flash", current: false, hasKey: true, supported: true, reason: null, existingProfile: "omega" },
+  { id: "x-relay", app: "codex", name: "PackyCode", baseUrl: "https://api.packycode.example/v1", model: "gpt-5.5", current: true, hasKey: true, supported: true, reason: null, existingProfile: null },
+];
+
 const mockProfiles: Record<string, { name: string; cliKind?: "codex" | "claude"; authKind: "apiKey" | "chatgpt" | "none"; apiKeyPresent: boolean; color: string | null; allowSwitch: boolean | null; config: Record<string, unknown>; models: MockModel[]; /** profile-model-display-names */ modelNames?: Record<string, string>; /** profile-catalog-overlay: edited entries whose model left upstream */ unavailable?: UnavailableModel[] } & MockProfileAgentOptions> = {
   // Fixed preview fixture: no credential and no network call; survives page reloads.
   Kimi: {
@@ -474,6 +488,11 @@ const CLAUDE_FEATURES = {
   subagents: true, subagentTranscripts: true, threadSearch: true,
   claudePermissionModes: ["default", "acceptEdits", "plan", "auto", "bypassPermissions"], livePermissionMode: true, permissionRules: true,
 };
+/**
+ * Kai: a claude-r21 adapter — Side chat (`sideChat`) and fork while busy (`forkWhileBusy`), fork on.
+ * Sora keeps the older adapter's map (no Side, no fork), so the preview shows both.
+ */
+const CLAUDE_R21_FEATURES = { ...CLAUDE_FEATURES, fork: true, sideChat: true, forkWhileBusy: true };
 /** `GET /v2/sessions/{id}/skills` of the mock Claude agent (Codex skills/list shape). */
 const MOCK_CLAUDE_SKILLS = {
   data: [{
@@ -485,11 +504,11 @@ const MOCK_CLAUDE_SKILLS = {
     errors: [],
   }],
 };
-function claudeSession(id: string, name: string, output: string): SessionResource {
-  const s = session(id, name, { profile: "claude", output });
+function claudeSession(id: string, name: string, output: string, features: Record<string, unknown> = CLAUDE_FEATURES, turn?: string): SessionResource {
+  const s = session(id, name, { profile: "claude", output, turn });
   return {
     ...s,
-    native: { threadId: `thread-${id}`, schema: { protocol: "claude-app-server-subset", majorVersion: 1, version: "0.3.0+cutex", sha256: "", channel: "experimental", capabilities: { experimentalApi: true, features: LEGACY ? null : CLAUDE_FEATURES }, extensions: ["claude-runtime-v1"] } },
+    native: { threadId: `thread-${id}`, schema: { protocol: "claude-app-server-subset", majorVersion: 1, version: "0.3.0+cutex", sha256: "", channel: "experimental", capabilities: { experimentalApi: true, features: LEGACY ? null : features }, extensions: ["claude-runtime-v1"] } },
     runtime: { ...s.runtime, backend: "claude_subscription" },
     runtimeDefaults: LEGACY ? null : { claudeAllowWrite: false, claudeAllowExec: false },
   };
@@ -513,6 +532,8 @@ let snapshot: SidebarSnapshot = {
     session("scratch", "scratch", { cwd: "C:\\Users\\sam\\scratch" }),
     session("wave", "Wave-Director", { tool: "✎ release-notes.md" }),
     { ...claudeSession("sora", "Sora", "WebFetch 读完了 adapter 的 DESKTOP_PARITY.md。"), activity: { lastOutput: { displayText: "WebFetch 读完了 adapter 的 DESKTOP_PARITY.md。", updatedAt: new Date(Date.now() - 70 * 60_000).toISOString() }, ...(LEGACY ? {} : { lastConversationAt: new Date(Date.now() - 70 * 60_000).toISOString() }) } },
+    // A busy claude-r21 agent: 分叉 stays available while it runs, 回退 waits; Side chat is offered.
+    claudeSession("kai", "Kai", "在跑 vitest，先看 structuralGate 的用例。", CLAUDE_R21_FEATURES, "kai-t2"),
     // Delegations (modules/delegations/mock.ts): Lead delegates, Helper handles.
     session("lead", "Lead", { profile: "gamma", output: "三件都交出去了，结果回来我再汇总。", idle: 120 }),
     session("helper", "Helper", { turn: "helper-t2", tool: "$ cargo test --lib management::v2::user_input" }),
@@ -562,6 +583,7 @@ let snapshot: SidebarSnapshot = {
     old1: hostRow("old1", "desktop"),
     wave: hostRow("wave", "waveline"),
     sora: hostRow("sora", "desktop"),
+    kai: hostRow("kai", "desktop"),
     lead: hostRow("lead", "desktop"),
     helper: hostRow("helper", "desktop"),
     scratch: hostRow("scratch", null),
@@ -923,6 +945,8 @@ const threadRead = {
           { type: "subAgentActivity", id: "sa2", kind: "started", agentThreadId: "thread-sub-acl", agentPath: "/root/acl_checker" },
           { type: "collabAgentToolCall", id: "s31", tool: "spawnAgent", status: "completed", senderThreadId: "thread-eva", receiverThreadIds: ["thread-sub-acl"], prompt: "并行检查 Windows 上 ACL 相关测试为什么不稳定", model: null, reasoningEffort: null, agentsStates: { "thread-sub-acl": { status: "running", message: "正在跑 task_service 测试…" } } },
           { type: "collabAgentToolCall", id: "s32", tool: "wait", status: "completed", senderThreadId: "thread-eva", receiverThreadIds: ["thread-sub-explorer"], prompt: null, model: null, reasoningEffort: null, agentsStates: { "thread-sub-explorer": { status: "completed", message: "共 3 处调用 flush：server.rs:3830（未校验 revision）、user_input.rs:212（已校验）、queue_panel 的「立即发送」路径（未校验）。建议在 dispatch_queue_flush 统一加 expectedRevision。" } } },
+          // A failed sub-agent: listed under 子代理 → 最近完成 (modules/subagents/mock.ts has its thread).
+          { type: "collabAgentToolCall", id: "s33", tool: "spawnAgent", status: "completed", senderThreadId: "thread-eva", receiverThreadIds: ["thread-sub-bench"], prompt: "跑一遍 queue 的基准测试，对比 flush 加 CAS 前后的吞吐", model: null, reasoningEffort: null, agentsStates: { "thread-sub-bench": { status: "errored", message: "cargo bench 编译失败：缺少 criterion 依赖" } } },
           { type: "mcpToolCall", id: "m31", server: "cutex", tool: "send_message", status: "completed", arguments: {} },
           { type: "mcpToolCall", id: "m31a", server: "cutex", tool: "cutex_task_service_director", status: "completed", arguments: { operation: "create_and_assign", action_id: "a1", task_id: "task-queue-rev", assignment_id: "as-1", assignee_cutex_session_id: "mika", summary: "queue 面板「立即发送」带上 expectedRevision" } },
           { type: "mcpToolCall", id: "m31b", server: "cutex", tool: "cutex_task_service_terminal", status: "completed", arguments: { operation: "request_changes", action_id: "a2", assignment_id: "as-1", decision_reference: "并发 flush 还会重复投递，补一个测试" } },
@@ -989,6 +1013,9 @@ const soraRead = {
           { type: "dynamicToolCall", id: "toolu_docs_review", namespace: "claude", tool: "Agent", arguments: { description: "核对文档", subagent_type: "Explore", prompt: "读 docs/DESKTOP_PARITY.md 和 timeline 的工具行代码，列出 dynamicToolCall 显示上还缺什么。只读。" }, status: "completed", contentItems: [{ type: "inputText", text: "缺两处：1. dynamicToolCall 没显示 namespace；2. 失败时错误文本被截断。其余与 DESKTOP_PARITY 一致。" }], success: true, durationMs: 48_000, ...(LEGACY ? {} : { agentThreadId: "claude:mock-sora:task:task-docs" }) },
           { type: "subAgentActivity", id: "sta1", kind: "started", agentThreadId: "claude:mock-sora:task:task-docs", agentPath: "/claude/task-docs" },
           { type: "subAgentActivity", id: "sta2", kind: "completed", agentThreadId: "claude:mock-sora:task:task-docs", agentPath: "/claude/task-docs" },
+          // An older background subagent (no `run_in_background: false`; refused since claude-r21): the card
+          // ended at the launch and no transcript was kept — 最近完成 shows it unclickable.
+          { type: "dynamicToolCall", id: "toolu_bg_scan", namespace: "claude", tool: "Agent", arguments: { description: "扫描旧日志", subagent_type: "general-purpose", prompt: "在 logs/ 里找出最近一周所有 flush 超时的记录，按天汇总。" }, status: "completed", contentItems: [{ type: "inputText", text: "Async agent launched successfully." }], success: true, durationMs: 900 },
         ],
       },
       // A finished plan: Claude Code's plan approval choices (modules/plan/ClaudePlanChoices).
@@ -1000,6 +1027,34 @@ const soraRead = {
         items: [
           { type: "userMessage", id: "su2", content: [{ type: "text", text: "规划一下：给 PlanCard 加 Claude 的三个审批选项。" }] },
           { type: "plan", id: "sp2", text: "## PlanCard 的 Claude 审批选项\n\n1. Claude agent 显示「执行，自动接受编辑」「执行，编辑逐个审批」「继续规划」。\n2. 模式与计划模式在一次 thread/settings/update 里切换。\n3. 补单元测试。" },
+        ],
+      },
+    ],
+  },
+};
+
+/** Kai (Claude, claude-r21): a finished turn to fork / revert from, and a running one. */
+const kaiRead = {
+  thread: {
+    id: "thread-kai",
+    turns: [
+      {
+        id: "kai-t1",
+        status: "completed",
+        startedAt: Date.now() / 1000 - 600,
+        completedAt: Date.now() / 1000 - 560,
+        items: [
+          { type: "userMessage", id: "ku1", content: [{ type: "text", text: "看一下 structuralGate 现在怎么处理忙碌的 Claude agent。" }] },
+          { type: "agentMessage", id: "ka1", text: "忙时分叉和回退都灰掉；claude-r21 起分叉可以从实时记录里做，回退仍要等这一轮结束。" },
+        ],
+      },
+      {
+        id: "kai-t2",
+        status: "inProgress",
+        startedAt: Date.now() / 1000 - 40,
+        items: [
+          { type: "userMessage", id: "ku2", content: [{ type: "text", text: "跑一下相关的 vitest。" }] },
+          { type: "commandExecution", id: "kc2", command: "npx vitest run test/structuralGate.test.ts", status: "inProgress", aggregatedOutput: "" },
         ],
       },
     ],
@@ -1167,7 +1222,7 @@ function mockThread(id: string): MockThread {
     const src = mockThread(fork.from);
     const end = fork.afterTurnId ? src.thread.turns.findIndex((t) => t.id === fork.afterTurnId) + 1 : src.thread.turns.length;
     read = { thread: { ...src.thread, id: `thread-${id}`, turns: src.thread.turns.slice(0, end || src.thread.turns.length) } };
-  } else read = (id === "eva" ? threadRead : id === "scratch" ? scratchRead : id === "sora" ? soraRead : id === "wave" ? waveRead : id === "mika" ? mikaRead : (moduleThread(id) ?? { thread: { id: `thread-${id}`, turns: [] } })) as MockThread;
+  } else read = (id === "eva" ? threadRead : id === "scratch" ? scratchRead : id === "sora" ? soraRead : id === "kai" ? kaiRead : id === "wave" ? waveRead : id === "mika" ? mikaRead : (moduleThread(id) ?? { thread: { id: `thread-${id}`, turns: [] } })) as MockThread;
   const cut = revertedFrom.get(id);
   const at = cut ? read.thread.turns.findIndex((t) => t.id === cut) : -1;
   return at >= 0 ? { thread: { ...read.thread, turns: read.thread.turns.slice(0, at) } } : read;
@@ -1717,15 +1772,34 @@ type MockDaemon = import("../../../shared/ipc").DaemonState;
  * users-p2-access (modules/users/mock.ts; `?nop2`: an older host): read-only files, with send images and
  * delegation commands.
  */
-function mockConnectionUser() {
+function mockConnectionUser(hostId: string = mockHosts.active) {
   const q = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
+  // Owner devices (cutex 21123b6, docs/research/owner-devices-desktop-api-20261019.md): `scope`, `ownerLocal`,
+  // `token.scope` / `token.issuedVia`. HOST-A: the root credential on loopback (ownerLocal); workstation and
+  // other SSH hosts: an owner token from `client-token issue` (hostCli, ownerLocal); a dev-direct host: a paired
+  // device (pairing, not local). `?ownerdevice[=local|ssh-7a3f01c2]`: that host is reached with a paired owner
+  // device token instead (ownerLocal false); `?scope=chat|read`: this connection's scope on HOST-A;
+  // `?noownerlocal`: an older cutex (none of these fields).
+  const legacyOwnerLocal = q.has("noownerlocal");
+  const pairedOn = q.has("ownerdevice") ? (q.get("ownerdevice") || "local") : null;
+  const kind = mockHosts.hosts.find((h) => h.id === hostId)?.kind ?? (hostId === "local" ? "local" : "ssh");
+  const paired = kind === "dev-direct" || pairedOn === hostId;
+  const scope: import("../../../shared/users").DeviceScope = hostId === "local" ? ((["chat", "read"] as const).find((v) => v === q.get("scope")) ?? "full") : "full";
+  const fields = (ownerLocal: boolean, s = scope) => (legacyOwnerLocal ? {} : { scope: s, ownerLocal });
+  const tokenFields = (issuedVia: import("../../../shared/users").TokenIssuedVia, s = scope) => (legacyOwnerLocal ? {} : { scope: s, issuedVia });
   // cutex C1 `user.token` (`?noown`: a host without C1 / C2): this desktop's own token — Kai's laptop while
   // pending, Mia's laptop as Mia, the root credential (null) as the owner of HOST-A (modules/users/mock.ts lists them).
   const token = (t: import("../../../shared/users").SelfToken | null) => (q.has("noown") ? {} : { token: t });
-  if (q.has("pending")) return { id: null, name: null, isOwner: false, pending: true, grant: null, ...token({ id: "mct-7e6d5c4b3a291807", label: "desktop-kai-laptop-cutex_dev-3b7e02", deviceName: null, ownerName: null, platform: null }) };
+  if (q.has("pending")) return { id: null, name: null, isOwner: false, pending: true, grant: null, ...token({ id: "mct-7e6d5c4b3a291807", label: "desktop-kai-laptop-cutex_dev-3b7e02", deviceName: null, ownerName: null, platform: null, ...tokenFields("hostCli") }), ...fields(false) };
   // users-self-profile: Mia set her own name + picture on her desktop (modules/users/mock.ts serves the image).
-  if (q.has("nonowner")) return { id: "u-5f1c2a9e0b7d", name: LONG_NAME ? "Mia Katharina von Hohenzollern-Sigmaringen" : "Mia", isOwner: false, pending: false, grant: { projects: ["desktop"], standaloneAgents: [], send: q.get("nonowner") === "send" }, displayName: "Mia Chen", avatarEtag: "5f1c2a9e0b7d0001", ...token({ id: "mct-5d6e7f8091a2b3c4", label: "desktop-mia-laptop-Cutex-71c0de", deviceName: null, ownerName: "Mia 的笔记本", platform: null }) };
-  return { id: "owner", name: "Sam", isOwner: true, pending: false, grant: null, ...token(null) };
+  if (q.has("nonowner")) return { id: "u-5f1c2a9e0b7d", name: LONG_NAME ? "Mia Katharina von Hohenzollern-Sigmaringen" : "Mia", isOwner: false, pending: false, grant: { projects: ["desktop"], standaloneAgents: [], send: q.get("nonowner") === "send" }, displayName: "Mia Chen", avatarEtag: "5f1c2a9e0b7d0001", ...token({ id: "mct-5d6e7f8091a2b3c4", label: "desktop-mia-laptop-Cutex-71c0de", deviceName: null, ownerName: "Mia 的笔记本", platform: null, ...tokenFields("hostCli") }), ...fields(false) };
+  const owner = { id: "owner", name: "Sam", isOwner: true, pending: false, grant: null };
+  // A paired owner device: the owner's rights, but not the host itself.
+  if (paired) return { ...owner, ...token({ id: hostId === "local" ? "mct-2b3c4d5e6f708192" : MOCK_WORKSTATION_TOKEN.id, label: hostId === "local" ? "desktop-sam-laptop-Cutex-5a2c11" : MOCK_WORKSTATION_TOKEN.label, deviceName: "sam-laptop", ownerName: null, platform: "linux", ...tokenFields("pairing") }), ...fields(false) };
+  // HOST-A: the root credential on loopback (`?scope` narrows this preview connection to show the scope rule on top).
+  if (kind === "local") return { ...owner, ...token(null), ...fields(true) };
+  // An SSH host: this desktop's owner token there, issued by `client-token issue` over SSH.
+  return { ...owner, ...token({ ...MOCK_WORKSTATION_TOKEN, ...tokenFields("hostCli", "full") }), ...fields(true, "full") };
 }
 
 /**
@@ -1756,6 +1830,29 @@ const WORKSTATION_MISSING_FEATURES: readonly string[] = ["notes", "side-chat"];
 const withoutWorkstationGaps = (featureList: string[]) => featureList.filter((f) => !WORKSTATION_MISSING_FEATURES.includes(f));
 /** What such a cutex answers on the notes / side-chat routes. */
 const routeNotFound = async (): Promise<never> => { throw new Error("route_not_found: management v2 route not found"); };
+/**
+ * Host ownership (cutex `host-owner-person`, docs/research/host-ownership-20261019.md): HOST-A's owner
+ * person is this desktop (confirmed; `?ownerunconfirmed`: not yet, so 「是我」 is offered and confirms it);
+ * workstation's is someone else (ema), so this desktop's owner token there is 有主人权限 only; alpha is
+ * an older cutex (no owner). A host added with "ema@" / "shared" in its target has ema as its owner
+ * (auto → member); any other new host is an older cutex (auto → owner). `?legacy`: no capability anywhere.
+ */
+const MOCK_SELF_FINGERPRINT = "116df1968daccae0";
+const MOCK_OTHER_OWNER: HostOwner = { displayName: "ema", fingerprint: "6060078263515bfd", confirmed: true, source: "firstRootClaim" };
+const OWNER_UNCONFIRMED = typeof location !== "undefined" && new URLSearchParams(location.search).has("ownerunconfirmed");
+const mockOwners: Record<string, HostOwner | null> = {
+  local: OWNER_UNCONFIRMED ? { displayName: null, fingerprint: null, confirmed: false, source: null } : { displayName: "Sam", fingerprint: MOCK_SELF_FINGERPRINT, confirmed: true, source: "firstRootClaim" },
+  [WORKSTATION]: MOCK_OTHER_OWNER,
+};
+const mockOwnerOf = async (hostId: string): Promise<HostOwner | null> => (LEGACY ? null : structuredClone(mockOwners[hostId] ?? null));
+/** PUT / DELETE /v2/users/owner-person: this machine's root credential only. */
+async function mockSetOwner(hostId: string, publicKey: string | null): Promise<import("../../../shared/users").UsersResult<HostOwner | null>> {
+  if (LEGACY) return { ok: false, error: { code: "route_not_found", message: "management v2 route not found" } };
+  if (hostId !== "local") return { ok: false, error: { code: "owner_person_local_only", message: "the owner person can only be set on the host itself" } };
+  mockOwners.local = publicKey ? { displayName: "Sam", fingerprint: MOCK_SELF_FINGERPRINT, confirmed: true, source: "local" } : { displayName: null, fingerprint: null, confirmed: false, source: null };
+  console.info("[mock] owner person", publicKey ? `set to ${publicKey}` : "cleared");
+  return { ok: true, value: structuredClone(mockOwners.local) };
+}
 let mockEpochs = 0;
 const mockEpoch = (id: string) => `mock-${id}-${++mockEpochs}`;
 const sshTunnel = (status: NonNullable<HostConnView["tunnel"]>["status"]) => ({ status, localPort: MOCK_PORT, error: null, attempt: 0, retryAt: null, upSince: status === "up" ? Date.now() : null });
@@ -1777,8 +1874,8 @@ let mockHosts: MockHosts = FRESH ? {
   hosts: [
     { id: "local", kind: "local", label: "HOST-A", target: null, remotePort: null, cutexPath: null, paired: true, lastConnectedAt: null, autoConnect: true, color: HOST_PALETTE[0], platform: "windows",
       conn: { epoch: mockEpoch("local"), tunnel: null, daemon: { kind: "connected", baseUrl: "mock://", hostId: "HOST-A" }, cutexBuild: MOCK_CUTEX_BUILD } },
-    { id: WORKSTATION, kind: "ssh", label: "workstation", target: "workstation", remotePort: 24270, cutexPath: "cutex", paired: true, lastConnectedAt: iso(26 * 3600), autoConnect: MULTI_HOST !== null, color: HOST_PALETTE[1], platform: "linux", tokenId: MOCK_WORKSTATION_TOKEN.id },
-    { id: ALPHA, kind: "ssh", label: "alpha", target: "alex@alpha", remotePort: 24270, cutexPath: "cutex", paired: true, lastConnectedAt: iso(3 * 86400), autoConnect: true, color: HOST_PALETTE[2], platform: "macos" },
+    { id: WORKSTATION, kind: "ssh", label: "workstation", target: "workstation", remotePort: 24270, cutexPath: "cutex", paired: true, lastConnectedAt: iso(26 * 3600), autoConnect: MULTI_HOST !== null, color: HOST_PALETTE[1], platform: "linux", tokenId: MOCK_WORKSTATION_TOKEN.id, connectAs: "owner" },
+    { id: ALPHA, kind: "ssh", label: "alpha", target: "alex@alpha", remotePort: 24270, cutexPath: "cutex", paired: true, lastConnectedAt: iso(3 * 86400), autoConnect: true, color: HOST_PALETTE[2], platform: "macos", connectAs: "owner" },
   ],
   // P2 mock: one group (this machine + workstation; Settings → 主机 → 分组 edits it).
   groups: [{ id: "grp-work0001", name: "工作", hosts: ["local", WORKSTATION] }],
@@ -1985,15 +2082,30 @@ function mockApiFor(api: DesktopApi, hostId: string): DesktopApi {
     ...(hostId === WORKSTATION ? {
       async capabilities() {
         const c = await api.capabilities();
-        // There this desktop is a paired client (C1: its own token), not the root credential.
-        const user = c?.user && (c.user as { isOwner?: boolean }).isOwner && "token" in c.user ? { ...c.user, token: MOCK_WORKSTATION_TOKEN } : c?.user;
-        return c && { ...c, featureList: withoutWorkstationGaps(c.featureList), ...(user ? { user } : {}) };
+        // There this desktop holds an owner token from `client-token issue` over SSH (C1: its own token), not the root credential.
+        return c && { ...c, featureList: withoutWorkstationGaps(c.featureList), ...(c.user ? { user: mockConnectionUser(hostId) } : {}) };
       },
       notesList: routeNotFound, notesGet: routeNotFound, notesCreate: routeNotFound, notesUpdate: routeNotFound, notesDelete: routeNotFound,
       sideOpen: routeNotFound, sideList: routeNotFound, sideRead: routeNotFound, sideSend: routeNotFound, sideInterrupt: routeNotFound, sideRespond: routeNotFound, sideClose: routeNotFound,
     } : {}),
+    ...(hostId !== WORKSTATION ? {
+      // Who this desktop is on that host (owner devices: root on HOST-A, hostCli over SSH, pairing on dev-direct).
+      async capabilities() {
+        const c = await api.capabilities();
+        return c && { ...c, ...(c.user ? { user: mockConnectionUser(hostId) } : {}) };
+      },
+    } : {}),
     async daemonState() {
       return mockDaemonOf(hostId);
+    },
+    async hostOwner() {
+      return mockOwnerOf(hostId);
+    },
+    async setOwnerPerson(publicKey) {
+      return mockSetOwner(hostId, publicKey);
+    },
+    async clearOwnerPerson() {
+      return mockSetOwner(hostId, null);
     },
     async sidebar() {
       return hostId === "local" ? moduleSidebar({ ...snapshot, retired: snapshot.retired.map(retiredProjection) }) : remoteSnapshot();
@@ -2130,7 +2242,7 @@ const core: MockCore = {
   unsupportedFor,
   settings: mockSettings,
   settingsView,
-  clientTokenNames: { register: registerMockTokenList, rename: renameMockToken },
+  clientTokenNames: { register: registerMockTokenList, rename: renameMockToken, setScope: scopeMockToken, revoke: revokeMockToken },
 };
 function moduleSettings(): Record<string, unknown> {
   return Object.assign({}, ...MODULE_MOCKS.map(({ mock }) => mock.settings?.(core) ?? {}));
@@ -2211,11 +2323,14 @@ export function installMockBridge(): void {
     update = { ...update, ...patch };
     emit("updateStatus", structuredClone(update));
   };
+  // client-remote-close: the countdown main would run (`?remoteclose`: host-a asks this desktop to close).
+  const remoteCloseShell = mockRemoteCloseShell({ state: shellState, emitView: (view) => emit("remoteClose", { view }), emitHost: (method, params) => core.emitHost(method, params) });
   const bridge: PreloadBridge = {
     platform: MOCK_PLATFORM,
     // ?platform=darwin: the title bar keeps clear of the traffic lights (no real buttons in a browser).
     ...(MOCK_PLATFORM === "darwin" ? { window: { control: async () => {}, setChrome: async () => {}, nativeControls: "left" as const } } : {}),
     shell: {
+      ...remoteCloseShell,
       async state() {
         return structuredClone(shellState);
       },
@@ -2334,19 +2449,33 @@ export function installMockBridge(): void {
         const cutexPath = request.cutexPath?.trim() || (target.includes("workstation") ? "/home/sam/Resources/Shortcuts/cutex" : "cutex");
         const id = `ssh-${Math.random().toString(16).slice(2, 10)}`;
         const label = request.label?.trim() || target.replace(/^.*@/, "").replace(/:\d+$/, "");
-        mockHosts = { ...mockHosts, hosts: [...mockHosts.hosts, { id, kind: "ssh", label, target, remotePort: request.remotePort ?? 24270, cutexPath, paired: true, lastConnectedAt: null, autoConnect: true, color: HOST_PALETTE[1 + (mockHosts.hosts.length % (HOST_PALETTE.length - 1))], platform: null }] };
+        // Host ownership: "auto" keeps the member token when the host's confirmed owner is someone else.
+        if (!LEGACY && (target.includes("ema@") || target.includes("shared"))) mockOwners[id] = MOCK_OTHER_OWNER;
+        const mode = request.connectAs ?? "auto";
+        const connectAs: SshConnectAs = mode !== "auto" ? mode : mockOwners[id] ? "member" : "owner";
+        mockHosts = { ...mockHosts, hosts: [...mockHosts.hosts, { id, kind: "ssh", label, target, remotePort: request.remotePort ?? 24270, cutexPath, paired: true, lastConnectedAt: null, autoConnect: true, color: HOST_PALETTE[1 + (mockHosts.hosts.length % (HOST_PALETTE.length - 1))], platform: null, connectAs }] };
         emit("hostsState", mockHostsOut());
         // No local host (?fresh=nohost): the first host added becomes the shown one (main: reachableScope).
         if (!mockHosts.hosts.some((h) => h.id === "local") && mockHosts.hosts.length === 1) mockActivate(id);
-        console.info("[mock] ssh", target, `${cutexPath} management client-token issue --label desktop-HOST-A`);
-        return { ok: true, hostId: id, cutexPath };
+        console.info("[mock] ssh", target, `${cutexPath} management client-token issue --label desktop-HOST-A${connectAs === "member" ? " --pending" : ""}`);
+        return { ok: true, hostId: id, cutexPath, connectAs, ...(connectAs === "member" ? { pending: true, userId: null } : {}), ...(mode === "auto" ? { autoReason: mockOwners[id] ? "ownerIsSomeoneElse" : "noCapability" } : {}) };
+      },
+      async setSshConnectAs(hostId, mode) {
+        await new Promise((r) => setTimeout(r, 800));
+        const host = mockHosts.hosts.find((h) => h.id === hostId && h.kind === "ssh");
+        if (!host || (mode !== "owner" && mode !== "member")) return { ok: false, error: { code: "badInput", detail: host ? "connectAs" : "host" } };
+        console.info("[mock] ssh", host.target, `cutex management client-token issue --label desktop-HOST-A${mode === "member" ? " --pending" : ""}; revoke the old token`);
+        mockHosts = { ...mockHosts, hosts: mockHosts.hosts.map((h) => (h.id === hostId ? { ...h, connectAs: mode } : h)) };
+        if (mockHosts.active === hostId) mockActivate(hostId, true);
+        else emit("hostsState", mockHostsOut());
+        return { ok: true, hostId, connectAs: mode, ...(mode === "member" ? { pending: true, userId: null } : {}) };
       },
       async pairSshHost(hostId) {
         await new Promise((r) => setTimeout(r, 800));
         mockHosts = { ...mockHosts, hosts: mockHosts.hosts.map((h) => (h.id === hostId ? { ...h, paired: true } : h)) };
         if (mockHosts.active === hostId) mockActivate(hostId, true);
         else emit("hostsState", mockHostsOut());
-        return { ok: true, hostId };
+        return { ok: true, hostId, connectAs: mockHosts.hosts.find((h) => h.id === hostId)?.connectAs ?? "owner" };
       },
       async updateSshHost(hostId, patch) {
         mockHosts = { ...mockHosts, hosts: mockHosts.hosts.map((h) => (h.id === hostId ? { ...h, ...(patch.label !== undefined ? { label: patch.label.trim() || h.label } : {}), ...(patch.remotePort !== undefined ? { remotePort: patch.remotePort } : {}), ...(patch.cutexPath !== undefined ? { cutexPath: patch.cutexPath.trim() || "cutex" } : {}) } : h)) };
@@ -2443,6 +2572,15 @@ export function installMockBridge(): void {
         mockHosts = { ...mockHosts, startOn: value };
         emit("hostsState", mockHostsOut());
         return mockHostsOut();
+      },
+      async hostOwner() {
+        return mockOwnerOf(mockHosts.active);
+      },
+      async setOwnerPerson(publicKey) {
+        return mockSetOwner(mockHosts.active, publicKey);
+      },
+      async clearOwnerPerson() {
+        return mockSetOwner(mockHosts.active, null);
       },
       async browseDirs(path) {
         await new Promise((r) => setTimeout(r, 150));
@@ -3316,6 +3454,34 @@ export function installMockBridge(): void {
         // (the form then uses FALLBACK_PRESETS, an older cutex's list).
         if (LEGACY) return null;
         return structuredClone(MOCK_PRESETS);
+      },
+      async ccSwitchImportList() {
+        if (LEGACY) return null;
+        await new Promise((r) => setTimeout(r, 300));
+        return { found: true, source: { path: "C:\\Users\\owner\\.cc-switch\\cc-switch.db", format: "sqlite" as const, schemaVersion: 5 }, error: null, providers: structuredClone(MOCK_CC_SWITCH) };
+      },
+      async ccSwitchImport(items) {
+        if (LEGACY) throw new Error("404 not_found: POST /v2/profile-imports/cc-switch");
+        await new Promise((r) => setTimeout(r, 500));
+        const reply: import("../../../shared/ccSwitchImport").CcSwitchImportResult = { created: [], failed: [] };
+        for (const item of items) {
+          const p = MOCK_CC_SWITCH.find((x) => x.app === item.app && x.id === item.id);
+          if (!p) reply.failed.push({ id: item.id, app: item.app, code: "provider_not_found", message: "no such CC Switch provider" });
+          else if (!p.supported || !p.hasKey) reply.failed.push({ id: p.id, app: p.app, code: "provider_unsupported", message: p.reason ?? "the provider has no API key" });
+          else {
+            let name = item.name?.trim() || p.name;
+            for (let n = 2; mockProfiles[name]; n++) name = `${item.name?.trim() || p.name} ${n}`;
+            mockProfiles[name] = {
+              name, cliKind: p.app, authKind: "apiKey", apiKeyPresent: true, color: null, allowSwitch: null,
+              config: { model: p.model, modelProvider: "custom", providerBaseUrl: p.baseUrl, providerWireApi: "responses" },
+              models: [],
+            };
+            p.existingProfile = name;
+            reply.created.push({ id: p.id, app: p.app, profile: mockProfileDetail(name) });
+          }
+        }
+        console.info("[mock] POST /v2/profile-imports/cc-switch", items, reply);
+        return reply;
       },
       async duplicateProfile(name, copy) {
         if (mockProfiles[copy]) throw new Error(`profile_exists: ${copy}`);

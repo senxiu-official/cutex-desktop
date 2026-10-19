@@ -26,15 +26,14 @@ export default defineModule({
         icon: Bell,
         titleKey: "notifications.page",
         source: null,
+        hintKey: "notifications.pageHint",
         Page: NotificationsPage,
         // The host part (SettingsHostPart) holds every card but 本设备's and the settings.section items.
         hostPart: true,
         sections: [
           { anchor: "levels", titleKey: "notifications.matrix.title", keywords: ["notifications.preset", "notifications.method.desktop", "notifications.method.sound", "notifications.method.bigAlert", "notifications.method.phone", "notifications.level.urgent", "notifications.level.inform"], requires: HOST, part: "host" },
-          { anchor: "events", titleKey: "notifications.events.title", keywords: ["notifications.events.changedOnly", "notifications.eventPreset.default"], requires: HOST, part: "host" },
+          { anchor: "events", titleKey: "notifications.events.title", keywords: ["notifications.eventPreset.default"], requires: HOST, part: "host" },
           { anchor: "device", titleKey: "notifications.device.title", keywords: ["notifications.device.permission", "notifications.method.desktop", "notifications.method.sound", "notifications.method.bigAlert", "notifications.device.test.desktop"] },
-          { anchor: "newAgentLevel", titleKey: "agent-config.defaults.notification", keywords: ["notify.newAgentLevel", "notify.lvl.important"], part: "host" },
-          { anchor: "mute", titleKey: "notifications.mute.title", requires: HOST, part: "host" },
         ],
       },
     ],

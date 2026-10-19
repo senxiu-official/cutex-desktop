@@ -10,6 +10,7 @@ import { shownSomewhere } from "../../lib/statusSurfaces";
 import { planProgress, type PlanStep } from "../../lib/statusCapsule";
 import { captureHostAction } from "../../lib/hostSwitch";
 import { useApp } from "../../store";
+import { convLiveOf, convViewOf, useConvScope, useConvViewHost } from "../../lib/conversationScope";
 import { Markdown } from "../../components/Markdown";
 import { PlanChoicesGate } from "./ClaudePlanChoices";
 
@@ -32,20 +33,23 @@ export function PlanCard({ sessionId, text, streaming, actionable }: { sessionId
   const [error, setError] = useState<string | null>(null);
   // Bind the displayed plan, before a click or an awaited mode switch can outlive its host/view.
   const currentHost = captureHostAction();
-  const threadId = useApp.getState().sessions[sessionId]?.timeline.threadId ?? null;
-  const current = () => currentHost() && useApp.getState().selectedId === sessionId &&
-    (useApp.getState().sessions[sessionId]?.timeline.threadId ?? null) === threadId;
+  // The conversation showing the plan (lib/conversationScope): still this agent at call time.
+  const conv = useConvScope();
+  const hostId = useConvViewHost(sessionId);
+  const threadId = convViewOf(conv, useApp.getState(), sessionId)?.timeline.threadId ?? null;
+  const current = () => currentHost() && convLiveOf(conv).sessionId === sessionId &&
+    (convViewOf(conv, useApp.getState(), sessionId)?.timeline.threadId ?? null) === threadId;
   const implement = async () => {
     if (!current()) return;
     setError(null);
     const app = useApp.getState();
     try {
-      const available = await app.setCollabMode("default");
+      const available = await app.setCollabMode("default", sessionId, hostId);
       if (!current() || available === null) return;
       if (!available) return setError(t("plan.defaultUnavailable"));
       decide();
       // Optimistic send (lib/outbox): a failure stays on the message with retry / edit / discard.
-      await app.submit(IMPLEMENT_MESSAGE, "auto").catch(() => {});
+      await app.submit(IMPLEMENT_MESSAGE, "auto", [], { sessionId, hostId }).catch(() => {});
     } catch (error) {
       if (current()) setError(error instanceof Error ? error.message : String(error));
     }

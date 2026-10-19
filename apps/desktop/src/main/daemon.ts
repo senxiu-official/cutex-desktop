@@ -17,6 +17,7 @@ import { app, BrowserWindow, dialog, shell } from "electron";
 import { hostname } from "node:os";
 import { approvalClientFacts } from "../shared/approvalOrigin";
 import {
+  CLIENT_INSTANCE_ID,
   CutexApiError,
   CutexClient,
   CutexUnreachableError,
@@ -63,6 +64,7 @@ import type { HostServiceInfo, UpgradeApplyRequest, UpgradeResult, UpgradeRollba
 import type { ComponentAction, ComponentResult, ComponentsList } from "../shared/components";
 import { claudeAccountCreateBody, claudeAccountId, claudeAccountRenameBody, DEFAULT_CLAUDE_ACCOUNT, type ClaudeAccount, type ClaudeAccountCreate, type ClaudeAccountList, type ClaudeAccountRemoved, type ClaudeAccountRemoveResult, type ClaudeAccountResult, type ProfileQuotaDetail } from "../shared/claudeAccounts";
 import { directorRotationBody, ROTATION_ID } from "../shared/directorRotation";
+import { ccSwitchImportBody, type CcSwitchImportItem, type CcSwitchImportList, type CcSwitchImportResult } from "../shared/ccSwitchImport";
 import { artifactContentQuery, artifactDiffQuery, artifactId, artifactListQuery, artifactPatchBody, artifactPublishBody, artifactResolveBody, artifactVersionSel, type ArtifactContent, type ArtifactDeleteResult, type ArtifactDetail, type ArtifactDiff, type ArtifactList, type ArtifactListQuery, type ArtifactPatch, type ArtifactPatchResult, type ArtifactPublished, type ArtifactPublishRequest, type ArtifactPublishResult, type ArtifactResolveItem, type ArtifactSummary, type ArtifactUsage } from "../shared/artifactStore";
 import { ALARM_ID, type AlarmCancelResult, type AlarmList, type AlarmView } from "../shared/alarms";
 import { USAGE_SOURCE_ID, USAGE_SOURCE_KINDS, type UsageSource, type UsageSourceCreate, type UsageSourceDeleteResult, type UsageSourcePatch, type UsageSourceResult, type UsageSourcesView } from "../shared/usageSources";
@@ -72,13 +74,15 @@ import type { RestoreCandidates } from "../shared/runtimeRestore";
 import type { QuotaContinueResult, QuotaContinueView } from "../shared/quotaContinue";
 import type { OwnDeviceRevoked, OwnDevices, PeerBindingResult, SelfProfile, SelfProfilePatch, TokenBindingResult, UserCreate, UserPatch, UsersList, UsersResult, UsersSettings, UserWriteResult } from "../shared/users";
 import type { IdentityChallenge, IdentityClaimResult, PersonKeyInput, PersonKeysResult } from "../shared/personIdentity";
-import { userAccessOf, type TokenPersonAckResult } from "../shared/users";
+import { accessRefusalDetailsOf, clientTokenUpdateBody, DEVICE_SCOPES, readDeviceScope, readIssuedVia, readOwnerNewDevices, userAccessOf, type ClientTokenUpdate, type ClientTokenUpdated, type DeviceScope, type OwnerDeviceAck, type OwnerNewDevice, type TokenPersonAckResult } from "../shared/users";
 import { PEER_ID, peerAddBody, peerInviteBody, peerPatchBody, peersSettingsBody, type PeerAgents, type PeerAuditEntry, type PeerInvite, type PeerList, type PeerPatch, type PeerResult, type PeersSettingsPatch, type PeerView } from "../shared/peers";
 import { asStuckDiscarded, asStuckView, cleanMinAge, stuckDiscardRequest } from "../shared/agentBusStuck";
 import { sanitizeLaunch, type NewThreadDefaultsPatch } from "../shared/launch";
+import type { ClientState, OnlineClientView, RemoteCloseResult } from "../shared/remoteClose";
+import { CLIENT_INSTANCE } from "./clientPresence";
 import type { ClientTokenView, PairingCodeView, WindowsSandboxReadiness } from "../shared/ipc";
 import { windowsSandboxReadinessOf } from "../shared/windowsSandbox";
-import { localDaemonSetup } from "../shared/hosts";
+import { localDaemonSetup, readHostOwner, type HostOwner } from "../shared/hosts";
 import { isValidTokenId } from "../shared/hosts";
 import { servicesSettingsPatch } from "../shared/servicesSettings";
 import type { ClaudeRepinDone, ClaudeRepinResult, ClaudeRuntimeView } from "../shared/claudeRepin";
@@ -107,7 +111,9 @@ function refusalOf(error: unknown): CutexRefusal | null {
   });
   const message = error.message.startsWith(`${error.code}: `) ? error.message.slice(error.code.length + 2) : error.message;
   const forkReferences = !Array.isArray(details) && (details as { nativeForkReferences?: unknown } | null | undefined)?.nativeForkReferences === true;
-  return { code: error.code, message, ...(sessions ? { sessions } : {}), ...(forkReferences ? { forkReferences } : {}) };
+  // owner_local_only / device_scope_denied / …: the action / scope the UI explains.
+  const access = accessRefusalDetailsOf(error.code, error.details);
+  return { code: error.code, message, ...(sessions ? { sessions } : {}), ...(forkReferences ? { forkReferences } : {}), ...(access ? { access } : {}) };
 }
 
 async function mutation(run: () => Promise<unknown>): Promise<MutationResult> {
@@ -1004,6 +1010,21 @@ export class DaemonService implements DaemonApi {
     return profileOf(await this.requireClient().request<{ profile: ProfileDetail }>("POST", this.profilePath(profile, "/duplicate"), { body: { name: name.trim() } }));
   }
 
+  /** cutex `profile-import-cc-switch`: CC Switch's providers on the host (never with keys); null = no such route (older cutex). */
+  async ccSwitchImportList(): Promise<CcSwitchImportList | null> {
+    try {
+      return await this.requireClient().request<CcSwitchImportList>("GET", "/v2/profile-imports/cc-switch");
+    } catch (error) {
+      if (error instanceof CutexApiError && (error.status === 404 || error.status === 405)) return null;
+      throw error;
+    }
+  }
+
+  /** cutex `profile-import-cc-switch`: the body is rebuilt from known fields (shared/ccSwitchImport.ts). */
+  ccSwitchImport(items: CcSwitchImportItem[]): Promise<CcSwitchImportResult> {
+    return this.requireClient().request<CcSwitchImportResult>("POST", "/v2/profile-imports/cc-switch", { body: ccSwitchImportBody(items) });
+  }
+
   /**
    * profile-transfer, MAIN ONLY (never an IPC method: not in DaemonApi / ALLOWED): the reply's bundle
    * may hold an API key. Used by main/profileTransfer.ts through HostManager.copyProfileToHost.
@@ -1203,11 +1224,21 @@ export class DaemonService implements DaemonApi {
     }
   }
 
-  async createPairingCode(label?: string, userId?: string): Promise<PairingCodeView> {
+  async createPairingCode(label?: string, userId?: string, scope?: DeviceScope): Promise<PairingCodeView> {
+    if (scope !== undefined && scope !== null && !DEVICE_SCOPES.includes(scope)) throw new Error("bad scope");
     // The reply carries a one-time code: returned to the renderer only, never logged here.
-    const r = await this.requireClient().createPairingCode(typeof label === "string" ? label : undefined, typeof userId === "string" ? { userId } : {});
+    const r = await this.requireClient().createPairingCode(typeof label === "string" ? label : undefined, { ...(typeof userId === "string" ? { userId } : {}), ...(scope ? { scope } : {}) });
     const bound = (r as { userId?: unknown }).userId;
-    return { code: r.code, expiresAt: r.expiresAt, label: r.label ?? null, hostId: r.hostId, ...(r.instanceId ? { instanceId: r.instanceId } : {}), urls: Array.isArray(r.urls) ? r.urls : [], qr: r.qr, ...(typeof bound === "string" ? { userId: bound } : {}) };
+    const ttl = r.ttlSeconds;
+    const granted = readDeviceScope(r.scope);
+    return {
+      code: r.code, expiresAt: r.expiresAt, label: r.label ?? null, hostId: r.hostId, ...(r.instanceId ? { instanceId: r.instanceId } : {}), urls: Array.isArray(r.urls) ? r.urls : [], qr: r.qr,
+      ...(typeof bound === "string" ? { userId: bound } : {}),
+      // owner-device-notice / device-scope (absent on older hosts).
+      ...(typeof ttl === "number" && Number.isFinite(ttl) && ttl > 0 ? { ttlSeconds: ttl } : {}),
+      ...(granted ? { scope: granted } : {}),
+      ...(typeof r.ownerDevice === "boolean" ? { ownerDevice: r.ownerDevice } : {}),
+    };
   }
 
   async clientTokens(): Promise<ClientTokenView[]> {
@@ -1222,6 +1253,9 @@ export class DaemonService implements DaemonApi {
       createdAt: t.createdAt,
       lastUsedAt: t.lastUsedAt ?? null,
       lastAddress: t.lastAddress ?? null,
+      // device-scope / owner-local-only (absent on older hosts).
+      ...((s) => (s ? { scope: s } : {}))(readDeviceScope(t.scope)),
+      ...((v) => (v ? { issuedVia: v } : {}))(readIssuedVia(t.issuedVia)),
     }));
   }
 
@@ -1235,6 +1269,65 @@ export class DaemonService implements DaemonApi {
     if (name !== null && typeof name !== "string") throw new Error("bad name");
     const r = await this.requireClient().renameClientToken(tokenId, name === null ? null : name.slice(0, 200));
     return { tokenId: r.tokenId, ownerName: r.ownerName ?? null };
+  }
+
+  /** `PATCH /v2/client-tokens/{id}` `{name?, scope?}` (client-token-rename / device-scope); refusals as values. */
+  updateClientToken(tokenId: string, patch: ClientTokenUpdate): Promise<UsersResult<ClientTokenUpdated>> {
+    if (!isValidTokenId(tokenId)) throw new Error("bad token id");
+    const body = clientTokenUpdateBody(patch);
+    return this.usersCall(async () => {
+      const r = await this.requireClient().request<{ tokenId?: unknown; ownerName?: unknown; scope?: unknown }>("PATCH", `/v2/client-tokens/${encodeURIComponent(tokenId)}`, { body });
+      return { tokenId: typeof r?.tokenId === "string" ? r.tokenId : tokenId, ownerName: typeof r?.ownerName === "string" ? r.ownerName : null, scope: readDeviceScope(r?.scope) ?? null };
+    });
+  }
+
+  // ---------- new owner devices (cutex `owner-device-notice`, shared/users.ts) ----------
+
+  /** `GET /v2/users/owner/new-devices`: unacknowledged owner devices; null on a cutex without the route. */
+  ownerNewDevices(): Promise<UsersResult<OwnerNewDevice[] | null>> {
+    return this.usersCall(async () => {
+      try {
+        return readOwnerNewDevices(await this.requireClient().request<unknown>("GET", "/v2/users/owner/new-devices"));
+      } catch (error) {
+        if (error instanceof CutexApiError && (error.status === 404 || error.status === 405)) return null;
+        throw error;
+      }
+    });
+  }
+
+  /** `POST /v2/users/owner/new-devices/{tokenId}/ack` (full owner principals; idempotent). */
+  ackOwnerNewDevice(tokenId: string): Promise<UsersResult<OwnerDeviceAck>> {
+    if (!isValidTokenId(tokenId)) throw new Error("bad token id");
+    return this.usersCall(async () => {
+      const r = await this.requireClient().request<{ tokenId?: unknown; acknowledged?: unknown }>("POST", `/v2/users/owner/new-devices/${encodeURIComponent(tokenId)}/ack`);
+      return { tokenId: typeof r?.tokenId === "string" ? r.tokenId : tokenId, acknowledged: r?.acknowledged === true };
+    });
+  }
+
+  // ---------- online desktops (cutex `client-remote-close`, shared/remoteClose.ts) ----------
+
+  /** `GET /v2/clients`; `self` = this launch's instance (main/clientPresence.ts CLIENT_INSTANCE). */
+  onlineClients(): Promise<RemoteCloseResult<OnlineClientView[]>> {
+    return this.remoteCloseCall(async () => (await this.requireClient().onlineClients()).map((c) => ({ ...c, self: c.instanceId === CLIENT_INSTANCE })));
+  }
+
+  /** `POST /v2/clients/{instanceId}/close` (the contract's 15 s countdown); refusals as values. */
+  closeOnlineClient(instanceId: string): Promise<RemoteCloseResult<{ instanceId: string; state: ClientState }>> {
+    if (typeof instanceId !== "string" || !CLIENT_INSTANCE_ID.test(instanceId)) throw new Error("bad instance id");
+    if (instanceId === CLIENT_INSTANCE) throw new Error("this desktop is closed from its own window");
+    return this.remoteCloseCall(() => this.requireClient().closeClient(instanceId));
+  }
+
+  private async remoteCloseCall<T>(run: () => Promise<T>): Promise<RemoteCloseResult<T>> {
+    try {
+      return { ok: true, value: await run() };
+    } catch (error) {
+      if (error instanceof CutexApiError) {
+        const message = error.message.startsWith(`${error.code}: `) ? error.message.slice(error.code.length + 2) : error.message;
+        return { ok: false, error: { code: error.code, message } };
+      }
+      throw error;
+    }
   }
 
   patchSettings(patch: Partial<GlobalSettings>): Promise<GlobalSettings & { restartRequired: string[] }> {
@@ -1878,7 +1971,9 @@ export class DaemonService implements DaemonApi {
       // person_key_in_use: who holds the key.
       const userId = typeof details?.userId === "string" ? details.userId : undefined;
       const publicKey = typeof details?.publicKey === "string" ? details.publicKey : undefined;
-      return { ok: false, error: { code: error.code, message, ...(tokens ? { tokens } : {}), ...(peers ? { peers } : {}), ...(userId ? { userId } : {}), ...(publicKey ? { publicKey } : {}) } };
+      // owner_local_only (disableOwnerApproval) / owner_person_local_only / device_scope_denied: their details.
+      const access = accessRefusalDetailsOf(error.code, error.details);
+      return { ok: false, error: { code: error.code, message, ...(tokens ? { tokens } : {}), ...(peers ? { peers } : {}), ...(userId ? { userId } : {}), ...(publicKey ? { publicKey } : {}), ...(access ? { access } : {}) } };
     }
   }
 
@@ -1976,6 +2071,24 @@ export class DaemonService implements DaemonApi {
 
   hostServiceInfo(): Promise<HostServiceInfo> {
     return this.requireClient().hostServiceInfo();
+  }
+
+  // ---------- host owner person (cutex `host-owner-person`, docs/research/host-ownership-20261019.md §1.2) ----------
+
+  /** `GET /v2/host` `owner`; null when absent (older cutex). */
+  async hostOwner(): Promise<HostOwner | null> {
+    return readHostOwner(await this.requireClient().request<unknown>("GET", "/v2/host"));
+  }
+
+  /** `PUT /v2/users/owner-person`: root credential on loopback only (403 `owner_person_local_only` as a value). */
+  setOwnerPerson(publicKey: string): Promise<UsersResult<HostOwner | null>> {
+    if (typeof publicKey !== "string" || !/^[A-Za-z0-9_-]{16,128}$/.test(publicKey)) return Promise.resolve({ ok: false, error: { code: "invalid_public_key", message: "publicKey" } });
+    return this.usersCall(async () => readHostOwner(await this.requireClient().request<unknown>("PUT", "/v2/users/owner-person", { body: { publicKey } })));
+  }
+
+  /** `DELETE /v2/users/owner-person` (unconfirmed again); same rule as setOwnerPerson. */
+  clearOwnerPerson(): Promise<UsersResult<HostOwner | null>> {
+    return this.usersCall(async () => readHostOwner(await this.requireClient().request<unknown>("DELETE", "/v2/users/owner-person")));
   }
 
   // ---------- optional components (cutex `components`, shared/components.ts) ----------

@@ -12,7 +12,8 @@ import { useUiPrefs } from "../lib/prefs";
 import { linkName, linkTypeOf, pickTurnLinks, startsExpanded, turnFileDiff, type TurnChanges, type TurnFileChange, type TurnLink } from "../lib/turnSummary";
 import { linkActions, useExistingLinks, useFileActions } from "../lib/turnSummaryView";
 import { HOST_FILE_READ_FEATURE, rootFor, scopeFor } from "../lib/workspace";
-import { selectedFeatures, selectedSidebar, useApp } from "../store";
+import { useApp } from "../store";
+import { convFeaturesOf, useConvScope, useConvSidebar } from "../lib/conversationScope";
 import { openTurnDiff } from "../lib/sideOpen";
 
 const NO_FILES: TurnFileChange[] = [];
@@ -45,8 +46,9 @@ export function TurnSummary({ sessionId, turnId, text, changes, latest }: { sess
   const { t } = useI18n();
   const { turnSummary: mode } = useUiPrefs();
   const files = changes?.files ?? NO_FILES;
-  const sidebar = useApp(selectedSidebar);
-  const hostRead = useApp((s) => selectedFeatures(s).has(HOST_FILE_READ_FEATURE));
+  const sidebar = useConvSidebar();
+  const conv = useConvScope();
+  const hostRead = useApp((s) => convFeaturesOf(conv, s).has(HOST_FILE_READ_FEATURE));
   const root = useMemo(() => {
     const scope = scopeFor(sidebar, sessionId);
     return scope ? rootFor(sidebar, scope) : null;

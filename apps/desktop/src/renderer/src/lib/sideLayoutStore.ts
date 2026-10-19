@@ -1,20 +1,23 @@
-// The right side's state (docs/desktop-modules.md §18): the layout of the current view scope (pages,
-// cards, instances, overrides — persisted per scope in localStorage "cutex-desktop.side"), with one
-// view per agent (column open, page in view: `layout.views`, RFC §13 D27′), plus what lives in
-// memory only: maximise / fullscreen (per agent too), the tab infos the page buttons sum, reveal
-// counters and the flash. A small zustand store of its own (not the 1900-line store.ts); every layout change
-// goes through the pure reducers in lib/sideLayout.ts.
+// The tool area's state (docs/desktop-modules.md §24; §18 for the parts it keeps): the layout of the
+// current view scope (tool columns, panes, instances, overrides — stored per scope as the tool area of
+// the pane layout, localStorage "cutex-desktop.panes" through lib/paneFile; migrated once from the v1.16
+// "cutex-desktop.side"), one for every agent (the per-agent views of §18.5 are gone: shown / hidden and
+// the focused column are global; what a pane shows follows its bindings), plus what lives in memory
+// only: maximise / fullscreen, the tab infos the launchers sum, reveal counters and the flash. A small
+// zustand store of its own (not the 1900-line store.ts); every layout change goes through the pure
+// reducers in lib/sideLayout.ts.
 import { create } from "zustand";
 import type { Json } from "../modules/types";
 import type { SideTabInfo } from "../modules/slots";
-import { agentHost, selectedSidebar, sidebarOf, useApp } from "../store";
-import { parseHostKey } from "./hostKeys";
+import { agentHost, selectedSidebar, useApp } from "../store";
 import { getUiPrefs } from "./prefs";
+import { migrateSideOnce, readScope, scopeHost, writeTools } from "./paneFile";
+import { toolRawOf } from "./paneLayout";
 import {
+  bindingVisible,
   closeIfEmptied,
   closeInstances,
   dropDeletedAgents,
-  dropViews,
   emptyLayout,
   findCard,
   findPage,
@@ -22,20 +25,15 @@ import {
   locate,
   prepareForSave,
   restoreInstances,
-  restoreView,
   sanitizeLayout,
-  saveView,
   stateSize,
   STATE_LIMIT,
-  switchAgentView,
-  viewKey,
   type SideLayout,
 } from "./sideLayout";
 import { sideRegistry, sideViewNow } from "./sideComponents";
 import { peekOpen } from "./peekStore";
 import { scopeFor, scopeKey } from "./workspace";
 
-export const SIDE_STORAGE_KEY = "cutex-desktop.side";
 
 export interface SideMode {
   kind: "maximised" | "fullscreen";
@@ -71,22 +69,7 @@ export const useSide = create<SideStoreState>(() => ({
   focusedCard: null,
 }));
 
-// ── Persistence ─────────────────────────────────────────────────────────────────────────────────
-
-interface SideFile {
-  v: 1;
-  layouts: Record<string, unknown>;
-}
-
-function readFile(): SideFile {
-  try {
-    const raw = JSON.parse(localStorage.getItem(SIDE_STORAGE_KEY) ?? "null") as unknown;
-    if (raw && typeof raw === "object" && (raw as SideFile).v === 1 && (raw as SideFile).layouts && typeof (raw as SideFile).layouts === "object") return raw as SideFile;
-  } catch {
-    // unreadable: start empty
-  }
-  return { v: 1, layouts: {} };
-}
+// ── Persistence (the tool area of the pane layout, lib/paneFile) ─────────────────────────────────
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -111,13 +94,7 @@ function saveNow(): void {
     persist: (kind) => registry?.get(kind)?.item.persist !== false,
     visible: (id) => (ctx ? instanceVisible(layout, id, ctx) : true),
   });
-  const file = readFile();
-  file.layouts[scope] = stored;
-  try {
-    localStorage.setItem(SIDE_STORAGE_KEY, JSON.stringify(file));
-  } catch {
-    // storage full / unavailable: the layout lasts for this session only
-  }
+  writeTools(scope, stored);
 }
 
 function scheduleSave(): void {
@@ -134,13 +111,11 @@ export function flushSideSave(): void {
 
 // ── Updates ─────────────────────────────────────────────────────────────────────────────────────
 
-/** Mode after a layout change: gone with its card / page or a closed column; a card mode on another page becomes the page's. */
+/** Mode after a layout change: gone with its card / column or hidden tool columns (a card mode stays on its card, in any column). */
 function validMode(layout: SideLayout, mode: SideMode | null): SideMode | null {
   if (!mode || !layout.open || !findPage(layout, layout.activePage)) return null;
   if (!mode.card) return mode;
-  const at = findCard(layout, mode.card);
-  if (!at) return null;
-  return at.page.id === layout.activePage ? mode : { kind: mode.kind, card: null };
+  return findCard(layout, mode.card) ? mode : null;
 }
 
 /**
@@ -153,46 +128,35 @@ function bindingCtx(): { hostId: string; sessionId: string | null; workspaceKey:
   return { hostId: agentHost(s), sessionId: s.selectedId, workspaceKey: scope ? scopeKey(scope) : null };
 }
 
-type AppNow = ReturnType<typeof useApp.getState>;
-/** The selected agent's view key (host-keyed for an agent of another host than the focus host). */
-const currentViewKey = (s: AppNow) => viewKey(s.selectedId, agentHost(s), s.hosts?.active ?? "local");
-
-/** The agent whose view `layout.open` / `activePage` are (set on scope load and agent switch). */
-let viewAgent: string | null = null;
-
-/** Applies a reducer to the current layout (persisted, debounced); the result is the current agent's view. */
-export function updateLayout(fn: (layout: SideLayout) => SideLayout): void {
+/**
+ * Applies a reducer to the current layout (persisted, debounced). `system`: not the owner's doing (a
+ * stored tab its component does not restore): the tool area does not hide for it.
+ */
+export function updateLayout(fn: (layout: SideLayout) => SideLayout, opts: { system?: boolean } = {}): void {
   const s = useSide.getState();
   const next = fn(s.layout);
   if (next === s.layout) return;
-  let layout = closeIfEmptied(s.layout, next, bindingCtx());
-  if (viewAgent !== null) layout = saveView(layout, viewAgent, Date.now());
+  const layout = opts.system ? next : closeIfEmptied(s.layout, next, bindingCtx());
   const mode = validMode(layout, s.mode);
   const focusedCard = s.focusedCard && findCard(layout, s.focusedCard) ? s.focusedCard : null;
   useSide.setState({ layout, mode, focusedCard });
   scheduleSave();
 }
 
-/** Maximise / full screen per agent, in memory only (modes never outlive the session). */
-const modes = new Map<string, SideMode>();
-
-/** Another agent selected: keep the old one's view (and mode), show the new one's. */
-function switchAgent(to: string): void {
+/**
+ * Another agent focused (§24: one layout for every agent): the tool columns stay as they are, their
+ * panes show what the new agent's bindings see; a maximised / full-screen card the agent cannot see ends.
+ */
+function switchAgent(): void {
   const s = useSide.getState();
-  const from = viewAgent;
-  if (from === to) return;
-  if (from !== null) {
-    if (s.mode) modes.set(from, s.mode);
-    else modes.delete(from);
-  }
-  viewAgent = to;
-  const layout = from === null ? saveView(restoreView(s.layout, to, bindingCtx()), to, Date.now(), true) : switchAgentView(s.layout, from, to, bindingCtx(), Date.now());
-  const mode = validMode(layout, modes.get(to) ?? null);
-  const focusedCard = s.focusedCard && findCard(layout, s.focusedCard) ? s.focusedCard : null;
-  if (layout !== s.layout || mode !== s.mode || focusedCard !== s.focusedCard) {
-    useSide.setState({ layout, mode, focusedCard, flash: null });
-    scheduleSave();
-  }
+  if (!s.mode?.card) return;
+  const at = findCard(s.layout, s.mode.card);
+  const ctx = bindingCtx();
+  const sees = !!at && at.card.tabs.some((id) => {
+    const inst = s.layout.instances[id];
+    return !!inst && bindingVisible(inst.binding, ctx);
+  });
+  if (!sees) useSide.setState({ mode: null });
 }
 
 export function setMode(mode: SideMode | null): void {
@@ -286,6 +250,7 @@ function restorePending(): void {
       }
       return inst.v === version ? { state: inst.state, v: version } : null;
     }),
+    { system: true },
   );
   // Ids no longer in the layout need no restore.
   const layout = useSide.getState().layout;
@@ -314,8 +279,9 @@ let firstLoad = true;
 function loadScope(scope: string): void {
   if (useSide.getState().scope === scope) return;
   flushSideSave();
-  const file = readFile();
-  let layout = sanitizeLayout(file.layouts[scope], scope.startsWith("host:") ? scope.slice("host:".length) : undefined);
+  migrateSideOnce();
+  const tools = readScope(scope).tools;
+  let layout = tools ? sanitizeLayout(toolRawOf(tools), scopeHost(scope)) : emptyLayout();
   if (firstLoad && !getUiPrefs().sideRestore) layout = { ...emptyLayout(), overrides: layout.overrides, seq: layout.seq };
   firstLoad = false;
   const discarded = closeOnLoad.get(scope);
@@ -325,10 +291,6 @@ function loadScope(scope: string): void {
   }
   pending.clear();
   for (const id of Object.keys(layout.instances)) pending.add(id);
-  // The selected agent's view of this scope (a fresh load: no agent's view is shown yet).
-  viewAgent = currentViewKey(useApp.getState());
-  modes.clear();
-  layout = saveView(restoreView(layout, viewAgent, bindingCtx()), viewAgent, Date.now(), true);
   useSide.setState({ scope, layout, mode: null, revealed: {}, tabInfo: {}, flash: null, focusedCard: null });
   restorePending();
 }
@@ -345,18 +307,11 @@ export function startSideStore(subscribeModules: (listener: () => void) => () =>
   const offApp = useApp.subscribe((s, prev) => {
     const host = s.hosts?.active ?? "local";
     if (host !== (prev.hosts?.active ?? "local")) loadScope(scopeOf(host));
-    if (s.selectedId !== prev.selectedId || s.selectedHost !== prev.selectedHost) switchAgent(currentViewKey(s));
+    if (s.selectedId !== prev.selectedId || s.selectedHost !== prev.selectedHost) switchAgent();
     if (s.sidebar && s.sidebar !== prev.sidebar) {
       const sidebar = s.sidebar;
       const known = new Set([...sidebar.active, ...sidebar.retired].map((r) => r.cutexSessionId));
-      // Views of another host's agents stay while that host's sidebar is unknown or still lists them.
-      const exists = (key: string) => {
-        const other = parseHostKey(key);
-        if (!other) return known.has(key);
-        const otherSidebar = sidebarOf(s, other[0]);
-        return !otherSidebar || [...otherSidebar.active, ...otherSidebar.retired].some((r) => r.cutexSessionId === other[1]);
-      };
-      updateLayout((layout) => dropViews(dropDeletedAgents(layout, host, (id) => known.has(id)), exists));
+      updateLayout((layout) => dropDeletedAgents(layout, host, (id) => known.has(id)));
     }
   });
   const offModules = subscribeModules(() => restorePending());
@@ -364,7 +319,6 @@ export function startSideStore(subscribeModules: (listener: () => void) => () =>
   window.addEventListener("beforeunload", onUnload);
   return () => {
     started = false;
-    viewAgent = null;
     offApp();
     offModules();
     window.removeEventListener("beforeunload", onUnload);

@@ -5,11 +5,17 @@
 // mutes); the owner-notify module's sections follow through the outlet. A cutex without
 // notification-levels shows 「需要升级 cutex」 for its tables, then 新智能体的提醒 and the owner-notify sections.
 // Two parts (review 2026-10-15 UI-02): 主机 edits the Settings target host (the host picker of the
-// host pages, components/SettingsHostFrame), never the focus host in its place; 本设备 is this computer.
+// host pages, components/SettingsHostFrame), never the focus host in its place; 这台设备 is this device.
+// Order (owner 2026-10-19): 这台设备 first (why nothing arrives is answered there), then the host's
+// 通知方式, 主人通知, and the long 通知等级 list last, not folded. 新智能体的提醒 (the bell's off / on /
+// important for new agents) is off the page (owner 2026-10-19): a second set of level words beside the
+// four levels, for a per-agent bell the levels design retires (docs/research/notification-levels.md §4.3);
+// the host keeps its stored value and the bell still changes one agent. 按项目通知 and the
+// owner-notify per-agent list are hidden until they get sub-pages (their stored values still apply).
 import { useState } from "react";
-import { Check, Lock } from "lucide-react";
+import { Check, Lock, Wrench } from "lucide-react";
 import { cellPatch, cellValue, fixedCell, groupedMethods, localText, LEGACY_PRESET, NOTIFICATION_LEVELS, NOTIFICATION_LEVELS_FEATURE, INDEPENDENT_PROJECT, isDeviceMethod, presetChoices, type EventView, type MethodGroup, type MethodSpec, type NotificationLevel, type NotificationLevelsPatch, type NotificationLevelsView } from "../../../../shared/notificationLevels";
-import { ErrorNote, ListRow, Loading, Notice, ResetButton, Section, Segmented, Select, SettingRow, Toggle, Button, EmptyState } from "../../components/settings/Form";
+import { ErrorNote, ListRow, Loading, Notice, ResetButton, ScopeChip, Section, Segmented, Select, SettingRow, Toggle, Button, EmptyState } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { useGlobalSettings } from "../../lib/globalSettings";
 import { setDeviceOff, useDeviceOff } from "../../lib/notifyDevice";
@@ -52,12 +58,14 @@ export function NotificationsPage() {
   const { t } = useI18n();
   return (
     <>
-      <SettingsHostPart title={t("notifications.part.host")} hint={t("notifications.part.hostHint")}>
-        <HostSections />
-      </SettingsHostPart>
-      <SettingsDevicePart title={t("notifications.part.device")} hint={t("notifications.part.deviceHint")}>
+      {/* No part headings (owner 2026-10-19): like the other pages, each card carries its own tag —
+          本地桌面应用 for 提醒开关, 「cutex 后端 · ● HOST ▾」 (the Settings target picker) for the host's cards. */}
+      <SettingsDevicePart>
         <DeviceSection />
       </SettingsDevicePart>
+      <SettingsHostPart>
+        <HostSections />
+      </SettingsHostPart>
     </>
   );
 }
@@ -74,15 +82,13 @@ function HostSections() {
     <>
       {supported && levels.error && <ErrorNote>{levels.error}</ErrorNote>}
       {supported && <MatrixSection levels={levels} />}
-      {supported && <EventsSection levels={levels} />}
       {!supported && features.size > 0 && (
         <Section id={settingsAnchorId("levels")} title={t("notifications.matrix.title")} source="host">
           <Notice tone="info">{t("modules.needsUpgrade", { feature: NOTIFICATION_LEVELS_FEATURE })}</Notice>
         </Section>
       )}
-      <NewAgentSection />
-      {supported && <MuteSection levels={levels} />}
       <SettingsSections page="notifications" />
+      {supported && <EventsSection levels={levels} />}
     </>
   );
 }
@@ -119,7 +125,7 @@ function MatrixSection({ levels }: { levels: TargetLevels }) {
   }));
   const pickable = (id: string) => id !== current && !choices.find((c) => c.id === id)?.readOnly;
   const columns: Column[] = view
-    ? groupedMethods(view.methods).flatMap(({ group, methods }): Column[] => (methods.length ? methods.map((method) => ({ group, method })) : group === "outbound" ? [{ group, method: null }] : []))
+    ? groupedMethods(view.methods).flatMap(({ group, methods }): Column[] => methods.map((method) => ({ group, method })))
     : [];
   const groups = columns.reduce<{ group: MethodGroup; span: number }[]>((acc, c) => {
     const last = acc[acc.length - 1];
@@ -216,13 +222,70 @@ function MatrixCell({ on, fixed, dim, disabled, label, fixedLabel, onToggle }: {
   );
 }
 
-// ---------- 2 事件 → 等级 ----------
+// ---------- 2 事件分级 (event → level) ----------
+
+/**
+ * Groups by what an event means for you (owner 2026-10-19), not by cutex module. Ids we know get their
+ * group, title and description here (lib-free, UI copy); anything else falls back by module, and an event
+ * no rule places goes to 其他 with cutex's own title / description.
+ */
+const EVENT_GROUPS = ["ask", "mine", "ownerNotify", "others", "trouble", "other"] as const;
+type EventGroup = (typeof EVENT_GROUPS)[number];
+const KNOWN_EVENTS: Record<string, EventGroup> = {
+  "native.approval": "ask",
+  "native.question": "ask",
+  "ownerApproval.pending": "ask",
+  "delegation.pendingReview": "ask",
+  "delegation.failed.owner": "mine",
+  "turn.owner.completed": "mine",
+  "turn.owner.failed": "mine",
+  "turn.owner.interrupted": "mine",
+  "ownerNotify.info": "ownerNotify",
+  "ownerNotify.attention": "ownerNotify",
+  "ownerNotify.urgent": "ownerNotify",
+  "ownerNotify.needsReply": "ownerNotify",
+  "turn.other.completed": "others",
+  "turn.other.failed": "others",
+  "job.completed.agent": "others",
+  "system.quarantine": "trouble",
+  "system.deliveryFailed": "trouble",
+  "system.idleDelegation": "trouble",
+  "delegation.deliveryFailed": "trouble",
+  "agentBus.messageFailed": "trouble",
+  "runtime.error": "trouble",
+};
+function eventGroup(e: EventView): EventGroup {
+  const known = KNOWN_EVENTS[e.id];
+  if (known) return known;
+  if (e.module === "ownerNotify") return "ownerNotify";
+  if (e.module === "native" || e.module === "approvals") return "ask";
+  if (e.module === "turn") return e.id.startsWith("turn.owner.") ? "mine" : "others";
+  if (e.module === "jobs") return "others";
+  if (e.module === "system" || e.module === "agentBus" || e.module === "runtime") return "trouble";
+  return "other";
+}
+
+/** The group band: a plain dark strip between rows of the one card (not the preview's dots). */
+function GroupBand({ group, first }: { group: EventGroup; first: boolean }) {
+  const { t } = useI18n();
+  return (
+    <div className={`-mx-4 flex min-h-8 items-center gap-2 border-b border-border/70 bg-win px-4 py-1.5 ${first ? "-mt-1 rounded-t-xl" : "-mt-px border-t"}`}>
+      <span className="text-[12px] font-medium text-muted">{t(`notifications.eventGroup.${group}` as MessageKey)}</span>
+      <span className="min-w-0 truncate text-[11px] text-subtle">{t(`notifications.eventGroup.${group}.hint` as MessageKey)}</span>
+      {/* 主人通知 is the agents' MCP tool owner_notify: the band carries its [MCP工具] tag. */}
+      {group === "ownerNotify" && (
+        <span className="ml-auto shrink-0">
+          <ScopeChip tone="plain" icon={<Wrench size={11} aria-hidden />} label={t("settings.scope.mcp.label")} title={t("settings.scope.mcp.title", { tools: "owner_notify" })} body={`${t("settings.scope.mcp.body", { tools: "owner_notify" })} ${t("owner-notify.toolDesc")}`} />
+        </span>
+      )}
+    </div>
+  );
+}
 
 function EventsSection({ levels: target }: { levels: TargetLevels }) {
   const { t, locale } = useI18n();
   const { view } = target;
   const [patch, busy] = usePatch(target);
-  const [changedOnly, setChangedOnly] = useState(false);
   const current = view?.effective.eventPreset ?? "default";
   const choices = presetChoices(view?.eventPresets.map((p) => p.id) ?? [], current);
   const pickable = (id: string) => id !== current && !choices.find((c) => c.id === id)?.readOnly;
@@ -231,63 +294,53 @@ function EventsSection({ levels: target }: { levels: TargetLevels }) {
     label: id === "custom" ? t("notifications.preset.custom") : KNOWN_EVENT_PRESETS.has(id) ? t(`notifications.eventPreset.${id}` as MessageKey) : localText(view?.eventPresets.find((p) => p.id === id)?.title, locale) || id,
   }));
   const levels = NOTIFICATION_LEVELS.map((l) => ({ value: l, label: t(`notifications.level.${l}`) }));
-  const events = (view?.events ?? []).filter((e) => !changedOnly || e.overridden);
-  const modules = [...new Set(events.map((e) => moduleGroup(e.module)))];
-  const moduleName = (m: string) => (KNOWN_MODULES.has(m) ? t(`notifications.module.${m}` as MessageKey) : m);
+  const events = view?.events ?? [];
+  const groups = EVENT_GROUPS.filter((g) => events.some((e) => eventGroup(e) === g));
   return (
     <Section
       id={settingsAnchorId("events")}
       title={t("notifications.events.title")}
-      hint={t("notifications.events.hint")}
+      hint={current === LEGACY_PRESET ? `${t("notifications.events.hint")} ${t("notifications.preset.legacyNote")}` : t("notifications.events.hint")}
       source="host"
-      actions={
-        <label className="flex items-center gap-2 text-xs text-muted">
-          {t("notifications.events.changedOnly")}
-          <Toggle checked={changedOnly} onChange={setChangedOnly} label={t("notifications.events.changedOnly")} />
-        </label>
-      }
+      actions={view ? <Segmented value={current} options={options} disabled={busy} label={t("notifications.preset")} onChange={(id) => pickable(id) && patch({ events: { preset: id } })} /> : undefined}
     >
       {!view && <Loading rows={4} />}
-      {view && (
-        <>
-          <SettingRow label={t("notifications.preset")} hint={current === LEGACY_PRESET ? t("notifications.preset.legacyNote") : undefined}>
-            <Segmented value={current} options={options} disabled={busy} onChange={(id) => pickable(id) && patch({ events: { preset: id } })} />
-          </SettingRow>
-          {events.length === 0 && <EmptyState>{t("notifications.events.none")}</EmptyState>}
-          {modules.map((m) => (
-            <div key={m}>
-              <div className="pt-3 pb-1 text-[11px] font-medium text-subtle">{moduleName(m)}</div>
-              {events
-                .filter((e) => moduleGroup(e.module) === m)
-                .map((e) => (
-                  <EventRow key={e.id} event={e} locale={locale} levels={levels} disabled={busy} onLevel={(level) => patch({ events: { levels: { [e.id]: level } } })} />
-                ))}
-            </div>
-          ))}
-        </>
-      )}
+      {view && events.length === 0 && <EmptyState>{t("notifications.events.none")}</EmptyState>}
+      {view &&
+        groups.map((g, i) => (
+          <div key={g}>
+            <GroupBand group={g} first={i === 0} />
+            {events
+              .filter((e) => eventGroup(e) === g)
+              .map((e) => (
+                <EventRow key={e.id} event={e} locale={locale} levels={levels} disabled={busy} onLevel={(level) => patch({ events: { levels: { [e.id]: level } } })} />
+              ))}
+          </div>
+        ))}
     </Section>
   );
 }
+
 
 /** One event: a settings row whose ↺ (reset slot) drops the override, like every defaultable row. */
 function EventRow({ event, locale, levels, disabled, onLevel }: { event: EventView; locale: string; levels: { value: NotificationLevel; label: string }[]; disabled: boolean; onLevel(level: NotificationLevel | null): void }) {
   const { t } = useI18n();
   const terms = resolveTerms(useTermOverrides(), locale as TermLocale);
-  const title = retermDaemonText(localText(event.title, locale), terms, locale as TermLocale) || event.id;
-  const description = retermDaemonText(localText(event.description, locale), terms, locale as TermLocale);
+  // Known ids carry our own title and one-line description (owner 2026-10-19); others keep cutex's.
+  const known = event.id in KNOWN_EVENTS;
+  const title = known ? t(`notifications.ev.${event.id}` as MessageKey) : retermDaemonText(localText(event.title, locale), terms, locale as TermLocale) || event.id;
+  const description = known ? t(`notifications.ev.${event.id}.desc` as MessageKey) : retermDaemonText(localText(event.description, locale), terms, locale as TermLocale);
   return (
     <SettingRow
       label={
         <span className="flex items-center gap-1.5" title={`${event.id}${description ? ` — ${description}` : ""}`}>
           <span className="truncate">{title}</span>
-          {event.overridden && <span className="shrink-0 rounded bg-accent/15 px-1 text-[10.5px] text-accent">{t("notifications.events.changed")}</span>}
         </span>
       }
       hint={description || undefined}
       reset={<ResetButton title={t("notifications.events.reset")} disabled={disabled || !event.overridden} onClick={() => onLevel(null)} />}
     >
-      <Select value={event.level} width="w-28" options={levels} disabled={disabled} label={title} onChange={(level) => onLevel(level)} />
+      <Segmented accent value={event.level} options={levels} disabled={disabled} label={title} onChange={(level) => onLevel(level)} />
     </SettingRow>
   );
 }
@@ -323,8 +376,12 @@ function DeviceSection() {
       {items.map(({ item }) => {
         const available = item.available();
         return (
-          <SettingRow key={item.id} label={t(item.titleKey)} hint={available === "unsupported" ? t("notifications.device.unsupported") : undefined}>
-            <Toggle checked={!off[item.method]} disabled={available === "unsupported"} label={t(item.titleKey)} onChange={(v) => void setDeviceOff(item.method, !v)} />
+          <SettingRow key={item.id} label={t(item.titleKey)}>
+            {available === "unsupported" ? (
+              <span className="text-xs text-subtle">{t("notifications.device.unsupported")}</span>
+            ) : (
+              <Toggle checked={!off[item.method]} label={t(item.titleKey)} onChange={(v) => void setDeviceOff(item.method, !v)} />
+            )}
           </SettingRow>
         );
       })}
@@ -335,7 +392,7 @@ function DeviceSection() {
 // ---------- 4 新智能体的提醒 ----------
 
 /** The level a new agent starts with (`newSessionNotification`), worded like the title-bar bell. */
-function NewAgentSection() {
+export function NewAgentSection() {
   const { t } = useI18n();
   const { settings, patch } = useGlobalSettings();
   if (!settings?.newSessionNotification) return null;
@@ -353,9 +410,9 @@ function NewAgentSection() {
   );
 }
 
-// ---------- 5 按项目通知 ----------
+// ---------- 5 按项目通知 (hidden for now: a sub-page later, owner 2026-10-19) ----------
 
-function MuteSection({ levels }: { levels: TargetLevels }) {
+export function MuteSection({ levels }: { levels: TargetLevels }) {
   const { t } = useI18n();
   const { view } = levels;
   const hostId = useTargetHostId();

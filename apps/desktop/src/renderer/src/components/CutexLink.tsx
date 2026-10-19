@@ -15,7 +15,8 @@ import { refActionEntries } from "../lib/refActions";
 import { services } from "../modules/app";
 import { useSlot } from "../modules/react";
 import type { AppSlotEntry, CutexRef, RefLinkView, RefOpenResult } from "../modules/slots";
-import { agentHost, useApp } from "../store";
+import { useApp } from "../store";
+import { convNotify, useConvHost, useConvScope, type ConversationScopeValue } from "../lib/conversationScope";
 
 type TargetEntry = AppSlotEntry<"ref.target">;
 
@@ -37,19 +38,20 @@ function useTarget(kind: string): TargetEntry | null {
 
 function useLinkRef(target: CutexLinkTarget, text: string): CutexRef {
   // Links in the open conversation are its agent's host's.
-  const hostId = useApp(agentHost);
+  const hostId = useConvHost();
   return cutexLinkRef(hostId, target, text);
 }
 
-function explain(t: (key: MessageKey, vars?: Record<string, string | number>) => string, r: RefOpenResult) {
+function explain(t: (key: MessageKey, vars?: Record<string, string | number>) => string, r: RefOpenResult, conv: ConversationScopeValue | null) {
   if (r.status === "opened") return;
   const reason = r.status === "stale" ? t("gutter.reason.stale") : t(`gutter.reason.${r.reason}` as MessageKey);
-  useApp.getState().notify(t("gutter.unavailable", { reason }), "error");
+  convNotify(conv, t("gutter.unavailable", { reason }), "error");
 }
 
 function useOpen() {
   const { t } = useI18n();
-  return (ref: CutexRef, how?: "auto" | "peek" | "page") => void services.refs.open(ref, how ? { how } : {}).then((r) => explain(t, r));
+  const conv = useConvScope();
+  return (ref: CutexRef, how?: "auto" | "peek" | "page") => void services.refs.open(ref, how ? { how } : {}).then((r) => explain(t, r, conv));
 }
 
 function menuFor(ref: CutexRef, open: (ref: CutexRef, how?: "auto" | "peek" | "page") => void, t: (key: MessageKey) => string): () => MenuEntry[] {

@@ -1,12 +1,22 @@
-// The right side's layout model (docs/desktop-modules.md §18; RFC right-panel-rfc-20261009 §3–§5):
-// pages → cards → instances, the pure `place()` that decides where an opened component goes, and
-// the reducers the shell runs on user actions. No React, no store, no feature names: every function
-// takes a layout and returns a new one (the input is never mutated), so tests build layouts as JSON.
+// The tool panes' layout model (docs/desktop-modules.md §24, superseding §18's pages; RFC
+// right-panel-rfc-20261009 §3–§5): the right-most columns of the window's pane layout. A "page" is now
+// a tool COLUMN (all of them on screen side by side, no page switcher), a "card" a PANE of that column
+// (≤ 3 rows, then tabs), a tab an instance. The pure `place()` decides where an opened component goes
+// (tools go into the right-most column, split down to 3 rows, then tabs of its bottom pane), and the
+// reducers the shell runs on user actions. One layout per view scope for every agent (§18.5's
+// per-agent views are gone, owner 2026-10-20): what a pane shows follows the bindings. No React, no
+// store, no feature names: every function takes a layout and returns a new one (the input is never
+// mutated), so tests build layouts as JSON. lib/paneLayout.ts stores it inside the pane layout JSON.
 import type { SideBinding, SidePageCandidate, SidePlacement } from "../modules/slots";
 import type { ItemId, Json } from "../modules/types";
+import { MAX_ROWS, MAX_TOOL_COLUMNS, MAX_TOOL_PANES } from "./paneLayout";
 
-export const MAX_PAGES = 9;
-export const MAX_CARDS = 6;
+/** Tool columns (former pages; §24 限额). */
+export const MAX_PAGES = MAX_TOOL_COLUMNS;
+/** Panes (former cards) per tool column; more → tabs of the bottom pane. */
+export const MAX_CARDS = MAX_ROWS;
+/** Pages a stored v1.16 side layout may have had (read once, folded into one column by `foldPages`). */
+export const LEGACY_MAX_PAGES = 9;
 /** The dedupe key of a singleton component (one instance per binding). */
 export const SINGLETON_KEY = "∅";
 export const CARD_HEADER = 36;
@@ -22,10 +32,6 @@ export const DRAWER_MARGIN = 48;
 export const STATE_LIMIT = 4096;
 export const MAX_INSTANCES = 200;
 export const MAX_OVERRIDES = 100;
-/** Per-agent views kept per scope (the least recently used beyond go). */
-export const MAX_VIEWS = 100;
-/** The view key while no agent is selected. */
-export const NO_AGENT = "∅";
 export const DEFAULT_ORDER = 500;
 export const DEFAULT_MIN_HEIGHT = MIN_CARD_HEIGHT;
 /** Prefix of the page group a user-made page carries (moved to a new page). */
@@ -33,7 +39,10 @@ export const USER_GROUP = "user:";
 
 export interface SideCard {
   id: string;
-  /** One component kind per card (never mixed). */
+  /**
+   * The pane's home kind (the kind it was made for: its declared order, min height, menu name). Its
+   * tabs are of that kind, except when a full column took another kind's tab in its bottom pane (§24).
+   */
   kind: ItemId;
   /** Instance ids, tab order. */
   tabs: string[];
@@ -73,26 +82,16 @@ export interface SideOverride {
   at: number;
 }
 
-/** One agent's view of the side (owner 2026-10-11, RFC §13 D27′): column open, page in view. */
-export interface SideAgentView {
-  open: boolean;
-  /** The page in view; null = none (an empty column with its launchers, or not chosen yet). */
-  page: string | null;
-  /** Last switched to / changed (the MAX_VIEWS cut drops the oldest). */
-  at: number;
-}
-
 export interface SideLayout {
-  /** The current agent's view (mirrored into `views` under its key by the store). */
+  /** The tool columns are shown (one switch for every agent: the title-bar toggle, Ctrl+Alt+B). */
   open: boolean;
+  /** The focused tool column (last opened into / clicked): page modes, the 「active」 placement candidate. */
   activePage: string | null;
-  /** Page-button order. */
+  /** The tool columns, left → right (the last one is the right-most). */
   pages: SidePage[];
   instances: Record<string, SideInstance>;
   /** User overrides per component kind (§18.7). */
   overrides: Record<string, SideOverride>;
-  /** Per-agent views (key = cutex session id, NO_AGENT without one); pages / cards above are shared. */
-  views?: Record<string, SideAgentView>;
   /** Id counter: ids are never reused, so an override never points at an unrelated new page. */
   seq: number;
 }
@@ -192,6 +191,26 @@ function freshestCard(layout: SideLayout, cards: readonly SideCard[]): SideCard 
   return best;
 }
 
+/** The card is `kind`'s: made for it, or holding one of its tabs (a full column's bottom pane, §24). */
+export function cardHolds(layout: SideLayout, card: SideCard, kind: ItemId): boolean {
+  return card.kind === kind || card.tabs.some((id) => layout.instances[id]?.kind === kind);
+}
+
+const filled = (cards: readonly SideCard[]) => cards.filter((c) => c.tabs.length > 0).length;
+
+/** Cards (tool panes) in the whole layout (a card emptied mid-reducer does not count). */
+export const cardCount = (layout: SideLayout): number => layout.pages.reduce((n, p) => n + filled(p.cards), 0);
+
+/** A new card fits on `page`: fewer than 3 in the column and fewer than MAX_TOOL_PANES tool panes in all (§24 限额). */
+export function roomForCard(layout: SideLayout, page: SidePage): boolean {
+  return filled(page.cards) < MAX_CARDS && cardCount(layout) < MAX_TOOL_PANES;
+}
+
+/** The right-most tool column (tools go there, §24), or null without columns. */
+export function rightmostPage(layout: SideLayout): SidePage | null {
+  return layout.pages[layout.pages.length - 1] ?? null;
+}
+
 // ── place() (§18.6) ─────────────────────────────────────────────────────────────────────────
 
 export interface SidePlaceRequest {
@@ -262,7 +281,7 @@ export function place(layout: SideLayout, req: SidePlaceRequest, spec: PlaceSpec
       let hit: SidePage | null = null;
       if (candidate === "active") hit = req.columnOpen ? findPage(layout, req.activePage) : null;
       else if ("group" in candidate) hit = layout.pages.find((p) => p.groups.includes(candidate.group)) ?? null;
-      else hit = layout.pages.find((p) => p.cards.some((c) => c.kind === candidate.containing)) ?? null;
+      else hit = layout.pages.find((p) => p.cards.some((c) => cardHolds(layout, c, candidate.containing))) ?? null;
       if (hit) {
         pick = { id: hit.id };
         via = "rule";
@@ -270,13 +289,16 @@ export function place(layout: SideLayout, req: SidePlaceRequest, spec: PlaceSpec
       }
     }
     if (!pick) {
+      // §24: no new column for a kind of its own any more — the focused column ("active-page") or the
+      // right-most one; a new column only when there is none yet.
       via = "otherwise";
-      const active = findPage(layout, req.activePage);
-      pick = spec.otherwise === "active-page" && active ? { id: active.id } : { new: [spec.home] };
+      const active = req.columnOpen ? findPage(layout, req.activePage) : null;
+      const target = (spec.otherwise === "active-page" ? active : null) ?? rightmostPage(layout);
+      pick = target ? { id: target.id } : { new: [spec.home] };
     }
   }
   if ("new" in pick && layout.pages.length >= MAX_PAGES) {
-    const fallback = findPage(layout, req.activePage) ?? layout.pages[layout.pages.length - 1]!;
+    const fallback = rightmostPage(layout)!;
     pick = { id: fallback.id };
     via = "limit";
   }
@@ -284,25 +306,25 @@ export function place(layout: SideLayout, req: SidePlaceRequest, spec: PlaceSpec
     return { op: "insert", page: { new: { groups: pick.new, index: layout.pages.length } }, card: { new: { index: 0, share: spec.share } }, via };
   }
   const page = findPage(layout, pick.id)!;
-  // 4. the card: an existing same-kind card (the freshest of several) gets a new tab
-  const same = freshestCard(layout, page.cards.filter((c) => c.kind === req.kind));
+  // 4. the pane: an existing pane of this kind (the freshest of several) gets a new tab
+  const same = freshestCard(layout, page.cards.filter((c) => cardHolds(layout, c, req.kind)));
   if (same) return { op: "insert", page: { id: page.id }, card: { id: same.id }, via };
-  if (page.cards.length < MAX_CARDS) {
+  if (roomForCard(layout, page)) {
     return { op: "insert", page: { id: page.id }, card: { new: { index: newCardIndex(page.cards, spec.order, orderOf), share: spec.share } }, via };
   }
-  // 5. a full page: another page sharing a group → its same-kind card or a new card; else a new page; else overflow
+  // 5. a full column (3 panes, or MAX_TOOL_PANES in all): another column's pane of this kind; else a new
+  // pane in another column with room; else a tab of this column's bottom pane (§24: then tabs).
   for (const other of layout.pages) {
-    if (other === page || !other.groups.some((g) => page.groups.includes(g))) continue;
-    const otherSame = freshestCard(layout, other.cards.filter((c) => c.kind === req.kind));
+    if (other === page) continue;
+    const otherSame = freshestCard(layout, other.cards.filter((c) => cardHolds(layout, c, req.kind)));
     if (otherSame) return { op: "insert", page: { id: other.id }, card: { id: otherSame.id }, via: "limit" };
-    if (other.cards.length < MAX_CARDS) {
+  }
+  for (const other of layout.pages) {
+    if (other !== page && roomForCard(layout, other)) {
       return { op: "insert", page: { id: other.id }, card: { new: { index: newCardIndex(other.cards, spec.order, orderOf), share: spec.share } }, via: "limit" };
     }
   }
-  if (layout.pages.length < MAX_PAGES) {
-    return { op: "insert", page: { new: { groups: [...page.groups], index: layout.pages.length } }, card: { new: { index: 0, share: spec.share } }, via: "limit" };
-  }
-  return { op: "insert", page: { id: page.id }, card: { new: { index: newCardIndex(page.cards, spec.order, orderOf), share: spec.share, collapsed: false } }, via: "limit" };
+  return { op: "insert", page: { id: page.id }, card: { id: page.cards[page.cards.length - 1]!.id }, via: "limit" };
 }
 
 // ── Mutation helpers (on a draft copy) ────────────────────────────────────────────────────────
@@ -314,7 +336,6 @@ function draft(layout: SideLayout): SideLayout {
     pages: layout.pages.map((p) => ({ ...p, groups: [...p.groups], cards: p.cards.map((c) => ({ ...c, tabs: [...c.tabs] })) })),
     instances: { ...layout.instances },
     overrides: { ...layout.overrides },
-    ...(layout.views ? { views: { ...layout.views } } : {}),
   };
 }
 
@@ -372,17 +393,49 @@ function detach(d: SideLayout, id: string): void {
   }
 }
 
+/** A pane none of whose tabs is of its home kind any more takes its first tab's kind (its order, name and min height follow). */
+function rehome(d: SideLayout, card: SideCard): void {
+  if (!card.tabs.length || card.tabs.some((id) => d.instances[id]?.kind === card.kind)) return;
+  const kind = d.instances[card.tabs[0]!]?.kind;
+  if (kind) card.kind = kind;
+}
+
+/** `card`'s tabs join `into` (the pane above it); `card` leaves its page (sizes renormalised). */
+function mergeCardInto(page: SidePage, card: SideCard, into: SideCard): void {
+  for (const id of card.tabs) if (!into.tabs.includes(id)) into.tabs.push(id);
+  if (!into.active) into.active = card.active ?? into.tabs[0] ?? null;
+  page.cards = page.cards.filter((c) => c !== card);
+  normalise(page.cards);
+}
+
+/**
+ * The limits (§24 限额): a column with more than 3 panes merges its bottom ones into the third (tabs);
+ * more than MAX_TOOL_PANES panes in all → the right-most column with ≥ 2 panes merges its bottom pane up.
+ */
+function fitLimits(d: SideLayout): void {
+  for (const page of d.pages) {
+    while (page.cards.length > MAX_CARDS) mergeCardInto(page, page.cards[page.cards.length - 1]!, page.cards[page.cards.length - 2]!);
+  }
+  while (cardCount(d) > MAX_TOOL_PANES) {
+    const page = [...d.pages].reverse().find((p) => p.cards.length >= 2);
+    if (!page) break;
+    mergeCardInto(page, page.cards[page.cards.length - 1]!, page.cards[page.cards.length - 2]!);
+  }
+}
+
 /**
  * Drops empty cards and pages (an empty page survives only while it is the page in view: the launcher),
- * renormalises card sizes, keeps `activePage` on a neighbour, closes the column when nothing is left.
+ * renormalises card sizes, keeps the limits, keeps `activePage` on a neighbour, closes the column when nothing is left.
  */
 function cleanup(d: SideLayout): void {
   for (const page of d.pages) {
     const before = page.cards.length;
     page.cards = page.cards.filter((c) => c.tabs.length > 0);
     for (const c of page.cards) if (!c.active || !c.tabs.includes(c.active)) c.active = c.tabs[0] ?? null;
+    for (const c of page.cards) rehome(d, c);
     if (page.cards.length !== before) normalise(page.cards);
   }
+  fitLimits(d);
   const order = d.pages.map((p) => p.id);
   d.pages = d.pages.filter((p) => p.cards.length > 0 || (p.launcher && p.id === d.activePage));
   if (!findPage(d, d.activePage)) {
@@ -674,6 +727,8 @@ export function moveInstance(layout: SideLayout, instanceId: string, target: Mov
   if (opts.card === from.card.id) return layout;
   // The only tab of the only card going to a new page: it would look exactly the same.
   if ("newPage" in target && from.page.cards.length === 1 && from.card.tabs.length === 1) return layout;
+  // No room for another tool column (§24 限额).
+  if ("newPage" in target && layout.pages.length >= MAX_PAGES) return layout;
   const d = draft(layout);
   detach(d, instanceId);
   let page: SidePage;
@@ -689,9 +744,11 @@ export function moveInstance(layout: SideLayout, instanceId: string, target: Mov
   delete page.launcher;
   let card: SideCard | null = null;
   if (opts.card) {
-    card = page.cards.find((c) => c.id === opts.card && c.kind === inst.kind) ?? null;
-    if (!card) return layout; // one kind per tab bar: never into another kind's card
-  } else if (!opts.newCard) card = freshestCard(d, page.cards.filter((c) => c.kind === inst.kind));
+    card = page.cards.find((c) => c.id === opts.card && cardHolds(d, c, inst.kind)) ?? null;
+    if (!card) return layout; // a dragged tab joins a pane of its kind only
+  } else if (!opts.newCard) card = freshestCard(d, page.cards.filter((c) => cardHolds(d, c, inst.kind)));
+  // A full column (§24): the tab joins its bottom pane (or the pane at the drop spot).
+  if (!card && page.cards.length && !roomForCard(d, page)) card = (opts.before ? page.cards.find((c) => c.id === opts.before) : null) ?? page.cards[page.cards.length - 1]!;
   if (!card) {
     const index = opts.newCard || opts.before !== undefined ? indexBefore(page.cards, opts.before) : newCardIndex(page.cards, orderOf(inst.kind), orderOf);
     card = addCard(d, page, inst.kind, index, null);
@@ -763,11 +820,11 @@ export function reorderPage(layout: SideLayout, pageId: string, targetId: string
 /** 拆到新卡片: the tab becomes its own card of the same kind right below, same page. No override. */
 export function splitInstance(layout: SideLayout, instanceId: string, now: number): SideLayout {
   const from = locate(layout, instanceId);
-  if (!from || from.card.tabs.length < 2) return layout;
+  if (!from || from.card.tabs.length < 2 || !roomForCard(layout, from.page)) return layout;
   const d = draft(layout);
   const at = locate(d, instanceId)!;
   detach(d, instanceId);
-  const card = addCard(d, at.page, at.card.kind, at.cardIndex + 1, null);
+  const card = addCard(d, at.page, d.instances[instanceId]?.kind ?? at.card.kind, at.cardIndex + 1, null);
   addTab(card, instanceId);
   touch(d, instanceId, now);
   return d;
@@ -792,6 +849,7 @@ export function moveCard(layout: SideLayout, cardId: string, target: MoveTarget 
   }
   if ("page" in target && target.page === src.page.id) return layout;
   if ("newPage" in target && src.page.cards.length < 2) return layout; // a single-card page: nothing would change
+  if ("newPage" in target && layout.pages.length >= MAX_PAGES) return layout; // no room for another tool column (§24)
   let page: SidePage;
   if ("newPage" in target) {
     page = newPage(d, []);
@@ -805,7 +863,7 @@ export function moveCard(layout: SideLayout, cardId: string, target: MoveTarget 
   delete page.launcher;
   src.page.cards.splice(src.cardIndex, 1);
   normalise(src.page.cards);
-  const same = freshestCard(d, page.cards.filter((c) => c.kind === src.card.kind));
+  const same = freshestCard(d, page.cards.filter((c) => cardHolds(d, c, src.card.kind)));
   if (same) {
     for (const id of src.card.tabs) addTab(same, id);
     same.active = src.card.active ?? same.active;
@@ -1022,22 +1080,13 @@ export function pageInView(layout: SideLayout, ctx: SideViewContext): SidePage |
   return page && pageVisibility(layout, page, ctx) !== "hidden" ? page : lanePages(layout, ctx)[0] ?? null;
 }
 
-// ── Per-agent views (owner 2026-10-11, RFC §13 D27′) ───────────────────────────────────────────
+// ── Content per agent (the views of §18.5 are gone, §24: one layout for every agent) ─────────────────
 
 type BindingCtx = Pick<SideViewContext, "hostId" | "sessionId" | "workspaceKey">;
 
 /**
- * An agent's view key: its session id; an open agent of another host than the focus host (multi-host
- * P1, opened in place) is keyed `[hostId, sessionId]` (lib/hostKeys) so equal ids of two hosts differ.
- */
-export function viewKey(sessionId: string | null, hostId?: string, focus?: string): string {
-  if (sessionId && hostId && focus && hostId !== focus) return JSON.stringify([hostId, sessionId]);
-  return sessionId ?? NO_AGENT;
-}
-
-/**
  * A page holds something for this agent: a placed instance whose binding it sees. By binding only
- * (dormant instances count): modules may still be registering when an agent's view is restored.
+ * (dormant instances count): modules may still be registering.
  */
 export function pageHasContentFor(layout: SideLayout, page: SidePage, ctx: BindingCtx): boolean {
   return page.cards.some((c) =>
@@ -1052,53 +1101,7 @@ export function hasContentFor(layout: SideLayout, ctx: BindingCtx): boolean {
   return layout.pages.some((p) => pageHasContentFor(layout, p, ctx));
 }
 
-function capViews(views: Record<string, SideAgentView>): Record<string, SideAgentView> {
-  const keys = Object.keys(views);
-  if (keys.length <= MAX_VIEWS) return views;
-  const out = { ...views };
-  for (const k of keys.sort((a, b) => views[a]!.at - views[b]!.at).slice(0, keys.length - MAX_VIEWS)) delete out[k];
-  return out;
-}
-
-/**
- * Records the current view (open, page in view) as `key`'s. An empty launcher page in view is
- * remembered as `page: null` (launcher pages live in memory only). Unchanged → the same layout
- * (`at` moves with a change, or always with `touch`).
- */
-export function saveView(layout: SideLayout, key: string, now: number, touch = false): SideLayout {
-  const active = findPage(layout, layout.activePage);
-  const page = active && active.cards.length ? active.id : null;
-  const old = layout.views?.[key];
-  if (old && old.open === layout.open && old.page === page && !touch) return layout;
-  return { ...layout, views: capViews({ ...layout.views, [key]: { open: layout.open, page, at: now } }) };
-}
-
-/**
- * Shows `key`'s view (an agent switch, a loaded scope): its column state and page. No stored view
- * = closed. The column stays closed when the agent has nothing here any more, except an empty
- * column it opened on purpose (stored open with `page: null`: the launchers). A stored page with
- * nothing for this agent falls back to the agent's first page with content.
- */
-export function restoreView(layout: SideLayout, key: string, ctx: BindingCtx): SideLayout {
-  const view = layout.views?.[key];
-  const first = layout.pages.find((p) => pageHasContentFor(layout, p, ctx))?.id ?? null;
-  const stored = view?.page ? findPage(layout, view.page) : null;
-  const page = stored && pageHasContentFor(layout, stored, ctx) ? stored.id : first;
-  const open = !!view?.open && (page !== null || view.page === null);
-  if (layout.open === open && layout.activePage === page) return layout;
-  return { ...layout, open, activePage: page };
-}
-
-/** Agent switch: saves `from`'s view, drops its launcher page (empty, in memory only), shows `to`'s. */
-export function switchAgentView(layout: SideLayout, from: string, to: string, ctx: BindingCtx, now: number): SideLayout {
-  let d = saveView(layout, from, now, true);
-  const launcher = findPage(d, d.activePage);
-  if (launcher && !launcher.cards.length) d = { ...d, pages: d.pages.filter((p) => p !== launcher), activePage: null };
-  d = restoreView(d, to, ctx);
-  return saveView(d, to, now, true);
-}
-
-/** A change took the current agent's last content away: its column closes (the next open reopens it). */
+/** A change took the focused agent's last content away: the tool columns hide (the next open shows them again). */
 export function closeIfEmptied(prev: SideLayout, next: SideLayout, ctx: BindingCtx): SideLayout {
   if (!next.open || !hasContentFor(prev, ctx) || hasContentFor(next, ctx)) return next;
   const active = findPage(next, next.activePage);
@@ -1106,14 +1109,77 @@ export function closeIfEmptied(prev: SideLayout, next: SideLayout, ctx: BindingC
   return { ...next, open: false };
 }
 
-/** Forgets the views of agents that no longer exist (deleted); NO_AGENT stays. */
-export function dropViews(layout: SideLayout, exists: (key: string) => boolean): SideLayout {
-  if (!layout.views) return layout;
-  const gone = Object.keys(layout.views).filter((k) => k !== NO_AGENT && !exists(k));
-  if (!gone.length) return layout;
-  const views = { ...layout.views };
-  for (const k of gone) delete views[k];
-  return { ...layout, views };
+/**
+ * The tool columns on screen (§24): every column with something for the focused agent, and the
+ * launcher column while it is the focused one. A maximised / full-screen column: that one; a card: its
+ * column with that card only. Nothing to show (the tool area is open with no pane at all): the empty state.
+ */
+export function columnsOnScreen(layout: SideLayout, ctx: SideViewContext, mode: { card: string | null } | null): { page: SidePage; only: string | null }[] {
+  const pages = lanePages(layout, ctx);
+  if (mode?.card) {
+    const at = findCard(layout, mode.card);
+    return at ? [{ page: at.page, only: mode.card }] : [];
+  }
+  if (mode) {
+    const page = findPage(layout, layout.activePage);
+    if (page && pages.includes(page)) return [{ page, only: null }];
+  }
+  return pages.map((page) => ({ page, only: null }));
+}
+
+/** The tool area shows: open, and either a column for this agent or nothing placed at all (the empty state with the launchers). */
+export function toolAreaShown(layout: SideLayout, ctx: SideViewContext): boolean {
+  return layout.open && (lanePages(layout, ctx).length > 0 || !layout.pages.some((p) => p.cards.length > 0));
+}
+
+/**
+ * The tool columns on screen for this agent (§24): the open layout's columns with something it can see,
+ * and the launcher column while it is the focused one. Empty when the columns are hidden.
+ */
+export function shownPages(layout: SideLayout, ctx: SideViewContext): SidePage[] {
+  return layout.open ? lanePages(layout, ctx) : [];
+}
+
+/** The layout within the limits (§24 限额; the same object when it already is). */
+export function fitLayout(layout: SideLayout): SideLayout {
+  if (cardCount(layout) <= MAX_TOOL_PANES && layout.pages.every((p) => p.cards.length <= MAX_CARDS)) return layout;
+  const d = draft(layout);
+  fitLimits(d);
+  return d;
+}
+
+/**
+ * v1.16 → v1.17 (§24 迁移): the pages of an old side layout as ONE tool column. `keep` (the focused
+ * agent's page in view; else the active page, else the first) stays; the other pages' cards follow in
+ * page order — into a pane of their kind there, else as new panes while the column has room, else as
+ * tabs of its bottom pane. Instances (params / state) are all kept; groups united; overrides re-pointed.
+ */
+export function foldPages(layout: SideLayout, keep: string | null): SideLayout {
+  if (layout.pages.length <= 1) return fitLayout(layout);
+  const d = draft(layout);
+  const target = findPage(d, keep) ?? findPage(d, d.activePage) ?? d.pages.find((p) => p.cards.length) ?? d.pages[0]!;
+  for (const other of d.pages) {
+    if (other === target) continue;
+    for (const card of other.cards) {
+      const same = freshestCard(d, target.cards.filter((c) => cardHolds(d, c, card.kind)));
+      if (same) {
+        for (const id of card.tabs) same.tabs.push(id);
+      } else if (target.cards.length < MAX_CARDS) {
+        target.cards.push({ ...card, size: 1 / (target.cards.length + 1), collapsed: false });
+        normalise(target.cards);
+      } else {
+        const bottom = target.cards[target.cards.length - 1]!;
+        for (const id of card.tabs) bottom.tabs.push(id);
+      }
+    }
+    target.groups = [...new Set([...target.groups, ...other.groups])];
+  }
+  for (const [kind, ov] of Object.entries(d.overrides)) if (ov.page !== target.id) d.overrides[kind] = { ...ov, page: target.id, groups: [...target.groups] };
+  d.pages = [target];
+  delete target.launcher;
+  d.activePage = target.id;
+  fitLimits(d);
+  return d;
 }
 
 // ── Heights (§18.4) ───────────────────────────────────────────────────────────────────────────
@@ -1226,8 +1292,12 @@ function isJson(v: unknown, depth = 0): v is Json {
   return false;
 }
 
-/** Untrusted stored JSON → a valid layout (bad parts dropped, never throws). `hostId`: the layout's host (§18.11 key). */
-export function sanitizeLayout(raw: unknown, hostId = "local"): SideLayout {
+/**
+ * Untrusted stored JSON → a valid layout (bad parts dropped, never throws). `hostId`: the layout's host
+ * (§18.11 key). `legacy`: a v1.16 side layout (up to 9 pages, kept as they are for `foldPages`);
+ * otherwise more than MAX_PAGES columns fold into the active one and the limits are applied.
+ */
+export function sanitizeLayout(raw: unknown, hostId = "local", opts: { legacy?: boolean } = {}): SideLayout {
   const out = emptyLayout();
   if (!isRecord(raw)) return out;
   const seen = new Set<string>();
@@ -1255,7 +1325,7 @@ export function sanitizeLayout(raw: unknown, hostId = "local"): SideLayout {
   }
   if (Array.isArray(raw.pages)) {
     for (const p of raw.pages) {
-      if (!isRecord(p) || typeof p.id !== "string" || !/^p\d+$/.test(p.id) || seen.has(p.id) || out.pages.length >= MAX_PAGES) continue;
+      if (!isRecord(p) || typeof p.id !== "string" || !/^p\d+$/.test(p.id) || seen.has(p.id) || out.pages.length >= LEGACY_MAX_PAGES) continue;
       seen.add(p.id);
       bump(p.id);
       const page: SidePage = { id: p.id, groups: Array.isArray(p.groups) ? [...new Set(p.groups.filter((g): g is string => typeof g === "string" && g.length > 0 && g.length <= 100))] : [], cards: [] };
@@ -1265,7 +1335,8 @@ export function sanitizeLayout(raw: unknown, hostId = "local"): SideLayout {
           if (!isRecord(c) || typeof c.id !== "string" || !/^c\d+$/.test(c.id) || seen.has(c.id) || typeof c.kind !== "string" || !Array.isArray(c.tabs)) continue;
           const tabs: string[] = [];
           for (const t of c.tabs) {
-            if (typeof t !== "string" || seen.has(t) || out.instances[t]?.kind !== c.kind) continue;
+            // A pane's tabs are of its kind, or (a full column's bottom pane, §24) of any kind.
+            if (typeof t !== "string" || seen.has(t) || !out.instances[t]) continue;
             seen.add(t);
             tabs.push(t);
           }
@@ -1294,21 +1365,11 @@ export function sanitizeLayout(raw: unknown, hostId = "local"): SideLayout {
       out.overrides[kind] = { page: v.page, groups: v.groups.filter((g): g is string => typeof g === "string"), at: typeof v.at === "number" ? v.at : 0 };
     }
   }
-  if (isRecord(raw.views)) {
-    const map: Record<string, SideAgentView> = {};
-    for (const [k, v] of Object.entries(raw.views)) {
-      if (!k || k.length > 400 || !isRecord(v) || typeof v.open !== "boolean") continue;
-      // A stored page that is gone (e.g. not persisted) = closed, not an empty column opened on purpose.
-      const page = typeof v.page === "string" && findPage(out, v.page) ? v.page : null;
-      const gone = typeof v.page === "string" && page === null;
-      map[k] = { open: v.open && !gone, page, at: typeof v.at === "number" && Number.isFinite(v.at) ? v.at : 0 };
-    }
-    out.views = capViews(map);
-  }
   out.activePage = typeof raw.activePage === "string" && findPage(out, raw.activePage) ? raw.activePage : out.pages[0]?.id ?? null;
   out.open = raw.open === true && out.pages.length > 0;
   out.seq = maxSeq;
-  return out;
+  if (opts.legacy) return out;
+  return out.pages.length > MAX_PAGES ? foldPages(out, out.activePage) : fitLayout(out);
 }
 
 export interface SaveOptions {
@@ -1353,6 +1414,10 @@ export function prepareForSave(layout: SideLayout, opts: SaveOptions): SideLayou
   }
   for (const page of d.pages) {
     page.cards = page.cards.filter((c) => c.tabs.length > 0);
+    for (const c of page.cards) {
+      if (!c.active || !c.tabs.includes(c.active)) c.active = c.tabs[0] ?? null;
+      rehome(d, c);
+    }
     normalise(page.cards);
   }
   d.pages = d.pages.filter((p) => p.cards.length > 0);

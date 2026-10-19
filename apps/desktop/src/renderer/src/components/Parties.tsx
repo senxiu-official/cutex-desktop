@@ -1,7 +1,8 @@
 // Who is involved in a task / delegation row: the colored "#N" tag and an agent as [avatar] name
 // (click = open that agent). Shared by task rows, delegation cards and the overviews.
 import { taskTag } from "../lib/tasks";
-import { agentHost, selectedSidebar, useApp } from "../store";
+import { useApp } from "../store";
+import { convSidebarOf, useConvHost, useConvScope } from "../lib/conversationScope";
 import { rowsOf } from "../lib/viewHost";
 import { useI18n } from "../i18n";
 import { SYSTEM_SENDER_NAME, systemSender } from "../lib/systemSenders";
@@ -27,9 +28,10 @@ export function TaskTag({ taskId, assignmentId, title }: { taskId: string; assig
 export function Who({ id: ref, name, size = 14, quiet = false }: { id: string | null; name: string | null; size?: number; quiet?: boolean }) {
   // `ref` may be a short session id from agent-facing tool text (`cutex.…3f9a1c`): resolved
   // against the sidebar; unknown or ambiguous = shown as text, not a link (lib/shortIds).
+  const conv = useConvScope();
   const session = useApp((s) => {
     if (!ref) return undefined;
-    const all = rowsOf(s.sidebar, selectedSidebar(s));
+    const all = rowsOf(s.sidebar, convSidebarOf(conv, s));
     const exact = all.find((x) => x.cutexSessionId === ref);
     if (exact || !isShortId(ref)) return exact;
     const full = resolveId(ref, all.map((x) => x.cutexSessionId));
@@ -37,8 +39,8 @@ export function Who({ id: ref, name, size = 14, quiet = false }: { id: string | 
   });
   const id = session?.cutexSessionId ?? (isShortId(ref) ? null : ref);
   const select = useApp((s) => s.select);
-  // Names are resolved from the open agent's host (selectedSidebar): open them there too.
-  const host = useApp(agentHost);
+  // Names are resolved from the conversation's host (lib/conversationScope): open them there too.
+  const host = useConvHost();
   const { t } = useI18n();
   const system = session ? null : systemSender(id);
   if (system) {

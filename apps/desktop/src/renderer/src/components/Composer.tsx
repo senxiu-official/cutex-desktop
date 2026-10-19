@@ -58,7 +58,9 @@ import { orderedEntries, type TimelineState } from "../lib/timeline";
 import { hasUnlandedTurn, outboxAt, visibleQueue } from "../lib/outbox";
 import { useHeldBusy } from "../lib/busyHold";
 import { lastAssistantText, timelineToMarkdown } from "../lib/transcript";
-import { agentHost, featuresOf, interruptWithFeedback, queueItemText, selectedFeatures, selectedSidebar, sessionApi, sidebarOf, useApp } from "../store";
+import { agentState, featuresOf, hostApi, interruptWithFeedback, queueItemText, sidebarOf, useApp, viewOf, type AgentAddress } from "../store";
+import { useConvFeatures, useConvHost, useConvScope } from "../lib/conversationScope";
+import { meantHere } from "../lib/uiSignal";
 import { offlineRuntime } from "../lib/runtimeStart";
 import { hostPageParam, useComposerHost, useHostLoadQuota, useHostQuotas } from "../lib/targetHost";
 import { services } from "../modules/app";
@@ -80,7 +82,7 @@ import { PendingMessagesSection } from "./PendingMessagesSection";
 import { usePendingMessages } from "../lib/agentMessageStore";
 import { AsksPausedSection, DelegationQueueSection, PauseAsksButton } from "./DelegationQueue";
 import { stopHeld } from "../lib/stopHold";
-import { ADMISSION_ORDER_FEATURE, OWNER_YIELD_FEATURE, admittedAskIds, currentTurnOf, pendingMessagesSectionShown, turnGroups } from "../lib/admissionOrder";
+import { ADMISSION_ORDER_FEATURE, OWNER_YIELD_FEATURE, admittedAskIds, currentTurnOf, pendingSectionMessages, turnGroups } from "../lib/admissionOrder";
 import { reloadOwnerMayPassAsks, useOwnerMayPassAsks } from "../lib/admissionOrderView";
 import { useHostRecords } from "../lib/delegationStore";
 import { useDelegationTurn, usePendingDelegations } from "../lib/delegationsView";
@@ -116,7 +118,8 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
   const cutexGauges = profile ? quotas[profile] : undefined;
   const loadQuota = useHostLoadQuota(quotaHost);
   const features = useApp((s) => featuresOf(s, quotaHost));
-  const online = useApp((s) => selectedSidebar(s)?.active.find((x) => x.cutexSessionId === sessionId)?.runtime.status === "online");
+  const convHost = useConvHost();
+  const online = useApp((s) => sidebarOf(s, convHost)?.active.find((x) => x.cutexSessionId === sessionId)?.runtime.status === "online");
   const prefs = useUiPrefs();
   useEffect(() => {
     if (!profile) return;
@@ -140,7 +143,7 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
     if (!fallback || !sessionId) return;
     let alive = true;
     const read = () =>
-      void sessionApi(sessionId).readRateLimits(sessionId).then((limits) => {
+      void hostApi(quotaHost).readRateLimits(sessionId).then((limits) => {
         if (alive && limits) setNativeQuota({ limits: limits as RateLimitsLike, at: Math.round(Date.now() / 1000) });
       });
     read();
@@ -261,8 +264,9 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
 function ProfileSwitch({ profile, sessionId, busy }: { profile: string | null; sessionId: string; busy: boolean }) {
   const { t } = useI18n();
   const modelName = useModelName();
-  const sidebar = useApp(selectedSidebar);
-  const familyAware = useApp((s) => selectedFeatures(s).has(PROFILE_FAMILY_FEATURE));
+  const hostId = useConvHost();
+  const sidebar = useApp((s) => sidebarOf(s, hostId));
+  const familyAware = useApp((s) => featuresOf(s, hostId).has(PROFILE_FAMILY_FEATURE));
   // From the cached list (warmed by ProfileQuota), so the section is there in the first paint;
   // refreshed in the background on each open.
   const [listed, setProfiles] = useState<ProfileItem[] | null>(() => cachedProfileList()?.profiles ?? null);
@@ -283,7 +287,7 @@ function ProfileSwitch({ profile, sessionId, busy }: { profile: string | null; s
     if (revision === undefined) return;
     setStatus(t("composer.switch.working"));
     try {
-      const r = await sessionApi(sessionId).switchProfile(sessionId, target, busy ? "afterTurn" : "now", revision);
+      const r = await hostApi(hostId).switchProfile(sessionId, target, busy ? "afterTurn" : "now", revision);
       setStatus(r.status === "scheduled" ? t("composer.switch.scheduled", { to: target }) : t("composer.switch.done", { to: target }));
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
@@ -529,38 +533,46 @@ export function Composer({
 }) {
   const { t } = useI18n();
   const modelName = useModelName();
+  // The conversation's host (lib/conversationScope): per-agent state and actions are keyed by host + id.
+  const hostId = useConvHost();
   const submit = useApp((s) => s.submit);
   const queueRemove = useApp((s) => s.queueRemove);
   const queueTakeForEdit = useApp((s) => s.queueTakeForEdit);
   const queueSendNow = useApp((s) => s.queueSendNow);
   const pendingDelegations = usePendingDelegations(sessionId);
-  const models = useApp((s) => s.models[sessionId]);
+  const models = useApp((s) => agentState(s.models, hostId, sessionId));
   const loadModels = useApp((s) => s.loadModels);
-  const collabModes = useApp((s) => s.collabModes[sessionId]);
+  const collabModes = useApp((s) => agentState(s.collabModes, hostId, sessionId));
   const loadCollabModes = useApp((s) => s.loadCollabModes);
   const setCollabMode = useApp((s) => s.setCollabMode);
   const updateSettings = useApp((s) => s.updateSettings);
   const compact = useApp((s) => s.compact);
-  const features = useApp(selectedFeatures);
+  // The conversation's host and its capabilities (lib/conversationScope).
+  const features = useConvFeatures();
   const uiSignal = useApp((s) => s.uiSignal);
   const notice = useApp((s) => s.notice);
   const shortWindow = useShortWindow();
-  const hostId = useApp(agentHost);
+  // Notices and open requests about this conversation go to its own composer (panes step 2: two
+  // conversations side by side each have one); see `shownHere`.
+  const scope = useConvScope();
+  const here = useMemo<AgentAddress>(() => ({ hostId, sessionId }), [hostId, sessionId]);
+  const notifyHere = (text: string, tone?: "info" | "error") => useApp.getState().notify(text, tone, here);
+  const signalHere = (target: string, arg?: string) => useApp.getState().signal(target, arg, here);
   const { text, setText, images, setImages, pickedSkills, setPickedSkills, clearDraft, captureDraft } = useComposerDraft(hostId, sessionId);
   const { sendKeys, delegationSteerKeys, queueSectionStrip, queuePanelFold } = useUiPrefs();
   // The running turn handles a delegation (agent-asks): hint, guarded shortcuts, send menu.
   const runningDelegation = useDelegationTurn(timeline);
   const delegation = busy ? runningDelegation : null;
   const guardKeys = { delegation: !!delegation, allowSteerKeys: delegationSteerKeys };
-  const pendingSteers = useApp((s) => s.pendingSteers[sessionId]);
-  const queuePause = useApp((s) => s.sessions[sessionId]?.queuePause ?? null);
-  const asksPaused = useApp((s) => selectedFeatures(s).has(ASKS_PAUSE_FEATURE) && !!s.sessions[sessionId]?.asksPaused);
+  const pendingSteers = useApp((s) => agentState(s.pendingSteers, hostId, sessionId));
+  const queuePause = useApp((s) => viewOf(s, hostId, sessionId)?.queuePause ?? null);
+  const asksPaused = useApp((s) => featuresOf(s, hostId).has(ASKS_PAUSE_FEATURE) && !!viewOf(s, hostId, sessionId)?.asksPaused);
   // stop-holds-ridealongs: the owner's stop holds everything until 继续发送 (lib/stopHold).
-  const stopHold = useApp((s) => stopHeld(s.sessions[sessionId]?.asksPaused));
-  const queueHandoff = useApp((s) => !!s.queueHandoff[sessionId]);
+  const stopHold = useApp((s) => stopHeld(viewOf(s, hostId, sessionId)?.asksPaused));
+  const queueHandoff = useApp((s) => !!agentState(s.queueHandoff, hostId, sessionId));
   // Optimistic sends and queue rows being removed (lib/outbox): the tray shows what will be.
-  const outbox = useApp((s) => s.outbox[sessionId]);
-  const queueHidden = useApp((s) => s.queueHidden[sessionId]);
+  const outbox = useApp((s) => agentState(s.outbox, hostId, sessionId));
+  const queueHidden = useApp((s) => agentState(s.queueHidden, hostId, sessionId));
   // The timeline's size stands in for its (mutated in place) entries: a flushed message landing hides its queue row.
   const entryCount = timeline?.entries.size ?? 0;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -569,7 +581,7 @@ export function Composer({
   const sendBusy = busy || hasUnlandedTurn(outbox);
   const paused = useMemo(() => pausedSection(pendingSteers ?? [], shownQueue, queuePause, queueHandoff), [pendingSteers, shownQueue, queuePause, queueHandoff]);
   // admission-order: one list in the order cutex admits owner messages, delegations and deliveries.
-  const admission = useApp((s) => (selectedFeatures(s).has(ADMISSION_ORDER_FEATURE) ? (s.sessions[sessionId]?.admission ?? null) : null));
+  const admission = useApp((s) => (featuresOf(s, hostId).has(ADMISSION_ORDER_FEATURE) ? (viewOf(s, hostId, sessionId)?.admission ?? null) : null));
   // The open agent's host's records (a peers delegation has one per host).
   const askById = useHostRecords(hostId);
   const mayPass = useOwnerMayPassAsks(!!admission);
@@ -581,9 +593,11 @@ export function Composer({
   const activeTurnStart = busy ? (timeline?.turns.find((x) => x.id === timeline.activeTurnId)?.startedAt ?? null) : null;
   // 待读留言 (agent-messages-v2): a message whose item is in the timeline is read in already.
   const pendingMessages = usePendingMessages(sessionId, (id) => !!timeline?.entries.has(id), timeline?.entries.size ?? 0);
+  // The 待读留言 section's rows: with admission-order those the turn frame (nextStep) does not list (notes).
+  const sectionMessages = useMemo(() => pendingSectionMessages(features, pendingMessages, admission?.nextStep), [features, pendingMessages, admission]);
   // A stop's hold (origin ownerStop) only matters while something waits behind it: with nothing held the
   // 「委托已随停止暂停」 strip stays out of the way (the owner's own 暂停委托 always shows).
-  const pauseOrigin = useApp((s) => s.sessions[sessionId]?.asksPaused?.origin ?? null);
+  const pauseOrigin = useApp((s) => viewOf(s, hostId, sessionId)?.asksPaused?.origin ?? null);
   const stopHoldsSomething = !!admission?.items.some((i) => i.kind !== "owner") || (admission?.nextStep?.length ?? 0) > 0 || otherDelegations.length > 0 || pendingMessages.length > 0;
   const showAsksPaused = asksPaused && (pauseOrigin !== "ownerStop" || stopHoldsSomething);
   // Something will start the next turn as soon as this one ends (a queued message cutex flushes, an
@@ -634,27 +648,33 @@ export function Composer({
   const online = !!timeline?.threadId;
   // The runtime itself (a thread id also comes from the offline history reader): models are asked
   // again when it comes up, and an offline agent's chips say "start it first" instead of loading.
-  const runtimeStatus = useApp((s) => selectedSidebar(s)?.active.find((r) => r.cutexSessionId === sessionId)?.runtime.status ?? null);
+  const runtimeStatus = useApp((s) => sidebarOf(s, hostId)?.active.find((r) => r.cutexSessionId === sessionId)?.runtime.status ?? null);
   const runtimeDown = offlineRuntime(runtimeStatus);
   useEffect(() => {
     if (!online || runtimeDown) return;
-    void loadModels();
-    void loadCollabModes();
+    void loadModels(false, sessionId, hostId);
+    void loadCollabModes(sessionId, hostId);
   }, [sessionId, online, runtimeDown, loadModels, loadCollabModes]);
 
-  // Notices from commands / store actions: visible for a few seconds.
+  // Notices from commands / store actions: visible for a few seconds — those about this agent, and
+  // those about none in particular while this conversation has the focus (lib/uiSignal meantHere).
+  const focused = scope?.focused ?? true;
   useEffect(() => {
     if (!notice || Date.now() - notice.nonce > 5000) return; // nonce is a timestamp; skip stale ones on remount
+    if (!meantHere(notice.agent, here, focused)) return;
     setShownNotice(notice);
     const timer = setTimeout(() => setShownNotice((n) => (n?.nonce === notice.nonce ? null : n)), notice.tone === "error" ? 8000 : 3500);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a focus change alone must not re-show an old notice
   }, [notice]);
 
-  // Open requests from elsewhere (signal) for the composer's own popovers / panels.
+  // Open requests from elsewhere (signal) for the composer's own popovers / panels (this agent's, or
+  // the focused conversation's).
   const lastSignal = useRef(uiSignal?.nonce ?? 0);
   useEffect(() => {
     if (!uiSignal || uiSignal.nonce === lastSignal.current) return;
     lastSignal.current = uiSignal.nonce;
+    if (!meantHere(uiSignal.agent, here, focused)) return;
     if (POPOVERS.has(uiSignal.target)) setPopoverSignal({ kind: uiSignal.target as PopoverKind, nonce: uiSignal.nonce });
     else if (PANELS.has(uiSignal.target)) setPanel(uiSignal.target as PanelKind);
   }, [uiSignal]);
@@ -671,7 +691,7 @@ export function Composer({
   const fastFeature = useApp((s) => featuresOf(s, hostId).has(SESSION_FAST_MODE_FEATURE));
   const modelItems: Pick<ModelOption, "model" | "displayName" | "description">[] =
     models ?? (currentModel ? [{ model: currentModel, displayName: currentModel, description: "" }] : []);
-  const session = useApp((s) => [...(selectedSidebar(s)?.active ?? []), ...(selectedSidebar(s)?.retired ?? [])].find((r) => r.cutexSessionId === sessionId));
+  const session = useApp((s) => [...(sidebarOf(s, hostId)?.active ?? []), ...(sidebarOf(s, hostId)?.retired ?? [])].find((r) => r.cutexSessionId === sessionId));
   // Claude agents (claude-runtime-features): hide what the adapter reports as unsupported.
   const agent = useMemo(() => agentFeaturesOf(session), [session]);
   const claudeAgent = !!session && runtimeOf(session) === "claude";
@@ -686,7 +706,7 @@ export function Composer({
   // 升级运行时 (claude-runtime-repin, lib/claudeRepin): keep the open Claude agent's runtime view cached for the agent menu.
   // Not needed when the agent list carries the pin (cutex session-claude-runtime).
   const repinOn = useApp((s) => repinApplies(featuresOf(s, hostId), session) && !pinInSession(session, sidebarOf(s, hostId)?.claudeRuntime));
-  useClaudeRuntimePreload(() => sessionApi(sessionId), hostId, sessionId, repinOn, session?.runtime.status);
+  useClaudeRuntimePreload(() => hostApi(hostId), hostId, sessionId, repinOn, session?.runtime.status);
   // Windows sandbox readiness (windows-sandbox-readiness): asked when the permission menu opens.
   const hostPlatform = useHostPlatform(hostId);
   const winSandboxApplies = useApp((s) => featuresOf(s, hostId).has(WINDOWS_SANDBOX_FEATURE)) && hostPlatform === "windows" && !!session && runtimeOf(session) !== "claude" && online;
@@ -714,8 +734,8 @@ export function Composer({
   // users-p2-access: a non-owner attaches images only with send (main uploads them, cutex refuses any
   // other image input of a non-owner); an older host refuses them all.
   const imagesAllowed = useP2Access(hostId).attachments;
-  const hostRow = useApp((s) => selectedSidebar(s)?.hostRows[sessionId]);
-  const projectSummary = useApp((s) => (hostRow?.projectId ? selectedSidebar(s)?.projects?.projects.find((p) => p.project_id === hostRow.projectId) : undefined));
+  const hostRow = useApp((s) => sidebarOf(s, hostId)?.hostRows[sessionId]);
+  const projectSummary = useApp((s) => (hostRow?.projectId ? sidebarOf(s, hostId)?.projects?.projects.find((p) => p.project_id === hostRow.projectId) : undefined));
   const project = hostRow?.projectId ? { id: hostRow.projectId, name: projectSummary?.presentation.display_name ?? hostRow.projectId } : null;
 
   // ---------- palette / mention state ----------
@@ -723,7 +743,7 @@ export function Composer({
   const paletteOpen = query !== null;
   const loadSkills = () => {
     const cwd = session?.cwd;
-    const request = skillsFrom === "claude" ? sessionApi(sessionId).sessionSkills(sessionId) : sessionApi(sessionId).codexRequest("skills/list", cwd ? { cwds: [cwd] } : {});
+    const request = skillsFrom === "claude" ? hostApi(hostId).sessionSkills(sessionId) : hostApi(hostId).codexRequest("skills/list", cwd ? { cwds: [cwd] } : {});
     request.then(
       (r) => {
         setSkillsError(null);
@@ -753,7 +773,7 @@ export function Composer({
     setMentionResults(null);
     if (!mentionOpen || !mention?.query) return;
     return startMentionSearch(mention.query,
-      (q) => sessionApi(sessionId).fsSearch({ kind: "session", id: sessionId }, q, 20).then((r) => r.results.map((x) => x.path)),
+      (q) => hostApi(hostId).fsSearch({ kind: "session", id: sessionId }, q, 20).then((r) => r.results.map((x) => x.path)),
       setMentionResults);
   }, [mentionOpen, mention?.query, sessionId]);
   const mentionPaths = mentionPathsFor(mentionResults, mentionOpen ? mention?.query ?? null : null);
@@ -774,36 +794,36 @@ export function Composer({
     open(target) {
       if (POPOVERS.has(target)) setPopoverSignal({ kind: target as PopoverKind, nonce: Date.now() });
       else if (PANELS.has(target)) setPanel(target as PanelKind);
-      else useApp.getState().signal(target);
+      else signalHere(target);
     },
     insert: (value) => {
       setText(value);
       requestAnimationFrame(() => textarea.current?.focus());
     },
-    notify: (key, vars) => useApp.getState().notify(t(key, vars)),
-    submitText: async (value) => void (await submit(value, busy ? "queue" : "auto")),
-    compact,
+    notify: (key, vars) => notifyHere(t(key, vars)),
+    submitText: async (value) => void (await submit(value, busy ? "queue" : "auto", [], { sessionId, hostId })),
+    compact: () => compact(sessionId, hostId),
     // Like the TUI: a new objective over an unfinished goal asks first (in the goal card); over a
     // finished one it just starts fresh.
     setGoal: async (objective) => {
       const goal = timeline?.goal;
-      if (goal && goal.status !== "complete") useApp.getState().signal("goal", `replace:${objective}`);
-      else await useApp.getState().replaceGoal(objective);
+      if (goal && goal.status !== "complete") signalHere("goal", `replace:${objective}`);
+      else await useApp.getState().replaceGoal(objective, sessionId, hostId);
     },
     goalVerb: async (verb) => {
-      if (verb === "edit") return useApp.getState().signal("goal", "edit");
-      if (verb === "clear") return useApp.getState().clearGoal();
-      return useApp.getState().setGoal({ status: verb === "pause" ? "paused" : "active" });
+      if (verb === "edit") return signalHere("goal", "edit");
+      if (verb === "clear") return useApp.getState().clearGoal(sessionId, hostId);
+      return useApp.getState().setGoal({ status: verb === "pause" ? "paused" : "active" }, sessionId, hostId);
     },
-    review: (instructions) => useApp.getState().startReview(instructions),
-    setPlan: (on) => setCollabMode(on ? "plan" : "default"),
+    review: (instructions) => useApp.getState().startReview(instructions, sessionId, hostId),
+    setPlan: (on) => setCollabMode(on ? "plan" : "default", sessionId, hostId),
     rename: async (value) => void (session && (await renameAgent(session, t, value))),
     archive: async () => void (session && (await archiveAgent(session, t))),
-    fork: () => useApp.getState().forkSession(sessionId, null),
+    fork: () => useApp.getState().forkSession(sessionId, null, hostId),
     side: (text) => void openSide(SIDE_CHAT_COMPONENT, { text }, { focus: true }),
     newAgent: () => services.ui.openPage("agent-config.newAgent", hostRow?.projectId ? { project: hostRow.projectId, host: hostId } : { host: hostId }),
     openDiff: () => void openChanges(),
-    stopBackground: () => useApp.getState().stopBackgroundTerminals(),
+    stopBackground: () => useApp.getState().stopBackgroundTerminals(sessionId, hostId),
     copyLast: async () => {
       const last = timeline ? lastAssistantText(orderedEntries(timeline)) : null;
       if (!last) return false;
@@ -812,9 +832,9 @@ export function Composer({
     },
     exportMarkdown: async () => {
       if (!timeline) return;
-      const names = new Map([...(selectedSidebar(useApp.getState())?.active ?? []), ...(selectedSidebar(useApp.getState())?.retired ?? [])].map((s) => [s.cutexSessionId, s.displayName]));
+      const names = new Map([...(sidebarOf(useApp.getState(), hostId)?.active ?? []), ...(sidebarOf(useApp.getState(), hostId)?.retired ?? [])].map((s) => [s.cutexSessionId, s.displayName]));
       // History pages: export the whole thread, not just the turns loaded so far.
-      const full = (await useApp.getState().completeTimeline(sessionId)) ?? timeline;
+      const full = (await useApp.getState().completeTimeline(sessionId, hostId)) ?? timeline;
       const md = timelineToMarkdown(name, orderedEntries(full), {
         user: t("export.user"),
         assistant: name,
@@ -825,7 +845,7 @@ export function Composer({
         plan: t("export.plan"),
       }, (id) => names.get(id) ?? id);
       const path = await api.saveMarkdown(`${name}.md`, md);
-      if (path) useApp.getState().notify(t("slash.notice.exported", { path }));
+      if (path) notifyHere(t("slash.notice.exported", { path }));
     },
     openSettings: (tab) => {
       // Host pages open on the agent's host (the settings host picker; reset when Settings closes).
@@ -841,7 +861,7 @@ export function Composer({
     } catch (e) {
       // A busy Claude agent's refusal of /fork (lib/structuralGate) is information, not a failure.
       const { text, refused } = structuralErrorText(e);
-      useApp.getState().notify(text, refused ? "info" : "error");
+      notifyHere(text, refused ? "info" : "error");
     }
   };
 
@@ -894,17 +914,17 @@ export function Composer({
     const imgs = files.filter((f) => f.type.startsWith("image/"));
     if (imgs.length === 0) return false;
     if (!imagesAllowed) {
-      useApp.getState().notify(t("users.access.noImages"), "error");
+      notifyHere(t("users.access.noImages"), "error");
       return true;
     }
     if (!canImages) {
-      useApp.getState().notify(t("composer.image.unsupported"), "error");
+      notifyHere(t("composer.image.unsupported"), "error");
       return true;
     }
     for (const file of imgs) {
       const url = await imageFileToDataUrl(file, maxImageBytes(agent));
       if (!url) {
-        useApp.getState().notify(t("composer.image.tooLarge", { name: file.name || "image" }), "error");
+        notifyHere(t("composer.image.tooLarge", { name: file.name || "image" }), "error");
         continue;
       }
       target.setImages((prev) => [...prev, { id: `img-${++imageSeq}`, name: file.name || "image", preview: url, source: { kind: "data", url } }]);
@@ -915,12 +935,12 @@ export function Composer({
     const target = captureDraft();
     try {
       // Picked on the agent's host's connection (a remote host uploads only the files it handed out).
-      for (const p of await sessionApi(sessionId).pickImages(maxImageBytes(agent))) {
-        if (p.error) useApp.getState().notify(t(p.error === "tooLarge" ? "composer.image.tooLarge" : "composer.image.unreadable", { name: p.name }), "error");
+      for (const p of await hostApi(hostId).pickImages(maxImageBytes(agent))) {
+        if (p.error) notifyHere(t(p.error === "tooLarge" ? "composer.image.tooLarge" : "composer.image.unreadable", { name: p.name }), "error");
         else target.setImages((prev) => [...prev, { id: `img-${++imageSeq}`, name: p.name, preview: p.preview, source: { kind: "path", path: p.path } }]);
       }
     } catch (e) {
-      useApp.getState().notify(e instanceof Error ? e.message : String(e), "error");
+      notifyHere(e instanceof Error ? e.message : String(e), "error");
     }
   };
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -945,9 +965,9 @@ export function Composer({
   // this instead (Ctrl+Shift+Enter).
   const interruptAndSendSteers = async () => {
     try {
-      await useApp.getState().interruptAndSendSteers();
+      await useApp.getState().interruptAndSendSteers(sessionId, hostId);
     } catch (e) {
-      useApp.getState().notify(e instanceof Error ? e.message : String(e), "error");
+      notifyHere(e instanceof Error ? e.message : String(e), "error");
     }
   };
 
@@ -960,10 +980,11 @@ export function Composer({
       pendingSteers: pendingSteers?.length ?? 0,
       delegation: !!delegation,
       blocked: !!panel || popupCount > 0 || (timeline?.pending.size ?? 0) > 0,
+      focused,
     },
     {
-      arm: () => useApp.getState().notify(t("composer.escAgainDelegation")),
-      act: (action) => void (action === "interrupt" ? interruptWithFeedback(t) : interruptAndSendSteers()),
+      arm: () => notifyHere(t("composer.escAgainDelegation")),
+      act: (action) => void (action === "interrupt" ? interruptWithFeedback(t, sessionId, hostId) : interruptAndSendSteers()),
     },
   );
 
@@ -979,14 +1000,14 @@ export function Composer({
       });
       if (!join) return;
     }
-    await queueSendNow(item, agentId);
+    await queueSendNow(item, agentId, hostId);
   };
 
   const pausedAction = async (action: () => Promise<void>) => {
     try {
       await action();
     } catch (e) {
-      useApp.getState().notify(e instanceof Error ? e.message : String(e), "error");
+      notifyHere(e instanceof Error ? e.message : String(e), "error");
     }
   };
 
@@ -1017,17 +1038,17 @@ export function Composer({
       setSending(true);
       try {
         enterDecision?.("dispatched");
-        await useApp.getState().interruptAndSend(draft, extra);
+        await useApp.getState().interruptAndSend(draft, extra, sessionId, hostId);
       } catch (e) {
         // Not stopped: the store put the text back into the composer.
-        useApp.getState().notify(e instanceof Error ? e.message : String(e), "error");
+        notifyHere(e instanceof Error ? e.message : String(e), "error");
       } finally {
         setSending(false);
       }
       return;
     }
     enterDecision?.("dispatched");
-    void submit(draft, strategy, extra).catch(() => {});
+    void submit(draft, strategy, extra, { sessionId, hostId }).catch(() => {});
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1070,7 +1091,7 @@ export function Composer({
     if (!keyAction) { report(e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey ? "newline" : "unhandled"); return; }
     const action = delegationKeyAction(keyAction, guardKeys);
     e.preventDefault();
-    if (action === "interrupt") { report("dispatched"); void interruptWithFeedback(t); }
+    if (action === "interrupt") { report("dispatched"); void interruptWithFeedback(t, sessionId, hostId); }
     else if (action === "interruptSendSteers") { report("dispatched"); void interruptAndSendSteers(); }
     else void send(action, report);
   };
@@ -1108,9 +1129,9 @@ export function Composer({
   const setPlan = async (on: boolean) => {
     try {
       // null = stale (selection / host changed meanwhile): nothing to report.
-      if ((await setCollabMode(on ? "plan" : "default")) === false) useApp.getState().notify(t("slash.notice.planUnavailable"), "error");
+      if ((await setCollabMode(on ? "plan" : "default", sessionId, hostId)) === false) notifyHere(t("slash.notice.planUnavailable"), "error");
     } catch (e) {
-      useApp.getState().notify(e instanceof Error ? e.message : String(e), "error");
+      notifyHere(e instanceof Error ? e.message : String(e), "error");
     }
   };
 
@@ -1153,25 +1174,25 @@ export function Composer({
           sendingSteers={outboxAt(outbox, "steer")}
           sendingQueue={outboxAt(outbox, "queue")}
           outbox={{
-            onRetry: (id) => useApp.getState().retrySend(sessionId, id),
-            onEdit: (id) => useApp.getState().editSend(sessionId, id),
-            onDiscard: (id) => useApp.getState().discardSend(sessionId, id),
+            onRetry: (id) => useApp.getState().retrySend(sessionId, id, hostId),
+            onEdit: (id) => useApp.getState().editSend(sessionId, id, hostId),
+            onDiscard: (id) => useApp.getState().discardSend(sessionId, id, hostId),
           }}
           onInterruptSendSteers={() => void interruptAndSendSteers()}
-          onDismissSteer={(id) => useApp.getState().dismissSteer(id)}
+          onDismissSteer={(id) => useApp.getState().dismissSteer(id, sessionId, hostId)}
           paused={paused}
           pausedHint={hasContent ? t(busy && sendKeys !== "cli" && paused.items.length > 0 ? "paused.composerHintQueue" : "paused.composerHint", { n: paused.count }) : null}
-          onResumePaused={() => void pausedAction(() => useApp.getState().resumePaused())}
-          onRestorePaused={() => void pausedAction(() => useApp.getState().restorePaused())}
-          onClearPaused={() => void pausedAction(() => useApp.getState().discardPaused())}
+          onResumePaused={() => void pausedAction(() => useApp.getState().resumePaused(sessionId, hostId))}
+          onRestorePaused={() => void pausedAction(() => useApp.getState().restorePaused(sessionId, hostId))}
+          onClearPaused={() => void pausedAction(() => useApp.getState().discardPaused(sessionId, hostId))}
           items={shownQueue}
           canEdit={!text.trim()}
-          onSendNow={noSteer && sendBusy ? undefined : (item) => void sendQueuedNow(item).catch((e: unknown) => useApp.getState().notify(e instanceof Error ? e.message : String(e), "error"))}
+          onSendNow={noSteer && sendBusy ? undefined : (item) => void sendQueuedNow(item).catch((e: unknown) => notifyHere(e instanceof Error ? e.message : String(e), "error"))}
           sendNowStartsTurn={!sendBusy}
-          onDelete={(item) => void queueRemove(item, sessionId).catch((e: unknown) => useApp.getState().notify(e instanceof Error ? e.message : String(e), "error"))}
+          onDelete={(item) => void queueRemove(item, sessionId, hostId).catch((e: unknown) => notifyHere(e instanceof Error ? e.message : String(e), "error"))}
           onEdit={(item) => {
             const target = captureDraft();
-            void queueTakeForEdit(item, sessionId).then(target.setText);
+            void queueTakeForEdit(item, sessionId, hostId).then(target.setText);
           }}
           stripEnabled={queueSectionStrip}
           autoCompact={queueAutoCompact(queuePanelFold, shortWindow)}
@@ -1184,30 +1205,30 @@ export function Composer({
                   nextStep: groups.nextStep,
                   ridealongsHeld: admission.ridealongsHeld,
                   ownerYielded: admission.ownerYielded,
-                  onYield: features.has(OWNER_YIELD_FEATURE) ? () => void useApp.getState().queueYield().catch((e: unknown) => useApp.getState().notify(e instanceof Error ? e.message : String(e), "error")) : undefined,
+                  onYield: features.has(OWNER_YIELD_FEATURE) ? () => void useApp.getState().queueYield(sessionId, hostId).catch((e: unknown) => notifyHere(e instanceof Error ? e.message : String(e), "error")) : undefined,
                   running: busy,
                   runningSince: activeTurnStart === null ? null : activeTurnStart * 1000,
                   currentTurn: currentTurnOf(busy, admission.currentTurn, delegation?.askId ?? null),
                   sessionId,
                   // Dropping onto 「下个工具边界」 = 插入 (the same path as the row's button).
-                  onInsert: noSteer && sendBusy ? undefined : (item: QueueItem) => void sendQueuedNow(item).catch((e: unknown) => useApp.getState().notify(e instanceof Error ? e.message : String(e), "error")),
+                  onInsert: noSteer && sendBusy ? undefined : (item: QueueItem) => void sendQueuedNow(item).catch((e: unknown) => notifyHere(e instanceof Error ? e.message : String(e), "error")),
                   mayPass,
                   onMove: (item, before) =>
                     void useApp
                       .getState()
-                      .queueMove(item, before)
+                      .queueMove(item, before, sessionId, hostId)
                       .catch((e: unknown) => {
                         if ((e as { moveRefusal?: string } | null)?.moveRefusal === "passingNotAllowed") reloadOwnerMayPassAsks();
-                        useApp.getState().notify(e instanceof Error ? e.message : String(e), "error");
+                        notifyHere(e instanceof Error ? e.message : String(e), "error");
                       }),
                   actions: orderedAsks ? <PauseAsksButton sessionId={sessionId} /> : null,
                 }
               : undefined
           }
           sections={[
-            // Slot 0: 待读留言 (agent messages v2). With admission-order these are the turn frame's
-            // ride-along items (admission.nextStep): the old section is only the fallback.
-            pendingMessagesSectionShown(features, pendingMessages.length) ? { node: <PendingMessagesSection sessionId={sessionId} messages={pendingMessages} busy={busy} runtime={agent.runtime} />, chip: { kind: "messages", n: pendingMessages.length } } : null,
+            // Slot 0: 待读留言 (agent messages v2). With admission-order the turn-starting ones are the turn
+            // frame's ride-along items (admission.nextStep); passive notes (never there) stay here.
+            sectionMessages.length > 0 ? { node: <PendingMessagesSection sessionId={sessionId} messages={sectionMessages} busy={busy} runtime={agent.runtime} />, chip: { kind: "messages", n: sectionMessages.length } } : null,
             // Slot 1: 待处理委托 (delegations; with admission-order only those the merged list does not have).
             otherDelegations.length > 0 ? { node: <DelegationQueueSection rows={otherDelegations} sessionId={sessionId} pauseButton={!orderedAsks} railed={!!groups} />, chip: { kind: "delegations", n: otherDelegations.length } } : null,
             // Slot 2: 委托已暂停 · 继续 (asks-pause-v2).
@@ -1276,7 +1297,7 @@ export function Composer({
             />
             {busyLook && (
               <button
-                onClick={() => void interruptWithFeedback(t)}
+                onClick={() => void interruptWithFeedback(t, sessionId, hostId)}
                 // Held through a turn boundary (no turn to stop for a moment): inert, looks the same.
                 disabled={!busy}
                 title={t("composer.stopHint")}
@@ -1326,7 +1347,7 @@ export function Composer({
             label: timeline?.goal ? t(`goal.status.${timeline.goal.status}` as MessageKey) : t("composer.tools.goal.unset"),
             disabledReason: lacks(agent, "goals") ? unsupportedHint : online ? null : t("composer.tools.needsOnline"),
             onClick: () => {
-              if (timeline?.goal) return useApp.getState().signal("goal");
+              if (timeline?.goal) return signalHere("goal");
               // Like `/goal` alone: put the command in the composer; an existing draft becomes the objective.
               setText((prev) => `/goal ${prev.trimStart()}`);
               focusEnd();
@@ -1339,7 +1360,7 @@ export function Composer({
             onAgent: () => setPanel("memories"),
             onManage: () => {
               // The open agent's project: on its host.
-              if (project) services.ui.openPage("projects.page", { project: project.id, tab: "memory", ...hostPageParam(agentHost(useApp.getState())) });
+              if (project) services.ui.openPage("projects.page", { project: project.id, tab: "memory", ...hostPageParam(hostId) });
               else if (online) setPanel("memories");
               else services.ui.openPage("projects.page", { tab: "memory" });
             },
@@ -1353,7 +1374,7 @@ export function Composer({
             trigger={<span className={`trim-cap whitespace-nowrap ${claudeMode === "bypassPermissions" ? "text-warn" : ""}`}>{claudeMode ? t(`composer.claudeMode.${claudeMode}` as MessageKey) : runtimeDown ? "—" : "…"}</span>}
             items={claudeModes.map((m) => ({ value: m, label: t(`composer.claudeMode.${m}` as MessageKey), description: t(`composer.claudeModeHint.${m}` as MessageKey) }))}
             selected={claudeMode}
-            onSelect={(m) => m !== claudeMode && void updateSettings(claudeModePatch(m, settings))}
+            onSelect={(m) => m !== claudeMode && void updateSettings(claudeModePatch(m, settings), sessionId, hostId)}
           />
         ) : (
         <Menu
@@ -1366,7 +1387,7 @@ export function Composer({
           triggerTitle={effective ? [t("composer.permissionTitle"), ...effectivePermissionLines(effective).map((line) => t(line.key, line.params)), ...effective.writableRoots].join("\n") : undefined}
           items={PERMISSION_MODES.map((m) => ({ value: m, label: t(`composer.mode.${m}` as MessageKey), description: t(`composer.modeHint.${m}` as MessageKey) }))}
           selected={mode}
-          onSelect={(m) => m !== "custom" && void updateSettings(permissionPatch(m, settings))}
+          onSelect={(m) => m !== "custom" && void updateSettings(permissionPatch(m, settings), sessionId, hostId)}
           onOpen={winSandbox.load}
           footer={
             <>
@@ -1423,20 +1444,20 @@ export function Composer({
             }
             triggerTitle={[runtimeDown ? `${t("composer.modelTitle")} · ${t("composer.model.offline")}` : currentModel && modelShown !== currentModel ? `${t("composer.modelTitle")} · ${currentModel}` : t("composer.modelTitle"), observedModel ? t("composer.model.observed", { model: observedModel }) : null].filter(Boolean).join("\n")}
             note={runtimeDown ? t("composer.model.offline") : observedModel ? t("composer.model.observed", { model: observedModel }) : undefined}
-            onOpen={() => void loadModels(true)}
-            onSelect={(model) => void updateSettings({ model })}
+            onOpen={() => void loadModels(true, sessionId, hostId)}
+            onSelect={(model) => void updateSettings({ model }, sessionId, hostId)}
             openSignal={sig("model")}
           />
           <EffortPicker
             effort={settings?.effort ?? null}
             efforts={efforts}
-            onChange={(effort) => void updateSettings({ effort })}
+            onChange={(effort) => void updateSettings({ effort }, sessionId, hostId)}
             offline={runtimeDown ? t("composer.model.offline") : undefined}
             empty={effortsEmpty === "none" ? t("composer.effort.noneOffered") : effortsEmpty === "unlisted" ? t("composer.effort.unlisted") : undefined}
-            onOpen={effortsEmpty === "unlisted" && !runtimeDown ? () => void loadModels(true) : undefined}
-            fast={fastTier && session ? { on: isFastTier(settings?.serviceTier, fastTier), onToggle: (on) => void updateSettings(fastModePatch(on, fastTier)) } : undefined}
+            onOpen={effortsEmpty === "unlisted" && !runtimeDown ? () => void loadModels(true, sessionId, hostId) : undefined}
+            fast={fastTier && session ? { on: isFastTier(settings?.serviceTier, fastTier), onToggle: (on) => void updateSettings(fastModePatch(on, fastTier), sessionId, hostId) } : undefined}
           />
-          <ContextMeter usage={timeline?.contextUsage ?? null} onCompact={() => void compact()} />
+          <ContextMeter usage={timeline?.contextUsage ?? null} onCompact={() => void compact(sessionId, hostId)} />
         </div>
         <ComposerTriggers hostId={hostId} sessionId={sessionId} side="right" />
       </div>

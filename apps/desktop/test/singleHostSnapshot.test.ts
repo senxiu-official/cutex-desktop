@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import type { DaemonState, HostsState } from "../src/shared/ipc";
 import type { NotifyOccurrence } from "../src/renderer/src/lib/notifyEvents";
+import { viewKey } from "../src/renderer/src/lib/viewKey";
 
 const mock = vi.hoisted(() => {
   const listeners = new Map<string, Set<(value: unknown) => void>>();
@@ -223,13 +224,13 @@ describe("single host: conversation", () => {
     const sent = mock.calls.filter((c) => c.method === "submit");
     expect(sent).toHaveLength(1);
     expect(sent[0]!.args.slice(0, 4)).toEqual(["a1", "hello", "auto", false]);
-    expect(store.getState().outbox.a1).toHaveLength(1);
-    expect(store.getState().outbox.a1![0]).toMatchObject({ text: "hello", state: "confirmed" });
+    expect(store.getState().outbox[viewKey("local", "a1")]).toHaveLength(1);
+    expect(store.getState().outbox[viewKey("local", "a1")]![0]).toMatchObject({ text: "hello", state: "confirmed" });
     // Session events of the selected agent reach its timeline.
-    const before = store.getState().sessions.a1!.version;
+    const before = store.getState().sessions[viewKey("local", "a1")]!.version;
     transport.session("a1", native("a1", "turn/started", { turn: { id: "turn-x", status: "inProgress" } }));
-    expect(store.getState().sessions.a1!.version).toBe(before + 1);
-    expect(store.getState().sessions.a1!.timeline.activeTurnId).toBe("turn-x");
+    expect(store.getState().sessions[viewKey("local", "a1")]!.version).toBe(before + 1);
+    expect(store.getState().sessions[viewKey("local", "a1")]!.timeline.activeTurnId).toBe("turn-x");
   });
 
   it("a waiting agent (pending request in its timeline) counts for attention", async () => {
@@ -291,6 +292,6 @@ describe("single host: switching the host", () => {
     expect(await sending).toBe("AbortError");
     expect(store.getState().outbox).toEqual({});
     transport.hosts("local", true);
-    expect(store.getState().outbox.a1?.map((e) => [e.text, e.state])).toEqual([["lost?", "failed"]]);
+    expect(store.getState().outbox[viewKey("local", "a1")]?.map((e) => [e.text, e.state])).toEqual([["lost?", "failed"]]);
   });
 });

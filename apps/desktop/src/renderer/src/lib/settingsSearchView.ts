@@ -51,7 +51,8 @@ export function settingsSearchDocs({ pages, sections, text, t, hostTarget, appTa
     const { item } = entry;
     if (entry.mode !== "show" && entry.waiting) return; // capabilities still loading
     const hostPage = isSettingsHostPage(item);
-    const target = hostPage ? hostTarget : appTarget;
+    // A 混合设置 page that is about one host (主机: its header names the Settings host) reads that host too.
+    const target = hostPage || (item.hostPart && SETTINGS_HOST_PAGES.has(item.page)) ? hostTarget : appTarget;
     let pageDisabled = entry.mode === "show" ? null : t("modules.needsCapability", { list: entry.missing.join(", ") });
     if (!pageDisabled && hostPage) {
       // Another user's connection: Settings shows only 「主机设置归主机所有者」 there.

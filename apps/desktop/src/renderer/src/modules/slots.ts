@@ -38,6 +38,8 @@ export interface SettingsPageItem extends SlotItemBase {
   Aside?: ComponentType;
   /** A link at the end of the page header to a related page (运行时 → 后端更新); shown only while that page is. */
   headerLink?: { page: SettingsTab; labelKey: MessageKey };
+  /** A way back above the page header (主机 → ‹ 所有设备); shown only while that page is. */
+  backLink?: { page: SettingsTab; labelKey: MessageKey };
   /**
    * A host page that can show every host at once (用量): the header picker adds 「全部主机」 while two or
    * more online hosts report `capability`; the page reads the hosts with lib/settingsHost
@@ -554,6 +556,75 @@ export interface SideReleaseHoldOptions {
   discard?: boolean;
 }
 
+// ── Contract 1.17: panes (docs/desktop-modules.md §24) ─────────────────────────────────────────────
+
+/**
+ * v1.17 what a pane kind's instances are bound to (§24.2): one agent ("agent", e.g. a conversation),
+ * a host ("host"), whatever the focused conversation shows ("follow": file tree, changes, status
+ * categories, an agent's previews / diffs / side chats / workspace terminals) or nothing ("none": pages).
+ */
+export type PaneKindBinding = "agent" | "host" | "follow" | "none";
+
+/** v1.17: a pane tab's title and badges — the tab, a chip (step 4) and the window title use it. */
+export interface PaneTitle extends SideTabInfo {
+  icon?: Icon;
+}
+
+/**
+ * v1.17 `pane.kind` (§24): a kind of pane content; entry id = kind id. A superset of `side.component`
+ * (§18.2): instances `single` / `multi`, a binding, params / state as there, a title hook, Body /
+ * Actions with SideBodyProps. Each `side.component` and each `main.page` (without an Aside) also derives
+ * a kind (§24.4); `core.conversation` is the shell's own. Contributed kinds open in the tool area
+ * (right-most column, ≤ 3 panes, then tabs) through services.panes.open / services.side.open.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- S / P default to Json; items of a slot mix them
+export interface PaneKindItem<S extends Json = any, P extends Json = any> extends SessionItemBase {
+  // default unavailable "hide": a kind whose module stops → its instances go dormant (kept, not shown)
+  titleKey: MessageKey;
+  icon: Icon;
+  instances: "single" | "multi";
+  binding: PaneKindBinding;
+  parseParams(params: Json): P | null;
+  /** Same key under the same binding → reuse that instance. Omitted: single → constant, multi → never. */
+  dedupeKey?(params: P): string;
+  init(params: P, previous: S | null): S;
+  /** Persisted state (≤ 4 KiB) from an older run → state, or null to drop the tab. */
+  restore?(raw: Json, version: number): S | null;
+  stateVersion?: number; // default 1
+  persist?: boolean; // default true
+  useTitle(props: SideTabProps<S>): PaneTitle;
+  Body: ComponentType<SideBodyProps<S>>;
+  Actions?: ComponentType<SideBodyProps<S>>;
+  /** Default 280 × 120 px (§24.5): a column is never narrower, a pane never lower. */
+  minSize?: { w: number; h: number };
+  /** May be tiled (default true). */
+  tile?: boolean;
+  /** "left": docked at the window's left edge, outside the tiling (only the agent list). Default null. */
+  dock?: "left" | null;
+  /** May pop out into a window of its own (step 6; default false). */
+  popOut?: boolean;
+  keepAlive?: "unmount" | "hidden";
+  onClose?(instance: SideInstanceInfo<S>): boolean | Promise<boolean>;
+  closeConfirm?(instance: SideInstanceInfo<S>): string | null;
+  toRef?(state: S): { key: string; title: string; params: RefParams; snippet?: string } | null;
+  fromRef?(params: RefParams): P | null;
+  launcher?: SideLauncher;
+}
+
+/** v1.17 services.panes.open options (§24.5). */
+export interface PaneOpenOptions {
+  /** Beside the focused pane (conversations: a new column; Ctrl/⌘ + click) rather than in it. */
+  beside?: boolean;
+  /** Give the pane the keyboard focus (default false; conversations: true). */
+  focus?: boolean;
+  /** Open without taking the view (like Ctrl/⌘ + click): no reveal, no focus; the pane flashes. Wins over `focus`. */
+  background?: boolean;
+}
+export type PaneOpenResult =
+  | { status: "opened"; kind: string; paneId: string | null; instanceId: string | null }
+  | { status: "unavailable"; reason: Extract<SideOpenResult, { status: "unavailable" }>["reason"] }
+  | { status: "stale" };
+
 // ── Contract 1.4: two sides and refs (docs/desktop-modules.md §19) ─────────────────────────────────
 
 /** A stored pointer (bookmarks, note sources, links). Plain JSON, data only — never instructions or authority. */
@@ -828,6 +899,8 @@ export interface SlotMap {
   "profile.fieldAction": ProfileFieldActionItem;
   // Contract 1.12: tabs of the 项目 page (§21).
   "project.tab": ProjectTabItem;
+  // Contract 1.17: pane kinds (§24); side.component / main.page items derive theirs.
+  "pane.kind": PaneKindItem;
 }
 export type SlotId = keyof SlotMap;
 export type SlotItem<S extends SlotId> = SlotMap[S];
@@ -853,6 +926,7 @@ export const SLOT_SPECS: { readonly [S in SlotId]: SlotSpec } = {
   "ref.target": { unavailable: "hide" },
   "profile.fieldAction": { unavailable: "hide" },
   "project.tab": { unavailable: "hide" },
+  "pane.kind": { unavailable: "hide" },
 };
 
 /** Narrow services handed to modules (§7). Step 1 ships the part the pilot needs; the rest lands with its area. */
@@ -873,7 +947,15 @@ export interface ModuleServices {
     /** 在主界面调整: opens the panel of a `customize.region` (an open page closes first); open on it already: closes it. */
     customize(region: CustomizeRegion): void;
   };
-  /** v1.4 (§18.8): the right side. Never "opened" without something visible. */
+  /**
+   * v1.17 (§24.5): open any pane kind — `core.conversation` (params `{ sessionId, hostId? }`; `beside` =
+   * a column beside the focused one), `page:<main.page id>` (params = PageParams; in the focused pane),
+   * or a tool kind (`side.component` / `pane.kind` id; the right-most tool column). Says why it cannot.
+   */
+  panes: {
+    open(kind: string, params?: Json, opts?: PaneOpenOptions): PaneOpenResult;
+  };
+  /** v1.4 (§18.8): the right side — v1.17: the tool area of the panes; `open` = services.panes.open of a tool kind. */
   side: {
     open: SideOpen;
     reveal(target: SideRevealTarget): SideRevealResult;

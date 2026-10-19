@@ -1,7 +1,7 @@
 import { createContext, useContext, useMemo } from "react";
 import { lacks, type AgentFeatures } from "../lib/agentFeatures";
 import { useAgentFeatures } from "../lib/agentFeaturesView";
-import { agentHost, useApp } from "../store";
+import { useConvHost } from "../lib/conversationScope";
 import type { AppSlotEntry } from "./slots";
 import { useSlot } from "./react";
 
@@ -22,7 +22,7 @@ export const TimelineViewContext = createContext<TimelineView | null>(null);
 
 export function useTimelineView(sessionId: string): TimelineView {
   // The open agent's host (an agent of another host in the scope opens in place).
-  const hostId = useApp(agentHost);
+  const hostId = useConvHost();
   const agent = useAgentFeatures(sessionId);
   const allTools = useSlot("timeline.tool");
   const received = useSlot("timeline.received");

@@ -34,6 +34,7 @@ vi.mock("../src/renderer/src/components/Parties", () => ({ Who: () => null }));
 vi.mock("../src/renderer/src/components/PeerParty", () => ({ PeerParty: () => null }));
 vi.mock("../src/renderer/src/components/DelegationComposer", () => ({ OwnerSteeredBadge: () => null }));
 vi.mock("../src/renderer/src/components/DelegationPeer", () => ({ DelegationPeerSection: () => null }));
+vi.mock("../src/renderer/src/lib/approvalDecision", () => ({ useAskReview: () => ({ record: null, canDecide: false, approvalsPage: false }), decideApprovalOn: vi.fn() }));
 
 import { DelegationCard } from "../src/renderer/src/components/DelegationCard";
 import { DelegationsBody, DelegationsMeta } from "../src/renderer/src/modules/delegations/DelegationStatus";

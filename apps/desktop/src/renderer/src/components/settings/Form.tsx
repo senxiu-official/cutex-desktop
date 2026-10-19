@@ -10,7 +10,7 @@ import { Component, createContext, isValidElement, useCallback, useContext, useE
 import { bridge } from "../../bridge";
 import { CARD_FLAGS } from "../../lib/narrowCard";
 import { dataFlags, useSizeFlags } from "../../lib/sizeFlags";
-import { ArrowRight, Bot, Check, ChevronDown, ChevronRight, KeyRound, Layers, Monitor, Plus, RotateCcw, RotateCw, Server, X } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, KeyRound, Layers, Monitor, Plus, RotateCcw, RotateCw, Server, Wrench, X } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { ARMED_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { FIELD_W } from "../../lib/fieldWidths";
@@ -43,9 +43,39 @@ const PageSourceContext = createContext<SettingsSource | undefined>(undefined);
 const PageAgentsContext = createContext<SettingsAgents | undefined>(undefined);
 /** A card reports here while its scope chip differs from its page's (SettingsPage: the page chip mentions it). */
 const PageExceptionsContext = createContext<((id: string, on: boolean) => void) | null>(null);
+/** A host card / host part reports here while mounted: a 混合设置 header then names the host they show. */
+const PageHostUseContext = createContext<((id: string, on: boolean) => void) | null>(null);
 
-/** A mixed page half (SettingsHostFrame parts) states its scope once: its sections do not repeat it. */
-export function PartSource({ source, agents, children }: { source: SettingsSource; agents?: SettingsAgents; children: ReactNode }) {
+/** For SettingsHostSection / SettingsHostPart: this page shows host settings (of the Settings target host). */
+export function useReportsHost(): void {
+  const report = useContext(PageHostUseContext);
+  const id = useId();
+  useEffect(() => {
+    if (!report) return;
+    report(id, true);
+    return () => report(id, false);
+  }, [report, id]);
+}
+
+/** A headless host part's host picker: its host cards join it to their scope tag (「cutex 后端 · ● HOST ▾」). */
+const PartPickerContext = createContext<ReactNode>(null);
+/** A headless part's place: its cards that name none show this one on a 混合设置 page. */
+const PartFallbackContext = createContext<SettingsSource | undefined>(undefined);
+/** The page is 混合设置 (no single place, or a card elsewhere): every titled card shows where it lives. */
+const PageMixedContext = createContext(false);
+
+/**
+ * A mixed page half (SettingsHostFrame parts) states its scope once: its sections do not repeat it.
+ * `cards` (a part without a heading, owner 2026-10-19): every card tags itself instead, like the cards of
+ * a one-place page that live elsewhere (排队顺序 on 输入区); `picker` joins the host cards' tags.
+ */
+export function PartSource({ source, agents, cards, picker, children }: { source: SettingsSource; agents?: SettingsAgents; cards?: boolean; picker?: ReactNode; children: ReactNode }) {
+  if (cards)
+    return (
+      <PartPickerContext value={picker ?? null}>
+        <PartFallbackContext value={source}>{children}</PartFallbackContext>
+      </PartPickerContext>
+    );
   return (
     <PageSourceContext value={source}>
       <PageAgentsContext value={agents}>{children}</PageAgentsContext>
@@ -93,32 +123,58 @@ export function ScopeChip({ tone, icon, label, title, body, joined }: { tone: ke
   );
 }
 
-/** Where the settings live: 本机 / cutex 后端 · X / Codex 设置 · X / 本设备 + 主机 (a mixed page). `short`: the left half of a tag with a host picker (the picker names the host). */
-function WhereChip({ source, short, except }: { source: SettingsSource | undefined; short?: boolean; except?: boolean }) {
+/**
+ * Where the settings live (owner 2026-10-19, dev topic 标签设计): 本地桌面应用 / cutex 后端 · X /
+ * Codex 运行时 · X — the place, never 「…设置」. On a page header, `except` (a card tagged elsewhere)
+ * makes it 「混合：<place>」, and a page with no single place (each card tagged) says 混合设置.
+ * `short`: the left half of a tag with a host picker (the picker names the host).
+ */
+function WhereChip({ source, short, except, shown }: { source: SettingsSource | undefined; short?: boolean; except?: boolean; /** On a 混合设置 header: the host the page's host cards show. */ shown?: boolean }) {
   const { t } = useI18n();
   const hostId = useTargetHostId();
   const host = useApp((s) => s.hosts?.hosts.find((h) => h.id === hostId)?.label) ?? "—";
-  // No local host (macOS without a local cutex): 「这台电脑」 instead of a 「本机」 that is not in the host list.
-  const localShown = useApp((s) => shownSettingsSource(source, s.hosts));
-  // A page with a card tagged elsewhere (owner 2026-10-18): the page chip says the cards' tags win.
-  const withExcept = (body: string) => (except ? `${body}${t("settings.scope.except")}` : body);
+  if (except) source = undefined;
   if (source === "local") {
-    const label = localShown ? t("settings.source.local") : t("settings.scope.thisComputer");
-    return <ScopeChip tone="plain" icon={<Monitor size={11} aria-hidden />} label={label} title={t("settings.scope.local.title")} body={withExcept(t("settings.scope.local.body"))} />;
+    // 「本地桌面应用」 (owner 2026-10-19: 「本机」 read oddly; it pairs with 「cutex 后端」). The same with or
+    // without a local host in the list.
+    return <ScopeChip tone="plain" icon={<Monitor size={11} aria-hidden />} label={t("settings.scope.local.label")} title={t("settings.scope.local.title")} body={t("settings.scope.local.body")} />;
   }
   if (source === "host" || source === "codex") {
     const label = short ? `${t(`settings.scope.${source}.short`)} ·` : t(`settings.scope.${source}.label`, { host });
-    return <ScopeChip tone="host" joined={short} icon={<Server size={11} aria-hidden />} label={label} title={t(`settings.scope.${source}.label`, { host })} body={withExcept(t(`settings.scope.${source}.body`, { host }))} />;
+    return <ScopeChip tone="host" joined={short} icon={<Server size={11} aria-hidden />} label={label} title={shown ? t("settings.scope.host.shownTitle", { host }) : t(`settings.scope.${source}.label`, { host })} body={t(`settings.scope.${source}.body`, { host })} />;
   }
+  // A page whose cards each say where they live (通知).
   return <ScopeChip tone="plain" icon={<Layers size={11} aria-hidden />} label={t("settings.scope.mixedTag")} title={t("settings.scope.mixedTag")} body={t("settings.scope.mixed")} />;
 }
 
-/** Whether (and when) agents feel these settings: 不影响 / 新启动的 / 运行中的 · 立即 / 影响访问 (follows the agent term). */
+/**
+ * Whether (and when) agents feel these settings (follows the agent term): 不影响智能体, 智能体 · 下次启动生效,
+ * 智能体 · 立即生效, 访问权限. A page header only ever says 不影响智能体 (owner 2026-10-19: when the whole
+ * page does not affect agents); a card that does says how.
+ */
 function AgentsChip({ agents }: { agents: SettingsAgents }) {
   const { t } = useI18n();
   const icon = agents === "access" ? <KeyRound size={11} aria-hidden /> : <Bot size={11} aria-hidden />;
   const tone = agents === "none" ? "quiet" : agents === "access" ? "plain" : "agents";
   return <ScopeChip tone={tone} icon={icon} label={t(`settings.scope.agents.${agents}`)} title={t(`settings.scope.agents.${agents}.title`)} body={t(`settings.scope.agents.${agents}.body`)} />;
+}
+
+/** An MCP tool a card is about: its name and, optionally, one line of its own (what agents use it for). */
+export interface CardTool {
+  name: string;
+  desc?: string;
+}
+
+/**
+ * [MCP工具] (owner 2026-10-19): the popover's title names the tools, a fixed first line says the card holds
+ * their settings, then each tool's own line (if it has one).
+ */
+function ToolsChip({ tools }: { tools: readonly CardTool[] }) {
+  const { t } = useI18n();
+  const title = tools.map((x) => x.name).join(" · ");
+  const list = tools.map((x) => x.name).join(t("settings.scope.mcp.and"));
+  const body = [t("settings.scope.mcp.body", { tools: list }), ...tools.flatMap((x) => (x.desc ? [x.desc] : []))].join(" ");
+  return <ScopeChip tone="plain" icon={<Wrench size={11} aria-hidden />} label={t("settings.scope.mcp.label")} title={t("settings.scope.mcp.title", { tools: title })} body={body} />;
 }
 
 /**
@@ -127,9 +183,29 @@ function AgentsChip({ agents }: { agents: SettingsAgents }) {
  * on click. Page headers and the halves of a mixed page (SettingsHostFrame parts) share it; `agents`
  * unset = the page is not reviewed yet (no chip).
  */
-export function ScopeLine({ source, picker, agents, except }: { source?: SettingsSource; picker?: ReactNode; agents?: SettingsAgents; except?: boolean }) {
+export function ScopeLine({ source, picker, agents, except, hostShown }: { source?: SettingsSource; picker?: ReactNode; agents?: SettingsAgents; except?: boolean; /** 混合设置 with host cards: name (and pick) the host they show, after the 混合设置 tag. */ hostShown?: boolean }) {
+  // A page tag says only 不影响智能体 (cards say the rest).
+  if (agents && agents !== "none") agents = undefined;
+  const mixed = except || !source;
+  if (mixed) {
+    return (
+      <div data-settings-scope="mixed" className="flex min-h-6 flex-wrap items-center gap-1.5">
+        <WhereChip source={undefined} />
+        {hostShown &&
+          (picker ? (
+            <span className="inline-flex items-center" data-settings-shown-host="">
+              <WhereChip source="host" short shown />
+              {picker}
+            </span>
+          ) : (
+            <WhereChip source="host" shown />
+          ))}
+        {agents && <AgentsChip agents={agents} />}
+      </div>
+    );
+  }
   return (
-    <div data-settings-scope={source ?? "mixed"} className="flex min-h-6 flex-wrap items-center gap-1.5">
+    <div data-settings-scope={except ? "mixed" : (source ?? "mixed")} className="flex min-h-6 flex-wrap items-center gap-1.5">
       {picker ? (
         <span className="inline-flex items-center">
           <WhereChip source={source} short except={except} />
@@ -146,9 +222,20 @@ export function ScopeLine({ source, picker, agents, except }: { source?: Setting
 /**
  * Page header: what the page is for (`hint`, one line) and the scope chips. The page name is in the
  * breadcrumb. `host`: the host picker of a host page (multi-host). `link`: a related page at the
- * header's end (the page item's `headerLink`, e.g. 运行时 → 后端更新).
+ * header's end (the page item's `headerLink`, e.g. 运行时 → 后端更新). `back`: a way back above it all
+ * (the page item's `backLink`, e.g. 主机 → ‹ 所有设备).
  */
-export function SettingsPage({ source, agents, hint, host, link, children }: { source?: SettingsSource; agents?: SettingsAgents; hint?: ReactNode; host?: ReactNode; link?: ReactNode; children: ReactNode }) {
+export function SettingsPage({ source, agents, hint, host, hostPage, link, back, children }: { source?: SettingsSource; back?: ReactNode; agents?: SettingsAgents; hint?: ReactNode; host?: ReactNode; /** A host page: `host` joins its tag. Otherwise `host` names the host of the page's host cards on a 混合设置 page. */ hostPage?: boolean; link?: ReactNode; children: ReactNode }) {
+  const [hostUsers, setHostUsers] = useState<ReadonlySet<string>>(() => new Set());
+  const reportHost = useCallback((id: string, on: boolean) => {
+    setHostUsers((prev) => {
+      if (prev.has(id) === on) return prev;
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
   // Cards whose own scope chip differs from the page's (Section `source`), e.g. a host card on 输入区.
   const [exceptions, setExceptions] = useState<ReadonlySet<string>>(() => new Set());
   const reportException = useCallback((id: string, on: boolean) => {
@@ -163,6 +250,7 @@ export function SettingsPage({ source, agents, hint, host, link, children }: { s
   return (
     <>
       <div data-settings-header className="mb-5 space-y-1.5 border-b border-border/60 pb-3">
+        {back && <div className="-mt-1 flex h-5 items-center">{back}</div>}
         {(hint || link) && (
           <div className="flex min-h-5 items-start gap-3">
             {hint && <p className="min-w-0 text-[13px] text-muted">{hint}</p>}
@@ -170,11 +258,15 @@ export function SettingsPage({ source, agents, hint, host, link, children }: { s
             {link && <span className="-my-1.5 ml-auto flex shrink-0 items-center">{link}</span>}
           </div>
         )}
-        <ScopeLine source={source} picker={host} agents={agents} except={exceptions.size > 0} />
+        <ScopeLine source={source} picker={hostPage === false ? (hostUsers.size ? host : undefined) : host} agents={agents} except={exceptions.size > 0} hostShown={hostUsers.size > 0} />
       </div>
       <PageSourceContext value={source}>
         <PageAgentsContext value={agents}>
-          <PageExceptionsContext value={reportException}>{children}</PageExceptionsContext>
+          <PageExceptionsContext value={reportException}>
+            <PageMixedContext value={!source || exceptions.size > 0}>
+              <PageHostUseContext value={reportHost}>{children}</PageHostUseContext>
+            </PageMixedContext>
+          </PageExceptionsContext>
         </PageAgentsContext>
       </PageSourceContext>
     </>
@@ -186,7 +278,7 @@ export function SettingsPage({ source, agents, hint, host, link, children }: { s
  * `agents` chip a section whose scope differs from the page's (owner 2026-10-18: per page, a section
  * only when it differs, never per row); the same as the page header is not repeated.
  */
-export function Section({ title, hint, source, agents, children, actions, id, tag, picker }: { title?: string; hint?: ReactNode; source?: SettingsSource; agents?: SettingsAgents; children: ReactNode; actions?: ReactNode; id?: string; /** A muted label after the title, e.g. 旧版 for a card that will be redone (title = tooltip). */ tag?: { label: string; title?: string }; /** A host card's host picker before its (then short) source chip (components/SettingsHostFrame SettingsHostSection). */ picker?: ReactNode }) {
+export function Section({ title, hint, source, agents, children, actions, id, tag, picker, tools, sub }: { title?: string; hint?: ReactNode; source?: SettingsSource; agents?: SettingsAgents; children: ReactNode; actions?: ReactNode; id?: string; /** A muted label after the title, e.g. 旧版 for a card that will be redone (title = tooltip). */ tag?: { label: string; title?: string }; /** A host card's host picker before its (then short) source chip (components/SettingsHostFrame SettingsHostSection). */ picker?: ReactNode; /** The agents' MCP tools this card is about: an [MCP工具] tag naming them. */ tools?: readonly CardTool[]; /** A child card under a heading of its own (a smaller title). */ sub?: boolean }) {
   const { t } = useI18n();
   // 「只看你修改过的设置」 (owner 2026-10-18): per card, offered only while a row in it is modified.
   const [modified, setModified] = useState<ReadonlySet<string>>(() => new Set());
@@ -209,14 +301,20 @@ export function Section({ title, hint, source, agents, children, actions, id, ta
     ) : null;
   const pageSource = useContext(PageSourceContext);
   const pageAgents = useContext(PageAgentsContext);
-  const shown = useApp((s) => shownSettingsSource(source, s.hosts));
-  if (source && source === pageSource) source = undefined;
-  else source = shown;
+  const partPicker = useContext(PartPickerContext);
+  const partFallback = useContext(PartFallbackContext);
+  const mixed = useContext(PageMixedContext);
+  const own = source ?? partFallback;
+  if (!picker && partPicker && (own === "host" || own === "codex")) picker = partPicker;
+  const elsewhere = !!own && own !== pageSource;
+  const place = mixed && title ? (own ?? pageSource) : elsewhere ? own : undefined;
+  const shown = useApp((s) => shownSettingsSource(place, s.hosts));
+  source = place ? shown : undefined;
   if (agents === pageAgents) agents = undefined;
   const compact = useContext(CompactContext);
   const reportException = useContext(PageExceptionsContext);
   const sectionId = useId();
-  const differs = !!source;
+  const differs = elsewhere;
   useEffect(() => {
     if (!reportException) return;
     reportException(sectionId, differs);
@@ -225,26 +323,17 @@ export function Section({ title, hint, source, agents, children, actions, id, ta
   return (
     // Compact (a 在主界面调整 panel): the settings page may be mounted too, so the anchor is not an id there.
     <section className={compact ? "mb-3" : "mb-6"} id={compact ? undefined : id} data-settings-anchor={compact ? id : undefined}>
-      {(title || actions || source || agents || filter || picker) && (
+      {(title || actions || source || agents || filter || picker || tools?.length) && (
         <div className={compact ? "mb-1" : "mb-2"}>
           {/* Fixed-height title row whether or not there are actions / the 「只看你修改过的设置」 switch,
               so one appearing never moves the page (owner 2026-10-18: a little taller for that switch). */}
           <div className={`mb-0.5 flex items-center gap-2 ${compact ? "h-7" : "h-8"}`}>
-            {title && <h3 className={`min-w-0 truncate font-semibold ${compact ? "text-[13px]" : "text-sm"}`}>{title}</h3>}
+            {title && <h3 className={`min-w-0 truncate ${sub ? "text-[13px] font-medium" : `font-semibold ${compact ? "text-[13px]" : "text-sm"}`}`}>{title}</h3>}
             {tag && (
               <span title={tag.title} className="inline-flex h-5 shrink-0 items-center rounded border border-dashed border-border px-1.5 text-[11px] text-subtle">
                 {tag.label}
               </span>
             )}
-            {picker ? (
-              <span className="inline-flex shrink-0 items-center">
-                {source && <WhereChip source={source} short />}
-                {picker}
-              </span>
-            ) : (
-              source && <WhereChip source={source} />
-            )}
-            {agents && <AgentsChip agents={agents} />}
             {(actions || filter) && (
               <div className="ml-auto flex shrink-0 items-center gap-3">
                 {filter}
@@ -253,6 +342,22 @@ export function Section({ title, hint, source, agents, children, actions, id, ta
             )}
           </div>
           {hint && <p className="text-xs text-subtle">{hint}</p>}
+          {/* Tags on their own line under the hint (owner 2026-10-19, A): where, whether agents feel it,
+              [MCP工具] — a card has them or not for good, so the line never comes and goes. */}
+          {(source || picker || agents || tools?.length) && (
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {picker ? (
+                <span className="inline-flex shrink-0 items-center">
+                  {source && <WhereChip source={source} short />}
+                  {picker}
+                </span>
+              ) : (
+                source && <WhereChip source={source} />
+              )}
+              {agents && <AgentsChip agents={agents} />}
+              {tools?.length ? <ToolsChip tools={tools} /> : null}
+            </div>
+          )}
         </div>
       )}
       <ModifiedContext value={{ only, report }}>
@@ -422,6 +527,16 @@ export function TextLink({ children, onClick }: { children: ReactNode; onClick()
   );
 }
 
+/** A link-styled way back with a leading ‹, e.g. 主机's 「‹ 所有设备」. */
+export function BackLink({ children, onClick }: { children: ReactNode; onClick(): void }) {
+  return (
+    <button type="button" data-settings-back onClick={onClick} className={`-ml-0.5 inline-flex items-center gap-0.5 rounded text-xs text-accent hover:underline ${FOCUS}`}>
+      <ChevronLeft size={13} aria-hidden />
+      {children}
+    </button>
+  );
+}
+
 /**
  * 「详细信息」: developer facts of a card (hashes, sequences, paths, channels) folded at its end, so the
  * card leads with what a person acts on. Collapsed by default; the rows inside are ordinary SettingRows.
@@ -549,7 +664,7 @@ export function ListRow({ leading, title, detail, actions, below, frame }: { lea
 export function Loading({ rows = 2 }: { rows?: number }) {
   const { t } = useI18n();
   return (
-    <div role="status" aria-label={t("settings.loading")} className="py-1">
+    <div role="status" aria-label={t("settings.loading")} data-settings-loading="" className="py-1">
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="flex items-center gap-3 border-b border-border py-3 last:border-b-0">
           <div className="h-3 w-40 animate-pulse rounded bg-surface-2" />
@@ -593,7 +708,7 @@ export function PlannedCard({ api, children }: { api: string; children: ReactNod
   );
 }
 
-export function Segmented<T extends string>({ value, options, onChange, disabled, label }: { value: T; options: { value: NoInfer<T>; label: string; /** What the choice means, as a tooltip (the row hint says what the setting is). */ title?: string }[]; onChange(v: NoInfer<T>): void; disabled?: boolean; label?: string }) {
+export function Segmented<T extends string>({ value, options, onChange, disabled, label, accent }: { value: T; options: { value: NoInfer<T>; label: string; /** What the choice means, as a tooltip (the row hint says what the setting is). */ title?: string }[]; onChange(v: NoInfer<T>): void; disabled?: boolean; label?: string; /** The choice in the accent colour (通知 → 事件分级 only, owner 2026-10-19: a column of choices reads at a glance). */ accent?: boolean }) {
   const aria = useRowA11y(label);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const selected = Math.max(
@@ -623,7 +738,7 @@ export function Segmented<T extends string>({ value, options, onChange, disabled
               refs.current[next]?.focus();
               onChange(options[next]!.value);
             }}
-            className={`rounded-md px-2.5 py-1 text-xs whitespace-nowrap ${FOCUS} ${on ? "bg-raised text-foreground shadow-sm ring-1 ring-border" : "text-muted hover:text-foreground"}`}
+            className={`rounded-md px-2.5 py-1 text-xs whitespace-nowrap ${FOCUS} ${on ? (accent ? "bg-accent text-white shadow-sm" : "bg-raised text-foreground shadow-sm ring-1 ring-border") : "text-muted hover:text-foreground"}`}
           >
             {o.label}
           </button>

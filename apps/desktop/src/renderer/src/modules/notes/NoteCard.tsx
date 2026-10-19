@@ -6,7 +6,7 @@ import { ArmedRemove, Button, IconButton } from "../../components/settings/Form"
 import { useI18n } from "../../i18n";
 import { useStreamdownTranslations } from "../../lib/streamdownTranslations";
 import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
-import { agentHost, useApp, viewHostOf } from "../../store";
+import { agentHost, useApp, viewOf } from "../../store";
 import { anchorStatus, hasPin, noteQuote, togglePin } from "./model";
 import { openNoteSource } from "./actions";
 import { NoteEditor } from "./NoteEditor";
@@ -22,8 +22,8 @@ export function NoteCard({ hostId, note, projectId, readOnly = false, onDismissE
   const draft = useNoteDrafts((s) => s.drafts[draftKey]);
   const sourceSession = note.anchor?.sessionId ?? (note.scope.kind === "session" ? note.scope.id : undefined);
   // The source agent may be open from another host in the scope (multi-host P1): its own host, not the focus.
-  const history = useApp((s) => sourceSession && viewHostOf(sourceSession) === hostId ? s.sessions[sourceSession] : undefined);
-  useApp((s) => sourceSession && viewHostOf(sourceSession) === hostId ? s.sessions[sourceSession]?.version : undefined);
+  const history = useApp((s) => sourceSession ? viewOf(s, hostId, sourceSession) : undefined);
+  useApp((s) => sourceSession ? viewOf(s, hostId, sourceSession)?.version : undefined);
   const sidebar = useHostSidebar(hostId);
   const sourceName = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((s) => s.cutexSessionId === sourceSession)?.displayName;
   const quoteTarget = useApp((s) => agentHost(s) === hostId ? s.selectedId : null);

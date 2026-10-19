@@ -1,6 +1,7 @@
 // 「需要你」 strip above the composer (sidebar v2): one chip per agent of any project of the hosts in the
 // view scope that needs the owner, just finished a turn or failed — except the open agent. Click opens
-// it in place (owner approvals only: the 审批 page). Settings → 外观 → 侧栏 「输入框上方显示『需要你』」. Multi-host (RFC §10, ★ Q15):
+// it in place (owner approvals only: the 审批 page; a delegation waiting for your review only: the
+// agent with that delegation's detail beside it, where 批准 / 拒绝 are). Settings → 外观 → 侧栏 「输入框上方显示『需要你』」. Multi-host (RFC §10, ★ Q15):
 // what waits on connected hosts outside the view scope is one 「其他主机 N 项」 chip at the end (click =
 // show 所有设备). Each agent chip has a × (also middle-click) that dismisses it without opening: done /
 // failed = the turn is marked seen as opening would (the sidebar pill goes too); needs-you = hidden
@@ -25,10 +26,12 @@ import { markSeenOn, turnMarksOn } from "../lib/turnUnread";
 import { dismissNeed, isDismissed, needFingerprint, pruneStoredDismissals, useDismissals } from "../lib/needsYouDismiss";
 import { useUiPrefs } from "../lib/prefs";
 import { focusOwnerNote } from "../lib/ownerNotifyStore";
+import { openDelegationDetail } from "../lib/delegationOpen";
 import { useOutOfScopeAttention } from "../lib/hostLists";
 import { ALL_HOSTS } from "../lib/hostScope";
 import { setViewScope } from "../lib/useHostScope";
-import { agentHost, useApp } from "../store";
+import { useApp } from "../store";
+import { useConvHost } from "../lib/conversationScope";
 import { services } from "../modules/app";
 import { StatusAvatar } from "./AgentStatus";
 import { HostMark } from "./HostMark";
@@ -58,7 +61,7 @@ function Strip({ sessionId }: { sessionId: string | null }) {
   const { rows, signals, needs, marks } = useScopedAttention(scoped.model, scoped.scope);
   const focus = scoped.scope.focus;
   const openAgent = useApp((s) => s.openAgent);
-  const openHost = useApp(agentHost);
+  const openHost = useConvHost();
   const exclude = sessionId ? hostKey(openHost, sessionId) : null;
   const dismissals = useDismissals();
   const all = useMemo(() => {
@@ -107,7 +110,10 @@ function Strip({ sessionId }: { sessionId: string | null }) {
     const approvalsOnly = c.signal === "needsYou" && n?.reasons.length === 1 && n.reasons[0] === "approval";
     // An agent → owner message behind it: open the agent at that message.
     const note = c.signal === "needsYou" ? n?.notificationIds?.[0] : undefined;
+    // Only a delegation waiting for your review: open its agent with the delegation's detail beside it (批准 / 拒绝 there).
+    const review = c.signal === "needsYou" && n?.reasons.length === 1 && n.reasons[0] === "review" ? (n.askIds[0] ?? null) : null;
     if (approvalsOnly) services.ui.openPage("approvals.page");
+    else if (review) void openAgent(c.id, host).then(() => openDelegationDetail(host, review));
     else if (note) focusOwnerNote(c.id, note, host);
     else void openAgent(c.id, host);
   };

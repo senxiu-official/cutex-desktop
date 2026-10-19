@@ -7,12 +7,12 @@ import { useI18n, type MessageKey } from "../../i18n";
 import { approvalDecisionTrace, approvalFacts, approvalPeer, APPROVAL_DECIDED_BY_FEATURE, APPROVAL_NOTICE_FEATURE, decisionInput, formatHold, grantKind, holdLeftMs, RETRYING_KINDS } from "../../lib/approvals";
 import { peerPartyText } from "../../lib/delegations";
 import { ClaimedCaps, PeerParty } from "../../components/PeerParty";
-import { hostApi, openHostAgent } from "../../lib/hostLists";
+import { openHostAgent } from "../../lib/hostLists";
+import { sendApprovalDecision } from "../../lib/approvalDecision";
 import type { HostLook } from "../../lib/hostScope";
 import { refusalText } from "../../lib/profileCreate";
 import { formatAbsolute, formatWhen, useClock, useNow } from "../../lib/time";
 import { featuresOf, useApp } from "../../store";
-import { LOCAL_HOST_ID } from "../../../../shared/hosts";
 import { Avatar } from "../../components/Avatar";
 import { HostMark } from "../../components/HostMark";
 import { ApprovalSource } from "../../components/ApprovalSource";
@@ -117,8 +117,6 @@ export interface Origin {
  */
 export function PendingCard({ record, origin, variant = "page" }: { record: ApprovalRecord; origin: Origin; variant?: "page" | "inline" }) {
   const { t } = useI18n();
-  const focus = useApp((s) => s.hosts?.active ?? LOCAL_HOST_ID);
-  const decideFocus = useApp((s) => s.decideApproval);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<ApprovalDecision | null>(null);
   const [claimBusy, setClaimBusy] = useState(false);
@@ -144,7 +142,7 @@ export function PendingCard({ record, origin, variant = "page" }: { record: Appr
       if (!bridge.apiFor) throw new Error("browser_unavailable");
       return bridge.apiFor(origin.hostId).decideApproval(record.approvalId, decision, note, where);
     }
-    return origin.hostId === focus ? decideFocus(record.approvalId, decision, note, where) : hostApi(origin.hostId).decideApproval(record.approvalId, decision, note, where);
+    return sendApprovalDecision(origin.hostId, record.approvalId, decision, note, where);
   };
   const run = async (decision: ApprovalDecision, event: { detail: number; nativeEvent?: unknown }) => {
     if (record.kind === "browser_claim" && decision === "approve") return; // Only exact owner-tab selection can grant a claim.

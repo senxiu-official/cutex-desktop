@@ -19,11 +19,12 @@ import { openDelegationDetail } from "../lib/delegationOpen";
 import { focusDelegation } from "../lib/focusRequest";
 import { ARMED_BUTTON, ARMED_FRAME, useArmed } from "../lib/armedConfirm";
 import { canReply, isFinal, isSystemNotice, notePresentation, OWNER_NOTIFY_DELETE_FEATURE } from "../lib/ownerNotify";
-import { ownerNotifyAct, useOwnerNotify } from "../lib/ownerNotifyStore";
+import { ownerNotifyAct, useHostOwnerNotes } from "../lib/ownerNotifyStore";
 import { openJobOutput } from "../lib/jobStore";
 import { JOB_SERVICE_FEATURE } from "../lib/jobs";
 import { formatAbsolute, formatWhen, useClock } from "../lib/time";
-import { agentHost, selectedFeatures, selectedSidebar, useApp } from "../store";
+import { useApp } from "../store";
+import { convFeaturesOf, convNotify, convSidebarOf, useConvHost, useConvScope } from "../lib/conversationScope";
 import { rowsOf } from "../lib/viewHost";
 import { DelegationTag } from "./DelegationParts";
 import { ClampBox } from "./ClampBox";
@@ -41,25 +42,32 @@ const TONE: Record<OwnerNotification["level"], { frame: string; icon: string; ba
 const CARD_BUTTON = "flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-xs hover:bg-surface-2 disabled:opacity-50";
 const ROW_BUTTON = "flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-50";
 
-export function OwnerNotifyCard({ notificationId, sessionId }: { notificationId: string; sessionId: string }) {
-  const record = useOwnerNotify((s) => s.byId[notificationId]);
+/**
+ * `hostId`: the agent's host. Its notices are read from that host (the focus host's `byId`, another
+ * connected host's `others` entry) and every action goes to it: an agent on another host than the focus
+ * one (e.g. host-a's desktop showing a hachimi agent) otherwise drew no card and its buttons asked the
+ * focus host.
+ */
+export function OwnerNotifyCard({ notificationId, sessionId, hostId }: { notificationId: string; sessionId: string; hostId: string }) {
+  const record = useHostOwnerNotes(hostId)[notificationId];
   if (!record) return null;
   // claude-safety-grants: a stopped command with 批准一次 / 不批准 instead of a message.
-  if (record.safetyBlock) return <SafetyBlockCard record={record} block={record.safetyBlock} />;
-  return <Card record={record} sessionId={sessionId} />;
+  if (record.safetyBlock) return <SafetyBlockCard record={record} block={record.safetyBlock} hostId={hostId} />;
+  return <Card record={record} sessionId={sessionId} hostId={hostId} />;
 }
 
-function Card({ record: r, sessionId }: { record: OwnerNotification; sessionId: string }) {
+function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; sessionId: string; hostId: string }) {
   const { t, locale } = useI18n();
   const now = useClock();
   // The card is in the open agent's timeline: the delegation it names is on that agent's host.
-  const host = useApp(agentHost);
-  const jobs = useApp((s) => selectedFeatures(s).has(JOB_SERVICE_FEATURE));
-  const notify = useApp((s) => s.notify);
-  const deletable = useApp((s) => selectedFeatures(s).has(OWNER_NOTIFY_DELETE_FEATURE));
+  const host = useConvHost();
+  const conv = useConvScope();
+  const jobs = useApp((s) => convFeaturesOf(conv, s).has(JOB_SERVICE_FEATURE));
+  const notify = (text: string, tone?: "info" | "error") => convNotify(conv, text, tone);
+  const deletable = useApp((s) => convFeaturesOf(conv, s).has(OWNER_NOTIFY_DELETE_FEATURE));
   const system = isSystemNotice(r);
   const agentName = useApp((s) =>
-    system ? (rowsOf(s.sidebar, selectedSidebar(s)).find((x) => x.cutexSessionId === r.agentId)?.displayName ?? r.agentName ?? r.agentId) : null,
+    system ? (rowsOf(s.sidebar, convSidebarOf(conv, s)).find((x) => x.cutexSessionId === r.agentId)?.displayName ?? r.agentName ?? r.agentId) : null,
   );
   const [replying, setReplying] = useState(false);
   const [busy, setBusy] = useState<null | "ack" | "reply" | "dismiss" | "delete">(null);
@@ -75,7 +83,7 @@ function Card({ record: r, sessionId }: { record: OwnerNotification; sessionId: 
   const act = async (action: "ack" | "dismiss" | "delete") => {
     setBusy(action);
     try {
-      const result = await ownerNotifyAct(r, action);
+      const result = await ownerNotifyAct(r, action, undefined, hostId);
       if (!result.ok) notify(result.error.code === "notification_closed" ? t("ownerNotify.closedMeanwhile") : result.error.message || result.error.code, "error");
     } catch (e) {
       notify(e instanceof Error ? e.message : String(e), "error");
@@ -161,7 +169,7 @@ function Card({ record: r, sessionId }: { record: OwnerNotification; sessionId: 
       )}
       {replyable && replying && (
         <div className="mt-2">
-          <OwnerReplyBox record={r} onClose={() => setReplying(false)} onBusy={(b) => setBusy(b ? "reply" : null)} />
+          <OwnerReplyBox record={r} hostId={hostId} onClose={() => setReplying(false)} onBusy={(b) => setBusy(b ? "reply" : null)} />
         </div>
       )}
       {deleteArmed ? (

@@ -12,7 +12,7 @@ import type { ModuleMock, MockProfileRef } from "../../dev/mockTypes";
 import { SESSION_CLAUDE_RUNTIME_FEATURE, type ClaudeRepinResult, type ClaudeRuntimeView } from "../../../../shared/claudeRepin";
 
 /** Claude agents of the core mock (dev/mockBridge.ts claudeSession). */
-const CLAUDE_IDS = new Set(["sora"]);
+const CLAUDE_IDS = new Set(["sora", "kai"]);
 const DEFAULT = { enabled: true };
 
 const utf8 = (s: string) => new TextEncoder().encode(s).length;

@@ -6,8 +6,9 @@
 // picker opens the other identity as its own tab (pinned and latest are different tabs); an old
 // pinned version says so with a 「看最新」 banner. Never falls back from a missing version to the latest.
 import { useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, ArrowLeftRight, Copy, ExternalLink, History, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, Copy, ExternalLink, History, Loader2, Play, RefreshCw } from "lucide-react";
 import { artifactRef, parseArtifactRef, type ArtifactContent, type ArtifactDetail, type ArtifactDiff, type ArtifactVersion } from "../../../../shared/artifactStore";
+import { ARTIFACT_PAGE_MAX_BYTES, ARTIFACT_PAGE_PROMPT_BYTES } from "../../../../shared/frames";
 import { DocumentPreview } from "../../components/DocumentPreview";
 import { Markdown } from "../../components/Markdown";
 import { UnifiedDiff } from "../../components/UnifiedDiff";
@@ -118,10 +119,13 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
   // A page main could not prepare (or no desktop bridge: the browser preview without frames) shows its source.
   const [problem, setProblem] = useState<{ key: string; problem: PageProblem } | null>(null);
   const [rawJson, setRawJson] = useState(false);
+  // A page over one content window (often embedded audio / video) is shown only after the owner asks.
+  const [largeOk, setLargeOk] = useState<string | null>(null);
   const pageProblem = problem?.key === key ? problem.problem : null;
   const asPage = kind === "html" && !code && !pageProblem;
+  const askLarge = asPage && version.bytes > ARTIFACT_PAGE_PROMPT_BYTES && largeOk !== key;
   useEffect(() => {
-    if (kind === "binary" || asPage) return;
+    if (kind === "binary" || (asPage && !askLarge)) return;
     let live = true;
     loadContent(hostId, version.artifactId, version.version, maxBytes).then(
       (value) => live && setContent({ key, value }),
@@ -130,7 +134,7 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
     return () => {
       live = false;
     };
-  }, [hostId, key, kind, maxBytes, version.artifactId, version.version, asPage]);
+  }, [hostId, key, kind, maxBytes, version.artifactId, version.version, asPage, askLarge]);
   const size = formatBytes(version.bytes);
   // PDF / DOCX (and the office formats we only describe): components/DocumentPreview.tsx.
   const doc = kind === "binary" ? docKindOf(typed, version.mediaType) : null;
@@ -151,7 +155,8 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
         />
       </div>
     );
-  if (asPage) return <PageFrame hostId={hostId} artifactId={version.artifactId} version={version.version} title={name} onProblem={(p) => setProblem({ key, problem: p })} />;
+  if (asPage && !askLarge)
+    return <PageFrame hostId={hostId} artifactId={version.artifactId} version={version.version} title={name} large={version.bytes > ARTIFACT_PAGE_PROMPT_BYTES} onProblem={(p) => setProblem({ key, problem: p })} />;
   if (kind === "binary") return <Note>{t("artifacts.binary", { type: version.mediaType || "?", size })}</Note>;
   if (!content || content.key !== key) return <p className="p-3 text-xs text-subtle">{t("artifacts.loading")}</p>;
   if (content.error) return <Note tone="danger">{t("artifacts.loadFailed", { error: content.error })}</Note>;
@@ -161,7 +166,18 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
   if (externalGone(c)) return <Note tone="warn">{t("artifacts.externalGone")}</Note>;
   const warnings = (
     <>
-      {pageProblem && pageProblem !== "navigated" && <Note tone={pageProblem === "unavailable" ? "muted" : "warn"}>{t(PAGE_PROBLEM_KEY[pageProblem])}</Note>}
+      {askLarge && (
+        <div className="m-2 flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-subtle">
+          <span className="min-w-0 flex-1">{t(version.bytes > ARTIFACT_PAGE_MAX_BYTES ? "artifacts.page.overMax" : "artifacts.page.largePrompt", { size, max: formatBytes(ARTIFACT_PAGE_MAX_BYTES) })}</span>
+          {version.bytes <= ARTIFACT_PAGE_MAX_BYTES && (
+            <button onClick={() => setLargeOk(key)} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-foreground hover:bg-hover">
+              <Play size={12} />
+              {t("artifacts.page.showLarge")}
+            </button>
+          )}
+        </div>
+      )}
+      {pageProblem && pageProblem !== "navigated" && <Note tone={pageProblem === "unavailable" ? "muted" : "warn"}>{t(PAGE_PROBLEM_KEY[pageProblem], { max: formatBytes(ARTIFACT_PAGE_MAX_BYTES) })}</Note>}
       {c.externalChanged && <Note tone="warn">{t("artifacts.externalChanged")}</Note>}
       {c.truncated && kind !== "image" && <Note>{t("artifacts.truncated", { size: formatBytes(c.content.length) })}</Note>}
     </>

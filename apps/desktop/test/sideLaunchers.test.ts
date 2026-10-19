@@ -15,11 +15,13 @@ const env = vi.hoisted(() => ({
   registry: new Map<string, { moduleId: string; item: Partial<SideComponentItem> }>(),
   gate: new Set<string>(),
   opened: [] as { kind: string; params: unknown; opts: Record<string, unknown> }[],
+  sidebar: null as unknown,
+  agentsOpened: [] as [string, string][],
 }));
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 vi.mock("../src/renderer/src/store", () => ({
-  useApp: { getState: () => ({ hosts: { active: "local" }, selectedId: "A", sidebar: null, notify: () => {} }) },
+  useApp: { getState: () => ({ hosts: { active: "local" }, selectedId: "A", sidebar: env.sidebar, notify: () => {} }) },
   agentHost: () => "local",
   selectedSidebar: () => null,
   sidebarOf: () => null,
@@ -37,6 +39,7 @@ vi.mock("../src/renderer/src/lib/sideOpen", () => ({
     return { status: "opened" };
   },
   toggleSideColumn: () => {},
+  openAgentSide: (id: string, host: string) => void env.agentsOpened.push([id, host]),
 }));
 vi.mock("../src/renderer/src/lib/sideComponents", () => ({
   sideRegistry: () => env.registry,
@@ -44,7 +47,7 @@ vi.mock("../src/renderer/src/lib/sideComponents", () => ({
   sideViewNow: () => ({ hostId: "local", sessionId: "A", workspaceKey: null, available: (k: string) => env.registry.has(k) }),
 }));
 
-const { pressLauncher, launcherMenu, launchable, setLauncherPinned, launcherContextMenu } = await import("../src/renderer/src/lib/sideMenus");
+const { pressLauncher, launcherMenu, launchable, setLauncherPinned, launcherContextMenu, agentsSubmenu } = await import("../src/renderer/src/lib/sideMenus");
 const { useSide } = await import("../src/renderer/src/lib/sideLayoutStore");
 
 // ── pure rules ────────────────────────────────────────────────────────────────────────────────────
@@ -239,16 +242,21 @@ describe("pressLauncher", () => {
     expect(useSide.getState().layout.pages[0]!.cards[0]!.collapsed).toBe(false);
   });
 
-  it("a multi kind whose card is on another page: reveal it there (focus + flash), no new instance", () => {
+  it("a multi kind whose card is in another column (v1.17: on screen too): that column is focused, the card expands, then focus + flash; no new instance", () => {
     const l = layoutWith(null); // p1 shows x.other
     l.instances.i5 = { kind: "x.term", binding: { kind: "agent", hostId: "local", sessionId: "A" }, key: "i5", state: null, v: 1, pinned: false, lastActiveAt: 5 };
     l.pages.push({ id: "p2", groups: ["workspace"], cards: [{ id: "c5", kind: "x.term", tabs: ["i5"], active: "i5", size: 1, collapsed: true }] });
     useSide.setState({ layout: l });
     pressLauncher("x.term");
     expect(env.opened).toEqual([]);
+    expect(useSide.getState().layout.activePage).toBe("p2");
+    expect(useSide.getState().layout.open).toBe(true);
+    expect(useSide.getState().layout.pages[1]!.cards[0]!.collapsed).toBe(false);
+    vi.stubGlobal("document", { querySelector: () => null });
+    vi.stubGlobal("CSS", { escape: (s: string) => s });
+    pressLauncher("x.term");
+    vi.unstubAllGlobals();
     const after = useSide.getState();
-    expect(after.layout.activePage).toBe("p2");
-    expect(after.layout.open).toBe(true);
     expect(after.focusedCard).toBe("c5");
     expect(after.flash).toBeTruthy();
     // Ctrl/⌘+Shift still opens a new one on the page in view, shown
@@ -299,5 +307,39 @@ describe("launcher list and ＋ menu", () => {
     rows[2]!.onSelect();
     expect(env.prefs.sideLauncherPins).toEqual({ "x.term": false });
     expect(launcherContextMenu("x.chat").filter((e) => !!e && e !== "separator")).toHaveLength(2);
+  });
+});
+
+describe("＋ ▸ agents", () => {
+  const session = (id: string, online: boolean) =>
+    ({
+      cutexSessionId: id,
+      displayName: `agent ${id}`,
+      lifecycle: "active",
+      createdAt: "2026-10-19T00:00:00Z",
+      updatedAt: "2026-10-19T00:00:00Z",
+      runtime: { status: online ? "online" : "offline", runtimeGeneration: 1, activeTurnId: null, activeTurnObservedAt: null, lastEventAt: "2026-10-19T00:00:00Z" },
+      activity: { lastConversationAt: null },
+    }) as never;
+  it("lists the focus host's agents by group (the main-area agent left out), offline ones in a submenu; a row opens it in the side area", () => {
+    env.sidebar = { active: [session("A", true), session("B", true), session("C", false)], retired: [], projects: null, hostRows: {} };
+    const entries = agentsSubmenu().filter((e): e is MenuAction | "separator" => !!e);
+    const rows = entries.filter((e): e is MenuAction => e !== "separator");
+    const labels = rows.map((r) => r.label);
+    expect(labels.some((l) => l.includes("A"))).toBe(false);
+    const b = rows.find((r) => r.label.includes("B"));
+    expect(b).toBeTruthy();
+    b!.onSelect();
+    expect(env.agentsOpened.at(-1)).toEqual(["B", "local"]);
+    const offline = rows.find((r) => r.submenu);
+    if (offline) {
+      const c = (offline.submenu as MenuAction[]).find((r) => r.label.includes("C"))!;
+      c.onSelect();
+      expect(env.agentsOpened.at(-1)).toEqual(["C", "local"]);
+    } else {
+      expect(labels.some((l) => l.includes("C"))).toBe(true);
+    }
+    env.sidebar = null;
+    expect(agentsSubmenu()).toHaveLength(1);
   });
 });

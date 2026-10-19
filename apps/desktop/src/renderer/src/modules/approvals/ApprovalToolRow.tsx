@@ -9,7 +9,8 @@ import { useI18n } from "../../i18n";
 import { APPROVAL_NOTICE_FEATURE, APPROVALS_LIVE_FEATURE, approvalOfTool, knownApprovalState } from "../../lib/approvals";
 import { useConnectedHostData } from "../../lib/hostLists";
 import type { RawItem } from "../../lib/timeline";
-import { agentHost, featuresOf, useApp } from "../../store";
+import { featuresOf, useApp } from "../../store";
+import { useConvHost } from "../../lib/conversationScope";
 import { TimelineFallbackContext } from "../timelineFallback";
 
 /** Reloads already asked for (approvalId), once per desktop run. */
@@ -18,7 +19,7 @@ const reloaded = new Set<string>();
 export function ApprovalToolRow({ item }: { item: RawItem; sessionId: string }) {
   const { t } = useI18n();
   const fallback = useContext(TimelineFallbackContext);
-  const hostId = useApp(agentHost);
+  const hostId = useConvHost();
   const data = useConnectedHostData().find((d) => d.hostId === hostId);
   const live = useApp((s) => featuresOf(s, hostId).has(APPROVALS_LIVE_FEATURE));
   const notice = useApp((s) => featuresOf(s, hostId).has(APPROVAL_NOTICE_FEATURE));

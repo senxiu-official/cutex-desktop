@@ -6,7 +6,7 @@ import type { ThreadSearchHit } from "../../../../shared/ipc";
 import { IconButton } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
 import { jumpToTurn } from "../../lib/jump";
-import { sessionApi, useApp } from "../../store";
+import { hostApi, useApp, viewOf } from "../../store";
 import type { GutterBodyProps, GutterTriggerProps } from "../slots";
 import { searchErrorKind, searchTerm, splitSnippet } from "./model";
 
@@ -41,7 +41,7 @@ function Snippet({ hit }: { hit: ThreadSearchHit }) {
 
 function SearchBody({ hostId, sessionId, close, docked }: GutterBodyProps) {
   const { t } = useI18n();
-  const threadId = useApp((s) => s.sessions[sessionId]?.timeline.threadId ?? null);
+  const threadId = useApp((s) => viewOf(s, hostId, sessionId)?.timeline.threadId ?? null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Results | null>(null);
   const run = useRef(0);
@@ -50,7 +50,7 @@ function SearchBody({ hostId, sessionId, close, docked }: GutterBodyProps) {
     if (!threadId) return;
     const id = ++run.current;
     setResults((old) => ({ term, hits: cursor && old?.term === term ? old.hits : [], cursor: cursor && old?.term === term ? old.cursor : null, loading: true, error: null }));
-    sessionApi(sessionId).searchThread(sessionId, threadId, term, cursor).then(
+    hostApi(hostId).searchThread(sessionId, threadId, term, cursor).then(
       (page) => {
         if (id !== run.current) return;
         setResults((old) => ({ term, hits: [...(cursor && old?.term === term ? old.hits : []), ...page.data], cursor: page.nextCursor, loading: false, error: null }));

@@ -1,5 +1,6 @@
 // Window-level Esc → stop the running turn (decision in lib/escInterrupt.ts). Mounted by the
-// composer of the open conversation, so it is gone on Settings and other pages.
+// composer of the open conversation, so it is gone on Settings and other pages; with several
+// conversations on screen only the focused one's acts (`focused`).
 import { useEffect, useRef } from "react";
 import { anyOverlayOpen } from "./openOverlays";
 import { conversationEscDecision, inSideRoot, isEditableTarget, overlayInDom, pageHasSelection, type ConversationEscContext } from "./escInterrupt";
@@ -8,6 +9,11 @@ import { sideLayersActive } from "./sideLayoutStore";
 export interface ConversationEscState extends Pick<ConversationEscContext, "preset" | "turnId" | "pendingSteers" | "delegation"> {
   /** Popups the DOM probe cannot see (composer panels, pending approvals / questions). */
   blocked: boolean;
+  /**
+   * This conversation holds the focus (panes step 2: with two conversations side by side only the
+   * focused one's Esc stops its turn; the other one's listener ignores the key). Default true.
+   */
+  focused?: boolean;
 }
 
 export interface ConversationEscHandlers {
@@ -32,6 +38,7 @@ export function useConversationEsc(state: ConversationEscState, handlers: Conver
       const sideLayers = snapshot?.event === e ? snapshot.sideLayers : true;
       snapshot = null;
       const { state: s, handlers: h } = latest.current;
+      if (s.focused === false) return;
       const now = Date.now();
       const d = conversationEscDecision(
         { key: e.key, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey, repeat: e.repeat, composing: e.isComposing, defaultPrevented: e.defaultPrevented },

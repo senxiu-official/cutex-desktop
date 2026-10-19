@@ -66,12 +66,12 @@ describe("mainline package adapter: actual settings modules", () => {
     expect(host.snapshot("settings.section").find(row => row.item.id === "remote-access.listen")).toMatchObject({ mode: "notice", waiting: false, missing: ["listen-settings"] });
     await host.setHost({ id: "fixture-ssh", kind: "ssh", features: new Set(ALL_FEATURES) });
     // Every page keeps its row; the capability-gated Claude 账户 joins as a section of Profile (claude-accounts), not a page.
-    // Two pages join: 后端更新 (backend-upgrade, 系统 group right before 更新与诊断 since 2026-10-15) and 互联 (module peers, hidden without peers-v2; its own
-    // page in 连接 since 2026-10-15); 用户 is the shell's, its management a users section; NCI 远程作业 (module nci) is off by default.
+    // One page joins: 后端更新 (backend-upgrade, 系统 group right before 更新与诊断 since 2026-10-15). 互联 (module peers, hidden
+    // without peers-v2) is a section of 访问管理 since 2026-10-19; NCI 远程作业 (module nci) is off by default.
     const joined = host.snapshot("settings.page");
-    expect(joined.filter(row => row.item.id !== "backend-upgrade.page" && row.item.id !== "peers.page")).toEqual(allPages);
+    expect(joined.filter(row => row.item.id !== "backend-upgrade.page")).toEqual(allPages);
     expect(joined.find(row => row.item.id === "backend-upgrade.page")).toMatchObject({ mode: "show", item: { page: "backend", group: "system" } });
-    expect(joined.find(row => row.item.id === "peers.page")).toMatchObject({ mode: "show", item: { page: "peers", group: "connection" } });
+    expect(host.snapshot("settings.section").find(row => row.item.id === "peers.access")).toMatchObject({ mode: "show", item: { page: "access" } });
     expect(host.snapshot("settings.section").find(row => row.item.id === "claude-accounts.accounts")).toMatchObject({ mode: "show", item: { page: "profiles" } });
     for (const item of remote.contributes!["settings.section"]!) {
       const row = host.snapshot("settings.section").find(entry => entry.item.id === item.id)!;

@@ -36,6 +36,7 @@ import type { RuntimesWire } from "./runtimes";
 import type { UpdateUnsupportedCode } from "./update";
 import type { Note, NoteCreate, NotesQuery, NotesResult, NoteUpdate } from "./notes";
 import type { SideChat, SideMessageInput, SideOpenInput, SideOpenResult, SideReply } from "./sideChat";
+import type { CcSwitchImportItem, CcSwitchImportList, CcSwitchImportResult } from "./ccSwitchImport";
 import type { ClaudeAccountCreate, ClaudeAccountList, ClaudeAccountRemoveResult, ClaudeAccountResult, ProfileQuotaDetail } from "./claudeAccounts";
 import type { AlarmCancelResult, AlarmList } from "./alarms";
 import type { SkillArchiveList, SkillArchiveResult } from "./skillsArchive";
@@ -50,7 +51,7 @@ import type { CapabilitiesUser, PeerBindingResult, SelfProfile, SelfProfilePatch
 import type { PeerAgents, PeerAuditEntry, PeerCaps, PeerInvite, PeerList, PeerPatch, PeerResult, PeersSettings, PeersSettingsPatch, PeerView } from "./peers";
 import type { ArtifactContent, ArtifactDeleteResult, ArtifactDetail, ArtifactDiff, ArtifactList, ArtifactListQuery, ArtifactPatch, ArtifactPatchResult, ArtifactPublishRequest, ArtifactPublishResult, ArtifactResolveItem, ArtifactUsage } from "./artifactStore";
 
-export type { AddSshHostRequest, DirBrowse, HostAppearancePatch, HostConnView, HostGroup, HostGroupDraft, HostPlatform, HostResult, HostsState, HostStartOn, HostTestResult, HostView, SshErrorView, SshHostPatch, TunnelView, ViewScope } from "./hosts";
+export type { AddSshHostRequest, DirBrowse, HostAppearancePatch, HostConnView, HostGroup, HostGroupDraft, HostOwner, HostPlatform, HostResult, HostsState, HostStartOn, HostTestResult, HostView, SshConnectAs, SshConnectAsRequest, SshErrorView, SshHostPatch, TunnelView, ViewScope } from "./hosts";
 
 export type { ApprovalPolicy, LaunchOverrides, LaunchPermissions, NewThreadDefaults, NewThreadDefaultsPatch, SandboxMode, ThreadKind } from "./launch";
 
@@ -413,6 +414,8 @@ export interface CutexRefusal {
   sessions?: { cutexSessionId: string; displayName: string; lifecycle?: "active" | "retired" }[];
   /** session_referenced: forks still read this agent's history (native refuses thread/delete). */
   forkReferences?: boolean;
+  /** owner_local_only / owner_person_local_only / device_scope_denied: cutex `details` (shared/users.ts accessRefusalOf). */
+  access?: import("./users").AccessRefusalDetails;
 }
 
 export type MutationResult = { ok: true } | { ok: false; error: CutexRefusal };
@@ -877,6 +880,12 @@ export interface PairingCodeView {
   qr: string;
   /** cutex `users`: the user the paired device will be bound to (echoed). */
   userId?: string | null;
+  /** cutex `owner-device-notice`: lifetime in seconds (owner codes 300, member codes 600); absent: older host. */
+  ttlSeconds?: number;
+  /** cutex `device-scope`: the paired device's scope (absent: older host = full). */
+  scope?: import("./users").DeviceScope;
+  /** cutex `owner-device-notice`: the code pairs a device with the owner's full rights (say so before showing it). */
+  ownerDevice?: boolean;
 }
 
 /** `GET /v2/client-tokens` row: metadata only, the token itself never leaves cutex. */
@@ -891,6 +900,10 @@ export interface ClientTokenView {
   createdAt: string;
   lastUsedAt?: string | null;
   lastAddress?: string | null;
+  /** cutex `device-scope` (absent: older host). */
+  scope?: import("./users").DeviceScope;
+  /** cutex `owner-local-only`: `hostCli` (issued on the host, e.g. SSH) / `pairing` / `unknown` (absent: older host). */
+  issuedVia?: import("./users").TokenIssuedVia;
 }
 
 /** A boundary domain: `project:<projectId>` or `agent:<cutexSessionId of a creator-tree root>`. */
@@ -965,8 +978,11 @@ export type ApprovalDecision = "approve" | "deny";
  * and sends it as the decision's `client`; cutex stores it as `decidedBy.client`).
  */
 export interface ApprovalDecisionOrigin {
-  /** `inline` = the dock card in the requesting agent's conversation; `page` = 审批. */
-  surface: "inline" | "page";
+  /**
+   * `inline` = the dock card in the requesting agent's conversation; `page` = 审批; `delegation` = a
+   * delegation's owner review on its card, the target's queue row or its side detail.
+   */
+  surface: "inline" | "page" | "delegation";
   /** How the button was activated: a mouse / pen / touch click, or Enter / Space on the focused button. */
   input: "pointer" | "touch" | "keyboard" | "unknown";
 }
@@ -1244,8 +1260,13 @@ export interface HostApi {
   sshConfigHosts(): Promise<string[]>;
   /** Pair (ssh → `cutex management client-token issue`) and store the host; failures as a result. */
   addSshHost(request: AddSshHostRequest): Promise<HostResult>;
-  /** Issue a fresh client token for a stored host (token revoked / lost). */
+  /** Issue a fresh client token for a stored host (token revoked / lost); keeps its `connectAs`. */
   pairSshHost(hostId: string): Promise<HostResult>;
+  /**
+   * 改为以成员 / 主人身份连接 (host ownership §2.1): issue a token of that kind (member = `--pending`),
+   * store it, revoke the old one (best effort) and reconnect. Failures as a result.
+   */
+  setSshConnectAs(hostId: string, mode: import("./hosts").SshConnectAs): Promise<HostResult>;
   updateSshHost(hostId: string, patch: SshHostPatch): Promise<HostResult>;
   /** Forget the host and its token; best-effort revoke on the remote. */
   removeSshHost(hostId: string): Promise<{ revoked: boolean }>;
@@ -1298,7 +1319,7 @@ export interface HostApi {
 }
 
 /** HostApi method names: served by main `HostManager`, never routed to a daemon (main + preload). */
-export const HOST_METHOD_NAMES = ["hosts", "sshConfigHosts", "addSshHost", "pairSshHost", "updateSshHost", "removeSshHost", "switchHost", "setScope", "reconnectHost", "connectHost", "setHostAutoConnect", "setHostAppearance", "saveHostGroups", "testHost", "setHostStartOn", "sshPrompts", "answerSshPrompt", "identityState", "exportIdentity", "importIdentity", "copyIdentityKey", "importIdentityKey", "setIdentityName", "copyProfileToHost"] as const satisfies readonly (keyof HostApi)[];
+export const HOST_METHOD_NAMES = ["hosts", "sshConfigHosts", "addSshHost", "pairSshHost", "setSshConnectAs", "updateSshHost", "removeSshHost", "switchHost", "setScope", "reconnectHost", "connectHost", "setHostAutoConnect", "setHostAppearance", "saveHostGroups", "testHost", "setHostStartOn", "sshPrompts", "answerSshPrompt", "identityState", "exportIdentity", "importIdentity", "copyIdentityKey", "importIdentityKey", "setIdentityName", "copyProfileToHost"] as const satisfies readonly (keyof HostApi)[];
 
 /** Request/response calls (renderer → main). */
 /** Native Windows sandbox readiness (`windowsSandbox/readiness`; cutex windows-sandbox-readiness). */
@@ -1469,6 +1490,10 @@ export interface DaemonApi {
   /** `GET /v2/profile-presets` (feature profile-create): API-key providers; null when the host has no such route. */
   profilePresets(): Promise<ProfilePreset[] | null>;
   duplicateProfile(profile: string, name: string): Promise<ProfileDetail>;
+  /** cutex `profile-import-cc-switch` (owner): CC Switch's providers on the host, without keys; null when the host has no such route. */
+  ccSwitchImportList(): Promise<CcSwitchImportList | null>;
+  /** cutex `profile-import-cc-switch` (owner): make profiles from CC Switch providers (cutex copies their keys; at most 50). */
+  ccSwitchImport(items: CcSwitchImportItem[]): Promise<CcSwitchImportResult>;
   /**
    * Refusals (`profile_in_use` with the agents, `profile_is_default`) come back as a result.
    * `archived: "detach"` (cutex profile-delete-detach-archived): archived agents no longer refuse;
@@ -1528,14 +1553,34 @@ export interface DaemonApi {
   patchProxySettings(patch: HostProxyPatch): Promise<GlobalSettings>;
   /** `PATCH /v2/settings {newThreadDefaults}` (feature new-thread-defaults); a null field = back to built-in. */
   patchNewThreadDefaults(patch: NewThreadDefaultsPatch): Promise<GlobalSettings & { restartRequired: string[] }>;
-  /** `POST /v2/pairing-codes` (feature device-pairing; loopback, which includes the SSH tunnel). */
-  createPairingCode(label?: string, userId?: string): Promise<PairingCodeView>;
+  /**
+   * `POST /v2/pairing-codes` (feature device-pairing; loopback, which includes the SSH tunnel). `scope`
+   * (cutex `device-scope`; omitted = full). Throws; owner-local-only hosts refuse a paired device's
+   * token with `owner_local_only` (shared/users.ts accessRefusalOf(error, {action: "pairingCode"})).
+   */
+  createPairingCode(label?: string, userId?: string, scope?: import("./users").DeviceScope): Promise<PairingCodeView>;
   /** `GET /v2/client-tokens` (client + device tokens, metadata only). */
   clientTokens(): Promise<ClientTokenView[]>;
   /** `DELETE /v2/client-tokens/{id}`. */
   revokeClientToken(tokenId: string): Promise<void>;
   /** `PATCH /v2/client-tokens/{id}` `{name}` (cutex `client-token-rename`, owner): null / blank clears the name. */
   renameClientToken(tokenId: string, name: string | null): Promise<{ tokenId: string; ownerName: string | null }>;
+  /**
+   * `PATCH /v2/client-tokens/{id}` `{name?, scope?}` (cutex `client-token-rename` / `device-scope`, full
+   * owner): refusals (invalid_scope, invalid_client_token_name, client_token_not_found, device_scope_denied) as values.
+   */
+  updateClientToken(tokenId: string, patch: import("./users").ClientTokenUpdate): Promise<UsersResult<import("./users").ClientTokenUpdated>>;
+  /** cutex `owner-device-notice`: `GET /v2/users/owner/new-devices` (unacknowledged owner devices); null: older cutex. */
+  ownerNewDevices(): Promise<UsersResult<import("./users").OwnerNewDevice[] | null>>;
+  /** cutex `owner-device-notice`: `POST /v2/users/owner/new-devices/{tokenId}/ack` (full owner; idempotent). */
+  ackOwnerNewDevice(tokenId: string): Promise<UsersResult<import("./users").OwnerDeviceAck>>;
+  /**
+   * cutex `client-remote-close`: `GET /v2/clients` — the desktops registered on this host (the owner sees
+   * all, other users their own); `self` marks this desktop instance. Refusals as values.
+   */
+  onlineClients(): Promise<import("./remoteClose").RemoteCloseResult<import("./remoteClose").OnlineClientView[]>>;
+  /** cutex `client-remote-close`: `POST /v2/clients/{instanceId}/close`; client_close_forbidden / remote_close_disabled / client_not_found as values. */
+  closeOnlineClient(instanceId: string): Promise<import("./remoteClose").RemoteCloseResult<{ instanceId: string; state: import("./remoteClose").ClientState }>>;
   userInstructions(): Promise<UserInstructions>;
   /** `GET /v2/sessions/{id}/harness` (feature agent-harness, root token). */
   agentHarness(sessionId: string): Promise<AgentHarnessPreview>;
@@ -1722,6 +1767,15 @@ export interface DaemonApi {
   patchUpgradeSettings(patch: UpgradeSettingsPatch): Promise<UpgradeResult<UpgradeSettings>>;
   /** `GET /v2/host` `serviceManager` / `runtimes`. */
   hostServiceInfo(): Promise<HostServiceInfo>;
+  /** `GET /v2/host` `owner` (cutex `host-owner-person`; every principal may read it); null = absent (older cutex). */
+  hostOwner(): Promise<import("./hosts").HostOwner | null>;
+  /**
+   * `PUT /v2/users/owner-person {publicKey}` → the new owner. Only the root credential on loopback
+   * (= this machine's own desktop connection); elsewhere 403 `owner_person_local_only` (as a value).
+   */
+  setOwnerPerson(publicKey: string): Promise<import("./users").UsersResult<import("./hosts").HostOwner | null>>;
+  /** `DELETE /v2/users/owner-person` (back to unconfirmed); same rule as setOwnerPerson. */
+  clearOwnerPerson(): Promise<import("./users").UsersResult<import("./hosts").HostOwner | null>>;
   // Optional components (cutex `components`, shared/components.ts). Owner only; refusals as values.
   /** `GET /v2/components`; null on a cutex without the route. */
   components(): Promise<ComponentsList | null>;
@@ -2054,6 +2108,8 @@ export interface DesktopEvents {
   sshPrompts: { prompts: import("./sshPrompt").SshPromptView[] };
   /** Signed module packs: the whole view after any change (check / install progress / remove; main/modulePacks.ts, §23). */
   modulePacks: import("./modulePacks").ModulePacksView;
+  /** A host asked this desktop to close (cutex `client-remote-close`, main/clientPresence.ts): the countdown, null when it ended. */
+  remoteClose: { view: import("./remoteClose").RemoteCloseView | null };
 }
 
 /** `DesktopEvents` keys whose payload carries a `HostTag` (daemon events and main-side per-host events such as the browser's). */
@@ -2171,6 +2227,8 @@ export interface DesktopPrefs {
   updateProxy?: UpdateProxyPref;
   /** Main only (never in ShellState): the manual update proxy's `user:password`, safeStorage-encrypted, base64. */
   updateProxyAuth?: string;
+  /** Settings → 通用 → 允许远程关闭这个桌面 (cutex `client-remote-close`); absent = allowed. Sent in every presence. */
+  allowRemoteClose?: boolean;
 }
 export interface ShellState {
   prefs: DesktopPrefs;
@@ -2230,7 +2288,10 @@ export type ShellRequest =
   | { op: "setNotifyOff"; value: DeviceOff }
   | { op: "notify"; notification: ShellNotification }
   | { op: "eventAlert"; alert: ShellEventAlert }
-  | { op: "retractAlerts"; retract: ShellRetract };
+  | { op: "retractAlerts"; retract: ShellRetract }
+  | { op: "setAllowRemoteClose"; value: boolean }
+  | { op: "remoteClose" }
+  | { op: "answerRemoteClose"; action: import("./remoteClose").RemoteCloseAction };
 export interface ShellBridge {
   state(): Promise<ShellState>;
   setCloseBehavior(value: CloseBehavior): Promise<ShellState>;
@@ -2262,6 +2323,12 @@ export interface ShellBridge {
   eventAlert?(alert: ShellEventAlert): Promise<void>;
   /** Close event big alerts / desktop notifications / owner_notify big alerts that were handled. */
   retractAlerts?(retract: ShellRetract): Promise<void>;
+  /** Settings → 通用 → 允许远程关闭这个桌面: stored by main, re-sent to every host's presence at once. */
+  setAllowRemoteClose?(value: boolean): Promise<ShellState>;
+  /** The running remote-close countdown (null: none); the `remoteClose` event follows changes. */
+  remoteClose?(): Promise<import("./remoteClose").RemoteCloseView | null>;
+  /** The countdown's 取消 / 立即关闭. */
+  answerRemoteClose?(action: import("./remoteClose").RemoteCloseAction): Promise<void>;
 }
 
 export const UPDATE_CHANNEL = "cutex-desktop:update";

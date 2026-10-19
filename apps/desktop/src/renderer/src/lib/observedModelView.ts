@@ -1,6 +1,6 @@
 // Store-backed answering-model badge of the composer's model chip (pure parts in observedModel.ts).
 import { useEffect, useState } from "react";
-import { sessionApi } from "../store";
+import { convApi, useConvScope } from "./conversationScope";
 import { observesModel, type AgentFeatures } from "./agentFeatures";
 import { observedModelOf, type ClaudeModelStatus } from "./observedModel";
 import type { TimelineState } from "./timeline";
@@ -15,10 +15,11 @@ export function useObservedModel(sessionId: string, agent: AgentFeatures, online
   const threadId = timeline?.threadId ?? null;
   const key = `${sessionId}\u0000${threadId ?? ""}`;
   const [fetched, setFetched] = useState<{ key: string; status: ClaudeModelStatus | null } | null>(null);
+  const conv = useConvScope();
   useEffect(() => {
     if (!enabled || !threadId) return;
     let cancelled = false;
-    sessionApi(sessionId)
+    convApi(conv, sessionId)
       .claudeModelStatus(sessionId, threadId)
       .then(
         (status) => !cancelled && setFetched({ key, status: (status as ClaudeModelStatus | null) ?? null }),

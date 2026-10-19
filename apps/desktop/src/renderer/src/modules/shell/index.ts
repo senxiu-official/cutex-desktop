@@ -2,20 +2,21 @@
 // 键盘快捷键, 关于); step 3: Settings itself as the `shell.settings` page (Aside = its nav) and the
 // sidebar footer ⚙ 设置. v1.2: the "bar" status surface; 状态 keeps the generic placement table (the
 // capsule's own geometry is a section of the `status-capsule` module on the same page).
-import { Activity, Blocks, Cpu, Info, Keyboard, PanelLeft, PanelRight, Palette, Settings as SettingsIcon, SlidersHorizontal, SquareStack, UserRound, UsersRound } from "lucide-react";
+import { Activity, Blocks, Cpu, Info, Keyboard, PanelLeft, PanelRight, Palette, Settings as SettingsIcon, ShieldCheck, SlidersHorizontal, SquareStack, UserRound, Users } from "lucide-react";
 import { Settings, SettingsNav } from "../../components/Settings";
-import { AboutPage, ComposerPage, GeneralPage, ShortcutsPage, SidebarPage, StatusPage } from "../../components/settings/AppSettings";
+import { AboutPage, ComposerPage, GeneralPage, QueueOrderSection, ShortcutsPage, SidebarPage, StatusPage } from "../../components/settings/AppSettings";
 import { SidesPage } from "../../components/settings/SidesSettings";
 import { openSideColumn } from "../../lib/sideActions";
 import { AppearancePage } from "../../components/settings/AppearanceSettings";
-import { UsersHubPage } from "../../components/settings/IdentitySettings";
+import { AccessPage, UsersHostPage } from "../../components/settings/AccessSettings";
+import { useOwnerDevicesNavBadge } from "../../components/settings/OwnerDevices";
 import { MePage } from "../../components/settings/MeSettings";
 import { SidebarSettingsCards } from "../../components/settings/regions/SidebarSettings";
 import { useOutdatedAgentCount } from "../../lib/runtimePackagesView";
 import { defineModule } from "../slots";
 import { ModulesPage } from "./ModulesPage";
 import { RuntimePage } from "./RuntimePage";
-import { ABOUT_SEARCH, APPEARANCE_SEARCH, GENERAL_SEARCH, SHORTCUTS_SEARCH, SIDEBAR_SEARCH, SIDES_SEARCH, COMPOSER_SEARCH, STATUS_SEARCH, ME_SEARCH, USERS_SEARCH } from "./settingsSearch";
+import { ABOUT_SEARCH, APPEARANCE_SEARCH, GENERAL_SEARCH, SHORTCUTS_SEARCH, SIDEBAR_SEARCH, SIDES_SEARCH, COMPOSER_SEARCH, STATUS_SEARCH, ME_SEARCH, ACCESS_SEARCH, USERS_SEARCH } from "./settingsSearch";
 import { openSettingsFromNav, useSettingsBadge, useSettingsTitle } from "./settingsNav";
 
 /** 通用 (更新与诊断): a desktop update. */
@@ -41,6 +42,8 @@ export default defineModule({
       { id: "shell.composer", region: "composer", titleKey: "customize.composer.title", settingsPage: "composer", side: "above", width: 440, Panel: ComposerPage },
       { id: "shell.sides", region: "sides", titleKey: "customize.sides.title", settingsPage: "sides", side: "left", Panel: SidesPage, reveal: openSideColumn },
     ],
+    // 排队顺序 sits on 协作 next to 消息投递 (agent-bus, 350): a host rule about the order messages reach agents.
+    "settings.section": [{ id: "shell.queueOrder", page: "collab", order: 360, titleKey: "queue.orderSection", keywords: ["queue.ownerMayPassAsks"], Section: QueueOrderSection }],
     "settings.page": [
       // 应用（本机）
       { id: "shell.general", page: "general", group: "app", order: 100, icon: SlidersHorizontal, titleKey: "shell.general", source: "local", agents: "none", hintKey: "shell.general.pageHint", Page: GeneralPage, ...GENERAL_SEARCH },
@@ -53,9 +56,11 @@ export default defineModule({
       // 连接 → 你 (local, every connection): 「你」 (name, picture, person identity) and the hosts you can
       // access with your role / permissions there (components/settings/MeSettings.tsx).
       { id: "shell.me", page: "me", group: "connection", order: 50, icon: UserRound, titleKey: "me.title", source: "local", Page: MePage, ...ME_SEARCH },
-      // 连接 → 用户: host-side management — the users module's sections on a host this device owns,
-      // else a notice (components/settings/IdentitySettings.tsx).
-      { id: "shell.users", page: "users", group: "connection", order: 250, icon: UsersRound, titleKey: "users.title", source: "host", Page: UsersHubPage, ...USERS_SEARCH },
+      // 连接 → 主机 (混合设置 on the Settings host): 主机信息, 你的权限, 本地桌面应用连接, 主机互联 (+ listen /
+      // CORS); 连接 → 用户 (on the Settings host): users, login devices, pending devices, pairing code
+      // (components/settings/AccessSettings.tsx). 接入 / 互联 fold into 主机 (lib/settingsNav settingsTab).
+      { id: "shell.access", page: "access", group: "connection", order: 200, icon: ShieldCheck, titleKey: "shell.access.title", source: null, hostPart: true, hintKey: "shell.access.pageHint", Page: AccessPage, ...ACCESS_SEARCH },
+      { id: "shell.users", page: "users", group: "connection", order: 210, icon: Users, titleKey: "shell.users.title", source: "host", hostPart: true, hintKey: "shell.users.pageHint", useBadge: useOwnerDevicesNavBadge, Page: UsersHostPage, ...USERS_SEARCH },
       // Agent: its sections 升级 agent (runtime-packages), 已安装的运行时 (runtimes); versions are on 后端更新 (header link).
       { id: "shell.runtime", page: "runtime", group: "agents", order: 500, icon: Cpu, titleKey: "shell.runtime", source: "host", useBadge: useRuntimeBadge, Page: RuntimePage, headerLink: { page: "backend", labelKey: "shell.runtime.backendLink" } },
       // 系统

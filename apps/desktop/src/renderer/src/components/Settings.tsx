@@ -26,8 +26,8 @@ import { useSlot } from "../modules/react";
 import type { AppSlotEntry, PageParams } from "../modules/slots";
 import { useApp } from "../store";
 import { noteCustomizeOpener, type CustomizeRegion } from "../lib/customize";
-import { PageBody, SUBNAV_ITEM, SUBNAV_OFF, SUBNAV_ON } from "./Page";
-import { EmptyState, Button, Section, SettingsPage, TextLink } from "./settings/Form";
+import { holdPageBody, PageBody, SUBNAV_ITEM, SUBNAV_OFF, SUBNAV_ON } from "./Page";
+import { BackLink, EmptyState, Button, Section, SettingsPage, TextLink } from "./settings/Form";
 
 function NavRow({ entry, current }: { entry: AppSlotEntry<"settings.page">; current: boolean }) {
   const { t } = useI18n();
@@ -41,7 +41,11 @@ function NavRow({ entry, current }: { entry: AppSlotEntry<"settings.page">; curr
       aria-current={current ? "page" : undefined}
       disabled={disabled}
       title={disabled && !entry.waiting ? t("modules.needsCapability", { list: entry.missing.join(", ") }) : undefined}
-      onClick={() => openSettings(item.page)}
+      onClick={() => {
+        // Hold the current page until the next one is ready (no building up card by card).
+        if (!current) holdPageBody();
+        openSettings(item.page);
+      }}
       className={`${SUBNAV_ITEM} ${current ? SUBNAV_ON : SUBNAV_OFF} ${disabled && !current ? "opacity-60" : ""} focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none`}
     >
       <Icon size={15} strokeWidth={1.75} className="shrink-0" />
@@ -333,6 +337,8 @@ export function Settings({ params }: { params: PageParams }) {
   const entry = pages.find((e) => e.item.page === tab && e.mode === "show");
   const headerLink = entry?.item.headerLink;
   const linked = headerLink && pages.some((e) => e.item.page === headerLink.page && e.mode === "show") ? headerLink : null;
+  const backLink = entry?.item.backLink;
+  const back = backLink && pages.some((e) => e.item.page === backLink.page && e.mode === "show") ? backLink : null;
   const customize = useCustomizeRegionOf(tab);
   // A picked host that goes offline stays the target (shown unavailable, no edits; UI-01).
   const target = useSettingsTarget();
@@ -381,6 +387,7 @@ export function Settings({ params }: { params: PageParams }) {
               source={item.source ?? undefined}
               agents={item.agents}
               hint={item.hintKey ? t(item.hintKey) : undefined}
+              back={back ? <BackLink onClick={() => openSettings(back.page)}>{t(back.labelKey)}</BackLink> : undefined}
               link={
                 linked || customize ? (
                   <span className="flex items-center gap-3">
@@ -389,8 +396,9 @@ export function Settings({ params }: { params: PageParams }) {
                   </span>
                 ) : undefined
               }
+              hostPage={hostPage}
               host={
-                hostPage && mode !== "none" ? (
+                mode !== "none" ? (
                   <HostPicker
                     chip
                     value={hostId}

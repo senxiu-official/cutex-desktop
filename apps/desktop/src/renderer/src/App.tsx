@@ -1,31 +1,29 @@
 import { useEffect, useMemo } from "react";
-import { Conversation } from "./components/Conversation";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { Sidebar } from "./components/Sidebar";
+import { PaneHost } from "./components/PaneHost";
 import { Overlays } from "./components/Overlays";
 import { SshPromptDialog } from "./components/SshPromptDialog";
+import { RemoteCloseDialog } from "./components/RemoteCloseDialog";
+import { OnboardingHost } from "./components/OnboardingDialog";
 import { AgentListDialog } from "./components/AgentListDialog";
-import { CustomizeHost } from "./components/CustomizeHost";
 import { JobOutputDialog } from "./components/JobParts";
 import { TitleBar } from "./components/TitleBar";
 import { HostAccessBanner } from "./components/AccessNotices";
-import { SideWorkArea } from "./components/side/SideArea";
 import { SideInstanceLayer } from "./components/side/SideInstanceLayer";
 import { SideDndLayer } from "./components/side/SideDndLayer";
 import { LOCAL_HOST_ID } from "../../shared/hosts";
 import { api, bridge } from "./bridge";
 import { activeHost, hasLocalHost, hasNoHost, hostIndicator, isRemote } from "./lib/hosts";
-import { useUiPrefs } from "./lib/prefs";
 import { useTurnMarkUpkeep } from "./lib/attentionView";
 import { useDesktopShell } from "./lib/shell";
 import { useTermsSync } from "./lib/termsSync";
 import { startSideStore } from "./lib/sideLayoutStore";
+import { startPaneSync } from "./lib/paneStore";
 import { useSideShortcuts } from "./lib/useSideShortcuts";
 import { useStaleFocusGuard } from "./lib/staleFocus";
 import { useSelectedHost, useSelectedScope, useWorkspace, WorkspaceContext } from "./lib/workspaceView";
 import { useI18n, type MessageKey } from "./i18n";
 import { appModules } from "./modules/app";
-import { MainOutlet, PageAsideOutlet } from "./modules/Outlet";
+import { PageAsideOutlet } from "./modules/Outlet";
 import { useOpenPage } from "./modules/react";
 import { hostApi, useApp } from "./store";
 
@@ -82,8 +80,6 @@ export function App() {
   // A page with an Aside (设置) is a full-window page: the Aside replaces the app sidebar.
   const open = useOpenPage();
   const fullWindow = !!open?.entry?.item.Aside;
-  const selectedId = useApp((s) => s.selectedId);
-  const { sidebarOpen } = useUiPrefs();
   const { locale } = useI18n();
   useDesktopShell(locale);
   useTermsSync();
@@ -97,6 +93,8 @@ export function App() {
   useEffect(() => init(), [init]);
   // The right side (components/side): its layout store follows the host / agent / modules.
   useEffect(() => startSideStore((listener) => appModules().subscribe(listener)), []);
+  // The conversation panes (lib/paneStore): the layout follows the selection, persisted per device.
+  useEffect(() => startPaneSync(), []);
   useSideShortcuts(!fullWindow);
   useStaleFocusGuard();
   // First commit: tells main a just-installed update renders (otherwise it rolls back).
@@ -118,21 +116,11 @@ export function App() {
           <JobOutputDialog />
           <Overlays />
           <SshPromptDialog />
-          {/* The window background holds the cards: the main card (conversation / page) and the right
-              side (page buttons + cards) in the work area, 8 px apart. */}
-          <div className={`relative flex min-h-0 flex-1 pr-2 pb-2 ${sidebarOpen && !fullWindow ? "" : "pl-2"}`}>
-            {sidebarOpen && !fullWindow && <Sidebar />}
-            <SideWorkArea side={!fullWindow}>
-              {/* A page that fails to render shows a notice here; the sidebar stays usable to move on. */}
-              <ErrorBoundary resetKey={`${open?.page ?? "conversation"}:${selectedId ?? ""}`}>
-                <MainOutlet>
-                  <Conversation scope={scope} />
-                </MainOutlet>
-              </ErrorBoundary>
-            </SideWorkArea>
-            {/* 在主界面调整: the region panel, placed in this row (not on a full-window page). */}
-            {!fullWindow && <CustomizeHost />}
-          </div>
+          <RemoteCloseDialog />
+          <OnboardingHost />
+          {/* The work row as panes (components/PaneHost): the agent list, the conversation pane(s) / page
+              and the right side; each conversation pane has its own ConversationScope. */}
+          <PaneHost fullWindow={fullWindow} scope={scope} />
         </div>
         <SideInstanceLayer />
         <SideDndLayer />

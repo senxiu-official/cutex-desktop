@@ -69,14 +69,18 @@ describe("settings search: model accounts, devices and peers (owner, current hos
     expect(searchSettings(all, "密钥").map((g) => g.page)).toContain("me");
   });
 
-  it.each(["zh-CN", "en"] as const)("%s: 设备 / devices land on 用户 › 设备, 对端 / peers on 用户 › 对端主机", (locale) => {
+  // 连接 D plan (2026-10-19): 用户 holds users and signed-in devices; 主机 holds 主机互联 (and which user each linked host belongs to).
+  const onPage = (page: string) => (all: ReturnType<typeof docs>, q: string) => searchSettings(all, q, 500).find((g) => g.page === page)?.sections.filter((h) => !h.doc.disabled).map((h) => h.doc.anchor) ?? [];
+  const onAccess = onPage("access");
+  const onUsers = onPage("users");
+  it.each(["zh-CN", "en"] as const)("%s: 设备 / devices find 用户 › 已登录设备, 互联 / linked hosts find 主机 › 互联主机所属用户", (locale) => {
     const all = docs(locale, modern);
-    for (const q of ["设备", "devices"]) expect(top(all, q), q).toMatchObject({ page: "users", anchor: "users-devices" });
-    for (const q of ["对端", "linked hosts"]) expect(top(all, q), q).toMatchObject({ page: "users", anchor: "users-peers" });
-    const peers = searchSettings(all, "peers").find((g) => g.page === "users");
-    expect(peers?.sections.map((h) => h.doc.anchor)).toContain("users-peers");
+    for (const q of ["设备", "devices"]) expect(onUsers(all, q), q).toContain("users-devices");
+    for (const q of ["互联", "linked hosts"]) expect(onAccess(all, q), q).toContain("users-peers");
+    // "peers" finds 主机互联's own cards (the former 互联 page) on 主机.
+    expect(onAccess(all, "peers")).toContain("peers-settings");
     // The users module's section is found by its cards, not as one more 「用户」 result.
-    expect(anchors(all)).not.toContain("users#users.manage");
+    expect(anchors(all)).not.toContain("users#users.people");
     expect(anchors(all)).not.toContain("users#users-own-devices");
   });
 });
@@ -84,17 +88,17 @@ describe("settings search: model accounts, devices and peers (owner, current hos
 describe("settings search follows the connection's role on the settings host", () => {
   it.each(["zh-CN", "en"] as const)("%s member: own devices instead of the owner's lists; host pages greyed with the reason", (locale) => {
     const all = docs(locale, { host: host(MODERN), access: MEMBER });
-    for (const q of ["设备", "devices"]) expect(top(all, q), q).toMatchObject({ page: "users", anchor: "users-own-devices" });
-    for (const a of ["users#users-devices", "users#users-peers", "users#users-list"]) expect(anchors(all)).not.toContain(a);
+    for (const q of ["设备", "devices"]) expect(searchSettings(all, q).find((g) => g.page === "users")?.sections.map((h) => h.doc.anchor), q).toContain("users-own-devices");
+    for (const a of ["users#users-devices", "access#users-peers", "users#users-list"]) expect(anchors(all)).not.toContain(a);
     const profiles = all.find((d) => d.page === "profiles" && d.anchor === null)!;
     expect(profiles.disabled).toContain("host-a");
-    // Nothing under a host page other than 用户 can be opened.
-    expect(all.filter((d) => d.page !== "users" && d.disabled === null && ["profiles", "defaults", "runtime", "collab"].includes(d.page))).toEqual([]);
+    // Nothing under a host page other than 主机 / 用户 can be opened.
+    expect(all.filter((d) => d.page !== "access" && d.page !== "users" && d.disabled === null && ["profiles", "defaults", "runtime", "collab"].includes(d.page))).toEqual([]);
   });
 
   it("pending: neither own devices nor the owner's lists", () => {
     const all = docs("zh-CN", { host: host(MODERN), access: PENDING });
-    expect(anchors(all).filter((a) => a.startsWith("users#"))).toEqual(["users#users-me"]);
+    expect(anchors(all).filter((a) => a.startsWith("access#") || a.startsWith("users#"))).toEqual(["access#hostInfo", "access#hostRights", "access#hostConnection", "users#users-me"]); // 主机 → 本地桌面应用连接 is this desktop's, for every role
     expect(all.find((d) => d.page === "profiles" && d.anchor === null)!.disabled).toBeTruthy();
   });
 });
@@ -103,7 +107,7 @@ describe("settings search on a legacy settings host (a current focus host in the
   it.each(["zh-CN", "en"] as const)("%s: no result leads to a card the page leaves out", (locale) => {
     const all = docs(locale, { host: host([]), access: OWNER });
     // The users module needs `users`: its cards are gone, not a dead link.
-    for (const a of ["users#users-devices", "users#users-peers", "users#users-list", "users#users.manage"]) expect(all.some((d) => `${d.page}#${d.anchor}` === a)).toBe(false);
+    for (const a of ["users#users-devices", "access#users-peers", "users#users-list", "users#users.people"]) expect(all.some((d) => `${d.page}#${d.anchor}` === a)).toBe(false);
     // Every enabled host-page card passes the same gate SettingsSections / the page applies.
     for (const d of all.filter((x) => x.anchor && !x.disabled)) {
       const section = SECTIONS.find((e) => e.item.page === d.page && e.item.id === d.anchor);
@@ -118,13 +122,13 @@ describe("settings search on a legacy settings host (a current focus host in the
   it("users without peers-v2: devices yes, linked hosts no", () => {
     const all = docs("en", { host: host([...MODERN].filter((c) => c !== PEERS_FEATURE)), access: OWNER });
     expect(anchors(all)).toContain("users#users-devices");
-    expect(anchors(all)).not.toContain("users#users-peers");
+    expect(anchors(all)).not.toContain("access#users-peers");
   });
 
   it("capabilities still loading: the host's gated cards wait (left out)", () => {
     const all = docs("en", { host: { features: new Set(), featuresKnown: false }, access: OWNER });
-    expect(anchors(all)).not.toContain("users#users-devices");
-    expect(all.some((d) => d.page === "users" && d.anchor === null)).toBe(true);
+    expect(anchors(all)).not.toContain("access#users-devices");
+    expect(all.some((d) => d.page === "access" && d.anchor === null)).toBe(true);
   });
 });
 
@@ -134,7 +138,8 @@ describe("mixed pages: the host part follows the Settings target, not the focus 
     const levels = legacy.find((d) => d.page === "notifications" && d.anchor === "levels");
     expect(levels?.disabled).toBeTruthy(); // the page shows 「需要升级 cutex」 there
     expect(anchors(legacy)).toContain("notifications#device");
-    expect(anchors(legacy)).toContain("notifications#newAgentLevel");
+    // 新智能体的提醒 left the page (owner 2026-10-19).
+    expect(anchors(legacy)).not.toContain("notifications#newAgentLevel");
     const member = docs("en", { host: host(MODERN), access: MEMBER }, MODERN);
     for (const a of ["notifications#levels", "notifications#newAgentLevel", "notifications#mute"]) expect(member.some((d) => `${d.page}#${d.anchor}` === a), a).toBe(false);
     expect(anchors(member)).toContain("notifications#device");
@@ -149,7 +154,7 @@ describe("mixed pages: the host part follows the Settings target, not the focus 
     const all = docs("zh-CN", { host: null, access: OWNER });
     expect(all.find((d) => d.page === "profiles" && d.anchor === null)?.disabled).toBeNull();
     expect(top(all, "API key").page).toBe("profiles");
-    expect(anchors(all)).not.toContain("users#users-devices");
+    expect(anchors(all)).not.toContain("access#users-devices");
   });
 });
 
@@ -182,7 +187,7 @@ describe("lib/settingsGate", () => {
   it("settingsPageAccess: host pages are the owner's, 用户 is everyone's, app pages always", () => {
     expect(settingsPageAccess({ page: "profiles", source: "host" }, MEMBER)).toBe("notOwner");
     expect(settingsPageAccess({ page: "profiles", source: "host" }, PENDING)).toBe("pending");
-    expect(settingsPageAccess({ page: "users", source: "host" }, MEMBER)).toBe("ok");
+    expect(settingsPageAccess({ page: "access", source: "host" }, MEMBER)).toBe("ok");
     expect(settingsPageAccess({ page: "general", source: "local" }, MEMBER)).toBe("ok");
     expect(settingsPageAccess({ page: "profiles", source: "host" }, null)).toBe("ok");
   });

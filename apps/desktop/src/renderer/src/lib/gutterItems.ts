@@ -4,7 +4,7 @@
 import { useMemo } from "react";
 import { useSlot } from "../modules/react";
 import type { AppSlotEntry } from "../modules/slots";
-import { agentHost, useApp } from "../store";
+import { useConvHost } from "./conversationScope";
 import { lacks } from "./agentFeatures";
 import { useAgentFeatures } from "./agentFeaturesView";
 import { useHostEntryGate } from "./hostGatingView";
@@ -27,8 +27,8 @@ export function useGutterItems(sessionId: string, hostId: string): { left: Gutte
 export function useTurnAttachmentItems(sessionId: string): AppSlotEntry<"timeline.turnAttachment">[] {
   const entries = useSlot("timeline.turnAttachment");
   const agent = useAgentFeatures(sessionId);
-  // The outlet renders attachments with the selected agent's host (modules/TurnAttachments.tsx).
-  const onHost = useHostEntryGate(useApp(agentHost));
+  // The outlet renders attachments with the conversation's host (modules/TurnAttachments.tsx).
+  const onHost = useHostEntryGate(useConvHost());
   return useMemo(
     () => entries.filter((e) => e.mode === "show" && !(agent && e.item.agentFeature && lacks(agent, e.item.agentFeature)) && onHost(e)).sort((a, b) => (a.item.order ?? 500) - (b.item.order ?? 500)),
     [entries, agent, onHost],

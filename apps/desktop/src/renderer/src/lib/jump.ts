@@ -6,7 +6,7 @@
 // a viewport probe (capture / restore the reading position) and reports its scrolls.
 import { create } from "zustand";
 import type { FocusTurnResult } from "../modules/slots";
-import { agentHost, useApp } from "../store";
+import { agentHost, useApp, viewOf } from "../store";
 import { viewRow } from "./viewHost";
 import { useFocusRequest } from "./focusRequest";
 import { returnReduce, type ReturnEvent, type ReturnPoint, type ReturnState } from "./returnPoint";
@@ -83,7 +83,7 @@ export function registerViewport(p: ViewportProbe): () => void {
   };
 }
 
-const nameOf = (sessionId: string) => viewRow(useApp.getState(), sessionId)?.displayName ?? sessionId;
+const nameOf = (sessionId: string) => viewRow(useApp.getState(), viewHost(), sessionId)?.displayName ?? sessionId;
 /** The open agent's host (multi-host P1: it may not be the focus host). */
 const viewHost = () => agentHost(useApp.getState());
 /** Open `sessionId` of `hostId` (in place when that host is not the focus host). */
@@ -98,7 +98,7 @@ function capturePoint(): ReturnPoint | null {
   if (!probe || s.view.kind !== "conversation" || probe.sessionId !== s.selectedId) return null;
   const pos = probe.capture();
   if (!pos) return null;
-  const view = s.sessions[probe.sessionId];
+  const view = viewOf(s, viewHost(), probe.sessionId);
   const turns = view?.timeline.turns ?? [];
   const complete = !!view && (!view.older || view.older.cursor === null);
   const index = pos.atBottom || !pos.turnId ? turns.length - 1 : turns.findIndex((t) => t.id === pos.turnId);
@@ -122,31 +122,32 @@ function until(test: () => boolean, ms: number): Promise<boolean> {
   });
 }
 
-const viewReady = (sessionId: string) => {
-  const v = useApp.getState().sessions[sessionId];
+const viewReady = (hostId: string, sessionId: string) => {
+  const v = viewOf(useApp.getState(), hostId, sessionId);
   return !!v && !v.loading;
 };
 
 /** Pages older history in until the turn is loaded: null = there, else why not. */
 async function pageTo(hostId: string, sessionId: string, turnId: string): Promise<null | "too-old" | "reverted" | "unknown"> {
-  const has = () => !!useApp.getState().sessions[sessionId]?.timeline.turns.some((t) => t.id === turnId);
+  const viewNow = () => viewOf(useApp.getState(), hostId, sessionId);
+  const has = () => !!viewNow()?.timeline.turns.some((t) => t.id === turnId);
   const read = cachedReader(hostId, sessionId);
   let pages = 0;
   for (let guard = 0; guard < LOOKUP_PAGES * 3; guard++) {
     if (has()) return null;
-    const view = useApp.getState().sessions[sessionId];
+    const view = viewNow();
     if (!view || view.error) return "unknown";
     if (view.older?.loading) {
       // The owner's own scroll-to-top paging: let it finish first.
-      await until(() => !useApp.getState().sessions[sessionId]?.older?.loading, 15_000);
+      await until(() => !viewNow()?.older?.loading, 15_000);
       continue;
     }
     const cursor = view.older?.cursor;
     if (!cursor) return "reverted";
     if (pages >= LOOKUP_PAGES) return "too-old";
     pages++;
-    await useApp.getState().loadOlder(sessionId, { read });
-    const after = useApp.getState().sessions[sessionId]?.older;
+    await useApp.getState().loadOlder(sessionId, { read, hostId });
+    const after = viewNow()?.older;
     if (after?.error || (after?.cursor === cursor && !has())) return "unknown";
   }
   return has() ? null : "unknown";
@@ -182,7 +183,7 @@ export async function jumpToTurn(hostId: string, sessionId: string, turnId: stri
       if (!isOpen(hostId, sessionId)) expected = sessionId;
       await openOn(hostId, sessionId);
     }
-    if (!(await until(() => viewReady(sessionId), 20_000)) || stale()) return stale() ? { status: "stale" } : { status: "not-found", reason: "unknown" };
+    if (!(await until(() => viewReady(hostId, sessionId), 20_000)) || stale()) return stale() ? { status: "stale" } : { status: "not-found", reason: "unknown" };
     const missing = await pageTo(hostId, sessionId, turnId);
     if (stale()) return { status: "stale" };
     // After a switch the way back stays offered even when the turn is not there.
@@ -214,7 +215,7 @@ export async function goBack(): Promise<void> {
     if (!isOpen(p.hostId, p.sessionId) || app.view.kind !== "conversation") {
       if (!isOpen(p.hostId, p.sessionId)) expected = p.sessionId;
       await openOn(p.hostId, p.sessionId);
-      await until(() => viewReady(p.sessionId), 20_000);
+      await until(() => viewReady(p.hostId, p.sessionId), 20_000);
     }
     if (p.atBottom || !p.turnId) {
       // A switch back already sticks to the bottom; the same agent re-attaches now.

@@ -12,7 +12,7 @@
 import { appModules } from "../modules/app";
 import type { CutexRef, FocusTurnResult, RefOpenResult, SideOpenResult } from "../modules/slots";
 import type { ItemId, Json } from "../modules/types";
-import { agentHost, sidebarOf, useApp, viewHostOf } from "../store";
+import { agentHost, sidebarOf, useApp, viewHostOf, viewOf } from "../store";
 import { jumpToTurn } from "./jump";
 import { usePeek } from "./peekStore";
 import { agentRef, mainPageRef, pageParamsOf, parseRef, sidePageRef, turnRef } from "./refs";
@@ -169,11 +169,11 @@ export async function refsOpen(raw: CutexRef, opts: { how?: How } = {}): Promise
 /** A loaded turn's ref (hover bars, message menus): name, start time, ordinal when the whole history is known, the thread. */
 export function turnRefNow(sessionId: string, turnId: string, snippet?: string): CutexRef {
   const s = useApp.getState();
-  const view = s.sessions[sessionId];
+  const hostId = viewHostOf(sessionId);
+  const view = viewOf(s, hostId, sessionId);
   const turns = view?.timeline.turns ?? [];
   const index = turns.findIndex((x) => x.id === turnId);
   const complete = !!view && (!view.older || view.older.cursor === null);
-  const hostId = viewHostOf(sessionId);
   const name = rows(hostId).find((r) => r.cutexSessionId === sessionId)?.displayName;
   return turnRef({
     hostId,

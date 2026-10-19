@@ -170,7 +170,9 @@ function openTerminals(): { id: string; terminalId: string | null }[] {
 }
 
 function focusComposer(): void {
-  document.querySelector<HTMLTextAreaElement>('[data-focus-region="main"] textarea:not([disabled])')?.focus();
+  // Two conversations side by side (panes step 2): the focused one's composer.
+  const main = '[data-focus-region="main"]';
+  (document.querySelector<HTMLTextAreaElement>(`${main} [data-pane-focused] textarea:not([disabled])`) ?? document.querySelector<HTMLTextAreaElement>(`${main} textarea:not([disabled])`))?.focus();
 }
 
 let lastFocused: string | null = null;

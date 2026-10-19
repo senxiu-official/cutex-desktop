@@ -6,10 +6,10 @@
 
 <p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
 
-**0.1.4**: messages and approvals that wait for you show up right in the conversation, Claude agents
-get Claude Code's own permission modes, skills, settings and subagent transcripts, agent browser tabs
-work in the background, plus a Network proxy page, signed module packs and theme palettes; pairs with
-cutex 0.1.4 (the 0.1.x series is "First Take"; 0.1.0 was the first public release). See [CHANGELOG.md](CHANGELOG.md).
+**0.1.5**: two conversations side by side and tool columns on the right, delegations reviewed right in
+the conversation, permission levels for the owner's devices, host owners and connecting as a member,
+notes from other hosts, closing a desktop remotely, Side chat and fork while busy for Claude agents,
+CC Switch import and a short introduction on first use; pairs with cutex 0.1.5 (the 0.1.x series is "First Take"; 0.1.0 was the first public release). See [CHANGELOG.md](CHANGELOG.md).
 
 > **Known issues**: see [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) (also in the app: Settings → About).
 > The most important ones:
