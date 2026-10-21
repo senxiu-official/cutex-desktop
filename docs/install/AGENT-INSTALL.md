@@ -67,6 +67,14 @@ https://github.com/senxiu-official/cutex-desktop/issues) instead of using anothe
 6. Start the desktop app detached (as the commands below do), never as a foreground command: a GUI
    started in the foreground keeps the shell tool waiting until it times out, which usually kills
    the app.
+7. **Before you start, ask the person which optional components they want**, and write the answers
+   into your final report:
+   - **Claude Code agents** (Claude models such as Opus or Sonnet)? If yes, install the Claude runtime
+     (section 6.1) and check its prerequisites first: Python 3.11+ with `venv`, and the Claude Code
+     CLI (`claude --version`). Do not skip it silently: a host without it shows "Claude 运行时 还没有安装"
+     the first time someone creates a Claude Profile or agent.
+   - **Long-running jobs** (Linux only)? If yes, install the Job Service (section 6.2).
+   An install is finished only when every component the person asked for passes its check.
 
 ## 1. Prerequisites
 
@@ -1056,7 +1064,7 @@ usage page's cost estimates), and it writes agent scratch directories under `~/.
 
 ### 6.1 Optional: Claude Code agents (the Claude runtime)
 
-Skip this unless you want agents that run Anthropic's Claude Code instead of Codex. The Claude
+Do this if the person asked for Claude Code agents (rule 7 of section 0); skip it otherwise. The Claude
 runtime is an optional cutex component: a small Python adapter between cutex and the official
 Claude Code CLI. cutex installs and updates it; you install two things it cannot ship for you:
 
@@ -1112,7 +1120,21 @@ official `claude auth login` for cutex's own Claude home (not your `~/.claude`).
 Profile of kind **Claude** in the desktop (section 8) and an agent on it.
 
 Check: `cutex component status claude-runtime` says `ready`, and
-`cutex human claude account list` shows the account as logged in.
+`cutex human claude account list` shows the account as logged in. Anything else means the Claude
+runtime is **not** installed: report it, do not end the install as done.
+
+If an install or a check says `claude-runtime at <dir> lacks <file>`, or `<dir> exists but was not
+unpacked from the manifest's archive`, an earlier attempt left an incomplete version directory.
+Move it away (do not delete it; keep it for the bug report) and install again:
+
+```sh
+mv "<install base>/components/claude-runtime/<version>" ~/claude-runtime-<version>.broken
+cutex component install claude-runtime
+cutex component status claude-runtime
+```
+
+`<install base>` is the one of section B.1 (Linux default `~/.local/share/cutex`; Windows
+`%LOCALAPPDATA%\cutex`), `<version>` the one named in the error (for example `claude-r21`).
 
 Updates and removal: a backend update (section 9) also downloads the Claude runtime version that
 belongs to the new cutex release and selects it for **new** Claude agents. Existing agents keep the
