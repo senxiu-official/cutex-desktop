@@ -1,3 +1,4 @@
+import { isImeComposing } from "../lib/ime";
 // Host choice of create forms (new agent / project) and of host settings pages (multi-host P1 step 2c;
 // RFC §9.2, §9.3): `⊞ ● name ⌄` with the switcher's row look. Hosts that are not online are listed
 // greyed with their status and cannot be picked. Which mode to show and the defaults: lib/hostPick.
@@ -11,6 +12,7 @@ import { useHostScope } from "../lib/useHostScope";
 import { HostDot, HostPlatformIcon } from "./HostMark";
 import { holdPageBody } from "./Page";
 import { ScriptText } from "./ScriptText";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 function HostFace({ host }: { host: HostLook }) {
   const { t } = useI18n();
@@ -39,6 +41,7 @@ function HostFace({ host }: { host: HostLook }) {
  * `only`: list just these hosts (e.g. the ones a 「全部主机」 view includes).
  */
 export function HostPicker({ value, onChange, mode, title, prefix = false, up = false, only, all, chip = false }: { value: string; onChange(hostId: string): void; mode: HostPickerMode; title: string; prefix?: boolean; up?: boolean; only?: readonly string[]; all?: { label: string; hint?: string; selected: boolean; onSelect(): void }; chip?: boolean }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const scope = useHostScope();
   const [open, setOpen] = useState(false);
@@ -53,8 +56,8 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
     const onDown = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    win.document.addEventListener("mousedown", onDown);
+    return () => win.document.removeEventListener("mousedown", onDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   if (mode === "none" || !current) return null;
@@ -69,13 +72,13 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
   );
   if (mode === "label" && chip)
     return (
-      <span title={title} className="inline-flex h-5 max-w-48 items-center gap-1 rounded-r bg-accent/12 pr-1.5 text-[11px] text-accent">
+      <span title={title} className="inline-flex h-5 max-w-48 items-center gap-1 rounded-r bg-accent/12 pr-1.5 text-caption/[inherit] text-accent">
         {chipFace}
       </span>
     );
   if (mode === "label")
     return (
-      <span title={title} className="inline-flex h-6 items-center gap-1.5 text-[13px]">
+      <span title={title} className="inline-flex h-6 items-center gap-1.5 text-ui/[inherit]">
         {label}
         <HostFace host={current} />
       </span>
@@ -94,6 +97,7 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
   };
   const first = all ? -1 : 0;
   const onKey = (e: React.KeyboardEvent) => {
+      if (isImeComposing(e)) return;
     if (!open) {
       if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") (e.preventDefault(), setOpen(true));
       return;
@@ -117,8 +121,8 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
         onClick={() => setOpen(!open)}
         className={
           chip
-            ? `inline-flex h-5 max-w-48 items-center gap-1 rounded-r bg-accent/12 pr-1.5 text-[11px] text-accent hover:brightness-125 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${open ? "brightness-125" : ""}`
-            : `inline-flex h-7 max-w-64 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-[13px] hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none ${open ? "bg-surface-2" : ""}`
+            ? `inline-flex h-5 max-w-48 items-center gap-1 rounded-r bg-accent/12 pr-1.5 text-caption/[inherit] text-accent hover:brightness-125 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${open ? "brightness-125" : ""}`
+            : `inline-flex h-7 max-w-64 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-ui/[inherit] hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none ${open ? "bg-surface-2" : ""}`
         }
       >
         {label}
@@ -138,7 +142,7 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
         <ChevronDown size={chip ? 11 : 13} className={`shrink-0 ${chip ? "" : "text-subtle"}`} />
       </button>
       {open && (
-        <div role="listbox" aria-label={title} className={`absolute ${up ? "bottom-full mb-1" : "top-full mt-1"} left-0 z-40 max-h-80 min-w-64 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl`}>
+        <div role="listbox" data-popover="" aria-label={title} className={`absolute ${up ? "bottom-full mb-1" : "top-full mt-1"} left-0 z-50 max-h-80 min-w-64 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl`}>
           {all && (
             <button
               type="button"

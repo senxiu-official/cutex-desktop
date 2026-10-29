@@ -1,4 +1,5 @@
 import { BROWSER_OWNER_INPUT_KINDS, isBrowserControlSettings, type BrowserOwnerInputKind, type BrowserRequest } from "../../shared/browser";
+import { browserLoginOrigin } from "./loginWarning";
 import { isBrowserClaimMode } from "../../shared/browserClaim";
 import type { HostBinding } from "../../shared/hosts";
 import { admitHostBinding, type FenceHosts, type HostFence } from "../hostFence";
@@ -14,6 +15,10 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     if (Object.keys(value).some(k => !["op", "enabled"].includes(k)) || (value.enabled !== undefined && typeof value.enabled !== "boolean")) throw Error("invalid_browser_request");
     return value.enabled === undefined ? { op: "externalPages" } : { op: "externalPages", enabled: value.enabled };
   }
+  if (value.op === "desktopLoopback") {
+    if (Object.keys(value).some(k => !["op", "enabled"].includes(k)) || (value.enabled !== undefined && typeof value.enabled !== "boolean")) throw Error("invalid_browser_request");
+    return value.enabled === undefined ? { op: "desktopLoopback" } : { op: "desktopLoopback", enabled: value.enabled };
+  }
   if (value.op === "sitePermissions") {
     const forget = value.forget as Record<string, unknown> | string | undefined;
     if (Object.keys(value).some(k => !["op", "forget"].includes(k))) throw Error("invalid_browser_request");
@@ -24,6 +29,11 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     return { op: "sitePermissions", forget: { pool: forget.pool, origin: forget.origin } };
   }
   const validId = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9._:-]{1,200}$/.test(v);
+  if (value.op === "desktopLoopbackChallenge") {
+    if (Object.keys(value).some(k => !["op", "tabKey", "url"].includes(k)) || !validId(value.tabKey)
+      || typeof value.url !== "string" || !value.url || value.url.length > 8000 || /[\x00-\x1f\x7f]/.test(value.url)) throw Error("invalid_browser_request");
+    return { op: "desktopLoopbackChallenge", tabKey: value.tabKey, url: value.url };
+  }
   if (value.op === "settings") {
     if (Object.keys(value).some(k => !["op", "agentOpenApproval"].includes(k)) || (value.agentOpenApproval !== undefined && value.agentOpenApproval !== "off" && value.agentOpenApproval !== "ask")) throw Error("invalid_browser_request");
     return value.agentOpenApproval === undefined ? { op: "settings" } : { op: "settings", agentOpenApproval: value.agentOpenApproval };
@@ -79,18 +89,30 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     if (Object.keys(value).some(k => k !== "op" && k !== "enabled") || typeof value.enabled !== "boolean") throw new Error("invalid_browser_request");
     return { op: "setEnabled", enabled: value.enabled };
   }
-  const allowed = value.op === "list" || value.op === "agents" ? ["op"] : value.op === "open" ? ["op", "tabKey", "url", "receipt", "identity"] : value.op === "navigate" ? ["op", "tabKey", "url"] :
+  if (value.op === "dismissLoginWarning") {
+    if (Object.keys(value).length !== 3 || Object.keys(value).some(k => !["op", "tabKey", "origin"].includes(k))
+      || typeof value.tabKey !== "string" || !value.tabKey || value.tabKey.length > 256 || /[\x00-\x1f\x7f]/.test(value.tabKey)
+      || typeof value.origin !== "string" || value.origin.length > 300 || browserLoginOrigin(value.origin) !== value.origin)
+      throw new Error("invalid_browser_request");
+    return { op: "dismissLoginWarning", tabKey: value.tabKey, origin: value.origin };
+  }
+  const allowed = value.op === "list" || value.op === "agents" ? ["op"] : value.op === "open" ? ["op", "tabKey", "url", "receipt", "identity", "desktopLoopback"] : value.op === "navigate" ? ["op", "tabKey", "url", "desktopLoopback"] :
     value.op === "close" ? ["op", "tabKey", "unmount"] :
-      value.op === "ownerInput" ? ["op", "tabKey", "kind"] : ["op", "tabKey"];
+      value.op === "ownerInput" ? ["op", "tabKey", "kind"] : value.op === "setZoom" ? ["op", "tabKey", "action"] : ["op", "tabKey"];
   if (!Object.keys(value).every(k => allowed.includes(k))) throw new Error("invalid_browser_request");
   if (value.op === "list") return { op: "list" };
   if (value.op === "agents") return { op: "agents" };
   if (typeof value.tabKey !== "string" || !value.tabKey || value.tabKey.length > 256 || /[\x00-\x1f\x7f]/.test(value.tabKey))
     throw new Error("invalid_browser_request");
   const tabKey = value.tabKey;
+  if (value.op === "openOwnerCopy") return { op: "openOwnerCopy", tabKey };
   if (value.op === "ownerInput") {
     if (!BROWSER_OWNER_INPUT_KINDS.includes(value.kind as BrowserOwnerInputKind)) throw new Error("invalid_browser_input");
     return { op: "ownerInput", tabKey, kind: value.kind as BrowserOwnerInputKind };
+  }
+  if (value.op === "setZoom") {
+    if (value.action !== "in" && value.action !== "out" && value.action !== "reset") throw new Error("invalid_browser_request");
+    return { op: "setZoom", tabKey, action: value.action };
   }
   if (value.op === "open" || value.op === "navigate") {
     if (typeof value.url !== "string" || value.url.length > 8000 || !value.url || /[\x00-\x1f\x7f]/.test(value.url)) throw new Error("invalid_browser_url");
@@ -110,7 +132,8 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
         throw new Error("invalid_browser_receipt");
       return { op: "open", tabKey, url: value.url, receipt: { src: r.src, webContentsId: r.webContentsId }, ...(identity ? { identity } : {}) };
     }
-    return { op: value.op, tabKey, url: value.url, ...(identity ? { identity } : {}) };
+    if (value.desktopLoopback !== undefined && (typeof value.desktopLoopback !== "string" || !/^[a-f0-9]{64}$/.test(value.desktopLoopback))) throw Error("invalid_browser_request");
+    return { op: value.op, tabKey, url: value.url, ...(identity ? { identity } : {}), ...(typeof value.desktopLoopback === "string" ? { desktopLoopback: value.desktopLoopback } : {}) };
   }
   if (value.op === "close") {
     if (value.unmount !== undefined && typeof value.unmount !== "boolean") throw new Error("invalid_browser_request");

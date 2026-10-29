@@ -167,7 +167,7 @@ describe("UI-01: a picked Settings host that disconnects stays the target", () =
 
 describe("UI-02: host parts edit the Settings target, not the focus host", () => {
   // Parts have no heading (owner 2026-10-19): the host is named by its cards' tags.
-  const part = (children: ReactNode, requires?: string[]) => renderToStaticMarkup(h(SettingsHostPart, { title: "part.host", requires, children: [children, h(Section, { key: "card", title: "card", source: "host", children: "x" })] }));
+  const part = (children: ReactNode, requires?: string[]) => renderToStaticMarkup(h(SettingsHostPart, { title: "part.host", requires, children: [children, h(Section, { key: "card", title: "card", children: "x" })] }));
 
   it("target ≠ focus: the part's pages read A and say so", () => {
     setState("online");
@@ -177,14 +177,14 @@ describe("UI-02: host parts edit the Settings target, not the focus host", () =>
     expect(html).toContain(`data-probe="${A}"`);
     expect(html).toContain("alpha-project");
     expect(html).not.toContain("focus-project");
-    expect(html).toContain("HOST-A");
+    expect(html).toContain(`data-settings-host="${A}"`);
   });
 
-  it("no pick: the part edits the focus host, and still names it", () => {
+  it("no pick: the part edits and identifies the focus host", () => {
     setState("online");
     const html = part(h(Probe));
     expect(html).toContain(`data-probe="${B}"`);
-    expect(html).toContain("HOST-B");
+    expect(html).toContain(`data-settings-host="${B}"`);
   });
 
   it("the picked host offline: the part stays on A, unavailable", () => {

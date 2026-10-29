@@ -1,5 +1,5 @@
 // 子 agent (collab sub-agents at work): its status category, and a sub-agent's thread as a right-side card.
-import { Bot } from "lucide-react";
+import { Bot, BotMessageSquare } from "lucide-react";
 import { ClaudeAgentRow, CollabRow } from "./CollabRow";
 import { isClaudeAgentTool } from "../../lib/claudeTasks";
 import { defineModule } from "../slots";
@@ -25,7 +25,7 @@ export default defineModule({
       {
         id: "subagents.thread",
         titleKey: "subagents.thread",
-        icon: Bot,
+        icon: BotMessageSquare,
         instances: "multi",
         defaultBinding: "agent",
         placement: { home: "workspace", order: 450 },

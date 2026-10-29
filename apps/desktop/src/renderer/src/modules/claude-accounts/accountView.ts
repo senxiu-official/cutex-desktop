@@ -1,7 +1,7 @@
 // Pure helpers for the Claude 账户 section (Settings → Profile) and its add flow: what state an
 // account is in, its one-line summary, the add request, the terminal command that stores an API
-// account's key, and the refusals the section explains. The commands only reference the account id;
-// the desktop never sees or sends a key.
+// account's key, and the refusals the section explains. The commands only reference the account id; a
+// key typed in the desktop is sent write-only with the add request or setClaudeAccountKey, never read back.
 import { CLAUDE_ACCOUNT_ID, claudeAccountLabel, type ClaudeAccount, type ClaudeAccountCreate, type ClaudeAccountKind, type ClaudeAccountQuota, type ClaudeKeyEnv } from "../../../../shared/claudeAccounts";
 import type { MessageKey } from "../../i18n";
 import { accountState, type AccountState } from "../../lib/claudeAccounts";
@@ -95,12 +95,14 @@ export interface AccountForm {
   baseUrl: string;
   keyEnv: ClaudeKeyEnv;
   envText: string;
+  /** API accounts: the write-only key typed in the desktop ("" = set it later). */
+  apiKey?: string;
 }
 
 /**
  * `POST /v2/claude/accounts` body of the add form (the kind comes from the button: 添加 Claude 订阅 /
  * API 账户). Subscription: label + kind only. API: base URL (empty = Anthropic), key header and the
- * extra settings; never a key.
+ * extra settings and, when typed, the write-only key (main validates it again).
  */
 export function accountCreateRequest(kind: ClaudeAccountKind, form: AccountForm): { request: ClaudeAccountCreate } | { error: "badLabel" } | { error: "envBad"; lines: string[] } {
   const label = claudeAccountLabel(form.label);
@@ -109,7 +111,8 @@ export function accountCreateRequest(kind: ClaudeAccountKind, form: AccountForm)
   const { env, bad } = parseEnvLines(form.envText);
   if (bad.length) return { error: "envBad", lines: bad };
   const baseUrl = form.baseUrl.trim();
-  return { request: { label, kind, keyEnv: form.keyEnv, ...(baseUrl ? { baseUrl } : {}), ...(Object.keys(env).length ? { env } : {}) } };
+  const apiKey = form.apiKey?.trim() ?? "";
+  return { request: { label, kind, keyEnv: form.keyEnv, ...(baseUrl ? { baseUrl } : {}), ...(Object.keys(env).length ? { env } : {}), ...(apiKey ? { apiKey } : {}) } };
 }
 
 /** Refusals the section explains in its own words (others show cutex's message). */

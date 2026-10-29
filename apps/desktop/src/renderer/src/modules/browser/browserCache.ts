@@ -1,6 +1,7 @@
 // Passive, host-scoped metadata only. Reading a tab never opens a guest or starts a poll.
-import type { BrowserTabView } from "../../../../shared/browser";
+import { BROWSER_ZOOM_BOUNDS, type BrowserTabView } from "../../../../shared/browser";
 import { browserError, browserTitle, MAX_BROWSER_INPUT, safeBrowserFavicon, safeBrowserUrl } from "./browserState";
+import { browserLoginOrigin } from "./loginHint";
 
 export function browserCacheKey(hostId: string, tabKey: string): string {
   return JSON.stringify([hostId, tabKey]);
@@ -23,7 +24,9 @@ export function createBrowserCache() {
         loading: view.loading, canGoBack: view.canGoBack, canGoForward: view.canGoForward,
         url: safeBrowserUrl(view.url, MAX_BROWSER_INPUT) ?? "about:blank", title: browserTitle(view.title),
         favicon: safeBrowserFavicon(view.favicon), error: view.error ? browserError(view.error) : undefined,
+        zoom: typeof view.zoom === "number" && Number.isFinite(view.zoom) && view.zoom >= BROWSER_ZOOM_BOUNDS.min && view.zoom <= BROWSER_ZOOM_BOUNDS.max && view.zoom !== 1 ? view.zoom : undefined,
         pool: view.pool === "agent" ? "agent" : "owner",
+        desktopLoopback: view.desktopLoopback === true ? true : undefined,
         lease: view.lease ? Object.freeze({ ...view.lease }) : undefined,
         confirmedOpen: view.confirmedOpen,
         sitePermission: view.sitePermission && ["waiting", "hidden", "timeout"].includes(view.sitePermission.state) && typeof view.sitePermission.origin === "string"
@@ -32,6 +35,7 @@ export function createBrowserCache() {
         control: view.control ? Object.freeze({ grantee: view.control.grantee, state: view.control.state, operating: view.control.operating }) : undefined,
         carrier: view.carrier === "background" ? "background" : undefined,
         handover: view.handover === true ? true : undefined,
+        loginOrigin: view.pool === "agent" ? browserLoginOrigin(view.url, view.loginOrigin) : null,
       }));
       notify();
       return true;

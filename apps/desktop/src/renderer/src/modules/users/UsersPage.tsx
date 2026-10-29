@@ -8,13 +8,14 @@
 // every token with its user, 待分配 first, the 新设备先待分配 switch). cutex `person-identity` (P2,
 // docs/research/person-identity-p2-20261014.md §5): each user lists the person keys it is known by
 // (fingerprint, remove) and the unknown keys its devices brought (「认作此用户」).
+import { isImeComposing } from "../../lib/ime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { create as createStore } from "zustand";
 import { ChevronDown, ChevronRight, Fingerprint } from "lucide-react";
 import { PEERS_FEATURE } from "../../../../shared/peers";
 import { shownUserName, USERS_P2_ACCESS_FEATURE, type PersonKeyRecord, type UserGrant, type UserRecord, type UsersList } from "../../../../shared/users";
 import { ProjectColorPicker } from "../../components/ProjectColorPicker";
-import { AddButton, ArmedRemove, Button, Checkbox, ErrorNote, IconButton, ListRow, Loading, Notice, RefreshButton, Section, SettingRow, TextField, TextInput, Toggle } from "../../components/settings/Form";
+import { AddButton, ArmedRemove, Button, Checkbox, ErrorNote, IconButton, ListRow, Loading, Notice, RefreshButton, Section, SettingRow, SettingsGroup, TextField, TextInput, Toggle } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { useTargetApi, useTargetFeatures, useTargetHostId, useTargetSidebar } from "../../lib/targetHost";
@@ -27,6 +28,8 @@ import { DEVICES_ANCHOR, nameIn, openPairing, PEERS_ANCHOR, USERS_ANCHOR, useT, 
 import { changePersonKeys } from "./personKeyWrites";
 import { PeersSection } from "./PeersSection";
 import { UserDot } from "./UserDot";
+import { Tag } from "../../components/Tag";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 /**
  * Settings → 访问管理 places the users module's cards in three of its parts (人 / 设备 / 别的主机), each a
@@ -47,6 +50,7 @@ const noLoad = async () => {};
 
 /** 人: the attention strip and the user list; reads the listing the other parts share. */
 export function UsersPeoplePart() {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const { list, unsupported, error, load } = useUsers();
   const write = useUsersWrite(load);
@@ -59,11 +63,11 @@ export function UsersPeoplePart() {
   // A user's 「2 台设备」 shows that user's devices in 设备.
   const showDevices = (next: DeviceFilter) => {
     useShared.setState({ filter: next });
-    requestAnimationFrame(() => document.getElementById(settingsAnchorId(DEVICES_ANCHOR))?.scrollIntoView({ block: "start", behavior: "smooth" }));
+    win.requestAnimationFrame(() => win.document.getElementById(settingsAnchorId(DEVICES_ANCHOR))?.scrollIntoView({ block: "start", behavior: "smooth" }));
   };
   const showPeers = (userId: string) => {
     useShared.setState({ peerUser: userId });
-    requestAnimationFrame(() => document.getElementById(settingsAnchorId(PEERS_ANCHOR))?.scrollIntoView({ block: "start", behavior: "smooth" }));
+    win.requestAnimationFrame(() => win.document.getElementById(settingsAnchorId(PEERS_ANCHOR))?.scrollIntoView({ block: "start", behavior: "smooth" }));
   };
   const waiting = list.tokens.filter(isUnassigned).length;
   return (
@@ -125,7 +129,7 @@ function UsersSection({ list, write, reload, onShowDevices, onShowPeers }: { lis
       id={settingsAnchorId(USERS_ANCHOR)}
       title={t("users.list")}
       hint={t("users.pageHint")}
-      source="host"
+
       actions={
         <>
           <RefreshButton label={t("users.refresh")} onClick={() => void reload()} />
@@ -134,13 +138,13 @@ function UsersSection({ list, write, reload, onShowDevices, onShowPeers }: { lis
       }
     >
       {adding && (
-        <div className="-mx-4 border-b border-border bg-surface-2/40 px-4 py-3" data-testid="users-add">
+        <SettingsGroup agents="access" source="host"><div className="-mx-4 border-b border-border bg-surface-2/40 px-4 py-3" data-testid="users-add">
           <p className="mb-2 text-xs text-subtle">{t("users.addHint")}</p>
           <div className="flex items-center gap-2">
-            <TextInput value={name} onChange={setName} placeholder={t("users.addNamePlaceholder")} label={t("users.addName")} maxLength={64} autoFocus onKeyDown={(e) => e.key === "Enter" && void create()} />
+            <TextInput value={name} onChange={setName} placeholder={t("users.addNamePlaceholder")} label={t("users.addName")} maxLength={64} autoFocus onKeyDown={(e) => !isImeComposing(e) && e.key === "Enter" && void create()} />
             <Button primary disabled={busy || !name.trim()} onClick={() => void create()}>{t("users.addSubmit")}</Button>
           </div>
-        </div>
+        </div></SettingsGroup>
       )}
       {error && <ErrorNote>{error}</ErrorNote>}
       {sortedUsers(list.users).map((user) => {
@@ -156,7 +160,7 @@ function UsersSection({ list, write, reload, onShowDevices, onShowPeers }: { lis
               <span className="flex min-w-0 items-center gap-2">
                 <span className="truncate">{shownUserName(user)}</span>
                 {showAlias && <span className="shrink-0 text-xs text-subtle" title={t("users.aliasHint")}>{t("users.aliasInline", { name: user.name })}</span>}
-                {user.isOwner && <span className="shrink-0 rounded bg-accent/15 px-1.5 text-[11px] text-accent">{t("users.ownerBadge")}</span>}
+                {user.isOwner && <Tag tone="accent">{t("users.ownerBadge")}</Tag>}
               </span>
             }
             detail={
@@ -208,23 +212,23 @@ function UserEditor({ user, list, write, onDeleted }: { user: UserRecord; list: 
     <div className="mt-2 mb-1 ml-8 space-y-3 border-l border-border pl-4" data-testid="user-editor">
       {error && <ErrorNote>{error}</ErrorNote>}
       {profiles && !user.isOwner && (
-        <SettingRow label={t("users.selfName")} hint={t("users.selfNameHint")}>
+        <SettingRow readOnly agents="none" source="host" label={t("users.selfName")} hint={t("users.selfNameHint")}>
           <span className="text-sm text-muted" data-testid="user-self-name">{user.displayName ?? t("users.selfNameUnset")}</span>
         </SettingRow>
       )}
       {/* Your own name comes from Settings → 你; an alias for yourself means nothing. */}
       {!(user.isOwner && profiles) && (
-        <SettingRow label={t(profiles ? "users.alias" : "users.name")} hint={profiles ? t("users.aliasHint") : undefined}>
+        <SettingRow agents="none" source="host" label={t(profiles ? "users.alias" : "users.name")} hint={profiles ? t("users.aliasHint") : undefined}>
           <TextField value={user.name} maxLength={64} label={t(profiles ? "users.alias" : "users.name")} onCommit={(v) => (v.trim() && v.trim() !== user.name ? patch({ name: v.trim() }) : undefined)} />
         </SettingRow>
       )}
-      <SettingRow label={t("users.color")}>
+      <SettingRow agents="none" source="host" label={t("users.color")}>
         <ProjectColorPicker value={user.color ?? ""} onChange={(c) => void patch({ color: c })} />
       </SettingRow>
       {!user.isOwner && <GrantEditor user={user} onSave={(grant) => patch({ grant })} />}
       <PersonKeys user={user} list={list} write={write} />
       {!user.isOwner && (
-        <div className="flex items-center justify-end gap-2 pt-1">
+        <SettingsGroup agents="access" source="host"><div className="flex items-center justify-end gap-2 pt-1">
           <span className="text-xs text-subtle">{t("users.delete")}</span>
           <ArmedRemove
             title={t("users.delete")}
@@ -235,7 +239,7 @@ function UserEditor({ user, list, write, onDeleted }: { user: UserRecord; list: 
               })
             }
           />
-        </div>
+        </div></SettingsGroup>
       )}
     </div>
   );
@@ -264,7 +268,7 @@ function PersonKeys({ user, list, write }: { user: UserRecord; list: UsersList; 
   const remove = (key: PersonKeyRecord) => void write(() => changePersonKeys(api, hostId, user.id, user, (latest) => withoutPersonKey(latest, key.publicKey)), setError, undefined, nameIn(list));
   const rows = keys.length + unknown.length + (self ? 1 : 0);
   return (
-    <SubList title={t("users.person.title")} empty={t("users.person.none")} count={rows}>
+    <SettingsGroup agents="access" source="host"><SubList title={t("users.person.title")} empty={t("users.person.none")} count={rows}>
       {error && <ErrorNote>{error}</ErrorNote>}
       {keys.map((key) => (
         <ListRow
@@ -300,7 +304,7 @@ function PersonKeys({ user, list, write }: { user: UserRecord; list: UsersList; 
           actions={<Button onClick={() => add(self)}>{t("users.person.add")}</Button>}
         />
       )}
-    </SubList>
+    </SubList></SettingsGroup>
   );
 }
 
@@ -361,7 +365,7 @@ function GrantEditor({ user, onSave }: { user: UserRecord; onSave(grant: UserGra
           <div className="text-xs text-subtle">{t(p2 ? "users.grantHintP2" : "users.grantHint")}</div>
         </div>
       </div>
-      <SettingRow label={t("users.grant.allProjects")} hint={t("users.grant.allProjectsHint")}>
+      <SettingRow agents="access" source="host" label={t("users.grant.allProjects")} hint={t("users.grant.allProjectsHint")}>
         <Toggle checked={all} label={t("users.grant.allProjects")} onChange={(on) => {
             const next = toggleAllProjects(draft, on, keptProjects);
             setKeptProjects(next.kept);
@@ -369,16 +373,16 @@ function GrantEditor({ user, onSave }: { user: UserRecord; onSave(grant: UserGra
           }} />
       </SettingRow>
       {!all && (
-        <div className="py-2">
+        <SettingsGroup agents="access" source="host"><div className="py-2">
           <div className="mb-1 text-xs text-muted">{t("users.grant.projects")}</div>
           {choices.projects.length ? <Checklist label={t("users.grant.projects")} choices={choices.projects} chosen={projects} onToggle={(id, on) => setDraft((d) => ({ ...d, projects: toggleId(d.projects === "all" ? [] : d.projects, id, on) }))} /> : <p className="text-xs text-subtle">{t("users.grant.noProjects")}</p>}
-        </div>
+        </div></SettingsGroup>
       )}
-      <div className="py-2">
+      <SettingsGroup agents="access" source="host"><div className="py-2">
         <div className="mb-1 text-xs text-muted">{t("users.grant.standalone")}</div>
         {choices.standalone.length ? <Checklist label={t("users.grant.standalone")} choices={choices.standalone} chosen={draft.standaloneAgents} onToggle={(id, on) => setDraft((d) => ({ ...d, standaloneAgents: toggleId(d.standaloneAgents, id, on) }))} /> : <p className="text-xs text-subtle">{t("users.grant.noStandalone")}</p>}
-      </div>
-      <SettingRow label={t("users.grant.send")} hint={t(p2 ? "users.grant.sendHintP2" : "users.grant.sendHint")}>
+      </div></SettingsGroup>
+      <SettingRow agents="access" source="host" label={t("users.grant.send")} hint={t(p2 ? "users.grant.sendHintP2" : "users.grant.sendHint")}>
         <Toggle checked={draft.send} label={t("users.grant.send")} onChange={(on) => setDraft((d) => ({ ...d, send: on }))} />
       </SettingRow>
       <div className="flex items-center justify-end gap-2 pt-2">

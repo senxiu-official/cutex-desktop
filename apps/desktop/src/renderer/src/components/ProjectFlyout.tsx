@@ -9,7 +9,7 @@ import { contextMenu } from "../lib/contextMenu";
 import { projectMenu } from "../lib/projectMenus";
 import { useProjectMuted } from "../lib/notificationLevelsStore";
 import { hoverOpensFlyout, isCollapsedRow, useFlyoutGate, useProjectFlyout, type ProjectFlyoutState } from "../lib/projectFlyout";
-import { onlineCount, rowKey } from "../lib/sidebar";
+import { groupKey, onlineCount, rowKey } from "../lib/sidebar";
 import { ProjectBadge } from "./ProjectBadge";
 import { NEUTRAL_GROUP, projectBlockLook } from "../lib/projectSeparation";
 import type { GroupLayout } from "../lib/sidebarLayout";
@@ -25,6 +25,7 @@ import { HostMark } from "./HostMark";
 import { ProjectIcon } from "./ProjectIcon";
 import { AgentRowButton, OfflineRow, PinnedRows } from "./AgentRows";
 import { ScriptText } from "./ScriptText";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 const FLYOUT_WIDTH = 288;
 /** An agent row of the flyout list (its own inner buttons, e.g. row actions, keep it open). */
@@ -49,7 +50,7 @@ export function CollapsedProject({ layout }: { layout: GroupLayout }) {
 
   return (
     <>
-    <div ref={fly.rowRef} {...fly.hover} className={block.rowClassName || undefined} style={block.style} onContextMenu={contextMenu(() => projectMenu(group, root, true, null, t))}>
+    <div ref={fly.rowRef} {...fly.hover} className={block.rowClassName || undefined} style={block.style} data-group-key={groupKey(group)} onContextMenu={contextMenu(() => projectMenu(group, root, true, null, t))}>
       <button
         onClick={() => fly.setPinned(!fly.pinned)}
         onKeyDown={fly.onKeyDown}
@@ -64,7 +65,7 @@ export function CollapsedProject({ layout }: { layout: GroupLayout }) {
         <span className="min-w-0 truncate text-xs font-semibold text-muted"><ScriptText text={title} /></span>
         {look && <HostMark host={look} className="shrink-0" />}
         {muted && <BellOff size={10} className="shrink-0 text-subtle" />}
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[10px]">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-caption/[inherit]">
           {layout.needsYouCount > 0 && <span className="font-semibold text-warn">{t("sidebar.needsYouCount", { count: layout.needsYouCount })}</span>}
           {layout.runningCount > 0 && <span className="text-accent">{t("sidebar.runningCount", { count: layout.runningCount })}</span>}
           <span className="text-subtle">{relativeTime(layout.lastActivity)}</span>
@@ -84,6 +85,7 @@ export function CollapsedProject({ layout }: { layout: GroupLayout }) {
  * (Director / needs-you first, running, online idle, then 离线 N). Opening an agent closes it.
  */
 export function ProjectFlyoutPanel({ layout, fly }: { layout: GroupLayout; fly: ProjectFlyoutState }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const { group } = layout;
   const title = group.kind === "project" ? group.name : t("sidebar.independent");
@@ -97,9 +99,9 @@ export function ProjectFlyoutPanel({ layout, fly }: { layout: GroupLayout; fly: 
   if (!fly.open || !rect) return null;
   // The sidebar's right edge (the flyout sits beside it, aligned with the row; kept inside the window).
   const aside = fly.rowRef.current?.closest("aside")?.getBoundingClientRect();
-  const left = Math.max(4, Math.min((aside?.right ?? rect.right) + 4, window.innerWidth - FLYOUT_WIDTH - 8));
+  const left = Math.max(4, Math.min((aside?.right ?? rect.right) + 4, win.innerWidth - FLYOUT_WIDTH - 8));
   // Rows in the lower part of the window open the flyout upwards (bottom-aligned with the row).
-  const place = rect.top > window.innerHeight * 0.55 ? { bottom: Math.max(8, window.innerHeight - rect.bottom - 6) } : { top: Math.max(8, rect.top - 6) };
+  const place = rect.top > win.innerHeight * 0.55 ? { bottom: Math.max(8, win.innerHeight - rect.bottom - 6) } : { top: Math.max(8, rect.top - 6) };
   const all = [...layout.full, ...layout.running, ...layout.idle];
 
   return createPortal(
@@ -112,18 +114,18 @@ export function ProjectFlyoutPanel({ layout, fly }: { layout: GroupLayout; fly: 
       // Opening an agent from the list is the end of the preview.
       onClick={(e) => (e.target as HTMLElement).closest(FLYOUT_AGENT)?.parentElement?.hasAttribute("data-flyout-list") && fly.close()}
       style={{ left, width: FLYOUT_WIDTH, ...place }}
-      className="fixed z-40 flex max-h-[min(70vh,520px)] flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-xl"
+      className="fixed z-50 flex max-h-[min(70vh,520px)] flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-xl"
     >
       <div className="flex items-center gap-1.5 border-b border-border px-2.5 py-1.5">
         {group.kind === "project" && <ProjectBadge icon={icon} badge={group.badge || title.slice(0, 1)} color={group.color} />}
         {/* The directory is only a tooltip here (no path line in the sidebar or its flyout). */}
-        <span className="min-w-0 truncate text-[13px] font-semibold" title={root ?? undefined}><ScriptText text={title} /></span>
+        <span className="min-w-0 truncate text-ui/[inherit] font-semibold" title={root ?? undefined}><ScriptText text={title} /></span>
         {look && <HostMark host={look} className="shrink-0" />}
         {layout.starred && <Star size={10} className="shrink-0 fill-warn text-warn" aria-label={t("sidebar.starred")} />}
-        <span className="ml-auto shrink-0 text-[10px] text-subtle">{onlineCount(group) > 0 ? t("sidebar.online", { count: onlineCount(group) }) : t("sidebar.noAgentsOnline")}</span>
+        <span className="ml-auto shrink-0 text-caption/[inherit] text-subtle">{onlineCount(group) > 0 ? t("sidebar.online", { count: onlineCount(group) }) : t("sidebar.noAgentsOnline")}</span>
       </div>
       {remark && (
-        <div className="truncate px-2.5 pt-1 text-[11px] text-subtle" data-project-remark="" title={`${remark}\n${t("remark.tooltip")}`}>
+        <div className="truncate px-2.5 pt-1 text-caption/[inherit] text-subtle" data-project-remark="" title={`${remark}\n${t("remark.tooltip")}`}>
           <ScriptText text={remark} />
         </div>
       )}
@@ -132,7 +134,7 @@ export function ProjectFlyoutPanel({ layout, fly }: { layout: GroupLayout; fly: 
           <AgentRowButton key={rowKey(row)} row={row} />
         ))}
         {layout.offline.length > 0 && (
-          <div className="flex items-center gap-2 px-1.5 pt-1 pb-0.5 text-[10.5px] text-subtle">
+          <div className="flex items-center gap-2 px-1.5 pt-1 pb-0.5 text-caption/[inherit] text-subtle">
             <span className="shrink-0">{t("sidebar.offlineCount", { count: layout.offline.length })}</span>
             <span className="h-px flex-1 bg-border" />
           </div>
@@ -142,6 +144,6 @@ export function ProjectFlyoutPanel({ layout, fly }: { layout: GroupLayout; fly: 
         ))}
       </div>
     </div>,
-    document.body,
+    win.document.body,
   );
 }

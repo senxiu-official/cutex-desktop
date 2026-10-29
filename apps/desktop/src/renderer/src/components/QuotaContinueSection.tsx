@@ -28,7 +28,7 @@ export function QuotaContinueSection({ hostId, sessionId, view }: { hostId: stri
     }
   };
   return (
-    <div className="flex h-6 items-center gap-2 px-2 text-[11px] text-warn-text" data-testid="quota-continue">
+    <div className="flex h-6 items-center gap-2 px-2 text-caption/[inherit] text-warn-text" data-testid="quota-continue">
       <BatteryWarning size={12} className="shrink-0" />
       <span className="min-w-0 flex-1 truncate" title={t("quotaContinue.hint", { reset: resetAt ?? "?", at })}>
         {t("quotaContinue.strip", { at })}

@@ -37,18 +37,18 @@ function LateAnswer({ d, label, hostId }: { d: AskSummary; label: string; hostId
   };
   return (
     <div className="mt-2" data-testid="late-answer">
-      <div className="mb-0.5 text-[11px] text-subtle" title={t("delegation.peer.lateAnswerHint", { label })}>
+      <div className="mb-0.5 text-caption/[inherit] text-subtle" title={t("delegation.peer.lateAnswerHint", { label })}>
         {t("delegation.peer.lateAnswer")}
       </div>
-      {text === null && late.preview && <div className="text-[13px] whitespace-pre-wrap text-muted">{late.preview}</div>}
+      {text === null && late.preview && <div className="selectable text-ui/[inherit] whitespace-pre-wrap text-muted">{late.preview}</div>}
       {text !== null && <Markdown text={text} streaming={false} />}
-      <div className="mt-0.5 text-[11px] text-subtle">{t("delegation.peer.lateAnswerHint", { label })}</div>
+      <div className="mt-0.5 text-caption/[inherit] text-subtle">{t("delegation.peer.lateAnswerHint", { label })}</div>
       {id && text === null && (
         <button onClick={() => void open()} className="mt-1 text-accent hover:underline">
           {t("delegation.peer.openLateAnswer")}
         </button>
       )}
-      {failed && <div className="text-[11px] text-danger">{id}</div>}
+      {failed && <div className="text-caption/[inherit] text-danger">{id}</div>}
     </div>
   );
 }
@@ -72,14 +72,14 @@ export function DelegationPeerSection({ d, hostId }: { d: AskSummary; hostId: st
   };
   return (
     <div className="mt-2 first:mt-0" data-testid="delegation-peer">
-      <div className="mb-0.5 text-[11px] text-subtle">{t("delegation.peer.remoteTitle")}</div>
+      <div className="mb-0.5 text-caption/[inherit] text-subtle">{t("delegation.peer.remoteTitle")}</div>
       {sync && (
         <div className={`text-xs ${sync === "queued" ? "text-muted" : "text-warn"}`}>
           {t(`delegation.peer.sync.${sync}` as MessageKey, { label, state: remote?.syncState ?? "" })}
         </div>
       )}
-      {err && <div className="truncate text-[11px] text-subtle" title={err}>{err}</div>}
-      {remoteExec && <div className="text-[11px] text-subtle">{t("delegation.peer.remoteState", { state: [stateWord(remoteExec), remoteHold ? stateWord(remoteHold) : null].filter(Boolean).join(" · ") })}</div>}
+      {err && <div className="truncate text-caption/[inherit] text-subtle" title={err}>{err}</div>}
+      {remoteExec && <div className="text-caption/[inherit] text-subtle">{t("delegation.peer.remoteState", { state: [stateWord(remoteExec), remoteHold ? stateWord(remoteHold) : null].filter(Boolean).join(" · ") })}</div>}
       {peer && <ClaimedCaps caps={peer.claimedCaps} />}
       {d.resultUndeliverable && <div className="text-xs text-danger">{t("delegation.peer.resultUndeliverable", { label })}</div>}
       <LateAnswer d={d} label={label} hostId={hostId} />

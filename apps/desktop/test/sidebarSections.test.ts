@@ -1,5 +1,5 @@
 // Sidebar project sections (lib/sidebarSections) + local host marks (lib/scopedSidebarView sidebarMark).
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import type { AgentRow, AgentStatus, ProjectGroup, SidebarGroup } from "../src/renderer/src/lib/sidebar";
 import { layoutSidebar, type LayoutContext } from "../src/renderer/src/lib/sidebarLayout";
@@ -98,6 +98,10 @@ describe("section prefs", () => {
 
   describe("persistence", () => {
     const storage = new Map<string, string>();
+    beforeAll(async () => {
+      await import("../src/renderer/src/lib/prefs");
+    }, 30_000);
+
     beforeEach(() => {
       vi.resetModules();
       storage.clear();

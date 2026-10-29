@@ -1,8 +1,11 @@
 // Only this built-in adapter runs in the trusted renderer. External packages never import here.
 import { defineModule } from "../slots";
 import { pageTitle } from "../react";
-import { PluginsPage } from "./PluginsPage";
 import { pluginManager } from "./controller";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const PluginsPage = lazyPage(() => import("./PluginsPage").then((m) => m.PluginsPage));
 export default defineModule({
   id: "plugins",
   titleKey: "plugins.title",

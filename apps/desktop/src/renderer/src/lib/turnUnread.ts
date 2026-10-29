@@ -13,6 +13,13 @@ export interface TurnMark {
   /** The turn failed (red 「出错」) rather than completed (blue 「完成」). */
   failed: boolean;
   turnId: string | null;
+  /** Unseen finished turns of this agent (the sidebar's unread count; absent in older stored marks = 1). */
+  count?: number;
+}
+
+/** How many finished turns the owner has not seen (the row's unread badge). */
+export function unreadCount(mark: TurnMark | undefined): number {
+  return mark ? Math.max(1, mark.count ?? 1) : 0;
 }
 
 export type TurnMarks = Readonly<Record<string, TurnMark>>;
@@ -37,7 +44,7 @@ export function turnEndOf(method: string | undefined, params: unknown): TurnEnd 
 export function applyTurnEnd(marks: TurnMarks, id: string, end: TurnEnd, at: number, viewing: boolean): TurnMarks {
   if (viewing) return clearMark(marks, id);
   if (end.status === "interrupted") return marks;
-  return { ...marks, [id]: { at, failed: end.status === "failed", turnId: end.turnId } };
+  return { ...marks, [id]: { at, failed: end.status === "failed", turnId: end.turnId, count: unreadCount(marks[id]) + 1 } };
 }
 
 /** Without `id`'s mark (the same object when there is none). */
@@ -69,7 +76,7 @@ function load(): TurnMarks {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Record<string, Partial<TurnMark>>;
     const out: Record<string, TurnMark> = {};
-    for (const [id, m] of Object.entries(raw)) if (m && typeof m.at === "number") out[id] = { at: m.at, failed: !!m.failed, turnId: m.turnId ?? null };
+    for (const [id, m] of Object.entries(raw)) if (m && typeof m.at === "number") out[id] = { at: m.at, failed: !!m.failed, turnId: m.turnId ?? null, ...(typeof m.count === "number" && m.count > 1 ? { count: m.count } : {}) };
     return out;
   } catch {
     return {};
@@ -170,12 +177,12 @@ export function pruneTurnMarks(alive: ReadonlySet<string>): void {
   updateHost(keyFocus(), (marks) => pruneMarks(marks, alive));
 }
 
+/** Called after any change of the marks (any host's). */
+export function subscribeTurnMarks(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 export function useTurnMarks(): TurnMarks {
-  return useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
-    () => current,
-  );
+  return useSyncExternalStore(subscribeTurnMarks, () => current);
 }

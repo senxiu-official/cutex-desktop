@@ -4,6 +4,9 @@ import type { CutexClient } from "./client";
 import { CutexApiError } from "./errors";
 import { SseParser } from "./sse";
 import { ACCESS_CHANGED_EVENT } from "./users";
+import { LIVE_DELTA_EVENT, readLiveDeltaFrame, type LiveDeltaFrame } from "./liveDeltas";
+
+type LiveDeltaResetReason = "reconnect" | "stream_reset" | "buffer_overflow" | "anchor_timeout";
 
 /** `access_changed` (users): the token's user / grant changed; the visible set may differ, so re-bootstrap. */
 export type FeedResyncReason = "stream_changed" | "cursor_expired" | "stream_reset" | "stream_error" | "access_changed";
@@ -15,6 +18,10 @@ export interface FeedPosition {
 }
 
 export interface EventFeedOptions extends FeedPosition {
+  /** Host-wide background refresh only; active session feeds bypass background admission. */
+  background?: boolean;
+  /** Opt in to non-durable live text; never advances the durable cursor. */
+  liveDeltas?: boolean;
   /** Scope to one session (`cutexSessionId` filter). Omit for the host-wide stream. */
   cutexSessionId?: string;
   /** Skip the retained backlog and start at the live tail (for host-wide UI refresh feeds). */
@@ -30,6 +37,14 @@ export interface EventFeedOptions extends FeedPosition {
 
 export interface EventFeedHandlers {
   event(envelope: EventEnvelope): void;
+  liveDelta?(frame: LiveDeltaFrame): void;
+  /**
+   * Invalidate existing temporary live text; completion repairs it. Emitted on
+   * connection loss, stream reset, or anchor-buffer loss, never on a successful
+   * open. Reconnect reset precedes the next catch-up events and live status.
+   * Does not invalidate durable state or fence items started after this callback.
+   */
+  liveReset?(): void;
   /** Raw SSE chunk bytes and delivered envelope count; metadata only, best effort. */
   traffic?(sample: { bytes: number; events: number }): void;
   /** Our view is invalid (new stream, expired cursor, crash reset). Feed has stopped; re-bootstrap and start a new feed. */
@@ -39,6 +54,9 @@ export interface EventFeedHandlers {
 }
 
 const PAGE_LIMIT = 1000;
+const LIVE_BUFFER_BYTES = 256 * 1024;
+const LIVE_BUFFER_FRAMES = 256;
+const LIVE_ANCHOR_TIMEOUT_MS = 5_000;
 
 /**
  * Durable event subscription: pages `/v2/events` until caught up, then follows
@@ -49,8 +67,13 @@ export class EventFeed {
   private streamId: string | undefined;
   private after: string | undefined;
   private lastSequence = 0;
+  /** Includes a fully applied catch-up checkpoint, even for an empty filtered page. */
+  private liveAppliedSequence = 0;
   private controller: AbortController | null = null;
   private stopped = false;
+  private livePending: { frame: LiveDeltaFrame; bytes: number; expires: number }[] = [];
+  private liveBytes = 0;
+  private liveTimer: ReturnType<typeof setTimeout> | undefined;
   /** The next reconnect wait; `reconnectNow` resets it. */
   private backoff: number;
   /** Ends the reconnect wait in progress early (null while not waiting). */
@@ -76,6 +99,7 @@ export class EventFeed {
 
   stop(): void {
     this.stopped = true;
+    this.clearLive();
     this.controller?.abort();
     this.wake?.();
   }
@@ -105,6 +129,7 @@ export class EventFeed {
           this.backoff = minBackoff;
           this.handlers.status?.("live");
         });
+        if (!this.stopped) this.resetLive("reconnect");
       } catch (error) {
         if (this.stopped) return;
         if (error instanceof CutexApiError && error.requiresResync) {
@@ -121,6 +146,7 @@ export class EventFeed {
           this.halt(error.reason, error.detail);
           return;
         }
+        this.resetLive("reconnect");
         this.handlers.status?.("retrying", error);
       }
       if (this.stopped) return;
@@ -145,6 +171,7 @@ export class EventFeed {
 
   private halt(reason: FeedResyncReason, detail?: unknown): void {
     this.stopped = true;
+    this.resetLive("stream_reset");
     this.controller?.abort();
     this.handlers.resync(reason, detail);
   }
@@ -163,7 +190,7 @@ export class EventFeed {
           after: this.after,
           limit: PAGE_LIMIT,
           cutexSessionId: this.options.cutexSessionId,
-        }, { signal: controller.signal }), controller);
+        }, { signal: controller.signal, background: this.options.background, retryable: false }), controller);
         // An injected transport may finish despite abort. Never deliver its stale page.
         if (this.stopped) return;
         if (this.streamId && page.streamId !== this.streamId) {
@@ -176,7 +203,13 @@ export class EventFeed {
           if (this.stopped) return;
         }
         if (page.nextCursor) this.after = page.nextCursor;
-        if (!page.hasMore) return;
+        if (!page.hasMore) {
+          const checkpoint = page.checkpoint;
+          if (checkpoint?.streamId === this.streamId && Number.isSafeInteger(checkpoint.sequence) && checkpoint.sequence >= 0) {
+            this.liveAppliedSequence = Math.max(this.liveAppliedSequence, checkpoint.sequence);
+          }
+          return;
+        }
       }
     } finally {
       if (this.controller === controller) this.controller = null;
@@ -200,10 +233,11 @@ export class EventFeed {
     const url = this.client.url("/v2/events/stream", {
       streamId: this.streamId,
       cutexSessionId: this.options.cutexSessionId,
+      liveDeltas: this.options.liveDeltas === true ? "true" : undefined,
     });
 
     try {
-      const response = await this.withReadDeadline(this.client.fetchRaw(url, { headers, signal: controller.signal }), controller, (late) => {
+      const response = await this.withReadDeadline(this.client.fetchRaw(url, { headers, signal: controller.signal }, { background: this.options.background, retryable: false }), controller, (late) => {
         void late.body?.cancel().catch(() => {});
       });
       body = response.body;
@@ -235,6 +269,12 @@ export class EventFeed {
         try {
           for (const message of parser.push(decoder.decode(value, { stream: true }))) {
             if (this.stopped) return;
+            if (message.event === LIVE_DELTA_EVENT) {
+              // WHATWG SSE ids are sticky. Inherited (or explicit) ids on live traffic
+              // must never reach advance(), Last-Event-ID, or durable telemetry counts.
+              if (this.options.liveDeltas) this.receiveLive(message.data);
+              continue;
+            }
             if (message.event === SSE_STREAM_ERROR) {
               throw new ResyncSignal("stream_error", safeJson(message.data));
             }
@@ -289,7 +329,69 @@ export class EventFeed {
     if (envelope.cutex?.method === "cutex/stream/reset") {
       throw new ResyncSignal("stream_reset", envelope.cutex.params);
     }
+    this.liveAppliedSequence = Math.max(this.liveAppliedSequence, envelope.sequence);
+    this.flushLive();
     return true;
+  }
+
+  private receiveLive(data: string): void {
+    const frame = readLiveDeltaFrame(data);
+    if (!frame || !this.handlers.liveDelta || (this.options.cutexSessionId && frame.cutexSessionId !== this.options.cutexSessionId)) return;
+    // Gaps invalidate already verified text; they must not wait on a missing/future
+    // anchor. A foreign stream still cannot invalidate the current subscription.
+    if (frame.kind === "gap") {
+      if (!frame.anchor || frame.anchor.streamId === this.streamId) this.handlers.liveDelta(frame);
+      return;
+    }
+    // Appended text requires a reachable durable checkpoint and verified start.
+    if (!frame.anchor || frame.anchor.streamId !== this.streamId) return;
+    if (frame.anchor.sequence <= this.liveAppliedSequence) {
+      this.handlers.liveDelta(frame);
+      return;
+    }
+    const bytes = new TextEncoder().encode(data).byteLength;
+    if (this.liveBytes + bytes > LIVE_BUFFER_BYTES || this.livePending.length >= LIVE_BUFFER_FRAMES) {
+      this.resetLive("buffer_overflow");
+      return;
+    }
+    this.livePending.push({ frame, bytes, expires: Date.now() + LIVE_ANCHOR_TIMEOUT_MS });
+    this.liveBytes += bytes;
+    if (!this.liveTimer) this.liveTimer = setTimeout(() => this.resetLive("anchor_timeout"), LIVE_ANCHOR_TIMEOUT_MS);
+  }
+
+  private flushLive(): void {
+    if (!this.livePending.length) return;
+    if (this.livePending.some((entry) => entry.expires <= Date.now())) {
+      this.resetLive("anchor_timeout");
+      return;
+    }
+    const pending = this.livePending;
+    this.clearLive();
+    for (const entry of pending) {
+      if (this.stopped) break;
+      const anchor = entry.frame.anchor!;
+      if (anchor.streamId !== this.streamId) continue;
+      if (anchor.sequence <= this.liveAppliedSequence) this.handlers.liveDelta?.(entry.frame);
+      else {
+        this.livePending.push(entry);
+        this.liveBytes += entry.bytes;
+      }
+    }
+    if (this.livePending.length) {
+      this.liveTimer = setTimeout(() => this.resetLive("anchor_timeout"), Math.max(0, this.livePending[0]!.expires - Date.now()));
+    }
+  }
+
+  private clearLive(): void {
+    clearTimeout(this.liveTimer);
+    this.liveTimer = undefined;
+    this.livePending = [];
+    this.liveBytes = 0;
+  }
+
+  private resetLive(_reason: LiveDeltaResetReason): void {
+    this.clearLive();
+    if (this.options.liveDeltas) this.handlers.liveReset?.();
   }
 }
 

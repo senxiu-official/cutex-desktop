@@ -13,9 +13,10 @@
 import { openModifiers, type OpenModifiers } from "../lib/openModifiers";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
-import { createContext, memo, useContext, type AnchorHTMLAttributes, type ComponentType, type HTMLAttributes, type ImgHTMLAttributes, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { createContext, memo, useContext, useMemo, useRef, useState, type AnchorHTMLAttributes, type ComponentType, type HTMLAttributes, type ImgHTMLAttributes, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { rehypeFontRuns } from "../lib/rehypeFontRuns";
 import { createHastCachePlugin } from "../lib/markdownCache";
+import { createBlockParser, withoutPartialFence } from "../lib/markdownBlocks";
 import { PreserveTextSelection } from "./PreserveTextSelection";
 import { Image as ImageIcon } from "lucide-react";
 import { defaultComponents, defaultRehypePlugins, Streamdown } from "streamdown";
@@ -33,9 +34,11 @@ import { fileKind, isThumbnailPath, THUMBNAIL_MAX_BYTES, type FileKind } from ".
 import { FILE_KIND_ICON } from "../lib/fileKindIcons";
 import { useThumbnail } from "../lib/fileThumbnails";
 import { useUiPrefs } from "../lib/prefs";
-import { openFile, openHostFile } from "../lib/sideOpen";
+import { openHostPath, openPath } from "../lib/sideOpen";
 import { escapeCutexHref, parseCutexLink, unescapeCutexHref } from "../lib/cutexLinks";
 import { CutexImage, CutexLink } from "./CutexLink";
+import { parseAgentMention } from "../lib/agentMentions";
+import { AgentMentionChip } from "./AgentMentionChip";
 import { CodeBlockScope, fenceLanguage } from "../lib/codeBlockScope";
 import { ReplyCodeBlock } from "./ReplyCodeBlock";
 import { useStreamdownTranslations } from "../lib/streamdownTranslations";
@@ -156,8 +159,8 @@ function useFileLink(href: string | undefined): FileLink | null {
       path: ref.path,
       title: ref.line ? `${rel}:${ref.line}` : rel,
       dotted: false,
-      activate: (_el, mods) => void openFile(rel, ref.line, "link", mods),
-      menu: () => fileMenu(rel, root, t),
+      activate: (_el, mods) => void openPath(rel, ref.line, "link", mods),
+      menu: () => fileMenu(rel, root, t, { hostId }),
       key: `${hostId}|${scopeKey(scope)}|${rel}`,
       read: () => hostApi(hostId).fsFile(scope, rel, THUMBNAIL_MAX_BYTES),
     };
@@ -168,8 +171,8 @@ function useFileLink(href: string | undefined): FileLink | null {
   const shown = ref.abs ?? ref.path;
   const full = ref.line ? `${shown}:${ref.line}` : shown;
   const abs = ref.abs;
-  const preview = hostRead && abs ? (mods?: OpenModifiers) => void openHostFile(abs, ref.line, mods) : null;
-  const menu = () => outsideFileMenu(ref, full, remote, t, preview);
+  const preview = hostRead && abs ? (mods?: OpenModifiers) => void openHostPath(abs, ref.line, mods) : null;
+  const menu = () => outsideFileMenu(ref, full, remote, t, preview, hostId);
   return {
     path: ref.path,
     title: full,
@@ -209,7 +212,7 @@ function Thumbnail({ link, alt, fallback }: { link: FileLink; alt: string; fallb
           className="block h-auto max-h-80 w-auto max-w-[min(100%,320px)] cursor-zoom-in rounded-md border border-border bg-surface-2 object-contain"
         />
       ) : (
-        <span aria-hidden className="block h-24 w-40 animate-pulse rounded-md border border-border bg-surface-2" />
+        <span aria-hidden className="block h-24 w-40 animate-skeleton rounded-md border border-border bg-surface-2" />
       )}
     </span>
   );
@@ -308,6 +311,13 @@ function FileAwareImage({ src: rawSrc, alt }: ImgHTMLAttributes<HTMLImageElement
 function MarkdownLink(props: AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown }) {
   const href = unescapeCutexHref(props.href);
   const target = href ? parseCutexLink(href) : null;
+  if (href && target?.kind === "agent") {
+    const mention = parseAgentMention(href);
+    const text = typeof props.children === "string" ? props.children.replace(/^@/, "") : "";
+    // `[@name@host](cutex:agent/<id>@host)`: the chip shows the name; the id picks the agent, the host is its address.
+    const label = (mention?.host && text.endsWith(`@${mention.host}`) ? text.slice(0, -mention.host.length - 1) : text) || (mention?.id ?? "");
+    return mention ? <AgentMentionChip id={mention.id} name={label} host={mention.host} /> : <span>{props.children}</span>;
+  }
   if (href && target) return <CutexLink href={href} target={target}>{props.children}</CutexLink>;
   return <FileAwareLink {...props} />;
 }
@@ -323,13 +333,15 @@ type CodeProps = HTMLAttributes<HTMLElement> & { node?: unknown; "data-block"?: 
 const DefaultCode = defaultComponents.code as ComponentType<CodeProps>;
 
 /**
- * Inline code, untagged / mermaid blocks and any Markdown outside a reply scope: streamdown's own.
- * A tagged block in a reply scope asks the `timeline.codeBlockAction` items (§22).
+ * Inline code, mermaid blocks and any Markdown outside a reply scope: streamdown's own. Every other block in a
+ * reply scope is a ReplyCodeBlock (it asks the `timeline.codeBlockAction` items, §22), untagged ones too: a fence
+ * streams in before its language, and switching component type when the tag arrived remounted the block
+ * (it flashed; flicker recorder 2026-10-26).
  */
 function MarkdownCode(props: CodeProps) {
   const scope = useContext(CodeBlockScope);
   const language = fenceLanguage(props.className);
-  if (!scope || !("data-block" in props) || !language || language.toLowerCase() === "mermaid") return <DefaultCode {...props} />;
+  if (!scope || !("data-block" in props) || language.toLowerCase() === "mermaid") return <DefaultCode {...props} />;
   return <ReplyCodeBlock {...props} scope={scope} language={language} />;
 }
 
@@ -342,17 +354,28 @@ const components = { a: MarkdownLink, img: MarkdownImage, code: MarkdownCode };
  */
 export const Markdown = memo(function Markdown({ text, streaming = false, compact = false, document = false, relativeFiles = true, uncappedCode = false }: { text: string; streaming?: boolean; /** 13px (reasoning text). */ compact?: boolean; document?: boolean; relativeFiles?: boolean; /** Code blocks grow to their full height (a whole file shown as one block; `document` implies it, and uncaps tables too); default: streamdown's 400px cap with an inner scroll. */ uncappedCode?: boolean }) {
   const translations = useStreamdownTranslations();
+  // Streaming: this message's own block split, re-splitting only its unsettled tail (lib/markdownBlocks).
+  const [blocks] = useState(createBlockParser);
+  // A message that streamed here keeps streamdown's block tree when it finishes: its static mode renders the
+  // whole text as one tree, so the switch remounted every paragraph, list and code block of the reply at the
+  // turn end (flicker recorder 2026-10-26). A message mounted complete renders static (hast cache) as before.
+  const streamed = useRef(false);
+  if (streaming) streamed.current = true;
+  const blockMode = streaming || streamed.current;
+  // A new token per text / mode (not the whole text spliced into a string on every update).
+  const revision = useMemo(() => ({ text, streaming }), [text, streaming]);
   return (
     <RelativeFiles.Provider value={relativeFiles}>
-      <PreserveTextSelection revision={`${streaming ? "streaming" : "static"}:${text}`}>
+      <PreserveTextSelection revision={revision}>
         <Streamdown
           className={`markdown leading-relaxed ${document ? "markdown-document " : ""}${compact ? "text-[length:calc(var(--chat-font-size,14px)-1px)]" : "text-[length:var(--chat-font-size,14px)]"}`}
-          mode={streaming ? "streaming" : "static"}
+          mode={blockMode ? "streaming" : "static"}
           isAnimating={streaming}
           parseIncompleteMarkdown={streaming}
+          {...(blockMode ? { parseMarkdownIntoBlocksFn: blocks } : {})}
           plugins={plugins}
           components={components}
-          rehypePlugins={streaming ? rehypePlugins : staticRehypePlugins}
+          rehypePlugins={blockMode ? rehypePlugins : staticRehypePlugins}
           shikiTheme={["github-light", "github-dark"]}
           translations={translations}
           // A whole document or file (side preview, artifact) scrolls as one: no inner height caps on its code
@@ -360,7 +383,7 @@ export const Markdown = memo(function Markdown({ text, streaming = false, compac
           {...(uncappedCode || document ? { codeBlockMaxHeight: Number.POSITIVE_INFINITY } : {})}
           {...(document ? { tableMaxHeight: Number.POSITIVE_INFINITY } : {})}
         >
-          {text}
+          {streaming ? withoutPartialFence(text) : text}
         </Streamdown>
       </PreserveTextSelection>
     </RelativeFiles.Provider>

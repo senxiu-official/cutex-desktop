@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import type { SidebarSnapshot } from "../src/shared/ipc";
 
-vi.mock("../src/renderer/src/store", () => ({ useApp: () => null, pinnedOn: (hostId: string) => new Set(hostId === "hosta" ? ["t-pinned"] : []) }));
+vi.mock("../src/renderer/src/store", () => ({ useApp: Object.assign(() => null, { getState: () => ({}) }), featuresOf: () => new Set(), pinnedOn: (hostId: string) => new Set(hostId === "hosta" ? ["t-pinned"] : []) }));
 
 const { agentIndex, lookOf, sessionProfileName } = await import("../src/renderer/src/lib/agentLook");
 
@@ -62,6 +62,26 @@ describe("lookOf", () => {
     expect(lookOf(entry(session("a"), "#123456"), gpt, null).color).toBe("#123456");
   });
 
+  it("a Profile without its own model takes the session's (owner 2026-10-28: Shared agents created with a per-session model)", () => {
+    // Profile Shared carries no model; the session's runtimeDefaults says gpt-6-astra → openai, not "other".
+    const noModel = { ...gpt, model: null };
+    const withDefaults = session("osprey", { runtimeDefaults: { model: "gpt-6-astra" } as never });
+    expect(lookOf(entry(withDefaults), noModel, null)).toMatchObject({ family: "openai", themes: ["gems"] });
+    const withNext = session("kittiwake", { effectiveNextLaunch: { profile: "omega", source: "session_configured", model: "gpt-6-astra" } });
+    expect(lookOf(entry(withNext), noModel, null).family).toBe("openai");
+    // the Profile's own model still wins; no facts anywhere → other (no portrait pool, nothing borrowed)
+    expect(lookOf(entry(session("a")), gpt, null).family).toBe("openai");
+    expect(lookOf(entry(session("bare", { profile: null, configuredProfile: null, launchedProfile: null })), noModel, null).family).toBe("other");
+    // A Claude runtime with no model string is claude by itself — the "Profile not loaded" test above covers it
+    // (`claude_subscription` backend → animals); a Claude creator is never inherited through an OpenAI Profile.
+  });
+
+  it("the cached entry carries follow intent and an explicit empty fixed letter", () => {
+    expect(lookOf(entry(session("follow", { avatarMode: "inherit", avatar: null })), null, null)).toMatchObject({ avatarMode: "inherit", fixedLetter: false });
+    expect(lookOf(entry(session("letter", { avatarMode: "fixed", avatar: null })), null, null)).toMatchObject({ avatarMode: "fixed", fixedLetter: true });
+    expect(lookOf(entry(session("emoji", { avatarMode: "fixed", avatar: { kind: "emoji", value: "E" } })), null, null)).toMatchObject({ avatarMode: "fixed", fixedLetter: false });
+  });
+
   it("Profile without a colour → the Profile name's hash colour", () => {
     const look = lookOf(entry(session("a")), { ...gpt, appearance: { color: null, effectiveColor: null, providerCategory: null } }, null);
     expect(look.color).toMatch(/^#[0-9a-f]{6}$/);
@@ -82,5 +102,26 @@ describe("lookOf", () => {
   it("the profile a session names: launched, else configured", () => {
     expect(sessionProfileName(session("a", { launchedProfile: null, configuredProfile: "GLM" }))).toBe("GLM");
     expect(sessionProfileName(session("a", { launchedProfile: "claude" }))).toBe("claude");
+  });
+});
+
+describe("portraitsWornIn", () => {
+  it("the pack pictures stored in one project on one host; other projects, hosts and avatar kinds don't count", async () => {
+    const { portraitsWornIn } = await import("../src/renderer/src/lib/agentLook");
+    const pic = (stem: string) => ({ avatar: { kind: "icon" as const, value: `portrait:p/office/${stem}` } });
+    const inProject = (sessions: SessionResource[], projects: Record<string, string>): SidebarSnapshot => ({
+      ...snapshot(sessions),
+      hostRows: Object.fromEntries(sessions.map((s) => [s.cutexSessionId, { id: s.cutexSessionId, projectId: projects[s.cutexSessionId] ?? null } as never])),
+    });
+    const index = agentIndex({
+      hosts: { active: "local" },
+      sidebar: inProject([session("a", pic("claude-v1")), session("b", pic("claude-v2")), session("c", { avatar: { kind: "emoji", value: "🦊" } }), session("d", pic("gpt-v1")), session("e")], { a: "p1", b: "p1", c: "p1", d: "p2" }),
+      byHost: { hosta: { sidebar: inProject([session("x", pic("claude-v3"))], { x: "p1" }) } },
+      pinned: new Set<string>(),
+    });
+    expect([...portraitsWornIn(index, "local", "p1")].sort()).toEqual(["p/office/claude-v1", "p/office/claude-v2"]);
+    expect([...portraitsWornIn(index, "local", "p2")]).toEqual(["p/office/gpt-v1"]);
+    expect([...portraitsWornIn(index, "hosta", "p1")]).toEqual(["p/office/claude-v3"]);
+    expect(portraitsWornIn(index, "local", null).size).toBe(0);
   });
 });

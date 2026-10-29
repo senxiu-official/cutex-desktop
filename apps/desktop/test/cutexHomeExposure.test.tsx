@@ -45,7 +45,7 @@ vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
   useI18n: () => ({ t: (key: string) => key, locale: "en" }),
 }));
 vi.mock("../src/renderer/src/lib/remoteMode", () => ({ useFolderPickBlocked: () => false, pickDirectory: async () => fx.picked }));
-vi.mock("../src/renderer/src/lib/targetHost", () => ({ useTargetHostId: () => "local" }));
+vi.mock("../src/renderer/src/lib/targetHost", async (importOriginal) => ({ ...(await importOriginal<object>()), useTargetHostId: () => "local" }));
 vi.mock("../src/renderer/src/lib/hostHome", () => ({ useHostHomeOf: () => fx.home, loadHostHome: async () => fx.home }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

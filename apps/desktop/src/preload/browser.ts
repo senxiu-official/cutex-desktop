@@ -22,6 +22,8 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
         return options.invoke(BROWSER_CHANNEL, request, binding);
       };
       return {
+        dismissLoginWarning: (tabKey, origin) => call({ op: "dismissLoginWarning", tabKey, origin }) as Promise<void>,
+        openOwnerCopy: tabKey => call({ op: "openOwnerCopy", tabKey }) as Promise<{ tabKey: string; url: string }>,
         reserveOwnerTab: () => call({ op: "reserveOwnerTab" }) as Promise<{ tabKey: string }>,
         list: () => call({ op: "list" }) as Promise<BrowserTabView[]>,
         turnShots: (sessionId, turnId) => call({ op: "turnShots", sessionId, turnId }) as Promise<BrowserTurnShot[]>,
@@ -29,6 +31,8 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
         toolItem: (sessionId, turnId, itemId) => call({ op: "toolItem", sessionId, turnId, itemId }) as Promise<BrowserToolItem>,
         agents: () => call({ op: "agents" }) as Promise<BrowserAgentView[]>,
         settings: agentOpenApproval => call({ op: "settings", ...(agentOpenApproval !== undefined ? { agentOpenApproval } : {}) }) as Promise<BrowserHostSettings>,
+        desktopLoopback: enabled => call({ op: "desktopLoopback", ...(enabled !== undefined ? { enabled } : {}) }) as Promise<{ enabled: boolean }>,
+        desktopLoopbackChallenge: (tabKey, url) => call({ op: "desktopLoopbackChallenge", tabKey, url }) as Promise<{ nonce: string }>,
         clearIdempotency: cutexSessionId => call({ op: "clearIdempotency", ...(cutexSessionId ? { cutexSessionId } : {}) }) as Promise<BrowserIdempotencyClearResult>,
         profileTools: (profile, enabled) => call({ op: "profileTools", profile, ...(enabled !== undefined ? { enabled } : {}) }) as Promise<{ enabled: boolean }>,
         grantAgent: (tabKey, sessionId, settings, approvalId, expected, options) => call({ op: "grantAgent", tabKey, sessionId, settings, expected, ...(approvalId ? { approvalId } : {}), ...(approvalId && options?.remember ? { remember: true as const } : {}) }) as Promise<void>,
@@ -42,9 +46,10 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
         resumeLease: (tabKey, leaseId, settings) => call({ op: "resumeLease", tabKey, leaseId, settings }) as Promise<void>,
         pauseLease: (tabKey, leaseId) => call({ op: "pauseLease", tabKey, leaseId }) as Promise<void>,
         openRefused: (requestId, code) => call({ op: "openRefused", requestId, code }) as Promise<void>,
-        open: (tabKey, url, receipt, identity) => call({ op: "open", tabKey, url, ...(receipt ? { receipt } : {}), ...(identity ? { identity } : {}) }) as Promise<BrowserTabMount>,
-        navigate: (tabKey, url) => call({ op: "navigate", tabKey, url }) as Promise<void>,
+        open: (tabKey, url, receipt, identity, options) => call({ op: "open", tabKey, url, ...(receipt ? { receipt } : {}), ...(identity ? { identity } : {}), ...(options?.desktopLoopback ? { desktopLoopback: options.desktopLoopback } : {}) }) as Promise<BrowserTabMount>,
+        navigate: (tabKey, url, options) => call({ op: "navigate", tabKey, url, ...(options?.desktopLoopback ? { desktopLoopback: options.desktopLoopback } : {}) }) as Promise<void>,
         ownerInput: (tabKey, kind) => call({ op: "ownerInput", tabKey, kind }) as Promise<void>,
+        setZoom: (tabKey, action) => call({ op: "setZoom", tabKey, action }) as Promise<void>,
         back: tabKey => call({ op: "back", tabKey }) as Promise<void>,
         forward: tabKey => call({ op: "forward", tabKey }) as Promise<void>,
         reload: tabKey => call({ op: "reload", tabKey }) as Promise<void>,

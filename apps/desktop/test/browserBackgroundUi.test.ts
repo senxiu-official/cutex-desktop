@@ -5,7 +5,8 @@ import type { BrowserTabMount } from "../src/shared/browser";
 import { restoreBrowser, safeBrowserThumbnail } from "../src/renderer/src/modules/browser/browserState";
 import { createGuestLifecycle } from "../src/renderer/src/modules/browser/guestLifecycle";
 import { browserThumbnails, createBrowserThumbnails } from "../src/renderer/src/modules/browser/thumbnails";
-import { zhCN, en } from "../src/renderer/src/modules/browser/i18n";
+import { zhCN } from "../src/renderer/src/modules/browser/i18n";
+import { en } from "../src/renderer/src/modules/browser/i18n.en";
 
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string, values?: Record<string, string>) => values ? `${key}:${JSON.stringify(values)}` : key }) }));
 import { BrowserBackgroundView } from "../src/renderer/src/modules/browser/BrowserBackgroundView";

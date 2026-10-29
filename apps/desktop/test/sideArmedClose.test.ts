@@ -90,16 +90,16 @@ describe("side close confirms in place", () => {
   it("a running terminal: the rows arm with what closing ends", () => {
     warnings.set(ids[1]!, "终端 2 将被结束");
     expect(cardCloseWarnings(cardId())).toEqual(["终端 2 将被结束"]);
-    expect(actions(cardMenu(cardId())).at(-1)!.armed).toBe("再点一次关闭 · 终端 2 将被结束");
-    expect(actions(pageMenu(pageId())).find((a) => a.danger)!.armed).toBe("再点一次关闭 · 终端 2 将被结束");
+    expect(actions(cardMenu(cardId())).at(-1)!.armed).toBe("再左键点击一次关闭 · 终端 2 将被结束");
+    expect(actions(pageMenu(pageId())).find((a) => a.danger)!.armed).toBe("再左键点击一次关闭 · 终端 2 将被结束");
     // 关闭其他 from t1 ends t2; from t2 it ends nothing
-    expect(actions(tabMenu(ids[0]!)).find((a) => a.label === "关闭其他")!.armed).toBe("再点一次关闭 · 终端 2 将被结束");
+    expect(actions(tabMenu(ids[0]!)).find((a) => a.label === "关闭其他")!.armed).toBe("再左键点击一次关闭 · 终端 2 将被结束");
     expect(actions(tabMenu(ids[1]!)).find((a) => a.label === "关闭其他")!.armed).toBeUndefined();
     // the tab's own 关闭: arms only for the tab that ends something
-    expect(actions(tabMenu(ids[1]!)).at(-1)!.armed).toBe("再点一次关闭 · 终端 2 将被结束");
+    expect(actions(tabMenu(ids[1]!)).at(-1)!.armed).toBe("再左键点击一次关闭 · 终端 2 将被结束");
     expect(actions(tabMenu(ids[0]!)).at(-1)!.armed).toBeUndefined();
     warnings.set(ids[0]!, "终端 1 将被结束");
-    expect(actions(cardMenu(cardId())).at(-1)!.armed).toBe("再点一次关闭 · 终端 1 将被结束 · 终端 2 将被结束");
+    expect(actions(cardMenu(cardId())).at(-1)!.armed).toBe("再左键点击一次关闭 · 终端 1 将被结束 · 终端 2 将被结束");
   });
 
   it("the close itself never asks (the confirm happened in place)", () => {

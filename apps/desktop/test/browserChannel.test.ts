@@ -22,9 +22,15 @@ function fixture(initiallyEnabled = true) {
 describe("browser narrow channel parsing", () => {
   it.each([
     { op: "list" }, { op: "setEnabled", enabled: false }, { op: "resetOrigins" }, { op: "reserveOwnerTab" },
+    { op: "dismissLoginWarning", tabKey: "side", origin: "https://login.example" },
+    { op: "openOwnerCopy", tabKey: "side" },
     { op: "open", tabKey: "side", url: "about:blank" },
+    { op: "open", tabKey: "side", url: "http://localhost:26111/", desktopLoopback: "a".repeat(64) },
     { op: "open", tabKey: "side", url: "about:blank", receipt: { src: "about:blank#fixture", webContentsId: 4 } },
     { op: "navigate", tabKey: "side", url: "http://localhost:26111/" },
+    { op: "navigate", tabKey: "side", url: "http://localhost:26111/", desktopLoopback: "a".repeat(64) },
+    { op: "desktopLoopback" }, { op: "desktopLoopback", enabled: true },
+    { op: "desktopLoopbackChallenge", tabKey: "side", url: "http://localhost:26111/" },
     ...BROWSER_OWNER_INPUT_KINDS.map(kind => ({ op: "ownerInput", tabKey: "side", kind })),
     { op: "back", tabKey: "side" }, { op: "forward", tabKey: "side" },
     { op: "reload", tabKey: "side" }, { op: "stop", tabKey: "side" },
@@ -33,10 +39,16 @@ describe("browser narrow channel parsing", () => {
   it.each([
     null, [], {}, { op: "grant", tabKey: "side" }, { op: "evaluate", tabKey: "side" },
     { op: "reserveOwnerTab", tabKey: "forged-old-agent" }, { op: "resetOrigins", path: "arbitrary" },
+    { op: "dismissLoginWarning", tabKey: "side", origin: "https://login.example/path" },
+    { op: "dismissLoginWarning", tabKey: "side", origin: "https://login.example", hostId: "other" },
+    { op: "openOwnerCopy", tabKey: "side", url: "https://forged.example" },
+    { op: "openOwnerCopy", tabKey: "side", pool: "owner" },
     { op: "list", hostId: "ssh-other" }, { op: "setEnabled", enabled: "yes" },
     { op: "setEnabled", enabled: true, hostId: "local" }, { op: "close", tabKey: "side", unmount: 1 },
     { op: "open", tabKey: "side", url: "about:blank", partition: "persist:browser-local" },
     { op: "navigate", tabKey: "side", url: "http://localhost/\n" },
+    { op: "navigate", tabKey: "side", url: "http://localhost/", desktopLoopback: false },
+    { op: "desktopLoopback", enabled: "yes" }, { op: "desktopLoopback", hostId: "other" },
     { op: "navigate", tabKey: "side", url: "x".repeat(8001) },
     { op: "stop", tabKey: "" }, { op: "stop", tabKey: "bad\0id" },
     { op: "ownerInput", tabKey: "side" }, { op: "ownerInput", tabKey: "side", kind: "hover" },
@@ -129,8 +141,16 @@ describe("browser preload bindings", () => {
     const bridge = browserBridge({ invoke, binding: () => ({ hostId: "remote", epoch: "epoch", focus: true }), subscribe: () => () => {} });
     const browser = bridge.forHost("remote");
     expect(browser).not.toHaveProperty("grant");
-    expect(Object.keys(browser).sort()).toEqual(["agents", "back", "claimAllowRevoke", "claimAllows", "claimAudit", "claimOpen", "claimPolicy", "clearIdempotency", "close", "forward", "grantAgent", "holdReady", "list", "navigate", "open", "openRefused", "ownerInput", "pauseLease", "profileTools", "releaseLease", "reload", "reserveOwnerTab", "resumeLease", "settings", "stop", "toBackground", "toolItem", "turnShot", "turnShots"]);
+    expect(Object.keys(browser).sort()).toEqual(["agents", "back", "claimAllowRevoke", "claimAllows", "claimAudit", "claimOpen", "claimPolicy", "clearIdempotency", "close", "desktopLoopback", "desktopLoopbackChallenge", "dismissLoginWarning", "forward", "grantAgent", "holdReady", "list", "navigate", "open", "openOwnerCopy", "openRefused", "ownerInput", "pauseLease", "profileTools", "releaseLease", "reload", "reserveOwnerTab", "resumeLease", "setZoom", "settings", "stop", "toBackground", "toolItem", "turnShot", "turnShots"]);
     expect(invoke).not.toHaveBeenCalled();
+  });
+  it("binds login dismissal and owner-copy requests to the source host without accepting a target URL", async () => {
+    const invoke = vi.fn(async () => undefined);
+    const bridge = browserBridge({ invoke, binding: () => ({ hostId: "remote", epoch: "current" }), subscribe: () => () => {} });
+    await bridge.forHost("remote").dismissLoginWarning("source", "https://login.example");
+    expect(invoke).toHaveBeenLastCalledWith(BROWSER_CHANNEL, { op: "dismissLoginWarning", tabKey: "source", origin: "https://login.example" }, { hostId: "remote", epoch: "current" });
+    await bridge.forHost("remote").openOwnerCopy("source");
+    expect(invoke).toHaveBeenLastCalledWith(BROWSER_CHANNEL, { op: "openOwnerCopy", tabKey: "source" }, { hostId: "remote", epoch: "current" });
   });
   it("re-reads target host binding for every call and never includes focus", async () => {
     let observed: HostBinding = { hostId: "ssh-other", epoch: "epoch-a", focus: true };

@@ -9,6 +9,7 @@ import { ComponentGate } from "../components/ComponentCard";
 import { PageBody } from "../components/Page";
 import { Button, EmptyState, Notice, Section } from "../components/settings/Form";
 import { capabilitiesOf } from "../lib/hostGatingView";
+import { setPageContent } from "../lib/pageContent";
 import { settingsSectionGate } from "../lib/settingsGate";
 import { useSettingsGateTarget } from "../lib/settingsGateView";
 import { settingsAnchorId } from "../lib/settingsNav";
@@ -17,7 +18,7 @@ import { useHostScope } from "../lib/useHostScope";
 import type { SettingsTab } from "../store";
 import { appModules, services } from "./app";
 import { useOpenPage, usePageOf, useSlot, type OpenPage } from "./react";
-import type { ProfileOwnedField, SettingsSectionItem } from "./slots";
+import type { PageItem, ProfileOwnedField, SettingsSectionItem } from "./slots";
 import type { ItemId, ModuleId, PageParams } from "./types";
 
 interface BoundaryProps {
@@ -69,7 +70,7 @@ function NeedsUpgrade({ id, titleKey, missing }: { id: string; titleKey: NonNull
   const { t } = useI18n();
   return (
     <div id={settingsAnchorId(id)}>
-      <Section title={t(titleKey)} source="host">
+      <Section title={t(titleKey)} >
         <Notice tone="info">{t("modules.needsUpgrade", { feature: missing.join(", ") })}</Notice>
       </Section>
     </div>
@@ -84,13 +85,13 @@ function NeedsUpgrade({ id, titleKey, missing }: { id: string; titleKey: NonNull
  * target host (module ∪ item capabilities; the slot's own mode only asks whether any host of the scope
  * has them) and is the owner's. Without a target (app pages) the slot mode decides.
  */
-export function SettingsSections({ page, only }: { page: SettingsTab; /** Only these item ids (a mixed page placing its halves). */ only?: readonly string[] }) {
+export function SettingsSections({ page, only, except }: { page: SettingsTab; /** Only these item ids (a mixed page placing its halves). */ only?: readonly string[]; /** Sections placed in another group on the same page. */ except?: readonly string[] }) {
   const entries = useSlot("settings.section");
   const target = useSettingsGateTarget(useContext(TargetHostContext));
   return (
     <>
       {entries
-        .filter((e) => e.item.page === page && (!only || only.includes(e.item.id)))
+        .filter((e) => e.item.page === page && (!only || only.includes(e.item.id)) && !except?.includes(e.item.id))
         .map((e) => {
           const gate = settingsSectionGate(e, capabilitiesOf(e.moduleId, e.item), target);
           if (gate.kind === "hidden") return null;
@@ -162,15 +163,29 @@ export function PaneOutlet({ page, children }: { page: { page: ItemId; params: P
 function PageOutlet({ open, children }: { open: OpenPage | null; children: ReactNode }) {
   if (!open) return <>{children}</>;
   if (!open.entry) return open.waiting ? <main className="min-w-0 flex-1" /> : <PageOff />;
-  const { Page } = open.entry.item;
-  const requires = appModules().modules.find((m) => m.id === open.entry!.moduleId)?.requires;
-  const page = <Page params={open.params} />;
-  return (
-    <ItemBoundary moduleId={open.entry.moduleId} resetKey={open.page}>
-      {requires?.component ? <FocusComponentGate name={requires.component} capabilities={requires.capabilities ?? []}>{page}</FocusComponentGate> : page}
+  return <PageContent item={open.entry.item} moduleId={open.entry.moduleId} params={open.params} />;
+}
+
+/**
+ * A page's content with its params (the conversation column's page, or a page pane in a Shelf — §24.4): in its
+ * module's error boundary, behind its module's component gate (`requires.component`, §12.1).
+ */
+export function PageContent({ item, moduleId, params }: { item: PageItem; moduleId: ModuleId | null; params: PageParams }) {
+  const { Page } = item;
+  const requires = moduleId ? appModules().modules.find((m) => m.id === moduleId)?.requires : undefined;
+  const page = <Page params={params} />;
+  const body = requires?.component ? <FocusComponentGate name={requires.component} capabilities={requires.capabilities ?? []}>{page}</FocusComponentGate> : page;
+  return moduleId ? (
+    <ItemBoundary moduleId={moduleId} resetKey={item.id}>
+      {body}
     </ItemBoundary>
+  ) : (
+    body
   );
 }
+
+// A page pane in a Shelf draws its page the same way (lib/paneKinds).
+setPageContent(PageContent);
 
 /** v1.15 `requires.component` (§12.1): a main page targets the focus host. */
 function FocusComponentGate({ name, capabilities, children }: { name: string; capabilities: readonly string[]; children: ReactNode }) {

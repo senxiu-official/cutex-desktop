@@ -7,7 +7,7 @@ import { useState, type ReactNode } from "react";
 import { Laptop, Plus, ShieldAlert, Smartphone } from "lucide-react";
 import { Button, Section, Segmented, Select, SettingRow } from "../components/settings/Form";
 
-const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] whitespace-nowrap";
+const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-caption/[inherit] whitespace-nowrap";
 type Scope = "full" | "chat" | "read";
 const SCOPES: { value: Scope; label: string; title: string }[] = [
   { value: "full", label: "完全控制", title: "和用户本人一样" },
@@ -105,17 +105,17 @@ function DeviceDetail({ d, back }: { d: Dev; back(): void }) {
     <>
       <button type="button" onClick={back} className="mb-2 text-xs text-accent hover:underline">‹ 已登录设备</button>
       <Section title={d.name} hint={`${d.user} 的设备 · 通过${d.via}连接 · ${d.last}使用`}>
-        <SettingRow label="所属用户" hint="设备使用该用户的授权">
+        <SettingRow agents="none" source="local" label="所属用户" hint="设备使用该用户的授权">
           <span className="flex items-center gap-2 text-xs text-muted">{d.user}<Button onClick={() => {}}>更改…</Button></span>
         </SettingRow>
-        <SettingRow label="项目" hint={`跟随 ${d.user} 的授权，在用户详情中修改`}>
+        <SettingRow agents="none" source="local" label="项目" hint={`跟随 ${d.user} 的授权，在用户详情中修改`}>
           <span className="flex items-center gap-2 text-xs text-muted">{g.projects}<button type="button" className="text-accent hover:underline">查看 {d.user}</button></span>
         </SettingRow>
-        <SettingRow label="设备权限" hint={`在 ${d.user} 的授权（${g.text}）范围内，限制这台设备能做什么`}>
+        <SettingRow agents="none" source="local" label="设备权限" hint={`在 ${d.user} 的授权（${g.text}）范围内，限制这台设备能做什么`}>
           {d.self ? <span className="text-xs text-subtle">完全控制 · 本机连接，不能修改</span> : <Segmented value={scope} options={allowed} onChange={setScope} />}
         </SettingRow>
-        <SettingRow label="名称"><Button onClick={() => {}}>重命名</Button></SettingRow>
-        <SettingRow label="吊销" hint="这台设备将无法再连接这台主机">
+        <SettingRow agents="none" source="local" label="名称"><Button onClick={() => {}}>重命名</Button></SettingRow>
+        <SettingRow agents="none" source="local" label="吊销" hint="这台设备将无法再连接这台主机">
           <button type="button" className="rounded-md border border-danger/50 px-2.5 py-1 text-xs text-danger hover:bg-danger/10">吊销…</button>
         </SettingRow>
       </Section>
@@ -135,7 +135,7 @@ function PairingCard() {
       hint="生成一次性配对码，在新设备上输入。仅可在本机或通过 SSH 生成。"
       actions={<Button onClick={() => setCode(true)}><span className="inline-flex items-center gap-1"><Plus size={12} />生成配对码</span></Button>}
     >
-      <SettingRow label="分配给" hint="设备使用该用户的授权">
+      <SettingRow agents="none" source="local" label="分配给" hint="设备使用该用户的授权">
         <Select value={forUser} width="w-32" options={[{ value: "Sam", label: "Sam（主人）" }, { value: "Kai", label: "Kai" }, { value: "Mia", label: "Mia" }]} onChange={setForUser} />
       </SettingRow>
       <div className="-mx-4 border-b border-border/60 px-4 py-2.5">
@@ -164,7 +164,7 @@ function PairingCard() {
         <p className="py-2 text-xs text-subtle">配对码 10 分钟内有效。</p>
       )}
       {code && (
-        <SettingRow label={<span className="font-mono text-base tracking-widest">K7Q-4MX</span>} hint={ownerFull ? "4:52 后失效 · 只能使用一次" : "9:52 后失效"}>
+        <SettingRow agents="none" source="local" label={<span className="font-mono text-base tracking-widest">K7Q-4MX</span>} hint={ownerFull ? "4:52 后失效 · 只能使用一次" : "9:52 后失效"}>
           <Button onClick={() => setCode(false)}>作废</Button>
         </SettingRow>
       )}
@@ -178,7 +178,7 @@ function UsersPageMock({ variant }: { variant: "a" | "b" }) {
   return (
     <>
       <div className="mb-4 space-y-1.5 border-b border-border/60 pb-3">
-        <p className="text-[13px] text-muted">所选主机的用户、权限和已登录设备。</p>
+        <p className="text-ui/[inherit] text-muted">所选主机的用户、权限和已登录设备。</p>
         <span className={`${CHIP} bg-accent/12 text-accent`}>cutex 后端 · host-a</span>
       </div>
       {DEVICES.filter((x) => x.isNew).map((x) => <NewOwnerDevice key={x.id} d={x} />)}
@@ -200,7 +200,7 @@ function Wrap({ children }: { children: ReactNode }) {
   return (
     <div className="flex items-start rounded-xl border border-border bg-background">
       <nav className="w-36 shrink-0 border-r border-border/60 p-2 text-sm">
-        <div className="px-2 pt-1 pb-1.5 text-[11px] text-subtle">连接</div>
+        <div className="px-2 pt-1 pb-1.5 text-caption/[inherit] text-subtle">连接</div>
         {["你", "主机列表", "主机", "用户", "网络代理"].map((n) => (
           <div key={n} className={`rounded-md px-2 py-1.5 ${n === "用户" ? "bg-surface-2 font-medium text-foreground" : "text-muted"}`}>{n}</div>
         ))}

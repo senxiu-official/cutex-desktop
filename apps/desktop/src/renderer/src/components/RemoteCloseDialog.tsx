@@ -39,7 +39,7 @@ export function RemoteCloseDialog() {
           <button autoFocus disabled={view.closing} onClick={() => answerRemoteClose("cancel")} className={`${button} text-muted hover:bg-surface-2`}>
             {t("remoteClose.cancel")}
           </button>
-          <button disabled={view.closing} onClick={() => answerRemoteClose("now")} className={`${button} bg-danger text-white`}>
+          <button disabled={view.closing} onClick={() => answerRemoteClose("now")} className={`${button} bg-danger-solid text-white`}>
             {t("remoteClose.closeNow")}
           </button>
         </div>

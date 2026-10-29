@@ -1,3 +1,4 @@
+import { cloneLiveDeltas } from "./liveDeltas";
 // History pages (cutex `history-pages`; offline sessions via `offline-history`): a long thread
 // opens with only its newest turns (bootstrap `?turnLimit=`, `historyPage`); older turns are read a
 // page at a time (`GET /v2/sessions/{id}/history?cursor=`) when the user scrolls to the top, and
@@ -68,5 +69,5 @@ export function prependHistory(state: TimelineState, result: unknown): number {
 
 /** A copy of `state` (turns / entries; the copy can be extended without touching the view). */
 export function cloneTimeline(state: TimelineState): TimelineState {
-  return { ...state, turns: state.turns.map((t) => ({ ...t, entryIds: [...t.entryIds] })), entries: new Map(state.entries), pending: new Map(state.pending), answering: new Set(state.answering) };
+  return { ...state, ...(state.liveDeltas ? { liveDeltas: cloneLiveDeltas(state.liveDeltas) } : {}), turns: state.turns.map((t) => ({ ...t, entryIds: [...t.entryIds] })), entries: new Map(state.entries), pending: new Map(state.pending), answering: new Set(state.answering) };
 }

@@ -1,5 +1,13 @@
 // Status category (step 2), 委托 page + nav (step 3; `delegations.*` moved from the base catalog).
+import { zhCN as treeMessages } from "./upgradeTreeMessages";
+import { zhCN as runMessages } from "./upgradeRunMessages";
+import { zhCN as routingMessages } from "./upgradeRoutingMessages";
+import { zhCN as memberMessages } from "./upgradeMemberMessages";
 export const zhCN = {
+  ...treeMessages,
+  ...runMessages,
+  ...routingMessages,
+  ...memberMessages,
   "delegations.title": "委托",
   "delegations.description": "{{agent}}之间的委托，显示在状态行和胶囊里",
   "delegations.statusTitle": "委托",
@@ -38,37 +46,3 @@ declare module "../i18nCatalog" {
   interface ModuleMessages extends Messages {}
 }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "delegations.title": "Delegations",
-  "delegations.description": "Delegations between {{agents}}, shown in the status line and capsule",
-  "delegations.statusTitle": "Delegations",
-  "delegations.count": "Delegations {n}",
-  "delegations.mine": "Sent by me",
-  "delegations.toMe": "Sent to me",
-  "delegations.handling": "Handling · {name}'s delegation",
-  "delegations.oldest": "oldest {t}",
-  "delegations.running": "{n} running",
-  "delegations.closed": "Finished · {n}",
-  "delegations.viewAll": "View all on the Delegations page",
-  "delegations.search": "Search delegations",
-  "delegations.bucket.needsYou": "Needs you",
-  "delegations.bucket.waiting": "Waiting / blocked",
-  "delegations.bucket.active": "In progress",
-  "delegations.bucket.done": "Finished",
-  "delegations.none": "No open delegations",
-  "delegations.allClear": "Nothing needs you",
-  "delegations.more": "Show {n} more",
-  "delegations.loading": "Loading…",
-  "delegations.unavailable": "This host's cutex has no delegations",
-  "delegations.col.delegation": "Delegation",
-  "delegations.col.people": "From → to",
-  "delegations.col.time": "Time",
-  "delegations.allAgents": "All {{agents}}",
-  "delegations.navNeedYou": "{n} delegations need you",
-  "delegations.nav": "Delegations",
-  "delegations.detail": "Delegation detail",
-  "delegations.detail.gone": "This delegation was not found (purged, or not visible on this host)",
-  "delegations.detail.created": "created {when}",
-  "delegations.detail.attempts": "attempt {n}",
-};

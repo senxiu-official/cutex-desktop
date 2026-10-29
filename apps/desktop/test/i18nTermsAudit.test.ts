@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { overlayDescription, trayTooltip } from "../src/shared/shell";
 
 const { zhCN } = await import("../src/renderer/src/i18n/zh-CN");
+const { zhHantCN } = await import("../src/renderer/src/i18n/zh-Hant-CN");
 const { en } = await import("../src/renderer/src/i18n/en");
 const { applyTerms, DEFAULT_TERMS, parseOverrides, resolveTerms, resetTerm, setTerm, splitTerms } = await import("../src/renderer/src/lib/terms");
 
@@ -43,6 +44,54 @@ describe("localization audit guards (2026-10-13)", () => {
     expect(zhCN["composer.quota.none"]).toContain("该 Profile");
     expect(zhCN["composer.quota.none"]).toContain("设置 → Profile");
     expect(zhCN["refusal.profile_is_default"]).toBe("不能删除默认 Profile。先把别的 Profile 设为默认。");
+  });
+
+  it("keeps the reviewed zh terminology consistent", () => {
+    const reviewed = {
+      "zh-CN": {
+        "project-view.title": "项目视图",
+        "sidebar.openProjectView": "打开项目视图",
+        "projects.badge": "徽章",
+        "stopIdle.reason.pinned": "已固定",
+        "side.pin": "固定：改成「并排」，不再盖住对话",
+        "updater.title": "桌面应用更新",
+        "backend-upgrade.desktopLink": "桌面应用更新",
+        "shell.about.desktop": "Cutex 桌面应用",
+      },
+      "zh-Hant-CN": {
+        "project-view.title": "項目視圖",
+        "sidebar.openProjectView": "打開項目視圖",
+        "projects.badge": "徽章",
+        "stopIdle.reason.pinned": "已固定",
+        "side.pin": "固定：改成「並排」，不再蓋住對話",
+        "updater.title": "桌面應用更新",
+        "backend-upgrade.desktopLink": "桌面應用更新",
+        "shell.about.desktop": "Cutex 桌面應用",
+      },
+    } as const;
+    for (const [locale, expected] of Object.entries(reviewed)) {
+      const catalog = locale === "zh-CN" ? zhCN : zhHantCN;
+      for (const [key, value] of Object.entries(expected)) {
+        expect(catalog[key as keyof typeof catalog], `${locale} ${key}`).toBe(value);
+      }
+    }
+  });
+
+  it("writes mouse actions in full in zh-CN", () => {
+    const ownedElsewhere = [/^gestures\./];
+    const nonMouse = new Set([
+      "quota.credits",
+      "info.avatar.defaultHintImportant",
+      "appearance.agentAvatarHint",
+      "fork.profile.sizeEstimate",
+      "settings.profile.introPortrait.bad.tooLarge",
+    ]);
+    const bareClick = /(?<!左键)(?<!中键)(?<!右键)(?<!双)点击|单击|右击|右键(?!点击|菜单)|中键(?!点击)|再点|点一下|点(?=[「⌄＋×↻A-Za-z])|点到|点的|\+\s*点|点\s*\+/;
+    const bad = Object.entries(zhCN as Record<string, string>)
+      .filter(([key]) => !ownedElsewhere.some((pattern) => pattern.test(key)) && !nonMouse.has(key))
+      .filter(([, value]) => bareClick.test(value))
+      .map(([key, value]) => `${key}: ${value}`);
+    expect(bad).toEqual([]);
   });
 
   it("zh tray / taskbar text uses the agent term, not a hard-coded latin word", () => {

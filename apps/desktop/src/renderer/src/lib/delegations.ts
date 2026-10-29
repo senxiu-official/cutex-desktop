@@ -4,6 +4,7 @@
 // close rows) for delegations cutex no longer has. Pure, so it is unit-tested; the live records are
 // kept by lib/delegationStore. Wire names (askId, AskSummary, …) are kept as cutex sends them.
 import type { AskAttemptView, AskClosed, AskDetail, AskExecution, AskHold, AskLateAnswer, AskQuestion, AskRemote, AskRequester, AskReview, AskSummary } from "../../../shared/ipc";
+import { askReviewFields } from "../../../shared/delegationReviews";
 import { isSessionRef, parseIdRef, sameId } from "./shortIds";
 import { resultDelegationId, toolArgs, toolResult } from "./taskRows";
 import type { ExternalMessage, RawItem, TimelineEntry, TimelineState, TurnView } from "./timeline";
@@ -115,6 +116,8 @@ export type DelegationStatusKey =
   | "planMode"
   | "offline"
   | "blocked"
+  // blocked(quota): the target's usage limit is used up; cutex redelivers it after the reset
+  | "quota"
   | "starting"
   | "running"
   | "question"
@@ -204,6 +207,7 @@ function holdStatus(hold: AskHold | null | undefined, queuePosition: number | nu
     case "paused":
       return s(hold.by === "planMode" ? "planMode" : "paused");
     case "blocked":
+      if (hold.by === "quota") return s("quota");
       return hold.by === "runtimeDown" ? s("offline", { dangerText: true }) : s("blocked", { dangerText: true });
     case "waitingForInput":
       return { key: "question", tone: "warn", glyph: "pulse" };
@@ -265,7 +269,7 @@ export function delegationStatus(d: StatusInput, ctx: DelegationContext = {}): D
     case "queued":
       return holdStatus(d.hold, d.queuePosition);
     case "admitted":
-      return d.hold ? holdStatus(d.hold, d.queuePosition) : { key: "starting", tone: "accent", glyph: "pulse" };
+      return d.hold ? holdStatus(d.hold, d.queuePosition) : { key: "starting", tone: "muted", glyph: "hollow" };
     case "running":
       if (d.hold?.reason === "waitingForInput") return { key: "question", tone: "warn", glyph: "pulse" };
       // Nothing runs while the target is offline; cutex owns reconciliation / stop settlement.
@@ -484,6 +488,7 @@ export function summaryFromRecord(raw: unknown): AskSummary | null {
     hold: (obj(r.hold) as AskHold | null) ?? null,
     holdSince: str(r.holdSince),
     review: (str(r.review) as AskReview | null) ?? null,
+    ...askReviewFields(r),
     closed: (str(r.closed) as AskClosed | null) ?? null,
     queuePosition: num(r.queuePosition),
     attempts: typeof r.attempts === "number" ? r.attempts : attempts.length,
@@ -534,6 +539,7 @@ export function applyAskEvent(records: DelegationRecords, method: string, rawPar
         execution: (str(p.execution) as AskExecution | null) ?? current.execution,
         hold: (obj(p.hold) as AskHold | null) ?? null,
         review: (str(p.review) as AskReview | null) ?? null,
+        ...askReviewFields(p),
         revision: revision ?? current.revision,
         ...(attempt ? { attempt: { ...(current.attempt ?? { n: attempt.n ?? current.attempts }), ...attempt } as AskAttemptView } : {}),
       });
@@ -548,7 +554,9 @@ export function applyAskEvent(records: DelegationRecords, method: string, rawPar
     case "cutex/ask/closed": {
       if (!current) return null;
       const revision = num(p.revision);
-      if (revision !== null && revision <= current.revision) return null;
+      // cutex publishes `stateChanged` and `closed` for one mutation with the same revision
+      // (asks/store.rs update_ask): the second still closes a row the first left open.
+      if (revision !== null && (revision < current.revision || (revision === current.revision && current.closed))) return null;
       return put({ ...current, closed: (str(p.outcome) as AskClosed | null) ?? current.closed ?? "completed", closedAt: current.closedAt ?? new Date().toISOString(), revision: revision ?? current.revision });
     }
     case "cutex/ask/progress": {
@@ -611,7 +619,7 @@ const asParty = (ref: string | null) => (isSessionRef(ref) ? { id: ref, name: nu
 
 /** Requester view (`agent_delegate` result, `delegation_wait` `delegations[]`) → summary fields. */
 function fromRequesterView(r: Record<string, unknown>): Partial<AskSummary> {
-  const out: Partial<AskSummary> = {};
+  const out: Partial<AskSummary> = askReviewFields(r);
   const state = str(r.state);
   if (state) out.execution = state as AskExecution;
   if ("hold" in r) out.hold = (obj(r.hold) as AskHold | null) ?? null;

@@ -10,10 +10,12 @@ import { useI18n, type MessageKey } from "../../i18n";
 import { jobTitle } from "../../lib/jobs";
 import { markExternalJob } from "../../lib/jobStore";
 import { markInput, sourceLabel, type MarkChoice } from "../../lib/remoteJobs";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 const CHOICES: MarkChoice[] = ["succeeded", "exitCode", "failed", "cancelled"];
 
 export function MarkExternalDialog({ job, hostId, onClose }: { job: JobRow; hostId: string; onClose(): void }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const [choice, setChoice] = useState<MarkChoice>("succeeded");
   const [exitCode, setExitCode] = useState("");
@@ -23,8 +25,8 @@ export function MarkExternalDialog({ job, hostId, onClose }: { job: JobRow; host
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && (e.stopPropagation(), onClose());
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    win.addEventListener("keydown", onKey, true);
+    return () => win.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
   const submit = async () => {
@@ -44,12 +46,12 @@ export function MarkExternalDialog({ job, hostId, onClose }: { job: JobRow; host
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/30 pt-[12vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[12vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-modal aria-label={t("jobs.mark.title")} className="w-[30rem] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-surface shadow-2xl">
         <div className="flex items-start gap-3 border-b border-border px-4 py-2.5">
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold">{t("jobs.mark.title")}</div>
-            <div className="mt-0.5 truncate text-[11px] text-subtle" title={jobTitle(job)}>
+            <div className="mt-0.5 truncate text-caption/[inherit] text-subtle" title={jobTitle(job)}>
               {[`${sourceLabel(job.source)} ${job.remoteId ?? ""}`.trim(), jobTitle(job) !== job.remoteId ? jobTitle(job) : ""].filter(Boolean).join(" · ")}
             </div>
           </div>

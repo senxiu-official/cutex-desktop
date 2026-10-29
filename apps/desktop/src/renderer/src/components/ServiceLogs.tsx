@@ -17,5 +17,5 @@ export function ServiceLogs({ slug, hostId, className = "" }: { slug: string; ho
       clearInterval(timer);
     };
   }, [slug, host]);
-  return <pre className={`max-h-56 overflow-auto rounded-lg bg-background px-3 py-2 font-mono text-[11px] whitespace-pre-wrap text-muted ${className}`}>{text}</pre>;
+  return <pre className={`max-h-56 overflow-auto rounded-lg bg-background px-3 py-2 font-mono text-caption/[inherit] whitespace-pre-wrap text-muted ${className}`}>{text}</pre>;
 }

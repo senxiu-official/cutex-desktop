@@ -116,6 +116,15 @@ describe("connection reads and host feed ownership", () => {
     expect(fixture.feeds).toHaveLength(1);
     expect(first.stop).toHaveBeenCalled();
   });
+
+  it("announces a host stream gap before restarting from the live tail", async () => {
+    const emit = vi.fn(); service = new DaemonService(emit);
+    fixture.host = async () => ({ hostId: "h" });
+    service.useEndpoint(endpoint, { remote: true }); await settle(); emit.mockClear();
+    fixture.feeds[0].handlers.resync("cursor_expired");
+    expect(emit).toHaveBeenCalledWith("hostResync", { reason: "cursor_expired" });
+    await settle(); expect(fixture.feeds).toHaveLength(2);
+  });
 });
 afterEach(() => {
   service.stop();

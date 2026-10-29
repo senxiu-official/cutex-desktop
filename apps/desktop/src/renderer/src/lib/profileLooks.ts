@@ -11,10 +11,10 @@ import { useSyncExternalStore } from "react";
 import type { DaemonApi, ProfileItem } from "../../../shared/ipc";
 import { onHostReset, onHostSwitch } from "./hostSwitch";
 
-export type ProfileLook = Pick<ProfileItem, "id" | "name" | "model" | "cliKind" | "appearance" | "avatarEtag" | "introPortraitEtag">;
+export type ProfileLook = Pick<ProfileItem, "id" | "name" | "model" | "cliKind" | "appearance" | "appearanceRevisions" | "avatarEtag" | "introPortraitEtag">;
 
 /** The daemon calls the host-stored looks need (registered by lib/profileSnapshot). */
-export type ProfileLooksApi = Pick<DaemonApi, "profileImage" | "putProfileImage" | "patchProfile">;
+export type ProfileLooksApi = Pick<DaemonApi, "profileImage" | "putProfileImage" | "patchProfile" | "getProfile">;
 
 /** host id → profiles by id and by name (sessions name their profile; renames keep the id). */
 let byHost = new Map<string, Map<string, ProfileLook>>();
@@ -38,6 +38,7 @@ const lookOf = (p: ProfileLook): ProfileLook => ({
   model: p.model,
   cliKind: p.cliKind,
   appearance: p.appearance,
+  appearanceRevisions: p.appearanceRevisions,
   avatarEtag: p.avatarEtag,
   introPortraitEtag: p.introPortraitEtag,
 });
@@ -95,6 +96,9 @@ export function profileLookOf(hostId: string, profile: string | null | undefined
   }
   return profile ? (map?.get(profile) ?? null) : null;
 }
+
+/** Whether `hostId`'s profile list has been noted (an agent whose Profile is not in it then really has none). */
+export const profileLooksKnown = (hostId: string): boolean => byHost.has(hostId);
 
 /**
  * Whether `hostId` stores Profile looks itself (cutex `profile-avatar`, seen on its profile list):

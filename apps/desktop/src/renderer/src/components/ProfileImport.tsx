@@ -5,14 +5,27 @@
 // profile-import, a `settings.section`) and the onboarding (`compact`, plus `useCcSwitchAvailable`).
 // Without the capability (or on a cutex without the route) it renders nothing. Its strings are the
 // profile-import module's (`profile-import.*`).
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ccSwitchImportable, CC_SWITCH_APPS, CC_SWITCH_IMPORT_FEATURE, CC_SWITCH_IMPORT_MAX, type CcSwitchApp, type CcSwitchImportList, type CcSwitchImportResult, type CcSwitchProvider } from "../../../shared/ccSwitchImport";
 import { useI18n } from "../i18n";
 import { urlHost } from "../lib/profilePresets";
 import { loadProfileList } from "../lib/profileSnapshot";
 import { daemonApiOf, useFocusHostId } from "../lib/targetHost";
 import { useHostData } from "../lib/useHostScope";
-import { Button, ErrorNote, Loading, Notice } from "./settings/Form";
+import { Button, ErrorNote, Loading, Notice, type SettingsRowDecoration } from "./settings/Form";
+import { SettingsDisclosureRow } from "./settings/SettingsDisclosureRow";
+
+/**
+ * cutex's CC Switch errors in words (r260 stable codes): unsupported_version (CC Switch newer than this cutex reads),
+ * unsupported_format (data it cannot read). r259 has no code, only its English sentence for the version case — that is
+ * recognised too. Anything else: cutex's own message.
+ */
+export const CC_SWITCH_NEWER_MESSAGE = /newer CC Switch format \(schema \d+; this cutex reads up to \d+\)/i;
+export function ccSwitchErrorKey(code: string | null | undefined, message: string | null | undefined): "profile-import.err.unsupportedVersion" | "profile-import.err.unsupportedFormat" | null {
+  if (code === "unsupported_version" || CC_SWITCH_NEWER_MESSAGE.test(message ?? "")) return "profile-import.err.unsupportedVersion";
+  if (code === "unsupported_format") return "profile-import.err.unsupportedFormat";
+  return null;
+}
 
 /** A row's key: CC Switch ids are unique per app only. */
 const rowKey = (p: Pick<CcSwitchProvider, "app" | "id">) => `${p.app}\n${p.id}`;
@@ -79,12 +92,19 @@ export function useCcSwitchAvailable(hostId: string): boolean {
   return capable && state.kind === "ready" && !!state.list?.found && state.list.providers.some(ccSwitchDefaultPicked);
 }
 
+export type ProfileImportStatus = { text: string; attention: boolean };
+
 export interface ProfileImportProps {
   hostId: string;
+  /** Report the read status to an independent Settings section header. */
+  onStatus?(status: ProfileImportStatus): void;
+  decoration?: SettingsRowDecoration;
   /** After an import that created at least one profile, with the number created. */
   onDone?(created: number): void;
   /** Tighter layout (onboarding): no source path, a scrolling list. */
   compact?: boolean;
+  /** Optional embedded disclosure; keeps the mounted draft, closed initially. */
+  collapsible?: boolean;
 }
 
 export function ProfileImport(props: ProfileImportProps) {
@@ -93,9 +113,9 @@ export function ProfileImport(props: ProfileImportProps) {
   return capable ? <ProfileImportBody key={props.hostId} {...props} /> : null;
 }
 
-const TAG = "inline-flex h-4 shrink-0 items-center rounded px-1 text-[10px] whitespace-nowrap";
+const TAG = "inline-flex h-4 shrink-0 items-center rounded px-1 text-caption/[inherit] whitespace-nowrap";
 
-function ProfileImportBody({ hostId, onDone, compact }: ProfileImportProps) {
+function ProfileImportBody({ hostId, onDone, compact, collapsible, decoration, onStatus }: ProfileImportProps) {
   const { t } = useI18n();
   const focus = useFocusHostId();
   const { state, reload } = useCcSwitchList(hostId, true);
@@ -104,23 +124,40 @@ function ProfileImportBody({ hostId, onDone, compact }: ProfileImportProps) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<CcSwitchImportResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   // Each new list starts from its default selection.
   useEffect(() => setPicked(ccSwitchDefaultSelection(list)), [list]);
   const groups = useMemo(() => CC_SWITCH_APPS.map((app) => [app, (list?.providers ?? []).filter((p) => p.app === app)] as const).filter(([, rows]) => rows.length > 0), [list]);
 
+  const summary = state.kind === "loading" ? t("profile-import.summary.loading")
+    : state.kind === "error" || list?.error ? t("profile-import.summary.error")
+    : !list?.found ? t("profile-import.notFound")
+    : !list.providers.length ? t("profile-import.empty")
+    : t("profile-import.summary.count", { total: list.providers.length, available: list.providers.filter(ccSwitchImportable).length });
+  const errorText = (code: string | null, message: string) => { const key = ccSwitchErrorKey(code, message); return key ? t(key) : message; };
+  const attention = state.kind === "error" || !!list?.error || !!importError || !!result?.failed.length;
+  useEffect(() => { onStatus?.({ text: summary, attention }); }, [onStatus, summary, attention]);
+  const wrap = (content: ReactNode) => collapsible ? (
+    <div data-profile-import-disclosure="">
+      <SettingsDisclosureRow decoration={decoration} title={t("profile-import.section")} summary={t("profile-import.sectionHint")} status={summary} attention={attention} open={open} onOpenChange={setOpen}>
+        {content}
+      </SettingsDisclosureRow>
+    </div>
+  ) : content;
+
   // No route on this cutex: nothing to offer.
   if (state.kind === "ready" && list === null) return null;
-  if (state.kind === "loading") return <Loading rows={compact ? 1 : 2} />;
+  if (state.kind === "loading") return wrap(<Loading rows={compact ? 1 : 2} />);
   if (state.kind === "error") {
-    return (
+    return wrap(
       <div className="flex items-center gap-3">
-        <ErrorNote>{t("profile-import.error", { message: state.message })}</ErrorNote>
+        <ErrorNote>{t("profile-import.error", { message: errorText(null, state.message) })}</ErrorNote>
         <Button onClick={reload}>{t("profile-import.reload")}</Button>
       </div>
     );
   }
   if (!list!.found) {
-    return (
+    return wrap(
       <div className="flex items-center gap-3 py-2">
         <p className="min-w-0 flex-1 text-xs text-subtle">{t("profile-import.notFound")}</p>
         <Button onClick={reload}>{t("profile-import.reload")}</Button>
@@ -128,9 +165,9 @@ function ProfileImportBody({ hostId, onDone, compact }: ProfileImportProps) {
     );
   }
   if (list!.error) {
-    return (
+    return wrap(
       <div className="flex items-center gap-3">
-        <ErrorNote>{t("profile-import.error", { message: list!.error.message })}</ErrorNote>
+        <ErrorNote>{t("profile-import.error", { message: errorText(list!.error.code, list!.error.message) })}</ErrorNote>
         <Button onClick={reload}>{t("profile-import.reload")}</Button>
       </div>
     );
@@ -168,7 +205,7 @@ function ProfileImportBody({ hostId, onDone, compact }: ProfileImportProps) {
     }
   };
 
-  return (
+  return wrap(
     <div data-profile-import="" className="flex flex-col gap-2">
       {!providers.length ? (
         <p className="py-2 text-xs text-subtle">{t("profile-import.empty")}</p>
@@ -185,7 +222,7 @@ function ProfileImportBody({ hostId, onDone, compact }: ProfileImportProps) {
         </div>
       )}
       <Notice tone="info">{t("profile-import.note")}</Notice>
-      {!compact && list!.source && <p className="truncate font-mono text-[10px] text-subtle" title={list!.source.path}>{list!.source.path}</p>}
+      {!compact && list!.source && <p className="truncate font-mono text-caption/[inherit] text-subtle" title={list!.source.path}>{list!.source.path}</p>}
       {providers.length > 0 && (
         <div className="flex items-center gap-3">
           <Button primary disabled={busy || chosen.length === 0 || chosen.length > CC_SWITCH_IMPORT_MAX} onClick={() => void runImport()}>
@@ -193,7 +230,7 @@ function ProfileImportBody({ hostId, onDone, compact }: ProfileImportProps) {
           </Button>
         </div>
       )}
-      {importError && <ErrorNote>{importError}</ErrorNote>}
+      {importError && <ErrorNote>{errorText(null, importError)}</ErrorNote>}
       {result && (
         <div data-cc-switch-result="" className="flex flex-col gap-1 text-xs">
           {result.created.length > 0 && <p className="text-ok-text">{t("profile-import.created", { n: result.created.length, names: result.created.map((c) => c.profile.name).join("、") })}</p>}
@@ -202,7 +239,7 @@ function ProfileImportBody({ hostId, onDone, compact }: ProfileImportProps) {
               <p>{t("profile-import.failed", { n: result.failed.length })}</p>
               <ul className="list-disc pl-5">
                 {result.failed.map((f) => (
-                  <li key={`${f.app}\n${f.id}`}>{t("profile-import.failedRow", { name: nameOf(f.app, f.id), message: f.message })}</li>
+                  <li key={`${f.app}\n${f.id}`}>{t("profile-import.failedRow", { name: nameOf(f.app, f.id), message: errorText(f.code, f.message) })}</li>
                 ))}
               </ul>
             </div>

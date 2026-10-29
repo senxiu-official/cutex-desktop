@@ -16,7 +16,7 @@
 // runtime) → today's name: the v2 path leaf or the short thread id.
 import { createContext, useContext } from "react";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
-import { isClaudeTaskRef } from "./claudeTasks";
+import { claudeTaskIdOf, claudeTaskStatus, isClaudeTaskRef } from "./claudeTasks";
 import { eventThreadId, orderedEntries, type RawItem, type TimelineState } from "./timeline";
 
 /** Child-thread status by thread id, from the child's own events / `thread/read`. */
@@ -59,6 +59,26 @@ export function childStatusFromEvent(envelope: EventEnvelope): { threadId: strin
     else if (params.status?.type === "systemError") status = "errored";
   }
   return status ? { threadId, status } : null;
+}
+
+/**
+ * A Claude background subagent's status from the parent's own `claude/task/updated` (adapter claude-r23):
+ * the task outlives its turn, so this, not a turn's end, says it still runs or how it ended. Keyed by the
+ * `claude:<session>:task:<id>` reference the timeline names for that task (null: not a subagent task of
+ * this thread, or not in the timeline).
+ */
+export function claudeTaskStatusFromEvent(envelope: EventEnvelope, timeline: TimelineState | null): { threadId: string; status: string } | null {
+  const message = envelope.native?.kind === "notification" ? envelope.native.message : null;
+  if (!message || message.method !== "claude/task/updated" || !timeline) return null;
+  const params = (message.params ?? {}) as { threadId?: unknown; task?: { taskId?: unknown; taskType?: unknown; status?: unknown } };
+  const status = claudeTaskStatus(params.task);
+  const taskId = params.task?.taskId;
+  if (params.threadId !== timeline.threadId || !status || typeof taskId !== "string") return null;
+  for (const entry of orderedEntries(timeline)) {
+    const ref = (entry as { item?: RawItem }).item?.agentThreadId;
+    if (claudeTaskIdOf(ref) === taskId) return { threadId: ref as string, status };
+  }
+  return null;
 }
 
 /** Settled status of a child thread from its `thread/read` result (null: nothing known yet). */

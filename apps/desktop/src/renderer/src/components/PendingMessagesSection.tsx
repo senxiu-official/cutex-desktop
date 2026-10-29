@@ -6,11 +6,18 @@
 // that instead, lib/agentMessages `timing`). A row leaves when it is read in (messageDelivered, or its external_event item shows up in
 // the timeline). Failures seen live stay, marked 失败, until dismissed. 唤醒 (owner): start a turn on
 // the idle agent so it reads its pending notes in. A note from an agent on another host (peers
-// cross-host tell, `remote`) shows its `name@host` sender with a small 另一台主机 tag.
+// cross-host tell, `remote`) shows its `name@host` sender with a small 另一台主机 tag; on cutex older than
+// 0.1.5 (no `remote`) the `ptell-` row's sender label gives both (lib/agentMessages peerSenderOf).
+import type { AgentRuntime } from "../lib/agentFeatures";
+import { MessageSettlementControl } from "./MessageSettlementControl";
 import { useState } from "react";
+import { CancelSendButton } from "./CancelSendButton";
+import { HiddenUndo } from "./HiddenUndo";
+import { matchCancelable, useCancelableSends, type CancelSend } from "../lib/cancelSend";
+import { hiddenKey, useHiddenRows, visibleRows } from "../lib/hiddenRows";
 import { ArrowDownLeft } from "lucide-react";
 import { useI18n } from "../i18n";
-import { wakeableNotes, type AgentMessageRecord } from "../lib/agentMessages";
+import { peerSenderOf, wakeableNotes, type AgentMessageRecord } from "../lib/agentMessages";
 import { useAgentMessages } from "../lib/agentMessageStore";
 import { useApp } from "../store";
 import { convNotify, convSidebarOf, useConvScope, useConvViewHost } from "../lib/conversationScope";
@@ -21,6 +28,7 @@ import { SenderAvatar } from "./SystemAvatar";
 import { KindTag } from "./AgentMessageParts";
 import { pendingWakeLabel, wakeHintOf, type PendingWakeLabel } from "../lib/wakeBusyWait";
 import { useWakeBusyWait } from "../lib/wakeBusyWaitView";
+import { Tag } from "./Tag";
 
 function wakeTexts(t: ReturnType<typeof useI18n>["t"], label: PendingWakeLabel): { text: string; hint?: string } {
   const hint = wakeHintOf(label);
@@ -37,49 +45,67 @@ function rowLabel(message: AgentMessageRecord, section: PendingWakeLabel): Pendi
   return section;
 }
 
-function MessageRow({ message, busy, label }: { message: AgentMessageRecord; busy: boolean; label: PendingWakeLabel }) {
+function MessageRow({ message, busy, label, cancel, ranSince, hostId }: { message: AgentMessageRecord; busy: boolean; label: PendingWakeLabel; cancel: CancelSend; ranSince: boolean; hostId: string }) {
   const { t } = useI18n();
   const wake = wakeTexts(t, rowLabel(message, label));
   const conv = useConvScope();
   const agentName = useApp((s) => message.senderName ?? rowsOf(s.sidebar, convSidebarOf(conv, s)).find((r) => r.cutexSessionId === message.from)?.displayName ?? message.from ?? "?");
-  const name = senderLabel(t, message.from, message.sourceKind, agentName);
+  const peer = peerSenderOf(message);
+  const name = peer ? peer.label : senderLabel(t, message.from, message.sourceKind, agentName);
   const failed = message.state === "failed";
+  // 取消发送: cutex still holds it (pending / stale_held); one already in the inbox has no button (cutex refuses it).
+  const target = !failed ? matchCancelable(cancel.list, { fromId: message.from, from: message.senderName, text: message.body }) : null;
+  // 清除: it lingers although the agent ran a turn since it was sent — hide it on this desktop only.
+  const lingering = !message.settlement && !failed && !target && ranSince;
   return (
-    <div className={`flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs ${failed ? "bg-danger/5" : ""}`} title={message.body} data-testid="pending-message" data-state={message.state}>
-      <ArrowDownLeft size={13} className="shrink-0 text-accent" />
-      <span className="shrink-0 text-muted">{t("conversation.from")}</span>
-      <SenderAvatar id={message.from} sourceKind={message.sourceKind} name={name} size={16} />
-      <span className="shrink-0 font-medium">{name}</span>
-      {message.remote && (
-        <span className="shrink-0 rounded bg-surface-2 px-1 text-[10px] text-subtle" title={t("agentMsg.remoteHint", { host: message.remote.host })} data-testid="pending-message-remote">
-          {t("agentMsg.remote")}
-        </span>
-      )}
-      <KindTag kind={message.kind} wakeHint={wake.hint} />
-      <span className="min-w-0 flex-1 truncate text-subtle">{message.body.replace(/\s+/g, " ")}</span>
-      {failed ? (
-        <>
-          <span className="flex shrink-0 items-center gap-1 text-[11px] text-danger" title={message.error ?? undefined}>
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-danger" />
-            {t("agentMsg.state.failed")}
-          </span>
-          <button onClick={() => useAgentMessages.getState().dismiss(message.messageId)} title={t("agentMsg.pending.dismiss")} className="shrink-0 rounded-md px-1.5 py-0.5 text-muted hover:text-danger">
-            ✕
+    <div className="min-w-0">
+      <div className={`flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2 text-xs ${failed ? "bg-danger/5" : ""}`} title={message.body} data-testid="pending-message" data-state={message.state}>
+        <ArrowDownLeft size={13} className="shrink-0 text-accent" />
+        <span className="shrink-0 text-muted">{t("conversation.from")}</span>
+        <SenderAvatar id={message.from} sourceKind={peer ? null : message.sourceKind} name={name} size={16} />
+        <span className="min-w-0 max-w-[16em] shrink-0 truncate whitespace-nowrap font-medium" title={name}>{name}</span>
+        {peer && (
+          <Tag title={t("agentMsg.remoteHint", { host: peer.host })} data-testid="pending-message-remote">
+            {t("agentMsg.remote")}
+          </Tag>
+        )}
+        <KindTag kind={message.kind} wakeHint={wake.hint} />
+        <span className="min-w-0 flex-1 truncate text-subtle">{message.body.replace(/\s+/g, " ")}</span>
+        {message.settlement?.state === "outcome_unknown" ? <span className="text-warn-text">{t("agent-bus.settlement.unknown")}</span> : failed ? (
+          <>
+            <span className="flex shrink-0 items-center gap-1 text-caption/[inherit] text-danger" title={message.error ?? undefined}>
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-danger" />
+              {t("agentMsg.state.failed")}
+            </span>
+            <button onClick={() => useAgentMessages.getState().dismiss(message.messageId)} title={t("agentMsg.pending.dismiss")} className="shrink-0 rounded-md px-1.5 py-0.5 text-muted hover:text-danger">
+              ✕
+            </button>
+          </>
+        ) : (
+          message.kind === "wake" && busy && <span className="shrink-0 text-caption/[inherit] text-subtle">{wake.text}</span>
+        )}
+        {!message.settlement && target && <CancelSendButton onCancel={() => cancel.cancel(target)} />}
+        {lingering && (
+          <button onClick={() => useHiddenRows.getState().hide([hiddenKey("note", hostId, message.messageId)], `notes:${hostId}`)} title={t("hide.noteHint")} className="shrink-0 rounded-md px-1.5 py-0.5 text-caption/[inherit] text-muted hover:text-foreground" data-testid="clear-note">
+            {t("hide.note")}
           </button>
-        </>
-      ) : (
-        message.kind === "wake" && busy && <span className="shrink-0 text-[11px] text-subtle">{wake.text}</span>
-      )}
+        )}
+      </div>
+      <MessageSettlementControl hostId={hostId} messageId={message.messageId} settlement={message.settlement} sessionId={message.to ?? undefined} />
     </div>
   );
 }
 
 /** `runtime`: the agent's runtime (lib/agentFeatures); Claude agents always wait for the turn end. */
-export function PendingMessagesSection({ sessionId, messages, busy, runtime = "codex" }: { sessionId: string; messages: AgentMessageRecord[]; busy: boolean; runtime?: "codex" | "claude" }) {
+export function PendingMessagesSection({ sessionId, messages: all, busy, runtime = "codex", readSince = null }: { sessionId: string; messages: AgentMessageRecord[]; busy: boolean; runtime?: AgentRuntime; readSince?: number | null }) {
   const { t } = useI18n();
   const [waking, setWaking] = useState(false);
   const conv = useConvScope();
   const hostId = useConvViewHost(sessionId);
+  const hidden = useHiddenRows((s) => s.keys);
+  const last = useHiddenRows((s) => s.last);
+  const messages = visibleRows(all, (m) => hiddenKey("note", hostId, m.messageId), hidden);
+  const cancel = useCancelableSends(hostId, sessionId, all.length > 0);
   const busyWait = useWakeBusyWait(messages.some((m) => m.kind === "wake"));
   const label = pendingWakeLabel(busyWait.supported, runtime, busyWait.wait);
   const notes = wakeableNotes(messages);
@@ -95,7 +121,7 @@ export function PendingMessagesSection({ sessionId, messages, busy, runtime = "c
   };
   return (
     <div data-testid="pending-messages">
-      <div className="flex h-6 items-center gap-2 px-2 text-[11px] text-subtle">
+      <div className="flex h-6 items-center gap-2 px-2 text-caption/[inherit] text-subtle">
         <span className="flex-1" title={t("agentMsg.pending.titleHint")}>
           {t("agentMsg.pending.title", { n: messages.length })}
         </span>
@@ -106,8 +132,9 @@ export function PendingMessagesSection({ sessionId, messages, busy, runtime = "c
         )}
       </div>
       {messages.map((m) => (
-        <MessageRow key={m.messageId} message={m} busy={busy} label={label} />
+        <MessageRow key={m.messageId} message={m} busy={busy} label={label} cancel={cancel} hostId={hostId} ranSince={readSince !== null && m.sentAt !== null && m.state === "pending" && readSince > m.sentAt} />
       ))}
+      {last?.scope === `notes:${hostId}` && <HiddenUndo scope={last.scope} n={last.keys.length} />}
     </div>
   );
 }

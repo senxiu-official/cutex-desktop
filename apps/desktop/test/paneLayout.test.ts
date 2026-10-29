@@ -27,6 +27,7 @@ import {
   defaultLayout,
   MAIN_PANE,
   MAX_CHIPS,
+  MAX_STORED_CHIPS,
   MAX_ROWS,
   MAX_VISIBLE_PANES,
   PANE_LAYOUT_VERSION,
@@ -88,7 +89,7 @@ describe("default layout (step 1b: derived from today's state)", () => {
 describe("validateLayout (the layout JSON shape)", () => {
   it("accepts the doc's two-column example and tiled grids within the limits", () => {
     const doc = {
-      v: 1,
+      v: PANE_LAYOUT_VERSION,
       dock: { left: { kind: "core.agents", mode: "open", width: 256 } },
       cols: [
         { w: 0.62, rows: [{ pane: "p1", h: 1 }] },
@@ -113,13 +114,15 @@ describe("validateLayout (the layout JSON shape)", () => {
   });
 
   it("refuses what is not a layout", () => {
-    for (const raw of [null, 1, "x", [], {}, { ...base(), v: 2 }, { ...base(), cols: [] }, { ...base(), dock: {} }, { ...base(), chips: null }]) expect(validateLayout(raw), JSON.stringify(raw)).toBeNull();
+    // v1 (tool columns) is read through migrateLayoutV1 first (§24.12), never as it is
+    for (const raw of [null, 1, "x", [], {}, { ...base(), v: 1 }, { ...base(), v: 3 }, { ...base(), cols: [] }, { ...base(), dock: {} }, { ...base(), chips: null }]) expect(validateLayout(raw), JSON.stringify(raw)).toBeNull();
   });
 
-  it("refuses more than the limits: 6 panes on screen, 3 per column, 8 chips", () => {
+  it("refuses more than the limits: 6 panes on screen, 3 per column, MAX_STORED_CHIPS chips (step 4: chips that would end something may briefly pass 8)", () => {
     expect(validateLayout(grid([3, 3, 1]))).toBeNull();
     expect(validateLayout(grid([4]))).toBeNull();
-    expect(validateLayout(grid([1], MAX_CHIPS + 1))).toBeNull();
+    expect(validateLayout(grid([1], MAX_CHIPS + 1))).not.toBeNull();
+    expect(validateLayout(grid([1], MAX_STORED_CHIPS + 1))).toBeNull();
   });
 
   it("refuses broken references and shares", () => {
@@ -288,7 +291,7 @@ describe("conversation panes (step 2: open beside, replace, close, focus, restor
     expect(restoreLayout(null)).toBeNull();
     expect(restoreLayout(grid([1, 1, 1]))).toBeNull(); // more than two columns
     expect(restoreLayout(grid([2]))).toBeNull(); // a column split in rows (later steps)
-    expect(restoreLayout(grid([1], 1))).toBeNull(); // chips (later steps)
+    expect(restoreLayout(grid([1], 1))!.chips).toEqual(["p1"]); // step 4: a conversation chip comes back with the layout
     const other = clone(base());
     other.instances[MAIN_PANE]!.kind = "files";
     expect(restoreLayout(other)).toBeNull();

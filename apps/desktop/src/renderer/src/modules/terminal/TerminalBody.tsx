@@ -9,6 +9,7 @@ import { useModuleHostGate } from "../../lib/hostGatingView";
 import type { SideBodyProps } from "../slots";
 import { adoptTerminals, createTerminal, refreshList, scopeOfBinding, useTerminals } from "./terminals";
 import { TERMINAL, type TerminalState } from "./terminalState";
+import { btn } from "../../components/Button";
 
 // xterm.js stays out of the main bundle until a PTY is shown.
 const XtermView = lazy(() => import("./XtermView").then((m) => ({ default: m.XtermView })));
@@ -90,7 +91,7 @@ function PendingBody({ props, pending, adopt }: { props: SideBodyProps<TerminalS
       {error ? (
         <>
           <span className="text-danger">{error}</span>
-          <button onClick={props.close} className="rounded-md border border-border px-2 py-0.5 hover:bg-hover hover:text-foreground">
+          <button onClick={props.close} className={btn()}>
             {t("terminal.closeTab")}
           </button>
         </>

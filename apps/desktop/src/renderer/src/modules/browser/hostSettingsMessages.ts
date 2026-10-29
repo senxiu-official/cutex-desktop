@@ -9,8 +9,8 @@ export const browserHostSettingsZhCN = {
   "browser.profile.hint": "默认关闭。此开关立即单独保存，在下次启动或工具重载时生效；打开后仍需给{{agent}}授予标签或批准认领",
   "browser.profile.moduleOff": "浏览器模块已关闭。先在 模块 中打开它，才能为此 Profile 开启浏览器工具",
   "browser.hold.limit": "同时交给{{agent}}的标签上限",
-  "browser.hold.hint": "与会话两侧的“保持挂载”共用上限（默认 4）；这里不另存副本",
-  "browser.hold.link": "打开会话两侧设置",
+  "browser.hold.hint": "与 Shelf 的“持续保持加载的标签上限”共用一个值（默认 4）",
+  "browser.hold.link": "打开 Shelf 后台加载设置",
 } as const;
 export const browserHostSettingsEn: Record<keyof typeof browserHostSettingsZhCN, string> = {
   "browser.host.settings": "Browser permissions on this host",
@@ -24,5 +24,5 @@ export const browserHostSettingsEn: Record<keyof typeof browserHostSettingsZhCN,
   "browser.profile.moduleOff": "The Browser module is off. Turn it on under Modules first, then browser tools can be enabled for this Profile.",
   "browser.hold.limit": "Maximum tabs granted to {{agents}}",
   "browser.hold.hint": "Shares the conversation sides' keep-mounted limit (default 4); no duplicate setting is stored here.",
-  "browser.hold.link": "Open conversation sides settings",
+  "browser.hold.link": "Open Shelf background loading settings",
 };

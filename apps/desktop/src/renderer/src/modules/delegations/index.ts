@@ -18,6 +18,9 @@ import { useDelegationsStatus } from "./useDelegationsStatus";
 import { DETAIL, DETAIL_GROUP, DETAIL_STATE_VERSION, detailKey, initDetail, parseDetailParams, restoreDetail, type DetailState } from "./detail";
 import { DetailBody, useDetailTab } from "./DetailView";
 import { openDelegationRef, useDelegationLink } from "./refTarget";
+import { lazyPage } from "../../lib/lazyPage";
+const UpgradeTreePage = lazyPage(() => import("./UpgradeWorkspace").then(m => m.UpgradeTreePage));
+const UpgradeWorkspace = lazyPage(() => import("./UpgradeWorkspace").then(m => m.UpgradeWorkspace));
 
 export default defineModule({
   id: "delegations",
@@ -40,7 +43,11 @@ export default defineModule({
       },
     ],
     "nav.primary": [{ id: "delegations.nav", order: 500, icon: ArrowLeftRight, titleKey: "delegations.nav", target: { page: "delegations.page" }, useBadge: useDelegationsBadge }],
-    "main.page": [{ id: "delegations.page", Page: DelegationsPage, useTitle: pageTitle("delegations.nav") }],
+    "main.page": [
+      { id: "delegations.page", Page: DelegationsPage, useTitle: pageTitle("delegations.nav") },
+      { id: "delegations.treePage", Page: UpgradeTreePage, useTitle: pageTitle("delegations.upgrade.tree.title"), requires: { capabilities: ["delegation-tree-stop-v1"] } },
+    ],
+    "project.tab": [{ id: "delegations.treeProject", tab: "delegation-tree", order: 310, titleKey: "delegations.upgrade.tree.title", Body: UpgradeWorkspace, requires: { capabilities: ["delegation-tree-stop-v1"] } }],
     // One delegation's detail on the right side (owner 2026-10-13: list clicks show it instead of
     // jumping to the timeline card; 跳到委托卡片 stays in the ⋯ / right-click menu).
     "side.component": [

@@ -1,6 +1,7 @@
 // Non-component sidebar helpers (kept out of component files so React Fast Refresh works).
 import { useMemo } from "react";
-import { featuresOf, focusSessionViews, hostSessionViews, pinnedOn, sidebarOf, useApp } from "../store";
+import { featuresOf, pinnedOn, sidebarOf, useApp } from "../store";
+import { sessionsMetaOf, viewsOfHost } from "./sessionsMeta";
 import { useFocusHostId, useTargetHostId } from "./targetHost";
 import { buildSidebar, needsInputIds, pendingByAgent, type AgentStatus } from "./sidebar";
 
@@ -32,7 +33,8 @@ export function useSidebarModel() {
   const own = hostId === focus;
   const snapshot = useApp((s) => sidebarOf(s, hostId));
   const focusPinned = useApp((s) => s.pinned);
-  const sessions = useApp((s) => s.sessions);
+  // What rows show of the agent views only, not every streamed token (lib/sessionsMeta).
+  const sessions = useApp((s) => sessionsMetaOf(s.sessions));
   const hosts = useApp((s) => s.hosts);
   // The focus host's agents waiting per its host feed (also those not open here).
   const hostWaiting = useApp((s) => s.hostWaiting);
@@ -41,7 +43,7 @@ export function useSidebarModel() {
   const pinned = useMemo(() => (own ? focusPinned : pinnedOn(hostId)), [own, focusPinned, hostId]);
   // That host's agent views only (`sessions` may also hold an open agent of another host).
   const needsInput = useMemo(
-    () => (own ? new Set(Object.keys(pendingByAgent(focusSessionViews({ hosts, sessions }), hostWaiting))) : needsInputIds(hostSessionViews(sessions, hostId))),
+    () => (own ? new Set(Object.keys(pendingByAgent(viewsOfHost(sessions, hosts?.active ?? "local"), hostWaiting))) : needsInputIds(viewsOfHost(sessions, hostId))),
     [own, hostId, hosts, sessions, hostWaiting],
   );
   return useMemo(

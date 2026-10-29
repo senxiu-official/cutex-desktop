@@ -4,8 +4,15 @@
 // clears that language's overrides, so 「默认」 is the empty preset. The Maid set is the owner's own wording,
 // offered as a small easter egg after the plain ones.
 import { DEFAULT_TERMS, TERM_IDS, getTermOverrides, resetTerm, setTerm, type TermForms, type TermId, type TermLocale, type TermOverrides } from "./terms";
+import { isTraditionalLocale } from "../../../shared/locales";
 
 export type TermPresetId = "default" | "daili" | "english" | "maid";
+
+/**
+ * The terms a preset sets (and clears): all but the Shelf's word — a renamed Shelf stays as it is whatever
+ * preset is picked, and does not make the wording "custom" (owner 2026-10-20, canvas principles §6).
+ */
+export const PRESET_TERM_IDS: readonly TermId[] = TERM_IDS.filter((id) => id !== "shelf");
 
 export interface TermPreset {
   id: TermPresetId;
@@ -19,25 +26,26 @@ const same = (word: string): TermForms => ({ one: word, many: word });
 const MAID: Partial<Record<TermId, TermForms>> = {
   agent: { one: "Maid", many: "Maids" },
   subagent: { one: "Maidling", many: "Maidlings" },
-  parentagent: { one: "Head Maid", many: "Head Maids" },
+  parentagent: { one: "Mentor Maid", many: "Mentor Maids" },
   director: { one: "Chief Maid", many: "Chief Maids" },
+  operator: { one: "Deputy Maid", many: "Deputy Maids" },
   owner: { one: "Master", many: "Masters" },
 };
 // Chinese has no plural: the Maid words are kept as written.
 const MAID_ZH: Partial<Record<TermId, TermForms>> = Object.fromEntries(Object.entries(MAID).map(([id, f]) => [id, same(f!.one)]));
 
 // In Chinese the English words do not take a plural either (「3 个 agent」).
-const EN_AGENT_ZH: Partial<Record<TermId, TermForms>> = { agent: same("agent"), subagent: same("subagent"), parentagent: same("parent agent") };
+const EN_AGENT_ZH: Partial<Record<TermId, TermForms>> = { agent: same("agent"), subagent: same("subagent"), parentagent: same("parent agent"), operator: same("operator") };
 
 const ZH_PRESETS: TermPreset[] = [
   { id: "default", terms: {} },
-  { id: "daili", terms: { agent: same("代理"), subagent: same("子代理"), parentagent: same("父代理") } },
+  { id: "daili", terms: { agent: same("代理"), subagent: same("子代理"), parentagent: same("父代理"), operator: same("副主管") } },
   { id: "english", terms: EN_AGENT_ZH },
   { id: "maid", easterEgg: true, terms: MAID_ZH },
 ];
 const ZH_HANT_PRESETS: TermPreset[] = [
   { id: "default", terms: {} },
-  { id: "daili", terms: { agent: same("代理"), subagent: same("子代理"), parentagent: same("父代理") } },
+  { id: "daili", terms: { agent: same("代理"), subagent: same("子代理"), parentagent: same("父代理"), operator: same("副主管") } },
   { id: "english", terms: EN_AGENT_ZH },
   { id: "maid", easterEgg: true, terms: MAID_ZH },
 ];
@@ -49,7 +57,7 @@ const OTHER_PRESETS: TermPreset[] = [
 /** The presets offered for a UI language (Chinese: 智能体 / 代理 / agent + Maid; others: default + Maid). */
 export function termPresets(locale: TermLocale): readonly TermPreset[] {
   if (locale === "zh-CN") return ZH_PRESETS;
-  if (locale === "zh-Hant-CN") return ZH_HANT_PRESETS;
+  if (isTraditionalLocale(locale)) return ZH_HANT_PRESETS;
   return OTHER_PRESETS;
 }
 
@@ -62,7 +70,7 @@ export function presetOverrides(locale: TermLocale, preset: TermPreset): TermOve
 export function applyTermPreset(locale: TermLocale, id: TermPresetId): void {
   const preset = termPresets(locale).find((p) => p.id === id);
   if (!preset) return;
-  for (const term of TERM_IDS) resetTerm(locale, term);
+  for (const term of PRESET_TERM_IDS) resetTerm(locale, term);
   for (const [term, forms] of Object.entries(preset.terms) as [TermId, TermForms][]) {
     if (forms.one !== DEFAULT_TERMS[locale][term].one) setTerm(locale, term, "one", forms.one);
     if (forms.many !== DEFAULT_TERMS[locale][term].many) setTerm(locale, term, "many", forms.many);
@@ -77,7 +85,7 @@ export function currentTermPreset(locale: TermLocale, overrides: TermOverrides =
     many: saved[term]?.many || DEFAULT_TERMS[locale][term].many,
   });
   for (const preset of termPresets(locale)) {
-    const match = TERM_IDS.every((term) => {
+    const match = PRESET_TERM_IDS.every((term) => {
       const want = preset.terms[term] ?? DEFAULT_TERMS[locale][term];
       const have = effective(term);
       return have.one === want.one && have.many === want.many;

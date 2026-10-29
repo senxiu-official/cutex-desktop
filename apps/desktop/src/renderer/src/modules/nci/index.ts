@@ -10,7 +10,10 @@
 import { Mailbox } from "lucide-react";
 import { INBOUND_MAIL_FEATURE } from "../../../../shared/remoteJobs";
 import { defineModule } from "../slots";
-import { NciSettings } from "./NciSettings";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const NciSettings = lazyPage(() => import("./NciSettings").then((m) => m.NciSettings));
 
 export default defineModule({
   id: "nci",

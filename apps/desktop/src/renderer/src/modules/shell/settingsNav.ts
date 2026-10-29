@@ -5,11 +5,17 @@ import { useSettingsAttention } from "../../lib/settingsAttention";
 import { useOwnerDevicesAttention } from "../../components/settings/OwnerDevices";
 import { settingsTab } from "../../lib/settingsNav";
 import { profilePageOf, SETTINGS_PAGE, useApp } from "../../store";
+import { useSettingsShelf } from "../../lib/settingsShelf";
 import { services } from "../app";
 import { useSlot } from "../react";
 import type { PageCrumb, PageParams } from "../slots";
 
-export { openSettingsFromNav } from "../../lib/openSettings";
+export { openSettingsFromNav, toggleSettingsFromNav } from "../../lib/openSettings";
+
+/** The footer ⚙ is highlighted while the Settings Shelf is open (lib/settingsShelf). */
+export function useSettingsShelfOpen(): boolean {
+  return useSettingsShelf((s) => s.open);
+}
 
 /** Red dot: agents on an old runtime, a desktop update, or a module's reason (a host's backend update). */
 export function useSettingsBadge() {

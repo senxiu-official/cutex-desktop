@@ -52,7 +52,7 @@ export function ApprovalToolRow({ item }: { item: RawItem; sessionId: string }) 
   return (
     <>
       {fallback}
-      <div data-approval-line={state} className={`-mt-0.5 mb-1 ml-6 flex min-w-0 items-center gap-1 text-[11.5px] ${tone}`}>
+      <div data-approval-line={state} className={`-mt-0.5 mb-1 ml-6 flex min-w-0 items-center gap-1 text-meta/[inherit] ${tone}`}>
         <Icon size={12} aria-hidden className="shrink-0" />
         <span className="min-w-0 truncate" title={found.summary ?? found.approvalId}>{text}</span>
         <button type="button" onClick={() => openPage("approvals.page")} className="ml-1 flex shrink-0 items-center gap-0.5 rounded px-1 text-accent hover:underline">

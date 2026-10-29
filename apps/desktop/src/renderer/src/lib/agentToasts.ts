@@ -16,6 +16,8 @@ export interface AgentToast {
   icon: AgentToastIcon;
   text: string;
   action?: { label: string; run(): void };
+  /** What the card is about: its `ref.action` items show as icon buttons (a service reveal → 固定到主页). */
+  ref?: import("../modules/slots").CutexRef;
   /** Dedupe: a toast with the same key replaces the older one (a republish, a repeated reveal). */
   key?: string;
 }

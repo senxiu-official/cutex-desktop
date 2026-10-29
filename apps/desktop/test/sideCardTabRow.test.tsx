@@ -69,7 +69,7 @@ function render(entry: SideComponentItem, tabs: string[]): HTMLDivElement {
   document.body.append(el);
   const root = createRoot(el);
   act(() => root.render(h(SideCardView, { page: layout.pages[0]!, card: layout.pages[0]!.cards[0]!, entry: { moduleId: "browser", item: entry } as never,
-    tabs, shown: tabs[0]!, height: null, folded: false, single: true, edge: false, currentWidth: () => 400 })));
+    tabs, shown: tabs[0]!, height: null, folded: false, single: true, edge: null, target: null, currentWidth: () => 400 })));
   return el;
 }
 
@@ -115,5 +115,50 @@ describe("side card tab row", () => {
     expect(cardNewTabParams(item({ tabRow: "always", launcher: undefined }))).toBeNull();
     expect(cardNewTabParams(item({ tabRow: "always", instances: "singleton" }))).toBeNull();
     expect(cardNewTabParams(item())).toBeNull();
+  });
+});
+
+// Owner 2026-10-23 (browser tab titles unreadable): the tabs share the row, the rest go into 「⌄ N」, never a hard clip.
+describe("side card tab row — a long row (lib/tabFit)", () => {
+  function withRowWidth(width: number, run: () => void): void {
+    const desc = Object.getOwnPropertyDescriptor(Element.prototype, "clientWidth")!;
+    Object.defineProperty(Element.prototype, "clientWidth", { configurable: true, get(this: Element) { return this.hasAttribute("data-side-tab-row") ? width : 0; } });
+    try { run(); } finally { Object.defineProperty(Element.prototype, "clientWidth", desc); }
+  }
+
+  it("narrow: the tabs that fit stay in the row (the active one among them), the rest are a 「⌄ N」 list; ＋ stays", () => {
+    withRowWidth(240, () => {
+      const el = render(item({ tabRow: "always" }), ["i1", "i2", "i3", "i4", "i5"]);
+      const tabs = [...el.querySelectorAll("[role=tab]")].map((t) => t.getAttribute("data-side-tab"));
+      expect(tabs).toContain("i1"); // the shown tab
+      expect(tabs.length).toBeLessThan(5);
+      expect(el.querySelector("[data-side-tab-more]")!.getAttribute("data-side-tab-more")).toBe(String(5 - tabs.length));
+      expect(el.querySelector("[data-side-new-tab]")).toBeTruthy();
+      // No scroller that hides the overflow (the old hard clip), no tab that refuses to shrink.
+      expect(el.querySelector("[role=tablist]")!.className).not.toContain("overflow-x-auto");
+      for (const t of el.querySelectorAll<HTMLElement>("[role=tab]")) {
+        expect(t.className).not.toContain("shrink-0");
+        expect(t.style.minWidth).toMatch(/^(72|120)px$/);
+      }
+    });
+  });
+
+  it("wide (or not measured yet): every tab in the row, no list", () => {
+    withRowWidth(1200, () => {
+      const el = render(item({ tabRow: "always" }), ["i1", "i2", "i3"]);
+      expect(el.querySelectorAll("[role=tab]")).toHaveLength(3);
+      expect(el.querySelector("[data-side-tab-more]")).toBeNull();
+    });
+  });
+
+  it("the whole title (and the address) in the tooltip; a data: favicon only; middle click closes", () => {
+    const el = render(item({ tabRow: "always" }), ["i1", "i2"]);
+    act(() => useSide.setState({ tabInfo: { i1: { title: "A very long page title", tooltip: "https://example.com/a", favicon: "data:image/png;base64,AAAA" } as never, i2: { title: "two", favicon: "https://evil.example/f.ico" } as never } }));
+    const [a, b] = [...el.querySelectorAll<HTMLElement>("[role=tab]")];
+    expect(a!.title).toBe("A very long page title\nhttps://example.com/a");
+    expect(a!.querySelector("img")!.getAttribute("src")).toBe("data:image/png;base64,AAAA");
+    expect(b!.querySelector("img")).toBeNull(); // never fetched
+    act(() => b!.dispatchEvent(new MouseEvent("auxclick", { bubbles: true, button: 1 })));
+    expect(useSide.getState().layout.pages[0]!.cards[0]!.tabs).toEqual(["i1"]);
   });
 });

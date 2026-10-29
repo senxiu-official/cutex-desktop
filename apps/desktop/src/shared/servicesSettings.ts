@@ -7,8 +7,12 @@
 import type { AgentPersistentApproval, ServicesSettings, ServicesSettingsPatch } from "./ipc";
 
 export const SERVICES_PERSIST_APPROVAL_FEATURE = "services-persistent-approval";
+export const SERVICES_EPHEMERAL_TTL_FEATURE = "services-ephemeral-ttl";
+export const SERVICES_ORGANIZE_FEATURE = "services-organize";
 /** cutex: owner `loginLinkCommand` on managed services + own-Origin rewrite for `proxyHostHeader: upstream`. */
 export const SERVICES_LOGIN_LINK_FEATURE = "services-login-link";
+/** cutex r267: `ownerScope` session | project on services; the owner switches it with PATCH {ownerScope, projectId?}. */
+export const SERVICES_PROJECT_SCOPE_FEATURE = "services-project-scope";
 export const DEFAULT_AGENT_PERSISTENT_APPROVAL: AgentPersistentApproval = "ask";
 
 export function isAgentPersistentApproval(v: unknown): v is AgentPersistentApproval {
@@ -27,6 +31,13 @@ export function servicesSettingsPatch(patch: unknown): ServicesSettingsPatch {
   const out: ServicesSettingsPatch = {};
   for (const [key, value] of Object.entries(patch)) {
     if (key === "agentPersistentApproval" && isAgentPersistentApproval(value)) out.agentPersistentApproval = value;
+    else if (
+      key === "ephemeralIdleMinutes" &&
+      typeof value === "number" &&
+      Number.isInteger(value) &&
+      (value === 0 || (value >= 5 && value <= 1440))
+    )
+      out.ephemeralIdleMinutes = value;
     else throw new Error(`bad services setting ${key}`);
   }
   if (Object.keys(out).length === 0) throw new Error("empty services settings patch");

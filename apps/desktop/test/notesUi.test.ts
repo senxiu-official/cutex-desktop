@@ -68,7 +68,7 @@ describe("Notes presentation and references", () => {
   });
   it("editors and search preserve the host Escape chain's modifier/IME guards", () => {
     const editor = readFileSync(new URL("../src/renderer/src/modules/notes/NoteEditor.tsx", import.meta.url), "utf8");
-    for (const guard of ["!event.repeat", "!event.nativeEvent.isComposing", "!event.ctrlKey", "!event.metaKey", "!event.altKey", "!event.shiftKey"]) expect(editor).toContain(guard);
+    for (const guard of ["!event.repeat", "!isImeComposing(event)", "!event.ctrlKey", "!event.metaKey", "!event.altKey", "!event.shiftKey"]) expect(editor).toContain(guard);
     expect(editor).not.toContain("stopPropagation");
     const search = readFileSync(new URL("../src/renderer/src/modules/notes/NotesListBody.tsx", import.meta.url), "utf8");
     for (const guard of ["!e.ctrlKey", "!e.metaKey", "!e.altKey", "!e.shiftKey"]) expect(search).toContain(guard);
@@ -151,7 +151,7 @@ describe("turn note floating window", () => {
     expect(source("index.ts")).toContain('"conversation.overlay": [{ id: "notes.floating", Overlay: NoteFloatHost }]');
     expect(float).toContain("createPortal"); expect(float).toContain("reserve(null)");
     expect(float).toContain('aria-modal="false"'); expect(float).toContain("useTrackOverlay(true)");
-    for (const guard of ["event.defaultPrevented", "event.repeat", "event.isComposing", "event.ctrlKey", "event.altKey", "event.metaKey", "event.shiftKey"]) expect(float).toContain(guard);
+    for (const guard of ["event.defaultPrevented", "event.repeat", "isImeComposing(event)", "event.ctrlKey", "event.altKey", "event.metaKey", "event.shiftKey"]) expect(float).toContain(guard);
     expect(float).not.toContain("stopPropagation");
     expect(source("NoteCard.tsx")).toContain("onDismiss={onDismissEditor}");
   });

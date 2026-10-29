@@ -4,7 +4,10 @@ import { dirname, join, resolve } from "node:path";
 import { BrowserRelayError } from "./relayTypes";
 export interface BrowserTabIdentityStorage { read(): string | undefined; write(content: string): void; reset?(content: string): void }
 /** Nonsecret provenance only. A restored agent tab can never silently enter the owner's partition. */
-export function createBrowserTabIdentity(storage: BrowserTabIdentityStorage) {
+/** Agent rows dropped at once when the list is full (owner 2026-10-23). */
+const AGENT_EVICT_BATCH = 512;
+/** `open`: the tabs open now (main's registry); their rows are never dropped. */
+export function createBrowserTabIdentity(storage: BrowserTabIdentityStorage, options: { open?: () => readonly { hostId: string; tabKey: string }[] } = {}) {
   const entries = new Set<string>(); let owners = new Set<string>(); let loaded = false, degraded = false, strict = false;
   const key = (hostId: string, tabKey: string) => { if (!/^[A-Za-z0-9._:-]{1,128}$/.test(hostId) || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(tabKey)) throw Error("invalid_browser_identity"); return JSON.stringify([hostId, tabKey]); };
   function load(): void {
@@ -75,12 +78,24 @@ export function createBrowserTabIdentity(storage: BrowserTabIdentityStorage) {
     },
     register(hostId: string, tabKey: string): boolean {
       load(); const id = key(hostId, tabKey); if (owners.has(id)) throw new BrowserRelayError("permission_denied");
-      if (entries.has(id)) return false; if (entries.size >= 4096) throw new BrowserRelayError("lease_limit");
+      if (entries.has(id)) return false;
+      if (entries.size >= 4096) {
+        // Owner 2026-10-23: the list no longer fills up for good. The oldest rows of agent tabs not open now go, and the
+        // store becomes strict: there an unknown tab key falls into the isolated agent pool and needs proof, never the
+        // owner's cookies, so a dropped row fails closed exactly like the tombstone it replaces.
+        const open = new Set((options.open?.() ?? []).flatMap(r => { try { return [key(r.hostId, r.tabKey)]; } catch { return []; } }));
+        const drop = [...entries].filter(row => !open.has(row)).slice(0, AGENT_EVICT_BATCH);
+        if (!drop.length) throw new BrowserRelayError("lease_limit");
+        const next = new Set(entries); for (const row of drop) next.delete(row); next.add(id);
+        const wasStrict = strict; strict = true;
+        try { write(next); } catch (error) { strict = wasStrict; throw error; }
+        entries.clear(); for (const row of next) entries.add(row); return true;
+      }
       const next = new Set(entries).add(id); write(next); entries.add(id); return true;
     },
     rollback(hostId: string, tabKey: string): void { load(); const id = key(hostId, tabKey); if (!entries.has(id)) return; const next = new Set(entries); next.delete(id); write(next); entries.delete(id); },
-    // Provenance tombstones deliberately survive close. Reviving stale renderer state must not
-    // cross into owner cookies; only owner provenance may be safely evicted.
+    // Provenance tombstones survive close. Reviving stale renderer state must not cross into owner cookies: agent
+    // rows are dropped only when the list is full, only for tabs not open, and only in strict mode (register).
   };
 }
 export function browserTabIdentityStorage(userData: string): BrowserTabIdentityStorage {

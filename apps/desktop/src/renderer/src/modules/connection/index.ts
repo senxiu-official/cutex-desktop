@@ -1,8 +1,11 @@
 // Core connection module: Settings → 设备管理 (formerly 主机: my hosts / hosts I can access, add, groups,
 // startup host, diagnostics). Access to a host (users, devices, peers, ways in) is Settings → 访问管理.
 import { Server } from "lucide-react";
-import { HostsPage } from "../../components/settings/ConnectionSettings";
 import { defineModule } from "../slots";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const HostsPage = lazyPage(() => import("../../components/settings/ConnectionSettings").then((m) => m.HostsPage));
 
 export default defineModule({
   id: "connection",

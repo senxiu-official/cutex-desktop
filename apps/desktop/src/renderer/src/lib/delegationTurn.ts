@@ -1,3 +1,4 @@
+import type { OwnerJoinDelegation } from "@cutex-desktop/protocol";
 // The composer while the agent runs a delegation turn (it is the handler of a running attempt):
 // which delegation it is (the hint over the empty input), what the send keys do (the steer /
 // interrupt-and-send shortcuts queue instead unless the 委托进行中允许插话快捷键 setting is on), and
@@ -9,6 +10,7 @@ import type { TimelineState } from "./timeline";
 
 export interface DelegationTurn {
   askId: string;
+  attempt: number;
   title: string;
   requesterId: string | null;
   requesterName: string | null;
@@ -36,6 +38,7 @@ export function currentDelegationTurn(timeline: TimelineState | null | undefined
   const turnStart = timeline.turns.find((t) => t.id === timeline.activeTurnId)?.startedAt ?? null;
   return {
     askId: row.askId,
+    attempt: row.attempt,
     title: record?.title || row.title,
     requesterId: row.requesterId,
     requesterName: row.requesterName,
@@ -68,8 +71,8 @@ export function delegationSendChoices(canSteer: boolean): DelegationSendChoice[]
 }
 
 /** What the composer's send does for a choice. */
-export function sendHowFor(choice: DelegationSendChoice): "queue" | "steer" | "interruptSend" {
-  return choice === "join" ? "steer" : choice === "interrupt" ? "interruptSend" : "queue";
+export function sendHowFor(choice: DelegationSendChoice): "queue" | "join" | "interruptSend" {
+  return choice === "join" ? "join" : choice === "interrupt" ? "interruptSend" : "queue";
 }
 
 /**
@@ -79,4 +82,13 @@ export function sendHowFor(choice: DelegationSendChoice): "queue" | "steer" | "i
  */
 export function queueSendNowMode(ctx: { delegation: boolean; allowSteerKeys: boolean }): "steer" | "confirm" {
   return ctx.delegation && !ctx.allowSteerKeys ? "confirm" : "steer";
+}
+
+export const OWNER_JOIN_FEATURE = "owner-join-delegation";
+
+/** Capture before a confirmation opens: never retarget an old owner consent to a newer turn. */
+export function delegationJoinIntent(turn: DelegationTurn | null, activeTurnId: string | null | undefined, runtimeGeneration: number, features: ReadonlySet<string>): OwnerJoinDelegation | undefined {
+  if (!features.has(OWNER_JOIN_FEATURE) || !turn || !activeTurnId || !Number.isSafeInteger(runtimeGeneration) || runtimeGeneration < 1 ||
+      !Number.isSafeInteger(turn.attempt) || turn.attempt < 1) return undefined;
+  return { askId: turn.askId, attempt: turn.attempt, expectedTurnId: activeTurnId, runtimeGeneration };
 }

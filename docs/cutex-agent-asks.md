@@ -345,6 +345,22 @@ own owner-queue flush (Fable C1, Astra F1). cutex therefore owns admission.
   ask. 「加入此委托」 steers it into the ask's turn as **shared task input**: the desktop says that
   text may be returned to the requester, and the answer is marked `ownerSteered: true`. (Setting,
   default "queue".)
+  *r263:* capability `owner-join-delegation` carries explicit `joinDelegation`
+  `{askId, attempt, expectedTurnId, runtimeGeneration}` on `userInput/submit`
+  (`auto`) or atomic `queue/steer`. The daemon verifies that exact running attempt
+  and lease and pins the native connection to that generation. It never turns a
+  stale join into a new turn. A refused direct join is retained as ordinary queued
+  input with `joinRefusal`; a refused queue join keeps its item. Native unknown
+  outcomes retain the normal deduplication/resync rules. Default `auto` and queued
+  follow-ups keep the conservative Ask guard. The desktop captures the identity
+  before a confirmation opens and gates joins on both daemon support and the live
+  runtime's steering capability.
+  The host-owner credential is required even when a scoped user has send access
+  (`403 owner_required`). This is a permission denial before admission: a direct
+  submit stays as a failed outbox row, not an accepted queued message; a queued
+  insertion shows rejected, while a merge preserves its merged queued text. The
+  desktop translates this refusal. Without the capability (r262), it hides join
+  and delegation insertion controls and retains ordinary queue/interrupt choices.
 - **`ifBusy`:** `"queue"` (default, decision 7) or `"fail"` (returns `busy` at once, so the
   requester can pick another agent).
 - **Offline target:** brought online only under the auto-wake policy (§8.4); otherwise the ask

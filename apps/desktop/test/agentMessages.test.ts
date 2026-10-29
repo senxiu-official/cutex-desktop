@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentMessageText, applyMessageEvent, deliveryKindOf, pendingMessagesFor, seedMessages, splitEnvelopeText, stateOf, stripLegacyPrefix, wakeableNotes, type MessageMap } from "../src/renderer/src/lib/agentMessages";
+import { agentMessageText, applyMessageEvent, deliveryKindOf, isLegacyPeerTell, lastFinishedTurnStart, peerSenderOf, pendingMessagesFor, seedMessages, splitEnvelopeText, stateOf, stripLegacyPrefix, wakeableNotes, type MessageMap } from "../src/renderer/src/lib/agentMessages";
 import { parseExternalInput } from "../src/renderer/src/lib/timeline";
 
 const sent = { messageId: "m1", fromCutexSessionId: "a", toCutexSessionId: "b", deliveryMode: "passive", deliveryKind: "note", content: "hi", body: "hi", sender: { id: "a", name: "Alpha", runtime: "codex" }, recipient: { id: "b", name: "Beta", runtime: "claude" } };
@@ -127,6 +127,77 @@ describe("seedMessages / pendingMessagesFor", () => {
     // Read in: the delivered event, or its item in the timeline.
     map = applyMessageEvent(map, "cutex/agentBus/messageDelivered", { messageId: "ptell-2", fromCutexSessionId: null, toCutexSessionId: "b", turnId: "t1", deliveredAt: "2026-10-19T00:02:00Z", remote }, 11);
     expect(pendingMessagesFor(map, "b", (id) => id === "ptell-1")).toEqual([]);
+  });
+
+  it("older cutex (< 0.1.5): a ptell- note without remote leaves once a turn that started after it finished", () => {
+    // r245 / 0.1.4 snapshot of a peer tell: system_sender_fields only (sender id = name@host, no
+    // name, no remote, senderKind agent), the frozen envelope names the cutex-peers service; no
+    // messageDelivered ever comes.
+    const queuedAt = Date.parse("2026-10-19T00:00:00Z") / 1000;
+    const boot = [{ messageId: "ptell-old", fromCutexSessionId: null, toCutexSessionId: "b", deliveryMode: "passive", content: "", state: "pending",
+      queuedAt: "2026-10-19T00:00:00Z", sender: { id: "worker@alpha", name: null, runtime: null }, senderKind: "agent",
+      externalInput: { message: { source: { kind: "service", id: "cutex-peers" }, delivery: "passive" } } }];
+    const map = seedMessages({}, "b", boot, []);
+    const row = map["ptell-old"]!;
+    expect(row).toMatchObject({ from: "worker@alpha", sourceKind: null, remote: null, kind: "note", state: "pending" });
+    expect(isLegacyPeerTell(row)).toBe(true);
+    expect(peerSenderOf(row)).toEqual({ label: "worker@alpha", host: "alpha" });
+    // No finished turn yet, or only one that started before it was queued (or is still running): stays.
+    expect(pendingMessagesFor(map, "b", undefined, undefined, null).map((m) => m.messageId)).toEqual(["ptell-old"]);
+    const before = { status: "completed", startedAt: queuedAt - 5, completedAt: queuedAt + 5 };
+    const running = { status: "inProgress", startedAt: queuedAt + 10, completedAt: null };
+    expect(lastFinishedTurnStart([before, running])).toBe(queuedAt - 5);
+    expect(pendingMessagesFor(map, "b", undefined, undefined, lastFinishedTurnStart([before, running]))).toHaveLength(1);
+    // That turn finished (interrupted counts: the note was read at its start): gone.
+    const after = { status: "interrupted", startedAt: queuedAt + 10, completedAt: queuedAt + 20 };
+    expect(pendingMessagesFor(map, "b", undefined, undefined, lastFinishedTurnStart([before, after]))).toEqual([]);
+    // Or its id in the timeline.
+    expect(pendingMessagesFor(map, "b", (id) => id === "ptell-old")).toEqual([]);
+  });
+
+  it("0.1.5 (remote present) and agent notes ignore the turn fallback: only messageDelivered / the timeline read them in", () => {
+    const remote = { host: "alpha", peerId: "ci-0123456789abcdef0123456789abcdef", senderId: "cutex.remote" };
+    let map = seedMessages({}, "b", [
+      { messageId: "ptell-new", fromCutexSessionId: null, toCutexSessionId: "b", deliveryMode: "passive", deliveryKind: "note", body: "x", state: "pending", queuedAt: "2026-10-19T00:00:00Z", sender: { id: "worker@alpha", name: "worker@alpha", runtime: null }, remote },
+      { messageId: "m-agent", fromCutexSessionId: "a", toCutexSessionId: "b", deliveryMode: "passive", deliveryKind: "note", body: "y", state: "pending", queuedAt: "2026-10-19T00:00:00Z" },
+    ], []);
+    expect(isLegacyPeerTell(map["ptell-new"]!)).toBe(false);
+    expect(peerSenderOf(map["ptell-new"]!)).toEqual({ label: "worker@alpha", host: "alpha" });
+    expect(peerSenderOf(map["m-agent"]!)).toBeNull();
+    const later = Date.parse("2026-10-19T01:00:00Z") / 1000;
+    expect(pendingMessagesFor(map, "b", undefined, undefined, later).map((m) => m.messageId)).toEqual(["m-agent", "ptell-new"]);
+    map = applyMessageEvent(map, "cutex/agentBus/messageDelivered", { messageId: "ptell-new", fromCutexSessionId: null, toCutexSessionId: "b", turnId: "t1", remote }, 11);
+    expect(pendingMessagesFor(map, "b", undefined, undefined, later).map((m) => m.messageId)).toEqual(["m-agent"]);
+  });
+
+  // Owner 2026-10-23: a Claude agent reads every waiting note into each turn it starts, but cutex marks them
+  // delivered only when that turn ends cleanly; after an interrupted turn they stayed 未读 with 唤醒 for good.
+  it("a note to a Claude agent leaves once a turn that started after it finished; wakes and Codex agents don't", () => {
+    const queued = "2026-10-19T00:00:00Z";
+    const map = seedMessages({}, "b", [
+      { messageId: "n1", fromCutexSessionId: "a", toCutexSessionId: "b", deliveryMode: "passive", deliveryKind: "note", body: "note", state: "inbox_accepted", queuedAt: queued },
+      { messageId: "w1", fromCutexSessionId: "a", toCutexSessionId: "b", deliveryMode: "after_turn", deliveryKind: "wake", body: "wake", state: "inbox_accepted", queuedAt: queued },
+    ], []);
+    const t0 = Date.parse(queued) / 1000;
+    const turn = (start: number) => lastFinishedTurnStart([{ status: "interrupted", startedAt: start, completedAt: start + 30 }]);
+    // Claude, a turn started a minute later and ended (interrupted): the note was read in; the wake stays.
+    expect(pendingMessagesFor(map, "b", undefined, undefined, turn(t0 + 60), true).map((m) => m.messageId)).toEqual(["w1"]);
+    // A turn that started right as it was queued (inside the margin) may not have taken it: it stays.
+    expect(pendingMessagesFor(map, "b", undefined, undefined, turn(t0 + 2), true).map((m) => m.messageId)).toEqual(["n1", "w1"]);
+    // A turn before it: stays (and 唤醒 still counts it).
+    const before = pendingMessagesFor(map, "b", undefined, undefined, turn(t0 - 60), true);
+    expect(before.map((m) => m.messageId)).toEqual(["n1", "w1"]);
+    expect(wakeableNotes(before)).toBe(1);
+    // A Codex agent: only messageDelivered / the timeline read it in.
+    expect(pendingMessagesFor(map, "b", undefined, undefined, turn(t0 + 60), false).map((m) => m.messageId)).toEqual(["n1", "w1"]);
+  });
+
+  it("parses name@host only from a ptell- row's sender label", () => {
+    const base = { remote: null, senderName: null };
+    expect(peerSenderOf({ ...base, messageId: "ptell-1", from: "a@b@lab" })).toEqual({ label: "a@b@lab", host: "lab" });
+    expect(peerSenderOf({ ...base, messageId: "ptell-1", from: "cutex-peers" })).toBeNull();
+    expect(peerSenderOf({ ...base, messageId: "ptell-1", from: "worker@" })).toBeNull();
+    expect(peerSenderOf({ ...base, messageId: "m1", from: "worker@alpha" })).toBeNull();
   });
 
   it("maps snapshot states", () => {

@@ -69,6 +69,6 @@ export function BrowserClaimOverlay({ sessionId }: { sessionId: string; reserve(
       : first.kind === "browser_claim"
         ? <BrowserClaimPanel key={first.approvalId} variant="card" hostId={hostId} approval={first} services={data?.services} />
         : <PendingCard key={first.approvalId} variant="inline" record={first} origin={{ hostId, sidebar: data?.sidebar ?? null, services: data?.services, look, mark: false, stale: hosts.stale.has(hostId) }} />}
-    {more > 0 && <p className="mt-1 text-[11px] text-subtle">{t("approvals.claim.more", { n: more })}</p>}
+    {more > 0 && <p className="mt-1 text-caption/[inherit] text-subtle">{t("approvals.claim.more", { n: more })}</p>}
   </div></div>, dock);
 }

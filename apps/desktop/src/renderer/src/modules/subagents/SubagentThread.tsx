@@ -91,10 +91,10 @@ export function SubagentThreadBody({ instance, sessionId }: SideBodyProps<Thread
             </span>
             <span className={`shrink-0 text-xs ${STATUS_TONE[status] ?? "text-muted"}`}>{t(`sub.status.${status}` as MessageKey)}</span>
           </div>
-          <p className="mt-1 text-[11px] text-subtle">{t(claude ? "subagents.claude.readOnly" : "sub.readOnly")}</p>
-          {truncated && <p className="mt-0.5 text-[11px] text-warn-text">{t("subagents.claude.truncated")}</p>}
+          <p className="mt-1 text-caption/[inherit] text-subtle">{t(claude ? "subagents.claude.readOnly" : "sub.readOnly")}</p>
+          {truncated && <p className="mt-0.5 text-caption/[inherit] text-warn-text">{t("subagents.claude.truncated")}</p>}
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-[13px]">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-ui/[inherit]">
           {error && <p className="text-xs text-danger">{error}</p>}
           {!timeline && !error && <p className="text-xs text-subtle">…</p>}
           {timeline && sessionId && <TimelineBody timeline={timeline} entries={entries} sessionId={sessionId} nameOf={nameOf} readOnly />}

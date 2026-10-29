@@ -37,6 +37,57 @@ export interface ComponentStatus {
   error: string | null;
   /** `needsUser`: what the owner must do (cutex `steps`); empty otherwise. */
   steps: string[];
+  /** Optional bundled/system Claude Code choice on newer daemon/runtime pairs. */
+  claudeCli?: ComponentClaudeCli;
+  dsh?: ComponentDsh;
+  kimi?: ComponentKimi;
+}
+
+/** Daemon-observed pinned Kimi Code version (`kimi-runtime`, r266) and, when cutex reports it, the host Node
+ *  prerequisite in DSH's shape (Kimi Code is a Node CLI). Absent / malformed: not shown. */
+export interface ComponentKimi {
+  version: string;
+  node?: { minimum: string; version: string | null; ready: boolean };
+}
+
+export function readComponentKimi(value: unknown): ComponentKimi | undefined {
+  const k = obj(value);
+  if (!k || typeof k.version !== "string" || !k.version) return undefined;
+  const node = readComponentDsh({ version: k.version, node: k.node })?.node;
+  return node ? { version: k.version, node } : { version: k.version };
+}
+
+/** Daemon-observed DSH pin and host Node prerequisite. Never probe the UI machine. */
+export interface ComponentDsh {
+  version: string;
+  node: { minimum: string; version: string | null; ready: boolean };
+}
+
+export function readComponentDsh(value: unknown): ComponentDsh | undefined {
+  const d = obj(value), node = obj(d?.node);
+  if (!d || !node || typeof d.version !== "string" || typeof node.minimum !== "string" || typeof node.ready !== "boolean") return undefined;
+  if (node.version !== null && typeof node.version !== "string") return undefined;
+  return { version: d.version, node: { minimum: node.minimum, version: node.version, ready: node.ready } };
+}
+
+export interface ComponentClaudeCli {
+  selected: "bundled" | "system";
+  bundled: { version: string | null };
+  /** null means no usable system installation was detected. */
+  system: { version: string | null } | null;
+}
+
+/** Ignore absent/malformed future metadata; never interpret a CLI path as a source choice. */
+export function readComponentClaudeCli(value: unknown): ComponentClaudeCli | undefined {
+  const v = obj(value);
+  if (!v || (v.selected != null && v.selected !== "bundled" && v.selected !== "system")) return undefined;
+  const bundled = obj(v.bundled), system = v.system == null ? null : obj(v.system);
+  if (!bundled || (v.system != null && !system)) return undefined;
+  const version = (value: unknown): string | null | undefined => value == null ? null
+    : typeof value === "string" && value.trim().length > 0 && value.length <= 200 && !/[\u0000-\u001f\u007f]/.test(value) ? value.trim() : undefined;
+  const bundledVersion = version(bundled.version), systemVersion = system ? version(system.version) : null;
+  if (bundledVersion === undefined || systemVersion === undefined || (v.selected === "system" && !system)) return undefined;
+  return { selected: v.selected === "system" ? "system" : "bundled", bundled: { version: bundledVersion }, system: system ? { version: systemVersion } : null };
 }
 
 export type ComponentOperationState = "running" | "done" | "failed";
@@ -104,6 +155,9 @@ export function readComponentStatus(value: unknown): ComponentStatus | null {
   const name = str(c?.name);
   if (!c || !name) return null;
   const origin = c.origin === "signed" || c.origin === "source" ? c.origin : null;
+  const claudeCli = name === "claude-runtime" ? readComponentClaudeCli(c.claudeCli) : undefined;
+  const dsh = name === "dsh-runtime" ? readComponentDsh(c.dsh) : undefined;
+  const kimi = name === "kimi-runtime" ? readComponentKimi(c.kimi) : undefined;
   const versions = Array.isArray(c.versions)
     ? c.versions.flatMap((v) => {
         const o = obj(v);
@@ -121,6 +175,9 @@ export function readComponentStatus(value: unknown): ComponentStatus | null {
     versions,
     error: str(c.error),
     steps: strings(c.steps),
+    ...(claudeCli ? { claudeCli } : {}),
+    ...(dsh ? { dsh } : {}),
+    ...(kimi ? { kimi } : {}),
   };
 }
 

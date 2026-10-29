@@ -49,6 +49,19 @@ export interface RestorePlan {
   steerIds: string[];
 }
 
+const IMAGE_TYPES = new Set(["image", "localImage"]);
+
+/**
+ * A queued message's text as its queue row shows it: its images are thumbnails beside it (not
+ * "[image]"); other non-text parts stay `[type]`.
+ */
+export function queuedRowText(item: QueueItem): string {
+  return (item.input as { type: string; text?: string }[])
+    .filter((p) => !IMAGE_TYPES.has(p.type))
+    .map((p) => (p.type === "text" ? p.text ?? "" : `[${p.type}]`))
+    .join("\n");
+}
+
 /** 放回输入框: steers first, then queued items, joined with a blank line. */
 export function restorePlan(steers: readonly PendingSteer[], items: readonly QueueItem[]): RestorePlan {
   const take: QueueItem[] = [];

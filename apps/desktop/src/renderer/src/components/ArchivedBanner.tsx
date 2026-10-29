@@ -51,7 +51,7 @@ export function ArchivedBanner({ session }: { session: SessionResource }) {
             {busy ? t("archive.banner.restoring") : t(project ? "archive.banner.restoreWithProject" : "archive.banner.restore")}
           </button>
           {project && (
-            <button disabled={busy} onClick={() => void restore(false)} className="text-[11px] text-subtle hover:text-foreground hover:underline disabled:opacity-50">
+            <button disabled={busy} onClick={() => void restore(false)} className="text-caption/[inherit] text-subtle hover:text-foreground hover:underline disabled:opacity-50">
               {t("archive.banner.restoreOnly")}
             </button>
           )}

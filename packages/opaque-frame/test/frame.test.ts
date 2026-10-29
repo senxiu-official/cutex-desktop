@@ -2,6 +2,7 @@ import { Script } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import { applyOpaqueFrame, buildOfflinePageDocument, OFFLINE_PAGE_CSP, OFFLINE_PAGE_MAX_BYTES, onFrameNavigatedAway, OPAQUE_FRAME_SANDBOX } from "../src/index";
 import { createFrameDocumentStore } from "../src/documents";
+import { PAGE_API_SCRIPT, PAGE_API_TAG } from "../src/page";
 
 describe("opaque frame attributes", () => {
   it("allows scripts only: no same-origin, popups, forms, top navigation; no device / clipboard access", () => {
@@ -88,5 +89,46 @@ describe("one-use frame documents", () => {
     now += 30_001;
     expect(store.respond(new Request(first.url)).status).toBe(404);
     expect(() => store.add(1, doc)).not.toThrow();
+  });
+});
+
+describe("page API (window.cutexPage)", () => {
+  // A fake frame window: parent receives posts; replies come back as message events from `parent`.
+  function run(framed = true) {
+    const listeners: ((e: { source: unknown; data: unknown }) => void)[] = [];
+    const posted: { data: Record<string, unknown>; target: string }[] = [];
+    const parent = { postMessage: (data: Record<string, unknown>, target: string) => posted.push({ data, target }) };
+    const window: Record<string, unknown> = {};
+    window.parent = framed ? parent : window;
+    const context = { window, Object, Map, Promise, JSON, Error, String, setTimeout, clearTimeout, addEventListener: (_t: string, l: (e: { source: unknown; data: unknown }) => void) => listeners.push(l) };
+    new Script(PAGE_API_SCRIPT).runInNewContext(context);
+    const reply = (data: Record<string, unknown>, source: unknown = parent) => listeners.forEach((l) => l({ source, data: { tag: PAGE_API_TAG, ...data } }));
+    return { api: window.cutexPage as { storage: Record<string, (...a: unknown[]) => Promise<unknown>>; submit(c: unknown): Promise<unknown>; copy(t: string): Promise<void> } | undefined, posted, reply };
+  }
+  it("is absent outside a frame (pages fall back)", () => expect(run(false).api).toBeUndefined());
+  it("posts fixed-schema messages to its parent and resolves on the parent's reply only", async () => {
+    const { api: maybe, posted, reply } = run();
+    const api = maybe!;
+    expect(Object.isFrozen(api)).toBe(true);
+    const got = api.storage.get("form");
+    expect(posted[0]).toEqual({ data: { tag: PAGE_API_TAG, id: 1, op: "storage.get", key: "form" }, target: "*" });
+    reply({ re: 1, ok: true, value: '{"a":1}' }, {}); // not from the parent: ignored
+    reply({ re: 1, ok: true, value: '{"a":1}' });
+    expect(await got).toEqual({ a: 1 });
+    api.storage.set("form", { a: 2 });
+    expect(posted[1]!.data).toEqual({ tag: PAGE_API_TAG, id: 2, op: "storage.set", key: "form", value: '{"a":2}' });
+    const sent = api.submit({ answers: [1] });
+    expect(posted[2]!.data).toMatchObject({ op: "submit", format: "json" });
+    reply({ re: 3, ok: true, sent: true });
+    expect(await sent).toEqual({ sent: true });
+    const copy = api.copy("x");
+    reply({ re: 4, ok: false, error: "no_gesture" });
+    await expect(copy).rejects.toMatchObject({ code: "no_gesture" });
+  });
+  it("is only in documents built with pageApi", () => {
+    expect(buildOfflinePageDocument("<p>x</p>").html).not.toContain("cutexPage");
+    const { html, csp } = buildOfflinePageDocument("<p>x</p>", undefined, { pageApi: true });
+    expect(html).toContain("cutexPage");
+    expect(csp).toBe(OFFLINE_PAGE_CSP);
   });
 });

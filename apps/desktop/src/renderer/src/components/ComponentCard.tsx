@@ -69,7 +69,7 @@ function openBackendUpdates(hostId: string) {
 }
 
 /** One component card: what the component is, why it is not usable on this host, what to do. */
-export function ComponentCard({ name, hostId, state, refusal, variant = "page" }: { name: string; hostId: string; state: Exclude<ComponentCardState, { kind: "body" | "waiting" }>; refusal: { code: string; message: string } | null; variant?: "page" | "banner" | "compact" }) {
+export function ComponentCard({ name, hostId, state, refusal, variant = "page", afterRecheck }: { name: string; hostId: string; state: Exclude<ComponentCardState, { kind: "body" | "waiting" }>; refusal: { code: string; message: string } | null; variant?: "page" | "banner" | "compact"; afterRecheck?(): Promise<void> }) {
   const { t } = useI18n();
   const banner = variant !== "page";
   const { title, what } = componentText(name, t);
@@ -77,6 +77,7 @@ export function ComponentCard({ name, hostId, state, refusal, variant = "page" }
   let text: ReactNode = null;
   let detail: ReactNode = null;
   let actions: ReactNode = null;
+  const recheck = () => { void (async () => { await loadComponents(hostId); await afterRecheck?.(); })(); };
   switch (state.kind) {
     case "askOwner":
       text = t("modules.component.askOwner", vars);
@@ -131,7 +132,7 @@ export function ComponentCard({ name, hostId, state, refusal, variant = "page" }
             ))}
           </ol>
         );
-      actions = <Button onClick={() => void loadComponents(hostId)}>{t("modules.component.recheck")}</Button>;
+      actions = <Button onClick={recheck}>{t("modules.component.recheck")}</Button>;
       break;
     case "restartPending":
       text = t("modules.component.restartPending", { ...vars, version: state.version ?? "" });
@@ -147,7 +148,7 @@ export function ComponentCard({ name, hostId, state, refusal, variant = "page" }
       break;
     case "unknown":
       text = t("modules.component.unknown", { ...vars, state: state.state });
-      actions = <Button onClick={() => void loadComponents(hostId)}>{t("modules.component.recheck")}</Button>;
+      actions = <Button onClick={recheck}>{t("modules.component.recheck")}</Button>;
       break;
   }
   return (

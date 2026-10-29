@@ -77,6 +77,15 @@ Direct app-server mode (no cutex) is **out of scope for v1**.
 - Display metadata on the cutex session record (stored in the daemon, shared by all clients):
   `display_name`, `note`, `avatar` (icon / emoji / small image). Leave room for more. _(gap: note,
   avatar likely missing)_
+- Agent avatar sources (as built): default = a bundled emoji from the Profile's 头像主题
+  (`lib/avatarThemes.ts`); 表情 (`emoji`); 颜色 (`color`); 图片 (`icon` `desktop-picture:<uuid>`, the
+  cropped picture device-local, `lib/agentPicture.ts`); **「Director 头像」** (2026-10-21, `icon`
+  `director:<bundled|user>/<stem>`, `lib/directorAvatars.ts`): portraits from the bundled folder
+  `apps/desktop/src/renderer/src/assets/avatars/director/` and the personal folder
+  `<userData>/avatars/director/` (read by main, handed over as PNG data URLs; CSP unchanged). A
+  Director's picker shows them first (编辑信息 opens on that tab when it has no avatar of its own; the
+  new-agent picker with 设为 Director ticked lists them above the emoji); any agent may pick one. How to
+  add images: the README in that assets folder.
 
 ### 3.1 Project = workspace + agent team (decided 2026-10-06)
 
@@ -206,6 +215,17 @@ Follows ZCode / common harness pattern (see owner's screenshot):
   Enabled only when the model's `inputModalities` has `image` (else "当前模型不支持图片").
   main re-validates every extra input item (`shared/input.ts`) before `cutex/userInput/submit`.
   User messages render image parts as thumbnails (click = full size) / file chips for paths.
+  Daemons advertising `event-media-blobs` may replace media with `cutexBlob` descriptors.
+  Main reads `cutex-blob:<session>/<sha256>` through authenticated `/v2/sessions/{session}/blobs/{sha256}`;
+  legacy `cutex-media:` keeps its separate owner-only media route. Reads verify hash, MIME and size
+  (new blobs ≤32 MiB), with no route fallback. Renderer thumbnails/lightboxes use lazy bounded object
+  URLs keyed by host, session and authorization epoch; copy/save re-read in main. Old inline images
+  remain readable. Unsupported/oversize media show quiet placeholders. Truncated stream requests
+  trigger canonical resync and never become actionable approval context before that read completes.
+  Optional paired `width`/`height` pixel hints reserve the same responsive aspect-ratio box during
+  lazy loading and after decoding, capped by each view's thumbnail limits. The lightbox reserves
+  its viewport-bounded box too. These hints never authorize reads or imply decode validity;
+  missing/invalid hints retain the existing automatic sizing.
 - Bottom bar (rearranged 2026-10-07, Claude layout + ZCode's merged chip). Left = actions / modes:
   `+`, permission mode, and a **计划 ×** accent chip only while Plan collaboration mode is on (× = back
   to default; nothing shown in default mode). No background-terminal chip (removed 2026-10-07): the
@@ -292,7 +312,26 @@ but the current adapter rejects busy changes. The proposal separates Claude mode
 sandbox presets, keeps the picker accessible during pending approvals, and requires asynchronous,
 generation-bound confirmation without blocking approval replies or stop. Not implemented yet.
 
+Cutex 主机自己的主人授权规则与 native 的自动 reviewer 是两层不同机制。已批准并在
+r258 分支实现的规则、风险确认、有效期、审计和兼容边界见
+[`docs/design/047-cutex-auto-approval.md`](design/047-cutex-auto-approval.md)：规则只由
+Management root 主人管理，桌面只在主机公布 `approval-auto-rules` 能力时显示入口。
+
 ### 4.5 Settings (structure decided 2026-10-06)
+**Effect markers (owner, 2026-10-24).** Every settings field declares its timing and storage scope
+as required row data; no page/card defaults or manually placed effect markers. The shared renderer
+computes timing and scope independently from all descendant rows, including conditional rows and
+their actual target host. State each marker at the highest uniform level: page header, otherwise
+uniform card, otherwise rows of a mixed card. A mixed page header says “混合设置”; a marker stated
+above never repeats below. Unknown declarations count as mixed and fail the declaration audit.
+Named layout exceptions live only in `lib/settingsEffectPolicy.ts`, keyed by page id with a reason;
+the audit reads that list. Profiles only states its common target-host scope once, tagging scopes
+that differ; timing follows the same page/card/row aggregation as every other page. Read-only results
+and summaries never carry timing; they may contribute their storage scope. Navigation/link rows
+contribute neither. Card-level markers share the card title row; untitled cards never invent a marker
+header. Disclosure rows keep any row marker beside their title, and keep drafts mounted. Fold only
+sensitive key material, long lists/logs, or advanced controls with meaningful risk; short information
+such as update build/source/check time stays visible.
 
 Full-page view (sidebar footer ⚙ is the only entry; nothing else in the footer). Left nav in
 groups like ZCode; each page states its source of truth (desktop-local vs cutex vs CODEX_HOME).
@@ -320,6 +359,27 @@ in the agent's header `⋯` → Agent settings (TUI Agent Inspector in GUI form)
 | | Archive | retired agents (restore later) | `/v2/sessions?lifecycle=retired` |
 | | About | desktop / cutex / cute-codex versions, licenses (ZCode NOTICE) | — |
 
+
+**DSH profiles (owner-approved integration, 2026-10-25).** Hosts declaring `dsh-runtime`
+offer a separate DSH profile kind and optional runtime component card. The daemon pins
+DSH 0.2.1-rc.3, checks Node >=24.9.0, owns launch and native history, and reads the
+profile's API-key environment reference on its own host. The desktop never accepts
+or reads that key. Model/effort use DSH settings; Codex/Claude permissions and login
+controls do not apply. Native steer, fork, revert and delete are hidden unless
+explicitly supported; cutex archive remains available. ACP context occupancy is
+shown separately from billing, which is marked unavailable. Unsupported Codex
+surfaces follow the per-session capability flags. Linux runtime acceptance and
+real-provider/native sandbox acceptance remain required before a release claim.
+
+**DSH on demand (owner decision, r262; r260/r261 unchanged).** The daemon advertises
+`dsh-runtime` only when its optional component is installed. Without it the desktop
+shows no DSH creation option, runtime settings card or installation prompt; initial
+installation uses the existing component CLI/API. Already-stored profiles, sessions,
+history and drafts remain user data. A removed component must not silently change a
+DSH draft into another provider. Component events refresh that host's capabilities
+without a desktop restart, with connection/response ordering fences. Remove unselects
+new sessions while existing sessions retain their pinned runtime. Standard r262 kits
+omit the DSH payload/Node preparation; explicit component installation owns them.
 
 **Context settings (owner priority).** Per profile: context window override + auto-compact token
 limit. Per model (catalog entry, "edit model" dialog like ZCode): context window, max output
@@ -349,11 +409,12 @@ computer control, account, design systems.
 
 ### 4.6 Header, workspace side pane, terminal (decided 2026-10-06)
 
-- **Header** (ZCode `WorkspaceHeader` style): avatar · name · role · project breadcrumb; second
-  line note / "working N s". Middle: git branch + `+N −M` (opens Changes tab), thread goal chip.
-  Right: open in editor/explorer (local host only), terminal toggle, side-pane toggle, `⋯`
-  (fork, rename/note/avatar, archive, copy id). Git lives in the header; no separate context bar
-  above the composer.
+- **Conversation header** (revised 2026-10-24): first line has avatar, name, role, online status and
+  notification bell; only pane actions remain on its right. The second line is project · host ·
+  path · git branch (`+N −M`, opens Changes), with the service pill at the far right. Paths and
+  branches yield space before project names. Services first shorten to icon + count, then move
+  into `⋯` on narrow panes. With the one-line preference they live in `⋯`, preserving header
+  height. The Shelf toggle and rail share the layers glyph; its tooltip is the Shelf term.
 - **Clickable files** (how ZCode/Claude do it): (1) agents are instructed to cite files as markdown
   links relative to the workspace root, with optional `:line` (cutex adds this to launch
   instructions — gap 17); (2) the renderer intercepts link clicks whose href resolves to a path
@@ -584,9 +645,8 @@ not cutex agents, so they never appear in the sidebar.
 
 ### 4.17 Arrow semantics (decided 2026-10-06)
 
-Disclosure arrows always show **state**, never the action. Collapsed is always ▸. Expanded points
-to where the revealed content is: ▾ when it opens below (work groups, messages, subagent rows,
-sidebar groups), ▴ when it opens above (the running-tasks panel above the composer). Dropdown
+Disclosure arrows always show **state**, never the action. Collapsed is always ▸ and expanded is
+always ▾, including panels above the composer (revised 2026-10-24). Dropdown
 carets (⌄ on the host switcher or agent title menu) are not disclosures and keep the menu
 convention. Expanded popovers also close on Esc, on an outside click, or on a click on their label.
 
@@ -647,6 +707,15 @@ i18n framework from day one, `zh-CN` + `en`. Dark/light via CSS variables (follo
   holds only agents outside every project (cutex `director_already_has_active_project`), the
   directory is a second `set_workspace_root` (epoch 1 / revision 1; on failure the project page
   link is offered), and the Director stays required. Code: `lib/projectCreate.ts`.
+
+- **Operator (2026-10-24):** keep the English role name in every locale. The project overview gives
+  Operators their own member group; owner-only member actions grant/revoke with the canonical
+  authority epoch and Operator grant revision. A conflict refreshes rather than retries. Hosts
+  without the Operator workspace projection show no Operator controls or marks. Avatars use a
+  small corner badge, including minor-agent tiles; rows use a role tag. After a role change,
+  online agents keep working and show “applies after restart”; an explicit Restart now action
+  warns that an active turn will be interrupted. Offline agents use the new tools on next start.
+  No automatic restart or timer. A current Operator must be revoked before becoming Director.
 
 ### 4.19 Built-in terminal (decided 2026-10-06)
 
@@ -867,6 +936,11 @@ order) is [`docs/desktop-modules.md`](desktop-modules.md).
   `persist:browser-<hostId>` for tabs the owner opens, `persist:browser-agent-<hostId>` for tabs an
   agent opens. A tab the owner grants to an agent stays in the owner partition and keeps the owner's
   logins; the grant UI says so. Plugin contexts keep zero egress and the app-level DNS block.
+  Agent-pool tabs show a quiet login-environment pill in the address bar. Its explanation offers
+  a fresh owner tab at the same exact URL; main retains the URL until that tab mounts. A compact
+  warning appears only after native owner input focuses a password field or types in a login form.
+  Main inspects field structure only, never field values, and ignores agent-dispatched input and
+  stale documents. Dismissal applies to that host and origin across windows for this app run.
   **N2 exception:** a browser-only egress proxy may listen on 127.0.0.1, random
   port, with a per-run credential ≥ 128 bit that main answers only for browser partitions; no TLS
   interception, no caching; closed when the last browser tab closes or the app exits. It must pass
@@ -884,7 +958,22 @@ order) is [`docs/desktop-modules.md`](desktop-modules.md).
   never browser targets; link-local / reserved addresses are always refused. An owner-typed LAN /
   tailnet origin goes through N2 in LAN-only mode, which dials that origin alone, even with websites
   off; no per-domain rules, no "trust the LAN" setting. Refusals carry one of six owner-facing
-  reasons (`browser-refusal-reasons` on the host passes them to agents). Co-control: owner clicks /
+  reasons (`browser-refusal-reasons` on the host passes them to agents).
+  **Owner-selected desktop loopback on SSH tabs (requested by the owner 2026-10-27).** An SSH tab
+  no longer makes `localhost` / `127.0.0.1` / `[::1]` an unconditional dead end: the explanation
+  still says that the address is on the desktop, keeps the `cutex:service/` guidance, and offers
+  「打开本机的这个地址」. That refusal makes main mint a 30-second, one-use nonce bound to the host,
+  tab and exact origin; the renderer's retry must return it (a bare boolean grants nothing). Settings → 浏览器 has a
+  separate per-SSH-host remember switch (default off, so upgrades keep the old behaviour and one
+  host's choice never spreads to another). Main decides before `loadURL`; agent tools / agent-driven
+  navigation and page-initiated cross-origin loopback navigations or forms remain refused. After
+  admission the origin follows the local-host per-tab + same-origin request rules, never N2.
+  Management, agent-bus, SSH-forward and every protected endpoint stay blocked first. A visible
+  「本机」 address-bar badge distinguishes the page from one on the SSH host. These pages can never
+  be granted to an agent, claimed or listed by its `tabs()`; entering one also revokes an existing
+  grant before loading. Reload / history reuse only that tab's already-admitted exact origin, even
+  if the remembered switch was later turned off. Removing a host deletes its remembered choice.
+  Co-control: owner clicks /
   scrolling / reading never pause the agent; owner input expires the agent's element refs; agent
   writes wait out owner typing (1.2 s); Pause / Resume are explicit, one click. Visibility per tab
   kind (2026-10-18, owner option C): an owner tab granted to an agent runs reads while hidden but

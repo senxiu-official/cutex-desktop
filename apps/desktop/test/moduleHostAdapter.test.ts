@@ -69,7 +69,7 @@ describe("mainline package adapter: actual settings modules", () => {
     // One page joins: 后端更新 (backend-upgrade, 系统 group right before 更新与诊断 since 2026-10-15). 互联 (module peers, hidden
     // without peers-v2) is a section of 访问管理 since 2026-10-19; NCI 远程作业 (module nci) is off by default.
     const joined = host.snapshot("settings.page");
-    expect(joined.filter(row => row.item.id !== "backend-upgrade.page")).toEqual(allPages);
+    expect(joined.filter(row => !["backend-upgrade.page", "storage.page"].includes(row.item.id))).toEqual(allPages);
     expect(joined.find(row => row.item.id === "backend-upgrade.page")).toMatchObject({ mode: "show", item: { page: "backend", group: "system" } });
     expect(host.snapshot("settings.section").find(row => row.item.id === "peers.access")).toMatchObject({ mode: "show", item: { page: "access" } });
     expect(host.snapshot("settings.section").find(row => row.item.id === "claude-accounts.accounts")).toMatchObject({ mode: "show", item: { page: "profiles" } });

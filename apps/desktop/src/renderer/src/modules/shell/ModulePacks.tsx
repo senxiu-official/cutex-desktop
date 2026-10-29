@@ -6,7 +6,7 @@ import { Check, CircleDashed, Loader2, MoreHorizontal } from "lucide-react";
 import { useI18n, type MessageKey } from "../../i18n";
 import { bridge } from "../../bridge";
 import { confirmDialog, openMenuFrom } from "../../lib/contextMenu";
-import { Button, ListRow } from "../../components/settings/Form";
+import { Button, ListRow, SettingsGroup } from "../../components/settings/Form";
 import { applyPackView, packRow, usePackRuntime, type PackRow } from "../packs";
 import type { ModulePacksView, PackStep } from "../../../../shared/modulePacks";
 
@@ -15,7 +15,7 @@ const STEPS: PackStep[] = ["download", "verify", "unpack"];
 function Tag({ children, tone = "muted", title }: { children: React.ReactNode; tone?: "muted" | "ok" | "warn" | "danger" | "accent"; title?: string }) {
   const color = tone === "ok" ? "bg-ok/15 text-ok-text" : tone === "warn" ? "bg-warn/15 text-warn-text" : tone === "danger" ? "bg-danger/12 text-danger" : tone === "accent" ? "bg-accent/12 text-accent" : "bg-surface-2 text-muted";
   return (
-    <span className={`shrink-0 truncate rounded px-1.5 py-0.5 text-[11px] ${color}`} title={title}>
+    <span className={`shrink-0 truncate rounded px-1.5 py-0.5 text-caption/[inherit] ${color}`} title={title}>
       {children}
     </span>
   );
@@ -52,7 +52,7 @@ export function PackIndexHeader() {
           ? t("modules.pack.checkedAt", { time: new Date(view.index.checkedAt).toLocaleString() })
           : t("modules.pack.neverChecked");
   return (
-    <ListRow
+    <SettingsGroup agents="none" source="local"><ListRow
       title={
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate">{t("modules.pack.indexTitle")}</span>
@@ -69,7 +69,7 @@ export function PackIndexHeader() {
           {view.checking ? <Loader2 size={13} className="animate-spin" /> : t("modules.pack.check")}
         </Button>
       }
-    />
+    /></SettingsGroup>
   );
 }
 
@@ -200,7 +200,7 @@ export function PackOnlyRows({ known }: { known: ReadonlySet<string> }) {
         const name = texts?.title?.[locale] ?? texts?.title?.en ?? id;
         const detail = texts?.description?.[locale] ?? texts?.description?.en;
         return (
-          <ListRow
+          <SettingsGroup agents="none" source="local" key={id}><ListRow
             key={id}
             leading={<span className="h-2 w-2 shrink-0 rounded-full border border-subtle/60" aria-hidden />}
             title={
@@ -212,7 +212,7 @@ export function PackOnlyRows({ known }: { known: ReadonlySet<string> }) {
             detail={detail}
             below={<PackBelow row={row} />}
             actions={<PackActions row={row} name={name} />}
-          />
+          /></SettingsGroup>
         );
       })}
     </>

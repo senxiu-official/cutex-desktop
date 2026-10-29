@@ -23,7 +23,7 @@ export function ClaudeSkillsImportRow() {
   const [open, setOpen] = useState(false);
   if (!features.has(CLAUDE_SKILLS_IMPORT_FEATURE)) return null;
   return (
-    <SettingRow label={t("agent-config.profile.claudeSkillsImport")} hint={t("agent-config.profile.claudeSkillsImportHint")}>
+    <SettingRow source="host" agents="next" label={t("agent-config.profile.claudeSkillsImport")} hint={t("agent-config.profile.claudeSkillsImportHint")}>
       <button type="button" onClick={() => setOpen(true)} className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-surface-2" data-testid="profile-claude-skills-import">
         {t("composer.tools.skillsImport")}
       </button>
@@ -40,7 +40,7 @@ export function ClaudeCodeSourceRows({ detail, patch, set }: { detail: ProfileDe
   return (
     <>
       {CLAUDE_SETTING_SOURCES.map((source) => (
-        <SettingRow key={source} label={t(`agent-config.profile.claudeSource.${source}` as MessageKey)} hint={t(`agent-config.profile.claudeSource.${source}Hint` as MessageKey)}>
+        <SettingRow source="host" agents="next" readOnly={!editable} key={source} label={t(`agent-config.profile.claudeSource.${source}` as MessageKey)} hint={t(`agent-config.profile.claudeSource.${source}Hint` as MessageKey)}>
           <Toggle
             label={t(`agent-config.profile.claudeSource.${source}` as MessageKey)}
             checked={sources.includes(source)}
@@ -50,7 +50,7 @@ export function ClaudeCodeSourceRows({ detail, patch, set }: { detail: ProfileDe
         </SettingRow>
       ))}
       {detail.claudeAiConnectors != null && (
-        <SettingRow label={t("agent-config.profile.claudeAiConnectors")} hint={t("agent-config.profile.claudeAiConnectorsHint")}>
+        <SettingRow source="host" agents="next" readOnly={!fieldEditable(detail, "claudeAiConnectors")} label={t("agent-config.profile.claudeAiConnectors")} hint={t("agent-config.profile.claudeAiConnectorsHint")}>
           <Toggle
             label={t("agent-config.profile.claudeAiConnectors")}
             checked={patch.claudeAiConnectors ?? detail.claudeAiConnectors ?? false}

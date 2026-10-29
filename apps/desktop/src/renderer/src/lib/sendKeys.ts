@@ -51,9 +51,9 @@ export function composerKeyAction(preset: SendKeyPreset, e: ComposerKeyEvent, ct
 }
 
 /** Strategy for a send action given whether a turn runs (cutex "queue" never starts a turn). */
-export function strategyFor(action: "send" | "steer" | "queue" | "interruptSend", busy: boolean): "auto" | "queue" | "interrupt" {
+export function strategyFor(action: "send" | "steer" | "join" | "queue" | "interruptSend", busy: boolean): "auto" | "queue" | "interrupt" {
   if (!busy) return "auto";
   if (action === "interruptSend") return "interrupt";
-  if (action === "steer") return "auto";
+  if (action === "steer" || action === "join") return "auto";
   return "queue";
 }

@@ -2,7 +2,8 @@
 // in test/usageMerge.test.ts. Each host's `/v2/usage` and quotas are read separately and merged here,
 // in the desktop only (cutex knows nothing about other hosts).
 //
-// - Profile identity across hosts is the profile NAME, trimmed and case-insensitive (`profileKey`);
+// - Profile identity prefers the owner-scoped secretId + accountKey; names are a legacy fallback.
+//   Conflicting known accounts cannot be bridged by an unlinked name. Previously only the NAME was used;
 //   the shown spelling is the first host's (`canonicalNames`).
 // - Rows keep their host (`key.host` = label, `key.hostId`) so the 「主机」 split can still tell hosts
 //   apart; the page's own aggregation (chart / table) adds same-named series up.
@@ -12,13 +13,15 @@
 // - Quotas: one card per profile name; the same account on several hosts shows the freshest observation
 //   (gauges are never added up); a different provider under the same name stays a separate card.
 import type { ProfileItem, QuotaGauge, UsageAmounts, UsageReport } from "../../../../shared/ipc";
+import { groupProfiles, identityProfile, profileRef, accountIdentity, type IdentityProfile } from "./accountIdentity";
+export { profileSignature } from "./accountIdentity";
 import { latestObservedAt } from "../../lib/quota";
 
 type Row = UsageReport["rows"][number];
 type Unpriced = NonNullable<UsageReport["unpricedModels"]>[number];
 
 /** The merged ledger's row key: the host the row came from rides along (the 「主机」 split). */
-export type HostRowKey = Row["key"] & { host?: string; hostId?: string };
+export type HostRowKey = Row["key"] & { host?: string; hostId?: string; profileGroup?: string };
 
 /** Identity of a profile across hosts: its name, trimmed, ignoring case. */
 export function profileKey(name: string): string {
@@ -37,6 +40,7 @@ export interface HostReport {
   hostId: string;
   label: string;
   report: UsageReport;
+  profiles?: ReadonlyMap<string, ProfileItem> | null;
 }
 
 /** The display currency of a report (cutex `usage-currency`: `currency`, else the pricing block's). */
@@ -89,6 +93,7 @@ function addAmounts(into: UsageAmounts, from: UsageAmounts, rate: number | null)
   if (from.estimatedCost !== undefined && rate !== null) into.estimatedCost = (into.estimatedCost ?? 0) + from.estimatedCost * rate;
   if (from.apiEquivalentUsd !== undefined) into.apiEquivalentUsd = (into.apiEquivalentUsd ?? 0) + from.apiEquivalentUsd;
   if (from.unpricedTokens !== undefined) into.unpricedTokens = (into.unpricedTokens ?? 0) + from.unpricedTokens;
+  if (from.maxRequestInput !== undefined) into.maxRequestInput = Math.max(into.maxRequestInput ?? 0, from.maxRequestInput);
   if (from.pricedAs?.length) into.pricedAs = [...new Set([...(into.pricedAs ?? []), ...from.pricedAs])].sort();
 }
 
@@ -104,6 +109,22 @@ function addAmounts(into: UsageAmounts, from: UsageAmounts, rate: number | null)
  */
 export function mergeUsageReports(parts: readonly HostReport[], opts: { currency?: string; canonical?: (name: string) => string } = {}): MergedUsage {
   const canonical = opts.canonical ?? canonicalNames(parts.flatMap((p) => p.report.rows.map((r) => r.key.profile)));
+  const enriched = parts.some((part) => part.profiles !== undefined);
+  const refs = new Map<string, IdentityProfile>();
+  const rowRefs = new Map<string, Map<Row, IdentityProfile>>();
+  if (enriched) for (const part of parts) {
+    const hostRows = new Map<Row, IdentityProfile>(); rowRefs.set(part.hostId, hostRows);
+    const byId = new Map([...(part.profiles?.values() ?? [])].map((p) => [p.id, p]));
+    for (const profile of part.profiles?.values() ?? []) { const ref = identityProfile(part.hostId, part.label, profile); refs.set(profileRef(ref), ref); }
+    for (const row of part.report.rows) {
+      if (!row.key.profile) continue;
+      const profile = row.key.profileId ? byId.get(row.key.profileId) : part.profiles?.get(row.key.profile);
+      const ref: IdentityProfile = profile ? identityProfile(part.hostId, part.label, profile) : { hostId: part.hostId, label: part.label, name: row.key.profile, signature: null, profileId: row.key.profileId, isolated: !!row.key.profileId && !!part.profiles?.get(row.key.profile) };
+      const key = profileRef(ref); if (!refs.has(key)) refs.set(key, ref); hostRows.set(row, refs.get(key)!);
+    }
+  }
+  const groups = groupProfiles([...refs.values()], false);
+  const identities = new Map(groups.flatMap((group) => group.members.map((member) => [profileRef(member), group] as const)));
   const currencies = parts.map((p) => reportCurrency(p.report));
   const target = opts.currency ?? currencies.find((c) => c !== undefined);
   // Rate tables: the target currency's host first (its owner set those rates), then the rest.
@@ -129,7 +150,11 @@ export function mergeUsageReports(parts: readonly HostReport[], opts: { currency
     addAmounts(totals, p.report.totals, rate);
     for (const r of p.report.rows) {
       const key: HostRowKey = { ...r.key, host: p.label, hostId: p.hostId };
-      if (r.key.profile) key.profile = canonical(r.key.profile);
+      if (r.key.profile) {
+        const ref = rowRefs.get(p.hostId)?.get(r); const group = ref && identities.get(profileRef(ref));
+        key.profile = group?.label ?? canonical(r.key.profile);
+        if (group) key.profileGroup = group.id;
+      }
       const row: Row = { ...r, key };
       if (r.estimatedCost !== undefined) {
         if (rate === null) delete row.estimatedCost;
@@ -201,18 +226,8 @@ export function emptyReport(query: UsageQuery): UsageReport {
 
 // ---------------------------------------------------------------- quotas
 
-/**
- * Which account a profile stands for, as far as the desktop can tell: CLI kind + provider + base URL.
- * Two hosts' profiles of one name with the same signature are the same account (same quota).
- */
-export function profileSignature(p: Pick<ProfileItem, "cliKind" | "provider" | "modelProvider" | "baseUrl"> | null | undefined): string | null {
-  if (!p) return null;
-  const base = (p.baseUrl ?? "").trim().replace(/\/+$/, "").toLowerCase();
-  return [p.cliKind, (p.modelProvider ?? p.provider ?? "").toLowerCase(), base].join("|");
-}
-
 /** One host's profile and its quota (undefined gauges = not answered yet). */
-export interface HostQuota {
+export interface HostQuota extends IdentityProfile {
   hostId: string;
   label: string;
   name: string;
@@ -238,43 +253,27 @@ export interface QuotaCard {
   gauges: QuotaGauge[];
   /** Every host answered. */
   loaded: boolean;
+  accountKey: string | null;
+  secretId: string | null;
+  members: HostQuota[];
+  linkedHosts: string[];
+  fromName: string | null;
+  observedAt: number | null;
 }
 
-/** One card per profile name (per provider when they differ); `quotas` in display order. */
+
+/** Account identity first; legacy name/provider fallback. `quotas` are in display order. */
 export function mergeQuotas(quotas: readonly HostQuota[]): QuotaCard[] {
-  const canonical = canonicalNames(quotas.map((q) => q.name));
-  const groups = new Map<string, HostQuota[][]>();
-  for (const q of quotas) {
-    const k = profileKey(q.name);
-    const list = groups.get(k) ?? [];
-    groups.set(k, list);
-    const same = q.signature === null ? list[0] : list.find((g) => g.some((x) => x.signature === q.signature) || g.every((x) => x.signature === null));
-    if (same) same.push(q);
-    else list.push([q]);
-  }
-  const out: QuotaCard[] = [];
-  for (const [k, list] of groups) {
-    list.forEach((members, gi) => {
-      let best: HostQuota | null = null;
-      let bestAt = -Infinity;
-      for (const m of members) {
-        if (!m.gauges?.length) continue;
-        const at = latestObservedAt(m.gauges) ?? Number.NEGATIVE_INFINITY;
-        if (best === null || at > bestAt) [best, bestAt] = [m, at];
-      }
-      const winner = best as HostQuota | null;
-      out.push({
-        key: `${k}#${gi}`,
-        name: canonical(members[0]!.name),
-        hosts: [...new Set(members.map((m) => m.label))],
-        hostIds: [...new Set(members.map((m) => m.hostId))],
-        split: list.length > 1,
-        from: winner?.label ?? null,
-        fromHostId: winner?.hostId ?? null,
-        gauges: winner?.gauges ?? [],
-        loaded: members.every((m) => m.gauges !== undefined),
-      });
-    });
-  }
-  return out;
+  return groupProfiles(quotas).map((group) => {
+    let best: HostQuota | null = null; let bestAt = -Infinity;
+    for (const member of group.members) {
+      if (!member.gauges?.length) continue;
+      const at = latestObservedAt(member.gauges) ?? Number.NEGATIVE_INFINITY;
+      if (best === null || at > bestAt) { best = member; bestAt = at; }
+    }
+    const verified = group.members.filter((member) => accountIdentity(member) === group.id);
+    return { key: group.id, name: group.name, hosts: [...new Set(group.members.map((m) => m.label))], hostIds: [...new Set(group.members.map((m) => m.hostId))], split: group.split,
+      from: best?.label ?? null, fromHostId: best?.hostId ?? null, fromName: best?.name ?? null, gauges: best?.gauges ?? [], observedAt: best ? latestObservedAt(best.gauges ?? []) : null,
+      loaded: group.members.every((m) => m.gauges !== undefined), accountKey: group.accountKey, secretId: group.secretId, members: group.members, linkedHosts: [...new Set(verified.map((m) => m.label))] };
+  });
 }

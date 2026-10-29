@@ -6,8 +6,11 @@ import { useSyncExternalStore } from "react";
 import { compareVersions, parseVersion } from "../../../shared/binaryUpdate";
 import type { ChangelogRelease } from "../../../shared/changelog";
 
-/** Bump when the introduction changes enough that everyone should see it again. */
-export const ONBOARDING_REVISION = 2;
+/**
+ * Bump when the introduction changes enough that everyone should see it again. 3 = the merged 0.2.0 flow (owner
+ * 2026-10-24: every user walks it once at 0.2.0, upgraders from 0.1.x included, their choices preselected).
+ */
+export const ONBOARDING_REVISION = 3;
 
 const KEY = "cutex-desktop.onboarding";
 
@@ -24,9 +27,10 @@ export interface OnboardingState {
   lastTestBuild: string | null;
 }
 
+/** `auto`: opened by itself at start (not a replay) — the first one on a device asks 「要看引导和提示吗？」 first (lib/guides). */
 export type OnboardingView =
-  | { kind: "intro"; /** Testing switch: record this build and show `whatsNew` (a version) afterwards. */ test?: { build: string; whatsNew: string | null } }
-  | { kind: "whatsNew"; version: string };
+  | { kind: "intro"; /** Testing switch: record this build and show `whatsNew` (a version) afterwards. */ test?: { build: string; whatsNew: string | null }; auto?: boolean; /** The card to open at (回到引导). */ at?: string }
+  | { kind: "whatsNew"; version: string; auto?: boolean; at?: string };
 
 const DEFAULTS: OnboardingState = { doneRevision: 0, whatsNew: true, lastWhatsNew: null, testEveryBuild: false, lastTestBuild: null };
 
@@ -119,6 +123,41 @@ export function testView(s: OnboardingState, build: string | null, listed: reado
 /** Opens a view (关于 → 重新看一遍 / 这个版本的新功能, or the automatic start). */
 export function openOnboarding(view: OnboardingView): void {
   open = view;
+  aside = null;
+  emit();
+}
+
+/** The flow stepped aside for one of its actions (lib/guideActions): 「回到引导」 reopens it at that card. */
+let aside: OnboardingView | null = null;
+
+export function useOnboardingAside(): OnboardingView | null {
+  return useSyncExternalStore(subscribe, () => aside);
+}
+
+/**
+ * A card's action (试一试 …) runs: the flow closes the way 关闭 does (counted as seen; the testing switch's
+ * 新功能 waits for the way back), and 「回到引导」 can bring it back at `step`.
+ */
+export function stepAsideOnboarding(version: string | null, step: string): void {
+  const view = open;
+  if (!view) return;
+  const back: OnboardingView = view.kind === "intro" ? { kind: "intro", at: step } : { kind: "whatsNew", version: view.version, at: step };
+  if (view.kind === "intro" && view.test) {
+    open = null;
+    save({ ...state, doneRevision: ONBOARDING_REVISION, lastTestBuild: view.test.build });
+  } else closeOnboarding(version);
+  aside = back;
+  emit();
+}
+
+/** 「回到引导」: the flow again at the card it left from. */
+export function resumeOnboarding(): void {
+  if (aside) openOnboarding(aside);
+}
+
+/** The pill's ✕: no way back (Settings → 帮助 still replays it). */
+export function dismissOnboardingAside(): void {
+  aside = null;
   emit();
 }
 
@@ -132,6 +171,15 @@ export function closeOnboarding(version: string | null): void {
   } else if (view?.kind === "intro") save({ ...state, doneRevision: ONBOARDING_REVISION, lastWhatsNew: version ?? state.lastWhatsNew });
   else if (view?.kind === "whatsNew") save({ ...state, lastWhatsNew: view.version });
   else emit();
+}
+
+/**
+ * 跳过所有引导 (lib/guides): the introduction counts as finished and `version`'s 新功能 as seen, without opening
+ * anything; closes what is open.
+ */
+export function finishOnboarding(version: string | null): void {
+  open = null;
+  save({ ...state, doneRevision: ONBOARDING_REVISION, lastWhatsNew: version ?? state.lastWhatsNew });
 }
 
 export function setWhatsNewEnabled(on: boolean): void {

@@ -1,7 +1,7 @@
 // Side agent view (「智能体」 side page): the store keeps N live session feeds — the selected agent and the
 // agents shown in the right side area (docs/research/side-agent-view-20261018.md). Same transport harness
 // as r244Acceptance.test.ts.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import type { DaemonState, HostsState } from "../src/shared/ipc";
 import type { NotifyOccurrence } from "../src/renderer/src/lib/notifyEvents";
@@ -99,6 +99,21 @@ async function startConnected() {
   await settle();
 }
 
+// Warm the transform cache once: each beforeEach resets modules and re-imports the store, and the
+// first-ever load (~3 s) was billed to the first test's hook and timed out under the full suite's
+// load. Same stubs as beforeEach (the store reads them at evaluation), undone like afterEach.
+beforeAll(async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {}, removeItem: () => {} });
+  vi.stubGlobal("document", { hasFocus: () => false });
+  vi.stubGlobal("requestAnimationFrame", (cb: () => void) => setTimeout(cb, 0));
+  await import("../src/renderer/src/store");
+  await import("../src/renderer/src/lib/shell");
+  await import("../src/renderer/src/lib/notifyEvents");
+  vi.clearAllTimers();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+}, 60_000);
 beforeEach(async () => {
   vi.resetModules();
   vi.useFakeTimers();

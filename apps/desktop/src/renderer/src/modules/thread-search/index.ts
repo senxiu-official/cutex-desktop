@@ -2,24 +2,30 @@
 // `thread-search-occurrences`; Codex natives 0.160+, Claude adapters with `threadSearch`).
 import { Search } from "lucide-react";
 import { setGutterPopover } from "../../lib/gutterStore";
+import { matchesCommand } from "../../lib/keybindings";
 import { useApp } from "../../store";
 import { defineModule, type AppModuleContext } from "../slots";
 import { SEARCH_GUTTER_ID, THREAD_SEARCH_CAPABILITY } from "./model";
 import { SearchGutter, SearchTrigger } from "./SearchGutter";
+import { onEveryAppWindow } from "../../lib/appWindowSet";
 
-/** Ctrl+F / ⌘F in the conversation opens the search (Settings keeps its own Ctrl+F). */
+/** The search key (lib/keybindings `threadSearch`, default Ctrl+F / ⌘F) in the conversation opens the search (Settings keeps its own). */
 function activate(context: AppModuleContext): void {
   if (typeof window === "undefined") return;
-  const onKey = (e: KeyboardEvent) => {
-    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "f" || e.defaultPrevented) return;
-    if (useApp.getState().view.kind !== "conversation") return;
-    const trigger = document.querySelector<HTMLElement>(`[data-gutter-trigger="${SEARCH_GUTTER_ID}"]`);
-    if (!trigger) return;
-    e.preventDefault();
-    setGutterPopover(SEARCH_GUTTER_ID, trigger);
-  };
-  window.addEventListener("keydown", onKey);
-  context.signal.addEventListener("abort", () => window.removeEventListener("keydown", onKey), { once: true });
+  // In every app window: the search of the conversation in the window the key was pressed in (multi-window).
+  const stop = onEveryAppWindow((win) => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !matchesCommand("threadSearch", e)) return;
+      if (useApp.getState().view.kind !== "conversation") return;
+      const trigger = win.document.querySelector<HTMLElement>(`[data-gutter-trigger="${SEARCH_GUTTER_ID}"]`);
+      if (!trigger) return;
+      e.preventDefault();
+      setGutterPopover(SEARCH_GUTTER_ID, trigger);
+    };
+    win.addEventListener("keydown", onKey);
+    return () => win.removeEventListener("keydown", onKey);
+  });
+  context.signal.addEventListener("abort", stop, { once: true });
 }
 
 export default defineModule({

@@ -1,17 +1,14 @@
-// Every keyboard shortcut the desktop handles, with its meaning — the list behind Settings → 键盘快捷键.
-// Sourced from the actual handlers; keep in sync:
+// The fixed keyboard shortcuts, with their meaning — the read-only part of Settings → 键盘快捷键. The
+// rebindable window / pane keys are lib/keybindings.ts (COMMANDS; their handlers ask matchesCommand), shown
+// above these by components/settings/KeybindingsSection. Sourced from the actual handlers; keep in sync:
 //   composer send keys      lib/sendKeys.ts (composerKeyAction) + Composer.tsx onKeyDown
 //   Esc in the conversation lib/escInterrupt.ts + lib/useConversationEsc.ts (mounted by Composer.tsx)
 //   slash palette / @       Composer.tsx onKeyDown (popup branch), pickPalette / pickMention
 //   effort / model pickers  Composer.tsx EffortPicker onKey, ModelPicker.tsx onKey (1–9)
 //   approvals / questions   InteractionDock.tsx
 //   dialogs / menus         Overlays.tsx, Menu.tsx
-//   window                  TitleBar.tsx (Ctrl+B, Ctrl+,), HostSwitcher.tsx (Ctrl+Shift+H), modules/terminal/terminals.ts (Ctrl+`: open / focus / back to the
-//                           composer; a focused xterm lets the app keys through), StatusCapsule.tsx (Ctrl+., Esc),
-//                           PendingChat.tsx, GoalBar.tsx,
-//                           Settings.tsx SettingsNav (Ctrl+F, / → settings search)
-//   right side              lib/useSideShortcuts.ts (mounted by App.tsx): Ctrl+Alt+B, Ctrl+Shift+1…9 / N / M,
-//                           Shift+F11, F6, Esc (restore / close the narrow-window drawer)
+//   window (fixed)          StatusCapsule.tsx (Esc), PendingChat.tsx (Enter), GoalBar.tsx (Ctrl+Enter),
+//                           lib/useSideShortcuts.ts (Esc: restore a maximised pane / close the narrow-window drawer)
 import type { MessageKey } from "../i18n";
 import type { SendKeyPreset } from "./sendKeys";
 
@@ -107,23 +104,10 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     id: "window",
     title: "shortcuts.group.window",
     items: [
-      { keys: ["Ctrl+B"], desc: "shortcuts.sidebar" },
-      { keys: ["Ctrl+,"], desc: "identity.settingsShortcut" },
-      { keys: ["Ctrl+Shift+H"], desc: "shortcuts.hostSwitcher" },
-      { keys: ["Ctrl+`"], desc: "shortcuts.terminal" },
-      { keys: ["Ctrl+."], desc: "shortcuts.capsule" },
       { keys: ["Esc"], desc: "shortcuts.capsuleEsc" },
       { keys: ["Enter"], desc: "shortcuts.newChatEnter" },
       { keys: ["Ctrl+Enter"], desc: "shortcuts.goalSave" },
-      { keys: ["Ctrl+F", "/"], desc: "shell.settingsSearch.shortcut" },
-      { keys: ["Ctrl+Alt+B"], desc: "shortcuts.sideToggle" },
-      { keys: ["Ctrl+Shift+1 … 9"], desc: "shortcuts.sidePage" },
-      { keys: ["Ctrl+Shift+N"], desc: "shortcuts.sideNewPage" },
-      { keys: ["Ctrl+Shift+M"], desc: "shortcuts.sideMaximise" },
-      { keys: ["Shift+F11"], desc: "shortcuts.sideFullscreen" },
       { keys: ["Esc"], desc: "shortcuts.escSide" },
-      { keys: ["Alt+←"], desc: "shortcuts.jumpBack" },
-      { keys: ["F6", "Shift+F6"], desc: "shortcuts.focusCycle" },
     ],
   },
 ];

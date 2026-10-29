@@ -4,6 +4,7 @@
 // first lists the open delegations it ends and confirms in place (click twice, no modal).
 // Every edit is one PATCH built by model.ts policyPatch (cutex merges per field, replaces exports /
 // assumedCaps whole) and the reply replaces the row.
+import { isImeComposing } from "../../lib/ime";
 import { useRef, useState } from "react";
 import { ArrowLeft, Plus } from "lucide-react";
 import type { AskDetail } from "../../../../shared/ipc";
@@ -11,7 +12,7 @@ import { CROSS_HOST_TELL_WAKE_FEATURE, PEER_LABEL, PEER_LIMITS, PEER_REVIEWS, PE
 import { MaskedText } from "../../components/MaskedText";
 import { ArmedHint } from "../../components/ArmedHint";
 import { PeerParty } from "../../components/PeerParty";
-import { ArmedRemove, Button, Checkbox, EmptyState, ErrorNote, IconButton, Loading, Notice, NumberField, RefreshButton, Section, Segmented, Select, SettingRow, TextField, TextInput, Toggle } from "../../components/settings/Form";
+import { ArmedRemove, Button, Checkbox, EmptyState, ErrorNote, IconButton, Loading, Notice, NumberField, RefreshButton, Section, Segmented, Select, SettingRow, SettingsGroup, TextField, TextInput, Toggle } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { summaryFromRecord } from "../../lib/delegations";
@@ -58,7 +59,7 @@ function UrlsEditor({ urls, disabled, onCommit }: { urls: string[]; disabled: bo
     <div className="flex flex-col items-end gap-1">
       {urls.map((u) => (
         <div key={u} className="flex items-center gap-1">
-          <span className="max-w-72 truncate font-mono text-[11px]" title={u}>
+          <span className="max-w-72 truncate font-mono text-caption/[inherit]" title={u}>
             {u}
           </span>
           <ArmedRemove title={t("peers.detail.removeUrl", { url: u })} disabled={disabled || urls.length <= 1} onRemove={() => onCommit(urls.filter((x) => x !== u))} />
@@ -66,7 +67,7 @@ function UrlsEditor({ urls, disabled, onCommit }: { urls: string[]; disabled: bo
       ))}
       {urls.length < PEER_URLS_MAX && (
         <div className="flex items-center gap-1">
-          <TextInput value={draft} onChange={setDraft} placeholder={t("peers.detail.urlPlaceholder")} mono width="w-56" label={t("peers.detail.addUrl")} disabled={disabled} onKeyDown={(e) => e.key === "Enter" && add()} />
+          <TextInput value={draft} onChange={setDraft} placeholder={t("peers.detail.urlPlaceholder")} mono width="w-56" label={t("peers.detail.addUrl")} disabled={disabled} onKeyDown={(e) => !isImeComposing(e) && e.key === "Enter" && add()} />
           <IconButton label={t("peers.detail.addUrl")} disabled={disabled || !draft.trim()} onClick={add}>
             <Plus size={13} />
           </IconButton>
@@ -87,6 +88,18 @@ function Check({ checked, disabled, onChange, children }: { checked: boolean; di
 
 const EXPORT_LIST_SIZES = { narrow: widthBelow(36) } as const;
 
+/** One project / agent of the 「部分」 export checklist (rendered inside its SettingsGroup). */
+function ExportCheck({ choice: c, exports, disabled, onCommit }: { choice: ExportChoice; exports: PeerExport[]; disabled: boolean; onCommit(next: PeerExport[]): void }) {
+  const { t } = useI18n();
+  return (
+    <Check checked={hasExport(exports, c.item)} disabled={disabled} onChange={(on) => onCommit(toggleExport(exports, c.item, on))}>
+      {c.color && <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: c.color }} />}
+      <span className="truncate">{c.name}</span>
+      {c.members !== null && <span className="shrink-0 text-xs text-subtle">{t("peers.policy.export.members", { n: c.members })}</span>}
+    </Check>
+  );
+}
+
 function ExportsEditor({ exports, disabled, onCommit }: { exports: PeerExport[]; disabled: boolean; onCommit(next: PeerExport[]): void }) {
   const { t } = useI18n();
   const sidebar = useTargetSidebar();
@@ -101,16 +114,9 @@ function ExportsEditor({ exports, disabled, onCommit }: { exports: PeerExport[];
     const next = withExportMode(exports, m);
     if (JSON.stringify(next) !== JSON.stringify(exports)) onCommit(next);
   };
-  const row = (c: ExportChoice) => (
-    <Check key={JSON.stringify(c.item)} checked={hasExport(exports, c.item)} disabled={disabled} onChange={(on) => onCommit(toggleExport(exports, c.item, on))}>
-      {c.color && <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: c.color }} />}
-      <span className="truncate">{c.name}</span>
-      {c.members !== null && <span className="shrink-0 text-xs text-subtle">{t("peers.policy.export.members", { n: c.members })}</span>}
-    </Check>
-  );
   return (
     <>
-      <SettingRow label={t("peers.policy.exports")} hint={mode === "all" ? t("peers.policy.export.allHint") : t("peers.policy.exportsHint")}>
+      <SettingRow agents="access" source="host" label={t("peers.policy.exports")} hint={mode === "all" ? t("peers.policy.export.allHint") : t("peers.policy.exportsHint")}>
         <Segmented<ExportMode>
           value={mode}
           disabled={disabled}
@@ -124,21 +130,21 @@ function ExportsEditor({ exports, disabled, onCommit }: { exports: PeerExport[];
         />
       </SettingRow>
       {mode === "some" && (
-        <div ref={listRef} {...dataFlags(listSize)} className="grid grid-cols-2 gap-x-6 border-b border-border py-2 data-[narrow]:grid-cols-1" data-testid="peer-exports">
+        <SettingsGroup agents="access" source="host"><div ref={listRef} {...dataFlags(listSize)} className="grid grid-cols-2 gap-x-6 border-b border-border py-2 data-[narrow]:grid-cols-1" data-testid="peer-exports">
           <div className="min-w-0">
             <div className="mb-0.5 text-xs text-subtle">{t("peers.policy.export.projects")}</div>
-            <div className="max-h-64 overflow-y-auto pr-1">{choices.projects.length ? choices.projects.map(row) : <p className="text-xs text-subtle">—</p>}</div>
+            <div className="max-h-64 overflow-y-auto pr-1">{choices.projects.length ? choices.projects.map((c) => <ExportCheck key={JSON.stringify(c.item)} choice={c} exports={exports} disabled={disabled} onCommit={onCommit} />) : <p className="text-xs text-subtle">—</p>}</div>
           </div>
           <div className="min-w-0">
             <div className="mb-0.5 text-xs text-subtle">{t("peers.policy.export.agents")}</div>
-            <div className="max-h-64 overflow-y-auto pr-1">{choices.agents.length ? choices.agents.map(row) : <p className="text-xs text-subtle">—</p>}</div>
+            <div className="max-h-64 overflow-y-auto pr-1">{choices.agents.length ? choices.agents.map((c) => <ExportCheck key={JSON.stringify(c.item)} choice={c} exports={exports} disabled={disabled} onCommit={onCommit} />) : <p className="text-xs text-subtle">—</p>}</div>
           </div>
           {choices.unknown.map((e) => (
             <Check key={JSON.stringify(e)} checked disabled={disabled} onChange={() => onCommit(toggleExport(exports, e, false))}>
               <span className="truncate text-subtle">{t("peers.policy.export.unknown", { id: "agent" in e ? e.agent : "project" in e ? e.project : "?" })}</span>
             </Check>
           ))}
-        </div>
+        </div></SettingsGroup>
       )}
     </>
   );
@@ -156,14 +162,14 @@ function PolicySections({ peer, disabled, save }: { peer: PeerView; disabled: bo
   return (
     <>
       <Section title={t("peers.policy.inbound")}>
-        <SettingRow label={t("peers.policy.accept")} hint={t("peers.policy.acceptHint")}>
+        <SettingRow agents="access" source="host" label={t("peers.policy.accept")} hint={t("peers.policy.acceptHint")}>
           <Toggle checked={p.inbound.accept} disabled={disabled} label={t("peers.policy.accept")} onChange={(accept) => set({ accept })} />
         </SettingRow>
         <ExportsEditor exports={p.inbound.exports} disabled={disabled} onCommit={(exports) => set({ exports })} />
-        <SettingRow label={t("peers.policy.review")} hint={t("peers.policy.reviewHintLine", { mode: t(`peers.policy.review.${p.inbound.review}Hint` as MessageKey), all: t("peers.policy.reviewHint") })}>
+        <SettingRow agents="access" source="host" label={t("peers.policy.review")} hint={t("peers.policy.reviewHintLine", { mode: t(`peers.policy.review.${p.inbound.review}Hint` as MessageKey), all: t("peers.policy.reviewHint") })}>
           <Segmented<PeerReview> value={p.inbound.review} disabled={disabled} label={t("peers.policy.review")} options={PEER_REVIEWS.map((r) => ({ value: r, label: t(`peers.policy.review.${r}` as MessageKey) }))} onChange={(review) => set({ review })} />
         </SettingRow>
-        <SettingRow label={t("peers.policy.assumedCaps")} hint={t("peers.policy.assumedCapsHint")}>
+        <SettingRow agents="access" source="host" label={t("peers.policy.assumedCaps")} hint={t("peers.policy.assumedCapsHint")}>
           <Select<string>
             value={caps.sandbox ?? ""}
             disabled={disabled}
@@ -172,25 +178,25 @@ function PolicySections({ peer, disabled, save }: { peer: PeerView; disabled: bo
             onChange={(sandbox) => set({ assumedCaps: { ...caps, sandbox: sandbox || null } })}
           />
         </SettingRow>
-        <SettingRow label={t("peers.policy.network")}>
+        <SettingRow agents="access" source="host" label={t("peers.policy.network")}>
           <Toggle checked={caps.networkAccess} disabled={disabled} label={t("peers.policy.network")} onChange={(networkAccess) => set({ assumedCaps: { ...caps, networkAccess } })} />
         </SettingRow>
-        <SettingRow label={t("peers.policy.services")}>
+        <SettingRow agents="access" source="host" label={t("peers.policy.services")}>
           <Toggle checked={caps.unrestrictedServices} disabled={disabled} label={t("peers.policy.services")} onChange={(unrestrictedServices) => set({ assumedCaps: { ...caps, unrestrictedServices } })} />
         </SettingRow>
-        <SettingRow label={t("peers.policy.maxOpenAsks")}>
+        <SettingRow agents="access" source="host" label={t("peers.policy.maxOpenAsks")}>
           <NumberField value={p.inbound.maxOpenAsks} range={PEER_LIMITS.maxOpenAsks} disabled={disabled} label={t("peers.policy.maxOpenAsks")} onCommit={(v) => v !== null && set({ maxOpenAsks: v })} />
         </SettingRow>
-        <SettingRow label={t("peers.policy.asksPerHour")}>
+        <SettingRow agents="access" source="host" label={t("peers.policy.asksPerHour")}>
           <NumberField value={p.inbound.asksPerHour} range={PEER_LIMITS.asksPerHour} disabled={disabled} label={t("peers.policy.asksPerHour")} onCommit={(v) => v !== null && set({ asksPerHour: v })} />
         </SettingRow>
         {wakeSupported && (
           <>
-            <SettingRow label={t("peers.policy.tellWake")} hint={t("peers.policy.tellWakeHint", { label: peer.label })}>
+            <SettingRow agents="access" source="host" label={t("peers.policy.tellWake")} hint={t("peers.policy.tellWakeHint", { label: peer.label })}>
               <Toggle checked={wake.tellWake} disabled={disabled} label={t("peers.policy.tellWake")} onChange={(tellWake) => set({ tellWake })} />
             </SettingRow>
             {wake.tellWake && (
-              <SettingRow label={t("peers.policy.tellWakesPerHour")} hint={t("peers.policy.tellWakesPerHourHint")}>
+              <SettingRow agents="access" source="host" label={t("peers.policy.tellWakesPerHour")} hint={t("peers.policy.tellWakesPerHourHint")}>
                 <NumberField value={wake.tellWakesPerHour} range={PEER_LIMITS.tellWakesPerHour} disabled={disabled} label={t("peers.policy.tellWakesPerHour")} onCommit={(v) => v !== null && set({ tellWakesPerHour: v })} />
               </SettingRow>
             )}
@@ -198,7 +204,7 @@ function PolicySections({ peer, disabled, save }: { peer: PeerView; disabled: bo
         )}
       </Section>
       <Section title={t("peers.policy.outbound")}>
-        <SettingRow label={t("peers.policy.visibility")} hint={t("peers.policy.visibilityHint", { label: peer.label })}>
+        <SettingRow agents="now" source="host" label={t("peers.policy.visibility")} hint={t("peers.policy.visibilityHint", { label: peer.label })}>
           <Toggle checked={p.outbound.visibility === "all"} disabled={disabled} label={t("peers.policy.visibility")} onChange={(on) => set({}, { visibility: on ? "all" : "none" })} />
         </SettingRow>
       </Section>
@@ -254,7 +260,7 @@ function PeerAgentList({ peer, agents }: { peer: PeerView; agents: readonly Peer
   return (
     <>
       {many && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-border/60 py-2">
+        <div role="search" className="flex flex-wrap items-center gap-2 border-b border-border/60 py-2">
           <TextInput width="w-56" value={query} placeholder={t("peers.agentsSearch")} onChange={setQuery} />
           <Segmented
             value={filter}
@@ -272,7 +278,7 @@ function PeerAgentList({ peer, agents }: { peer: PeerView; agents: readonly Peer
             <li key={a.cutexSessionId} className="flex items-center gap-2 border-b border-border py-1.5 text-sm last:border-b-0">
               {/* On this peer's own page every agent is @peer: the name alone. */}
               <PeerParty text={a.name || a.short || a.cutexSessionId} label={peer.label} size={16} />
-              <span className="font-mono text-[11px] text-subtle">{a.short}</span>
+              <span className="font-mono text-caption/[inherit] text-subtle">{a.short}</span>
               <span className="text-xs text-subtle">{a.runtime}</span>
               <span className={`ml-auto text-xs ${a.status === "busy" ? "text-accent" : a.status === "offline" ? "text-subtle" : "text-muted"}`}>
                 {["idle", "busy", "offline"].includes(a.status) ? t(`peers.agent.${a.status}` as MessageKey) : a.status}
@@ -313,7 +319,7 @@ function AuditSection({ peer }: { peer: PeerView }) {
                     <When iso={e.ts} />
                   </td>
                   <td className="py-1 text-muted">{e.direction === "in" || e.direction === "inbound" ? t("peers.audit.in") : e.direction === "out" || e.direction === "outbound" ? t("peers.audit.out") : e.direction}</td>
-                  <td className="truncate py-1 font-mono text-[11px]" title={[e.route, e.askId].filter(Boolean).join(" · ")}>
+                  <td className="truncate py-1 font-mono text-caption/[inherit]" title={[e.route, e.askId].filter(Boolean).join(" · ")}>
                     {e.route}
                     {e.askId && <span className="text-subtle"> · {e.askId.slice(0, 12)}…</span>}
                   </td>
@@ -342,7 +348,7 @@ function InflightList({ asks }: { asks: AskDetail[] }) {
         const effect = inflightEffect(raw);
         return (
           <li key={d.askId} className="flex min-w-0 items-center gap-2 text-xs">
-            <span className="shrink-0 font-mono text-[11px] text-subtle">{effect === "incomingStopped" ? "↓" : "↑"}</span>
+            <span className="shrink-0 font-mono text-caption/[inherit] text-subtle">{effect === "incomingStopped" ? "↓" : "↑"}</span>
             <span className="min-w-0 truncate text-foreground" title={d.title}>
               {d.title}
             </span>
@@ -374,11 +380,11 @@ function DeleteSection({ peer, disabled, onDeleted }: { peer: PeerView; disabled
   const asks = inflight.value ?? [];
   return (
     <Section title={t("peers.delete")}>
-      <SettingRow label={t("peers.delete")} hint={t("peers.deleteHint")}>
+      <SettingRow agents="access" source="host" label={t("peers.delete")} hint={t("peers.deleteHint")}>
         <span ref={anchor} className="inline-flex">
           {armed && !disabled ? (
             <button className={`${ARMED_FORM_BUTTON} shrink-0 whitespace-nowrap`} onClick={() => void remove()} data-testid="peer-delete-armed">
-              {t("peers.delete")}
+              {t("peers.deleteConfirmLabel")}
             </button>
           ) : (
             <Button disabled={disabled || busy || inflight.loading} onClick={() => setArmed(true)}>
@@ -434,7 +440,7 @@ export function PeerDetail({ peer, onBack, onChanged, onDeleted }: { peer: PeerV
       </button>
       <Section title={`${t("peers.detail.identity")} · ${peer.label}`} actions={<StateBadge peer={peer} />}>
         {error && <ErrorNote>{error}</ErrorNote>}
-        <SettingRow label={t("peers.detail.label")} hint={t("peers.detail.labelHint")}>
+        <SettingRow agents="now" source="host" label={t("peers.detail.label")} info={t("peers.detail.labelHint")}>
           <TextField
             value={peer.label}
             width="w-40"
@@ -447,18 +453,18 @@ export function PeerDetail({ peer, onBack, onChanged, onDeleted }: { peer: PeerV
             }}
           />
         </SettingRow>
-        <SettingRow label={t("peers.enable")} hint={peer.enabled ? undefined : (lock.hint ?? t("peers.stateHint.disabled"))}>
+        <SettingRow agents="access" source="host" label={t("peers.enable")} hint={peer.enabled ? undefined : (lock.hint ?? t("peers.stateHint.disabled"))}>
           <Toggle checked={peer.enabled} disabled={disabled || peer.state === "removedByPeer" || (lock.locked && !peer.enabled)} label={t("peers.enable")} onChange={(enabled) => void patch({ enabled }, true)} />
         </SettingRow>
-        <SettingRow label={t("peers.detail.urls")} hint={t("peers.detail.urlsHint")}>
+        <SettingRow agents="now" source="host" label={t("peers.detail.urls")} info={t("peers.detail.urlsHint")}>
           <UrlsEditor urls={peer.urls} disabled={disabled} onCommit={(urls) => void patch({ urls }, true)} />
         </SettingRow>
-        <SettingRow label={t("peers.detail.host")}>
+        <SettingRow readOnly agents="none" source="host" label={t("peers.detail.host")}>
           <span className="flex min-w-0 items-center gap-1 truncate text-xs text-muted">
-            {peer.hostId} · {peer.platform} · <MaskedText value={peer.id} keep={7} className="font-mono text-[11px]" copy testId="peer-instance" />
+            {peer.hostId} · {peer.platform} · <MaskedText value={peer.id} keep={7} className="font-mono text-caption/[inherit]" copy testId="peer-instance" />
           </span>
         </SettingRow>
-        <SettingRow label={t("peers.detail.state")} hint={(() => {
+        <SettingRow readOnly agents="none" source="host" label={t("peers.detail.state")} hint={(() => {
           const key = peer.enabled ? peer.state : "disabled";
           return t(`peers.stateHint.${key}` as MessageKey) === `peers.stateHint.${key}` ? undefined : t(`peers.stateHint.${key}` as MessageKey) || undefined;
         })()}>
@@ -468,18 +474,18 @@ export function PeerDetail({ peer, onBack, onChanged, onDeleted }: { peer: PeerV
           </span>
         </SettingRow>
         {err && (
-          <SettingRow label={t("peers.detail.lastError")}>
+          <SettingRow readOnly agents="none" source="host" label={t("peers.detail.lastError")}>
             <span className="max-w-96 truncate text-xs text-warn-text" title={err.title} data-testid="peer-last-error">
               {err.text}
             </span>
           </SettingRow>
         )}
-        <SettingRow label={t("peers.detail.features")}>
+        <SettingRow readOnly agents="none" source="host" label={t("peers.detail.features")}>
           <span className="truncate text-xs text-muted" title={`declared: ${declared.join(", ")}\nnegotiated: ${negotiated.join(", ")}`}>
             {t("peers.detail.featuresValue", { p: peer.protocol ?? "?", n: negotiated.length })} · {t("peers.detail.policyRevision", { n: peer.policyRevision ?? 0 })}
           </span>
         </SettingRow>
-        <SettingRow label={t("peers.detail.user")}>
+        <SettingRow readOnly agents="none" source="host" label={t("peers.detail.user")}>
           <span className="text-xs text-muted">{peer.userId && peer.userId !== "owner" ? peer.userId : t("peers.detail.userOwner")}</span>
         </SettingRow>
       </Section>

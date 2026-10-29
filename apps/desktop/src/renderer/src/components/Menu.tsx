@@ -1,8 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { isImeComposing } from "../lib/ime";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useTrackOverlay } from "../lib/openOverlays";
+import { useOwnerWindow } from "../lib/ownerContext";
+import { resizeObserverFor } from "../lib/ownerWindow";
+import { MenuLayersContext, menuLayerContains, useMenuLayer, useMenuLayers } from "../lib/menuLayers";
 
 /** Upward-opening popover anchored to a small trigger button (composer settings row). Stacks above
- * the slash / @ palettes (z-30): it was opened on purpose. */
+ * the slash / @ palettes (z-50): it was opened on purpose. Popovers are over the foretell / drop previews (styles.css 「Layers」). */
 export function Popover({
   trigger,
   children,
@@ -11,8 +16,12 @@ export function Popover({
   onKey,
   triggerTitle,
   width = "min-w-56",
-  overflowVisible = false,
+  height,
+  fitViewport = true,
   openSignal = 0,
+  disabled,
+  triggerClassName,
+  triggerLabel,
 }: {
   trigger: ReactNode;
   children: (close: () => void) => ReactNode;
@@ -22,15 +31,41 @@ export function Popover({
   onKey?(e: KeyboardEvent, close: () => void): boolean;
   triggerTitle?: string;
   width?: string;
-  /** No max height / scroll, so absolutely positioned flyouts inside are not clipped. */
-  overflowVisible?: boolean;
+  /** Stable extent for asynchronously loaded panels; other menus size to their content. */
+  height?: string;
+  fitViewport?: boolean;
   /** Opens the popover whenever this changes to a non-zero value (slash commands). */
   openSignal?: number;
+  disabled?: boolean;
+  triggerClassName?: string;
+  triggerLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: 0, top: 0 });
+  const layers = useMenuLayers();
+  useMenuLayer(panel, layers, open);
   const close = () => setOpen(false);
   useTrackOverlay(open);
+  const win = useOwnerWindow();
+  const doc = win.document;
+  useLayoutEffect(() => {
+    if (!open || !fitViewport) return;
+    const fit = () => {
+      if (!ref.current || !panel.current) return;
+      const anchor = ref.current.getBoundingClientRect(), box = panel.current.getBoundingClientRect();
+      const start = align === "right" ? anchor.right - box.width : anchor.left;
+      const left = Math.max(16, Math.min(start, win.innerWidth - box.width - 16));
+      const top = Math.max(16, Math.min(anchor.top - box.height - 6, win.innerHeight - box.height - 16));
+      setPosition((old) => old.left === left && old.top === top ? old : { left, top });
+    };
+    fit(); win.addEventListener("resize", fit);
+    const observer = resizeObserverFor(ref.current, fit);
+    if (ref.current) observer?.observe(ref.current);
+    if (panel.current) observer?.observe(panel.current);
+    return () => { win.removeEventListener("resize", fit); observer?.disconnect(); };
+  }, [open, fitViewport, width, align, win]);
   useEffect(() => {
     if (!openSignal) return;
     onOpen?.();
@@ -40,38 +75,49 @@ export function Popover({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+      if (doc.querySelector("dialog[open]")) return;
+      if (!ref.current?.contains(e.target as Node) && !menuLayerContains(layers, e.target)) setOpen(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
+      if (doc.querySelector("dialog[open]")) return;
+      if (isImeComposing(e)) return;
       if (e.key === "Escape") setOpen(false);
       else if (onKey?.(e, close)) e.preventDefault();
     };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKeyDown);
+    const onScroll = (event: Event) => {
+      if (!menuLayerContains(layers, event.target)) setOpen(false);
     };
-  }, [open, onKey]);
+    doc.addEventListener("mousedown", onDown);
+    doc.addEventListener("keydown", onKeyDown);
+    win.addEventListener("scroll", onScroll, true);
+    return () => {
+      doc.removeEventListener("mousedown", onDown);
+      doc.removeEventListener("keydown", onKeyDown);
+      win.removeEventListener("scroll", onScroll, true);
+    };
+  }, [open, onKey, doc, layers]);
+  const content = open ? <div
+    ref={panel}
+    style={{ ...(height ? { height, maxHeight: "calc(100dvh - 9rem)" } : { maxHeight: "min(24rem, calc(100dvh - 32px))" }), ...(fitViewport ? { position: "fixed", ...position, right: "auto", bottom: "auto", maxWidth: "calc(100vw - 32px)", minWidth: "min(14rem, calc(100vw - 32px))" } : {}) }}
+    data-popover=""
+    className={`absolute bottom-full z-[51] mb-1.5 max-h-96 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl ${width} ${align === "right" ? "right-0" : "left-0"}`}
+  ><MenuLayersContext.Provider value={layers}>{children(close)}</MenuLayersContext.Provider></div> : null;
   return (
     <div ref={ref} className="relative">
       <button
+        type="button"
+        disabled={disabled}
+        aria-label={triggerLabel}
         title={triggerTitle}
         onClick={() => {
           if (!open) onOpen?.();
           setOpen(!open);
         }}
-        className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground ${open ? "bg-surface-2 text-foreground" : ""}`}
+        className={triggerClassName ?? `flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground ${open ? "bg-surface-2 text-foreground" : ""}`}
       >
         {trigger}
       </button>
-      {open && (
-        <div
-          className={`absolute bottom-full z-40 mb-1.5 rounded-xl border border-border bg-surface p-1 shadow-xl ${overflowVisible ? "" : "max-h-96 overflow-y-auto"} ${width} ${align === "right" ? "right-0" : "left-0"}`}
-        >
-          {children(close)}
-        </div>
-      )}
+      {fitViewport && content ? createPortal(content, doc.body) : content}
     </div>
   );
 }

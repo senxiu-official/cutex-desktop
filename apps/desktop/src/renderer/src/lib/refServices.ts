@@ -18,7 +18,7 @@ import { usePeek } from "./peekStore";
 import { agentRef, mainPageRef, pageParamsOf, parseRef, sidePageRef, turnRef } from "./refs";
 import { sideRegistry, sideViewNow } from "./sideComponents";
 import { TURN_PEEK } from "./sideKinds";
-import { instanceVisible, pageInView } from "./sideLayout";
+import { instanceVisible, pageInView, switchPage } from "./sideLayout";
 import { pageLabel } from "./sideActions";
 import { updateLayout, useSide } from "./sideLayoutStore";
 import { sideOpen, sideOpenPeek, sideReveal, whyUnavailable } from "./sideServices";
@@ -127,7 +127,8 @@ export async function refsOpen(raw: CutexRef, opts: { how?: How } = {}): Promise
       const groups = (ref.params.groups ?? "").split(",").filter(Boolean);
       const page = layout.pages.find((p) => p.id === (ref.params.pageId ?? ref.key)) ?? layout.pages.find((p) => p.groups.some((g) => groups.includes(g)));
       if (!page) return { status: "unavailable", reason: "gone" };
-      updateLayout((l) => ({ ...l, open: true, activePage: page.id }));
+      // §24.12: the page comes into view in its Shelf (back from the tray if it was there).
+      updateLayout((l) => switchPage(l, page.id));
       return { status: "opened", where: "card" };
     }
   }

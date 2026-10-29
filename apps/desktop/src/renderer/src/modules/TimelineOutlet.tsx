@@ -5,6 +5,7 @@ import { receivedRendererFor } from "../lib/receivedRows";
 import { toolRendererFor } from "../lib/timelineRenderers";
 import type { ExternalMessage, RawItem } from "../lib/timeline";
 import { PlainToolRow } from "../components/PlainToolRow";
+import { ItemMedia } from "../components/ItemMedia";
 import { ItemBoundary } from "./Outlet";
 import { TimelineViewContext, useTimelineView, type TimelineView } from "./timelineItemsView";
 
@@ -46,7 +47,7 @@ export function ReceivedOutlet({ message, sessionId, readOnly, fallback }: { mes
 export function ToolOutlet({ item, sessionId }: { item: RawItem; sessionId: string }) {
   return withView(sessionId, useContext(TimelineViewContext), (view) => {
     const entry = toolRendererFor(item, view.tools);
-    const fallback = <PlainToolRow item={item} />;
+    const fallback = <><PlainToolRow item={item} /><ItemMedia item={item} hostId={view.hostId} /></>;
     if (!entry) return fallback;
     const { Row } = entry.item;
     return (

@@ -21,6 +21,7 @@ import { bridge } from "../../bridge";
 import { ApprovalDifferences } from "./ApprovalDifferences";
 import { BrowserClaimPanel } from "./BrowserClaimPanel";
 import { browserOwnerErrorKey as browserErrorKey } from "../../../../shared/browser";
+import { Tag } from "../../components/Tag";
 
 export function When({ iso }: { iso: string | null | undefined }) {
   const { locale } = useI18n();
@@ -28,7 +29,7 @@ export function When({ iso }: { iso: string | null | undefined }) {
   const ms = iso ? Date.parse(iso) : NaN;
   if (!Number.isFinite(ms)) return null;
   return (
-    <span className="shrink-0 text-[11px] text-subtle tabular-nums" title={formatAbsolute(ms / 1000)}>
+    <span className="shrink-0 text-caption/[inherit] text-subtle tabular-nums" title={formatAbsolute(ms / 1000)}>
       {formatWhen(ms / 1000, now, locale)}
     </span>
   );
@@ -39,10 +40,10 @@ export function KindChip({ kind }: { kind: ApprovalRecord["kind"] }) {
   const Icon = kind === "managed_service" || kind === "service_lifetime" ? Server : kind === "static_root" ? FolderOpen : kind === "agent_profile" ? Boxes : kind === "browser_claim" || kind === "browser_open" ? Globe : kind === "workflow_run" ? Workflow : ShieldAlert;
   const key = `approvals.kind.${kind}` as MessageKey;
   return (
-    <span className="flex shrink-0 items-center gap-1 rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">
+    <Tag>
       <Icon size={12} strokeWidth={1.75} />
       {t(key) === key ? kind : t(key)}
-    </span>
+    </Tag>
   );
 }
 
@@ -88,7 +89,7 @@ export function Facts({ record }: { record: ApprovalRecord }) {
         return (
           <div key={f.key} className="contents">
             <dt className="text-subtle">{t(key) === key ? f.key : t(key)}</dt>
-            <dd className={`min-w-0 break-words ${f.mono ? "font-mono text-[11px]" : ""}`}>{f.value}</dd>
+            <dd className={`min-w-0 break-words ${f.mono ? "font-mono text-caption/[inherit]" : ""}`}>{f.value}</dd>
           </div>
         );
       })}
@@ -145,6 +146,7 @@ export function PendingCard({ record, origin, variant = "page" }: { record: Appr
     return sendApprovalDecision(origin.hostId, record.approvalId, decision, note, where);
   };
   const run = async (decision: ApprovalDecision, event: { detail: number; nativeEvent?: unknown }) => {
+    if (note.length > 1000) return;
     if (record.kind === "browser_claim" && decision === "approve") return; // Only exact owner-tab selection can grant a claim.
     const how: ApprovalDecisionOrigin = { surface: variant, input: decisionInput(event) };
     // r243 acceptance 7 (a denial nobody remembered): every decision made here leaves one local line.
@@ -185,6 +187,7 @@ export function PendingCard({ record, origin, variant = "page" }: { record: Appr
           </button>
         )}
       </div>
+      {record.autoDecision && record.matchedRuleId && <p className="mt-1 text-caption/[inherit] text-accent">{t("approvals.rules.autoDecided", { rule: record.matchedRuleId })}</p>}
       <Facts record={record} />
       {record.kind !== "browser_claim" && record.kind !== "browser_open" && <ApprovalDifferences value={record.details?.differences} />}
       {grant !== "other" && grant !== "claimBrowser" && (
@@ -199,20 +202,20 @@ export function PendingCard({ record, origin, variant = "page" }: { record: Appr
         <input
           value={note}
           disabled={origin.stale}
-          onChange={(e) => setNote(e.target.value.slice(0, 1000))}
+          maxLength={1000}
+          onChange={(e) => setNote(e.target.value)}
           placeholder={t(grant === "claimBrowser" ? "approvals.browser.denyNote" : "approvals.notePlaceholder")}
           className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-accent"
         />
-        <Button disabled={!!busy || claimBusy || origin.stale} onClick={(e) => void run("deny", e)}>{t("approvals.deny")}</Button>
-        {grant !== "claimBrowser" && <Button primary disabled={!!busy || origin.stale} onClick={(e) => void run("approve", e)} title={t(grant === "openBrowser" ? "approvals.browser.retryHint" : grant === "runWorkflow" ? "approvals.runWorkflowHint" : "approvals.retryHint")}>
+        <Button disabled={!!busy || claimBusy || origin.stale || note.length > 1000} onClick={(e) => void run("deny", e)}>{t("approvals.deny")}</Button>
+        {grant !== "claimBrowser" && <Button primary disabled={!!busy || origin.stale || note.length > 1000} onClick={(e) => void run("approve", e)} title={t(grant === "openBrowser" ? "approvals.browser.retryHint" : grant === "runWorkflow" ? "approvals.runWorkflowHint" : "approvals.retryHint")}>
           {t(grant === "runAsOwner" ? "approvals.approve.runAsOwner" : grant === "useProfile" ? "approvals.approve.useProfile" : grant === "openBrowser" ? "approvals.browser.approveOpen" : grant === "runWorkflow" ? "approvals.approve.runWorkflow" : grant === "serveRoot" ? "approvals.approve.serveRoot" : "approvals.approve")}
         </Button>}
       </div>
-      {holdLeft !== null ? <p className="mt-1 text-[11px] text-subtle">{t("approvals.hold.hint")}</p>
-        : variant === "inline" && retrying && <p className="mt-1 text-[11px] text-subtle">{t(notice ? "approvals.inline.noticeHint" : "approvals.inline.retryYourself")}</p>}
+      {holdLeft !== null ? <p className="mt-1 text-caption/[inherit] text-subtle">{t("approvals.hold.hint")}</p>
+        : variant === "inline" && retrying && <p className="mt-1 text-caption/[inherit] text-subtle">{t(notice ? "approvals.inline.noticeHint" : "approvals.inline.retryYourself")}</p>}
       {/* One reserved line: an error appearing never moves the next card. */}
       <p className="mt-1 h-4 truncate text-xs text-danger" title={error ?? undefined}>{error}</p>
     </section>
   );
 }
-

@@ -133,7 +133,15 @@ export const mock: ModuleMock = {
     async claudeAccounts() {
       await wait(200);
       if (core.legacy) return null;
-      return { contractVersion: 2, accounts: structuredClone(accounts) };
+      const out = structuredClone(accounts);
+      const q = new URLSearchParams(typeof location === "undefined" ? "" : location.search);
+      if (typeof location !== "undefined") new URLSearchParams((location.hash ?? "").replace(/^#\??/, "")).forEach((value, key) => q.set(key, value));
+      if (q.get("step") === "profile") {
+        const account = out.find(a => a.id === "default")!;
+        if (["missing", "installing"].includes(q.get("claude") ?? "")) account.status = null;
+        if (q.get("claude") === "needsUser") account.status = { loggedIn: false, checkedAt: new Date().toISOString(), authMethod: "none" };
+      }
+      return { contractVersion: 2, accounts: out };
     },
     async createClaudeAccount(request: ClaudeAccountCreate) {
       await wait(250);
@@ -141,7 +149,7 @@ export const mock: ModuleMock = {
       const id = `ca-${Math.random().toString(36).slice(2, 12).padEnd(10, "0")}`;
       const account =
         request.kind === "api"
-          ? apiAccount(id, request.label, request.baseUrl ?? null, request.keyEnv ?? "ANTHROPIC_API_KEY", request.env ?? {}, false, { createdAt: new Date().toISOString() })
+          ? apiAccount(id, request.label, request.baseUrl ?? null, request.keyEnv ?? "ANTHROPIC_API_KEY", request.env ?? {}, !!request.apiKey, { createdAt: new Date().toISOString() })
           : subscription(id, request.label, `${ROOT}\\${id}`, { createdAt: new Date().toISOString(), status: { loggedIn: false, authMethod: "none", checkedAt: new Date().toISOString() } });
       accounts.push(account);
       return { ok: true as const, account: structuredClone(account) };
@@ -153,6 +161,17 @@ export const mock: ModuleMock = {
       if (account.isDefault) return refusal("claude_account_is_default", "the default Claude account has no editable settings");
       if (taken(label, id)) return refusal("claude_account_label_taken", `a Claude account labelled ${label} already exists`);
       account.label = label;
+      return { ok: true as const, account: structuredClone(account) };
+    },
+    // Write-only like cutex: only `apiKeyPresent` changes; the value is not kept here either.
+    async setClaudeAccountKey(id: string, apiKey: string) {
+      await wait(300);
+      const account = find(id);
+      if (!account) return refusal("claude_account_not_found", `no Claude account ${id}`);
+      if (account.kind !== "api") return refusal("invalid_request", "baseUrl, keyEnv, env and apiKey apply to API accounts only");
+      if (!apiKey.trim() || /\s/.test(apiKey.trim())) return refusal("invalid_request", "apiKey: API key must be 1-4096 non-whitespace characters");
+      account.api!.apiKeyPresent = true;
+      account.status = apiStatus(account.api!.baseUrl, account.api!.keyEnv, true);
       return { ok: true as const, account: structuredClone(account) };
     },
     async deleteClaudeAccount(id: string) {

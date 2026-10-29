@@ -60,13 +60,13 @@ export function BrowserHostSettings() {
       setClearFailed(browserErrorKey(error)); setConfirming(false);
     } finally { setClearing(false); }
   }
-  return <Section source="host" title={t("browser.host.settings")}>
-    <SettingRow label={t("browser.host.approval")} hint={t(fullAccessOpens ? "browser.host.approvalHint3" : "browser.host.approvalHint2")}>
+  return <Section  title={t("browser.host.settings")}>
+    <SettingRow agents="now" source="host" label={t("browser.host.approval")} hint={t(fullAccessOpens ? "browser.host.approvalHint3" : "browser.host.approvalHint2")}>
       <Select value={state.value ?? "off"} disabled={!state.available || state.busy || state.value === null}
         options={[{ value: "off", label: t("browser.host.off") }, { value: "ask", label: t(fullAccessOpens ? "browser.host.askFull" : "browser.host.ask") }]}
         onChange={state.save} label={t("browser.host.approval")} />
     </SettingRow>
-    {canClear && <SettingRow label={t("browser.idempotency.clear")} hint={t("browser.idempotency.clearHint")}>
+    {canClear && <SettingRow agents="now" source="host" label={t("browser.idempotency.clear")} hint={t("browser.idempotency.clearHint")}>
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Select value={clearTarget} disabled={!state.available || clearing}
           options={[{ value: "all", label: t("browser.idempotency.all") }, ...agents.map(agent => ({ value: agent.sessionId, label: agent.name }))]}
@@ -79,7 +79,7 @@ export function BrowserHostSettings() {
       <p>{t("browser.idempotency.confirm")}</p>
       <div className="mt-2 flex justify-end gap-2">
         <button type="button" onClick={() => setConfirming(false)} className="rounded-md px-3 py-1.5">{t("browser.idempotency.cancel")}</button>
-        <button type="button" disabled={clearing} onClick={() => void clear()} className="rounded-md bg-danger px-3 py-1.5 text-white disabled:opacity-40">{t("browser.idempotency.confirmAction")}</button>
+        <button type="button" disabled={clearing} onClick={() => void clear()} className="rounded-md bg-danger-solid px-3 py-1.5 text-white disabled:opacity-40">{t("browser.idempotency.confirmAction")}</button>
       </div>
     </div>}
     {canClear && cleared && <p role="status" className="py-2 text-xs text-subtle">{t("browser.idempotency.done", cleared)}</p>}

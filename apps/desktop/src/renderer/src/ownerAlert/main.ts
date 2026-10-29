@@ -1,3 +1,5 @@
+import { isImeComposing, installImeGuards } from "../lib/ime";
+import { installContentSelection } from "../lib/contentSelection";
 // The big alert page (main/ownerAlert.ts; owner-notify `bigAlert`). Plain DOM, no React: it is a
 // small always-on-top window. Talks only to `window.ownerAlert` (preload/ownerAlert.ts). Without that
 // bridge (browser preview at /owner-alert.html) it shows sample alerts.
@@ -6,7 +8,11 @@ import { isAppLocale, matchAppLocale } from "../../../shared/locales";
 import type { OwnerAlertBridge, OwnerAlertItem, OwnerAlertLocale, OwnerAlertState } from "../../../shared/ownerAlert";
 import { hashColor } from "../lib/avatar";
 import { loadTheme } from "../lib/theme";
+import { followStoredFonts } from "../lib/storedFonts";
 import { alertStrings, chimeNotes, pickFirst, refsLine, timeLabel } from "./model";
+
+installImeGuards(document);
+installContentSelection(document);
 
 declare global {
   interface Window {
@@ -27,6 +33,8 @@ let first = true;
 
 const theme = loadTheme();
 if (theme !== "system") document.documentElement.dataset.theme = theme;
+// The owner's 外观 fonts, like the main window (the stylesheet falls back to its own stacks meanwhile).
+followStoredFonts();
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -86,7 +94,7 @@ function render(): void {
   }
   card.append(head);
 
-  const body = el("div", "body");
+  const body = el("div", "body selectable");
   body.append(el("div", "text", alert.text));
   const refs = refsLine(alert, t);
   if (refs) body.append(el("div", "refs", refs));
@@ -103,6 +111,7 @@ function render(): void {
       send.disabled = busy || !draft.trim();
     };
     area.onkeydown = (e) => {
+      if (isImeComposing(e)) return;
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         void sendReply(alert);

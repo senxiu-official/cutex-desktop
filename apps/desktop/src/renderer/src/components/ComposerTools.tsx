@@ -12,6 +12,7 @@ import type { ListMcpServerStatusResponse, McpServerStatus, SkillMetadata } from
 import { useI18n, type MessageKey } from "../i18n";
 import { mcpState, mcpSummary, skillsSummary, sortSkills, type McpTone } from "../lib/composerTools";
 import { Popover } from "./Menu";
+import { MenuFlyout } from "./MenuFlyout";
 import { Toggle } from "./settings/Form";
 import { hostApi } from "../store";
 import { useComposerHost } from "../lib/targetHost";
@@ -54,21 +55,18 @@ function Section({ title }: { title: string }) {
   return <div className="px-2.5 pt-1.5 pb-1 text-xs text-subtle">{title}</div>;
 }
 
-/** Hover / click row that opens a panel to its right (the "+" sits at the left edge). */
+/** Hover / click row using the same window-fitting layer as the model and context submenus. */
 function FlyoutRow({ id, open, setOpen, row, header, footer, children }: { id: FlyoutId; open: FlyoutId | null; setOpen(id: FlyoutId | null): void; row: (active: boolean, toggle: () => void) => ReactNode; header?: ReactNode; footer?: ReactNode; children: ReactNode }) {
   const active = open === id;
   return (
     <div className="relative" onMouseEnter={() => setOpen(id)} onMouseLeave={() => setOpen(null)}>
       {row(active, () => setOpen(active ? null : id))}
       {active && (
-        // Padding (not margin) bridges the gap so the pointer can travel into the flyout.
-        <div className="absolute bottom-0 left-full z-30 pl-1">
-          <div className="flex max-h-96 w-80 flex-col rounded-xl border border-border bg-surface p-1 shadow-xl">
-            {header}
-            <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
-            {footer && <div className="mt-1 border-t border-border pt-1">{footer}</div>}
-          </div>
-        </div>
+        <MenuFlyout align="bottom" className="flex w-80 flex-col">
+          {header}
+          <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+          {footer && <div className="mt-1 border-t border-border pt-1">{footer}</div>}
+        </MenuFlyout>
       )}
     </div>
   );
@@ -161,7 +159,6 @@ export function ComposerTools({ canImages, imagePickBlocked, canFiles, filesDisa
       triggerTitle={t("composer.attach")}
       trigger={<Plus size={15} strokeWidth={2} className="block" />}
       width="w-72"
-      overflowVisible
       onOpen={() => {
         setFly(null);
         setToggleError(null);
@@ -300,7 +297,7 @@ export function ComposerTools({ canImages, imagePickBlocked, canFiles, filesDisa
               header={
                 <div className="px-2.5 pt-1.5 pb-1">
                   <div className="text-xs text-subtle">{t("composer.tools.skills")}</div>
-                  <div className="text-[11px] text-subtle">{t(skillsManaged ? "composer.tools.skillsClaudeScope" : "composer.tools.skillsScope")}</div>
+                  <div className="text-caption/[inherit] text-subtle">{t(skillsManaged ? "composer.tools.skillsClaudeScope" : "composer.tools.skillsScope")}</div>
                 </div>
               }
               footer={skillsManaged ? (onImportSkills ? <Row
@@ -353,7 +350,7 @@ export function ComposerTools({ canImages, imagePickBlocked, canFiles, filesDisa
               header={
                 <div className="px-2.5 pt-1.5 pb-1">
                   <div className="text-xs text-subtle">{t("composer.tools.mcpTitle")}</div>
-                  <div className="text-[11px] text-subtle">{t("composer.tools.mcpScope")}</div>
+                  <div className="text-caption/[inherit] text-subtle">{t("composer.tools.mcpScope")}</div>
                 </div>
               }
               footer={<Row

@@ -19,10 +19,14 @@ function fixture(scroll = 0) {
   };
   const root = { children: rows, parentElement: scroller };
   const origin = { closest: () => ({ querySelector: () => root }) } as unknown as HTMLElement;
-  vi.stubGlobal("window", { innerWidth: 1200, innerHeight: 900, addEventListener: (key: string, cb: () => void) => callbacks.set(key, cb), removeEventListener: (key: string) => callbacks.delete(key) });
-  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { frames.set(++seq, cb); return seq; });
-  vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
-  vi.stubGlobal("ResizeObserver", class { constructor(cb: () => void) { resize = cb; } observe(el: unknown) { observed.push(el); } disconnect = disconnect; });
+  const requestAnimationFrame = (cb: FrameRequestCallback) => { frames.set(++seq, cb); return seq; };
+  const cancelAnimationFrame = (id: number) => frames.delete(id);
+  const ResizeObserver = class { constructor(cb: () => void) { resize = cb; } observe(el: unknown) { observed.push(el); } disconnect = disconnect; };
+  // The conversation's window (ownerWindowOf: the main window here) carries its frames and observers.
+  vi.stubGlobal("window", { innerWidth: 1200, innerHeight: 900, requestAnimationFrame, cancelAnimationFrame, ResizeObserver, addEventListener: (key: string, cb: () => void) => callbacks.set(key, cb), removeEventListener: (key: string) => callbacks.delete(key) });
+  vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
+  vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+  vi.stubGlobal("ResizeObserver", ResizeObserver);
   vi.stubGlobal("MutationObserver", class { constructor(cb: () => void) { mutate = cb; } observe() {} disconnect = disconnect; });
   const update = vi.fn(), dismiss = vi.fn();
   const flush = () => { for (const [id, cb] of frames) { frames.delete(id); cb(0); } };

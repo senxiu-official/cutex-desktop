@@ -1,20 +1,20 @@
-// 在主界面调整 (docs/research/rfc-in-place-settings-20261018.md, lead decisions 2026-10-18): where the
-// panel goes (beside the sidebar at any width, no drawer; not over the composer), the
-// store / services.ui.customize open-close rules, and the entries (right-click menus, shell slot).
+// 在主界面调整 (docs/research/rfc-in-place-settings-20261018.md, lead decisions 2026-10-18; owner 2026-10-21:
+// a live edit beside the Settings Shelf instead of a separate panel): where the 完成 bar goes (beside the
+// sidebar at any width, no drawer; not over the composer), the store / services.ui.customize start-finish
+// rules (the Settings Shelf stays open on the region's page; finishing returns), and the entries.
+import { translate } from "../src/renderer/src/i18n";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 
 const { CUSTOMIZE_GAP, CUSTOMIZE_PANEL_MIN_H, CUSTOMIZE_PANEL_MIN_W, CUSTOMIZE_PANEL_W, noteCustomizeOpener, placeCustomizePanel, takeCustomizeOpener } = await import("../src/renderer/src/lib/customize");
-const { useApp, SETTINGS_PAGE } = await import("../src/renderer/src/store");
+const { useApp } = await import("../src/renderer/src/store");
+const { useSettingsShelf, resetSettingsShelfForTest, setSettingsShelfMaximized } = await import("../src/renderer/src/lib/settingsShelf");
 const { services } = await import("../src/renderer/src/modules/app");
 const { getUiPrefs, setUiPref } = await import("../src/renderer/src/lib/prefs");
 const { sectionMenu } = await import("../src/renderer/src/lib/sectionMenus");
 const { customizeSidebarItem } = await import("../src/renderer/src/lib/customizeMenu");
 const shell = (await import("../src/renderer/src/modules/shell/index")).default;
-const { SidebarSettingsCards } = await import("../src/renderer/src/components/settings/regions/SidebarSettings");
-const { ComposerPage } = await import("../src/renderer/src/components/settings/AppSettings");
-const { SidesPage } = await import("../src/renderer/src/components/settings/SidesSettings");
 const { openSideColumn } = await import("../src/renderer/src/lib/sideActions");
 
 const t = (key: string) => key;
@@ -99,33 +99,71 @@ describe("placeCustomizePanel: the right side and the composer", () => {
 });
 
 describe("opening and closing", () => {
-  it("services.ui.customize opens the region's panel; the same entry again closes it", () => {
+  const shelf = () => useSettingsShelf.getState();
+  it("services.ui.customize puts the region into edit state; the same entry again finishes", () => {
     useApp.getState().closeCustomize();
     services.ui.customize("sidebar");
-    expect(useApp.getState().customize).toEqual({ region: "sidebar" });
+    expect(useApp.getState().customize).toMatchObject({ region: "sidebar" });
     services.ui.customize("sidebar");
     expect(useApp.getState().customize).toBeNull();
   });
 
-  it("one panel at a time: another region replaces it", () => {
-    services.ui.customize("sidebar");
-    services.ui.customize("composer");
-    expect(useApp.getState().customize).toEqual({ region: "composer" });
+  it("one region at a time: another region replaces it, keeping the first one's way back", () => {
+    resetSettingsShelfForTest();
+    useApp.getState().openCustomize("sidebar", "sidebar");
+    useApp.getState().openCustomize("composer", "composer");
+    expect(useApp.getState().customize).toMatchObject({ region: "composer", page: "composer", back: { open: false } });
+    expect(shelf()).toMatchObject({ open: true, params: { tab: "composer" } });
     useApp.getState().closeCustomize();
     expect(useApp.getState().customize).toBeNull();
+    expect(shelf().open).toBe(false);
   });
 
-  it("from Settings: closes Settings first; opening Settings closes the panel", () => {
-    services.ui.openSettings("sidebar");
-    services.ui.customize("sidebar");
+  it("from Settings: the Settings Shelf stays open on the region's page beside it; finishing returns", () => {
+    resetSettingsShelfForTest();
+    services.ui.openSettings("appearance");
+    useApp.getState().openCustomize("sidebar", "sidebar");
     expect(useApp.getState().view).toEqual({ kind: "conversation" });
-    expect(useApp.getState().customize).toEqual({ region: "sidebar" });
+    expect(useApp.getState().customize).toMatchObject({ region: "sidebar", page: "sidebar" });
+    expect(shelf()).toMatchObject({ open: true, params: { tab: "sidebar" } });
+    useApp.getState().closeCustomize();
+    // Back to the page it was on, still open.
+    expect(shelf()).toMatchObject({ open: true, params: { tab: "appearance" } });
+  });
+
+  it("maximised Settings goes beside the region while editing, and is maximised again after", () => {
+    resetSettingsShelfForTest();
     services.ui.openSettings("sidebar");
-    expect(useApp.getState().view).toEqual({ kind: "page", page: SETTINGS_PAGE, params: { tab: "sidebar" } });
+    setSettingsShelfMaximized(true);
+    useApp.getState().openCustomize("sidebar", "sidebar");
+    expect(shelf().maximized).toBe(false);
+    useApp.getState().closeCustomize();
+    expect(shelf()).toMatchObject({ open: true, maximized: true, params: { tab: "sidebar" } });
+    setSettingsShelfMaximized(false);
+  });
+
+  it("opened by the edit (a sidebar menu): finishing closes the Settings Shelf again", () => {
+    resetSettingsShelfForTest();
+    useApp.getState().openCustomize("sidebar", "sidebar");
+    expect(shelf()).toMatchObject({ open: true, params: { tab: "sidebar" } });
+    useApp.getState().closeCustomize();
+    expect(shelf().open).toBe(false);
+  });
+
+  it("another settings page, or closing the Settings Shelf, ends the edit where it is", () => {
+    resetSettingsShelfForTest();
+    useApp.getState().openCustomize("sidebar", "sidebar");
+    services.ui.openSettings("sidebar");
+    expect(useApp.getState().customize).toMatchObject({ region: "sidebar" });
+    services.ui.openSettings("appearance");
+    expect(useApp.getState().customize).toBeNull();
+    expect(shelf()).toMatchObject({ open: true, params: { tab: "appearance" } });
+    useApp.getState().openCustomize("sidebar", "sidebar");
+    useSettingsShelf.setState({ open: false });
     expect(useApp.getState().customize).toBeNull();
   });
 
-  it("shows a hidden sidebar; closing the panel leaves it shown", () => {
+  it("shows a hidden sidebar; finishing leaves it shown", () => {
     setUiPref("sidebarOpen", false);
     services.ui.customize("sidebar");
     expect(getUiPrefs().sidebarOpen).toBe(true);
@@ -147,14 +185,18 @@ describe("opening and closing", () => {
 });
 
 describe("entries", () => {
-  it("the section header menu ends with 调整左侧栏…, which opens the panel", () => {
+  it("the section header menu ends with 调整左侧栏… and 侧栏设置… (design 006 v1); the first starts the edit", () => {
     useApp.getState().closeCustomize();
     const items = sectionMenu({ id: "s1", name: "S", collapsed: false, members: [] } as never, ["s1"], t as never).filter(Boolean);
-    const last = items.at(-1) as { label: string; onSelect(): void };
+    const last = items.at(-4) as { label: string; onSelect(): void };
+    expect(items.at(-5)).toBe("separator");
+    expect((items.at(-3) as { label: string }).label).toBe(translate("settings.panel.menu.sidebar"));
+    // Then 「使用小指南」 (lib/panelGuides) after a separator.
     expect(items.at(-2)).toBe("separator");
+    expect((items.at(-1) as { label: string }).label).toBe(translate("onboarding.panel.menu"));
     expect(last.label).toBe("customize.sidebar.menu");
     last.onSelect();
-    expect(useApp.getState().customize).toEqual({ region: "sidebar" });
+    expect(useApp.getState().customize).toMatchObject({ region: "sidebar" });
     useApp.getState().closeCustomize();
   });
 
@@ -162,15 +204,17 @@ describe("entries", () => {
     const item = customizeSidebarItem(t as never);
     expect(item.label).toBe("customize.sidebar.menu");
     item.onSelect();
-    expect(useApp.getState().customize).toEqual({ region: "sidebar" });
+    expect(useApp.getState().customize).toMatchObject({ region: "sidebar" });
     useApp.getState().closeCustomize();
   });
 
-  it("the shell contributes 左侧栏, 输入区 and 右侧栏与留白, each with its settings page's own content", () => {
+  it("the shell contributes 左侧栏, 输入区 and Shelf 与留白, each with the settings page the Settings Shelf shows (输入区: on 会话, design 006 v1)", () => {
     expect(shell.contributes?.["customize.region"]).toEqual([
-      expect.objectContaining({ id: "shell.sidebar", region: "sidebar", titleKey: "customize.sidebar.title", settingsPage: "sidebar", side: "right", Panel: SidebarSettingsCards }),
-      expect.objectContaining({ id: "shell.composer", region: "composer", titleKey: "customize.composer.title", settingsPage: "composer", side: "above", Panel: ComposerPage }),
-      expect.objectContaining({ id: "shell.sides", region: "sides", titleKey: "customize.sides.title", settingsPage: "sides", side: "left", Panel: SidesPage, reveal: openSideColumn }),
+      expect.objectContaining({ id: "shell.sidebar", region: "sidebar", titleKey: "customize.sidebar.title", settingsPage: "sidebar", side: "right" }),
+      expect.objectContaining({ id: "shell.composer", region: "composer", titleKey: "customize.composer.title", settingsPage: "conversation", side: "above" }),
+      expect.objectContaining({ id: "shell.sides", region: "sides", titleKey: "customize.sides.title", settingsPage: "sides", side: "left", reveal: openSideColumn }),
     ]);
+    // No separate panel any more: the settings page is the place to change them.
+    for (const item of shell.contributes?.["customize.region"] ?? []) expect("Panel" in item).toBe(false);
   });
 });

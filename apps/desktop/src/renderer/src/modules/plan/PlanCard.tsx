@@ -13,12 +13,15 @@ import { useApp } from "../../store";
 import { convLiveOf, convViewOf, useConvScope, useConvViewHost } from "../../lib/conversationScope";
 import { Markdown } from "../../components/Markdown";
 import { PlanChoicesGate } from "./ClaudePlanChoices";
+import { btn } from "../../components/Button";
+import { useUserLayoutToggle } from "../../lib/userLayoutToggle";
 
 /** Same user message the TUI sends (PLAN_IMPLEMENTATION_CODING_MESSAGE). */
 const IMPLEMENT_MESSAGE = "Implement the plan.";
 
 export function PlanCard({ sessionId, text, streaming, actionable }: { sessionId: string; text: string; streaming: boolean; actionable: boolean }) {
   const { t } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const [decided, setDecided] = useState(false);
   // Open while it streams and while it waits for a decision; folded to its title line afterwards
   // (and for older plans). A click on the header overrides either way.
@@ -56,7 +59,7 @@ export function PlanCard({ sessionId, text, streaming, actionable }: { sessionId
   };
   return (
     <div className={`my-3 rounded-xl border bg-surface px-4 py-2.5 ${open ? "border-accent/40" : "border-border"}`}>
-      <button onClick={() => setUserOpen(!open)} className="flex h-5 w-full items-center gap-1.5 text-left text-xs text-subtle hover:text-foreground">
+      <button onClick={() => userToggle(() => setUserOpen(!open))} className="flex h-5 w-full items-center gap-1.5 text-left text-xs text-subtle hover:text-foreground">
         <NotebookPen size={13} className="shrink-0 text-accent" />
         <span className="shrink-0">{t("plan.title")}</span>
         {!open && <span className="min-w-0 truncate text-sm text-foreground">{title}</span>}
@@ -72,7 +75,7 @@ export function PlanCard({ sessionId, text, streaming, actionable }: { sessionId
         <PlanChoicesGate sessionId={sessionId} current={current} onDecided={decide}>
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
           <span className="mr-auto text-xs text-subtle">{t("plan.question")}</span>
-          <button onClick={decide} className="rounded-md bg-surface-2 px-2.5 py-1 text-xs text-muted hover:text-foreground" title={t("plan.stayHint")}>
+          <button onClick={decide} className={btn({ size: "sm" })} title={t("plan.stayHint")}>
             {t("plan.stay")}
           </button>
           <button onClick={() => void implement()} className="rounded-md bg-accent px-2.5 py-1 text-xs text-white" title={t("plan.implementHint")}>
@@ -127,6 +130,7 @@ export function Checklist({ explanation, steps }: { explanation: string | null; 
  */
 export function ChecklistEntry({ explanation, steps }: { explanation: string | null; steps: PlanStep[] }) {
   const { t } = useI18n();
+  const userToggle = useUserLayoutToggle();
   // This module's status item, where it actually shows; null while the module is off — both keep
   // the full transcript list.
   const placement = useStatusPlacement("plan.status");
@@ -143,7 +147,7 @@ export function ChecklistEntry({ explanation, steps }: { explanation: string | n
   const { done, total } = planProgress(steps);
   return (
     <div className="my-1.5 text-sm">
-      <button onClick={() => setOpen(!open)} className="flex h-5 items-center gap-1.5 text-xs text-subtle hover:text-foreground">
+      <button onClick={() => userToggle(() => setOpen(!open))} className="flex h-5 items-center gap-1.5 text-xs text-subtle hover:text-foreground">
         <ListChecks size={13} />
         {t("plan.updated", { done, total })}
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}

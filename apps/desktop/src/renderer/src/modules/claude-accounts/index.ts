@@ -11,7 +11,10 @@ import { CLAUDE_ACCOUNTS_FEATURE } from "../../../../shared/claudeAccounts";
 import { CLAUDE_ACCOUNTS_SECTION } from "../../lib/claudeAccounts";
 import { defineModule } from "../slots";
 import { AddSubscriptionAction } from "./AccountFlow";
-import { ClaudeAccountsSection } from "./ClaudeAccountsSection";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const ClaudeAccountsSection = lazyPage(() => import("./ClaudeAccountsSection").then((m) => m.ClaudeAccountsSection));
 
 export default defineModule({
   id: "claude-accounts",

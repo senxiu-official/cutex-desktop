@@ -1,3 +1,4 @@
+import { isImeComposing } from "../lib/ime";
 // Thread goal (`/goal`). GoalCard is the detail card (objective, status, pause / resume / edit /
 // clear), shared by the status capsule (StatusCapsule: display + 暂停 / 继续 only) and the
 // status row above the input (GoalBar: one line expanding to the card). Editing always happens in
@@ -16,13 +17,17 @@ import type { RevealIntent } from "../modules/slots";
 import { useApp } from "../store";
 import { useConvHost, useConvSession } from "../lib/conversationScope";
 import { GoalMark } from "./GoalMark";
+import { btn } from "./Button";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 /**
  * Goal details with its actions. Edit and clear-confirm happen inside the card; clearing is
  * click-twice (lib/armedConfirm: the card turns red). Esc steps out of edit / replace first (and
  * swallows that Esc, so the surrounding panel stays open).
  */
-export function GoalCard({ goal, request, pauseOnly = false, className, idleBorder = "border-border", title = true }: { goal: ThreadGoal; request: GoalRequest | null; /** Capsule: display + 暂停/继续 only (edit / clear live in the status row). */ pauseOnly?: boolean; className: string; idleBorder?: string; title?: boolean }) {
+export function GoalCard({ goal, request, pauseOnly = false, className, idleBorder = "border-border", title = true, popover = false }: { goal: ThreadGoal; request: GoalRequest | null; /** Capsule: display + 暂停/继续 only (edit / clear live in the status row). */ pauseOnly?: boolean; className: string; idleBorder?: string; title?: boolean; /** Opened as a popover (over the foretell / drop previews: lib/overlayHoles). */ popover?: boolean }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<GoalRequest["mode"]>(request?.mode ?? "view");
@@ -52,12 +57,13 @@ export function GoalCard({ goal, request, pauseOnly = false, className, idleBord
   useEffect(() => {
     if (mode === "view") return;
     const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return;
       if (e.key !== "Escape") return;
       e.stopPropagation();
       setMode("view");
     };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    win.addEventListener("keydown", onKey, true);
+    return () => win.removeEventListener("keydown", onKey, true);
   }, [mode]);
   const status = t(`goal.status.${goal.status}` as MessageKey);
   const act = async (fn: () => Promise<void>) => {
@@ -70,7 +76,7 @@ export function GoalCard({ goal, request, pauseOnly = false, className, idleBord
     }
   };
   const active = goal.status === "active";
-  const btn = "shrink-0 rounded-md bg-surface-2 px-2 py-1 text-xs hover:text-foreground";
+  const cancelBtn = "shrink-0 rounded-md bg-surface-2 px-2 py-1 text-xs hover:text-foreground";
   // Edit / replace action row: same height, actions on the right (a hint, if any, takes the left);
   // the view row carries the stats on its left instead.
   const ACTIONS = "flex h-7 items-center justify-end gap-1.5";
@@ -86,6 +92,7 @@ export function GoalCard({ goal, request, pauseOnly = false, className, idleBord
             value={budgetDraft}
             onChange={(e) => setBudgetDraft(e.target.value)}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
               if (e.key === "Enter" && canSave) save();
             }}
             placeholder="∞"
@@ -102,12 +109,12 @@ export function GoalCard({ goal, request, pauseOnly = false, className, idleBord
     </>
   );
   return (
-    <div className={`${className} border transition-colors ${armed ? ARMED_FRAME : idleBorder}`}>
+    <div data-popover={popover ? "" : undefined} className={`${className} border transition-colors ${armed ? ARMED_FRAME : idleBorder}`}>
       {title && <div className="mb-1 text-xs text-subtle">{t("goal.title")}</div>}
       {mode === "replace" ? (
         <div className="mb-2 rounded-lg border border-accent/40 bg-accent/5 px-2 py-1.5">
           <div className="mb-0.5 text-xs text-subtle">{t("goal.replaceWith")}</div>
-          <p className="whitespace-pre-wrap">{draft}</p>
+          <p className="selectable whitespace-pre-wrap">{draft}</p>
         </div>
       ) : mode === "edit" ? (
         <textarea
@@ -115,13 +122,14 @@ export function GoalCard({ goal, request, pauseOnly = false, className, idleBord
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
             if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && canSave) save();
           }}
           rows={1}
           className="-mx-[9px] -mt-[7px] mb-[1px] block max-h-48 w-[calc(100%+18px)] resize-none overflow-y-auto rounded-lg border border-border bg-background px-2 py-1.5 text-sm outline-none [field-sizing:content] focus:border-accent"
         />
       ) : (
-        <p className="mb-2 whitespace-pre-wrap">{goal.objective}</p>
+        <p className="selectable mb-2 whitespace-pre-wrap">{goal.objective}</p>
       )}
       {/* Edit / replace keep the stats on their own line (the budget field, the hint); in view they
           share the action row: status bottom-left, buttons on the right. */}
@@ -129,16 +137,16 @@ export function GoalCard({ goal, request, pauseOnly = false, className, idleBord
       {mode === "edit" ? (
         <div className={ACTIONS}>
           <span className="mr-auto text-xs text-subtle">Ctrl+Enter</span>
-          <button className={btn} onClick={() => setMode("view")}>{t("goal.cancel")}</button>
-          <button className="rounded-md bg-accent px-2 py-1 text-xs text-white disabled:opacity-50" disabled={!canSave} onClick={save}>
+          <button className={cancelBtn} onClick={() => setMode("view")}>{t("goal.cancel")}</button>
+          <button className={btn({ variant: "primary", size: "sm" })} disabled={!canSave} onClick={save}>
             {t("goal.save")}
           </button>
         </div>
       ) : mode === "replace" ? (
         <div className={ACTIONS}>
           <span className="mr-auto text-xs text-subtle">{t("goal.replaceHint")}</span>
-          <button className={btn} onClick={() => setMode("view")}>{t("goal.cancel")}</button>
-          <button className="rounded-md bg-accent px-2 py-1 text-xs text-white" autoFocus onClick={() => void act(() => replaceGoal(draft))}>
+          <button className={cancelBtn} onClick={() => setMode("view")}>{t("goal.cancel")}</button>
+          <button className={btn({ variant: "primary", size: "sm" })} autoFocus onClick={() => void act(() => replaceGoal(draft))}>
             {t("goal.replace")}
           </button>
         </div>
@@ -146,9 +154,9 @@ export function GoalCard({ goal, request, pauseOnly = false, className, idleBord
         <div className={VIEW_ROW}>
           <div className={STATS}>{stats}</div>
           {active ? (
-            <button className={btn} onClick={() => void act(() => setGoal({ status: "paused" }))}>{t("goal.pause")}</button>
+            <button className={cancelBtn} onClick={() => void act(() => setGoal({ status: "paused" }))}>{t("goal.pause")}</button>
           ) : (
-            goal.status !== "complete" && <button className={btn} onClick={() => void act(() => setGoal({ status: "active" }))}>{t("goal.resume")}</button>
+            goal.status !== "complete" && <button className={cancelBtn} onClick={() => void act(() => setGoal({ status: "active" }))}>{t("goal.resume")}</button>
           )}
         </div>
       ) : (
@@ -162,12 +170,12 @@ export function GoalCard({ goal, request, pauseOnly = false, className, idleBord
           {!armed && (
             <>
               {active ? (
-                <button className={btn} onClick={() => void act(() => setGoal({ status: "paused" }))}>{t("goal.pause")}</button>
+                <button className={cancelBtn} onClick={() => void act(() => setGoal({ status: "paused" }))}>{t("goal.pause")}</button>
               ) : (
-                goal.status !== "complete" && <button className={btn} onClick={() => void act(() => setGoal({ status: "active" }))}>{t("goal.resume")}</button>
+                goal.status !== "complete" && <button className={cancelBtn} onClick={() => void act(() => setGoal({ status: "active" }))}>{t("goal.resume")}</button>
               )}
               <button
-                className={btn}
+                className={cancelBtn}
                 onClick={() => {
                   setDraft(goal.objective);
                   setBudgetDraft(budgetText(goal.tokenBudget));
@@ -178,7 +186,7 @@ export function GoalCard({ goal, request, pauseOnly = false, className, idleBord
               </button>
             </>
           )}
-          <button className={armed ? `${ARMED_BUTTON} py-1` : `${btn} text-danger`} onClick={() => (armed ? void act(clearGoal) : setArmed(true))}>
+          <button className={armed ? `${ARMED_BUTTON} py-1` : `${cancelBtn} text-danger`} onClick={() => (armed ? void act(clearGoal) : setArmed(true))}>
             {t("goal.clear")}
           </button>
         </div>
@@ -192,7 +200,9 @@ export function GoalCard({ goal, request, pauseOnly = false, className, idleBord
  *  still opens the card for edit / replace requests (intent "edit": always here); "show" requests
  *  go where `reveal` picks — the capsule when only it shows the goal, else this card. */
 export function GoalBar({ goal, inline, reveal }: { goal: ThreadGoal | null; inline: boolean; reveal(intent: RevealIntent, openBarPanel: () => void): unknown }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const [open, setOpen] = useState(false);
   const [request, setRequest] = useState<GoalRequest | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -210,24 +220,24 @@ export function GoalBar({ goal, inline, reveal }: { goal: ThreadGoal | null; inl
       setRequest(null);
       return;
     }
-    const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+    const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && userToggle(() => setOpen(false));
+    const onKey = (e: KeyboardEvent) => !isImeComposing(e) && (e.key === "Escape" && userToggle(() => setOpen(false)));
+    win.document.addEventListener("mousedown", onDown);
+    win.document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      win.document.removeEventListener("mousedown", onDown);
+      win.document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, userToggle]);
   if (!goal) return null;
   // Opens from its trigger (left of the status row) and only as wide as it needs, so its actions stay
   // near where the click was; the plan / background popovers do the same from the right.
-  const card = open && <GoalCard goal={goal} request={request} className="absolute bottom-full left-6 z-30 w-[28rem] max-w-[calc(100%-3rem)] rounded-xl bg-surface p-2.5 text-sm shadow-xl" />;
+  const card = open && <GoalCard goal={goal} request={request} popover className="absolute bottom-full left-6 z-50 w-[28rem] max-w-[calc(100%-3rem)] rounded-xl bg-surface p-2.5 text-sm shadow-xl" />;
   if (!inline) return card ? <div ref={root}>{card}</div> : null;
   const active = goal.status === "active";
   return (
     <div ref={root} className="min-w-0 flex-1">
-      <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-1.5 py-1 text-left text-xs text-muted hover:text-foreground" title={goal.objective}>
+      <button onClick={() => userToggle(() => setOpen(!open))} className="flex w-full items-center gap-1.5 py-1 text-left text-xs text-muted hover:text-foreground" title={goal.objective}>
         <GoalMark status={goal.status} size={13} />
         <span className="shrink-0">{t("goal.label")}</span>
         <span className="min-w-0 truncate text-foreground">{goal.objective}</span>

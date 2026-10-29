@@ -35,6 +35,15 @@ const storage: KeyValueStorage = {
   },
 };
 
+/** The settings page a 在主界面调整 region belongs to (`customize.region` settingsPage); none while the module host is not up. */
+function customizePage(region: string) {
+  try {
+    return appModules().snapshot("customize.region").find((e) => e.mode === "show" && e.item.region === region)?.item.settingsPage;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * The services handed to modules (ctx.services). Shell and shared components that are not module
  * code navigate through the same object (services.ui.openPage, services.side.open), never through
@@ -48,7 +57,7 @@ export const services: ModuleServices = {
     openSettings: (page, focus) => useApp.getState().openSettings(page, focus),
     openPage: (page, params) => useApp.getState().openPage(page, params),
     closePage: () => useApp.getState().closePage(),
-    customize: (region) => useApp.getState().openCustomize(region),
+    customize: (region) => useApp.getState().openCustomize(region, customizePage(region)),
   },
   // v1.17 (§24.5): any pane kind; services.side.open stays as its alias for tool kinds.
   panes: {

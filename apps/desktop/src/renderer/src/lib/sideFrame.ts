@@ -1,13 +1,14 @@
 // Where the right side sits in the work area (docs/desktop-modules.md §18.3–§18.4; RFC §3.8, §3.8a).
 // Pure: the work area's width + settings + layout state → the side box's kind, width, the width it
-// takes from the conversation card, and the 让位 shift of the reading column. Tested.
+// takes from the conversation card. Tested. (The reading column centres in its own card: 让位 is gone, owner 2026-10-21.)
 // Page buttons (2026-10-13): with the column open they are a row of tabs at the column's top (`strip`,
 // inside the box, no width of its own); the vertical 44 px lane only exists while the column is closed.
 // 右栏布局 = 竖条 + 标签页 (`pageBar: "lane"`, ★ owner 2026-10-14, the pre-2026-10-13 look): the lane also
 // stays beside the open column, between it and the conversation, and takes the place of the 8 px seam:
 // the open side is LANE_EXTRA wider, so the cards keep their width in both layouts; no tab row then —
 // each card's header is the tab row.
-import { CARD_GAP, DRAWER_MARGIN, isNarrow, LANE_WIDTH, MIN_SIDE, sideWidth } from "./sideLayout";
+import { foldHeld } from "./foldHysteresis";
+import { CARD_GAP, DRAWER_MARGIN, isNarrow, LANE_WIDTH, MIN_SIDE, sideWidth, type FrameMins } from "./sideLayout";
 
 export type SideFrameKind = "closed" | "flow" | "float" | "drawer" | "maximised" | "fullscreen";
 
@@ -23,10 +24,14 @@ export interface SideFrameInput {
   laneWhenHidden: "keep" | "hide";
   /** 右栏布局: the vertical lane beside the open column too ("lane"), or the tab row at its top ("tabs"). */
   pageBar: "lane" | "tabs";
-  /** 右栏与对话. */
-  mode: "push" | "yield" | "float";
+  /** Shelf 与会话: side by side (push) or over the conversation (float). */
+  mode: "push" | "float";
   /** A maximised / full-screen page or card. */
   layered: "maximised" | "fullscreen" | null;
+  /** The minimum widths of the conversations and the tool area (default: one column each; lib/sideLayout frameMins). */
+  mins?: FrameMins;
+  /** The last frame was narrow (a drawer): it stays one until the area has lib/foldHysteresis's slack more. */
+  wasNarrow?: boolean;
 }
 
 export interface SideFrame {
@@ -40,8 +45,6 @@ export interface SideFrame {
   width: number;
   /** Width taken from the conversation card's row (a spacer when the box itself is out of flow). */
   inFlow: number;
-  /** --side-shift: with 让位 the reading column stays where it was with the column closed. */
-  shift: number;
 }
 
 /** What the open lane adds to the stored width (it replaces the 8 px seam, the cards keep their width). */
@@ -51,13 +54,13 @@ export const LANE_EXTRA = LANE_WIDTH - CARD_GAP;
 export const FLOAT_KEEP = 160;
 
 export function sideFrame(input: SideFrameInput): SideFrame {
-  const narrow = input.areaWidth > 0 && isNarrow(input.areaWidth);
+  const narrow = input.areaWidth > 0 && foldHeld((slack) => isNarrow(input.areaWidth - slack, input.mins), !!input.wasNarrow);
   const pagesShown = input.pages >= 2;
   const closedLane = pagesShown && input.laneWhenHidden === "keep";
   // What the closed side takes from the row: an open side that is out of the row (悬浮, drawer, a
   // narrow maximised / full-screen side) keeps that much reserved, so opening never reflows the conversation.
   const closedWidth = closedLane ? LANE_WIDTH : 0;
-  if (!input.open) return { kind: "closed", narrow, lane: closedLane, strip: false, width: closedWidth, inFlow: closedWidth, shift: 0 };
+  if (!input.open) return { kind: "closed", narrow, lane: closedLane, strip: false, width: closedWidth, inFlow: closedWidth };
   const room = input.areaWidth > 0 ? input.areaWidth : input.stored + 1000;
   const openLane = pagesShown && input.pageBar !== "tabs";
   const open = { narrow, lane: openLane, strip: pagesShown && !openLane };
@@ -65,16 +68,23 @@ export function sideFrame(input: SideFrameInput): SideFrame {
   const stored = input.stored + (openLane ? LANE_EXTRA : 0);
   if (input.layered) {
     // The conversation keeps its open-column width underneath (no reflow; it stays mounted).
-    const under = narrow || input.mode === "float" ? closedWidth : sideWidth(stored, room, false);
-    return { kind: input.layered, ...open, width: room, inFlow: under, shift: 0 };
+    const under = narrow || input.mode === "float" ? closedWidth : sideWidth(stored, room, false, input.mins);
+    return { kind: input.layered, ...open, width: room, inFlow: under };
   }
   if (narrow) {
-    return { kind: "drawer", ...open, width: sideWidth(stored, room, true), inFlow: closedWidth, shift: 0 };
+    return { kind: "drawer", ...open, width: sideWidth(stored, room, true, input.mins), inFlow: closedWidth };
   }
   if (input.mode === "float") {
     const width = Math.round(Math.max(Math.min(MIN_SIDE, room - DRAWER_MARGIN), Math.min(stored, room - FLOAT_KEEP)));
-    return { kind: "float", ...open, width, inFlow: closedWidth, shift: 0 };
+    return { kind: "float", ...open, width, inFlow: closedWidth };
   }
-  const width = sideWidth(stored, room, false);
-  return { kind: "flow", ...open, width, inFlow: width, shift: input.mode === "yield" ? Math.max(0, width - closedWidth) : 0 };
+  const width = sideWidth(stored, room, false, input.mins);
+  return { kind: "flow", ...open, width, inFlow: width };
 }
+
+/**
+ * The next frame's `wasNarrow` (pure; tested). Only an open right Shelf holds the drawer's slack: a closed / collapsed
+ * one is measured with its rail's room, not the Shelf's — held, it made the next opening a drawer or an inline Shelf
+ * depending on history and on whether the window had been reloaded (shelf-width-stable 2026-10-27).
+ */
+export const drawerHeld = (frame: Pick<SideFrame, "kind" | "narrow">): boolean => frame.kind !== "closed" && frame.narrow;

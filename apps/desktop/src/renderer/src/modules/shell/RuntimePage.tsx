@@ -1,14 +1,12 @@
-// Settings → 运行时 (connected host): the page's sections 升级{{agent}} (module runtime-packages) and
-// 已安装的运行时 (module runtimes, cutex runtimes-view). The cutex build and the runtimes new agents
-// get show once, on 后端更新 (settings audit 2026-10-15, lead decision 1); the page header links
-// there (`headerLink` of the page item).
+import { AcpRuntimeSettings } from "../../components/DshRuntimeCard";
+// Settings → 运行时: the matching runtime groups, then the existing agent-upgrade controls.
+// Installed native/Claude versions come from runtimes-view; DSH / Kimi come from component metadata.
 import { useEffect } from "react";
 import { refreshRuntimePackages } from "../../lib/runtimePackageStore";
 import { useHostRuntimePackages } from "../../lib/runtimePackagesView";
 import { refreshRuntimes, useHostRuntimes } from "../../lib/runtimesStore";
 import { useTargetHostId } from "../../lib/targetHost";
 import { SettingsSections } from "../Outlet";
-
 export function RuntimePage() {
   const packages = useHostRuntimePackages();
   const runtimes = useHostRuntimes();
@@ -20,5 +18,5 @@ export function RuntimePage() {
   const hostId = useTargetHostId();
   useEffect(() => void refreshRuntimePackages(hostId), [packagesOn, hostId]);
   useEffect(() => void refreshRuntimes(hostId), [runtimesOn, lastRunDone, hostId]);
-  return <SettingsSections page="runtime" />;
+  return <><SettingsSections page="runtime" only={["runtimes.installed"]} /><AcpRuntimeSettings /><SettingsSections page="runtime" except={["runtimes.installed"]} /></>;
 }

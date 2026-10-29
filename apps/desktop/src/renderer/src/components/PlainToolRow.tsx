@@ -6,13 +6,14 @@ import { useI18n, type MessageKey } from "../i18n";
 import { contextMenu } from "../lib/contextMenu";
 import { toolMenu } from "../lib/menus";
 import type { RawItem } from "../lib/timeline";
-import { approvalOutcome, isFailed, isRunning, toolDetail, toolLiveness, toolOutput } from "../lib/workGroups";
+import { approvalOutcome, diffCounts, isFailed, isRunning, toolDetail, toolLiveness, toolOutput } from "../lib/workGroups";
 import { parseFileLink, rootFor, scopeFor } from "../lib/workspace";
 import { agentState, useApp, viewOf } from "../store";
 import { convSignal, useConvHost, useConvScope, useConvSession, useConvSidebar } from "../lib/conversationScope";
 import { toolErrorText } from "../lib/taskRows";
 import { ToolErrorText } from "./ToolErrorText";
-import { openFile } from "../lib/sideOpen";
+import { openPath } from "../lib/sideOpen";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 
 function formatMs(ms: number): string {
   const s = Math.round(ms / 1000);
@@ -63,6 +64,7 @@ function ToolIcon({ item, liveness, blocked, approval }: { item: RawItem; livene
 
 export function PlainToolRow({ item, safetyBlock = null }: { item: RawItem; safetyBlock?: ToolSafetyBlock | null }) {
   const { t } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const conv = useConvScope();
   const [open, setOpen] = useState(false);
   const sidebar = useConvSidebar();
@@ -83,13 +85,16 @@ export function PlainToolRow({ item, safetyBlock = null }: { item: RawItem; safe
   // A failed MCP / dynamic tool call: its error text on a muted line, in full when expanded. A
   // safety-stopped call shows the check's reason there instead.
   const error = blocked ? (safetyBlock.reason?.trim() || null) : failed && (item.type === "mcpToolCall" || item.type === "dynamicToolCall") ? toolErrorText(item) : null;
-  // A running command shows its newest output lines without expanding.
-  const tail = running && output ? output.trimEnd().split("\n").slice(-3).join("\n") : null;
+  // One line from the first render to the last (owner 2026-10-24: a running Edit showed ~5 lines of its diff, then
+  // collapsed to one when done — the rows above jumped). The live state is inline: the spinner, a file change's
+  // +/- counts (the same once done), a running command's newest output line; the rest is one click away.
+  const counts = diffCounts(item);
+  const lastLine = running && item.type === "commandExecution" && output ? (output.trimEnd().split("\n").pop()?.trim() ?? "") || null : null;
   return (
-    <div className="my-0.5 text-xs" onContextMenu={contextMenu(() => toolMenu(item, linked, t))}>
+    <div className="my-0.5 min-w-0 max-w-full text-xs" data-tool-row={item.type} onContextMenu={contextMenu(() => toolMenu(item, linked, t))}>
       {/* Failed (UI review #13): only the ✕ and 「失败」 are red; the rest of the row stays muted. */}
-      <div className="flex max-w-full items-center gap-1.5 text-muted">
-        <button onClick={() => setOpen(!open)} className="flex shrink-0 items-center gap-1.5 hover:text-foreground">
+      <div className="flex min-w-0 max-w-full items-center gap-1.5 text-muted">
+        <button onClick={() => userToggle(() => setOpen(!open))} className="flex shrink-0 items-center gap-1.5 hover:text-foreground">
           <ToolIcon item={item} liveness={liveness} blocked={blocked} approval={approval} />
           <span className="font-medium">{t(key)}</span>
         </button>
@@ -98,16 +103,16 @@ export function PlainToolRow({ item, safetyBlock = null }: { item: RawItem; safe
         {approval === "denied" && <span data-tool-approval="denied" className="shrink-0 text-muted">· {t("tool.declined")}</span>}
         {blocked && <span data-tool-blocked className="shrink-0 text-muted">· {t("tool.safetyBlocked")}</span>}
         {liveness === "background" && (
-          <button onClick={() => convSignal(conv, "ps")} title={t("tool.backgroundHint")} className="shrink-0 rounded bg-accent/10 px-1 text-[11px] text-accent hover:underline">
+          <button onClick={() => convSignal(conv, "ps")} title={t("tool.backgroundHint")} className="shrink-0 rounded bg-accent/10 px-1 text-caption/[inherit] text-accent hover:underline">
             {t("tool.background")}
           </button>
         )}
-        {liveness === "interrupted" && <span className="shrink-0 text-[11px] text-subtle">{t("tool.interrupted")}</span>}
+        {liveness === "interrupted" && <span className="shrink-0 text-caption/[inherit] text-subtle">{t("tool.interrupted")}</span>}
         {files.length > 0 ? (
           <span className="flex min-w-0 gap-2 truncate">
             {files.map((f) =>
               f.link ? (
-                <button key={f.raw} onClick={(e) => void openFile(f.link!.path, null, "link", openModifiers(e))} onAuxClick={(e) => e.button === 1 && void openFile(f.link!.path, null, "link", openModifiers(e))} className="truncate font-mono text-subtle hover:text-accent hover:underline" title={f.raw}>
+                <button key={f.raw} onClick={(e) => void openPath(f.link!.path, null, "link", openModifiers(e))} onAuxClick={(e) => e.button === 1 && void openPath(f.link!.path, null, "link", openModifiers(e))} className="truncate font-mono text-subtle hover:text-accent hover:underline" title={f.raw}>
                   {f.link.path}
                 </button>
               ) : (
@@ -116,23 +121,31 @@ export function PlainToolRow({ item, safetyBlock = null }: { item: RawItem; safe
             )}
           </span>
         ) : (
-          <code className="min-w-0 truncate font-mono text-subtle">{detail}</code>
+          <code className="min-w-0 truncate font-mono text-subtle" title={detail}>{detail}</code>
         )}
-        {failed && typeof item.exitCode === "number" && <span className="shrink-0 font-mono text-[11px] text-subtle">exit {item.exitCode}</span>}
-        {typeof item.durationMs === "number" && !running && <span className="ml-auto shrink-0 text-[11px] text-subtle">{formatMs(item.durationMs)}</span>}
+        {counts && (
+          <span data-tool-counts="" className="shrink-0 font-mono text-caption/[inherit] tabular-nums">
+            <span className="text-ok">+{counts.added}</span> <span className="text-danger/80">−{counts.removed}</span>
+          </span>
+        )}
+        {lastLine && !open && (
+          <span data-tool-live="" title={lastLine} className="min-w-0 flex-1 truncate font-mono text-caption/[inherit] text-subtle">
+            · {lastLine}
+          </span>
+        )}
+        {failed && typeof item.exitCode === "number" && <span className="shrink-0 font-mono text-caption/[inherit] text-subtle">exit {item.exitCode}</span>}
+        {typeof item.durationMs === "number" && !running && <span className="ml-auto shrink-0 text-caption/[inherit] text-subtle">{formatMs(item.durationMs)}</span>}
       </div>
-      {tail && !open && <pre className="mt-0.5 ml-5 overflow-hidden font-mono text-[11px] whitespace-pre-wrap text-subtle">{tail}</pre>}
       {error && !open && (
-        <button onClick={() => setOpen(true)} title={error} className="mt-0.5 ml-5 block max-w-[calc(100%-1.25rem)] truncate text-left font-mono text-[11px] text-muted hover:text-foreground">
+        <button onClick={() => userToggle(() => setOpen(true))} title={error} className="mt-0.5 ml-5 block max-w-[calc(100%-1.25rem)] truncate text-left font-mono text-caption/[inherit] text-muted hover:text-foreground">
           {error.replace(/\s+/g, " ")}
         </button>
       )}
       {/* Expanded, a safety-stopped call shows what the agent was told (the reason and the hint). */}
       {open && error && !blocked && <ToolErrorText text={error} className="mt-1 ml-5" />}
       {open && (blocked || !(error && output)) && (
-        <pre className="mt-1 ml-5 max-h-72 overflow-auto rounded-md bg-surface p-2 font-mono text-[11px] whitespace-pre-wrap text-muted">{output ?? (approval ? toolErrorText(item) : null) ?? JSON.stringify(item, null, 2)}</pre>
+        <pre className="mt-1 ml-5 max-h-72 overflow-auto rounded-md bg-surface p-2 font-mono text-caption/[inherit] whitespace-pre-wrap text-muted">{output ?? (approval ? toolErrorText(item) : null) ?? JSON.stringify(item, null, 2)}</pre>
       )}
     </div>
   );
 }
-

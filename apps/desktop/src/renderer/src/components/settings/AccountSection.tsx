@@ -7,6 +7,7 @@ import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { updateCachedProfile } from "../../lib/profileSnapshot";
 import { Button, SettingRow, TextInput } from "./Form";
 import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
+import { Tag } from "../../components/Tag";
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -131,11 +132,11 @@ export function AccountRows({ profile, initial, onChanged }: { profile: string; 
 
   return (
     <>
-      <SettingRow label={t("account.status")}>
+      <SettingRow agents="next" source="host" label={t("account.status")}>
         <span className="text-sm">
           {a.loggedIn ? t(`account.mode.${a.authMode}` as MessageKey) : <span className="text-subtle">{t("account.signedOut")}</span>}
           {a.email && <span className="ml-2 text-muted">{a.email}</span>}
-          {a.planType && <span className="ml-2 rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">{a.planType}</span>}
+          {a.planType && <Tag className="ml-2">{a.planType}</Tag>}
         </span>
         {a.loggedIn &&
           (logoutArmed ? (
@@ -147,7 +148,7 @@ export function AccountRows({ profile, initial, onChanged }: { profile: string; 
           ))}
       </SettingRow>
       {view.supportedLoginTypes.includes("chatgpt") && (
-        <SettingRow label="ChatGPT" hint={pending ? t("account.pendingHint") : undefined}>
+        <SettingRow agents="next" source="host" label="ChatGPT" hint={pending ? t("account.pendingHint") : undefined}>
           {pending ? (
             <>
               {login?.authUrl && <Button onClick={() => void api.openExternal(login.authUrl!)}>{t("account.reopen")}</Button>}
@@ -161,7 +162,7 @@ export function AccountRows({ profile, initial, onChanged }: { profile: string; 
       {/* Official profiles only: signing in with an OpenAI API key instead of ChatGPT writes the
           same auth.json slot (switches the auth mode). API-key profiles use the editor's key field. */}
       {view.supportedLoginTypes.includes("apiKey") && view.supportedLoginTypes.includes("chatgpt") && (
-        <SettingRow label={t("account.useKeyInstead")} hint={t("account.useKeyInsteadHint")}>
+        <SettingRow agents="next" source="host" label={t("account.useKeyInstead")} info={t("account.useKeyInsteadHint")}>
           <TextInput mono width="w-48" type="password" value={apiKey} onChange={setApiKey} placeholder="sk-…" />
           <Button disabled={!apiKey.trim()} onClick={() => void submitKey()}>{t("account.useKey")}</Button>
         </SettingRow>
@@ -174,7 +175,7 @@ export function AccountRows({ profile, initial, onChanged }: { profile: string; 
         </p>
       )}
       {error && <p className="py-1 text-xs text-danger">{error}</p>}
-      <p className="py-1 text-[11px] text-subtle">{t("account.nextLaunch")}</p>
+      <p className="py-1 text-caption/[inherit] text-subtle">{t("account.nextLaunch")}</p>
     </>
   );
 }

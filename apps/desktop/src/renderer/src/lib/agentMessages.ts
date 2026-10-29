@@ -5,6 +5,9 @@
 // Feeds the sender's status dot (未读 / 已读入 / 失败) and the recipient's 待读留言 section.
 // Pure and framework-free; lib/agentMessageStore.ts holds the state.
 
+import type { MessageSettlement } from "@cutex-desktop/protocol";
+import { MESSAGE_SETTLEMENT_EVENT, mergeMessageSettlement, readMessageSettlement } from "../../../shared/messageSettlement";
+
 /** The capability that turns all of this on (`agentMessagesV2` in cutex MANAGEMENT_FEATURES). */
 export const AGENT_MESSAGES_V2 = "agent-messages-v2";
 
@@ -25,6 +28,9 @@ export function deliveryKindOf(kind: unknown, mode?: unknown): DeliveryKind | nu
 export type MessageState = "pending" | "delivered" | "failed";
 
 export interface AgentMessageRecord {
+  settlement?: MessageSettlement;
+  /** A full snapshot or explicit stream projection has established presence/absence. */
+  settlementKnown?: boolean;
   messageId: string;
   from: string | null;
   to: string | null;
@@ -75,7 +81,7 @@ export interface RemoteSender {
 
 export type MessageMap = Readonly<Record<string, AgentMessageRecord>>;
 
-const RANK: Record<MessageState, number> = { pending: 0, delivered: 1, failed: 1 };
+const RANK: Record<MessageState, number> = { pending: 0, failed: 1, delivered: 2 };
 
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
 const time = (v: unknown): number | null => {
@@ -95,6 +101,51 @@ export function remoteOf(v: unknown): RemoteSender | null {
   const o = v as { host?: unknown; peerId?: unknown; senderId?: unknown };
   const host = str(o.host);
   return host ? { host, peerId: str(o.peerId), senderId: str(o.senderId) } : null;
+}
+
+/**
+ * Bus message ids of cross-host notes (cutex `agent_bus::peer_tell::MESSAGE_ID_PREFIX`; the bus
+ * message id is the peer tell's external message id, which cutex requires to carry it).
+ */
+export const PEER_TELL_ID_PREFIX = "ptell-";
+
+export const isPeerTellId = (messageId: string): boolean => messageId.startsWith(PEER_TELL_ID_PREFIX);
+
+/**
+ * A cross-host note from a cutex older than 0.1.5 (r245 / 0.1.4): a `ptell-` row without `remote`.
+ * 0.1.5 (cutex 3225365) puts `remote` on every peer-tell snapshot entry and event, and emits
+ * `messageDelivered` exactly for those (no `remote` = no delivered event, whatever the host's
+ * version), so the missing field is the precise per-row signal; host capabilities
+ * (`cross-host-tell-wake`, `client-remote-close`) only arrived in later commits of the same release.
+ */
+export function isLegacyPeerTell(m: Pick<AgentMessageRecord, "messageId" | "remote">): boolean {
+  return isPeerTellId(m.messageId) && !m.remote;
+}
+
+/**
+ * Sender of a cross-host note for display: `label` = `name@host`, `host` = the sending host. From
+ * `remote` (0.1.5+), else for an older host's `ptell-` row parsed from its sender label (`from`,
+ * cutex `sender.id` = `name@host`). Null for any other message.
+ */
+export function peerSenderOf(m: Pick<AgentMessageRecord, "messageId" | "remote" | "from" | "senderName">): { label: string; host: string } | null {
+  if (m.remote) return { label: m.senderName ?? m.from ?? m.remote.host, host: m.remote.host };
+  if (!isPeerTellId(m.messageId)) return null;
+  for (const label of [m.senderName, m.from]) {
+    const at = label?.lastIndexOf("@") ?? -1;
+    if (label && at > 0 && at < label.length - 1) return { label, host: label.slice(at + 1) };
+  }
+  return null;
+}
+
+/**
+ * Start (unix s) of the agent's latest finished turn (completed / interrupted / failed), null when
+ * none. A note queued before it was read in at that turn's start (older cutex: lib/agentMessages
+ * `pendingMessagesFor` `readSince`).
+ */
+export function lastFinishedTurnStart(turns: readonly { status: string; startedAt: number | null; completedAt: number | null }[] | null | undefined): number | null {
+  let last: number | null = null;
+  for (const t of turns ?? []) if (t.status !== "inProgress" && t.completedAt !== null && t.startedAt !== null && (last === null || t.startedAt > last)) last = t.startedAt;
+  return last;
 }
 
 /** cutex error values are objects ({code, message, …}) or strings. */
@@ -128,7 +179,8 @@ const SERVICE_KINDS = new Set(["alarm_service", "job_service", "task_service"]);
 function receivedOrigin(m: Record<string, unknown>): Pick<AgentMessageRecord, "sourceKind" | "timing"> & { serviceId: string | null } {
   const frozen = ((m.externalInput as { message?: unknown } | null | undefined)?.message ?? {}) as { source?: { kind?: unknown; id?: unknown }; delivery?: unknown };
   // A cross-host note is from an agent too (on another host), never a service.
-  const agentSent = !!str(m.fromCutexSessionId) || remoteOf(m.remote) !== null;
+  // Older cutex (before 0.1.5) reports a peer tell's frozen source as the `cutex-peers` service: its `ptell-` id says otherwise.
+  const agentSent = !!str(m.fromCutexSessionId) || remoteOf(m.remote) !== null || isPeerTellId(str(m.messageId) ?? "");
   const sourceKind = agentSent ? null : (str(frozen.source?.kind) ?? (SERVICE_KINDS.has(m.senderKind as string) ? "service" : null));
   const timing = m.afterTurnOnly === true || frozen.delivery === "after_turn" ? "afterTurn" : frozen.delivery === "soon" ? "nextStep" : null;
   return { sourceKind: sourceKind === "service" ? "service" : null, timing, serviceId: agentSent ? null : str(frozen.source?.id) };
@@ -142,22 +194,35 @@ function blank(messageId: string): AgentMessageRecord {
  * Merge `patch` into the record: identity fields fill in (a later event never blanks what an
  * earlier one said), and the state never goes back (a late queued event after delivered).
  */
-function merge(map: MessageMap, messageId: string, patch: Partial<AgentMessageRecord>): MessageMap {
+function merge(map: MessageMap, messageId: string, patch: Partial<AgentMessageRecord>, authoritativeSettlement = false): MessageMap {
   const prev = map[messageId] ?? blank(messageId);
   const next: AgentMessageRecord = { ...prev };
   for (const [k, v] of Object.entries(patch) as [keyof AgentMessageRecord, unknown][]) {
     if (k === "state") continue;
+    if (k === "settlement") {
+      const incoming = v as MessageSettlement | undefined;
+      next.settlement = authoritativeSettlement && prev.settlement?.state !== "closed"
+        ? JSON.stringify(prev.settlement) === JSON.stringify(incoming) ? prev.settlement : incoming
+        : mergeMessageSettlement(prev.settlement, incoming);
+      if (authoritativeSettlement || v !== undefined) next.settlementKnown = true;
+      continue;
+    }
     if (v === null || v === undefined || v === "") continue;
     if (k === "remote" && prev.remote) continue; // fills in once (a fresh object would always differ)
     (next as unknown as Record<string, unknown>)[k] = v;
   }
   // Final states stick: a late queued / sent event never turns a read-in message back to 未读.
   if (patch.state && RANK[patch.state] > RANK[prev.state]) next.state = patch.state;
+  // A positive delivery receipt outranks replayed observations; a durable closure is history.
+  if (next.state === "delivered" && next.settlement?.state === "outcome_unknown") {
+    next.settlement = undefined;
+    next.settlementKnown = true;
+  }
   const changed = !map[messageId] || (Object.keys(next) as (keyof AgentMessageRecord)[]).some((k) => next[k] !== prev[k]);
   return changed ? { ...map, [messageId]: next } : map;
 }
 
-export const AGENT_BUS_METHODS = new Set(["cutex/agentBus/messageSent", "cutex/agentBus/messageQueued", "cutex/agentBus/messageDelivered", "cutex/agentBus/messageFailed"]);
+export const AGENT_BUS_METHODS = new Set([MESSAGE_SETTLEMENT_EVENT, "cutex/agentBus/messageSent", "cutex/agentBus/messageQueued", "cutex/agentBus/messageDelivered", "cutex/agentBus/messageFailed"]);
 
 /**
  * Apply one cutex agent-bus event (from any stream: the same event may arrive on the host feed and
@@ -168,9 +233,15 @@ export function applyMessageEvent(map: MessageMap, method: string, params: Recor
   if (!AGENT_BUS_METHODS.has(method)) return map;
   const id = str(params.messageId);
   if (!id) return map;
+  if (method === MESSAGE_SETTLEMENT_EVENT) {
+    if (params.settlement === null) return map[id] ? merge(map, id, { settlement: undefined }, true) : map;
+    const settlement = readMessageSettlement(params.settlement);
+    return settlement ? merge(map, id, { settlement }, true) : map;
+  }
   const sender = party(params.sender);
   const recipient = party(params.recipient);
   const base: Partial<AgentMessageRecord> = {
+    settlement: readMessageSettlement(params.settlement),
     from: str(params.fromCutexSessionId) ?? sender.id,
     to: str(params.toCutexSessionId) ?? recipient.id,
     remote: remoteOf(params.remote),
@@ -185,7 +256,7 @@ export function applyMessageEvent(map: MessageMap, method: string, params: Recor
     case "cutex/agentBus/messageQueued":
       return merge(map, id, { ...base, body: str(params.body) ?? str(params.content) ?? "", sentAt: time(params.queuedAt) ?? time(params.sentAt) ?? at, state: "pending" });
     case "cutex/agentBus/messageDelivered":
-      return merge(map, id, { ...base, state: "delivered", deliveredAt: time(params.deliveredAt) ?? at, turnId: str(params.turnId) });
+      return merge(map, id, { ...base, state: "delivered", deliveredAt: time(params.deliveredAt) ?? at, turnId: str(params.turnId) }, params.settlement == null);
     default:
       // A live failure (shows in the recipient's panel), unless it was read in already.
       if (map[id]?.state === "delivered") return map;
@@ -207,6 +278,7 @@ export function seedMessages(map: MessageMap, sessionId: string, received: unkno
     const sender = party(m.sender);
     const origin = receivedOrigin(m);
     next = merge(next, id, {
+      settlement: readMessageSettlement(m.settlement),
       from: str(m.fromCutexSessionId) ?? sender.id ?? origin.serviceId,
       to: str(m.toCutexSessionId) ?? sessionId,
       sourceKind: origin.sourceKind,
@@ -222,7 +294,7 @@ export function seedMessages(map: MessageMap, sessionId: string, received: unkno
       turnId: str(m.contextTurnId),
       error: errorText(m.error),
       state: stateOf(m.state),
-    });
+    }, true);
   }
   for (const raw of sent ?? []) {
     const m = (raw ?? {}) as Record<string, unknown>;
@@ -230,6 +302,7 @@ export function seedMessages(map: MessageMap, sessionId: string, received: unkno
     if (!id) continue;
     const recipient = party(m.recipient);
     next = merge(next, id, {
+      settlement: readMessageSettlement(m.settlement),
       from: sessionId,
       to: str(m.toCutexSessionId) ?? recipient.id,
       recipientName: recipient.name,
@@ -241,7 +314,7 @@ export function seedMessages(map: MessageMap, sessionId: string, received: unkno
       turnId: str(m.contextTurnId),
       error: errorText(m.error),
       state: stateOf(m.state),
-    });
+    }, true);
   }
   return next;
 }
@@ -250,13 +323,24 @@ export function seedMessages(map: MessageMap, sessionId: string, received: unkno
  * The 待读留言 rows of agent `sessionId`: messages to it not read in yet (plus failures seen live),
  * oldest first. `readIn`: message ids already in its timeline (the native external_event item id
  * is the bus message id) — they are read in even if the delivered event has not arrived. `dismissed`:
- * failed rows the owner closed.
+ * failed rows the owner closed. `readSince`: start of the agent's latest finished turn
+ * (`lastFinishedTurnStart`); a cross-host note from a cutex older than 0.1.5 (`isLegacyPeerTell`,
+ * which never reports it delivered) queued before that turn started was read in at that turn's start.
+ * `claudeRecipient`: the same for a note to a Claude agent queued CLAUDE_NOTE_MARGIN_S before such a turn
+ * — the Claude adapter reads every waiting note into each turn it starts, but confirms them only when the
+ * turn ends cleanly; after an interrupted or failed turn cutex keeps them 未读 (inbox_accepted) for good,
+ * and 唤醒 reads nothing (owner 2026-10-23).
  */
-export function pendingMessagesFor(map: MessageMap, sessionId: string, readIn: (messageId: string) => boolean = () => false, dismissed: ReadonlySet<string> = new Set()): AgentMessageRecord[] {
+export function pendingMessagesFor(map: MessageMap, sessionId: string, readIn: (messageId: string) => boolean = () => false, dismissed: ReadonlySet<string> = new Set(), readSince: number | null = null, claudeRecipient = false): AgentMessageRecord[] {
+  const readByTurn = (m: AgentMessageRecord) =>
+    readSince !== null && m.sentAt !== null && m.state === "pending" && ((isLegacyPeerTell(m) && readSince > m.sentAt) || (claudeRecipient && m.kind === "note" && readSince - m.sentAt >= CLAUDE_NOTE_MARGIN_S));
   return Object.values(map)
-    .filter((m) => m.to === sessionId && m.from !== sessionId && (m.state === "pending" || (m.state === "failed" && m.failedLive && !dismissed.has(m.messageId))) && !readIn(m.messageId))
+    .filter((m) => m.settlement?.state !== "closed" && m.to === sessionId && m.from !== sessionId && (m.settlement?.state === "outcome_unknown" || m.state === "pending" || (m.state === "failed" && m.failedLive && !dismissed.has(m.messageId))) && (m.settlement?.state === "outcome_unknown" || (!readIn(m.messageId) && !readByTurn(m))))
     .sort((a, b) => (a.sentAt ?? 0) - (b.sentAt ?? 0) || a.messageId.localeCompare(b.messageId));
 }
+
+/** A note reaches the Claude adapter's inbox a moment after cutex queues it: a turn this much later took it. */
+export const CLAUDE_NOTE_MARGIN_S = 5;
 
 /** Pending notes (not wakes) of the agent — what the owner's 唤醒 would read in. */
 export function wakeableNotes(rows: AgentMessageRecord[]): number {

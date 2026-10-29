@@ -35,7 +35,7 @@ export function FollowSharedSection() {
   };
   return (
     <Section id={settingsAnchorId("sync")} title={t("codex-config.plugins.sync")}>
-      <SettingRow label={t("codex-config.plugins.follow")} hint={t("codex-config.plugins.followHint")}>
+      <SettingRow agents="next" source="host" label={t("codex-config.plugins.follow")} hint={t("codex-config.plugins.followHint")}>
         <Toggle disabled={busy} checked={settings.codexConfigFollowShared} label={t("codex-config.plugins.follow")} onChange={(v) => void patch(v)} />
       </SettingRow>
       {error && <ErrorNote>{error}</ErrorNote>}

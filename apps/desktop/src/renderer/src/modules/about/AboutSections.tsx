@@ -19,6 +19,7 @@ import { INSTALL_GUIDE_URL } from "../../lib/firstRun";
 import { useApp } from "../../store";
 import { ABOUT_LINKS, KNOWN_ISSUES_URL, useKnownIssues } from "./knownIssues";
 import { BUNDLED_CHANGELOG, initialOpen, inlineTokens, newSince, readSeenVersion, writeSeenVersion } from "./changelog";
+import { Tag } from "../../components/Tag";
 
 const FOCUS = "focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none";
 const LINK = `inline-flex items-center gap-1 whitespace-nowrap rounded text-xs text-accent hover:underline ${FOCUS}`;
@@ -47,7 +48,7 @@ export function AboutLinksSection() {
   const { t } = useI18n();
   return (
     <Section title={t("about.links.section")}>
-      <SettingRow label={t("about.source")} hint={t("about.sourceHint")}>
+      <SettingRow navigation agents="none" source="local" label={t("about.source")} hint={t("about.sourceHint")}>
         <span className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5 group-data-[narrow]/card:justify-start">
           {RELATED_REPO_URLS.map((r) => (
             <ExternalLinkButton key={r.name} url={r.url}>
@@ -59,15 +60,16 @@ export function AboutLinksSection() {
           </Button>
         </span>
       </SettingRow>
-      <SettingRow label={t("about.link.install")} hint={t("about.installHint")}>
+      <SettingRow navigation agents="none" source="local" label={t("about.link.install")} info={t("about.installHint")}>
         <ExternalLinkButton url={INSTALL_GUIDE_URL}>{t("about.open")}</ExternalLinkButton>
       </SettingRow>
-      <SettingRow label={t("about.license")} hint={t("about.licenseHint")}>
-        <span className="font-mono text-xs text-muted">Apache-2.0</span>
+      <SettingRow readOnly agents="none" source="local" label={t("about.license")} hint={t("about.licenseHint")}>
+        <span className="text-xs text-muted">Apache-2.0</span>
       </SettingRow>
-      <SettingRow label={t("about.thirdParty")} hint={t("about.thirdPartyHint")}>
-        <span className="font-mono text-xs text-subtle">NOTICE</span>
+      <SettingRow readOnly agents="none" source="local" label={t("about.thirdParty")} hint={t("about.thirdPartyHint")}>
+        <span className="text-xs text-subtle">NOTICE</span>
       </SettingRow>
+      <p className="py-3 text-xs leading-relaxed text-subtle">{t("avatarStyle.aiDisclosure")}</p>
     </Section>
   );
 }
@@ -86,7 +88,7 @@ export function KnownIssuesSection() {
   const fetchedAt = view.fetchedAt ? Date.parse(view.fetchedAt) / 1000 : null;
   return (
     <Section title={t("about.knownIssues")} hint={t("about.knownIssuesHint")} actions={<OnGithub url={KNOWN_ISSUES_URL} />}>
-      <p data-known-issues-source={view.source} className="pt-2 pb-1 text-[11px] text-subtle" title={fetchedAt !== null ? formatAbsolute(fetchedAt) : undefined}>
+      <p data-known-issues-source={view.source} className="pt-2 pb-1 text-caption/[inherit] text-subtle" title={fetchedAt !== null ? formatAbsolute(fetchedAt) : undefined}>
         {view.source === "github" && fetchedAt !== null
           ? t(view.stale ? "about.sourceGithubStale" : "about.sourceGithub", { time: formatWhen(fetchedAt, Date.now(), locale) })
           : t("about.sourceBuiltin")}
@@ -99,7 +101,7 @@ export function KnownIssuesSection() {
             <li key={issue.id} data-issue={issue.id} className="border-b border-border/60 py-3 last:border-b-0">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="text-sm">{text(issue.title)}</span>
-                {issue.fixedIn && <span className="shrink-0 rounded-full bg-accent/15 px-2 text-[11px] leading-5 text-accent">{t("about.fixedIn", { version: issue.fixedIn })}</span>}
+                {issue.fixedIn && <Tag tone="accent">{t("about.fixedIn", { version: issue.fixedIn })}</Tag>}
               </div>
               <p className="mt-1 whitespace-pre-line text-xs text-subtle">{text(issue.body)}</p>
               {issue.workaround && <p className="mt-1 whitespace-pre-line text-xs text-muted">{t("about.workaround", { text: text(issue.workaround) })}</p>}
@@ -118,7 +120,7 @@ function Inline({ text }: { text: string }) {
     <>
       {inlineTokens(text).map((tok, i) =>
         tok.kind === "code" ? (
-          <code key={i} className="rounded bg-surface-2 px-1 font-mono text-[11px] break-all">
+          <code key={i} className="rounded bg-surface-2 px-1 font-mono text-caption/[inherit] break-all">
             {tok.text}
           </code>
         ) : tok.kind === "bold" ? (
@@ -178,8 +180,8 @@ function ReleaseRow({ release, open, onToggle, installed, fresh }: { release: Ch
         {open ? <ChevronDown size={13} className="shrink-0 text-muted" aria-hidden /> : <ChevronRight size={13} className="shrink-0 text-muted" aria-hidden />}
         <span className="text-sm font-medium tabular-nums">{release.version}</span>
         {release.title && <span className="text-sm text-subtle">“{release.title}”</span>}
-        {installed && <span className="shrink-0 rounded-full bg-accent/15 px-2 text-[11px] leading-5 text-accent">{t("about.changelog.installed")}</span>}
-        {fresh && <span className="shrink-0 rounded-full bg-ok/15 px-2 text-[11px] leading-5 text-ok-text">{t("about.changelog.new")}</span>}
+        {installed && <Tag tone="accent">{t("about.changelog.installed")}</Tag>}
+        {fresh && <Tag tone="ok">{t("about.changelog.new")}</Tag>}
         {date && !Number.isNaN(date.getTime()) && (
           <span className="ml-auto shrink-0 text-xs text-subtle tabular-nums" title={release.date}>
             {date.toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" })}

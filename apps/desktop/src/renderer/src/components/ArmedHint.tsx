@@ -1,13 +1,15 @@
 // The "click again" hint of an armed button (lib/armedConfirm) as a floating bubble anchored to the
-// button: the button keeps its footprint (no label swap, no row reflow). Rendered into <body> with
+// button: the button keeps its footprint (no label swap, no row reflow). Rendered into its window's <body> with
 // position: fixed, above the button when there is room (else below), clamped into the viewport; it
 // follows scroll / resize and disappears with the armed state.
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { armedHintPosition } from "../lib/armedConfirm";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 export function ArmedHint({ anchor, text }: { anchor: RefObject<HTMLElement | null>; text: string }) {
   const bubble = useRef<HTMLDivElement>(null);
+  const win = useOwnerWindow();
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
     const place = () => {
@@ -15,17 +17,17 @@ export function ArmedHint({ anchor, text }: { anchor: RefObject<HTMLElement | nu
       const b = bubble.current;
       if (!a || !b) return;
       const r = a.getBoundingClientRect();
-      const next = armedHintPosition({ top: r.top, bottom: r.bottom, left: r.left, width: r.width }, { width: b.offsetWidth, height: b.offsetHeight }, { width: window.innerWidth, height: window.innerHeight });
+      const next = armedHintPosition({ top: r.top, bottom: r.bottom, left: r.left, width: r.width }, { width: b.offsetWidth, height: b.offsetHeight }, { width: win.innerWidth, height: win.innerHeight });
       setPos((old) => (old && old.left === next.left && old.top === next.top ? old : { left: next.left, top: next.top }));
     };
     place();
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
+    win.addEventListener("resize", place);
+    win.addEventListener("scroll", place, true);
     return () => {
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
+      win.removeEventListener("resize", place);
+      win.removeEventListener("scroll", place, true);
     };
-  }, [anchor, text]);
+  }, [anchor, text, win]);
   return createPortal(
     <div
       ref={bubble}
@@ -35,6 +37,6 @@ export function ArmedHint({ anchor, text }: { anchor: RefObject<HTMLElement | nu
     >
       {text}
     </div>,
-    document.body,
+    win.document.body,
   );
 }

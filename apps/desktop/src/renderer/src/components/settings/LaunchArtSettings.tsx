@@ -8,7 +8,7 @@ import { BUNDLED_LAUNCH_ART, canImportLaunchArt, clearLaunchArt, importLaunchArt
 import type { PortraitProvider } from "../../lib/launchPortraits";
 import { PROVIDER_LABEL } from "../../lib/provider";
 import { settingsAnchorId } from "../../lib/settingsNav";
-import { Button, ListRow, Notice, Section } from "./Form";
+import { Button, ListRow, Notice, Section, SettingsGroup } from "./Form";
 
 const PROVIDERS = Object.keys(LAUNCH_ART_FILES) as PortraitProvider[];
 
@@ -44,18 +44,20 @@ export function LaunchArtSection() {
   };
   return (
     <Section
+
       id={settingsAnchorId("launchArt")}
       title={t("appearance.launchArt")}
+
       // Legacy (owner 2026-10-18): this module will be redone (its ties to 对话 → 会话开场 and the Profile
       // art, the file-name rule, which page); left as it is until then.
       tag={{ label: t("settings.legacy"), title: t("settings.legacyHint") }}
       hint={t("appearance.launchArtHint")}
       actions={
         <>
-          <Button disabled={busy} onClick={() => void run(async () => describe(await importLaunchArt()))}>
+          <SettingsGroup agents="none" source="local"><Button disabled={busy} onClick={() => void run(async () => describe(await importLaunchArt()))}>
             {busy ? t("appearance.launchArt.importing") : t("appearance.launchArt.import")}
-          </Button>
-          <Button
+          </Button></SettingsGroup>
+          <SettingsGroup agents="none" source="local"><Button
             disabled={busy || !anyImported}
             onClick={() =>
               void run(async () => {
@@ -65,7 +67,7 @@ export function LaunchArtSection() {
             }
           >
             {t("appearance.launchArt.clear")}
-          </Button>
+          </Button></SettingsGroup>
         </>
       }
     >

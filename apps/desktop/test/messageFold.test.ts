@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoFolds, foldView, latestReplyIds, lineHeightPx, migrateFoldLines, visualLines, type FoldPrefs } from "../src/renderer/src/lib/messageFold";
+import { autoFolds, foldPresentationChanged, foldView, latestReplyIds, lineHeightPx, migrateFoldLines, visualLines, type FoldPrefs } from "../src/renderer/src/lib/messageFold";
 import type { TimelineEntry } from "../src/renderer/src/lib/timeline";
 
 const on: FoldPrefs = { foldLong: true, foldLines: 12, foldOlderReplies: false };
@@ -54,6 +54,17 @@ describe("foldView", () => {
     expect(foldView(false, "folded", 6, 12)).toMatchObject({ clipLines: 3, overflowing: true });
     expect(foldView(false, "folded", 2, 12)).toMatchObject({ clipLines: 1, overflowing: true });
     expect(foldView(false, undefined, 1, 12).canFold).toBe(false);
+  });
+});
+
+describe("foldPresentationChanged", () => {
+  it("ignores a short message crossing only the hover-menu's can-fold threshold", () => {
+    expect(foldPresentationChanged(false, undefined, 1, 2, 12)).toBe(false);
+  });
+  it("commits clipping, overflow and collapse changes, and a still-overflowing count", () => {
+    expect(foldPresentationChanged(true, "open", 12, 13, 12)).toBe(true);
+    expect(foldPresentationChanged(true, undefined, 12, 13, 12)).toBe(true);
+    expect(foldPresentationChanged(true, undefined, 13, 14, 12)).toBe(true);
   });
 });
 

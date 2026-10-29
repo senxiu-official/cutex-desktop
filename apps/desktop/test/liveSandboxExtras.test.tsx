@@ -32,6 +32,12 @@ vi.mock("../src/renderer/src/lib/remoteMode", async (importOriginal) => ({
   useFolderPickBlocked: () => false,
 }));
 
+// The components at the top (their mocks above are hoisted), not inside the tests: loading LiveSandboxExtras there
+// cost its test up to 2.4 s alone and timed it out (5 s) under the full suite's load; the mock's feature lists too.
+const { PermissionDetail } = await import("../src/renderer/src/components/PermissionDetail");
+const { LiveSandboxExtras } = await import("../src/renderer/src/components/LiveSandboxExtras");
+const { MOCK_NEW_FEATURES, MOCK_BASE_FEATURES } = await import("../src/renderer/src/dev/mockFeatures");
+
 const workspace = (extra: Record<string, unknown> = {}) =>
   ({ approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandboxPolicy: { type: "workspaceWrite", writableRoots: ["/srv/data"], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false, ...extra } }) as never;
 
@@ -50,7 +56,6 @@ describe("liveExtrasApply", () => {
 
 describe("menu footer", () => {
   it("PermissionDetail drops the network / directory lines when the controls show them", async () => {
-    const { PermissionDetail } = await import("../src/renderer/src/components/PermissionDetail");
     const effective = effectivePermissions(workspace())!;
     const plain = renderToStaticMarkup(h(PermissionDetail, { effective }));
     expect(plain).toContain("composer.effective.network.off");
@@ -62,7 +67,6 @@ describe("menu footer", () => {
   });
 
   it("LiveSandboxExtras shows the network switch, the directories with an add button and the next-turn note", async () => {
-    const { LiveSandboxExtras } = await import("../src/renderer/src/components/LiveSandboxExtras");
     const html = renderToStaticMarkup(h(LiveSandboxExtras, { hostId: "local", sessionId: "eva", network: true, roots: ["/srv/data"] }));
     expect(html).toContain("launch.network");
     expect(html).toMatch(/aria-checked="true"|checked=""/);
@@ -99,7 +103,6 @@ describe("mock cutex", () => {
   });
 
   it("advertises the capability only on a current cutex", async () => {
-    const { MOCK_NEW_FEATURES, MOCK_BASE_FEATURES } = await import("../src/renderer/src/dev/mockFeatures");
     expect(MOCK_NEW_FEATURES).toContain(SESSION_SANDBOX_EXTRAS_FEATURE);
     expect(MOCK_BASE_FEATURES).not.toContain(SESSION_SANDBOX_EXTRAS_FEATURE);
   });

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { INVOKE_CHANNEL, SHELL_CHANNEL, UPDATE_CHANNEL, WINDOW_CHANNEL } from "../src/shared/ipc";
 import { PLUGINS_CHANNEL } from "../src/shared/plugins";
 import { KNOWN_ISSUES_CHANNEL } from "../src/shared/knownIssues";
@@ -116,6 +116,7 @@ vi.mock("electron", () => ({
     loadFile() {}
   },
   nativeTheme: {},
+  screen: { on() {} },
   protocol: {
     registerSchemesAsPrivileged() {},
     // Plugin frame documents only; the module-pack scheme has its own tests (modulePacks*.test.ts).
@@ -137,13 +138,18 @@ vi.mock("electron", () => ({
   dialog: {},
   shell: {}
 }));
-vi.mock("@cutex-desktop/cutex-client", () => ({
+vi.mock("@cutex-desktop/cutex-client", async () => ({
+  messageSettlementCloseBody: (await import("../../../packages/cutex-client/src/messageSettlement")).messageSettlementCloseBody,
   CutexClient: class {
     constructor(public endpoint: {
       baseUrl: string;
     }) {}
     host() {
       return new Promise(() => {});
+    }
+    closeBusMessage(input: unknown) {
+      fake.calls.push({ endpoint: this.endpoint.baseUrl, session: "settlement", input });
+      return fake.reply ?? Promise.resolve({ messageId: "m1", changed: true, settlement: { state: "closed" } });
     }
     submitInput(session: string, input: unknown) {
       fake.calls.push({
@@ -268,7 +274,8 @@ function deliver() {
   fake.event!({}, "hostsState", fake.current);
 }
 const submit = () => fake.bridge!.api.submit("same-session", "old intent", "auto");
-beforeEach(async () => {
+/** Boots a fresh main + preload (vi.resetModules()) against the fakes; each test needs its own. */
+async function boot() {
   fake.daemon?.stop();
   vi.resetModules();
   fake.handlers.clear();
@@ -295,13 +302,21 @@ beforeEach(async () => {
   // HostManager is created once the app is ready (main/index.ts whenReady).
   for (let i = 0; i < 20 && !fake.create; i++) await Promise.resolve();
   endpoint("local", "epoch-a");
-});
-afterEach(() => {
+}
+function teardown() {
   fake.daemon?.stop();
   for (const conn of fake.extra) conn.daemon.stop();
   fake.conn?.daemon.stop();
   rmSync(fake.userData, { recursive: true, force: true });
-});
+}
+// Warm-up: one boot before all tests, so the first load of the main + preload graph is not billed to the first test's
+// hook (it neared the limits under the full suite's load); each test still boots fresh modules from the cache.
+beforeAll(async () => {
+  await boot();
+  teardown();
+}, 60_000);
+beforeEach(boot);
+afterEach(teardown);
 describe("main admission checks renderer-observed host binding", () => {
   it("rejects daemon requests before explicit startup handshake", async () => {
     await expect(submit()).rejects.toThrow("host binding");
@@ -428,6 +443,18 @@ describe("multi-host P0: every connected host has its own binding", () => {
     await submit();
     expect(fake.calls.map(call => call.endpoint)).toEqual(["fake://ssh-t", "fake://local"]);
     await expect(fake.bridge!.apiFor!("ssh-unknown").submit("same-session", "x", "auto")).rejects.toThrow("host binding");
+  });
+
+  it("routes settlement through narrow preload/main IPC to the bound host and rebuilds its strict body", async () => {
+    fake.bridge!.on("hostsState", () => {});
+    connectBackground("ssh-t", "epoch-t");
+    await fake.bridge!.api.hosts();
+    const request = { messageId: "m1", expectedEvidenceToken: "proof", requestId: "owner-close-key", reason: "Owner has finished following up" };
+    const close = fake.bridge!.apiFor!("ssh-t").closeBusMessage;
+    expect(await close({ ...request, allowProtected: true } as typeof request)).toMatchObject({ ok: true, result: { changed: true } });
+    expect(fake.calls).toEqual([{ endpoint: "fake://ssh-t", session: "settlement", input: request }]);
+    await expect(close({ ...request, reason: " " })).rejects.toThrow("bad settlement reason");
+    expect(fake.calls).toHaveLength(1);
   });
 
   it("a focus call is refused once the focus moved, even though the old focus host stays connected", async () => {

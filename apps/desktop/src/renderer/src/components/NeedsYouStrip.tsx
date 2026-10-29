@@ -4,8 +4,9 @@
 // agent with that delegation's detail beside it, where 批准 / 拒绝 are). Settings → 外观 → 侧栏 「输入框上方显示『需要你』」. Multi-host (RFC §10, ★ Q15):
 // what waits on connected hosts outside the view scope is one 「其他主机 N 项」 chip at the end (click =
 // show 所有设备). Each agent chip has a × (also middle-click) that dismisses it without opening: done /
-// failed = the turn is marked seen as opening would (the sidebar pill goes too); needs-you = hidden
-// until the need changes (lib/needsYouDismiss; the sidebar keeps the real state).
+// failed = the turn is marked seen as opening would (the sidebar pill goes too); a runtime error = hidden
+// while it is the same error (member + runtimeGeneration + lastError); needs-you = hidden until the need
+// changes (lib/needsYouDismiss; the sidebar keeps the real state).
 // Redesign (owner report 2026-10-15: it had become a long sideways scroller with a scrollbar over the
 // chips): one line, never scrolling. A chip is avatar + name + one status word (no dots); 需要你 /
 // 出错 first and tinted; two or more 完成 are one 「N 个已完成」 chip (its menu opens each, or
@@ -23,66 +24,82 @@ import { hostKey } from "../lib/hostKeys";
 import { useScopedAttention, useScopedSidebar } from "../lib/scopedSidebarView";
 import type { AgentRow } from "../lib/sidebar";
 import { markSeenOn, turnMarksOn } from "../lib/turnUnread";
-import { dismissNeed, isDismissed, needFingerprint, pruneStoredDismissals, useDismissals } from "../lib/needsYouDismiss";
+import { chipDismissed, dismissNeed, dismissRuntimeError, errorKey, needFingerprint, pruneStoredDismissals, runtimeErrorFingerprint, useDismissals } from "../lib/needsYouDismiss";
 import { useUiPrefs } from "../lib/prefs";
-import { focusOwnerNote } from "../lib/ownerNotifyStore";
-import { openDelegationDetail } from "../lib/delegationOpen";
+import { activateAttention } from "../lib/attentionActivate";
 import { useOutOfScopeAttention } from "../lib/hostLists";
 import { ALL_HOSTS } from "../lib/hostScope";
 import { setViewScope } from "../lib/useHostScope";
 import { useApp } from "../store";
 import { useConvHost } from "../lib/conversationScope";
-import { services } from "../modules/app";
 import { StatusAvatar } from "./AgentStatus";
 import { HostMark } from "./HostMark";
+import { sharedResizeObserver } from "../lib/resizeHub";
 
 // Colour budget (lib/statusChips chipTone): tinted only for 出错 and pending decisions; the rest is a
 // neutral chip whose state is the muted word.
 const TONE: Record<ChipTone, string> = {
-  urgent: "border-warn/40 bg-warn/10 hover:bg-warn/20",
-  error: "border-danger/40 bg-danger/10 hover:bg-danger/20",
-  quiet: "border-border bg-background hover:bg-hover",
+  urgent: "bg-attention-soft hover:bg-attention/25",
+  error: "bg-danger-soft hover:bg-danger/20",
+  quiet: "bg-surface-2 hover:bg-hover",
 };
-const LABEL_TONE: Record<ChipTone, string> = { urgent: "text-warn", error: "text-danger", quiet: "text-muted" };
-const CHIP = "group flex shrink-0 items-center rounded-full border text-[11.5px]";
+const LABEL_TONE: Record<ChipTone, string> = { urgent: "text-warn-text", error: "text-danger", quiet: "text-muted" };
+const CHIP = "group flex shrink-0 items-center rounded-full text-meta";
 const CLOSE =
   "mx-0.5 flex size-4 shrink-0 items-center justify-center rounded-full text-subtle opacity-0 group-hover:opacity-100 hover:bg-hover hover:text-foreground focus-visible:opacity-100 max-sm:opacity-100 [@media(hover:none)]:opacity-100";
 
-export function NeedsYouStrip({ sessionId }: { sessionId: string | null }) {
+/** `inline`: inside the status row (components/StatusBar), which sets its width, line and edges. */
+export function NeedsYouStrip({ sessionId, inline = false }: { sessionId: string | null; inline?: boolean }) {
   const { needsYouStrip } = useUiPrefs();
   if (!needsYouStrip) return null;
-  return <Strip sessionId={sessionId} />;
+  return <Strip sessionId={sessionId} inline={inline} />;
 }
 
-function Strip({ sessionId }: { sessionId: string | null }) {
+function Strip({ sessionId, inline }: { sessionId: string | null; inline: boolean }) {
   const { t } = useI18n();
   // Every host of the view scope (RFC §10): rows, signals and needs are keyed by row key (host + id).
   const scoped = useScopedSidebar();
   const { rows, signals, needs, marks } = useScopedAttention(scoped.model, scoped.scope);
   const focus = scoped.scope.focus;
-  const openAgent = useApp((s) => s.openAgent);
   const openHost = useConvHost();
   const exclude = sessionId ? hostKey(openHost, sessionId) : null;
   const dismissals = useDismissals();
-  const all = useMemo(() => {
-    const markOf = (row: AgentRow) => ((row.hostId ?? focus) === focus ? marks[row.id] : turnMarksOn(row.hostId!)[row.id]);
-    return attentionChips(rows, signals, needs, markOf, null);
-  }, [rows, signals, needs, marks, focus]);
+  const markOf = useMemo(() => (row: AgentRow) => ((row.hostId ?? focus) === focus ? marks[row.id] : turnMarksOn(row.hostId!)[row.id]), [marks, focus]);
+  const all = useMemo(() => attentionChips(rows, signals, needs, markOf, null), [rows, signals, needs, markOf]);
+  const byKey = useMemo(() => new Map(rows.map((r) => [hostKey(r.hostId ?? focus, r.id), r])), [rows, focus]);
+  const runtimeErrorOf = (c: AttentionChip) => runtimeErrorFingerprint(byKey.get(hostKey(c.hostId ?? focus, c.id))?.session.runtime);
   const chips = useMemo(
-    () => all.filter((c) => c.key !== exclude && !isDismissed(dismissals, hostKey(c.hostId ?? focus, c.id), c, needs.get(c.key))),
-    [all, exclude, dismissals, needs, focus],
+    () => all.filter((c) => {
+      if (c.key === exclude) return false;
+      const row = byKey.get(hostKey(c.hostId ?? focus, c.id));
+      return !chipDismissed(dismissals, hostKey(c.hostId ?? focus, c.id), c, needs.get(c.key), row, !!(row && markOf(row)?.failed));
+    }),
+    [all, exclude, dismissals, needs, focus, byKey, markOf],
   );
-  // Dismissals of agents in view whose need is gone or changed go (a new need shows the chip again).
+  // Dismissals of agents in view whose need or runtime error is gone or changed go (a new one shows the chip again).
   useEffect(() => {
     const current = new Map(all.filter((c) => c.signal === "needsYou").map((c) => [hostKey(c.hostId ?? focus, c.id), needFingerprint(needs.get(c.key))]));
+    for (const r of rows) {
+      const fp = runtimeErrorFingerprint(r.session.runtime);
+      if (fp) current.set(errorKey(hostKey(r.hostId ?? focus, r.id)), fp);
+    }
     pruneStoredDismissals(current, new Set(rows.map((r) => hostKey(r.hostId ?? focus, r.id))));
   }, [all, rows, needs, focus]);
-  const byKey = useMemo(() => new Map(rows.map((r) => [hostKey(r.hostId ?? focus, r.id), r])), [rows, focus]);
   const elsewhere = useOutOfScopeAttention();
   const items = useMemo(() => stripItems(chips), [chips]);
   const strip = useRef<HTMLDivElement>(null);
   const moreWidth = useRef(36);
   const [fit, setFit] = useState(Number.POSITIVE_INFINITY);
+  // What the chips' widths depend on, as one string: `items` / `needs` are new objects whenever any
+  // agent's session changes (each streamed delta), and the measure below forces a layout.
+  const layoutKey = items
+    .map((item) => {
+      if (item.kind === "done") return `done:${item.chips.map((c) => c.key).join(",")}`;
+      const c = item.chip;
+      const n = needs.get(c.key);
+      return `${c.key}|${c.name}|${chipTone(c.signal, n)}|${signalLabel(t, c.signal, n) ?? ""}`;
+    })
+    .join("\n") + `\n${elsewhere}|${scoped.scope.showHostMarks}`;
   useLayoutEffect(() => {
     const row = strip.current;
     if (!row) return;
@@ -97,27 +114,22 @@ function Strip({ sessionId }: { sessionId: string | null }) {
       setFit(fitCount(widths, content - fixed, gap, moreWidth.current));
     };
     measure();
-    const observer = new ResizeObserver(measure);
+    const observer = sharedResizeObserver(measure);
     observer.observe(row);
     return () => observer.disconnect();
-  }, [items, needs, elsewhere]);
+  }, [layoutKey]);
   if (chips.length === 0 && elsewhere === 0) return null;
 
   const hostOf = (c: AttentionChip) => c.hostId ?? focus;
-  const activate = (c: AttentionChip) => {
-    const host = hostOf(c);
-    const n = needs.get(c.key);
-    const approvalsOnly = c.signal === "needsYou" && n?.reasons.length === 1 && n.reasons[0] === "approval";
-    // An agent → owner message behind it: open the agent at that message.
-    const note = c.signal === "needsYou" ? n?.notificationIds?.[0] : undefined;
-    // Only a delegation waiting for your review: open its agent with the delegation's detail beside it (批准 / 拒绝 there).
-    const review = c.signal === "needsYou" && n?.reasons.length === 1 && n.reasons[0] === "review" ? (n.askIds[0] ?? null) : null;
-    if (approvalsOnly) services.ui.openPage("approvals.page");
-    else if (review) void openAgent(c.id, host).then(() => openDelegationDetail(host, review));
-    else if (note) focusOwnerNote(c.id, note, host);
-    else void openAgent(c.id, host);
+  // Where its need is handled (lib/attentionActivate; the sidebar's 「现在」 cards do the same).
+  const activate = (c: AttentionChip) => activateAttention(c, needs.get(c.key), hostOf(c));
+  const dismiss = (c: AttentionChip) => {
+    if (c.signal === "needsYou") return dismissNeed(hostKey(hostOf(c), c.id), needs.get(c.key));
+    // 出错 from a runtime error: remember this error; a failed / finished turn is marked seen as before.
+    const runtimeError = c.signal === "error" ? runtimeErrorOf(c) : null;
+    if (runtimeError) dismissRuntimeError(hostKey(hostOf(c), c.id), runtimeError);
+    markSeenOn(hostOf(c), c.id);
   };
-  const dismiss = (c: AttentionChip) => (c.signal === "needsYou" ? dismissNeed(hostKey(hostOf(c), c.id), needs.get(c.key)) : markSeenOn(hostOf(c), c.id));
   const avatarOf = (c: AttentionChip) => {
     const row = byKey.get(hostKey(hostOf(c), c.id));
     return row ? <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={16} signal="idle" /> : undefined;
@@ -190,8 +202,8 @@ function Strip({ sessionId }: { sessionId: string | null }) {
   };
 
   return (
-    <div ref={strip} data-needs-you-strip="" className="side-col side-col-composer flex w-full min-w-0 items-center gap-1.5 overflow-hidden px-6 pb-1.5">
-      <span data-strip-fixed="" className="shrink-0 text-[11px] text-subtle">
+    <div ref={strip} data-needs-you-strip="" className={`flex min-w-0 items-center gap-1.5 overflow-hidden ${inline ? "" : "side-col side-col-composer w-full px-6 pb-1.5"}`}>
+      <span data-strip-fixed="" className="shrink-0 text-caption text-subtle">
         {t("needsYou.label")}
       </span>
       {items.map((item, i) => renderItem(item, i >= fit))}
@@ -202,7 +214,7 @@ function Strip({ sessionId }: { sessionId: string | null }) {
           aria-label={t("needsYou.more", { n: hiddenCount })}
           title={t("needsYou.more", { n: hiddenCount })}
           onClick={(e) => openMenuAbove(e.currentTarget, hiddenMenu(), { minWidth: 220 })}
-          className="flex shrink-0 items-center rounded-full border border-border px-2 py-0.5 text-[11.5px] font-medium whitespace-nowrap text-muted hover:bg-hover hover:text-foreground"
+          className="flex shrink-0 items-center rounded-full bg-surface-2 px-2 py-0.5 text-meta font-medium whitespace-nowrap text-muted hover:bg-hover hover:text-foreground"
         >
           +{hiddenCount}
         </button>
@@ -212,7 +224,7 @@ function Strip({ sessionId }: { sessionId: string | null }) {
           data-strip-fixed=""
           onClick={() => void setViewScope(ALL_HOSTS)}
           title={t("needsYou.otherHostsHint", { n: elsewhere })}
-          className="flex shrink-0 items-center rounded-full border border-dashed border-warn/40 px-2 py-0.5 text-[11.5px] whitespace-nowrap text-warn hover:bg-warn/10"
+          className="flex shrink-0 items-center rounded-full bg-attention-soft px-2 py-0.5 text-meta whitespace-nowrap text-warn-text hover:bg-attention/25"
         >
           {t("needsYou.otherHosts", { n: elsewhere })}
         </button>

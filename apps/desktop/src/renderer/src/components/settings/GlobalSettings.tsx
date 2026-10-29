@@ -3,20 +3,22 @@
 // titles), 指令 (AGENTS.md, 运行环境说明 = cutex agent-harness); plus the 协作 page's agent 间消息格式 (消息总线 lives in modules/agent-bus/BusSettings.tsx).
 import { useEffect, useState } from "react";
 import type { AgentHarnessPreview, AgentHarnessSectionId, GlobalSettings, ProfileItem, UserInstructions } from "../../../../shared/ipc";
-import { useI18n } from "../../i18n";
-import { AGENT_HARNESS_FEATURE, useGlobalSettings } from "../../lib/globalSettings";
+import { useI18n, type MessageKey } from "../../i18n";
+import { AGENT_HARNESS_FEATURE, PROMPT_CACHE_KEY_FEATURE, useGlobalSettings } from "../../lib/globalSettings";
 import { pickHarnessAgent } from "../../lib/harnessPreview";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { AUTO_TITLES_FEATURE, QUICK_CHAT_PROFILE_FEATURE } from "../../lib/profileCreate";
 import { useThreadDefaults } from "../../lib/threadDefaults";
 import { useApp } from "../../store";
-import { Button, EmptyState, ErrorNote, LinkRow, Loading, Notice, Section, Segmented, Select, SettingRow, TextField, Toggle } from "./Form";
+import { Button, EmptyState, ErrorNote, LinkRow, Loading, Notice, Section, Segmented, Select, SettingRow, TextField, Toggle, SettingsGroup } from "./Form";
 import { ThreadDefaultRows } from "./ThreadDefaults";
 import { useTargetApi, useTargetFeatures, useTargetHostId, useTargetSidebar, useTargetIsFocus } from "../../lib/targetHost";
 import { useOrderedProfiles } from "../../lib/profileOrder";
 import { useHostPlatform } from "../../lib/codeBlockActions";
 import { WINDOWS_SANDBOX_FEATURE } from "../../../../shared/windowsSandbox";
 import { WindowsSandboxSection } from "../WindowsSandboxNotice";
+import { ACP_RUNTIME_INFO, isAcpRuntime } from "../../lib/acpRuntimes";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -38,6 +40,7 @@ function useProfiles(): ProfileItem[] | null {
  * per profile (edited on the profile page).
  */
 export function DefaultsPage() {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const { settings, error, patch } = useGlobalSettings();
   const threads = useThreadDefaults();
@@ -48,7 +51,7 @@ export function DefaultsPage() {
   // openSettings("defaults", { anchor: "quickWork" }) scrolls to the 快速启动 section.
   useEffect(() => {
     if (!focus?.anchor || !settings) return;
-    document.getElementById(settingsAnchorId(focus.anchor))?.scrollIntoView({ block: "start" });
+    win.document.getElementById(settingsAnchorId(focus.anchor))?.scrollIntoView({ block: "start" });
     useApp.setState({ settingsFocus: null });
   }, [focus, settings]);
   if (error && !settings) return <ErrorNote>{error}</ErrorNote>;
@@ -64,10 +67,10 @@ export function DefaultsPage() {
       {(error || threads.error) && <ErrorNote>{error ?? threads.error}</ErrorNote>}
       {!threads.supported && <Notice>{t("agent-config.threadDefaults.unsupported")}</Notice>}
       <Section id={settingsAnchorId("newAgent")} title={t("agent-config.defaults.newAgent")} hint={t("agent-config.defaults.newAgentHint")}>
-        <SettingRow label={t("agent-config.defaults.profile")}>
+        <SettingRow agents="newAgents" source="host" label={t("agent-config.defaults.profile")}>
           <Select value={settings.defaultProfile ?? ""} options={names.map((n) => ({ value: n, label: n }))} onChange={(v) => void patch({ defaultProfile: v })} />
         </SettingRow>
-        <SettingRow label={t("agent-config.defaults.directLaunch")} hint={t("agent-config.defaults.directLaunchHint")}>
+        <SettingRow agents="newAgents" source="host" label={t("agent-config.defaults.directLaunch")} hint={t("agent-config.defaults.directLaunchHint")}>
           <Toggle checked={settings.defaultProfileDirectLaunch} onChange={(v) => void patch({ defaultProfileDirectLaunch: v })} />
         </SettingRow>
         {threads.state && <ThreadDefaultRows kind="agent" current={threads.state.current.agent} builtin={threads.state.builtin.agent} onPatch={(f) => void threads.patch("agent", f)} />}
@@ -75,6 +78,7 @@ export function DefaultsPage() {
       {windowsHost && <WindowsSandboxSection supported={windowsSandbox} />}
       <QuickWorkSection profiles={names} quickChatDefaultProfile={settings.quickChatDefaultProfile ?? null} onProfile={(v) => void patch({ quickChatDefaultProfile: v })} threads={threads} />
       <ThreadTitleSection />
+      <PromptCacheKeySection />
     </>
   );
 }
@@ -87,7 +91,7 @@ function QuickWorkSection({ profiles, quickChatDefaultProfile, onProfile, thread
   const options = [{ value: "", label: t("agent-config.quickChats.profileGlobal") }, ...[...new Set([...profiles, ...(current ? [current] : [])])].map((n) => ({ value: n, label: n }))];
   return (
     <Section id={settingsAnchorId("quickWork")} title={t("agent-config.quickChats")} hint={t("agent-config.quickChats.hint")}>
-      <SettingRow label={t("agent-config.quickChats.profile")} hint={hasProfile ? t("agent-config.quickChats.profileHintOn") : t("agent-config.quickChats.profileHint")}>
+      <SettingRow agents="newAgents" source="host" label={t("agent-config.quickChats.profile")} hint={hasProfile ? t("agent-config.quickChats.profileHintOn") : t("agent-config.quickChats.profileHint")}>
         <Select disabled={!hasProfile} options={hasProfile ? options : options.slice(0, 1)} value={hasProfile ? current : ""} onChange={(v) => onProfile(v || null)} />
       </SettingRow>
       {threads.state && <ThreadDefaultRows kind="quickChat" current={threads.state.current.quickChat} builtin={threads.state.builtin.quickChat} onPatch={(f) => void threads.patch("quickChat", f)} />}
@@ -105,12 +109,48 @@ function ThreadTitleSection() {
   return (
     <Section id={settingsAnchorId("titles")} title={t("agent-config.titles")} hint={t("agent-config.titles.hint")}>
       {error && <ErrorNote>{error}</ErrorNote>}
-      <SettingRow label={t("agent-config.titles.auto")}>
+      <SettingRow agents="now" source="host" label={t("agent-config.titles.auto")}>
         <Toggle disabled={!settings} checked={enabled} onChange={(v) => void patch({ autoThreadTitles: v })} />
       </SettingRow>
-      <SettingRow label={t("agent-config.titles.model")} hint={t("agent-config.titles.modelHint")}>
+      <SettingRow agents="now" source="host" label={t("agent-config.titles.model")} info={t("agent-config.titles.modelHint")}>
         <TextField mono maxLength={200} disabled={!settings || !enabled} placeholder={t("agent-config.titles.modelAuto")} value={settings?.threadTitleModel ?? ""} onCommit={(v) => patch({ threadTitleModel: v.trim() || null })} />
       </SettingRow>
+    </Section>
+  );
+}
+
+/** 新建默认 → 提示缓存 (cutex `prompt-cache-key`, design 034): opt-in; one stable Responses
+ *  prompt cache key per host + workspace for native launches. Hidden without the capability, and
+ *  while / where the host's settings do not carry the field (older cutex). */
+export function PromptCacheKeySection() {
+  const { t } = useI18n();
+  const api = useTargetApi();
+  const { settings, error, replace } = useGlobalSettings();
+  // `{ promptCacheKey: { enabled } }` is the whole PATCH; an older cutex answers 400 "unsupported field": say so, the switch stays.
+  const [failure, setFailure] = useState<string | null>(null);
+  const toggle = async (enabled: boolean) => {
+    setFailure(null);
+    try {
+      replace(await api.patchSettings({ promptCacheKey: { enabled } }));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setFailure(/unsupported field/i.test(msg) ? t("agent-config.promptCache.needNew") : msg);
+    }
+  };
+  if (!useTargetFeatures().has(PROMPT_CACHE_KEY_FEATURE) || settings?.promptCacheKey === undefined) return null;
+  const status = settings.promptCacheKeyStatus;
+  const statusKey = status === "pending" ? "pending" : status === "active" ? "active" : status === "unsupported" ? "unsupported" : status === "probe_failed" ? "probeFailed" : null;
+  return (
+    <Section id={settingsAnchorId("promptCache")} title={t("agent-config.promptCache.title")} hint={t("agent-config.promptCache.hint")}>
+      {(error || failure) && <ErrorNote>{failure ?? error}</ErrorNote>}
+      <SettingRow agents="next" source="host" label={t("agent-config.promptCache.share")} hint={t("agent-config.promptCache.shareHint")}>
+        <Toggle checked={settings.promptCacheKey.enabled} onChange={(v) => void toggle(v)} />
+      </SettingRow>
+      {statusKey && settings.promptCacheKey.enabled && (
+        <p data-prompt-cache-status={status} className="px-1 pt-1 text-xs text-subtle">
+          {t(`agent-config.promptCache.status.${statusKey}` as MessageKey)}
+        </p>
+      )}
     </Section>
   );
 }
@@ -153,21 +193,21 @@ export function InstructionsPage() {
         actions={
           <>
             {saved && <span className="text-xs text-subtle">{t("settings.saved")}</span>}
-            <Button primary disabled={!doc || text === doc.content} onClick={() => void save()}>
+            <SettingsGroup agents="next" source="codex"><Button primary disabled={!doc || text === doc.content} onClick={() => void save()}>
               {t("settings.save")}
-            </Button>
+            </Button></SettingsGroup>
           </>
         }
       >
         {doc?.overrideActive && <Notice>{t("agent-config.instructions.override", { path: doc.overridePath })}</Notice>}
         {error && <ErrorNote>{error}</ErrorNote>}
-        <textarea
+        <SettingsGroup agents="next" source="codex"><textarea
           aria-label={t("agent-config.instructions.user")}
           value={text}
           onChange={(e) => setText(e.target.value)}
           spellCheck={false}
           className="my-2 h-80 w-full resize-y rounded-lg border border-border bg-background p-3 font-mono text-xs outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/30"
-        />
+        /></SettingsGroup>
       </Section>
       {harness && <HarnessSection />}
     </>
@@ -226,10 +266,10 @@ function HarnessSection() {
   return (
     <Section id={settingsAnchorId("harness")} title={t("agent-config.harness")} hint={t("agent-config.harness.hint")}>
       {error && <ErrorNote>{error}</ErrorNote>}
-      <SettingRow label={t("agent-config.harness.enabled")}>
+      <SettingRow agents="next" source="host" label={t("agent-config.harness.enabled")}>
         <Toggle disabled={!settings} checked={enabled} onChange={(v) => void patch({ agentHarness: { enabled: v } })} />
       </SettingRow>
-      <SettingRow label={agentName ? t("agent-config.harness.previewFor", { name: agentName }) : t("agent-config.harness.preview")} hint={t("agent-config.harness.previewHint")}>
+      <SettingRow agents="none" source="local" navigation label={agentName ? t("agent-config.harness.previewFor", { name: agentName }) : t("agent-config.harness.preview")} hint={t("agent-config.harness.previewHint")}>
         {agents.length > 0 && (
           <Select
             label={t("agent-config.harness.agent")}
@@ -247,7 +287,7 @@ function HarnessSection() {
         <div className="space-y-2 py-2">
           {!shown.enabled && <Notice tone="info">{t("agent-config.harness.off")}</Notice>}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-subtle">
-            <span className="font-medium text-foreground">{shown.runtime === "claude" ? "Claude" : "Codex"}</span>
+            <span className="font-medium text-foreground">{isAcpRuntime(shown.runtime) ? ACP_RUNTIME_INFO[shown.runtime].label : shown.runtime === "claude" ? "Claude" : "Codex"}</span>
             <span>·</span>
             <span>{t(`agent-config.harness.placement.${shown.placement}`)}</span>
             <span>·</span>
@@ -255,12 +295,12 @@ function HarnessSection() {
           </div>
           {shown.runtime === "codex" && <div className="text-xs text-subtle">{t("agent-config.harness.codexNote")}</div>}
           <div className="flex overflow-x-auto">
-            <Segmented
+            <SettingsGroup agents="none" source="local"><Segmented
               label={t("agent-config.harness.preview")}
               value={current ? part : "all"}
               options={[{ value: "all", label: t("agent-config.harness.all") }, ...shown.sections.map((s) => ({ value: s.id, label: sectionTitle(s.id) }))]}
               onChange={setPart}
-            />
+            /></SettingsGroup>
           </div>
           <div className="flex items-baseline justify-between gap-2 text-xs">
             <span className="font-medium">{current ? sectionTitle(current.id) : t("agent-config.harness.all")}</span>
@@ -288,10 +328,10 @@ export function MessageTemplatesSection() {
       {!settings && !error && <Loading rows={2} />}
       {settings && (
         <>
-          <SettingRow label={t("agent-config.instructions.prefix")}>
+          <SettingRow agents="next" source="host" label={t("agent-config.instructions.prefix")}>
             <TextField mono value={settings.agentMessagePrefixTemplate ?? ""} onCommit={(v) => patch({ agentMessagePrefixTemplate: v || null })} />
           </SettingRow>
-          <SettingRow label={t("agent-config.instructions.suffix")}>
+          <SettingRow agents="next" source="host" label={t("agent-config.instructions.suffix")}>
             <TextField mono value={settings.agentMessageSuffixTemplate ?? ""} onCommit={(v) => patch({ agentMessageSuffixTemplate: v || null })} />
           </SettingRow>
         </>
@@ -299,4 +339,3 @@ export function MessageTemplatesSection() {
     </Section>
   );
 }
-

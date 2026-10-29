@@ -1,8 +1,13 @@
 // Codex config pages (the connected host's codex config), group 工具: 插件, MCP, 技能, 钩子.
 import { Anchor, Cable, Puzzle, Wand2 } from "lucide-react";
-import { HooksPage, McpPage, SkillsPage } from "../../components/settings/CapabilitiesSettings";
-import { PluginsPage } from "../../components/settings/PluginsSettings";
 import { defineModule } from "../slots";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const McpPage = lazyPage(() => import("../../components/settings/CapabilitiesSettings").then((m) => m.McpPage));
+const SkillsPage = lazyPage(() => import("../../components/settings/CapabilitiesSettings").then((m) => m.SkillsPage));
+const HooksPage = lazyPage(() => import("../../components/settings/CapabilitiesSettings").then((m) => m.HooksPage));
+const PluginsPage = lazyPage(() => import("../../components/settings/PluginsSettings").then((m) => m.PluginsPage));
 
 export default defineModule({
   id: "codex-config",

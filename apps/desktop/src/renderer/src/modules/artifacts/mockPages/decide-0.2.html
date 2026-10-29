@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0.2 打磨清单 · 拍板</title>
+<style>
+/* Colors from apps/desktop/src/renderer/src/styles.css: light = 纸 (paper), dark = 石墨 (graphite) */
+:root{
+  --bg:#faf9f5;--surface:#f3f1ea;--surface-2:#e8e5da;--raised:#fffdf8;
+  --fg:#2d2b26;--fg-muted:#69655b;--fg-subtle:#7b766b;--border:#e2ddd0;
+  --accent:#3b82f6;--warn:#d97706;--warn-text:#9a4a06;--ok:#10b981;--ok-text:#047857;--danger:#dc2626;
+  --hover:rgba(70,55,30,.06);--card-border:rgba(70,55,30,.09);
+  --card-shadow:0 1px 2px rgba(20,20,30,.04),0 6px 20px rgba(20,20,30,.045);
+  --shadow:0 10px 30px rgba(15,15,20,.14),0 2px 6px rgba(15,15,20,.06);
+  --font-sans:"Inter","Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#161616;--surface:#1c1c1d;--surface-2:#262628;--raised:#232325;
+  --fg:#ececec;--fg-muted:#a4a4aa;--fg-subtle:#86868d;--border:#2c2c2f;
+  --accent:#60a5fa;--warn:#f59e0b;--warn-text:#f59e0b;--ok-text:#34d399;--danger:#f87171;
+  --hover:rgba(255,255,255,.06);--card-border:rgba(255,255,255,.06);
+  --card-shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+  --shadow:0 12px 34px rgba(0,0,0,.5),0 2px 6px rgba(0,0,0,.3);color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#161616;--surface:#1c1c1d;--surface-2:#262628;--raised:#232325;
+  --fg:#ececec;--fg-muted:#a4a4aa;--fg-subtle:#86868d;--border:#2c2c2f;
+  --accent:#60a5fa;--warn:#f59e0b;--warn-text:#f59e0b;--ok-text:#34d399;--danger:#f87171;
+  --hover:rgba(255,255,255,.06);--card-border:rgba(255,255,255,.06);
+  --card-shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+  --shadow:0 12px 34px rgba(0,0,0,.5),0 2px 6px rgba(0,0,0,.3);color-scheme:dark;}
+*{box-sizing:border-box}
+html{scroll-padding-top:120px}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 var(--font-sans);-webkit-font-smoothing:antialiased}
+button,input,textarea{font:inherit;color:inherit}
+/* top bar */
+.top{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+.top-in{max-width:860px;margin:0 auto;padding:10px 16px 8px;display:flex;flex-direction:column;gap:8px}
+.row1{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.title{font-weight:600;font-size:15px;white-space:nowrap}
+.prog{display:flex;align-items:center;gap:8px;color:var(--fg-muted);font-size:13px;white-space:nowrap}
+.bar{width:110px;height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .25s}
+.sp{flex:1}
+.btn{border:1px solid var(--border);background:var(--raised);border-radius:8px;padding:5px 12px;cursor:pointer;font-size:13px}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--fg-muted)}
+.row2{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.seg{display:inline-flex;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:2px}
+.seg button{border:0;background:transparent;padding:3px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--fg-muted)}
+.seg button.on{background:var(--raised);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.groups{display:flex;gap:4px;flex-wrap:wrap}
+.groups a{font-size:12.5px;color:var(--fg-muted);text-decoration:none;padding:2px 8px;border-radius:6px;border:1px solid transparent;white-space:nowrap}
+.groups a:hover{background:var(--hover);color:var(--fg)}
+.groups a b{font-weight:600;color:var(--fg)}
+/* content */
+main{max-width:860px;margin:0 auto;padding:14px 16px 80px}
+.hint{color:var(--fg-subtle);font-size:12.5px;margin:2px 2px 14px}
+.hint kbd{font:11px/1 var(--font-sans);border:1px solid var(--border);border-bottom-width:2px;border-radius:4px;padding:2px 5px;background:var(--raised)}
+h2{font-size:13px;font-weight:600;color:var(--fg-muted);margin:22px 2px 8px;letter-spacing:.02em}
+h2 .gl{display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;border-radius:5px;background:var(--surface-2);color:var(--fg);margin-right:6px;font-size:12px}
+.card{background:var(--raised);border:1px solid var(--card-border);box-shadow:var(--card-shadow);border-radius:12px;padding:12px 14px 12px;margin:0 0 10px;outline:none;transition:border-color .15s, box-shadow .15s}
+.card.cur{border-color:color-mix(in srgb,var(--accent) 55%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent),var(--card-shadow)}
+.card.answered .num{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok-text)}
+.head{display:flex;align-items:baseline;gap:8px}
+.num{flex:none;font-size:12px;font-weight:600;min-width:28px;text-align:center;padding:1px 6px;border-radius:6px;background:var(--surface-2);color:var(--fg-muted)}
+.ttl{font-weight:600;font-size:14.5px}
+.tag{flex:none;margin-left:auto;font-size:11.5px;padding:1px 7px;border-radius:999px;border:1px solid var(--border);color:var(--fg-muted);white-space:nowrap}
+.tag.d{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
+.tag.z{color:var(--ok-text);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.tag.c{color:var(--warn-text);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+.ctx{color:var(--fg-muted);font-size:13px;margin:4px 0 8px 36px}
+.decided{margin:0 0 8px 36px;font-size:13px;background:var(--surface);border-radius:8px;padding:8px 10px;color:var(--fg)}
+.decided ul{margin:2px 0 0;padding-left:18px}
+.decided li{margin:1px 0}
+.sub{margin:10px 0 4px 36px;font-size:12.5px;font-weight:600;color:var(--fg-muted)}
+.opts{display:flex;flex-wrap:wrap;gap:6px;margin-left:36px}
+.opt{position:relative;display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border);border-radius:9px;padding:5px 11px 5px 8px;cursor:pointer;background:var(--bg);font-size:13px;user-select:none;max-width:100%}
+.opt:hover{background:var(--hover)}
+.opt input{position:absolute;opacity:0;pointer-events:none}
+.opt .k{flex:none;font-size:10.5px;width:16px;height:16px;line-height:14px;text-align:center;border-radius:4px;border:1px solid var(--border);color:var(--fg-subtle)}
+.opt.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--raised))}
+.opt.on .k{background:var(--accent);border-color:var(--accent);color:#fff}
+.opt input:focus-visible + .k{outline:2px solid var(--accent);outline-offset:1px}
+.rec{font-size:11px;color:var(--ok-text);background:color-mix(in srgb,var(--ok) 14%,transparent);border-radius:5px;padding:0 5px;white-space:nowrap}
+.chips .opt{border-radius:999px}
+textarea{display:block;width:calc(100% - 36px);margin:8px 0 0 36px;min-height:38px;resize:vertical;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:6px 9px;font-size:13px;line-height:1.5}
+textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 15%,transparent)}
+textarea.big{min-height:120px}
+textarea[hidden]{display:none}
+details.done{margin-top:26px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+details.done summary{cursor:pointer;padding:9px 14px;font-weight:600;font-size:13px;color:var(--fg-muted)}
+details.done .card{box-shadow:none;margin:0 10px 10px;background:var(--bg)}
+.empty{color:var(--fg-subtle);text-align:center;padding:40px 0;display:none}
+/* modal + toast */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;z-index:30;padding:16px}
+.modal.show{display:flex}
+.box{background:var(--raised);border-radius:14px;box-shadow:var(--shadow);width:min(680px,100%);padding:14px}
+.box h3{margin:0 0 6px;font-size:14px}
+.box p{margin:0 0 8px;color:var(--fg-muted);font-size:12.5px}
+.box textarea{width:100%;margin:0;min-height:300px;font-size:12.5px}
+.box .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--fg);color:var(--bg);padding:7px 14px;border-radius:9px;font-size:13px;transition:.2s;z-index:40;pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%)}
+@media (max-width:600px){
+  .ctx,.decided,.sub,.opts{margin-left:0}
+  textarea{width:100%;margin-left:0}
+  .bar{width:60px}
+  .title{font-size:14px}
+  .groups{overflow-x:auto;flex-wrap:nowrap;max-width:100%}
+  .tag{margin-left:auto}
+}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="top-in">
+    <div class="row1">
+      <span class="title">0.2 打磨清单 · 拍板</span>
+      <span class="prog"><span class="bar"><i id="barFill"></i></span><span id="progTxt">0/38 已答</span></span>
+      <span class="sp"></span>
+      <button class="btn ghost" id="themeBtn" title="切换浅色 / 深色">◐</button>
+      <button class="btn" id="clearBtn">清空</button>
+      <button class="btn" id="copyBtn">复制结果</button>
+      <button class="btn primary" id="sendBtn" hidden>发给智能体</button>
+    </div>
+    <div class="row2">
+      <div class="seg" id="filter">
+        <button data-f="all" class="on">全部</button><button data-f="todo">未答</button><button data-f="d">定</button><button data-f="z">做</button><button data-f="c">查</button>
+      </div>
+      <nav class="groups" id="groups"></nav>
+    </div>
+  </div>
+</div>
+<main>
+  <div class="hint"><span id="saveNote">点选项即可，答案自动保存在本机，随时可以停下。</span>键盘：<kbd>j</kbd>/<kbd>k</kbd> 下一条 / 上一条，<kbd>1</kbd>–<kbd>4</kbd> 选当前卡片的选项，<kbd>Esc</kbd> 离开输入框。</div>
+  <div id="list"></div>
+  <div class="empty" id="empty">这个筛选下没有条目了。</div>
+  <details class="done" id="doneBox"><summary>已完成（<span id="doneN">0</span>）</summary><div id="doneList"></div></details>
+</main>
+<div class="modal" id="modal"><div class="box">
+  <h3>结果文本</h3><p>没能自动复制到剪贴板，请全选（Ctrl/⌘+A）后复制。</p>
+  <textarea id="outTxt" readonly></textarea>
+  <div class="acts"><button class="btn" id="selBtn">全选</button><button class="btn primary" id="closeBtn">关闭</button></div>
+</div></div>
+<div class="toast" id="toast"></div>
+<script>
+const GROUPS={A:'布局与面板',B:'顶栏与窗口',C:'设置页',D:'桌面、托盘、主页',E:'对话与队列',F:'侧栏',G:'动画与观感',H:'性能',I:'后端与发布',J:'讨论中记下的'};
+const R='推荐';
+// t: d=[定] z=[做] c=[查] x=[已做]; o: options (first = recommended when rec:true)
+const ITEMS=[
+{n:1,g:'A',t:'x',title:'Shelf Rail 常驻',ctx:'Shelf 关着或为空时 Rail 也一直显示（空的带「＋」），设置里可关，默认显示。10-21 已做。'},
+{n:2,g:'A',t:'d',title:'页面窗格的默认宽度',ctx:'项目、委托、服务等页面放进 Shelf 时偏挤。',o:['页面单独一个默认宽度（如 640 px）','打开时自动放大','保持现状']},
+{n:3,g:'A',t:'d',title:'智能体列表做成可摆放的窗格',ctx:'按画布原则 §2：可停到右边、放进 Shelf、开多个（按项目 / 主机筛选）。现在仍是固定在左边的侧栏。',o:['做：可停靠、可放进 Shelf、可开多个','只做「可放进 Shelf」，先不开多个','先保持固定侧栏']},
+{n:4,g:'A',t:'d',title:'一键恢复默认布局',ctx:'现在只有 Shelf 的「重置右栏布局」，没有整个窗口的。',o:['加整个窗口的「恢复默认布局」','保持现状，只有 Shelf 的重置']},
+{n:5,g:'A',t:'z',title:'键盘调宽度时显示数值',ctx:'方向键调宽度时没有视觉反馈。',dec:['用方向键调宽度时显示当前宽度数值提示']},
+{n:6,g:'A',t:'c',title:'两个工作区时共享页在另一边是占位',ctx:'共享页只显示在聚焦的工作区；要不要让两边都能看。'},
+{n:7,g:'A',t:'d',title:'去掉托盘里的「小片」',ctx:'托盘现在是快捷方式，但收起的工具窗格（小片）还留在里面。',o:['去掉小片：「—」改成「移到另一页 / 关闭」','保留小片，维持现状']},
+{n:8,g:'A',t:'c',title:'Shelf 里的服务 / 网页开东西总进聚焦的 Shelf',ctx:'应该开进它自己所在的那个 Shelf，而不是当前聚焦的。'},
+{n:9,g:'A',t:'d',title:'设置 Shelf 放左边时的位置',ctx:'现在在侧栏和工作区之间；侧栏收成窄栏后要不要跟着调整。',o:['跟着调整：紧贴窄栏','固定在窗口最左边（侧栏外侧）','保持现状']},
+{n:10,g:'B',t:'d',title:'桌面模式下窗口顶栏轻量化',ctx:'主人 10-20 提过，当时说先保持两行再看。',o:['先保持两行，再用一阵看','现在就合成一行','桌面模式下顶栏自动隐藏，悬停显示']},
+{n:11,g:'B',t:'c',title:'对话顶栏折叠宽度是否太早',ctx:'现在在 630 / 570 / 510 px 处逐级折叠。'},
+{n:12,g:'B',t:'d',title:'新术语要不要可自定义',ctx:'窗口顶栏、对话顶栏、工作区、投影、桌面模式等；现在只有 Shelf 能改名。',o:['先只保留 Shelf 可自定义','全部新术语都可自定义','只开放几个常用的（写在批注里）']},
+{n:13,g:'C',t:'d',big:true,chips:true,title:'以 Shelf / 面板种类为入口重做设置',ctx:'0.1 的设置按「侧栏 / 会话 / 主栏」分。初步想法：每种面板的 ⋯ 里有「设置…」，直接打开设置 Shelf 的对应页；分类按「面板种类 + 智能体 / Profile + 主机 / 用户 + 通知 / 审批 + 关于」重排；外观设置不放预览，直接看旁边真实界面。先出原型讨论。',o:['以面板种类为入口','只按功能重排分类','先不动']},
+{n:14,g:'D',t:'c',title:'亚克力 + 循环动画的性能',ctx:'任何转圈都会让 30 px 模糊每帧重算；考虑改成预先模糊一张背景图，不用 backdrop-filter。'},
+{n:15,g:'D',t:'d',title:'托盘显示「正在屏幕上」以外的东西？',ctx:'例如最近用过的、有未读的智能体自动出现在托盘里。',o:['只显示正在屏幕上的（现状）','也自动显示有未读的','也显示最近用过的 + 有未读的']},
+{n:16,g:'D',t:'z',title:'「编辑主页」面板统一样式',ctx:'桌面上的「编辑主页」面板还是旧样子。',dec:['位置和样式跟新的卡片体系统一']},
+{n:17,g:'D',t:'d',title:'个人页热力图只算最近一年',ctx:'cutex 接口一次最多 366 天；要不要后端出全量统计。',o:['先只算最近一年','后端出全量统计']},
+{n:18,g:'E',t:'c',title:'状态胶囊每个字都重画',ctx:'性能文档 §9.6 记下的：流式输出时胶囊逐字重绘。'},
+{n:19,g:'E',t:'c',title:'长对话屏幕外跳过渲染',ctx:'用 content-visibility 省得多，但有滚动抖动风险，要小心做。'},
+{n:20,g:'E',t:'d',title:'投影窗格的样子',ctx:'现在是紧凑时间线 + 输入框，是否够用。',o:['够用，先这样','要加东西（写在批注里）','需要重新设计']},
+{n:21,g:'F',t:'d',title:'窄栏（Ctrl+B）显示哪些',ctx:'现在只显示 Director + 置顶 + 需要你，用一阵后看是否合适。',o:['先这样用一阵再看','再加上运行中的智能体','显示全部智能体（只要头像）']},
+{n:22,g:'F',t:'c',title:'同 Profile 智能体头像底色一样',ctx:'大项目里很难区分。'},
+{n:23,g:'F',t:'d',title:'运行中的智能体始终用大行？',ctx:'现在跟随「运行中智能体：完整显示」设置。',o:['跟随设置（现状）','运行中始终用大行']},
+{n:24,g:'G',t:'z',title:'过渡动画统一成一套规则',ctx:'现在各处各做各的。',dec:['规定哪些变化有动画：Shelf 展开收起、工作区开关、放大全屏、焦点描边','统一时长','「减少动态」时的处理']},
+{n:25,g:'G',t:'c',title:'亚克力下次要文字对比度偏淡',ctx:'「纸」配色、70% 透明度时尤其明显。'},
+{n:26,g:'H',t:'c',title:'多个审阅各审一遍',ctx:'主人给清单后，起 GLM / Codex / Claude 子智能体分别审一遍。不紧急。'},
+{n:27,g:'H',t:'d',title:'app 内「性能记录」',ctx:'卡顿超过 100 ms 时记一条（开着什么、在做什么、最耗时的代码），事后对时间查，不必复现。',o:['做，默认开','做，默认关（设置里开）','先不做']},
+{n:28,g:'H',t:'c',title:'窗口缩放主要耗在浏览器排版',ctx:'约 1.7 s / 次测试，帧率 ~31。'},
+{n:29,g:'I',t:'d',title:'0.2 的命名和发布节奏',ctx:'主人说过这次可以直接叫 0.2。',o:['叫 0.2，打磨完一次发','叫 0.2，边做边发 0.2.x','先发 0.1.x，攒够再叫 0.2']},
+{n:30,g:'I',t:'c',title:'Project 视图的项目事件流',ctx:'历史动态、所有智能体的子智能体 / 后台命令，需要后端支持。'},
+{n:31,g:'I',t:'c',title:'审批通知在回合结束后才送达',ctx:'safety grants 已改为下一步就送；approvals 要改需要动闹钟协议。'},
+{n:32,g:'I',t:'c',title:'macOS 正式版',ctx:'cutex 没有 darwin 构建，组件也没有 darwin 包。'},
+{n:33,g:'I',t:'z',title:'host02 Windows 进程组验收',ctx:'需要主人亲自操作。',dec:['主人在 host02 上验收 Windows 进程组']},
+{n:34,g:'I',t:'c',title:'「Windows PowerShell 启动巨慢」',ctx:'等主人说是哪个场景（可写在批注里）。'},
+{n:35,g:'J',t:'c',title:'Alt+1/2 切 Shelf 页时对话列闪烁',ctx:'猜测：页宽不同导致对话列重新排版，或切页触发了移动动画 / 对话重新渲染。讨论后复现确认。'},
+{n:36,g:'J',t:'z',title:'托盘外观',ctx:'主人 10-21 定，不要悬浮 Dock。',dec:['常驻（默认）：对话区底部、横跨对话区的矮卡片；卡片底色、不透明、圆角、和其他卡片留缝','自动隐藏（可选）：平时只有底部小把手；碰底边 / 按住 Alt / Ctrl⌘+J 滑出盖在内容上','图标靠左，右边放「需要你 N」','左组圆形头像 = 智能体（点 = 切换工作区）；右组圆角方形 = 服务 / 成果 / Project（点 = 放进当前 Shelf）；中间细分隔线','悬停提示直接说结果：「切换到 X」「在当前 Shelf 打开 Y」「Ctrl/⌘+点 = 并排」']},
+{n:37,g:'J',t:'z',max:true,title:'最大化 = 规则 2',ctx:'主人 10-21 定。只剩「独占」档要不要保留。',dec:['被最大化的面板拿到整行所有空隙，其他面板宽度不变、往两边靠；没空隙时按钮变灰','两个工作区整行一起算；Shelf 里的窗格竖向占满该页（同页其他窗格缩成标题栏）；收起的 Shelf 先展开','再点还原；缩放窗口时保持，打开新东西或手动拖边则结束；同时只一个；侧栏和托盘不参与','铺满模式下，其他对话列缩到默认（阅读）宽度省出空间'],o2:['保留：最大化 / 独占 / 全屏 三档','合并：只有最大化 / 全屏']},
+{n:38,g:'J',t:'c',title:'很多面板只能从一侧拉伸',ctx:'对话列、Shelf、设置 Shelf 只有一条可拖的边；要不要两侧都能拖（只改动两侧相邻面板）。'},
+];
+const TAGN={d:'定',z:'做',c:'查',x:'已做'};
+const CHECK=['查','先不查','不需要'], DO=['对，照做','要改'];
+const KEY='cutex-decide-0.2-v1';
+// In Cutex: window.cutexPage (the page's own storage, submit to the agent after the owner confirms, copy).
+// Elsewhere (a plain browser): localStorage and the clipboard as before.
+const CP=window.cutexPage||null;
+let S={};
+let canSave=!!CP;
+if(!CP){ try{S=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){S={}} try{localStorage.setItem(KEY+'.probe','1');localStorage.removeItem(KEY+'.probe');canSave=true}catch(e){canSave=false} }
+const noteSave=(m,warn)=>{const n=document.getElementById('saveNote'); if(n)n.innerHTML=warn?`<b style="color:#e8a33d">${m}</b>`:m;};
+let saveT=0;
+const save=()=>{
+  if(CP){ clearTimeout(saveT); saveT=setTimeout(()=>CP.storage.set(KEY,S).then(()=>noteSave('已自动保存（Cutex 里这个页面自己的存储，改版后也在）。'),e=>noteSave(e.code==='quota_exceeded'?'页面存储已满，这次没能保存：先「发给智能体」或「复制结果」。':'这次没能保存（'+e.code+'）。',true)),300); return; }
+  try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
+};
+addEventListener('DOMContentLoaded',()=>{ if(CP){ noteSave('点选项即可，答案自动保存在 Cutex 里，随时可以停下。'); document.getElementById('sendBtn').hidden=false; } else if(!canSave){ noteSave('这里不能自动保存：关掉之前先点「复制结果」贴回去。',true); } });
+const st=n=>(S[n]=S[n]||{});
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function optsOf(it){ if(it.t==='d')return it.o.map(x=>x); if(it.t==='z')return DO; if(it.t==='c')return CHECK; return []; }
+function answered(it){
+  if(it.t==='x')return true;
+  const s=S[it.n]||{};
+  if(it.max) return s.c!=null||s.c2!=null||!!(s.note||'').trim();
+  return s.c!=null||!!(s.note||'').trim();
+}
+function optHTML(it,list,field,recFirst,cls){
+  const s=S[it.n]||{};
+  return `<div class="opts ${cls||''}" data-field="${field}">`+list.map((t,i)=>
+    `<label class="opt ${s[field]===i?'on':''}"><input type="radio" name="${field}-${it.n}" value="${i}" ${s[field]===i?'checked':''}><span class="k">${field==='c'?i+1:''}</span><span>${esc(t)}</span>${recFirst&&i===0?`<span class="rec">${R}</span>`:''}</label>`).join('')+`</div>`;
+}
+function cardHTML(it){
+  const s=S[it.n]||{};
+  let h=`<div class="head"><span class="num">#${it.n}</span><span class="ttl">${esc(it.title)}</span><span class="tag ${it.t}">${TAGN[it.t]}</span></div><div class="ctx">${esc(it.ctx)}</div>`;
+  if(it.t==='x')return h;
+  if(it.dec)h+=`<div class="decided">${it.max?'已定（规则 2）：':'已定：'}<ul>${it.dec.map(d=>`<li>${esc(d)}</li>`).join('')}</ul></div>`;
+  let ph='其他 / 写批注（可不填）', hidden=false;
+  if(it.t==='d'){h+=optHTML(it,it.o,'c',true,it.chips?'chips':''); if(it.chips)ph='方向、想法、想先看的原型……（可不填）';}
+  else if(it.t==='z'){h+=optHTML(it,DO,'c',false); ph='要改哪里？'; hidden=!it.max&&s.c!==1&&!(s.note||'').trim();}
+  else if(it.t==='c'){h+=optHTML(it,CHECK,'c',false); ph='补充（可不填）';}
+  if(it.max){h+=`<div class="sub">待定：「独占」档保留吗？</div>`+optHTML(it,it.o2,'c2',true); ph='批注（可不填；选「要改」时写要改哪里）';}
+  h+=`<textarea class="${it.big?'big':''}" placeholder="${esc(ph)}" ${hidden?'hidden':''}>${esc(s.note||'')}</textarea>`;
+  return h;
+}
+const list=document.getElementById('list'), doneList=document.getElementById('doneList');
+let filter='all';
+function render(){
+  let html='',done='',ng=0;
+  const gnav=[];
+  for(const g of Object.keys(GROUPS)){
+    const its=ITEMS.filter(i=>i.g===g&&i.t!=='x');
+    if(its.length){html+=`<h2 id="g-${g}" data-g="${g}"><span class="gl">${g}</span>${GROUPS[g]}</h2>`+its.map(it=>`<div class="card" tabindex="-1" id="c-${it.n}" data-n="${it.n}">${cardHTML(it)}</div>`).join('');}
+    gnav.push(`<a href="#g-${g}" title="${GROUPS[g]}"><b>${g}</b> ${GROUPS[g].split(/[、与]/)[0]}</a>`);
+  }
+  ITEMS.filter(i=>i.t==='x').forEach(it=>{done+=`<div class="card answered" data-n="${it.n}">${cardHTML(it)}</div>`;ng++;});
+  list.innerHTML=html; doneList.innerHTML=done; document.getElementById('doneN').textContent=ng;
+  document.getElementById('groups').innerHTML=gnav.join('');
+  refresh();
+}
+function refresh(){
+  let a=0;
+  ITEMS.forEach(it=>{if(answered(it))a++;});
+  document.getElementById('progTxt').textContent=`${a}/38 已答`;
+  document.getElementById('barFill').style.width=(a/38*100)+'%';
+  list.querySelectorAll('.card').forEach(c=>{
+    const it=ITEMS.find(i=>i.n==c.dataset.n), ans=answered(it);
+    c.classList.toggle('answered',ans);
+    const show=filter==='all'||(filter==='todo'&&!ans)||filter===it.t;
+    c.style.display=show?'':'none';
+  });
+  let any=false;
+  list.querySelectorAll('h2').forEach(h=>{
+    const vis=[...list.querySelectorAll('.card')].some(c=>c.style.display!=='none'&&ITEMS.find(i=>i.n==c.dataset.n).g===h.dataset.g);
+    h.style.display=vis?'':'none'; any=any||vis;
+  });
+  document.getElementById('empty').style.display=any?'none':'block';
+  document.getElementById('doneBox').style.display=(filter==='all')?'':'none';
+}
+list.addEventListener('change',e=>{
+  const inp=e.target; if(inp.type!=='radio')return;
+  const card=inp.closest('.card'), n=+card.dataset.n, field=inp.closest('.opts').dataset.field, it=ITEMS.find(i=>i.n===n);
+  st(n)[field]=+inp.value; save();
+  inp.closest('.opts').querySelectorAll('.opt').forEach(l=>l.classList.toggle('on',l.querySelector('input').checked));
+  if(it.t==='z'&&!it.max){const ta=card.querySelector('textarea'); const show=st(n).c===1||!!(st(n).note||'').trim(); ta.hidden=!show; if(st(n).c===1)ta.focus();}
+  setCur(card,false); refresh();
+});
+list.addEventListener('input',e=>{
+  if(e.target.tagName!=='TEXTAREA')return;
+  const n=+e.target.closest('.card').dataset.n; st(n).note=e.target.value; save(); refresh();
+});
+list.addEventListener('focusin',e=>{const c=e.target.closest('.card'); if(c)setCur(c,false);});
+list.addEventListener('click',e=>{const c=e.target.closest('.card'); if(c)setCur(c,false);});
+// filter + nav
+document.getElementById('filter').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b)return; filter=b.dataset.f;
+  document.querySelectorAll('#filter button').forEach(x=>x.classList.toggle('on',x===b)); refresh();
+});
+// current card + keyboard
+let cur=null;
+function visCards(){return [...list.querySelectorAll('.card')].filter(c=>c.style.display!=='none');}
+function setCur(c,scroll){ if(cur)cur.classList.remove('cur'); cur=c; if(!c)return; c.classList.add('cur'); if(scroll){c.scrollIntoView({block:'center',behavior:'smooth'});} }
+document.addEventListener('keydown',e=>{
+  const typing=/TEXTAREA|INPUT/.test(document.activeElement.tagName)&&document.activeElement.type!=='radio';
+  if(e.key==='Escape'){ if(document.getElementById('modal').classList.contains('show')){closeModal();return;} if(typing)document.activeElement.blur(); return; }
+  if(typing||e.ctrlKey||e.metaKey||e.altKey)return;
+  const cs=visCards(); if(!cs.length)return;
+  if(e.key==='j'||e.key==='k'){
+    e.preventDefault();
+    let i=cur?cs.indexOf(cur):-1;
+    if(i<0){ // start from the card nearest the viewport top
+      const y=130; i=cs.findIndex(c=>c.getBoundingClientRect().bottom>y); if(i<0)i=0; if(e.key==='k')i=Math.max(0,i); setCur(cs[i],true); return; }
+    i=e.key==='j'?Math.min(cs.length-1,i+1):Math.max(0,i-1); setCur(cs[i],true); return;
+  }
+  if(/^[1-4]$/.test(e.key)&&cur){
+    const r=cur.querySelectorAll('.opts[data-field="c"] input')[+e.key-1];
+    if(r){e.preventDefault(); r.checked=true; r.dispatchEvent(new Event('change',{bubbles:true}));}
+  }
+});
+// result text
+function lineFor(it){
+  const s=S[it.n]||{}, note=(s.note||'').trim().replace(/\s*\n\s*/g,' / ');
+  const pick=s.c!=null?optsOf(it)[s.c]:null;
+  let choice;
+  if(it.max){const parts=[]; if(pick)parts.push('规则 2：'+pick); if(s.c2!=null)parts.push('独占：'+it.o2[s.c2]); choice=parts.join('；');}
+  else choice=pick||'';
+  if(!choice&&!note)return null;
+  return `#${it.n} ${it.title}：${choice||'（未选）'}${note?'｜'+note:''}`;
+}
+function resultText(){
+  const lines=ITEMS.filter(i=>i.t!=='x').map(lineFor).filter(Boolean);
+  return `0.2 打磨清单 · 主人答复（${lines.length}/37）\n`+lines.join('\n');
+}
+const toast=m=>{const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('show'),1800);};
+function showModal(txt){const m=document.getElementById('modal'),ta=document.getElementById('outTxt');ta.value=txt;m.classList.add('show');ta.focus();ta.select();}
+function closeModal(){document.getElementById('modal').classList.remove('show');}
+document.getElementById('copyBtn').onclick=async()=>{
+  const txt=resultText();
+  if(!ITEMS.some(i=>i.t!=='x'&&lineFor(i))){toast('还没有答任何一条');return;}
+  if(CP){ try{ await CP.copy(txt); return; }catch(e){ /* not during a click, or refused: fall through */ } }
+  try{ if(!navigator.clipboard)throw 0; await navigator.clipboard.writeText(txt); toast('已复制到剪贴板'); }
+  catch(_){
+    const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();
+    let ok=false;try{ok=document.execCommand('copy')}catch(e){} ta.remove();
+    if(ok)toast('已复制到剪贴板'); else showModal(txt);
+  }
+};
+document.getElementById('sendBtn').onclick=async()=>{
+  if(!ITEMS.some(i=>i.t!=='x'&&lineFor(i))){toast('还没有答任何一条');return;}
+  try{ const r=await CP.submit(resultText()); toast(r.sent?'已发给智能体':'没有发送'); }
+  catch(e){ toast({rate_limited:'刚问过，稍等几秒再发',busy:'已经有一个发送确认框开着',no_recipient:'不知道是哪个智能体做的这个页面，请用「复制结果」',too_large:'内容太长，请用「复制结果」'}[e.code]||('没能发送（'+e.code+'）')); }
+};
+document.getElementById('selBtn').onclick=()=>{const ta=document.getElementById('outTxt');ta.focus();ta.select();};
+document.getElementById('closeBtn').onclick=closeModal;
+document.getElementById('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal();});
+// confirm() is blocked in a sandboxed frame: a second click within 3 s confirms instead.
+let clearArm=0;
+document.getElementById('clearBtn').onclick=()=>{ if(Date.now()-clearArm>3000){clearArm=Date.now(); toast('再点一次「清空」确认清空所有答案'); return;} clearArm=0; S={}; save(); render(); toast('已清空'); };
+// theme toggle (auto -> light/dark override, persisted)
+const TK='cutex-decide-theme';
+const applyTheme=t=>{ if(t)document.documentElement.dataset.theme=t; else delete document.documentElement.dataset.theme; };
+let savedTheme=null; if(!CP){try{savedTheme=localStorage.getItem(TK)}catch(e){}}
+applyTheme(savedTheme||new URLSearchParams(location.search).get('theme'));
+if(CP)CP.storage.get(TK).then(t=>{if(t)applyTheme(t)},()=>{});
+document.getElementById('themeBtn').onclick=()=>{
+  const dark=document.documentElement.dataset.theme?document.documentElement.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
+  const t=dark?'light':'dark'; applyTheme(t); if(CP)CP.storage.set(TK,t).catch(()=>{}); else try{localStorage.setItem(TK,t)}catch(e){}
+};
+render();
+// In Cutex the saved answers arrive asynchronously from the page's own storage.
+if(CP)CP.storage.get(KEY).then(v=>{ if(v&&typeof v==='object'&&!new URLSearchParams(location.search).get('demo')){ S=Object.assign({},v,S); render(); } },e=>noteSave('没能读出保存的答案（'+e.code+'）。',true));
+// ?demo=1 fills a few answers (for screenshots only; not persisted)
+if(new URLSearchParams(location.search).get('demo')){
+  S={2:{c:0},3:{c:0,note:'先做停右边'},5:{c:0},6:{c:1},7:{c:0},13:{c:0,note:'先出原型，从对话列开始'},16:{c:1,note:'样式跟主页卡片一致'}};
+  render(); setCur(document.getElementById('c-7'),false);
+}
+{const at=new URLSearchParams(location.search).get('at'); const t=at?document.getElementById('c-'+at):(location.hash?document.querySelector(location.hash):null); if(t){document.title='Y'+Math.round(t.getBoundingClientRect().top+scrollY); setTimeout(()=>t.scrollIntoView({block:'start'}),50); if(t.classList.contains('card'))setCur(t,false);}}
+</script>
+</body>
+</html>

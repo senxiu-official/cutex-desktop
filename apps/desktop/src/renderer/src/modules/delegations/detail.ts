@@ -7,6 +7,7 @@ import { askIdOfRef, isAskId } from "../../lib/delegationRefs";
 import { summaryFromRecord } from "../../lib/delegations";
 import type { CutexRef, RefOpenResult, SideOpenResult } from "../slots";
 import type { Json } from "../types";
+import type { SideLayout } from "../../lib/sideLayout";
 
 export const DETAIL = "delegations.detail";
 /** Page group of the detail cards (docs/desktop-modules.md §18.6). */
@@ -18,6 +19,8 @@ export interface DetailParams {
   askId: string;
   /** Known title, for the tab before the record loads. */
   title?: string;
+  /** The existing Shelf tab to reveal on Back; never included in a shared delegation ref. */
+  returnTo?: string;
 }
 export type DetailState = DetailParams;
 
@@ -26,7 +29,8 @@ const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v =
 export function parseDetailParams(raw: Json): DetailParams | null {
   if (!isRecord(raw) || !isAskId(raw.askId)) return null;
   const title = typeof raw.title === "string" && raw.title.trim() ? raw.title.trim().slice(0, MAX_TITLE) : undefined;
-  return title ? { askId: raw.askId, title } : { askId: raw.askId };
+  const returnTo = typeof raw.returnTo === "string" && /^[A-Za-z0-9_.:-]{1,200}$/.test(raw.returnTo) ? raw.returnTo : undefined;
+  return { askId: raw.askId, ...(title ? { title } : {}), ...(returnTo ? { returnTo } : {}) };
 }
 
 export function detailKey(p: Pick<DetailParams, "askId">): string {
@@ -35,7 +39,19 @@ export function detailKey(p: Pick<DetailParams, "askId">): string {
 
 export function initDetail(p: DetailParams, previous: DetailState | null): DetailState {
   const title = p.title ?? (previous?.askId === p.askId ? previous.title : undefined);
-  return title ? { askId: p.askId, title } : { askId: p.askId };
+  const returnTo = p.returnTo ?? (previous?.askId === p.askId ? previous.returnTo : undefined);
+  return { askId: p.askId, ...(title ? { title } : {}), ...(returnTo ? { returnTo } : {}) };
+}
+
+/** Pointer/focus capture identifies the source card, including another visible Shelf page. */
+export function detailReturnSource(layout: SideLayout, focusedCard: string | null, askId: string): string | undefined {
+  const card = layout.pages.flatMap(page => page.cards).find(card => card.id === focusedCard)
+    ?? layout.pages.find(page => page.id === layout.activePage)?.cards.find(card => !!card.active);
+  const id = card?.active, source = id ? layout.instances[id] : null;
+  if (!id || !source) return undefined;
+  // Reopening the same detail keeps its prior origin rather than creating a self-return.
+  if (source.kind === DETAIL && isRecord(source.state) && source.state.askId === askId) return parseDetailParams(source.state)?.returnTo;
+  return id;
 }
 
 /**

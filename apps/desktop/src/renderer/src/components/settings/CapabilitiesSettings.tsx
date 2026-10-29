@@ -32,7 +32,7 @@ import {
 } from "../../lib/codexTools";
 import { HOST_FILE_READ_FEATURE } from "../../lib/workspace";
 import { Markdown } from "../Markdown";
-import { AddButton, ArmedRemove, Button, EmptyState, ErrorNote, IconButton, LinkRow, ListRow, Loading, NumberField, RefreshButton, Section, Segmented, SettingRow, TextArea, TextInput, Toggle } from "./Form";
+import { useSettingsRowDecoration, AddButton, ArmedRemove, Button, EmptyState, ErrorNote, IconButton, LinkRow, ListRow, Loading, NumberField, RefreshButton, Section, Segmented, SettingRow, TextArea, TextInput, Toggle, SettingsGroup } from "./Form";
 import { useTargetApi, useTargetFeatures } from "../../lib/targetHost";
 import { useApp } from "../../store";
 import { SKILLS_ARCHIVE_FEATURE, type SkillArchiveRecord, type SkillArchiveResult } from "../../../../shared/skillsArchive";
@@ -64,7 +64,7 @@ function FollowSharedLink() {
   if (follow === undefined) return null;
   return (
     <Section>
-      <LinkRow
+      <LinkRow agents="none" source="local"
         label={t("codex-config.plugins.follow")}
         hint={t(follow ? "codex-config.plugins.followOn" : "codex-config.plugins.followOff")}
         link={t("codex-config.plugins.followLink")}
@@ -98,9 +98,10 @@ const STATUS_COLOR: Record<McpServerConnectionStatus, string> = {
 
 /** A labelled block whose control is too wide for a SettingRow's right column (lists, maps). */
 function FieldBlock({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {
+  const decoration = useSettingsRowDecoration();
   return (
-    <div className="border-b border-border py-2.5 last:border-b-0">
-      <div className="text-sm">{label}</div>
+    <div {...decoration?.attributes} className="border-b border-border py-2.5 last:border-b-0">
+      <div className="text-sm">{label}{decoration?.marker}</div>
       {hint && <div className="text-xs text-subtle">{hint}</div>}
       <div className="mt-1.5">{children}</div>
     </div>
@@ -177,52 +178,52 @@ function McpServerForm({ name: editing, original, tools, taken, onDone }: { name
         <span className="text-xs text-subtle">{t("codex-config.mcp.restartNote")}</span>
       </div>
       {!editing && (
-        <SettingRow label={t("codex-config.mcp.name")} hint={nameProblem === "taken" ? <span className="text-danger">{t("codex-config.mcp.nameTaken")}</span> : undefined}>
+        <SettingRow agents="next" source="codex" label={t("codex-config.mcp.name")} hint={nameProblem === "taken" ? <span className="text-danger">{t("codex-config.mcp.nameTaken")}</span> : undefined}>
           <TextInput mono width="w-48" value={name} onChange={setName} placeholder="my-server" />
         </SettingRow>
       )}
-      <SettingRow label={t("codex-config.mcp.transport")}>
+      <SettingRow agents="next" source="codex" label={t("codex-config.mcp.transport")}>
         <Segmented value={draft.transport} options={[{ value: "stdio", label: "stdio" }, { value: "http", label: "HTTP" }]} onChange={(v) => set({ transport: v })} />
       </SettingRow>
       {draft.transport === "stdio" ? (
         <>
-          <SettingRow label={t("codex-config.mcp.command")}>
+          <SettingRow agents="next" source="codex" label={t("codex-config.mcp.command")}>
             <TextInput mono value={draft.command} onChange={(v) => set({ command: v })} placeholder="npx" />
           </SettingRow>
-          <SettingRow label={t("codex-config.mcp.args")} hint={t("codex-config.mcp.argsHint")}>
+          <SettingRow agents="next" source="codex" label={t("codex-config.mcp.args")} info={t("codex-config.mcp.argsHint")}>
             <TextArea mono rows={Math.min(8, Math.max(2, draft.args.split("\n").length + 1))} value={draft.args} onChange={(v) => set({ args: v })} placeholder={"-y\n@scope/server"} />
           </SettingRow>
-          <SettingRow label={t("codex-config.mcp.cwd")}>
+          <SettingRow agents="next" source="codex" label={t("codex-config.mcp.cwd")}>
             <TextInput mono value={draft.cwd} onChange={(v) => set({ cwd: v })} placeholder={t("codex-config.mcp.optional")} />
           </SettingRow>
-          <FieldBlock label={t("codex-config.mcp.env")} hint={t("codex-config.mcp.secretHint")}>
+          <SettingsGroup agents="next" source="codex"><FieldBlock label={t("codex-config.mcp.env")} hint={t("codex-config.mcp.secretHint")}>
             <MapEditor secret entries={draft.env} onChange={(env) => set({ env })} keyPlaceholder="NAME" valuePlaceholder={t("codex-config.mcp.value")} />
-          </FieldBlock>
+          </FieldBlock></SettingsGroup>
         </>
       ) : (
         <>
-          <SettingRow label="URL">
+          <SettingRow agents="next" source="codex" label="URL">
             <TextInput mono width="w-64" value={draft.url} onChange={(v) => set({ url: v })} placeholder="https://…/mcp" />
           </SettingRow>
-          <SettingRow label={t("codex-config.mcp.tokenEnv")} hint={t("codex-config.mcp.tokenEnvHint")}>
+          <SettingRow agents="next" source="codex" label={t("codex-config.mcp.tokenEnv")} hint={t("codex-config.mcp.tokenEnvHint")}>
             <TextInput mono value={draft.bearerTokenEnvVar} onChange={(v) => set({ bearerTokenEnvVar: v })} placeholder="MY_TOKEN" />
           </SettingRow>
-          <FieldBlock label={t("codex-config.mcp.headers")} hint={t("codex-config.mcp.secretHint")}>
+          <SettingsGroup agents="next" source="codex"><FieldBlock label={t("codex-config.mcp.headers")} hint={t("codex-config.mcp.secretHint")}>
             <MapEditor secret entries={draft.httpHeaders} onChange={(httpHeaders) => set({ httpHeaders })} keyPlaceholder="Header" valuePlaceholder={t("codex-config.mcp.value")} />
-          </FieldBlock>
-          <FieldBlock label={t("codex-config.mcp.envHeaders")} hint={t("codex-config.mcp.envHeadersHint")}>
+          </FieldBlock></SettingsGroup>
+          <SettingsGroup agents="next" source="codex"><FieldBlock label={t("codex-config.mcp.envHeaders")} hint={t("codex-config.mcp.envHeadersHint")}>
             <MapEditor entries={draft.envHttpHeaders} onChange={(envHttpHeaders) => set({ envHttpHeaders })} keyPlaceholder="Header" valuePlaceholder="ENV_VAR" />
-          </FieldBlock>
+          </FieldBlock></SettingsGroup>
         </>
       )}
-      <SettingRow label={t("codex-config.mcp.startupTimeout")}>
+      <SettingRow agents="next" source="codex" label={t("codex-config.mcp.startupTimeout")}>
         <NumberField value={draft.startupTimeoutSec} range={[1, 3600]} unit={t("codex-config.mcp.seconds")} placeholder="—" onCommit={(v) => set({ startupTimeoutSec: v })} />
       </SettingRow>
-      <SettingRow label={t("codex-config.mcp.toolTimeout")}>
+      <SettingRow agents="next" source="codex" label={t("codex-config.mcp.toolTimeout")}>
         <NumberField value={draft.toolTimeoutSec} range={[1, 86400]} unit={t("codex-config.mcp.seconds")} placeholder="—" onCommit={(v) => set({ toolTimeoutSec: v })} />
       </SettingRow>
       {editing && (
-        <FieldBlock label={t("codex-config.mcp.toolsTitle")} hint={toolNames.length ? t("codex-config.mcp.toolsHint") : t("codex-config.mcp.toolsUnknown")}>
+        <SettingsGroup agents="next" source="codex"><FieldBlock label={t("codex-config.mcp.toolsTitle")} hint={toolNames.length ? t("codex-config.mcp.toolsHint") : t("codex-config.mcp.toolsUnknown")}>
           {toolNames.length > 0 && (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-x-4 gap-y-1">
               {toolNames.map((tool) => (
@@ -235,7 +236,7 @@ function McpServerForm({ name: editing, original, tools, taken, onDone }: { name
               ))}
             </div>
           )}
-        </FieldBlock>
+        </FieldBlock></SettingsGroup>
       )}
       {problems.includes("duplicateKey") && <ErrorNote>{t("codex-config.mcp.duplicateKey")}</ErrorNote>}
       {problems.includes("redacted") && <ErrorNote>{t("codex-config.mcp.redactedValue")}</ErrorNote>}
@@ -244,9 +245,9 @@ function McpServerForm({ name: editing, original, tools, taken, onDone }: { name
         <Button disabled={busy} onClick={() => onDone(false)}>
           {t("settings.cancel")}
         </Button>
-        <Button primary disabled={busy || !!nameProblem || problems.length > 0} onClick={() => void save()}>
+        <SettingsGroup agents="next" source="codex"><Button primary disabled={busy || !!nameProblem || problems.length > 0} onClick={() => void save()}>
           {t("settings.save")}
-        </Button>
+        </Button></SettingsGroup>
       </div>
     </div>
   );
@@ -264,7 +265,7 @@ function BuiltinMcp() {
   return (
     <Section id={settingsAnchorId("builtin")} title={t("codex-config.mcp.builtin")} hint={t("codex-config.mcp.builtinHint")}>
       {servers.map((s) => (
-        <ListRow
+        <SettingsGroup agents="none" source="host" readOnly key={s.name}><ListRow
           key={s.name}
           title={s.name}
           detail={<span className="block whitespace-normal">{s.name === "cutex" ? t("codex-config.mcp.builtin.cutex") : t("codex-config.mcp.builtin.job")}</span>}
@@ -289,7 +290,7 @@ function BuiltinMcp() {
               </div>
             ) : undefined
           }
-        />
+        /></SettingsGroup>
       ))}
     </Section>
   );
@@ -340,9 +341,9 @@ export function McpPage() {
         actions={
           <>
             <RefreshButton onClick={() => void api.codexRequest("config/mcpServer/reload").then(reloadAll, (e: unknown) => config.setError(errorText(e)))} />
-            <AddButton disabled={form !== null} onClick={() => setForm("")}>
+            <SettingsGroup agents="next" source="codex"><AddButton disabled={form !== null} onClick={() => setForm("")}>
               {t("codex-config.mcp.add")}
-            </AddButton>
+            </AddButton></SettingsGroup>
           </>
         }
       >
@@ -368,7 +369,7 @@ export function McpPage() {
           const tools = st ? Object.keys(st.tools).length : null;
           const runtime = st?.runtimeStatus ?? null;
           return (
-            <ListRow
+            <SettingsGroup agents="next" source="codex" key={name}><ListRow
               key={name}
               title={<span className="font-mono">{name}</span>}
               detail={[cfg.url ?? [cfg.command, ...(cfg.args ?? [])].filter(Boolean).join(" "), tools !== null ? t("settings.mcp.tools", { n: tools }) : null].filter(Boolean).join(" · ")}
@@ -384,7 +385,7 @@ export function McpPage() {
                 </>
               }
               below={st?.toolsError ? <p className="pb-1 text-xs break-words whitespace-pre-wrap text-danger">{st.toolsError}</p> : undefined}
-            />
+            /></SettingsGroup>
           );
         })}
       </Section>
@@ -407,7 +408,7 @@ function SkillContent({ path }: { path: string }) {
   }, [path]);
   return (
     <div className="mb-2 max-h-[28rem] overflow-y-auto rounded-lg bg-surface-2 px-3 py-2">
-      <p className="mb-1 truncate font-mono text-[11px] text-subtle" title={skillMdPath(path)}>
+      <p className="mb-1 truncate font-mono text-caption/[inherit] text-subtle" title={skillMdPath(path)}>
         {skillMdPath(path)}
       </p>
       {!file && !error && <p className="text-xs text-subtle">{t("codex-config.skills.loading")}</p>}
@@ -481,8 +482,8 @@ export function SkillsPage() {
         <Section key={scope} title={t(`codex-config.skills.scope.${scope}` as MessageKey)} actions={i === 0 ? <RefreshButton onClick={skills.reload} /> : undefined}>
           {byScope.get(scope)!.map((s) => (
             <div key={s.path}>
-              <SettingRow label={s.interface?.displayName ?? s.name} hint={s.interface?.shortDescription ?? s.shortDescription ?? s.description}>
-                {s.pluginId && <span className="text-[11px] text-subtle">{s.pluginId}</span>}
+              <SettingRow agents="next" source="codex" label={s.interface?.displayName ?? s.name} hint={s.interface?.shortDescription ?? s.shortDescription ?? s.description}>
+                {s.pluginId && <span className="text-caption/[inherit] text-subtle">{s.pluginId}</span>}
                 {canRead && (
                   <button aria-expanded={open === s.path} onClick={() => setOpen(open === s.path ? null : s.path)} className="flex items-center gap-0.5 rounded text-xs whitespace-nowrap text-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none">
                     {open === s.path ? t("codex-config.skills.hide") : t("codex-config.skills.view")}
@@ -520,7 +521,7 @@ function HookRow({ hook, busy, onWrite }: { hook: HookMetadata; busy: boolean; o
   const title = `${t(`codex-config.hooks.event.${hook.eventName}` as MessageKey)}${hook.matcher ? ` · ${hook.matcher}` : ""}`;
   const handler = hookHandlerText(hook);
   return (
-    <ListRow
+    <SettingsGroup agents="next" source="codex"><ListRow
       title={title}
       detail={
         <span className="font-mono" title={`${handler}\n${hook.sourcePath}`}>
@@ -550,7 +551,7 @@ function HookRow({ hook, busy, onWrite }: { hook: HookMetadata; busy: boolean; o
           )}
         </>
       }
-    />
+    /></SettingsGroup>
   );
 }
 
@@ -584,9 +585,9 @@ export function HooksPage() {
         actions={
           <>
             {pending.length > 0 && (
-              <Button disabled={busy} onClick={() => void write(hookTrustEdits(pending))}>
+              <SettingsGroup agents="next" source="codex"><Button disabled={busy} onClick={() => void write(hookTrustEdits(pending))}>
                 {t("codex-config.hooks.trustAll", { n: pending.length })}
-              </Button>
+              </Button></SettingsGroup>
             )}
             <RefreshButton onClick={hooks.reload} />
           </>

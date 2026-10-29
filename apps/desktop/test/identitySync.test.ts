@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { avatarEtag, base64Bytes, splitDataUrl } from "../src/renderer/src/lib/identityAvatar";
-import { planIdentityPublish, publishedName, recordPublished, syncIssue, syncSummary } from "../src/renderer/src/lib/identityPublish";
+import { planIdentityPublish, planIdentityRound, publishedName, recordPublished, syncIssue, syncSummary } from "../src/renderer/src/lib/identityPublish";
 
 const FEATURES = new Set(["users", "users-self-profile"]);
 const access = (displayName: string | null = null, avatarEtag: string | null = null) => ({ pending: false, displayName, avatarEtag });
@@ -50,6 +50,64 @@ describe("planIdentityPublish", () => {
   it("publishes a typed name only", () => {
     expect(publishedName({ name: "  " })).toBeNull();
     expect(publishedName({ name: " J " })).toBe("J");
+  });
+});
+
+describe("planIdentityRound (every connected host; owner 2026-10-20)", () => {
+  const OLD = new Set(["users"]);
+  const hosts = [
+    { hostId: "remote", features: FEATURES },
+    { hostId: "hachimi", features: FEATURES },
+    { hostId: "friend", features: FEATURES },
+    { hostId: "newcomer", features: FEATURES },
+    { hostId: "old", features: OLD },
+  ];
+  const access = {
+    remote: { pending: false, displayName: null, avatarEtag: null }, // owner
+    hachimi: { pending: false, displayName: null, avatarEtag: null }, // owner
+    friend: { pending: false, displayName: "x", avatarEtag: null }, // bound user
+    newcomer: { pending: true }, // pending device
+    old: { pending: false },
+  };
+
+  it("publishes an edit to every host where this connection is the owner or a bound user, not only the focus host", () => {
+    const plans = planIdentityRound({ hosts, access, prefs: prefs("林青", null, 10, null), published: {}, avatar: null });
+    expect(plans.remote).toEqual({ state: "syncing", patch: { displayName: "林青" } });
+    expect(plans.hachimi).toEqual({ state: "syncing", patch: { displayName: "林青" } });
+    expect(plans.friend).toEqual({ state: "syncing", patch: { displayName: "林青" } });
+    // Pending devices and older cutex: nothing.
+    expect(plans.newcomer).toEqual({ state: "pending" });
+    expect(plans.old).toEqual({ state: "unsupported" });
+    // Not known yet (capabilities not read): treated as pending, nothing sent.
+    expect(planIdentityRound({ hosts: [{ hostId: "x", features: FEATURES }], access: {}, prefs: prefs("林青", null, 10, null), published: {}, avatar: null }).x).toEqual({ state: "pending" });
+  });
+
+  it("a host connected later gets the pending edit once; published hosts are not sent it again", () => {
+    const edit = prefs("林青", null, 10, null);
+    const published = { remote: recordPublished(edit, undefined, { displayName: "林青", avatarEtag: null }) };
+    const after = { ...access, remote: { pending: false, displayName: "林青", avatarEtag: null } };
+    const plans = planIdentityRound({ hosts: hosts.slice(0, 2), access: after, prefs: edit, published, avatar: null });
+    expect(plans.remote).toEqual({ state: "synced" });
+    expect(plans.hachimi).toEqual({ state: "syncing", patch: { displayName: "林青" } });
+    // Once hachimi has it too: nothing more.
+    const both = { ...published, hachimi: recordPublished(edit, undefined, { displayName: "林青", avatarEtag: null }) };
+    const synced = planIdentityRound({ hosts: hosts.slice(0, 2), access: { ...after, hachimi: { pending: false, displayName: "林青", avatarEtag: null } }, prefs: edit, published: both, avatar: null });
+    expect(synced).toEqual({ remote: { state: "synced" }, hachimi: { state: "synced" } });
+  });
+
+  it("a desktop without its own name fills empty hosts with the one your other hosts have, never the OS name", () => {
+    const fresh = prefs("", null, null, null); // "" = the OS account name, shown only
+    const withNames = { remote: { pending: false, displayName: "林青", avatarEtag: A }, hachimi: { pending: false, displayName: null, avatarEtag: null } };
+    const plans = planIdentityRound({ hosts: hosts.slice(0, 2), access: withNames, prefs: fresh, published: {}, avatar: null, adopted: { name: "林青", avatar: { etag: A } } });
+    expect(plans.hachimi).toEqual({ state: "syncing", patch: { displayName: "林青", avatar: "upload" } });
+    expect(plans.remote).toEqual({ state: "local" });
+    // Nothing adopted: nothing sent (the OS name is never published).
+    expect(planIdentityRound({ hosts: hosts.slice(1, 2), access: withNames, prefs: fresh, published: {}, avatar: null, adopted: { name: null, avatar: null } }).hachimi).toEqual({ state: "local" });
+    expect(planIdentityRound({ hosts: hosts.slice(1, 2), access: withNames, prefs: fresh, published: {}, avatar: null }).hachimi).toEqual({ state: "local" });
+    // Never over a value the host has, nor to a pending / older host.
+    expect(planIdentityRound({ hosts: hosts.slice(2), access, prefs: fresh, published: {}, avatar: null, adopted: { name: "林青", avatar: null } })).toEqual({ friend: { state: "local" }, newcomer: { state: "pending" }, old: { state: "unsupported" } });
+    // A name cleared on this desktop (an edit) is not refilled from other hosts.
+    expect(planIdentityRound({ hosts: hosts.slice(1, 2), access: withNames, prefs: prefs("", null, 10, 10), published: {}, avatar: null, adopted: { name: "林青", avatar: { etag: A } } }).hachimi).toEqual({ state: "synced" });
   });
 });
 

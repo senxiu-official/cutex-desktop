@@ -5,11 +5,12 @@ import { useState, type ReactNode } from "react";
 import type { CutexRefusal } from "../../../../shared/ipc";
 import { USAGE_SOURCE_KIND_DEFAULTS, USAGE_SOURCES_FEATURE, type UsageSource, type UsageSourceBilling, type UsageSourceKind, type UsageSourceResult, type UsageSourcesView } from "../../../../shared/usageSources";
 import { useI18n } from "../../i18n";
-import { AddButton, ArmedRemove, Button, ErrorNote, Loading, Notice, RefreshButton, Select, TextInput, Toggle } from "../../components/settings/Form";
+import { AddButton, ArmedRemove, Button, ErrorNote, Loading, Notice, RefreshButton, Select, TextInput, Toggle , SettingsGroup , SettingsEffectCard } from "../../components/settings/Form";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { modelProvider } from "../../lib/provider";
 import { useTargetApi } from "../../lib/targetHost";
 import { availableKinds, scanClock, suggestedPath } from "./sourceHelpers";
+import { Tag } from "../../components/Tag";
 
 const CARD = "rounded-xl border border-border bg-surface";
 
@@ -81,7 +82,7 @@ function AddForm({ view, onDone, onCancel }: { view: UsageSourcesView | null; on
   };
   const field = "grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3";
   return (
-    <div className="-mx-4 space-y-2 border-t border-border bg-surface-2/40 px-4 py-3 first:border-t-0">
+    <SettingsGroup agents="none" source="host"><div className="-mx-4 space-y-2 border-t border-border bg-surface-2/40 px-4 py-3 first:border-t-0">
       <div className={field}>
         <span className="text-xs text-muted">{t("usage.sources.kind")}</span>
         <Select width="w-44" value={kind} options={kinds.map((k) => ({ value: k, label: t(`usage.sources.kind.${k}`) }))} onChange={changeKind} label={t("usage.sources.kind")} />
@@ -111,7 +112,7 @@ function AddForm({ view, onDone, onCancel }: { view: UsageSourcesView | null; on
           {t("usage.sources.add")}
         </Button>
       </div>
-    </div>
+    </div></SettingsGroup>
   );
 }
 
@@ -135,15 +136,15 @@ function SourceRow({ source, onChanged }: { source: UsageSource; onChanged(): vo
     }
   };
   return (
-    <div className="-mx-4 border-t border-border px-4 py-2.5 first:border-t-0">
+    <SettingsGroup agents="none" source="host"><div className="-mx-4 border-t border-border px-4 py-2.5 first:border-t-0">
       <div className="flex min-h-7 items-center gap-2.5">
         <KindIcon kind={source.kind} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-sm">
             <span className="truncate font-medium">{source.label}</span>
-            <span className="shrink-0 rounded bg-surface-2 px-1.5 py-px text-[11px] text-muted" title={source.billing === "subscription" ? t("usage.sources.subscriptionHint") : undefined}>
+            <Tag title={source.billing === "subscription" ? t("usage.sources.subscriptionHint") : undefined}>
               {t(source.billing === "subscription" ? "usage.sources.tag.subscription" : "usage.sources.tag.api")}
-            </span>
+            </Tag>
           </div>
           <div className="truncate font-mono text-xs text-subtle" title={source.path}>
             {source.path}
@@ -167,7 +168,7 @@ function SourceRow({ source, onChanged }: { source: UsageSource; onChanged(): vo
         </div>
       </div>
       {error && <ErrorNote>{error}</ErrorNote>}
-    </div>
+    </div></SettingsGroup>
   );
 }
 
@@ -181,24 +182,24 @@ export function UsageSources({ view, error, unsupported, onChanged, host, hostHi
   // A known feature list without extra sources = an older cutex: keep the card in place so the feature is findable.
   if (view === null)
     return !unsupported ? null : (
-      <section className="mb-6">
+      <SettingsEffectCard><section className="mb-6">
         <div className="mb-1 flex h-7 items-center gap-2">
           <h3 className="text-sm font-semibold">{t("usage.sources.title")}</h3>
           {host && <span className="ml-auto">{host}</span>}
         </div>
         <Notice tone="info">{t("modules.needsUpgrade", { feature: USAGE_SOURCES_FEATURE })}</Notice>
-      </section>
+      </section></SettingsEffectCard>
     );
   return (
-    <section className="mb-6">
+    <SettingsEffectCard><section className="mb-6">
       <div className="mb-1 flex h-7 items-center gap-2">
         <h3 className="text-sm font-semibold">{t("usage.sources.title")}</h3>
         <span className="ml-auto flex items-center gap-2">
           {host}
           {!adding && (
-            <AddButton disabled={!view} onClick={() => setAdding(true)}>
+            <SettingsGroup agents="none" source="host"><AddButton disabled={!view} onClick={() => setAdding(true)}>
               {t("usage.sources.addDir")}
-            </AddButton>
+            </AddButton></SettingsGroup>
           )}
         </span>
       </div>
@@ -222,6 +223,6 @@ export function UsageSources({ view, error, unsupported, onChanged, host, hostHi
           />
         )}
       </div>
-    </section>
+    </section></SettingsEffectCard>
   );
 }

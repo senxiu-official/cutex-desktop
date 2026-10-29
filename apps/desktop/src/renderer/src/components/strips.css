@@ -1,0 +1,67 @@
+/* 收起一个会话 (docs/design/002): a conversation folded to its strip, and 「太窄？收起 X」 on a Shelf pane. */
+.conv-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 10px 0;
+  cursor: pointer;
+  border-radius: inherit;
+  outline: none;
+}
+.conv-strip:hover,
+.conv-strip:focus-visible {
+  background: var(--hover);
+}
+.conv-strip:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.conv-strip-avatar {
+  position: relative;
+  display: flex;
+}
+.conv-strip-name {
+  writing-mode: vertical-rl;
+  min-height: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.conv-strip:hover .conv-strip-name {
+  color: var(--fg);
+}
+
+.narrow-chip {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 0 6px 6px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--warn-text);
+  font-size: 11.5px;
+  line-height: 18px;
+}
+.narrow-chip button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--warn) 70%, transparent);
+  border-radius: 6px;
+  padding: 0 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.narrow-chip button:hover,
+.narrow-chip button:focus-visible {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+}

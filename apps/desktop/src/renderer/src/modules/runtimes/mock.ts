@@ -30,6 +30,20 @@ export const mock: ModuleMock = {
   api: () => ({
     async runtimes() {
       await new Promise((r) => setTimeout(r, 150));
+      if (new URLSearchParams(location.search).has("runtimeGroups")) return {
+        hostId: "host-a",
+        native: [
+          { release: "r260", version: "0.160.0-r52.4", selected: true, agents: agents("Rei", "Ritsuko", "Maya") },
+          { release: "r241", version: "0.160.0-r52.3", agents: agents("Mari") },
+          { release: "r238", version: "0.160.0-r52.2", missing: true, agents: agents("Shinji") },
+          ...[177, 52, 51, 50, 49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35].map(n => ({ release: `r${n}`, version: `0.160.0-r${n}`, agents: [] })),
+        ],
+        claude: [
+          { release: "claude-r29", selected: true, agents: agents("Kaworu", "Pen Pen", "Sakura") },
+          { release: "claude-r28", agents: agents("Yui") },
+          { release: "claude-r27", agentCount: 0 },
+        ],
+      } satisfies RuntimesWire;
       return structuredClone(VIEW);
     },
   }),

@@ -4,7 +4,7 @@
 // (restart needed) and, with cutex agent-bus-stuck-messages, 卡住的消息 — is in a collapsed 「高级」
 // card at the end of the page. Settings search still finds it: a reveal opens the card.
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import type { GlobalSettings } from "../../../../shared/ipc";
 import { STUCK_MESSAGES_FEATURE } from "../../../../shared/agentBusStuck";
 import { ErrorNote, IconButton, Loading, Notice, NumberField, ResetButton, Section, SettingRow, Toggle } from "../../components/settings/Form";
@@ -47,7 +47,7 @@ function WakeBusyWaitRow({ settings, patch }: { settings: GlobalSettings; patch(
   const range = settings.agentBusRange?.wakeBusyWaitSecs ?? WAKE_BUSY_WAIT_RANGE;
   const save = (secs: number | null) => void patch({ agentBus: { wakeBusyWaitSecs: secs } });
   return (
-    <SettingRow label={t("agent-bus.wakeBusyWait")} hint={t("agent-bus.wakeBusyWaitHint")} reset={<ResetButton disabled={value === def} onClick={() => save(def)} />}>
+    <SettingRow agents="now" source="host" label={t("agent-bus.wakeBusyWait")} hint={t("agent-bus.wakeBusyWaitHint")} reset={<ResetButton disabled={value === def} onClick={() => save(def)} />}>
       <NumberField value={value ?? null} range={range} unit={t("agent-bus.seconds")} placeholder={t("agent-bus.wakeBusyWaitOff")} onCommit={save} />
     </SettingRow>
   );
@@ -62,7 +62,7 @@ export function AdvancedSection() {
   useOnSettingsReveal(ADVANCED_SECTION, () => setOpen(true));
   const toggle = (
     <IconButton label={t(open ? "agent-bus.advancedCollapse" : "agent-bus.advancedExpand")} onClick={() => setOpen(!open)}>
-      {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
     </IconButton>
   );
   if (!open)
@@ -107,13 +107,13 @@ function BusSection() {
     <Section title={t("agent-bus.page")} hint={t("agent-bus.hint")}>
       {notice && <Notice>{notice}</Notice>}
       {error && <ErrorNote>{error}</ErrorNote>}
-      <SettingRow label={t("agent-bus.enabled")} hint={t("agent-bus.restartHint")}>
+      <SettingRow agents="hostRestartRuntimeNext" source="host" label={t("agent-bus.enabled")} hint={t("agent-bus.restartHint")}>
         <Toggle checked={settings.agentBusEnabled} onChange={(v) => void patch({ agentBusEnabled: v }, t("agent-bus.restartDaemon"))} />
       </SettingRow>
-      <SettingRow label={t("agent-bus.port")} hint={t("agent-bus.effective", { port: settings.agentBusEffectivePort ?? "—" })}>
+      <SettingRow agents="hostRestartRuntimeNext" source="host" label={t("agent-bus.port")} hint={t("agent-bus.effective", { port: settings.agentBusEffectivePort ?? "—" })}>
         <NumberField value={settings.agentBusPort ?? null} range={[1, 65535]} placeholder={String(settings.agentBusEffectivePort ?? "")} onCommit={(v) => void patch({ agentBusPort: v }, t("agent-bus.restartDaemon"))} />
       </SettingRow>
-      <SettingRow label={t("agent-bus.token")}>
+      <SettingRow readOnly agents="none" source="host" label={t("agent-bus.token")}>
         <span className="text-xs text-subtle">{settings.secretsPresent.agentBusToken ? t("agent-bus.tokenSet") : t("agent-bus.tokenMissing")}</span>
       </SettingRow>
     </Section>

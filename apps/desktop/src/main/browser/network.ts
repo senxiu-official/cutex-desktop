@@ -24,6 +24,8 @@ export type BrowserRefusal = typeof BROWSER_REFUSALS[number] | "invalid_url";
 export type BrowserActor = "owner" | "agent" | "page";
 export interface BrowserRequestContext {
   actor: BrowserActor;
+  /** Main-only evidence of the owner's explicit 「打开本机的这个地址」 click. */
+  allowDesktopLoopback?: true;
   webContentsId?: number;
   /** Electron's initiatorOrigin: absent = started by the browser itself (main's loadURL, history,
    * reload), kept from the original request across redirects. "null" = an opaque origin. */
@@ -41,6 +43,8 @@ export interface BrowserUrlPolicyOptions {
   protectedEndpoint?: (url: URL) => boolean;
   /** Per-tab owner/main admission of a private-class origin (loopback, LAN, tailnet). */
   admitted?: (webContentsId: number, origin: string) => boolean;
+  /** Per-SSH-host, owner-pool choice (remembered or one click); never for agent/page actors. */
+  desktopLoopback?: (context: BrowserRequestContext) => boolean;
   /** A LAN / tailnet authority main admitted after an owner navigation (none = not admitted).
    * Such an authority is private-class even when its name looks public (e.g. a tailnet DNS name). */
   lan?: (hostname: string, port: number) => "ready" | "unavailable" | "none";
@@ -113,7 +117,8 @@ export function createBrowserUrlPolicy(options: BrowserUrlPolicyOptions): Browse
       // Agents never get one; pages only within the tab that admitted it (below).
       if (!page) return context.actor !== "owner" || lan === "none" ? "private_address_blocked" : lan === "ready" ? null : "external_proxy_unavailable";
     } else {
-      if (host.kind === "ssh") return "remote_loopback"; // Desktop loopback is not the remote host's loopback.
+      if (host.kind === "ssh" && !page && (context.actor !== "owner" || options.desktopLoopback?.(context) !== true))
+        return "remote_loopback"; // Explicitly desktop loopback, never the remote host's loopback.
       if (!page) return null; // main attributes and admits its own navigation before loading it
     }
     // Loopback / LAN reached by a page: only an origin main admitted for THIS tab, and then only from

@@ -14,6 +14,8 @@ const fx = vi.hoisted(() => ({
   calls: [] as { host: string; items: CcSwitchImportItem[] }[],
   lists: 0,
   done: [] as number[],
+  listError: null as { code: string; message: string } | null,
+  failed: null as { id: string; app: string; code: string; message: string }[] | null,
 }));
 
 const LIST: CcSwitchImportList = {
@@ -33,13 +35,13 @@ function daemon(host: string) {
   return {
     async ccSwitchImportList() {
       fx.lists++;
-      return structuredClone(LIST);
+      return { ...structuredClone(LIST), error: fx.listError };
     },
     async ccSwitchImport(items: CcSwitchImportItem[]) {
       fx.calls.push({ host, items });
       return {
         created: [{ id: "c-glm", app: "claude", profile: { name: "Zhipu GLM" } }],
-        failed: [{ id: "x-relay", app: "codex", code: "invalid_request", message: "bad base URL" }],
+        failed: fx.failed ?? [{ id: "x-relay", app: "codex", code: "invalid_request", message: "bad base URL" }],
       };
     },
   };
@@ -65,7 +67,7 @@ globalThis.ResizeObserver ??= class {
   disconnect() {}
 } as unknown as typeof ResizeObserver;
 
-const { ProfileImport, resetCcSwitchListCache, useCcSwitchAvailable } = await import("../src/renderer/src/components/ProfileImport");
+const { ProfileImport, resetCcSwitchListCache, useCcSwitchAvailable, ccSwitchErrorKey } = await import("../src/renderer/src/components/ProfileImport");
 
 async function render(el: ReturnType<typeof h>) {
   const div = document.createElement("div");
@@ -85,6 +87,8 @@ beforeEach(() => {
   fx.calls = [];
   fx.lists = 0;
   fx.done = [];
+  fx.listError = null;
+  fx.failed = null;
 });
 
 describe("ProfileImport (CC Switch)", () => {
@@ -151,5 +155,46 @@ describe("ProfileImport (CC Switch)", () => {
     const second = await render(h(Probe, { hostId: "local" }));
     expect(seen).toBe(false);
     second.unmount();
+  });
+
+  it("cutex error codes read as words; r259's English sentence too; other errors keep cutex's text", () => {
+    expect(ccSwitchErrorKey("unsupported_version", "whatever")).toBe("profile-import.err.unsupportedVersion");
+    expect(ccSwitchErrorKey("unsupported_format", "whatever")).toBe("profile-import.err.unsupportedFormat");
+    expect(ccSwitchErrorKey(null, "newer CC Switch format (schema 23; this cutex reads up to 22): update cutex")).toBe("profile-import.err.unsupportedVersion");
+    expect(ccSwitchErrorKey("read_failed", "Error: newer CC Switch format (schema 7; this cutex reads up to 5): update cutex")).toBe("profile-import.err.unsupportedVersion");
+    expect(ccSwitchErrorKey("read_failed", "database is locked")).toBeNull();
+    expect(ccSwitchErrorKey(null, "newer CC Switch format")).toBeNull();
+  });
+
+  it("a list error with a code shows the localized sentence; an unknown code shows cutex's message", async () => {
+    fx.listError = { code: "unsupported_version", message: "newer CC Switch format (schema 23; this cutex reads up to 22): update cutex" };
+    let r = await render(h(ProfileImport, { hostId: "local" }));
+    expect(r.div.textContent).toContain('profile-import.error {"message":"profile-import.err.unsupportedVersion"}');
+    r.unmount();
+    resetCcSwitchListCache();
+    fx.listError = { code: "unsupported_format", message: "unexpected table layout" };
+    r = await render(h(ProfileImport, { hostId: "local" }));
+    expect(r.div.textContent).toContain('profile-import.error {"message":"profile-import.err.unsupportedFormat"}');
+    r.unmount();
+    resetCcSwitchListCache();
+    fx.listError = { code: "read_failed", message: "database is locked" };
+    r = await render(h(ProfileImport, { hostId: "local" }));
+    expect(r.div.textContent).toContain('profile-import.error {"message":"database is locked"}');
+    r.unmount();
+  });
+
+  it("failed import rows map their codes too", async () => {
+    fx.failed = [
+      { id: "x-relay", app: "codex", code: "unsupported_format", message: "bad shape" },
+      { id: "c-glm", app: "claude", code: "invalid_request", message: "bad base URL" },
+    ];
+    const { div, unmount } = await render(h(ProfileImport, { hostId: "local" }));
+    const button = [...div.querySelectorAll("button")].find((b) => b.textContent?.startsWith("profile-import.import"))!;
+    await act(async () => button.click());
+    await act(async () => {});
+    const result = div.querySelector("[data-cc-switch-result]")!.textContent!;
+    expect(result).toContain('profile-import.failedRow {"name":"Relay","message":"profile-import.err.unsupportedFormat"}');
+    expect(result).toContain('"message":"bad base URL"');
+    unmount();
   });
 });

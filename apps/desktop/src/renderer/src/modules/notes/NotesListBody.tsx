@@ -1,3 +1,4 @@
+import { isImeComposing } from "../../lib/ime";
 import { useEffect, useState } from "react";
 import { Plus, RefreshCw, Search } from "lucide-react";
 import { Button } from "../../components/settings/Form";
@@ -45,7 +46,7 @@ export function NotesListBody({ hostId, state, setState, visible = true }: { hos
         </select>}
         <select aria-label={t("notes.pinnedOnly")} className={SELECT} value={state.pinnedOnly ? "pinned" : "all"} onChange={(e) => setState({ ...state, pinnedOnly: e.target.value === "pinned" })}><option value="all">{t("notes.all")}</option><option value="pinned">{t("notes.pinnedOnly")}</option></select>
       </div>
-      <div className="flex min-w-0 items-center gap-2"><Search size={13} className="shrink-0 text-subtle" /><input aria-label={t("notes.search")} placeholder={t("notes.search")} value={search} maxLength={500} onChange={(e) => setSearch(e.target.value)} className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-accent" onKeyDown={(e) => { if (e.key === "Escape" && search && !e.repeat && !e.nativeEvent.isComposing && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); setSearch(""); setState({ ...state, query: "" }); } }} />
+      <div className="flex min-w-0 items-center gap-2"><Search size={13} className="shrink-0 text-subtle" /><input aria-label={t("notes.search")} placeholder={t("notes.search")} value={search} maxLength={500} onChange={(e) => setSearch(e.target.value)} className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-accent" onKeyDown={(e) => { if (e.key === "Escape" && search && !e.repeat && !isImeComposing(e) && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); setSearch(""); setState({ ...state, query: "" }); } }} />
         <button aria-label={t("notes.refresh")} title={t("notes.refresh")} disabled={result.loading} onClick={() => void notesCache.refresh(hostId, query)} className="text-subtle hover:text-accent"><RefreshCw size={13} className={result.loading ? "animate-spin" : ""} /></button>
       </div>
       <Button onClick={() => { if (!draft) setNoteDraft(draftKey, newDraft(scope)); }}><Plus size={12} className="mr-1 inline" />{t("notes.new")}</Button>

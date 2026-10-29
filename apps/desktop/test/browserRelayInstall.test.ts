@@ -49,6 +49,10 @@ vi.mock("../src/main/browser/externalPages", async importOriginal => {
   // In-memory store (default on): tests never write a browser-external.json under the cwd.
   return { ...actual, BrowserExternalPagesStore: class extends actual.BrowserExternalPagesStore { constructor() { super(null); } } };
 });
+vi.mock("../src/main/browser/desktopLoopback", async importOriginal => {
+  const actual = await importOriginal<typeof import("../src/main/browser/desktopLoopback")>();
+  return { ...actual, BrowserDesktopLoopbackStore: class extends actual.BrowserDesktopLoopbackStore { constructor() { super(null); } } };
+});
 vi.mock("../src/main/browser/device", () => ({ loadBrowserDeviceId: mocks.device }));
 vi.mock("../src/main/browser/tabIdentity", async importOriginal => {
   const original = await importOriginal<typeof import("../src/main/browser/tabIdentity")>();
@@ -93,7 +97,7 @@ vi.mock("../src/main/browser/relay", () => ({ BrowserRelay: class {
   revokeLease = vi.fn(async (id: string) => { this.grants.delete(id); });
 } }));
 vi.mock("electron", () => ({
-  BrowserWindow: vi.fn(), nativeImage: { createFromBuffer: vi.fn(() => { throw Error("No image expected in wiring test"); }) },
+  BrowserWindow: vi.fn(), nativeTheme: { shouldUseDarkColors: false, on: vi.fn(), off: vi.fn() }, nativeImage: { createFromBuffer: vi.fn(() => { throw Error("No image expected in wiring test"); }) },
   ipcMain: { handle: (name: string, fn: (...args: any[]) => Promise<any>) => mocks.handlers.set(name, fn),
     removeHandler: (name: string) => mocks.handlers.delete(name) },
   app: { isPackaged: false, getPath: () => "memory-only-user-data",
@@ -227,6 +231,20 @@ async function pendingAgentOpen(f: ReturnType<typeof fixture>, url = "http://loc
   await until(() => f.events.some(event => event.kind === "agent-open" && event.openIntent?.requestId === request.requestId));
   const event = f.events.findLast(event => event.kind === "agent-open" && event.openIntent?.requestId === request.requestId)!;
   return { peer, ctx, request, result, event, intent: event.openIntent! };
+}
+async function mountDesktopLoopback(f: ReturnType<typeof fixture>, remembered: boolean, tabKey = "owner-one", hostId = "ssh-one") {
+  const url = "http://127.0.0.1:59273/";
+  let nonce: string | undefined;
+  if (remembered) await f.ipc({ op: "desktopLoopback", enabled: true }, { hostId });
+  else {
+    await expect(f.ipc({ op: "open", tabKey, url }, { hostId })).rejects.toMatchObject({ code: "remote_loopback" });
+    nonce = (await f.ipc({ op: "desktopLoopbackChallenge", tabKey, url }, { hostId })).nonce;
+  }
+  const reserved = await f.ipc({ op: "open", tabKey, url, ...(nonce ? { desktopLoopback: nonce } : {}) }, { hostId }) as BrowserTabMount;
+  const guest = f.attach(reserved);
+  await f.ipc({ op: "open", tabKey, url, receipt: { src: reserved.src, webContentsId: guest.id } }, { hostId });
+  await flush();
+  return { reserved, guest, url };
 }
 beforeEach(() => {
   mocks.handlers.clear(); mocks.sessions.clear(); mocks.appListeners.clear(); mocks.relays.length = 0;
@@ -417,6 +435,42 @@ describe("installed I3 per-host relay lifetime", () => {
 });
 
 describe("installed I3 owner two-phase grants and IPC identity", () => {
+  it.each([false, true])("SSH desktop loopback cannot be owner- or claim-granted (remembered=%s)", async remembered => {
+    const f = fixture(["ssh-one"], true, { "ssh-one": "ssh" }); await f.enable();
+    await mountDesktopLoopback(f, remembered);
+    const row = (await f.list())[0]!;
+    expect(row.desktopLoopback).toBe(true);
+    for (const approvalId of [undefined, "apr-desktop"]) {
+      await expect(f.ipc({ op: "grantAgent", tabKey: row.tabKey, sessionId: "session-one", settings: DEFAULT_BROWSER_CONTROL_SETTINGS,
+        ...(approvalId ? { approvalId } : {}), expected: { guestId: row.guestId, pageGeneration: row.pageGeneration } })).rejects.toMatchObject({ code: "remote_loopback" });
+    }
+    expect(f.peer().grantLease).not.toHaveBeenCalled();
+  });
+  it.each([false, true])("agent tabs exclude an SSH desktop loopback page (remembered=%s)", async remembered => {
+    const f = fixture(["ssh-one"], true, { "ssh-one": "ssh" }); await f.enable();
+    if (remembered) await f.ipc({ op: "desktopLoopback", enabled: true });
+    const { guest, reserved } = await f.mount("owner-one", "about:blank"), pending = await pendingOwnerGrant(f, "owner-one", "ssh-one");
+    await f.ipc({ op: "holdReady", tabKey: "owner-one", leaseId: pending.leaseId, held: true }); await pending.grant;
+    guest.url = "http://127.0.0.1:59273/"; guest.emit("did-navigate", {}, guest.url);
+    expect((await f.list())[0]).toMatchObject({ desktopLoopback: true, lease: { leaseId: pending.leaseId } });
+    guest.debugger.sendCommand.mockClear();
+    await expect(f.peer().options.execute(command(f.peer(), { kind: "tab.snapshot" }, { leaseId: pending.leaseId,
+      target: { hostId: "ssh-one", deviceId: f.peer().options.deviceId, guestId: reserved.guestId } }), context().value)).rejects.toMatchObject({ code: "permission_denied" });
+    expect(guest.debugger.sendCommand).not.toHaveBeenCalled();
+  });
+  it("owner navigation to SSH desktop loopback revokes an existing grant before loading", async () => {
+    const f = fixture(["ssh-one"], true, { "ssh-one": "ssh" }); await f.enable();
+    const { guest, reserved } = await f.mount("owner-one", "about:blank"), pending = await pendingOwnerGrant(f, "owner-one", "ssh-one");
+    await f.ipc({ op: "holdReady", tabKey: "owner-one", leaseId: pending.leaseId, held: true }); await pending.grant;
+    await f.ipc({ op: "desktopLoopback", enabled: true });
+    await f.ipc({ op: "navigate", tabKey: "owner-one", url: "http://127.0.0.1:59273/" });
+    expect(guest.loads.at(-1)).toBe("http://127.0.0.1:59273/");
+    expect((await f.list())[0]).toMatchObject({ desktopLoopback: true });
+    expect((await f.list())[0]?.lease).toBeUndefined();
+    expect(f.peer().revokeLease).toHaveBeenCalledWith(pending.leaseId);
+    await expect(f.peer().options.execute(command(f.peer(), { kind: "tab.snapshot" }, { leaseId: pending.leaseId,
+      target: { hostId: "ssh-one", deviceId: f.peer().options.deviceId, guestId: reserved.guestId } }), context().value)).rejects.toMatchObject({ code: "lease_revoked" });
+  });
   it("main rejects a consented old document before contacting the lease peer", async () => {
     const f = fixture(); await f.enable(); const { guest } = await f.mount(); const row = (await f.list())[0]!;
     guest.emit("did-navigate", {}, guest.getURL());
@@ -1066,5 +1120,92 @@ describe("background carrier for agent tabs", () => {
     expect(challenge(guest)).toEqual([["test-only", "not-a-real-credential"]]);
     const stray = new ContentsMock(mocks.sessions.get("persist:browser-agent-local") as SessionMock);
     expect(challenge(stray)).toEqual([[]]); expect(challenge(f.owner)).toEqual([[]]);
+  });
+});
+
+
+const loginFixture = () => {
+  mocks.identity = JSON.stringify([["local", "11111111-2222-4333-8444-555555555501"], ["local", "11111111-2222-4333-8444-555555555502"], ["local", "11111111-2222-4333-8444-555555555503"], ["local", "11111111-2222-4333-8444-555555555504"], ["local", "11111111-2222-4333-8444-555555555505"]]);
+  return fixture();
+};
+
+describe("agent-pool login warning boundary", () => {
+  it("warns only after actual owner input, ignores agent dispatch and clears on navigation", async () => {
+    const f = loginFixture(); await f.enable();
+    const { guest } = await f.mount("11111111-2222-4333-8444-555555555501", "http://localhost:26180/login", "local", { agentOpened: true });
+    expect((await f.list())[0]?.loginOrigin).toBeNull();
+    guest.executeJavaScriptInIsolatedWorld.mockResolvedValue(true);
+    const agentInput = vi.spyOn(InAppProvider.prototype, "agentInput").mockReturnValue(true);
+    guest.emit("before-input-event", {}, { type: "keyDown", key: "a" }); await flush();
+    expect(guest.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
+    agentInput.mockRestore();
+    guest.emit("before-mouse-event", {}, { type: "mouseDown" }); await flush();
+    expect((await f.list())[0]?.loginOrigin).toBe("http://localhost:26180");
+    expect(f.events.findLast(event => event.tabKey === "11111111-2222-4333-8444-555555555501")?.loginOrigin).toBe("http://localhost:26180");
+    guest.emit("did-start-navigation", {}, guest.getURL(), false, true);
+    expect((await f.list())[0]?.loginOrigin).toBeNull();
+    const owner = await f.mount("real-owner", "http://localhost:26180/login");
+    owner.guest.executeJavaScriptInIsolatedWorld.mockResolvedValue(true);
+    owner.guest.emit("before-input-event", {}, { type: "keyDown", key: "a" }); await flush();
+    expect(owner.guest.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
+  });
+  it("does not lose the first login keystroke while a mouse-focus probe is pending", async () => {
+    const f = loginFixture(); await f.enable();
+    const { guest } = await f.mount("11111111-2222-4333-8444-555555555501", "http://localhost:26184/login", "local", { agentOpened: true });
+    const focus = deferred<boolean>();
+    guest.executeJavaScriptInIsolatedWorld.mockReturnValueOnce(focus.promise).mockResolvedValue(true);
+    guest.emit("before-mouse-event", {}, { type: "mouseDown" });
+    guest.emit("before-input-event", {}, { type: "keyDown", key: "a" });
+    focus.resolve(false); await flush();
+    expect(guest.executeJavaScriptInIsolatedWorld).toHaveBeenCalledTimes(2);
+    expect((await f.list())[0]?.loginOrigin).toBe("http://localhost:26184");
+  });
+  it.each([true, false])("drops a late same-URL navigation result (main frame %s) and page messages cannot trigger detection", async mainFrame => {
+    const f = loginFixture(); await f.enable();
+    const { guest } = await f.mount("11111111-2222-4333-8444-555555555502", "http://localhost:26181/login", "local", { agentOpened: true });
+    const pending = deferred<boolean>();
+    guest.executeJavaScriptInIsolatedWorld.mockReturnValue(pending.promise);
+    guest.emit("ipc-message", { channel: "login-intent", args: [true] });
+    expect(guest.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
+    guest.emit("before-input-event", {}, { type: "keyDown", key: "a" });
+    guest.emit("did-start-navigation", {}, guest.getURL(), false, mainFrame);
+    pending.resolve(true); await flush();
+    expect((await f.list())[0]?.loginOrigin).toBeNull();
+  });
+  it("dismisses by host and origin across agent tabs and rejects forged or stale owner requests", async () => {
+    const f = loginFixture(); await f.enable();
+    const a = await f.mount("11111111-2222-4333-8444-555555555503", "http://localhost:26182/a", "local", { agentOpened: true });
+    const b = await f.mount("11111111-2222-4333-8444-555555555504", "http://localhost:26182/b", "local", { agentOpened: true });
+    for (const { guest } of [a, b]) { guest.executeJavaScriptInIsolatedWorld.mockResolvedValue(true); guest.emit("before-mouse-event", {}, { type: "mouseUp" }); }
+    await flush();
+    const request = { op: "dismissLoginWarning", tabKey: "11111111-2222-4333-8444-555555555503", origin: "http://localhost:26182" };
+    await expect(f.ipc(request, { sender: a.guest })).rejects.toThrow("untrusted_sender");
+    await expect(f.ipc(request, { frame: {} })).rejects.toThrow("untrusted_sender");
+    await expect(f.ipc({ ...request, origin: "http://elsewhere.invalid" })).rejects.toMatchObject({ code: "invalid_request" });
+    await f.ipc(request);
+    expect((await f.list()).every(row => row.loginOrigin === null)).toBe(true);
+    b.guest.executeJavaScriptInIsolatedWorld.mockClear();
+    b.guest.emit("before-input-event", {}, { type: "keyDown", key: "a" }); await flush();
+    expect(b.guest.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
+  });
+  it("opens a fresh owner-pool copy with the exact current URL kept only in main", async () => {
+    const f = loginFixture(); await f.enable();
+    const raw = "http://localhost:26183/login?token=copy-secret&view=one#return-secret";
+    const source = await f.mount("11111111-2222-4333-8444-555555555505", raw, "local", { agentOpened: true });
+    const before = (await f.list()).find(row => row.tabKey === "11111111-2222-4333-8444-555555555505")!;
+    await expect(f.ipc({ op: "openOwnerCopy", tabKey: "11111111-2222-4333-8444-555555555505" }, { sender: source.guest })).rejects.toThrow("untrusted_sender");
+    await expect(f.ipc({ op: "openOwnerCopy", tabKey: "11111111-2222-4333-8444-555555555505" }, { epoch: "stale" })).rejects.toThrow();
+    const copy = await f.ipc({ op: "openOwnerCopy", tabKey: "11111111-2222-4333-8444-555555555505" });
+    expect(copy.tabKey).not.toBe("11111111-2222-4333-8444-555555555505");
+    expect(copy.url).toBe("http://localhost:26183/login?view=one");
+    const mounted = await f.mount(copy.tabKey, copy.url);
+    expect(mounted.reserved.pool).toBe("owner");
+    expect(mounted.reserved.partition).toBe("persist:browser-local");
+    expect(mounted.guest.loads.at(-1)).toBe(raw);
+    expect((await f.list()).find(row => row.tabKey === "11111111-2222-4333-8444-555555555505")).toEqual(before);
+    expect(source.guest.getURL()).toBe(raw);
+    expect(JSON.stringify(f.events)).not.toContain("copy-secret");
+    expect(JSON.stringify(mocks.storageWrites)).not.toContain("copy-secret");
+    await expect(f.ipc({ op: "openOwnerCopy", tabKey: copy.tabKey })).rejects.toMatchObject({ code: "permission_denied" });
   });
 });

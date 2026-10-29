@@ -2,12 +2,20 @@
 import { describe, expect, it } from "vitest";
 import type { QuotaGauge } from "../src/shared/ipc";
 import { fireHostReset, fireHostSwitch } from "../src/renderer/src/lib/hostSwitch";
-import { cachedUsage, PREDICTED_GAUGES, predictUsage, rememberUsage, usageLayout } from "../src/renderer/src/lib/usageFlyout";
+import { cachedUsage, PREDICTED_GAUGES, predictUsage, rememberUsage, usageLayout, usageHeight, usageGaugeHeight } from "../src/renderer/src/lib/usageFlyout";
 
 const g = (id: string): QuotaGauge => ({ id, label: id, kind: "window", remainingPercent: 50, balance: null, resetAt: null, windowLabel: id, observedAt: null, stale: false });
 const p = (name: string, authKind: "chatgpt" | "apiKey" | "claude" | "none", quotaEnabled = false, cliKind = "codex") => ({ name, authKind, quotaEnabled, cliKind });
 
 describe("predictUsage", () => {
+  it("reserves exact fixed gauge rows, footer and empty state before paint", () => {
+    expect(usageGaugeHeight(0)).toBe(18);
+    expect(usageGaugeHeight(2)).toBe(40);
+    expect(usageGaugeHeight(3)).toBe(62);
+    expect(usageHeight({ rows: ["a", "b"], off: [], counts: { a: 2, b: 3 } })).toBe(126);
+    expect(usageHeight({ rows: ["a"], off: ["off"], counts: { a: 1 } })).toBe(56);
+    expect(usageHeight({ rows: [], off: [], counts: {} })).toBe(28);
+  });
   it("expects quota from ChatGPT / Claude logins and API keys with a reader", () => {
     const layout = predictUsage([p("gamma", "chatgpt"), p("Kimi", "apiKey", true), p("relay", "apiKey"), p("cc", "none", false, "claude"), p("x", "none")]);
     expect(layout.rows).toEqual(["gamma", "Kimi", "cc"]);

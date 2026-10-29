@@ -107,7 +107,7 @@ function Card({ entry, peek, style, overlay }: { entry: SideComponentEntry; peek
       data-focus-region="peek"
       role="complementary"
       aria-label={t("gutter.peek")}
-      className={`pointer-events-auto absolute left-2 z-[7] flex flex-col overflow-hidden rounded-[14px] border border-card-border bg-background ${overlay ? "shadow-2xl" : "shadow-[var(--shadow)]"} ${dragged ? "*:opacity-45" : ""}`}
+      className={`pointer-events-auto absolute left-2 z-[7] flex flex-col overflow-hidden rounded-card border border-transparent bg-background ${overlay ? "shadow-2xl" : "shadow-e2"} ${dragged ? "*:opacity-45" : ""}`}
       style={style}
     >
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border/60 pr-1 pl-1">
@@ -146,7 +146,7 @@ function Card({ entry, peek, style, overlay }: { entry: SideComponentEntry; peek
           <PanelRight size={13} />
           {t("gutter.openRight")}
         </button>
-        <span className="ml-auto truncate text-[11px] text-subtle">{t("gutter.readOnly")}</span>
+        <span className="ml-auto truncate text-caption/[inherit] text-subtle">{t("gutter.readOnly")}</span>
       </div>
     </div>
   );

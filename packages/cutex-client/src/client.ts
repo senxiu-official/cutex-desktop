@@ -1,3 +1,6 @@
+import { userAccessOf } from "./users";
+import { delegationControlRoute, delegationId, requireDelegationCapability } from "./delegation";
+import { DELEGATION_CAPABILITIES, type DelegationTreeQuery, type DelegationTreePage, type DelegationAttempts, type DelegationPolicy, type DelegationGrants, type DelegationApproval, type ProjectRunControl, type DelegationControlRequest, type DelegationOperationResult, type DelegationOperationLookup, type PermanentRetirementReviewRequest, type PermanentRetirementReview, type PermanentRetirementRequest, type AgentArchiveReceipt } from "@cutex-desktop/protocol";
 import type {
   CutexRequestResult,
   EventPage,
@@ -25,12 +28,18 @@ import type {
   UserInputSubmitParams,
   UserInputSubmitResult,
 } from "@cutex-desktop/protocol";
+import { messageSettlementCloseBody } from "./messageSettlement";
+import type { MessageSettlementCloseRequest, MessageSettlementCloseResponse } from "@cutex-desktop/protocol";
 import type { DaemonEndpoint } from "./endpoint";
+import type { OperatorActionReceipt, OperatorActionRequest, OperatorProjectWorkspace } from "./operators";
 import type { ClientTokenList, ClientTokenRenamed, HostSummary, PairingCode, PairRequest, PairResponse, SummaryReadResult } from "./summary";
 import { CutexApiError, CutexUnreachableError } from "./errors";
+import { errorOf, fetchWithRetry, type HttpRetryOptions } from "./retry";
+import { admittedResponse, finiteRead, ReadLoad, subscriptionRead } from "./readLoad";
 import { CLIENT_INSTANCE_ID, clientPresenceBody, closeGraceSeconds, readClientPresenceReply, readClientState, readOnlineClients, type ClientClosingOutcome, type ClientPresence, type ClientPresenceReply, type ClientState, type OnlineClient } from "./clients";
 import { componentName, readComponentOperation, readComponentsList, type ComponentOperation, type ComponentsList } from "./components";
 import { readHostServiceInfo, UPGRADE_RUN_ID, upgradeApplyBody, upgradeRefusalOf, upgradeRollbackBody, upgradeSettingsBody, upgradeStageBody, type HostServiceInfo, type UpgradeApplyRequest, type UpgradeResult, type UpgradeRollbackRequest, type UpgradeRollbackResult, type UpgradeRun, type UpgradeSettings, type UpgradeSettingsPatch, type UpgradeStaging, type UpgradeStatus } from "./upgrade";
+import { HOME_COVER_MAX_BYTES, TILE_IMAGE_MAX_BYTES, homeCoverBody, homePutBody, readHomeView, readServiceTileAnswer, type HomeCoverUpload, type HomeDoc, type HomeView, type ServiceTileAnswer } from "./home";
 import { AVATAR_CONTENT_TYPES, AVATAR_ETAG, AVATAR_MAX_BYTES, grantBody, PROFILE_IMAGE_KINDS, PROFILE_IMAGE_MAX_BYTES, profileImagePath, type AvatarUpload, type ProfileImageKind, PERSON_PUBLIC_KEY, PERSON_SIGNATURE, personKeysBody, selfProfileBody, DISPLAY_NAME_MAX, IDENTITY_CLAIM_OUTCOMES, type IdentityChallenge, type IdentityClaimOutcome, type IdentityClaimResult, type PersonKeyInput, type PersonKeysResult, type TokenPersonAckResult, userColorBody, userNameBody, USER_ID, type AvatarContentType, type SelfProfile, type SelfProfilePatch, type UserAvatar, type PeerBindingResult, type TokenBindingResult, type UserCreate, type UserPatch, type UsersList, type UsersSettings, type UserWriteResult, type OwnDevices, type OwnDeviceRevoked, DEVICE_SCOPES, type DeviceScope } from "./users";
 
 /** Web Crypto UUID: available in Node ≥ 19, Electron, browsers and Android WebView (secure context). */
@@ -114,6 +123,8 @@ export interface EventQuery {
 }
 
 export interface CutexClientOptions {
+  /** Enables admission for reads explicitly marked background. Foreground reads always bypass it. */
+  backgroundReads?: boolean;
   /** Defaults to the global `fetch` (looked up per call, never called with the client as `this`). */
   fetch?: typeof fetch;
   /** Identifies this desktop instance in `origin.clientId` of submitted input. */
@@ -123,8 +134,10 @@ export interface CutexClientOptions {
    * entry, same ids). Default `CAPACITY_RETRY_DELAYS_MS`; `[]` = no retry.
    */
   capacityRetryDelaysMs?: readonly number[];
-  /** Replaces the timer behind those waits (tests). */
+  /** Replaces waits for HTTP overload and input-capacity retries (tests). */
   sleep?: (ms: number) => Promise<void>;
+  /** Replaces HTTP retry jitter (tests). */
+  retryRandom?: () => number;
 }
 
 /** 3 retries over about 4 s: cutex frees capacity within seconds or not for a long while. */
@@ -134,7 +147,9 @@ const CAPACITY_RETRY_MAX_HINT_MS = 3000;
 
 type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
-type RequestOptions = { body?: unknown; query?: Record<string, string | number | undefined>; headers?: Record<string, string>; signal?: AbortSignal };
+/** Local scheduling metadata; never sent to the daemon. */
+export type ReadOptions = { signal?: AbortSignal; background?: boolean; retryable?: boolean };
+type RequestOptions = ReadOptions & { body?: unknown; query?: Record<string, string | number | undefined>; headers?: Record<string, string> };
 
 /** Metadata only, emitted once when each HTTP stage settles. Attempts start at 1; retries reuse requestId. */
 export interface SubmitHttpTraceEvent {
@@ -164,19 +179,55 @@ function emitSubmitHttpTrace(trace: SubmitHttpTrace | undefined, event: Omit<Sub
 /**
  * Thin typed client for cutex Management v2. Platform-neutral (fetch + Web Streams + Web Crypto):
  * runs in the Electron main process and in a browser / Capacitor WebView (the latter needs CORS on
- * the cutex side). Stateless: streaming/resync lives in `EventFeed`.
+ * the cutex side). Streaming/resync lives in `EventFeed`; desktop read admission is opt-in.
  */
+/** Largest history media (one generated image) read back through `historyMedia`. */
+export const HISTORY_MEDIA_MAX_BYTES = 64 * 1024 * 1024;
+/** Descriptor-backed event media uses a tighter cap than legacy history refs. */
+export const HISTORY_MEDIA_DESCRIPTOR_MAX_BYTES = 32 * 1024 * 1024;
+export interface HistoryMediaBytes {
+  bytes: Uint8Array;
+  mime: string;
+  size: number;
+}
+export interface MediaBytesExpected { mime: string; size: number }
+export interface HistoryMediaBytesOptions {
+  transport: "bytes";
+  expected?: MediaBytesExpected;
+}
+const HISTORY_MEDIA_SHA256 = /^[0-9a-f]{64}$/;
+const historyMediaMime = (value: unknown): value is string => typeof value === "string" && value.length <= 128 && /^[A-Za-z0-9.+-]+\/[A-Za-z0-9.+-]+$/.test(value);
+function mediaBytesExpected(expected: MediaBytesExpected | undefined): MediaBytesExpected | undefined {
+  if (expected === undefined) return undefined;
+  if (!expected || typeof expected !== "object" || Array.isArray(expected) || Object.keys(expected).some(key => key !== "mime" && key !== "size") || !historyMediaMime(expected.mime) || !Number.isSafeInteger(expected.size) || expected.size < 0 || expected.size > HISTORY_MEDIA_DESCRIPTOR_MAX_BYTES) throw new Error("bad expected media descriptor");
+  return { mime: expected.mime.toLowerCase(), size: expected.size };
+}
+
+/** A response too large to hold as one string (V8 ~512 M characters; design 025). */
+export class ResponseTooLargeError extends Error {
+  readonly code = "response_too_large";
+  constructor(readonly path: string, cause: unknown) {
+    super(`response_too_large: the host's answer for ${path.split("?")[0]} is too large to load (update the host's cutex for history-media-refs)`, { cause });
+    this.name = "ResponseTooLargeError";
+  }
+}
+
 export class CutexClient {
+  private delegationDiscovery: Promise<{featureList: string[]; user?: unknown} | null> | undefined;
+  private readonly readLoad: ReadLoad | undefined;
   readonly clientId: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly httpRetry: HttpRetryOptions;
   private readonly capacityRetryDelaysMs: readonly number[];
   private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(readonly endpoint: DaemonEndpoint, options: CutexClientOptions = {}) {
+    this.readLoad = options.backgroundReads ? new ReadLoad(options.retryRandom) : undefined;
     // Browsers throw "Illegal invocation" when fetch is called with a foreign `this`
     // (e.g. `this.fetchImpl(...)` holding the bare global), so always call through a wrapper.
     const injected = options.fetch;
     this.fetchImpl = injected ? (input, init) => injected(input, init) : (input, init) => globalThis.fetch(input, init);
+    this.httpRetry = { sleep: options.sleep, random: options.retryRandom };
     this.clientId = options.clientId ?? `cutex-desktop-${randomUUID()}`;
     this.capacityRetryDelaysMs = options.capacityRetryDelaysMs ?? CAPACITY_RETRY_DELAYS_MS;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -184,8 +235,37 @@ export class CutexClient {
 
   // ---------- low level ----------
 
-  fetchRaw(url: string, init: RequestInit): Promise<Response> {
-    return this.fetchImpl(url, init);
+  /** Stop pending background reads when this desktop host connection is replaced. */
+  dispose(): void { this.readLoad?.dispose(); }
+
+  async fetchRaw(url: string, init: RequestInit, options: Pick<HttpRetryOptions, "retryable" | "jsonErrorsOnly"> & { background?: boolean } = {}): Promise<Response> {
+    const load = this.readLoad;
+    // Mutations keep their existing outcome policy; only background requests belong to this queue.
+    const read = finiteRead(url, init);
+    if (read && load) init = { ...init, signal: init.signal ? AbortSignal.any([init.signal, load.signal]) : load.signal };
+    if (!load || !options.background) return fetchWithRetry(this.fetchImpl, url, init, { ...this.httpRetry, ...options });
+    const streaming = subscriptionRead(url, init);
+    let release: (() => void) | undefined;
+    if (read) {
+      if (streaming) await load.opening(init.signal);
+      else release = await load.acquire(init.signal);
+    }
+    try {
+      // Stores/feeds own the next refresh. A refused read is never multiplied into five attempts.
+      const response = await fetchWithRetry(this.fetchImpl, url, init, { ...this.httpRetry, ...options, ...(read ? { retryable: false } : {}) });
+      if (read && (response.status === 503 || response.status === 429)) {
+        const error = await errorOf(response, init.signal, 5_000);
+        const header = response.headers.get("Retry-After")?.trim();
+        const fromHeader = !header ? 0 : /^\d+(?:\.\d+)?$/.test(header) ? Number(header) * 1000 : Date.parse(header) - Date.now();
+        if (!error?.capacityExceeded) load.overload(Math.max(error?.retryAfterMs ?? 0, Number.isFinite(fromHeader) ? fromHeader : 0));
+      }
+      if (release) {
+        const result = admittedResponse(response, release, init.signal);
+        release = undefined;
+        return result;
+      }
+      return response;
+    } finally { release?.(); }
   }
 
   headers(extra: Record<string, string> = {}): Record<string, string> {
@@ -226,10 +306,10 @@ export class CutexClient {
     let response: Response;
     const headersStarted = trace ? performance.now() : 0;
     try {
-      response = await this.fetchImpl(url, init);
+      response = await this.fetchRaw(url, init, { retryable: options.retryable, background: options.background });
     } catch (error) {
       if (trace) emitSubmitHttpTrace(trace, { stage: "fetch-headers", elapsedMs: performance.now() - headersStarted, outcome: "failed" });
-      if ((error as Error).name === "AbortError") throw error;
+      if ((error as Error).name === "AbortError" || options.signal?.aborted) throw error;
       throw new CutexUnreachableError(this.endpoint.baseUrl, error);
     }
     if (trace) emitSubmitHttpTrace(trace, { stage: "fetch-headers", elapsedMs: performance.now() - headersStarted, outcome: "completed", status: response.status });
@@ -239,6 +319,8 @@ export class CutexClient {
       text = await response.text();
     } catch (error) {
       if (trace) emitSubmitHttpTrace(trace, { stage: "fetch-body", elapsedMs: performance.now() - bodyStarted, outcome: "failed", status: response.status });
+      // V8 caps a string at ~512 M characters (design 025: a 1.5 GB image conversation): say what happened.
+      if (error instanceof RangeError || /string longer than/i.test(String((error as Error)?.message))) throw new ResponseTooLargeError(path, error);
       throw error;
     }
     if (trace) emitSubmitHttpTrace(trace, { stage: "fetch-body", elapsedMs: performance.now() - bodyStarted, outcome: "completed", status: response.status });
@@ -266,7 +348,7 @@ export class CutexClient {
    * `includeHidden` (capability `include-hidden`, root credential only): also agents created with
    * `expose_to_im: false` (rows carry `visible: false`). Older cutex answers 400, a non-root token 403.
    */
-  sessions(lifecycle: SessionLifecycle = "active", options: { signal?: AbortSignal; includeHidden?: boolean } = {}): Promise<SessionList> {
+  sessions(lifecycle: SessionLifecycle = "active", options: ReadOptions & { includeHidden?: boolean } = {}): Promise<SessionList> {
     const { includeHidden, ...rest } = options;
     return this.request("GET", "/v2/sessions", { query: { lifecycle, ...(includeHidden ? { includeHidden: "true" } : {}) }, ...rest });
   }
@@ -281,27 +363,34 @@ export class CutexClient {
    * `compact-history`): large item fields (command / tool output, diffs) cut to 2 KB with
    * `truncated: true` on the item; `?compact=1` is only sent when true.
    */
-  bootstrap(id: string, opts: { turnLimit?: number; compact?: boolean; signal?: AbortSignal } = {}): Promise<SessionBootstrap> {
+  bootstrap(id: string, opts: { turnLimit?: number; compact?: boolean; mediaRefs?: boolean; signal?: AbortSignal } = {}): Promise<SessionBootstrap> {
     const query: Record<string, string> = {};
     if (opts.turnLimit) query.turnLimit = String(opts.turnLimit);
     if (opts.compact) query.compact = "1";
+    // history-media-refs (design 025): media over 64 KiB as cutex-media: references (historyMedia).
+    if (opts.mediaRefs) query.media = "ref";
     return this.request("GET", `/v2/sessions/${encodeURIComponent(id)}/bootstrap`, { query, ...(opts.signal ? { signal: opts.signal } : {}) });
   }
 
-  events(query: EventQuery = {}, options: { signal?: AbortSignal } = {}): Promise<EventPage> {
-    return this.request("GET", "/v2/events", { query: { ...query }, ...(options.signal ? { signal: options.signal } : {}) });
+  events(query: EventQuery = {}, options: ReadOptions = {}): Promise<EventPage> {
+    return this.request("GET", "/v2/events", { query: { ...query }, ...options });
   }
 
-  hostSessions(query = "", cursor?: string, limit = 200): Promise<HostSessionPage> {
-    return this.request("POST", "/v2/host/sessions", { body: { query, cursor, limit } });
+  hostSessions(query = "", cursor?: string, limit = 200, options: ReadOptions = {}): Promise<HostSessionPage> {
+    return this.request("POST", "/v2/host/sessions", { body: { query, cursor, limit }, ...options });
   }
 
-  projects(): Promise<ProjectsResponse> {
-    return this.request("GET", "/v2/agent-management/projects");
+  projects(options: ReadOptions = {}): Promise<ProjectsResponse> {
+    return this.request("GET", "/v2/agent-management/projects", options);
   }
 
-  project(projectId: string): Promise<unknown> {
-    return this.request("GET", `/v2/agent-management/projects/${encodeURIComponent(projectId)}`);
+  project(projectId: string, options: ReadOptions = {}): Promise<OperatorProjectWorkspace> {
+    return this.request("GET", `/v2/agent-management/projects/${encodeURIComponent(projectId)}`, options);
+  }
+
+  /** Owner/full only. CAS values and the retry action ID are forwarded unchanged. */
+  operatorAction(request: OperatorActionRequest): Promise<OperatorActionReceipt> {
+    return this.request("POST", "/v2/agent-management/operator-actions", { body: request });
   }
 
   // ---------- native app-server forwarding ----------
@@ -368,6 +457,7 @@ export class CutexClient {
     input: unknown[],
     strategy: UserInputSubmitParams["strategy"],
     extra: {
+      joinDelegation?: UserInputSubmitParams["joinDelegation"];
       clientUserMessageId?: string; expectedTurnId?: string; startIfOffline?: boolean; origin?: UserInputSubmitParams["origin"];
       /** Per-submit observer, not sent to the daemon. At most 3 metadata-only events per attempt. */
       onHttpTrace?: SubmitHttpTraceObserver;
@@ -383,6 +473,7 @@ export class CutexClient {
     };
     if (extra.expectedTurnId) params.expectedTurnId = extra.expectedTurnId;
     if (extra.startIfOffline) params.startIfOffline = true;
+    if (extra.joinDelegation) params.joinDelegation = extra.joinDelegation;
     // The same requestId on every attempt (the idempotency key); clientUserMessageId is fixed in params.
     const requestId = randomUUID();
     return this.retryWhenFull(async (attempt) => {
@@ -409,10 +500,11 @@ export class CutexClient {
   }
 
   /** Stored history; works while the runtime is offline (capability offline-history). */
-  history(sessionId: string, page: { limit?: number; cursor?: string | null; compact?: boolean } = {}): Promise<SessionHistory> {
+  history(sessionId: string, page: { limit?: number; cursor?: string | null; compact?: boolean; mediaRefs?: boolean } = {}): Promise<SessionHistory> {
     const q = new URLSearchParams({ limit: String(page.limit ?? 20) });
     if (page.cursor) q.set("cursor", page.cursor);
     if (page.compact) q.set("compact", "1");
+    if (page.mediaRefs) q.set("media", "ref");
     return this.request("GET", `/v2/sessions/${encodeURIComponent(sessionId)}/history?${q}`);
   }
 
@@ -457,11 +549,12 @@ export class CutexClient {
     sessionId: string,
     queueId: string,
     expectedRevision: number,
-    extra: { expectedTurnId?: string; ifIdle?: "start" | "fail" } = {},
+    extra: { expectedTurnId?: string; ifIdle?: "start" | "fail"; joinDelegation?: UserInputSubmitParams["joinDelegation"] } = {},
   ): Promise<QueueSteerResult> {
     const params: Record<string, unknown> = { queueId, expectedRevision };
     if (extra.expectedTurnId) params.expectedTurnId = extra.expectedTurnId;
     if (extra.ifIdle) params.ifIdle = extra.ifIdle;
+    if (extra.joinDelegation) params.joinDelegation = extra.joinDelegation;
     const requestId = randomUUID();
     return this.retryWhenFull(() => this.cutex(sessionId, "cutex/userInput/queue/steer", params, { requestId }));
   }
@@ -497,9 +590,9 @@ export class CutexClient {
    * `GET /v2/capabilities` (`cutexBuild` (see `readCutexBuild`), `hostId`, `featureList`, ...). Null on a cutex
    * without the route (404). Readable with a client token.
    */
-  async capabilities<T = JsonObject>(): Promise<T | null> {
+  async capabilities<T = JsonObject>(options: { signal?: AbortSignal } = {}): Promise<T | null> {
     try {
-      return await this.request<T>("GET", "/v2/capabilities");
+      return await this.request<T>("GET", "/v2/capabilities", options);
     } catch (error) {
       if (isMissingRoute(error, [404])) return null;
       throw error;
@@ -538,10 +631,10 @@ export class CutexClient {
     return { instanceId: typeof r?.instanceId === "string" ? r.instanceId : instanceId, state: r?.state === undefined ? "closeRequested" : readClientState(r.state) };
   }
 
-  /** `POST /v2/clients/{instanceId}/closing` `{outcome}`: only the closing client itself may report. */
+  /** `POST /v2/clients/{instanceId}/closing` `{outcome}`: only the closing client itself may report (`exited`: lifecycle hosts only). */
   async reportClientClosing(instanceId: string, outcome: ClientClosingOutcome, options: { signal?: AbortSignal } = {}): Promise<void> {
     if (!CLIENT_INSTANCE_ID.test(instanceId)) throw new Error("bad instance id");
-    if (outcome !== "closing" && outcome !== "cancelled") throw new Error("bad outcome");
+    if (outcome !== "closing" && outcome !== "cancelled" && outcome !== "exited") throw new Error("bad outcome");
     await this.request<unknown>("POST", `/v2/clients/${encodeURIComponent(instanceId)}/closing`, { body: { outcome }, ...(options.signal ? { signal: options.signal } : {}) });
   }
 
@@ -588,8 +681,8 @@ export class CutexClient {
   }
 
   /** `GET /v2/summary` (capability `host-summary`). */
-  summary(signal?: AbortSignal): Promise<HostSummary> {
-    return this.request("GET", "/v2/summary", signal ? { signal } : {});
+  summary(signal?: AbortSignal, options: ReadOptions = {}): Promise<HostSummary> {
+    return this.request("GET", "/v2/summary", { ...options, ...(signal ? { signal } : {}) });
   }
 
   /**
@@ -615,7 +708,7 @@ export class CutexClient {
     }
     let response: Response;
     try {
-      response = await this.fetchImpl(this.url("/v2/summary/events", query), { headers, ...(options.signal ? { signal: options.signal } : {}) });
+      response = await this.fetchRaw(this.url("/v2/summary/events", query), { headers, ...(options.signal ? { signal: options.signal } : {}) });
     } catch (error) {
       if ((error as Error).name === "AbortError") throw error;
       throw new CutexUnreachableError(this.endpoint.baseUrl, error);
@@ -936,6 +1029,13 @@ export class CutexClient {
     return this.request<T>("POST", "/v2/agent-bus/stuck-messages/discard", { body });
   }
 
+  /** agent-bus-message-settlement-v1. Read an uncertain write before an explicit same-key retry. */
+  async closeBusMessage(request: MessageSettlementCloseRequest): Promise<MessageSettlementCloseResponse> {
+    const body = messageSettlementCloseBody(request);
+    await this.delegationFeature(DELEGATION_CAPABILITIES.settlement);
+    return this.request("POST", "/v2/agent-bus/stuck-messages/close", { body, retryable: false });
+  }
+
   // ---------- installed runtimes (runtimes-view) ----------
 
   /** `GET /v2/runtimes` (installed native / Claude runtimes and their pinned agents). Null when the route is missing. */
@@ -961,16 +1061,18 @@ export class CutexClient {
     }
   }
 
-  /** `POST /v2/claude/accounts` → 201 item. */
-  async createClaudeAccount<T = JsonObject>(body: { label: string; kind: "subscription" | "api"; baseUrl?: string; keyEnv?: string; env?: Record<string, string> }): Promise<T> {
-    if ("apiKey" in body) throw new Error("apiKey is not sent from the desktop");
+  /** `POST /v2/claude/accounts` → 201 item. `apiKey` (API accounts) is write-only: cutex never returns it. */
+  async createClaudeAccount<T = JsonObject>(body: { label: string; kind: "subscription" | "api"; baseUrl?: string; keyEnv?: string; env?: Record<string, string>; apiKey?: string }): Promise<T> {
+    if (body.apiKey !== undefined && (body.kind !== "api" || typeof body.apiKey !== "string" || !body.apiKey)) throw new Error("apiKey is for API accounts only");
     return this.request<T>("POST", "/v2/claude/accounts", { body });
   }
 
-  /** `PATCH /v2/claude/accounts/{id}` (the desktop renames only). */
-  async updateClaudeAccount<T = JsonObject>(id: string, patch: { label: string }): Promise<T> {
+  /** `PATCH /v2/claude/accounts/{id}`: rename (`label`) or set / replace the write-only `apiKey` (owner 2026-10-27). */
+  async updateClaudeAccount<T = JsonObject>(id: string, patch: { label: string } | { apiKey: string }): Promise<T> {
     if (!CLAUDE_ACCOUNT_ID.test(id)) throw new Error("bad Claude account id");
-    return this.request<T>("PATCH", `/v2/claude/accounts/${encodeURIComponent(id)}`, { body: { label: patch.label } });
+    const body = "apiKey" in patch ? { apiKey: patch.apiKey } : { label: patch.label };
+    if ("apiKey" in body && (typeof body.apiKey !== "string" || !body.apiKey)) throw new Error("bad apiKey");
+    return this.request<T>("PATCH", `/v2/claude/accounts/${encodeURIComponent(id)}`, { body });
   }
 
   /** `DELETE /v2/claude/accounts/{id}`: deregisters; the home (login, Claude history) is kept. */
@@ -1189,6 +1291,60 @@ export class CutexClient {
     return this.request("DELETE", `/v2/users/me/devices/${encodeURIComponent(tokenId)}`);
   }
 
+  // ---------- home page (user-home) and service tiles (service-tiles) ----------
+
+  /** `GET /v2/users/me/home`. Null on a cutex without the route (404 / 405). */
+  async userHome(): Promise<HomeView | null> {
+    try {
+      return readHomeView(await this.request<unknown>("GET", "/v2/users/me/home"));
+    } catch (error) {
+      if (isMissingRoute(error)) return null;
+      throw error;
+    }
+  }
+
+  /** `PUT /v2/users/me/home` `{revision, home}`; 409 `home_revision_conflict` (`details.revision`), 400 `invalid_home`, 413 `home_too_large`. */
+  async putUserHome(revision: number, home: HomeDoc | null): Promise<HomeView> {
+    return readHomeView(await this.request<unknown>("PUT", "/v2/users/me/home", { body: homePutBody(revision, home) }));
+  }
+
+  /** `GET /v2/users/me/home/cover` (null: no cover, or an older cutex). */
+  homeCover(): Promise<UserAvatar | null> {
+    return this.fetchImage("/v2/users/me/home/cover", HOME_COVER_MAX_BYTES);
+  }
+
+  /** `PUT /v2/users/me/home/cover` `{contentType, data}`; 400 `invalid_cover`, 413 `cover_too_large`. */
+  async putHomeCover(upload: HomeCoverUpload): Promise<HomeView> {
+    return readHomeView(await this.request<unknown>("PUT", "/v2/users/me/home/cover", { body: homeCoverBody(upload) }));
+  }
+
+  /** `DELETE /v2/users/me/home/cover` (idempotent). */
+  async deleteHomeCover(): Promise<HomeView> {
+    return readHomeView(await this.request<unknown>("DELETE", "/v2/users/me/home/cover"));
+  }
+
+  /** `GET /v2/services/{slug}/tile` (template sanitised). Null on a cutex without the route. */
+  async serviceTile(slug: string): Promise<ServiceTileAnswer | null> {
+    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) throw new Error("bad service slug");
+    try {
+      return readServiceTileAnswer(await this.request<unknown>("GET", `/v2/services/${encodeURIComponent(slug)}/tile`));
+    } catch (error) {
+      if (isMissingRoute(error)) return null;
+      throw error;
+    }
+  }
+
+  /** `GET /v2/services/{slug}/tile/image` (PNG / JPEG / WebP ≤ 512 KiB; null: none / unsupported). */
+  async serviceTileImage(slug: string): Promise<UserAvatar | null> {
+    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) throw new Error("bad service slug");
+    try {
+      return await this.fetchImage(`/v2/services/${encodeURIComponent(slug)}/tile/image`, TILE_IMAGE_MAX_BYTES);
+    } catch (error) {
+      if (error instanceof CutexApiError && (error.status === 415 || error.status === 502)) return null;
+      throw error;
+    }
+  }
+
   // ---------- person identity (person-identity; weak auth: who a paired token belongs to) ----------
 
   /** `GET /v2/identity/challenge` → `{nonce, hostId, expiresAt}` (one-use, short-lived; pending tokens too). */
@@ -1278,15 +1434,118 @@ export class CutexClient {
   }
 
   /** An image route: PNG / JPEG / WebP up to `maxBytes`, else null; 404 / 403 / 405 = null. */
+  /**
+   * An image a history read with `media=ref` replaced by `cutex-media:<session>/<sha256>`
+   * (`GET /v2/sessions/{id}/media/{sha256}`, history-media-refs). Null when the host no longer has
+   * it (evicted: read the turn again) or it is not an image.
+   */
+  historyMedia(sessionId: string, sha256: string): Promise<UserAvatar | null>;
+  historyMedia(sessionId: string, sha256: string, options: HistoryMediaBytesOptions): Promise<HistoryMediaBytes | null>;
+  async historyMedia(sessionId: string, sha256: string, options?: HistoryMediaBytesOptions): Promise<UserAvatar | HistoryMediaBytes | null> {
+    if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) throw new Error("bad media session id");
+    if (typeof sha256 !== "string" || !HISTORY_MEDIA_SHA256.test(sha256)) throw new Error("bad media hash");
+    const path = `/v2/sessions/${encodeURIComponent(sessionId)}/media/${sha256}`;
+    if (options === undefined) return this.fetchImage(path, HISTORY_MEDIA_MAX_BYTES);
+    if (!options || typeof options !== "object" || Array.isArray(options) || options.transport !== "bytes" || Object.keys(options).some(key => key !== "transport" && key !== "expected")) throw new Error("bad media transport options");
+    // A history media ref's sha is cutex's cache key (SHA-256 of the base64 payload, or of a saved-image descriptor), not a
+    // hash of the served bytes: verifying it rejected every generated / pasted image on reopen (live diagnosis 2026-10-26).
+    return this.fetchHistoryMediaBytes(path, sha256, mediaBytesExpected(options.expected), HISTORY_MEDIA_MAX_BYTES, false);
+  }
+
+  /** A granted event blob on the visible-session route; never falls back to owner-only history media. */
+  async eventBlob(sessionId: string, sha256: string, expected?: MediaBytesExpected): Promise<HistoryMediaBytes | null> {
+    if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) throw new Error("bad media session id");
+    if (typeof sha256 !== "string" || !HISTORY_MEDIA_SHA256.test(sha256)) throw new Error("bad media hash");
+    const path = `/v2/sessions/${encodeURIComponent(sessionId)}/blobs/${sha256}`;
+    return this.fetchHistoryMediaBytes(path, sha256, mediaBytesExpected(expected), HISTORY_MEDIA_DESCRIPTOR_MAX_BYTES, true);
+  }
+
+  /** Streaming, authenticated bytes only: no arrayBuffer/text/base64 detour, including errors. `verifyDigest`: the sha names the
+   *  bytes themselves (event blobs) and a mismatch is refused; history media refs are cache keys and are not hashed. */
+  private async fetchHistoryMediaBytes(path: string, sha256: string, expected: MediaBytesExpected | undefined, maxBytes: number, verifyDigest: boolean): Promise<HistoryMediaBytes | null> {
+    const controller = new AbortController();
+    const deadline = Date.now() + 15000;
+    let response: Response | undefined, reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    const cancel = () => {
+      controller.abort();
+      try { void (reader ? reader.cancel() : response?.body?.cancel())?.catch(() => {}); } catch { /* already closed */ }
+    };
+    const timeoutError = () => new CutexApiError(408, "history_media_timeout", "history media read timed out", true);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => { cancel(); reject(timeoutError()); }, 15000);
+    });
+    const read = async (): Promise<HistoryMediaBytes | null> => {
+      try {
+        response = await this.fetchRaw(this.url(path), { headers: this.headers({ Accept: "*/*" }), redirect: "error", signal: controller.signal }, { jsonErrorsOnly: true });
+        if (controller.signal.aborted || Date.now() >= deadline) { cancel(); throw timeoutError(); }
+        if (response.status === 403 || response.status === 404 || response.status === 405) { cancel(); return null; }
+        if (!response.ok) {
+          cancel();
+          throw new CutexApiError(response.status, `http_${response.status}`, `history media request failed (${response.status})`, response.status >= 500);
+        }
+        const rawMime = response.headers.get("content-type") ?? "";
+        const mime = rawMime.length <= 512 ? rawMime.split(";", 1)[0]!.trim().toLowerCase() : "";
+        if (!historyMediaMime(mime) || (expected && mime !== expected.mime)) { cancel(); return null; }
+        const cap = expected?.size ?? maxBytes;
+        const rawLength = response.headers.get("content-length");
+        const length = rawLength === null ? null : /^[0-9]+$/.test(rawLength) ? Number(rawLength) : NaN;
+        if (length !== null && (!Number.isSafeInteger(length) || length <= 0 || length > cap || (expected && length !== expected.size))) { cancel(); return null; }
+        if (!response.body) return null;
+        reader = response.body.getReader();
+        // Grow a bounded contiguous buffer instead of retaining arbitrarily many tiny chunks.
+        let buffer = new Uint8Array(0);
+        let size = 0;
+        for (;;) {
+          const chunk = await reader.read();
+          if (controller.signal.aborted || Date.now() >= deadline) throw timeoutError();
+          if (chunk.done) break;
+          if (!(chunk.value instanceof Uint8Array) || chunk.value.byteLength > cap - size) { cancel(); return null; }
+          const nextSize = size + chunk.value.byteLength;
+          if (nextSize > buffer.length) {
+            const grown = new Uint8Array(Math.min(cap, Math.max(65536, buffer.length * 2, nextSize)));
+            grown.set(buffer.subarray(0, size));
+            buffer = grown;
+          }
+          buffer.set(chunk.value, size);
+          size = nextSize;
+        }
+        if (size === 0 || (expected && size !== expected.size) || (length !== null && size !== length)) { cancel(); return null; }
+        const bytes = buffer.length === size ? buffer : buffer.slice(0, size);
+        if (!verifyDigest) return { bytes, mime, size };
+        if (!globalThis.crypto?.subtle) { cancel(); return null; }
+        const digest = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", bytes));
+        if (controller.signal.aborted || Date.now() >= deadline) throw timeoutError();
+        const hash = Array.from(digest, byte => byte.toString(16).padStart(2, "0")).join("");
+        if (hash !== sha256) { cancel(); return null; }
+        return { bytes, mime, size };
+      } catch (error) {
+        cancel();
+        if (error instanceof CutexApiError) throw error;
+        throw new CutexUnreachableError(this.endpoint.baseUrl, error);
+      } finally {
+        reader?.releaseLock();
+      }
+    };
+    try {
+      return await Promise.race([read(), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async fetchImage(path: string, maxBytes: number): Promise<UserAvatar | null> {
     const url = this.url(path);
     let response: Response;
     try {
-      response = await this.fetchImpl(url, { headers: this.headers({ Accept: "image/*" }) });
+      response = await this.fetchRaw(url, { headers: this.headers({ Accept: "image/*" }) });
     } catch (error) {
       throw new CutexUnreachableError(this.endpoint.baseUrl, error);
     }
-    if (response.status === 404 || response.status === 403 || response.status === 405) return null;
+    if (response.status === 404 || response.status === 403 || response.status === 405) {
+      await response.body?.cancel();
+      return null;
+    }
     if (!response.ok) {
       const text = await response.text().catch(() => "");
       let body: unknown = text;
@@ -1296,7 +1555,10 @@ export class CutexClient {
       throw CutexApiError.fromBody(response.status, body);
     }
     const contentType = (response.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase() as AvatarContentType;
-    if (!AVATAR_CONTENT_TYPES.includes(contentType)) return null;
+    if (!AVATAR_CONTENT_TYPES.includes(contentType)) {
+      await response.body?.cancel();
+      return null;
+    }
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.length === 0 || bytes.length > maxBytes) return null;
     let binary = "";
@@ -1305,10 +1567,88 @@ export class CutexClient {
     return { contentType, data: btoa(binary), etag };
   }
 
+  // r266 owner controls. Probe capability before EVERY new route; older daemons see only discovery.
+  /** Coalesce concurrent new-feature discovery only; no retained authority/capability cache. */
+  private delegationCapabilities(): Promise<{featureList: string[]; user?: unknown} | null> {
+    if (this.delegationDiscovery) return this.delegationDiscovery;
+    const pending=this.capabilities<{featureList: string[]; user?: unknown}>();
+    this.delegationDiscovery=pending;
+    const clear=()=>{if(this.delegationDiscovery===pending)this.delegationDiscovery=undefined;};
+    pending.then(clear,clear);
+    return pending;
+  }
+  private async delegationFeature(feature: typeof DELEGATION_CAPABILITIES[keyof typeof DELEGATION_CAPABILITIES]): Promise<void> {
+    const caps = await this.delegationCapabilities();
+    requireDelegationCapability(caps, feature);
+    if (!userAccessOf(caps).isOwner) throw new Error("owner delegation route required");
+  }
+  async delegationTree(projectId: string, query: DelegationTreeQuery = {}): Promise<DelegationTreePage> {
+    const id = delegationId(projectId); const q: Record<string, string> = {};
+    if (query.cursor !== undefined) { if (typeof query.cursor !== "string" || query.cursor.length > 1024) throw new Error("bad tree cursor"); q.cursor = query.cursor; }
+    if (query.limit !== undefined) { if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 200) throw new Error("bad tree limit"); q.limit = String(query.limit); }
+    if (query.rootId !== undefined) q.rootId = delegationId(query.rootId);
+    if (query.rootHostId !== undefined) { if (!query.rootId) throw new Error("rootId required"); q.rootHostId = delegationId(query.rootHostId); }
+    await this.delegationFeature(DELEGATION_CAPABILITIES.tree);
+    return this.request("GET", `/v2/projects/${id}/delegations`, { query: q });
+  }
+  async delegationAttempts(id: string, cursor?: string): Promise<DelegationAttempts> {
+    delegationId(id); if (cursor !== undefined && !/^\d{1,16}$/.test(cursor)) throw new Error("bad attempt cursor");
+    await this.delegationFeature(DELEGATION_CAPABILITIES.tree);
+    return this.request("GET", `/v2/delegations/${id}/attempts`, { query: cursor === undefined ? {} : { cursor } });
+  }
+  async delegationPolicy(projectId: string): Promise<DelegationPolicy> {
+    delegationId(projectId); await this.delegationFeature(DELEGATION_CAPABILITIES.routing);
+    return this.request("GET", `/v2/projects/${projectId}/delegation-policy`);
+  }
+  async delegationGrants(projectId: string): Promise<DelegationGrants> {
+    delegationId(projectId); await this.delegationFeature(DELEGATION_CAPABILITIES.routing);
+    return this.request("GET", `/v2/projects/${projectId}/delegation-grants`);
+  }
+  async delegationApprovals(projectId: string): Promise<{ routingApprovals: DelegationApproval[] }> {
+    delegationId(projectId); await this.delegationFeature(DELEGATION_CAPABILITIES.routing);
+    return this.request("GET", `/v2/projects/${projectId}/delegation-approvals`);
+  }
+  async delegationApproval(id: string): Promise<DelegationApproval> {
+    delegationId(id); await this.delegationFeature(DELEGATION_CAPABILITIES.routing);
+    return this.request("GET", `/v2/delegation-approvals/${id}`);
+  }
+  async projectRunControl(projectId: string): Promise<ProjectRunControl> {
+    delegationId(projectId); await this.delegationFeature(DELEGATION_CAPABILITIES.runControl);
+    return this.request("GET", `/v2/projects/${projectId}/run-control`);
+  }
+  async delegationControl(request: DelegationControlRequest): Promise<DelegationOperationResult> {
+    const route = delegationControlRoute(request);
+    await this.delegationFeature(route.capability);
+    return this.request(route.method, route.path, { body: route.body, retryable: false });
+  }
+  async delegationOperation(actionId: string): Promise<DelegationOperationLookup> {
+    delegationId(actionId);
+    const caps = await this.delegationCapabilities();
+    if (!userAccessOf(caps).isOwner) throw new Error("owner delegation route required");
+    if (![DELEGATION_CAPABILITIES.routing, DELEGATION_CAPABILITIES.tree, DELEGATION_CAPABILITIES.runControl, DELEGATION_CAPABILITIES.continuation].some(f => caps?.featureList?.includes(f))) throw new Error("unsupported delegation receipts");
+    return this.request("GET", `/v2/delegation-operations/${actionId}`);
+  }
+  async permanentRetirementReview(request: PermanentRetirementReviewRequest): Promise<PermanentRetirementReview> {
+    const body = { cutex_session_id: delegationId(request.cutex_session_id) };
+    const caps = await this.delegationCapabilities();
+    if (!userAccessOf(caps).isOwner) throw new Error("owner delegation route required");
+    if (!caps?.featureList?.includes("agent-archive-kind-v1")) throw new Error("unsupported permanent retirement");
+    return this.request("POST", "/v2/agent-management/permanent-retirement/review", { body, retryable: false });
+  }
+  async permanentRetirement(request: PermanentRetirementRequest): Promise<AgentArchiveReceipt> {
+    delegationId(request.action_id); delegationId(request.cutex_session_id);
+    if (typeof request.confirmed_name !== "string" || typeof request.confirmation_token !== "string" || !request.confirmation_token || !Number.isSafeInteger(request.expected_revision) || request.expected_revision < 0) throw new Error("bad retirement request");
+    const body = { action_id: request.action_id, cutex_session_id: request.cutex_session_id, confirmed_name: request.confirmed_name, confirmation_token: request.confirmation_token, expected_revision: request.expected_revision };
+    const caps = await this.delegationCapabilities();
+    if (!userAccessOf(caps).isOwner) throw new Error("owner delegation route required");
+    if (!caps?.featureList?.includes("agent-archive-kind-v1")) throw new Error("unsupported permanent retirement");
+    return this.request("POST", "/v2/agent-management/permanent-retirement/execute", { body, retryable: false });
+  }
+
   // ---------- delegations (asks, delegation-views) ----------
 
   /** `GET /v2/asks`. Null when the daemon has no asks route (404 / 405). */
-  async asks<T = JsonObject>(filter: AskQuery = {}): Promise<T[] | null> {
+  async asks<T = JsonObject>(filter: AskQuery = {}, options: ReadOptions = {}): Promise<T[] | null> {
     const query: Record<string, string> = {};
     for (const key of ["project", "requester", "target", "involving", "state"] as const) {
       const v = filter[key];
@@ -1316,7 +1656,7 @@ export class CutexClient {
     }
     if (typeof filter.limit === "number" && filter.limit > 0) query.limit = String(Math.min(1000, Math.floor(filter.limit)));
     try {
-      const r = await this.request<{ asks?: T[] }>("GET", "/v2/asks", { query });
+      const r = await this.request<{ asks?: T[] }>("GET", "/v2/asks", { query, ...options });
       return r.asks ?? [];
     } catch (error) {
       if (isMissingRoute(error)) return null;
@@ -1383,7 +1723,7 @@ export class CutexClient {
     const url = this.url(`/v2/sessions/${encodeURIComponent(sessionId)}/attachments`);
     let response: Response;
     try {
-      response = await this.fetchImpl(url, {
+      response = await this.fetchRaw(url, {
         method: "POST",
         headers: this.headers({ "Content-Type": mime }),
         body: bytes,

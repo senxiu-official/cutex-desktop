@@ -1,3 +1,4 @@
+import { isImeComposing } from "../../lib/ime";
 // 复制到其他主机 (cutex `profile-transfer`; docs/research/profile-migration-design-20261016.md §7): one
 // page — target host (connected hosts whose cutex imports), new name (the source name, else a free
 // one on the target), the credential row of this profile's kind (API key: 「同时复制 API key」, on by
@@ -13,10 +14,10 @@ import { useI18n } from "../../i18n";
 import { transferWarningText } from "../../lib/profileTransfer";
 import { useTransferTargets } from "../../lib/useTransferTargets";
 import { setSettingsHost } from "../../lib/settingsHost";
-import { daemonApiOf } from "../../lib/targetHost";
+import { daemonApiOf, TargetHostContext } from "../../lib/targetHost";
 import { useHostScope } from "../../lib/useHostScope";
 import { useApp } from "../../store";
-import { Checkbox } from "./Form";
+import { Checkbox, SettingsGroup } from "./Form";
 
 export function CopyProfileToHostDialog({ item, sourceHostId, onClose }: { item: ProfileItem; sourceHostId: string; onClose(): void }) {
   const { t } = useI18n();
@@ -98,7 +99,7 @@ export function CopyProfileToHostDialog({ item, sourceHostId, onClose }: { item:
         aria-labelledby="profile-transfer-title"
         data-testid="profile-transfer-dialog"
         className="w-[30rem] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-surface p-4 shadow-2xl"
-        onKeyDown={(e) => e.key === "Escape" && !busy && onClose()}
+        onKeyDown={(e) => !isImeComposing(e) && (e.key === "Escape" && !busy && onClose())}
       >
         <div id="profile-transfer-title" className="mb-1 flex items-center gap-2 text-sm font-medium">
           <ArrowRightLeft size={16} className="shrink-0 text-muted" />
@@ -127,7 +128,7 @@ export function CopyProfileToHostDialog({ item, sourceHostId, onClose }: { item:
             </div>
           </div>
         ) : (
-          <form
+          <TargetHostContext.Provider value={target || null}><SettingsGroup agents="newAgents" source="host"><form
             className="flex flex-col gap-3"
             onSubmit={(e) => {
               e.preventDefault();
@@ -187,7 +188,7 @@ export function CopyProfileToHostDialog({ item, sourceHostId, onClose }: { item:
                 {busy ? t("agent-config.profile.transfer.copying") : t("agent-config.profile.transfer.copy")}
               </button>
             </div>
-          </form>
+          </form></SettingsGroup></TargetHostContext.Provider>
         )}
       </div>
     </div>

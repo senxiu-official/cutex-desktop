@@ -4,6 +4,7 @@
 // approvals / questions, the 「接下来」 queue and a slim composer.
 // The store keeps it live while this body is mounted (retainView). The agent open in the main area
 // shows a placeholder here (已在主区打开 · 换回) instead of rendering twice.
+import { isImeComposing } from "../../lib/ime";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftRight, ArrowUp, Square } from "lucide-react";
 import { useI18n } from "../../i18n";
@@ -14,7 +15,7 @@ import { useComposerDraft } from "../../lib/composerDrafts";
 import { useHostAccess } from "../../lib/hostAccess";
 import { agentRetraction, retractNotify } from "../../lib/notifyEvents";
 import { hasUnlandedTurn, outboxAt, visibleQueue } from "../../lib/outbox";
-import { pendingFollowKey } from "../../lib/stickToBottom";
+import { pendingFollowKey, scrollFollow, turnFollowKey, watchScrollIntent, type ScrollIntentWatch } from "../../lib/stickToBottom";
 import { useKeepOnPrepend } from "../../lib/keepOnPrepend";
 import { pausedSection } from "../../lib/queuePause";
 import { SIDE_AGENT_COMPONENT, type SideAgentParams } from "../../lib/sideKinds";
@@ -22,6 +23,7 @@ import { stopHeld } from "../../lib/stopHold";
 import { orderedEntries } from "../../lib/timeline";
 import { markSeenOn } from "../../lib/turnUnread";
 import { agentHost, agentState, useApp, viewOf, type SessionView } from "../../store";
+import { useShownInWindow } from "../../lib/windowScope";
 import { viewKey } from "../../lib/viewKey";
 import { canSend } from "../../../../shared/users";
 import { Avatar } from "../../components/Avatar";
@@ -32,10 +34,13 @@ import type { SessionResource } from "@cutex-desktop/protocol";
 import type { SideBodyProps } from "../slots";
 import { useAgentResource, useInMain, useSince } from "./sideAgentData";
 import { useNames } from "./turnPeekData";
+import { useOwnerWindow } from "../../lib/ownerContext";
+import { resizeObserverFor } from "../../lib/ownerWindow";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function SideAgentBody({ instance, hostId, visible, open, close }: SideBodyProps<SideAgentParams>) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const sessionId = instance.state.sessionId;
   const focus = useApp((s) => s.hosts?.active ?? "local");
@@ -53,18 +58,19 @@ export function SideAgentBody({ instance, hostId, visible, open, close }: SideBo
   useEffect(() => {
     if (live) useApp.getState().setViewVisible(host, sessionId, shown);
   }, [live, host, sessionId, shown]);
+  useShownInWindow(host, sessionId, live && shown);
   // Looking at it takes back its alerts and its done / failed mark, like opening it in the main area.
   useEffect(() => {
     if (!shown) return;
     const look = () => {
-      if (!document.hasFocus()) return;
+      if (!win.document.hasFocus()) return;
       markSeenOn(host, sessionId);
       retractNotify(agentRetraction(sessionId));
     };
     look();
-    window.addEventListener("focus", look);
-    return () => window.removeEventListener("focus", look);
-  }, [shown, host, sessionId]);
+    win.addEventListener("focus", look);
+    return () => win.removeEventListener("focus", look);
+  }, [shown, host, sessionId, win]);
   // 换回: the agent the main area showed before this one (same host).
   const selected = useApp((s) => (agentHost(s) === host ? s.selectedId : null));
   const [before, setBefore] = useState<string | null>(null);
@@ -104,7 +110,7 @@ export function SideAgentBody({ instance, hostId, visible, open, close }: SideBo
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-2">
-        <Avatar name={name} avatar={resource?.avatar} seed={sessionId} size={24} />
+        <Avatar name={name} avatar={resource?.avatar} seed={sessionId} size={28} />
         <div className="min-w-0 flex-1 leading-tight">
           <div className="truncate text-sm font-semibold">{name}</div>
           <StatusLine sessionId={sessionId} hostId={host} resource={resource} />
@@ -140,46 +146,66 @@ function StatusLine({ sessionId, hostId, resource }: { sessionId: string; hostId
         : status && status !== "online"
           ? [t("conversation.agent.offline"), "text-subtle"]
           : [t("conversation.agent.idle"), "text-subtle"];
-  return <div className={`truncate text-[11px] ${tone}`}>{text}</div>;
+  return <div className={`truncate text-caption/[inherit] ${tone}`}>{text}</div>;
 }
 
-function SideAgentConversation({ sessionId, hostId, name, resource }: { sessionId: string; hostId: string; name: string; resource: SessionResource | undefined }) {
+/** The live timeline and slim composer (also the projection's body, Projection.tsx): sends go to this agent only. */
+export function SideAgentConversation({ sessionId, hostId, name, resource }: { sessionId: string; hostId: string; name: string; resource: SessionResource | undefined }) {
   const { t } = useI18n();
   const view = useApp((s) => viewOf(s, hostId, sessionId));
   const names = useNames(hostId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const entries = useMemo(() => (view ? orderedEntries(view.timeline) : []), [view?.version, view?.timeline]);
   const pendingSends = useApp((s) => pendingFollowKey(agentState(s.outbox, hostId, sessionId)));
-  // Stick to the bottom while the owner is there (scrolling up lets go).
+  // Stick to the bottom while the owner is there: only their own scrolling up lets go, not the layout
+  // moving the position (lib/stickToBottom scrollFollow / watchScrollIntent).
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const lastScroll = useRef<{ top: number; clientHeight: number } | null>(null);
+  const intent = useRef<ScrollIntentWatch | null>(null);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const watch = watchScrollIntent(el);
+    intent.current = watch;
+    return () => {
+      watch.dispose();
+      if (intent.current === watch) intent.current = null;
+    };
+  }, []);
   const onScroll = () => {
     const el = scroller.current;
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    if (!el) return;
+    const prev = lastScroll.current;
+    lastScroll.current = { top: el.scrollTop, clientHeight: el.clientHeight };
+    const next = scrollFollow(stick.current, prev, { top: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }, intent.current?.user() ?? true);
+    stick.current = next.stick;
+    if (next.snap) el.scrollTop = el.scrollHeight;
   };
+  const turnKey = turnFollowKey(view?.timeline);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [entries, pendingSends, view?.loading]);
+  }, [entries, pendingSends, view?.loading, turnKey]);
   // Older turns paged in at the top (scrolling up to 加载更早): stay on the turn being read instead of
   // landing on the thread's first turns.
   useKeepOnPrepend(scroller, sessionId, view?.timeline.turns[0]?.id ?? null, stick);
   useEffect(() => {
     const el = content.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => {
+    const ro = resizeObserverFor(el, () => {
       if (stick.current && scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
     });
-    ro.observe(el);
-    return () => ro.disconnect();
+    ro?.observe(el);
+    return () => ro?.disconnect();
   }, []);
   const access = useHostAccess(hostId);
   const archived = isArchived(resource);
   const pending = view && view.timeline.pending.size > 0 ? [...view.timeline.pending.values()] : null;
   return (
     <>
-      <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-[13px]">
+      <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-ui/[inherit]">
         <div ref={content}>
           {(!view || view.loading) && <p className="text-xs text-subtle">{t("conversation.loading")}</p>}
           {view?.error && (
@@ -207,7 +233,7 @@ function SideAgentConversation({ sessionId, hostId, name, resource }: { sessionI
           )}
         </div>
       </div>
-      {pending && <InteractionDock pending={pending} takeFocus={false} onReply={(request, reply) => void useApp.getState().respond(request.id, reply, sessionId, hostId)} />}
+      {pending && <InteractionDock pending={pending} takeFocus={false} runtime={agentFeaturesOf(resource).runtime} onReply={(request, reply) => void useApp.getState().respond(request.id, reply, sessionId, hostId)} />}
       {archived ? (
         <p className="shrink-0 px-3 pb-2 text-xs text-subtle">{t("conversation.agent.archived")}</p>
       ) : !canSend(access) ? null : (
@@ -254,6 +280,7 @@ function SideComposer({ sessionId, hostId, name, view, resource }: { sessionId: 
     <div className="shrink-0 px-2 pb-2">
       <QueuePanel
         sessionId={sessionId}
+        hostId={hostId}
         steers={pendingSteers ?? []}
         sendingSteers={outboxAt(outbox, "steer")}
         sendingQueue={outboxAt(outbox, "queue")}
@@ -273,24 +300,24 @@ function SideComposer({ sessionId, hostId, name, view, resource }: { sessionId: 
         onSendNow={noSteer && sendBusy ? undefined : (item) => void app().queueSendNow(item, sessionId, hostId).catch(report)}
         sendNowStartsTurn={!sendBusy}
         onDelete={(item) => void app().queueRemove(item, sessionId, hostId).catch(report)}
-        onEdit={(item) => void app().queueTakeForEdit(item, sessionId, hostId).then((value) => setText(value), report)}
+        onEdit={(item) => void app().queueTakeForEdit(item, sessionId, hostId).catch(report)}
         stopHold={stopHeld(view.asksPaused)}
         running={busy}
       />
-      {error && <p className="px-1 pb-1 text-[11px] text-danger">{error}</p>}
+      {error && <p className="px-1 pb-1 text-caption/[inherit] text-danger">{error}</p>}
       <div className="flex items-end gap-1.5 rounded-xl border border-border bg-surface px-2 py-1.5 focus-within:border-accent/60">
         <textarea
           value={text}
           rows={1}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
               e.preventDefault();
               send();
             }
           }}
           placeholder={busy ? t(noSteer ? "conversation.agent.busyQueue" : "conversation.agent.busySteer") : t("conversation.agent.placeholder", { name })}
-          className="max-h-40 min-h-[22px] flex-1 resize-none bg-transparent text-[13px] leading-5 outline-none [field-sizing:content] placeholder:text-subtle"
+          className="max-h-40 min-h-[22px] flex-1 resize-none bg-transparent text-ui/[inherit] leading-5 outline-none [field-sizing:content] placeholder:text-subtle"
         />
         {busy && (
           <button onClick={stop} disabled={stopping} title={t("conversation.agent.stop")} aria-label={t("conversation.agent.stop")} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-2 text-foreground hover:bg-hover disabled:opacity-50">

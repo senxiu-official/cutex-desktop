@@ -2,13 +2,18 @@
 // agent-tool line and the delegation ASK / results rows, ungated like the baseline (the 委托 card
 // itself stays in modules/delegations behind agent-asks). Contract 1.4 (§19): the core reference
 // component (one turn as a reference card / right-side card; the RFC's `turn.peek`).
-import { MessageSquareText, PanelRightOpen } from "lucide-react";
+import { MessageSquareText, MessagesSquare, PanelRightOpen } from "lucide-react";
+import { projectInto } from "../../lib/workspaces";
 import { openAgentSide } from "../../lib/sideOpen";
-import { ConversationPage } from "../../components/settings/AppSettings";
 import { isAgentTaskTool } from "../../lib/taskRows";
 import { defineModule } from "../slots";
 import { AgentToolRow, AskReceivedRow, ResultsReceivedRow } from "./TimelineRows";
 import { turnPeekComponent } from "./turnPeekItem";
+import { projectionComponent } from "./projectionItem";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const ConversationPage = lazyPage(() => import("../../components/settings/AppSettings").then((m) => m.ConversationPage));
 
 export default defineModule({
   id: "conversation",
@@ -16,7 +21,7 @@ export default defineModule({
   descriptionKey: "conversation.description",
   required: true,
   contributes: {
-    "settings.page": [{ id: "conversation.settings", page: "conversation", group: "app", order: 300, icon: MessageSquareText, titleKey: "conversation.page", source: "local", hintKey: "conversation.pageHint", Page: ConversationPage, sections: [{ anchor: "titleBar", titleKey: "shell.sidebar.titleBar", keywords: ["appearance.titleTwoLines", "appearance.runtimeButton"] }, { anchor: "display", titleKey: "conversation.display", keywords: ["conversation.reasoningView", "conversation.interactions", "conversation.agentMessages", "conversation.timelineIntro", "conversation.turnSummary", "appearance.messageImages", "notes.showTimeline", "notes.showTimelineHint"] }, { anchor: "fold", titleKey: "conversation.longSection", keywords: ["conversation.timelineTurns", "appearance.fold", "appearance.foldLong", "appearance.foldLines", "appearance.foldLong.mine", "appearance.foldLong.all"] }] }],
+    "settings.page": [{ id: "conversation.settings", page: "conversation", group: "app", order: 300, icon: MessageSquareText, titleKey: "settings.panel.conversation", source: "local", hintKey: "conversation.pageHint", Page: ConversationPage, sections: [{ anchor: "titleBar", titleKey: "shell.sidebar.titleBar", keywords: ["appearance.titleTwoLines", "appearance.runtimeButton"] }, { anchor: "display", titleKey: "conversation.display", keywords: ["conversation.reasoningView", "conversation.interactions", "conversation.agentMessages", "conversation.timelineIntro", "conversation.turnSummary", "appearance.messageImages", "notes.showTimeline", "notes.showTimelineHint"] }, { anchor: "fold", titleKey: "conversation.longSection", keywords: ["conversation.timelineTurns", "appearance.fold", "appearance.foldLong", "appearance.foldLines", "appearance.foldLong.mine", "appearance.foldLong.all"] }] }],
     // Delegation ASK / results are rendered by schema whatever the host supports (baseline, O6).
     "timeline.received": [
       { id: "conversation.delegationAsk", order: 200, schemas: ["cutex.delegation-ask.v1"], Row: AskReceivedRow },
@@ -26,11 +31,17 @@ export default defineModule({
     "timeline.tool": [{ id: "conversation.agentTools", order: 250, match: isAgentTaskTool, Row: AgentToolRow }],
     // The turn reference (§19.4): ungated, like the timeline it reads. v1.17 (§24.4): another agent's
     // live conversation (`conversation.agent`, v1.16) is a conversation pane now — no side component.
-    "side.component": [turnPeekComponent],
+    // §24.13 (owner 2026-10-21): a projection — another agent's live conversation in the focused conversation's Shelf.
+    "side.component": [turnPeekComponent, projectionComponent],
     // 在侧边打开 in every agent menu (sidebar row, title bar, 全部 agent dialog): a conversation pane beside.
     "ref.action": [{ id: "conversation.openAgentSide", titleKey: "conversation.agent.openSide", icon: PanelRightOpen, kinds: ["agent"], run: (ref) => {
       const sessionId = ref.params.sessionId ?? ref.key;
       if (sessionId) openAgentSide(sessionId, ref.hostId);
+    } },
+    // §24.13: 投影 — the agent as a live conversation pane in the focused conversation's Shelf.
+    { id: "conversation.projectAgent", titleKey: "conversation.projection.menu", icon: MessagesSquare, kinds: ["agent"], run: (ref) => {
+      const sessionId = ref.params.sessionId ?? ref.key;
+      if (sessionId) projectInto(ref.hostId, sessionId);
     } }],
   },
 });

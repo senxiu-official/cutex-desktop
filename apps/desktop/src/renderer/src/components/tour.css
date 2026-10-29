@@ -1,0 +1,396 @@
+/* The 0.2.0 tour's drawings (components/TourArt): small mock-ups of the real UI in the theme's own colours, moving
+   with CSS keyframes only (transform / opacity), one loop each; prefers-reduced-motion = the end frame, still. */
+
+.tour-art {
+  position: relative;
+  height: 100%;
+  min-height: 260px;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  background: var(--bg);
+}
+.tour-col {
+  position: absolute;
+  top: 12px;
+  bottom: 52px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.tour-ln {
+  height: 6px;
+  margin: 7px 0;
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+.tour-av {
+  position: relative;
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+.tour-tray {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  left: 10px;
+  display: flex;
+  height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.tour-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border);
+}
+.tour-capsule {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+}
+.tour-pin::after {
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--surface);
+  border-radius: 50%;
+  background: var(--danger);
+  content: "";
+}
+.tour-label {
+  position: absolute;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Groups: A+B leave for the tray as one capsule, C comes up; then they swap back. */
+@keyframes tour-group-out {
+  0%, 30% { opacity: 1; transform: none; }
+  45%, 80% { opacity: 0; transform: translateY(110px) scale(0.4); }
+  95%, 100% { opacity: 1; transform: none; }
+}
+@keyframes tour-group-in {
+  0%, 30% { opacity: 0; transform: translateY(24px); }
+  45%, 80% { opacity: 1; transform: none; }
+  95%, 100% { opacity: 0; transform: translateY(24px); }
+}
+@keyframes tour-capsule-in {
+  0%, 35% { opacity: 0; transform: translateY(14px); }
+  50%, 80% { opacity: 1; transform: none; }
+  95%, 100% { opacity: 0; transform: translateY(14px); }
+}
+.tour-anim-out { animation: tour-group-out 6s var(--ease-standard) infinite; }
+.tour-anim-in { animation: tour-group-in 6s var(--ease-standard) infinite; }
+.tour-anim-capsule { animation: tour-capsule-in 6s var(--ease-standard) infinite; }
+
+/* Pages: the second page button moves onto the first, the page splits in two panes, Undo shows. */
+.tour-rail {
+  position: absolute;
+  top: 12px;
+  right: 10px;
+  bottom: 12px;
+  display: flex;
+  width: 40px;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.tour-pb {
+  display: flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--fg-muted);
+}
+.tour-pane {
+  position: absolute;
+  right: 58px;
+  left: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.tour-pane-h {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+@keyframes tour-page-drag {
+  0%, 15% { transform: none; opacity: 1; }
+  40% { transform: translateY(-34px); opacity: 1; }
+  45%, 85% { transform: translateY(-34px); opacity: 0; }
+  100% { transform: none; opacity: 1; }
+}
+@keyframes tour-pane-top {
+  0%, 40% { bottom: 12px; }
+  50%, 85% { bottom: calc(50% + 4px); }
+  100% { bottom: 12px; }
+}
+@keyframes tour-pane-bottom {
+  0%, 40% { opacity: 0; transform: translateY(40px); }
+  50%, 85% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translateY(40px); }
+}
+@keyframes tour-undo {
+  0%, 45% { opacity: 0; }
+  55%, 85% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.tour-anim-pagedrag { animation: tour-page-drag 6s var(--ease-standard) infinite; }
+.tour-anim-panetop { animation: tour-pane-top 6s var(--ease-standard) infinite; }
+.tour-anim-panebottom { animation: tour-pane-bottom 6s var(--ease-standard) infinite; }
+.tour-anim-undo { animation: tour-undo 6s linear infinite; }
+.tour-undo {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  translate: -50% 0;
+  padding: 3px 10px;
+  border-radius: 9px;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Look: the running ring turns. */
+@keyframes tour-spin {
+  to { transform: rotate(360deg); }
+}
+.tour-ring {
+  position: absolute;
+  inset: -3px;
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: tour-spin 1.6s linear infinite;
+}
+.tour-badge {
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border: 2px solid var(--bg);
+  border-radius: 999px;
+  background: var(--danger-solid);
+  color: #fff;
+  font-size: 9.5px;
+  line-height: 11px;
+  text-align: center;
+}
+.tour-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+/* More: the stop-idle row arms, then the undo toast. */
+@keyframes tour-arm {
+  0%, 30% { background: transparent; color: var(--fg); }
+  40%, 65% { background: var(--danger-solid); color: #fff; }
+  75%, 100% { background: transparent; color: var(--fg); }
+}
+.tour-anim-arm { animation: tour-arm 5s linear infinite; }
+@keyframes tour-undo-late {
+  0%, 68% { opacity: 0; }
+  75%, 95% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.tour-anim-undolate { animation: tour-undo-late 5s linear infinite; }
+
+/* Intro: you ask, the agent works (tool rows tick in), the ring turns. */
+.tour-bubble {
+  width: fit-content;
+  margin-left: auto;
+  padding: 8px 10px;
+  border-radius: 12px 12px 4px 12px;
+  background: var(--accent);
+}
+.tour-tool {
+  margin: 0 0 6px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--fg-muted);
+  font: 10.5px var(--font-mono);
+}
+.tour-composer {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+@keyframes tour-show-1 { 0%, 8% { opacity: 0; transform: translateY(6px); } 15%, 88% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+@keyframes tour-show-2 { 0%, 25% { opacity: 0; transform: translateY(6px); } 32%, 88% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+@keyframes tour-show-3 { 0%, 42% { opacity: 0; transform: translateY(6px); } 49%, 88% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+@keyframes tour-show-4 { 0%, 59% { opacity: 0; transform: translateY(6px); } 66%, 88% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+.tour-anim-ask { animation: tour-show-1 7s var(--ease-standard) infinite; }
+.tour-anim-tool1 { animation: tour-show-2 7s var(--ease-standard) infinite; }
+.tour-anim-tool2 { animation: tour-show-3 7s var(--ease-standard) infinite; }
+.tour-anim-tool3 { animation: tour-show-4 7s var(--ease-standard) infinite; }
+
+/* Project: the Director, then members one by one, each result coming back. */
+.tour-tag {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--fg-muted);
+  font-size: 10.5px;
+}
+.tour-member {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 0 30px;
+}
+.tour-branch {
+  position: absolute;
+  top: -14px;
+  left: -17px;
+  width: 14px;
+  height: 25px;
+  border-bottom: 1.5px solid var(--border);
+  border-left: 1.5px solid var(--border);
+  border-bottom-left-radius: 6px;
+}
+.tour-result {
+  color: var(--ok);
+  font-size: 12px;
+  font-weight: 700;
+}
+.tour-anim-member1 { animation: tour-show-1 7s var(--ease-standard) infinite; }
+.tour-anim-member2 { animation: tour-show-2 7s var(--ease-standard) infinite; }
+.tour-anim-member3 { animation: tour-show-3 7s var(--ease-standard) infinite; }
+.tour-anim-member1 .tour-result, .tour-anim-member2 .tour-result, .tour-anim-member3 .tour-result { animation: tour-show-4 7s var(--ease-standard) infinite; }
+
+/* Look: a face as components/Avatar draws it (picture / emoji / letter). */
+.tour-face {
+  position: relative;
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.tour-face img { width: 100%; height: 100%; object-fit: cover; border-radius: 999px; }
+.tour-face-edge { position: absolute; inset: 0; border-radius: 999px; pointer-events: none; }
+
+/* Window: a soft highlight goes from part to part. */
+.tour-part {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.tour-part-desktop {
+  position: absolute;
+  right: 14px;
+  bottom: 48px;
+  color: var(--fg-subtle);
+  font-size: 11px;
+}
+@keyframes tour-part-lit {
+  0%, 2% { border-color: var(--border); box-shadow: none; color: var(--fg-muted); }
+  6%, 16% { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); color: var(--fg); }
+  20%, 100% { border-color: var(--border); box-shadow: none; color: var(--fg-muted); }
+}
+@keyframes tour-desktop-lit {
+  0%, 2% { color: var(--fg-subtle); }
+  6%, 16% { color: var(--accent); }
+  20%, 100% { color: var(--fg-subtle); }
+}
+.tour-anim-part1 { animation: tour-part-lit 10s linear infinite; }
+.tour-anim-part2 { animation: tour-part-lit 10s linear 2s infinite; }
+.tour-anim-part3 { animation: tour-part-lit 10s linear 4s infinite; }
+.tour-anim-part4 { animation: tour-part-lit 10s linear 6s infinite; }
+.tour-anim-part5 { animation: tour-desktop-lit 10s linear 8s infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-anim-out,
+  .tour-anim-in,
+  .tour-anim-capsule,
+  .tour-anim-pagedrag,
+  .tour-anim-panetop,
+  .tour-anim-panebottom,
+  .tour-anim-undo,
+  .tour-anim-arm,
+  .tour-anim-undolate,
+  .tour-anim-ask,
+  .tour-anim-tool1,
+  .tour-anim-tool2,
+  .tour-anim-tool3,
+  .tour-anim-member1,
+  .tour-anim-member2,
+  .tour-anim-member3,
+  .tour-result,
+  .tour-anim-part1,
+  .tour-anim-part2,
+  .tour-anim-part3,
+  .tour-anim-part4,
+  .tour-anim-part5,
+  .tour-ring {
+    animation: none;
+  }
+  /* The end frame: C is up, A+B in the tray; the page is merged. */
+  .tour-anim-out { opacity: 0; }
+  .tour-anim-capsule,
+  .tour-anim-in,
+  .tour-anim-panebottom,
+  .tour-anim-undo { opacity: 1; }
+  .tour-anim-panetop { bottom: calc(50% + 4px); }
+  .tour-anim-pagedrag { opacity: 0; }
+}

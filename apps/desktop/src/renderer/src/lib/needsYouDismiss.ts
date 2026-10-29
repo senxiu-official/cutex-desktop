@@ -3,8 +3,13 @@
 // remembers a fingerprint of the need (reasons, count, delegation / notification ids) and a new or
 // different need shows the chip again. Device-local (localStorage, best effort); sidebar badges keep
 // showing the real state. Done / failed chips are dismissed by marking the turn seen (lib/turnUnread).
+// An 出错 chip of a runtime error (cutex runtime.status "error", owner 2026-10-26: members stopped normally
+// kept a red 出错 that could not be closed) is remembered by member + runtimeGeneration + that lastError:
+// the same error stays hidden, a later one (or a failed turn) shows the chip again.
 import { useSyncExternalStore } from "react";
+import type { SessionRuntime } from "@cutex-desktop/protocol";
 import type { AttentionChip, NeedsYou } from "./agentAttention";
+import type { AgentRow } from "./sidebar";
 
 export interface Dismissal {
   /** The need's fingerprint when it was dismissed. */
@@ -25,18 +30,42 @@ export function needFingerprint(need: NeedsYou | undefined): string {
   return JSON.stringify([[...need.reasons].sort(), need.count, need.askIds, need.notificationIds ?? []]);
 }
 
-/** Whether a needs-you chip is hidden by a dismissal (done / error chips never are: they go when seen). */
-export function isDismissed(dismissals: Dismissals, key: string, chip: Pick<AttentionChip, "signal">, need: NeedsYou | undefined): boolean {
-  return chip.signal === "needsYou" && dismissals[key]?.fp === needFingerprint(need);
+/** Which runtime error the member shows (its runtime generation and lastError); null when its runtime is not in error. */
+export function runtimeErrorFingerprint(runtime: Pick<SessionRuntime, "status" | "runtimeGeneration" | "lastError"> | undefined): string | null {
+  if (runtime?.status !== "error") return null;
+  return JSON.stringify([runtime.runtimeGeneration, runtime.lastError ?? null]);
+}
+
+/** The dismissal key of a member's runtime error (beside its needs-you one). */
+export const errorKey = (key: string): string => `error|${key}`;
+
+/**
+ * Whether a chip is hidden by a dismissal: a needs-you chip whose need is unchanged; an 出错 chip whose runtime
+ * error (`runtimeError`, runtimeErrorFingerprint) is the dismissed one and no failed turn waits unseen
+ * (`failedTurn`). Done chips never are: they go when seen.
+ */
+export function isDismissed(dismissals: Dismissals, key: string, chip: Pick<AttentionChip, "signal">, need: NeedsYou | undefined, runtimeError: string | null = null, failedTurn = false): boolean {
+  if (chip.signal === "needsYou") return dismissals[key]?.fp === needFingerprint(need);
+  return chip.signal === "error" && !!runtimeError && !failedTurn && dismissals[errorKey(key)]?.fp === runtimeError;
+}
+
+/**
+ * The one rule for every place that lists 需要你 chips (the strip above the composer, sidebar layout B's 「现在」
+ * cards): what was closed in one is gone in the other too. `key`: the host key; `row`: the agent's row (its
+ * runtime error); `failedTurn`: a failed turn of it waits unseen.
+ */
+export function chipDismissed(dismissals: Dismissals, key: string, chip: Pick<AttentionChip, "signal">, need: NeedsYou | undefined, row: Pick<AgentRow, "session"> | undefined, failedTurn: boolean): boolean {
+  return isDismissed(dismissals, key, chip, need, runtimeErrorFingerprint(row?.session.runtime), failedTurn);
 }
 
 /**
  * Drop stale dismissals: those of agents in view (`current`: host key → the need's fingerprint of
- * every needs-you chip; `inView`: host keys of all rows in view) whose need is gone or changed, and
- * any older than the TTL. The same object when nothing goes.
+ * every needs-you chip, and errorKey(host key) → the runtime error's; `inView`: host keys of all rows in
+ * view) whose need or error is gone or changed, and any older than the TTL. The same object when nothing goes.
  */
 export function pruneDismissals(dismissals: Dismissals, current: ReadonlyMap<string, string>, inView: ReadonlySet<string>, now: number): Dismissals {
-  const stale = Object.entries(dismissals).filter(([key, d]) => now - d.at > DISMISS_TTL_MS || (inView.has(key) && current.get(key) !== d.fp));
+  const rowOf = (key: string) => (key.startsWith("error|") ? key.slice(6) : key);
+  const stale = Object.entries(dismissals).filter(([key, d]) => now - d.at > DISMISS_TTL_MS || (inView.has(rowOf(key)) && current.get(key) !== d.fp));
   if (stale.length === 0) return dismissals;
   const next = { ...dismissals };
   for (const [key] of stale) delete next[key];
@@ -78,6 +107,11 @@ export function getDismissals(): Dismissals {
 /** Hide the needs-you chip of `key` (host key) until its need changes. */
 export function dismissNeed(key: string, need: NeedsYou | undefined, now = Date.now()): void {
   save({ ...current, [key]: { fp: needFingerprint(need), at: now } });
+}
+
+/** Hide the 出错 chip of `key` (host key) while its runtime error (runtimeErrorFingerprint) stays the same. */
+export function dismissRuntimeError(key: string, fingerprint: string, now = Date.now()): void {
+  save({ ...current, [errorKey(key)]: { fp: fingerprint, at: now } });
 }
 
 export function pruneStoredDismissals(currentNeeds: ReadonlyMap<string, string>, inView: ReadonlySet<string>, now = Date.now()): void {

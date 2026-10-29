@@ -19,6 +19,8 @@ import { useTargetHostId, useTargetIsFocus, useTargetSidebar } from "../../lib/t
 import { useApp } from "../../store";
 import { Avatar } from "../../components/Avatar";
 import type { AgentRow } from "../../lib/sidebar";
+import { Tag } from "../../components/Tag";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 export type PickerMode = "add" | "director";
 
@@ -118,18 +120,18 @@ function PickRow({
         aria-label={c.row.name}
         className="h-3.5 w-3.5 accent-[var(--accent)] disabled:opacity-30"
       />
-      <Avatar name={c.row.name} initial={c.row.initial} color={c.row.color} avatar={s.avatar} seed={s.cutexSessionId} size={26} />
+      <Avatar name={c.row.name} initial={c.row.initial} color={c.row.color} avatar={s.avatar} seed={s.cutexSessionId} size={28} />
       <div className="min-w-0 leading-snug">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[c.row.status]}`} title={t(`status.${c.row.status}` as const)} />
-          <span className="truncate text-[13px] font-medium" title={c.row.name}>
+          <span className="truncate text-ui/[inherit] font-medium" title={c.row.name}>
             {c.row.name}
           </span>
           {c.row.isDirector && (
-            <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-surface-2 px-1 text-[9px] font-semibold text-muted">
+            <Tag>
               <Crown size={9} />
               {t("sidebar.director")}
-            </span>
+            </Tag>
           )}
         </div>
         {note && (
@@ -143,7 +145,7 @@ function PickRow({
           {profile ?? "—"}
         </div>
         {model && (
-          <div className="truncate text-[11px] text-subtle" title={rawIdTitle(model, modelShown) ?? model}>
+          <div className="truncate text-caption/[inherit] text-subtle" title={rawIdTitle(model, modelShown) ?? model}>
             {modelShown}
           </div>
         )}
@@ -159,7 +161,7 @@ function PickRow({
           <span className="text-subtle">{t("projects.picker.independent")}</span>
         )}
       </div>
-      <div className="text-right text-[11px] text-subtle tabular-nums">{relativeTime(last)}</div>
+      <div className="text-right text-caption/[inherit] text-subtle tabular-nums">{relativeTime(last)}</div>
     </div>
   );
 }
@@ -185,6 +187,7 @@ export function MemberPicker({
   /** Assigns / switches the Director (confirms itself); resolves false when the owner cancelled. */
   onPickDirector(row: AgentRow): Promise<boolean>;
 }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const model = useSidebarModel();
   const hostId = useTargetHostId();
@@ -225,8 +228,8 @@ export function MemberPicker({
       e.stopPropagation();
       onClose();
     };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    win.addEventListener("keydown", onKey, true);
+    return () => win.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
   const toggle = (id: string) =>
@@ -284,7 +287,7 @@ export function MemberPicker({
   const noMembers = mode === "director" && all.length === 0;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/30 pt-[7vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[7vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-modal aria-label={title} className="flex h-[min(80vh,42rem)] w-[50rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         <header className="flex items-center gap-3 border-b border-border px-4 py-2.5">
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</h2>
@@ -303,7 +306,7 @@ export function MemberPicker({
               onKeyDown={onSearchKey}
               placeholder={t("projects.picker.search")}
               aria-label={t("projects.picker.search")}
-              className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-subtle"
+              className="min-w-0 flex-1 bg-transparent text-ui/[inherit] outline-none placeholder:text-subtle"
             />
           </label>
           <select value={q.status} onChange={(e) => set({ status: e.target.value as MemberPickerQuery["status"] })} className={SELECT} aria-label={t("projects.picker.status.all")}>

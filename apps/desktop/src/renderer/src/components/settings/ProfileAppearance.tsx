@@ -1,12 +1,10 @@
-// Settings → Profiles → <profile> → 外观: colour and provider (cutex PATCH color / providerCategory),
-// then 头像与开场: 头像主题, the picture and the opening (portrait + greeting, lib/introAppearance). A
-// host with cutex `profile-avatar` stores them (lib/profileLooks useProfileLooksSynced); an older one
-// leaves them on this device, and only then is the card tagged 本机. All are drafts saved with the
-// page's sticky bar.
+// One appearance card: host colour, full avatar style (host when supported), host icon/usage category.
+// Pictures and the opening retain their existing host sync / legacy local fallback. All are drafts.
+import { useShownNotice } from "../ProfileLinkedAppearance";
 import { Check, Pipette } from "lucide-react";
 import { useState } from "react";
 import type { ProfileDetail, ProfilePatch } from "../../../../shared/ipc";
-import { useI18n } from "../../i18n";
+import { useI18n, type MessageKey } from "../../i18n";
 import { useProfileAvatar } from "../../lib/profileAvatar";
 import { INTRO_GREETING_MAX, resolveIntroGreeting, resolveIntroPortrait, useIntroAppearanceOf, type IntroDraft } from "../../lib/introAppearance";
 import { useLaunchArt } from "../../lib/launchArt";
@@ -16,51 +14,14 @@ import { PROVIDER_LABEL, profileProvider, type Provider } from "../../lib/provid
 import { resolveTerms, useTermOverrides } from "../../lib/terms";
 import { ProfileAvatar } from "../ProfileAvatar";
 import { ProviderIcon } from "../ProviderIcon";
-import { Button, ResetButton, SettingRow, Section, Select, TextArea } from "./Form";
+import { Button, ResetButton, SettingRow, Section, SettingsGroup, Select, TextArea, Toggle } from "./Form";
+import type { LinkedAppearanceControls } from "../../lib/profileLinkAppearance";
 import { useTargetFeatures } from "../../lib/targetHost";
-import { AVATAR_THEME_IDS, defaultAvatarThemes, themePreview, type AvatarThemeId } from "../../lib/avatarThemes";
-import { emojiTint } from "../../lib/agentEmoji";
-import { avatarThemesOverride, useUiPrefs } from "../../lib/prefs";
+import { getAppAvatarStyle, getProfileAvatarStyle, pendingLocalProfileAvatarStyle, saveLocalProfileAvatarStyle, useAvatarStyleVersion, type AvatarStyle } from "../../lib/avatarStyle";
+import { AvatarStyleLabel, AvatarStylePicker } from "./AvatarStylePicker";
 import { useProfileLooksSynced } from "../../lib/profileLooks";
-import { EmojiGlyph } from "../Avatar";
 
 const CATEGORIES: (Provider | "other")[] = ["kimi", "glm", "zai", "claude", "deepseek", "codex", "other"];
-
-const sameThemes = (a: readonly AvatarThemeId[] | null, b: readonly AvatarThemeId[] | null) => (a === null || b === null ? a === b : a.length === b.length && a.every((x) => b.includes(x)));
-
-/**
- * 头像主题 (owner spec via the lead, 2026-10-18): one toggle per theme, each on / off, at least one on;
- * each shows a few of its emoji. The default emoji comes from the union of the ticked themes.
- */
-function ThemeToggles({ shown, onToggle }: { shown: readonly AvatarThemeId[]; onToggle(id: AvatarThemeId): void }) {
-  const { t } = useI18n();
-  return (
-    <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={t("settings.profile.avatarTheme")}>
-      {AVATAR_THEME_IDS.map((id) => {
-        const on = shown.includes(id);
-        const last = on && shown.length === 1;
-        return (
-          <button
-            key={id}
-            type="button"
-            aria-pressed={on}
-            disabled={last}
-            title={last ? t("settings.profile.avatarTheme.keepOne") : undefined}
-            onClick={() => onToggle(id)}
-            className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default ${on ? "border-accent/60 bg-accent/12 text-foreground" : "border-border text-muted hover:bg-surface-2 hover:text-foreground"}`}
-          >
-            <span className={`flex gap-0.5 ${on ? "" : "opacity-50 grayscale"}`} aria-hidden>
-              {themePreview(id, 3).map((e) => (
-                <EmojiGlyph key={e.code} glyph={e.glyph} size={13} />
-              ))}
-            </span>
-            {t(`avatarTheme.${id}`)}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 function Swatch({ color, selected, title, onClick, children }: { color: string; selected: boolean; title: string; onClick(): void; children?: React.ReactNode }) {
   return (
@@ -78,7 +39,7 @@ function Swatch({ color, selected, title, onClick, children }: { color: string; 
   );
 }
 
-export function ProfileAppearance({ detail, patch, set, host, picture, setPicture, onPicture, intro, setIntro, onIntroPortrait, introError, theme, setTheme }: {
+export function ProfileAppearance({ detail, patch, set, host, picture, setPicture, onPicture, intro, setIntro, onIntroPortrait, introError, theme, setTheme, linked }: {
   detail: ProfileDetail;
   patch: ProfilePatch;
   set(p: ProfilePatch): void;
@@ -94,11 +55,14 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
   onIntroPortrait(): void;
   /** Why the last pick or save failed; null = none. */
   introError: "type" | "tooLarge" | "bad" | "full" | null;
-  /** 头像主题 draft (lib/avatarThemes): undefined = unchanged, null = by model family, else the ticked themes (never empty). */
-  theme: AvatarThemeId[] | null | undefined;
-  setTheme(theme: AvatarThemeId[] | null | undefined): void;
+  /** Full style draft: undefined unchanged, null inherit app; local fallback for older hosts. */
+  theme: AvatarStyle | null | undefined;
+  setTheme(theme: AvatarStyle | null | undefined): void;
+  linked?: { state: LinkedAppearanceControls; checked: boolean; onChecked(value: boolean): void };
 }) {
   const { t, locale } = useI18n();
+  // 已同步到 X only briefly (owner 2026-10-25); 取消同步 stays in the card's ⋯.
+  const notice = useShownNotice(linked?.state.notice);
   const features = useTargetFeatures();
   const stored = useProfileAvatar(detail.id);
   const shownPicture = picture !== undefined ? picture : stored;
@@ -112,22 +76,13 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
   const shownColor = chosen ?? auto;
   const custom = !!chosen && !PROFILE_COLORS.includes(chosen.toLowerCase());
 
-  // 头像主题: the owner's choice (on the host when it stores looks, else this device) or by model family.
-  // Ticking exactly the model family's themes stores nothing (null = default), so 恢复默认 is that set.
-  useUiPrefs();
+  useAvatarStyleVersion();
   const synced = useProfileLooksSynced(host);
-  const storedThemes = avatarThemesOverride(host, detail.id);
-  const chosenThemes = theme !== undefined ? theme : storedThemes;
-  const autoThemes = defaultAvatarThemes({ model: patch.model !== undefined ? patch.model : detail.model, cliKind: detail.cliKind });
-  const shownThemes = chosenThemes ?? autoThemes;
-  const pickThemes = (next: AvatarThemeId[] | null) => {
-    const value = next && sameThemes(next, autoThemes) ? null : next;
-    setTheme(sameThemes(value, storedThemes) ? undefined : value);
-  };
-  const toggleTheme = (id: AvatarThemeId) => {
-    const next = shownThemes.includes(id) ? shownThemes.filter((x) => x !== id) : AVATAR_THEME_IDS.filter((x) => x === id || shownThemes.includes(x));
-    if (next.length) pickThemes(next);
-  };
+  const storedStyle = getProfileAvatarStyle(host, detail.id);
+  const localStyle = pendingLocalProfileAvatarStyle(host, detail.id);
+  const [savingLocalStyle, setSavingLocalStyle] = useState(false);
+  const [localStyleError, setLocalStyleError] = useState<string | null>(null);
+  const shownStyle = theme !== undefined ? theme : storedStyle;
 
   // Provider: "" = automatic (what cutex infers).
   const canProvider = features.has(PROFILE_FEATURES.providerCategory);
@@ -156,11 +111,36 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
 
   return (
     <>
-      <Section title={t("settings.profile.look")}>
-        <SettingRow label={t("agent-config.profile.color")} hint={t("settings.profile.color.hint")}>
+      <Section   title={t("settings.profile.look")} hint={t((features.has("profile-avatar-style") ? "avatarStyle.appearanceHostScope" : "avatarStyle.appearanceScope") as MessageKey, { name: detail.name })}>
+        {linked?.state.linked && (
+          <SettingRow source="host" agents="none" label={t("settings.profile.link.appearance.also")} hint={t("settings.profile.link.appearance.alsoHint")}>
+            <Toggle checked={linked.checked} disabled={linked.state.busy || linked.state.conflict} onChange={linked.onChecked} />
+          </SettingRow>
+        )}
+        {linked?.state.linked && linked.state.conflict && (
+          <div className="my-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-xs">
+            <p className="text-muted">{t("settings.profile.link.appearance.conflict")}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {linked.state.choices.map((source) => (
+                <Button key={`${source.hostId}:${source.profile.id}`} disabled={linked.state.busy} onClick={() => void linked.state.choose(source)}>
+                  {t("settings.profile.link.appearance.useSource", { host: `${source.hostName} · ${source.profile.name}` })}
+                </Button>
+              ))}
+              <Button disabled={linked.state.busy} onClick={linked.state.keepSeparate}>{t("settings.profile.link.appearance.keepSeparate")}</Button>
+            </div>
+          </div>
+        )}
+        {notice && linked && (
+          <div role="status" className="my-2 flex flex-wrap items-center gap-2 text-xs text-muted">
+            <span>{t(`settings.profile.link.appearance.${notice.kind}`, { hosts: notice.hosts.join(", ") })}</span>
+            {notice.undo && <Button disabled={linked.state.busy} onClick={() => void linked.state.undo()}>{t("settings.profile.link.appearance.undo")}</Button>}
+            {["pending", "error", "storageError"].includes(notice.kind) && <Button disabled={linked.state.busy} onClick={linked.state.retry}>{t("settings.profile.link.appearance.retry")}</Button>}
+          </div>
+        )}
+        <SettingRow source="host" agents="none" label={t("agent-config.profile.color")} info={t("settings.profile.color.hint")}>
           <div className="flex flex-wrap items-center gap-2">
             <Swatch color={auto} selected={chosen === null} title={t("settings.profile.color.auto")} onClick={() => set({ color: null })}>
-              <span className="text-[10px] font-semibold">A</span>
+              <span className="text-caption/[inherit] font-semibold">A</span>
             </Swatch>
             <span className="mx-0.5 h-4 w-px bg-border" />
             {PROFILE_COLORS.map((c) => (
@@ -176,7 +156,18 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
             </label>
           </div>
         </SettingRow>
-        <SettingRow
+        <SettingRow agents="none" source={features.has("profile-avatar-style") ? "host" : "local"} label={t("avatarStyle.title" as MessageKey)} hint={<>{t((features.has("profile-avatar-style") ? "avatarStyle.profileHost" : "avatarStyle.profileLocal") as MessageKey, { name: detail.name })}<span className="block">{t("avatarStyle.hint" as MessageKey)}</span></>}
+          sample={<AvatarStylePicker value={shownStyle} allowInherit inherited={getAppAvatarStyle()} onChange={(next) => setTheme(JSON.stringify(next) === JSON.stringify(storedStyle) ? undefined : next)} />} />
+        {localStyle && <SettingsGroup agents="none" source="host"><div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted" data-avatar-style-local-draft>
+          <span>{t("avatarStyle.localDraft" as MessageKey)}: <AvatarStyleLabel style={localStyle} /></span>
+          <Button disabled={savingLocalStyle || theme !== undefined} onClick={() => {
+            setSavingLocalStyle(true); setLocalStyleError(null);
+            void saveLocalProfileAvatarStyle(host, detail.id).catch((error) => setLocalStyleError(error instanceof Error ? error.message : String(error))).finally(() => setSavingLocalStyle(false));
+          }}>{t("avatarStyle.saveToHost" as MessageKey)}</Button>
+          {localStyleError && <span role="alert" className="text-danger">{localStyleError}</span>}
+        </div></SettingsGroup>}
+        <SettingRow source="host"
+          agents="none" readOnly={!canProvider}
           label={t("settings.profile.provider")}
           hint={
             <>
@@ -201,37 +192,13 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
       </Section>
       {/* 本机 only while the host keeps none of this (older cutex); the title row has a fixed height, so the
           tag arriving once the host's Profile list loads moves nothing. */}
-      <Section title={t("agent-config.profile.localLook")} source={synced ? undefined : "local"}>
-        <SettingRow
-          label={t("settings.profile.avatarTheme")}
-          hint={t("settings.profile.avatarTheme.hint")}
-          reset={<ResetButton disabled={sameThemes(shownThemes, autoThemes)} onClick={() => pickThemes(null)} />}
-          sample={<ThemeToggles shown={shownThemes} onToggle={toggleTheme} />}
-        >
-          <span className="flex flex-col items-end gap-1.5">
-            <button
-              type="button"
-              disabled={shownThemes.length === AVATAR_THEME_IDS.length}
-              onClick={() => pickThemes([...AVATAR_THEME_IDS])}
-              className="rounded text-xs text-accent hover:underline disabled:text-subtle disabled:no-underline"
-            >
-              {t("avatarTheme.all")}
-            </button>
-            <span className="flex gap-1" data-theme-preview={shownThemes.join(",")} aria-hidden>
-              {themePreview(shownThemes).map((e) => (
-                <span key={e.code} className="flex size-[22px] items-center justify-center rounded-full" style={{ background: emojiTint(shownColor) }} title={e.name}>
-                  <EmojiGlyph glyph={e.glyph} size={14} />
-                </span>
-              ))}
-            </span>
-          </span>
-        </SettingRow>
-        <SettingRow label={t("settings.profile.picture")} hint={t("settings.profile.picture.hint")}>
+      <Section  title={t("settings.profileIa.picturesOpening" as MessageKey)}  hint={t((synced ? "settings.profileIa.hostProfile" : "settings.profileIa.localProfileDraft") as MessageKey, { name: detail.name })}>
+        <SettingRow agents="none" source={synced ? "host" : "local"} label={t("settings.profile.picture")} info={t("settings.profile.picture.hint")}>
           <ProfileAvatar profile={previewProfile} size={32} badge picture={shownPicture} color={shownColor} />
           <Button onClick={onPicture}>{shownPicture ? t("settings.profile.picture.change") : t("settings.profile.picture.upload")}</Button>
           {shownPicture && <Button onClick={() => setPicture(stored ? null : undefined)}>{t("settings.profile.picture.remove")}</Button>}
         </SettingRow>
-        <SettingRow label={t("settings.profile.introPortrait")} hint={t("settings.profile.introPortrait.hint")}>
+        <SettingRow agents="none" source={synced ? "host" : "local"} label={t("settings.profile.introPortrait")} hint={t("settings.profile.introPortrait.hint")}>
           {shownIntroPortrait && <img src={shownIntroPortrait} alt="" className="h-10 w-auto rounded-md border border-border bg-surface-2 object-contain" />}
           <Button onClick={onIntroPortrait}>{shownIntroPortrait ? t("settings.profile.introPortrait.change") : t("settings.profile.introPortrait.upload")}</Button>
           {shownIntroPortrait && <Button onClick={() => setIntro({ portrait: storedIntro.portrait ? null : undefined })}>{t("settings.profile.introPortrait.remove")}</Button>}
@@ -241,7 +208,7 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
             </span>
           )}
         </SettingRow>
-        <SettingRow
+        <SettingRow agents="none" source={synced ? "host" : "local"}
           label={t("settings.profile.introGreeting")}
           hint={
             <>
@@ -262,7 +229,7 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
             rows={3}
           />
         </SettingRow>
-        <SettingRow label={t("settings.profile.introPreview")}>
+        <SettingRow agents="none" source={synced ? "host" : "local"} readOnly label={t("settings.profile.introPreview")}>
           <div className="flex w-full max-w-sm flex-col items-center gap-2 rounded-xl border border-border bg-surface-2/40 px-4 py-3 text-center">
             {introPortrait && <img src={introPortrait} alt="" className="max-h-24 w-auto object-contain" />}
             <p className="max-w-xs text-sm leading-relaxed text-muted">{introGreeting || "—"}</p>

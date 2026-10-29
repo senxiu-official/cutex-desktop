@@ -1,13 +1,16 @@
 // The add flow of Claude accounts, used by the Claude 账户 section (Settings → Profile) and, as a
 // dialog, by 「+ 添加订阅」 beside the profile editor's / 添加 profile form's 账户 select (this module's
 // `profile.fieldAction`): name (+ API settings) → cutex creates the account → the terminal guide
-// (login command, or the hidden key command) → 完成 asks cutex for the status. The desktop never runs
-// the login and never sees a credential (docs/research/claude-multi-account.md decision 2).
+// (login command; for an API account: type the key here, or the hidden key command) → 完成 asks cutex for
+// the status. The desktop never runs the login. A typed key is write-only (owner 2026-10-27, docs/design/042):
+// it lives only in this form's state until it is sent (renderer → preload → main → cutex), is cleared right
+// after, and never goes to drafts, notices or error text; cutex answers only `apiKeyPresent`.
+import { isImeComposing } from "../../lib/ime";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Copy, Plus, X } from "lucide-react";
 import { CLAUDE_KEY_ENVS, type ClaudeAccount, type ClaudeAccountKind, type ClaudeKeyEnv } from "../../../../shared/claudeAccounts";
-import { Button, Card, IconButton, Segmented, Select, SettingRow, TextArea, TextInput } from "../../components/settings/Form";
+import { Button, Card, IconButton, Segmented, Select, SettingRow, SettingsGroup, TextArea, TextInput } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { useOverlayState } from "../../lib/contextMenu";
 import { useTrackOverlay } from "../../lib/openOverlays";
@@ -16,6 +19,7 @@ import type { ProfileFieldActionProps } from "../slots";
 import { accountCreateRequest, apiKeyCommand, guessKeyShell, type KeyShell } from "./accountView";
 import { errorText, useAccountTitle, useHostLabel, useRefusalText } from "./hooks";
 import { useTargetApi } from "../../lib/targetHost";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 /** One command to copy (the whole line selects on click too). */
 function CommandBox({ text }: { text: string }) {
@@ -51,7 +55,7 @@ function GuideFrame({ title, onClose, children }: { title: string; onClose?(): v
 function Step({ n, children }: { n: number; children: ReactNode }) {
   return (
     <li className="flex gap-2">
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-accent/15 text-[10px] font-medium text-accent">{n}</span>
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-accent/15 text-caption/[inherit] font-medium text-accent">{n}</span>
       <div className="min-w-0 flex-1 space-y-1.5">{children}</div>
     </li>
   );
@@ -114,7 +118,8 @@ function LoginGuide({ account: a, onChecked, onClose, closable = true }: GuidePr
         <p>{t("claude-accounts.guide.step1", { host })}</p>
         {commands ? (
           <>
-            <Segmented
+            {/* Which shell the shown command is for: a view choice, not a setting. */}
+            <div role="toolbar" aria-label={t("claude-accounts.guide.shell")} className="contents"><Segmented
               label={t("claude-accounts.guide.shell")}
               value={shell}
               onChange={setShell}
@@ -123,9 +128,9 @@ function LoginGuide({ account: a, onChecked, onClose, closable = true }: GuidePr
                 { value: "powershell", label: "PowerShell" },
                 { value: "posix", label: "bash / zsh" },
               ]}
-            />
+            /></div>
             <CommandBox text={commands[shell]} />
-            <p className="truncate text-[11px] text-subtle" title={commands.claudeConfigDir}>
+            <p className="truncate text-caption/[inherit] text-subtle" title={commands.claudeConfigDir}>
               {t("claude-accounts.guide.home")}: <span className="font-mono">{commands.claudeConfigDir}</span>
             </p>
           </>
@@ -150,6 +155,56 @@ function LoginGuide({ account: a, onChecked, onClose, closable = true }: GuidePr
   );
 }
 
+/** Type the key in the desktop: write-only, sent once, cleared after the send whatever the outcome. */
+function KeyEntry({ account: a, onStored }: { account: ClaudeAccount; onStored(a: ClaudeAccount): void }) {
+  const api = useTargetApi();
+  const { t } = useI18n();
+  const refusalText = useRefusalText();
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const save = async () => {
+    const value = key;
+    setKey("");
+    setBusy(true);
+    setProblem(null);
+    try {
+      const r = await api.setClaudeAccountKey(a.id, value);
+      if (r.ok) onStored(r.account);
+      else setProblem(refusalText(r.error));
+    } catch (error) {
+      setProblem(errorText(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-1" data-claude-key-entry="">
+      <SettingsGroup agents="next" source="host"><div className="flex flex-wrap items-center gap-2">
+        <TextInput
+          mono
+          type="password"
+          width="w-64"
+          label={t("claude-accounts.key.input")}
+          value={key}
+          placeholder={a.api?.apiKeyPresent ? t("claude-accounts.key.replacePlaceholder") : "sk-…"}
+          disabled={busy}
+          onChange={(v) => (setKey(v), setProblem(null))}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && key.trim()) void save();
+          }}
+        />
+        <Button primary disabled={busy || !key.trim()} onClick={() => void save()}>
+          {t(a.api?.apiKeyPresent ? "claude-accounts.key.replace" : "claude-accounts.key.save")}
+        </Button>
+        {busy && <span className="animate-pulse text-subtle">{t("common.loading")}</span>}
+      </div></SettingsGroup>
+      <p className="text-caption/[inherit] text-subtle">{t("claude-accounts.key.writeOnly")}</p>
+      {problem && <p className="text-warn">{problem}</p>}
+    </div>
+  );
+}
+
 function KeyGuide({ account: a, onChecked, onClose, closable = true }: GuideProps) {
   const { t } = useI18n();
   const host = useHostLabel();
@@ -168,8 +223,19 @@ function KeyGuide({ account: a, onChecked, onClose, closable = true }: GuideProp
   return (
     <GuideFrame title={t("claude-accounts.guide.keyTitle", { label: titleOf(a) })} onClose={closable ? onClose : undefined}>
       <Step n={1}>
-        <p>{t("claude-accounts.guide.keyStep1", { host })}</p>
-        <Segmented
+        <p>{t("claude-accounts.key.here")}</p>
+        <KeyEntry
+          account={a}
+          onStored={(next) => {
+            onChecked(next);
+            services.ui.notice(t("claude-accounts.guide.keyStored"));
+            onClose();
+          }}
+        />
+      </Step>
+      <Step n={2}>
+        <p>{t("claude-accounts.key.orTerminal", { host })}</p>
+        <div role="toolbar" aria-label={t("claude-accounts.guide.shell")} className="contents"><Segmented
           label={t("claude-accounts.guide.shell")}
           value={shell}
           onChange={setShell}
@@ -177,10 +243,10 @@ function KeyGuide({ account: a, onChecked, onClose, closable = true }: GuideProp
             { value: "powershell", label: "PowerShell" },
             { value: "posix", label: "bash / zsh" },
           ]}
-        />
+        /></div>
         {command && <CommandBox text={command} />}
       </Step>
-      <Step n={2}>
+      <Step n={3}>
         <p>{t("claude-accounts.guide.keyStep2")}</p>
         <div className="flex flex-wrap items-center gap-2">
           <Button primary disabled={check.busy} onClick={() => void check.run(() => t("claude-accounts.guide.keyMissing"))}>
@@ -201,7 +267,7 @@ export function AccountGuide(props: GuideProps) {
 
 /**
  * The add form for one kind (the button chose it): a name; API accounts also take a base URL, the key
- * header and extra settings (never the key). `dialog`: laid out for the dialog instead of a card row.
+ * header, extra settings and, optionally, the write-only key. `dialog`: laid out for the dialog instead of a card row.
  */
 export function AddForm({ kind, onCancel, onCreated, dialog }: { kind: ClaudeAccountKind; onCancel(): void; onCreated(account: ClaudeAccount): void; dialog?: boolean }) {
   const api = useTargetApi();
@@ -211,11 +277,14 @@ export function AddForm({ kind, onCancel, onCreated, dialog }: { kind: ClaudeAcc
   const [baseUrl, setBaseUrl] = useState("");
   const [keyEnv, setKeyEnv] = useState<ClaudeKeyEnv>("ANTHROPIC_API_KEY");
   const [envText, setEnvText] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const submit = async () => {
-    const r = accountCreateRequest(kind, { label, baseUrl, keyEnv, envText });
+    const r = accountCreateRequest(kind, { label, baseUrl, keyEnv, envText, apiKey });
     if ("error" in r) return setProblem(r.error === "badLabel" ? t("claude-accounts.form.badLabel") : t("claude-accounts.form.envBad", { lines: r.lines.join(", ") }));
+    // Sent once: the field empties now, whatever cutex answers (a refused create means typing it again).
+    setApiKey("");
     setBusy(true);
     setProblem(null);
     try {
@@ -231,7 +300,7 @@ export function AddForm({ kind, onCancel, onCreated, dialog }: { kind: ClaudeAcc
   const keyEnvLabel: Record<ClaudeKeyEnv, MessageKey> = { ANTHROPIC_API_KEY: "claude-accounts.form.keyEnvApiKey", ANTHROPIC_AUTH_TOKEN: "claude-accounts.form.keyEnvAuthToken" };
   return (
     <Card className={dialog ? "px-5 pt-1" : "-mx-4 border-b border-border bg-surface-2/40 px-4 pt-1"}>
-      <SettingRow label={t("claude-accounts.form.label")} hint={t(kind === "api" ? "claude-accounts.form.apiNote" : "claude-accounts.form.subscriptionNote")}>
+      <SettingRow agents="none" source="host" label={t("claude-accounts.form.label")} hint={t(kind === "api" ? "claude-accounts.form.apiKeyNote" : "claude-accounts.form.subscriptionNote")}>
         <TextInput
           autoFocus
           width="w-64"
@@ -241,6 +310,7 @@ export function AddForm({ kind, onCancel, onCreated, dialog }: { kind: ClaudeAcc
           placeholder={t(kind === "api" ? "claude-accounts.form.labelPlaceholderApi" : "claude-accounts.form.labelPlaceholder")}
           onChange={(v) => (setLabel(v), setProblem(null))}
           onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
             if (e.key === "Enter" && kind === "subscription") void submit();
             if (e.key === "Escape") onCancel();
           }}
@@ -248,14 +318,17 @@ export function AddForm({ kind, onCancel, onCreated, dialog }: { kind: ClaudeAcc
       </SettingRow>
       {kind === "api" && (
         <>
-          <SettingRow label={t("claude-accounts.form.baseUrl")} hint={t("claude-accounts.form.baseUrlHint")}>
+          <SettingRow label={t("claude-accounts.form.baseUrl")} hint={t("claude-accounts.form.baseUrlHint")} agents="next" source="host">
             <TextInput mono width="w-64" label={t("claude-accounts.form.baseUrl")} value={baseUrl} placeholder="https://api.deepseek.com/anthropic" onChange={(v) => (setBaseUrl(v), setProblem(null))} />
           </SettingRow>
-          <SettingRow label={t("claude-accounts.form.keyEnv")}>
+          <SettingRow label={t("claude-accounts.form.keyEnv")} agents="next" source="host">
             <Select width="w-64" label={t("claude-accounts.form.keyEnv")} value={keyEnv} onChange={setKeyEnv} options={CLAUDE_KEY_ENVS.map((k) => ({ value: k, label: t(keyEnvLabel[k]) }))} />
           </SettingRow>
-          <SettingRow label={t("claude-accounts.form.env")} hint={t("claude-accounts.form.envHint")}>
+          <SettingRow label={t("claude-accounts.form.env")} hint={t("claude-accounts.form.envHint")} agents="next" source="host">
             <TextArea mono width="w-64" rows={3} label={t("claude-accounts.form.env")} value={envText} placeholder="ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro" onChange={(v) => (setEnvText(v), setProblem(null))} />
+          </SettingRow>
+          <SettingRow label={t("claude-accounts.key.input")} hint={t("claude-accounts.form.apiKeyHint")} agents="next" source="host">
+            <TextInput mono type="password" width="w-64" label={t("claude-accounts.key.input")} value={apiKey} placeholder={t("claude-accounts.form.apiKeyPlaceholder")} onChange={(v) => (setApiKey(v), setProblem(null))} />
           </SettingRow>
         </>
       )}
@@ -277,6 +350,7 @@ export function AddForm({ kind, onCancel, onCreated, dialog }: { kind: ClaudeAcc
  * keeps what was done (an account that still needs its login shows 需要登录 in the select).
  */
 function AddSubscriptionDialog({ onPicked, onClose }: { onPicked(id: string): void | Promise<void>; onClose(): void }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const titleOf = useAccountTitle();
   const [account, setAccount] = useState<ClaudeAccount | null>(null);
@@ -291,12 +365,12 @@ function AddSubscriptionDialog({ onPicked, onClose }: { onPicked(id: string): vo
       e.stopPropagation();
       onClose();
     };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose, overlayOpen]);
+    win.addEventListener("keydown", onKey, true);
+    return () => win.removeEventListener("keydown", onKey, true);
+  }, [onClose, overlayOpen, win]);
   const title = t("claude-accounts.addSubscription");
   return createPortal(
-    <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/30 pt-[10vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[10vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-modal aria-label={title} className="flex max-h-[80vh] w-[34rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         <header className="flex items-center gap-2 border-b border-border px-5 py-3">
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</h2>
@@ -328,7 +402,7 @@ function AddSubscriptionDialog({ onPicked, onClose }: { onPicked(id: string): vo
         )}
       </div>
     </div>,
-    document.body,
+    win.document.body,
   );
 }
 

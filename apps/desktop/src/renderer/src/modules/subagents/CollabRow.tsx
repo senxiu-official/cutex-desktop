@@ -10,6 +10,7 @@ import { isRunning } from "../../lib/workGroups";
 import type { RawItem } from "../../lib/timeline";
 import { ScriptText } from "../../components/ScriptText";
 import { openSubagentThread } from "../../lib/sideOpen";
+import { useUserLayoutToggle } from "../../lib/userLayoutToggle";
 
 const COLLAB_VERB: Record<string, MessageKey> = {
   spawnAgent: "subagents.timeline.spawn",
@@ -28,15 +29,17 @@ const COLLAB_VERB: Record<string, MessageKey> = {
  * sub-agent chip buttons, and a <button> inside a <button> is invalid HTML (React warns). Same look.
  */
 function ToggleRow({ onToggle, children }: { onToggle: () => void; children: ReactNode }) {
+  const userToggle = useUserLayoutToggle();
+  const toggle = () => userToggle(onToggle);
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={onToggle}
+      onClick={toggle}
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
         e.preventDefault();
-        onToggle();
+        toggle();
       }}
       className="flex w-full max-w-full cursor-default items-center gap-1.5 text-left text-muted select-none hover:text-foreground"
     >
@@ -97,7 +100,7 @@ export function CollabRow({ item }: { item: RawItem }) {
         {prompt && !open && <span className="min-w-0 truncate text-subtle"><ScriptText text={prompt.replace(/\s+/g, " ")} /></span>}
         {prompt && (open ? <ChevronDown size={13} className="ml-auto shrink-0" /> : <ChevronRight size={13} className="ml-auto shrink-0" />)}
       </ToggleRow>
-      {open && prompt && <div className="font-chat-context mt-1 ml-5 max-w-[75%] rounded-xl border border-dashed border-border px-3 py-1.5 whitespace-pre-wrap text-muted"><ScriptText text={prompt} /></div>}
+      {open && prompt && <div className="selectable message-body font-chat-context mt-1 ml-5 max-w-[75%] rounded-xl border border-dashed border-border px-3 py-1.5 whitespace-pre-wrap text-muted"><ScriptText text={prompt} /></div>}
       {finished.map((id) => (
         <SubAgentResult key={id} threadId={id} status={states[id]!.status} message={states[id]!.message} />
       ))}
@@ -118,7 +121,7 @@ function SubAgentResult({ threadId, status, message }: { threadId: string; statu
         {message && !open && <span className="min-w-0 truncate text-subtle"><ScriptText text={message.replace(/\s+/g, " ")} /></span>}
         {message && (open ? <ChevronDown size={13} className="ml-auto shrink-0" /> : <ChevronRight size={13} className="ml-auto shrink-0" />)}
       </ToggleRow>
-      {open && message && <div className="font-chat-context mt-1 ml-5 max-w-[75%] rounded-xl border border-border bg-peer px-3 py-1.5 whitespace-pre-wrap"><ScriptText text={message} /></div>}
+      {open && message && <div className="selectable message-body font-chat-context mt-1 ml-5 max-w-[75%] rounded-xl border border-border bg-peer px-3 py-1.5 whitespace-pre-wrap"><ScriptText text={message} /></div>}
     </div>
   );
 }
@@ -175,8 +178,8 @@ export function ClaudeAgentRow({ item, sessionId }: { item: RawItem; sessionId: 
         {prompt && !open && <span className="min-w-0 truncate text-subtle"><ScriptText text={prompt.replace(/\s+/g, " ")} /></span>}
         {(prompt || result) && (open ? <ChevronDown size={13} className="ml-auto shrink-0" /> : <ChevronRight size={13} className="ml-auto shrink-0" />)}
       </ToggleRow>
-      {open && prompt && <div className="font-chat-context mt-1 ml-5 max-w-[75%] rounded-xl border border-dashed border-border px-3 py-1.5 whitespace-pre-wrap text-muted"><ScriptText text={prompt} /></div>}
-      {open && result && <div className="font-chat-context mt-1 ml-5 max-w-[75%] rounded-xl border border-border bg-peer px-3 py-1.5 whitespace-pre-wrap"><ScriptText text={result} /></div>}
+      {open && prompt && <div className="selectable message-body font-chat-context mt-1 ml-5 max-w-[75%] rounded-xl border border-dashed border-border px-3 py-1.5 whitespace-pre-wrap text-muted"><ScriptText text={prompt} /></div>}
+      {open && result && <div className="selectable message-body font-chat-context mt-1 ml-5 max-w-[75%] rounded-xl border border-border bg-peer px-3 py-1.5 whitespace-pre-wrap"><ScriptText text={result} /></div>}
     </div>
   );
 }

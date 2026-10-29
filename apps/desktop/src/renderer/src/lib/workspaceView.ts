@@ -29,6 +29,14 @@ export function useSelectedScope(): WorkspaceScope | null {
   return useStableScope(key, scope);
 }
 
+/** Workspace scope of one agent (a desk window's conversation, multi-window): like useSelectedScope, not the selection's. */
+export function useAgentScope(hostId: string, sessionId: string | null): WorkspaceScope | null {
+  const sidebar = useApp((s) => sidebarOf(s, hostId));
+  const scope = scopeFor(sidebar, sessionId);
+  const key = scope ? hostKey(hostId, scopeKey(scope)) : null;
+  return useStableScope(key, scope);
+}
+
 /** The selected agent's host (the focus host when none is selected). */
 export const useSelectedHost = (): string => useApp(agentHost);
 
@@ -77,7 +85,9 @@ export function useWorkspace(scope: WorkspaceScope | null, hostId: string) {
     let cancelled = false;
     const loadGit = () =>
       daemon.gitStatus(scope).then(
-        (g) => !cancelled && setGit(g),
+        // The same status again (each reload after a turn) keeps the object: App and every consumer of the
+        // workspace context would re-render for nothing (perf §9).
+        (g) => !cancelled && setGit((prev) => (prev && JSON.stringify(prev) === JSON.stringify(g) ? prev : g)),
         (e: unknown) => !cancelled && setError(workspaceError(e)),
       );
     void loadGit();

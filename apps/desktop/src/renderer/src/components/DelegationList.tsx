@@ -3,7 +3,7 @@
 // below and loaded on first open (50 shown, then 更多). Row: status (glyph + word) · #N title
 // (+ activity / latest progress) · requester → target · time · ⋯ (the delegation menu). Without
 // cutex asks there is nothing to list: compact shows nothing, the full list a short note.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowRight, ChevronDown, ChevronRight, MoreHorizontal } from "lucide-react";
 import type { SessionAvatar } from "@cutex-desktop/protocol";
 import type { AskSummary } from "../../../shared/ipc";
@@ -47,12 +47,12 @@ function When({ d, bucket }: { d: AskSummary; bucket: DelegationBucket }) {
   const { locale } = useI18n();
   const now = useClock();
   const s = rowSeconds(d, bucket, now);
-  if (s !== null) return <span className="text-[11px] text-subtle tabular-nums">{formatSpan(s)}</span>;
+  if (s !== null) return <span className="text-caption/[inherit] text-subtle tabular-nums">{formatSpan(s)}</span>;
   const at = d.closedAt ?? d.updatedAt;
   if (!at) return null;
   const sec = Date.parse(at) / 1000;
   return (
-    <span className="text-[11px] text-subtle" title={formatAbsolute(sec)}>
+    <span className="text-caption/[inherit] text-subtle" title={formatAbsolute(sec)}>
       {formatWhen(sec, now, locale)}
     </span>
   );
@@ -159,14 +159,14 @@ function Fold({ label, count, open, onToggle }: { label: string; count?: number 
  * `projectId` locks to one project. `only` (compact: no toolbar, no header, no 已结束) limits to
  * some buckets, `limit` caps the rows. `agent` presets the agent filter (delegations.page `params.agent`).
  */
-export function DelegationList({ projectId, only, limit, agent: preset }: { projectId?: string; only?: DelegationBucket[]; limit?: number; agent?: string }) {
+export function DelegationList({ projectId, only, limit, agent: preset, actions }: { projectId?: string; only?: DelegationBucket[]; limit?: number; agent?: string; actions?: ReactNode }) {
   const { t } = useI18n();
   const enabled = useTargetFeatures().has(ASKS_FEATURE);
   if (!enabled) return only || limit ? null : <p className="text-sm text-subtle">{t("delegations.unavailable")}</p>;
-  return <Delegations projectId={projectId} only={only} limit={limit} preset={preset} />;
+  return <Delegations projectId={projectId} only={only} limit={limit} preset={preset} actions={actions} />;
 }
 
-function Delegations({ projectId, only, limit, preset }: { projectId?: string; only?: DelegationBucket[]; limit?: number; preset?: string }) {
+function Delegations({ projectId, only, limit, preset, actions }: { projectId?: string; only?: DelegationBucket[]; limit?: number; preset?: string; actions?: ReactNode }) {
   const { t } = useI18n();
   // The target host's records (the focus host: the overview's; another host is followed while shown).
   const hostId = useTargetHostId();
@@ -213,18 +213,19 @@ function Delegations({ projectId, only, limit, preset }: { projectId?: string; o
         <PageToolbar>
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("delegations.search")} className="mr-auto w-48 rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-accent" />
           <Select value={agent} options={[{ value: "", label: t("delegations.allAgents") }, ...[...new Set([...agentIds, ...(agent ? [agent] : [])])].map((id) => ({ value: id, label: party(id).name }))]} onChange={setAgent} />
+          {actions}
         </PageToolbar>
       )}
       {loadedAt === null && scoped.length === 0 && <p className="text-sm text-subtle">{t("delegations.loading")}</p>}
       {loadedAt !== null && shownOpen.length === 0 && <p className="py-2 text-sm text-subtle">{t(compact ? "delegations.allClear" : "delegations.none")}</p>}
-      {shownOpen.length > 0 && <DataTable columns={columns} groups={groups} rowKey={(d) => d.askId} foldPrefix="delegations" hideHeader={compact} onRowContextMenu={(e, d) => rowMenu(d)(e)} />}
+      {shownOpen.length > 0 && <DataTable virtualize columns={columns} groups={groups} rowKey={(d) => d.askId} foldPrefix="delegations" hideHeader={compact} onRowContextMenu={(e, d) => rowMenu(d)(e)} />}
       {!compact && own && (
         <>
           <Fold label={t("delegations.bucket.done")} count={closedLoaded ? done.length : null} open={doneOpen} onToggle={toggleDone} />
           {doneOpen && closedLoading && done.length === 0 && <p className="px-2 text-sm text-subtle">{t("delegations.loading")}</p>}
           {doneOpen && done.length > 0 && (
             <>
-              <DataTable columns={columns} groups={[{ key: "done", label: null, rows: done.slice(0, doneShown) }]} rowKey={(d) => d.askId} foldPrefix="delegations" hideHeader onRowContextMenu={(e, d) => rowMenu(d)(e)} />
+              <DataTable virtualize columns={columns} groups={[{ key: "done", label: null, rows: done.slice(0, doneShown) }]} rowKey={(d) => d.askId} foldPrefix="delegations" hideHeader onRowContextMenu={(e, d) => rowMenu(d)(e)} />
               {done.length > doneShown && (
                 <button onClick={() => setDoneShown(doneShown + DONE_PAGE)} className="mt-1 px-2 text-xs text-accent hover:underline">
                   {t("delegations.more", { n: Math.min(DONE_PAGE, done.length - doneShown) })}

@@ -1,3 +1,4 @@
+import { isImeComposing } from "../../lib/ime";
 // Settings → 主机 → 分组 (multi-host P2, RFC §7.5): create / rename / recolor / reorder / delete host
 // groups and edit their members. Every edit sends the whole list (`saveHostGroups`, main validates
 // with the same shared rules; lib/hostGroups checks first so errors show inline). Not folded (owner
@@ -13,7 +14,8 @@ import { settingsAnchorId } from "../../lib/settingsNav";
 import { saveHostGroups, setViewScope, useHostScope } from "../../lib/useHostScope";
 import { useApp } from "../../store";
 import { HostDot } from "../HostMark";
-import { Button, Section, TextInput } from "./Form";
+import { Button, Section, TextInput, SettingsGroup } from "./Form";
+import { Tag } from "../../components/Tag";
 
 /** DOM id of a group's row (host card tags scroll here). */
 export const hostGroupRowId = (groupId: string) => `${settingsAnchorId("hostGroups")}-${groupId}`;
@@ -49,7 +51,7 @@ function MemberChips({ hosts, members, onToggle }: { hosts: readonly HostLook[];
             type="button"
             aria-pressed={on}
             onClick={() => onToggle(h.id)}
-            className={`flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] ${on ? "border-accent/60 bg-accent/10 text-foreground" : "border-border text-subtle hover:text-foreground"}`}
+            className={`flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-caption/[inherit] ${on ? "border-accent/60 bg-accent/10 text-foreground" : "border-border text-subtle hover:text-foreground"}`}
           >
             <HostDot color={h.color} status={h.indicator.status} size={7} />
             <span className="max-w-32 truncate">{h.label}</span>
@@ -94,7 +96,7 @@ function GroupRow({ group, index, count, apply }: { group: HostGroup; index: num
     await run({ kind: "rename", id: group.id, name });
   };
   return (
-    <div id={hostGroupRowId(group.id)} className={`-mx-4 scroll-mt-4 border-b border-border px-4 py-3 last:border-b-0 ${armed ? ARMED_FRAME : ""}`}>
+    <SettingsGroup agents="none" source="local"><div id={hostGroupRowId(group.id)} className={`-mx-4 scroll-mt-4 border-b border-border px-4 py-3 last:border-b-0 ${armed ? ARMED_FRAME : ""}`}>
       <div className="flex items-center gap-2">
         <Layers size={14} className="shrink-0 text-muted" style={group.color ? { color: group.color } : undefined} />
         <TextInput
@@ -108,6 +110,7 @@ function GroupRow({ group, index, count, apply }: { group: HostGroup; index: num
           }}
           onBlur={() => void commitName()}
           onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
             if (e.key === "Enter") void commitName();
             else if (e.key === "Escape") {
               setName(group.name);
@@ -115,8 +118,8 @@ function GroupRow({ group, index, count, apply }: { group: HostGroup; index: num
             }
           }}
         />
-        {shown && <span className="rounded bg-accent/15 px-1.5 text-[10px] text-accent">{t("host.active")}</span>}
-        {known.length === 0 && <span className="text-[11px] text-subtle">{t("hostGroups.noMembers")}</span>}
+        {shown && <Tag tone="accent">{t("host.active")}</Tag>}
+        {known.length === 0 && <span className="text-caption/[inherit] text-subtle">{t("hostGroups.noMembers")}</span>}
         <span className="flex-1" />
         {armed ? (
           <>
@@ -160,7 +163,7 @@ function GroupRow({ group, index, count, apply }: { group: HostGroup; index: num
           />
         </span>
       </div>
-    </div>
+    </div></SettingsGroup>
   );
 }
 
@@ -177,7 +180,7 @@ function NewGroupForm({ groups, apply, onDone }: { groups: readonly HostGroup[];
     else onDone();
   };
   return (
-    <div className="-mx-4 border-b border-border bg-surface-2/40 px-4 py-3">
+    <SettingsGroup agents="none" source="local"><div className="-mx-4 border-b border-border bg-surface-2/40 px-4 py-3">
       <div className="flex items-center gap-2">
         <Layers size={14} className="shrink-0 text-muted" style={color ? { color } : undefined} />
         <TextInput
@@ -191,6 +194,7 @@ function NewGroupForm({ groups, apply, onDone }: { groups: readonly HostGroup[];
             setError(null);
           }}
           onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
             if (e.key === "Enter") void create();
             else if (e.key === "Escape") onDone();
           }}
@@ -212,7 +216,7 @@ function NewGroupForm({ groups, apply, onDone }: { groups: readonly HostGroup[];
           <SwatchPicker value={color} label={t("hostGroups.color")} customLabel={t("host.colorCustom")} noneLabel={t("hostGroups.colorNone")} onNone={() => setColor(null)} onChange={setColor} />
         </span>
       </div>
-    </div>
+    </div></SettingsGroup>
   );
 }
 
@@ -226,9 +230,9 @@ export function HostGroupsSection() {
       title={t("hostGroups.title")}
       hint={t("hostGroups.hint")}
       actions={
-        <Button disabled={adding} onClick={() => setAdding(true)}>
+        <SettingsGroup agents="none" source="local"><Button disabled={adding} onClick={() => setAdding(true)}>
           {t("hostGroups.new")}
-        </Button>
+        </Button></SettingsGroup>
       }
     >
       {adding && <NewGroupForm groups={groups} apply={apply} onDone={() => setAdding(false)} />}

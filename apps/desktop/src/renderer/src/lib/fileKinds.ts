@@ -92,12 +92,12 @@ export function isThumbnailPath(path: string): boolean {
 
 /**
  * `<img>` src for an fs/file body, or null when it is not a complete renderable image: a
- * truncated read, over [`THUMBNAIL_MAX_BYTES`], a non-image mime (aliases such as `image/jpg` count; a
+ * truncated read, over `maxBytes` (default [`THUMBNAIL_MAX_BYTES`]), a non-image mime (aliases such as `image/jpg` count; a
  * generic recorded type is decided by `name`'s extension, else by a base64 body's image signature). SVG comes back as utf8 text and
  * becomes a data: URL too (an <img> never runs its scripts; it is never put into the DOM inline).
  */
-export function thumbnailSrc(file: Pick<FsFile, "encoding" | "content" | "mime" | "size" | "truncated">, name = ""): string | null {
-  if (file.truncated || file.size > THUMBNAIL_MAX_BYTES) return null;
+export function thumbnailSrc(file: Pick<FsFile, "encoding" | "content" | "mime" | "size" | "truncated">, name = "", maxBytes = THUMBNAIL_MAX_BYTES): string | null {
+  if (file.truncated || file.size > maxBytes) return null;
   // The bytes decide for a binary body (a store may have recorded a generic or misspelled type);
   // a generic type otherwise falls back to `name`'s extension.
   let mime = imageMimeFor(file.mime, name);

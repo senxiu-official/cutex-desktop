@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_QUOTA_VIEW, defaultQuotaLabel, fillColor, gaugeLabel, gaugeShortLabel, gaugesFromRateLimits, mergeRateLimits, migrateQuotaView, QUOTA_READERS, quotaFill, quotaPercent, quotaTextKey, readerFollowsBaseUrl, remainingColor, remainingRatio, resetsIn, resetsInCompact, usageColor, quotaLabelProblem, quotaLabelValid, usedRatio, windowLabel, windowName, withQuotaLabel, type QuotaGauge } from "../src/renderer/src/lib/quota";
+import { DEFAULT_QUOTA_VIEW, defaultQuotaLabel, displayLabelValid, labelColumns, gaugeName, quotaLabelFieldProblem, withLabelText, fillColor, gaugeLabel, gaugeShortLabel, gaugesFromRateLimits, mergeRateLimits, migrateQuotaView, QUOTA_READERS, quotaFill, quotaPercent, quotaTextKey, readerFollowsBaseUrl, remainingColor, remainingRatio, resetsIn, resetsInCompact, usageColor, quotaLabelProblem, quotaLabelValid, usedRatio, windowLabel, windowName, withQuotaLabel, type QuotaGauge } from "../src/renderer/src/lib/quota";
 import { translate } from "../src/renderer/src/i18n";
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";
 import { en } from "../src/renderer/src/i18n/en";
@@ -99,5 +99,44 @@ describe("quota reader label (cutex: 1–6 ASCII letters / digits)", () => {
     expect(withQuotaLabel({ label: "", window_label: "7d" })).toEqual({ label: "7d", window_label: "7d" });
     expect(withQuotaLabel({ label: " GLM ", window_label: "5h" })).toEqual({ label: "GLM", window_label: "5h" });
     expect(withQuotaLabel({ label: "", window_label: null })).toEqual({ label: "", window_label: null });
+  });
+});
+
+describe("quota display label (cutex quota-display-label)", () => {
+  const g = (over: Partial<QuotaGauge>): QuotaGauge => ({ id: "primary", label: "DS", kind: "balance", remainingPercent: null, balance: "¥1", resetAt: null, windowLabel: null, observedAt: null, stale: false, ...over });
+
+  it("width rule: CJK counts 2, max 6 columns", () => {
+    expect(labelColumns("余额")).toBe(4);
+    expect(displayLabelValid("余额")).toBe(true);
+    expect(displayLabelValid("余额不足")).toBe(false);
+    expect(displayLabelValid("余额a")).toBe(true);
+    expect(displayLabelValid("abcdef")).toBe(true);
+    expect(displayLabelValid("abcdefg")).toBe(false);
+    expect(displayLabelValid("")).toBe(false);
+    expect(displayLabelValid("a\tb")).toBe(false);
+  });
+
+  it("shows displayLabel ?? label", () => {
+    expect(gaugeName(g({ displayLabel: "余额" }))).toBe("余额");
+    expect(gaugeName(g({ displayLabel: null }))).toBe("DS");
+    expect(gaugeName(g({}))).toBe("DS");
+    expect(gaugeShortLabel(g({ displayLabel: "余额" }))).toBe("余额");
+  });
+
+  it("capability gate: Chinese only becomes a display label when cutex has it", () => {
+    const r = { label: "DS", display_label: null as string | null, window_label: null as string | null };
+    expect(withLabelText(r, "余额", true)).toEqual({ label: "DS", display_label: "余额", window_label: null });
+    expect(withLabelText(r, "余额", false)).toEqual({ label: "余额", display_label: null, window_label: null });
+    expect(withLabelText(r, "GLM", true).display_label).toBeNull();
+    expect(quotaLabelFieldProblem({ ...r, display_label: "余额" }, true)).toBeNull();
+    expect(quotaLabelFieldProblem({ ...r, display_label: "余额不足" }, true)).toBe("bad");
+    expect(quotaLabelFieldProblem({ ...r, label: "余额" }, false)).toBe("bad");
+  });
+
+  it("saved reader: display_label sent only with the capability, ASCII label derived", () => {
+    expect(withQuotaLabel({ label: "", display_label: "余额", window_label: null }, true)).toEqual({ label: "Q", display_label: "余额", window_label: null });
+    expect(withQuotaLabel({ label: "", display_label: "余额", window_label: "7d" }, true).label).toBe("7d");
+    expect(withQuotaLabel({ label: "DS", display_label: null }, true)).toEqual({ label: "DS", display_label: "" });
+    expect(withQuotaLabel({ label: "DS", display_label: "余额" })).toEqual({ label: "DS" });
   });
 });

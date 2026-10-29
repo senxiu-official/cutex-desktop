@@ -4,9 +4,12 @@
 // and one changed event, and the patch / evaluate rules of cutex (config/notification_levels.rs,
 // Evaluator::decide). Like cutex since 2026-10-15 (notification-presets-no-legacy) there is no
 // `legacy` preset. `?legacy` = an older cutex without the capability (no routes).
+// `?notifyLatency=300`: the PATCH answers after 300 ms, like a real host (Settings → 通知 must not flash meanwhile).
 import type { DesktopApi } from "../../../../shared/ipc";
 import { NOTIFICATION_LEVELS, NOTIFICATION_LEVELS_FEATURE, NOTIFICATION_PRESETS_NO_LEGACY_FEATURE, sanitizeEvaluate, sanitizeLevelsPatch, type MethodMatrix, type NotificationDecision, type NotificationLevel, type NotificationLevelSettings, type NotificationLevelsPatch, type NotificationLevelsView } from "../../../../shared/notificationLevels";
 import type { ModuleMock } from "../../dev/mockTypes";
+
+const latency = typeof location !== "undefined" ? Number(new URLSearchParams(location.search).get("notifyLatency")) || 0 : 0;
 
 type Text = Record<string, string>;
 const tx = (en: string, zh: string): Text => ({ en, "zh-CN": zh });
@@ -167,6 +170,7 @@ export const mock: ModuleMock = {
     },
     async patchNotificationLevels(patch) {
       if (core.legacy) throw new Error("PATCH /v2/notification-levels: 404");
+      if (latency) await new Promise((r) => setTimeout(r, latency));
       applyPatch(patch);
       return view();
     },

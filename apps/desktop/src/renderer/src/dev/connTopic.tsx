@@ -6,7 +6,7 @@ import { useState, type ReactNode } from "react";
 import { Check, ChevronDown, Copy, Laptop, MoreHorizontal, Server, Smartphone, Monitor, Plus } from "lucide-react";
 import { Button, LinkRow, ListRow, Section, Segmented, Select, SettingRow, TextField, Toggle } from "../components/settings/Form";
 
-const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] whitespace-nowrap";
+const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-caption/[inherit] whitespace-nowrap";
 const T = {
   local: <span className={`${CHIP} bg-surface-2 text-muted`}><Monitor size={11} />本地桌面应用</span>,
   host: (picker: ReactNode) => <span className={`${CHIP} bg-accent/12 pr-0.5 text-accent`}><Server size={11} />cutex 后端 ·{picker}</span>,
@@ -42,7 +42,7 @@ const HOSTS: { id: HostId; os: string; owner: string; self?: boolean }[] = [
 function Header({ hint, tags }: { hint?: string; tags: ReactNode }) {
   return (
     <div className="mb-4 space-y-1.5 border-b border-border/60 pb-3">
-      {hint && <p className="text-[13px] text-muted">{hint}</p>}
+      {hint && <p className="text-ui/[inherit] text-muted">{hint}</p>}
       <div className="flex min-h-6 flex-wrap items-center gap-1.5">{tags}</div>
     </div>
   );
@@ -100,17 +100,17 @@ function Heatmap() {
       <div className="flex" style={{ gap: GAP }}>
         {HEAT.map((week, w) => (
           <div key={w} className="flex flex-col" style={{ gap: GAP }}>
-            {week.map((v, d) => <span key={d} className={`rounded-[2px] ${v < 0 ? "bg-transparent" : LEVELS[v]}`} style={{ width: CELL, height: CELL }} />)}
+            {week.map((v, d) => <span key={d} className={`rounded-xs ${v < 0 ? "bg-transparent" : LEVELS[v]}`} style={{ width: CELL, height: CELL }} />)}
           </div>
         ))}
       </div>
-      <div className="relative mt-1 h-4 text-[10px] text-subtle" style={{ width: WEEKS * (CELL + GAP) - GAP }}>
+      <div className="relative mt-1 h-4 text-caption/[inherit] text-subtle" style={{ width: WEEKS * (CELL + GAP) - GAP }}>
         {MONTHS.map((m) => <span key={m.w} className="absolute" style={{ left: m.w * (CELL + GAP) }}>{m.label}</span>)}
       </div>
-      <div className="mt-1 flex items-center justify-between text-[10px] text-subtle" style={{ width: WEEKS * (CELL + GAP) - GAP }}>
+      <div className="mt-1 flex items-center justify-between text-caption/[inherit] text-subtle" style={{ width: WEEKS * (CELL + GAP) - GAP }}>
         <span>过去一年 · 每格一天</span>
         <span className="flex items-center gap-1">
-          少{LEVELS.map((c) => <span key={c} className={`rounded-[2px] ${c}`} style={{ width: CELL, height: CELL }} />)}多
+          少{LEVELS.map((c) => <span key={c} className={`rounded-xs ${c}`} style={{ width: CELL, height: CELL }} />)}多
         </span>
       </div>
     </div>
@@ -146,7 +146,7 @@ function MePage({ go }: { go(p: PageId, h?: HostId): void }) {
         <div className="mt-4 grid grid-cols-4 gap-2">
           {STATS.map((s) => (
             <div key={s.label} className="rounded-lg bg-surface-2/60 px-3 py-2">
-              <div className="text-[11px] text-subtle">{s.label}</div>
+              <div className="text-caption/[inherit] text-subtle">{s.label}</div>
               <div className="mt-0.5 text-base font-semibold tabular-nums">{s.value}</div>
             </div>
           ))}
@@ -156,9 +156,9 @@ function MePage({ go }: { go(p: PageId, h?: HostId): void }) {
         </div>
       </div>
       <Section title="身份">
-        <SettingRow label="名字"><TextField value={name} onCommit={setName} /></SettingRow>
-        <SettingRow label="头像"><Button onClick={() => {}}>上传图片</Button></SettingRow>
-        <SettingRow label="在其他设备上使用这个身份" hint="把身份密钥粘贴到你的另一台设备，主机会认出是你">
+        <SettingRow agents="none" source="local" label="名字"><TextField value={name} onCommit={setName} /></SettingRow>
+        <SettingRow agents="none" source="local" label="头像"><Button onClick={() => {}}>上传图片</Button></SettingRow>
+        <SettingRow agents="none" source="local" label="在其他设备上使用这个身份" hint="把身份密钥粘贴到你的另一台设备，主机会认出是你">
           <span className="inline-flex items-center gap-2">
             <code className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-muted">116d••••••</code>
             <Button onClick={() => (setCopied(true), setTimeout(() => setCopied(false), 1500))}>
@@ -179,7 +179,7 @@ function MePage({ go }: { go(p: PageId, h?: HostId): void }) {
         ))}
       </Section>
       <Section>
-        <LinkRow label="我的设备" hint="这台设备、你的主机和手机" link="在设备管理里查看 →" onClick={() => go("devices")} />
+        <LinkRow agents="none" source="local" label="我的设备" hint="这台设备、你的主机和手机" link="在设备管理里查看 →" onClick={() => go("devices")} />
       </Section>
     </>
   );
@@ -243,7 +243,7 @@ function DevicesPage() {
         {others.map((m) => <MachineRow key={m.name} m={m} />)}
       </Section>
       <Section title="添加">
-        <SettingRow label="添加主机" hint="让这台设备连上一台新的 cutex 主机">
+        <SettingRow agents="none" source="local" label="添加主机" hint="让这台设备连上一台新的 cutex 主机">
           <span className="inline-flex gap-2">
             <Button onClick={() => {}}>通过 SSH 添加主机</Button>
             <Button onClick={() => {}}>用配对码连接</Button>
@@ -260,7 +260,7 @@ function HostPicker({ host, setHost }: { host: HostId; setHost(h: HostId): void 
   const [open, setOpen] = useState(false);
   return (
     <span className="relative inline-flex">
-      <button type="button" onClick={() => setOpen(!open)} className="ml-1 inline-flex h-4.5 items-center gap-1 rounded bg-background/70 px-1.5 text-[11px] text-foreground hover:bg-background">
+      <button type="button" onClick={() => setOpen(!open)} className="ml-1 inline-flex h-4.5 items-center gap-1 rounded bg-background/70 px-1.5 text-caption/[inherit] text-foreground hover:bg-background">
         <Dot />{host}<ChevronDown size={11} className="text-subtle" />
       </button>
       {open && (
@@ -268,7 +268,7 @@ function HostPicker({ host, setHost }: { host: HostId; setHost(h: HostId): void 
           {HOSTS.map((x) => (
             <button key={x.id} type="button" onClick={() => (setHost(x.id), setOpen(false))} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-foreground hover:bg-surface-2">
               <Dot />{x.id}
-              <span className="text-[11px] text-subtle">{x.owner === "sam" ? "主人" : "成员"}{x.self ? " · 此设备" : ""}</span>
+              <span className="text-caption/[inherit] text-subtle">{x.owner === "sam" ? "主人" : "成员"}{x.self ? " · 此设备" : ""}</span>
               {x.id === host && <Check size={13} className="ml-auto text-accent" />}
             </button>
           ))}
@@ -326,21 +326,21 @@ function OwnerAccess({ host }: { host: HostId }) {
           detail="10 分钟前 · 待分配"
           actions={<Select value={pending} onChange={setPending} options={[{ value: "", label: "分配给…" }, { value: "sam", label: "Sam" }, { value: "ema", label: "ema" }, { value: "reject", label: "拒绝" }]} />}
         />
-        <SettingRow label="新设备先待分配" hint="新设备要你分配给某个人后才能使用"><Toggle checked={hold} onChange={setHold} /></SettingRow>
+        <SettingRow agents="none" source="local" label="新设备先待分配" hint="新设备要你分配给某个人后才能使用"><Toggle checked={hold} onChange={setHold} /></SettingRow>
       </Section>
       <Section title="别的主机" hint="和这台主机互联的主机，以及它们能看到什么。" actions={<Button onClick={() => {}}><span className="inline-flex items-center gap-1"><Plus size={12} />邀请主机</span></Button>}>
         <ListRow leading={<Server size={15} className="text-subtle" />} title="hachimi" detail="归属 ema · 已连接" />
-        <SettingRow label="它能看到这里的智能体" hint={see === "none" ? <span className="text-warn">对方现在看不到这里的任何智能体</span> : see === "some" ? "只看到你选的项目里的智能体" : "能看到这里的所有智能体"}>
+        <SettingRow agents="none" source="local" label="它能看到这里的智能体" hint={see === "none" ? <span className="text-warn">对方现在看不到这里的任何智能体</span> : see === "some" ? "只看到你选的项目里的智能体" : "能看到这里的所有智能体"}>
           <Segmented value={see} onChange={setSee} options={[{ value: "all", label: "全部" }, { value: "some", label: "部分" }, { value: "none", label: "不可见" }]} />
         </SettingRow>
-        <SettingRow label="接受委托" hint="对方的智能体可以把任务委托给这里"><Toggle checked={deleg} onChange={setDeleg} /></SettingRow>
+        <SettingRow agents="none" source="local" label="接受委托" hint="对方的智能体可以把任务委托给这里"><Toggle checked={deleg} onChange={setDeleg} /></SettingRow>
       </Section>
       <Section title="接入方式" tag={{ label: "高级" }} hint="设备和浏览器从哪里连进这台主机。">
-        <SettingRow label="配对码" hint="新设备输入配对码即可连接，10 分钟内有效"><Button onClick={() => {}}>生成配对码</Button></SettingRow>
-        <SettingRow label="监听地址">
+        <SettingRow agents="none" source="local" label="配对码" hint="新设备输入配对码即可连接，10 分钟内有效"><Button onClick={() => {}}>生成配对码</Button></SettingRow>
+        <SettingRow agents="none" source="local" label="监听地址">
           <span className="text-right font-mono text-xs leading-5 text-muted">127.0.0.1:24270<br />Tailscale 100.64.0.7:24270</span>
         </SettingRow>
-        <SettingRow label="网页访问来源 (CORS)" hint="允许从这些网页地址访问">
+        <SettingRow agents="none" source="local" label="网页访问来源 (CORS)" hint="允许从这些网页地址访问">
           <span className="text-right font-mono text-xs leading-5 text-muted">http://localhost:5173<br />https://cutex.app</span>
         </SettingRow>
       </Section>
@@ -353,8 +353,8 @@ function MemberAccess() {
     <>
       <div className="mb-6 rounded-xl border border-border bg-surface-2/50 px-4 py-3 text-sm text-muted">只有 hachimi 的主人（ema）能管理访问。</div>
       <Section title="你在 hachimi 上">
-        <SettingRow label="身份"><span className="inline-flex items-center gap-1.5 text-xs text-muted">{T.member}全部项目 · 可以发消息</span></SettingRow>
-        <SettingRow label="你的设备"><span className="text-xs text-muted">host-a</span></SettingRow>
+        <SettingRow agents="none" source="local" label="身份"><span className="inline-flex items-center gap-1.5 text-xs text-muted">{T.member}全部项目 · 可以发消息</span></SettingRow>
+        <SettingRow agents="none" source="local" label="你的设备"><span className="text-xs text-muted">host-a</span></SettingRow>
       </Section>
     </>
   );
@@ -390,7 +390,7 @@ export function ConnTopic() {
       </ul>
       <div className="flex items-start rounded-xl border border-border bg-background">
         <nav className="sticky top-0 w-36 shrink-0 self-start border-r border-border/60 p-2">
-          <div className="px-2 pt-1 pb-1.5 text-[11px] text-subtle">连接</div>
+          <div className="px-2 pt-1 pb-1.5 text-caption/[inherit] text-subtle">连接</div>
           {NAV.map((n) => (
             <button
               key={n.id}
@@ -398,7 +398,7 @@ export function ConnTopic() {
               className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm ${n.id === page ? "bg-surface-2 font-medium text-foreground" : n.off ? "text-subtle" : "text-muted hover:text-foreground"}`}
             >
               {n.label}
-              {n.off && <span className="text-[10px] text-subtle">不变</span>}
+              {n.off && <span className="text-caption/[inherit] text-subtle">不变</span>}
             </button>
           ))}
         </nav>

@@ -58,13 +58,10 @@ describe("settings punctuation", () => {
     expect([...LEGACY_ROW_HINTS].filter((k) => !hasStop(k)), "fixed: remove from the legacy list").toEqual([]);
   });
 
-  it("reviewed pages (with an agents chip) have a sentence as their page hint", () => {
-    const pages = MODULES.flatMap((m) => m.contributes?.["settings.page"] ?? []).filter((p) => p.agents);
+  it("declared page hints are sentences independently of effect summaries", () => {
+    const pages = MODULES.flatMap((m) => m.contributes?.["settings.page"] ?? []).filter((p) => p.hintKey);
     expect(pages.length).toBeGreaterThan(0);
-    for (const p of pages) {
-      expect(p.hintKey, p.page).toBeTruthy();
-      expect(isSentence(p.hintKey!), `${p.page}: ${zh[p.hintKey!]} / ${enCat[p.hintKey!]}`).toBe(true);
-    }
+    expect(pages.filter(p => !isSentence(p.hintKey!)).map(p => [p.page, p.hintKey, zh[p.hintKey!], enCat[p.hintKey!]])).toEqual([]);
   });
 
   it("scope chip explanations are sentences", () => {

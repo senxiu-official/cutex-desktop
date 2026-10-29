@@ -10,7 +10,7 @@
 // without its heading (modules/status-capsule).
 
 /** One item row (add `hover:bg-hover` for a row without its own button). */
-export const CAPSULE_ROW = "group/row relative flex min-h-8 min-w-0 items-center gap-2 rounded-lg px-2 text-[13px]";
+export const CAPSULE_ROW = "group/row relative flex min-h-8 min-w-0 items-center gap-2 rounded-lg px-2 text-ui/[inherit]";
 
 /** The row's main button (fills the row; the actions are its siblings). */
 export const CAPSULE_ROW_MAIN = "flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:underline";
@@ -19,10 +19,10 @@ export const CAPSULE_ROW_MAIN = "flex min-h-8 min-w-0 flex-1 items-center gap-2 
 export const CAPSULE_ROW_ICON = "flex w-3.5 shrink-0 items-center justify-center text-subtle";
 
 /** Right-aligned meta: muted, tabular; hidden while the row's actions show. */
-export const CAPSULE_ROW_META = "shrink-0 text-[11px] text-subtle tabular-nums group-hover/row:hidden group-focus-within/row:hidden";
+export const CAPSULE_ROW_META = "shrink-0 text-caption/[inherit] text-subtle tabular-nums group-hover/row:hidden group-focus-within/row:hidden";
 
 /** The meta of a row without actions: stays. */
-export const CAPSULE_ROW_META_STATIC = "shrink-0 text-[11px] text-subtle tabular-nums";
+export const CAPSULE_ROW_META_STATIC = "shrink-0 text-caption/[inherit] text-subtle tabular-nums";
 
 /**
  * The row's actions: collapsed to no width (still in the tab order) until the row is hovered or
@@ -33,10 +33,10 @@ export function capsuleRowActions(shown = false): string {
 }
 
 /** A small text action inside a row. */
-export const CAPSULE_ROW_ACTION = "shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-50";
+export const CAPSULE_ROW_ACTION = "shrink-0 rounded-md px-1.5 py-0.5 text-caption/[inherit] text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-50";
 
 /** A secondary line of a Body (group label, fold): smaller, muted, same inset. */
-export const CAPSULE_LINE = "flex h-7 w-full items-center gap-1.5 rounded-lg px-2 text-left text-[11px] text-subtle";
+export const CAPSULE_LINE = "flex h-7 w-full items-center gap-1.5 rounded-lg px-2 text-left text-caption/[inherit] text-subtle";
 
 /** Status dot (the only colour in a row). */
 export const CAPSULE_DOT = "size-1.5 shrink-0 rounded-full";

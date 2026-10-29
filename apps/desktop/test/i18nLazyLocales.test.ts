@@ -1,4 +1,4 @@
-// Lazy locale catalogs (i18n/index.tsx): en + zh-CN are bundled eagerly, the other ten load on demand.
+// Lazy locale catalogs (i18n/index.tsx): only zh-CN is bundled eagerly; en (since 2026-10-24) and the other ten load on demand.
 // Guards: nothing in the renderer imports a lazy catalog statically (that would pull it back into the
 // main chunk), every app locale has a loader, and a loaded catalog is the file's table.
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -12,7 +12,7 @@ import { jaJP } from "../src/renderer/src/i18n/ja-JP";
 import { koKR } from "../src/renderer/src/i18n/ko-KR";
 import { zhHantCN } from "../src/renderer/src/i18n/zh-Hant-CN";
 
-const EAGER = new Set(["en", "zh-CN"]);
+const EAGER = new Set(["zh-CN"]);
 const LAZY = APP_LOCALES.filter((l) => !EAGER.has(l));
 const RENDERER = join(__dirname, "../src/renderer/src");
 
@@ -25,9 +25,11 @@ function sources(dir: string): string[] {
 }
 
 describe("lazy locale catalogs", () => {
-  it("en and zh-CN are always loaded", () => {
-    expect(loadedCatalog("en")).toBe(en);
+  it("zh-CN is always loaded; en loads on demand (a partial locale brings it as its fallback)", async () => {
     expect(loadedCatalog("zh-CN")).toBe(zhCN);
+    expect(loadedCatalog("en")).toBeUndefined();
+    await loadLocale("en");
+    expect(loadedCatalog("en")).toBe(en);
   });
 
   it("loads every other app locale on demand", async () => {

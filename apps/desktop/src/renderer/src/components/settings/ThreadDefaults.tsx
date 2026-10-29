@@ -23,7 +23,7 @@ export function ThreadDefaultRows({ current, builtin, onPatch }: { kind: ThreadK
   const row = (field: LaunchField, label: string, control: React.ReactNode, extraHint?: string) => {
     const hint = [changed.has(field) ? t("agent-config.threadDefaults.builtin", { value: describe(field) }) : null, extraHint].filter(Boolean).join("；");
     return (
-      <SettingRow
+      <SettingRow agents="newAgents" source="host"
         label={
           <span className="flex items-center gap-1.5">
             {label}

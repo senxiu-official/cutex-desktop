@@ -3,7 +3,7 @@
 // (DelegationDetailBody: brief, progress, questions, result, actions, ⋯ with 跳到委托卡片). The record
 // comes from the host-keyed store (live); one the store has not loaded comes from the detail.
 import { useEffect, useState } from "react";
-import { ArrowLeftRight, ArrowRight, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, ArrowRight, Loader2 } from "lucide-react";
 import type { AskDetail } from "../../../../shared/ipc";
 import { DelegationDetailBody } from "../../components/DelegationCard";
 import { DelegationHops, DelegationStatusMark, DelegationTag } from "../../components/DelegationParts";
@@ -22,6 +22,7 @@ import { formatAbsolute, formatWhen, useNow } from "../../lib/time";
 import { featuresOf, useApp } from "../../store";
 import type { SideBodyProps, SideTabInfo, SideTabProps } from "../slots";
 import { detailTabTitle, summaryFromDetail, type DetailState } from "./detail";
+import { services } from "../app";
 
 /** 「委托 #3 · title」 (the store's title once known, else the one it was opened with). */
 export function useDetailTab({ instance, hostId }: SideTabProps<DetailState>): SideTabInfo {
@@ -51,10 +52,18 @@ function Note({ children, tone = "muted" }: { children: React.ReactNode; tone?: 
   return <p className={`flex items-center gap-1.5 p-3 text-xs ${tone === "danger" ? "text-danger" : "text-subtle"}`}>{children}</p>;
 }
 
-export function DetailBody({ instance, hostId }: SideBodyProps<DetailState>) {
+export function DetailBody({ instance, hostId, close }: SideBodyProps<DetailState>) {
   const { t } = useI18n();
-  if (!hostId) return <Note tone="danger">{t("gutter.reason.bad-ref")}</Note>;
-  return <Detail hostId={hostId} askId={instance.state.askId} />;
+  return <div className="flex h-full min-h-0 flex-col">
+    <div className="shrink-0 border-b border-border/60 px-3 py-2">
+      <button type="button" data-delegation-back="" className="flex items-center gap-1 text-xs text-muted hover:text-foreground" onClick={() => {
+        const returnTo = instance.state.returnTo;
+        if (returnTo && returnTo !== instance.id) services.side.reveal({ instanceId: returnTo });
+        close();
+      }}><ArrowLeft size={13} aria-hidden />{t("settings.back")}</button>
+    </div>
+    <div className="min-h-0 flex-1">{hostId ? <Detail hostId={hostId} askId={instance.state.askId} /> : <Note tone="danger">{t("gutter.reason.bad-ref")}</Note>}</div>
+  </div>;
 }
 
 function Detail({ hostId, askId }: { hostId: string; askId: string }) {
@@ -96,31 +105,31 @@ function Detail({ hostId, askId }: { hostId: string; askId: string }) {
     );
   const to = peer?.side === "target" ? <PeerParty text={peer.name} label={peer.label} size={16} /> : <Who id={d.target || null} name={targetName} size={16} />;
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="delegation-detail" data-ask-id={askId}>
+    <div className="message-body flex h-full min-h-0 min-w-0 max-w-full flex-col" data-testid="delegation-detail" data-ask-id={askId}>
       <div className="shrink-0 border-b border-border/60 px-3 py-2" onContextMenu={contextMenu(() => delegationMenu(d, t, nameOf, { host: hostId, views }))}>
         <div className="flex items-start gap-1.5 text-sm">
           <ArrowLeftRight size={14} className="mt-0.5 shrink-0 text-accent" />
           <DelegationTag askId={askId} />
-          <span className="min-w-0 flex-1 font-medium break-words">{d.title || askId}</span>
+          <span className="min-w-0 flex-1 font-medium">{d.title || askId}</span>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
           {from}
           <ArrowRight size={11} className="shrink-0 text-subtle" />
           {to}
           {model && (
-            <span className="shrink-0 text-subtle" title={d.attempt?.model ? rawIdTitle(d.attempt.model, model) : undefined}>
+            <span className="min-w-0 max-w-[50%] truncate text-subtle" title={d.attempt?.model ? rawIdTitle(d.attempt.model, model) : undefined}>
               · {model}
             </span>
           )}
           <DelegationHops hops={d.hops} />
-          <DelegationStatusMark status={status} name={targetName} trailing={took !== null ? formatSpan(took) : null} error={d.attempt?.lastError ?? d.remote?.lastError} className="ml-auto shrink-0" />
+          <DelegationStatusMark status={status} name={targetName} trailing={took !== null ? formatSpan(took) : null} error={d.attempt?.lastError ?? d.remote?.lastError} className="ml-auto min-w-0 max-w-full" />
         </div>
-        <div className="mt-0.5 text-[11px] text-subtle">
+        <div className="mt-0.5 text-caption/[inherit] text-subtle">
           {Number.isFinite(created) && <span title={formatAbsolute(created)}>{t("delegations.detail.created", { when: formatWhen(created, Date.now(), locale) })}</span>}
           {d.attempts > 0 && <span> · {t("delegations.detail.attempts", { n: d.attempts })}</span>}
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-2">
         <DelegationDetailBody d={d} brief={detail?.body?.text ?? null} here={null} host={hostId} layout="side" />
       </div>
     </div>

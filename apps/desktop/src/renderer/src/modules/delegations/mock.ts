@@ -2,8 +2,64 @@
 // with agent_delegate calls, ASK / ANSWER events with their views, the cutex asks API and a timed
 // replay (progress → answered → closed, the next queued delegation starting). Between them the
 // delegations cover every status row of the card table (DESIGN §4.21). Collected by dev/mockModules.ts (dev/mockTypes.ts).
-import type { AskAnswerPage, AskCommandMethod, AskDetail, AskFilter, AskHold, AskSummary, MutationResult } from "../../../../shared/ipc";
+import type { AskAnswerPage, AskCommandMethod, AskDetail, AskFilter, AskHold, AskSummary, DaemonApi, MutationResult } from "../../../../shared/ipc";
 import type { MockAdmissionEntry, MockCore, ModuleMock } from "../../dev/mockTypes";
+import type { UpgradeApprovalRead } from "../../../../shared/delegationUpgradePreview";
+
+
+const ROUTING_SCENE = typeof location !== "undefined" && new URLSearchParams(location.search).has("routingReviews");
+const digest = `sha256:${"a".repeat(64)}`;
+const records = new Map<string, UpgradeApprovalRead>();
+function routingRows(seed: AskSummary): AskSummary[] {
+  const rows = [
+    { id: "route-pending", title: "请 Kai 复核项目内委托的路由", state: "pending" as const },
+    { id: "route-denied", title: "已拒绝：本次任务超出项目安排", state: "denied" as const },
+    { id: "route-grant", title: "路由已批准，等待一次性审核授权", state: "approved" as const },
+  ];
+  return rows.map(row => {
+    const approvalId = `routing-approval-${row.id}`, askId = `ask-${row.id}`;
+    const ref = { kind: "routing" as const, approvalId, projectId: "desktop" };
+    records.set(approvalId, { id: approvalId, projectId: "desktop", delegationRef: { hostId: "local", id: askId }, state: row.state,
+      requestDigest: digest, revision: 1, policyRevision: 1, authorityEpoch: 1,
+      requestedBy: { kind: "agent", hostId: "local", sessionId: "lead", name: "Lead", redacted: false },
+      decidedBy: row.state === "pending" ? null : { kind: "owner", hostId: null, sessionId: null, name: null, redacted: false },
+      decisionAuthority: row.state === "pending" ? null : "owner", decisionNote: row.state === "denied" ? "本次委托范围不符合当前项目安排。" : null,
+      createdAt: seed.createdAt, decidedAt: row.state === "pending" ? null : seed.updatedAt, allowedActions: { approve: row.state === "pending", deny: row.state === "pending" } });
+    return { ...seed, askId, title: row.title, target: "kai", targetName: "Kai", execution: "pendingReview", closed: row.state === "denied" ? "cancelled" : null,
+      reviewRef: ref, reviewRefs: [ref], reviewDenialReason: row.state === "denied" ? "本次委托范围不符合当前项目安排。" : null };
+  });
+}
+function routingMockApi(base: Partial<DaemonApi>, asks: AskSummary[], core: MockCore): Partial<DaemonApi> {
+  const receipts = new Map<string, { input: string; result: UpgradeResult }>();
+  return {
+    ...base,
+    async delegationRoutingApprovals(project) { return structuredClone([...records.values()].filter(record => record.projectId === project && record.state === "pending")); },
+    async delegationUpgradeApproval(id) { return structuredClone(records.get(id) ?? await base.delegationUpgradeApproval!(id)); },
+    async delegationUpgradeOperation(id) {
+      const stored = receipts.get(id)?.result;
+      return stored?.receipt ? { schema: "cutex.delegation-operation.v1", actionId: id, status: "found", outcomeUnknown: false, result: { receipt: structuredClone(stored.receipt) } } : base.delegationUpgradeOperation!(id);
+    },
+    async delegationUpgradeAction(project, action) {
+      if (action.kind !== "decision" || !records.has(action.approvalId)) return base.delegationUpgradeAction!(project, action);
+      const stored = receipts.get(action.actionId), input = JSON.stringify(action);
+      if (stored) { if (stored.input !== input) throw Error("action_id_conflict"); return structuredClone(stored.result); }
+      const record = records.get(action.approvalId)!;
+      if (record.projectId !== project || record.state !== "pending" || !record.allowedActions[action.decision] || record.requestDigest !== action.expectedDigest || record.revision !== action.expectedRevision) throw Error("approval_revision_conflict");
+      record.state = action.decision === "approve" ? "approved" : "denied"; record.revision++;
+      record.allowedActions = { approve: false, deny: false }; record.decisionNote = action.decisionNote ?? null;
+      record.decidedAt = new Date().toISOString(); record.decisionAuthority = "owner";
+      record.decidedBy = { kind: "owner", hostId: null, sessionId: null, name: null, redacted: false };
+      const ask = asks.find(row => row.askId === record.delegationRef.id)!;
+      if (action.decision === "deny") { ask.closed = "cancelled"; ask.reviewDenialReason = action.decisionNote || "主人拒绝了本次项目路由。"; ask.revision++; }
+      const result: UpgradeResult = { effectState: "committed", receipt: { schema: "cutex.delegation-operation.v1", actionId: action.actionId,
+        operationId: `mock:${action.actionId}`, operation: "approval.decide", requestDigest: "b".repeat(64), status: "completed", effectState: "committed", outcomeUnknown: false, revision: 1, updatedAt: record.decidedAt } };
+      receipts.set(action.actionId, { input, result });
+      core.emitHost("cutex/delegation/routingApprovalChanged", { projectId: project, resourceId: record.id, revision: record.revision });
+      core.emitCutex(["lead", "kai"], "cutex/ask/stateChanged", { ...ask });
+      return structuredClone(result);
+    },
+  };
+}
 
 const iso = (secondsAgo: number) => new Date(Date.now() - secondsAgo * 1000).toISOString();
 const now = () => Date.now() / 1000;
@@ -109,6 +165,32 @@ const asks: AskSummary[] = [
   ask("ask-unknown", "把 Workstation 的 r206 升到 r207", SORA, "interrupted", { ago: 3300, attempt: ended(3200, 3000, { state: "interrupted", interruptReason: "outcomeUnknown", lastError: "native exited while the turn was running; whether it finished is unknown" }) }),
   ...peerAsks(),
 ];
+// `?projectview` (modules/project-view/mock.ts): the cutex-dev project's delegations (its Director and workers).
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("projectview")) {
+  const agent = (id: string, name: string) => ({ requester: { kind: "agent" as const, cutexSessionId: id, cutex_session_id: id, name } });
+  const DIR = agent("pv-dir", "cutex-director");
+  const pv = { projectId: "cutex-dev" };
+  asks.push(
+    ask("ask-pv-1", "Shelf 收起后接入 Shelf Rail", ["pv-shm", "shelf-model"], "running", { ...pv, ...DIR, ago: 2280, ran: 2200, attempt: { n: 1, state: "running", turnId: "pv-shm-t1", startedAt: iso(2200), model: null, activity: { toolCalls: 31 }, progress: [{ text: "Rail 收起状态写进布局 v2", at: iso(1200) }, { text: "在改迁移：旧的 toolsCollapsed → shelf.collapsed", at: iso(140) }] } }),
+    ask("ask-pv-3", "审查设备令牌吊销", ["pv-sec", "security-review"], "running", { ...pv, ...DIR, ago: 1200, ran: 1150, attempt: { n: 1, state: "running", turnId: "pv-sec-t1", startedAt: iso(1150), model: null, activity: { toolCalls: 9 }, progress: [{ text: "读完 token.rs，开始找 revokeToken 的调用点", at: iso(420) }] } }),
+    ask("ask-pv-4", "r251 发布说明", ["pv-rel", "release-bot"], "pendingReview", { ...pv, ...DIR, ago: 720 }),
+    ask("ask-pv-2", "主人设备的全局提示", ["pv-set", "settings-ui"], "answered", { ...pv, owner: true, ago: 3600, attempt: ended(3500, 130), answerId: "ans-pv-2", answerPreview: "ownerDeviceAdded 提示做完了，测试通过。", review: "awaitingAcceptance" }),
+    ask("ask-pv-5", "8 种语言 remote.token.* 改译", ["pv-tr", "翻译校对"], "running", { ...pv, ...agent("pv-set", "settings-ui"), ago: 1500, ran: 1400, ownerQuestions: 1, openQuestions: 1, holdSince: iso(360), ...held({ reason: "waitingForInput" }) }),
+    ask("ask-pv-6", "顶栏拆分截图验收", ["pv-qa", "ui-tester"], "running", { ...pv, ...agent("pv-shl", "shell-layout"), ago: 720, ran: 700 }),
+    ask("ask-pv-7", "/summary 加 needsYouCount", ["pv-rh", "remote-hosts"], "running", { ...pv, ...agent("pv-mob", "mobile-work"), ago: 1800, ran: 1700 }),
+    ask("ask-pv-8", "整理 desktop-modules.md §24", ["pv-doc", "文档整理"], "answered", { ...pv, ...DIR, ago: 14000, attempt: ended(13900, 10900), answerId: "ans-pv-8", answerPreview: "§24 按 Shelf 改写完了。", closed: "completed", closedAt: iso(10800) }),
+    ask("ask-pv-9", "检查更新通道", ["pv-upd", "updater"], "answered", { ...pv, ...DIR, ago: 5400, attempt: ended(5300, 3700), answerId: "ans-pv-9", answerPreview: "beta / stable 两个通道都正常。", review: "accepted", closed: "accepted", closedAt: iso(3600) }),
+    // The Director's result waiting for its own acceptance (owner 2026-10-28: 放弃 from the detail must drop it from the card).
+    ask("ask-pv-10", "复核 sidebar 的虚拟列表", ["pv-perf", "sidebar-perf"], "answered", { ...pv, ...DIR, ago: 4200, attempt: ended(4100, 2900), answerId: "ans-pv-10", answerPreview: "虚拟列表在 2000 行下保持 60 fps。", review: "awaitingAcceptance" }),
+  );
+}
+if (ROUTING_SCENE) {
+  const capability = asks.find(row => row.askId === "ask-review")!;
+  capability.target = "kai"; capability.targetName = "Kai";
+  capability.reviewRef = { kind: "capability", approvalId: "apr-5e1f0a7c", projectId: "desktop" };
+  capability.reviewRefs = [capability.reviewRef];
+  asks.push(...routingRows(capability));
+}
 const byId = new Map(asks.map((a) => [a.askId, a]));
 
 const ANSWERS: Record<string, string> = {
@@ -206,6 +288,7 @@ function leadThread() {
             { type: "agentMessage", id: "la1", text: "好，我先让 Helper 只读找调用点，Alden 准备构建和发布说明。" },
             delegateCall("ld1", a("ask-done")),
             delegateCall("ld2", a("ask-review")),
+            ...(ROUTING_SCENE ? [delegateCall("ld-route", a("ask-route-pending")), delegateCall("ld-denied", a("ask-route-denied")), delegateCall("ld-grant", a("ask-route-grant"))] : []),
             delegateCall("ld3", a("ask-accept")),
             { type: "mcpToolCall", id: "lw1", server: "cutex", tool: "delegation_wait", status: "completed", durationMs: 3300, arguments: { delegations: ["ask-done"] }, result: { content: [], structuredContent: { ok: true, reason: "result", results: [{ kind: "answer", delegation: "ask-done", title: a("ask-done").title, answer: a("ask-done").answerPreview, awaiting_acceptance: false }], delegations: [] } } },
             { type: "agentMessage", id: "la2", text: "Helper 找到 3 处调用，两处没校验 revision。接下来让它直接改。" },
@@ -343,9 +426,21 @@ function parties(d: AskSummary): string[] {
   return r && r !== "owner" ? [r, d.target] : [d.target];
 }
 
-function update(askId: string, patch: Partial<AskSummary>) {
+/**
+ * `?askstale`: what the owner hit on remote 2026-10-28 — the host feed misses the events of an owner close
+ * and the host's capped closed list (newest 1000 by creation) does not reach that delegation.
+ */
+const ASK_STALE = typeof location !== "undefined" && new URLSearchParams(location.search).has("askstale");
+const missedCloses = new Set<string>();
+
+function update(askId: string, patch: Partial<AskSummary>, missed = false) {
   const d = byId.get(askId);
   if (!d) return;
+  if (missed) {
+    missedCloses.add(askId);
+    Object.assign(d, patch, { revision: d.revision + 1, updatedAt: new Date().toISOString() });
+    return;
+  }
   const before = { execution: d.execution, hold: d.hold, review: d.review, closed: d.closed };
   Object.assign(d, patch, { revision: d.revision + 1, updatedAt: new Date().toISOString() });
   if (before.execution !== d.execution || JSON.stringify(before.hold) !== JSON.stringify(d.hold) || before.review !== d.review)
@@ -357,7 +452,7 @@ function mockDelegationApi() {
   return {
     async asks(filter: AskFilter): Promise<AskSummary[] | null> {
       const rows = [...byId.values()]
-        .filter((d) => (filter.state === "open" ? isOpen(d) : filter.state === "closed" ? !isOpen(d) : !filter.state || d.execution === filter.state))
+        .filter((d) => (filter.state === "open" ? isOpen(d) : filter.state === "closed" ? !isOpen(d) && !missedCloses.has(d.askId) : !filter.state || d.execution === filter.state))
         .filter((d) => !filter.requester || requesterId(d) === filter.requester)
         .filter((d) => !filter.target || d.target === filter.target)
         .filter((d) => !filter.involving || d.target === filter.involving || requesterId(d) === filter.involving)
@@ -402,7 +497,7 @@ function mockDelegationApi() {
       } else if (method === "cutex/ask/retry") {
         update(d.askId, { execution: "queued", hold: { reason: "targetBusy", position: 1 }, attempts: d.attempts + 1, attempt: null });
       } else {
-        update(d.askId, { review: params.outcome === "accepted" ? "accepted" : d.review === "awaitingAcceptance" ? "abandoned" : d.review, closed: params.outcome ?? "abandoned", closedAt: new Date().toISOString() });
+        update(d.askId, { review: params.outcome === "accepted" ? "accepted" : d.review === "awaitingAcceptance" ? "abandoned" : d.review, closed: params.outcome ?? "abandoned", closedAt: new Date().toISOString() }, ASK_STALE);
       }
       return { ok: true };
     },
@@ -484,11 +579,17 @@ function currentTurnOf(sessionId: string) {
 }
 
 export const mock: ModuleMock = {
-  api: () => mockDelegationApi(),
+  features: { new: ["delegation-tree-stop-v1", "delegation-routing-v1", "project-run-control-v1", "delegation-continuation-v1", "agent-activity-v1", "agent-archive-kind-v1", ...(ROUTING_SCENE ? ["delegation-review-refs"] : [])] },
+  api: (core) => {
+    const base = { ...mockDelegationApi(), ...(!core.legacy ? createUpgradeMock("local") : {}) };
+    return ROUTING_SCENE ? routingMockApi(base, asks, core) : base;
+  },
+  remote: (hostId) => ({ ...mockDelegationApi(), ...createUpgradeMock(hostId) }),
   admission: (sessionId) => admissionOf(sessionId),
   currentTurn: (sessionId) => currentTurnOf(sessionId),
   thread: (sessionId) => (sessionId === "lead" ? leadThread() : sessionId === "helper" ? helperThread() : null),
   start(core: MockCore) {
+    if (ROUTING_SCENE) return;
     if (core.legacy) return;
     // Helper's delegation turns count as busy, so sends while one runs queue / steer like a live agent.
     core.markBusy("helper", "helper-t2");
@@ -503,3 +604,605 @@ export const mock: ModuleMock = {
     );
   },
 };
+
+import type {
+  DelegationRef, PermanentRetirementExecute, PermanentRetirementReview, RedactedAncestor,
+  UpgradeAction, UpgradeActor, UpgradeApproval, UpgradeOperationReceipt, UpgradeMember, UpgradeNode, UpgradeParty, UpgradeTreeParty,
+  UpgradePreviewApi, UpgradeResult, UpgradePanelSnapshot as UpgradeSnapshot, UpgradeTreeNode,
+} from "../../../../shared/delegationUpgradePreview";
+
+// In-memory preview only: no daemon transport, owner impersonation, timers or remote receipts.
+const OBSERVED_AT = "2026-10-26T01:00:00.000Z";
+const PAGE_SIZE = 4;
+const cloneUpgrade = <T>(value: T): T => structuredClone(value);
+const fail = (code: string): never => { throw new Error(code); };
+const requireAllowed = (allowed: boolean) => { if (!allowed) fail("action_not_allowed"); };
+const checkRevision = (expected: number, actual: number) => {
+  if (expected !== actual) fail("revision_conflict");
+};
+const refKey = (ref: DelegationRef) => JSON.stringify([ref.hostId, ref.id]);
+const sameRef = (a: DelegationRef | UpgradeTreeParty | null, b: DelegationRef | UpgradeTreeParty) => a !== null && "id" in a && "id" in b && refKey(a) === refKey(b);
+const upgradeNodes = (state: UpgradeSnapshot) => state.nodes.filter((n): n is UpgradeNode => n.kind === "delegation");
+const opaque = () => crypto.randomUUID();
+const ownerActor: UpgradeActor = { kind: "owner", hostId: null, sessionId: null, name: null, redacted: false };
+
+export interface UpgradeMockOptions {
+  /** Authenticated mock entry, never request/wire fields. Scope booleans are independent. */
+  caller?: Partial<UpgradeSnapshot["caller"]> & {
+    role?: "director" | "operator" | "member";
+    actor?: UpgradeActor;
+    canPauseMembers?: boolean;
+    canStop?: boolean;
+  };
+  /** Explicit simulation controls; never interpreted as a backend receipt. */
+  retirement?: {
+    stage?: "committed" | "stopped_not_archived" | "uncertain";
+    runtimeGeneration?: number;
+    nativeThreadId?: string;
+  };
+}
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
+  if (value !== null && typeof value === "object") {
+    return "{" + Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => JSON.stringify(key) + ":" + canonical(item)).join(",") + "}";
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+function exactFields(value: object, fields: readonly string[]) {
+  if (Object.keys(value).some(key => !fields.includes(key))) fail("invalid_request_fields");
+}
+const nodeActions = (manage: boolean): UpgradeNode["allowedActions"] => ({
+  readAttempts: true, stop: manage, stopSelf: manage, stopJobs: false,
+  declareContinuation: false, resumeContinuation: false,
+});
+
+function seed(hostId: string, projectId: string, caller: UpgradeSnapshot["caller"], route: boolean, pauseMembers: boolean, stop: boolean): UpgradeSnapshot {
+  const seededAt = new Date().toISOString();
+  const remoteHost = hostId + ":preview-remote";
+  const ref = (id: string, host = hostId): DelegationRef => ({ id, hostId: host });
+  const party = (id: string, name: string, host = hostId): UpgradeParty => ({ ...ref(id, host), name });
+  const director = party("director", "小侦探");
+  const worker = party("worker", "Alden");
+  const actor: UpgradeActor = { kind: "agent", hostId, sessionId: worker.id, name: worker.name, redacted: false };
+  const node = (id: string, title: string, overrides: Partial<UpgradeNode> = {}): UpgradeNode => ({
+    kind: "delegation", id, hostId, projectId, ref: ref(id),
+    parent: ref("root"), parentState: "visible", redactedParentRef: null,
+    root: ref("root"), rootState: "visible", redactedRootRef: null,
+    followUp: null, followUpState: "none", parentId: "root", rootId: "root", followUpOf: null,
+    parentAttemptId: "root#1", lineageState: "verified", redactedParent: false,
+    requester: director, target: worker, title, execution: "queued", closed: null,
+    lastActivityAt: seededAt, resumeEvidence: { kind: "none" }, continuation: null, routingApproval: null,
+    allowedActions: nodeActions(stop), revision: 1, ...overrides,
+  });
+  const approval = (id: string, overrides: Partial<UpgradeApproval> = {}): UpgradeApproval => ({
+    id, state: "pending", requestDigest: "mock-routing-digest-1", policyRevision: 1, authorityEpoch: 1, revision: 1,
+    requestedBy: actor, decidedBy: null, decisionAuthority: null, decisionNote: null,
+    createdAt: seededAt, decidedAt: null, allowedActions: { approve: route, deny: route }, ...overrides,
+  });
+  const member = (id: string, name: string, overrides: Partial<UpgradeMember> = {}): UpgradeMember => ({
+    id, hostId, name, director: false, lastActivityAt: OBSERVED_AT, observedAt: OBSERVED_AT,
+    activityStatus: "idle", archiveKind: "active", restorable: false, restoreBlockers: ["not_archived"],
+    allowedActions: ["start", "send", "archive", "permanentRetire"], ...overrides,
+  });
+  const parentPlaceholder = opaque(), rootPlaceholder = opaque();
+  const placeholder = (placeholderId: string): RedactedAncestor => ({
+    kind: "redactedAncestor", placeholderId, labelKey: "delegation.ancestorRestricted",
+    reason: "notVisible", expandable: false, allowedActions: {},
+  });
+  return {
+    projectId, revision: "1", nextCursor: null, coverage: "partial",
+    unresolvedEdges: [
+      { from: ref("legacy"), relation: "parent", reason: "legacyUnknown" },
+      { from: ref("legacy"), relation: "root", reason: "legacyUnknown" },
+      { from: ref("redacted"), relation: "parent", reason: "redacted" },
+      { from: ref("redacted"), relation: "root", reason: "redacted" },
+      { from: ref("remote", remoteHost), relation: "parent", reason: "unavailable" },
+    ],
+    nodes: [
+      node("root", "重做委托树面板的外观", { parent: null, parentState: "none", parentId: null, parentAttemptId: null, execution: "running" }),
+      node("child", "审计间距、字号和圆角"),
+      node("grandchild", "补齐深浅色截图", { parent: ref("child"), parentId: "child", parentAttemptId: "child#1", execution: "running", requester: worker }),
+      node("deep", "深色主题下重拍确认对话框", { parent: ref("grandchild"), parentId: "grandchild", parentAttemptId: "grandchild#1", requester: worker }),
+      node("failed", "对比旧版 Shelf 的页头", { parent: ref("child"), parentId: "child", parentAttemptId: "child#1", requester: worker,
+        execution: "interrupted", closed: "failed", allowedActions: nodeActions(false) }),
+      node("remote", "在 remote 上跑完整测试", {
+        hostId: remoteHost, ref: ref("remote", remoteHost), parent: ref("child"), parentId: null, rootId: null,
+        parentAttemptId: "child#1", target: party("remote-worker", "trainer", remoteHost), execution: "running",
+      }),
+      node("legacy", "旧版：整理委托卡片文案", {
+        parent: null, parentState: "unknown", parentId: null, parentAttemptId: null, root: null, rootState: "unknown", rootId: null,
+        lineageState: "legacyUnknown", execution: "answered", closed: "completed", allowedActions: nodeActions(false),
+      }),
+      node("redacted", "核对受限父任务的交接", {
+        parent: null, parentState: "redacted", parentId: null, parentAttemptId: null, root: null, rootState: "redacted", rootId: null,
+        redactedParentRef: { placeholderId: parentPlaceholder }, redactedRootRef: { placeholderId: rootPlaceholder },
+        requester: null, redactedParent: true,
+      }),
+      node("limited", "夜间长跑：回放 30 轮滚动", {
+        execution: "interrupted", revision: 2, resumeEvidence: { kind: "restartRecovery" },
+        continuation: { state: "limited", roundNumber: 32, maxRounds: 32, maxElapsedSeconds: 86400,
+          waitingFor: null, nextWakeAt: null, limitReason: "max_rounds", revision: 1 },
+        allowedActions: { ...nodeActions(stop), resumeContinuation: caller.isOwner },
+      }),
+      node("approval", "请 Mika 复核对话框按钮顺序", { routingApproval: approval("approval-1") }),
+      node("history", "清点旧的确认对话框", {
+        execution: "answered", closed: "completed", followUp: ref("legacy"), followUpState: "visible", followUpOf: "legacy", allowedActions: nodeActions(false),
+      }),
+      node("director-work", "拆分 r265 委托合同的界面工作", {
+        parent: null, parentState: "none", parentId: null, parentAttemptId: null, root: ref("director-work"), rootId: "director-work", target: director, execution: "running",
+      }),
+      node("redactedActor", "整理审批记录的显示", {
+        execution: "answered", closed: "completed", allowedActions: nodeActions(false),
+        routingApproval: approval("approval-redacted", { state: "approved", decidedBy: { kind: "agent", hostId: null, sessionId: null, name: null, redacted: true },
+          decisionAuthority: "director", decidedAt: seededAt, allowedActions: { approve: false, deny: false } }),
+      }),
+      node("approved", "修复归档确认的焦点顺序", {
+        execution: "answered", closed: "completed", allowedActions: nodeActions(false),
+        routingApproval: approval("approval-approved", { state: "approved", decidedBy: ownerActor, decisionAuthority: "owner",
+          decidedAt: seededAt, allowedActions: { approve: false, deny: false } }),
+      }),
+      node("unknown-audit", "统一状态图标", {
+        execution: "answered", closed: "completed", allowedActions: nodeActions(false),
+        routingApproval: approval("approval-unknown", { state: "approved", allowedActions: { approve: false, deny: false } }),
+      }),
+      node("same-id", "更新 PROGRESS.md"),
+      node("same-id", "同步 remote 上的预览截图", { hostId: remoteHost, ref: ref("same-id", remoteHost), rootId: null, parentId: null,
+        target: party("remote-worker", "trainer", remoteHost) }),
+      placeholder(parentPlaceholder), placeholder(rootPlaceholder),
+    ],
+    members: [
+      member("director", director.name, { director: true, activityStatus: "busy", allowedActions: ["start", "send"] }),
+      member("worker", worker.name, { activityStatus: "busy" }),
+      member("idle", "Mika", { lastActivityAt: new Date(Date.parse(OBSERVED_AT) - 3 * 60 * 60 * 1000).toISOString() }),
+      member("unknown", "Kai", { activityStatus: "unknown", lastActivityAt: null }),
+      member("soft", "Rei", { activityStatus: "offline", archiveKind: "soft", restorable: true,
+        restoreBlockers: [], allowedActions: ["restore", "permanentRetire"] }),
+      member("blocked", "Sora", { activityStatus: "offline", archiveKind: "soft", restorable: true,
+        restoreBlockers: ["runtime_not_offline"], allowedActions: ["permanentRetire"] }),
+      member("permanent", "old-reviewer", { activityStatus: "offline", archiveKind: "permanent",
+        restoreBlockers: ["permanently_closed"], allowedActions: [] }),
+      member("offline", "Helper", { activityStatus: "offline" }),
+      member("remote-worker", "trainer", { hostId: remoteHost, activityStatus: "busy" }),
+    ],
+    parties: [],
+    approvals: [],
+    policy: { revision: 1, memberMode: "approvalRequired", allowedActions: { update: route } },
+    runControl: { epoch: 1, phase: "running", pauseId: null, mode: "afterTurn", scope: "members",
+      allowedActions: { pause: pauseMembers, pauseAll: caller.isOwner && caller.canManageMembers, resume: false } },
+    grants: { items: [], allowedActions: { create: route } }, interruptedDelegations: [], caller: cloneUpgrade(caller),
+  };
+}
+
+export function createUpgradeMock(hostId: string, options: UpgradeMockOptions = {}): UpgradePreviewApi {
+  const isOwner = options.caller?.isOwner ?? true;
+  const director = options.caller?.role === "director";
+  const caller: UpgradeSnapshot["caller"] = {
+    isOwner, canManageMembers: options.caller?.canManageMembers ?? (isOwner || director),
+    canOfflineMembers: options.caller?.canOfflineMembers ?? (isOwner || director),
+  };
+  const canRoute = isOwner || director;
+  const canPause = options.caller?.canPauseMembers ?? (isOwner || director);
+  const canStop = options.caller?.canStop ?? (isOwner || director);
+  const actor: UpgradeActor = isOwner ? ownerActor : options.caller?.actor ?? {
+    kind: "agent", hostId, sessionId: director ? "director" : "mock-member",
+    name: director ? "Preview Director" : "Preview Member", redacted: false,
+  };
+  if (!isOwner && actor.kind === "owner") fail("invalid_mock_caller");
+  const projects = new Map<string, UpgradeSnapshot>();
+  const queryIds = new Map<string, string>();
+  const receipts = new Map<string, { payload: string; result?: UpgradeResult; error?: string }>();
+  const occurrences = new Map<string, { revision: number; generation: number; thread: string }>();
+  const reviews = new Map<string, {
+    review: PermanentRetirementReview; projectId: string; thread: string; request?: string;
+  }>();
+  // A partial receipt may already have effects. The session stays fenced to its original action,
+  // across project views and reviews, until an authoritative final receipt can resolve it.
+  const pendingRetirements = new Map<string, string>();
+  const retirementTargetKey = (id: string) => refKey({ hostId, id });
+  const nowIso = () => new Date().toISOString();
+  const stateFor = (projectId: string) => {
+    let state = projects.get(projectId);
+    if (!state) {
+      state = seed(hostId, projectId, caller, canRoute, canPause, canStop);
+      projects.set(projectId, state);
+      queryIds.set(projectId, opaque());
+    }
+    return state;
+  };
+  const projectedSnapshot = (state: UpgradeSnapshot): UpgradeSnapshot => {
+    const snapshot = cloneUpgrade(state);
+    snapshot.parties = snapshot.members.filter(member => member.archiveKind === "active").map(({ hostId, id, name }) => ({ hostId, id, name }));
+    snapshot.approvals = upgradeNodes(snapshot).flatMap(node => node.routingApproval && "allowedActions" in node.routingApproval
+      ? [{ ...node.routingApproval, projectId: snapshot.projectId, delegationRef: node.ref }] : []);
+    return snapshot;
+  };
+  const memberFor = (state: UpgradeSnapshot, id: string) =>
+    state.members.find(m => m.id === id && m.hostId === hostId) ?? fail("member_not_found");
+  const occurrenceFor = (state: UpgradeSnapshot, member: UpgradeMember) => {
+    const key = canonical([state.projectId, member.hostId, member.id]);
+    let occurrence = occurrences.get(key);
+    if (!occurrence) {
+      occurrence = { revision: 1, generation: 1, thread: "mock-thread:" + member.id };
+      occurrences.set(key, occurrence);
+    }
+    return { occurrence, generation: options.retirement?.runtimeGeneration ?? occurrence.generation,
+      thread: options.retirement?.nativeThreadId ?? occurrence.thread };
+  };
+  function ownerGate() {
+    // Options are the authenticated preview entry, not request fields. Re-read them so a revoked
+    // owner cannot retrieve a historical receipt merely because it was cached while authorized.
+    if (!(options.caller?.isOwner ?? caller.isOwner)
+      || !(options.caller?.canManageMembers ?? caller.canManageMembers)) fail("owner_required");
+  }
+  function rotatePlaceholders(state: UpgradeSnapshot) {
+    const replacements = new Map<string, string>();
+    for (const node of state.nodes) {
+      if (node.kind !== "redactedAncestor") continue;
+      const previous = node.placeholderId;
+      node.placeholderId = opaque();
+      replacements.set(previous, node.placeholderId);
+    }
+    for (const node of upgradeNodes(state)) {
+      for (const boundary of [node.redactedParentRef, node.redactedRootRef]) {
+        if (boundary) boundary.placeholderId = replacements.get(boundary.placeholderId) ?? fail("mock_placeholder_missing");
+      }
+    }
+  }
+  function refreshGrants(state: UpgradeSnapshot) {
+    for (const grant of state.grants.items) {
+      const root = upgradeNodes(state).find(n => sameRef(n.ref, grant.rootDelegationRef));
+      if ((!root || root.closed !== null || grant.authorityEpoch !== 1) && grant.expiresAt === null) {
+        grant.expiresAt = nowIso();
+        grant.revision++;
+      }
+    }
+  }
+  function apply(state: UpgradeSnapshot, action: UpgradeAction): UpgradeResult {
+    let effectState: UpgradeResult["effectState"] = "committed";
+    let retirementStage: string | undefined;
+    let message = "Mock preview only; no backend action was sent.";
+    const findNode = (id: string, host: string) =>
+      upgradeNodes(state).find(n => sameRef(n.ref, { id, hostId: host })) ?? fail("node_not_found");
+    const recordInterrupted = (node: UpgradeNode) => {
+      if (!state.interruptedDelegations.some(ref => sameRef(ref, node.ref))) state.interruptedDelegations.push({ ...node.ref });
+    };
+    const stopLocal = (node: UpgradeNode) => {
+      node.execution = "interrupted"; node.closed = "stopped";
+      node.allowedActions = nodeActions(false);
+      if (node.continuation) {
+        node.continuation.state = "cancelled"; node.continuation.nextWakeAt = null; node.continuation.waitingFor = null;
+        node.continuation.revision++;
+      }
+      if (node.routingApproval?.state === "pending") {
+        node.routingApproval.state = "cancelled";
+        (node.routingApproval as UpgradeApproval).allowedActions = { approve: false, deny: false };
+        node.routingApproval.revision++;
+      }
+      node.revision++;
+      recordInterrupted(node);
+    };
+    switch (action.kind) {
+      case "stop": {
+        exactFields(action, ["kind", "actionId", "nodeId", "nodeHostId", "cascade", "stopJobs", "expectedRevision"]);
+        if (action.stopJobs !== false || !["none", "descendants"].includes(action.cascade)) fail("invalid_stop_request");
+        const target = findNode(action.nodeId, action.nodeHostId);
+        checkRevision(action.expectedRevision, target.revision);
+        requireAllowed(canStop && (action.cascade === "none" ? target.allowedActions.stopSelf : target.allowedActions.stop));
+        const selected = new Set([refKey(target.ref)]);
+        if (action.cascade === "descendants") {
+          let grew = true;
+          while (grew) {
+            grew = false;
+            for (const node of upgradeNodes(state)) {
+              if (node.parentState !== "visible" || !node.parent || node.lineageState !== "verified") continue;
+              if (selected.has(refKey(node.parent)) && !selected.has(refKey(node.ref))) {
+                selected.add(refKey(node.ref)); grew = true;
+              }
+            }
+          }
+        }
+        for (const node of upgradeNodes(state)) {
+          if (!selected.has(refKey(node.ref)) || node.closed !== null) continue;
+          const allowed = sameRef(node.ref, target.ref) && action.cascade === "descendants"
+            ? node.allowedActions.stop : node.allowedActions.stopSelf;
+          if (!allowed || node.hostId !== hostId) { effectState = "partial"; continue; }
+          stopLocal(node);
+        }
+        if (action.cascade === "descendants" && state.coverage !== "complete") effectState = "partial";
+        if (effectState === "partial") message += " Coverage incomplete or remote stop receipt pending.";
+        break;
+      }
+      case "pause": {
+        exactFields(action, ["kind", "actionId", "mode", "scope", "expectedEpoch"]);
+        const control = state.runControl;
+        if (action.expectedEpoch !== control.epoch) fail("epoch_conflict");
+        requireAllowed(action.scope === "all"
+          ? caller.isOwner && caller.canManageMembers && control.allowedActions.pauseAll
+          : canPause && control.allowedActions.pause);
+        requireAllowed(control.pauseId === null);
+        let waiting = false;
+        for (const node of upgradeNodes(state)) {
+          if (node.closed !== null || !["running", "queued"].includes(node.execution)) continue;
+          if (action.scope === "members" && state.members.some(m => m.director && sameRef(m, node.target))) continue;
+          if (node.hostId !== hostId) { effectState = "partial"; continue; }
+          if (action.mode === "interrupt" && node.execution === "running") {
+            node.execution = "interrupted"; node.revision++; recordInterrupted(node);
+          } else if (node.execution === "running") waiting = true;
+        }
+        control.epoch++; control.pauseId = "mock-pause-" + control.epoch;
+        control.mode = action.mode; control.scope = action.scope;
+        control.phase = effectState === "partial" ? "partial" : waiting ? "pausing" : "paused";
+        control.allowedActions = { pause: false, pauseAll: false,
+          resume: action.scope === "all" ? caller.isOwner && caller.canManageMembers : canPause };
+        if (effectState === "partial") message += " Remote pause receipt pending.";
+        break;
+      }
+      case "resume": {
+        exactFields(action, ["kind", "actionId", "pauseId", "expectedEpoch"]);
+        const control = state.runControl;
+        if (action.expectedEpoch !== control.epoch) fail("epoch_conflict");
+        if (action.pauseId !== control.pauseId) fail("pause_id_conflict");
+        requireAllowed(control.allowedActions.resume && (control.scope === "all" ? caller.isOwner && caller.canManageMembers : canPause));
+        // Admission only: never requeue interrupted work, start offline members or clear personal pauses.
+        if (control.phase === "partial") { effectState = "partial"; message += " Remote resume receipt pending."; }
+        control.epoch++; control.phase = effectState === "partial" ? "partial" : "running"; control.pauseId = null;
+        control.allowedActions = { pause: canPause, pauseAll: caller.isOwner && caller.canManageMembers, resume: false };
+        break;
+      }
+      case "decision": {
+        exactFields(action, ["kind", "actionId", "approvalId", "decision", "expectedDigest", "expectedRevision", "decisionNote"]);
+        requireAllowed(canRoute);
+        const node = upgradeNodes(state).find(n => n.routingApproval?.id === action.approvalId) ?? fail("approval_not_found");
+        const approval = node.routingApproval as UpgradeApproval;
+        if (approval.state === "approved" || approval.state === "denied") fail("approval_already_decided");
+        checkRevision(action.expectedRevision, approval.revision);
+        if (action.expectedDigest !== approval.requestDigest) fail("digest_conflict");
+        requireAllowed(approval.allowedActions[action.decision] && approval.state === "pending" && node.closed === null);
+        requireAllowed(approval.authorityEpoch === 1 && approval.policyRevision === state.policy.revision);
+        const note = action.decisionNote ?? null;
+        if (note !== null && (typeof note !== "string" || /[\r\n\u2028\u2029]/u.test(note) || Array.from(note).length > 200)) fail("invalid_decision_note");
+        approval.state = action.decision === "approve" ? "approved" : "denied";
+        approval.decidedBy = cloneUpgrade(actor); approval.decisionAuthority = caller.isOwner ? "owner" : "director";
+        approval.decidedAt = nowIso(); approval.decisionNote = note;
+        approval.allowedActions = { approve: false, deny: false }; approval.revision++; node.revision++;
+        if (action.decision === "deny") { node.closed = "routing_denied"; node.execution = "interrupted"; node.allowedActions = nodeActions(false); }
+        break;
+      }
+      case "policy": {
+        exactFields(action, ["kind", "actionId", "memberMode", "expectedRevision"]);
+        checkRevision(action.expectedRevision, state.policy.revision);
+        requireAllowed(canRoute && state.policy.allowedActions.update);
+        state.policy.memberMode = action.memberMode; state.policy.revision++;
+        for (const node of upgradeNodes(state)) {
+          if (node.routingApproval?.state !== "pending") continue;
+          node.routingApproval.state = "stale"; node.routingApproval.revision++;
+          (node.routingApproval as UpgradeApproval).allowedActions = { approve: false, deny: false }; node.revision++;
+        }
+        break;
+      }
+      case "grant": {
+        exactFields(action, ["kind", "actionId", "requesterRef", "targetRefs", "rootDelegationRef", "maxUses"]);
+        requireAllowed(canRoute && state.grants.allowedActions.create);
+        if (action.maxUses !== 1) fail("invalid_grant_uses");
+        const requester = state.members.find(m => sameRef(m, action.requesterRef)) ?? fail("member_not_found");
+        const targets = action.targetRefs.map(ref => state.members.find(m => sameRef(m, ref)) ?? fail("member_not_found"));
+        requireAllowed(targets.length > 0 && new Set(targets.map(refKey)).size === targets.length
+          && targets.every(target => !sameRef(target, requester) && target.archiveKind === "active") && requester.archiveKind === "active");
+        const root = findNode(action.rootDelegationRef.id, action.rootDelegationRef.hostId);
+        requireAllowed(root.closed === null && root.parentState === "none" && root.rootState === "visible"
+          && sameRef(root.root, root.ref) && root.lineageState === "verified");
+        if (root.hostId !== hostId) { effectState = "partial"; message += " Remote grant not acknowledged."; break; }
+        state.grants.items.push({
+          id: "mock-grant-" + (state.revision + 1), projectId: state.projectId,
+          rootDelegationRef: { ...root.ref }, requesterRef: { ...action.requesterRef },
+          targetRefs: action.targetRefs.map(ref => ({ ...ref })), purpose: "review", maxUses: 1, usedCount: 0,
+          expiresAt: null, authorityEpoch: 1, revision: 1, revokedAt: null, allowedActions: { revoke: canRoute },
+        });
+        break;
+      }
+      case "revoke": {
+        exactFields(action, ["kind", "actionId", "grantId", "expectedRevision"]);
+        const grant = state.grants.items.find(g => g.id === action.grantId) ?? fail("grant_not_found");
+        checkRevision(action.expectedRevision, grant.revision);
+        requireAllowed(canRoute && grant.allowedActions.revoke);
+        grant.revokedAt = nowIso(); grant.allowedActions.revoke = false; grant.revision++;
+        break;
+      }
+      case "offline": case "archive": case "restore": {
+        exactFields(action, ["kind", "actionId", "memberId"]);
+        requireAllowed(action.kind === "offline" ? caller.canOfflineMembers : caller.canManageMembers);
+        const member = memberFor(state, action.memberId);
+        if (action.kind === "offline") {
+          requireAllowed(!member.director && member.activityStatus === "idle" && member.archiveKind === "active");
+          const idleMs = Date.parse(member.observedAt ?? "") - (member.lastActivityAt === null ? NaN : Date.parse(member.lastActivityAt ?? ""));
+          requireAllowed(Number.isFinite(idleMs) && idleMs >= 7200 * 1000);
+          member.activityStatus = "offline";
+        } else if (action.kind === "restore") {
+          if (member.archiveKind === "permanent") fail("permanent_retirement");
+          if ((member.restoreBlockers?.length ?? 0)) fail("restore_blocked");
+          requireAllowed(member.archiveKind === "soft" && member.restorable === true && member.allowedActions?.includes("restore") === true);
+          member.archiveKind = "active"; member.restorable = false; member.activityStatus = "offline";
+          member.restoreBlockers = ["not_archived"]; member.allowedActions = ["start", "send", "archive", "permanentRetire"];
+        } else {
+          requireAllowed(!member.director && member.archiveKind === "active" && member.allowedActions?.includes("archive") === true
+            && (member.activityStatus === "idle" || member.activityStatus === "offline"));
+          member.archiveKind = "soft"; member.restorable = true; member.activityStatus = "offline";
+          member.restoreBlockers = []; member.allowedActions = ["restore", "permanentRetire"];
+          for (const node of upgradeNodes(state)) if (sameRef(node.target, member) && node.closed === null) stopLocal(node);
+        }
+        occurrenceFor(state, member).occurrence.revision++;
+        break;
+      }
+      case "retire": {
+        exactFields(action, ["kind", "actionId", "payload"]);
+        ownerGate();
+        exactFields(action.payload, ["cutex_session_id", "confirmed_name", "confirmation_token", "expected_revision"]);
+        const request: PermanentRetirementExecute = { ...action.payload, action_id: action.actionId };
+        const targetKey = retirementTargetKey(request.cutex_session_id);
+        if (pendingRetirements.has(targetKey)) fail("permanent_retirement_pending");
+        const token = reviews.get(request.confirmation_token) ?? fail("archive_confirmation_invalid");
+        if (token.projectId !== state.projectId || token.review.cutex_session_id !== request.cutex_session_id) fail("archive_confirmation_invalid");
+        const requestIdentity = canonical(request);
+        if (token.request && token.request !== requestIdentity) fail("archive_confirmation_already_used");
+        if (Math.floor(Date.now() / 1000) >= token.review.expires_at_unix) fail("archive_confirmation_expired");
+        const member = memberFor(state, request.cutex_session_id);
+        const occurrence = occurrenceFor(state, member);
+        if (!Number.isSafeInteger(request.expected_revision) || request.expected_revision < 0
+          || request.expected_revision !== token.review.revision || request.expected_revision !== occurrence.occurrence.revision) fail("archive_confirmation_target_revision_mismatch");
+        if (occurrence.generation !== token.review.runtime_generation || occurrence.thread !== token.thread) fail("archive_confirmation_occurrence_changed");
+        if (member.name !== token.review.formal_name) fail("archive_confirmation_stale");
+        if (request.confirmed_name !== member.name) fail("permanent_retirement_name_confirmation_required");
+        requireAllowed(!member.director && member.allowedActions?.includes("permanentRetire") === true
+          && (member.archiveKind === "active" || member.archiveKind === "soft"));
+        token.request = requestIdentity;
+        retirementStage = options.retirement?.stage ?? "committed";
+        if (retirementStage !== "committed") pendingRetirements.set(targetKey, action.actionId);
+        if (retirementStage === "uncertain") {
+          effectState = "unknown"; message += " Retirement outcome uncertain; query this action instead of issuing a new one.";
+        } else {
+          member.activityStatus = "offline";
+          for (const node of upgradeNodes(state)) if (sameRef(node.target, member) && node.closed === null) stopLocal(node);
+          if (retirementStage === "stopped_not_archived") {
+            effectState = "partial"; message += " Stopped, but permanent archival did not commit.";
+          } else {
+            member.archiveKind = "permanent"; member.restorable = false;
+            member.restoreBlockers = ["permanently_closed"]; member.allowedActions = [];
+            occurrence.occurrence.revision++;
+          }
+        }
+        break;
+      }
+      case "resumeContinuation": {
+        exactFields(action, ["kind", "actionId", "nodeId", "nodeHostId", "expectedRevision"]);
+        requireAllowed(caller.isOwner);
+        const node = findNode(action.nodeId, action.nodeHostId);
+        const continuation = node.continuation ?? fail("action_not_allowed");
+        checkRevision(action.expectedRevision, continuation.revision);
+        const member = state.members.find(m => sameRef(m, node.target)) ?? fail("member_not_found");
+        requireAllowed(node.allowedActions.resumeContinuation && node.closed === null && continuation.state === "limited"
+          && member.archiveKind === "active" && member.activityStatus !== "offline" && state.runControl.phase === "running");
+        if (node.hostId !== hostId) { effectState = "partial"; message += " Remote continuation receipt pending."; break; }
+        continuation.state = "resuming"; continuation.roundNumber = 1;
+        continuation.waitingFor = null; continuation.nextWakeAt = null; continuation.limitReason = null; continuation.revision++;
+        node.execution = "queued"; node.resumeEvidence = { kind: "newAttempt" };
+        node.allowedActions.resumeContinuation = false; node.revision++;
+        break;
+      }
+      default: {
+        const exhaustive: never = action;
+        return fail("unsupported_action:" + String(exhaustive));
+      }
+    }
+    refreshGrants(state);
+    state.revision = String(Number(state.revision) + 1);
+    rotatePlaceholders(state);
+    return { snapshot: projectedSnapshot(state), effectState, message, ...(retirementStage ? { retirementStage } : {}) };
+  }
+
+  return {
+    async delegationUpgradeSnapshot(projectId, cursor) {
+      const state = stateFor(projectId);
+      const visible = upgradeNodes(state);
+      let offset = 0;
+      const prefix = "mock:" + queryIds.get(projectId)! + ":" + state.revision + ":";
+      if (cursor !== undefined) {
+        if (!cursor.startsWith(prefix)) fail("invalid_or_stale_cursor");
+        const suffix = cursor.slice(prefix.length);
+        if (!/^[1-9]\d*$/.test(suffix)) fail("invalid_or_stale_cursor");
+        offset = Number(suffix);
+        if (!Number.isSafeInteger(offset) || offset % PAGE_SIZE !== 0 || offset >= visible.length) fail("invalid_or_stale_cursor");
+      }
+      const snapshot = projectedSnapshot(state);
+      const page = visible.slice(offset, offset + PAGE_SIZE);
+      const placeholders = new Set(page.flatMap(node => [node.redactedParentRef, node.redactedRootRef]
+        .flatMap(boundary => boundary ? [boundary.placeholderId] : [])));
+      snapshot.nodes = cloneUpgrade([...page, ...state.nodes.filter(n => n.kind === "redactedAncestor" && placeholders.has(n.placeholderId))]);
+      snapshot.unresolvedEdges = snapshot.unresolvedEdges.filter(edge => page.some(n => sameRef(n.ref, edge.from)));
+      snapshot.nextCursor = offset + PAGE_SIZE < visible.length ? prefix + (offset + PAGE_SIZE) : null;
+      return snapshot;
+    },
+    async delegationUpgradeApproval(approvalId) {
+      const state = [...projects.values()].find(state => upgradeNodes(state).some(node => node.routingApproval?.id === approvalId));
+      if (!state) return fail("approval_not_found");
+      const projectId = state.projectId;
+      const node = upgradeNodes(state).find(node => node.routingApproval?.id === approvalId);
+      if (!node || !node.routingApproval || !("allowedActions" in node.routingApproval)) return fail("approval_not_found");
+      return cloneUpgrade({ ...node.routingApproval, projectId, delegationRef: node.ref });
+    },
+    async delegationUpgradeOperation(actionId) {
+      const cached = receipts.get(actionId);
+      const result = cached?.result;
+      if (!result || !result.receipt) return { schema: "cutex.delegation-operation.v1", actionId, status: "notFound", outcomeUnknown: true, result: null };
+      return { schema: "cutex.delegation-operation.v1", actionId, status: "found", outcomeUnknown: result.receipt.outcomeUnknown, result: { receipt: cloneUpgrade(result.receipt) } };
+    },
+    async delegationRetirementReview(projectId, request) {
+      ownerGate();
+      exactFields(request, ["cutex_session_id"]);
+      if (pendingRetirements.has(retirementTargetKey(request.cutex_session_id))) fail("permanent_retirement_pending");
+      const state = stateFor(projectId);
+      const member = memberFor(state, request.cutex_session_id);
+      requireAllowed(!member.director && member.allowedActions?.includes("permanentRetire") === true
+        && (member.archiveKind === "active" || member.archiveKind === "soft"));
+      const current = occurrenceFor(state, member);
+      if (!Number.isSafeInteger(current.generation) || current.generation < 0) fail("archive_confirmation_occurrence_changed");
+      const review: PermanentRetirementReview = {
+        confirmation_token: opaque(), cutex_session_id: member.id, formal_name: member.name,
+        revision: current.occurrence.revision, runtime_generation: current.generation,
+        expires_at_unix: Math.floor(Date.now() / 1000) + 300,
+      };
+      reviews.set(review.confirmation_token, { review: cloneUpgrade(review), projectId, thread: current.thread });
+      return review;
+    },
+    async delegationUpgradeAction(projectId, action) {
+      if (action.kind === "retire") ownerGate();
+      if (!action.actionId?.trim()) fail("action_id_required");
+      const payload = canonical({ projectId, action });
+      const cached = receipts.get(action.actionId);
+      if (cached) {
+        if (cached.payload !== payload) fail("action_id_payload_conflict");
+        if (cached.error) fail(cached.error);
+        // This remains execute POST, not a receipt GET. Unfinished retries revalidate the original
+        // confirmation and occurrence before replay; they never execute the retirement again.
+        if (action.kind === "retire" && cached.result?.retirementStage !== "committed") {
+          const request: PermanentRetirementExecute = { ...action.payload, action_id: action.actionId };
+          const token = reviews.get(request.confirmation_token) ?? fail("archive_confirmation_invalid");
+          if (token.projectId !== projectId || token.review.cutex_session_id !== request.cutex_session_id) fail("archive_confirmation_invalid");
+          if (token.request !== canonical(request)) fail("archive_confirmation_already_used");
+          if (Math.floor(Date.now() / 1000) >= token.review.expires_at_unix) fail("archive_confirmation_expired");
+          const state = stateFor(projectId);
+          const member = memberFor(state, request.cutex_session_id);
+          const current = occurrenceFor(state, member);
+          if (!Number.isSafeInteger(request.expected_revision) || request.expected_revision < 0
+            || request.expected_revision !== token.review.revision || current.occurrence.revision !== token.review.revision) fail("archive_confirmation_target_revision_mismatch");
+          if (current.generation !== token.review.runtime_generation || current.thread !== token.thread) fail("archive_confirmation_occurrence_changed");
+          if (member.name !== token.review.formal_name) fail("archive_confirmation_stale");
+          if (request.confirmed_name !== member.name) fail("permanent_retirement_name_confirmation_required");
+        }
+        return cloneUpgrade(cached.result!);
+      }
+      try {
+        const result = apply(stateFor(projectId), action);
+        if (action.kind === "retire") result.retirementReceipt = {
+          request: { reason: "owner_permanent_retirement", action_id: action.actionId, review: {
+            cutex_session_id: action.payload.cutex_session_id, formal_name: action.payload.confirmed_name, operation: "permanentRetire",
+            current_project_id: projectId, revision: action.payload.expected_revision, runtime_generation: 1,
+          } }, request_sha256: "b".repeat(64), stage: result.retirementStage, result: null, error: null, committed_at: null,
+        };
+        const operations: Partial<Record<UpgradeAction["kind"], string>> = { stop: "delegation.stop", pause: "project.pause", resume: "project.resume", policy: "policy.update", decision: "approval.decide", grant: "grant.create", revoke: "grant.revoke", resumeContinuation: "continuation.resume" };
+        if (operations[action.kind]) result.receipt = {
+          schema: "cutex.delegation-operation.v1", actionId: action.actionId, operationId: "mock-operation:" + action.actionId,
+          operation: operations[action.kind]!, requestDigest: "a".repeat(64),
+          status: result.effectState === "partial" || result.effectState === "unknown" ? "pending" : "completed",
+          effectState: result.effectState, outcomeUnknown: result.effectState === "unknown", revision: 1, updatedAt: new Date().toISOString(),
+        } satisfies UpgradeOperationReceipt;
+        receipts.set(action.actionId, { payload, result: cloneUpgrade(result) });
+        return result;
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "mock_action_failed";
+        receipts.set(action.actionId, { payload, error: code });
+        throw error;
+      }
+    },
+  };
+}

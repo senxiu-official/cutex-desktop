@@ -70,8 +70,8 @@ https://github.com/senxiu-official/cutex-desktop/issues) instead of using anothe
 7. **Before you start, ask the person which optional components they want**, and write the answers
    into your final report:
    - **Claude Code agents** (Claude models such as Opus or Sonnet)? If yes, install the Claude runtime
-     (section 6.1) and check its prerequisites first: Python 3.11+ with `venv`, and the Claude Code
-     CLI (`claude --version`). Do not skip it silently: a host without it shows "Claude 运行时 还没有安装"
+     (section 6.1). claude-r32 bundles Python, Claude Code CLI and the SDK; the person still needs
+     a Claude account or API key. Do not skip it silently: a host without it shows "Claude 运行时 还没有安装"
      the first time someone creates a Claude Profile or agent.
    - **Long-running jobs** (Linux only)? If yes, install the Job Service (section 6.2).
    An install is finished only when every component the person asked for passes its check.
@@ -193,7 +193,7 @@ The same native archives are also attached to the `native-<native version>` rele
 (same SHA-256; only the signature timestamps differ), so either copy is right.
 
 Every file has a `<file>.minisig` signature next to it, and each release a `SHA256SUMS` (+
-`.minisig`). The owner signs them offline with the release key; CI never holds it. The public key
+`.minisig`). The established Sign release workflow signs them with the release key stored in the release environment; the offline owner-signing path remains available. The public key
 (key id `00A0BD016183F447`) is the one cutex itself trusts for backend updates
 (`src/upgrade/keys.rs` in the cutex repository) and is published as `docs/install/cutex-release.pub`
 in this repository:
@@ -202,21 +202,36 @@ in this repository:
 RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
 ```
 
-The versions that belong together are in the table below. A cutex release's `manifest.json` names
-a `native` block (`native.version`, `native.commit`) only when that release brings a new cute-codex;
-a release without one keeps the native of the newest earlier release that has it. cutex 0.1.1 and
-0.1.2 had none (they kept `0.160.0-r52.2` from cutex 0.1.0); cutex 0.1.3 brings `0.160.0-r52.3` (see the
-`native` block of https://github.com/senxiu-official/cutex/releases/download/v0.1.3/manifest.json). cutex
-0.1.4 and 0.1.5 have none: hosts that update keep `0.160.0-r52.3`, and a fresh install of 0.1.5 uses that
-same native, which B.1 downloads from the `cute-codex-v0.160.0-r52.3` release (its commit is the one in the
-0.1.3 manifest's `native` block; the 0.1.4 and 0.1.5 manifests name none). The `cute-codex-build.json`
-inside the native archive (`version`, `commit`) says which one you unpacked.
+The versions that belong together are in the table below. This public set is desktop
+[0.2.0](https://github.com/senxiu-official/cutex-desktop/releases/tag/v0.2.0), cutex
+[0.2.0](https://github.com/senxiu-official/cutex/releases/tag/v0.2.0), and cute-codex native
+[0.164.0-r58](https://github.com/senxiu-official/cute-codex/releases/tag/cute-codex-v0.164.0-r58).
+The backend publishes its required optional component archives separately, including Claude runtime
+claude-r32 with its bundled Python. Select only the optional components the person asks for.
+
+A cutex release's signed manifest names the native and component versions it ships. Verify its
+native version/commit against the unpacked `cute-codex-build.json`; do not mix a newer backend with
+files copied from an older native directory. Existing agents keep their pinned runtime files unless
+the person explicitly chooses to change them. Never overwrite or delete an older pinned runtime.
+
+The previous public set was desktop/cutex 0.1.5, native 0.160.0-r52.3 and Claude runtime claude-r21.
+For an existing installation, use the signed update path in B.5 and retain the previous release for
+recovery; do not run the fresh-install steps over it. A desktop update alone does not update the host.
+The backend upgrade includes a one-way delegation-store format migration. Read the backend release's
+migration notes before upgrading; keeping the previous executable does not make a normal downgrade
+safe. Do not downgrade the backend without its documented store-restore procedure and stopped writers.
+Hosts without a feature's advertised capability keep their supported controls; new Profile/runtime,
+delegation and file-transfer controls require the matching backend capability.
 
 | | Linux / Windows | macOS (desktop only) |
 |---|---|---|
-| `VERSION` (cutex) | `0.1.5` | not used |
-| `DESKTOP_VERSION` (desktop) | `0.1.5` | `0.1.5` |
-| `NATIVE` (cute-codex) | `0.160.0-r52.3` | not used |
+| `VERSION` (cutex) | `0.2.0` | not used |
+| `DESKTOP_VERSION` (desktop) | `0.2.0` | `0.2.0` |
+| `NATIVE` (binary/archive version) | `0.164.0-r58` | not used |
+| `NATIVE_TAG` (cute-codex release tag) | `cute-codex-v0.164.0-r58` | not used |
+
+The binaries, `cute-codex-build.json` and archive file names use `0.164.0-r58`.
+`NATIVE_TAG` is the complete release tag; keep its `cute-codex-v` prefix in download URLs.
 
 ### B.1 Download and verify
 
@@ -251,7 +266,7 @@ Linux:
 ```sh
 mkdir -p ~/cutex-download
 cat > ~/cutex-download/cutex-install.env <<'ENV'
-VERSION=0.1.5 DESKTOP_VERSION=0.1.5 NATIVE=0.160.0-r52.3 PLATFORM=linux-x64
+VERSION=0.2.0 DESKTOP_VERSION=0.2.0 NATIVE=0.164.0-r58 NATIVE_TAG=cute-codex-v0.164.0-r58 PLATFORM=linux-x64
 PUB=RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
 # cutex's own default install base: $CUTEX_INSTALL_BASE, else $XDG_DATA_HOME/cutex, else ~/.local/share/cutex
 CUTEX_BASE=${CUTEX_INSTALL_BASE:-${XDG_DATA_HOME:-$HOME/.local/share}/cutex}
@@ -273,7 +288,7 @@ execution policy):
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\cutex-download" | Out-Null
 @'
-$Version = '0.1.5'; $DesktopVersion = '0.1.5'; $Native = '0.160.0-r52.3'; $Platform = 'windows-x64'
+$Version = '0.2.0'; $DesktopVersion = '0.2.0'; $Native = '0.164.0-r58'; $NativeTag = 'cute-codex-v0.164.0-r58'; $Platform = 'windows-x64'
 $Pub = 'RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS'
 $Dl = "$env:USERPROFILE\cutex-download"
 # cutex's own default install base: $env:CUTEX_INSTALL_BASE, else %LOCALAPPDATA%\cutex
@@ -297,7 +312,7 @@ macOS (the desktop only):
 ```sh
 mkdir -p ~/cutex-download
 cat > ~/cutex-download/cutex-install.env <<'ENV'
-DESKTOP_VERSION=0.1.5
+DESKTOP_VERSION=0.2.0
 PUB=RWRH9INhAb2gACJAg/h5EBjbudos2LXj6K+5hRBEGeVLDKaKzE+FICmS
 # hw.optional.arm64 is 1 on Apple silicon, also in a Rosetta terminal (where uname -m says x86_64)
 ARCH=$( [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] && echo arm64 || echo x64 )
@@ -319,9 +334,15 @@ get() { curl -fsSL --retry 3 -O "$1" && curl -fsSL --retry 3 -O "$1.minisig" && 
   || { echo "STOP: ${1##*/} did not download or verify; do not use it"; return 1; }; }
 get https://github.com/senxiu-official/cutex/releases/download/v$VERSION/cutex-$VERSION-$PLATFORM.tar.gz &&
 get https://github.com/senxiu-official/cutex/releases/download/v$VERSION/manifest.json &&
-get https://github.com/senxiu-official/cute-codex/releases/download/cute-codex-v$NATIVE/native-$NATIVE-$PLATFORM.tar.gz &&
+get https://github.com/senxiu-official/cute-codex/releases/download/$NATIVE_TAG/native-$NATIVE-$PLATFORM.tar.gz &&
 get https://github.com/senxiu-official/cutex-desktop/releases/download/v$DESKTOP_VERSION/cutex-desktop-$DESKTOP_VERSION-$PLATFORM.tar.gz &&
-echo "all downloads verified"
+python3 - "$VERSION" "$NATIVE" <<'PY'
+import json, sys
+m = json.load(open("manifest.json"))
+assert m["cutex"]["release"] == sys.argv[1], "STOP: unexpected backend release"
+assert m["native"]["version"] == sys.argv[2], "STOP: unexpected native version"
+print("all downloads verified; manifest versions match")
+PY
 ```
 
 Windows (PowerShell):
@@ -331,14 +352,21 @@ Invoke-Expression (Get-Content -Raw "$env:USERPROFILE\cutex-download\cutex-insta
 Set-Location $Dl
 function Get-Signed($Url) {
   $name = $Url.Split('/')[-1]
-  curl.exe -fsSL --retry 3 -o $name $Url; curl.exe -fsSL --retry 3 -o "$name.minisig" "$Url.minisig"
-  minisign -Vm $name -P $Pub; if ($LASTEXITCODE -ne 0) { throw "STOP: $name did not download or verify; do not use it" }
+  curl.exe -fsSL --retry 3 -o $name $Url
+  if ($LASTEXITCODE -ne 0) { throw "STOP: $name download failed; do not use a previous file" }
+  curl.exe -fsSL --retry 3 -o "$name.minisig" "$Url.minisig"
+  if ($LASTEXITCODE -ne 0) { throw "STOP: $name signature download failed" }
+  minisign -Vm $name -P $Pub
+  if ($LASTEXITCODE -ne 0) { throw "STOP: $name did not verify; do not use it" }
 }
 Get-Signed "https://github.com/senxiu-official/cutex/releases/download/v$Version/cutex-$Version-$Platform.tar.gz"
 Get-Signed "https://github.com/senxiu-official/cutex/releases/download/v$Version/manifest.json"
-Get-Signed "https://github.com/senxiu-official/cute-codex/releases/download/cute-codex-v$Native/native-$Native-$Platform.tar.gz"
+Get-Signed "https://github.com/senxiu-official/cute-codex/releases/download/$NativeTag/native-$Native-$Platform.tar.gz"
 Get-Signed "https://github.com/senxiu-official/cutex-desktop/releases/download/v$DesktopVersion/cutex-desktop-$DesktopVersion-$Platform.zip"
-"all downloads verified"
+$manifest = Get-Content -Raw manifest.json | ConvertFrom-Json
+if ($manifest.cutex.release -cne $Version) { throw 'STOP: unexpected backend release' }
+if ($manifest.native.version -cne $Native) { throw 'STOP: unexpected native version' }
+"all downloads verified; manifest versions match"
 ```
 
 macOS:
@@ -371,7 +399,7 @@ Linux:
 cd ~/cutex-download
 mkdir -p cutex-$VERSION && tar -xzf cutex-$VERSION-$PLATFORM.tar.gz -C cutex-$VERSION
 cp manifest.json manifest.json.minisig cutex-$VERSION/
-cutex-$VERSION/cutex --version            # cutex 0.1.5 (0.1.5, <commit>)
+cutex-$VERSION/cutex --version            # cutex release 0.2.0, with its build commit
 cutex-$VERSION/cutex service install --channel release --no-start
 ls "$RELEASE_DIR"                          # cutex  cutex-mcp  manifest.json  manifest.json.minisig
 mkdir -p ~/.local/bin && ln -sfn "$CUTEX_BASE/current/cutex" ~/.local/bin/cutex
@@ -390,7 +418,11 @@ New-Item -ItemType Directory -Force "cutex-$Version" | Out-Null
 tar -xzf "cutex-$Version-$Platform.tar.gz" -C "cutex-$Version"
 Copy-Item manifest.json, manifest.json.minisig "cutex-$Version\"
 & ".\cutex-$Version\cutex.exe" --version
+if (Get-Process -Name runtime-host -ErrorAction SilentlyContinue) {
+  throw 'STOP: runtime-host already exists; report the existing installation instead of replacing it'
+}
 & ".\cutex-$Version\cutex.exe" service install --channel release --no-start
+if ($LASTEXITCODE -ne 0) { throw 'STOP: service install failed; do not retry with --force' }
 Get-ChildItem $env:RELEASE_DIR
 # put cutex on PATH for your user (new terminals pick it up; the settings file covers later blocks)
 [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ";$CutexBase\bin", 'User')
@@ -407,12 +439,13 @@ Check:
 - `cutex service status` (Linux): `units` shows `ActiveState: inactive` for both services. If
   either is already `active`, another cutex on this account owns these unit names: stop and ask the
   person (rule 4).
-- `cutex upgrade status` prints `installed  0.1.5`; `cutex upgrade status --json` shows
-  `"managed": true` and `installed.sequence` 7. (Its `serviceManager` field may say `none` while
+- `cutex upgrade status` prints `installed  0.2.0`; `cutex upgrade status --json` shows
+  `"managed": true`; its installed sequence must agree with the signed release metadata. (Its `serviceManager` field may say `none` while
   `cutex service status` says `systemd`; that is fine.)
 - The last line prints `"home": "fresh"` (section 5.2 explains the record).
 
-The services are installed but not started yet.
+The services are installed but not started yet. If Windows reports an existing runtime-host
+installation, stop and report it; do not replace it or retry with `--force`.
 
 ### B.3 Install the runtime files
 
@@ -441,7 +474,7 @@ if (Test-Path "$env:N\codex-app-server.exe") { "natives $Native already installe
 & "$env:N\codex-app-server.exe" --version
 ```
 
-Check: `codex-app-server --version` prints `codex-app-server 0.160.0-r52.3`.
+Check: `codex-app-server --version` reports the 0.164.0-r58 runtime, and `cute-codex-build.json` records version `0.164.0-r58` and the native commit from the signed manifest.
 
 Now save the Python script of section 5.3 (the block under "Write the manifest") as
 `~/cutex-download/write-manifest.py` (Windows: `%USERPROFILE%\cutex-download\write-manifest.py`).
@@ -451,19 +484,33 @@ and select the manifest:
 
 ```sh
 . ~/cutex-download/cutex-install.env
-test -n "$NATIVE_COMMIT" && echo "native commit ok"
+python3 - "$HOME/cutex-download/manifest.json" "$N/cute-codex-build.json" "$VERSION" "$NATIVE" <<'PY'
+import json, sys
+m, b = (json.load(open(p)) for p in sys.argv[1:3])
+assert m["cutex"]["release"] == sys.argv[3], "STOP: unexpected backend release"
+assert m["native"]["version"] == b["version"] == sys.argv[4], "STOP: native version mismatch"
+assert m["native"]["commit"] == b["commit"], "STOP: native commit mismatch"
+print("native commit ok")
+PY
+if [ "$?" -ne 0 ]; then echo "STOP: native identity did not match"; exit 1; fi
 python3 ~/cutex-download/write-manifest.py
 cutex human install-runtime "$RELEASE_DIR/manifests/default.json"
 ```
 
 ```powershell
 Invoke-Expression (Get-Content -Raw "$env:USERPROFILE\cutex-download\cutex-install.env.ps1")
-if ($env:NATIVE_COMMIT) { "native commit ok" } else { throw "no NATIVE_COMMIT: is $env:N\cute-codex-build.json there?" }
+$manifest = Get-Content -Raw "$Dl\manifest.json" | ConvertFrom-Json
+$nativeBuild = Get-Content -Raw "$env:N\cute-codex-build.json" | ConvertFrom-Json
+if ($manifest.cutex.release -cne $Version) { throw 'STOP: unexpected backend release' }
+if ($manifest.native.version -cne $Native -or $nativeBuild.version -cne $Native) { throw 'STOP: native version mismatch' }
+if ($manifest.native.commit -cne $nativeBuild.commit) { throw 'STOP: native commit mismatch' }
+$env:NATIVE_COMMIT = $nativeBuild.commit
+"native commit ok"
 py "$Dl\write-manifest.py"
 cutex human install-runtime "$env:RELEASE_DIR\manifests\default.json"
 ```
 
-Check: `native commit ok`; the script prints `<install base>/releases/0.1.5/manifests/default.json`;
+Check: `native commit ok`; the script prints `<install base>/releases/0.2.0/manifests/default.json`;
 `install-runtime` prints `native_home` = `~/.cutex/codex-home` and `bundle_manifest` = that same
 file. It verifies every pinned file, so an error here names the file that is wrong.
 
@@ -749,7 +796,7 @@ cargo build --locked --release -p codex-cli -p codex-app-server --bin codex --bi
 ```
 
 Check: `target/release/codex-app-server --version` prints `codex-app-server <version>` (for example
-`0.160.0-r52.3`). Remember that version; section 5 uses it. Compiler `warning:` lines are expected
+`0.164.0-r58`). Remember that version; section 5 uses it. Compiler `warning:` lines are expected
 in this and the other builds; only `error:` lines (and a non-zero exit) mean the build failed.
 
 ### 3.2 Build the code-mode host
@@ -823,7 +870,7 @@ cargo +1.95.0 build --locked --release --bin cutex --bin cutex-mcp
 .\target\release\cutex.exe --version
 ```
 
-Check: `cutex --version` prints `cutex 0.1.5 (<7-char commit>)` (warnings during the build are
+Check: `cutex --version` reports release `0.2.0` and its build commit (warnings during the build are
 expected; only `error:` matters). `CUTEX_COMMIT` names the install
 (`dev-<commit>`) and `CUTEX_CHANNEL=release` records the channel; neither changes behaviour.
 
@@ -1064,24 +1111,16 @@ usage page's cost estimates), and it writes agent scratch directories under `~/.
 
 ### 6.1 Optional: Claude Code agents (the Claude runtime)
 
-Do this if the person asked for Claude Code agents (rule 7 of section 0); skip it otherwise. The Claude
-runtime is an optional cutex component: a small Python adapter between cutex and the official
-Claude Code CLI. cutex installs and updates it; you install two things it cannot ship for you:
+Do this if the person asked for Claude Code agents (rule 7 of section 0); skip it otherwise.
+The signed claude-r32 component bundles Python 3.13.17, the Claude Code CLI, the Python SDK and
+the adapter. A normal binary install does not require a separate Python/venv or global Claude CLI
+for this component. The Python used in B.3 to write the native manifest is a separate install-tool
+prerequisite; it is not the Claude runtime's Python.
 
-- **Python 3.11 or newer** with the `venv` module. cutex creates a private virtual environment from
-  the wheels in the component archive, offline. Linux: Debian 12+ / Ubuntu 24.04+
-  `sudo apt install -y python3 python3-venv`; Ubuntu 22.04 `sudo apt install -y python3.11 python3.11-venv`.
-  Windows: `winget install Python.Python.3.13` (or the python.org installer); cutex finds it with `py -3`.
-- **The Claude Code CLI** (`claude`), installed by you under your own Anthropic account. Its license does not allow
-  redistribution, so no Cutex archive contains it. Linux: `curl -fsSL https://claude.ai/install.sh | bash`;
-  Windows (PowerShell): `irm https://claude.ai/install.ps1 | iex`. Check with `claude --version`.
-
-`npm install -g @anthropic-ai/claude-code` works too. Do not point cutex at the copy bundled inside
-the `claude-agent-sdk` wheels from PyPI. cutex looks for `claude` on PATH, then in `~/.local/bin` (Windows
-`%USERPROFILE%\.local\bin`). If yours is elsewhere, set `CUTEX_CLAUDE_CLI=<path>` in the shell
-where you run `cutex component install claude-runtime` (the install records that path); when you
-install from the desktop's install card instead, set it for the cutex services, which run that
-install. `CUTEX_CLAUDE_PYTHON=<path>` does the same for Python.
+Use the bundled Claude Code source by default. An already installed Claude Code can be selected
+explicitly through the runtime/source controls if the person wants it; do not substitute a random
+CLI found inside another SDK installation. The person still needs their own Claude subscription or
+API credentials; packaging the CLI does not sign them in.
 
 Install the component. A binary install (section B) downloads the signed archive that belongs to the
 installed cutex release:
@@ -1091,7 +1130,7 @@ cutex component install claude-runtime
 cutex component status claude-runtime
 ```
 
-A source install builds it from the checkout instead (this downloads the Python wheels from PyPI):
+A source install builds it from the checkout instead and downloads its pinned component build inputs:
 
 ```sh
 cutex component install claude-runtime --from-source ~/src/cutex
@@ -1109,8 +1148,7 @@ again (the prepared environment is reused):
 
 | Code in `detail.needsUser.code` | What to do |
 |---|---|
-| `python_missing`, `python_too_old`, `python_venv_missing` | Install Python 3.11+ with venv (above) |
-| `claude_cli_missing` | Install the Claude Code CLI (above) |
+| `python_missing`, `python_too_old`, `python_venv_missing`, `claude_cli_missing` | On claude-r32, report the exact missing bundled file and failed component check; do not silently switch to an external runtime. Older/source components or an explicitly selected external source can require separately installed prerequisites. |
 | `codex_runtime_missing` | Select the Codex runtime first (section 5.3 / B.3) |
 | `claude_login_required` | Log in (below); the runtime itself is ready |
 

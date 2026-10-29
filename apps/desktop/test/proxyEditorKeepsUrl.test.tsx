@@ -19,7 +19,7 @@ it("keeps the manual URL in the form after a switch to none that clears it", asy
   const onSave = vi.fn(async () => {});
   const modes = [{ value: "system", label: "system" }, { value: "none", label: "none" }, { value: "manual", label: "manual" }] as const;
   const render = (mode: "system" | "none" | "manual", url: string | null) =>
-    act(() => root.render(h(ProxyEditor<"system" | "none" | "manual">, { label: "mode", modes, mode, manual: "manual", url, hasCredentials: false, noProxy: url ? "corp.example" : null, onSave })));
+    act(() => root.render(h(ProxyEditor<"system" | "none" | "manual">, { agents: "hostNowRuntimeNext", source: "host", label: "mode", modes, mode, manual: "manual", url, hasCredentials: false, noProxy: url ? "corp.example" : null, onSave })));
   const radio = (label: string) => [...div.querySelectorAll<HTMLButtonElement>("[role=radio]")].find((b) => b.textContent === label)!;
   render("manual", "http://10.0.0.2:3128");
   await act(async () => radio("none").click());
@@ -38,10 +38,10 @@ it("restores a remembered (redacted) URL with a bare manual save so its login su
   const onSave = vi.fn(async () => {});
   const modes = [{ value: "none", label: "none" }, { value: "manual", label: "manual" }] as const;
   // cutex with the Q16 ② fix: mode none still returns the stored URL, credentials redacted.
-  act(() => root.render(h(ProxyEditor<"none" | "manual">, { label: "mode", modes, mode: "none", manual: "manual", url: "http://10.0.0.2:3128/", hasCredentials: true, noProxy: "corp.example", onSave })));
+  act(() => root.render(h(ProxyEditor<"none" | "manual">, { agents: "hostNowRuntimeNext", source: "host", label: "mode", modes, mode: "none", manual: "manual", url: "http://10.0.0.2:3128/", hasCredentials: true, noProxy: "corp.example", onSave })));
   const radio = (label: string) => [...div.querySelectorAll<HTMLButtonElement>("[role=radio]")].find((b) => b.textContent === label)!;
   await act(async () => radio("manual").click());
-  const save = [...div.querySelectorAll<HTMLButtonElement>("button")].find((b) => !b.getAttribute("role") && !b.disabled)!;
+  const save = [...div.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "proxy.save" && !b.disabled)!;
   await act(async () => save.click());
   expect(onSave).toHaveBeenLastCalledWith({ mode: "manual", noProxy: "corp.example" });
   act(() => root.unmount());
@@ -56,7 +56,7 @@ it("r243 5.3: a remount after 继承主机 (cutex stores nothing) still shows th
     const div = document.createElement("div");
     document.body.append(div);
     const root = createRoot(div);
-    act(() => root.render(h(ProxyEditor<"inherit" | "none" | "manual">, { label: "mode", modes, mode, manual: "manual", url, hasCredentials: false, noProxy: null, memoryKey, onSave })));
+    act(() => root.render(h(ProxyEditor<"inherit" | "none" | "manual">, { agents: "hostNowRuntimeNext", source: "host", label: "mode", modes, mode, manual: "manual", url, hasCredentials: false, noProxy: null, memoryKey, onSave })));
     return { div, root };
   };
   const first = mount("manual", "http://127.0.0.1:18080/");
@@ -66,7 +66,7 @@ it("r243 5.3: a remount after 继承主机 (cutex stores nothing) still shows th
   const radio = (label: string) => [...second.div.querySelectorAll<HTMLButtonElement>("[role=radio]")].find((b) => b.textContent === label)!;
   await act(async () => radio("manual").click());
   expect(second.div.querySelector("input")!.value).toBe("http://127.0.0.1:18080/");
-  const save = [...second.div.querySelectorAll<HTMLButtonElement>("button")].find((b) => !b.getAttribute("role"))!;
+  const save = [...second.div.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "proxy.save")!;
   expect(save.disabled).toBe(false);
   await act(async () => save.click());
   expect(onSave).toHaveBeenLastCalledWith({ mode: "manual", url: "http://127.0.0.1:18080/", noProxy: null });

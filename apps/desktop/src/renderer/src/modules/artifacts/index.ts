@@ -6,23 +6,33 @@
 // `artifacts` capability; the core never imports this module. 项目 page: a 成果库 tab (`project.tab`,
 // §21) with the project's scope and a count for the overview. HTML artifacts render as pages in the
 // offline opaque frame (§10.2); an agent's live publish opens beside its conversation (live.ts).
-import { Copy, FolderOpen, Library, PanelRight } from "lucide-react";
+import { Copy, FileBox, FolderOpen, Library, PanelRight } from "lucide-react";
 import { ARTIFACTS_FEATURE, parseArtifactRef } from "../../../../shared/artifactStore";
 import { defineModule } from "../slots";
 import { copyArtifactLink, explainOpen } from "./actions";
-import { LibraryBody, ProjectLibraryTab } from "./Library";
 import { useProjectArtifactsSummary } from "./summary";
 import { ARTIFACT_REF_KIND, DEFAULT_LIBRARY, initView, isPublishTool, LIBRARY, parseViewParams, publishCallOf, restoreLibrary, restoreView, VIEW, viewKey, type LibraryState, type ViewParams, type ViewState } from "./model";
 import { artifactThumbnail, openArtifactRef, useArtifactLink } from "./refTarget";
 import { startArtifactSync } from "./store";
 import { startAutoOpen } from "./live";
-import { ArtifactSettings } from "./Settings";
 import { ArtifactToasts } from "./Toasts";
 import { useLibraryTab, useViewTab } from "./tabs";
 import { PublishToolRow } from "./ToolRow";
-import { ViewActions, ViewBody } from "./View";
+import { ViewActions } from "./ViewActions";
 import { isRunning } from "../../lib/workGroups";
 import { services } from "../app";
+import { useApp } from "../../store";
+import { lazyPage } from "../../lib/lazyPage";
+import { copyArtifactSourcePath, loadArtifactSourceFileEntries, openArtifactSourceFileMenu } from "./fileActions";
+import type { MessageKey } from "../../i18n";
+
+// Loaded on first open (lib/lazyPage).
+const ArtifactSettings = lazyPage(() => import("./Settings").then((m) => m.ArtifactSettings));
+const PageDataSettings = lazyPage(() => import("./pageData").then((m) => m.PageDataSettings));
+// The library and the view load when first shown (0.2.0 beta perf audit); the headers stay eager.
+const LibraryBody = lazyPage(() => import("./Library").then((m) => m.LibraryBody));
+const ProjectLibraryTab = lazyPage(() => import("./Library").then((m) => m.ProjectLibraryTab));
+const ViewBody = lazyPage(() => import("./View").then((m) => m.ViewBody));
 
 
 export default defineModule({
@@ -37,19 +47,21 @@ export default defineModule({
         titleKey: "artifacts.library",
         icon: Library,
         instances: "singleton",
-        defaultBinding: "workspace",
+        // Follows the focused conversation's project like the file tree / changes (owner 2026-10-23); the Body lists
+        // the scope that conversation publishes to. Stored `workspace` bindings move over on load (convShelves rebindFollow).
+        defaultBinding: "follow",
         placement: { home: "artifacts", order: 100 },
         parseParams: () => ({}),
         init: (_params: Record<string, never>, previous: LibraryState | null): LibraryState => previous ?? DEFAULT_LIBRARY,
         restore: (raw): LibraryState => restoreLibrary(raw),
         useTab: useLibraryTab,
         Body: LibraryBody,
-        launcher: { order: 850, params: () => ({}) },
+        launcher: { category: "content", order: 850, params: () => ({}) },
       },
       {
         id: VIEW,
         titleKey: "artifacts.view",
-        icon: FolderOpen,
+        icon: FileBox,
         instances: "multi",
         defaultBinding: "host",
         transient: true,
@@ -75,6 +87,7 @@ export default defineModule({
     "conversation.overlay": [{ id: "artifacts.toasts", order: 300, Overlay: ArtifactToasts }],
     "settings.section": [
       { id: "artifacts.settings", page: "sides", order: 450, titleKey: "artifacts.settings", keywords: ["artifacts.autoOpen", "artifacts.autoOpenHint", "artifacts.autoOpen.open", "artifacts.autoOpen.notify", "artifacts.autoOpen.off"], Section: ArtifactSettings },
+      { id: "artifacts.pageData", page: "sides", order: 460, titleKey: "artifacts.pageData.title", keywords: ["artifacts.pageData.hint", "artifacts.pageData.clearOne"], Section: PageDataSettings },
     ],
     "project.tab": [{ id: "artifacts.projectTab", tab: "artifacts", order: 310, titleKey: "artifacts.library", Body: ProjectLibraryTab, useSummary: useProjectArtifactsSummary }],
     "timeline.tool": [
@@ -91,6 +104,15 @@ export default defineModule({
     "ref.target": [{ id: "artifacts.ref", kind: ARTIFACT_REF_KIND, role: "content", open: openArtifactRef, useLink: useArtifactLink, thumbnail: artifactThumbnail }],
     "ref.action": [
       {
+        id: "artifacts.sourceFileActions",
+        order: 105,
+        kinds: [ARTIFACT_REF_KIND, VIEW],
+        icon: FolderOpen,
+        titleKey: "artifacts.sourceFileActions" as MessageKey,
+        submenu: (ref) => loadArtifactSourceFileEntries(ref.hostId, ref.kind === VIEW ? (ref.params.ref ?? ref.key) : ref.key),
+        run: (ref) => openArtifactSourceFileMenu(ref.hostId, ref.kind === VIEW ? (ref.params.ref ?? ref.key) : ref.key),
+      },
+      {
         id: "artifacts.copyLink",
         order: 100,
         kinds: [ARTIFACT_REF_KIND, VIEW],
@@ -101,6 +123,18 @@ export default defineModule({
           if (!parseArtifactRef(key)) return;
           copyArtifactLink(key, (ref.params.name ?? ref.title).replace(/\s+v\d+$/, ""));
         },
+      },
+      {
+        id: "artifacts.copyFilePath",
+        order: 101,
+        kinds: [ARTIFACT_REF_KIND, VIEW],
+        icon: Copy,
+        titleKey: "artifacts.copyFilePath" as MessageKey,
+        useState: (ref) => {
+          const host = useApp.getState().hosts?.hosts.find(item => item.id === ref.hostId);
+          return host?.kind === "local" ? null : { tooltip: host?.label ?? ref.hostId };
+        },
+        run: (ref) => copyArtifactSourcePath(ref.hostId, ref.kind === VIEW ? (ref.params.ref ?? ref.key) : ref.key),
       },
       {
         // The reference card / a bookmark of a view → a tab on the right (link chips have it built in).

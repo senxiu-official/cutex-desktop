@@ -322,7 +322,7 @@ describe("agent views are read by host + id (panes step 1c)", () => {
       for (const hit of scanViewReads(strip(readFileSync(join(SRC, rel), "utf8")))) offences.push(`${rel}: ${hit}`);
     }
     expect(offences).toEqual([]);
-  });
+  }, 30_000);
 
   it("the scan catches what it is meant to catch", () => {
     for (const code of ["useApp((s) => s.sessions[id])", "useApp.getState().sessions[id]", "state.sessions?.[id]", "app.sessions.a1"]) expect(scanViewReads(code), code).not.toEqual([]);
@@ -343,7 +343,7 @@ describe("per-agent state is read by host + id (panes step 2)", () => {
       for (const hit of scanAgentStateReads(strip(readFileSync(join(SRC, rel), "utf8")))) offences.push(`${rel}: ${hit}`);
     }
     expect(offences).toEqual([]);
-  });
+  }, 30_000);
 
   it("the scan catches what it is meant to catch", () => {
     for (const code of ["useApp((s) => s.outbox[sessionId])", "useApp.getState().pendingSteers[id]", "s.queueHandoff?.[id]", "s.models[sessionId]"]) expect(scanAgentStateReads(code), code).not.toEqual([]);

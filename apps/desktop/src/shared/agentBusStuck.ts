@@ -3,6 +3,7 @@
 // `agent_bus_state.rs` (`StuckAgentBusMessage`, camelCase) and docs/agent-bus-operations.md §3;
 // every wire field the desktop reads is here and in the preview mock (modules/agent-bus/mock.ts).
 // cutex validates again; this keeps renderer input well-formed and a changed wire from crashing the list.
+import { readMessageSettlement } from "./messageSettlement";
 import type { StuckBusDiscardRequest, StuckBusDiscarded, StuckBusMessage, StuckBusParty, StuckBusView } from "./ipc";
 
 export const STUCK_MESSAGES_FEATURE = "agent-bus-stuck-messages";
@@ -35,6 +36,7 @@ export function asStuckMessage(raw: unknown): StuckBusMessage | null {
   const sha = str(raw.semanticSha256);
   return {
     messageId,
+    ...(readMessageSettlement(raw.settlement) ? { settlement: readMessageSettlement(raw.settlement) } : {}),
     state: str(raw.state) ?? "unknown",
     durable: raw.durable !== false,
     to: party(raw.to) ?? party(raw.toCutexSessionId),

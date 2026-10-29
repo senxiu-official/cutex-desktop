@@ -55,6 +55,6 @@ it("follows cursors and stops at the terminal page", async () => {
   fixture.hostSessions.mockResolvedValueOnce({ data: [{ id: "one" }], nextCursor: "next" });
   fixture.hostSessions.mockResolvedValueOnce({ data: [{ id: "two" }], nextCursor: null });
   expect(Object.keys((await service.sidebar()).hostRows!)).toEqual(["one", "two"]);
-  expect(fixture.hostSessions.mock.calls).toEqual([["", undefined], ["", "next"]]);
+  expect(fixture.hostSessions.mock.calls).toEqual([["", undefined, 200, { background: true }], ["", "next", 200, { background: true }]]);
   expect(fixture.log).not.toHaveBeenCalled();
 });

@@ -1,0 +1,60 @@
+/* 动作预告 (components/ForetellLayer, docs/design/008-foretell.md). */
+.foretell-layer {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 48; /* under every menu / popover / dialog (≥ 50), over the panes: styles.css 「Layers」 */
+}
+.foretell-mark {
+  --ft: var(--fg-subtle);
+  position: fixed;
+  border: 2px dashed var(--ft);
+  border-radius: 12px;
+  /* Its tint (only 框线+底色 paints it: .drop-tint, styles.css; 只要框线 keeps the dashed outline alone). */
+  --drop-tint: color-mix(in srgb, var(--ft) 7%, transparent);
+  animation: foretell-in var(--motion-short) var(--ease-standard);
+}
+.foretell-mark[data-foretell-mark="replace"] {
+  --ft: var(--danger);
+}
+.foretell-mark[data-foretell-mark="open"] {
+  --ft: var(--accent);
+}
+.foretell-mark[data-foretell-mark="beside"] {
+  --ft: var(--ok);
+}
+.foretell-mark[data-foretell-mark="fold"] {
+  --ft: var(--fg-subtle);
+}
+.foretell-text {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  max-width: calc(100% - 16px);
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--ft);
+  color: #fff;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+  white-space: normal;
+  box-shadow: var(--e2);
+}
+.foretell-mark[data-foretell-mark="fold"] .foretell-text {
+  background: var(--fg-muted, #6b7280);
+}
+@keyframes foretell-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .foretell-mark {
+    animation: none;
+  }
+}

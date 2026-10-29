@@ -1,4 +1,4 @@
-# 桌面插槽与模块约定（v1.17）
+# 桌面插槽与模块约定（v1.26）
 
 > **公开仓库说明 / Public repository note.** 本文是维护者开发时的设计记录，保留原样。文中引用的内部笔记和工作副本
 > （`docs/research/…`、`docs/reviews/…`、`docs/handoff/…`、`TODO.md`、`PROGRESS.md`、`PLAN.md`、`upstream/…`、
@@ -73,6 +73,40 @@ v1.17（2026-10-20，窗格第 3 步；设计 `docs/research/panes-20261019.md` 
 `services.panes.open(kind, params, { beside?, focus?, background? })`，`services.side.open` 保留为它对工具种类的别名；`services.ui.openPage`
 在聚焦的对话窗格里打开页面。§18.5 的每 agent 一份视图废止（布局全局一份）。布局只存本机 `cutex-desktop.panes`，旧 `cutex-desktop.side`
 一次性迁过去并留备份键。只加不删：`side.component` / `main.page` / `services.side` 不变。
+v1.18（2026-10-20，窗格第 5 步；`docs/research/home-page-20261019.md`、`panes-20261019.md` §5）：**桌面底层**（§25）——新插槽 `pane.desktop`
+（A 档，`unavailable: "hide"`）：没有窗格在前面时外壳在工作区画第一个显示的条目；`NavItem` 加可选 `lead` / `useShown` / `useActive`（侧栏
+最上面的固定入口、按设置显示、自己的高亮）。第一个使用者：内置模块 `home`（桌面、个人页 `home.profile`、固定到主页）。只加不删。
+Shelf（2026-10-20，契约仍是 v1.18；`docs/research/canvas-principles-20261020.md` §6）：工具区改成 **Shelf**（§24.12）——会话两侧各最多一个，
+每个有自己的 **Shelf Rail**（≤ 9 页，一次显示一页）、宽度和选项（允许混排、Rail 外侧 / 内侧）；第 3 步去掉的右栏多页按这个形状回来。
+模块看到的东西不变（`pane.kind`、`services.panes` / `services.side.open` 的 `page` 仍是页 id），所以不升版本。
+v1.21（2026-10-21，主人：「页面应该是自己的面板」）：`main.page`（项目、委托、服务、审批、作业、工作流…；带 `Aside` 的全窗口页除外）不再盖在
+会话上、挂在会话顶栏下面，而是作为**自己的窗格**开进聚焦对话的 Shelf（派生种类 `page:<id>` 交给工具引擎放置：自己的页组，按 Shelf 的混排
+规则新开一页或成为标签；窗格头 = 页面入口的图标 + 面包屑 + 放大 / 全屏 / ⋯ / ×），会话照旧显示对话。新设置 外观 → 窗口与卡片 →
+「页面打开位置」：{{shelf}}（缺省）/ 占用会话（页面暂时盖在会话上，带**页面自己的顶栏**，Esc / × 回到对话）。`services.ui.openPage`、
+`services.panes.open("page:<id>")`、侧栏入口、⌘K、链接 / 深链都跟着这个设置；会话顶栏不再有页面面包屑（§24.4、§26.4）。类型不变，语义变了，
+所以 `MODULE_API_VERSION` 1.20 → 1.21（声明快照只有版本常量）。
+v1.22（2026-10-22，主人：「平台，而不是产品」；设计 030 v2 + 032）：新插槽 **`desktop.widget`**（§27）——桌面上的每一块都是一个**小组件种类**的
+实例：模块声明大小（8 px 网格步长的最小 / 最大 / 缺省 / 快捷大小）、形状（卡片 / 圆 / 路径 / 无底板）、能不能放多个、缺省位置、每个实例的设置表
+（外壳画表单）、刷新节奏（共用的计时器）、**来源**（模块 / 服务 / 智能体）和组件；组件拿到大小、配色、设置、减少动态效果、整理中、时间、
+来源和 **`actions`**（外壳自己的打开智能体 / 页面 / 服务、确认后发给智能体）。桌面模块 `home` 把名片、时钟、需要你、用量、固定的磁贴都改成了
+小组件，新模块 `world-clock` 是第一个别的模块的小组件。只加不删，`MODULE_API_VERSION` 1.21 → 1.22（声明快照只有版本常量）。
+v1.23（2026-10-24，主人：「现在 grid 好像太细」→ 一格 96 px）：桌面改成**整格**的网格——一格 96 px、两格之间 16 px（`WIDGET_CELL` /
+`WIDGET_GAP`），外框只能是整格。种类可以用格子给大小（`size.cells`，可选）；只写了 1.22 步长的种类照常能用：每个大小换成最近的格数
+（`cellsOfSteps` / `cellSizesOf`，绝不拒绝）。组件多拿到 `cells: { w, h }`（`steps` 照旧 = px / 8）。存过的 1.22 摆放换算一次（见 §27.2）。
+只加不删，`MODULE_API_VERSION` 1.22 → 1.23（声明快照只有版本常量）。
+v1.24（2026-10-24，主人：「你现在的单个其实是占据 2x2」）：网格再细一半——**单位** 40 px、间距 16 px（`WIDGET_UNIT`），两个单位加一个间距正好
+是 1.23 的一格，所以 1.23 的大小和摆放**正好乘 2，什么都不动**。种类可以用 `size.units` 给大小；没写就把 `size.cells` 乘 2，再没有就按步长换算
+（`unitSizesOf` / `unitsOfSteps`，每边至少 2 个单位，绝不拒绝）。组件多拿到 `units: { w, h }`。整理时画**点阵**（四个单位相交处一个点，点一样大）。
+只加不删，`MODULE_API_VERSION` 1.23 → 1.24（声明快照只有版本常量）。
+v1.25（2026-10-24，空 Shelf 启动器）：app 层 `SideLauncher` 加可选 `category?: "content" | "tool"`，供空 Shelf 的内容／工具分组使用。
+分类只是展示元数据，不改变绑定、能力门控、启动参数、固定或打开行为；未声明的旧启动器按 `tool` 分组，状态启动器由外壳另行派生。没有新插槽，`SLOT_SPECS` 的默认值／placement 快照不变。
+只加不删，`MODULE_API_VERSION` 1.24 → 1.25；SDK 仍只承载中立合约，声明快照 `module-api-1.25.d.ts` 只有版本常量变化。
+
+v1.26（2026-10-29，来源文件操作子菜单）：app 层 `RefActionItem` 加可选 `submenu(ref)`，返回菜单项数组或它的 Promise。
+引用菜单将其作为正常的懒加载子菜单，悬停／→／Enter 时才解析；复用菜单的定位、滚动、可用性检查与危险操作确认。
+不在每个 chip 渲染时读取详情；关闭后的异步结果不能重开菜单。`run` 保留给独立图标按钮，旧条目行为不变。
+没有新插槽，默认值／placement 快照不变；`MODULE_API_VERSION` 1.25 → 1.26，SDK 声明快照只有版本常量变化。
+
 
 决定：主人，2026-10-09（总纲 `docs/DESIGN.md` §4.22）。读者：主线开发；GPT（按本文实现宿主包，见
 `docs/research/kutex-brief-for-gpt.md` §3 A；下称 brief）。本文是约定，改格式先改本文。行号 = 2026-10-09 `main`，
@@ -178,7 +212,7 @@ export interface SlotEntry<T extends SlotItemBase> {  // snapshot(slot) 的一�
 | A | `profile.fieldAction`（v1.6，§20） | `settings/ProfileClaudeAccount.tsx`（编辑器 + 添加表单的 Claude 账户行） | claude-accounts「+ 添加订阅」 |
 | A | `project.tab`（v1.12，§21） | `modules/projects/ProjectsPage.tsx`（标签栏、概览计数行），`lib/projectMenus.tsx`（打开项目页面） | artifacts 成果库、services 服务 |
 | A | `conversation.status` | `lib/statusItems.ts:5–12`，`StatusCapsule.tsx:45,270–453`，`StatusBar.tsx:57–77` | 目标、进程、终端、subagents、委托、作业 |
-| A | `nav.primary` | `Sidebar.tsx:373–406` | 快速对话、新建 agent、项目、服务、委托、作业、审批 |
+| A | `nav.primary` | `SidebarNav.tsx`：顶栏主机选择器右边一组平铺图标（`TitleBarEntries`，侧栏 v5，设计 040 §4.1）；头像栏（侧栏收起）的图标（`TopNav rail`，v1.18 `lead` 条目在最上面） | 桌面（`lead`，v1.18）、快速对话、新建 agent、项目、服务、委托、作业、审批 |
 | A | `main.page` | `App.tsx:101–121`，`store.ts:84`（`MainView`），`TitleBar.tsx:136–200`（面包屑） | 设置、项目、委托、作业、审批、服务、草稿对话、新建 agent（任务详情页 r219 删除） |
 | A | `timeline.received` | `lib/receivedRows.ts:16–24`，`Timeline.tsx:276–298` | task-service 任务（旧转录）、委托请求、委托结果；兜底 = agent 消息 |
 | A | `timeline.tool` | `WorkGroup.tsx:193–198`，`Timeline.tsx:301–303`，`lib/workGroups.ts:127` | subagents（collab）、旧 cutex 任务工具、委托卡片；兜底 = 普通工具行 |
@@ -190,7 +224,8 @@ export interface SlotEntry<T extends SlotItemBase> {  // snapshot(slot) 的一�
 | A | `side.component`（v1.4，§18；v1.17 起它的实例是工具列里的窗格，§24） | `components/side/*`，`lib/sideLayout.ts`（原 `SidePane.tsx` 已删） | 工作区（文件、改动、预览）、diff、subagent 线程、状态分类（适配 `status:<id>`） |
 | A | `conversation.gutter` / `timeline.turnAttachment` / `ref.action` / `ref.target`（v1.4，§19） | 已声明，宿主随 P1a 接入 | 书签、批注、侧聊（GPT 返工，RFC §7.14）；成果（`artifacts`：`ref.target` 种类 `artifact` + `ref.action`，v1.7）；委托（`delegations`：`ref.target` 种类 `delegation`，2026-10-13） |
 | A | `timeline.intro`（v1.13，§19.3） | `Timeline.tsx` 会话开头出口 `modules/TimelineIntro.tsx` | intro（开场：profile 立绘 + 开场白） |
-| A | `pane.kind`（v1.17，§24） | `components/PaneHost.tsx`（工作区与工具列），`lib/paneKinds.tsx`（种类表：核心 + 贡献 + 派生），`lib/paneLayout.ts` / `lib/paneStore.ts` / `lib/paneFile.ts`，`lib/paneServices.ts`（`services.panes`） | 还没有模块直接贡献；派生：每个 `side.component`（同 id）、每个不带 `Aside` 的 `main.page`（`page:<id>`）；核心 `core.conversation` |
+| A | `pane.kind`（v1.17，§24） | `components/PaneHost.tsx`（工作区与工具列），`lib/paneKinds.tsx`（种类表：核心 + 贡献 + 派生），`lib/paneLayout.ts` / `lib/paneStore.ts` / `lib/paneFile.ts`，`lib/paneServices.ts`（`services.panes`） | home（`home.profile` 个人页，v1.18）；派生：每个 `side.component`（同 id）、每个不带 `Aside` 的 `main.page`（`page:<id>`）；核心 `core.conversation` |
+| A | `pane.desktop`（v1.18，§25） | `components/PaneHost.tsx`（单个空对话窗格的位置），`lib/paneDesk.ts`（`desktopReason`） | home（桌面：名片、时钟、需要你、用量、磁贴） |
 | A | `timeline.codeBlockAction`（v1.14，§22） | `Markdown.tsx` 的代码块（`components.code`）→ `ReplyCodeBlock.tsx`，出口 `modules/CodeBlockActions.tsx`；范围由 `Timeline.tsx` 的 agent 回复给 | terminal ▶ 运行（Copy / Download 是 streamdown 自带，不是条目） |
 | B | `attention.source` | `lib/agentAttention.ts:56–73`，`lib/attentionView.ts:35–53` | 原生请求、审批、委托、主人通知 |
 | B | `app.overlay` | `App.tsx:94–96` | agent 列表、作业输出、菜单 / 对话框 |
@@ -218,6 +253,7 @@ export type PageParams = Readonly<Record<string, string | undefined>>;          
 export interface SettingsPageItem extends SlotItemBase {    // 默认 unavailable "hide"
   page: SettingsTab;             // 稳定深链名 = openSettings(page)；store.ts 的 SettingsTab 联合类型（新页先在那里加名字）；全局唯一
   group: SettingsGroupId;        // lib/settingsNav.ts；组顺序由外壳固定（SETTINGS_GROUP_ORDER），组内按 order
+                                 // 设计 006 v1：外壳按 page id 把面板页（sidebar / conversation / status / sides / tray / desktop）显示成「面板」组（PANEL_PAGES，跟在应用后面），模块的 group 不变
   icon: Icon; titleKey: MessageKey; // 导航名 + 面包屑
   source: SettingsSource | null; // 来源标签（原 PAGE_SOURCE）
   hintKey?: MessageKey;          // 原 PAGE_HINT
@@ -277,7 +313,8 @@ export interface NavItem extends SlotItemBase {             // 默认 unavailabl
   activePages?: readonly ItemId[]; // 这些页面打开时高亮；默认 = target.page
   useTitleKey?(): MessageKey | null; // 第 3 步加：实时文字（正在创建工作…）；null = titleKey
   useBadge?(): { text?: string; dot?: boolean; title?: string; attention?: boolean } | null; // 「⚠ N」/ 红点（设置）
-  Menu?: ComponentType;            // 入口旁下拉（快速对话 → profile）；只在可用时渲染
+  Menu?: ComponentType;            // 入口旁下拉；侧栏 v5 起不再画（入口成了顶栏图标，用 menu）
+  menu?: { open(anchor: HTMLElement): void; hintKey: MessageKey }; // 2026-10-23：顶栏图标的右键菜单（开在图标下面）；hintKey = tooltip 里一行说明。没有 = 右键是固定 / 取消固定
 }
 export interface PageCrumb { text: string; to?: PageTarget; lead?: ReactNode; trail?: ReactNode } // lead / trail：项目徽标、任务编号、项目 id
 export interface PageItem extends SlotItemBase {            // 默认 unavailable "hide"：打开着的页所属模块停了 → 「模块已关闭」+ 打开 模块
@@ -334,6 +371,13 @@ export const SLOT_SPECS: { readonly [S in SlotId]: SlotSpec } = { /* nav.primary
 
 `settings.page` 用 `page` 做键而 `main.page` 用条目 id：设置页是现成的共享深链名（斜杠命令、别的模块、分区都按名字
 跳），普通页面归各自模块。
+
+**按需加载**（2026-10-23，`lib/lazyPage`）：内置模块的 `settings.page` 的 `Page`、`settings.section` 的 `Section`（以及不常开的
+`main.page`，如 agent-config 的几页）写成 `const X = lazyPage(() => import("./X").then((m) => m.X))`，条目本身（id、标题、
+搜索关键字、顺序）照旧在入口包里，组件第一次打开时才加载（之后同步渲染，没有空帧）；不用 Suspense（React 会把边界内容在
+fallback 出现后压 300 ms）。常开的页（审批、委托、作业、项目、服务、工作流、快速对话）保持直接导入。模块包（`claude-science`）
+只能用 `packHost` 里的文件，不走这条。`test/lazyPage.test.tsx` 检查每个模块的设置页 / 分区都是 `lazyPage`。`preloadLazyPages()` 在空闲时
+逐个预加载全部（设置 → 通用 → 性能 → 流畅优先，`lib/perfMode`）。
 
 **设置搜索**（2026-10-09，`feat/settings-search`）：设置导航顶部的搜索框（Ctrl+F，或焦点不在输入框时按 `/`；Esc 清空）。
 只索引**声明出来的文字**，不扫 DOM：页的 `titleKey` + `keywords`、页内卡片 `sections[]` 的 `titleKey` + `keywords`、
@@ -790,12 +834,15 @@ PlanCard/ChecklistEntry实现在plan模块，核心plan/checklist条目仍走唯
   'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none';
   object-src / frame-src / child-src / worker-src / manifest-src / base-uri / form-action 'none'`——**完全不联网，loopback 也不行**，
   不允许 `unsafe-eval`。文档开头是宿主的 charset + CSP meta + 删 `RTC*` / `WebTransport` 构造器的脚本，再接页面原文（去掉它自己的
-  doctype）；默认上限 4 MiB（= `ARTIFACT_CONTENT_MAX`），调用方可传更大的上限（分段读出的大页面，≤ 256 MiB）。没有 bootstrap bridge、MessagePort、nonce：页面能跑自己的内联脚本，但没有任何可调用的东西。
+  doctype）；默认上限 4 MiB（= `ARTIFACT_CONTENT_MAX`），调用方可传更大的上限（分段读出的大页面，≤ 256 MiB）。没有 bootstrap bridge、MessagePort、nonce：页面能跑自己的内联脚本。`buildOfflinePageDocument(html, max, { pageApi: true })`（只有 agent 页面用）在 RTC 脚本后再放 `PAGE_API_SCRIPT`：`window.cutexPage`，只是把三种固定格式的消息 `parent.postMessage` 出去的薄包装（见下「三个口」），本身不授予任何东西。
 - `./documents`（main）：`createFrameDocumentStore({ scheme })`——一次性文档（30 s 未取即过期，总数 32、每个 renderer 8），
   只出一次，响应头 `CSP; sandbox allow-scripts` + `nosniff` + `no-referrer`，URL 是该 webContents 的导航租约直到 release。
   **插件文档和 agent 页面共用 main 里同一个 store**（同一个 `cutex-plugin://frame/<id>/index.html` scheme、同一个
   `onBeforeRequest` / `will-frame-navigate` 租约检查、同一次 `releaseOwner`），所以仍只有一个 frame 宿主要审计；父页面 CSP 不变
-  （`frame-src cutex-plugin:`）。
+  （`frame-src cutex-plugin:`）。多窗口（§24.17 P4）：租约的 webContents 是**画 frame 的那个窗口**（主窗口或主窗口开的一张桌子，
+  main 在 prepare 时核对），只在那里能取、那个窗口没了就释放；插件文档仍只租给主窗口。store 的「每个 8」按 webContents 算，所以 agent 页面 /
+  HTML 文件另按**发请求的 renderer** 合计封顶 8（`PAGE_DOCUMENTS_PER_OWNER`，`main/frames.ts`，所有窗口加起来），超过答
+  `Too many prepared frame documents`：页面 + 插件文档最多 16 个，占不满共享的 32，桌子再多也挤不掉主窗口的插件 frame（和 P4 之前一样）。
 
 agent 页面（`artifacts.view` 的 `html` 预览，`text/html` / `application/xhtml+xml` / `.html` / `.htm`）：
 - renderer 只发 `{ hostId, artifactId, version }`（具体版本；`@latest` 标签先解析）到 IPC `cutex-desktop:frames`
@@ -803,11 +850,42 @@ agent 页面（`artifacts.view` 的 `html` 预览，`text/html` / `application/x
   在第一份文档之前跑 `pluginNetwork.ensure()`（WebRTC / 代理黑洞 / DoH，与插件相同），再放进共享 store。HTML 不经 renderer → main，
   token 不离开 main。外部文件已变、非 UTF-8 → 返回原因，视图改显示源代码。超过 4 MiB（`ARTIFACT_PAGE_PROMPT_BYTES`，一个内容窗口）的页面先在视图里问主人（常是内嵌音频 / 视频），主人点「显示页面」后请求带 `large: true`，main 按 4 MiB 窗口逐段读取（每段校验版本、sha256、总长和接续的 offset；cutex 在字符边界切窗口）再拼成文档，上限 256 MiB（`ARTIFACT_PAGE_MAX_BYTES`），超过仍显示源代码。
 - 视图头上「页面 / 源代码」切换（`ViewState.code`）；页面自己跳走（链接、刷新）被 main 拦下，视图显示「已拦下 · 重新加载」。
-- 不需要审批：它什么都碰不到。需要联网的东西是服务（`service_register`），由主人在自己的浏览器标签里打开。
+- 不需要审批：除下面三个口外它什么都碰不到。需要联网的东西是服务（`service_register`），由主人在自己的浏览器标签里打开。
+
+**三个口**（2026-10-21，`docs/design/004-artifact-page-bridge.md`，不改契约版本）。页面仍是不透明来源、不联网（loopback 也不行）、
+没有 preload / Node / token / daemon RPC；它只能发三种固定格式的消息，每一种都由主进程检查、决定：
+- 路径：页面 `parent.postMessage({ tag: "cutex-page/1", id, op, … }, "*")` → renderer 的 broker（`modules/artifacts/pageBroker.ts`，
+  `PageFrame` 挂载）只收 `event.source === 这个 frame 的 window` 且 `origin === "null"` 的消息，按 `shared/pageBridge.ts` 的
+  `parsePageMessage` 校验（op 白名单、字段必须正好是这些、key ≤ 256 且无控制字符、单条 ≤ 5 MiB、提交 ≤ 64 KiB、复制 ≤ 1 MiB、
+  同一 frame 同时最多 8 个请求）→ IPC `cutex-desktop:frames` `{ op: "page", id: <main 发的文档 id>, call }` → main 用
+  `parsePageCall` 再查一遍，按**它自己在 prepare 时绑定**到这个文档 id 的 host + artifact + version 处理（别的 renderer、已 release
+  的文档 → `unavailable`）。回复只发回同一个 frame window。没有别的 op：fetch / ipc / daemon / open 一律 `invalid`。
+- A 存储 `storage.get / set / remove / keys / clear`：`main/pageStorage.ts`，userData `artifact-pages/<sha256(host)前16>-<af-id>.json`，
+  **每个成果一份、各版本共用**。上限是 main 里的常量：每个成果 5 MiB（key + value 的 UTF-8 字节）、所有成果合计软上限 200 MB；
+  超过答 `quota_exceeded`（`scope: page | total`），**从不自动删除**；合计超限时设置里提示。主人在成果 ⋯ 菜单「清除这个页面的数据」
+  或 设置 → 右侧栏与留白 → 页面数据（逐个列出、可清除）清除（IPC `pageDataUsage` / `pageDataClear`）。
+- B 提交 `submit`（文本或 JSON）：main 从主机读这个版本的 `producer`（`agent`，或 `exclusive` 的自动捕获）定收件人，页面不能指定；
+  没有 → `no_recipient`。然后 main 自己弹**原生**确认框（`dialog.showMessageBox`，挂在主人的窗口上；标题、发给谁、内容预览前 1200 字；
+  默认按钮是「取消」；页面看不到也点不了；窗口隐藏 / 最小化 → 不弹、答 `unavailable`；5 分钟没答 = 取消；frame 关掉 = 取消）。
+  点「发送」才以普通主人消息发给那个智能体（`submit … auto, startIfOffline`），开头标明「来自成果页面「名称」vN（af-…@N）：」，JSON 包在代码块里。
+  限流：每个窗口同时一个确认框（`busy`）；同一成果关框后 5 s 内、或 10 分钟内已问过 5 次 → `rate_limited`。
+- C 复制 `copy`：broker 只在用户手势进行中转发（`navigator.userActivation.isActive`——frame 里的点击会传到父页面——且焦点在这个
+  frame 上；否则答 `no_gesture`，main 根本收不到），main 用 `clipboard.writeText` 写入，app 自己弹「已复制页面里的文字」；每个 frame
+  每 500 ms 最多一次。剪贴板读取仍是关的。
+- 页面 API（`window.cutexPage`，在 Cutex 外不存在，页面应判断后退回 localStorage / 复制框）：
+  `storage.get(key)` → 值（JSON 解析后）或 null；`storage.set(key, value)`（JSON 序列化；`undefined` = 删除）；`storage.remove(key)`；
+  `storage.keys()`；`storage.clear()`；`submit(textOrJson)` → `{ sent: boolean }`（主人取消 = `sent: false`）；`copy(text)`。
+  失败时 reject 一个 `Error`，`code` 为 `invalid | too_large | quota_exceeded | busy | rate_limited | no_gesture | no_recipient | unavailable`
+  （`quota_exceeded` 还带 `scope`、`limit`）。存储请求 15 s、复制 5 s 没回复 = `unavailable`；提交不超时（等主人）。
+  示例页：`modules/artifacts/mockPages/decide-0.2.html`（自动保存 + 发给智能体；预览里是 demo-writer 的 `reviews/decide-0.2.html`）。
+- 浏览器预览没有原生对话框：`dev/mockFrames.ts` 画一个标明「预览替身」的确认框，存储放在预览页的 localStorage，限额同 main。
+- 测试：`test/pageBridge.test.ts`（schema、绑定、不确认不发、限流、无收件人、复制）、`test/pageStorage.test.ts`（隔离、5 MiB、合计、
+  不驱逐、清除）、`test/pageBroker.test.ts`（来源 / origin、手势、并发上限）、`packages/opaque-frame/test/frame.test.ts`（页面 API、CSP 不变）。
 
 导入边界（`packages/plugin-host/test/package-boundaries.test.ts`）：`plugin-sandbox` 仍只由 `modules/plugins/` 与 `main/plugins.ts`
 导入；`opaque-frame` 只由 `plugin-sandbox`、`main/index.ts` / `main/plugins.ts` / `main/frames.ts` 与
-`modules/artifacts/PageFrame.tsx` 导入。浏览器预览（无 Electron）由 `vite.preview.config.ts` 的 `mock-frames` 插件扮演 main 的
+`modules/artifacts/PageFrame.tsx` 导入，另有 `components/FilePageFrame.tsx`（2026-10-24：文件预览里的 HTML 文件——main 从该主机读字节，
+同一个离线文档、同一个 CSP 和 `sandbox="allow-scripts"`，**没有**三个页面通道；只用文件里自带的内容，旁边的文件不加载）。浏览器预览（无 Electron）由 `vite.preview.config.ts` 的 `mock-frames` 插件扮演 main 的
 文档服务（同一个文档、同一个 CSP 头），只为预览把 `frame-src 'self'` 加进预览页的 CSP。
 
 同一提交（desktop-only quick wins，研究 §4）：`artifacts` 的 `conversation.overlay`（对话里的小卡片，`lib/agentToasts.ts` +
@@ -1062,10 +1140,63 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   （SDK 中立类型只有版本常量变化）；`test/moduleSdkContract.test.ts` 有 `pane.kind` / `services.panes` 正反例并钉住 `SLOT_SPECS`，
   `test/modules.test.ts` 钉住插槽快照与派生种类表；`test/sideLayout.test.ts` / `test/sideDrop.test.ts` 按 §24 改写（场景编号不变，见 §24.9），
   `test/panesStep3.test.ts`（工具区 JSON、页面窗格、迁移）、`test/panesStep2Store.test.ts`（页面跟着聚焦窗格）、`test/sideAgentViews.test.ts`（全局一份）。
+- 2026-10-20 v1.18（§25，窗格第 5 步）：`MODULE_API_VERSION` 1.17 → 1.18，只加不删。app 层：新插槽 `pane.desktop`（`PaneDesktopItem`、
+  `PaneDesktopProps`），`SLOT_SPECS["pane.desktop"] = { unavailable: "hide" }`；`NavItem` 加可选 `lead`、`useShown`、`useActive`。外壳：
+  `PaneHost` 在单个空对话窗格的位置画桌面（`lib/paneDesk.ts` `desktopReason`）；`SidebarNav` 先画 `lead` 条目；`lib/paneActions.ts`
+  `revealDesktop()`（侧栏「桌面」）；`lib/agentToasts.ts` 卡片可带 `ref`（显示 `ref.action` 图标按钮），`lib/services.ts` 服务行菜单加
+  `ref.action`。内置模块 `home`：`pane.desktop`、`pane.kind` `home.profile`（第一个直接贡献的窗格种类）、`nav.primary` `home.nav`（lead）、
+  `ref.action` `home.pin`。声明快照 `module-api-1.18.d.ts`（只有版本常量）；`test/moduleSdkContract.test.ts` 有 `pane.desktop` / `lead`
+  正反例并钉住 `SLOT_SPECS`；`test/modules.test.ts` 钉住 `pane.kind` / `pane.desktop` / lead 条目快照，`lib/paneDesk.ts`、`SidebarNav.tsx`、
+  `lib/navEntries.ts` 进外壳扫描；`test/homeDesktop.test.ts`（显示规则）、`test/homeStore.test.ts`、`test/homeStats.test.ts`、
+  `test/homeTile.test.ts`、`test/homeModel.test.ts`。
+- 2026-10-20 Shelf（§24.12，契约不升，仍是 v1.18）：工具区 → 会话两侧的 Shelf（≤ 2，每边一个），每个有 Shelf Rail（≤ 9 页、Alt+1…9、
+  ＋、右键重命名 / 换图标 / 上移 / 下移 / 删除，可撤销）和 ⋯（允许混排、Rail 外侧 / 内侧、收起成小片、移到另一边、关闭，可撤销）；新 Shelf 不允许
+  混排，迁来的右 Shelf 允许。拖放：页按钮（停 0.4 s 切页）、＋、空着的边缘新建 Shelf；窗格左右缘不再新开列。布局 v2（`shelves`），v1 的工具列
+  和第 3 步备份的旧页迁成右 Shelf 的页。术语加 `shelf`。模块看到的仍是页 id，插槽与服务不变，所以不升版本、快照不变。
+- 2026-10-20 Shelf 主人决定（§24.12，契约不变）：每个 Shelf 缺省**不允许混排**，迁来的右 Shelf 也是（存储文件 v2 → v3 一次性把已存的
+  允许混排关掉，已经混放的窗格不动）；布局选项**只用一个 {{shelf}}**（单一 Shelf 模式：不再新建第二个，边缘拖放进现有 Shelf 的新页，
+  移到另一边照旧），新安装缺省开、已有用户关；在 Shelf 的 ⋯ 和设置 → 右侧栏与留白里切换。
+- 2026-10-21 Shelf 收起到 Rail（主人决定，§24.12，契约不变）：收起的 Shelf 不再进底部托盘，而是原地只剩它的 Shelf Rail（40 px 的竖条，在
+  Shelf 的外侧），页图标和角标照旧；点一页 = 展开到那一页，再点正在显示的页 / 焦点在 Shelf 里按 Esc / Rail 底部的收起按钮 = 收起（2026-10-22 起再点正在显示的页什么都不做，§24.12.3）。⋯ 里的
+  「收起成小片」改成「收起」；存储文件 v3 → v4 把已存的托盘里的 Shelf（`chip`）迁成收起（`collapsed`）。宽度平滑过渡（遵守减少动态效果）。
+- 2026-10-21 v1.19（§26，顶栏拆分，主人选 A）：`MODULE_API_VERSION` 1.18 → 1.19，只加不删。app 层：新插槽 `window.search`
+  （`WindowSearchItem`：`placeholderKey`、可选 `keys()`、`open()`），`SLOT_SPECS["window.search"] = { unavailable: "hide" }`；内置模块
+  `quick-switch` 贡献 `quick-switch.search`（点 = 打开 ⌘K 快速切换）。外壳：窗口顶栏（`components/TitleBar.tsx`）只留整个窗口的东西，
+  对话相关的都进每个会话自己的两行顶栏（`components/ConversationHeader.tsx`，`lib/convHeader.ts`）。声明快照 `module-api-1.19.d.ts`
+  （只有版本常量）；`test/moduleSdkContract.test.ts` 有 `window.search` 正反例并钉住 `SLOT_SPECS`；`test/modules.test.ts` 钉住
+  `window.search` 快照、`TitleBar.tsx` 进外壳扫描；`test/convHeader.test.tsx`（每个窗格的顶栏项、窄时收进 ⋯ 的顺序、窗口顶栏内容）。
+- 2026-10-23（§19.8，设计 040 跟进，`fix/0.2-conv-followups`）：`RefActionItem` 加可选 `inline`（消息悬停浮条上总是图标；书签模块用它）。
+  只是 app 层插槽的可选字段，SDK / 引擎类型不变，旧条目照常工作（不写 = 进「⋯」），所以 `MODULE_API_VERSION` 不升、快照不动。
+- 2026-10-23（侧栏 v5，设计 040 §4.1，`feat/0.2-sidebar-v5`）：`nav.primary` 的顶部入口从侧栏搬到顶栏（主机选择器右边：分割线 + 平铺图标 + `CountBadge`，「⋯ 更多」= 原来的更多菜单；窄窗口只留第一个，其余收进一个带总数的 ⋯）。
+  `NavItem` 加可选 `menu`（右键菜单：快速启动的 profile 列表，新建智能体也用它），`Menu` 不再画。只是 app 层插槽的可选字段，旧条目照常工作，所以 `MODULE_API_VERSION` 不升、快照不动。
+- 2026-10-21 v1.20（§25.3，托盘，原则 §7）：`MODULE_API_VERSION` 1.19 → 1.20，只加不删。`PaneDesktopItem` 加 `Dock?` / `useDockCount?`，
+  `PaneDesktopProps.reason` 多 `"covered"`、加 `tray?`，新类型 `PaneDockProps`。桌面成为整个工作区的底层，托盘是浮在桌面底部的程序坞
+  （快捷方式 + 收起的工具窗格）。声明快照 `module-api-1.20.d.ts`（只有版本常量）。
+- 2026-10-21 工作区（§24.13，契约不变）：工作区 = 对话 + 它自己的 Shelf，屏幕上 1–2 个；Shelf 按对话记（共享页「在所有对话中显示」、
+  默认布局），存储文件 v4 → v5；投影 / 并排 / 替换三种同时看两个对话；侧栏、窄栏、⌘K、托盘共用的拖放规则；对话窗格的「—」= 关闭窗格，
+  不再有对话小片。投影是 `conversation` 模块的 `side.component`，没有新插槽或服务。
+- 2026-10-24 v1.25（§18.2，空 Shelf 启动器）：`MODULE_API_VERSION` 1.24 → 1.25，只加不删：app 层 `SideLauncher.category?: "content" | "tool"`。
+  内容／工具分类只影响展示，不改变绑定、门控、参数或打开行为；省略字段的旧模块继续工作。没有新增插槽，app 的 slot 默认值快照不变；SDK 声明快照 `module-api-1.25.d.ts` 只有版本常量变化。
+- 2026-10-24 v1.24（§27，设计 032 §13）：`MODULE_API_VERSION` 1.23 → 1.24，只加不删：`WIDGET_UNIT` / `WIDGET_MIN_UNITS`、`WidgetUnits`、
+  `WidgetUnitSizes`、`size.units?`、`WidgetInstanceRef.units?`、`DesktopWidgetProps.units`、`unitsOfSteps` / `unitSizesOf`；`HomeDoc.desk.units`
+  （每档的单位摆放；`cells` 和 `bands` 不再写，留作备份）。声明快照 `module-api-1.24.d.ts`。
+- 2026-10-24 v1.23（§27，设计 032 §12，主人：一格 96 px）：`MODULE_API_VERSION` 1.22 → 1.23，只加不删：`WIDGET_CELL` / `WIDGET_GAP`、
+  `WidgetCells`、`WidgetCellSizes`、`size.cells?`、`WidgetInstanceRef.cells?`、`DesktopWidgetProps.cells`、`cellsOfSteps` / `cellSizesOf`；
+  `HomeDoc.desk.cells`（每档的整格摆放；`bands` 不再写，留作 1.22 的备份）。声明快照 `module-api-1.23.d.ts`（只有版本常量）。
+- 2026-10-22 v1.22（§27，设计 032，主人：「平台，而不是产品」；030 v2 的看不见的网格）：`MODULE_API_VERSION` 1.21 → 1.22，只加不删：插槽
+  `desktop.widget`（`modules/widgetTypes.ts`：`DesktopWidgetItem` / `DesktopWidgetProps` / `WidgetActions` / `WidgetSource` / 设置表
+  `WidgetSettingField`）；`HomeDoc.desk`（cutex 原样保存主页文档里不认识的顶层键，不用改 cutex）。声明快照 `module-api-1.22.d.ts`（只有版本
+  常量）；`test/moduleSdkContract.test.ts` 钉住插槽缺省和编译期的条目形状。
+- 2026-10-21 v1.21（§24.4、§26.4，主人：页面是自己的面板）：`MODULE_API_VERSION` 1.20 → 1.21，类型不变、`services.ui.openPage` /
+  `services.panes.open("page:<id>")` 的落点变了：缺省进聚焦对话的 Shelf，成为自己的窗格（`lib/sideComponents` 把每个不带 `Aside` 的页面
+  派生成工具引擎的组件：singleton、绑焦点主机、页组 = 种类 id、`persist: false`，标题 / 图标取打开它的 `nav.primary` 条目）；外观 → 窗口与卡片
+  →「页面打开位置」= 占用会话时照旧盖在聚焦的会话上，但带页面自己的顶栏（`components/PageHeader.tsx`）。会话顶栏的页面面包屑和窗口顶栏
+  的页面面包屑（全窗口页除外）删掉。声明快照 `module-api-1.21.d.ts`（只有版本常量）；`test/modules.test.ts` 钉住派生的 Shelf 组件表；
+  `test/pagesOwnPane.test.tsx`。
 
 ## 15. 动态模块登记（v1.1，稳定基线后迁移）
 
-唯一引擎为 `@cutex-desktop/plugin-host`；共享类型来自 `@cutex-desktop/plugin-sdk`，`MODULE_API_VERSION = "1.17"`（v1.2 – v1.4、v1.6 – v1.14、v1.17 只改 app 层插槽，见 §16 – §22、§24、§18.3、§18.13、§18.14、§19.3、§19.6；
+唯一引擎为 `@cutex-desktop/plugin-host`；共享类型来自 `@cutex-desktop/plugin-sdk`，`MODULE_API_VERSION = "1.25"`（v1.2 – v1.4、v1.6 – v1.14、v1.17、v1.18 只改 app 层插槽，见 §16 – §22、§24、§25、§18.3、§18.13、§18.14、§19.3、§19.6；
 SDK / 引擎的类型除版本常量外不变；v1.5 加多主机输入与 `ctx.hosts`，见 §4、§6；v1.15 加 `ModuleRequires.component`，引擎不看它，见 §12.1；v1.16 加模块包入口 / 宿主对象类型和 `moduleApi` 范围求值，见 §23）。
 原有内置模块定义、插槽形状、prefs key、主机和 agent 门控保持 v1 行为。
 
@@ -1289,9 +1420,10 @@ interface NotifyDelivery { key: string; event: string; eventTitle: string; level
   现在的文件预览只读，还没有调用方，留给以后的编辑器）；**替换守卫**：普通打开要替换一个预览标签时，若它的组件 `closeConfirm` 对它给出警告，
   不替换——先把它转成保留标签，新的作为它旁边自己的预览标签打开（`lib/sideServices.ts`））、`keepAlive: "unmount" | "hidden"`（缺省卸载；hidden = 最近 `sideKeepHidden` 个（★4）离屏仍挂载；
   v1.9 另可用 `keepMounted` 持有，§18.13）、
-  `minHeight`（缺省 120）、`launcher?: { order, pin?, params(), newParams?() }`（标题栏启动栏 / ＋ 菜单 / 启动页里出现；`params()` 返回 null = 现在不能开；
+  `minHeight`（缺省 120）、`launcher?: { order, pin?, category?, params(), newParams?() }`（标题栏启动栏 / ＋ 菜单 / 启动页里出现；`params()` 返回 null = 现在不能开；
   v1.11 `pin`：`"default"` = 缺省固定在标题栏（主人可取消），`"never"` = 只在 ＋ 菜单，省略 = 主人固定前不在标题栏；v1.11 `newParams`：
-  `multi` 组件「新开一个」的参数（Ctrl/⌘ / 中键单击、「新…」），省略 = `params()`）、
+  `multi` 组件「新开一个」的参数（Ctrl/⌘ / 中键单击、「新…」），省略 = `params()`；v1.25 `category?: "content" | "tool"`：
+  空 Shelf 的内容／工具分组（仅展示；不改变启动或门控，省略按 `tool` 显示））、
   `onClose?` / `closeConfirm?`（返回会结束什么；有警告时卡片 × 和关闭菜单项原地点两次确认，不弹窗）、`peekable`、`toRef` / `fromRef`（§19）。
 - 门控照常：模块 `requires`、条目级 `requires` / `agentFeature`；不可用的组件实例**休眠**（保留、不显示、不占图标），模块回来自动恢复。
 
@@ -1348,6 +1480,12 @@ interface NotifyDelivery { key: string; event: string; eventTitle: string; level
   页上多于一张卡片时折叠 ▾、×。同种组件在一页里只有一张卡片（「拆到新卡片」后才会有第二张；打开时落到最近用过的那张）。
 - 2026-10-18 `SideComponentItem.tabRow?: "always"`（app 层可选字段，SDK / 引擎类型不变，`MODULE_API_VERSION` 不升；主人报「浏览器侧栏没有 tab 和新建 tab」）：只对 `multi` 组件有效——卡片头一个实例时也是标签行，最后一个标签后有 ＋（「新标签页」），打开 `launcher.newParams ?? launcher.params` 作为**这张卡片**的新标签（同页、同当前标签的绑定；先触碰当前标签，所以同页有两张同种卡片时也落到这张）。现在只有 `browser.tab` 声明它；其他组件不变（单实例 = 标题，≥ 2 个才是标签行）。
 - 高度 = 比例 `share`；卡片间 8 px 缝可拖（双击均分，方向键调整），折叠卡片只剩头部；放不下时最下面的卡片先折叠。
+  「放不下」= 展开的卡片的最小高度之和（加缝和折叠卡片的头部）超过页高（2026-10-27，主人：只有真放不下才折成一行）：比例算出来
+  低于最小高度的卡片（缝拖到底、窗口变矮）按最小高度画，差额由其他卡片按比例让出，存的比例不变（页变高后回到原高度）；
+  拖缝 / 方向键从画出来的高度开始算。
+  折叠的卡片（收起的，或放不下折叠的）旁的缝照样可拖（2026-10-26）：往离开它的方向拉就展开它（至少到最小高度，之后跟着指针），
+  双击 = 和相邻卡片均分，方向键朝外一下 = 展开；它的 ▾ 和双击它的标题栏也展开（放得下时回到原比例）。只有被另一张卡片「最大化」
+  压成头部的卡片不响应。保留布局 / 共享的页上，模块关闭的卡片不画（不留空洞；比例留着，模块回来就回到原处）。
 - 最大化（⤢，Ctrl+Shift+M）= 盖住工作区；全屏（⛶，Shift+F11）= 盖住整个窗口，自带 40 px 标题行（拖动区、三平台窗口按钮、还原）。
   对象 = 卡片（卡片上的按钮 / 焦点所在卡片）或当前页（标题栏按钮）；模式中点别的页按钮 = 跟着切页。模式不跨重启。
 
@@ -1636,7 +1774,7 @@ interface SideHoldLocator { readonly scope: string; readonly instanceId: string;
   （零高度锚点里的绝对定位盒子，宽 `min(G + 24 − 16, 320)`）；相邻两个会重叠时后一个往下推（文档批注式，`marginStack`，间距 8 px），
   由 ResizeObserver 驱动、按帧合并。
 - 否则**内联**：在这一轮末尾——已结束的轮在最后一条回复里、轮尾摘要（「改了 N 个文件」行）之后、操作栏之前；
-  没有这样的回复（进行中、无回复）就在这一轮最后一行之后；宽 = 阅读列宽 − 48。`TurnAttachmentProps.where` / `width` 告诉条目是哪种。
+  没有这样的回复（进行中、无回复）就在这一轮最后一行之后；宽 = 阅读列宽 − 48，按 8 px 向下取整（拖窗口时不必每一步都重画）。`TurnAttachmentProps.where` / `width` 告诉条目是哪种。
   （2026-10-15 起，原为「第一行下面」；宿主行为，契约版本不变。）
 - 批注（`notes.turn`）不写 `margin`：只在轮尾内联，样式同轮尾摘要（「批注 · [标题] · [标题] · +N」，点开浮窗）；
   宽屏时不再飘到右侧留白（主人 2026-10-15）。`margin` 仍由书签（`bookmarks.ribbon`，左）、浏览器截图（`browser.turnShots`，右）与 `dev/devGutter.tsx` 使用。
@@ -1752,7 +1890,7 @@ interface RefImage { mime: string; encoding: "utf8" | "base64"; content: string;
 
 | 出口 | 引用 |
 |---|---|
-| 消息操作栏里的图标按钮（`RefActionButtons`，复制 · 分叉 / 编辑并重发之后、「…」之前；2026-10-15 起不再收进「…」）与消息右键菜单 | `turn`（主人消息与回复；只读时间线没有） |
+| 消息悬停浮条（设计 040 第 10 步，2026-10-23）：标了 `inline` 的条目（书签）和 `useState().active` 正亮着的条目是图标（`RefActionButtons hoverBar`，复制 · 分叉 / 编辑并重发之后、「⋯」之前），其余在浮条的「⋯」里（`refActionEntries(ref, lead, skipInline)`）；消息右键菜单列全部 | `turn`（主人消息与回复；只读时间线没有） |
 | 侧栏 agent 右键菜单 | `agent` |
 | 右侧标签右键菜单、卡片 ⋯ / 类别图标菜单（当前显示的标签） | 组件 `toRef` 的结果（不可引用的组件没有） |
 | 右侧页菜单 | `side.page`（启动页没有） |
@@ -1760,7 +1898,9 @@ interface RefImage { mime: string; encoding: "utf8" | "base64"; content: string;
 
 - `useState(ref)` 只影响显示：菜单行（`MenuAction.labelNode`：另一个标题、✓、`disabledReason` 变灰）、图标按钮（`active` = 实心图标，另一个标题作提示，`disabledReason` = 禁用并作提示；批注：这一轮已有批注时实心）；`run` 要自己再判断一次。
 - `run` 抛错 → 一行错误通知。宿主未启动时（测试、启动早期）没有条目。
+- `submenu(ref)`（可选，v1.26）：菜单行显示 › 并复用正常子菜单；数组可同步给出，也可在展开时异步解析。子项仍走相同的 `available`／确认／武装确认；引用自己的主机和版本由提供者固定，不能回退到当前主机或最新版本。图标按钮仍调用 `run`。
 - 服务行的引用动作延后：P2 之前没有服务的引用种类。
+- `inline`（可选，2026-10-23，设计 040 跟进；主人：书签要一直在浮条上）：条目在消息悬停浮条上总是一个图标，不进浮条的「⋯」。没有它 = 在「⋯」里，只在 `active` 时也显示成图标。只影响悬停浮条，菜单照旧。宿主不点名模块。
 - `excludeKinds`（可选，2026-10-16）：条目在这些引用种类上不出现，即使 `kinds` 包含它们（`lib/refActionApplies.ts`）。书签模块用它把 `agent` 排除：给 agent 的「收藏」并入侧栏置顶，书签只留给对话等引用。
 
 ### 19.9 `services.refs`
@@ -1797,6 +1937,7 @@ host-changed | bad-ref`）/ `stale`。`ref.target` 从不启动 / 重启任何�
 | 3 | 参考卡片开着且看得见（右侧区最大化 / 全屏时它被藏起：先走第 4 行，还原后它回来，下一次 Esc 才关它） | 关掉它（焦点回去） |
 | 4 | 右侧区最大化 / 全屏 | 还原 |
 | 5 | 窄窗口抽屉开着、焦点不在可编辑处 | 关抽屉 |
+| 5b | v1.21：聚焦的会话盖着页面（「页面打开位置」= 占用会话，§24.4）、焦点不在可编辑处、不在右侧 | 关掉页面，露出对话（代码里的 `close-page`，排在 Shelf / 设置 Shelf 的行之后） |
 | 6 | 焦点在右侧或留白（`[data-side-root]` / `[data-gutter-root]`）、不在可编辑处 | 什么都不做：**从不打断回合** |
 | 7 | 对话 | 对话自己的 Esc（`lib/escInterrupt.ts`） |
 
@@ -2156,9 +2297,10 @@ export const messages: Record<string, Record<string, string>>; // 语言 → { "
 
 ## 24. 窗格（v1.17）
 
-设计与主人决定：`docs/research/panes-20261019.md`（§1 概念、§2 契约、§4 摆放、§7 第 3 行；开头是主人 2026-10-20 的回答：右栏多页去掉；
-布局全局一份，窗格分「跟随对话」和「固定」；布局只存本机）。本节是约定；第 4 步起（小片托盘、最大化、LRU 限额、拖放分割合并、键盘）
-改这里。
+设计与主人决定：`docs/research/panes-20261019.md`（§1 概念、§2 契约、§4 摆放、§7 第 3、4 行；开头是主人 2026-10-20 的回答：右栏多页去掉；
+布局全局一份，窗格分「跟随对话」和「固定」；布局只存本机）。本节是约定；第 4 步（小片托盘、最大化、LRU 限额、`minSize`、拖放分割合并、
+键盘，§24.11）已经写进来。契约（`pane.kind`、`services.panes`）第 4 步没有变。**§24.12（Shelf，2026-10-20）取代下面说「工具列」的地方**：
+工具列变成 Shelf 的页，一个 Shelf 一次显示一页；§24.3 的布局 JSON 是 v1（工具列 `area: "tools"`），存储现在是 v2（§24.12.5）。
 
 ### 24.1 概念与外壳文件
 
@@ -2187,6 +2329,7 @@ export const messages: Record<string, Record<string, string>>; // 语言 → { "
 ```ts
 type PaneKindBinding = "agent" | "host" | "follow" | "none";
 interface PaneTitle extends SideTabInfo { icon?: Icon }                // 标签、小片（第 4 步）、标题栏共用
+// SideTabInfo.favicon?（2026-10-23）：标签上的网页图标，只接受内联 data:image/…（渲染层从不去取网址）；标签行像浏览器一样平分宽度、省略号、放不下进「⌄ N」（lib/tabFit.ts），太窄时模块工具条可用 lib/paneHeader 的 compact 收起次要按钮
 
 interface PaneKindItem<S extends Json, P extends Json> extends SessionItemBase {   // 条目 id = 种类 id
   titleKey: MessageKey; icon: Icon;
@@ -2242,15 +2385,29 @@ interface PaneKindItem<S extends Json, P extends Json> extends SessionItemBase {
 | 外壳 | `core.conversation` | multi / agent（去重 = 主机 + session） | 工作区（`PaneHost` 自己画，带 `ConversationScope`） |
 | `pane.kind` 条目 | 条目 id | 条目自己的 | 工具区 |
 | 每个 `side.component`（含状态分类派生的 `status:<id>`，§18.9） | **同 id** | singleton → single，multi → multi；`agent` / `workspace` / `follow` → follow，`host` → host | 工具区（就是原来的 side 组件实例） |
-| 每个不带 `Aside` 的 `main.page` | `page:<页面 id>` | single / none；params = `PageParams`，只在内存 | 聚焦的对话窗格里，盖在它的对话上 |
+| 每个不带 `Aside` 的 `main.page` | `page:<页面 id>` | single / none（= 焦点主机的 `host` 绑定）；params = `PageParams`，只在内存 | v1.21：工具区——聚焦对话的 Shelf 里自己的窗格（缺省）；「页面打开位置」= 占用会话时盖在聚焦的会话上 |
 
 - 带 `Aside` 的页面（设置）**不派生**，仍是全窗口页（Aside 代替智能体列表，工具区隐藏）。
 - 右栏的 `conversation.agent`（另一个 agent 的实时对话，2026-10-18）**并进 `core.conversation`**：它不再是 side 组件；agent 菜单「在侧边打开」、
   ＋ ▸ 智能体、`services.side.open("conversation.agent", { sessionId }, { binding: { kind: "host", hostId } })` 都打开一个固定在那个 agent 上的对话窗格
   （在聚焦对话的旁边；`background` = 不抢焦点）。
-- **页面在窗格里**：`services.ui.openPage(page, params)` 把页面作为聚焦对话窗格的一个标签打开、盖在对话上（对话标签还在）；每个窗格最多一个页面，
-  每个页面最多在一个窗格里（在别的窗格开同一页 = 从那里移过来）。`closePage`、普通打开 agent（`select`）、窗格头的 × = 关掉页面、露出对话。
-  聚焦另一个窗格时 `view` 变成那个窗格的页面或对话。store 的 `MainView`（`view`）保留给它的读者，现在 = 聚焦窗格的页面（完全退休留到以后）。
+- **页面是自己的窗格**（v1.21，主人 2026-10-21；取代 v1.17 的「盖在对话上」）：`services.ui.openPage(page, params)`（侧栏入口 `runNav`、
+  ⌘K 的页面结果 = `services.panes.open("page:<id>")`、链接 / 引用 / 深链、`lib/workspaces` `openRef` 的页面）先问 `lib/pageOpener`：
+  设置 `appearance.pageOpen`（外观 → 窗口与卡片 →「页面打开位置」，本机）= `"shelf"`（缺省）时 `lib/paneServices` `openPageInShelf` 用
+  `sideOpen("page:<id>", params, { reveal, focus })` 把它开进**聚焦对话的 Shelf**：`lib/sideComponents` 的组件表里每个不带 `Aside` 的页面
+  （`lib/paneKinds` `pageSideItems`）是一个 singleton、绑焦点主机（`host`）、页组 = 种类 id 的组件，所以按 §24.12.2 的放置**开在自己的页**、整页高（设计 038，主人 2026-10-23；
+  已经有这个页面的窗格 = 跳过去、换成新的 params；混排开关只影响「这一页满了」之后的退路），已经开着 = 换成新的 params、显示并闪一下。窗格头是普通的 Shelf 窗格头（`components/side/SideCard.tsx`）：图标和名字取
+  打开这个页面的 `nav.primary` 条目（`target.page` 或 `activePages`；没有 = 通用图标、「页面」），标题 = `useTitle` 的面包屑连成一行
+  （「项目 › profileCedar-agent」），放大（= 占满工作行的其余部分，§24.16）、全屏、⋯、×。正文 = `modules/Outlet` `PageContent`（模块的错误边界、
+  `requires.component` 的组件卡片）。`persist: false`：页面窗格不存盘（params 只在内存，同以前）。**会话照旧显示对话**，`view` 不变
+  （`MainView` 只表示「会话上盖着的页面」）；侧栏入口的高亮、审批页的「正在看」也认 Shelf 里屏幕上的页面（`lib/pageOpener`
+  `kindsOnScreen` / `pageInShelfShown`）。Shelf 不接（作用域过期等）= 退回占用会话。
+- **占用会话**（`appearance.pageOpen = "column"`）：页面作为聚焦对话窗格的一个标签打开、盖在对话上（对话标签还在）；每个窗格最多一个页面，
+  每个页面最多在一个窗格里（在别的窗格开同一页 = 从那里移过来）。这一列的顶栏换成**页面自己的顶栏**（`components/PageHeader.tsx`：图标、
+  可点的面包屑、放大 / × / ⋯，⋯ =「在 {{shelf}} 中打开」、全屏、关闭页面），不再是 agent 的顶栏。×、Esc（§19.10 第 5b 行）、`closePage`、
+  普通打开 agent（`select`）= 关掉页面、露出对话。聚焦另一个窗格时 `view` 变成那个窗格的页面或对话。
+- 带 `Aside` 的页面（设置 = 设置 Shelf，§24.14）两种设置下都不变。草稿对话（`quick-chats.draft`，`newQuickChat` 直接设 `view`）照旧在会话，
+  带页面顶栏。
 
 ### 24.5 打开规则、服务与限额
 
@@ -2262,7 +2419,7 @@ type PaneOpenResult = { status: "opened"; kind: string; paneId: string | null; i
 
 - `core.conversation`：params `{ sessionId, hostId? }`（缺省 = 选中 agent 的主机）。普通 = 在聚焦的对话窗格里（已经开着 = 聚焦那个窗格）；
   `beside` = 在它旁边新开一列（满 2 列 = 替换另一列）；`background` = 同 `beside` 但焦点不动。
-- `page:<id>`：= `services.ui.openPage`（聚焦的对话窗格里）。
+- `page:<id>`：= `services.ui.openPage`（v1.21：聚焦对话的 Shelf 里自己的窗格，`instanceId` / `paneId` = 那个窗格；占用会话 = 聚焦的对话窗格，`instanceId: null`）。
 - 工具种类：= `services.side.open(kind, params, { reveal: true, focus, background })`（§18.8）。`services.side.open` 保留，是工具种类的别名
   （外加上面的 `conversation.agent`）。
 - **工具放置**（`lib/sideLayout.ts` `place()`，§18.6 的顺序不变，「页」= 列）：复用 → 预览就地替换 → 选列（显式 → 覆盖 → `prefer` →
@@ -2271,7 +2428,9 @@ type PaneOpenResult = { status: "opened"; kind: string; paneId: string | null; i
   标签，可以混种类）。
 - **限额**（`lib/paneLayout.ts` 常量）：屏幕上 ≤ 6 个窗格（`MAX_VISIBLE_PANES`）、每列 ≤ 3 个（`MAX_ROWS`）、对话 ≤ 2 列、工具列 ≤ 2 列
   （`MAX_TOOL_COLUMNS`）、工具窗格合计 ≤ 4（`MAX_TOOL_PANES` = 6 − 2 列对话）。所有改布局的操作之后 `fitLayout` 保证限额（多出来的窗格
-  变成第三个窗格的标签）；拖放和菜单要超出限额时拒绝（拖动提示「不能放这里」）。小片托盘、LRU 收起、`minSize` 的列宽判断是第 4 步。
+  变成第三个窗格的标签）；拖放要超出限额时拒绝（拖动提示「放不下了」）。第 4 步：放回小片超出限额时，最久没用的窗格收成小片（LRU，
+  §24.11）；`minSize`（缺省 280 × 120；对话旁边还有对话时 `CONVERSATION_MIN_W` = 400）放不下的新工具列不建，改加标签（`place()` 的
+  `roomForColumn`、拖放），两个对话 + 工具列放不下各自的最小宽度时工具区变成抽屉（`frameMins`，不再把对话挤到 280 px 以下）。
 - 已经开着：聚焦并闪一下（启动器、`reveal`）。所有工具列都在屏幕上，所以启动器的「当前页」= 有这种可见窗格的列（没有 = 聚焦的列），
   规则同 §18.3（折叠 → 展开，可见 → 聚焦并闪一下）。Ctrl+Shift+1…9 = 聚焦第 n 个工具列；Ctrl+Shift+N = 新的一列（空列，放启动器）。
 
@@ -2282,6 +2441,16 @@ localStorage `cutex-desktop.panes` = `{ v: 1, layouts: { "host:<焦点主机>": 
 写工具区（`prepareForSave`：不存 `persist: false`、超过 4 KiB 的 state、空的启动器列；每范围 ≤ 200 个实例、覆盖 ≤ 100 条，§18.11）。恢复时丢掉
 已删除 agent 的对话窗格和工具实例、`restore` 返回 null 的实例；最大化 / 全屏不恢复；「启动时恢复」关掉时只留覆盖。
 
+存放位置（E-G10，主人 2026-10-24 批准；`lib/paneDb.ts`）：上面这份文件放在 IndexedDB `cutex-desktop-panes`，一块一条记录（`meta`、每个范围的
+布局、每个范围的默认布局 + 共享页、每个对话自己的 Shelf）。首次渲染前读进内存（`lib/paneDbBoot.ts`，整个读取一个 5 秒期限，超时 = 这次
+运行用 localStorage），之后读都是同步的；写只写变了的记录（100 ms 内合成一个事务，记录带时间 `t`，旧的不盖新的；删掉的留墓碑
+`{ t, del }`，有有效的戳时 7 天后清掉），其他窗口经 BroadcastChannel 马上收到。每个窗口没提交的写另记一份 localStorage 日志
+`cutex-desktop.panes.journal.<窗口>`（小的时候每次变化都记，pagehide 时一定记；下次启动在下面的合并之后全部补上，内容没被那个窗口改过才删）。首次启动：旧键拷进来（别的窗口
+这期间写的记录保留）、读回核对后才用，旧键原样保留。退出（pagehide）：整份文件写回旧键 `cutex-desktop.panes`（≤ 1.5M 字符时；给降级回旧版
+桌面用，0.2 系列保留），哈希和最新 `t` 先写进 `cutex-desktop.panes.stamp`（戳写不下就不写拷贝）。旧键跟这个戳不一致 = 旧版桌面（或没有 IndexedDB 的一次
+运行）写过它：把它跟库里不同的块合并进来，但拷贝之后在这里改过的记录（含墓碑）不动（那边没见过它们）；没有戳时只补这里从没有过的块；从不整库清空，这时窗口退出也不拿自己的拷贝盖掉它。
+没有 IndexedDB / 打不开 / 核对失败 / 超时：照旧用 localStorage（超时后不再往库里写；已经写进去的拷贝 / 合并会盖戳）。
+
 ### 24.7 从 `cutex-desktop.side` 迁移（一次）
 
 两个 store 第一次读之前都调 `migrateSideOnce()`（`lib/paneFile.ts`，幂等）：
@@ -2290,28 +2459,983 @@ localStorage `cutex-desktop.panes` = `{ v: 1, layouts: { "host:<焦点主机>": 
 2. **聚焦的 agent** = `views` 里最近用过的那个；它在看的页成为**唯一的工具列**（没有视图记录 = 存档的 `activePage`），它的开 / 关 = 工具区的开 / 关。
 3. 别的页的卡片按页的顺序并进这一列：有同种的窗格 → 成为它的标签；这一列还有空间 → 成为新窗格；否则 → 最下面窗格的标签。页组合并，
    覆盖指向这一列。**不丢任何实例**：参数 / state、去重键、保留标记、最近使用都原样带过来。
-4. `conversation.agent` 卡片离开工具区，它们的 agent 成为工作区的对话列（在已有对话旁边，满 2 列为止；不抢焦点）。
+4. `conversation.agent` 卡片离开工具区，它们的 agent 成为工作区的会话（在已有对话旁边，满 2 列为止；不抢焦点）。
 5. 写进 `cutex-desktop.panes` 的同一范围（已有的工作区保留；已有工具区的范围不覆盖），原值整份放到备份键 `cutex-desktop.side.v1-backup`
    （应用不再读它），删掉 `cutex-desktop.side`。
 
 ### 24.8 外壳行为摘要
 
-- 工作区一个对话窗格时 DOM 与以前相同（没有窗格头）；两列时每列一个细窗格头（agent、主机、页面名、×：有页面时 × 关页面）。
+- 工作区只有一个对话窗格、旁边没有工具窗格时 DOM 与以前相同（没有窗格头）；两列对话、或旁边有工具窗格时每列一个细窗格头（agent、主机、
+  ⤢（悬停）、「—」、×，最后一个对话窗格没有 ×；v1.21：盖着页面的列是页面自己的顶栏，§26.4）。
 - 工具区：`SideArea.tsx` 把屏幕上的工具列（`columnsOnScreen`：对聚焦 agent 有内容的列 + 聚焦的空列）并排画，列之间 8 px；每列是
   `SidePageView.tsx`（窗格、行间可拖的缝）；窗格头 = `SideCard.tsx`（标签行；混种类时用当前标签的种类画图标和操作）。工具区开着但没有
   任何窗格时显示空状态和启动器；开着、只有别的 agent 的内容时不显示。
-- 拖放（§18.7 表格，`lib/sideDrop.ts` / `sideDnd.ts`）照旧：窗格头 / 窗格之间的缝 = 列内移动或移到别的列；工具区左缘条带与工具区以外 =
-  新的一列（到 2 列就拒绝）；会超出限额的放下被拒绝。页按钮那几行（药丸、标签条）已经没有可拖的目标。
+- 拖放见 §24.11（第 4 步换成按窗格分区：四边 30 %、窗格头 / 正中、工作区最左最右）；页按钮那几行（药丸、标签条、整页拖动）的规则删了。
 
 ### 24.9 测试
 
-`test/paneLayout.test.ts`（布局、校验、对话列）、`test/panesStep3.test.ts`（工具区 JSON 互转、两个区域的拆合、页面窗格、迁移、两个 store 互不覆盖）、
+`test/paneLayout.test.ts`（布局、校验、会话）、`test/panesStep4.test.ts`（小片、LRU、`minSize`、最大化、会话移动、方向键、窗格键、
+Esc、两个区域的小片存取、`lib/paneActions` 的显示桌面和托盘上限）、`test/panesStep3.test.ts`（工具区 JSON 互转、两个区域的拆合、页面窗格、迁移、两个 store 互不覆盖）、
 `test/panesStep2Store.test.ts`（页面跟着聚焦窗格、不存页面）、`test/sideLayout.test.ts`（§18.6 / RFC §4.4 的 13 个场景按本节改写，编号不变；
-`foldPages`）、`test/sideDrop.test.ts`（§3.7 表格，两列的世界，超限拒绝）、`test/sideAgentViews.test.ts`（全局一份）、`test/sideLaunchers.test.ts`、
-`test/modules.test.ts`（`pane.kind` 快照与派生种类表、外壳扫描）、`test/moduleSdkContract.test.ts`（类型正反例、`SLOT_SPECS`）。
+`foldPages`）、`test/sideDrop.test.ts`（第 4 步的分区：四边 30 %、合并为标签、新列、工作区边缘、对话换位、拒绝、外部把手）、`test/sideAgentViews.test.ts`（全局一份）、`test/sideLaunchers.test.ts`、
+`test/modules.test.ts`（`pane.kind` 快照与派生种类表、v1.21 页面的 Shelf 组件表、外壳扫描）、`test/moduleSdkContract.test.ts`（类型正反例、`SLOT_SPECS`）、
+`test/pagesOwnPane.test.tsx`（v1.21：页面是自己的窗格、占用会话的页面顶栏）。
 
-### 24.10 延后（第 4 步起）
+### 24.10 延后（第 5 步起）
 
-小片托盘与「—」、最大化窗格（今天的 ⤢ / ⛶ 仍是 §18.4 的卡片 / 列模式）、LRU 限额、拖窗格头 / 标签分割合并（四边 30 %）与工作区边缘新开一列、
-对话窗格里放工具标签、键盘（Ctrl+T / Ctrl+W / Ctrl+Alt+方向键 / Ctrl+Shift+D）、`minSize` 的列宽判断、左栏细栏与桌面底层（第 5 步）、弹出窗口（第 6 步）、
-`MainView` 完全退休、`lib/sideDrop.ts` / `sideDnd.ts` 里页按钮那部分的清理。
+桌面底层与个人页已在第 5 步落地（§25）；左栏细栏、对话窗格里放工具标签（拖放拒绝「工具放在对话的右边」）、
+弹出窗口（第 6 步）、`MainView` 完全退休、单击智能体时被替换的对话变小片（§4 第一条；第 4 步仍是直接替换）。
+
+### 24.11 第 4 步：小片、最大化、拖放、键盘
+
+> **0.2 变更（2026-10-22，合并 feat/0.2-tray / feat/0.2-width；本节下文的小片 / LRU / 最大化描述已过时，以此为准）**：
+> - 「—」on a tool pane opens a menu: 移到另一页 ▸ (the other pages of its Shelf, plus 新的一页 when the pane isn't alone on its page, below 9 pages) and 关闭 (confirmed in place, like ×). Tool panes never go to the tray (#7, owner 2026-10-21). 托盘 = 钉住的 + 打开着的会话（docs/design/001）。
+> - 显示桌面（主人 2026-10-22 改定）：只显示桌面——侧栏卡片照常（平时显示就显示）、托盘按它的设置；**没有会话、窄条、Shelf、Shelf Rail**。会话整体收走（`emptyWork`）；Shelf 的布局不动（不再收成 Rail——Rail 常驻会把它们留在屏幕上），显示桌面期间工作区只是不画 Shelf（`components/PaneHost` `side` = `!desktopShown`）。再按一次 = 原样回来。〔原来：展开的 Shelf 收成 Rail，Rail 常驻时最右还剩一条 Rail。〕
+> - LRU / limits: no pane goes to the tray any more (remove "the least recently used pane goes to the tray"); 会话收起 = 原位窄条或最小化到托盘（docs/design/002）。
+> - Migration (no file version bump): stored tool chips go back into their Shelf once (`resolveChips`); one that cannot (its Shelf at 9 pages) is closed with one notice saying how many.
+> - 最大化 = 规则 2（只吃空隙，`lib/panelGrow*`，docs/design/003）；原来的「最大化」改名「独占」，在 ⋯ 里（`toggleExclusive`，两个工作区时另一个收成窄条）；全屏不变。动作预告：`lib/foretell.ts` + `components/ForetellLayer.tsx`，效果与执行同源（`lib/workspaceEffects.ts`，docs/design/008）。
+
+外壳文件：`lib/paneActions.ts`（两个区域共用的动作：收起 / 放回 / 关小片、托盘 ≤ 8、最大化、显示桌面、窗格键、焦点窗格）、
+`components/ChipTray.tsx`（托盘、「显示桌面」按钮）、`lib/paneFly.ts`（收起 / 放回时的飞行动画）、`lib/paneRoom.ts`（`minSize`）、
+`lib/paneKeys.ts`（键的纯路由）；纯函数在 `lib/paneLayout.ts`（工作区）和 `lib/sideLayout.ts`（工具区）。
+
+- **小片**：窗格头「—」把窗格收进工作区底部的托盘（飞行动画：窗格的影子飞进小片；`prefers-reduced-motion` 时不飞）。小片显示图标 /
+  头像、标题、「+n」个标签、角标（忙 / 需要你的数目 / 未读，来自各标签的 `useTitle` / 侧栏的需要你）；点 = 放回原来的邻居旁边（工作区：
+  左 / 右邻居、列序号、宽度份额，`Pane.home`；工具区：所在工具列 id / 组 / 名 / 序号、上 / 下邻居，`SideChip`；列已经没了就在原序号重建，
+  放不下新列就进最右一列）；× = 关（要结束东西时先原地确认，同 `closeConfirm`）；中键 = ×。托盘按收起时间排；超过 `MAX_CHIPS` = 8
+  时自动关最旧的，有 `closeConfirm` 提示的不自动关（存档最多 `MAX_STORED_CHIPS` = 16）。最后一个对话窗格收起后留下一个空的对话窗格
+  （没有 agent = 今天的空状态），放回时它让位。打开已经在小片里的东西（单击 agent、`services.side.open` 复用同一实例、`reveal`）= 放回原位。
+- **LRU**：对话窗格放回时已有 2 列 → 最久没用的对话窗格收成小片；「在旁边打开」已有 2 列 → 另一列显示它、它原来的 agent 收成小片
+  （以前是直接替换）；工具窗格放回时那一列满 3 个或工具窗格满 4 个 → 那一列（或全部）里最久没用的收成小片。
+- **最大化**：窗格头 ⤢、双击窗格头、Ctrl+Shift+M（聚焦的窗格）。同时只有一个；Esc 或 ⤢ 还原；不存（`joinLayout` 丢掉）。
+  （2026-10-21 起：占工作行剩下的宽度，别的面板收成 Rail，另有全屏——§24.16。）
+- **显示桌面**：标题栏按钮 / Ctrl+Shift+D：屏幕上的窗格（对话 + 对这个 agent 可见的工具窗格）按屏幕顺序收成小片，托盘最前面多一个
+  「恢复布局」；什么都不在屏幕上时再按 = 按原样放回（焦点回到原来的对话），没有可恢复的就放回最新的小片。
+- **拖放**（`lib/sideDrop.ts` 纯函数 + `lib/sideDnd.ts` 探测 / 盖层）：拖窗格头（整个窗格）或标签（一个实例），对话窗格拖它的窗格头。
+  落在另一个窗格四边 30 % = 那一边分出（工具：上 / 下 = 这一列里分，左 / 右 = 旁边新的一列；放不下新列 = 改成标签）；窗格头或正中 =
+  合并为标签（任何种类）；工作区最左 / 最右缘 = 新的一列（对话：最左 / 最右的会话；工具只能在最右）。规则内：对话一列一个、只能
+  左右换位；工具不进对话窗格、对话不进工具区（拒绝并说明）；限额照旧拒绝。拖动时被拖的窗格变淡，目标区域高亮并写明结果，Esc 取消。
+- **键盘**（`lib/useSideShortcuts.ts` → `lib/paneKeys.ts`）：Ctrl/⌘+W 关聚焦窗格的当前标签（对话窗格：关页面，否则关这一栏，最后一栏不关；
+  要结束东西时先确认）；Ctrl/⌘+T 在聚焦窗格弹出启动器菜单（工具窗格：新开的作为它的标签）；Ctrl+Alt+方向键 = 换到那个方向的窗格；
+  Ctrl+Shift+M 最大化 / 还原；Ctrl+Shift+D 显示桌面。终端聚焦时 Ctrl+Shift+D / M 和 Ctrl+Alt+方向键放行，Ctrl+W / T 归 shell。
+  Esc 链（`lib/escChain.ts` 第 4 行）先还原最大化的窗格（对话或工具），再关参考卡片、抽屉。
+- **持久化**：小片随布局存（工作区小片 = `chips` 里的窗格 id + `home`；工具区小片 = `chips` 里 `t-` 前缀的窗格，`home.column` / `above` /
+  `below`），恢复时校验，已删除 agent 的小片丢掉。最大化不存。
+
+### 24.12 Shelf（2026-10-20，契约不变）
+
+主人方向与术语：`docs/research/canvas-principles-20261020.md` §6（Shelf、Shelf Rail、页、窗格、标签行、会话；每个 Shelf 自己的「允许混排」
+和 Rail 内外侧；第 3 步删掉的右栏多页按这个形状回来）；原型 `.claude/preview-shelves.html` A 组（默认、两个 Shelf、混排关 / 开、拖到页签、
+拖到边缘、Shelf 菜单、Rail 在内侧、Shelf 收起）；收起到 Rail（主人 2026-10-21）：`.claude/preview-design-v1.html` §3 方案 a（`#s3-a`、
+`#s3-a+open`、「▶ 演示动画」）。
+
+**层次**：Shelf → 页（Shelf Rail 切换，一次显示一页）→ 窗格（一页里上下最多 3 个）→ 标签（标签行切换）。
+
+〔**2026-10-23 起改为「样子 A」**（主人选；`feat/0.2-shelf-look`）：展开的 Shelf 不再画成一张卡片。Rail 是一整条满高的卡片，朝外的一边圆角、贴窗格的一边方角；每个窗格是自己的卡片贴在 Rail 上（贴 Rail 的一边无边框、方角，朝外圆角），窗格之间是标准的 8 px 缝（`SHELF_PANE_GAP = CARD_GAP`，缝里看得见桌面，仍是拖高度的把手），Shelf 里的窗格不加阴影；每个窗格内容的外侧下角都画圆角（`SideInstanceLayer`）；亚克力按每个角分别裁。收起的 Shelf（只剩 Rail）不变。下面这段 10-21 的「一张卡片 / 1 px 线」说法作废，留作历史。拖放时真实窗格先挪到放下后的位置（`lib/dropMorph.ts`，只用 transform / clip-path；减少动态效果时只画虚线框）。〕
+**一张卡片**（设计 009，主人 2026-10-21 选 A）：Shelf Rail 是 **Shelf 的页签栏**，不是单独的一种面板。整个 Shelf 是一张卡片（`.shell-card`
+的材质、圆角、细边、阴影只有一份；`components/side/SideArea` `ShelfView` 的 `.shelf-card`，样式 `components/side/shelfCard.css`）：Rail 在卡片里
+贴一边，和页之间一条细线（页这一栏朝 Rail 的 `border-l` / `border-r`），没有缝；页里的窗格不再各自是卡片（没有边框、圆角、阴影、自己的材质），
+上下两个窗格之间是 1 px 的线（`SidePageView` `PANE_LINE`，拖动的热区仍是 9 px；`cardHeights` 的 `gap` 参数），实例层只把卡片自己的那个角
+（最下面窗格离 Rail 远的那一角）画成圆角（`SideInstanceLayer` `bodyCorners`）。**收起** = 同一张卡片收窄到 Rail 宽（圆角 12 px，和侧栏的头像窄栏
+一样）；**展开** = 从 Rail 那边长出来，动画是这张卡片变宽（`lib/shelfMotion` 原样）。空 Shelf 的 Rail、另一个工作区的 Rail 也是收起的 Shelf 卡片
+（`data-shelf-collapsed`）。「Rail 直角」（主人想试的：只剩 Rail 时直角、展开后圆角）是开发开关 `lib/shelfCorners`（`?shelfcorners=square`、
+`localStorage["cutex-desktop.shelfCorners"]`，`<html data-shelf-corners>`），缺省圆角。契约不变（`MODULE_API_VERSION` 不升）。
+
+#### 24.12.1 模型（`lib/sideLayout.ts`）
+
+```ts
+interface Shelf {
+  id: string;                         // "s<n>"（和页、窗格、实例共用 id 计数）
+  side: "left" | "right";             // 会话的哪一边；每边最多一个，合计 ≤ MAX_SHELVES = 2
+  width?: number;                     // 自己的宽度（不含 Rail）；没有 = appearance.sidePaneWidth（设置里的默认宽度）
+  active: string | null;              // 显示的页
+  options: { allowMixing: boolean; railPlacement: "outer" | "inner" };
+  collapsed?: boolean;                // 收起：只剩 Shelf Rail（原地的竖条，§24.12.3）；没有 = 展开。v3 存的 `chip`（整个 Shelf 在托盘里）读作收起
+}
+interface SidePage { …; shelf?: string; icon?: PageIcon; kept?: boolean }   // 属于哪个 Shelf；Rail 图标；主人建的页（空也保留）
+interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          // 左边的在前；只用一个 Shelf（没有 = 关）
+```
+
+- 引擎原来的「页」（第 3 步叫工具列）就是 Shelf 的页；Rail 顺序 = `pages` 里这个 Shelf 的页的顺序。每页 ≤ 3 个窗格（`MAX_CARDS`），每个 Shelf
+  ≤ 9 页（`MAX_SHELF_PAGES`，Alt+1…9）。没有 `shelves` 的布局（手写、旧存档）读的时候所有页归右边的 Shelf，**允许混排关**（`withShelves`
+  / `shelvesOf`，归一化有缓存；所有 reducer 先归一化）。`layout.activePage` = 聚焦的页（Alt+n、启动器、`active-page` 放置都看它所在的 Shelf）。
+- **限额**：每页 ≤ 3；屏幕上的工具窗格 ≤ `MAX_TOOL_PANES` = 4 只按**屏幕上的页**（每个展开的 Shelf 正在显示的页；收起的只有 Rail）算，只在加窗格时检查
+  （`place`、拖放、小片放回的 LRU）；切页不合并任何东西（另一页可以各有 3 个）。旧的「合计 ≤ 4 就把最下面合并成标签」改成只保证每页 ≤ 3。
+- **默认**（主人 2026-10-20）：**每个 Shelf 都不允许混排**（一个窗格的标签行只放一种东西；文件、网页、终端各成窗格），Rail 在外侧——
+  从 v1.17 布局、v1.16 右栏、第 3 步备份迁来的右 Shelf 也一样（`defaultShelfOptions()` 不再有「旧布局开」的分支；之前的迁移把它设成开，
+  存储 v3 一次性关掉，§24.12.5）。已经混放的窗格保持原样（不重新分组）；之后满页时放置开新页（§24.12.2），主人可以在 ⋯ 里打开。
+- **只用一个 {{shelf}}**（`singleShelf`，单一 Shelf 模式 = 以前的右栏）：开着时不会有第二个 Shelf——`shelfLimit(layout)` = 1（否则
+  `MAX_SHELVES`），`canAddShelf` 为假；`addShelf`、`moveToNewShelf` 不变；`applyOpen` / 小片放回（`restoreCard`）/ 撤销（`restoreRemoved`）/
+  旧页恢复需要新 Shelf 时改用现有的那个；工作区边缘拖放 = 现有 Shelf 的新页（§24.12.4）；**移到另一边**照旧。打开时已经有两个 Shelf：都留着
+  （不合并），只是不再新建，关掉一个就剩一个（`setSingleShelf` 只改这个标记）。缺省：**新安装开**（什么都没存过：没有 `cutex-desktop.panes`、
+  `cutex-desktop.side` 和它的备份），**已有用户关**（不管有没有两个 Shelf，行为不变）；每个范围存自己的选择（`tools.singleShelf`），没存过工具区
+  的范围用文件里的缺省（`singleShelfDefault()`，§24.12.5）。
+
+#### 24.12.2 放置（`place()`，§24.5 的顺序，「列」读作「页」）
+
+复用 → 预览就地替换 → 选页（显式 → 覆盖 → `prefer` → otherwise：`active-page` = 聚焦的页（没有 = 右 Shelf 正在显示的页）；
+**缺省 `new-page`**（所有页面种类 `page:<id>` 和没有声明的种类，设计 038，主人 2026-10-23）= 已经有这种窗格的页（它加标签、显示出来），
+否则默认 Shelf 的**新页**，整页高——不再悄悄把正在显示的页分成 1/2、1/3（以前 `otherwise` 被忽略，都进右 Shelf 正在显示的页）；没有任何 Shelf
+才新建右 Shelf）。覆盖指向的页没了、也没有同组的页 → 默认 Shelf 的新页（≤ 9，满了就是它正在显示的页）；一页不需要宽度，`roomForColumn`
+只在要建新 Shelf 时有意义。→ 选窗格：这一页有这种的窗格 → 加标签；还有空间 → 按 `order` 新窗格；**这一页满了** → 另一个 Shelf 正在显示的
+页或本 Shelf 别的页里有这种的窗格 → 它的标签；另一个 Shelf 正在显示的页有空间 → 那里新窗格；本 Shelf **允许混排** → 这一页最下面窗格的标签
+（今天的行为）；**不允许** → 本 Shelf 的新页（切到它）；9 页都满 → 最下面窗格的标签（最后的退路）。`reveal` 一个在收起的 Shelf 里的实例 = 把
+那个 Shelf 展开并切到那一页（切页 `setActivePage` 总是展开它所在的 Shelf）。
+
+#### 24.12.3 外壳
+
+- `components/side/SideArea.tsx`：工作区 = [左 Shelf][对话卡片][右 Shelf]。右 Shelf 沿用 §18.3 的框（并排 / 让位 / 悬浮 / 窄窗口抽屉 /
+  最大化 / 全屏）；左 Shelf 只在行内，会话放不下各自的最小宽度（加上右 Shelf 的最小宽度）时离开屏幕，窗口变宽再回来。每个 Shelf 的框 =
+  宽度 + Rail（`RAIL_WIDTH` = 40）+ 8 px 缝（收起时只有 Rail + 缝 = `COLLAPSED_SHELF_WIDTH` = 48，见下）；缝和窗格朝对话一侧的边是宽度把手（`lib/sideResize.ts`：拖动实时、松手存进布局，双击 = 回到默认
+  宽度，方向键）。最大化 / 全屏时右框盖住整个工作区，显示那个窗格 / 页所在的 Shelf。
+- `components/side/ShelfRail.tsx`：Shelf 卡片的页签栏，在卡片的外侧（窗口边）或内侧（对话一侧）。页按钮 = 页的图标（**两个以上窗格的页 = 胶囊**：一个竖的圆角框里按上下顺序叠着每个窗格的图标，没有把手标记——框 / 空隙拖整页，
+  图标拖那个窗格；悬停框 = 整个框描淡的强调色，悬停图标 = 只亮图标；点图标 = 显示那一页并聚焦、闪一下那个窗格；设计 038）（`page.icon`，否则第一个窗格种类的图标；
+  `lib/shelfIcons.ts`）+ 提示（页名 · Alt+n）；正在显示的页有底色和外缘的小竖条；需要你的数目、忙的点。然后 ＋（新页，≤ 9；新页带改名 /
+  图标浮层）、最下面收起按钮（收起 / 展开，提示「· Esc」）和 ⋯（Shelf 菜单）。点页按钮：别的页 = 切过去；**正在显示的页 = 什么都不做**（主人 2026-10-22：原来是收起，太容易误点；双击它也不收起——Rail 的双击 = 最大化只在空白处）。按住拖 = 拖整页（§24.12.4）。右键页按钮：重命名 / 换图标（同一个浮层：名字输入框 + 22 个图标 + 「自动」）/ 移到上面 / 移到下面 / 拆开「窗格」（右键的图标，否则聚焦的 / 最下面的窗格，成为紧挨着的下一页）/ 合并到上一页（合起来 ≤ 3 个窗格）/ 在所有对话中显示 / 删除这一页（设计 038）。
+- ⋯ 菜单（`lib/shelfMenus.tsx`）：标题「右边的 {{shelf}} · n 页」；允许混排（开关，下面一行说明）；只用一个 {{shelf}}（开关，整个布局的，
+  下面一行说明；有两个 Shelf 时说明「已有的两个都留着」）；{{shelf}} Rail 在外侧 / 内侧；**收起**（收起时这一项是「展开 {{shelf}}」）；
+  移到左边 / 右边（那边有 Shelf 时不可用）；关闭 {{shelf}}（n 个窗格一起关，可撤销）。托盘里不再有 Shelf 小片。
+- **收起到 Rail**（主人 2026-10-21；`collapseShelf` / `expandShelf` / `railPageClick` / `toggleShelfCollapsed` 在 `lib/sideLayout.ts`，
+  动作在 `lib/shelves.ts`）：收起的 Shelf 原地只剩它的 Rail——一条竖条（`COLLAPSED_SHELF_WIDTH` = Rail 40 + 缝 8），在 Shelf 的外侧
+  （窗口边；Rail 选了内侧也一样），是收窄到 Rail 宽的 Shelf 卡片（设计 009），**不标**正在显示的页（没有页在屏幕上）；页图标、需要你的数目、忙的点照旧，＋、收起按钮
+  （这时是展开）和 ⋯ 照旧。它的页、窗格、实例都留着；页不在屏幕上（不算进 4 个工具窗格），实例按 keepAlive 规则隐藏。会话拿到让出的宽度
+  （`shelfRow()`：[左 Shelf][对话][右 Shelf] 的宽度，纯函数；收起的右 Shelf 不经过 §18.3 的框，`railsOnScreen()` 给出要画的竖条）。
+  **展开**：点 Rail 上的一页 = 展开到那一页；收起按钮 / ⋯ 里的「展开」= 展开到原来那页；Alt+1…9（聚焦的 Shelf 收起时）、⌘K 的页、`reveal`、
+  拖放停在页按钮上也都展开。**收起**：收起按钮、⋯ →「收起」、会话顶栏的 Shelf 按钮、焦点在这个 Shelf 里（Rail、窗格头、窗格内容，不在输入框里）按
+  **Esc**（`lib/escChain.ts` 第 6 行，在还原最大化和关抽屉之后；终端等自己用 Esc 的组件先拿到）。收起时如果聚焦的是它，焦点移到另一个展开的 Shelf；
+  它在最大化 / 全屏就先还原。最大化 / 全屏时不画收起的竖条。
+- **动画**（`lib/shelfMotion.ts`）：收起 / 展开时 Shelf 的框在两个宽度之间平滑过渡（220 ms，WAAPI），会话每帧跟着变；展开时页的内容保持最终
+  宽度（被框裁掉、淡入），窗格不会每帧重排，盖在窗格上的实例等框到位再出现（`useShelfMotion`）。`prefers-reduced-motion` 时直接跳到位。
+  宽度来自外壳算出的值（不量 DOM），按 Shelf 记住，竖条和完整的框互换时也接得上。显示桌面 / 恢复布局不碰收起状态。〔2026-10-22 起：显示桌面时
+  Shelf 和竖条都不画（§24.11 0.2 变更）。〕
+- **撤销**（`lib/shelves.ts`、`components/side/ShelfToast.tsx`）：删除页 / 关闭 Shelf 把页、窗格、实例从布局拿走（`removePage` / `removeShelf`
+  返回被拿走的部分），底部提示条带「撤销」7 秒（`restoreRemoved` 放回原处：Shelf 回原来那边，那边已有 Shelf 就去空着的一边，都占了就并进那边
+  的 Shelf）。组件的 `onClose`（例如结束终端进程）等提示条消失才跑；窗口关闭时立刻跑。所以这两项不再先确认。
+  〔2026-10-23 起（窗口审计 #6）：拖放造成的合并 / 拆开 / 移动 / 跨工作区移页也出同一个提示条和 7 秒「撤销」（`lib/dropUndo.ts`），放回拖放前的
+  排法、实例状态不变；之后又动过布局或焦点换了对话就不撤，提示「之后又动过布局，没法撤销这一步」。一次只有一个提示条：新的拖放提示会让还没过期的
+  删除页撤销提前生效。主人的风险分级：这些是低风险，一次过、只给撤销。〕
+- **{{shelf}} Rail 常驻**（主人 2026-10-21："the Shelf Rail could be always present — no need to hide it; make it configurable, shown by default"；设置 → 外观 → 窗口与卡片，`appearance.shelfRailAlways`，
+  本机，**缺省开**）：开着时每个对话的 Shelf Rail 一直在它的位置上（Rail 内外侧、§24.15 并排时的位置照旧）：
+  - **工具区关着**（`open: false`）：它的 Shelf 都画成 Rail（和收起的一样，不标正在显示的页；`workspaceShelves`，单个工作区也这样——并排时
+    本来就这样，§24.15 (a)）。点页按钮 = 打开到那一页（`railPageClickNow` → `switchPage`，`open` 变真、Shelf 展开）；Rail 底部的收起 / 展开按钮
+    在关着时是「展开」（`toggleShelfNow`：`collapsed` 或工具区关着都展开）。
+  - **空的 Shelf**（这个对话一页都没有，或只有别的 agent 的页）：一条空 Rail（`components/side/ShelfRail.tsx` `EmptyShelfRail`，
+    `data-shelf-rail-empty`）：对话的小头像 + ＋（启动器菜单，选的开进这个对话的 Shelf：`lib/convPaneControls` `shelfLauncherMenu`，和顶栏
+    Shelf 按钮的「＋ 打开 {{shelf}}」同一份）；没有页、收起按钮和 ⋯。单个工作区画在会话右边；并排时画在 `workspaceRow` 的 `railAt`
+    （外侧 / 永远偏右），另一个工作区的那条点头像 = 聚焦它、＋ 选了先聚焦再打开，也是工作区拖放的投影目标（`data-ws-shelf`）。没有 agent 在前面
+    （桌面）时不画。
+  - **另一个工作区**同样（关着的画 Rail、空的画空 Rail）。
+  - **宽度**：Rail 算进行宽——单个工作区当成收起的右 Shelf（`shelfRow` `right: "collapsed"`，单列的边、`singleColumnWidth` 的 `free`、按内容的
+    整组宽度都扣掉 48 px），并排时是 `RowWorkspace.rail`（`workspaceRow` 本来就为「另一个工作区的 Rail」留的位置：`fits`、铺满的份额、强制
+    画成 Rail 的判断都算它）；`setShelvesTaken` 也算它。
+  - **最大化 / 全屏**（§24.16）照旧：关着的工具区的 Shelf 和别的 Shelf 一样收成 Rail；空 Rail 不画。
+  - 顶栏的 Shelf 按钮（§26.3）不变：展开的 = 收成 Rail，收着 / 关着的 = 展开，空的 = 启动器；Rail 一直在。
+  - **关掉** = 以前的行为：空的 Shelf 没有 Rail（入口只在顶栏），单个工作区关着的工具区什么都不画（并排时关着的仍画 Rail，§24.15 (a)）。
+- 新页 / 页按钮名：`pageLabel`（主人起的名，否则前两个窗格名）。主人用 ＋ 建的页、拖到 ＋ 建的页是 `kept`：空了也留在 Rail 上（显示「这一页
+  还是空的」和启动器），删除才走；规则建的页空了就走（和以前一样）。
+
+#### 24.12.4 拖放（`lib/sideDrop.ts` + `lib/sideDnd.ts`）
+
+- **拖页按钮 = 拖整页**（主人 2026-10-22 报「页按钮拖不动了」——Shelf 有 Rail 以来（741f5a34）页按钮就没有拖动把手，第 3 步的整页拖动在
+  bb63923b 删掉了；不是 0.2 的回退）：`SideDrag` `{ type: "page", pageId }`（`ShelfRail` 的页按钮用 `sideDragHandle`，短按仍是点击，放下后的
+  点击被吞掉）。放在**页按钮 / 胶囊的中间**（上下各 25 % 以外）= **合并**：那一页在下面加上这一页的所有窗格，这一页消失（合起来超过 3 个窗格拒绝
+  「放不下：一页最多 3 个窗格」；`mergePageInto`，目标 `mergePage`，设计 038）；放在**上 / 下 25 %** = 放到它前面 / 后面；放在 **＋** 上 = 那条 Rail 的最后。
+  拖动中 ＋ 变成虚线框「新页」。胶囊里的**图标** = 拖那个窗格（`{ type: "card" }`，规则同下面的窗格拖动：放在别的页按钮上 = 进那一页，放在「新页」上 = 自己成一页）。同一个 Shelf = 只改 Rail 的顺序
+  （正在显示的不变）；**另一个 Shelf**（≤ 9 页，满了拒绝「没有空间」）= 整页连同窗格移过去并在那边显示，原来的 Shelf 没页了就消失
+  （`lib/sideLayout` `movePageTo`，`lib/sideDrop` `pageDropTarget` → 目标 `movePage`）。放回原位 = 什么都不做；窗格上、工作区边缘、另一个
+  工作区的 Shelf 不接受（页只进 Rail；另一个工作区的页 id 是它自己的）。拖动中停在页按钮上**不**切页。反馈：要放的位置一条横线 +「移到这里」/
+  「移到这个 {{shelf}}」。测试 `test/shelfPageDrag.test.tsx`。
+
+- 窗格四边 30 %：上 / 下 = 这一页里分出（满 3 个拒绝）；左 / 右和正中、窗格头 = 合并成标签（**不再**在旁边新开一列）。
+- **允许混排关**：拖到别的种类的窗格头 / 正中被拒，改成「放在它下面的新窗格」（区域标成警示色，标签行打斜纹，标签写「不允许混排（这里是
+  …）· 放成新窗格」；放下后提示「可在 {{shelf}} 选项里打开允许混排」）；这一页也满了 → 拒绝「不允许混排，这一页也已满」。同种类照常合并。
+- **页按钮**：停 0.4 s（`PAGE_HOVER_MS`）切到那一页（之后可以放进它的某个窗格）；放在按钮上 = 放进那一页（窗格按 `order` 进新窗格或同种窗格，
+  标签进同种窗格否则新窗格），那一页显示出来；满了拒绝「这一页已满（3 个窗格）」；自己的页 = 什么都不做。**＋** = 新的一页（`kept`），≤ 9。
+- **工作区最左 / 最右缘**：那边没有 Shelf → 在那边新建 Shelf（不允许混排；≤ 2；放不下新 Shelf 的宽度就拒绝）；那边有 Shelf → 它的新页。
+  **只用一个 {{shelf}}** 开着、已经有 Shelf → 两边边缘都是那个 Shelf 的新页（标签「放到新的一页」，9 页满了拒绝）；不显示「新建 {{shelf}}」。
+  对话窗格拖到边缘照旧是会话换位。外部把手（参考卡片）：窗格 / 页按钮 = 钉进那一页；别处 = 新页（聚焦的 Shelf）。
+
+#### 24.12.5 存储：布局 v2（`lib/paneLayout.ts`、`lib/paneFile.ts`）
+
+`PANE_LAYOUT_VERSION` = 2：工作列只有会话；工具区在 `shelves`：
+
+```json
+"shelves": [ { "id": "s7", "side": "right", "active": "p3", "options": { "allowMixing": false, "railPlacement": "outer" },
+               "pages": [ { "id": "p1", "groups": ["workspace"], "name": "工作", "rows": [ { "pane": "t-c2", "h": 1 } ] },
+                          { "id": "p3", "groups": ["browser"], "icon": "globe", "rows": [ { "pane": "t-c4", "h": 1 } ] },
+                          { "id": "p9", "groups": ["user:p9"], "kept": true, "rows": [] } ] } ]
+```
+
+- 工具区状态 `tools` 多一个可选的 `singleShelf: boolean`（只用一个 {{shelf}}；没有 = 关）。
+- 校验：≤ 2 个 Shelf，每边一个；每个 1–9 页，每页 0–3 行（0 只给 `kept` 页），行高合计 1；所有窗格只出现一次（屏幕上、某一页上或小片里）；
+  屏幕上 ≤ 6 个窗格只数工作列（隐藏的页不在屏幕上）。工具小片的 `home.column` 多 `shelf` / `side`（Shelf 没了按原来那边重建，放不下就进那边
+  或右边 Shelf 的新页）。
+- **迁移**（`migrateSideOnce`，两个 store 第一次读之前都调，幂等）：
+  1. 还有 `cutex-desktop.side`（v1.16）：页直接成为右 Shelf 的页（不再折成一列），聚焦 agent 在看的页在显示，允许混排关；备份键照旧。
+  2. 文件 `v: 1` → `v: 2`（只一次）：每个 v1 布局的工具列成为右 Shelf 的页（`migrateLayoutV1`：列顺序 = Rail 顺序，聚焦的列在显示，允许混排关）；
+     然后如果有第 3 步的备份 `cutex-desktop.side.v1-backup`，它的旧页在每个范围里**按原样回来**（`restoreLegacyPages`：页名、组、窗格的
+     种类 / 标签顺序 / 当前标签 / 高度 / 折叠；还在的实例——同 id、种类、去重键、绑定——从折成的那一列移回原来的页；之后被主人关掉的不复活；
+     一个都对不上的范围 = 没从它折过，旧页连同实例整页加回来，换新 id）。备份键留着不删。刚从 v1.16 迁来的范围跳过这一步（页已经是页）。
+  3. 文件 `v: 2` → `v: 3`（只一次，`migrateMixingOff`，主人 2026-10-20）：每个已存 Shelf 的 `allowMixing` 改成 `false`，窗格、标签、实例都不动
+     （已经混放的窗格照旧）。741f5a34 的 v2 文件分不出「迁移设的开」和「主人自己打开的开」（这个选项当天才有，没有标记），所以全部关一次；
+     从 v3 起所有迁移都写关，所以之后存着的「开」一定是主人设的，不需要另外的标记字段。同一步在文件上记 `singleShelf`：这次是新安装（第 1 步
+     之前什么都没存）= `true`，否则 `false`——`singleShelfDefault()` 给没存过工具区的范围当缺省；存过的范围读自己的 `tools.singleShelf`（没有 = 关）。
+     旧版本读到 `v: 3` 会当成读不了（和 v2 对更旧的版本一样）。
+  4. 文件 `v: 3` → `v: 4`（只一次，`migrateShelfRails`，主人 2026-10-21）：收起的 Shelf 不再是托盘里的小片，而是原地的 Rail——每个已存 Shelf
+     的 `chip`（进托盘的时间）换成 `collapsed: true`，页、窗格、实例都不动。读的时候 `chip` 也当收起（`sanitizeLayout`、`toolRawOf`），存的时候
+     只写 `collapsed`。
+
+#### 24.12.6 键盘、术语、读接口
+
+- Alt+1…9 = 聚焦的 Shelf 的第 n 页（终端聚焦时也放行，`modules/terminal/terminalState.ts` `passThroughKey`）；Ctrl+Shift+1…9 = 所有 Rail
+  合起来的第 n 个页按钮（左 Shelf 在前）；Ctrl+Shift+N = 聚焦的 Shelf 的新页。聚焦的 Shelf 收起时 Alt+n 把它展开到第 n 页；焦点在展开的
+  Shelf 里按 Esc 收起它（§24.12.3）。
+- 术语 `shelf`（`lib/terms.ts`）：占位符 `{{shelf}}` / `{{Shelf}}` / `{{shelves}}`，所有语言缺省都是「Shelf」（复数同一个词），设置 → 术语里能改；
+  措辞预设（`lib/termPresets.ts` `PRESET_TERM_IDS`）不设也不清它，改过的 Shelf 不会让措辞变成「自定义」。新界面文字一律写 `{{shelf}}`（12 种语言）。
+- 读接口（`lib/shelves.ts`，给 ⌘K 快速切换等）：`listShelfPages(): ShelfPageInfo[]`（每个 Rail 上的页，左 Shelf 在前，Rail 顺序：`shelfId`、
+  `side`、`pageId`、`index`（1 起，Alt+n）、`name`、`icon`、`firstKind`、`inView`、`focused`、`panes`、`shelfCollapsed`（收起到 Rail））、
+  `subscribeShelfPages(listener)`、`openShelfPage(pageId): boolean`（Shelf 收起就展开、切到那页并聚焦）、`switchShelfPage(n)`。
+- 契约：模块看到的仍是页 id（`services.side.open` 的 `page`、`SideBodyProps.pageId`），`services.panes.open` 没有新目标；所以 `MODULE_API_VERSION`
+  不升（1.18），快照不变。想让模块把东西开到指定 Shelf / 页时再加（候选：`services.panes.open(kind, params, { shelf?: "left" | "right", page? })`，v1.19）。
+
+#### 24.12.7 测试
+
+`test/shelves.test.ts`（模型：页的增删改排、图标、9 页上限、删除和撤销、两个 Shelf、换边、关闭和撤销、收起到 Rail 和展开、宽度和选项存取、
+混排开 / 关的放置；v2 存取、`migrateLayoutV1`、`restoreLegacyPages`、`migrateShelves` 与 v1.16 迁移；术语；`listShelfPages` / `openShelfPage` /
+Alt+n；Shelf 外壳文件不点名功能）、`test/sideDrop.test.ts`（页按钮、＋、混排关的拒绝和改成新窗格、边缘新建 Shelf / 新页）。场景测试的改动见
+`test/sideLayout.test.ts` 开头：场景在「允许混排开」的 Shelf 上跑（主人打开过的，第 4 步的行为）；「另开一列」改成第二个 Shelf；18 列上限改成
+9 页上限；sanitize 不再折页。`test/panesStep3.test.ts` / `panesStep4.test.ts` / `panesStep2Store.test.ts` / `paneLayout.test.ts` 改成 v2 形状。
+主人决定（2026-10-20）的测试在 `test/shelves.test.ts`：「只用一个 Shelf」（`addShelf` / `moveToNewShelf` 不变、移到另一边照旧、边缘拖放 =
+现有 Shelf 的新页、两个 Shelf 时打开不合并、撤销 / 小片放回进现有 Shelf、`tools.singleShelf` 存取）、载入缺省（新安装开、v2 文件 / 只有
+v1.16 右栏的已有用户关、范围自己存的选择优先）、`migrateMixingOff`（v2 → v3 关掉允许混排、混放的窗格不动、只一次）。
+收起到 Rail（主人 2026-10-21）也在 `test/shelves.test.ts`：收起 / 展开 / 切换（页不在屏幕上、`railsOnScreen` 给竖条、焦点移到另一个 Shelf、
+`reveal` 和 Alt+n 展开、`collapsed` 存取、v3 的 `chip` 读作收起）、点页按钮（收起时展开到那页、点正在显示的页不变、别的页切换）、Esc 链的
+「收起 Shelf」行、行宽（`shelfRow`：收起的 Shelf 只占 48 px、会话拿到其余的；`shelfMotionFrom` 只在收起 / 展开时动）、`migrateShelfRails`
+（v3 → v4，只一次；新安装直接到 v4）。
+{{shelf}} Rail 常驻在 `test/shelfRailAlways.test.tsx`：缺省开 / 存的关 / 读坏值；单个工作区关着的工具区画 Rail、点页打开到那页、收起按钮展开；
+空 Shelf 的空 Rail（头像、＋ 的启动器、没有页、单列的边让开它）、桌面时不画；关掉 = 以前的行为、再打开立即出现；对话最大化时关着的 Rail 收在旁边、
+空 Rail 不画；顶栏 Shelf 按钮（关着 → 展开 → 收成 Rail → 展开，Rail 一直在）；并排：另一个工作区的空 Rail 在外侧、算进铺满的宽度（关掉时宽度
+回到以前）、聚焦的空 Shelf 永远偏右时在它右边、另一个工作区关着的 Shelf 画 Rail；不重叠：纯函数扫描（两边空 Rail / 关着 / 展开 × 宽度 × 模式 ×
+位置）和渲染扫描（800–2600 px）。`test/wsRails.test.tsx` 里「另一个工作区的空 Shelf 不占位置」的两条改在设置关时跑。
+
+### 24.13 工作区、投影、按对话记的 Shelf（2026-10-21，契约不变）
+
+原则 `docs/research/canvas-principles-20261020.md` §7（主人 2026-10-21）；原型 `.claude/preview-workspaces.html`。推翻 §24.12 的「布局全局一份」。
+
+- **工作区** = 一个会话 + 它自己的 Shelf。屏幕上 1–2 个工作区。外壳文件：`lib/workspaces.ts`（打开 / 拖放规则 / 几何，纯函数 +
+  拖动的 DOM 部分）、`lib/convShelves.ts`（按对话的 Shelf，纯函数）、`lib/sideLayoutStore.ts`（`switchConversation`、`peers`、
+  `peekConvShelf`、`saveShelfAsDefault`）、`lib/shelfSourceContext.ts` + `lib/shelfSource.ts`（一棵子树画的是哪个对话的 Shelf）、
+  `components/WorkspaceDndLayer.tsx`（拖动的高亮）、`components/side/WorkspaceRail.tsx`（只在一个对话最大化 / 全屏时画另一个工作区，
+  §24.16）、`modules/conversation/Projection.tsx` + `projectionItem.ts`（投影）。外壳不点名功能（投影是 `lib/sideKinds`
+  的一个众所周知的组件 id `conversation.projection`）。
+- **Shelf 按对话记**：每个对话（`convKey` = 主机 + 会话）记住自己的 Shelf——页、窗格、每个 Shelf 正在显示的页、收起、宽度、聚焦的页
+  （`ShelfMeta`）。实时的工具区永远是**聚焦的对话**的 Shelf：换对话时 `splitShared` 把共享页取出，剩下的作为旧对话自己的 Shelf 记住
+  （内存里一份，连同不存盘的实例；也写进文件），`mergeShared` 把共享页放进新对话的 Shelf（各进自己那边的 Shelf，没有就新建），它的视图
+  照原样回来。页、窗格、实例的 id 在一个范围里所有对话间唯一（同一个 `seq`），冲突时 `renumber`；**Shelf 的 id 只在一个对话里唯一**：
+  每个对话的第一个 Shelf 常常都是 `s1`，共享页所在的 Shelf 在它出现的每个对话里保留同一个 id（`mergeShared`「同 id 就是同一个
+  Shelf」）。所以两个工作区的 Shelf 要按「对话 + Shelf id」区分（下面「并排」）。没有自己 Shelf 的对话从**默认布局**（`template`）复制：
+  只带「跟随对话」的窗格（文件、更改…），绑定某个 agent 的或主机上的东西（浏览器标签）属于打开它的那个 Shelf；没有默认布局 = 空的、关着的
+  Shelf。还没有对话聚焦时显示的布局（启动、桌面）归第一个聚焦、自己没有 Shelf 的对话。Shelf ⋯「设为新对话的默认布局」= `saveShelfAsDefault`。
+  每个范围最多记 `MAX_CONV_SHELVES` = 120 个对话（最久没用的先走）；agent 删了它的 Shelf 也忘掉（`pruneConvShelves`，侧栏列表变化时，至多每分钟一次）。
+- **共享页**：页右键「在所有对话中显示」（`SidePage.shared`，`setPageShared`）= 在每个对话的 Shelf 里，同一个实例跟着焦点走；Rail 上有
+  共享角标。取消共享 = 变成聚焦对话自己的页。
+- **存储**：`lib/paneFile.ts` 文件 `v: 4` → `v: 5`（`migrateConvShelves`，只一次）：每个范围的 `convShelves[scope] = { template, shared,
+  conv: { [convKey]: { part, meta, at } } }`；旧的全局工具区同时成为默认布局**和**当时聚焦的对话自己的 Shelf，什么都不丢；工作区里已存的
+  对话小片关掉（agent 照旧在 cutex 里运行）。`layouts[scope]` 里的工具区从此不再读。
+- **同时看 A 和 B**：
+  1. **投影**（`projectInto`）：B 作为一个对话窗格出现在 A 的 Shelf 里（`conversation.projection`，multi，按 agent 去重，参数 / 状态
+     `{ hostId, sessionId }`）——实时的 B 本身：它的时间线、审批 / 提问、「接下来」队列和精简的输入框，不带 B 的 Shelf。发送只到 B
+     （`submit(…, { sessionId, hostId })`），Esc 在投影里永远不停聚焦对话的回合（投影在 side root 里，`lib/escInterrupt` `inSide`）。
+     顶部「投影 · 在旁边打开」= `promoteProjection`（先在这个 Shelf 关掉投影，再并排打开 B）；卡片的 × 移除。B 已经作为工作区在屏幕上时
+     投影只显示占位和「切过去」，不再挂第二份实时视图。agent 菜单的「投影到当前 {{shelf}}」（`conversation.projectAgent`）。
+  2. **并排**（`openBesideAt`）：`[A | A 的 Shelf] [B | B 的 Shelf]`，两个会话各是一张卡片（`ConversationColumns` `split`），聚焦的有
+     描边（焦点换过去时描边从外圈收进来、旧的淡出，`styles.css` `.ws-col`）。**焦点不改布局**（主人 2026-10-21，§24.15「宽度规则」）：两个
+     工作区的 Shelf 都按各自对话记住的展开 / 收起和宽度画在行里，换焦点只移动描边。**两个 Shelf 都是实时的**（d2ab9da0，主人 2026-10-21）：
+     - 实时布局 `layout` 仍是聚焦对话的 Shelf；屏幕上另一个对话的 Shelf 是 `sideLayoutStore` 的 **`peers[convKey]`**（`PeerShelf`：它自己的
+       页 / 窗格 / 实例 `own` + `ShelfMeta`，不含共享页），实例照样挂着。`syncPeers`（窗格布局变化时，工作行也调用）按屏幕上的对话增删 peer：
+       已有的原样留着，新来的从内存 / 文件 / 默认布局取（和实时布局 id 冲突时改号）。换焦点（`switchConversation`）在**同一次** `setState`
+       里把新聚焦对话的 Shelf 从 `peers` 换进 `layout`、旧的换进 `peers`——同样的实例 id，什么都不卸载、不重挂。peer 的修改走 `remember` /
+       `updatePeerView`，各自防抖存盘（`schedulePeerSave`）。
+     - **每个 Shelf 画的是谁的**：`lib/shelfSourceContext` `ShelfSourceContext`（null = 聚焦对话的，`ShelfPeer` = 另一个对话的，带它的
+       `peerView` = 自己的页 + 实时布局里的共享页 + meta）。Shelf 组件（`ShelfRail`、`SidePageView`、`SideCard`…）都经 `lib/shelfSource`
+       `useShelfLayout` 读布局、经 `useSideView` 读视图上下文：另一个工作区里「跟随对话」的工具绑到**它自己的**对话（不是聚焦的那个）。
+       实例层（`SideInstanceLayer`）对每个实例知道它属于哪个 Shelf（`owners`），用那个 Shelf 的布局和上下文挂它。
+     - **按下即聚焦**：在另一个工作区的 Shelf 里按下 / 获得焦点（它的盒子 `data-ws-peer` 的 `onPointerDownCapture` / `onFocusCapture`）先
+       `focusPeer`（同步）：那个工作区成为聚焦的，它的 Shelf 在原处变成 `layout`，于是这一下按键照常作用于它（页按钮、边缘拖宽、窗格里的点击）。
+       快捷键（Alt+1–9、Esc、Ctrl+Shift+M…）永远只作用于聚焦工作区的 Shelf。
+     - **跨 Shelf 拖动**（`lib/sideDnd`：指针下有 `data-ws-peer` 时按那个 Shelf 算规则，`peerDropTarget`）：窗格 / 标签拖进另一个对话的 Shelf
+       （页按钮、＋、页上、那边工具区的窗格）= `movePaneToPeer`：同样的实例移过去（不重挂），焦点不动，两边各自存盘；悬停页按钮在**那边**换页
+       （`updatePeerView`）。拒绝：绑定在那个对话看不到的东西上的窗格（某个 agent、某个工作区：`bound`，「这个窗格只属于这个对话…」）、放到共享页上
+       （`shared`，共享页在每个 Shelf 里都一样）。
+     - **共享页**只有一份实例，跟着焦点：在另一个工作区的 Shelf 里它的页显示一个占位（`ws.peerShared`「共享页显示在聚焦的工作区，点一下切过来」，
+       点一下 = 按下即聚焦）。
+     - 行里两个工作区的 Shelf 盒子（`SideWorkArea` 的 `WsShelfBox`，各在 `ShelfSourceContext.Provider` 下）按工作区顺序排（左边的先），**键 =
+       对话 + Shelf id**（`shelfBoxKey`），换焦点盒子、窗格、占位都不动；`lib/shelfMotion` 记住的宽度、拖动会话里各 Shelf 的起始宽度也按这个键。
+       （只按 Shelf id 时两个对话的 `s1` 撞键：React 留下旧盒子、画重一个、丢掉另一个——主人 2026-10-21「选中左边的对话，它的 Shelf Rail
+       不见了」，`test/twoLiveShelves.test.tsx`「two Shelves of the same id」。）拖宽中的 `liveWidth` 只属于实时布局的 Shelf（另一个工作区的
+       Shelf 被拖时已经先聚焦了）。换焦点不让列滑动（`glideColumns` 的键里没有焦点；动画中读到的位置等动画结束再记一次）。
+     空的 Shelf 不显示。几何、放在哪一边、按内容的宽度：§24.15（`lib/workspaceRow`，取代 `splitGeometry`）。
+     放不下时只在第二个工作区打开那一次把两个 Shelf 都收成 Rail（`shouldFoldShelves`，取代 `railsWhenTight`）。两个工作区放不下侧栏时侧栏自动隐藏（`sidebarAutoRail` / `useSidebarRail`；2026-10-28 起收起 = 完全隐藏、左缘临时弹出）；Ctrl/⌘+B 或「展开侧栏」那时
+     只展开侧栏（到只剩一个工作区为止），不改主人的隐藏设置。屏幕上已有两个时，并排 = 那一边的工作区换成 B。
+  3. **替换**（`replaceWith`）：整个工作区切到 B（B 自己的 Shelf）；A 的工作区原样记住。B 已在屏幕上 = 聚焦它。
+- **拖放规则**（`startWorkspaceDrag(ref, event)`；侧栏行（含隐藏侧栏的弹出）、⌘K 行、托盘）：按下后移动 ≥ 6 px 才算拖（更短 = 原来的点击；
+  拖完那一下点击被吞掉），Esc 取消。目标（`probe`）：窗口工作区的左 / 右边缘带（58 px）= **并排**；某个 Shelf（展开的、Rail、或没有 Shelf 时
+  对话右侧 22%）= **投影**；对话上 / 直接点 = **替换**。`dropOutcome`（纯）：服务、成果、页总是放进目标工作区的 Shelf（`into-shelf`），边缘
+  拒绝它们；把 agent 拖进它自己的 Shelf、拖到已经显示它的对话、拖到另一边已显示它的对话（松开 = 聚焦那边）都拒绝；没有 agent 的工作区（桌面）
+  直接接过 agent。高亮颜色：投影蓝、并排青、替换紫、拒绝灰；区域里写「投影到 X 的 {{shelf}}」/「并排打开」/「替换」和第二行说明，顶部有图例，
+  指针旁有名字 + 动作的小药丸。⌘K：回车 = 替换，⌘/Ctrl+回车 = 并排（服务 / 成果 / 页没有并排）。
+- **对话窗格的「关闭」= 关闭窗格**（`closeWorkspace`；agent 照旧在 cutex 里运行，它的工作区记住；原来的「—」，现在在顶栏的 2×2 按钮块里，§26.3）；
+  最后一个 = 不聚焦任何 agent，桌面露出来。
+  不再有对话小片（`openBeside` 的 `noChip`）。显示桌面把对话整体收走（`emptyWork`，`useDesktop.work` 记住之前的工作区，再按一次原样回来；
+  其间那些 agent 的数据流保持，恢复时不重读）；工具窗格照旧进托盘。
+- **给别处调用的接口**（`lib/workspaces.ts`）：`openRef(ref: WorkspaceRef, mode: "replace" | "beside" | "project", opts?)`（`WorkspaceRef =
+  { kind: "agent" | "service" | "artifact" | "page"; hostId; key; title? }`；非 agent 总是进 Shelf；没打开 = false）、
+  `startWorkspaceDrag(ref, event, { onStart? })`、`isOnScreen(ref)`（agent 在某个工作区或投影在可见的页里；服务 / 成果 / 页在聚焦工作区的
+  可见页里）。
+- **服务和智能体**（原则 §7，主人 2026-10-21；原型 `#service`；`lib/serviceLink.ts`、`lib/serviceLinkView.ts`、`components/ServiceLinks.tsx`、
+  `lib/trayPins.ts`）：服务窗格 = 应用内浏览器标签 `cutex:service/<slug>…`，主人 = `ServiceView.ownerCutexSessionId`。标签的 Actions 里有
+  「打开 <主人>」（点 = 并排，▾ = 投影到这个 {{shelf}} / 替换，也能按 `startWorkspaceDrag` 拖出去）；服务没有主人、主人不在了、或就在主人自己的
+  Shelf 里时不显示。会话顶栏「N 个服务」列出这个 agent 的服务（健康点）：「在 Shelf 中打开」= 放进**这个对话**的 Shelf 并关联（浏览器标签状态
+  `linked` = agent 的会话 id，只是标记），已在 = 「已在 Shelf · 定位」。关联的窗格显示 agent 小头像 +「断开」：去掉关联、原处不动（不变成共享页），
+  并固定到托盘 / 桌面共用的固定列表（`lib/trayPins`，`home` 模块启动时登记；撤销 toast 连同新加的固定一起撤回）；以后从托盘在别的对话里打开 =
+  进那个对话的 Shelf。每个服务「和它的智能体一起打开」（默认关，`services` 模块 prefs `withAgent`，本机）：那个 agent 的对话成为聚焦对话时，
+  Shelf 里还没有就打开（关联，不抢焦点）。预览：`?ws=service[&wsMenu]`、`?ws=svchdr`、`?ws=svclink[&unlink]`。
+- **契约**：模块看到的仍是页 id 和 `services.panes.open` / `side.open`；投影是 `conversation` 模块的一个 `side.component`，没有新插槽和
+  服务，所以 `MODULE_API_VERSION` 不因工作区升（同期的 v1.20 是托盘，§25.3）。
+- 预览：`?ws=start|project|split|replace|rails`（`dev/devWorkspaces.ts`；`rails` = 第一个对话的工具区关着、旁边第二个对话的 Shelf 空着，
+  §24.12.3 的 Rail 常驻，截图 `shots/rail-always/`），`&wsDrag=shelf|edge|conv` 把一行停在拖动中。截图 `shots/layout-rules/`
+  （两个工作区铺满、圆角卡片和缝隙；换焦点后布局不变）。
+
+#### 24.13.1 测试
+
+`test/workspaces.test.ts`（`convShelves` 纯函数：键、`splitShared` / `mergeShared`、id 冲突改号、`ShelfMeta`、`renumber`、`fromTemplate`；
+`sideLayoutStore`：每个对话的 Shelf 换回来时原样、新对话用默认布局、没有聚焦时 Shelf 不动、共享页一个实例跟着焦点走、v4 → v5 迁移；
+`dropOutcome` 各目标、标签、并排几何（`workspaceRow` 铺满窗口）、`sidebarAutoRail`、⌘K 回车 / Ctrl+回车、`noChip`、`emptyWork`）、`test/projection.test.tsx`
+（投影里的发送只到被投影的 agent，Esc 不停聚焦对话的回合，组件参数 / 去重 / 恢复）、`test/homeDesktop.test.ts` / `test/panesStep4.test.ts`
+（显示桌面不再产生对话小片、再按一次原样回来）。`test/serviceLink.test.tsx`（「打开 <主人>」何时显示、点击 / ▾ / 拖动的方式，顶栏服务列表的打开 / 定位，关联角标，断开原处不动、不共享、
+已固定、撤销，「和它的智能体一起打开」）。`test/twoLiveShelves.test.tsx`（两个 Shelf 都实时：另一个工作区画真的窗格、实例挂着；跟随对话的工具
+绑到自己工作区的对话；换焦点不卸载、同一个 DOM 节点、只交换谁是 `layout`；peer 的实例状态 / 关闭；Alt+n 只作用于聚焦的 Shelf；在另一个
+Shelf 里按下先聚焦；它的边缘拖宽只改它和它自己的列；跨 Shelf 拖动同一个实例过去不重挂、绑定的拒绝；两个对话的 Shelf 同 id 时每个盒子各一次、
+带 Rail、换焦点是同一个元素、没有重复键）。
+
+### 24.15 工作行按内容宽度、工作区的 Shelf Rail（主人 2026-10-21，契约不变）
+
+主人报告（2026-10-21，真机两个工作区：hachimi-cutex-dev 聚焦、它的 Shelf 有一个浏览器页；cutex-waveline 的 Shelf 空）：(a) 聚焦的工作区
+一点 Shelf / Rail 都没有；(b) 空 Shelf 的 waveline 右边一条空白 Rail；(c) 聚焦 waveline 之后第一个工作区的 Shelf 收成 Rail 夹在两个对话
+**中间**，点它的浏览器按钮展开并把焦点跳回去——看不懂。
+
+- **(a) 的根因**：并排时 `SideWorkArea` 仍按**单个工作区**算右 Shelf 的框（`sideFrame`，最小宽度 = 两个会话 2 × 400 + Shelf 260），
+  在普通窗口（工作区 < 1060 px，例如开着设置 Shelf 或 1280 的窗口）上把 `useSide.narrow` 设成真——可并排时根本没有抽屉。Esc 链（`lib/escLayers`）
+  于是走「关抽屉」那一步：`setOpen(false)` 把整个工具区关了，而 `open` 按对话记（`ShelfMeta.open`），并排那一支在 `open: false` 时什么都不画
+  （`columnsOnScreen` / `railsOnScreen` 都要 `open`）。`WorkspaceRail` 不看 `open`，所以换到另一个工作区后它的 Rail 又出现，点页 =
+  `switchPage` 把 `open` 设回真。修：`narrow`（以及「窄窗口时自动收起」、抽屉的点一下关闭、gutter 的遮挡）只属于单个工作区；并排时关着的工具区
+  有页就画成它的 Rail（永远不会什么都没有）。测试 `test/wsRails.test.tsx`（同样的宽度单个工作区是 narrow、并排不是，Esc 链不再走关抽屉；`open:
+  false` 的 Shelf 并排时画成 Rail）。
+- **工作区的 Shelf Rail**（设置 → 外观 → 窗口与卡片「并排时 {{shelf}} 的位置」，`appearance.wsRailPlacement`，本机）：**外侧**（缺省）=
+  左边工作区的 Shelf（展开的或 Rail）在窗口最左边、右边工作区的在最右边，永远不夹在两个对话之间；**永远偏右** = 每个工作区的 Shelf 都在它的右边。
+  一个工作区时 Shelf 照旧在它自己那一边。另一个工作区的 Rail 跟着同一条规则（`WsRowContext.railAt`）。`shelfSideAt` / `workspaceRow`
+  （`lib/workspaceRow.ts`，纯）给每个 Shelf 一个画在哪一边（`at`）；`components/side/SideArea` `WsShelfBox` 按它画（宽度把手在朝对话那一边，
+  Rail 内外侧按画的那一边算）。
+- **Rail 顶上的小头像**：每条 Shelf Rail（展开的 Shelf 的、收起的、另一个工作区的）最上面是这个 Shelf 所属对话的小头像（`RailOwner`，
+  `components/side/ShelfRail.tsx`；另一个工作区的点头像 = 聚焦它）。
+- **空的 Shelf 不显示 Rail**（2026-10-21 起只在「{{shelf}} Rail 常驻」关着时，§24.12.3；缺省开：空的 Shelf 有一条空 Rail，头像 + ＋）：入口在
+  会话顶栏（§26.3）：「＋ 打开 {{shelf}}」= 启动器菜单，选的东西开进这个对话的 Shelf。
+- **Shelf Rail 在 Shelf 的外侧 / 内侧**也在设置里（同一节，`appearance.shelfRailPlacement`）：改了就改所有 Shelf——实时的、这次会话里别的对话
+  留下的、存着的（`paneFile` `setStoredShelfRails`：默认布局、共享页、每个对话的）——和以后新建的（`setNewShelfRailPlacement`，
+  `defaultShelfOptions`）；每个 Shelf 的 ⋯ 仍能单独改（`sideLayoutStore` `setEveryShelfRail`）。
+- **工作区宽度**（同一节，`appearance.workspaceWidth`）：**只管宽度**（主人 2026-10-21：铺满和贴边分开）。**智能**（缺省）= 一个工作区时按内容
+  （会话按缺省 / 拖出来的宽度，居中，四周露出桌面），两个工作区时铺满窗口。`rowWidthMode(mode, 工作区个数)` 把它解析成按内容 / 铺满，
+  `workspaceRow` 的输出带 `mode`（实际用的），`WsRowContext.mode` 也是实际的；`SideWorkArea` 的 `data-ws-width` 是实际的、`data-ws-width-setting`
+  是设置；`columnHandleShown` 决定两列之间有没有分隔把手（`components/PaneResizer` `RowSplitter`）。**铺满**（铺满窗口，或智能 + 两个工作区）：
+  两个会话分侧栏卡片、Shelf、Rail、托盘带之外剩下的宽度，按**主人上次拖出来的比例**（`RowInput.split` = 窗格布局 `cols[].w` 里左列的
+  份额，缺省一半；`fillWidths` 给出明确的像素宽度，各不低于最小宽度）。卡片照旧有圆角、8 px 缝隙和阴影，缝里露出桌面。迁移
+  （`migrateWorkspaceWidth`，`appearance.workspaceWidthRev` = `WORKSPACE_WIDTH_REV` 1）：没有修订号时存着的「按内容」是旧缺省，读成智能一次；
+  铺满窗口照旧；有修订号以后选的按内容保留（每次存都写修订号）。**按内容** = 一个工作区（会话按缺省 / 拖出来的宽度 + 它的 Shelf 按自己的
+  宽度）作为一组居中；两个工作区各按自己的宽度，一起居中（`columnWant`：拖出来的宽度，否则「单个对话的默认宽度」——阅读宽度 + 边框 / 工作行
+  的百分比由两列分 / 全宽 = 铺满）；空出来的地方露出桌面。**铺满窗口** = 原来的「窗格铺满时占满整个窗口」的宽度部分（存着的 `fillWindow: true`
+  读作铺满窗口 + 贴边显示，`parseAppearance`）：会话铺满，单个对话的默认宽度不再收窄它。
+  单个工作区：行 `justify-content: center`，主卡片宽 = `singleColumnWidth`（不再用 auto 边距，Shelf 跟着会话居中）。两个工作区：
+  `SideWorkArea` 算 `workspaceRow`，经 `WsRowContext` 把每列宽度给 `PaneHost` 的 `ConversationColumns`。桌面亮度在窗格铺满时（铺满窗口，
+  或智能 + 两个工作区）算「窗格占满屏幕」。一个 ↔ 两个工作区切换时会话照旧滑到新位置（`lib/columnGlide`，减少动态效果时不动）。
+- **贴边显示**（同一节，`appearance.edgeToEdge`，缺省关，主人 2026-10-21 从铺满窗口拆出来）：窗格铺满工作区时（铺满的行、或全宽的单个对话；
+  桌面内容不在屏幕上）`<html data-edge-to-edge>`：工作行没有边距、底色是卡片色，卡片没有圆角和阴影，侧栏贴左边，桌面背景隐藏
+  （`lib/workSurface` `edgeToEdge`）；按内容露出桌面时不生效。迁移（`migrateEdgeToEdge`）：没有这个字段时，`fillWindow: true` 或存着的
+  铺满窗口（2026-10-21 前它就是贴边）读成开，其余关；存过一次以后照选的。
+- **宽度规则**（主人 2026-10-21，原则 `canvas-principles-20261020.md` §8.1；纯函数在 `lib/workspaceRow`，拖动之间的记忆在 `lib/rowDrag`
+  （只在内存），胶水在 `SideWorkArea`）：
+  1. **焦点不改布局**：每个工作区的 Shelf 按自己对话的状态画（上面「并排」）；换焦点时两边的展开 / 收起、宽度、位置都不变。
+  2. **放不下只处理一次**：`shouldFoldShelves` 只在工作区从 1 个变 2 个、而且按两边存着的状态放不下（`fits` 为假）时为真：实时的 Shelf
+     收起（存），另一个对话的 `collapseConvShelves`（在内存的改 `ShelfMeta`，否则 `collapseOnEnter`，`peekConvView` 也读它）。窗口变窄、
+     换焦点、主人自己展开都不触发。主人**展开**一个 Shelf 而放不下时（`newlyExpanded`：某个对话的某个 Shelf 从收起变成展开——状态按对话记，
+     单纯换焦点不会出现在这里），收起**另一个**工作区的 Shelf。窗口变窄：会话先收窄到最小（`WS_CONVERSATION_MIN_W` 300），再放不下时
+     Shelf 只**画成** Rail（`forced`，不存），宽度够了就回来。
+  3. **拖一条边只改两边的两个面板**：Shelf 的边 = Shelf 和它自己的会话（另一个会话不动：拖动开始时记下行的样子（`RowSession`，
+     `lib/columnGlide` `onResizeDrag`），铺满时 `pin` 让另一列保持像素宽度（`pinIndex`），按内容时只改它自己那列（松手存进
+     `rowDrag.colW`；单个对话存成 `singleColumnW`）。侧栏右边 / 设置 Shelf 内边（行外面的边）：铺满时远端那列不动、紧挨着的那列让
+     （行的左边缘移了 = 左边的边），按内容时整组在屏幕上不动（`shiftedLead`），先吃掉桌面空隙；能给多少由 `lib/sideResize`
+     `setRowHooks` 的 `give` 说（`rowGive`，`PaneResizer` / `SettingsShelf` 拖到那里就停）。两列之间的分隔把手：只改这两列，拖动中
+     `previewSplit`，松手存份额。**10-23 起推挤**（[031](design/031-edge-push.md)）：边往哪边走，那边紧挨着的面板让到最小，再拖就和后面
+     直到空桌面的面板一起被推着走（那一侧空桌面变少），没有空桌面就停（`lib/workspaceRow pushEdge`）；行外面的边按内容时只吃空桌面、
+     列宽不变，铺满时紧挨着的是 Shelf 就改 Shelf；永远偏右时两列之间的 Shelf 的外边代替分隔把手。
+  4. **不重新居中**：按内容时拖动中没拖的那边不动；单个会话两条边对称移动、中心不动（`centredWidth`；只有一侧有 Shelf 时整组因此离开中心，
+     `setPinnedLead`）。松手后不跳回居中（`rowDrag.lead`、`data-ws-lead`、行的 `padding-left`）；行自己变宽 / 变窄（窗口大小变化、
+     旁边打开了别的面板，不在拖动中）时整组保持它在空隙里的相对位置（`keepLeadShare` → `rowDrag.leadShare`，2026-10-21 主人「窗口一变
+     面板就乱飞」：原来这里重新居中，1 px 的变化能跳半个空隙）；工作区打开 / 关闭、工作区宽度换了时才重新居中（`resetRowDrag`）。
+  5. **碰到最小宽度就停**：Shelf 的把手最多拿到它那列剩最小宽度（`setRowHooks` 的 `shelfMax`），会话之间按 `fillWidths` 的最小宽度，
+     单个会话按 `SINGLE_MIN_W` 和它两边 Shelf 的位置；~~从不推开别的面板~~ 10-23 起到最小后推挤、吃空桌面（[031](design/031-edge-push.md)），
+     空桌面用完才停。
+  6. **窗口大小变化**：Shelf 和侧栏保持像素宽度；会话按比例缩放，铺满时保持存着的份额（不总是各一半）。
+  7. **双击一条边** = 它两边的两个面板回到缺省：Shelf 的边 = Shelf 缺省宽度 + 它那列的缺省（铺满时另一列不动，按内容时忘掉 `colW`，单个对话
+     `singleColumnW = 0`；`shelfReset`）；两列之间 = 各一半；单个会话的边 = 默认宽度、重新居中。
+  8. 拖动中不滑动（`lib/columnGlide`，原样）；只有离散的变化滑过去。
+  9. **方向键 = 一次短的拖动**（`lib/columnGlide` `keyResize`）：Shelf 的边、侧栏的边、设置 Shelf 的内边、两列之间的把手按方向键时同样开一个
+     拖动会话（规则 1：只改两边的两个面板，外边只拿 `rowGive` 给得出的），立即显示，停按 `KEY_RESIZE_MS` 160 ms 后像松手一样存一次。
+- **窗口大小变化时不乱飞**（主人 2026-10-21；无头 Chrome 在 mock 预览里 1920 → 1100 → 1920 每步 20 px、±10 px 来回、快速跳变量过）：
+  工作行和实例层在同一帧里排好（`SideWorkArea`、`SettingsShelf` 的 ResizeObserver 用 `flushSync`；实例层在行的 layout effect 里
+  `slotsRelayout` 同步重量，原来晚一帧——单个工作区 1100 → 1920 先画出铺满再画居中、页面落后窗格一帧）；行宽变化的那次渲染里 Shelf
+  盒子不做宽度动画（`still`，`lib/shelfMotion`）、侧栏的自动隐藏不做宽度过渡（原来过渡带着整行逐帧移动，途中 Shelf 收起又展开）、
+  列不滑动；为缺宽度而做的收起都留 `FOLD_HYSTERESIS` 48 px 回差（`lib/foldHysteresis`：Shelf 画成 Rail `held`、右 Shelf 抽屉
+  `wasNarrow`、左 Shelf 离开行 `leftWasOut`、侧栏自动隐藏 `was`），在阈值附近来回拉窗口不再每像素翻一次。实例层不再把「没有框的占位」
+  算成每次都变（原来 1100 px 窗口开着设置 Shelf 时无限渲染、整窗空白）。
+- **太窄的时候**（2026-10-21 起见上面「宽度规则」2）：不再在窗口变窄时自动收起（原来的 `foldAt` 收一次取消）；会话收窄到最小
+  （`WS_CONVERSATION_MIN_W` 300，单个 `MIN_CONVERSATION` 360），连最小也放不下时 Shelf 只画成 Rail（`forced`，不存）。
+- 焦点在两个工作区之间移动时描边有过渡（`.ws-col`：旧的淡出，新的从外圈 12 px 收到 2 px，0.56 s；减少动态效果时不动）。
+- 测试：`test/workspaceRow.test.ts`（一个 / 两个工作区的放置、外侧 / 永远偏右、按内容居中和各自宽度、太窄收窄再强制 Rail、铺满窗口、
+  `shouldFoldShelves`（只在第二个工作区打开时）、`newlyExpanded`、`columnWant`、设置合并；智能：一个 / 两个工作区、分隔把手、旧缺省迁移；宽度规则：
+  `fillWidths` 份额 / 最小宽度 / `pin`、窗口缩放保持 Shelf 像素和份额、`pinIndex`、`groupLead` / `shiftedLead`、`centredWidth`、贴边显示的缺省和迁移）、
+  `test/layoutRules.test.tsx`（渲染：换焦点 Shelf 状态 / 宽度 / 位置 / 列宽都不变（展开的、收起的）、第二个工作区打开收一次之后换焦点不变、
+  主人展开放不下才收另一个、放得下不收；Shelf 的边只改它那列另一列不动并停在最小宽度、松手不跳；双击回缺省另一列不动；侧栏的边只拿紧挨的列、
+  窗口缩放保持份额；两列之间的把手、最小宽度、双击各一半；按内容单列的边中心不动、松手不重新居中、窗口变化才重新居中；按内容 Shelf 的边只改
+  单列 / 两列里自己那列、存下；侧栏拖动时按内容整组不动；D：方向键只改 Shelf 和它那列、停按后存；窗口变窄画成 Rail 不做宽度动画、
+  回差内不回来；单个工作区抽屉的回差；ResizeObserver 的更新同步排好）、`test/windowResize.test.tsx`（回差的纯函数、`keepLeadShare`、
+  `keyResize` 会话、实例层没有框的占位不再死循环）、`test/sidebarPeek.test.tsx`（隐藏时无流内元素、左缘弹出盖在内容上、离开 / Esc / 打开 agent 收回、固定）、`test/wsRails.test.tsx`（根因 (a)、关着的工具区并排时的 Rail、渲染出来的放置和顺序、头像、
+  空 Shelf 没有 Rail、按内容居中、窗口变窄不收、第二个工作区放不下就收、设置里改所有 Shelf 的 Rail、焦点描边的过渡；智能：一个工作区居中、
+  第二个出现就铺满（贴边要另开）、放得下不收 Shelf）、`test/workspaceOverlap.test.tsx`（10,000 组以上的不重叠扫描；窗口变窄画成 Rail 不存、
+  变宽回来）、`test/convPaneControls.test.tsx`（§26.3）、`test/deskGaps.test.tsx`（铺满窗口只管宽度、贴边显示单独开；设置里的智能 / 按内容 /
+  铺满窗口 / 贴边显示，选的按内容重新读还在）。
+
+### 24.14 设置 Shelf（2026-10-21，契约不变）
+
+主人决定（2026-10-21）：设置成为一个特殊的 Shelf。
+
+- **一个、全局**：不按对话记，最多一个；工作行的整个高度（`components/SettingsShelf.tsx`，状态 `lib/settingsShelf.ts`）。真实界面一直在旁边，改设置时直接看到效果。
+- **默认在左边，夹在侧栏卡片和工作区之间**（主人 2026-10-21：不在侧栏左边，窗口顶栏的主机 / 侧栏按钮组仍对着侧栏）：设置 Shelf 渲染进自己的一个
+  节点（portal），节点放在 PaneHost 里侧栏卡片后面的插槽 `SettingsShelfSlot`（侧栏停靠时）；右边、没有停靠的侧栏、最大化时放在 App 工作行的锚点
+  （右边 `order: 1`，左边 `order: −1`）。换边 / 最大化 / 侧栏收起只移动这个节点，不重新挂载。存储加版本 `v: 2`：没有版本的旧布局（以前的缺省「右」
+  每次拖宽 / 最大化都会存下，分不出是不是主人选的）读入时一次性改到左边并写回（`parseSettingsShelfLayout`）；之后移到右边照常记住。
+- **一张卡片、正常宽度**（主人 2026-10-21：「设置给正常的宽度，不要缩太小；或者把设置的 Rail 并进去，不要拆出来」——两样都做）：
+  设置分类不再是旁边单独的 Rail 卡片，而是**设置卡片里的左栏**（像原来全窗口设置的左侧导航），整个设置 Shelf 只有一张 `.shell-card`。
+  卡片顶栏横跨整张卡片：面包屑（`shell.settings` 页面条目的 `useTitle`）、搜索、⇄、⤢、×；下面左栏是分类导航，右边是**页** = 分类页
+  （`components/Settings` `Settings`，各模块的 `settings.page` / `settings.section` 照旧）。左栏在卡片里一直在左边（设置 Shelf 在右边时也是）。
+- **布局（只存本机，`cutex-desktop.settingsShelf`）**：`width` 是整张卡片（导航 + 页）。缺省 `SETTINGS_SHELF_DEFAULT_W` = 760 px（导航
+  `SETTINGS_NAV_NAMED_W` 200 + 页约 560），最窄 `SETTINGS_SHELF_MIN_W` = 640；移到另一边（顶栏 ⇄）；内侧边缘拖宽（松手存，双击 = 默认，
+  方向键 ±24 = 一次短的拖动，同样只拿工作行给得出的，不低于 640）。画的时候给对话留 `SETTINGS_SHELF_ROW_KEEP` = 420 px：可分的宽度 = 工作行减去停靠的侧栏卡片、卡片四周的 8 px 间距和
+  设置 Shelf 自己的 8 px 缝（`settingsShelfWidth` 纯函数；1440 px 窗口、256 px 侧栏时卡片 732、对话正好 420）。**窗口放不下两样**（可分宽度
+  − 420 < 640）：设置卡片保持 640，旁边的对话拿剩下的、按它自己的窄规则收；**不自动最大化**（不在主人背后改状态，真实界面仍在旁边；
+  要整窗就按 ⤢）；工作行比 640 还窄时卡片就等于工作行。**会话的 Shelf 展开时**（主人 2026-10-24：设置 Shelf 很宽时展开 Rail，Shelf
+  成了窄窗口抽屉、压在对话上）：工作行报出它要的宽度（`useSettingsRowNeed`：对话最窄 + Shelf 最窄 + 收起的回弹余量 48，左边 Shelf / Rail 另算），
+  卡片让到这么多（不低于 640，`settingsRowKeep`），Shelf 在行里展开；卡片让到 640 也不够时卡片不动，Shelf 照旧是抽屉，这时旁边露出的
+  对话变暗（`data-drawer-scrim`），点一下就收起抽屉。最大化（⤢）= 盖住整个工作行（原来的全窗口设置：带组名的宽导航
+  `SETTINGS_NAV_W` 208 在卡片外的窗口底色上，和以前一样），下面的工作行照常挂着、`inert`。设置 Shelf 占的宽度报给 `lib/workspaces`
+  `setReservedWidth`（两个工作区时侧栏自动收成窄栏的判断）。存储版本 `v: 3`：v2 及以前的 `width` 是旁边有 Rail 的页卡片（缺省 600），
+  读入时小于 640 的一次性改成新缺省 760 并写回（≥ 640 的照留）；v3 只会存 ≥ 640。
+- **分类导航（卡片左栏）**：最上面是搜索（聚焦顶栏的搜索框；Ctrl+F、`/` 只在焦点在设置 Shelf 里或最大化时），然后分类一行一个（图标 +
+  名字），组之间一条细线；底部按钮「只显示图标 / 显示分类名称」在卡片里收成图标栏（`SETTINGS_NAV_ICONS_W` 48，名字在提示里，卡片宽度
+  不变、页变宽；本机记住，存储字段仍叫 `railLabels`）。只有卡片真的很窄（< `SETTINGS_NAV_FOLD_UNDER` 560 px，即工作行连 640 都放不下）
+  才自动只显示图标（按钮灰掉并说明），规则 `settingsShelfLayout`。
+- **不接受拖放**：根元素带 `data-no-drop`，`lib/sideDnd` / `lib/workspaces` 的 `probe` 在它上面什么都不给（连工作行边缘带伸进来的部分也不算）。
+- **入口**：`services.ui.openSettings(page, focus)` / store `openSettings` 打开设置 Shelf 到那一页（已开就换页），`focus.anchor` 照旧滚到那张卡；
+  `openPage("shell.settings", params)`（面包屑、模块）也进设置 Shelf；`view` 不变（不再是 `main.page`）。主机切换后设置 Shelf 留在同一页（子页回到总览）。
+  ⚙（侧栏底部，`useActive` = 开着）和 **Ctrl+,** 切换开 / 关（`toggleSettingsFromNav`）。主机选择器 / 目标主机（`lib/settingsHost`）照旧，
+  关闭时回到焦点主机。
+- **Esc**（`lib/escChain.ts`）：5a 在主界面调整中（焦点不在输入框）= 完成调整；6a 焦点在设置 Shelf 里、或它最大化（不在输入框）= 关闭；
+  都排在弹层、自己用 Esc 的组件、还原最大化、抽屉之后。设置 Shelf 算 `inSideRoot`（Esc 在那里从不打断回合），最大化 / 调整中
+  `sideLayersActive()` 为真（对话的 Esc 让开）。
+- **在主界面调整（取代单独的面板）**：设置页页头的「在主界面调整」（和搜索结果里的小按钮、侧栏右键「调整左侧栏…」、`services.ui.customize`）
+  让真实界面里对应的区域进入编辑状态——淡描边 + 旁边一条小「完成」条（`components/CustomizeHost`，位置仍是 `placeCustomizePanel`）——设置 Shelf
+  保持打开在那一页（最大化的先还原到旁边）。完成（「完成」、页头的「完成调整」、Esc、同一入口再点）= 回到之前：是这次打开的设置 Shelf 就关掉，
+  原来最大化就再最大化，原来在别的页就回那一页。换到别的设置页或关掉设置 Shelf = 调整就此结束。`customize.region` 条目不再有 `Panel` / `width`
+  （渲染进程内部插槽，不在 SDK）。
+- **契约**：模块看到的 `settings.page` / `settings.section` / `services.ui.openSettings` / `openPage` 都不变；`main.page` 的 `Aside`（全窗口页）
+  通用机制保留（设置不再走它）。`MODULE_API_VERSION` 不升（1.20），快照不变。
+- 测试：`test/settingsShelf.test.tsx`（开 / 关 / 切换、导航换页和模块的页、深链、换边、拖宽和最窄、缺省 760 / 最窄 640 / 给对话留 420 /
+  放不下时不最大化、导航在卡片里（一张卡片、顶栏在上、搜索在最上、组分隔线、移到右边仍在左栏）、收成图标并记住、只在 < 560 时自动收、
+  最大化时宽导航在卡片外、左边插槽、旧布局移到左边、v2 小宽度一次性改成 760 并写回、Esc 链）、
+  `test/customize.test.ts` / `test/customizeHost.test.ts`（调整的开始 / 完成 / 回到之前、完成条）、`test/pages.test.ts`、`test/singleHostSnapshot.test.ts`。
+
+### 24.16 最大化与全屏：每一种面板（主人 2026-10-21，契约不变）
+
+主人：「面板没有最大化 / 全屏吗？」（设计「怎么合理怎么来」）。取代 §24.11 里「对话窗格铺满工作区、工具区隐藏」和工具区的盖层式
+最大化 / 窗口内全屏（`FullTitleRow` 删除）。外壳文件：`lib/panelFull.ts`（全屏的状态、进 / 出、和两个仓库保持一致；纯函数
+`sameTarget` / `fullscreenHolds` / `restoredState`）、`components/side/SideArea.tsx`（行内的画法）、`components/PanelFullscreen.tsx`
+（窗口顶栏的悬停浮出、「退出全屏 Esc」提示）、`lib/longPress.ts`。
+
+- **三种面板**：会话（`PaneLayout.max`，原样）、整个 Shelf（新：`SideMode.shelf`——它当前的页，收起的 Shelf 也行，布局不变；
+  `columnsOnScreen` 认它）、Shelf 里的一个窗格（`SideMode.card`，原样）。同时只有一个。
+- **最大化 = 占工作行剩下的宽度**：侧栏卡片和托盘不变。同一个工作区的其他 Shelf 收成它们的 Rail；会话最大化时另一个工作区显示成它的
+  Rail（`WorkspaceRail always`：顶上头像，Shelf 空的也显示头像，放在它原来那一边；点 = 聚焦它，最大化随之结束）；Shelf / 窗格最大化时
+  对话卡片变成一条头像竖条（`ConvStrip`，对话照旧挂着、隐藏；点头像 = 全部还原并聚焦那个对话）。只是**画法**：Shelf 的 `collapsed`、
+  宽度、页都不改（宽度规则里「放不下收起」的判断在最大化期间也不跑；另一个工作区的 Shelf 不论展开与否都只画成头像 Rail），所以再按一次 /
+  Esc / 双击正好回到原来的样子。被收起的 Rail 上点任何
+  按钮先全部还原，再做按钮自己的事（`foldedClick`）。
+- **全屏 = 最大化 + 窗口的外壳让开**：侧栏也完全隐藏（2026-10-28 起与收起一致：只剩左缘细线，贴边 / logo 弹出仍能切换；不改主人的设置，`lib/windowSidebar useSidebarCollapsed`）、
+  托盘自动隐藏（「托盘常驻」这期间当作关，把手留着，`TrayFrame`）、窗口顶栏移出布局，鼠标到窗口顶边 6 px 浮出（键盘焦点进去也浮出，
+  往下移开就收回）、设置 Shelf 暂时不显示。进入时顶部中间出现「退出全屏 Esc」小提示约 2 秒。在侧栏里点别的 agent = 这一列换成它，
+  仍然全屏。工具区的全屏仍是 `mode.kind === "fullscreen"`（别处直接设的——模块的 `side.open` 目标、参考卡片的 ⛶——也会被接管）。
+- **退出 / Esc**：Esc 链第 4 行（`lib/escChain.ts`，排在弹层、自己用 Esc 的组件、参考卡片之后）先退出全屏，**回到进入前的状态**
+  （之前是最大化的就还是最大化：`before = { max, mode }`），再按一次还原最大化。全屏的那个面板不再最大化（例如焦点换到另一个工作区）=
+  全屏自己结束，不强行回到之前。全屏时按「放大」/ ⤢ / Ctrl+Shift+M = 直接回到普通布局。都不存盘（重启后没有最大化 / 全屏）。
+- **入口**：
+  - 会话：顶栏 2×2 块的「放大」= 最大化 / 还原（一个人时也可以：它占整个工作行，不再是阅读宽度）；**长按**（500 ms）= 全屏；⋯ 菜单
+    第一项「全屏 / 退出全屏」；双击顶栏 = 最大化。
+  - Shelf：⋯ 菜单「最大化 {{shelf}} / 还原」「全屏 / 退出全屏」（`toggleShelfMode`）；双击 Rail 的空白处（Shelf 的「顶栏」）= 最大化 / 还原。
+  - Shelf 里的窗格：窗格头 ⤢ = 最大化（占剩下的宽度，和别的面板一样）、⛶ = 全屏；窗格 ⋯ 和页的菜单里也有。
+  - 键：**F11** 或 **Ctrl/⌘+Shift+F** = 聚焦的面板全屏 / 回去（`lib/paneKeys` `"fullscreen"`；原来的 Shift+F11 现在是同一件事）；
+    Ctrl+Shift+M 照旧最大化。终端聚焦时 Ctrl+Shift+F、Shift+F11 放行给窗口，**单独的 F11 留给 shell**（TUI 会用；`passThroughKey`）。
+    F11 在渲染进程里被用掉（`preventDefault`），所以默认菜单的系统全屏不再接它（只在 mock 里验证过，Electron 真机待看）。
+- **动画**：最大化 / 还原沿用工作区的重排缓动（`data-pane-relayout`，`.panel-max`），被收起的 Rail 和头像竖条淡入（`.panel-fold`），
+  Shelf 盒子在全宽和 Rail 之间的宽度动画照旧（`lib/shelfMotion`）；顶栏浮出 0.18 s；`prefers-reduced-motion` 时都不动。
+- 测试：`test/panelMax.test.tsx`（会话最大化：一个 / 两个工作区，Shelf 收成 Rail 但布局不变、另一个工作区的头像 Rail 在它那一边、
+  点它回去；整个 Shelf（含收起的）和窗格最大化：对话变成头像竖条且仍挂着、另一个 Shelf 收成 Rail、次序；被收起的 Rail 上的按钮先还原；
+  全屏：纯函数、Esc 顺序（全屏 → 最大化 → 普通）、从最大化进入再退出正好回去、工具区全屏被接管、焦点换走时自己结束、全屏时「放大」
+  回普通、Esc 先给内层；键 F11 / Ctrl+Shift+F / ⌘+Shift+F 和终端放行；外壳：侧栏窄栏、托盘自动隐藏、顶栏浮出、提示一次；不存盘）、
+  `test/convPaneControls.test.tsx` / `test/convHeader.test.tsx`（一个人时「放大」可用）。
+- 预览截图：`shots/maximize/`（两个工作区时最大化对话、Shelf 窗格全屏）。
+
+### 24.17 桌子窗口（多窗口 P0–P3.5、P6，2026-10-27，契约不变，设置「多窗口」默认关）
+
+主人 2026-10-27 批准「第二张桌子」：另一个应用窗口（可放到另一块屏幕），由**主窗口的渲染进程**画（同一个 store、每会话一条流、
+一个发件箱），不是第二个渲染进程。研究与取舍：`.claude/previews/multi-window/proposal.md`。
+
+- **怎么开**：渲染端先向 main 要票（`WINDOW_CHANNEL` `desk` `ticket`，只有主窗口主框架能要，`isAppSender`），再
+  `window.open("about:blank", 票名)`。main 的 `setWindowOpenHandler` 只放行 `about:blank` + 这张一次性票（10 s 内、发给这个
+  webContents、用一次；`main/deskWindows.ts` `DeskRegistry`），选项全部写死：无 preload、`sandbox`、`contextIsolation`、
+  `webviewTag` 只在浏览器的加固已装好时开（P5，见下）；其它一律拒绝。桌子文档继承主文档的 CSP（about:blank 继承创建者的策略容器），默认会话的出口封锁照旧。
+- **样子**：`lib/deskDocument` 把主文档的 `<style>` / `<link rel=stylesheet>`（按序）、`<html>` / `<body>` 属性（主题、调色板、
+  外观变量）和脚本加的字体抄进桌子文档，并用 MutationObserver 跟着改（Vite HMR、主题切换）；不用定时器。React 用 portal 画进去
+  （`components/DeskWindows`），portal 容器自己监听事件，点击和键入照常。
+- **main 的窗口登记**（`main/deskShell.ts`）：窗口控制带桌子 id，main 只认「这个渲染端开的、仍开着的」桌子；隐藏到托盘 = 全部隐藏，
+  托盘显示 = 全部回来；任务栏角标每个窗口一份；主窗口重载 / 崩溃 / 关闭时桌子一起关（不算主人关的，位置和重开名单保留）；
+  主人关桌子 = 真关，事件 `deskWindow` `closed`，对话回主窗口成小片。有桌子显示时主窗口 `setBackgroundThrottling(false)`
+  （P0 实测：不关时主窗口最小化 / 被盖住，主窗口里的定时器降到 1 Hz、它的 rAF 停）。
+- **位置**：`window-state.json` 变成 `{ main, desks: { <id>: … } }`（旧的单条读作 `main`），新桌子从最新的桌子 / 主窗口错开 32 px，
+  在它所在的显示器上；显示器拔掉 / 改变时移回主显示器（`shared/windowBounds.ts` `restoreDeskBounds` / `refitBounds`）；
+  Windows 在 `ready-to-show` 后再 `setBounds` 一次（混合 DPI）；Wayland 只给尺寸。
+- **不透明 frame**：`cutex-plugin:` 请求只来自「所有者组」（主窗口 + 它开的、仍开着的桌子，`frameHostOf`），且只认**租给发请求的那个
+  webContents** 的文档（P4 起，见下）。模块包：桌子主框架只可加载样式表，不加载脚本。浏览器 P5 起进桌子（见下）。
+- **主人用的窗口**：原生对话框、大号提醒（显示器 + 闪烁）用有焦点的应用窗口，否则最后有焦点的，否则主窗口（`main/appWindows.ts`
+  `ownerWindow`）。Ctrl+K 在每个窗口里都开，开在按键的窗口里（`lib/appWindowSet`）。
+- **P1 的渲染端**：本地开关 `localStorage["cutex-desktop.multiWindow"] = "1"`（P6 起换成设置「多窗口」，见下）；对话列 ⋯「移到新窗口」、桌子里「放回主窗口」；
+  一个桌子一个对话（头 + 时间线 + 输入框，自己的工作区上下文）。按窗口的侧栏 / 布局 / 选择、桌子里的 Shelf 和 Rail 是 P3。
+- 测试：`test/deskWindows.test.ts`（票、放行、登记、窗口控制 id、frame 组、确认框父窗口、按桌子的位置）、
+  `test/deskRenderer.test.tsx`（文档镜像、portal 事件、桌子 store、交回小片）。
+- **P2：元素在哪个窗口就用哪个窗口（2026-10-27）**。桌子是主渲染端 portal 出去的，全局 `window` / `document` 永远是主窗口，
+  所以菜单、对话框、提示、焦点、按键、rAF、观察器都要按元素所在的窗口来。`lib/ownerWindow`（纯 DOM：`ownerWindowOf` /
+  `ownerDocumentOf` / `windowOfDocument` / `activeElementOf` / `selectionOf`，跨 realm 的 `isElement` / `isHTMLElement` /
+  `isDom`，`resizeObserverFor` / `intersectionObserverFor`）；`lib/ownerContext`（`OwnerDocumentContext`，桌子根由
+  `DeskWindows` 提供；`useOwnerDocument` / `useOwnerWindow` / `useOverlayRoot`，没有 DOM 时安全）；`components/OwnerLayer`
+  （`OwnerLayer` 主窗口原地画、桌子 portal 进它的 body；`OwnerPortal` 总是 portal）；`lib/appWindowSet`
+  （`activeAppDocument`、`queryAppWindows` / `queryAllAppWindows` 主窗口优先、`onEveryAppWindow`）；`lib/deskGuards`
+  （桌子文档也装覆盖滚动条、IME、选择、动画相位、循环暂停）。全局的菜单 / 对话框记下开它的文档（`contextMenu` 的 `doc` /
+  `dialogDoc`），拖动绑在开始的窗口。没有桌子时行为和以前一样。
+- **守卫**：`test/ownerWindowGuard.test.ts` 按类别数 renderer 里直接用的全局 `document.` / `window.`（body、activeElement、
+  hasFocus、监听、rAF、选择、matchMedia、视口、查找、观察器、realm / instanceof），只许名单里的文件、按确切次数，每条写原因
+  （整个应用的存储 / 主窗口启动 / 系统偏好 / 只在主窗口的界面）。新代码用上面的帮手。
+- **P3：每个窗口是完整的一张桌子（2026-10-27，主人决定）**。桌子窗口画和主窗口同一个外壳（`components/DeskWindows`
+  `DeskShell`）：同一个侧栏、≤ 2 个对话列且每列自己的 Shelf + Shelf Rail + 标签、托盘、设置；智能体 HTML 页面仍不进桌子（P4），浏览器见 P5。
+  - **按窗口的状态**（`lib/windowScope`）：`windowStore(make)` 每个窗口一份 zustand store，API 不变——hook 按组件所在窗口
+    （`DeskContext`）取；`getState` / `setState` 用「当前窗口」= `inWindow(key, fn)` 指定的，否则「活动窗口」（主人最后聚焦 / 点 / 按键的
+    窗口，`lib/windowRoute` 在每个窗口的 capture 阶段跟踪）；`subscribe` 听所有窗口并在变化的那个窗口里跑。按窗口的：布局
+    `usePanes`、Shelf `useSide`（`currentConv`、存盘计时、待恢复按窗口）、`useDesktop`、`usePanelFull`、`useGrow`、`useRowDrag`、托盘
+    `useTray` / `useTrayRoom` / `useTrayStage`、宽度 `useWsUi`（每个窗口自己的 resize）、`paneRoom`、设置 Shelf 槽。组件 effect 里写这些
+    store 用 `useInWindow()`（一次提交里各窗口的 effect 一起跑，不能靠活动窗口）。
+  - **选择按窗口**：`useApp` 的 `selectedId` / `selectedHost` / `view` 是活动窗口的；其它窗口的留在 `useWindowSelection`，`useApp` hook
+    （`selectionAware`）给非活动窗口里的组件叠上它自己的那份。切到另一个窗口 = 记下离开的、`enterWindow` 把那个窗口的焦点列选中（它的
+    全窗口页面如设置也回来）。非活动窗口的布局变化只更新它记下的选择，不碰全局选择。
+  - **一个智能体只开一份**（`lib/windowRoute`）：`agentPlaces` = 所有窗口的对话列和托盘小片；`store.openAgent` 和 `openAgentBeside` 先问
+    `routeOpen`：别的窗口的列里有 → 跳过去（main 抬起那个窗口、它成为活动窗口、那一列聚焦），不开第二份；哪儿都没开 → 在当前窗口开，
+    别的窗口托盘里它的小片去掉。侧栏 / Ctrl+K / 通知点开都走这里。行菜单「在主窗口打开」/「在 桌子 N 打开」/「在新窗口打开」
+    （`lib/deskActions` `openInWindow`：从原处挪走再在那个窗口打开）；拖侧栏行松手在另一个应用窗口上（按屏幕坐标，`appWindowAt`）同样。
+    桌子里对话列 ⋯「放回主窗口」（只挪这一列）。
+  - **存储**：布局作用域 `host:<id>/desk:<deskId>`（`paneScopeOf`；`scopeHost` 去掉桌子后缀）；对话自己的 Shelf 和默认布局仍存在主机作用域
+    （`convScopeOf`，跟着对话进出桌子；一份 = 一个写者），桌子的共享页面存在桌子作用域。桌子的 Shelf id 从远处开始（`windowSeqBase`），
+    和主窗口不撞。桌子名单只记 id + 焦点对话（`DESKS_STORAGE_KEY`，没有存过布局时用它起一列）；重开时按存的布局和位置回来；空桌子不重开。
+    关掉桌子 = 它所有的对话（列 + 小片）回主窗口成小片。
+  - **侧栏按窗口**：滚动和筛选本来就是每个侧栏自己的；收起（隐藏 + 左缘弹出）和宽度桌子各存各的（`lib/windowSidebar`，
+    `cutex-desktop.deskSidebar.v1`；Ctrl+B / 边缘拖动在桌子里只改那张桌子），主窗口照旧用偏好。
+  - **设置 / 主页在点的那个窗口**：设置 Shelf 记下打开它的窗口（`useSettingsShelf.win`），只有那个窗口画它；在另一个窗口按 Ctrl+, 把它挪过去。
+  - **「在看」/ 需要你 / 提醒**：`lib/appFocus` = 任一应用窗口有焦点；`looksAt` 只算活动窗口里显示的（`noteShownIn` / `shownInActiveWindow`），
+    `ownerNotifyStore` 的 `looking` 同样；在桌子里看着一个智能体也收回它的提醒（`appLookWindow`：所有应用窗口的 focus / blur）。
+    大提醒和原生对话框本来就用有焦点的应用窗口（P1 `ownerWindow`）。
+  - **缩放**：桌子里也有 Ctrl+= / − / 0；main 把缩放同时设到所有桌子（`DeskShell.setZoom`，新桌子打开时也用）。foretell 在控件所在窗口里算；
+    `widenForPage` 用打开它的窗口的帧时钟。
+  - 守卫：store.ts / ownerNotifyStore 的焦点判断、workspaces 的 resize、pageShelfWidth 的 rAF 不再在名单里（28 个文件 / 56 处 → 26 / 49）。
+  - 测试：`test/multiWindowP3.test.tsx`（窗口 store、选择叠加、一份规则、屏幕命中、作用域键、桌子侧栏）、`test/panesStep2Store.test.ts`
+    （桌子自己的布局和选择、跳过去、在桌子 N 打开、按窗口存、关掉交回小片）、`test/deskShell.test.tsx`（jsdom 第二个文档里的桌子外壳）。
+  - **还没有**（P4–P7）：智能体页面进桌子（P4）；跨窗口拖列头（P7）；侧栏的「现在」高度等其它侧栏偏好仍全局。
+- **P3.5：开关打开前剩下的（2026-10-27，开关仍默认关）**。
+  - **托盘按窗口**：「打开但不在屏幕上」名单 `useTrayOpen`（含「返回上一个」的步骤）和工作区组 `useWorkspaceSets`（含置顶的智能体）都是
+    `windowStore`，每个窗口一份，按桌子存（主窗口仍是 `cutex-desktop.trayOpen` / `cutex-desktop.trayWorkspaces`，桌子在后面加
+    `.desk:<deskId>`；桌子没存过 = 空，旧名单的首次迁移只给主窗口）。一份规则：一个窗口的布局变化后，它屏幕上的智能体离开**其它**窗口的
+    名单和组（订阅本来就在变化的窗口里跑）——所以别的窗口打开了托盘里那个智能体，它的小片就去掉（Director：先这样）。主机上删掉的智能体从
+    每个窗口的名单里去掉。关桌子（不是退出）= `giveBackToMain` 先把桌子托盘里的名单和组并进主窗口（按时间新的在前、一个智能体一条、组按
+    `MAX_RECENT` 裁），删掉桌子存的那两份，再把列和小片交回主窗口（P1 照旧）；记住的桌子重开时没回来（对话已不在）同样交给主窗口
+    （`handTrayToMain`，没建过 store 时读存的那份）。托盘组件的 effect（置顶列表）用 `useInWindow()`。测试 `test/multiWindowP35.test.tsx`。
+  - **拖动 / 提示画在拖动所在的窗口**：拖动的幽灵、落点、foretell 在 P2 / P3 已经跟着拖动 / 控件的文档（`OwnerLayer`）。剩下只画在主窗口的：
+    宽度提示（`lib/widthTip` 记下边的文档 `doc`，`WidthTip` 用 `OwnerLayer`）；Shelf 提示条（`showShelfToast` / `showShelfNotice` 记下
+    当前窗口 `win`，App 和每个桌子都挂 `ShelfToast`，只有那个窗口画；「撤销」在那个窗口里跑——以前在桌子里关 Shelf 再点主窗口的撤销会
+    作用到主窗口的 Shelf）；Ctrl/⌘ + 点的选列（`useColumnPick` 记 `win`，`ColumnPickLayer` 也挂在桌子里，读那个窗口的列，`finishColumnPick`
+    在那个窗口里换）；全屏提示 `FullscreenHint`（`usePanelFull` 本来就按窗口，桌子也挂一个）；落点形变的实例框按窗格自己的文档找
+    （`lib/dropMorph`）；收起 / 恢复的飞行按所有窗口找窗格元素（`paneActions` `queryAllAppWindows`）；宽度拖动跟踪（`lib/dragTrace`，
+    默认关）跟踪开始时的活动窗口（它的面板、帧时钟、store）；`useWsUi` 的起始宽度用 `appWindowOfKey`。
+  - 守卫（`test/ownerWindowGuard.test.ts`）的前缀从 `(?<![\w.$])` 改成 `(?<![\w$]|[^.]\.)`：展开 `[...document.querySelectorAll(…)]`
+    以前漏掉（6 处）。修掉 3 处（dropMorph、paneActions、StatusCapsule），`appWindowSet`（枚举窗口）和 perf-log `screen`（只采主窗口）各
+    多记 1 处；`workspaces.ts`、`dragTrace.ts` 不再在名单里：26 个文件 / 49 处 → 24 / 46（按新规则原来是 26 / 52）。测试
+    `test/multiWindowP35Overlays.test.tsx`（jsdom iframe 当桌子：宽度提示、提示条和它的撤销、选列、形变实例框）。
+  - **重启去重**：存的布局可能让主窗口和一张记住的桌子（或两张桌子）都把同一个智能体放在列里（比如两边的存盘时间不同）。规则：
+    主人在哪个窗口里按键、点击、跳过去或把东西挪过去，就把那个窗口存为活动窗口（`cutex-desktop.activeWindow.v1`，`activateWindow`）；
+    只是窗口得到焦点或桌子关掉（`remember: false`）不存——退出时先关桌子、焦点回到主窗口，不能让它决定下次的去重（双屏实测 2026-10-28）。
+    启动时在这次的聚焦事件改写它之前读一次
+    （`readStoredActive`）。重开的桌子布局一载入（`reopenDesks` 标记 `restoring`，`deskSync` `startDesk` 在 `startPaneSync` 之后
+    `takeRestoring` → `dedupeAtStart`），在已载入的窗口里：**上次的活动窗口**有它 → 它留；否则**桌子**留（第一张记住的桌子；智能体是主人
+    特意挪过去的）；否则主窗口。输的窗口那一列关掉（只有一列 = 那列空着，智能体仍在侧栏和赢的窗口里；等着恢复选中它的 `restore` 作废）。
+    运行时新开的桌子不去重（`moveToDesk` / `openInNewDesk` 自己挪走原处）。纯函数 `startWinner` / `startDuplicates`（`lib/windowRoute`）。
+    测试：`test/panesStep2Store.test.ts`（存的是桌子 / 主窗口 / 没存时的三种结果、只有重开的桌子去重、纯规则含两张桌子）。
+- **P5：应用内浏览器进桌子（2026-10-27，开关仍默认关）**。浏览器是 `<webview>`：它的嵌入者是创建这个元素的文档所在的 webContents
+  （Electron 44 实测，隐藏窗口：主文档 `document.createElement` 再挂进桌子 = 嵌入者仍是主窗口，主窗口的钩子在管、但 main 不知道它画在桌子里；
+  桌子文档自己创建 = 嵌入者是桌子，没有 `webviewTag` 时根本不挂）。所以：
+  - **渲染端**：`BrowserBody` 用容器自己的文档创建 `<webview>`（`container.ownerDocument`）；桌子里的标签由那张桌子嵌入。main 从
+    guest 本身（`hostWebContents`）知道标签在哪个窗口，不靠渲染端的标记。main 关于一个标签的事件（网页弹窗的 `new-tab`、`pressed`、
+    `reveal`）在拿着这个标签的窗口里跑（`popupOpen.ts` `inBrowserTabWindow`：弹窗开在开它的标签旁边，桌子里也是）。
+  - **按窗口的加固**（`main/browser/install.ts`）：一次安装，多个嵌入者——主窗口和每张加进来的桌子（`addBrowserWindow`）。每个嵌入者装同一套
+    `will-attach-webview`（一次性票先作废再检查；webPreferences 整包换成固定的那份，`attachPolicy.ts` 不变）/ `did-attach-webview` / 主人输入
+    钩子；票记下消耗它的窗口，回执里的 guest 必须正是那个窗口嵌入的（`hostWebContents`）。其它窗口从 webContents 出现那一刻
+    （`web-contents-created`）就挂一个拒绝一切挂载的守卫（并作废票），直到被加为嵌入者；安装拆掉后也一直拒绝。加一张桌子不再拆掉别的
+    （以前的单窗口安装再装一次会拆上一次）。
+  - **顺序**：`DeskShell.openResponse` 只在浏览器已安装（`browserEmbeddable`）时给桌子 `webviewTag: true`；`adopt` 登记后第一件事就是
+    `addBrowserWindow`，加不进去就自己拒绝这张桌子里的一切挂载。抢在 `adopt` 之前的挂载由上面的早期守卫拒绝。
+  - **标签的窗口**：权限提示的原生对话框挂在标签所在的窗口，按那个窗口的可见 / 焦点（桌子最小化 = 不弹、提示主人）；下载的保存对话框由 Electron
+    挂在 guest 的 owner window（= 嵌入者，桌子，实测）；智能体的下载要求标签所在的窗口在屏幕上；智能体操作的可见性 / 键盘焦点 / 焦点归还在那个
+    窗口的文档里查；网页全屏退回的是那个窗口。后台 carrier 仍属主窗口，缩略图在任一应用窗口在屏幕上时画。N2 凭据只给已加入的嵌入者里的
+    guest（或主窗口的 carrier）；按标签 + 来源的准入、分区（`persist:browser-<hostId>` / `persist:browser-agent-<hostId>`）不变。
+  - **关桌子**：它嵌入的标签卸载（guest 关掉，租约照旧随卸载结束）、未绑定的 guest 关掉、它消耗的票作废、它的钩子移除；主窗口的标签不受影响。
+  - **挪窗口 = 重载**（主人接受）：标签换了文档就重新挂载，页面重新加载（分区和登录还在）；智能体授予的标签和主窗口里一次重新挂载一样
+    （租约随卸载结束，授予界面不变）。不重载的 carrier 交接以后再说。IPC 仍只从主窗口的渲染端来（桌子没有 preload）。
+  - 测试：`test/multiWindowP5.test.ts`（桌子的挂载：偏好被换掉、一次性票、回执绑定窗口、网络准入；没加入的窗口一律拒绝且作废票；
+    权限提示的父窗口 = 桌子、按桌子的可见性；桌子里的下载；弹窗的 new-tab 带开它的标签；N2 凭据；关桌子的清理；拆掉后拒绝；
+    `DeskShell` 的 `webviewTag` 和「先加浏览器」的顺序，端到端），`test/multiWindowP5Renderer.test.tsx`（`<webview>` 由桌子文档创建；
+    事件在拿着标签的窗口里跑）。
+- **P4：智能体 HTML 页面和 HTML 文件在桌子里（2026-10-27，开关仍默认关）**。P1 的占位（`DeskPageNotice`）去掉；§10.2 的规则一条不放宽。
+  - **租给画它的那一个窗口**：`frames` 的 `artifactPage` / `filePage` 请求可带 `deskId`；main 用 `DeskRegistry.placeFor` 解析成**那张桌子的
+    webContents**（只认这个渲染端开的、仍开着的桌子，否则拒绝，什么都不读），共享 store 里的文档就租给它（store 的 `owner` 键 = 画它的
+    webContents，「位置」）。`onBeforeRequest`（`frameRequestAllowed`）和桌子 / 主窗口各自的 `will-frame-navigate` 都只认租给**发请求的那个
+    webContents** 的文档：主窗口的文档进不了桌子，一张桌子的进不了主窗口或另一张桌子。读主机期间桌子关了 → 不租（`placeOpen` 再查一次）。
+  - **释放**：桌子关闭 / 销毁 / 主框架导航 / 渲染进程没了 → `releaseFrames(位置)`：`artifactPages.releasePlace` 作废绑在那里的页面通道（开着的
+    确认框按取消关掉、什么都不发），`frameDocuments.releaseOwner(位置)` 删掉那里所有文档。主窗口重载 / 崩溃 / 关闭 → `releaseOwner(主窗口)`
+    同时删掉它在所有桌子里的页面（桌子本来也一起关）。webContents id 不复用，租约不会落到以后的窗口。
+  - **确认框的父窗口**：在 prepare 时就绑定（`Binding.place`），`page` 请求不再带窗口（P1 的 `deskId` 去掉，`page` 只有 `{ op, id, call }`）；
+    `confirmParent(owner, place)` = 主窗口，或那张桌子（仍是这个渲染端的、仍开着），否则不弹、答 `unavailable`。同一时间仍只一个确认框（按渲染端）。
+  - **渲染端**：`PageFrame` / `FilePageFrame` 用 `useDeskId()` 把桌子 id 带给 prepare；iframe 在容器自己的文档里建（`applyOpaqueFrame(doc.createElement("iframe"))`，
+    属性不变）；broker 在**那个窗口**上收消息（页面的 `parent` 是桌子窗口）、仍只收这个 frame 实例 + `origin "null"`；复制的手势查 frame 所在文档
+    （`frameGestureActive(frame, frame.ownerDocument)`：桌子文档的 userActivation + 焦点 + activeElement）。没有新通道、CSP / sandbox / 出口封锁不变。
+  - 插件 frame 仍不进桌子：`plugin-sandbox` 握手在全局 `window` 上收（包里要改，另做）；插件文档仍只租给主窗口。
+  - 预览：`?desks` 里把 demo-writer 移到桌子，点 `decide-0.2.html`：页面在桌子里画，自动保存可用，「发给智能体」的替身确认框画在桌子里
+    （`dev/mockFrames` 按 prepare 时的桌子找文档）。
+  - **上限**：store 的「每个 8」按 webContents 算，按桌子租以后一个 renderer 最多能占 5 × 8 = 40 > 共享的 32，主窗口的插件 frame 会拿不到文档；
+    所以页面另按 renderer 合计封顶 8（`PAGE_DOCUMENTS_PER_OWNER`，§10.2），插件文档的位置留着。复审后补（2026-10-27）：IPC 的 prepare 一步
+    抽成 `preparePlaced`（`main/frames.ts`）；桌子 `will-frame-navigate` 和释放的接线在假 BrowserWindow 上测；`PageFrame` 的容器文档没有
+    window 时答 `failed`（不在别的窗口上挂 broker）；`placeOpen` 也查桌子的 webContents 没被销毁。
+  - 测试：`test/multiWindowP4.test.tsx`（按位置租、跨窗口拒绝、CSP 不变、关桌子释放 + 确认框取消、主窗口释放、读主机时桌子关了、确认父窗口、
+    没有新通道、桌子里的 PageFrame / FilePageFrame、broker 在桌子窗口上收、手势查桌子文档、`preparePlaced` 拒绝别人的 / 关了的桌子、按 renderer
+    封顶）、`test/deskShellFrames.test.ts`（假 BrowserWindow：关闭 / 销毁 / 渲染进程没了 / 主框架导航都 `releaseFrames(桌子)`，子框架只认租给桌子的）、
+    `test/deskWindows.test.ts`（`frameHostOf` / `placeFor` / `confirmParent`、真 store 跨窗口）。
+- **P6：设置「多窗口」（2026-10-27）**。设置 → 通用 → 窗口 →「多窗口」（这台设备的界面偏好 `cutex-desktop.ui` 的 `multiWindow`，
+  默认关；只在能开桌子的地方显示：Electron 应用、预览带 `?desks`）。旧的本地开关只认一次（`lib/multiWindowPref`）：还没存过这个设置时
+  `"1"` = 开，载入时存成设置并删掉旧键；之后只看设置。`desksEnabled()` 读设置。
+  - 关：没有「移到新窗口」/「在 桌子 N 打开」/「在主窗口打开」/「在新窗口打开」菜单项；桌子不启动，记住的桌子启动时不重开，但不删
+    （`cutex-desktop.desks.v1`、各桌子的布局 / 托盘都留着，再打开后下次启动回来）。
+  - 开着时关掉：只去掉菜单项；已经开着的桌子照常用到关掉（关掉照旧交回主窗口）。关着时打开：桌子马上启动（`followDesksSetting`），
+    记住的桌子这时回来。
+  - ~~main 不读这个设置~~（2026-10-27 起由 main 保存，见下一条）。
+  - 预览：`?desks` 照旧给出模拟的桌子桥；设置里打开「多窗口」（模拟的 main 每次载入页面算一次「第一次运行」）。
+- **多窗口归 main（2026-10-27，纵深防御）**。设置存在 main 的 `desktop-prefs.json`（`DesktopPrefs.multiWindow`，缺省 = 关），
+  随 `ShellState.prefs` 给渲染端；渲染端只是镜像（`lib/multiWindowPref` `multiWindowOn` / `useMultiWindow` / `subscribeMultiWindow`，
+  `desksEnabled()`、菜单、设置行、`followDesksSetting` 都读它；main 回答之前当关）。
+  - 改动只有两条路，都经 `SHELL_CHANNEL`，非布尔值在 main 拒绝（`bad value`）：`setMultiWindow`（设置里的开关，主人操作）和
+    `migrateMultiWindow`（渲染端的旧值，一次性迁移）。
+  - main 关着时：`DeskRegistry.issue` 不发票、`admit` 不放行（开着时发的票关掉后也作废），不管渲染端怎么要。已经开着的桌子照常用到关掉
+    （`resolve` / `frameHosts` / 窗口控制不受影响）；记住的桌子渲染端不重开，也不删。
+  - 迁移（`shared/shell.ts` `openMultiWindowMigration` / `multiWindowChange`）：渲染端载入时读一次旧值（`cutex-desktop.ui` 的
+    `multiWindow`，没有就看旧键 `"1"`），从本地删掉，启动时交给 main。main 只在**第一次**存这个设置的那次运行里收它：载入时
+    `multiWindowMigrated` 不在就开一次迁移，并立刻把标记写盘；这次运行里第一次 `migrate`（开或关都算）或主人先动了开关，迁移就用掉。
+    之后的运行、同一次运行里的重放都忽略——渲染端不能事后借迁移在主人背后打开多窗口，只有设置里的开关能改。
+  - 测试：`test/multiWindowPrefMain.test.ts`（解析只认 `true`、ShellState 带它、setter 拒绝非布尔、迁移只一次且不能重放 / 跨运行、
+    关着不发票不放行、关掉不拆已开的桌子、main 把开关接到 DeskShell）；`test/multiWindowP6.test.tsx` 改为跟 ShellState。
+  - 测试：`test/multiWindowP6.test.tsx`（默认关、旧开关只认一次并删掉、存过的设置优先、菜单项跟设置、关着不启动不删记住的桌子、
+    中途打开就启动、中途关掉不拆已开的桌子）。
+
+## 25. 桌面底层与个人页（v1.18，窗格第 5 步）
+
+设计与主人决定：`docs/research/home-page-20261019.md`（入口两个都要、可各自关；服务先只显示图标，模板磁贴随后；设置存在主机上；
+不显示 @用户名；统计按所有主机、可以估算）、`docs/research/panes-20261019.md` §5；原型 `preview-home-page.html`（主人选「C 的背景 + A/B
+的结构」，个人页和桌面分开）、`preview-shell.html`（桌面在窗格后面，名片打开个人页窗格）。
+
+### 25.1 插槽 `pane.desktop`
+
+```ts
+interface PaneDesktopItem extends SlotItemBase {        // unavailable "hide"
+  Desktop: ComponentType<{ reason: "empty" | "desktop"; hostId: string }>;
+  useShowWhenEmpty?(): boolean;                          // 缺省 true
+}
+```
+
+- 外壳（`components/PaneHost.tsx`）在**单个对话窗格没有 agent** 的位置画第一个显示的条目（不是窗格，是工作区的底层；工具列照旧在右边）。
+  规则是纯函数 `lib/paneDesk.ts` `desktopReason`：设置页（全窗口）、两列对话或带工具窗格的会话、选中的 agent、打开的页面、首次运行引导
+  都在前面时不画；「显示桌面」之后（`useDesktop.snapshot` 非空且对话窗格都空）= `"desktop"`，不看设置；否则 `useShowWhenEmpty()` 为真 =
+  `"empty"`；都不是 = 今天的空状态。
+- `NavItem` 加 `lead?: boolean`（画在侧栏最上面、置顶条目之前，不进「更多」、不能取消置顶）、`useShown?(): boolean`（false = 现在不画）、
+  `useActive?(): boolean`（`run()` 目标的高亮）。
+- `lib/paneActions.ts` `revealDesktop()`：屏幕上有窗格 = 显示桌面；没有 = 标记「主人要看桌面」（快照为空数组，不切回），打开对话后自动清掉。
+
+### 25.2 内置模块 `home`（`modules/home`）
+
+| 条目 | 作用 |
+|---|---|
+| `pane.desktop` `home.desktop` | 全幅背景（主页封面，否则启动页立绘 + 天空底色，即原型 C）上的半透明卡片：名片（头像、显示名、简介；点 = 个人页）、时钟 / 日期、「需要你」（同 `NeedsYouStrip` 的数据：需要你 + 出错）、用量条（今天 / 本周 Token、{{agents}}数、连续使用天数）、固定的磁贴；区块按设置的顺序和开关 |
+| `pane.kind` `home.profile` | 个人页：single / none（进工具列）；封面、头像、显示名、简介、累计 Token（近一年）、最长 / 当前连续天数、一年的活动热力图（每天、所有主机） |
+| `nav.primary` `home.nav` | `lead` 入口「桌面」= `revealDesktop()`；`useShown` = 设置 `sidebarEntry`（缺省开） |
+| `ref.action` `home.pin` | 「固定到主页 / 取消固定」：种类 `agent`、`service`、`artifact`、`artifacts.view`、`browser.tab`（服务页的行菜单、对话里的服务卡片、成果标签菜单、agent 菜单、浏览器标签） |
+
+- **存储**：`GET/PUT /v2/users/me/home`（cutex `user-home`），带 revision；编辑先在本地生效（队列里的编辑叠在最后确认的文档上），409
+  `home_revision_conflict` → 重读主机上的文档、把同一个编辑再做一次（最多 3 次）。主机没有 `user-home`（或路由缺失）→ 存在本机（模块 prefs
+  `local`，和书签一样）。主页主机：本机主机（已连接）否则第一台主人主机，它的设置里 `homeHost` 指向另一台已连接的主人主机时用那台。
+  封面 `PUT/DELETE /v2/users/me/home/cover`（≤ 2 MiB，PNG / JPEG / WebP），图片由 main 读成 data: URL。
+- **磁贴**（尺寸 s / m / w / l）：服务 = 图标 + 名字 + 运行状态点 + 主机标记；主机有 `service-tiles` 且服务给了模板时按尺寸画模板（标题、副标题、
+  ≤ 3 行、图片、进度、角标、≤ 3 个操作）。模板在 main（cutex-client `readServiceTile`）和渲染进程（`modules/home/tile.ts`）各检查一次：只有文字；
+  图片和操作只能是服务内的路径，操作打开 `cutex:service/<slug><path>`（应用内浏览器），从不调用接口。成果 = 图标 + 标题；agent = 头像 + 名字；
+  链接 = 浏览器标签。点磁贴 = 打开对应窗格（对话进空窗格，其他进工具列）。
+- **编辑主页**（桌面右侧面板 / 个人页里；桌面上的面板是工作行的一张卡片，清单 #16：`.shell-card` 的材质 / 圆角 / 阴影，贴工作行的上、右、下边
+  （`lib/trayModel` `deskGeometry` 的 `panel` = 0 / 0 / 0，宽 `DESK_PANEL_W` 312 盖住桌面右栏），卡片顶栏 h-10 + 细线 + 标题 + ×）：封面（选图片 → PUT，或「使用立绘」= 删除封面）、简介、区块开关和顺序、两个入口开关、主页主机
+  （多台主人主机时）；磁贴拖动排序、大小、×。
+- **统计**：每台已连接主机 `/v2/usage`（按天，366 天 = cutex 上限）相加，客户端算今天、本周（周一起）、连续天数、热力图（四分位，一种颜色由浅到深）。
+- 预览：`?desktop`、`?homeprofile`、`?homeedit`（`dev/devDesktop.ts`），`?nocover`、`?homeconflict`、`?legacy`（没有 `user-home`：存本机）。
+
+### 25.3 托盘与桌面底层（v1.20，原则 §7，主人 2026-10-21）
+
+```ts
+interface PaneDesktopItem extends SlotItemBase {        // unavailable "hide"
+  Desktop: ComponentType<PaneDesktopProps>;
+  useShowWhenEmpty?(): boolean;
+  Dock?: ComponentType<PaneDockProps>;                   // v1.20：托盘里的快捷方式
+  useDockCount?(): number;                               // v1.20：几个（0 = 没有可放的）
+}
+interface PaneDesktopProps { reason: "empty" | "desktop" | "covered"; hostId: string; tray?: boolean }  // v1.20 "covered" / tray
+interface PaneDockProps { placement: "desktop" | "overlay"; onUsed(): void }
+```
+
+- 桌面是真正的底层：外壳（`components/ChipTray.tsx` `DesktopStage`）把第一个显示的 `pane.desktop` 条目挂在整个工作区（会话 + Shelf）
+  后面，一直挂着；有窗格在前面时 `reason = "covered"`（藏起来），不再画「空窗格」盖住它。（2026-10-21 起背景画在整个窗口后面、盖住时只藏内容：§25.4。）`tray` = 托盘浮在桌面底部（内容要让开）。
+- 托盘 = pin-everything 的快捷方式（`Dock`，第一步只固定对话；`home` 模块：和桌面磁贴同一份固定列表，尺寸只影响桌面）+ 用「—」收起的工具
+  窗格。桌面在屏幕上时浮在桌面底部；被窗格盖住时是底部中间的一条细线，鼠标停在窗口底边 / 点线 / Ctrl/⌘+J 浮到窗格上（不推开它们），用完收回
+  （`lib/trayModel.ts`、`lib/trayStore.ts`）。角标来自 cutex：需要你（琥珀色，唯一带数字的）、运行中、未读、出错；服务 = 健康。每个快捷方式
+  有自己的打开方式（替换 / 并排 / 投影，缺省替换，存本机），打开、拖出、「在屏幕上」都走 §24.13 的 `lib/workspaces`。
+- 只加不删：v1.18 的条目照常工作（没有 `Dock` = 托盘只有收起的工具窗格；`reason` 多一个值）。声明快照 `module-api-1.20.d.ts`（只有版本常量）；
+  `test/moduleSdkContract.test.ts` 有 `Dock` / `"covered"` 正反例；`test/tray.test.ts`、`test/trayStage.test.tsx`。
+
+### 25.4 卡片下面的桌面背景、卡片材质、单个对话的宽度（主人 2026-10-21，契约不变）
+
+- **桌面背景永远是整个窗口的底层**：外壳（`components/ChipTray.tsx` `DesktopBackground`，挂在 `App.tsx` 根的第一个子元素，根是
+  `isolate`，背景 `z-index: −1`，`inert`，不接指针）把第一个显示的 `pane.desktop` 条目以 `reason = "covered"`（只画背景：主页封面，
+  否则启动页立绘，否则天空渐变）画在所有卡片（侧栏卡片、会话、Shelf、Rail、窗口顶栏）后面；卡片之间的缝和四周的边距露出它，不再是平的窗口色。
+  窗口顶栏在背景上加一层浅的毛玻璃（`[data-window-titlebar]`）。没有 `pane.desktop` 条目 = 仍是窗口色。
+- **盖住时只藏内容**：`DesktopStage` 只在没有东西在前面时（`"empty"` / `"desktop"`）画桌面的内容（名片、磁贴、时钟、需要你、用量）；
+  盖住时内容不画、盒子 `inert`，背景照旧从缝里露出来。取消了「盖住 → 整层藏起来」。`home` 模块的内容模式不再画第二份背景（只画立绘署名）。
+- **编辑主页点了没反应（2026-10-21 修）**：桌面在屏幕上时工作行 `[data-side-work]`（`z-index: 1`，铺满工作区）盖在桌面层（`z 0`）上面，
+  只有空的主卡片 `pointer-events: none`，工作行自己接住了所有点击——编辑主页、磁贴、名片都点不到。现在工作行 `pointer-events: none`，
+  只有它的 Shelf / Rail 子元素接指针（`components/tray.css`；`test/deskGaps.test.tsx`）。
+- **卡片材质**（设置 → 外观 → 窗口与卡片，本机 `appearance.cardMaterial` / `cardOpacity`）：不透明（缺省，今天的样子）/ 亚克力：
+  `.shell-card`、`.sidebar-card`（两种模式）、`.shelf-rail-card`（收起的 Shelf Rail、另一个工作区的 Rail（拖放高亮时也是）、设置 Shelf 的分类 Rail）= 卡片色 × `--card-alpha`（70–95 %，
+  缺省 82 %）叠在 `--acrylic-filter`（模糊，再把背后的对比度压向浅色 / 深色）后面的桌面上；菜单、弹出框不变。`lib/workSurface.ts`
+  有同一组滤镜参数的对比度模型：最低不透明度下正文 ≥ 7:1，缺省下次要文字 ≥ 4.5:1（所有配色、黑 / 白 / 原色背景），默认配色在最低不透明度下
+  次要文字也 ≥ 4.5:1。贴边显示时（下一条）不用亚克力。
+- **窗格铺满时占满整个窗口**（2026-10-21 起拆成两样：宽度 = 「工作区宽度 → 铺满窗口」，贴边 = 「贴边显示」，§24.15；旧的 `fillWindow: true`
+  读作两样都开）：贴边显示开着并且窗格铺满工作区（桌面内容不在屏幕上）时 `<html data-edge-to-edge>`：工作行没有边距、底色是卡片色，卡片没有
+  圆角和阴影，侧栏贴左边，桌面背景隐藏（`edgeToEdge`）。只开铺满窗口不贴边：卡片保持圆角、缝隙、阴影。
+- **单个对话的宽度**（`singleColumnWidth`）：只有一个对话（没有页面盖住、没有最大化）时主卡片宽 = 阅读宽度 + 卡片边框（文字正好铺满卡片，
+  两边不留白），和它的 Shelf 一起居中（工作区宽度「按内容」，§24.15；铺满窗口时铺满），桌面从两边露出来；空间不够（差不到 24 px）= 铺满。设置「单个对话的默认宽度」：
+  阅读宽度（缺省；阅读宽度 = 全宽时铺满）/ 全宽 / 自定义百分比（工作区的 30–100 %）。卡片两边的缝里有拖动边（`SingleColumnEdges`：两边一起动、
+  中心不动、碰到最小宽度或两边 Shelf 要出行时停（`centredWidth`；只有一侧有 Shelf 时整组离开中心，松手后留在那里，§24.15 宽度规则 4）；
+  拖动时只改卡片 / 行的 style，松开存 `appearance.singleColumnW`；方向键微调；双击 = 回到默认并重新居中），换默认方式时忘掉拖出来的宽度。
+  比阅读宽度宽时阅读列照旧在卡片里居中（两侧给浮动胶囊、书签、批注、边栏）。Shelf 打开 / 关闭、第二个工作区出现 / 消失时会话滑到新位置
+  （`lib/columnGlide.ts`：`[data-glide]` 的元素测量前后位置，translate + 宽度，220 ms；减少动态效果时不动；Shelf 自己收起 / 展开时已经逐帧跟着走，
+  不再加第二个动画）。
+- 只加不删、无新插槽，`MODULE_API_VERSION` 不变（`PaneDesktopProps` 的含义见 `modules/slots.ts` 注释）。
+- 测试：`test/deskGaps.test.tsx`（背景永远在底层：几何 / 顺序 / 不接指针 / 盖住时只藏内容；编辑主页回归；材质字段、类、滤镜 = 模型、各配色对比度；
+  铺满规则和 CSS；宽度计算、拖动、设置；滑动）、`test/trayStage.test.tsx`。
+
+- **空的占位没有材质（2026-10-21 修）**：亚克力时中间空的主卡片（桌面在屏幕上时）被画成了亚克力。原因：材质规则用 `:is(...)` 列卡片，`:is()`
+  取最具体的参数（`.sidebar-card[data-sidebar-mode="rail"]`），整条规则的特异性 (0,5,0) 和 `tray.css` 里清空空主卡片的规则一样；`styles.css`
+  在 `tray.css` 后面（`main.tsx` 先 import App），于是材质规则赢了。现在卡片列表放在 `:where(...)` 里（(0,3,0)），任何占位规则都压得过它
+  （`test/deskGaps.test.tsx` 按应用里的顺序加载两份 CSS 回归）。
+
+### 25.6 桌面亮度（主人 2026-10-21，契约不变）
+
+- 设置 → 外观 → 窗口与卡片 →「桌面亮度」三个滑块（0–100 %，本机 `appearance.deskEmpty` / `deskOpen` / `deskFull`，缺省 100 / 80 / 60）：
+  **没有窗格时**（桌面内容在屏幕上）、**有对话或页面打开时**、**窗格占满屏幕时**（对话 / 工具窗格最大化或全屏、设置 Shelf 最大化、全窗口页面、
+  工作区宽度 = 铺满窗口，或智能且两个工作区）。规则 `lib/workSurface` `deskState`；`lib/deskBrightness` `useDeskState`（`DesktopStage` 里）给 `<html>` 标
+  `data-desk-state`；`components/tray.css` 用 `--desk-veil-*`（背景上一层黑色，`.window-desk::after`）和 `--desk-filter-*`（桌面内容
+  `brightness()`，100 % 时为 `none`，低于 100 % 时内容里的毛玻璃卡片只模糊它自己层里的东西）。切换时 0.45 s 渐变，减少动态效果时立即切换。
+- 测试：`test/deskGaps.test.tsx`（字段与范围、状态规则、渲染时的标记、CSS）。
+
+### 25.5 托盘是停靠在边上的面板（主人 2026-10-21，契约不变）
+
+- 主人找不到、也点不到托盘收起后的细线。现在托盘是**窗口工作区（标题栏下面：工作行 + 设置 Shelf）边上的面板**：外壳
+  `components/ChipTray.tsx` `TrayFrame`（`App.tsx` 包住工作行）在停靠的那条边给它**一条自己的带**（布局的一部分，工作行拿剩下的，
+  窗格变小、从不被盖住）；树的形状对每条边都一样（上 / 左用 CSS `order`），换边不重新挂载窗格。`DesktopStage` 只把「有什么可放、
+  桌面是否在屏幕上、是否全窗口页面」报给 `lib/trayStore` `useTrayStage`，不再自己画托盘；桌面内容不再给托盘留底边（`tray` 恒为 false）。
+- **托盘常驻**（缺省开，设置 → 外观 → 窗口与卡片，本机 `localStorage` `cutex-desktop.tray`，`lib/trayPrefs.ts`）：一直是带里的一条矮条
+  （`"docked"`，带宽 `TRAY_BAND_PX` = 52）。**关**：桌面在屏幕上时同样是矮条；窗格在前面时收成一条 14 px 的带里的小胶囊把手
+  （`"handle"`，整条带都能点；停一下 / 点它 / Ctrl/⌘+J → 浮到窗格上 `"overlay"`，带不变、窗格不动，用完收回，规则同 §25.3）。
+  没有可放的东西、全窗口页面、设置 Shelf 最大化 = 没有托盘。规则：`lib/trayModel` `trayPlacement` / `trayBand` / `paneArea`。
+  停在底部时（#36）是会话下面的卡片（`lib/trayRoom`）：**图标放不下不再退回底条**，后面的收进「… N」，点开是带名字的列表（`lib/trayFold`，
+  `ChipTray` `TrayOverflow`，设计 038，主人 2026-10-23：设置 Shelf 打开时底条把侧栏、Shelf、设置 Shelf 都压矮了）。两个会话中间夹着 Shelf、
+  或会话窄得放不下「… N」（只看 Shelf 的窄条）时，卡片横跨会话**和它们的 Shelf**（`"wide"`：Shelf 也在底部让出位置），从不横跨侧栏和设置 Shelf；
+  只有什么都放不下时才是底条。
+- **停靠在底部（缺省）/ 顶部 / 左侧 / 右侧**：左右是竖排（`aria-orientation`，↑↓ 移动）；左右时在侧栏卡片和 Shelf 外面、贴窗口边。
+  拖托盘开头的把手（`[data-tray-grip]`）：四条边亮起放置区，离指针最近的那条（按工作区宽高的比例，`trayDropEdge`）高亮，松开 = 停在那里；
+  Esc 取消。点把手、右键托盘空白处或把手 →「停靠在… › 底部 / 顶部 / 左侧 / 右侧」「托盘常驻」。托盘里的菜单（含 `Dock` 条目的菜单，
+  `lib/trayMenu` `openTrayMenu`）朝远离那条边的方向打开。
+- `Dock` 收到的 `placement`：带里 = `"desktop"`（在屏幕上，不是临时浮出），浮出 = `"overlay"`（契约 1.20 不变）。外观保持轻：小图标、
+  无文字、半透明毛玻璃、圆点角标、在屏幕上的下划线（左右时在外侧的竖线）、打开方式、和桌面磁贴共用固定列表。
+- 已知：`lib/workspaces` 的「两个工作区时侧栏自动收成窄栏」按窗口宽减去设置 Shelf 计算，没有减去左 / 右托盘的 52 px。
+- 测试：`test/tray.test.ts`（位置规则、带宽、窗格区域不与带相交、放置边、方向键、存储解析）、`test/trayStage.test.tsx`（常驻：带在工作行旁边、
+  不在里面、高度 = 带宽，换边 / 关常驻不重新挂载工作行；自动隐藏：把手是按钮、点击 / 停留 / Ctrl+J 浮出、Esc 收回、右键可开常驻；左右竖排、
+  ↑↓；菜单停靠；拖把手的放置区、松开停靠、点击不开菜单、Esc 取消；本机存储读回）。
+
+## 26. 窗口顶栏与会话顶栏（v1.19，主人 2026-10-21 选「顶栏拆分 A」）
+
+原型 `.claude/preview-design-v1.html` §1（`#s1-a`、`#s1-a+2col`）；原则 `docs/research/canvas-principles-20261020.md` §3。
+
+### 26.1 插槽 `window.search`
+
+```ts
+interface WindowSearchItem extends SlotItemBase {      // unavailable "hide"
+  placeholderKey: MessageKey;                           // 框里的字（能搜什么）
+  keys?(): string;                                      // 框尾的快捷键，按平台（"Ctrl K" / "⌘K"）
+  open(): void;                                         // 点框
+}
+```
+
+- 外壳（`components/TitleBar.tsx`）在窗口顶栏中间画第一个显示的条目；没有条目 = 没有搜索框。唯一贡献者：`quick-switch.search`
+  （必需、锁定开启的 `quick-switch` 模块，点 = 打开快速切换面板）。
+
+### 26.2 窗口顶栏（只留整个窗口的东西）
+
+左：智能体列表开关（logo，Ctrl/⌘+B）+ 主机范围（`HostSwitcher`）；中：全窗口页面（带 `Aside`）的面包屑（`PageTitle`；v1.21 起别的页面的
+面包屑在它自己的顶栏里，§26.4）+ 搜索框（§26.1）；右：显示桌面、
+启动器栏（固定的启动器、＋ 新建 / 布局 / {{shelf}} 菜单、侧栏开关，`components/side/TitleBarLaunchers`）、窗口按钮。窗口顶栏不画任何对话的东西
+（`test/modules.test.ts`、`test/convHeader.test.tsx` 检查）。
+
+### 26.3 会话顶栏（`components/ConversationHeader.tsx`，`lib/convHeader.ts`）
+
+- **每个**会话都有（单独一列、两列并排、旁边有工具窗格），各显示自己窗格的主机 + agent（`convHeaderInfo(sidebarOf(host), sessionId)`），
+  不看选中项。第一行：头像、名字（点 = agent 菜单）、角色（{{director}}）、项目片 + 星标；右边 在线 / 离线（点 = 启动 / 停止运行时，停止点两次）、
+  通知（静音菜单）、互联（这个 agent 的服务数，点 = 服务列表），然后窗格自己的 **2×2 按钮块**（主人 2026-10-21，取代一排的 ⤢ / 「—」 / ⋯；
+  `lib/convPaneControls.ts`）：上排 **{{Shelf}}**（这个对话的 Shelf：展开的 = 收成 Rail，收着的 = 展开；另一个工作区的 = 先聚焦它再展开；
+  空的 = 「＋ 打开 {{shelf}}」启动器菜单，选的开进这个对话的 Shelf——「{{shelf}} Rail 常驻」关着时空的 Shelf 没有 Rail，开着（缺省）时还有一条空 Rail，§24.12.3）和 **放大**（最大化 / 还原，一个人时也可以；长按 = 全屏，§24.16）；
+  下排 **关闭**（× 图标，提示「关闭窗格（{{agent}}继续运行）」= `closeWorkspace`；第一次关的时候提示「已关闭，可以从侧栏或托盘找回」，只一次，
+  本机记住 `cutex-desktop.paneCloseHint`）和 **⋯**（两个工作区时「移到左边 / 右边」、窄列收进来的项、这个 agent 的菜单）。顶栏只有一行时四个
+  排成一行。（v1.21：没有页面的部分——页面是自己的窗格，或盖在会话上时用页面自己的顶栏，§26.4。）第二行：主机 · 目录（保留结尾）· ⎇ 分支（悬停显示 +/−）；设置「标题栏显示两行」关掉时不画。
+- 分支：选中的 agent 用 App 的工作区监视（与工具列共用）；旁边那列读一次 `gitStatus`（它拿到焦点就变成共用的那份）。
+- 窄列：按宽度依次把 **互联 → 通知 → 项目片** 收进 ⋯（`convHeaderFolded`，低于 560 / 500 / 440 px），⋯ 菜单按同样顺序列出收进去的项（子菜单）。
+  测试 `test/convHeader.test.tsx`、`test/convPaneControls.test.tsx`（2×2 / 一行、空 Shelf 的启动器、展开 ↔ 收起、关闭的提示只一次、放大）。
+- 整个顶栏是这一列的拖动把手，双击 = 最大化 / 还原（窗格第 4 步，§24.11；§24.16）；按钮都带 `data-side-nodrag`。⋯ 菜单第一项 = 全屏。
+- 输入框不变。外壳文件 `PaneHost.tsx` 只引用这个组件，仍不点名任何功能。
+
+### 26.4 页面的顶栏（v1.21，主人 2026-10-21：页面是自己的面板）
+
+- 页面从不出现在会话顶栏下面。缺省（「页面打开位置」= {{shelf}}）它是聚焦对话 Shelf 里的一个窗格，顶栏 = Shelf 窗格头（页面入口的图标、
+  面包屑连成的标题、放大 / 全屏 / ⋯ / 收起 / ×；§24.4）。
+- 占用会话时这一列画 `components/PageHeader.tsx`（不是 `ConversationHeader`）：页面入口的图标、面包屑（`PageTitle` `PageCrumbs`，前面的段
+  可点，右键 = `ref.action`）、放大（最大化这一列，§24.16）、×（关页面，回到对话）、⋯（在 {{shelf}} 中打开 = 关掉这里、开进 Shelf；全屏；关闭页面）。
+  双击顶栏 = 放大 / 还原。单独一列和并排两列都一样（`PaneHost` 的单列分支也画它，页面不再连顶栏一起盖掉）。Esc（焦点不在输入框、不在 Shelf）
+  = 关页面（`lib/escChain` `close-page`，§19.10 第 5b 行）。
+- 窗口顶栏只给全窗口页面画面包屑（§26.2）。测试 `test/pagesOwnPane.test.tsx`（Shelf 窗格与它的标题 / 图标 / 正文、参数更新同一个窗格、
+  侧栏入口、⌘K 的 `panes.open`、深链参数、占用会话的页面顶栏、× 和 Esc、⋯ 在 Shelf 中打开、会话顶栏没有页面部分）。
+
+## 27. 桌面小组件 `desktop.widget`（v1.22；v1.23 整格，设计 032）
+
+主人 2026-10-22：「平台，而不是产品」——桌面上的东西要有底层的模型、框架和接口，做几个例子，写好说明，让便宜的模型也能照着加。设计
+`docs/design/032-desktop-widgets.md`（为什么这样定、来源、权限、版本）；写一个小组件的步骤 `docs/widget-authoring-guide.md`；模板
+`docs/widget-template/`。
+
+### 27.1 条目与组件（`modules/widgetTypes.ts`）
+
+```ts
+interface DesktopWidgetItem extends SlotItemBase {
+  titleKey; descriptionKey?; icon;
+  size: { min: [w, h]; max: [w, h]; default: [w, h]; presets?: Record<string, [w, h]>; ratio?: number; resizable?: boolean; // 单位：1.22 步长（WIDGET_STEP = 8 px）
+          cells?: { min: [w, h]; max: [w, h]; default: [w, h]; presets?: Record<string, [w, h]> } };                 // v1.23：整格（WIDGET_CELL 96 px，间距 WIDGET_GAP 16 px）；没写就按 cellsOfSteps 换算
+  shape?: "card" | "round" | "path" | "bare"; clipPath?: string;  // 外框对齐网格；看得见的形状可以不是矩形（030 v2 §1）
+  instances?: "owner" | "module"; multiple?: boolean;            // 主人增删（存在 desk.items）/ 模块列出（useInstances，例：每个固定一个）
+  defaultPlace?: { area: "header-left" | "header-right" | "side" | "main"; order: number };
+  settings?: WidgetSettingField[]; defaults?: WidgetSettings | ((locale) => WidgetSettings);
+  useInstances?(): WidgetInstanceRef[]; remove?(instanceId): void;
+  refresh?: "minute" | "second";                                    // 共用的计时器，组件不自己开定时器
+  source?: WidgetSource;                                             // { kind: "module" } | { kind: "service", hostId, slug } | { kind: "agent", hostId, sessionId, artifactId? }
+  Widget: ComponentType<DesktopWidgetProps>;
+}
+interface DesktopWidgetProps {
+  instanceId; width; height; steps: { w; h }; cells: { w; h } /* v1.23 */; theme: "light" | "dark"; settings; setSettings(next); reducedMotion; arranging; now; hostId; source;
+  actions: { openAgent(hostId, sessionId); openPage(page, params?); openService(hostId, slug); sendToAgent(hostId, sessionId, text) }; // v1.22：sendToAgent 恒为 false（保留）
+}
+```
+
+- 设置表字段：`text`（`maxLength`）· `number`（`min` / `max` / `step`）· `toggle` · `select`（`options`）· `timezone`（IANA）· `list`（一组平的字段，
+  `min` / `max` 行，`itemDefaults`）。外壳在编辑主页的面板里画表单（`modules/home/WidgetSettingsForm.tsx`），每改一下就存；存的值按表检查，
+  不合格的用缺省（`modules/home/desk.ts` `settingsOf`）。
+- 组件只经自己模块的窄服务读数据、只经 `actions` 做事；整理中（`arranging`）外壳拿走指针，组件画成不可点的样子即可。外壳把组件包在
+  `ItemBoundary` 里：一个小组件出错只显示那一块的错误。
+
+### 27.2 外壳（模块 `home`）
+
+- `modules/home/DeskSurface.tsx`：读 `desktop.widget`，主人实例来自 `HomeDoc.desk.items`，模块实例来自各种类的 `useInstances`（每个种类一个
+  子组件取，避免钩子顺序随种类变）；按工作行宽度分档（窄 < 760 · 中 < 1280 · 宽）取这一档的外框：存过的、或从最近一档按贴边推导、或缺省布局
+  （v1.23：`modules/home/deskCells.ts`，纯函数，整格；格子在桌面宽度里居中）。整理：长按 400 ms / 编辑主页 / 右键「整理桌面」；整理时
+  格子淡淡地显出来；拖到整格上、功能块之间按 030 Q2（一样大互换、否则就近避让）、右下角按整格改大小（种类的上下限、比例）、方向键一格 /
+  Shift 四格、Ctrl/⌘+方向键改大小、Delete、Ctrl/⌘+Z、Esc；每次改动写一次这一档（`HomeDoc.desk.cells[band]`，整格，带贴边）。1.22 的摆放
+  （`desk.bands`，px）读的时候换算一次（`migratePxBand`：大小取最近的格数，位置按贴边取最近的格子，重叠的去最近的空地，没有就往下放），
+  不写盘；主人改了这一档才写进 `cells`。`bands` 原样留着当备份（旧版本的桌面照旧读它）；右键「恢复换大格子前的摆法」= 去掉这一档的
+  `cells`，重新从备份换算。
+- `modules/home/desk.ts`：`HomeDoc.desk = { v: 1, items: [{ id, kind, settings? }], off?: [kind], bands: { n?|m?|w?: { width, at: { id: { x, y, w, h, ax } } } },
+  cells?: { n?|m?|w?: { cols, at: { id: { x, y, w, h, ax } } } } }`（v1.23 `cells` 的数都是整格）；
+  没有 `desk` 时按旧的 `blocks` 算出缺省（不写盘）；增删实例时同步旧的 `blocks.visible`，磁贴改大小时同步 `pins[].size`（最接近的快捷大小），
+  还没升级的桌面照旧能显示。
+- `modules/home/deskEnv.ts`：共用计时器（每种节奏一个，按整分 / 整秒对齐，第一个用的开、最后一个走了停）、配色、减少动态效果。
+- 内置小组件（`modules/home/widgets.tsx`）：`home.profile`、`home.clock`（无底板，今天的样子）、`home.needs`、`home.stats`、`home.tile`（模块实例 =
+  固定列表，服务的来源是那个服务）。别的模块：`world-clock.clock`（`modules/world-clock`，指南里的例子）。
+
+### 27.3 测试
+
+`test/deskCells.test.ts`（v1.23：整格、放下的规则、推导、缺省布局、1.22 摆放的换算、1.22 声明换算）、`test/deskLayout.test.ts`（1.22 的步长、参考线、
+放下的规则、分档和贴边、缺省布局）、`test/deskModel.test.ts`（`HomeDoc.desk`、迁移、设置检查、
+同步旧字段、共用计时器）、`test/deskSurface.test.ts`（实例、分档取外框）、`test/worldClock.test.tsx`（时区计算、缺省、画出来的、设置表单）、
+`test/moduleSdkContract.test.ts`（插槽缺省、编译期形状）。
+
+> **0.2 变更（2026-10-23，设计 039，feat/0.2-workspace-groups-2）**：托盘 = 钉住 | 最近（≤ 6 个工作区）| 应用。工作区 = 并排的一组对话列，
+> 记在 `lib/workspaceSets.ts`（localStorage `cutex-desktop.trayWorkspaces`，由布局变化推导）；钉住的胶囊存进首页 `pins`（agent 钉住 + `members`）。
+> 普通点 = 切换到那个工作区（不再替换列）；替换 = 拖放 / 列菜单「替换这一栏…」；Ctrl/⌘+点已满 = `ColumnPickLayer` 选一列。
+> `MAX_CONVERSATION_COLUMNS` → `maxConversationColumns()`（设置「允许 3 列」）。`trayPrefs.grouping` 删除。‹ / › 右键 = 小菜单；手势表在 设置 → 键盘快捷键（`lib/gestures.ts`）。
+
+## 28. 引导和提示（Guides，主人 2026-10-24）
+
+所有教人的东西——入门引导、锚定提示、表单里的说明面板——都登记在一张表里：`lib/guides.ts` 的 `GUIDES`。入门引导（`components/OnboardingDialog`）、提示（`components/FirstUseTips`）、面板（`components/InlineGuide`）和「设置 → 帮助」（`modules/onboarding/HelpPage`）都只读这张表。
+
+- 条目：`id`、`kind`（`onboarding` / `tip` / `inline`）、`since`（从哪个版本起出现）、可选的 `retireAfter`（最后出现的版本；之后不再出现，也不在帮助里列出）、`title` / `text`（文案键，可用 `{{agent}}` 等称呼；帮助显示 `text` 的第一行）、提示的 `anchor`（CSS 选择器）+ 可选 `when(anchor)` 进一步判断、`trigger`（`appear` 默认：锚点出现在屏幕上；`hover`：鼠标停留或获得焦点）、可选 `settings`（「打开相关设置」）和 `related`（「也看看：…」）。
+- 状态（每台设备）：`localStorage["cutex-desktop.guides"]` = `{ schema: 1, seen: string[], asked: boolean }`。只记 id，所以加一条不需要迁移；退役条目的 id 留着也无害。
+- 第一次有引导要出现时问一次「要看引导和提示吗？」（看 / 全部跳过）。全部跳过 = 当前版本里所有在用的条目记为已看；以后新增的条目照常出现（每条提示自带「跳过所有引导」）。帮助里「重置所有提示」把提示和面板恢复成未看，「再看一次」单独恢复一条（入门引导是直接重放）。
+- 加一条提示：在 `GUIDES` 里加条目（`since` = 要发布的版本），在 `modules/onboarding/i18n.ts`、`i18n.en.ts`、`i18n/zh-Hant-CN.ts` 加 `guide.<名字>.title/text`；锚点没有稳定的 `data-*` 属性就在组件上加一个。只给行为出人意料、手势看不见、或当下就要知道后果的地方加；一次一条，小，靠着锚点，不挡操作。`test/guides.test.ts` 会检查文案和锚点都在。
+- 退役一条：设 `retireAfter` 为最后一个还要显示它的版本，不要删条目（删掉后帮助和测试里也就没有了它的历史）。确定没有用户还停在那些版本时再删。
+- 预览：`?tips`（提示随锚点出现）、`?tips=ask`（新设备，先问）、`?tip=<id>`（只看这一条，马上显示）、`?help`（打开帮助）、`?onboarding=ask`（新设备上的自动入门引导）。
+- 主机上的选择（cutex r258 `guides.preferences`）：`lib/guidesHost` 在启动时读主人的 `skippedThrough`。还没回答过「要看引导和提示吗？」的设备才采用它：版本 ≤ `skippedThrough` 的条目记为已看；全部覆盖就不再问、入门引导记为完成；只覆盖一部分则照常问，但「全部跳过」是预选按钮。问题最多等主机 3 秒。「全部跳过」写回当前引导版本（在用条目里最新的 `since`），「重置所有提示」写回 null。每条提示看没看过仍只记在本机。
+- 谁创建的（cutex r258 `session-created-by`）：侧栏行带 `data-created-by`（director / member / agent / owner / system；未知则没有）。`tip.directorCreated` 锚在主管自己建的那一行，并覆盖 `tip.minorAgent`；没有这项记录（旧 cutex、旧会话）时由 `tip.minorAgent` 解释小方块。预览：`?guidesSkipped=0.2.0`（主人在别的设备上全部跳过过）。

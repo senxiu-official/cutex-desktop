@@ -2,6 +2,7 @@ import type { HostSessionRow, ProjectSummary, SessionResource } from "@cutex-des
 import type { SidebarSnapshot } from "../../../shared/ipc";
 import { hostKey, type HostKey } from "./hostKeys";
 import { initialOf, initialStem, projectInitials } from "./agentInitials";
+import { shortNames } from "./sidebarNames";
 
 /**
  * `unknown`: not confirmed yet — the row comes from a stale snapshot (host / app reconnecting, its first
@@ -16,6 +17,8 @@ export interface AgentRow {
   subtitle: string;
   status: AgentStatus;
   isDirector: boolean;
+  isOperator?: boolean;
+  operatorRestartRequired?: boolean;
   pinned: boolean;
   lastActivity: number;
   profile: string | null;
@@ -28,6 +31,11 @@ export interface AgentRow {
   key?: HostKey;
   /** Generated avatar initial without the project's shared prefix / revision suffix (lib/agentInitials). */
   initial?: string;
+  /**
+   * The name shown in a project group without the prefix most of its agents share (lib/sidebarNames:
+   * "demo-annotate-01" → "annotate-01"); absent = `name`. Tooltips, search and menus keep `name`.
+   */
+  shortName?: string;
 }
 
 export interface ProjectGroup {
@@ -87,6 +95,8 @@ export const SIDEBAR_GROUP_IDS: readonly string[] = ["__independent__", "__chats
 
 /** A row's / group's key across hosts (hand-built ones without a host: their bare id). */
 export const rowKey = (row: Pick<AgentRow, "id" | "key">): string => row.key ?? row.id;
+/** The name a sidebar row shows (its `shortName` inside a project group, else `name`). */
+export const shownName = (row: Pick<AgentRow, "name" | "shortName">): string => row.shortName ?? row.name;
 export const groupKey = (group: Pick<SidebarGroup, "id" | "key">): string => group.key ?? group.id;
 
 /**
@@ -275,6 +285,8 @@ export function buildSidebar(snapshot: SidebarSnapshot, options: SidebarOptions 
   for (const session of snapshot.active) {
     const host = snapshot.hostRows[session.cutexSessionId];
     const row = rowFor(session, host, directors, options);
+    row.operatorRestartRequired = snapshot.operatorRestartRequired?.includes(session.cutexSessionId) === true;
+    row.isOperator = !row.isDirector && !!host?.projectId && snapshot.projectOperators?.[host.projectId]?.includes(session.cutexSessionId) === true;
     if (options.chats && !host?.projectId && isQuickChat(session, host)) {
       chats.push(row);
       continue;
@@ -300,6 +312,12 @@ export function buildSidebar(snapshot: SidebarSnapshot, options: SidebarOptions 
     // Independent agents share no project prefix: only their revision suffix is skipped.
     const initials = g.kind === "project" ? projectInitials(members.map((r) => r.name), [g.id, g.name]) : null;
     for (const r of members) r.initial = initials?.get(r.name) ?? initialOf(initialStem(r.name));
+    // Independent agents share no project: their names stay whole.
+    const short = g.kind === "project" ? shortNames(members.map((r) => r.name)) : null;
+    for (const r of members) {
+      const s = short?.get(r.name);
+      if (s !== undefined) r.shortName = s;
+    }
   }
   // Projects with live agents first, then by name.
   groups.sort(compareProjects);
@@ -344,4 +362,15 @@ export function projectColor(color: string): string {
     red: "#fa5252",
   };
   return named[color] ?? (/^#[0-9a-f]{6}$/i.test(color) ? color : "#868e96");
+}
+
+/**
+ * Who created a row's agent, for its `data-created-by` (cutex session-created-by; the first-use tips read it):
+ * "director" / "member" / "agent" (an agent, role not said), "owner", "system"; undefined = not known (older cutex,
+ * or a session from before it was recorded).
+ */
+export function createdByOf(session: Pick<SessionResource, "createdBy">): string | undefined {
+  const by = session.createdBy;
+  if (!by) return undefined;
+  return by.kind === "agent" ? (by.role ?? "agent") : by.kind;
 }

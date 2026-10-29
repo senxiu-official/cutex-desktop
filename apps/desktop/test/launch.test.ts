@@ -65,3 +65,16 @@ describe("new thread defaults helpers", () => {
     expect(isAbsolutePath("C:")).toBe(false);
   });
 });
+
+describe("no effort is sent unless the owner picked one (owner 10-22, design 028 (b))", () => {
+  it("an untouched form or an unpicked effort leaves the effort to cutex's default and fallback", async () => {
+    const { launchFromForm, BUILTIN_THREAD_DEFAULTS } = await import("../src/shared/launch");
+    const form = { ...BUILTIN_THREAD_DEFAULTS.agent, writableRoots: [...BUILTIN_THREAD_DEFAULTS.agent.writableRoots], model: "", reasoningEffort: "" };
+    expect(launchFromForm(form, false)).toBeUndefined();
+    // Touched (e.g. a model picked), effort never picked: no reasoningEffort, even though the page shows one.
+    const touched = launchFromForm({ ...form, model: "glm-5.3" }, true)!;
+    expect(touched.model).toBe("glm-5.3");
+    expect(touched).not.toHaveProperty("reasoningEffort");
+    expect(launchFromForm({ ...form, reasoningEffort: "high" }, true)!.reasoningEffort).toBe("high");
+  });
+});

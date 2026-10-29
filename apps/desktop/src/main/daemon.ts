@@ -1,9 +1,32 @@
+import { readDelegationUpgrade, executeDelegationUpgrade, projectDelegationApproval } from "../shared/delegationUpgradeAdapter";
+import { SidebarReadCache, SidebarRefresh } from "./sidebarReadCache";
+import { retryableSteerPreflight, withSteerPreflightRetry } from "../shared/queueSteerRetry";
+import { ownerJoinIntent } from "../shared/ownerJoin";
+import { fullTextReference, needsFullTextRepair, hydrateFullText } from "./liveFullText";
+import { OperatorRestartNotices, recordOperatorRuntimeNotice } from "./operatorRestart";
+import { AGENT_PAUSE_METHOD, AGENT_RESUME_METHOD, type AgentPauseResult } from "../shared/agentPause";
+import type { EventEnvelope } from "@cutex-desktop/protocol";
+import { readProjectOperators } from "./projectOperators";
+import { forkPreview, forkRequestParams, forkResult } from "./sessionFork";
+import { localFileAction } from "./localFiles";
+import { remoteCopyTransport } from "./remoteCopyTransport";
+import type { CopySource } from "../shared/remoteCopies";
+import type { SessionForkRequest, SessionForkResult, SessionForkPreviewRequest } from "../shared/sessionFork";
+import { storageApi } from "./storage";
+import { storageCleanupApi } from "./storageCleanup";
+import type { StorageCleanupPreviewRequest, StorageCleanupExecuteRequest } from "../shared/storageCleanup";
+import type { StorageItemQuery } from "../shared/storage";
+import type { ApprovalRuleAuditPage, ApprovalRuleDraft, ApprovalRuleMutation, ApprovalRulesView } from "../shared/ipc";
+import { directorScopeCandidates, directorReviewContent, projectDirector, directorHandovers, directorStartReviews, decideDirectorItem, approveDirectorScope, type DirectorFence, type DirectorScope } from "@cutex-desktop/cutex-client";
 import { appWindows } from "./appWindows";
 import { randomUUID } from "node:crypto";
 import type { HostProxyPatch } from "../shared/proxy";
 import { traceSendStage } from "../shared/sendTrace";
 import { fastTierOf } from "../shared/fastMode";
 import { logError } from "./errorLog";
+import { imageActionBytes, mediaReadRequest, withoutLiveImages } from "./eventMedia";
+import { EVENT_MEDIA_BLOBS_FEATURE, MAX_EVENT_MEDIA_BYTES, mediaRecord, parseCutexBlobRef, parseCutexMediaRef } from "../shared/mediaBlobs";
+import type { HistoryMediaExpected, HistoryMediaPayload, ImageActionInput, ImageActionResult } from "../shared/ipc";
 import { RecentFeedTraffic, submitHttpTraceBuffer } from "./sendDiagnostics";
 import { notesApi, sideApi } from "./notesSideApi";
 import type { ExportReply, ImportReply } from "./profileTransfer";
@@ -13,16 +36,21 @@ import type { NoteCreate, NotesQuery, NoteUpdate } from "../shared/notes";
 import type { SideMessageInput, SideOpenInput, SideReply } from "../shared/sideChat";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { basename, extname, isAbsolute } from "node:path";
-import { app, BrowserWindow, dialog, shell } from "electron";
+import { app, BrowserWindow, ClipboardItem, clipboard, dialog, nativeImage, shell } from "electron";
 import { hostname } from "node:os";
 import { approvalClientFacts } from "../shared/approvalOrigin";
 import {
   CLIENT_INSTANCE_ID,
+  messageSettlementCloseBody,
   CutexApiError,
   CutexClient,
   CutexUnreachableError,
   EventFeed,
+  LIVE_DELTAS_FEATURE,
   openStream,
+  ProjectEventFollower,
+  projectBackground,
+  projectEventsPage,
   type StreamHandle,
   type DaemonEndpoint,
   PROFILE_IMAGE_KINDS,
@@ -30,7 +58,11 @@ import {
   type AvatarContentType,
   type ProfileImageKind,
 } from "@cutex-desktop/cutex-client";
-import type { AdmissionRef, HostSessionRow, SessionList, OwnerNotification, OwnerNotificationList, OwnerNotifyFilter, OwnerNotifySettingsPatch, ProjectsResponse, QueueMoveResult, QueueYieldResult } from "@cutex-desktop/protocol";
+import type { IdleRuntimes, StopIdleRequest, StopIdleResult } from "../shared/stopIdle";
+import type { ProjectBackground, ProjectEventPage, ProjectEventsQuery, ProjectEventsResult, ProjectEventsWatch } from "../shared/projectEvents";
+/** cutex capability: history reads may return media as `cutex-media:` references (design 025). */
+const HISTORY_MEDIA_REFS = "history-media-refs";
+import type { AdmissionRef, GuidesPreferences, HostSessionRow, SessionList, OwnerNotification, OwnerNotificationList, OwnerNotifyFilter, OwnerNotifySettingsPatch, ProjectsResponse, QueueItem, QueueMoveResult, QueueYieldResult } from "@cutex-desktop/protocol";
 import { SAFETY_CHECK_DISMISS, SAFETY_CHECK_GRANT } from "@cutex-desktop/protocol";
 import { asRecord, isNotificationId, sanitizeOwnerNotifyPatch } from "../shared/ownerNotify";
 import { asDecision, asLevelsView, sanitizeEvaluate, sanitizeLevelsPatch, type NotificationDecision, type NotificationEvaluateRequest, type NotificationLevelsPatch, type NotificationLevelsView } from "../shared/notificationLevels";
@@ -58,11 +90,18 @@ import type { JobListPage, JobOutputPage, JobResult, JobRow, JobServiceCapabilit
 import { dataUrlImage, sanitizeExtraInput, uploadKind } from "../shared/input";
 import { shownSessions } from "../shared/hiddenSessions";
 import { queueMoveErrorKind, queueMoveErrorMessage } from "../shared/queueMove";
-import { queueSteerErrorDetail, queueSteerErrorKind, queueSteerErrorMessage } from "../shared/queueSteer";
+import { queueSteerErrorDetail, queueSteerErrorKind, queueSteerErrorMessage, queueSteerRawDetail, type QueueSteerErrorKind } from "../shared/queueSteer";
+import { imageDeliveryOf } from "../shared/imageDelivery";
+import { mergeableOwnerItem, mergeQueueInputs, planQueueMerge, queueMergeErrorMessage, type QueueMergeResult } from "../shared/queueMerge";
 import type { RuntimesWire } from "../shared/runtimes";
 import type { HostServiceInfo, UpgradeApplyRequest, UpgradeResult, UpgradeRollbackRequest, UpgradeRollbackResult, UpgradeRun, UpgradeSettings, UpgradeSettingsPatch, UpgradeStaging, UpgradeStatus } from "../shared/backendUpgrade";
 import type { ComponentAction, ComponentResult, ComponentsList } from "../shared/components";
-import { claudeAccountCreateBody, claudeAccountId, claudeAccountRenameBody, DEFAULT_CLAUDE_ACCOUNT, type ClaudeAccount, type ClaudeAccountCreate, type ClaudeAccountList, type ClaudeAccountRemoved, type ClaudeAccountRemoveResult, type ClaudeAccountResult, type ProfileQuotaDetail } from "../shared/claudeAccounts";
+import { consumeResultOf, resetCreditsViewOf, validIdempotencyKey, type ResetConsumeResult, type ResetCreditsView } from "../shared/resetCredits";
+import { effortFallbackOf, validActionId, type CreateAbandonResult } from "../shared/createAbandon";
+import { autoPickPreviewOf, autoPickQuery, profilePickOf } from "../shared/profileAutoPick";
+import { credentialSourceBody, profileApiKey, variantBaseUrl, variantAddBody, variantIdOf, variantPatchBody, type ProfileRuntimeVariant, type VariantResult } from "../shared/profileVariants";
+import { kimiAccountCreateBody, kimiAccountId, kimiAccountRenameBody, kimiLoginId, type KimiAccount, type KimiAccountList, type KimiAccountRemoved, type KimiAccountRemoveResult, type KimiAccountResult, type KimiLogin, type KimiLoginResult } from "../shared/kimiAccounts";
+import { claudeAccountCreateBody, claudeAccountId, claudeAccountKeyBody, claudeAccountRenameBody, DEFAULT_CLAUDE_ACCOUNT, writeOnlyApiKey, type ClaudeAccount, type ClaudeAccountCreate, type ClaudeAccountList, type ClaudeAccountRemoved, type ClaudeAccountRemoveResult, type ClaudeAccountResult, type ProfileQuotaDetail } from "../shared/claudeAccounts";
 import { directorRotationBody, ROTATION_ID } from "../shared/directorRotation";
 import { ccSwitchImportBody, type CcSwitchImportItem, type CcSwitchImportList, type CcSwitchImportResult } from "../shared/ccSwitchImport";
 import { artifactContentQuery, artifactDiffQuery, artifactId, artifactListQuery, artifactPatchBody, artifactPublishBody, artifactResolveBody, artifactVersionSel, type ArtifactContent, type ArtifactDeleteResult, type ArtifactDetail, type ArtifactDiff, type ArtifactList, type ArtifactListQuery, type ArtifactPatch, type ArtifactPatchResult, type ArtifactPublished, type ArtifactPublishRequest, type ArtifactPublishResult, type ArtifactResolveItem, type ArtifactSummary, type ArtifactUsage } from "../shared/artifactStore";
@@ -73,6 +112,7 @@ import { WORKFLOW_RUN_ID, type WorkflowRunAction, type WorkflowRunList, type Wor
 import type { RestoreCandidates } from "../shared/runtimeRestore";
 import type { QuotaContinueResult, QuotaContinueView } from "../shared/quotaContinue";
 import type { OwnDeviceRevoked, OwnDevices, PeerBindingResult, SelfProfile, SelfProfilePatch, TokenBindingResult, UserCreate, UserPatch, UsersList, UsersResult, UsersSettings, UserWriteResult } from "../shared/users";
+import type { HomeCoverUpload, HomeDoc, HomeImage, HomeResult, HomeView, ServiceTileAnswer } from "../shared/home";
 import type { IdentityChallenge, IdentityClaimResult, PersonKeyInput, PersonKeysResult } from "../shared/personIdentity";
 import { accessRefusalDetailsOf, clientTokenUpdateBody, DEVICE_SCOPES, readDeviceScope, readIssuedVia, readOwnerNewDevices, userAccessOf, type ClientTokenUpdate, type ClientTokenUpdated, type DeviceScope, type OwnerDeviceAck, type OwnerNewDevice, type TokenPersonAckResult } from "../shared/users";
 import { PEER_ID, peerAddBody, peerInviteBody, peerPatchBody, peersSettingsBody, type PeerAgents, type PeerAuditEntry, type PeerInvite, type PeerList, type PeerPatch, type PeerResult, type PeersSettingsPatch, type PeerView } from "../shared/peers";
@@ -86,7 +126,13 @@ import { localDaemonSetup, readHostOwner, type HostOwner } from "../shared/hosts
 import { isValidTokenId } from "../shared/hosts";
 import { servicesSettingsPatch } from "../shared/servicesSettings";
 import type { ClaudeRepinDone, ClaudeRepinResult, ClaudeRuntimeView } from "../shared/claudeRepin";
-import type { AgentSecurityPatch, ApprovalDecision, ApprovalDecisionOrigin, ApprovalDecisionResult, ApprovalRecord, CutexRefusal, RuntimePackageRun, RuntimePackageRunResult, RuntimePackagesView, MutationResult, ProfileCreateRequest, ProfilePreset, NotificationLevel, ProfileAccountView, ServiceView, ServicesList, ServicesSettings, ServicesSettingsPatch, ProfileLogin, TerminalSummary, ProjectMemoryView, ProjectMutationOperation, BackgroundTerminal, CapabilitiesView, CatalogModelPatch, GlobalSettings, ProfileDetail, ProfileItem, ProfileModelsView, ProfilePatch, UserInstructions, AgentHarnessPreview, ClaudeCodeSources, ClaudePermissionRules, ClaudeSkillsImportList, ClaudeSkillsImportResult, SessionSandboxExtras, SessionSandboxExtrasPatch, FsDir, FsFile, GitStatus, UsageDimension, UsagePrices, UsageReport, UsageSourceFilter, WorkspaceScope, DaemonState, DesktopApi, DaemonEvents, ModelOption, QuotaConfigView, QuotaGauge, ServerRequestReply, SidebarSnapshot, DirectorRotation, DirectorRotationResult, DirectorRotationStart, StuckBusDiscardRequest, StuckBusDiscardResult, StuckBusView } from "../shared/ipc";
+import type { AgentSecurityPatch, ApprovalDecision, ApprovalDecisionOrigin, ApprovalDecisionResult, ApprovalRecord, CutexRefusal, RuntimePackageRun, RuntimePackageRunResult, RuntimePackagesView, MutationResult, ProfileCreateBody, ProfilePreset, NotificationLevel, ProfileAccountView, ServiceView, ServicesList, ServicesSettings, ServicesSettingsPatch, ProfileLogin, TerminalSummary, ProjectMemoryView, ProjectMutationOperation, BackgroundTerminal, CapabilitiesView, CatalogModelPatch, GlobalSettings, ProfileDetail, ProfileItem, ProfileModelsView, ProfilePatch, UserInstructions, AgentHarnessPreview, ClaudeCodeSources, ClaudePermissionRules, ClaudeSkillsImportList, ClaudeSkillsImportResult, SessionSandboxExtras, SessionSandboxExtrasPatch, FsDir, FsFile, GitStatus, UsageDimension, UsagePrices, UsageReport, UsageSourceFilter, WorkspaceScope, DaemonState, DesktopApi, DaemonEvents, ModelOption, QuotaConfigView, QuotaGauge, ServerRequestReply, SidebarSnapshot, DirectorRotation, DirectorRotationResult, DirectorRotationStart, StuckBusDiscardRequest, StuckBusDiscardResult, StuckBusView } from "../shared/ipc";
+
+/** What a queue-steer refusal carries after its kind: the native refusal, or an unknown outcome's raw answer (详情). */
+function steerErrorDetail(kind: QueueSteerErrorKind, error: CutexApiError): string {
+  if (kind === "runtimeRefused") return queueSteerErrorDetail(error.details);
+  return kind === "outcomeUnknown" ? queueSteerRawDetail(error.message, error.details) : "";
+}
 
 /**
  * A 4xx cutex error as a refusal the renderer can explain. Thrown errors lose their code and
@@ -103,6 +149,8 @@ function refusalOf(error: unknown): CutexRefusal | null {
   const details = error.details as { sessions?: unknown } | unknown[] | null | undefined;
   const raw = Array.isArray(details) ? details : Array.isArray(details?.sessions) ? (details.sessions as unknown[]) : null;
   const sessions = raw?.map((x): NonNullable<CutexRefusal["sessions"]>[number] => {
+    // variant_in_use lists bare ids.
+    if (typeof x === "string") return { cutexSessionId: x, displayName: x };
     const r = x as Record<string, unknown>;
     const id = String(r.cutexSessionId ?? r.cutex_session_id ?? r.id ?? "");
     const ref = { cutexSessionId: id, displayName: String(r.displayName ?? r.display_name ?? id) };
@@ -113,7 +161,8 @@ function refusalOf(error: unknown): CutexRefusal | null {
   const forkReferences = !Array.isArray(details) && (details as { nativeForkReferences?: unknown } | null | undefined)?.nativeForkReferences === true;
   // owner_local_only / device_scope_denied / …: the action / scope the UI explains.
   const access = accessRefusalDetailsOf(error.code, error.details);
-  return { code: error.code, message, ...(sessions ? { sessions } : {}), ...(forkReferences ? { forkReferences } : {}), ...(access ? { access } : {}) };
+  const count = !Array.isArray(details) && typeof (details as { count?: unknown } | null | undefined)?.count === "number" ? (details as { count: number }).count : undefined;
+  return { code: error.code, message, ...(sessions ? { sessions } : {}), ...(forkReferences ? { forkReferences } : {}), ...(access ? { access } : {}), ...(count !== undefined ? { count } : {}) };
 }
 
 async function mutation(run: () => Promise<unknown>): Promise<MutationResult> {
@@ -125,6 +174,36 @@ async function mutation(run: () => Promise<unknown>): Promise<MutationResult> {
     if (refusal) return { ok: false, error: refusal };
     throw error;
   }
+}
+
+const APPROVAL_RULE_KINDS = new Set(["managed_service", "service_lifetime", "static_root", "agent_profile", "ask_delivery", "browser_claim", "browser_open", "workflow_run"]);
+function approvalRuleBody(input: ApprovalRuleDraft): ApprovalRuleDraft {
+  if (!input || input.subject?.type !== "agent" || typeof input.subject.cutexSessionId !== "string" || !input.subject.cutexSessionId.startsWith("cutex.") || input.subject.cutexSessionId.length > 160) throw new Error("bad approval rule subject");
+  const kinds = Array.isArray(input.kinds) ? [...new Set(input.kinds)] : [];
+  const high = Array.isArray(input.highRiskKindsExplicit) ? [...new Set(input.highRiskKindsExplicit)] : [];
+  if (!kinds.length || kinds.some((kind) => !APPROVAL_RULE_KINDS.has(kind)) || high.some((kind) => !kinds.includes(kind))) throw new Error("bad approval rule kinds");
+  const mode = input.expiry?.mode;
+  if (!(["turn", "hour", "today", "revoked"] as const).includes(mode)) throw new Error("bad approval rule expiry");
+  const turn = input.expiry.turn;
+  if (mode === "turn" && (!turn || !Number.isSafeInteger(turn.runtimeGeneration) || turn.runtimeGeneration < 1 || typeof turn.turnId !== "string" || !turn.turnId || turn.turnId.length > 200)) throw new Error("bad approval rule turn");
+  const profiles = input.constraints?.profileIds ?? [];
+  if (!Array.isArray(profiles) || profiles.length > 100 || profiles.some((id) => typeof id !== "string" || !id || id.length > 160)) throw new Error("bad approval rule profiles");
+  const workflow = input.constraints?.workflow;
+  for (const value of [workflow?.maxAgents, workflow?.maxTokens]) if (value !== undefined && (!Number.isSafeInteger(value) || value! < 1)) throw new Error("bad approval rule workflow limit");
+  const projectId = input.projectId == null ? undefined : input.projectId;
+  if (projectId !== undefined && (typeof projectId !== "string" || !projectId || projectId.length > 160)) throw new Error("bad approval rule project");
+  return {
+    enabled: input.enabled === true,
+    subject: { type: "agent", cutexSessionId: input.subject.cutexSessionId, ...(typeof input.subject.displayName === "string" ? { displayName: input.subject.displayName.slice(0, 200) } : {}) },
+    ...(projectId ? { projectId } : {}), kinds, constraints: { ...(profiles.length ? { profileIds: profiles } : {}), ...(workflow ? { workflow: { ...(workflow.maxAgents ? { maxAgents: workflow.maxAgents } : {}), ...(workflow.maxTokens ? { maxTokens: workflow.maxTokens } : {}) } } : {}) },
+    expiry: { mode, ...(mode === "turn" ? { turn: { runtimeGeneration: turn!.runtimeGeneration, turnId: turn!.turnId } } : {}) },
+    highRiskKindsExplicit: high,
+  };
+}
+
+function approvalRuleId(id: string): string {
+  if (!/^aar-[A-Za-z0-9-]{1,60}$/.test(id)) throw new Error("bad approval rule id");
+  return id;
 }
 
 /** Profile routes answer `{ profile }`; tolerate a bare ProfileDetail too. */
@@ -149,6 +228,14 @@ const IMAGE_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg"
  * which hands it an endpoint (`useEndpoint`). Implements the renderer-facing `DaemonApi`.
  */
 export class DaemonService implements DaemonApi {
+  private readonly operatorRestartNotices = new OperatorRestartNotices();
+  storage() { return storageApi(this.requireClient()).storage(); }
+  storageCleanupPreview(request: StorageCleanupPreviewRequest) { return storageCleanupApi(this.requireClient()).storageCleanupPreview(request); }
+  storageCleanupExecute(request: StorageCleanupExecuteRequest) { return storageCleanupApi(this.requireClient()).storageCleanupExecute(request); }
+  storageCleanupHistory() { return storageCleanupApi(this.requireClient()).storageCleanupHistory(); }
+  storageCleanupRun(runId: string) { return storageCleanupApi(this.requireClient()).storageCleanupRun(runId); }
+  storageRefresh(stores?: string[]) { return storageApi(this.requireClient()).storageRefresh(stores); }
+  storageItems(storeId: string, query?: StorageItemQuery) { return storageApi(this.requireClient()).storageItems(storeId, query); }
   notesList(query?: NotesQuery) { return notesApi(this.requireClient()).notesList(query); }
   notesGet(id: string) { return notesApi(this.requireClient()).notesGet(id); }
   notesCreate(input: NoteCreate) { return notesApi(this.requireClient()).notesCreate(input); }
@@ -161,6 +248,13 @@ export class DaemonService implements DaemonApi {
   sideInterrupt(sessionId: string, chatId: string) { return sideApi(this.requireClient()).sideInterrupt(sessionId, chatId); }
   sideRespond(sessionId: string, chatId: string, requestId: string | number, reply: SideReply) { return sideApi(this.requireClient()).sideRespond(sessionId, chatId, requestId, reply); }
   sideClose(sessionId: string, chatId: string) { return sideApi(this.requireClient()).sideClose(sessionId, chatId); }
+  private sidebarRefresh = new SidebarRefresh<SidebarSnapshot>(2000);
+  private retiredCache = new SidebarReadCache<SessionList>();
+  private projectsCache = new SidebarReadCache<ProjectsResponse>();
+  private operatorsCache = new SidebarReadCache<Awaited<ReturnType<typeof readProjectOperators>>>();
+  private capabilitiesCache = new SidebarReadCache<CapabilitiesView | null>();
+  private capabilitiesRevision = 0;
+  private accessRevision = 0;
   private client: CutexClient | null = null;
   private endpoint: DaemonEndpoint | null = null;
   private state: DaemonState = { kind: "connecting", baseUrl: "" };
@@ -172,8 +266,21 @@ export class DaemonService implements DaemonApi {
   private hostTraffic = new RecentFeedTraffic();
   private sessionTraffic = new RecentFeedTraffic();
   private sessionFeeds = new Map<string, EventFeed>();
+  private fullTextActive = 0;
+  private fullTextQueue: { client: CutexClient; envelope: EventEnvelope; sessionId: string; feed: EventFeed; key: string }[] = [];
+  private fullTextKeys = new Set<string>();
+  private sessionFeedAttempt = 0;
+  private sessionFeedAttempts = new Map<string, number>();
+  private liveDeltasClient: CutexClient | null = null;
+  private liveDeltasSupported = false;
+  private mediaResyncSeen = new Set<string>();
+  private mediaResyncPending = new Map<string, symbol>();
+  private mediaResyncEmitted = new Set<string>();
+  private mediaResyncAgain = new Set<string>();
   private retryTimer: NodeJS.Timeout | null = null;
   private watches = new Map<string, StreamHandle>();
+  /** Project 「动态」 live watches (watchProjectEvents); closed with the connection. */
+  private projectWatches = new Map<string, ProjectEventFollower>();
   /** Attached terminal output streams, by terminal id (the PTYs themselves live in cutex). */
   private terminals = new Map<string, StreamHandle>();
   /** Bumped whenever the app moves to another daemon; stale replies are dropped (main/index.ts). */
@@ -210,7 +317,7 @@ export class DaemonService implements DaemonApi {
     this.remote = options.remote;
     // A copy: `retarget` mutates it in place so feeds / handles follow a moved tunnel port.
     this.endpoint = { ...endpoint };
-    this.client = new CutexClient(this.endpoint);
+    this.client = new CutexClient(this.endpoint, { backgroundReads: true });
     void this.connect();
   }
 
@@ -257,6 +364,12 @@ export class DaemonService implements DaemonApi {
   detachViews(): void {
     for (const feed of this.sessionFeeds.values()) feed.stop();
     this.sessionFeeds.clear();
+    this.sessionFeedAttempts.clear();
+    this.fullTextQueue = [];
+    this.fullTextKeys.clear();
+    this.mediaResyncPending.clear();
+    this.mediaResyncEmitted.clear();
+    this.mediaResyncAgain.clear();
     for (const watch of this.watches.values()) watch.close();
     this.watches.clear();
     for (const t of this.terminals.values()) t.close();
@@ -264,7 +377,19 @@ export class DaemonService implements DaemonApi {
   }
 
   private teardown(): void {
+    this.client?.dispose?.();
+    this.mediaResyncSeen.clear();
+    this.mediaResyncPending.clear();
+    this.mediaResyncEmitted.clear();
+    this.mediaResyncAgain.clear();
     this.gen++;
+    this.accessRevision++;
+    this.capabilitiesRevision++;
+    this.sidebarRefresh = new SidebarRefresh<SidebarSnapshot>(2000);
+    this.retiredCache = new SidebarReadCache<SessionList>();
+    this.projectsCache = new SidebarReadCache<ProjectsResponse>();
+    this.operatorsCache = new SidebarReadCache<Awaited<ReturnType<typeof readProjectOperators>>>();
+    this.capabilitiesCache = new SidebarReadCache<CapabilitiesView | null>();
     this.restricted = false;
     this.hiddenRefused = false;
     this.hostTraffic = new RecentFeedTraffic();
@@ -285,6 +410,11 @@ export class DaemonService implements DaemonApi {
     for (const t of this.terminals.values()) t.close();
     this.terminals.clear();
     this.sessionFeeds.clear();
+    this.sessionFeedAttempts.clear();
+    this.fullTextQueue = [];
+    this.fullTextKeys.clear();
+    for (const w of this.projectWatches.values()) w.stop();
+    this.projectWatches.clear();
   }
 
   private setState(state: DaemonState): void {
@@ -292,7 +422,67 @@ export class DaemonService implements DaemonApi {
     this.emit("daemonState", state);
   }
 
-  private async connect(): Promise<void> {
+  /** Reuse canonical history reload once for an explicitly partial event; never replay-loop it. */
+  private resyncPartialMedia(envelope: EventEnvelope, boundSessionId?: string, force = false): void {
+    const message: unknown = envelope.native?.message;
+    const marker = mediaRecord(message) ? message._cutexTruncated : undefined;
+    if (!force && needsFullTextRepair(envelope) && mediaRecord(message) && message._cutexFullText !== undefined) return;
+    if (!force && (!mediaRecord(marker) || marker.reason !== "event_size_limit" || marker.resyncRequired !== true)) return;
+    const sessionId = boundSessionId ?? envelope.cutexSessionId;
+    if (!sessionId || (boundSessionId && envelope.cutexSessionId && envelope.cutexSessionId !== boundSessionId) || !this.sessionFeeds.has(sessionId)) return;
+    const key = JSON.stringify([sessionId, envelope.streamId, envelope.eventId, envelope.cursor]);
+    if (this.mediaResyncSeen.has(key)) return;
+    this.mediaResyncSeen.add(key);
+    if (this.mediaResyncSeen.size > 512) this.mediaResyncSeen.delete(this.mediaResyncSeen.values().next().value!);
+    if (this.mediaResyncPending.has(sessionId)) {
+      // A new partial event after load() started might not be covered by that snapshot.
+      if (this.mediaResyncEmitted.has(sessionId)) this.mediaResyncAgain.add(sessionId);
+      return;
+    }
+    this.queuePartialMediaResync(sessionId);
+  }
+
+  private repairFullText(envelope: EventEnvelope, sessionId: string, feed: EventFeed): void {
+    if (!Number.isSafeInteger(envelope.correlation?.runtimeGeneration) || !fullTextReference(envelope)) { this.resyncPartialMedia(envelope, sessionId, true); return; }
+    const key = JSON.stringify([this.gen, this.sessionFeedAttempts.get(sessionId), sessionId, envelope.streamId, envelope.eventId, envelope.cursor]);
+    if (this.fullTextKeys.has(key)) return;
+    // Two bounded 32 MiB reads per host; queued entries retain descriptors/previews only.
+    if (this.fullTextQueue.length >= 32) { this.resyncPartialMedia(envelope, sessionId, true); return; }
+    this.fullTextKeys.add(key);
+    this.fullTextQueue.push({ client: this.requireClient(), envelope, sessionId, feed, key });
+    this.pumpFullText();
+  }
+
+  private pumpFullText(): void {
+    while (this.fullTextActive < 2 && this.fullTextQueue.length) {
+      const job = this.fullTextQueue.shift()!;
+      const current = () => this.client === job.client && this.sessionFeeds.get(job.sessionId) === job.feed;
+      if (!current()) { this.fullTextKeys.delete(job.key); continue; }
+      this.fullTextActive++;
+      void hydrateFullText(job.envelope, (sessionId, sha, expected) => job.client.eventBlob(sessionId, sha, expected)).then(full => {
+        if (!current()) return;
+        if (full) this.emit("sessionFullText", { sessionId: job.sessionId, envelope: full });
+        else this.resyncPartialMedia(job.envelope, job.sessionId, true);
+      }, () => { if (current()) this.resyncPartialMedia(job.envelope, job.sessionId, true); }).finally(() => {
+        this.fullTextActive--;
+        this.fullTextKeys.delete(job.key);
+        this.pumpFullText();
+      }).catch(() => {});
+    }
+  }
+
+  private queuePartialMediaResync(sessionId: string): void {
+    const token = Symbol(), generation = this.gen;
+    this.mediaResyncPending.set(sessionId, token);
+    queueMicrotask(() => {
+      if (this.gen !== generation || this.mediaResyncPending.get(sessionId) !== token || !this.sessionFeeds.has(sessionId)) return;
+      // Kept pending until subscribe resumes after the renderer's existing load() call.
+      this.mediaResyncEmitted.add(sessionId);
+      this.emit("sessionResync", { sessionId, reason: "event_size_limit" });
+    });
+  }
+
+  private async connect(probe = false): Promise<void> {
     const client = this.requireClient();
     const gen = this.gen;
     const attempt = ++this.connectAttempt;
@@ -302,20 +492,26 @@ export class DaemonService implements DaemonApi {
     const timer = setTimeout(() => controller.abort(), CONNECTION_READ_TIMEOUT_MS);
     const current = () => gen === this.gen && attempt === this.connectAttempt;
     const baseUrl = client.endpoint.baseUrl;
-    this.setState({ kind: "connecting", baseUrl });
+    const wasConnected = probe && this.state.kind === "connected";
+    if (!wasConnected) this.setState({ kind: "connecting", baseUrl });
     try {
       const host = await client.host({ signal: controller.signal });
       clearTimeout(timer);
       if (!current()) return;
-      this.setState({ kind: "connected", baseUrl, hostId: host.hostId, ...(typeof host.platform === "string" ? { platform: host.platform } : {}) });
+      if (!wasConnected) this.setState({ kind: "connected", baseUrl, hostId: host.hostId, ...(typeof host.platform === "string" ? { platform: host.platform } : {}) });
       // The daemon answers again (e.g. the SSH tunnel came back): session feeds waiting out their
       // backoff (up to 15 s) reconnect now instead of leaving the open agent stale.
-      this.kickSessionFeeds();
-      await this.startHostFeed();
+      if (!wasConnected) {
+        this.hostFeed?.reconnectNow();
+        this.kickSessionFeeds();
+      }
+      if (!this.hostFeed) await this.startHostFeed();
     } catch (error) {
       if (!current()) return;
       const message = error instanceof Error ? error.message : String(error);
-      this.setState(
+      // A busy HTTP route proves the host still answers; a connected probe must not
+      // turn a single overload refusal into a disconnected UI or kick every session feed.
+      if (!(wasConnected && error instanceof CutexApiError && (error.status === 503 || error.status === 429))) this.setState(
         error instanceof CutexUnreachableError
           ? { kind: "unreachable", baseUrl, message, ...(this.remote ? {} : { setup: localDaemonSetup(client.endpoint) }) }
           : { kind: "error", baseUrl, message, ...(error instanceof CutexApiError ? { status: error.status } : {}) },
@@ -323,7 +519,7 @@ export class DaemonService implements DaemonApi {
       if (this.retryTimer) clearTimeout(this.retryTimer);
       this.retryTimer = setTimeout(() => {
         this.retryTimer = null;
-        if (current()) void this.connect();
+        if (current()) void this.connect(wasConnected);
       }, 5000);
     } finally {
       clearTimeout(timer);
@@ -334,6 +530,7 @@ export class DaemonService implements DaemonApi {
   /** Session feeds in a reconnect wait retry at once, with their backoff reset (live ones are left alone). */
   kickSessionFeeds(): void {
     for (const feed of this.sessionFeeds.values()) feed.reconnectNow();
+    for (const w of this.projectWatches.values()) w.reconnectNow();
   }
 
   private async startHostFeed(): Promise<void> {
@@ -351,7 +548,7 @@ export class DaemonService implements DaemonApi {
     // sidebar feed does not replay the retained backlog. Falls back to fast-forward paging.
     let position: { streamId?: string; after?: string } = {};
     try {
-      const list = await client.sessions("active", { signal: controller.signal });
+      const list = await client.sessions("active", { signal: controller.signal, background: true });
       const stream = (list.management as { eventStream?: { streamId?: string; latest?: { cursor?: string } | null } } | null)
         ?.eventStream;
       if (stream?.streamId) position = { streamId: stream.streamId, after: stream.latest?.cursor ?? undefined };
@@ -367,32 +564,52 @@ export class DaemonService implements DaemonApi {
     const feed = new EventFeed(
       client,
       {
-        event: (envelope) => { if (current()) this.emit("hostEvent", envelope); },
+        event: (envelope) => { if (current()) { this.invalidateSidebarEvent(envelope); this.emit("hostEvent", withoutLiveImages(envelope)); this.resyncPartialMedia(envelope); } },
         traffic: (sample) => { if (current()) this.hostTraffic.add(sample); },
         resync: (reason, detail) => {
           if (!current()) return;
           // users: the token's user / grant changed — the renderer re-reads the capabilities and lists.
-          if (reason === "access_changed") this.emit("accessChanged", { changedAt: changedAtOf(detail) });
-          // Host feed only drives sidebar refresh; restart from the live tail.
+          this.invalidateSidebarParts();
+          this.invalidateCapabilities();
+          if (reason === "access_changed") {
+            this.invalidateAccess();
+            this.emit("accessChanged", { changedAt: changedAtOf(detail) });
+          }
+          this.emit("hostResync", { reason });
+          // Restart from the live tail; renderer caches must re-read the state they follow.
           void this.startHostFeed();
         },
         status: (status, error) => {
           if (!current()) return;
+          // A later HTTP answer/live stream cancels a not-yet-started transport probe.
+          if ((status === "live" || error instanceof CutexApiError) && this.state.kind === "connected" && this.retryTimer) {
+            clearTimeout(this.retryTimer);
+            this.retryTimer = null;
+          }
           // users: a refusal (403 access_pending / owner_required) is not a lost connection — the host
           // answers. Keep the feed's own backoff instead of reconnecting in a loop; once it streams
           // again (the owner assigned this device) the renderer re-reads what this device may see.
           if (status === "retrying" && error instanceof CutexApiError && error.status === 403) {
+            if (!refused) this.invalidateAccess();
             refused = true;
             return;
           }
           if (status === "live" && refused) {
             refused = false;
+            this.invalidateAccess();
             this.emit("accessChanged", { changedAt: null });
           }
-          if (status === "retrying" && this.state.kind === "connected") void this.connect();
+          // HTTP errors (including route 503) prove the host is reachable. EventFeed owns
+          // their backoff. Only transport loss starts a bounded host recovery probe.
+          if (status === "retrying" && error instanceof CutexUnreachableError && !this.connectRead && !this.retryTimer) {
+            this.retryTimer = setTimeout(() => {
+              this.retryTimer = null;
+              if (current()) void this.connect(true);
+            }, 5000);
+          }
         },
       },
-      { ...position, fromLatest: position.streamId === undefined },
+      { ...position, fromLatest: position.streamId === undefined, background: true },
     );
     this.hostFeed = feed;
     feed.start();
@@ -426,7 +643,7 @@ export class DaemonService implements DaemonApi {
   /**
    * Remote host: a local file the user picked becomes a host-side file (`session-attachments`), sent
    * as that path. Only paths returned by `pickImages` are read — the renderer cannot make main read
-   * arbitrary files. Anything else (already a host path, data: URLs) passes through.
+   * arbitrary files. Inline/ref images upload on local and remote hosts; existing host paths pass through.
    */
   private assertInputScope(client: CutexClient, generation: number): void {
     if (this.gen !== generation || this.client !== client) throw new Error("host switched");
@@ -434,11 +651,24 @@ export class DaemonService implements DaemonApi {
 
   private async remoteInput(sessionId: string, items: ExtraInput[], client: CutexClient, generation: number): Promise<ExtraInput[]> {
     this.assertInputScope(client, generation);
-    if (!this.remote && !this.restricted) return items;
+    if (!this.remote && !this.restricted && !items.some(item => item.type === "image")) return items;
     const ctx = { remote: this.remote, restricted: this.restricted, picked: (path: string) => this.pickedImages.has(path) };
     const out: ExtraInput[] = [];
     for (const item of items) {
       this.assertInputScope(client, generation);
+      if (item.type === "image") {
+        const blob = parseCutexBlobRef(item.url), ref = blob ?? parseCutexMediaRef(item.url);
+        if (ref) {
+          const image = blob ? await client.eventBlob(ref.sessionId, ref.sha256)
+            : await client.historyMedia(ref.sessionId, ref.sha256, { transport: "bytes" });
+          this.assertInputScope(client, generation);
+          if (!image || !(image.bytes instanceof Uint8Array) || !image.bytes.length || !Object.values(IMAGE_MIME).includes(image.mime)) throw new Error("image_unavailable");
+          if (image.bytes.length > MAX_ATTACHMENT_BYTES) throw new Error("image too large");
+          const uploaded = await this.uploadImage(sessionId, new Uint8Array(image.bytes), image.mime, client, generation);
+          out.push({ type: "localImage", path: uploaded.path });
+          continue;
+        }
+      }
       const kind = uploadKind(item, ctx);
       if (!kind) {
         out.push(item);
@@ -463,11 +693,26 @@ export class DaemonService implements DaemonApi {
       }
       this.assertInputScope(client, generation);
       if (bytes.length > MAX_ATTACHMENT_BYTES) throw new Error("image too large");
-      const uploaded = await client.uploadAttachment(sessionId, bytes, mime);
-      this.assertInputScope(client, generation);
+      const uploaded = await this.uploadImage(sessionId, bytes, mime, client, generation);
       out.push({ type: "localImage", path: uploaded.path });
     }
     return out;
+  }
+
+  /** Keep inline binary data out of typed management receipts on every supported host. */
+  private async uploadImage(sessionId: string, bytes: Uint8Array<ArrayBuffer>, mime: string, client: CutexClient, generation: number) {
+    this.assertInputScope(client, generation);
+    if (bytes.length > MAX_ATTACHMENT_BYTES) throw new Error("image too large");
+    if (mime === "image/bmp") {
+      const decoded = nativeImage.createFromBuffer(Buffer.from(bytes));
+      if (decoded.isEmpty()) throw new Error("image_unavailable");
+      bytes = new Uint8Array(decoded.toPNG());
+      mime = "image/png";
+      if (!bytes.length || bytes.length > MAX_ATTACHMENT_BYTES) throw new Error("image too large");
+    }
+    const uploaded = await client.uploadAttachment(sessionId, bytes, mime);
+    this.assertInputScope(client, generation);
+    return uploaded;
   }
 
   /**
@@ -476,40 +721,111 @@ export class DaemonService implements DaemonApi {
    * the plain listing, and not asked again on this connection.
    */
   private async activeSessions(client: CutexClient): Promise<SessionList> {
+    const access = this.accessRevision;
     if (!this.hiddenRefused) {
       try {
-        const list = await client.sessions("active", { includeHidden: true });
+        const list = await client.sessions("active", { includeHidden: true, background: true });
         return { ...list, sessions: shownSessions(list.sessions) };
       } catch (error) {
         if (!(error instanceof CutexApiError && (error.status === 400 || error.status === 403))) throw error;
-        if (this.client === client) this.hiddenRefused = true;
+        if (this.client === client && access === this.accessRevision) this.hiddenRefused = true;
       }
     }
-    return client.sessions("active");
+    if (this.client !== client || access !== this.accessRevision) throw new Error("access changed");
+    return client.sessions("active", { background: true });
   }
 
-  async sidebar(): Promise<SidebarSnapshot> {
-    const client = this.requireClient();
+  sidebar(): Promise<SidebarSnapshot> {
+    const client = this.requireClient(), generation = this.gen;
+    return this.sidebarRefresh.read(async () => {
+      this.assertInputScope(client, generation);
+      const access = this.accessRevision;
+      const snapshot = await this.readSidebar(client);
+      this.assertInputScope(client, generation);
+      if (access !== this.accessRevision) throw new Error("access changed");
+      return snapshot;
+    });
+  }
+
+  private invalidateSidebarParts(): void {
+    this.sidebarRefresh.invalidate();
+    this.retiredCache = new SidebarReadCache<SessionList>();
+    this.projectsCache = new SidebarReadCache<ProjectsResponse>();
+    this.operatorsCache = new SidebarReadCache<Awaited<ReturnType<typeof readProjectOperators>>>();
+  }
+
+  private invalidateAccess(): void {
+    this.accessRevision++;
+    this.invalidateSidebarParts();
+    this.invalidateCapabilities();
+    this.hiddenRefused = false;
+    this.restricted = true;
+  }
+
+  private invalidateCapabilities(): void {
+    this.capabilitiesRevision++;
+    this.capabilitiesCache = new SidebarReadCache<CapabilitiesView | null>();
+    this.liveDeltasClient = null;
+    this.mediaRefsClient = null;
+  }
+
+  private invalidateSidebarEvent(envelope: EventEnvelope): void {
+    const method = envelope.cutex?.method ?? "";
+    if (method.startsWith("cutex/users/") || method.startsWith("cutex/access/")) this.invalidateAccess();
+    else if (method.startsWith("cutex/components/") || method.startsWith("cutex/features/") ||
+        method.startsWith("cutex/featureFlags/") || method.startsWith("cutex/settings/") || method.startsWith("cutex/capabilities/"))
+      this.invalidateCapabilities();
+    const native = envelope.native?.message.method ?? "";
+    if (method || native.startsWith("turn/") || native.startsWith("thread/status") || native === "thread/name/updated" || native === "thread/settings/updated")
+      this.sidebarRefresh.invalidate();
+    if (method.startsWith("cutex/project/") || method.startsWith("cutex/projects/") ||
+        method.startsWith("cutex/agentManagement/") || method === "cutex/sessions/changed") {
+      this.invalidateSidebarParts();
+    } else if (method.startsWith("cutex/session/") && !method.includes("history/")) {
+      if (/retire|restore|delete|created|fork/.test(method)) this.invalidateSidebarParts();
+      else {
+        const params = envelope.cutex?.params as { cutexSessionId?: string } | undefined;
+        const id = params?.cutexSessionId ?? envelope.cutexSessionId;
+        const retired = this.retiredCache.peek();
+        // Initial/unknown target reads remain conservative. Known active metadata never
+        // invalidates the archive; retired names/defaults still update without a TTL.
+        if (!retired || !id || retired.sessions.some(session => session.cutexSessionId === id))
+          this.retiredCache = new SidebarReadCache<SessionList>();
+      }
+    }
+  }
+
+  private async readSidebar(client: CutexClient): Promise<SidebarSnapshot> {
+    // Capture before awaiting: an old host must never fill a new host's caches.
+    const retiredCache = this.retiredCache, projectsCache = this.projectsCache, operatorsCache = this.operatorsCache;
     const [active, retired, projects, hostRows] = await Promise.all([
       this.activeSessions(client),
-      client.sessions("retired").catch(() => ({ sessions: [] })),
-      client.projects().catch((error: unknown): ProjectsResponse | null => {
+      retiredCache.read(() => client.sessions("retired", { background: true })).catch(() => ({ sessions: [], failed: true as const })),
+      projectsCache.read(() => client.projects({ background: true })).catch((error: unknown): ProjectsResponse | null => {
         if (error instanceof CutexApiError) return null;
         throw error;
       }),
       // users: `/v2/host/sessions` is owner-only; another user's rows (name, project) come from its
       // filtered summary instead, so the sidebar still groups its agents by project.
-      this.allHostRows().catch((error: unknown) => (error instanceof CutexApiError && error.status === 403 ? this.summaryHostRows() : {})),
+      this.allHostRows(client).catch((error: unknown) => (error instanceof CutexApiError && error.status === 403 ? this.summaryHostRows(client) : {})),
     ]);
     // session-claude-runtime: the release for new Claude sessions, read with the agents' pins.
+    const projectOperators = projects ? await operatorsCache.read(async () => {
+      const roster = await readProjectOperators(projects.projects, id => client.project(id, { background: true }));
+      // Failed projections must be tried again, without retaining the old role.
+      if (projects.projects.some(p => Number.isSafeInteger(p.operator_count) && p.operator_count! >= 0 && !Object.hasOwn(roster ?? {}, p.project_id)))
+        operatorsCache.invalidate();
+      return roster;
+    }) : undefined;
     const claudeRuntime = active.claudeRuntime;
-    return { active: active.sessions, retired: retired.sessions, projects, hostRows, ...(claudeRuntime ? { claudeRuntime } : {}) };
+    const partial = ("failed" in retired && retired.failed) || this.hiddenRefused;
+    return { active: active.sessions, retired: retired.sessions, projects, hostRows, operatorRestartRequired: this.operatorRestartNotices.current(active.sessions), ...(projectOperators ? { projectOperators } : {}), ...(claudeRuntime ? { claudeRuntime } : {}), ...(partial ? { partial: true as const } : {}) };
   }
 
   /** Host rows of the agents a non-owner user sees (`GET /v2/summary`, filtered by cutex); {} on any error. */
-  private async summaryHostRows(): Promise<Record<string, HostSessionRow>> {
+  private async summaryHostRows(client = this.requireClient()): Promise<Record<string, HostSessionRow>> {
     try {
-      const summary = await this.requireClient().summary();
+      const summary = await client.summary(undefined, { background: true });
       const projects = new Map(summary.projects.map((p) => [p.id, p.name]));
       return Object.fromEntries(summary.agents.map((a) => [a.id, {
         id: a.id, name: a.name, kind: a.kind ?? "agent", hostId: summary.hostId, profile: null, provider: a.provider,
@@ -521,12 +837,11 @@ export class DaemonService implements DaemonApi {
     }
   }
 
-  private async allHostRows(): Promise<Record<string, HostSessionRow>> {
-    const client = this.requireClient();
+  private async allHostRows(client = this.requireClient()): Promise<Record<string, HostSessionRow>> {
     const rows: Record<string, HostSessionRow> = {};
     let cursor: string | undefined;
     for (let page = 0; page < 50; page++) {
-      const result = await client.hostSessions("", cursor);
+      const result = await client.hostSessions("", cursor, 200, { background: true });
       for (const row of result.data) rows[row.id] = row;
       if (!result.nextCursor) return rows;
       cursor = result.nextCursor;
@@ -535,13 +850,78 @@ export class DaemonService implements DaemonApi {
     return rows;
   }
 
+  /**
+   * The client whose host offers history-media-refs (design 025): its history reads ask for media
+   * as `cutex-media:` references, read back one by one with historyMedia. Older cutex refuses the
+   * parameter, so it is only sent to the client the capability came from.
+   */
+  private mediaRefsClient: CutexClient | null = null;
+
+  private mediaRefs(client: CutexClient): boolean {
+    return this.mediaRefsClient === client;
+  }
+
   bootstrap(sessionId: string, turnLimit?: number) {
-    return this.requireClient().bootstrap(sessionId, { turnLimit });
+    const client = this.requireClient();
+    return client.bootstrap(sessionId, { turnLimit, mediaRefs: this.mediaRefs(client) });
+  }
+
+  /** An image of a `media=ref` history (`cutex-media:<session>/<sha256>`); null when the host no longer has it. */
+  async historyMedia(sessionId: string, sha256: string, expected?: HistoryMediaExpected): Promise<HistoryMediaPayload | null> {
+    const ref = mediaReadRequest(sessionId, sha256, expected), client = this.requireClient(), generation = this.gen;
+    const media: unknown = await client.historyMedia(ref.sessionId, ref.sha256, { transport: "bytes", ...(ref.expected ? { expected: ref.expected } : {}) });
+    this.assertInputScope(client, generation);
+    return this.mediaPayload(media, ref.expected);
+  }
+
+  async eventBlob(sessionId: string, sha256: string, expected?: HistoryMediaExpected): Promise<HistoryMediaPayload | null> {
+    const ref = mediaReadRequest(sessionId, sha256, expected), client = this.requireClient(), generation = this.gen;
+    const media = await client.eventBlob(ref.sessionId, ref.sha256, ref.expected);
+    this.assertInputScope(client, generation);
+    const payload = this.mediaPayload(media, ref.expected);
+    return payload && "bytes" in payload && payload.bytes.length <= MAX_EVENT_MEDIA_BYTES ? payload : null;
+  }
+
+  private mediaPayload(media: unknown, expected?: HistoryMediaExpected): HistoryMediaPayload | null {
+    if (!mediaRecord(media)) return null;
+    if (media.bytes instanceof Uint8Array && typeof media.mime === "string" && media.size === media.bytes.length
+      && media.bytes.length > 0 && media.bytes.length <= (expected ? MAX_EVENT_MEDIA_BYTES : 64 * 1024 * 1024)
+      && (!expected || (media.mime === expected.mime && media.size === expected.size))) {
+      return { bytes: media.bytes, mime: media.mime, size: media.bytes.length };
+    }
+    // Additive compatibility with older image clients; real byte reads never encode to base64.
+    return !expected && typeof media.contentType === "string" && /^image\/(?:png|jpeg|webp)$/.test(media.contentType)
+      && typeof media.data === "string" && media.data.length <= 64 * 1024 * 1024 * 4 / 3
+      ? { dataUrl: `data:${media.contentType};base64,${media.data}` } : null;
+  }
+
+  async imageAction(input: ImageActionInput, action: "copy" | "save"): Promise<ImageActionResult> {
+    if (action !== "copy" && action !== "save") throw new Error("invalid_image_action");
+    const client = this.client, generation = this.gen;
+    const check = () => { if (this.client !== client || this.gen !== generation) throw new Error("host switched"); };
+    const image = await imageActionBytes(input, (sessionId, sha, expected, blob) => blob ? this.eventBlob(sessionId, sha, expected) : this.historyMedia(sessionId, sha, expected));
+    check();
+    const decoded = nativeImage.createFromBuffer(Buffer.from(image.bytes.buffer, image.bytes.byteOffset, image.bytes.byteLength));
+    if (decoded.isEmpty()) throw new Error("image_unavailable");
+    if (action === "copy") {
+      const png = new Uint8Array(decoded.toPNG());
+      check();
+      await clipboard.write([new ClipboardItem({ "image/png": new Blob([png], { type: "image/png" }) })]);
+      return { status: "copied" };
+    }
+    const win = BrowserWindow.getFocusedWindow() ?? appWindows()[0];
+    const options = { defaultPath: `image.${image.extension}`, filters: [{ name: image.mime, extensions: [image.extension] }] };
+    const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+    check();
+    if (result.canceled || !result.filePath) return { status: "cancelled" };
+    await writeFile(result.filePath, image.bytes);
+    return { status: "saved" };
   }
 
   async history(sessionId: string, cursor?: string | null, limit = 20) {
     try {
-      return await this.requireClient().history(sessionId, { limit, cursor });
+      const client = this.requireClient();
+      return await client.history(sessionId, { limit, cursor, mediaRefs: this.mediaRefs(client) });
     } catch (e) {
       if (e instanceof CutexApiError && (e.status === 404 || e.status === 409)) return null;
       throw e;
@@ -549,31 +929,75 @@ export class DaemonService implements DaemonApi {
   }
 
   async subscribe(sessionId: string, from: { streamId: string; after: string | null }): Promise<void> {
+    const client = this.requireClient();
+    const attempt = ++this.sessionFeedAttempt;
+    this.sessionFeedAttempts.set(sessionId, attempt);
+    if (this.liveDeltasClient !== client) {
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([this.readCapabilities(client, { signal: controller.signal }), new Promise<never>((_, reject) => {
+          timer = setTimeout(() => { controller.abort(); reject(new Error("live capability probe timed out")); }, 1_500);
+        })]);
+      } catch { /* Capability negotiation cannot stall the existing durable feed. */ }
+      finally { if (timer !== undefined) clearTimeout(timer); }
+    }
+    if (this.client !== client || this.sessionFeedAttempts.get(sessionId) !== attempt) return;
+    const liveDeltas = this.liveDeltasClient === client && this.liveDeltasSupported;
+    let latestGeneration = -1;
+    let liveGeneration = -1;
+    const again = this.mediaResyncAgain.delete(sessionId);
+    this.mediaResyncPending.delete(sessionId);
+    this.mediaResyncEmitted.delete(sessionId);
     this.sessionFeeds.get(sessionId)?.stop();
     const feed = new EventFeed(
       this.requireClient(),
       {
-        event: (envelope) => this.emit("sessionEvent", { sessionId, envelope }),
+        event: (envelope) => {
+          if (this.sessionFeeds.get(sessionId) !== feed) return;
+          const generation = envelope.correlation?.runtimeGeneration;
+          if (generation != null) latestGeneration = Math.max(latestGeneration, generation);
+          this.emit("sessionEvent", { sessionId, envelope: withoutLiveImages(envelope) });
+          if (needsFullTextRepair(envelope, liveDeltas && generation != null && generation === liveGeneration && generation === latestGeneration)) this.repairFullText(envelope, sessionId, feed);
+          else this.resyncPartialMedia(envelope, sessionId);
+        },
+        liveDelta: (frame) => {
+          if (this.sessionFeeds.get(sessionId) === feed) {
+            if (frame.runtimeGeneration >= latestGeneration) liveGeneration = frame.runtimeGeneration;
+            this.emit("sessionLiveDelta", { sessionId, frame });
+          }
+        },
+        liveReset: () => {
+          if (this.sessionFeeds.get(sessionId) === feed) this.emit("sessionLiveReset", { sessionId });
+        },
         traffic: (sample) => { if (this.sessionFeeds.get(sessionId) === feed) this.sessionTraffic.add(sample); },
         resync: (reason) => {
+          if (this.sessionFeeds.get(sessionId) !== feed) return;
+          this.sessionFeedAttempts.delete(sessionId);
           this.sessionFeeds.delete(sessionId);
           this.emit("sessionResync", { sessionId, reason });
         },
-        status: (status) => this.emit("sessionStatus", { sessionId, status }),
+        status: (status) => { if (this.sessionFeeds.get(sessionId) === feed) this.emit("sessionStatus", { sessionId, status }); },
       },
-      { cutexSessionId: sessionId, streamId: from.streamId, after: from.after ?? undefined },
+      { cutexSessionId: sessionId, streamId: from.streamId, after: from.after ?? undefined, liveDeltas },
     );
     this.sessionFeeds.set(sessionId, feed);
     feed.start();
+    if (again) this.queuePartialMediaResync(sessionId);
   }
 
   async unsubscribe(sessionId: string): Promise<void> {
+    this.sessionFeedAttempts.delete(sessionId);
+    this.mediaResyncPending.delete(sessionId);
+    this.mediaResyncEmitted.delete(sessionId);
+    this.mediaResyncAgain.delete(sessionId);
     this.sessionFeeds.get(sessionId)?.stop();
     this.sessionFeeds.delete(sessionId);
   }
 
   async submit(sessionId: string, text: string, strategy: "auto" | "queue" | "interrupt", startIfOffline = false, options: SubmitOptions = {}) {
     const client = this.requireClient();
+    const joinDelegation = ownerJoinIntent(options.joinDelegation);
     const generation = this.gen;
     const clientUserMessageId = typeof options.clientUserMessageId === "string" && options.clientUserMessageId.length <= 128 ? options.clientUserMessageId : undefined;
     const trace = { sessionId, clientUserMessageId, hostId: this.state.kind === "connected" ? this.state.hostId : undefined };
@@ -587,7 +1011,7 @@ export class DaemonService implements DaemonApi {
     const result = await traceSendStage({ ...trace, stage: "daemon-submit" }, (record) => logError({
       ...record, httpStages: httpTrace.snapshot(),
       hostSse: hostTraffic.snapshot(), sessionSse: sessionTraffic.snapshot(),
-    }), () => client.submitInput(sessionId, input, strategy, { startIfOffline, clientUserMessageId, onHttpTrace: httpTrace.observe }));
+    }), () => client.submitInput(sessionId, input, strategy, { startIfOffline: joinDelegation ? false : startIfOffline, clientUserMessageId, joinDelegation, onHttpTrace: httpTrace.observe }));
     this.assertInputScope(client, generation);
     return result;
   }
@@ -674,6 +1098,31 @@ export class DaemonService implements DaemonApi {
     }
   }
 
+  /** `GET /v2/profiles/{p}/reset-credits` (cutex `profile-reset-credits`); null when the route is missing. */
+  async profileResetCredits(profile: string, refresh = false): Promise<ResetCreditsView | null> {
+    if (typeof profile !== "string" || !profile || profile.length > 200) throw new Error("bad profile");
+    try {
+      const raw = await this.requireClient().request<unknown>("GET", `/v2/profiles/${encodeURIComponent(profile)}/reset-credits`, {
+        query: refresh ? { refresh: "true" } : undefined,
+      });
+      return resetCreditsViewOf(raw);
+    } catch (error) {
+      if (error instanceof CutexApiError && (error.status === 404 || error.status === 405)) return null;
+      throw error;
+    }
+  }
+
+  /** `POST /v2/profiles/{p}/reset-credits/consume`: uses one reset credit. Only after the owner's confirm. */
+  async consumeResetCredit(profile: string, body: { idempotencyKey: string; creditId?: string | null }): Promise<ResetConsumeResult> {
+    if (typeof profile !== "string" || !profile || profile.length > 200) throw new Error("bad profile");
+    if (!body || typeof body.idempotencyKey !== "string" || !validIdempotencyKey(body.idempotencyKey)) throw new Error("bad idempotency key");
+    const creditId = typeof body.creditId === "string" && body.creditId.length > 0 && body.creditId.length <= 200 ? body.creditId : undefined;
+    const raw = await this.requireClient().request<unknown>("POST", `/v2/profiles/${encodeURIComponent(profile)}/reset-credits/consume`, {
+      body: { idempotencyKey: body.idempotencyKey, ...(creditId ? { creditId } : {}) },
+    });
+    return consumeResultOf(raw);
+  }
+
   async readRateLimits(sessionId: string): Promise<Record<string, unknown> | null> {
     try {
       // No params: the app-server schema rejects `{}` for this method.
@@ -707,10 +1156,50 @@ export class DaemonService implements DaemonApi {
   }
 
   async capabilities(): Promise<CapabilitiesView | null> {
-    const client = this.requireClient();
-    const caps = await client.capabilities<CapabilitiesView>();
-    if (this.client === client) this.restricted = !userAccessOf(caps).isOwner;
+    return this.readCapabilities(this.requireClient());
+  }
+
+  private readCapabilities(client: CutexClient, options: { signal?: AbortSignal } = {}): Promise<CapabilitiesView | null> {
+    const cache = this.capabilitiesCache;
+    const load = async () => {
+      const caps = await this.loadCapabilities(client, options);
+      // A missing route can appear after an in-place daemon upgrade; don't memoize absence.
+      if (caps === null) cache.invalidate();
+      return caps;
+    };
+    return cache.read(() => {
+      const signal = options.signal;
+      if (!signal) return load();
+      return new Promise<CapabilitiesView | null>((resolve, reject) => {
+        const abort = () => reject(new Error("capability probe aborted"));
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
+        load().then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+      });
+    });
+  }
+
+  private async loadCapabilities(client: CutexClient, options: { signal?: AbortSignal }): Promise<CapabilitiesView | null> {
+    const access = this.accessRevision, revision = this.capabilitiesRevision;
+    const raw = await client.capabilities<CapabilitiesView>(options);
+    if (options.signal?.aborted || this.client !== client || access !== this.accessRevision || revision !== this.capabilitiesRevision) throw new Error("capability scope changed");
+    const blobs = raw?.eventMediaBlobs === true || raw?.featureList?.some(feature => feature === EVENT_MEDIA_BLOBS_FEATURE || feature === "eventMediaBlobs");
+    let caps = blobs && !raw?.featureList?.includes(EVENT_MEDIA_BLOBS_FEATURE)
+      ? { ...raw!, featureList: [...(raw?.featureList ?? []), EVENT_MEDIA_BLOBS_FEATURE] } : raw;
+    if (caps?.features?.liveTextDeltas === true && !caps.featureList?.includes(LIVE_DELTAS_FEATURE))
+      caps = { ...caps, featureList: [...(caps.featureList ?? []), LIVE_DELTAS_FEATURE] };
+    if (this.client === client && access === this.accessRevision) {
+      this.liveDeltasClient = caps === null ? null : client;
+      this.liveDeltasSupported = caps?.featureList?.includes(LIVE_DELTAS_FEATURE) === true;
+      this.restricted = !userAccessOf(caps).isOwner;
+      this.mediaRefsClient = caps?.featureList?.some(feature => feature === HISTORY_MEDIA_REFS || feature === EVENT_MEDIA_BLOBS_FEATURE || feature === "eventMediaBlobs") || caps?.eventMediaBlobs === true ? client : null;
+    }
     return caps;
+  }
+
+  /** Main-only: the fixed link-secret route is deliberately absent from DaemonApi/preload. */
+  profileLinkRequest<T>(method: "GET" | "PUT", body?: unknown): Promise<T> {
+    return this.requireClient().request<T>(method, "/v2/profile-link/secret", body === undefined ? {} : { body });
   }
 
   async usage(query: { from?: string; to?: string; groupBy: UsageDimension[]; source?: UsageSourceFilter }): Promise<UsageReport | null> {
@@ -730,6 +1219,15 @@ export class DaemonService implements DaemonApi {
 
   putUsagePrices(prices: UsagePrices): Promise<UsagePrices> {
     return this.requireClient().request<UsagePrices>("PUT", "/v2/usage/prices", { body: prices });
+  }
+
+  // The owner's guide choice (cutex guides.preferences): 全部跳过 shared across the owner's devices.
+  guidesPreferences(): Promise<GuidesPreferences> {
+    return this.requireClient().request<GuidesPreferences>("GET", "/v2/human/preferences/guides");
+  }
+
+  putGuidesPreferences(skippedThrough: string | null): Promise<GuidesPreferences> {
+    return this.requireClient().request<GuidesPreferences>("PUT", "/v2/human/preferences/guides", { body: { schema: 1, skippedThrough } });
   }
 
   // Extra usage sources (cutex usage-external-sources): Claude Code / Codex CLI / ZCode directories cutex imports.
@@ -809,6 +1307,19 @@ export class DaemonService implements DaemonApi {
   /** Owner-only host file read (cutex fs-file-read): previews a file outside every workspace root. */
   hostFile(path: string, maxBytes?: number): Promise<FsFile> {
     return this.requireClient().request<FsFile>("GET", "/v2/fs/file", { query: { path, maxBytes } });
+  }
+
+  /** Main-only byte transport; never exposed through DaemonApi or the renderer. */
+  async copyTransport(source: CopySource, check: () => void) {
+    const client = this.requireClient(), generation = this.generation;
+    const caps = await this.capabilities();
+    check();
+    if (!caps?.featureList?.includes("fs-file-transfer-v1")) throw new Error("file transfer is unavailable on this host");
+    if (source.artifact && !caps.featureList.includes("artifacts")) throw new Error("artifact reads are unavailable on this host");
+    return remoteCopyTransport(client, source, () => {
+      check();
+      if (this.client !== client || this.generation !== generation) throw new Error("source connection changed");
+    });
   }
 
   fsSearch(scope: WorkspaceScope, q: string, limit?: number) {
@@ -965,7 +1476,47 @@ export class DaemonService implements DaemonApi {
   }
 
   async patchProfile(profile: string, patch: ProfilePatch): Promise<ProfileDetail> {
-    return (await this.requireClient().request<{ profile: ProfileDetail }>("PATCH", this.profilePath(profile), { body: patch })).profile;
+    const body: ProfilePatch = { ...patch };
+    // Write-only fields are rebuilt here (shared/profileVariants.ts); errors never repeat a key.
+    if (body.apiKey !== undefined && body.apiKey !== null) body.apiKey = profileApiKey(body.apiKey);
+    if (body.credential !== undefined) body.credential = credentialSourceBody(body.credential);
+    if (body.defaultVariant !== undefined && body.defaultVariant !== null) body.defaultVariant = variantIdOf(body.defaultVariant);
+    if (body.kimiAccount !== undefined && body.kimiAccount !== null) body.kimiAccount = kimiAccountId(body.kimiAccount);
+    return (await this.requireClient().request<{ profile: ProfileDetail }>("PATCH", this.profilePath(profile), { body })).profile;
+  }
+
+  // profile-runtime-variants (r265): add / edit / remove a Profile's runtime variants; refusals come back as data.
+  async addProfileVariant(profile: string, request: Parameters<DesktopApi["addProfileVariant"]>[1]): Promise<VariantResult> {
+    const body = variantAddBody(request);
+    return this.variantCall(() => this.requireClient().request<{ variant?: ProfileRuntimeVariant; profile: ProfileDetail }>("POST", `${this.profilePath(profile)}/variants`, { body }));
+  }
+
+  async patchProfileVariant(profile: string, variantId: string, defaults: Parameters<DesktopApi["patchProfileVariant"]>[2]): Promise<VariantResult> {
+    const body = variantPatchBody(defaults);
+    return this.variantCall(() => this.requireClient().request<{ variant?: ProfileRuntimeVariant; profile: ProfileDetail }>("PATCH", `${this.profilePath(profile)}/variants/${encodeURIComponent(variantIdOf(variantId))}`, { body }));
+  }
+
+  async deleteProfileVariant(profile: string, variantId: string): Promise<{ ok: true; defaultVariant: string | null; profile?: ProfileDetail } | { ok: false; error: CutexRefusal }> {
+    const path = `${this.profilePath(profile)}/variants/${encodeURIComponent(variantIdOf(variantId))}`;
+    try {
+      const r = await this.requireClient().request<{ defaultVariant?: string | null; profile?: ProfileDetail }>("DELETE", path);
+      return { ok: true, defaultVariant: r?.defaultVariant ?? null, ...(r?.profile ? { profile: r.profile } : {}) };
+    } catch (error) {
+      const refusal = refusalOf(error);
+      if (refusal) return { ok: false, error: refusal };
+      throw error;
+    }
+  }
+
+  private async variantCall(run: () => Promise<{ variant?: ProfileRuntimeVariant; profile: ProfileDetail }>): Promise<VariantResult> {
+    try {
+      const r = await run();
+      return { ok: true, profile: r.profile, variant: r.variant ?? null };
+    } catch (error) {
+      const refusal = refusalOf(error);
+      if (refusal) return { ok: false, error: refusal };
+      throw error;
+    }
   }
 
   // cutex `profile-avatar`: the picture / intro portrait of a profile (owner only, like every profile route).
@@ -983,15 +1534,43 @@ export class DaemonService implements DaemonApi {
     return this.requireClient().putProfileImage(profileId, kind, { contentType: match[1] as AvatarContentType, data: match[2]! });
   }
 
-  async createProfile(request: ProfileCreateRequest): Promise<ProfileDetail> {
+  async createProfile(request: ProfileCreateBody): Promise<ProfileDetail> {
     // Forward only the known fields (cutex validates kind / preset / URL).
     const body: Record<string, unknown> = { name: request.name.trim(), kind: request.kind };
     for (const k of ["preset", "baseUrl", "model"] as const) {
       const v = request[k]?.trim();
       if (v) body[k] = v;
     }
+    if (request.interfaceBaseUrls !== undefined) {
+      if (request.kind !== "apiKey" && request.kind !== "dsh") throw new Error("interface base URLs are only valid for API-key or DSH profiles");
+      const urls = request.interfaceBaseUrls;
+      if (!urls || typeof urls !== "object" || Array.isArray(urls)) throw new Error("bad interface base URLs");
+      // Rebuild the allow-listed interface map; never forward arbitrary renderer fields.
+      body.interfaceBaseUrls = urls.deepseekNative === undefined ? {} : { deepseekNative: variantBaseUrl(urls.deepseekNative) };
+    }
+    if (request.kind === "dsh") {
+      const dsh = request.options?.dsh;
+      // profile-runtime-variants: a stored key or a named variable replaces the legacy env default (no fallback).
+      const ownCredential = request.apiKey !== undefined || request.credential !== undefined;
+      // No (valid) model: leave it out and cutex picks its default — main writes no model name of its own.
+      const model = typeof dsh?.model === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(dsh.model.trim()) ? dsh.model.trim() : null;
+      body.options = { dsh: { ...(model ? { model } : {}), ...(ownCredential ? {} : { apiKeyEnv: "DEEPSEEK_API_KEY" }), ...(dsh?.reasoningEffort && ["off", "low", "high", "max"].includes(dsh.reasoningEffort) ? { reasoningEffort: dsh.reasoningEffort } : {}) } };
+      if (request.credential !== undefined) body.credential = credentialSourceBody(request.credential);
+    }
+    // Write-only: an API-key or DSH profile's key, in this one request (never logged or returned).
+    if (request.apiKey !== undefined) {
+      if (request.kind !== "apiKey" && request.kind !== "dsh") throw new Error("apiKey is only valid for API-key or DSH profiles");
+      const key = writeOnlyApiKey(request.apiKey);
+      if (request.credential?.source !== "env") body.apiKey = key;
+    }
     // claude-accounts: a Claude profile's account (a well-formed id; `default` = leave it out).
     if (request.kind === "claude" && request.claudeAccount !== undefined && request.claudeAccount !== DEFAULT_CLAUDE_ACCOUNT) body.claudeAccount = claudeAccountId(request.claudeAccount);
+    // kimi-runtime-profiles: the account is the credential; Kimi relay addresses use the primary baseUrl.
+    if (request.kind === "kimi") {
+      for (const k of ["preset", "model"] as const) delete body[k];
+      if (request.baseUrl !== undefined) body.baseUrl = variantBaseUrl(request.baseUrl);
+      if (request.kimiAccount !== undefined) body.kimiAccount = kimiAccountId(request.kimiAccount);
+    }
     return profileOf(await this.requireClient().request<{ profile: ProfileDetail }>("POST", "/v2/profiles", { body }));
   }
 
@@ -1097,6 +1676,40 @@ export class DaemonService implements DaemonApi {
     }
   }
 
+  async approvalRules(): Promise<ApprovalRulesView | null> {
+    try {
+      return await this.requireClient().request<ApprovalRulesView>("GET", "/v2/approval-rules");
+    } catch (error) {
+      if (error instanceof CutexApiError && (error.status === 404 || error.status === 405)) return null;
+      throw error;
+    }
+  }
+
+  confirmApprovalRule(rule: ApprovalRuleDraft, typedPhrase: string): Promise<{ confirmationToken: string; requiredPhrase: string; expiresInSeconds: number }> {
+    if (typeof typedPhrase !== "string" || typedPhrase.length > 500) throw new Error("bad approval rule confirmation");
+    return this.requireClient().request("POST", "/v2/approval-rules/confirm", { body: { rule: approvalRuleBody(rule), typedPhrase } });
+  }
+
+  createApprovalRule(expectedRevision: number, rule: ApprovalRuleDraft, confirmationToken?: string): Promise<ApprovalRuleMutation> {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new Error("bad approval rule revision");
+    return this.requireClient().request("POST", "/v2/approval-rules", { body: { expectedRevision, rule: approvalRuleBody(rule), ...(confirmationToken ? { confirmationToken } : {}) } });
+  }
+
+  patchApprovalRule(ruleId: string, expectedRevision: number, rule: ApprovalRuleDraft, confirmationToken?: string): Promise<ApprovalRuleMutation> {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new Error("bad approval rule revision");
+    return this.requireClient().request("PATCH", `/v2/approval-rules/${encodeURIComponent(approvalRuleId(ruleId))}`, { body: { expectedRevision, rule: approvalRuleBody(rule), ...(confirmationToken ? { confirmationToken } : {}) } });
+  }
+
+  deleteApprovalRule(ruleId: string, expectedRevision: number): Promise<ApprovalRuleMutation> {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new Error("bad approval rule revision");
+    return this.requireClient().request("DELETE", `/v2/approval-rules/${encodeURIComponent(approvalRuleId(ruleId))}`, { body: { expectedRevision } });
+  }
+
+  approvalRuleAudit(cursor = 0, limit = 100): Promise<ApprovalRuleAuditPage> {
+    if (!Number.isSafeInteger(cursor) || cursor < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new Error("bad approval rule audit query");
+    return this.requireClient().request("GET", "/v2/approval-rules/audit", { query: { cursor, limit } });
+  }
+
   runtimePackages(): Promise<RuntimePackagesView | null> {
     return this.requireClient().runtimePackages<RuntimePackagesView>();
   }
@@ -1140,6 +1753,42 @@ export class DaemonService implements DaemonApi {
     return this.directorRotationCall(() => this.requireClient().directorRotationAction<DirectorRotation>(rotationId, "continue"));
   }
 
+  delegationUpgradeSnapshot(projectId: string, cursor?: string) {
+    return readDelegationUpgrade(this.requireClient(),projectId,cursor);
+  }
+  delegationUpgradeAction(projectId: string, action: import("../shared/delegationUpgradePreview").UpgradeAction) {
+    return executeDelegationUpgrade(this.requireClient(),projectId,action);
+  }
+  async delegationUpgradeApproval(approvalId: string) {
+    return projectDelegationApproval(await this.requireClient().delegationApproval(approvalId));
+  }
+  async delegationRoutingApprovals(projectId: string) {
+    if (!/^(?!\.+$)[A-Za-z0-9_.:-]{1,256}$/.test(projectId)) throw new Error("bad project identifier");
+    const result = await this.requireClient().request<{ routingApprovals: import("@cutex-desktop/protocol").DelegationApproval[] }>("GET", `/v2/projects/${projectId}/delegation-approvals`, { query: { state: "pending" } });
+    return result.routingApprovals.map(projectDelegationApproval);
+  }
+  delegationUpgradeOperation(actionId: string) {
+    return this.requireClient().delegationOperation(actionId);
+  }
+  async delegationRetirementReview(projectId: string, request: import("@cutex-desktop/protocol").PermanentRetirementReviewRequest) {
+    const client=this.requireClient();
+    const caps=await client.capabilities<{featureList:string[];user?:unknown}>();
+    if (!caps?.featureList.includes("agent-archive-kind-v1") || !userAccessOf(caps).isOwner) throw new Error("retirement_review_unavailable");
+    const workspace=await client.project(projectId);
+    if (![...workspace.active_agents,...workspace.retired_agents,...(workspace.archived_agents??[])].some(row=>row.agent.cutex_session_id===request.cutex_session_id)&&workspace.director?.cutex_session_id!==request.cutex_session_id) throw new Error("member_scope_changed");
+    return client.permanentRetirementReview(request);
+  }
+
+  async closeBusMessage(request: import("@cutex-desktop/protocol").MessageSettlementCloseRequest): Promise<import("../shared/ipc").MessageSettlementCloseResult> {
+    const body = messageSettlementCloseBody(request);
+    try {
+      return { ok: true, result: await this.requireClient().closeBusMessage(body) };
+    } catch (error) {
+      if (error instanceof CutexApiError) return { ok: false, error: { code: error.code, message: error.message, status: error.status } };
+      throw error;
+    }
+  }
+
   async stuckBusMessages(minAgeSecs: number): Promise<StuckBusView | null> {
     const wanted = cleanMinAge(minAgeSecs);
     const raw = await this.requireClient().stuckBusMessages(wanted);
@@ -1171,20 +1820,30 @@ export class DaemonService implements DaemonApi {
     return this.requireClient().runtimes<RuntimesWire>();
   }
 
-  // Claude accounts: bodies are rebuilt from known fields here (shared/claudeAccounts.ts), so no
-  // API key or login can pass through this bridge; logins run in the owner's terminal.
+  // Claude accounts: bodies are rebuilt from known fields here (shared/claudeAccounts.ts); an API key
+  // passes only as the write-only `apiKey` of create / setClaudeAccountKey; logins run in the owner's terminal.
   claudeAccounts(): Promise<ClaudeAccountList | null> {
     return this.requireClient().claudeAccounts<ClaudeAccountList>();
   }
 
   createClaudeAccount(request: ClaudeAccountCreate): Promise<ClaudeAccountResult> {
     const body = claudeAccountCreateBody(request);
+    // cutex-client's createClaudeAccount refuses `apiKey` (its keyless contract); the inline key goes
+    // through the plain request with the same route and refusal handling.
+    if (body.apiKey !== undefined) return this.claudeAccountCall(() => this.requireClient().request<ClaudeAccount>("POST", "/v2/claude/accounts", { body: { ...body } }));
     return this.claudeAccountCall(() => this.requireClient().createClaudeAccount<ClaudeAccount>(body));
   }
 
   renameClaudeAccount(id: string, label: string): Promise<ClaudeAccountResult> {
     const accountId = claudeAccountId(id);
     const patch = claudeAccountRenameBody(label);
+    return this.claudeAccountCall(() => this.requireClient().updateClaudeAccount<ClaudeAccount>(accountId, patch));
+  }
+
+  /** Write-only: the key goes to cutex in this one request and is not kept, logged or returned. */
+  setClaudeAccountKey(id: string, apiKey: string): Promise<ClaudeAccountResult> {
+    const accountId = claudeAccountId(id);
+    const patch = claudeAccountKeyBody(apiKey);
     return this.claudeAccountCall(() => this.requireClient().updateClaudeAccount<ClaudeAccount>(accountId, patch));
   }
 
@@ -1202,6 +1861,72 @@ export class DaemonService implements DaemonApi {
   checkClaudeAccount(id: string): Promise<ClaudeAccountResult> {
     const accountId = claudeAccountId(id);
     return this.claudeAccountCall(() => this.requireClient().checkClaudeAccount<ClaudeAccount>(accountId));
+  }
+
+  // Kimi accounts (r266): ids / labels checked here; the login runs on the host (cutex drives `kimi login`), the
+  // desktop only shows its URL / code and polls. No token ever passes through the desktop.
+  async kimiAccounts(): Promise<KimiAccountList | null> {
+    try {
+      return await this.requireClient().request<KimiAccountList>("GET", "/v2/kimi/accounts");
+    } catch (error) {
+      if (error instanceof CutexApiError && (error.status === 404 || error.status === 405)) return null;
+      throw error;
+    }
+  }
+
+  createKimiAccount(request: { label: string; region?: string }): Promise<KimiAccountResult> {
+    const body = kimiAccountCreateBody(request);
+    return this.kimiCall((account) => ({ ok: true, account }), () => this.requireClient().request<KimiAccount>("POST", "/v2/kimi/accounts", { body }));
+  }
+
+  renameKimiAccount(id: string, label: string): Promise<KimiAccountResult> {
+    const path = this.kimiAccountPath(id);
+    const body = kimiAccountRenameBody(label);
+    return this.kimiCall((account) => ({ ok: true, account }), () => this.requireClient().request<KimiAccount>("PATCH", path, { body }));
+  }
+
+  deleteKimiAccount(id: string): Promise<KimiAccountRemoveResult> {
+    const path = this.kimiAccountPath(id);
+    return this.kimiCall((removed) => ({ ok: true, removed }), () => this.requireClient().request<KimiAccountRemoved>("DELETE", path));
+  }
+
+  checkKimiAccount(id: string): Promise<KimiAccountResult> {
+    const path = `${this.kimiAccountPath(id)}/status`;
+    return this.kimiCall((account) => ({ ok: true, account }), () => this.requireClient().request<KimiAccount>("POST", path, { body: {} }));
+  }
+
+  logoutKimiAccount(id: string): Promise<KimiAccountResult> {
+    const path = `${this.kimiAccountPath(id)}/logout`;
+    return this.kimiCall((account) => ({ ok: true, account }), () => this.requireClient().request<KimiAccount>("POST", path, { body: {} }));
+  }
+
+  startKimiLogin(id: string): Promise<KimiLoginResult> {
+    const path = `${this.kimiAccountPath(id)}/login`;
+    return this.kimiCall((login) => ({ ok: true, login }), () => this.requireClient().request<KimiLogin>("POST", path, { body: {} }));
+  }
+
+  kimiLogin(id: string, loginId: string): Promise<KimiLoginResult> {
+    const path = `${this.kimiAccountPath(id)}/login/${encodeURIComponent(kimiLoginId(loginId))}`;
+    return this.kimiCall((login) => ({ ok: true, login }), () => this.requireClient().request<KimiLogin>("GET", path));
+  }
+
+  cancelKimiLogin(id: string, loginId: string): Promise<KimiLoginResult> {
+    const path = `${this.kimiAccountPath(id)}/login/${encodeURIComponent(kimiLoginId(loginId))}`;
+    return this.kimiCall((login) => ({ ok: true, login }), () => this.requireClient().request<KimiLogin>("DELETE", path));
+  }
+
+  private kimiAccountPath(id: string): string {
+    return `/v2/kimi/accounts/${encodeURIComponent(kimiAccountId(id))}`;
+  }
+
+  private async kimiCall<T, R>(ok: (value: T) => R, call: () => Promise<T>): Promise<R | { ok: false; error: CutexRefusal }> {
+    try {
+      return ok(await call());
+    } catch (error) {
+      const refusal = refusalOf(error);
+      if (refusal) return { ok: false, error: refusal };
+      throw error;
+    }
   }
 
   private async claudeAccountCall(call: () => Promise<ClaudeAccount>): Promise<ClaudeAccountResult> {
@@ -1346,6 +2071,7 @@ export class DaemonService implements DaemonApi {
       // owner-notify: through patchOwnerNotify (the view carries read-only deliveryDefault / phonePaired).
       ownerNotify: _ownerNotify,
       agentHarnessDefault: _harnessDefault,
+      promptCacheKeyDefault: _promptCacheKeyDefault,
       agentBusDefault: _agentBusDefault,
       agentBusRange: _agentBusRange,
       // peers-v2: through patchPeersSettings (loopback-only; a stray copy must not make every save fail remotely).
@@ -1448,7 +2174,11 @@ export class DaemonService implements DaemonApi {
   }
 
   services(): Promise<ServicesList> {
-    return this.requireClient().request<ServicesList>("GET", "/v2/services");
+    return this.requireClient().request<ServicesList>("GET", "/v2/services", { query: { visibility: "all" } });
+  }
+
+  serviceEligibleOwners(slug: string): Promise<import("../shared/serviceOwners").EligibleServiceOwners> {
+    return this.requireClient().request("GET", `/v2/services/${encodeURIComponent(slug)}/eligible-owners`);
   }
 
   async registerService(request: Record<string, unknown>): Promise<ServiceView> {
@@ -1463,8 +2193,8 @@ export class DaemonService implements DaemonApi {
     await this.requireClient().request("DELETE", `/v2/services/${encodeURIComponent(slug)}`);
   }
 
-  async serviceAction(slug: string, action: "start" | "stop" | "restart"): Promise<ServiceView> {
-    if (!["start", "stop", "restart"].includes(action)) throw new Error("bad service action");
+  async serviceAction(slug: string, action: "start" | "stop" | "restart" | "archive" | "restore"): Promise<ServiceView> {
+    if (!["start", "stop", "restart", "archive", "restore"].includes(action)) throw new Error("bad service action");
     return (await this.requireClient().request<{ service: ServiceView }>("POST", `/v2/services/${encodeURIComponent(slug)}/${action}`)).service;
   }
 
@@ -1480,6 +2210,11 @@ export class DaemonService implements DaemonApi {
 
   async patchServicesSettings(patch: ServicesSettingsPatch): Promise<ServicesSettings> {
     const body = servicesSettingsPatch(patch);
+    if (body.ephemeralIdleMinutes !== undefined) {
+      if (body.agentPersistentApproval !== undefined) throw new Error("service TTL and approval settings must be changed separately");
+      const answer = await this.requireClient().request<{ services: ServicesSettings }>("PATCH", "/v2/settings", { body: { services: body } });
+      return answer.services;
+    }
     return (await this.requireClient().request<{ settings: ServicesSettings }>("PATCH", "/v2/services", { body })).settings;
   }
 
@@ -1524,10 +2259,24 @@ export class DaemonService implements DaemonApi {
     if (request.projectId) body.projectId = request.projectId;
     if (request.cwd) body.cwd = request.cwd;
     if (request.profile) body.profile = request.profile;
+    // profile-runtime-variants: the renderer sends it only to hosts that report the capability.
+    if (request.variantId !== undefined) body.variantId = variantIdOf(request.variantId);
     const launch = sanitizeLaunch(request.launch);
     if (launch) body.launch = launch;
-    const r = await this.requireClient().request<{ cutexSessionId: string }>("POST", "/v2/human/agents", { body });
-    return { cutexSessionId: r.cutexSessionId };
+    const r = await this.requireClient().request<{ cutexSessionId: string; effortFallback?: unknown; profilePick?: unknown }>("POST", "/v2/human/agents", { body });
+    return { cutexSessionId: r.cutexSessionId, effortFallback: effortFallbackOf(r.effortFallback), profilePick: profilePickOf(r.profilePick) };
+  }
+
+  async profileAutoPick(query: Parameters<DesktopApi["profileAutoPick"]>[0]) {
+    const raw = await this.requireClient().request<unknown>("GET", `/v2/profile-auto-pick${autoPickQuery(query ?? {})}`);
+    const preview = autoPickPreviewOf(raw);
+    if (!preview) throw new Error("unexpected profile-auto-pick answer");
+    return preview;
+  }
+
+  async abandonAgentCreate(actionId: string, dryRun: boolean): Promise<CreateAbandonResult> {
+    if (typeof actionId !== "string" || !validActionId(actionId)) throw new Error("bad action id");
+    return this.requireClient().request<CreateAbandonResult>("POST", "/v2/agent-management/create-abandon", { body: { action_id: actionId, dry_run: !!dryRun } });
   }
 
   async createHumanSession(request: Parameters<DesktopApi["createHumanSession"]>[0]) {
@@ -1535,6 +2284,7 @@ export class DaemonService implements DaemonApi {
     if (request.cwd) body.cwd = request.cwd;
     if (request.profile) body.profile = request.profile;
     if (request.displayName?.trim()) body.displayName = request.displayName.trim().slice(0, 64).trim();
+    if (request.variantId !== undefined) body.variantId = variantIdOf(request.variantId);
     const launch = sanitizeLaunch(request.launch);
     if (launch) body.launch = launch;
     const r = await this.requireClient().request<{ cutexSessionId: string }>("POST", "/v2/human/sessions", { body });
@@ -1544,17 +2294,17 @@ export class DaemonService implements DaemonApi {
   async sessionAction(sessionId: string, method: SessionActionMethod, params: Record<string, unknown>) {
     if (!(SESSION_ACTION_METHODS as readonly string[]).includes(method)) throw new Error(`method not allowed: ${method}`);
     if (method === "cutex/session/defaults/update") checkDefaultsPatch(params);
-    return this.requireClient().cutex<unknown>(sessionId, method, params);
+    const client = this.requireClient();
+    try { return await client.cutex<unknown>(sessionId, method, params); }
+    finally {
+      if (this.client === client) this.invalidateSidebarEvent({ cutexSessionId: sessionId, cutex: { method, params } } as EventEnvelope);
+    }
   }
 
-  async forkSession(sessionId: string, request: { afterTurnId?: string | null; name?: string }): Promise<{ cutexSessionId: string }> {
-    const params: Record<string, unknown> = { afterTurnId: request.afterTurnId ?? null };
-    if (request.name?.trim()) params.name = request.name.trim();
-    // cutex answers `{ newCutexSessionId, session, … }` (cutex/session/fork).
-    const r = (await this.sessionAction(sessionId, "cutex/session/fork", params)) as { newCutexSessionId?: string; cutexSessionId?: string; session?: { cutexSessionId?: string } } | null;
-    const id = r?.newCutexSessionId ?? r?.session?.cutexSessionId ?? r?.cutexSessionId;
-    if (!id) throw new Error("cutex/session/fork returned no session");
-    return { cutexSessionId: id };
+  forkPreview(sessionId: string, request?: SessionForkPreviewRequest) { return forkPreview(this.requireClient(), sessionId, request); }
+
+  async forkSession(sessionId: string, request: SessionForkRequest): Promise<SessionForkResult> {
+    return forkResult(await this.sessionAction(sessionId, "cutex/session/fork", forkRequestParams(request)));
   }
 
   deleteSession(sessionId: string, expectedRevision?: number): Promise<MutationResult> {
@@ -1582,6 +2332,76 @@ export class DaemonService implements DaemonApi {
     await this.requireClient().native(sessionId, "thread/backgroundTerminals/terminate", { threadId, processId });
   }
 
+  async stopClaudeTask(sessionId: string, threadId: string, taskId: string): Promise<void> {
+    await this.requireClient().native(sessionId, "claude/tasks/stop", { threadId, taskId });
+  }
+
+  // ---------- project log (project-events, design 022) ----------
+
+  private async projectEventRead<T>(read: (client: CutexClient) => Promise<T>): Promise<ProjectEventsResult<T>> {
+    try {
+      return { ok: true, value: await read(this.requireClient()) };
+    } catch (error) {
+      if (error instanceof CutexApiError) {
+        // A cutex without the route: router 404 / 405 with no project-events code.
+        const missing = (error.status === 404 || error.status === 405) && error.code !== "project_not_found";
+        return { ok: false, code: missing ? "unsupported" : error.code, message: error.message };
+      }
+      if (error instanceof CutexUnreachableError) return { ok: false, code: "unreachable", message: error.message };
+      throw error;
+    }
+  }
+
+  directorScopeCandidates(projectId: string) { return this.projectEventRead((c) => directorScopeCandidates(c, projectId)); }
+  directorReviewContent(projectId: string, id: string) { return this.projectEventRead((c) => directorReviewContent(c, projectId, id)); }
+  projectDirector(projectId: string) { return this.projectEventRead((c) => projectDirector(c, projectId)); }
+  directorHandovers(projectId: string) { return this.projectEventRead((c) => directorHandovers(c, projectId)); }
+  directorStartReviews(projectId: string) { return this.projectEventRead((c) => directorStartReviews(c, projectId)); }
+  decideDirectorItem(projectId: string, kind: "handover" | "start-reviews", id: string, decision: "accept" | "discard", fence: DirectorFence) {
+    if (!["handover", "start-reviews"].includes(kind) || !["accept", "discard"].includes(decision)) throw new Error("Invalid Director decision");
+    return this.projectEventRead((c) => decideDirectorItem(c, projectId, kind, id, decision, fence));
+  }
+  approveDirectorScope(projectId: string, scope: DirectorScope) { return this.projectEventRead((c) => approveDirectorScope(c, projectId, scope)); }
+
+  projectEvents(projectId: string, query: ProjectEventsQuery): Promise<ProjectEventsResult<ProjectEventPage>> {
+    const limit = typeof query.limit === "number" ? Math.min(500, Math.max(1, Math.floor(query.limit))) : undefined;
+    return this.projectEventRead((client) => projectEventsPage(client, projectId, { ...query, limit }));
+  }
+
+  projectBackground(projectId: string): Promise<ProjectEventsResult<ProjectBackground>> {
+    return this.projectEventRead((client) => projectBackground(client, projectId));
+  }
+
+  async watchProjectEvents(projectId: string, watch: ProjectEventsWatch): Promise<string> {
+    const watchId = randomUUID();
+    const follower = new ProjectEventFollower(
+      this.requireClient(),
+      projectId,
+      {
+        event: (event) => this.emit("projectEvents", { watchId, kind: "event", event }),
+        status: (status) => this.emit("projectEvents", { watchId, kind: "status", status }),
+        reset: () => {
+          this.projectWatches.delete(watchId);
+          this.emit("projectEvents", { watchId, kind: "reset" });
+        },
+        failed: (error) => {
+          this.projectWatches.delete(watchId);
+          this.emit("projectEvents", { watchId, kind: "failed", code: error.code, message: error.message });
+        },
+      },
+      // cutex keeps alive every 25 s: three missed = a half-open connection.
+      { after: watch.after, streamId: watch.streamId ?? null, kinds: watch.kinds, sessionId: watch.sessionId ?? null, idleTimeoutMs: 80_000 },
+    );
+    this.projectWatches.set(watchId, follower);
+    follower.start();
+    return watchId;
+  }
+
+  async unwatchProjectEvents(watchId: string): Promise<void> {
+    this.projectWatches.get(watchId)?.stop();
+    this.projectWatches.delete(watchId);
+  }
+
   async subAgentThread(sessionId: string, threadId: string, opts?: { includeTurns?: boolean }): Promise<unknown> {
     return this.requireClient().native<unknown>(sessionId, "thread/read", { threadId, includeTurns: opts?.includeTurns !== false });
   }
@@ -1591,8 +2411,23 @@ export class DaemonService implements DaemonApi {
     return { data: Array.isArray(page?.data) ? page.data : [], nextCursor: typeof page?.nextCursor === "string" ? page.nextCursor : null };
   }
 
+  async operatorRuntimeNotice(projectId: string, sessionId: string) {
+    const client = this.requireClient(), generation = this.gen;
+    const current = () => this.gen === generation;
+    const workspace = await client.project(projectId);
+    if (!current() || workspace.access_role !== "human_management" || !workspace.active_agents.some(member => member.agent.cutex_session_id === sessionId) || workspace.director?.cutex_session_id === sessionId) throw Error("operator_unavailable");
+    return recordOperatorRuntimeNotice({ read: () => client.session(sessionId), notices: this.operatorRestartNotices, current });
+  }
+  projectRead(projectId: string) { return this.requireClient().project(projectId); }
+  async operatorAction(request: import("@cutex-desktop/cutex-client").OperatorActionRequest) {
+    const client = this.requireClient();
+    try { return await client.operatorAction(request); }
+    finally { if (this.client === client) this.invalidateSidebarParts(); }
+  }
+
   async projectMutation(projectId: string, expected: { authorityEpoch: number; projectRevision: number }, operation: ProjectMutationOperation) {
-    return this.requireClient().request<unknown>("POST", "/v2/agent-management/project-mutations", {
+    const client = this.requireClient();
+    try { return await client.request<unknown>("POST", "/v2/agent-management/project-mutations", {
       body: {
         schema: "cutex/human-management-project-mutation/v1",
         action_id: `desktop-${randomUUID()}`,
@@ -1601,11 +2436,13 @@ export class DaemonService implements DaemonApi {
         expected_project_revision: expected.projectRevision,
         operation,
       },
-    });
+    }); }
+    finally { if (this.client === client) this.invalidateSidebarParts(); }
   }
 
   async projectPresentation(projectId: string, expected: { authorityEpoch: number; presentationRevision: number }, presentation: { display_name: string; badge_label: string; color: string }) {
-    return this.requireClient().request<unknown>("POST", "/v2/agent-management/project-presentation", {
+    const client = this.requireClient();
+    try { return await client.request<unknown>("POST", "/v2/agent-management/project-presentation", {
       body: {
         schema: "cutex/human-management-project-presentation/v1",
         project_id: projectId,
@@ -1613,7 +2450,8 @@ export class DaemonService implements DaemonApi {
         expected_presentation_revision: expected.presentationRevision,
         presentation,
       },
-    });
+    }); }
+    finally { if (this.client === client) this.invalidateSidebarParts(); }
   }
 
   async projectMemory(projectId: string): Promise<ProjectMemoryView | null> {
@@ -1641,7 +2479,8 @@ export class DaemonService implements DaemonApi {
   // ---------- delegations (cutex asks, root credential) ----------
 
   asks(filter: AskFilter): Promise<AskSummary[] | null> {
-    return this.requireClient().asks<AskSummary>(filter);
+    const { background, ...query } = filter;
+    return this.requireClient().asks<AskSummary>(query, { background });
   }
 
   ask(askId: string): Promise<AskDetail | null> {
@@ -1842,6 +2681,22 @@ export class DaemonService implements DaemonApi {
   // Restore after an unclean stop (cutex runtime-restore-candidates).
   restoreCandidates(): Promise<RestoreCandidates | null> {
     return this.requireClient().restoreCandidates<RestoreCandidates>();
+  }
+
+  // Stop idle agents (cutex stop-idle-agents, design 031): cutex classifies and stops.
+  async idleRuntimes(query: { minIdleSecs: number; projectId?: string }): Promise<IdleRuntimes | null> {
+    try {
+      return await this.requireClient().request<IdleRuntimes>("GET", "/v2/runtimes/idle", {
+        query: { minIdleSecs: String(Math.max(0, Math.round(query.minIdleSecs))), ...(query.projectId ? { projectId: query.projectId } : {}) },
+      });
+    } catch (error) {
+      if (error instanceof CutexApiError && (error.status === 404 || error.status === 405)) return null;
+      throw error;
+    }
+  }
+
+  stopIdle(body: StopIdleRequest): Promise<StopIdleResult> {
+    return this.requireClient().request<StopIdleResult>("POST", "/v2/runtimes/stop-idle", { body });
   }
 
   dismissRestoreCandidates(): Promise<MutationResult> {
@@ -2116,6 +2971,50 @@ export class DaemonService implements DaemonApi {
     return avatar ? { dataUrl: `data:${avatar.contentType};base64,${avatar.data}`, etag: avatar.etag } : null;
   }
 
+  // ---------- home page (cutex `user-home`) and service tiles (`service-tiles`), shared/home.ts ----------
+
+  /** Refusals as values; `home_revision_conflict` carries the host's current revision (`details.revision`). */
+  private async homeCall<T>(run: () => Promise<T>): Promise<HomeResult<T>> {
+    try {
+      return { ok: true, value: await run() };
+    } catch (error) {
+      if (!(error instanceof CutexApiError) || error.code.startsWith("http_")) throw error;
+      const message = error.message.startsWith(`${error.code}: `) ? error.message.slice(error.code.length + 2) : error.message;
+      const revision = (error.details as { revision?: unknown } | null | undefined)?.revision;
+      return { ok: false, error: { code: error.code, message, ...(typeof revision === "number" && Number.isInteger(revision) && revision >= 0 ? { revision } : {}) } };
+    }
+  }
+
+  userHome(): Promise<HomeResult<HomeView | null>> {
+    return this.homeCall(() => this.requireClient().userHome());
+  }
+
+  putUserHome(revision: number, home: HomeDoc | null): Promise<HomeResult<HomeView>> {
+    return this.homeCall(() => this.requireClient().putUserHome(revision, home));
+  }
+
+  async homeCover(): Promise<HomeImage | null> {
+    const image = await this.requireClient().homeCover();
+    return image ? { dataUrl: `data:${image.contentType};base64,${image.data}`, etag: image.etag } : null;
+  }
+
+  putHomeCover(upload: HomeCoverUpload): Promise<HomeResult<HomeView>> {
+    return this.homeCall(() => this.requireClient().putHomeCover(upload));
+  }
+
+  deleteHomeCover(): Promise<HomeResult<HomeView>> {
+    return this.homeCall(() => this.requireClient().deleteHomeCover());
+  }
+
+  serviceTile(slug: string): Promise<ServiceTileAnswer | null> {
+    return this.requireClient().serviceTile(slug);
+  }
+
+  async serviceTileImage(slug: string): Promise<HomeImage | null> {
+    const image = await this.requireClient().serviceTileImage(slug);
+    return image ? { dataUrl: `data:${image.contentType};base64,${image.data}`, etag: image.etag } : null;
+  }
+
   askCommand(sessionId: string, method: AskCommandMethod, params: { askId: string; outcome?: "accepted" | "abandoned" }): Promise<MutationResult> {
     if (!ASK_COMMAND_METHODS.includes(method)) throw new Error(`method not allowed: ${String(method)}`);
     if (typeof params?.askId !== "string" || !/^[A-Za-z0-9._:-]{1,120}$/.test(params.askId)) throw new Error("bad ask id");
@@ -2140,8 +3039,7 @@ export class DaemonService implements DaemonApi {
   // Local host only (a remote path means nothing here). Reveal, never open: opening could run it.
   async revealPath(path: string) {
     if (this.remote) throw new Error("the active host is remote: its files are not on this machine");
-    if (!isAbsolute(path)) throw new Error("revealPath needs an absolute path");
-    shell.showItemInFolder(path);
+    await localFileAction("local", path, "reveal", shell);
   }
 
   async openExternal(url: string) {
@@ -2211,6 +3109,15 @@ export class DaemonService implements DaemonApi {
     return this.requireClient().asksResume(sessionId);
   }
 
+  /** agent-pause: the owner pauses / resumes the whole agent (session requests, Management root credential). */
+  agentPause(sessionId: string) {
+    return this.requireClient().cutex<AgentPauseResult>(sessionId, AGENT_PAUSE_METHOD);
+  }
+
+  agentResume(sessionId: string) {
+    return this.requireClient().cutex<AgentPauseResult>(sessionId, AGENT_RESUME_METHOD);
+  }
+
   /** queue-pause "停止": cutex pauses the queue first, then interrupts the active turn (no auto-send). */
   stopTurn(sessionId: string) {
     return this.requireClient().turnStop(sessionId);
@@ -2223,26 +3130,155 @@ export class DaemonService implements DaemonApi {
    * Older cutex: CAS-remove it (fails if it changed, was flushed or removed meanwhile, so it is never
    * sent twice), then submit the stored input with `auto` under its own clientUserMessageId + origin
    * (cutex dedupes that id against the thread) — which cutex may queue again (an ask holds the
-   * session, a Claude turn runs).
+   * session, a Claude turn runs). `options.ifIdle` "fail": a steer that never starts a turn (a draft
+   * with images queued first, then steered: r264 image-input-steering).
    */
-  async queuePromote(sessionId: string, queueId: string, expectedRevision: number, steer = false): Promise<QueuePromoteResult> {
+  async queuePromote(sessionId: string, queueId: string, expectedRevision: number, steer = false, join?: import("@cutex-desktop/protocol").OwnerJoinDelegation, options: { ifIdle?: "fail" } = {}): Promise<QueuePromoteResult> {
+    const joinDelegation = ownerJoinIntent(join);
+    if (joinDelegation && !steer) throw new Error("queue_steer_refused:joinChanged");
     const client = this.requireClient();
+    const generation = this.gen;
     const { items } = await client.queueList(sessionId);
     const item = items.find((x) => x.queueId === queueId && x.revision === expectedRevision);
     if (!item) throw new Error(steer ? queueSteerErrorMessage("changed") : "queue item changed or already sent");
     if (steer) {
       try {
-        const r = await client.queueSteer(sessionId, queueId, expectedRevision, { ifIdle: "start" });
-        return { result: { disposition: r.disposition, turnId: r.turnId }, clientUserMessageId: r.clientUserMessageId, input: item.input };
+        const r = await withSteerPreflightRetry(() => client.queueSteer(sessionId, queueId, expectedRevision, { ifIdle: joinDelegation || options.ifIdle === "fail" ? "fail" : "start", ...(joinDelegation ? { joinDelegation } : {}) }), () => {
+          this.assertInputScope(client, generation);
+          logError({ source: "queue-steer-preflight", method: "queuePromote", sessionId, message: "retrying a pre-send runtime capability refusal", attempt: 2 });
+        });
+        const imageDelivery = imageDeliveryOf(r);
+        return { result: { disposition: r.disposition, turnId: r.turnId, ...(imageDelivery ? { imageDelivery } : {}) }, clientUserMessageId: r.clientUserMessageId, input: item.input };
       } catch (error) {
-        const kind = error instanceof CutexApiError ? queueSteerErrorKind(error.code, error.details) : null;
+        const kind = error instanceof CutexApiError ? retryableSteerPreflight(error) ? "runtimeNotReady" : queueSteerErrorKind(error.code, error.details) : null;
         if (kind === null) throw error;
-        throw new Error(queueSteerErrorMessage(kind, kind === "runtimeRefused" ? queueSteerErrorDetail((error as CutexApiError).details) : ""));
+        throw new Error(queueSteerErrorMessage(kind, steerErrorDetail(kind, error as CutexApiError)));
       }
     }
     await client.queueRemove(sessionId, queueId, expectedRevision);
     const result = await client.submitInput(sessionId, item.input, "auto", { clientUserMessageId: item.clientUserMessageId, origin: item.origin });
     return { result, clientUserMessageId: item.clientUserMessageId, input: item.input };
+  }
+
+  /**
+   * 「全部合并插入」 (shared/queueMerge): merge the queued owner messages `requested` (queue order, at
+   * the revisions the owner saw) into ONE input and steer it into the running turn. cutex has no
+   * atomic merge, so the merged text always lives in a cutex queue item (never only here):
+   *   1. queue/list: every requested item still at its revision (else nothing is touched: `changed`).
+   *   2. queue/remove the 2nd..Nth merged items with their expected revisions (in order; a conflict
+   *      stops there — the rest stay queued as they are).
+   *   3. queue/update the 1st (the carrier) with the merged input of itself + the removed ones.
+   *      Refused (sent / edited meanwhile): the removed ones go back as ONE queued item at the front.
+   *   4. queue/steer the carrier (one clientUserMessageId: the carrier's); cutex removes it only once
+   *      the native accepted it. Refused: it stays queued as one item, moved to the front (`kept`).
+   *      Older cutex (no queue-steer): CAS-remove + submit `auto`; a failed submit is queued again.
+   */
+  async queueMergeInsert(sessionId: string, requested: { queueId: string; revision: number }[], steer = false, join?: import("@cutex-desktop/protocol").OwnerJoinDelegation): Promise<QueueMergeResult> {
+    const joinDelegation = ownerJoinIntent(join);
+    if (joinDelegation && !steer) throw new Error("queue_steer_refused:joinChanged");
+    const client = this.requireClient();
+    const generation = this.gen;
+    const { items } = await client.queueList(sessionId);
+    const wanted = requested.map((r) => items.find((x) => x.queueId === r.queueId && x.revision === r.revision));
+    if (wanted.some((x) => !x)) throw new Error(queueMergeErrorMessage("changed"));
+    const plan = planQueueMerge(wanted as QueueItem[]);
+    if (!plan) throw new Error(queueMergeErrorMessage(wanted.filter((x) => mergeableOwnerItem(x!)).length >= 2 ? "tooLarge" : "changed"));
+    const [carrier, ...others] = plan.items as [QueueItem, ...QueueItem[]];
+    const removed: QueueItem[] = [];
+    for (const other of others) {
+      if (await this.removeForMerge(sessionId, other)) removed.push(other);
+      else break;
+    }
+    if (!removed.length) throw new Error(queueMergeErrorMessage("changed"));
+    const merged = [carrier, ...removed];
+    const input = mergeQueueInputs(merged.map((x) => x.input));
+    const skipped = requested.map((r) => r.queueId).filter((id) => !merged.some((x) => x.queueId === id));
+    let revision: number;
+    try {
+      const updated = (await client.queueUpdate(sessionId, carrier.queueId, carrier.revision, input)) as { revision?: unknown } | null;
+      if (typeof updated?.revision !== "number") throw new Error("queue/update returned no revision");
+      revision = updated.revision;
+    } catch (error) {
+      // Not in the carrier: the removed messages' text must not vanish — one item at the front.
+      await this.requeueMergedFront(sessionId, mergeQueueInputs(removed.map((x) => x.input)), carrier.origin);
+      throw new Error(queueMergeErrorMessage("kept", error instanceof Error ? error.message : String(error)));
+    }
+    const done = (result: QueueMergeResult["result"]): QueueMergeResult => ({ result, clientUserMessageId: carrier.clientUserMessageId, input, merged: merged.map((x) => x.queueId), skipped });
+    if (steer) {
+      try {
+        const r = await withSteerPreflightRetry(() => client.queueSteer(sessionId, carrier.queueId, revision, { ifIdle: joinDelegation ? "fail" : "start", ...(joinDelegation ? { joinDelegation } : {}) }), () => {
+          this.assertInputScope(client, generation);
+          logError({ source: "queue-steer-preflight", method: "queueMergeInsert", sessionId, message: "retrying a pre-send runtime capability refusal", attempt: 2 });
+        });
+        const imageDelivery = imageDeliveryOf(r);
+        return done({ disposition: r.disposition, turnId: r.turnId, ...(imageDelivery ? { imageDelivery } : {}) });
+      } catch (error) {
+        this.assertInputScope(client, generation);
+        const kind = error instanceof CutexApiError ? retryableSteerPreflight(error) ? "runtimeNotReady" : queueSteerErrorKind(error.code, error.details) : null;
+        // May have reached the native: never moved or re-sent from here.
+        if (kind === "outcomeUnknown" || kind === null) throw new Error(queueSteerErrorMessage("outcomeUnknown", kind ? steerErrorDetail(kind, error as CutexApiError) : error instanceof Error ? error.message : String(error)));
+        await this.moveToFront(sessionId, carrier.queueId, () => this.assertInputScope(client, generation));
+        const detail = kind ? queueSteerErrorMessage(kind, steerErrorDetail(kind, error as CutexApiError)) : error instanceof Error ? error.message : String(error);
+        throw new Error(queueMergeErrorMessage("kept", detail));
+      }
+    }
+    try {
+      await client.queueRemove(sessionId, carrier.queueId, revision);
+    } catch (error) {
+      await this.moveToFront(sessionId, carrier.queueId);
+      throw new Error(queueMergeErrorMessage("kept", error instanceof Error ? error.message : String(error)));
+    }
+    try {
+      const result = await client.submitInput(sessionId, input, "auto", { clientUserMessageId: carrier.clientUserMessageId, origin: carrier.origin });
+      return done(result);
+    } catch (error) {
+      await this.requeueMergedFront(sessionId, input, carrier.origin);
+      throw new Error(queueMergeErrorMessage("kept", error instanceof Error ? error.message : String(error)));
+    }
+  }
+
+  /** queue/remove at the expected revision for a merge; true = removed (an unknown outcome counts if it is gone). */
+  private async removeForMerge(sessionId: string, item: QueueItem): Promise<boolean> {
+    const client = this.requireClient();
+    try {
+      await client.queueRemove(sessionId, item.queueId, item.revision);
+      return true;
+    } catch (error) {
+      // Changed / sent / removed by someone else: not ours to merge.
+      if (error instanceof CutexApiError && ["revision_conflict", "queue_item_not_found", "queue_input_already_submitted"].includes(error.code)) return false;
+      // Unknown outcome (transport): if it is gone now, this remove took it — merge its text.
+      try {
+        const { items } = await client.queueList(sessionId);
+        return !items.some((x) => x.queueId === item.queueId);
+      } catch {
+        // Unreadable: count it as removed (a duplicate is better than a lost message).
+        return true;
+      }
+    }
+  }
+
+  /** Queue `input` again as ONE item (new id) and put it at the front; best effort beyond the submit. */
+  private async requeueMergedFront(sessionId: string, input: unknown[], origin: QueueItem["origin"]): Promise<void> {
+    if (!input.length) return;
+    const result = await this.requireClient().submitInput(sessionId, input, "queue", { clientUserMessageId: randomUUID(), origin });
+    const queueId = (result as { queue?: { queueId?: string } | null }).queue?.queueId;
+    if (queueId) await this.moveToFront(sessionId, queueId);
+  }
+
+  /** Best effort: move an owner queue item before the first admission item (cutex may refuse passing a delegation). */
+  private async moveToFront(sessionId: string, queueId: string, checkCurrent: () => void = () => {}): Promise<void> {
+    checkCurrent();
+    try {
+      const client = this.requireClient();
+      const { admission } = await client.queueList(sessionId);
+      checkCurrent();
+      const first = admission?.items[0];
+      if (!admission || !first || (first.kind === "owner" && first.id === queueId)) return;
+      await client.queueMove(sessionId, queueId, admission.orderRevision ?? admission.revision, { kind: first.kind, id: first.id });
+    } catch {
+      checkCurrent();
+      // stays where it is (still queued)
+    }
   }
 
   async respond(sessionId: string, runtimeGeneration: number, requestId: string | number, reply: ServerRequestReply): Promise<void> {
@@ -2413,5 +3449,3 @@ export class DaemonService implements DaemonApi {
     return r.filePath;
   }
 }
-
-

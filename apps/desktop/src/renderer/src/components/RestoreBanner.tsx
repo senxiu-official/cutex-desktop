@@ -13,6 +13,7 @@ import { useI18n } from "../i18n";
 import { chosenCandidates, restoreSequentially, type RestoreOutcome } from "../lib/runtimeRestore";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { useApp } from "../store";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 const COMPACT_BUTTON = "shrink-0 rounded px-1.5 py-0.5 text-muted hover:bg-hover hover:text-foreground disabled:opacity-50";
 
@@ -148,6 +149,7 @@ export function RestoreBanner(_props: { compact?: boolean }) {
 
 /** Title-bar chip while the sidebar is collapsed: 「↺ 恢复 4」, opening the same card below it. */
 export function RestoreChip() {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const state = useRestoreState();
   const [open, setOpen] = useState(false);
@@ -162,11 +164,11 @@ export function RestoreChip() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+    win.document.addEventListener("mousedown", onDown);
+    win.document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      win.document.removeEventListener("mousedown", onDown);
+      win.document.removeEventListener("keydown", onKey);
     };
   }, [shown]);
   if (!state) return null;
@@ -186,7 +188,7 @@ export function RestoreChip() {
         {t("restore.chip", { count })}
       </button>
       {shown && (
-        <div role="dialog" aria-label={state.message} className="absolute top-full left-0 z-40 mt-1 w-72 rounded-xl border border-border bg-surface p-2.5 shadow-xl">
+        <div role="dialog" aria-label={state.message} className="absolute top-full left-0 z-50 mt-1 w-72 rounded-xl border border-border bg-surface p-2.5 shadow-xl">
           <RestoreCard state={state} className="" />
         </div>
       )}

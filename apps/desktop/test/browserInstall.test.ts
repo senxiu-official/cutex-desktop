@@ -4,7 +4,7 @@ import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import type { HostManager } from "../src/main/hosts";
 import type { BrowserEvent, BrowserRequest, BrowserTabMount, BrowserTabView } from "../src/shared/browser";
 import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS } from "../src/shared/browser";
-import { browserDisplayUrl, installBrowser, syncBrowserHosts } from "../src/main/browser/install";
+import { browserAppZoom, browserDisplayUrl, installBrowser, syncBrowserHosts } from "../src/main/browser/install";
 
 // Exercise installBrowser's public IPC/event boundary, not private functions or an alternate adapter.
 const electron = vi.hoisted(() => ({
@@ -16,8 +16,15 @@ const electron = vi.hoisted(() => ({
   packaged: false,
   proxies: [] as any[],
   startProxy: vi.fn(),
+  menus: [] as { popup: ReturnType<typeof vi.fn> }[],
+  buildFromTemplate: vi.fn((template: any[]) => { const menu = { popup: vi.fn() }; electron.menus.push(menu); return menu; }),
   messageBox: vi.fn(async (..._args: any[]) => ({ response: 1, checkboxChecked: false })),
 }));
+vi.mock("../src/main/browser/guestView", async importOriginal => {
+  const actual = await importOriginal<typeof import("../src/main/browser/guestView")>();
+  // In-memory store: tests never write browser-zoom.json under the cwd.
+  return { ...actual, BrowserZoomStore: class extends actual.BrowserZoomStore { constructor() { super(null); } } };
+});
 vi.mock("../src/main/browser/sitePermissions", async importOriginal => {
   const actual = await importOriginal<typeof import("../src/main/browser/sitePermissions")>();
   // In-memory store: tests never write browser-site-permissions.json under the cwd.
@@ -28,6 +35,10 @@ vi.mock("../src/main/browser/externalPages", async importOriginal => {
   // In-memory store (default on): tests never write a browser-external.json under the cwd.
   return { ...actual, BrowserExternalPagesStore: class extends actual.BrowserExternalPagesStore { constructor() { super(null); } } };
 });
+vi.mock("../src/main/browser/desktopLoopback", async importOriginal => {
+  const actual = await importOriginal<typeof import("../src/main/browser/desktopLoopback")>();
+  return { ...actual, BrowserDesktopLoopbackStore: class extends actual.BrowserDesktopLoopbackStore { constructor() { super(null); } } };
+});
 vi.mock("../src/main/browser/egressProxy", () => ({ startBrowserEgressProxy: electron.startProxy }));
 vi.mock("../src/main/browser/tabIdentity", async importOriginal => {
   const original = await importOriginal<typeof import("../src/main/browser/tabIdentity")>();
@@ -35,7 +46,9 @@ vi.mock("../src/main/browser/tabIdentity", async importOriginal => {
 });
 vi.mock("electron", () => ({
   BrowserWindow: electron.nativeWindows,
+  nativeTheme: { shouldUseDarkColors: false, on: vi.fn(), off: vi.fn() },
   dialog: { showMessageBox: electron.messageBox },
+  Menu: { buildFromTemplate: electron.buildFromTemplate },
   ipcMain: {
     handle: (name: string, handler: (...args: any[]) => Promise<any>) => { electron.handlers.set(name, handler); },
     removeHandler: (name: string) => { electron.handlers.delete(name); },
@@ -103,6 +116,10 @@ class ContentsMock extends EventEmitter {
   debugger = new DebuggerMock();
   executeJavaScriptInIsolatedWorld = vi.fn(async () => ({ width: 640, height: 360 }));
   setWebRTCIPHandlingPolicy = vi.fn();
+  setZoomFactor = vi.fn();
+  copyImageAt = vi.fn();
+  downloadURL = vi.fn();
+  undo = vi.fn(); redo = vi.fn(); cut = vi.fn(); copy = vi.fn(); paste = vi.fn(); selectAll = vi.fn();
   openHandler?: (details: any) => { action: string };
   setWindowOpenHandler = vi.fn((fn: (details: any) => { action: string }) => { this.openHandler = fn; });
   navigationHistory = { canGoBack: () => false, canGoForward: () => false, getAllEntries: () => [], getActiveIndex: () => 0, goToOffset: vi.fn() };
@@ -145,7 +162,7 @@ function fixture(session = new SessionMock(), permissiveAppSender = false) {
     capabilities: vi.fn(async () => ({ featureList: ["services-proxy", "services-lifetime"] })) };
   const conns = new Map([["local", { routingEpoch: "epoch-a", daemon }]]);
   const hosts = { connection: (hostId: string) => conns.get(hostId), focus: () => "local",
-    state: () => ({ hosts: [...conns.keys()].map(id => ({ id, kind: id === "local" ? "local" : "dev-direct" })) }) };
+    state: () => ({ hosts: [...conns.keys()].map(id => ({ id, kind: id === "local" ? "local" : id.startsWith("ssh-") ? "ssh" : "dev-direct" })) }) };
   const windowState = { visible: true, focused: true, flashFrame: vi.fn() };
   installBrowser(Object.assign(new EventEmitter(), { webContents: owner, isDestroyed: () => owner.dead, isVisible: () => windowState.visible, isMinimized: () => false,
     isFocused: () => windowState.focused, flashFrame: windowState.flashFrame, isFullScreen: () => false, setFullScreen: vi.fn() }) as unknown as BrowserWindow,
@@ -185,6 +202,7 @@ function fixture(session = new SessionMock(), permissiveAppSender = false) {
 }
 beforeEach(() => {
   electron.handlers.clear(); electron.sessions.clear(); electron.appListeners.clear(); electron.nativeWindows.mockClear(); electron.packaged = false;
+  electron.menus.length = 0; electron.buildFromTemplate.mockClear();
   electron.proxies.length = 0;
   // Baseline: the local-only tier (development override). N2 tests opt in with "n2" or packaged mode.
   vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "off");
@@ -313,6 +331,43 @@ describe("installed browser owner IPC / Electron boundary", () => {
     // Development override reported, never stored.
     expect(await f.ipc({ op: "externalPages" })).toEqual({ enabled: false, stored: true, forced: "off" });
     expect(await f.ipc({ op: "externalPages", enabled: false })).toEqual({ enabled: false, stored: false, forced: "off" });
+  });
+  it("SSH desktop loopback needs owner confirmation or the per-host switch; protected ports never open", async () => {
+    const f = fixture(), sshSession = new SessionMock();
+    f.conns.set("ssh-one", { routingEpoch: "epoch-ssh", daemon: { ...f.daemon } });
+    electron.sessions.set("persist:browser-ssh-one", sshSession);
+    await f.ipc({ op: "setEnabled", enabled: true });
+    const binding = { hostId: "ssh-one", epoch: "epoch-ssh" }, url = "http://127.0.0.1:59273/";
+    expect(await f.ipc({ op: "desktopLoopback" }, binding)).toEqual({ enabled: false });
+    await expect(f.ipc({ op: "desktopLoopbackChallenge", tabKey: "ssh-tab", url }, binding)).rejects.toThrow("remote_loopback");
+    await expect(f.ipc({ op: "open", tabKey: "ssh-tab", url }, binding)).rejects.toThrow("remote_loopback");
+    const { nonce } = await f.ipc({ op: "desktopLoopbackChallenge", tabKey: "ssh-tab", url }, binding);
+    await expect(f.ipc({ op: "open", tabKey: "control", url: "http://127.0.0.1:26111/", desktopLoopback: nonce }, binding)).rejects.toThrow("protected_endpoint");
+    const reserved = await f.ipc({ op: "open", tabKey: "ssh-tab", url, desktopLoopback: nonce }, binding) as BrowserTabMount;
+    expect(f.willAttach(reserved).denied).toBe(false);
+    const guest = f.didAttach(new ContentsMock(nextContentsId++, sshSession));
+    await f.ipc({ op: "open", tabKey: "ssh-tab", url, receipt: { src: reserved.src, webContentsId: guest.id } }, binding);
+    await flush();
+    expect(guest.loads).toEqual([url]);
+    expect(f.events.at(-1)).toMatchObject({ hostId: "ssh-one", tabKey: "ssh-tab", desktopLoopback: true });
+    expect(sshSession.denied(guest.id, url, "xhr", "https://evil.example")).toBe(true);
+    expect(sshSession.denied(guest.id, url, "xhr", "http://127.0.0.1:59273")).toBe(false);
+    await expect(f.ipc({ op: "open", tabKey: "replay", url, desktopLoopback: nonce }, binding)).rejects.toThrow("remote_loopback");
+    await expect(f.ipc({ op: "open", tabKey: "remembered", url }, binding)).rejects.toThrow("remote_loopback");
+    expect(await f.ipc({ op: "desktopLoopback", enabled: true }, binding)).toEqual({ enabled: true });
+    await expect(f.ipc({ op: "open", tabKey: "remembered", url }, binding)).resolves.toMatchObject({ tabKey: "remembered" });
+    expect(await f.ipc({ op: "desktopLoopback", enabled: false }, binding)).toEqual({ enabled: false });
+    await expect(f.ipc({ op: "navigate", tabKey: "ssh-tab", url: "http://localhost:59273/next" }, binding)).rejects.toThrow("remote_loopback");
+    const nextUrl = "http://localhost:59273/next";
+    const nextNonce = (await f.ipc({ op: "desktopLoopbackChallenge", tabKey: "ssh-tab", url: nextUrl }, binding)).nonce;
+    await f.ipc({ op: "navigate", tabKey: "ssh-tab", url: nextUrl, desktopLoopback: nextNonce }, binding);
+    expect(guest.loads.at(-1)).toBe("http://localhost:59273/next");
+    await f.ipc({ op: "reload", tabKey: "ssh-tab" }, binding);
+    expect(guest.reload).toHaveBeenCalledOnce();
+    guest.navigationHistory.getAllEntries = () => [{ url }, { url: nextUrl }] as any;
+    guest.navigationHistory.getActiveIndex = () => 1;
+    await f.ipc({ op: "back", tabKey: "ssh-tab" }, binding);
+    expect(guest.navigationHistory.goToOffset).toHaveBeenCalledWith(-1);
   });
   it.each(["close", "disable"])("late base policy after %s cannot start an orphan N2 listener", async cause => {
     vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "n2"); const session = new SessionMock(), pending = deferred<void>();
@@ -929,7 +984,8 @@ describe("installed browser owner IPC / Electron boundary", () => {
     const before = f.events.length;
     expect(f.session.denied(first.guest.id, "http://localhost:9222/json", "mainFrame", "http://localhost:26180")).toBe(true);
     expect(f.events.slice(before).at(-1)).toMatchObject({ error: "private_address_blocked" });
-    expect(JSON.stringify(f.events.slice(before))).not.toContain("9222");
+    // The refused URL's port form: random guest ids are hex and may hold the digits 9222 ("…bc9222b3").
+    expect(JSON.stringify(f.events.slice(before))).not.toContain(":9222");
     // Closing the tab drops its admission; a remount re-admits through main's own navigation.
     await f.ipc({ op: "close", tabKey: "side-two" });
     const again = await f.mount("side-two", "http://localhost:26190/");
@@ -990,6 +1046,18 @@ describe("installed browser owner IPC / Electron boundary", () => {
 });
 
 describe("installed controlled tabs, downloads and site permissions (0.1.3)", () => {
+  it("an owner press in a tab's page is reported (`pressed`: its pane counts it as a press, design 017); other input is not", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "http://localhost:26180/");
+    guest.emit("before-mouse-event", {}, { type: "mouseMove" });
+    guest.emit("before-input-event", {}, { type: "keyDown" });
+    expect(f.events.filter(event => event.kind === "pressed")).toHaveLength(0);
+    guest.emit("before-mouse-event", {}, { type: "mouseDown" });
+    expect(f.events.filter(event => event.kind === "pressed")).toEqual([expect.objectContaining({ hostId: "local", tabKey: "side-one", epoch: "epoch-a" })]);
+    await f.ipc({ op: "setEnabled", enabled: false });
+    guest.emit("before-mouse-event", {}, { type: "mouseDown" });
+    expect(f.events.filter(event => event.kind === "pressed")).toHaveLength(1);
+  });
   it("an owner-clicked POST popup becomes an owner tab that replays the exact URL and body once", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
     const { guest } = await f.mount("side-one", "http://localhost:26180/");
@@ -1087,5 +1155,55 @@ describe("installed controlled tabs, downloads and site permissions (0.1.3)", ()
     expect(notices().at(-1)).toEqual(["permission-hidden", { state: "hidden", origin: "http://localhost:26180", permissions: ["notifications"] }]);
     expect(shown().at(-1)).toBe("hidden");
     expect(await f.ipc({ op: "sitePermissions" })).toEqual([]);
+  });
+  it("guest zoom: Ctrl+= and the wheel step per site, publish in the view, persist across tabs and follow the app zoom", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "http://localhost:26180/");
+    // The owner's keys inside the guest (the app's own Ctrl+= is untouched: this is the guest's input event).
+    guest.emit("before-input-event", {}, { type: "keyDown", key: "=", control: true });
+    guest.emit("before-input-event", {}, { type: "keyDown", key: "=", control: true });
+    expect(guest.setZoomFactor).toHaveBeenLastCalledWith(1.25);
+    expect(f.events.at(-1)).toMatchObject({ kind: "changed", tabKey: "side-one", zoom: 1.25 });
+    // Electron's own Ctrl+wheel path steps the other way, one step per gesture tick.
+    guest.emit("zoom-changed", {}, "out");
+    expect(guest.setZoomFactor).toHaveBeenLastCalledWith(1.1);
+    guest.emit("zoom-changed", {}, "out");
+    expect(guest.setZoomFactor).toHaveBeenLastCalledWith(1.1); // Gated: the repeat notch is one gesture.
+    // The owner UI chip's reset goes through the same main-side step.
+    await f.ipc({ op: "setZoom", tabKey: "side-one", action: "in" });
+    expect(guest.setZoomFactor).toHaveBeenLastCalledWith(1.25);
+    await expect(f.ipc({ op: "setZoom", tabKey: "missing", action: "reset" })).rejects.toThrow("target_closed");
+    // A second tab of the same site starts at the remembered level (Chromium would have it at 100 %).
+    const second = await f.mount("side-two", "http://localhost:26180/other");
+    expect(second.guest.setZoomFactor).toHaveBeenLastCalledWith(1.25);
+    // The app's own zoom change is applied under the page's remembered level.
+    browserAppZoom(1.5);
+    expect(guest.setZoomFactor).toHaveBeenLastCalledWith(1.5 * 1.25);
+    expect(second.guest.setZoomFactor).toHaveBeenLastCalledWith(1.5 * 1.25);
+    browserAppZoom(1);
+  });
+  it("guest right-click menu: image actions from main only; 查看图片 opens an owner tab with the exact URL", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "http://localhost:26180/");
+    const flags = { canUndo: false, canRedo: false, canCut: false, canCopy: false, canPaste: false, canDelete: false, canSelectAll: false, canEditRichly: false };
+    guest.emit("context-menu", {}, { x: 10, y: 20, mediaType: "none", srcURL: "", linkURL: "", linkText: "", pageURL: "http://localhost:26180/",
+      frameURL: "", frame: null, hasImageContents: false, isEditable: false, selectionText: "", editFlags: flags, misspelledWord: "", dictionarySuggestions: [] });
+    expect(electron.buildFromTemplate).not.toHaveBeenCalled(); // Nothing useful there: no menu.
+    guest.emit("context-menu", {}, { x: 10, y: 20, mediaType: "image", srcURL: "http://localhost:26180/pic.png", linkURL: "", linkText: "",
+      pageURL: "http://localhost:26180/", frameURL: "", frame: null, hasImageContents: true, isEditable: true, selectionText: "alt", editFlags: { ...flags, canCopy: true }, misspelledWord: "", dictionarySuggestions: [] });
+    const template = electron.buildFromTemplate.mock.calls.at(-1)![0] as ({ type: "separator" } | { label: string; click: () => void })[];
+    expect(template.map(item => "type" in item ? "|" : item.label)).toEqual([
+      "Open image in new tab", "Copy image", "Save image as…", "|", "Undo", "Redo", "|", "Cut", "Copy", "Paste", "Select all",
+    ]);
+    expect(electron.menus.at(-1)!.popup).toHaveBeenCalledWith(expect.objectContaining({ x: 10, y: 20 }));
+    (template[0] as { click: () => void }).click(); // 查看图片
+    const opened = f.events.find(event => event.kind === "new-tab");
+    expect(opened).toMatchObject({ newTabUrl: "http://localhost:26180/pic.png", pool: "owner" });
+    const imageTab = await f.mount(opened!.newTabKey!, "http://localhost:26180/pic.png");
+    expect(imageTab.guest.loads).toContain("http://localhost:26180/pic.png");
+    (template[1] as { click: () => void }).click(); // 复制图片
+    expect(guest.copyImageAt).toHaveBeenCalledWith(10, 20);
+    (template[2] as { click: () => void }).click(); // 另存为…
+    expect(guest.downloadURL).toHaveBeenCalledWith("http://localhost:26180/pic.png");
   });
 });

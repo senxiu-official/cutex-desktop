@@ -1,17 +1,18 @@
 // Model picker helpers: per-profile pinned models (Claude-style "first few + More models").
 // Pins are a desktop UI preference (ui prefs `modelPins`, keyed by host id, then profile name).
 
-/** Without explicit pins, the first few models of the catalog are shown up front. */
+/** Without explicit pins, the first few models of the catalog are shown up front (a folded Claude list:
+ *  its primary rows, lib/claudeModels). */
 export const DEFAULT_PINNED = 4;
 
-export function splitPinned<T extends { model: string }>(models: readonly T[], pins: readonly string[] | undefined): { pinned: T[]; rest: T[] } {
-  const pinned = pins ? pins.map((p) => models.find((m) => m.model === p)).filter((m): m is T => !!m) : models.slice(0, DEFAULT_PINNED);
+export function splitPinned<T extends { model: string }>(models: readonly T[], pins: readonly string[] | undefined, defaultCount = DEFAULT_PINNED): { pinned: T[]; rest: T[] } {
+  const pinned = pins ? pins.map((p) => models.find((m) => m.model === p)).filter((m): m is T => !!m) : models.slice(0, defaultCount);
   return { pinned, rest: models.filter((m) => !pinned.includes(m)) };
 }
 
 /** Pin list after toggling `model`; starts from the implicit default pins the first time. */
-export function togglePinned(models: readonly { model: string }[], pins: readonly string[] | undefined, model: string): string[] {
-  const current = pins ? [...pins] : models.slice(0, DEFAULT_PINNED).map((m) => m.model);
+export function togglePinned(models: readonly { model: string }[], pins: readonly string[] | undefined, model: string, defaultCount = DEFAULT_PINNED): string[] {
+  const current = pins ? [...pins] : models.slice(0, defaultCount).map((m) => m.model);
   return current.includes(model) ? current.filter((m) => m !== model) : [...current, model];
 }
 

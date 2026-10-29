@@ -8,8 +8,12 @@ import { defineModule } from "../slots";
 import { initSide, parseSideParams, restoreSide, type SideParams, type SideState } from "./cardState";
 import { launcherParams, useFromTurnState, useSideTab } from "./hooks";
 import { SideChatCard } from "./SideChatCard";
-import { SideChatSettings, SideSummarySettings } from "./SideSettings";
 import { closeSideInstance, sideModuleActive } from "./state";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const SideChatSettings = lazyPage(() => import("./SideSettings").then((m) => m.SideChatSettings));
+const SideSummarySettings = lazyPage(() => import("./SideSettings").then((m) => m.SideSummarySettings));
 
 export default defineModule({
   id: "side-chat", titleKey: "side-chat.title", descriptionKey: "side-chat.description",

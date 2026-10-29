@@ -30,9 +30,9 @@ export function useProjectsTitle(params: PageParams): readonly PageCrumb[] {
       lead: p && <ProjectBadge icon={projectIcon(prefs.projectIcons, host, p.project_id)} badge={p.presentation.badge_label || p.presentation.display_name.slice(0, 1)} color={p.presentation.color} />,
       trail: p && (
         <>
-          <span className="shrink-0 font-mono text-[11px] font-normal text-subtle">{p.project_id}</span>
+          <span className="shrink-0 font-mono text-caption/[inherit] font-normal text-subtle">{p.project_id}</span>
           {remark && (
-            <span className="ml-1 max-w-[24rem] min-w-0 truncate text-[11px] font-normal text-subtle" data-project-remark="" title={`${remark}\n${t("remark.tooltip")}`}>
+            <span className="ml-1 max-w-[24rem] min-w-0 truncate text-caption/[inherit] font-normal text-subtle" data-project-remark="" title={`${remark}\n${t("remark.tooltip")}`}>
               · {remark}
             </span>
           )}

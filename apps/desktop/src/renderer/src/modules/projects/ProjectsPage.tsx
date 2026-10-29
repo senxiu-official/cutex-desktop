@@ -2,7 +2,9 @@
 // Director, project-layer MCP, memory, tasks. Membership and Director changes live only here, on the
 // agent tab (the list + MemberPicker); 设置 only links to it.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ArrowRightLeft, Crown, FolderOpen, Pencil, Plus, StickyNote, UserMinus, Users, UserX } from "lucide-react";
+import { displayWidth, isBadgeLabelError, projectBadgeWidth } from "../../lib/badgeWidth";
+import { BadgeTextInput } from "../../components/BadgeTextInput";
+import { Archive, ArrowRightLeft, Crown, FolderOpen, Pencil, Plus, Shield, StickyNote, UserMinus, Users, UserX } from "lucide-react";
 import type { ProjectSummary } from "@cutex-desktop/protocol";
 import type { ProjectMemoryView } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -24,7 +26,7 @@ import { DelegationList } from "../../components/DelegationList";
 import { ProjectMemoryList } from "../../components/ProjectMemory";
 import { ServiceLine } from "../../components/ServiceLine";
 import { PageBody, SubNav, SUBNAV_ITEM, SUBNAV_OFF, SUBNAV_ON } from "../../components/Page";
-import { Button, SettingRow, Section, Select, TextInput } from "../../components/settings/Form";
+import { Button, SettingRow, SettingsGroup, Section, Select, TextInput } from "../../components/settings/Form";
 import { ProjectColorPicker } from "../../components/ProjectColorPicker";
 import { ProjectBadge } from "../../components/ProjectBadge";
 import { ProjectIconPicker } from "../../components/ProjectIconPicker";
@@ -52,6 +54,8 @@ import { editProjectRemark } from "../../lib/projectMenus";
 import { archiveProject, confirmProjectArchive } from "../../lib/projectArchive";
 import { isOwnerFeatures } from "../../../../shared/users";
 import type { AgentRow } from "../../lib/sidebar";
+import { operatorIds, operatorSupported, setProjectOperator } from "../../lib/projectOperators";
+import { captureHostAction } from "../../lib/hostSwitch";
 
 /** Pseudo project id for the "new project" form. */
 const NEW = "__new__";
@@ -84,8 +88,8 @@ function ProjectList({ projects, selected, onSelect, mark }: { projects: HostPro
         >
           <ProjectBadge icon={projectIcon(icons, hostId, p.project_id)} badge={p.presentation.badge_label || p.presentation.display_name.slice(0, 1)} color={p.presentation.color} size="lg" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-medium">{p.presentation.display_name}</span>
-            <span className="block truncate text-[11px] text-subtle">{t("projects.members", { n: p.active_member_count })}</span>
+            <span className="block truncate text-ui/[inherit] font-medium">{p.presentation.display_name}</span>
+            <span className="block truncate text-caption/[inherit] text-subtle">{t("projects.members", { n: p.active_member_count })}</span>
           </span>
           {mark(hostId) && <HostMark host={mark(hostId)!} dotOnly className="shrink-0" />}
         </button>
@@ -124,6 +128,7 @@ function NewProjectForm({ target }: { target: CreateHost }) {
   const online = target.look?.indicator.status === "online";
   const [name, setName] = useState("");
   const [badge, setBadge] = useState("");
+  const [badgeComposing, setBadgeComposing] = useState(false);
   const [color, setColor] = useState<string>("cyan");
   /** 项目图标 (same picker as 项目设置), written to the device-local pref once the project exists. */
   const [icon, setIcon] = useState<ProjectIconChoice | null>(null);
@@ -136,10 +141,11 @@ function NewProjectForm({ target }: { target: CreateHost }) {
   const pickBlocked = useFolderPickBlocked();
   // Only agents outside every project can direct one (cutex: director_already_has_active_project).
   const agents = independentAgents(sidebar);
-  const badgeText = badge.trim() || autoBadge(name);
+  const badgeText = badge.trim() || autoBadge(name, projectBadgeWidth(features));
   const newDirector = optional && director === DIRECTOR_NEW;
-  const ready = online && !!name.trim() && !busy && (optional || !!director);
+  const ready = online && !!name.trim() && !busy && !badgeComposing && displayWidth(badge.trim()) <= projectBadgeWidth(features) && (optional || !!director);
   const create = async () => {
+    if (badgeComposing || displayWidth(badge.trim()) > projectBadgeWidth(features)) return;
     setError(null);
     setPartial(null);
     setBusy(true);
@@ -164,7 +170,7 @@ function NewProjectForm({ target }: { target: CreateHost }) {
       }
       // A refused directory (create_project's workspace_root, or the follow-up set_workspace_root).
       const rootError = workspaceRootErrorKey(e);
-      setError(rootError ? t(rootError) : errorText(e));
+      setError(rootError ? t(rootError) : isBadgeLabelError(e) ? t(features.has("project-badge-wide") ? "projects.badgeHintWide" : "projects.badgeHint") : errorText(e));
     } finally {
       setBusy(false);
     }
@@ -187,25 +193,27 @@ function NewProjectForm({ target }: { target: CreateHost }) {
       <Section title={t("projects.basics")} hint={t(optional ? "projects.newHintOptional" : "projects.newHint")} actions={<Button primary disabled={!ready} onClick={() => void create()}>{t("projects.create")}</Button>}>
         {target.mode !== "none" && (
           <SettingRow
+            agents="none"
+            source="local"
             label={t("hostPicker.label")}
             hint={!online ? <span className="text-warn">{t("hostPicker.unavailable", { host: hostLabel })}</span> : !isFocus ? t("hostPicker.opensOther", { host: hostLabel }) : undefined}
           >
             <HostPicker value={hostId} onChange={target.setHostId} mode={target.mode} title={t("hostPicker.createTitle")} />
           </SettingRow>
         )}
-        <SettingRow label={t("projects.name")} hint={t("projects.icon.hint")}>
+        <SettingRow agents="none" source={["host", "local"]} label={t("projects.name")} info={t("projects.icon.hint")}>
           <div className="flex items-center gap-2">
             <ProjectIconPicker value={icon} onIcon={setIcon} badge={badgeText || "?"} color={color} onColor={setColor} />
             <TextInput width="w-56" value={name} onChange={setName} />
           </div>
         </SettingRow>
-        <SettingRow label={t("projects.badge")} hint={t("projects.badgeHint")}>
-          <TextInput width="w-20" value={badge} onChange={(v) => setBadge(v.slice(0, 4))} placeholder={autoBadge(name)} />
+        <SettingRow agents="none" source="host" label={t("projects.badge")} info={t(features.has("project-badge-wide") ? "projects.badgeHintWide" : "projects.badgeHint")}>
+          <BadgeTextInput value={badge} onChange={setBadge} maxWidth={projectBadgeWidth(features)} onCompositionChange={setBadgeComposing} aria-label={t("projects.badge")} placeholder={autoBadge(name, projectBadgeWidth(features))} className="w-20 rounded border border-border bg-background px-2 py-1 text-sm outline-none focus:border-accent" />
         </SettingRow>
-        <SettingRow label={t("projects.color")}>
+        <SettingRow agents="none" source="host" label={t("projects.color")}>
           <ProjectColorPicker value={color} onChange={setColor} />
         </SettingRow>
-        <SettingRow label={t("projects.directory")} hint={t(createRoot ? "projects.directoryCreateHint" : "projects.directoryNewHint")}>
+        <SettingRow agents="next" source="host" label={t("projects.directory")} hint={t(createRoot ? "projects.directoryCreateHint" : "projects.directoryNewHint")}>
           <div className="flex items-center gap-1.5">
             <TextInput width="w-72" mono value={dir} onChange={setDir} placeholder={remote ? "/home/me/project" : "D:\\path\\to\\project"} />
             <Button
@@ -221,7 +229,7 @@ function NewProjectForm({ target }: { target: CreateHost }) {
             </Button>
           </div>
         </SettingRow>
-        <SettingRow label={t("sidebar.director")} hint={optional ? t(newDirector ? "projects.directorNewHint" : "projects.directorHint") : t("projects.directorLegacyHint")}>
+        <SettingRow agents="hostNowRuntimeNext" source="host" label={t("sidebar.director")} hint={optional ? t(newDirector ? "projects.directorNewHint" : "projects.directorHint") : t("projects.directorLegacyHint")}>
           <Select value={director} options={directorOptions} onChange={setDirector} />
         </SettingRow>
         {!optional && agents.length === 0 && <p className="py-2 text-xs text-warn">{t("projects.noIndependent")}</p>}
@@ -291,6 +299,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
   const moduleTab = current.entry;
   const [name, setName] = useState(project.presentation.display_name);
   const [badge, setBadge] = useState(project.presentation.badge_label);
+  const [badgeComposing, setBadgeComposing] = useState(false);
   const [color, setColor] = useState(project.presentation.color);
   const [error, setError] = useState<string | null>(null);
   const allServices = useHostData(hostId)?.services;
@@ -315,6 +324,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
     const prev = saved.current;
     const next = project.presentation;
     const same = prev.id === id;
+    if (!same) setBadgeComposing(false);
     saved.current = { id, presentation: next };
     setName((v) => (same && v !== prev.presentation.display_name ? v : next.display_name));
     setBadge((v) => (same && v !== prev.presentation.badge_label ? v : next.badge_label));
@@ -328,9 +338,57 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
     const all = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])];
     return all.filter((s) => sidebar?.hostRows[s.cutexSessionId]?.projectId === id && s.lifecycle !== "retired");
   }, [sidebar, id]);
+  const [operatorWorkspace, setOperatorWorkspace] = useState<Awaited<ReturnType<typeof api.projectRead>> | null>(null);
+  const operatorReadEpoch = useRef(0);
+  const [operatorBusy, setOperatorBusy] = useState<string | null>(null);
+  const operatorWriteEpoch = useRef(0);
+  useEffect(() => { operatorWriteEpoch.current++; setOperatorBusy(null); }, [hostId, id, api]);
+  const operatorProjection = JSON.stringify(sidebar?.projectOperators?.[id] ?? null);
+  useEffect(() => {
+    const epoch = ++operatorReadEpoch.current;
+    const currentHost = captureHostAction(hostId);
+    setOperatorWorkspace(null);
+    void api.projectRead(id).then((workspace) => {
+      if (operatorReadEpoch.current === epoch && currentHost() && workspace.project_id === id) setOperatorWorkspace(workspace);
+    }, () => {});
+    return () => { operatorReadEpoch.current++; };
+  }, [api, hostId, id, project.project_revision, project.authority_epoch, operatorProjection]);
+  const hasOperators = operatorSupported(operatorWorkspace);
+  const grantedOperators = operatorIds(operatorWorkspace);
+  const memberIds = useMemo(() => new Set(members.map((s) => s.cutexSessionId)), [members]);
+  const operatorGroups = [
+    { role: "director", title: t("sidebar.director"), match: (row: AgentRow) => row.id === project.director_cutex_session_id },
+    { role: "operator", title: t("projects.operators" as MessageKey), match: (row: AgentRow) => row.id !== project.director_cutex_session_id && memberIds.has(row.id) && grantedOperators.has(row.id) },
+    { role: "member", title: t("projects.membersTitle"), match: (row: AgentRow) => row.id !== project.director_cutex_session_id && !(memberIds.has(row.id) && grantedOperators.has(row.id)) },
+  ];
   const optional = features.has(OPTIONAL_DIRECTOR_FEATURE);
   // users: a non-owner connection may only look (no membership / Director changes; lib/projectMenus).
   const owner = isOwnerFeatures(features);
+  const canManageOperators = owner && hasOperators && operatorWorkspace?.access_role === "human_management" &&
+    operatorWorkspace.lifecycle === "active" && !!operatorWorkspace.director &&
+    operatorWorkspace.authority_epoch === project.authority_epoch &&
+    operatorWorkspace.director.cutex_session_id === project.director_cutex_session_id;
+  const changeOperator = async (row: AgentRow, grant: boolean) => {
+    if (!canManageOperators || operatorBusy || !memberIds.has(row.id) || row.id === project.director_cutex_session_id) return;
+    const epoch = ++operatorWriteEpoch.current;
+    const currentHost = captureHostAction(hostId);
+    setOperatorBusy(row.id);
+    setError(null);
+    try {
+      await setProjectOperator(hostId, id, row.id, grant);
+    } catch (e) {
+      if (operatorWriteEpoch.current === epoch && currentHost()) setError(errorText(e));
+    } finally {
+      if (operatorWriteEpoch.current === epoch && currentHost()) {
+        const readEpoch = ++operatorReadEpoch.current;
+        const workspace = await api.projectRead(id).catch(() => null);
+        if (operatorWriteEpoch.current === epoch && currentHost()) {
+          if (operatorReadEpoch.current === readEpoch) setOperatorWorkspace(workspace?.project_id === id ? workspace : null);
+          setOperatorBusy(null);
+        }
+      }
+    }
+  };
   // 更换 to an existing member: cutex rotate_director (part of owner-rotation; any host of the scope).
   const switchOn = features.has(OWNER_ROTATION_FEATURE);
   const hasDirector = !!project.director_cutex_session_id;
@@ -396,6 +454,12 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
   };
   /** 设为 Director: assign (no Director) or switch (rotate_director, after a confirm naming its consequences). */
   const makeDirector = async (row: Pick<AgentRow, "id" | "name">): Promise<boolean> => {
+    // The cached roster can be loading after a grant; always check the canonical successor role.
+    const roster = await api.projectRead(id);
+    if (operatorIds(roster).has(row.id)) {
+      setError(t("projects.operatorSuccessor", { name: row.name }));
+      return false;
+    }
     const current = project.director_cutex_session_id;
     if (current) {
       const ok = await confirmDialog(t("projects.switchDirectorConfirm", { from: nameOf(current), to: row.name }), false, { ok: t("projects.switchDirectorOk"), cancel: t("projects.picker.cancel") });
@@ -435,6 +499,12 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
           }
           const canMake = hasDirector ? switchOn : optional;
           return [
+            canManageOperators && memberIds.has(row.id) && {
+              label: t((grantedOperators.has(row.id) ? "projects.revokeOperator" : "projects.setOperator") as MessageKey),
+              icon: <Shield size={14} />,
+              disabled: !!operatorBusy,
+              onSelect: () => void changeOperator(row, !grantedOperators.has(row.id)),
+            },
             canMake && {
               label: t("projects.setDirector"),
               icon: <Crown size={14} />,
@@ -460,7 +530,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
       await fn();
       await refreshSidebar();
     } catch (e) {
-      setError(errorText(e));
+      setError(isBadgeLabelError(e) ? t(features.has("project-badge-wide") ? "projects.badgeHintWide" : "projects.badgeHint") : errorText(e));
     }
   };
   // A colour from the icon picker applies at once (with the *saved* name / badge, so half-typed
@@ -483,7 +553,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
     try {
       await archiveProject({ hostId, projectId: id, displayName, expected, directorId: director?.cutexSessionId ?? null, withDirector: answer.withDirector, t });
     } catch (e) {
-      setError(errorText(e));
+      setError(isBadgeLabelError(e) ? t(features.has("project-badge-wide") ? "projects.badgeHintWide" : "projects.badgeHint") : errorText(e));
     }
   };
 
@@ -567,10 +637,24 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
             )}
           </h3>
           <div className="mb-4 rounded-xl border border-border bg-surface px-1 py-1">
+            {hasOperators ? operatorGroups.map((group) => {
+              const online = team.online.filter(group.match);
+              const offline = team.offline.filter(group.match);
+              if (group.role !== "operator" && online.length + offline.length === 0) return null;
+              return (
+                <div key={group.role} data-project-role={group.role}>
+                  <h4 className="px-2 pt-2 pb-1 text-xs text-subtle">{group.title}</h4>
+                  {online.map((row) => <AgentRowButton key={row.id} row={row} />)}
+                  <OfflineSection rows={offline} searching={false} onAll={() => setTab("agents")} hostId={isFocus ? undefined : hostId} />
+                  {group.role === "operator" && online.length + offline.length === 0 && <p className="px-2 py-2 text-xs text-subtle">{t("projects.operatorsEmpty" as MessageKey)}</p>}
+                </div>
+              );
+            }) : <>
             {team.online.map((row) => (
               <AgentRowButton key={row.id} row={row} />
             ))}
             <OfflineSection rows={team.offline} searching={false} onAll={() => setTab("agents")} hostId={isFocus ? undefined : hostId} />
+            </>}
             {team.online.length + team.offline.length === 0 && <p className="px-2 py-2 text-xs text-subtle">{t("projects.noMembers")}</p>}
           </div>
           {projectServices.length > 0 && (
@@ -578,7 +662,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
               <h3 className="mb-2 text-sm font-semibold">{t("projects.services")}</h3>
               <div className="mb-4 rounded-xl border border-border bg-surface px-3">
                 {projectServices.map((s) => (
-                  <ServiceLine key={s.slug} s={s} onError={setError} />
+                  <ServiceLine key={s.slug} s={s} onError={setError} hostId={hostId} />
                 ))}
               </div>
             </>
@@ -636,7 +720,9 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
       {active === "memory" && (
         <>
       <Section title={t("projects.memory")} hint={memory ? `${t("projects.memoryHint")} · ${shortenHome(memory.dir)}` : t("projects.memoryHint")}>
-        <ProjectMemoryList hostId={hostId} projectId={id} memory={memory} />
+        <SettingsGroup agents="none" source="host">
+          <ProjectMemoryList hostId={hostId} projectId={id} memory={memory} />
+        </SettingsGroup>
       </Section>
 
         </>
@@ -649,8 +735,9 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
           dirty && (
             <Button
               primary
+              disabled={badgeComposing || displayWidth(badge.trim()) > projectBadgeWidth(features)}
               onClick={() =>
-                void run(() =>
+                !badgeComposing && displayWidth(badge.trim()) <= projectBadgeWidth(features) && void run(() =>
                   api.projectPresentation(id, { authorityEpoch: project.authority_epoch, presentationRevision: project.presentation.revision ?? 0 }, { display_name: name.trim(), badge_label: badge.trim(), color }),
                 )
               }
@@ -660,16 +747,16 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
           )
         }
       >
-        <SettingRow label={t("projects.name")} hint={t("projects.icon.hint")}>
+        <SettingRow agents="none" source={["host", "local"]} label={t("projects.name")} info={t("projects.icon.hint")}>
           <div className="flex items-center gap-2">
             <ProjectIconPicker hostId={hostId} projectId={id} badge={badge.trim() || name.trim().slice(0, 1) || project.presentation.display_name.slice(0, 1)} color={color} onColor={applyColor} />
             <TextInput width="w-56" value={name} onChange={setName} />
           </div>
         </SettingRow>
-        <SettingRow label={t("projects.badge")} hint={t("projects.badgeHint")}>
-          <TextInput width="w-20" value={badge} onChange={(v) => setBadge(v.slice(0, 4))} />
+        <SettingRow agents="none" source="host" label={t("projects.badge")} info={t(features.has("project-badge-wide") ? "projects.badgeHintWide" : "projects.badgeHint")}>
+          <BadgeTextInput key={`${hostId}:${id}`} value={badge} onChange={setBadge} maxWidth={projectBadgeWidth(features)} onCompositionChange={setBadgeComposing} aria-label={t("projects.badge")} className="w-20 rounded border border-border bg-background px-2 py-1 text-sm outline-none focus:border-accent" />
         </SettingRow>
-        <SettingRow label={t("projects.directory")} hint={t("projects.directoryHint")}>
+        <SettingRow agents="next" source="host" label={t("projects.directory")} info={t("projects.directoryHint")}>
           <ProjectRootEditor
             hostId={hostId}
             current={project.workspace_root ?? null}
@@ -684,10 +771,12 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
 
       {/* Members and the Director are managed on the agent tab (one place, owner 2026-10-14). */}
       <Section title={t("projects.membersTitle")}>
-        <button onClick={() => setTab("agents")} className="flex items-center gap-1.5 py-2 text-xs text-accent hover:underline" data-members-link="">
-          <Users size={13} />
-          {t("projects.membersElsewhere", { tab: t("projects.tab.agents") })} →
-        </button>
+        <SettingsGroup navigation agents="none" source="host">
+          <button onClick={() => setTab("agents")} className="flex items-center gap-1.5 py-2 text-xs text-accent hover:underline" data-members-link="">
+            <Users size={13} />
+            {t("projects.membersElsewhere", { tab: t("projects.tab.agents") })} →
+          </button>
+        </SettingsGroup>
       </Section>
 
       <ExternalAgentsSection projectId={id} />
@@ -698,7 +787,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
         {mcp && Object.keys(mcp.servers).length === 0 && <p className="py-2 text-xs text-subtle">{t("projects.mcpNone")}</p>}
         {mcp &&
           Object.entries(mcp.servers).map(([server, cfg]) => (
-            <SettingRow key={server} label={server} hint={JSON.stringify(cfg).slice(0, 120)}>
+            <SettingRow readOnly key={server} agents="next" source="host" label={server} hint={JSON.stringify(cfg).slice(0, 120)}>
               <span />
             </SettingRow>
           ))}
@@ -711,7 +800,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
             <div className="text-sm">{t("projects.archive")}</div>
             <div className="text-xs text-subtle">{t(members.length === 0 ? "projects.archiveHintEmpty" : "projects.archiveHint")}</div>
           </div>
-          <button onClick={() => void archive()} className="flex shrink-0 items-center gap-1 rounded-md bg-danger px-3 py-1 text-xs font-medium text-white hover:bg-danger/90">
+          <button onClick={() => void archive()} className="flex shrink-0 items-center gap-1 rounded-md bg-danger-solid px-3 py-1 text-xs font-medium text-white hover:brightness-95">
             <Archive size={13} />
             {t("projects.archive")}
           </button>

@@ -1,14 +1,15 @@
-// A tagged code block of a live agent reply (docs/desktop-modules.md §22; Markdown.tsx hands it over when
-// a CodeBlockScope is set): the `timeline.codeBlockAction` items that match it go after streamdown's
-// Download / Copy. No match → streamdown's own block, unchanged.
-import type { ComponentType, HTMLAttributes, ReactNode } from "react";
-import { CodeBlock, CodeBlockCopyButton, CodeBlockDownloadButton, defaultComponents, useIsCodeFenceIncomplete } from "streamdown";
+// A code block of a live agent reply (docs/desktop-modules.md §22; Markdown.tsx hands it over when a
+// CodeBlockScope is set): the `timeline.codeBlockAction` items that match it go after streamdown's
+// Download / Copy. Always the same tree (streamdown's CodeBlock, as its default `code` renders it), with or
+// without a match and with or without a language yet: a block that streams in never changes component type,
+// so it is not remounted mid-stream (the flicker recorder saw it flash, 2026-10-26).
+import type { HTMLAttributes, ReactNode } from "react";
+import { CodeBlock, CodeBlockCopyButton, CodeBlockDownloadButton, useIsCodeFenceIncomplete } from "streamdown";
 import { useCodeBlockActionItems, useHostPlatform } from "../lib/codeBlockActions";
 import { matchCodeBlockActions, trimCode, type CodeBlockScopeValue } from "../lib/codeBlockScope";
 import { CodeBlockActions } from "../modules/CodeBlockActions";
 
 type CodeProps = HTMLAttributes<HTMLElement> & { node?: unknown; "data-block"?: string };
-const DefaultCode = defaultComponents.code as ComponentType<CodeProps>;
 
 /** The text of a block `code` element as streamdown reads it (one string child, or a string). */
 function codeTextOf(children: ReactNode): string {
@@ -25,8 +26,7 @@ export function ReplyCodeBlock({ scope, language, ...props }: CodeProps & { scop
   const platform = useHostPlatform(scope.hostId);
   const incomplete = useIsCodeFenceIncomplete();
   const block = { language: language.toLowerCase(), hostId: scope.hostId, platform };
-  const entries = items.length ? matchCodeBlockActions(items, block, (id, error) => console.error(`[${id}] codeBlockAction match`, error)) : [];
-  if (!entries.length) return <DefaultCode {...props} />;
+  const entries = items.length && language ? matchCodeBlockActions(items, block, (id, error) => console.error(`[${id}] codeBlockAction match`, error)) : [];
   // = streamdown's default block (line numbers / startLine from the fence meta) + Download + Copy, then the items.
   const { node, className, children, "data-block": _block, ...rest } = props;
   const raw = (node as { properties?: { metastring?: unknown } } | undefined)?.properties?.metastring;
@@ -37,8 +37,7 @@ export function ReplyCodeBlock({ scope, language, ...props }: CodeProps & { scop
     <CodeBlock {...rest} className={className} code={code} language={language} isIncomplete={incomplete} lineNumbers={!/\bnoLineNumbers\b/.test(meta)} startLine={start >= 1 ? start : undefined}>
       <CodeBlockDownloadButton code={code} language={language} />
       <CodeBlockCopyButton />
-      <CodeBlockActions entries={entries} block={{ ...block, sessionId: scope.sessionId, code: trimCode(code), incomplete }} />
+      {entries.length > 0 && <CodeBlockActions entries={entries} block={{ ...block, sessionId: scope.sessionId, code: trimCode(code), incomplete }} />}
     </CodeBlock>
   );
 }
-

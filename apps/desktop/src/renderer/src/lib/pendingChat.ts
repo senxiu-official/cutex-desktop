@@ -36,6 +36,8 @@ export interface PendingChatState {
    * carries only model / effort and the Claude starting mode (lib/newAgentClaude claudeOnlyLaunch).
    */
   claude?: boolean;
+  /** DSH ACP creation accepts model/effort only; no native permission overrides. */
+  dsh?: boolean;
   /** Claude starting modes the profile offers (cutex claude-launch-permission-mode); null = none. */
   claudeModes?: ClaudeLaunchMode[] | null;
   /** Start in plan mode (collaboration mode set before the first message). */
@@ -73,13 +75,13 @@ export function draftSubmit(draft: PendingDraft): { text: string; extra: ExtraIn
 }
 
 /** The remaining steps, in order. Empty = done (or nothing to send yet). */
-export function pendingChatSteps(p: Pick<PendingChatState, "sessionId" | "plan" | "goal" | "applied" | "drafts">): PendingChatStep[] {
+export function pendingChatSteps(p: Pick<PendingChatState, "sessionId" | "plan" | "goal" | "applied" | "drafts"> & { dsh?: boolean }): PendingChatStep[] {
   if (p.drafts.length === 0 && !p.sessionId) return [];
   const steps: PendingChatStep[] = [];
   if (!p.sessionId) steps.push({ kind: "create" });
-  if (p.plan && !p.applied.plan) steps.push({ kind: "plan" });
+  if (!p.dsh && p.plan && !p.applied.plan) steps.push({ kind: "plan" });
   const objective = p.goal?.trim();
-  if (objective && !p.applied.goal) steps.push({ kind: "goal", objective });
+  if (!p.dsh && objective && !p.applied.goal) steps.push({ kind: "goal", objective });
   for (const d of p.drafts) steps.push({ kind: "submit", ...draftSubmit(d) });
   return steps;
 }
@@ -93,7 +95,7 @@ export function pendingSettingLocked(p: Pick<PendingChatState, "applied">, which
  * profile hides the entry (it would only fail after creation). Unknown profile (list not
  * loaded yet / none picked): offered, like before. */
 export function draftOffersGoal(profile: Pick<ProfileItem, "cliKind" | "authKind" | "providerFamily"> | null | undefined): boolean {
-  return !profile || profileKind(profile) !== "claude";
+  return !profile || !["claude", "dsh", "kimi"].includes(profileKind(profile));
 }
 
 /** The draft's `/` palette commands; `goal` drops out for the same runtimes as above. */

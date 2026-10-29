@@ -19,7 +19,9 @@ function fixture(grants = ["agents.read", "agents.open", "settings"], options: {
   const broker = createBroker(port, { instanceId: "frame", channel: "secret", scope: { hostId: "A" }, requestedPermissions: ["agents.read", "agents.open", "settings"], grantedPermissions: grants, operations });
   let id = 0;
   const dispatch = (method: string, params: Json = null) => { const next = ++id; listener?.({ data: { version: 1, kind: "request", instanceId: "frame", channel: "secret", id: next, method, params } } as MessageEvent); return next; };
-  const reply = async (id: number) => { await vi.waitFor(() => expect(replies.some((row) => row.id === id)).toBe(true)); return replies.find((row) => row.id === id)!; };
+  // A reply lands within a microtask or two; waitFor's default 50 ms poll made the ~75-round-trip settings test take
+  // 4.5 s alone and time out under the full suite. Poll every millisecond instead (same condition, same 1 s timeout).
+  const reply = async (id: number) => { await vi.waitFor(() => expect(replies.some((row) => row.id === id)).toBe(true), { interval: 1 }); return replies.find((row) => row.id === id)!; };
   return { broker, controller, operations, values, open, replies, dispatch, reply, agents: (next: PluginAgent[]) => { agents = next; }, tick: (ms: number) => { clock += ms; } };
 }
 

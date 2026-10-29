@@ -1,5 +1,6 @@
 // Desktop-local UI preferences (localStorage), shared between components via useSyncExternalStore.
 import { migrateNavPins } from "./navPins";
+import { DEFAULT_PORTRAIT_THEMES, isPortraitThemeKey, migratePortraitThemes } from "../../../shared/portraitDefaults";
 import { useSyncExternalStore } from "react";
 import type { SendKeyPreset } from "./sendKeys";
 import type { CreateHostDefault } from "./hostPick";
@@ -8,7 +9,7 @@ import { DEFAULT_OFFLINE_LIMIT, migrateOfflineLimit, type OfflineLimit } from ".
 import { DEFAULT_FOLD_LINES, migrateFoldLines, type FoldLines } from "./messageFold";
 import { DEFAULT_REASONING_VIEW, migrateReasoningView, REASONING_VIEW_REV, type ReasoningView } from "./reasoningView";
 import type { TurnSummaryMode } from "./turnSummary";
-import { DEFAULT_QUOTA_VIEW, migrateQuotaView, type QuotaView } from "./quota";
+import { DEFAULT_QUOTA_VIEW, migrateGaugeChoices, migrateQuotaView, type GaugeChoice, type QuotaView } from "./quota";
 import { migrateSections, type SectionCollapsedShows, type SidebarSection } from "./sidebarSections";
 import { migrateRemarks, withRemark } from "./projectRemarks";
 import { migrateIcons, withIcon, type ProjectIconChoice } from "./projectIcons";
@@ -25,20 +26,38 @@ import { DEFAULT_RUNNING_AGENTS, migrateRunningAgents, RUNNING_AGENTS_REV, type 
 import { normalizeAvatarThemes, type AvatarThemeId } from "./avatarThemes";
 import { onProfileLooksNoted, patchProfileLook, profileLookOf, profileLooksApi, profileLooksSynced } from "./profileLooks";
 import { AGENT_AVATAR_DEFAULT_REV, migrateAgentAvatarDefault, type AgentAvatarDefault } from "./avatarDefault";
+import { DEFAULT_DIRECTOR_HEADWEAR, migrateDirectorHeadwear, type DirectorHeadwear } from "./directorHeadwear";
+import { migrateImageHistoryHintDone } from "./imageHistoryHint";
+import { migrateMultiWindow, takeLegacyDesksFlag } from "./multiWindowPref";
 
 export type ProjectIconStyle = "tint" | "line";
 export type { AgentAvatarDefault };
 
+/** 头像底色 (UiPrefs.avatarTint). */
+export type AvatarTint = "none" | "provider";
+export const AVATAR_TINTS: readonly AvatarTint[] = ["none", "provider"];
+
 export interface UiPrefs {
-  /** Show the reset countdown next to quota rings in the composer row. */
-  quotaShowReset: boolean;
+  /** Refresh open file / working-tree diff previews after completed agent patches. */
+  viewerAutoRefresh: boolean;
+  /** Per-gauge choices in the composer quota popover, keyed by gauge display name ("Claude 7d") and
+   *  shared across all Profiles (owner 2026-10-28: the ring / the countdown managed per gauge). */
+  quotaGauges: Record<string, GaugeChoice>;
+  /** The reset-countdown default for gauges without an explicit choice: the removed global switch's
+   *  value (off stays off), so the old setting seeds the new per-gauge ones. */
+  quotaResetDefault: boolean;
+  /** One Profile's window gauges whose resets are < 10 min apart share one composer ring (the
+   *  popover's bottom switch turns merging off). */
+  quotaMerge: boolean;
   /** The profile chip in the composer starts with the profile picture (lib/profileAvatar). */
   composerProfileAvatar: boolean;
   /** Quota gauges in the composer chip + popover show what is left (default) or what is used.
    *  The context ring always shows used. */
   quotaView: QuotaView;
-  /** Left sidebar visible (Ctrl+B / title bar toggle). */
+  /** Left sidebar shown. Collapsing it (Ctrl/⌘+B, the title bar toggle) hides it (`sidebarRail`); false only in prefs stored before the rail (migrated on load). */
   sidebarOpen: boolean;
+  /** The left sidebar collapsed — fully hidden with the left-edge pop-out (Ctrl/⌘+B, owner 2026-10-28; the key keeps its rail name; device-local). */
+  sidebarRail: boolean;
   /** Agent-bus messages: one-line collapsible (compact) or always the full bubble. */
   agentMessages: "compact" | "full";
   /** Folded table groups, "<table>:<group key>" (DataTable foldPrefix, e.g. "services:<projectId>"; "" = no project). */
@@ -94,7 +113,7 @@ export interface UiPrefs {
   /** Sidebar groups (project id / "__independent__") whose offline list is expanded; the others
    *  show only the 离线 N header (plus the open agent). Collapsed by default. */
   offlineOpen: string[];
-  /** Title bar 启动 / 停止运行时 button: every conversation, independent agents only, or none. */
+  /** Conversation header 启动 / 停止运行时 button: every conversation, independent agents only, or none. */
   runtimeButton: "all" | "independent" | "off";
   /** Long-message folding (lib/messageFold): the user's own messages taller than `foldLines`
    *  visual lines show clipped with 展开全部. */
@@ -115,6 +134,8 @@ export interface UiPrefs {
   foldIdleAgents: boolean;
   /** Sidebar groups whose 在线空闲 fold is expanded. */
   idleOpen: string[];
+  /** Sidebar groups whose 「最近活跃 +N」 fold (compact recent rows past the cap) is expanded. */
+  recentOpen: string[];
   /** Projects (sidebar group ids) set to 「在线空闲不收起」: their idle agents are listed one by one
    *  even with `foldIdleAgents` on (project right-click menu). */
   idleUnfolded: string[];
@@ -156,12 +177,27 @@ export interface UiPrefs {
   titleTwoLines: boolean;
   /** Latest message as a second line under the agent name: never, Director rows only, every row. */
   rowPreview: RowPreview;
+  /** 1: IM-style rows (2026-10-20) made 「每行」 the default; an older stored default (Director only) moved with it. */
+  rowPreviewRev: number;
   /** 默认头像 of agents without their own avatar: a bundled emoji picked from the id (lib/agentEmoji), the
    *  initial, or (★ "important") the emoji for important agents only and a Profile-coloured dot in list
    *  rows for the rest (lib/avatarDefault). */
   agentAvatarDefault: AgentAvatarDefault;
   /** Which `agentAvatarDefault` default was saved under (lib/avatarDefault migration). */
   agentAvatarDefaultRev: number;
+  /** 头像底色 (docs/design/040 §3.1): pictures (uploaded, Director, portraits) as they are with a hairline edge
+   *  (none), or on a 16 % backdrop of the Profile's provider colour with a provider ring (provider). Emoji /
+   *  letters keep their Profile-colour circle either way. */
+  avatarTint: AvatarTint;
+  /** 主管头饰 (lib/directorHeadwear, owner 2026-10-24): what a project Director wears on its avatar (≥ 28 px), or none. */
+  directorHeadwear: DirectorHeadwear;
+  /** 副主管也戴 (lib/directorHeadwear, 2026-10-25): a project's Operator wears the companion of the Director's style. */
+  operatorHeadwear: boolean;
+  /** 节日头饰 (lib/directorHeadwear, 2026-10-25): the Director wears a Christmas hat / a New Year bow in their windows. */
+  seasonalHeadwear: boolean;
+  /** 拟人头像 (lib/portraitPacks, lib/portraitThemes): the enabled themes as `<pack>/<theme>`; new agents and agents
+   *  without an avatar of their own wear a picture of these for their model family. Empty = 不用 (default: today's look). */
+  portraitPacks: string[];
   /** 头像主题 per Profile (lib/avatarThemes): hostKey(host id, profile id) → ticked themes (canonical,
    *  never empty); absent = by model family. Only for hosts without cutex `profile-avatar` (a syncing
    *  host stores the choice itself; local entries are uploaded once). Always host keys. */
@@ -170,21 +206,16 @@ export interface UiPrefs {
   messageImages: "thumbnail" | "link";
   /** 轮尾摘要 under a finished turn's last reply (lib/turnSummary): collapsed, the latest one expanded, or off. */
   turnSummary: TurnSummaryMode;
+  /** Conversations whose one-time image-heavy history hint was dismissed (cutex session ids). */
+  imageHistoryHintDone: string[];
+  /** The one-time notice after opening at least three desk windows was acknowledged. */
+  deskPerformanceHintDone: boolean;
   // ── 会话两侧 (Settings → 侧栏, docs/desktop-modules.md §18.12) ──
-  /** 右栏与对话: side by side with the text re-centred (push), the text keeps its place (yield), or over the conversation (float). */
+  /** Shelf 与会话: side by side with the text centred in its own pane (push), or over the conversation (float). The old 让位 ("yield") migrates to push (owner 2026-10-21). */
   sideMode: SideMode;
-  /**
-   * 右栏布局 with ≥ 2 pages (owner 2026-10-14): "lane" (★) = the vertical page-button lane stays beside the
-   * open column (pages left, each card's own tab row on the right); "tabs" = the pages as a tab row at the
-   * column's top, the lane only while the column is closed.
-   */
-  sidePageBar: "lane" | "tabs";
-  /** Page buttons in the vertical lane (open column with 竖条 + 标签页, and the closed side). */
-  sidePillAnchor: "top" | "center" | "bottom";
-  /** Right column closed with ≥ 2 pages: keep the page buttons (launcher) or hide everything. */
-  sideLaneWhenHidden: "keep" | "hide";
-  /** 点击当前页图标 (the page in view's button / Ctrl+Shift+n again): nothing (★; the lane has its own collapse button) or close the column. */
-  sideCurrentPageClick: CurrentPageClick;
+  // 右栏布局 / 竖条里页按钮位置 / 右栏收起时 / 点击当前页图标 (sidePageBar, sidePillAnchor, sideLaneWhenHidden,
+  // sideCurrentPageClick) are gone (design 006 v1 Q5, owner 2026-10-22): step-3 right-column options that did nothing
+  // since the Shelves have a Rail; load() drops stored values (the next save forgets them).
   /** Window too narrow for both: the side as a drawer over the conversation, or closed automatically. */
   sideNarrow: "overlay" | "auto-collapse";
   /** Opening a file: replace the unpinned preview tab (★, lead 2026-10-12; Ctrl/⌘ / middle click keeps it), new tabs for
@@ -200,6 +231,10 @@ export interface UiPrefs {
   sideKeepMounted: number;
   /** Title-bar launchers the owner pinned (true) / unpinned (false), by component id (§18.3); absent = the component's `launcher.pin`. */
   sideLauncherPins: Record<string, boolean>;
+  /** 侧栏布局 (design 040 §4, step 14): 花名册 (the roster, default) or 现在 / 全部 (components/SidebarNowAll). */
+  sidebarLayout: SidebarLayout;
+  /** 现在 / 全部: the 「现在」 half's height (px), dragged at the divider. */
+  sidebarNowHeight: number;
   /** Sidebar top entries in the first screen, in pin order (lib/navPins); null = the defaults. Per device, not per host. */
   navPins: string[] | null;
   /** Where a reference card opens (two sides, §19; host pending): left when it fits, always right, always left. */
@@ -218,29 +253,59 @@ export interface UiPrefs {
   lastCreateHost: string;
   /** Default host of create forms in a multi-host scope: "local" = this machine first (★, owner 2026-10-14), "context" = the selected agent's / last creation's host first. */
   createHostDefault: CreateHostDefault;
+  /** 性能 (Settings → 通用, owner 2026-10-23; lib/perfMode): "save" 节省资源 = looping animations rest while the window is not in front, rarely used pages load on first open; "smooth" 流畅优先 = the loops keep running, those pages load right after start when idle. */
+  perfMode: PerfMode;
 }
 
-export type SideMode = "push" | "yield" | "float";
+export type PerfMode = "save" | "smooth";
+export const PERF_MODES: readonly PerfMode[] = ["save", "smooth"];
+
+export type SideMode = "push" | "float";
 
 export type RowPreview = "off" | "director" | "all";
+export type SidebarLayout = "roster" | "now-all";
+export const SIDEBAR_LAYOUTS: readonly SidebarLayout[] = ["roster", "now-all"];
+/** 「现在」's height: default and bounds (px). */
+export const NOW_HEIGHT = { def: 300, min: 120, max: 1200 } as const;
+export const clampNowHeight = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? Math.round(Math.min(NOW_HEIGHT.max, Math.max(NOW_HEIGHT.min, v))) : NOW_HEIGHT.def);
 
 export type ProjectGrouping = "all" | "starred";
 export type NoOnlineProjects = "collapse" | "expand";
 export type { RunningAgents };
 
 const KEY = "cutex-desktop.ui";
-const DEFAULTS: UiPrefs = { quotaShowReset: true, composerProfileAvatar: true, quotaView: DEFAULT_QUOTA_VIEW, sidebarOpen: true, agentMessages: "compact", foldedGroups: [], modelPins: {}, lastAgentCwd: "", remoteAgentCwd: {}, sendKeys: "queueFirst", delegationSteerKeys: false, capsuleCorner: DEFAULT_CAPSULE_CORNER, capsuleEdge: DEFAULT_CAPSULE_EDGE, reasoningView: DEFAULT_REASONING_VIEW, reasoningViewRev: REASONING_VIEW_REV, capsuleOpen: false, capsuleFoldedItems: [], timelineTurns: 30, timelineInteractions: true, timelineIntro: true, capsuleAlways: false, projectOrder: [], profileOrder: [], offlineAgents: DEFAULT_OFFLINE_LIMIT, offlineOpen: [],runtimeButton: "all", foldLong: true, foldLines: DEFAULT_FOLD_LINES, foldOlderReplies: false, projectGrouping: "all", noOnlineProjects: "collapse", runningAgents: DEFAULT_RUNNING_AGENTS, runningAgentsRev: RUNNING_AGENTS_REV, foldIdleAgents: true, idleOpen: [], idleUnfolded: [], foldedProjects: [], starredProjects: [], sidebarSections: [], projectRemarks: {}, projectDirectors: {}, projectIcons: {}, sectionCollapsedShows: "summary", projectHoverPreview: true, projectHoverDelay: DEFAULT_FLYOUT_DELAY, projectSeparation: DEFAULT_PROJECT_SEPARATION, projectSeparationRev: PROJECT_SEPARATION_REV, projectIconStyle: "tint", statusChips: DEFAULT_STATUS_CHIPS, needsYouStrip: true, titleTwoLines: true, rowPreview: "director", agentAvatarDefault: "important", agentAvatarDefaultRev: AGENT_AVATAR_DEFAULT_REV, avatarThemes: {}, messageImages: "thumbnail", turnSummary: "collapsed", sideMode: "push", sidePageBar: "lane", sidePillAnchor: "top", sideLaneWhenHidden: "keep", sideCurrentPageClick: "stay", sideNarrow: "overlay", sidePreview: DEFAULT_SIDE_PREVIEW, sidePreviewRev: SIDE_PREVIEW_REV, sideRestore: true, sideKeepHidden: 4, sideKeepMounted: 4, sideLauncherPins: {}, navPins: null, peekTarget: "auto", gutterDocked: [], sideHomes: {}, gutterDockWidth: DOCK_WIDTH_DEFAULT, hostMarksSingle: false, hostMarkLocal: false, queueSectionStrip: true, queuePanelFold: DEFAULT_QUEUE_PANEL_FOLD, lastCreateHost: "", createHostDefault: "local" };
+const ROW_PREVIEW_REV = 1;
+const BASE_DEFAULTS: Omit<UiPrefs, "imageHistoryHintDone"> = { deskPerformanceHintDone: false, viewerAutoRefresh: true, quotaGauges: {}, quotaResetDefault: true, quotaMerge: true, composerProfileAvatar: true, quotaView: DEFAULT_QUOTA_VIEW, sidebarOpen: true, sidebarRail: false, agentMessages: "compact", foldedGroups: [], modelPins: {}, lastAgentCwd: "", remoteAgentCwd: {}, sendKeys: "queueFirst", delegationSteerKeys: false, capsuleCorner: DEFAULT_CAPSULE_CORNER, capsuleEdge: DEFAULT_CAPSULE_EDGE, reasoningView: DEFAULT_REASONING_VIEW, reasoningViewRev: REASONING_VIEW_REV, capsuleOpen: false, capsuleFoldedItems: [], timelineTurns: 30, timelineInteractions: true, timelineIntro: true, capsuleAlways: false, projectOrder: [], profileOrder: [], offlineAgents: DEFAULT_OFFLINE_LIMIT, offlineOpen: [],runtimeButton: "all", foldLong: true, foldLines: DEFAULT_FOLD_LINES, foldOlderReplies: false, projectGrouping: "all", noOnlineProjects: "collapse", runningAgents: DEFAULT_RUNNING_AGENTS, runningAgentsRev: RUNNING_AGENTS_REV, foldIdleAgents: true, idleOpen: [], recentOpen: [], idleUnfolded: [], foldedProjects: [], starredProjects: [], sidebarSections: [], projectRemarks: {}, projectDirectors: {}, projectIcons: {}, sectionCollapsedShows: "summary", projectHoverPreview: true, projectHoverDelay: DEFAULT_FLYOUT_DELAY, projectSeparation: DEFAULT_PROJECT_SEPARATION, projectSeparationRev: PROJECT_SEPARATION_REV, projectIconStyle: "tint", statusChips: DEFAULT_STATUS_CHIPS, needsYouStrip: true, titleTwoLines: true, rowPreview: "all", rowPreviewRev: ROW_PREVIEW_REV, agentAvatarDefault: "important", agentAvatarDefaultRev: AGENT_AVATAR_DEFAULT_REV, avatarTint: "none", directorHeadwear: DEFAULT_DIRECTOR_HEADWEAR, operatorHeadwear: true, seasonalHeadwear: true, portraitPacks: [...DEFAULT_PORTRAIT_THEMES], avatarThemes: {}, messageImages: "thumbnail", turnSummary: "collapsed", sideMode: "push", sideNarrow: "overlay", sidePreview: DEFAULT_SIDE_PREVIEW, sidePreviewRev: SIDE_PREVIEW_REV, sideRestore: true, sideKeepHidden: 4, sideKeepMounted: 4, sideLauncherPins: {}, sidebarLayout: "roster", sidebarNowHeight: NOW_HEIGHT.def, navPins: null, peekTarget: "auto", gutterDocked: [], sideHomes: {}, gutterDockWidth: DOCK_WIDTH_DEFAULT, hostMarksSingle: false, hostMarkLocal: false, queueSectionStrip: true, queuePanelFold: DEFAULT_QUEUE_PANEL_FOLD, lastCreateHost: "", createHostDefault: "local", perfMode: "save" };
+const DEFAULTS: UiPrefs = { ...BASE_DEFAULTS, imageHistoryHintDone: [] };
 const listeners = new Set<() => void>();
 /**
  * Lists of agent / project / group ids: stored under host keys (lib/hostKeys), shown as the focus
  * host's bare ids. `foldedGroups` entries are `<table>:<group>` (claimed by any id segment).
  */
-const HOST_LISTS = ["projectOrder", "profileOrder", "offlineOpen", "idleOpen", "idleUnfolded", "foldedProjects", "starredProjects", "foldedGroups"] as const;
+const HOST_LISTS = ["projectOrder", "profileOrder", "offlineOpen", "idleOpen", "recentOpen", "idleUnfolded", "foldedProjects", "starredProjects", "foldedGroups"] as const;
 export type HostList = (typeof HOST_LISTS)[number];
 const isHostList = (key: keyof UiPrefs): key is HostList => (HOST_LISTS as readonly string[]).includes(key);
+// 多窗口 moved to main (desktop-prefs.json; lib/multiWindowPref): the renderer's old value — the P6 pref stored here, or
+// the P1–P3.5 local flag before it — is read once, handed to main at start (startMultiWindowPref) and dropped here.
+const legacy = readLegacyMultiWindow();
 /** What is persisted (host keys); `current` is its projection onto the focus host. */
 let stored: UiPrefs = load();
 let current: UiPrefs = project(stored);
+if (takeLegacyDesksFlag() || legacy.stored) persist(stored);
+
+/** The renderer's old 多窗口 value (read at load; main adopts it at most once). */
+export function legacyMultiWindow(): boolean {
+  return legacy.on;
+}
+
+function readLegacyMultiWindow(): { on: boolean; stored: boolean } {
+  try {
+    const raw = (JSON.parse(localStorage.getItem(KEY) ?? "{}") ?? {}) as { multiWindow?: unknown };
+    return { on: migrateMultiWindow(raw.multiWindow), stored: "multiWindow" in raw };
+  } catch {
+    return { on: migrateMultiWindow(undefined), stored: false };
+  }
+}
 
 function project(prefs: UiPrefs): UiPrefs {
   const out = { ...prefs };
@@ -283,17 +348,71 @@ function migrateSideHomes(raw: unknown): Record<string, string> {
   return Object.fromEntries(Object.entries(raw).filter(([k, v]) => k && k.length <= 128 && typeof v === "string" && v && v.length <= 64));
 }
 
+/** 消息预览 (rowPreview): the IM-style rows show every agent's last message by default; a stored old default follows. */
+export function migrateRowPreview(value: unknown, rev: unknown): RowPreview {
+  if (value === "off" || value === "all") return value;
+  if (value === "director") return typeof rev === "number" && rev >= ROW_PREVIEW_REV ? "director" : "all";
+  return "all";
+}
+
+/** Shelf 与会话: 让位 ("yield", removed 2026-10-21 — the reading column centres in its own pane) and anything unknown → 并排. */
+export function migrateSideMode(value: unknown): SideMode {
+  return value === "float" ? "float" : "push";
+}
+
+/**
+ * The sidebar's collapsed form is hidden (owner 2026-10-28): a sidebar stored hidden comes back collapsed
+ * (the work row only docks the sidebar while `sidebarOpen`).
+ */
+export function migrateSidebarRail(stored: { sidebarOpen?: unknown; sidebarRail?: unknown }): { sidebarOpen: boolean; sidebarRail: boolean } {
+  if (stored.sidebarOpen === false) return { sidebarOpen: true, sidebarRail: true };
+  return { sidebarOpen: true, sidebarRail: stored.sidebarRail === true };
+}
+
+/** Ctrl/⌘+B and the title bar toggle: the full sidebar ↔ hidden. */
+/** §24.13 (lib/workspaces): the sidebar hidden automatically (two workspaces short of width) takes the toggle itself. */
+let sidebarRailToggleHook: ((prefRail: boolean) => boolean) | null = null;
+export function setSidebarRailToggleHook(hook: ((prefRail: boolean) => boolean) | null): void {
+  sidebarRailToggleHook = hook;
+}
+
+/** Multi-window P3 (lib/windowSidebar): in a desk window the toggle is that desk's own (true = handled there). */
+let sidebarRailWindowHook: (() => boolean) | null = null;
+export function setSidebarRailWindowHook(hook: (() => boolean) | null): void {
+  sidebarRailWindowHook = hook;
+}
+
+export function toggleSidebarRail(): void {
+  if (sidebarRailWindowHook?.()) return;
+  const prefs = getUiPrefs();
+  if (prefs.sidebarOpen && sidebarRailToggleHook?.(prefs.sidebarRail)) return;
+  if (!prefs.sidebarOpen) {
+    persist({ ...stored, sidebarOpen: true, sidebarRail: false });
+    return;
+  }
+  setUiPref("sidebarRail", !prefs.sidebarRail);
+}
+
+/** Stored prefs no longer read (design 006 v1 Q5: the step-3 right column's options); load() leaves them out. */
+export const DROPPED_PREFS = ["sidePageBar", "sidePillAnchor", "sideLaneWhenHidden", "sideCurrentPageClick"] as const;
+
 function load(): UiPrefs {
   try {
-    const stored = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<UiPrefs> & { capsuleAnchor?: unknown; projectHeaderTint?: unknown };
-    // projectHeaderTint (项目标题着色, removed 2026-10-18) only feeds the projectSeparation migration.
-    const { capsuleAnchor, projectHeaderTint, ...rest } = stored;
+    const stored = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<UiPrefs> & { capsuleAnchor?: unknown; projectHeaderTint?: unknown; multiWindow?: unknown; quotaShowReset?: unknown } & Partial<Record<(typeof DROPPED_PREFS)[number], unknown>>;
+    // projectHeaderTint (项目标题着色, removed 2026-10-18) only feeds the projectSeparation migration. The
+    // DROPPED_PREFS are left out (design 006 v1 Q5). multiWindow moved to main (readLegacyMultiWindow).
+    const { capsuleAnchor, projectHeaderTint, sidePageBar: _a, sidePillAnchor: _b, sideLaneWhenHidden: _c, sideCurrentPageClick: _d, multiWindow: _mw, quotaShowReset: _oldResetSwitch, ...rest } = stored;
     const anchor = stored.capsuleCorner ? null : migrateCapsuleAnchor(capsuleAnchor);
     return {
       ...DEFAULTS,
       ...rest,
       ...(anchor && { capsuleCorner: anchor.corner, capsuleEdge: anchor.edge }),
       quotaView: migrateQuotaView(stored.quotaView),
+      // quotaGauges / quotaResetDefault replace the removed global 「显示重置时间」 switch: an owner who
+      // had it off keeps every gauge's countdown off until they turn one on (owner 2026-10-28).
+      quotaGauges: migrateGaugeChoices(stored.quotaGauges),
+      quotaResetDefault: typeof stored.quotaResetDefault === "boolean" ? stored.quotaResetDefault : stored.quotaShowReset !== false,
+      quotaMerge: stored.quotaMerge !== false,
       offlineAgents: migrateOfflineLimit(stored.offlineAgents),
       foldLines: migrateFoldLines(stored.foldLines),
       reasoningView: migrateReasoningView(stored.reasoningView, stored.reasoningViewRev),
@@ -303,6 +422,7 @@ function load(): UiPrefs {
       projectDirectors: migrateProjectDirectors(stored.projectDirectors),
       projectIcons: migrateIcons(stored.projectIcons),
       sectionCollapsedShows: stored.sectionCollapsedShows === "attention" ? "attention" : "summary",
+      viewerAutoRefresh: stored.viewerAutoRefresh !== false,
       timelineIntro: stored.timelineIntro !== false,
       timelineInteractions: stored.timelineInteractions !== false,
       projectHoverPreview: stored.projectHoverPreview !== false,
@@ -315,14 +435,28 @@ function load(): UiPrefs {
       sideLauncherPins: migrateLauncherPins(stored.sideLauncherPins),
       sideHomes: migrateSideHomes(stored.sideHomes),
       navPins: migrateNavPins(stored.navPins),
+      sidebarLayout: stored.sidebarLayout === "now-all" ? "now-all" : "roster",
+      sidebarNowHeight: clampNowHeight(stored.sidebarNowHeight),
       sidePreview: migrateSidePreview(stored.sidePreview, stored.sidePreviewRev),
       sidePreviewRev: SIDE_PREVIEW_REV,
       runningAgents: migrateRunningAgents(stored.runningAgents, stored.runningAgentsRev),
       runningAgentsRev: RUNNING_AGENTS_REV,
       agentAvatarDefault: migrateAgentAvatarDefault(stored.agentAvatarDefault, stored.agentAvatarDefaultRev),
       agentAvatarDefaultRev: AGENT_AVATAR_DEFAULT_REV,
+      avatarTint: stored.avatarTint === "provider" ? "provider" : "none",
+      directorHeadwear: migrateDirectorHeadwear(stored.directorHeadwear),
+      operatorHeadwear: stored.operatorHeadwear !== false,
+      seasonalHeadwear: stored.seasonalHeadwear !== false,
+      imageHistoryHintDone: migrateImageHistoryHintDone(stored.imageHistoryHintDone),
+      deskPerformanceHintDone: stored.deskPerformanceHintDone === true,
+      portraitPacks: Array.isArray(stored.portraitPacks) ? migratePortraitThemes(stored.portraitPacks.filter(isPortraitThemeKey)).slice(0, 200) : stored.agentAvatarDefault === "letter" ? [] : [...DEFAULT_PORTRAIT_THEMES],
       avatarThemes: migrateAvatarThemes(stored.avatarThemes),
       queuePanelFold: migrateQueuePanelFold(stored.queuePanelFold),
+      sideMode: migrateSideMode(stored.sideMode),
+      ...migrateSidebarRail(stored),
+      rowPreview: migrateRowPreview(stored.rowPreview, stored.rowPreviewRev),
+      rowPreviewRev: ROW_PREVIEW_REV,
+      perfMode: stored.perfMode === "smooth" ? "smooth" : "save",
     };
   } catch {
     return DEFAULTS;
@@ -343,12 +477,15 @@ export function getUiPrefs(): UiPrefs {
   return current;
 }
 
+/** Called after every pref change (shell code outside React: lib/perfMode). Returns the unsubscribe. */
+export function subscribeUiPrefs(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => void listeners.delete(listener);
+}
+
 export function useUiPrefs(): UiPrefs {
   return useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
+    subscribeUiPrefs,
     () => current,
     // The same cached snapshot serves server-rendered tests (renderToStaticMarkup).
     () => current,
@@ -361,7 +498,7 @@ export function toggleFolded(key: string): void {
 }
 
 /** Adds / removes `id` in a string-list pref of `hostId` (default: the focus host). */
-function toggleIn(key: "idleOpen" | "idleUnfolded" | "foldedProjects" | "starredProjects" | "offlineOpen", id: string, hostId = keyFocus()): void {
+function toggleIn(key: "idleOpen" | "recentOpen" | "idleUnfolded" | "foldedProjects" | "starredProjects" | "offlineOpen", id: string, hostId = keyFocus()): void {
   const list = projectList(stored[key], hostId);
   persist({ ...stored, [key]: writeList(stored[key], list.includes(id) ? list.filter((k) => k !== id) : [...list, id], hostId) });
 }
@@ -403,6 +540,11 @@ export function toggleOfflineOpen(groupId: string, hostId?: string): void {
 /** Expands / collapses a sidebar group's 在线空闲 fold (`idleOpen`); `hostId`: the group's host. */
 export function toggleIdleOpen(groupId: string, hostId?: string): void {
   toggleIn("idleOpen", groupId, hostId);
+}
+
+/** Expands / collapses a sidebar group's 「最近活跃 +N」 fold (`recentOpen`); `hostId`: the group's host. */
+export function toggleRecentOpen(groupId: string, hostId?: string): void {
+  toggleIn("recentOpen", groupId, hostId);
 }
 
 /** 「在线空闲不收起」 on / off for a project (sidebar group id); `hostId`: the project's host. */

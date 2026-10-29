@@ -9,6 +9,7 @@
   --accent: #3b82f6;
   --warn: #d97706;
   --danger: #dc2626;
+  --danger-solid: #dc2626;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -22,6 +23,7 @@
     --accent: #60a5fa;
     --warn: #f59e0b;
     --danger: #f87171;
+    --danger-solid: #dc2626;
     color-scheme: dark;
   }
 }
@@ -35,6 +37,7 @@
   --accent: #60a5fa;
   --warn: #f59e0b;
   --danger: #f87171;
+  --danger-solid: #dc2626;
   color-scheme: dark;
 }
 
@@ -48,7 +51,7 @@ body {
   overflow: hidden;
   background: var(--bg);
   color: var(--fg);
-  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  font: 14px/1.5 var(--font-sans, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif);
   user-select: none;
 }
 #alert {
@@ -128,7 +131,7 @@ body {
 }
 .badge-urgent {
   color: #fff;
-  background: var(--danger);
+  background: var(--danger-solid);
 }
 .meta {
   color: var(--fg-muted);
@@ -175,7 +178,7 @@ body {
   margin-top: 6px;
   color: var(--fg-muted);
   font-size: 12px;
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-mono, ui-monospace, "Cascadia Mono", Consolas, monospace);
   overflow-wrap: anywhere;
 }
 .actions {

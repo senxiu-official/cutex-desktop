@@ -78,4 +78,22 @@ describe("PendingMessagesSection: a note from another host", () => {
     expect(el.querySelector('[data-testid="pending-message-remote"]')).toBeNull();
     root.unmount();
   });
+
+  it("older cutex (< 0.1.5, no remote): a ptell- row names name@host with the tag, not Cutex 系统", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const el = document.createElement("div");
+    const root = createRoot(el);
+    // Even a record that still says service (seeded before the ptell- rule) shows as the agent.
+    const legacy: AgentMessageRecord = { ...remoteNote, messageId: "ptell-9", remote: null, senderName: null, sourceKind: "service", body: "" };
+    await act(async () => root.render(h(PendingMessagesSection, { sessionId: "cutex.b", messages: [legacy], busy: false })));
+    const row = el.querySelector('[data-testid="pending-message"]')!;
+    expect(row.textContent).toContain("worker@alpha");
+    expect(row.textContent).not.toContain("system.cutex");
+    expect(el.querySelector('[data-testid="pending-message-remote"]')!.getAttribute("title")).toBe('agentMsg.remoteHint:{"host":"alpha"}');
+    // A non-ptell service row keeps its system name and no tag.
+    await act(async () => root.render(h(PendingMessagesSection, { sessionId: "cutex.b", messages: [{ ...legacy, messageId: "svc-1", from: "cutex-peers" }], busy: false })));
+    expect(el.querySelector('[data-testid="pending-message"]')!.textContent).toContain("system.cutex");
+    expect(el.querySelector('[data-testid="pending-message-remote"]')).toBeNull();
+    root.unmount();
+  });
 });

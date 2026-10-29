@@ -65,10 +65,12 @@ describe("about module", () => {
 
   const html = renderToStaticMarkup(h(AboutPage));
 
-  it("leads with the desktop version (exact build folded under 详细信息), then license, notices and every project link", () => {
+  it("leads with the desktop version and always-visible exact build information, then license, notices and every project link", () => {
     expect(html).toContain(">0.1.2<");
-    expect(html).toContain("settings.details");
-    expect(html).not.toContain("0.1.2 · abcdef1");
+    expect(html).not.toContain("settings.details");
+    expect(html).toContain("shell.about.desktopBuild");
+    expect(html).toContain("abcdef1");
+    expect(html).toContain("0.1.2 · abcdef1");
     expect(html).toContain("Apache-2.0");
     expect(html).toContain("about.thirdParty");
     // One project card: the three repositories and the star button (no second copy on 更新与诊断).

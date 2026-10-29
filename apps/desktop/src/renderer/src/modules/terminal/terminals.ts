@@ -1,6 +1,7 @@
 // The terminal module's runtime (RFC right-panel-rfc-20261009 §6.1, §3.11): what the daemon says about
 // the workspace's PTYs, unread / exited marks for the tabs, the output-stream attach count (main keeps
 // one stream per PTY), and Ctrl+`. PTYs live in cutex; nothing here spawns a shell.
+import { isImeComposing } from "../../lib/ime";
 import { create } from "zustand";
 import type { TerminalSummary, WorkspaceScope } from "../../../../shared/ipc";
 import type { DaemonApi } from "../../../../shared/ipc";
@@ -10,8 +11,11 @@ import { services } from "../app";
 import { missingTerminals, scopeOfKey, TERMINAL, terminalIdOf } from "./terminalState";
 import { scopeKey } from "../../lib/workspace";
 import { shortcutKeyUsed } from "../../lib/browserCapture";
+import { matchesCommand } from "../../lib/keybindings";
 import type { AppModuleContext, SideBinding } from "../slots";
 import type { MessageKey } from "../../i18n";
+import { isElement } from "../../lib/ownerWindow";
+import { activeAppDocument, queryAppWindows } from "../../lib/appWindowSet";
 
 interface TerminalsState {
   /** terminalList per host + workspace scope (`listKey`; refreshed on open / create / exit). */
@@ -172,7 +176,7 @@ function openTerminals(): { id: string; terminalId: string | null }[] {
 function focusComposer(): void {
   // Two conversations side by side (panes step 2): the focused one's composer.
   const main = '[data-focus-region="main"]';
-  (document.querySelector<HTMLTextAreaElement>(`${main} [data-pane-focused] textarea:not([disabled])`) ?? document.querySelector<HTMLTextAreaElement>(`${main} textarea:not([disabled])`))?.focus();
+  (queryAppWindows<HTMLTextAreaElement>(`${main} [data-pane-focused] textarea:not([disabled])`) ?? queryAppWindows<HTMLTextAreaElement>(`${main} textarea:not([disabled])`))?.focus();
 }
 
 let lastFocused: string | null = null;
@@ -191,8 +195,8 @@ export function lastFocusedTerminal(): string | null {
  * (the last focused one); none → open by the placement rules, taking in the workspace's live PTYs.
  */
 export function toggleTerminalFocus(notice: (reason: string) => void = () => {}): void {
-  const active = document.activeElement;
-  if (active instanceof Element && active.closest("[data-terminal-view]")) {
+  const active = activeAppDocument().activeElement;
+  if (isElement(active) && active.closest("[data-terminal-view]")) {
     focusComposer();
     return;
   }
@@ -215,7 +219,7 @@ export async function adoptTerminals(hostId: string, scope: WorkspaceScope, open
   return missing.length;
 }
 
-/** Module activation: the output / exit marks and Ctrl+`. Undone when the module stops. */
+/** Module activation: the output / exit marks and the terminal key (lib/keybindings `terminal`). Undone when the module stops. */
 export function startTerminals(ctx: AppModuleContext): void {
   const notice = (reason: string) =>
     ctx.services.ui.notice(
@@ -239,8 +243,8 @@ export function startTerminals(ctx: AppModuleContext): void {
         })
       : () => {};
   const onKey = (e: KeyboardEvent) => {
-    if (shortcutKeyUsed(e) || e.isComposing) return;
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "`" || e.code === "Backquote")) {
+    if (shortcutKeyUsed(e) || isImeComposing(e)) return;
+    if (matchesCommand("terminal", e)) {
       e.preventDefault();
       toggleTerminalFocus(notice);
     }

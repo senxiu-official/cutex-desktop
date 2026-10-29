@@ -1,49 +1,41 @@
-// App top bar (DESIGN §4.13): replaces the native title bar and the old conversation header, as in
-// ZCode / Claude / ChatGPT — one row. Left: sidebar toggle + host switcher (components/HostSwitcher.tsx).
-// Middle: current agent (title menu), note, git chip. Right: the right side's launcher bar — pinned
-// side-component launchers, ＋, the side toggle (components/side/TitleBarLaunchers) — + window controls.
+// The window bar (DESIGN §4.13; owner 2026-10-21 header split, variant A — prototype
+// .claude/preview-design-v1.html §1): only what belongs to the whole window. Left: the agent-list toggle
+// (the logo; Ctrl/⌘+B) + host scope (components/HostSwitcher.tsx), then the app's entries (sidebar v5, design 040
+// §4.1: a divider + flat icons — 新建智能体, 快速启动, 委托, 审批, 显示桌面 (owner 2026-10-23, components/ShowDesktopButton), ⋯;
+// components/SidebarNav TitleBarEntries). Middle: the open page's breadcrumb (PageTitle) and the search field
+// (`window.search`, contract 1.19 §26: ⌘K quick switcher). Right: the launcher bar — pinned launchers, ＋ (new / layout / {{shelf}} menu), the side
+// toggle (components/side/TitleBarLaunchers) — + window controls. Everything about a conversation (agent,
+// role, project, state, host · cwd · branch) is in that conversation column's own header
+// (components/ConversationHeader.tsx), so two columns side by side each show their own.
 // Windows keeps native caption buttons (titleBarOverlay, recolored to the theme); macOS keeps the
 // traffic lights; Linux gets drawn buttons.
-import { useEffect, useRef, useState } from "react";
-import { Bell, BellOff, BellRing, Check, ChevronDown, Globe, Loader2, PanelLeft, PanelLeftClose, Power, Star, X } from "lucide-react";
-import type { SessionResource } from "@cutex-desktop/protocol";
-import type { GitStatus, NotificationLevel } from "../../../shared/ipc";
-import { api, bridge } from "../bridge";
+import { useEffect, useMemo } from "react";
+import { LayoutDashboard, PanelLeft, PanelLeftClose, RotateCcw, Search, X } from "lucide-react";
+import { openMenuFrom } from "../lib/contextMenu";
+import { resetWindowLayout } from "../lib/layoutReset";
+import { bridge } from "../bridge";
+import { captionColors } from "../../../shared/windowChrome";
 import { useI18n } from "../i18n";
-import { openMenuFrom, runAction } from "../lib/contextMenu";
-import { useArmed } from "../lib/armedConfirm";
-import { useRuntimeStartSince } from "../lib/runtimeStart";
-import { ArmedHint } from "./ArmedHint";
-import { agentMenu, runtimeItem } from "../lib/menus";
-import { openService } from "../lib/services";
-import { isQuickChat } from "../lib/sidebar";
-import { projectIcon } from "../lib/projectIcons";
-import { getUiPrefs, hostListKeys, setUiPref, toggleStarred, useUiPrefs } from "../lib/prefs";
-import { hostKey } from "../lib/hostKeys";
-import { services } from "../modules/app";
-import { hostPageParam } from "../lib/targetHost";
-import { toggleProjectMuted, useProjectMuted, useProjectMuteSupported } from "../lib/notificationLevelsStore";
-import { INDEPENDENT_PROJECT } from "../../../shared/notificationLevels";
-import { notifyHidden, notifyLook, notifyMenu, notifyTooltip, type NotifyState } from "../lib/notifyControl";
-import { sidebarMark } from "../lib/hostScope";
-import { openChanges } from "../lib/sideOpen";
-import { shortenHome } from "../lib/workspace";
-import { diffTotals } from "../lib/workspaceView";
-import { useOpenPage } from "../modules/react";
-import { agentHost, selectedSidebar, sessionApi, useApp, viewOf } from "../store";
+import { toggleSidebarRail } from "../lib/prefs";
+import { useOpenPage, useSlot } from "../modules/react";
+import type { AppSlotEntry } from "../modules/slots";
+import { useApp } from "../store";
 import { PageTitle } from "./PageTitle";
-import { ProjectBadge } from "./ProjectBadge";
 import { CaptionSpace, LinuxControls } from "./WindowControls";
 import { TitleBarLaunchers } from "./side/TitleBarLaunchers";
-import { Avatar } from "./Avatar";
 import cutexLogo from "../assets/cutex-logo-64.png";
-import { ScriptText } from "./ScriptText";
 import { HostSwitcher } from "./HostSwitcher";
+import { TitleBarEntries } from "./SidebarNav";
 import { RestoreChip } from "./RestoreBanner";
-import { HostDot } from "./HostMark";
-import { useHostScope } from "../lib/useHostScope";
-import { openSettingsFromNav } from "../lib/openSettings";
-import { realAgentName, realNameTip } from "../lib/agentAlias";
+import { toggleSettingsFromNav } from "../lib/openSettings";
+import { matchesCommand } from "../lib/keybindings";
+import { useBindingLabel, withKey } from "../lib/useKeybindings";
+import { appSchemeNow } from "../lib/theme";
+import { useOwnerWindow } from "../lib/ownerContext";
+import { useSidebarCollapsed, useSidebarPeek } from "../lib/windowSidebar";
+import { createPeekRest } from "../lib/sidebarPeek";
+import { useWindowKey } from "../lib/windowScope";
+import { IdentityChip } from "./IdentityMenu";
 
 const win = bridge.window;
 const NO_DRAG = "[app-region:no-drag]";
@@ -51,21 +43,24 @@ const ICON_BTN = `${NO_DRAG} rounded-md p-1.5 text-muted hover:bg-surface-2 hove
 
 /**
  * Keep the native window in the app's colours (theme and palette can change at runtime): the Windows
- * caption buttons, and on every platform the window background main paints before the page (no flash of
+ * caption buttons' symbols (their fill is transparent: the window bar shows through, shared/windowChrome), and on every platform the window background main paints before the page (no flash of
  * the default colour at the next start with 宣纸 / 暮色 …).
  */
 function useChromeColors() {
+  const ownerWin = useOwnerWindow();
   useEffect(() => {
     if (!win) return;
     const sync = () => {
       const css = getComputedStyle(document.documentElement);
       const color = css.getPropertyValue("--win").trim();
-      const symbolColor = css.getPropertyValue("--fg").trim();
-      if (color && symbolColor && win.nativeControls === "right") void win.setChrome({ color, symbolColor });
+      // Windows: the caption buttons' fill stays transparent, only the symbols follow the theme (docs/design/029).
+      if (color && win.nativeControls === "right") void win.setChrome(captionColors({ fg: css.getPropertyValue("--fg"), win: color }));
       if (color) void win.setBackground?.(color);
+      // cutex's own pages in the in-app browser follow the app's light / dark (main/appScheme).
+      void win.setScheme?.(appSchemeNow());
     };
     sync();
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const media = ownerWin.matchMedia("(prefers-color-scheme: dark)");
     media.addEventListener("change", sync);
     const observer = new MutationObserver(sync);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-light-palette", "data-dark-palette"] });
@@ -76,356 +71,136 @@ function useChromeColors() {
   }, []);
 }
 
-/**
- * One notification control for the open agent (lib/notifyControl.ts): the icon reflects the agent's
- * alert level and its group's host mute together; the click menu sets either, with labels.
- */
-/**
- * Quiet pass: a title control in its default state (not starred, notifications as usual) shows on
- * hover / keyboard focus of the title; a non-default state (★, muted, important) always shows.
- */
-const ON_DEMAND = "opacity-0 transition-opacity group-hover/title:opacity-100 group-focus-within/title:opacity-100 focus-visible:opacity-100";
+/** The search field in the middle of the window bar: the first shown `window.search` item (§26). */
+function WindowSearch() {
+  const entry = useSlot("window.search").find((e) => e.mode === "show");
+  return entry ? <SearchField key={entry.item.id} entry={entry} /> : null;
+}
 
-function NotifyControl({ session }: { session: SessionResource }) {
+function SearchField({ entry }: { entry: AppSlotEntry<"window.search"> }) {
   const { t } = useI18n();
-  const threadId = session.native.threadId ?? null;
-  const [agent, setAgent] = useState<NotificationLevel | null>(null);
-  // The open agent's host (multi-host: it may not be the focus host). Project mutes: focus host only.
-  const daemon = sessionApi(session.cutexSessionId);
-  const own = useApp((s) => agentHost(s) === (s.hosts?.active ?? "local"));
-  const sidebar = useApp(selectedSidebar);
-  const host = sidebar?.hostRows[session.cutexSessionId];
-  const projectId = host?.projectId ?? null;
-  const groupId = projectId ?? INDEPENDENT_PROJECT;
-  const project = projectId ? sidebar?.projects?.projects.find((p) => p.project_id === projectId) : undefined;
-  const muteSupported = useProjectMuteSupported() && own;
-  const muted = useProjectMuted(groupId);
-  useEffect(() => {
-    let live = true;
-    setAgent(null);
-    if (threadId) daemon.notificationLevel(threadId).then((l) => live && setAgent(l), () => live && setAgent(null));
-    return () => {
-      live = false;
-    };
-  }, [threadId, daemon]);
-  const state: NotifyState = {
-    agent: threadId ? agent : null,
-    projectMuted: muteSupported ? muted : null,
-    groupName: projectId ? project?.presentation.display_name || host?.projectName || projectId : null,
-  };
-  if (notifyHidden(state)) return null;
-  const look = notifyLook(state);
-  const Icon = look === "off" ? BellOff : look === "important" ? BellRing : Bell;
-  const tip = notifyTooltip(state, t);
+  const item = entry.item;
+  const text = t(item.placeholderKey);
+  const keys = item.keys?.() ?? "";
   return (
     <button
-      onClick={(e) =>
-        openMenuFrom(
-          e.currentTarget,
-          notifyMenu(state, t, {
-            setAgent: (level) => threadId && void daemon.setNotificationLevel(threadId, level).then(setAgent, () => {}),
-            toggleProject: () => toggleProjectMuted(groupId),
-            check: <Check size={14} />,
-            muteIcon: <BellOff size={14} />,
-            unmuteIcon: <Bell size={14} />,
-          }),
-        )
-      }
-      title={tip}
-      aria-label={tip}
+      onClick={() => item.open()}
+      title={keys ? `${text} (${keys})` : text}
+      aria-label={text}
+      data-window-bar="search"
+      className={`${NO_DRAG} titlebar-capsule flex h-7 w-[340px] max-w-full min-w-[120px] shrink items-center gap-2 rounded-ctl bg-surface-2 pr-2 pl-2.5 text-ui/[inherit] text-subtle hover:bg-[color-mix(in_srgb,var(--fg)_9%,var(--surface-2))]`}
+    >
+      <Search size={14} className="shrink-0" />
+      <span className="min-w-0 flex-1 truncate text-left">{text}</span>
+      {keys && <kbd className="shrink-0 rounded border border-border px-1 font-mono text-caption/[inherit] leading-[15px] text-subtle">{keys}</kbd>}
+    </button>
+  );
+}
+
+/** 窗口布局 (checklist #4): the window's layout menu — 恢复默认布局 (undoable once, lib/layoutReset). */
+function LayoutMenuButton() {
+  const { t } = useI18n();
+  return (
+    <button
+      data-window-layout=""
+      title={t("layout.menu")}
+      aria-label={t("layout.menu")}
       aria-haspopup="menu"
-      className={`${NO_DRAG} shrink-0 rounded-md p-1 hover:bg-surface-2 ${look === "important" ? "text-warn" : look === "on" ? `text-muted hover:text-foreground ${ON_DEMAND}` : "text-subtle hover:text-foreground"}`}
+      onClick={(e) => openMenuFrom(e.currentTarget, [{ label: t("layout.reset"), icon: <RotateCcw size={14} />, title: t("layout.resetHint"), onSelect: resetWindowLayout }], { owner: "window-layout" })}
+      className={ICON_BTN}
     >
-      <Icon size={14} />
+      <LayoutDashboard size={16} />
     </button>
   );
 }
 
-/** Web services this agent registered: a quiet chip, click lists them, picking one opens it. */
-function AgentServices({ cutexSessionId }: { cutexSessionId: string }) {
+export function TitleBar() {
+  const ownerWin = useOwnerWindow();
   const { t } = useI18n();
-  // The open agent's host's services registry.
-  const hostId = useApp(agentHost);
-  const all = useApp((s) => (agentHost(s) === (s.hosts?.active ?? "local") ? s.services : (s.byHost[agentHost(s)]?.services ?? null)));
-  const mine = (all ?? []).filter((s) => s.ownerCutexSessionId === cutexSessionId);
-  if (mine.length === 0) return null;
-  const up = mine.filter((s) => s.health === "reachable").length;
-  return (
-    <button
-      onClick={(e) =>
-        openMenuFrom(
-          e.currentTarget,
-          mine.map((s) => ({ label: `${s.health === "reachable" ? "●" : "○"} ${s.displayName || s.slug}  :${s.port}`, onSelect: () => void openService(s, hostId).catch(() => undefined) })),
-        )
-      }
-      title={t("services.ofAgent", { n: mine.length })}
-      className={`${NO_DRAG} flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-2`}
-    >
-      <Globe size={13} className={up ? "text-ok" : "text-subtle"} />
-      {mine.length}
-    </button>
-  );
-}
-
-/** 启动 / 停止运行时 beside the name: the agent menu's runtime item as one icon; 停止 is click-twice (lib/armedConfirm). */
-function RuntimeButton({ session }: { session: SessionResource }) {
-  const { t } = useI18n();
-  const { runtimeButton } = useUiPrefs();
-  const host = useApp((s) => selectedSidebar(s)?.hostRows[session.cutexSessionId]);
-  const ref = useRef<HTMLButtonElement>(null);
-  const [armed, setArmed] = useArmed(`${session.cutexSessionId}:${session.runtime.status}`);
-  // Re-render while our start runs (runtimeItem then offers 正在启动… instead of 启动).
-  const starting = useRuntimeStartSince(useApp(agentHost), session.cutexSessionId) !== null;
-  if (runtimeButton === "off" || (runtimeButton === "independent" && (host?.projectId || isQuickChat(session, host)))) return null;
-  const item = runtimeItem(session, t);
-  if (!item) return null;
-  const online = session.runtime.status === "online";
-  const tip = starting && !online ? t("menu.starting") : t(online ? "titlebar.runtimeOnline" : "titlebar.runtimeOffline");
-  const click = () => {
-    if (item.armed && !armed) return setArmed(true);
-    setArmed(false);
-    void runAction(item);
-  };
-  return (
-    <>
-      <button
-        ref={ref}
-        onClick={click}
-        title={armed ? undefined : tip}
-        aria-label={armed && item.armed ? item.armed : tip}
-        disabled={item.disabled}
-        className={`${NO_DRAG} shrink-0 rounded-md p-1 ${armed ? "bg-danger text-white" : starting && !online ? "text-accent" : `hover:bg-surface-2 ${online ? "text-ok hover:text-danger" : "text-subtle hover:text-accent"}`}`}
-      >
-        {starting && !online ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
-      </button>
-      {armed && item.armed && <ArmedHint anchor={ref} text={item.armed} />}
-    </>
-  );
-}
-
-/**
- * The open agent's host, same rule as the sidebar (lib/hostScope sidebarMark): only when hosts are
- * marked, and the local host only with 「本机也显示主机标记」. Sits after the name / in the subtitle.
- */
-function TitleHostMark({ className = "", sep = false }: { className?: string; sep?: boolean }) {
-  const { t } = useI18n();
-  const scope = useHostScope();
-  const { hostMarkLocal } = useUiPrefs();
-  const host = useApp(agentHost);
-  const look = sidebarMark({ marks: scope.showHostMarks, localMarks: hostMarkLocal, look: (id) => scope.host(id ?? scope.focus) }, host);
-  if (!look) return null;
-  return (
-    <span className={`inline-flex min-w-0 shrink items-center gap-1 ${className}`} title={t("titlebar.hostTip", { host: look.label })}>
-      <HostDot color={look.color} status={look.indicator.status} size={6} />
-      <span className="truncate">{look.label}</span>
-      {sep && <span className="font-normal text-subtle">·</span>}
-    </span>
-  );
-}
-
-function AgentTitle({ git }: { git: GitStatus | null }) {
-  const { t } = useI18n();
-  const selectedId = useApp((s) => s.selectedId);
-  const sidebar = useApp(selectedSidebar);
-  const connection = useApp((s) => (s.selectedId ? viewOf(s, agentHost(s), s.selectedId) : undefined));
-  const { titleTwoLines } = useUiPrefs();
-  const session = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((s) => s.cutexSessionId === selectedId);
-  if (!selectedId || !session) return null;
-  const d = git?.isRepo ? diffTotals(git) : null;
-  if (titleTwoLines) return <AgentTitleTwoLines session={session} git={git} />;
-  return (
-    <div className="group/title flex min-w-0 items-center gap-2">
-      <button
-        onClick={(e) => openMenuFrom(e.currentTarget, agentMenu(session, t, agentHost(useApp.getState())))}
-        className={`${NO_DRAG} flex min-w-0 items-center gap-2 rounded-md px-1.5 py-0.5 hover:bg-surface-2`}
-        title={realNameTip(session) ? `${t("info.realNameTip", { name: realAgentName(session) })}\n${t("menu.more")}` : t("menu.more")}
-      >
-        <Avatar name={session.displayName} avatar={session.avatar} seed={session.cutexSessionId} size={20} />
-        <span className="truncate text-sm font-semibold"><ScriptText text={session.displayName} /></span>
-        {realNameTip(session) && <span className="hidden max-w-40 shrink truncate text-xs font-normal text-subtle lg:inline">{realAgentName(session)}</span>}
-        <ChevronDown size={13} className="shrink-0 text-subtle" />
-      </button>
-      <TitleHostMark className="max-w-28 rounded bg-surface-2/60 px-1.5 py-px text-[11px] text-subtle" />
-      <RuntimeButton session={session} />
-      <NotifyControl session={session} />
-      <AgentServices cutexSessionId={session.cutexSessionId} />
-      <span className="hidden min-w-0 truncate text-xs text-subtle md:inline" title={session.cwd ?? undefined}>
-        {session.note || session.cwd || ""}
-      </span>
-      {git?.isRepo && (
-        <button onClick={() => void openChanges()} title={t("pane.changes")} className={`${NO_DRAG} flex shrink-0 items-center gap-1.5 rounded-md px-2 py-0.5 text-xs text-muted hover:bg-surface-2`}>
-          <span>⎇ {git.branch ?? "HEAD"}</span>
-          {d?.files ? (
-            <span className="hidden items-center gap-1.5 group-hover/title:flex group-focus-within/title:flex">
-              <span className="text-ok-text">+{d.added}</span>
-              <span className="text-danger">−{d.deleted}</span>
-            </span>
-          ) : null}
-        </button>
-      )}
-      {connection && connection.connection !== "live" && !connection.loading && connection.historySource !== "archived" && <span className="shrink-0 text-xs text-warn">{connection.connection}</span>}
-    </div>
-  );
-}
-
-/** Project chip on the title bar: badge + name, star toggle (the project mute is in NotifyControl). */
-function ProjectChip({ session }: { session: SessionResource }) {
-  const { t } = useI18n();
-  const sidebar = useApp(selectedSidebar);
-  // The open agent's host: its project page and star (per-host prefs).
-  const hostId = useApp(agentHost);
-  const prefs = useUiPrefs();
-  const host = sidebar?.hostRows[session.cutexSessionId];
-  if (isQuickChat(session, host) && !host?.projectId) return null;
-  const projectId = host?.projectId ?? null;
-  const project = projectId ? sidebar?.projects?.projects.find((p) => p.project_id === projectId) : undefined;
-  const groupId = projectId ?? INDEPENDENT_PROJECT;
-  const name = project?.presentation.display_name || host?.projectName || projectId || t("titlebar.independent");
-  const starred = hostListKeys("starredProjects", [hostId]).includes(hostKey(hostId, groupId));
-  return (
-    <span className="flex min-w-0 shrink-[3] items-center gap-0.5 text-xs text-muted">
-      {projectId ? (
-        <button
-          onClick={() => services.ui.openPage("projects.page", { project: projectId, ...hostPageParam(hostId) })}
-          title={t("titlebar.openProject", { name })}
-          className={`${NO_DRAG} flex min-w-0 items-center gap-1 rounded px-1 py-0.5 hover:bg-surface-2 hover:text-foreground`}
-        >
-        {project && <ProjectBadge icon={projectIcon(prefs.projectIcons, hostId, projectId)} badge={project.presentation.badge_label || name.slice(0, 1)} color={project.presentation.color} />}
-        <span className="truncate"><ScriptText text={name} /></span>
-        </button>
-      ) : (
-        // Independent agents: a quiet badge, not a link (no project page).
-        <span title={t("titlebar.independentTip")} className={`${NO_DRAG} mx-0.5 shrink-0 rounded border border-border px-1 text-[10px] leading-4 text-subtle`}>
-          {name}
-        </span>
-      )}
-      <button onClick={() => toggleStarred(groupId, hostId)} title={t(projectId ? (starred ? "titlebar.unstar" : "titlebar.star") : starred ? "titlebar.unstarIndependent" : "titlebar.starIndependent")} aria-pressed={starred} className={`${NO_DRAG} shrink-0 rounded p-0.5 hover:bg-surface-2 ${starred ? "text-warn" : `text-subtle hover:text-foreground ${ON_DEMAND}`}`}>
-        <Star size={13} className={starred ? "fill-warn" : ""} />
-      </button>
-    </span>
-  );
-}
-
-/**
- * Two-line agent title (Settings 「顶栏两行」): line 1 = avatar, full name, Director pill, project
- * chip (star), runtime / notifications / services; line 2 = host (remote only) · cwd (keeps its
- * tail) · branch · +/−.
- */
-function AgentTitleTwoLines({ session, git }: { session: SessionResource; git: GitStatus | null }) {
-  const { t } = useI18n();
-  const connection = useApp((s) => viewOf(s, agentHost(s), session.cutexSessionId));
-  const director = useApp((s) => !!selectedSidebar(s)?.projects?.projects.some((p) => p.director_cutex_session_id === session.cutexSessionId));
-  const d = git?.isRepo ? diffTotals(git) : null;
-  const cwd = session.cwd ?? "";
-  return (
-    <div className="group/title flex min-w-0 flex-1 items-center gap-2">
-      <button onClick={(e) => openMenuFrom(e.currentTarget, agentMenu(session, t, agentHost(useApp.getState())))} className={`${NO_DRAG} shrink-0 rounded-full`} title={t("menu.more")}>
-        <Avatar name={session.displayName} avatar={session.avatar} seed={session.cutexSessionId} size={26} />
-      </button>
-      <div className="flex min-w-0 flex-1 flex-col justify-center leading-tight">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <button
-            onClick={(e) => openMenuFrom(e.currentTarget, agentMenu(session, t, agentHost(useApp.getState())))}
-            className={`${NO_DRAG} flex min-w-0 shrink items-center gap-1 rounded px-0.5 hover:bg-surface-2`}
-            title={realNameTip(session) ? `${session.displayName}\n${t("info.realNameTip", { name: realAgentName(session) })}` : session.displayName}
-          >
-            <span className="truncate text-sm font-semibold"><ScriptText text={session.displayName} /></span>
-            {realNameTip(session) && <span className="max-w-48 shrink truncate text-[11px] font-normal text-subtle">{realAgentName(session)}</span>}
-            <ChevronDown size={12} className="shrink-0 text-subtle" />
-          </button>
-          {director && <span className="shrink-0 rounded bg-surface-2 px-1 text-[9px] font-semibold text-muted">{t("sidebar.director")}</span>}
-          <ProjectChip session={session} />
-          <RuntimeButton session={session} />
-          <NotifyControl session={session} />
-          <AgentServices cutexSessionId={session.cutexSessionId} />
-          {connection && connection.connection !== "live" && !connection.loading && connection.historySource !== "archived" && <span className="shrink-0 text-xs text-warn">{connection.connection}</span>}
-        </div>
-        <div className="flex min-w-0 items-center gap-1.5 px-0.5 text-[10.5px] text-subtle">
-          <TitleHostMark className="max-w-32 shrink-0 font-medium text-muted" sep={!!cwd} />
-          {cwd && (
-            // Long paths keep their tail (rtl ellipsis), like the sidebar's project directory.
-            <span className="min-w-0 truncate font-mono" style={{ direction: "rtl", textAlign: "left" }} title={session.note ? `${cwd}\n${session.note}` : cwd}>
-              <bdi>{shortenHome(cwd)}</bdi>
-            </span>
-          )}
-          {git?.isRepo && (
-            <button onClick={() => void openChanges()} title={t("pane.changes")} className={`${NO_DRAG} flex shrink-0 items-center gap-1.5 rounded px-1 hover:bg-surface-2 hover:text-foreground`}>
-              {cwd && <span className="-ml-1 pr-0.5">·</span>}
-              <span>⎇ {git.branch ?? "HEAD"}</span>
-              {d?.files ? (
-                // Metadata on demand (quiet pass): +/− on hover / keyboard focus of the title.
-                <span className="hidden items-center gap-1.5 group-hover/title:flex group-focus-within/title:flex">
-                  <span className="text-ok-text">+{d.added}</span>
-                  <span className="text-danger">−{d.deleted}</span>
-                </span>
-              ) : null}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export function TitleBar({ git }: { git: GitStatus | null }) {
-  const { t } = useI18n();
-  const { sidebarOpen } = useUiPrefs();
-  const inConversation = useApp((s) => s.view.kind === "conversation");
+  // Collapsed = fully hidden with the left-edge pop-out (Ctrl/⌘+B; this window's own choice,
+  // lib/windowSidebar useSidebarCollapsed). Hovering the logo pops it out without pinning it.
+  const sidebarOpen = !useSidebarCollapsed();
+  const peek = useSidebarPeek.of(useWindowKey());
+  const logoRest = useMemo(() => createPeekRest(() => peek.setState({ popped: true })), [peek]);
   // A full-window page (设置) brings its own nav (Aside): no sidebar toggle / host row; a close button.
   const fullWindow = !!useOpenPage()?.entry?.item.Aside;
   const closePage = useApp((s) => s.closePage);
   useChromeColors();
+  const sidebarKey = useBindingLabel("sidebar");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") {
+      if (matchesCommand("sidebar", e)) {
         e.preventDefault();
-        setUiPref("sidebarOpen", !getUiPrefs().sidebarOpen);
-      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === ",") {
-        // Settings (also the identity menu's first item and the sidebar footer ⚙).
+        toggleSidebarRail();
+      } else if (matchesCommand("settings", e)) {
+        // Settings (also the identity menu's first item and the sidebar footer ⚙): toggles the Settings Shelf.
         e.preventDefault();
-        openSettingsFromNav();
+        toggleSettingsFromNav();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    ownerWin.addEventListener("keydown", onKey);
+    return () => ownerWin.removeEventListener("keydown", onKey);
   }, []);
 
   return (
     <header
+      data-window-titlebar=""
       className="flex h-10 shrink-0 items-stretch bg-transparent select-none [app-region:drag]"
       onDoubleClick={(e) => win?.nativeControls === null && e.target === e.currentTarget && void win.control("toggleMaximize")}
     >
       {!fullWindow && (
-        <div className={`flex min-w-0 shrink-0 items-center gap-1 px-2 ${sidebarOpen ? "w-[var(--sidebar-w,16rem)] max-w-[calc(100%-360px)] min-w-[180px]" : ""} ${win?.nativeControls === "left" ? "pl-[76px]" : ""}`}>
-          {/* The logo is the sidebar toggle; hover / keyboard focus shows the panel icon instead. */}
-          <button
-            onClick={() => setUiPref("sidebarOpen", !sidebarOpen)}
-            title={`${t(sidebarOpen ? "titlebar.hideSidebar" : "titlebar.showSidebar")} (Ctrl+B)`}
-            aria-label={t(sidebarOpen ? "titlebar.hideSidebar" : "titlebar.showSidebar")}
-            aria-expanded={sidebarOpen}
-            className={`${ICON_BTN} group/logo relative shrink-0`}
-          >
-            <img src={cutexLogo} alt="" draggable={false} className="h-4 w-4 group-hover/logo:invisible group-focus-visible/logo:invisible" />
-            <span className="invisible absolute inset-0 flex items-center justify-center group-hover/logo:visible group-focus-visible/logo:visible">
-              {sidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
-            </span>
-          </button>
-          <HostSwitcher />
-          {/* The sidebar's restore notice, as a chip while the sidebar is collapsed (UI review #11). */}
-          {!sidebarOpen && <RestoreChip />}
+        <div data-window-bar="scope" className={`flex min-w-0 shrink-0 items-center gap-1 px-2 ${sidebarOpen ? "max-w-[calc(100%-360px)] min-w-[max(180px,var(--sidebar-w,16rem))]" : ""} ${win?.nativeControls === "left" ? "pl-[76px]" : ""}`}>
+          <div className="titlebar-capsule flex h-8 min-w-0 items-center gap-1 px-1">
+            {/* The logo is the sidebar toggle; hover / keyboard focus shows the panel icon instead. */}
+            <button
+              onClick={toggleSidebarRail}
+              onMouseEnter={() => sidebarOpen || logoRest.enter()}
+              onMouseLeave={() => logoRest.leave()}
+              onFocus={() => sidebarOpen || logoRest.enter()}
+              onBlur={() => logoRest.leave()}
+              title={withKey(t(sidebarOpen ? "titlebar.hideSidebar" : "titlebar.showSidebar"), sidebarKey)}
+              aria-label={t(sidebarOpen ? "titlebar.hideSidebar" : "titlebar.showSidebar")}
+              aria-expanded={sidebarOpen}
+              className={`${ICON_BTN} group/logo relative shrink-0`}
+            >
+              <img src={cutexLogo} alt="" draggable={false} className="h-4 w-4 group-hover/logo:invisible group-focus-visible/logo:invisible" />
+              <span className="invisible absolute inset-0 flex items-center justify-center group-hover/logo:visible group-focus-visible/logo:visible">
+                {sidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
+              </span>
+            </button>
+            <HostSwitcher />
+            <TitleBarEntries btn={ICON_BTN} />
+            {/* The sidebar's restore notice, as a chip while the sidebar is collapsed (UI review #11). */}
+            {!sidebarOpen && <RestoreChip />}
+          </div>
         </div>
       )}
+      {/* A full-window page's breadcrumb (other pages carry theirs in their own header: a Shelf pane's, or
+          components/PageHeader over the conversation column — §26), then the search field centred in what is left. */}
       <div data-titlebar-title className="flex min-w-0 flex-1 items-center gap-2 px-3">
-        {inConversation ? <AgentTitle git={git} /> : <PageTitle />}
-      </div>
-      <div className="flex shrink-0 items-center gap-0.5 pr-2">
-        {!fullWindow && <TitleBarLaunchers />}
         {fullWindow && (
-          <button onClick={closePage} title={t("settings.close")} className={ICON_BTN}>
-            <X size={16} />
-          </button>
+          <div data-window-bar="page" className="titlebar-capsule flex h-8 min-w-0 shrink items-center px-2">
+            <PageTitle />
+          </div>
         )}
+        <span className="min-w-0 flex-1" />
+        <WindowSearch />
+        <span className="min-w-0 flex-1" />
+      </div>
+      <div data-window-bar="actions" className="flex shrink-0 items-center gap-0.5 pr-2">
+        <div className="titlebar-capsule flex h-8 items-center gap-0.5 px-1">
+          {!fullWindow && <LayoutMenuButton />}
+          {!fullWindow && <TitleBarLaunchers />}
+          {fullWindow && (
+            <button onClick={closePage} title={t("settings.close")} className={ICON_BTN}>
+              <X size={16} />
+            </button>
+          )}
+        </div>
+        {/* The sidebar hidden: its footer's identity / settings / update live in this far-right chip (④),
+            outside the capsule — an avatar, not one of the button groups. */}
+        {!fullWindow && !sidebarOpen && <IdentityChip />}
         <LinuxControls />
       </div>
       {/* Space under the native Windows caption buttons (3 × 46px). */}

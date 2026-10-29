@@ -7,6 +7,7 @@ import { Check, ChevronDown, ChevronRight, MessageCircleQuestion, MonitorSmartph
 import { useI18n, type MessageKey } from "../i18n";
 import { useUiPrefs } from "../lib/prefs";
 import { choiceOf, glyphOf, questionAnswers, rowParts, type InteractionGlyph, type InteractionRecord } from "../lib/interactionLog";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 
 const GLYPH_ICON: Record<InteractionGlyph, typeof Check> = {
   question: MessageCircleQuestion,
@@ -47,8 +48,8 @@ function QuestionDetail({ header, question, options, selected, isSecret }: { hea
   const { t, locale } = useI18n();
   const typed = selected.filter((value) => !options.some((o) => o.label === value));  return (
     <div className="mb-2 last:mb-0">
-      <div className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide">{header}</div>
-      <p className="mb-1 text-xs whitespace-pre-wrap">{question}</p>
+      <div className="mb-0.5 text-caption/[inherit] font-semibold uppercase tracking-wide">{header}</div>
+      <p className="selectable mb-1 text-xs whitespace-pre-wrap">{question}</p>
       {options.length > 0 ? (
         <ul className="flex flex-col gap-0.5">
           {options.map((option) => {
@@ -100,7 +101,7 @@ function InteractionDetail({ record }: { record: InteractionRecord }) {
       <div className="flex flex-col gap-1.5">
         <div className="text-xs font-medium">{t(`interactionLog.subject.${asked.title}` as MessageKey)}</div>
         {asked.reason && <p className="text-xs text-muted">{asked.reason}</p>}
-        {asked.subject && <pre className="max-h-40 overflow-auto rounded-lg bg-background p-2 font-mono text-[11px] whitespace-pre-wrap">{asked.subject}</pre>}
+        {asked.subject && <pre className="selectable max-h-40 overflow-auto rounded-lg bg-background p-2 font-mono text-caption/[inherit] whitespace-pre-wrap">{asked.subject}</pre>}
         {record.settled.kind === "answered" && (
           <div className="text-xs">
             <span className="mr-1.5 text-muted">{t("interactionLog.decision")}</span>
@@ -121,10 +122,10 @@ function InteractionDetail({ record }: { record: InteractionRecord }) {
     return (
       <div className="flex flex-col gap-1.5">
         <div className="text-xs font-medium">{t("interaction.title.elicitation", { server: p.serverName })}</div>
-        {message && <p className="text-xs whitespace-pre-wrap">{message}</p>}
-        {url && <span className="truncate font-mono text-[11px] text-subtle">{url}</span>}
+        {message && <p className="selectable text-xs whitespace-pre-wrap">{message}</p>}
+        {url && <span className="truncate font-mono text-caption/[inherit] text-subtle">{url}</span>}
         {content && Object.keys(content).length > 0 && (
-          <pre className="max-h-40 overflow-auto rounded-lg bg-background p-2 font-mono text-[11px] whitespace-pre-wrap">{JSON.stringify(content, null, 2)}</pre>
+          <pre className="selectable max-h-40 overflow-auto rounded-lg bg-background p-2 font-mono text-caption/[inherit] whitespace-pre-wrap">{JSON.stringify(content, null, 2)}</pre>
         )}
       </div>
     );
@@ -134,6 +135,7 @@ function InteractionDetail({ record }: { record: InteractionRecord }) {
 
 export function InteractionRow({ record }: { record: InteractionRecord }) {
   const { t, locale } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const [open, setOpen] = useState(false);
   if (!useUiPrefs().timelineInteractions) return null;
   const glyph = glyphOf(record);
@@ -147,7 +149,7 @@ export function InteractionRow({ record }: { record: InteractionRecord }) {
   const elsewhere = record.settled.kind === "elsewhere";
   return (
     <div className="my-0.5 text-xs">
-      <button onClick={() => setOpen(!open)} aria-expanded={open} className="flex max-w-full items-center gap-1.5 text-muted hover:text-foreground">
+      <button onClick={() => userToggle(() => setOpen(!open))} aria-expanded={open} className="flex max-w-full items-center gap-1.5 text-muted hover:text-foreground">
         <Icon size={13} className={`shrink-0 ${GLYPH_CLASS[glyph]}`} />
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="shrink-0 font-medium">{t(GLYPH_WORD[glyph])}</span>

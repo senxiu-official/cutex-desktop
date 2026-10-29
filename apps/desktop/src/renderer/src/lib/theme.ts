@@ -23,6 +23,25 @@ export function applyTheme(pref: ThemePref): void {
   }
 }
 
+/** The app's light / dark now: the theme setting, or the OS's under 跟随系统. */
+export function appSchemeNow(): "light" | "dark" {
+  const set = document.documentElement.dataset.theme;
+  if (set === "light" || set === "dark") return set;
+  return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+/** Calls `onChange` when the app's light / dark may have changed (the theme setting or the OS scheme). */
+export function watchAppScheme(onChange: () => void): () => void {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  const media = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
+  media?.addEventListener("change", onChange);
+  return () => {
+    observer.disconnect();
+    media?.removeEventListener("change", onChange);
+  };
+}
+
 /** Text contrast (desktop-local): raises the muted / subtle text colours (data-contrast on <html>). */
 export type ContrastPref = "standard" | "high" | "max";
 

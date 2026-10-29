@@ -40,8 +40,8 @@ export function normalizeAvatarThemes(value: unknown): AvatarThemeId[] | null {
 /** Every known theme ticked (= the whole bundled set). */
 const everyTheme = (themes: readonly AvatarThemeId[]): boolean => AVATAR_THEME_IDS.every((id) => themes.includes(id));
 
-/** Model family of a Profile, by model id / runtime only. */
-export type ModelFamily = "claude" | "openai" | "deepseek" | "other";
+/** Model family of a Profile, by model id / runtime only (also picks the provider colour of 头像底色 = 按模型, docs/design/040 §3.1). */
+export type ModelFamily = "claude" | "openai" | "gemini" | "deepseek" | "kimi" | "glm" | "other";
 
 // Code points (as in lib/agentEmoji ROWS). Order is part of the pick: append only, never reorder.
 const SEA = ["1f419", "1f422", "1f42c", "1f40b", "1f420", "1f980", "1f9a6", "1f427", "26f5"];
@@ -101,7 +101,8 @@ export function themePreview(theme: AvatarThemeId | "all" | readonly AvatarTheme
 const CLAUDE_MODEL = /(^|[^a-z])(claude|opus|sonnet|haiku)([^a-z]|$)/;
 const OPENAI_MODEL = /^(gpt|chatgpt|codex|o\d+)([^a-z]|$)|(^|[^a-z])codex([^a-z]|$)/;
 
-/** A Profile's model family: Claude by runtime or model id, GPT / o-series / codex, DeepSeek, else other. */
+/** A Profile's model family: Claude by runtime or model id, GPT / o-series / codex, Gemini, DeepSeek, Kimi
+ *  (incl. its k-series ids like `k3.1-pro`), GLM, else other. */
 export function modelFamily(p: { model?: string | null; cliKind?: string | null }): ModelFamily {
   if (p.cliKind === "claude") return "claude";
   // Strip an `org/` prefix (openai/gpt-5.5, deepseek-ai/deepseek-v4) so the id itself is matched.
@@ -110,10 +111,14 @@ export function modelFamily(p: { model?: string | null; cliKind?: string | null 
   if (CLAUDE_MODEL.test(model)) return "claude";
   if (model.includes("deepseek")) return "deepseek";
   if (OPENAI_MODEL.test(model)) return "openai";
+  if (model.includes("gemini")) return "gemini";
+  if (/(^|[^a-z])(kimi|moonshot)/.test(model) || /^k\d+(\.\d+)?([-_.]|$)/.test(model)) return "kimi";
+  if (/(^|[^a-z])(glm|chatglm|zhipu)/.test(model)) return "glm";
   return "other";
 }
 
-const FAMILY_THEME: Record<ModelFamily, AvatarThemeId | "all"> = { claude: "animals", openai: "gems", deepseek: "sea", other: "all" };
+// Gemini / Kimi / GLM have no emoji theme of their own: the whole set, as before they had a family.
+const FAMILY_THEME: Record<ModelFamily, AvatarThemeId | "all"> = { claude: "animals", openai: "gems", gemini: "all", deepseek: "sea", kimi: "all", glm: "all", other: "all" };
 
 /** The single theme a Profile gets unless the owner picked some ("all" = every theme; the legacy picker's label). */
 export function defaultAvatarTheme(p: { model?: string | null; cliKind?: string | null }): AvatarThemeId | "all" {

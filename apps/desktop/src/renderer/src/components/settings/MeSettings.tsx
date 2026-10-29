@@ -1,3 +1,4 @@
+import { TargetHostContext } from "../../lib/targetHost";
 // Settings → 你 (shell page "me", local, every connection; docs/research/identity-settings-review-20261015.md
 // §4.1): 「你」 — name, picture and the identity key (components/settings/IdentitySettings.tsx
 // IdentitySection) — then 你在各主机上: one row per configured host saying which user you are there
@@ -26,7 +27,7 @@ import { useApp } from "../../store";
 import type { HostClaimView } from "../../../../shared/personIdentity";
 import { IdentitySection } from "./IdentitySettings";
 import { DeviceLineText, RoleLine } from "./MyHostLines";
-import { Button, LinkRow, Section } from "./Form";
+import { Button, LinkRow, Section, SettingsGroup } from "./Form";
 
 /** Settings → 你. */
 export function MePage() {
@@ -36,7 +37,7 @@ export function MePage() {
       <IdentitySection />
       <AccessSection />
       <Section>
-        <LinkRow label={t("shell.me.devices.label")} hint={t("shell.me.devices.hint")} link={t("shell.me.devices.link")} onClick={() => useApp.getState().openSettings("hosts")} />
+        <LinkRow agents="none" source="local" label={t("shell.me.devices.label")} hint={t("shell.me.devices.hint")} link={t("shell.me.devices.link")} onClick={() => useApp.getState().openSettings("hosts")} />
       </Section>
     </>
   );
@@ -96,7 +97,7 @@ function AccessRow({ look, sync, claim, publicKey }: { look: HostLook; sync: Ide
   const role = me.row.role;
   const manage = role === "owner" || role === "older" ? "owner" : role === "member" || role === "pending" ? "member" : null;
   return (
-    <li>
+    <TargetHostContext value={look.id}><SettingsGroup agents="access" source="host" navigation={!issue?.remember}>{decoration => <li {...decoration.attributes}>
       <div
         role="button"
         tabIndex={0}
@@ -110,6 +111,7 @@ function AccessRow({ look, sync, claim, publicKey }: { look: HostLook; sync: Ide
         <div className="min-w-0 flex-1 space-y-0.5">
           <div className="flex min-w-0 items-center gap-2 text-sm">
             <span className="truncate font-medium">{look.label}</span>
+            {issue?.remember && <span onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>{decoration.marker}</span>}
             {/* Only a connection on its way or in trouble; 未连接 is line 2's. */}
             {status !== "online" && status !== "disconnected" && (
               <span className="flex shrink-0 items-center gap-1 text-xs text-subtle">
@@ -148,6 +150,6 @@ function AccessRow({ look, sync, claim, publicKey }: { look: HostLook; sync: Ide
           </span>
         )}
       </div>
-    </li>
+    </li>}</SettingsGroup></TargetHostContext>
   );
 }

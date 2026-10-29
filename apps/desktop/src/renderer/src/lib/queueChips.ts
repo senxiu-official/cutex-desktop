@@ -4,15 +4,16 @@
 // lasts for this run (per agent, memory only), so the automatic rule comes back after a restart. Pure
 // except the window-height hook. The whole rule is opt-in since 2026-10-16 (pref `queuePanelFold`,
 // Settings → 对话 → 输入框 「「接下来」面板」): ★ 始终展开 never compacts, 自动折叠 applies it.
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import type { AdmissionNextStep } from "@cutex-desktop/protocol";
 import type { AdmissionRow } from "./admissionOrder";
+import { useOwnerWindow } from "./ownerContext";
 
-export type QueueChipKind = "queued" | "inserting" | "paused" | "messages" | "delegations" | "alarms" | "asksPaused" | "quota";
+export type QueueChipKind = "queued" | "inserting" | "paused" | "messages" | "delegations" | "alarms" | "asksPaused" | "agentPaused" | "quota";
 
 export interface QueueChip {
   kind: QueueChipKind;
-  /** The count shown (omitted for a state chip: 委托已暂停, 额度用完). */
+  /** The count shown (omitted for a state chip: 新委托已暂停, 额度用完). */
   n?: number;
   /** Warn tone (paused / held / quota). */
   warn?: boolean;
@@ -91,16 +92,16 @@ export function queueAutoCompact(fold: QueuePanelFold, short: boolean): { short:
   return fold === "auto" ? { short } : undefined;
 }
 
-function subscribeResize(listener: () => void): () => void {
-  window.addEventListener("resize", listener);
-  return () => window.removeEventListener("resize", listener);
-}
-
-/** The window is shorter than SHORT_WINDOW (false without a window: tests, SSR). */
+/** The window (this component's, a desk window's too) is shorter than SHORT_WINDOW (false without a window: tests, SSR). */
 export function useShortWindow(): boolean {
+  const win = useOwnerWindow();
+  const subscribe = useCallback((listener: () => void) => {
+    win.addEventListener("resize", listener);
+    return () => win.removeEventListener("resize", listener);
+  }, [win]);
   return useSyncExternalStore(
-    subscribeResize,
-    () => window.innerHeight < SHORT_WINDOW,
+    subscribe,
+    () => win.innerHeight < SHORT_WINDOW,
     () => false,
   );
 }

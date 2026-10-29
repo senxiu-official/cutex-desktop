@@ -73,7 +73,7 @@ export function reasonsTooltip(m: StuckBusMessage): string | undefined {
 
 /** Rows 全部丢弃 covers: a Task / Job / control message is only ever discarded on its own row. */
 export function bulkTargets(messages: readonly StuckBusMessage[]): StuckBusMessage[] {
-  return messages.filter((m) => !m.protectedControl);
+  return messages.filter((m) => !m.protectedControl && !m.settlement);
 }
 
 export function protectedCount(messages: readonly StuckBusMessage[]): number {

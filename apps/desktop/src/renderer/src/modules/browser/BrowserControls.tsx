@@ -62,10 +62,10 @@ function useControl({ hostId, tabKey }: ControlProps) {
     try { await controller.revoke(hostId, tabKey, view.lease.leaseId); } catch (reason) { if (generation.current === token) setFailed(browserErrorKey(reason)); }
   }
   return { t, view, scope, grant, resume, pause, revoke, failed, pending,
-    canGrant: enabled && !!scope && view?.status === "attached" && !pending };
+    canGrant: enabled && !!scope && view?.status === "attached" && !view?.desktopLoopback && !pending };
 }
 
-function Header({ hostId, tabKey }: ControlProps) {
+function Header({ hostId, tabKey, compact = false }: ControlProps & { compact?: boolean }) {
   const { t, view, scope, grant, resume, pause, revoke, failed, pending, canGrant } = useControl({ hostId, tabKey });
   const [agents, setAgents] = useState<BrowserAgentView[]>([]), [selected, setSelected] = useState("");
   const [loading, setLoading] = useState(false), [loaded, setLoaded] = useState(false);
@@ -93,18 +93,19 @@ function Header({ hostId, tabKey }: ControlProps) {
         aria-label={t("browser.owner.pause")} title={t("browser.owner.pause")} onClick={() => void pause()}><Pause size={12} /></button>}
       <button type="button" data-browser-revoke className={BUTTON} aria-label={t("browser.owner.revoke")}
         title={t("browser.owner.revoke")} onClick={() => void revoke()}><Square size={12} /></button>
-    </> : <>
+    </> : view.desktopLoopback ? <span role="status" className="max-w-56 text-xs text-subtle" title={t("browser.desktopLoopback.noAgent")}>{t("browser.desktopLoopback.noAgent")}</span> : <>
       <BrowserAgentPicker hostId={hostId} agents={agents} selected={selected} onSelect={setSelected} onOpen={() => void loadAgents()} loading={loading}
-        disabled={!canGrant || !!view.control} placeholder={t(loading ? "browser.owner.loadingAgents" : loaded && !agents.length ? "browser.owner.noAgents" : "browser.owner.select")} />
-      <button type="button" className={BUTTON} disabled={!canGrant || loading || !!view.control} onClick={() => void loadAgents()}
-        title={t("browser.owner.loadAgents")} aria-label={t("browser.owner.loadAgents")}><RotateCw size={12} /></button>
+        disabled={!canGrant || !!view.control} compact={compact} placeholder={t(loading ? "browser.owner.loadingAgents" : loaded && !agents.length ? "browser.owner.noAgents" : "browser.owner.select")} />
+      {/* Compact header: the picker loads the agents itself when it opens. */}
+      {!compact && <button type="button" className={BUTTON} disabled={!canGrant || loading || !!view.control} onClick={() => void loadAgents()}
+        title={t("browser.owner.loadAgents")} aria-label={t("browser.owner.loadAgents")}><RotateCw size={12} /></button>}
       <button type="button" data-browser-grant-agent className={BUTTON} aria-label={t("browser.owner.grant")} title={t("browser.owner.grant")}
         disabled={!canGrant || !agent || pending || !!view.control} onClick={() => agent && void grant(agent)}><Hand size={13} /></button>
     </>}
   </>;
 }
 
-export function BrowserControlHeader(props: ControlProps) {
+export function BrowserControlHeader(props: ControlProps & { compact?: boolean }) {
   const epoch = useBrowserHostEpoch(props.hostId), view = useBrowserView(props.hostId, props.tabKey);
   return <Header key={`${props.hostId}\0${epoch}\0${props.tabKey}\0${view?.guestId}`} {...props} />;
 }

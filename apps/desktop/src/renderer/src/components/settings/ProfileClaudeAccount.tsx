@@ -58,7 +58,8 @@ export function ClaudeAccountRow({ detail, patch, onChoose, saveError }: {
   const options = claudeAccountOptions(list, current).map((o) => ({ value: o.id, label: claudeAccountOptionText(o, t) }));
   const editable = fieldEditable(detail, "claudeAccount");
   return (
-    <SettingRow
+    <SettingRow source="host"
+      agents="newAgents" readOnly={!editable}
       label={t("agent-config.profile.claudeAccount")}
       hint={
         <>
@@ -105,7 +106,7 @@ export function NewClaudeAccountRow({ value, onChange, disabled }: { value: stri
   const current = disabled ? DEFAULT_CLAUDE_ACCOUNT : value;
   const options = claudeAccountOptions(list, current).map((o) => ({ value: o.id, label: claudeAccountOptionText(o, t) }));
   return (
-    <SettingRow
+    <SettingRow agents="newAgents" source="host" readOnly={disabled}
       label={t("agent-config.profile.claudeAccount")}
       hint={
         disabled ? (

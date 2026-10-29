@@ -11,5 +11,5 @@ export function UserDot({ user }: { user: Pick<UserRecord, "id" | "color" | "nam
   const hostId = useTargetHostId();
   const picture = useUserAvatar(hostId, user.id, user.avatarEtag);
   const name = shownUserName(user);
-  return <Avatar name={name} initial={identityInitials(name)} color={user.color ? projectColor(user.color) : "#868e96"} picture={picture} size={24} />;
+  return <Avatar name={name} initial={identityInitials(name)} color={user.color ? projectColor(user.color) : "#868e96"} picture={picture} size={20} />;
 }

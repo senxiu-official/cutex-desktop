@@ -50,21 +50,22 @@ export const RESTRICTED_FEATURE = "desktop:restricted";
 /**
  * cutex capabilities whose routes are owner-only (docs/research/user-isolation-p1-20261014.md §4):
  * files / terminals, host approvals, services, jobs, alarms, artifacts, notes, side chats, owner
- * notices, creating agents / chats, peers, runtimes, Claude accounts, Director rotation, NCI mail,
+ * notices, creating agents / chats, peers, runtimes, Claude accounts, Kimi accounts, Director rotation, NCI mail,
  * remote access, the agent bus, structural session actions (fork / delete / revert), delegation
  * pause, quota auto-continue, notification levels, attachments (non-text input), users, backend upgrades,
  * renaming client / device tokens, optional components (install / remove).
  */
 export const OWNER_ONLY_CAPABILITIES: readonly string[] = [
+  "profile-account-link",
   "terminal", "workspace-fs", "fs-dir-browse", "fs-file-read", "session-attachments",
   "owner-approvals", "services", "services-persistent-approval", "services-login-link", "job-service", "alarms-api",
   "artifacts", "notes", "side-chat", "owner-messages", "owner-notify-delete", "notification-levels",
   "human-create-session", "human-create-agent", "peers-v2", "runtime-package-upgrade", "runtimes-view",
-  "runtime-restore-candidates", "claude-accounts", "owner-rotation", "project-optional-director",
-  "inbound-mail", "listen-settings", "device-pairing", "management-client-tokens", "agent-bus-stuck-messages",
-  "session-fork", "session-delete", "session-delete-empty-on-archive", "session-history-revert",
+  "runtime-restore-candidates", "claude-accounts", "kimi-accounts", "owner-rotation", "project-optional-director",
+  "inbound-mail", "listen-settings", "device-pairing", "management-client-tokens", "agent-bus-stuck-messages", "agent-bus-message-settlement-v1",
+  "session-fork", "session-fork-profile", "session-fork-preview", "session-delete", "session-delete-empty-on-archive", "session-history-revert",
   "asks-pause-v2", "claude-quota-auto-continue", "users", "workflows", "workflow-resume", "backend-upgrade",
-  "client-token-rename", "components", "claude-safety-grants",
+  "client-token-rename", "components", "claude-safety-grants", "host-storage",
 ];
 
 /**

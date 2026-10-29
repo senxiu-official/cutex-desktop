@@ -12,6 +12,7 @@ import { copyText } from "../lib/menus";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { formatAbsolute, useNow } from "../lib/time";
 import { DelegationGlyph } from "./DelegationParts";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 const WORD_TONE = { danger: "text-danger", warn: "text-warn", green: "text-muted", accent: "text-muted", muted: "text-muted", neutral: "text-muted" } as const;
 
@@ -50,6 +51,7 @@ interface StreamView {
 const EMPTY_STREAM: StreamView = { text: "", next: 0, eof: false, gap: false, loading: false, error: null };
 
 function OutputDialog({ jobId, hostId }: { jobId: string; hostId: string | null }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const focusJob = useJobs((s) => s.byId[jobId]);
   const hostJob = useHostJobs((s) => (hostId ? s.byHost[hostId]?.rows.find((j) => j.jobId === jobId) : undefined));
@@ -98,32 +100,32 @@ function OutputDialog({ jobId, hostId }: { jobId: string; hostId: string | null 
       e.stopPropagation();
       closeJobOutput();
     };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    win.addEventListener("keydown", onKey, true);
+    return () => win.removeEventListener("keydown", onKey, true);
   }, []);
 
   const v = views[stream];
   const status = job ? jobStatus(job) : null;
   const finished = status?.group === "done";
   return (
-    <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/30 pt-[7vh]" onMouseDown={(e) => e.target === e.currentTarget && closeJobOutput()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[7vh]" onMouseDown={(e) => e.target === e.currentTarget && closeJobOutput()}>
       <div role="dialog" aria-modal aria-label={t("jobs.output.title")} className="flex h-[min(82vh,46rem)] w-[56rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         <div className="flex items-start gap-3 border-b border-border px-4 py-2.5">
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2 text-sm">
-              <span className={`min-w-0 truncate font-semibold ${job?.command ? "font-mono text-[13px]" : ""}`} title={job ? jobTitle(job) : jobId}>
+              <span className={`min-w-0 truncate font-semibold ${job?.command ? "selectable font-mono text-ui/[inherit]" : ""}`} title={job ? jobTitle(job) : jobId}>
                 {job ? jobTitle(job) : jobId}
               </span>
               {job && <JobStatusMark job={job} trailing={time} className="shrink-0 text-xs" />}
             </div>
-            <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 text-[11px] text-subtle">
+            <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 text-caption/[inherit] text-subtle">
               <button onClick={() => copyText(jobId)} title={t("jobs.copyId")} className="inline-flex items-center gap-1 font-mono hover:text-foreground">
                 {jobId}
                 <Copy size={11} />
               </button>
               {job?.agentName && <span>{job.agentName}</span>}
               {job && <span title={formatAbsolute(job.createdAt)}>{t("jobs.started", { at: formatAbsolute(job.createdAt) })}</span>}
-              {job?.cwd && <span className="min-w-0 truncate font-mono">{job.cwd}</span>}
+              {job?.cwd && <span className="selectable min-w-0 truncate font-mono">{job.cwd}</span>}
             </div>
           </div>
           <button title={t("jobs.output.close")} onClick={closeJobOutput} className="shrink-0 rounded-md p-1 text-subtle hover:bg-surface-2 hover:text-foreground">
@@ -140,7 +142,7 @@ function OutputDialog({ jobId, hostId }: { jobId: string; hostId: string | null 
               </button>
             );
           })}
-          {job?.[stream]?.truncated && <span className="ml-2 text-[11px] text-warn-text">{t("jobs.output.truncated")}</span>}
+          {job?.[stream]?.truncated && <span className="ml-2 text-caption/[inherit] text-warn-text">{t("jobs.output.truncated")}</span>}
           <span className="ml-auto flex items-center gap-2">
             {v.loading && <span className="text-subtle">{t("jobs.output.loading")}</span>}
             {!v.eof && !v.loading && v.text && (

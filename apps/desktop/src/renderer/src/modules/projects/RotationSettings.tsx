@@ -10,7 +10,7 @@ export function RotationSettingsSection() {
   const options = (HANDOFF_MINUTE_CHOICES as readonly number[]).map((n) => ({ value: String(n), label: minutesLabel(n, t) }));
   return (
     <Section title={t("projects.rotation.settings")}>
-      <SettingRow label={t("projects.rotation.settingsHandoff")} hint={t("projects.rotation.settingsHandoffHint")}>
+      <SettingRow agents="newAgents" source="local" label={t("projects.rotation.settingsHandoff")} hint={t("projects.rotation.settingsHandoffHint")}>
         <Select value={String(minutes)} options={options} onChange={(v) => setHandoffMinutes(Number(v))} />
       </SettingRow>
     </Section>

@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
 import { useOwnerNotify } from "./ownerNotifyStore";
+import { sessionsMetaOf } from "./sessionsMeta";
 import { attentionByHost } from "./shell";
 import { connectedHostIds, hostsWithoutData, outOfScopeCount, staleHostIds } from "./hostCounts";
 import type { DaemonApi } from "../../../shared/ipc";
@@ -119,14 +120,16 @@ export function openHostAgent(hostId: string, sessionId: string): void {
 /** 需要你 「其他主机 N 项」 (RFC §10, ★ Q15): what waits for the owner on connected hosts outside the scope. */
 export function useOutOfScopeAttention(): number {
   const scope = useHostScope();
-  const sessions = useApp((s) => s.sessions);
+  // Recounted when a pending request / connection / turn changes, not per streamed token (lib/sessionsMeta);
+  // the count itself reads the views as they are.
+  const meta = useApp((s) => sessionsMetaOf(s.sessions));
   const approvals = useApp((s) => s.approvals);
   const features = useApp((s) => s.features);
   const byHost = useApp((s) => s.byHost);
   const hosts = useApp((s) => s.hosts);
   const notes = useOwnerNotify((s) => s.byId);
   const others = useOwnerNotify((s) => s.others);
-  return useMemo(() => outOfScopeCount(attentionByHost({ sessions, approvals, features, byHost, hosts }, notes, others), scope.isInScope), [scope, sessions, approvals, features, byHost, hosts, notes, others]);
+  return useMemo(() => outOfScopeCount(attentionByHost({ sessions: useApp.getState().sessions, approvals, features, byHost, hosts }, notes, others), scope.isInScope), [scope, meta, approvals, features, byHost, hosts, notes, others]); // eslint-disable-line react-hooks/exhaustive-deps -- `meta` stands for `sessions`
 }
 
 /** Daemon calls for an entry of `hostId`: the focus host's `api`, another host's `apiFor` binding. */

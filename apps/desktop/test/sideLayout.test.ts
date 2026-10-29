@@ -4,6 +4,16 @@
 // v1.17 port (§24): a page is a tool COLUMN (≤ MAX_PAGES = 2, all on screen), a card a PANE (≤ 3 per
 // column, ≤ MAX_TOOL_PANES = 4 in all, then tabs of the bottom pane), and there are no per-agent views.
 // Each RFC scenario keeps its number; what it now expects (and why) is said in its title.
+// §24.12 Shelves (2026-10-20): a "column" here is a Shelf's page in view. Changes, with reasons:
+//   - the fixtures' Shelf allows mixing (`open` turns it on for a new Shelf): the scenarios describe the
+//     step-4 behaviour with 允许混排 on; every Shelf — a migrated one too, owner 2026-10-20 — starts with it
+//     off (a full page then takes another kind as a new page) — test/shelves.test.ts covers that default;
+//   - `inNewColumn` makes a second Shelf (the first moves to the left, the new one is the right Shelf, so the
+//     "right-most column" is still the new one): a launcher page of the same Shelf would not be on screen;
+//   - "at 18 columns" → "at 9 pages a Shelf takes no new page" (a page per Shelf, not columns in all);
+//     a vanished override page → a new page of the right Shelf (not refused: a page needs no width);
+//   - sanitize keeps the pages (they are pages of the right Shelf again) instead of folding them;
+//   - columnsOnScreen entries name their Shelf too.
 import { describe, expect, it } from "vitest";
 import type { SideBinding, SidePlacement } from "../src/renderer/src/modules/slots";
 import type { ItemId } from "../src/renderer/src/modules/types";
@@ -18,6 +28,7 @@ import {
   columnsOnScreen,
   DEFAULT_ORDER,
   dragGap,
+  unfoldSizes,
   dropDeletedAgents,
   dropEmptyPage,
   emptyLayout,
@@ -71,6 +82,14 @@ import {
   type SideLayout,
   type SidePlaceDecision,
   type SideViewContext,
+  setShelfOptions,
+  shelvesOf,
+  addShelf,
+  shelfOfPage,
+  withShelves,
+  MAX_SHELF_PAGES,
+  moveShelfToOtherSide,
+  shelfOnSide,
 } from "../src/renderer/src/lib/sideLayout";
 import { MAX_TOOL_PANES } from "../src/renderer/src/lib/paneLayout";
 
@@ -135,8 +154,15 @@ function open(layout: SideLayout, kind: ItemId, o: OpenOpts = {}): { layout: Sid
   const key = o.key === undefined ? SINGLETON_KEY : o.key;
   const decision = decide(layout, kind, o);
   const applied = applyOpen(layout, decision, { kind, binding, key, state: o.state ?? null, v: 1, pinned: !!o.pin }, ++clock, { reveal: o.reveal ?? true, home: SPECS[kind]!.home });
-  return { layout: applied.layout, id: applied.instanceId, decision };
+  // §24.12: the scenarios run on a Shelf that allows mixing (the owner turned it on: a full page takes
+  // another kind as a tab of its bottom pane). No Shelf allows it by default (test/shelves.test.ts).
+  let out = applied.layout;
+  for (const shelf of shelvesOf(out)) if (!shelvesOf(layout).some((x) => x.id === shelf.id) && MIXING_FIXTURES) out = setShelfOptions(out, shelf.id, { allowMixing: true });
+  return { layout: out, id: applied.instanceId, decision };
 }
+
+/** The fixtures' Shelves allow mixing (turned on; see `open`). */
+const MIXING_FIXTURES = true;
 
 const kinds = (layout: SideLayout, pageIndex = 0) => layout.pages[pageIndex]!.cards.map((c) => c.kind);
 const pageOf = (layout: SideLayout, id: string) => locate(layout, id)!.page.id;
@@ -175,10 +201,17 @@ function s1() {
   return { layout: l, files: files.id, changes: changes.id };
 }
 
-/** `kind` opened into a new (launcher) column of its own: the second tool column. */
+/**
+ * `kind` opened into a column of its own beside the first: §24.12 — a second Shelf (on the left), its one
+ * page a launcher page (not one the owner made: it goes when emptied).
+ */
 function inNewColumn(layout: SideLayout, kind: ItemId, o: OpenOpts = {}) {
-  const made = openLauncherPage(layout);
-  return open(made.layout, kind, { ...o, page: made.pageId! });
+  // The first Shelf moves to the left, the new one is the right Shelf (the right-most column, as before).
+  const first = shelvesOf(layout)[0];
+  const moved = first ? moveShelfToOtherSide(layout, first.id) : layout;
+  const made = addShelf(moved, "right");
+  const l = { ...made.layout, pages: made.layout.pages.map((p) => (p.id === made.pageId ? (({ kept: _k, ...rest }) => ({ ...rest, groups: [], launcher: true }))(p) : p)) };
+  return open(l, kind, { ...o, page: made.pageId! });
 }
 
 /** Every pane holds tabs of its own kind (no full column took another kind's tab). */
@@ -274,17 +307,20 @@ describe("§4.4 scenarios (v1.17: one column, ≤ 3 panes, then tabs)", () => {
     expect(cardOf(t4.layout, t4.id).tabs).toEqual([t1, t4.id, t2, jobs, t3.id]);
   });
 
-  it("5: a browser tab (no column of its group) → the right-most column (§24: no new column of its own); full → a tab there", () => {
+  it("5: a browser tab (no page of its group) → a page of its own (design 038: never a silent split of the page in view); again → a tab there", () => {
     const { layout } = s0();
     const docs = open(layout, "browser.tab", { key: "service:docs" });
-    expect(docs.decision).toMatchObject({ page: { id: layout.pages[0]!.id } });
-    expect(docs.layout.pages.map((p) => p.groups)).toEqual([["workspace"]]);
+    expect(docs.decision).toMatchObject({ via: "otherwise", page: { new: { groups: ["browser"] } } });
+    expect(docs.layout.pages.map((p) => p.groups)).toEqual([["workspace"], ["browser"]]);
+    expect(docs.layout.activePage).toBe(pageOf(docs.layout, docs.id));
+    expect(findPage(docs.layout, pageOf(docs.layout, docs.id))!.cards).toHaveLength(1);
     const roomy = open(s1().layout, "browser.tab", { key: "service:docs" });
-    expect(roomy.decision).toMatchObject({ via: "otherwise", page: { id: roomy.layout.pages[0]!.id }, card: { new: {} } });
-    // the right-most of two columns
-    const two = inNewColumn(s1().layout, "side-chat.chat");
-    const right = open(two.layout, "browser.tab", { key: "service:docs" });
-    expect(right.decision).toMatchObject({ via: "otherwise", page: { id: two.layout.pages[1]!.id } });
+    expect(roomy.decision).toMatchObject({ via: "otherwise", page: { new: {} } });
+    // a second tab joins the browser's pane, wherever the focus is
+    const back = { ...docs.layout, activePage: docs.layout.pages[0]!.id };
+    const more = open(back, "browser.tab", { key: "service:more" });
+    expect(cardOf(more.layout, more.id).id).toBe(cardOf(docs.layout, docs.id).id);
+    expect(more.layout.activePage).toBe(pageOf(docs.layout, docs.id));
   });
 
   it("6: a system event opens nothing (badges are pill-side; see sidePills.test.ts)", () => {
@@ -292,10 +328,11 @@ describe("§4.4 scenarios (v1.17: one column, ≤ 3 panes, then tabs)", () => {
     expect(layout.pages).toHaveLength(1);
   });
 
-  it("7: side chat per agent: into the column (a tab of its bottom pane when full); again for A = activate; B = another tab of the same pane", () => {
+  it("7: side chat per agent: a page of its own (design 038); again for A = activate; B = another tab of the same pane", () => {
     const { layout } = s0();
     const a = open(layout, "side-chat.chat");
-    expect(a.layout.pages).toHaveLength(1);
+    expect(a.layout.pages).toHaveLength(2);
+    expect(findPage(a.layout, pageOf(a.layout, a.id))!.groups).toEqual(["chat"]);
     const again = open(a.layout, "side-chat.chat");
     expect(again.decision).toEqual({ op: "activate", instance: a.id });
     const b = open(a.layout, "side-chat.chat", { binding: agent("B") });
@@ -383,7 +420,7 @@ describe("§4.4 scenarios (v1.17: one column, ≤ 3 panes, then tabs)", () => {
     assertLimits(sub.layout);
   });
 
-  it("12: a reference card (turn.peek) falls back to the focused column at order 150 (full: a tab); the next one replaces it; column hidden → the right-most column", () => {
+  it("12: a reference card (turn.peek) falls back to the focused column at order 150 (full: a tab); the next one replaces it; Shelf closed → a page of its own", () => {
     const { layout, t1 } = s0();
     const peek = open(layout, "turn.peek", { key: "turn:local:A:36", transient: true });
     expect(peek.decision).toMatchObject({ page: { id: layout.activePage }, card: { id: cardOf(layout, t1).id } });
@@ -391,9 +428,9 @@ describe("§4.4 scenarios (v1.17: one column, ≤ 3 panes, then tabs)", () => {
     expect(next.decision).toEqual({ op: "replace", instance: peek.id });
     const roomy = open(s1().layout, "turn.peek", { key: "turn:local:A:36", transient: true });
     expect(kinds(roomy.layout)).toEqual(["workspace.files", "turn.peek", "workspace.changes"]);
-    // the column hidden: "active" does not match → otherwise the right-most column (no new column)
+    // the Shelf closed: "active" does not match → otherwise (design 038) a page of its own
     const closed = open({ ...layout, open: false }, "turn.peek", { key: "turn:local:A:36", transient: true });
-    expect(closed.decision).toMatchObject({ via: "limit", page: { id: layout.pages[0]!.id } });
+    expect(closed.decision).toMatchObject({ via: "otherwise", page: { new: { groups: ["reference"] } } });
     expect(open(emptyLayout(), "turn.peek", { key: "k", transient: true }).decision).toMatchObject({ via: "otherwise", page: { new: { groups: ["reference"] } } });
   });
 
@@ -414,9 +451,11 @@ describe("§4.4 scenarios (v1.17: one column, ≤ 3 panes, then tabs)", () => {
     expect(r1).toEqual(r2);
     expect(r1.overrides).toEqual({});
     expect(Object.keys(r1.instances).sort()).toEqual(before);
-    expect(r1.pages.map((p) => p.groups)).toEqual([["workspace"]]);
+    // design 038: the side chat replays onto a page of its own
+    expect(r1.pages.map((p) => p.groups)).toEqual([["workspace"], ["chat"]]);
     expect(r1.pages.every((p) => p.name === undefined)).toBe(true);
     expect(kinds(r1)).toEqual(["workspace.files", "workspace.changes", "terminal.pty"]);
+    expect(kinds(r1, 1)).toEqual(["side-chat.chat"]);
     expect(cardOf(r1, base.t1).tabs.slice(0, 2)).toEqual([base.t1, base.t2]);
     expect(r1.instances[base.t1]!.lastActiveAt).toBe(l.instances[base.t1]!.lastActiveAt);
     sizesSum(r1).forEach((s) => expect(s).toBeCloseTo(1));
@@ -486,8 +525,10 @@ describe("place: column choice", () => {
     expect(decide(ov(browserPage, ["x"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { id: browserPage } });
     expect(decide(ov("p999", ["browser"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { id: browserPage } });
     expect(decide(ov("p999", ["workspace", "browser"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { id: workPage } });
-    // a new column is refused at MAX_PAGES: the right-most column
-    expect(decide(ov("p999", ["user:p999"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "limit", page: { id: browserPage } });
+    // §24.12: its page gone and no page of its groups → a new page of the right Shelf (the browser's
+    // Shelf is the left one here), at the end of its rail
+    const rightShelf = shelfOnSide(b.layout, "right")!.id;
+    expect(decide(ov("p999", ["user:p999"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { new: { groups: ["user:p999"], shelf: rightShelf } } });
     expect(decide({ ...layout, overrides: { "workspace.preview": { page: "p999", groups: ["user:p999"], at: 1 } } }, "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { new: { groups: ["user:p999"] } } });
   });
 
@@ -512,23 +553,30 @@ describe("place: column choice", () => {
     expect(decide(noChanges, "diff.view", { key: "git:a" })).toMatchObject({ via: "rule", page: { id: noChanges.pages[0]!.id } });
   });
 
-  it("otherwise: the right-most column (never a new one); active-page: the focused column; a new column only without any", () => {
+  it("otherwise: new-page (default) = a page of its own, or the page already holding the kind; active-page: the focused page; a new page only without any", () => {
     const { layout } = s1();
-    expect(decide(layout, "browser.tab", { key: "x" })).toMatchObject({ via: "otherwise", page: { id: layout.pages[0]!.id } });
+    expect(decide(layout, "browser.tab", { key: "x" })).toMatchObject({ via: "otherwise", page: { new: { groups: ["browser"] } } });
     expect(decide(layout, "notes.note", { key: "n1" })).toMatchObject({ via: "otherwise", page: { id: layout.activePage } });
     const two = inNewColumn(layout, "side-chat.chat");
     const focusedLeft = { ...two.layout, activePage: two.layout.pages[0]!.id };
-    expect(decide(focusedLeft, "browser.tab", { key: "x" })).toMatchObject({ via: "otherwise", page: { id: two.layout.pages[1]!.id } });
+    expect(decide(focusedLeft, "browser.tab", { key: "x" })).toMatchObject({ via: "otherwise", page: { new: {} } });
     expect(decide(focusedLeft, "notes.note", { key: "n1" })).toMatchObject({ via: "otherwise", page: { id: two.layout.pages[0]!.id } });
+    // a pane of the kind already open (on a page of another group): a tab there, not a new page
+    const tab = open(layout, "browser.tab", { key: "x", page: layout.pages[0]!.id });
+    expect(decide(tab.layout, "browser.tab", { key: "y" })).toMatchObject({ via: "otherwise", page: { id: layout.pages[0]!.id }, card: { id: cardOf(tab.layout, tab.id).id } });
     expect(decide(emptyLayout(), "notes.note", { key: "n1" })).toMatchObject({ via: "otherwise", page: { new: { groups: ["notes"] } } });
   });
 
-  it(`at ${MAX_PAGES} columns a new column is refused: the right-most column (via limit)`, () => {
-    const l = pagesLayout(MAX_PAGES, 1);
+  it(`at ${MAX_SHELF_PAGES} pages a Shelf takes no new page: its page in view (via limit) (§24.12; was: ${MAX_PAGES} columns)`, () => {
+    const l = pagesLayout(MAX_SHELF_PAGES, 1);
     const ov = { ...l, overrides: { "side-chat.chat": { page: "p404", groups: ["user:p404"], at: 1 } } };
-    expect(decide(ov, "side-chat.chat")).toMatchObject({ via: "limit", page: { id: l.pages[MAX_PAGES - 1]!.id } });
+    expect(decide(ov, "side-chat.chat")).toMatchObject({ via: "limit", page: { id: l.activePage } });
     expect(openLauncherPage(l).pageId).toBeNull();
     expect(moveCard(l, l.pages[0]!.cards[0]!.id, { newPage: true }, ++clock, orderOf)).toBe(l);
+    // more pages than a Shelf holds (a hand-made layout): the extra ones fold into its 9th page
+    const many = withShelves(pagesLayout(MAX_SHELF_PAGES + 2, 1));
+    expect(many.pages).toHaveLength(MAX_SHELF_PAGES);
+    expect(many.pages.at(-1)!.cards).toHaveLength(3);
   });
 });
 
@@ -594,7 +642,11 @@ describe("place: pane choice and full columns", () => {
   });
 
   it("full column step 3: no room anywhere → a tab of the bottom pane (mixed kinds); a pane of the kind is still used first", () => {
-    const l = pagesLayout(1, MAX_CARDS);
+    // A hand-made layout's Shelf does not allow mixing (owner 2026-10-20): a full page → a new page.
+    const plain = pagesLayout(1, MAX_CARDS);
+    expect(decide(plain, "notes.note", { key: "n" })).toMatchObject({ via: "limit", page: { new: { groups: ["notes"] } } });
+    let l = withShelves(plain);
+    l = setShelfOptions(l, shelvesOf(l)[0]!.id, { allowMixing: true });
     const n = open(l, "notes.note", { key: "n" });
     expect(n.decision).toMatchObject({ via: "limit", page: { id: l.pages[0]!.id }, card: { id: l.pages[0]!.cards.at(-1)!.id } });
     expect(n.layout.pages[0]!.cards).toHaveLength(MAX_CARDS);
@@ -841,6 +893,22 @@ describe("geometry", () => {
     expect(h[2]!.height).toBeCloseTo(room / 2);
   });
 
+  it("owner 2026-10-23: the gap between two panes of a page moves only that gap — the pane below keeps its pixels", () => {
+    const sizes = [1, 2, 1];
+    const before = cardHeights(sizes.map((size) => ({ size, collapsed: false })), 800);
+    const room = before.reduce((n, b) => n + b.height, 0);
+    for (const dy of [-120, -30, 45, 200]) {
+      const next = dragGap(sizes.map((x) => x / 4), 0, 1, dy, room, MIN_CARD_HEIGHT / room);
+      // Only the two panes beside the gap change; their sum stays (the next gap does not move).
+      expect(next[2]).toBe(1 / 4);
+      expect(next[0]! + next[1]!).toBeCloseTo(3 / 4, 10);
+      const after = cardHeights(next.map((size) => ({ size, collapsed: false })), 800);
+      expect(after[2]!.height).toBeCloseTo(before[2]!.height, 6);
+      // The pane above follows the pointer, down to the minimum height.
+      expect(after[0]!.height - before[0]!.height).toBeCloseTo(Math.max(MIN_CARD_HEIGHT - before[0]!.height, Math.min(before[1]!.height - MIN_CARD_HEIGHT, dy)), 6);
+    }
+  });
+
   it("no room for the minimum heights: the bottom expanded cards fold first; one card always stays open", () => {
     const h = cardHeights([{ size: 1, collapsed: false }, { size: 1, collapsed: false }, { size: 1, collapsed: false }], 250);
     expect(h.map((b) => b.folded)).toEqual([false, true, true]);
@@ -851,6 +919,63 @@ describe("geometry", () => {
     expect(all.map((b) => b.folded)).toEqual([false, true]);
     const h2 = cardHeights([{ size: 1, collapsed: false }, { size: 1, collapsed: false }], 2 * MIN_CARD_HEIGHT + CARD_GAP);
     expect(h2.every((b) => !b.folded && b.height >= MIN_CARD_HEIGHT)).toBe(true);
+  });
+
+  it("fix/shelf-split-collapsed: a folded pane with a share under its min opens from its neighbour", () => {
+    // 0.9 / 0.1 of 600 px, the lower pane collapsed (a share under its min alone no longer folds: fix/shelf-collapse-again).
+    const cards = [{ size: 0.9 }, { size: 0.1 }];
+    const boxes = cardHeights(cards.map((c, k) => ({ ...c, collapsed: k === 1 })), 600, CARD_GAP);
+    expect(boxes.map((b) => b.folded)).toEqual([false, true]);
+    const mins = { f: MIN_CARD_HEIGHT, donor: MIN_CARD_HEIGHT };
+    const next = unfoldSizes(cards, boxes, 1, 0, 200, mins)!;
+    const after = cardHeights(next.map((size) => ({ size, collapsed: false })), 600, CARD_GAP);
+    expect(after.map((b) => b.folded)).toEqual([false, false]);
+    expect(after[1]!.height).toBeCloseTo(200, 6);
+    expect(after[0]!.height + after[1]!.height).toBeCloseTo(600 - CARD_GAP, 6);
+    // A short pull still opens it at its min height (it cannot show smaller), never past the donor's min.
+    const small = cardHeights(unfoldSizes(cards, boxes, 1, 0, CARD_HEADER + 6, mins)!.map((size) => ({ size, collapsed: false })), 600, CARD_GAP);
+    expect(small[1]!.folded).toBe(false);
+    expect(small[1]!.height).toBeGreaterThanOrEqual(MIN_CARD_HEIGHT);
+    const big = cardHeights(unfoldSizes(cards, boxes, 1, 0, 5000, mins)!.map((size) => ({ size, collapsed: false })), 600, CARD_GAP);
+    expect(big.every((b) => !b.folded && b.height >= MIN_CARD_HEIGHT)).toBe(true);
+  });
+
+  it("fix/shelf-collapse-again: a share under the min is drawn at the min while the minimums fit; folding only past that", () => {
+    // 0.9 / 0.1 of 600 px used to fold the lower pane (59 px < 120) although 2 × 120 + 8 fit.
+    const h = cardHeights([{ size: 0.9, collapsed: false }, { size: 0.1, collapsed: false }], 600, CARD_GAP);
+    expect(h).toEqual([{ folded: false, height: 600 - CARD_GAP - MIN_CARD_HEIGHT }, { folded: false, height: MIN_CARD_HEIGHT }]);
+    // A share stored exactly at the min (a gap dragged to its limit) comes back a hair under it in floats: still open.
+    const room = 944 - CARD_GAP;
+    const dragged = dragGap([0.5, 0.5], 0, 1, 10_000, room, MIN_CARD_HEIGHT / room);
+    const d = cardHeights(dragged.map((size) => ({ size, collapsed: false })), 944, CARD_GAP);
+    expect(d.map((b) => b.folded)).toEqual([false, false]);
+    expect(d[1]!.height).toBeCloseTo(MIN_CARD_HEIGHT, 6);
+    // A bigger min of its own (a module's minHeight) is held too; the others share the rest by their sizes.
+    const m = cardHeights([{ size: 0.45, collapsed: false }, { size: 0.45, collapsed: false }, { size: 0.1, minHeight: 220, collapsed: false }], 800, CARD_GAP);
+    expect(m.map((b) => b.folded)).toEqual([false, false, false]);
+    expect(m[2]!.height).toBe(220);
+    expect(m[0]!.height).toBeCloseTo(m[1]!.height, 6);
+    expect(m[0]!.height + m[1]!.height).toBeCloseTo(800 - 2 * CARD_GAP - 220, 6);
+    // The heights fill the page at every height where both minimums fit.
+    for (const total of [248, 300, 500, 944]) {
+      const x = cardHeights([{ size: 0.97, collapsed: false }, { size: 0.03, collapsed: false }], total, CARD_GAP);
+      expect(x.map((b) => b.folded)).toEqual([false, false]);
+      expect(x[0]!.height + x[1]!.height + CARD_GAP).toBeCloseTo(total, 6);
+    }
+  });
+
+  it("unfoldSizes: a collapsed pane above / between keeps the other panes' pixels; no room or not folded = null", () => {
+    const cards = [{ size: 1, collapsed: false }, { size: 1, collapsed: true }, { size: 1, collapsed: false }];
+    const boxes = cardHeights(cards, 800, CARD_GAP);
+    const next = unfoldSizes(cards, boxes, 1, 2, 250, { f: MIN_CARD_HEIGHT, donor: MIN_CARD_HEIGHT })!;
+    const after = cardHeights(next.map((size) => ({ size, collapsed: false })), 800, CARD_GAP);
+    expect(after.map((b) => b.folded)).toEqual([false, false, false]);
+    expect(after[0]!.height).toBeCloseTo(boxes[0]!.height, 6);
+    expect(after[1]!.height).toBeCloseTo(250, 6);
+    // Too short for both minimums: nothing to do.
+    const short = cardHeights([{ size: 0.5, collapsed: false }, { size: 0.5, collapsed: true }], 200, CARD_GAP);
+    expect(unfoldSizes([{ size: 0.5 }, { size: 0.5 }], short, 1, 0, 150, { f: MIN_CARD_HEIGHT, donor: MIN_CARD_HEIGHT })).toBeNull();
+    expect(unfoldSizes(cards, boxes, 0, 2, 150, { f: MIN_CARD_HEIGHT, donor: MIN_CARD_HEIGHT })).toBeNull();
   });
 
   it("dragging a gap keeps the pair's total and each side's minimum", () => {
@@ -1024,8 +1149,10 @@ describe("one layout for every agent (v1.17: no per-agent views)", () => {
     const b = inNewColumn(layout, "browser.tab", { key: "u" });
     const l = b.layout;
     const card = cardOf(l, files).id;
-    expect(columnsOnScreen(l, ctx(), { card })).toEqual([{ page: l.pages[0]!, only: card }]);
-    expect(columnsOnScreen({ ...l, activePage: l.pages[1]!.id }, ctx(), { card: null })).toEqual([{ page: l.pages[1]!, only: null }]);
+    // §24.12: each entry names its Shelf too
+    const strip = (xs: ReturnType<typeof columnsOnScreen>) => xs.map(({ page, only }) => ({ page, only }));
+    expect(strip(columnsOnScreen(l, ctx(), { card }))).toEqual([{ page: l.pages[0]!, only: card }]);
+    expect(strip(columnsOnScreen({ ...l, activePage: l.pages[1]!.id }, ctx(), { card: null }))).toEqual([{ page: l.pages[1]!, only: null }]);
     expect(columnsOnScreen(l, ctx(), null)).toHaveLength(2);
   });
 });
@@ -1069,8 +1196,10 @@ describe("foldPages (the v1.16 right side as one tool column)", () => {
     expect(out.activePage).toBe("p91");
     // an unknown page: the active page is kept
     expect(foldPages(l, "p404").pages.map((p) => p.id)).toEqual(["p92"]);
-    // sanitize keeps up to 9 pages for this (legacy), and folds a stored layout with more than MAX_PAGES columns
+    // sanitize keeps the pages (§24.12: they are the right Shelf's pages again, nothing folds)
     expect(sanitizeLayout(JSON.parse(JSON.stringify(l)), "local", { legacy: true }).pages).toHaveLength(3);
-    expect(sanitizeLayout(JSON.parse(JSON.stringify(l))).pages).toHaveLength(1);
+    const kept = sanitizeLayout(JSON.parse(JSON.stringify(l)));
+    expect(kept.pages).toHaveLength(3);
+    expect(shelvesOf(kept)).toMatchObject([{ side: "right", active: "p92", options: { allowMixing: false } }]);
   });
 });

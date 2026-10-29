@@ -11,6 +11,7 @@ import { agentHost, featuresOf, useApp } from "../../store";
 import type { AppModuleContext, SideOpenOptions } from "../slots";
 import { AUTO_OPEN_PREF, autoOpenEvent, autoOpenSetting, decideAutoOpen, type LivePublish } from "./autoOpen";
 import { VIEW } from "./model";
+import { activeAppDocument } from "../../lib/appWindowSet";
 
 export const TOAST_OWNER = "artifacts";
 
@@ -25,7 +26,7 @@ function viewing(): { hostId: string; sessionId: string } | null {
 
 /** The composer has focus and something typed in it. */
 function typing(): boolean {
-  const el = typeof document === "undefined" ? null : document.activeElement;
+  const el = typeof document === "undefined" ? null : activeAppDocument().activeElement;
   return !!el && el.matches?.("[data-composer-input]") && "value" in el && String((el as HTMLTextAreaElement).value).trim() !== "";
 }
 

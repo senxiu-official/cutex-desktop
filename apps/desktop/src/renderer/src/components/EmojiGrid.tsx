@@ -55,7 +55,7 @@ export function EmojiGrid({ value, onPick, columns = 10, className = "" }: { val
     <div role="grid" aria-label={t("info.avatar.emoji")} onKeyDown={onKeyDown} className={`space-y-1.5 ${className}`}>
       {layout.map(({ group, rows: groupRows }) => (
         <div key={group} role="rowgroup" aria-label={t(`info.emojiGroup.${group}` as MessageKey)}>
-          <div aria-hidden className="px-0.5 pb-0.5 text-[10px] font-medium tracking-wide text-subtle">{t(`info.emojiGroup.${group}` as MessageKey)}</div>
+          <div aria-hidden className="px-0.5 pb-0.5 text-caption/[inherit] font-medium tracking-wide text-subtle">{t(`info.emojiGroup.${group}` as MessageKey)}</div>
           {groupRows.map((row, ri) => (
             <div key={ri} role="row" className="grid gap-0.5" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
               {row.map((e) => (

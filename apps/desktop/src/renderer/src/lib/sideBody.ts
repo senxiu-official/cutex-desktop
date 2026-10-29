@@ -10,6 +10,7 @@ import { holdKey, setHeldState, setSideHold, useSideKeep } from "./sideKeep";
 import { pinInstance, resolveBinding, type SideInstance } from "./sideLayout";
 import { setInstanceStateNow, updateLayout, useSide } from "./sideLayoutStore";
 import { sideOpen } from "./sideServices";
+import { sideOpenFrom } from "./shelfTarget";
 
 export interface SidePlaceInfo {
   cardId: string;
@@ -56,7 +57,11 @@ export function useSideBodyProps(id: string, inst: SideInstance, where: SidePlac
       where: "card" as const,
       revealed,
       close: () => (outOfScope ? void setSideHold(outOfScope, id, instRef.current, "hidden", false) : closeTab(id)),
-      open: (kind, params, opts) => sideOpen(kind, params ?? null, { ...(pageId ? { page: pageId } : {}), ...opts }),
+      // Design 012: lands in this pane's own Shelf (the other workspace's too), on its page.
+      open: (kind, params, opts) => {
+        const o = { ...(pageId ? { page: pageId } : {}), ...opts };
+        return outOfScope ? sideOpen(kind, params ?? null, o) : sideOpenFrom({ instanceId: id }, kind, params ?? null, o);
+      },
       keepMounted: (hold: boolean) => setSideHold(scope, id, instRef.current, sideRegistry().get(inst.kind)?.item.keepAlive, hold),
       held,
       keep: () => keepTab(id, outOfScope),

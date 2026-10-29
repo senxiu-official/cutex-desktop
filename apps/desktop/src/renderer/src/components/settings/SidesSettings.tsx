@@ -1,5 +1,5 @@
-// Settings → 右侧栏与留白 (was 会话两侧; its own page since 2026-10-15; docs/desktop-modules.md §18.12): 右栏 (width,
-// modes, keep-loaded limits, reset), 打开位置 (files, the reference card, and each component's default
+// Settings → {{shelf}} (design 006 v1; its 留白 card is on 会话 now: GutterSection) — was 右侧栏与留白 (was 会话两侧; its own page since 2026-10-15; docs/desktop-modules.md §18.12): Shelf (width,
+// 只用一个 Shelf (§24.12), modes, keep-loaded limits, reset), 打开位置 (files, the reference card, and each component's default
 // page group — editable, per device: UiPrefs.sideHomes — with the moved-to page and 恢复默认), and
 // 留白 (§19: which gutter lists stay docked when the gutter is wide enough).
 import { useState } from "react";
@@ -12,13 +12,15 @@ import { pageLabel } from "../../lib/sideActions";
 import { useSideRegistry } from "../../lib/sideComponents";
 import { DEFAULT_ORDER, findPage } from "../../lib/sideLayout";
 import { useSide } from "../../lib/sideLayoutStore";
+import { setSingleShelfNow } from "../../lib/shelves";
 import { resetSideLayout, restoreKindDefaultNow } from "../../lib/sideMenus";
 import { clampDockPref, DOCK_WIDTH_DEFAULT, DOCK_WIDTH_RANGE } from "../../lib/gutterDock";
 import { clampSetting, KEEP_HIDDEN_DEFAULT, KEEP_HIDDEN_RANGE, KEEP_MOUNTED_DEFAULT, KEEP_MOUNTED_RANGE } from "../../lib/sideKeep";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { AppearanceNumberRow } from "./AppearanceRows";
 import { FIELD_W } from "../../lib/fieldWidths";
-import { Button, NumberField, ResetButton, Section, Segmented, Select, SettingRow, Toggle } from "./Form";
+import { Button, NumberField, ResetButton, Section, Segmented, Select, SettingRow, Toggle, SettingsGroup } from "./Form";
+import { ShelfPlacementSection } from "../WorkSurfaceSettings";
 
 function DefaultsTable() {
   const { t } = useI18n();
@@ -59,7 +61,7 @@ function DefaultsTable() {
         const declared = item.placement.home;
         const home = sideHomes[item.id] ?? declared;
         return (
-          <div key={item.id} className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-1 py-1.5 text-[13px]">
+          <SettingsGroup agents="none" source="local" key={item.id}><div key={item.id} className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-1 py-1.5 text-ui/[inherit]">
             <Icon size={14} className="shrink-0 text-subtle" />
             <span className="min-w-0 flex-1 truncate">{t(item.titleKey)}</span>
             {override && (
@@ -77,13 +79,13 @@ function DefaultsTable() {
               options={homes.map((h) => ({ value: h, label: homeLabel(h) }))}
               onChange={(v) => setHome(item.id, v, declared)}
             />
-          </div>
+          </div></SettingsGroup>
         );
       })}
       <div className="py-1.5">
-        <button type="button" onClick={() => setAll(!all)} className="rounded text-xs text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none">
+        <SettingsGroup agents="none" source="local"><button type="button" onClick={() => setAll(!all)} className="rounded text-xs text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none">
           {all ? t("shell.sides.defaults.onlyChanged") : t("shell.sides.defaults.showAll", { n: rows.length })}
-        </button>
+        </button></SettingsGroup>
       </div>
     </div>
   );
@@ -98,7 +100,7 @@ function DockRows() {
   return (
     <>
       {items.map(({ item }) => (
-        <SettingRow key={item.id} label={t(item.titleKey)} hint={t("shell.sides.gutterDocked.min", { n: item.dockMinWidth! })}>
+        <SettingRow agents="none" source="local" key={item.id} label={t(item.titleKey)} hint={t("shell.sides.gutterDocked.min", { n: item.dockMinWidth! })}>
           <Toggle
             checked={gutterDocked.includes(item.id)}
             onChange={(v) => setUiPref("gutterDocked", v ? [...gutterDocked.filter((x) => x !== item.id), item.id] : gutterDocked.filter((x) => x !== item.id))}
@@ -114,41 +116,42 @@ export function SidesPage() {
   const ui = useUiPrefs();
   const keepHidden = clampSetting(ui.sideKeepHidden, KEEP_HIDDEN_RANGE, KEEP_HIDDEN_DEFAULT);
   const keepMounted = clampSetting(ui.sideKeepMounted, KEEP_MOUNTED_RANGE, KEEP_MOUNTED_DEFAULT);
-  const choice = <K extends "sideMode" | "sideNarrow" | "peekTarget">(key: K, values: readonly string[], prefix: string) => (
-    <Segmented
-      value={ui[key] as string}
-      options={values.map((v) => ({ value: v, label: t(`${prefix}.${v}` as MessageKey) }))}
-      onChange={(v) => setUiPref(key, v as never)}
-    />
-  );
+  const singleShelf = useSide((s) => s.layout.singleShelf === true);
   return (
     <>
+      {/* Design 006 v1: the Shelf's own page — the Rails and where pages open first (were 外观 → 窗口与卡片). */}
+      <ShelfPlacementSection />
       <Section id={settingsAnchorId("sides")} title={t("shell.sides.rightPane")} hint={t("shell.sides.hint")}>
         <AppearanceNumberRow field="sidePaneWidth" label="pane.width" hint="shell.sides.widthHint" unit="px" step={10} />
-        <SettingRow label={t("shell.sides.mode")} hint={t("shell.sides.modeHint")}>
-          {choice("sideMode", ["push", "yield", "float"], "shell.sides.mode")}
+        {/* 只用一个 Shelf (§24.12; also in each Shelf's ⋯): the current layout's, like the Shelves themselves. */}
+        <SettingRow agents="none" source="local" label={t("shelf.single")} hint={t("shelf.singleHint")}>
+          <Toggle checked={singleShelf} onChange={setSingleShelfNow} />
+        </SettingRow>
+        {/* 让位 is gone (owner 2026-10-21): the reading column always centres in its own pane. */}
+        <SettingRow agents="none" source="local" label={t("shell.sides.mode")} hint={t("shell.sides.modeHintCentred")}>
+          <Segmented value={ui.sideMode} options={(["push", "float"] as const).map(v => ({ value: v, label: t(`shell.sides.mode.${v}` as MessageKey) }))} onChange={v => setUiPref("sideMode", v)} />
         </SettingRow>
         {/* v1.17 (§24): no page buttons any more (every tool column is on screen) — 右栏布局 / 页按钮位置 /
             右栏收起时 / 点击当前页图标 are gone from here; their stored prefs are left alone. */}
-        <SettingRow label={t("shell.sides.narrow")} hint={t("shell.sides.narrowHint")}>
-          {choice("sideNarrow", ["overlay", "auto-collapse"], "shell.sides.narrow")}
+        <SettingRow agents="none" source="local" label={t("shell.sides.narrow")} info={t("shell.sides.narrowHint")}>
+          <Segmented value={ui.sideNarrow} options={(["overlay", "auto-collapse"] as const).map(v => ({ value: v, label: t(`shell.sides.narrow.${v}` as MessageKey) }))} onChange={v => setUiPref("sideNarrow", v)} />
         </SettingRow>
-        <SettingRow label={t("shell.sides.restore")} hint={t("shell.sides.restoreHint")}>
+        <SettingRow agents="none" source="local" label={t("shell.sides.restore")} hint={t("shell.sides.restoreHint")}>
           <Toggle checked={ui.sideRestore} onChange={(v) => setUiPref("sideRestore", v)} />
         </SettingRow>
-        <SettingRow label={t("shell.sides.keepHidden")} hint={t("shell.sides.keepHiddenHint")} reset={<ResetButton disabled={keepHidden === KEEP_HIDDEN_DEFAULT} onClick={() => setUiPref("sideKeepHidden", KEEP_HIDDEN_DEFAULT)} />}>
+        <SettingRow agents="none" source="local" label={t("shell.sides.keepHidden")} hint={t("shell.sides.keepHiddenHint")} reset={<ResetButton disabled={keepHidden === KEEP_HIDDEN_DEFAULT} onClick={() => setUiPref("sideKeepHidden", KEEP_HIDDEN_DEFAULT)} />}>
           <NumberField slider value={keepHidden} range={KEEP_HIDDEN_RANGE} unit={t("shell.sides.tabs")} onCommit={(v) => v !== null && setUiPref("sideKeepHidden", v)} />
         </SettingRow>
-        <SettingRow label={t("shell.sides.keepMounted")} hint={t("shell.sides.keepMountedHint")} reset={<ResetButton disabled={keepMounted === KEEP_MOUNTED_DEFAULT} onClick={() => setUiPref("sideKeepMounted", KEEP_MOUNTED_DEFAULT)} />}>
+        <SettingRow agents="none" source="local" label={t("shell.sides.keepMounted")} hint={t("shell.sides.keepMountedHint")} reset={<ResetButton disabled={keepMounted === KEEP_MOUNTED_DEFAULT} onClick={() => setUiPref("sideKeepMounted", KEEP_MOUNTED_DEFAULT)} />}>
           <NumberField slider value={keepMounted} range={KEEP_MOUNTED_RANGE} unit={t("shell.sides.tabs")} onCommit={(v) => v !== null && setUiPref("sideKeepMounted", v)} />
         </SettingRow>
-        <SettingRow label={t("shell.sides.reset")} hint={t("shell.sides.resetHint")}>
+        <SettingRow agents="none" source="local" label={t("shell.sides.reset")} hint={t("shell.sides.resetHint")}>
           <Button onClick={resetSideLayout}>{t("shell.sides.resetButton")}</Button>
         </SettingRow>
       </Section>
 
       <Section id={settingsAnchorId("open")} title={t("shell.sides.openSection")}>
-        <SettingRow label={t("shell.sides.preview")} hint={t("shell.sides.previewHint")}>
+        <SettingRow agents="none" source="local" label={t("shell.sides.preview")} hint={t("shell.sides.previewHint")}>
           {/* Long option labels: a select (a segmented control here squeezed the label column). */}
           <Select
             width={FIELD_W.model}
@@ -157,30 +160,41 @@ export function SidesPage() {
             onChange={(v) => setUiPref("sidePreview", v)}
           />
         </SettingRow>
-        <SettingRow label={t("shell.sides.peekTarget")} hint={t("shell.sides.peekTargetHint")}>
-          {choice("peekTarget", ["auto", "right", "left"], "shell.sides.peekTarget")}
+        <SettingRow agents="none" source="local" label={t("shell.sides.peekTarget")} hint={t("shell.sides.peekTargetHint")}>
+          <Segmented value={ui.peekTarget} options={(["auto", "right", "left"] as const).map(v => ({ value: v, label: t(`shell.sides.peekTarget.${v}` as MessageKey) }))} onChange={v => setUiPref("peekTarget", v)} />
         </SettingRow>
         <div className="pt-3">
-          <div className="text-[13px] font-medium">{t("shell.sides.defaults")}</div>
+          <div className="text-ui/[inherit] font-medium">{t("shell.sides.defaults")}</div>
           <div className="mb-1 text-xs text-subtle">{t("shell.sides.defaultsHint")}</div>
           <DefaultsTable />
         </div>
       </Section>
       {/* 智能体发布成果时 (module artifacts; from 对话, owner 2026-10-18): it opens on the right side. */}
-      <SettingsSections page="sides" only={["artifacts.settings"]} />
+      <SettingsSections page="sides" except={["artifacts.pageData"]} />
 
+    </>
+  );
+}
+
+/**
+ * Settings → 会话 → 留白 (design 006 v1: the margins are beside the conversation; was 右侧栏与留白): which gutter
+ * lists stay docked, and their width. The anchor stays `gutter`.
+ */
+export function GutterSection() {
+  const { t } = useI18n();
+  const ui = useUiPrefs();
+  return (
+    <>
       <Section id={settingsAnchorId("gutter")} title={t("shell.sides.gutter")} hint={t("shell.sides.gutterHint")}>
         <div>
-          <div className="text-[13px] font-medium">{t("shell.sides.gutterDocked")}</div>
+          <div className="text-ui/[inherit] font-medium">{t("shell.sides.gutterDocked")}</div>
           <div className="mb-1 text-xs text-subtle">{t("shell.sides.gutterDockedHint")}</div>
           <DockRows />
         </div>
-        <SettingRow label={t("shell.sides.gutterDockWidth")} hint={t("shell.sides.gutterDockWidthHint")} reset={<ResetButton disabled={clampDockPref(ui.gutterDockWidth) === DOCK_WIDTH_DEFAULT} onClick={() => setUiPref("gutterDockWidth", DOCK_WIDTH_DEFAULT)} />}>
+        <SettingRow agents="none" source="local" label={t("shell.sides.gutterDockWidth")} info={t("shell.sides.gutterDockWidthHint")} reset={<ResetButton disabled={clampDockPref(ui.gutterDockWidth) === DOCK_WIDTH_DEFAULT} onClick={() => setUiPref("gutterDockWidth", DOCK_WIDTH_DEFAULT)} />}>
           <NumberField slider value={clampDockPref(ui.gutterDockWidth)} range={DOCK_WIDTH_RANGE} step={4} unit="px" onCommit={(v) => v !== null && setUiPref("gutterDockWidth", clampDockPref(v))} />
         </SettingRow>
       </Section>
-      {/* 书签条 (module bookmarks; from 对话): the little bookmarks sit in the gutter. */}
-      <SettingsSections page="sides" only={["bookmarks.settings"]} />
     </>
   );
 }

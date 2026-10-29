@@ -1,18 +1,24 @@
 // services.panes (docs/desktop-modules.md §24.5): one way to open any pane kind — a conversation (in the
-// focused pane, or beside it), a page (in the focused conversation pane, over its conversation) or a
+// focused pane, or beside it), a page (its own pane in the focused conversation's Shelf; 页面打开位置 =
+// 占用会话: over the focused conversation column, with its own page header) or a
 // tool kind (the tool area: the right-most column, ≤ 3 panes, then tabs; lib/sideServices). Also the
 // v1.17 alias of services.side.open for the v1.16 `conversation.agent` component (merged into
 // `core.conversation`: a conversation pane fixed to that agent). Shell code: names no feature.
 import type { PaneOpenOptions, PaneOpenResult, SideOpenOptions, SideOpenResult } from "../modules/slots";
-import type { ItemId, Json } from "../modules/types";
-import { useApp } from "../store";
-import { CONVERSATION_KIND, focusedConversation, isPageKind, PAGE_KIND_PREFIX, paneShowing } from "./paneLayout";
+import type { ItemId, Json, PageParams } from "../modules/types";
+import { isColumnPage, useApp } from "../store";
+import { kindsOnScreen, setPageOpener, setShelfKindsShown } from "./pageOpener";
+import { sideViewNow } from "./sideComponents";
+import { getAppearance } from "./appearance";
+import type { PageOpenPlace } from "./appearanceModel";
+import { CONVERSATION_KIND, focusedConversation, isPageKind, PAGE_KIND_PREFIX, pageKind, paneShowing } from "./paneLayout";
 import { isFullWindowPage, paneKindsNow } from "./paneKinds";
 import { openAgentBeside, setFullWindowPages, usePanes } from "./paneStore";
 import { SIDE_AGENT_COMPONENT } from "./sideKinds";
 import { locate } from "./sideLayout";
 import { useSide } from "./sideLayoutStore";
 import { sideOpen, whyUnavailable } from "./sideServices";
+import { widenForPage } from "./pageShelfWidth";
 
 // A page with an Aside (设置) is full-window: lib/paneStore never puts it into a pane.
 setFullWindowPages(isFullWindowPage);
@@ -31,15 +37,43 @@ function openConversation(params: Json | undefined, opts: PaneOpenOptions): Pane
   return { status: "opened", kind: CONVERSATION_KIND, paneId: paneShowing(usePanes.getState().layout, hostId, sessionId), instanceId: null };
 }
 
-/** A page kind: the page opens in the focused conversation pane (a full-window page over the window). */
+/** 页面打开位置 now (Settings → 外观 → 窗口与卡片): the focused conversation's Shelf (default) or 占用会话. */
+export const pageOpenPlace = (): PageOpenPlace => getAppearance().pageOpen;
+
+/**
+ * A page as its own pane in the focused conversation's Shelf (§24.4, 2026-10-21): placed like any tool kind (its
+ * own page of the Shelf, or a tab per the Shelf's mixing rules), revealed and focused. A page already open there
+ * shows the new params (single instance). Null: not opened there (a full-window page, unknown, the Shelf refused).
+ */
+export function openPageInShelf(page: ItemId, params: PageParams = {}): { instanceId: string; paneId: string | null } | null {
+  if (isFullWindowPage(page)) return null;
+  const r = sideOpen(pageKind(page) as ItemId, { ...params } as Json, { reveal: true, focus: true });
+  if (r.status !== "opened" || r.where !== "card") return null;
+  // Design 011: a page newly in a Shelf narrower than its own width widens it once.
+  if (!r.reused) widenForPage(r.instanceId);
+  return { instanceId: r.instanceId, paneId: locate(useSide.getState().layout, r.instanceId)?.card.id ?? null };
+}
+
+// store.openPage (services.ui.openPage, sidebar entries, ⌘K, links, deep links) asks here first.
+setPageOpener((page, params) => pageOpenPlace() === "shelf" && openPageInShelf(page, params) !== null);
+// What the Shelf shows (an approvals page there counts as looked at, like over the column).
+setShelfKindsShown(() => kindsOnScreen(useSide.getState().layout, sideViewNow()));
+
+/** A page kind: as services.ui.openPage — its own Shelf pane, or over the focused conversation column (占用会话). */
 function openPageKind(kind: string, params: Json | undefined): PaneOpenResult {
   const page = kind.slice(PAGE_KIND_PREFIX.length) as ItemId;
   const entry = paneKindsNow().find((k) => k.id === kind);
   if (!entry && !isFullWindowPage(page)) return { status: "unavailable", reason: "unknown-kind" };
   const flat: Record<string, string> = {};
   if (isRecord(params)) for (const [k, v] of Object.entries(params)) if (typeof v === "string") flat[k] = v;
-  useApp.getState().openPage(page, flat);
-  return { status: "opened", kind, paneId: isFullWindowPage(page) ? null : focusedConversation(usePanes.getState().layout), instanceId: null };
+  if (isFullWindowPage(page)) {
+    useApp.getState().openPage(page, flat);
+    return { status: "opened", kind, paneId: null, instanceId: null };
+  }
+  const shelf = pageOpenPlace() === "shelf" && !isColumnPage(page) ? openPageInShelf(page, flat) : null;
+  if (shelf) return { status: "opened", kind, paneId: shelf.paneId, instanceId: shelf.instanceId };
+  useApp.setState({ view: { kind: "page", page, params: flat } });
+  return { status: "opened", kind, paneId: focusedConversation(usePanes.getState().layout), instanceId: null };
 }
 
 /** services.panes.open (§24.5). */

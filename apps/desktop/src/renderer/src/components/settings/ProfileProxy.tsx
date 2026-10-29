@@ -10,6 +10,7 @@ import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targ
 import { useApp } from "../../store";
 import { Section, TextLink } from "./Form";
 import { ProxyEditor } from "./ProxyEditor";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 function effectiveText(view: ProfileProxyView, t: ReturnType<typeof useI18n>["t"]): string {
   return view.effective.mode === "none"
@@ -26,6 +27,7 @@ function effectiveText(view: ProfileProxyView, t: ReturnType<typeof useI18n>["t"
  * (redacted; under 不使用代理 the remembered one 手动 restores) and what is in effect. Click → the 代理 section.
  */
 export function ProfileProxySummary({ detail }: { detail: ProfileDetail }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const features = useTargetFeatures();
   const view: ProfileProxyView | undefined = detail.proxy;
@@ -40,7 +42,7 @@ export function ProfileProxySummary({ detail }: { detail: ProfileDetail }) {
       <button
         type="button"
         data-profile-proxy-summary={view.mode}
-        onClick={() => document.getElementById("profile-proxy")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+        onClick={() => win.document.getElementById("profile-proxy")?.scrollIntoView({ behavior: "smooth", block: "start" })}
         className="min-w-0 truncate text-left font-mono hover:text-accent"
         title={parts.join(" · ")}
       >
@@ -60,8 +62,8 @@ export function ProfileProxy({ profile, detail, onSaved }: { profile: string; de
   if (!features.has(PROFILE_PROXY_FEATURE) || !view) return null;
   const effective = effectiveText(view, t);
   return (
-    <Section id="profile-proxy" title={t("proxy.profile.title")} hint={t("proxy.profile.hint")}>
-      <ProxyEditor<ProfileProxyMode>
+    <Section id="profile-proxy"  title={t("proxy.profile.title")} hint={<>{t("proxy.profile.hint")}<span className="block">{t("settings.profileTiming.proxy")}</span></>}>
+      <ProxyEditor<ProfileProxyMode> agents="hostNowRuntimeNext" source="host"
         label={t("proxy.modeLabel")}
         modes={[
           { value: "inherit", label: t("proxy.mode.inherit") },

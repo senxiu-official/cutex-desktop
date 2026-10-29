@@ -1,8 +1,8 @@
 // Geometry of the two gutters beside the reading column (docs/desktop-modules.md §19.2; RFC §7.2).
 // Pure: the conversation card's width, the reading width and the right side's frame → where the
 // column sits and how wide each gutter is, where its triggers go and which bands the capsule takes.
-// Mirrors the `.side-col` CSS (styles.css): margin-left = max(0, min((C + shift − R) / 2, C − R)),
-// so 并排 / 让位 / 悬浮 need no mode input — 让位 is the shift, 悬浮 / the drawer the covered part.
+// Mirrors the `.side-col` CSS (styles.css): the column is centred in its own card, margin-left =
+// max(0, (C − R) / 2), so 并排 / 悬浮 need no mode input — 悬浮 / the drawer is the covered part.
 
 /** The reading column's own horizontal padding (px-6): blank too, triggers and popovers may use it. */
 export const COLUMN_PADDING = 24;
@@ -24,8 +24,6 @@ export const MARGIN_MAX = 320;
 export interface GutterInput {
   /** The conversation card's content width (the scroller's client width), px. */
   cardWidth: number;
-  /** --side-shift (让位): the right side's in-flow width beyond its closed width. 0 otherwise. */
-  shift: number;
   /** 悬浮 / narrow drawer: px of the card's right part covered by the side (0 otherwise). */
   sideCover: number;
   /** appearance.readingWidth; 0 = full width (no gutters). */
@@ -60,7 +58,7 @@ export function gutterLayout(i: GutterInput): GutterGeometry {
   const card = Math.max(0, i.cardWidth);
   const full = !(i.readingWidth > 0);
   const columnWidth = full ? card : Math.min(i.readingWidth, card);
-  const columnLeft = full ? 0 : Math.max(0, Math.min((card + Math.max(0, i.shift) - i.readingWidth) / 2, card - i.readingWidth));
+  const columnLeft = full ? 0 : Math.max(0, (card - i.readingWidth) / 2);
   const shown = i.conversationVisible && !full && card > 0;
   const leftWidth = shown ? Math.floor(columnLeft) : 0;
   const rightWidth = shown ? Math.max(0, Math.floor(card - columnLeft - columnWidth - Math.max(0, i.sideCover))) : 0;
@@ -194,4 +192,24 @@ export function peekPlacement(i: { x0: number; width: number; top: number; botto
     if (area(beside, narrowed) > area(below, i.width)) return { ...beside, width: narrowed };
   }
   return best;
+}
+
+/** The top entries' strip margin from the card's edge (px, `left-2` / `right-2`). */
+export const TOP_STRIP_INSET = 8;
+
+/**
+ * How a side's top entries (搜索 / 书签 / 批注) show (owner 2026-10-21: in a narrow column the strip wrapped
+ * into a stack over the text). Always one row: `beside` = in the gutter, clear of the reading column's text;
+ * `row` = over the column's top (the conversation then starts the timeline below it, in flow: nothing scrolls
+ * under it); `compact` = not even one row fits in its half of the card — a single button whose popover holds
+ * the entries. `natural`: the strip's one-row width (px). Pure; tested.
+ */
+export function topStripMode(i: { side: "left" | "right"; natural: number; cardWidth: number; geometry: GutterGeometry; padding?: number }): "beside" | "row" | "compact" {
+  const padding = i.padding ?? COLUMN_PADDING;
+  const g = i.geometry;
+  const textLeft = g.columnLeft + padding;
+  const textRight = g.columnLeft + g.columnWidth - padding;
+  const beside = i.side === "left" ? TOP_STRIP_INSET + i.natural <= textLeft - 4 : i.cardWidth - TOP_STRIP_INSET - i.natural >= textRight + 4;
+  if (g[i.side].width > 0 && beside) return "beside";
+  return i.natural <= i.cardWidth / 2 - 2 * TOP_STRIP_INSET ? "row" : "compact";
 }

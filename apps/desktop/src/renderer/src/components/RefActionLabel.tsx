@@ -8,7 +8,7 @@ export function RefActionLabel({ entry, cref }: { entry: AppSlotEntry<"ref.actio
   const { t } = useI18n();
   const state = entry.item.useState?.(cref) ?? null;
   return (
-    <span className={state?.disabledReason ? "opacity-50" : undefined} title={state?.disabledReason}>
+    <span className={state?.disabledReason ? "opacity-50" : undefined} title={state?.tooltip ?? state?.disabledReason}>
       {t(state?.titleKey ?? entry.item.titleKey)}
       {state?.active && <span className="ml-1.5 text-accent">✓</span>}
     </span>

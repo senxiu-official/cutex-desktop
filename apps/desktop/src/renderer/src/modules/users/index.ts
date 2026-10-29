@@ -13,7 +13,12 @@ import { USERS_FEATURE } from "../../../../shared/users";
 import { defineModule } from "../slots";
 import { ProjectUsersTab } from "./ProjectUsersTab";
 import { DEVICES_ANCHOR, PEERS_ANCHOR, USERS_ANCHOR } from "./shared";
-import { UsersDevicesPart, UsersPeersPart, UsersPeoplePart } from "./UsersPage";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const UsersPeoplePart = lazyPage(() => import("./UsersPage").then((m) => m.UsersPeoplePart));
+const UsersDevicesPart = lazyPage(() => import("./UsersPage").then((m) => m.UsersDevicesPart));
+const UsersPeersPart = lazyPage(() => import("./UsersPage").then((m) => m.UsersPeersPart));
 
 export default defineModule({
   id: "users",

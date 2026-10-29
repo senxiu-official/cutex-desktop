@@ -31,8 +31,8 @@ function NoteRows({ notes, onPick }: { notes: Note[]; onPick(id: string): void }
     return <button key={note.id} data-note-row={note.id} onClick={() => onPick(note.id)} className="flex w-full min-w-0 items-start gap-2 rounded-lg px-2 py-2 text-left hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent">
       <StickyNote size={13} className={`mt-0.5 shrink-0 ${note.anchor?.turnId ? "text-accent" : "text-subtle"}`} />
       <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 items-baseline gap-2"><span className="min-w-0 flex-1 truncate text-xs font-medium">{note.title || t("notes.untitled")}</span>{Number.isFinite(updated) && <span className="shrink-0 text-[10.5px] text-subtle" title={formatAbsolute(updated)}>{formatWhen(updated, now, locale)}</span>}</span>
-        <span className="mt-0.5 line-clamp-2 text-[11px] [overflow-wrap:anywhere] text-subtle">{note.body.slice(0, 200)}</span>
+        <span className="flex min-w-0 items-baseline gap-2"><span className="min-w-0 flex-1 truncate text-xs font-medium">{note.title || t("notes.untitled")}</span>{Number.isFinite(updated) && <span className="shrink-0 text-caption/[inherit] text-subtle" title={formatAbsolute(updated)}>{formatWhen(updated, now, locale)}</span>}</span>
+        <span className="mt-0.5 line-clamp-2 text-caption/[inherit] [overflow-wrap:anywhere] text-subtle">{note.body.slice(0, 200)}</span>
       </span>
     </button>;
   })}</>;
@@ -69,10 +69,10 @@ function NotesGutterBody({ hostId, sessionId, close }: GutterBodyProps) {
       {!groups.current.length && (current.loading ? <p className="p-2 text-xs text-subtle">{t("notes.loading")}</p> : <div className="flex flex-col items-center gap-1.5 px-4 py-5 text-center">
         <NotebookPen size={18} className="text-subtle" aria-hidden />
         <p className="text-xs text-muted">{t("notes.empty")}</p>
-        <p className="text-[11px] text-subtle">{t("notes.emptyHint")}</p>
+        <p className="text-caption/[inherit] text-subtle">{t("notes.emptyHint")}</p>
       </div>)}
       <NoteRows notes={groups.current} onPick={setNoteId} />
-      {!!groups.project.length && <><h4 className="px-2 pt-2 text-[11px] text-subtle">{t("notes.projectSelected")}</h4><NoteRows notes={groups.project} onPick={setNoteId} /></>}
+      {!!groups.project.length && <><h4 className="px-2 pt-2 text-caption/[inherit] text-subtle">{t("notes.projectSelected")}</h4><NoteRows notes={groups.project} onPick={setNoteId} /></>}
       {projectId && project.error && <p role="alert" className="break-words p-2 text-xs text-danger">{noteErrorText(project.error, t)}</p>}
     </div>}
   </div>;

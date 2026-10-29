@@ -1,0 +1,37 @@
+// English strings of ./i18n.ts, apart from the zh-CN source so they stay out of the entry chunk: they load with the
+// en catalog (i18n/index.tsx), only when the UI or a search needs English (0.2.0 beta perf audit, 2026-10-24).
+import type { zhCN } from "./i18n";
+
+export const en: Record<keyof typeof zhCN, string> = {
+  "about.title": "About & known issues",
+  "about.description": "Settings → About: known issues, changelog, project links and license",
+  "about.links.section": "Project",
+  "about.source": "Source code",
+  "about.sourceHint": "If it's useful to you, a star on GitHub helps",
+  "about.star": "⭐ Star on GitHub",
+  "about.installHint": "Installing, updating and what each module does",
+  "about.open": "Open",
+  "about.license": "License",
+  "about.licenseHint": "Cutex desktop is open source under the Apache License 2.0",
+  "about.onGithub": "View on GitHub",
+  "about.link.github": "GitHub",
+  "about.link.changelog": "Changelog",
+  "about.link.install": "Install guide",
+  "about.link.knownIssues": "Known issues doc",
+  "about.knownIssues": "Known issues",
+  "about.knownIssuesHint": "Known issues of the current versions; fixed ones leave this list",
+  "about.sourceGithub": "Updated {time} from GitHub",
+  "about.sourceGithubStale": "Updated {time} from GitHub (a later refresh failed; showing that list)",
+  "about.sourceBuiltin": "Built-in list (the latest list could not be fetched from GitHub yet)",
+  "about.noIssues": "No known issues for this version",
+  "about.fixedIn": "Fix planned: {version}",
+  "about.workaround": "Workaround: {text}",
+  "about.changelog": "Changelog",
+  "about.changelogHint": "What each version of this desktop app brought (shipped with the app, works offline)",
+  "about.changelog.keywords": "changelog release notes version history what's new",
+  "about.changelog.installed": "Installed",
+  "about.changelog.new": "New",
+  "about.changelog.empty": "This build has no changelog bundled",
+  "about.thirdParty": "Third-party licenses",
+  "about.thirdPartyHint": "Some UI code is adapted from ZCode (Apache-2.0); also includes OpenAI Codex (Apache-2.0), Lobe Icons (MIT) and more — see NOTICE and THIRD_PARTY_NOTICES.md in the app folder",
+};

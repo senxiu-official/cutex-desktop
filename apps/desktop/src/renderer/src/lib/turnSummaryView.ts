@@ -2,8 +2,8 @@
 // not change are checked through the host file read before they show) and what a click on a file or
 // link does (side-pane preview, browser, show in folder, copy).
 import { createElement, useEffect, useMemo, useState } from "react";
-import { Copy, ExternalLink, FileText, FolderOpen, type LucideIcon } from "lucide-react";
-import { api, apiFor } from "../bridge";
+import { Copy, ExternalLink, FileText, type LucideIcon } from "lucide-react";
+import { api } from "../bridge";
 import { useI18n } from "../i18n";
 import { hostApi, useApp } from "../store";
 import { convNotify, useConvFeatures, useConvHost, useConvScope, useConvSidebar } from "./conversationScope";
@@ -14,7 +14,8 @@ import { copyText, outsideFileMenu } from "./menus";
 import type { OpenModifiers } from "./openModifiers";
 import type { TurnLink } from "./turnSummary";
 import { HOST_FILE_READ_FEATURE, resolveFileHref, rootFor, scopeFor } from "./workspace";
-import { openFile, openHostFile } from "./sideOpen";
+import { openHostPath, openPath } from "./sideOpen";
+import { fileActions } from "./fileActions";
 
 const icon = (Icon: LucideIcon) => createElement(Icon, { size: 14 });
 
@@ -79,7 +80,8 @@ export function useFileActions(sessionId: string): (path: string) => FileActions
   // The conversation's host (lib/conversationScope).
   const sidebar = useConvSidebar();
   const hostRead = useConvFeatures().has(HOST_FILE_READ_FEATURE);
-  const remote = useConvHost() !== LOCAL_HOST_ID;
+  const hostId = useConvHost();
+  const remote = hostId !== LOCAL_HOST_ID;
   const conv = useConvScope();
   return useMemo(() => {
     const scope = scopeFor(sidebar, sessionId);
@@ -89,22 +91,21 @@ export function useFileActions(sessionId: string): (path: string) => FileActions
       const rel = ref?.rel ?? null;
       const abs = ref?.abs ?? null;
       const app = useApp.getState();
-      const preview = rel && scope ? (mods?: OpenModifiers) => void openFile(rel, null, "link", mods) : hostRead && abs ? (mods?: OpenModifiers) => void openHostFile(abs, null, mods) : null;
+      const preview = rel && scope ? (mods?: OpenModifiers) => void openPath(rel, null, "link", mods) : hostRead && abs ? (mods?: OpenModifiers) => void openHostPath(abs, null, mods) : null;
       const full = abs ?? path;
       const menu = (): MenuEntry[] => [
         preview && { label: t("conversation.turnSummary.sidePreview"), icon: icon(FileText), onSelect: () => preview() },
-        !remote && abs && { label: t("conversation.turnSummary.reveal"), icon: icon(FolderOpen), onSelect: () => void apiFor(LOCAL_HOST_ID).revealPath(abs).catch((e: unknown) => convNotify(conv, e instanceof Error ? e.message : String(e), "error")) },
-        { label: t("conversation.turnSummary.copyPath"), icon: icon(Copy), onSelect: () => copyText(full) },
+        ...fileActions({ hostId, path: full, copyLabel: t("conversation.turnSummary.copyPath") }, t),
       ];
       return {
         display: rel ?? path,
         abs,
         preview,
-        open: (el, mods) => (preview ? preview(mods) : openMenuFrom(el, ref ? outsideFileMenu(ref, full, remote, t, null) : menu())),
+        open: (el, mods) => (preview ? preview(mods) : openMenuFrom(el, ref ? outsideFileMenu(ref, full, remote, t, null, hostId) : menu())),
         menu,
       };
     };
-  }, [sidebar, sessionId, hostRead, remote, t, conv]);
+  }, [sidebar, sessionId, hostRead, remote, t, conv, hostId]);
 }
 
 /** Default click and 打开方式 entries of a picked link. */

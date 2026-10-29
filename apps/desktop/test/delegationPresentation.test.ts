@@ -6,7 +6,8 @@ import type { RawItem } from "../src/renderer/src/lib/timeline";
 import { agentDelegations } from "../src/renderer/src/lib/delegations";
 import { en } from "../src/renderer/src/i18n/en";
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";
-import { en as moduleEn, zhCN as moduleZh } from "../src/renderer/src/modules/delegations/i18n";
+import { zhCN as moduleZh } from "../src/renderer/src/modules/delegations/i18n";
+import { en as moduleEn } from "../src/renderer/src/modules/delegations/i18n.en";
 
 const state = vi.hoisted(() => ({ locale: "zh-CN", offline: true, record: null as AskSummary | null }));
 const catalogs: Record<string, Record<string, string>> = { en: { ...en, ...moduleEn }, "zh-CN": { ...zhCN, ...moduleZh } };
@@ -24,6 +25,7 @@ vi.mock("../src/renderer/src/lib/delegationsView", () => ({
   useOwnerSteered: () => false,
 }));
 vi.mock("../src/renderer/src/lib/delegationStore", () => ({ hasDelegationViews: () => true }));
+vi.mock("../src/renderer/src/lib/quotaContinue", () => ({ useQuotaContinue: () => null, continueClock: () => "" }));
 vi.mock("../src/renderer/src/lib/p2Access", () => ({ useP2Access: () => ({ files: true, attachments: true, delegations: true, owner: true }) }));
 vi.mock("../src/renderer/src/lib/delegationMenu", () => ({ delegationMenu: vi.fn(), runDelegationCommand: vi.fn() }));
 vi.mock("../src/renderer/src/lib/focusRequest", () => ({ focusDelegation: vi.fn(), focusTurn: vi.fn() }));

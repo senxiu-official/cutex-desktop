@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Globe, LoaderCircle, ShieldAlert, ShieldX, X } from "lucide-react";
 import type { BrowserTurnShot } from "../../../../shared/browser";
+import type { MessageImage } from "../../../../shared/input";
+import { ImageThumb } from "../../components/ImageThumbs";
 import { browserErrorKey } from "./browserState";
 import { bridge } from "../../bridge";
 import { useI18n } from "../../i18n";
@@ -10,6 +12,7 @@ import type { TurnAttachmentProps } from "../slots";
 import { useTimelineContext } from "../timelineItemsView";
 import { afterBrowserHostsDelivered, browserHostCurrent, useBrowserHostEpoch } from "./hosts";
 import { browserLoadedToolItem, browserTimelineImage, browserTimelineRefusalKey, browserToolView, browserTurnShots, isBrowserTool } from "./browserTimeline";
+import { useUserLayoutToggle } from "../../lib/userLayoutToggle";
 
 function Screenshot({ src }: { src: string }) {
   const { t } = useI18n();
@@ -23,9 +26,19 @@ function Screenshot({ src }: { src: string }) {
     }} />;
 }
 
+function ToolScreenshot({ image, hostId }: { image: MessageImage; hostId: string }) {
+  const { t } = useI18n();
+  if (image.kind === "url") return <Screenshot key={image.url} src={image.url} />;
+  const unavailable = <p className="mt-1 text-xs text-subtle">{t("browser.timeline.imageUnavailable")}</p>;
+  if (image.kind !== "blob") return unavailable;
+  return <ImageThumb key={image.blob.blobId} image={image} hostId={hostId} title={t("browser.timeline.screenshot")}
+    className="mt-1 block max-w-full" imgClassName="max-h-80 max-w-full rounded border border-border object-contain" fallback={unavailable} />;
+}
+
 /** Browser tool output has no raw-JSON fallback: summaries cannot reveal filled values. */
 function ToolRow({ item, sessionId, hostId, epoch }: { item: RawItem; sessionId: string; hostId: string; epoch: string | null }) {
   const { t } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const turnId = useApp(state => viewOf(state, hostId, sessionId)?.timeline.entries.get(item.id)?.turnId ?? null);
   const [full, setFull] = useState<RawItem | null>(null);
   const [loading, setLoading] = useState(false);
@@ -45,7 +58,7 @@ function ToolRow({ item, sessionId, hostId, epoch }: { item: RawItem; sessionId:
       if (token !== generation.current || !browserHostCurrent(hostId, epoch)) return;
       const loaded = browserLoadedToolItem(reply, item);
       if (!loaded) throw new Error("invalid_result");
-      setFull(loaded);
+      userToggle(() => setFull(loaded));
     } catch (error) { if (token === generation.current) setFailed(browserErrorKey(error)); }
     finally { if (token === generation.current) setLoading(false); }
   };
@@ -60,8 +73,8 @@ function ToolRow({ item, sessionId, hostId, epoch }: { item: RawItem; sessionId:
       {model.title && <span className="shrink-0 text-subtle">{t(model.summary)}</span>}
       {approval && <span className="shrink-0">· {t(approval === "required" ? "tool.approvalRequired" : "tool.declined")}</span>}
     </div>
-    {model.errorCode && <p className={`ml-5 text-[11px] ${approval ? "text-subtle" : "text-danger"}`}>{t(browserTimelineRefusalKey(model.errorCode) ?? browserErrorKey(model.errorCode))}</p>}
-    {model.image && <Screenshot key={model.image} src={model.image} />}
+    {model.errorCode && <p className={`ml-5 text-caption/[inherit] ${approval ? "text-subtle" : "text-danger"}`}>{t(browserTimelineRefusalKey(model.errorCode) ?? browserErrorKey(model.errorCode))}</p>}
+    {model.image && <ToolScreenshot image={model.image} hostId={hostId} />}
     {model.imageState === "not-loaded" && !failed && <button type="button" onClick={() => void load()}
       disabled={loading || !turnId || !epoch} className="mt-1 flex items-center gap-1 text-accent enabled:hover:underline disabled:text-subtle">
       <Camera size={12} />{t(loading ? "browser.timeline.loading" : "browser.timeline.loadImage")}
@@ -79,13 +92,14 @@ export function BrowserToolRow({ item, sessionId }: { item: RawItem; sessionId: 
 
 function TurnShot({ shot, hostId, epoch }: { shot: BrowserTurnShot; hostId: string; epoch: string }) {
   const { t } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const [src, setSrc] = useState<string | null>(null), [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false), [failed, setFailed] = useState<ReturnType<typeof browserErrorKey> | null>(null);
   const generation = useRef(0);
   useEffect(() => () => { generation.current++; }, []);
   const show = async () => {
     if (loading) return;
-    if (open) { setOpen(false); setSrc(null); return; }
+    if (open) { userToggle(() => { setOpen(false); setSrc(null); }); return; }
     const token = ++generation.current;
     setLoading(true); setFailed(null);
     try {
@@ -96,7 +110,7 @@ function TurnShot({ shot, hostId, epoch }: { shot: BrowserTurnShot; hostId: stri
       if (token !== generation.current || !browserHostCurrent(hostId, epoch)) return;
       const image = reply.mimeType === shot.mimeType ? browserTimelineImage(reply.mimeType, reply.data) : null;
       if (!image) throw new Error("invalid_result");
-      setSrc(image); setOpen(true);
+      userToggle(() => { setSrc(image); setOpen(true); });
     } catch (error) { if (token === generation.current) setFailed(browserErrorKey(error)); }
     finally { if (token === generation.current) setLoading(false); }
   };
@@ -149,7 +163,7 @@ function TurnShots({ hostId, sessionId, turnId, where, width, epoch }: TurnAttac
   return <section className="my-1 space-y-1 rounded-md border border-border bg-surface p-2 text-xs" style={where === "margin" ? { width } : undefined}
     aria-label={t("browser.timeline.turnShots")} data-browser-turn-shots={turnId}>
     <p className="font-medium text-muted">{t("browser.timeline.turnShots")}</p>
-    <p className="text-[11px] text-subtle">{t("browser.timeline.ownerOnly")}</p>
+    <p className="text-caption/[inherit] text-subtle">{t("browser.timeline.ownerOnly")}</p>
     {shots.map(shot => <TurnShot key={shot.id} shot={shot} hostId={hostId} epoch={epoch} />)}
   </section>;
 }

@@ -7,6 +7,8 @@
 import { ARTIFACT_PUBLISHED_EVENT, ARTIFACT_SHOW_FEATURE, ARTIFACT_SHOW_REQUESTED_EVENT, ARTIFACT_UPDATED_EVENT, ARTIFACTS_FEATURE, artifactLink, artifactRef, parseArtifactRef, type ArtifactCandidate, type ArtifactContent, type ArtifactDetail, type ArtifactKind, type ArtifactProducer, type ArtifactResolveItem, type ArtifactScope, type ArtifactSummary, type ArtifactVersion } from "../../../../shared/artifactStore";
 import type { DesktopApi } from "../../../../shared/ipc";
 import type { MockCore, ModuleMock } from "../../dev/mockTypes";
+// The decision form using the page API (window.cutexPage: autosave + 发给智能体), docs/design/004.
+import DECIDE_PAGE from "./mockPages/decide-0.2.html?raw";
 
 const ROOT = "D:\\Research\\demo";
 const SCOPE: ArtifactScope = { kind: "project", id: "demo" };
@@ -21,6 +23,47 @@ const DRAFT = "af-d4a7b1e9c3f5082e6a4d1c7b9e3f5a20";
 const ACCEPT = "af-7c3e9a1b5d2f4086e1a9c7b3d5f2e480";
 const DOODLE = "af-7d00d1e0a1b2c3d4e5f60718293a4b5c";
 const SUMMARY_PDF = "af-9a8b7c6d5e4f30211203f4e5d6c7b8a9";
+const DECIDE = "af-dec1de02000000000000000000000004";
+/**
+ * `?bigpng`: a print-size PNG (about 4000×6000 px, 3–4 MB), drawn on first read — the artifact-view freeze check.
+ * `?bigpng=<url>` serves that file instead (e.g. a 16-bit or interlaced PNG via vite's /@fs/ path).
+ */
+const POSTER = "af-b16b16b16000000000000000000000f5";
+const BIG_PNG = typeof location !== "undefined" && new URLSearchParams(location.search).has("bigpng");
+let posterB64: Promise<string> | null = null;
+function posterPng(): Promise<string> {
+  return (posterB64 ??= (async () => {
+    const given = new URLSearchParams(location.search).get("bigpng");
+    if (given) return toBase64(new Uint8Array(await (await fetch(given)).arrayBuffer()));
+    const w = 4000, h = 6000;
+    const canvas = new OffscreenCanvas(w, h);
+    const g = canvas.getContext("2d")!;
+    // Flat fills (a canvas gradient is dithered: noise everywhere, a far bigger PNG).
+    g.fillStyle = "#f4efe6";
+    g.fillRect(0, 0, w, h);
+    g.fillStyle = "#c9d6e8";
+    g.fillRect(0, h / 2, w, h / 2);
+    // Noise bands keep the PNG from compressing to nothing (a scanned / printed figure).
+    const band = g.createImageData(w, 80);
+    let seed = 7;
+    for (let i = 0; i < band.data.length; i += 4) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      const v = 150 + (seed % 90);
+      band.data[i] = v; band.data[i + 1] = v - 20; band.data[i + 2] = v - 40; band.data[i + 3] = 255;
+    }
+    for (let y = 300; y < h; y += 1000) g.putImageData(band, 0, y);
+    g.fillStyle = "#1d2b44";
+    g.font = "bold 320px sans-serif";
+    g.fillText("POSTER 180×271", 260, 900);
+    const blob = await canvas.convertToBlob({ type: "image/png" });
+    return toBase64(new Uint8Array(await blob.arrayBuffer()));
+  })());
+}
+function toBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const bytes = (text: string) => new TextEncoder().encode(text).length;
@@ -192,7 +235,7 @@ function version(artifactId: string, n: number, text: string, mediaType: string,
 function seed(): Map<string, Stored> {
   const writer = (turn: string, ask: string | null = null) => agent("demo-done", "demo-writer", turn, ask);
   const stats = (turn: string) => agent("demo-idle2", "demo-stats", turn);
-  const make = (artifactId: string, name: string, kind: ArtifactKind, versions: (ArtifactVersion & { text: string })[], extra: Partial<Stored["summary"]> = {}): [string, Stored] => [
+  const make = (artifactId: string, name: string, kind: ArtifactKind, versions: MockVersion[], extra: Partial<Stored["summary"]> = {}): [string, Stored] => [
     artifactId,
     { summary: { artifactId, scope: SCOPE, name, kind, revision: versions.length, starred: false, archivedAt: null, createdAt: versions[0]!.createdAt, updatedAt: versions[versions.length - 1]!.createdAt, ...extra }, versions },
   ];
@@ -221,11 +264,20 @@ function seed(): Map<string, Stored> {
     ]),
     make(HANDOFF, "handoff/notes.md", "handoff", [version(HANDOFF, 1, HANDOFF_TEXT, "text/markdown", "handoff/notes.md", auto("unknown", []), ago(8))]),
     make(DOODLE, "figures/dose-response.html", "figure", [version(DOODLE, 1, doodle(1), "text/html", "figures/dose-response.html", writer("demo-t10"), ago(3), { note: "interactive sketch" })]),
+    make(DECIDE, "reviews/decide-0.2.html", "plan", [version(DECIDE, 1, DECIDE_PAGE, "text/html", "reviews/decide-0.2.html", writer("demo-t9"), ago(6), { note: "0.2 checklist — answers autosave, 发给智能体 sends them back" })]),
     make(SUMMARY_PDF, "reports/dose-response-summary.pdf", "report", [
       binaryVersion(version(SUMMARY_PDF, 1, tinyPdf(["Dose-response summary", "Generated in the browser preview (mock artifact).", "Pooled slope 0.42 per mg; see table2.csv."]), "application/pdf", "reports/dose-response-summary.pdf", writer("demo-t9"), ago(20), { note: "PDF export of the report" })),
     ]),
     make(ACCEPT, "reviews/a1-acceptance.txt", "report", [version(ACCEPT, 1, ACCEPT_TEXT, "text/plain", "reviews/a1-acceptance.txt", writer("demo-t9"), ago(23), { note: "A1 tail sensitivity Director acceptance" })]),
     make(DRAFT, "reports/old-draft.md", "report", [version(DRAFT, 1, DRAFT_TEXT, "text/markdown", "reports/old-draft.md", writer("demo-t4"), ago(300))], { archivedAt: ago(100) }),
+    // `?projectview` (modules/project-view/mock.ts): two results of the cutex-dev project.
+    ...(BIG_PNG ? [make(POSTER, "figures/poster-print.png", "figure", [{ ...version(POSTER, 1, "", "image/png", "figures/poster-print.png", writer("demo-t12"), ago(2), { note: "print size 180×271 mm" }), b64: true as const, bytes: 3_560_000 }])] : []),
+    ...(typeof location !== "undefined" && new URLSearchParams(location.search).has("projectview")
+      ? [
+          make("af-a1b2c3d4e5f60718293a4b5c6d7e8f90", "docs/release/r251.md", "report", [version("af-a1b2c3d4e5f60718293a4b5c6d7e8f90", 1, "# r251\n\n- Shelf Rail\n- ⌘K quick switcher\n", "text/markdown", "docs/release/r251.md", agent("pv-rel", "release-bot", "pv-rel-t1"), ago(13))], { scope: { kind: "project", id: "cutex-dev" } }),
+          make("af-0f1e2d3c4b5a69788796a5b4c3d2e1f0", "shots/topbar-split/summary.md", "report", [version("af-0f1e2d3c4b5a69788796a5b4c3d2e1f0", 1, "# 顶栏拆分截图\n\n18 / 32 done.\n", "text/markdown", "shots/topbar-split/summary.md", agent("pv-qa", "ui-tester", "pv-qa-t1"), ago(7))], { scope: { kind: "project", id: "cutex-dev" } }),
+        ]
+      : []),
   ]);
 }
 
@@ -313,6 +365,18 @@ function writerThread() {
             { type: "userMessage", id: "scpw-u10", content: [{ type: "text", text: "各站点的剂量效应画个图给我看看，能切换柱状和折线。" }] },
             publishCall("scpw-p10", "figures/dose-response.html", DOODLE, 1, "interactive sketch"),
             { type: "agentMessage", id: "scpw-a10", text: `画好了：[dose-response.html v1](${artifactLink(artifactRef(DOODLE, 1))})，可以点「Resample」和切换柱状 / 折线。` },
+          ],
+        },
+        {
+          id: "demo-t12",
+          status: "completed",
+          startedAt: now - 160,
+          completedAt: now - 150,
+          items: [
+            { type: "userMessage", id: "scpw-u12", content: [{ type: "text", text: "0.2 的清单做成一个能点的表单给我。" }] },
+            publishCall("scpw-p12", "reviews/decide-0.2.html", DECIDE, 1, "0.2 checklist"),
+            { type: "agentMessage", id: "scpw-a12", text: `做好了：[decide-0.2.html v1](${artifactLink(artifactRef(DECIDE, 1))})。答案会自动保存；填完点「发给智能体」，确认后直接发回给我。` },
+            ...(BIG_PNG ? [{ type: "agentMessage", id: "scpw-a12b", text: `印刷版海报：[poster-print.png v1](${artifactLink(artifactRef(POSTER, 1))})` }] : []),
           ],
         },
       ],
@@ -407,7 +471,7 @@ function storeApi(store: Map<string, Stored>, home: ArtifactScope, homeSessions:
       const offset = opts?.offset ?? 0;
       const max = opts?.maxBytes ?? 262_144;
       if (v.b64) {
-        const bin = atob(v.text);
+        const bin = atob(v.text || (s!.summary.artifactId === POSTER ? await posterPng() : ""));
         const part = bin.slice(offset, offset + max);
         return { version: v.version, encoding: "base64", content: btoa(part), offset, totalBytes: bin.length, truncated: offset + part.length < bin.length, mediaType: v.mediaType, sha256: v.sha256, externalChanged: null };
       }

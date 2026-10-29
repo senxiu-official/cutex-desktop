@@ -2,21 +2,37 @@
 // the core mock bridge without clashes, and stays out of non-dev code (production bundles).
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PreloadBridge } from "../src/shared/ipc";
 import { accountState, claudeAccountOptions } from "../src/renderer/src/lib/claudeAccounts";
 
 const SRC = join(__dirname, "../src/renderer/src");
 const MODULES_DIR = join(SRC, "modules");
 
-async function install(search: string): Promise<PreloadBridge> {
-  vi.resetModules();
-  vi.useFakeTimers();
+// Every module's mock, loaded while the file is collected (it was the first test's first load: ~0.9 s alone).
+const { MODULE_MOCKS } = await import("../src/renderer/src/dev/mockModules");
+
+function stubs(search: string): { cutex?: PreloadBridge } {
   const win: { cutex?: PreloadBridge } = {};
   vi.stubGlobal("window", win);
   vi.stubGlobal("location", { search });
   vi.stubGlobal("document", { title: "" });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
+  return win;
+}
+
+// Each install() evaluates a fresh mock bridge (resetModules); the first also transformed it (~1.1 s alone, inside
+// that test's 5 s — a timeout risk under the full suite's load). One load before all fills the transform cache.
+beforeAll(async () => {
+  stubs("");
+  await import("../src/renderer/src/dev/mockBridge");
+  vi.unstubAllGlobals();
+}, 60_000);
+
+async function install(search: string): Promise<PreloadBridge> {
+  vi.resetModules();
+  vi.useFakeTimers();
+  const win = stubs(search);
   const { installMockBridge } = await import("../src/renderer/src/dev/mockBridge");
   installMockBridge();
   return win.cutex!;
@@ -30,7 +46,6 @@ afterEach(() => {
 describe("module mocks", () => {
   it("every modules/<id>/mock.ts is collected and exports `mock`", async () => {
     const dirs = readdirSync(MODULES_DIR).filter((d) => statSync(join(MODULES_DIR, d)).isDirectory() && readdirSync(join(MODULES_DIR, d)).includes("mock.ts"));
-    const { MODULE_MOCKS } = await import("../src/renderer/src/dev/mockModules");
     expect(MODULE_MOCKS.map((m) => m.id).sort()).toEqual(dirs.sort());
     for (const m of MODULE_MOCKS) expect(typeof m.mock, m.id).toBe("object");
     expect(dirs).toEqual(expect.arrayContaining(["delegations", "jobs", "owner-notify", "runtime-packages", "codex-config"]));
@@ -49,10 +64,11 @@ describe("module mocks", () => {
       for (const m of code.matchAll(/(?:from|import)\s*\(?\s*"([^"]+)"/g)) {
         const spec = m[1]!;
         if (isMock) {
-          // A module mock reaches the core only through MockCore: shared types / helpers and dev/mockTypes.
-          expect(spec.startsWith("../../../../shared/") || spec.startsWith("@cutex-desktop/") || spec === "../../dev/mockTypes", `${rel} imports ${spec}`).toBe(true);
+          // A module mock reaches the core only through MockCore: shared types / helpers and dev/mockTypes;
+          // its own raw fixtures (./mockPages/*?raw, e.g. a demo HTML page) are plain data.
+          expect(spec.startsWith("../../../../shared/") || spec.startsWith("@cutex-desktop/") || spec === "../../dev/mockTypes" || /^\.\/mockPages\/[^/]+\?raw$/.test(spec), `${rel} imports ${spec}`).toBe(true);
         } else {
-          const devOrMock = /(^|\/)mock$/.test(spec) || /(^|\/)dev\//.test(spec);
+          const devOrMock = /(^|\/)mock$/.test(spec) || /(^|\/)dev\//.test(spec) || /(^|\/)mockPages\//.test(spec);
           expect(devOrMock, `${rel} imports ${spec}`).toBe(rel === "bridge.ts" && spec === "./dev/mockBridge");
         }
       }
@@ -134,5 +150,24 @@ describe("module mocks", () => {
   it("?legacy: no claudeAccount on profiles", async () => {
     const api = (await install("?legacy")).api;
     expect((await api.listProfiles())!.profiles.every((p) => !("claudeAccount" in p))).toBe(true);
+  });
+
+  it.each(["?legacy", "?scope=read&profilelink", "?scope=chat&profilelink", "?nonowner&profilelink"])("%s: profile link metadata stays private", async (query) => {
+    const api = (await install(query)).api;
+    const item = (await api.listProfiles())!.profiles.find((profile) => profile.name === "claude")!;
+    expect(item.link).toBeUndefined();
+    expect(item.accountLinkState).toBeUndefined();
+    expect((await api.getProfile("claude")).accountLink).toBeUndefined();
+  });
+
+  it("profile link lifecycle exposes safe status and keeps owner-local rotation refusal explicit", async () => {
+    const api = (await install("?profilelink&linkerror=local")).api;
+    const before = await api.profileLinkState();
+    const reset = api.resetProfileLinks;
+    const after = await reset();
+    expect(after.secretId).not.toBe(before.secretId);
+    expect(Object.values(after.hosts).some((host) => host.code === "owner_local_required")).toBe(true);
+    expect(JSON.stringify(after)).not.toContain('"secret":');
+    expect((await api.syncProfileLinks()).secretId).toBe(after.secretId);
   });
 });

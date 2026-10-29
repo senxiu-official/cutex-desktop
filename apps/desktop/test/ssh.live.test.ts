@@ -60,7 +60,7 @@ describe.skipIf(!process.env.CUTEX_SSH_IT)("ssh plumbing (throwaway listeners)",
     const port = (fake.address() as { port: number }).port;
     const views: TunnelView[] = [];
     const pidFile = join(dir, "pids.json");
-    const tunnel = new SshTunnel({ target: parseSshTarget(`127.0.0.1:${port}`)!, remotePort: 24270, pids: new TunnelPidFile(pidFile), onChange: (v) => views.push(v), readyTimeoutMs: 10_000 });
+    const tunnel = new SshTunnel({ targets: [parseSshTarget(`127.0.0.1:${port}`)!], remotePort: 24270, pids: new TunnelPidFile(pidFile), onChange: (v) => views.push(v), readyTimeoutMs: 10_000 });
     tunnel.start();
     await vi.waitFor(() => expect(views.filter((v) => v.status === "retrying").length).toBeGreaterThanOrEqual(2), { timeout: 20_000, interval: 100 });
     const retries = views.filter((v) => v.status === "retrying");

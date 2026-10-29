@@ -1,16 +1,20 @@
 // Service helpers (non-component, kept out of components/ for Fast Refresh): opening a service,
 // its context menu, and grouping by project.
 import type { ProjectSummary } from "@cutex-desktop/protocol";
-import type { ServiceView } from "../../../shared/ipc";
+import type { ServicePatch, ServiceView, SidebarSnapshot } from "../../../shared/ipc";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
+import { SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE } from "../../../shared/servicesSettings";
 import { api, apiFor } from "../bridge";
 import type { MessageKey } from "../i18n";
 import { services } from "../modules/app";
 import { useApp } from "../store";
-import { confirmDialog, openMenuAt, type MenuEntry } from "./contextMenu";
+import { confirmDialog, promptDialog, type MenuEntry } from "./contextMenu";
+import type { ReactNode } from "react";
 import { hostData } from "./hostScope";
 import { copyText } from "./menus";
 import { sideShowsHost } from "./sideServices";
+import { refActionEntries } from "./refActions";
+import { claimProjectChoices, scopePatch, serviceMayManage, serviceScope } from "./projectServices";
 
 type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
@@ -51,39 +55,97 @@ export async function openServiceExternal(s: Pick<ServiceView, "slug">, hostId =
   await api.openExternal(path === "/" ? base : new URL(path.replace(/^\/+/, ""), base.endsWith("/") ? base : `${base}/`).href);
 }
 
-// Where the last pointer press was, so a follow-up menu (owner picker) opens at the same spot.
-let lastPointer = { x: 200, y: 200 };
-if (typeof window !== "undefined") window.addEventListener("pointerdown", (e) => (lastPointer = { x: e.clientX, y: e.clientY }), true);
-
-function ownerPicker(s: ServiceView, t: T, run: (fn: () => Promise<unknown>) => void, hostId: string | undefined): MenuEntry[] {
-  // Owners are agents of the service's own host.
-  const agents = hostData(useApp.getState(), hostId ?? focusId())?.sidebar?.active ?? [];
-  const api = daemonOf(hostId);
-  return [
-    ...agents.map((a) => ({ label: `${a.cutexSessionId === s.ownerCutexSessionId ? "✓ " : ""}${a.displayName}`, onSelect: () => run(() => api.patchService(s.slug, { ownerCutexSessionId: a.cutexSessionId })) })),
-    s.ownerCutexSessionId && "separator",
-    s.ownerCutexSessionId && { label: t("services.clearOwner"), onSelect: () => run(() => api.patchService(s.slug, { ownerCutexSessionId: null })) },
-  ];
-}
-
-export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, toggleLogs?: () => void, hostId?: string): MenuEntry[] {
+export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, toggleLogs?: () => void, hostId?: string, toggleOrganize?: () => void, organization: MenuEntry[] = [], ownerFlyout?: ReactNode): MenuEntry[] {
   const api = daemonOf(hostId);
   const run = (fn: () => Promise<unknown>) => void fn().catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)));
   // Only `managed` services run under cutex; `external` and `static` (files cutex serves) have nothing to start or stop — cutex answers 409 not_supervised.
   const supervised = s.runtime === "managed";
   const running = s.health === "reachable" || s.health === "starting";
+  const supportsTtl = hostData(useApp.getState(), hostId ?? focusId())?.features.has(SERVICES_EPHEMERAL_TTL_FEATURE) ?? false;
+  const supportsOrganize = hostData(useApp.getState(), hostId ?? focusId())?.features.has(SERVICES_ORGANIZE_FEATURE) ?? false;
+  const host = hostData(useApp.getState(), hostId ?? focusId());
+  // An agent view says whether it may manage the service (`youMayManage`); the owner's list leaves it out (manages all).
+  const manage = serviceMayManage(s);
+  const scopeRows = manage && !s.archived && (host?.features.has(SERVICES_PROJECT_SCOPE_FEATURE) ?? false) ? serviceScopeEntries(s, t, host?.sidebar, (patch) => run(() => api.patchService(s.slug, patch))) : [];
+  const currentTtl = s.effectiveIdleTtlMinutes ?? Number.POSITIVE_INFINITY;
+  const ttlChoices = [30, 120, 480, 1440].filter((minutes) => minutes > currentTtl && minutes <= (s.maxIdleTtlMinutes ?? 1440));
   return [
-    { label: t("services.open"), onSelect: () => run(() => openService(s, hostId)) },
-    { label: t("services.openExternal"), onSelect: () => run(() => openService(s, hostId, "/", { external: true })) },
-    { label: t("services.copyUrl"), onSelect: () => copyText(s.url) },
-    { label: t("services.changeOwner"), onSelect: () => setTimeout(() => openMenuAt(lastPointer.x, lastPointer.y, ownerPicker(s, t, run, hostId)), 0) },
-    supervised && "separator",
-    supervised && running && { label: t("services.stop"), onSelect: () => run(() => api.serviceAction(s.slug, "stop")) },
-    supervised && !running && { label: t("services.start"), onSelect: () => run(() => api.serviceAction(s.slug, "start")) },
-    supervised && running && { label: t("services.restart"), onSelect: () => run(() => api.serviceAction(s.slug, "restart")) },
-    supervised && toggleLogs && { label: t("services.logs"), onSelect: toggleLogs },
-    "separator",
-    {
+    !s.archived && { label: t("services.open"), onSelect: () => run(() => openService(s, hostId)) },
+    !s.archived && { label: t("services.openExternal"), onSelect: () => run(() => openService(s, hostId, "/", { external: true })) },
+    !s.archived && { label: t("services.copyUrl"), onSelect: () => copyText(s.url) },
+    // The owner picker is the flyout (components/ServiceOwnerFlyout): the service's own host, searchable,
+    // bounded, project members first — not a flat menu of the host's every session (owner bug 2026-10-28).
+    manage && ownerFlyout !== undefined && { label: t("services.changeOwner"), flyout: ownerFlyout, onSelect: () => {} },
+    ...scopeRows,
+    supervised && manage && !s.archived && "separator",
+    supervised && manage && !s.archived && running && { label: t("services.stop"), onSelect: () => run(() => api.serviceAction(s.slug, "stop")) },
+    supervised && manage && !s.archived && !running && { label: t("services.start"), onSelect: () => run(() => api.serviceAction(s.slug, "start")) },
+    supervised && manage && !s.archived && running && { label: t("services.restart"), onSelect: () => run(() => api.serviceAction(s.slug, "restart")) },
+    supervised && !s.archived && toggleLogs && { label: t("services.logs"), onSelect: toggleLogs },
+    supportsTtl && manage && s.lifetime === "ephemeral" && "separator",
+    supportsTtl &&
+      manage &&
+      s.lifetime === "ephemeral" && {
+        label: s.pinned ? t("services.keepPinned.on") : t("services.keepPinned.off"),
+        info: t("services.keepPinned.hint"),
+        onSelect: () => run(() => api.patchService(s.slug, { pinned: !s.pinned })),
+      },
+    supportsOrganize && "separator",
+    supportsOrganize && {
+      label: t("services.note.edit"),
+      onSelect: () => void promptDialog(t("services.note.edit"), s.note ?? "", { placeholder: t("services.note.placeholder"), multiline: true, maxLength: 1000 }).then((note) => note !== null && run(() => api.patchService(s.slug, { note: note.trim() || null }))),
+    },
+    ...organization,
+    supportsOrganize && toggleOrganize && { label: t("services.organize"), onSelect: toggleOrganize },
+    supportsOrganize &&
+      s.lifetime === "ephemeral" && {
+        label: t("services.keep"),
+        submenu: (["foreground", "background"] as const).map((purpose) => ({
+          label: t(`services.purpose.${purpose}`),
+          onSelect: () => run(() => api.patchService(s.slug, { lifetime: "persistent", purpose })),
+        })),
+        onSelect: () => {},
+      },
+    supportsOrganize &&
+      s.lifetime === "persistent" && {
+        label: t("services.purpose"),
+        submenu: (["foreground", "background", "unknown"] as const).map((purpose) => ({
+          label: `${s.purpose === purpose || (!s.purpose && purpose === "unknown") ? "✓ " : ""}${t(`services.purpose.${purpose}`)}`,
+          onSelect: () => run(() => api.patchService(s.slug, { purpose: purpose === "unknown" ? null : purpose })),
+        })),
+        onSelect: () => {},
+      },
+    supportsOrganize && {
+      label: s.starred ? t("services.unstar") : t("services.star"),
+      onSelect: () => run(() => api.patchService(s.slug, { starred: !s.starred })),
+    },
+    supportsOrganize && !s.archived && {
+      label: s.hidden ? t("services.show") : t("services.hide"),
+      onSelect: () => run(() => api.patchService(s.slug, { hidden: !s.hidden })),
+    },
+    supportsOrganize && !s.archived && {
+      label: t("services.archive"),
+      onSelect: () => run(() => api.serviceAction(s.slug, "archive")),
+    },
+    supportsOrganize && s.archived && {
+      label: t("services.restore"),
+      onSelect: () => run(() => api.serviceAction(s.slug, "restore")),
+    },
+    supportsTtl &&
+      s.lifetime === "ephemeral" &&
+      !s.pinned &&
+      ttlChoices.length > 0 && {
+        label: t("services.extend"),
+        submenu: ttlChoices.map((minutes) => ({
+          label: t(`services.idleTtl.${minutes}` as "services.idleTtl.30"),
+          onSelect: () => run(() => api.patchService(s.slug, { idleTtlMinutes: minutes })),
+        })),
+        onSelect: () => {},
+      },
+    // The modules' `ref.action` items for the service (§19.8; e.g. 固定到主页 / 取消固定).
+    ...refActionEntries({ hostId: hostId ?? focusId(), kind: "service", key: s.slug, title: (s.displayName || s.slug).slice(0, 200), params: {} }, true),
+    manage && "separator",
+    manage && {
       label: t("services.delete"),
       danger: true,
       onSelect: () =>
@@ -92,6 +154,36 @@ export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, 
         })(),
     },
   ];
+}
+
+/**
+ * 转为项目服务 / 转为个人服务 (cutex `services-project-scope`, owner): medium risk, so the row confirms in place
+ * (armed). A record without a projectId picks the project in a submenu, the registrant's project first.
+ */
+export function serviceScopeEntries(s: ServiceView, t: T, sidebar: SidebarSnapshot | null | undefined, send: (patch: ServicePatch) => void): MenuEntry[] {
+  const nameOf = (id: string | null | undefined) => (id && sidebar?.projects?.projects.find((p) => p.project_id === id)?.presentation.display_name) || id || "";
+  if (serviceScope(s) === "project") {
+    const patch = scopePatch(s, "session")!;
+    return [{ label: t("services.ownerScope.toSession"), info: t("services.ownerScope.toSession.hint"), armed: t("services.ownerScope.toSession.armed"), onSelect: () => send(patch) }];
+  }
+  if (s.projectId) {
+    const patch = scopePatch(s, "project")!;
+    return [{ label: t("services.ownerScope.toProject"), info: t("services.ownerScope.toProject.hint"), armed: t("services.ownerScope.toProject.armed", { project: nameOf(s.projectId) }), onSelect: () => send(patch) }];
+  }
+  const choices = claimProjectChoices(s, sidebar);
+  if (!choices.length) return [{ label: t("services.ownerScope.toProject"), disabled: true, title: t("services.ownerScope.noProjects"), onSelect: () => {} }];
+  return [{
+    label: t("services.ownerScope.toProjectPick"),
+    info: t("services.ownerScope.toProject.hint"),
+    submenu: choices.map(({ project, registrants }) => ({
+      label: project.presentation.display_name || project.project_id,
+      hint: registrants ? t("services.ownerScope.registrantsProject") : undefined,
+      // The row names the project already; a short text keeps the narrow submenu from wrapping.
+      armed: t("services.claim.armed"),
+      onSelect: () => send(scopePatch(s, "project", project.project_id)!),
+    })),
+    onSelect: () => {},
+  }];
 }
 
 export interface ServiceGroup {

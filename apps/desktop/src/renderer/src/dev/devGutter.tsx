@@ -63,8 +63,8 @@ function RefsList({ close, docked }: GutterBodyProps) {
           ])}
           className="flex min-w-0 flex-col items-start rounded-lg px-2 py-1.5 text-left hover:bg-hover"
         >
-          <span className="w-full truncate text-[13px]">{ref.title}</span>
-          <span className="w-full truncate text-[11px] text-subtle">
+          <span className="w-full truncate text-ui/[inherit]">{ref.title}</span>
+          <span className="w-full truncate text-caption/[inherit] text-subtle">
             {ref.kind}
             {ref.snapshot?.snippet ? ` · ${ref.snapshot.snippet}` : ""}
           </span>

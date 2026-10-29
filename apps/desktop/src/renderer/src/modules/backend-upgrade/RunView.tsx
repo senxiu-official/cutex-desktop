@@ -2,13 +2,12 @@
 // swap, start, verify …), cancel while nothing changed yet, and the outcome — committed, deferred,
 // cancelled, rolled back, failed, or needs-owner with the commands to run on the host. Also the
 // history list (each run expands to the same view).
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Check, ChevronDown, ChevronRight, CircleDashed, Copy, Loader2, Minus, X } from "lucide-react";
 import type { UpgradeRun } from "../../../../shared/backendUpgrade";
-import { ArmedHint } from "../../components/ArmedHint";
 import { Button, EmptyState, ErrorNote, IconButton, Loading, RefreshButton, Section } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
-import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
+import { confirmDialog } from "../../lib/contextMenu";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { formatAbsolute, formatWhen, useClock, useNow } from "../../lib/time";
 import { useTargetApi } from "../../lib/targetHost";
@@ -211,12 +210,9 @@ export function RunSection({ hostId, run, native = null }: { hostId: string; run
   const { t } = useI18n();
   const api = useTargetApi();
   const action = useUpgradeAction();
-  const [armed, setArmed] = useArmed(run.runId);
-  const anchor = useRef<HTMLSpanElement>(null);
   const active = runActive(run);
   const title = t(run.kind === "rollback" ? "backend-upgrade.run.titleRollback" : "backend-upgrade.run.title", { from: run.fromRelease, to: run.toRelease });
   const cancel = async () => {
-    setArmed(false);
     await action.run(() => api.upgradeCancel());
     void loadUpgradeStatus(hostId);
   };
@@ -228,18 +224,14 @@ export function RunSection({ hostId, run, native = null }: { hostId: string; run
       hint={t(runModeKeys(runRuntime(run, native)).mode)}
       actions={
         active && cancellable ? (
-          <span ref={anchor} className="inline-flex">
-            {armed ? (
-              <button className={`${ARMED_FORM_BUTTON} shrink-0 whitespace-nowrap`} disabled={action.busy} onClick={() => void cancel()}>
-                {t("backend-upgrade.cancel")}
-              </button>
-            ) : (
-              <Button disabled={action.busy} onClick={() => setArmed(true)}>
-                {t("backend-upgrade.cancel")}
-              </Button>
-            )}
-            {armed && <ArmedHint anchor={anchor} text={t("backend-upgrade.cancelArmed")} />}
-          </span>
+          <Button
+            disabled={action.busy}
+            onClick={() => void confirmDialog(t("backend-upgrade.cancelConfirm"), true, { ok: t("backend-upgrade.cancelConfirmOk"), cancel: t("backend-upgrade.cancelConfirmBack") }).then((yes) => {
+              if (yes) void cancel();
+            })}
+          >
+            {t("backend-upgrade.cancel")}
+          </Button>
         ) : undefined
       }
     >
@@ -270,7 +262,7 @@ function HistoryRow({ run }: { run: UpgradeRun }) {
       </button>
       {open && (
         <div className="pl-5">
-          <p className="font-mono text-[11px] text-subtle select-text">
+          <p className="font-mono text-caption/[inherit] text-subtle select-text">
             {run.runId} · {t(`backend-upgrade.class.${run.class}` as MessageKey)} · {t(`backend-upgrade.mode.short.${run.mode}` as MessageKey)}
             {run.requestedBy ? ` · ${run.requestedBy}` : ""}
           </p>

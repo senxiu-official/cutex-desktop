@@ -30,6 +30,7 @@ vi.mock("electron", () => {
     on() {}
     showInactive() {}
     moveTop() {}
+    setBounds() {}
     loadFile() {
       return Promise.resolve();
     }
@@ -81,7 +82,7 @@ beforeEach(async () => {
   alerts = new OwnerAlerts({
     daemonFor: (hostId) => (daemons[hostId] as never) ?? null,
     shell: { notifyOff: { bigAlert: false, sound: false }, locale: "en", appIcon() {}, show: vi.fn() } as never,
-    mainWindow: () => null,
+    ownerWindow: () => null,
     openInApp: vi.fn(),
     openEvent: vi.fn(),
   });

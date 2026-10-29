@@ -79,6 +79,17 @@ describe("ssh command lines", () => {
     expect(args).toContain("BatchMode=yes");
     expect(args.slice(-3)).toEqual(["--", "workstation", "cutex management client-token issue --label desktop-HOST-A"]);
   });
+
+  it("explicitly disables forwarding and local commands on every ssh command", () => {
+    const tunnel = tunnelArgs({ destination: "workstation", port: null }, 53122, 24270);
+    const exec = execArgs({ destination: "workstation", port: null }, "true");
+    for (const args of [tunnel, exec]) {
+      expect(args.join(" ")).toContain("-o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no");
+    }
+    expect(tunnel.filter((arg) => arg === "-L")).toHaveLength(1);
+    expect(tunnel).not.toContain("-R");
+    expect(tunnel).not.toContain("-D");
+  });
 });
 
 describe("remote output and ssh_config", () => {
@@ -168,6 +179,14 @@ describe("tunnel state", () => {
     expect(s.error?.code).toBe("auth");
     expect(tunnelReduce(s, { type: "stop" })).toMatchObject({ status: "idle", error: null, localPort: 1 });
   });
+
+  it("carries the active SSH address through reconnects and stop", () => {
+    let s = tunnelReduce(initialTunnel(), { type: "spawn", localPort: 53122, target: "hachimi-direct" });
+    expect(s.target).toBe("hachimi-direct");
+    s = tunnelReduce(s, exit(255, "Connection reset", 100));
+    expect(s.target).toBe("hachimi-direct");
+    expect(tunnelReduce(s, { type: "stop" })).toMatchObject({ status: "idle", target: "hachimi-direct" });
+  });
 });
 
 describe("hosts file", () => {
@@ -197,6 +216,14 @@ describe("hosts file", () => {
     expect(focusHostOf(initialScope(base), base)).toBe("ssh-aaaa1111");
     expect(initialScope({ ...base, startOn: "local" })).toEqual({ kind: "host", id: "local" });
     expect(focusHostOf({ kind: "host", id: "ssh-gone" }, base)).toBe("local");
+  });
+
+  it("migrates one target to a rollback-compatible ordered address list", () => {
+    const old = parseHostsFile({ version: 2, hosts: [{ id: "ssh-aaaa1111", target: "hachimi-lan" }] }).hosts[0]!;
+    expect(old).toMatchObject({ target: "hachimi-lan", targets: ["hachimi-lan"], daemonHostId: null });
+    const current = parseHostsFile({ version: 2, hosts: [{ id: "ssh-aaaa1111", target: "hachimi-lan", targets: ["hachimi-direct", "hachimi-direct", "hachimi-tail"], daemonHostId: "HOST-H" }] }).hosts[0]!;
+    expect(current).toMatchObject({ target: "hachimi-direct", targets: ["hachimi-direct", "hachimi-tail"], daemonHostId: "HOST-H" });
+    expect(parseHostsFile({ version: 2, hosts: [{ id: "ssh-aaaa1111", target: "hachimi-lan", targets: ["-oProxyCommand=x"] }] }).hosts[0]).toMatchObject({ target: "hachimi-lan", targets: ["hachimi-lan"] });
   });
 
   it("v1 → v2 (one way): lastActive becomes the scope, every host auto-connects, palette colors in order", () => {

@@ -53,7 +53,7 @@ export function WritableRootsEditor({ roots, onChange, disabled }: { roots: stri
               <AlertTriangle size={11} />
             </span>
           )}
-          <span className="truncate font-mono text-[11px]" title={root} style={{ direction: "rtl", textAlign: "left" }}>
+          <span className="truncate font-mono text-caption/[inherit]" title={root} style={{ direction: "rtl", textAlign: "left" }}>
             <bdi>{shortenHome(root)}</bdi>
           </span>
           <button disabled={disabled} title={t("launch.removeRoot")} aria-label={t("launch.removeRoot")} onClick={() => onChange(roots.filter((r) => r !== root))} className="rounded p-0.5 text-subtle hover:bg-surface hover:text-foreground">
@@ -62,7 +62,7 @@ export function WritableRootsEditor({ roots, onChange, disabled }: { roots: stri
         </div>
       ))}
       {confirm !== null && (
-        <div role="status" className="flex w-60 flex-col items-end gap-1 rounded-md border border-warn/40 bg-warn/10 px-2 py-1 text-[11px] text-warn-text" data-testid="root-exposes-cutex-confirm">
+        <div role="status" className="flex w-60 flex-col items-end gap-1 rounded-md border border-warn/40 bg-warn/10 px-2 py-1 text-caption/[inherit] text-warn-text" data-testid="root-exposes-cutex-confirm">
           <span className="self-start">
             <AlertTriangle size={11} className="mr-1 inline align-[-1px]" />
             {warning}

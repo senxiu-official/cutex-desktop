@@ -5,13 +5,15 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import type { CutexRefusal, OutdatedRuntimeAgent, RuntimePackageRun, RuntimePackageRunItem, RuntimePackageSummary } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
-import { ARMED_FORM_BUTTON, ARMED_FRAME, useArmed } from "../../lib/armedConfirm";
-import { agentPackages, agentRuntimeState, idleCount, itemNote, itemOutcome, noteworthyItems, packageLabel, revertTarget } from "../../lib/runtimePackages";
+import { confirmDialog } from "../../lib/contextMenu";
+import { agentPackages, agentRuntimeState, itemNote, itemOutcome, noteworthyItems, packageLabel, revertTarget } from "../../lib/runtimePackages";
+import { combinedRuntimeCounts, displayedRuntimeRuns, type OutdatedClaudeRuntimeAgent } from "../../lib/claudeRuntimeBatch";
 import { revertRuntimePackageRun, startRuntimePackageUpgrade } from "../../lib/runtimePackageStore";
-import { useActiveHostLabel, useHostRuntimePackages } from "../../lib/runtimePackagesView";
+import { useActiveHostLabel, useHostRuntimePackages, useOutdatedClaudeRuntimeAgents } from "../../lib/runtimePackagesView";
 import { useTargetHostId } from "../../lib/targetHost";
 import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
-import { Button, ErrorNote, Loading, Section } from "./Form";
+import { Button, ErrorNote, Loading, Section, SettingsGroup } from "./Form";
+import { Tag } from "../../components/Tag";
 
 const STATE_TONE = { busy: "text-warn", offline: "text-subtle", online: "text-ok-text" } as const;
 const KNOWN_ERRORS = ["run_in_progress", "nothing_to_upgrade", "selected_unavailable", "nothing_to_revert", "run_not_found"];
@@ -22,15 +24,16 @@ export function RuntimePackagesSection() {
   const { t } = useI18n();
   const host = useHostRuntimePackages();
   const hostLabel = useActiveHostLabel();
+  const claudeAgents = useOutdatedClaudeRuntimeAgents();
   if (!host) return null;
   const { view, error, actionError } = host;
   // All current and nothing to report: just the one quiet line.
-  const quiet = !!view && view.agents.length === 0 && !view.activeRun && !view.lastRun;
+  const quiet = !!view && view.agents.length === 0 && claudeAgents.length === 0 && !view.activeRun && !view.lastRun && !host.claudeBatch;
   return (
     <Section title={t("runtimePackages.title")} hint={quiet ? undefined : t("runtimePackages.hint")}>
       {!view && !error && <Loading rows={1} />}
       {!view && error && <ErrorNote>{error}</ErrorNote>}
-      {view && <Body hostLabel={hostLabel} starting={host.starting} />}
+      {view && <Body hostLabel={hostLabel} starting={host.starting} claudeAgents={claudeAgents} />}
       {actionError && <ErrorNote>{refusalText(actionError, t)}</ErrorNote>}
     </Section>
   );
@@ -40,43 +43,43 @@ function refusalText(error: CutexRefusal, t: ReturnType<typeof useI18n>["t"]): s
   return KNOWN_ERRORS.includes(error.code) ? t(`runtimePackages.error.${error.code}` as MessageKey) : `${error.code}: ${error.message}`;
 }
 
-function Body({ hostLabel, starting }: { hostLabel: string; starting: boolean }) {
+function Body({ hostLabel, starting, claudeAgents }: { hostLabel: string; starting: boolean; claudeAgents: OutdatedClaudeRuntimeAgent[] }) {
   const hostId = useTargetHostId();
   const { t } = useI18n();
-  const view = useHostRuntimePackages()!.view!;
+  const host = useHostRuntimePackages()!;
+  const view = host.view!;
   const [open, setOpen] = useState(false);
-  const [armed, setArmed] = useArmed(view.agents.length);
-  const target = packageLabel(view.selected) ?? t("runtimePackages.unknownTarget");
-  const outdated = view.agents.length;
-  const idle = idleCount(view.agents);
-  const run = view.activeRun;
-  const canStart = !!view.selected && !run && !starting && idle > 0;
-  const headline = !view.selected
+  const nativeOutdated = view.agents.length;
+  const targetParts = [nativeOutdated > 0 ? packageLabel(view.selected) : null, claudeAgents.length > 0 ? `${t("modules.component.claude-runtime.name")} ${claudeAgents[0]!.target}` : null].filter((part): part is string => !!part);
+  const target = targetParts.join(" · ") || t("runtimePackages.unknownTarget");
+  const counts = combinedRuntimeCounts(view.agents, claudeAgents);
+  const outdated = counts.outdated;
+  const claudeIdle = claudeAgents.filter((agent) => !agent.busy).length;
+  const idle = counts.idle;
+  const runs = displayedRuntimeRuns(view, host.claudeBatch);
+  const run = runs.active;
+  const canStart = !run && !starting && idle > 0 && (!!view.selected || nativeOutdated === 0 || claudeIdle > 0);
+  const headline = !view.selected && nativeOutdated > 0 && claudeAgents.length === 0
     ? t("runtimePackages.selectedError", { host: hostLabel, error: view.selectedError ?? "—" })
     : outdated > 0
       ? t("runtimePackages.outdated", { host: hostLabel, n: outdated, target })
       : t("runtimePackages.current", { host: hostLabel, target });
   return (
     <>
-      <div className={`-mx-4 flex items-center gap-3 px-4 py-2.5 ${armed ? ARMED_FRAME : ""} ${outdated > 0 || run || view.lastRun ? "border-b border-border" : ""}`}>
+      <div className={`-mx-4 flex items-center gap-3 px-4 py-2.5 ${outdated > 0 || run || view.lastRun ? "border-b border-border" : ""}`}>
         <p className={`min-w-0 flex-1 text-sm ${outdated > 0 ? "text-foreground" : "text-subtle"}`}>{headline}</p>
-        {outdated > 0 &&
-          (armed ? (
-            <button
-              className={ARMED_FORM_BUTTON}
-              disabled={!canStart}
-              onClick={() => {
-                setArmed(false);
-                void startRuntimePackageUpgrade(hostId);
-              }}
-            >
-              {t("runtimePackages.upgradeAgain", { n: idle })}
-            </button>
-          ) : (
-            <Button primary disabled={!canStart} title={idle === 0 ? t("runtimePackages.allBusy") : t("runtimePackages.upgradeHint")} onClick={() => setArmed(true)}>
-              {starting ? <Loader2 size={12} className="inline animate-spin" /> : t("runtimePackages.upgrade")}
-            </Button>
-          ))}
+        {outdated > 0 && (
+          <SettingsGroup agents="now" source="host"><Button
+            primary
+            disabled={!canStart}
+            title={idle === 0 ? t("runtimePackages.allBusy") : t("runtimePackages.upgradeHint")}
+            onClick={() =>
+              void confirmDialog(t("runtimePackages.upgradeConfirm", { n: idle, target }), true, { ok: t("runtimePackages.upgradeConfirmOk", { n: idle }), cancel: t("settings.cancel") }).then((yes) => yes && void startRuntimePackageUpgrade(hostId, { native: nativeOutdated > 0, claude: claudeAgents }))
+            }
+          >
+            {starting ? <Loader2 size={12} className="inline animate-spin" /> : t("runtimePackages.upgrade")}
+          </Button></SettingsGroup>
+        )}
       </div>
       {run ? (
         <RunBlock run={run} live />
@@ -93,14 +96,35 @@ function Body({ hostLabel, starting }: { hostLabel: string; starting: boolean })
                   {view.agents.map((a) => (
                     <AgentRow key={a.cutexSessionId} agent={a} selected={view.selected} />
                   ))}
+                  {claudeAgents.map((a) => (
+                    <ClaudeAgentRow key={a.cutexSessionId} agent={a} />
+                  ))}
                 </ul>
               )}
             </div>
           )}
-          {view.lastRun && <RunBlock run={view.lastRun} live={false} />}
+          {runs.last && <RunBlock run={runs.last} live={false} />}
         </>
       )}
     </>
+  );
+}
+
+function ClaudeAgentRow({ agent }: { agent: OutdatedClaudeRuntimeAgent }) {
+  const { t } = useI18n();
+  const state = agent.busy ? "busy" : agent.online ? "online" : "offline";
+  return (
+    <li className="flex items-baseline gap-2 py-1 text-xs">
+      <span className="w-24 shrink-0 truncate text-foreground" title={agent.cutexSessionId}>
+        {agent.name}
+      </span>
+      <span className="min-w-0 flex-1 truncate font-mono text-caption/[inherit] text-muted">
+        {agent.current} → {agent.target}
+      </span>
+      <span className={`shrink-0 ${STATE_TONE[state]}`} title={state === "busy" && agent.busyReason ? t(`runtimePackages.busy.${agent.busyReason}` as MessageKey) : undefined}>
+        {t(`runtimePackages.state.${state}` as MessageKey)}
+      </span>
+    </li>
   );
 }
 
@@ -113,13 +137,13 @@ function AgentRow({ agent, selected }: { agent: OutdatedRuntimeAgent; selected: 
       <span className="w-24 shrink-0 truncate text-foreground" title={agent.cutexSessionId}>
         {agent.name}
       </span>
-      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted" title={agent.repair ? (agent.current.missing ?? []).join("\n") || undefined : (agent.current.manifest ?? undefined)}>
+      <span className="min-w-0 flex-1 truncate font-mono text-caption/[inherit] text-muted" title={agent.repair ? (agent.current.missing ?? []).join("\n") || undefined : (agent.current.manifest ?? undefined)}>
         {agent.repair ? t("runtimePackages.agent.missing") : (current ?? t("runtimePackages.unreadable"))} → {target ?? "?"}
       </span>
       {agent.repair && (
-        <span className="shrink-0 rounded bg-warn/15 px-1 text-[10px] text-warn-text" title={t("runtimePackages.agent.repairHint")}>
+        <Tag tone="attention" title={t("runtimePackages.agent.repairHint")}>
           {t("runtimePackages.agent.repair")}
-        </span>
+        </Tag>
       )}
       <span className={`shrink-0 ${STATE_TONE[state]}`} title={state === "busy" && agent.busyReason ? t(`runtimePackages.busy.${agent.busyReason}` as MessageKey) : undefined}>
         {t(`runtimePackages.state.${state}` as MessageKey)}
@@ -133,22 +157,22 @@ function RunBlock({ run, live }: { run: RuntimePackageRun; live: boolean }) {
   const hostId = useTargetHostId();
   const { t, locale } = useI18n();
   const now = useClock();
-  const [armed, setArmed] = useArmed(run.runId);
   const target = revertTarget(useHostRuntimePackages()?.view ?? null);
   const revertable = target?.shownOn === run.runId ? target : null;
   const starting = useHostRuntimePackages()?.starting ?? false;
   const revert = run.kind === "revert";
   const c = run.counts;
+  const running = run.items.filter((item) => item.state === "running").length;
   const when = Date.parse(run.finishedAt ?? run.startedAt);
   const rows = live ? run.items : noteworthyItems(run);
   return (
-    <div className={`-mx-4 px-4 py-2 ${armed ? ARMED_FRAME : ""}`}>
+    <div className={`-mx-4 px-4 py-2`}>
       <div className="flex items-center gap-3">
         <p className="min-w-0 flex-1 text-xs text-muted">
           {live ? (
             <span className="inline-flex items-center gap-1.5 text-accent">
               <Loader2 size={12} className="animate-spin" />
-              {t(revert ? "runtimePackages.runningRevert" : "runtimePackages.running", { done: c.total - c.pending - (run.currentAgentId ? 1 : 0), total: c.total })}
+              {t(revert ? "runtimePackages.runningRevert" : "runtimePackages.running", { done: c.total - c.pending - running, total: c.total })}
             </span>
           ) : (
             <span title={Number.isFinite(when) ? formatAbsolute(when / 1000) : undefined}>
@@ -159,28 +183,21 @@ function RunBlock({ run, live }: { run: RuntimePackageRun; live: boolean }) {
                 failed: c.failed,
               })}
               {run.state === "interrupted" && <span className="ml-1 text-warn">{t("runtimePackages.interruptedRun")}</span>}
-              {run.revertedBy.length > 0 && <span className="ml-1.5 rounded bg-surface-2 px-1 text-[10px] text-subtle">{t("runtimePackages.revertedTag")}</span>}
+              {run.revertedBy.length > 0 && <Tag className="ml-1.5">{t("runtimePackages.revertedTag")}</Tag>}
             </span>
           )}
         </p>
-        {!live &&
-          revertable &&
-          (armed ? (
-            <button
-              className={ARMED_FORM_BUTTON}
-              disabled={starting}
-              onClick={() => {
-                setArmed(false);
-                void revertRuntimePackageRun(revertable.runId, hostId);
-              }}
-            >
-              {t("runtimePackages.revertAgain", { n: revertable.agents })}
-            </button>
-          ) : (
-            <Button disabled={starting} title={t("runtimePackages.revertHint")} onClick={() => setArmed(true)}>
-              {t("runtimePackages.revert")}
-            </Button>
-          ))}
+        {!live && revertable && (
+          <SettingsGroup agents="now" source="host"><Button
+            disabled={starting}
+            title={t("runtimePackages.revertHint")}
+            onClick={() =>
+              void confirmDialog(t("runtimePackages.revertConfirm", { n: revertable.agents }), true, { ok: t("runtimePackages.revertConfirmOk", { n: revertable.agents }), cancel: t("settings.cancel") }).then((yes) => yes && void revertRuntimePackageRun(revertable.runId, hostId))
+            }
+          >
+            {t("runtimePackages.revert")}
+          </Button></SettingsGroup>
+        )}
       </div>
       {rows.length > 0 && (
         <ul className="pt-1">
@@ -235,7 +252,9 @@ function ItemRow({ item, revert }: { item: RuntimePackageRunItem; revert: boolea
   }
   // Known cases read as a short explanation; the raw cutex reason stays in the tooltip.
   const note = reason ? itemNote(item) : null;
-  const versions = item.targetRuntimeVersion || item.targetFacadeRelease ? `${item.previousRuntimeVersion ?? "?"} / ${item.previousFacadeRelease ?? "?"} → ${item.targetRuntimeVersion ?? "?"} / ${item.targetFacadeRelease ?? "?"}` : undefined;
+  const versions = item.targetFacadeRelease || item.previousFacadeRelease
+    ? `${item.previousRuntimeVersion ?? "?"} / ${item.previousFacadeRelease ?? "?"} → ${item.targetRuntimeVersion ?? "?"} / ${item.targetFacadeRelease ?? "?"}`
+    : item.targetRuntimeVersion ? `${item.previousRuntimeVersion ?? "?"} → ${item.targetRuntimeVersion}` : undefined;
   return (
     <li className="py-1 text-xs">
       <div className="flex items-baseline gap-2">
@@ -248,11 +267,11 @@ function ItemRow({ item, revert }: { item: RuntimePackageRunItem; revert: boolea
         </span>
       </div>
       {reason && note && (
-        <p className="mt-0.5 text-[11px] text-subtle select-text" title={reason}>
+        <p className="mt-0.5 text-caption/[inherit] text-subtle select-text" title={reason}>
           {t(`runtimePackages.note.${note}` as MessageKey)}
         </p>
       )}
-      {reason && !note && <p className="mt-0.5 line-clamp-3 font-mono text-[11px] break-words whitespace-pre-wrap text-subtle select-text">{reason}</p>}
+      {reason && !note && <p className="mt-0.5 line-clamp-3 font-mono text-caption/[inherit] break-words whitespace-pre-wrap text-subtle select-text">{reason}</p>}
     </li>
   );
 }

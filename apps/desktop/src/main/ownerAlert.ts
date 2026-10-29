@@ -26,7 +26,8 @@ export interface OwnerAlertDeps {
   /** The daemon of a connected host (multi-host: one OwnerAlerts for every connection); null when not connected. */
   daemonFor(hostId: string): DaemonService | null;
   shell: DesktopShell;
-  mainWindow(): BrowserWindow | null;
+  /** The app window the owner is using (main/appWindows ownerWindow): the alert shows on its display and it flashes. */
+  ownerWindow(): BrowserWindow | null;
   /** 打开: tell the renderer to open that host's agent at that message (after the window was shown). */
   openInApp(hostId: string, agentId: string, notificationId: string): void;
   /** 打开 on an event alert: the renderer runs the click of that key. */
@@ -238,6 +239,7 @@ export class OwnerAlerts {
     if (!this.win || this.win.isDestroyed()) this.createWindow();
     else this.push();
     if (added) {
+      if (this.win) this.place(this.win);
       this.win?.showInactive();
       this.win?.moveTop();
       this.flash(true);
@@ -253,9 +255,9 @@ export class OwnerAlerts {
     if (this.win && !this.win.isDestroyed()) this.win.webContents.send(OWNER_ALERT_STATE, this.state());
   }
 
-  /** Taskbar flash until the main window gets focus or no alert is left. */
+  /** Taskbar flash (of the window the owner uses) until it gets focus or no alert is left. */
   private flash(on: boolean): void {
-    const main = this.deps.mainWindow();
+    const main = this.deps.ownerWindow();
     if (!main || main.isDestroyed() || this.flashing === on) return;
     if (on && main.isFocused()) return;
     this.flashing = on;
@@ -263,8 +265,24 @@ export class OwnerAlerts {
     if (on) main.once("focus", () => this.flash(false));
   }
 
+  /** Centred on the display of the window the owner is using (a desk on another display included), else the primary one. */
+  private area(): Electron.Rectangle {
+    const owner = this.deps.ownerWindow();
+    try {
+      return owner && !owner.isDestroyed() && owner.isVisible() ? screen.getDisplayMatching(owner.getBounds()).workArea : screen.getPrimaryDisplay().workArea;
+    } catch {
+      return screen.getPrimaryDisplay().workArea;
+    }
+  }
+
+  private place(win: BrowserWindow): void {
+    const area = this.area();
+    const { width, height } = OWNER_ALERT_SIZE;
+    if (!win.isDestroyed()) win.setBounds({ x: Math.round(area.x + (area.width - width) / 2), y: Math.round(area.y + (area.height - height) / 2), width, height });
+  }
+
   private createWindow(): void {
-    const area = screen.getPrimaryDisplay().workArea;
+    const area = this.area();
     const { width, height } = OWNER_ALERT_SIZE;
     const win = new BrowserWindow({
       width,

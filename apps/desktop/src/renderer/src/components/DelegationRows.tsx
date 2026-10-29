@@ -22,6 +22,7 @@ import { DelegationStatusMark, DelegationTag } from "./DelegationParts";
 import { Markdown } from "./Markdown";
 import { Who } from "./Parties";
 import { PeerParty } from "./PeerParty";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 
 /** A verb template with the party spliced in at `{who}` (like task rows). */
 function Sentence({ k, who }: { k: MessageKey; who: React.ReactNode }) {
@@ -36,15 +37,18 @@ function Sentence({ k, who }: { k: MessageKey; who: React.ReactNode }) {
   );
 }
 
-function YouOrWho({ owner, id, name, peerLabel }: { owner: boolean; id: string | null; name: string | null; peerLabel?: string | null }) {
+function YouOrWho({ owner, id, name, peerLabel, realAvatar }: { owner: boolean; id: string | null; name: string | null; peerLabel?: string | null; realAvatar?: boolean }) {
   const { t } = useI18n();
-  if (peerLabel) return <PeerParty text={name ?? ""} label={peerLabel} size={16} />;
-  return owner ? <span className="shrink-0 font-medium text-foreground">{t("delegation.you")}</span> : <Who id={id} name={name} size={16} />;
+  if (peerLabel) return <span className="inline-flex min-w-0 max-w-[16em] shrink-0" title={name ?? undefined}><PeerParty text={name ?? ""} label={peerLabel} size={16} /></span>;
+  return owner
+    ? <span className="shrink-0 whitespace-nowrap font-medium text-foreground">{t("delegation.you")}</span>
+    : <span className="inline-flex min-w-0 max-w-[16em] shrink-0"><Who id={id} name={name} size={16} realAvatar={realAvatar} /></span>;
 }
 
 /** Handler side: the delegation that started this turn. */
 export function DelegationAskRow({ row, body }: { row: AskRowModel; body: string }) {
   const { t } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const [open, setOpen] = useState(false);
   // The row is in the open agent's timeline; its requester is an agent of the same host.
   const host = useAgentHost();
@@ -52,7 +56,7 @@ export function DelegationAskRow({ row, body }: { row: AskRowModel; body: string
   const menu = contextMenu(() => [jump && { label: t("delegation.jumpCard"), onSelect: jump }, { label: t("delegation.copyId"), onSelect: () => copyText(row.askId) }]);
   return (
     <div className="my-2" onContextMenu={menu} data-ask-row={row.askId}>
-      <button onClick={() => setOpen(!open)} className="flex w-full max-w-full items-center gap-1.5 rounded-md py-0.5 text-left text-xs text-muted hover:text-foreground">
+      <button onClick={() => userToggle(() => setOpen(!open))} className="flex w-full max-w-full items-center gap-1.5 rounded-md py-0.5 text-left text-xs text-muted hover:text-foreground">
         <ArrowDownLeft size={13} className="shrink-0 text-accent" />
         <Sentence k="delegation.from" who={<YouOrWho owner={row.owner} id={row.requesterId} name={row.requesterName} peerLabel={row.peerLabel} />} />
         <DelegationTag askId={row.askId} onJump={() => openDelegationDetail(host, row.askId, { title: row.title })} />
@@ -61,7 +65,7 @@ export function DelegationAskRow({ row, body }: { row: AskRowModel; body: string
         {open ? <ChevronDown size={13} className="ml-auto shrink-0" /> : <ChevronRight size={13} className="ml-auto shrink-0" />}
       </button>
       {open && (
-        <div className="mt-1 ml-6 max-w-[85%] rounded-2xl border border-border bg-peer px-4 py-2 text-[13px]">
+        <div className="selectable message-body mt-1 ml-6 max-w-[85%] rounded-2xl border border-border bg-peer px-4 py-2 text-ui/[inherit]">
           <Markdown text={body} streaming={false} />
         </div>
       )}
@@ -84,7 +88,7 @@ function ResultLine({ item, sessionId, onToggle, open }: { item: DelegationResul
   return (
     <button onClick={onToggle} onContextMenu={menu} className="flex w-full max-w-full items-center gap-1.5 rounded-md py-0.5 text-left text-xs text-muted hover:text-foreground">
       <Icon size={13} className={`shrink-0 ${item.kind === "question" ? "text-warn" : "text-accent"}`} />
-      <Sentence k={RESULT_VERB[item.kind]} who={<Who id={item.targetId} name={item.targetName} size={16} />} />
+      <Sentence k={RESULT_VERB[item.kind]} who={<span className="inline-flex min-w-0 max-w-[16em] shrink-0"><Who id={item.targetId} name={item.targetName} size={16} /></span>} />
       <span className="shrink-0 text-subtle">·</span>
       <DelegationTag askId={item.askId} onJump={() => openDelegationDetail(host, item.askId, { title: item.title })} />
       <span className="max-w-[40%] shrink-0 truncate text-foreground">{item.title}</span>
@@ -102,13 +106,14 @@ function ResultLine({ item, sessionId, onToggle, open }: { item: DelegationResul
 /** Requester side: answers / questions / state changes of this agent's delegations (one event). */
 export function DelegationResultsRow({ items, message, sessionId }: { items: DelegationResultItem[]; message: ExternalMessage; sessionId: string }) {
   const [open, setOpen] = useState(false);
+  const userToggle = useUserLayoutToggle();
   return (
     <div className="my-2">
       {items.map((item, i) => (
-        <ResultLine key={`${item.askId}:${i}`} item={item} sessionId={sessionId} open={open} onToggle={() => setOpen(!open)} />
+        <ResultLine key={`${item.askId}:${i}`} item={item} sessionId={sessionId} open={open} onToggle={() => userToggle(() => setOpen(!open))} />
       ))}
       {open && (
-        <div className="mt-1 ml-6 max-w-[85%] rounded-2xl border border-border bg-peer px-4 py-2 text-[13px]">
+        <div className="selectable message-body mt-1 ml-6 max-w-[85%] rounded-2xl border border-border bg-peer px-4 py-2 text-ui/[inherit]">
           <Markdown text={message.text} streaming={false} />
         </div>
       )}
@@ -116,8 +121,12 @@ export function DelegationResultsRow({ items, message, sessionId }: { items: Del
   );
 }
 
-/** Handler side: under the final reply of a turn a delegation started. */
-export function RepliedBadge({ row }: { row: AskRowModel }) {
+/**
+ * Handler side: under the final reply of a turn a delegation started. Design 040 step 10: one quiet `text-meta` line —
+ * 「↩ 已回复 [avatar] Lead 的委托 #11 · ✓ 已完成」 (a 16 px avatar, not a dot; #11 an accent link). `inline`: it sits at
+ * the start of the reply's action row (components/MessageActions ReplyActions `status`), so it has no margins of its own.
+ */
+export function RepliedBadge({ row, inline = false }: { row: AskRowModel; inline?: boolean }) {
   const host = useAgentHost();
   const record = useDelegation(host, row.askId);
   const ctxOf = useDelegationContext();
@@ -125,12 +134,16 @@ export function RepliedBadge({ row }: { row: AskRowModel }) {
   const jump = row.requesterId ? () => focusDelegation(row.requesterId!, row.askId, host) : undefined;
   const menu = contextMenu(() => [jump && { label: t("delegation.jumpCard"), onSelect: jump }, { label: t("delegation.copyId"), onSelect: () => copyText(row.askId) }]);
   return (
-    <div className="-mt-1 mb-2 flex items-center gap-1.5 text-[11px] text-subtle" onContextMenu={menu}>
-      <CornerDownLeft size={12} className="shrink-0" />
-      <Sentence k="delegation.replied" who={<YouOrWho owner={row.owner} id={row.requesterId} name={row.requesterName} peerLabel={row.peerLabel} />} />
-      <span>·</span>
+    <div className={`flex min-w-0 items-center gap-1.5 text-meta text-subtle ${inline ? "" : "-mt-1 mb-2"}`} data-replied-badge={inline ? "inline" : ""} onContextMenu={menu}>
+      <CornerDownLeft size={13} className="shrink-0" />
+      <Sentence k="delegation.repliedTask" who={<YouOrWho owner={row.owner} id={row.requesterId} name={row.requesterName} peerLabel={row.peerLabel} realAvatar />} />
       <DelegationTag askId={row.askId} onJump={() => openDelegationDetail(host, row.askId, { title: row.title })} />
-      {record && <DelegationStatusMark status={delegationStatus(record, ctxOf(record))} name={record.targetName ?? ""} />}
+      {record && (
+        <>
+          <span aria-hidden>·</span>
+          <DelegationStatusMark status={delegationStatus(record, ctxOf(record))} name={record.targetName ?? ""} className="min-w-0" />
+        </>
+      )}
     </div>
   );
 }

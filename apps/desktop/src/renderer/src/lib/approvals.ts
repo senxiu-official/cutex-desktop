@@ -27,6 +27,8 @@ export const APPROVAL_WAIT_FEATURE = "approval-wait";
  * then says where (inline dock card / 审批) and how (pointer / touch / keyboard) the owner decided.
  */
 export const APPROVAL_DECIDED_BY_FEATURE = "approval-decided-by";
+/** Host-owned scoped auto-approval rules (design 047). Hidden entirely on older daemons. */
+export const APPROVAL_AUTO_RULES_FEATURE = "approval-auto-rules";
 
 /**
  * How a decision button was activated. Chromium dispatches a keyboard-activated click (Enter / Space on

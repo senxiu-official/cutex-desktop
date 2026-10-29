@@ -167,10 +167,10 @@ describe("ProjectBadge", () => {
     }
   });
 
-  it("custom text: one or two characters; a longer daemon badge label shows its first two", () => {
+  it("custom text and daemon labels preserve four display columns", () => {
     expect(html({ icon: { kind: "text", value: "卷" } })).toContain(">卷<");
     expect(html({ icon: { kind: "text", value: "卷轴" } })).toContain(">卷轴<");
-    expect(html({ badge: "ABCD" })).toContain(">AB<");
+    expect(html({ badge: "ABCD" })).toContain(">ABCD<");
   });
 
   it("white takes the foreground colour; hex colours pass through", () => {

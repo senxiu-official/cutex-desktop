@@ -2,6 +2,345 @@
   "schema": 1,
   "releases": [
     {
+      "version": "0.2.0",
+      "title": "Beautiful World",
+      "date": "2026-10-29",
+      "blocks": [
+        {
+          "kind": "item",
+          "text": "External-agent and project pickers support search and keyboard navigation; long menus scroll more steadily.",
+          "zh": "可见的外部智能体和互通项目支持搜索、键盘选择，长菜单滚动更稳定。"
+        },
+        {
+          "kind": "item",
+          "text": "Fast scrolling through conversation history no longer flashes blank rows.",
+          "zh": "快速翻阅会话历史时不再闪出空白行。"
+        },
+        {
+          "kind": "item",
+          "text": "A first insert refused by a transient capability check retries once; explicit native refusals and uncertain outcomes are not resent.",
+          "zh": "首次插入若遇到临时能力检查失败，会自动重试一次；明确拒绝或结果不明时不会重发。"
+        },
+        {
+          "kind": "item",
+          "text": "Pending tooltips no longer cause continuous animation polling; side windows use their own animation clock.",
+          "zh": "修正待显示提示导致动画不停轮询的问题，侧窗口使用自己的动画时钟。"
+        },
+        {
+          "kind": "item",
+          "text": "New Profile provider cards use brand icons and the names Codex and Claude; Kimi omits the Moonshot suffix.",
+          "zh": "新建 Profile 的提供商卡片使用品牌图标，显示 Codex、Claude，Kimi 不再附带 Moonshot。"
+        },
+        {
+          "kind": "item",
+          "text": "Source-file actions open in a hover submenu with keyboard navigation.",
+          "zh": "来源文件操作改为悬停展开的子菜单，也支持键盘操作。"
+        },
+        {
+          "kind": "item",
+          "text": "Side chat explains rejected input and runtime errors, and keeps the draft editable.",
+          "zh": "侧聊显示具体的输入或运行时错误，失败后草稿仍可编辑，不再只显示 invalid text。"
+        },
+        {
+          "kind": "item",
+          "text": "Avatar theme cards show one portrait per card. Portraits are AI-generated, unpolished, and may change in later versions.",
+          "zh": "头像主题卡片每张显示一幅立绘。头像为 AI 生成，未精修，后续版本随时可能更换。"
+        },
+        {
+          "kind": "heading",
+          "text": "Conversation and workspace"
+        },
+        {
+          "kind": "item",
+          "text": "Hide the sidebar and peek from its edge; title-bar capsules are clearer over wallpaper, toolbars wrap, and submenus stay inside the window.",
+          "zh": "隐藏侧栏后可从边缘临时查看；顶栏按钮在壁纸上更清楚，工具栏会换行，子菜单不再被裁掉。"
+        },
+        {
+          "kind": "item",
+          "text": "Turn diffs open faster in a full-height Shelf page. Delegation details have a Back action, and scrolling up no longer pulls the conversation back down.",
+          "zh": "本轮改动打开更快，使用全高工具页；委托详情增加返回入口，向上翻阅历史时不再被拉回底部。"
+        },
+        {
+          "kind": "item",
+          "text": "Pinned project pages follow the current project, and project handover actions hide when there is nothing to handle.",
+          "zh": "固定的项目视图直接打开当前项目；没有待办事项时，项目交接操作区自动隐藏。"
+        },
+        {
+          "kind": "item",
+          "text": "Fill mode uses the available workspace, code and CJK fonts can be chosen separately, and quota gauges have individual display switches.",
+          "zh": "填满模式可铺满工作区；代码和中文字体可单独选择；每条额度可分别控制显示。"
+        },
+        {
+          "kind": "heading",
+          "text": "Portraits and experimental windows"
+        },
+        {
+          "kind": "item",
+          "text": "The new default avatar pack includes 20 themes and 720 portraits, with different portraits assigned within a project where possible. The images are AI-generated, unpolished, and may change in any later version; the package is about 50 MB larger.",
+          "zh": "新版默认头像包含二十套主题、七百二十张立绘，同一项目尽量分配不同头像。AI 生成，未精修，后续版本随时可能更换；安装包约增加五十兆。"
+        },
+        {
+          "kind": "item",
+          "text": "Multi-window remains experimental and off by default. Extra windows can increase CPU usage; opening three or more windows shows a one-time notice.",
+          "zh": "多窗口仍为默认关闭的实验功能；增加窗口可能提高处理器占用，打开三个及以上窗口时会出现一次提示。"
+        },
+        {
+          "kind": "heading",
+          "text": "Host capabilities and services"
+        },
+        {
+          "kind": "item",
+          "text": "On r267 hosts with the matching capabilities, use delegation routing approvals, remote file copies, project services, eligible service owners, Kimi accounts, DSH relay addresses and runtime variants. Older hosts keep their supported controls.",
+          "zh": "搭配新版主机及对应能力，可使用委托路由审批、远程文件副本、项目服务、合适的服务负责人、账号管理、中转地址和运行时变体；这些入口需要后端升级至对应版本，旧主机继续显示它支持的功能。"
+        },
+        {
+          "kind": "item",
+          "text": "DSH and Kimi are labelled experimental. Existing agents keep their pinned runtimes; this desktop package does not upgrade the daemon.",
+          "zh": "两种新增提供商均标为实验功能；已有智能体继续使用固定的运行时，桌面安装包不会升级后端。"
+        },
+        {
+          "kind": "item",
+          "text": "Automatic-retry waiting status requires cutex r268 and stays hidden on older hosts.",
+          "zh": "等待自动重试状态需要后端升级至下一版本；旧主机暂不显示。"
+        },
+        {
+          "kind": "item",
+          "text": "Service and browser pages remember zoom; image menus offer viewing, copying and saving. Remote file copies support progress, cancellation and per-copy retention.",
+          "zh": "服务页和浏览器页会记住缩放比例；图片菜单支持查看、复制和保存；远程副本支持进度、取消和逐份保留。"
+        },
+        {
+          "kind": "heading",
+          "text": "Delegations and message recovery"
+        },
+        {
+          "kind": "item",
+          "text": "On r266 hosts, review delegation approvals, pause a group, stop descendants, control continuation rounds and budgets, and close stuck agent messages with a recorded reason. Older hosts keep their supported controls.",
+          "zh": "搭配 r266 主机，可以复核委托审批、批量暂停、停止后续委托、管理续轮和额度，并带理由关闭卡住的智能体消息。旧主机继续显示它支持的入口。"
+        },
+        {
+          "kind": "item",
+          "text": "Abandoned or stopped delegations leave project cards after the confirmed state arrives; pending decisions refresh when the host reconnects or the window regains focus.",
+          "zh": "放弃或停止委托后，项目卡片会按确认后的状态更新；主机重连或窗口重新获得焦点时，会重新核对待处理事项。"
+        },
+        {
+          "kind": "item",
+          "text": "Confirmed owner delivery supersedes stale pending rows. Uncertain writes keep their original request identity across reloads instead of being resent automatically.",
+          "zh": "确认送达的主人消息不再被旧的待处理状态盖回；结果不明确的操作在重载后保留原请求身份，不会自动重发。"
+        },
+        {
+          "kind": "heading",
+          "text": "Conversation and Shelf layout"
+        },
+        {
+          "kind": "item",
+          "text": "Short panes keep room for history: the composer is capped, upcoming messages fold to one row, and the composer toolbar wraps instead of clipping.",
+          "zh": "矮窗格会为历史记录留出空间：输入框限制高度，接下来的消息收成一行，输入框工具栏空间不足时换行，不再被裁掉。"
+        },
+        {
+          "kind": "item",
+          "text": "Shelf splits collapse only when minimum page heights no longer fit. Dividers beside folded pages remain draggable, Shelf widths stay steady, and the gap beside the sidebar resizes it.",
+          "zh": "工具页拆分只在放不下最小高度时收起；收起页旁的分隔条仍可拖动，工具页开合宽度更稳定，侧栏与会话之间的空隙也能调整侧栏宽度。"
+        },
+        {
+          "kind": "item",
+          "text": "Conversation scrolling stays anchored while upcoming rows shrink and panes maximise or restore. Project activity keeps a useful share of its page.",
+          "zh": "接下来内容缩短、窗格最大化或还原时，历史滚动位置更稳定；项目动态区域也会保留足够的可用空间。"
+        },
+        {
+          "kind": "heading",
+          "text": "Images, appearance and everyday tools"
+        },
+        {
+          "kind": "item",
+          "text": "Sent and historical images reopen more reliably. Claude image input converted to a file path shows its thumbnail and an explicit path-insertion label; missing images keep a clear placeholder.",
+          "zh": "发送后的图片和历史图片重新打开更可靠；Claude 图片转成文件路径插入时，会显示缩略图和路径插入标记，图片失效时保留明确的占位提示。"
+        },
+        {
+          "kind": "item",
+          "text": "Dark code highlighting, danger-button contrast, CJK font fallback, portraits, sender names and status-row sizing are more consistent. Runtime settings group native, Claude and DSH versions more clearly.",
+          "zh": "深色代码高亮、危险按钮对比度、中日韩字体回退、头像、发送者名称和状态行高度更一致；运行时设置也更清楚地分组显示原生程序、Claude 和 DSH 版本。"
+        },
+        {
+          "kind": "item",
+          "text": "Open file viewers can refresh after confirmed file changes while protecting drafts and HTML form state. Artifacts offer link and file-path copying; panel guides and rules controls are easier to reach.",
+          "zh": "打开的文件可在确认变更后自动刷新，同时保护未保存内容和 HTML 表单状态。成果支持复制链接与文件路径，面板引导和规则设置入口也更容易找到。"
+        },
+        {
+          "kind": "item",
+          "text": "Background reads share bounded host queues and 503 cooldowns while foreground actions remain responsive. SSH hosts can try ordered addresses, with forwarding disabled and host identity checked.",
+          "zh": "后台读取共用有上限的主机队列和 503 等待，前台操作仍可及时响应。SSH 主机可按顺序尝试多个地址，禁用转发，并核对主机身份。"
+        },
+        {
+          "kind": "item",
+          "text": "Fix sending images to cutex r259 by uploading attachments before submitting the message.",
+          "zh": "修复向 cutex r259 发送图片失败的问题：先上传附件，再提交消息。"
+        },
+        {
+          "kind": "heading",
+          "text": "Upgrade and host support"
+        },
+        {
+          "kind": "item",
+          "text": "Cutex 0.2.0 “Beautiful World” brings the new workspace, Shelf and tray layout together with guided setup, clearer settings and better collaboration. Upgrade from 0.1.x without creating new agents or changing their pinned runtimes.",
+          "zh": "本次更新把工作区、Shelf 和托盘的新布局，与入门引导、设置整理和协作改进放在一起。从旧版本升级时，无须重新创建智能体，也不会自动更换已有会话固定使用的运行时。"
+        },
+        {
+          "kind": "item",
+          "text": "Use cutex r259 and claude-r28 for the complete release. Event-blob images, agent pause/resume and the Claude Code source choice require the corresponding r259 host capabilities. Update the desktop and each host separately.",
+          "zh": "完整功能搭配主机后端 r259 和运行时 claude-r28 使用。图片引用、智能体暂停与继续、Claude 来源选择，需要主机提供对应的新功能。桌面应用和各台主机需要分别更新。"
+        },
+        {
+          "kind": "item",
+          "text": "Older r258 or r252 hosts remain usable. Supported conversations and tools stay available; pause controls and Claude source selection stay unavailable when the host does not advertise them. Existing inline images and older history-media references remain readable. An unavailable image shows a placeholder instead of failing the conversation.",
+          "zh": "旧主机仍可连接，原有会话和工具继续按主机支持的功能使用。主机不支持时，不显示智能体暂停入口，也不能选择新的模型程序来源。旧版内嵌图片和历史图片仍可读取，暂时无法读取的图片显示占位提示，不会让整个会话打不开。"
+        },
+        {
+          "kind": "heading",
+          "text": "Workspaces and Shelf"
+        },
+        {
+          "kind": "item",
+          "text": "Each conversation remembers its own Shelf, pages, tabs, widths and folded state. Open conversations side by side, project one into a Shelf, or return to a saved workspace from the tray. Larger windows can allow a third conversation column.",
+          "zh": "每个会话会记住自己的工具页、标签、宽度和收起状态。你可以并排打开会话，把另一个会话放进工具页，或从托盘返回原来的工作区。大屏幕可以开启第三列会话。"
+        },
+        {
+          "kind": "item",
+          "text": "Drag pages, tabs and panes to merge, split or move them. Drop previews show the result before you let go, and layout changes offer Undo. The outline or filled preview choice now applies consistently.",
+          "zh": "拖动页面、标签和窗格，可以合并、拆分或移动。松开鼠标前会预览放置结果，改动后可以撤销。框线或填色的预览选项现在会一致地应用到放置区域。"
+        },
+        {
+          "kind": "item",
+          "text": "Conversation headers keep the agent’s status and notifications beside its role, with service links in a compact menu. Panels can be folded, maximised or shown full screen; resizing remains available beside a folded Shelf.",
+          "zh": "会话标题把状态和通知放在角色旁，服务入口收在紧凑的菜单中。面板可以收起、最大化或全屏显示，工具页收起后仍能调整会话宽度。"
+        },
+        {
+          "kind": "item",
+          "text": "The desktop and tray have separate shortcut lists. Drag to pin, unpin or put an item on the desktop; reorder tray pins and optionally use two rows. Home widgets can be added, moved and resized.",
+          "zh": "桌面图标和托盘固定项分开保存。拖动可以固定、取消固定，或把一项放到桌面上；托盘固定项可排序，也可开启两排。主页小组件可以添加、移动和调整大小。"
+        },
+        {
+          "kind": "heading",
+          "text": "Agents, projects and collaboration"
+        },
+        {
+          "kind": "item",
+          "text": "The roster, compact sidebar and quick switcher make agents, services, artifacts and pages easier to find. Project view collects members, activity and results. Agent and project badges have clearer editing and wider labels on supported hosts.",
+          "zh": "花名册、窄侧栏和快速切换器，方便查找智能体、服务、成果和页面。项目视图集中显示成员、动态和结果；智能体与项目徽章的编辑入口更清楚，新主机支持更宽的标记。"
+        },
+        {
+          "kind": "item",
+          "text": "Projects can show their director and operators, director change notices, pending handovers and start records awaiting review. These controls follow the host’s capabilities and your permissions. The role names remain customisable.",
+          "zh": "项目可以显示主管和副主管、主管变更通知、待交接事项，以及需要复核的启动记录。入口按主机功能和你的权限显示，角色称呼仍可自定义。"
+        },
+        {
+          "kind": "item",
+          "text": "Type @ in the composer to choose an agent or a file. Agent mentions appear as avatar chips, keep the exact agent identity when copied or pasted, and open that agent when clicked, including on another host.",
+          "zh": "在输入框输入 @，可以选择智能体或文件。智能体会显示为头像标签，复制、粘贴后仍指向同一个成员；点击可以打开对应会话，也支持另一台主机上的成员。"
+        },
+        {
+          "kind": "item",
+          "text": "Pause an agent to let its current turn finish before it stops starting new turns. Later messages, delegations and reminders wait until you resume it. This is separate from pausing new delegations, which leaves running delegations alone. Requires an r259 host.",
+          "zh": "暂停智能体时，它会先完成当前这一轮，再停止开始新的一轮。后续消息、委托和提醒排队等待，继续后再处理。这与「暂停新委托」不同，后者不会停止正在执行的委托；智能体暂停需要新版主机。"
+        },
+        {
+          "kind": "item",
+          "text": "Character avatar themes can be mixed, while emoji and initials remain available. A one-time cleanup removes accidentally saved default emoji so those agents follow the chosen avatar style again. Director headwear includes crown and mianguan styles, with agent state still visible.",
+          "zh": "拟人头像主题可以混用，也保留表情和首字头像。升级时会一次性清除以前误保存的默认表情，让这些智能体重新跟随所选头像风格。主管头饰新增王冠和冕旒，工作状态仍显示在头像上。"
+        },
+        {
+          "kind": "heading",
+          "text": "Conversations and images"
+        },
+        {
+          "kind": "item",
+          "text": "The composer and Next panel work together. Queue, steer and next-turn delivery are labelled more accurately, including Claude messages with images. Messages already read or cancelled leave the pending list without jumping the layout.",
+          "zh": "输入框和「接下来」面板一起工作。排队、插入和下一轮发送的说明更准确，也能区分带图片的消息。已经读取或取消的消息会离开待处理列表，布局不会因此来回跳动。"
+        },
+        {
+          "kind": "item",
+          "text": "Large event images use authenticated blob references on r259 instead of being copied repeatedly through the event stream. Lazy loading reserves the image’s space when its dimensions are known. Existing inline images remain supported.",
+          "zh": "新版主机把大图片作为经过授权的引用传递，减少事件中反复复制图片造成的内存和存储占用。延后加载时，会尽量按已知尺寸保留图片位置；旧的内嵌图片格式继续支持。"
+        },
+        {
+          "kind": "item",
+          "text": "Enlarge images in the side pane, zoom or pan them, and copy the image itself. Editing queued messages keeps their image attachments. HTML files can be viewed as an offline page or as source.",
+          "zh": "图片可以在侧边放大、缩放、移动，并复制图片本身。编辑排队消息时会保留图片附件；本地网页文件可以离线查看页面，也可以切换到源码。"
+        },
+        {
+          "kind": "item",
+          "text": "Turn actions, notes and bookmarks are easier to reach. Tool rows keep a steadier height as work completes. Tab and Shift+Tab in a terminal are left to the shell for completion.",
+          "zh": "回合操作、笔记和书签更容易找到。工具执行前后的行高更稳定；终端中的制表键与反向制表键交给命令行处理，用于补全。"
+        },
+        {
+          "kind": "heading",
+          "text": "Profiles and runtimes"
+        },
+        {
+          "kind": "item",
+          "text": "New-agent setup can recommend a Profile after you choose a provider. Supported agents can fork into another Profile of the same provider after a preview of the target and prompt-cache sharing.",
+          "zh": "新建智能体时，可以先选择提供方，再获得配置推荐。支持分叉的智能体可以选择同一提供方的另一个配置，确认前会预览目标配置和提示缓存是否共用。"
+        },
+        {
+          "kind": "item",
+          "text": "Recognise the same account on different hosts, link it manually when needed, undo a link, and choose whether linked Profiles share appearance. Quota and usage views explain their account grouping more clearly.",
+          "zh": "可以识别不同主机上的同一个账号，必要时手动关联，并撤销关联。关联的配置可以选择是否共用外观；额度和用量页面也会更清楚地说明账号归组方式。"
+        },
+        {
+          "kind": "item",
+          "text": "Claude setup shows runtime readiness. claude-r28 includes Python and Claude Code; with r259, choose the bundled Claude Code or a version detected on the host. Per-model context and auto-compaction settings include more presets. Existing agents keep their pinned runtime until you explicitly upgrade them.",
+          "zh": "引导会显示运行时是否就绪。新版 Claude 运行时随附解释器和模型程序；搭配新版主机，可以选择随附程序或主机上检测到的已安装版本。各模型的上下文和自动压缩设置增加了预设。已有智能体继续使用固定的运行时，直到你明确升级它们。"
+        },
+        {
+          "kind": "heading",
+          "text": "Services, approvals and storage"
+        },
+        {
+          "kind": "item",
+          "text": "Services have cards and a detailed list, owner-managed groups and notes, foreground/background organisation, and reversible archive. Temporary service retention and pinning are clearer on hosts that support them.",
+          "zh": "服务页提供卡片和详细列表，支持由你管理分组、备注、前台与后台分类，以及可恢复的归档。主机支持时，也能更清楚地设置临时服务的保留时间和固定状态。"
+        },
+        {
+          "kind": "item",
+          "text": "Host owners can create scoped, expiring auto-approval rules. High-risk permissions need explicit confirmation; browser claims still require you to choose a tab. Pausing or removing a rule does not grant broader permissions.",
+          "zh": "主机所有者可以创建有范围和有效期的自动审批规则。高风险权限仍需明确确认，浏览器授权仍要由你选择标签页。暂停或移除规则不会扩大权限。"
+        },
+        {
+          "kind": "item",
+          "text": "Settings → Storage shows host usage and retention. Cleanup previews what can be removed before asking you to confirm, with stronger confirmation for higher-risk actions. A bounded scan says when its results are partial; archived conversations remain restorable.",
+          "zh": "在设置 → 存储中，可以查看各主机的占用和保留规则。清理前先预览可处理的数据，再由你确认；风险较高的操作需要更明确的确认。检查范围受限时会说明结果不完整，已归档会话仍可恢复。"
+        },
+        {
+          "kind": "heading",
+          "text": "Settings, guidance and reliability"
+        },
+        {
+          "kind": "item",
+          "text": "Settings are grouped by what you want to change. Rows explain which host or device they affect and when a change takes effect. Keyboard shortcuts for 29 window and pane commands can be rebound, checked for conflicts or reset; their tooltips show the effective keys.",
+          "zh": "设置按用途重新分组，并说明改动影响哪台主机或设备、何时生效。窗口和窗格的二十九项快捷操作可以重新绑定、检查冲突和恢复默认，相关提示会显示实际按键。"
+        },
+        {
+          "kind": "item",
+          "text": "The first 0.2.0 launch offers one combined introduction for new and existing users, keeping existing settings. Guides and small contextual tips can be skipped and replayed from Settings → Help. What’s new and the full release history remain available afterwards.",
+          "zh": "首次启动本版本时，新老用户都会看到统一的入门引导，已有设置会保留。引导和界面旁的小提示可以跳过，也可以在设置 → 帮助中重看；之后仍能查看新功能和完整更新记录。"
+        },
+        {
+          "kind": "item",
+          "text": "Onboarding, guide and shortcut copy is more consistent across languages. Traditional Chinese has separate Mainland China, Taiwan, Hong Kong and Macao choices. Interface terms and avatar styles remain your choice.",
+          "zh": "引导、提示和快捷键文案在各语言中更加一致。繁体中文区分中国大陆、台湾、香港和澳门用词，界面术语和头像风格仍可自行选择。"
+        },
+        {
+          "kind": "item",
+          "text": "Layout saving uses smaller, changed-only writes. More pages and language tables load on demand. Save resources and Smooth first offer a clear performance choice. Short busy-host responses are retried with the host’s requested delay where safe, instead of flashing repeated errors. The app also reports its version when run from a freshly unpacked ZIP or a source install.",
+          "zh": "布局保存减少重复写入，更多页面和语言表按需加载。你可以选择节省资源或流畅优先；主机短暂繁忙时，应用会在安全范围内按主机建议等待后重试，减少反复出现的错误提示。直接解压或源码安装也会正确显示版本。"
+        },
+        {
+          "kind": "item",
+          "text": "Chinese and other input methods can finish choosing a candidate before short fields apply their length limits. Enter confirms the candidate without also submitting a form, changing a badge or triggering a shortcut.",
+          "zh": "中文等输入法选词时，短输入框会等选词完成后再检查长度。回车用于确认候选词，不会同时提交表单、保存徽章或触发快捷操作。"
+        }
+      ]
+    },
+    {
       "version": "0.1.5",
       "title": "First Take",
       "date": "2026-10-20",

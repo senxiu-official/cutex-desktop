@@ -1,29 +1,32 @@
 // Settings → Profile → Claude 账户 (cutex claude-accounts; owner 2026-10-10: a section after the
 // profile list, not a page of its own): the host's Claude accounts — the shared default home,
 // subscription logins and API accounts — with their status, bound profiles, agents and quota.
-// Add / rename / remove go through cutex; logging in and storing an API key happen in a terminal on
-// the host (the guide shows the command, 完成 asks cutex for the status). The desktop never sees a
-// credential (docs/research/claude-multi-account.md decision 2), and nothing here moves agents or
+// Add / rename / remove go through cutex; logging in happens in a terminal on the host (the guide shows
+// the command, 完成 asks cutex for the status). An API key is typed here write-only or stored from a
+// terminal (owner 2026-10-27, docs/design/042); the desktop never reads one back, and nothing here moves agents or
 // profiles between accounts (decision 8). The add flow and the guides are AccountFlow.tsx.
+import { isImeComposing } from "../../lib/ime";
 import { useState } from "react";
 import { ComponentNotice } from "../../components/ComponentCard";
 import { CLAUDE_RUNTIME_COMPONENT } from "../../lib/componentCard";
-import { ChevronDown, ChevronRight, ChevronUp, KeyRound, Pencil, UserRound } from "lucide-react";
+import { KeyRound, Pencil, UserRound } from "lucide-react";
 import { claudeAccountLabel, type ClaudeAccount, type ClaudeAccountKind, type ClaudeAccountQuota } from "../../../../shared/claudeAccounts";
 import type { CutexRefusal } from "../../../../shared/ipc";
 import { GaugeChip } from "../../components/GaugeBar";
-import { AddButton, ArmedRemove, Button, ErrorNote, IconButton, Loading, Notice, RefreshButton, Section, TextInput } from "../../components/settings/Form";
+import { AddButton, ArmedRemove, Button, ErrorNote, IconButton, Loading, Notice, RefreshButton, Section, SettingsGroup, TextInput, type SettingsRowDecoration } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { formatWhen, useClock } from "../../lib/time";
 import { formatTokens } from "../../lib/usage";
 import { services } from "../app";
-import { CLAUDE_ACCOUNTS_SECTION, sortClaudeAccounts } from "../../lib/claudeAccounts";
+import { CLAUDE_ACCOUNTS_SECTION, CLAUDE_API_ACCOUNT_ADD_ANCHOR, sortClaudeAccounts } from "../../lib/claudeAccounts";
+import { settingsAnchorId } from "../../lib/settingsNav";
 import { useOnSettingsReveal } from "../../lib/settingsSearchView";
 import { AccountGuide, AddForm } from "./AccountFlow";
 import { accountsNeedingAttention, accountState, accountSummary, checkedAtSeconds, formatCost, needsTerminal, quotaNote, STATE_TONE, type AccountState, type StateTone } from "./accountView";
 import { errorText, useAccountTitle, useRefusalText } from "./hooks";
 import { useClaudeAccounts } from "./useClaudeAccounts";
 import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
+import { SettingsDisclosureRow } from "../../components/settings/SettingsDisclosureRow";
 
 const TONE_TAG: Record<StateTone, string> = {
   ok: "bg-ok/15 text-ok-text",
@@ -31,7 +34,7 @@ const TONE_TAG: Record<StateTone, string> = {
   danger: "bg-danger/15 text-danger",
   muted: "bg-surface-2 text-subtle",
 };
-const TAG = "inline-flex h-4 shrink-0 items-center rounded px-1 text-[10px] whitespace-nowrap";
+const TAG = "inline-flex h-4 shrink-0 items-center rounded px-1 text-caption/[inherit] whitespace-nowrap";
 
 /** The `settings.section` body (its anchor is the item id, set by `<SettingsSections>`). */
 export function ClaudeAccountsSection() {
@@ -69,6 +72,7 @@ function AccountsSection({ hostId }: { hostId: string }) {
   const [adding, setAdding] = useState<ClaudeAccountKind | null>(null);
   // At most one guide open (login or key, by the account's kind).
   const [guide, setGuide] = useState<string | null>(null);
+  useOnSettingsReveal(CLAUDE_API_ACCOUNT_ADD_ANCHOR, () => { setOpen(true); setAdding("api"); setGuide(null); });
   const addDisabled = adding !== null || !data.list;
   const add = (kind: ClaudeAccountKind) => (setOpen(true), setAdding(kind));
   const sorted = data.list ? sortClaudeAccounts(data.list) : null;
@@ -76,12 +80,9 @@ function AccountsSection({ hostId }: { hostId: string }) {
   return (
     <Section
       title={t("claude-accounts.section")}
-      hint={t("claude-accounts.sectionHint")}
+      hint={t("claude-accounts.sectionHintKeys")}
       actions={
         <>
-          <IconButton label={t(open ? "claude-accounts.collapse" : "claude-accounts.expand")} onClick={() => toggle(!open)}>
-            {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </IconButton>
           <RefreshButton onClick={() => void data.load()} disabled={data.loading} />
           <AddButton disabled={addDisabled} onClick={() => add("api")}>
             {t("claude-accounts.addApi")}
@@ -94,16 +95,16 @@ function AccountsSection({ hostId }: { hostId: string }) {
     >
       {/* Claude agents need the claude-runtime component on this host (components spec v2 §5). */}
       <ComponentNotice name={CLAUDE_RUNTIME_COMPONENT} hostId={hostId} className="mb-2" />
-      {!open && (
-        <button type="button" aria-expanded={false} onClick={() => toggle(true)} className="flex w-full min-w-0 items-center gap-2 py-2.5 text-left text-sm hover:text-foreground">
-          <ChevronRight size={14} className="shrink-0 text-subtle" />
-          <span className="min-w-0 flex-1 truncate text-muted">
-            {sorted ? t("claude-accounts.collapsed", { n: sorted.length, names: sorted.map(titleOf).join(" · ") }) : data.error ? data.error : "…"}
-          </span>
-          {attention > 0 && <span className="shrink-0 text-xs text-warn">{t("claude-accounts.collapsedAttention", { n: attention })}</span>}
-        </button>
-      )}
-      {open && <AccountsBody data={data} adding={adding} setAdding={setAdding} guide={guide} setGuide={setGuide} sorted={sorted} />}
+      <SettingsDisclosureRow
+        title={sorted ? t("claude-accounts.collapsedCount" as MessageKey, { n: sorted.length }) : t("claude-accounts.section")}
+        summary={sorted ? sorted.map(titleOf).join(" · ") : undefined}
+        status={data.error || (attention > 0 ? t("claude-accounts.collapsedAttention", { n: attention }) : !sorted ? "…" : undefined)}
+        attention={!!data.error || attention > 0}
+        open={open}
+        onOpenChange={toggle}
+      >
+        <AccountsBody data={data} adding={adding} setAdding={setAdding} guide={guide} setGuide={setGuide} sorted={sorted} />
+      </SettingsDisclosureRow>
     </Section>
   );
 }
@@ -120,6 +121,7 @@ function AccountsBody({ data, adding, setAdding, guide, setGuide, sorted }: {
   return (
     <>
       {adding && (
+        <div id={adding === "api" ? settingsAnchorId(CLAUDE_API_ACCOUNT_ADD_ANCHOR) : undefined}>
         <AddForm
           key={adding}
           kind={adding}
@@ -127,15 +129,19 @@ function AccountsBody({ data, adding, setAdding, guide, setGuide, sorted }: {
           onCreated={(account) => {
             data.put(account);
             setAdding(null);
-            setGuide(account.id);
+            // A key typed in the form is already stored: no guide needed.
+            if (!(account.kind === "api" && account.api?.apiKeyPresent)) setGuide(account.id);
           }}
         />
+        </div>
       )}
       {!data.list && !data.error && !data.unsupported && <Loading rows={3} />}
       {data.unsupported && <Notice>{t("claude-accounts.unsupported")}</Notice>}
-      {sorted?.map((account) => (
-        <AccountRow
-          key={account.id}
+      {sorted && (
+      <>
+      {sorted.map((account) => (
+        <SettingsGroup key={account.id} agents="next" source="host">{decoration => <AccountRow
+          decoration={decoration}
           account={account}
           quota={data.quotas[account.id]}
           guideOpen={guide === account.id}
@@ -149,14 +155,17 @@ function AccountsBody({ data, adding, setAdding, guide, setGuide, sorted }: {
             if (guide === account.id) setGuide(null);
           }}
           onStale={() => void data.load()}
-        />
+        />}</SettingsGroup>
       ))}
+      </>
+      )}
       {data.error && <ErrorNote>{data.error}</ErrorNote>}
     </>
   );
 }
 
 interface RowProps {
+  decoration: SettingsRowDecoration;
   account: ClaudeAccount;
   quota: ClaudeAccountQuota | null | undefined;
   guideOpen: boolean;
@@ -167,7 +176,7 @@ interface RowProps {
   onStale(): void;
 }
 
-function AccountRow({ account: a, quota, guideOpen, onGuide, onChanged, onRemoved, onStale }: RowProps) {
+function AccountRow({ decoration, account: a, quota, guideOpen, onGuide, onChanged, onRemoved, onStale }: RowProps) {
   const api = useTargetApi();
   const { t, locale } = useI18n();
   const now = useClock();
@@ -238,7 +247,7 @@ function AccountRow({ account: a, quota, guideOpen, onGuide, onChanged, onRemove
   const terminalLabel: MessageKey = api_ ? (state === "keyReady" ? "claude-accounts.replaceKey" : "claude-accounts.setKey") : state === "loggedIn" ? "claude-accounts.relogin" : "claude-accounts.login";
   const detail = [...summary, ...(!summary.length && a.isDefault ? [t("claude-accounts.defaultHint")] : []), ...(checked && !api_ ? [t("claude-accounts.checkedAt", { time: formatWhen(checked, now, locale) })] : [])];
   return (
-    <div className="-mx-4 border-b border-border px-4 py-2.5 last:border-b-0">
+    <div {...decoration.attributes} className="-mx-4 border-b border-border px-4 py-2.5 last:border-b-0">
       <div className="flex min-h-7 items-center gap-2.5">
         <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${a.isDefault ? "bg-accent/12 text-accent" : "bg-surface-2 text-muted"}`}>
           <Icon size={14} />
@@ -256,6 +265,7 @@ function AccountRow({ account: a, quota, guideOpen, onGuide, onChanged, onRemove
                   disabled={busy === "rename"}
                   onChange={(v) => (setDraft(v), setProblem(null))}
                   onKeyDown={(e) => {
+                    if (isImeComposing(e)) return;
                     if (e.key === "Enter") void rename();
                     if (e.key === "Escape") (e.preventDefault(), setRenaming(false), setProblem(null));
                   }}
@@ -270,6 +280,7 @@ function AccountRow({ account: a, quota, guideOpen, onGuide, onChanged, onRemove
                 {title}
               </span>
             )}
+            {decoration.marker}
             <span className={`${TAG} bg-surface-2 text-muted`}>{t(api_ ? "claude-accounts.kind.api" : "claude-accounts.kind.subscription")}</span>
             <StateTag state={state} />
           </div>

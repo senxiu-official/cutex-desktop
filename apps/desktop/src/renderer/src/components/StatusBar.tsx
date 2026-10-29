@@ -6,15 +6,20 @@
 // the rest sit on the right. Each panel floats up over the timeline, positioned against this row.
 // Always mounted (an empty row has no height). The open agent's pending owner notices
 // (components/PendingOwnerNotes) lead the start side.
+// 需要你 (`needsYou`, owner 2026-10-27): the strip sits in this row — on the left beside the right-side chips when the
+// left is empty, else on a line of its own above them (styles.css [data-status-row]; no measuring). A narrow row
+// (`tight`, lib/sizeFlags) shortens the right-side chips to icon + count (StatusChipWords) so 需要你 keeps room.
 import { useI18n } from "../i18n";
 import { ItemBoundary } from "../modules/Outlet";
 import type { RevealIntent } from "../modules/slots";
 import { shownOn, type PlacedStatus } from "../lib/statusItems";
 import { revealStatusItem, useStatusItems } from "../lib/statusItemsView";
 import { legacyHome } from "../lib/statusSurfaces";
-import { useApp } from "../store";
+import { dataFlags, useSizeFlags } from "../lib/sizeFlags";
+import { STATUS_ROW_FLAGS } from "../lib/statusRow";
 import { convNotify, useConvHost, useConvScope } from "../lib/conversationScope";
 import { PendingOwnerNotes } from "./PendingOwnerNotes";
+import { NeedsYouStrip } from "./NeedsYouStrip";
 
 function BarPart({ sessionId, hostId, placed }: { sessionId: string; hostId: string; placed: PlacedStatus }) {
   const { t } = useI18n();
@@ -35,22 +40,24 @@ function BarPart({ sessionId, hostId, placed }: { sessionId: string; hostId: str
   );
 }
 
-export function StatusBar({ sessionId }: { sessionId: string }) {
+export function StatusBar({ sessionId, needsYou = false }: { sessionId: string; needsYou?: boolean }) {
   const items = useStatusItems(sessionId);
   // The conversation's host (it may not be the focus host; lib/conversationScope).
   const hostId = useConvHost();
+  const [sizeRef, flags] = useSizeFlags(STATUS_ROW_FLAGS);
   const side = (s: "start" | "end") =>
     items
       .filter((p) => (p.item.barSide ?? "end") === s)
       .map((p) => <BarPart key={p.item.id} sessionId={sessionId} hostId={hostId} placed={p} />);
   return (
-    <div className="side-col side-col-composer relative flex w-full items-center gap-4 px-6">
-      <div className="flex min-w-0 flex-1 items-center gap-4">
+    <div ref={sizeRef} {...dataFlags(flags)} data-status-row="" className="group/status side-col side-col-composer relative flex w-full flex-wrap items-center gap-x-4 gap-y-1.5 px-6">
+      {needsYou && <NeedsYouStrip sessionId={sessionId} inline />}
+      <div data-status-start="" className="flex min-w-0 flex-1 items-center gap-4">
         {/* The open agent's notices waiting for the owner (等你回复 / 需要你): first, before the items. */}
         <PendingOwnerNotes sessionId={sessionId} hostId={hostId} />
         {side("start")}
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-4">{side("end")}</div>
+      <div data-status-end="" className="ml-auto flex shrink-0 items-center gap-4 empty:hidden">{side("end")}</div>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { isImeComposing } from "../lib/ime";
 // Title bar host switcher (multi-host RFC §7, P1): the button shows the view scope (one host, a group,
 // or 所有设备); the menu picks the scope and switches hosts' connections (⏻) without changing it.
 // Ctrl+Shift+H opens it (★ Q19); ↑ / ↓ / Enter / Esc inside. Model: lib/hostScope, actions:
@@ -10,16 +11,19 @@ import { ALL_HOSTS, singleHostScope, scopeTitle, versionOutliers, hostVersionTit
 import { sameScope, switcherGroups } from "../../../shared/hosts";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { hasNoHost } from "../lib/hosts";
-import { isMac } from "../lib/openModifiers";
+import { matchesCommand } from "../lib/keybindings";
+import { useBindingLabel, withKey } from "../lib/useKeybindings";
 import { setHostConnected, setViewScope, useHostScope } from "../lib/useHostScope";
 import { useApp } from "../store";
 import { HostDot, HostPlatformIcon } from "./HostMark";
 import { ScriptText } from "./ScriptText";
+import { Tag } from "./Tag";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 const NO_DRAG = "[app-region:no-drag]";
 
-/** Ctrl+Shift+H (⌘⇧H on macOS): open / close the switcher. */
-const isSwitcherKey = (e: KeyboardEvent) => (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.code === "KeyH";
+/** The switcher's key (lib/keybindings `hostSwitcher`, default Ctrl+Shift+H / ⌘⇧H): open / close it. */
+const isSwitcherKey = (e: KeyboardEvent) => matchesCommand("hostSwitcher", e);
 
 interface Row {
   key: string;
@@ -29,6 +33,8 @@ interface Row {
 }
 
 export function HostSwitcher() {
+  const win = useOwnerWindow();
+  const switcherKey = useBindingLabel("hostSwitcher");
   const { t } = useI18n();
   const scope = useHostScope();
   const hostsState = useApp((s) => s.hosts);
@@ -41,7 +47,7 @@ export function HostSwitcher() {
   const versionText = { dev: t("cutexBuild.dev"), legacy: t("cutexBuild.legacy") };
   const statusText = (h: HostLook) => (h.indicator.status === "online" ? null : t(`host.status.${h.indicator.status}` as MessageKey));
   const hostTip = (h: HostLook) =>
-    [`${h.label} · ${t(`host.status.${h.indicator.status}` as MessageKey)}`, h.connected && h.indicator.status === "online" ? `cutex ${hostVersionTitle(h.build, versionText)}` : null, h.view.kind === "ssh" ? `ssh ${h.view.target ?? ""}` : null, h.indicator.problem ? t(`host.problem.${h.indicator.problem}` as MessageKey) : null, h.indicator.detail]
+    [`${h.label} · ${t(`host.status.${h.indicator.status}` as MessageKey)}`, h.connected && h.indicator.status === "online" ? `cutex ${hostVersionTitle(h.build, versionText)}` : null, h.view.kind === "ssh" ? `ssh ${h.view.conn?.tunnel?.target ?? h.view.target ?? ""}` : null, h.indicator.problem ? t(`host.problem.${h.indicator.problem}` as MessageKey) : null, h.indicator.detail]
       .filter(Boolean)
       .join("\n");
   const outliers = useMemo(() => versionOutliers(scope.hosts), [scope.hosts]);
@@ -107,9 +113,9 @@ export function HostSwitcher() {
             </span>
             {statusText(h) && <span className={`shrink-0 text-xs ${h.indicator.status === "error" ? "text-danger" : h.indicator.status === "disconnected" || h.indicator.status === "offline" ? "text-subtle" : "text-warn"}`}>{statusText(h)}</span>}
             {h.version && (
-              <span title={outliers.has(h.id) ? t("hostSwitcher.versionDiffers") : hostVersionTitle(h.build, versionText)} className={`shrink-0 rounded px-1 font-mono text-[10px] ${outliers.has(h.id) ? "bg-warn/15 text-warn-text" : "text-subtle"}`}>
+              <Tag tone={outliers.has(h.id) ? "attention" : "neutral"} title={outliers.has(h.id) ? t("hostSwitcher.versionDiffers") : hostVersionTitle(h.build, versionText)} className="font-mono">
                 {h.version}
-              </span>
+              </Tag>
             )}
             {tick(sameScope(scope.scope, singleHostScope(h.id)))}
             <button
@@ -159,15 +165,16 @@ export function HostSwitcher() {
   cursorRef.current = cursor;
   rowsRef.current = rows;
 
-  // Ctrl+Shift+H anywhere toggles the menu.
+  // The switcher key anywhere toggles the menu.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return;
       if (!isSwitcherKey(e)) return;
       e.preventDefault();
       setOpen((v) => !v);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    win.addEventListener("keydown", onKey);
+    return () => win.removeEventListener("keydown", onKey);
   }, []);
 
   // While open: the cursor starts on the current scope; outside clicks / Esc close; ↑ ↓ Enter.
@@ -179,6 +186,7 @@ export function HostSwitcher() {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return;
       if (isSwitcherKey(e)) return;
       const count = rowsRef.current.length;
       if (e.key === "Escape") setOpen(false);
@@ -189,11 +197,11 @@ export function HostSwitcher() {
       e.preventDefault();
       e.stopPropagation();
     };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey, true);
+    win.document.addEventListener("mousedown", onDown);
+    win.document.addEventListener("keydown", onKey, true);
     return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey, true);
+      win.document.removeEventListener("mousedown", onDown);
+      win.document.removeEventListener("keydown", onKey, true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -203,7 +211,7 @@ export function HostSwitcher() {
   const single = scope.scope.kind === "host" ? scope.host(scope.scope.id) : null;
   const scopeGroupId = scope.scope.kind === "group" ? scope.scope.id : null;
   const groupColor = scopeGroupId ? hostsState?.groups.find((g) => g.id === scopeGroupId)?.color : undefined;
-  const buttonTip = [`${t("hostSwitcher.title")} (${isMac() ? "⌘⇧H" : "Ctrl+Shift+H"})`, ...scope.hostsInScope.map(hostTip)].join("\n\n");
+  const buttonTip = [withKey(t("hostSwitcher.title"), switcherKey), ...scope.hostsInScope.map(hostTip)].join("\n\n");
   // No host at all (macOS without a local cutex): say so and go to Settings → 主机 (nothing to switch).
   const noHost = hasNoHost(hostsState);
   let label: ReactNode;
@@ -239,7 +247,7 @@ export function HostSwitcher() {
           {members.map((h) => (
             <span key={h.id} className="flex items-center gap-0.5">
               <HostDot color={h.color} status={h.indicator.status} size={7} title={h.label} />
-              {named && <span className="hidden max-w-16 truncate text-[11px] text-subtle lg:inline">{h.label}</span>}
+              {named && <span className="hidden max-w-16 truncate text-caption/[inherit] text-subtle lg:inline">{h.label}</span>}
             </span>
           ))}
         </span>
@@ -247,7 +255,7 @@ export function HostSwitcher() {
     );
   }
 
-  const sectionTitle = (text: string) => <div className="px-2.5 pt-1.5 pb-0.5 text-[11px] text-subtle">{text}</div>;
+  const sectionTitle = (text: string) => <div className="px-2.5 pt-1.5 pb-0.5 text-caption/[inherit] text-subtle">{text}</div>;
   const rowClass = (i: number) => `flex w-full cursor-default items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm ${i === cursor ? "bg-surface-2" : "hover:bg-surface-2"}`;
   const renderRow = (row: Row, i: number) => (
     <div key={row.key} role="menuitem" tabIndex={-1} onMouseEnter={() => setCursor(i)} onClick={() => activate(row)} className={rowClass(i)}>
@@ -262,6 +270,9 @@ export function HostSwitcher() {
     <div ref={ref} className={`${NO_DRAG} relative min-w-0`}>
       <button
         title={buttonTip}
+        data-host-switcher=""
+        data-hosts-remote={scope.hosts.some((h) => !h.local) ? "" : undefined}
+        data-hosts-version-differs={outliers.size ? "" : undefined}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => (noHost ? openSettings("hosts", { anchor: "addHost" }) : setOpen((v) => !v))}

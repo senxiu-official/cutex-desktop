@@ -8,8 +8,16 @@
 // a code with 403 owner_local_only {action: "pairingCode"}; `?scope=chat|read` refuses writes with
 // device_scope_denied; `?noownerlocal`: an older cutex (none of the new fields).
 // client-remote-close (用户 → 在线的桌面): this desktop (MOCK_SELF_INSTANCE) and host-a · cutex 桌面 0.1.5;
-// 关闭 on host-a → closeRequested, 5 s later closing, then it leaves the list (its countdown ran out).
+// 关闭 on host-a → closeRequested, 5 s later closing, then it leaves the list (its countdown ran out);
+// `?closenoreply`: host-a never reports (the list gives up after 30 s with a timeout). Three remote rows:
+// the current launch, a leftover of the previous launch of the same install (last heartbeat before the
+// new launch connected: the list hides it) and a second install on the same device (a dev run with its
+// own userData), whose owner cancels the countdown (关闭 there ends in 已取消).
 // `?remoteclose`: host-a asks this desktop to close (dev/mockRemoteClose.ts).
+// client-presence-lifecycle (r264; `?nolifecycle` = a cutex with remote close but without it): cutex already
+// replaced the remote leftover (no such row), a closed desktop leaves with `stateChanged` exited, a cancelled
+// one shows as online again; `?peerexit[=s]`: host-a quits normally s seconds (default 8) after start
+// (`closing exited` → its row leaves at once).
 import type { MockCore, ModuleMock } from "../../dev/mockTypes";
 import type { OnlineClient } from "@cutex-desktop/cutex-client";
 
@@ -22,6 +30,7 @@ const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
 const query = () => (typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams());
 /** `?noownerlocal`: a cutex before owner devices (no scope / issuedVia / ttlSeconds / ownerDevice). */
 const NO_OWNER_LOCAL = query().has("noownerlocal");
+const LIFECYCLE = !query().has("nolifecycle");
 type Scope = "full" | "chat" | "read";
 const owned = (scope: Scope, issuedVia: "hostCli" | "pairing") => (NO_OWNER_LOCAL ? {} : { scope, issuedVia });
 const mockClientTokens: import("../../../../shared/ipc").ClientTokenView[] = [
@@ -65,6 +74,28 @@ const mockDesktops: OnlineClient[] = [
   { instanceId: "9d2c41e8-7a55-4c3b-9e0f-2b8e5d7c1a40", installId: "mock-install-host-a", appName: "cutex-desktop", appVersion: "0.1.5", deviceName: "host-a", platform: "win32", userId: "owner", tokenId: "mct-9f8e7d6c5b4a3f2e", local: false, connectedSince: ago(26 * 3_600_000), lastSeen: ago(45_000), allowRemoteClose: true, state: "online", current: false },
 ];
 
+// remote: this launch connected 70 s ago; the previous launch of the same install last beat 80 s before that.
+const TETHYS_STARTED = Date.now() - 70_000;
+const at = (ms: number) => new Date(ms).toISOString();
+mockDesktops.push(
+  { instanceId: "3f6a9b20-1c4d-4e8f-a7b5-6d2e0c9f1a33", installId: "mock-install-remote", appName: "cutex-desktop", appVersion: "0.2.1", deviceName: "remote", platform: "linux", userId: "owner", tokenId: "mct-7e6d5c4b3a291807", local: false, connectedSince: at(TETHYS_STARTED), lastSeen: ago(20_000), allowRemoteClose: true, state: "online", current: false },
+  // The previous launch of the same install: a lifecycle host removed it when the new launch registered.
+  ...(LIFECYCLE ? [] : [{ instanceId: "c81e44d0-9a2b-4f6c-8e1d-3b7a5c0d2e91", installId: "mock-install-remote", appName: "cutex-desktop", appVersion: "0.2.0", deviceName: "remote", platform: "linux", userId: "owner", tokenId: "mct-7e6d5c4b3a291807", local: false, connectedSince: at(TETHYS_STARTED - 5 * 3_600_000), lastSeen: at(TETHYS_STARTED - 80_000), allowRemoteClose: true, state: "online", current: false } satisfies OnlineClient]),
+  { instanceId: "e2d7f051-6b3a-4c9e-b8f2-71a0c4d5e6f7", installId: "mock-install-remote-dev", appName: "cutex-desktop", appVersion: "0.2.1", deviceName: "remote", platform: "linux", userId: "owner", tokenId: "mct-7e6d5c4b3a291807", local: false, connectedSince: ago(40 * 60_000), lastSeen: ago(30_000), allowRemoteClose: true, state: "online", current: false },
+);
+/** Rows whose `lastSeen` stays as stored (the leftover stopped beating). */
+const STOPPED = new Set(["c81e44d0-9a2b-4f6c-8e1d-3b7a5c0d2e91"]);
+/** The remote dev run: its owner cancels the countdown. */
+const CANCELS = new Set(["e2d7f051-6b3a-4c9e-b8f2-71a0c4d5e6f7"]);
+
+/** A lifecycle host: the desktop reported `closing exited` — the row goes at once, with `stateChanged` exited. */
+function exited(core: MockCore, instanceId: string): void {
+  const i = mockDesktops.findIndex((d) => d.instanceId === instanceId);
+  if (i < 0) return;
+  mockDesktops.splice(i, 1);
+  core.emitHost("cutex/client/stateChanged", { instanceId, state: "exited" });
+}
+
 function onlineClientsApi(core: MockCore) {
   const refuse = (code: string, message: string) => ({ ok: false as const, error: { code, message } });
   const setState = (instanceId: string, state: OnlineClient["state"]) => {
@@ -75,7 +106,7 @@ function onlineClientsApi(core: MockCore) {
   };
   return {
     async onlineClients() {
-      return { ok: true as const, value: mockDesktops.map((d) => ({ ...structuredClone(d), lastSeen: d.state === "online" ? new Date(Date.now() - (d.current ? 20_000 : 45_000)).toISOString() : d.lastSeen, self: d.instanceId === MOCK_SELF_INSTANCE })) };
+      return { ok: true as const, value: mockDesktops.map((d) => ({ ...structuredClone(d), lastSeen: d.state === "online" && !STOPPED.has(d.instanceId) ? new Date(Date.now() - (d.current ? 20_000 : 45_000)).toISOString() : d.lastSeen, self: d.instanceId === MOCK_SELF_INSTANCE })) };
     },
     async closeOnlineClient(instanceId: string) {
       if (instanceId === MOCK_SELF_INSTANCE) throw new Error("this desktop is closed from its own window");
@@ -85,7 +116,16 @@ function onlineClientsApi(core: MockCore) {
       if (!row.allowRemoteClose) return refuse("remote_close_disabled", "this client does not allow remote close");
       core.emitHost("cutex/client/closeRequested", { instanceId, requestedBy: { deviceName: "sam-laptop", userId: "owner", local: true }, graceSeconds: 15, at: new Date().toISOString() });
       setState(instanceId, "closeRequested");
+      if (CANCELS.has(instanceId)) {
+        setTimeout(() => setState(instanceId, "cancelled"), 4000);
+        return { ok: true as const, value: { instanceId, state: "closeRequested" as const } };
+      }
+      if (query().has("closenoreply")) return { ok: true as const, value: { instanceId, state: "closeRequested" as const } };
       setTimeout(() => setState(instanceId, "closing"), 5000);
+      if (LIFECYCLE) {
+        setTimeout(() => exited(core, instanceId), 6000);
+        return { ok: true as const, value: { instanceId, state: "closeRequested" as const } };
+      }
       setTimeout(() => {
         const i = mockDesktops.findIndex((d) => d.instanceId === instanceId);
         if (i >= 0 && mockDesktops[i]!.state === "closing") mockDesktops.splice(i, 1);
@@ -96,7 +136,12 @@ function onlineClientsApi(core: MockCore) {
 }
 
 export const mock: ModuleMock = {
-  features: { new: ["client-token-rename", "client-remote-close"] },
+  features: { new: ["client-token-rename", "client-remote-close", ...(LIFECYCLE ? ["client-presence-lifecycle"] : [])] },
+  start: (core) => {
+    const peerExit = query().get("peerexit");
+    if (peerExit === null || !LIFECYCLE || core.legacy) return;
+    setTimeout(() => exited(core, "9d2c41e8-7a55-4c3b-9e0f-2b8e5d7c1a40"), (Number(peerExit) > 0 ? Number(peerExit) : 8) * 1000);
+  },
   api: (core) => {
     core.clientTokenNames.register({
       rename(tokenId, ownerName) {

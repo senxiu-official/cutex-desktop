@@ -10,7 +10,8 @@ import { taskTag } from "../../lib/tasks";
 import { useApp } from "../../store";
 import { services } from "../app";
 import type { CutexRef, RefLinkView, RefOpenResult } from "../slots";
-import { DETAIL, detailOpenArgs, refResult } from "./detail";
+import { DETAIL, detailOpenArgs, detailReturnSource, refResult } from "./detail";
+import { useSide } from "../../lib/sideLayoutStore";
 
 export function openDelegationRef(ref: CutexRef, how: "auto" | "peek" | "page"): RefOpenResult {
   // Bound to the open agent (its side view); past the host check below the ref's host is that agent's.
@@ -21,7 +22,9 @@ export function openDelegationRef(ref: CutexRef, how: "auto" | "peek" | "page"):
   if (!sideShowsHost(ref.hostId)) return { status: "unavailable", reason: "host-offline" };
   // A document-like target: every way opens the right side (no reference card, like artifacts).
   void how;
-  return refResult(services.side.open(DETAIL, { ...args.params }, { target: "page", binding: args.binding, focus: true }));
+  const source = useSide.getState();
+  const returnTo = detailReturnSource(source.layout, source.focusedCard, args.params.askId);
+  return refResult(services.side.open(DETAIL, { ...args.params, ...(returnTo ? { returnTo } : {}) }, { target: "page", binding: args.binding, focus: true, ...(returnTo ? { pin: true } : {}) }));
 }
 
 /** Open the detail from this module's own rows (the status capsule / chip). */

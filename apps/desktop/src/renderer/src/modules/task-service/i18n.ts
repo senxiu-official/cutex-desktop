@@ -9,8 +9,3 @@ declare module "../i18nCatalog" {
   interface ModuleMessages extends Messages {}
 }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "task-service.title": "Task Service",
-  "task-service.description": "Shows deliveries and tool calls of the removed Task Service (cutex task-service) in old transcripts",
-};

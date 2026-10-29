@@ -4,14 +4,19 @@
 // (`useAgentMessage`) so a status change re-renders only that row, never the timeline.
 import { useMemo } from "react";
 import { create } from "zustand";
-import type { EventEnvelope } from "@cutex-desktop/protocol";
-import { AGENT_BUS_METHODS, applyMessageEvent, pendingMessagesFor, seedMessages, type AgentMessageRecord, type MessageMap } from "./agentMessages";
+import type { EventEnvelope, MessageSettlement } from "@cutex-desktop/protocol";
+import { MESSAGE_SETTLEMENT_EVENT } from "../../../shared/messageSettlement";
+import { AGENT_BUS_METHODS, applyMessageEvent, lastFinishedTurnStart, pendingMessagesFor, seedMessages, type AgentMessageRecord, type MessageMap } from "./agentMessages";
 
 export interface AgentMessagesState {
   byId: MessageMap;
   /** Failed rows the owner closed in the 待读留言 section (this app session only). */
   dismissed: ReadonlySet<string>;
   apply(envelope: EventEnvelope): void;
+  /** Server settlement from a close response or recovery read, merged like a replayable event. */
+  applySettlement(messageId: string, settlement: MessageSettlement): void;
+  /** An authoritative read can remove expired sidecar evidence; a proven closure remains sticky. */
+  applySettlementRead(messageId: string, settlement: MessageSettlement | undefined): void;
   seed(sessionId: string, received: unknown[] | null | undefined, sent: unknown[] | null | undefined): void;
   dismiss(messageId: string): void;
   reset(): void;
@@ -20,6 +25,20 @@ export interface AgentMessagesState {
 export const useAgentMessages = create<AgentMessagesState>((set, get) => ({
   byId: {},
   dismissed: new Set(),
+  applySettlementRead(messageId, settlement) {
+    const previous = get().byId[messageId];
+    if (previous?.settlement?.state === "closed") return;
+    if (previous?.state === "delivered" && settlement?.state !== "closed") settlement = undefined;
+    if (!previous) {
+      if (settlement) get().applySettlement(messageId, settlement);
+      return;
+    }
+    set((s) => ({ byId: { ...s.byId, [messageId]: { ...previous, settlement, settlementKnown: true } } }));
+  },
+  applySettlement(messageId, settlement) {
+    const byId = applyMessageEvent(get().byId, MESSAGE_SETTLEMENT_EVENT, { messageId, settlement }, Date.now() / 1000);
+    if (byId !== get().byId) set({ byId });
+  },
   apply(envelope) {
     const cutex = envelope.cutex;
     if (!cutex || !AGENT_BUS_METHODS.has(cutex.method)) return;
@@ -44,12 +63,14 @@ export function useAgentMessage(messageId: string | null): AgentMessageRecord | 
 }
 
 /**
- * The 待读留言 rows of an agent; `readIn(id)`: already in its timeline. Recomputed when the
- * message map changes (agent-bus events are rare) or the caller's `version` moves.
+ * The 待读留言 rows of an agent; `readIn(id)`: already in its timeline. `turns`: its timeline turns
+ * (mutated in place; older cutex's cross-host notes leave once a later turn finished). Recomputed
+ * when the message map changes (agent-bus events are rare), the caller's `version` moves or a turn finishes.
  */
-export function usePendingMessages(sessionId: string, readIn: (messageId: string) => boolean, version: number): AgentMessageRecord[] {
+export function usePendingMessages(sessionId: string, readIn: (messageId: string) => boolean, version: number, turns?: Parameters<typeof lastFinishedTurnStart>[0], claudeRecipient = false): AgentMessageRecord[] {
   const byId = useAgentMessages((s) => s.byId);
   const dismissed = useAgentMessages((s) => s.dismissed);
+  const readSince = lastFinishedTurnStart(turns);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- readIn changes with `version`
-  return useMemo(() => pendingMessagesFor(byId, sessionId, readIn, dismissed), [byId, dismissed, sessionId, version]);
+  return useMemo(() => pendingMessagesFor(byId, sessionId, readIn, dismissed, readSince, claudeRecipient), [byId, dismissed, sessionId, version, readSince, claudeRecipient]);
 }

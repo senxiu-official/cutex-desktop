@@ -66,7 +66,10 @@ describe("desktop shell logic", () => {
 
   it("uses the renderer locale, else the OS locale", () => {
     expect(resolveLocale("en", "zh-CN")).toBe("en");
-    expect(resolveLocale(null, "zh-TW")).toBe("zh-Hant-CN");
+    expect(resolveLocale(null, "zh-TW")).toBe("zh-Hant-TW");
+    expect(resolveLocale(null, "zh-HK")).toBe("zh-Hant-HK");
+    expect(resolveLocale(null, "zh-Hant")).toBe("zh-Hant-CN");
+    expect(resolveLocale(null, "zh-CN")).toBe("zh-CN");
     expect(resolveLocale(null, "en-AU")).toBe("en-AU");
   });
 

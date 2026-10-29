@@ -1,11 +1,12 @@
 // Hooks of the title-bar launcher bar (docs/desktop-modules.md §18.3; rules in lib/sideLaunchers.ts).
 // Shell code: no feature names.
-import { useEffect, useState, type RefObject } from "react";
+import { useLayoutEffect, useState, type RefObject } from "react";
 import { useApp } from "../store";
 import { useUiPrefs } from "./prefs";
 import { useSideRegistry } from "./sideComponents";
 import { fitLaunchers, splitLaunchers } from "./sideLaunchers";
 import { launchable, type Launchable } from "./sideMenus";
+import { sharedResizeObserver } from "./resizeHub";
 
 /** Width of one launcher button incl. its gap (h-7 w-7 + gap-0.5). */
 export const LAUNCHER_SIZE = 30;
@@ -28,17 +29,23 @@ export function useLaunchers(): { pinned: Launchable[]; others: Launchable[] } {
  * (`[data-titlebar-title]`, flex-1) takes what the strip gives up, so the sum stays put while the count changes.
  */
 export function useLauncherFit(strip: RefObject<HTMLElement | null>, count: number): number {
-  const [room, setRoom] = useState(Number.POSITIVE_INFINITY);
-  useEffect(() => {
+  // The fitted count is the state, not the room: the room changes on every step of a window resize, and keeping it
+  // re-rendered the whole launcher bar per step (perf audit 2026-10-23 #28). Measured before paint, so a changed
+  // count never shows the old fit for a frame.
+  const [fit, setFit] = useState(count);
+  useLayoutEffect(() => {
     const el = strip.current;
     const title = el?.closest("header")?.querySelector<HTMLElement>("[data-titlebar-title]");
-    if (!el || !title || typeof ResizeObserver === "undefined") return;
-    const measure = () => setRoom(title.getBoundingClientRect().width + el.getBoundingClientRect().width - TITLE_MIN);
-    const observer = new ResizeObserver(measure);
+    if (!el || !title || typeof ResizeObserver === "undefined") {
+      setFit(count);
+      return;
+    }
+    const measure = () => setFit(fitLaunchers(title.getBoundingClientRect().width + el.getBoundingClientRect().width - TITLE_MIN, count, LAUNCHER_SIZE));
+    const observer = sharedResizeObserver(measure);
     observer.observe(title);
     observer.observe(el);
     measure();
     return () => observer.disconnect();
-  }, [strip]);
-  return fitLaunchers(room, count, LAUNCHER_SIZE);
+  }, [strip, count]);
+  return Math.min(fit, count);
 }

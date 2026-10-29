@@ -31,9 +31,13 @@ export const RELATED_REPO_URLS = [
 ] as const;
 
 /** One-line summary of the update on offer (tooltip / settings hint). */
-export function updateSummary(t: (key: "update.available" | "update.availableVersion" | "update.offMain" | "updater.switchChannel" | ChannelLabelKey, vars?: Record<string, string | number>) => string, latest: NonNullable<UpdateStatus["latest"]>, channel = "main"): string {
+export function updateSummary(t: (key: "update.available" | "update.availableVersion" | "update.offMain" | "update.sourceAhead" | "update.sourceUnknown" | "update.sourceUnknownBranch" | "updater.switchChannel" | ChannelLabelKey, vars?: Record<string, string | number>) => string, latest: NonNullable<UpdateStatus["latest"]>, channel = "main"): string {
   // A release package (binary install) is offered by version, not by commits.
   if (latest.version) return t("update.availableVersion", { version: latest.version });
+  if (latest.sourceComparison === "unknown") return channel === "main" && latest.installedReleaseVersion
+    ? t("update.sourceUnknown", { version: latest.installedReleaseVersion, subject: latest.subject })
+    : t("update.sourceUnknownBranch", { branch: channel, subject: latest.subject });
+  if (channel === "main" && latest.sourceComparison === "ahead") return t("update.sourceAhead", { count: latest.count, subject: latest.subject });
   if (latest.switchChannel) return t("updater.switchChannel", { channel: channelLabel(t, channel), subject: latest.subject });
   return latest.offMain ? t("update.offMain", { subject: latest.subject, branch: channel }) : t("update.available", { count: latest.count, subject: latest.subject });
 }

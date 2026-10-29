@@ -59,6 +59,38 @@ beforeEach(() => {
 afterEach(() => { sideModuleActive(false); });
 
 describe("Side request identity and lifecycle", () => {
+  it("lets a locally rejected message be corrected while preserving the draft", async () => {
+    seed("bad\0question");
+    harness.api.sideSend.mockRejectedValueOnce(new Error("side_chat_invalid_message: nul"));
+    await sendSide("host-a", "side-1");
+    expect(current().error).toBe("side_chat_invalid_message: nul");
+    expect(current().draft).toBe("bad\0question");
+    expect(current().pendingMessage).toBeNull();
+    setSideDraft("host-a", "side-1", "corrected question");
+    harness.api.sideSend.mockResolvedValueOnce({ chat: chat(), turnId: "new-turn" });
+    await sendSide("host-a", "side-1");
+    expect(harness.api.sideSend.mock.calls[1]![2].text).toBe("corrected question");
+    expect(current().draft).toBe("");
+  });
+
+  it("never treats a backend or unknown-outcome error containing a validation code as a local rejection", async () => {
+    harness.api.sideSend.mockRejectedValueOnce(new Error("side_native_error: side_chat_invalid_message: nul"));
+    await sendSide("host-a", "side-1");
+    expect(current().pendingMessage).not.toBeNull();
+    const pending = current().pendingMessage;
+    await sendSide("host-a", "side-1");
+    expect(harness.api.sideSend.mock.calls[1]![2]).toBe(pending);
+  });
+
+  it("shows the field-specific validation reason instead of invalid text", () => {
+    const t = (key: string) => key;
+    expect(sideErrorText("side_chat_invalid_message: empty", t)).toBe("side-chat.messageEmpty");
+    expect(sideErrorText("side_chat_invalid_message: nul", t)).toBe("side-chat.messageInvalid");
+    expect(sideErrorText("side_chat_invalid_message: too_long", t)).toBe("side-chat.messageTooLong");
+    expect(sideErrorText("side_chat_invalid_message_id: empty", t)).toBe("side-chat.messageIdInvalid");
+    expect(sideErrorText("side_chat_invalid_model: type", t)).toBe("side-chat.modelInvalid");
+    expect(sideErrorText("side_chat_invalid_error_message: nul", t)).toBe("side-chat.replyInvalid");
+  });
   it("closes a thread whose open completes after the user closes the card", async () => {
     const response = deferred<{ chat: SideChat }>();
     harness.api.sideOpen.mockReturnValue(response.promise);

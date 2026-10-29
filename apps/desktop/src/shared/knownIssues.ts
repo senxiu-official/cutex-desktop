@@ -15,7 +15,7 @@
 // An entry that breaks a rule is dropped (the rest still show); a document whose shape is wrong (schema
 // other than 1, no issue list, too many issues) is rejected as a whole. Strings may carry `{{agent}}`-style
 // term tokens (lib/terms.ts), nothing else is interpreted: no HTML, no Markdown, no links.
-import { APP_LOCALES, type AppLocale } from "./locales";
+import { APP_LOCALES, isTraditionalLocale, localeFallbacks, type AppLocale } from "./locales";
 import { compareVersions, parseVersion } from "./binaryUpdate";
 
 export const KNOWN_ISSUES_SCHEMA = 1;
@@ -170,7 +170,12 @@ export function applicableIssues(doc: KnownIssuesDoc, versions: { desktop?: stri
   return doc.issues.filter((e) => (!e.appliesTo?.desktop || inRange(e.appliesTo.desktop, versions.desktop)) && (!e.appliesTo?.cutex || inRange(e.appliesTo.cutex, versions.cutex)));
 }
 
-/** The string for `locale`: its own, zh-Hant-CN falls back to zh-CN, everything else to en. */
+/**
+ * The string for `locale`: its own or its regional chain (zh-Hant-MO → HK → TW); Traditional Chinese then
+ * zh-Hant-CN, then zh-CN (an untranslated entry still reads in Chinese); everything else en.
+ */
 export function localizedText(value: LocalizedText, locale: AppLocale): string {
-  return value[locale] ?? (locale === "zh-Hant-CN" ? value["zh-CN"] : undefined) ?? value.en;
+  for (const l of localeFallbacks(locale)) if (value[l] !== undefined) return value[l]!;
+  if (isTraditionalLocale(locale)) return value["zh-Hant-CN"] ?? value["zh-CN"];
+  return value.en;
 }

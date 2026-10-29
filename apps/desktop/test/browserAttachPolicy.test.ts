@@ -27,7 +27,7 @@ describe("browser attach admission", () => {
     Object.assign(value.params, { preload: "file:///secret.js", webpreferences: "nodeIntegration=yes", useragent: ticket,
       httpreferrer: "http://127.0.0.1/", allowpopups: true });
     Object.assign(value.webPreferences, { preload: "unsafe", session: {}, additionalArguments: ["--unsafe"], unknownFutureSetting: true,
-      sandbox: false, nodeIntegration: true, nodeIntegrationInWorker: true, webviewTag: true, webSecurity: false });
+      sandbox: false, nodeIntegration: true, nodeIntegrationInWorker: true, webviewTag: true, webSecurity: false, transparent: true });
     expect(evaluateBrowserAttach(value)).toEqual({ allowed: true, hostId: "local", partition: "persist:browser-local" });
     expect(value.params.src).toBe("about:blank");
     expect(value.params).not.toHaveProperty("preload");
@@ -37,7 +37,9 @@ describe("browser attach admission", () => {
     expect(value.webPreferences).not.toHaveProperty("session");
     expect(value.webPreferences).not.toHaveProperty("unknownFutureSetting");
     expect(value.webPreferences).toMatchObject({ sandbox: true, contextIsolation: true, webSecurity: true,
-      nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false, disablePopups: false, webviewTag: false });
+      nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false, disablePopups: false, webviewTag: false,
+      // An opaque guest paints its own colour-scheme canvas (no app card behind a page without a background).
+      transparent: false });
     expect(value.params.allowpopups).toBe(true);
   });
   it.each([false, undefined, "true", 1])("refuses popup delivery without strict main guard proof: %s", proof => {

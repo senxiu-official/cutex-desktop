@@ -3,7 +3,10 @@
 // ops `remoteClose` / `answerRemoteClose` / `setAllowRemoteClose`. The 在线的桌面 list itself is
 // modules/remote-access/mock.ts. `?remoteclose[=s]`: s seconds (default 3)
 // after start, host-a asks this desktop to close (the countdown shows; 取消 keeps it, 立即关闭 / the
-// deadline "quits" — the preview only logs that and clears the dialog). Only dev/mockBridge.ts imports this.
+// deadline "quits" — the preview only logs that and clears the dialog). `&missed`: the event never arrives,
+// the next presence reply carries the request (main starts the same countdown from it). With
+// client-presence-lifecycle (not under `?legacy` / `?nolifecycle`) the "quit" also reports `closing exited`:
+// this desktop's own row leaves the list. Only dev/mockBridge.ts imports this.
 import { CLIENT_CLOSE_REQUESTED_EVENT, CLIENT_STATE_CHANGED_EVENT } from "@cutex-desktop/cutex-client";
 import type { ShellBridge, ShellState } from "../../../shared/ipc";
 import { RemoteCloseCountdown, type RemoteCloseView } from "../../../shared/remoteClose";
@@ -16,6 +19,8 @@ export function mockRemoteCloseShell(deps: {
   emitView(view: RemoteCloseView | null): void;
   emitHost(method: string, params: Record<string, unknown>): void;
 }): Pick<ShellBridge, "setAllowRemoteClose" | "remoteClose" | "answerRemoteClose"> {
+  const q = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
+  const lifecycle = !q.has("legacy") && !q.has("nolifecycle");
   const countdown = new RemoteCloseCountdown({
     now: () => Date.now(),
     setTimer: (run, ms) => setTimeout(run, ms),
@@ -23,16 +28,19 @@ export function mockRemoteCloseShell(deps: {
     report: async (_hostId, instanceId, outcome) => deps.emitHost(CLIENT_STATE_CHANGED_EVENT, { instanceId, state: outcome }),
     quit: () => {
       console.info("[mock] remote close: the desktop app would quit now (cutex keeps running)");
+      // main's before-quit: `closing {outcome: "exited"}` (≤ 800 ms) — the host drops the row at once.
+      if (lifecycle) deps.emitHost(CLIENT_STATE_CHANGED_EVENT, { instanceId: MOCK_SELF_INSTANCE, state: "exited" });
       setTimeout(() => deps.emitView(null), 1500);
     },
     onChange: (view) => deps.emitView(view),
   });
-  const param = typeof location !== "undefined" ? new URLSearchParams(location.search).get("remoteclose") : null;
+  const param = q.get("remoteclose");
   if (param !== null) {
     const seconds = Number(param) > 0 ? Number(param) : 3;
     setTimeout(() => {
       const request = { instanceId: MOCK_SELF_INSTANCE, requestedBy: { deviceName: "host-a", userId: "owner", local: false }, graceSeconds: 15, at: new Date().toISOString() };
-      deps.emitHost(CLIENT_CLOSE_REQUESTED_EVENT, request);
+      if (q.has("missed")) console.info("[mock] remote close: no event; the presence reply carries closeRequest", request);
+      else deps.emitHost(CLIENT_CLOSE_REQUESTED_EVENT, request);
       if (deps.state.prefs.allowRemoteClose === false) deps.emitHost(CLIENT_STATE_CHANGED_EVENT, { instanceId: MOCK_SELF_INSTANCE, state: "cancelled" });
       else countdown.request("local", request);
     }, seconds * 1000);

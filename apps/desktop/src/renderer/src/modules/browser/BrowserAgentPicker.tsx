@@ -1,6 +1,7 @@
 // Searchable agent picker in the browser card header (replaces a plain <select>): type to filter by
 // name / project, ↑ ↓ Enter Esc, the current conversation's agent and recent grants on top, the rest
 // grouped by project. Picking only selects (same as the old <select>); the hand button grants.
+import { isImeComposing } from "../../lib/ime";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Check, ChevronDown, Search } from "lucide-react";
 import type { BrowserAgentView } from "../../../../shared/browser";
@@ -9,6 +10,7 @@ import { useTrackOverlay } from "../../lib/openOverlays";
 import { sidebarOf, useApp } from "../../store";
 import { LOCAL_HOST_ID } from "../../../../shared/hosts";
 import { pickerGroups, recentGrants, type PickerAgent } from "./agentPicker";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 interface Props {
   hostId: string;
@@ -24,7 +26,8 @@ interface Props {
 
 const WIDTH = 288;
 
-export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen, disabled, loading, placeholder }: Props) {
+export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen, disabled, loading, placeholder, compact = false }: Props & { compact?: boolean }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -51,8 +54,8 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
     if (!open) return;
     const rect = trigger.current?.getBoundingClientRect();
     if (!rect) return;
-    const left = Math.max(8, Math.min(rect.right - WIDTH, window.innerWidth - WIDTH - 8));
-    const below = window.innerHeight - rect.bottom - 12;
+    const left = Math.max(8, Math.min(rect.right - WIDTH, win.innerWidth - WIDTH - 8));
+    const below = win.innerHeight - rect.bottom - 12;
     setPlace({ top: rect.bottom + 4, left, maxHeight: Math.max(160, Math.min(420, below)) });
   }, [open]);
   useEffect(() => {
@@ -62,10 +65,10 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
       if (!panel.current?.contains(target) && !trigger.current?.contains(target)) setOpen(false);
     };
     const onResize = () => setOpen(false);
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("resize", onResize);
-    window.addEventListener("blur", onResize);
-    return () => { document.removeEventListener("mousedown", onDown); window.removeEventListener("resize", onResize); window.removeEventListener("blur", onResize); };
+    win.document.addEventListener("mousedown", onDown);
+    win.addEventListener("resize", onResize);
+    win.addEventListener("blur", onResize);
+    return () => { win.document.removeEventListener("mousedown", onDown); win.removeEventListener("resize", onResize); win.removeEventListener("blur", onResize); };
   }, [open]);
   useEffect(() => {
     list.current?.querySelector(`[data-picker-index="${cursor}"]`)?.scrollIntoView({ block: "nearest" });
@@ -80,7 +83,7 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
     onSelect(agent.sessionId); setOpen(false); trigger.current?.focus();
   }
   function onKey(event: KeyboardEvent<HTMLInputElement>): void {
-    if (event.nativeEvent.isComposing) return;
+    if (isImeComposing(event)) return;
     const n = flat.length;
     if (event.key === "ArrowDown") { if (n) setCursor(c => (c + 1) % n); }
     else if (event.key === "ArrowUp") { if (n) setCursor(c => (c - 1 + n) % n); }
@@ -96,8 +99,8 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
   return <>
     <button ref={trigger} type="button" data-browser-agent-select aria-label={t("browser.owner.select")} title={chosen?.name ?? t("browser.owner.select")}
       aria-haspopup="listbox" aria-expanded={open} disabled={disabled} onClick={() => (open ? setOpen(false) : show())}
-      onKeyDown={event => { if ((event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") && !open) { event.preventDefault(); show(); } }}
-      className="flex max-w-36 min-w-0 items-center gap-1 rounded border border-border bg-background px-1.5 py-1 text-xs text-foreground enabled:hover:bg-hover disabled:opacity-40">
+      onKeyDown={event => { if (!isImeComposing(event) && (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") && !open) { event.preventDefault(); show(); } }}
+      className={`flex ${compact ? "max-w-20" : "max-w-36"} min-w-0 items-center gap-1 rounded border border-border bg-background px-1.5 py-1 text-xs text-foreground enabled:hover:bg-hover disabled:opacity-40`}>
       <span className={`truncate ${chosen ? "" : "text-subtle"}`}>{chosen?.name ?? placeholder}</span>
       <ChevronDown size={11} className="shrink-0 text-subtle" />
     </button>
@@ -114,15 +117,15 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
         <div ref={list} id="browser-agent-picker-list" role="listbox" aria-label={t("browser.owner.select")} className="min-h-0 flex-1 overflow-y-auto p-1">
           {!flat.length && <p className="px-2.5 py-2 text-xs text-subtle">{t(agents.length ? "browser.owner.pickerNoMatch" : loading ? "browser.owner.loadingAgents" : "browser.owner.noAgents")}</p>}
           {groups.map(group => <div key={group.key} role="group" aria-label={groupLabel(group.kind, group.label) ?? undefined}>
-            <div className="truncate px-2.5 pt-1.5 pb-0.5 text-[11px] text-subtle">{groupLabel(group.kind, group.label)}</div>
+            <div className="truncate px-2.5 pt-1.5 pb-0.5 text-caption/[inherit] text-subtle">{groupLabel(group.kind, group.label)}</div>
             {group.agents.map(agent => {
               const i = index++;
               return <div key={agent.sessionId} id={`browser-agent-option-${i}`} data-picker-index={i} role="option" aria-selected={agent.sessionId === selected}
                 onMouseEnter={() => setCursor(i)} onMouseDown={event => event.preventDefault()} onClick={() => pick(agent)}
                 className={`flex cursor-default items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs ${i === cursor ? "bg-surface-2" : ""}`}>
                 <span className="min-w-0 flex-1 truncate text-foreground" title={agent.name}>{agent.name}</span>
-                {agent.sessionId === current && <span className="shrink-0 text-[11px] text-subtle">{t("browser.owner.pickerCurrent")}</span>}
-                {group.kind === "top" && agent.projectName && <span className="max-w-24 shrink-0 truncate text-[11px] text-subtle">{agent.projectName}</span>}
+                {agent.sessionId === current && <span className="shrink-0 text-caption/[inherit] text-subtle">{t("browser.owner.pickerCurrent")}</span>}
+                {group.kind === "top" && agent.projectName && <span className="max-w-24 shrink-0 truncate text-caption/[inherit] text-subtle">{agent.projectName}</span>}
                 <span className="w-3 shrink-0 text-accent">{agent.sessionId === selected && <Check size={12} />}</span>
               </div>;
             })}

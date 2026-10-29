@@ -1,0 +1,42 @@
+// English strings of ./i18n.ts, apart from the zh-CN source so they stay out of the entry chunk: they load with the
+// en catalog (i18n/index.tsx), only when the UI or a search needs English (0.2.0 beta perf audit, 2026-10-24).
+import type { zhCN } from "./i18n";
+
+export const en: Record<keyof typeof zhCN, string> = {
+  "owner-notify.title": "{{Owner}} notifications",
+  "owner-notify.description": "Messages {{agents}} send you: who may send, delivery and rate limits",
+  // ---- settings (moved from the base catalog, 2026-10-09) ----
+  "owner-notify.settings.ownerNotify.title": "{{Owner}} notifications",
+  "owner-notify.hint": "How you are alerted when {{an agent}} messages you; {{agents}} only pick a level and never see where or how you are reached.",
+  "owner-notify.toolDesc": "{{Agents}} use it to message you and give each message a notification level.",
+  "owner-notify.delivery": "Delivery",
+  "owner-notify.deliveryHint": "Where each level goes; the message always shows in the {{agent}}'s conversation",
+  "owner-notify.legacyNote": "This older host uses these while the preset is Old behaviour; other presets use Level → methods",
+  "owner-notify.byLevels": "{{Agent}} messages get a level in Event → level, then go out as Level → methods says",
+  "owner-notify.showLevels": "Show",
+  "owner-notify.resetDelivery": "Restore defaults",
+  "owner-notify.channel.desktop": "Desktop",
+  "owner-notify.channel.phone": "Phone",
+  "owner-notify.channel.bigAlert": "Alert window",
+  "owner-notify.phoneUnpaired": "No phone paired",
+  "owner-notify.sound": "Alert window sound",
+  "owner-notify.soundHint": "Chime when the alert window opens (twice for urgent)",
+  "owner-notify.audience": "Which {{agents}} get the tool",
+  "owner-notify.audienceHint": "Changes tool lists at {{an agent}}'s next launch; every call is checked at once",
+  "owner-notify.audience.ownerFacing": "Project {{directors}} and {{agents}} you created",
+  "owner-notify.audience.everyone": "Every {{agent}}",
+  "owner-notify.audience.directors": "Project {{directors}} only",
+  "owner-notify.audience.none": "Nobody",
+  "owner-notify.perHour": "Messages per {{agent}} per hour",
+  "owner-notify.perHourHint": "Beyond this they become Inform and are not pushed",
+  "owner-notify.perHourUnit": "",
+  "owner-notify.urgentPerHour": "Urgent messages per hour",
+  "owner-notify.urgentPerHourHint": "Per {{agent}}; beyond this Urgent becomes Needs you",
+  "owner-notify.overrides": "Per {{agent}}",
+  "owner-notify.overridesHint": "Mute: recorded but never pushed; Force: no rate limits",
+  "owner-notify.override.mute": "Mute",
+  "owner-notify.override.force": "Always deliver",
+  "owner-notify.overrideRemove": "Remove",
+  "owner-notify.overrideAgent": "Choose {{an agent}}…",
+  "owner-notify.overrideAdd": "Add",
+};

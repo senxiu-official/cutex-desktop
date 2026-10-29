@@ -7,15 +7,18 @@
 import { useEffect } from "react";
 import { useSide } from "./sideLayoutStore";
 import { useApp } from "../store";
+import { isHTMLElement, windowOfDocument } from "./ownerWindow";
+import { activeAppDocument } from "./appWindowSet";
 
 /** Selection items: page buttons and card tabs (role=tab), sidebar rows (data-row-selectable). */
 const STALE = '[role="tab"][aria-selected="false"], [data-row-selectable]:not([data-row-selected])';
 
 export function dropStaleFocus(): void {
-  // After React has committed the new selection.
-  requestAnimationFrame(() => {
-    const el = document.activeElement;
-    if (el instanceof HTMLElement && el.matches(STALE)) el.blur();
+  // In the app window in front (a desk window's, multi-window), after React has committed the new selection.
+  const doc = activeAppDocument();
+  windowOfDocument(doc).requestAnimationFrame(() => {
+    const el = doc.activeElement;
+    if (isHTMLElement(el) && el.matches(STALE)) el.blur();
   });
 }
 

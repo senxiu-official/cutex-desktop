@@ -15,6 +15,9 @@ import { unknownTermTokens } from "../src/renderer/src/lib/terms";
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";
 import { en } from "../src/renderer/src/i18n/en";
 import { zhHantCN } from "../src/renderer/src/i18n/zh-Hant-CN";
+import { zhHantTW } from "../src/renderer/src/i18n/zh-Hant-TW";
+import { zhHantHK } from "../src/renderer/src/i18n/zh-Hant-HK";
+import { zhHantMO } from "../src/renderer/src/i18n/zh-Hant-MO";
 import { enAU } from "../src/renderer/src/i18n/en-AU";
 import { ruRU } from "../src/renderer/src/i18n/ru-RU";
 import { frFR } from "../src/renderer/src/i18n/fr-FR";
@@ -28,6 +31,9 @@ import { koKR } from "../src/renderer/src/i18n/ko-KR";
 const CATALOGS: Record<AppLocale, Record<string, string>> = {
   "zh-CN": zhCN,
   "zh-Hant-CN": zhHantCN,
+  "zh-Hant-TW": zhHantTW,
+  "zh-Hant-HK": { ...zhHantTW, ...zhHantHK },
+  "zh-Hant-MO": { ...zhHantTW, ...zhHantHK, ...zhHantMO },
   en,
   "en-AU": enAU,
   "ru-RU": ruRU,
@@ -44,7 +50,7 @@ const VAR = /\{(\w+)\}/g;
 const TERM = /\{\{([^}]*)\}\}/g;
 // Placeholders are compared by what they mean, not their spelling: en marks the plural ({{agents}})
 // and the en article ({{an agent}}), zh / the other languages use the bare singular — same term.
-const BASE: Record<string, string> = { agent: "agent", agents: "agent", subagent: "subagent", subagents: "subagent", parentagent: "parentagent", parentagents: "parentagent", director: "director", directors: "director", owner: "owner", owners: "owner" };
+const BASE: Record<string, string> = { agent: "agent", agents: "agent", subagent: "subagent", subagents: "subagent", parentagent: "parentagent", parentagents: "parentagent", director: "director", directors: "director", operator: "operator", operators: "operator", owner: "owner", owners: "owner", shelf: "shelf", shelves: "shelf" };
 const termIds = (v: string) => [...v.matchAll(TERM)].map((m) => BASE[m[1]!.replace(/^(an? |An? )/, "").toLowerCase()] ?? m[1]!).sort();
 const vars = (v: string) => [...v.replace(TERM, " ").matchAll(VAR)].map((m) => m[1]!).sort();
 const HARDCODED_SUB = /(子|sub-|Sub-|sous-|sotto-|суб-|サブ)\{\{agents?\}\}/;

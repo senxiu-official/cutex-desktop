@@ -8,8 +8,3 @@ declare module "../i18nCatalog" {
   interface ModuleMessages extends Messages {}
 }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "runtime-packages.title": "{{Agent}} runtime upgrades",
-  "runtime-packages.description": "Upgrade idle {{agents}} to the new runtime",
-};

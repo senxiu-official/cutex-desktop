@@ -65,11 +65,23 @@ const received = (id: string, turnId: string, m: ExternalMessage): TimelineEntry
 const agentText = (id: string, turnId: string): TimelineEntry => ({ kind: "agent", id, turnId, text: "done", streaming: false });
 
 describe("delegationStatus", () => {
+  it("admitted work waits calmly without promising that a runtime is starting", () => {
+    expect(delegationStatus(ask({ execution: "admitted" }))).toMatchObject({ key: "starting", tone: "muted", glyph: "hollow" });
+    expect(zhCN["delegation.status.starting"]).toBe("等待处理");
+    expect(en["delegation.status.starting"]).toBe("Waiting for processing");
+  });
   it("names holds and positions", () => {
     expect(delegationStatus(ask({ execution: "queued", queuePosition: 2, hold: { reason: "targetBusy" } as never }))).toMatchObject({ key: "queuedAt", n: 2 });
     expect(delegationStatus(ask({ execution: "queued", queuePosition: 1, hold: { reason: "targetBusy" } as never })).key).toBe("waitTurn");
     expect(delegationStatus(ask({ execution: "admitted", hold: { reason: "blocked", detail: { reason: "runtimeDown" } } as never })).dangerText).toBeTruthy();
     expect(delegationStatus(ask({ execution: "running" })).key).toBe("running");
+  });
+
+  it("says a quota hold continues by itself (not 受阻)", () => {
+    const status = delegationStatus(ask({ execution: "queued", hold: { reason: "blocked", by: "quota" } }));
+    expect(status.key).toBe("quota");
+    expect(status.dangerText).toBeFalsy();
+    expect(delegationStatus(ask({ execution: "queued", hold: { reason: "blocked", by: "runtimeDown" } })).key).toBe("offline");
   });
 
   it("closed outcomes win over execution", () => {
@@ -295,7 +307,11 @@ describe("events", () => {
     const r = records(ask({ execution: "answered", revision: 5 }));
     expect(applyAskEvent(r, "cutex/ask/answered", { askId: "ask-1", answerId: "an-1", preview: "LGTM" })?.byId?.["ask-1"]).toMatchObject({ answerId: "an-1", answerPreview: "LGTM" });
     expect(applyAskEvent(r, "cutex/ask/closed", { askId: "ask-1", outcome: "accepted", revision: 6 })?.byId?.["ask-1"]?.closed).toBe("accepted");
-    expect(applyAskEvent(r, "cutex/ask/closed", { askId: "ask-1", outcome: "accepted", revision: 5 })).toBeNull();
+    expect(applyAskEvent(r, "cutex/ask/closed", { askId: "ask-1", outcome: "accepted", revision: 4 })).toBeNull();
+    // The same revision as the row (cutex sends stateChanged + closed for one mutation): still closes it, once.
+    const same = applyAskEvent(r, "cutex/ask/closed", { askId: "ask-1", outcome: "accepted", revision: 5 })!.byId!;
+    expect(same["ask-1"]?.closed).toBe("accepted");
+    expect(applyAskEvent(records(same["ask-1"]!), "cutex/ask/closed", { askId: "ask-1", outcome: "accepted", revision: 5 })).toBeNull();
     expect(applyAskEvent(r, "cutex/ask/progress", { askId: "missing" })).toBeNull();
   });
 

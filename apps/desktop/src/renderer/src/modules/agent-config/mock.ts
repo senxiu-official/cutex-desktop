@@ -1,3 +1,5 @@
+import type { SessionResource } from "@cutex-desktop/protocol";
+import type { SessionForkPreview } from "../../../../shared/sessionFork";
 // Browser-preview data for agent-config (dev/mockTypes.ts): cutex `agent-harness` — the
 // `agentHarness` setting and `GET /v2/sessions/{id}/harness` (指令 → 运行环境说明) — and cutex
 // `claude-code-sources`: a Claude profile's `claudeSettingSources` / `claudeAiConnectors` (Profile → 行为)
@@ -72,6 +74,10 @@ const enabledNow = (settings: Record<string, unknown>) => ((settings.agentHarnes
 
 /** claude-code-sources per Claude profile id: `claude` was created after the feature (project on), others predate it. */
 const claudeCode: Record<string, { sources: ClaudeSettingSource[]; connectors: boolean }> = {};
+/** claude-compaction per Claude profile id (the `claude` profile has the 10-22 hand-written file). */
+const compaction: Record<string, { window: number; percent: number } | null> = { claude: { window: 500_000, percent: 90 } };
+/** claude-compaction-models per Claude profile id: sonnet gets its own point, the rest follow the profile. */
+const compactionModels: Record<string, Record<string, { window: number; percent: number }>> = { claude: { "claude-sonnet-5-5": { window: 333_000, percent: 100 } } };
 const codeOf = (p: MockProfileRef) => (claudeCode[p.id] ??= { sources: p.id === "claude" ? ["project"] : [], connectors: false });
 /** The merged MCP layers of the mock host, as cutex reports them for a Claude agent. */
 const CODE_SERVERS: ClaudeCodeServer[] = [
@@ -122,27 +128,50 @@ function claudeRuntimeView(id: string): ClaudeRuntimeView {
   };
 }
 
+const forkSources = new Map<string, SessionResource>();
+const forkProfileNames = new Set<string>();
+function previewFork(id: string, afterTurnId: string | null, profile: string | undefined): SessionForkPreview {
+  const unknownSize = typeof location !== "undefined" && new URLSearchParams(location.search).get("forkwarning") === "size";
+  const source = forkSources.get(id);
+  if (!source) throw new Error("session_not_found");
+  const family = (name: string | null) => name?.startsWith("claude") ? "anthropic" : name?.startsWith("gamma") ? "openai-chatgpt" : name === "omega" || name === "GLM" ? "responses-api" : "chat-completions";
+  const kind = (name: string | null) => name?.startsWith("claude") ? "claude" as const : "codex" as const;
+  const sourceFamily = family(source.profile), sourceKind = kind(source.profile);
+  const targets = [...forkProfileNames].map((name) => {
+    const allowed = name === "gamma-fork" || (name === "claude-work" && new URLSearchParams(typeof location === "undefined" ? "" : location.search).has("forkprofile"));
+    const same = family(name) === sourceFamily && kind(name) === sourceKind;
+    const eligible = same && allowed;
+    return { id: name, name, cliKind: kind(name), providerFamily: family(name), eligible, reason: eligible ? null : { code: same ? "profile_fork_disallowed" : "provider_family_mismatch", message: same ? "Profile does not allow switching" : "Different provider family" } };
+  });
+  const selected = profile ? targets.find(t => t.name === profile) : null;
+  return { contractVersion: 2, cutexSessionId: id, afterTurnId, profile: profile ?? null, sourceProfile: source.profile, sourceCliKind: sourceKind, sourceProviderFamily: sourceFamily,
+    targets, eligible: !profile || !!selected?.eligible, reason: profile && !selected?.eligible ? selected?.reason ?? {code:"profile_not_found",message:"Profile missing"} : null,
+    historyBytes: unknownSize ? null : 8 * 1024 ** 2, historyBytesEstimate: unknownSize ? "unavailable" : "upperBound", historyBytesMeaning: "Upper bound includes source turns after the selected point; file bytes, not tokens or quota.", coldCache: !!profile && profile !== source.profile,
+    boundaryNote: "Copied delegations, jobs and approvals remain with the source session." };
+}
 export const mock: ModuleMock = {
-  features: { new: ["agent-harness", "claude-code-sources", "claude-launch-permission-mode", `claude-skills-import`, "claude-runtime-repin", SESSION_CLAUDE_RUNTIME_FEATURE] },
+  features: { new: ["session-fork-profile", "session-fork-preview", "session-badge", "project-badge-wide", "agent-harness", "claude-code-sources", "claude-launch-permission-mode", `claude-skills-import`, "claude-runtime-repin", "claude-compaction", "claude-compaction-models", "prompt-cache-key", SESSION_CLAUDE_RUNTIME_FEATURE] },
   // session-claude-runtime (not under ?legacy): each Claude agent's pin and the host's selected release.
   sidebar(snapshot, core) {
+    for (const s of [...snapshot.active, ...snapshot.retired]) forkSources.set(s.cutexSessionId, s);
     if (core.legacy) return snapshot;
     const withPin = (s: SidebarSnapshot["active"][number]) => {
       if (!CLAUDE_IDS.has(s.cutexSessionId)) return s;
       const pin = pinOf(s.cutexSessionId);
       return { ...s, runtime: { ...s.runtime, claudeRuntime: { release: pin.release, pendingRelease: pin.pending?.release ?? null } } };
     };
-    return { ...snapshot, active: snapshot.active.map(withPin), retired: snapshot.retired.map(withPin), claudeRuntime: { selectedRelease: SELECTED_CLAUDE_RUNTIME } };
+    return { ...snapshot, active: snapshot.active.map((s, i) => withPin(i === 0 && s.badge === undefined ? { ...s, badge: { text: "挂件", tint: "violet" } } : s)), retired: snapshot.retired.map(withPin), claudeRuntime: { selectedRelease: SELECTED_CLAUDE_RUNTIME } };
   },
   profile: {
     fields: (profile, core) => {
+      forkProfileNames.add(profile.name);
       if (core.legacy) return {};
-      if (profile.cliKind !== "claude") return { claudeSettingSources: null, claudeAiConnectors: null, claudeLaunchPermissionModes: null };
+      if (profile.cliKind !== "claude") return { claudeSettingSources: null, claudeAiConnectors: null, claudeLaunchPermissionModes: null, claudeCompaction: null, claudeCompactionModels: null };
       const code = codeOf(profile);
-      return { claudeSettingSources: [...code.sources], claudeAiConnectors: code.connectors, claudeLaunchPermissionModes: ["default", "acceptEdits", "plan", "auto", "bypassPermissions"] };
+      return { claudeSettingSources: [...code.sources], claudeAiConnectors: code.connectors, claudeLaunchPermissionModes: ["default", "acceptEdits", "plan", "auto", "bypassPermissions"], claudeCompaction: compaction[profile.id] ?? null, claudeCompactionModels: Object.keys(compactionModels[profile.id] ?? {}).length ? { ...compactionModels[profile.id] } : null };
     },
     patch(profile, body, core) {
-      const owned = (["claudeSettingSources", "claudeAiConnectors"] as const).filter((k) => k in body);
+      const owned = (["claudeSettingSources", "claudeAiConnectors", "claudeCompaction", "claudeCompactionModels"] as const).filter((k) => k in body);
       if (!owned.length) return [];
       if (core.legacy) throw new Error(`invalid_request: unsupported field: ${owned[0]}`);
       if (profile.cliKind !== "claude") throw new Error(`invalid_request: ${owned[0]} applies to Claude profiles only`);
@@ -151,6 +180,19 @@ export const mock: ModuleMock = {
         const v = body.claudeSettingSources;
         if (v !== null && (!Array.isArray(v) || v.some((s) => s !== "project" && s !== "user"))) throw new Error("invalid_request: claudeSettingSources: unknown source; known: project, user");
         code.sources = v === null ? [] : (["project", "user"] as const).filter((s) => (v as string[]).includes(s));
+      }
+      if ("claudeCompaction" in body) {
+        const v = body.claudeCompaction as { window?: unknown; percent?: unknown } | null;
+        const ok = v === null || (Number.isInteger(v.window) && (v.window as number) >= 100_000 && (v.window as number) <= 1_000_000 && Number.isInteger(v.percent) && (v.percent as number) >= 1 && (v.percent as number) <= 100);
+        if (!ok) throw new Error("invalid_request: claudeCompaction: window must be 100000..1000000, percent 1..100");
+        compaction[profile.id] = v && { window: v.window as number, percent: v.percent as number };
+      }
+      if ("claudeCompactionModels" in body) {
+        const v = body.claudeCompactionModels as Record<string, { window?: unknown; percent?: unknown }> | null;
+        const entries = v === null ? [] : typeof v === "object" && !Array.isArray(v) ? Object.entries(v) : null;
+        const ok = entries !== null && entries.length <= 32 && entries.every(([id, c]) => id !== "" && !/s/.test(id) && !!c && Number.isInteger(c.window) && (c.window as number) >= 100_000 && (c.window as number) <= 1_000_000 && Number.isInteger(c.percent) && (c.percent as number) >= 1 && (c.percent as number) <= 100);
+        if (!ok) throw new Error("invalid_request: claudeCompactionModels: {\"<model id>\": {window 100000..1000000, percent 1..100}}, at most 32");
+        compactionModels[profile.id] = Object.fromEntries(entries!.map(([id, c]) => [id, { window: c.window as number, percent: c.percent as number }]));
       }
       if ("claudeAiConnectors" in body) {
         if (typeof body.claudeAiConnectors !== "boolean") throw new Error("invalid_request: claudeAiConnectors: must be a boolean");
@@ -163,9 +205,17 @@ export const mock: ModuleMock = {
   settings: (core) => ({
     agentHarness: { enabled: enabledNow(core.settings) },
     agentHarnessDefault: { ...DEFAULT },
+    // design 034 prompt-cache-key: default off, PATCH round-trips through core.settings.
+    promptCacheKey: { enabled: ((core.settings.promptCacheKey as { enabled?: boolean } | undefined)?.enabled ?? false) },
+    promptCacheKeyDefault: { enabled: false },
+    promptCacheKeyStatus: ((core.settings.promptCacheKey as { enabled?: boolean } | undefined)?.enabled ? "pending" : "off") as "pending" | "off",
     newRuntimesOnlyFields: [...((core.settings.newRuntimesOnlyFields as string[] | undefined) ?? []), "agentHarness"],
   }),
   api: (core) => ({
+      async forkPreview(sessionId, request = {}) {
+        if (core.legacy) throw new Error("unknown_method: fork-preview unavailable");
+        return previewFork(sessionId, request.afterTurnId ?? null, request.profile);
+      },
     async claudeRuntime(sessionId): Promise<ClaudeRuntimeView> {
       if (core.legacy) throw new Error("404 not_found: unknown route");
       if (!CLAUDE_IDS.has(sessionId)) throw new Error("409 unsupported_runtime: the Claude runtime applies to Claude agents only");

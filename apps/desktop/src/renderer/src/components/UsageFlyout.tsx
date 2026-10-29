@@ -9,11 +9,12 @@ import type { ProfileItem, QuotaGauge } from "../../../shared/ipc";
 import { useI18n } from "../i18n";
 import { closeMenu } from "../lib/contextMenu";
 import { useUiPrefs } from "../lib/prefs";
-import { cachedProfileList, loadProfileList } from "../lib/profileSnapshot";
+import { cachedProfileList } from "../lib/profileSnapshot";
+import { prepareUsage } from "../lib/usagePreparation";
 import { useOrderedProfiles } from "../lib/profileOrder";
-import { formatBalance, gaugeShortLabel, quotaFill, quotaPercent, resetsIn, type QuotaView } from "../lib/quota";
-import { useHostLoadQuota, useHostQuotas } from "../lib/targetHost";
-import { cachedUsage, predictUsage, PREDICTED_GAUGES, rememberUsage, usageLayout, type UsageLayout } from "../lib/usageFlyout";
+import { formatBalance, gaugeShortLabel, quotaFill, quotaPercent, resetsIn, resetsInCompact, type QuotaView } from "../lib/quota";
+import { useHostQuotas } from "../lib/targetHost";
+import { cachedUsage, predictUsage, PREDICTED_GAUGES, rememberUsage, usageGaugeHeight, usageHeight, usageLayout, type UsageLayout } from "../lib/usageFlyout";
 import { useApp } from "../store";
 import { GaugeBar } from "./GaugeBar";
 import { ProfileAvatar } from "./ProfileAvatar";
@@ -31,28 +32,30 @@ export function UsageFlyout() {
   const [cached] = useState(() => cachedUsage(hostId));
   const [settled, setSettled] = useState(false);
   const quotas = useHostQuotas(hostId);
-  const loadQuota = useHostLoadQuota(hostId);
   const view = useUiPrefs().quotaView;
   useEffect(() => {
     let live = true;
-    loadProfileList(hostId)
-      .then(async (list) => {
+    prepareUsage(hostId)
+      .then((list) => {
         if (!live) return;
         setProfiles(list?.profiles ?? []);
-        await Promise.allSettled((list?.profiles ?? []).map((p) => loadQuota(p.name)));
       })
       .catch(() => live && setProfiles((p) => p ?? []))
       .finally(() => live && setSettled(true));
     return () => {
       live = false;
     };
-  }, [hostId, loadQuota]);
+  }, [hostId]);
   // Live gauges win; the cached ones fill in until a profile's read arrives (also after the store
   // dropped its quotas on an agent host change).
   const gauges = useMemo<Record<string, QuotaGauge[]>>(() => ({ ...cached?.gauges, ...quotas }), [cached, quotas]);
   const names = useMemo(() => profiles?.map((p) => p.name) ?? [], [profiles]);
   const known = useMemo(() => (profiles ? usageLayout(names, gauges, settled) : null), [profiles, names, gauges, settled]);
   const layout = known ?? cached ?? (profiles ? predictUsage(profiles) : UNKNOWN_LAYOUT);
+  // Snapshot once, before paint. Live data may contain a third window where the old predictor
+  // reserved two, or profiles may have changed: keep them accessible inside a fixed viewport.
+  // The refreshed shape is cached below for the next opening, not applied to this one's bounds.
+  const [opening] = useState(() => ({ height: usageHeight(layout), counts: { ...layout.counts } }));
   useEffect(() => {
     if (known) rememberUsage(hostId, { ...known, gauges: Object.fromEntries(known.rows.map((n) => [n, gauges[n]!])) });
   }, [hostId, known, gauges]);
@@ -62,10 +65,11 @@ export function UsageFlyout() {
   };
   const pending = !known;
   return (
-    <div className="w-80 max-w-[calc(100vw-2rem)]" aria-busy={pending || undefined}>
+    <div className="w-[26rem] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-1.5rem)] overflow-y-auto" style={{ height: opening.height }} data-usage-flyout="" aria-busy={pending || undefined}>
       {layout.rows.map((name) => {
         const profile = profiles?.find((p) => p.name === name);
         const shown = gauges[name];
+        const count = opening.counts[name] || PREDICTED_GAUGES;
         return (
           <button
             key={name}
@@ -76,10 +80,10 @@ export function UsageFlyout() {
           >
             {profile ? <ProfileAvatar profile={profile} size={18} /> : <span className="h-[18px] w-[18px] shrink-0 rounded-full bg-surface-2" aria-hidden />}
             <span className="w-24 shrink-0 truncate text-sm leading-[18px]">{name.trim() ? name : ""}</span>
-            <span className="flex min-w-0 flex-1 flex-col gap-1">
+            <span className="flex min-w-0 flex-1 flex-col gap-1 overflow-y-auto" style={{ height: usageGaugeHeight(count) }} data-usage-gauges="">
               {shown?.map((g) => <GaugeRow key={g.id} gauge={g} view={view} />)}
               {/* Until the row set is final, a row keeps the height it opened with. */}
-              {Array.from({ length: Math.max(0, (layout.counts[name] || 1) - (shown?.length ?? 0)) }, (_, i) => (shown?.length ? <span key={i} className="h-[18px]" aria-hidden /> : <PlaceholderGauge key={i} />))}
+              {Array.from({ length: Math.max(0, count - (shown?.length ?? 0)) }, (_, i) => (shown?.length ? <span key={i} className="h-[18px] shrink-0" aria-hidden /> : <PlaceholderGauge key={i} />))}
             </span>
           </button>
         );
@@ -87,7 +91,7 @@ export function UsageFlyout() {
       {layout.rows.length === 0 ? (
         <div className="px-2.5 py-1.5 text-xs text-subtle">{t(pending ? "identity.usage.loading" : "identity.usage.none")}</div>
       ) : layout.off.length > 0 ? (
-        <div className="truncate px-2.5 pt-1 pb-1.5 text-xs text-subtle" title={layout.off.join(", ")}>
+        <div className="h-[26px] truncate px-2.5 pt-1 pb-1.5 text-xs text-subtle" title={layout.off.join(", ")}>
           {t("identity.usage.off", { names: layout.off.join(", ") })}
         </div>
       ) : null}
@@ -98,22 +102,23 @@ export function UsageFlyout() {
 /** A gauge line not read yet: same height as `GaugeRow`, an empty bar. */
 function PlaceholderGauge() {
   return (
-    <span className="flex h-[18px] items-center gap-2 text-xs" aria-hidden>
-      <span className="w-9 shrink-0" />
-      <span className="h-1 min-w-0 flex-1 animate-pulse rounded-full bg-surface-2" />
+    <span className="flex h-[18px] shrink-0 items-center gap-2 text-xs" aria-hidden>
+      <span className="w-14 shrink-0" />
+      <span className="h-1 min-w-0 flex-1 animate-skeleton rounded-full bg-surface-2" />
       <span className="w-9 shrink-0 text-right text-subtle">—</span>
+      <span className="w-11 shrink-0" />
     </span>
   );
 }
 
-/** `5h ▬▬▬▭ 62%`; a balance as its amount; the reset time on hover. */
-function GaugeRow({ gauge: g, view }: { gauge: QuotaGauge; view: QuotaView }) {
+/** `5h ▬▬▬▭ 62% 2d19h`; a balance as its amount; the reset countdown inline (exact time on hover). */
+export function GaugeRow({ gauge: g, view }: { gauge: QuotaGauge; view: QuotaView }) {
   const { t } = useI18n();
   const fill = quotaFill(g, view);
   const title = g.error ?? (g.resetAt ? `${gaugeShortLabel(g)} · ${t("identity.usage.resets", { time: resetsIn(g.resetAt) })}` : undefined);
   return (
-    <span className={`flex h-[18px] items-center gap-2 text-xs tabular-nums ${g.stale ? "opacity-60" : ""}`} title={title}>
-      <span className="w-9 shrink-0 truncate text-subtle">{gaugeShortLabel(g)}</span>
+    <span className={`flex h-[18px] shrink-0 items-center gap-2 text-xs tabular-nums ${g.stale ? "opacity-60" : ""}`} title={title}>
+      <span className="w-14 shrink-0 truncate text-subtle" title={gaugeShortLabel(g)}>{gaugeShortLabel(g)}</span>
       {g.error ? (
         <span className="min-w-0 flex-1 truncate text-danger">{g.error}</span>
       ) : g.kind === "balance" ? (
@@ -124,6 +129,8 @@ function GaugeRow({ gauge: g, view }: { gauge: QuotaGauge; view: QuotaView }) {
           <span className="w-9 shrink-0 text-right text-muted">{fill === null ? "—" : `${quotaPercent(g, view)}%`}</span>
         </>
       )}
+      {/* Windows without a reset time (balances, points) leave the slot empty so the columns line up. */}
+      <span className="w-11 shrink-0 text-right text-subtle" data-usage-reset="">{!g.error && g.resetAt ? resetsInCompact(g.resetAt) : ""}</span>
     </span>
   );
 }

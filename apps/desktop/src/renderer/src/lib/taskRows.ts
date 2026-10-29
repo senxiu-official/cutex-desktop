@@ -330,6 +330,23 @@ export function taskRowOutcome(item: RawItem): TaskRowOutcome | null {
 }
 
 /**
+ * The unfinished agent_create a tool row stands for (design 028 (d)): the call's own action when it
+ * ended `owner_action_required`, or the older action a refused create names as still holding the name
+ * (`unresolved_agent_reservation: unfinished action 'auto-…' …`). null otherwise.
+ */
+export function unfinishedCreateAction(item: RawItem): string | null {
+  if (String(item.tool ?? "") !== "agent_create") return null;
+  const r = result(item);
+  const envelope = obj(r?.outcome);
+  const status = str(envelope?.status);
+  const own = str(r?.action_id);
+  if (status === "owner_action_required" && own) return own;
+  const detail = str(obj(envelope?.failure)?.detail) ?? str(envelope?.detail) ?? "";
+  const named = /unfinished action '([A-Za-z0-9._:/@-]{1,256})'/.exec(detail);
+  return named ? named[1]! : null;
+}
+
+/**
  * The full text a failed tool call returned (its text content blocks, else the item-level error
  * message), for the expanded row and copying; null when the call didn't fail or said nothing.
  */

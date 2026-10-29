@@ -3,13 +3,14 @@
 // "agent" is found by its new name), and scrolls to + flashes a result's card once its page renders.
 import { useEffect, useMemo, useRef } from "react";
 import { create } from "zustand";
-import { useI18n, type MessageKey } from "../i18n";
-import { en as enCatalog } from "../i18n/en";
+import { useEnglishCatalog, useI18n, type MessageKey } from "../i18n";
 import { zhCN as zhCatalog } from "../i18n/zh-CN";
-import { useSlot } from "../modules/react";
+import { useModuleStatuses, useSlot } from "../modules/react";
+import { appModules } from "../modules/app";
+import { listedInSettings, revealUnlistedModules } from "../modules/settingsVisibility";
 import { flashElement } from "./focusRequest";
 import { cleanText, type SearchText, type SettingsSearchDoc } from "./settingsSearch";
-import { SETTINGS_GROUP_ORDER, settingsAnchorId } from "./settingsNav";
+import { settingsNavGroups, settingsAnchorId } from "./settingsNav";
 import type { SettingsPageItem, SettingsSearchSection, SettingsSectionItem } from "../modules/slots";
 import { hostGate } from "./hostGating";
 import { capabilitiesOf } from "./hostGatingView";
@@ -17,7 +18,8 @@ import { isSettingsHostPage, settingsCardGate, settingsPageAccess, settingsSecti
 import { useSettingsGateTarget } from "./settingsGateView";
 import { SETTINGS_HOST_PAGES, useSettingsHost } from "./settingsHost";
 import { useHostScope } from "./useHostScope";
-import { applyTerms, resolveTerms, useTermOverrides } from "./terms";
+import { applyTerms, DEFAULT_TERMS, TERM_IDS, resolveTerms, useTermOverrides, type TermLocale, type TermOverrides } from "./terms";
+import { useOwnerWindow } from "./ownerContext";
 
 type Entry<T> = { item: T; moduleId: string; mode: "show" | "disable" | "notice"; missing: readonly string[]; waiting: boolean };
 
@@ -35,6 +37,18 @@ export interface SettingsIndexInput {
   hostLabel: string;
   /** Module ∪ item capabilities (lib/hostGatingView capabilitiesOf). */
   capabilitiesOf(moduleId: string, item?: { requires?: { capabilities?: readonly string[] } }): string[];
+  termKeywords?: readonly SearchText[];
+  moduleEntries?: readonly { id: string; title: SearchText; keywords: readonly SearchText[] }[];
+}
+
+/** Keep both the effective aliases and shipped names discoverable after renaming. */
+export function settingsTermSearchTexts(overrides: TermOverrides, locale: TermLocale, other: TermLocale): SearchText[] {
+  const current = resolveTerms(overrides, locale);
+  const translated = resolveTerms(overrides, other);
+  return TERM_IDS.flatMap((id) => (["one", "many"] as const).flatMap((form) => [
+    { current: current[id][form], other: translated[id][form] },
+    { current: DEFAULT_TERMS[locale][id][form], other: DEFAULT_TERMS[other][id][form] },
+  ]));
 }
 
 /**
@@ -42,11 +56,11 @@ export interface SettingsIndexInput {
  * (lib/settingsGate): no result leads to a card the page leaves out; a card the page shows as
  * 「需要升级 cutex」 or a page this connection cannot use is a greyed result with the reason.
  */
-export function settingsSearchDocs({ pages, sections, text, t, hostTarget, appTarget, hostLabel, capabilitiesOf }: SettingsIndexInput): SettingsSearchDoc[] {
+export function settingsSearchDocs({ pages, sections, text, t, hostTarget, appTarget, hostLabel, capabilitiesOf, termKeywords = [], moduleEntries = [] }: SettingsIndexInput): SettingsSearchDoc[] {
   const upgrade = (missing: readonly string[]) => t("modules.needsUpgrade", { feature: missing.join(", ") });
   const docs: SettingsSearchDoc[] = [];
   // Nav order: group, then slot order inside the group (= SettingsNav).
-  const ordered = SETTINGS_GROUP_ORDER.flatMap((g) => pages.filter((e) => e.item.group === g));
+  const ordered = settingsNavGroups(pages).flatMap((g) => g.entries);
   ordered.forEach((entry, pageOrder) => {
     const { item } = entry;
     if (entry.mode !== "show" && entry.waiting) return; // capabilities still loading
@@ -69,10 +83,13 @@ export function settingsSearchDocs({ pages, sections, text, t, hostTarget, appTa
     // Host pages: their header picks the host (multi-host; 「主机选择」 finds them).
     const pageKeywords = [...(item.keywords ?? []), ...(SETTINGS_HOST_PAGES.has(item.page) ? (["hostPicker.searchKeyword"] as const) : [])];
     docs.push({ page: item.page, pageOrder, pageTitle, anchor: null, sectionTitle: null, keywords: pageKeywords.map(text), disabled: pageDisabled });
+    if (item.page === "modules") for (const module of moduleEntries) {
+      docs.push({ page: item.page, pageOrder, pageTitle, anchor: `module-${module.id}`, sectionTitle: module.title, keywords: module.keywords, disabled: pageDisabled });
+    }
     const card = (s: SettingsSearchSection, gate: SettingsGate) => {
       if (gate.kind === "hidden") return;
       const disabled = pageDisabled ?? (gate.kind === "notice" ? upgrade(gate.missing) : null);
-      docs.push({ page: item.page, pageOrder, pageTitle, anchor: s.anchor, sectionTitle: text(s.titleKey), keywords: (s.keywords ?? []).map(text), disabled });
+      docs.push({ page: item.page, pageOrder, pageTitle, anchor: s.anchor, sectionTitle: text(s.titleKey), keywords: [...(s.keywords ?? []).map(text), ...(item.page === "general" && s.anchor === "terms" ? termKeywords : [])], disabled });
     };
     // A mixed page's host part (SettingsHostPart) is on the Settings target host, like the host pages.
     const partTarget = item.hostPart ? hostTarget : null;
@@ -104,15 +121,25 @@ export function useSettingsSearchIndex(): SettingsSearchDoc[] {
   const hostLabel = useHostScope().host(settingsHost)?.label ?? settingsHost;
   const pages = useSlot("settings.page");
   const sections = useSlot("settings.section");
+  const statuses = useModuleStatuses();
+  // en loads on demand (i18n): the index is rebuilt when it arrives, so a search typed before then also finds the
+  // English names. Opening Settings starts the load (the search lives there).
+  const enCatalog = useEnglishCatalog();
   return useMemo(() => {
     // The other shipped language, with its own display terms: zh UI also matches English,
     // en-family UI also Chinese, other languages also English.
     const otherLocale = locale.startsWith("zh") ? "en" : locale.startsWith("en") ? "zh-CN" : "en";
-    const otherCatalog: Record<MessageKey, string> = otherLocale === "en" ? enCatalog : zhCatalog;
+    const otherCatalog: Partial<Record<MessageKey, string>> = otherLocale === "en" ? (enCatalog ?? {}) : zhCatalog;
     const otherTerms = resolveTerms(overrides, otherLocale);
-    const text = (key: MessageKey): SearchText => ({ current: cleanText(t(key)), other: cleanText(applyTerms(otherCatalog[key] ?? enCatalog[key] ?? key, otherTerms, otherLocale)) });
-    return settingsSearchDocs({ pages, sections, text, t, hostTarget, appTarget, hostLabel, capabilitiesOf });
-  }, [t, locale, overrides, hostTarget, appTarget, hostLabel, pages, sections]);
+    const text = (key: MessageKey): SearchText => ({ current: cleanText(t(key)), other: cleanText(applyTerms(otherCatalog[key] ?? enCatalog?.[key] ?? zhCatalog[key] ?? key, otherTerms, otherLocale)) });
+    const modules = appModules();
+    const reveal = revealUnlistedModules();
+    const moduleEntries = modules.modules.filter((m) => listedInSettings(m.id, modules.isEnabled(m.id), reveal)).map((m) => ({
+      id: m.id, title: m.displayName ? { current: m.displayName, other: m.displayName } : text(m.titleKey), keywords: [text(m.titleKey)],
+    }));
+    return settingsSearchDocs({ pages, sections, text, t, hostTarget, appTarget, hostLabel, capabilitiesOf,
+      termKeywords: settingsTermSearchTexts(overrides, locale, otherLocale), moduleEntries });
+  }, [t, locale, overrides, hostTarget, appTarget, hostLabel, pages, sections, statuses, enCatalog]);
 }
 
 // ---- reveal (scroll + flash after the page renders) ----
@@ -143,22 +170,23 @@ const REVEAL_TIMEOUT_MS = 3000;
 
 /** Mounted by the Settings page: waits (pages load their data first) for the card, then flashes it. */
 export function useSettingsReveal(): void {
+  const win = useOwnerWindow();
   const { anchor, nonce } = useReveal();
   useEffect(() => {
     if (!anchor) return;
     const started = Date.now();
     let frame = 0;
     const tick = () => {
-      const el = document.getElementById(settingsAnchorId(anchor));
+      const el = win.document.getElementById(settingsAnchorId(anchor));
       if (el) {
         flashElement(el);
         useReveal.setState({ anchor: null });
         return;
       }
-      if (Date.now() - started < REVEAL_TIMEOUT_MS) frame = requestAnimationFrame(tick);
+      if (Date.now() - started < REVEAL_TIMEOUT_MS) frame = win.requestAnimationFrame(tick);
       else useReveal.setState({ anchor: null });
     };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [anchor, nonce]);
+    frame = win.requestAnimationFrame(tick);
+    return () => win.cancelAnimationFrame(frame);
+  }, [anchor, nonce, win]);
 }

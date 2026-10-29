@@ -1,7 +1,7 @@
 import { bridge } from "../../bridge";
 import type { AppModuleContext } from "../slots";
 import { browserCache } from "./browserCache";
-import { BROWSER_TAB, browserNavigationUrl, browserTitle, isBrowserTabKey } from "./browserState";
+import { browserTitle } from "./browserState";
 import { guestLifecycle } from "./guestLifecycle";
 import { browserActivation } from "./activation";
 import { browserHostCurrent, watchBrowserHosts } from "./hosts";
@@ -11,6 +11,7 @@ import { translate } from "../../i18n";
 import type { BrowserEvent } from "../../../../shared/browser";
 import { browserSitePermissionList } from "./sitePermissionText";
 import { openClaimTab } from "./claimOpen";
+import { inBrowserTabWindow, openPopupTab, pressBrowserTab, revealBrowserTab } from "./popupOpen";
 import { browserThumbnails } from "./thumbnails";
 
 /** A preview intentionally has no browser bridge, hence no real webview or website requests. */
@@ -54,6 +55,8 @@ export async function startBrowser(context: AppModuleContext): Promise<void> {
     }
     // A background agent tab's live frame: display only, no tab-state change.
     if (event.kind === "thumbnail") { browserThumbnails.set(event.hostId, event.tabKey, event.thumbnail); return; }
+    // The owner pressed in a tab's page (design 017): like a press in its pane.
+    if (event.kind === "pressed") { inBrowserTabWindow(event.hostId, event.tabKey, () => pressBrowserTab(event)); return; }
     if (event.kind === "agent-open") { if (event.openIntent) opens.open(event.openIntent); return; }
     if (event.kind === "agent-open-cancel") { if (event.openRequestId) opens.cancelled(event.hostId, event.openRequestId); return; }
     if (event.kind === "agent-open-confirm") { if (event.openRequestId) opens.confirmed(event.hostId, event.openRequestId); }
@@ -62,20 +65,15 @@ export async function startBrowser(context: AppModuleContext): Promise<void> {
     if (event.kind === "claim-granted") { if (browserCache.update(event)) claimGrantedNotice(context, event); return; }
     if (!browserCache.update(event)) return;
     if (event.kind === "reveal") {
-      // list() is already limited to the current scope. Reveal only this existing host-bound
-      // instance: never open a replacement, switch scope, focus a card or restore the OS window.
-      const target = context.services.side.list(BROWSER_TAB).find((instance) => instance.state && typeof instance.state === "object" && !Array.isArray(instance.state) && instance.state.tabKey === event.tabKey
-        && (instance.binding.kind === "host" || instance.binding.kind === "agent") && instance.binding.hostId === event.hostId);
-      if (target) context.services.side.reveal({ instanceId: target.id });
+      // Only this existing host-bound instance, in whichever live Shelf of the scope holds it (design 017): never
+      // open a replacement, switch scope, focus a card or restore the OS window.
+      inBrowserTabWindow(event.hostId, event.tabKey, () => revealBrowserTab(event, context.services.side));
       return;
     }
     if (event.kind === "new-tab") {
-      const url = browserNavigationUrl(event.newTabUrl);
-      if (!url || !/^https?:/.test(url) || (event.pool === "agent" && !isBrowserTabKey(event.newTabKey))) return;
-      // Main minted the new tab's key in the opener's pool (and holds the exact URL / form body for it).
-      const params: Record<string, string | boolean> = event.pool === "agent" ? { url, tabKey: event.newTabKey!, agentOpened: true }
-        : isBrowserTabKey(event.newTabKey) ? { url, tabKey: event.newTabKey, ownerTab: true } : { url };
-      context.services.side.open(BROWSER_TAB, params, { binding: { kind: "host", hostId: event.hostId }, focus: false });
+      // Design 012: in the Shelf that holds the opener tab (the other workspace's too), not the focused one.
+      // In the window that holds the opener (a desk too, P5).
+      if (!inBrowserTabWindow(event.hostId, event.tabKey, () => openPopupTab(event, context.services.side.open))) return;
       if (event.newTabAgent) context.services.ui.notice(translate(event.newTabGranted ? "browser.newTab.agentGranted" : "browser.newTab.agent", { name: browserTitle(event.lease?.agentName ?? "") }));
     }
   });

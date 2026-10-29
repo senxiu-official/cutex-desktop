@@ -4,7 +4,7 @@
 // second host's same-id agent). The pane layout (lib/paneStore) follows the selection: open beside,
 // focus, close, and the layout persisted per device and restored without gone agents. Same fake per-host
 // bridge as storeQueueScope.test.ts.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import type { DaemonState, HostsState } from "../src/shared/ipc";
 import type { NotifyOccurrence } from "../src/renderer/src/lib/notifyEvents";
@@ -127,6 +127,24 @@ async function start(focus = "local") {
 }
 const ids = (rows: { cutexSessionId: string }[] | undefined) => rows?.map((r) => r.cutexSessionId);
 
+// Warm the transform cache once: each beforeEach resets modules and re-imports the store, and the
+// first-ever load (~3 s) was billed to the first test's hook and timed out under the full suite's
+// load. Same stubs as beforeEach (the store reads them at evaluation), undone like afterEach.
+beforeAll(async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {}, removeItem: () => {} });
+  vi.stubGlobal("document", { hasFocus: () => false });
+  vi.stubGlobal("requestAnimationFrame", (cb: () => void) => setTimeout(cb, 0));
+  await import("../src/renderer/src/store");
+  await import("../src/renderer/src/lib/shell");
+  await import("../src/renderer/src/lib/ownerNotifyStore");
+  await import("../src/renderer/src/lib/notifyEvents");
+  await import("../src/renderer/src/lib/paneStore");
+  await import("../src/renderer/src/lib/paneLayout");
+  vi.clearAllTimers();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+}, 60_000);
 beforeEach(async () => {
   vi.resetModules();
   vi.useFakeTimers();
@@ -327,7 +345,7 @@ describe("the pane layout follows the selection (lib/paneStore)", () => {
     await settle();
     stop();
     const stored = JSON.parse(storage.get(panes.PANES_STORAGE_KEY)!) as { v: number; layouts: Record<string, unknown> };
-    expect(stored.v).toBe(1);
+    expect(stored.v).toBe(5); // §24.12 / §24.13: the file is v5 once the migrations ran (v2: Shelves, v3: 允许混排 reset, v4: Shelf chips → rails, v5: a Shelf per conversation)
     expect(Object.keys(stored.layouts)).toEqual(["host:local"]);
     // Next start: the remote "same" was deleted meanwhile; the focused local a1 is opened again.
     vi.resetModules();
@@ -384,3 +402,257 @@ describe("the pane layout follows the selection (lib/paneStore)", () => {
   });
 });
 
+describe("r265 D4 D-5: a restored pane of a host switched to", () => {
+  it("opens its agent after the host notification is delivered, not during it (no 「host binding unavailable or changed」)", async () => {
+    mock.responses.set("bootstrap", boot);
+    // An earlier run: the workstation's layout has its agent w1 focused.
+    await start("local");
+    const panes = await import("../src/renderer/src/lib/paneStore");
+    const stop = panes.startPaneSync();
+    transport.hosts(WORKSTATION);
+    await settle();
+    await store.getState().select("w1", WORKSTATION);
+    await settle();
+    stop();
+    expect(Object.keys((JSON.parse(storage.get(panes.PANES_STORAGE_KEY)!) as { layouts: Record<string, unknown> }).layouts)).toContain(`host:${WORKSTATION}`);
+    // Next start on this machine's host; the workstation is connected outside the scope (its list is followed).
+    vi.resetModules();
+    mock.listeners.clear();
+    mock.calls.length = 0;
+    store = (await import("../src/renderer/src/store")).useApp;
+    // This machine's cutex is down (no connection): nothing listed for it.
+    mock.responses.set("hosts", () => hostsState("local", [WORKSTATION]));
+    mock.responses.set("local:daemonState", () => ({ kind: "unreachable", baseUrl: "fake://local", message: "down" }));
+    mock.responses.set("local:sidebar", () => { throw new Error("unreachable"); });
+    const again = await import("../src/renderer/src/lib/paneStore");
+    const stop2 = again.startPaneSync();
+    store.getState().init();
+    await settle();
+    await settle();
+    expect(store.getState().byHost[WORKSTATION]?.sidebar).toBeTruthy();
+    // Switch: the restored pane's agent is listed by the adopted slice at once — its open waits for the delivery.
+    expect(store.getState().sidebar).toBeNull();
+    transport.hosts(WORKSTATION, [WORKSTATION]);
+    await settle();
+    await settle();
+    expect([store.getState().selectedHost, store.getState().selectedId]).toEqual([WORKSTATION, "w1"]);
+    expect(store.getState().sessions[viewKey(WORKSTATION, "w1")]?.error ?? null).toBeNull();
+    expect(callsOf("bootstrap")).toContainEqual([WORKSTATION, "w1"]);
+    stop2();
+  });
+});
+
+describe("multi-window P3: each window's own layout and selection, one copy per agent", () => {
+  const DESK = "d000000000001";
+  async function withDesk() {
+    await twoHostsSameId();
+    const panes = await import("../src/renderer/src/lib/paneStore");
+    const layout = await import("../src/renderer/src/lib/paneLayout");
+    const scope = await import("../src/renderer/src/lib/windowScope");
+    const route = await import("../src/renderer/src/lib/windowRoute");
+    const desks = await import("../src/renderer/src/lib/deskStore");
+    const actions = await import("../src/renderer/src/lib/deskActions");
+    (await import("../src/renderer/src/store")).setOpenRouter(route.routeOpen);
+    const stopMain = panes.startPaneSync();
+    await store.getState().select("a1", "local");
+    await settle();
+    // A desk window is open (lib/deskSync registers it, then its layout follows the app), seeded with w1.
+    desks.useDesks.setState({ desks: [{ deskId: DESK, handle: { deskId: DESK, win: {} as Window, root: null as never, dispose: () => {} }, content: { kind: "conversation", hostId: WORKSTATION, sessionId: "w1" } }] });
+    panes.seedWindowLayout(DESK, layout.defaultLayout({ sidebarOpen: true, sidebarWidth: 256, hostId: WORKSTATION, sessionId: "w1" }));
+    const stopDesk = panes.startPaneSync(DESK);
+    await settle();
+    const agents = (key: string) => {
+      const l = panes.usePanes.of(key).getState().layout;
+      return layout.conversationPanes(l).map((id) => layout.paneBinding(l, id));
+    };
+    return { panes, layout, scope, route, desks, actions, agents, stop: () => (stopDesk(), stopMain()) };
+  }
+  const selected = () => [store.getState().selectedHost, store.getState().selectedId];
+
+  it("a desk has its own layout and kept selection; coming to it makes its selection the store's", async () => {
+    const { panes, scope, route, agents, stop } = await withDesk();
+    expect(panes.usePanes.of(DESK).getState().scope).toBe(`host:local/desk:${DESK}`);
+    expect(agents("main")).toEqual([{ hostId: "local", sessionId: "a1" }]);
+    expect(agents(DESK)).toEqual([{ hostId: WORKSTATION, sessionId: "w1" }]);
+    expect(selected()).toEqual(["local", "a1"]);
+    expect(scope.keptSelection(DESK)).toMatchObject({ selectedHost: WORKSTATION, selectedId: "w1" });
+    route.activateWindow(DESK);
+    await settle();
+    expect(selected()).toEqual([WORKSTATION, "w1"]);
+    expect(scope.keptSelection("main")).toMatchObject({ selectedHost: "local", selectedId: "a1" });
+    // A plain open in the desk replaces the desk's column; the main window is left alone.
+    await store.getState().openAgent("same", WORKSTATION);
+    await settle();
+    expect(agents(DESK)).toEqual([{ hostId: WORKSTATION, sessionId: "same" }]);
+    expect(agents("main")).toEqual([{ hostId: "local", sessionId: "a1" }]);
+    route.activateWindow("main");
+    await settle();
+    expect(selected()).toEqual(["local", "a1"]);
+    stop();
+  });
+
+  it("an open of an agent shown in the other window jumps there (no second copy); open nowhere → the window asked in", async () => {
+    const { scope, route, agents, stop } = await withDesk();
+    route.activateWindow(DESK);
+    await settle();
+    // a1 is in the main window's column: asked in the desk, the main window becomes the active one, on a1.
+    await store.getState().openAgent("a1", "local");
+    await settle();
+    expect(scope.useActiveWindow.getState().key).toBe("main");
+    expect(selected()).toEqual(["local", "a1"]);
+    expect(agents(DESK)).toEqual([{ hostId: WORKSTATION, sessionId: "w1" }]);
+    expect(route.agentPlaces("local", "a1")).toEqual([{ window: "main", paneId: "main", kind: "column" }]);
+    // Ctrl+click (beside) of w1 from the main window: w1 is the desk's — the desk comes forward instead.
+    const { openAgentBeside } = await import("../src/renderer/src/lib/paneStore");
+    openAgentBeside(WORKSTATION, "w1");
+    await settle();
+    expect(scope.useActiveWindow.getState().key).toBe(DESK);
+    expect(agents("main")).toEqual([{ hostId: "local", sessionId: "a1" }]);
+    stop();
+  });
+
+  it("a sidebar / ⌘K row (agentEffect 替换 or 并排) of an agent in the other window's column jumps there too (dual-screen run 2026-10-28)", async () => {
+    const { scope, route, agents, stop } = await withDesk();
+    const { agentEffect } = await import("../src/renderer/src/lib/workspaceEffects");
+    for (const mode of ["replace", "beside"] as const) {
+      route.activateWindow("main");
+      await settle();
+      // w1 is the desk's: the preview says where it goes (no outline on this window), the click goes there.
+      const effect = agentEffect({ hostId: WORKSTATION, key: "w1" }, mode);
+      expect(effect.foretell).toMatchObject({ tone: "open", marks: [] });
+      effect.run();
+      await settle();
+      expect(scope.useActiveWindow.getState().key).toBe(DESK);
+      expect(agents("main")).toEqual([{ hostId: "local", sessionId: "a1" }]);
+      expect(agents(DESK)).toEqual([{ hostId: WORKSTATION, sessionId: "w1" }]);
+    }
+    // Shown in no other window: this window's own plan (a plain open replaces the desk's column).
+    agentEffect({ hostId: "local", key: "b2" }, "replace").run();
+    await settle();
+    expect(agents(DESK)).toEqual([{ hostId: "local", sessionId: "b2" }]);
+    expect(agents("main")).toEqual([{ hostId: "local", sessionId: "a1" }]);
+    stop();
+  });
+
+  it("「在 桌子 N 打开」 moves an agent; a closed desk gives its conversations back as chips; both layouts are stored per window", async () => {
+    const { panes, layout, desks, actions, agents, stop } = await withDesk();
+    actions.openInWindow(DESK, "local", "b2");
+    await settle();
+    expect(agents(DESK)).toEqual([{ hostId: "local", sessionId: "b2" }]);
+    actions.openInWindow(DESK, "local", "a1");
+    await settle();
+    // a1 left the main window (its only column shows nothing now) and replaced the desk's focused column.
+    expect(agents("main")).toEqual([{ hostId: "local", sessionId: null }]);
+    expect(agents(DESK)).toEqual([{ hostId: "local", sessionId: "a1" }]);
+    stop();
+    const stored = JSON.parse(storage.get(panes.PANES_STORAGE_KEY)!) as { layouts: Record<string, unknown> };
+    expect(Object.keys(stored.layouts).sort()).toEqual(["host:local", `host:local/desk:${DESK}`]);
+    // The desk closes: it leaves the open list, then hands back what it showed (columns and chips) as main's chips.
+    const content = desks.useDesks.getState().desks[0]!.content;
+    desks.useDesks.setState({ desks: [] });
+    actions.giveBackToMain(content, DESK);
+    await settle();
+    const main = panes.usePanes.of("main").getState().layout;
+    expect(main.chips.map((id) => layout.paneBinding(main, id))).toEqual(expect.arrayContaining([{ hostId: "local", sessionId: "a1" }]));
+  });
+
+  // P3.5: a restart whose stored layouts show one agent in two windows keeps exactly one copy.
+  async function withDuplicate() {
+    const env = await withDesk();
+    const { panes, layout } = env;
+    // The main window's stored layout also shows the desk's w1 (beside a1): two live copies after a restart.
+    panes.usePanes.of("main").setState({ layout: layout.openBeside(panes.usePanes.of("main").getState().layout, { hostId: WORKSTATION, sessionId: "w1" }, 1, { room: true })! });
+    expect(env.agents("main")).toEqual([{ hostId: "local", sessionId: "a1" }, { hostId: WORKSTATION, sessionId: "w1" }]);
+    return env;
+  }
+
+  it("restart, last active window = the desk (stored): the desk keeps the agent, the main window's column of it closes", async () => {
+    const { actions, route, agents, stop } = await withDuplicate();
+    const dropped = actions.dedupeAtStart(DESK);
+    await settle();
+    expect(dropped.map((p) => p.window)).toEqual(["main"]);
+    expect(agents("main")).toEqual([{ hostId: "local", sessionId: "a1" }]);
+    expect(agents(DESK)).toEqual([{ hostId: WORKSTATION, sessionId: "w1" }]);
+    expect(route.agentPlaces(WORKSTATION, "w1").filter((p) => p.kind === "column")).toHaveLength(1);
+    // The main window (active) still has its own agent selected.
+    expect(selected()).toEqual(["local", "a1"]);
+    stop();
+  });
+
+  it("restart, last active window = the main window: the main window keeps it, the desk's only column shows nothing", async () => {
+    const { actions, agents, stop } = await withDuplicate();
+    actions.dedupeAtStart("main");
+    await settle();
+    expect(agents("main")).toEqual([{ hostId: "local", sessionId: "a1" }, { hostId: WORKSTATION, sessionId: "w1" }]);
+    expect(agents(DESK)).toEqual([{ hostId: WORKSTATION, sessionId: null }]);
+    stop();
+  });
+
+  it("restart, nothing stored: the desk wins (the agent was moved there on purpose); the stored last window is the active one", async () => {
+    const { actions, route, agents, stop } = await withDuplicate();
+    expect(route.readStoredActive()).toBeNull();
+    actions.dedupeAtStart(route.readStoredActive());
+    await settle();
+    expect(agents("main")).toEqual([{ hostId: "local", sessionId: "a1" }]);
+    expect(agents(DESK)).toEqual([{ hostId: WORKSTATION, sessionId: "w1" }]);
+    route.activateWindow(DESK);
+    expect(route.readStoredActive()).toBe(DESK);
+    route.activateWindow("main");
+    expect(route.readStoredActive()).toBe("main");
+    // No duplicates: nothing to do.
+    expect(actions.dedupeAtStart(DESK)).toEqual([]);
+    stop();
+  });
+
+  it("quitting does not change the stored last window: the focus moving to the main window and a desk going away are not remembered (dual-screen run 2026-10-28)", async () => {
+    const { scope, route, stop } = await withDesk();
+    // The owner pressed in the desk last.
+    route.activateWindow(DESK);
+    expect(route.readStoredActive()).toBe(DESK);
+    // Quit: the desks close, the main window gets the focus — it becomes the active one, but is not stored.
+    route.activateWindow("main", { remember: false });
+    expect(scope.useActiveWindow.getState().key).toBe("main");
+    expect(route.readStoredActive()).toBe(DESK);
+    route.activateWindow(DESK, { remember: false });
+    route.windowGone(DESK);
+    expect(scope.useActiveWindow.getState().key).toBe("main");
+    expect(route.readStoredActive()).toBe(DESK);
+    // A press in the main window is stored, also when it already is the active one.
+    route.activateWindow("main");
+    expect(route.readStoredActive()).toBe("main");
+    stop();
+  });
+
+  it("only remembered desks coming back are de-duplicated (a desk opened now is not)", async () => {
+    const actions = await import("../src/renderer/src/lib/deskActions");
+    const desks = await import("../src/renderer/src/lib/deskStore");
+    storage.set(desks.DESKS_STORAGE_KEY, JSON.stringify([{ deskId: DESK, hostId: "local", sessionId: "a1" }]));
+    // No desk bridge here: the window does not open, but the desk was marked as restoring first.
+    vi.stubGlobal("window", {});
+    await actions.reopenDesks(() => true);
+    vi.unstubAllGlobals();
+    expect(actions.takeRestoring(DESK)).toBe(true);
+    expect(actions.takeRestoring(DESK)).toBe(false);
+    expect(actions.takeRestoring("d000000000002")).toBe(false);
+  });
+});
+
+describe("multi-window P3.5: restart winner (lib/windowRoute, pure)", () => {
+  it("the last active window when it holds the agent, else the first remembered desk, else the main window", async () => {
+    const { startWinner, startDuplicates } = await import("../src/renderer/src/lib/windowRoute");
+    const { defaultLayout, openBeside } = await import("../src/renderer/src/lib/paneLayout");
+    const A = "d000000000001";
+    const B = "d000000000002";
+    expect(startWinner(["main", A], A, [A, B])).toBe(A);
+    expect(startWinner(["main", A], "main", [A, B])).toBe("main");
+    expect(startWinner(["main", A], B, [A, B])).toBe(A);
+    expect(startWinner(["main", B, A], null, [A, B])).toBe(A);
+    expect(startWinner(["main"], null, [])).toBe("main");
+    // Two desks and the main window all show x; y only in B; z twice in the main window.
+    const one = (s: string) => defaultLayout({ sidebarOpen: true, sidebarWidth: 256, hostId: "local", sessionId: s });
+    const layouts: Record<string, ReturnType<typeof one>> = { main: openBeside(one("x"), { hostId: "local", sessionId: "m" }, 1, { room: true })!, [A]: one("x"), [B]: openBeside(one("x"), { hostId: "local", sessionId: "y" }, 1, { room: true })! };
+    const drop = startDuplicates(["main", A, B], (k) => layouts[k]!, B, [A, B]);
+    expect(drop.map((p) => p.window).sort()).toEqual([A, "main"].sort());
+    expect(startDuplicates(["main", A, B], (k) => layouts[k]!, null, [A, B]).map((p) => p.window).sort()).toEqual([B, "main"].sort());
+  });
+});

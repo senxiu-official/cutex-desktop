@@ -1,7 +1,7 @@
 // Agent avatars: cutex stores `{kind: emoji|color|icon, value, color?}` (or null) via
 // `cutex/session/metadata/update`; null falls back to the profile color / a stable hash color.
 // `color` (#rrggbb) on an emoji / icon avatar needs the host capability `agent-avatar-color`.
-import type { SessionAvatar } from "@cutex-desktop/protocol";
+import type { AvatarMode, SessionBadge, SessionAvatar } from "@cutex-desktop/protocol";
 
 export const AVATAR_PALETTE = ["#4c8dff", "#22b8cf", "#40c057", "#d6336c", "#fab005", "#7950f2", "#fd7e14", "#12b886"];
 /** cutex SESSION_AVATAR_VALUE_MAX_CHARS. */
@@ -37,24 +37,31 @@ export function avatarColor(avatar: SessionAvatar | null | undefined): string | 
 }
 
 export interface AgentInfo {
+  avatarMode?: AvatarMode;
   avatar: SessionAvatar | null;
   note: string | null;
   /** 显示名 (cutex `displayNameOverride`); undefined = not edited here. */
   displayName?: string | null;
+  badge?: SessionBadge | null;
 }
 
 /** `cutex/session/metadata/update` params for what changed (empty = nothing to send). */
 export function agentInfoPatch(before: AgentInfo, after: AgentInfo): Partial<AgentInfo> {
   const patch: Partial<AgentInfo> = {};
-  const avatar = cleanAvatar(after.avatar);
+  const avatar = after.avatarMode === "inherit" ? null : cleanAvatar(after.avatar);
   const was = before.avatar ?? null;
   if (avatar?.kind !== was?.kind || avatar?.value !== was?.value || (avatar?.color ?? null) !== (was?.color ?? null)) patch.avatar = avatar;
+  if (after.avatarMode !== undefined && ((after.avatarMode ?? null) !== (before.avatarMode ?? null) || "avatar" in patch)) {
+    patch.avatarMode = after.avatarMode;
+    patch.avatar = avatar;
+  }
   const note = after.note?.trim() || null;
   if (note !== (before.note ?? null)) patch.note = note;
   if (after.displayName !== undefined) {
     const name = after.displayName?.trim() || null;
     if (name !== (before.displayName ?? null)) patch.displayName = name;
   }
+  if (after.badge !== undefined && JSON.stringify(after.badge) !== JSON.stringify(before.badge ?? null)) patch.badge = after.badge;
   return patch;
 }
 
@@ -66,4 +73,7 @@ export interface AgentInfoOptions {
   combineColor: boolean;
   /** `session-metadata` displayName: the 显示名 field. */
   editName: boolean;
+  editBadge?: boolean;
+  /** session-avatar-mode: fixed choices and draw-time Profile following. */
+  editAvatarMode?: boolean;
 }

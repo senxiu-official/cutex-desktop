@@ -7,10 +7,12 @@ import type { QuotaConfigView, QuotaReaderConfig } from "../../../../shared/ipc"
 import { api } from "../../bridge";
 import { useI18n, type MessageKey } from "../../i18n";
 import { FIELD_W } from "../../lib/fieldWidths";
-import { defaultQuotaLabel, gaugeErrors, isQuotaReaderPreset, latestObservedAt, observedClock, PROFILE_GENERIC_SWITCHES_FEATURE, QUOTA_CLAUDE_FEATURE, QUOTA_NATIVE_FEATURE, quotaLabelProblem, quotaPresetChoices, quotaPresetLabel, quotaReadersOff, readerFollowsBaseUrl, usesQuotaReaders, withPrimaryEnabled } from "../../lib/quota";
+import { defaultQuotaLabel, gaugeErrors, isQuotaReaderPreset, latestObservedAt, observedClock, PROFILE_GENERIC_SWITCHES_FEATURE, QUOTA_CLAUDE_FEATURE, QUOTA_DISPLAY_LABEL_FEATURE, QUOTA_NATIVE_FEATURE, quotaLabelFieldProblem, quotaLabelText, quotaPresetChoices, quotaPresetLabel, quotaReadersOff, readerFollowsBaseUrl, usesQuotaReaders, withLabelText, withPrimaryEnabled } from "../../lib/quota";
 import { GaugeChip } from "../GaugeBar";
 import { Button, Loading, NumberField, RefreshButton, SettingRow, Section, Segmented, Select, TextInput, Toggle } from "./Form";
-import { useTargetFeatures, useTargetLoadQuota, useTargetQuotas } from "../../lib/targetHost";
+import { useTargetFeatures, useTargetHostId, useTargetLoadQuota, useTargetQuotas } from "../../lib/targetHost";
+import { RESET_CREDITS_FEATURE } from "../../../../shared/resetCredits";
+import { ResetCreditsDetail, ResetCreditsUnsupportedRow } from "../ResetCredits";
 
 const MODES: QuotaReaderConfig["mode"][] = ["remaining_and_limit", "used_and_limit", "remaining_percent", "used_percent", "used_ratio", "balance"];
 const RESET_FORMATS: QuotaReaderConfig["reset_format"][] = ["rfc3339", "unix_seconds", "unix_millis"];
@@ -36,25 +38,35 @@ function ReaderFields({ reader, onChange, endpointLocked, isExtra }: { reader: Q
   const set = <K extends keyof QuotaReaderConfig>(key: K, value: QuotaReaderConfig[K]) => onChange({ ...reader, [key]: value });
   const balance = reader.mode === "balance";
   // Empty is fine when the window name can stand in (saved as 7d); anything else must pass cutex's rule.
-  const labelProblem = quotaLabelProblem(reader.label, reader.window_label);
+  const displayLabels = useTargetFeatures().has(QUOTA_DISPLAY_LABEL_FEATURE);
+  const labelProblem = quotaLabelFieldProblem(reader, displayLabels);
+  const labelText = quotaLabelText(reader);
+  // Without cutex's `quota-display-label` a non-ASCII label is refused: say why (and that a newer cutex takes it).
+  const noChinese = !displayLabels && labelProblem === "bad" && /[^\x00-\x7f]/.test(labelText);
   return (
     <>
-      <SettingRow label={t("agent-config.quota.enabled")}>
+      <SettingRow agents="none" source="host" label={t("agent-config.quota.enabled")}>
         <Toggle checked={reader.enabled} onChange={(v) => set("enabled", v)} />
       </SettingRow>
-      <SettingRow
+      <SettingRow agents="none" source="host"
         label={t("agent-config.quota.label")}
-        hint={labelProblem ? <span className="text-danger">{t(labelProblem === "bad" ? "agent-config.quota.labelBad" : "agent-config.quota.labelMissing")}</span> : t("agent-config.quota.labelHint")}
+        hint={
+          labelProblem ? (
+            <span className="text-danger">{t(noChinese ? "agent-config.quota.labelNeedsNewer" : labelProblem === "bad" ? (displayLabels ? "agent-config.quota.displayLabelBad" : "agent-config.quota.labelBad") : "agent-config.quota.labelMissing")}</span>
+          ) : (
+            t(displayLabels ? "agent-config.quota.displayLabelHint" : "agent-config.quota.labelHint")
+          )
+        }
       >
-        <TextInput width="w-24" value={reader.label} placeholder={defaultQuotaLabel(reader.window_label) || undefined} onChange={(v) => set("label", v)} />
+        <TextInput width="w-24" value={labelText} placeholder={defaultQuotaLabel(reader.window_label) || undefined} onChange={(v) => onChange(withLabelText(reader, v, displayLabels))} />
         <TextInput width="w-20" placeholder="5h / 7d" value={reader.window_label ?? ""} onChange={(v) => set("window_label", v || null)} />
       </SettingRow>
       {!endpointLocked && (
         <>
-          <SettingRow label="URL" hint={isExtra ? t("agent-config.quota.urlExtraHint") : undefined}>
+          <SettingRow agents="none" source="host" label="URL" hint={isExtra ? t("agent-config.quota.urlExtraHint") : undefined}>
             <TextInput width="w-80" mono value={reader.url} placeholder={isExtra ? t("agent-config.quota.samePrimary") : "https://…/usage"} onChange={(v) => set("url", v)} />
           </SettingRow>
-          <SettingRow label={t("agent-config.quota.auth")}>
+          <SettingRow agents="none" source="host" label={t("agent-config.quota.auth")}>
             <Select
               value={reader.auth}
               options={[
@@ -64,24 +76,24 @@ function ReaderFields({ reader, onChange, endpointLocked, isExtra }: { reader: Q
               onChange={(v) => set("auth", v)}
             />
           </SettingRow>
-          <SettingRow label={t("agent-config.quota.mode")}>
+          <SettingRow agents="none" source="host" label={t("agent-config.quota.mode")}>
             <Select value={reader.mode} options={MODES.map((m) => ({ value: m, label: t(`agent-config.quota.mode.${m}` as MessageKey) }))} onChange={(v) => set("mode", v)} />
           </SettingRow>
-          <SettingRow label={t("agent-config.quota.valuePointer")}>
+          <SettingRow agents="none" source="host" label={t("agent-config.quota.valuePointer")}>
             <TextInput mono value={reader.value_pointer} onChange={(v) => set("value_pointer", v)} />
           </SettingRow>
           {!balance && reader.mode.endsWith("_limit") && (
-            <SettingRow label={t("agent-config.quota.limitPointer")}>
+            <SettingRow agents="none" source="host" label={t("agent-config.quota.limitPointer")}>
               <TextInput mono value={reader.limit_pointer} onChange={(v) => set("limit_pointer", v)} />
             </SettingRow>
           )}
           {!balance && (
-            <SettingRow label={t("agent-config.quota.resetPointer")}>
+            <SettingRow agents="none" source="host" label={t("agent-config.quota.resetPointer")}>
               <TextInput mono width="w-48" value={reader.reset_pointer} onChange={(v) => set("reset_pointer", v)} />
               <Select width={FIELD_W.short} value={reader.reset_format} options={RESET_FORMATS.map((f) => ({ value: f, label: f }))} onChange={(v) => set("reset_format", v)} />
             </SettingRow>
           )}
-          <SettingRow label={t("agent-config.quota.refresh")}>
+          <SettingRow agents="none" source="host" label={t("agent-config.quota.refresh")}>
             <NumberField value={reader.refresh_seconds} range={[0, 86_400]} unit="s" onCommit={(v) => set("refresh_seconds", v ?? 0)} />
           </SettingRow>
         </>
@@ -118,7 +130,7 @@ function GaugesRow({ profile, label, empty, errors = false }: { profile: string;
   const gauges = useTargetQuotas()[profile];
   const failed = errors ? gaugeErrors(gauges ?? []) : [];
   return (
-    <SettingRow label={label} hint={observed ?? undefined}>
+    <SettingRow agents="none" source="host" readOnly label={label} hint={observed ?? undefined}>
       <span className="max-w-96">
         <GaugeList profile={profile} empty={empty} />
         {failed.map((line) => (
@@ -132,27 +144,36 @@ function GaugesRow({ profile, label, empty, errors = false }: { profile: string;
 }
 
 /** 额度 for official-login profiles: nothing to configure. */
-export function OfficialQuotaSection({ profile, claude }: { profile: string; claude: boolean }) {
+export function OfficialQuotaSection({ profile, claude, name = profile }: { profile: string; claude: boolean; name?: string }) {
   const { t } = useI18n();
   const loadQuota = useTargetLoadQuota();
   const native = useTargetFeatures().has(QUOTA_NATIVE_FEATURE);
   const claudeCutex = useTargetFeatures().has(QUOTA_CLAUDE_FEATURE);
+  const resets = useTargetFeatures().has(RESET_CREDITS_FEATURE);
+  const hostId = useTargetHostId();
   const label = claude ? (claudeCutex ? "agent-config.quota.claudeCutex" : "agent-config.quota.claude") : "agent-config.quota.official";
   const empty = claude ? (claudeCutex ? "agent-config.quota.officialEmpty" : "agent-config.quota.claudeEmpty") : native ? "agent-config.quota.officialEmpty" : "agent-config.quota.officialPending";
   return (
-    <Section title={t("agent-config.quota.title")} actions={<RefreshButton label={t("composer.quota.refresh")} onClick={() => void loadQuota(profile, true)} />}>
+    <Section   title={t("agent-config.quota.title")} hint={claude ? undefined : t("settings.profileParity.officialQuotaHint" as MessageKey, { name })} actions={<RefreshButton label={t("composer.quota.refresh")} onClick={() => void loadQuota(profile, true)} />}>
       <GaugesRow profile={profile} label={t(label)} empty={t(empty)} />
+      {resets && (
+        <SettingRow source="host" agents="now" label={t("resets.title")} hint={t("resets.hint")}>
+          <ResetCreditsDetail hostId={hostId} profile={profile} afterReset={() => void loadQuota(profile, true)} />
+        </SettingRow>
+      )}
     </Section>
   );
 }
 
 /** 额度 for API-key profiles; the config draft is saved by the editor's save bar. */
-export function QuotaConfigSection({ profile, draft, setDraft }: { profile: string; draft: QuotaConfigView | null; setDraft(v: QuotaConfigView): void }) {
+export function QuotaConfigSection({ profile, name = profile, draft, setDraft }: { profile: string; name?: string; draft: QuotaConfigView | null; setDraft(v: QuotaConfigView): void }) {
   const { t } = useI18n();
   const loadQuota = useTargetLoadQuota();
   const presetLabel = (preset: string) => quotaPresetLabel(t, preset);
   // cutex profile-generic-switches: explicit readers; `auto` is only a legacy leftover to replace.
   const readers = usesQuotaReaders(draft, useTargetFeatures().has(PROFILE_GENERIC_SWITCHES_FEATURE));
+  const resets = useTargetFeatures().has(RESET_CREDITS_FEATURE);
+  const hostId = useTargetHostId();
   const auto = draft?.preset === "auto";
   const reader = draft !== null && readers && isQuotaReaderPreset(draft.preset);
   const endpointLocked = auto || reader;
@@ -182,12 +203,13 @@ export function QuotaConfigSection({ profile, draft, setDraft }: { profile: stri
           t("agent-config.quota.customHint")
         );
   return (
-    <Section title={t("agent-config.quota.title")} hint={t("agent-config.quota.hint")} actions={<RefreshButton label={t("composer.quota.refresh")} onClick={() => void loadQuota(profile, true)} />}>
+    <Section   title={t("agent-config.quota.title")} hint={t("settings.profileParity.apiQuotaHint" as MessageKey, { name })} actions={<RefreshButton label={t("composer.quota.refresh")} onClick={() => void loadQuota(profile, true)} />}>
+      <h4 className="mt-2 text-xs font-medium text-muted">{t("settings.profileParity.quotaReadings" as MessageKey)}</h4>
+      <p className="mt-1 text-xs text-subtle">{t("settings.profileParity.quotaRefreshHint" as MessageKey)}</p>
       {/* No reader on: cutex reads nothing, so say so and offer the switch (saved by the save bar). */}
       {draft && quotaReadersOff(draft) ? (
-        <SettingRow label={t("agent-config.quota.current")}>
+        <SettingRow agents="none" source="host" readOnly label={t("agent-config.quota.current")}>
           <span className="text-xs text-subtle">{t("agent-config.quota.currentOff")}</span>
-          <Button onClick={() => setDraft(withPrimaryEnabled(draft))}>{t("agent-config.quota.enableNow")}</Button>
         </SettingRow>
       ) : (
         <GaugesRow profile={profile} label={t("agent-config.quota.current")} empty={t("agent-config.quota.currentEmpty")} errors />
@@ -196,7 +218,10 @@ export function QuotaConfigSection({ profile, draft, setDraft }: { profile: stri
         <Loading rows={1} />
       ) : (
         <>
-          <SettingRow label={t("agent-config.quota.preset")} hint={presetHint}>
+          <h4 className="mt-4 text-xs font-medium text-muted">{t("settings.profileParity.quotaReaderSetup" as MessageKey)}</h4>
+          <p className="mt-1 text-xs text-subtle">{t("settings.profileParity.quotaReaderSetupHint" as MessageKey)}</p>
+          <SettingRow agents="none" source="host" label={t("agent-config.quota.preset")} hint={presetHint}>
+            {quotaReadersOff(draft) && <Button onClick={() => setDraft(withPrimaryEnabled(draft))}>{t("agent-config.quota.enableNow")}</Button>}
             {readers ? (
               <Select
                 width="w-64"
@@ -242,6 +267,7 @@ export function QuotaConfigSection({ profile, draft, setDraft }: { profile: stri
           )}
         </>
       )}
+      {resets && <ResetCreditsUnsupportedRow hostId={hostId} profile={profile} />}
     </Section>
   );
 }

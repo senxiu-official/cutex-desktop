@@ -63,7 +63,7 @@ export function GoalBody({ data: goal }: { sessionId: string; data: ThreadGoal }
         <span className={`${CAPSULE_ROW_ICON} h-5`}>
           <GoalMark status={goal.status} />
         </span>
-        <p className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-5">{goal.objective}</p>
+        <p className="line-clamp-2 min-w-0 flex-1 text-ui/[inherit] leading-5">{goal.objective}</p>
       </div>
       {budget !== null && (
         <div className="mt-1.5 pl-5.5" title={t("goal.budgetRing", { used: formatGoalTokens(goal.tokensUsed), budget: formatGoalTokens(goal.tokenBudget!) })}>

@@ -25,7 +25,7 @@ export class CutexApiError extends Error {
   static fromBody(status: number, body: unknown, viaProxy = false): CutexApiError {
     const error = (body as Partial<CutexErrorBody> | undefined)?.error;
     if (error && typeof error.code === "string") {
-      return new CutexApiError(status, error.code, error.message ?? "", !!error.retryable, error.details);
+      return new CutexApiError(status, error.code, error.message ?? "", error.retryable === true, error.details);
     }
     // Some cutex routers (peers-v2 `/v2/peers*`) answer a flat `{code, message, retryable, details}`.
     const flat = body as { code?: unknown; message?: unknown; retryable?: unknown; details?: unknown } | null | undefined;

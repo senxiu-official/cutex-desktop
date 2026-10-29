@@ -26,7 +26,7 @@ const REASON: Record<string, MessageKey> = {
 function Snapshot({ state, reason, onRetry }: { state: TurnPeekParams; reason: MessageKey; onRetry?: () => void }) {
   const { t } = useI18n();
   return (
-    <div className="px-3.5 py-3 text-[13px] text-subtle">
+    <div className="px-3.5 py-3 text-ui/[inherit] text-subtle">
       <p className="m-0 font-medium text-muted">{t(reason)}</p>
       {state.snippet && <p className="font-chat-context mt-2 mb-0 line-clamp-6 whitespace-pre-wrap opacity-80"><ScriptText text={state.snippet} /></p>}
       {onRetry && (
@@ -49,20 +49,20 @@ export function TurnPeekBody({ instance, where }: SideBodyProps<TurnPeekParams>)
   const entries = useMemo(() => (found ? orderedEntries(found.timeline) : []), [found?.timeline, found?.turn.entryIds.length]);
   const frame = where === "card" ? "h-full overflow-y-auto" : "";
   let body;
-  if (result.status === "loading") body = <p className="m-0 px-3.5 py-3 text-[13px] text-subtle">{t("conversation.turnPeek.loading")}</p>;
+  if (result.status === "loading") body = <p className="m-0 px-3.5 py-3 text-ui/[inherit] text-subtle">{t("conversation.turnPeek.loading")}</p>;
   else if (result.status === "host-offline") body = <Snapshot state={s} reason="conversation.turnPeek.hostOffline" />;
   else if (result.status === "error") body = <Snapshot state={s} reason="conversation.turnPeek.error" onRetry={() => void lookupTurn(target(s), true)} />;
   else if (result.status === "not-found") body = <Snapshot state={s} reason={REASON[result.reason] ?? "conversation.turnPeek.unknown"} onRetry={() => void lookupTurn(target(s), true)} />;
   else
     body = (
-      <div className="px-3.5 pb-2 text-[13px]">
+      <div className="px-3.5 pb-2 text-ui/[inherit]">
         <TimelineBody timeline={found!.timeline} entries={entries} sessionId={s.sessionId} nameOf={nameOf} readOnly />
       </div>
     );
   return (
     <div className={frame} data-turn-peek={s.turnId}>
       {where === "card" && found?.turn.startedAt && (
-        <p className="m-0 px-3.5 pt-2 text-[11px] text-subtle">
+        <p className="m-0 px-3.5 pt-2 text-caption/[inherit] text-subtle">
           {nameOf(s.sessionId)} · {shortTime(found.turn.startedAt)}
         </p>
       )}

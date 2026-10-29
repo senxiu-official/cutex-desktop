@@ -7,6 +7,7 @@ import type { ProjectMemoryView } from "../../../shared/ipc";
 import { hostApi, useApp } from "../store";
 import { useI18n } from "../i18n";
 import { Markdown } from "./Markdown";
+import { Tag } from "./Tag";
 
 function MemoryEntry({ hostId, projectId, entry }: { hostId: string; projectId: string; entry: ProjectMemoryView["entries"][number] }) {
   const [open, setOpen] = useState(false);
@@ -24,9 +25,9 @@ function MemoryEntry({ hostId, projectId, entry }: { hostId: string; projectId: 
       <button onClick={toggle} className="flex w-full items-center gap-2 py-2 text-left">
         {open ? <ChevronDown size={13} className="shrink-0 text-subtle" /> : <ChevronRight size={13} className="shrink-0 text-subtle" />}
         <span className="shrink-0 text-sm">{entry.name}</span>
-        {entry.type && <span className="shrink-0 rounded bg-surface-2 px-1 text-[10px] text-muted">{entry.type}</span>}
+        {entry.type && <Tag>{entry.type}</Tag>}
         <span className="min-w-0 flex-1 truncate text-xs text-subtle">{entry.description}</span>
-        {typeof entry.bytes === "number" && <span className="shrink-0 font-mono text-[11px] text-subtle">{Math.max(1, Math.round(entry.bytes / 1024))} KB</span>}
+        {typeof entry.bytes === "number" && <span className="shrink-0 font-mono text-caption/[inherit] text-subtle">{Math.max(1, Math.round(entry.bytes / 1024))} KB</span>}
       </button>
       {open && <div className="mb-2 ml-5 rounded-lg bg-background px-3 py-2 text-sm">{content === null ? <span className="text-xs text-subtle">…</span> : <Markdown text={content} />}</div>}
     </div>

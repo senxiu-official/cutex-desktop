@@ -15,6 +15,10 @@ import { useModuleEnabled } from "../modules/react";
 import { CARD_FLAGS } from "../lib/narrowCard";
 import { dataFlags, useSizeFlags, type SizeTest } from "../lib/sizeFlags";
 import "./LaunchPage.css";
+import { openMenuAt } from "../lib/contextMenu";
+import { LOCAL_HOST_ID } from "../../../shared/hosts";
+import { DROP_TINT, dropTint } from "../lib/dropTint";
+import { ownerWindowOf } from "../lib/ownerWindow";
 
 /**
  * Page sizes (content box) for LaunchPage.css: `data-narrow` ≤ 520px (two-column settings),
@@ -56,7 +60,7 @@ export function measureLaunchDock(el: HTMLElement | null): (() => void) | undefi
   if (!el || !page || typeof ResizeObserver === "undefined") return undefined;
   const set = (height: number) => { if (height > 0) page.style.setProperty("--launch-dock-h", `${Math.ceil(height)}px`); };
   set(el.getBoundingClientRect().height);
-  const observer = new ResizeObserver((entries) => {
+  const observer = new (ownerWindowOf(el).ResizeObserver)((entries) => {
     const entry = entries[entries.length - 1];
     set(entry?.borderBoxSize?.[0]?.blockSize ?? el.getBoundingClientRect().height);
   });
@@ -69,18 +73,26 @@ export function LaunchDock({ children }: { children: ReactNode }) {
   return <div ref={measureLaunchDock} className="launch-dock">{children}</div>;
 }
 
-export function LaunchAttachments({ images, disabled = false, onRemove }: { images: DraftImage[]; disabled?: boolean; onRemove(id: string): void }) {
+export function LaunchAttachments({ images, hostId, disabled = false, onRemove }: { images: DraftImage[]; hostId?: string; disabled?: boolean; onRemove(id: string): void }) {
   const { t } = useI18n();
   if (!images.length) return null;
   return <div className="mb-2 flex gap-2 overflow-x-auto pb-1" aria-label={t("composer.attachImage")}>
-    {images.map((image) => <div key={image.id} className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-surface-2" title={image.name}>
-      {image.preview ? <img src={image.preview} alt={image.name} className="h-full w-full object-cover" /> : <span className="text-[10px] text-subtle">{image.name}</span>}
+    {images.map((image) => <div key={image.id} className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-surface-2" title={image.name}
+      onContextMenu={image.source.kind === "path" ? (event) => {
+        event.preventDefault(); event.stopPropagation();
+        const { clientX, clientY } = event;
+        const path = image.source.kind === "path" ? image.source.path : "";
+        void import("../lib/fileActions").then(({ fileActions }) => openMenuAt(clientX, clientY, fileActions({ hostId: image.pickedLocally ? LOCAL_HOST_ID : hostId ?? "unknown", path, knownLocal: image.pickedLocally }, t)));
+      } : undefined}>
+      {image.preview ? <img src={image.preview} alt={image.name} className="h-full w-full object-cover" /> : <span className="text-caption/[inherit] text-subtle">{image.name}</span>}
       <button type="button" disabled={disabled} title={t("composer.image.remove")} aria-label={`${t("composer.image.remove")} ${image.name}`}
         onClick={() => onRemove(image.id)}
         className="absolute top-0.5 right-0.5 rounded-full bg-black/60 p-0.5 text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100 disabled:hidden"><X size={10} /></button>
     </div>)}
   </div>;
 }
+
+const LAUNCH_DROP_TINT = dropTint("var(--accent)", 13, "var(--surface)");
 
 /** Identical textarea, action row and image geometry, regardless of which launcher owns the draft. */
 export function LaunchComposer({ textarea, attachments, status, hint, label, disabled, busy = false, onSubmit, dragOver, dragEvents }: {
@@ -96,13 +108,14 @@ export function LaunchComposer({ textarea, attachments, status, hint, label, dis
   dragEvents: Pick<ComponentProps<"div">, "onDragOver" | "onDragLeave" | "onDrop">;
 }) {
   const value = typeof textarea.value === "string" ? textarea.value : "";
-  return <div {...dragEvents} className={`launch-composer rounded-2xl border bg-surface px-4 pt-3 pb-3 focus-within:border-accent/40 ${dragOver ? "border-accent" : "border-border"}`}>
+  // A file over it: the accent border; 框线+底色 also tints it (lib/dropTint, over its own --surface).
+  return <div {...dragEvents} className={`launch-composer rounded-2xl border bg-surface px-4 pt-3 pb-3 focus-within:border-accent/40 ${dragOver ? `border-accent ${DROP_TINT}` : "border-border"}`} style={dragOver ? LAUNCH_DROP_TINT : undefined}>
     {attachments}
     {status}
     <textarea {...textarea} rows={Math.min(8, Math.max(2, value.split("\n").length))}
       className="block max-h-40 w-full resize-none bg-transparent text-sm leading-5 outline-none placeholder:text-subtle" />
     <div className="mt-1 flex h-8 items-center justify-between gap-3">
-      <span className="text-[11px] text-subtle">{hint}</span>
+      <span className="text-caption/[inherit] text-subtle">{hint}</span>
       <button type="button" disabled={disabled} onClick={onSubmit} title={label} aria-label={label}
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-80 disabled:opacity-20 motion-reduce:transition-none">
         {busy ? <LoaderCircle size={16} className="animate-spin motion-reduce:animate-none" /> : <ArrowUp size={16} />}

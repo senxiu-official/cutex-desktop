@@ -2,10 +2,18 @@ import { describe, expect, it } from "vitest";
 import { BROWSER_ERROR_CODES } from "@cutex-desktop/browser-protocol";
 import { RELAY_CODES } from "../src/main/browser/relayTypes";
 import { browserErrorKey } from "../src/renderer/src/modules/browser/browserState";
-import { zhCN, en } from "../src/renderer/src/modules/browser/i18n";
+import { zhCN } from "../src/renderer/src/modules/browser/i18n";
+import { en } from "../src/renderer/src/modules/browser/i18n.en";
 import { browserToolView } from "../src/renderer/src/modules/browser/browserTimeline";
+import { browserRefusalAction } from "../src/shared/browser";
 
 describe("browser owner error localization", () => {
+  it("offers the explicit owner confirmation only for SSH desktop loopback", () => {
+    expect(browserRefusalAction("remote_loopback")).toBe("allowDesktopLoopback");
+    expect(browserRefusalAction("protected_endpoint")).toBeNull();
+    expect(zhCN["browser.refusal.openDesktopLoopback"]).toContain("本机");
+    expect(en["browser.refusal.openDesktopLoopback"]).toContain("this computer");
+  });
   it.each([...new Set([...RELAY_CODES, ...BROWSER_ERROR_CODES, "browser_identity_recovered"])])("localizes %s in both languages without raw diagnostics", code => {
     const key = browserErrorKey({ code, message: "SECRET http://private/" });
     expect(key).not.toBe("browser.error.unknown");

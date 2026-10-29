@@ -50,8 +50,8 @@ function Row({ job, sessionId }: { job: JobRow; sessionId: string }) {
         title={`${title}\n${job.jobId}${nciOn && job.remoteId ? `\n${job.remoteId}` : ""}${job.cwd ? `\n${job.cwd}` : ""}`}
         className={CAPSULE_ROW_MAIN}
       >
-        <span className={`min-w-0 flex-1 truncate ${job.command ? "font-mono text-[12px]" : ""}`}>{title}</span>
-        <JobStatusMark job={job} trailing={time} className={`max-w-[45%] shrink-0 text-[11px] tabular-nums ${cancellable && !armed ? "group-hover/row:hidden group-focus-within/row:hidden" : ""}`} />
+        <span className={`min-w-0 flex-1 truncate ${job.command ? "font-mono text-meta/[inherit]" : ""}`}>{title}</span>
+        <JobStatusMark job={job} trailing={time} className={`max-w-[45%] shrink-0 text-caption/[inherit] tabular-nums ${cancellable && !armed ? "group-hover/row:hidden group-focus-within/row:hidden" : ""}`} />
       </button>
       {cancellable && (
         <span className={capsuleRowActions(armed)}>
@@ -76,7 +76,7 @@ export function JobsBody({ sessionId, data }: { sessionId: string; data: AgentJo
   const error = useJobs((s) => s.error);
   return (
     <div>
-      {error && data.open.length === 0 && data.finishedTotal === 0 && <p data-capsule-line="" className="px-2 py-1 text-[11px] text-subtle">{t("jobs.unavailable")}</p>}
+      {error && data.open.length === 0 && data.finishedTotal === 0 && <p data-capsule-line="" className="px-2 py-1 text-caption/[inherit] text-subtle">{t("jobs.unavailable")}</p>}
       {data.open.length > 0 && (
         <ul>
           {data.open.map((j) => (
@@ -151,7 +151,7 @@ export function JobsStatusBar({ sessionId, inline }: StatusBarProps) {
         </>
       }
     >
-      <div className="flex h-6 items-center gap-1.5 px-2 text-[11px] text-subtle tabular-nums">
+      <div className="flex h-6 items-center gap-1.5 px-2 text-caption/[inherit] text-subtle tabular-nums">
         <JobsMeta data={data} />
       </div>
       <JobsBody sessionId={sessionId} data={data} />

@@ -5,7 +5,10 @@
 // Hidden without the capability.
 import { CC_SWITCH_IMPORT_FEATURE } from "../../../../shared/ccSwitchImport";
 import { defineModule } from "../slots";
-import { ProfileImportSection } from "./ProfileImportSection";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const ProfileImportSection = lazyPage(() => import("./ProfileImportSection").then((m) => m.ProfileImportSection));
 
 export default defineModule({
   id: "profile-import",

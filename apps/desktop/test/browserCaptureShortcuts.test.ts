@@ -6,12 +6,15 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BROWSER_CAPTURE_ATTR, isCaptureKeydown, shortcutKeyUsed } from "../src/renderer/src/lib/browserCapture";
 
-const sideMocks = vi.hoisted(() => ({ goToPage: vi.fn(), newPage: vi.fn(), toggleModeForFocus: vi.fn(), toggleSideColumn: vi.fn(), runEscChain: vi.fn() }));
+const sideMocks = vi.hoisted(() => ({ goToPage: vi.fn(), newPage: vi.fn(), toggleModeForFocus: vi.fn(), toggleSideColumn: vi.fn(), runEscChain: vi.fn(), runPaneKey: vi.fn(() => true) }));
 const terminalMocks = vi.hoisted(() => ({ open: vi.fn(() => ({ status: "opened" })), reveal: vi.fn(), list: vi.fn(() => []) }));
 
-vi.mock("react", () => ({ useEffect: (effect: () => void) => effect() }));
+// No provider: lib/ownerContext resolves the main window, as before desk windows.
+vi.mock("react", () => ({ useEffect: (effect: () => void) => effect(), createContext: () => ({}), useContext: () => null }));
 vi.mock("../src/renderer/src/lib/sideActions", () => ({ goToPage: sideMocks.goToPage, newPage: sideMocks.newPage, toggleModeForFocus: sideMocks.toggleModeForFocus }));
 vi.mock("../src/renderer/src/lib/sideOpen", () => ({ toggleSideColumn: sideMocks.toggleSideColumn }));
+// Panes step 4: Ctrl+Shift+M is a pane key (lib/paneKeys) — maximise / restore the focused pane.
+vi.mock("../src/renderer/src/lib/paneKeys", async (importOriginal) => ({ ...(await importOriginal<typeof import("../src/renderer/src/lib/paneKeys")>()), runPaneKey: sideMocks.runPaneKey }));
 vi.mock("../src/renderer/src/lib/escLayers", () => ({ runEscChain: sideMocks.runEscChain }));
 vi.mock("../src/renderer/src/lib/openOverlays", () => ({ anyOverlayOpen: () => false }));
 vi.mock("../src/renderer/src/lib/escInterrupt", () => ({ overlayInDom: () => false }));
@@ -85,20 +88,20 @@ describe("side shortcuts under the capture layer", () => {
 
   it("Ctrl+Shift+M and F6 still run for a defaultPrevented capture-layer keydown", () => {
     dispatch(keydown(CTRL_SHIFT_M));
-    expect(sideMocks.toggleModeForFocus).toHaveBeenCalledWith("maximised");
+    expect(sideMocks.runPaneKey).toHaveBeenCalledWith("maximize");
     dispatch(keydown(F6));
     expect(focused).toHaveBeenCalledTimes(1);
   });
   it("other defaultPrevented keydowns still bail", () => {
     dispatch(keydown(CTRL_SHIFT_M, { target: new FakeElement({ "data-browser-card": "" }) }));
     dispatch(keydown(F6, { target: new FakeElement() }));
-    expect(sideMocks.toggleModeForFocus).not.toHaveBeenCalled();
+    expect(sideMocks.runPaneKey).not.toHaveBeenCalled();
     expect(focused).not.toHaveBeenCalled();
   });
   it("untrusted (synthetic) capture-layer keydowns still bail", () => {
     dispatch(keydown(CTRL_SHIFT_M, { trusted: false }));
     dispatch(keydown(F6, { trusted: false }));
-    expect(sideMocks.toggleModeForFocus).not.toHaveBeenCalled();
+    expect(sideMocks.runPaneKey).not.toHaveBeenCalled();
     expect(focused).not.toHaveBeenCalled();
   });
 });

@@ -49,7 +49,7 @@ const spanReads = new Set<string>();
 export function useFinishedSpanReads(sessionId: string, rows: FinishedSubAgent[]): void {
   const online = useAgentOnline(sessionId);
   const features = useAgentFeatures(sessionId);
-  const due = rows.flatMap((r) => (r.threadId && r.durationMs === null && !r.background && canOpenSubAgent(r.threadId, features) && !spanReads.has(`${sessionId}:${r.threadId}`) ? [r.threadId] : []));
+  const due = rows.flatMap((r) => (r.threadId && r.durationMs === null && !r.noTranscript && canOpenSubAgent(r.threadId, features) && !spanReads.has(`${sessionId}:${r.threadId}`) ? [r.threadId] : []));
   const key = due.join("\n");
   const conv = useConvScope();
   useEffect(() => {

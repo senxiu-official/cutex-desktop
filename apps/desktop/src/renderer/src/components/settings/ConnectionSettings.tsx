@@ -11,12 +11,12 @@
 // docs/research/host-ownership-ui-contract-20261019.md) for the selected host.
 // Tokens never reach this page — main stores them (safeStorage) and only reports "paired".
 import { useEffect, useState } from "react";
-import { ChevronRight, Copy, Layers } from "lucide-react";
-import { DEFAULT_CUTEX_PATH, DEFAULT_REMOTE_PORT, groupsOfHost, sameScope, type HostGroup, type HostOwner, type HostResult, type HostTestResult, type SshConnectAsRequest, type SshErrorView } from "../../../../shared/hosts";
+import { ArrowDown, ArrowUp, ChevronRight, Copy, Layers, Plus, X } from "lucide-react";
+import { DEFAULT_CUTEX_PATH, DEFAULT_REMOTE_PORT, groupsOfHost, parseSshTarget, sameScope, type HostGroup, type HostOwner, type HostResult, type HostTestResult, type SshConnectAsRequest, type SshErrorView } from "../../../../shared/hosts";
 import type { CapabilitiesView } from "../../../../shared/ipc";
 import { api } from "../../bridge";
+import { confirmDialog } from "../../lib/contextMenu";
 import { useI18n, type MessageKey } from "../../i18n";
-import { ARMED_FORM_BUTTON, ARMED_FRAME, useArmed } from "../../lib/armedConfirm";
 import { hostVersionTitle, singleHostScope, type HostLook } from "../../lib/hostScope";
 import { hasLocalHost, hasNoHost, missingRemoteFeatures } from "../../lib/hosts";
 import { useHostOwnership, useHostOwnershipGroups, type HostOwnership } from "../../lib/hostOwnership";
@@ -30,8 +30,10 @@ import { setSettingsHost } from "../../lib/settingsHost";
 import type { MyAccessRow } from "../../lib/myAccess";
 import type { HostUserAccess } from "../../../../shared/users";
 import { HostDot, HostPlatformIcon } from "../HostMark";
-import { Button, EmptyState, IconButton, SettingRow, Section, Segmented, TextInput, Toggle } from "./Form";
+import { Button, EmptyState, IconButton, SettingRow, Section, Segmented, TextInput, Toggle, SettingsGroup } from "./Form";
 import { HostGroupsSection, hostGroupRowId, SwatchPicker } from "./HostGroupsSection";
+import { Tag } from "../../components/Tag";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 function useCapabilities(): CapabilitiesView | null | undefined {
   const daemon = useApp((s) => s.daemon);
@@ -51,7 +53,7 @@ export function ProblemText({ error }: { error: SshErrorView }) {
     <div className="mt-1 text-xs text-danger">
       <div>{t(`host.problem.${error.code}` as MessageKey)}</div>
       {error.tried && error.tried.length > 0 && <div className="mt-0.5 text-danger/80">{t("host.problem.tried", { list: error.tried.join(" · ") })}</div>}
-      {error.detail && <pre className="mt-0.5 max-h-24 overflow-auto font-mono text-[11px] whitespace-pre-wrap text-danger/80">{error.detail}</pre>}
+      {error.detail && <pre className="mt-0.5 max-h-24 overflow-auto font-mono text-caption/[inherit] whitespace-pre-wrap text-danger/80">{error.detail}</pre>}
     </div>
   );
 }
@@ -62,7 +64,8 @@ function ConnectionLine({ look }: { look: HostLook }) {
   const host = look.view;
   const indicator = look.indicator;
   const tunnel = host.conn?.tunnel ?? null;
-  const endpoint = host.kind === "ssh" ? (tunnel?.localPort ? `127.0.0.1:${tunnel.localPort} → ${host.target}:${host.remotePort}` : `${host.target}:${host.remotePort}`) : (host.conn?.daemon.baseUrl ?? "");
+  const currentTarget = host.kind === "ssh" ? (tunnel?.target ?? host.target) : null;
+  const endpoint = host.kind === "ssh" ? (tunnel?.localPort ? `127.0.0.1:${tunnel.localPort} → ${currentTarget}:${host.remotePort}` : `${currentTarget}:${host.remotePort}`) : (host.conn?.daemon.baseUrl ?? "");
   const version = look.connected && indicator.status === "online" ? `cutex ${hostVersionTitle(look.build, { dev: t("cutexBuild.dev"), legacy: t("cutexBuild.legacy") })}` : null;
   const tone = indicator.status === "online" ? "text-ok-text" : indicator.status === "connecting" || indicator.status === "retrying" ? "text-warn" : indicator.status === "disconnected" ? "text-subtle" : "text-danger";
   return (
@@ -73,17 +76,18 @@ function ConnectionLine({ look }: { look: HostLook }) {
           {indicator.problem && ` — ${t(`host.problem.${indicator.problem}` as MessageKey)}`}
         </span>
         {look.connected && endpoint && (
-          <span className="font-mono text-[11px] text-subtle" title={t("connection.endpoint")}>
+          <span className="font-mono text-caption/[inherit] text-subtle" title={t("connection.endpoint")}>
             {endpoint}
           </span>
         )}
+        {look.connected && currentTarget && <span className="text-subtle">{t("host.currentTarget")}: <span className="font-mono text-caption/[inherit]">{currentTarget}</span></span>}
         {version && (
-          <span className="font-mono text-[11px] text-subtle" title={t("connection.version")}>
+          <span className="font-mono text-caption/[inherit] text-subtle" title={t("connection.version")}>
             {version}
           </span>
         )}
       </div>
-      {indicator.detail && <pre className="mt-1 max-h-24 overflow-auto font-mono text-[11px] whitespace-pre-wrap text-subtle">{indicator.detail}</pre>}
+      {indicator.detail && <pre className="mt-1 max-h-24 overflow-auto font-mono text-caption/[inherit] whitespace-pre-wrap text-subtle">{indicator.detail}</pre>}
     </div>
   );
 }
@@ -108,10 +112,10 @@ function OwnedByMeToggle({ hostId }: { hostId: string }) {
   const o = useHostOwnership(hostId);
   if (o.connection === "local" || o.capability === true) return null;
   return (
-    <span className="flex items-center gap-2" title={t("host.own.markMineHint")}>
+    <SettingsGroup agents="none" source="local"><span className="flex items-center gap-2" title={t("host.own.markMineHint")}>
       {t("host.own.markMine")}
       <Toggle checked={o.ownedByMe} label={t("host.own.markMine")} onChange={o.setOwnedByMe} />
-    </span>
+    </span></SettingsGroup>
   );
 }
 
@@ -134,6 +138,7 @@ const NO_GROUPS: HostGroup[] = [];
 
 /** The groups a host belongs to (RFC §7.3): small tags, click = scroll to the group's editor row. */
 function HostGroupTags({ hostId }: { hostId: string }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const groups = useApp((s) => s.hosts?.groups ?? NO_GROUPS);
   const mine = groupsOfHost(groups, hostId);
@@ -141,16 +146,16 @@ function HostGroupTags({ hostId }: { hostId: string }) {
   return (
     <>
       {mine.map((g) => (
-        <button
+        <SettingsGroup navigation agents="none" source="local" key={g.id}><button
           key={g.id}
           type="button"
           title={t("host.groupTag", { name: g.name })}
-          onClick={() => document.getElementById(hostGroupRowId(g.id))?.scrollIntoView({ block: "center", behavior: "smooth" })}
-          className="flex shrink-0 items-center gap-0.5 rounded bg-surface-2 px-1.5 text-[10px] text-muted hover:text-foreground"
+          onClick={() => win.document.getElementById(hostGroupRowId(g.id))?.scrollIntoView({ block: "center", behavior: "smooth" })}
+          className="flex shrink-0 items-center gap-0.5 rounded bg-surface-2 px-1.5 text-caption/[inherit] text-muted hover:text-foreground"
         >
           <Layers size={9} style={g.color ? { color: g.color } : undefined} />
           <span className="max-w-24 truncate">{g.name}</span>
-        </button>
+        </button></SettingsGroup>
       ))}
     </>
   );
@@ -162,7 +167,7 @@ function CapabilityList({ list }: { list: readonly string[] }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <SettingRow label={t("connection.features")}>
+      <SettingRow readOnly agents="none" source="host" label={t("connection.features")}>
         <Button onClick={() => setOpen(!open)}>{open ? t("host.capabilities.hide") : t("host.capabilities.show", { n: list.length })}</Button>
         <IconButton label={t("host.capabilities.copy")} onClick={() => void navigator.clipboard.writeText(list.join("\n"))}>
           <Copy size={14} />
@@ -171,9 +176,9 @@ function CapabilityList({ list }: { list: readonly string[] }) {
       {open && (
         <div className="flex flex-wrap gap-1 border-b border-border/60 py-3 last:border-b-0">
           {list.map((f) => (
-            <span key={f} className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-muted">
+            <Tag key={f} className="font-mono">
               {f}
-            </span>
+            </Tag>
           ))}
         </div>
       )}
@@ -192,17 +197,17 @@ function Diagnostics() {
   return (
     <Section id={settingsAnchorId("diagnostics")} title={t("connection.diagnostics")}>
       {daemon.kind === "connected" && (
-        <SettingRow label={t("host.daemonHostId")}>
+        <SettingRow readOnly agents="none" source="host" label={t("host.daemonHostId")}>
           <span className="font-mono text-xs text-muted">{daemon.hostId}</span>
         </SettingRow>
       )}
       {missing.length > 0 && (
-        <SettingRow label={t("host.missing")} hint={t("host.missingHint")}>
+        <SettingRow readOnly agents="none" source="local" label={t("host.missing")} hint={t("host.missingHint")}>
           <span className="flex max-w-sm flex-wrap justify-end gap-1">
             {missing.map((f) => (
-              <span key={f} className="rounded bg-warn/15 px-1.5 py-0.5 font-mono text-[11px] text-warn-text">
+              <Tag tone="attention" key={f} className="font-mono">
                 {f}
-              </span>
+              </Tag>
             ))}
           </span>
         </SettingRow>
@@ -239,12 +244,11 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
   const host = look.view;
   const notify = useApp((s) => s.notify);
   const indicator = look.indicator;
-  const [armed, setArmed] = useArmed(host.id);
   const [busy, setBusy] = useState<null | "test" | "pair" | "remove" | "save">(null);
   const [test, setTest] = useState<HostTestResult | null>(null);
   const [pairError, setPairError] = useState<SshErrorView | null>(null);
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ label: host.label, remotePort: String(host.remotePort ?? DEFAULT_REMOTE_PORT), cutexPath: host.cutexPath ?? DEFAULT_CUTEX_PATH });
+  const [form, setForm] = useState({ label: host.label, targets: host.targets?.length ? [...host.targets] : [host.target ?? ""], remotePort: String(host.remotePort ?? DEFAULT_REMOTE_PORT), cutexPath: host.cutexPath ?? DEFAULT_CUTEX_PATH });
   const tokenRejected = indicator.problem === "tokenRejected";
 
   const run = async (kind: NonNullable<typeof busy>, fn: () => Promise<void>) => {
@@ -284,41 +288,40 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
   const save = () =>
     run("save", async () => {
       const port = Number(form.remotePort);
-      const r = await api.updateSshHost(host.id, { label: form.label, remotePort: Number.isInteger(port) ? port : -1, cutexPath: form.cutexPath });
+      const r = await api.updateSshHost(host.id, { label: form.label, targets: form.targets, remotePort: Number.isInteger(port) ? port : -1, cutexPath: form.cutexPath });
       if (r.ok) setEditing(false);
       else setPairError(r.error);
     });
   const reconnect = () => void api.reconnectHost(host.id).catch((e: unknown) => notify(e instanceof Error ? e.message : String(e), "error"));
+  const moveTarget = (index: number, delta: -1 | 1) => setForm((current) => {
+    const targets = [...current.targets];
+    const [target] = targets.splice(index, 1);
+    targets.splice(index + delta, 0, target!);
+    return { ...current, targets };
+  });
+  const targetsValid = form.targets.length > 0 && form.targets.every((target) => parseSshTarget(target) !== null);
 
   const last = host.lastConnectedAt ? Date.parse(host.lastConnectedAt) : NaN;
   return (
-    <div className={`-mx-4 border-b border-border px-4 py-3 last:border-b-0 ${armed ? ARMED_FRAME : ""}`}>
+    <SettingsGroup agents="none" source="local"><div className={`-mx-4 border-b border-border px-4 py-3 last:border-b-0`}>
       <div className="flex items-center gap-2">
         <HostPlatformIcon platform={look.platform} className="text-muted" />
         <HostDot color={look.color} status={indicator.status} size={9} title={t(`host.status.${indicator.status}` as MessageKey)} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-sm">
             <span className="truncate">{host.label}</span>
-            {host.kind === "local" && <span className="shrink-0 rounded bg-accent/15 px-1.5 text-[10px] text-accent">{t("connection.thisDevice")}</span>}
-            {shown ? <span className="rounded bg-accent/15 px-1.5 text-[10px] text-accent">{t("host.active")}</span> : look.inScope && <span className="rounded bg-surface-2 px-1.5 text-[10px] text-muted">{t("host.inScope")}</span>}
-            {host.kind === "ssh" && !host.paired && <span className="rounded bg-warn/15 px-1.5 text-[10px] text-warn-text">{t("host.notPaired")}</span>}
-            {look.version && <span className="font-mono text-[10px] text-subtle">{look.version}</span>}
+            {host.kind === "local" && <Tag tone="accent">{t("connection.thisDevice")}</Tag>}
+            {shown ? <Tag tone="accent">{t("host.active")}</Tag> : look.inScope && <Tag>{t("host.inScope")}</Tag>}
+            {host.kind === "ssh" && !host.paired && <Tag tone="attention">{t("host.notPaired")}</Tag>}
+            {look.version && <span className="font-mono text-caption/[inherit] text-subtle">{look.version}</span>}
             <HostGroupTags hostId={host.id} />
           </div>
-          <div className="truncate font-mono text-[11px] text-subtle">
-            {host.kind === "local" ? t("titlebar.local") : host.kind === "dev-direct" ? `dev ${host.target}` : `ssh ${host.target} · :${host.remotePort} · ${host.cutexPath}`}
+          <div className="truncate font-mono text-caption/[inherit] text-subtle">
+            {host.kind === "local" ? t("titlebar.local") : host.kind === "dev-direct" ? `dev ${host.target}` : `ssh ${(host.targets ?? [host.target]).join(" → ")} · :${host.remotePort} · ${host.cutexPath}`}
             {Number.isFinite(last) && <span className="ml-2 font-sans">{t("host.lastConnected", { when: formatWhen(last / 1000, now, locale) })}</span>}
           </div>
         </div>
-        {armed ? (
-          <>
-            <span className="text-xs text-danger">{t("host.removeArmed")}</span>
-            <button className={ARMED_FORM_BUTTON} onClick={() => void remove()}>
-              {t("host.remove")}
-            </button>
-          </>
-        ) : (
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
             <Button disabled={busy !== null} onClick={() => void runTest()}>
               {busy === "test" ? t("host.testing") : t("host.test")}
             </Button>
@@ -332,7 +335,12 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
                 <Button disabled={busy !== null} onClick={() => setEditing((v) => !v)}>
                   {t("host.edit")}
                 </Button>
-                <Button disabled={busy !== null} onClick={() => setArmed(true)}>
+                <Button
+                  disabled={busy !== null}
+                  onClick={() => void confirmDialog(t("host.removeConfirm", { host: host.label }), true, { ok: t("host.removeConfirmOk"), cancel: t("settings.cancel") }).then((yes) => {
+                    if (yes) void remove();
+                  })}
+                >
                   {t("host.remove")}
                 </Button>
               </>
@@ -351,7 +359,6 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
               </Button>
             )}
           </div>
-        )}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-x-6 gap-y-2 pl-6 text-xs text-muted">
         <span className="flex items-center gap-2">
@@ -366,21 +373,37 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
       </div>
       <ConnectionLine look={look} />
       {editing && host.kind === "ssh" && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 pl-6">
-          <TextInput width="w-40" value={form.label} placeholder={t("host.add.label")} onChange={(label) => setForm((f) => ({ ...f, label }))} />
-          <TextInput width="w-24" mono value={form.remotePort} placeholder={String(DEFAULT_REMOTE_PORT)} onChange={(remotePort) => setForm((f) => ({ ...f, remotePort: remotePort.replace(/\D/g, "").slice(0, 5) }))} />
-          <TextInput width="w-56" mono value={form.cutexPath} placeholder={DEFAULT_CUTEX_PATH} onChange={(cutexPath) => setForm((f) => ({ ...f, cutexPath }))} />
-          <Button primary disabled={busy !== null} onClick={() => void save()}>
-            {t("host.save")}
-          </Button>
-          <Button onClick={() => setEditing(false)}>{t("dialog.cancel")}</Button>
+        <div className="mt-3 space-y-3 pl-6" data-ssh-address-editor="">
+          <div className="flex flex-wrap items-center gap-2">
+            <TextInput width="w-40" value={form.label} placeholder={t("host.add.label")} onChange={(label) => setForm((f) => ({ ...f, label }))} />
+            <TextInput width="w-24" mono value={form.remotePort} placeholder={String(DEFAULT_REMOTE_PORT)} onChange={(remotePort) => setForm((f) => ({ ...f, remotePort: remotePort.replace(/\D/g, "").slice(0, 5) }))} />
+            <TextInput width="w-56" mono value={form.cutexPath} placeholder={DEFAULT_CUTEX_PATH} onChange={(cutexPath) => setForm((f) => ({ ...f, cutexPath }))} />
+            <Button primary disabled={busy !== null || !targetsValid} onClick={() => void save()}>{t("host.save")}</Button>
+            <Button onClick={() => setEditing(false)}>{t("dialog.cancel")}</Button>
+          </div>
+          <div className="max-w-2xl rounded-lg border border-border bg-surface-2/40 p-2.5">
+            <div className="mb-1 text-xs font-medium text-muted">{t("host.targets")}</div>
+            <p className="mb-2 text-caption/[inherit] text-subtle">{t("host.targetsHint")}</p>
+            <div className="space-y-1.5">
+              {form.targets.map((target, index) => (
+                <div className="flex items-center gap-1" key={index}>
+                  <span className="w-5 shrink-0 text-center font-mono text-caption/[inherit] text-subtle">{index + 1}</span>
+                  <TextInput width="w-full" mono label={`${t("host.targets")} ${index + 1}`} value={target} placeholder="hachimi-lan / me@host:22" onChange={(value) => setForm((current) => ({ ...current, targets: current.targets.map((item, itemIndex) => itemIndex === index ? value : item) }))} />
+                  <IconButton label={t("host.moveAddressUp")} disabled={index === 0} onClick={() => moveTarget(index, -1)}><ArrowUp size={13} /></IconButton>
+                  <IconButton label={t("host.moveAddressDown")} disabled={index === form.targets.length - 1} onClick={() => moveTarget(index, 1)}><ArrowDown size={13} /></IconButton>
+                  <IconButton label={t("host.removeAddress")} danger disabled={form.targets.length === 1} onClick={() => setForm((current) => ({ ...current, targets: current.targets.filter((_, itemIndex) => itemIndex !== index) }))}><X size={13} /></IconButton>
+                </div>
+              ))}
+            </div>
+            <Button disabled={busy !== null} onClick={() => setForm((current) => ({ ...current, targets: [...current.targets, ""] }))}><Plus size={13} className="mr-1 inline" />{t("host.addAddress")}</Button>
+          </div>
         </div>
       )}
       <div className="pl-6">
         {test && <TestResult result={test} />}
         {pairError && <ProblemText error={pairError} />}
       </div>
-    </div>
+    </div></SettingsGroup>
   );
 }
 
@@ -407,7 +430,7 @@ function HostOverviewRow({ look }: { look: HostLook; member?: boolean }) {
     useApp.getState().openSettings("access");
   };
   return (
-    <button
+    <SettingsGroup navigation agents="none" source="local"><button
       type="button"
       data-host-row={host.id}
       title={t("connection.openHost", { host: host.label })}
@@ -416,15 +439,15 @@ function HostOverviewRow({ look }: { look: HostLook; member?: boolean }) {
     >
       <HostPlatformIcon platform={look.platform} className="text-muted" />
       <span className="min-w-0 truncate text-sm">{host.label}</span>
-      {host.kind === "local" && <span className="shrink-0 rounded bg-accent/15 px-1.5 text-[10px] text-accent">{t("connection.thisDevice")}</span>}
+      {host.kind === "local" && <Tag tone="accent">{t("connection.thisDevice")}</Tag>}
       <OverviewOwnership hostId={host.id} label={host.label} />
-      {host.kind === "ssh" && !host.paired && <span className="shrink-0 rounded bg-warn/15 px-1.5 text-[10px] text-warn-text">{t("host.notPaired")}</span>}
+      {host.kind === "ssh" && !host.paired && <Tag tone="attention">{t("host.notPaired")}</Tag>}
       <span className={`ml-auto flex shrink-0 items-center gap-1.5 text-xs ${tone}`}>
         <HostDot color={look.color} status={status} size={8} />
         {t(`host.status.${status}` as MessageKey)}
       </span>
       <ChevronRight size={14} className="shrink-0 text-subtle" aria-hidden />
-    </button>
+    </button></SettingsGroup>
   );
 }
 
@@ -444,7 +467,7 @@ export function HostConnectionSection({ hostId }: { hostId: string }) {
     app.openSettings("hosts");
   };
   return (
-    <Section id={settingsAnchorId("hostConnection")} title={t("shell.access.connection")} hint={t("shell.access.connectionHint")} source="local">
+    <Section id={settingsAnchorId("hostConnection")} title={t("shell.access.connection")} hint={t("shell.access.connectionHint")} >
       {look ? <HostRow look={look} shown={sameScope(scope.scope, singleHostScope(hostId))} member={isMemberHost(accessMap[hostId], hostId)} onRemoved={onRemoved} /> : <EmptyState>{t("shell.access.noHost")}</EmptyState>}
     </Section>
   );
@@ -493,7 +516,7 @@ function AddHostForm({ onDone }: { onDone(): void }) {
   return (
     <div className="-mx-4 border-b border-border bg-surface-2/40 px-4 py-3">
       <p className="mb-2 text-xs text-subtle">{t("host.add.hint")}</p>
-      <SettingRow label={t("host.add.target")} hint={t("host.add.targetHint")}>
+      <SettingRow agents="none" source="local" label={t("host.add.target")} hint={t("host.add.targetHint")}>
         <input
           list="cutex-ssh-aliases"
           value={target}
@@ -512,16 +535,16 @@ function AddHostForm({ onDone }: { onDone(): void }) {
       {aliases.length > 0 && (
         <div className="flex flex-wrap justify-end gap-1 pb-2">
           {aliases.slice(0, 12).map((a) => (
-            <button key={a} onClick={() => setTarget(a)} className={`rounded-md px-1.5 py-0.5 font-mono text-[11px] ${target === a ? "bg-accent/15 text-accent" : "bg-surface-2 text-muted hover:text-foreground"}`}>
+            <SettingsGroup agents="none" source="local" key={a}><button key={a} onClick={() => setTarget(a)} className={`rounded-md px-1.5 py-0.5 font-mono text-caption/[inherit] ${target === a ? "bg-accent/15 text-accent" : "bg-surface-2 text-muted hover:text-foreground"}`}>
               {a}
-            </button>
+            </button></SettingsGroup>
           ))}
         </div>
       )}
-      <SettingRow label={t("host.add.label")}>
+      <SettingRow agents="none" source="local" label={t("host.add.label")}>
         <TextInput width="w-64" value={label} placeholder={t("host.add.labelPlaceholder")} onChange={setLabel} />
       </SettingRow>
-      <SettingRow label={t("host.add.connectAs")} hint={t("host.add.connectAsHint")}>
+      <SettingRow agents="access" source="local" label={t("host.add.connectAs")} hint={t("host.add.connectAsHint")}>
         <Segmented
           value={connectAs}
           options={[
@@ -532,30 +555,31 @@ function AddHostForm({ onDone }: { onDone(): void }) {
           onChange={setConnectAs}
         />
       </SettingRow>
-      <SettingRow label={t("host.add.port")} hint={t("host.add.portHint")}>
+      <SettingRow agents="none" source="local" label={t("host.add.port")} hint={t("host.add.portHint")}>
         <TextInput width="w-24" mono value={port} placeholder={String(DEFAULT_REMOTE_PORT)} onChange={(v) => setPort(v.replace(/\D/g, "").slice(0, 5))} />
       </SettingRow>
-      <SettingRow label={t("host.add.cutexPath")} hint={t("host.add.cutexPathHint")}>
+      <SettingRow agents="none" source="local" label={t("host.add.cutexPath")} hint={t("host.add.cutexPathHint")}>
         <TextInput width="w-64" mono value={cutexPath} placeholder={DEFAULT_CUTEX_PATH} onChange={setCutexPath} />
       </SettingRow>
       {error && <ProblemText error={error} />}
       <div className="mt-2 flex items-center justify-end gap-2">
         {busy && <span className="mr-auto text-xs text-subtle">{t("host.add.pairing")}</span>}
-        <Button disabled={busy} onClick={onDone}>
+        <SettingsGroup navigation agents="none" source="local"><Button disabled={busy} onClick={onDone}>
           {t("dialog.cancel")}
-        </Button>
-        <Button disabled={busy || !target.trim()} onClick={() => void add(false)}>
+        </Button></SettingsGroup>
+        <SettingsGroup agents="none" source="local"><Button disabled={busy || !target.trim()} onClick={() => void add(false)}>
           {t("host.add.submit")}
-        </Button>
-        <Button primary disabled={busy || !target.trim()} onClick={() => void add(true)}>
+        </Button></SettingsGroup>
+        <SettingsGroup agents="none" source="local"><Button primary disabled={busy || !target.trim()} onClick={() => void add(true)}>
           {t("host.add.submitConnect")}
-        </Button>
+        </Button></SettingsGroup>
       </div>
     </div>
   );
 }
 
 export function HostsPage() {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const hosts = useApp((s) => s.hosts);
   const scope = useHostScope();
@@ -571,7 +595,7 @@ export function HostsPage() {
     if (focus?.anchor !== "addHost") return;
     setAdding(true);
     useApp.setState({ settingsFocus: null });
-    requestAnimationFrame(() => document.getElementById(settingsAnchorId("hostAdd"))?.scrollIntoView({ block: "start" }));
+    win.requestAnimationFrame(() => win.document.getElementById(settingsAnchorId("hostAdd"))?.scrollIntoView({ block: "start" }));
   }, [focus]);
   // 我的设备 / 我能访问的设备: your role on each host (lib/hostAccess; a host not read yet counts as yours,
   // a disconnected one keeps its last known role).
@@ -596,7 +620,7 @@ export function HostsPage() {
         {adding ? (
           <AddHostForm onDone={() => setAdding(false)} />
         ) : (
-          <SettingRow label={t("host.add.target")}>
+          <SettingRow navigation agents="none" source="local" label={t("host.add.target")}>
             <Button onClick={() => setAdding(true)}>{t("titlebar.addSsh")}</Button>
           </SettingRow>
         )}
@@ -605,7 +629,7 @@ export function HostsPage() {
       <HostGroupsSection />
       <Section id={settingsAnchorId("hostStartup")} title={t("host.startup")}>
         {localHost && (
-          <SettingRow label={t("host.startOn")} hint={t("host.startOnHint")}>
+          <SettingRow agents="none" source="local" label={t("host.startOn")} hint={t("host.startOnHint")}>
             <Segmented
               value={hosts?.startOn ?? "last"}
               options={[
@@ -617,7 +641,7 @@ export function HostsPage() {
           </SettingRow>
         )}
         {localHost && (
-          <SettingRow label={t("host.createDefault")} hint={t("host.createDefaultHint")}>
+          <SettingRow agents="newAgents" source="local" label={t("host.createDefault")} hint={t("host.createDefaultHint")}>
             <Segmented
               value={createHostDefault}
               options={[
@@ -628,11 +652,11 @@ export function HostsPage() {
             />
           </SettingRow>
         )}
-        <SettingRow label={t("host.marksSingle")} hint={t("host.marksSingleHint")}>
+        <SettingRow agents="none" source="local" label={t("host.marksSingle")} hint={t("host.marksSingleHint")}>
           <Toggle checked={marksSingle} label={t("host.marksSingle")} onChange={(on) => setUiPref("hostMarksSingle", on)} />
         </SettingRow>
         {localHost && (
-          <SettingRow label={t("host.markLocal")} hint={t("host.markLocalHint")}>
+          <SettingRow agents="none" source="local" label={t("host.markLocal")} hint={t("host.markLocalHint")}>
             <Toggle checked={hostMarkLocal} label={t("host.markLocal")} onChange={(on) => setUiPref("hostMarkLocal", on)} />
           </SettingRow>
         )}

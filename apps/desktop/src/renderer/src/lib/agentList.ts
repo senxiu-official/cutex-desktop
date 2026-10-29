@@ -1,8 +1,9 @@
 // 全部 agent list (dialog + project page): a group's online / offline / archived agents with search,
 // sort, runtime filter, multi-select and bulk stop / start / archive / restore. Pure helpers (no React,
 // no store).
+import type { AgentRuntime } from "./agentFeatures";
 import type { SessionResource } from "@cutex-desktop/protocol";
-import { CLAUDE_PROTOCOL } from "./agentFeatures";
+import { agentFeaturesOf, CLAUDE_PROTOCOL } from "./agentFeatures";
 import { compareRecent } from "./offlineAgents";
 import { agentMatches } from "./agentAlias";
 import type { AgentRow, SidebarGroup } from "./sidebar";
@@ -40,7 +41,11 @@ export const START_CONFIRM_OVER = 10;
 export const START_CONCURRENCY = 3;
 
 /** Claude (cutex claude_subscription runtime) or Codex; archived agents keep their backend too. */
-export function runtimeOf(s: SessionResource): "codex" | "claude" {
+export function runtimeOf(s: SessionResource): AgentRuntime {
+  // profile-runtime-variants: the binding fixed at creation (cutex's answer) wins.
+  if (s.launchBinding?.runtime) return s.launchBinding.runtime;
+  const acp = agentFeaturesOf(s).runtime;
+  if (acp === "dsh" || acp === "kimi") return acp;
   if (s.runtime?.backend === "claude_subscription" || s.effectiveNextLaunch?.source === "claude_subscription") return "claude";
   return s.native?.schema?.protocol === CLAUDE_PROTOCOL ? "claude" : "codex";
 }

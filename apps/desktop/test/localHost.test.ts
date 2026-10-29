@@ -50,11 +50,18 @@ describe("the implicit local host rule", () => {
 
 describe("HostManager without a local host", () => {
   let dir: string;
+  let managers: HostManager[] = [];
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "cutex-local-host-"));
     fake.userData = dir;
+    managers = [];
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  // A rewritten scope saves hosts.json in the background (tmp + rename): removing the folder under that
+  // write failed the test now and then on a loaded machine (rmSync EBUSY / ENOTEMPTY, the rename ENOENT).
+  afterEach(async () => {
+    await Promise.all(managers.map((m) => m.saved()));
+    rmSync(dir, { recursive: true, force: true });
+  });
 
   function manager(localHost?: boolean) {
     const published: HostsState[] = [];
@@ -67,6 +74,7 @@ describe("HostManager without a local host", () => {
       },
       localHost === undefined ? {} : { localHost },
     );
+    managers.push(hosts);
     return { hosts, published, opened };
   }
 

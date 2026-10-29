@@ -1,3 +1,4 @@
+import { isImeComposing } from "../../lib/ime";
 import { useId, useState } from "react";
 import { Pin } from "lucide-react";
 import type { Note, NoteScope } from "../../../../shared/notes";
@@ -40,14 +41,14 @@ export function NoteEditor({ hostId, draftKey, currentNote, onSaved, onCancel, o
   };
   return (
     <section onKeyDown={(event) => {
-      if (event.key === "Escape" && !event.repeat && !event.nativeEvent.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !busy) { event.preventDefault(); if (onDismiss) onDismiss(); else setNoteDraft(draftKey, null); }
+      if (event.key === "Escape" && !event.repeat && !isImeComposing(event) && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !busy) { event.preventDefault(); if (onDismiss) onDismiss(); else setNoteDraft(draftKey, null); }
     }} className="space-y-3 rounded-xl border border-accent/40 bg-surface p-3" aria-label={draft.noteId ? t("notes.edit") : t("notes.new")}>
       <TextInput label={t("notes.titleField")} placeholder={t("notes.titleField")} value={draft.title} onChange={(title) => patch({ title })} width="w-full" maxLength={NOTE_TITLE_LIMIT} disabled={busy} autoFocus />
       <label className="block text-xs text-subtle" htmlFor={id}>{t("notes.bodyField")}</label>
       <textarea id={id} value={draft.body} disabled={busy} onChange={(event) => patch({ body: event.target.value })} rows={7} maxLength={NOTE_BODY_LIMIT}
         className="min-h-24 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-50"
         onKeyDown={(event) => {
-          if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void save(); }
+          if (!isImeComposing(event) && event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void save(); }
         }} />
       <div className="space-y-2 text-xs">
         <div className="flex items-center gap-2"><Pin size={13} /><span>{t("notes.pins")}</span></div>

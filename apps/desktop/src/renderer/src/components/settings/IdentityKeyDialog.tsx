@@ -1,3 +1,5 @@
+import { isImeComposing } from "../../lib/ime";
+import type { SettingsRowDecoration } from "./Form";
 // 粘贴身份密钥 (P2 person identity, main/personKey.ts parsePersonKeyString): a masked input for the
 // `cutex-id-…` string the person copied on another computer. Main checks it (prefix / length /
 // checksum, refused inline here), then shows the same replace confirmation as an identity file import;
@@ -9,6 +11,7 @@ import type { IdentityFileResult, IdentityImportTexts } from "../../../../shared
 import { api } from "../../bridge";
 import { useI18n } from "../../i18n";
 import { Button, IconButton } from "./Form";
+import { useOverlayRoot } from "../../lib/ownerContext";
 
 const ERROR_KEYS = {
   prefix: "identity.person.keyErrorPrefix",
@@ -17,7 +20,8 @@ const ERROR_KEYS = {
   key: "identity.person.keyErrorKey",
 } as const;
 
-export function IdentityKeyDialog({ texts, onClose, onDone }: { texts: IdentityImportTexts; onClose(): void; onDone(result: IdentityFileResult & { ok: true }): void }) {
+export function IdentityKeyDialog({ decoration, texts, onClose, onDone }: { decoration?: SettingsRowDecoration; texts: IdentityImportTexts; onClose(): void; onDone(result: IdentityFileResult & { ok: true }): void }) {
+  const overlayRoot = useOverlayRoot();
   const { t } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -61,7 +65,7 @@ export function IdentityKeyDialog({ texts, onClose, onDone }: { texts: IdentityI
       className="fixed inset-0 m-auto w-[480px] max-w-[95vw] rounded-2xl border border-border bg-surface p-5 text-foreground shadow-2xl backdrop:bg-black/40"
     >
       <div className="mb-2 flex items-center">
-        <h3 id={titleId} className="font-semibold">{t("identity.person.pasteTitle")}</h3>
+        <h3 id={titleId} className="font-semibold">{t("identity.person.pasteTitle")}{decoration?.marker}</h3>
         <span className="ml-auto">
           <IconButton label={t("settings.cancel")} disabled={busy} onClick={onClose}>
             <X size={15} />
@@ -81,7 +85,8 @@ export function IdentityKeyDialog({ texts, onClose, onDone }: { texts: IdentityI
               setError(null);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+              if (isImeComposing(e)) return;
+              if (e.key === "Enter") {
                 e.preventDefault();
                 void submit();
               }
@@ -112,6 +117,6 @@ export function IdentityKeyDialog({ texts, onClose, onDone }: { texts: IdentityI
         </div>
       </div>
     </dialog>,
-    document.body,
+    overlayRoot,
   );
 }

@@ -1,6 +1,7 @@
 import { Eye, LoaderCircle } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { useBrowserThumbnail } from "./thumbnails";
+import { btn } from "../../components/Button";
 
 /**
  * A background agent tab (main's offscreen carrier): its live thumbnail and the one control to bring
@@ -24,7 +25,7 @@ export function BrowserBackgroundView(props: { hostId: string; tabKey: string; t
           {props.handover ? t("browser.background.handover") : props.agentName ? t("browser.background.statusAgent", { name: props.agentName }) : t("browser.background.status")}
         </p>
         <button type="button" data-browser-front disabled={props.handover} onClick={props.onFront}
-          className="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-foreground enabled:hover:bg-hover disabled:opacity-40">
+          className={`${btn()} shrink-0`}>
           <Eye size={13} aria-hidden="true" />{t("browser.background.front")}
         </button>
       </div>

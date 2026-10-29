@@ -22,7 +22,8 @@ export interface BrowserPermissionPromptWindow {
   isDestroyed(): boolean; isVisible(): boolean; isMinimized(): boolean; isFocused?(): boolean; flashFrame?(flag: boolean): void;
 }
 export interface BrowserPermissionPromptDeps<W extends BrowserPermissionPromptWindow> {
-  window: W;
+  /** The window the asking tab is drawn in (multi-window P5: the main window or a desk); null = none (treated as hidden). */
+  window(request: BrowserPermissionPromptRequest): W | null;
   showMessageBox(window: W, options: MessageBoxOptions): Promise<Pick<MessageBoxReturnValue, "response" | "checkboxChecked">>;
   locale(): string | undefined;
   /** Module disabled / window torn down: never show, never trust a late answer. */
@@ -36,8 +37,8 @@ export function createBrowserPermissionPrompt<W extends BrowserPermissionPromptW
   const call = <T>(fn: () => T, fallback: T): T => { try { return fn(); } catch { return fallback; } };
   return async (request: BrowserPermissionPromptRequest): Promise<{ allow: boolean; remember: boolean } | null> => {
     if (deps.closed() || request.signal?.aborted) return null;
-    const { window } = deps;
-    if (call(() => window.isDestroyed() || !window.isVisible() || window.isMinimized(), true)) { deps.notice("permission-hidden", request); return null; }
+    const window = call(() => deps.window(request), null);
+    if (!window || call(() => window.isDestroyed() || !window.isVisible() || window.isMinimized(), true)) { deps.notice("permission-hidden", request); return null; }
     const focused = call(() => window.isFocused?.() ?? true, false);
     if (!focused) { call(() => window.flashFrame?.(true), undefined); deps.notice("permission-waiting", request); }
     const abort = new AbortController();

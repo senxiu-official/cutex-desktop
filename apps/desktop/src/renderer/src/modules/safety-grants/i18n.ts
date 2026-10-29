@@ -12,12 +12,3 @@ declare module "../i18nCatalog" {
   interface ModuleMessages extends Messages {}
 }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "safety-grants.title": "Safety check grants",
-  "safety-grants.description": "Commands a Claude Code safety check stopped under full access: marked in the conversation; the {{owner}} may approve one exact retry",
-  "safety-grants.line.blocked": "Stopped, waiting for the {{owner}}",
-  "safety-grants.line.granted": "The {{owner}} approved it once",
-  "safety-grants.line.dismissed": "The {{owner}} did not approve it",
-  "safety-grants.line.open": "Show",
-};

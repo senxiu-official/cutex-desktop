@@ -17,13 +17,14 @@
 // until a queue list fetched after the response has it — or no longer has it (flushed / removed).
 // A failed send stays where it was with the error: retry (same id) / back into the composer / discard.
 // Pure, unit-tested (test/outbox.test.ts).
-import type { QueueItem, SubmitStrategy, UserInputSubmitResult } from "@cutex-desktop/protocol";
+import type { OwnerJoinDelegation, QueueItem, SubmitStrategy, UserInputSubmitResult } from "@cutex-desktop/protocol";
 import { messageImages } from "../../../shared/input";
 import type { TimelineEntry, TimelineState } from "./timeline";
 
 export type OutboxPlacement = "turn" | "steer" | "queue";
 
 export interface OutboxEntry {
+  joinDelegation?: OwnerJoinDelegation;
   /** clientUserMessageId (the reconciliation key). */
   id: string;
   text: string;
@@ -49,6 +50,8 @@ export interface OutboxEntry {
   confirmedAt?: number;
   stoppedAt?: number;
   error?: string;
+  /** `error` is the backend's / transport's own words (no plain wording for it): a 详情 tooltip, not the row's text. */
+  errorRaw?: boolean;
   /** Confirmed "queued": cutex's queue item (shown as a normal queue row meanwhile). */
   queueItem?: QueueItem;
   /** Confirmed "started": the turn it started (text fallback for natives without the clientId echo). */
@@ -92,12 +95,13 @@ const imageCount = (extra: readonly unknown[]) => (extra as { type?: string }[])
 
 export function newOutboxEntry(
   timeline: TimelineState | null,
-  e: { id: string; text: string; extra?: unknown[]; strategy: SubmitStrategy; placement: OutboxPlacement; startIfOffline?: boolean; promoted?: boolean; stage?: OutboxEntry["stage"] },
+  e: { joinDelegation?: OwnerJoinDelegation; id: string; text: string; extra?: unknown[]; strategy: SubmitStrategy; placement: OutboxPlacement; startIfOffline?: boolean; promoted?: boolean; stage?: OutboxEntry["stage"] },
   now = Date.now(),
 ): OutboxEntry {
   const extra = e.extra ?? [];
   return {
     id: e.id,
+    ...(e.joinDelegation ? { joinDelegation: e.joinDelegation } : {}),
     text: e.text,
     extra,
     imageCount: imageCount(extra),
@@ -154,22 +158,22 @@ export function submitLandedPaused(result: UserInputSubmitResult | null | undefi
  * the code survives the IPC hop as the message prefix. Other errors keep their message.
  */
 /** cutex refusals of a non-owner's input (users-p2-access): shown in words, not as the raw code. */
-export type SendRefusal = "attachment_not_owned" | "input_type_not_allowed";
+export type SendRefusal = "attachment_not_owned" | "input_type_not_allowed" | "owner_required";
 
 export function sendErrorText(e: unknown, capacityText: () => string, refusalText?: (code: SendRefusal) => string): string {
   const message = e instanceof Error ? e.message : String(e);
   if (/(?:^|\s)idempotency_capacity_exceeded\b/.test(message)) return capacityText();
-  const refusal = refusalText && /(?:^|\s)(attachment_not_owned|input_type_not_allowed)\b/.exec(message);
+  const refusal = refusalText && /(?:^|\s)(attachment_not_owned|input_type_not_allowed|owner_required)\b/.exec(message);
   return refusal ? refusalText(refusal[1] as SendRefusal) : message;
 }
 
-export function failOutbox(list: readonly OutboxEntry[], id: string, error: string): OutboxEntry[] {
-  return replace(list, id, (e) => ({ ...e, state: "failed", error }));
+export function failOutbox(list: readonly OutboxEntry[], id: string, error: string, errorRaw = false): OutboxEntry[] {
+  return replace(list, id, (e) => ({ ...e, state: "failed", error, errorRaw: errorRaw || undefined }));
 }
 
 /** Back to "sending" for a retry (same id: cutex dedupes it if the first attempt did land). */
 export function retryOutbox(list: readonly OutboxEntry[], id: string, strategy: SubmitStrategy, placement: OutboxPlacement): OutboxEntry[] {
-  return replace(list, id, (e) => ({ ...e, state: "sending", waitingForPrevious: false, error: undefined, strategy, placement, queueItem: undefined, confirmedTick: undefined, confirmedAt: undefined, stage: undefined }));
+  return replace(list, id, (e) => ({ ...e, state: "sending", waitingForPrevious: false, error: undefined, errorRaw: undefined, strategy, placement, queueItem: undefined, confirmedTick: undefined, confirmedAt: undefined, stage: undefined }));
 }
 
 export function markOutboxWaiting(list: readonly OutboxEntry[], id: string, waitingForPrevious: boolean): OutboxEntry[] {

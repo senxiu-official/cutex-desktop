@@ -1,6 +1,7 @@
 // The two sides (docs/desktop-modules.md §19; RFC §7, §8 item 4): gutter geometry, where the reference
 // card opens, the Esc chain, 回到, the margin push-down, the turn lookup order and the core turn
 // reference's toRef → fromRef round trip.
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionHistory } from "@cutex-desktop/protocol";
 import { escChainStep, type EscChainInput } from "../src/renderer/src/lib/escChain";
@@ -14,7 +15,7 @@ import { timelineFromThreadRead } from "../src/renderer/src/lib/timeline";
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 
-const input = (over: Partial<GutterInput> = {}): GutterInput => ({ cardWidth: 1600, shift: 0, sideCover: 0, readingWidth: 768, columnPadding: COLUMN_PADDING, capsule: null, conversationVisible: true, ...over });
+const input = (over: Partial<GutterInput> = {}): GutterInput => ({ cardWidth: 1600, sideCover: 0, readingWidth: 768, columnPadding: COLUMN_PADDING, capsule: null, conversationVisible: true, ...over });
 
 describe("gutterLayout", () => {
   it("centres the column; both gutters get the rest", () => {
@@ -24,12 +25,26 @@ describe("gutterLayout", () => {
     expect(g.right.width).toBe(416);
   });
 
-  it("让位: the column moves by half the shift (clamped to the card); the right gutter shrinks by the rest", () => {
-    const g = gutterLayout(input({ cardWidth: 1180, shift: 420 }));
-    // (1180 + 420 − 768) / 2 = 416, clamped to 1180 − 768 = 412: the column hugs the card's right edge.
-    expect(g.columnLeft).toBe(412);
-    expect(g.left.width).toBe(412);
-    expect(g.right.width).toBe(0);
+  it("centres in its own card whatever is beside it (no 让位 shift, owner 2026-10-21); below the reading width: full width", () => {
+    // A card narrowed by an open Shelf: still centred in what is left of it.
+    const g = gutterLayout(input({ cardWidth: 1180 }));
+    expect(g.columnLeft).toBe(206);
+    expect(g.left.width).toBe(206);
+    expect(g.right.width).toBe(206);
+    expect("shift" in input()).toBe(false);
+    // Narrower than the reading width: the column takes the whole card (its own padding is the margin).
+    const narrow = gutterLayout(input({ cardWidth: 600 }));
+    expect(narrow).toMatchObject({ columnLeft: 0, columnWidth: 600 });
+    expect(narrow.left.width).toBe(0);
+    expect(narrow.right.width).toBe(0);
+  });
+
+  it("styles.css .side-col mirrors it: centred, no --side-shift anywhere", () => {
+    const css = readFileSync(new URL("../src/renderer/src/styles.css", import.meta.url), "utf8");
+    expect(css).not.toContain("--side-shift");
+    const rule = /\.side-col \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toContain("margin-left: max(0px, calc((100% - var(--col-w)) / 2));");
+    expect(rule).toContain("margin-right: auto;");
   });
 
   it("悬浮 / drawer: the covered part does not count for the right gutter", () => {

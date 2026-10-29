@@ -27,6 +27,7 @@ import {
   trackRect,
   userScroll,
 } from "./overlayScrollbars";
+import { isElement, isNode } from "./ownerWindow";
 
 const LAYER_ATTR = "data-overlay-scrollbars";
 const OPT_OUT = `[${NATIVE_SCROLLBAR_ATTR}]`;
@@ -75,13 +76,15 @@ interface Thumb {
   on: boolean;
 }
 
-let installed: (() => void) | null = null;
+/** The installed windows (this one from main.tsx; a desk window's from lib/deskGuards, multi-window). */
+const installed = new Map<Window, () => void>();
 
-/** Start the overlay scrollbars for this window (main.tsx, before React mounts so its capture listeners
+/** Start the overlay scrollbars for `win` (this window: main.tsx, before React mounts so its capture listeners
  *  run first). Returns a function that removes them again. */
-export function installOverlayScrollbars(): () => void {
-  if (installed) return installed;
-  const doc = document;
+export function installOverlayScrollbars(win: Window = window): () => void {
+  const existing = installed.get(win);
+  if (existing) return existing;
+  const doc = win.document;
   const layer = doc.createElement("div");
   layer.setAttribute(LAYER_ATTR, "");
   layer.setAttribute("aria-hidden", "true");
@@ -104,19 +107,19 @@ export function installOverlayScrollbars(): () => void {
   let lastMove = 0;
   let drags = 0;
 
-  const ro = new ResizeObserver(() => schedule());
+  const ro = new win.ResizeObserver(() => schedule());
   // A menu / popover opening over a shown thumb must clip it in the same frame, not at the next
   // WATCH_MS tick (the bar briefly covered the new popover). Observed only while thumbs exist.
   const mo = new MutationObserver(() => schedule());
   const all = (): Thumb[] => [...thumbs.y.values(), ...thumbs.x.values()];
   const schedule = () => {
-    if (!frame) frame = requestAnimationFrame(run);
+    if (!frame) frame = win.requestAnimationFrame(run);
   };
   const thumbFor = (target: EventTarget | null): Thumb | undefined => {
-    const hit = target instanceof Element ? target.closest(".osb-hit") : null;
+    const hit = isElement(target) ? target.closest(".osb-hit") : null;
     return hit ? byHit.get(hit) : undefined;
   };
-  const inLayer = (target: EventTarget | null): boolean => target instanceof Node && layer.contains(target);
+  const inLayer = (target: EventTarget | null): boolean => isNode(target) && layer.contains(target);
   const contains = (outer: Node, inner: Node) => outer.contains(inner);
   const root = () => doc.scrollingElement ?? doc.documentElement;
 
@@ -138,7 +141,7 @@ export function installOverlayScrollbars(): () => void {
 
   /** The padding box (where content scrolls) in screen px, honouring CSS zoom / transforms. */
   function clientBox(el: Element): Rect {
-    if (el === root()) return { left: 0, top: 0, width: innerWidth, height: innerHeight };
+    if (el === root()) return { left: 0, top: 0, width: win.innerWidth, height: win.innerHeight };
     const r = el.getBoundingClientRect();
     const local = el as HTMLElement;
     const sx = local.offsetWidth ? r.width / local.offsetWidth : 1;
@@ -345,7 +348,7 @@ export function installOverlayScrollbars(): () => void {
     for (const [el, user] of pendingScroll) scrolled(el, user);
     pendingScroll.clear();
     const metrics = new Map<Element, Metrics>();
-    const viewport = { left: 0, top: 0, width: innerWidth, height: innerHeight };
+    const viewport = { left: 0, top: 0, width: win.innerWidth, height: win.innerHeight };
     const list = all();
     for (const t of list) plan(t, metrics, viewport);
     const scale = layerScale();
@@ -547,7 +550,7 @@ export function installOverlayScrollbars(): () => void {
       setHover(t.axis, t.el);
       return;
     }
-    if (inLayer(e.target) || !(e.target instanceof Element)) return;
+    if (inLayer(e.target) || !isElement(e.target)) return;
     lastMove = performance.now();
     hoverAt(e.target);
   };
@@ -555,7 +558,7 @@ export function installOverlayScrollbars(): () => void {
     if (e.pointerType === "touch") return;
     pointer = { x: e.clientX, y: e.clientY };
     const now = performance.now();
-    if (drags > 0 || now - lastMove < MOVE_MS || inLayer(e.target) || !(e.target instanceof Element)) return;
+    if (drags > 0 || now - lastMove < MOVE_MS || inLayer(e.target) || !isElement(e.target)) return;
     lastMove = now;
     hoverAt(e.target);
   };
@@ -572,7 +575,7 @@ export function installOverlayScrollbars(): () => void {
     else schedule();
   };
   const onWheel = (e: Event) => {
-    if (!inLayer(e.target)) intent = { at: performance.now(), target: e.target instanceof Node ? e.target : null };
+    if (!inLayer(e.target)) intent = { at: performance.now(), target: isNode(e.target) ? e.target : null };
   };
   const onKey = (e: KeyboardEvent) => {
     if (!scrollKey(e.key)) return;
@@ -580,7 +583,7 @@ export function installOverlayScrollbars(): () => void {
     intent = { at: performance.now(), target: focus && focus !== doc.body && focus !== doc.documentElement ? focus : null };
   };
   const onScroll = (e: Event) => {
-    const el = e.target === doc ? root() : e.target instanceof Element ? e.target : null;
+    const el = e.target === doc ? root() : isElement(e.target) ? e.target : null;
     if (!el || inLayer(el) || el.closest(OPT_OUT)) return;
     const user = userScroll(intent, performance.now(), el, contains);
     pendingScroll.set(el, (pendingScroll.get(el) ?? false) || user);
@@ -589,36 +592,37 @@ export function installOverlayScrollbars(): () => void {
 
   const capture = { capture: true } as const;
   const passive = { capture: true, passive: true } as const;
-  addEventListener("pointerdown", onPointerDown, capture);
-  for (const type of SWALLOWED) addEventListener(type, swallow, capture);
-  addEventListener("pointerover", onOver, passive);
-  addEventListener("pointermove", onMove, passive);
-  addEventListener("pointerout", onOut, passive);
-  addEventListener("wheel", onWheel, passive);
-  addEventListener("touchstart", onWheel, passive);
-  addEventListener("touchmove", onWheel, passive);
-  addEventListener("keydown", onKey, passive);
+  win.addEventListener("pointerdown", onPointerDown, capture);
+  for (const type of SWALLOWED) win.addEventListener(type, swallow, capture);
+  win.addEventListener("pointerover", onOver, passive);
+  win.addEventListener("pointermove", onMove, passive);
+  win.addEventListener("pointerout", onOut, passive);
+  win.addEventListener("wheel", onWheel, passive);
+  win.addEventListener("touchstart", onWheel, passive);
+  win.addEventListener("touchmove", onWheel, passive);
+  win.addEventListener("keydown", onKey, passive);
   doc.addEventListener("scroll", onScroll, passive);
-  addEventListener("resize", schedule, passive);
+  win.addEventListener("resize", schedule, passive);
 
-  installed = () => {
-    removeEventListener("pointerdown", onPointerDown, capture);
-    for (const type of SWALLOWED) removeEventListener(type, swallow, capture);
-    removeEventListener("pointerover", onOver, passive);
-    removeEventListener("pointermove", onMove, passive);
-    removeEventListener("pointerout", onOut, passive);
-    removeEventListener("wheel", onWheel, passive);
-    removeEventListener("touchstart", onWheel, passive);
-    removeEventListener("touchmove", onWheel, passive);
-    removeEventListener("keydown", onKey, passive);
+  const remove = () => {
+    win.removeEventListener("pointerdown", onPointerDown, capture);
+    for (const type of SWALLOWED) win.removeEventListener(type, swallow, capture);
+    win.removeEventListener("pointerover", onOver, passive);
+    win.removeEventListener("pointermove", onMove, passive);
+    win.removeEventListener("pointerout", onOut, passive);
+    win.removeEventListener("wheel", onWheel, passive);
+    win.removeEventListener("touchstart", onWheel, passive);
+    win.removeEventListener("touchmove", onWheel, passive);
+    win.removeEventListener("keydown", onKey, passive);
     doc.removeEventListener("scroll", onScroll, passive);
-    removeEventListener("resize", schedule, passive);
-    if (frame) cancelAnimationFrame(frame);
+    win.removeEventListener("resize", schedule, passive);
+    if (frame) win.cancelAnimationFrame(frame);
     for (const t of all()) drop(t);
     ro.disconnect();
     mo.disconnect();
     layer.remove();
-    installed = null;
+    installed.delete(win);
   };
-  return installed;
+  installed.set(win, remove);
+  return remove;
 }

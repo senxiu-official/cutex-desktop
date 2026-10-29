@@ -12,10 +12,3 @@ declare module "../i18nCatalog" {
   interface ModuleMessages extends Messages {}
 }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "goal.moduleTitle": "Goal",
-  "goal.moduleDescription": "The thread goal (/goal) as a status category: objective, time, budget, pause / resume",
-  "goal.statusTitle": "Goal",
-  "goal.budgetRing": "Goal budget: {used} of {budget} tokens used",
-};

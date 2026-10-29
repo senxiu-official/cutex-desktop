@@ -4,12 +4,14 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, CircleQuestionMark, ClipboardList, Hourglass, Loader2, ShieldX, X } from "lucide-react";
 import type { MessageKey } from "../i18n";
 import { useI18n } from "../i18n";
-import { toolErrorText, type TaskRowModel, type TaskRowOutcome } from "../lib/taskRows";
+import { toolErrorText, unfinishedCreateAction, type TaskRowModel, type TaskRowOutcome } from "../lib/taskRows";
+import { CreateAbandonButton } from "./CreateAbandonButton";
 import { isFailed, isRunning } from "../lib/workGroups";
 import type { RawItem } from "../lib/timeline";
 import { formatSpan } from "../lib/delegations";
 import { TaskTag, Who } from "./Parties";
 import { ToolErrorText } from "./ToolErrorText";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 
 /** The verb template with the counterpart spliced in at `{who}`. */
 function Sentence({ task }: { task: TaskRowModel }) {
@@ -19,7 +21,7 @@ function Sentence({ task }: { task: TaskRowModel }) {
   return (
     <>
       {before && <span className="shrink-0">{before.trim()}</span>}
-      {who}
+      {who && <span className="inline-flex min-w-0 max-w-[35%] shrink-0">{who}</span>}
       {after.trim() && <span className="shrink-0">{after.trim()}</span>}
     </>
   );
@@ -45,6 +47,7 @@ function RowIcon({ running, outcome }: { running: boolean; outcome: TaskRowOutco
 
 export function TaskToolRow({ item, task }: { item: RawItem; task: TaskRowModel }) {
   const { t } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const [open, setOpen] = useState(false);
   const running = isRunning(item);
   const outcome = running ? null : (task.outcome ?? (isFailed(item) ? { kind: "failed" as const, code: null, detail: null } : null));
@@ -58,8 +61,8 @@ export function TaskToolRow({ item, task }: { item: RawItem; task: TaskRowModel 
   const long = !!full && (full.length > 80 || (!!reason && !!task.text) || !!task.detail || !!raw);
   const took = !running && typeof item.durationMs === "number" ? formatSpan(item.durationMs / 1000) : null;
   return (
-    <div className="my-0.5 text-xs">
-      <button onClick={() => long && setOpen(!open)} title={reason ?? undefined} className="flex w-full max-w-full items-center gap-1.5 text-left text-muted hover:text-foreground">
+    <div className="my-0.5 min-w-0 max-w-full text-xs" data-task-tool-row="">
+      <button onClick={() => long && userToggle(() => setOpen(!open))} title={[task.counterpartName, full].filter(Boolean).join("\n") || undefined} className="flex w-full min-w-0 max-w-full items-center gap-1.5 overflow-hidden text-left text-muted hover:text-foreground">
         <RowIcon running={running} outcome={outcome} />
         <Sentence task={task} />
         <Tag task={task} />
@@ -68,8 +71,14 @@ export function TaskToolRow({ item, task }: { item: RawItem; task: TaskRowModel 
         {!open && (reason ? <span className="min-w-0 truncate text-subtle">{reason.replace(/\s+/g, " ")}</span> : task.text && <span className="min-w-0 truncate text-subtle">{task.text.replace(/\s+/g, " ")}</span>)}
         {long && (open ? <ChevronDown size={13} className="ml-auto shrink-0" /> : <ChevronRight size={13} className="ml-auto shrink-0" />)}
       </button>
+      {/* Design 028 (d): an unfinished agent_create (its own, or the one still holding the name). */}
+      {outcome?.kind === "failed" && unfinishedCreateAction(item) && (
+        <div className="mt-0.5 ml-5">
+          <CreateAbandonButton actionId={unfinishedCreateAction(item)!} />
+        </div>
+      )}
       {open && full && (
-        <div className="mt-1 ml-5 max-w-[75%] rounded-xl border border-dashed border-border px-3 py-1.5 whitespace-pre-wrap text-muted">
+        <div className="selectable message-body mt-1 ml-5 max-w-[75%] rounded-xl border border-dashed border-border px-3 py-1.5 whitespace-pre-wrap text-muted">
           {body}
           {reason && <div className={body ? "mt-1.5" : ""}>{reason}</div>}
           {raw && <ToolErrorText text={raw} className={body || reason ? "mt-1.5" : ""} />}
@@ -82,17 +91,18 @@ export function TaskToolRow({ item, task }: { item: RawItem; task: TaskRowModel 
 /** An assignment or change request delivered to this agent; never folded. */
 export function TaskDeliveryRow({ task, body }: { task: TaskRowModel; body: string }) {
   const [open, setOpen] = useState(false);
+  const userToggle = useUserLayoutToggle();
   const tone = task.verb === "changesRequested" ? "text-warn" : "text-accent";
   return (
-    <div className="my-2 text-xs">
-      <button onClick={() => setOpen(!open)} className="flex w-full max-w-full items-center gap-1.5 text-left text-muted hover:text-foreground">
+    <div className="my-2 min-w-0 max-w-full text-xs">
+      <button onClick={() => userToggle(() => setOpen(!open))} title={body} className="flex w-full min-w-0 max-w-full items-center gap-1.5 overflow-hidden text-left text-muted hover:text-foreground">
         <ClipboardList size={13} className={`shrink-0 ${tone}`} />
         <Sentence task={task} />
         <Tag task={task} />
         {task.text && <span className="min-w-0 truncate text-foreground">{task.text.replace(/\s+/g, " ")}</span>}
         {open ? <ChevronDown size={13} className="ml-auto shrink-0" /> : <ChevronRight size={13} className="ml-auto shrink-0" />}
       </button>
-      {open && <div className="mt-1 ml-5 max-w-[75%] rounded-xl border border-border bg-peer px-3 py-1.5 font-mono text-[11px] whitespace-pre-wrap">{body}</div>}
+      {open && <div className="selectable message-body mt-1 ml-5 max-w-[75%] rounded-xl border border-border bg-peer px-3 py-1.5 text-caption/[inherit] whitespace-pre-wrap">{body}</div>}
     </div>
   );
 }

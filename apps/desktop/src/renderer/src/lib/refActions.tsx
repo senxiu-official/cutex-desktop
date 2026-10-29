@@ -36,10 +36,11 @@ export function useHasRefActions(kind: string): boolean {
 }
 
 /** Menu rows for `ref` (empty when nothing applies); `separator` first when `lead` is set and there are rows.
- * Actions whose module / item capabilities `ref`'s host lacks are left out (they would call that host). */
-export function refActionEntries(ref: CutexRef | null, lead = false): MenuEntry[] {
+ * Actions whose module / item capabilities `ref`'s host lacks are left out (they would call that host).
+ * `skipInline`: leave out the `inline` items (a hover bar's 「⋯」: they are icons on that bar already). */
+export function refActionEntries(ref: CutexRef | null, lead = false, skipInline = false): MenuEntry[] {
   if (!ref) return [];
-  const actions = refActionsFor(ref.kind).filter((e) => entryGateNow(ref.hostId, e).ok);
+  const actions = refActionsFor(ref.kind).filter((e) => entryGateNow(ref.hostId, e).ok && !(skipInline && e.item.inline));
   if (!actions.length) return [];
   const rows: MenuEntry[] = actions.map((e) => {
     const Icon = e.item.icon;
@@ -47,6 +48,10 @@ export function refActionEntries(ref: CutexRef | null, lead = false): MenuEntry[
       label: translate(e.item.titleKey),
       icon: createElement(Icon, { size: ICON }),
       labelNode: e.item.useState ? createElement(RefActionLabel, { entry: e, cref: ref }) : undefined,
+      submenu: e.item.submenu ? async () => {
+        try { return await e.item.submenu!(ref); }
+        catch (err) { useApp.getState().notify(err instanceof Error ? err.message : String(err), "error"); return []; }
+      } : undefined,
       onSelect: async () => {
         try {
           await e.item.run(ref);

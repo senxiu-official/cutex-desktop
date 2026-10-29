@@ -1,3 +1,4 @@
+import { isImeComposing } from "../lib/ime";
 // Panels the slash commands open above the composer: /status, /memories, /experimental, plus the
 // read-only project memory viewer ("+" → 记忆 → 项目记忆).
 // Same frame as the palette (rounded-xl border bg-surface shadow); Esc / ✕ / outside click close.
@@ -13,22 +14,24 @@ import { useConvHost } from "../lib/conversationScope";
 import { services } from "../modules/app";
 import { hostPageParam } from "../lib/targetHost";
 import { ProjectMemoryList } from "./ProjectMemory";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 function Panel({ title, onClose, actions, tall, children }: { title: string; onClose(): void; actions?: ReactNode; tall?: boolean; children: ReactNode }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && onClose();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+    const onKey = (e: KeyboardEvent) => !isImeComposing(e) && (e.key === "Escape" && onClose());
+    win.document.addEventListener("mousedown", onDown);
+    win.document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      win.document.removeEventListener("mousedown", onDown);
+      win.document.removeEventListener("keydown", onKey);
     };
   }, [onClose]);
   return (
-    <div ref={ref} className={`absolute right-0 bottom-full left-0 z-30 mb-1.5 ${tall ? "max-h-[60vh]" : "max-h-96"} overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl`}>
+    <div ref={ref} data-popover="" className={`absolute right-0 bottom-full left-0 z-50 mb-1.5 ${tall ? "max-h-[60vh]" : "max-h-96"} overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl`}>
       <div className="flex items-center gap-2 px-2.5 pt-1.5 pb-1 text-xs text-subtle">
         <span className="min-w-0 flex-1 truncate">{title}</span>
         {actions}
@@ -140,7 +143,7 @@ export function ProjectMemoryPanel({ projectId, projectName, onClose }: { projec
         </button>
       }
     >
-      <p className="text-[11px] text-subtle">{t("composer.tools.memory.projectReadOnly")}</p>
+      <p className="text-caption/[inherit] text-subtle">{t("composer.tools.memory.projectReadOnly")}</p>
       <ProjectMemoryList hostId={hostId} projectId={projectId} memory={memory} indexOpenInitially />
     </Panel>
   );
@@ -175,7 +178,7 @@ export function ExperimentalPanel({ sessionId, threadId, onClose }: { sessionId:
           <span className="min-w-0 flex-1">
             <span className="block text-sm">
               {f.displayName ?? f.name}
-              {f.stage && <span className="ml-1.5 text-[11px] text-subtle">{f.stage}</span>}
+              {f.stage && <span className="ml-1.5 text-caption/[inherit] text-subtle">{f.stage}</span>}
             </span>
             {f.description && <span className="block text-xs text-subtle">{f.description}</span>}
           </span>

@@ -1,6 +1,7 @@
 // The connected host's `agentBus.wakeBusyWaitSecs` (lib/wakeBusyWait.ts) for the 待读留言 label:
 // read from `/v2/settings` once per capabilities load (a reconnect or host switch replaces the
 // `features` set, which reloads it); the Settings row writes the new value through `setWakeBusyWait`.
+import type { AgentRuntime } from "./agentFeatures";
 import { useEffect } from "react";
 import { create } from "zustand";
 import { api } from "../bridge";
@@ -38,7 +39,7 @@ export function useWakeBusyWait(enabled: boolean): { supported: boolean; wait: W
  * does to a busy recipient on this host (wake-busy-wait), the old after-turn hint without the capability.
  * `undefined` when the row is no wake (nothing is loaded for it, KindTag keeps its own default).
  */
-export function useWakeHint(isWake: boolean, runtime: "codex" | "claude"): string | undefined {
+export function useWakeHint(isWake: boolean, runtime: AgentRuntime): string | undefined {
   const { t } = useI18n();
   const { supported, wait } = useWakeBusyWait(isWake);
   if (!isWake) return undefined;

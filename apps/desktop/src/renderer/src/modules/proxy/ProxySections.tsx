@@ -47,10 +47,12 @@ export function UpdateProxySection() {
   const mode: UpdateProxyMode = pref?.mode ?? "system";
   const available = !!shell?.setUpdateProxy;
   return (
-    <Section id={settingsAnchorId("updateProxy")} source="local" title={t("proxy.update.title")} hint={t("proxy.update.hint")}>
+    <Section id={settingsAnchorId("updateProxy")}  title={t("proxy.update.title")} hint={t("proxy.update.hint")}>
       {!state && !error && <Loading rows={1} />}
       {state && (
         <ProxyEditor<UpdateProxyMode>
+          agents="none"
+          source="local"
           label={t("proxy.modeLabel")}
           modes={[
             { value: "system", label: t("proxy.mode.system") },
@@ -96,11 +98,13 @@ export function HostProxySection() {
   }, [load]);
   const view = settings?.proxy && typeof settings.proxy === "object" && "mode" in settings.proxy ? (settings.proxy as HostProxyView) : null;
   return (
-    <Section id={settingsAnchorId("hostProxy")} source="host" title={t("proxy.host.title")} hint={t("proxy.host.hint")}>
+    <Section id={settingsAnchorId("hostProxy")}  title={t("proxy.host.title")} hint={t("proxy.host.hint")}>
       {!settings && !error && <Loading rows={1} />}
       {view && (
         <>
           <ProxyEditor<HostProxyMode>
+            agents="hostNowRuntimeNext"
+            source="host"
             label={t("proxy.modeLabel")}
             modes={[
               { value: "system", label: t("proxy.mode.system") },

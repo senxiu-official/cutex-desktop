@@ -1,3 +1,4 @@
+import { isImeComposing } from "../lib/ime";
 // The SSH question dialog (key passphrase, password, keyboard-interactive, unknown host key): one
 // question at a time, oldest first, from any host / operation (lib/sshPrompts.ts).
 import { useState } from "react";
@@ -35,7 +36,7 @@ function PromptBody({ prompt, more }: { prompt: SshPromptView; more: number }) {
   if (prompt.kind === "hostKey" || prompt.kind === "confirm" || prompt.kind === "notice") {
     const hostKey = prompt.kind === "hostKey";
     return (
-      <div onKeyDown={(e) => e.key === "Escape" && done(null)}>
+      <div onKeyDown={(e) => !isImeComposing(e) && (e.key === "Escape" && done(null))}>
         <div className="mb-3 flex items-center gap-2 text-sm font-medium">
           <ShieldAlert size={16} className="shrink-0 text-warn" />
           <span className="min-w-0 break-words">{title}</span>
@@ -92,7 +93,7 @@ function PromptBody({ prompt, more }: { prompt: SshPromptView; more: number }) {
         value={value}
         maxLength={4096}
         onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => e.key === "Escape" && done(null)}
+        onKeyDown={(e) => !isImeComposing(e) && (e.key === "Escape" && done(null))}
         aria-label={title}
         className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-accent"
       />

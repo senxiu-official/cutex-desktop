@@ -6,8 +6,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { claudeRulesChipShown, claudeToolsOff } from "../src/renderer/src/lib/claudePermissionModes";
+import { fireHostReset } from "../src/renderer/src/lib/hostSwitch";
 
 const fx = vi.hoisted(() => ({
   features: new Set<string>(),
@@ -33,8 +34,11 @@ vi.mock("../src/renderer/src/store", async (importOriginal) => ({
   }),
 }));
 vi.mock("../src/renderer/src/components/ClaudeCodeSourcesNote", () => ({ ClaudeCodeSourcesNote: () => h("div", { "data-testid": "claude-code-sources" }) }));
+vi.mock("../src/renderer/src/components/Avatar", () => ({ Avatar: () => h("span", { "data-testid": "avatar" }) }));
+vi.mock("../src/renderer/src/lib/profileSnapshot", () => ({ cachedProfileList: () => null, loadProfileList: async () => null }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-const { ClaudeRulesChip } = await import("../src/renderer/src/components/ClaudeRulesChip");
+const { ClaudeRulesChip, RulesChip } = await import("../src/renderer/src/components/ClaudeRulesChip");
+beforeEach(() => { fireHostReset("local"); fx.allow = []; fx.reads = 0; });
 
 type Props = { write?: boolean | null; exec?: boolean | null; rulesFeature?: boolean; iconOnly?: boolean };
 async function mount(p: Props) {
@@ -71,12 +75,65 @@ describe("ClaudeRulesChip", () => {
     unmount();
   });
 
+  it("Claude agents switch Cutex | Claude with a pill; the popover is as tall as its content; Codex has only Cutex", async () => {
+    const daemon = {
+      approvalRules: async () => ({ contractVersion: 1, hostId: "local", revision: 0, catalog: [], rules: [] }),
+    } as never;
+    const cutex = {
+      hostId: "local", api: daemon, sessionId: "s1", displayName: "S1", profile: null, projectId: "p",
+      runtimeGeneration: 1, turnId: "turn", capabilityFacts: { formalAgent: true, hostFeatures: new Set<string>(), isDirector: false, declaredTools: [], agentCreate: false },
+      identityRole: null,
+    };
+    const div = document.createElement("div"); document.body.append(div); const root = createRoot(div);
+    await act(async () => root.render(h(RulesChip, { hostId: "local", sessionId: "s1", claude: true, write: true, exec: true, rulesFeature: true, cutex })));
+    expect(div.querySelectorAll("[data-testid=claude-rules-chip]")).toHaveLength(1);
+    await act(async () => button(div)!.click());
+    const panel = document.querySelector("[data-rules-panel]")!;
+    expect(panel.querySelector("[data-rules-header]")?.textContent).toContain("approvals.rules.title");
+    expect(document.querySelector<HTMLElement>("[data-popover]")!.style.height).toBe("");
+    expect(panel.querySelectorAll("[data-rules-tab]")).toHaveLength(2);
+    expect(panel.querySelector("[data-testid=claude-rules-panel]")).toBeNull();
+    expect(panel.querySelector("[data-approval-rules-panel]")!.parentElement!.hidden).toBe(false);
+    await act(async () => panel.querySelector<HTMLButtonElement>("[data-rules-tab=claude]")!.click());
+    expect(panel.querySelector("[data-testid=claude-rules-panel]")).not.toBeNull();
+    expect(panel.querySelector("[data-approval-rules-panel]")!.parentElement!.hidden).toBe(true);
+    expect(panel.querySelector("[data-rules-header]")?.textContent).toContain("approvals.rules.subtitleClaude");
+
+    await act(async () => root.unmount());
+    const codex = document.createElement("div"); document.body.append(codex); const codexRoot = createRoot(codex);
+    await act(async () => codexRoot.render(h(RulesChip, { hostId: "local", sessionId: "s1", claude: false, write: null, exec: null, rulesFeature: false, cutex })));
+    await act(async () => button(codex)!.click());
+    expect(document.querySelector("[data-rules-tabs]")).toBeNull();
+    expect(document.querySelector("[data-testid=claude-rules-panel]")).toBeNull();
+    expect(document.querySelector("[data-approval-rules-panel]")).not.toBeNull();
+    await act(async () => codexRoot.unmount());
+  });
+
+  it("a Director: a crown on the avatar, the identity card and its project-page action", async () => {
+    const onOpenProject = vi.fn();
+    const daemon = { approvalRules: async () => ({ contractVersion: 1, hostId: "local", revision: 0, catalog: [], rules: [] }) } as never;
+    const cutex = {
+      hostId: "local", api: daemon, sessionId: "s1", displayName: "S1", profile: null, projectId: "p",
+      runtimeGeneration: 1, turnId: "turn", capabilityFacts: { formalAgent: true, hostFeatures: new Set<string>(), isDirector: true, declaredTools: [], agentCreate: true },
+      identityRole: "director" as const, onOpenProject,
+    };
+    const div = document.createElement("div"); document.body.append(div); const root = createRoot(div);
+    await act(async () => root.render(h(RulesChip, { hostId: "local", sessionId: "s1", claude: false, write: null, exec: null, rulesFeature: false, cutex })));
+    await act(async () => button(div)!.click());
+    expect(document.querySelector("[data-rules-crown]")).not.toBeNull();
+    expect(document.querySelector("[data-approval-identity=director]")?.textContent).toContain("approvals.rules.identity.directorTitle");
+    const link = Array.from(document.querySelectorAll("button")).find((item) => item.textContent === "approvals.rules.identity.openProject")!;
+    await act(async () => link.click());
+    expect(onOpenProject).toHaveBeenCalledOnce();
+    await act(async () => root.unmount());
+  });
+
   it("labels 规则 with the rule count, icon-only when narrow", async () => {
     fx.allow = ["Bash(git status:*)", "Edit(src/**)", "Read"];
     const { div, unmount } = await mount({ rulesFeature: true });
     const chip = div.querySelector("[data-testid=claude-rules-chip]")!;
     expect(chip.textContent).toBe("composer.claude.rulesChip3");
-    expect(button(div)!.title).toContain("composer.claude.rulesChipCount(3)");
+    expect(button(div)!.title).toContain("composer.claude.rulesChip: approvals.rules.chipPart(Claude,3)");
     expect(div.querySelector("[data-testid=claude-rules-tools-off]")).toBeNull();
     unmount();
     const narrow = await mount({ rulesFeature: true, iconOnly: true });
@@ -100,13 +157,12 @@ describe("ClaudeRulesChip", () => {
     unmount();
   });
 
-  it("opens 「Claude 权限规则」: tools, then the rules list, then the sources note", async () => {
+  it("without Cutex rules it opens straight on Claude's: tools, then the rules list, then the sources note", async () => {
     fx.features = new Set(["claude-code-sources"]);
     fx.allow = ["Bash(git status:*)"];
     const { div, unmount } = await mount({ rulesFeature: true });
     await act(async () => button(div)!.click());
-    const panel = div.querySelector("[data-testid=claude-rules-panel]")!;
-    expect(panel.textContent).toContain("composer.claude.rulesPanelTitle");
+    const panel = document.querySelector("[data-testid=claude-rules-panel]")!;
     const order = ["claude-tools-note", "claude-allow-rules", "claude-code-sources"].map((id) => panel.querySelector(`[data-testid=${id}]`));
     expect(order.every(Boolean)).toBe(true);
     expect(order[0]!.compareDocumentPosition(order[1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

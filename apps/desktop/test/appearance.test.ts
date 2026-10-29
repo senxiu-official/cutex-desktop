@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { appearanceVars, clampPaneWidth, DEFAULT_APPEARANCE, fontStack, MIN_CONVERSATION_W, parseAppearance, RANGES } from "../src/renderer/src/lib/appearanceModel";
+import { appearanceVars, clampPaneWidth, DEFAULT_APPEARANCE, MIN_CONVERSATION_W, parseAppearance, RANGES } from "../src/renderer/src/lib/appearanceModel";
 import { buildFontPlan, FALLBACK_FONT_VARIABLES } from "../src/renderer/src/lib/fontFaces";
 
 describe("parseAppearance", () => {
+  it("keeps old preferences following UI and restores a selected code CJK font", () => {
+    expect(parseAppearance({ cjkFont: "SimSun" }).monoCjkFont).toBe("");
+    expect(parseAppearance({ monoCjkFont: "  KingHwa_OldSong  " }).monoCjkFont).toBe("KingHwa_OldSong");
+    expect(parseAppearance({ monoCjkFont: 42 }).monoCjkFont).toBe("");
+  });
+
   it("defaults, clamps to the wide ranges, and migrates the old capsule size", () => {
     expect(parseAppearance(null)).toEqual(DEFAULT_APPEARANCE);
     const p = parseAppearance({ zoom: 999, chatFontSize: 3, sidebarWidth: 300.4, readingWidth: 0, density: "comfortable", uiFont: "  Inter  " });
@@ -37,11 +43,7 @@ describe("side pane width / clampPaneWidth", () => {
   });
 });
 
-describe("appearanceVars / fontStack", () => {
-  it("quotes families and falls back to the built-in stack", () => {
-    expect(fontStack(["KingHwa_OldSong", "Noto Serif CJK SC", ""], "serif")).toBe(`KingHwa_OldSong, "Noto Serif CJK SC", serif`);
-  });
-
+describe("appearanceVars", () => {
   it("maps fields to CSS variables (0 width = none, chat follows UI when unset)", () => {
     const v = appearanceVars({ ...DEFAULT_APPEARANCE, readingWidth: 0, chatFontSize: 18, capsuleScale: 175 });
     expect(v["--reading-w"]).toBe("none");

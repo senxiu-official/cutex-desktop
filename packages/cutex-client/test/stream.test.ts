@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CutexClient } from "../src/client";
 import { openStream } from "../src/stream";
 
@@ -17,6 +17,24 @@ function hangingResponse(chunks: string[], signal: AbortSignal): Response {
 }
 
 describe("openStream", () => {
+  it("owns overload reconnect backoff without nested HTTP retries", async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn(async () => Response.json({ error: { code: "busy", retryable: true, details: { retryAfterMs: 100 } } }, { status: 503 }));
+    const client = new CutexClient(endpoint, { fetch, backgroundReads: true });
+    const onError = vi.fn();
+    const handle = openStream(client, "/watch", { onMessage() {}, onError }, { reconnect: true });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onError).toHaveBeenCalledOnce();
+      expect(fetch).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(499);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      handle.close();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally { handle.close(); client.dispose(); vi.useRealTimers(); }
+  });
+
   it("reconnects a silent stream after idleTimeoutMs", async () => {
     let opens = 0;
     const fetch = (async (_url: string, init?: RequestInit) => {

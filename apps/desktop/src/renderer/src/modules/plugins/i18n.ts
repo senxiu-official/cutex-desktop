@@ -5,7 +5,7 @@ export const zhCN = {
   "plugins.externalDescription": "只使用你授予的权限，运行在隔离界面中",
   "plugins.pageTitle": "桌面插件",
   "plugins.openPlugin": "打开桌面插件",
-  "plugins.hint": "管理此设备已有的插件：勾选权限后点「授权并启用」；插件文件变了要重新授权",
+  "plugins.hint": "管理此设备已有的插件：勾选权限后左键点击「授权并启用」；插件文件变了要重新授权",
   "plugins.empty": "此设备没有预先放入的桌面插件。",
   "plugins.refresh": "刷新列表",
   "plugins.loading": "正在读取插件列表…",
@@ -28,31 +28,3 @@ export const zhCN = {
 
 declare module "../i18nCatalog" { interface ModuleMessages extends Messages {} }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "plugins.title": "Desktop plugins",
-  "plugins.description": "Manage preinstalled isolated desktop plugins on this device; off by default",
-  "plugins.externalTitle": "External desktop plugin",
-  "plugins.externalDescription": "Runs in an isolated view with only the permissions you grant",
-  "plugins.pageTitle": "Desktop plugins",
-  "plugins.openPlugin": "Open desktop plugin",
-  "plugins.hint": "Manage plugins already present on this device. Choose permissions, then Grant and enable. Changed plugin files require fresh permission grants.",
-  "plugins.empty": "No desktop plugins are preinstalled on this device.",
-  "plugins.refresh": "Refresh list",
-  "plugins.loading": "Reading plugin list…",
-  "plugins.grant": "Grant and enable",
-  "plugins.revoke": "Revoke all permissions",
-  "plugins.open": "Open",
-  "plugins.granted": "Granted",
-  "plugins.ungranted": "Not granted",
-  "plugins.changed": "Plugin files changed; grant permissions again",
-  "plugins.rejected": "Plugins that could not be loaded",
-  "plugins.unavailable": "This plugin is unavailable or has not been granted view permission.",
-  "plugins.failed": "Plugin failed to load: {message}",
-  "plugins.codexPlugin": "Companion {{agent}} plugin: {name} (installed separately by the daemon)",
-  "plugins.permission.views": "Show isolated plugin pages",
-  "plugins.permission.entries": "Show navigation entries",
-  "plugins.permission.agents.read": "Read {{agent}} names, identifiers and status on the current host",
-  "plugins.permission.agents.open": "Open {{an agent}} conversation previously listed",
-  "plugins.permission.settings": "Read and save this plugin's own settings",
-};

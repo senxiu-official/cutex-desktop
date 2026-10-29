@@ -27,10 +27,12 @@ export function roleWords(access: Pick<UserAccess, "isOwner" | "pending" | "gran
 
 /**
  * The name shown. On a host with cutex `users-self-profile` (`selfProfile`) your identity is the one
- * you set on this desktop and publish there: the 「你的名字」 pref, else the display name the host has
- * for you (published from another desktop of yours), else — a member — the host's name for you, else
- * the OS account name. On an older host: the owner's pref / OS name; a member's cutex user name (that
- * is how that host knows you). A pending device (no cutex name yet) falls back to the local name.
+ * you set on this desktop and publish there: the 「你的名字」 pref, else the display name your hosts
+ * have for you (`hostName`: the most recently updated one across connected hosts, adoptedIdentity;
+ * omitted: this host's), else — a member — the host's name for you, else the OS account name. On an
+ * older host: the owner's pref / a host display name / OS name; a member's cutex user name (that is
+ * how that host knows you). A pending device (no cutex name yet) falls back to the local name.
+ * The OS account name is only ever shown, never published (lib/identityPublish).
  * null: nothing known (the caller shows a generic 「你」).
  */
 export function identityName(
@@ -38,12 +40,76 @@ export function identityName(
   localName: string | null | undefined,
   osUserName: string | null | undefined,
   selfProfile = false,
+  hostName?: string | null,
 ): string | null {
   const local = localName?.trim() || null;
   const os = osUserName?.trim() || null;
-  if (selfProfile) return local || access.displayName?.trim() || (access.isOwner ? null : access.name?.trim()) || os;
-  if (access.isOwner) return local || os;
-  return access.name?.trim() || local || os;
+  const host = (hostName === undefined ? (selfProfile ? access.displayName : null) : hostName)?.trim() || null;
+  if (selfProfile) return local || host || (access.isOwner ? null : access.name?.trim()) || os;
+  if (access.isOwner) return local || host || os;
+  return access.name?.trim() || local || host || os;
+}
+
+/** What one host has for you, as this desktop saw it: each field with when it was seen to change (0: since first seen, age unknown). */
+export interface SeenHostIdentity {
+  name: string | null;
+  nameAt: number;
+  etag: string | null;
+  etagAt: number;
+}
+
+/** Note a host's current display name / avatar ETag: a field seen to change is stamped `now`; first sight is age-unknown (0). */
+export function observeHostIdentity(before: SeenHostIdentity | undefined, view: { displayName?: string | null; avatarEtag?: string | null }, now: number): SeenHostIdentity {
+  const name = view.displayName?.trim() || null;
+  const etag = view.avatarEtag || null;
+  if (!before) return { name, nameAt: 0, etag, etagAt: 0 };
+  return {
+    name,
+    nameAt: name !== before.name ? now : before.nameAt,
+    etag,
+    etagAt: etag !== before.etag ? now : before.etagAt,
+  };
+}
+
+export interface AdoptedIdentity {
+  /** The display name your hosts have for you (null: none has one). Never the OS account name. */
+  name: string | null;
+  /** Where to read your picture from (null: no host has one). */
+  picture: { hostId: string; userId: string; etag: string } | null;
+}
+
+/**
+ * Your identity as your hosts have it, for a desktop without a local name / picture (owner
+ * 2026-10-20: a fresh desktop showed its OS account name although another host had 「林青」): per
+ * field, the value most recently seen to change across hosts where this connection is a user
+ * (owner or bound; pending devices have none); ties (e.g. all first seen on this run) go to the
+ * focus host, then to the order given.
+ */
+export function adoptedIdentity(
+  access: Readonly<Record<string, Pick<UserAccess, "pending" | "userId" | "displayName" | "avatarEtag"> | undefined>>,
+  seen: Readonly<Record<string, SeenHostIdentity | undefined>>,
+  focusHostId: string | null,
+): AdoptedIdentity {
+  const ids = Object.keys(access).filter((id) => access[id] && !access[id]!.pending);
+  const ordered = focusHostId && ids.includes(focusHostId) ? [focusHostId, ...ids.filter((id) => id !== focusHostId)] : ids;
+  let name: string | null = null;
+  let nameAt = -1;
+  let picture: AdoptedIdentity["picture"] = null;
+  let pictureAt = -1;
+  for (const id of ordered) {
+    const a = access[id]!;
+    const s = seen[id];
+    const n = a.displayName?.trim() || null;
+    if (n) {
+      const at = s && s.name === n ? s.nameAt : 0;
+      if (at > nameAt) [name, nameAt] = [n, at];
+    }
+    if (a.avatarEtag && a.userId) {
+      const at = s && s.etag === a.avatarEtag ? s.etagAt : 0;
+      if (at > pictureAt) [picture, pictureAt] = [{ hostId: id, userId: a.userId, etag: a.avatarEtag }, at];
+    }
+  }
+  return { name, picture };
 }
 
 const SEPARATOR = /[\s._\-@]+/u;

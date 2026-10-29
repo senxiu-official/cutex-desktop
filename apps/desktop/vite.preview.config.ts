@@ -29,7 +29,8 @@ function mockFrames(): Plugin {
           req.on("data", (chunk: string) => (body += chunk));
           req.on("end", () => {
             try {
-              const doc = buildOfflinePageDocument(body);
+              // ?pageApi=0: a file page (the file view) has no page channels.
+              const doc = buildOfflinePageDocument(body, 10 * 1024 * 1024, { pageApi: !/[?&]pageApi=0\b/.test(req.url ?? "") });
               const key = randomUUID();
               docs.set(key, doc);
               res.setHeader("Content-Type", "application/json");
@@ -107,6 +108,12 @@ function mockModulePacks(): Plugin {
 
 export default defineConfig({
   root: resolve(__dirname, "src/renderer"),
+  base: "./",
+  // Build a fixed mock preview for the service proxy: no HMR timestamps or source-module requests.
+  define: { "import.meta.env.DEV": "true" },
+  // Keep prior hashed chunks so already-open review tabs can finish lazy-loading after a rebuild.
+  build: { outDir: resolve(__dirname, "out/mock-preview"), emptyOutDir: false },
+  preview: { host: "127.0.0.1", strictPort: true, headers: { "Cache-Control": "no-store" } },
   plugins: [react(), tailwindcss(), mockFrames(), mockModulePacks()],
   resolve: { alias: { "@": resolve(__dirname, "src/renderer/src") } },
   // Polling: the native Windows watcher kept missing edits made by tools (stale modules served).

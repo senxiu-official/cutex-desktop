@@ -5,15 +5,14 @@
 // typed confirmation) / cancel / roll back (dry-run preview first); the run by phase; history; the
 // automatic-update settings. cutex does all the work (`cutex upgrade …` runner, docs/backend-upgrade.md);
 // this page only reads its state and triggers it. A hand-deployed host (managed: false) is read-only.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { UPGRADE_CHECK_INTERVAL_MAX, UPGRADE_PACKAGE_RUN_BATCH_MAX, UPGRADE_PACKAGE_RUNS, upgradeNoteText, type HostServiceInfo, type UpgradeAvailable, type UpgradeMigration, type UpgradeMode, type UpgradePackageRun, type UpgradeRollbackPreview, type UpgradeSettings, type UpgradeSettingsPatch, type UpgradeStatus } from "../../../../shared/backendUpgrade";
 import { readCutexBuild } from "@cutex-desktop/cutex-client";
-import { ArmedHint } from "../../components/ArmedHint";
-import { Button, Details, EmptyState, ErrorNote, Loading, Notice, NumberField, Section, Segmented, Select, SettingRow, TextInput, Toggle } from "../../components/settings/Form";
+import { Button, EmptyState, ErrorNote, Loading, Notice, NumberField, Section, Segmented, Select, SettingRow, TextInput, Toggle } from "../../components/settings/Form";
 import { formatWhen } from "../../lib/time";
 import { useI18n, type MessageKey } from "../../i18n";
-import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
+import { confirmDialog } from "../../lib/contextMenu";
 import { cutexBuildText, settingsAnchorId } from "../../lib/settingsNav";
 import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
 import { useHostServiceInfo, useUpgradeAction } from "./hooks";
@@ -59,7 +58,7 @@ function Value({ children, title }: { children: React.ReactNode; title?: string 
 
 function Tag({ children, tone = "muted" }: { children: React.ReactNode; tone?: "muted" | "ok" | "warn" | "danger" | "accent" }) {
   const color = tone === "ok" ? "bg-ok/15 text-ok-text" : tone === "warn" ? "bg-warn/15 text-warn" : tone === "danger" ? "bg-danger/12 text-danger" : tone === "accent" ? "bg-accent/12 text-accent" : "bg-surface-2 text-muted";
-  return <span className={`inline-flex h-5 shrink-0 items-center rounded px-1.5 text-[11px] whitespace-nowrap ${color}`}>{children}</span>;
+  return <span className={`inline-flex h-5 shrink-0 items-center rounded px-1.5 text-caption/[inherit] whitespace-nowrap ${color}`}>{children}</span>;
 }
 
 function ClassTag({ value }: { value: string }) {
@@ -132,17 +131,17 @@ function StatusSection({ status, info, onCheck, checking, checkError, installedN
         ) : undefined
       }
     >
-      <SettingRow label={t("backend-upgrade.status.installed")} hint={<span className={state.tone === "accent" ? "text-accent" : state.tone === "warn" ? "text-warn" : undefined}>{state.text}</span>}>
+      <SettingRow readOnly agents="none" source="host" label={t("backend-upgrade.status.installed")} hint={<span className={state.tone === "accent" ? "text-accent" : state.tone === "warn" ? "text-warn" : undefined}>{state.text}</span>}>
         <span className="font-mono text-sm tabular-nums select-text">{installed ?? t("backend-upgrade.status.unknown")}</span>
       </SettingRow>
       {notes && (
         <div className="border-b border-border/60 py-3 last:border-b-0" data-installed-notes="">
           <p className="text-sm">{t("backend-upgrade.notes.label", { release: status.installed!.release })}</p>
-          <p className="mt-0.5 text-xs whitespace-pre-wrap text-muted">{notes}</p>
+          <p className="selectable mt-0.5 text-xs whitespace-pre-wrap text-muted">{notes}</p>
         </div>
       )}
       {native && (
-        <SettingRow label={t("backend-upgrade.status.runtimes")} hint={olderNative > 0 ? t("backend-upgrade.status.olderNative", { n: olderNative }) : info?.runtimes?.unpinnedAgents ? t("backend-upgrade.status.unpinned", { n: info.runtimes.unpinnedAgents }) : undefined}>
+        <SettingRow readOnly agents="none" source="host" label={t("backend-upgrade.status.runtimes")} hint={olderNative > 0 ? t("backend-upgrade.status.olderNative", { n: olderNative }) : info?.runtimes?.unpinnedAgents ? t("backend-upgrade.status.unpinned", { n: info.runtimes.unpinnedAgents }) : undefined}>
           <Value title={native.latest ? t("backend-upgrade.status.nativeLatest", { release: native.latest }) : null}>
             {[native.selected, claude?.selected].filter(Boolean).join(" · ") || "—"}
           </Value>
@@ -151,31 +150,31 @@ function StatusSection({ status, info, onCheck, checking, checkError, installedN
       {status.managed && status.lastCheckError && <ErrorNote>{t("backend-upgrade.status.lastCheckError", { code: status.lastCheckError.code, message: status.lastCheckError.message })}</ErrorNote>}
       {status.managed && status.trustedKeys.length === 0 && <Notice>{t("backend-upgrade.status.noKeys")}</Notice>}
       {checkError && <ErrorNote>{checkError}</ErrorNote>}
-      <Details>
-        <SettingRow label={t("backend-upgrade.status.build")}>
+      <>
+        <SettingRow readOnly agents="none" source="host" label={t("backend-upgrade.status.build")}>
           <Value>{cutexBuildText(build, { dev: t("cutexBuild.dev"), legacy: t("cutexBuild.legacy") })}</Value>
         </SettingRow>
         {(status.installed?.commit || status.installed?.sequence || status.installed?.manifestSha256) && (
-          <SettingRow label={t("backend-upgrade.status.release")}>
+          <SettingRow readOnly agents="none" source="host" label={t("backend-upgrade.status.release")}>
             <Value title={status.installed?.manifestSha256 ?? null}>
               {[status.installed?.commit ? status.installed.commit.slice(0, 7) : null, status.installed?.sequence ? t("backend-upgrade.status.sequence", { n: status.installed.sequence }) : null, status.installed?.manifestSha256 ? `sha256 ${status.installed.manifestSha256.slice(0, 12)}` : null].filter(Boolean).join(" · ")}
             </Value>
           </SettingRow>
         )}
-        <SettingRow label={t("backend-upgrade.status.install")} hint={status.managed ? t("backend-upgrade.status.managedHint", { base: status.base ?? "—" }) : t("backend-upgrade.status.unmanagedHint")}>
+        <SettingRow readOnly agents="none" source="host" label={t("backend-upgrade.status.install")} hint={status.managed ? t("backend-upgrade.status.managedHint", { base: status.base ?? "—" }) : t("backend-upgrade.status.unmanagedHint")}>
           <Tag tone={status.managed ? "ok" : "warn"}>{t(status.managed ? "backend-upgrade.status.managed" : "backend-upgrade.status.unmanaged")}</Tag>
         </SettingRow>
-        <SettingRow label={t("backend-upgrade.status.serviceManager")} hint={sm?.unit ?? undefined}>
+        <SettingRow readOnly agents="none" source="host" label={t("backend-upgrade.status.serviceManager")} hint={sm?.unit ?? undefined}>
           <Value>{t(`backend-upgrade.serviceManager.${["systemd", "cutex-supervisor", "runtime-host", "none"].includes(smKind) ? smKind : "other"}` as MessageKey, { kind: smKind })}</Value>
         </SettingRow>
         {status.managed && (
-          <SettingRow label={t("backend-upgrade.status.lastCheck")} hint={status.settings.checkIntervalHours > 0 ? t("backend-upgrade.status.lastCheckHint", { interval: intervalText(status.settings.checkIntervalHours) }) : t("backend-upgrade.status.lastCheckOff")}>
+          <SettingRow readOnly agents="none" source="host" label={t("backend-upgrade.status.lastCheck")} hint={status.settings.checkIntervalHours > 0 ? t("backend-upgrade.status.lastCheckHint", { interval: intervalText(status.settings.checkIntervalHours) }) : t("backend-upgrade.status.lastCheckOff")}>
             <span className="text-xs text-muted">
               <When iso={status.lastCheckAt} />
             </span>
           </SettingRow>
         )}
-      </Details>
+      </>
     </Section>
   );
 }
@@ -198,29 +197,17 @@ function UnmanagedSection() {
 
 // ---------- the update: download (stage) and apply ----------
 
-/** A click-twice button: the first click arms it (red, hint bubble), the second runs. */
-function ArmedButton({ label, armedText, disabled, onConfirm, primary, resetKey }: { label: string; armedText: string; disabled?: boolean; onConfirm(): void; primary?: boolean; resetKey?: unknown }) {
-  const [armed, setArmed] = useArmed(resetKey);
-  const anchor = useRef<HTMLSpanElement>(null);
+/**
+ * A big, rare action (design 013): one click opens a confirm dialog that says what happens; the
+ * dialog's button names the action (「确认更新到 0.1.5」). Not click-twice: an update is too easy to
+ * read as failed when the armed state runs out.
+ */
+function ConfirmButton({ label, message, ok, disabled, onConfirm, primary }: { label: string; message: string; ok: string; disabled?: boolean; onConfirm(): void; primary?: boolean }) {
+  const { t } = useI18n();
   return (
-    <span ref={anchor} className="inline-flex">
-      {armed && !disabled ? (
-        <button
-          className={`${ARMED_FORM_BUTTON} shrink-0 whitespace-nowrap`}
-          onClick={() => {
-            setArmed(false);
-            onConfirm();
-          }}
-        >
-          {label}
-        </button>
-      ) : (
-        <Button primary={primary} disabled={disabled} onClick={() => setArmed(true)}>
-          {label}
-        </Button>
-      )}
-      {armed && !disabled && <ArmedHint anchor={anchor} text={armedText} />}
-    </span>
+    <Button primary={primary} disabled={disabled} onClick={() => void confirmDialog(message, true, { ok, cancel: t("backend-upgrade.confirm.back") }).then((yes) => yes && onConfirm())}>
+      {label}
+    </Button>
   );
 }
 
@@ -239,7 +226,7 @@ function ReleaseFacts({ available }: { available: UpgradeAvailable }) {
           </span>
         )}
       </div>
-      {notes && <p className="text-xs whitespace-pre-wrap text-muted">{notes}</p>}
+      {notes && <p className="selectable text-xs whitespace-pre-wrap text-muted">{notes}</p>}
       <p className="text-xs text-subtle">{t(modeKeys(available.mode, available.nativeVersion ?? null).impact)}</p>
       {(available.nativeVersion || available.claudeRuntime) && (
         <p className="text-xs text-subtle">
@@ -318,7 +305,7 @@ function UpdateSection({ hostId, status, busyRun }: { hostId: string; status: Up
     <Section id={settingsAnchorId("update")} title={t("backend-upgrade.update.title")} hint={installed ? t("backend-upgrade.update.from", { from: installed }) : undefined}>
       {facts && <ReleaseFacts available={facts} />}
       {/* Download (stage): verify signatures, unpack, preflight. Nothing changes on the host yet. */}
-      <SettingRow
+      <SettingRow agents="none" source="host"
         label={t("backend-upgrade.stage.label")}
         hint={
           stagingRunning
@@ -358,7 +345,7 @@ function UpdateSection({ hostId, status, busyRun }: { hostId: string; status: Up
             <div className="space-y-2 border-b border-border/60 py-3">
               <p className="text-xs font-medium text-danger">{t("backend-upgrade.oneWay.warning", { release: target.release })}</p>
               {!facts && refusedOneWay && refusedOneWay.migrations.length > 0 && <Migrations list={refusedOneWay.migrations} />}
-              <SettingRow label={t("backend-upgrade.oneWay.type", { release: target.release })}>
+              <SettingRow agents="none" source="host" label={t("backend-upgrade.oneWay.type", { release: target.release })}>
                 <TextInput value={confirmText} onChange={setConfirmText} placeholder={target.release} mono width="w-40" label={t("backend-upgrade.oneWay.type", { release: target.release })} />
               </SettingRow>
             </div>
@@ -371,7 +358,7 @@ function UpdateSection({ hostId, status, busyRun }: { hostId: string; status: Up
           </div>
           {advanced && (
             <>
-              <SettingRow label={t("backend-upgrade.apply.mode")} hint={t(facts?.mode === "full" ? "backend-upgrade.apply.modeFullRequired" : "backend-upgrade.apply.modeHint")}>
+              <SettingRow agents="newAgents" source="host" label={t("backend-upgrade.apply.mode")} hint={t(facts?.mode === "full" ? "backend-upgrade.apply.modeFullRequired" : "backend-upgrade.apply.modeHint")}>
                 <Segmented
                   label={t("backend-upgrade.apply.mode")}
                   value={facts?.mode === "full" ? "full" : mode}
@@ -383,22 +370,22 @@ function UpdateSection({ hostId, status, busyRun }: { hostId: string; status: Up
                   onChange={(v) => setMode(v)}
                 />
               </SettingRow>
-              <SettingRow label={t("backend-upgrade.apply.maxWait")} hint={t("backend-upgrade.apply.maxWaitHint")}>
+              <SettingRow agents="none" source="host" label={t("backend-upgrade.apply.maxWait")} hint={t("backend-upgrade.apply.maxWaitHint")}>
                 <NumberField label={t("backend-upgrade.apply.maxWait")} value={waitMin} range={[0, 24 * 60]} unit={t("backend-upgrade.unit.min")} onCommit={(v) => setWaitPick(v)} />
               </SettingRow>
               {effectiveMode === "full" && (
-                <SettingRow label={t("backend-upgrade.packageRun.label")} hint={t(`backend-upgrade.packageRun.${packageRun}Hint` as MessageKey)}>
+                <SettingRow agents="next" source="host" label={t("backend-upgrade.packageRun.label")} hint={t(`backend-upgrade.packageRun.${packageRun}Hint` as MessageKey)}>
                   <Select label={t("backend-upgrade.packageRun.label")} value={packageRun} options={UPGRADE_PACKAGE_RUNS.map((v) => ({ value: v, label: t(`backend-upgrade.packageRun.${v}` as MessageKey) }))} onChange={setPackageRunPick} />
                 </SettingRow>
               )}
             </>
           )}
-          <SettingRow label={t("backend-upgrade.apply.label", { release: target.release })} hint={t(modeKeys(effectiveMode, releaseNative(status, target.release)).impact)}>
-            <ArmedButton
+          <SettingRow agents="newAgents" source="host" label={t("backend-upgrade.apply.label", { release: target.release })} hint={t(modeKeys(effectiveMode, releaseNative(status, target.release)).impact)}>
+            <ConfirmButton
               primary
-              resetKey={`${target.release}|${confirmText}`}
               label={t("backend-upgrade.apply.button")}
-              armedText={t(oneWay ? "backend-upgrade.apply.armedOneWay" : "backend-upgrade.apply.armed", { release: target.release, wait: waitMin })}
+              message={t(oneWay ? "backend-upgrade.apply.confirmOneWay" : "backend-upgrade.apply.confirm", { release: target.release, wait: waitMin })}
+              ok={t("backend-upgrade.apply.confirmOk", { release: target.release })}
               disabled={action.busy || busyRun || !typedOk}
               onConfirm={() => void apply()}
             />
@@ -440,7 +427,7 @@ function RollbackSection({ hostId, status, busyRun }: { hostId: string; status: 
   };
   return (
     <Section id={settingsAnchorId("rollback")} title={t("backend-upgrade.rollback.title")} hint={t("backend-upgrade.rollback.hint")}>
-      <SettingRow label={t("backend-upgrade.rollback.target")} hint={previous ? t("backend-upgrade.rollback.previous", { release: previous }) : undefined}>
+      <SettingRow agents="newAgents" source="host" label={t("backend-upgrade.rollback.target")} hint={previous ? t("backend-upgrade.rollback.previous", { release: previous }) : undefined}>
         {others.length > 1 ? (
           <Select label={t("backend-upgrade.rollback.target")} value={to} options={others.map((r) => ({ value: r, label: r === previous ? t("backend-upgrade.rollback.previousOption", { release: r }) : r }))} onChange={setTo} />
         ) : (
@@ -468,7 +455,7 @@ function RollbackSection({ hostId, status, busyRun }: { hostId: string; status: 
           <p className="text-xs text-subtle">{preview.selectionBackup ? t("backend-upgrade.rollback.selectionRestored") : t("backend-upgrade.rollback.selectionKept")}</p>
           <p className="text-xs text-warn">{t("backend-upgrade.rollback.sessionsKept")}</p>
           <div className="flex justify-end pb-1">
-            <ArmedButton resetKey={`${preview.from}|${preview.to}`} label={t("backend-upgrade.rollback.button", { release: preview.to })} armedText={t("backend-upgrade.rollback.armed", { release: preview.to })} disabled={action.busy || busyRun} onConfirm={() => void rollback()} />
+            <ConfirmButton label={t("backend-upgrade.rollback.button", { release: preview.to })} message={t("backend-upgrade.rollback.confirm", { release: preview.to })} ok={t("backend-upgrade.rollback.confirmOk", { release: preview.to })} disabled={action.busy || busyRun} onConfirm={() => void rollback()} />
           </div>
         </div>
       )}
@@ -491,10 +478,10 @@ function SettingsSection({ hostId, settings }: { hostId: string; settings: Upgra
   const intervalText = useIntervalText();
   return (
     <Section id={settingsAnchorId("settings")} title={t("backend-upgrade.settings.title")}>
-      <SettingRow label={t("backend-upgrade.settings.channel")} hint={t("backend-upgrade.settings.channelHint")}>
+      <SettingRow agents="none" source="host" label={t("backend-upgrade.settings.channel")} hint={t("backend-upgrade.settings.channelHint")}>
         <Segmented label={t("backend-upgrade.settings.channel")} value={settings.channel} disabled={action.busy} options={[{ value: "release", label: t("backend-upgrade.channel.release") }, { value: "main", label: t("backend-upgrade.channel.main") }]} onChange={(channel) => void save({ channel })} />
       </SettingRow>
-      <SettingRow label={t("backend-upgrade.settings.interval")}>
+      <SettingRow agents="none" source="host" label={t("backend-upgrade.settings.interval")}>
         <Select
           label={t("backend-upgrade.settings.interval")}
           value={String(settings.checkIntervalHours)}
@@ -503,25 +490,25 @@ function SettingsSection({ hostId, settings }: { hostId: string; settings: Upgra
           onChange={(v) => void save({ checkIntervalHours: Number(v) })}
         />
       </SettingRow>
-      <SettingRow label={t("backend-upgrade.settings.autoStage")} hint={t("backend-upgrade.settings.autoStageHint")}>
+      <SettingRow agents="none" source="host" label={t("backend-upgrade.settings.autoStage")} hint={t("backend-upgrade.settings.autoStageHint")}>
         <Toggle label={t("backend-upgrade.settings.autoStage")} checked={settings.autoStage} disabled={action.busy} onChange={(autoStage) => void save({ autoStage })} />
       </SettingRow>
-      <SettingRow label={t("backend-upgrade.settings.autoApply")} hint={t("backend-upgrade.settings.autoApplyHint")}>
+      <SettingRow agents="newAgents" source="host" label={t("backend-upgrade.settings.autoApply")} hint={t("backend-upgrade.settings.autoApplyHint")}>
         <Toggle label={t("backend-upgrade.settings.autoApply")} checked={settings.autoApply} disabled={action.busy} onChange={(autoApply) => void save({ autoApply })} />
       </SettingRow>
-      <SettingRow label={t("backend-upgrade.settings.maxWait")} hint={t("backend-upgrade.apply.maxWaitHint")}>
+      <SettingRow agents="none" source="host" label={t("backend-upgrade.settings.maxWait")} hint={t("backend-upgrade.apply.maxWaitHint")}>
         <NumberField label={t("backend-upgrade.settings.maxWait")} value={minutesOf(settings.maxWaitSecs)} range={[0, 24 * 60]} unit={t("backend-upgrade.unit.min")} disabled={action.busy} onCommit={(v) => v !== null && void save({ maxWaitSecs: v * 60 })} />
       </SettingRow>
-      <SettingRow label={t("backend-upgrade.packageRun.label")} hint={t(`backend-upgrade.packageRun.${settings.packageRun}Hint` as MessageKey)}>
+      <SettingRow agents="next" source="host" label={t("backend-upgrade.packageRun.label")} hint={t(`backend-upgrade.packageRun.${settings.packageRun}Hint` as MessageKey)}>
         <Select label={t("backend-upgrade.packageRun.label")} value={settings.packageRun} disabled={action.busy} options={UPGRADE_PACKAGE_RUNS.map((v) => ({ value: v, label: t(`backend-upgrade.packageRun.${v}` as MessageKey) }))} onChange={(packageRun) => void save({ packageRun })} />
       </SettingRow>
       {settings.packageRun === "after" && (
-        <SettingRow label={t("backend-upgrade.settings.batch")} hint={t("backend-upgrade.settings.batchHint")}>
+        <SettingRow agents="next" source="host" label={t("backend-upgrade.settings.batch")} info={t("backend-upgrade.settings.batchHint")}>
           <NumberField label={t("backend-upgrade.settings.batch")} value={settings.packageRunBatch} range={[1, UPGRADE_PACKAGE_RUN_BATCH_MAX]} disabled={action.busy} onCommit={(v) => v !== null && void save({ packageRunBatch: v })} />
         </SettingRow>
       )}
-      <Details>
-        <SettingRow
+      <>
+        <SettingRow readOnly agents="none" source="host"
           label={t("backend-upgrade.settings.source")}
           hint={
             <>
@@ -534,7 +521,7 @@ function SettingsSection({ hostId, settings }: { hostId: string; settings: Upgra
         >
           <Value title={settings.source}>{settings.source}</Value>
         </SettingRow>
-      </Details>
+      </>
       {action.error && <ErrorNote>{action.error}</ErrorNote>}
     </Section>
   );

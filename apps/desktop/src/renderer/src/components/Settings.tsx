@@ -1,3 +1,4 @@
+import { isImeComposing } from "../lib/ime";
 // Settings page (DESIGN §4.5; layout per docs/research/settings-audit-20261008.md): grouped left
 // nav (this machine → connection → the connected host); every page starts with a source tag saying
 // where its settings live (本机 / 主机 · name / codex 配置 · name). Pages are `settings.page` items
@@ -6,28 +7,36 @@
 // SettingsNav as its Aside. Multi-host (P1 step 2c, RFC §9.3): host pages get a host picker in their
 // header (lib/settingsHost) and read / write that host (lib/targetHost provider).
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { ArrowLeft, Search, SlidersHorizontal, X } from "lucide-react";
+import { preloadOnIntent } from "../lib/lazyPage";
+import { ArrowLeft, Check, Search, SlidersHorizontal, X } from "lucide-react";
 import { bridge } from "../bridge";
 import { useI18n, type MessageKey } from "../i18n";
 import { resetDragonSize } from "../lib/aboutDragon";
-import { SETTINGS_GROUP_ORDER, settingsTab } from "../lib/settingsNav";
+import { settingsNavGroups, settingsTab } from "../lib/settingsNav";
 import { firstResult, flattenResults, highlightParts, resultCount, searchSettings, type Ranges, type SettingsSearchHit } from "../lib/settingsSearch";
 import { requestSettingsReveal, useSettingsReveal, useSettingsSearchIndex } from "../lib/settingsSearchView";
+import { profileSearchAnchor } from "../lib/settingsProfileSearch";
+import { en as searchEn, zhCN as searchZh } from "../lib/settingsSearchIaMessages";
 import { hostPickerMode } from "../lib/hostPick";
 import { AllHostsContext, SETTINGS_HOST_PAGES, SETTINGS_MEMBER_PAGES, setSettingsHost, useSettingsHost, useSettingsTarget } from "../lib/settingsHost";
 import { useSettingsAllHosts } from "../lib/settingsAllHosts";
 import { TargetHostContext } from "../lib/targetHost";
 import { useHostAccess } from "../lib/hostAccess";
 import { useHostScope } from "../lib/useHostScope";
+import { isSettingsHostPage, settingsPageHasHostPicker } from "../lib/settingsGate";
 import { HostPicker } from "./HostPicker";
 import { SettingsHostFrame } from "./SettingsHostFrame";
 import { ItemBoundary } from "../modules/Outlet";
 import { useSlot } from "../modules/react";
 import type { AppSlotEntry, PageParams } from "../modules/slots";
-import { useApp } from "../store";
+import { useApp, type SettingsTab } from "../store";
 import { noteCustomizeOpener, type CustomizeRegion } from "../lib/customize";
 import { holdPageBody, PageBody, SUBNAV_ITEM, SUBNAV_OFF, SUBNAV_ON } from "./Page";
 import { BackLink, EmptyState, Button, Section, SettingsPage, TextLink } from "./settings/Form";
+import { Tag } from "./Tag";
+import { keyVar, matchesCommand } from "../lib/keybindings";
+import { isHTMLElement } from "../lib/ownerWindow";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 function NavRow({ entry, current }: { entry: AppSlotEntry<"settings.page">; current: boolean }) {
   const { t } = useI18n();
@@ -51,7 +60,7 @@ function NavRow({ entry, current }: { entry: AppSlotEntry<"settings.page">; curr
       <Icon size={15} strokeWidth={1.75} className="shrink-0" />
       <span className="truncate">{t(item.titleKey)}</span>
       {badge?.dot && <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-danger" aria-label={t("settings.about.attention")} />}
-      {badge?.text && <span className="ml-auto shrink-0 rounded bg-surface-2 px-1 text-[10px] text-subtle">{badge.text}</span>}
+      {badge?.text && <Tag className="ml-auto">{badge.text}</Tag>}
     </button>
   );
 }
@@ -62,7 +71,10 @@ function NavRow({ entry, current }: { entry: AppSlotEntry<"settings.page">; curr
  * with the breadcrumb. The top row is a window drag region; on macOS it clears the traffic lights.
  */
 export function SettingsNav({ params }: { params: PageParams }) {
+  const win = useOwnerWindow();
   const tab = settingsTab(params);
+  // The other Settings pages load in idle time once Settings is open (lib/lazyPage): switching to one is instant.
+  useEffect(() => void preloadOnIntent(), []);
   const { t } = useI18n();
   const closePage = useApp((s) => s.closePage);
   const pages = useSlot("settings.page");
@@ -74,16 +86,14 @@ export function SettingsNav({ params }: { params: PageParams }) {
   // Ctrl+F (anywhere) or "/" (outside a text field) focuses the search box while Settings is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      const find = mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f";
-      const slash = e.key === "/" && !mod && !e.altKey && !isTextTarget(e.target);
-      if (!find && !slash) return;
+      if (isImeComposing(e)) return;
+      if (!matchesCommand("settingsSearch", e)) return;
       e.preventDefault();
       input.current?.focus();
       input.current?.select();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    win.addEventListener("keydown", onKey);
+    return () => win.removeEventListener("keydown", onKey);
   }, []);
   return (
     <nav aria-label={t("settings.title")} className="flex w-52 shrink-0 flex-col bg-transparent select-none">
@@ -102,12 +112,13 @@ export function SettingsNav({ params }: { params: PageParams }) {
           aria-expanded={query.trim() !== ""}
           aria-controls="settings-search-results"
           aria-label={t("shell.settingsSearch.placeholder")}
-          title={t("shell.settingsSearch.title")}
+          title={t("shell.settingsSearch.title", keyVar("settingsSearch", " · "))}
           placeholder={t("shell.settingsSearch.placeholder")}
           value={query}
           spellCheck={false}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
             if (e.key === "Escape") {
               e.preventDefault();
               e.stopPropagation();
@@ -115,7 +126,7 @@ export function SettingsNav({ params }: { params: PageParams }) {
               else e.currentTarget.blur();
             }
           }}
-          className="w-full rounded-md border border-border bg-background py-1 pr-6 pl-7 text-[13px] outline-none select-text placeholder:text-subtle focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/30 [&::-webkit-search-cancel-button]:hidden"
+          className="w-full rounded-md border border-border bg-background py-1 pr-6 pl-7 text-ui/[inherit] outline-none select-text placeholder:text-subtle focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/30 [&::-webkit-search-cancel-button]:hidden"
         />
         {query && (
           <button
@@ -132,9 +143,7 @@ export function SettingsNav({ params }: { params: PageParams }) {
         <SettingsSearchResults query={query} input={input} current={tab} />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-2 pb-2">
-          {SETTINGS_GROUP_ORDER.map((group) => {
-            const entries = pages.filter((e) => e.item.group === group);
-            if (!entries.length) return null;
+          {settingsNavGroups(pages).map(({ group, entries }) => {
             return (
               <div key={group} className="mb-3">
                 <div className="px-2 pt-1 pb-1 text-sm text-subtle">{t(`settings.group.${group}` as MessageKey)}</div>
@@ -152,8 +161,8 @@ export function SettingsNav({ params }: { params: PageParams }) {
   );
 }
 
-function isTextTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
+export function isTextTarget(target: EventTarget | null): boolean {
+  if (!isHTMLElement(target)) return false;
   return target.isContentEditable || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || (target.tagName === "INPUT" && !["checkbox", "radio", "range", "button"].includes((target as HTMLInputElement).type));
 }
 
@@ -178,7 +187,7 @@ function Highlight({ text, ranges }: { text: string; ranges: Ranges }) {
  * cards); ↑ / ↓ move, Enter / click opens the page and scrolls to + flashes the card. Unavailable
  * entries show greyed with the reason.
  */
-function SettingsSearchResults({ query, input, current }: { query: string; input: RefObject<HTMLInputElement | null>; current: string }) {
+export function SettingsSearchResults({ query, input, current, onNavigate }: { query: string; input: RefObject<HTMLInputElement | null>; current: string; /** Shelf replaces results with the destination page after a valid selection. */ onNavigate?(): void }) {
   const { t } = useI18n();
   const openSettings = useApp((s) => s.openSettings);
   const docs = useSettingsSearchIndex();
@@ -187,6 +196,10 @@ function SettingsSearchResults({ query, input, current }: { query: string; input
   const settingsHost = scope.host(useSettingsHost());
   const hostSuffix = (page: string) => (settingsHost && hostPickerMode(scope, settingsHost.id) === "picker" && SETTINGS_HOST_PAGES.has(page as never) ? settingsHost.label : null);
   const groups = useMemo(() => searchSettings(docs, query), [docs, query]);
+  const stopIdleHelp = searchSettings([{
+    page: "general", pageOrder: 0, pageTitle: { current: "", other: "" }, anchor: null, sectionTitle: null, disabled: null,
+    keywords: [{ current: searchZh["settings.searchIa.stopIdleKeywords"], other: searchEn["settings.searchIa.stopIdleKeywords"] }],
+  }], query).length > 0;
   const regions = useSlot("customize.region");
   const regionOf = (page: string) => regions.find((e) => e.mode === "show" && e.item.settingsPage === page)?.item.region;
   const rows = useMemo(() => flattenResults(groups), [groups]);
@@ -198,14 +211,17 @@ function SettingsSearchResults({ query, input, current }: { query: string; input
     const row = rows[i];
     if (!row || row.disabled) return;
     setActive(i);
-    openSettings(row.page);
-    if (row.anchor) requestSettingsReveal(row.anchor);
+    const profileAnchor = row.page === "profiles" ? profileSearchAnchor(row.anchor) : null;
+    openSettings(row.page, profileAnchor ? { anchor: profileAnchor } : undefined);
+    if (row.anchor && !profileAnchor) requestSettingsReveal(row.anchor);
+    onNavigate?.();
   };
   // Keys arrive at the search box (the focus stays there).
   useEffect(() => {
     const el = input.current;
     if (!el) return;
     const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return;
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter") return;
       e.preventDefault();
       if (e.key === "Enter") return open(active);
@@ -224,8 +240,12 @@ function SettingsSearchResults({ query, input, current }: { query: string; input
   return (
     <div ref={list} id="settings-search-results" role="listbox" aria-label={t("shell.settingsSearch.placeholder")} className="min-h-0 flex-1 overflow-y-auto px-2 pt-2 pb-2">
       <div className="px-2 pb-1 text-xs text-subtle" aria-live="polite">
-        {groups.length ? t("shell.settingsSearch.count", { n: resultCount(rows) }) : t("shell.settingsSearch.empty")}
+        {groups.length ? t("shell.settingsSearch.count", { n: resultCount(rows) }) : stopIdleHelp ? null : t("shell.settingsSearch.empty")}
       </div>
+      {stopIdleHelp && <div role="note" className="mb-3 rounded-md border border-edge px-2 py-2 text-xs text-muted">
+        <p className="font-medium text-foreground">{t("settings.searchIa.stopIdle" as MessageKey)}</p>
+        <p className="mt-1">{t("settings.searchIa.stopIdleHelp" as MessageKey)}</p>
+      </div>}
       {groups.map((g) => {
         const pageIndex = index++;
         return (
@@ -236,7 +256,7 @@ function SettingsSearchResults({ query, input, current }: { query: string; input
                 {hostSuffix(g.page) && <span className="font-normal text-subtle"> · {hostSuffix(g.page)}</span>}
               </span>
               {g.pageHit && g.pageHit.text !== g.pageTitle && <Detail hit={g.pageHit} />}
-              {regionOf(g.page) && !g.disabled && <CustomizeButton region={regionOf(g.page)!} small />}
+              {regionOf(g.page) && !g.disabled && <CustomizeButton region={regionOf(g.page)!} page={g.page as SettingsTab} small />}
             </ResultRow>
             {g.sections.map((h) => {
               const i = index++;
@@ -246,7 +266,9 @@ function SettingsSearchResults({ query, input, current }: { query: string; input
                 <ResultRow key={h.doc.anchor} index={i} active={active === i} disabled={h.doc.disabled} indent onOpen={open} onHover={setActive}>
                   <span className="truncate">
                     <span className="text-subtle">› </span>
-                    <Highlight text={title} ranges={inTitle ? h.ranges : []} />
+                    {g.page === "profiles" && profileSearchAnchor(h.doc.anchor)
+                      ? t("settings.searchIa.profilePath" as MessageKey, { section: title })
+                      : <Highlight text={title} ranges={inTitle ? h.ranges : []} />}
                   </span>
                   {!inTitle && <Detail hit={h} />}
                 </ResultRow>
@@ -262,7 +284,7 @@ function SettingsSearchResults({ query, input, current }: { query: string; input
 /** The matched keyword (or English text) under a result title. */
 function Detail({ hit }: { hit: SettingsSearchHit }) {
   return (
-    <span className="truncate text-[11px] text-subtle">
+    <span className="truncate text-caption/[inherit] text-subtle">
       <Highlight text={hit.text} ranges={hit.ranges} />
     </span>
   );
@@ -279,10 +301,10 @@ function ResultRow({ index, active, disabled, current, indent, onOpen, onHover, 
       onMouseDown={(e) => e.preventDefault() /* keep the focus in the search box */}
       onMouseEnter={() => !disabled && onHover(index)}
       onClick={() => onOpen(index)}
-      className={`flex w-full cursor-pointer flex-col rounded-md px-2 py-1 text-left text-[13px] ${indent ? "pl-4" : ""} ${active && !disabled ? "bg-surface-2 text-foreground" : current ? "text-foreground" : "text-muted"} ${disabled ? "cursor-default opacity-50" : "hover:text-foreground"}`}
+      className={`flex w-full cursor-pointer flex-col rounded-md px-2 py-1 text-left text-ui/[inherit] ${indent ? "pl-4" : ""} ${active && !disabled ? "bg-surface-2 text-foreground" : current ? "text-foreground" : "text-muted"} ${disabled ? "cursor-default opacity-50" : "hover:text-foreground"}`}
     >
       {children}
-      {disabled && <span className="truncate text-[11px] text-subtle">{disabled}</span>}
+      {disabled && <span className="truncate text-caption/[inherit] text-subtle">{disabled}</span>}
     </div>
   );
 }
@@ -293,15 +315,17 @@ function useCustomizeRegionOf(page: string): CustomizeRegion | undefined {
 }
 
 /**
- * 「在主界面调整」: closes Settings and opens the region's panel beside it (lead 2026-10-18). On a page
- * header, and `small` in a settings search result of that page.
+ * 「在主界面调整」 (owner 2026-10-21): the region of the real UI goes into edit state beside the Settings
+ * Shelf, which stays open on the region's page (`page`); while it is being edited the header button
+ * finishes (完成调整). On a page header, and `small` in a settings search result of that page.
  */
-function CustomizeButton({ region, small }: { region: CustomizeRegion; small?: boolean }) {
+function CustomizeButton({ region, page, small }: { region: CustomizeRegion; page: SettingsTab; small?: boolean }) {
   const { t } = useI18n();
-  const open = () => {
-    // The button goes away with Settings: the focus goes to the region when the panel closes.
-    noteCustomizeOpener(null);
-    useApp.getState().openCustomize(region);
+  const editing = useApp((s) => s.customize?.region === region);
+  const open = (e: { currentTarget: Element }) => {
+    // Finishing returns the focus here (the button stays, the Settings Shelf stays open).
+    noteCustomizeOpener(e.currentTarget);
+    useApp.getState().openCustomize(region, page);
   };
   if (small) {
     return (
@@ -309,9 +333,9 @@ function CustomizeButton({ region, small }: { region: CustomizeRegion; small?: b
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          open();
+          open(e);
         }}
-        className="mt-0.5 inline-flex w-fit items-center gap-1 rounded text-[11px] text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none"
+        className="mt-0.5 inline-flex w-fit items-center gap-1 rounded text-caption/[inherit] text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none"
       >
         <SlidersHorizontal size={11} aria-hidden />
         {t("customize.openInMain")}
@@ -319,10 +343,10 @@ function CustomizeButton({ region, small }: { region: CustomizeRegion; small?: b
     );
   }
   return (
-    <Button title={t("customize.openInMainHint")} onClick={open}>
+    <Button title={t(editing ? "customize.doneTip" : "customize.editInMainHint")} onClick={open}>
       <span className="inline-flex items-center gap-1.5">
-        <SlidersHorizontal size={13} aria-hidden />
-        {t("customize.openInMain")}
+        {editing ? <Check size={13} aria-hidden /> : <SlidersHorizontal size={13} aria-hidden />}
+        {t(editing ? "customize.finish" : "customize.openInMain")}
       </span>
     </Button>
   );
@@ -364,7 +388,7 @@ export function Settings({ params }: { params: PageParams }) {
   }
   const { item } = entry;
   const Page = item.Page;
-  const hostPage = SETTINGS_HOST_PAGES.has(item.page) && (item.source === "host" || item.source === "codex");
+  const hostPage = isSettingsHostPage(item);
   // Another page, sub-page (Profile detail / 添加) or host opens at the top, not at the last page's offset.
   const scrollKey = [tab, hostPage ? hostId : "", params.profile ?? "", params.create ?? ""].join("|");
   return (
@@ -384,21 +408,19 @@ export function Settings({ params }: { params: PageParams }) {
             {/* A page per host: switching hosts starts the page over (no state of one host shown for another). */}
             <SettingsPage
               key={hostPage ? `${tab}|${allHosts.on ? "*" : hostId}` : tab}
-              source={item.source ?? undefined}
-              agents={item.agents}
+              page={tab}
               hint={item.hintKey ? t(item.hintKey) : undefined}
               back={back ? <BackLink onClick={() => openSettings(back.page)}>{t(back.labelKey)}</BackLink> : undefined}
               link={
                 linked || customize ? (
                   <span className="flex items-center gap-3">
                     {linked && <TextLink onClick={() => openSettings(linked.page)}>{t(linked.labelKey)}</TextLink>}
-                    {customize && <CustomizeButton region={customize} />}
+                    {customize && <CustomizeButton region={customize} page={tab} />}
                   </span>
                 ) : undefined
               }
-              hostPage={hostPage}
               host={
-                mode !== "none" ? (
+                settingsPageHasHostPicker(item) && mode !== "none" ? (
                   <HostPicker
                     chip
                     value={hostId}

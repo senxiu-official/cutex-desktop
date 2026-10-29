@@ -21,26 +21,27 @@ import {
   pluginRows,
   type PluginRow,
 } from "../../lib/codexPlugins";
-import { ArmedRemove, Button, EmptyState, ErrorNote, IconButton, Loading, RefreshButton, Section, Segmented, SettingRow, TextInput, Toggle } from "./Form";
+import { ArmedRemove, Button, EmptyState, ErrorNote, IconButton, Loading, RefreshButton, Section, Segmented, SettingRow, TextInput, Toggle, SettingsGroup } from "./Form";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { FollowSharedSection } from "./FollowShared";
 import { useTargetApi, useTargetFeatures } from "../../lib/targetHost";
+import { Tag } from "../../components/Tag";
 
 type Tab = "installed" | "browse" | "marketplaces";
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 function Badge({ children, tone = "muted" }: { children: React.ReactNode; tone?: "muted" | "ok" | "warn" }) {
   const color = tone === "ok" ? "bg-ok/15 text-ok-text" : tone === "warn" ? "bg-warn/15 text-warn-text" : "bg-surface-2 text-muted";
-  return <span className={`rounded px-1.5 py-0.5 text-[11px] ${color}`}>{children}</span>;
+  return <span className={`rounded px-1.5 py-0.5 text-caption/[inherit] ${color}`}>{children}</span>;
 }
 
 function ComponentGroup({ label, items, warn }: { label: string; items: string[]; warn?: boolean }) {
   if (items.length === 0) return null;
   return (
     <div className="flex items-baseline gap-2 text-xs">
-      <span className={`shrink-0 rounded px-1.5 py-0.5 ${warn ? "bg-warn/15 text-warn-text" : "bg-sky-500/15 text-sky-700 dark:text-sky-300"}`}>
+      <Tag tone={warn ? "attention" : "accent"}>
         {label} {items.length}
-      </span>
+      </Tag>
       <span className="min-w-0 break-words font-mono text-muted">{items.join(", ")}</span>
     </div>
   );
@@ -142,7 +143,7 @@ function PluginDetailPanel({ row, onChanged, onNotice }: { row: PluginRow; onCha
   };
   const iface = detail?.summary.interface;
   return (
-    <div className="mb-2 space-y-2 rounded-lg bg-surface-2 p-3">
+    <SettingsGroup agents="next" source="codex"><div className="mb-2 space-y-2 rounded-lg bg-surface-2 p-3">
       {!detail && !error && <p className="text-xs text-subtle">{t("codex-config.plugins.loadingDetail")}</p>}
       {detail && (
         <>
@@ -241,7 +242,7 @@ function PluginDetailPanel({ row, onChanged, onNotice }: { row: PluginRow; onCha
         </>
       )}
       {error && <ErrorNote>{error}</ErrorNote>}
-    </div>
+    </div></SettingsGroup>
   );
 }
 
@@ -251,7 +252,7 @@ function PluginList({ rows, open, setOpen, onToggle, onChanged, onNotice, showMa
     <>
       {rows.map((r) => (
         <div key={r.id}>
-          <SettingRow label={r.displayName} hint={[showMarketplace ? r.id : r.name !== r.displayName ? r.name : null, r.description].filter(Boolean).join(" · ") || undefined}>
+          <SettingRow agents="next" source="codex" label={r.displayName} hint={[showMarketplace ? r.id : r.name !== r.displayName ? r.name : null, r.description].filter(Boolean).join(" · ") || undefined}>
             {r.category && <Badge>{r.category}</Badge>}
             {r.installed && !onToggle && <Badge tone="ok">{t("codex-config.plugins.installedBadge")}</Badge>}
             {r.installed && onToggle && !r.enabled && <Badge>{t("codex-config.plugins.disabledBadge")}</Badge>}
@@ -292,7 +293,7 @@ function AddMarketplace({ onDone, onNotice }: { onDone(): void; onNotice(text: s
   };
   return (
     <Section title={t("codex-config.plugins.market.add")} hint={t("codex-config.plugins.market.sourceHint")}>
-      <SettingRow label={t("codex-config.plugins.market.source")}>
+      <SettingRow agents="next" source="codex" label={t("codex-config.plugins.market.source")}>
         <TextInput mono width="w-64" value={source} onChange={setSource} placeholder="owner/repo" />
         <Button primary disabled={!parsed || busy} onClick={() => void add()}>
           {t("codex-config.plugins.market.addButton")}
@@ -380,7 +381,7 @@ export function PluginsPage() {
         <AlertTriangle size={14} className="mt-px shrink-0" />
         {t("codex-config.plugins.warning")}
       </p>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div role="toolbar" className="mb-3 flex flex-wrap items-center gap-2">
         <Segmented
           value={tab}
           options={[
@@ -437,16 +438,16 @@ export function PluginsPage() {
             title={t("codex-config.plugins.tab.marketplaces", { n: markets.length })}
             actions={
               <>
-                <Button disabled={busy || !markets.some((m) => m.canUpgrade)} onClick={() => upgrade(null)}>
+                <SettingsGroup agents="next" source="codex"><Button disabled={busy || !markets.some((m) => m.canUpgrade)} onClick={() => upgrade(null)}>
                   {t("codex-config.plugins.market.upgradeAll")}
-                </Button>
+                </Button></SettingsGroup>
                 {refresh}
               </>
             }
           >
             {markets.length === 0 && <EmptyState>{t("codex-config.plugins.market.none")}</EmptyState>}
             {markets.map((m) => (
-              <SettingRow
+              <SettingRow agents="next" source="codex"
                 key={m.name}
                 label={m.display}
                 hint={[

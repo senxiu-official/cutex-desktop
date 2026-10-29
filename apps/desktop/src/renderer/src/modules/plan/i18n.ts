@@ -35,7 +35,7 @@ export const zhCN = {
   "plan.dismiss": "隐藏进度",
   "plan.dismissHint": "隐藏，直到{{agent}}给出新的进度列表",
   "plan.restore": "显示进度",
-  "plan.restoreHint": "进度已隐藏（{done}/{total}），点击重新显示",
+  "plan.restoreHint": "进度已隐藏（{done}/{total}），左键点击重新显示",
 } as const;
 
 // Adds these keys to MessageKey (modules/i18nCatalog.ts collects the dictionary itself).
@@ -43,41 +43,3 @@ declare module "../i18nCatalog" {
   interface ModuleMessages extends Messages {}
 }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "plan.title": "Plan",
-  "plan.question": "Implement this plan?",
-  "plan.implement": "Implement",
-  "plan.implementHint": "Switch to Default mode and start coding",
-  "plan.stay": "Keep planning",
-  "plan.stayHint": "Stay in Plan mode and refine it",
-  "plan.defaultUnavailable": "Default mode unavailable",
-  "plan.claude.acceptEdits": "Yes, auto-accept edits",
-  "plan.claude.acceptEditsHint": "Leave Plan mode in Accept edits and start implementing",
-  "plan.claude.manual": "Yes, approve edits manually",
-  "plan.claude.manualHint": "Leave Plan mode in Ask first and start implementing",
-  "plan.claude.keep": "Yes, keep {mode}",
-  "plan.claude.keepHint": "Leave Plan mode, keep the previous permission mode and start implementing",
-  "plan.claude.keepPlanning": "No, keep planning…",
-  "plan.claude.feedbackPlaceholder": "Tell Claude what to change in the plan (optional)",
-  "plan.claude.feedbackCancel": "Cancel",
-  "plan.claude.feedbackSend": "Send feedback",
-  "plan.checklist": "Plan {done}/{total}",
-  "plan.updated": "Updated progress {done}/{total}",
-
-  "plan.moduleTitle": "Plan",
-  "plan.moduleDescription": "The model's progress list (update_plan) as a status category",
-  "plan.statusTitle": "Plan",
-  "plan.count": "Progress {done}/{total}",
-  "plan.fold.completed": "{n} completed",
-  "plan.fold.earlier": "{n} earlier",
-  "plan.fold.pending": "{n} pending",
-  "plan.fold.later": "{n} more",
-  "plan.cleared": "Cleared",
-  "plan.clearedEntry": "Cleared the progress list",
-  "plan.clearedHint": "The {{agent}} cleared its progress list; this is the previous one",
-  "plan.dismiss": "Hide progress",
-  "plan.dismissHint": "Hide until the {{agent}} posts a new progress list",
-  "plan.restore": "Show progress",
-  "plan.restoreHint": "Progress hidden ({done}/{total}); click to show it again",
-};

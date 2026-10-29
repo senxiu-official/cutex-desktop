@@ -8,6 +8,8 @@ import type { SideBinding } from "../modules/slots";
 import type { ItemId, Json } from "../modules/types";
 import { useGutter } from "./gutterStore";
 import { peekTarget, type PeekSetting, type PeekWhere } from "./peekTarget";
+import { isHTMLElement } from "./ownerWindow";
+import { activeAppDocument, queryAppWindows } from "./appWindowSet";
 
 export interface PeekInstance {
   /** "peek:<n>" — never a right-side instance id. */
@@ -53,10 +55,12 @@ export function showPeek(next: Omit<PeekInstance, "id">, focus: boolean): { id: 
   const s = usePeek.getState();
   const same = !!s.peek && s.peek.kind === next.kind && next.key !== null && s.peek.key === next.key && s.peek.hostId === next.hostId;
   if (!s.peek) {
-    const active = document.activeElement;
+    // The window the owner acted in (a desk window's gutter, multi-window).
+    const doc = activeAppDocument();
+    const active = doc.activeElement;
     // Opened from a gutter list (which closes now): focus goes back to its trigger.
-    const fromList = active instanceof HTMLElement && !!active.closest("[data-gutter-popover]");
-    returnFocus = fromList ? useGutter.getState().lastTrigger : active instanceof HTMLElement && active !== document.body ? active : null;
+    const fromList = isHTMLElement(active) && !!active.closest("[data-gutter-popover]");
+    returnFocus = fromList ? useGutter.getState().lastTrigger : isHTMLElement(active) && active !== doc.body ? active : null;
   }
   const id = same ? s.peek!.id : `peek:${++seq}`;
   usePeek.setState({ peek: { ...next, id }, flash: same ? s.flash + 1 : s.flash, revealed: focus ? s.revealed + 1 : s.revealed });
@@ -81,11 +85,12 @@ export function setPeekWhere(where: PeekInstance["where"]): void {
 export function closePeek(opts: { focus?: boolean; fallback?: () => HTMLElement | null } = {}): void {
   const s = usePeek.getState();
   if (!s.peek) return;
-  const card = document.querySelector("[data-peek-card]");
-  const active = document.activeElement;
-  const focusWasInside = !active || active === document.body || (!!card && card.contains(active));
+  const card = queryAppWindows("[data-peek-card]");
+  const doc = card?.ownerDocument ?? activeAppDocument();
+  const active = doc.activeElement;
+  const focusWasInside = !active || active === doc.body || (!!card && card.contains(active));
   usePeek.setState({ peek: null });
   const target = returnFocus?.isConnected ? returnFocus : (opts.fallback?.() ?? null);
   returnFocus = null;
-  if (opts.focus !== false && focusWasInside) (target ?? (document.querySelector<HTMLElement>("[data-pane-focused] [data-composer-input]") ?? document.querySelector<HTMLElement>("[data-composer-input]")))?.focus();
+  if (opts.focus !== false && focusWasInside) (target ?? (doc.querySelector<HTMLElement>("[data-pane-focused] [data-composer-input]") ?? doc.querySelector<HTMLElement>("[data-composer-input]")))?.focus();
 }

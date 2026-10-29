@@ -28,7 +28,7 @@ export function ClaimedCaps({ caps }: { caps: Partial<PeerCaps> | null | undefin
   ].filter(Boolean);
   if (parts.length === 0) return null;
   return (
-    <span className="text-[11px] text-subtle" title={t("delegation.peer.claimedCapsHint")} data-testid="claimed-caps">
+    <span className="text-caption/[inherit] text-subtle" title={t("delegation.peer.claimedCapsHint")} data-testid="claimed-caps">
       {t("delegation.peer.claimedCapsLine", { label: t("delegation.peer.claimedCaps"), caps: parts.join(" · ") })}
     </span>
   );

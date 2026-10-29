@@ -31,7 +31,7 @@ const { Section, SettingRow } = await import("../src/renderer/src/components/set
 const { isNarrowWidth, NARROW_CARD_REM } = await import("../src/renderer/src/lib/narrowCard");
 const { dataFlags, sizeFlagKey, useSizeFlags, widthAtLeast, widthBelow } = await import("../src/renderer/src/lib/sizeFlags");
 const sec = (props: { title: string; id?: string }, children: ReactNode) => h(Section, { ...props, children });
-const row = (label: string, children: ReactNode) => h(SettingRow, { label, children });
+const row = (label: string, children: ReactNode) => h(SettingRow, { label, agents: "none", source: "local", children });
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

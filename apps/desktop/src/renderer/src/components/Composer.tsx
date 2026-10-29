@@ -1,3 +1,9 @@
+import { ConversationModelControls } from "./ConversationModelControls";
+import { ProfileSwitch } from "./ProfileSwitch";
+import { cachedProfileList, loadProfileList } from "../lib/profileSnapshot";
+export { ConversationModelControls, EffortPicker, type FastModeControl } from "./ConversationModelControls";
+export { ProfileSwitch } from "./ProfileSwitch";
+import { isImeComposing } from "../lib/ime";
 // Composer in the Claude desktop style: a clean input box (queued items, image thumbnails, text,
 // stop + send) and a thin settings row beneath it.
 //   left:  `+` (ComposerTools) · permission mode · plan chip · background-terminal count
@@ -5,28 +11,36 @@
 //          menu: profile switch on top, models below) · reasoning effort · context-window ring
 // Quota and context are deliberately separate (unlike Claude, which merges them).
 // `/` opens the command palette (lib/slashCommands), `@` the workspace file search (DESIGN §4.3).
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowUp, X, Zap } from "lucide-react";
-import type { QueueItem } from "@cutex-desktop/protocol";
+import { AgentPausedSection, AgentPausedSendHint } from "./AgentPauseParts";
+import { useAgentPause } from "../lib/agentPause";
+import { mentionText, parseDraggedPaths, WORKSPACE_PATHS_MIME } from "../lib/workspaceDrag";
+import { DROP_TINT, dropTint } from "../lib/dropTint";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useId, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowUp, Clock, Eye, EyeOff, Square, X } from "lucide-react";
+import type { AdmissionNextStep, QueueItem } from "@cutex-desktop/protocol";
 import type { SkillMetadata, SkillsListResponse } from "@cutex-desktop/protocol/codex/v2";
 import type { ExtraInput, ModelOption, ProfileItem } from "../../../shared/ipc";
 import { fastModePatch, isFastTier, SESSION_FAST_MODE_FEATURE } from "../../../shared/fastMode";
-import { imageInputItems } from "../../../shared/input";
+import { draftMessageImage, imageInputItems } from "../../../shared/input";
 import { api, bridge } from "../bridge";
-import { useI18n, type MessageKey } from "../i18n";
-import { en } from "../i18n/en";
+import { useEnglishCatalog, useI18n, type MessageKey } from "../i18n";
 import { zhCN } from "../i18n/zh-CN";
 import { imageFileToDataUrl } from "../lib/images";
 import { useP2Access } from "../lib/p2Access";
 import { senderLabel } from "../lib/systemSenders";
 import { useComposerDraft } from "../lib/composerDrafts";
 import { candidateIndex, composerCandidateKey, mentionPathsFor, startMentionSearch, type MentionResults } from "../lib/composerMentions";
+import { agentMentionCandidates, agentMentionInsert } from "../lib/composerAgentMentions";
+import { agentMentionTokens } from "../lib/agentMentions";
+import { Avatar } from "./Avatar";
+import { AgentMentionInput, type AgentMentionInputHandle } from "./AgentMentionInput";
 import { createComposerEnterTrace, type EnterDecision } from "../lib/composerEnterTrace";
 import { archiveAgent, renameAgent } from "../lib/menus";
 import { PERMISSION_MODES, effectivePermissionLines, effectivePermissions, liveExtrasApply, permissionModeOf, permissionPatch } from "../lib/permissionModes";
 import { claudeModeOf, claudeModePatch, claudeModesOf, claudeToolSwitches, type ClaudeMode } from "../lib/claudePermissionModes";
-import { ClaudeRulesChip } from "./ClaudeRulesChip";
+import { RulesChip } from "./ClaudeRulesChip";
 import { useSizeFlags, widthBelow } from "../lib/sizeFlags";
+import { ComposerToolbarRow } from "./ComposerToolbarRow";
 import { ClaudeSkillsImportDialog } from "./ClaudeSkillsImportDialog";
 import { CLAUDE_SKILLS_IMPORT_FEATURE } from "../lib/claudeSkillsImport";
 import { CLAUDE_PERMISSION_RULES_FEATURE } from "../../../shared/ipc";
@@ -34,15 +48,12 @@ import { SESSION_SANDBOX_EXTRAS_FEATURE } from "../../../shared/ipc";
 import { LiveSandboxExtras } from "./LiveSandboxExtras";
 import { PermissionDetail } from "./PermissionDetail";
 import { ClaudeCodeSourcesNote } from "./ClaudeCodeSourcesNote";
-import { cachedProfileList, loadProfileList } from "../lib/profileSnapshot";
-import { useOrderedProfiles } from "../lib/profileOrder";
 import { useImagePickBlocked } from "../lib/remoteMode";
-import { PROFILE_FAMILY_FEATURE, switchTargets } from "../lib/profileCreate";
-import { formatBalance, gaugeName, gaugesFromRateLimits, latestObservedAt, mergeGauges, observedClock, resetsIn, resetsInCompact, quotaFill, quotaPercent, quotaTextKey, wantsNativeQuotaFallback, windowName, type QuotaGauge, type RateLimitsLike } from "../lib/quota";
+import { composerGauges, formatBalance, gaugeChoiceName, gaugeName, gaugesFromRateLimits, latestObservedAt, mergeGauges, observedClock, resetsIn, resetsInCompact, quotaFill, quotaPercent, quotaTextKey, wantsNativeQuotaFallback, windowName, type ComposerGauge, type GaugeChoice, type QuotaGauge, type RateLimitsLike } from "../lib/quota";
 import { appendToken } from "../lib/composerTools";
 import { useModelName } from "../lib/modelDisplay";
 import { setUiPref, useUiPrefs } from "../lib/prefs";
-import { agentFeaturesOf, CLAUDE_SESSION_SKILLS_CAPABILITY, claudeFastMode, lacks, maxImageBytes, skillSource, steerAction, type AgentFeatures } from "../lib/agentFeatures";
+import { agentFeaturesOf, changesSettingsLive, CLAUDE_SESSION_SKILLS_CAPABILITY, claudeFastMode, isAcpAgent, lacks, maxImageBytes, skillSource, steerAction, type AgentFeatures } from "../lib/agentFeatures";
 import { useObservedModel } from "../lib/observedModelView";
 import { shortModelId } from "../lib/observedModel";
 import { structuralErrorText } from "../lib/structuralGateView";
@@ -54,12 +65,17 @@ import { SIDE_CHAT_COMPONENT } from "../lib/sideKinds";
 import { useConversationEsc } from "../lib/useConversationEsc";
 import { pausedSection } from "../lib/queuePause";
 import { composerKeyAction, strategyFor } from "../lib/sendKeys";
+import { draftSteerPlan, hasImageInput, IMAGE_INPUT_STEERING_FEATURE, imageSteerMode } from "../lib/imageSteer";
+import { queueActionNotice } from "../lib/queueSteer";
 import { orderedEntries, type TimelineState } from "../lib/timeline";
 import { hasUnlandedTurn, outboxAt, visibleQueue } from "../lib/outbox";
+import { insertFeedbackOf, useQueueInsertFeedback } from "../lib/queueInsertFeedback";
 import { useHeldBusy } from "../lib/busyHold";
 import { lastAssistantText, timelineToMarkdown } from "../lib/transcript";
 import { agentState, featuresOf, hostApi, interruptWithFeedback, queueItemText, sidebarOf, useApp, viewOf, type AgentAddress } from "../store";
 import { useConvFeatures, useConvHost, useConvScope } from "../lib/conversationScope";
+import { formatAutoRetryWait } from "../lib/modelOverloadRetry";
+import { useModelOverloadRetry } from "../lib/modelOverloadRetryView";
 import { meantHere } from "../lib/uiSignal";
 import { offlineRuntime } from "../lib/runtimeStart";
 import { hostPageParam, useComposerHost, useHostLoadQuota, useHostQuotas } from "../lib/targetHost";
@@ -68,44 +84,72 @@ import { setSettingsHost } from "../lib/settingsHost";
 import { ExperimentalPanel, MemoriesPanel, ProjectMemoryPanel, StatusPanel, type StatusRow } from "./ComposerPanels";
 import { ComposerTools } from "./ComposerTools";
 import { GaugeBar } from "./GaugeBar";
-import { ProfileAvatar } from "./ProfileAvatar";
-import { Segmented, Toggle } from "./settings/Form";
+import { ProfileAvatar, type AvatarProfile } from "./ProfileAvatar";
+import { Segmented } from "./settings/Form";
 import { Ring } from "./Ring";
 import { Menu, Popover } from "./Menu";
 import { WindowsSandboxMenuNote } from "./WindowsSandboxNotice";
 import { useSessionWindowsSandbox } from "../lib/windowsSandboxView";
 import { useHostPlatform } from "../lib/codeBlockActions";
 import { WINDOWS_SANDBOX_FEATURE, windowsSandboxWarns } from "../../../shared/windowsSandbox";
-import { ModelPicker } from "./ModelPicker";
 import { QueuePanel } from "./QueuePanel";
+import { ImageThumb } from "./ImageThumbs";
 import { PendingMessagesSection } from "./PendingMessagesSection";
 import { usePendingMessages } from "../lib/agentMessageStore";
+import { lastFinishedTurnStart } from "../lib/agentMessages";
 import { AsksPausedSection, DelegationQueueSection, PauseAsksButton } from "./DelegationQueue";
 import { stopHeld } from "../lib/stopHold";
+import { APPROVAL_AUTO_RULES_FEATURE } from "../lib/approvals";
+import { approvalIdentityRole, declaredAgentCreate, declaredCutexTools } from "../lib/approvalRuleKinds";
+import { isQuickChat } from "../lib/sidebar";
 import { ADMISSION_ORDER_FEATURE, OWNER_YIELD_FEATURE, admittedAskIds, currentTurnOf, pendingSectionMessages, turnGroups } from "../lib/admissionOrder";
+import { useUnreadNextStep } from "../lib/readInRideAlongs";
 import { reloadOwnerMayPassAsks, useOwnerMayPassAsks } from "../lib/admissionOrderView";
 import { useHostRecords } from "../lib/delegationStore";
 import { useDelegationTurn, usePendingDelegations } from "../lib/delegationsView";
-import { delegationKeyAction, delegationSendChoices, queueSendNowMode, sendHowFor } from "../lib/delegationTurn";
-import { confirmDialog } from "../lib/contextMenu";
+import { delegationJoinIntent, OWNER_JOIN_FEATURE, delegationKeyAction, delegationSendChoices, queueSendNowMode, sendHowFor } from "../lib/delegationTurn";
+import { confirmDialog, contextMenu } from "../lib/contextMenu";
+import { fileActions } from "../lib/fileActions";
+import { LOCAL_HOST_ID } from "../../../shared/hosts";
 import { noteSent } from "../lib/jump";
 import { followAfterSend } from "../lib/stickToBottom";
 import { ComposerTriggers } from "./gutter/ComposerTriggers";
 import { ASKS_PAUSE_FEATURE } from "../lib/asksPause";
 import { QUOTA_CONTINUE_FEATURE } from "../../../shared/quotaContinue";
+import { RESET_CREDITS_FEATURE } from "../../../shared/resetCredits";
+import { quotaExhausted, ResetCreditsLine, ResetOfferSection } from "./ResetCredits";
+import { useResetOffer } from "../lib/resetCredits";
 import { useQuotaContinue } from "../lib/quotaContinue";
 import { pinInSession, repinApplies, useClaudeRuntimePreload } from "../lib/claudeRepin";
 import { runtimeOf } from "../lib/agentList";
+import { chatModelAndEffort } from "../lib/dshModels";
 import { QuotaContinueSection } from "./QuotaContinueSection";
 import { queueAutoCompact, useShortWindow } from "../lib/queueChips";
-import { DelegationSendMenu, DelegationTurnHint } from "./DelegationComposer";
+import { DelegationSendMenu, DelegationTurnHint, DelegationTurnOverlay } from "./DelegationComposer";
 import { SlashPalette, type PaletteRow } from "./SlashPalette";
 import { composerEfforts } from "../lib/models";
+import { claudePickerItems, claudeShortName } from "../lib/claudeModels";
+import { sharedResizeObserver } from "../lib/resizeHub";
+import { NoSteerSendHint } from "./NoSteerSendHint";
+import { busyPlaceholderKey, noSteerHintShown } from "../lib/noSteerHint";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 
 const Bar = GaugeBar;
 
 const QUOTA_REFRESH_MS = 60_000;
+
+/**
+ * 「接下来」 and the input box (owner 2026-10-26, replacing design 040 step 9's one wrapping card): 「接下来」
+ * (QueuePanel `data-queue-tray`) is a block of its own right above the input box — the same width and edges, its
+ * bottom corners square and its bottom edge the input box's top border, so the two read as one piece — but it never
+ * wraps the input box. The input box has the same position and size with or without it (no inset that comes and
+ * goes): opening, folding or a row coming and going changes only the history's height. CSS only (`:has()`): the
+ * DOM, the drop target and the keys are the same either way.
+ */
+const INPUT_IN_CARD = "group-has-[[data-queue-tray]]/inputcard:rounded-t-none";
+/** The input box's drop tint under 框线+底色 (lib/dropTint): over its own --surface, so it stays opaque. */
+const INPUT_DROP_TINT = dropTint("var(--accent)", 13, "var(--surface)");
 
 /** Profile chip: the profile name with its quota rings; the popover has the profile switch list
  *  and the quota details. `sessionId` null = new-chat draft: no native fallback, and `switcher` (the
@@ -118,6 +162,7 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
   const cutexGauges = profile ? quotas[profile] : undefined;
   const loadQuota = useHostLoadQuota(quotaHost);
   const features = useApp((s) => featuresOf(s, quotaHost));
+  const resetsOn = features.has(RESET_CREDITS_FEATURE);
   const convHost = useConvHost();
   const online = useApp((s) => sidebarOf(s, convHost)?.active.find((x) => x.cutexSessionId === sessionId)?.runtime.status === "online");
   const prefs = useUiPrefs();
@@ -129,11 +174,16 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
   }, [profile, loadQuota]);
   // Warm the profile list so the popover's switch section is there in its first paint; the chip's
   // picture comes from it too.
-  const [items, setItems] = useState<ProfileItem[] | null>(() => cachedProfileList()?.profiles ?? null);
+  // The list of THE COMPOSER'S host (quotaHost), not the focus host's: an agent of another host (host02's Ceobe seen from
+  // remote) names a Profile the focus host does not have, and the chip then lost its avatar.
+  const [items, setItems] = useState<ProfileItem[] | null>(() => cachedProfileList(quotaHost)?.profiles ?? null);
   useEffect(() => {
-    if (!cachedProfileList()) void loadProfileList().then((r) => setItems(r?.profiles ?? null), () => {});
-  }, []);
-  const item = profile ? items?.find((p) => p.name === profile) : undefined;
+    const cached = cachedProfileList(quotaHost);
+    setItems(cached?.profiles ?? null);
+    if (!cached) void loadProfileList(quotaHost).then((r) => setItems(r?.profiles ?? null), () => {});
+  }, [quotaHost]);
+  // Known by name but not (yet) in the list: still a face — the initial on the name's colour, never nothing.
+  const item: AvatarProfile | undefined = profile ? (items?.find((p) => p.name === profile) ?? { id: profile, name: profile, authKind: "none", cliKind: "", baseUrl: null, appearance: { color: null, effectiveColor: null, providerCategory: null } }) : undefined;
   // cutex has no gauges for this profile (older cutex, or a Claude profile: r202 reads ChatGPT
   // only): ask the agent's own runtime.
   const fallback = !!sessionId && wantsNativeQuotaFallback(cutexGauges, online);
@@ -160,29 +210,51 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
   // With no gauge yet, a dim ring keeps the chip's size, so nothing shifts when quota lands.
   const view = prefs.quotaView;
   const visible = gauges.some((g) => g.kind === "balance" || quotaFill(g, view) !== null);
+  // The row's rings after the per-gauge choices and same-reset merging (lib/quota composerGauges).
+  const rings = composerGauges(gauges, prefs.quotaGauges, prefs.quotaResetDefault, prefs.quotaMerge);
+  const choiceOf = (g: QuotaGauge) => prefs.quotaGauges[gaugeChoiceName(g)];
+  const setChoice = (g: QuotaGauge, patch: GaugeChoice) => setUiPref("quotaGauges", { ...prefs.quotaGauges, [gaugeChoiceName(g)]: { ...choiceOf(g), ...patch } });
+  const toggleChoice = (g: QuotaGauge, field: "ring" | "reset") =>
+    setChoice(g, { [field]: !(field === "ring" ? choiceOf(g)?.ring !== false : choiceOf(g)?.reset ?? prefs.quotaResetDefault) });
+  const percentOf = (g: QuotaGauge) => {
+    const percent = quotaPercent(g, view);
+    return percent === null ? "" : t(quotaTextKey(view), { percent });
+  };
+  // A merged ring's hover names every window it stands for and their shared reset.
+  const ringTitle = (r: ComposerGauge) => {
+    if (r.members.length === 1) {
+      const g = r.members[0]!;
+      return g.resetAt ? `${title(g)} · ${t("composer.quota.resets", { in: resetsIn(g.resetAt) })}` : title(g);
+    }
+    const members = r.members.map((m) => [title(m), percentOf(m)].filter(Boolean).join(" · "));
+    return [...members, r.resetAt !== null ? t("composer.quota.mergedResets", { in: resetsIn(r.resetAt) }) : ""].filter(Boolean).join("\n");
+  };
   return (
     <Popover
       triggerTitle={profile ? `${profile} · ${t("composer.quota.title")}` : t("composer.quota.title")}
-      width="w-72"
+      // Widens to its rows so gauge names (「Claude · Fable 7d」) stay whole, up to 28rem / the window.
+      width="w-max min-w-72 max-w-[min(28rem,calc(100vw-2rem))]"
       align="right"
       openSignal={openSignal}
       trigger={
         <span className="flex min-w-0 items-center gap-2">
-          {item && prefs.composerProfileAvatar && <ProfileAvatar profile={item} size={18} />}
-          <span className="trim-cap max-w-28 truncate">{profile ?? t("composer.quota.noProfile")}</span>
+          {item && prefs.composerProfileAvatar && <ProfileAvatar profile={item} size={18} host={quotaHost} />}
+          <span className="trim-cap max-w-28 truncate" data-quota-name="" title={profile ?? undefined}>{profile ?? t("composer.quota.noProfile")}</span>
           {!visible && (
             <span className="opacity-40">
               <Ring ratio={0} />
             </span>
           )}
-          {gauges.map((g) => {
+          {rings.map((r) => {
+            const g = r.draw;
             const fill = quotaFill(g, view);
-            return g.kind === "balance" ? (
+            return r.balance ? (
               <span key={g.id} className={`trim-cap text-subtle tabular-nums ${g.stale ? "opacity-60" : ""}`} title={g.balance ?? undefined}>{formatBalance(g.balance, true)}</span>
             ) : fill === null ? null : (
-              <span key={g.id} className={`flex items-center gap-1 ${g.stale ? "opacity-50" : ""}`}>
+              // The ring's hover names the reset too: a narrow composer row hides the countdown text (lib/toolbarFit).
+              <span key={g.id} data-quota-ring={g.id} data-merged={r.members.length > 1 ? "" : undefined} className={`flex shrink-0 items-center gap-1 ${g.stale ? "opacity-50" : ""}`} title={ringTitle(r)}>
                 <Ring ratio={fill} view={view} />
-                {prefs.quotaShowReset && g.resetAt && <span className="trim-cap text-subtle tabular-nums">{resetsInCompact(g.resetAt)}</span>}
+                {r.showReset && r.resetAt !== null && <span className="trim-cap text-subtle tabular-nums" data-quota-reset="">{resetsInCompact(r.resetAt)}</span>}
               </span>
             );
           })}
@@ -204,16 +276,44 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
             </span>
           </div>
           {gauges.length === 0 && <p className="text-xs text-subtle">{t("composer.quota.none")}</p>}
-          {observed !== null && <p className="-mt-2 text-[11px] text-subtle">{t("composer.quota.observedAt", { at: observedClock(observed) })}</p>}
+          {observed !== null && <p className="-mt-2 text-caption/[inherit] text-subtle">{t("composer.quota.observedAt", { at: observedClock(observed) })}</p>}
           {/* One grid for every row (subgrid): label | reset | value line up across rows; bars span all three. */}
           {gauges.length > 0 && (
-            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-3 gap-y-3">
+            <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] gap-x-3 gap-y-3">
               {gauges.map((g) => {
                 const fill = quotaFill(g, view);
                 const percent = quotaPercent(g, view);
                 return (
-                  <div key={g.id} className={`col-span-3 grid grid-cols-subgrid items-baseline gap-y-1.5 ${g.stale ? "opacity-60" : ""}`} title={g.observedAt ? t("composer.quota.observedAt", { at: observedClock(g.observedAt) }) : undefined}>
-                    <span className="min-w-0 truncate text-sm">
+                  <div key={g.id} className={`col-span-4 grid grid-cols-subgrid items-baseline gap-y-1.5 ${g.stale ? "opacity-60" : ""}`} title={g.observedAt ? t("composer.quota.observedAt", { at: observedClock(g.observedAt) }) : undefined}>
+                    {/* The row's two choices (owner 2026-10-28): this gauge's ring and its countdown. A hidden row stays listed, dimmed. */}
+                    {g.kind === "balance" ? (
+                      <span aria-hidden />
+                    ) : (
+                      <span className="flex items-center gap-0.5 self-center">
+                        <button
+                          type="button"
+                          data-quota-ring-toggle={g.id}
+                          aria-pressed={choiceOf(g)?.ring !== false}
+                          title={t("composer.quota.ring")}
+                          onClick={() => toggleChoice(g, "ring")}
+                          className={`rounded p-0.5 hover:bg-surface-2 ${choiceOf(g)?.ring === false ? "text-subtle opacity-60" : "text-muted"}`}
+                        >
+                          {choiceOf(g)?.ring === false ? <EyeOff size={13} /> : <Eye size={13} />}
+                        </button>
+                        <button
+                          type="button"
+                          data-quota-reset-toggle={g.id}
+                          aria-pressed={choiceOf(g)?.reset ?? prefs.quotaResetDefault}
+                          title={t("composer.quota.reset")}
+                          onClick={() => toggleChoice(g, "reset")}
+                          className={`rounded p-0.5 hover:bg-surface-2 ${(choiceOf(g)?.reset ?? prefs.quotaResetDefault) ? "text-muted" : "text-subtle opacity-60"}`}
+                        >
+                          <Clock size={13} />
+                        </button>
+                      </span>
+                    )}
+                    {/* The whole name; past the popover's max width it wraps (two lines at most, the title has the rest). */}
+                    <span data-quota-label={g.id} title={title(g)} className={`line-clamp-2 min-w-0 text-sm break-words ${choiceOf(g)?.ring === false && g.kind !== "balance" ? "opacity-55" : ""}`}>
                       {title(g)}
                       {g.stale && <span className="ml-1 text-xs text-warn" title={t("composer.quota.stale")}>~</span>}
                     </span>
@@ -224,20 +324,21 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
                       <span className="text-right text-xs font-medium whitespace-nowrap tabular-nums">{percent === null ? "—" : t(quotaTextKey(view), { percent })}</span>
                     )}
                     {fill !== null && (
-                      <div className="col-span-3">
+                      <div className="col-span-4">
                         <Bar ratio={fill} view={view} />
                       </div>
                     )}
-                    {g.error && <p className="col-span-3 text-xs text-danger">{g.error}</p>}
+                    {g.error && <p className="col-span-4 text-xs text-danger">{g.error}</p>}
                   </div>
                 );
               })}
             </div>
           )}
+          {profile && resetsOn && <ResetCreditsLine hostId={quotaHost} profile={profile} afterReset={() => void loadQuota(profile, true)} />}
           <div className="space-y-2 border-t border-border pt-2 text-xs text-muted">
             <label className="flex cursor-pointer items-center justify-between">
-              {t("composer.quota.showReset")}
-              <input type="checkbox" checked={prefs.quotaShowReset} onChange={(e) => setUiPref("quotaShowReset", e.target.checked)} />
+              {t("composer.quota.merge")}
+              <input type="checkbox" checked={prefs.quotaMerge} onChange={(e) => setUiPref("quotaMerge", e.target.checked)} />
             </label>
             <div className="flex items-center justify-between gap-2">
               <span>{t("composer.quota.view")}</span>
@@ -258,71 +359,12 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
   );
 }
 
-/** "Switch profile" list (DESIGN §4.8) at the top of the profile chip's popover. Gated per profile by
- *  cutex; when the current profile can't switch (or has nothing to switch to) the section is not
- *  shown at all. */
-function ProfileSwitch({ profile, sessionId, busy }: { profile: string | null; sessionId: string; busy: boolean }) {
-  const { t } = useI18n();
-  const modelName = useModelName();
-  const hostId = useConvHost();
-  const sidebar = useApp((s) => sidebarOf(s, hostId));
-  const familyAware = useApp((s) => featuresOf(s, hostId).has(PROFILE_FAMILY_FEATURE));
-  // From the cached list (warmed by ProfileQuota), so the section is there in the first paint;
-  // refreshed in the background on each open.
-  const [listed, setProfiles] = useState<ProfileItem[] | null>(() => cachedProfileList()?.profiles ?? null);
-  /** Switch targets in the owner's manual profile order (lib/profileOrder). */
-  const profiles = useOrderedProfiles(listed);
-  const [status, setStatus] = useState<string | null>(null);
-  useEffect(() => {
-    loadProfileList().then((r) => setProfiles(r?.profiles ?? null), () => {});
-  }, []);
-  if (!profiles) return null;
-  const current = profiles.find((p) => p.name === profile);
-  if (!current?.allowSessionSwitch) return null;
-  const revision = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((s) => s.cutexSessionId === sessionId)?.revision;
-  const targets = switchTargets(profile, profiles, familyAware);
-  if (targets.length === 0) return null;
-  const familyLabel = familyAware ? (current?.providerFamilyLabel ?? current?.providerFamily ?? null) : null;
-  const sw = async (target: string) => {
-    if (revision === undefined) return;
-    setStatus(t("composer.switch.working"));
-    try {
-      const r = await hostApi(hostId).switchProfile(sessionId, target, busy ? "afterTurn" : "now", revision);
-      setStatus(r.status === "scheduled" ? t("composer.switch.scheduled", { to: target }) : t("composer.switch.done", { to: target }));
-    } catch (e) {
-      setStatus(e instanceof Error ? e.message : String(e));
-    }
-  };
-  return (
-    <div className="border-b border-border pb-2">
-      <div className="mb-1 flex items-baseline gap-2 text-xs text-subtle">
-        <span>{busy ? t("composer.switch.titleAfterTurn") : t("composer.switch.title")}</span>
-        {familyLabel && <span className="ml-auto truncate" title={t("settings.profile.familyHint")}>{t("composer.switch.sameFamily", { label: familyLabel })}</span>}
-      </div>
-      {targets.map((p) => (
-          <button
-            key={p.id}
-            disabled={!p.allowSessionSwitch}
-            title={p.allowSessionSwitch ? undefined : t("composer.switch.targetLocked")}
-            onClick={() => void sw(p.name)}
-            className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-transparent"
-          >
-            <ProfileAvatar profile={p} size={18} />
-            <span className="truncate">{p.name}</span>
-            <span className="ml-auto truncate text-xs text-subtle">{modelName(p.model, null, p.id)}</span>
-          </button>
-        ))}
-      {status && <p className="mt-1 text-xs text-muted">{status}</p>}
-    </div>
-  );
-}
-
 /** Divider between the profile chip (name + quota) and the model group (model · reasoning · context). */
 export function ChipDivider() {
   return <span aria-hidden className="mx-1 h-3.5 w-px shrink-0 bg-border" />;
 }
 
-function ContextMeter({ usage, onCompact }: { usage: TimelineState["contextUsage"]; onCompact(): void }) {
+function ContextMeter({ usage, onCompact, billingUnavailable = false, canCompact = true }: { usage: TimelineState["contextUsage"]; onCompact(): void; billingUnavailable?: boolean; canCompact?: boolean }) {
   const { t } = useI18n();
   // Before the first token report (fresh agent, or reopened: thread/read carries none) the ring is
   // dim but still opens the popover, so 压缩会话 stays reachable.
@@ -349,9 +391,11 @@ function ContextMeter({ usage, onCompact }: { usage: TimelineState["contextUsage
             </span>
           </div>
           {ratio !== null ? <Bar ratio={ratio} /> : <p className="text-xs text-subtle">{usage ? t("composer.context.noWindow") : t("composer.context.none")}</p>}
+          {billingUnavailable && <p className="text-xs text-subtle">{t("dsh.billingUnavailable")}</p>}
+          {usage?.dsh && <p className="text-xs text-subtle" title={usage.dsh.observedAt}>{t("dsh.contextObserved", { at: new Date(usage.dsh.observedAt).toLocaleString() })}</p>}
           <div className="flex items-center justify-between">
             <span className="text-xs text-subtle">{ratio !== null && ratio > 0.85 ? t("composer.context.soon") : ""}</span>
-            <button
+            {canCompact && <button
               onClick={() => {
                 onCompact();
                 close();
@@ -359,135 +403,13 @@ function ContextMeter({ usage, onCompact }: { usage: TimelineState["contextUsage
               className="rounded-md bg-surface-2 px-2 py-1 text-xs hover:text-foreground"
             >
               {t("composer.context.compact")}
-            </button>
+            </button>}
           </div>
         </div>
       )}
     </Popover>
   );
 }
-
-/** Click or drag along the track; the filled part runs up to the thumb. Commits on release. */
-function EffortTrack({ efforts, index, label, onCommit }: { efforts: string[]; index: number; label(e: string): string; onCommit(i: number): void }) {
-  const [drag, setDrag] = useState<number | null>(null);
-  const n = efforts.length;
-  const shown = drag ?? index;
-  const at = (e: React.PointerEvent<HTMLDivElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    return Math.min(n - 1, Math.max(0, Math.floor(((e.clientX - r.left) / r.width) * n)));
-  };
-  const center = (i: number) => `${((i + 0.5) / n) * 100}%`;
-  return (
-    <div
-      role="slider"
-      aria-valuemin={0}
-      aria-valuemax={n - 1}
-      aria-valuenow={shown}
-      aria-valuetext={efforts[shown] ? label(efforts[shown]!) : undefined}
-      className="relative h-7 cursor-pointer touch-none rounded-lg bg-surface-2 select-none"
-      onPointerDown={(e) => {
-        e.currentTarget.setPointerCapture(e.pointerId);
-        setDrag(at(e));
-      }}
-      onPointerMove={(e) => drag !== null && setDrag(at(e))}
-      onPointerUp={(e) => {
-        const i = at(e);
-        setDrag(null);
-        onCommit(i);
-      }}
-      onPointerCancel={() => setDrag(null)}
-    >
-      <div className="absolute inset-y-0 left-0 rounded-lg bg-accent/25 transition-[width] duration-100" style={{ width: `calc(${center(shown)} + 8px)` }} />
-      {efforts.map((e, i) => (
-        <span key={e} title={label(e)} className={`absolute top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full ${i < shown ? "bg-accent" : "bg-subtle"}`} style={{ left: center(i) }} />
-      ))}
-      <span className="absolute top-1/2 h-5 w-4 -translate-x-1/2 -translate-y-1/2 rounded-md bg-accent shadow transition-[left] duration-100" style={{ left: center(shown) }} />
-    </div>
-  );
-}
-
-/** Fast mode in the effort popover (cutex session-fast-mode); absent = the model / host has none. */
-export interface FastModeControl {
-  on: boolean;
-  onToggle(on: boolean): void;
-}
-
-/**
- * `offline`: the agent's runtime is not running — nothing to read the effort from or send it to; the
- * chip shows "—" instead of a loading "…" and the panel says to start the runtime first.
- */
-export function EffortPicker({ effort, efforts, onChange, fast, offline, empty, onOpen }: { effort: string | null; efforts: string[]; onChange(e: string): void; fast?: FastModeControl; offline?: string; /** Why `efforts` is empty (shown instead of the track). */ empty?: string; onOpen?(): void }) {
-  const { t } = useI18n();
-  // Localized name when we have one, else the model's raw value (models add new levels, e.g. "ultra").
-  const label = (e: string) => {
-    const key = `composer.effort.${e}`;
-    const text = t(key as MessageKey);
-    return text === key ? e : text;
-  };
-  const index = Math.max(0, efforts.indexOf(effort ?? ""));
-  const step = (delta: number) => {
-    const next = efforts[Math.min(efforts.length - 1, Math.max(0, index + delta))];
-    if (next && next !== effort) onChange(next);
-  };
-  return (
-    <Popover
-      align="right"
-      width="w-80"
-      onOpen={onOpen}
-      trigger={
-        <span className="trim-cap inline-flex items-center gap-0.5" title={fast?.on ? t("composer.fast.on") : undefined}>
-          {fast?.on && <Zap size={12} className="shrink-0 fill-current text-warn" aria-label={t("composer.fast.on")} />}
-          {effort ? label(effort) : offline ? "—" : "…"}
-        </span>
-      }
-      onKey={(e) => {
-        if (e.key === "ArrowLeft") step(-1);
-        else if (e.key === "ArrowRight") step(1);
-        else return false;
-        return true;
-      }}
-    >
-      {() => (
-        <div className="space-y-3 p-3">
-          <div className="text-sm">
-            <span className="text-subtle">{t("composer.effortTitle")}</span> <span className="font-medium">{effort ? label(effort) : ""}</span>
-            {effort && label(effort) !== effort && <span className="ml-1.5 font-mono text-xs text-subtle">{effort}</span>}
-          </div>
-          {efforts.length > 0 ? (
-            <>
-              <div className="flex justify-between text-xs text-subtle">
-                <span>{t("composer.effort.faster")}</span>
-                <span>{t("composer.effort.smarter")}</span>
-              </div>
-              <EffortTrack efforts={efforts} index={index} label={label} onCommit={(i) => efforts[i] && efforts[i] !== effort && onChange(efforts[i]!)} />
-              <div className="flex text-[11px] text-subtle">
-                {efforts.map((e) => (
-                  <span key={e} className={`flex-1 text-center font-mono ${e === effort ? "text-foreground" : ""}`}>
-                    {e}
-                  </span>
-                ))}
-              </div>
-            </>
-          ) : (
-            !offline && empty && <p className="text-xs text-subtle" data-effort-empty="">{empty}</p>
-          )}
-          {offline && <p className="border-t border-border pt-2 text-xs text-subtle" data-offline-note="">{offline}</p>}
-          {fast && (
-            <label className="flex cursor-pointer items-center gap-2 border-t border-border pt-3 text-sm">
-              <Zap size={14} className={`shrink-0 ${fast.on ? "fill-current text-warn" : "text-subtle"}`} />
-              <span className="min-w-0 flex-1">
-                <span className="block font-medium">{t("composer.fast.title")}</span>
-                <span className="block text-xs text-subtle">{t("composer.fast.hint")}</span>
-              </span>
-              <Toggle checked={fast.on} onChange={(v) => fast.onToggle(v)} label={t("composer.fast.title")} />
-            </label>
-          )}
-        </div>
-      )}
-    </Popover>
-  );
-}
-
 
 type PaletteItem = PaletteEntry & { skill?: SkillMetadata };
 type PanelKind = "status" | "memories" | "experimental" | "projectMemory";
@@ -498,8 +420,8 @@ const POPOVERS = new Set<string>(["model", "permissions", "quota"]);
 /** The settings row below the input: narrow = the Claude rules chip shows its icon only (lib/sizeFlags). */
 const TOOLBAR_SIZES = { narrow: widthBelow(34) } as const;
 
-/** Command entries with both locales' descriptions as search keywords (zh and en both match). */
-function commandEntries(t: (k: MessageKey, v?: Record<string, string | number>) => string, features: ReadonlySet<string>, agent: AgentFeatures, busy: boolean): PaletteItem[] {
+/** Command entries with both locales' descriptions as search keywords (zh and en both match; en once loaded). */
+function commandEntries(t: (k: MessageKey, v?: Record<string, string | number>) => string, features: ReadonlySet<string>, agent: AgentFeatures, busy: boolean, en: Readonly<Partial<Record<MessageKey, string>>> | undefined): PaletteItem[] {
   return SLASH_COMMANDS.map((c) => {
     const key = `slash.cmd.${c.id}` as MessageKey;
     const unavailable = slashUnavailable(c, features, agent, busy);
@@ -508,19 +430,21 @@ function commandEntries(t: (k: MessageKey, v?: Record<string, string | number>) 
       kind: "command",
       name: c.id,
       description: t(key),
-      keywords: [zhCN[key], en[key], ...(c.aliases ?? [])],
+      keywords: [zhCN[key], ...(en?.[key] ? [en[key]] : []), ...(c.aliases ?? [])],
       disabledReason: unavailable ? t(`slash.unavailable.${unavailable}` as MessageKey) : undefined,
     };
   });
 }
 
 let imageSeq = 0;
+const NO_NEXT_STEP: AdmissionNextStep[] = [];
 
 export function Composer({
   name,
   busy,
   queue,
   timeline,
+  timelineRev,
   sessionId,
   profile,
 }: {
@@ -528,13 +452,17 @@ export function Composer({
   busy: boolean;
   queue: QueueItem[];
   timeline: TimelineState | null;
+  /** Moves when what the composer reads from `timeline` (updated in place) changed (lib/timelineShape); lets a memo'd composer skip streamed text. */
+  timelineRev?: number;
   sessionId: string;
   profile: string | null;
 }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const modelName = useModelName();
   // The conversation's host (lib/conversationScope): per-agent state and actions are keyed by host + id.
   const hostId = useConvHost();
+  const overloadRetry = useModelOverloadRetry(sessionId, hostId);
   const submit = useApp((s) => s.submit);
   const queueRemove = useApp((s) => s.queueRemove);
   const queueTakeForEdit = useApp((s) => s.queueTakeForEdit);
@@ -549,6 +477,8 @@ export function Composer({
   const compact = useApp((s) => s.compact);
   // The conversation's host and its capabilities (lib/conversationScope).
   const features = useConvFeatures();
+  const approvalRulesFeature = features.has(APPROVAL_AUTO_RULES_FEATURE);
+  const runtimeGeneration = useApp((s) => viewOf(s, hostId, sessionId)?.runtimeGeneration ?? 0);
   const uiSignal = useApp((s) => s.uiSignal);
   const notice = useApp((s) => s.notice);
   const shortWindow = useShortWindow();
@@ -564,6 +494,8 @@ export function Composer({
   const runningDelegation = useDelegationTurn(timeline);
   const delegation = busy ? runningDelegation : null;
   const guardKeys = { delegation: !!delegation, allowSteerKeys: delegationSteerKeys };
+  const joinIntent = delegationJoinIntent(delegation, timeline?.activeTurnId, runtimeGeneration, features);
+  const canJoin = features.has(OWNER_JOIN_FEATURE) && !!joinIntent;
   const pendingSteers = useApp((s) => agentState(s.pendingSteers, hostId, sessionId));
   const queuePause = useApp((s) => viewOf(s, hostId, sessionId)?.queuePause ?? null);
   const asksPaused = useApp((s) => featuresOf(s, hostId).has(ASKS_PAUSE_FEATURE) && !!viewOf(s, hostId, sessionId)?.asksPaused);
@@ -578,7 +510,8 @@ export function Composer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const shownQueue = useMemo(() => visibleQueue(queue, queueHidden, outbox, timeline), [queue, queueHidden, outbox, timeline, entryCount]);
   // A send that is starting a turn counts as busy: the next Enter queues behind it.
-  const sendBusy = busy || hasUnlandedTurn(outbox);
+  const insertPending = useQueueInsertFeedback((s) => insertFeedbackOf(hostId, sessionId)(s).some((f) => f.state === "requesting"));
+  const sendBusy = busy || hasUnlandedTurn(outbox) || insertPending;
   const paused = useMemo(() => pausedSection(pendingSteers ?? [], shownQueue, queuePause, queueHandoff), [pendingSteers, shownQueue, queuePause, queueHandoff]);
   // admission-order: one list in the order cutex admits owner messages, delegations and deliveries.
   const admission = useApp((s) => (featuresOf(s, hostId).has(ADMISSION_ORDER_FEATURE) ? (viewOf(s, hostId, sessionId)?.admission ?? null) : null));
@@ -586,19 +519,26 @@ export function Composer({
   const askById = useHostRecords(hostId);
   const mayPass = useOwnerMayPassAsks(!!admission);
   const groups = useMemo(() => (admission ? turnGroups(admission, shownQueue, askById) : null), [admission, shownQueue, askById]);
+  // Ride-alongs already in the timeline leave at once, before cutex's receipt (a Claude turn's comes at its end; lib/readInRideAlongs).
+  const nextStep = useUnreadNextStep(groups?.nextStep ?? NO_NEXT_STEP, timeline, timelineRev ?? entryCount);
   const admittedAsks = useMemo(() => admittedAskIds(admission), [admission]);
   // Pending delegations the admission list does not have (e.g. awaiting the owner's review) keep their section.
   const otherDelegations = useMemo(() => (admission ? pendingDelegations.filter((d) => !admittedAsks.has(d.askId)) : pendingDelegations), [admission, pendingDelegations, admittedAsks]);
   const orderedAsks = !!groups?.turns.some((r) => r.kind === "ask");
   const activeTurnStart = busy ? (timeline?.turns.find((x) => x.id === timeline.activeTurnId)?.startedAt ?? null) : null;
   // 待读留言 (agent-messages-v2): a message whose item is in the timeline is read in already.
-  const pendingMessages = usePendingMessages(sessionId, (id) => !!timeline?.entries.has(id), timeline?.entries.size ?? 0);
+  // A Claude agent's notes read in by a later turn leave too (lib/agentMessages pendingMessagesFor).
+  const claudeRecipient = useApp((s) => {
+    const row = [...(sidebarOf(s, hostId)?.active ?? []), ...(sidebarOf(s, hostId)?.retired ?? [])].find((r) => r.cutexSessionId === sessionId);
+    return !!row && runtimeOf(row) === "claude";
+  });
+  const pendingMessages = usePendingMessages(sessionId, (id) => !!timeline?.entries.has(id), timeline?.entries.size ?? 0, timeline?.turns, claudeRecipient);
   // The 待读留言 section's rows: with admission-order those the turn frame (nextStep) does not list (notes).
   const sectionMessages = useMemo(() => pendingSectionMessages(features, pendingMessages, admission?.nextStep), [features, pendingMessages, admission]);
   // A stop's hold (origin ownerStop) only matters while something waits behind it: with nothing held the
   // 「委托已随停止暂停」 strip stays out of the way (the owner's own 暂停委托 always shows).
   const pauseOrigin = useApp((s) => viewOf(s, hostId, sessionId)?.asksPaused?.origin ?? null);
-  const stopHoldsSomething = !!admission?.items.some((i) => i.kind !== "owner") || (admission?.nextStep?.length ?? 0) > 0 || otherDelegations.length > 0 || pendingMessages.length > 0;
+  const stopHoldsSomething = !!admission?.items.some((i) => i.kind !== "owner") || nextStep.length > 0 || otherDelegations.length > 0 || pendingMessages.length > 0;
   const showAsksPaused = asksPaused && (pauseOrigin !== "ownerStop" || stopHoldsSomething);
   // Something will start the next turn as soon as this one ends (a queued message cutex flushes, an
   // admitted delegation, a send in flight) — not after the owner's stop. The stop button and the busy
@@ -620,30 +560,47 @@ export function Composer({
   const [paletteDismissed, setPaletteDismissed] = useState<string | null>(null);
   const [mentionDismissed, setMentionDismissed] = useState<number | null>(null);
   const [mentionResults, setMentionResults] = useState<MentionResults | null>(null);
+  const mentionListId = useId();
   const [panel, setPanel] = useState<PanelKind | null>(null);
   const [popoverSignal, setPopoverSignal] = useState<{ kind: PopoverKind; nonce: number } | null>(null);
   const [shownNotice, setShownNotice] = useState<typeof notice>(null);
   const [dragOver, setDragOver] = useState(false);
-  const textarea = useRef<HTMLTextAreaElement>(null);
+  const textarea = useRef<HTMLTextAreaElement | AgentMentionInputHandle>(null);
+  const [richInput, setRichInput] = useState(false);
+  const hasAgentMentions = useMemo(() => agentMentionTokens(text).length > 0, [text]);
+  const useRichInput = richInput || hasAgentMentions;
+  useEffect(() => { if (hasAgentMentions) setRichInput(true); }, [hasAgentMentions]);
+  useEffect(() => setRichInput(false), [sessionId, hostId]);
   // The input grows with its wrapped text (not only its line breaks) up to max-h-60, then scrolls:
   // counting "\n" alone left long wrapped paragraphs scrolling inside a short box (owner 2026-10-18).
+  // In a short pane the cap is lower (`--composer-input-max`, set by Conversation; lib/shortPane composerInputMax).
   useLayoutEffect(() => {
-    const el = textarea.current;
-    if (!el) return;
+    const control = textarea.current;
+    const el = control && "element" in control ? control.element : control;
+    if (!control || !el) return;
+    // Typing at the end of a draft taller than the cap keeps the caret line in view, also when the cap itself changes
+    // (the pane resized, 「接下来」 folded): no input event then for the browser to scroll to the caret.
+    const followCaret = () => {
+      if (el.ownerDocument.activeElement === el && control.selectionEnd >= control.value.length) el.scrollTop = el.scrollHeight;
+    };
     const fit = () => {
       el.style.height = "auto";
       el.style.height = `${el.scrollHeight}px`;
+      followCaret();
     };
     fit();
     let width = el.clientWidth;
-    const ro = new ResizeObserver(() => {
-      if (el.clientWidth === width) return;
-      width = el.clientWidth;
-      fit();
+    let height = el.clientHeight;
+    const ro = sharedResizeObserver(() => {
+      if (el.clientWidth !== width) {
+        width = el.clientWidth;
+        fit();
+      } else if (el.clientHeight !== height) followCaret();
+      height = el.clientHeight;
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [text]);
+  }, [text, useRichInput]);
 
   const online = !!timeline?.threadId;
   // The runtime itself (a thread id also comes from the offline history reader): models are asked
@@ -683,15 +640,20 @@ export function Composer({
   const mode = permissionModeOf(settings);
   const effective = effectivePermissions(settings);
   const collabMode = settings?.collaborationMode?.mode ?? "default";
-  const currentModel = settings?.model ?? null;
+  const session = useApp((s) => [...(sidebarOf(s, hostId)?.active ?? []), ...(sidebarOf(s, hostId)?.retired ?? [])].find((r) => r.cutexSessionId === sessionId));
+  // The chat's live model (threadSettings). DSH: else the session's model default (cutex model_defaults, where a
+  // change on the chat lands too) — never the creation value of its launch binding.
+  const { model: currentModel, effort: currentEffort } = chatModelAndEffort(settings, session ? runtimeOf(session) : null, session?.runtimeDefaults);
   const modelInfo = models?.find((m) => m.model === currentModel || m.id === currentModel);
+  // Claude (docs/design/024-model-list.md): one row per real model, aliases folded in.
+  const claudeList = !!session && runtimeOf(session) === "claude";
+  const claudeName = claudeList && models ? claudeShortName(models.map((m) => ({ id: m.model, displayName: m.displayName })), currentModel, t) : null;
   // The profile's entry name, else the catalog name (lib/modelDisplay); "" = no model yet.
-  const modelShown = modelName(currentModel, modelInfo?.displayName, profile);
+  const modelShown = modelName(currentModel, claudeName ?? modelInfo?.displayName, profile);
   const { efforts, empty: effortsEmpty } = composerEfforts(models, currentModel);
   const fastFeature = useApp((s) => featuresOf(s, hostId).has(SESSION_FAST_MODE_FEATURE));
-  const modelItems: Pick<ModelOption, "model" | "displayName" | "description">[] =
-    models ?? (currentModel ? [{ model: currentModel, displayName: currentModel, description: "" }] : []);
-  const session = useApp((s) => [...(sidebarOf(s, hostId)?.active ?? []), ...(sidebarOf(s, hostId)?.retired ?? [])].find((r) => r.cutexSessionId === sessionId));
+  const modelItems: (Pick<ModelOption, "model" | "displayName" | "description"> & { primary?: boolean })[] =
+    models ? (claudeList ? claudePickerItems(models, currentModel, t) : models) : currentModel ? [{ model: currentModel, displayName: currentModel, description: "" }] : [];
   // Claude agents (claude-runtime-features): hide what the adapter reports as unsupported.
   const agent = useMemo(() => agentFeaturesOf(session), [session]);
   const claudeAgent = !!session && runtimeOf(session) === "claude";
@@ -700,21 +662,32 @@ export function Composer({
   const fastTier = (claudeAgent ? claudeFastMode(agent) : fastFeature) ? (modelInfo?.fastTier ?? null) : null;
   // The model that actually answered (Claude adapters with modelObservation), when it differs from the selection.
   const observedModel = useObservedModel(sessionId, agent, online, timeline, currentModel);
+  // A Claude alias shown by its model already says which model answered (Sonnet 5.5 = claude-sonnet-5-5).
+  const observedIsShown = !!(claudeName && observedModel && models && claudeShortName(models.map((m) => ({ id: m.model, displayName: m.displayName })), observedModel, t) === claudeName);
   // 额度用完 · HH:MM 自动继续 · 取消 (claude-quota-auto-continue, lib/quotaContinue).
   const quotaApplies = useApp((s) => featuresOf(s, hostId).has(QUOTA_CONTINUE_FEATURE)) && !!session && runtimeOf(session) === "claude";
   const quotaView = useQuotaContinue(hostId, sessionId, quotaApplies);
+  // 额度用完 · 有 N 张重置券 · 用一张 (profile-reset-credits): read only once a window is used up.
+  const composerQuotas = useHostQuotas(hostId);
+  const loadComposerQuota = useHostLoadQuota(hostId);
+  const resetsFeature = useApp((s) => featuresOf(s, hostId).has(RESET_CREDITS_FEATURE));
+  const showResetOffer = useResetOffer(hostId, profile, resetsFeature && !!profile && (quotaExhausted(profile ? composerQuotas[profile] : undefined) || !!quotaView?.pending));
   // 升级运行时 (claude-runtime-repin, lib/claudeRepin): keep the open Claude agent's runtime view cached for the agent menu.
   // Not needed when the agent list carries the pin (cutex session-claude-runtime).
   const repinOn = useApp((s) => repinApplies(featuresOf(s, hostId), session) && !pinInSession(session, sidebarOf(s, hostId)?.claudeRuntime));
   useClaudeRuntimePreload(() => hostApi(hostId), hostId, sessionId, repinOn, session?.runtime.status);
   // Windows sandbox readiness (windows-sandbox-readiness): asked when the permission menu opens.
   const hostPlatform = useHostPlatform(hostId);
-  const winSandboxApplies = useApp((s) => featuresOf(s, hostId).has(WINDOWS_SANDBOX_FEATURE)) && hostPlatform === "windows" && !!session && runtimeOf(session) !== "claude" && online;
+  const winSandboxApplies = useApp((s) => featuresOf(s, hostId).has(WINDOWS_SANDBOX_FEATURE)) && hostPlatform === "windows" && !!session && runtimeOf(session) === "codex" && online;
   const winSandbox = useSessionWindowsSandbox(sessionId, winSandboxApplies, timeline?.windowsSandboxSetup);
   // Network / extra writable directories of this running agent (session-sandbox-extras).
   const liveExtrasFeature = useApp((s) => featuresOf(s, hostId).has(SESSION_SANDBOX_EXTRAS_FEATURE));
-  const liveExtras = liveExtrasApply({ feature: liveExtrasFeature, claude: !!session && runtimeOf(session) === "claude", online, settings });
+  const liveExtras = !isAcpAgent(agent) && liveExtrasApply({ feature: liveExtrasFeature, claude: !!session && runtimeOf(session) === "claude", online, settings });
   const noSteer = lacks(agent, "turnSteer");
+  const cannotInsert = noSteer || (!!delegation && !canJoin);
+  // image-input-steering (lib/imageSteer): what an explicit 插话 with images does on this agent.
+  const imageSteerFeature = features.has(IMAGE_INPUT_STEERING_FEATURE);
+  const imageSteering = imageSteerMode(features, session);
   // Claude agents whose adapter offers Claude Code's own modes (lib/claudePermissionModes).
   const claudeModes = useMemo(() => claudeModesOf(agent), [agent]);
   const claudeMode = claudeModes ? claudeModeOf(settings) : null;
@@ -736,7 +709,32 @@ export function Composer({
   const imagesAllowed = useP2Access(hostId).attachments;
   const hostRow = useApp((s) => sidebarOf(s, hostId)?.hostRows[sessionId]);
   const projectSummary = useApp((s) => (hostRow?.projectId ? sidebarOf(s, hostId)?.projects?.projects.find((p) => p.project_id === hostRow.projectId) : undefined));
+  // Older snapshots omit the canonical Operator projection; then the identity
+  // stays unknown rather than being inferred from a broader capability.
+  const projectOperatorIds = useApp((s) => hostRow?.projectId ? sidebarOf(s, hostId)?.projectOperators?.[hostRow.projectId] : undefined);
   const project = hostRow?.projectId ? { id: hostRow.projectId, name: projectSummary?.presentation.display_name ?? hostRow.projectId } : null;
+  const isDirector = projectSummary ? projectSummary.director_cutex_session_id === sessionId : hostRow?.projectId ? null : false;
+  const identityRole = approvalIdentityRole(isDirector, projectOperatorIds, sessionId);
+  const ruleCapabilityFacts = useMemo(() => ({
+    formalAgent: session ? !isQuickChat(session, hostRow) : null,
+    hostFeatures: features,
+    isDirector,
+    declaredTools: declaredCutexTools(session?.native.schema),
+    agentCreate: declaredAgentCreate(session?.native.schema),
+  }), [session, hostRow, features, isDirector]);
+  const cutexRulesProps = useMemo(() => approvalRulesFeature ? {
+    hostId,
+    api: hostApi(hostId),
+    sessionId,
+    displayName: name,
+    profile,
+    projectId: project?.id ?? null,
+    runtimeGeneration,
+    turnId: timeline?.activeTurnId ?? null,
+    capabilityFacts: ruleCapabilityFacts,
+    identityRole,
+    onOpenProject: project ? () => services.ui.openPage("projects.page", { project: project.id, ...hostPageParam(hostId) }) : undefined,
+  } : undefined, [approvalRulesFeature, hostId, sessionId, name, profile, project?.id, runtimeGeneration, timeline?.activeTurnId, ruleCapabilityFacts, identityRole]);
 
   // ---------- palette / mention state ----------
   const query = paletteDismissed === text ? null : paletteQuery(text);
@@ -761,26 +759,41 @@ export function Composer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paletteOpen, allSkills, session?.cwd]);
   const skills = useMemo(() => allSkills?.filter((s) => s.enabled) ?? null, [allSkills]);
+  // English keywords: the en catalog loads when the palette first opens (i18n); the list ranks again when it arrives.
+  const enCatalog = useEnglishCatalog(paletteOpen);
   const paletteItems = useMemo<PaletteItem[]>(() => {
     if (query === null) return [];
     const skillItems: PaletteItem[] = noSkills ? [] : (skills ?? []).map((s) => ({ key: `skill:${s.path}`, kind: "skill", name: s.name, description: s.interface?.shortDescription ?? s.shortDescription ?? s.description, skill: s }));
-    return rankEntries(query, [...commandEntries(t, features, agent, busy), ...skillItems]);
-  }, [query, skills, t, features, agent, busy, noSkills]);
+    return rankEntries(query, [...commandEntries(t, features, agent, busy, enCatalog), ...skillItems]);
+  }, [query, skills, t, features, agent, busy, noSkills, enCatalog]);
 
-  const mention = features.has("workspace-fs") ? mentionAt(text, caret) : null;
+  const mention = mentionAt(text, caret);
   const mentionOpen = !!mention && !paletteOpen && mentionDismissed !== mention.start;
+  const mentionSidebar = useApp(s => s.sidebar);
+  const mentionByHost = useApp(s => s.byHost);
+  const mentionHosts = useApp(s => s.hosts);
+  const mentionDaemon = useApp(s => s.daemon);
+  const mentionAgents = useMemo(() => {
+    if (!mentionOpen) return [];
+    const focus = mentionHosts?.active ?? "local";
+    const ids = new Set([focus, ...(mentionHosts?.hosts?.map(host => host.id) ?? Object.keys(mentionByHost ?? {}))]);
+    return agentMentionCandidates([...ids].map(id => ({ id, label: mentionHosts?.hosts.find(host => host.id === id)?.label ?? id,
+      connected: (id === focus ? mentionDaemon : mentionByHost?.[id]?.daemon)?.kind === "connected",
+      sidebar: id === focus ? mentionSidebar : mentionByHost?.[id]?.sidebar ?? null,
+    })), hostId, sessionId, mention?.query ?? "");
+  }, [mentionOpen, mention?.query, mentionSidebar, mentionByHost, mentionHosts, mentionDaemon, hostId, sessionId]);
   useEffect(() => {
     setMentionResults(null);
-    if (!mentionOpen || !mention?.query) return;
+    if (!mentionOpen || !mention?.query || !features.has("workspace-fs")) return;
     return startMentionSearch(mention.query,
       (q) => hostApi(hostId).fsSearch({ kind: "session", id: sessionId }, q, 20).then((r) => r.results.map((x) => x.path)),
       setMentionResults);
-  }, [mentionOpen, mention?.query, sessionId]);
+  }, [mentionOpen, mention?.query, sessionId, hostId, features]);
   const mentionPaths = mentionPathsFor(mentionResults, mentionOpen ? mention?.query ?? null : null);
-  const popupCount = paletteOpen ? paletteItems.length : mentionOpen ? mentionPaths.length : 0;
+  const popupCount = paletteOpen ? paletteItems.length : mentionOpen ? mentionAgents.length + mentionPaths.length : 0;
   const selectedCandidate = candidateIndex(selected, popupCount) ?? 0;
   // Reset on a changed list, not on an unrelated sidebar refresh returning equivalent entries.
-  const candidateListKey = JSON.stringify(paletteOpen ? paletteItems.map((item) => item.key) : mentionPaths);
+  const candidateListKey = JSON.stringify(paletteOpen ? paletteItems.map((item) => item.key) : [...mentionAgents.map(agent => agent.id), ...mentionPaths]);
   useEffect(() => setSelected(0), [query, mention?.query, candidateListKey]);
 
   // ---------- slash dispatch ----------
@@ -798,7 +811,7 @@ export function Composer({
     },
     insert: (value) => {
       setText(value);
-      requestAnimationFrame(() => textarea.current?.focus());
+      win.requestAnimationFrame(() => textarea.current?.focus());
     },
     notify: (key, vars) => notifyHere(t(key, vars)),
     submitText: async (value) => void (await submit(value, busy ? "queue" : "auto", [], { sessionId, hostId })),
@@ -866,7 +879,7 @@ export function Composer({
   };
 
   const focusEnd = () =>
-    requestAnimationFrame(() => {
+    win.requestAnimationFrame(() => {
       const el = textarea.current;
       if (!el) return;
       el.focus();
@@ -897,12 +910,19 @@ export function Composer({
   };
 
   const pickMention = (index: number) => {
-    const path = mentionPaths[index];
-    if (!path || !mention) return;
-    const next = insertMention(text, mention, path);
+    if (!mention) return;
+    const agent = mentionAgents[index];
+    const path = mentionPaths[index - mentionAgents.length];
+    if (!agent && !path) return;
+    const next = agent ? (() => {
+      const inserted = agentMentionInsert(agent, hostId);
+      const after = text.slice(mention.end);
+      const separator = after.startsWith(" ") ? "" : " ";
+      return { text: text.slice(0, mention.start) + inserted + separator + after, caret: mention.start + inserted.length + separator.length };
+    })() : insertMention(text, mention, path!);
     setText(next.text);
     setCaret(next.caret);
-    requestAnimationFrame(() => {
+    win.requestAnimationFrame(() => {
       textarea.current?.focus();
       textarea.current?.setSelectionRange(next.caret, next.caret);
     });
@@ -937,13 +957,13 @@ export function Composer({
       // Picked on the agent's host's connection (a remote host uploads only the files it handed out).
       for (const p of await hostApi(hostId).pickImages(maxImageBytes(agent))) {
         if (p.error) notifyHere(t(p.error === "tooLarge" ? "composer.image.tooLarge" : "composer.image.unreadable", { name: p.name }), "error");
-        else target.setImages((prev) => [...prev, { id: `img-${++imageSeq}`, name: p.name, preview: p.preview, source: { kind: "path", path: p.path } }]);
+        else target.setImages((prev) => [...prev, { id: `img-${++imageSeq}`, name: p.name, preview: p.preview, pickedLocally: true, source: { kind: "path", path: p.path } }]);
       }
     } catch (e) {
       notifyHere(e instanceof Error ? e.message : String(e), "error");
     }
   };
-  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+  const onPaste = (e: ClipboardEvent<HTMLElement>) => {
     const files = [...e.clipboardData.files];
     if (files.some((f) => f.type.startsWith("image/"))) {
       e.preventDefault();
@@ -952,6 +972,13 @@ export function Composer({
   };
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
     setDragOver(false);
+    // Rows of the 文件 explorer: their paths as mentions (lib/workspaceDrag).
+    if (e.dataTransfer.types.includes(WORKSPACE_PATHS_MIME)) {
+      e.preventDefault();
+      const paths = parseDraggedPaths(e.dataTransfer.getData(WORKSPACE_PATHS_MIME));
+      if (paths.length) useApp.getState().insertIntoComposer(sessionId, mentionText(paths), "append", undefined, hostId);
+      return;
+    }
     const files = [...e.dataTransfer.files];
     if (files.length === 0) return;
     e.preventDefault();
@@ -967,7 +994,7 @@ export function Composer({
     try {
       await useApp.getState().interruptAndSendSteers(sessionId, hostId);
     } catch (e) {
-      notifyHere(e instanceof Error ? e.message : String(e), "error");
+      notifyHere(queueActionNotice(e, t), "error");
     }
   };
 
@@ -993,6 +1020,8 @@ export function Composer({
   const sendQueuedNow = async (item: QueueItem) => {
     // This agent, as of the click: the confirm below may stay open while the owner switches agents.
     const agentId = sessionId;
+    const joinDelegation = delegation ? joinIntent : undefined;
+    if (delegation && !canJoin) throw new Error(t("queue.steer.joinChanged"));
     if (queueSendNowMode(guardKeys) === "confirm") {
       const join = await confirmDialog(t("delegationTurn.joinQueuedConfirm", { text: queueItemText(item).slice(0, 80) }), false, {
         ok: t("delegationTurn.choice.join"),
@@ -1000,18 +1029,34 @@ export function Composer({
       });
       if (!join) return;
     }
-    await queueSendNow(item, agentId, hostId);
+    await queueSendNow(item, agentId, hostId, joinDelegation);
+  };
+
+  // 「全部合并插入」: the same delegation-turn guard as 插入, then one merged insert.
+  const mergeQueuedNow = async (list: QueueItem[]) => {
+    const agentId = sessionId;
+    const joinDelegation = delegation ? joinIntent : undefined;
+    if (delegation && !canJoin) throw new Error(t("queue.steer.joinChanged"));
+    if (queueSendNowMode(guardKeys) === "confirm") {
+      const join = await confirmDialog(t("delegationTurn.joinQueuedConfirm", { text: list.map(queueItemText).join(" / ").slice(0, 80) }), false, {
+        ok: t("delegationTurn.choice.join"),
+        cancel: t("delegationTurn.keepQueued"),
+      });
+      if (!join) return;
+    }
+    await useApp.getState().queueMergeInsert(list, agentId, hostId, joinDelegation);
   };
 
   const pausedAction = async (action: () => Promise<void>) => {
     try {
       await action();
     } catch (e) {
-      notifyHere(e instanceof Error ? e.message : String(e), "error");
+      notifyHere(queueActionNotice(e, t), "error");
     }
   };
 
-  const send = async (how: "send" | "steer" | "queue" | "interruptSend", enterDecision?: (decision: EnterDecision) => void) => {
+  /** `explicit`: an explicit 插话 (Ctrl+Enter), not the 插话优先 preset's plain Enter (lib/imageSteer draftSteerPlan). */
+  const send = async (how: "send" | "steer" | "join" | "queue" | "interruptSend", enterDecision?: (decision: EnterDecision) => void, explicit = false) => {
     const trimmed = text.trim();
     if (!trimmed && images.length === 0) { enterDecision?.("no-content"); return; }
     if (sending) { enterDecision?.("interrupt-busy"); return; }
@@ -1029,7 +1074,18 @@ export function Composer({
     followAfterSend(sessionId);
     const extra: ExtraInput[] = [...imageInputItems(images), ...(noSkills ? [] : boundSkills(text, pickedSkills)).map((s) => ({ type: "skill" as const, name: s.name, path: s.path }))];
     // No same-turn steering (Claude): a steer waits in the queue instead (cutex would queue it too).
-    const strategy = strategyFor(steerAction(how, agent), sendBusy);
+    const wantsJoin = how === "join" || (how === "steer" && !!delegation);
+    const joinDelegation = wantsJoin && canJoin && !noSteer ? joinIntent : undefined;
+    const strategy = wantsJoin
+      ? (joinDelegation && !noSteer ? "auto" : "queue")
+      : strategyFor(steerAction(how, agent), sendBusy);
+    if (wantsJoin && !joinDelegation) notifyHere(t(noSteer ? "queue.steer.runtimeNoSteer" : "queue.steer.joinChanged"), "error");
+    // Images while a turn runs (image-input-steering): cutex queues an ordinary send by default; an explicit
+    // 插话 steers the queued item at once, or — the runtime cannot insert images — stays queued and says so.
+    const imagePlan = how === "steer" && explicit && !wantsJoin && strategy === "auto"
+      ? draftSteerPlan({ feature: imageSteerFeature, busy: sendBusy, images: hasImageInput(extra), mode: imageSteering })
+      : "plain";
+    if (imagePlan === "refuse") notifyHere(t("queue.steer.imageUnsupported"));
     // Optimistic (lib/outbox): the draft leaves the composer at once and shows up where it will land
     // (queue tray / steers / timeline) as 发送中…; a failure stays there with retry / edit / discard.
     clearDraft();
@@ -1048,17 +1104,17 @@ export function Composer({
       return;
     }
     enterDecision?.("dispatched");
-    void submit(draft, strategy, extra, { sessionId, hostId }).catch(() => {});
+    void submit(draft, imagePlan === "refuse" ? "queue" : strategy, extra, { sessionId, hostId, joinDelegation, ...(imagePlan === "queueThenSteer" ? { steerImages: true } : {}) }).catch(() => {});
   };
 
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     const eventLagMs = e.key === "Enter" ? performance.now() - e.timeStamp : 0;
     const report = (decision: EnterDecision) => {
-      if (e.key === "Enter") traceEnter({ decision, composing: e.nativeEvent.isComposing,
+      if (e.key === "Enter") traceEnter({ decision, composing: isImeComposing(e),
         ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey,
         hasContent: !!text.trim() || images.length > 0, eventLagMs });
     };
-    const candidate = composerCandidateKey({ key: e.key, shift: e.shiftKey, isComposing: e.nativeEvent.isComposing }, popupCount, selected);
+    const candidate = composerCandidateKey({ key: e.key, shift: e.shiftKey, isComposing: isImeComposing(e) }, popupCount, selected);
     if (candidate === "composing") { report("ime-confirm"); return; }
     if (popupCount > 0 || paletteOpen || mentionOpen) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -1082,7 +1138,8 @@ export function Composer({
     }
     // A right-side layer in front (maximised / full screen / narrow drawer) takes this Esc first (App).
     if (e.key === "Escape" && (panel || anyOverlayOpen() || sideLayersActive())) return;
-    const el = e.currentTarget;
+    const el = textarea.current;
+    if (!el) return;
     const keyAction = composerKeyAction(
       sendKeys,
       { key: e.key, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey, alt: e.altKey },
@@ -1093,7 +1150,7 @@ export function Composer({
     e.preventDefault();
     if (action === "interrupt") { report("dispatched"); void interruptWithFeedback(t, sessionId, hostId); }
     else if (action === "interruptSendSteers") { report("dispatched"); void interruptAndSendSteers(); }
-    else void send(action, report);
+    else void send(action, report, action === "steer" && (e.ctrlKey || e.metaKey));
   };
 
   const paletteRows: PaletteRow[] = paletteItems.map((item) => ({
@@ -1103,17 +1160,22 @@ export function Composer({
     disabled: !!item.disabledReason,
     tag: item.kind === "skill" ? t("slash.skillTag") : undefined,
   }));
-  const mentionRows: PaletteRow[] = mentionPaths.map((p) => {
+  const mentionRows: PaletteRow[] = [...mentionAgents.map(agent => ({
+    key: `agent:${agent.id}`, label: agent.label, group: t("mention.agents"),
+    description: `${agent.sameProject ? t("mention.sameProject") + " · " : ""}${t(`mention.${agent.presence}`)}`,
+    ariaLabel: t("mention.agentMention", { name: agent.label }) + ` · ${t(`mention.${agent.presence}`)}`,
+    icon: <Avatar name={agent.name} seed={agent.id} avatar={agent.session.avatar} size={20} status={{presence:agent.presence}} />,
+  })), ...mentionPaths.map((p) => {
     const slash = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
-    return { key: p, label: slash >= 0 ? p.slice(slash + 1) : p, description: slash >= 0 ? p.slice(0, slash) : undefined };
-  });
+    return { key: `file:${p}`, group: t("mention.title"), label: slash >= 0 ? p.slice(slash + 1) : p, description: slash >= 0 ? p.slice(0, slash) : undefined };
+  })];
 
   const statusRows = (): StatusRow[] => {
     const usage = timeline?.contextUsage;
     const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
     return [
       { label: t("slash.status.model"), value: modelShown ? (currentModel && modelShown !== currentModel ? `${modelShown} (${currentModel})` : modelShown) : "—" },
-      { label: t("slash.status.effort"), value: settings?.effort ? t(`composer.effort.${settings.effort}` as MessageKey) : "—" },
+      { label: t("slash.status.effort"), value: currentEffort ? t(`composer.effort.${currentEffort}` as MessageKey) : "—" },
       { label: t("slash.status.permissions"), value: mode ? t(`composer.mode.${mode}` as MessageKey) : "—", tone: mode === "full" ? "warn" : undefined },
       { label: t("slash.status.collab"), value: t(collabMode === "plan" ? "composer.collab.plan" : "composer.collab.default"), tone: collabMode === "plan" ? "accent" : undefined },
       { label: t("slash.status.profile"), value: profile ?? t("composer.quota.noProfile") },
@@ -1137,11 +1199,13 @@ export function Composer({
 
   const sig = (kind: PopoverKind) => (popoverSignal?.kind === kind ? popoverSignal.nonce : 0);
   const hasContent = !!text.trim() || images.length > 0;
+  // 暂停智能体 (agent-pause): a send queues; 继续并发送 resumes first.
+  const agentPause = useAgentPause(hostId, sessionId);
   return (
-    <div className="side-col side-col-composer w-full px-4 pb-3">
+    <div className="side-col side-col-composer flex min-h-0 w-full flex-col px-4 pb-3">
       {importingSkills && <ClaudeSkillsImportDialog hostId={hostId} onClose={() => setImportingSkills(false)} onImported={loadSkills} />}
       {/* 在主界面调整: the input card is the 输入区 region (its panel opens above it, components/CustomizeHost). */}
-      <div className="relative" data-customize-region="composer">
+      <div className="group/inputcard relative flex min-h-0 flex-col rounded-inner" data-customize-region="composer">
         {paletteOpen && (
           <SlashPalette
             title={t("slash.title")}
@@ -1155,10 +1219,12 @@ export function Composer({
         )}
         {mentionOpen && (
           <SlashPalette
-            title={t("mention.title")}
+            title={t("mention.menuTitle")}
+            listId={mentionListId}
             rows={mentionRows}
             selected={selectedCandidate}
-            empty={mention?.query ? (mentionResults?.query === mention.query ? t("mention.none") : t("common.loading")) : t("mention.hint")}
+            empty={mention?.query && features.has("workspace-fs") && mentionResults?.query !== mention.query ? t("common.loading") : t("mention.empty")}
+            footer={t("mention.footer")}
             onHover={setSelected}
             onPick={pickMention}
           />
@@ -1170,6 +1236,9 @@ export function Composer({
         {/* Queue tray: a card stacked on the input box (the box overlaps its bottom edge), outside the input. */}
         <QueuePanel
           sessionId={sessionId}
+          hostId={hostId}
+          runtime={claudeRecipient ? "claude" : "codex"}
+          imageSteering={imageSteering}
           steers={pendingSteers ?? []}
           sendingSteers={outboxAt(outbox, "steer")}
           sendingQueue={outboxAt(outbox, "queue")}
@@ -1187,13 +1256,10 @@ export function Composer({
           onClearPaused={() => void pausedAction(() => useApp.getState().discardPaused(sessionId, hostId))}
           items={shownQueue}
           canEdit={!text.trim()}
-          onSendNow={noSteer && sendBusy ? undefined : (item) => void sendQueuedNow(item).catch((e: unknown) => notifyHere(e instanceof Error ? e.message : String(e), "error"))}
+          onSendNow={cannotInsert && sendBusy ? undefined : (item) => void sendQueuedNow(item).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error"))}
           sendNowStartsTurn={!sendBusy}
-          onDelete={(item) => void queueRemove(item, sessionId, hostId).catch((e: unknown) => notifyHere(e instanceof Error ? e.message : String(e), "error"))}
-          onEdit={(item) => {
-            const target = captureDraft();
-            void queueTakeForEdit(item, sessionId, hostId).then(target.setText);
-          }}
+          onDelete={(item) => void queueRemove(item, sessionId, hostId).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error"))}
+          onEdit={(item) => void queueTakeForEdit(item, sessionId, hostId)}
           stripEnabled={queueSectionStrip}
           autoCompact={queueAutoCompact(queuePanelFold, shortWindow)}
           stopHold={stopHold}
@@ -1202,16 +1268,17 @@ export function Composer({
             groups && admission
               ? {
                   turns: groups.turns,
-                  nextStep: groups.nextStep,
+                  nextStep,
                   ridealongsHeld: admission.ridealongsHeld,
                   ownerYielded: admission.ownerYielded,
-                  onYield: features.has(OWNER_YIELD_FEATURE) ? () => void useApp.getState().queueYield(sessionId, hostId).catch((e: unknown) => notifyHere(e instanceof Error ? e.message : String(e), "error")) : undefined,
+                  onYield: features.has(OWNER_YIELD_FEATURE) ? () => void useApp.getState().queueYield(sessionId, hostId).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error")) : undefined,
                   running: busy,
                   runningSince: activeTurnStart === null ? null : activeTurnStart * 1000,
                   currentTurn: currentTurnOf(busy, admission.currentTurn, delegation?.askId ?? null),
                   sessionId,
                   // Dropping onto 「下个工具边界」 = 插入 (the same path as the row's button).
-                  onInsert: noSteer && sendBusy ? undefined : (item: QueueItem) => void sendQueuedNow(item).catch((e: unknown) => notifyHere(e instanceof Error ? e.message : String(e), "error")),
+                  onInsert: cannotInsert && sendBusy ? undefined : (item: QueueItem) => void sendQueuedNow(item).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error")),
+                  onMergeInsert: cannotInsert && sendBusy ? undefined : (list: QueueItem[]) => void mergeQueuedNow(list).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error")),
                   mayPass,
                   onMove: (item, before) =>
                     void useApp
@@ -1219,7 +1286,7 @@ export function Composer({
                       .queueMove(item, before, sessionId, hostId)
                       .catch((e: unknown) => {
                         if ((e as { moveRefusal?: string } | null)?.moveRefusal === "passingNotAllowed") reloadOwnerMayPassAsks();
-                        notifyHere(e instanceof Error ? e.message : String(e), "error");
+                        notifyHere(queueActionNotice(e, t), "error");
                       }),
                   actions: orderedAsks ? <PauseAsksButton sessionId={sessionId} /> : null,
                 }
@@ -1228,18 +1295,23 @@ export function Composer({
           sections={[
             // Slot 0: 待读留言 (agent messages v2). With admission-order the turn-starting ones are the turn
             // frame's ride-along items (admission.nextStep); passive notes (never there) stay here.
-            sectionMessages.length > 0 ? { node: <PendingMessagesSection sessionId={sessionId} messages={sectionMessages} busy={busy} runtime={agent.runtime} />, chip: { kind: "messages", n: sectionMessages.length } } : null,
+            sectionMessages.length > 0 ? { node: <PendingMessagesSection sessionId={sessionId} messages={sectionMessages} busy={busy} runtime={agent.runtime} readSince={lastFinishedTurnStart(timeline?.turns)} />, chip: { kind: "messages", n: sectionMessages.length } } : null,
             // Slot 1: 待处理委托 (delegations; with admission-order only those the merged list does not have).
             otherDelegations.length > 0 ? { node: <DelegationQueueSection rows={otherDelegations} sessionId={sessionId} pauseButton={!orderedAsks} railed={!!groups} />, chip: { kind: "delegations", n: otherDelegations.length } } : null,
+            // 智能体已暂停 · 继续 (agent-pause): before everything else that waits, since it holds all of it.
+            agentPause ? { node: <AgentPausedSection hostId={hostId} sessionId={sessionId} railed={!!groups} />, chip: { kind: "agentPaused", warn: true } } : null,
             // Slot 2: 委托已暂停 · 继续 (asks-pause-v2).
             showAsksPaused ? { node: <AsksPausedSection sessionId={sessionId} railed={!!groups} />, chip: { kind: "asksPaused", warn: true } } : null,
             // Slot 3: 额度用完 · HH:MM 自动继续 · 取消 (claude-quota-auto-continue).
             quotaView?.pending ? { node: <QuotaContinueSection hostId={hostId} sessionId={sessionId} view={quotaView} />, chip: { kind: "quota", warn: true } } : null,
+            // Slot 4: 额度用完 · 有 N 张重置券 · 用一张 (profile-reset-credits; confirm dialog first).
+            showResetOffer && profile ? { node: <ResetOfferSection hostId={hostId} profile={profile} afterReset={() => void loadComposerQuota(profile, true)} />, chip: { kind: "quota", warn: true } } : null,
           ]}
         />
         <div
+          // A file / workspace path over it: the accent border; 框线+底色 also tints it (lib/dropTint).
           onDragOver={(e) => {
-            if (e.dataTransfer.types.includes("Files")) {
+            if (e.dataTransfer.types.includes("Files") || e.dataTransfer.types.includes(WORKSPACE_PATHS_MIME)) {
               e.preventDefault();
               setDragOver(true);
             }
@@ -1247,26 +1319,23 @@ export function Composer({
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
           data-gutter-anchor="composer"
-          className={`relative rounded-2xl border bg-surface px-3 py-2 focus-within:border-accent/60 ${dragOver ? "border-accent" : "border-border"}`}
+          className={`relative rounded-inner border bg-surface px-3 py-2 focus-within:border-accent/60 ${INPUT_IN_CARD} ${dragOver ? `border-accent ${DROP_TINT}` : "border-border"}`}
+          style={dragOver ? INPUT_DROP_TINT : undefined}
         >
-          {/* Transient feedback (已中断, 已复制, …) floats inside the input box's top-right corner (not over the
-              queue card above it), so it never moves the layout; long text ends in … within the pill, the
-              whole text as its tooltip. */}
-          {shownNotice && (
-            <div
-              role="status"
-              title={shownNotice.text}
-              className={`absolute top-1.5 right-2.5 z-10 flex max-w-[min(70%,28rem)] min-w-0 items-center rounded-full border border-border bg-surface px-2.5 py-0.5 text-xs shadow-sm ${shownNotice.tone === "error" ? "text-danger" : "text-muted"}`}
-              data-testid="composer-notice"
-            >
-              <span className="min-w-0 truncate">{shownNotice.text}</span>
-            </div>
-          )}
           {images.length > 0 && (
             <div className="flex flex-wrap gap-2 pt-1 pb-1.5">
               {images.map((img) => (
-                <div key={img.id} className="group relative h-14 w-14 overflow-hidden rounded-lg border border-border bg-surface-2" title={img.name}>
-                  {img.preview ? <img src={img.preview} alt={img.name} className="h-full w-full object-cover" /> : <span className="flex h-full items-center justify-center text-[10px] text-subtle">{img.name}</span>}
+                <div key={img.id} className="group relative h-14 w-14 overflow-hidden rounded-lg border border-border bg-surface-2" title={img.name}
+                  onContextMenuCapture={img.source.kind === "path" ? contextMenu(() => fileActions({ hostId: img.pickedLocally ? LOCAL_HOST_ID : hostId, path: img.source.kind === "path" ? img.source.path : "", knownLocal: img.pickedLocally }, t)) : undefined}>
+                  {/* Click → full size, as for a sent image; a restored host path is read through cutex. */}
+                  <ImageThumb
+                    image={draftMessageImage(img)}
+                    hostId={hostId}
+                    title={img.name}
+                    className="block h-full w-full"
+                    imgClassName="h-full w-full object-cover"
+                    fallback={<span className="flex h-full items-center justify-center text-caption/[inherit] text-subtle">{img.name}</span>}
+                  />
                   <button
                     onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))}
                     title={t("composer.image.remove")}
@@ -1279,10 +1348,39 @@ export function Composer({
             </div>
           )}
           {delegation && <DelegationTurnHint turn={delegation} draft={hasContent} />}
-          <div className="flex items-end gap-2">
-            <textarea
+          {overloadRetry?.phase === "pending" && <div role="status" className="pb-1.5 text-caption text-muted group-has-[[data-auto-retry-explained]]/inputcard:hidden" data-testid="composer-auto-retry-owner-order">
+            {formatAutoRetryWait(t, overloadRetry, "queue.autoRetryOwnerOrder")}
+          </div>}
+          {agentPause && hasContent && <AgentPausedSendHint hostId={hostId} sessionId={sessionId} send={() => send("send")} />}
+          {noSteerHintShown({ busy: busyLook, noSteer, hasContent, delegation: !!delegation, paused: !!agentPause }) && <NoSteerSendHint />}
+          <div className="relative flex items-end gap-2">
+            {delegation && !hasContent && <DelegationTurnOverlay turn={delegation} />}
+            {useRichInput ? <AgentMentionInput
               data-composer-input
-              ref={textarea}
+              ref={textarea as React.Ref<AgentMentionInputHandle>}
+              value={text}
+              onChange={(value, nextCaret) => { setText(value); setCaret(nextCaret); }}
+              onSelect={setCaret}
+              onKeyDown={onKeyDown}
+              onPaste={onPaste}
+              aria-label={t("mention.inputLabel")}
+              role={mentionOpen ? "combobox" : "textbox"}
+              aria-autocomplete={mentionOpen ? "list" : undefined}
+              aria-expanded={mentionOpen ? true : undefined}
+              aria-controls={mentionOpen ? mentionListId : undefined}
+              aria-activedescendant={mentionOpen && popupCount > 0 ? `${mentionListId}-${selectedCandidate}` : undefined}
+              placeholder={delegation ? "" : busyLook ? t(busyPlaceholderKey(noSteer)) : t("composer.placeholder", { name })}
+              // Two lines + padding: exactly the textarea's rows={2} box, so the swap on the first @ does not jump (owner 2026-10-25).
+              className="max-h-[min(15rem,var(--composer-input-max,15rem))] min-h-[calc(2lh+0.5rem)] min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words bg-transparent py-1 pr-2.5 outline-none"
+            /> : <textarea
+              data-composer-input
+              aria-label={t("mention.inputLabel")}
+              role={mentionOpen ? "combobox" : undefined}
+              aria-autocomplete={mentionOpen ? "list" : undefined}
+              aria-expanded={mentionOpen ? true : undefined}
+              aria-controls={mentionOpen ? mentionListId : undefined}
+              aria-activedescendant={mentionOpen && popupCount > 0 ? `${mentionListId}-${selectedCandidate}` : undefined}
+              ref={textarea as React.Ref<HTMLTextAreaElement>}
               value={text}
               onChange={(e) => {
                 setText(e.target.value);
@@ -1292,22 +1390,32 @@ export function Composer({
               onKeyDown={onKeyDown}
               onPaste={onPaste}
               rows={2}
-              placeholder={delegation ? "" : busyLook ? t("composer.placeholderBusy") : t("composer.placeholder", { name })}
-              className="max-h-60 flex-1 resize-none bg-transparent py-1 pr-2.5 outline-none placeholder:text-subtle"
-            />
-            {busyLook && (
-              <button
-                onClick={() => void interruptWithFeedback(t, sessionId, hostId)}
-                // Held through a turn boundary (no turn to stop for a moment): inert, looks the same.
-                disabled={!busy}
-                title={t("composer.stopHint")}
-                className="mb-0.5 flex h-7 shrink-0 items-center gap-1 rounded-full border border-danger/50 px-2 text-xs text-danger hover:bg-danger/10"
-              >
-                <span className="text-[9px]">■</span>
-                {t("composer.stop")}
-              </button>
+              placeholder={delegation ? "" : busyLook ? t(busyPlaceholderKey(noSteer)) : t("composer.placeholder", { name })}
+              className="max-h-[min(15rem,var(--composer-input-max,15rem))] flex-1 resize-none bg-transparent py-1 pr-2.5 outline-none placeholder:text-subtle"
+            />}
+            {/* Stop: a fixed round slot, empty while idle, so a turn starting or ending never changes the input's
+                width (the 「■ 停止」 pill used to appear beside it and rewrap the draft; flicker recorder 2026-10-26). */}
+            <span className="mb-0.5 flex size-7 shrink-0" data-stop-slot="">
+              {busyLook && (
+                <button
+                  onClick={() => void interruptWithFeedback(t, sessionId, hostId)}
+                  // Held through a turn boundary (no turn to stop for a moment): inert, looks the same.
+                  disabled={!busy}
+                  title={t("composer.stopHint")}
+                  aria-label={t("composer.stop")}
+                  className="flex size-7 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-40"
+                >
+                  <Square size={11} fill="currentColor" strokeWidth={0} aria-hidden />
+                </button>
+              )}
+            </span>
+            {/* The send menu's slot (its 26 px chevron) stays for the whole delegation turn: the first keystroke and a send
+                never change the input's width (flicker recorder 2026-10-26: ±34 px per draft). */}
+            {delegation && (
+              <span className="flex w-6.5 shrink-0 justify-center" data-delegation-menu-slot="">
+                {hasContent && <DelegationSendMenu choices={delegationSendChoices(!noSteer && canJoin)} disabled={sending} onPick={(c) => void send(sendHowFor(c))} />}
+              </span>
             )}
-            {delegation && hasContent && <DelegationSendMenu choices={delegationSendChoices(!noSteer)} disabled={sending} onPick={(c) => void send(sendHowFor(c))} />}
             {/* Send: a filled button (disabled while empty); Enter sends in both key presets (lib/sendKeys), the tooltip names it.
                 Always there, also while a turn runs: the first keystroke / a send never shifts the input's width. */}
             <button
@@ -1323,7 +1431,7 @@ export function Composer({
         </div>
       </div>
 
-      <div ref={toolbarRef} className="mt-1 flex min-w-0 items-center gap-0.5 px-0.5">
+      <ComposerToolbarRow sizeRef={toolbarRef} left={<>
         {/* Gutter items when the gutters are too narrow for them (§19.2). */}
         <ComposerTriggers hostId={hostId} sessionId={sessionId} side="left" />
         <ComposerTools
@@ -1367,11 +1475,11 @@ export function Composer({
           }}
           onManage={(tab) => useApp.getState().openSettings(tab)}
         />
-        {claudeModes ? (
+        {isAcpAgent(agent) ? null : claudeModes ? (
           <Menu<ClaudeMode>
             title={t("composer.permissionTitle")}
             openSignal={sig("permissions")}
-            trigger={<span className={`trim-cap whitespace-nowrap ${claudeMode === "bypassPermissions" ? "text-warn" : ""}`}>{claudeMode ? t(`composer.claudeMode.${claudeMode}` as MessageKey) : runtimeDown ? "—" : "…"}</span>}
+            trigger={<span data-guide-target="composer-mode" className={`trim-cap whitespace-nowrap ${claudeMode === "bypassPermissions" ? "text-warn" : ""}`}>{claudeMode ? t(`composer.claudeMode.${claudeMode}` as MessageKey) : runtimeDown ? "—" : "…"}</span>}
             items={claudeModes.map((m) => ({ value: m, label: t(`composer.claudeMode.${m}` as MessageKey), description: t(`composer.claudeModeHint.${m}` as MessageKey) }))}
             selected={claudeMode}
             onSelect={(m) => m !== claudeMode && void updateSettings(claudeModePatch(m, settings), sessionId, hostId)}
@@ -1382,7 +1490,7 @@ export function Composer({
           openSignal={sig("permissions")}
           // nowrap: the chip never gives up width to a crowded toolbar by breaking 完全访问 mid-word; the model
           // name (truncate) and the right-hand group give way first.
-          trigger={<span className={`trim-cap whitespace-nowrap ${mode === "full" ? "text-warn" : ""}`}>{mode ? t(`composer.mode.${mode}` as MessageKey) : runtimeDown ? "—" : "…"}</span>}
+          trigger={<span data-guide-target="composer-mode" className={`trim-cap whitespace-nowrap ${mode === "full" ? "text-warn" : ""}`}>{mode ? t(`composer.mode.${mode}` as MessageKey) : runtimeDown ? "—" : "…"}</span>}
           // What the mode name does not say: reviewer, network, extra directories (lib/permissionModes).
           triggerTitle={effective ? [t("composer.permissionTitle"), ...effectivePermissionLines(effective).map((line) => t(line.key, line.params)), ...effective.writableRoots].join("\n") : undefined}
           items={PERMISSION_MODES.map((m) => ({ value: m, label: t(`composer.mode.${m}` as MessageKey), description: t(`composer.modeHint.${m}` as MessageKey) }))}
@@ -1407,17 +1515,19 @@ export function Composer({
           }
         />
         )}
-        {/* Claude agents: tools / always-allow rules / Claude Code sources, beside the modes (ClaudeRulesChip). */}
-        {claudeModes && (
-          <ClaudeRulesChip
+        {/* One rules entry: Claude permissions beside Cutex rules, or Cutex alone for Codex. */}
+        {(claudeAgent || approvalRulesFeature) && (
+          <RulesChip
             hostId={hostId}
             sessionId={sessionId}
-            {...claudeToolSwitches(session?.runtimeDefaults as Record<string, unknown> | null | undefined)}
+            claude={claudeAgent}
+            {...(claudeAgent ? claudeToolSwitches(session?.runtimeDefaults as Record<string, unknown> | null | undefined) : { write: null, exec: null })}
             rulesFeature={claudeRulesFeature}
+            cutex={cutexRulesProps}
             iconOnly={toolbarFlags.narrow}
           />
         )}
-        {collabMode === "plan" && (
+        {!isAcpAgent(agent) && collabMode === "plan" && (
           <button
             onClick={() => void setPlan(false)}
             title={t("composer.tools.planOff")}
@@ -1427,39 +1537,43 @@ export function Composer({
             <X size={11} />
           </button>
         )}
-        {/* One rhythm: chips are 4px-padded with no gap, so every token sits 8px apart. */}
-        <div className="ml-auto flex min-w-0 items-center [&>div>button]:px-1 [&>span:not([aria-hidden])]:px-1">
+      </>} right={<>
           <ProfileQuota profile={profile} rateLimits={timeline?.rateLimits ?? null} rateLimitsAt={timeline?.rateLimitsObservedAt ?? null} sessionId={sessionId} busy={busy} openSignal={sig("quota")} />
           <ChipDivider />
-          <ModelPicker
-            profile={profile}
-            models={modelItems}
-            current={currentModel}
-            label={modelShown || (runtimeDown ? "—" : "…")}
-            trigger={
-              <span className="flex min-w-0 items-center gap-1">
+          <ConversationModelControls runtime={agent.runtime} live={changesSettingsLive(agent)}
+            model={{
+              profile, models: modelItems, current: currentModel,
+              label: modelShown || (runtimeDown ? "—" : "…"),
+              trigger: <span className="flex min-w-0 items-center gap-1">
                 <span className="trim-cap max-w-40 truncate">{modelShown || (runtimeDown ? "—" : "…")}</span>
-                {observedModel && observedModel !== currentModel && <span className="trim-cap max-w-28 truncate text-[10px] text-subtle" data-testid="observed-model">{shortModelId(observedModel)}</span>}
-              </span>
-            }
-            triggerTitle={[runtimeDown ? `${t("composer.modelTitle")} · ${t("composer.model.offline")}` : currentModel && modelShown !== currentModel ? `${t("composer.modelTitle")} · ${currentModel}` : t("composer.modelTitle"), observedModel ? t("composer.model.observed", { model: observedModel }) : null].filter(Boolean).join("\n")}
-            note={runtimeDown ? t("composer.model.offline") : observedModel ? t("composer.model.observed", { model: observedModel }) : undefined}
-            onOpen={() => void loadModels(true, sessionId, hostId)}
-            onSelect={(model) => void updateSettings({ model }, sessionId, hostId)}
-            openSignal={sig("model")}
-          />
-          <EffortPicker
-            effort={settings?.effort ?? null}
-            efforts={efforts}
-            onChange={(effort) => void updateSettings({ effort }, sessionId, hostId)}
-            offline={runtimeDown ? t("composer.model.offline") : undefined}
-            empty={effortsEmpty === "none" ? t("composer.effort.noneOffered") : effortsEmpty === "unlisted" ? t("composer.effort.unlisted") : undefined}
-            onOpen={effortsEmpty === "unlisted" && !runtimeDown ? () => void loadModels(true, sessionId, hostId) : undefined}
-            fast={fastTier && session ? { on: isFastTier(settings?.serviceTier, fastTier), onToggle: (on) => void updateSettings(fastModePatch(on, fastTier), sessionId, hostId) } : undefined}
-          />
-          <ContextMeter usage={timeline?.contextUsage ?? null} onCompact={() => void compact(sessionId, hostId)} />
-        </div>
-        <ComposerTriggers hostId={hostId} sessionId={sessionId} side="right" />
+                {observedModel && observedModel !== currentModel && !observedIsShown && <span className="trim-cap max-w-28 truncate text-caption/[inherit] text-subtle" data-testid="observed-model">{shortModelId(observedModel)}</span>}
+              </span>,
+              triggerTitle: [runtimeDown ? `${t("composer.modelTitle")} · ${t("composer.model.offline")}` : currentModel && modelShown !== currentModel ? `${t("composer.modelTitle")} · ${currentModel}` : t("composer.modelTitle"), observedModel ? t("composer.model.observed", { model: observedModel }) : null].filter(Boolean).join("\n"),
+              note: runtimeDown ? t("composer.model.offline") : observedModel ? t("composer.model.observed", { model: observedModel }) : undefined,
+              onOpen: () => void loadModels(true, sessionId, hostId),
+              onSelect: model => void updateSettings({ model }, sessionId, hostId),
+              openSignal: sig("model"),
+            }}
+            effort={{
+              effort: currentEffort, efforts,
+              onChange: effort => void updateSettings({ effort }, sessionId, hostId),
+              offline: runtimeDown ? t("composer.model.offline") : undefined,
+              empty: effortsEmpty === "none" ? t("composer.effort.noneOffered") : effortsEmpty === "unlisted" ? t("composer.effort.unlisted") : undefined,
+              onOpen: effortsEmpty === "unlisted" && !runtimeDown ? () => void loadModels(true, sessionId, hostId) : undefined,
+              fast: fastTier && session ? { on: isFastTier(settings?.serviceTier, fastTier), onToggle: on => void updateSettings(fastModePatch(on, fastTier), sessionId, hostId) } : undefined,
+            }} />
+          <ContextMeter usage={timeline?.contextUsage ?? null} billingUnavailable={lacks(agent, "billingUsage")} canCompact={!lacks(agent, "compact")} onCompact={() => void compact(sessionId, hostId)} />
+      </>} tail={<ComposerTriggers hostId={hostId} sessionId={sessionId} side="right" />} />
+      {/* A reserved status line outside the input and toolbar. Notices neither cover other
+          conversation controls nor change the input's geometry when they appear or disappear. */}
+      <div className="flex h-5 min-w-0 items-center justify-end" data-testid="composer-notice-slot">
+        {shownNotice && meantHere(shownNotice.agent, here, focused) && (
+          <div role="status" title={shownNotice.text}
+            className={`flex max-w-full min-w-0 items-center rounded border border-border bg-surface px-2 text-xs ${shownNotice.tone === "error" ? "text-danger" : "text-muted"}`}
+            data-testid="composer-notice">
+            <span className="min-w-0 truncate">{shownNotice.text}</span>
+          </div>
+        )}
       </div>
     </div>
   );

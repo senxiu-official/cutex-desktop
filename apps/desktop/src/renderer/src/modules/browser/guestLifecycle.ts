@@ -19,12 +19,13 @@ export function createGuestLifecycle() {
   return {
     /** The next release of this tab's mount keeps main's page (a carrier switch remount). */
     keepNext(hostId: string, tabKey: string): void { kept.add(browserCacheKey(hostId, tabKey)); },
-    mount(hostId: string, tabKey: string, url: string, api: GuestApi, attach: (mount: BrowserTabMount, confirm: (webContentsId: number) => Promise<void>) => void, failed: (error: unknown) => void, isCurrent: () => boolean = () => true, identity?: BrowserMountIdentity): () => void {
+    mount(hostId: string, tabKey: string, url: string, api: GuestApi, attach: (mount: BrowserTabMount, confirm: (webContentsId: number) => Promise<void>) => void, failed: (error: unknown) => void, isCurrent: () => boolean = () => true, identity?: BrowserMountIdentity, desktopLoopback?: string): () => void {
       const key = browserCacheKey(hostId, tabKey);
       let active = true;
       void enqueue(key, async () => {
         if (!active || retired.has(key) || !isCurrent()) return;
-        const mount = identity ? await api.open(tabKey, url, undefined, identity) : await api.open(tabKey, url);
+        const mount = desktopLoopback ? await api.open(tabKey, url, undefined, identity, { desktopLoopback }) :
+          identity ? await api.open(tabKey, url, undefined, identity) : await api.open(tabKey, url);
         if (active && !retired.has(key) && isCurrent()) {
           let confirmed = false;
           // Main's background carrier has no webview and needs no receipt.
@@ -40,8 +41,9 @@ export function createGuestLifecycle() {
               if (!active || retired.has(key) || !isCurrent()) return;
               // Electron's did-attach event does not identify the will-attach reservation. Only this
               // owner-UI receipt lets main correlate its consumed ticket with the actual blank guest.
-              if (identity) await api.open(tabKey, url, { src: mount.src, webContentsId }, identity);
-              else await api.open(tabKey, url, { src: mount.src, webContentsId });
+              const receipt = { src: mount.src, webContentsId };
+              if (identity) await api.open(tabKey, url, receipt, identity);
+              else await api.open(tabKey, url, receipt);
             }).catch((error: unknown) => { if (active && !retired.has(key) && isCurrent()) failed(error); });
           });
         }

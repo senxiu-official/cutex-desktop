@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { ServiceView } from "../src/shared/ipc";
 import { mergeProjectTabs, type ProjectTabEntry } from "../src/renderer/src/lib/projectTabs";
 import { DEFAULT_LIBRARY, libraryQuery, libraryScopeKey } from "../src/renderer/src/modules/artifacts/model";
-import { projectServiceList } from "../src/renderer/src/modules/services/model";
+import { compareOrganizedServices, organizedServiceSections, projectServiceList, serviceSection } from "../src/renderer/src/modules/services/model";
 import type { MessageKey } from "../src/renderer/src/i18n";
 
 const entry = (id: string, tab: string, order: number): ProjectTabEntry =>
@@ -51,5 +51,34 @@ describe("projectServiceList", () => {
   it("is empty for an unknown list or a project without services", () => {
     expect(projectServiceList(null, "p")).toEqual([]);
     expect(projectServiceList([svc("a", "q", "reachable")], "p")).toEqual([]);
+  });
+});
+
+describe("service organisation", () => {
+  const svc = (slug: string, extra: Partial<ServiceView> = {}) => ({ slug, displayName: slug, health: "reachable", runtime: "managed", lifetime: "persistent", ...extra }) as ServiceView;
+
+  it("keeps ephemeral services in 临时 and treats future persistent purposes as 未分类", () => {
+    expect(serviceSection(svc("temp", { lifetime: "ephemeral", purpose: "foreground" }))).toBe("temporary");
+    expect(serviceSection(svc("front", { purpose: "foreground" }))).toBe("foreground");
+    expect(serviceSection(svc("future", { purpose: "future-purpose" }))).toBe("unknown");
+  });
+
+  it("sorts stars first, then owner order and name", () => {
+    const list = [svc("z", { sortOrder: 0 }), svc("a", { sortOrder: 0 }), svc("last", { sortOrder: 99 }), svc("star", { starred: true, sortOrder: 99 })];
+    expect(list.sort(compareOrganizedServices).map((s) => s.slug)).toEqual(["star", "a", "z", "last"]);
+  });
+
+  it("builds purpose sections and keeps custom groups in their persisted row order", () => {
+    const rows = [
+      { key: "late", item: svc("late", { purpose: "foreground", groupName: "Later", sortOrder: 500 }) },
+      { key: "early-b", item: svc("early-b", { purpose: "foreground", groupName: "First", sortOrder: 200 }) },
+      { key: "early-a", item: svc("early-a", { purpose: "foreground", groupName: "First", sortOrder: 100 }) },
+      { key: "temp", item: svc("temp", { lifetime: "ephemeral", groupName: "Scratch", sortOrder: 10 }) },
+    ];
+    const sections = organizedServiceSections(rows);
+    expect(sections.map((section) => section.section)).toEqual(["foreground", "temporary"]);
+    expect(sections[0]!.groups.map((group) => group.name)).toEqual(["First", "Later"]);
+    expect(sections[0]!.groups[0]!.rows.map((row) => row.key)).toEqual(["early-a", "early-b"]);
+    expect(sections[1]!.groups[0]!.name).toBe("Scratch");
   });
 });

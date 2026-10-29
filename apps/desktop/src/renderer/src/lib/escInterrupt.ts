@@ -14,6 +14,7 @@
 // ESC_CONFIRM_MS, bound to the same turn: stopping it from a stray key press affects the
 // delegation's requester. Pure decision here; the DOM probes below feed it.
 import type { SendKeyPreset } from "./sendKeys";
+import { isElement, isHTMLElement, selectionOf } from "./ownerWindow";
 
 /** Window for the confirming second Esc on a delegation turn. */
 export const ESC_CONFIRM_MS = 1500;
@@ -75,7 +76,7 @@ export function conversationEscDecision(e: ConversationEscEvent, ctx: Conversati
 
 /** A text-entry element (Esc there belongs to it). */
 export function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
+  if (!isHTMLElement(target)) return false;
   if (target.isContentEditable || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return true;
   return target.tagName === "INPUT" && !["checkbox", "radio", "range", "button", "submit", "reset", "color", "file"].includes((target as HTMLInputElement).type);
 }
@@ -90,15 +91,16 @@ export function overlayInDom(doc: Document = document): boolean {
   return false;
 }
 
-const SIDE_ROOT_SELECTOR = "[data-side-root],[data-gutter-root]";
+// The Settings Shelf too (owner 2026-10-21): Esc there closes it (lib/escChain row 6a), never a turn interrupt.
+const SIDE_ROOT_SELECTOR = "[data-side-root],[data-gutter-root],[data-settings-shelf]";
 
-/** The element is inside the right side (area or instance layer) or a conversation gutter. */
+/** The element is inside the right side (area or instance layer), a conversation gutter or the Settings Shelf. */
 export function inSideRoot(target: EventTarget | null): boolean {
-  return target instanceof Element && !!target.closest(SIDE_ROOT_SELECTOR);
+  return isElement(target) && !!target.closest(SIDE_ROOT_SELECTOR);
 }
 
-/** A non-collapsed text selection (outside inputs, whose selection is not reported here). */
-export function pageHasSelection(): boolean {
-  const sel = window.getSelection();
+/** A non-collapsed text selection (outside inputs, whose selection is not reported here), in `target`'s window (default: this one). */
+export function pageHasSelection(target?: EventTarget | Node | Window | null): boolean {
+  const sel = selectionOf(target);
   return !!sel && sel.rangeCount > 0 && !sel.isCollapsed && sel.toString().length > 0;
 }

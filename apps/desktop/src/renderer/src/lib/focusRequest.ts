@@ -5,6 +5,7 @@
 // and keeps the 「回到」 point. A miss says so (or goes to `onDone` when the requester reports it).
 import { create } from "zustand";
 import { useApp } from "../store";
+import { drawRow } from "./farRows";
 
 export interface FocusRequest {
   sessionId: string;
@@ -42,6 +43,7 @@ const FLASH_MS = 1800;
 
 /** Scroll an element into view and highlight it briefly. */
 export function flashElement(el: Element): void {
+  drawRow(el);
   el.scrollIntoView({ block: "center" });
   el.classList.add(...FLASH);
   setTimeout(() => el.classList.remove(...FLASH), FLASH_MS);

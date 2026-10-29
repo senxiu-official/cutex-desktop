@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { bridge } from "../bridge";
 import { translate } from "../i18n";
+import { btn } from "./Button";
 
 /**
  * A render error replaces only this subtree with a recoverable message (React unmounts the whole
@@ -40,7 +41,7 @@ function CrashNotice({ error, onRetry }: { error: Error; onRetry: () => void }) 
         <p className="text-muted">{t("crash.hint")}</p>
         <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-border bg-surface p-2 text-xs text-danger">{error.message}</pre>
         <div className="flex gap-2">
-          <button onClick={onRetry} className="rounded border border-border px-3 py-1 hover:bg-surface">
+          <button onClick={onRetry} className={btn()}>
             {t("crash.retry")}
           </button>
           <button onClick={() => window.location.reload()} className="rounded border border-border px-3 py-1 hover:bg-surface">

@@ -10,6 +10,7 @@
 import { useRef, type MouseEvent } from "react";
 import { PanelRight, PanelRightClose, Plus } from "lucide-react";
 import { useI18n } from "../../i18n";
+import { preloadOnIntent } from "../../lib/lazyPage";
 import { contextMenu, openMenuFrom } from "../../lib/contextMenu";
 import { useSideView } from "../../lib/sideComponents";
 import { shownPages, visibleCards } from "../../lib/sideLayout";
@@ -19,14 +20,15 @@ import { launcherContextMenu, launcherMenu, pressLauncher, type Launchable } fro
 import { toggleSideColumn } from "../../lib/sideOpen";
 import { newInstanceKey, openModifiers, PLAIN_OPEN } from "../../lib/openModifiers";
 import { attentionText, kindBadges, pillContent } from "../../lib/sidePills";
+import { keyVar } from "../../lib/keybindings";
 
 /** A launcher's badges: red count (attention), else the unread dot; busy = a green pulse. */
 function Badges({ attention, unread, busy }: { attention: number; unread: boolean; busy: boolean }) {
-  const ring = "shadow-[0_0_0_2px_var(--win)]";
+  const ring = "ring-2 ring-(--win)";
   return (
     <>
       {attention > 0 && (
-        <span className={`absolute -top-[3px] -right-[5px] z-[1] h-3.5 min-w-3.5 rounded-[7px] bg-danger px-[3px] text-center text-[9px] leading-[14px] font-bold text-white ${ring}`}>{attentionText(attention)}</span>
+        <span className={`absolute -top-[3px] -right-[5px] z-[1] h-3.5 min-w-3.5 rounded-full bg-danger-solid px-[3px] text-center text-[9px] leading-[14px] font-bold text-white ${ring}`}>{attentionText(attention)}</span>
       )}
       {attention === 0 && unread && <span className={`absolute top-px right-px h-[7px] w-[7px] rounded-full bg-accent ${ring}`} />}
       {busy && <span className="side-busy absolute right-px bottom-px h-1.5 w-1.5 rounded-full bg-ok" />}
@@ -93,20 +95,20 @@ export function TitleBarLaunchers() {
   const plusTip = hidden ? t("side.launcherMenuMore", { n: hidden }) : t("side.launcherMenu");
   return (
     <>
-      <span ref={strip} data-side-launchers className="flex shrink-0 items-center gap-0.5">
+      <span ref={strip} data-side-launchers onPointerEnter={() => void preloadOnIntent()} className="flex shrink-0 items-center gap-0.5">
         {shown.map((item) => (
           <Launcher key={item.kind} item={item} inView={inView.has(item.kind)} />
         ))}
       </span>
-      <button onClick={(e) => openMenuFrom(e.currentTarget, launcherMenu())} title={plusTip} aria-label={plusTip} aria-haspopup="menu" data-side-launcher-menu className={BTN}>
+      <button onClick={(e) => openMenuFrom(e.currentTarget, launcherMenu())} onPointerEnter={() => void preloadOnIntent()} title={plusTip} aria-label={plusTip} aria-haspopup="menu" data-side-launcher-menu className={BTN}>
         <Plus size={16} />
         {hidden > 0 && <span className="absolute top-1 right-1 h-[5px] w-[5px] rounded-full bg-subtle" />}
       </button>
-      <button onClick={toggleSideColumn} title={t("side.toggleHint", { key: "Ctrl+Alt+B" })} aria-label={t("side.toggle")} aria-pressed={layout.open} className={`${BTN} ${layout.open ? "bg-hover text-foreground" : ""}`}>
+      <button onClick={toggleSideColumn} title={t("side.toggleHint", keyVar("sideToggle"))} aria-label={t("side.toggle")} aria-pressed={layout.open} className={`${BTN} ${layout.open ? "bg-hover text-foreground" : ""}`}>
         {layout.open ? <PanelRightClose size={16} /> : <PanelRight size={16} />}
         {badge &&
           (badge.attention ? (
-            <span className="absolute -top-0.5 -right-0.5 h-3.5 min-w-3.5 rounded-[7px] bg-danger px-[3px] text-center text-[9px] leading-[14px] font-bold text-white">{attentionText(badge.attention)}</span>
+            <span className="absolute -top-0.5 -right-0.5 h-3.5 min-w-3.5 rounded-full bg-danger-solid px-[3px] text-center text-[9px] leading-[14px] font-bold text-white">{attentionText(badge.attention)}</span>
           ) : (
             <span className="absolute top-1 right-1 h-[7px] w-[7px] rounded-full bg-accent" />
           ))}

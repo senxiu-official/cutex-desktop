@@ -3,6 +3,7 @@
 // A row opens the artifact following its latest version; the menu has the pinned version, the link
 // and the owner's edits. 「从工作区发布…」 publishes a workspace file as the owner (POST /v2/artifact-store).
 // The 项目 page's 成果库 tab (`project.tab`, §21) is the same view for one project's scope (LibraryPanel).
+import { isImeComposing } from "../../lib/ime";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowLeftRight, LayoutGrid, List, Loader2, Search, Star, Upload } from "lucide-react";
 import { ARTIFACT_KINDS, artifactRef, type ArtifactKind, type ArtifactList, type ArtifactScope, type ArtifactSummary } from "../../../../shared/artifactStore";
@@ -18,10 +19,13 @@ import { artifactMenu, openDelegation, openVersion, refusalText } from "./action
 import { arrangeLibrary, DEFAULT_LIBRARY, initView, parseViewParams, previewKind, typePath, VIEW, type ViewState, LIBRARY_SORTS, libraryQuery, libraryScopeKey, producerLabel, producerOptions, type ArchivedFilter, type LibraryScope, type LibrarySort, type LibraryState } from "./model";
 import { KIND_ICON } from "./refTarget";
 import { invalidateArtifact, loadContent, useEpoch } from "./store";
-import { ViewActions, ViewBody } from "./View";
+import { ViewBody } from "./View";
+import { ViewActions } from "./ViewActions";
+import { Tag } from "../../components/Tag";
+import { btn } from "../../components/Button";
 
 const PAGE = 100;
-const SELECT = "rounded-md border border-border bg-background px-1.5 py-0.5 text-[11px] outline-none focus:border-accent";
+const SELECT = "rounded-md border border-border bg-background px-1.5 py-0.5 text-caption/[inherit] outline-none focus:border-accent";
 const FIELD = "w-full rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-accent";
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -55,7 +59,7 @@ function Meta({ hostId, a, now }: { hostId: string; a: ArtifactSummary; now: num
   const { t, locale } = useI18n();
   const p = a.latest.producer;
   return (
-    <span className="flex min-w-0 items-center gap-1 text-[11px] text-subtle">
+    <span className="flex min-w-0 items-center gap-1 text-caption/[inherit] text-subtle">
       <span className={`min-w-0 truncate ${p.kind === "auto" && p.attribution === "ambiguous" ? "text-warn" : ""}`} title={producerLabel(p, t)}>
         {producerLabel(p, t)}
       </span>
@@ -70,13 +74,13 @@ function Meta({ hostId, a, now }: { hostId: string; a: ArtifactSummary; now: num
             void openDelegation(hostId, p.askId!, p.sessionId);
           }}
           title={p.askId}
-          className="flex shrink-0 items-center gap-0.5 rounded bg-surface-2 px-1 text-[10.5px] hover:text-accent"
+          className="flex shrink-0 items-center gap-0.5 rounded bg-surface-2 px-1 text-caption/[inherit] hover:text-accent"
         >
           <ArrowLeftRight size={10} />
           {t("artifacts.delegation")}
         </button>
       )}
-      {a.archivedAt && <span className="shrink-0 rounded bg-surface-2 px-1 text-[10.5px]">{t("artifacts.archivedTag")}</span>}
+      {a.archivedAt && <Tag>{t("artifacts.archivedTag")}</Tag>}
     </span>
   );
 }
@@ -89,10 +93,10 @@ function Row({ hostId, a, open, layout, now }: { hostId: string; a: ArtifactSumm
   const title = (
     <span className="flex min-w-0 items-center gap-1.5">
       {layout === "list" && <Icon size={13} className="shrink-0 text-subtle" />}
-      <span className="min-w-0 truncate text-[13px] text-foreground" title={a.name}>
+      <span className="min-w-0 truncate text-ui/[inherit] text-foreground" title={a.name}>
         {a.name}
       </span>
-      <span className="shrink-0 font-mono text-[11px] text-subtle">{t("artifacts.version", { n: a.latestVersion })}</span>
+      <span className="shrink-0 font-mono text-caption/[inherit] text-subtle">{t("artifacts.version", { n: a.latestVersion })}</span>
       {a.starred && <Star size={11} fill="currentColor" className="shrink-0 text-warn" aria-label={t("artifacts.starredTag")} />}
     </span>
   );
@@ -165,21 +169,21 @@ function PublishForm({ hostId, scope, open, onDone }: { hostId: string; scope: A
       className="mx-2 mb-2 flex flex-col gap-1.5 rounded-lg border border-border bg-surface p-2 text-xs"
       onSubmit={(e) => {
         e.preventDefault();
-        void submit();
+        if (!isImeComposing(e)) void submit();
       }}
     >
       <div className="font-medium text-foreground">{t("artifacts.publishTitle")}</div>
       <label className="flex flex-col gap-0.5">
-        <span className="text-[11px] text-subtle">{t("artifacts.publishPath")}</span>
+        <span className="text-caption/[inherit] text-subtle">{t("artifacts.publishPath")}</span>
         <input autoFocus value={path} onChange={(e) => setPath(e.target.value)} placeholder={t("artifacts.publishPathHint")} className={`${FIELD} font-mono`} />
       </label>
       <div className="flex gap-1.5">
         <label className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-[11px] text-subtle">{t("artifacts.publishName")}</span>
+          <span className="text-caption/[inherit] text-subtle">{t("artifacts.publishName")}</span>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("artifacts.publishNameHint")} className={FIELD} />
         </label>
         <label className="flex shrink-0 flex-col gap-0.5">
-          <span className="text-[11px] text-subtle">{t("artifacts.publishKind")}</span>
+          <span className="text-caption/[inherit] text-subtle">{t("artifacts.publishKind")}</span>
           <select value={kind} onChange={(e) => setKind(e.target.value as ArtifactKind | "")} className={`${FIELD} w-auto`}>
             <option value="">{t("artifacts.publishKindAuto")}</option>
             {ARTIFACT_KINDS.map((k) => (
@@ -191,15 +195,15 @@ function PublishForm({ hostId, scope, open, onDone }: { hostId: string; scope: A
         </label>
       </div>
       <label className="flex flex-col gap-0.5">
-        <span className="text-[11px] text-subtle">{t("artifacts.publishNote")}</span>
+        <span className="text-caption/[inherit] text-subtle">{t("artifacts.publishNote")}</span>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder={t("artifacts.publishNoteHint")} className={`${FIELD} resize-y`} />
       </label>
-      {error && <p className="text-[11px] text-danger">{error}</p>}
+      {error && <p className="text-caption/[inherit] text-danger">{error}</p>}
       <div className="flex justify-end gap-1.5">
         <button type="button" onClick={onDone} className="rounded-md px-2 py-1 text-muted hover:bg-hover">
           {t("artifacts.cancel")}
         </button>
-        <button type="submit" disabled={!path.trim() || busy} className="flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-white hover:opacity-90 disabled:opacity-50">
+        <button type="submit" disabled={!path.trim() || busy} className={btn({ variant: "primary" })}>
           {busy && <Loader2 size={12} className="animate-spin" />}
           {t("artifacts.publishSubmit")}
         </button>
@@ -354,9 +358,10 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
             <Search size={12} className="shrink-0 text-subtle" />
             <input
               value={state.q}
-              onChange={(e) => set({ q: e.target.value.slice(0, 200) })}
+              maxLength={200}
+              onChange={(e) => set({ q: e.target.value })}
               onKeyDown={(e) => {
-                if (e.key === "Escape" && state.q) {
+                if (!isImeComposing(e) && e.key === "Escape" && state.q) {
                   e.preventDefault();
                   e.stopPropagation();
                   set({ q: "" });
@@ -403,7 +408,7 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
               </option>
             ))}
           </select>
-          <span className="ml-auto flex items-center gap-1 text-[11px] text-subtle">
+          <span className="ml-auto flex items-center gap-1 text-caption/[inherit] text-subtle">
             {list && t("artifacts.count", { n: items.length })}
             <span role="group" className="ml-1 flex overflow-hidden rounded-md border border-border">
               {(["list", "grid"] as const).map((l) => {

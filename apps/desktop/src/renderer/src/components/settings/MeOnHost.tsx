@@ -9,6 +9,7 @@ import { bridge } from "../../bridge";
 import { useI18n } from "../../i18n";
 import { useHostAccess } from "../../lib/hostAccess";
 import { identityInitials, identityName } from "../../lib/identity";
+import { useAdoptedIdentity } from "../../lib/identityHosts";
 import { useIdentityPrefs } from "../../lib/identityPrefs";
 import { useMyHost } from "../../lib/myHost";
 import { settingsAnchorId } from "../../lib/settingsNav";
@@ -17,9 +18,10 @@ import { useUserAvatar } from "../../lib/userAvatars";
 import { useHostData } from "../../lib/useHostScope";
 import { useApp } from "../../store";
 import { Avatar } from "../Avatar";
-import { ArmedRemove, EmptyState, ErrorNote, ListRow, Loading, Section } from "./Form";
+import { ArmedRemove, EmptyState, ErrorNote, ListRow, Loading, Section, SettingsGroup } from "./Form";
 import { DeviceLineText, RoleLine } from "./MyHostLines";
 import { ThisComputerBadge, TokenDetail, TokenIcon, TokenTitle } from "./TokenName";
+import { Tag } from "../../components/Tag";
 
 let osUserName: string | null | undefined;
 function useOsUserName(): string | null {
@@ -39,8 +41,9 @@ export function MeHereSection({ hostId }: { hostId: string }) {
   const prefs = useIdentityPrefs();
   const os = useOsUserName();
   const selfProfile = useHostData(hostId)?.features.has(USERS_SELF_PROFILE_FEATURE) ?? false;
-  const picture = useUserAvatar(hostId, selfProfile && !prefs.picture ? access.userId : null, access.avatarEtag);
-  const name = identityName(access, prefs.name, os, selfProfile) || t("identity.you");
+  const adopted = useAdoptedIdentity(hostId);
+  const picture = useUserAvatar(adopted.picture?.hostId, prefs.picture ? null : adopted.picture?.userId, adopted.picture?.etag);
+  const name = identityName(access, prefs.name, os, selfProfile, adopted.name) || t("identity.you");
   const owner = me.row.role === "owner" || me.row.role === "older";
   return (
     <Section id={settingsAnchorId("users-me")} title={t("users.me.title")}>
@@ -49,7 +52,7 @@ export function MeHereSection({ hostId }: { hostId: string }) {
         <div className="min-w-0 flex-1 space-y-0.5">
           <div className="flex min-w-0 items-center gap-2 text-sm">
             <span className="truncate font-medium">{name}</span>
-            {owner && <span className="shrink-0 rounded bg-accent/15 px-1.5 text-[11px] text-accent">{t("users.ownerBadge")}</span>}
+            {owner && <Tag tone="accent">{t("users.ownerBadge")}</Tag>}
           </div>
           {!owner && <RoleLine row={me.row} stale={me.stale} />}
           <DeviceLineText device={me.device} />
@@ -106,7 +109,7 @@ export function OwnDevicesSection({ hostId }: { hostId: string }) {
     if (!own) return null;
     return (
       <Section id={settingsAnchorId("users-own-devices")} title={t("users.own.title")} hint={t("users.own.hint")}>
-        <ListRow leading={<TokenIcon token={{ kind: "client" }} />} title={<TokenTitle token={{ tokenId: own.id, label: own.label, deviceName: own.deviceName, ownerName: own.ownerName }} editing={false} onSave={async () => false} onCancel={() => {}} extra={<ThisComputerBadge />} />} />
+        <SettingsGroup agents="access" source="host"><ListRow leading={<TokenIcon token={{ kind: "client" }} />} title={<TokenTitle token={{ tokenId: own.id, label: own.label, deviceName: own.deviceName, ownerName: own.ownerName }} editing={false} onSave={async () => false} onCancel={() => {}} extra={<ThisComputerBadge />} />} /></SettingsGroup>
       </Section>
     );
   }
@@ -118,13 +121,13 @@ export function OwnDevicesSection({ hostId }: { hostId: string }) {
       {[...(devices ?? [])]
         .sort((a, b) => (a.current !== b.current ? (a.current ? -1 : 1) : (Date.parse(b.lastUsedAt ?? "") || 0) - (Date.parse(a.lastUsedAt ?? "") || 0)))
         .map((device) => (
-          <ListRow
+          <SettingsGroup agents="access" source="host" key={device.tokenId}><ListRow
             key={device.tokenId}
             leading={<TokenIcon token={device} />}
             title={<TokenTitle token={device} editing={false} onSave={async () => false} onCancel={() => {}} extra={device.current ? <ThisComputerBadge /> : undefined} />}
             detail={<TokenDetail token={device} />}
             actions={<ArmedRemove title={device.current ? t("remote.token.revokeOwn") : `${t("users.revoke")} — ${t("users.revokeHint")}`} armedLabel={t(device.current ? "users.own.removeCurrentArmed" : "users.revokeArmed")} disabled={busy} onRemove={() => void remove(device)} />}
-          />
+          /></SettingsGroup>
         ))}
     </Section>
   );

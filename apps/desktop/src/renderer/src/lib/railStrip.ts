@@ -4,6 +4,8 @@
 // close to the left edge that would clip it (the conversation column, else the window) the strip
 // renders inside the frame, over the row start.
 import { createContext, useEffect, useState, type RefObject } from "react";
+import { sharedResizeObserver } from "./resizeHub";
+import { ownerWindowOf } from "./ownerWindow";
 
 export type StripTone = "accent" | "muted" | "warn" | "danger";
 
@@ -44,12 +46,13 @@ export function useStripInside(ref: RefObject<HTMLElement | null>, enabled: bool
     const el = ref.current;
     if (!enabled || !el) return;
     const measure = () => setInside(stripInside(el.getBoundingClientRect().left - clipLeft(el)));
+    const win = ownerWindowOf(el);
     measure();
-    window.addEventListener("resize", measure);
-    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    win.addEventListener("resize", measure);
+    const ro = typeof ResizeObserver === "undefined" ? null : sharedResizeObserver(measure);
     ro?.observe(el);
     return () => {
-      window.removeEventListener("resize", measure);
+      win.removeEventListener("resize", measure);
       ro?.disconnect();
     };
   }, [ref, enabled]);

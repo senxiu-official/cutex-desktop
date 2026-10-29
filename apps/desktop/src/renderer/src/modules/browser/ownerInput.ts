@@ -17,10 +17,10 @@ interface BrowserCaptureDocument extends EventTarget {
  * this guest. Updated whenever focus moves; never moves focus itself, so an owner click into the
  * page keeps it there.
  */
-export function installBrowserOwnerCapture(capture: BrowserMarkerElement, guest: EventTarget, document: BrowserCaptureDocument, guestId: string): () => void {
+export function installBrowserOwnerCapture(capture: BrowserMarkerElement, guest: EventTarget, doc: BrowserCaptureDocument, guestId: string): () => void {
   let marked: FocusElement | null = null;
   const mark = (element: unknown) => {
-    if (!element || element === guest || element === capture || element === document.body) return;
+    if (!element || element === guest || element === capture || element === doc.body) return;
     const candidate = element as FocusElement;
     if (typeof candidate.setAttribute !== "function") return;
     if (marked && marked !== candidate) marked.removeAttribute?.(BROWSER_FOCUS_RETURN);
@@ -34,14 +34,14 @@ export function installBrowserOwnerCapture(capture: BrowserMarkerElement, guest:
   };
   const cleanup = () => {
     capture.removeAttribute("data-browser-owner-ready");
-    document.removeEventListener("focusin", focusin, true);
+    doc.removeEventListener("focusin", focusin, true);
     if (marked?.getAttribute?.(BROWSER_FOCUS_RETURN) === guestId) marked.removeAttribute?.(BROWSER_FOCUS_RETURN);
     marked = null;
   };
   capture.removeAttribute("data-browser-owner-ready");
   try {
-    mark(document.activeElement);
-    document.addEventListener("focusin", focusin, true);
+    mark(doc.activeElement);
+    doc.addEventListener("focusin", focusin, true);
     capture.setAttribute("data-browser-owner-ready", "true");
   } catch (error) { cleanup(); throw error; }
   return cleanup;

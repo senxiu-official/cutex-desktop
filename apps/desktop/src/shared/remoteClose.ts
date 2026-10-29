@@ -5,6 +5,7 @@
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import {
   CLIENT_CLOSE_REQUESTED_EVENT,
+  CLIENT_PRESENCE_LIFECYCLE_FEATURE,
   CLIENT_REMOTE_CLOSE_FEATURE,
   CLIENT_STATE_CHANGED_EVENT,
   DEFAULT_HEARTBEAT_SECONDS,
@@ -18,7 +19,7 @@ import {
 } from "@cutex-desktop/cutex-client";
 import type { DeviceScope } from "./users";
 
-export { CLIENT_REMOTE_CLOSE_FEATURE as REMOTE_CLOSE_FEATURE, type ClientCloseRequested, type ClientClosingOutcome, type ClientState, type ClientStateChanged, type OnlineClient };
+export { CLIENT_REMOTE_CLOSE_FEATURE as REMOTE_CLOSE_FEATURE, CLIENT_PRESENCE_LIFECYCLE_FEATURE as PRESENCE_LIFECYCLE_FEATURE, type ClientCloseRequested, type ClientClosingOutcome, type ClientState, type ClientStateChanged, type OnlineClient };
 
 /** A `GET /v2/clients` row as the renderer gets it: `self` = this desktop instance (main knows its instance id). */
 export interface OnlineClientView extends OnlineClient {
@@ -109,11 +110,15 @@ export interface CountdownDeps {
   report(hostId: string, instanceId: string, outcome: ClientClosingOutcome): Promise<void>;
   /** Quit the desktop app (only the app). */
   quit(): void;
+  /** Exit at once when the quit has not ended the app after QUIT_WATCHDOG_MS (something held it open). */
+  forceQuit?(): void;
   onChange(view: RemoteCloseView | null): void;
 }
 
 /** How long a closing / cancelled report may take before the app quits regardless. */
 export const REPORT_TIMEOUT_MS = 2_500;
+/** How long a remote-close quit may take before the app exits regardless (its dialog would otherwise say 正在关闭 forever). */
+export const QUIT_WATCHDOG_MS = 10_000;
 
 /**
  * One countdown at a time. A second request (another host, or the same one again) joins the running
@@ -186,6 +191,8 @@ export class RemoteCloseCountdown {
     this.deps.onChange(this.view());
     await this.reportAll(cur.sources, "closing");
     this.deps.quit();
+    // Deliberately not cleared by dispose(): it runs on the quit path, which is what may stall.
+    if (this.deps.forceQuit) this.deps.setTimer(() => this.deps.forceQuit?.(), QUIT_WATCHDOG_MS);
   }
 
   /** A host's connection ended: it is no longer told the outcome (the countdown itself runs on). */
@@ -244,9 +251,43 @@ export function sortOnlineClients(rows: readonly OnlineClientView[]): OnlineClie
   return [...rows].sort((a, b) => Number(b.self) - Number(a.self) || seen(b) - seen(a) || a.deviceName.localeCompare(b.deviceName));
 }
 
-/** Apply a `stateChanged` to a list (unknown instance: unchanged). */
+/**
+ * Leftovers of earlier launches of the same install: cutex keeps a registration until 3 minutes
+ * without a heartbeat and a desktop quitting normally does not deregister, so a relaunch shows the old
+ * row next to the new one for up to 3 minutes. One install (same `installId` over the same credential)
+ * is one userData directory, and the single-instance lock allows one running desktop per userData — so
+ * an older row of that install whose last heartbeat came before the newest launch connected is a
+ * leftover and is dropped. Rows without both times, other installs (another userData on the same
+ * device) and this desktop's own row always stay; a still-running older launch (multi-instance dev run)
+ * shows again with its next heartbeat.
+ * Only for hosts without `client-presence-lifecycle`: those remove an exiting desktop's row themselves
+ * (`closing exited`) and replace an install's older row when its next launch registers.
+ */
+export function dropRelaunchLeftovers<T extends OnlineClientView>(rows: readonly T[]): T[] {
+  const time = (iso: string | null) => (iso ? Date.parse(iso) : NaN);
+  const key = (r: T) => (r.installId ? `${r.tokenId ?? ""}\u0000${r.installId}` : null);
+  const newest = new Map<string, number>();
+  for (const r of rows) {
+    const k = key(r);
+    const since = time(r.connectedSince);
+    if (k && Number.isFinite(since) && !(since <= (newest.get(k) ?? -Infinity))) newest.set(k, since);
+  }
+  const kept = rows.filter((r) => {
+    const k = key(r);
+    if (r.self || !k) return true;
+    const latest = newest.get(k);
+    const seen = time(r.lastSeen);
+    const since = time(r.connectedSince);
+    return latest === undefined || !Number.isFinite(seen) || !Number.isFinite(since) || since === latest || seen >= latest;
+  });
+  return kept.length === rows.length ? (rows as T[]) : kept;
+}
+
+/** Apply a `stateChanged` to a list: `exited` drops the row (unknown instance: unchanged). */
 export function applyClientState(rows: readonly OnlineClientView[], change: ClientStateChanged): OnlineClientView[] {
-  return rows.some((r) => r.instanceId === change.instanceId && r.state !== change.state) ? rows.map((r) => (r.instanceId === change.instanceId ? { ...r, state: change.state } : r)) : (rows as OnlineClientView[]);
+  const { state } = change;
+  if (state === "exited") return rows.some((r) => r.instanceId === change.instanceId) ? rows.filter((r) => r.instanceId !== change.instanceId) : (rows as OnlineClientView[]);
+  return rows.some((r) => r.instanceId === change.instanceId && r.state !== state) ? rows.map((r) => (r.instanceId === change.instanceId ? { ...r, state } : r)) : (rows as OnlineClientView[]);
 }
 
 /** Display name of a client platform (`process.platform` values; anything else as given). */

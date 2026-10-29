@@ -76,3 +76,119 @@ export function restoreWindowBounds(saved: WindowState | null, workAreas: readon
     maximized,
   };
 }
+
+// ── Desk windows (multi-window, main/deskShell.ts): one record per desk id next to the main window's ──
+
+/** A desk window's first size (no saved record): a little smaller than the main window's default. */
+export const DEFAULT_DESK_SIZE = { width: 1040, height: 760 } as const;
+export const MIN_DESK_SIZE = { width: 560, height: 420 } as const;
+/** A new desk opens this far right / down of the main window, on the main window's display. */
+export const DESK_CASCADE = 32;
+/** Desk records kept at most (the newest first wins; a closed desk is forgotten, see forgetDesk). */
+export const MAX_DESK_RECORDS = 8;
+
+/** window-state.json: the main window's record and one per desk id. The old single record = `main`. */
+export interface WindowStates {
+  main: WindowState | null;
+  desks: Record<string, WindowState>;
+}
+
+const DESK_KEY = /^d[0-9a-f]{12}$/;
+
+export function parseWindowStates(raw: unknown): WindowStates {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { main: null, desks: {} };
+  const value = raw as Record<string, unknown>;
+  // Before desks the file was one WindowState ({bounds, maximized}).
+  if ("bounds" in value) return { main: parseWindowState(value), desks: {} };
+  const desks: Record<string, WindowState> = {};
+  const stored = value.desks && typeof value.desks === "object" && !Array.isArray(value.desks) ? (value.desks as Record<string, unknown>) : {};
+  for (const [id, record] of Object.entries(stored)) {
+    if (Object.keys(desks).length >= MAX_DESK_RECORDS) break;
+    const state = DESK_KEY.test(id) ? parseWindowState(record) : null;
+    if (state) desks[id] = state;
+  }
+  return { main: parseWindowState(value.main), desks };
+}
+
+/** The display (work area) a rect lies on most, or null when none shows MIN_VISIBLE of it. */
+function bestArea(rect: Rect, workAreas: readonly Rect[]): Rect | null {
+  let best: Rect | null = null;
+  let bestArea = 0;
+  for (const area of workAreas) {
+    const o = overlap(rect, area);
+    if (o.width >= MIN_VISIBLE.width && o.height >= MIN_VISIBLE.height && o.width * o.height > bestArea) {
+      best = area;
+      bestArea = o.width * o.height;
+    }
+  }
+  return best;
+}
+
+/** `rect` shrunk to `area` (not below `min` unless the area is smaller) and moved fully onto it. */
+function fitInto(rect: Rect, area: Rect, min: { width: number; height: number }): Rect {
+  const width = clampSize(rect.width, min.width, area.width);
+  const height = clampSize(rect.height, min.height, area.height);
+  return { x: Math.min(Math.max(rect.x, area.x), area.x + area.width - width), y: Math.min(Math.max(rect.y, area.y), area.y + area.height - height), width, height };
+}
+
+/**
+ * A desk window's bounds to start with. A saved record still on a display is kept (fitted to it, like the
+ * main window). Otherwise the default desk size on the display the main window (`anchor`) is on, cascaded
+ * DESK_CASCADE from it; with no anchor on any display, centred on the primary display.
+ */
+export function restoreDeskBounds(saved: WindowState | null, workAreas: readonly Rect[], anchor: Rect | null): { bounds: Rect; maximized: boolean } {
+  const primary = workAreas[0] ?? { x: 0, y: 0, width: DEFAULT_DESK_SIZE.width, height: DEFAULT_DESK_SIZE.height };
+  if (saved) {
+    const area = bestArea(saved.bounds, workAreas);
+    if (area) return { bounds: fitInto(saved.bounds, area, MIN_DESK_SIZE), maximized: saved.maximized };
+  }
+  const area = (anchor && bestArea(anchor, workAreas)) ?? null;
+  const size = { width: DEFAULT_DESK_SIZE.width, height: DEFAULT_DESK_SIZE.height };
+  if (area && anchor) return { bounds: fitInto({ x: anchor.x + DESK_CASCADE, y: anchor.y + DESK_CASCADE, ...size }, area, MIN_DESK_SIZE), maximized: false };
+  const fitted = fitInto({ x: primary.x, y: primary.y, ...size }, primary, MIN_DESK_SIZE);
+  return { bounds: { ...fitted, x: primary.x + Math.round((primary.width - fitted.width) / 2), y: primary.y + Math.round((primary.height - fitted.height) / 2) }, maximized: false };
+}
+
+/**
+ * A display was removed or changed (resolution, scaling, arrangement): where an open window must move so
+ * it stays reachable, or null when it is still on a display. Windows usually moves such windows itself,
+ * X11 does not always.
+ */
+export function refitBounds(bounds: Rect, workAreas: readonly Rect[], min: { width: number; height: number } = MIN_WINDOW_SIZE): Rect | null {
+  if (workAreas.length === 0 || bestArea(bounds, workAreas)) return null;
+  const primary = workAreas[0]!;
+  const fitted = fitInto(bounds, primary, min);
+  return { ...fitted, x: primary.x + Math.round((primary.width - fitted.width) / 2), y: primary.y + Math.round((primary.height - fitted.height) / 2) };
+}
+
+// ── Restoring exactly (Windows, hidden title bar, fractional scaling) ──
+
+/** What settleWindowBounds uses of a BrowserWindow. */
+export interface BoundsWindow {
+  getNormalBounds(): Rect;
+  setBounds(bounds: Rect): void;
+}
+
+const sameRect = (a: Rect, b: Rect) => a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+
+/**
+ * A new window's bounds made to read back as asked. On Windows a window with the hidden title bar
+ * (`titleBarStyle: "hidden"`, main/index.ts, main/deskShell.ts) does not come up at the size it was created
+ * with at a fractional scale: at 150 % `width: 1282` reads back 1284 DIP, 1284 → 1287, 1287 → 1291 … (measured
+ * with Electron 44, dual-screen run 2026-10-28), and that is what got saved, so the window grew on every start; a
+ * single setBounds is off by one too. So: set it again, corrected by the difference, until getNormalBounds
+ * matches (at most `tries` times). A size that maps to no whole pixel count (1275 DIP at 150 %) ends on a
+ * neighbouring one that does, which then restores exactly — the next start is stable either way.
+ * `want` without a position (the default size, centred) keeps the position the window got.
+ */
+export function settleWindowBounds(win: BoundsWindow, want: Partial<Rect> & { width: number; height: number }, tries = 3): Rect {
+  let got = win.getNormalBounds();
+  const target: Rect = { x: want.x ?? got.x, y: want.y ?? got.y, width: want.width, height: want.height };
+  let asked = target;
+  for (let i = 0; i < tries && !sameRect(got, target); i++) {
+    asked = { x: asked.x + target.x - got.x, y: asked.y + target.y - got.y, width: asked.width + target.width - got.width, height: asked.height + target.height - got.height };
+    win.setBounds(asked);
+    got = win.getNormalBounds();
+  }
+  return got;
+}

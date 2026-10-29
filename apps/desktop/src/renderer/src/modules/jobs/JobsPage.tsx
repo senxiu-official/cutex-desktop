@@ -44,6 +44,7 @@ import { JobStatusMark } from "../../components/JobParts";
 import { PageBody, PageToolbar } from "../../components/Page";
 import { Segmented, Select } from "../../components/settings/Form";
 import { ProjectLabel } from "../../components/StatusIcon";
+import { Tag } from "../../components/Tag";
 
 type Scope = JobGroup;
 const SCOPES: Scope[] = ["active", "queued", "done"];
@@ -69,14 +70,14 @@ function useAgents(sidebars: ReadonlyMap<string, SidebarSnapshot | null>) {
 
 function Time({ job }: { job: JobRow }) {
   const now = useClock();
-  return <span className="text-[11px] text-subtle tabular-nums">{formatSpan(jobSeconds(job, Math.floor(now / 1000)))}</span>;
+  return <span className="text-caption/[inherit] text-subtle tabular-nums">{formatSpan(jobSeconds(job, Math.floor(now / 1000)))}</span>;
 }
 
 function Started({ at }: { at: number }) {
   const { locale } = useI18n();
   const now = useClock();
   return (
-    <span className="text-[11px] text-subtle" title={formatAbsolute(at)}>
+    <span className="text-caption/[inherit] text-subtle" title={formatAbsolute(at)}>
       {formatWhen(at, now, locale)}
     </span>
   );
@@ -90,13 +91,13 @@ function ExternalTags({ job }: { job: JobRow }) {
   if (!label) return null;
   const last = job.lastSourceEventAt ? t("jobs.external.lastEvent", { at: formatWhen(job.lastSourceEventAt, now, locale) }) : t("jobs.external.noEvent");
   return (
-    <span className="flex shrink-0 items-center gap-1.5 text-[11px]" title={`${t("jobs.external.sourceTitle", { source: label })}\n${last}`}>
-      <span className="rounded border border-border px-1 text-[10px] font-medium text-muted">{label}</span>
+    <span className="flex shrink-0 items-center gap-1.5 text-caption/[inherit]" title={`${t("jobs.external.sourceTitle", { source: label })}\n${last}`}>
+      <Tag>{label}</Tag>
       {job.remoteId && jobTitle(job) !== job.remoteId && <span className="font-mono text-subtle">{job.remoteId}</span>}
       {job.stale && jobStatus(job).group !== "done" && (
-        <span className="rounded bg-warn/15 px-1 text-[10px] text-warn-text" title={t("jobs.external.staleHint")}>
+        <Tag tone="attention" title={t("jobs.external.staleHint")}>
           {t("jobs.external.stale")}
-        </span>
+        </Tag>
       )}
     </span>
   );
@@ -242,7 +243,7 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
       header: t("jobs.col.exit"),
       width: "3.5rem",
       align: "right",
-      cell: (j) => (j.exitCode != null ? <span className={`font-mono text-[11px] ${j.exitCode === 0 ? "text-subtle" : "text-danger"}`}>{j.exitCode}</span> : null),
+      cell: (j) => (j.exitCode != null ? <span className={`font-mono text-caption/[inherit] ${j.exitCode === 0 ? "text-subtle" : "text-danger"}`}>{j.exitCode}</span> : null),
     },
     {
       key: "menu",
@@ -274,7 +275,7 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
           {loading ? t("delegations.loading") : t("jobs.loadMore")}
         </button>
       )}
-      {!anyOps && loaded && <p className="mt-4 px-2 text-[11px] text-subtle">{t("jobs.listOnlyHint")}</p>}
+      {!anyOps && loaded && <p className="mt-4 px-2 text-caption/[inherit] text-subtle">{t("jobs.listOnlyHint")}</p>}
       {marking && <MarkExternalDialog job={marking} hostId={marking.hostId} onClose={() => setMarking(null)} />}
     </>
   );

@@ -1,10 +1,14 @@
 // Turn / message time labels: relative while recent, clock time after (DESIGN §4.15).
 import { useEffect, useState } from "react";
 import type { AppLocale } from "../../../shared/locales";
+import { subscribeTick } from "./ticker";
 
 type Locale = AppLocale;
 
 const LABELS: Record<Locale, { justNow: string; minAgo: (m: number) => string; yesterday: string }> = {
+  "zh-Hant-TW": { justNow: "剛剛", minAgo: (m) => `${m} 分鐘前`, yesterday: "昨天" },
+  "zh-Hant-HK": { justNow: "剛剛", minAgo: (m) => `${m} 分鐘前`, yesterday: "昨天" },
+  "zh-Hant-MO": { justNow: "剛剛", minAgo: (m) => `${m} 分鐘前`, yesterday: "昨天" },
   "zh-CN": { justNow: "刚刚", minAgo: (m) => `${m} 分钟前`, yesterday: "昨天" },
   "zh-Hant-CN": { justNow: "剛剛", minAgo: (m) => `${m} 分鐘前`, yesterday: "昨天" },
   en: { justNow: "just now", minAgo: (m) => `${m} min ago`, yesterday: "Yesterday" },
@@ -50,8 +54,7 @@ export function useNow(active: boolean): number {
   useEffect(() => {
     if (!active) return;
     setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
+    return subscribeTick(1000, setNow);
   }, [active]);
   return now;
 }

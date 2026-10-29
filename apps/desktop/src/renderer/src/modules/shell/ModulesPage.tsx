@@ -2,7 +2,7 @@
 // state and its switch; core modules are locked (核心). The state is written out only when the switch
 // does not already say it (不可用：缺 X / 出错 + 重试 / 启动中 …); 已启用 / 已关闭 are the dot's tooltip.
 import { useI18n } from "../../i18n";
-import { Button, ListRow, Section, Toggle } from "../../components/settings/Form";
+import { Button, ListRow, Section, SettingsGroup, Toggle } from "../../components/settings/Form";
 import { appModules } from "../app";
 import { useModuleStatuses } from "../react";
 import { listedInSettings, revealUnlistedModules } from "../settingsVisibility";
@@ -11,6 +11,9 @@ import { ExternalBadge } from "../ExternalBadge";
 import type { ModuleState } from "../types";
 import { packRow, usePackRuntime } from "../packs";
 import { PackActions, PackBelow, PackIndexHeader, PackOnlyRows, PackSourceTag } from "./ModulePacks";
+import { Tag } from "../../components/Tag";
+import { settingsAnchorId } from "../../lib/settingsNav";
+import { keyVar, MODULE_COMMANDS } from "../../lib/keybindings";
 
 const DOT: Record<ModuleState["kind"], string> = {
   active: "bg-ok",
@@ -62,8 +65,10 @@ export function ModulesPage() {
         const title = def.displayName ?? t(def.titleKey);
         const pack = def.required || isExternalModuleId(def.id) ? null : packRowOf(def.id);
         return (
+          <div key={def.id} id={settingsAnchorId(`module-${def.id}`)}>
+          {/* Only the browser module serves agents: off = its relay refuses agent browser calls at once (main/browser/install.ts moduleEnabled). */}
+          <SettingsGroup agents={def.id === "browser" ? "now" : "none"} source="local" readOnly={!!def.required && state.kind !== "failed" && !status?.lastError}>
           <ListRow
-            key={def.id}
             leading={<span className={`h-2 w-2 shrink-0 rounded-full ${DOT[state.kind]}`} title={stateText(state)} aria-hidden />}
             title={
               <span className="flex min-w-0 items-center gap-2">
@@ -77,7 +82,7 @@ export function ModulesPage() {
                 )}
               </span>
             }
-            detail={def.descriptionKey ? t(def.descriptionKey) : undefined}
+            detail={def.descriptionKey ? t(def.descriptionKey, MODULE_COMMANDS[def.id] ? keyVar(MODULE_COMMANDS[def.id]!) : undefined) : undefined}
             below={
               <>
                 {status?.lastError && (
@@ -93,13 +98,15 @@ export function ModulesPage() {
                 {(state.kind === "failed" || status?.lastError) && <Button onClick={() => void host.retry(def.id)}>{t("modules.retry")}</Button>}
                 {pack && <PackActions row={pack} name={title} />}
                 {def.required ? (
-                  <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-subtle">{t("modules.core")}</span>
+                  <Tag>{t("modules.core")}</Tag>
                 ) : (
                   <Toggle label={title} checked={host.isEnabled(def.id)} onChange={(on) => void host.setEnabled(def.id, on)} />
                 )}
               </>
             }
           />
+          </SettingsGroup>
+          </div>
         );
       })}
       <PackOnlyRows known={new Set(host.modules.map((m) => m.id))} />

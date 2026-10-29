@@ -57,7 +57,7 @@ it("limits sandbox / opaque-frame imports to their reviewed users and keeps the 
         }
         // Agent pages (§10.2): main's frame store (index.ts, plugins.ts, frames.ts) and the artifacts view only.
         if (specifier.includes("opaque-frame")) {
-          expect(["main/index.ts", "main/plugins.ts", "main/frames.ts"].some((file) => path === join(source, file)) || path === join(source, "renderer/src/modules/artifacts/PageFrame.tsx"), `${path}: ${specifier}`).toBe(true);
+          expect(["main/index.ts", "main/plugins.ts", "main/frames.ts"].some((file) => path === join(source, file)) || path === join(source, "renderer/src/modules/artifacts/PageFrame.tsx") || path === join(source, "renderer/src/components/FilePageFrame.tsx"), `${path}: ${specifier}`).toBe(true);
         }
         // Source consumers use the reviewed scoped package entry; no cross-package path bypass.
         if (specifier.startsWith(".")) expect(resolve(dirname(path), specifier).startsWith(app + sep), `${path}: ${specifier}`).toBe(true);

@@ -57,6 +57,7 @@ export function presetsOf(raw: unknown): ProfilePreset[] | null {
       ...(item.quotaReader === null || typeof item.quotaReader === "string" ? { quotaReader: str(item.quotaReader) } : {}),
       ...(typeof item.modelCatalog === "boolean" ? { modelCatalog: item.modelCatalog } : {}),
       ...(item.webSearch === null || typeof item.webSearch === "string" ? { webSearch: str(item.webSearch) } : {}),
+      ...(item.toolSchemaCompat === null || item.toolSchemaCompat === "off" || item.toolSchemaCompat === "strict" ? { toolSchemaCompat: item.toolSchemaCompat } : {}),
     });
   }
   return out.length ? out : null;

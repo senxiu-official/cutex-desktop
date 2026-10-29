@@ -6,10 +6,16 @@
 // ref.action / ref.target; their hosts landed with P1a: docs/desktop-modules.md §19; contract 1.6:
 // profile.fieldAction, §20; contract 1.7: `cutex:<kind>/<key>` links + RefTargetItem.useLink / thumbnail, §19.6;
 // contract 1.8: GutterItem.anchor, §19.3; contract 1.9: SideBodyProps.keepMounted / held, §18.13; contract 1.12:
-// project.tab, §21; contract 1.13: timeline.intro, §19.3; contract 1.14: timeline.codeBlockAction, §22).
+// project.tab, §21; contract 1.13: timeline.intro, §19.3; contract 1.14: timeline.codeBlockAction, §22; contract 1.17:
+// pane.kind, §24; contract 1.18: pane.desktop + NavItem lead / useShown / useActive, §25; contract 1.19:
+// window.search, §26; contract 1.20: pane.desktop Dock / useDockCount, PaneDesktopProps covered / tray —
+// the tray of shortcuts, canvas principles §7; contract 1.21: a `main.page` opens as its own pane in the focused
+// conversation's Shelf — services.ui.openPage / panes.open("page:<id>") — or, 页面打开位置 = 占用会话, over the
+// conversation column with its own page header, §24.4).
 // Item component types live here; types.ts / host.ts stay React-free.
 import type { ComponentType, ReactNode } from "react";
 import type { MessageKey } from "../i18n";
+import type { MenuEntry } from "../lib/contextMenu";
 import type { AgentFeature } from "../lib/agentFeatures";
 import type { SettingsAgents, SettingsGroupId, SettingsSource } from "../lib/settingsNav";
 import type { ExternalMessage, RawItem } from "../lib/timeline";
@@ -18,6 +24,8 @@ import type { DaemonApi, ProfileCreateRequest, ProfilePatch } from "../../../sha
 import type { HostPlatform } from "../../../shared/hosts";
 import type { SettingsTab } from "../store";
 import type { CustomizeRegion, CustomizeSide } from "../lib/customize";
+import type { DesktopWidgetItem } from "./widgetTypes";
+export type { DesktopWidgetItem, DesktopWidgetProps, WidgetActions, WidgetInstanceRef, WidgetSettingField, WidgetSettings, WidgetShape, WidgetSizeSpec, WidgetSource, WidgetSteps } from "./widgetTypes";
 import type { ItemId, Json, ModuleContext, ModuleDefinition, ModuleHost, PageParams, SlotEntry, SlotItemBase, SlotSpec } from "./types";
 
 export type { PageParams } from "./types";
@@ -30,9 +38,9 @@ export interface SettingsPageItem extends SlotItemBase {
   group: SettingsGroupId; // the shell fixes the group order (lib/settingsNav.ts)
   icon: Icon;
   titleKey: MessageKey; // nav label + breadcrumb
-  source: SettingsSource | null; // page-header source tag; null = sections tag themselves
+  source: SettingsSource | null; // host/device page routing; effect scopes come only from row declarations
   hintKey?: MessageKey; // what the page is for, one line above the scope chips
-  /** Second scope chip: do agents feel this page (lib/settingsNav SettingsAgents)? Unset = not reviewed yet, no chip. */
+  /** @deprecated Type compatibility only; the renderer ignores it. Effects are required row data. */
   agents?: SettingsAgents;
   /** A live preview beside the page when the column is wide, after it when narrow (components/Page PageBody). */
   Aside?: ComponentType;
@@ -82,23 +90,20 @@ export interface SettingsSearchSection {
 }
 
 /**
- * 在主界面调整 (docs/research/rfc-in-place-settings-20261018.md): a region of the main window whose local
- * settings open in a panel beside it (components/CustomizeHost). Renderer-internal, beside `settings.page`;
- * not in the plugin SDK. `settingsPage`: 全部设置 → and that page's header button 在主界面调整.
+ * 在主界面调整 (docs/research/rfc-in-place-settings-20261018.md; owner 2026-10-21): a region of the main
+ * window that goes into edit state (outlined, a 完成 bar beside it, components/CustomizeHost) while the
+ * Settings Shelf shows its settings page beside the real UI. Renderer-internal, beside `settings.page`;
+ * not in the plugin SDK. `settingsPage`: the page the Settings Shelf shows (its header button 在主界面调整).
  */
 export interface CustomizeRegionItem extends SlotItemBase {
   // default unavailable "hide"
   region: CustomizeRegion;
-  titleKey: MessageKey; // the panel title, e.g. 调整左侧栏
+  titleKey: MessageKey; // the edit bar's title, e.g. 调整左侧栏
   settingsPage: SettingsTab;
-  /** Which side of the region the panel sits on (lib/customize placeCustomizePanel); the region element is `[data-customize-region="<region>"]`. */
+  /** Which side of the region the 完成 bar sits on (lib/customize placeCustomizePanel); the region element is `[data-customize-region="<region>"]`. */
   side: CustomizeSide;
-  /** The panel's width when there is room (px; default CUSTOMIZE_PANEL_W). */
-  width?: number;
-  /** Shows the region when the panel opens on it while it is hidden (closing the panel leaves it shown). */
+  /** Shows the region when the edit starts while it is hidden (finishing leaves it shown). */
   reveal?(): void;
-  /** The panel body: the same cards as the settings page, under <CompactSettings>. */
-  Panel: ComponentType;
 }
 
 export interface SettingsSectionItem extends SlotItemBase {
@@ -260,8 +265,23 @@ export interface NavItem extends SlotItemBase {
   target: PageTarget | { run(): void | Promise<void> };
   activePages?: readonly ItemId[]; // highlighted while one of these pages is open; default = target.page
   useTitleKey?(): MessageKey | null; // a live label (正在创建…); null = titleKey
+  useHint?(): MessageKey | null; // a live tooltip line under the label (桌面: 点一下恢复布局); null = none
   useBadge?(): { text?: string; dot?: boolean; title?: string; attention?: boolean } | null; // 「⚠ N」, red dot
-  Menu?: ComponentType; // drop-down beside the entry (快速对话 → profile); only while available
+  Menu?: ComponentType; // drop-down beside the entry; not drawn since sidebar v5 (the entries are window-bar icons: use `menu`)
+  /**
+   * Sidebar v5 (design 040 §4.1, 2026-10-23): the entry's own menu, opened below its window-bar icon on right-click
+   * (快速启动's profiles; 新建智能体 opens the same). `hintKey`: a tooltip line saying so. Without it, right-click = pin / unpin.
+   */
+  menu?: { open(anchor: HTMLElement): void; hintKey: MessageKey };
+  /**
+   * v1.18 (§25): a lead entry — drawn first in the top list, above the pinned entries; never folded into
+   * 「更多」 and not pinnable. Only top-area entries.
+   */
+  lead?: boolean;
+  /** v1.18: false = the entry is not drawn at all right now (a setting turned it off). Default shown. */
+  useShown?(): boolean;
+  /** v1.18: highlighted while this is true (an entry whose target is `run()`, not a page). */
+  useActive?(): boolean;
 }
 
 /** One breadcrumb of a page's title (the title bar); the last one is the page name. */
@@ -396,6 +416,8 @@ export interface SideTabInfo {
   busy?: boolean; // green pulse on this card's icon in the page button
   attention?: number; // red count on this card's icon (pending approvals …)
   unread?: boolean; // accent dot when there is no attention
+  /** A small image for the tab (a web page's favicon): a `data:image/…` URL only — anything else is not shown (no fetch). */
+  favicon?: string;
 }
 export interface SideInstanceInfo<S> {
   id: string;
@@ -496,6 +518,8 @@ export interface SideComponentItem<S extends Json = any, P extends Json = any> e
  * omitted = not pinned until the owner pins it. `newParams` (multi only): params of a new instance (⌥ / middle click, 「新…」); omitted = `params()`.
  */
 export interface SideLauncher {
+  /** Empty Shelf section; absent means tool. Status launchers are derived separately. */
+  category?: "content" | "tool";
   order: number;
   pin?: "default" | "never";
   params(): Json | null;
@@ -611,6 +635,65 @@ export interface PaneKindItem<S extends Json = any, P extends Json = any> extend
   launcher?: SideLauncher;
 }
 
+/**
+ * v1.18 `pane.desktop` (§25): the desktop layer behind the panes — drawn by the shell in the work area
+ * where the conversation pane would be when no pane is in front of it (no conversation, every pane in
+ * the tray, or 「显示桌面」). The shell draws the first shown item; without one, today's empty state.
+ */
+export interface PaneDesktopItem extends SlotItemBase {
+  // default unavailable "hide": nothing contributes → the empty state
+  Desktop: ComponentType<PaneDesktopProps>;
+  /**
+   * Shown when nothing is in front (no conversation / every pane collapsed) — false: only after an
+   * explicit 「显示桌面」. Default true.
+   */
+  useShowWhenEmpty?(): boolean;
+  /**
+   * v1.20 (canvas principles §7, owner 2026-10-21): the tray's shortcuts. The shell draws this dock in the
+   * tray, a panel in its own band at an edge of the work area (bottom / top / left / right, §25.5); with
+   * 托盘常驻 off, while panes cover the desktop, a small handle that Ctrl+J / a click reveals over the panes
+   * (components/ChipTray). Items are laid out by the shell (a column on the left / right).
+   * `useDockCount`: how many shortcuts (0 = nothing to dock).
+   */
+  Dock?: ComponentType<PaneDockProps>;
+  useDockCount?(): number;
+}
+export interface PaneDesktopProps {
+  /**
+   * "empty": nothing is open; "desktop": the owner asked for the desktop (显示桌面, a sidebar entry);
+   * v1.20 "covered": the background only. Since 2026-10-21 (§25.4, same contract) the shell mounts the item
+   * once with "covered" as the whole window's background behind every card (always drawn, never
+   * interactive), and with "empty" / "desktop" over the work area for the content only — draw no second
+   * background there (the window's shows through). While panes cover it the content is not drawn.
+   */
+  reason: "empty" | "desktop" | "covered";
+  /** The host the empty work area belongs to (the focus host). */
+  hostId: string;
+  /** v1.20: the tray floats over the desktop's bottom (keep the content clear of it). */
+  tray?: boolean;
+}
+/** v1.20 the tray's dock (PaneDesktopItem.Dock). */
+export interface PaneDockProps {
+  /** "desktop": on screen (the tray's band, §25.5); "overlay": revealed over the panes. */
+  placement: "desktop" | "overlay";
+  /** Something was opened from it (a revealed tray hides). Its menus open with owner TRAY_MENU_OWNER (lib/trayModel): the tray stays while one is open. */
+  onUsed(): void;
+}
+
+/**
+ * v1.19 `window.search` (§26): the window bar's search field — an entry that depends on no pane (canvas
+ * principles §3). The shell draws the first shown item as a field in the middle of the window bar; a click
+ * (or Enter on it) runs `open`. Nothing contributes → no field.
+ */
+export interface WindowSearchItem extends SlotItemBase {
+  // default unavailable "hide"
+  /** The field's text (what can be searched). */
+  placeholderKey: MessageKey;
+  /** The shortcut shown at the field's end, for this platform (e.g. "Ctrl K", "⌘K"). */
+  keys?(): string;
+  open(): void;
+}
+
 /** v1.17 services.panes.open options (§24.5). */
 export interface PaneOpenOptions {
   /** Beside the focused pane (conversations: a new column; Ctrl/⌘ + click) rather than in it. */
@@ -719,6 +802,7 @@ export interface TurnAttachmentProps {
   sessionId: string;
   turnId: string;
   where: "inline" | "margin";
+  /** px. Inline: the reading column's width less its padding, in steps of 8 px (rounded down). */
   width: number;
 }
 
@@ -783,7 +867,14 @@ export interface RefActionItem extends SlotItemBase {
   icon: Icon;
   titleKey: MessageKey;
   /** Live state for the current ref, e.g. "already bookmarked" (filled icon, other title). */
-  useState?(ref: CutexRef): { active?: boolean; titleKey?: MessageKey; disabledReason?: string } | null;
+  useState?(ref: CutexRef): { active?: boolean; titleKey?: MessageKey; tooltip?: string; disabledReason?: string } | null;
+  /**
+   * Always an icon on a message's hover bar (§19.8, design 040 step 10; owner 2026-10-23: 书签). Without it the item is a
+   * row of that bar's 「⋯」 and shows as an icon only while its `useState().active` is on. Menus are unaffected.
+   */
+  inline?: boolean;
+  /** v1.26: resolved only when a menu's child opens; standalone icon buttons still use run. */
+  submenu?(ref: CutexRef): MenuEntry[] | Promise<MenuEntry[]>;
   run(ref: CutexRef): void | Promise<void>;
 }
 
@@ -798,7 +889,8 @@ export interface ProfileFieldActionItem extends SlotItemBase {
   Action: ComponentType<ProfileFieldActionProps>;
 }
 /** Profile fields a `profile.fieldAction` can fill: keys of both the PATCH and the create body. */
-export type ProfileOwnedField = keyof ProfilePatch & keyof ProfileCreateRequest;
+// Never a credential: the write-only `apiKey` (create body too since 新建 Profile P1) is not a module field.
+export type ProfileOwnedField = Exclude<keyof ProfilePatch & keyof ProfileCreateRequest, "apiKey">;
 export interface ProfileFieldActionProps {
   /**
    * Puts a value into the field's draft: the control re-reads its choices and shows it, the save bar
@@ -901,6 +993,12 @@ export interface SlotMap {
   "project.tab": ProjectTabItem;
   // Contract 1.17: pane kinds (§24); side.component / main.page items derive theirs.
   "pane.kind": PaneKindItem;
+  // Contract 1.18: the desktop layer behind the panes (§25).
+  "pane.desktop": PaneDesktopItem;
+  // Contract 1.19: the window bar's search field (§26).
+  "window.search": WindowSearchItem;
+  // Contract 1.22: desktop widgets (§27, design 032).
+  "desktop.widget": DesktopWidgetItem;
 }
 export type SlotId = keyof SlotMap;
 export type SlotItem<S extends SlotId> = SlotMap[S];
@@ -927,6 +1025,9 @@ export const SLOT_SPECS: { readonly [S in SlotId]: SlotSpec } = {
   "profile.fieldAction": { unavailable: "hide" },
   "project.tab": { unavailable: "hide" },
   "pane.kind": { unavailable: "hide" },
+  "pane.desktop": { unavailable: "hide" },
+  "window.search": { unavailable: "hide" },
+  "desktop.widget": { unavailable: "hide" },
 };
 
 /** Narrow services handed to modules (§7). Step 1 ships the part the pilot needs; the rest lands with its area. */
@@ -940,16 +1041,20 @@ export interface ModuleServices {
   ui: {
     notice(text: string, tone?: "info" | "error"): void; // = store.notify
     openSettings(page: SettingsTab, focus?: { anchor?: string; profile?: string; create?: boolean }): void;
-    /** Shows a `main.page` item (step 3); params live in memory only. */
+    /**
+     * Shows a `main.page` item (step 3); params live in memory only. v1.21 (§24.4): as its own pane in the focused
+     * conversation's Shelf (a page already open there shows these params); with 页面打开位置 = 占用会话 (or no Shelf
+     * to take it) over the focused conversation column, with its own page header. A page with an Aside: full window.
+     */
     openPage(page: ItemId, params?: PageParams): void;
-    /** Back to the conversation (closes the open page). */
+    /** Back to the conversation (closes the page over the conversation column; a page pane in a Shelf stays). */
     closePage(): void;
-    /** 在主界面调整: opens the panel of a `customize.region` (an open page closes first); open on it already: closes it. */
+    /** 在主界面调整: puts a `customize.region` into edit state, the Settings Shelf on its page beside it (an open page closes first); editing it already: finishes. */
     customize(region: CustomizeRegion): void;
   };
   /**
    * v1.17 (§24.5): open any pane kind — `core.conversation` (params `{ sessionId, hostId? }`; `beside` =
-   * a column beside the focused one), `page:<main.page id>` (params = PageParams; in the focused pane),
+   * a column beside the focused one), `page:<main.page id>` (params = PageParams; = ui.openPage, v1.21),
    * or a tool kind (`side.component` / `pane.kind` id; the right-most tool column). Says why it cannot.
    */
   panes: {

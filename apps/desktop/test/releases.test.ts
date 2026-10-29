@@ -22,8 +22,10 @@ import {
   syncMacLauncher,
   LAUNCHER_INSTALL_FILE,
   launcherSidecarRelease,
+  sidecarReleaseDir,
   type DirEntryInfo,
   type LauncherOps,
+  type PathStyle,
 } from "../src/shared/releases";
 
 const NOW = Date.parse("2026-10-15T12:00:00Z");
@@ -118,10 +120,14 @@ describe("old-releases deletion plan", () => {
   });
 });
 
+// Real files: the host's own path style and directory links (as main/releaseMaintenance and main/updater make them —
+// a junction on Windows, which needs no symlink privilege; the type is ignored elsewhere).
+const HOST: PathStyle = process.platform === "win32" ? { sep: "\\", win: true } : { sep: "/", win: false };
+
 describe("archiveOldReleases (real files)", () => {
   let root: string;
   let base: string;
-  const style = { sep: "/" as const, win: false };
+  const style = HOST;
   const ops = () => nodeReleaseOps(fs, style);
   const release = (name: string, ageHours = 48, bundle = false) => {
     const d = join(base, "releases", name);
@@ -143,12 +149,12 @@ describe("archiveOldReleases (real files)", () => {
     release("b", 90);
     const prev = release("c", 80);
     const cur = release("d", 1);
-    symlinkSync(cur, join(base, "current"));
+    symlinkSync(cur, join(base, "current"), "junction");
     // A link inside releases/ to something outside must stay, and its target untouched.
     const outside = join(root, "outside");
     mkdirSync(outside);
     writeFileSync(join(outside, "keep"), "1");
-    symlinkSync(outside, join(base, "releases", "evil"));
+    symlinkSync(outside, join(base, "releases", "evil"), "junction");
     const r = archiveOldReleases(base, ops(), { ...style, mac: false, running: cur, previous: prev, now: NOW });
     expect(r.reason).toBeUndefined();
     expect(r.moved.map((m) => m.name).sort()).toEqual(["a", "b"]);
@@ -167,7 +173,7 @@ describe("archiveOldReleases (real files)", () => {
     expect(archiveOldReleases(base, ops(), { ...style, mac: false, running: null, now: NOW }).reason).toBe("no current link");
     const elsewhere = join(root, "elsewhere");
     mkdirSync(elsewhere);
-    symlinkSync(elsewhere, join(base, "current"));
+    symlinkSync(elsewhere, join(base, "current"), "junction");
     expect(archiveOldReleases(base, ops(), { ...style, mac: false, running: null, now: NOW }).reason).toMatch(/outside/);
     expect(readdirSync(join(base, "releases")).sort()).toEqual(["a", "b", "c"]);
   });
@@ -176,10 +182,10 @@ describe("archiveOldReleases (real files)", () => {
     release("a", 100);
     release("b", 90);
     const cur = release("c", 80);
-    symlinkSync(cur, join(base, "current"));
+    symlinkSync(cur, join(base, "current"), "junction");
     const trap = join(root, "trap");
     mkdirSync(trap);
-    symlinkSync(trap, join(base, "old-releases"));
+    symlinkSync(trap, join(base, "old-releases"), "junction");
     const r = archiveOldReleases(base, ops(), { ...style, mac: false, running: null, now: NOW });
     expect(r.reason).toMatch(/not a directory inside/);
     expect(readdirSync(trap)).toEqual([]);
@@ -191,9 +197,9 @@ describe("archiveOldReleases (real files)", () => {
     release("b", 90);
     release("c", 85);
     const cur = release("d", 80);
-    symlinkSync(cur, join(base, "current"));
+    symlinkSync(cur, join(base, "current"), "junction");
     const real = ops();
-    const flaky: LauncherOps = { ...real, rename: (from, to) => (from.endsWith("/a") ? (() => { throw new Error("EBUSY: resource busy or locked"); })() : real.rename(from, to)) };
+    const flaky: LauncherOps = { ...real, rename: (from, to) => (from.endsWith(`${style.sep}a`) ? (() => { throw new Error("EBUSY: resource busy or locked"); })() : real.rename(from, to)) };
     const r = archiveOldReleases(base, flaky, { ...style, mac: false, running: null, previous: "c", now: NOW });
     expect(r.moved.map((m) => m.name)).toEqual(["b"]);
     expect(r.skipped).toEqual([{ name: "a", error: "EBUSY: resource busy or locked" }]);
@@ -204,7 +210,7 @@ describe("archiveOldReleases (real files)", () => {
     release("a", 100, true);
     const prev = release("b", 90, true);
     const cur = release("c", 80, true);
-    symlinkSync(cur, join(base, "current"));
+    symlinkSync(cur, join(base, "current"), "junction");
     const unregistered: string[] = [];
     const r = archiveOldReleases(base, { ...ops(), unregisterApp: (b) => unregistered.push(b) }, { ...style, mac: true, running: null, previous: prev, now: NOW });
     expect(r.moved.map((m) => m.name)).toEqual(["a"]);
@@ -219,7 +225,7 @@ describe("syncMacLauncher (real files, cp stands in for clonefile)", () => {
   let root: string;
   let base: string;
   let apps: string;
-  const ops = (): LauncherOps => ({ ...nodeReleaseOps(fs, { sep: "/", win: false }), clone: (from, to) => cpSync(from, to, { recursive: true, verbatimSymlinks: true }) });
+  const ops = (): LauncherOps => ({ ...nodeReleaseOps(fs, HOST), clone: (from, to) => cpSync(from, to, { recursive: true, verbatimSymlinks: true }) });
   const release = (name: string, recorded: string | null) => {
     const d = join(base, "releases", name);
     mkdirSync(join(d, "Cutex.app", "Contents", "Resources", "app"), { recursive: true });
@@ -228,7 +234,7 @@ describe("syncMacLauncher (real files, cp stands in for clonefile)", () => {
   };
   const point = (target: string) => {
     rmSync(join(base, "current"), { force: true });
-    symlinkSync(target, join(base, "current"));
+    symlinkSync(target, join(base, "current"), "junction");
   };
   const launcherRelease = () => launcherReleaseDir(readFileSync(join(apps, "Cutex.app", "Contents", "Resources", "app", "package.json"), "utf8"));
   beforeEach(() => {
@@ -350,13 +356,13 @@ describe("ReleaseMaintenance (main process, real files)", () => {
     const { ReleaseMaintenance } = await import("../src/main/releaseMaintenance");
     const cur = join(base, "releases", "cur");
     mkdirSync(cur);
-    symlinkSync(cur, join(base, "current"));
+    symlinkSync(cur, join(base, "current"), "junction");
     old("fresh", 2, 2000);
     old("expired", 31);
     const outside = join(root, "outside");
     mkdirSync(outside);
     writeFileSync(join(outside, "keep"), "1");
-    symlinkSync(outside, join(base, "old-releases", "link"));
+    symlinkSync(outside, join(base, "old-releases", "link"), "junction");
     const logs: string[] = [];
     const m = new ReleaseMaintenance(layoutFor(cur), (t) => logs.push(t));
     expect(await m.deleteOld(false)).toEqual({ deleted: ["expired"], failed: [] });
@@ -366,5 +372,18 @@ describe("ReleaseMaintenance (main process, real files)", () => {
     expect(readdirSync(join(base, "old-releases"))).toEqual(["link"]);
     expect(existsSync(join(outside, "keep"))).toBe(true);
     expect(await m.measure()).toEqual({ count: 0, bytes: 0 });
+  });
+});
+
+describe("sidecarReleaseDir", () => {
+  it("reads back the absolute release path syncMacLauncher wrote — POSIX or Windows — and nothing relative", () => {
+    const read = (releaseDir: unknown) => sidecarReleaseDir(JSON.stringify({ releaseDir }));
+    expect(read("/Users/me/cutex/releases/a")).toBe("/Users/me/cutex/releases/a");
+    expect(read("C:\\Users\\me\\cutex\\releases\\a")).toBe("C:\\Users\\me\\cutex\\releases\\a");
+    expect(read("D:/cutex/releases/a")).toBe("D:/cutex/releases/a");
+    expect(read("\\\\host\\share\\releases\\a")).toBe("\\\\host\\share\\releases\\a");
+    for (const bad of ["releases/a", "C:releases", "\\releases", "", 7, null]) expect(read(bad)).toBeNull();
+    expect(sidecarReleaseDir("not json")).toBeNull();
+    expect(sidecarReleaseDir(null)).toBeNull();
   });
 });

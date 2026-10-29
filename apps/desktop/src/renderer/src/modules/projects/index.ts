@@ -6,8 +6,11 @@ import { FolderKanban } from "lucide-react";
 import { OWNER_ROTATION_FEATURE } from "../../../../shared/directorRotation";
 import { defineModule } from "../slots";
 import { ProjectsPage } from "./ProjectsPage";
-import { RotationSettingsSection } from "./RotationSettings";
 import { useProjectsTitle } from "./useProjectsTitle";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const RotationSettingsSection = lazyPage(() => import("./RotationSettings").then((m) => m.RotationSettingsSection));
 
 export default defineModule({
   id: "projects",

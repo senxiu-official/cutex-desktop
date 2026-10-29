@@ -5,8 +5,11 @@
 // in the capsule just have no resident place until it is back; the saved choices stay.
 import { defineModule } from "../slots";
 import { revealInCapsule } from "./capsuleState";
-import { CapsuleSettingsSection } from "./CapsuleSettings";
 import { StatusCapsule } from "./StatusCapsule";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const CapsuleSettingsSection = lazyPage(() => import("./CapsuleSettings").then((m) => m.CapsuleSettingsSection));
 
 export default defineModule({
   id: "status-capsule",

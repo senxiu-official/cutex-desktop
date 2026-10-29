@@ -6,6 +6,7 @@
 // Controlled (`onIcon`): the 新建项目 form, before the project exists — the choice stays in the form
 // and is written to the pref once the project is created.
 import { useEffect, useRef, useState } from "react";
+import { isImeComposing } from "../lib/ime";
 import { createPortal } from "react-dom";
 import { useI18n, type MessageKey } from "../i18n";
 import { parseCustomIcon, projectIcon, PROJECT_ICON_COLORS, PROJECT_NAMED_SWATCHES, sameProjectColor, searchProjectEmoji, searchProjectIcons, type ProjectIconChoice } from "../lib/projectIcons";
@@ -13,6 +14,8 @@ import { projectColor } from "../lib/sidebar";
 import { setProjectIcon, useUiPrefs } from "../lib/prefs";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { ProjectBadge } from "./ProjectBadge";
+import { btn } from "./Button";
+import { isNode, ownerWindowOf } from "../lib/ownerWindow";
 
 const WIDTH = 288;
 const GRID_H = 200;
@@ -74,35 +77,37 @@ export function ProjectIconPicker({ badge, color, onColor, disabled, ...target }
 type Tab = "emoji" | "icon" | "custom";
 
 function PickerPanel({ anchor, badge, current, color, onPick, onColor, onReset, onClose }: { anchor: HTMLElement; badge: string; current: ProjectIconChoice | null; color: string; onPick(icon: ProjectIconChoice): void; onColor(c: string): void; onReset(): void; onClose(): void }) {
+  const win = ownerWindowOf(anchor);
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>(current?.kind === "icon" ? "icon" : current?.kind === "text" ? "custom" : "emoji");
   const [query, setQuery] = useState("");
   const panel = useRef<HTMLDivElement>(null);
   // Below the badge, clamped into the window; rows low on the screen open upwards instead.
   const rect = anchor.getBoundingClientRect();
-  const style = window.innerHeight - rect.bottom - 8 > GRID_H + 150 ? { top: rect.bottom + 6 } : { bottom: window.innerHeight - rect.top + 6 };
-  const left = Math.max(8, Math.min(rect.left, window.innerWidth - WIDTH - 8));
+  const style = win.innerHeight - rect.bottom - 8 > GRID_H + 150 ? { top: rect.bottom + 6 } : { bottom: win.innerHeight - rect.top + 6 };
+  const left = Math.max(8, Math.min(rect.left, win.innerWidth - WIDTH - 8));
   const emoji = tab === "emoji" ? searchProjectEmoji(query) : null;
   const icons = tab === "icon" ? searchProjectIcons(query) : null;
 
   // Esc closes; so does a click outside (the badge itself re-clicks through onClick above).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         onClose();
       }
     };
     const onDown = (e: MouseEvent) => {
-      if (!(e.target instanceof Node) || (!panel.current?.contains(e.target) && !anchor.contains(e.target))) onClose();
+      if (!isNode(e.target) || (!panel.current?.contains(e.target) && !anchor.contains(e.target))) onClose();
     };
-    window.addEventListener("keydown", onKey, true);
-    document.addEventListener("mousedown", onDown, true);
+    win.addEventListener("keydown", onKey, true);
+    win.document.addEventListener("mousedown", onDown, true);
     return () => {
-      window.removeEventListener("keydown", onKey, true);
-      document.removeEventListener("mousedown", onDown, true);
+      win.removeEventListener("keydown", onKey, true);
+      win.document.removeEventListener("mousedown", onDown, true);
     };
-  }, [anchor, onClose]);
+  }, [anchor, onClose, win]);
 
   const chip = "rounded-md px-2.5 py-1 text-xs";
   return createPortal(
@@ -198,7 +203,7 @@ function PickerPanel({ anchor, badge, current, color, onPick, onColor, onReset, 
         )}
       </div>
     </div>,
-    document.body,
+    win.document.body,
   );
 }
 
@@ -206,7 +211,8 @@ function PickerPanel({ anchor, badge, current, color, onPick, onColor, onReset, 
 function CustomPanel({ badge, current, color, onPick }: { badge: string; current: ProjectIconChoice | null; color: string; onPick(icon: ProjectIconChoice): void }) {
   const { t } = useI18n();
   const [value, setValue] = useState(current?.kind === "emoji" || current?.kind === "text" ? current.value : "");
-  const parsed = parseCustomIcon(value);
+  const [composing, setComposing] = useState(false);
+  const parsed = composing ? null : parseCustomIcon(value);
   const confirm = () => parsed && onPick(parsed);
   return (
     <div className="flex flex-col gap-2 p-3">
@@ -216,16 +222,18 @@ function CustomPanel({ badge, current, color, onPick }: { badge: string; current
           autoFocus
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && confirm()}
+          onCompositionStart={() => setComposing(true)}
+          onCompositionEnd={() => setComposing(false)}
+          onKeyDown={(e) => !composing && !isImeComposing(e) && e.key === "Enter" && confirm()}
           placeholder={t("projects.icon.customHint")}
           aria-label={t("projects.icon.customHint")}
           className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-accent"
         />
-        <button type="button" disabled={!parsed} onClick={confirm} className="rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40">
+        <button type="button" disabled={!parsed} onClick={confirm} className={btn({ variant: "primary", size: "sm" })}>
           {t("projects.icon.customUse")}
         </button>
       </div>
-      <p className={`text-xs ${value && !parsed ? "text-danger" : "text-subtle"}`}>{value && !parsed ? t("projects.icon.customInvalid") : t("projects.icon.customHint")}</p>
+      <p className={`text-xs ${!composing && value && !parsed ? "text-danger" : "text-subtle"}`}>{!composing && value && !parsed ? t("projects.icon.customInvalid") : t("projects.icon.customHint")}</p>
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { useApp, viewOf } from "../../store";
 import { timelineFromThreadRead } from "../../lib/timeline";
 import { services } from "../app";
 import { completedSummary, sideTimeline } from "./model";
-import { SideForkBlockedError } from "./errors";
+import { isSideMessageValidationError, SideForkBlockedError } from "./errors";
 
 export interface SummaryJob {
   nonce: string; turnId: string | null; status: "requesting" | "generating" | "saving" | "saved" | "failed";
@@ -127,7 +127,10 @@ export async function sendSide(hostId: string, chatId: string): Promise<void> {
     patch(key, { pendingMessage: null });
     if (useSides.getState().views[key]?.draft === pendingMessage.text) patch(key, { draft: "" });
     watchSide(hostId, chatId);
-  } catch (e) { fail(key, e); }
+  } catch (e) {
+    fail(key, e);
+    if (leases.get(key) === token && isSideMessageValidationError(errorText(e))) patch(key, { pendingMessage: null });
+  }
   finally { patch(key, { sending: false }); }
 }
 export async function interruptSide(hostId: string, chatId: string) {

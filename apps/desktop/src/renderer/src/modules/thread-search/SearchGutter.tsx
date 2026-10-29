@@ -1,5 +1,6 @@
 // The conversation search (top-left gutter popover; Ctrl+F): native `thread/searchOccurrences` on the
 // open agent's own thread through cutex, results as snippets; a click jumps to the turn (lib/jump).
+import { isImeComposing } from "../../lib/ime";
 import { useEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import type { ThreadSearchHit } from "../../../../shared/ipc";
@@ -9,6 +10,7 @@ import { jumpToTurn } from "../../lib/jump";
 import { hostApi, useApp, viewOf } from "../../store";
 import type { GutterBodyProps, GutterTriggerProps } from "../slots";
 import { searchErrorKind, searchTerm, splitSnippet } from "./model";
+import { keyVar } from "../../lib/keybindings";
 
 export function SearchTrigger({ open, toggle }: GutterTriggerProps) {
   const { t } = useI18n();
@@ -31,7 +33,7 @@ interface Results {
 function Snippet({ hit }: { hit: ThreadSearchHit }) {
   const { before, match, after } = splitSnippet(hit);
   return (
-    <span className="line-clamp-3 text-[11.5px] [overflow-wrap:anywhere] text-muted">
+    <span className="line-clamp-3 text-meta/[inherit] [overflow-wrap:anywhere] text-muted">
       {before}
       <mark className="rounded-sm bg-accent/20 px-0.5 text-foreground">{match}</mark>
       {after}
@@ -94,10 +96,10 @@ function SearchBody({ hostId, sessionId, close, docked }: GutterBodyProps) {
           maxLength={2048}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing && results?.hits[0]) {
+            if (e.key === "Enter" && !isImeComposing(e) && results?.hits[0]) {
               e.preventDefault();
               pick(results.hits[0]);
-            } else if (e.key === "Escape" && query && !e.repeat && !e.nativeEvent.isComposing && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+            } else if (e.key === "Escape" && query && !e.repeat && !isImeComposing(e) && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
               e.preventDefault();
               e.stopPropagation();
               setQuery("");
@@ -105,7 +107,7 @@ function SearchBody({ hostId, sessionId, close, docked }: GutterBodyProps) {
           }}
           className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs outline-none focus:border-accent"
         />
-        {count && <span className="shrink-0 text-[11px] text-subtle">{count}</span>}
+        {count && <span className="shrink-0 text-caption/[inherit] text-subtle">{count}</span>}
         <IconButton label={t("thread-search.close")} onClick={close}>
           <X size={13} />
         </IconButton>
@@ -113,7 +115,7 @@ function SearchBody({ hostId, sessionId, close, docked }: GutterBodyProps) {
       {!threadId ? (
         <p className="px-2 py-2 text-xs text-subtle">{t("thread-search.noThread")}</p>
       ) : !results ? (
-        <p className="px-2 py-2 text-[11px] text-subtle">{t("thread-search.hint")}</p>
+        <p className="px-2 py-2 text-caption/[inherit] text-subtle">{t("thread-search.hint", keyVar("threadSearch"))}</p>
       ) : (
         <div className="max-h-[min(60vh,28rem)] overflow-y-auto">
           {results.hits.map((hit, index) => (

@@ -1,10 +1,13 @@
 import { noteFloatPosition, noteTurnRange } from "./floating";
+import { ownerWindowOf } from "../../lib/ownerWindow";
 
 /** Read the existing timeline markers; do not change the shell or reserve any layout space. */
 export function trackNoteFloat(origin: HTMLElement, turnId: string, update: (position: NonNullable<ReturnType<typeof noteFloatPosition>>) => void, dismiss: () => void) {
   const root = origin.closest("main")?.querySelector<HTMLElement>("[data-timeline-root]");
   const scroller = root?.parentElement;
   if (!root || !scroller) { dismiss(); return () => {}; }
+  // The conversation's window (a desk window's, multi-window).
+  const win = ownerWindowOf(origin);
   let frame = 0, stopped = false;
   const measure = (reveal = false) => {
     if (stopped) return;
@@ -25,13 +28,13 @@ export function trackNoteFloat(origin: HTMLElement, turnId: string, update: (pos
       scroller.scrollBy({ top: edge() - (bounds.bottom - followingSpace), behavior: "instant" });
     }
     const first = rows[range.start]!.getBoundingClientRect();
-    const position = noteFloatPosition({ width: window.innerWidth, height: window.innerHeight }, bounds, { right: first.right, bottom: edge() });
+    const position = noteFloatPosition({ width: win.innerWidth, height: win.innerHeight }, bounds, { right: first.right, bottom: edge() });
     if (position) update(position); else dismiss();
   };
   const schedule = () => {
-    if (!frame && !stopped) frame = requestAnimationFrame(() => { frame = 0; measure(); });
+    if (!frame && !stopped) frame = win.requestAnimationFrame(() => { frame = 0; measure(); });
   };
-  const resize = new ResizeObserver(schedule);
+  const resize = new win.ResizeObserver(schedule);
   const observeRows = () => {
     resize.disconnect(); resize.observe(root); resize.observe(scroller);
     for (const row of Array.from(root.children)) resize.observe(row);
@@ -39,11 +42,11 @@ export function trackNoteFloat(origin: HTMLElement, turnId: string, update: (pos
   const mutation = new MutationObserver(() => { observeRows(); schedule(); });
   observeRows();
   mutation.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["data-turn-id"] });
-  window.addEventListener("scroll", schedule, true);
-  window.addEventListener("resize", schedule);
+  win.addEventListener("scroll", schedule, true);
+  win.addEventListener("resize", schedule);
   measure(true);
   return () => {
-    stopped = true; cancelAnimationFrame(frame); resize.disconnect(); mutation.disconnect();
-    window.removeEventListener("scroll", schedule, true); window.removeEventListener("resize", schedule);
+    stopped = true; win.cancelAnimationFrame(frame); resize.disconnect(); mutation.disconnect();
+    win.removeEventListener("scroll", schedule, true); win.removeEventListener("resize", schedule);
   };
 }

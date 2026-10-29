@@ -27,7 +27,7 @@ export function browserCarrierPreferences(hostId: string): WebPreferences {
     contextIsolation: true, sandbox: true, webSecurity: true,
     nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false,
     webviewTag: false, plugins: false, allowRunningInsecureContent: false,
-    safeDialogs: true, navigateOnDragDrop: false, spellcheck: false };
+    safeDialogs: true, navigateOnDragDrop: false, spellcheck: false, transparent: false };
 }
 export interface BrowserCarrier {
   readonly guest: WebContents;

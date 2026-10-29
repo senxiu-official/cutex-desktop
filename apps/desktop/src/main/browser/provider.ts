@@ -42,6 +42,8 @@ export interface InAppProviderOptions {
   /** Right before the provider attaches the guest's debugger / right after it let it go: a
    * background carrier's dialog guard hands the debugger over (carrier.ts). Never grants anything. */
   beforeAttach?(guestId: string): void;
+  /** Right after the provider attached: a new CDP session, without the page-scheme emulation (pageScheme.ts) — send it again. */
+  afterAttach?(guestId: string): void;
   afterDetach?(guestId: string): void;
   now?(): number;
 }
@@ -335,6 +337,7 @@ export class InAppProvider {
     try { this.options.beforeAttach?.(entry.id); } catch { /* The attach below decides. */ }
     if (debug.isAttached()) throw new ProtocolError("tab_busy", "A different debugger already controls this guest");
     try { debug.attach("1.3"); } catch { throw new ProtocolError("tab_busy", "Could not attach the browser debugger"); }
+    try { this.options.afterAttach?.(entry.id); } catch { /* Observers cannot block the binding. */ }
     const binding: Binding = { alive: true, retiring: false, scale, cleanup: [] };
     entry.binding = binding;
     const transport: CdpTransport = {

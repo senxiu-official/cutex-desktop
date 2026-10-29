@@ -15,6 +15,8 @@ import { featuresOf, useApp } from "../../store";
 import { hostData } from "../../lib/hostScope";
 import { PageBody, PageToolbar } from "../../components/Page";
 import { Button, Segmented } from "../../components/settings/Form";
+import { ArmedButton } from "../../components/ArmedButton";
+import { btnFace, btnShape } from "../../components/Button";
 import { services } from "../app";
 import type { PageParams } from "../slots";
 import { autoExpandWaiting } from "./model";
@@ -50,7 +52,7 @@ function When({ iso }: { iso: string | null | undefined }) {
   const ms = iso ? Date.parse(iso) : NaN;
   if (!Number.isFinite(ms)) return null;
   return (
-    <span className="shrink-0 text-[11px] text-subtle tabular-nums" title={formatAbsolute(ms / 1000)}>
+    <span className="shrink-0 text-caption/[inherit] text-subtle tabular-nums" title={formatAbsolute(ms / 1000)}>
       {formatWhen(ms / 1000, now, locale)}
     </span>
   );
@@ -118,7 +120,7 @@ function Bar({ value, cap }: { value: number; cap: number }) {
 function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
   return (
     <div className="mt-3">
-      <div className="mb-1 flex items-center gap-2 text-[11px] font-medium tracking-wide text-subtle uppercase">
+      <div className="mb-1 flex items-center gap-2 text-caption/[inherit] font-medium tracking-wide text-subtle uppercase">
         <span>{title}</span>
         <span className="flex-1" />
         {right}
@@ -129,7 +131,7 @@ function Section({ title, children, right }: { title: string; children: React.Re
 }
 
 function Mono({ text, max = "max-h-64" }: { text: string; max?: string }) {
-  return <pre className={`${max} overflow-auto rounded-lg bg-surface-2/60 px-3 py-2 font-mono text-[11px] leading-relaxed break-words whitespace-pre-wrap`}>{text}</pre>;
+  return <pre className={`${max} overflow-auto rounded-lg bg-surface-2/60 px-3 py-2 font-mono text-caption/[inherit] leading-relaxed break-words whitespace-pre-wrap`}>{text}</pre>;
 }
 
 const pretty = (value: unknown) => (typeof value === "string" ? value : JSON.stringify(value, null, 2));
@@ -164,7 +166,7 @@ function PlanCard({ hostId, run, claude }: { hostId: string; run: WorkflowRunVie
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const decide = async (decision: "approve" | "deny") => {
-    if (!run.approvalId) return;
+    if (!run.approvalId || note.length > 1000) return;
     setBusy(true);
     setError(null);
     try {
@@ -181,7 +183,7 @@ function PlanCard({ hostId, run, claude }: { hostId: string; run: WorkflowRunVie
   const fact = (label: string, value: React.ReactNode, mono = false) => (
     <div className="contents">
       <dt className="text-subtle">{label}</dt>
-      <dd className={`min-w-0 break-words ${mono ? "font-mono text-[11px]" : ""}`}>{value}</dd>
+      <dd className={`min-w-0 break-words ${mono ? "font-mono text-caption/[inherit]" : ""}`}>{value}</dd>
     </div>
   );
   return (
@@ -217,7 +219,7 @@ function PlanCard({ hostId, run, claude }: { hostId: string; run: WorkflowRunVie
           </span>,
         )}
         {fact(t("workflows.plan.cwd"), run.cwd, true)}
-        {run.args !== undefined && run.args !== null && fact(t("workflows.plan.args"), <span className="whitespace-pre-wrap">{JSON.stringify(run.args)}</span>, true)}
+        {run.args !== undefined && run.args !== null && fact(t("workflows.plan.args"), <span className="selectable whitespace-pre-wrap">{JSON.stringify(run.args)}</span>, true)}
         {run.draftPath && fact(t("workflows.plan.draft"), run.draftPath, true)}
         {run.resumedFrom && fact("↻", t("workflows.plan.resumedFrom", { run: run.resumedFrom }))}
       </dl>
@@ -226,11 +228,12 @@ function PlanCard({ hostId, run, claude }: { hostId: string; run: WorkflowRunVie
       <div className="mt-2 flex items-center gap-2">
         <input
           value={note}
-          onChange={(e) => setNote(e.target.value.slice(0, 1000))}
+          maxLength={1000}
+          onChange={(e) => setNote(e.target.value)}
           placeholder={t("workflows.notePlaceholder")}
           className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-accent"
         />
-        <Button disabled={busy || !run.approvalId} onClick={() => void decide("deny")}>{t("workflows.reject")}</Button>
+        <Button disabled={busy || !run.approvalId || note.length > 1000} onClick={() => void decide("deny")}>{t("workflows.reject")}</Button>
         <Button primary disabled={busy || !run.approvalId} onClick={() => void decide("approve")}>{t("workflows.approve")}</Button>
       </div>
       <p className="mt-1 h-4 truncate text-xs text-danger" title={error ?? undefined}>{error}</p>
@@ -269,7 +272,6 @@ function RunDetail({ hostId, summary }: { hostId: string; summary: WorkflowRunSu
   const { t } = useI18n();
   const { run, gone } = useRunDetailState(hostId, summary.runId);
   const resumeSupported = useApp((s) => featuresOf(s, hostId).has(WORKFLOW_RESUME_FEATURE));
-  const [armed, setArmed] = useState<"stop" | "delete" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showResult, setShowResult] = useState<unknown>(undefined);
   // One action at a time (a double-click on 继续 would start two runs); a ref so a second click before
@@ -282,21 +284,11 @@ function RunDetail({ hostId, summary }: { hostId: string; summary: WorkflowRunSu
     const names = approval?.details?.claudeProfiles;
     return Array.isArray(names) ? names.filter((n): n is string => typeof n === "string") : [];
   }, [approval]);
-  useEffect(() => {
-    if (!armed) return;
-    const id = setTimeout(() => setArmed(null), 4000);
-    return () => clearTimeout(id);
-  }, [armed]);
   if (!run) return <p className="px-3 py-3 text-xs text-subtle">{gone ? t("workflows.runGone") : "…"}</p>;
   const act = async (action: "stop" | "resume" | "delete") => {
-    if ((action === "stop" || action === "delete") && armed !== action) {
-      setArmed(action);
-      return;
-    }
     if (acting.current) return;
     acting.current = true;
     setBusy(true);
-    setArmed(null);
     setError(null);
     try {
       const r = await services.daemonFor(hostId).workflowRunAction(run.runId, action);
@@ -331,16 +323,16 @@ function RunDetail({ hostId, summary }: { hostId: string; summary: WorkflowRunSu
       {run.state === "pendingApproval" && <PlanCard hostId={hostId} run={run} claude={claude} />}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <p className="min-w-0 flex-1 text-xs text-muted">{run.state === "pendingApproval" ? null : run.description}</p>
-        <button onClick={() => copyText(run.runId)} title={t("workflows.copyId")} className="flex items-center gap-1 text-[11px] text-subtle hover:text-foreground">
+        <button onClick={() => copyText(run.runId)} title={t("workflows.copyId")} className="flex items-center gap-1 text-caption/[inherit] text-subtle hover:text-foreground">
           <Copy size={11} /> {run.runId}
         </button>
         {open && run.state !== "pendingApproval" && (
-          <Button onClick={() => void act("stop")} disabled={busy || run.state === "stopping"}>{t(armed === "stop" ? "workflows.stopConfirm" : "workflows.stop")}</Button>
+          <ArmedButton shape={btnShape()} idle={btnFace()} hint={t("workflows.stopConfirm")} onConfirm={() => void act("stop")} disabled={busy || run.state === "stopping"} testId="workflow-stop">{t("workflows.stop")}</ArmedButton>
         )}
         {!open && resumeSupported && ["stopped", "errored", "expired"].includes(run.state) && (
           <Button onClick={() => void act("resume")} disabled={busy} title={t("workflows.resumeHint")}>{t("workflows.resume")}</Button>
         )}
-        {!open && <Button onClick={() => void act("delete")} disabled={busy}>{t(armed === "delete" ? "workflows.deleteConfirm" : "workflows.delete")}</Button>}
+        {!open && <ArmedButton shape={btnShape()} idle={btnFace()} hint={t("workflows.deleteConfirm")} onConfirm={() => void act("delete")} disabled={busy} testId="workflow-delete">{t("workflows.delete")}</ArmedButton>}
       </div>
       {error && <p className="mt-1 text-xs text-danger">{t("workflows.actionFailed", { error })}</p>}
       {run.state !== "pendingApproval" && (
@@ -393,7 +385,7 @@ function RunDetail({ hostId, summary }: { hostId: string; summary: WorkflowRunSu
           ) : (
             [...groups.entries()].map(([phase, steps]) => (
               <div key={phase || "-"} className="mb-1">
-                {groups.size > 1 && <div className="mt-1 text-[11px] text-subtle">{phase || t("workflows.ungrouped")}</div>}
+                {groups.size > 1 && <div className="mt-1 text-caption/[inherit] text-subtle">{phase || t("workflows.ungrouped")}</div>}
                 {steps.map((s) => (
                   <StepRow key={s.stepKey} step={s} />
                 ))}
@@ -407,7 +399,7 @@ function RunDetail({ hostId, summary }: { hostId: string; summary: WorkflowRunSu
           {log.length === 0 ? (
             <p className="text-xs text-subtle">{t("workflows.noLog")}</p>
           ) : (
-            <div className="max-h-48 overflow-auto rounded-lg bg-surface-2/60 px-3 py-1.5 font-mono text-[11px] leading-relaxed">
+            <div className="max-h-48 overflow-auto rounded-lg bg-surface-2/60 px-3 py-1.5 font-mono text-caption/[inherit] leading-relaxed">
               {log.map((l) => (
                 <div key={l.seq} className={l.level === "warn" ? "text-warn" : ""}>
                   <span className="mr-2 text-subtle">{new Date(l.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
@@ -421,14 +413,14 @@ function RunDetail({ hostId, summary }: { hostId: string; summary: WorkflowRunSu
       {run.hasResult && (
         <Section
           title={t("workflows.result")}
-          right={showResult === undefined && <button onClick={() => void loadResult()} className="text-[11px] normal-case text-accent hover:underline">{t("workflows.showFullResult")}</button>}
+          right={showResult === undefined && <button onClick={() => void loadResult()} className="text-caption/[inherit] normal-case text-accent hover:underline">{t("workflows.showFullResult")}</button>}
         >
           <Mono text={showResult !== undefined ? pretty(showResult) : (run.resultPreview ?? "")} />
         </Section>
       )}
       {run.state !== "pendingApproval" && (
         <Section title={t("workflows.plan.script")}>
-          {run.draftPath && <p className="mb-1 font-mono text-[11px] text-subtle">{run.draftPath}</p>}
+          {run.draftPath && <p className="mb-1 font-mono text-caption/[inherit] text-subtle">{run.draftPath}</p>}
           <ScriptFold hostId={hostId} runId={run.runId} />
         </Section>
       )}

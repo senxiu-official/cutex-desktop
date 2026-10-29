@@ -4,6 +4,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PreloadBridge, ProfileModelsView, ProfilePatch } from "../src/shared/ipc";
 import type { MenuAction, MenuEntry } from "../src/renderer/src/lib/contextMenu";
+
+function staticSubmenu(entries: MenuAction["submenu"]): MenuEntry[] {
+  expect(Array.isArray(entries)).toBe(true);
+  if (!Array.isArray(entries)) throw new Error("Expected a static submenu fixture");
+  return entries;
+}
 import { defaultModelMenu } from "../src/renderer/src/lib/profileDefaultModel";
 import { defaultModelEditable, PROFILE_FEATURES } from "../src/renderer/src/lib/profileKind";
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";
@@ -112,9 +118,9 @@ describe("defaultModelMenu", () => {
     const opus = actions(defaultModelMenu({ view: claudeView, profileId: "c", claude: true, model: "claude-opus-5-5", effort: "high", modelName: named, labels, onPick: () => {} }));
     const effort = opus.find((e) => e.label === "Effort")!;
     expect(effort.hint).toBe("high");
-    expect(actions(effort.submenu!).map((e) => e.label)).toEqual(["Model default", "low", "high", "max"]);
+    expect(actions(staticSubmenu(effort.submenu)).map((e) => e.label)).toEqual(["Model default", "low", "high", "max"]);
     const sonnet = actions(defaultModelMenu({ view: claudeView, profileId: "c", claude: true, model: "sonnet", effort: null, modelName: named, labels, onPick: () => {} }));
-    expect(actions(sonnet.find((e) => e.label === "Effort")!.submenu!).map((e) => e.label)).toEqual(["Model default", "low", "medium", "high", "xhigh", "max"]);
+    expect(actions(staticSubmenu(sonnet.find((e) => e.label === "Effort")!.submenu)).map((e) => e.label)).toEqual(["Model default", "low", "medium", "high", "xhigh", "max"]);
     // A Codex model without levels: no effort row.
     const codex = actions(defaultModelMenu({ view: view([{ id: "relay-model" }], "relay-model"), profileId: "r", claude: false, model: "relay-model", effort: null, modelName: named, labels, onPick: () => {} }));
     expect(codex.map((e) => e.label)).toEqual(["relay-model"]);

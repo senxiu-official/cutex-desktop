@@ -39,7 +39,8 @@ export function takeSideText(token?: string): string {
   return text;
 }
 export function forkInput(params: SideParams, scope: string, model: string): SideOpenInput {
+  const selectedModel = params.model?.trim() || model.trim();
   return { ...(params.turnId ? { anchorTurnId: params.turnId } : {}),
     ...(params.lastTurnId ? { lastTurnId: params.lastTurnId } : scope === "through" && params.turnId ? { lastTurnId: params.turnId } : {}),
-    ...(params.model || model.trim() ? { model: params.model ?? model.trim() } : {}) };
+    ...(selectedModel ? { model: selectedModel } : {}) };
 }

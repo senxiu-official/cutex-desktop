@@ -4,6 +4,7 @@ import { useI18n } from "../i18n";
 import type { AgentEnvelope, DeliveryKind } from "../lib/agentMessages";
 import { useAgentMessage } from "../lib/agentMessageStore";
 import { formatAbsolute } from "../lib/time";
+import { Tag } from "./Tag";
 
 /** 留言 / 唤醒; `downgraded`: a wake the loop guard delivered as a note (shown as 留言 · 已降级).
  *  `wakeHint`: the 唤醒 tooltip when the caller knows better (cutex wake-busy-wait). */
@@ -12,11 +13,11 @@ export function KindTag({ kind, downgraded = false, wakeHint }: { kind: Delivery
   if (!kind) return null;
   return (
     <>
-      <span className={`shrink-0 rounded px-1.5 py-px text-[10px] whitespace-nowrap ${kind === "wake" ? "bg-accent/10 text-accent" : "bg-surface-2 text-muted"}`} title={kind === "wake" ? (wakeHint ?? t("agentMsg.kind.wakeHint")) : t("agentMsg.kind.noteHint")} data-testid="delivery-kind">
+      <Tag tone={kind === "wake" ? "accent" : "neutral"} title={kind === "wake" ? (wakeHint ?? t("agentMsg.kind.wakeHint")) : t("agentMsg.kind.noteHint")} data-testid="delivery-kind">
         {t(kind === "wake" ? "agentMsg.kind.wake" : "agentMsg.kind.note")}
-      </span>
+      </Tag>
       {downgraded && (
-        <span className="shrink-0 text-[10px] whitespace-nowrap text-subtle" title={t("agentMsg.kind.downgradedHint")}>
+        <span className="shrink-0 text-caption/[inherit] whitespace-nowrap text-subtle" title={t("agentMsg.kind.downgradedHint")}>
           {t("agentMsg.kind.downgraded")}
         </span>
       )}
@@ -33,12 +34,13 @@ export function SentStatus({ messageId }: { messageId: string }) {
   const record = useAgentMessage(messageId);
   const state = record?.state ?? "pending";
   const at = record?.deliveredAt ?? null;
-  const label = state === "delivered" ? (at ? t("agentMsg.state.deliveredAt", { time: formatAbsolute(at).slice(11, 16) }) : t("agentMsg.state.delivered")) : state === "failed" ? t("agentMsg.state.failed") : t("agentMsg.state.pending");
-  const title = state === "failed" ? (record?.error ?? undefined) : state === "delivered" ? (at ? formatAbsolute(at) : undefined) : t("agentMsg.state.pendingHint");
-  const dot = state === "delivered" ? "bg-accent" : state === "failed" ? "bg-danger" : "border border-subtle";
+  const settlement = record?.settlement;
+  const label = settlement ? t(settlement.state === "closed" ? "agent-bus.settlement.closed" : "agent-bus.settlement.unknown") : state === "delivered" ? (at ? t("agentMsg.state.deliveredAt", { time: formatAbsolute(at).slice(11, 16) }) : t("agentMsg.state.delivered")) : state === "failed" ? t("agentMsg.state.failed") : t("agentMsg.state.pending");
+  const title = settlement ? t("agent-bus.settlement.disclaimer") : state === "failed" ? (record?.error ?? undefined) : state === "delivered" ? (at ? formatAbsolute(at) : undefined) : t("agentMsg.state.pendingHint");
+  const dot = settlement?.state === "outcome_unknown" ? "bg-warn-text" : state === "delivered" ? "bg-accent" : state === "failed" ? "bg-danger" : "border border-subtle";
   const text = state === "failed" ? "text-danger" : state === "delivered" ? "text-muted" : "text-subtle";
   return (
-    <span className={`flex shrink-0 items-center gap-1 text-[11px] whitespace-nowrap ${text}`} title={title} data-testid="sent-status" data-state={state}>
+    <span className={`flex shrink-0 items-center gap-1 text-caption/[inherit] whitespace-nowrap ${text}`} title={title} data-testid="sent-status" data-state={settlement?.state ?? state}>
       <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`} />
       {label}
     </span>
@@ -52,7 +54,7 @@ export function SentStatus({ messageId }: { messageId: string }) {
  */
 export function EnvelopeBadges({ envelope, reveal = "" }: { envelope: AgentEnvelope; reveal?: string }) {
   const { t } = useI18n();
-  const badge = "shrink-0 rounded border border-border px-1 py-px text-[10px] whitespace-nowrap";
+  const badge = "shrink-0 rounded border border-border px-1 py-px text-caption/[inherit] whitespace-nowrap";
   return (
     <>
       {envelope.narrower && (

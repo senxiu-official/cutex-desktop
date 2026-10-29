@@ -2,10 +2,15 @@
 // lists back the right-click menu and the hover "⋯" buttons, so actions never diverge.
 import { useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { AgentInfo, AgentInfoOptions } from "./avatar";
+import type { Foretell } from "./foretell";
 import { captureHostAction, onHostSwitch } from "./hostSwitch";
+import { activeAppDocument } from "./appWindowSet";
+import { isHTMLElement, ownerDocumentOf, selectionOf } from "./ownerWindow";
 
 export interface MenuAction {
   label: string;
+  /** Hidden until this main-backed eligibility check succeeds; no result is cached across menus. */
+  available?(): Promise<boolean>;
   /** Rendered instead of `label` in the row (a `ref.action` item's live state, lib/refActions.tsx); `label` stays the text. */
   labelNode?: ReactNode;
   icon?: ReactNode;
@@ -15,6 +20,12 @@ export interface MenuAction {
   disabled?: boolean;
   /** Tooltip of the row, e.g. why it is disabled right now. */
   title?: string;
+  /**
+   * What the row does, in a sentence: shown as a small ⓘ at the row's right and as a tooltip on hover / keyboard highlight
+   * (and read as the button's description). Use this instead of a grey note row under the item; a note that reports the
+   * result of an armed confirm or a live state stays an inline row (design 040 §2).
+   */
+  info?: string;
   /** Non-interactive text row (e.g. a full file path; selectable, wraps); `hint` goes below. Set `disabled` too. */
   note?: boolean;
   /** Ask before running (destructive / interrupting actions). */
@@ -24,8 +35,15 @@ export interface MenuAction {
    * and turns the row into this text in the danger style; a second select within ARMED_TIMEOUT_MS runs it.
    */
   armed?: string;
+  /**
+   * Confirm in place after looking something up (a count): the first select shows `preparing` (else the label)
+   * in the row while this runs; `{ armed }` then arms the row with that text (as `armed`), `{ empty }` shows
+   * that text in the row for a moment instead (nothing to do). The second select runs `onSelect`.
+   */
+  prepare?(): Promise<{ armed: string } | { empty: string }>;
+  preparing?: string;
   /** A "›" row: hovering / clicking opens these items beside it (`onSelect` is not used). */
-  submenu?: MenuEntry[];
+  submenu?: MenuEntry[] | (() => Promise<MenuEntry[]>);
   /**
    * A "›" row whose flyout is custom content (mounted only while open, e.g. live quota rows); its
    * clickable rows use `role="menuitem"` so → / ↑ ↓ / Enter reach them. `onSelect` is not used.
@@ -33,6 +51,11 @@ export interface MenuAction {
   flyout?: ReactNode;
   /** A small on / off button at the row's end (e.g. pin a launcher to the title bar); clicking it keeps the menu open. */
   toggle?: MenuToggle;
+  /**
+   * 动作预告 (docs/design/008): a row that changes the layout says what it will do while it is hovered or
+   * keyboard-highlighted — computed by the same effect its `onSelect` runs (lib/workspaceEffects).
+   */
+  foretell?(): Foretell | null;
   onSelect(): void | Promise<void>;
 }
 export interface MenuToggle {
@@ -55,6 +78,8 @@ interface MenuState {
   /** Who opened it (a trigger shows itself pressed while its menu is open). */
   owner?: string;
   minWidth?: number;
+  /** The document it opens in: its trigger's, else the app window in front (multi-window, lib/ownerWindow). */
+  doc?: Document;
 }
 
 /**
@@ -72,12 +97,15 @@ type Dialog =
   | { kind: "prompt"; title: string; initial: string; placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck; resolve(value: string | null): void }
   /** In-app folder browser over a host's daemon (`fs-dir-browse`; remote hosts; null host = the focus host). */
   | { kind: "folder"; start: string | null; hostId: string | null; resolve(value: string | null): void }
+  | { kind: "forkProfile"; sessionId: string; hostId: string; afterTurnId: string | null; resolve(value: null): void }
   /** 编辑信息: an agent's avatar + note (name / color only for the preview). */
   | { kind: "agentInfo"; name: string; color: string | null; seed: string; initial: AgentInfo; options: AgentInfoOptions; resolve(value: AgentInfo | null): void };
 
 interface State {
   menu: MenuState | null;
   dialog: Dialog | null;
+  /** The document the dialog opens in: the app window in front when it was asked for. */
+  dialogDoc?: Document;
 }
 
 let state: State = { menu: null, dialog: null };
@@ -107,20 +135,55 @@ export function normalizeEntries(entries: MenuEntry[]): (MenuAction | "separator
   return out;
 }
 
-export function openMenuAt(x: number, y: number, entries: MenuEntry[]): void {
+/** What had the focus when the open menu was opened (its ⋯ button; a right-click: whatever was focused). */
+let opener: HTMLElement | null = null;
+
+/** The element the last menu was opened from (an action that opens something can give the focus back to it). */
+export function menuOpener(): HTMLElement | null {
+  return opener?.isConnected ? opener : null;
+}
+
+/** The document of the app window in front (the main window's unless a desk window has the focus). */
+const frontDocument = (): Document | undefined => (typeof document === "undefined" ? undefined : activeAppDocument());
+
+function showMenu(menu: MenuState): void {
+  if (!menu.doc) menu = { ...menu, doc: frontDocument() };
+  const doc = menu.doc;
+  if (doc) {
+    const active = doc.activeElement;
+    opener = isHTMLElement(active) && active !== doc.body ? active : null;
+  }
+  const pending = menu.items.some((item) => item !== "separator" && item.available);
+  if (!pending) { set({ menu }); return; }
+  const initial: MenuState = { ...menu, items: normalizeEntries(menu.items.filter((item) => item === "separator" || !item.available)) };
+  set({ menu: initial });
+  void Promise.all(menu.items.map(async (item): Promise<MenuEntry> => {
+    if (item === "separator" || !item.available) return item;
+    try { return await item.available() ? item : null; }
+    catch { return null; }
+  })).then((entries) => {
+    // Closing/replacing the menu while main checks a path must never reopen it.
+    if (state.menu !== initial) return;
+    const items = normalizeEntries(entries);
+    set({ menu: items.length ? { ...menu, items } : null });
+  });
+}
+
+/** `doc`: the window it opens in (default: the app window in front). */
+export function openMenuAt(x: number, y: number, entries: MenuEntry[], options: { owner?: string; doc?: Document } = {}): void {
   const items = normalizeEntries(entries);
-  if (items.length) set({ menu: { x, y, items } });
+  if (items.length) showMenu({ x, y, items, ...options });
 }
 
 /** `onContextMenu` handler factory. Items are built lazily so menus always reflect current state. */
 export function contextMenu(build: () => MenuEntry[]) {
   return (e: ReactMouseEvent) => {
     // Selected text inside the target: leave it to the native menu (Copy / Search), see main/index.ts.
-    const sel = window.getSelection();
+    const sel = selectionOf(e.currentTarget);
     if (sel && !sel.isCollapsed && sel.toString().trim() && sel.containsNode(e.target as Node, true)) return;
     e.preventDefault();
     e.stopPropagation();
-    openMenuAt(e.clientX, e.clientY, build());
+    openMenuAt(e.clientX, e.clientY, build(), { doc: ownerDocumentOf(e.currentTarget) });
   };
 }
 
@@ -128,7 +191,7 @@ export function contextMenu(build: () => MenuEntry[]) {
 export function openMenuFrom(el: HTMLElement, entries: MenuEntry[], options: { owner?: string } = {}): void {
   const r = el.getBoundingClientRect();
   const items = normalizeEntries(entries);
-  if (items.length) set({ menu: { x: r.left, y: r.bottom + 4, items, ...options } });
+  if (items.length) showMenu({ x: r.left, y: r.bottom + 4, items, ...options, doc: ownerDocumentOf(el) });
 }
 
 /**
@@ -138,7 +201,7 @@ export function openMenuFrom(el: HTMLElement, entries: MenuEntry[], options: { o
 export function openMenuAbove(el: HTMLElement, entries: MenuEntry[], options: { owner?: string; minWidth?: number } = {}): void {
   const r = el.getBoundingClientRect();
   const items = normalizeEntries(entries);
-  if (items.length) set({ menu: { x: r.left, y: r.top - 4, items, above: true, ...options } });
+  if (items.length) showMenu({ x: r.left, y: r.top - 4, items, above: true, ...options, doc: ownerDocumentOf(el) });
 }
 
 /** The `owner` of the open menu (null: none open / opened without one). */
@@ -157,9 +220,9 @@ export function closeMenu(): void {
  * position: fixed, so nothing under it moving changes where it is). A scrollbar drag starts with a
  * mousedown, which closes it already; wheel / touch inside the menu (a long submenu) keeps it.
  */
-export function watchMenuDismiss(menu: () => Element | null, close: () => void, win: Window = window): () => void {
+export function watchMenuDismiss(menu: () => Element | null, close: () => void, win: Window = window, contains?: (target: EventTarget | null) => boolean): () => void {
   const outside = (e: Event) => {
-    if (!menu()?.contains(e.target as Node)) close();
+    if (!(contains ? contains(e.target) : menu()?.contains(e.target as Node))) close();
   };
   const opts = { capture: true, passive: true } as const;
   win.addEventListener("blur", close);
@@ -176,7 +239,7 @@ export function watchMenuDismiss(menu: () => Element | null, close: () => void, 
 
 /** What selecting a row does now: arm it in place first (`armed` rows), else run it. */
 export function selectStep(action: MenuAction, armedNow: MenuAction | null): "arm" | "run" {
-  return action.armed && !action.disabled && !action.submenu && !action.flyout && armedNow !== action ? "arm" : "run";
+  return (action.armed || action.prepare) && !action.disabled && !action.submenu && !action.flyout && armedNow !== action ? "arm" : "run";
 }
 
 export async function runAction(action: MenuAction): Promise<void> {
@@ -194,29 +257,36 @@ export interface ConfirmLabels {
   cancel: string;
 }
 
+/** A dialog opens in the app window in front (the one the owner acted in). */
+const showDialog = (dialog: Dialog) => set({ dialog, dialogDoc: frontDocument() });
+
 /** `check`: an optional checkbox; its final state is written back to `check.checked`. */
 export function confirmDialog(message: string, danger = false, labels?: ConfirmLabels, check?: DialogCheck): Promise<boolean> {
-  return new Promise((resolve) => set({ dialog: { kind: "confirm", message, danger, labels, check, resolve } }));
+  return new Promise((resolve) => showDialog({ kind: "confirm", message, danger, labels, check, resolve }));
 }
 
 /** A message with a single OK button (e.g. why cutex refused a delete). */
 export function noticeDialog(message: string): Promise<void> {
-  return new Promise((resolve) => set({ dialog: { kind: "confirm", message, danger: false, notice: true, resolve: () => resolve() } }));
+  return new Promise((resolve) => showDialog({ kind: "confirm", message, danger: false, notice: true, resolve: () => resolve() }));
 }
 
 /** Electron has no window.prompt — this is the replacement. Resolves null on cancel. */
 export function promptDialog(title: string, initial = "", options: { placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck } = {}): Promise<string | null> {
-  return new Promise((resolve) => set({ dialog: { kind: "prompt", title, initial, ...options, resolve } }));
+  return new Promise((resolve) => showDialog({ kind: "prompt", title, initial, ...options, resolve }));
 }
 
 /** Pick a folder on `hostId` (default: the focus host) with the in-app browser; null on cancel. */
 export function folderDialog(start?: string | null, hostId?: string): Promise<string | null> {
-  return new Promise((resolve) => set({ dialog: { kind: "folder", start: start?.trim() || null, hostId: hostId ?? null, resolve } }));
+  return new Promise((resolve) => showDialog({ kind: "folder", start: start?.trim() || null, hostId: hostId ?? null, resolve }));
 }
 
 /** Edit an agent's avatar and note; null on cancel. */
 export function agentInfoDialog(name: string, color: string | null, seed: string, initial: AgentInfo, options: AgentInfoOptions): Promise<AgentInfo | null> {
-  return new Promise((resolve) => set({ dialog: { kind: "agentInfo", name, color, seed, initial, options, resolve } }));
+  return new Promise((resolve) => showDialog({ kind: "agentInfo", name, color, seed, initial, options, resolve }));
+}
+
+export function forkProfileDialog(sessionId: string, hostId: string, afterTurnId: string | null): Promise<void> {
+  return new Promise((resolve) => showDialog({ kind: "forkProfile", sessionId, hostId, afterTurnId, resolve: () => resolve() }));
 }
 
 export function closeDialog(): void {

@@ -14,7 +14,7 @@ import { chromiumProxyRules, isProxyParseError, parseProxyUrl, type UpdateProxyR
 import type { UpdateProxyConfig } from "./updateNet";
 import type { CloseBehavior, DesktopPrefs, ShellCommand, ShellLocale, ShellState } from "../shared/ipc";
 import { parseDeviceOff, type DeviceOff } from "../shared/notificationLevels";
-import { attentionCount, closeAction, editMenuLabels, effectiveCloseBehavior, overlayDescription, parseNameHasOwner, parsePrefs, parseTerms, resolveLocale, trayMenuLabels, trayNoticeText, trayTooltip, type TrayHost } from "../shared/shell";
+import { attentionCount, closeAction, editMenuLabels, effectiveCloseBehavior, multiWindowChange, openMultiWindowMigration, overlayDescription, parseNameHasOwner, parsePrefs, parseTerms, resolveLocale, trayMenuLabels, trayNoticeText, trayTooltip, type TrayHost } from "../shared/shell";
 import icon16 from "../../resources/icons/icon-16.png?asset";
 import icon24 from "../../resources/icons/icon-24.png?asset";
 import icon32 from "../../resources/icons/icon-32.png?asset";
@@ -76,6 +76,8 @@ function osUserName(): string | null {
 
 export class DesktopShell {
   private prefs: DesktopPrefs;
+  /** The renderer's old 多窗口 value may still be adopted (first run storing it, not used yet). */
+  private multiWindowMigration = false;
   private tray: Tray | null = null;
   private trayHost: TrayHost = "unknown";
   private noticeOpen = false;
@@ -83,6 +85,11 @@ export class DesktopShell {
   private attention = 0;
   private lastBlur = 0;
   private icons: { normal: NativeImage; dot: NativeImage; overlay: NativeImage } | null = null;
+  /**
+   * The desk windows (multi-window, main/deskShell.ts). The main window stays the primary one for the tray,
+   * close-to-tray and quit: hiding it to the tray hides every desk, showing it brings them back.
+   */
+  desks: { windows(): BrowserWindow[]; hideAll(): void; showAll(): void } | null = null;
 
   constructor(
     private readonly getWindow: () => BrowserWindow | null,
@@ -90,7 +97,12 @@ export class DesktopShell {
     private readonly createWindow: () => void,
     private readonly sendCommand: (command: ShellCommand) => void,
   ) {
-    this.prefs = this.load();
+    // 多窗口: the renderer's old value may come in once, this run only (shared/shell.ts multiWindowChange).
+    const loaded = this.load();
+    const opened = openMultiWindowMigration(loaded);
+    this.prefs = opened.prefs;
+    this.multiWindowMigration = opened.migrationOpen;
+    if (opened.migrationOpen) this.save();
     app.on("before-quit", () => (this.quitting = true));
   }
 
@@ -121,9 +133,10 @@ export class DesktopShell {
       this.tray.on("click", () => {
         if (process.platform !== "win32") return;
         const win = this.getWindow();
-        // Clicking the tray focuses the taskbar first, so "focused" = focused until just now.
-        const focused = win && (win.isFocused() || Date.now() - this.lastBlur < 400);
-        if (win && focused && win.isVisible() && !win.isMinimized()) win.hide();
+        // Clicking the tray focuses the taskbar first, so "focused" = focused until just now. Any app
+        // window counts (a desk on the other display included); hiding hides them all.
+        const focused = win && (win.isFocused() || this.desks?.windows().some((w) => w.isFocused()) || Date.now() - this.lastBlur < 400);
+        if (win && focused && win.isVisible() && !win.isMinimized()) this.hideWindow(win);
         else this.show();
       });
     } catch (error) {
@@ -163,6 +176,7 @@ export class DesktopShell {
   }
 
   private hideWindow(win: BrowserWindow): void {
+    this.desks?.hideAll();
     // macOS native full screen: hiding the window there leaves its full-screen Space behind as a
     // black screen (only the Dock's 退出 got out). Leave full screen first, then hide.
     if (win.isFullScreen()) {
@@ -200,9 +214,16 @@ export class DesktopShell {
       this.createWindow();
       return;
     }
+    this.desks?.showAll();
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
+  }
+
+  /** A desk window was created: it shows the same attention badge (Windows taskbar) and tracks blur like the main window. */
+  attachDesk(win: BrowserWindow): void {
+    win.on("blur", () => (this.lastBlur = Date.now()));
+    this.applyAttentionTo(win);
   }
 
   quit(): void {
@@ -244,6 +265,23 @@ export class DesktopShell {
     this.prefs = value ? rest : { ...rest, allowRemoteClose: false };
     this.save();
     this.onAllowRemoteCloseChanged?.(value);
+    return this.state();
+  }
+
+  /** 多窗口 (Settings → 通用 → 窗口; absent = off): main/deskShell issues and admits desk tickets only while on. */
+  get multiWindow(): boolean {
+    return this.prefs.multiWindow === true;
+  }
+
+  /** The owner's switch (`set`) or the renderer's one-time old value (`migrate`, ignored once used up). Off keeps open desks. */
+  setMultiWindow(kind: "set" | "migrate", value: unknown): ShellState {
+    if (typeof value !== "boolean") throw new Error("bad value");
+    const next = multiWindowChange(this.prefs, this.multiWindowMigration, { kind, value });
+    this.multiWindowMigration = next.migrationOpen;
+    if (next.changed) {
+      this.prefs = next.prefs;
+      this.save();
+    }
     return this.state();
   }
 
@@ -357,12 +395,16 @@ export class DesktopShell {
       this.tray.setImage(count > 0 ? this.icons.dot : this.icons.normal);
       this.tray.setToolTip(trayTooltip(count, this.locale, this.prefs.terms));
     }
-    const win = this.getWindow();
-    if (process.platform === "win32" && win && !win.isDestroyed()) {
-      win.setOverlayIcon(count > 0 ? (this.icons?.overlay ?? nativeImage.createFromBuffer(overlayPng(16))) : null, count > 0 ? overlayDescription(count, this.locale, this.prefs.terms) : "");
-    }
+    // Windows: every app window has its own taskbar button, each with the same badge.
+    for (const win of [this.getWindow(), ...(this.desks?.windows() ?? [])]) if (win) this.applyAttentionTo(win);
     // macOS dock / Linux Unity launcher; a no-op (returns false) elsewhere.
     if (process.platform !== "win32") app.setBadgeCount(count);
+  }
+
+  private applyAttentionTo(win: BrowserWindow): void {
+    const count = this.attention;
+    if (process.platform !== "win32" || win.isDestroyed()) return;
+    win.setOverlayIcon(count > 0 ? (this.icons?.overlay ?? nativeImage.createFromBuffer(overlayPng(16))) : null, count > 0 ? overlayDescription(count, this.locale, this.prefs.terms) : "");
   }
 
   private rebuildMenu(): void {

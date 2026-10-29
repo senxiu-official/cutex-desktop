@@ -50,17 +50,17 @@ describe("stop hold state", () => {
 });
 
 describe("labels", () => {
-  it("held groups: 已随停止暂停 / 委托已暂停", () => {
+  it("held groups: 已随停止暂停 / 新委托已暂停", () => {
     expect(zhCN[heldKeys("ownerStop").strip]).toBe("已随停止暂停");
-    expect(zhCN[heldKeys("ownerPause").strip]).toBe("委托已暂停");
+    expect(zhCN[heldKeys("ownerPause").strip]).toBe("新委托已暂停");
     expect(en[heldKeys("ownerStop").strip]).toBe("Held by stop");
     expect(zhCN[heldKeys("ownerStop").hint]).toContain("继续发送");
   });
 
-  it("the asks-paused section: a stop hold offers 继续发送 (queue resume); 暂停委托 offers 继续 (asks resume)", () => {
+  it("the asks-paused section: a stop hold offers 继续发送 (queue resume); 暂停新委托 offers 继续 (asks resume)", () => {
     const stop = asksPausedKeys(pause("ownerStop", true));
     expect(stop.resume).toBe("queue");
-    expect(zhCN[stop.title]).toBe("委托已随停止暂停");
+    expect(zhCN[stop.title]).toBe("新委托已随停止暂停");
     expect(zhCN[stop.button]).toBe("继续发送");
     expect(zhCN[stop.buttonHint]).toContain("全部");
     const owner = asksPausedKeys(pause("ownerPause"));

@@ -10,7 +10,8 @@ export const GENERAL_SEARCH: Search = {
   sections: [
     { anchor: "language", titleKey: "shell.general.language", keywords: ["shell.language", "shell.dateFormat", "shell.numberFormat"] },
     { anchor: "terms", titleKey: "terms.title", keywords: ["terms.singular", "terms.plural"] },
-    { anchor: "window", titleKey: "shell.general.window", keywords: ["shell.closeWindow", "shell.closeWindow.tray", "remoteClose.allow"] },
+    { anchor: "window", titleKey: "shell.general.window", keywords: ["shell.closeWindow", "shell.closeWindow.tray", "remoteClose.allow", "desk.setting"] },
+    { anchor: "performance", titleKey: "shell.perf.title", keywords: ["shell.perf.mode", "shell.perf.save", "shell.perf.smooth", "shell.perf.keywords"] },
   ],
 };
 
@@ -50,17 +51,22 @@ export const APPEARANCE_SEARCH: Search = {
     {
       anchor: "fonts",
       titleKey: "appearance.fonts",
-      keywords: ["appearance.uiFont", "appearance.cjkFont", "appearance.chatFont", "appearance.chatCjkFont", "appearance.chatFontSize", "appearance.monoFont", "appearance.monoFontSize"],
+      keywords: ["appearance.uiFont", "appearance.cjkFont", "appearance.chatFont", "appearance.chatCjkFont", "appearance.chatFontSize", "appearance.monoFont", "appearance.monoFontSize", "appearance.monoCjkFont"],
     },
-    { anchor: "layout", titleKey: "appearance.layout", keywords: ["appearance.zoom", "appearance.width.full", "appearance.readingWidth", "appearance.density"] },
-    { anchor: "launchArt", titleKey: "appearance.launchArt", keywords: ["appearance.launchArt.import", "appearance.launchArt.source.imported", "appearance.launchArt.source.bundled"] },
+    { anchor: "layout", titleKey: "appearance.layout", keywords: ["appearance.zoom", "appearance.density"] },
+    { anchor: "avatars", titleKey: "settings.ia.avatars" as MessageKey, keywords: ["appearance.agentAvatar", "appearance.avatarTint"] },
+    // 窗口与卡片 (design 006 v1: what stays here is the whole window's; the panels' rows are on their 面板 pages).
+    { anchor: "work-surface", titleKey: "workSurface.title", keywords: ["workSurface.material", "workSurface.width", "workSurface.edge", "foretell.setting", "workSurface.dropPreview"] },
+    { anchor: "portraits", titleKey: "avatarStyle.title", keywords: ["appearance.portraits", "appearance.portraits.selectAll", "appearance.portraits.replaceAll", "appearance.portraits.reassign", "info.avatar.packs", "avatarStyle.kind.portrait", "avatarStyle.kind.emoji", "avatarStyle.kind.letter", "avatarStyle.bulk.replaceAll", "avatarStyle.bulk.reassign"] },
+    { anchor: "launchArt", titleKey: "appearance.launchArt", keywords: ["appearance.launchArt.import", "appearance.launchArt.clear", "appearance.launchArt.source.imported", "appearance.launchArt.source.bundled"] },
+    { anchor: "headwear", titleKey: "appearance.headwear", keywords: ["appearance.headwear.maid", "appearance.headwear.crown", "appearance.headwear.mianguan", "appearance.headwear.detective", "appearance.headwear.graduation", "appearance.headwear.chef", "appearance.headwear.wizard", "appearance.headwear.halo", "appearance.headwear.cat-ears", "appearance.headwear.headphones", "appearance.headwear.none", "appearance.headwear.operators", "appearance.headwear.seasonal"] },
   ],
 };
 
 export const SIDEBAR_SEARCH: Search = {
   sections: [
     { anchor: "projects", titleKey: "appearance.sidebar.projects", keywords: ["appearance.projectGrouping", "appearance.noOnlineProjects", "appearance.sectionCollapsed", "appearance.projectOrderReset"] },
-    { anchor: "agentRows", titleKey: "appearance.sidebar.agentRows", keywords: ["appearance.runningAgents", "appearance.statusChips", "appearance.rowPreview", "appearance.foldIdleAgents", "appearance.agentAvatar", "appearance.offlineAgents"] },
+    { anchor: "agentRows", titleKey: "appearance.sidebar.agentRows", keywords: ["appearance.sidebarLayout", "appearance.runningAgents", "appearance.statusChips", "appearance.rowPreview", "appearance.foldIdleAgents", "appearance.offlineAgents"] },
     { anchor: "sidebarStyle", titleKey: "appearance.sidebar.style", keywords: ["appearance.projectIconStyle", "appearance.projectIconStyle.tint", "appearance.projectIconStyle.line", "appearance.projectSeparation", "appearance.sidebarWidth"] },
     { anchor: "hoverPreview", titleKey: "appearance.sidebar.hoverPreview", keywords: ["appearance.projectHoverPreview", "appearance.projectHoverDelay"] },
   ],
@@ -71,10 +77,12 @@ export const SIDES_SEARCH: Search = {
     {
       anchor: "sides",
       titleKey: "shell.sides.rightPane",
-      keywords: ["pane.width", "shell.sides.mode", "side.pageBar", "shell.sides.pillAnchor", "shell.sides.laneWhenHidden", "shell.sides.currentPageClick", "shell.sides.narrow", "shell.sides.restore", "shell.sides.keepHidden", "shell.sides.keepMounted", "shell.sides.reset"],
+      // Design 006 v1 Q5: 右栏布局 / 竖条里页按钮位置 / 右栏收起时 / 点击当前页图标 are gone (lib/prefs drops them).
+      keywords: ["pane.width", "shelf.single", "shell.sides.mode", "shell.sides.narrow", "shell.sides.restore", "shell.sides.keepHidden", "shell.sides.keepMounted", "shell.sides.reset"],
     },
+    { anchor: "shelf-place", titleKey: "settings.panel.shelfPlace", keywords: ["workSurface.pageOpen", "workSurface.wsRails", "workSurface.shelfRail", "workSurface.shelfRailAlways", "settings.panel.pageWidth"] },
     { anchor: "open", titleKey: "shell.sides.openSection", keywords: ["shell.sides.preview", "shell.sides.peekTarget", "shell.sides.defaults"] },
-    { anchor: "gutter", titleKey: "shell.sides.gutter", keywords: ["shell.sides.gutterDocked", "shell.sides.gutterDockWidth"] },
+    // 留白 is on 会话 now (shell.gutter section item).
   ],
 };
 
@@ -83,7 +91,7 @@ export const COMPOSER_SEARCH: Search = {
     { anchor: "send", titleKey: "shell.composer.send", keywords: ["settings.sendKeys", "conversation.delegationSteerKeys"] },
     { anchor: "queuePanel", titleKey: "queue.panelFold", keywords: ["queue.panelFold.open", "queue.panelFold.auto", "queue.sectionStrip"] },
     { anchor: "aboveInput", titleKey: "shell.status.aboveInput", keywords: ["appearance.needsYouStrip", "shell.composer.barItems"] },
-    { anchor: "inputBar", titleKey: "shell.composer.inputBar", keywords: ["shell.composer.quotaReset", "composer.profileAvatar"] },
+    { anchor: "inputBar", titleKey: "shell.composer.inputBar", keywords: ["composer.profileAvatar"] },
   ],
 };
 
@@ -98,7 +106,7 @@ function shortcutAnchor(group: string): string {
 
 export const SHORTCUTS_SEARCH: Search = {
   keywords: ["settings.sendKeys"],
-  sections: SHORTCUT_GROUPS.map((g) => ({ anchor: shortcutAnchor(g.id), titleKey: g.title, keywords: [...new Set<MessageKey>(g.items.map((s) => s.desc))] })),
+  sections: [{ anchor: "gestures", titleKey: "gestures.title", keywords: ["gestures.group.title", "gestures.page.title", "gestures.launcher.title", "gestures.tab.title", "gestures.strip.title", "gestures.input.middle", "gestures.input.longPress", "gestures.legend.beside", "gestures.legend.background"] }, ...SHORTCUT_GROUPS.map((g) => ({ anchor: shortcutAnchor(g.id), titleKey: g.title, keywords: [...new Set<MessageKey>(g.items.map((s) => s.desc))] }))],
 };
 
 export const ABOUT_SEARCH: Search = {

@@ -16,6 +16,7 @@ import { convNotify, convSidebarOf, useConvScope } from "../lib/conversationScop
 import { rowsOf } from "../lib/viewHost";
 import { ClampBox } from "./ClampBox";
 import { SystemAvatar } from "./SystemAvatar";
+import { Tag } from "./Tag";
 
 const REFUSALS: Record<string, MessageKey> = {
   session_offline: "safetyBlock.error.offline",
@@ -71,7 +72,7 @@ export function SafetyBlockCard({ record: r, block, hostId }: { record: OwnerNot
         <span className={open ? "font-medium text-foreground" : "text-muted"}>{t("system.cutex")}</span>
         <span className="min-w-0 truncate text-muted">{t("ownerNotify.aboutAgent", { name: agentName })}</span>
         {open ? (
-          <span className="rounded-full bg-warn/15 px-1.5 py-px text-[11px] font-semibold text-warn-text">{t("safetyBlock.badge")}</span>
+          <Tag tone="attention">{t("safetyBlock.badge")}</Tag>
         ) : (
           <span className="text-subtle">· {t("safetyBlock.badge")}</span>
         )}
@@ -83,20 +84,20 @@ export function SafetyBlockCard({ record: r, block, hostId }: { record: OwnerNot
           {stateLine}
         </span>
       </div>
-      {open && <div className="mt-1.5 text-[13.5px]">{t("safetyBlock.lead", { tool: block.toolName })}</div>}
+      {open && <div className="mt-1.5 text-ui/[inherit]">{t("safetyBlock.lead", { tool: block.toolName })}</div>}
       <ClampBox lines={open ? 10 : 3} resetKey={block.blockId} className={open ? "mt-1.5" : "mt-0.5"}>
-        <pre data-safety-command="" className={`font-mono whitespace-pre-wrap break-all rounded-lg bg-surface-2/70 px-2.5 py-1.5 ${open ? "text-[12.5px] text-foreground" : "text-[12px] text-muted"}`}>
+        <pre data-safety-command="" className={`font-mono whitespace-pre-wrap break-all rounded-lg bg-surface-2/70 px-2.5 py-1.5 ${open ? "text-ui/[inherit] text-foreground" : "text-meta/[inherit] text-muted"}`}>
           {block.command}
         </pre>
       </ClampBox>
       {open && (
         <>
           {block.reason && (
-            <div className="mt-1.5 text-[12.5px] text-muted">
+            <div className="mt-1.5 text-ui/[inherit] text-muted">
               <span className="text-subtle">{t("safetyBlock.reason")}</span> <span className="break-words">{block.reason}</span>
             </div>
           )}
-          <div className="mt-1 text-[11.5px] text-subtle">{t("safetyBlock.rule", { minutes })}</div>
+          <div className="mt-1 text-meta/[inherit] text-subtle">{t("safetyBlock.rule", { minutes })}</div>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => void decide("grant")}

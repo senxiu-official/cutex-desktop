@@ -1,3 +1,4 @@
+import { isImeComposing } from "../../lib/ime";
 // 「你」 — your name and picture, set on this desktop (lib/identityPrefs) and published to every connected
 // host with cutex `users-self-profile` (lib/identitySync), plus your person identity (P2: fingerprint,
 // export / import, lib/personIdentity) — the identity card of Settings → 你 (components/settings/MeSettings.tsx).
@@ -10,6 +11,7 @@ import { useHostAccess, useNonOwnerHosts } from "../../lib/hostAccess";
 import { syncSummary } from "../../lib/identityPublish";
 import { useIdentitySyncStatus } from "../../lib/identitySync";
 import { identityInitials, identityName } from "../../lib/identity";
+import { useAdoptedIdentity } from "../../lib/identityHosts";
 import { IDENTITY_NAME_MAX, setIdentityPrefs, useIdentityPrefs } from "../../lib/identityPrefs";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
@@ -32,13 +34,14 @@ export function IdentitySection() {
     bridge.shell?.state().then((s) => setOsName(s.osUserName ?? null), () => {});
   }, []);
   useEffect(() => setDraft(prefs.name), [prefs.name]);
-  // The preview is you as the page's host shows you: without a local name / picture, what that host
-  // has (set from another desktop of yours), like the sidebar's identity button.
+  // The preview is you as the page's host shows you: without a local name / picture, what your hosts
+  // have (set from another desktop of yours; the latest), like the sidebar's identity button.
   const hostId = useTargetHostId();
   const access = useHostAccess(hostId);
   const selfProfile = useTargetFeatures().has(USERS_SELF_PROFILE_FEATURE);
-  const hostPicture = useUserAvatar(hostId, selfProfile && !prefs.picture ? access.userId : null, access.avatarEtag);
-  const shown = identityName(access, draft, osName, selfProfile) || t("identity.you");
+  const adopted = useAdoptedIdentity(hostId);
+  const hostPicture = useUserAvatar(adopted.picture?.hostId, prefs.picture ? null : adopted.picture?.userId, adopted.picture?.etag);
+  const shown = identityName(access, draft, osName, selfProfile, adopted.name) || t("identity.you");
   const commit = () => draft.trim() !== prefs.name && setIdentityPrefs({ name: draft.trim() });
   // One summary line of what others see (lib/identityPublish syncSummary), not a 「未设置」 per host.
   const statuses = useIdentitySyncStatus();
@@ -48,7 +51,7 @@ export function IdentitySection() {
   return (
     <Section id={settingsAnchorId("identity")} title={t("identity.section")} hint={t("identity.sectionHint")}>
       <div className="flex items-center gap-3 py-3">
-        <Avatar name={shown} initial={identityInitials(shown)} color="#868e96" picture={prefs.picture ?? hostPicture} size={44} />
+        <Avatar name={shown} initial={identityInitials(shown)} color="#868e96" picture={prefs.picture ?? hostPicture} size={40} />
         <div className="min-w-0">
           <div className="truncate text-sm font-medium" data-testid="identity-shown-name">{shown}</div>
           {summary && (
@@ -58,7 +61,7 @@ export function IdentitySection() {
           )}
         </div>
       </div>
-      <SettingRow label={t("identity.name")} hint={t("identity.nameHint")}>
+      <SettingRow agents="none" source="local" label={t("identity.name")} hint={t("identity.nameHint")}>
         <TextInput
           value={draft}
           placeholder={t("identity.namePlaceholder")}
@@ -66,10 +69,10 @@ export function IdentitySection() {
           label={t("identity.name")}
           onChange={setDraft}
           onBlur={commit}
-          onKeyDown={(e) => e.key === "Enter" && commit()}
+          onKeyDown={(e) => !isImeComposing(e) && (e.key === "Enter" && commit())}
         />
       </SettingRow>
-      <SettingRow label={t("identity.picture")} hint={t("identity.picture.hint")}>
+      <SettingRow agents="none" source="local" label={t("identity.picture")} info={t("identity.picture.hint")}>
         <span className="flex items-center gap-2">
           <Button onClick={() => (setFileError(null), fileInput.current?.click())}>{t(prefs.picture ? "identity.picture.replace" : "identity.picture.upload")}</Button>
           {prefs.picture && <Button onClick={() => setIdentityPrefs({ picture: null })}>{t("identity.picture.remove")}</Button>}

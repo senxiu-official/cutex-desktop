@@ -1,0 +1,974 @@
+/* The work area's bottom layer and the tray (components/ChipTray; canvas principles §7, owner 2026-10-21:
+   small icons, no labels, dot badges; a panel in its own band at an edge of the work area, auto-hidden behind
+   a small handle when 托盘常驻 is off. #36: at the bottom and when revealed, an opaque low card under the
+   conversation columns; 001: agents round on the left, apps square on the right, marks, 需要你 N). */
+
+/* The desktop background behind the whole window (DesktopBackground, owner 2026-10-21): under every card
+   (App root is isolated; z −1 keeps it above the body's window colour), never interactive. */
+.window-desk {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* 桌面亮度 (owner 2026-10-21; lib/workSurface deskState / deskDim, appearance --desk-veil-* / --desk-filter-*):
+   components/side/SideArea marks <html data-desk-state> = empty (no pane in front) / open (a conversation or
+   page) / full (the panes fill the screen); the background dims under a black veil, the desktop's content
+   (on screen only when empty) by a brightness filter (none at 100 %). Unmarked: as drawn. Changes ease;
+   reduced motion: at once. The state's values are set on the two boxes that use them, not on :root: a custom
+   property changed on :root restyles the whole document (perf-baseline-20261020.md §7). */
+:root {
+  --desk-veil: 0;
+  --desk-filter: none;
+}
+:root[data-desk-state="empty"] :is(.window-desk, .pane-desk) {
+  --desk-veil: var(--desk-veil-empty, 0);
+  --desk-filter: var(--desk-filter-empty, none);
+}
+:root[data-desk-state="open"] :is(.window-desk, .pane-desk) {
+  --desk-veil: var(--desk-veil-open, 0.2);
+  --desk-filter: var(--desk-filter-open, brightness(0.8));
+}
+:root[data-desk-state="full"] :is(.window-desk, .pane-desk) {
+  --desk-veil: var(--desk-veil-full, 0.4);
+  --desk-filter: var(--desk-filter-full, brightness(0.6));
+}
+.window-desk::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: var(--desk-veil);
+  pointer-events: none;
+  transition: opacity var(--motion-long) var(--ease-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+  .window-desk::after {
+    transition: none;
+  }
+}
+/* 窗格铺满时占满整个窗口 while the panes fill the work area: no desktop at all (lib/workSurface edgeToEdge). */
+:root[data-edge-to-edge] .window-desk {
+  visibility: hidden;
+}
+
+/* The desktop's content over the work area: shown (fades in) when nothing is in front; covered: nothing
+   drawn, inert (the background shows only through the gaps between the cards). */
+.pane-desk {
+  z-index: 0;
+  /* 桌面亮度 of the content (a filter only below 100 %: the content's frosted cards then blur within it). */
+  filter: var(--desk-filter);
+  transition:
+    opacity var(--motion-long) var(--ease-standard),
+    visibility 0s linear 0s,
+    filter var(--motion-long) var(--ease-standard);
+}
+.pane-desk[data-pane-desktop="covered"] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--motion-medium) var(--ease-standard),
+    visibility 0s linear var(--motion-medium);
+}
+/* With the desktop on screen the empty main card lets it through (the Shelves stay over it). The work row
+   itself must let the pointer through too: it lies over the whole desktop (z 1), and catching the clicks
+   there made 编辑主页, the tiles and every other control on the desktop dead (2026-10-21 regression;
+   test/deskGaps.test.tsx). Only its real boxes (the Shelves, their rails) take the pointer. */
+[data-desk-on] > [data-side-work] {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+[data-desk-on] > [data-side-work] > :not([data-focus-region="main"]) {
+  pointer-events: auto;
+}
+:root [data-desk-on] > [data-side-work] > .shell-card[data-focus-region="main"] {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+/* ── The band: the tray's own room at an edge of the work area (components/ChipTray TrayFrame) ──── */
+/* Part of the layout (the work row gets the rest: nothing overlaps a pane). The band comes first on the
+   top / left (CSS order: the tree is the same for every edge). Its window side keeps 8 px from the window's
+   edge; the cards keep their own 8 px on the other side. */
+.tray-band {
+  position: relative;
+  /* Over the panes and the Shelves' instance layer (z 39) and drawer (z 38) when revealed; under menus (60+) and toasts (66). */
+  z-index: 45;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+}
+[data-tray-at="top"] > .tray-band,
+[data-tray-at="left"] > .tray-band {
+  order: -1;
+}
+.tray-band[data-tray-band="docked"] {
+  padding-bottom: 8px;
+}
+[data-tray-at="top"] > .tray-band[data-tray-band="docked"] {
+  padding: 0 0 8px;
+}
+[data-tray-at="left"] > .tray-band[data-tray-band="docked"] {
+  padding: 0 0 8px 8px;
+}
+[data-tray-at="right"] > .tray-band[data-tray-band="docked"] {
+  padding: 0 8px 8px 0;
+}
+
+/* ── 托盘常驻 at the bottom (#36; lib/trayRoom): the conversation cards leave room at their bottom and the tray
+   card sits there, spanning the conversation columns only (the sidebar card and the Shelves stay full
+   height). Single column: the main card (SideArea `data-conv-card`); two workspaces: each column's card. */
+[data-tray-room] :is([data-conv-card], section.ws-col[data-conv-pane]) {
+  margin-bottom: var(--tray-room, 52px);
+}
+.tray-room {
+  position: absolute;
+  z-index: 45;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+.tray-room > .pane-tray-dock {
+  flex: 1 1 auto;
+  /* A folding dock shows what sticks out (overflow visible), so its automatic min-width is all its items: without this
+     it ran past the conversations (and the window) instead of folding. */
+  min-width: 0;
+  max-width: none;
+  max-height: none;
+  height: 100%;
+}
+/* The desktop shows (no conversation): the card in the middle of the stage's bottom, as wide as its items. */
+.tray-room[data-tray-centre] {
+  justify-content: center;
+}
+.tray-room[data-tray-centre] > .pane-tray-dock {
+  flex: 0 1 auto;
+  max-width: calc(100% - 32px);
+}
+
+/* ── The dock ──────────────────────────────────────────────────────────────────────────────────── */
+/* Light (owner 2026-10-21): small icons, no labels, very translucent frosted, no border, a faint shadow. */
+.pane-tray-dock {
+  display: flex;
+  max-width: calc(100% - 32px);
+  max-height: 100%;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  overflow: auto;
+  scrollbar-width: none;
+  padding: 4px 5px;
+  border-radius: var(--r-xl);
+  background: color-mix(in srgb, var(--bg) 46%, transparent);
+  backdrop-filter: blur(16px) saturate(1.5);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.07);
+}
+/* A folding tray never scrolls (what does not fit goes into 「… N」), so it shows what sticks out (a Director's
+   headwear, a hovered item, the divider's pushpin). */
+.pane-tray-dock[data-tray-fold] {
+  overflow: visible;
+}
+/* The card look (#36, owner 2026-10-21): at the bottom and when revealed over the panes — an opaque low
+   card like the others (card colour, border, radius, shadow), no translucent strip. */
+.pane-tray-dock[data-tray-card] {
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--r-xl);
+  background: var(--bg);
+  backdrop-filter: none;
+  box-shadow: var(--e1);
+}
+:root[data-card-material="acrylic"]:not([data-edge-to-edge]) .pane-tray-dock[data-tray-card] {
+  background: color-mix(in srgb, var(--bg) var(--card-alpha, 82%), transparent);
+  backdrop-filter: var(--acrylic-filter);
+}
+.pane-tray-dock[data-vertical] {
+  max-width: none;
+  max-height: calc(100% - 32px);
+  flex-direction: column;
+  padding: 5px 4px;
+}
+/* Revealed over the panes: it floats from its handle over the panes' edge, with a little more body so it
+   reads over a conversation; it slides in from the edge. */
+.pane-tray-dock[data-pane-tray="overlay"] {
+  position: absolute;
+  max-height: none;
+  background: color-mix(in srgb, var(--bg) 66%, transparent);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.12);
+  animation: tray-in var(--motion-medium) var(--ease-standard);
+}
+.pane-tray-dock[data-pane-tray="overlay"][data-vertical] {
+  max-width: none;
+  max-height: calc(100% - 32px);
+}
+[data-tray-at="bottom"] .pane-tray-dock[data-pane-tray="overlay"] {
+  bottom: 4px;
+}
+[data-tray-at="top"] .pane-tray-dock[data-pane-tray="overlay"] {
+  top: 4px;
+}
+[data-tray-at="left"] .pane-tray-dock[data-pane-tray="overlay"] {
+  left: 4px;
+}
+[data-tray-at="right"] .pane-tray-dock[data-pane-tray="overlay"] {
+  right: 4px;
+}
+@keyframes tray-in {
+  from {
+    opacity: 0;
+  }
+}
+.tray-grip {
+  display: flex;
+  height: 40px;
+  width: 14px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--fg-muted);
+  opacity: 0.55;
+  cursor: grab;
+  touch-action: none;
+  outline: none;
+}
+[data-vertical] > .tray-grip {
+  height: 14px;
+  width: 40px;
+}
+.tray-grip:hover,
+.tray-grip:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+.tray-grip:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+:root:has([data-tray-drop]) {
+  cursor: grabbing;
+}
+.tray-sep {
+  position: relative;
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+}
+[data-vertical] .tray-sep {
+  width: 18px;
+  height: 1px;
+  margin: 3px 0;
+}
+.tray-item {
+  position: relative;
+  display: flex;
+  height: 40px;
+  width: 40px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  outline: none;
+  cursor: pointer;
+  transition: transform var(--motion-short) var(--ease-standard);
+}
+.tray-item:hover {
+  transform: translateY(-2px) scale(1.08);
+}
+.tray-item:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+/* The empty tray (owner 2026-10-21): 「＋ 固定」 and a muted one-line hint (horizontal); just the ＋ when vertical
+   or beside collapsed tool panes. */
+.tray-pin {
+  color: var(--fg-muted);
+}
+.tray-pin.tray-item {
+  border: 1.5px dashed color-mix(in srgb, var(--fg) 22%, transparent);
+  height: 32px;
+  width: 32px;
+  margin: 2px;
+}
+.tray-pin-wide {
+  display: flex;
+  height: 30px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  padding: 0 11px 0 9px;
+  margin-left: 2px;
+  border-radius: 9px;
+  border: 1.5px dashed color-mix(in srgb, var(--fg) 22%, transparent);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  outline: none;
+  cursor: pointer;
+}
+.tray-pin:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+.tray-pin-wide:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.tray-hint {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 10px 0 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  opacity: 0.8;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tray-item-dim > :first-child {
+  opacity: 0.55;
+  filter: grayscale(0.7);
+}
+.tray-glyph {
+  display: flex;
+  height: 32px;
+  width: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #fff;
+}
+.tray-glyph-tool {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  color: var(--fg-muted);
+}
+/* Dot badges: 7 px; only 需要你 carries a number. */
+.tray-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  height: 7px;
+  min-width: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--bg) 80%, transparent);
+  pointer-events: none;
+}
+.tray-badge[data-dot="needs"] {
+  top: 1px;
+  right: 1px;
+  height: 13px;
+  min-width: 13px;
+  padding: 0 3px;
+  background: var(--warn);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+}
+.tray-badge[data-dot="running"],
+.tray-badge[data-dot="ok"] {
+  background: var(--ok);
+}
+.tray-badge[data-dot="running"] {
+  animation: tray-breathe 2.4s ease-in-out infinite;
+}
+.tray-badge[data-dot="warn"] {
+  background: var(--warn);
+}
+.tray-badge[data-dot="error"] {
+  background: var(--danger);
+}
+@keyframes tray-breathe {
+  50% {
+    opacity: 0.45;
+  }
+}
+/* Marks (001): on screen = a bar under the icon; folded to a strip = a hollow bar; open (off screen) = a small
+   dot; only pinned = none. */
+.tray-under {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  height: 3px;
+  width: 14px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: translateX(-50%);
+}
+.tray-under[data-mark="strip"] {
+  height: 4px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.tray-under[data-mark="open"] {
+  height: 4px;
+  width: 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--fg) 50%, transparent);
+}
+[data-tray-at="left"] .tray-under[data-mark="open"],
+[data-tray-at="right"] .tray-under[data-mark="open"] {
+  height: 4px;
+  width: 4px;
+}
+[data-tray-at="left"] .tray-under[data-mark="strip"],
+[data-tray-at="right"] .tray-under[data-mark="strip"] {
+  width: 4px;
+}
+/* An item with its hover × (every agent entry, top-right) and, when pinned, its pin mark (top-left; design 039). */
+.tray-slot {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+}
+.tray-item[data-round] {
+  border-radius: 999px;
+}
+.tray-x {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  z-index: 1;
+  display: none;
+  height: 18px;
+  width: 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--card-border);
+  background: var(--bg);
+  color: var(--fg-muted);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  cursor: pointer;
+}
+.tray-slot:hover > .tray-x {
+  display: flex;
+}
+.tray-x:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg));
+}
+/* 钉住: ONE red pushpin stuck into the divider after the pinned entries (owner 2026-10-24, 「图钉 + 拖动」; it replaced
+   the pin on each item): its needle tip in the line near the top, the head tilted up on the line's left, above the icon
+   row — no slot of its own (positioned on the divider, takes no width). Vertical trays: near the line's start, head
+   above. Not a button: its tooltip says how dragging across the divider pins / unpins. */
+.tray-divpin {
+  position: absolute;
+  right: 0;
+  top: 5px;
+  width: 0;
+  height: 0;
+  cursor: default;
+}
+[data-vertical] .tray-divpin {
+  right: auto;
+  top: 0;
+  left: 5px;
+}
+/* The svg hangs from its needle tip (11 × 17 box, tip at 6 / 17.4), turned so the head leans up-left. */
+.tray-divpin > .tray-pushpin {
+  position: absolute;
+  left: -6px;
+  top: -17.4px;
+  transform-origin: 6px 17.4px;
+  transform: rotate(-32deg);
+}
+.tray-pushpin {
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+}
+.tray-pushpin-halo {
+  fill: var(--card, var(--bg));
+}
+.tray-pushpin-head {
+  fill: #ef4444;
+  stroke: #b91c1c;
+  stroke-width: 0.8;
+}
+.tray-pushpin-needle {
+  fill: #9ca3af;
+  stroke: #6b7280;
+  stroke-width: 0.5;
+  stroke-linejoin: round;
+}
+.tray-pushpin-shine {
+  fill: #fff;
+  fill-opacity: 0.75;
+}
+/* A workspace of several agents side by side: one capsule holding their avatars (design 039). The frame and the gaps
+   between the avatars are the whole workspace, an avatar is that column. */
+.tray-item[data-capsule] {
+  width: auto;
+  gap: 2px;
+  padding: 0 3px;
+  border-radius: 999px;
+  border: 1.5px solid color-mix(in srgb, var(--fg) 18%, transparent);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.tray-item[data-capsule]:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.tray-item[data-capsule][data-on-screen] {
+  border-color: var(--accent);
+}
+.tray-capsule {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.tray-m {
+  position: relative;
+  display: flex;
+  border-radius: 50%;
+}
+.tray-m:hover {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+/* Groups (001 grouping B / D: small labels). */
+.tray-group {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+[data-vertical] .tray-group {
+  flex-direction: column;
+}
+.tray-glabel {
+  padding: 0 4px 0 3px;
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  user-select: none;
+}
+[data-vertical] .tray-glabel {
+  display: none;
+}
+/* The end: 返回上一个 and 「需要你 N」 at the far side. */
+.tray-end {
+  flex: 1 0 8px;
+}
+.tray-back {
+  color: var(--fg-muted);
+}
+.tray-back:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  transform: none;
+}
+.tray-needs {
+  position: relative;
+  display: flex;
+  height: 32px;
+  width: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  margin: 0 2px 0 4px;
+  border-radius: 8px;
+  background: var(--attention-soft);
+  color: var(--attention);
+  outline: none;
+  cursor: pointer;
+}
+.tray-needs:hover {
+  background: color-mix(in oklab, var(--attention) 26%, transparent);
+}
+.tray-needs:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+[data-vertical] .tray-needs {
+  margin: 4px 0 2px;
+}
+
+[data-tray-at="left"] .tray-under,
+[data-tray-at="right"] .tray-under {
+  top: 50%;
+  bottom: auto;
+  height: 10px;
+  width: 2px;
+  transform: translateY(-50%);
+}
+[data-tray-at="left"] .tray-under {
+  left: 0;
+}
+[data-tray-at="right"] .tray-under {
+  left: auto;
+  right: 0;
+}
+[data-tray-at="top"] .tray-under {
+  top: 0;
+  bottom: auto;
+}
+
+/* ── Auto-hidden: the handle (owner 2026-10-21: the old hairline was not findable) ─────────────── */
+/* The whole band is its hit area; a small pill in the middle, plainly visible on any background. */
+.pane-tray-handle {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  outline: none;
+}
+.pane-tray-pill {
+  display: block;
+  height: 6px;
+  width: 56px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 30%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--bg) 55%, transparent),
+    0 1px 4px rgba(0, 0, 0, 0.12);
+  transition:
+    background var(--motion-medium) var(--ease-standard),
+    height var(--motion-medium) var(--ease-standard),
+    width var(--motion-medium) var(--ease-standard);
+}
+[data-tray-vertical] .pane-tray-pill {
+  height: 56px;
+  width: 6px;
+}
+.pane-tray-handle:hover .pane-tray-pill,
+.pane-tray-handle:focus-visible .pane-tray-pill {
+  height: 8px;
+  width: 72px;
+  background: color-mix(in srgb, var(--fg) 52%, transparent);
+}
+[data-tray-vertical] .pane-tray-handle:hover .pane-tray-pill,
+[data-tray-vertical] .pane-tray-handle:focus-visible .pane-tray-pill {
+  height: 72px;
+  width: 8px;
+}
+.pane-tray-handle:focus-visible .pane-tray-pill {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+/* ── Dragging the grip: the four edges of the work area as drop zones ─────────────────────────── */
+.tray-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 46;
+  pointer-events: none;
+}
+.tray-zone {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-xl);
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 35%, transparent);
+  /* Its tint (only 框线+底色 paints it: .drop-tint, styles.css). */
+  --drop-tint: color-mix(in srgb, var(--accent) 6%, transparent);
+  transition: background var(--motion-short) var(--ease-standard);
+}
+.tray-zone[data-on] {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  --drop-tint: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.tray-zone[data-tray-zone="bottom"] {
+  inset: auto 72px 4px;
+  height: 52px;
+}
+.tray-zone[data-tray-zone="top"] {
+  inset: 4px 72px auto;
+  height: 52px;
+}
+.tray-zone[data-tray-zone="left"] {
+  inset: 72px auto 72px 4px;
+  width: 52px;
+}
+.tray-zone[data-tray-zone="right"] {
+  inset: 72px 4px 72px auto;
+  width: 52px;
+}
+:is([data-tray-zone="left"], [data-tray-zone="right"]) > .tray-zone-label {
+  padding: 8px 2px;
+  writing-mode: vertical-rl;
+}
+.tray-zone-label {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 11px;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-desk,
+  .pane-tray-dock,
+  .tray-item {
+    transition: none;
+  }
+  .pane-tray-pill,
+  .tray-zone {
+    transition: none;
+  }
+  .pane-tray-dock[data-pane-tray="overlay"],
+  .tray-badge[data-dot="running"] {
+    animation: none;
+  }
+}
+
+/* Design 038: the card spans the conversations and their Shelves ("wide": a Shelf between two conversation
+   columns, or conversations too narrow for 「… N」): the Shelves leave room at their bottom too — the sidebar and
+   the Settings Shelf keep their full height. Only the outermost Shelf box of each Shelf. */
+[data-tray-room="wide"] :is([data-shelf-box], [data-side-box], [data-ws-shelf], [data-shelf-rail-empty]):not(:is([data-shelf-box], [data-side-box], [data-ws-shelf], [data-shelf-rail-empty]) *) {
+  margin-bottom: var(--tray-room, 52px);
+}
+
+/* 「托盘两排」 (owner 2026-10-24, lib/trayFold): items that do not fit one row lay out in two — each group wraps in its own
+   block (钉住 | 最近 | apps), so the divider and its pushpin still stand between them, two rows tall; the card is taller
+   (ChipTray TrayFrame). The grip spans both rows. */
+.pane-tray-dock[data-tray-rows="2"] .tray-group {
+  flex-shrink: 1;
+  flex-wrap: wrap;
+  align-content: center;
+  row-gap: 2px;
+}
+.pane-tray-dock[data-tray-rows="2"] .tray-sep {
+  height: 66px;
+}
+.pane-tray-dock[data-tray-rows="2"] > .tray-grip {
+  height: 76px;
+}
+
+/* Design 038: icons that do not fit the card fold into 「… N」 (ChipTray); the list pops up above it. */
+.pane-tray-dock [data-tray-folded] {
+  display: none !important;
+}
+.tray-more {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  height: 34px;
+  min-width: 40px;
+  padding: 0 8px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.tray-more:hover,
+.tray-more[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--fg);
+}
+.tray-overflow {
+  position: fixed;
+  z-index: 70;
+  display: flex;
+  max-height: min(60vh, 420px);
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--e2);
+}
+.tray-overflow .tray-group,
+.tray-overflow .contents {
+  display: contents;
+}
+.tray-overflow .tray-sep,
+.tray-overflow .tray-divpin,
+.tray-overflow [data-tray-drop-slot],
+.tray-overflow .tray-end,
+.tray-overflow .tray-glabel,
+.tray-overflow [data-tray-overflow-hide] {
+  display: none !important;
+}
+.tray-overflow .tray-slot {
+  display: flex;
+}
+.tray-overflow [data-tray-item] {
+  display: flex;
+  width: 100%;
+  min-width: 180px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 10px 0 4px;
+}
+.tray-overflow [data-tray-item]::after {
+  content: attr(aria-label);
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tray-overflow .tray-x {
+  display: none;
+}
+/* Items that already say something (需要你 N): no second name. */
+.tray-overflow .tray-needs::after {
+  content: none;
+}
+
+/* Reordering pinned entries (modules/home/trayReorder, owner 2026-10-24): over the workspace drag's shield (z 47–49). */
+.tray-drop-line {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.tray-drop-refuse {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  border: 1.5px dashed var(--fg-subtle);
+  border-radius: 12px;
+  --drop-tint: color-mix(in srgb, var(--fg-subtle) 8%, transparent);
+}
+/* A pinned entry over 最近: the whole group takes it (取消固定). */
+.tray-drop-accept {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  border: 1.5px solid var(--accent);
+  border-radius: var(--r-lg);
+  --drop-tint: var(--accent-soft);
+}
+/* The empty side of the divider while an entry is dragged (nothing pinned yet / nothing in 最近): a drop slot. */
+.tray-group[data-tray-drop-slot] {
+  min-width: 40px;
+  min-height: 40px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: var(--r-lg);
+}
+.tray-drop-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #fff;
+  background: var(--fg-muted);
+}
+.tray-drop-line > .tray-drop-tip {
+  bottom: calc(100% + 4px);
+}
+.tray-drop-tip-ok {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+/* Notes on the items (modules/home/trayNotes, owner 2026-10-24 layout 甲): the note's first line right of the avatar —
+   the item grows wider, never taller; a folding tray shortens the notes first (data-tray-short, lib/trayFold), then folds
+   into 「… N」, whose list shows the whole note. A vertical tray writes it under the avatar. */
+.tray-item[data-has-note] {
+  width: auto;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 0 10px 0 4px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.tray-item[data-has-note]:hover {
+  transform: translateY(-2px);
+  background: var(--hover);
+}
+.tray-note {
+  max-width: 72px;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 1.25;
+  color: var(--fg-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tray-note-full {
+  display: none;
+}
+.pane-tray-dock[data-tray-short] .tray-note {
+  max-width: 38px;
+}
+.pane-tray-dock:not([data-vertical]) .tray-item[data-has-note] .tray-under {
+  left: 20px;
+}
+[data-vertical] .tray-item[data-has-note] {
+  height: auto;
+  width: 48px;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 0;
+  border-radius: 12px;
+}
+[data-vertical] .tray-item[data-has-note] .tray-note {
+  max-width: 46px;
+  font-size: 10px;
+  text-align: center;
+}
+[data-tray-at="left"] .tray-item[data-has-note] .tray-under,
+[data-tray-at="right"] .tray-item[data-has-note] .tray-under {
+  top: 20px;
+}
+.tray-overflow [data-tray-item][data-has-note] {
+  display: grid;
+  height: auto;
+  min-height: 40px;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "icon name" "icon note";
+  align-items: center;
+  justify-items: start;
+  column-gap: 8px;
+  padding: 4px 10px 4px 4px;
+  text-align: left;
+  background: none;
+}
+.tray-overflow [data-tray-item][data-has-note]:hover {
+  transform: none;
+}
+.tray-overflow [data-has-note] > :first-child {
+  grid-area: icon;
+}
+.tray-overflow [data-has-note]::after {
+  grid-area: name;
+  align-self: end;
+}
+.tray-overflow .tray-note {
+  display: none;
+}
+.tray-overflow .tray-note-full {
+  display: block;
+  grid-area: note;
+  align-self: start;
+  max-width: 260px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--fg-muted);
+  text-align: left;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+/* 「备注…」's editor beside the item. */
+.tray-note-editor {
+  position: fixed;
+  z-index: 71;
+  padding: 10px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: var(--e2);
+}

@@ -68,12 +68,12 @@ function Row({ alarm, hostId }: { alarm: AlarmView; hostId: string }) {
   const swap = scheduled && !armed ? "group-hover/row:hidden group-focus-within/row:hidden" : "";
   return (
     <li data-capsule-row="" className="group/row rounded-lg hover:bg-hover">
-      <div className="flex min-h-8 min-w-0 items-center gap-1 px-2 text-[13px]">
+      <div className="flex min-h-8 min-w-0 items-center gap-1 px-2 text-ui/[inherit]">
         <button onClick={() => setOpen(!open)} aria-expanded={open} title={title} className={`${CAPSULE_ROW_MAIN} gap-1.5`}>
           <span className={`shrink-0 font-medium tabular-nums ${scheduled ? "" : "text-subtle"}`}>{alarmClock(ms, now, locale)}</span>
           {alarm.lastError && <TriangleAlert size={12} className="shrink-0 text-warn" />}
           <span className={`min-w-0 flex-1 truncate ${scheduled ? "" : "text-subtle"} ${alarm.state === "cancelled" ? "line-through" : ""}`}>{alarm.messagePreview}</span>
-          <span className={`shrink-0 text-[11px] tabular-nums ${alarm.lastError ? "text-warn-text" : "text-subtle"} ${swap}`}>{scheduled ? relative(ms, now) : t(`alarms.state.${alarm.state}` as MessageKey)}</span>
+          <span className={`shrink-0 text-caption/[inherit] tabular-nums ${alarm.lastError ? "text-warn-text" : "text-subtle"} ${swap}`}>{scheduled ? relative(ms, now) : t(`alarms.state.${alarm.state}` as MessageKey)}</span>
         </button>
         {scheduled && (
           <span className={capsuleRowActions(armed)}>
@@ -90,11 +90,11 @@ function Row({ alarm, hostId }: { alarm: AlarmView; hostId: string }) {
         )}
       </div>
       {open && (
-        <div className="px-2 pb-1.5 text-[11px] text-muted">
+        <div className="px-2 pb-1.5 text-caption/[inherit] text-muted">
           <div className="text-subtle">
             <Parties alarm={alarm} />
           </div>
-          <p className="break-words whitespace-pre-wrap">
+          <p className="selectable break-words whitespace-pre-wrap">
             {alarm.messagePreview}
             {alarm.messageTruncated && "…"}
           </p>
@@ -111,7 +111,7 @@ export function AlarmsBody({ data }: { sessionId: string; data: AlarmsData }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
-      {data.error && data.pending.length === 0 && data.recent.length === 0 && <p data-capsule-line="" className="px-2 py-1 text-[11px] text-subtle">{t("alarms.unavailable")}</p>}
+      {data.error && data.pending.length === 0 && data.recent.length === 0 && <p data-capsule-line="" className="px-2 py-1 text-caption/[inherit] text-subtle">{t("alarms.unavailable")}</p>}
       {data.pending.length > 0 && (
         <ul>
           {data.pending.map((a) => (
@@ -189,7 +189,7 @@ export function AlarmsStatusBar({ sessionId, inline }: StatusBarProps) {
         </>
       }
     >
-      <div className="flex h-6 items-center gap-1.5 px-2 text-[11px] text-subtle tabular-nums">
+      <div className="flex h-6 items-center gap-1.5 px-2 text-caption/[inherit] text-subtle tabular-nums">
         <AlarmsMeta data={data} />
       </div>
       <AlarmsBody sessionId={sessionId} data={data} />

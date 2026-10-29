@@ -10,6 +10,7 @@ import { useNow } from "../lib/time";
 import { DelegationTag } from "./DelegationParts";
 import { Popover } from "./Menu";
 import { Who } from "./Parties";
+import { Tag } from "./Tag";
 
 /** "正在处理 {who} 的委托" with the requester (avatar + name, or 你) spliced in. */
 function Handling({ turn }: { turn: DelegationTurn }) {
@@ -18,31 +19,40 @@ function Handling({ turn }: { turn: DelegationTurn }) {
   return (
     <>
       {before.trim() && <span className="shrink-0">{before.trim()}</span>}
-      {turn.owner || (!turn.requesterId && !turn.requesterName) ? <span className="shrink-0">{t("delegation.you")}</span> : <Who id={turn.requesterId} name={turn.requesterName} size={14} quiet />}
+      {turn.owner || (!turn.requesterId && !turn.requesterName) ? <span className="shrink-0">{t("delegation.you")}</span> : <Who id={turn.requesterId} name={turn.requesterName} size={16} quiet />}
       {after.trim() && <span className="shrink-0">{after.trim()}</span>}
     </>
   );
 }
 
 /**
- * Over the empty input (in place of the placeholder; `draft` false), or a small line above a draft.
- * One line, truncated; never takes clicks (the textarea underneath does).
+ * A delegation turn's draft label: 「正在回复委托 …」 while there is a draft, laid on the input box's top edge (a
+ * legend; the box is its positioning box). It takes no room: the first keystroke, a send and the delegation turn
+ * ending never change the box's size (it was a line above the draft; flicker recorder 2026-10-26). Never takes clicks.
  */
 export function DelegationTurnHint({ turn, draft }: { turn: DelegationTurn; draft: boolean }) {
   const { t } = useI18n();
-  const now = useNow(!draft);
+  if (!draft) return null;
+  return (
+    <div className="pointer-events-none absolute -top-2 left-2.5 z-10 flex max-w-[calc(100%-1.25rem)] min-w-0 items-center gap-1 rounded-full bg-surface px-1.5 text-caption/[inherit] text-subtle" data-delegation-draft-line="">
+      <ArrowDownLeft size={11} className="shrink-0 text-accent" />
+      <DelegationTag askId={turn.askId} />
+      <span className="truncate">{t("delegationTurn.typing")}</span>
+    </div>
+  );
+}
+
+/**
+ * Over the empty input, in place of the placeholder (inside the input row, which is its positioning box). One line,
+ * truncated; never takes clicks (the textarea underneath does).
+ */
+export function DelegationTurnOverlay({ turn }: { turn: DelegationTurn }) {
+  const { t } = useI18n();
+  const now = useNow(true);
   const seconds = delegationTurnSeconds(turn, now);
-  if (draft)
-    return (
-      <div className="flex min-w-0 items-center gap-1 pt-0.5 text-[11px] text-subtle">
-        <ArrowDownLeft size={11} className="shrink-0 text-accent" />
-        <DelegationTag askId={turn.askId} />
-        <span className="truncate">{t("delegationTurn.typing")}</span>
-      </div>
-    );
   return (
     // On the queue card's grid (components/TurnQueue): the icon in its rail column, the words from its icon column.
-    <div aria-hidden className="pointer-events-none absolute inset-x-2 top-2 flex min-w-0 items-center gap-1 py-1 pr-24 text-sm text-subtle">
+    <div aria-hidden className="pointer-events-none absolute -left-1 right-0 top-0 flex min-w-0 items-center gap-1 py-1 pr-24 text-sm text-subtle">
       <span className="-mr-0.5 flex w-[22px] shrink-0 justify-center">
         <ArrowDownLeft size={13} className="text-accent" />
       </span>
@@ -58,9 +68,9 @@ export function DelegationTurnHint({ turn, draft }: { turn: DelegationTurn; draf
 export function OwnerSteeredBadge() {
   const { t } = useI18n();
   return (
-    <span className="shrink-0 rounded bg-warn/15 px-1 text-[10px] leading-4 text-warn-text" title={t("delegationTurn.ownerSteeredHint")}>
+    <Tag tone="attention" title={t("delegationTurn.ownerSteeredHint")}>
       {t("delegationTurn.ownerSteered")}
-    </span>
+    </Tag>
   );
 }
 

@@ -16,6 +16,8 @@ export interface Bands {
   top: number;
   /** px from the scroller's bottom edge. */
   bottom: number;
+  /** px from the timeline frame's top the gutter's top entries take over the column: the scroller starts below (leadBand). */
+  lead?: number;
 }
 
 /**
@@ -38,4 +40,19 @@ export function reservedBands(scroller: Box, column: Box, boxes: readonly Box[])
 /** Column padding for the bands: the defaults (16 / 32 px) or the band plus a gap. */
 export function bandPadding(bands: Bands): { top: number; bottom: number } {
   return { top: bands.top > 0 ? Math.max(16, bands.top + 8) : 16, bottom: bands.bottom > 0 ? Math.max(32, bands.bottom + 12) : 32 };
+}
+
+/**
+ * The gutter's top entries over the column (no gutter beside it, lib/gutterLayout topStripMode `row` /
+ * `compact`): the timeline starts below them instead of scrolling under them (owner 2026-10-21). px from the
+ * timeline frame's top (`frame`) that the strip boxes crossing the column take; 0 = none (they sit beside it).
+ */
+export function leadBand(frame: Box, column: Box, strips: readonly Box[]): number {
+  let lead = 0;
+  for (const b of strips) {
+    if (b.right <= column.left || b.left >= column.right || b.bottom <= b.top) continue;
+    if (b.bottom <= frame.top || b.top >= (frame.top + frame.bottom) / 2) continue;
+    lead = Math.max(lead, Math.ceil(b.bottom - frame.top));
+  }
+  return lead;
 }

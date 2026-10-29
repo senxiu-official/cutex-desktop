@@ -9,6 +9,9 @@ import {
   dropEmptyPage,
   findCard,
   findPage,
+  findShelf,
+  focusedShelf,
+  shelfLanePages,
   lanePages,
   locate,
   openLauncherPage,
@@ -24,7 +27,10 @@ import {
 } from "./sideLayout";
 import { flashCard, setFocusedCard, setMode, updateLayout, useSide, type SideMode } from "./sideLayoutStore";
 import { laneClickAction, type LaneClickAction } from "./sideLaneClick";
+import { exitFullscreen, toggleFullscreen } from "./panelFull";
 import { getUiPrefs, setUiPref } from "./prefs";
+import { showShelfToast } from "./shelves";
+import { queryAppWindows } from "./appWindowSet";
 
 /** Show / hide the column. A side with nothing for this agent runs `whenEmpty` (the default components) instead. */
 export function toggleColumn(whenEmpty?: () => void): void {
@@ -65,7 +71,8 @@ export function pageButtonClick(pageId: string, cardId: string | null = null): v
     pageId,
     cardId: card ? card.card.id : null,
     cardCollapsed: !!card?.card.collapsed,
-    setting: getUiPrefs().sideCurrentPageClick,
+    // 点击当前页图标 is no longer a setting (design 006 v1 Q5): the page in view stays (as the Rail, 10-22).
+    setting: "stay",
   });
   runLaneAction(action);
 }
@@ -97,7 +104,27 @@ export function runLaneAction(action: LaneClickAction): void {
 function focusCard(cardId: string): void {
   setFocusedCard(cardId);
   flashCard(cardId);
-  document.querySelector(`[data-side-card="${CSS.escape(cardId)}"]`)?.scrollIntoView({ block: "nearest" });
+  queryAppWindows(`[data-side-card="${CSS.escape(cardId)}"]`)?.scrollIntoView({ block: "nearest" });
+}
+
+/**
+ * Alt+1…9 (§24.12): the n-th rail page (1-based) of the focused Shelf (or `shelfId`'s), shown and focused.
+ * False: there is none (the key goes on). lib/shelves re-exports it with the other Shelf actions.
+ */
+export function switchShelfPage(n: number, shelfId?: string): boolean {
+  const { layout, mode } = useSide.getState();
+  let ctx: ReturnType<typeof sideViewNow>;
+  try {
+    ctx = sideViewNow();
+  } catch {
+    return false;
+  }
+  const shelf = findShelf(layout, shelfId) ?? focusedShelf(layout);
+  const page = shelf ? shelfLanePages(layout, shelf.id, ctx)[n - 1] : undefined;
+  if (!page) return false;
+  if (mode?.card) setMode({ kind: mode.kind, card: null });
+  updateLayout((l) => switchPage(l, page.id));
+  return true;
 }
 
 /** Ctrl+Shift+n: the n-th page button (1-based), same rule as clicking it (the page in view again → 点击当前页图标). */
@@ -106,14 +133,28 @@ export function goToPage(n: number): void {
   if (page) pageButtonClick(page.id);
 }
 
-/** 新页面: an empty launcher page in view (dropped when left empty). */
-export function newPage(): void {
+/**
+ * 新建空页 (Ctrl+Shift+N, the launcher / page menus, the ＋ menu of an empty Shelf, ⌘K): an empty launcher page in
+ * view (dropped when left empty). Also the first one: no Shelf yet = a right Shelf. Refused (a toast) at 9 pages.
+ */
+export function newPage(): string | null {
   if (useSide.getState().mode) setMode(null);
-  updateLayout((l) => openLauncherPage(l).layout);
+  let made: string | null = null;
+  updateLayout((l) => {
+    const r = openLauncherPage(l);
+    made = r.pageId;
+    return r.layout;
+  });
+  if (!made) showShelfToast(translate("shelf.toast.pagesFull"));
+  return made;
 }
 
-/** ⤢ / ⛶ (and Ctrl+Shift+M / Shift+F11): toggle the mode for a card or the page in view. */
+/** ⤢ / ⛶ (and Ctrl+Shift+M / Shift+F11): toggle the mode for a card or the page in view. Full screen: lib/panelFull (Esc goes back to the state before). */
 export function toggleMode(kind: SideMode["kind"], card: string | null): void {
+  if (kind === "fullscreen") {
+    toggleFullscreen({ area: "tools", card });
+    return;
+  }
   const s = useSide.getState();
   if (s.mode && s.mode.kind === kind && s.mode.card === card) {
     setMode(null);
@@ -124,13 +165,33 @@ export function toggleMode(kind: SideMode["kind"], card: string | null): void {
   setMode({ kind, card });
 }
 
+/**
+ * A whole Shelf (§24.16: its ⋯, a double-click on its rail): maximised over the rest of the row, or full screen;
+ * the same again = back. Its page in view, whether the Shelf is collapsed or not (the layout is not changed).
+ */
+export function toggleShelfMode(kind: SideMode["kind"], shelfId: string): void {
+  if (kind === "fullscreen") {
+    toggleFullscreen({ area: "tools", card: null, shelf: shelfId });
+    return;
+  }
+  const s = useSide.getState();
+  if (s.mode && s.mode.kind === kind && !s.mode.card && s.mode.shelf === shelfId) {
+    setMode(null);
+    return;
+  }
+  if (!s.layout.pages.some((p) => p.shelf === shelfId)) return;
+  if (!s.layout.open) updateLayout((l) => setOpen(l, true));
+  setMode({ kind, card: null, shelf: shelfId });
+}
+
 /** Shortcut target: the focused card when it is on the page in view, else the page. */
 export function toggleModeForFocus(kind: SideMode["kind"]): void {
   const s = useSide.getState();
   const at = s.focusedCard ? findCard(s.layout, s.focusedCard) : null;
   const card = at && at.page.id === s.layout.activePage ? at.card.id : null;
   if (s.mode && s.mode.kind === kind) {
-    setMode(null);
+    if (kind === "fullscreen") exitFullscreen();
+    else setMode(null);
     return;
   }
   toggleMode(kind, card);

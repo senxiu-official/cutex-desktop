@@ -2,7 +2,7 @@ import { useState, useSyncExternalStore } from "react";
 import type { PluginCapability } from "@cutex-desktop/plugin-sandbox";
 import { useI18n } from "../../i18n";
 import { PageBody, PageToolbar } from "../../components/Page";
-import { Button, EmptyState, Section } from "../../components/settings/Form";
+import { Button, EmptyState, Section, SettingsGroup } from "../../components/settings/Form";
 import { appModules, services } from "../app";
 import { externalItemId, externalModuleId } from "./manager";
 import { pluginManager } from "./controller";
@@ -23,6 +23,7 @@ function PluginPermissions({ plugin }: { plugin: PluginRecord }) {
   const first = plugin.manifest.contributes["main.page"].find((page) => pages.some((entry) => entry.mode === "show" && entry.item.id === externalItemId(page.id)));
   return (
     <Section title={`${plugin.manifest.name} · ${plugin.manifest.version}`} hint={plugin.changed ? t("plugins.changed") : plugin.permissions.length ? t("plugins.granted") : t("plugins.ungranted")}>
+      <SettingsGroup agents="none" source="local">
       <div className="space-y-2 py-3">
         {plugin.manifest.capabilities.map((permission) => <label key={permission} className="flex items-start gap-2 text-sm">
           <input type="checkbox" checked={selected.includes(permission)} disabled={busy} onChange={(event) => setSelected((permissions) => event.target.checked ? [...permissions, permission] : permissions.filter((value) => value !== permission))} />
@@ -36,6 +37,7 @@ function PluginPermissions({ plugin }: { plugin: PluginRecord }) {
         </div>
         {error && <p role="alert" className="text-xs text-danger">{error}</p>}
       </div>
+      </SettingsGroup>
     </Section>
   );
 }

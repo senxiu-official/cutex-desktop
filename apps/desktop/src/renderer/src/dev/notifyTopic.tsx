@@ -18,7 +18,7 @@ const WORDS: Record<Words, { name: string; note: string; ways: string; waysHint:
   L3: { name: "L3 提醒 / 归类", note: "「提醒方式」「事件归类」：名词短标题，提示句说清楚方向。", ways: "提醒方式", waysHint: "每个等级用哪些方式提醒你；带锁的格子固定。", events: "事件归类", eventsHint: "每类事件算哪个等级；同时属于几类时按最高的算。", msg: (lv) => `智能体标为「${lv}」`, reply: "智能体要你回复" },
 };
 
-const tag = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] whitespace-nowrap";
+const tag = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-caption/[inherit] whitespace-nowrap";
 const localTag = <span className={`${tag} bg-surface-2 text-muted`}><Monitor size={11} />本机</span>;
 const hostTag = <span className={`${tag} bg-accent/12 text-accent`}><Server size={11} />cutex 后端 · HOST-A</span>;
 const LV = ["紧急", "需要你", "告知", "记录"];
@@ -26,8 +26,8 @@ const LV = ["紧急", "需要你", "告知", "记录"];
 function PartHead({ title, hint, chip }: { title: string; hint: string; chip: ReactNode }) {
   return (
     <div className="mt-2 mb-3 border-b border-border/60 pb-2">
-      <div className="flex items-center gap-2"><span className="text-[15px] font-semibold">{title}</span>{chip}</div>
-      <p className="mt-0.5 text-[13px] text-muted">{hint}</p>
+      <div className="flex items-center gap-2"><span className="text-title/[inherit] font-semibold">{title}</span>{chip}</div>
+      <p className="mt-0.5 text-ui/[inherit] text-muted">{hint}</p>
     </div>
   );
 }
@@ -36,10 +36,10 @@ function DeviceCard() {
   const [d, setD] = useState({ desktop: true, sound: true });
   return (
     <Section title="这台设备收不收" hint="主机决定什么时候提醒；这台设备可以关掉某种方式。" actions={<span className="flex gap-1.5"><button className="rounded-md border border-border px-2 py-0.5 text-xs text-muted">测试通知</button><button className="rounded-md border border-border px-2 py-0.5 text-xs text-muted">测试声音</button></span>}>
-      <SettingRow label="系统通知权限" hint="没有允许时，桌面通知不会弹出"><span className="flex items-center gap-2 text-xs"><span className="text-warn-text">需要允许</span><button className="rounded-md border border-border px-2 py-0.5">允许</button></span></SettingRow>
-      <SettingRow label="桌面通知"><Toggle checked={d.desktop} onChange={(v) => setD({ ...d, desktop: v })} /></SettingRow>
-      <SettingRow label="声音"><Toggle checked={d.sound} onChange={(v) => setD({ ...d, sound: v })} /></SettingRow>
-      <SettingRow label="置顶提醒窗" hint="这台设备上不可用"><span className="text-xs text-subtle">不可用</span></SettingRow>
+      <SettingRow agents="none" source="local" label="系统通知权限" hint="没有允许时，桌面通知不会弹出"><span className="flex items-center gap-2 text-xs"><span className="text-warn-text">需要允许</span><button className="rounded-md border border-border px-2 py-0.5">允许</button></span></SettingRow>
+      <SettingRow agents="none" source="local" label="桌面通知"><Toggle checked={d.desktop} onChange={(v) => setD({ ...d, desktop: v })} /></SettingRow>
+      <SettingRow agents="none" source="local" label="声音"><Toggle checked={d.sound} onChange={(v) => setD({ ...d, sound: v })} /></SettingRow>
+      <SettingRow agents="none" source="local" label="置顶提醒窗" hint="这台设备上不可用"><span className="text-xs text-subtle">不可用</span></SettingRow>
     </Section>
   );
 }
@@ -57,9 +57,9 @@ function Matrix({ w }: { w: (typeof WORDS)[Words] }) {
     <Section title={w.ways} hint={w.waysHint} actions={<Segmented value={"custom" as string} onChange={() => {}} options={[{ value: "quiet", label: "安静" }, { value: "rec", label: "推荐" }, { value: "all", label: "全部" }, { value: "custom", label: "自定义" }]} />}>
       <div className="grid grid-cols-[1fr_repeat(6,4.6rem)] items-center gap-y-2 py-3 text-xs">
         <span />
-        {COLS.map((c) => <span key={c} className="text-center text-[11px] text-subtle">{c}{c === "手机推送" && <span className="block text-[10px] text-warn-text">未配对</span>}</span>)}
+        {COLS.map((c) => <span key={c} className="text-center text-caption/[inherit] text-subtle">{c}{c === "手机推送" && <span className="block text-caption/[inherit] text-warn-text">未配对</span>}</span>)}
         {LEVELS.map((l) => [
-          <span key={l.k}><span className="text-[13px] text-foreground">{l.k}</span><span className="block text-[11px] text-subtle">{l.h}</span></span>,
+          <span key={l.k}><span className="text-ui/[inherit] text-foreground">{l.k}</span><span className="block text-caption/[inherit] text-subtle">{l.h}</span></span>,
           ...l.c.map((on, i) => <span key={l.k + i} className="flex justify-center">{i === 0 && l.k !== "告知" ? <Lock size={12} className="text-subtle" /> : <input type="checkbox" defaultChecked={!!on} />}</span>),
         ])}
       </div>
@@ -83,9 +83,9 @@ function EventRows({ w }: { w: (typeof WORDS)[Words] }) {
     <>
       {EVENTS(w).map(([group, rows]) => (
         <div key={group}>
-          <div className="pt-3 pb-1 text-[11px] text-subtle">{group}</div>
+          <div className="pt-3 pb-1 text-caption/[inherit] text-subtle">{group}</div>
           {rows.map(([e, lv]) => (
-            <SettingRow key={e} label={e}><Select value={lv} onChange={() => {}} options={LV.map((x) => ({ value: x, label: x }))} /></SettingRow>
+            <SettingRow agents="none" source="local" key={e} label={e}><Select value={lv} onChange={() => {}} options={LV.map((x) => ({ value: x, label: x }))} /></SettingRow>
           ))}
         </div>
       ))}
@@ -105,12 +105,12 @@ function OtherHost() {
   return (
     <>
       <Section title="新智能体的提醒" hint="跟标题栏铃铛一样；之后可在铃铛里单独改每个智能体。">
-        <SettingRow label="默认级别"><Segmented value={"on" as string} onChange={() => {}} options={[{ value: "off", label: "关" }, { value: "on", label: "开" }, { value: "imp", label: "重要" }]} /></SettingRow>
+        <SettingRow agents="none" source="local" label="默认级别"><Segmented value={"on" as string} onChange={() => {}} options={[{ value: "off", label: "关" }, { value: "on", label: "开" }, { value: "imp", label: "重要" }]} /></SettingRow>
       </Section>
       <Section title="主人通知" hint="智能体给你发消息时怎么提醒你；智能体只决定级别。">
-        <SettingRow label="哪些智能体能用" hint="影响智能体下次启动时的工具列表"><Select value={"d" as string} onChange={() => {}} options={[{ value: "d", label: "项目主管和主人创建的智能体（默认）" }]} /></SettingRow>
-        <SettingRow label="每个智能体每小时条数" hint="超过后降为「告知」且不推送"><span className="text-xs">12 条</span></SettingRow>
-        <SettingRow label="每小时紧急条数" hint="每个智能体；超过后「紧急」降为「需要你」"><span className="text-xs">3 条</span></SettingRow>
+        <SettingRow agents="none" source="local" label="哪些智能体能用" hint="影响智能体下次启动时的工具列表"><Select value={"d" as string} onChange={() => {}} options={[{ value: "d", label: "项目主管和主人创建的智能体（默认）" }]} /></SettingRow>
+        <SettingRow agents="none" source="local" label="每个智能体每小时条数" hint="超过后降为「告知」且不推送"><span className="text-xs">12 条</span></SettingRow>
+        <SettingRow agents="none" source="local" label="每小时紧急条数" hint="每个智能体；超过后「紧急」降为「需要你」"><span className="text-xs">3 条</span></SettingRow>
       </Section>
     </>
   );
@@ -136,7 +136,7 @@ export function NotifyTopic() {
   const btn = (on: boolean) => `rounded-md border px-3 py-1 text-sm ${on ? "border-accent bg-accent/12 text-accent" : "border-border text-muted hover:text-foreground"}`;
   const head = (
     <>
-      <p className="mb-1 text-[13px] text-muted">什么事、用什么方式提醒你：这台设备收不收，和主机上的规则。</p>
+      <p className="mb-1 text-ui/[inherit] text-muted">什么事、用什么方式提醒你：这台设备收不收，和主机上的规则。</p>
       <div className="mb-5 flex gap-1.5 border-b border-border/60 pb-3">{localTag}<span className={`${tag} bg-surface-2 text-muted`}>+</span>{hostTag}</div>
     </>
   );
@@ -152,8 +152,8 @@ export function NotifyTopic() {
       <p className="mb-4 text-sm text-muted">{w.note}</p>
       {v === "N4" && sub ? (
         <Page crumbs={["设置", "通知", w.events]}>
-          <button type="button" onClick={() => setSub(false)} className="mb-3 text-[13px] text-accent hover:underline">‹ 返回通知</button>
-          <p className="mb-1 text-[13px] text-muted">{w.eventsHint}</p>
+          <button type="button" onClick={() => setSub(false)} className="mb-3 text-ui/[inherit] text-accent hover:underline">‹ 返回通知</button>
+          <p className="mb-1 text-ui/[inherit] text-muted">{w.eventsHint}</p>
           <div className="mb-5 flex gap-1.5 border-b border-border/60 pb-3">{hostTag}</div>
           <Section actions={<Segmented value={"custom" as string} onChange={() => {}} options={[{ value: "rec", label: "推荐" }, { value: "custom", label: "自定义" }]} />} title="预设">
             <EventRows w={w} />
@@ -171,7 +171,7 @@ export function NotifyTopic() {
             <EventsSection w={w} />
           ) : (
             <Section title={w.events} hint={w.eventsHint}>
-              <button type="button" onClick={() => setSub(true)} className="flex w-full items-center gap-2 py-3 text-left text-[13px] hover:text-accent">
+              <button type="button" onClick={() => setSub(true)} className="flex w-full items-center gap-2 py-3 text-left text-ui/[inherit] hover:text-accent">
                 20 类事件<span className="text-subtle">· 改过 1 项（主人回合完成）</span>
                 <ChevronRight size={14} className="ml-auto" />
               </button>

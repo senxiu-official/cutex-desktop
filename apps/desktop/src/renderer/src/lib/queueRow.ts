@@ -6,11 +6,11 @@
  * in the meta's place]. Same height (24px) and paddings in every section; at most one accent per row
  * (warn only for paused / needs-you).
  */
-export const QUEUE_ROW = "group/row flex h-6 min-w-0 flex-1 items-center gap-1.5 rounded-md pr-1 pl-0.5";
+export const QUEUE_ROW = "group/row flex h-6 min-w-0 flex-1 items-center gap-1.5 rounded-ctl pr-1 pl-0.5";
 /** The row's primary text (its colour added by the row: foreground, muted while sending). */
-export const ROW_TEXT = "min-w-0 flex-1 truncate text-sm";
+export const ROW_TEXT = "min-w-0 flex-1 truncate text-ui";
 /** Quiet words at the row end (colour added by the row: subtle, warn when paused). */
-export const ROW_META = "shrink-0 pl-1 text-[11px] whitespace-nowrap";
+export const ROW_META = "shrink-0 pl-1 text-caption font-normal whitespace-nowrap";
 /**
  * Row actions: no room and invisible until the row is hovered or one of them has focus (still
  * reachable with Tab: clipped, not display:none; the negative margin cancels the row gap meanwhile).

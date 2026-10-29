@@ -3,14 +3,16 @@
 import { useState, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { CAPSULE_LINE } from "../lib/capsuleRows";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 
 export function FinishedFold({ label, viewAll, onViewAll, children }: { label: string; viewAll: string; onViewAll(): void; children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const userToggle = useUserLayoutToggle();
   // lib/capsuleRows line (marked, so a kind with one row and this fold keeps its heading).
   const quiet = `${CAPSULE_LINE} gap-1 hover:bg-hover hover:text-foreground`;
   return (
     <>
-      <button onClick={() => setOpen(!open)} aria-expanded={open} data-capsule-line="" className={quiet}>
+      <button onClick={() => userToggle(() => setOpen(!open))} aria-expanded={open} data-capsule-line="" className={quiet}>
         <Check size={12} className="shrink-0" />
         {label}
         {open ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />}

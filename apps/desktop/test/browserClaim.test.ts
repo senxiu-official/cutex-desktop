@@ -3,7 +3,8 @@ import type { ApprovalRecord } from "../src/shared/ipc";
 import { DEFAULT_BROWSER_CONTROL_SETTINGS, type BrowserTabView } from "../src/shared/browser";
 import { BrowserClaimController, browserClaimApproval, browserClaimTabs, browserClaimTabDisplay, type BrowserClaimScope } from "../src/renderer/src/modules/approvals/browserClaimUi";
 import { approvalFacts, grantKind } from "../src/renderer/src/lib/approvals";
-import { zhCN, en } from "../src/renderer/src/modules/approvals/i18n";
+import { zhCN } from "../src/renderer/src/modules/approvals/i18n";
+import { en } from "../src/renderer/src/modules/approvals/i18n.en";
 
 const now = Date.parse("2026-10-11T12:00:00Z"), digest = "a".repeat(64);
 const approval = (extra: Partial<ApprovalRecord> = {}): ApprovalRecord => ({ approvalId: "approval-1", kind: "browser_claim", state: "pending",

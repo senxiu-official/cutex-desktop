@@ -35,6 +35,11 @@ export function isSettingsHostPage(item: { page: SettingsTab; source: SettingsSo
   return SETTINGS_HOST_PAGES.has(item.page) && (item.source === "host" || item.source === "codex");
 }
 
+/** The page header picks a host only when the page or one of its parts follows the Settings target. */
+export function settingsPageHasHostPicker(item: { page: SettingsTab; source: SettingsSource | null; hostPart?: boolean }): boolean {
+  return isSettingsHostPage(item) || !!item.hostPart;
+}
+
 /**
  * The page as a whole for `access` there: "notOwner" / "pending" when Settings shows only the
  * 「主机设置归主机所有者」 note (a host page other than the member pages, on another user's connection).

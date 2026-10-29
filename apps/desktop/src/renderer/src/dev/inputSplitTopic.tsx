@@ -16,12 +16,12 @@ const NAMINGS: Record<Naming, { name: string; note: string; above: string; below
 const STATUS_ITEMS = ["目标", "计划", "后台终端", "子智能体", "委托", "作业", "闹钟"];
 
 function Pill({ children, active }: { children: ReactNode; active?: boolean }) {
-  return <span className={`rounded px-1.5 py-0.5 text-[11px] ${active ? "bg-accent/15 text-accent" : "bg-surface-2 text-muted"}`}>{children}</span>;
+  return <span className={`rounded px-1.5 py-0.5 text-caption/[inherit] ${active ? "bg-accent/15 text-accent" : "bg-surface-2 text-muted"}`}>{children}</span>;
 }
 
 // A labelled sketch of the bottom of the main window: which name points where.
 function Sketch({ n }: { n: (typeof NAMINGS)[Naming] }) {
-  const tag = "absolute -right-2 translate-x-full whitespace-nowrap text-[11px] text-accent";
+  const tag = "absolute -right-2 translate-x-full whitespace-nowrap text-caption/[inherit] text-accent";
   return (
     <div className="relative mr-40 rounded-lg border border-border bg-surface/40 p-3 text-xs">
       <div className="relative h-16 rounded border border-dashed border-border/70 text-subtle">
@@ -63,21 +63,21 @@ function ComposerPage({ n }: { n: (typeof NAMINGS)[Naming] }) {
   return (
     <MiniPage title="输入区" hint="怎么发送消息，以及输入框周围的面板和两行。">
       <Section title="发送">
-        <SettingRow label="发送方式" hint="（提示的写法在 A 里另定）"><Segmented value={send} onChange={setSend} options={[{ value: "cli", label: "插话优先" }, { value: "queue", label: "排队优先" }]} /></SettingRow>
-        <SettingRow label="处理委托时也能用快捷键插话"><Toggle checked={false} onChange={() => {}} /></SettingRow>
+        <SettingRow agents="none" source="local" label="发送方式" hint="（提示的写法在 A 里另定）"><Segmented value={send} onChange={setSend} options={[{ value: "cli", label: "插话优先" }, { value: "queue", label: "排队优先" }]} /></SettingRow>
+        <SettingRow agents="none" source="local" label="处理委托时也能用快捷键插话"><Toggle checked={false} onChange={() => {}} /></SettingRow>
       </Section>
-      <Section title="排队顺序"><SettingRow label="排队消息可以排到委托前面"><Toggle checked onChange={() => {}} /></SettingRow></Section>
+      <Section title="排队顺序"><SettingRow agents="none" source="local" label="排队消息可以排到委托前面"><Toggle checked onChange={() => {}} /></SettingRow></Section>
       <Section title="「接下来」面板">
-        <SettingRow label="展开方式"><Segmented value={fold} onChange={setFold} options={[{ value: "open", label: "始终展开" }, { value: "auto", label: "自动折叠" }]} /></SettingRow>
-        <SettingRow label="悬停时显示分区名"><Toggle checked onChange={() => {}} /></SettingRow>
+        <SettingRow agents="none" source="local" label="展开方式"><Segmented value={fold} onChange={setFold} options={[{ value: "open", label: "始终展开" }, { value: "auto", label: "自动折叠" }]} /></SettingRow>
+        <SettingRow agents="none" source="local" label="悬停时显示分区名"><Toggle checked onChange={() => {}} /></SettingRow>
       </Section>
       <Section title={n.above === "状态行" ? "输入框上方" : n.above} hint={n.aboveHint}>
-        <SettingRow label="「需要你」条" hint="所有项目里需要你、刚完成或出错的智能体，点一下打开"><Toggle checked onChange={() => {}} /></SettingRow>
-        {n.above === "状态行" ? <SettingRow label="状态行里显示什么" hint="在「状态」页里选"><span className="text-xs text-accent">去「状态」 →</span></SettingRow> : null}
+        <SettingRow agents="none" source="local" label="「需要你」条" hint="所有项目里需要你、刚完成或出错的智能体，点一下打开"><Toggle checked onChange={() => {}} /></SettingRow>
+        {n.above === "状态行" ? <SettingRow agents="none" source="local" label="状态行里显示什么" hint="在「状态」页里选"><span className="text-xs text-accent">去「状态」 →</span></SettingRow> : null}
       </Section>
       <Section title={n.below} hint={n.belowHint}>
-        <SettingRow label={n.quota}><Toggle checked onChange={() => {}} /></SettingRow>
-        <SettingRow label={n.avatar} hint="在 Profile 名字前显示它的头像"><Toggle checked onChange={() => {}} /></SettingRow>
+        <SettingRow agents="none" source="local" label={n.quota}><Toggle checked onChange={() => {}} /></SettingRow>
+        <SettingRow agents="none" source="local" label={n.avatar} hint="在 Profile 名字前显示它的头像"><Toggle checked onChange={() => {}} /></SettingRow>
       </Section>
     </MiniPage>
   );
@@ -93,7 +93,7 @@ function StatusPage({ n }: { n: (typeof NAMINGS)[Naming] }) {
       <Section title="显示位置" hint={n.name.startsWith("N3") ? "胶囊浮在对话正文的一角，点开能看详情；状态行在输入框正上方，一直看得到。" : undefined}>
         <div className="grid grid-cols-[minmax(6rem,1fr)_repeat(4,5.5rem)] items-center gap-y-2 px-4 py-3 text-sm">
           <span />
-          {cols.map((c) => <span key={c} className="text-center text-[11px] text-subtle" title={c === "胶囊" ? "浮在对话正文一角的小面板" : c === "状态行" ? "输入框正上方的一行" : undefined}>{c}</span>)}
+          {cols.map((c) => <span key={c} className="text-center text-caption/[inherit] text-subtle" title={c === "胶囊" ? "浮在对话正文一角的小面板" : c === "状态行" ? "输入框正上方的一行" : undefined}>{c}</span>)}
           {STATUS_ITEMS.map((it) => [
             <span key={it}>{it}</span>,
             ...cols.map((_, i) => <span key={it + i} className="text-center"><input type="radio" name={`sp-${it}`} checked={(place[it] ?? 1) === i} onChange={() => setPlace({ ...place, [it]: i })} /></span>),
@@ -101,10 +101,10 @@ function StatusPage({ n }: { n: (typeof NAMINGS)[Naming] }) {
         </div>
       </Section>
       <Section title="胶囊">
-        <SettingRow label="位置" hint="折叠和展开都在这个角"><Segmented value={corner} onChange={setCorner} options={[{ value: "tl", label: "左上" }, { value: "tr", label: "右上" }, { value: "bl", label: "左下" }, { value: "br", label: "右下" }]} /></SettingRow>
-        <SettingRow label="贴靠"><Segmented value={edge} onChange={setEdge} options={[{ value: "win", label: "窗口边缘" }, { value: "col", label: "正文边缘" }]} /></SettingRow>
-        <SettingRow label="没有内容时也显示胶囊"><Toggle checked={false} onChange={() => {}} /></SettingRow>
-        <SettingRow label="大小"><span className="text-xs text-muted">100 %</span></SettingRow>
+        <SettingRow agents="none" source="local" label="位置" hint="折叠和展开都在这个角"><Segmented value={corner} onChange={setCorner} options={[{ value: "tl", label: "左上" }, { value: "tr", label: "右上" }, { value: "bl", label: "左下" }, { value: "br", label: "右下" }]} /></SettingRow>
+        <SettingRow agents="none" source="local" label="贴靠"><Segmented value={edge} onChange={setEdge} options={[{ value: "win", label: "窗口边缘" }, { value: "col", label: "正文边缘" }]} /></SettingRow>
+        <SettingRow agents="none" source="local" label="没有内容时也显示胶囊"><Toggle checked={false} onChange={() => {}} /></SettingRow>
+        <SettingRow agents="none" source="local" label="大小"><span className="text-xs text-muted">100 %</span></SettingRow>
       </Section>
     </MiniPage>
   );

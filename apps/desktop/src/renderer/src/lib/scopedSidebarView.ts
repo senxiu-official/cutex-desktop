@@ -4,7 +4,8 @@
 import { createContext, useContext, useMemo } from "react";
 import type { SidebarSnapshot } from "../../../shared/ipc";
 import { OWNER_NOTIFY_FEATURE } from "../../../shared/ownerNotify";
-import { featuresOf, focusSessionViews, hostSessionViews, pinnedOn, sidebarOf, useApp } from "../store";
+import { featuresOf, pinnedOn, sidebarOf, useApp } from "../store";
+import { sessionsMetaOf, viewsOfHost } from "./sessionsMeta";
 import type { Attention } from "./attentionView";
 import { ASKS_FEATURE } from "./delegations";
 import { hostDelegations, useDelegations } from "./delegationStore";
@@ -62,7 +63,8 @@ export function useScopedSidebar(): ScopedSidebar {
   const features = useApp((s) => s.features);
   const hostsState = useApp((s) => s.hosts);
   const pinned = useApp((s) => s.pinned);
-  const sessions = useApp((s) => s.sessions);
+  // Only what rows show of the agent views (pending requests, connection, turn): not every streamed token (lib/sessionsMeta).
+  const sessions = useApp((s) => sessionsMetaOf(s.sessions));
   // The focus host's requests seen on its host feed: agents not open here are ⚠ rows too.
   const hostWaiting = useApp((s) => s.hostWaiting);
   return useMemo(() => {
@@ -74,7 +76,7 @@ export function useScopedSidebar(): ScopedSidebar {
       const snapshot = current ?? lastKnown.get(look.id) ?? null;
       const state = hostSidebarState(look, current);
       const focus = look.id === scope.focus;
-      const views = hostSessionViews(sessions, look.id);
+      const views = viewsOfHost(sessions, look.id);
       parts.push({ hostId: look.id, snapshot, pinned: focus ? pinned : pinnedOn(look.id), needsInput: focus ? new Set(Object.keys(pendingByAgent(views, hostWaiting))) : needsInputIds(views), chats: featuresOf(source, look.id).has("human-create-session"), statusUnknown: state === "loading", liveStatus: state === "loading" ? liveStatuses(views) : undefined });
       hosts.push({ look, state, hasRows: !!snapshot });
     }
@@ -85,7 +87,7 @@ export function useScopedSidebar(): ScopedSidebar {
 
 /** Signals / needs-you of the merged rows (keyed by row key), each from its own host's sources. */
 export function useScopedAttention(model: ScopedSidebarModel, scope: HostScope): Attention {
-  const sessions = useApp((s) => s.sessions);
+  const sessions = useApp((s) => sessionsMetaOf(s.sessions));
   const hostsState = useApp((s) => s.hosts);
   const approvals = useApp((s) => s.approvals);
   const hostWaiting = useApp((s) => s.hostWaiting);
@@ -100,7 +102,7 @@ export function useScopedAttention(model: ScopedSidebarModel, scope: HostScope):
   const result = useMemo(() => {
     const parts: HostAttentionPart[] = scope.hostsInScope.map((look) => {
       const focus = look.id === scope.focus;
-      const views = focus ? focusSessionViews({ hosts: hostsState, sessions }) : hostSessionViews(sessions, look.id);
+      const views = viewsOfHost(sessions, focus ? (hostsState?.active ?? "local") : look.id);
       // The focus host: also its requests seen on its host feed (agents not open here).
       const pending = pendingByAgent(views, focus ? hostWaiting : undefined);
       // Another host: its requests seen on its host feed (methods unknown: a confirmation).
@@ -117,7 +119,8 @@ export function useScopedAttention(model: ScopedSidebarModel, scope: HostScope):
     });
     return scopedSignals(rows, parts, scope.focus);
   }, [rows, scope, hostsState, sessions, hostWaiting, approvals, byHost, features, delegations, ownerNotify, notes, otherNotes, marks]);
-  return { rows, signals: result.signals, needs: result.needs, marks };
+  // One object per change: rows read it from AttentionContext (a new value would re-render every row).
+  return useMemo(() => ({ rows, signals: result.signals, needs: result.needs, marks }), [rows, result, marks]);
 }
 
 /** What sidebar rows need to know about hosts (provided by the sidebar; absent elsewhere = the focus host). */

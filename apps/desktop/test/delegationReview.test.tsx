@@ -36,6 +36,7 @@ vi.mock("../src/renderer/src/lib/delegationsView", () => ({
 }));
 vi.mock("../src/renderer/src/lib/approvalDecision", () => ({ useAskReview: () => state.review, decideApprovalOn: vi.fn() }));
 vi.mock("../src/renderer/src/lib/delegationStore", () => ({ hasDelegationViews: () => true }));
+vi.mock("../src/renderer/src/lib/quotaContinue", () => ({ useQuotaContinue: () => null, continueClock: () => "" }));
 vi.mock("../src/renderer/src/lib/delegationOpen", () => ({ openDelegationDetail: vi.fn() }));
 vi.mock("../src/renderer/src/lib/p2Access", () => ({ useP2Access: () => ({ files: true, attachments: true, delegations: true, owner: true }) }));
 vi.mock("../src/renderer/src/lib/delegationMenu", () => ({ delegationMenu: vi.fn(), runDelegationCommand: vi.fn() }));
@@ -131,6 +132,19 @@ describe("delegation review mapping", () => {
 const item: RawItem = { id: "delegate-1", type: "mcpToolCall", server: "cutex", tool: "agent_delegate", arguments: { target: "alden", text: "构建" }, result: { structuredContent: { delegation: "ask-1" } } };
 const card = () => renderToStaticMarkup(createElement(DelegationCard, { item, sessionId: "lead" }));
 const row = () => renderToStaticMarkup(createElement(DelegationRow, { d: state.record!, sessionId: "alden" }));
+
+describe("a held delegation card stays one line (owner 2026-10-24: the history jumped when a hold line went)", () => {
+  it("the hold reason is on the card's line, not on a second line under it", () => {
+    state.locale = "zh-CN";
+    state.review = { record: null, canDecide: false, approvalsPage: false };
+    state.record = ask({ execution: "queued", review: null, hold: { reason: "targetBusy" } });
+    const html = card();
+    const at = html.indexOf("data-delegation-hold");
+    expect(at).toBeGreaterThan(-1);
+    expect(at).toBeLessThan(html.indexOf("</button>"));
+    expect(html).not.toContain("ml-5 text-caption");
+  });
+});
 
 describe.each(["zh-CN", "en"])("delegation review buttons (%s)", (locale) => {
   beforeEach(() => {

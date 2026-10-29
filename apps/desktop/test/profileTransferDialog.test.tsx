@@ -11,7 +11,7 @@ vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useI18n: () => ({ t: (key: string, p?: Record<string, unknown>) => (p ? `${key}(${Object.values(p).join(",")})` : key), locale: "en" }),
 }));
-const state = { hosts: { active: "local" }, openSettings: () => {} };
+const state = { hosts: { active: "local", hosts: [{ id: "local", label: "box-b" }, { id: "ssh-bbbb2222", label: "box-a" }] }, openSettings: () => {} };
 vi.mock("../src/renderer/src/store", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useApp: Object.assign((select: (s: unknown) => unknown) => select(state), { getState: () => state, setState: () => {}, subscribe: () => () => {} }),
@@ -28,6 +28,7 @@ describe("CopyProfileToHostDialog", () => {
   it("API-key profile: target host, the source name, the key checkbox on", () => {
     const html = render({});
     expect(html).toContain('role="dialog"');
+    expect(html).toContain('data-effect-host="ssh-bbbb2222"');
     expect(html).toContain("agent-config.profile.transfer.title(GLM)");
     expect(html).toContain('<option value="ssh-bbbb2222" selected="">box-a</option>');
     expect(html).toContain('value="GLM"');

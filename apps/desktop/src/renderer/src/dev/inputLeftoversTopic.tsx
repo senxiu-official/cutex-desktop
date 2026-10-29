@@ -15,15 +15,15 @@ const TITLES: Record<TitleStyle, { name: string; note: string }> = {
 };
 
 const dot = <span className="size-1.5 shrink-0 rounded-full bg-ok" aria-hidden />;
-const chip = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] whitespace-nowrap";
+const chip = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-caption/[inherit] whitespace-nowrap";
 
 function TitleRow({ style }: { style: TitleStyle }) {
-  const title = <span className="text-[13px] font-semibold">排队顺序</span>;
+  const title = <span className="text-ui/[inherit] font-semibold">排队顺序</span>;
   if (style === "Q1")
     return (
       <div className="flex items-center gap-2">
         {title}
-        <span className="inline-flex items-center gap-1.5 text-[12px] text-muted"><LayoutGrid size={12} />{dot}HOST-A · 本机</span>
+        <span className="inline-flex items-center gap-1.5 text-meta/[inherit] text-muted"><LayoutGrid size={12} />{dot}HOST-A · 本机</span>
         <span className={`${chip} bg-accent/12 text-accent`}><Server size={11} />cutex</span>
       </div>
     );
@@ -55,7 +55,7 @@ function TitleRow({ style }: { style: TitleStyle }) {
     return (
       <div className="flex items-center gap-2">
         {title}
-        <button type="button" className="ml-auto inline-flex items-center gap-1 text-[12px] text-subtle hover:text-foreground">
+        <button type="button" className="ml-auto inline-flex items-center gap-1 text-meta/[inherit] text-subtle hover:text-foreground">
           存在{dot}HOST-A 的 cutex
           <ChevronDown size={12} />
         </button>
@@ -72,13 +72,13 @@ function QueueOrderCard({ style }: { style: TitleStyle }) {
       </div>
       <Section>
         {style === "Q4" && (
-          <div className="flex items-center gap-1.5 border-b border-border/60 py-2 text-[11px] text-subtle">
+          <div className="flex items-center gap-1.5 border-b border-border/60 py-2 text-caption/[inherit] text-subtle">
             <Server size={11} />
             主机{dot}HOST-A · cutex
             <ChevronDown size={11} />
           </div>
         )}
-        <SettingRow label="排队消息可以排到委托前面" hint="在「接下来」面板里拖动你的消息时，可以越过委托和待投递的结果">
+        <SettingRow agents="none" source="local" label="排队消息可以排到委托前面" hint="在「接下来」面板里拖动你的消息时，可以越过委托和待投递的结果">
           <Toggle checked onChange={() => {}} />
         </SettingRow>
       </Section>
@@ -101,7 +101,7 @@ function HintChoices({ label, items, on }: { label: string; items: { k: string; 
   return (
     <Section title={label}>
       {items.map((x) => (
-        <SettingRow key={x.k} label={<span>{label} <span className="ml-1 text-[11px] font-normal text-accent">{x.k}</span></span>} hint={x.v}>
+        <SettingRow agents="none" source="local" key={x.k} label={<span>{label} <span className="ml-1 text-caption/[inherit] font-normal text-accent">{x.k}</span></span>} hint={x.v}>
           <Toggle checked={on} onChange={() => {}} />
         </SettingRow>
       ))}

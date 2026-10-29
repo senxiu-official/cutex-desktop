@@ -19,5 +19,5 @@ export function useBrowserTab({ instance, hostId }: SideTabProps<BrowserState>):
   const { t } = useI18n();
   const view = useBrowserView(hostId, instance.state.tabKey);
   // Main owns the operation's linger window. No renderer timer, attach or polling here.
-  return { title: view?.title || instance.state.title || t("browser.title"), tooltip: view?.url ?? instance.state.url, busy: view?.loading || view?.control?.operating || undefined };
+  return { title: view?.title || instance.state.title || t("browser.title"), tooltip: view?.url ?? instance.state.url, busy: view?.loading || view?.control?.operating || undefined, ...(view?.favicon ? { favicon: view.favicon } : {}) };
 }

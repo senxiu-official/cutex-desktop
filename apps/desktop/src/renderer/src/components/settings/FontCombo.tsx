@@ -1,3 +1,4 @@
+import { isImeComposing } from "../../lib/ime";
 // A font picker you can type into (owner 2026-10-18, option A in /settings-variants.html): one line, no
 // separate 「自定义…」. Focus or ▾ opens the list (default first, then the known fonts, not-installed ones
 // tagged); typing filters it, and a name that is not listed can be used as typed. While nothing is typed
@@ -58,6 +59,7 @@ export function FontCombo({ value, fonts, defaultLabel, installed, onChange, lab
           setOpen(false);
         }}
         onKeyDown={(e) => {
+          if (isImeComposing(e)) return;
           if (e.key === "ArrowDown") {
             e.preventDefault();
             setOpen(true);
@@ -77,7 +79,7 @@ export function FontCombo({ value, fonts, defaultLabel, installed, onChange, lab
       />
       <ChevronDown size={14} aria-hidden className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-subtle" />
       {open && (
-        <ul id={listId} role="listbox" className="absolute top-full right-0 left-0 z-30 mt-1 max-h-64 overflow-auto rounded-md border border-border bg-raised py-1 text-sm shadow-lg">
+        <ul id={listId} role="listbox" data-popover="" className="absolute top-full right-0 left-0 z-50 mt-1 max-h-64 overflow-auto rounded-md border border-border bg-raised py-1 text-sm shadow-lg">
           {items.map((i, n) => (
             <li
               key={`${i.value}|${i.note ?? ""}`}
@@ -91,11 +93,11 @@ export function FontCombo({ value, fonts, defaultLabel, installed, onChange, lab
               className={`flex cursor-pointer items-center gap-2 px-2 py-1 ${n === active ? "bg-hover" : ""} ${i.value === value ? "font-medium" : ""}`}
             >
               <span className="min-w-0 flex-1 truncate">{i.label}</span>
-              {i.note && <span className="shrink-0 text-[11px] text-subtle">{i.note}</span>}
+              {i.note && <span className="shrink-0 text-caption/[inherit] text-subtle">{i.note}</span>}
             </li>
           ))}
           {!(query ?? "").trim() && (
-            <li role="presentation" aria-disabled className="sticky bottom-0 -mb-1 mt-1 cursor-default border-t border-border/60 bg-raised px-2 pt-1.5 pb-1.5 text-[11px] text-subtle select-none">
+            <li role="presentation" aria-disabled className="sticky bottom-0 -mb-1 mt-1 cursor-default border-t border-border/60 bg-raised px-2 pt-1.5 pb-1.5 text-caption/[inherit] text-subtle select-none">
               {t("appearance.fontCombo.typeHint")}
             </li>
           )}

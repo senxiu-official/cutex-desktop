@@ -1,7 +1,11 @@
+import type { SessionForkRequest, SessionForkResult, SessionForkPreview, SessionForkPreviewRequest } from "./sessionFork";
+import type { AskReviewFields } from "./delegationReviews";
 // IPC contract between Electron main and the renderer. The renderer never sees the cutex token
 // and never talks to the daemon directly; everything goes through these calls.
+import type { AgentPauseResult } from "./agentPause";
 import type { InboundMailInput, InboundMailStatus, MarkExternalInput, NciHelper, NciVerificationInput, NciVerificationStatus } from "./remoteJobs";
 import type { AppLocale } from "./locales";
+import type { CredentialSourcePatch, InterfaceBaseUrls, ProfileVariantFields, ProviderInterface, RuntimeCompatibility, VariantAddRequest, VariantDefaults, VariantResult } from "./profileVariants";
 import type { HostProxyPatch, HostProxyView, ProfileProxyPatch, ProfileProxyView, UpdateProxyPref, UpdateProxyRequest } from "./proxy";
 import type {
   AdmissionRef,
@@ -21,12 +25,14 @@ import type {
   SessionResource,
   SubmitStrategy,
   UserInputSubmitResult,
+  OwnerJoinDelegation,
   OwnerNotification,
   OwnerNotifyFilter,
   OwnerNotifySettings,
   OwnerNotifySettingsPatch,
+  GuidesPreferences,
 } from "@cutex-desktop/protocol";
-import type { CutexBuild, ProfileImageKind } from "@cutex-desktop/cutex-client";
+import type { OperatorActionRequest, OperatorActionReceipt, OperatorProjectWorkspace, CutexBuild, ProfileImageKind } from "@cutex-desktop/cutex-client";
 import type { ThreadMemoryMode } from "@cutex-desktop/protocol/codex";
 import type { CollaborationModeMask, ReviewTarget, ThreadGoal, ThreadGoalStatus } from "@cutex-desktop/protocol/codex/v2";
 import type { AddSshHostRequest, DirBrowse, HostAppearancePatch, HostGroupDraft, HostResult, HostsState, HostStartOn, HostTestResult, SshHostPatch, ViewScope } from "./hosts";
@@ -37,7 +43,10 @@ import type { UpdateUnsupportedCode } from "./update";
 import type { Note, NoteCreate, NotesQuery, NotesResult, NoteUpdate } from "./notes";
 import type { SideChat, SideMessageInput, SideOpenInput, SideOpenResult, SideReply } from "./sideChat";
 import type { CcSwitchImportItem, CcSwitchImportList, CcSwitchImportResult } from "./ccSwitchImport";
+import type { CreateAbandonResult, EffortFallback } from "./createAbandon";
+import type { ResetConsumeResult, ResetCreditsView } from "./resetCredits";
 import type { ClaudeAccountCreate, ClaudeAccountList, ClaudeAccountRemoveResult, ClaudeAccountResult, ProfileQuotaDetail } from "./claudeAccounts";
+import type { KimiAccountList, KimiAccountRemoveResult, KimiAccountResult, KimiLoginResult, KimiRegion } from "./kimiAccounts";
 import type { AlarmCancelResult, AlarmList } from "./alarms";
 import type { SkillArchiveList, SkillArchiveResult } from "./skillsArchive";
 import type { UsageSourceCreate, UsageSourceDeleteResult, UsageSourcePatch, UsageSourceResult, UsageSourcesView } from "./usageSources";
@@ -46,7 +55,9 @@ import type { RestoreCandidates } from "./runtimeRestore";
 import type { HostServiceInfo, UpgradeApplyRequest, UpgradeResult, UpgradeRollbackRequest, UpgradeRollbackResult, UpgradeRun, UpgradeSettings, UpgradeSettingsPatch, UpgradeStaging, UpgradeStatus } from "./backendUpgrade";
 import type { ComponentAction, ComponentResult, ComponentsList } from "./components";
 import type { QuotaContinueResult, QuotaContinueView } from "./quotaContinue";
+import type { QueueMergeResult } from "./queueMerge";
 import type { ClaudeRepinResult, ClaudeRuntimeView } from "./claudeRepin";
+import type { HomeResult } from "./home";
 import type { CapabilitiesUser, PeerBindingResult, SelfProfile, SelfProfilePatch, TokenBindingResult, UserCreate, UserPatch, UsersList, UsersResult, UsersSettings, UserWriteResult } from "./users";
 import type { PeerAgents, PeerAuditEntry, PeerCaps, PeerInvite, PeerList, PeerPatch, PeerResult, PeersSettings, PeersSettingsPatch, PeerView } from "./peers";
 import type { ArtifactContent, ArtifactDeleteResult, ArtifactDetail, ArtifactDiff, ArtifactList, ArtifactListQuery, ArtifactPatch, ArtifactPatchResult, ArtifactPublishRequest, ArtifactPublishResult, ArtifactResolveItem, ArtifactUsage } from "./artifactStore";
@@ -66,6 +77,9 @@ export type DaemonState =
   | { kind: "error"; baseUrl: string; message: string; /** HTTP status of the failing cutex reply (401 = token rejected). */ status?: number };
 
 export interface SidebarSnapshot {
+  /** Canonical per-project Operator IDs; absent when this host lacks the projection. */
+  projectOperators?: Record<string, string[]>;
+  operatorRestartRequired?: string[];
   active: SessionResource[];
   retired: SessionResource[];
   /** null when the projects route is unavailable (e.g. non-root token). */
@@ -74,6 +88,11 @@ export interface SidebarSnapshot {
   hostRows: Record<string, HostSessionRow>;
   /** The host's Claude runtime for new sessions (`GET /v2/sessions` `claudeRuntime`); absent on older cutex. */
   claudeRuntime?: HostClaudeRuntime;
+  /**
+   * The list leaves agents out (the archived listing failed, or hidden agents were refused): nothing may be judged
+   * deleted by it (storage audit 2026-10-23: stored Shelves were pruned against such a list).
+   */
+  partial?: true;
 }
 
 
@@ -87,6 +106,8 @@ export interface QuotaGauge {
   /** Unix seconds. */
   resetAt: number | null;
   windowLabel: string | null;
+  /** cutex `quota-display-label`: free-text label (e.g. 余额) shown instead of `label`; null / absent otherwise. */
+  displayLabel?: string | null;
   observedAt: number | null;
   stale: boolean;
   /** Set when cutex could not resolve the reader config. */
@@ -107,6 +128,8 @@ export interface QuotaReaderConfig {
   reset_pointer: string;
   reset_format: "rfc3339" | "unix_seconds" | "unix_millis";
   window_label?: string | null;
+  /** cutex `quota-display-label`: 1–6 display columns (CJK = 2) shown instead of `label`; "" clears it on PUT. */
+  display_label?: string | null;
   /** cutex `kimi-code-plan`: a window the response may leave out; never read → no gauge. Absent = false. */
   optional?: boolean;
 }
@@ -135,10 +158,16 @@ export interface QuotaConfigView {
 }
 
 export interface CapabilitiesView {
+  /** r260 non-durable text opt-in (normalized into featureList by main). */
+  features?: { liveTextDeltas?: boolean };
+  /** r258 native event media references (also advertised in featureList). */
+  eventMediaBlobs?: boolean;
   /** Build identity (cutex r224+; absent on older cutex). */
   cutexBuild?: CutexBuild;
   hostId: string;
   featureList: string[];
+  continuationWakeKinds?: string[];
+  continuationChildKinds?: string[];
   /** cutex `users`: who this connection is (absent on older cutex = the owner; shared/users.ts userAccessOf). */
   user?: CapabilitiesUser | null;
 }
@@ -162,6 +191,8 @@ export interface UsageAmounts {
   /** cutex `usage-model-map`: the models this row's samples were priced as (price table 「按另一个模型计价」). */
   pricedAs?: string[];
   apiEquivalentUsd?: number;
+  /** cutex `usage-turn-shape`: the largest input of one model request in this row (the context one step carried). */
+  maxRequestInput?: number;
 }
 
 /** `GET /v2/usage` (cutex usage ledger; local calendar days, inclusive). */
@@ -251,11 +282,26 @@ export interface GitStatus {
   files: GitFileStatus[];
 }
 
+export interface ProfileAccountLink {
+  accountKey: string;
+  basis: "claude-account" | "chatgpt-user" | "api-key" | "manual";
+  source: "auto" | "manual";
+  secretId: string;
+}
+export type ProfileAppearanceRevisions = Partial<Record<"color" | "avatarThemes" | "avatarStyle" | "introGreeting" | "avatar" | "introPortrait", { etag: string | null; updatedAt: string | null }>>;
+
 /** `GET /v2/profiles` item. */
-export interface ProfileItem {
+/** `ProfileVariantFields`: cutex profile-runtime-variants (shared/profileVariants.ts); absent on older hosts. */
+export interface ProfileItem extends ProfileVariantFields {
   id: string;
   name: string;
+  /** Owner/full-only account identity. Absent on older hosts or when unavailable. */
+  link?: ProfileAccountLink;
+  accountLinkState?: "auto" | "disabled" | "manual";
+  /** Per-field appearance revisions, including deletion tombstones. */
+  appearanceRevisions?: ProfileAppearanceRevisions;
   cliKind: string;
+  options?: { dsh?: DshProfileOptions };
   /** cutex `profile-proxy` (shared/proxy.ts): the Profile's own proxy and what it resolves to. */
   proxy?: ProfileProxyView;
   source: string | null;
@@ -282,6 +328,8 @@ export interface ProfileItem {
     effectiveProviderCategory?: string | null;
     /** cutex `profile-avatar`: the owner's 头像主题 (theme ids, never empty); null = by model family. Absent on older cutex. */
     avatarThemes?: string[] | null;
+    /** profile-avatar-style: full style; null explicitly follows the desktop default. */
+    avatarStyle?: import("@cutex-desktop/protocol").AvatarStyle | null;
     /** cutex `profile-avatar`: the custom intro greeting; null = the provider pool. Absent on older cutex. */
     introGreeting?: string | null;
   };
@@ -302,6 +350,10 @@ export interface ProfileItem {
   nativeSubagents?: boolean | null;
   /** cutex `profile-agent-approval`: agents launching agents on this profile wait for an owner approval. */
   agentUseRequiresApproval?: boolean;
+  /** cutex browser module: this Profile offers the browser_* tools to its sessions. */
+  browserTools?: boolean;
+  /** cutex `profile-auto-pick` (design 041): 「参与自动选择」 — `auto:<providerFamily>` may pick this profile. Default off; absent on older cutex. */
+  autoPick?: boolean;
   /**
    * cutex `profile-generic-switches` (Codex profiles; `detail.editable.privateChatgptAuthFile`): explicit
    * agent launches use the host's private native ChatGPT `auth.json` with the profile's own model /
@@ -314,6 +366,12 @@ export interface ProfileItem {
    * nullable enums). null / absent = off.
    */
   toolSchemaCompat?: "off" | "strict" | null;
+  /**
+   * cutex `profile-image-history-trim` (Codex profiles; `detail.editable.imageHistoryTrim`): keep only the
+   * newest `keep` generated images in the model request once history holds more than `maxInline`; older
+   * ones become a note with the saved file path. null = off; absent on older cutex.
+   */
+  imageHistoryTrim?: import("./imageHistoryTrim").ImageHistoryTrim | null;
   /** cutex `delegation-tools`: effective — agents may wait for delegation results inside the turn
    *  (`delegation_wait`). Absent on older cutex. */
   delegationWait?: boolean;
@@ -329,6 +387,8 @@ export interface ProfileItem {
    * keep the account they were created on. Absent on older cutex.
    */
   claudeAccount?: string | null;
+  /** cutex `kimi-runtime-profiles` (r266): the Kimi account (`ka-…`) of a Kimi-kind profile; null elsewhere. */
+  kimiAccount?: string | null;
   /**
    * claude-tools-settings (Claude profiles): the effective rules — sessions get Write/Edit (write)
    * and Bash (exec). With `claude-tool-defaults` unset = on, and sessions whose rule was not set
@@ -338,6 +398,10 @@ export interface ProfileItem {
   claudeAllowExec?: boolean | null;
   /** Claude profiles: effective file checkpoints (null for Codex profiles); absent on older cutex. */
   claudeFileCheckpointing?: boolean | null;
+  /** cutex `claude-compaction` (Claude profiles): auto-compaction override; null = Claude Code decides. */
+  claudeCompaction?: import("./claudeCompaction").ClaudeCompaction | null;
+  /** claude-compaction-models: per-model overrides by exact model id (patch: the whole table; null removes it). */
+  claudeCompactionModels?: import("./claudeCompaction").CompactionModels | null;
   /**
    * cutex `claude-launch-permission-mode` (Claude profiles): the Claude Code permission modes a new
    * agent / quick chat of this profile can start in (`launch.claudePermissionMode`), from the host's
@@ -359,13 +423,22 @@ export interface ProfileItem {
 }
 
 /** Kinds `POST /v2/profiles` creates (cutex `profile-create`). */
-export type ProfileCreateKind = "chatgpt" | "claude" | "apiKey";
+export type ProfileCreateKind = "chatgpt" | "claude" | "apiKey" | "dsh" | "kimi";
+
+export interface DshProfileOptions {
+  model: string;
+  reasoningEffort?: "off" | "low" | "high" | "max";
+  apiKeyEnv?: string;
+}
 
 /**
  * `GET /v2/profile-presets` item (cutex `profile-create`): an API-key provider cutex knows. Official
  * providers carry their own `baseUrl`; `custom` has none (`baseUrlRequired`).
  */
 export interface ProfilePreset {
+  /** Additive backend authority for the new-profile preview. */
+  runtimeCompatibility?: RuntimeCompatibility[];
+  providerInterfaces?: ProviderInterface[];
   id: string;
   /** Other ids `POST /v2/profiles {preset}` accepts (e.g. moonshot: kimi). */
   aliases: string[];
@@ -385,6 +458,8 @@ export interface ProfilePreset {
   modelCatalog?: boolean;
   /** cutex profile-presets-v2: the root `web_search` mode the preset writes (e.g. "disabled"); null = native default. Absent on older cutex. */
   webSearch?: string | null;
+  /** profile-presets-v2: strict tool-definition normalization, or null = off. */
+  toolSchemaCompat?: "off" | "strict" | null;
 }
 
 /**
@@ -394,14 +469,32 @@ export interface ProfilePreset {
 export interface ProfileCreateRequest {
   name: string;
   kind: ProfileCreateKind;
+  options?: { dsh: DshProfileOptions };
   preset?: string;
   baseUrl?: string;
   model?: string;
+  /** API key only, write-only: stored by cutex with the profile (accepted on create since profile-create). */
+  apiKey?: string;
   /**
    * cutex `claude-accounts`, Claude profiles only: the Claude account (`ca-…`) new agents of the
    * profile run on; absent = the shared default. cutex answers 400 for an unknown id or another kind.
    */
   claudeAccount?: string;
+  /** cutex `kimi-runtime-profiles`, Kimi-kind profiles only: the Kimi account (`ka-…`) that is the credential. */
+  kimiAccount?: string;
+}
+
+/**
+ * `POST /v2/profiles` with the core's write-only credential fields (kept out of `ProfileCreateRequest`, whose keys
+ * are what a module's `profile.fieldAction` may fill — modules/slots.ts ProfileOwnedField).
+ */
+export interface ProfileCreateBody extends ProfileCreateRequest {
+  /** profile-relay-runtimes (apiKey / dsh): DSH's separate address, never options.dsh.baseUrl. */
+  interfaceBaseUrls?: InterfaceBaseUrls;
+  /** apiKey / dsh: the write-only key (dsh needs profile-runtime-variants; cutex then stores it). */
+  apiKey?: string;
+  /** dsh + profile-runtime-variants: Advanced — read the key from a named host variable instead. */
+  credential?: CredentialSourcePatch;
 }
 
 /**
@@ -416,6 +509,8 @@ export interface CutexRefusal {
   forkReferences?: boolean;
   /** owner_local_only / owner_person_local_only / device_scope_denied: cutex `details` (shared/users.ts accessRefusalOf). */
   access?: import("./users").AccessRefusalDetails;
+  /** variant_in_use: how many agents (archived included) are bound to the variant. */
+  count?: number;
 }
 
 export type MutationResult = { ok: true } | { ok: false; error: CutexRefusal };
@@ -470,6 +565,8 @@ export interface ProfileConfig {
 }
 
 export interface ProfileDetail extends ProfileItem {
+  /** Owner/full-only manual marker for exact undo; never an automatic identity. */
+  accountLink?: string | null;
   detail: {
     config: ProfileConfig;
     apiKeyPresent: boolean;
@@ -496,6 +593,10 @@ export interface ProfileDetail extends ProfileItem {
      *  (null = unset) and the default (false; null for Codex). Absent on older cutex. */
     claudeFileCheckpointingExplicit?: boolean | null;
     claudeFileCheckpointingDefault?: boolean | null;
+    /** claude-compaction: why the stored claude-runtime.json is refused (the launch fails until fixed). */
+    claudeCompactionError?: string | null;
+    /** claude-compaction-models: why the stored claude-compaction-models.json is refused. */
+    claudeCompactionModelsError?: string | null;
     /** claude-code-sources: stored sources (null = the default) and the default ([]; null for Codex). */
     claudeSettingSourcesExplicit?: ClaudeSettingSource[] | null;
     claudeSettingSourcesDefault?: ClaudeSettingSource[] | null;
@@ -518,26 +619,43 @@ export interface ProfileDetail extends ProfileItem {
 export type AgentTurnQuestions = "decide" | "wait";
 
 /** PATCH body: omitted = keep, null = clear. `apiKey` is write-only. */
-export type ProfilePatch = Partial<{ [K in Exclude<keyof ProfileConfig, "modelCatalogJson">]: ProfileConfig[K] }> & {
+export type ProfilePatch = { options?: { dsh: DshProfileOptions } } & Partial<{ [K in Exclude<keyof ProfileConfig, "modelCatalogJson">]: ProfileConfig[K] }> & {
+  /** profile-relay-runtimes: merge interface addresses; null restores the default. */
+  interfaceBaseUrls?: InterfaceBaseUrls;
+  /** profile-account-link: null = auto, none = disable, m-… = manual group. */
+  accountLink?: string | null;
   color?: string | null;
   /** profile-provider-category-v2: kimi / glm / zai / claude / deepseek / codex / other; null = infer again. */
   providerCategory?: string | null;
   /** profile-avatar: 头像主题 ids (non-empty, unique, known to the host); null = by model family. */
   avatarThemes?: string[] | null;
+  /** profile-avatar-style: independent of the legacy emoji theme field. */
+  avatarStyle?: import("@cutex-desktop/protocol").AvatarStyle | null;
+  /** profile-avatar-style-import-if-unset: atomic import into a never-saved empty host style. */
+  avatarStyleImportIfUnset?: true;
   /** profile-avatar: the intro greeting (≤ 300 chars); null / "" = the provider pool. */
   introGreeting?: string | null;
   allowSessionSwitch?: boolean | null;
-  apiKey?: string;
+  /** Write-only. null = remove the stored key (DSH profiles, profile-runtime-variants). */
+  apiKey?: string | null;
+  /** profile-runtime-variants, DSH profiles: stored key or a named host variable (Advanced). */
+  credential?: CredentialSourcePatch;
+  /** profile-runtime-variants: the variant new agents get when none is picked; null = the primary. */
+  defaultVariant?: string | null;
   /** Rename — only sent when cutex reports `detail.editable.name === true`. */
   name?: string;
   /** profile-native-subagents (Codex only): null = back to the default. */
   nativeSubagents?: boolean | null;
   /** profile-agent-approval. */
   agentUseRequiresApproval?: boolean;
+  /** profile-auto-pick: 「参与自动选择」. */
+  autoPick?: boolean;
   /** profile-generic-switches (Codex profiles, `detail.editable.privateChatgptAuthFile`). */
   privateChatgptAuthFile?: boolean;
   /** profile-tool-schema-compat (Codex profiles): null = back to the default (off). */
   toolSchemaCompat?: "off" | "strict" | null;
+  /** profile-image-history-trim (Codex profiles): {maxInline, keep} (keep 1..50, maxInline keep+1..500); null = off. */
+  imageHistoryTrim?: import("./imageHistoryTrim").ImageHistoryTrim | null;
   /** delegation-tools: `delegation_wait` on this profile; null = back to the default. */
   delegationWait?: boolean | null;
   /** profile-search-tool (Codex API-key profiles, `detail.editable.searchTool`): the `web_search` cutex tool. */
@@ -549,6 +667,10 @@ export type ProfilePatch = Partial<{ [K in Exclude<keyof ProfileConfig, "modelCa
   claudeAllowExec?: boolean | null;
   /** Claude profiles (`detail.editable.claudeFileCheckpointing`): null = clear (off); applies at the next runtime launch. */
   claudeFileCheckpointing?: boolean | null;
+  /** claude-compaction (Claude profiles): {window, percent}; null removes it (Claude Code decides). Next runtime start. */
+  claudeCompaction?: import("./claudeCompaction").ClaudeCompaction | null;
+  /** claude-compaction-models: per-model overrides by exact model id (patch: the whole table; null removes it). */
+  claudeCompactionModels?: import("./claudeCompaction").CompactionModels | null;
   /** claude-code-sources (Claude profiles): the full source list; null = back to the default (none). Next launch. */
   claudeSettingSources?: ClaudeSettingSource[] | null;
   /** claude-code-sources (Claude profiles): claude.ai connectors of a subscription login. Next launch. */
@@ -557,6 +679,8 @@ export type ProfilePatch = Partial<{ [K in Exclude<keyof ProfileConfig, "modelCa
   planLabel?: string | null;
   /** claude-accounts (Claude profiles): `ca-…`, or null / `default` = the shared account; an unknown id → 400. */
   claudeAccount?: string | null;
+  /** kimi-runtime-profiles (Kimi-kind profiles): the Kimi account `ka-…`; applies to new agents only. */
+  kimiAccount?: string | null;
   /** profile-model-display-names: merge; a string sets that entry's name, null removes it. */
   modelDisplayNames?: Record<string, string | null>;
   /** profile-proxy: inherit / none / manual (omitted url keeps the stored one); null = inherit. */
@@ -655,7 +779,11 @@ export interface UserInstructions {
   overrideActive: boolean;
 }
 
+export type PromptCacheKeyStatus = "off" | "pending" | "active" | "unsupported" | "probe_failed";
+
 export interface GlobalSettings {
+  /** Newer hosts: Claude Code source; omitted by hosts without bundled CLI support. */
+  claudeCli?: "bundled" | "system";
   /** cutex `proxy-modes` (shared/proxy.ts); changed only through `patchProxySettings`. Older cutex: another shape or null. */
   proxy?: HostProxyView | null;
   defaultProfile: string | null;
@@ -707,6 +835,14 @@ export interface GlobalSettings {
   /** cutex `agent-harness`: the `# Cutex` launch section (new runtimes only; absent on older cutex). */
   agentHarness?: { enabled: boolean };
   agentHarnessDefault?: { enabled: boolean };
+  /** cutex `prompt-cache-key` (design 034; absent on older cutex): native launches pin one stable
+   *  Responses prompt cache key per host + workspace, so a fresh agent's first request can hit
+   *  the cache too. Default off; applies at the next launch. */
+  promptCacheKey?: { enabled: boolean };
+  promptCacheKeyDefault?: { enabled: boolean };
+  /** What the key is doing for native launches (cutex release after r250; absent on older cutex): off, pending (the next
+   *  launch will pin it), active, unsupported (this native build cannot), probe_failed (the probe failed: launched the old way). */
+  promptCacheKeyStatus?: PromptCacheKeyStatus;
   /** cutex `wake-busy-wait` (r220; absent on older cutex): a wake / delegation results for a busy Codex
    *  agent wait this long for the turn to end, then are read at its next step. 0 = next step at once;
    *  null = never early (wait for the turn end). Read per delivery (no restart). PATCH `{agentBus:
@@ -721,7 +857,21 @@ export interface GlobalSettings {
    *  (`passing_not_allowed`). PATCH `{queue: {ownerMayPassAsks}}`. */
   queue?: { ownerMayPassAsks: boolean };
   queueDefault?: { ownerMayPassAsks: boolean };
+  /** cutex `image-input-steering` (r264; absent on older cutex): what an ordinary busy send (`auto`) with
+   *  images does — `queue` (default; the original image goes out when the turn ends) or `steer`. Explicit
+   *  queue / queue-steer / owner join never read it. PATCH `{imageInput: {busyBehavior}}`. */
+  imageInput?: { busyBehavior: ImageBusyBehavior };
 }
+
+/** `imageInput.busyBehavior` of the host settings (image-input-steering). */
+export type ImageBusyBehavior = "queue" | "steer";
+
+/**
+ * image-input-steering: how the native actually took a message's images (submit / queue-steer success,
+ * `cutex/userInput/submitted`), only when it really accepted them: `pathText` = the image's file path on
+ * the target host as text (Claude), `nativeImage` = the image itself. Not "the model saw the image".
+ */
+export type ImageDelivery = "pathText" | "nativeImage";
 
 /** cutex capability for {@link SessionSandboxExtras}: live network / extra writable roots of a session. */
 export const SESSION_SANDBOX_EXTRAS_FEATURE = "session-sandbox-extras";
@@ -848,7 +998,7 @@ export type AgentHarnessSectionId = "cutex" | "agentsMdUser" | "agentsMdProject"
 /** `GET /v2/sessions/{id}/harness` (cutex `agent-harness`, root): the launch text cutex adds, rendered now. */
 export interface AgentHarnessPreview {
   cutexSessionId: string;
-  runtime: "codex" | "claude";
+  runtime: "codex" | "claude" | "dsh" | "kimi";
   enabled: boolean;
   /** The `# Cutex` section (rendered also when disabled). */
   harness: string;
@@ -958,7 +1108,39 @@ export interface ApprovalRecord {
   consumedAt?: string | null;
   /** cutex approval-wait: the requesting tool call holds for the decision until `until`; `end` once it stopped. */
   wait?: ApprovalWait | null;
+  risk?: "low" | "medium" | "high" | null;
+  matchedRuleId?: string | null;
+  autoDecision?: boolean;
+  ruleRevision?: number | null;
 }
+
+export type ApprovalKind = "managed_service" | "service_lifetime" | "static_root" | "agent_profile" | "ask_delivery" | "browser_claim" | "browser_open" | "workflow_run";
+export type ApprovalRuleExpiryMode = "turn" | "hour" | "today" | "revoked";
+export interface ApprovalRuleDraft {
+  enabled: boolean;
+  subject: { type: "agent"; cutexSessionId: string; displayName?: string | null };
+  projectId?: string | null;
+  kinds: ApprovalKind[];
+  constraints: { profileIds?: string[]; workflow?: { maxAgents?: number; maxTokens?: number } };
+  expiry: { mode: ApprovalRuleExpiryMode; expiresAt?: string | null; turn?: { runtimeGeneration: number; turnId: string } | null };
+  highRiskKindsExplicit: ApprovalKind[];
+}
+export interface ApprovalRule extends ApprovalRuleDraft {
+  ruleId: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  source?: "role" | null;
+  grantedBy?: "role:director" | null;
+  lastMatchedAt?: string | null;
+  expired: boolean;
+}
+export interface ApprovalRuleCatalogItem { kind: ApprovalKind; risk: "medium" | "high" | "dynamic"; compositeRisk: boolean; constraints: string[] }
+export interface ApprovalRulesView { contractVersion: 1; hostId: string; revision: number; catalog: ApprovalRuleCatalogItem[]; rules: ApprovalRule[] }
+export interface ApprovalRuleAudit { auditId: string; at: string; action: string; ruleId?: string | null; ruleRevision?: number | null; actor: string; requesterCutexSessionId?: string | null; projectId?: string | null; kind?: ApprovalKind | null; risk?: "low" | "medium" | "high" | null; requestSha256?: string | null; approvalId?: string | null; result: string; details: unknown }
+export interface ApprovalRuleAuditPage { audit: ApprovalRuleAudit[]; nextCursor: number | null }
+export interface ApprovalRuleMutation { revision: number; rule?: ApprovalRule; revoked?: true; ruleId?: string }
 
 /** One tool call holding for the owner's decision (cutex `approval-wait`). */
 export interface ApprovalWait {
@@ -1183,8 +1365,11 @@ export interface StuckBusParty {
   name: string | null;
 }
 
+export type MessageSettlementCloseResult = { ok: true; result: import("@cutex-desktop/protocol").MessageSettlementCloseResponse } | { ok: false; error: CutexRefusal & { status: number } };
+
 /** One undelivered message: a durable `pending` / `stale_held` record, or an entry only the bus's in-memory queue still holds (`durable` false, state `live_only`). */
 export interface StuckBusMessage {
+  settlement?: import("@cutex-desktop/protocol").MessageSettlement;
   messageId: string;
   state: string;
   durable: boolean;
@@ -1255,6 +1440,9 @@ export type ServerRequestReply = { result: unknown } | { error: { code: number; 
 
 /** Host list / SSH tunnel calls (main `HostManager`; shared/hosts.ts). Tokens never cross IPC. */
 export interface HostApi {
+  profileLinkState(): Promise<import("./profileLink").ProfileLinkState>;
+  syncProfileLinks(): Promise<import("./profileLink").ProfileLinkState>;
+  resetProfileLinks(): Promise<import("./profileLink").ProfileLinkState>;
   hosts(): Promise<HostsState>;
   /** Host aliases from ~/.ssh/config (names only), offered by 添加 SSH 主机. */
   sshConfigHosts(): Promise<string[]>;
@@ -1319,7 +1507,7 @@ export interface HostApi {
 }
 
 /** HostApi method names: served by main `HostManager`, never routed to a daemon (main + preload). */
-export const HOST_METHOD_NAMES = ["hosts", "sshConfigHosts", "addSshHost", "pairSshHost", "setSshConnectAs", "updateSshHost", "removeSshHost", "switchHost", "setScope", "reconnectHost", "connectHost", "setHostAutoConnect", "setHostAppearance", "saveHostGroups", "testHost", "setHostStartOn", "sshPrompts", "answerSshPrompt", "identityState", "exportIdentity", "importIdentity", "copyIdentityKey", "importIdentityKey", "setIdentityName", "copyProfileToHost"] as const satisfies readonly (keyof HostApi)[];
+export const HOST_METHOD_NAMES = ["profileLinkState", "syncProfileLinks", "resetProfileLinks", "hosts", "sshConfigHosts", "addSshHost", "pairSshHost", "setSshConnectAs", "updateSshHost", "removeSshHost", "switchHost", "setScope", "reconnectHost", "connectHost", "setHostAutoConnect", "setHostAppearance", "saveHostGroups", "testHost", "setHostStartOn", "sshPrompts", "answerSshPrompt", "identityState", "exportIdentity", "importIdentity", "copyIdentityKey", "importIdentityKey", "setIdentityName", "copyProfileToHost"] as const satisfies readonly (keyof HostApi)[];
 
 /** Request/response calls (renderer → main). */
 /** Native Windows sandbox readiness (`windowsSandbox/readiness`; cutex windows-sandbox-readiness). */
@@ -1341,7 +1529,19 @@ export interface ThreadSearchPage {
   nextCursor: string | null;
 }
 
-export interface DaemonApi {
+import type { StorageOverview, StorageRefresh, StorageItemsPage, StorageItemQuery } from "./storage";
+import type { StorageCleanupApi } from "./storageCleanup";
+
+export interface HistoryMediaExpected { mime: string; size: number }
+export type HistoryMediaPayload = { bytes: Uint8Array; mime: string; size: number } | { dataUrl: string };
+export type ImageActionInput = { kind: "media" | "blob"; sessionId: string; sha256: string; mime?: string; size?: number }
+  | { kind: "inline"; dataUrl: string };
+export type ImageActionResult = { status: "copied" | "saved" | "cancelled" };
+
+export interface DaemonApi extends StorageCleanupApi {
+  storage(): Promise<StorageOverview | null>;
+  storageRefresh(stores?: string[]): Promise<StorageRefresh>;
+  storageItems(storeId: string, query?: StorageItemQuery): Promise<StorageItemsPage>;
   notesList(query?: NotesQuery): Promise<NotesResult>;
   notesGet(id: string): Promise<Note>;
   notesCreate(input: NoteCreate): Promise<Note>;
@@ -1365,6 +1565,15 @@ export interface DaemonApi {
    * (default 20) older than `cursor`. Null if unsupported.
    */
   history(sessionId: string, cursor?: string | null, limit?: number): Promise<SessionHistory | null>;
+  /**
+   * An image a history read replaced by `cutex-media:<session>/<sha256>` (history-media-refs, design
+   * 025; main asks for references whenever the host offers them). Null when the host no longer has it.
+   */
+  historyMedia(sessionId: string, sha256: string, expected?: HistoryMediaExpected): Promise<HistoryMediaPayload | null>;
+  /** r258 durable event blob. Separate from the older owner-only history-media route. */
+  eventBlob(sessionId: string, sha256: string, expected?: HistoryMediaExpected): Promise<HistoryMediaPayload | null>;
+  /** Explicit owner image actions. Main chooses save paths and reads only authenticated session media. */
+  imageAction(input: ImageActionInput, action: "copy" | "save"): Promise<ImageActionResult>;
   /** Start streaming events for a session from the bootstrap checkpoint. */
   subscribe(sessionId: string, from: { streamId: string; after: string | null }): Promise<void>;
   unsubscribe(sessionId: string): Promise<void>;
@@ -1387,6 +1596,10 @@ export interface DaemonApi {
   compactThread(sessionId: string, threadId: string): Promise<void>;
   /** Profile quota gauges from cutex; [] when unconfigured or the daemon predates the route. */
   profileQuota(profile: string, refresh?: boolean): Promise<QuotaGauge[]>;
+  /** Usage-limit reset credits of the profile's account (cutex `profile-reset-credits`); null when the route is missing. */
+  profileResetCredits(profile: string, refresh?: boolean): Promise<ResetCreditsView | null>;
+  /** Use one reset credit (owner click after the confirm dialog only); the same key never uses a second one. */
+  consumeResetCredit(profile: string, body: { idempotencyKey: string; creditId?: string | null }): Promise<ResetConsumeResult>;
   /**
    * Stop-gap: native `account/rateLimits/read` on this agent's runtime (the `rateLimits` snapshot),
    * used only while cutex lacks `profile-quota-native`. null on any error.
@@ -1422,6 +1635,10 @@ export interface DaemonApi {
   rescanUsageSource(id: string): Promise<UsageSourceResult>;
   usagePrices(): Promise<UsagePrices>;
   putUsagePrices(prices: UsagePrices): Promise<UsagePrices>;
+  /** `GET /v2/human/preferences/guides` (guides.preferences): the owner's 全部跳过, shared across their devices. */
+  guidesPreferences(): Promise<GuidesPreferences>;
+  /** `PUT /v2/human/preferences/guides` (owner-full): `skippedThrough` null resets it. */
+  putGuidesPreferences(skippedThrough: string | null): Promise<GuidesPreferences>;
   fsDir(scope: WorkspaceScope, path: string): Promise<FsDir>;
   fsFile(scope: WorkspaceScope, path: string, maxBytes?: number): Promise<FsFile>;
   /** `GET /v2/fs/file` (fs-file-read): any absolute path on the active host (owner-only), same body as `fsFile`. */
@@ -1451,18 +1668,26 @@ export interface DaemonApi {
   /** `GET /v2/codex/managed-mcp`: MCP servers cutex injects at launch, with tool lists. null on older cutex. */
   managedMcp(): Promise<{ servers: { name: string; configured?: boolean; approvalMode: string; toolsSource: string; tools: { name: string; description: string }[] | null }[] } | null>;
   /** `POST /v2/human/agents` (human-create-agent): new agent, optionally in a project and started. */
-  createAgent(request: { name: string; projectId?: string; cwd?: string; profile?: string; start: boolean; launch?: LaunchOverrides }): Promise<{ cutexSessionId: string }>;
+  /** `effortFallback` (cutex agent-create-effort-fallback): the profile default effort the model does not offer was replaced. */
+  /** `profile: "auto:<providerFamily>"` (cutex profile-auto-pick): cutex picks the profile; `profilePick` says which and why. */
+  createAgent(request: { name: string; projectId?: string; cwd?: string; profile?: string; variantId?: string; start: boolean; launch?: LaunchOverrides }): Promise<{ cutexSessionId: string; effortFallback?: EffortFallback | null; profilePick?: import("./profileAutoPick").ProfilePick | null }>;
+  /** `GET /v2/profile-auto-pick` (cutex profile-auto-pick): per-provider ranking of the opted-in profiles, nothing created. */
+  profileAutoPick(query: { provider?: string | null; model?: string | null; effort?: string | null }): Promise<import("./profileAutoPick").AutoPickPreview>;
+  /** Owner abandon of an unfinished agent_create (cutex agent-create-abandon); `dryRun` lists what would be removed. */
+  abandonAgentCreate(actionId: string, dryRun: boolean): Promise<CreateAbandonResult>;
   /** `POST /v2/human/sessions` (human-create-session): quick chat; without cwd cutex makes a scratch dir. */
-  createHumanSession(request: { cwd?: string; profile?: string; displayName?: string; start: boolean; launch?: LaunchOverrides }): Promise<{ cutexSessionId: string }>;
+  createHumanSession(request: { cwd?: string; profile?: string; variantId?: string; displayName?: string; start: boolean; launch?: LaunchOverrides }): Promise<{ cutexSessionId: string }>;
   /** Per-native-thread attention level (cutex /v2/notifications/session; the TUI's Alt+N). */
   notificationLevel(threadId: string): Promise<NotificationLevel>;
   setNotificationLevel(threadId: string, level: NotificationLevel): Promise<NotificationLevel>;
   /** cutex `services`: registry of web services agents started. */
   services(): Promise<ServicesList>;
+  /** services-eligible-owners: candidates of this service’s own daemon, including hidden sessions. */
+  serviceEligibleOwners(slug: string): Promise<import("./serviceOwners").EligibleServiceOwners>;
   registerService(request: ServiceRegisterRequest): Promise<ServiceView>;
-  patchService(slug: string, patch: { displayName?: string; port?: number; path?: string | null; ownerCutexSessionId?: string | null }): Promise<ServiceView>;
+  patchService(slug: string, patch: ServicePatch): Promise<ServiceView>;
   deleteService(slug: string): Promise<void>;
-  serviceAction(slug: string, action: "start" | "stop" | "restart"): Promise<ServiceView>;
+  serviceAction(slug: string, action: "start" | "stop" | "restart" | "archive" | "restore"): Promise<ServiceView>;
   /** Starts an on-demand service if needed; returns the URL to open. */
   openService(slug: string): Promise<{ url: string; localUrl: string }>;
   serviceLogs(slug: string, tail?: number): Promise<{ text: string }>;
@@ -1486,7 +1711,13 @@ export interface DaemonApi {
    * Profile lifecycle. The UI only calls these when cutex advertises `profile-create` /
    * `profile-duplicate` / `profile-delete`. A duplicate carries no credentials.
    */
-  createProfile(request: ProfileCreateRequest): Promise<ProfileDetail>;
+  createProfile(request: ProfileCreateBody): Promise<ProfileDetail>;
+  /** `POST /v2/profiles/{p}/variants` (profile-runtime-variants); 409 variant_runtime_unsupported / variant_exists come back as a refusal. */
+  addProfileVariant(profile: string, request: VariantAddRequest): Promise<VariantResult>;
+  /** `PATCH /v2/profiles/{p}/variants/{v} {defaults}`: new agents only. */
+  patchProfileVariant(profile: string, variantId: string, defaults: Partial<VariantDefaults>): Promise<VariantResult>;
+  /** `DELETE /v2/profiles/{p}/variants/{v}`; 409 variant_in_use (count) / primary_variant_not_removable come back as a refusal. */
+  deleteProfileVariant(profile: string, variantId: string): Promise<{ ok: true; defaultVariant: string | null; profile?: ProfileDetail } | { ok: false; error: CutexRefusal }>;
   /** `GET /v2/profile-presets` (feature profile-create): API-key providers; null when the host has no such route. */
   profilePresets(): Promise<ProfilePreset[] | null>;
   duplicateProfile(profile: string, name: string): Promise<ProfileDetail>;
@@ -1512,6 +1743,13 @@ export interface DaemonApi {
   approvals(state: "pending" | "all"): Promise<ApprovalRecord[] | null>;
   /** `POST /v2/approvals/{id}/approve|deny`; `approval_not_found` / `approval_not_pending` come back as a refusal. */
   decideApproval(approvalId: string, decision: ApprovalDecision, note?: string, origin?: ApprovalDecisionOrigin): Promise<ApprovalDecisionResult>;
+  /** Root-only design 047 API. Null on older daemons; callers must capability-gate every use. */
+  approvalRules(): Promise<ApprovalRulesView | null>;
+  confirmApprovalRule(rule: ApprovalRuleDraft, typedPhrase: string): Promise<{ confirmationToken: string; requiredPhrase: string; expiresInSeconds: number }>;
+  createApprovalRule(expectedRevision: number, rule: ApprovalRuleDraft, confirmationToken?: string): Promise<ApprovalRuleMutation>;
+  patchApprovalRule(ruleId: string, expectedRevision: number, rule: ApprovalRuleDraft, confirmationToken?: string): Promise<ApprovalRuleMutation>;
+  deleteApprovalRule(ruleId: string, expectedRevision: number): Promise<ApprovalRuleMutation>;
+  approvalRuleAudit(cursor?: number, limit?: number): Promise<ApprovalRuleAuditPage>;
   /** `GET /v2/runtime-packages` (feature runtime-package-upgrade, root); null when the daemon predates it. */
   runtimePackages(): Promise<RuntimePackagesView | null>;
   /** `GET /v2/runtime-packages/runs/{runId}`; null when unknown or the daemon predates it. */
@@ -1530,7 +1768,15 @@ export interface DaemonApi {
   cancelDirectorRotation(rotationId: string): Promise<DirectorRotationResult>;
   /** `POST /v2/director-rotations/{id}/continue`: stop waiting for the handoff note. */
   continueDirectorRotation(rotationId: string): Promise<DirectorRotationResult>;
-  /** `GET /v2/agent-bus/stuck-messages?minAgeSecs=` (feature agent-bus-stuck-messages, root), oldest first; null when the daemon predates it. */
+  /** agent-bus-message-settlement-v1: owner follow-up close. Never auto-retry an uncertain write. */
+  delegationUpgradeSnapshot(projectId: string, cursor?: string): Promise<import("./delegationUpgradePreview").UpgradeSnapshot>;
+  delegationUpgradeAction(projectId: string, action: import("./delegationUpgradePreview").UpgradeAction): Promise<import("./delegationUpgradePreview").UpgradeResult>;
+  delegationUpgradeApproval(approvalId: string): Promise<import("./delegationUpgradePreview").UpgradeApprovalRead>;
+  delegationRoutingApprovals(projectId: string): Promise<import("./delegationUpgradePreview").UpgradeApprovalRead[]>;
+  delegationUpgradeOperation(actionId: string): Promise<import("./delegationUpgradePreview").UpgradeOperationLookup>;
+  delegationRetirementReview(projectId: string, request: import("./delegationUpgradePreview").PermanentRetirementReviewRequest): Promise<import("./delegationUpgradePreview").PermanentRetirementReview>;
+  closeBusMessage(request: import("@cutex-desktop/protocol").MessageSettlementCloseRequest): Promise<MessageSettlementCloseResult>;
+  /** `GET /v2/agent-bus/stuck-messages?minAgeSecs=`; null on older daemons. */
   stuckBusMessages(minAgeSecs: number): Promise<StuckBusView | null>;
   /** `POST /v2/agent-bus/stuck-messages/discard` (the reason is fixed in main); 4xx (message_not_found, message_protected, message_not_discardable, …) come back as a refusal. */
   discardStuckBusMessage(request: StuckBusDiscardRequest): Promise<StuckBusDiscardResult>;
@@ -1538,14 +1784,34 @@ export interface DaemonApi {
   runtimes(): Promise<RuntimesWire | null>;
   /** `GET /v2/claude/accounts` (feature claude-accounts); null when the daemon predates it. */
   claudeAccounts(): Promise<ClaudeAccountList | null>;
-  /** `POST /v2/claude/accounts` (validated in main; never carries an API key); 4xx come back as a refusal. */
+  /** `POST /v2/claude/accounts` (validated in main; an API account may carry the write-only `apiKey`); 4xx come back as a refusal. */
   createClaudeAccount(request: ClaudeAccountCreate): Promise<ClaudeAccountResult>;
   /** `PATCH /v2/claude/accounts/{id} {label}`; 4xx (label taken, default, not found) come back as a refusal. */
   renameClaudeAccount(id: string, label: string): Promise<ClaudeAccountResult>;
+  /** `PATCH /v2/claude/accounts/{id} {apiKey}`: set / replace an API account's key (write-only, never read back). */
+  setClaudeAccountKey(id: string, apiKey: string): Promise<ClaudeAccountResult>;
   /** `DELETE /v2/claude/accounts/{id}` (home kept); 409 claude_account_in_use etc. come back as a refusal. */
   deleteClaudeAccount(id: string): Promise<ClaudeAccountRemoveResult>;
   /** `POST /v2/claude/accounts/{id}/status`: cutex runs `claude auth status` (subscription) or checks the stored key (api). */
   checkClaudeAccount(id: string): Promise<ClaudeAccountResult>;
+  /** `GET /v2/kimi/accounts` (feature kimi-accounts); null when the daemon predates it. */
+  kimiAccounts(): Promise<KimiAccountList | null>;
+  /** `POST /v2/kimi/accounts {label, region?}`; 4xx (label taken…) come back as a refusal. */
+  createKimiAccount(request: { label: string; region?: KimiRegion }): Promise<KimiAccountResult>;
+  /** `PATCH /v2/kimi/accounts/{id} {label}`. */
+  renameKimiAccount(id: string, label: string): Promise<KimiAccountResult>;
+  /** `DELETE /v2/kimi/accounts/{id}` (home kept); 409 kimi_account_in_use comes back as a refusal. */
+  deleteKimiAccount(id: string): Promise<KimiAccountRemoveResult>;
+  /** `POST /v2/kimi/accounts/{id}/status`: cutex re-reads the local credential metadata (no network). */
+  checkKimiAccount(id: string): Promise<KimiAccountResult>;
+  /** `POST /v2/kimi/accounts/{id}/logout`: cutex writes Kimi's revoked tombstone (running agents stop at their next request). */
+  logoutKimiAccount(id: string): Promise<KimiAccountResult>;
+  /** `POST /v2/kimi/accounts/{id}/login`: cutex starts `kimi login` (device code) and answers with the URL / code. */
+  startKimiLogin(id: string): Promise<KimiLoginResult>;
+  /** `GET /v2/kimi/accounts/{id}/login/{loginId}` (poll). */
+  kimiLogin(id: string, loginId: string): Promise<KimiLoginResult>;
+  /** `DELETE /v2/kimi/accounts/{id}/login/{loginId}`. */
+  cancelKimiLogin(id: string, loginId: string): Promise<KimiLoginResult>;
   /** `GET /v2/profiles/{p}/quota` with `source` + `nativeQuota` (Claude account windows / API usage); null when the route is missing. */
   profileQuotaDetail(profile: string): Promise<ProfileQuotaDetail | null>;
   patchSettings(patch: Partial<GlobalSettings>): Promise<GlobalSettings & { restartRequired: string[] }>;
@@ -1616,10 +1882,11 @@ export interface DaemonApi {
   /** Allowlisted cutex session mutations for menus: metadata/update, retire, restore, visibility/*, runtime/offline|online. */
   sessionAction(sessionId: string, method: SessionActionMethod, params: Record<string, unknown>): Promise<unknown>;
   /**
-   * `cutex/session/fork` (feature session-fork): a new agent (same project / profile) whose thread
+   * `cutex/session/fork` (feature session-fork): a new agent (same project; optional compatible profile) whose thread
    * is this one up to `afterTurnId` (null = the latest turn).
    */
-  forkSession(sessionId: string, request: { afterTurnId?: string | null; name?: string }): Promise<{ cutexSessionId: string }>;
+  forkSession(sessionId: string, request: SessionForkRequest): Promise<SessionForkResult>;
+  forkPreview(sessionId: string, request?: SessionForkPreviewRequest): Promise<SessionForkPreview>;
   /**
    * `cutex/session/delete` (feature session-delete); refusals (`session_referenced`, `session_busy`) as a result.
    * Without `expectedRevision` it applies to the current revision (agents the desktop doesn't list).
@@ -1634,6 +1901,24 @@ export interface DaemonApi {
   backgroundTerminals(sessionId: string, threadId: string): Promise<BackgroundTerminal[]>;
   /** cute-codex `thread/backgroundTerminals/terminate` (needs the cutex allowlist entry). */
   terminateBackgroundTerminal(sessionId: string, threadId: string, processId: string): Promise<void>;
+  /** Claude adapter `claude/tasks/stop` (cutex `claude-background-tasks`): stop a running background subagent of the
+   *  agent's thread `threadId` (task id = the `claude:<session>:task:<id>` suffix). */
+  stopClaudeTask(sessionId: string, threadId: string, taskId: string): Promise<void>;
+  /** Director address / handover (r254, design 044); gated by the host capabilities. */
+  directorScopeCandidates(projectId: string): Promise<import("./projectEvents").ProjectEventsResult<{items: import("@cutex-desktop/cutex-client").DirectorScopeCandidate[]}>>;
+  directorReviewContent(projectId: string, id: string): Promise<import("./projectEvents").ProjectEventsResult<import("@cutex-desktop/cutex-client").DirectorReviewContent>>;
+  projectDirector(projectId: string): Promise<import("./projectEvents").ProjectEventsResult<import("@cutex-desktop/cutex-client").ProjectDirector>>;
+  directorHandovers(projectId: string): Promise<import("./projectEvents").ProjectEventsResult<{items: import("@cutex-desktop/cutex-client").DirectorHandover[]}>>;
+  directorStartReviews(projectId: string): Promise<import("./projectEvents").ProjectEventsResult<{items: import("@cutex-desktop/cutex-client").DirectorStartReview[]}>>;
+  decideDirectorItem(projectId: string, kind: "handover" | "start-reviews", id: string, decision: "accept" | "discard", fence: import("@cutex-desktop/cutex-client").DirectorFence): Promise<import("./projectEvents").ProjectEventsResult<unknown>>;
+  approveDirectorScope(projectId: string, scope: import("@cutex-desktop/cutex-client").DirectorScope): Promise<import("./projectEvents").ProjectEventsResult<unknown>>;
+  /** `GET /v2/projects/{id}/events` (project-events, design 022): newest first; `after` = oldest first. */
+  projectEvents(projectId: string, query: import("./projectEvents").ProjectEventsQuery): Promise<import("./projectEvents").ProjectEventsResult<import("./projectEvents").ProjectEventPage>>;
+  /** `GET /v2/projects/{id}/background`: what runs now, per agent (stop requests for the owner). */
+  projectBackground(projectId: string): Promise<import("./projectEvents").ProjectEventsResult<import("./projectEvents").ProjectBackground>>;
+  /** Follow `…/events/stream` (resumes, catches up after `lagged`); rows arrive as `projectEvents`. Returns a watch id. */
+  watchProjectEvents(projectId: string, watch: import("./projectEvents").ProjectEventsWatch): Promise<string>;
+  unwatchProjectEvents(watchId: string): Promise<void>;
   /** cute-codex `thread/read` of a sub-agent thread spawned by this agent (cutex `subagent-threads`). Raw native result.
    *  `includeTurns: false` = the thread only (nickname / role / status), no history. */
   subAgentThread(sessionId: string, threadId: string, opts?: { includeTurns?: boolean }): Promise<unknown>;
@@ -1641,6 +1926,9 @@ export interface DaemonApi {
    *  assistant messages containing `term` (case-insensitive), oldest first, one page. */
   searchThread(sessionId: string, threadId: string, term: string, cursor?: string | null): Promise<ThreadSearchPage>;
   /** cutex project mutation (add_member / detach_member / set_workspace_root / archive / restore). */
+  projectRead(projectId: string): Promise<OperatorProjectWorkspace>;
+  operatorRuntimeNotice(projectId: string, sessionId: string): Promise<{ state: "required" | "offline" }>;
+  operatorAction(request: OperatorActionRequest): Promise<OperatorActionReceipt>;
   projectMutation(projectId: string, expected: { authorityEpoch: number; projectRevision: number }, operation: ProjectMutationOperation): Promise<unknown>;
   /** cutex project presentation update (name / badge / color). */
   projectPresentation(projectId: string, expected: { authorityEpoch: number; presentationRevision: number }, presentation: { display_name: string; badge_label: string; color: string }): Promise<unknown>;
@@ -1689,6 +1977,10 @@ export interface DaemonApi {
   workflowRunAction(runId: string, action: WorkflowRunAction): Promise<{ ok: true } | { ok: false; error: CutexRefusal }>;
   /** Agents online before an unclean stop (`GET /v2/runtimes/restore-candidates`, cutex runtime-restore-candidates); null on an older cutex. */
   restoreCandidates(): Promise<RestoreCandidates | null>;
+  /** Online agents with an idle verdict (`GET /v2/runtimes/idle`, cutex stop-idle-agents, design 031); null on an older cutex. */
+  idleRuntimes(query: { minIdleSecs: number; projectId?: string }): Promise<import("./stopIdle").IdleRuntimes | null>;
+  /** `POST /v2/runtimes/stop-idle`: stop the chosen agents (each checked again by cutex). */
+  stopIdle(body: import("./stopIdle").StopIdleRequest): Promise<import("./stopIdle").StopIdleResult>;
   /** `DELETE /v2/runtimes/restore-candidates`: the owner dismisses the restore prompt. */
   dismissRestoreCandidates(): Promise<MutationResult>;
   /** Claude quota auto-continue of an agent (`GET /v2/quota-auto-continue?sessionId=`); null on an older cutex. */
@@ -1746,6 +2038,21 @@ export interface DaemonApi {
   putUserPersonKeys(userId: string, personKeys: import("./users").PersonKeyInput[]): Promise<UsersResult<import("./users").PersonKeysResult>>;
   /** person-identity-ack, owner only: acknowledge a device's key change (clears `person.previousPublicKey`). */
   ackTokenPersonChange(tokenId: string): Promise<UsersResult<import("./users").TokenPersonAckResult>>;
+  // Home page (cutex `user-home`, shared/home.ts): the caller's own settings + cover; refusals as values.
+  /** `GET /v2/users/me/home`; null on a cutex without the route. */
+  userHome(): Promise<HomeResult<import("./home").HomeView | null>>;
+  /** `PUT /v2/users/me/home`; `home_revision_conflict` carries the host's current revision. */
+  putUserHome(revision: number, home: import("./home").HomeDoc | null): Promise<HomeResult<import("./home").HomeView>>;
+  /** `GET /v2/users/me/home/cover` as a data: URL (null: none / older cutex). */
+  homeCover(): Promise<import("./home").HomeImage | null>;
+  /** `PUT /v2/users/me/home/cover` (PNG / JPEG / WebP ≤ 2 MiB, base64). */
+  putHomeCover(upload: import("./home").HomeCoverUpload): Promise<HomeResult<import("./home").HomeView>>;
+  /** `DELETE /v2/users/me/home/cover`. */
+  deleteHomeCover(): Promise<HomeResult<import("./home").HomeView>>;
+  /** cutex `service-tiles`: `GET /v2/services/{slug}/tile` (template sanitised; null: older cutex). */
+  serviceTile(slug: string): Promise<import("./home").ServiceTileAnswer | null>;
+  /** cutex `service-tiles`: the tile's image as a data: URL (null: none / unsupported / unavailable). */
+  serviceTileImage(slug: string): Promise<import("./home").HomeImage | null>;
   // Backend upgrade (cutex `backend-upgrade`, shared/backendUpgrade.ts). Owner only; refusals as values.
   /** `GET /v2/upgrade`; null on a cutex without the route. */
   upgradeStatus(): Promise<UpgradeStatus | null>;
@@ -1840,6 +2147,9 @@ export interface DaemonApi {
   /** asks-pause-v2: pause / resume delegation (å§æ) for this session. */
   asksPause(sessionId: string): Promise<AsksPauseResult>;
   asksResume(sessionId: string): Promise<AsksPauseResult>;
+  /** agent-pause (shared/agentPause): pause the whole agent (its current turn may finish) / lift that pause. */
+  agentPause(sessionId: string): Promise<AgentPauseResult>;
+  agentResume(sessionId: string): Promise<AgentPauseResult>;
   /** queue-pause "停止": cutex pauses the queue (if non-empty), then interrupts the active turn. */
   stopTurn(sessionId: string): Promise<TurnStopResult>;
   queueUpdate(sessionId: string, queueId: string, expectedRevision: number, text: string): Promise<void>;
@@ -1847,9 +2157,16 @@ export interface DaemonApi {
   /**
    * Queue item → steer into the running turn (idle: start it). `steer` (the host has queue-steer):
    * atomic `cutex/userInput/queue/steer`, a refusal keeps the item queued; otherwise CAS remove +
-   * submit `auto` with the item's own id.
+   * submit `auto` with the item's own id. `options.ifIdle` "fail" (queue-steer only): never start a turn
+   * with it — no turn running = `noActiveTurn`, it stays queued (a draft queued then steered, r264).
    */
-  queuePromote(sessionId: string, queueId: string, expectedRevision: number, steer?: boolean): Promise<QueuePromoteResult>;
+  queuePromote(sessionId: string, queueId: string, expectedRevision: number, steer?: boolean, joinDelegation?: OwnerJoinDelegation, options?: { ifIdle?: "fail" }): Promise<QueuePromoteResult>;
+  /**
+   * 「全部合并插入」 (shared/queueMerge): the queued owner messages `items` (queue order, at their
+   * revisions) merged into ONE input and steered into the running turn under the first one's id.
+   * Refusals arrive as `queue_merge_failed:<kind>` (merged-but-unsent text stays one queued item).
+   */
+  queueMergeInsert(sessionId: string, items: { queueId: string; revision: number }[], steer?: boolean, joinDelegation?: OwnerJoinDelegation): Promise<QueueMergeResult>;
   /**
    * admission-order: move an owner queued item in front of `before` (any kind; null = to the end),
    * CAS on the admission revision. Refusals arrive as `queue_move_refused:<kind>` (shared/queueMove).
@@ -1905,12 +2222,14 @@ export type ExtraInput =
   | { type: "mention"; name: string; path: string };
 
 export interface QueuePromoteResult {
-  result: UserInputSubmitResult;
+  /** `imageDelivery`: the queue-steer receipt (image-input-steering), only when cutex sent one. */
+  result: UserInputSubmitResult & { imageDelivery?: ImageDelivery };
   clientUserMessageId: string;
   input: unknown[];
 }
 
 export interface SubmitOptions {
+  joinDelegation?: OwnerJoinDelegation;
   extra?: ExtraInput[];
   clientUserMessageId?: string;
 }
@@ -1980,8 +2299,16 @@ export interface ServiceView {
   host: string;
   port: number;
   path: string | null;
+  /** The registering session (with `ownerScope` project: the registrant; null once cleared / deleted). */
   ownerCutexSessionId: string | null;
   projectId: string | null;
+  /**
+   * cutex `services-project-scope`: who manages it. Absent (older hosts) or any other value = `session`
+   * (its registrant only); `project` (always with a projectId) = also the project's current Director.
+   */
+  ownerScope?: "session" | "project";
+  /** Agent `service_list` views only (the owner's Management list omits it: the owner manages every service). */
+  youMayManage?: boolean;
   runtime: "external" | "managed" | "static";
   portAllocated?: boolean;
   createdAt: string;
@@ -1995,11 +2322,50 @@ export interface ServiceView {
   cwd?: string | null;
   envKeys?: string[];
   lifetime?: "persistent" | "ephemeral";
+  /** Persistent-service purpose; unknown future values render as uncategorised. */
+  purpose?: string | null;
+  /** Per-service idle TTL override; absent/null follows the host default. */
+  idleTtlMinutes?: number | null;
+  /** Effective idle TTL; null means kept until owner archive or persistent. */
+  effectiveIdleTtlMinutes?: number | null;
+  /** Host maximum an agent may request. */
+  maxIdleTtlMinutes?: number;
+  /** Owner pin: suppress automatic TTL reclaim until the owner is archived. */
+  pinned?: boolean;
+  /** Owner-only organisation (`services-organize`). */
+  groupName?: string | null;
+  starred?: boolean;
+  sortOrder?: number;
+  note?: string | null;
+  hidden?: boolean;
+  archived?: boolean;
+  archivedAt?: string | null;
+  activeConnections?: number;
+  lastTrafficAt?: string | null;
   proxyHostHeader?: "preserve" | "upstream";
   /** Owner views on a cutex with `services-login-link`. */
   loginLinkCommand?: string | string[] | null;
   stopped?: boolean;
   process?: { pid: number | null; startedAt: string | null; restarts: number; lastExitCode: number | null; lastExitAt: string | null; nextRestartAt: string | null } | null;
+}
+
+export interface ServicePatch {
+  displayName?: string;
+  port?: number;
+  path?: string | null;
+  ownerCutexSessionId?: string | null;
+  /** cutex `services-project-scope` (owner): `project` needs a projectId, settable in the same request. */
+  ownerScope?: "session" | "project";
+  projectId?: string | null;
+  lifetime?: "persistent" | "ephemeral";
+  purpose?: "foreground" | "background" | null;
+  idleTtlMinutes?: number | null;
+  pinned?: boolean;
+  groupName?: string | null;
+  starred?: boolean;
+  sortOrder?: number;
+  note?: string | null;
+  hidden?: boolean;
 }
 
 /** `POST /v2/services` body (owner). */
@@ -2014,6 +2380,7 @@ export type ServiceRegisterRequest = {
   cwd?: string;
   env?: Record<string, string>;
   lifetime?: "persistent" | "ephemeral";
+  purpose?: "foreground" | "background";
   /** `upstream`: the service sees Host `127.0.0.1:<port>` (and, with `services-login-link`, its own Origin). */
   proxyHostHeader?: "preserve" | "upstream";
   /** cutex `services-login-link`, managed only: prints a one-time loopback login URL of the running service. */
@@ -2024,6 +2391,20 @@ export interface ServicesList {
   hostId: string;
   services: ServiceView[];
   settings: ServicesSettings;
+  /** Recently reclaimed services (cutex `services.json` `tombstone`). */
+  tombstones?: ServiceTombstone[];
+}
+
+/** Why cutex reclaimed a service; open, so a reason a newer cutex adds still parses (r267: `project_archived`). */
+export type ServiceReclaimReason = "idle" | "ttl" | "owner_archived" | "project_archived" | (string & {});
+
+export interface ServiceTombstone {
+  slug: string;
+  displayName: string;
+  ownerCutexSessionId: string | null;
+  lifetime: "ephemeral" | "persistent";
+  reason: ServiceReclaimReason;
+  reclaimedAt: string;
 }
 
 /** cutex `services-persistent-approval`: does an agent's persistent-lifetime request need the owner's approval. */
@@ -2035,11 +2416,16 @@ export interface ServicesSettings {
   portRangeEnd: number;
   /** Absent on a cutex without `services-persistent-approval`. */
   agentPersistentApproval?: AgentPersistentApproval;
+  /** cutex `services-ephemeral-ttl`; 0 means until owner archive. */
+  ephemeralIdleMinutes?: number;
+  /** Maximum TTL an agent may request. */
+  ephemeralTtlHours?: number;
 }
 
-/** `PATCH /v2/services` body the desktop sends (shared/servicesSettings.ts validates it in main). */
+/** Service settings patch; TTL goes through `/v2/settings.services`. */
 export interface ServicesSettingsPatch {
   agentPersistentApproval?: AgentPersistentApproval;
+  ephemeralIdleMinutes?: number;
 }
 
 export type NotificationLevel = "important" | "normal" | "off";
@@ -2063,13 +2449,21 @@ export interface DaemonEvents {
   daemonState: DaemonState;
   /** Host-wide event; renderer uses it to refresh the sidebar. */
   hostEvent: EventEnvelope;
+  /** The host feed restarted without replaying the missed events. */
+  hostResync: { reason: string };
   sessionEvent: { sessionId: string; envelope: EventEnvelope };
+  sessionLiveDelta: { sessionId: string; frame: import("@cutex-desktop/cutex-client").LiveDeltaFrame };
+  sessionLiveReset: { sessionId: string };
+  /** Validated asynchronous completion hydration; never a second durable feed advance. */
+  sessionFullText: { sessionId: string; envelope: EventEnvelope };
   sessionResync: { sessionId: string; reason: string };
   sessionStatus: { sessionId: string; status: "connecting" | "live" | "retrying" };
   workspaceChanged: { watchId: string; paths: string[]; gitChanged: boolean; overflow: boolean };
   /** PTY output (base64). `reset`: the scrollback ring dropped bytes — clear before writing. */
   terminalOutput: { terminalId: string; data: string; replay: boolean; reset: boolean };
   terminalExit: { terminalId: string; exitCode: number | null };
+  /** Live rows / state of a `watchProjectEvents` watch. */
+  projectEvents: import("./projectEvents").ProjectEventsMessage;
   /** cutex `users`: this connection's user or grant changed (the host feed ended with `cutex/access/changed`). */
   accessChanged: { changedAt: string | null };
 }
@@ -2081,6 +2475,7 @@ export interface HostTag {
 }
 
 export interface DesktopEvents {
+  profileLinkState: import("./profileLink").ProfileLinkState;
   browserEvent: HostTag & import("./browser").BrowserEvent;
   /** One host's connection state (every connected host, not only the focus host). */
   daemonState: HostTag & { state: DaemonState };
@@ -2088,15 +2483,22 @@ export interface DesktopEvents {
   hostsState: HostsState;
   /** Host-wide event of one host (its session events, approvals, owner notes …). */
   hostEvent: HostTag & { envelope: EventEnvelope };
+  hostResync: HostTag & DaemonEvents["hostResync"];
   sessionEvent: HostTag & DaemonEvents["sessionEvent"];
+  sessionLiveDelta: HostTag & DaemonEvents["sessionLiveDelta"];
+  sessionLiveReset: HostTag & DaemonEvents["sessionLiveReset"];
+  sessionFullText: HostTag & DaemonEvents["sessionFullText"];
   sessionResync: HostTag & DaemonEvents["sessionResync"];
   sessionStatus: HostTag & DaemonEvents["sessionStatus"];
   workspaceChanged: HostTag & DaemonEvents["workspaceChanged"];
   terminalOutput: HostTag & DaemonEvents["terminalOutput"];
   terminalExit: HostTag & DaemonEvents["terminalExit"];
+  projectEvents: HostTag & DaemonEvents["projectEvents"];
   accessChanged: HostTag & DaemonEvents["accessChanged"];
   /** From the main process (tray menu): "newChat" = the window was shown; start a quick chat. */
   shellCommand: { command: ShellCommand };
+  /** A desk window closed / took the focus (main/deskShell.ts). */
+  deskWindow: DeskWindowEvent;
   updateStatus: UpdateStatus;
   /** 打开 on a big alert (main/ownerAlert.ts): the window was shown; open this agent (of that host) at that message. */
   ownerNotifyOpen: { hostId: string; agentId: string; notificationId: string };
@@ -2116,7 +2518,7 @@ export interface DesktopEvents {
 export type HostTaggedEvent = { [K in keyof DesktopEvents]: DesktopEvents[K] extends HostTag ? K : never }[keyof DesktopEvents];
 
 /** Events that carry a `HostTag` (preload drops the ones of a replaced connection). */
-export const HOST_TAGGED_EVENTS = ["daemonState", "hostEvent", "sessionEvent", "sessionResync", "sessionStatus", "workspaceChanged", "terminalOutput", "terminalExit", "accessChanged", "browserEvent"] as const satisfies readonly HostTaggedEvent[];
+export const HOST_TAGGED_EVENTS = ["daemonState", "hostEvent", "hostResync", "sessionEvent", "sessionLiveDelta", "sessionLiveReset", "sessionFullText", "sessionResync", "sessionStatus", "workspaceChanged", "terminalOutput", "terminalExit", "accessChanged", "browserEvent", "projectEvents"] as const satisfies readonly HostTaggedEvent[];
 
 export const INVOKE_CHANNEL = "cutex-desktop:invoke";
 export const EVENT_CHANNEL = "cutex-desktop:event";
@@ -2151,13 +2553,38 @@ export interface PreloadBridge {
   knownIssues?: import("./knownIssues").KnownIssuesBridge;
   /** Settings → 外观 → 启动页立绘: imported launcher art (shared/launchArt.ts). Absent in a plain browser. */
   launchArt?: import("./launchArt").LaunchArtBridge;
+  /** 「Director 头像」 personal portrait folder in userData (shared/directorAvatars.ts). Absent in a plain browser. */
+  directorAvatars?: import("./directorAvatars").DirectorAvatarsBridge;
+  /** 拟人头像包 in the owner's folder in userData (shared/portraitPacks.ts). Absent in a plain browser. */
+  portraitPacks?: import("./portraitPacks").PortraitPacksBridge;
 }
 
 export const WINDOW_CHANNEL = "cutex-desktop:window";
 export const TITLEBAR_HEIGHT = 40;
 export type WindowAction = "minimize" | "toggleMaximize" | "close";
+/** A desk window (multi-window, main/deskShell.ts) changed: the owner closed it, or it took the focus. */
+export interface DeskWindowEvent {
+  deskId: string;
+  kind: "closed" | "focus";
+}
+/** Main's answer to a desk request: the desk id and the one-use window.open name. */
+export interface DeskTicket {
+  deskId: string;
+  name: string;
+}
+/** Desk windows (multi-window P1): main admits a window.open only with a ticket it issued. */
+export interface DeskBridge {
+  /** A ticket for one window.open("about:blank", ticket.name); `deskId` reopens a remembered desk. Null: too many desks. */
+  ticket(deskId?: string): Promise<DeskTicket | null>;
+  /** Bring a desk window (null: the main window) to the front. False: no such desk. */
+  focus(deskId: string | null): Promise<boolean>;
+  close(deskId: string): Promise<void>;
+}
 export interface WindowBridge {
-  control(action: WindowAction): Promise<void>;
+  /** `deskId`: a desk window's own controls (main checks it opened that desk); absent = the main window. */
+  control(action: WindowAction, deskId?: string): Promise<void>;
+  /** Desk windows; absent in a plain browser and older preloads. */
+  desk?: DeskBridge;
   /** Recolor the native Windows caption buttons to match the app theme. */
   setChrome(colors: { color: string; symbolColor: string }): Promise<void>;
   /**
@@ -2166,6 +2593,11 @@ export interface WindowBridge {
    * older preloads and the browser preview lack it.
    */
   setBackground?(color: string): Promise<void>;
+  /**
+   * The app's light / dark as the theme setting resolves it: cutex's own pages in the in-app browser (service
+   * tabs) are told it; other sites keep the OS preference. Optional like setBackground.
+   */
+  setScheme?(scheme: "light" | "dark"): Promise<void>;
   /** Native caption buttons drawn by the OS (Windows overlay / macOS traffic lights) and their side. */
   nativeControls: "right" | "left" | null;
 }
@@ -2229,6 +2661,11 @@ export interface DesktopPrefs {
   updateProxyAuth?: string;
   /** Settings → 通用 → 允许远程关闭这个桌面 (cutex `client-remote-close`); absent = allowed. Sent in every presence. */
   allowRemoteClose?: boolean;
+  /** Settings → 通用 → 窗口 → 多窗口 (multi-window, docs/desktop-modules.md §24.17); absent = off. Main refuses desk
+   *  tickets while off (main/deskWindows.ts). Changed only by the setting (`setMultiWindow`) or the one-time migration. */
+  multiWindow?: boolean;
+  /** The one-time migration of the renderer's old 多窗口 value is used up (shared/shell.ts multiWindowChange). */
+  multiWindowMigrated?: boolean;
 }
 export interface ShellState {
   prefs: DesktopPrefs;
@@ -2272,6 +2709,9 @@ export interface ShellRetract {
   notes?: { hostId: string; notificationId: string }[];
 }
 export type ShellRequest =
+  | { op: "remoteCopies"; request: import("./remoteCopyRequests").CopyRequest }
+  | { op: "filePathInfo"; hostId: string; path: string }
+  | { op: "filePath"; hostId: string; path: string; action: "reveal" | "open" }
   | { op: "state" }
   | { op: "setCloseBehavior"; value: CloseBehavior }
   | { op: "setLocale"; value: ShellLocale }
@@ -2290,9 +2730,16 @@ export type ShellRequest =
   | { op: "eventAlert"; alert: ShellEventAlert }
   | { op: "retractAlerts"; retract: ShellRetract }
   | { op: "setAllowRemoteClose"; value: boolean }
+  | { op: "setMultiWindow"; value: boolean }
+  | { op: "migrateMultiWindow"; value: boolean }
   | { op: "remoteClose" }
   | { op: "answerRemoteClose"; action: import("./remoteClose").RemoteCloseAction };
 export interface ShellBridge {
+  remoteCopies?<T = import("./remoteCopies").CopyState>(request: import("./remoteCopyRequests").CopyRequest): Promise<T>;
+  /** Eligibility only; main revalidates immediately before opening. */
+  filePathInfo?(hostId: string, path: string): Promise<{ canOpen: boolean }>;
+  /** User-selected local filesystem actions, independent of daemon connectivity. */
+  filePath?(hostId: string, path: string, action: "reveal" | "open"): Promise<void>;
   state(): Promise<ShellState>;
   setCloseBehavior(value: CloseBehavior): Promise<ShellState>;
   setLocale(value: ShellLocale): Promise<void>;
@@ -2325,6 +2772,10 @@ export interface ShellBridge {
   retractAlerts?(retract: ShellRetract): Promise<void>;
   /** Settings → 通用 → 允许远程关闭这个桌面: stored by main, re-sent to every host's presence at once. */
   setAllowRemoteClose?(value: boolean): Promise<ShellState>;
+  /** Settings → 通用 → 窗口 → 多窗口: the owner's switch, stored by main (which refuses desk tickets while off). */
+  setMultiWindow?(value: boolean): Promise<ShellState>;
+  /** The renderer's old 多窗口 value (P6 pref / P1–P3.5 flag): main adopts it at most once (shared/shell.ts multiWindowChange). */
+  migrateMultiWindow?(value: boolean): Promise<ShellState>;
   /** The running remote-close countdown (null: none); the `remoteClose` event follows changes. */
   remoteClose?(): Promise<import("./remoteClose").RemoteCloseView | null>;
   /** The countdown's 取消 / 立即关闭. */
@@ -2358,11 +2809,15 @@ export interface UpdateStatus {
   /** `version`: the package version (binary installs). */
   current: { commit: string; committedAt: string | null; version?: string } | null;
   /** Newest commit on the update source's channel branch when it is ahead of the running build.
-   *  `offMain`: the running build is not on that branch at all (packaged by hand from another branch,
-   *  or a channel switch); `count` is 0. `switchChannel`: the channel was switched and its head is older
+   *  `offMain`: a comparable source commit actually diverges from the channel; `count` is 0.
+   *  Missing build/source objects use `sourceComparison: unknown`, never `offMain`.
+   *  `switchChannel`: the channel was switched and its head is older
    *  than the running build — offered (never installed silently) as the switch to that channel.
    *  Binary installs: `version` of the newest release (commit "", count 0, subject = release name). */
-  latest: { commit: string; committedAt: string; subject: string; count: number; offMain?: boolean; switchChannel?: boolean; version?: string } | null;
+  latest: { commit: string; committedAt: string; subject: string; count: number; offMain?: boolean; switchChannel?: boolean; version?: string;
+    /** Source updates build locally; unknown provenance must not be described as a fork. */
+    sourceBuild?: boolean; sourceComparison?: "ahead" | "unknown" | "diverged" | "switch"; installedReleaseVersion?: string;
+  } | null;
   step?: UpdateStep;
   /** Last lines of the failing step (state "error"). */
   error?: string;
@@ -2526,7 +2981,7 @@ export interface AskAttemptView {
 }
 
 /** `GET /v2/asks` row. Fields after `revision` come with cutex `delegation-views` (absent before). */
-export interface AskSummary {
+export interface AskSummary extends AskReviewFields {
   askId: string;
   title: string;
   requester: AskRequester;
@@ -2566,6 +3021,8 @@ export interface AskSummary {
 }
 
 export interface AskFilter {
+  /** Local admission for automatic refreshes; never part of the daemon query. */
+  background?: boolean;
   project?: string;
   /** A cutex session id or "owner". */
   requester?: string;

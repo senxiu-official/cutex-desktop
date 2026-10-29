@@ -30,6 +30,13 @@ vi.mock("../src/renderer/src/lib/contextMenu", async (orig) => ({
   }),
 }));
 
+// Load the store + projectArchive graph once while the file is collected (no per-test timeout).
+// The tests never reset modules, so their own `await import(...)`s get these same instances from
+// the cache; before, the first load (~4 s) was billed to the first beforeEach/test and timed out
+// under the full suite's load.
+await import("../src/renderer/src/store");
+await import("../src/renderer/src/lib/projectArchive");
+
 const t = ((key: string, vars?: Record<string, string | number>) => (vars ? `${key}(${Object.values(vars).join(",")})` : key)) as never;
 
 function session(id: string, over: { busy?: boolean; retired?: boolean; projectId?: string } = {}): SessionResource {

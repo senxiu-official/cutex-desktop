@@ -1,14 +1,14 @@
-// cutex `services-persistent-approval` (Settings → 协作 → 服务): the patch main sends, reading the
-// setting from GET /v2/services, the preview mock (default ask, off round trip, legacy without it),
-// and the section's gating on the capability.
+// cutex service lifecycle settings (Settings → 协作 → 服务): patches, preview round trips,
+// legacy omission, and section capability gating.
 import { describe, expect, it, vi } from "vitest";
-import { agentPersistentApprovalOf, DEFAULT_AGENT_PERSISTENT_APPROVAL, isAgentPersistentApproval, SERVICES_PERSIST_APPROVAL_FEATURE, servicesSettingsPatch } from "../src/shared/servicesSettings";
+import { agentPersistentApprovalOf, DEFAULT_AGENT_PERSISTENT_APPROVAL, isAgentPersistentApproval, SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_PERSIST_APPROVAL_FEATURE, servicesSettingsPatch } from "../src/shared/servicesSettings";
 import { stubServices } from "./serviceStub";
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 
 const { mock } = await import("../src/renderer/src/modules/services/mock");
-const { zhCN, en } = await import("../src/renderer/src/modules/services/i18n");
+const { zhCN } = await import("../src/renderer/src/modules/services/i18n");
+const { en } = await import("../src/renderer/src/modules/services/i18n.en");
 const { default: servicesModule } = await import("../src/renderer/src/modules/services/index");
 const { createModuleHost } = await import("../src/renderer/src/modules/host");
 const { SLOT_SPECS } = await import("../src/renderer/src/modules/slots");
@@ -19,6 +19,10 @@ describe("servicesSettingsPatch", () => {
   it("passes ask / off and refuses anything else", () => {
     expect(servicesSettingsPatch({ agentPersistentApproval: "off" })).toEqual({ agentPersistentApproval: "off" });
     expect(servicesSettingsPatch({ agentPersistentApproval: "ask" })).toEqual({ agentPersistentApproval: "ask" });
+    expect(servicesSettingsPatch({ ephemeralIdleMinutes: 120 })).toEqual({ ephemeralIdleMinutes: 120 });
+    expect(servicesSettingsPatch({ ephemeralIdleMinutes: 0 })).toEqual({ ephemeralIdleMinutes: 0 });
+    expect(() => servicesSettingsPatch({ ephemeralIdleMinutes: 4 })).toThrow();
+    expect(() => servicesSettingsPatch({ ephemeralIdleMinutes: 1441 })).toThrow();
     expect(() => servicesSettingsPatch({ agentPersistentApproval: "never" })).toThrow();
     expect(() => servicesSettingsPatch({ portRangeStart: 1 })).toThrow(/portRangeStart/);
     expect(() => servicesSettingsPatch({})).toThrow();
@@ -40,17 +44,21 @@ describe("preview mock", () => {
   it("defaults to ask and round-trips off / ask", async () => {
     const api = mock.api!({ legacy: false } as Core);
     expect((await api.services!()).settings.agentPersistentApproval).toBe("ask");
+    expect((await api.services!()).settings.ephemeralIdleMinutes).toBe(120);
     expect(await api.patchServicesSettings!({ agentPersistentApproval: "off" })).toMatchObject({ agentPersistentApproval: "off", portRangeStart: 24400 });
     expect((await api.services!()).settings.agentPersistentApproval).toBe("off");
     expect((await api.patchServicesSettings!({ agentPersistentApproval: "ask" })).agentPersistentApproval).toBe("ask");
+    expect((await api.patchServicesSettings!({ ephemeralIdleMinutes: 480 })).ephemeralIdleMinutes).toBe(480);
     await expect(api.patchServicesSettings!({ agentPersistentApproval: "never" as never })).rejects.toThrow();
   });
 
   it("an older cutex neither reports nor accepts it", async () => {
     const api = mock.api!({ legacy: true } as Core);
     expect((await api.services!()).settings).not.toHaveProperty("agentPersistentApproval");
+    expect((await api.services!()).settings).not.toHaveProperty("ephemeralIdleMinutes");
     await expect(api.patchServicesSettings!({ agentPersistentApproval: "off" })).rejects.toThrow(/agentPersistentApproval/);
     expect(mock.features?.new).toContain(SERVICES_PERSIST_APPROVAL_FEATURE);
+    expect(mock.features?.new).toContain(SERVICES_EPHEMERAL_TTL_FEATURE);
   });
 
   it("another host keeps its own value", async () => {
@@ -73,7 +81,7 @@ describe("settings section", () => {
     return host.snapshot("settings.section").find((e) => e.item.id === "services.persistApproval.settings");
   };
 
-  it("shows on 协作 only when cutex advertises the setting", async () => {
+  it("shows on 协作 when cutex advertises service settings and the component feature-detects its rows", async () => {
     const shown = await section(["services", SERVICES_PERSIST_APPROVAL_FEATURE]);
     expect(shown?.mode).toBe("show");
     expect(shown?.item.page).toBe("collab");
@@ -81,7 +89,7 @@ describe("settings section", () => {
   });
 
   it("has zh-CN and en text", () => {
-    for (const key of ["services.settings", "services.persistApproval", "services.persistApproval.hint", "services.persistApproval.unknown"] as const) {
+    for (const key of ["services.settings", "services.persistApproval", "services.persistApproval.hint", "services.persistApproval.unknown", "services.idleTtl", "services.idleTtl.0", "services.keepPinned.off", "services.extend"] as const) {
       expect(zhCN[key]).toBeTruthy();
       expect(en[key]).toBeTruthy();
     }

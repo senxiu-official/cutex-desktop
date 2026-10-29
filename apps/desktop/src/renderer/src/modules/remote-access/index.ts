@@ -3,12 +3,17 @@
 // with listen addresses, CORS (the same listener, so right after it) and device pairing as sections. A
 // cutex without the capability gets 「需要升级 cutex」 instead (CORS just hides). On 用户: 在线的桌面
 // (client-remote-close; hidden on an older cutex) before 配对设备.
-import { CorsSection, PairingSection, RemoteAccessSection } from "../../components/settings/RemoteAccess";
-import { OnlineDesktopsSection } from "../../components/settings/OnlineDesktops";
 import { LISTEN_FEATURE, PAIRING_FEATURE } from "../../lib/remoteAccess";
 import { ONLINE_DESKTOPS_ANCHOR } from "../../lib/remoteClose";
 import { REMOTE_CLOSE_FEATURE } from "../../../../shared/remoteClose";
 import { defineModule } from "../slots";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const RemoteAccessSection = lazyPage(() => import("../../components/settings/RemoteAccess").then((m) => m.RemoteAccessSection));
+const CorsSection = lazyPage(() => import("../../components/settings/RemoteAccess").then((m) => m.CorsSection));
+const OnlineDesktopsSection = lazyPage(() => import("../../components/settings/OnlineDesktops").then((m) => m.OnlineDesktopsSection));
+const PairingSection = lazyPage(() => import("../../components/settings/RemoteAccess").then((m) => m.PairingSection));
 
 export default defineModule({
   id: "remote-access",

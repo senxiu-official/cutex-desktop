@@ -1,7 +1,7 @@
 // Updater against real git repositories: the channel branch decides what is offered, and an install
 // whose update source is missing stays quietly "unsupported" (main/updater.ts, shared/update.ts).
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -12,9 +12,32 @@ vi.mock("electron", () => ({
   app: { isPackaged: true, getAppPath: () => env.appPath, getPath: () => env.userData, relaunch: () => {}, exit: () => {} },
 }));
 
-const { Updater } = await import("../src/main/updater");
+let Updater!: typeof import("../src/main/updater")["Updater"];
+
+/**
+ * A PATH with git and no node / corepack, so the build step cannot start. POSIX: /usr/bin:/bin. Windows: Git for
+ * Windows' own folders only (cmd, mingw64\bin, usr\bin — its fetch needs the msys runtime in usr\bin) —
+ * "/usr/bin:/bin" means nothing there and hid git too (the apply then failed at "pull", not "install");
+ * main/updater finds corepack only beside a node.exe or a corepack.cmd on PATH.
+ */
+function gitOnlyPath(): string {
+  if (process.platform !== "win32") return "/usr/bin:/bin";
+  const dirs = (process.env.PATH ?? "").split(";").map((d) => d.replace(/^"|"$/g, ""));
+  const dir = dirs.find((d) => d && existsSync(join(d, "git.exe")));
+  if (!dir) throw new Error("no git.exe on PATH");
+  // <Git>\cmd, <Git>\bin or <Git>\mingw64\bin → <Git>.
+  const root = [join(dir, ".."), join(dir, "..", "..")].find((r) => existsSync(join(r, "cmd", "git.exe")));
+  const path = (root ? [join(root, "cmd"), join(root, "mingw64", "bin"), join(root, "usr", "bin")] : [dir]).filter((d) => existsSync(d));
+  if (path.some((d) => existsSync(join(d, "node.exe")) || existsSync(join(d, "corepack.cmd")))) throw new Error(`node beside git in ${path.join(";")}`);
+  return path.join(";");
+}
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" }).trim();
+
+// Every test here runs real git (clone, checkout, fetch, rev-parse, …: 10–20 processes, 0.5–1.3 s alone on Windows).
+// Under the full suite's load process start-up slows several times over and crossed the default 5 s — the work, not
+// a wait or a race. This file's own time for that (hooks: the fixture repositories).
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 let root: string;
 let upstream: string;
@@ -25,7 +48,8 @@ let olderRelease: string;
 const commits: Record<string, string> = {};
 const realExecPath = process.execPath;
 
-beforeAll(() => {
+beforeAll(async () => {
+  ({ Updater } = await import("../src/main/updater"));
   root = mkdtempSync(join(tmpdir(), "cutex-updater-"));
   upstream = join(root, "upstream");
   mkdirSync(upstream);
@@ -95,13 +119,76 @@ function install(name: string, opts: { build: string; channelFile?: string; pack
 }
 
 async function settle(updater: InstanceType<typeof Updater>): Promise<UpdateStatus> {
+  // The check resolves once its state is worded (an unreachable remote too: no fixed wait for its `git remote get-url`).
   await updater.check();
-  // unreachable() words the state after an async `git remote get-url`.
-  await new Promise((r) => setTimeout(r, 300));
   return updater.state();
 }
 
 describe("updater channels", () => {
+  function exportedInstall(name: string, source?: string, legacy = false) {
+    const base = install(name, { build: commits.m1!, channelFile: "main", packagedChannel: "release" });
+    const info = { commit: "e".repeat(40), committedAt: null, sourceDir: null, nodeDir: null, version: "0.2.1", channel: "release", releasePage: "https://github.com/example-org/cutex-desktop/releases" };
+    writeFileSync(join(env.appPath, "package.json"), JSON.stringify(info));
+    if (source) writeFileSync(legacy ? join(base, "RELEASE-RECEIPT.json") : join(env.appPath, "..", "..", "source-provenance.json"), JSON.stringify(legacy
+      ? { version: info.version, publicStagingCommit: info.commit, privateProductCommit: source }
+      : { version: info.version, build: info.commit, sourceCommit: source }));
+    return base;
+  }
+
+  it("does not call an exported commit missing from source Git a fork", async () => {
+    exportedInstall("export-no-mapping");
+    const s = await settle(new Updater(() => {}));
+    expect(s).toMatchObject({ state: "available", latest: { sourceComparison: "unknown", sourceBuild: true, installedReleaseVersion: "0.2.1", count: 0 } });
+    expect(s.latest?.offMain).toBeUndefined();
+    expect(s.current?.commit).toBe("e".repeat(40)); // Show actual packaged identity, never the private source hash.
+  });
+
+  it.each([false, true])("counts from exact private source provenance (legacy=%s)", async (legacy) => {
+    exportedInstall(`export-provenance-${legacy}`, commits.m1, legacy);
+    const s = await settle(new Updater(() => {}));
+    expect(s.latest).toMatchObject({ commit: commits.m2, count: 1, sourceComparison: "ahead", sourceBuild: true });
+    expect(s.latest?.offMain).toBeUndefined();
+  });
+
+  it("distinguishes a valid source fork from an unavailable source object", async () => {
+    exportedInstall("export-divergent", commits.r2);
+    expect((await settle(new Updater(() => {}))).latest).toMatchObject({ offMain: true, sourceComparison: "diverged" });
+    exportedInstall("export-source-unavailable", "d".repeat(40));
+    const s = await settle(new Updater(() => {}));
+    expect(s.latest?.sourceComparison).toBe("unknown");
+    expect(s.latest?.offMain).toBeUndefined();
+  });
+
+  it("does not offer a source build already at the followed head", async () => {
+    exportedInstall("export-current", commits.m2);
+    expect((await settle(new Updater(() => {}))).latest).toBeNull();
+  });
+
+  it("recognizes a release source merged into main through a merge commit", async () => {
+    const merged = join(root, "merged-release-origin");
+    git(root, "clone", "-q", upstream, merged);
+    git(merged, "merge", "--no-ff", "-s", "ours", "origin/release", "-m", "release merged");
+    const head = git(merged, "rev-parse", "HEAD");
+    const expectedCount = Number(git(merged, "rev-list", "--count", `${commits.r2}..${head}`));
+    const base = exportedInstall("export-merged-release", commits.r2);
+    git(join(base, "src"), "remote", "set-url", "origin", merged);
+    const s = await settle(new Updater(() => {}));
+    expect(s.latest).toMatchObject({ commit: head, count: expectedCount, sourceComparison: "ahead" });
+    expect(s.latest?.offMain).toBeUndefined();
+  });
+
+  it.each(["source", "standalone"])("keeps the package version visible for a %s install", async (kind) => {
+    install(`version-${kind}`, { build: commits.m1! });
+    const packagePath = join(env.appPath, "package.json");
+    const info = JSON.parse(readFileSync(packagePath, "utf8"));
+    writeFileSync(packagePath, JSON.stringify({ ...info, version: "0.2.0", releasePage: "https://github.com/example-org/cutex-desktop/releases" }));
+    if (kind === "standalone") Object.defineProperty(process, "execPath", { value: join(root, "standalone", "cutex"), configurable: true });
+    const updater = new Updater(() => {});
+    expect(updater.state().current).toMatchObject({ version: "0.2.0", commit: commits.m1 });
+    if (kind === "standalone") expect(updater.state()).toMatchObject({ state: "unsupported", code: "releasePackage" });
+    expect((await settle(updater)).current?.version).toBe("0.2.0");
+  });
+
   it("main channel (nothing recorded): offers the newest main, as before", async () => {
     install("main-install", { build: commits.m1! });
     const updater = new Updater(() => {});
@@ -216,7 +303,7 @@ describe("switching channels (Settings → 更新与诊断)", () => {
     const updater = new Updater(() => {});
     await updater.setChannel("release");
     const path = process.env.PATH;
-    process.env.PATH = "/usr/bin:/bin";
+    process.env.PATH = gitOnlyPath();
     try {
       const s = await updater.apply();
       expect(s).toMatchObject({ state: "error", step: "install" });

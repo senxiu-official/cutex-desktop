@@ -124,8 +124,12 @@ export interface HostLocalConfig {
 export interface SshHostConfig {
   id: string;
   label: string;
-  /** `alias` from ~/.ssh/config, or `user@host[:port]`. */
+  /** First connection address; kept for older desktop versions reading this file. */
   target: string;
+  /** Ordered connection addresses. Absent only in in-memory fixtures and pre-migration data. */
+  targets?: string[];
+  /** cutex `/v2/host` identity confirmed on this host; every address must answer with the same id. */
+  daemonHostId?: string | null;
   remotePort: number;
   cutexPath: string;
   /** Client token id on the remote (for revoke); null when not paired. */
@@ -240,6 +244,8 @@ export type SshErrorCode =
   | "noToken" // host not paired (no stored token)
   | "noKeyring" // safeStorage unavailable: refuse to store the token
   | "tokenRejected" // remote daemon answered 401/403 for the stored token
+  | "remoteDaemon" // SSH is up, but cutex did not answer through this address
+  | "hostMismatch" // the cutex hostId differs from the identity confirmed on the other addresses
   | "badInput"
   | "exited";
 
@@ -254,6 +260,8 @@ export interface SshErrorView {
 export interface TunnelView {
   status: TunnelStatus;
   localPort: number | null;
+  /** SSH address of the current / latest attempt. */
+  target?: string | null;
   error: SshErrorView | null;
   /** Consecutive failed attempts (backoff exponent). */
   attempt: number;
@@ -269,6 +277,8 @@ export interface HostView {
   kind: "local" | "ssh" | "dev-direct";
   label: string;
   target: string | null;
+  /** Ordered SSH addresses; `target` remains the first one for older clients. */
+  targets?: string[];
   remotePort: number | null;
   cutexPath: string | null;
   paired: boolean;
@@ -358,6 +368,7 @@ export interface AddSshHostRequest {
 
 export interface SshHostPatch {
   label?: string;
+  targets?: string[];
   remotePort?: number;
   cutexPath?: string;
 }
@@ -444,13 +455,16 @@ export function parseHostsFile(raw: unknown): HostsFile {
     const x = h as Record<string, unknown> | null;
     if (!x || typeof x.id !== "string" || !/^ssh-[a-z0-9]{4,32}$/.test(x.id) || seen.has(x.id)) continue;
     if (typeof x.target !== "string" || !parseSshTarget(x.target)) continue;
+    const targets = normalizeSshTargets(x.targets) ?? [x.target.trim()];
     seen.add(x.id);
     const color = !v1 && typeof x.color === "string" && HEX_COLOR.test(x.color) ? x.color : nextHostColor(used);
     used.push(color);
     file.hosts.push({
       id: x.id,
       label: typeof x.label === "string" && x.label.trim() ? x.label.trim().slice(0, 64) : defaultHostLabel(x.target),
-      target: x.target.trim(),
+      target: targets[0]!,
+      targets,
+      daemonHostId: typeof x.daemonHostId === "string" && x.daemonHostId.trim() ? x.daemonHostId.trim() : null,
       remotePort: isValidPort(x.remotePort) ? x.remotePort : DEFAULT_REMOTE_PORT,
       cutexPath: typeof x.cutexPath === "string" && isValidCutexPath(x.cutexPath) ? x.cutexPath : DEFAULT_CUTEX_PATH,
       tokenId: isValidTokenId(x.tokenId) ? x.tokenId : null,
@@ -570,6 +584,30 @@ export function parseSshTarget(input: string): SshTarget | null {
   return { destination: user ? `${user}@${host}` : host, port };
 }
 
+export function formatSshTarget(target: SshTarget): string {
+  const at = target.destination.lastIndexOf("@");
+  const user = at >= 0 ? target.destination.slice(0, at + 1) : "";
+  const host = at >= 0 ? target.destination.slice(at + 1) : target.destination;
+  const printableHost = host.includes(":") ? `[${host}]` : host;
+  return `${user}${printableHost}${target.port ? `:${target.port}` : ""}`;
+}
+
+export function normalizeSshTargets(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const targets: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") return null;
+    const target = item.trim();
+    if (!parseSshTarget(target)) return null;
+    if (!targets.includes(target)) targets.push(target);
+  }
+  return targets;
+}
+
+export function sshTargetStrings(host: Pick<SshHostConfig, "target" | "targets">): string[] {
+  return host.targets?.length ? [...host.targets] : [host.target];
+}
+
 export function isValidPort(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65535;
 }
@@ -639,7 +677,14 @@ export function defaultHostLabel(target: string): string {
  * the default identity files.
  */
 function common(interactive: boolean): string[] {
-  return ["-o", interactive ? "BatchMode=no" : "BatchMode=yes", "-o", "ConnectTimeout=15", ...(interactive ? ["-o", "NumberOfPasswordPrompts=3"] : [])];
+  return [
+    "-o", interactive ? "BatchMode=no" : "BatchMode=yes",
+    "-o", "ConnectTimeout=15",
+    "-o", "ForwardAgent=no",
+    "-o", "ForwardX11=no",
+    "-o", "PermitLocalCommand=no",
+    ...(interactive ? ["-o", "NumberOfPasswordPrompts=3"] : []),
+  ];
 }
 
 /** `ssh -N -L 127.0.0.1:<local>:127.0.0.1:<remote> … -- <destination>` (no remote command). */
@@ -899,12 +944,12 @@ export function backoffMs(attempt: number): number {
   return Math.min(TUNNEL_MAX_BACKOFF_MS, 1000 * 2 ** Math.max(0, attempt - 1));
 }
 
-export function initialTunnel(): TunnelView {
-  return { status: "idle", localPort: null, error: null, attempt: 0, retryAt: null, upSince: null };
+export function initialTunnel(target: string | null = null): TunnelView {
+  return { status: "idle", localPort: null, target, error: null, attempt: 0, retryAt: null, upSince: null };
 }
 
 export type TunnelEvent =
-  | { type: "spawn"; localPort: number }
+  | { type: "spawn"; localPort: number; target?: string }
   | { type: "ready"; now: number }
   | { type: "exit"; error: SshErrorView; now: number }
   | { type: "stop" };
@@ -912,7 +957,7 @@ export type TunnelEvent =
 export function tunnelReduce(s: TunnelView, e: TunnelEvent): TunnelView {
   switch (e.type) {
     case "spawn":
-      return { ...s, status: "starting", localPort: e.localPort, retryAt: null, upSince: null };
+      return { ...s, status: "starting", localPort: e.localPort, ...(e.target !== undefined ? { target: e.target } : {}), retryAt: null, upSince: null };
     case "ready":
       return { ...s, status: "up", error: null, retryAt: null, upSince: e.now };
     case "exit": {
@@ -922,7 +967,7 @@ export function tunnelReduce(s: TunnelView, e: TunnelEvent): TunnelView {
       return { ...s, status: "retrying", error: e.error, attempt, retryAt: e.now + backoffMs(attempt), upSince: null };
     }
     case "stop":
-      return { ...initialTunnel(), localPort: s.localPort };
+      return { ...initialTunnel(s.target ?? null), localPort: s.localPort };
   }
 }
 

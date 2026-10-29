@@ -11,7 +11,7 @@ import { OWNER_NOTIFY_CHANNELS, OWNER_NOTIFY_LEVELS, type OwnerNotifyAgentOverri
 import type { GlobalSettings } from "../../../../shared/ipc";
 import { ownerNotifyPatch, toggleChannel, type OwnerNotifyDraft } from "../../../../shared/ownerNotify";
 import { useI18n, type MessageKey } from "../../i18n";
-import { Button, Checkbox, ErrorNote, IconButton, Loading, NumberField, ResetButton, Section, Select, SettingRow, Toggle } from "./Form";
+import { Button, Checkbox, ErrorNote, IconButton, Loading, NumberField, ResetButton, Section, Select, SettingRow, Toggle, SettingsGroup } from "./Form";
 import { useTargetApi, useTargetFeatures, useTargetSidebar } from "../../lib/targetHost";
 import { LEGACY_PRESET, NOTIFICATION_LEVELS_FEATURE, NOTIFICATION_PRESETS_NO_LEGACY_FEATURE } from "../../../../shared/notificationLevels";
 import { useNotificationLevels } from "../../lib/notificationLevelsStore";
@@ -43,8 +43,10 @@ export function OwnerNotifySection({ settings, onSettings }: { settings: GlobalS
     }
   };
   return (
-    // Who gets the owner_notify tool changes what agents can call (at their next start): tagged like that.
-    <Section title={t("owner-notify.settings.ownerNotify.title")} hint={t("owner-notify.hint")} source="host" agents="next" tools={[{ name: "owner_notify", desc: t("owner-notify.toolDesc") }]}>
+    // cutex reads these settings on every owner_notify call (rate limits apply at once); the audience is
+    // asymmetric: a removed agent is refused at its next call, an added one lists the tool at its next start.
+    // Delivery / sound only change how the owner is told.
+    <Section title={t("owner-notify.settings.ownerNotify.title")} hint={t("owner-notify.hint")}   tools={[{ name: "owner_notify", desc: t("owner-notify.toolDesc") }]}>
       {error && <ErrorNote>{error}</ErrorNote>}
       {!settings && !error && <Loading rows={3} />}
       {on && (
@@ -53,12 +55,13 @@ export function OwnerNotifySection({ settings, onSettings }: { settings: GlobalS
           {legacy && (
             <>
               <DeliveryMatrix settings={on} note={levelsSupported} onChange={(delivery) => void save({ delivery })} />
-              <SettingRow label={t("owner-notify.sound")} hint={t("owner-notify.soundHint")}>
+              <SettingRow source="host" label={t("owner-notify.sound")} info={t("owner-notify.soundHint")} agents="none">
                 <Toggle checked={on.bigAlertSound} onChange={(v) => void save({ bigAlertSound: v })} />
               </SettingRow>
             </>
           )}
-          <SettingRow
+          <SettingRow source="host"
+            agents="offNowOnNext"
             label={t("owner-notify.audience")}
             hint={t("owner-notify.audienceHint")}
             reset={<ResetButton disabled={on.toolAudience === DEFAULT_AUDIENCE} onClick={() => void save({ toolAudience: DEFAULT_AUDIENCE })} />}
@@ -70,10 +73,10 @@ export function OwnerNotifySection({ settings, onSettings }: { settings: GlobalS
               onChange={(v) => void save({ toolAudience: v })}
             />
           </SettingRow>
-          <SettingRow label={t("owner-notify.perHour")} hint={t("owner-notify.perHourHint")}>
+          <SettingRow agents="now" source="host" label={t("owner-notify.perHour")} hint={t("owner-notify.perHourHint")}>
             <NumberField value={on.rateLimit.perHour} range={[1, 1000]} unit={t("owner-notify.perHourUnit")} onCommit={(v) => v !== null && void save({ rateLimit: { perHour: v } })} />
           </SettingRow>
-          <SettingRow label={t("owner-notify.urgentPerHour")} hint={t("owner-notify.urgentPerHourHint")}>
+          <SettingRow agents="now" source="host" label={t("owner-notify.urgentPerHour")} hint={t("owner-notify.urgentPerHourHint")}>
             <NumberField value={on.rateLimit.urgentPerHour} range={[0, 100]} unit={t("owner-notify.perHourUnit")} onCommit={(v) => v !== null && void save({ rateLimit: { urgentPerHour: v } })} />
           </SettingRow>
           {/* 单个智能体 (mute / force) waits for a sub-page with a searchable agent list (owner 2026-10-19); stored overrides still apply. */}
@@ -88,9 +91,10 @@ function DeliveryMatrix({ settings, note, onChange }: { settings: OwnerNotifySet
   const phoneOff = !settings.phonePaired;
   const isDefault = OWNER_NOTIFY_LEVELS.every((l) => [...(settings.delivery[l] ?? [])].sort().join() === [...(settings.deliveryDefault?.[l] ?? [])].sort().join());
   return (
-    <div className="border-b border-border py-2.5">
+    <SettingsGroup agents="none" source="host"><div className="border-b border-border py-2.5">
       <div className="mb-1.5 flex items-center gap-2">
         <div className="min-w-0 flex-1">
+          {/* One timing icon for the whole matrix (by its heading), not one per checkbox. */}
           <div className="text-sm">{t("owner-notify.delivery")}</div>
           <div className="text-xs text-subtle">{t("owner-notify.deliveryHint")}</div>
           {note && <div className="text-xs text-subtle">{t("owner-notify.legacyNote")}</div>}
@@ -104,7 +108,7 @@ function DeliveryMatrix({ settings, note, onChange }: { settings: OwnerNotifySet
             {OWNER_NOTIFY_CHANNELS.map((c) => (
               <th key={c} className="px-2 py-1 text-center font-normal" title={c === "phone" && phoneOff ? t("owner-notify.phoneUnpaired") : undefined}>
                 {t(`owner-notify.channel.${c}` as MessageKey)}
-                {c === "phone" && phoneOff && <div className="text-[10.5px] text-warn">{t("owner-notify.phoneUnpaired")}</div>}
+                {c === "phone" && phoneOff && <div className="text-caption/[inherit] text-warn">{t("owner-notify.phoneUnpaired")}</div>}
               </th>
             ))}
           </tr>
@@ -128,7 +132,7 @@ function DeliveryMatrix({ settings, note, onChange }: { settings: OwnerNotifySet
           ))}
         </tbody>
       </table>
-    </div>
+    </div></SettingsGroup>
   );
 }
 
@@ -149,8 +153,8 @@ export function Overrides({ overrides, onChange }: { overrides: Record<string, O
       {Object.entries(overrides).map(([id, v]) => (
         <div key={id} className="flex items-center gap-2 border-t border-border/60 py-1.5">
           <span className="min-w-0 flex-1 truncate text-sm">{nameOf(id)}</span>
-          <Select value={v} width="w-36" options={modes} onChange={(next) => onChange({ ...overrides, [id]: next })} label={nameOf(id)} />
-          <IconButton
+          <SettingsGroup agents="now" source="host"><Select value={v} width="w-36" options={modes} onChange={(next) => onChange({ ...overrides, [id]: next })} label={nameOf(id)} /></SettingsGroup>
+          <SettingsGroup agents="now" source="host"><IconButton
             label={t("owner-notify.overrideRemove")}
             onClick={() => {
               const { [id]: _drop, ...rest } = overrides;
@@ -158,19 +162,19 @@ export function Overrides({ overrides, onChange }: { overrides: Record<string, O
             }}
           >
             <X size={14} />
-          </IconButton>
+          </IconButton></SettingsGroup>
         </div>
       ))}
       <div className="flex items-center gap-2 border-t border-border/60 pt-2">
-        <Select
+        <SettingsGroup agents="now" source="host"><Select
           value={pick}
           width="min-w-0 flex-1"
           label={t("owner-notify.overrideAgent")}
           options={[{ value: "", label: t("owner-notify.overrideAgent") }, ...free.map((a) => ({ value: a.cutexSessionId, label: a.displayName }))]}
           onChange={setPick}
-        />
-        <Select value={mode} width="w-36" options={modes} onChange={setMode} label={t("owner-notify.overrides")} />
-        <Button
+        /></SettingsGroup>
+        <SettingsGroup agents="now" source="host"><Select value={mode} width="w-36" options={modes} onChange={setMode} label={t("owner-notify.overrides")} /></SettingsGroup>
+        <SettingsGroup agents="now" source="host"><Button
           disabled={!pick}
           onClick={() => {
             onChange({ ...overrides, [pick]: mode });
@@ -178,7 +182,7 @@ export function Overrides({ overrides, onChange }: { overrides: Record<string, O
           }}
         >
           {t("owner-notify.overrideAdd")}
-        </Button>
+        </Button></SettingsGroup>
       </div>
     </div>
   );

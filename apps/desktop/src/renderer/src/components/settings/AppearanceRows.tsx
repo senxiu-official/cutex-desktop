@@ -16,7 +16,7 @@ export function AppearanceNumberRow({ field, label, hint, unit, step = 1, commit
   const def = DEFAULT_APPEARANCE[field] as number;
   const set = (v: number) => setAppearance({ [field]: v } as Partial<Appearance>);
   return (
-    <SettingRow label={t(label)} hint={hint ? t(hint) : undefined} reset={<ResetButton disabled={value === def} onClick={() => set(def)} />}>
+    <SettingRow agents="none" source="local" label={t(label)} hint={hint ? t(hint) : undefined} reset={<ResetButton disabled={value === def} onClick={() => set(def)} />}>
       <NumberField slider commitOnRelease={commitOnRelease} value={value} range={RANGES[field]} unit={unit} step={step} onCommit={(v) => v !== null && set(v)} />
     </SettingRow>
   );
@@ -30,7 +30,7 @@ export function FontRow({ label, hint, value, fonts, defaultLabel, onChange }: {
   const { t } = useI18n();
   const installed = useMemo(() => new Map(fonts.map((f) => [f, fontAvailable(f)])), [fonts]);
   return (
-    <SettingRow label={label} hint={hint}>
+    <SettingRow agents="none" source="local" label={label} hint={hint}>
       <FontCombo label={label} value={value} fonts={fonts} defaultLabel={defaultLabel ?? t("appearance.builtIn")} installed={(f) => installed.get(f) ?? fontAvailable(f)} onChange={onChange} />
     </SettingRow>
   );

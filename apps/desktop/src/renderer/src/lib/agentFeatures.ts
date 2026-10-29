@@ -2,10 +2,17 @@
 // `native.schema.protocol === "claude-app-server-subset"` and `native.schema.capabilities.features`:
 // the Codex v2 surfaces its adapter serves (false = unsupported, null / absent = unknown). Only an
 // explicit `false` hides UI, except sideChat which requires Claude to declare support. Codex agents
-// and other unknown features keep today's behaviour.
-// Pure (no React, no store) so it is unit-tested.
+// and other unknown features keep today's behaviour. ACP runtimes (DSH, Kimi Code: lib/acpRuntimes) require
+// explicit support for structural actions; native threadFork/threadRevert names map to the existing
+// fork/historyRevert surfaces. Pure (no React, no store) so it is unit-tested.
 import { CLAUDE_MAX_IMAGE_BYTES, MAX_IMAGE_BYTES } from "../../../shared/ipc";
 import { parseUnsupported } from "../../../shared/unsupported";
+import { ACP_RUNTIME_INFO, acpRuntimeOf, isAcpRuntime, type AcpRuntime } from "./acpRuntimes";
+
+export const DSH_PROTOCOL = ACP_RUNTIME_INFO.dsh.protocol;
+export const DSH_RUNTIME_CAPABILITY = ACP_RUNTIME_INFO.dsh.capability;
+export const KIMI_PROTOCOL = ACP_RUNTIME_INFO.kimi.protocol;
+export const KIMI_RUNTIME_CAPABILITY = ACP_RUNTIME_INFO.kimi.capability;
 
 export const CLAUDE_PROTOCOL = "claude-app-server-subset";
 export const CLAUDE_FEATURES_CAPABILITY = "claude-runtime-features";
@@ -24,11 +31,17 @@ export type AgentFeature =
   | "planMode"
   | "compact"
   | "threadSearch"
-  | "sideChat";
+  | "sideChat"
+  | "threadDelete"
+  | "contextOccupancy"
+  | "billingUsage";
 // Side needs an explicit Claude capability: its ephemeral fork is not part of the adapter subset.
 
+/** The runtime an agent runs on (cutex's answer: launch binding, schema protocol, backend). */
+export type AgentRuntime = "codex" | "claude" | AcpRuntime;
+
 export interface AgentFeatures {
-  runtime: "codex" | "claude";
+  runtime: AgentRuntime;
   /** The adapter's feature map; null = unknown (Codex agent, or an adapter without features.json). */
   map: Record<string, unknown> | null;
 }
@@ -38,17 +51,39 @@ export const CODEX_FEATURES: AgentFeatures = { runtime: "codex", map: null };
 type SchemaLike = { protocol?: unknown; capabilities?: unknown } | null | undefined;
 
 /** Features of an agent from its session resource (`native.schema`). */
-export function agentFeaturesOf(resource: { native?: { schema?: SchemaLike } | null } | null | undefined): AgentFeatures {
+export function agentFeaturesOf(resource: { native?: { schema?: SchemaLike } | null; runtime?: { backend?: string }; launchBinding?: { runtime?: string } | null } | null | undefined): AgentFeatures {
   const schema = resource?.native?.schema;
-  if (!schema || schema.protocol !== CLAUDE_PROTOCOL) return CODEX_FEATURES;
-  const features = (schema.capabilities as { features?: unknown } | null | undefined)?.features;
-  return { runtime: "claude", map: features && typeof features === "object" && !Array.isArray(features) ? (features as Record<string, unknown>) : null };
+  // profile-runtime-variants: the session's fixed binding is cutex's answer, also before the native reports a schema.
+  const acp = acpRuntimeOf({ protocol: schema?.protocol, backend: resource?.runtime?.backend, bound: resource?.launchBinding?.runtime });
+  if (!acp && (!schema || schema.protocol !== CLAUDE_PROTOCOL)) return CODEX_FEATURES;
+  const features = (schema?.capabilities as { features?: unknown } | null | undefined)?.features;
+  return { runtime: acp ?? "claude", map: features && typeof features === "object" && !Array.isArray(features) ? (features as Record<string, unknown>) : null };
 }
 
 /** Unsupported by the adapter; Claude must explicitly opt into ephemeral side chats. */
 export function lacks(f: AgentFeatures, feature: AgentFeature): boolean {
+  if (isAcpRuntime(f.runtime)) {
+    const key = feature === "fork" ? "threadFork" : feature === "historyRevert" ? "threadRevert" : feature;
+    // ACP structural actions require explicit support, including on older hosts.
+    if (["turnSteer", "threadFork", "threadRevert", "threadDelete", "sideChat"].includes(key)) return f.map?.[key] !== true;
+    // Images (r265): the runtime says it takes them (imageInput true, not textInputOnly); the model decides per chat.
+    if (key === "imageInput") return f.map?.imageInput !== true || f.map?.textInputOnly === true;
+    return f.map?.[key] === false;
+  }
   if (feature === "sideChat" && f.runtime === "claude") return f.map?.sideChat !== true;
   return f.map?.[feature] === false;
+}
+
+/**
+ * Model / effort of an existing chat change live (`thread/settings/update`). Codex and Claude: always (as before).
+ * ACP runtimes (DSH r265 C1, Kimi r266): when the runtime declares `threadSettingsUpdate`, or — hosts that do not name it — carries the r265
+ * schema (`textInputOnly: false`, shipped with the same change); older DSH runtimes froze the creation choice.
+ */
+export function changesSettingsLive(f: AgentFeatures): boolean {
+  if (!isAcpRuntime(f.runtime)) return true;
+  const declared = f.map?.threadSettingsUpdate;
+  if (typeof declared === "boolean") return declared;
+  return f.map?.textInputOnly === false;
 }
 
 /** cutex `claude-session-skills`: `GET /v2/sessions/{id}/skills` lists a Claude agent's managed skills. */
@@ -70,6 +105,7 @@ export function declares(f: AgentFeatures, feature: string): boolean {
  * be refused).
  */
 export function skillSource(f: AgentFeatures, host: HostFeatures): "codex" | "claude" | null {
+  if (isAcpRuntime(f.runtime)) return null;
   if (f.runtime !== "claude") return lacks(f, "skillInput") ? null : "codex";
   return declares(f, "managedSkills") && host.has(CLAUDE_SESSION_SKILLS_CAPABILITY) ? "claude" : null;
 }
@@ -90,6 +126,14 @@ export function claudeFastMode(f: AgentFeatures): boolean {
  */
 export function opensClaudeSubagents(f: AgentFeatures): boolean {
   return declares(f, "subagentTranscripts");
+}
+
+/** cutex `claude-background-tasks`: `claude/tasks/stop` is forwarded and finished background tasks wake the agent. */
+export const CLAUDE_BACKGROUND_TASKS_CAPABILITY = "claude-background-tasks";
+
+/** 停止 on a running Claude background subagent: adapter `backgroundSubagents` (claude-r23) + cutex `claude-background-tasks`. */
+export function stopsClaudeTasks(f: AgentFeatures, host: HostFeatures): boolean {
+  return declares(f, "backgroundSubagents") && host.has(CLAUDE_BACKGROUND_TASKS_CAPABILITY);
 }
 
 /** cutex `claude-subagent-transcripts`: the adapter's live transcript frames reach the stream (else re-read). */
@@ -118,4 +162,9 @@ export function describeError(e: unknown, notice: (feature: string) => string): 
   const message = e instanceof Error ? e.message : String(e);
   const feature = parseUnsupported(message);
   return feature === null ? { text: message, unsupported: false } : { text: notice(feature), unsupported: true };
+}
+
+/** An ACP runtime (DSH, Kimi Code): no Codex sandbox / approval presets, plan mode or live extras in the composer. */
+export function isAcpAgent(f: Pick<AgentFeatures, "runtime"> | null | undefined): boolean {
+  return isAcpRuntime(f?.runtime);
 }

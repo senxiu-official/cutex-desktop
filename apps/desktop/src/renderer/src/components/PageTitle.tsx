@@ -1,4 +1,4 @@
-// Title-bar breadcrumb of the open `main.page` (docs/desktop-modules.md §3.2): the page item's
+// Breadcrumb of an open `main.page` (docs/desktop-modules.md §3.2; the page header's since 2026-10-21, §26): the page item's
 // useTitle(params) gives the crumbs; earlier crumbs with a target are links, the last one is the page
 // name in bold. Pages never repeat it as an in-page heading. Right-click: the modules' `ref.action`
 // items for the page when it is referable (refParams, §19.8). Shell file: no feature names here
@@ -68,10 +68,15 @@ function Crumbs({ entry, params }: { entry: AppSlotEntry<"main.page">; params: P
 export function PageTitle() {
   const open = useOpenPage();
   if (!open?.entry) return null;
+  return <PageCrumbs entry={open.entry} params={open.params} />;
+}
+
+/** A page's breadcrumb (the window bar's for a full-window page; a page header's, components/PageHeader). */
+export function PageCrumbs({ entry, params }: { entry: AppSlotEntry<"main.page">; params: PageParams }) {
   return (
-    <ItemBoundary moduleId={open.entry.moduleId} resetKey={open.page}>
+    <ItemBoundary moduleId={entry.moduleId} resetKey={entry.item.id}>
       {/* Keyed by page: each page's useTitle hook gets its own component instance. */}
-      <Crumbs key={open.page} entry={open.entry} params={open.params} />
+      <Crumbs key={entry.item.id} entry={entry} params={params} />
     </ItemBoundary>
   );
 }

@@ -29,7 +29,7 @@ vi.mock("@cutex-desktop/cutex-client", () => {
 import { CutexApiError } from "@cutex-desktop/cutex-client";
 import { DaemonService } from "../src/main/daemon";
 import { parseQueueSteerError, queueSteerErrorKind } from "../src/shared/queueSteer";
-import { QUEUE_STEER_FEATURE, queueSteerNotice } from "../src/renderer/src/lib/queueSteer";
+import { QUEUE_STEER_FEATURE, queueSteerNotice, queueSteerRaw } from "../src/renderer/src/lib/queueSteer";
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";
 import { en } from "../src/renderer/src/i18n/en";
 
@@ -48,6 +48,63 @@ beforeEach(() => {
 afterEach(() => service.stop());
 
 describe("queuePromote with queue-steer", () => {
+  it("first click retries only the unsent capability gate with the same queue identity", async () => {
+    const c = connect();
+    c.queueSteer.mockRejectedValueOnce(refusal("steer_unavailable", { reason: "runtimeNoSteer" }));
+    const result = await service.queuePromote("s1", "q1", 2, true);
+    expect(result.result.disposition).toBe("steered");
+    expect(c.queueSteer.mock.calls).toEqual([
+      ["s1", "q1", 2, { ifIdle: "start" }],
+      ["s1", "q1", 2, { ifIdle: "start" }],
+    ]);
+    expect(c.queueRemove).not.toHaveBeenCalled();
+    expect(c.submitInput).not.toHaveBeenCalled();
+  });
+
+  it("does not claim unsupported when the bounded capability check still cannot confirm support", async () => {
+    const c = connect();
+    c.queueSteer.mockRejectedValue(refusal("steer_unavailable", { reason: "runtimeNoSteer" }));
+    await expect(service.queuePromote("s1", "q1", 2, true)).rejects.toThrow("queue_steer_refused:runtimeNotReady");
+    expect(c.queueSteer).toHaveBeenCalledTimes(2);
+    expect(c.queueRemove).not.toHaveBeenCalled();
+  });
+
+  it("a native unsupported reply is reported immediately without another send", async () => {
+    const c = connect();
+    c.queueSteer.mockRejectedValue(refusal("steer_unavailable", { reason: "runtimeNoSteer", nativeError: { code: -32601 } }));
+    await expect(service.queuePromote("s1", "q1", 2, true)).rejects.toThrow("queue_steer_refused:runtimeNoSteer");
+    expect(c.queueSteer).toHaveBeenCalledOnce();
+  });
+
+  it("a resync requirement overrides a nominal capability refusal", async () => {
+    const c = connect();
+    c.queueSteer.mockRejectedValue(refusal("steer_unavailable", { reason: "runtimeNoSteer", resyncRequired: true }));
+    await expect(service.queuePromote("s1", "q1", 2, true)).rejects.toThrow("queue_steer_refused:outcomeUnknown");
+    expect(c.queueSteer).toHaveBeenCalledOnce();
+    expect(c.queueRemove).not.toHaveBeenCalled();
+  });
+  it("passes explicit join identity atomically and refuses legacy fallback", async () => {
+    const c = connect();
+    const join = { askId: "ask-a", attempt: 2, expectedTurnId: "turn-a", runtimeGeneration: 7 };
+    await service.queuePromote("s1", "q1", 2, true, join);
+    expect(c.queueSteer).toHaveBeenCalledWith("s1", "q1", 2, { ifIdle: "fail", joinDelegation: join });
+    await expect(service.queuePromote("s1", "q1", 2, false, join)).rejects.toThrow("joinChanged");
+    c.queueSteer.mockRejectedValueOnce(refusal("steer_unavailable", { reason: "joinChanged" }));
+    await expect(service.queuePromote("s1", "q1", 2, true, join)).rejects.toThrow("queue_steer_refused:joinChanged");
+    expect(c.queueRemove).not.toHaveBeenCalled();
+    expect(c.submitInput).not.toHaveBeenCalled();
+  });
+
+  it("reports the r263 non-owner gate as a definite refusal without sending or removing", async () => {
+    const c = connect();
+    const join = { askId: "ask-a", attempt: 2, expectedTurnId: "turn-a", runtimeGeneration: 7 };
+    c.queueSteer.mockRejectedValueOnce(new CutexApiError(403, "owner_required", "this route is the host owner's"));
+    await expect(service.queuePromote("s1", "q1", 2, true, join)).rejects.toThrow("queue_steer_refused:ownerRequired");
+    expect(c.queueRemove).not.toHaveBeenCalled();
+    expect(c.submitInput).not.toHaveBeenCalled();
+    expect(queueSteerNotice("queue_steer_refused:ownerRequired", zh)).toBe("只有主机所有者可以加入此委托");
+  });
+
   it("uses the atomic steer (ifIdle start) and maps its reply to QueuePromoteResult", async () => {
     const c = connect();
     const r = await service.queuePromote("s1", "q1", 2, true);
@@ -72,10 +129,13 @@ describe("queuePromote with queue-steer", () => {
     const c = connect();
     const cases: [unknown, string][] = [
       [refusal("steer_unavailable", { reason: "delegationTurn" }), "queue_steer_refused:delegationTurn"],
-      [refusal("steer_unavailable", { reason: "runtimeNoSteer" }), "queue_steer_refused:runtimeNoSteer"],
+      [refusal("steer_unavailable", { reason: "runtimeNoSteer", nativeError: { code: -32601 } }), "queue_steer_refused:runtimeNoSteer"],
       [refusal("steer_unavailable", { reason: "runtimeRefused", nativeError: { message: "cannot steer a\n review turn" } }), "queue_steer_refused:runtimeRefused cannot steer a review turn"],
       [refusal("turn_conflict"), "queue_steer_refused:turnConflict"],
-      [refusal("outcome_unknown"), "queue_steer_refused:outcomeUnknown"],
+      // An unknown outcome carries the backend's words (详情 only); the v2 server says request_outcome_unknown.
+      [refusal("outcome_unknown"), "queue_steer_refused:outcomeUnknown outcome_unknown: kept"],
+      [refusal("request_outcome_unknown", { resyncRequired: true, originalCode: "outcome_unknown", originalDetails: {} }), "queue_steer_refused:outcomeUnknown request_outcome_unknown: kept (originalCode: outcome_unknown)"],
+      [refusal("session_runtime_changed", { resyncRequired: true }), "queue_steer_refused:outcomeUnknown session_runtime_changed: kept"],
       [refusal("revision_conflict"), "queue_steer_refused:changed"],
     ];
     for (const [error, message] of cases) {
@@ -120,11 +180,55 @@ describe("queue-steer notices", () => {
     const wrapped = "Error invoking remote method 'invoke': Error: queue_steer_refused:delegationTurn";
     expect(parseQueueSteerError(wrapped)).toEqual({ kind: "delegationTurn", detail: "" });
     expect(parseQueueSteerError("queue_steer_refused:bogus")).toBeNull();
-    expect(queueSteerNotice(wrapped, zh)).toBe("委托占用中（委托回合在跑，或委托结果正在送达），暂时不能插话；已留在队列");
+    expect(queueSteerNotice(wrapped, zh)).toBe("委托占用中（委托回合在跑，或委托结果正在送达）：消息留在队列，等委托这一轮结束后发送");
     expect(queueSteerNotice("Error: queue_steer_refused:turnConflict", zh)).toBe("回合刚变化，请再试一次");
-    expect(queueSteerNotice("queue_steer_refused:runtimeRefused cannot steer a review turn", zh)).toBe("运行时拒绝插话（cannot steer a review turn）；已留在队列");
+    // The native's own words never reach the notice (queueSteerRaw: the 详情 tooltip).
+    expect(queueSteerNotice("queue_steer_refused:runtimeRefused cannot steer a review turn", zh)).toBe("运行时拒绝插话；已留在队列");
+    expect(queueSteerRaw("queue_steer_refused:runtimeRefused cannot steer a review turn")).toBe("cannot steer a review turn");
     expect(queueSteerNotice("queue_steer_refused:runtimeRefused", zh)).toBe("运行时拒绝插话；已留在队列");
     expect(queueSteerNotice("queue item changed or already sent", zh)).toBeNull();
     for (const key of Object.keys(zhCN).filter((k) => k.startsWith("queue.steer."))) expect((en as Record<string, string>)[key]).toBeTruthy();
+  });
+});
+
+describe("image-input-steering (r264): queue-steer receipt, ifIdle fail, image refusals", () => {
+  const enT = (key: string, vars?: Record<string, string | number>) => (en as Record<string, string>)[key]!.replace(/\{(\w+)\}/g, (_, n: string) => String(vars?.[n]));
+
+  it("passes cutex's imageDelivery receipt through; none when cutex sent none", async () => {
+    const c = connect();
+    c.queueSteer.mockResolvedValueOnce({ disposition: "steered", turnId: "t9", clientUserMessageId: "cm-1", queueRevision: 8, imageDelivery: "pathText" });
+    expect((await service.queuePromote("s1", "q1", 2, true)).result).toEqual({ disposition: "steered", turnId: "t9", imageDelivery: "pathText" });
+    c.queueSteer.mockResolvedValueOnce({ disposition: "steered", turnId: "t9", clientUserMessageId: "cm-1", queueRevision: 8, imageDelivery: "somethingElse" });
+    expect((await service.queuePromote("s1", "q1", 2, true)).result).toEqual({ disposition: "steered", turnId: "t9" });
+  });
+
+  it("a draft steered after cutex queued it never starts a turn (ifIdle fail)", async () => {
+    const c = connect();
+    await service.queuePromote("s1", "q1", 2, true, undefined, { ifIdle: "fail" });
+    expect(c.queueSteer).toHaveBeenCalledWith("s1", "q1", 2, { ifIdle: "fail" });
+  });
+
+  it("imagePathRequired / imageUnavailable are kept-in-queue refusals with their own words", async () => {
+    const c = connect();
+    expect(queueSteerErrorKind("steer_unavailable", { reason: "imagePathRequired" })).toBe("imagePathRequired");
+    expect(queueSteerErrorKind("steer_unavailable", { reason: "imageUnavailable" })).toBe("imageUnavailable");
+    for (const reason of ["imagePathRequired", "imageUnavailable"]) {
+      c.queueSteer.mockRejectedValueOnce(refusal("steer_unavailable", { reason }));
+      await expect(service.queuePromote("s1", "q1", 2, true)).rejects.toThrow(new Error(`queue_steer_refused:${reason}`));
+      expect(parseQueueSteerError(`Error invoking remote method: Error: queue_steer_refused:${reason}`)).toEqual({ kind: reason, detail: "" });
+    }
+    expect(c.queueRemove).not.toHaveBeenCalled();
+    expect(queueSteerNotice("queue_steer_refused:imagePathRequired", zh)).toBe("图片需要先上传到这台主机才能插入当前回合：已留在队列，本回合结束后发送");
+    expect(queueSteerNotice("queue_steer_refused:imageUnavailable", zh)).toBe("主机上的图片文件不可用（已删除或无法读取）：已留在队列");
+    expect(queueSteerNotice("queue_steer_refused:imagePathRequired", enT)).toContain("must be uploaded to this host");
+  });
+
+  it("a runtime refusal names images only for a message with images on a runtime that declares unsupported", () => {
+    const image = zh("queue.steer.imageUnsupported");
+    expect(queueSteerNotice("queue_steer_refused:runtimeNoSteer", zh, { images: true, imageSteering: "unsupported" })).toBe(image);
+    expect(queueSteerNotice("queue_steer_refused:runtimeNoSteer", zh, { images: false, imageSteering: "unsupported" })).toBe(zh("queue.steer.runtimeNoSteer"));
+    expect(queueSteerNotice("queue_steer_refused:runtimeNoSteer", zh, { images: true, imageSteering: "pathText" })).toBe(zh("queue.steer.runtimeNoSteer"));
+    expect(queueSteerNotice("queue_steer_refused:runtimeNoSteer", zh, { images: true, imageSteering: null })).toBe(zh("queue.steer.runtimeNoSteer"));
+    expect(queueSteerNotice("queue_steer_refused:runtimeNoSteer", zh)).toBe("这个运行时只在回合之间接收新消息：已留在队列，本回合结束后发送");
   });
 });

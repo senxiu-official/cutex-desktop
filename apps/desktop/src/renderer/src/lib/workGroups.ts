@@ -5,9 +5,11 @@
 // steps + "N earlier". Pure, so it is unit-tested.
 import { approvalOfTool } from "./approvals";
 import { isClaudeAgentTool } from "./claudeTasks";
+import { itemMedia } from "./itemMedia";
 import { reasoningText, type ReasoningEntry } from "./reasoning";
 import { taskRowOutcome, taskToolRow } from "./taskRows";
 import type { RawItem, TimelineEntry } from "./timeline";
+import { changeAsDiff, changeRecords, countChange } from "./turnSummary";
 
 export interface WorkSummary {
   commands: number;
@@ -57,14 +59,37 @@ export function toolDetail(item: RawItem): string {
 }
 
 /**
+ * A file change's added / removed lines; null = no diff to count. An update's unified diff counts its
+ * +/- lines (headers not counted); an add / delete carries the whole file body (FileUpdateChange), so
+ * every line of it counts (r265 D6: a created file read 「+0 −0」 while the turn summary said +1).
+ */
+export function diffCounts(item: RawItem): { added: number; removed: number } | null {
+  if (item.type !== "fileChange") return null;
+  const changes = changeRecords(item).filter((c) => c.diff.length > 0);
+  if (!changes.length) return null;
+  let added = 0;
+  let removed = 0;
+  for (const c of changes) {
+    const n = countChange(c);
+    added += n.added;
+    removed += n.deleted;
+  }
+  return { added, removed };
+}
+
+/**
  * Text shown when a tool row is expanded: command output, the unified diffs of a file change, the
  * text content of a dynamic tool call; null = fall back to the raw item.
  */
 export function toolOutput(item: RawItem): string | null {
   if (typeof item.aggregatedOutput === "string") return item.aggregatedOutput;
   if (item.type === "fileChange") {
-    const diffs = ((item.changes as { path?: string; diff?: unknown }[] | undefined) ?? []).filter((c) => typeof c.diff === "string" && c.diff);
-    if (diffs.length) return diffs.map((c) => (String(c.diff).startsWith("---") || String(c.diff).startsWith("diff ") ? String(c.diff) : `--- ${c.path ?? ""}\n${String(c.diff)}`)).join("\n");
+    // An add / delete carries the file body, not a diff: shown as one (+ / - lines) like the turn summary's 查看变更.
+    const diffs = changeRecords(item).filter((c) => c.diff);
+    if (diffs.length)
+      return diffs
+        .map((c) => (c.kind !== "update" ? changeAsDiff(c, undefined, false) : c.diff.startsWith("---") || c.diff.startsWith("diff ") ? c.diff : `--- ${c.path}\n${c.diff}`))
+        .join("\n");
   }
   if (item.type === "dynamicToolCall" && Array.isArray(item.contentItems)) {
     const text = (item.contentItems as { type?: string; text?: unknown }[]).filter((c) => typeof c.text === "string").map((c) => c.text as string);
@@ -152,7 +177,7 @@ export function segmentEntries(entries: TimelineEntry[], opts: { reasoning?: boo
     group = null;
   };
   for (const entry of entries) {
-    if (entry.kind === "other") continue; // invisible, doesn't split a group
+    if (entry.kind === "other" && !itemMedia(entry.item).images.length && !itemMedia(entry.item).truncated) continue;
     if (entry.kind === "interaction" && !showInteractions) continue;
     if (entry.kind === "reasoning") {
       if (showReasoning && reasoningText(entry)) (group ??= []).push(entry);

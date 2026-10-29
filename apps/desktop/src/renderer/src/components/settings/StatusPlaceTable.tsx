@@ -13,7 +13,7 @@ import { setStatusPlace, useStatusItems, useSurfaceProviders } from "../../lib/s
 import { placeSelectable, type SurfaceProviders } from "../../lib/statusSurfaces";
 import { services } from "../../modules/app";
 import { STATUS_PLACES, STATUS_SURFACES, type StatusPlace } from "../../modules/slots";
-import { Button, Notice } from "./Form";
+import { Button, Notice, SettingsGroup } from "./Form";
 
 const GRID = "grid grid-cols-[minmax(6rem,1fr)_repeat(4,minmax(3.5rem,4.5rem))_1.5rem] items-center gap-x-3";
 
@@ -39,7 +39,7 @@ function PlaceRow({ placed, providers }: { placed: PlacedStatus; providers: Surf
     return null;
   };
   return (
-    <div className="border-b border-border py-2 last:border-b-0">
+    <SettingsGroup agents="none" source="local"><div className="border-b border-border py-2 last:border-b-0">
       <div role="radiogroup" aria-labelledby={labelId} aria-describedby={note ? noteId : undefined} className={GRID}>
         <span id={labelId} className="truncate text-sm">
           {t(item.titleKey)}
@@ -82,7 +82,7 @@ function PlaceRow({ placed, providers }: { placed: PlacedStatus; providers: Surf
           {note}
         </p>
       )}
-    </div>
+    </div></SettingsGroup>
   );
 }
 
@@ -101,7 +101,7 @@ export function StatusPlaceTable() {
         <Notice key={s} tone="info">
           <span className="flex flex-wrap items-center gap-2">
             {t("shell.statusPlace.surfaceOff", { surface: t(`shell.statusPlace.${s}` as MessageKey) })}
-            <Button onClick={() => services.ui.openSettings("modules")}>{t("modules.openModules")}</Button>
+            <SettingsGroup agents="none" source="local"><Button onClick={() => services.ui.openSettings("modules")}>{t("modules.openModules")}</Button></SettingsGroup>
           </span>
         </Notice>
       ))}

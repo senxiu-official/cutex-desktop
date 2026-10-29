@@ -1,6 +1,6 @@
 // Delegation (委托) state for the delegation cards and overviews, kept in its own zustand store
 // instead of the app store. Refresh-based: on connect and after any `cutex/ask/*` host event
-// (debounced) it reloads the open delegations (`GET /v2/asks?state=open`); events are applied
+// (coalesced with a bounded interval) it reloads the open delegations (`GET /v2/asks?state=open`); events are applied
 // optimistically first (lib/delegations applyAskEvent) and the refresh corrects them. Events are
 // taken from the host feed only (it carries every session's stream: each event arrives twice, once
 // per party, and applying is idempotent). Selecting an agent loads its delegations once (open and
@@ -21,10 +21,13 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { create } from "zustand";
 import type { AskCommandMethod, AskDetail, AskQuestion, AskSummary, DaemonApi, MutationResult } from "../../../shared/ipc";
+import { hostEpoch, type HostsState } from "../../../shared/hosts";
 import { api, apiFor, bridge } from "../bridge";
 import { translate } from "../i18n";
 import { applyAskEvent, ASKS_FEATURE, DELEGATION_VIEWS_FEATURE, mergeSummaries, summaryFromRecord, type DelegationRecords, type ProgressNote } from "./delegations";
+import { delegationRefresh } from "./delegationRefresh";
 import { focusHostId, hostKey, parseHostKey, type HostKey } from "./hostKeys";
+import { onEveryAppWindow } from "./appWindowSet";
 
 export interface DelegationsState {
   /** Delegations by `hostKey(hostId, askId)`: open ones, those of agents opened, closed ones loaded. */
@@ -53,13 +56,17 @@ export const useDelegations = create<DelegationsState>((set) => ({
   reset: () => {
     sessionsLoaded.clear();
     detailInFlight.clear();
-    for (const timer of refreshTimers.values()) clearTimeout(timer);
-    refreshTimers.clear();
+    closedRequest = null;
+    closedRequested = null;
+    connectionReady.clear();
+    for (const hostId of generations.keys()) invalidateHost(hostId);
+    lastResync.clear();
     set({ ...EMPTY });
   },
 }));
 
 interface AppView {
+  hosts?: HostsState | null;
   features: ReadonlySet<string>;
   selectedId: string | null;
   selectedHost: string | null;
@@ -73,11 +80,65 @@ export interface AppHandle {
 }
 
 let app: AppHandle | null = null;
-const refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+type HostGeneration = { epoch: string | null; changed: Promise<void>; invalidate(): void; refresh: ReturnType<typeof delegationRefresh> };
+const generations = new Map<string, HostGeneration>();
+const epochOf = (hostId: string) => hostEpoch(app?.getState().hosts ?? null, hostId);
+function generation(hostId: string): HostGeneration {
+  let current = generations.get(hostId);
+  if (current && current.epoch !== epochOf(hostId)) {
+    invalidateHost(hostId);
+    current = undefined;
+  }
+  if (!current) {
+    let invalidate!: () => void;
+    const changed = new Promise<void>(resolve => { invalidate = resolve; });
+    const created: HostGeneration = { epoch: epochOf(hostId), changed, invalidate, refresh: delegationRefresh(() => readOpenDelegations(hostId, created)) };
+    generations.set(hostId, current = created);
+  }
+  return current;
+}
+const currentRead = (hostId: string, token: HostGeneration) => generations.get(hostId) === token && token.epoch === epochOf(hostId) && followed(hostId);
+function invalidateHost(hostId: string) {
+  generations.get(hostId)?.invalidate();
+  generations.get(hostId)?.refresh.dispose();
+  generations.delete(hostId);
+  lastResync.delete(hostId);
+  for (const key of sessionsLoaded) if (key.startsWith(`${hostId}\n`)) sessionsLoaded.delete(key);
+}
 /** `${hostId}\n${sessionId}` of agents whose delegations were loaded. */
 const sessionsLoaded = new Set<string>();
-const detailInFlight = new Set<string>();
-const REFRESH_DEBOUNCE_MS = 300;
+const detailInFlight = new Map<HostKey, { promise: Promise<AskDetail | null> }>();
+let closedRequested: string | null = null;
+let closedRequest: { hostId: string; promise: Promise<void> } | null = null;
+const connectionReady = new Map<string, boolean>();
+const connectionKind = (hostId: string, hosts = app?.getState().hosts) => hosts?.hosts.find(h => h.id === hostId)?.conn?.daemon?.kind;
+const ready = (hostId: string) => {
+  const hosts = app?.getState().hosts;
+  // hostsState can advertise a new, still-connecting epoch before daemonState resets the old
+  // readiness flag. Only the current connection can admit the retry; mocks without hosts fall back.
+  return supported(hostId) && connectionReady.get(hostId) !== false && (!hosts || connectionKind(hostId, hosts) === "connected");
+};
+
+/** Invalidation wakes consumers immediately; a superseded request's later rejection is handled. */
+function readInGeneration<T>(token: HostGeneration, read: () => Promise<T>) {
+  const result = (async () => {
+    try { return { kind: "value" as const, value: await read() }; }
+    catch { return { kind: "error" as const }; }
+  })();
+  return Promise.race([result, token.changed.then(() => ({ kind: "changed" as const }))]);
+}
+
+function freshDetails(details: DelegationsState["details"], byKey: DelegationsState["byKey"]) {
+  let next = details;
+  for (const [key, detail] of Object.entries(details)) {
+    const row = byKey[key];
+    if (row && (detail === null || row.revision > (detail?.revision ?? -Infinity))) {
+      if (next === details) next = { ...details };
+      delete next[key];
+    }
+  }
+  return next;
+}
 
 const focus = () => focusHostId();
 const daemonOf = (hostId: string): DaemonApi => (hostId === focus() ? api : apiFor(hostId));
@@ -161,7 +222,10 @@ function liftChanges<T>(byKey: Record<HostKey, T>, hostId: string, before: Recor
 
 /** Merge rows of `hostId` into the store. */
 function mergeRows(hostId: string, rows: AskSummary[], extra: Partial<DelegationsState> = {}): void {
-  useDelegations.setState((s) => ({ byKey: mergeHostRows(s.byKey, hostId, rows), ...extra }));
+  useDelegations.setState((s) => {
+    const byKey = mergeHostRows(s.byKey, hostId, rows);
+    return { byKey, details: freshDetails(s.details, byKey), ...extra };
+  });
 }
 
 /** Daemon calls of a host's delegations (answers, artifacts of its cards). */
@@ -216,50 +280,63 @@ export function useFocusDelegations(): Record<string, AskSummary> {
 }
 
 function scheduleRefresh(hostId: string) {
-  const timer = refreshTimers.get(hostId);
-  if (timer) clearTimeout(timer);
-  refreshTimers.set(
-    hostId,
-    setTimeout(() => {
-      refreshTimers.delete(hostId);
-      void refreshOpenDelegations(hostId);
-    }, REFRESH_DEBOUNCE_MS),
-  );
+  if (supported(hostId) && followed(hostId)) void generation(hostId).refresh.request();
 }
 
-/** Reload a host's open delegations. Ones that dropped out of the list (closed meanwhile) are re-read. */
-export async function refreshOpenDelegations(hostId: string = focus()): Promise<void> {
-  if (!supported(hostId)) return;
-  let rows: AskSummary[] | null;
-  try {
-    rows = await daemonOf(hostId).asks({ state: "open" });
-  } catch {
-    return; // transient; the next event retries
-  }
-  if (!rows || !followed(hostId)) return;
-  const open = new Set(rows.map((r) => r.askId));
-  const vanished = Object.values(hostDelegations(useDelegations.getState().byKey, hostId)).filter(
-    (d) => !d.closed && !open.has(d.askId) && d.execution !== "failed" && d.execution !== "rejected" && d.execution !== "cancelled",
-  );
-  mergeRows(hostId, rows, hostId === focus() ? { loadedAt: Date.now() } : { hostLoadedAt: { ...useDelegations.getState().hostLoadedAt, [hostId]: Date.now() } });
-  for (const d of vanished.slice(0, 20)) void reloadOne(hostId, d.askId);
+/** All callers share a host's read and at most one pending refresh. */
+export function refreshOpenDelegations(hostId: string = focus()): Promise<void> {
+  if (!supported(hostId) || !followed(hostId)) return Promise.resolve();
+  return generation(hostId).refresh.request(true);
 }
 
-/** Re-read one delegation (it left the open list). */
-async function reloadOne(hostId: string, askId: string) {
+async function readOpenDelegations(hostId: string, token: HostGeneration): Promise<void> {
+  if (!currentRead(hostId, token)) return;
   try {
-    const detail = await daemonOf(hostId).ask(askId);
-    const row = detail ? summaryFromRecord(detail) : null;
-    if (row && followed(hostId)) mergeRows(hostId, [row], { details: { ...useDelegations.getState().details, [hostKey(hostId, askId)]: detail } });
+    const daemon = daemonOf(hostId);
+    const rows = await daemon.asks({ state: "open", background: true });
+    if (!rows || !currentRead(hostId, token)) return;
+    const open = new Set(rows.map((r) => r.askId));
+    const vanished = Object.values(hostDelegations(useDelegations.getState().byKey, hostId)).some(
+      (d) => !d.closed && !open.has(d.askId),
+    );
+    mergeRows(hostId, rows, hostId === focus() ? { loadedAt: Date.now() } : { hostLoadedAt: { ...useDelegations.getState().hostLoadedAt, [hostId]: Date.now() } });
+    if (!vanished) return;
+    // The list contract has no cursor. Fetch once at its supported maximum; absence from a capped
+    // list (or a missing route) is not evidence of closure or deletion. Keep unresolved results.
+    // Backend follow-up: expose a stable cursor for GET /v2/asks (and carry it through AskFilter /
+    // DaemonApi / cutex-client). Until then, closures outside this 1000-row window cannot be fully
+    // reconciled by list reads; retain them rather than infer cancellation/deletion from absence.
+    const closed = await daemon.asks({ state: "closed", limit: 1000, background: true });
+    if (closed && currentRead(hostId, token)) mergeRows(hostId, closed);
   } catch {
-    // keep what we have
+    // Transient: retain known rows; a subsequent event or panel resync retries.
   }
+}
+
+/** When each host was last re-synced by resyncDelegations. */
+const lastResync = new Map<string, number>();
+export const RESYNC_MIN_MS = 15_000;
+
+/**
+ * Catch up with `hostId` (owner 2026-10-23: delegations the host closed still showed 待验收 for days): the
+ * open list (vanished ones reconciled with the closed list) and, with `sessionId`, that agent's delegations. Events are the fast
+ * path; this covers the ones a feed restart skipped. Called when the 委托 panel opens and when the window
+ * comes back to the front; at most once per RESYNC_MIN_MS per host.
+ */
+export function resyncDelegations(hostId: string, sessionId?: string, now = Date.now()): boolean {
+  if (!supported(hostId) || now - (lastResync.get(hostId) ?? -Infinity) < RESYNC_MIN_MS) return false;
+  lastResync.set(hostId, now);
+  void refreshOpenDelegations(hostId);
+  if (sessionId) void loadSessionDelegations(sessionId, true, hostId);
+  return true;
 }
 
 /** An agent's delegations, both directions, once per agent (cards in its timeline, capsule); `hostId`: its host. */
 export async function loadSessionDelegations(sessionId: string, force = false, hostId: string = focus()): Promise<void> {
   const key = `${hostId}\n${sessionId}`;
-  if (!supported(hostId) || (!force && sessionsLoaded.has(key))) return;
+  if (!supported(hostId)) return;
+  const token = generation(hostId);
+  if (!force && sessionsLoaded.has(key)) return;
   sessionsLoaded.add(key);
   try {
     const daemon = daemonOf(hostId);
@@ -267,53 +344,121 @@ export async function loadSessionDelegations(sessionId: string, force = false, h
       ? [await daemon.asks({ involving: sessionId })]
       : await Promise.all([daemon.asks({ requester: sessionId }), daemon.asks({ target: sessionId })]);
     const rows = lists.flatMap((l) => l ?? []);
-    if (rows.length && followed(hostId)) mergeRows(hostId, rows);
+    if (rows.length && currentRead(hostId, token)) mergeRows(hostId, rows);
   } catch {
-    sessionsLoaded.delete(key);
+    if (currentRead(hostId, token)) sessionsLoaded.delete(key);
   }
 }
 
-/** The overview's 已结束 bucket (on first open; the focus host's). */
-export async function loadClosedDelegations(): Promise<void> {
-  const s = useDelegations.getState();
+/** The overview remembers demand because an expanded bucket does not re-run a React effect on reconnect. */
+export function loadClosedDelegations(force = false): Promise<void> {
   const hostId = focus();
-  if (!supported(hostId) || s.closedLoading || s.closedIds) return;
-  useDelegations.setState({ closedLoading: true });
-  try {
-    const rows = (await api.asks({ state: "closed", limit: 200 })) ?? [];
-    if (hostId === focus()) mergeRows(hostId, rows, { closedIds: rows.map((r) => r.askId), closedLoading: false });
-  } catch {
-    useDelegations.setState({ closedLoading: false });
-  }
+  closedRequested = hostId;
+  if (closedRequest?.hostId === hostId) return closedRequest.promise;
+  if (!supported(hostId) || (!force && useDelegations.getState().closedIds)) return Promise.resolve();
+  const owner = app;
+  const request = { hostId, promise: Promise.resolve() };
+  closedRequest = request;
+  const alive = () => app === owner && closedRequest === request && focus() === hostId;
+  request.promise = (async () => {
+    useDelegations.setState({ closedLoading: true });
+    while (alive()) {
+      const token = generation(hostId);
+      if (!ready(hostId)) { await token.changed; continue; }
+      const result = await readInGeneration(token, () => daemonOf(hostId).asks({ state: "closed", limit: 200 }));
+      if (!alive()) return;
+      if (!currentRead(hostId, token) || result.kind === "changed") continue;
+      if (result.kind === "value" && result.value) {
+        mergeRows(hostId, result.value, { closedIds: result.value.map(r => r.askId) });
+      }
+      return; // transient error / missing route retains rows and can retry on next demand or reconnect
+    }
+  })().finally(() => {
+    if (closedRequest === request) {
+      closedRequest = null;
+      useDelegations.setState({ closedLoading: false });
+    }
+  });
+  return request.promise;
 }
 
-/** The full record (brief artifact, attempts' turn ids without delegation-views), from `hostId`. Fetched once; a 404 is remembered. */
-export async function loadDelegationDetail(hostId: string, askId: string): Promise<AskDetail | null> {
+/** Shared on-demand detail. Reconnect continues the caller's promise; only a current 404 is cached. */
+export function loadDelegationDetail(hostId: string, askId: string): Promise<AskDetail | null> {
+  generation(hostId); // retire a changed epoch before consulting inflight/cached data
   const key = hostKey(hostId, askId);
-  const known = useDelegations.getState().details;
-  if (key in known) return known[key] ?? null;
-  if (detailInFlight.has(key)) return null;
-  detailInFlight.add(key);
-  try {
-    const detail = await daemonOf(hostId).ask(askId);
-    if (followed(hostId)) useDelegations.setState((s) => ({ details: { ...s.details, [key]: detail } }));
-    return detail;
-  } catch {
+  const pending = detailInFlight.get(key);
+  if (pending) return pending.promise;
+  const s = useDelegations.getState();
+  const known = s.details[key];
+  const revision = s.byKey[key]?.revision;
+  if (key in s.details && (known === null || revision === undefined || (known?.revision ?? -Infinity) >= revision)) return Promise.resolve(known ?? null);
+  const owner = app;
+  const request = { promise: Promise.resolve<AskDetail | null>(null) };
+  detailInFlight.set(key, request);
+  const alive = () => app === owner && detailInFlight.get(key) === request && followed(hostId);
+  request.promise = (async () => {
+    while (alive()) {
+      const token = generation(hostId);
+      if (!ready(hostId)) { await token.changed; continue; }
+      const revisionAtStart = useDelegations.getState().byKey[key]?.revision;
+      const result = await readInGeneration(token, () => daemonOf(hostId).ask(askId));
+      if (!alive()) return null;
+      if (!currentRead(hostId, token) || result.kind === "changed") continue;
+      if (result.kind === "error") return null; // transient failures are not cached
+      if ((useDelegations.getState().byKey[key]?.revision ?? -Infinity) > (revisionAtStart ?? -Infinity)) continue;
+      // A newer record than the row (an event or the capped lists missed it) updates the row too, so
+      // every view of it (the project card, the overview) agrees with the detail.
+      useDelegations.setState(s => {
+        const row = s.byKey[key];
+        const next = row && result.value ? withDetailState(row, result.value) : row;
+        return { details: { ...s.details, [key]: result.value }, ...(next !== row ? { byKey: { ...s.byKey, [key]: next! } } : {}) };
+      });
+      return result.value;
+    }
     return null;
-  } finally {
-    detailInFlight.delete(key);
-  }
+  })().finally(() => {
+    if (detailInFlight.get(key) === request) detailInFlight.delete(key);
+  });
+  return request.promise;
+}
+
+/**
+ * A row with the state of a newer full record (`GET /v2/asks/{id}`); the same row when the record is
+ * not newer. Only what the daemon says changes: execution, hold, review, closed, attempt, answer.
+ */
+export function withDetailState(row: AskSummary, detail: AskDetail): AskSummary {
+  const fresh = summaryFromRecord({ ...detail, answerId: typeof detail.answerId === "string" ? detail.answerId : (detail.answer?.answerId ?? null) });
+  if (!fresh || fresh.askId !== row.askId || fresh.revision <= row.revision) return row;
+  const { execution, hold, holdSince, review, closed, closedAt, revision, updatedAt, attempt, attempts } = fresh;
+  return { ...row, execution, hold, holdSince, review, closed, closedAt, revision, updatedAt, attempt: attempt ?? row.attempt, attempts, answerId: fresh.answerId ?? row.answerId };
+}
+
+/**
+ * Re-read one delegation (its full record) and take its state: after an owner command on it, so the
+ * row follows even when the events were missed and it is outside the capped open / closed lists.
+ */
+export function refreshDelegation(hostId: string, askId: string): Promise<AskDetail | null> {
+  const key = hostKey(hostId, askId);
+  useDelegations.setState((s) => {
+    if (!(key in s.details)) return s;
+    const details = { ...s.details };
+    delete details[key];
+    return { details };
+  });
+  return loadDelegationDetail(hostId, askId);
 }
 
 /**
  * Owner command on a delegation, sent on the target agent's session (also for owner-made ones) on
- * `hostId` (the host whose record the owner acts on). A refusal comes back as the result; a refresh
- * follows either way.
+ * `hostId` (the host whose record the owner acts on). A refusal comes back as the result; that
+ * delegation is re-read and the open list refreshed either way (owner 2026-10-28: after 放弃 the
+ * project card kept the row — the host's closed list is capped and the events had not arrived).
  */
 export async function delegationCommand(hostId: string, d: Pick<AskSummary, "askId" | "target">, method: AskCommandMethod, outcome?: "accepted" | "abandoned"): Promise<MutationResult> {
   try {
     return await daemonOf(hostId).askCommand(d.target, method, outcome ? { askId: d.askId, outcome } : { askId: d.askId });
   } finally {
+    if (supported(hostId) && followed(hostId)) void refreshDelegation(hostId, d.askId);
     scheduleRefresh(hostId);
   }
 }
@@ -333,10 +478,8 @@ function deliveryFailedText(raw: unknown): string {
 
 /** Drop the records of a host the store no longer follows. */
 function dropHost(hostId: string): void {
-  for (const key of [...sessionsLoaded]) if (key.startsWith(`${hostId}\n`)) sessionsLoaded.delete(key);
-  const timer = refreshTimers.get(hostId);
-  if (timer) clearTimeout(timer);
-  refreshTimers.delete(hostId);
+  for (const key of detailInFlight.keys()) if (hostOfKey(key) === hostId) detailInFlight.delete(key);
+  invalidateHost(hostId);
   useDelegations.setState((s) => {
     const hostLoadedAt = Object.fromEntries(Object.entries(s.hostLoadedAt).filter(([id]) => id !== hostId));
     return { ...withoutHost(s, hostId), hostLoadedAt };
@@ -354,10 +497,12 @@ export function withoutHost(s: HostRecords & Pick<DelegationsState, "details">, 
 }
 
 /** Start following `cutex/ask/*` events and the app's connection / selection (store.ts init). */
-export function startDelegationSync(handle: AppHandle): void {
-  if (app) return;
+export function startDelegationSync(handle: AppHandle): () => void {
+  if (app) return () => {};
   app = handle;
-  bridge.on("hostEvent", ({ hostId, envelope }) => {
+  const stopEvents = bridge.on("hostEvent", ({ hostId, epoch, envelope }) => {
+    const current = epochOf(hostId);
+    if (current && current !== epoch) return;
     // The focus host's delegations, and the open agent's host's (cutex keeps them per daemon).
     if (!followed(hostId)) return;
     const method = envelope.cutex?.method;
@@ -365,21 +510,79 @@ export function startDelegationSync(handle: AppHandle): void {
     if (method === "cutex/ask/deliveryFailed") app?.getState().notify(deliveryFailedText(envelope.cutex?.params), "error");
     // The event's host's records only (the other side of a peers delegation has its own).
     const patch = applyHostAskEvent(useDelegations.getState(), hostId, method, envelope.cutex?.params);
-    if (patch) useDelegations.setState(patch);
+    if (patch) useDelegations.setState(s => ({ ...patch, ...(patch.byKey ? { details: freshDetails(s.details, patch.byKey) } : {}) }));
     scheduleRefresh(hostId);
   });
-  handle.subscribe((state, prev) => {
+  // The host feed restarted from its live tail: the events in between are lost, re-read the open list.
+  const stopResync = bridge.on("hostResync", ({ hostId, epoch }) => {
+    const current = epochOf(hostId);
+    if (current && current !== epoch) return;
+    scheduleRefresh(hostId);
+  });
+  const stopDaemon = bridge.on("daemonState", ({ hostId, epoch, state }) => {
+    const current = epochOf(hostId);
+    if (current && current !== epoch) return;
+    connectionReady.set(hostId, state.kind === "connected");
+    invalidateHost(hostId);
+    if (state.kind === "connected") {
+      scheduleRefresh(hostId);
+      if (closedRequested === hostId && hostId === focus()) void loadClosedDelegations(true);
+      const s = handle.getState();
+      if (s.selectedId && (s.selectedHost ?? focus()) === hostId) void loadSessionDelegations(s.selectedId, true, hostId);
+    }
+  });
+  const stopApp = handle.subscribe((state, prev) => {
+    if (state.features !== prev.features) invalidateHost(focus());
+    for (const hostId of generations.keys()) {
+      if (state.byHost[hostId]?.features !== prev.byHost[hostId]?.features) invalidateHost(hostId);
+    }
+    if (state.hosts !== prev.hosts) {
+      for (const hostId of [...generations.keys()]) {
+        if (hostEpoch(state.hosts, hostId) !== hostEpoch(prev.hosts, hostId)
+          || connectionKind(hostId, state.hosts) !== connectionKind(hostId, prev.hosts)) {
+          invalidateHost(hostId);
+          if (closedRequested === hostId && hostId === focus()) void loadClosedDelegations(true);
+        }
+      }
+    }
     const before = viewHost(prev);
     const now = viewHost(state);
     if (before && before !== now && !watched.has(before)) dropHost(before);
     if (now && now !== before) void refreshOpenDelegations(now);
     if (state.features !== prev.features && state.features.has(ASKS_FEATURE)) {
       void refreshOpenDelegations();
+      if (closedRequested === focus()) void loadClosedDelegations(true);
       if (state.selectedId && !now) void loadSessionDelegations(state.selectedId);
     }
     if (state.selectedId && (state.selectedId !== prev.selectedId || state.selectedHost !== prev.selectedHost)) void loadSessionDelegations(state.selectedId, false, now ?? focus());
   });
+  // Back in front: catch up with what a feed restart may have skipped (resyncDelegations).
+  const onFocus = () => {
+    const s = handle.getState();
+    const host = viewHost(s) ?? focus();
+    resyncDelegations(host, s.selectedId ?? undefined);
+    if (host !== focus()) resyncDelegations(focus());
+    // Hosts followed for a page of theirs (a project view of another host) catch up too.
+    for (const hostId of watched.keys()) if (hostId !== host && hostId !== focus()) resyncDelegations(hostId);
+  };
+  // Any app window getting the focus (a desk window too, multi-window).
+  const stopFocus = typeof window !== "undefined" ? onEveryAppWindow((win) => {
+    win.addEventListener("focus", onFocus);
+    return () => win.removeEventListener("focus", onFocus);
+  }) : () => {};
   if (supported()) void refreshOpenDelegations();
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    stopEvents();
+    stopResync();
+    stopDaemon();
+    stopApp();
+    stopFocus();
+    app = null;
+    useDelegations.getState().reset();
+  };
 }
 
 // ---------- selectors ----------

@@ -1,6 +1,6 @@
 export const zhCN = {
   "terminal.moduleTitle": "终端",
-  "terminal.description": "右栏的终端卡片：在{{agent}}的工作区里开 cutex 终端（终端在 cutex 里运行）",
+  "terminal.description": "{{shelf}}里的终端窗格：在{{agent}}的工作区里开 cutex 终端（终端在 cutex 里运行）",
   "terminal.title": "终端",
   "terminal.tab": "终端 {n}",
   "terminal.tabEnded": "{title}（已结束）",
@@ -15,7 +15,7 @@ export const zhCN = {
   "terminal.willEnd": "终端将被结束",
   "terminal.willEndN": "终端 {n} 将被结束",
   "terminal.runTip": "在终端里运行",
-  "terminal.runArmed": "再点一次，在终端里运行这 {n} 行",
+  "terminal.runArmed": "再左键点击一次，在终端里运行这 {n} 行",
   "terminal.runFailed": "没能在终端里运行：{error}",
 } as const;
 
@@ -24,24 +24,3 @@ declare module "../i18nCatalog" {
   interface ModuleMessages extends Messages {}
 }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "terminal.moduleTitle": "Terminal",
-  "terminal.description": "The right column's terminal card: cutex terminals in the {{agent}}'s workspace (they run in cutex)",
-  "terminal.title": "Terminal",
-  "terminal.tab": "Terminal {n}",
-  "terminal.tabEnded": "{title} (ended)",
-  "terminal.new": "New terminal",
-  "terminal.closeTab": "Close",
-  "terminal.creating": "Opening a terminal…",
-  "terminal.adopting": "Connecting this workspace's terminals…",
-  "terminal.exited": "The terminal has ended",
-  "terminal.exitedCode": "The terminal has ended (exit code {code})",
-  "terminal.gone": "This terminal no longer exists (cutex restarted, or it was ended elsewhere)",
-  "terminal.noWorkspace": "This {{agent}} has no working directory; no terminal",
-  "terminal.willEnd": "A terminal will be ended",
-  "terminal.willEndN": "Terminal {n} will be ended",
-  "terminal.runTip": "Run in the terminal",
-  "terminal.runArmed": "Click again to run these {n} lines in the terminal",
-  "terminal.runFailed": "Couldn't run it in the terminal: {error}",
-};

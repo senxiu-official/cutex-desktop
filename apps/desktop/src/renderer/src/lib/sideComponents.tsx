@@ -1,22 +1,23 @@
 // The tool area's component registry (docs/desktop-modules.md §18, §24): `side.component` items, the
-// contract-1.17 `pane.kind` items (adapted by lib/paneKinds `sideItemOf`), plus one
+// contract-1.17 `pane.kind` items and the pages' `page:<id>` kinds (adapted by lib/paneKinds `sideItemOf`), plus one
 // shell-derived component per `conversation.status` category (`status:<item id>`, §18.9), and the
 // view context (selected agent, host, workspace) that decides which instances are visible. Kept out
 // of components/*.tsx (Fast Refresh): the derived Bodies live here with the adapter that makes them.
 import { useMemo } from "react";
+import { useShelfPeer } from "./shelfSourceContext";
 import { ListChecks } from "lucide-react";
 import { useI18n } from "../i18n";
 import { appModules } from "../modules/app";
 import { useSlot } from "../modules/react";
 import type { AppSlotEntry, SideBodyProps, SideComponentItem, SideTabProps, StatusItem } from "../modules/slots";
 import type { ItemId } from "../modules/types";
-import { agentHost, selectedSidebar, useApp } from "../store";
+import { agentHost, selectedSidebar, sidebarOf, useApp } from "../store";
 import { getUiPrefs } from "./prefs";
 import { agentFeaturesFor } from "./agentFeaturesView";
 import { lacks } from "./agentFeatures";
 import { SINGLETON_KEY, placeSpec, type PlaceSpec, type SideViewContext } from "./sideLayout";
 import { STATUS_COMPONENT_PREFIX } from "./sideKinds";
-import { sideItemOf } from "./paneKinds";
+import { pageSideItems, sideItemOf } from "./paneKinds";
 import { scopeFor, scopeKey } from "./workspace";
 
 export interface SideComponentEntry {
@@ -48,7 +49,7 @@ export function statusComponent(item: StatusItem): SideComponentItem | null {
     if (!sessionId || !status) return <div className="px-3 py-4 text-xs text-subtle">{t("side.statusNone")}</div>;
     const Body = item.Body;
     return (
-      <div className="h-full overflow-y-auto px-2 py-1 text-[13px]">
+      <div className="h-full overflow-y-auto px-2 py-1 text-ui/[inherit]">
         <Body sessionId={sessionId} data={status.data} />
       </div>
     );
@@ -86,10 +87,13 @@ export function statusComponent(item: StatusItem): SideComponentItem | null {
 
 // ── Registry ────────────────────────────────────────────────────────────────────────────────────
 
-let cache: { side: unknown; status: unknown; panes: unknown; value: SideRegistry } | null = null;
+let cache: { side: unknown; status: unknown; panes: unknown; pages: unknown; nav: unknown; value: SideRegistry } | null = null;
 
-function build(side: readonly AppSlotEntry<"side.component">[], status: readonly AppSlotEntry<"conversation.status">[], panes: readonly AppSlotEntry<"pane.kind">[]): SideRegistry {
-  if (cache && cache.side === side && cache.status === status && cache.panes === panes) return cache.value;
+type Pages = readonly AppSlotEntry<"main.page">[];
+type Nav = readonly AppSlotEntry<"nav.primary">[];
+
+function build(side: readonly AppSlotEntry<"side.component">[], status: readonly AppSlotEntry<"conversation.status">[], panes: readonly AppSlotEntry<"pane.kind">[], pages: Pages = [], nav: Nav = []): SideRegistry {
+  if (cache && cache.side === side && cache.status === status && cache.panes === panes && cache.pages === pages && cache.nav === nav) return cache.value;
   const map = new Map<ItemId, SideComponentEntry>();
   for (const entry of side) if (entry.mode === "show") map.set(entry.item.id, { item: entry.item, moduleId: entry.moduleId });
   // v1.17 (§24.3): a contributed pane kind opens in the tool area like a side component.
@@ -99,21 +103,25 @@ function build(side: readonly AppSlotEntry<"side.component">[], status: readonly
     const component = statusComponent(entry.item);
     if (component && !map.has(component.id)) map.set(component.id, { item: component, moduleId: entry.moduleId });
   }
-  cache = { side, status, panes, value: map };
+  // 2026-10-21 (§24.4): a page (`page:<id>`, no Aside) opens as its own pane in a Shelf.
+  for (const entry of pageSideItems(pages, nav)) if (!map.has(entry.item.id)) map.set(entry.item.id, entry);
+  cache = { side, status, panes, pages, nav, value: map };
   return map;
 }
 
 /** The available components now (outside React: services). */
 export function sideRegistry(): SideRegistry {
   const host = appModules();
-  return build(host.snapshot("side.component"), host.snapshot("conversation.status"), host.snapshot("pane.kind"));
+  return build(host.snapshot("side.component"), host.snapshot("conversation.status"), host.snapshot("pane.kind"), host.snapshot("main.page"), host.snapshot("nav.primary"));
 }
 
 export function useSideRegistry(): SideRegistry {
   const side = useSlot("side.component");
   const status = useSlot("conversation.status");
   const panes = useSlot("pane.kind");
-  return build(side, status, panes);
+  const pages = useSlot("main.page");
+  const nav = useSlot("nav.primary");
+  return build(side, status, panes, pages, nav);
 }
 
 /** A component's placement with defaults; unknown kinds → null. */
@@ -139,9 +147,14 @@ export function dedupeKeyOf(item: SideComponentItem, params: unknown): string | 
 
 type AppState = ReturnType<typeof useApp.getState>;
 
-function workspaceKeyOf(state: AppState, sessionId: string | null): string | null {
-  const scope = scopeFor(selectedSidebar(state), sessionId);
+function workspaceKeyOf(state: AppState, sessionId: string | null, hostId?: string): string | null {
+  const scope = scopeFor(hostId === undefined ? selectedSidebar(state) : sidebarOf(state, hostId), sessionId);
   return scope ? scopeKey(scope) : null;
+}
+
+/** scopeKey of the workspace agent `sessionId` of host `hostId` is in (null: none). */
+export function workspaceKeyFor(state: AppState, hostId: string, sessionId: string): string | null {
+  return workspaceKeyOf(state, sessionId, hostId);
 }
 
 function contextFor(registry: SideRegistry, hostId: string, sessionId: string | null, workspaceKey: string | null): SideViewContext {
@@ -163,13 +176,28 @@ export function sideViewNow(): SideViewContext {
   return contextFor(sideRegistry(), agentHost(s), s.selectedId, workspaceKeyOf(s, s.selectedId));
 }
 
+/**
+ * The view context of another conversation (two live workspaces, §24.13: the other workspace's Shelf sees its
+ * own conversation — a follow-bound tool there binds to it, not to the focused one). Outside React.
+ */
+export function sideViewFor(hostId: string, sessionId: string): SideViewContext {
+  return contextFor(sideRegistry(), hostId, sessionId, workspaceKeyOf(useApp.getState(), sessionId, hostId));
+}
+
+/**
+ * The view context of the Shelf being drawn: the focused conversation's, or — inside the other workspace's
+ * Shelf / its instances (lib/shelfSourceContext) — that conversation's.
+ */
 export function useSideView(): SideViewContext {
   const registry = useSideRegistry();
+  const peer = useShelfPeer();
   // The open agent's host (multi-host P1: it may not be the focus host).
-  const hostId = useApp(agentHost);
-  const sessionId = useApp((s) => s.selectedId);
-  const workspaceKey = useApp((s) => workspaceKeyOf(s, s.selectedId));
+  const selectedHost = useApp(agentHost);
+  const selectedId = useApp((s) => s.selectedId);
+  const hostId = peer ? peer.hostId : selectedHost;
+  const sessionId = peer ? peer.sessionId : selectedId;
+  const workspaceKey = useApp((s) => (peer ? workspaceKeyOf(s, peer.sessionId, peer.hostId) : workspaceKeyOf(s, s.selectedId)));
   // `sidebar` changes carry agent feature updates (lacks reads them on demand).
-  const sidebar = useApp(selectedSidebar);
+  const sidebar = useApp((s) => (peer ? sidebarOf(s, peer.hostId) : selectedSidebar(s)));
   return useMemo(() => contextFor(registry, hostId, sessionId, workspaceKey), [registry, hostId, sessionId, workspaceKey, sidebar]); // eslint-disable-line react-hooks/exhaustive-deps
 }

@@ -27,4 +27,10 @@ describe("Side card state", () => {
     expect(parseSideParams({ text: "字".repeat(22000) })).toBeNull();
     expect(parseSideParams({ threadId: "native-id", turnId: "t1" })).toEqual({ turnId: "t1" });
   });
+  it("uses the configured Claude model when a launcher supplies an empty override", () => {
+    for (const model of ["", "   "]) {
+      expect(forkInput({ turnId: "65a7b940-1", model }, "all", "claude-opus-5-5")).toEqual({ anchorTurnId: "65a7b940-1", model: "claude-opus-5-5" });
+      expect(forkInput({ model }, "all", "")).toEqual({});
+    }
+  });
 });

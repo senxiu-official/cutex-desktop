@@ -49,3 +49,19 @@ describe("inline module reference actions", () => {
     expect(html).toContain('aria-label="bookmarks.toggle"');
   });
 });
+
+describe("hoverBar (design 040 step 10: a message's floating bar)", () => {
+  const inline = (e: AppSlotEntry<"ref.action">) => ({ ...e, item: { ...e.item, inline: true } }) as AppSlotEntry<"ref.action">;
+  const bar = () => renderToStaticMarkup(createElement(RefActionButtons, { kind: "turn", build: () => ref, hoverBar: true }));
+  it("shows the items marked inline (always) and the ones whose live state is on; the rest are in the bar's ⋯", () => {
+    data.entries = [inline(action("bookmarks.toggle")), action("notes.add", ["turn"], { active: true, titleKey: "notes.has" }), action("side-chat.fromTurn", ["turn"], { active: false })];
+    const html = bar();
+    expect(html).toContain('aria-label="bookmarks.toggle"');
+    expect(html).toContain('aria-label="notes.has"');
+    expect(html).not.toContain('aria-label="side-chat.fromTurn"');
+  });
+  it("the bookmarks module asks for it (inline), so 书签 is always on the bar", async () => {
+    const src = (await import("node:fs")).readFileSync("src/renderer/src/modules/bookmarks/index.ts", "utf8");
+    expect(src).toMatch(/id: "bookmarks\.toggle"[^\n]*inline: true/);
+  });
+});

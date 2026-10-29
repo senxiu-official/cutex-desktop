@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-// The 在主界面调整 panel host (components/CustomizeHost): a non-modal dialog beside the sidebar, focus
-// into it on open, Esc / × close it and the focus goes back to the entry; clicking elsewhere does not
-// close it; 全部设置 → opens the settings page (the panel closes).
+// The 在主界面调整 edit state (components/CustomizeHost; owner 2026-10-21): no separate panel any more — the
+// region is outlined and a small 完成 bar sits beside it while the Settings Shelf shows the region's page;
+// 完成 finishes and the focus goes back to the entry; clicking elsewhere keeps the edit on.
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,19 +11,15 @@ vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useI18n: () => ({ t: (key: string) => key, locale: "en" }),
 }));
-const fx = vi.hoisted(() => ({ changed: 0 }));
-vi.mock("../src/renderer/src/modules/react", async (importOriginal) => {
-  const { createElement } = await import("react");
-  const Panel = () => createElement("button", { type: "button", "data-probe": "", onClick: () => fx.changed++ }, "项目分组");
-  return {
-    ...(await importOriginal<object>()),
-    useSlot: (slot: string) => (slot === "customize.region" ? [{ moduleId: "shell", mode: "show", item: { id: "shell.sidebar", region: "sidebar", titleKey: "customize.sidebar.title", settingsPage: "sidebar", side: "right", Panel } }] : []),
-  };
-});
+vi.mock("../src/renderer/src/modules/react", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useSlot: (slot: string) => (slot === "customize.region" ? [{ moduleId: "shell", mode: "show", item: { id: "shell.sidebar", region: "sidebar", titleKey: "customize.sidebar.title", settingsPage: "sidebar", side: "right" } }] : []),
+}));
 
 const { CustomizeHost } = await import("../src/renderer/src/components/CustomizeHost");
 const { noteCustomizeOpener } = await import("../src/renderer/src/lib/customize");
-const { useApp, SETTINGS_PAGE } = await import("../src/renderer/src/store");
+const { useApp } = await import("../src/renderer/src/store");
+const { useSettingsShelf, resetSettingsShelfForTest } = await import("../src/renderer/src/lib/settingsShelf");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -48,6 +44,7 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
+  resetSettingsShelfForTest();
   act(() => root.render(h(CustomizeHost)));
   act(() => useApp.setState({ view: { kind: "conversation" }, customize: null }));
 });
@@ -59,64 +56,49 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const dialog = () => container.querySelector<HTMLElement>('[role="dialog"]');
+const bar = () => container.querySelector<HTMLElement>("[data-customize-bar]");
 const open = () => {
   entry.focus();
   noteCustomizeOpener(entry);
-  act(() => useApp.getState().openCustomize("sidebar"));
+  act(() => useApp.getState().openCustomize("sidebar", "sidebar"));
 };
 
 describe("CustomizeHost", () => {
-  it("opens a non-modal dialog beside the sidebar with the focus in it", () => {
-    expect(dialog()).toBeNull();
+  it("puts the region into edit state: a 完成 bar beside the sidebar, the Settings Shelf on its page", () => {
+    expect(bar()).toBeNull();
     open();
-    const d = dialog()!;
-    expect(d.getAttribute("aria-modal")).toBe("false");
-    expect(d.style.left).toBe("264px");
-    expect(d.style.top).toBe("8px");
-    expect(document.getElementById(d.getAttribute("aria-labelledby")!)?.textContent).toBe("customize.sidebar.title");
-    expect(document.activeElement).toBe(d);
+    const b = bar()!;
+    expect(b.dataset.customizeBar).toBe("sidebar");
+    expect(b.style.left).toBe("264px");
+    expect(b.style.top).toBe("8px");
+    expect(b.textContent).toContain("customize.sidebar.title");
+    expect(useSettingsShelf.getState()).toMatchObject({ open: true, params: { tab: "sidebar" } });
+    // No separate panel with the cards.
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it("marks the region (the faint outline) while open, and only then", () => {
+  it("marks the region (the faint outline) while editing, and only then", () => {
     open();
     expect(aside.hasAttribute("data-customizing")).toBe(true);
     act(() => useApp.getState().closeCustomize());
     expect(aside.hasAttribute("data-customizing")).toBe(false);
   });
 
-  it("Esc closes it and the focus goes back to the entry", () => {
+  it("完成 finishes: the bar goes, the Settings Shelf it opened closes, the focus goes back to the entry", () => {
     open();
-    act(() => void dialog()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    act(() => container.querySelector<HTMLButtonElement>("[data-customize-done]")!.click());
     expect(useApp.getState().customize).toBeNull();
-    expect(dialog()).toBeNull();
+    expect(bar()).toBeNull();
+    expect(useSettingsShelf.getState().open).toBe(false);
     expect(document.activeElement).toBe(entry);
   });
 
-  it("× closes it; without a remembered entry the focus goes to the region", () => {
-    open();
-    noteCustomizeOpener(null);
-    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="common.close"]')!.click());
-    expect(dialog()).toBeNull();
-    expect(document.activeElement).toBe(aside);
-  });
-
-  it("stays open while the main window is used, and its rows work", () => {
+  it("stays on while the main window is used", () => {
     open();
     act(() => entry.click());
     act(() => document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
-    act(() => container.querySelector<HTMLButtonElement>("[data-probe]")!.click());
-    expect(fx.changed).toBe(1);
-    expect(dialog()).not.toBeNull();
-  });
-
-  it("全部设置 → opens the region's settings page and closes the panel", () => {
-    open();
-    const link = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("customize.allSettings"))!;
-    act(() => link.click());
-    expect(useApp.getState().view).toEqual({ kind: "page", page: SETTINGS_PAGE, params: { tab: "sidebar" } });
-    expect(useApp.getState().customize).toBeNull();
-    expect(dialog()).toBeNull();
+    expect(bar()).not.toBeNull();
+    expect(useApp.getState().customize).toMatchObject({ region: "sidebar" });
   });
 });
 

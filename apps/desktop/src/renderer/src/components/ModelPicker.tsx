@@ -11,9 +11,11 @@ import { pinsFor, splitPinned, togglePinned, withPins } from "../lib/models";
 import { rawIdTitle, useModelName } from "../lib/modelDisplay";
 import { getUiPrefs, setUiPref, useUiPrefs } from "../lib/prefs";
 import { Popover } from "./Menu";
+import { MenuFlyout } from "./MenuFlyout";
 import { useComposerHost } from "../lib/targetHost";
 
-type Item = Pick<ModelOption, "model" | "displayName" | "description">;
+/** `primary` (a folded Claude list, lib/claudeModels): without pins, the primary rows are up front. */
+type Item = Pick<ModelOption, "model" | "displayName" | "description"> & { primary?: boolean };
 
 /** `note`: a line under the title (e.g. the agent's runtime is offline: no model list to show yet). */
 export function ModelPicker({ profile, models, current, label, trigger, triggerTitle, header, note, onOpen, onSelect, openSignal }: { profile: string | null; models: Item[]; current: string | null; label: string; trigger?: ReactNode; triggerTitle?: string; header?: (close: () => void) => ReactNode; note?: string; onOpen(): void; onSelect(model: string): void; openSignal?: number }) {
@@ -23,9 +25,10 @@ export function ModelPicker({ profile, models, current, label, trigger, triggerT
   // Pins are per host: the open agent's.
   const hostId = useComposerHost();
   const pins = pinsFor(useUiPrefs().modelPins, hostId, key);
-  const { pinned, rest } = splitPinned(models, pins);
+  const primaries = models.some((m) => m.primary !== undefined) ? models.filter((m) => m.primary).length : undefined;
+  const { pinned, rest } = splitPinned(models, pins, primaries);
   const [more, setMore] = useState(false);
-  const toggle = (model: string) => setUiPref("modelPins", withPins(getUiPrefs().modelPins, hostId, key, togglePinned(models, pins, model)));
+  const toggle = (model: string) => setUiPref("modelPins", withPins(getUiPrefs().modelPins, hostId, key, togglePinned(models, pins, model, primaries)));
 
   const row = (m: Item, close: () => void, index: number | null) => {
     const isPinned = pinned.includes(m as never);
@@ -40,7 +43,7 @@ export function ModelPicker({ profile, models, current, label, trigger, triggerT
           className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-left"
         >
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm" title={rawIdTitle(m.model, shown)}>{shown}</span>
+            <span className={`block text-sm ${index === null ? "[overflow-wrap:anywhere]" : "truncate"}`} title={rawIdTitle(m.model, shown)}>{shown}</span>
             {m.description && <span className="block text-xs text-subtle">{m.description}</span>}
           </span>
           <span className="w-3 text-xs text-accent">{m.model === current ? "✓" : ""}</span>
@@ -61,7 +64,6 @@ export function ModelPicker({ profile, models, current, label, trigger, triggerT
     <Popover
       align="right"
       width="w-80"
-      overflowVisible
       openSignal={openSignal}
       onOpen={() => {
         setMore(false);
@@ -93,10 +95,7 @@ export function ModelPicker({ profile, models, current, label, trigger, triggerT
                 <ChevronRight size={14} className="text-subtle" />
               </button>
               {more && (
-                // Padding (not margin) bridges the gap so the pointer can travel into the flyout.
-                <div className="absolute right-full bottom-0 pr-1">
-                  <div className="max-h-96 w-80 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl">{rest.map((m) => row(m, close, null))}</div>
-                </div>
+                <MenuFlyout align="bottom" className="w-80">{rest.map((m) => row(m, close, null))}</MenuFlyout>
               )}
             </div>
           )}

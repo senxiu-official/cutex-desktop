@@ -1,5 +1,5 @@
 // 本机备注 (lib/projectRemarks + prefs `projectRemarks`): sanitising, host keying, sidebar search.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import type { AgentRow, ProjectGroup, SidebarGroup } from "../src/renderer/src/lib/sidebar";
 import { groupRemark, migrateRemarks, REMARK_MAX, sanitizeRemark, searchGroups, withRemark } from "../src/renderer/src/lib/projectRemarks";
@@ -79,6 +79,14 @@ describe("searchGroups", () => {
 
 describe("prefs projectRemarks", () => {
   const storage = new Map<string, string>();
+  // Warm the transform cache once: each test needs a fresh prefs (vi.resetModules, it reads
+  // localStorage at evaluation), but the first-ever load of its graph was billed to the first
+  // test and neared the 5 s limit under the full suite's load. Tests now only re-evaluate.
+  beforeAll(async () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem() {}, removeItem() {} });
+    await import("../src/renderer/src/lib/prefs");
+    vi.unstubAllGlobals();
+  }, 60_000);
   beforeEach(() => {
     storage.clear();
     vi.resetModules();

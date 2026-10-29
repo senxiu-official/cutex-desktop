@@ -3,7 +3,10 @@
 // capability gets 「需要升级 cutex」 instead.
 import { RUNTIMES_FEATURE } from "../../../../shared/runtimes";
 import { defineModule } from "../slots";
-import { RuntimesSection } from "./RuntimesSection";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const RuntimesSection = lazyPage(() => import("./RuntimesSection").then((m) => m.RuntimesSection));
 
 export default defineModule({
   id: "runtimes",

@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { useI18n } from "../../i18n";
 import { useAppearance } from "../../lib/appearance";
-import { COLUMN_PADDING, freeSpan, gutterLayout, gutterTriggerLocation, placeBelow, popoverWidth, type CardRect, type GutterGeometry } from "../../lib/gutterLayout";
+import { COLUMN_PADDING, freeSpan, gutterLayout, gutterTriggerLocation, placeBelow, popoverWidth, topStripMode, type CardRect, type GutterGeometry } from "../../lib/gutterLayout";
 import { clampDockPref, DOCK_WIDTH_DEFAULT, DOCK_WIDTH_RANGE, DOCK_WIDTH_STEP, dockWidth, dragDockWidth } from "../../lib/gutterDock";
 import { useGutterItems, type GutterEntry } from "../../lib/gutterItems";
 import { setGutterGeometry, setGutterPopover, setGutterTopStackBottom, toggleFolded, useGutter } from "../../lib/gutterStore";
@@ -17,6 +17,9 @@ import { ItemBoundary } from "../../modules/Outlet";
 import { GutterPopover } from "./GutterPopover";
 import { GutterTrigger } from "./GutterTrigger";
 import { PeekHost } from "./PeekCard";
+import { sharedResizeObserver } from "../../lib/resizeHub";
+import { isHTMLElement } from "../../lib/ownerWindow";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 type Rect = CardRect;
 
@@ -60,7 +63,7 @@ function overlayElements(root: Element | null): HTMLElement[] {
   const out: HTMLElement[] = [];
   const visit = (el: Element) => {
     for (const child of el.children) {
-      if (!(child instanceof HTMLElement)) continue;
+      if (!isHTMLElement(child)) continue;
       const cs = getComputedStyle(child);
       // A `display: contents` wrapper (one per overlay item) draws nothing itself.
       if (cs.display === "contents" || cs.pointerEvents === "none") visit(child);
@@ -83,6 +86,8 @@ function overlayRects(root: Element | null, origin: DOMRect): Rect[] {
 
 /** One side's top / composer-level triggers + its open popover / docked lists. */
 function GutterSide({ side, items, geometry, box, hostId, sessionId, layer, onStackTop }: { side: "left" | "right"; items: GutterEntry[]; geometry: GutterGeometry; box: GutterBox; hostId: string; sessionId: string; layer: HTMLDivElement | null; onStackTop(side: "left" | "right", top: number | null): void }) {
+  const win = useOwnerWindow();
+  const { t } = useI18n();
   const g = geometry[side];
   const popover = useGutter((s) => s.popover);
   const folded = useGutter((s) => s.folded);
@@ -95,12 +100,56 @@ function GutterSide({ side, items, geometry, box, hostId, sessionId, layer, onSt
   const inGutter = g.trigger === "gutter";
   // Narrow gutter but no composer on screen (archived {{agent}}): a row at the card's bottom corner.
   const bottomRow = !inGutter && !!box.anchor && box.anchor.kind !== "composer";
+  // Where the trigger stack starts (DockedLists stop above it): re-read when its placement or its
+  // entries change, and when the stack itself changes size — not on every render (a forced layout
+  // per streamed delta otherwise).
+  const composerIds = composerItems.map((e) => e.item.id).join("\n");
+  const posKey = box.anchor ? `${box.anchor.left},${box.anchor.right},${box.anchor.bottom}` : `${geometry.columnLeft},${geometry.columnWidth}`;
   useLayoutEffect(() => {
     const el = stack.current;
-    onStackTop(side, el && inGutter && layer ? Math.round(el.getBoundingClientRect().top - layer.getBoundingClientRect().top) : null);
-  });
-  // The top entries sit at the corner, or below an overlay box (the capsule) they would intersect.
+    const report = () => onStackTop(side, el && inGutter && layer ? Math.round(el.getBoundingClientRect().top - layer.getBoundingClientRect().top) : null);
+    report();
+    if (!el) return;
+    const observer = sharedResizeObserver(report);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [side, inGutter, layer, onStackTop, composerIds, posKey, box, bottomRow, items.length]);
+  // The top entries sit at the corner, or below an overlay box (the capsule) they would intersect. Always one
+  // row: beside the column, over its top (the timeline starts below it), or one compact button (lib/gutterLayout
+  // topStripMode) — never wrapped into a stack over the text. `natural` = the row's own width, measured while
+  // it is drawn as a row.
   const [topSize, setTopSize] = useState<{ width: number; height: number } | null>(null);
+  const [natural, setNatural] = useState(0);
+  const stripMode = natural > 0 ? topStripMode({ side, natural, cardWidth: box.width, geometry }) : "row";
+  const compact = stripMode === "compact";
+  const [menu, setMenu] = useState(false);
+  const topIds: readonly string[] = topItems.map((e) => e.item.id);
+  // The compact button's list stays while an entry opened from it has its popover open (that popover anchors in
+  // it). Only this conversation's list: the popover id is shared by every conversation's gutter.
+  const [held, setHeld] = useState<string | null>(null);
+  const menuShown = compact && (menu || (!!held && popover === held));
+  useEffect(() => {
+    if (held && popover !== held) setHeld(null);
+  }, [held, popover]);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const away = (e: Event) => {
+      const t = e.target as Node | null;
+      if (t && (menuRef.current?.contains(t) || topStack.current?.contains(t))) return;
+      setMenu(false);
+    };
+    const esc = (e: globalThis.KeyboardEvent) => e.key === "Escape" && setMenu(false);
+    win.document.addEventListener("pointerdown", away, true);
+    win.document.addEventListener("keydown", esc, true);
+    return () => {
+      win.document.removeEventListener("pointerdown", away, true);
+      win.document.removeEventListener("keydown", esc, true);
+    };
+  }, [menu]);
+  useEffect(() => {
+    if (!compact) setMenu(false);
+  }, [compact]);
   const topX0 = side === "left" ? 8 : box.width - 8 - (topSize?.width ?? 0);
   const topY = topSize ? placeBelow(topX0, topX0 + topSize.width, g.topInset + 8, topSize.height, box.overlays) : g.topInset + 8;
   useLayoutEffect(() => {
@@ -113,14 +162,15 @@ function GutterSide({ side, items, geometry, box, hostId, sessionId, layer, onSt
     const measure = () => {
       const width = el.offsetWidth;
       const height = el.offsetHeight;
+      if (!compact && width > 0) setNatural(width);
       setTopSize((old) => (old && old.width === width && old.height === height ? old : { width, height }));
       setGutterTopStackBottom(side, Math.ceil(el.getBoundingClientRect().bottom - layer.getBoundingClientRect().top));
     };
     measure();
-    const observer = new ResizeObserver(measure);
+    const observer = sharedResizeObserver(measure);
     observer.observe(el);
     return () => { observer.disconnect(); setGutterTopStackBottom(side, null); };
-  }, [items, box.width, topY, layer, side]);
+  }, [items, box.width, topY, layer, side, compact]);
   if (!items.length) return null;
   const dockable = (e: GutterEntry) => !!e.item.Body && !!e.item.dockMinWidth && gutterDocked.includes(e.item.id) && g.width >= e.item.dockMinWidth;
   const docked = items.filter((e) => dockable(e) && !folded.includes(e.item.id));
@@ -134,12 +184,17 @@ function GutterSide({ side, items, geometry, box, hostId, sessionId, layer, onSt
       ? { right: box.width - (geometry.columnLeft + COLUMN_PADDING - 8), bottom: 12 }
       : { left: geometry.columnLeft + geometry.columnWidth - COLUMN_PADDING + 8, bottom: 12 };
   const toggle = (e: GutterEntry) => () => {
+    if (compact && topIds.includes(e.item.id)) {
+      setMenu(false);
+      setHeld(popover === e.item.id || dockable(e) ? null : e.item.id);
+    }
     if (dockable(e)) return toggleFolded(e.item.id);
     setGutterPopover(popover === e.item.id ? null : e.item.id, triggers.current.get(e.item.id) ?? null);
   };
   const open = items.find((e) => e.item.id === popover && !dockable(e));
   const openAnchor = open ? triggers.current.get(open.item.id) : undefined;
-  const card = layer?.getBoundingClientRect();
+  // Only read (a forced layout) while a popover is open.
+  const card = open && openAnchor ? layer?.getBoundingClientRect() : undefined;
   const renderTrigger = (e: GutterEntry, where: "gutter" | "composer") => (
     <GutterTrigger
       key={e.item.id}
@@ -161,8 +216,39 @@ function GutterSide({ side, items, geometry, box, hostId, sessionId, layer, onSt
           ref={topStack}
           data-gutter-root
           data-gutter-top={side}
-          className={`pointer-events-none absolute z-[6] flex max-w-[calc(50%-16px)] flex-wrap gap-1.5 rounded-lg border border-card-border bg-background shadow-sm ${side === "left" ? "left-2" : "right-2 justify-end"}`}
+          data-gutter-top-mode={stripMode}
+          className={`pointer-events-none absolute z-[6] flex flex-nowrap gap-1.5 rounded-lg border border-card-border bg-background shadow-sm ${side === "left" ? "left-2" : "right-2 justify-end"}`}
           style={{ top: topY }}
+        >
+          {compact ? (
+            <div className="pointer-events-auto flex">
+              <button
+                data-gutter-top-compact=""
+                onClick={() => setMenu((m) => !m)}
+                title={topItems.map((e) => t(e.item.titleKey)).join(" · ")}
+                aria-label={topItems.map((e) => t(e.item.titleKey)).join(" · ")}
+                aria-expanded={menuShown}
+                aria-haspopup="true"
+                className={`flex h-[30px] items-center gap-1 rounded-full border border-border bg-background px-2 text-muted shadow-sm transition-colors hover:bg-surface hover:text-foreground ${menuShown ? "bg-surface text-foreground" : ""}`}
+              >
+                {topItems.map((e) => {
+                  const Icon = e.item.icon;
+                  return <Icon key={e.item.id} size={13} />;
+                })}
+              </button>
+            </div>
+          ) : (
+            topItems.map((e) => renderTrigger(e, "gutter"))
+          )}
+        </div>
+      )}
+      {menuShown && (
+        <div
+          ref={menuRef}
+          data-gutter-top-menu={side}
+          role="group"
+          className={`pointer-events-auto absolute z-[7] flex flex-col gap-1.5 rounded-lg border border-transparent bg-background p-1.5 shadow-e2 ${side === "left" ? "left-2 items-start" : "right-2 items-end"}`}
+          style={{ top: topY + (topSize?.height ?? 30) + 4 }}
         >
           {topItems.map((e) => renderTrigger(e, "gutter"))}
         </div>
@@ -183,7 +269,7 @@ function GutterSide({ side, items, geometry, box, hostId, sessionId, layer, onSt
           sessionId={sessionId}
           side={side}
           anchor={openAnchor}
-          edge={side === "left" ? card.left + 8 : window.innerWidth - card.right + 8}
+          edge={side === "left" ? card.left + 8 : win.innerWidth - card.right + 8}
           top={card.top + g.topInset + 8}
           width={popoverWidth(g.width)}
           direction={open.item.anchor === "top" ? "down" : "up"}
@@ -295,9 +381,9 @@ function DockedLists({ side, entries, geometry, box, hostId, sessionId }: { side
 
 /** `corner`: an overlay at a window-edge corner beside the column (the status capsule), from the conversation's reservations. */
 export function GutterHost({ sessionId, hostId, scroller, corner }: { sessionId: string; hostId: string; scroller: RefObject<HTMLDivElement | null>; corner: { side: "left" | "right"; anchor: "top" | "bottom" } | null }) {
+  const win = useOwnerWindow();
   const layer = useRef<HTMLDivElement>(null);
   const { readingWidth } = useAppearance();
-  const sideShift = useGutter((s) => s.sideShift);
   const sideCover = useGutter((s) => s.sideCover);
   const covered = useSide((s) => !!s.mode);
   const items = useGutterItems(sessionId, hostId);
@@ -334,7 +420,7 @@ export function GutterHost({ sessionId, hostId, scroller, corner }: { sessionId:
     const main = layer.current?.parentElement;
     if (!main) return;
     measure();
-    const ro = new ResizeObserver(measure);
+    const ro = sharedResizeObserver(measure);
     const observeChildren = () => {
       ro.disconnect();
       ro.observe(main);
@@ -354,7 +440,7 @@ export function GutterHost({ sessionId, hostId, scroller, corner }: { sessionId:
     const overlayRoot = main.querySelector("[data-overlay-root]");
     const omo = new MutationObserver(() => {
       if (frame) return;
-      frame = requestAnimationFrame(() => {
+      frame = win.requestAnimationFrame(() => {
         frame = 0;
         observeChildren();
         measure();
@@ -363,19 +449,19 @@ export function GutterHost({ sessionId, hostId, scroller, corner }: { sessionId:
     if (overlayRoot) omo.observe(overlayRoot, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
     mo.observe(main, { childList: true });
     for (const child of main.children) if (child !== layer.current && !child.contains(scroller.current)) mo.observe(child, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
-    window.addEventListener("resize", measure);
+    win.addEventListener("resize", measure);
     return () => {
       ro.disconnect();
       mo.disconnect();
       omo.disconnect();
-      cancelAnimationFrame(frame);
-      window.removeEventListener("resize", measure);
+      win.cancelAnimationFrame(frame);
+      win.removeEventListener("resize", measure);
     };
   }, [measure, scroller, sessionId]);
-  useLayoutEffect(() => measure(), [measure, readingWidth, sideShift, sideCover, covered]);
+  useLayoutEffect(() => measure(), [measure, readingWidth, sideCover, covered]);
 
   const geometry = box
-    ? gutterLayout({ cardWidth: box.cardWidth, shift: sideShift, sideCover, readingWidth, columnPadding: COLUMN_PADDING, capsule: corner, conversationVisible: !covered })
+    ? gutterLayout({ cardWidth: box.cardWidth, sideCover, readingWidth, columnPadding: COLUMN_PADDING, capsule: corner, conversationVisible: !covered })
     : null;
   useEffect(() => setGutterGeometry(geometry, box?.cardWidth ?? 0));
   useEffect(() => () => setGutterGeometry(null, 0), []);

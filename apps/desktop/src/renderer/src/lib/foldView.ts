@@ -2,12 +2,29 @@
 // when the conversation switches agents) and `useMessageFold`, which measures a message's visual
 // lines and keeps the reading position when a fold toggles. Rules: lib/messageFold.
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { autoFolds, foldView, lineHeightPx, visualLines, type FoldManual, type FoldRole, type FoldView } from "./messageFold";
+import { autoFolds, foldPresentationChanged, foldView, lineHeightPx, visualLines, type FoldManual, type FoldRole, type FoldView } from "./messageFold";
 import { useUiPrefs } from "./prefs";
+import { sharedResizeObserver } from "./resizeHub";
+import { useUserLayoutToggle } from "./userLayoutToggle";
 
 let manual: Record<string, Record<string, FoldManual>> = {};
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
+const delayedFoldUpdates = new Map<object, () => void>();
+let delayedFoldTimer: ReturnType<typeof setTimeout> | null = null;
+function delayFoldUpdate(key: object, run: () => void): void {
+  delayedFoldUpdates.set(key, run);
+  if (delayedFoldTimer !== null) return;
+  delayedFoldTimer = setTimeout(() => {
+    delayedFoldTimer = null;
+    const updates = [...delayedFoldUpdates.values()];
+    delayedFoldUpdates.clear();
+    updates.forEach((update) => update());
+  }, 250);
+}
+function cancelFoldUpdate(key: object): void {
+  delayedFoldUpdates.delete(key);
+}
 const subscribe = (l: () => void) => (listeners.add(l), () => void listeners.delete(l));
 
 export function setFold(sessionId: string, id: string, value: FoldManual | undefined): void {
@@ -56,10 +73,12 @@ export interface MessageFold extends FoldView {
  * so a streaming reply costs nothing per token.
  */
 export function useMessageFold(sessionId: string, id: string, role: FoldRole): MessageFold {
+  const userToggle = useUserLayoutToggle();
   const prefs = useUiPrefs();
   const enabled = role !== "off";
   const mine = useSyncExternalStore(subscribe, () => manual[sessionId]?.[id]);
   const [lines, setLines] = useState(0);
+  const measuredLines = useRef(0);
   const content = useRef<HTMLElement | null>(null);
   const frame = useRef<HTMLElement | null>(null);
   const [node, setNode] = useState<HTMLElement | null>(null);
@@ -75,14 +94,37 @@ export function useMessageFold(sessionId: string, id: string, role: FoldRole): M
     if (!enabled || !node) return;
     const measure = () => {
       const style = getComputedStyle(node);
-      setLines(visualLines(node.getBoundingClientRect().height, lineHeightPx(style.lineHeight, style.fontSize)));
+      const next = visualLines(node.getBoundingClientRect().height, lineHeightPx(style.lineHeight, style.fontSize));
+      const previous = measuredLines.current;
+      if (previous === next) return;
+      // A pane resize moves every message by a fraction of a line. Clipping, overflow controls and
+      // an exposed collapse control are commit-worthy; the hover menu's short-message foldability
+      // can follow after the layout transition.
+      const auto = autoFolds(role, prefs);
+      const before = foldView(auto, mine, previous, prefs.foldLines);
+      const after = foldView(auto, mine, next, prefs.foldLines);
+      if (foldPresentationChanged(auto, mine, previous, next, prefs.foldLines)) {
+        cancelFoldUpdate(node);
+        measuredLines.current = next;
+        setLines(next);
+        return;
+      }
+      if (before.canFold !== after.canFold) {
+        delayFoldUpdate(node, () => {
+          measuredLines.current = next;
+          setLines(next);
+        });
+      }
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
+    const ro = sharedResizeObserver(measure);
     ro.observe(node);
-    return () => ro.disconnect();
-  }, [enabled, node]);
+    return () => {
+      cancelFoldUpdate(node);
+      ro.disconnect();
+    };
+  }, [enabled, node, mine, prefs]);
 
   // A toggle keeps the message's top where it was on screen; a fold whose top had scrolled off
   // brings the top back into view. Then a synthetic scroll lets the conversation re-read whether
@@ -92,9 +134,9 @@ export function useMessageFold(sessionId: string, id: string, role: FoldRole): M
     (folded: boolean) => {
       const el = frame.current;
       anchor.current = el ? { top: el.getBoundingClientRect().top, folding: folded } : null;
-      setFold(sessionId, id, folded ? "folded" : "open");
+      userToggle(() => setFold(sessionId, id, folded ? "folded" : "open"));
     },
-    [sessionId, id],
+    [sessionId, id, userToggle],
   );
   useLayoutEffect(() => {
     const a = anchor.current;

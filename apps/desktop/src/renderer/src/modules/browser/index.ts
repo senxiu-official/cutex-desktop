@@ -4,9 +4,12 @@ import { BrowserActions, BrowserBody } from "./BrowserBody";
 import { BROWSER_TAB, browserRef, initBrowser, parseBrowserParams, restoreBrowser } from "./browserState";
 import { closeBrowser, startBrowser } from "./runtime";
 import { useBrowserTab } from "./tabs";
-import { BrowserSettings } from "./BrowserSettings";
 import { BrowserToolRow, BrowserTurnAttachment } from "./BrowserTimelineViews";
-import { isBrowserTool } from "./browserTimeline";
+import { browserShotStandalone, isBrowserTool } from "./browserTimeline";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const BrowserSettings = lazyPage(() => import("./BrowserSettings").then((m) => m.BrowserSettings));
 
 export default defineModule({
   id: "browser",
@@ -15,11 +18,14 @@ export default defineModule({
   // On by default since 2026-10-15 (fresh installs; was off since the I2a checkpoint). Installs that
   // already saved module choices keep it off (modules/defaultFlips.ts).
   contributes: {
-    "timeline.tool": [{ id: "browser.tool", order: 150, match: isBrowserTool, Row: BrowserToolRow }],
+    // A call that came back with a screenshot is its own row (standalone): folded into a work group's one line, the
+    // picture would vanish when the next step arrives and the history above would jump (owner 2026-10-24).
+    "timeline.tool": [{ id: "browser.tool", order: 150, match: isBrowserTool, Row: BrowserToolRow, standalone: browserShotStandalone }],
     "timeline.turnAttachment": [{ id: "browser.turnShots", order: 300, margin: { side: "right", minWidth: 200 }, Attachment: BrowserTurnAttachment }],
     // Its own page under 工具 (owner 2026-10-15: browser permissions did not belong on 对话).
-    "settings.page": [{ id: "browser.settings", page: "browser", group: "tools", order: 50, icon: Globe, titleKey: "browser.title", source: null, Page: BrowserSettings,
-      keywords: ["browser.settingsHint", "browser.hiddenTarget", "browser.hiddenTargetHint", "browser.viewportWidth", "browser.viewportHeight", "browser.viewportHint", "browser.idleDetach", "browser.idleDetachHint", "browser.host.approval", "browser.hold.limit", "browser.externalPages.label"] }],
+    "settings.page": [{ id: "browser.settings", page: "browser", group: "tools", order: 50, icon: Globe, titleKey: "browser.title", source: null, hostPart: true, Page: BrowserSettings,
+      keywords: ["browser.settingsHint", "browser.hiddenTarget", "browser.hiddenTargetHint", "browser.viewportWidth", "browser.viewportHeight", "browser.viewportHint", "browser.idleDetach", "browser.idleDetachHint", "browser.host.approval", "browser.hold.limit", "browser.externalPages.label", "browser.desktopLoopback.label", "browser.claim.allows", "browser.claim.audit"],
+      sections: [{ anchor: "site-permissions", titleKey: "browser.sitePermissions.title", keywords: ["browser.sitePermissions.hint", "browser.sitePermissions.forgetAll", "browser.sitePermissions.forget"] }, { anchor: "site-origins", titleKey: "browser.origins.reset", keywords: ["browser.origins.resetHint"] }] }],
     "side.component": [{
       id: BROWSER_TAB,
       titleKey: "browser.title",

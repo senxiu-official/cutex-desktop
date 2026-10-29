@@ -8,14 +8,14 @@ const MAX_DEPTH = 8;
 
 function Scalar({ value }: { value: string | number | boolean | null }) {
   if (value === null) return <span className="text-subtle">—</span>;
-  if (typeof value === "boolean") return <span className={`font-mono text-[11px] ${value ? "text-ok-text" : "text-danger"}`}>{String(value)}</span>;
-  if (typeof value === "number") return <span className="font-mono text-[11px] tabular-nums">{value}</span>;
+  if (typeof value === "boolean") return <span className={`font-mono text-caption/[inherit] ${value ? "text-ok-text" : "text-danger"}`}>{String(value)}</span>;
+  if (typeof value === "number") return <span className="font-mono text-caption/[inherit] tabular-nums">{value}</span>;
   return <span className="whitespace-pre-wrap break-words">{value}</span>;
 }
 
 function Value({ value, depth }: { value: JsonValue; depth: number }): ReactNode {
   if (isJsonScalar(value)) return <Scalar value={value} />;
-  if (depth >= MAX_DEPTH) return <span className="font-mono text-[11px] break-all whitespace-pre-wrap text-subtle">{JSON.stringify(value)}</span>;
+  if (depth >= MAX_DEPTH) return <span className="font-mono text-caption/[inherit] break-all whitespace-pre-wrap text-subtle">{JSON.stringify(value)}</span>;
   if (Array.isArray(value)) {
     if (value.length === 0) return <span className="text-subtle">[]</span>;
     if (value.every(isJsonScalar))
@@ -33,7 +33,7 @@ function Value({ value, depth }: { value: JsonValue; depth: number }): ReactNode
       <ol className="flex flex-col gap-1.5">
         {value.map((v, i) => (
           <li key={i} className="flex min-w-0 gap-1.5">
-            <span className="shrink-0 pt-px font-mono text-[10px] text-subtle tabular-nums">{i + 1}.</span>
+            <span className="shrink-0 pt-px font-mono text-caption/[inherit] text-subtle tabular-nums">{i + 1}.</span>
             <div className="min-w-0 flex-1">
               <Value value={v} depth={depth + 1} />
             </div>
@@ -53,7 +53,7 @@ function Fields({ value, depth }: { value: { [key: string]: JsonValue }; depth: 
       {entries.map(([key, v]) =>
         isJsonScalar(v) || (Array.isArray(v) && v.every(isJsonScalar)) ? (
           <div key={key} className="contents">
-            <dt className="max-w-[14rem] truncate pt-px text-[11px] text-subtle" title={key}>
+            <dt className="max-w-[14rem] truncate pt-px text-caption/[inherit] text-subtle" title={key}>
               {jsonKeyLabel(key)}
             </dt>
             <dd className="min-w-0 text-xs text-foreground">
@@ -62,7 +62,7 @@ function Fields({ value, depth }: { value: { [key: string]: JsonValue }; depth: 
           </div>
         ) : (
           <div key={key} className="col-span-2 mt-1 min-w-0">
-            <div className="mb-1 text-[11px] font-medium text-muted" title={key}>
+            <div className="mb-1 text-caption/[inherit] font-medium text-muted" title={key}>
               {jsonKeyLabel(key)}
             </div>
             <div className="min-w-0 border-l border-border pl-2.5 text-xs">
@@ -77,7 +77,7 @@ function Fields({ value, depth }: { value: { [key: string]: JsonValue }; depth: 
 
 export function JsonRecord({ value }: { value: JsonValue[] | { [key: string]: JsonValue } }) {
   return (
-    <div className="px-3 py-2 text-xs leading-relaxed" data-json-record>
+    <div className="selectable px-3 py-2 text-xs leading-relaxed" data-json-record>
       <Value value={value} depth={0} />
     </div>
   );

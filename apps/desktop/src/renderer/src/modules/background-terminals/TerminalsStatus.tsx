@@ -30,8 +30,8 @@ function TerminalRow({ term, onTerminate }: { term: BackgroundTerminal; onTermin
       <span className={CAPSULE_ROW_ICON}>
         <SquareTerminal size={14} className={armed ? "text-danger" : ""} />
       </span>
-      <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground">{term.command}</span>
-      {armed ? <span className="shrink-0 text-[11px] text-danger">{t("background-terminals.terminateAgain")}</span> : usage && <span className={CAPSULE_ROW_META}>{usage}</span>}
+      <span className="min-w-0 flex-1 truncate font-mono text-meta/[inherit] text-foreground">{term.command}</span>
+      {armed ? <span className="shrink-0 text-caption/[inherit] text-danger">{t("background-terminals.terminateAgain")}</span> : usage && <span className={CAPSULE_ROW_META}>{usage}</span>}
       <span className={capsuleRowActions(armed)}>
         {!armed && (
           <button title={t("background-terminals.output")} disabled className={CAPSULE_ROW_ACTION}>

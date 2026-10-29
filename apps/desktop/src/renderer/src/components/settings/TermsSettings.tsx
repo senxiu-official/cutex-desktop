@@ -5,14 +5,15 @@
 // 「标出术语」 switch marks them all. A field commits on Enter / blur ("" = default) and the whole UI
 // follows at once.
 import { useState, type ReactNode } from "react";
-import { loadedCatalog, useI18n, type MessageKey } from "../../i18n";
-import { en } from "../../i18n/en";
+import { loadedCatalog, useEnglishCatalog, useI18n, type MessageKey } from "../../i18n";
+import { zhCN } from "../../i18n/zh-CN";
 import { PreviewMarkContext } from "../../lib/previewMark";
 import { DEFAULT_TERMS, resetTerm, resolveTerms, setTerm, splitTerms, subagentDefault, TERM_IDS, TERM_MAX, useTermOverrides, type TermId, type TermLocale } from "../../lib/terms";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { Avatar } from "../Avatar";
-import { ResetButton, Section, SettingRow, TextField, Toggle } from "./Form";
+import { ResetButton, Section, SettingRow, TextField, Toggle, SettingsGroup } from "./Form";
 import { PreviewBand, PreviewTerm } from "./PreviewBand";
+import { Tag } from "../../components/Tag";
 
 /**
  * A term row label: the built-in word of the UI language plus a second language so the concept is clear
@@ -22,7 +23,10 @@ export function termLabel(locale: TermLocale, id: TermId): string {
   const second: TermLocale = locale.startsWith("zh") ? "en" : locale.startsWith("en") ? "zh-CN" : "en";
   // A label, so each word starts upper-case (the stored defaults are mid-sentence lower case).
   const up = (w: string) => w.charAt(0).toLocaleUpperCase() + w.slice(1);
-  return `${up(DEFAULT_TERMS[locale][id].one)} / ${up(DEFAULT_TERMS[second][id].one)}`;
+  const a = up(DEFAULT_TERMS[locale][id].one);
+  const b = up(DEFAULT_TERMS[second][id].one);
+  // The Shelf is "Shelf" in every language: one word says it.
+  return a === b ? a : `${a} / ${b}`;
 }
 
 export function TermsSection() {
@@ -52,7 +56,7 @@ export function TermsSection() {
           control={
             <label className="inline-flex cursor-pointer items-center gap-1.5">
               {t("terms.markAll")}
-              <Toggle label={t("terms.markAll")} checked={markAll} onChange={setMarkAll} />
+              <SettingsGroup agents="none" source="local"><Toggle label={t("terms.markAll")} checked={markAll} onChange={setMarkAll} /></SettingsGroup>
             </label>
           }
         >
@@ -64,13 +68,14 @@ export function TermsSection() {
 }
 
 // Partial, lazily loaded catalogs (see i18n/index.tsx): a sample piece falls back to en when the
-// language's catalog lacks it.
-const raw = (locale: TermLocale, key: MessageKey) => loadedCatalog(locale)?.[key] ?? en[key];
+// language's catalog lacks it (en itself loads on demand: zh-CN until it has).
+const raw = (locale: TermLocale, key: MessageKey, en: Readonly<Record<MessageKey, string>> | undefined) => loadedCatalog(locale)?.[key] ?? en?.[key] ?? zhCN[key];
 
 /** A sample piece with its term placeholders as marked words. */
 function Piece({ locale, k }: { locale: TermLocale; k: MessageKey }) {
   const terms = resolveTerms(useTermOverrides(), locale);
-  return <>{splitTerms(raw(locale, k), terms, locale).map((p, i) => (typeof p === "string" ? p : <PreviewTerm key={i} id={p.id}>{p.text}</PreviewTerm>))}</>;
+  const en = useEnglishCatalog();
+  return <>{splitTerms(raw(locale, k, en), terms, locale).map((p, i) => (typeof p === "string" ? p : <PreviewTerm key={i} id={p.id}>{p.text}</PreviewTerm>))}</>;
 }
 
 /** Pieces of the real UI (new-agent entry, counts, a director badge, a waiting chip) in one wrapping line. */
@@ -78,7 +83,7 @@ function TermsSample({ locale }: { locale: TermLocale }) {
   const terms = resolveTerms(useTermOverrides(), locale);
   const muted = (children: ReactNode) => <span className="text-xs text-muted">{children}</span>;
   return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-2.5 text-[13px]">
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2.5 text-ui/[inherit]">
       <span className="inline-flex h-6 items-center rounded-md border border-border bg-surface px-2 text-xs">
         <span>＋ <Piece locale={locale} k="terms.sample.new" /></span>
       </span>
@@ -86,15 +91,17 @@ function TermsSample({ locale }: { locale: TermLocale }) {
       <span className="inline-flex items-center gap-1.5">
         <Avatar name="Eva" seed="Eva" size={20} />
         <span className="font-medium">Eva</span>
-        <span className="rounded bg-surface-2 px-1 text-[11px] text-muted">
+        <Tag>
           <PreviewTerm id="director">{terms.director.one}</PreviewTerm>
-        </span>
+        </Tag>
       </span>
       {muted(<Piece locale={locale} k="terms.sample.working" />)}
       {muted(<Piece locale={locale} k="terms.sample.reportsTo" />)}
-      <span className="inline-flex h-6 items-center rounded-md bg-warn/15 px-2 text-xs text-warn-text">
+      <Tag><Piece locale={locale} k="sidebar.operator" /></Tag>
+      <Tag tone="attention">
         <span><Piece locale={locale} k="terms.sample.waiting" /></span>
-      </span>
+      </Tag>
+      {muted(<Piece locale={locale} k="terms.sample.shelf" />)}
     </div>
   );
 }
@@ -108,7 +115,7 @@ function TermRow({ locale, id }: { locale: TermLocale; id: TermId }) {
   const defaults = id === "subagent" ? subagentDefault(resolved.agent, locale) : DEFAULT_TERMS[locale][id];
   const plural = !locale.startsWith("zh") && !locale.startsWith("ja") && !locale.startsWith("ko");
   return (
-    <SettingRow
+    <SettingRow agents="none" source="local"
       label={termLabel(locale, id)}
       // The default as a hint only where it says more than the placeholder: the plural forms (always shown, so
       // the row never changes height). The derived sub word (子 + a renamed agent word) is the placeholder

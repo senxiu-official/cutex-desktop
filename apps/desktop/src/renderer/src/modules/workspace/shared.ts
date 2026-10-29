@@ -5,6 +5,7 @@ import { contextMenu, type MenuEntry } from "../../lib/contextMenu";
 import { fileMenu } from "../../lib/menus";
 import { useSide } from "../../lib/sideLayoutStore";
 import { rootFor } from "../../lib/workspace";
+import { useSelectedWorkspace } from "../../lib/workspaceView";
 import { selectedSidebar, useApp } from "../../store";
 import type { ItemId } from "../types";
 
@@ -14,8 +15,9 @@ export const PREVIEW: ItemId = "workspace.preview";
 
 export function useFileMenu(scope: WorkspaceScope | null) {
   const { t } = useI18n();
+  const { hostId } = useSelectedWorkspace();
   const root = useApp((s) => (scope ? rootFor(selectedSidebar(s), scope) : null));
-  return (path: string, opts?: { changed?: boolean; isDir?: boolean }) => contextMenu((): MenuEntry[] => fileMenu(path, root, t, opts));
+  return (path: string, opts?: { changed?: boolean; isDir?: boolean }) => contextMenu((): MenuEntry[] => fileMenu(path, root, t, { ...opts, hostId }));
 }
 
 export function fence(lang: string, text: string): string {

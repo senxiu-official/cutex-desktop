@@ -3,6 +3,8 @@
 import { approvalOutcome } from "../../lib/workGroups";
 import type { RawItem } from "../../lib/timeline";
 import type { BrowserTurnShot } from "../../../../shared/browser";
+import type { MessageImage } from "../../../../shared/input";
+import { parseMediaBlob } from "../../../../shared/mediaBlobs";
 
 export const BROWSER_TIMELINE_TOOLS = ["browser_list", "browser_read", "browser_find", "browser_act", "browser_navigate",
   "browser_screenshot", "browser_release", "browser_open", "browser_claim"] as const;
@@ -15,7 +17,7 @@ export const browserTimelineZhCN = {
   "browser.timeline.list": "列出已授予的标签", "browser.timeline.read": "读取网页结构", "browser.timeline.find": "查找网页元素",
   "browser.timeline.act": "网页操作", "browser.timeline.navigate": "导航网页", "browser.timeline.screenshot": "网页截图",
   "browser.timeline.release": "交回网页控制", "browser.timeline.open": "打开网页", "browser.timeline.claim": "申请网页控制",
-  "browser.timeline.click": "点击元素", "browser.timeline.fill": "填写字段（内容不展示）", "browser.timeline.press": "按键",
+  "browser.timeline.click": "左键点击元素", "browser.timeline.fill": "填写字段（内容不展示）", "browser.timeline.press": "按键",
   "browser.timeline.scroll": "滚动网页", "browser.timeline.scrollIntoView": "显示目标元素", "browser.timeline.select": "选择选项",
   "browser.timeline.check": "勾选", "browser.timeline.uncheck": "取消勾选", "browser.timeline.hover": "悬停元素",
   "browser.timeline.wait": "等待网页状态", "browser.timeline.back": "网页后退", "browser.timeline.forward": "网页前进",
@@ -95,6 +97,16 @@ export function browserTimelineDataImage(raw: unknown): string | null {
   return browserTimelineImage(raw.slice(5, comma), raw.slice(comma + 8));
 }
 
+/** Keep browser screenshots restricted to PNG/JPEG. References are fetched
+ * through the host's authenticated media reader, never as an img URL. */
+function screenshotReference(raw: unknown, mime?: unknown): MessageImage | null {
+  const blob = parseMediaBlob(raw);
+  if (blob && (blob.mime === "image/png" || blob.mime === "image/jpeg")
+    && (mime === undefined || mime === blob.mime)) return { kind: "blob", blob };
+  if (object(raw) && raw.type === "imageNotLoaded") return { kind: "unavailable" };
+  return null;
+}
+
 const ACTIONS = new Set(["click", "fill", "press", "scroll", "scrollIntoView", "select", "check", "uncheck", "hover", "wait", "back", "forward", "reload", "dialog"]);
 const ERRORS = new Set(["invalid_request", "unsupported_operation", "permission_denied", "browser_disabled", "browser_unavailable",
   "target_closed", "target_hidden", "owner_paused", "lease_revoked", "lease_ended_desktop_restarted", "stale_connection", "stale_request", "stale_ref", "deadline_exceeded",
@@ -103,7 +115,7 @@ const ERRORS = new Set(["invalid_request", "unsupported_operation", "permission_
   "unsupported_provider", "navigation_failed", "service_unavailable", "service_auth_failed", "browser_identity_unavailable"]);
 export interface BrowserToolView {
   tool: BrowserTimelineTool; title: string; summary: BrowserTimelineKey; state: "running" | "done" | "failed";
-  errorCode: string | null; image: string | null; imageState: "none" | "ready" | "not-loaded" | "invalid";
+  errorCode: string | null; image: MessageImage | null; imageState: "none" | "ready" | "not-loaded" | "unavailable" | "invalid";
   /** The call stopped for the owner (approval_required) or the owner declined it: not shown as a failure. */
   approval: "required" | "denied" | null;
 }
@@ -119,14 +131,22 @@ export function browserToolView(item: RawItem): BrowserToolView | null {
   const summary = `browser.timeline.${suffix}` as BrowserTimelineKey;
   const result = object(item.result) ? item.result : {};
   const blocks = item.type === "mcpToolCall" ? result.content : item.contentItems;
-  let image: string | null = null, imageState: BrowserToolView["imageState"] = "none", errorCode: string | null = null;
+  let image: MessageImage | null = null, imageState: BrowserToolView["imageState"] = "none", errorCode: string | null = null;
   let imageCount = 0;
   if (Array.isArray(blocks) && blocks.length <= 8) for (const block of blocks) {
     if (!object(block)) continue;
-    if (block.type === "imageNotLoaded" && block.fullItemRequired === true) { imageState = "not-loaded"; imageCount++; }
+    if (block.type === "imageNotLoaded") {
+      image = block.fullItemRequired === true ? null : { kind: "unavailable" };
+      imageState = block.fullItemRequired === true ? "not-loaded" : "unavailable"; imageCount++;
+    }
     else if (block.type === "image" || block.type === "inputImage") {
-      image = block.type === "image" ? browserTimelineImage(block.mimeType, block.data) : browserTimelineDataImage(block.imageUrl);
-      imageState = image ? "ready" : "invalid"; imageCount++;
+      const raw = block.type === "image" ? block.data : block.imageUrl;
+      image = screenshotReference(raw, block.type === "image" ? block.mimeType : undefined);
+      if (!image) {
+        const inline = block.type === "image" ? browserTimelineImage(block.mimeType, raw) : browserTimelineDataImage(raw);
+        image = inline ? { kind: "url", url: inline } : null;
+      }
+      imageState = image?.kind === "unavailable" ? "unavailable" : image ? "ready" : "invalid"; imageCount++;
     } else if ((block.type === "text" || block.type === "inputText") && typeof block.text === "string" && block.text.length <= 65536) {
       try {
         const value: unknown = JSON.parse(block.text);
@@ -137,7 +157,7 @@ export function browserToolView(item: RawItem): BrowserToolView | null {
   }
   if (imageCount > 1 || (Array.isArray(blocks) && blocks.length > 8)) { image = null; imageState = "invalid"; }
   // Never render a base64 prefix carrying the generic compact marker.
-  if (item.truncated === true && imageState === "ready") { image = null; imageState = "not-loaded"; }
+  if (item.truncated === true && imageState === "ready" && image?.kind === "url") { image = null; imageState = "not-loaded"; }
   const running = item.status === "inProgress" || item.status === "running";
   const failed = item.success === false || result.isError === true || item.error != null || ["failed", "errored", "declined"].includes(String(item.status)) || errorCode !== null;
   const approval = running ? null : errorCode === "approval_required" ? "required" : errorCode === "approval_denied" ? "denied" : approvalOutcome(item);
@@ -145,6 +165,12 @@ export function browserToolView(item: RawItem): BrowserToolView | null {
 }
 
 /** A late full-item response must never replace another item's row. */
+/** A call that came back with a screenshot (shown or still to load): its own timeline row, never folded into a work group (modules/browser/index.ts). */
+export function browserShotStandalone(item: RawItem): boolean {
+  const v = browserToolView(item);
+  return !!v && (!!v.image || v.imageState === "not-loaded");
+}
+
 export function browserLoadedToolItem(value: unknown, original: RawItem): RawItem | null {
   if (!object(value) || !object(value.item)) return null;
   const item = value.item;

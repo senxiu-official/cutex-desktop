@@ -1,0 +1,12 @@
+/* A project list can live in a narrow Shelf. Keep names and role tags readable there. */
+.agent-list[data-narrow] .agent-list-grid {
+  grid-template-columns: 1rem 1.75rem minmax(0, 1fr) 1.5rem;
+  row-gap: 2px;
+}
+.agent-list[data-narrow] .agent-list-grid > :nth-child(1),
+.agent-list[data-narrow] .agent-list-grid > :nth-child(2) { grid-row: 1 / 3; align-self: center; }
+.agent-list[data-narrow] .agent-list-grid > :nth-child(3) { grid-column: 3; grid-row: 1; }
+.agent-list[data-narrow] .agent-list-grid > :nth-child(4) { grid-column: 3; grid-row: 2; }
+.agent-list[data-narrow] .agent-list-grid > :nth-child(5) { display: none; }
+.agent-list[data-narrow] .agent-list-grid > :nth-child(6) { grid-column: 4; grid-row: 1 / 3; align-self: center; }
+.agent-list[data-narrow] .agent-list-grid > :nth-child(3) > div:first-child { flex-wrap: wrap; }

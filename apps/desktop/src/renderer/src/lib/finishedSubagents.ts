@@ -6,12 +6,14 @@
 //
 // Durations: a Claude card carries `durationMs`. A Codex child's comes from its own thread (turns, else
 // createdAt → updatedAt), recorded from a read of the settled child (`subAgentSpanFromThreadRead`,
-// lib/subagentMetaStore). Background Claude subagents (`run_in_background` not false; refused since
-// claude-r21): the card ended at the launch and the adapter kept no transcript of the run that followed,
-// so they show neither a duration nor an open.
+// lib/subagentMetaStore). Background Claude subagents (`run_in_background` not false): the card ends at
+// the launch. Since claude-r23 the run that follows has a transcript (the card's `agentThreadId`) and an
+// end of its own (its `subAgentActivity` / `claude/task/updated` status, lib/subagents): the row waits for
+// that end and takes its duration from the transcript's span. Older adapters (refused since claude-r21,
+// or before it) kept no transcript: no duration, no open.
 // Pure (no React, no store) so it is unit-tested.
-import { isClaudeAgentTool, isClaudeTaskRef } from "./claudeTasks";
-import { subAgentDisplayName, subAgentsOf, type SubAgentLive, type SubAgentMetaMap } from "./subagents";
+import { isBackgroundClaudeAgentTool, isClaudeAgentTool, isClaudeTaskRef } from "./claudeTasks";
+import { subAgentDisplayName, subAgentsOf, type SubAgentInfo, type SubAgentLive, type SubAgentMetaMap } from "./subagents";
 import { orderedEntries, type RawItem, type TimelineState, type TurnStatus } from "./timeline";
 
 /** How many finished sub-agents the group lists. */
@@ -30,8 +32,10 @@ export interface FinishedSubAgent {
   type: string | null;
   durationMs: number | null;
   outcome: FinishedOutcome;
-  /** A background Claude subagent: no transcript was kept. */
+  /** A background Claude subagent (`run_in_background`). */
   background: boolean;
+  /** …of an older adapter: no transcript of its run was kept (nothing to open, no duration). */
+  noTranscript: boolean;
   /** Its task (spawn prompt), for the tooltip. */
   task: string | null;
 }
@@ -62,6 +66,18 @@ function spanMs(span: SubAgentSpan | undefined): number | null {
   return span ? Math.round((span.endedAt - span.startedAt) * 1000) : null;
 }
 
+/** The references of the agent's background Claude subagents (their Agent / Task cards). */
+export function backgroundClaudeRefs(timeline: TimelineState | null): Set<string> {
+  const refs = new Set<string>();
+  if (!timeline) return refs;
+  for (const entry of orderedEntries(timeline)) {
+    const item = (entry as { item?: RawItem }).item;
+    const ref = item && isBackgroundClaudeAgentTool(item) ? str(item.agentThreadId) : null;
+    if (ref) refs.add(ref);
+  }
+  return refs;
+}
+
 /** A Codex `CollabAgentStatus` (or a Claude activity's) → outcome; null while it may still run. */
 function outcomeOf(status: string): FinishedOutcome | null {
   switch (status) {
@@ -78,8 +94,9 @@ function outcomeOf(status: string): FinishedOutcome | null {
   }
 }
 
-/** A Claude Agent / Task card's row (null while it runs). `turn`: the status of the card's turn. */
-function claudeCardRow(item: RawItem, turn: TurnStatus | undefined, meta: SubAgentMetaMap, spans: SubAgentSpans): FinishedSubAgent | null {
+/** A Claude Agent / Task card's row (null while it runs). `turn`: the status of the card's turn; `agents`:
+ *  the sub-agents by reference with their live status (a background run's end). */
+function claudeCardRow(item: RawItem, turn: TurnStatus | undefined, meta: SubAgentMetaMap, spans: SubAgentSpans, agents: ReadonlyMap<string, SubAgentInfo>): FinishedSubAgent | null {
   const args = (item.arguments && typeof item.arguments === "object" ? item.arguments : {}) as Record<string, unknown>;
   const ref = str(item.agentThreadId);
   const known = ref ? meta[ref] : undefined;
@@ -93,14 +110,23 @@ function claudeCardRow(item: RawItem, turn: TurnStatus | undefined, meta: SubAge
   else outcome = "completed";
   // A refused call never ran, in the background or otherwise.
   const background = args.run_in_background !== false && outcome === "completed";
+  // claude-r23: the background run has its own transcript and end; until it ends it is a running row.
+  const run = background && ref ? agents.get(ref) : undefined;
+  if (run) {
+    const ended = outcomeOf(run.status);
+    if (!ended) return null;
+    outcome = ended;
+  }
+  const noTranscript = background && !run;
   return {
     key: String(item.id),
     threadId: ref,
     name: description ? subAgentDisplayName(description, { nickname: description, role: type }) : type,
     type,
-    durationMs: background ? null : (num(item.durationMs) ?? (ref ? spanMs(spans[ref]) : null)),
+    durationMs: noTranscript ? null : background ? (ref ? spanMs(spans[ref]) : null) : (num(item.durationMs) ?? (ref ? spanMs(spans[ref]) : null)),
     outcome,
     background,
+    noTranscript,
     task: str(args.prompt),
   };
 }
@@ -117,6 +143,7 @@ export function finishedSubAgents(
 ): FinishedSubAgent[] {
   if (!timeline) return [];
   const turns = new Map(timeline.turns.map((t) => [t.id, t.status] as const));
+  const agents = subAgentsOf(timeline, live, meta);
   const rows: { at: number; row: FinishedSubAgent }[] = [];
   const lastSeen = new Map<string, number>();
   // The last completed / errored snapshot of each child: a later closeAgent (shutdown) keeps that outcome.
@@ -125,7 +152,7 @@ export function finishedSubAgents(
     const item = (entry as { item?: RawItem }).item;
     if (!item) return;
     if (isClaudeAgentTool(item)) {
-      const row = claudeCardRow(item, turns.get(entry.turnId ?? ""), meta, spans);
+      const row = claudeCardRow(item, turns.get(entry.turnId ?? ""), meta, spans, agents);
       if (row) rows.push({ at, row });
     } else if (item.type === "subAgentActivity") lastSeen.set(String(item.agentThreadId), at);
     else if (item.type === "collabAgentToolCall") {
@@ -137,12 +164,12 @@ export function finishedSubAgents(
       }
     }
   });
-  for (const info of subAgentsOf(timeline, live, meta).values()) {
+  for (const info of agents.values()) {
     if (isClaudeTaskRef(info.threadId)) continue; // its card's row
     const outcome = outcomeOf(info.status === "shutdown" ? (ended.get(info.threadId) ?? info.status) : info.status);
     if (!outcome) continue;
     const type = info.role && info.role.toLowerCase() !== "default" ? info.role : null;
-    rows.push({ at: lastSeen.get(info.threadId) ?? -1, row: { key: info.threadId, threadId: info.threadId, name: info.name, type, durationMs: spanMs(spans[info.threadId]), outcome, background: false, task: info.task } });
+    rows.push({ at: lastSeen.get(info.threadId) ?? -1, row: { key: info.threadId, threadId: info.threadId, name: info.name, type, durationMs: spanMs(spans[info.threadId]), outcome, background: false, noTranscript: false, task: info.task } });
   }
   return rows
     .sort((a, b) => b.at - a.at)

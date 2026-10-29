@@ -1,6 +1,7 @@
 // 终端 card state (pure; RFC right-panel-rfc-20261009 §6.1): an instance is one cutex PTY
 // ({ terminalId }), or a short-lived placeholder that creates one / takes in the workspace's live PTYs
 // and then hands over to them (Ctrl+`, the title-bar button, ＋). The PTYs live in the daemon.
+import { terminalPassesKey } from "../../lib/keybindings";
 import type { TerminalSummary, WorkspaceScope } from "../../../../shared/ipc";
 import type { Json } from "../types";
 
@@ -79,17 +80,13 @@ export function missingTerminals(list: readonly TerminalSummary[], open: Readonl
 }
 
 /**
- * Keys a focused terminal lets through to the window (§3.11): the app's own shortcuts. Everything
+ * Keys a focused terminal lets through to the window (§3.11): the app's own shortcuts — the keys of the
+ * commands lib/keybindings marks `terminal` (Ctrl+`, Ctrl+Alt+B, the page keys, Ctrl+Shift+N / M / D / F,
+ * Ctrl+Alt+arrows, Shift+F11, F6 by default; F11 alone and Ctrl+W / Ctrl+T stay the shell's). Everything
  * else (Esc, Ctrl+B, Alt+←, Ctrl+C …) belongs to the shell.
  */
 export function passThroughKey(e: Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">): boolean {
-  const mod = e.ctrlKey || e.metaKey;
-  if (mod && !e.altKey && !e.shiftKey && (e.key === "`" || e.code === "Backquote")) return true;
-  if (mod && e.altKey && !e.shiftKey && e.code === "KeyB") return true;
-  if (mod && e.shiftKey && !e.altKey && (/^Digit[1-9]$/.test(e.code) || e.code === "KeyN" || e.code === "KeyM")) return true;
-  if (e.key === "F11" && e.shiftKey && !mod && !e.altKey) return true;
-  if (e.key === "F6" && !mod && !e.altKey) return true;
-  return false;
+  return terminalPassesKey(e);
 }
 
 /**
@@ -101,4 +98,33 @@ export function passThroughKey(e: Pick<KeyboardEvent, "key" | "code" | "ctrlKey"
 export function isTerminalReply(data: string): boolean {
   // eslint-disable-next-line no-control-regex -- terminal control sequences
   return /^(?:\x1b\[[\d;]*[Rnt]|\x1b\[[?>][\d;]*c|\x1b\[\??[\d;]*\$y|\x1b\][^\x07\x1b]*rgb:[^\x07\x1b]*(?:\x07|\x1b\\)|\x1bP[\s\S]*\x1b\\)+$/.test(data);
+}
+
+/** xterm's answer to a cursor position request (`CSI 6 n` → `CSI row ; col R`). */
+export function isCursorReport(data: string): boolean {
+  // eslint-disable-next-line no-control-regex -- terminal control sequences
+  return /^\x1b\[\d+;\d+R$/.test(data);
+}
+
+/**
+ * Whether a replayed scrollback ends with a cursor position request nobody answered yet: after its last
+ * `CSI 6 n` only control sequences or blanks follow. Windows ConPTY (portable-pty starts it with
+ * PSEUDOCONSOLE_INHERIT_CURSOR) asks once when the PTY starts and holds the shell until the answer comes; a
+ * new terminal's first replay carries that request, and dropping xterm's answer as a stale reply kept
+ * PowerShell waiting (#34). An old request is followed by the shell's output (a prompt at least).
+ */
+export function pendingCursorRequest(bytes: Uint8Array): boolean {
+  // Only the last 4 KiB: more bytes after it and the shell has long been running.
+  let at = -1;
+  for (let i = bytes.length - 4; i >= Math.max(0, bytes.length - 4096); i--) {
+    if (bytes[i] === 0x1b && bytes[i + 1] === 0x5b && bytes[i + 2] === 0x36 && bytes[i + 3] === 0x6e) {
+      at = i;
+      break;
+    }
+  }
+  if (at < 0) return false;
+  const tail = String.fromCharCode(...bytes.subarray(at + 4))
+    // eslint-disable-next-line no-control-regex -- terminal control sequences
+    .replace(/\x1b\[[?>=!]?[\d;]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b[=>78c]/g, "");
+  return /^[\s\0]*$/.test(tail);
 }

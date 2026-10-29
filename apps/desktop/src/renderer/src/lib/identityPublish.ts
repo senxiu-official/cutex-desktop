@@ -1,6 +1,8 @@
 // What 「你」 publishes to one host (pure part of lib/identitySync; unit-tested in
 // test/identitySync.test.ts): nothing to an older cutex / a pending device; a field never edited on
-// this desktop only fills an empty host field; otherwise only what differs from the host's view, once per edit.
+// this desktop only fills an empty host field — with this desktop's value, else the one adopted from your
+// other hosts (lib/identityHosts; never the OS account name); otherwise only what differs from the
+// host's view, once per edit.
 // syncSummary / syncIssue word the outcome for Settings → 你 (one summary line, exceptions per host).
 import { USERS_SELF_PROFILE_FEATURE, type UserAccess } from "../../../shared/users";
 import type { PreparedAvatar } from "./identityAvatar";
@@ -44,7 +46,9 @@ export function publishedName(prefs: Pick<IdentityPrefs, "name">): string | null
 /**
  * What to do on one host (pure; unit-tested). Each field is published only once it was edited on this
  * desktop, once per edit, and only when the host's value differs. `avatar`: the prepared local
- * picture (null: none, or not publishable).
+ * picture (null: none, or not publishable). `adopted`: your name / prepared picture as another host
+ * has it, only used to fill this host's empty field when this desktop has none and never edited it
+ * (`patch.avatar` "upload" then means the adopted picture).
  */
 export function planIdentityPublish(input: {
   features: ReadonlySet<string>;
@@ -52,8 +56,9 @@ export function planIdentityPublish(input: {
   prefs: Pick<IdentityPrefs, "name" | "picture" | "nameAt" | "pictureAt">;
   published: PublishedFields | undefined;
   avatar: Pick<PreparedAvatar, "etag"> | null;
-}): { state: IdentitySyncState; patch?: { displayName?: string | null; avatar?: "upload" | null } } {
-  const { features, access, prefs, avatar } = input;
+  adopted?: { name: string | null; avatar: Pick<PreparedAvatar, "etag"> | null };
+}): IdentityPlan {
+  const { features, access, prefs, avatar, adopted } = input;
   const published = input.published ?? {};
   if (!features.has(USERS_SELF_PROFILE_FEATURE)) return { state: "unsupported" };
   if (!access || access.pending) return { state: "pending" };
@@ -61,8 +66,10 @@ export function planIdentityPublish(input: {
   const hostEtag = access.avatarEtag ?? null;
   // Set before this desktop stamped edits (or before the host supported it): fill a host field that is
   // still empty — that overwrites nothing (owner 2026-10-15: the avatar never reached the hosts).
-  const fillName = prefs.nameAt === null && hostName === null ? publishedName(prefs) : null;
-  const fillPicture = prefs.pictureAt === null && hostEtag === null && !!prefs.picture && !!avatar;
+  // A desktop with no identity of its own fills it with the one your other hosts have (a fresh desktop:
+  // owner 2026-10-20) — the OS account name is never published.
+  const fillName = prefs.nameAt === null && hostName === null ? (publishedName(prefs) ?? (adopted?.name?.trim() || null)) : null;
+  const fillPicture = prefs.pictureAt === null && hostEtag === null && (prefs.picture ? !!avatar : !!adopted?.avatar);
   if (prefs.nameAt === null && prefs.pictureAt === null && !fillName && !fillPicture) {
     // Never edited here: "synced" once the host already shows this desktop's identity (e.g. filled before).
     const same = hostName === publishedName(prefs) && (prefs.picture ? !!avatar && hostEtag === avatar.etag : true);
@@ -85,6 +92,32 @@ export function planIdentityPublish(input: {
   }
   if (Object.keys(patch).length) return { state: "syncing", patch };
   return { state: elsewhere ? "changedElsewhere" : "synced" };
+}
+
+export interface IdentityPlan {
+  state: IdentitySyncState;
+  patch?: { displayName?: string | null; avatar?: "upload" | null };
+}
+
+/**
+ * One publishing round over every connected host (pure; lib/identitySync runs the patches): each host
+ * where this connection is the owner or a bound user and cutex has `users-self-profile` gets this
+ * desktop's edits once per edit (`published[hostId]`, so a host connected later catches up); older
+ * hosts and pending devices get nothing.
+ */
+export function planIdentityRound(input: {
+  hosts: readonly { hostId: string; features: ReadonlySet<string> }[];
+  access: Readonly<Record<string, Pick<UserAccess, "pending" | "displayName" | "avatarEtag"> | undefined>>;
+  prefs: Pick<IdentityPrefs, "name" | "picture" | "nameAt" | "pictureAt">;
+  published: Readonly<Published>;
+  avatar: Pick<PreparedAvatar, "etag"> | null;
+  adopted?: { name: string | null; avatar: Pick<PreparedAvatar, "etag"> | null };
+}): Record<string, IdentityPlan> {
+  const out: Record<string, IdentityPlan> = {};
+  for (const host of input.hosts) {
+    out[host.hostId] = planIdentityPublish({ features: host.features, access: input.access[host.hostId] ?? null, prefs: input.prefs, published: input.published[host.hostId], avatar: input.avatar, adopted: input.adopted });
+  }
+  return out;
 }
 
 /** The published record once the host holds `host` for the fields edited here (after a write or when nothing differed). */

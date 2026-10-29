@@ -9,6 +9,7 @@ import { openServiceExternal } from "../../lib/services";
 import { sideShowsHost } from "../../lib/sideServices";
 import { useApp } from "../../store";
 import type { AppModuleContext } from "../slots";
+import { SERVICE_REF_KIND } from "./refTarget";
 import { parseServiceReveal, revealIsLive, serviceLink, type ServiceReveal } from "./reveal";
 
 export const TOAST_OWNER = "services";
@@ -55,6 +56,8 @@ export function startServiceReveals(ctx: AppModuleContext): void {
         key: `service:${r.slug}`,
         text: ctx.t("services.reveal.toast", { agent: agent ?? ctx.t("services.reveal.someAgent"), name }),
         action: { label: ctx.t("services.reveal.open"), run },
+        // The modules' ref actions on the service (e.g. 固定到主页) beside 打开.
+        ref: { hostId, kind: SERVICE_REF_KIND, key: r.slug, title: name.slice(0, 200), params: {} },
       },
       REVEAL_CARD_MS,
     );

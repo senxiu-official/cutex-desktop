@@ -13,10 +13,14 @@ import { sideOpenPeek } from "../../lib/sideServices";
 import { TURN_PEEK } from "../../lib/sideKinds";
 import { useApp } from "../../store";
 import { convNotify, useConvScope } from "../../lib/conversationScope";
+import { bindingLabel, matchesCommand } from "../../lib/keybindings";
+import { withKey } from "../../lib/useKeybindings";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 const CHIP = "pointer-events-auto flex h-7 items-center gap-1.5 rounded-full border border-border bg-background pr-3 pl-2.5 text-xs text-foreground shadow-md hover:bg-surface";
 
 export function ReturnChip({ sessionId }: { sessionId: string }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const conv = useConvScope();
   const back = useJump((s) => s.back);
@@ -26,14 +30,14 @@ export function ReturnChip({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     if (!shown) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.key !== "ArrowLeft" || e.defaultPrevented) return;
-      if (isEditableTarget(e.target) || isEditableTarget(document.activeElement)) return;
+      if (e.defaultPrevented || !matchesCommand("jumpBack", e)) return;
+      if (isEditableTarget(e.target) || isEditableTarget(win.document.activeElement)) return;
       e.preventDefault();
       void goBack();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [shown]);
+    win.addEventListener("keydown", onKey);
+    return () => win.removeEventListener("keydown", onKey);
+  }, [shown, win]);
   // The 太早了 note goes away by itself.
   useEffect(() => {
     if (!miss) return;
@@ -73,7 +77,7 @@ export function ReturnChip({ sessionId }: { sessionId: string }) {
         </span>
       )}
       {shown && label && (
-        <button onClick={() => void goBack()} title={t("gutter.returnHint")} className={CHIP}>
+        <button onClick={() => void goBack()} title={withKey(t("gutter.returnHint"), bindingLabel("jumpBack"))} className={CHIP}>
           <CornerUpLeft size={13} className="text-accent" />
           {t(label.key, label.vars)}
         </button>

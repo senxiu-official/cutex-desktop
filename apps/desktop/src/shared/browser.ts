@@ -69,11 +69,17 @@ export interface BrowserToolItem { item: Record<string, unknown> }
 /** Host capture-layer input, never a page assertion about input provenance. */
 export const BROWSER_OWNER_INPUT_KINDS = ["pointerdown", "wheel", "keydown", "contextmenu", "dragenter", "drop", "touchstart"] as const;
 export type BrowserOwnerInputKind = typeof BROWSER_OWNER_INPUT_KINDS[number];
+/** A guest page zoom step the owner asked for (keyboard, wheel or the chip); "reset" returns to 100 %. */
+export type BrowserZoomAction = "in" | "out" | "reset";
+/** Chrome's page-zoom bounds; main walks the steps between them (guestView.ts). */
+export const BROWSER_ZOOM_BOUNDS = { min: 0.33, max: 3 } as const;
 
 /** Owner UI only. Product agent tools and leases belong to I3. */
 export const BROWSER_CHANNEL = "cutex-desktop:browser";
 export type BrowserTabStatus = "pending" | "attached" | "unmounted" | "crashed" | "closed";
 export interface BrowserTabView {
+  /** Main-detected owner login input in an agent pool; null clears the inline reminder. */
+  loginOrigin?: string | null;
   guestId: string;
   tabKey: string;
   hostId: string;
@@ -87,9 +93,13 @@ export interface BrowserTabView {
   error?: string;
   /** Only a validated, bounded data image. Never a remote URL loaded by the app session. */
   favicon?: string;
+  /** Main-applied page zoom of this tab, relative to the app's own zoom; absent = 100 %. */
+  zoom?: number;
   control?: BrowserControlView;
   lease?: BrowserLeaseView;
   pool?: "owner" | "agent";
+  /** Main-confirmed desktop loopback page in an SSH host's tab (not the remote host). */
+  desktopLoopback?: true;
   /** Exact main-confirmed open correlation, never inferred from a locally active lease. */
   confirmedOpen?: string;
   /** A site-permission request of this tab: main's native dialog is open (waiting), or the last one
@@ -116,7 +126,8 @@ export interface BrowserTabMount {
 }
 /** Main opens an owner tab for a claim: the renderer shows it (held) in the requesting agent's lane. */
 export interface BrowserClaimOpenIntent { tabKey: string; url: string; sessionId: string }
-export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-tab" | "diagnostic" | "reveal" | "agent-open" | "agent-open-cancel" | "agent-open-confirm" | "claim-open" | "claim-granted" | "blocked" | "thumbnail"; newTabUrl?: string;
+export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-tab" | "diagnostic" | "reveal" | "agent-open" | "agent-open-cancel" | "agent-open-confirm" | "claim-open" | "claim-granted" | "blocked" | "thumbnail" | "pressed"; newTabUrl?: string;
+  /** pressed: the owner pressed the mouse in this tab's page (never the agent's own dispatch); the renderer takes it as a press in its pane (design 017). */
   /** thumbnail: a bounded data:image/jpeg of a background agent tab (at most ~1 per second). */
   thumbnail?: string;
   /** new-tab: the opener's agent caused this popup (its own click), not the owner. */
@@ -129,9 +140,13 @@ export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-t
 /** Completion of a one-use owner UI mount, not an agent target identifier. */
 export interface BrowserAttachReceipt { src: string; webContentsId: number }
 export type BrowserRequest =
+  | { op: "dismissLoginWarning"; tabKey: string; origin: string }
+  | { op: "openOwnerCopy"; tabKey: string }
   | { op: "setEnabled"; enabled: boolean }
   | { op: "resetOrigins" }
   | { op: "externalPages"; enabled?: boolean }
+  | { op: "desktopLoopback"; enabled?: boolean }
+  | { op: "desktopLoopbackChallenge"; tabKey: string; url: string }
   | { op: "sitePermissions"; forget?: BrowserSitePermissionForget }
   | { op: "reserveOwnerTab" }
   | { op: "list" }
@@ -153,12 +168,16 @@ export type BrowserRequest =
   | { op: "pauseLease"; tabKey: string; leaseId: string }
   | { op: "openRefused"; requestId: string; code: BrowserOpenRefusal }
   | { op: "clearIdempotency"; cutexSessionId?: string }
-  | { op: "open"; tabKey: string; url: string; receipt?: BrowserAttachReceipt; identity?: BrowserMountIdentity }
-  | { op: "navigate"; tabKey: string; url: string }
+  | { op: "open"; tabKey: string; url: string; receipt?: BrowserAttachReceipt; identity?: BrowserMountIdentity; desktopLoopback?: string }
+  | { op: "navigate"; tabKey: string; url: string; desktopLoopback?: string }
   | { op: "ownerInput"; tabKey: string; kind: BrowserOwnerInputKind }
+  | { op: "setZoom"; tabKey: string; action: BrowserZoomAction }
   | { op: "back" | "forward" | "reload" | "stop" | "toBackground"; tabKey: string }
   | { op: "close"; tabKey: string; unmount?: boolean };
 export interface HostBrowserBridge {
+  dismissLoginWarning(tabKey: string, origin: string): Promise<void>;
+  /** Fresh owner identity; exact target is retained transiently in main, URL here is display-safe. */
+  openOwnerCopy(tabKey: string): Promise<{ tabKey: string; url: string }>;
   /** Main allocates a fresh identity; callers cannot nominate or promote an old tab key. */
   reserveOwnerTab(): Promise<{ tabKey: string }>;
   list(): Promise<BrowserTabView[]>;
@@ -167,6 +186,10 @@ export interface HostBrowserBridge {
   toolItem(sessionId: string, turnId: string, itemId: string): Promise<BrowserToolItem>;
   agents(): Promise<BrowserAgentView[]>;
   settings(agentOpenApproval?: "off" | "ask"): Promise<BrowserHostSettings>;
+  /** Per-SSH-host remembered owner choice; read with no argument. */
+  desktopLoopback(enabled?: boolean): Promise<{ enabled: boolean }>;
+  /** The nonce main minted with this exact tab + origin's remote_loopback refusal. */
+  desktopLoopbackChallenge(tabKey: string, url: string): Promise<{ nonce: string }>;
   clearIdempotency(cutexSessionId?: string): Promise<BrowserIdempotencyClearResult>;
   profileTools(profile: string, enabled?: boolean): Promise<{ enabled: boolean }>;
   /** remember (claims only): after the grant, main allows this agent the tab's origin until app restart. */
@@ -186,10 +209,12 @@ export interface HostBrowserBridge {
   /** The owner's explicit 「暂停智能体」: keeps the lease (unlike revoke); 「继续」 resumes it. */
   pauseLease(tabKey: string, leaseId: string): Promise<void>;
   openRefused(requestId: string, code: BrowserOpenRefusal): Promise<void>;
-  open(tabKey: string, url: string, receipt?: BrowserAttachReceipt, identity?: BrowserMountIdentity): Promise<BrowserTabMount>;
-  navigate(tabKey: string, url: string): Promise<void>;
+  open(tabKey: string, url: string, receipt?: BrowserAttachReceipt, identity?: BrowserMountIdentity, options?: { desktopLoopback?: string }): Promise<BrowserTabMount>;
+  navigate(tabKey: string, url: string, options?: { desktopLoopback?: string }): Promise<void>;
   /** Main-frame-only, epoch-exempt, reduction of authority; never grants or resumes. */
   ownerInput(tabKey: string, kind: BrowserOwnerInputKind): Promise<void>;
+  /** Owner UI zoom step of this tab (the chip's reset); the page's own shortcuts are handled in main. */
+  setZoom(tabKey: string, action: BrowserZoomAction): Promise<void>;
   back(tabKey: string): Promise<void>;
   forward(tabKey: string): Promise<void>;
   reload(tabKey: string): Promise<void>;
@@ -215,7 +240,7 @@ export interface BrowserBridge {
 /** Fixed UI keys only; no page/daemon message is ever an owner-facing fallback. */
 export type BrowserOwnerErrorKey = "browser.error.invalid" | "browser.error.unsupported" | "browser.error.permission" | "browser.error.loopbackOnly" | "browser.error.disabled" | "browser.error.unavailable" | "browser.error.revoked" | "browser.error.desktopRestarted" | "browser.error.hidden" | "browser.error.paused" | "browser.error.scope" | "browser.error.stale" | "browser.error.deadline" | "browser.error.cancelled" | "browser.error.unknownOutcome" | "browser.error.conflict" | "browser.error.notRetained" | "browser.error.approvalRequired" | "browser.error.approvalDenied" | "browser.error.leaseLimit" | "browser.error.busy" | "browser.error.capacity" | "browser.error.tooLarge" | "browser.error.identityUnavailable" | "browser.error.identityRecovered" | "browser.error.serviceUnavailable" | "browser.error.serviceReclaimed" | "browser.error.serviceStopped" | "browser.error.serviceNotFound" | "browser.error.serviceStartFailed" | "browser.error.serviceCrashLooped" | "browser.error.serviceChanged" | "browser.error.upstreamUnreachable" | "browser.error.staticNotFound" | "browser.externalUnavailable" | "browser.refusal.externalOff" | "browser.refusal.proxyUnavailable" | "browser.refusal.privateAddress" | "browser.refusal.reservedAddress" | "browser.refusal.protectedEndpoint" | "browser.refusal.remoteLoopback" | "browser.serviceProxyRequired" | "browser.noHost" | "browser.unavailable" | "browser.navigationFailed" | "browser.serviceAuthFailed" | "browser.invalidReceipt" | "browser.error.unknown";
 /** The one owner action that actually fixes a refusal (none: explain only). */
-export type BrowserRefusalAction = "enableExternal" | "retry" | "reload" | null;
+export type BrowserRefusalAction = "enableExternal" | "allowDesktopLoopback" | "retry" | "reload" | null;
 /**
  * Service errors a reload can fix: reloading a service tab goes through the ticket flow again with
  * `start: true` (an on-demand / stopped managed service starts, a moved port is picked up). Not for a
@@ -224,7 +249,7 @@ export type BrowserRefusalAction = "enableExternal" | "retry" | "reload" | null;
 const RELOAD_FIXES: ReadonlySet<string> = new Set(["service_stopped", "service_start_failed", "service_crash_looped", "service_changed", "upstream_unreachable", "service_unavailable", "services_store_unavailable", "proxy_busy"]);
 export function browserRefusalAction(code: unknown): BrowserRefusalAction {
   if (typeof code === "string" && RELOAD_FIXES.has(code)) return "reload";
-  return code === "external_pages_off" ? "enableExternal" : code === "external_proxy_unavailable" ? "retry" : null;
+  return code === "external_pages_off" ? "enableExternal" : code === "remote_loopback" ? "allowDesktopLoopback" : code === "external_proxy_unavailable" ? "retry" : null;
 }
 export function browserOwnerErrorKey(error: unknown): BrowserOwnerErrorKey {
   const message = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : error instanceof Error ? error.message : String(error);

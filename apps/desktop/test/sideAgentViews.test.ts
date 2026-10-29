@@ -1,13 +1,13 @@
-// The tool area is one layout for every agent (docs/desktop-modules.md §24; v1.17 abolished §18.5's
-// per-agent views, RFC §13 D27′): focusing another agent keeps the tool columns as they are — a pane
-// shows what that agent's bindings see; a maximised card it cannot see ends; closing the focused agent's
-// last content hides the tool area.
+// The tool area is the focused conversation's own Shelf (docs/desktop-modules.md §24.13, owner 2026-10-21:
+// 「Shelf 按对话记」 replaces v1.17's one layout for every agent): focusing another agent shows that agent's
+// Shelf (a new one: a copy of the default layout, here empty); a maximised card ends; focusing A again
+// brings A's Shelf back as it was; closing the focused agent's last content hides the tool area.
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 
-describe("side store: one layout for every agent", () => {
-  it("open a card on A → B keeps the tool area open (A's card hidden for B) → A sees it again; a maximised card B cannot see ends", async () => {
+describe("side store: a Shelf per conversation (§24.13)", () => {
+  it("open a card on A → B has its own (empty) Shelf → A gets its Shelf back as it was; a maximised card ends on the switch", async () => {
     const { useApp, SETTINGS_PAGE } = await import("../src/renderer/src/store");
     const { startSideStore, updateLayout, useSide, setMode } = await import("../src/renderer/src/lib/sideLayoutStore");
     const { applyOpen, closeInstances, lanePages, place, placeSpec, SINGLETON_KEY } = await import("../src/renderer/src/lib/sideLayout");
@@ -32,18 +32,22 @@ describe("side store: one layout for every agent", () => {
       const chatCard = useSide.getState().layout.pages[0]!.cards[0]!.id;
       setMode({ kind: "maximised", card: chatCard });
 
+      const aPage = useSide.getState().layout.pages[0]!.id;
       useApp.setState({ selectedId: "B" });
-      // Same layout: open, the chat column has nothing for B (off screen); the maximised chat card ends.
-      expect(useSide.getState().layout.open).toBe(true);
+      // B's own Shelf: the default layout (none here: empty, closed); A's chat is not in it; the maximised card ends.
+      expect(useSide.getState().layout.pages).toEqual([]);
+      expect(useSide.getState().layout.open).toBe(false);
       expect(lanePages(useSide.getState().layout, ctxOf("B"))).toEqual([]);
       expect(useSide.getState().mode).toBeNull();
 
       // A settings page keeps selectedId: nothing changes.
       useApp.setState({ view: { kind: "page", page: SETTINGS_PAGE, params: {} } });
-      expect(useSide.getState().layout.open).toBe(true);
+      expect(useSide.getState().layout.pages).toEqual([]);
 
       useApp.setState({ selectedId: "A", view: { kind: "conversation" } });
-      expect(lanePages(useSide.getState().layout, ctxOf("A")).map((p) => p.id)).toEqual([useSide.getState().layout.pages[0]!.id]);
+      expect(useSide.getState().layout.open).toBe(true);
+      expect(lanePages(useSide.getState().layout, ctxOf("A")).map((p) => p.id)).toEqual([aPage]);
+      expect(useSide.getState().layout.instances[chat]?.kind).toBe("side-chat.chat");
 
       // Closing A's last content hides the tool area.
       updateLayout((l) => closeInstances(l, [chat]));

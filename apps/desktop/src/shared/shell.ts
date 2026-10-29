@@ -4,7 +4,7 @@ import { parseUpdateProxyPref } from "./proxy";
 import type { CloseBehavior, DesktopPrefs, ShellLocale } from "./ipc";
 import type { ShellTermForms, ShellTerms, ShellTermsPref } from "./ipc";
 import { DEVICE_OFF_NONE, parseDeviceOff } from "./notificationLevels";
-import { isAppLocale, matchAppLocale } from "./locales";
+import { isAppLocale, isTraditionalLocale, localeFallbacks, matchAppLocale, type AppLocale } from "./locales";
 import { parseUpdateRemote, parseUpdateRemotes } from "./update";
 
 export const DEFAULT_PREFS: DesktopPrefs = { closeBehavior: "tray", locale: null, terms: null, updateCheckMinutes: 10, notifyOff: DEVICE_OFF_NONE };
@@ -43,11 +43,38 @@ export function parsePrefs(raw: unknown): DesktopPrefs {
     ...(value.closeBehaviorChosen === true ? { closeBehaviorChosen: true } : {}),
     ...(value.trayNoticeShown === true ? { trayNoticeShown: true } : {}),
     ...(value.allowRemoteClose === false ? { allowRemoteClose: false } : {}),
+    ...(value.multiWindow === true ? { multiWindow: true } : {}),
+    ...(value.multiWindowMigrated === true ? { multiWindowMigrated: true } : {}),
     ...(parseUpdateRemote(value.updateRemote) ? { updateRemote: parseUpdateRemote(value.updateRemote)! } : {}),
     ...(parseUpdateRemotes(value.updateRemotes) ? { updateRemotes: parseUpdateRemotes(value.updateRemotes)! } : {}),
     ...(parseUpdateProxyPref(value.updateProxy) ? { updateProxy: parseUpdateProxyPref(value.updateProxy)! } : {}),
     ...(parseUpdateProxyPref(value.updateProxy)?.hasCredentials && typeof value.updateProxyAuth === "string" && value.updateProxyAuth ? { updateProxyAuth: value.updateProxyAuth } : {}),
   };
+}
+
+/**
+ * 多窗口 (multi-window, docs/desktop-modules.md §24.17), stored by main so main can refuse desk tickets while it is off
+ * (the renderer is untrusted-ish). Two ways in:
+ * - `set`: the owner's switch in Settings — always applies, and closes the migration for good.
+ * - `migrate`: the renderer's old value (the P6 renderer pref, or the P1–P3.5 local flag before it). Adopted only while
+ *   `migrationOpen` — the first run in which main stores the setting (`multiWindowMigrated` absent at load; main records
+ *   it at once, so no later run reopens it) — and only once in that run. After that only `set` changes it: a renderer
+ *   cannot replay the migration to turn desks on behind the owner's back.
+ * Non-booleans are refused by the IPC handler before this.
+ */
+export function multiWindowChange(
+  prefs: DesktopPrefs,
+  migrationOpen: boolean,
+  change: { kind: "set" | "migrate"; value: boolean },
+): { prefs: DesktopPrefs; migrationOpen: boolean; changed: boolean } {
+  if (change.kind === "migrate" && !migrationOpen) return { prefs, migrationOpen: false, changed: false };
+  const { multiWindow: _old, ...rest } = prefs;
+  return { prefs: { ...rest, ...(change.value ? { multiWindow: true } : {}), multiWindowMigrated: true }, migrationOpen: false, changed: true };
+}
+
+/** Load time: a migration is open only when main never recorded one; the marker is written at once (see multiWindowChange). */
+export function openMultiWindowMigration(prefs: DesktopPrefs): { prefs: DesktopPrefs; migrationOpen: boolean } {
+  return prefs.multiWindowMigrated ? { prefs, migrationOpen: false } : { prefs: { ...prefs, multiWindowMigrated: true }, migrationOpen: true };
 }
 
 export function isCloseBehavior(value: unknown): value is CloseBehavior {
@@ -121,7 +148,16 @@ export function attentionCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.min(Math.floor(value), 999) : 0;
 }
 
-const TEXT = {
+interface ShellText {
+  show: string;
+  newChat: string;
+  quit: string;
+  waiting: (n: number, w?: ShellTermForms) => string;
+  overlay: (n: number, w?: ShellTermForms) => string;
+}
+
+// Base locales only; regional Traditional Chinese resolves through shellEntry.
+const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   "zh-CN": {
     show: "显示窗口",
     newChat: "快速启动",
@@ -140,6 +176,14 @@ const TEXT = {
     show: "顯示視窗",
     newChat: "快速啟動",
     quit: "退出",
+    waiting: (n: number, w?: ShellTermForms) => `Cutex — ${n} 個${w?.many ?? "智能體"}等待處理`,
+    overlay: (n: number, w?: ShellTermForms) => `${n} 個${w?.many ?? "智能體"}等待處理`,
+  },
+  // Taiwan wording; zh-Hant-HK / zh-Hant-MO inherit it.
+  "zh-Hant-TW": {
+    show: "顯示視窗",
+    newChat: "快速啟動",
+    quit: "結束",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — ${n} 個${w?.many ?? "智能體"}等待處理`,
     overlay: (n: number, w?: ShellTermForms) => `${n} 個${w?.many ?? "智能體"}等待處理`,
   },
@@ -206,28 +250,42 @@ const TEXT = {
     waiting: (n: number, w?: ShellTermForms) => `Cutex — 대기 중 ${w?.many ?? "에이전트"}: ${n}`,
     overlay: (n: number, w?: ShellTermForms) => `대기 중 ${w?.many ?? "에이전트"}: ${n}`,
   },
-} as const;
+};
+
+/**
+ * The entry for `locale` in a table that lists base locales only: the regional chain (zh-Hant-MO → HK → TW),
+ * then — for Traditional Chinese — zh-Hant-CN, never Simplified; undefined when nothing matches.
+ */
+export function shellEntry<T>(table: Partial<Record<AppLocale, T>>, locale: ShellLocale): T | undefined {
+  for (const l of localeFallbacks(locale)) if (table[l] !== undefined) return table[l];
+  return isTraditionalLocale(locale) ? table["zh-Hant-CN"] : undefined;
+}
+
+const text = (locale: ShellLocale): ShellText => shellEntry(TEXT, locale) ?? TEXT.en;
+const agentWords = (locale: ShellLocale, terms?: ShellTermsPref | null): ShellTermForms | undefined =>
+  (terms?.locale === locale ? terms.terms.agent : undefined) ?? (locale === "zh-Hant-TW" ? { one: "智慧體", many: "智慧體" } : undefined);
 
 export function trayMenuLabels(locale: ShellLocale): { show: string; newChat: string; quit: string } {
-  const t = TEXT[locale];
+  const t = text(locale);
   return { show: t.show, newChat: t.newChat, quit: t.quit };
 }
 
 export function trayTooltip(count: number, locale: ShellLocale, terms?: ShellTermsPref | null): string {
-  return count > 0 ? TEXT[locale].waiting(count, terms?.locale === locale ? terms.terms.agent : undefined) : "Cutex";
+  return count > 0 ? text(locale).waiting(count, agentWords(locale, terms)) : "Cutex";
 }
 
 /** Accessible description for the Windows taskbar overlay icon. */
 export function overlayDescription(count: number, locale: ShellLocale, terms?: ShellTermsPref | null): string {
-  return TEXT[locale].overlay(count, terms?.locale === locale ? terms.terms.agent : undefined);
+  return text(locale).overlay(count, agentWords(locale, terms));
 }
 
 /** Context-menu labels for text inputs (main process), in the UI locale. */
 export function editMenuLabels(locale: ShellLocale) {
-  const table: Record<ShellLocale, { addToDictionary: string; undo: string; redo: string; cut: string; copy: string; paste: string; selectAll: string }> = {
+  const table: Partial<Record<ShellLocale, { addToDictionary: string; undo: string; redo: string; cut: string; copy: string; paste: string; selectAll: string }>> = {
     "zh-CN": { addToDictionary: "添加到词典", undo: "撤销", redo: "重做", cut: "剪切", copy: "复制", paste: "粘贴", selectAll: "全选" },
     en: { addToDictionary: "Add to dictionary", undo: "Undo", redo: "Redo", cut: "Cut", copy: "Copy", paste: "Paste", selectAll: "Select all" },
     "zh-Hant-CN": { addToDictionary: "添加到詞典", undo: "撤銷", redo: "重做", cut: "剪切", copy: "複製", paste: "粘貼", selectAll: "全選" },
+    "zh-Hant-TW": { addToDictionary: "加入字典", undo: "復原", redo: "重做", cut: "剪下", copy: "複製", paste: "貼上", selectAll: "全選" },
     "en-AU": { addToDictionary: "Add to dictionary", undo: "Undo", redo: "Redo", cut: "Cut", copy: "Copy", paste: "Paste", selectAll: "Select all" },
     "ru-RU": { addToDictionary: "Добавить в словарь", undo: "Отменить", redo: "Повторить", cut: "Вырезать", copy: "Копировать", paste: "Вставить", selectAll: "Выделить всё" },
     "fr-FR": { addToDictionary: "Ajouter au dictionnaire", undo: "Annuler", redo: "Rétablir", cut: "Couper", copy: "Copier", paste: "Coller", selectAll: "Tout sélectionner" },
@@ -238,12 +296,12 @@ export function editMenuLabels(locale: ShellLocale) {
     "ja-JP": { addToDictionary: "辞書に追加", undo: "取り消す", redo: "やり直す", cut: "切り取り", copy: "コピー", paste: "貼り付け", selectAll: "すべて選択" },
     "ko-KR": { addToDictionary: "사전에 추가", undo: "실행 취소", redo: "다시 실행", cut: "잘라내기", copy: "복사", paste: "붙여넣기", selectAll: "모두 선택" },
   };
-  return table[locale];
+  return shellEntry(table, locale) ?? table.en!;
 }
 
 /** The one-time Linux first-close notice (main dialog). Other locales fall back to English. */
 export function trayNoticeText(locale: ShellLocale, terms?: ShellTermsPref | null): { title: string; message: string; detail: string; keep: string; quit: string } {
-  const words = terms?.locale === locale ? terms.terms.agent : undefined;
+  const words = agentWords(locale, terms);
   const table: Partial<Record<ShellLocale, { title: string; message: string; detail: string; keep: string; quit: string }>> = {
     "zh-CN": {
       title: "Cutex",
@@ -259,6 +317,13 @@ export function trayNoticeText(locale: ShellLocale, terms?: ShellTermsPref | nul
       keep: "繼續在托盤中運行",
       quit: "關閉窗口時退出",
     },
+    "zh-Hant-TW": {
+      title: "Cutex",
+      message: "Cutex 仍在系統匣中執行",
+      detail: `關閉視窗後 Cutex 會繼續在背景執行，以便${words?.one ?? "智能體"}需要你時提醒你；可從系統匣圖示的選單重新開啟或結束。\n\n如果在頂端列或系統匣裡看不到 Cutex 圖示（例如 GNOME 未安裝 AppIndicator 擴充功能），請選「關閉視窗時結束」。之後可在 設定 → 通用 → 關閉視窗時 修改`,
+      keep: "繼續在系統匣中執行",
+      quit: "關閉視窗時結束",
+    },
     en: {
       title: "Cutex",
       message: "Cutex is still running in the system tray",
@@ -268,5 +333,5 @@ export function trayNoticeText(locale: ShellLocale, terms?: ShellTermsPref | nul
     },
   };
   if (locale === "en-AU") return table.en!;
-  return table[locale] ?? table.en!;
+  return shellEntry(table, locale) ?? table.en!;
 }

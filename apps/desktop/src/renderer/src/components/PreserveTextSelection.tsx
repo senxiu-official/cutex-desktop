@@ -9,6 +9,26 @@ interface Props {
   as?: "div" | "span";
 }
 
+// Reading the selection (getSelection / rangeCount / isCollapsed) makes the browser bring style up to
+// date — a forced style recalc per streamed update of every message. Whether there is a selection at all
+// is read once, then followed from `selectionchange` (fired for every change of the selection).
+// Per document: a desk window has its own selection (multi-window).
+const selectionSeen = new WeakMap<Document, boolean>();
+const hasSelection = (doc: Document) => {
+  const selection = doc.getSelection();
+  return !!selection && selection.rangeCount > 0 && !selection.isCollapsed;
+};
+function selectionPossible(doc: Document): boolean {
+  if (typeof document === "undefined") return true;
+  let seen = selectionSeen.get(doc);
+  if (seen === undefined) {
+    seen = hasSelection(doc);
+    selectionSeen.set(doc, seen);
+    doc.addEventListener("selectionchange", () => void selectionSeen.set(doc, hasSelection(doc)));
+  }
+  return seen;
+}
+
 /**
  * getSnapshotBeforeUpdate is React's commit-before-mutation boundary. A layout effect's cleanup
  * is too late for Text.data changes, which can already have collapsed the browser selection.
@@ -19,7 +39,7 @@ export class PreserveTextSelection extends Component<Props> {
   private setRoot = (element: HTMLElement | null): void => { this.root = element; };
 
   getSnapshotBeforeUpdate(previous: Props): TextSelectionSnapshot | null {
-    return !Object.is(previous.revision, this.props.revision) && this.root
+    return !Object.is(previous.revision, this.props.revision) && this.root && selectionPossible(this.root.ownerDocument)
       ? captureTextSelection(this.root) : null;
   }
 

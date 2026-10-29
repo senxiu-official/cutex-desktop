@@ -27,3 +27,41 @@ export function canOpenSubAgent(threadId: string, f: AgentFeatures): boolean {
 export function isClaudeAgentTool(item: RawItem): boolean {
   return item.type === "dynamicToolCall" && item.namespace === "claude" && (item.tool === "Agent" || item.tool === "Task");
 }
+
+/** A Claude Agent / Task card that started a background subagent (`run_in_background` not false). */
+export function isBackgroundClaudeAgentTool(item: RawItem): boolean {
+  const args = item.arguments && typeof item.arguments === "object" ? (item.arguments as Record<string, unknown>) : {};
+  return isClaudeAgentTool(item) && args.run_in_background !== false;
+}
+
+/** The task id of a `claude:<session>:task:<id>` reference (null for anything else). */
+export function claudeTaskIdOf(ref: unknown): string | null {
+  if (!isClaudeTaskRef(ref)) return null;
+  const at = (ref as string).lastIndexOf(":task:");
+  return at < 0 ? null : (ref as string).slice(at + 6) || null;
+}
+
+/**
+ * Status of a Claude SDK task (adapter `claude/task/updated`, claude-r23 background subagents) as a
+ * sub-agent status (`CollabAgentStatus` words): running / completed / errored / interrupted; null for
+ * shell tasks and anything unknown. `lost` = the Claude runtime restarted while it ran.
+ */
+export function claudeTaskStatus(task: { taskType?: unknown; status?: unknown } | null | undefined): string | null {
+  if (!task || !["local_agent", "agent", "subagent"].includes(String(task.taskType))) return null;
+  switch (task.status) {
+    case "running":
+    case "pending":
+      return "running";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "errored";
+    case "stopped":
+    case "killed":
+    case "cancelled":
+    case "lost":
+      return "interrupted";
+    default:
+      return null;
+  }
+}

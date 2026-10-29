@@ -4,6 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { queueSendNowMode } from "../src/renderer/src/lib/delegationTurn";
 import { normalizeEntries, type MenuAction } from "../src/renderer/src/lib/contextMenu";
 import { viewKey } from "../src/renderer/src/lib/viewKey";
+// The store and the menus at the top (bridge mocked — vi.mock is hoisted): loaded inside the first test they cost
+// it up to 3 s alone and timed it out (5 s) under the full suite's load. Same single instances as before.
+import { useApp } from "../src/renderer/src/store";
+import { agentMenu } from "../src/renderer/src/lib/menus";
 
 const PAUSE = { since: "2026-10-08T12:00:00Z", by: "owner", origin: "ownerPause" as const };
 const api = vi.hoisted(() => ({
@@ -15,7 +19,6 @@ vi.mock("../src/renderer/src/bridge", () => ({ api, onEvent: () => () => {} }));
 const t = (key: string) => key;
 
 async function seed(features: string[], asksPaused: typeof PAUSE | null = null) {
-  const { useApp } = await import("../src/renderer/src/store");
   useApp.setState({ features: new Set(features), sessions: { [viewKey("local", "a")]: { asksPaused } as never } });
   return useApp;
 }
@@ -47,7 +50,6 @@ describe("asks pause (asks-pause-v2)", () => {
   });
 
   it("agent menu offers 暂停委托 / 继续委托 only with the capability", async () => {
-    const { agentMenu } = await import("../src/renderer/src/lib/menus");
     const labels = () => normalizeEntries(agentMenu(session, t as never)).map((e) => (e === "separator" ? "|" : (e as MenuAction).label));
     await seed(["asks-pause-v2"]);
     expect(labels()).toContain("asksPause.pause");

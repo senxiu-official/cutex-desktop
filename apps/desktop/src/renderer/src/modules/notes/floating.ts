@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { isHTMLElement } from "../../lib/ownerWindow";
+import { activeAppDocument } from "../../lib/appWindowSet";
 
 export interface NoteFloat {
   id: string; hostId: string; sessionId: string; turnId: string; editing: boolean;
@@ -7,7 +9,8 @@ export interface NoteFloat {
 }
 export const useNoteFloat = create<{ active: NoteFloat | null }>(() => ({ active: null }));
 export function openTurnNotes(hostId: string, sessionId: string, turnId: string, editing = false, trigger?: HTMLElement | null) {
-  const focused = typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const active = typeof document !== "undefined" ? activeAppDocument().activeElement : null;
+  const focused = isHTMLElement(active) ? active : null;
   useNoteFloat.setState({ active: { id: crypto.randomUUID(), hostId, sessionId, turnId, editing, trigger: trigger ?? focused } });
 }
 export function closeTurnNotes(id: string) {

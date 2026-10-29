@@ -8,6 +8,9 @@
 //   from another desktop: shown as 「名字或头像已在你另一台电脑上改过」).
 // - Only what differs from the host's view (capabilities `user`) is sent; the avatar is compared by
 //   ETag (cutex's: SHA-256 prefix of the bytes).
+// - A desktop without its own name / picture (never edited here, none set) fills a host's empty field
+//   with the one your other hosts have (lib/identityHosts: the most recently changed); never with the
+//   OS account name, and never over a value a host already has.
 // - Older cutex / pending devices: nothing is sent (local only, as before).
 // Settings → 你 words the per-host states as one summary line under 「你」 plus exceptions per host
 // (lib/identityPublish syncSummary / syncIssue).
@@ -18,7 +21,9 @@ import { useApp } from "../store";
 import { hostAccessStore, noteSelfProfile } from "./hostAccess";
 import { prepareAvatar, type PreparedAvatar } from "./identityAvatar";
 import { getIdentityPrefs, subscribeIdentityPrefs, type IdentityPrefs } from "./identityPrefs";
-import { planIdentityPublish, publishedName, recordPublished, type IdentitySyncStatus, type Published } from "./identityPublish";
+import { planIdentityRound, publishedName, recordPublished, type IdentityPlan, type IdentitySyncStatus, type Published } from "./identityPublish";
+import { adoptedIdentityNow, observeHostIdentities } from "./identityHosts";
+import type { AdoptedIdentity } from "./identity";
 import { noteUserAvatar } from "./userAvatars";
 import { translate } from "../i18n";
 import { memberName } from "./myAccess";
@@ -71,15 +76,26 @@ function connectedHosts(): HostNow[] {
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-async function publishTo(host: HostNow, prefs: IdentityPrefs, published: Published): Promise<IdentitySyncStatus> {
+/** The picture your other hosts have for you (adoptedIdentity), prepared for upload; null: none / unreadable. */
+async function adoptedAvatar(source: AdoptedIdentity["picture"]): Promise<PreparedAvatar | null> {
+  if (!source) return null;
+  const found = await apiFor(source.hostId).userAvatar(source.userId).catch(() => null);
+  return found?.dataUrl ? prepareAvatar(found.dataUrl) : null;
+}
+
+async function publishTo(host: HostNow, plan: IdentityPlan, prefs: IdentityPrefs, published: Published, avatar: PreparedAvatar | null, adopted: () => Promise<PreparedAvatar | null>): Promise<IdentitySyncStatus> {
   const access = hostAccessStore.get()[host.hostId] ?? null;
-  let avatar = prefs.picture ? await prepareAvatar(prefs.picture) : null;
-  const plan = planIdentityPublish({ features: host.features, access, prefs, published: published[host.hostId], avatar });
   if (!plan.patch) {
     if (plan.state === "synced") published[host.hostId] = recordPublished(prefs, published[host.hostId], { displayName: access?.displayName ?? null, avatarEtag: access?.avatarEtag ?? null });
     return { state: plan.state };
   }
   useStatus.setState({ [host.hostId]: { state: "syncing" } });
+  // "upload" without a local picture: the one adopted from another host (filling an empty avatar).
+  if (!prefs.picture && plan.patch.avatar === "upload") {
+    avatar = await adopted();
+    if (!avatar) delete plan.patch.avatar;
+    if (!Object.keys(plan.patch).length) return { state: "local" };
+  }
   const api = apiFor(host.hostId);
   const send = (a: PreparedAvatar | null) => {
     const body: SelfProfilePatch = {};
@@ -118,9 +134,24 @@ async function run(): Promise<void> {
       const prefs = getIdentityPrefs();
       const published = readPublished();
       const next: Record<string, IdentitySyncStatus> = {};
-      for (const host of connectedHosts()) {
+      const hosts = connectedHosts();
+      const avatar = prefs.picture ? await prepareAvatar(prefs.picture).catch(() => null) : null;
+      // Your identity as your hosts have it: fills empty hosts when this desktop has none of its own.
+      const found = adoptedIdentityNow(useApp.getState().hosts?.active ?? "local");
+      let adopted: Promise<PreparedAvatar | null> | null = null;
+      const adoptedPicture = () => (adopted ??= adoptedAvatar(found.picture));
+      const plans = planIdentityRound({
+        hosts,
+        access: hostAccessStore.get(),
+        prefs,
+        published,
+        avatar,
+        // The adopted picture is only fetched when a host needs it; its ETag is the source's.
+        adopted: { name: found.name, avatar: found.picture ? { etag: found.picture.etag } : null },
+      });
+      for (const host of hosts) {
         try {
-          next[host.hostId] = await publishTo(host, prefs, published);
+          next[host.hostId] = await publishTo(host, plans[host.hostId]!, prefs, published, avatar, adoptedPicture);
         } catch (e) {
           next[host.hostId] = { state: "failed", error: message(e) };
         }
@@ -163,7 +194,12 @@ export function startIdentitySync(): void {
     }
   };
   useApp.subscribe(onApp);
-  hostAccessStore.subscribe(schedule);
+  // What each host has for you, with when it changed (a desktop without its own 「你」 shows the latest).
+  observeHostIdentities();
+  hostAccessStore.subscribe(() => {
+    observeHostIdentities();
+    schedule();
+  });
   subscribeIdentityPrefs(schedule);
   onApp();
   // P2 person identity: main sends this name with identity claims (shown on a host's pending card).

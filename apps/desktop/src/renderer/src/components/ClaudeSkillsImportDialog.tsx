@@ -1,3 +1,4 @@
+import { isImeComposing } from "../lib/ime";
 // 从 ~/.claude/skills 导入… (cutex `claude-skills-import`, owner): lists the skills of a directory on
 // `hostId` (default: that host user's ~/.claude/skills), lets the owner pick some and copies them into
 // the host's shared ~/.cutex/claude-skills (lib/claudeSkillsImport). Opened from a Claude agent's
@@ -10,8 +11,11 @@ import { useI18n } from "../i18n";
 import { formatBytes, initialSelection, namesToImport, reasonKey, resultCounts, selectable } from "../lib/claudeSkillsImport";
 import { hostApi } from "../store";
 import { Checkbox } from "./settings/Form";
+import { Tag } from "./Tag";
+import { useOverlayRoot } from "../lib/ownerContext";
 
 export function ClaudeSkillsImportDialog({ hostId, onClose, onImported }: { hostId: string; onClose(): void; onImported?(): void }) {
+  const overlayRoot = useOverlayRoot();
   const { t } = useI18n();
   const [list, setList] = useState<ClaudeSkillsImportList | null>(null);
   const [source, setSource] = useState("");
@@ -74,7 +78,7 @@ export function ClaudeSkillsImportDialog({ hostId, onClose, onImported }: { host
         aria-labelledby="claude-skills-import-title"
         data-testid="claude-skills-import-dialog"
         className="flex max-h-[76vh] w-[34rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border border-border bg-surface p-4 shadow-2xl"
-        onKeyDown={(e) => e.key === "Escape" && !busy && onClose()}
+        onKeyDown={(e) => !isImeComposing(e) && (e.key === "Escape" && !busy && onClose())}
       >
         <div id="claude-skills-import-title" className="mb-1 flex items-center gap-2 text-sm font-medium">
           <Download size={16} className="shrink-0 text-muted" />
@@ -118,6 +122,7 @@ export function ClaudeSkillsImportDialog({ hostId, onClose, onImported }: { host
                   spellCheck={false}
                   onChange={(e) => setSource(e.target.value)}
                   onKeyDown={(e) => {
+                    if (isImeComposing(e)) return;
                     if (e.key === "Enter") {
                       e.preventDefault();
                       load(source.trim());
@@ -149,9 +154,9 @@ export function ClaudeSkillsImportDialog({ hostId, onClose, onImported }: { host
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5 text-sm">
                             <span className={`truncate ${s.importable ? "" : "text-muted"}`}>{s.title ?? s.name}</span>
-                            {s.title && s.title !== s.name && <span className="truncate font-mono text-[11px] text-subtle">{s.name}</span>}
-                            {s.exists && <span className="shrink-0 rounded bg-surface-2 px-1 text-[10px] text-muted">{t("claudeSkillsImport.exists")}</span>}
-                            <span className="ml-auto shrink-0 text-[11px] text-subtle tabular-nums">{formatBytes(s.bytes)}</span>
+                            {s.title && s.title !== s.name && <span className="truncate font-mono text-caption/[inherit] text-subtle">{s.name}</span>}
+                            {s.exists && <Tag>{t("claudeSkillsImport.exists")}</Tag>}
+                            <span className="ml-auto shrink-0 text-caption/[inherit] text-subtle tabular-nums">{formatBytes(s.bytes)}</span>
                           </span>
                           {s.description && <span className="block truncate text-xs text-subtle" title={s.description}>{s.description}</span>}
                           {!s.importable && <span className="block text-xs text-warn-text">{t(reasonKey(s.reason))}</span>}
@@ -183,6 +188,6 @@ export function ClaudeSkillsImportDialog({ hostId, onClose, onImported }: { host
         )}
       </div>
     </div>,
-    document.body,
+    overlayRoot,
   );
 }

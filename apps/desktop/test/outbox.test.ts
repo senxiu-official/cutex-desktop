@@ -196,6 +196,9 @@ describe("outbox: failure", () => {
     applyEvent(tl, userItem("u1", "go", "t1", "c1"));
     expect(reconcileOutbox(list, tl, [])).toEqual([]);
   });
+  it("translates an owner-required refusal after the IPC wrapper", () => {
+    expect(sendErrorText(new Error("Error invoking remote method 'submit': Error: owner_required: this route is the host owner's"), () => "capacity", code => `translated:${code}`)).toBe("translated:owner_required");
+  });
   it("shows cutex's full request store (503 idempotency_capacity_exceeded) as a readable message", () => {
     const capacity = () => "cutex is overloaded";
     // The code is the message prefix after the IPC hop (Electron's wrapper is stripped in bridge.ts).

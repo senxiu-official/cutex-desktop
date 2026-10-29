@@ -14,6 +14,7 @@ import { deletedIdOfEvent, isAlerting, isPending, isSystemNotice, mergeRecords, 
 import { api, apiFor, bridge } from "../bridge";
 import { translate } from "../i18n";
 import { useFocusRequest } from "./focusRequest";
+import { appHasFocus } from "./appFocus";
 import { onHostReset } from "./hostSwitch";
 import { emitNotify, retractNotify } from "./notifyEvents";
 import { ownerNoteActions } from "./ownerNotify";
@@ -267,7 +268,7 @@ export function startOwnerNotifySync(handle: OwnerNotifyAppHandle): void {
       projectId: row ? (row.projectId ?? null) : undefined,
       title: `${label ? `${label} · ` : ""}${from} · ${level}`,
       body: previewText(record.text, 200),
-      looking: focus && document.hasFocus() && s.view.kind === "conversation" && s.selectedId === record.agentId,
+      looking: focus && appHasFocus() && s.view.kind === "conversation" && s.selectedId === record.agentId,
       skip: ["bigAlert", ...(record.channels.includes("bigAlert") ? ["sound"] : [])],
       onClick: () => focusHostOwnerNote(hostId, record.agentId, record.notificationId),
     });

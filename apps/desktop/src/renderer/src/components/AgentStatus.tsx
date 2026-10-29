@@ -1,4 +1,4 @@
-// Sidebar v2 status visuals: avatar with the running ring / grey offline look, and the row's status
+// Sidebar v2 status visuals: avatar with its status (components/Avatar `status`), and the row's status
 // tail in three tiers (lib/statusTail): attention pills (需要你 / 待审核 / 出错 …), the running dot +
 // elapsed time, passive muted text. Rules live in lib/agentAttention and lib/statusTail.
 import type { SessionAvatar } from "@cutex-desktop/protocol";
@@ -7,43 +7,21 @@ import { useI18n } from "../i18n";
 import { formatElapsed, type AgentSignal, type NeedsYou } from "../lib/agentAttention";
 import { signalLabel, useNow } from "../lib/attentionView";
 import { Avatar } from "./Avatar";
-import { agentPictureOf } from "../lib/agentPicture";
-import { minorDotSize } from "../lib/avatarDefault";
-import { useMinorDot } from "../lib/agentLook";
+import { avatarPresence, type AvatarBadge } from "../lib/avatarStatus";
+import { Tag, type TagTone } from "./Tag";
 
-/** `running`: ring even when another signal wins (a running agent that also needs the owner).
- *  `minor`: a list row (Avatar `minor`); a minor agent's ring hugs its dot. */
-export function StatusAvatar({ name, initial, color, avatar, size, signal, running, seed, minor }: { name: string; initial?: string; color?: string | null; avatar?: SessionAvatar | null; seed?: string | null; size: number; signal: AgentSignal; running?: boolean; minor?: boolean }) {
-  const { t } = useI18n();
-  const offline = signal === "offline";
-  // Not confirmed yet (lib/sidebar `unknown`): dimmed, with a hollow grey dot — 「连接中」, not offline.
-  const unknown = signal === "unknown";
-  const dot = Math.max(5, Math.round(size * 0.32));
-  const minorDot = useMinorDot(seed, avatar, agentPictureOf(avatar), minor);
-  const ring = <span className="agent-ring" aria-hidden />;
-  return (
-    <span className={`relative inline-flex shrink-0 ${offline ? "opacity-50 grayscale" : unknown ? "opacity-60" : ""}`} title={unknown ? t("status.unknown") : undefined} data-status-unknown={unknown ? "" : undefined}>
-      <Avatar name={name} initial={initial} color={color} avatar={avatar} seed={seed} size={size} minor={minor} />
-      {(running ?? signal === "running") &&
-        (minorDot ? (
-          <span className="absolute inset-0 flex items-center justify-center" aria-hidden>
-            <span className="relative block" style={{ width: minorDotSize(size), height: minorDotSize(size) }}>{ring}</span>
-          </span>
-        ) : (
-          ring
-        ))}
-      {unknown && (
-        <span role="img" aria-label={t("status.unknown")} className="absolute -right-0.5 -bottom-0.5 rounded-full border-[1.5px] border-subtle bg-background" style={{ width: dot, height: dot }} />
-      )}
-    </span>
-  );
+/** An agent avatar with its status (docs/design/040 §3.1): maps a sidebar signal onto Avatar `status` — the
+ *  running ring, grey when offline, the hollow dot while unknown. `running`: ring even when another signal wins
+ *  (a running agent that also needs the owner). `badge`: the corner badge (lib/avatarStatus avatarBadge); sites
+ *  that show the request elsewhere (a row's 需要你 pill) leave it out. `minor`: a list row (Avatar `minor`). */
+export function StatusAvatar({ name, initial, color, avatar, size, signal, running, seed, minor, badge }: { name: string; initial?: string; color?: string | null; avatar?: SessionAvatar | null; seed?: string | null; size: number; signal: AgentSignal; running?: boolean; minor?: boolean; badge?: AvatarBadge | null }) {
+  return <Avatar name={name} initial={initial} color={color} avatar={avatar} seed={seed} size={size} minor={minor} status={{ running: running ?? signal === "running", badge, presence: avatarPresence(signal) }} />;
 }
 
-const ATTENTION: Record<"warn" | "danger", string> = { warn: "bg-warn text-background", danger: "bg-danger text-background" };
-/** Attention pill (lib/statusTail tier attention, tones warn / danger); tone quiet = dot + muted text. */
-const PILL = "inline-flex h-4 shrink-0 items-center rounded-full px-1.5 text-[10px] leading-4 font-semibold whitespace-nowrap tabular-nums";
+const ATTENTION: Record<"warn" | "danger", TagTone> = { warn: "attention", danger: "danger" };
+/** Attention pill (lib/statusTail tier attention, tones warn / danger) is a Tag (design 040); tone quiet = dot + muted text. */
 /** Muted tail text: 运行中 time, 完成, last activity. Fixed line box so the row never changes height. */
-const TAIL_TEXT = "inline-flex h-4 shrink-0 items-center text-[11px] leading-4 whitespace-nowrap tabular-nums";
+const TAIL_TEXT = "inline-flex h-4 shrink-0 items-center text-caption/[inherit] leading-4 whitespace-nowrap tabular-nums";
 
 /**
  * The tail of a row that wants the owner: needs-you / 出错 = an attention pill (lib/statusTail), 完成 =
@@ -52,7 +30,7 @@ const TAIL_TEXT = "inline-flex h-4 shrink-0 items-center text-[11px] leading-4 w
  * measuring for 状态标签 自动 — the tail sits in a `data-fit-chip` slot with an invisible copy of the
  * full pill (`data-fit-measure`).
  */
-export function StatusPill({ signal, needs, className = "", compact = false, fit = false }: { signal: AgentSignal; needs?: NeedsYou; className?: string; compact?: boolean; fit?: boolean }) {
+export function StatusPill({ signal, needs, className = "", compact = false, fit = false, plain = false }: { signal: AgentSignal; needs?: NeedsYou; className?: string; compact?: boolean; fit?: boolean; plain?: boolean }) {
   const { t } = useI18n();
   const label = signalLabel(t, signal, needs);
   if (!label) return null;
@@ -66,12 +44,21 @@ export function StatusPill({ signal, needs, className = "", compact = false, fit
         {short ?? label}
       </span>
     );
+  } else if (tail.tier === "attention" && plain) {
+    // Design 040 §3.1: the request is on the avatar (corner badge, with the count); beside it only the reason, as text.
+    if (compact) return null;
+    const word = signal === "needsYou" && (needs?.count ?? 0) > 1 ? t("agentStatus.needsYou") : label;
+    pill = (
+      <span data-tail-tier="attention" data-tail-tone={tail.tone} data-tail-plain="" className={`${TAIL_TEXT} font-medium ${tail.tone === "danger" ? "text-danger" : "text-warn-text"} ${className}`}>
+        {word}
+      </span>
+    );
   } else if (tail.tier === "attention") {
     const short = compact ? compactAttentionText(signal, needs) : null;
     pill = (
-      <span data-tail-tier="attention" data-tail-tone={tail.tone} title={short ? label : undefined} aria-label={short ? label : undefined} role={short ? "img" : undefined} className={`${PILL} ${ATTENTION[tail.tone === "danger" ? "danger" : "warn"]} ${className}`}>
+      <Tag tone={ATTENTION[tail.tone === "danger" ? "danger" : "warn"]} data-tail-tier="attention" data-tail-tone={tail.tone} title={short ? label : undefined} aria-label={short ? label : undefined} role={short ? "img" : undefined} className={`tabular-nums ${className}`}>
         {short ?? label}
-      </span>
+      </Tag>
     );
   } else if (tail.tier === "passive" && tail.kind === "done") {
     pill = <span data-tail-tier="passive" className={`${TAIL_TEXT} text-muted ${className}`}>{label}</span>;
@@ -79,9 +66,9 @@ export function StatusPill({ signal, needs, className = "", compact = false, fit
   if (!fit) return pill;
   return (
     <span data-fit-chip="" className="relative flex shrink-0">
-      <span data-fit-measure="" aria-hidden className={`pointer-events-none invisible absolute top-0 right-0 ${PILL}`}>
+      <Tag tone={ATTENTION[tail.tier === "attention" && tail.tone === "danger" ? "danger" : "warn"]} data-fit-measure="" aria-hidden className="pointer-events-none invisible absolute top-0 right-0 tabular-nums">
         {label}
-      </span>
+      </Tag>
       {pill}
     </span>
   );
@@ -97,7 +84,7 @@ export function RunningTime({ since, className = "", dot = false }: { since: num
   const now = useNow(young ? 1000 : 15_000);
   const text = formatElapsed(now - since);
   return (
-    <span data-tail-tier={dot ? "activity" : undefined} className={`${dot ? `${TAIL_TEXT} gap-1` : "shrink-0 text-[10px]"} text-muted tabular-nums ${className}`} title={t("agentStatus.runningFor", { time: text })}>
+    <span data-tail-tier={dot ? "activity" : undefined} className={`${dot ? `${TAIL_TEXT} gap-1` : "shrink-0 text-caption/[inherit]"} text-muted tabular-nums ${className}`} title={t("agentStatus.runningFor", { time: text })}>
       {dot && <RunningDot />}
       {text}
     </span>

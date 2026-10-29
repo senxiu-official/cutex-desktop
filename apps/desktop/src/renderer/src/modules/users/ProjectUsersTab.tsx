@@ -6,7 +6,7 @@
 // module needs `users`, which a non-owner connection's feature set never has; checked here again.
 import { useState } from "react";
 import { isOwnerFeatures, shownUserName, type UserGrant, type UserRecord } from "../../../../shared/users";
-import { ErrorNote, ListRow, Loading, RefreshButton, Section, Toggle } from "../../components/settings/Form";
+import { ErrorNote, ListRow, Loading, RefreshButton, Section, SettingsGroup, Toggle } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
 import { setSettingsHost } from "../../lib/settingsHost";
 import { TargetHostContext, useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
@@ -97,7 +97,7 @@ function ProjectUsers({ projectId }: { projectId: string }) {
           {t("users.project.none")} <SettingsLink>{t("users.project.openSettings")}</SettingsLink>
         </p>
       )}
-      {users.map((user) => {
+      {users.length > 0 && <SettingsGroup agents="access" source="host">{users.map((user) => {
         const access = projectAccess(shownGrant(user, list.revision, fresh), projectId);
         const busy = pending.has(user.id);
         const name = shownUserName(user);
@@ -123,7 +123,7 @@ function ProjectUsers({ projectId }: { projectId: string }) {
             }
           />
         );
-      })}
+      })}</SettingsGroup>}
     </Section>
   );
 }

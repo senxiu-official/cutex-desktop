@@ -81,6 +81,14 @@ export function foldView(auto: boolean, manual: FoldManual | undefined, lines: n
   };
 }
 
+/** Whether a re-measured message changes what React must draw (not the hover-only can-fold flag). */
+export function foldPresentationChanged(auto: boolean, manual: FoldManual | undefined, previousLines: number, nextLines: number, threshold: number): boolean {
+  const before = foldView(auto, manual, previousLines, threshold);
+  const after = foldView(auto, manual, nextLines, threshold);
+  if (before.overflowing && after.overflowing) return true;
+  return before.clipLines !== after.clipLines || before.overflowing !== after.overflowing || before.collapsible !== after.collapsible;
+}
+
 /**
  * Agent messages of the latest reply: those of the newest turn that has agent text. They never
  * auto-fold, so a turn's commentary does not fold away while its next message streams in.

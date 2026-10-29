@@ -13,7 +13,7 @@ export function PermissionDetail({ effective, editable }: { effective: Effective
         <div key={line.key} className="text-muted">{t(line.key, line.params)}</div>
       ))}
       {!editable && effective.writableRoots.map((root) => (
-        <div key={root} title={root} className="ml-2 truncate font-mono text-[11px]">{root}</div>
+        <div key={root} title={root} className="ml-2 truncate font-mono text-caption/[inherit]">{root}</div>
       ))}
     </div>
   );

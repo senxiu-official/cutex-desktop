@@ -4,10 +4,17 @@ import type { Json } from "../types";
 export const BROWSER_TAB = "browser.tab";
 export const MAX_BROWSER_URL = 2000;
 export const MAX_BROWSER_INPUT = 8000;
-export type BrowserParams = { url: string; pendingOpen?: string; tabKey?: string; agentOpened?: true; ownerTab?: true };
+export type BrowserParams = { url: string; pendingOpen?: string; tabKey?: string; agentOpened?: true; ownerTab?: true; linked?: string };
 /** front: an agent tab the owner brought into the card's webview (otherwise agent tabs run in main's
  * background carrier). Only meaningful with agentOpened; never selects a cookie pool. */
-export type BrowserState = { url: string; title: string; tabKey: string; pendingOpen?: string; agentOpened?: true; newOwner?: true; front?: true };
+/** linked: a service tab opened from its agent's conversation header (lib/serviceLink): that agent's session id —
+ * a label for the pane (the agent's avatar, 断开), never a permission or a cookie pool. */
+export type BrowserState = { url: string; title: string; tabKey: string; pendingOpen?: string; agentOpened?: true; newOwner?: true; front?: true; linked?: string };
+
+/** A linked agent's session id as kept in params / state (a bounded plain token), else null. */
+export function browserLinked(raw: unknown): string | null {
+  return typeof raw === "string" && /^[A-Za-z0-9._:-]{1,200}$/.test(raw) ? raw : null;
+}
 // The shell's instance id is only scope-local. This key identifies the page across scopes;
 // it is not a lease, a guest id, a partition selector or an authorization credential.
 export function isBrowserTabKey(value: unknown): value is string {
@@ -155,7 +162,9 @@ export function parseBrowserParams(raw: Json): BrowserParams | null {
     if (!isBrowserTabKey(raw.tabKey)) return null;
     return { url, tabKey: raw.tabKey, ownerTab: true };
   }
-  return { url };
+  // Only a service tab can be linked to an agent (its conversation header opened it).
+  const linked = url.startsWith("cutex:service/") ? browserLinked(raw.linked) : null;
+  return linked ? { url, linked } : { url };
 }
 
 export function initBrowser(params: BrowserParams, previous: BrowserState | null): BrowserState {
@@ -164,7 +173,7 @@ export function initBrowser(params: BrowserParams, previous: BrowserState | null
   if (params.ownerTab && isBrowserTabKey(params.tabKey)) return { url: params.url, title: "", tabKey: params.tabKey };
   return { url: params.url, title: previous?.url === params.url ? browserTitle(previous.title) : "",
     tabKey: isBrowserTabKey(previous?.tabKey) ? previous.tabKey : crypto.randomUUID(), ...(previous?.agentOpened ? { agentOpened: true } : {}),
-    ...(!previous || previous.newOwner ? { newOwner: true as const } : {}) };
+    ...(!previous || previous.newOwner ? { newOwner: true as const } : {}), ...(params.linked ? { linked: params.linked } : {}) };
 }
 
 export function restoreBrowser(raw: Json, version: number): BrowserState | null {
@@ -175,8 +184,9 @@ export function restoreBrowser(raw: Json, version: number): BrowserState | null 
   // Never restore newOwner: only a newly initialized card may ask main to allocate a
   // different, fresh UUID. This is a workflow hint, not authority over the supplied key.
   const params = parseBrowserParams(raw);
+  const linked = params?.url.startsWith("cutex:service/") ? browserLinked(raw.linked) : null;
   return params ? { url: params.url, title: browserTitle(raw.title), tabKey: isBrowserTabKey(raw.tabKey) ? raw.tabKey : crypto.randomUUID(),
-    ...(raw.agentOpened === true ? { agentOpened: true as const, ...(raw.front === true ? { front: true as const } : {}) } : {}) } : null;
+    ...(raw.agentOpened === true ? { agentOpened: true as const, ...(raw.front === true ? { front: true as const } : {}) } : {}), ...(linked ? { linked } : {}) } : null;
 }
 
 export function browserRef(state: BrowserState): { key: string; title: string; params: { url: string } } | null {

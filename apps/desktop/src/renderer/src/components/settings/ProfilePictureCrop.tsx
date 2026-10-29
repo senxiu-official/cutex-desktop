@@ -3,11 +3,16 @@ import { createPortal } from "react-dom";
 import { useI18n } from "../../i18n";
 import { croppedPicture, INITIAL_CROP, squareCrop, type CropPosition } from "../../lib/imageCrop";
 import { AVATAR_PX } from "../../lib/profileAvatar";
-import { Button } from "./Form";
+import { useProfileLooksSynced } from "../../lib/profileLooks";
+import { useTargetHostId } from "../../lib/targetHost";
+import { Button, SettingsGroup } from "./Form";
+import { useOverlayRoot } from "../../lib/ownerContext";
 
 /** Both picture upload entry points share this cropper; confirmation only updates the draft. */
 export function ProfilePictureCrop({ file, onCancel, onConfirm }: { file: File; onCancel(): void; onConfirm(picture: string): void }) {
+  const overlayRoot = useOverlayRoot();
   const { t } = useI18n();
+  const synced = useProfileLooksSynced(useTargetHostId());
   const title = useId();
   const hint = useId();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -90,6 +95,7 @@ export function ProfilePictureCrop({ file, onCancel, onConfirm }: { file: File; 
         {/* Square output, with a circular guide matching the avatar's actual display. */}
         <div className="pointer-events-none absolute inset-0 rounded-full border border-white/70 shadow-[0_0_0_80px_#0004]" />
       </div>
+      <SettingsGroup agents="none" source={synced ? "host" : "local"}>
       <label className="mt-4 flex items-center gap-3 text-xs">
         <span>{t("settings.profile.picture.zoom")}</span>
         <input type="range" min="1" max="4" step="0.01" value={position.zoom} disabled={!image || saving}
@@ -101,12 +107,13 @@ export function ProfilePictureCrop({ file, onCancel, onConfirm }: { file: File; 
           }} className="min-w-0 flex-1 accent-[var(--accent)]" />
         <span className="w-10 text-right tabular-nums">{Math.round(position.zoom * 100)}%</span>
       </label>
+      </SettingsGroup>
       {error && <p role="alert" className="mt-2 text-xs text-danger">{t("settings.profile.picture.bad")}</p>}
       <div className="mt-4 flex items-center justify-end gap-2">
         <Button disabled={!image || saving} onClick={() => setPosition(INITIAL_CROP)}>{t("settings.profile.picture.reset")}</Button>
         <Button onClick={onCancel}>{t("dialog.cancel")}</Button>
         <Button primary disabled={!image || saving} onClick={() => void confirm()}>{t("settings.profile.picture.useCrop")}</Button>
       </div>
-    </dialog>, document.body,
+    </dialog>, overlayRoot,
   );
 }

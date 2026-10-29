@@ -1,6 +1,6 @@
 // Owner-facing text only; unknown codes never fall back to raw daemon/page messages.
 export const browserErrorMessagesZhCN = {
-  "browser.origins.doNotSignIn": "不要在此登录：此标签位于与{{agent}}标签共享的隔离登录环境。请新建{{owner}}标签后再登录。",
+  "browser.origins.doNotSignIn": "你正在{{agent}}共用的登录环境中输入登录信息，请勿使用个人账号。",
   "browser.origins.reset": "重置来源记录",
   "browser.origins.resetHint": "归档损坏的来源记录并开始新记录。不会清除登录信息或改变现有标签的登录环境；无法确认来源的旧标签继续隔离",
   "browser.origins.resetDone": "来源记录已检查并恢复可用。现有隔离标签仍保持隔离；需要登录时请新建标签。",
@@ -13,8 +13,8 @@ export const browserErrorMessagesZhCN = {
   "browser.error.unavailable": "浏览器或主机暂时不可用，请检查连接。",
   "browser.error.closed": "目标标签已关闭或重建，请重新选择标签。",
   "browser.error.revoked": "控制权已撤销，请由{{owner}}重新授予。",
-  "browser.error.hidden": "目标卡片不可见（Cutex 窗口最小化、被其他窗口完全挡住，或卡片未显示）；请把它显示在前台后再操作。",
-  "browser.error.paused": "{{owner}}暂停了控制；点「继续」即可恢复同一授权。",
+  "browser.error.hidden": "目标窗格不可见（Cutex 窗口最小化、被其他窗口完全挡住，或窗格未显示）；请把它显示在前台后再操作。",
+  "browser.error.paused": "{{owner}}暂停了控制；左键点击「继续」即可恢复同一授权。",
   "browser.error.scope": "当前视图范围无法打开或保留此标签。",
   "browser.error.stale": "连接或页面引用已过期，请重新读取后操作。",
   "browser.error.deadline": "操作已超时；不要自动重放可能已执行的动作。",
@@ -33,7 +33,7 @@ export const browserErrorMessagesZhCN = {
   "browser.error.desktopRestarted": "桌面应用重启过，授权已结束",
   "browser.error.serviceUnavailable": "此主机的本地服务暂时不可用，请检查服务与连接，然后重新加载。",
   "browser.error.serviceReclaimed": "这个服务已被 cutex 回收（闲置或到期），页面不再可用。请让{{agent}}重新登记，或在「服务」页查看。",
-  "browser.error.serviceStopped": "这个服务已停止（或崩溃后正在等待重启）。点「重新加载」会再次启动它。",
+  "browser.error.serviceStopped": "这个服务已停止（或崩溃后正在等待重启）。左键点击「重新加载」会再次启动它。",
   "browser.error.serviceNotFound": "找不到这个服务：它可能已被删除或改名。请在「服务」页查看。",
   "browser.error.serviceStartFailed": "这个服务没能启动。请在「服务」页查看日志，然后重新加载。",
   "browser.error.serviceCrashLooped": "这个服务反复崩溃，cutex 已停止自动重启。请在「服务」页查看日志，修好后重新加载。",
@@ -42,7 +42,7 @@ export const browserErrorMessagesZhCN = {
   "browser.error.staticNotFound": "这个地址下没有文件。",
 } as const;
 export const browserErrorMessagesEn: Record<keyof typeof browserErrorMessagesZhCN, string> = {
-  "browser.origins.doNotSignIn": "Do not sign in here: this tab shares an isolated login environment with {{agent}} tabs. Open a new {{owner}} tab before signing in.",
+  "browser.origins.doNotSignIn": "You are entering login information in the shared {{agent}} environment. Do not use personal accounts here.",
   "browser.origins.reset": "Reset provenance records",
   "browser.origins.resetHint": "Archive corrupt provenance and start fresh. This does not clear logins or change existing tabs' login environments. Old tabs with unproven origins stay isolated.",
   "browser.origins.resetDone": "Provenance records were checked and are usable. Existing isolated tabs stay isolated; open a new tab to sign in.",
@@ -55,7 +55,7 @@ export const browserErrorMessagesEn: Record<keyof typeof browserErrorMessagesZhC
   "browser.error.unavailable": "The browser or host is unavailable. Check the connection.",
   "browser.error.closed": "The tab closed or was recreated. Select the tab again.",
   "browser.error.revoked": "Control was revoked. The {{owner}} must grant it again.",
-  "browser.error.hidden": "The card is not visible (the Cutex window is minimized or fully covered by another window, or the card is not shown). Bring it to the front before acting.",
+  "browser.error.hidden": "The pane is not visible (the Cutex window is minimized or fully covered by another window, or the pane is not shown). Bring it to the front before acting.",
   "browser.error.paused": "The {{owner}} paused control. Resume continues the same grant.",
   "browser.error.scope": "This view scope cannot open or retain the tab.",
   "browser.error.stale": "The connection or page reference expired. Read it again before acting.",

@@ -26,7 +26,7 @@ export function SafetyToolRow({ item, sessionId }: { item: RawItem; sessionId: s
   return (
     <>
       <PlainToolRow item={item} safetyBlock={{ reason: note.safetyBlock?.reason ?? null }} />
-      <div data-safety-line={state} className={`-mt-0.5 mb-1 ml-6 flex items-center gap-1 text-[11.5px] ${tone}`}>
+      <div data-safety-line={state} className={`-mt-0.5 mb-1 ml-6 flex items-center gap-1 text-meta/[inherit] ${tone}`}>
         <Icon size={12} aria-hidden />
         <span>{t(open ? "safety-grants.line.blocked" : state === "dismissed" ? "safety-grants.line.dismissed" : "safety-grants.line.granted")}</span>
         {open && (

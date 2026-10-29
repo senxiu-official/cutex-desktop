@@ -10,7 +10,7 @@
 // rule, muted text and its actions shown on hover / keyboard focus.
 // Long text (owner 2026-10-15): wraps everywhere (code blocks and paths too, never a sideways
 // scrollbar) and is cut at a few lines with 「展开」 (components/ClampBox).
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Bell, BellRing, Check, CornerDownRight, MessageSquareReply, Trash2, X } from "lucide-react";
 import type { OwnerNotification } from "@cutex-desktop/protocol";
 import { useI18n, type MessageKey } from "../i18n";
@@ -31,12 +31,14 @@ import { ClampBox } from "./ClampBox";
 import { SafetyBlockCard } from "./SafetyBlockCard";
 import { Markdown } from "./Markdown";
 import { OwnerReplyBox } from "./OwnerReplyBox";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 import { SystemAvatar } from "./SystemAvatar";
+import { Tag, type TagTone } from "./Tag";
 
-const TONE: Record<OwnerNotification["level"], { frame: string; icon: string; badge: string; dot: string }> = {
-  info: { frame: "border-accent/30 bg-accent/5", icon: "text-accent", badge: "bg-accent/15 text-accent", dot: "bg-accent" },
-  attention: { frame: "border-warn/40 bg-warn/5", icon: "text-warn", badge: "bg-warn/15 text-warn", dot: "bg-warn" },
-  urgent: { frame: "border-danger/45 bg-danger/5", icon: "text-danger", badge: "bg-danger text-white", dot: "bg-danger" },
+const TONE: Record<OwnerNotification["level"], { frame: string; icon: string; tag: TagTone; dot: string }> = {
+  info: { frame: "border-accent/30 bg-accent/5", icon: "text-accent", tag: "accent" as TagTone, dot: "bg-accent" },
+  attention: { frame: "border-warn/40 bg-warn/5", icon: "text-warn", tag: "attention" as TagTone, dot: "bg-warn" },
+  urgent: { frame: "border-danger/45 bg-danger/5", icon: "text-danger", tag: "danger" as TagTone, dot: "bg-danger" },
 };
 /** Card buttons (bordered) vs. the quiet row's (borderless, hover-revealed). */
 const CARD_BUTTON = "flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-xs hover:bg-surface-2 disabled:opacity-50";
@@ -48,16 +50,18 @@ const ROW_BUTTON = "flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs tex
  * one (e.g. host-a's desktop showing a hachimi agent) otherwise drew no card and its buttons asked the
  * focus host.
  */
-export function OwnerNotifyCard({ notificationId, sessionId, hostId }: { notificationId: string; sessionId: string; hostId: string }) {
+// memo (perf §9): the timeline body re-renders on every streamed delta; the card only follows its record.
+export const OwnerNotifyCard = memo(function OwnerNotifyCard({ notificationId, sessionId, hostId }: { notificationId: string; sessionId: string; hostId: string }) {
   const record = useHostOwnerNotes(hostId)[notificationId];
   if (!record) return null;
   // claude-safety-grants: a stopped command with 批准一次 / 不批准 instead of a message.
   if (record.safetyBlock) return <SafetyBlockCard record={record} block={record.safetyBlock} hostId={hostId} />;
   return <Card record={record} sessionId={sessionId} hostId={hostId} />;
-}
+});
 
 function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; sessionId: string; hostId: string }) {
   const { t, locale } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const now = useClock();
   // The card is in the open agent's timeline: the delegation it names is on that agent's host.
   const host = useConvHost();
@@ -115,11 +119,11 @@ function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; ses
         <span className={card ? "font-medium text-foreground" : "text-muted"}>{t(system ? "system.cutex" : "ownerNotify.toYou")}</span>
         {system && <span className="min-w-0 truncate text-muted">{t("ownerNotify.aboutAgent", { name: agentName ?? r.agentId })}</span>}
         {card ? (
-          <span className={`rounded-full px-1.5 py-px text-[11px] font-semibold ${tone.badge}`}>{t(`ownerNotify.level.${r.level}` as MessageKey)}</span>
+          <Tag tone={tone.tag}>{t(`ownerNotify.level.${r.level}` as MessageKey)}</Tag>
         ) : (
           <span className="text-subtle">· {t(`ownerNotify.level.${r.level}` as MessageKey)}</span>
         )}
-        {r.needsReply && open && <span className="rounded-full bg-warn/15 px-1.5 py-px text-[11px] font-medium text-warn-text">{t("ownerNotify.needsReply")}</span>}
+        {r.needsReply && open && <Tag tone="attention">{t("ownerNotify.needsReply")}</Tag>}
         <span className="text-subtle" title={Number.isFinite(created) ? formatAbsolute(created) : undefined}>
           · {Number.isFinite(created) ? formatWhen(created, now, locale) : ""}
         </span>
@@ -129,7 +133,7 @@ function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; ses
           {t(`ownerNotify.state.${r.state}` as MessageKey)}
         </span>
       </div>
-      <ClampBox lines={card ? 12 : 4} resetKey={r.notificationId} className={card ? "mt-1.5 text-[14.5px]" : "mt-0.5 text-[13px] text-muted"}>
+      <ClampBox lines={card ? 12 : 4} resetKey={r.notificationId} className={card ? "mt-1.5 text-title/[inherit]" : "mt-0.5 text-ui/[inherit] text-muted"}>
         <Markdown text={r.text} />
       </ClampBox>
       {(r.delegation || r.job) && (
@@ -145,23 +149,23 @@ function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; ses
             <span className="flex items-center gap-1">
               {t("ownerNotify.aboutJob")}
               {jobs ? (
-                <button onClick={() => openJobOutput(r.job!)} className="font-mono text-[11px] break-all text-accent hover:underline">
+                <button onClick={() => openJobOutput(r.job!)} className="font-mono text-caption/[inherit] break-all text-accent hover:underline">
                   {r.job}
                 </button>
               ) : (
-                <span className="font-mono text-[11px] break-all">{r.job}</span>
+                <span className="font-mono text-caption/[inherit] break-all">{r.job}</span>
               )}
             </span>
           )}
         </div>
       )}
-      {note && <div className="mt-1.5 text-[11.5px] text-subtle">{note}</div>}
+      {note && <div className="mt-1.5 text-meta/[inherit] text-subtle">{note}</div>}
       {r.reply && (
         <div className="mt-2 flex gap-1.5 rounded-lg bg-surface-2/70 px-2.5 py-1.5 text-sm">
           <CornerDownRight size={14} className="mt-0.5 shrink-0 text-subtle" />
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] text-subtle">{t("ownerNotify.yourReply")}</div>
-            <ClampBox lines={6} resetKey={r.notificationId} className="whitespace-pre-wrap">
+            <div className="text-caption/[inherit] text-subtle">{t("ownerNotify.yourReply")}</div>
+            <ClampBox lines={6} resetKey={r.notificationId} className="selectable whitespace-pre-wrap">
               {r.reply.text}
             </ClampBox>
           </div>
@@ -169,7 +173,7 @@ function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; ses
       )}
       {replyable && replying && (
         <div className="mt-2">
-          <OwnerReplyBox record={r} hostId={hostId} onClose={() => setReplying(false)} onBusy={(b) => setBusy(b ? "reply" : null)} />
+          <OwnerReplyBox record={r} hostId={hostId} onClose={(sent) => sent ? setReplying(false) : userToggle(() => setReplying(false))} onBusy={(b) => setBusy(b ? "reply" : null)} />
         </div>
       )}
       {deleteArmed ? (
@@ -205,7 +209,7 @@ function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; ses
             </button>
           )}
           {replyable && !replying && (
-            <button data-note-reply="" onClick={() => setReplying(true)} disabled={!!busy} className={button}>
+            <button data-note-reply="" onClick={() => userToggle(() => setReplying(true))} disabled={!!busy} className={button}>
               <MessageSquareReply size={13} />
               {t("ownerNotify.reply")}
             </button>

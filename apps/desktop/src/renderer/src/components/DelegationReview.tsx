@@ -4,7 +4,7 @@
 // Same `ask_delivery` record and daemon call as the 审批 page (lib/approvalDecision); the buttons only
 // show to a connection that may decide (owner, owner-approvals, full device scope). Otherwise the card
 // keeps the old hint line (到「审批」页处理).
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { ArrowUpRight } from "lucide-react";
 import type { ApprovalDecision, AskSummary } from "../../../shared/ipc";
 import { useI18n } from "../i18n";
@@ -13,25 +13,46 @@ import { decisionInput } from "../lib/approvals";
 import { awaitsOwnerReview } from "../lib/delegations";
 import { refusalText } from "../lib/profileCreate";
 import { useApp } from "../store";
+import { reviewReferences } from "../../../shared/delegationReviews";
+import { ArmedButton } from "./ArmedButton";
+import { runDelegationCommand } from "../lib/delegationMenu";
 
 type Variant = "card" | "row" | "side";
+const RoutingReview = lazy(() => import("./RoutingReview").then(m => ({ default: m.RoutingDelegationReview })));
 
 /** `host`: the host whose record `d` is (the approval lives there too). */
 export function DelegationReviewActions({ d, host, variant }: { d: AskSummary; host: string; variant: Variant }) {
   const { t } = useI18n();
+  const refs = reviewReferences(d), routing = refs.find(ref => ref.kind === "routing");
+  if (d.reviewDenialReason) return <p className="text-xs text-danger" data-testid="delegation-review-denial">{t("delegation.routing.denial", { reason: d.reviewDenialReason })}</p>;
+  if (routing && !d.remote) return <>
+    <Suspense fallback={<span className="text-xs text-subtle">{t("delegation.routing.loading")}</span>}><RoutingReview d={d} host={host} variant={variant} refValue={routing} /></Suspense>
+    {refs.some(ref => ref.kind === "capability") && <><span className="text-xs text-subtle">{t("delegation.routing.requiredBoth")}</span><CapabilityReviewActions d={d} host={host} variant={variant} /></>}
+  </>;
+  return <CapabilityReviewActions d={d} host={host} variant={variant} />;
+}
+
+function CapabilityReviewActions({ d, host, variant }: { d: AskSummary; host: string; variant: Variant }) {
+  const { t } = useI18n();
   const active = awaitsOwnerReview(d);
-  const review = useAskReview(host, d.askId, active);
+  const review = useAskReview(host, d.askId, active, reviewReferences(d).filter(ref => ref.kind === "capability").map(ref => ref.approvalId));
   const [busy, setBusy] = useState<ApprovalDecision | null>(null);
   const [error, setError] = useState<string | null>(null);
   if (!active) return null;
   const openPage = () => useApp.getState().openPage("approvals.page");
   const record = review.canDecide ? review.record : null;
   if (!record) {
+    if (!review.record && review.loaded && !review.routingSupported) return <div className={`${variant === "card" ? "ml-5" : "mb-2"} flex flex-wrap items-center gap-2 text-xs`} data-testid="delegation-review-update">
+      <span className="text-warn">{t("delegation.routing.upgradeHost")}</span>
+      {review.canDecide && <ArmedButton shape="rounded px-2 py-0.5 text-xs" idle="border border-border text-muted hover:text-danger" hint={t("delegation.stopConfirm")} resetKey={d.revision}
+        onConfirm={() => void runDelegationCommand(host, d, "cutex/ask/stop", t)}>{t("delegation.stop")}</ArmedButton>}
+    </div>;
+    if (review.loaded === false) return <span className="text-xs text-subtle">{t("delegation.routing.loading")}</span>;
     // Not decidable here (not the owner, a narrowed device, the record not loaded): say where.
     if (variant === "row") return null;
     const hint = t("delegation.pendingReviewHint");
     return (
-      <div className={`${variant === "card" ? "ml-5" : "mb-2"} text-[11px] text-warn`} data-testid="delegation-review-line">
+      <div className={`${variant === "card" ? "ml-5" : "mb-2"} text-caption/[inherit] text-warn`} data-testid="delegation-review-line">
         {review.approvalsPage ? (
           <button onClick={openPage} className="hover:underline">
             {hint}
@@ -56,7 +77,7 @@ export function DelegationReviewActions({ d, host, variant }: { d: AskSummary; h
     }
   };
   const dense = variant === "row";
-  const base = dense ? "rounded px-1.5 text-[11px] leading-5" : "rounded-md px-2 py-0.5 text-xs";
+  const base = dense ? "rounded px-1.5 text-caption/[inherit] leading-5" : "rounded-md px-2 py-0.5 text-xs";
   const buttons = (
     <>
       <button type="button" disabled={!!busy} onClick={(e) => void run("approve", e)} title={t("delegation.review.approveHint")} className={`${base} whitespace-nowrap bg-accent font-medium text-white hover:opacity-90 disabled:opacity-50`} data-review="approve">
@@ -71,11 +92,11 @@ export function DelegationReviewActions({ d, host, variant }: { d: AskSummary; h
     return (
       <span className="flex shrink-0 items-center gap-1" data-testid="delegation-review-actions" title={error ?? undefined}>
         {buttons}
-        {error && <span className="max-w-[8rem] truncate text-[11px] text-danger">{error}</span>}
+        {error && <span className="max-w-[8rem] truncate text-caption/[inherit] text-danger">{error}</span>}
       </span>
     );
   return (
-    <div className={`${variant === "card" ? "ml-5" : "mb-2"} flex flex-wrap items-center gap-1.5 text-[11px]`} data-testid="delegation-review-actions">
+    <div className={`${variant === "card" ? "ml-5" : "mb-2"} flex flex-wrap items-center gap-1.5 text-caption/[inherit]`} data-testid="delegation-review-actions">
       <span className="text-warn">{t("delegation.review.lead")}</span>
       {buttons}
       {review.approvalsPage && (

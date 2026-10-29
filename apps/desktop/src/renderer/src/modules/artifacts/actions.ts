@@ -1,6 +1,6 @@
 // 成果 actions shared by the library, the view and the timeline card: open a version, copy its link,
 // owner edits (star / rename / archive / delete, CAS on the revision), the delegation link.
-import { artifactMarkdown, artifactRef, parseArtifactRef, type ArtifactPatch, type ArtifactSummary } from "../../../../shared/artifactStore";
+import { artifactMarkdown, artifactRef, parseArtifactRef, type ArtifactPatch, type ArtifactSummary, type ArtifactVersion } from "../../../../shared/artifactStore";
 import type { CutexRefusal } from "../../../../shared/ipc";
 import { translate, type MessageKey } from "../../i18n";
 import { confirmDialog, promptDialog, type MenuEntry } from "../../lib/contextMenu";
@@ -12,8 +12,10 @@ import { copyText } from "../../lib/menus";
 import { agentHost, useApp } from "../../store";
 import { services } from "../app";
 import type { CutexRef, RefOpenResult, SideOpen } from "../slots";
-import { ARTIFACT_REF_KIND, VIEW } from "./model";
+import { ARTIFACT_REF_KIND, previewKind, VIEW } from "./model";
+import { clearPageData } from "./pageData";
 import { invalidateArtifact, loadDetail } from "./store";
+import { artifactSourceFileEntries } from "./fileActions";
 
 const notice = (text: string, tone: "info" | "error" = "info") => services.ui.notice(text, tone);
 
@@ -63,13 +65,14 @@ async function patch(hostId: string, a: ArtifactSummary, change: Omit<ArtifactPa
 }
 
 /** The owner's menu rows for one artifact (library rows, the view's header). */
-export function artifactMenu(hostId: string, a: ArtifactSummary, open: SideOpen | null): MenuEntry[] {
+export function artifactMenu(hostId: string, a: ArtifactSummary, open: SideOpen | null, version: ArtifactVersion | null = a.latest): MenuEntry[] {
   const latest = artifactRef(a.artifactId, "latest");
   const pinned = artifactRef(a.artifactId, a.latestVersion);
   return [
     { label: translate("artifacts.openLatest"), onSelect: () => openVersion(open, latest, a.name) },
     { label: translate("artifacts.openPinned", { n: a.latestVersion }), onSelect: () => openVersion(open, pinned, a.name) },
     { label: translate("artifacts.copyLink"), onSelect: () => copyArtifactLink(pinned, a.name) },
+    ...artifactSourceFileEntries(hostId, version),
     "separator",
     { label: translate(a.starred ? "artifacts.unstar" : "artifacts.star"), onSelect: () => void patch(hostId, a, { starred: !a.starred }) },
     {
@@ -80,6 +83,8 @@ export function artifactMenu(hostId: string, a: ArtifactSummary, open: SideOpen 
       },
     },
     { label: translate(a.archivedAt ? "artifacts.unarchive" : "artifacts.archive"), onSelect: () => void patch(hostId, a, { archived: !a.archivedAt }) },
+    // A page's own saved data (channel A, pageData.tsx); all versions share it.
+    ...(previewKind(a.latest.mediaType, a.name, a.latest.sourcePath) === "html" ? [{ label: translate("artifacts.pageData.clear"), onSelect: () => void clearPageData(hostId, a) }] : []),
     {
       label: translate("artifacts.delete"),
       danger: true,

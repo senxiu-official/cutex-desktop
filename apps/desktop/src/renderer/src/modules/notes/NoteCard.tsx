@@ -51,7 +51,7 @@ export function NoteCard({ hostId, note, projectId, readOnly = false, onDismissE
       <ArmedRemove title={t("notes.delete")} disabled={busy} armedLabel={t("notes.deleteConfirm")} onRemove={() => void run(() => notesCache.remove(hostId, note))} /></>}
     </div>
     {/* Wraps like a notification (styles.css .wrap-all): code and tables too, never a sideways scrollbar. */}
-    <div className="wrap-all min-w-0 break-words text-[13px] leading-relaxed"><Streamdown mode="static" className="markdown" translations={translations}>{note.body}</Streamdown></div>
+    <div className="wrap-all min-w-0 break-words text-ui/[inherit] leading-relaxed"><Streamdown mode="static" className="markdown" translations={translations}>{note.body}</Streamdown></div>
     {unavailable && <p className="text-xs text-warn" title={note.anchorStateAt ?? undefined}>{t(status === "sessionDeleted" ? "notes.sessionDeleted" : "notes.reverted")}</p>}
     {status === "unknown" && <p className="text-xs text-subtle">{t("notes.sourceUnknown")}</p>}
     {error && <p role="alert" className="text-xs text-danger">{noteErrorText(error, t)}</p>}
@@ -64,6 +64,6 @@ export function NoteCard({ hostId, note, projectId, readOnly = false, onDismissE
       }}><Quote size={12} className="mr-1 inline" />{t("notes.quote")}</Button>
       {[{ kind: "host" as const }, ...(project ? [project] : [])].map((scope) => <button key={scope.kind} disabled={busy} aria-pressed={hasPin(note.pins, scope)} title={t("notes.pinHint")} className={`rounded px-1 py-1 text-xs hover:bg-hover ${hasPin(note.pins, scope) ? "text-accent" : "text-subtle"}`} onClick={() => pin(scope)}><Pin size={11} className="mr-1 inline" />{t(scope.kind === "host" ? "notes.scope.host" : "notes.scope.project")}</button>)}</>}
     </div>
-    <p className="text-[11px] text-subtle" title={Number.isFinite(updated) ? formatAbsolute(updated) : undefined}>{sourceName ? `${sourceName} · ` : ""}{t("notes.savedAt", { time: Number.isFinite(updated) ? formatWhen(updated, now, locale) : note.updatedAt })}</p>
+    <p className="text-caption/[inherit] text-subtle" title={Number.isFinite(updated) ? formatAbsolute(updated) : undefined}>{sourceName ? `${sourceName} · ` : ""}{t("notes.savedAt", { time: Number.isFinite(updated) ? formatWhen(updated, now, locale) : note.updatedAt })}</p>
   </article>;
 }

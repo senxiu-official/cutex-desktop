@@ -8,7 +8,7 @@
 // (lib/ownerNotify openAgentPendingNotes = isPending); an ordinary message to the agent does not
 // answer them (cutex semantics unchanged).
 import { useEffect, useMemo, useState } from "react";
-import { ChevronUp, MessageSquareReply } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import type { OwnerNotification } from "@cutex-desktop/protocol";
 import { useI18n } from "../i18n";
 import { openMenuAbove, type MenuEntry } from "../lib/contextMenu";
@@ -20,11 +20,13 @@ import { formatAbsolute, formatWhen, useClock } from "../lib/time";
 import { ClampBox } from "./ClampBox";
 import { Markdown } from "./Markdown";
 import { OwnerReplyBox } from "./OwnerReplyBox";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 
 const createdOf = (n: OwnerNotification) => Date.parse(n.createdAt) / 1000;
 
 export function PendingOwnerNotes({ sessionId, hostId }: { sessionId: string; hostId: string }) {
   const { t, locale } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const now = useClock();
   const byId = useHostOwnerNotes(hostId);
   const notes = useMemo(() => openAgentPendingNotes(byId, sessionId), [byId, sessionId]);
@@ -69,7 +71,7 @@ export function PendingOwnerNotes({ sessionId, hostId }: { sessionId: string; ho
           aria-label={t("ownerNotify.pending.more", { n: notes.length - 1 })}
           title={t("ownerNotify.pending.more", { n: notes.length - 1 })}
           onClick={(e) => openMenuAbove(e.currentTarget, others, { minWidth: 280 })}
-          className="shrink-0 rounded-full border border-border px-1.5 text-[11px] text-muted tabular-nums hover:bg-hover hover:text-foreground"
+          className="shrink-0 rounded-full border border-border px-1.5 text-caption/[inherit] text-muted tabular-nums hover:bg-hover hover:text-foreground"
         >
           +{notes.length - 1}
         </button>
@@ -77,16 +79,16 @@ export function PendingOwnerNotes({ sessionId, hostId }: { sessionId: string; ho
       {canReply(first) && (
         <button
           data-pending-reply=""
-          onClick={() => setReplyTo(replying ? null : first.notificationId)}
+          onClick={() => userToggle(() => setReplyTo(replying ? null : first.notificationId))}
           aria-expanded={!!replying}
           className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-accent hover:bg-hover"
         >
-          {replying ? <ChevronUp size={13} /> : <MessageSquareReply size={13} />}
+          {replying ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           {t("ownerNotify.reply")}
         </button>
       )}
       {replying && (
-        <div data-pending-reply-panel="" className="absolute bottom-full left-6 z-30 mb-1 w-[34rem] max-w-[calc(100%-3rem)] rounded-xl border border-border bg-surface p-2.5 text-sm shadow-xl">
+        <div data-pending-reply-panel="" data-popover="" className="absolute bottom-full left-6 z-50 mb-1 w-[34rem] max-w-[calc(100%-3rem)] rounded-xl border border-border bg-surface p-2.5 text-sm shadow-xl">
           <div className="mb-1 flex items-center gap-1.5 text-xs">
             <span className="font-medium text-foreground">{labelOf(replying)}</span>
             <span className="text-subtle">· {ageOf(replying)}</span>
@@ -94,10 +96,10 @@ export function PendingOwnerNotes({ sessionId, hostId }: { sessionId: string; ho
               {t("ownerNotify.pending.jump")}
             </button>
           </div>
-          <ClampBox lines={5} resetKey={replying.notificationId} className="mb-2 text-[13px] text-muted">
+          <ClampBox lines={5} resetKey={replying.notificationId} className="mb-2 text-ui/[inherit] text-muted">
             <Markdown text={replying.text} />
           </ClampBox>
-          <OwnerReplyBox record={replying} hostId={hostId} onClose={() => setReplyTo(null)} />
+          <OwnerReplyBox record={replying} hostId={hostId} onClose={(sent) => sent ? setReplyTo(null) : userToggle(() => setReplyTo(null))} />
         </div>
       )}
     </div>

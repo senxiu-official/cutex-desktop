@@ -7,6 +7,7 @@ import { refreshAgentJobs, refreshAllJobs, useJobs } from "./jobStore";
 import { JOB_SERVICE_COMPONENT } from "./componentCard";
 import { useComponentUsable } from "./componentView";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
+import { useOwnerDocument } from "./ownerContext";
 
 /** Poll while something runs, slower otherwise; never while the window is hidden. */
 const FAST_MS = 10_000;
@@ -21,17 +22,18 @@ export function useJobsEnabled(): boolean {
 }
 
 function usePoll(run: () => void, enabled: boolean, fast: boolean, key: string) {
+  const doc = useOwnerDocument();
   useEffect(() => {
     if (!enabled) return;
     run();
     const id = setInterval(() => {
-      if (!document.hidden) run();
+      if (!doc.hidden) run();
     }, fast ? FAST_MS : SLOW_MS);
-    const onVisible = () => !document.hidden && run();
-    document.addEventListener("visibilitychange", onVisible);
+    const onVisible = () => !doc.hidden && run();
+    doc.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisible);
+      doc.removeEventListener("visibilitychange", onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, fast, key]);

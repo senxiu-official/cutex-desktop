@@ -1,0 +1,210 @@
+/* 桌面 (modules/home): variant C's background (cover or launch art, full bleed) under translucent glass
+   cards laid out like A / B (preview-home-page.html). Light / dark follow the app theme. */
+.home-desk {
+  --home-sky1: #bcd3f5;
+  --home-sky2: #f6d9c4;
+  --home-sky3: #8fa9d6;
+  /* 亚克力 (owner 2026-10-24, .claude/previews/preview-widgets-v1.html): heavier blur, a tint, faint grain, a light top edge. */
+  --home-glass: rgba(252, 252, 254, 0.5);
+  --home-glass-b: rgba(255, 255, 255, 0.4);
+  --home-glass-hi: rgba(255, 255, 255, 0.75);
+  --home-glass-shadow: 0 8px 26px rgba(30, 40, 80, 0.14);
+  --home-glass-fg: #1d1d1f;
+  --home-glass-sub: rgba(29, 29, 31, 0.62);
+  --home-veil: linear-gradient(180deg, rgba(255, 255, 255, 0) 55%, rgba(255, 255, 255, 0.18));
+  /* Bare text over the wallpaper (.home-clock): the light sky is pale where the clocks sit, so a thin dark edge
+     and a tight shadow under the soft one keep thin white digits readable; dark wallpapers need only the soft one. */
+  --home-clock-shadow: 0 0 1px rgba(16, 24, 48, 0.42), 0 1px 3px rgba(16, 24, 48, 0.28), 0 2px 16px rgba(16, 24, 48, 0.3);
+  --home-heat0: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .home-desk {
+    --home-sky1: #1b2440;
+    --home-sky2: #3b2a4a;
+    --home-sky3: #2c3a63;
+    --home-glass: rgba(30, 31, 40, 0.56);
+    --home-glass-b: rgba(255, 255, 255, 0.08);
+    --home-glass-hi: rgba(255, 255, 255, 0.14);
+    --home-glass-shadow: 0 10px 32px rgba(0, 0, 0, 0.28);
+    --home-glass-fg: #f2f2f4;
+    --home-glass-sub: rgba(242, 242, 244, 0.66);
+    --home-veil: linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.32));
+    --home-clock-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
+  }
+}
+:root[data-theme="dark"] .home-desk {
+  --home-sky1: #1b2440;
+  --home-sky2: #3b2a4a;
+  --home-sky3: #2c3a63;
+  --home-glass: rgba(30, 31, 40, 0.56);
+  --home-glass-b: rgba(255, 255, 255, 0.08);
+  --home-glass-hi: rgba(255, 255, 255, 0.14);
+  --home-glass-shadow: 0 10px 32px rgba(0, 0, 0, 0.28);
+  --home-glass-fg: #f2f2f4;
+  --home-glass-sub: rgba(242, 242, 244, 0.66);
+  --home-veil: linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.32));
+  --home-clock-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
+}
+.home-scene {
+  background:
+    radial-gradient(ellipse at 72% 32%, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0) 55%),
+    linear-gradient(135deg, var(--home-sky1), var(--home-sky2) 65%, var(--home-sky3));
+}
+.home-glass {
+  background:
+    var(--home-grain),
+    linear-gradient(var(--home-glass), var(--home-glass));
+  border: 1px solid var(--home-glass-b);
+  color: var(--home-glass-fg);
+  backdrop-filter: blur(32px) saturate(1.5);
+  box-shadow: var(--home-glass-shadow), inset 0 1px 0 var(--home-glass-hi);
+}
+.home-desk {
+  /* The acrylic's grain: a small tiled noise (data: URL — the renderer's CSP allows `img-src data:`). */
+  --home-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.home-sub {
+  color: var(--home-glass-sub);
+}
+.home-clock {
+  color: #fff;
+  text-shadow: var(--home-clock-shadow);
+}
+/* 少框 (owner 2026-10-24): widgets that are not lists sit on the wallpaper without a card — white text with the
+   light sky's clock shadow (the thin dark edge keeps small text readable on any wallpaper). */
+.home-bare {
+  color: #fff;
+  text-shadow: 0 0 1px rgba(16, 24, 48, 0.5), 0 1px 3px rgba(16, 24, 48, 0.4), 0 2px 12px rgba(16, 24, 48, 0.32);
+}
+.home-bare .home-sub {
+  color: rgba(255, 255, 255, 0.84);
+}
+/* A clickable bare widget: on hover a faint acrylic shows that it is one thing to click. */
+.home-bare-hit {
+  border-radius: var(--radius-card);
+  transition: background-color 0.15s ease;
+}
+.home-bare-hit:hover,
+.home-bare-hit:focus-visible {
+  background-color: color-mix(in srgb, var(--home-glass) 70%, transparent);
+  backdrop-filter: blur(20px) saturate(1.3);
+}
+.desk-arranging .home-bare-hit:hover { background-color: transparent; backdrop-filter: none; }
+/* An agent's cut-out portrait (Avatar `cutout`): stands on the wallpaper, a soft shadow under it. */
+.home-cutout {
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+}
+.home-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 92px);
+  grid-auto-rows: 92px;
+  grid-auto-flow: row dense;
+  gap: 12px;
+}
+.home-tile {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.home-tile:hover {
+  transform: translateY(-2px);
+}
+/* Only a tile with a card lifts a shadow (a bare one would show a square around nothing). */
+.home-tile.home-glass:hover {
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.18);
+}
+.home-tile[data-size="m"] {
+  grid-column: span 2;
+}
+.home-tile[data-size="w"] {
+  grid-column: span 4;
+  grid-row: span 2;
+}
+.home-tile[data-size="l"] {
+  grid-column: span 4;
+  grid-row: span 3;
+}
+.home-editing .home-tile {
+  animation: home-jig 0.9s ease-in-out infinite alternate;
+}
+@keyframes home-jig {
+  from { transform: rotate(-0.4deg); }
+  to { transform: rotate(0.4deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-editing .home-tile { animation: none; }
+  .home-tile { transition: none; }
+}
+.home-heat rect[data-level="0"] { fill: var(--home-heat0, color-mix(in srgb, var(--fg) 9%, transparent)); }
+/* One sequential hue (the usage page's token blue #4c8dff), light → dark. */
+.home-heat rect[data-level="1"] { fill: color-mix(in srgb, #4c8dff 30%, var(--bg)); }
+.home-heat rect[data-level="2"] { fill: color-mix(in srgb, #4c8dff 55%, var(--bg)); }
+.home-heat rect[data-level="3"] { fill: color-mix(in srgb, #4c8dff 78%, var(--bg)); }
+.home-heat rect[data-level="4"] { fill: #4c8dff; }
+.home-heat rect:hover { stroke: var(--fg); stroke-width: 1; }
+/* The desktop background changed (the host's answer differs from the remembered one, modules/home/backdrop):
+   the new one fades in over the old (Parts DesktopBackdrop); instant with reduced motion. */
+.home-backdrop-in {
+  animation: home-backdrop-in 0.45s ease-out both;
+}
+@keyframes home-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-backdrop-in {
+    animation: none;
+  }
+}
+
+/* ── The widget surface (design 030 v2 + 032; modules/home/DeskSurface) ───────────────────────── */
+.desk-widget {
+  transition: left 0.2s ease, top 0.2s ease, width 0.2s ease, height 0.2s ease, box-shadow 0.15s;
+  outline: none;
+}
+.desk-widget.desk-still { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .desk-widget { transition: none; }
+}
+/* Arranging: the content is inert (the surface takes the pointer); the selected one is ringed. */
+.desk-arranging .desk-widget { cursor: grab; }
+.desk-arranging .desk-widget-body { pointer-events: none; }
+.desk-arranging .desk-widget[data-desk-selected] { box-shadow: 0 0 0 2px var(--color-accent), 0 10px 28px rgba(0, 0, 0, 0.16); }
+.desk-arranging .desk-widget:focus-visible { box-shadow: 0 0 0 2px var(--color-accent); }
+.desk-widget[data-desk-lifted] { z-index: 40; cursor: grabbing; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28); opacity: 0.94; }
+/* A shaped widget's box (what aligns) while selected. */
+.desk-boxmark { position: absolute; pointer-events: none; outline: 1.5px dashed var(--color-accent); outline-offset: 2px; border-radius: 4px; z-index: 30; }
+.desk-resize { position: absolute; width: 18px; height: 18px; cursor: nwse-resize; z-index: 45; }
+.desk-resize::after { content: ""; position: absolute; right: 4px; bottom: 4px; width: 9px; height: 9px; border-right: 2.5px solid var(--color-accent); border-bottom: 2.5px solid var(--color-accent); border-radius: 0 0 3px 0; }
+/* The drop preview (foretell style): the target, and where the covered ones go. Their tint is --drop-tint (only
+   框线+底色 paints it: .drop-tint, styles.css). */
+.desk-ghost { position: absolute; border-radius: 18px; pointer-events: none; z-index: 35; }
+.desk-ghost > span { position: absolute; left: 6px; top: -22px; color: #fff; font-size: 11.5px; border-radius: 6px; padding: 1px 7px; white-space: nowrap; }
+.desk-ghost-target { border: 2px dashed var(--color-accent); --drop-tint: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.desk-ghost-target > span { background: var(--color-accent); }
+.desk-ghost-moved { border: 2px dashed #7c8494; --drop-tint: rgba(124, 132, 148, 0.14); }
+.desk-ghost-moved > span { background: #7c8494; }
+/* A tray avatar dragged over the desk (deskDrop): the box its icon takes, 「放到桌面」 above it. */
+.desk-drop-hint { border: 2px dashed var(--color-accent); --drop-tint: color-mix(in srgb, var(--color-accent) 16%, transparent); }
+.desk-drop-hint > span { background: var(--color-accent); }
+/* The unit grid (contract 1.24, deskCells: 40 px units, 16 px apart): while arranging, a dot where four units meet
+   (the middle of each gap crossing, every 56 px) — owner 2026-10-24: 点阵, all dots the same size. */
+/* A widget's settings pop-over (DeskSurface) sits over the widgets beside it. */
+.desk-pop { z-index: 46; pointer-events: auto; }
+.desk-grid { pointer-events: none; }
+.desk-grid > * { pointer-events: auto; }
+.desk-cells {
+  position: absolute;
+  inset: -8px;
+  pointer-events: none !important;
+  background-image: radial-gradient(circle, var(--desk-dot) 1.3px, transparent 1.9px);
+  background-size: 56px 56px;
+  background-position: -28px -28px;
+}
+.home-desk { --desk-dot: rgba(30, 40, 80, 0.3); }
+:root[data-theme="dark"] .home-desk { --desk-dot: rgba(255, 255, 255, 0.4); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .home-desk { --desk-dot: rgba(255, 255, 255, 0.4); }
+}

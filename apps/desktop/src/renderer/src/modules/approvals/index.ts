@@ -9,6 +9,10 @@ import { ApprovalsPage } from "./ApprovalsPage";
 import { ApprovalToolRow } from "./ApprovalToolRow";
 import { BrowserClaimOverlay } from "./BrowserClaimOverlay";
 import { useApprovalsBadge } from "./useApprovalsBadge";
+import { lazyPage } from "../../lib/lazyPage";
+import { APPROVAL_AUTO_RULES_FEATURE } from "../../lib/approvals";
+
+const ApprovalRulesSettings = lazyPage(() => import("./ApprovalRules").then((m) => m.ApprovalRulesSettings));
 
 export default defineModule({
   id: "approvals",
@@ -23,5 +27,14 @@ export default defineModule({
     "conversation.overlay": [{ id: "approvals.browserClaim", order: 200, Overlay: BrowserClaimOverlay }],
     // A cutex tool call that answered approval_required / approval_denied: a line under its row.
     "timeline.tool": [{ id: "approvals.tool", order: 350, match: (item) => approvalOfTool(item) !== null, Row: ApprovalToolRow }],
+    "settings.section": [{
+      id: "approvals.rules.settings",
+      page: "collab",
+      order: 250,
+      requires: { capabilities: [APPROVAL_AUTO_RULES_FEATURE] },
+      titleKey: "approvals.rules.settings",
+      keywords: ["approvals.rules.settings.hint", "approvals.rules.audit"],
+      Section: ApprovalRulesSettings,
+    }],
   },
 });

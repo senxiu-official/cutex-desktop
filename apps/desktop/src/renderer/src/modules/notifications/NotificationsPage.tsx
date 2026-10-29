@@ -12,10 +12,13 @@
 // four levels, for a per-agent bell the levels design retires (docs/research/notification-levels.md §4.3);
 // the host keeps its stored value and the bell still changes one agent. 按项目通知 and the
 // owner-notify per-agent list are hidden until they get sub-pages (their stored values still apply).
-import { useState } from "react";
+// A change only touches its own control (owner 2026-10-25: changing one level flashed the whole page): the control
+// shows the new value at once (optimistic, until the host answers), nothing else is disabled or dimmed, and the
+// writes go out one after another so answers land in order; unchanged event rows skip the re-render (EventRow memo).
+import { memo, useCallback, useRef, useState } from "react";
 import { Check, Lock, Wrench } from "lucide-react";
 import { cellPatch, cellValue, fixedCell, groupedMethods, localText, LEGACY_PRESET, NOTIFICATION_LEVELS, NOTIFICATION_LEVELS_FEATURE, INDEPENDENT_PROJECT, isDeviceMethod, presetChoices, type EventView, type MethodGroup, type MethodSpec, type NotificationLevel, type NotificationLevelsPatch, type NotificationLevelsView } from "../../../../shared/notificationLevels";
-import { ErrorNote, ListRow, Loading, Notice, ResetButton, ScopeChip, Section, Segmented, Select, SettingRow, Toggle, Button, EmptyState } from "../../components/settings/Form";
+import { ErrorNote, ListRow, Loading, Notice, ResetButton, ScopeChip, Section, Segmented, Select, SettingRow, SettingsGroup, Toggle, Button, EmptyState } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { useGlobalSettings } from "../../lib/globalSettings";
 import { setDeviceOff, useDeviceOff } from "../../lib/notifyDevice";
@@ -42,17 +45,40 @@ const moduleGroup = (m: string) => MODULE_GROUP[m] ?? m;
 /** The bell's levels (lib/notifyControl.ts), in the bell menu's order. */
 const AGENT_LEVELS = ["off", "normal", "important"] as const;
 
-function usePatch(levels: TargetLevels): [(patch: NotificationLevelsPatch) => void, boolean] {
-  const [busy, setBusy] = useState(false);
-  const run = (patch: NotificationLevelsPatch) => {
-    setBusy(true);
-    void levels
-      .patch(patch)
-      .catch(() => {})
-      .finally(() => setBusy(false));
-  };
-  return [run, busy];
+/** A control's value while its write is on its way (key → value), e.g. `ev:turn.owner.failed` → "urgent". */
+export type Pending = Readonly<Record<string, unknown>>;
+
+/**
+ * Writes for one section: `send(key, value, patch)` shows `value` on control `key` at once and PATCHes in
+ * the background, queued so the answers (each a whole view) arrive in the order the changes were made. When
+ * it settles the control follows the host's view again (a failed write: back to the old value, the error
+ * shown above). Nothing else on the page is disabled while it runs (the old page-wide `busy` dimmed every
+ * row for the round trip: the flash).
+ */
+export function usePendingPatch(levels: TargetLevels): { send(key: string, value: unknown, patch: NotificationLevelsPatch): void; pending: Pending } {
+  const [pending, setPending] = useState<Pending>({});
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const latest = useRef(levels);
+  latest.current = levels;
+  const send = useCallback((key: string, value: unknown, patch: NotificationLevelsPatch) => {
+    setPending((p) => ({ ...p, [key]: value }));
+    const run = queue.current.then(() => latest.current.patch(patch)).catch(() => {});
+    queue.current = run;
+    void run.then(() =>
+      setPending((p) => {
+        // A later change of the same control is still on its way: keep showing that one.
+        if (!(key in p) || p[key] !== value) return p;
+        const rest = { ...p };
+        delete rest[key];
+        return rest;
+      }),
+    );
+  }, []);
+  return { send, pending };
 }
+
+/** The shown value of control `key`: its pending one, else the host's. */
+const shown = <T,>(pending: Pending, key: string, actual: T): T => (key in pending && pending[key] !== null ? (pending[key] as T) : actual);
 
 export function NotificationsPage() {
   const { t } = useI18n();
@@ -83,7 +109,7 @@ function HostSections() {
       {supported && levels.error && <ErrorNote>{levels.error}</ErrorNote>}
       {supported && <MatrixSection levels={levels} />}
       {!supported && features.size > 0 && (
-        <Section id={settingsAnchorId("levels")} title={t("notifications.matrix.title")} source="host">
+        <Section id={settingsAnchorId("levels")} title={t("notifications.matrix.title")} >
           <Notice tone="info">{t("modules.needsUpgrade", { feature: NOTIFICATION_LEVELS_FEATURE })}</Notice>
         </Section>
       )}
@@ -109,16 +135,17 @@ interface Column {
   method: MethodSpec | null; // null = the greyed outbound placeholder
 }
 
-function MatrixSection({ levels }: { levels: TargetLevels }) {
+export function MatrixSection({ levels }: { levels: TargetLevels }) {
   const { t, locale } = useI18n();
   const { view } = levels;
-  const [patch, busy] = usePatch(levels);
+  const { send, pending } = usePendingPatch(levels);
   const off = useDeviceOff();
   const { settings } = useGlobalSettings();
   const phonePaired = settings?.ownerNotify?.phonePaired !== false;
   const presetIds = view ? view.methodPresets.map((p) => p.id) : [];
-  const current = view?.effective.methodPreset ?? "default";
-  const choices = presetChoices(presetIds, current);
+  const actualPreset = view?.effective.methodPreset ?? "default";
+  const current = shown(pending, "methods.preset", actualPreset);
+  const choices = presetChoices(presetIds, actualPreset);
   const options = choices.map(({ id }) => ({
     value: id,
     label: KNOWN_PRESETS.has(id) || id === "custom" ? t(`notifications.preset.${id}` as MessageKey) : localText(view?.methodPresets.find((p) => p.id === id)?.title, locale) || id,
@@ -135,13 +162,14 @@ function MatrixSection({ levels }: { levels: TargetLevels }) {
   }, []);
   const template = `minmax(8rem, 1.6fr) repeat(${Math.max(1, columns.length)}, minmax(3.25rem, 1fr))`;
   return (
-    <Section id={settingsAnchorId("levels")} title={t("notifications.matrix.title")} hint={t("notifications.matrix.hint")} source="host">
+    <Section id={settingsAnchorId("levels")} title={t("notifications.matrix.title")} hint={t("notifications.matrix.hint")} >
       {!view && <Loading rows={4} />}
       {view && (
         <>
-          <SettingRow label={t("notifications.preset")} hint={current === LEGACY_PRESET ? t("notifications.preset.legacyNote") : undefined}>
-            <Segmented value={current} options={options} disabled={busy} onChange={(id) => pickable(id) && patch({ methods: { preset: id } })} />
+          <SettingRow agents="none" source="host" label={t("notifications.preset")} hint={current === LEGACY_PRESET ? t("notifications.preset.legacyNote") : undefined}>
+            <Segmented value={current} options={options} onChange={(id) => pickable(id) && send("methods.preset", id, { methods: { preset: id } })} />
           </SettingRow>
+          <SettingsGroup agents="none" source="host">
           <div className="-mx-4 overflow-x-auto px-4 py-2">
             <div role="table" aria-label={t("notifications.matrix.title")} className="grid min-w-[36rem] text-xs" style={{ gridTemplateColumns: template }}>
               <div role="row" className="contents">
@@ -160,8 +188,8 @@ function MatrixSection({ levels }: { levels: TargetLevels }) {
                   return (
                     <div key={c.method?.id ?? "outbound"} role="columnheader" title={c.method ? localText(c.method.description, locale) || undefined : t("notifications.outbound.later")} className={`px-1 pt-1.5 pb-1 text-center leading-tight ${c.method ? "text-subtle" : "text-subtle/50"}`}>
                       {c.method ? methodName(t, c.method, locale) : "—"}
-                      {deviceOff && <div className="text-[10.5px] text-warn">{t("notifications.deviceOff")}</div>}
-                      {phoneOff && <div className="text-[10.5px] text-warn">{t("notifications.phoneUnpaired")}</div>}
+                      {deviceOff && <div className="text-caption/[inherit] text-warn">{t("notifications.deviceOff")}</div>}
+                      {phoneOff && <div className="text-caption/[inherit] text-warn">{t("notifications.phoneUnpaired")}</div>}
                     </div>
                   );
                 })}
@@ -170,21 +198,20 @@ function MatrixSection({ levels }: { levels: TargetLevels }) {
                 <div key={level.id} role="row" className="contents">
                   <div role="rowheader" className="border-t border-border/60 py-1.5 pr-2">
                     <div className="text-sm">{levelName(t, view, level.id, locale)}</div>
-                    <div className="text-[11px] text-subtle">{(NOTIFICATION_LEVELS as readonly string[]).includes(level.id) ? t(`notifications.levelHint.${level.id}` as MessageKey) : localText(level.description, locale)}</div>
+                    <div className="text-caption/[inherit] text-subtle">{(NOTIFICATION_LEVELS as readonly string[]).includes(level.id) ? t(`notifications.levelHint.${level.id}` as MessageKey) : localText(level.description, locale)}</div>
                   </div>
                   {columns.map((c) => (
                     <div key={c.method?.id ?? "outbound"} role="cell" className="flex items-center justify-center border-t border-border/60 py-1.5">
                       {c.method ? (
                         <MatrixCell
-                          on={cellValue(view, level.id, c.method.id)}
+                          on={shown(pending, `cell:${level.id}:${c.method.id}`, cellValue(view, level.id, c.method.id))}
                           fixed={fixedCell(view, level.id, c.method.id) !== null}
                           dim={(isDeviceMethod(c.method.id) && off[c.method.id]) || (c.method.id === "phone" && !phonePaired)}
-                          disabled={busy}
                           label={`${levelName(t, view, level.id, locale)} · ${methodName(t, c.method, locale)}`}
                           fixedLabel={t("notifications.fixed")}
                           onToggle={(on) => {
                             const p = cellPatch(view, level.id as NotificationLevel, c.method!.id, on);
-                            if (p) patch(p);
+                            if (p) send(`cell:${level.id}:${c.method!.id}`, on, p);
                           }}
                         />
                       ) : (
@@ -196,13 +223,14 @@ function MatrixSection({ levels }: { levels: TargetLevels }) {
               ))}
             </div>
           </div>
+          </SettingsGroup>
         </>
       )}
     </Section>
   );
 }
 
-function MatrixCell({ on, fixed, dim, disabled, label, fixedLabel, onToggle }: { on: boolean; fixed: boolean; dim: boolean; disabled: boolean; label: string; fixedLabel: string; onToggle(on: boolean): void }) {
+function MatrixCell({ on, fixed, dim, label, fixedLabel, onToggle }: { on: boolean; fixed: boolean; dim: boolean; label: string; fixedLabel: string; onToggle(on: boolean): void }) {
   return (
     <button
       type="button"
@@ -211,7 +239,6 @@ function MatrixCell({ on, fixed, dim, disabled, label, fixedLabel, onToggle }: {
       aria-label={label}
       aria-disabled={fixed || undefined}
       title={fixed ? `${label} · ${fixedLabel}` : label}
-      disabled={disabled && !fixed}
       onClick={() => !fixed && onToggle(!on)}
       className={`flex h-5 w-5 items-center justify-center rounded-md border transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none ${
         on ? "border-accent bg-accent text-white" : "border-border bg-background text-subtle"
@@ -270,8 +297,8 @@ function GroupBand({ group, first }: { group: EventGroup; first: boolean }) {
   const { t } = useI18n();
   return (
     <div className={`-mx-4 flex min-h-8 items-center gap-2 border-b border-border/70 bg-win px-4 py-1.5 ${first ? "-mt-1 rounded-t-xl" : "-mt-px border-t"}`}>
-      <span className="text-[12px] font-medium text-muted">{t(`notifications.eventGroup.${group}` as MessageKey)}</span>
-      <span className="min-w-0 truncate text-[11px] text-subtle">{t(`notifications.eventGroup.${group}.hint` as MessageKey)}</span>
+      <span className="text-meta/[inherit] font-medium text-muted">{t(`notifications.eventGroup.${group}` as MessageKey)}</span>
+      <span className="min-w-0 truncate text-caption/[inherit] text-subtle">{t(`notifications.eventGroup.${group}.hint` as MessageKey)}</span>
       {/* 主人通知 is the agents' MCP tool owner_notify: the band carries its [MCP工具] tag. */}
       {group === "ownerNotify" && (
         <span className="ml-auto shrink-0">
@@ -282,18 +309,21 @@ function GroupBand({ group, first }: { group: EventGroup; first: boolean }) {
   );
 }
 
-function EventsSection({ levels: target }: { levels: TargetLevels }) {
+export function EventsSection({ levels: target }: { levels: TargetLevels }) {
   const { t, locale } = useI18n();
   const { view } = target;
-  const [patch, busy] = usePatch(target);
-  const current = view?.effective.eventPreset ?? "default";
-  const choices = presetChoices(view?.eventPresets.map((p) => p.id) ?? [], current);
+  const { send, pending } = usePendingPatch(target);
+  const actualPreset = view?.effective.eventPreset ?? "default";
+  const current = shown(pending, "events.preset", actualPreset);
+  const choices = presetChoices(view?.eventPresets.map((p) => p.id) ?? [], actualPreset);
   const pickable = (id: string) => id !== current && !choices.find((c) => c.id === id)?.readOnly;
   const options = choices.map(({ id }) => ({
     value: id,
     label: id === "custom" ? t("notifications.preset.custom") : KNOWN_EVENT_PRESETS.has(id) ? t(`notifications.eventPreset.${id}` as MessageKey) : localText(view?.eventPresets.find((p) => p.id === id)?.title, locale) || id,
   }));
-  const levels = NOTIFICATION_LEVELS.map((l) => ({ value: l, label: t(`notifications.level.${l}`) }));
+  const levels = useLevelOptions();
+  // One callback for every row (EventRow is memoised on it).
+  const onLevel = useCallback((id: string, level: NotificationLevel | null) => send(`ev:${id}`, level, { events: { levels: { [id]: level } } }), [send]);
   const events = view?.events ?? [];
   const groups = EVENT_GROUPS.filter((g) => events.some((e) => eventGroup(e) === g));
   return (
@@ -301,8 +331,7 @@ function EventsSection({ levels: target }: { levels: TargetLevels }) {
       id={settingsAnchorId("events")}
       title={t("notifications.events.title")}
       hint={current === LEGACY_PRESET ? `${t("notifications.events.hint")} ${t("notifications.preset.legacyNote")}` : t("notifications.events.hint")}
-      source="host"
-      actions={view ? <Segmented value={current} options={options} disabled={busy} label={t("notifications.preset")} onChange={(id) => pickable(id) && patch({ events: { preset: id } })} /> : undefined}
+      actions={view ? <SettingsGroup agents="none" source="host"><Segmented value={current} options={options} label={t("notifications.preset")} onChange={(id) => pickable(id) && send("events.preset", id, { events: { preset: id } })} /></SettingsGroup> : undefined}
     >
       {!view && <Loading rows={4} />}
       {view && events.length === 0 && <EmptyState>{t("notifications.events.none")}</EmptyState>}
@@ -313,7 +342,7 @@ function EventsSection({ levels: target }: { levels: TargetLevels }) {
             {events
               .filter((e) => eventGroup(e) === g)
               .map((e) => (
-                <EventRow key={e.id} event={e} locale={locale} levels={levels} disabled={busy} onLevel={(level) => patch({ events: { levels: { [e.id]: level } } })} />
+                <EventRow key={e.id} event={e} locale={locale} levels={levels} level={shown(pending, `ev:${e.id}`, e.level)} resetting={pending[`ev:${e.id}`] === null} onLevel={onLevel} />
               ))}
           </div>
         ))}
@@ -322,8 +351,26 @@ function EventsSection({ levels: target }: { levels: TargetLevels }) {
 }
 
 
+type LevelOption = { value: NotificationLevel; label: string };
+
+/** The four level choices, the same array while the locale stays (EventRow's memo compares it). */
+function useLevelOptions(): LevelOption[] {
+  const { t, locale } = useI18n();
+  const memo = useRef<{ locale: string; t: unknown; options: LevelOption[] } | null>(null);
+  if (!memo.current || memo.current.locale !== locale || memo.current.t !== t)
+    memo.current = { locale, t, options: NOTIFICATION_LEVELS.map((l) => ({ value: l, label: t(`notifications.level.${l}`) })) };
+  return memo.current.options;
+}
+
+type EventRowProps = { event: EventView; locale: string; levels: LevelOption[]; level: NotificationLevel; resetting: boolean; onLevel(id: string, level: NotificationLevel | null): void };
+
+/** A new view (every answer is a whole one) re-renders only the rows whose event changed. */
+const sameEvent = (a: EventRowProps, b: EventRowProps) =>
+  a.locale === b.locale && a.levels === b.levels && a.level === b.level && a.resetting === b.resetting && a.onLevel === b.onLevel &&
+  a.event.id === b.event.id && a.event.level === b.event.level && a.event.overridden === b.event.overridden && JSON.stringify([a.event.title, a.event.description]) === JSON.stringify([b.event.title, b.event.description]);
+
 /** One event: a settings row whose ↺ (reset slot) drops the override, like every defaultable row. */
-function EventRow({ event, locale, levels, disabled, onLevel }: { event: EventView; locale: string; levels: { value: NotificationLevel; label: string }[]; disabled: boolean; onLevel(level: NotificationLevel | null): void }) {
+const EventRow = memo(function EventRow({ event, locale, levels, level, resetting, onLevel }: EventRowProps) {
   const { t } = useI18n();
   const terms = resolveTerms(useTermOverrides(), locale as TermLocale);
   // Known ids carry our own title and one-line description (owner 2026-10-19); others keep cutex's.
@@ -332,18 +379,20 @@ function EventRow({ event, locale, levels, disabled, onLevel }: { event: EventVi
   const description = known ? t(`notifications.ev.${event.id}.desc` as MessageKey) : retermDaemonText(localText(event.description, locale), terms, locale as TermLocale);
   return (
     <SettingRow
+      agents="none"
+      source="host"
       label={
         <span className="flex items-center gap-1.5" title={`${event.id}${description ? ` — ${description}` : ""}`}>
           <span className="truncate">{title}</span>
         </span>
       }
       hint={description || undefined}
-      reset={<ResetButton title={t("notifications.events.reset")} disabled={disabled || !event.overridden} onClick={() => onLevel(null)} />}
+      reset={<ResetButton title={t("notifications.events.reset")} disabled={resetting || !event.overridden} onClick={() => onLevel(event.id, null)} />}
     >
-      <Segmented accent value={event.level} options={levels} disabled={disabled} label={title} onChange={(level) => onLevel(level)} />
+      <Segmented accent value={level} options={levels} label={title} onChange={(next) => onLevel(event.id, next)} />
     </SettingRow>
   );
-}
+}, sameEvent);
 
 // ---------- 3 本设备 ----------
 
@@ -360,14 +409,14 @@ function DeviceSection() {
       id={settingsAnchorId("device")}
       title={t("notifications.device.title")}
       hint={t("notifications.device.hint")}
-      source="local"
+
       actions={items.map(({ item }) => (
         <Button key={item.id} disabled={item.available() !== "ok" || off[item.method]} onClick={() => testMethod(item.method, text)}>
           {t(`notifications.device.test.${item.method}` as MessageKey)}
         </Button>
       ))}
     >
-      <SettingRow label={t("notifications.device.permission")}>
+      <SettingRow readOnly={permission !== "needsPermission" || !desktop?.requestPermission} label={t("notifications.device.permission")} agents="none" source="local">
         <span className={`text-xs ${permission === "ok" ? "text-muted" : "text-warn"}`}>{t(`notifications.device.${permission}` as MessageKey)}</span>
         {permission === "needsPermission" && desktop?.requestPermission && (
           <Button onClick={() => void desktop.requestPermission?.().finally(() => rerender((n) => n + 1))}>{t("notifications.device.allow")}</Button>
@@ -376,7 +425,7 @@ function DeviceSection() {
       {items.map(({ item }) => {
         const available = item.available();
         return (
-          <SettingRow key={item.id} label={t(item.titleKey)}>
+          <SettingRow readOnly={available === "unsupported"} key={item.id} label={t(item.titleKey)} agents="none" source="local">
             {available === "unsupported" ? (
               <span className="text-xs text-subtle">{t("notifications.device.unsupported")}</span>
             ) : (
@@ -397,8 +446,8 @@ export function NewAgentSection() {
   const { settings, patch } = useGlobalSettings();
   if (!settings?.newSessionNotification) return null;
   return (
-    <Section id={settingsAnchorId("newAgentLevel")} title={t("agent-config.defaults.notification")} hint={t("agent-config.defaults.notificationHint")} source="host">
-      <SettingRow label={t("notify.newAgentLevel")}>
+    <Section id={settingsAnchorId("newAgentLevel")} title={t("agent-config.defaults.notification")} hint={t("agent-config.defaults.notificationHint")} >
+      <SettingRow label={t("notify.newAgentLevel")} agents="none" source="host">
         <Segmented
           value={settings.newSessionNotification}
           label={t("notify.newAgentLevel")}
@@ -420,10 +469,10 @@ export function MuteSection({ levels }: { levels: TargetLevels }) {
   const icons = useUiPrefs().projectIcons;
   const overrides = view?.settings.projectOverrides ?? {};
   const row = (id: string, title: string, leading: React.ReactNode) => (
-    <ListRow key={id} leading={leading} title={title} actions={<Toggle label={title} disabled={!view} checked={overrides[id] !== "mute"} onChange={() => void levels.patch(projectMutePatch(view, id)).catch(() => {})} />} />
+    <SettingsGroup key={id} agents="none" source="host"><ListRow leading={leading} title={title} actions={<Toggle label={title} disabled={!view} checked={overrides[id] !== "mute"} onChange={() => void levels.patch(projectMutePatch(view, id)).catch(() => {})} />} /></SettingsGroup>
   );
   return (
-    <Section id={settingsAnchorId("mute")} title={t("notifications.mute.title")} hint={t("notifications.mute.hint")} source="host">
+    <Section id={settingsAnchorId("mute")} title={t("notifications.mute.title")} hint={t("notifications.mute.hint")} >
       {projects.map((p) =>
         row(
           p.project_id,

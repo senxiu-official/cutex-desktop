@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { hostEpoch } from "../../../../shared/hosts";
 import { bridge } from "../../bridge";
-import { useI18n } from "../../i18n";
+import { useI18n, type MessageKey } from "../../i18n";
 import { useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
 import { browserActivation } from "../../../../shared/browser";
 import { browserOwnerErrorKey as browserErrorKey } from "../../../../shared/browser";
@@ -12,7 +12,7 @@ import type { BrowserClaimPolicyView } from "../../../../shared/browser";
 import { BROWSER_CLAIM_MODES, DEFAULT_BROWSER_CLAIM_MODE, type BrowserClaimMode } from "../../../../shared/browserClaim";
 
 /** Immediate one-field save; does not join or overwrite the profile's other draft fields. */
-export function BrowserProfileTools({ profile }: { profile: string }) {
+export function BrowserProfileTools({ profile }: { profile: string; name?: string }) {
   const { t } = useI18n(), hostId = useTargetHostId(), enabled = useSyncExternalStore(browserActivation.subscribe, browserActivation.get, browserActivation.get);
   const epoch = useApp(state => state.hosts ? hostEpoch(state.hosts, hostId) : null);
   const supported = useTargetFeatures().has("browser-relay-v1");
@@ -37,10 +37,10 @@ export function BrowserProfileTools({ profile }: { profile: string }) {
     return () => { ++generation.current; };
   }, [hostId, epoch, profile, available]);
   // Module off (fresh installs have it on since 2026-10-15): keep the row discoverable, inert, with the way to turn it on.
-  if (!enabled) return <SettingRow label={t("browser.profile.tools")} hint={t("browser.profile.moduleOff")}>
+  if (!enabled) return <SettingRow source="local" agents="none" navigation label={t("browser.profile.tools")} hint={t("browser.profile.moduleOff")}>
     <Button onClick={() => useApp.getState().openSettings("modules")}>{t("modules.openModules")}</Button>
   </SettingRow>;
-  return <SettingRow label={t("browser.profile.tools")} hint={<>
+  return <SettingRow source="host" agents="offNowOnNext" label={t("browser.profile.tools")} hint={<>
     {t("browser.profile.hint")}
     {!available && <span className="block">{t("browser.host.unavailable")}</span>}
     {failed && <span role="alert" className="block text-danger">{t(failed)}</span>}
@@ -55,7 +55,7 @@ export function BrowserProfileTools({ profile }: { profile: string }) {
  * (main stores it per host + profile and enforces it), so it is its own card tagged 本机 under 行为;
  * ↺ goes back to the default. Saved immediately.
  */
-export function BrowserProfileClaimMode({ profile }: { profile: string }) {
+export function BrowserProfileClaimMode({ profile, name = profile }: { profile: string; name?: string }) {
   const { t } = useI18n(), hostId = useTargetHostId(), enabled = useSyncExternalStore(browserActivation.subscribe, browserActivation.get, browserActivation.get);
   const epoch = useApp(state => state.hosts ? hostEpoch(state.hosts, hostId) : null);
   const supported = useTargetFeatures().has("browser-relay-v1");
@@ -83,7 +83,7 @@ export function BrowserProfileClaimMode({ profile }: { profile: string }) {
   if (!enabled && !preview) return null;
   const label = (mode: BrowserClaimMode) => t(`browser.claim.mode.${mode}`);
   const mode = view?.mode ?? DEFAULT_BROWSER_CLAIM_MODE;
-  return <Section source="local"><SettingRow label={t("browser.claim.mode")} hint={<>
+  return <Section id="profile-browser"   title={t("settings.profileIa.browserClaim" as MessageKey)} hint={t("settings.profileIa.localProfileImmediate" as MessageKey, { name })}><SettingRow agents="now" source="local" label={t("browser.claim.mode")} hint={<>
     {t("browser.claim.modeHint")}
     <span className="block">{t("browser.claim.localHint")}</span>
     {mode === "always" && <span role="alert" data-browser-claim-always-warning className="block text-warn">{t("browser.claim.alwaysWarn")}</span>}

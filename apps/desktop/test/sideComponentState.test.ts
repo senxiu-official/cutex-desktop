@@ -3,11 +3,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { baseOf, initPreview, isSourceToggleable, parsePreviewParams, previewKey, restorePreview } from "../src/renderer/src/modules/workspace/previewState";
 import { diffKey, diffLabel, diffName, initDiff, parseDiffParams, restoreDiff, turnTexts } from "../src/renderer/src/modules/diff/diffState";
+// At the top (bridge mocked — vi.mock is hoisted), not inside the test: loading it there cost the test up to 3.4 s
+// alone and timed it out (5 s) under the full suite's load.
+import { parseThreadParams, restoreThread } from "../src/renderer/src/modules/subagents/threadState";
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 
-// Tests here import renderer modules on demand (menus, side pages): slow under a loaded full run.
-describe("workspace.preview", { timeout: 20_000 }, () => {
+describe("workspace.preview", () => {
   it("accepts a path (+ line, host) and nothing else", () => {
     expect(parsePreviewParams({ path: "docs/DESIGN.md", line: 12 })).toEqual({ path: "docs/DESIGN.md", line: 12, host: false });
     expect(parsePreviewParams({ path: "/home/jy/r.md", host: true })).toEqual({ path: "/home/jy/r.md", line: null, host: true });
@@ -21,9 +23,10 @@ describe("workspace.preview", { timeout: 20_000 }, () => {
     expect(previewKey({ path: "a.md", line: 3, host: true })).toBe("host:a.md");
   });
 
-  it("a line anchor opens the source; otherwise reopening keeps the toggle", () => {
+  it("a line anchor opens the source; otherwise the last choice for that kind (viewChoice, default rendered)", () => {
     expect(initPreview({ path: "a.md", line: 4, host: false }, null).source).toBe(true);
-    expect(initPreview({ path: "a.md", line: null, host: false }, { path: "a.md", line: null, host: false, source: true }).source).toBe(true);
+    // The tab it replaces no longer decides: the per-kind choice does (fileViewHtml.test.tsx covers remembering).
+    expect(initPreview({ path: "a.md", line: null, host: false }, { path: "a.md", line: null, host: false, source: true }).source).toBe(false);
     expect(initPreview({ path: "a.md", line: null, host: false }, null).source).toBe(false);
   });
 
@@ -84,7 +87,6 @@ describe("diff.view", () => {
 
 describe("subagents.thread", () => {
   it("takes a thread id; restores v1 only", async () => {
-    const { parseThreadParams, restoreThread } = await import("../src/renderer/src/modules/subagents/threadState");
     expect(parseThreadParams({ threadId: "th-1" })).toEqual({ threadId: "th-1" });
     expect(parseThreadParams({ threadId: "" })).toBeNull();
     expect(parseThreadParams({ threadId: "x".repeat(201) })).toBeNull();

@@ -3,7 +3,8 @@
 import { describe, expect, it } from "vitest";
 import { nextWorkspaceRoot, rootConfirmKind, workspaceRootErrorKey } from "../src/renderer/src/lib/projectRoot";
 import { ProjectDirectoryError } from "../src/renderer/src/lib/projectCreate";
-import { en, zhCN } from "../src/renderer/src/modules/projects/i18n";
+import { zhCN } from "../src/renderer/src/modules/projects/i18n";
+import { en } from "../src/renderer/src/modules/projects/i18n.en";
 
 describe("nextWorkspaceRoot", () => {
   it("trims, and empty means clear", () => {

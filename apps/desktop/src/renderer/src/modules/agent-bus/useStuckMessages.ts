@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { StuckBusMessage, StuckBusView } from "../../../../shared/ipc";
 import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
 import { useHostData } from "../../lib/useHostScope";
+import { bridge } from "../../bridge";
+import { MESSAGE_SETTLEMENT_EVENT } from "../../../../shared/messageSettlement";
 import { bulkTargets, DEFAULT_MIN_AGE, discardAll, discardOutcome, discardRequest, emptySummary, failure, isMinAgeChoice, type BulkSummary } from "./stuck";
 
 const KEY = "cutex-desktop.stuckBusMinAge";
@@ -77,6 +79,13 @@ export function useStuckMessages(): StuckMessagesState {
       if (alive.current && seq === loadSeq.current) setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof bridge.on !== "function") return;
+    return bridge.on("hostEvent", ({ hostId: changedHost, envelope }) => {
+      if (changedHost === scope.current.hostId && envelope.cutex?.method === MESSAGE_SETTLEMENT_EVENT) void refresh();
+    });
+  }, [refresh]);
 
   // A host switch starts from nothing.
   useEffect(() => {

@@ -1,10 +1,12 @@
 // Pure helpers for the usage page: series per bucket, weekly buckets, axis scale, smooth paths.
 import type { UsageReport } from "../../../../shared/ipc";
-import { seriesName } from "../../lib/usage";
+import { usageSeriesName as seriesName } from "./accountIdentity";
 
 export type Split = "total" | "profile" | "model" | "agent" | "project" | "source" | "host";
 export type Metric = "tokens" | "cost";
 export type ChartMode = "line" | "stacked";
+/** Default split: per-profile rows make Claude's step/context shape visible without a click. */
+export const DEFAULT_USAGE_SPLIT: Split = "profile";
 /** Token types the 「总计」 view stacks: cache reads, fresh (uncached) input, output. */
 export const TOKEN_TYPES = ["cached", "fresh", "output"] as const;
 export type TokenType = (typeof TOKEN_TYPES)[number];
@@ -13,6 +15,11 @@ export type TokenType = (typeof TOKEN_TYPES)[number];
 const PALETTE = ["#4c8dff", "#f2a33a", "#3cc48a", "#e8618c", "#9b7bff", "#8a8f98", "#22b8cf", "#fd7e14"];
 const TOKEN_COLORS: Record<TokenType, string> = { cached: "#22b8cf", fresh: "#4c8dff", output: "#f2a33a" };
 export const OTHER = "…";
+
+/** Claude subscription gauges: the 5-hour line carries its own reset rule. */
+export function claudeFiveHourGauge(gauge: { id: string; windowLabel: string | null }): boolean {
+  return gauge.id.startsWith("claude-") && gauge.windowLabel === "5h";
+}
 
 export function seriesColor(series: readonly string[], name: string): string {
   if (name in TOKEN_COLORS) return TOKEN_COLORS[name as TokenType];

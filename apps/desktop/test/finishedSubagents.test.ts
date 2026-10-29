@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { finishedSubAgents, subAgentSpanFromThreadRead } from "../src/renderer/src/lib/finishedSubagents";
+import { backgroundClaudeRefs, finishedSubAgents, subAgentSpanFromThreadRead } from "../src/renderer/src/lib/finishedSubagents";
+import { claudeTaskIdOf, claudeTaskStatus } from "../src/renderer/src/lib/claudeTasks";
+import { activeSubAgents, claudeTaskStatusFromEvent } from "../src/renderer/src/lib/subagents";
+import { stopsClaudeTasks } from "../src/renderer/src/lib/agentFeatures";
 import { timelineFromThreadRead } from "../src/renderer/src/lib/timeline";
-import { en, zhCN } from "../src/renderer/src/modules/subagents/i18n";
+import { zhCN } from "../src/renderer/src/modules/subagents/i18n";
+import { en } from "../src/renderer/src/modules/subagents/i18n.en";
 
 const PARENT = "00000000-0000-7000-8000-000000000001";
 const A = "00000000-0000-7000-8000-00000000000a";
@@ -117,8 +121,56 @@ describe("finishedSubAgents", () => {
       },
     ]);
     const [refused, bg] = finishedSubAgents(tl);
-    expect(bg).toMatchObject({ key: "toolu_bg", background: true, durationMs: null, outcome: "completed" });
-    expect(refused).toMatchObject({ key: "toolu_refused", background: false, outcome: "failed" });
+    expect(bg).toMatchObject({ key: "toolu_bg", background: true, noTranscript: true, durationMs: null, outcome: "completed" });
+    expect(refused).toMatchObject({ key: "toolu_refused", background: false, noTranscript: false, outcome: "failed" });
+  });
+
+  it("claude-r23: a background run with a transcript is a running row until its task ends, then opens with its span", () => {
+    const ref = "claude:s1:task:bg1";
+    const activity = (kind: string) => ({ type: "subAgentActivity", id: `act-${kind}`, kind, agentThreadId: ref, agentPath: "/claude/bg1" });
+    const tl = timeline([
+      { id: "t1", status: "completed", items: [agentCard("toolu_bg", { description: "整理日志", subagent_type: "general-purpose" }, { agentThreadId: ref, durationMs: 40 }), activity("started")] },
+    ]);
+    // The card completed at the launch; the run goes on after its turn.
+    expect(finishedSubAgents(tl)).toEqual([]);
+    expect(activeSubAgents(tl, true).map((a) => a.threadId)).toEqual([ref]);
+    expect([...backgroundClaudeRefs(tl)]).toEqual([ref]);
+    // claude/task/updated says how it ended (here: stopped).
+    const spans = { [ref]: { startedAt: 100, endedAt: 190 } };
+    const [row] = finishedSubAgents(tl, { live: { [ref]: "interrupted" }, spans });
+    expect(row).toMatchObject({ key: "toolu_bg", threadId: ref, background: true, noTranscript: false, outcome: "stopped", durationMs: 90_000 });
+    expect(activeSubAgents(tl, true, { [ref]: "interrupted" })).toEqual([]);
+    // Or the adapter's own completed activity item in the origin turn.
+    const done = timeline([{ id: "t1", status: "completed", items: [agentCard("toolu_bg", { description: "整理日志" }, { agentThreadId: ref }), activity("started"), activity("completed")] }]);
+    expect(finishedSubAgents(done)[0]).toMatchObject({ outcome: "completed", noTranscript: false, durationMs: null });
+  });
+
+  it("reads claude/task/updated into a sub-agent status by the timeline's reference", () => {
+    const ref = "claude:s1:task:bg1";
+    const tl = timeline([{ id: "t1", status: "completed", items: [agentCard("toolu_bg", {}, { agentThreadId: ref })] }]);
+    const envelope = (task: Record<string, unknown>, threadId = PARENT) =>
+      ({ native: { kind: "notification", message: { method: "claude/task/updated", params: { threadId, task } } } }) as never;
+    expect(claudeTaskStatusFromEvent(envelope({ taskId: "bg1", taskType: "local_agent", status: "running" }), tl)).toEqual({ threadId: ref, status: "running" });
+    expect(claudeTaskStatusFromEvent(envelope({ taskId: "bg1", taskType: "local_agent", status: "lost" }), tl)).toEqual({ threadId: ref, status: "interrupted" });
+    expect(claudeTaskStatusFromEvent(envelope({ taskId: "bg1", taskType: "local_agent", status: "failed" }), tl)).toEqual({ threadId: ref, status: "errored" });
+    // Shell tasks, other threads and unknown tasks say nothing.
+    expect(claudeTaskStatusFromEvent(envelope({ taskId: "bg1", taskType: "local_bash", status: "completed" }), tl)).toBeNull();
+    expect(claudeTaskStatusFromEvent(envelope({ taskId: "bg1", taskType: "local_agent", status: "completed" }, "other"), tl)).toBeNull();
+    expect(claudeTaskStatusFromEvent(envelope({ taskId: "nope", taskType: "local_agent", status: "completed" }), tl)).toBeNull();
+    expect(claudeTaskStatus({ taskType: "local_agent", status: "unknown" })).toBeNull();
+    expect(claudeTaskIdOf(ref)).toBe("bg1");
+    expect(claudeTaskIdOf("00000000-0000-7000-8000-00000000000a")).toBeNull();
+  });
+
+  it("offers 停止 only with the adapter's backgroundSubagents and cutex claude-background-tasks", () => {
+    const host = (on: boolean) => ({ has: (f: string) => on && f === "claude-background-tasks" });
+    const claude = { runtime: "claude" as const, map: { backgroundSubagents: true } };
+    expect(stopsClaudeTasks(claude, host(true))).toBe(true);
+    expect(stopsClaudeTasks(claude, host(false))).toBe(false);
+    expect(stopsClaudeTasks({ runtime: "claude", map: {} }, host(true))).toBe(false);
+    expect(stopsClaudeTasks({ runtime: "codex", map: null }, host(true))).toBe(false);
+    expect(zhCN["subagents.stop"]).toBe("停止");
+    expect(en["subagents.stop"]).toBe("Stop");
   });
 
   it("skips a Claude card whose turn still runs, and caps the list", () => {

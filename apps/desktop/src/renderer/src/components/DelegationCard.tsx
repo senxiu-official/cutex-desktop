@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeftRight, ChevronDown, ChevronRight, MoreHorizontal } from "lucide-react";
 import type { AskAnswerPage } from "../../../shared/ipc";
 import { useI18n } from "../i18n";
-import { ARMED_BUTTON, ARMED_FRAME, useArmed } from "../lib/armedConfirm";
+import { ARMED_FRAME } from "../lib/armedConfirm";
 import { contextMenu, openMenuFrom } from "../lib/contextMenu";
 import { attemptSeconds, delegateCallOf, delegationActions, delegationStatus, formatSpan, peerPartyText, requesterSession, stopPending, waitSeconds, type DelegationStatus } from "../lib/delegations";
 import { delegationMenu, runDelegationCommand } from "../lib/delegationMenu";
@@ -22,11 +22,14 @@ import type { RawItem } from "../lib/timeline";
 import { useNow } from "../lib/time";
 import { featuresOf, useApp } from "../store";
 import { useConvHost } from "../lib/conversationScope";
+import { continueClock, useQuotaContinue } from "../lib/quotaContinue";
 import type { AskQuestion, AskSummary } from "../../../shared/ipc";
 import { DelegationHops, DelegationStatusMark, DelegationTag } from "./DelegationParts";
 import { PeerParty } from "./PeerParty";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 import { DelegationPeerSection } from "./DelegationPeer";
 import { DelegationReviewActions } from "./DelegationReview";
+import { ArmedButton } from "./ArmedButton";
 import { Markdown } from "./Markdown";
 import { Who } from "./Parties";
 import { rawIdTitle, useModelName } from "../lib/modelDisplay";
@@ -34,6 +37,11 @@ import { rawIdTitle, useModelName } from "../lib/modelDisplay";
 const NO_NOTES: { text: string; at: string }[] = [];
 const NO_QUESTIONS: AskQuestion[] = [];
 const NO_COMMANDS = { stop: false, retry: false, accept: false, abandon: false } as const;
+/** The action row's buttons (the armed face keeps this shape). */
+const ACTION_SHAPE = "rounded-md px-2 py-0.5 text-xs";
+const ACTION_IDLE_DANGER = "text-muted hover:bg-surface-2 hover:text-danger";
+/** 「放弃这个委托？再左键点击一次确认」 / "Abandon this delegation? Click again to confirm" (no space after full-width marks). */
+const armedHint = (question: string, again: string) => `${question}${/[　-〿！-／：-？]$/.test(question) ? "" : " "}${again}`;
 
 /** Running / waiting time after the status word. */
 function statusTime(d: AskSummary, status: DelegationStatus, now: number): string | null {
@@ -56,7 +64,7 @@ function questionText(q: AskQuestion): string {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mt-2 first:mt-0">
-      <div className="mb-0.5 text-[11px] text-subtle">{title}</div>
+      <div className="mb-0.5 text-caption/[inherit] text-subtle">{title}</div>
       {children}
     </div>
   );
@@ -135,8 +143,9 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
     for (const q of [...(detail?.questions ?? []), ...liveQuestions]) byId.set(q.questionId, { ...byId.get(q.questionId), ...q });
     return [...byId.values()];
   }, [detail?.questions, liveQuestions]);
-  const [stopArmed, setStopArmed] = useArmed();
-  const [abandonArmed, setAbandonArmed] = useArmed();
+  // Reported by the two ArmedButtons: the card frame turns red while one is armed.
+  const [stopArmed, setStopArmed] = useState(false);
+  const [abandonArmed, setAbandonArmed] = useState(false);
   // users-p2-access: a non-owner sees the commands only with send (lib/p2Access).
   const commands = useP2Access(host).delegations;
   const can = commands ? delegationActions(d) : NO_COMMANDS;
@@ -148,14 +157,14 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
   const armed = stopArmed || abandonArmed;
   // Its target is an agent of the open agent's host (not the focus host's).
   const openTarget = () => (views && d.attempt?.turnId ? focusTurn(d.target, d.attempt.turnId, host) : void useApp.getState().select(d.target, host));
-  const button = "rounded-md px-2 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground";
+  const button = `${ACTION_SHAPE} text-muted hover:bg-surface-2 hover:text-foreground`;
   return (
-    <div className={`${layout === "card" ? "mt-1 ml-5 max-w-[85%]" : ""} rounded-xl border px-3 py-2 text-xs transition-colors ${armed ? ARMED_FRAME : "border-transparent bg-surface"}`}>
+    <div className={`message-body ${layout === "card" ? "mt-1 ml-5 max-w-[85%]" : ""} rounded-xl border px-3 py-2 text-xs transition-colors ${armed ? ARMED_FRAME : "border-transparent bg-surface"}`}>
       {/* The side detail (opened from the 需要你 strip, a queue row, a list): the owner review on top. The card has it under its line. */}
       {layout === "side" && <DelegationReviewActions d={d} host={host} variant="side" />}
       {brief && (
         <Section title={t("delegation.brief")}>
-          <div className={`${layout === "card" ? "max-h-48 overflow-y-auto" : ""} text-[13px]`}>
+          <div className={`${layout === "card" ? "max-h-48 overflow-y-auto" : ""} text-ui/[inherit]`}>
             <Markdown text={brief} streaming={false} />
           </div>
           {artifact && <FullBrief artifactId={artifact} hostId={host} />}
@@ -167,7 +176,7 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
             {notes.map((n) => (
               <li key={n.at + n.text} className="flex gap-2">
                 <span className="shrink-0 text-subtle tabular-nums">{n.at.slice(11, 16)}</span>
-                <span className="min-w-0">{n.text}</span>
+                <span className="selectable min-w-0">{n.text}</span>
               </li>
             ))}
           </ul>
@@ -177,8 +186,8 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
         <Section title={t("delegation.questions")}>
           {questions.map((q) => (
             <div key={q.questionId} className="flex gap-2">
-              <span className="min-w-0 flex-1 whitespace-pre-wrap">{questionText(q)}</span>
-              <span className={`shrink-0 ${q.state === "open" ? "text-warn" : "text-subtle"}`}>
+              <span className="selectable min-w-0 flex-1 whitespace-pre-wrap">{questionText(q)}</span>
+              <span className={`min-w-0 max-w-[40%] ${q.state === "open" ? "text-warn" : "text-subtle"}`}>
                 {q.state !== "open" ? t("delegation.question.resolved") : q.route === "owner" || q.routedToOwnerAt ? t("delegation.question.owner") : t("delegation.question.requester", { name: requester ? nameOf(requester) : t("delegation.you") })}
               </span>
             </div>
@@ -188,58 +197,41 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
       <DelegationPeerSection d={d} hostId={host} />
       {(d.answerPreview || d.answerId) && (
         <Section title={t("delegation.result")}>
-          {d.answerPreview && <div className="text-[13px] whitespace-pre-wrap">{d.answerPreview}</div>}
-          {answerMeta && <div className="mt-0.5 text-[11px] text-subtle">{answerMeta}</div>}
+          {d.answerPreview && <div className="selectable text-ui/[inherit] whitespace-pre-wrap">{d.answerPreview}</div>}
+          {answerMeta && <div className="mt-0.5 text-caption/[inherit] text-subtle">{answerMeta}</div>}
           {d.answerId && <FullAnswer askId={d.askId} hostId={host} />}
         </Section>
       )}
       <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-border/60 pt-1.5">
-        {armed ? (
-          <>
-            <span className="mr-1 text-danger">{t("delegation.again")}</span>
-            <button
-              className={ARMED_BUTTON}
-              onClick={() => {
-                setStopArmed(false);
-                setAbandonArmed(false);
-                void (stopArmed ? runDelegationCommand(host, d, "cutex/ask/stop", t) : runDelegationCommand(host, d, "cutex/ask/close", t, "abandoned"));
-              }}
-            >
-              {t(stopArmed ? "delegation.stop" : "delegation.abandon")}
-            </button>
-          </>
-        ) : (
-          <>
-            {!d.remote && (
-              <button className={button} onClick={openTarget}>
-                {t("delegation.open", { name: targetName })}
-              </button>
-            )}
-            {can.stop && (
-              <button className={`${button} hover:text-danger`} onClick={() => setStopArmed(true)}>
-                {t("delegation.stop")}
-              </button>
-            )}
-            {can.retry && (
-              <button className={button} onClick={() => void runDelegationCommand(host, d, "cutex/ask/retry", t)}>
-                {t("delegation.retry")}
-              </button>
-            )}
-            {can.accept && (
-              <button className={button} onClick={() => void runDelegationCommand(host, d, "cutex/ask/close", t, "accepted")}>
-                {t("delegation.accept")}
-              </button>
-            )}
-            {can.abandon && (
-              <button className={`${button} hover:text-danger`} onClick={() => setAbandonArmed(true)}>
-                {t("delegation.abandon")}
-              </button>
-            )}
-            <button className={`${button} ml-auto`} title={t("delegation.more")} aria-label={t("delegation.more")} onClick={(e) => openMenuFrom(e.currentTarget, delegationMenu(d, t, nameOf, { host, here, views }))}>
-              <MoreHorizontal size={13} />
-            </button>
-          </>
+        {/* Stop / 放弃 arm in place (ArmedButton: same button, floating hint), so nothing in the row moves. */}
+        {!d.remote && (
+          <button className={button} onClick={openTarget}>
+            {t("delegation.open", { name: targetName })}
+          </button>
         )}
+        {can.stop && (
+          <ArmedButton shape={ACTION_SHAPE} idle={ACTION_IDLE_DANGER} hint={armedHint(t("delegation.stopConfirm"), t("delegation.again"))} onArmedChange={setStopArmed} resetKey={d.revision} testId="delegation-stop" onConfirm={() => void runDelegationCommand(host, d, "cutex/ask/stop", t)}>
+            {t("delegation.stop")}
+          </ArmedButton>
+        )}
+        {can.retry && (
+          <button className={button} onClick={() => void runDelegationCommand(host, d, "cutex/ask/retry", t)}>
+            {t("delegation.retry")}
+          </button>
+        )}
+        {can.accept && (
+          <button className={button} onClick={() => void runDelegationCommand(host, d, "cutex/ask/close", t, "accepted")}>
+            {t("delegation.accept")}
+          </button>
+        )}
+        {can.abandon && (
+          <ArmedButton shape={ACTION_SHAPE} idle={ACTION_IDLE_DANGER} hint={armedHint(t("delegation.abandonConfirm"), t("delegation.again"))} onArmedChange={setAbandonArmed} resetKey={d.revision} testId="delegation-abandon" onConfirm={() => void runDelegationCommand(host, d, "cutex/ask/close", t, "abandoned")}>
+            {t("delegation.abandon")}
+          </ArmedButton>
+        )}
+        <button className={`${button} ml-auto`} title={t("delegation.more")} aria-label={t("delegation.more")} onClick={(e) => openMenuFrom(e.currentTarget, delegationMenu(d, t, nameOf, { host, here, views }))}>
+          <MoreHorizontal size={13} />
+        </button>
       </div>
     </div>
   );
@@ -252,6 +244,7 @@ function useTargetActivity(targetId: string, running: boolean): string | null {
 
 export function DelegationCard({ item, sessionId }: { item: RawItem; sessionId: string }) {
   const { t } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const call = useMemo(() => delegateCallOf(item)!, [item]);
   // The call result may carry the short form (`ask-123456`, cutex task 06): the store's full id when known.
   const askId = useResolvedAskId(call.askId!);
@@ -279,14 +272,20 @@ export function DelegationCard({ item, sessionId }: { item: RawItem; sessionId: 
   const waited = held && d.createdAt ? formatSpan(waitSeconds(d, now) ) : null;
   const ownerSteered = useOwnerSteered(askId, live && !!d.answerId);
   return (
-    <div className="my-2" data-ask-id={askId} onContextMenu={contextMenu(() => delegationMenu(d, t, nameOf, { host, here: sessionId, views }))}>
-      <button onClick={() => setOpen(!open)} className="flex w-full max-w-full items-center gap-1.5 rounded-md py-0.5 text-left text-xs text-muted hover:text-foreground">
+    <div className="my-2 min-w-0 max-w-full" data-ask-id={askId} data-delegation-card="" onContextMenu={contextMenu(() => delegationMenu(d, t, nameOf, { host, here: sessionId, views }))}>
+      <button onClick={() => userToggle(() => setOpen(!open))} className="flex w-full min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-md py-0.5 text-left text-xs text-muted hover:text-foreground">
         <ArrowLeftRight size={13} className="shrink-0 text-subtle" />
         <span className="shrink-0">{t("delegation.label")}</span>
-        {d.remote ? <PeerParty text={peerPartyText(d.remote.targetName || targetName, d.target, d.remote.label)} label={d.remote.label} size={16} /> : <Who id={d.target || null} name={targetName} size={16} />}
-        {model && <span className="shrink-0 text-subtle" title={d.attempt?.model ? rawIdTitle(d.attempt.model, model) : undefined}>· {model}</span>}
+        <span className="inline-flex min-w-0 max-w-[30%] shrink-0">{d.remote ? <PeerParty text={peerPartyText(d.remote.targetName || targetName, d.target, d.remote.label)} label={d.remote.label} size={16} /> : <Who id={d.target || null} name={targetName} size={16} />}</span>
+        {model && <span className="min-w-0 max-w-[25%] truncate text-subtle" title={d.attempt?.model ? rawIdTitle(d.attempt.model, model) : undefined}>· {model}</span>}
         <DelegationTag askId={askId} />
-        {line ? (
+        {/* Held (queued, waiting for quota …): why, on the card's one line — a second line under it went again when the
+            delegation started and the history above jumped (owner 2026-10-24). The title stays on hover. */}
+        {held && status.key !== "question" ? (
+          <span data-delegation-hold="" className={`min-w-0 truncate ${status.dangerText ? "text-danger" : "text-subtle"}`} title={title}>
+            {status.key === "quota" && d.target ? <QuotaHoldLine host={host} target={d.target} waited={waited} /> : <DelegationHoldLine status={status} name={targetName} waited={waited} />}
+          </span>
+        ) : line ? (
           <span className="min-w-0 truncate text-subtle" title={title}>
             {line}
             {tools && <span className="ml-1.5">· {tools}</span>}
@@ -296,22 +295,31 @@ export function DelegationCard({ item, sessionId }: { item: RawItem; sessionId: 
             {title}
           </span>
         )}
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
+        <span className="ml-auto flex min-w-0 max-w-[45%] items-center gap-1.5 pl-2">
           <DelegationHops hops={d.hops} />
           {ownerSteered && <OwnerSteeredBadge />}
           {live || d.revision >= 0 || status.key !== "queued" ? <DelegationStatusMark status={shown} name={targetName} trailing={time} error={d.attempt?.lastError ?? d.remote?.lastError} /> : null}
           {open ? <ChevronDown size={13} className="shrink-0" /> : <ChevronRight size={13} className="shrink-0" />}
         </span>
       </button>
-      {held && status.key !== "question" && (
-        <div className={`ml-5 text-[11px] ${status.dangerText ? "text-danger" : "text-subtle"}`}>
-          <DelegationHoldLine status={status} name={targetName} waited={waited} />
-        </div>
-      )}
       {/* Delegating to a wider target waits for the owner first (cutex pendingReview): decide it here. */}
       <DelegationReviewActions d={d} host={host} variant="card" />
       {open && <DelegationDetailBody d={d} brief={call.brief} here={sessionId} host={host} />}
     </div>
+  );
+}
+
+/** blocked(quota): 额度用完 · 约 HH:MM 自动继续 — when the target's quota hold lifts and cutex redelivers it. */
+function QuotaHoldLine({ host, target, waited }: { host: string; target: string; waited: string | null }) {
+  const { t, locale } = useI18n();
+  const now = useNow(false);
+  const at = useQuotaContinue(host, target, true)?.pending?.at;
+  const clock = at ? continueClock(at, now, locale) : "";
+  return (
+    <>
+      {clock ? t("delegation.status.quotaAt", { at: clock }) : t("delegation.status.quota")}
+      {waited && <span className="text-subtle"> · {t("delegation.waited", { t: waited })}</span>}
+    </>
   );
 }
 

@@ -81,7 +81,7 @@ describe("owner Side bridge", () => {
     expect(request).toHaveBeenLastCalledWith("GET", "/v2/sessions/parent/side-chats/side", { query: { afterRevision: 12, waitMs: 25000 } });
     expect(() => side.sideRead("parent", "side", -1)).toThrow();
     expect(() => side.sideRead("parent", "side", 12, 25001)).toThrow();
-    expect(() => side.sideSend("parent", "side", { text: "字".repeat(22000), clientMessageId: "n" })).toThrow("UTF-8");
+    expect(() => side.sideSend("parent", "side", { text: "字".repeat(22000), clientMessageId: "n" })).toThrow("side_chat_invalid_message: too_long");
   });
   it("accepts one native response or error, never arbitrary native calls", async () => {
     const { side, request } = harness();
@@ -91,5 +91,53 @@ describe("owner Side bridge", () => {
     expect(request).toHaveBeenLastCalledWith("POST", "/v2/sessions/parent/side-chats/side/responses", { body: { requestId: "request", error: { code: -32603, message: "No" } } });
     expect(() => side.sideRespond("p", "s", 1, { error: { code: NaN, message: "No" } })).toThrow();
     expect(() => side.sideRespond("p", "s", 1, { result: {}, error: { code: 1, message: "No" } })).toThrow();
+  });
+
+  it("uses the parent model for omitted or blank overrides without accepting malformed models", async () => {
+    const { side, request } = harness();
+    for (const model of [undefined, "", "   "]) {
+      await side.sideOpen("claude-r32-parent", { anchorTurnId: "65a7b940-1", model });
+      expect(request).toHaveBeenLastCalledWith("POST", "/v2/sessions/claude-r32-parent/side-chats", { body: { anchorTurnId: "65a7b940-1" } });
+    }
+    request.mockClear();
+    for (const model of [null, 4, "a\0b", "a\nb", "x".repeat(201), "字".repeat(67), " ".repeat(201)]) {
+      await expect(side.sideOpen("parent", { model } as never)).rejects.toThrow("side_chat_invalid_model");
+    }
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("passes the owner's question and a normal send UUID unchanged", async () => {
+    const { side, request } = harness();
+    const input = { text: "Is deepCPS intergrated into the scPolyA and GUI or separate?", clientMessageId: "bad9d056-32d2-4cf0-97d4-00f97f017f6a" };
+    await side.sideSend("claude-parent", "side", input);
+    expect(request).toHaveBeenCalledWith("POST", "/v2/sessions/claude-parent/side-chats/side/messages", { body: input });
+  });
+
+  it("names the rejected field, retains the original limits and sends no malformed request", () => {
+    const { side, request } = harness();
+    for (const text of [undefined, "", " \n", "bad\0text", "a".repeat(64001), "字".repeat(22000)]) {
+      expect(() => side.sideSend("parent", "side", { text, clientMessageId: "good" } as never)).toThrow("side_chat_invalid_message:");
+    }
+    for (const clientMessageId of [undefined, "", " ", "bad\0id", "x".repeat(129)]) {
+      expect(() => side.sideSend("parent", "side", { text: "good", clientMessageId } as never)).toThrow("side_chat_invalid_message_id:");
+    }
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("normalizes runtime error messages without masking their context or changing the code", async () => {
+    const { side, request } = harness();
+    for (const message of ["", "   "]) {
+      await side.sideRespond("parent", "side", "r32-request", { error: { code: -32603, message } });
+      expect(request).toHaveBeenLastCalledWith("POST", "/v2/sessions/parent/side-chats/side/responses", { body: { requestId: "r32-request", error: { code: -32603, message: "Request failed" } } });
+    }
+    for (const [message, expected] of [["bad\0error", "baderror"], ["real failure: " + "x".repeat(1100), ("real failure: " + "x".repeat(1100)).slice(0, 1000)], ["x".repeat(999) + "😀", "x".repeat(999)]] as const) {
+      await side.sideRespond("parent", "side", 1, { error: { code: -32603, message } });
+      expect(request).toHaveBeenLastCalledWith("POST", "/v2/sessions/parent/side-chats/side/responses", { body: { requestId: 1, error: { code: -32603, message: expected } } });
+    }
+    request.mockClear();
+    for (const message of [undefined, null, 3]) {
+      expect(() => side.sideRespond("parent", "side", 1, { error: { code: -32603, message } } as never)).toThrow("side_chat_invalid_error_message:");
+    }
+    expect(request).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { chipIsCompact, type ChipFit, type StatusChips } from "./statusChips";
+import { sharedResizeObserver } from "./resizeHub";
 
 /**
  * 状态标签 自动 for one agent row: measures its first line (ResizeObserver) and decides with
@@ -18,7 +19,7 @@ export function useChipFit(pref: StatusChips, deps: readonly unknown[]) {
       return prev && next && Math.abs(prev.lineWidth - next.lineWidth) < 0.5 && prev.nameWidth === next.nameWidth && prev.otherWidth === next.otherWidth && prev.chipWidth === next.chipWidth ? prev : next;
     });
     measure();
-    const ro = new ResizeObserver(measure);
+    const ro = sharedResizeObserver(measure);
     ro.observe(line);
     // The text copy changes width with the language / font without the line resizing.
     const copy = line.querySelector("[data-fit-measure]");

@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import type { HostsState, ExtraInput } from "../src/shared/ipc";
 import type { SessionView } from "../src/renderer/src/store";
 import { emptyTimeline } from "../src/renderer/src/lib/timeline";
@@ -154,6 +154,14 @@ function expectUntouched(previous: ReturnType<typeof sentinel>) {
   expect(mock.api.queueResume).not.toHaveBeenCalled();
   expect(mock.api.queueList).not.toHaveBeenCalled();
 }
+// Each test needs a fresh store (vi.resetModules() below), so the imports stay in beforeEach and the tests; this
+// warm-up loads the graph once first, so its first transform is not billed to the first test (2.5 s alone, near 5 s
+// under the full suite's load).
+beforeAll(async () => {
+  await import("../src/renderer/src/store");
+  await import("../src/renderer/src/lib/composerDrafts");
+  await import("../src/renderer/src/lib/pendingChat");
+}, 60_000);
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
@@ -433,6 +441,29 @@ describe("pending operations retain their host and run", () => {
     for (let i = 0; i < 40; i++) await Promise.resolve();
     expect(mock.api.bootstrap).toHaveBeenCalledTimes(2);
     expect(mock.api.updateThreadSettings).not.toHaveBeenCalled();
+  });
+
+  it("opening an agent its host's sidebar does not list yet (just created) re-reads that sidebar at once", async () => {
+    const listed = (ids: string[]) => ({ active: ids.map((id) => ({ cutexSessionId: id, displayName: id, lifecycle: "active", avatar: id === "fresh" ? { kind: "icon", value: "portrait:p/office/claude-v1" } : null, runtime: { status: "offline", runtimeGeneration: 1 } })), retired: [], hostRows: {}, projects: null });
+    store.setState({ sidebar: listed(["same"]) as never });
+    mock.api.bootstrap.mockResolvedValue({
+      native: null,
+      cutexState: { pendingServerRequests: [], runtime: { runtimeGeneration: 1 }, userInputQueue: [], agentBusMessages: [], agentBusSentMessages: [], ownerNotifications: [] },
+      checkpoint: { streamId: "s", cursor: 0 },
+      historyPage: null,
+    });
+    mock.api.subscribe.mockResolvedValue(undefined);
+    mock.api.sidebar.mockResolvedValue(listed(["same", "fresh"]));
+    await store.getState().select("fresh", "local");
+    for (let i = 0; i < 40; i++) await Promise.resolve();
+    expect(mock.api.sidebar).toHaveBeenCalledTimes(1);
+    expect(store.getState().sidebar?.active.find((s) => s.cutexSessionId === "fresh")?.avatar).toEqual({ kind: "icon", value: "portrait:p/office/claude-v1" });
+    // A listed agent: no extra read.
+    mock.api.sidebar.mockClear();
+    await store.getState().select("same", "local");
+    await store.getState().reloadSession("same");
+    for (let i = 0; i < 40; i++) await Promise.resolve();
+    expect(mock.api.sidebar).not.toHaveBeenCalled();
   });
 
   it("completes same-host creation and drafts appended during creation, without duplicating the create", async () => {

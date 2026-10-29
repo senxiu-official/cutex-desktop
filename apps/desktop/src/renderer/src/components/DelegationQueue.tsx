@@ -37,7 +37,7 @@ export function DelegationRow({ d, sessionId, dense = false, children }: { d: As
   return (
     <div className={`flex ${dense ? "h-6 pr-1 pl-0.5" : "h-7 px-2"} min-w-0 flex-1 items-center gap-1.5 rounded-lg text-xs text-muted hover:bg-surface-2/60`} onContextMenu={contextMenu(() => delegationMenu(d, t, nameOf, { host, here: sessionId, views }))} data-testid="queue-delegation">
       <ArrowDownLeft size={13} className="shrink-0 text-accent" />
-      {peer?.side === "requester" ? <PeerParty text={peer.name} label={peer.label} size={16} /> : isOwnerRequest(d.requester) ? <span className="shrink-0 font-medium text-foreground">{t("delegation.you")}</span> : <Who id={requester} name={requesterName(d.requester) ?? (requester ? nameOf(requester) : null)} size={16} />}
+      <span className="inline-flex min-w-0 max-w-[30%] shrink-0">{peer?.side === "requester" ? <PeerParty text={peer.name} label={peer.label} size={16} /> : isOwnerRequest(d.requester) ? <span className="font-medium text-foreground">{t("delegation.you")}</span> : <Who id={requester} name={requesterName(d.requester) ?? (requester ? nameOf(requester) : null)} size={16} />}</span>
       <span className="shrink-0 text-subtle">·</span>
       <DelegationTag askId={d.askId} onJump={show} />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground" title={d.title}>
@@ -51,7 +51,7 @@ export function DelegationRow({ d, sessionId, dense = false, children }: { d: As
   );
 }
 
-/** 暂停委托 (asks-pause-v2): offered while nothing is paused; the paused section has 继续. */
+/** 暂停新委托 (asks-pause-v2): offered while nothing is paused; the paused section has 继续. */
 export function PauseAsksButton({ sessionId }: { sessionId: string }) {
   const { t } = useI18n();
   const conv = useConvScope();
@@ -66,7 +66,7 @@ export function PauseAsksButton({ sessionId }: { sessionId: string }) {
   );
 }
 
-export function DelegationQueueSection({ rows, sessionId, pauseButton = true, railed = false }: { rows: AskSummary[]; sessionId: string; /** false: the merged queue list has 暂停委托. */ pauseButton?: boolean; /** Turn cards: no header row; ⏳ in the rail, the title as its tooltip. */ railed?: boolean }) {
+export function DelegationQueueSection({ rows, sessionId, pauseButton = true, railed = false }: { rows: AskSummary[]; sessionId: string; /** false: the merged queue list has 暂停新委托. */ pauseButton?: boolean; /** Turn cards: no header row; ⏳ in the rail, the title as its tooltip. */ railed?: boolean }) {
   const { t } = useI18n();
   if (railed) {
     const title = t("delegation.queueTitle", { n: rows.length });
@@ -87,7 +87,7 @@ export function DelegationQueueSection({ rows, sessionId, pauseButton = true, ra
   }
   return (
     <>
-      <div className="flex h-6 items-center gap-2 px-2 text-[11px] text-subtle">
+      <div className="flex h-6 items-center gap-2 px-2 text-caption/[inherit] text-subtle">
         <span className="flex-1">{t("delegation.queueTitle", { n: rows.length })}</span>
         {pauseButton && <PauseAsksButton sessionId={sessionId} />}
       </div>
@@ -99,9 +99,9 @@ export function DelegationQueueSection({ rows, sessionId, pauseButton = true, ra
 }
 
 /**
- * Section 委托已暂停 · 继续 (asks-pause-v2): the owner paused new delegations to this agent (暂停委托).
- * Delegations stay queued until 继续 or the owner's next message. With stop-holds-ridealongs a stop
- * holds them too (`origin: "ownerStop"`, lib/stopHold): 「委托已随停止暂停 · 继续发送」, the same
+ * Section 新委托已暂停 · 继续 (asks-pause-v2): the owner paused new delegations to this agent (暂停新委托).
+ * New delegations stay queued until 继续 or the owner's next message. With stop-holds-ridealongs a stop
+ * holds them too (`origin: "ownerStop"`, lib/stopHold): 「新委托已随停止暂停 · 继续发送」, the same
  * 继续发送 as the paused queue (queue resume releases the whole stop hold).
  */
 export function AsksPausedSection({ sessionId, railed = false }: { sessionId: string; /** Turn cards: ❚❚ in the queue rail column, like the paused divider. */ railed?: boolean }) {
@@ -114,7 +114,7 @@ export function AsksPausedSection({ sessionId, railed = false }: { sessionId: st
   // On the queue's grid: the glyph in the rail column (22px, turn cards) or the heading glyph cell
   // (16px, as QueuePanel's paused heading), the title where every other section's text starts.
   const body = (
-    <div className={`flex h-6 min-w-0 flex-1 items-center gap-1.5 pr-1 ${railed ? "pl-0.5" : ""} text-[11px] text-warn-text`}>
+    <div className={`flex h-6 min-w-0 flex-1 items-center gap-1.5 pr-1 ${railed ? "pl-0.5" : ""} text-caption/[inherit] text-warn-text`}>
       {!railed && (
         <span className="flex w-4 shrink-0 items-center justify-center self-stretch text-[8px] leading-none" aria-hidden>
           ❚❚

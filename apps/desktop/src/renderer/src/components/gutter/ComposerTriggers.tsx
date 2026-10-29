@@ -7,8 +7,10 @@ import { useGutterItems, type GutterEntry } from "../../lib/gutterItems";
 import { setGutterPopover, useGutter } from "../../lib/gutterStore";
 import { GutterPopover } from "./GutterPopover";
 import { GutterTrigger } from "./GutterTrigger";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 export function ComposerTriggers({ hostId, sessionId, side }: { hostId: string; sessionId: string; side: "left" | "right" }) {
+  const win = useOwnerWindow();
   const items = useGutterItems(sessionId, hostId)[side];
   const inComposer = useGutter((s) => s.geometry?.[side].trigger === "composer");
   const popover = useGutter((s) => s.popover);
@@ -19,7 +21,7 @@ export function ComposerTriggers({ hostId, sessionId, side }: { hostId: string; 
   const open: GutterEntry | undefined = withBody.find((e) => e.item.id === popover && e.item.Body);
   const anchor = open ? triggers.current.get(open.item.id) : undefined;
   const rect = anchor?.getBoundingClientRect();
-  const width = Math.max(POPOVER_MIN, Math.min(POPOVER_MAX, window.innerWidth - 32));
+  const width = Math.max(POPOVER_MIN, Math.min(POPOVER_MAX, win.innerWidth - 32));
   return (
     <div data-gutter-root className="flex items-center gap-0.5">
       {withBody.map((e) => (
@@ -41,7 +43,7 @@ export function ComposerTriggers({ hostId, sessionId, side }: { hostId: string; 
           sessionId={sessionId}
           side={side}
           anchor={anchor}
-          edge={side === "left" ? Math.max(8, rect.left) : Math.max(8, window.innerWidth - rect.right)}
+          edge={side === "left" ? Math.max(8, rect.left) : Math.max(8, win.innerWidth - rect.right)}
           top={8}
           width={width}
           close={() => setGutterPopover(null)}

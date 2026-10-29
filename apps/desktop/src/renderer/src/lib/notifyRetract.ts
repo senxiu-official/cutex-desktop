@@ -54,7 +54,11 @@ export function retractionOfLook(look: string | null): NotifyRetraction | null {
 }
 
 /** The window events the look trigger follows (no window in unit tests of the store). */
-export type LookWindow = Pick<Window, "addEventListener" | "removeEventListener"> & { document: Pick<Document, "hasFocus"> };
+export interface LookWindow {
+  addEventListener: (type: "focus" | "blur", listener: () => void) => void;
+  removeEventListener: (type: "focus" | "blur", listener: () => void) => void;
+  document: Pick<Document, "hasFocus">;
+}
 
 /**
  * Follow what the owner looks at: opening an agent (or focusing the window on it) takes back that

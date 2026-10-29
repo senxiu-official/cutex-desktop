@@ -3,7 +3,7 @@
 // (docs/module-dev-guide.md §4 术语), never a hard-coded word.
 import { describe, expect, it } from "vitest";
 
-const { applyTerms, autoPlural, DEFAULT_TERMS, parseOverrides, resolveTerms, retermDaemonText, unknownTermTokens } = await import("../src/renderer/src/lib/terms");
+const { applyTerms, splitTerms, autoPlural, DEFAULT_TERMS, parseOverrides, resolveTerms, retermDaemonText, unknownTermTokens } = await import("../src/renderer/src/lib/terms");
 const { zhCN } = await import("../src/renderer/src/i18n/zh-CN");
 const { en } = await import("../src/renderer/src/i18n/en");
 
@@ -26,6 +26,20 @@ describe("applyTerms", () => {
   it("zh has one form and no article", () => {
     expect(applyTerms("新建{{agent}}", zhTerms, "zh-CN")).toBe("新建智能体");
     expect(applyTerms("{{subagents}} · {{Director}} · {{an agent}}", zhTerms, "zh-CN")).toBe("子智能体 · 主管 · 智能体");
+  });
+
+  // Owner 2026-10-26: a Latin term between Han characters gets spaces (「是 Chief Maid」), not punctuation or Latin.
+  it("zh: a Latin term next to Han gets a space on that side only", () => {
+    const maid = resolveTerms({ "zh-CN": { agent: { one: "Maid" }, director: { one: "Chief Maid" } } }, "zh-CN");
+    expect(applyTerms("这是{{director}}：可以管理{{agents}}", maid, "zh-CN")).toBe("这是 Chief Maid：可以管理 Maid");
+    expect(applyTerms("「{{agent}}」· {{agent}} 列表 · {{agent}}1", maid, "zh-CN")).toBe("「Maid」· Maid 列表 · Maid1");
+    expect(applyTerms("停止空闲的{{agent}}（3）", maid, "zh-Hant-TW" as never)).toBe("停止空闲的 Maid（3）");
+    expect(applyTerms("新建{{agent}}", DEFAULT_TERMS["zh-CN"], "zh-CN")).toBe("新建智能体");
+    expect(applyTerms("新建{{agent}}", resolveTerms({ ja: { agent: { one: "Maid" } } } as never, "ja-JP" as never), "ja-JP" as never)).not.toContain(" Maid");
+    // splitTerms joins to the same text.
+    const parts = splitTerms("这是{{director}}，{{agent}}在线", maid, "zh-CN");
+    expect(parts.map((p) => (typeof p === "string" ? p : p.text)).join("")).toBe(applyTerms("这是{{director}}，{{agent}}在线", maid, "zh-CN"));
+    expect(parts.map((p) => (typeof p === "string" ? p : p.text)).join("")).toBe("这是 Chief Maid，Maid 在线");
   });
 
   it("leaves {var} and unknown placeholders alone", () => {
@@ -121,6 +135,10 @@ describe("retermDaemonText", () => {
   it("swaps cutex's default zh words for the owner's terms", () => {
     const terms = resolveTerms({ "zh-CN": { agent: { one: "女仆" }, owner: { one: "我" } } }, "zh-CN");
     expect(retermDaemonText("主人回合中子智能体与智能体出错", terms, "zh-CN")).toBe("我回合中子女仆与女仆出错");
+  });
+  it("spaces a Latin term between Han characters", () => {
+    const terms = resolveTerms({ "zh-CN": { agent: { one: "Maid" } } }, "zh-CN");
+    expect(retermDaemonText("三个智能体在线", terms, "zh-CN")).toBe("三个 Maid 在线");
   });
   it("leaves default terms and other languages alone", () => {
     const zh = resolveTerms({}, "zh-CN");

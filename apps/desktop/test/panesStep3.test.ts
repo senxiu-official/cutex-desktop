@@ -1,7 +1,8 @@
 // Panes step 3 (docs/desktop-modules.md §24; research panes-20261019.md §7 row 3): the tool area inside
 // the stored pane layout (lib/paneLayout toolPartOf / toolRawOf / splitLayout / joinLayout, lib/paneFile),
 // the one-time migration of the v1.16 right side (`cutex-desktop.side` → `cutex-desktop.panes`, backup
-// key), and pages over a conversation pane (showPageIn / closePaneOverlay).
+// key), and pages over a conversation pane (showPageIn / closePaneOverlay). §24.12 (layout v2): the tool area
+// is stored as Shelves (`shelves`, pages with rows) instead of tool columns; the v1.16 pages stay pages.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SideBinding } from "../src/renderer/src/modules/slots";
 import type { ItemId } from "../src/renderer/src/modules/types";
@@ -56,8 +57,8 @@ describe("the tool area in the pane layout JSON", () => {
     const side = { ...tools(), overrides: { "workspace.files": { page: "p1", groups: ["workspace"], at: 3 } } };
     const saved = prepareForSave(side, { persist: () => true });
     const part = JSON.parse(JSON.stringify(toolPartOf(saved)));
-    expect(part.cols).toHaveLength(1);
-    expect(part.cols[0]).toMatchObject({ area: "tools", id: "p1", groups: ["workspace"] });
+    expect(part.shelves).toHaveLength(1);
+    expect(part.shelves[0]).toMatchObject({ id: "s1", side: "right", active: "p2", options: { allowMixing: false, railPlacement: "outer" }, pages: [{ id: "p2", groups: ["workspace"] }] });
     expect(Object.keys(part.panes).every((id: string) => id.startsWith("t-"))).toBe(true);
     expect(sanitizeLayout(toolRawOf(part))).toEqual(saved);
   });
@@ -68,21 +69,28 @@ describe("the tool area in the pane layout JSON", () => {
     const { work: w, tools: t } = splitLayout(joined);
     expect(w.cols).toHaveLength(1);
     expect(conversationPanes(w)).toEqual([MAIN_PANE]);
-    expect(t!.cols.map((c) => c.area)).toEqual(["tools"]);
+    expect(t!.shelves.map((x) => x.side)).toEqual(["right"]);
     expect(restoreLayout(JSON.parse(JSON.stringify(joined)))).toEqual({ ...w, max: null, focus: MAIN_PANE });
     // two conversation columns + 4 tool panes = 6 panes
     const two = openBeside(work(), { hostId: "local", sessionId: "b2" }, 1);
     let side = tools();
     side = open(side, "browser.tab", { kind: "host", hostId: "local" }, "u", "browser").layout;
-    expect(Object.keys(toolPartOf(side).panes)).toHaveLength(3); // full column: the browser is a tab
+    // a full page of a Shelf without mixing: the browser gets a page of its own (hidden pages are not on screen)
+    expect(Object.keys(toolPartOf(side).panes)).toHaveLength(4);
+    expect(toolPartOf(side).shelves[0]!.pages).toHaveLength(2);
     expect(validateLayout(JSON.parse(JSON.stringify(joinLayout(two, toolPartOf(side)))))).not.toBeNull();
     // page tabs never reach storage
     const withPage = showPageIn(work(), MAIN_PANE, "projects.page", { tab: "agents" });
     expect(Object.values(joinLayout(withPage, null).instances).map((i) => i.kind)).toEqual([CONVERSATION_KIND]);
-    // a tool column must name its id; widths are shares per area
+    // a Shelf must name its id and side; a v1 tool column is not a v2 column
     const bad = JSON.parse(JSON.stringify(joined)) as PaneLayout;
-    delete bad.cols[1]!.id;
+    delete (bad.shelves![0] as { id?: string }).id;
     expect(validateLayout(bad)).toBeNull();
+    const twoSides = JSON.parse(JSON.stringify(joined)) as PaneLayout;
+    twoSides.shelves!.push({ ...twoSides.shelves![0]!, id: "s99", pages: [{ id: "p98", groups: [], kept: true, rows: [] }] });
+    expect(validateLayout(twoSides)).toBeNull(); // two Shelves on one side
+    twoSides.shelves![1]!.side = "left";
+    expect(validateLayout(twoSides)).not.toBeNull();
     expect(MAX_TOOL_PANES).toBe(4);
   });
 });
@@ -157,20 +165,24 @@ describe("migration of the v1.16 right side (lib/paneFile)", () => {
     };
   }
 
-  it("migrateSideLayout: the focused agent's page is the column, the rest folds in, no instance / param / state is lost; agent cards become agents", async () => {
+  it("migrateSideLayout (§24.12): the pages stay pages of the right Shelf (mixing off, owner 2026-10-20), the focused agent's page in view; no instance / param / state is lost; agent cards become agents", async () => {
     const { migrateSideLayout } = await import("../src/renderer/src/lib/paneFile");
+    const { shelvesOf } = await import("../src/renderer/src/lib/sideLayout");
     const { side, agents } = migrateSideLayout(legacy(), "local", "conversation.agent");
-    expect(side.pages.map((p) => p.id)).toEqual(["p10"]);
+    expect(side.pages.map((p) => p.id)).toEqual(["p1", "p10"]);
     expect(side.open).toBe(true);
-    expect(side.pages[0]!.cards.map((c) => c.kind)).toEqual(["browser.tab", "workspace.files", "workspace.changes"]);
-    expect(side.pages[0]!.cards[2]!.tabs).toEqual(["i5", "i7", "i9"]);
+    expect(shelvesOf(side)).toMatchObject([{ side: "right", active: "p10", options: { allowMixing: false } }]);
+    expect(side.activePage).toBe("p10");
+    // a v1.16 page had 4 cards: the 4th becomes a tab of the 3rd (≤ 3 panes per page)
+    expect(side.pages[0]!.cards.map((c) => c.kind)).toEqual(["workspace.files", "workspace.changes", "workspace.preview"]);
+    expect(side.pages[0]!.cards[2]!.tabs).toEqual(["i7", "i9"]);
     expect(Object.keys(side.instances).sort()).toEqual(["i12", "i3", "i5", "i7", "i9"]);
     expect(side.instances.i7!.state).toEqual({ path: "src/a.ts", line: 4 });
     expect(side.instances.i9!.state).toEqual({ pty: 9 });
     expect(agents).toEqual([{ hostId: "local", sessionId: "b2" }]);
     // no views: the active page is kept, its open state
     const plain = { ...legacy(), views: undefined };
-    expect(migrateSideLayout(plain, "local", "conversation.agent").side.pages.map((p) => p.id)).toEqual(["p1"]);
+    expect(migrateSideLayout(plain, "local", "conversation.agent").side.activePage).toBe("p1");
   });
 
   it("migrateLegacySide: once per install; every scope gets its tool area and the agent column; the old value goes to the backup key", async () => {
@@ -188,11 +200,11 @@ describe("migration of the v1.16 right side (lib/paneFile)", () => {
       { hostId: "local", sessionId: "a1" },
       { hostId: "local", sessionId: "b2" },
     ]);
-    expect(local.tools!.cols).toHaveLength(1);
+    expect(local.tools!.shelves.map((x) => x.pages.map((p) => p.id))).toEqual([["p1", "p10"]]);
     expect(Object.keys(local.tools!.instances)).toHaveLength(5);
     const remote = file.readScope("host:ssh-1");
     expect(remote.work).not.toBeNull();
-    expect(remote.tools!.cols[0]!.id).toBe("p1");
+    expect(remote.tools!.shelves[0]!.active).toBe("p1");
   });
 
   it("writeWork / writeTools keep each other's area", async () => {
@@ -201,10 +213,10 @@ describe("migration of the v1.16 right side (lib/paneFile)", () => {
     file.writeWork("host:local", openBeside(work(), { hostId: "local", sessionId: "b2" }, 1));
     const both = file.readScope("host:local");
     expect(conversationPanes(both.work!)).toHaveLength(2);
-    expect(both.tools!.cols).toHaveLength(1);
+    expect(both.tools!.shelves).toHaveLength(1);
     file.writeTools("host:local", emptyLayout());
     const again = file.readScope("host:local");
     expect(conversationPanes(again.work!)).toHaveLength(2);
-    expect(again.tools!.cols).toEqual([]);
+    expect(again.tools!.shelves).toEqual([]);
   });
 });

@@ -1,18 +1,14 @@
-// 「你」's identity key row (P2, docs/research/person-identity-p2-20261014.md §5; layout per
-// docs/research/identity-settings-review-20261015.md §4.1.1): one collapsed row 「在你的其他电脑上使用」
-// with this desktop's fingerprint as a small masked, copyable chip. Expanded: 复制身份密钥 puts the
-// `cutex-id-…` string on the clipboard from main (cleared after a minute; the string never reaches the
-// renderer), 粘贴身份密钥… takes one from another computer (IdentityKeyDialog), and the legacy identity
-// file (导入 / 导出 through main's dialogs) as quiet links. The hint says what the key does: it decides
-// which user a new device lands on and grants nothing. The row opens by itself while a note shows.
+// Identity is always visible with its masked, revealable and copyable fingerprint.
+// Only key material and cross-device import/export actions live in the collapsed disclosure.
+// Main handles keys and clears copied secrets; the renderer only sees the fingerprint and results.
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
 import { groupFingerprint, type IdentityFileResult, type IdentityImportTexts } from "../../../../shared/personIdentity";
 import { api } from "../../bridge";
 import { useI18n } from "../../i18n";
 import { usePersonIdentity } from "../../lib/personIdentity";
 import { MaskedText } from "../MaskedText";
-import { Button, ErrorNote, HintAction } from "./Form";
+import { Button, ErrorNote, HintAction, SettingRow, SettingsGroup } from "./Form";
+import { SettingsDisclosureRow } from "./SettingsDisclosureRow";
 import { IdentityKeyDialog } from "./IdentityKeyDialog";
 
 type Note = { text: string; tone: "info" | "warn" | "error"; until?: number };
@@ -62,22 +58,9 @@ export function PersonIdentityRows() {
   const hasKey = !!identity.fingerprint;
   // Open while a copy / paste / file note shows (it explains what just happened).
   const expanded = open || !!note || pasting;
-  const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
     <div className="border-b border-border/60 last:border-b-0" data-testid="identity-key-row">
-      <div className="flex items-center gap-2 py-3">
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => (expanded ? (setOpen(false), setNote(null)) : setOpen(true))}
-          className="flex min-w-0 flex-1 items-start gap-1.5 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-        >
-          <Chevron size={14} className="mt-0.5 shrink-0 text-subtle" aria-hidden />
-          <span className="min-w-0">
-            <span className="block text-sm">{t("identity.person.useElsewhere")}</span>
-            <span className="block text-xs text-subtle">{t("identity.person.useElsewhereHint")}</span>
-          </span>
-        </button>
+      <SettingRow agents="access" source="local" readOnly label={t("identity.person.title")} hint={t("identity.person.hint")}>
         {identity.fingerprint ? (
           <span className="flex shrink-0 items-center gap-1 text-xs text-subtle">
             {t("identity.person.fingerprint")}
@@ -94,8 +77,13 @@ export function PersonIdentityRows() {
         ) : (
           <span className="shrink-0 text-xs text-danger">{t("identity.person.unavailable", { message: identity.error ?? "" })}</span>
         )}
-      </div>
-      {expanded && (
+      </SettingRow>
+      <SettingsGroup agents="access" source="local">{decoration => <SettingsDisclosureRow
+        decoration={decoration}
+        title={t("identity.person.useElsewhere")}
+        open={expanded}
+        onOpenChange={next => { setOpen(next); if (!next) setNote(null); }}
+      >
         <div className="space-y-2 pb-3 pl-5">
           <p className="text-xs text-warn">{t("identity.person.keyHint")}</p>
           <div className="flex flex-wrap items-center gap-2">
@@ -116,9 +104,9 @@ export function PersonIdentityRows() {
               </p>
             ))}
         </div>
-      )}
-      {pasting && (
-        <IdentityKeyDialog
+      </SettingsDisclosureRow>}</SettingsGroup>
+      {pasting && <SettingsGroup agents="access" source="local">{decoration => (
+        <IdentityKeyDialog decoration={decoration}
           texts={importTexts(t("identity.person.pasteTitle"))}
           onClose={() => setPasting(false)}
           onDone={(r) => {
@@ -126,7 +114,7 @@ export function PersonIdentityRows() {
             imported(r);
           }}
         />
-      )}
+      )}</SettingsGroup>}
     </div>
   );
 }

@@ -3,7 +3,7 @@
 // Linux hosts (Workstation); the mock pretends the host has a Job Service with every human operation.
 import type { JobListPage, JobOutputPage, JobResult, JobRow, JobServiceCapabilities, JobStream } from "../../../../shared/ipc";
 import type { DesktopApi } from "../../../../shared/ipc";
-import { COMPONENTS_FEATURE, readComponentOperation, readComponentsList } from "../../../../shared/components";
+import { COMPONENTS_FEATURE, readComponentOperation, readComponentsList, type ComponentStatus } from "../../../../shared/components";
 import type { ModuleMock } from "../../dev/mockTypes";
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -49,6 +49,13 @@ const jobs: JobRow[] = [
   job("eva", "Eva", "running", 31 * 3600, { actionId: "", command: null, cwd: null, source: "nci", remoteId: "148011870.gadi-pbs", remoteName: `cx${"07de".repeat(8)}`, lastSourceEventAt: T0 - 30 * 3600, stale: true, revision: 2 }),
   job("eva", "Eva", "exited", 9 * 3600, { actionId: "", command: null, cwd: null, source: "nci", remoteId: "147998201.gadi-pbs", remoteName: "md-npt-cx2b3e9a0b7e3d2c1f6a5b4c3d2e1f0a9b", exitCode: 0, tookSeconds: 5 * 3600, lastSourceEventAt: T0 - 4 * 3600, revision: 4 }),
 ];
+// `?projectview` (modules/project-view/mock.ts): three running jobs of the cutex-dev project's agents.
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("projectview"))
+  jobs.push(
+    job("pv-qa", "ui-tester", "running", 5 * 60 + 12, { actionId: "shots", command: "chrome --headless --screenshot shots/topbar-split" }),
+    job("pv-perf", "sidebar-perf", "running", 12 * 60 + 4, { actionId: "vitest", command: "pnpm vitest --watch" }),
+    job("pv-rh", "remote-hosts", "running", 4 * 60 + 2, { actionId: "build", command: "cargo build --release -p cutex-server" }),
+  );
 const byId = new Map(jobs.map((j) => [j.jobId, j]));
 /** Multi-host P1: workstation (another host) has its own jobs, so the merged 作业 page shows two hosts. */
 const remoteJobs = new Map<string, Map<string, JobRow>>();
@@ -146,26 +153,32 @@ function mockJobApi(byId: Map<string, JobRow>) {
  * the Linux host says "update cutex"). unmanaged / source apply to the host, so to both components.
  */
 const QUERY = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
+if (typeof location !== "undefined") new URLSearchParams((location.hash ?? "").replace(/^#\??/, "")).forEach((value, key) => QUERY.set(key, value));
 const COMPONENT_MODE = QUERY.get("component") ?? "";
 const CLAUDE_MODE = QUERY.get("claude") ?? "";
 const HOST_MODE = [COMPONENT_MODE, CLAUDE_MODE].find((m) => m === "unmanaged" || m === "source") ?? "";
 
 const STEPS: Record<string, string[]> = {
+  "dsh-runtime": ["Configure DEEPSEEK_API_KEY in the host environment.", "Then press Check again here."],
   "job-service": ["Enable lingering for your user so the service keeps running after you log out: loginctl enable-linger", "Then press Check again here."],
   "claude-runtime": ["Install the Claude Code CLI on the host (npm install -g @anthropic-ai/claude-code).", "Log in once in a terminal on the host: claude", "Then press Check again here."],
 };
 const VERSIONS: Record<string, { old: string; next: string; size: number }> = {
+  "dsh-runtime": { old: "0.2.1-rc.3", next: "0.2.1-rc.3", size: 9_437_184 },
+  "kimi-runtime": { old: "kimi-r1", next: "kimi-r1", size: 41_943_040 },
   "job-service": { old: "0.1.1", next: "0.1.2", size: 9_437_184 },
   "claude-runtime": { old: "claude-r10", next: "claude-r11", size: 31_457_280 },
 };
 
 function mockComponent(name: string, mode: string) {
   const v = VERSIONS[name]!;
-  const STATES: Record<string, string> = { needsUser: "needsUser", restartPending: "restartPending", degraded: "degraded", degradedWorking: "degraded", external: "external", notInManifest: "notInManifest" };
-  const state = mode === "" || mode === "nocap" ? "ready" : (STATES[mode] ?? "missing");
+  const STATES: Record<string, string> = { installing: "installing", needsUser: "needsUser", restartPending: "restartPending", degraded: "degraded", degradedWorking: "degraded", external: "external", notInManifest: "notInManifest" };
+  const state = mode === "" || mode === "ready" || mode === "nocap" ? "ready" : (STATES[mode] ?? "missing");
   const selected = state === "ready" ? v.old : mode === "restartPending" ? v.next : mode === "degradedWorking" ? v.old : null;
   return {
     name,
+    ...(name === "dsh-runtime" ? { dsh: { version: "0.2.1-rc.3", node: { minimum: "24.9.0", version: QUERY.get("dshNode") === "missing" ? null : "24.9.0", ready: QUERY.get("dshNode") !== "missing" } } } : {}),
+    ...(name === "kimi-runtime" ? { kimi: { version: "2.3.3", node: { minimum: "22.19.0", version: QUERY.get("kimiNode") === "missing" ? null : "24.9.0", ready: QUERY.get("kimiNode") !== "missing" } } } : {}),
     supported: mode !== "unsupported",
     state,
     selected,
@@ -173,18 +186,25 @@ function mockComponent(name: string, mode: string) {
     origin: selected ? "signed" : null,
     versions: selected ? [{ version: selected, pinnedBy: 3, sizeBytes: v.size }] : [],
     error: mode.startsWith("degraded") ? `${name} ${v.next}: did not answer within 10 s` : null,
-    steps: mode === "needsUser" ? STEPS[name]! : [],
-  } as { name: string; supported: boolean; state: string; selected: string | null; available: string; origin: string | null; versions: { version: string; pinnedBy: number; sizeBytes: number }[]; error: string | null; steps: string[] };
+    // Onboarding's needsUser fixture has a verified CLI, but is not signed in yet.
+    steps: mode === "needsUser" ? (name === "claude-runtime" && QUERY.get("step") === "profile" ? STEPS[name]!.slice(1) : STEPS[name]!) : [],
+    ...(name === "claude-runtime" && ["both", "bundled", "system"].includes(QUERY.get("claudeCli") ?? "") ? { claudeCli: {
+      selected: QUERY.get("claudeCli") === "system" ? "system" : "bundled",
+      bundled: { version: "2.1.301" }, system: QUERY.get("claudeCli") === "bundled" ? null : { version: "2.1.299" },
+    } } : {}),
+  } as ComponentStatus;
 }
 
-function mockComponents(emitHost: (method: string, params: Record<string, unknown>) => void): Partial<DesktopApi> {
+function mockComponents(emitHost: (method: string, params: Record<string, unknown>) => void, settings?: Record<string, unknown>): Partial<DesktopApi> {
   const modes: Record<string, string> = { "job-service": COMPONENT_MODE, "claude-runtime": CLAUDE_MODE };
-  const items = [mockComponent("job-service", COMPONENT_MODE), mockComponent("claude-runtime", CLAUDE_MODE)];
-  let operation: Record<string, unknown> | null = null;
+  const items = [mockComponent("job-service", COMPONENT_MODE), mockComponent("claude-runtime", CLAUDE_MODE), ...(!QUERY.has("legacy") ? [mockComponent("dsh-runtime", QUERY.get("dsh") ?? "missing"), mockComponent("kimi-runtime", QUERY.get("kimi") ?? "missing")] : [])];
+  modes["dsh-runtime"] = QUERY.get("dsh") ?? "missing";
+  modes["kimi-runtime"] = QUERY.get("kimi") ?? "missing";
+  let operation: Record<string, unknown> | null = CLAUDE_MODE === "installing" ? { id: "cop-preview", name: "claude-runtime", action: "install", state: "running", step: "download", error: null } : null;
   const list = () => ({
     managed: HOST_MODE !== "unmanaged",
     installFrom: HOST_MODE === "source" ? "source-only" : HOST_MODE === "unmanaged" ? "none" : "release",
-    components: items,
+    components: items.map(item => item.claudeCli ? { ...item, claudeCli: { ...item.claudeCli, selected: settings?.claudeCli === "system" && item.claudeCli.system ? "system" : settings?.claudeCli === "bundled" ? "bundled" : item.claudeCli.selected } } : item),
     operation,
   });
   const publish = (name: string, reason: "operation" | "state") =>
@@ -228,7 +248,7 @@ function mockComponents(emitHost: (method: string, params: Record<string, unknow
 }
 
 export const mock: ModuleMock = {
-  api: (core) => ({ ...mockJobApi(byId), ...mockComponents((method, params) => core.emitHost(method, params)) }),
+  api: (core) => ({ ...mockJobApi(byId), ...mockComponents((method, params) => core.emitHost(method, params), core.settings) }),
   remote: (hostId, emitHost) => ({ ...mockJobApi(remoteJobsOf(hostId)), ...mockComponents(emitHost) }),
   // The NCI rows above are plain Job Service data; inbound mail / the Gadi check are modules/nci/mock.ts.
   features: { new: ["job-external", ...(COMPONENT_MODE === "nocap" ? [] : [COMPONENTS_FEATURE])] },

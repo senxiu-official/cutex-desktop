@@ -31,12 +31,12 @@ export function BrowserClaimSettings() {
   }
   if (!available) return null;
   const reason = (value: BrowserClaimAuditView["reason"]) => t(`browser.claim.reason.${value}` as MessageKey);
-  return <Section source="local" title={t("browser.claim.allows")} hint={t("browser.claim.allowsHint")}>
+  return <Section  title={t("browser.claim.allows")} hint={t("browser.claim.allowsHint")}>
     {allows.length === 0 && <p className="py-2 text-xs text-subtle">{t("browser.claim.allowsEmpty")}</p>}
-    {allows.map(entry => <SettingRow key={`${entry.sessionId}\0${entry.origin}`} label={entry.agentName} hint={entry.origin}>
+    {allows.map(entry => <SettingRow agents="now" source="local" key={`${entry.sessionId}\0${entry.origin}`} label={entry.agentName} hint={entry.origin}>
       <button type="button" data-browser-claim-revoke onClick={() => void revoke(entry)} className="rounded-md border border-border px-3 py-1.5 text-xs">{t("browser.claim.allowRevoke")}</button>
     </SettingRow>)}
-    <SettingRow label={t("browser.claim.audit")} hint={audit.length ? undefined : t("browser.claim.auditEmpty")}>{null}</SettingRow>
+    <SettingRow readOnly agents="none" source="local" label={t("browser.claim.audit")} hint={audit.length ? undefined : t("browser.claim.auditEmpty")}>{null}</SettingRow>
     {audit.length > 0 && <ul className="pb-2 text-xs text-subtle">
       {audit.slice(0, 20).map(entry => <li key={`${entry.approvalId}\0${entry.at}`} className="truncate py-0.5" title={entry.approvalId}>
         {new Date(entry.at).toLocaleTimeString()} · {entry.agentName} · {entry.title || entry.origin} · {reason(entry.reason)}

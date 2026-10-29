@@ -24,7 +24,7 @@ function Strip({ label, forced }: { label: StripLabel; forced: boolean }) {
   return (
     <span
       aria-hidden
-      className={`pointer-events-none absolute top-1/2 z-20 -translate-y-1/2 rounded-full border bg-surface px-2 py-px text-[11px] leading-4 whitespace-nowrap shadow-sm transition-[opacity,translate] duration-[120ms] motion-reduce:transition-none ${side} ${TONES[label.tone]} ${
+      className={`pointer-events-none absolute top-1/2 z-20 -translate-y-1/2 rounded-full border bg-surface px-2 py-px text-caption/[inherit] leading-4 whitespace-nowrap shadow-sm transition-[opacity,translate] duration-[120ms] motion-reduce:transition-none ${side} ${TONES[label.tone]} ${
         forced ? "translate-x-0 opacity-100" : `${hidden} opacity-0 group-hover/rail:translate-x-0 group-hover/rail:opacity-100 group-hover/rail:delay-150`
       }`}
       data-testid={forced ? "rail-strip-forced" : "rail-strip"}
@@ -42,7 +42,7 @@ export function Rail({ label, children, className = "", strip, forced }: { label
   const { enabled } = useContext(RailStripContext);
   const shown = enabled ? (forced ?? strip) : undefined;
   return (
-    <span className={`group/rail relative flex w-[22px] shrink-0 items-center justify-center self-stretch text-[10px] text-subtle ${className}`} title={label}>
+    <span className={`group/rail relative flex w-[22px] shrink-0 items-center justify-center self-stretch text-caption/[inherit] text-subtle ${className}`} title={label}>
       {children}
       {shown && <Strip label={shown} forced={!!forced} />}
     </span>

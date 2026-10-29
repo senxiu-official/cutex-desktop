@@ -2,7 +2,7 @@
 // other auto-connect hosts stay connected. Their attention (approvals, owner notes, waiting agents)
 // and notifications keep working; switching the focus keeps both hosts' state; a host's reconnect or
 // disconnect resets only that host. Runs the real store and sub-stores against a per-host fake bridge.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import type { DaemonState, HostsState } from "../src/shared/ipc";
 import type { NotifyOccurrence } from "../src/renderer/src/lib/notifyEvents";
@@ -125,6 +125,22 @@ async function start(focus = "local") {
 }
 const ids = (rows: { cutexSessionId: string }[] | undefined) => rows?.map((r) => r.cutexSessionId);
 
+// Warm the transform cache once: each beforeEach resets modules and re-imports the store, and the
+// first-ever load (~3 s) was billed to the first test's hook and timed out under the full suite's
+// load. Same stubs as beforeEach (the store reads them at evaluation), undone like afterEach.
+beforeAll(async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {}, removeItem: () => {} });
+  vi.stubGlobal("document", { hasFocus: () => false });
+  vi.stubGlobal("requestAnimationFrame", (cb: () => void) => setTimeout(cb, 0));
+  await import("../src/renderer/src/store");
+  await import("../src/renderer/src/lib/shell");
+  await import("../src/renderer/src/lib/ownerNotifyStore");
+  await import("../src/renderer/src/lib/notifyEvents");
+  vi.clearAllTimers();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+}, 60_000);
 beforeEach(async () => {
   vi.resetModules();
   vi.useFakeTimers();
@@ -752,5 +768,66 @@ describe("an agent created by a Director (agent_create, cutex Agent Bus process)
     await vi.advanceTimersByTimeAsync(2500);
     await settle();
     expect(ids(store.getState().sidebar?.active)).toEqual(["a1", "b2", "n3"]);
+  });
+});
+
+
+describe("r260 mixed-host live frames", () => {
+  it("batches live text, isolates host/epoch, repairs gaps and retains legacy durable deltas", async () => {
+    mock.responses.set("local:capabilities", () => ({ featureList: [...FEATURES, "live-text-deltas"] }));
+    mock.responses.set(`${WORKSTATION}:capabilities`, () => ({ featureList: FEATURES }));
+    mock.responses.set("bootstrap", (id: unknown) => ({
+      native: { result: { thread: { id: `thread-${id}`, turns: [] } } }, historyPage: null,
+      checkpoint: { streamId: "stream", cursor: "c0" },
+      cutexState: { runtime: { runtimeGeneration: 1 }, userInputQueue: [], pendingServerRequests: [], agentBusMessages: [], agentBusSentMessages: [], ownerNotifications: [] },
+    }));
+    await start();
+    await store.getState().select("a1", "local"); await settle();
+    fire("hostsState", { ...hostsState("local"), scope: { kind: "all" } }); await settle();
+    await store.getState().select("w1", WORKSTATION); await settle();
+    let seq = 0;
+    const native = (hostId: string, sessionId: string, method: string, params: unknown) => fire("sessionEvent", {
+      hostId, epoch: `${hostId}-1`, sessionId,
+      envelope: { contractVersion: 2, streamId: "stream", sequence: ++seq, cursor: `c${seq}`, eventId: `e${seq}`, hostId: LABEL[hostId], cutexSessionId: sessionId, receivedAt: "", source: "app_server", correlation: { runtimeGeneration: 1 }, native: { kind: "notification", message: { method, params } } },
+    });
+    for (const [host, session] of [["local", "a1"], [WORKSTATION, "w1"]] as const) {
+      native(host, session, "turn/started", { turn: { id: "turn", status: "inProgress" } });
+      native(host, session, "item/started", { threadId: `thread-${session}`, turnId: "turn", item: { id: "reply", type: "agentMessage", text: "" } });
+    }
+    const live = (hostId: string, sessionId: string, delta: string, offset: number, revision: number, extra: object = {}, epoch = `${hostId}-1`) => fire("sessionLiveDelta", {
+      hostId, epoch, sessionId,
+      frame: { version: 1, kind: "delta", cutexSessionId: sessionId, hostId: LABEL[hostId], runtimeGeneration: 1, threadId: `thread-${sessionId}`, turnId: "turn", itemId: "reply", method: "item/agentMessage/delta", producerEpoch: "producer", revision, startOffset: offset, endOffset: offset + new TextEncoder().encode(delta).byteLength, anchor: { streamId: "stream", sequence: seq }, params: { delta }, ...extra },
+    });
+    const key = viewKey("local", "a1");
+    const version = store.getState().sessions[key]!.version;
+    live("local", "a1", "你好", 0, 1);
+    live("local", "a1", "🧪", 6, 3);
+    expect(store.getState().sessions[key]!.timeline.entries.get("reply")).toMatchObject({ text: "你好🧪" });
+    expect(store.getState().sessions[key]!.version).toBe(version);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(store.getState().sessions[key]!.version).toBe(version + 1);
+    live("local", "a1", "wrong epoch", 10, 4, {}, "local-stale");
+    live(WORKSTATION, "w1", "not enabled", 0, 1);
+    native(WORKSTATION, "w1", "item/agentMessage/delta", { itemId: "reply", turnId: "turn", delta: "legacy" });
+    expect(store.getState().sessions[viewKey(WORKSTATION, "w1")]!.timeline.entries.get("reply")).toMatchObject({ text: "legacy" });
+    live("local", "a1", "", 10, 4, { kind: "gap", gapScope: "subscription" });
+    live("local", "a1", "missing tail", 10, 5);
+    expect(store.getState().sessions[key]!.timeline.entries.get("reply")).toMatchObject({ text: "你好🧪", liveIncomplete: true });
+    const full = envelope("a1", {
+      source: "app_server", hostId: LABEL.local, streamId: "stream", sequence: ++seq, eventId: "completed", cursor: "complete-cursor",
+      correlation: { runtimeGeneration: 1 }, native: { kind: "notification", message: { method: "item/completed", params: { threadId: "thread-a1", turnId: "turn", item: { id: "reply", type: "agentMessage", text: "authoritative full text" } } } },
+    });
+    const pending = { ...full, native: { ...full.native!, message: { ...full.native!.message, _cutexFullText: { type: "cutexBlob" }, _cutexTruncated: { reason: "event_size_limit", resyncRequired: true } } } };
+    fire("sessionEvent", { hostId: "local", epoch: "local-1", sessionId: "a1", envelope: pending });
+    expect(store.getState().sessions[key]!.timeline.entries.get("reply")).toMatchObject({ text: "你好🧪", streaming: false, liveIncomplete: true });
+    fire("sessionFullText", { hostId: "local", epoch: "old", sessionId: "a1", envelope: full });
+    fire("sessionFullText", { hostId: "local", epoch: "local-1", sessionId: "a1", envelope: { ...full, correlation: { runtimeGeneration: 0 } } });
+    expect(store.getState().sessions[key]!.timeline.entries.get("reply")).toMatchObject({ text: "你好🧪" });
+    fire("sessionFullText", { hostId: "local", epoch: "local-1", sessionId: "a1", envelope: full });
+    expect(store.getState().sessions[key]!.timeline.entries.get("reply")).toMatchObject({ text: "authoritative full text", streaming: false });
+    native("local", "a1", "item/completed", { threadId: "thread-a1", turnId: "turn", item: { id: "reply", type: "agentMessage", text: "newer authoritative item" } });
+    fire("sessionFullText", { hostId: "local", epoch: "local-1", sessionId: "a1", envelope: full });
+    live("local", "a1", "late", 10, 6);
+    expect(store.getState().sessions[key]!.timeline.entries.get("reply")).toMatchObject({ text: "newer authoritative item", streaming: false });
   });
 });

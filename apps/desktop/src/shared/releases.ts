@@ -267,12 +267,16 @@ export function isReleasePackageJson(packageJson: string | null): boolean {
   }
 }
 
-/** The `releaseDir` of a launcher sidecar file (LAUNCHER_INSTALL_FILE), or null. */
+/**
+ * The `releaseDir` of a launcher sidecar file (LAUNCHER_INSTALL_FILE), or null. Only an absolute path — a POSIX one or a
+ * Windows drive / UNC one: syncMacLauncher writes the host's own path here, and read back it must be accepted (only
+ * "/…" was, so on Windows every sidecar it had just written read as none — the launcher counted as foreign).
+ */
 export function sidecarReleaseDir(text: string | null): string | null {
   if (!text) return null;
   try {
     const v = JSON.parse(text) as { releaseDir?: unknown };
-    return typeof v.releaseDir === "string" && v.releaseDir.startsWith("/") ? v.releaseDir : null;
+    return typeof v.releaseDir === "string" && /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(v.releaseDir) ? v.releaseDir : null;
   } catch {
     return null;
   }
@@ -445,7 +449,22 @@ export function nodeReleaseOps(fs: NodeFsLike, style: PathStyle, run?: (command:
     exists: (path) => lstat(path) !== null,
     mkdir: (path) => void fs.mkdirSync(path, { recursive: true }),
     rename: (from, to) => fs.renameSync(from, to),
-    writeFile: (path, text) => fs.writeFileSync(path, text),
+    // Atomic (owner 2026-10-23, storage audit): a temp file beside it, then a rename over it, so a crash leaves the
+    // old file or the new one, never a torn one (MOVED_AT, the launcher sidecar).
+    writeFile(path, text) {
+      const temp = `${path}.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}.tmp`;
+      fs.writeFileSync(temp, text);
+      try {
+        fs.renameSync(temp, path);
+      } catch (error) {
+        try {
+          fs.rmSync(temp, { recursive: false, force: true });
+        } catch {
+          // leave the temp file; the target is unchanged
+        }
+        throw error;
+      }
+    },
     readFile(path) {
       try {
         return fs.readFileSync(path, "utf8");

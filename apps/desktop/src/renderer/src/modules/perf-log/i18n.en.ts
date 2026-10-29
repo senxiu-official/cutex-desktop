@@ -1,0 +1,37 @@
+// English strings of ./i18n.ts, apart from the zh-CN source so they stay out of the entry chunk: they load with the
+// en catalog (i18n/index.tsx), only when the UI or a search needs English (0.2.0 beta perf audit, 2026-10-24).
+import type { zhCN } from "./i18n";
+
+export const en: Record<keyof typeof zhCN, string> = {
+  "perf-log.moduleTitle": "Performance log",
+  "perf-log.description": "One entry whenever the UI stalls for more than 100 ms: when, what was on screen, what you just did and which code took longest. Kept on this computer only, never sent",
+  "perf-log.section": "Performance log",
+  "perf-log.enabled": "Record stalls",
+  "perf-log.enabled.hint": "An entry for every stall over 100 ms; the newest 500 are kept (about 5 MB), on this computer only. Next to no cost while nothing stalls",
+  "perf-log.range": "Time",
+  "perf-log.range.15m": "15 min",
+  "perf-log.range.1h": "1 hour",
+  "perf-log.range.today": "Today",
+  "perf-log.range.all": "All",
+  "perf-log.range.custom": "At a time",
+  "perf-log.around": "10 minutes either side",
+  "perf-log.around.hint": "E.g. “it lagged at 22:40”: pick that moment to see the entries 10 minutes before and after",
+  "perf-log.count": "{n} entries, longest {max} ms",
+  "perf-log.empty": "No stalls in this period",
+  "perf-log.off": "Recording is off",
+  "perf-log.copy": "Copy JSON",
+  "perf-log.save": "Save JSON",
+  "perf-log.clear": "Clear",
+  "perf-log.frames": "{n} frames, {total} ms in all",
+  "perf-log.layout": "style and layout {ms} ms",
+  "perf-log.action": "{ago} ms before: {what}",
+  "perf-log.noAction": "No action before it",
+  "perf-log.screen": "Screen",
+  "perf-log.code": "Costliest code",
+  "perf-log.noCode": "The browser gave no code attribution (likely painting or garbage collection)",
+  "perf-log.hiddenWindow": "window in the background",
+  "perf-log.desktop": "desktop",
+  "perf-log.workspaces": "{n} workspaces",
+  "perf-log.rows": "timeline {turns} turns / {rows} rows",
+  "perf-log.dom": "{n} elements",
+};

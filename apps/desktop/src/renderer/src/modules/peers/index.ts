@@ -7,7 +7,10 @@
 // review onto per-user grants; the policy editor is one component so it can be swapped for the user's grant then.
 import { PEERS_FEATURE } from "../../../../shared/peers";
 import { defineModule } from "../slots";
-import { PeersPage } from "./PeersPage";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const PeersPage = lazyPage(() => import("./PeersPage").then((m) => m.PeersPage));
 
 export default defineModule({
   id: "peers",

@@ -69,7 +69,7 @@ export function WindowsSandboxSection({ supported }: { supported: boolean }) {
         <Notice>{t("winSandbox.unsupported")}</Notice>
       ) : (
         <>
-          <SettingRow
+          <SettingRow agents="next" source="host"
             label={t("winSandbox.status")}
             hint={
               readiness === "updateRequired" ? t("winSandbox.steps.elevated") : phase.kind !== "idle" && phase.kind !== "running" ? <PhaseText phase={phase} startedKey="winSandbox.hostSetupPending" doneKey="winSandbox.hostSetupDone" /> : undefined

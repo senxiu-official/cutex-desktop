@@ -1,9 +1,16 @@
 /// <reference path="../src/main/env.d.ts" />
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DaemonService } from "../src/main/daemon";
 import type { PreloadBridge } from "../src/shared/ipc";
 import type { HostsState } from "../src/shared/hosts";
 import { viewKey } from "../src/renderer/src/lib/viewKey";
+import type { MenuAction, MenuEntry } from "../src/renderer/src/lib/contextMenu";
+
+function staticSubmenu(entries: MenuAction["submenu"]): MenuEntry[] {
+  expect(Array.isArray(entries)).toBe(true);
+  if (!Array.isArray(entries)) throw new Error("Expected a static submenu fixture");
+  return entries;
+}
 /** The one host connection of these tests (multi-host P0: main routes by the binding's host). */
 type TestConn = { hostId: string; routingEpoch: string; daemon: DaemonService };
 /** One shown, connected host (the transport shape; P0 scope = that host). */
@@ -80,6 +87,7 @@ vi.mock("electron", () => ({
     loadFile() {}
   },
   nativeTheme: {},
+  screen: { on() {} },
   protocol: { registerSchemesAsPrivileged() {}, handle() {} },
   session: {
     defaultSession: {
@@ -283,7 +291,8 @@ function endpoint(host: string, epoch: string) {
     remote: host !== "local"
   });
 }
-beforeEach(async () => {
+/** Fresh main + preload + store + menus over the fake daemon (every test starts from new module instances). */
+async function boot() {
   fake.daemon?.stop();
   vi.resetModules();
   fake.handlers.clear();
@@ -313,7 +322,12 @@ beforeEach(async () => {
     refreshSidebar: async () => {}
   });
   seed("LOCAL OLD AGENT", 7);
-});
+}
+// The first boot transforms main, preload, the store and the menus: 7.8 s alone, so under the full suite's load the
+// first test's beforeEach ran into the 10 s hook timeout. One boot before all fills the transform cache (its own
+// explicit time); each test's boot then only re-evaluates the fresh modules (~40 ms), as before.
+beforeAll(boot, 60_000);
+beforeEach(boot);
 function changeRoute(host = "remote", epoch = "epoch-b") {
   endpoint(host, epoch);
   fake.event!({}, "hostsState", fake.current);
@@ -459,7 +473,7 @@ describe("route-scoped actual menu/store/preload/main actions", () => {
     };
     const entry = menus.agentMenu(agent, key => key).find(item => item && typeof item === "object" && item.label === "menu.claudeTools");
     if (!entry || typeof entry !== "object") throw Error("missing tools action");
-    const action = entry.submenu?.find(item => item && typeof item === "object" && item.label === "menu.claudeWrite");
+    const action = staticSubmenu(entry.submenu).find(item => item && typeof item === "object" && item.label === "menu.claudeWrite");
     if (!action || typeof action !== "object") throw Error("missing write action");
     action.onSelect();
     for (let i = 0; i < 20; i++) await Promise.resolve();

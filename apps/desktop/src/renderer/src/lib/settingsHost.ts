@@ -14,7 +14,7 @@ import { useHostScope } from "./useHostScope";
  * Host pages that follow the picker (lib/targetHost: they read / write the picked host). Device pages
  * keep their own rules and show no picker.
  */
-export const SETTINGS_HOST_PAGES: ReadonlySet<SettingsTab> = new Set<SettingsTab>(["profiles", "defaults", "instructions", "collab", "runtime", "mcp", "skills", "hooks", "plugins", "access", "remote", "peers", "users", "usage", "archive", "backend", "nci"]);
+export const SETTINGS_HOST_PAGES: ReadonlySet<SettingsTab> = new Set<SettingsTab>(["profiles", "defaults", "instructions", "collab", "runtime", "mcp", "skills", "hooks", "plugins", "access", "remote", "peers", "users", "usage", "archive", "storage", "backend", "nci"]);
 /**
  * Host pages that also render for a connection that is not the host's owner (the page decides what
  * such a connection sees): 访问管理 — a member sees 你在这台主机上 and their own devices; the management

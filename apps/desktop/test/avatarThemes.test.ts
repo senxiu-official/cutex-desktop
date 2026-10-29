@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AVATAR_EMOJI_SET, defaultEmoji, seedHash } from "../src/renderer/src/lib/agentEmoji";
 import { AVATAR_THEME_IDS, avatarThemesOf, defaultAvatarTheme, defaultAvatarThemes, isAvatarTheme, modelFamily, normalizeAvatarThemes, themedEmoji, themeEmoji, themePreview, themesEmoji } from "../src/renderer/src/lib/avatarThemes";
-import { AGENT_AVATAR_DEFAULT_REV, AGENT_AVATAR_DEFAULTS, DEFAULT_AGENT_AVATAR, avatarSwitchOf, drawsEmoji, hiddenAvatar, isMinorAgent, migrateAgentAvatarDefault, minorDotSize, shownAvatar } from "../src/renderer/src/lib/avatarDefault";
+import { AGENT_AVATAR_DEFAULT_REV, AGENT_AVATAR_DEFAULTS, DEFAULT_AGENT_AVATAR, avatarSwitchOf, drawsEmoji, hiddenAvatar, isMinorAgent, migrateAgentAvatarDefault, minorTileSize, shownAvatar } from "../src/renderer/src/lib/avatarDefault";
 
 describe("avatar themes", () => {
   it("every theme is a subset of the bundled set with at least 8 distinct emoji", () => {
@@ -100,9 +100,14 @@ describe("model family → default theme", () => {
     [{ model: "openai/gpt-oss-120b" }, "openai", "gems"],
     [{ model: "deepseek-v4-flash" }, "deepseek", "sea"],
     [{ model: "deepseek-ai/DeepSeek-V4" }, "deepseek", "sea"],
-    [{ model: "glm-5.3" }, "other", "all"],
-    [{ model: "kimi-k3" }, "other", "all"],
-    [{ model: "gemini-3.8-flash" }, "other", "all"],
+    [{ model: "glm-5.3" }, "glm", "all"],
+    [{ model: "zhipu/chatglm-4" }, "glm", "all"],
+    [{ model: "kimi-k3" }, "kimi", "all"],
+    [{ model: "moonshot-v1-128k" }, "kimi", "all"],
+    [{ model: "k3.1-pro" }, "kimi", "all"],
+    [{ model: "k2.5" }, "kimi", "all"],
+    [{ model: "gemini-3.8-flash" }, "gemini", "all"],
+    [{ model: "google/gemini-3-pro" }, "gemini", "all"],
     [{ model: "qwen3-coder" }, "other", "all"],
     [{ model: "omni-moderation" }, "other", "all"],
     [{ model: null }, "other", "all"],
@@ -254,10 +259,10 @@ describe("仅重要智能体: who gets the dot", () => {
     expect(isMinorAgent("important", { ...plain, avatar: { kind: "color", value: "#40c057" } })).toBe(true);
   });
 
-  it("the dot is ≈ 8 px in rows, smaller in 16 px slots", () => {
-    expect(minorDotSize(28)).toBe(8);
-    expect(minorDotSize(18)).toBe(8);
-    expect(minorDotSize(16)).toBe(6);
+  it("the minor tile is 15 px in rows, 12 px in 16 px slots", () => {
+    expect(minorTileSize(28)).toBe(15);
+    expect(minorTileSize(20)).toBe(15);
+    expect(minorTileSize(16)).toBe(12);
   });
 });
 
@@ -268,6 +273,7 @@ describe("仅重要智能体: 显示头像 / 隐藏头像", () => {
     expect(avatarSwitchOf("important", { ...plain, avatar: { kind: "color", value: "#40c057" } })).toBe("show");
     expect(avatarSwitchOf("important", { ...plain, avatar: { kind: "emoji", value: "🦊" } })).toBe("hide");
     expect(avatarSwitchOf("important", { ...plain, avatar: { kind: "icon", value: "lucide:star" } })).toBe("hide");
+    expect(avatarSwitchOf("important", { ...plain, avatar: { kind: "icon", value: "portrait:p/beach/claude-v1" } })).toBe("hide");
   });
 
   it("nothing for Directors, pinned agents, pictures and the other modes", () => {
@@ -280,9 +286,13 @@ describe("仅重要智能体: 显示头像 / 隐藏头像", () => {
 
   it("显示头像 writes the theme default emoji (an own colour stays where the host combines)", () => {
     const glyph = themedEmoji("agent-1", ["gems"]).glyph;
-    expect(shownAvatar(glyph, null, true)).toEqual({ kind: "emoji", value: glyph });
-    expect(shownAvatar(glyph, { kind: "color", value: "#40C057" }, true)).toEqual({ kind: "emoji", value: glyph, color: "#40c057" });
-    expect(shownAvatar(glyph, { kind: "color", value: "#40c057" }, false)).toEqual({ kind: "emoji", value: glyph });
+    const emoji = { kind: "emoji", value: glyph } as const;
+    expect(shownAvatar(emoji, null, true)).toEqual({ kind: "emoji", value: glyph });
+    expect(shownAvatar(emoji, { kind: "color", value: "#40C057" }, true)).toEqual({ kind: "emoji", value: glyph, color: "#40c057" });
+    expect(shownAvatar(emoji, { kind: "color", value: "#40c057" }, false)).toEqual({ kind: "emoji", value: glyph });
+    // 拟人头像 enabled: the picture is stored instead, with the own colour likewise.
+    const portrait = { kind: "icon", value: "portrait:p/beach/claude-v1" } as const;
+    expect(shownAvatar(portrait, { kind: "color", value: "#40c057" }, true)).toEqual({ ...portrait, color: "#40c057" });
   });
 
   it("隐藏头像 clears the avatar, keeping an own colour as a colour avatar", () => {

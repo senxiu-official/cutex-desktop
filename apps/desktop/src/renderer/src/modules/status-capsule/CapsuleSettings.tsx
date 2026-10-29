@@ -13,14 +13,14 @@ export function CapsuleSettingsSection() {
   const ui = useUiPrefs();
   return (
     <Section title={t("status-capsule.section")}>
-      <SettingRow label={t("status-capsule.corner")} hint={t("status-capsule.corner.hint")}>
+      <SettingRow agents="none" source="local" label={t("status-capsule.corner")} hint={t("status-capsule.corner.hint")}>
         <Segmented
           value={ui.capsuleCorner}
           options={CAPSULE_CORNERS.map((c) => ({ value: c, label: t(`status-capsule.corner.${c}` as MessageKey) }))}
           onChange={(v) => setUiPref("capsuleCorner", v)}
         />
       </SettingRow>
-      <SettingRow label={t("status-capsule.edge")} hint={t("status-capsule.edge.hint")}>
+      <SettingRow agents="none" source="local" label={t("status-capsule.edge")} info={t("status-capsule.edge.hint")}>
         <Segmented
           value={ui.capsuleEdge}
           options={[
@@ -30,7 +30,7 @@ export function CapsuleSettingsSection() {
           onChange={(v) => setUiPref("capsuleEdge", v)}
         />
       </SettingRow>
-      <SettingRow label={t("status-capsule.always")} hint={t("status-capsule.always.hint")}>
+      <SettingRow agents="none" source="local" label={t("status-capsule.always")} info={t("status-capsule.always.hint")}>
         <Toggle checked={ui.capsuleAlways} onChange={(v) => setUiPref("capsuleAlways", v)} />
       </SettingRow>
       <AppearanceNumberRow field="capsuleScale" label="status-capsule.scale" hint="status-capsule.scaleHint" unit="%" step={5} />

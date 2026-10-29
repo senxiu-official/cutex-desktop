@@ -1,8 +1,11 @@
-import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { BellOff, Check, ChevronRight, CircleCheck, MessageSquare, Settings2, Star, TriangleAlert, User } from "lucide-react";
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { BellOff, ChevronRight, CircleCheck, LayoutDashboard, MessageSquare, Power, Settings2, Star, TriangleAlert, User } from "lucide-react";
 import { useI18n } from "../i18n";
-import { groupKey, moveProject, orderGroups, rowKey, type AgentRow, type SidebarGroup } from "../lib/sidebar";
-import { hostListKeys, setHostListKeys, toggleIdleOpen, toggleOfflineOpen, toggleProjectFolded, updateSections, useUiPrefs, type RunningAgents as RunningAgentsMode } from "../lib/prefs";
+import { groupKey, moveProject, orderGroups, rowKey, shownName, type AgentRow, type SidebarGroup } from "../lib/sidebar";
+import { DROP_TINT, dropTint } from "../lib/dropTint";
+import { useSidebarCollapsed, useSidebarEdge } from "../lib/windowSidebar";
+import { useWindowKey } from "../lib/windowScope";
+import { hostListKeys, setHostListKeys, toggleIdleOpen, toggleRecentOpen, toggleOfflineOpen, toggleProjectFolded, updateSections, useUiPrefs, type RunningAgents as RunningAgentsMode } from "../lib/prefs";
 import { groupRemark, searchGroups } from "../lib/projectRemarks";
 import { groupIcon } from "../lib/projectIcons";
 import { assignSection, memberKey, sectionOf, setSectionCollapsed, splitBySection, summarizeSection, visibleInSection, type SidebarSection } from "../lib/sidebarSections";
@@ -18,12 +21,15 @@ import { openAgentList } from "../lib/agentListDialog";
 import { sidebarOf, useApp } from "../store";
 import { contextMenu } from "../lib/contextMenu";
 import { noteCustomizeOpener } from "../lib/customize";
-import { customizeSidebarItem } from "../lib/customizeMenu";
+import { sidebarMenuTail } from "../lib/customizeMenu";
+import { hostStopIdleEntries } from "../lib/stopIdle";
 import { agentMenu } from "../lib/menus";
 import { projectMenu } from "../lib/projectMenus";
 import { rootFor } from "../lib/workspace";
-import { AttentionContext } from "../lib/attentionView";
-import { foldLabel, layoutSidebar, nextIdleFold, type GroupLayout, type LayoutContext } from "../lib/sidebarLayout";
+import { AttentionContext, useAttentionSource } from "../lib/attentionView";
+import { activityTimesFor, activityTimesOf } from "../lib/sessionsMeta";
+import { capRecent, foldLabel, layoutSidebar, nextIdleFold, type GroupLayout, type LayoutContext } from "../lib/sidebarLayout";
+import { openProjectViewPane, useProjectViewAvailable } from "../lib/sidebarProjectView";
 import { computeFresh, markAgentOpened, publishFresh, useFreshAgents } from "../lib/freshAgents";
 import { NEUTRAL_GROUP, projectBlockLook } from "../lib/projectSeparation";
 import { useProjectMuted } from "../lib/notificationLevelsStore";
@@ -41,13 +47,19 @@ import { CollapsedProject, ProjectFlyoutPanel } from "./ProjectFlyout";
 import { FlyoutGateContext, hoverOpensFlyout, isCollapsedRow, useFlyoutGate, useProjectFlyout } from "../lib/projectFlyout";
 import { UpdateButton } from "./UpdateButton";
 import { IdentityButton } from "./IdentityMenu";
-import { TopNav } from "./SidebarNav";
+import { middleOpen, navAltHint } from "./SidebarNav";
+import { SidebarPeek } from "./SidebarPeek";
+import { NowSection, NowSplitter } from "./SidebarNowAll";
+import { AllRowsCompact } from "../lib/allRowsCompact";
 import { runNav, useNavActive } from "../lib/navEntries";
 import { PaneResizer } from "./PaneResizer";
+import { openModifiers } from "../lib/openModifiers";
 import { ScriptText } from "./ScriptText";
 import { useHostAccess } from "../lib/hostAccess";
 import { realAgentName } from "../lib/agentAlias";
 import { dataFlags, useSizeFlags, widthBelow } from "../lib/sizeFlags";
+import { share } from "../lib/structuralShare";
+import type { AvatarBadge } from "../lib/avatarStatus";
 
 /** Footer narrower than 12rem (content box): the identity button shows only its avatar. */
 const FOOTER_SIZES = { tight: widthBelow(12) } as const;
@@ -69,8 +81,8 @@ function SidebarFooter() {
 }
 
 /**
- * Offline agents under a group: a divider (离线 N ── 全部 ›), the newest K as compact rows
- * (Settings → 外观), then 还有 N 个 ›. `onAll` opens the full list (dialog / project tab).
+* Offline agents under a group: a divider (离线 N ── 全部 ›), the newest K as compact rows
+ * (Settings → 侧栏), then 还有 N 个 ›. `onAll` opens the full list (dialog / project tab).
  * With `foldId` the 离线 N header folds the list (collapsed by default, remembered per group in
  * `offlineOpen`); collapsed, only the open agent stays listed. Searching lists every match.
  */
@@ -78,19 +90,22 @@ export function OfflineSection({ rows, searching, onAll, foldId, hostId }: { row
   const { t } = useI18n();
   const prefs = useUiPrefs();
   const { offlineAgents: limit } = prefs;
-  const activity = useApp((s) => s.activity);
+  // Last-activity times to the minute (lib/sessionsMeta), of these rows only: not re-sorted on every streamed token,
+  // nor re-rendered when an online agent's activity changes.
+  const ids = useMemo(() => rows.map((r) => r.id), [rows]);
+  const activity = useApp(useCallback((s: ReturnType<typeof useApp.getState>) => activityTimesFor(activityTimesOf(s.activity), ids), [ids]));
   const selectedId = useApp((s) => (s.view.kind === "conversation" ? s.selectedId : null));
   // A group of another host (multi-host sidebar) keeps its fold under that host's key.
   const expanded = foldId === undefined || (hostId ? hostListKeys("offlineOpen", [hostId]).includes(hostKey(hostId, foldId)) : prefs.offlineOpen.includes(foldId));
   const { shown, hidden } = useMemo(() => {
     if (!expanded && !searching) return { shown: rows.filter((r) => r.id === selectedId), hidden: 0 };
-    return offlineSlice(rows, limit, (r) => lastSeen(r, activity[r.id]?.at), { searching, keep: (r) => limit !== 0 && (r.pinned || r.id === selectedId) });
+    return offlineSlice(rows, limit, (r) => lastSeen(r, activity[r.id]), { searching, keep: (r) => limit !== 0 && (r.pinned || r.id === selectedId) });
   }, [rows, limit, activity, searching, selectedId, expanded]);
   if (rows.length === 0) return null;
   const count = t("sidebar.offlineCount", { count: rows.length });
   return (
     <div className="mt-0.5">
-      <div className="flex items-center gap-2 px-1.5 pt-1 pb-0.5 text-[10.5px] text-subtle">
+      <div className="flex items-center gap-2 px-1.5 pt-1 pb-0.5 text-caption/[inherit] text-subtle">
         {foldId === undefined ? (
           <span className="shrink-0">{count}</span>
         ) : (
@@ -114,7 +129,7 @@ export function OfflineSection({ rows, searching, onAll, foldId, hostId }: { row
         <OfflineRow key={rowKey(row)} row={row} />
       ))}
       {hidden > 0 && (
-        <button onClick={onAll ?? (() => foldId !== undefined && toggleOfflineOpen(foldId, hostId))} className="flex w-full items-center rounded-md py-0.5 pr-1.5 pl-9 text-left text-[11px] text-subtle hover:bg-surface-2/60 hover:text-foreground">
+        <button onClick={onAll ?? (() => foldId !== undefined && toggleOfflineOpen(foldId, hostId))} className="flex w-full items-center rounded-md py-0.5 pr-1.5 pl-[34px] text-left text-caption/[inherit] text-subtle hover:bg-surface-2/60 hover:text-foreground">
           {t("sidebar.moreOffline", { count: hidden })} ›
         </button>
       )}
@@ -123,7 +138,7 @@ export function OfflineSection({ rows, searching, onAll, foldId, hostId }: { row
 }
 
 /**
- * Running agents that need nothing (Settings → 外观 → 运行中智能体): compact rows (★) or the older
+ * Running agents that need nothing (Settings → 侧栏 → 运行中智能体): compact rows (★) or the older
  * 运行中 + avatars row (ring; hover = name, click = open). 「完整显示」 lists them as full rows
  * (lib/sidebarLayout), so they never reach here.
  */
@@ -136,7 +151,7 @@ function RunningAgents({ rows, mode }: { rows: AgentRow[]; mode: RunningAgentsMo
   if (mode !== "avatars") return <>{rows.map((row) => <AgentRowButton key={rowKey(row)} row={row} compact />)}</>;
   return (
     <div className="flex items-center gap-2 px-1.5 py-1">
-      <span className="shrink-0 text-[11px] text-subtle">{t("sidebar.runningRow")}</span>
+      <span className="shrink-0 text-caption/[inherit] text-subtle">{t("sidebar.runningRow")}</span>
       <div className="flex min-w-0 flex-wrap items-center gap-2 py-0.5">
         {rows.map((row) => (
           <button
@@ -159,11 +174,55 @@ function RunningAgents({ rows, mode }: { rows: AgentRow[]; mode: RunningAgentsMo
 }
 
 /**
+ * A group's compact recently-active rows (lib/sidebarLayout `recent`: full rows that are not big —
+ * finished, fresh, recently active): the first RECENT_CAP, the rest folded into 「› 最近活跃 +N」
+ * (expanded per group in `recentOpen`). The open agent and fresh ones are never folded away.
+ */
+function RecentRows({ groupId, hostId, rows, searching }: { groupId: string; hostId?: string; rows: AgentRow[]; searching: boolean }) {
+  const { t } = useI18n();
+  const prefs = useUiPrefs();
+  // The open agent as a host key (rows of the focus host may carry no host).
+  const focus = useApp((s) => s.hosts?.active ?? "local");
+  const selected = useApp((s) => (s.view.kind === "conversation" && s.selectedId ? hostKey(s.selectedHost ?? focus, s.selectedId) : null));
+  const open = hostId ? hostListKeys("recentOpen", [hostId]).includes(hostKey(hostId, groupId)) : prefs.recentOpen.includes(groupId);
+  const fresh = useFreshKeys(rows);
+  const { shown, hidden } = capRecent(rows, { expanded: open, searching, keep: (r) => hostKey(r.hostId ?? focus, r.id) === selected || fresh.has(rowKey(r)) });
+  const foldable = !searching && (hidden.length > 0 || (open && capRecent(rows).hidden.length > 0));
+  return (
+    <>
+      {shown.map((row) => (
+        <AgentRowButton key={rowKey(row)} row={row} compact />
+      ))}
+      {foldable && (
+        <button
+          onClick={() => toggleRecentOpen(groupId, hostId)}
+          aria-expanded={open}
+          data-recent-fold=""
+          className="flex w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-[3px] text-left text-meta/[inherit] text-subtle hover:bg-surface-2/60 hover:text-foreground"
+        >
+          <ChevronRight size={11} className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
+          <span className="shrink-0">{open ? t("sidebar.recentLess") : t("sidebar.recentMore", { count: hidden.length })}</span>
+        </button>
+      )}
+    </>
+  );
+}
+
+/** Row keys of `rows` that are fresh (lib/freshAgents), for the 「最近活跃」 fold's keep rule. */
+function useFreshKeys(rows: AgentRow[]): Set<string> {
+  const keys = useFreshAgents((s) => s.keys);
+  return useMemo(() => new Set(rows.map(rowKey).filter((k) => keys.has(k))), [rows, keys]);
+}
+
+/** The idle fold's 完成 mark: the unread dot (Avatar `status`), no number at 14 px. */
+const DONE_DOT: AvatarBadge = { tone: "accent", text: null };
+
+/**
  * 「› N 个空闲」: folded online idle agents (expanded per group in `idleOpen`). Collapsed, the header
  * shows their overlapping avatars; expanded, only the chevron and count, with the agents below as
  * compact rows. The open agent stays in the fold (lib/sidebarLayout `idleSelected`): collapsed, the
  * header is highlighted with its avatar first (ringed) and its name; expanded, its own row shows as
- * selected. Agents with a finished turn not seen yet stay in it too (`done`): a ✓ on their avatar
+ * selected. Agents with a finished turn not seen yet stay in it too (`done`): the unread dot on their avatar
  * (shown before the others) and 「· N 完成」 on the header (lib/sidebarLayout `foldLabel`).
  */
 function IdleFold({ groupId, hostId, rows, selected, done }: { groupId: string; hostId?: string; rows: AgentRow[]; selected: string | null; done: readonly string[] }) {
@@ -185,19 +244,15 @@ function IdleFold({ groupId, hostId, rows, selected, done }: { groupId: string; 
         title={marked ? t("sidebar.idleHasOpen", { name: current.name }) : undefined}
         data-row-selectable=""
         data-row-selected={marked ? "" : undefined}
-        className={`flex w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-[3px] text-left text-[11.5px] ${marked ? "bg-background text-foreground shadow-[var(--card-shadow)]" : "text-subtle hover:bg-surface-2/60 hover:text-foreground"}`}
+        className={`flex w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-[3px] text-left text-meta/[inherit] ${marked ? "bg-background text-foreground shadow-e1" : "text-subtle hover:bg-surface-2/60 hover:text-foreground"}`}
       >
         <ChevronRight size={11} className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
         {!open && (
           <span data-idle-stack="" className="flex shrink-0 -space-x-1.5">
             {avatars.slice(0, 4).map((r) => (
               <span key={rowKey(r)} data-idle-open={marked && r === current ? "" : undefined} className={`relative flex rounded-full ${marked && r === current ? "z-10 ring-[1.5px] ring-accent ring-offset-1 ring-offset-background" : isDone(r) ? "z-[5]" : ""}`}>
-                <StatusAvatar name={r.name} initial={r.initial} color={r.color} avatar={r.session.avatar} seed={r.session.cutexSessionId} size={14} signal="idle" />
-                {isDone(r) && (
-                  <span data-idle-done="" className="absolute -right-1 -bottom-1 flex size-[9px] items-center justify-center rounded-full bg-accent text-background ring-1 ring-background" aria-label={t("agentStatus.done")}>
-                    <Check size={7} strokeWidth={4} />
-                  </span>
-                )}
+                {/* 完成 (not seen): the unread dot on the avatar, as everywhere (Avatar `status`). */}
+                <StatusAvatar name={r.name} initial={r.initial} color={r.color} avatar={r.session.avatar} seed={r.session.cutexSessionId} size={16} signal="idle" badge={isDone(r) ? DONE_DOT : null} />
               </span>
             ))}
           </span>
@@ -209,7 +264,7 @@ function IdleFold({ groupId, hostId, rows, selected, done }: { groupId: string; 
         </span>
         {marked && (
           <span className="min-w-0 truncate">
-            · <ScriptText text={current.name} />
+            · <ScriptText text={shownName(current)} />
           </span>
         )}
       </button>
@@ -303,9 +358,10 @@ const Group = memo(function Group({ layout, dragKey, dragging: dragged, searchin
   const dropLine = useDropAt(drag, dragKey);
   const dropAt = dragKey && !dragged ? dropLine : null;
   const block = projectBlockLook(prefs.projectSeparation, group.kind === "project" ? group.color : NEUTRAL_GROUP);
+  const projectView = useProjectViewAvailable();
   const fly = useProjectFlyout({ available: !open && !dragging, hoverEnabled: hoverOpensFlyout({ collapsed: isCollapsedRow(layout, !open), hoverPreview: prefs.projectHoverPreview, dragging }), delay: prefs.projectHoverDelay });
   return (
-    <section className={`relative ${open ? block.gapClassName : block.foldedGapClassName} ${block.className} ${dragged ? "opacity-40" : ""}`} style={block.style} data-project-block={block.style ? prefs.projectSeparation : undefined} data-folded={open ? undefined : ""}>
+    <section className={`relative ${open ? block.gapClassName : block.foldedGapClassName} ${block.className} ${dragged ? "opacity-40" : ""}`} style={block.style} data-project-block={block.style ? prefs.projectSeparation : undefined} data-folded={open ? undefined : ""} data-group-key={groupKey(group)}>
       {dropAt && <div className={`pointer-events-none absolute right-1 left-1 h-0.5 rounded bg-accent ${dropAt === "before" ? "-top-1" : "-bottom-1"}`} />}
       <div
         ref={fly.rowRef}
@@ -348,7 +404,7 @@ const Group = memo(function Group({ layout, dragKey, dragging: dragged, searchin
           {state === "live" ? (
             // Metadata on demand (quiet pass): the counts show on hover / keyboard focus, and while the open agent is in this group.
             // Hidden they take no width (display none, not opacity), so a narrow sidebar does not truncate the name for them.
-            <span className={`ml-auto shrink-0 text-[10px] text-subtle ${layout.hasSelected ? "" : "hidden group-hover/header:inline group-focus-within/header:inline"}`} data-group-counts="">
+            <span className={`ml-auto shrink-0 text-caption/[inherit] text-subtle ${layout.hasSelected ? "" : "hidden group-hover/header:inline group-focus-within/header:inline"}`} data-group-counts="">
               {layout.runningCount > 0 && <span>{t("sidebar.runningShort", { count: layout.runningCount })} · </span>}
               {t("sidebar.online", { count: group.online.length })}
             </span>
@@ -357,6 +413,17 @@ const Group = memo(function Group({ layout, dragKey, dragging: dragged, searchin
           )}
         </button>
         {state !== "live" && look && <HostStatusAction look={look} state={state} />}
+        {group.kind === "project" && projectView && (
+          <button
+            onClick={() => openProjectViewPane(group.hostId ?? hosts?.focus ?? "local", group.id)}
+            title={t("sidebar.openProjectView")}
+            aria-label={t("sidebar.openProjectView")}
+            data-open-project-view=""
+            className="hidden rounded p-0.5 text-subtle group-focus-within/header:block group-hover/header:block hover:bg-surface-2 hover:text-foreground"
+          >
+            <LayoutDashboard size={13} />
+          </button>
+        )}
         {group.kind === "project" && (
           <button onClick={() => services.ui.openPage("projects.page", { project: group.id, tab: "settings", ...(own ? {} : { host: group.hostId! }) })} title={t("nav.projectSettings")} className="mr-1 hidden rounded p-0.5 text-subtle group-hover/header:block hover:bg-surface-2 hover:text-foreground">
             <Settings2 size={13} />
@@ -370,16 +437,18 @@ const Group = memo(function Group({ layout, dragKey, dragging: dragged, searchin
         // 本机备注 under the header. The project directory is never a sidebar line (owner 2026-10-14: it
         // only shifted the list when a project got selected): it stays in the header / remark tooltips
         // and on the project page.
-        <div className={`truncate pr-1.5 pb-0.5 pl-6 text-[11px] text-subtle ${block.metaClassName}`} data-project-remark="" title={[remark, t("remark.tooltip"), root].filter(Boolean).join("\n")}>
+        <div className={`truncate pr-1.5 pb-0.5 pl-6 text-caption/[inherit] text-subtle ${block.metaClassName}`} data-project-remark="" title={[remark, t("remark.tooltip"), root].filter(Boolean).join("\n")}>
           <ScriptText text={remark} />
         </div>
       )}
       {open && (
         <div className={block.bodyClassName}>
-          {layout.full.map((row) => (
+          {/* Big rows (Director, pins, needs-you / error, running), then compact rows: running, recently active (capped), idle. */}
+          {layout.big.map((row) => (
             <AgentRowButton key={rowKey(row)} row={row} />
           ))}
           <RunningAgents rows={layout.running} mode={prefs.runningAgents} />
+          <RecentRows groupId={group.id} hostId={own ? undefined : group.hostId} rows={layout.recent} searching={searching} />
           <IdleFold groupId={group.id} hostId={own ? undefined : group.hostId} rows={layout.idle} selected={layout.idleSelected} done={layout.idleDone} />
           {/* While searching, every offline match is listed. The full list dialog opens on the group's host. */}
           <OfflineSection rows={layout.offline} searching={searching} onAll={() => openAgentList(group.id, "offline", own ? undefined : group.hostId)} foldId={group.id} hostId={own ? undefined : group.hostId} />
@@ -399,9 +468,9 @@ function OtherProjects({ layouts }: { layouts: GroupLayout[] }) {
   return (
     <section className="mb-1.5">
       <button onClick={toggleOpen} className="flex w-full min-w-0 items-center gap-1.5 px-1.5 py-1 text-left">
-        <span className="inline-block w-2.5 text-[10px] text-subtle">{open ? "▾" : "▸"}</span>
+        <span className="inline-block w-2.5 text-caption/[inherit] text-subtle">{open ? "▾" : "▸"}</span>
         <span className="truncate text-xs font-semibold text-muted">{t("sidebar.otherProjects")}</span>
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[10px]">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-caption/[inherit]">
           {needs > 0 && <span className="font-semibold text-warn">{t("sidebar.needsYouCount", { count: needs })}</span>}
           {running > 0 && <span className="text-accent">{t("sidebar.runningCount", { count: running })}</span>}
           <span className="text-subtle">{layouts.length}</span>
@@ -447,7 +516,9 @@ function ProjectSection({ section, layouts, visible, searching, dragged, drop }:
   return (
     <section className="mt-1 mb-1.5" data-sidebar-section={section.id}>
       <div
-        className={`flex items-center rounded-md ${drop.over ? "bg-accent/10 ring-1 ring-accent/50" : ""}`}
+        data-section-drop-over={drop.over || undefined}
+        className={`flex items-center rounded-md ${drop.over ? `ring-1 ring-accent/50 ${DROP_TINT}` : ""}`}
+        style={drop.over ? dropTint("var(--accent)", 10) : undefined}
         onContextMenu={contextMenu(() => sectionMenu(section, visible, t))}
         onDragOver={(e) => {
           if (!drop.active) return;
@@ -464,7 +535,7 @@ function ProjectSection({ section, layouts, visible, searching, dragged, drop }:
           onClick={() => updateSections((list) => setSectionCollapsed(list, section.id, !section.collapsed))}
           aria-expanded={!folded}
           title={t("section.projectsHint", { count: sum.projects })}
-          className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden px-1.5 py-1 text-left text-[10.5px] whitespace-nowrap text-subtle hover:text-foreground"
+          className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden px-1.5 py-1 text-left text-caption/[inherit] whitespace-nowrap text-subtle hover:text-foreground"
         >
           <ChevronRight size={11} className={`shrink-0 transition-transform ${folded ? "" : "rotate-90"}`} />
           <span className={`min-w-[2.5em] truncate font-semibold tracking-wide ${folded && sum.hasSelected ? "text-foreground" : ""}`}>
@@ -512,7 +583,7 @@ function ChatsGroup({ rows }: { rows: AgentRow[] }) {
   // A section header like 独立智能体: the project header treatment in the neutral colour.
   const block = projectBlockLook(prefs.projectSeparation, NEUTRAL_GROUP);
   return (
-    <section className={`relative ${open ? block.gapClassName : block.foldedGapClassName} ${block.className}`} style={block.style} data-project-block={block.style ? prefs.projectSeparation : undefined} data-folded={open ? undefined : ""}>
+    <section className={`relative ${open ? block.gapClassName : block.foldedGapClassName} ${block.className}`} style={block.style} data-project-block={block.style ? prefs.projectSeparation : undefined} data-folded={open ? undefined : ""} data-group-key="__chats__">
       <div className={`flex items-center rounded-md ${block.headerClassName}`}>
         <button
           onClick={toggleOpen}
@@ -522,7 +593,7 @@ function ChatsGroup({ rows }: { rows: AgentRow[] }) {
         >
           <ProjectIcon source={{ glyph: MessageSquare }} toggle={open ? "open" : "closed"} />
           <span className="truncate text-xs font-semibold text-muted">{t("sidebar.chats")}</span>
-          <span className="ml-auto text-[10px] text-subtle">{rows.length}</span>
+          <span className="ml-auto text-caption/[inherit] text-subtle">{rows.length}</span>
         </button>
       </div>
       {open ? (
@@ -542,9 +613,9 @@ function ChatsGroup({ rows }: { rows: AgentRow[] }) {
 function HostStatusAction({ look, state }: { look: HostLook; state: HostSidebarState }) {
   const { t } = useI18n();
   const disconnected = !look.connected;
-  if (state === "loading") return <span className="mr-1 shrink-0 text-[10px] text-subtle">{t("sidebar.hostLoading")}</span>;
+  if (state === "loading") return <span className="mr-1 shrink-0 text-caption/[inherit] text-subtle">{t("sidebar.hostLoading")}</span>;
   return (
-    <span className="mr-1 flex shrink-0 items-center gap-1 text-[10px] text-subtle">
+    <span className="mr-1 flex shrink-0 items-center gap-1 text-caption/[inherit] text-subtle">
       {t(disconnected ? "sidebar.hostDisconnected" : "sidebar.hostOffline")} ·
       <button
         onClick={() => void (disconnected ? setHostConnected(look.id, true) : api.reconnectHost(look.id).catch(() => {}))}
@@ -567,7 +638,7 @@ function HostOnlyHeader({ look, state }: { look: HostLook; state: HostSidebarSta
         <span className="ml-auto" />
         <HostStatusAction look={look} state={state} />
       </div>
-      {state === "live" && <p className="pl-6 text-[10.5px] text-subtle">{t("sidebar.hostNoRows")}</p>}
+      {state === "live" && <p className="pl-6 text-caption/[inherit] text-subtle">{t("sidebar.hostNoRows")}</p>}
     </section>
   );
 }
@@ -585,8 +656,9 @@ function FooterEntry({ entry }: { entry: AppSlotEntry<"nav.primary"> }) {
   return (
     <button
       disabled={disabled}
-      onClick={() => runNav(item)}
-      title={badge?.title ? `${label}\n${badge.title}` : label}
+      onClick={(e) => runNav(item, openModifiers(e))}
+      {...middleOpen(() => runNav(item, openModifiers({ ctrlKey: false, metaKey: false, shiftKey: false, button: 1 })))}
+      title={[label, badge?.title, navAltHint(item, t)].filter(Boolean).join("\n")}
       aria-label={label}
       className={`relative flex shrink-0 items-center rounded p-1.5 hover:bg-surface-2 hover:text-foreground disabled:opacity-50 ${active ? "bg-surface-2 text-foreground" : ""}`}
     >
@@ -621,7 +693,7 @@ export function Sidebar() {
   const scoped = useScopedSidebar();
   const { model, scope } = scoped;
   const attention = useScopedAttention(model, scope);
-  const activity = useApp((s) => s.activity);
+  const attentionSource = useAttentionSource(attention);
   const selectedKey = useApp((s) => (s.view.kind === "conversation" && s.selectedId ? hostKey(s.selectedHost ?? s.hosts?.active ?? "local", s.selectedId) : null));
   const [query, setQuery] = useState("");
   const prefs = useUiPrefs();
@@ -633,11 +705,16 @@ export function Sidebar() {
   const [dragged, setDragged] = useState<string | null>(null);
   const dropStore = useMemo(createDropStore, []);
   const searching = query.trim() !== "";
+  // Not the whole `activity` (a streamed token refreshes it every frame; perf baseline H1): last-activity
+  // times to the minute for the layout (idle fold, offline order), the preview texts only while searching.
+  const times = useApp((s) => activityTimesOf(s.activity));
+  const activity = useApp((s) => (searching ? s.activity : null));
   const hostsCtx = useMemo<SidebarHosts>(() => ({ marks: scope.showHostMarks, localMarks: prefs.hostMarkLocal, focus: scope.focus, look: (id) => scope.host(id ?? scope.focus), stateOf: scoped.stateOf }), [scope, scoped.stateOf, prefs.hostMarkLocal]);
   // Hosts of the scope with nothing to list (not reached yet this run): a header with their status.
   const hostOnly = scoped.hosts.filter((h) => !h.hasRows && (scope.multi || h.state !== "live"));
   // Activity previews are the focus host's (other hosts' rows search by name).
-  const previewOf = (r: AgentRow) => (!r.hostId || r.hostId === scope.focus ? activity[r.id] : undefined);
+  const own = (r: AgentRow) => !r.hostId || r.hostId === scope.focus;
+  const previewOf = (r: AgentRow) => (own(r) ? activity?.[r.id] : undefined);
 
   const groups = useMemo(() => {
     const ordered = orderGroups(model.groups, projectOrder);
@@ -672,9 +749,9 @@ export function Sidebar() {
   // The idle fold's clock: advanced when an online agent's last activity turns IDLE_FOLD_AFTER_MS
   // old (lib/sidebarLayout nextIdleFold), so a row moves into 「N 个空闲」 by itself. A stale clock
   // (rows changed since) is caught up at once: their crossing is already past.
-  const lastOfRow = (r: AgentRow) => lastSeen(r, previewOf(r)?.at);
+  const lastOfRow = (r: AgentRow) => lastSeen(r, own(r) ? times[r.id] : undefined);
   const [foldNow, setFoldNow] = useState(() => Date.now());
-  const nextFold = useMemo(() => nextIdleFold(model.groups, foldNow, lastOfRow), [model.groups, activity, foldNow, scope.focus]); // eslint-disable-line react-hooks/exhaustive-deps
+  const nextFold = useMemo(() => nextIdleFold(model.groups, foldNow, lastOfRow), [model.groups, times, foldNow, scope.focus]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (nextFold === null) return;
     const timer = setTimeout(() => setFoldNow(Date.now()), Math.max(0, nextFold - Date.now()) + 50);
@@ -692,22 +769,29 @@ export function Sidebar() {
       now: foldNow,
       isFresh: (key) => fresh.keys.has(key) || key === openedFresh,
     }),
-    [fresh, openedFresh, attention.signals, selectedKey, starredKeys, idleUnfolded, prefs.projectGrouping, prefs.noOnlineProjects, prefs.runningAgents, prefs.foldIdleAgents, searching, activity, foldNow], // eslint-disable-line react-hooks/exhaustive-deps
+    [fresh, openedFresh, attention.signals, selectedKey, starredKeys, idleUnfolded, prefs.projectGrouping, prefs.noOnlineProjects, prefs.runningAgents, prefs.foldIdleAgents, searching, times, foldNow], // eslint-disable-line react-hooks/exhaustive-deps
   );
   // Sections (pure UI prefs, lib/sidebarSections): their projects leave the main list and render
   // under the section's header, laid out by the same rules.
   const sections = prefs.sidebarSections;
   const split = useMemo(() => splitBySection(groups, sections, scope.focus), [groups, sections, scope.focus]);
-  const layout = useMemo(() => layoutSidebar(split.rest, layoutCtx), [split, layoutCtx]);
+  // The same layout objects while a group's layout reads the same (lib/structuralShare; perf §9): an agent's
+  // status change re-renders its own group, not every project of the sidebar.
+  const sharedLayout = useRef<unknown>(null);
+  const layout = useMemo(() => (sharedLayout.current = share(sharedLayout.current, layoutSidebar(split.rest, layoutCtx))), [split, layoutCtx]);
   // Only sections with a member in this scope (searching: with a match) show.
+  const sharedSections = useRef<unknown>(null);
   const sectionLayouts = useMemo(
     () =>
-      sections.flatMap((section) => {
-        const own = split.bySection.get(section.id);
-        if (!own?.length) return [];
-        const l = layoutSidebar(own, layoutCtx);
-        return [{ section, layouts: [...l.main, ...l.others] }];
-      }),
+      (sharedSections.current = share(
+        sharedSections.current,
+        sections.flatMap((section) => {
+          const own = split.bySection.get(section.id);
+          if (!own?.length) return [];
+          const l = layoutSidebar(own, layoutCtx);
+          return [{ section, layouts: [...l.main, ...l.others] }];
+        }),
+      )),
     [sections, split, layoutCtx],
   );
   const visibleSections = useMemo(() => sectionLayouts.map((x) => x.section.id), [sectionLayouts]);
@@ -765,37 +849,55 @@ export function Sidebar() {
   const flyGate = useMemo(() => ({ dragging: dragged !== null }), [dragged]);
   // users: a pending device sees nothing on its focus host until the host owner assigns it.
   const focusAccess = useHostAccess(useApp((s) => s.hosts?.active ?? "local"));
+  // Collapsed (Ctrl/⌘+B, the logo): fully hidden with the left-edge pop-out (owner 2026-10-28; §24.13 hides it
+  // automatically while two workspaces are short of width, §24.16 while a pane is full screen). This window's own
+  // collapse (multi-window P3, lib/windowSidebar useSidebarCollapsed; the main window: the prefs).
+  const collapsed = useSidebarCollapsed();
+  // The width edge is drawn (not while hidden): a column against the sidebar leaves the gap to it (components/side/SideArea).
+  const edgeStore = useSidebarEdge.of(useWindowKey());
+  useLayoutEffect(() => {
+    edgeStore.setState({ shown: !collapsed });
+    return () => edgeStore.setState({ shown: false });
+  }, [edgeStore, collapsed]);
+  const searchRef = useRef<HTMLInputElement>(null);
 
-  return (
-    <SidebarHostsContext.Provider value={hostsCtx}>
-    <AttentionContext.Provider value={attention}>
-      {/* 在主界面调整: the region the 调整左侧栏 panel adjusts (a faint outline while it is open, styles.css; no layout
-          change); a right-click / press inside is remembered as the entry the focus returns to. */}
-      <aside
-        data-resizable-pane
-        data-customize-region="sidebar"
-        tabIndex={-1}
-        onContextMenuCapture={(e) => noteCustomizeOpener((e.target as Element).closest(FOCUSABLE) ?? e.currentTarget)}
-        onPointerDownCapture={(e) => noteCustomizeOpener((e.target as Element).closest(FOCUSABLE) ?? e.currentTarget)}
-        className="relative flex h-full w-[var(--sidebar-w,16rem)] max-w-[calc(100%-360px)] min-w-[180px] shrink-0 flex-col bg-transparent outline-none"
-      >
-        <PaneResizer field="sidebarWidth" edge="right" />
-        <RestoreBanner compact />
-        <div className="p-2">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("sidebar.search")}
-            className="w-full rounded-md border border-border bg-background px-2.5 py-1 text-[13px] outline-none placeholder:text-subtle focus:border-accent"
-          />
-        </div>
-        <div className="px-1.5 pb-1.5">
-          <TopNav />
-        </div>
+  // 侧栏布局 (design 040 §4): 花名册, or 现在 / 全部 (components/SidebarNowAll; 「全部」 = this roster in compact rows).
+  const nowAll = prefs.sidebarLayout === "now-all";
+  // The 「现在」 height while its divider is dragged (stored on release).
+  const [liveNow, setLiveNow] = useState<number | null>(null);
+  const nowHeight = liveNow ?? prefs.sidebarNowHeight;
+  const searchField = (placeholder: string, className: string) => (
+    <input ref={searchRef} data-sidebar-search="" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={placeholder} aria-label={placeholder} className={className} />
+  );
+  // The full sidebar's body: docked when expanded, the popped overlay while hidden (components/SidebarPeek).
+  const full = (
+    <>
+        {nowAll ? (
+          <>
+            {/* 「现在」 (the abnormal-shutdown notice under its header), the divider, then 「全部」's header with the filter. */}
+            <NowSection attention={attention} focus={scope.focus} height={nowHeight} notice={<RestoreBanner compact />} />
+            <NowSplitter height={nowHeight} onLive={setLiveNow} />
+            <div data-sidebar-all="" className="flex shrink-0 items-center gap-1.5 px-2.5 pt-1 pb-1">
+              <span className="text-meta font-semibold text-muted">{t("sidebar.all")}</span>
+              <span className="text-caption text-subtle tabular-nums">{attention.rows.length}</span>
+              {searchField(t("sidebar.all.filter"), "ml-1 h-6 min-w-0 flex-1 rounded-ctl border border-border bg-background px-2 text-meta outline-none placeholder:text-subtle focus:border-accent")}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="p-2">
+              {searchField(t("sidebar.search"), "w-full rounded-md border border-border bg-background px-2.5 py-1 text-ui/[inherit] outline-none placeholder:text-subtle focus:border-accent")}
+            </div>
+            {/* The abnormal-shutdown notice (dismissable); the entries are in the window bar (sidebar v5, design 040 §4.1). */}
+            <RestoreBanner compact />
+          </>
+        )}
+        <AllRowsCompact.Provider value={nowAll}>
         <FlyoutGateContext.Provider value={flyGate}>
         <ProjectDragContext.Provider value={projectDrag}>
         {/* The list's empty area: a menu with only 调整左侧栏… (rows and headers have their own menus). */}
-        <nav className="flex-1 overflow-y-auto px-1.5 pt-1 pb-2" onContextMenu={contextMenu(() => [customizeSidebarItem(t)])}>
+        {/* IM-style rows (消息预览 on): a wider avatar column, shared by every row variant so names line up. */}
+        <nav data-sidebar-roster={nowAll ? "all" : "roster"} className="flex-1 overflow-y-auto px-1.5 pt-1 pb-2" style={prefs.rowPreview === "off" && !nowAll ? undefined : ({ "--avatar-col": nowAll ? "20px" : "32px" } as CSSProperties)} onContextMenu={contextMenu(() => [...hostStopIdleEntries(t, <Power size={14} />), ...sidebarMenuTail(t)])}>
           {groups.length === 0 && chats.length === 0 && hostOnly.length === 0 ? (
             <p className="px-2 py-6 text-center text-sm text-subtle">{focusAccess.pending ? t("users.access.pendingEmpty") : t("sidebar.empty")}</p>
           ) : (
@@ -837,8 +939,35 @@ export function Sidebar() {
         </nav>
         </ProjectDragContext.Provider>
         </FlyoutGateContext.Provider>
+        </AllRowsCompact.Provider>
         <SidebarFooter />
+    </>
+  );
+
+  return (
+    <SidebarHostsContext.Provider value={hostsCtx}>
+    <AttentionContext.Provider value={attentionSource}>
+      {/* Collapsed: nothing in the layout at all — the edge hint, the hot zone and the popped overlay
+          (components/SidebarPeek) draw outside the flow, so no pane's width moves. */}
+      {collapsed && <SidebarPeek>{full}</SidebarPeek>}
+      {/* 在主界面调整: the region the 调整左侧栏 panel adjusts (a faint outline while it is open, styles.css; no layout
+          change); a right-click / press inside is remembered as the entry the focus returns to. */}
+      {!collapsed && (
+      <aside
+        data-resizable-pane
+        data-customize-region="sidebar"
+        tabIndex={-1}
+        onContextMenuCapture={(e) => noteCustomizeOpener((e.target as Element).closest(FOCUSABLE) ?? e.currentTarget)}
+        onPointerDownCapture={(e) => noteCustomizeOpener((e.target as Element).closest(FOCUSABLE) ?? e.currentTarget)}
+        data-sidebar-mode="open"
+        // A rounded card like the conversation / Shelf cards (styles.css .sidebar-card), 8 px from the window
+        // edge and from the next card; min-width lives in the width (max()).
+        className="sidebar-card relative flex h-full max-w-[calc(100%-360px)] w-[max(180px,var(--sidebar-w,16rem))] shrink-0 flex-col outline-none"
+      >
+        <PaneResizer field="sidebarWidth" edge="right" />
+        {full}
       </aside>
+      )}
     </AttentionContext.Provider>
     </SidebarHostsContext.Provider>
   );

@@ -27,13 +27,13 @@ export const componentRequiresListProbe: AppModule = { id: "probe", titleKey: "j
 export const packEntryProbe: SDK.ModulePackEntry<SlotMap, ModuleServices, MessageKey> = { moduleApi: "^1.16", module: componentRequiresProbe, messages: { en: { "probe.title": "Probe" } } };
 // @ts-expect-error A pack entry must say which MODULE_API_VERSION range it was built for.
 export const packEntryNoRangeProbe: SDK.ModulePackEntry<SlotMap, ModuleServices, MessageKey> = { module: componentRequiresProbe };
-it("v1.16 pack ranges: ^ / ~ / comparator sets, and which side must update (v1.17: additive, ^1.16 packs still load)", async () => {
+it("v1.16 pack ranges: ^ / ~ / comparator sets, and which side must update (through v1.26: additive, ^1.16 packs still load)", async () => {
   const { moduleApiSatisfies, moduleApiVerdict, MODULE_API_VERSION, MODULE_PACK_HOST_GLOBAL } = await import("@cutex-desktop/plugin-sdk");
-  expect(MODULE_API_VERSION).toBe("1.17");
+  expect(MODULE_API_VERSION).toBe("1.26");
   expect(MODULE_PACK_HOST_GLOBAL).toBe("__CUTEX_MODULE_HOST__");
   expect(moduleApiSatisfies(`^${MODULE_API_VERSION}`, MODULE_API_VERSION)).toBe(true);
   expect(moduleApiSatisfies("^1.16", MODULE_API_VERSION)).toBe(true);
-  expect(moduleApiVerdict("^1.18", MODULE_API_VERSION)).toBe("needsNewerApp");
+  expect(moduleApiVerdict("^1.27", MODULE_API_VERSION)).toBe("needsNewerApp");
   expect(moduleApiVerdict("~1.15", MODULE_API_VERSION)).toBe("needsNewerModule");
 });
 
@@ -102,6 +102,11 @@ function compileContract(ctx: AppModuleContext) {
   ctx.contribute("side.component", { ...side, launcher: { order: 100, pin: "default", params: () => "a.ts", newParams: () => "b.ts" } });
   ctx.contribute("side.component", { ...side, launcher: { order: 100, pin: "never", params: () => null } });
   ctx.contribute("side.component", { ...side, launcher: { order: 100, params: () => "a.ts" } });
+  // v1.25: optional presentation grouping; old launchers remain valid.
+  ctx.contribute("side.component", { ...side, launcher: { order: 100, category: "content", params: () => "a.ts" } });
+  ctx.contribute("side.component", { ...side, launcher: { order: 100, category: "tool", params: () => "a.ts" } });
+  // @ts-expect-error Launcher category is a closed presentation union.
+  ctx.contribute("side.component", { ...side, launcher: { order: 100, category: "other", params: () => "a.ts" } });
   // @ts-expect-error Pinning is "default" or "never" (omitted = not pinned until the owner pins it).
   ctx.contribute("side.component", { ...side, launcher: { order: 100, pin: "always", params: () => null } });
   // @ts-expect-error v1.11 replaced the app-internal launcher.button with launcher.pin.
@@ -195,6 +200,44 @@ function compileContract(ctx: AppModuleContext) {
   ctx.contribute("pane.kind", { id: "probe.pane", titleKey: "side.column", icon: () => null, instances: "single", binding: "workspace", parseParams: () => null, init: () => null, useTitle: () => ({ title: "" }), Body: () => null });
   // @ts-expect-error instances is single / multi (not the side slot's singleton).
   ctx.contribute("pane.kind", { id: "probe.pane", titleKey: "side.column", icon: () => null, instances: "singleton", binding: "none", parseParams: () => null, init: () => null, useTitle: () => ({ title: "" }), Body: () => null });
+  // v1.18 (§25): the desktop layer behind the panes; lead / conditional / active sidebar entries.
+  ctx.contribute("pane.desktop", { id: "probe.desk", Desktop: ({ reason, hostId }) => (void [reason, hostId], null), useShowWhenEmpty: () => true });
+  // @ts-expect-error The desktop layer gets the reason as "empty" | "desktop".
+  ctx.contribute("pane.desktop", { id: "probe.desk", Desktop: ({ reason }: { reason: number }) => (void reason, null) });
+  ctx.contribute("nav.primary", { id: "probe.lead", icon: () => null, titleKey: "side.column", target: { run: () => {} }, lead: true, useShown: () => true, useActive: () => false });
+  // v1.20 (§25.3): the tray's dock on the desktop layer; the layer stays mounted behind panes ("covered").
+  ctx.contribute("pane.desktop", {
+    id: "probe.dock",
+    Desktop: ({ reason, tray }) => (void [reason === "covered", tray], null),
+    Dock: ({ placement, onUsed }) => (void [placement === "overlay", onUsed], null),
+    useDockCount: () => 0,
+  });
+  // @ts-expect-error The dock is placed "desktop" | "overlay".
+  ctx.contribute("pane.desktop", { id: "probe.dock", Desktop: () => null, Dock: ({ placement }: { placement: number; onUsed(): void }) => (void placement, null) });
+  // v1.19 (§26): the window bar's search field.
+  ctx.contribute("window.search", { id: "probe.search", placeholderKey: "side.column", keys: () => "Ctrl K", open: () => {} });
+  // @ts-expect-error A search field says what it searches (placeholderKey) and what a click does (open).
+  ctx.contribute("window.search", { id: "probe.search", keys: () => "Ctrl K" });
+  // v1.22 (§27, design 032): a desktop widget kind — sizes in grid steps, a shape, a settings schema, the component.
+  ctx.contribute("desktop.widget", {
+    id: "probe.widget",
+    titleKey: "side.column",
+    icon: () => null,
+    size: { min: [10, 10], max: [40, 40], default: [20, 12], presets: { s: [12, 12] } },
+    shape: "round",
+    multiple: true,
+    refresh: "minute",
+    settings: [
+      { key: "name", type: "text", labelKey: "side.column", maxLength: 24 },
+      { key: "rows", type: "list", labelKey: "side.column", max: 4, addLabelKey: "side.column", itemDefaults: { tz: "UTC" }, fields: [{ key: "tz", type: "timezone", labelKey: "side.column" }] },
+    ],
+    defaults: (locale) => ({ name: locale }),
+    Widget: ({ width, height, settings, now, arranging, actions, source }) => (void [width + height, settings.name, now, arranging, actions.openPage, source.kind], null),
+  });
+  // @ts-expect-error A widget kind declares its sizes (min / max / default in grid steps).
+  ctx.contribute("desktop.widget", { id: "probe.widget", titleKey: "side.column", icon: () => null, Widget: () => null });
+  // @ts-expect-error The shell draws only these shapes.
+  ctx.contribute("desktop.widget", { id: "probe.widget", titleKey: "side.column", icon: () => null, size: { min: [1, 1], max: [2, 2], default: [1, 1] }, shape: "hexagon", Widget: () => null });
   // v1.17 (§24.5): open any pane kind; side.open stays (its alias for tool kinds).
   const opened = ctx.services.panes.open("core.conversation", { sessionId: "s2", hostId: "local" }, { beside: true });
   if (opened.status === "opened") void [opened.kind, opened.paneId, opened.instanceId];
@@ -242,5 +285,10 @@ it("pins the declared slot defaults and placement choices", () => {
     "timeline.codeBlockAction": { unavailable: "hide" },
     // v1.17 (§24): pane kinds (side.component / main.page items derive theirs).
     "pane.kind": { unavailable: "hide" },
+    // v1.18 (§25): the desktop layer behind the panes.
+    "pane.desktop": { unavailable: "hide" },
+    // v1.19 (§26): the window bar's search field.
+    "window.search": { unavailable: "hide" },
+    "desktop.widget": { unavailable: "hide" },
   });
 });

@@ -1,8 +1,16 @@
 import { useEffect, useMemo } from "react";
 import { PaneHost } from "./components/PaneHost";
+import { DesktopBackground, TrayFrame } from "./components/ChipTray";
+import { ForetellLayer } from "./components/ForetellLayer";
+import { startTrayOpen } from "./lib/trayOpen";
+import { startWorkspaceSets } from "./lib/workspaceSets";
+import { startConvStrips } from "./lib/convStrips";
+import { startBackKey } from "./lib/workspaceEffects";
 import { Overlays } from "./components/Overlays";
 import { SshPromptDialog } from "./components/SshPromptDialog";
 import { RemoteCloseDialog } from "./components/RemoteCloseDialog";
+import { FirstUseTips } from "./components/FirstUseTips";
+import { PanelGuideHost } from "./components/PanelGuideHost";
 import { OnboardingHost } from "./components/OnboardingDialog";
 import { AgentListDialog } from "./components/AgentListDialog";
 import { JobOutputDialog } from "./components/JobParts";
@@ -10,6 +18,14 @@ import { TitleBar } from "./components/TitleBar";
 import { HostAccessBanner } from "./components/AccessNotices";
 import { SideInstanceLayer } from "./components/side/SideInstanceLayer";
 import { SideDndLayer } from "./components/side/SideDndLayer";
+import { WorkspaceDndLayer } from "./components/WorkspaceDndLayer";
+import { ColumnPickLayer } from "./components/ColumnPickLayer";
+import { ShelfToast } from "./components/side/ShelfToast";
+import { SettingsShelf } from "./components/SettingsShelf";
+import { WidthTip } from "./components/WidthTip";
+import { useSettingsShelf } from "./lib/settingsShelf";
+import { useFullscreen } from "./lib/panelFull";
+import { FullscreenHint, WindowBarFrame } from "./components/PanelFullscreen";
 import { LOCAL_HOST_ID } from "../../shared/hosts";
 import { api, bridge } from "./bridge";
 import { activeHost, hasLocalHost, hasNoHost, hostIndicator, isRemote } from "./lib/hosts";
@@ -17,7 +33,9 @@ import { useTurnMarkUpkeep } from "./lib/attentionView";
 import { useDesktopShell } from "./lib/shell";
 import { useTermsSync } from "./lib/termsSync";
 import { startSideStore } from "./lib/sideLayoutStore";
+import { startDragTrace } from "./lib/dragTrace";
 import { startPaneSync } from "./lib/paneStore";
+import { startPaneActions } from "./lib/paneActions";
 import { useSideShortcuts } from "./lib/useSideShortcuts";
 import { useStaleFocusGuard } from "./lib/staleFocus";
 import { useSelectedHost, useSelectedScope, useWorkspace, WorkspaceContext } from "./lib/workspaceView";
@@ -26,6 +44,11 @@ import { appModules } from "./modules/app";
 import { PageAsideOutlet } from "./modules/Outlet";
 import { useOpenPage } from "./modules/react";
 import { hostApi, useApp } from "./store";
+import { DeskWindows } from "./components/DeskWindows";
+import { followDesksSetting } from "./lib/deskSync";
+import { startMultiWindowPref } from "./lib/multiWindowPref";
+import { legacyMultiWindow } from "./lib/prefs";
+import { MAIN_WINDOW } from "./lib/windowScope";
 
 const BANNER_BUTTON = "shrink-0 rounded px-1.5 py-0.5 hover:bg-warn/15 hover:text-foreground";
 
@@ -80,11 +103,15 @@ export function App() {
   // A page with an Aside (设置) is a full-window page: the Aside replaces the app sidebar.
   const open = useOpenPage();
   const fullWindow = !!open?.entry?.item.Aside;
+  // A panel in full screen (§24.16, lib/panelFull): only it stays — the Settings Shelf leaves, the window bar
+  // is revealed at the top edge (components/PanelFullscreen), the sidebar and the tray step back by themselves.
+  const full = useFullscreen();
+  const covered = useSettingsShelf((s) => s.open && s.maximized && s.win === MAIN_WINDOW) && !full;
   const { locale } = useI18n();
   useDesktopShell(locale);
   useTermsSync();
   useTurnMarkUpkeep();
-  // One workspace watch for the selected agent, shared by the title bar git chip and the right side.
+  // One workspace watch for the selected agent, shared by its conversation header's git chip and the right side.
   const scope = useSelectedScope();
   const workspaceHost = useSelectedHost();
   const workspace = useWorkspace(scope, workspaceHost);
@@ -95,19 +122,39 @@ export function App() {
   useEffect(() => startSideStore((listener) => appModules().subscribe(listener)), []);
   // The conversation panes (lib/paneStore): the layout follows the selection, persisted per device.
   useEffect(() => startPaneSync(), []);
+  // Step 4: the tray (≤ 8 chips), the focused pane across both areas.
+  useEffect(() => startPaneActions(), []);
+  // The tray's open items, 返回上一个 (Alt+←) and the strips of folded conversations (docs/design/001, 002).
+  useEffect(() => startTrayOpen(), []);
+  useEffect(() => startWorkspaceSets(), []);
+  useEffect(() => startConvStrips(), []);
+  useEffect(() => startBackKey(), []);
+  // Desk windows (multi-window, lib/deskSync): only with the 多窗口 setting on (also when switched on later).
+  useEffect(() => followDesksSetting((listener) => appModules().subscribe(listener)), []);
+  // 多窗口 is main's (desktop-prefs.json): follow it; the renderer's old value goes to main once (lib/multiWindowPref).
+  useEffect(() => void startMultiWindowPref(bridge.shell, legacyMultiWindow()), []);
+  // The width-drag trace (lib/dragTrace): only with its localStorage flag on.
+  useEffect(() => startDragTrace(), []);
   useSideShortcuts(!fullWindow);
   useStaleFocusGuard();
   // First commit: tells main a just-installed update renders (otherwise it rolls back).
   useEffect(() => void bridge.shell?.rendererReady().catch(() => {}), []);
   return (
     <WorkspaceContext.Provider value={selected}>
-      <div className="flex h-full">
+      {/* isolate: the desktop background (z −1) sits behind every card yet above the body's window colour. */}
+      <div className="relative isolate flex h-full">
+        {/* The desktop background under the whole window (components/ChipTray; owner 2026-10-21): the gaps
+            between the cards and the margins around them show it. */}
+        <DesktopBackground />
         {/* A full-window page (设置): its Aside (← 返回 on top) runs the full height in place of the app
             sidebar and the title bar's sidebar / host row. Same tree shape either way, so the title
             bar, banner and overlays are not remounted when such a page opens. */}
         <PageAsideOutlet />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <TitleBar git={workspace.git} />
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <WindowBarFrame>
+            <TitleBar />
+          </WindowBarFrame>
+          <FullscreenHint />
           <DaemonBanner />
           {/* The restore notice lives at the top of the sidebar; with it collapsed, a title-bar chip
               (components/RestoreBanner). Never a full-width bar here. */}
@@ -117,13 +164,34 @@ export function App() {
           <Overlays />
           <SshPromptDialog />
           <RemoteCloseDialog />
+          <DeskWindows />
           <OnboardingHost />
+          <FirstUseTips />
+          <PanelGuideHost />
           {/* The work row as panes (components/PaneHost): the agent list, the conversation pane(s) / page
-              and the right side; each conversation pane has its own ConversationScope. */}
-          <PaneHost fullWindow={fullWindow} scope={scope} />
+              and the right side; each conversation pane has its own ConversationScope. Beside it the
+              global Settings Shelf (components/SettingsShelf, owner 2026-10-21): right by default, or
+              left (CSS order), or maximised over the row — the row then stays mounted under it, inert. */}
+          {/* The tray (components/ChipTray TrayFrame, owner 2026-10-21): a panel in its own band at an edge of
+              this work area (bottom by default; top, left, right), outside the sidebar card and the Shelves. */}
+          <TrayFrame hidden={covered}>
+            <div className="relative flex min-h-0 min-w-0 flex-1">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col" inert={covered || undefined} aria-hidden={covered || undefined}>
+                <PaneHost fullWindow={fullWindow} scope={scope} />
+              </div>
+              <div className="contents" hidden={full || undefined}>
+                <SettingsShelf />
+              </div>
+            </div>
+          </TrayFrame>
         </div>
         <SideInstanceLayer />
         <SideDndLayer />
+        <WidthTip />
+        <WorkspaceDndLayer />
+        <ColumnPickLayer />
+        <ForetellLayer />
+        <ShelfToast />
       </div>
     </WorkspaceContext.Provider>
   );

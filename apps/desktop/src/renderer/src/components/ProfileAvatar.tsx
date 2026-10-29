@@ -9,15 +9,17 @@ import { ProviderIcon } from "./ProviderIcon";
 
 export type AvatarProfile = Pick<ProfileItem, "id" | "name" | "authKind" | "cliKind" | "baseUrl" | "appearance">;
 
-export function ProfileAvatar({ profile, size = 28, badge = false, picture, color }: {
+export function ProfileAvatar({ profile, size = 28, badge = false, picture, color, host }: {
   profile: AvatarProfile;
   size?: number;
   badge?: boolean;
   /** Unsaved edits (the 外观 section previews them): a picture (null = removed) and a colour. */
   picture?: string | null;
   color?: string;
+  /** The host the profile lives on (default: the active host). */
+  host?: string;
 }) {
-  const stored = useProfileAvatar(profile.id);
+  const stored = useProfileAvatar(profile.id, host);
   const shown = picture !== undefined ? picture : stored;
   const bg = color ?? profileColor(profile);
   const provider = badge ? profileProvider(profile) : null;

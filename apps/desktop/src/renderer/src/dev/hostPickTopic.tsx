@@ -11,7 +11,7 @@ const NOTES: Record<Pos, string> = {
   P2: "P2：选择器在标签下面单独一行，写「正在编辑：」。",
   P3: "P3：选择器放在页头右上角（「在主界面调整」那个位置；有那个按钮的页面两者并排）。",
 };
-const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] whitespace-nowrap";
+const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-caption/[inherit] whitespace-nowrap";
 const dot = (c = "bg-ok") => <span className={`size-1.5 shrink-0 rounded-full ${c}`} />;
 const tagLocal = (mixed: boolean) => <span className={`${CHIP} bg-surface-2 text-muted`}><Monitor size={11} />{mixed ? "混合：本地桌面应用" : "本地桌面应用"}</span>;
 const tagMixed = <span className={`${CHIP} bg-surface-2 text-muted`}><Layers size={11} />混合设置</span>;
@@ -34,7 +34,7 @@ function Picker({ host, setHost, prefix }: { host: string; setHost(h: string): v
               {dot(x.dot)}{x.id}<span className="ml-auto text-xs text-subtle">{x.note}</span>{x.id === host && <Check size={13} className="text-accent" />}
             </button>
           ))}
-          <span className="block border-t border-border/60 px-2.5 pt-1.5 pb-1 text-[11px] text-subtle">整个设置里的主机设置都跟着换</span>
+          <span className="block border-t border-border/60 px-2.5 pt-1.5 pb-1 text-caption/[inherit] text-subtle">整个设置里的主机设置都跟着换</span>
         </span>
       )}
     </span>
@@ -45,7 +45,7 @@ function Header({ pos, hint, tags, picker, right }: { pos: Pos; hint: string; ta
   return (
     <div className="mb-5 space-y-1.5 border-b border-border/60 pb-3">
       <div className="flex min-h-5 items-start gap-3">
-        <p className="min-w-0 text-[13px] text-muted">{hint}</p>
+        <p className="min-w-0 text-ui/[inherit] text-muted">{hint}</p>
         <span className="ml-auto flex shrink-0 items-center gap-2">{pos === "P3" && picker}{right}</span>
       </div>
       <div className="flex min-h-6 flex-wrap items-center gap-1.5">{tags}{pos === "P1" && <span className="ml-1.5">{picker}</span>}</div>
@@ -62,7 +62,7 @@ function Card({ title, hint, tag, rows }: { title: string; hint?: string; tag?: 
         {hint && <p className="text-xs text-subtle">{hint}</p>}
         {tag && <div className="mt-1 flex gap-1.5">{tag}</div>}
       </div>
-      <div className="rounded-xl border border-border bg-surface px-4">{rows.map((r) => <SettingRow key={r} label={r}><Toggle checked onChange={() => {}} /></SettingRow>)}</div>
+      <div className="rounded-xl border border-border bg-surface px-4">{rows.map((r) => <SettingRow agents="none" source="local" key={r} label={r}><Toggle checked onChange={() => {}} /></SettingRow>)}</div>
     </section>
   );
 }

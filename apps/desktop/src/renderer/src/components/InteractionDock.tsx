@@ -1,3 +1,5 @@
+import type { AgentRuntime } from "../lib/agentFeatures";
+import { isImeComposing } from "../lib/ime";
 // Docked interaction card above the composer (pattern from ZCode's V4InteractionDialogs /
 // PermissionDialog / ElicitationDialog): shows the first pending server request, keyboard driven.
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
@@ -19,6 +21,7 @@ import {
   type InteractionModel,
   type PendingRequest,
 } from "../lib/interactions";
+import { btn } from "./Button";
 
 const TONE: Record<Choice["tone"], string> = {
   primary: "bg-accent text-white",
@@ -47,7 +50,7 @@ function Card({ children, onKeyDown }: { children: React.ReactNode; onKeyDown?: 
   );
 }
 
-function Approval({ model, onReply }: { model: Extract<InteractionModel, { kind: "approval" }>; onReply: (result: unknown) => void }) {
+function Approval({ model, runtime, onReply }: { model: Extract<InteractionModel, { kind: "approval" }>; runtime?: AgentRuntime; onReply: (result: unknown) => void }) {
   const { t } = useI18n();
   const [selected, setSelected] = useState(0);
   const pick = (i: number) => {
@@ -55,7 +58,7 @@ function Approval({ model, onReply }: { model: Extract<InteractionModel, { kind:
     if (choice) onReply(choice.result);
   };
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.nativeEvent.isComposing) return;
+    if (isImeComposing(e)) return;
     // Esc picks only decline / cancel; with neither on offer it is left alone (lib/interactions).
     const action = approvalKeyAction(e.key, e.shiftKey, model, selected);
     if (!action) return;
@@ -68,13 +71,13 @@ function Approval({ model, onReply }: { model: Extract<InteractionModel, { kind:
     <Card onKeyDown={onKeyDown}>
       <div className="mb-2 flex items-start gap-2">
         <span className="min-w-0 flex-1 text-sm font-semibold">{t(`interaction.title.${model.title}` as MessageKey)}</span>
-        <ApprovalSource source="native" />
+        <ApprovalSource source="native" runtime={runtime} />
       </div>
       {model.reason && <p className="mb-2 text-sm text-muted">{model.reason}</p>}
       {model.subject && (
-        <pre className="mb-2 max-h-48 overflow-auto rounded-lg bg-background p-2 font-mono text-xs whitespace-pre-wrap">{model.subject}</pre>
+        <pre className="selectable mb-2 max-h-48 overflow-auto rounded-lg bg-background p-2 font-mono text-xs whitespace-pre-wrap">{model.subject}</pre>
       )}
-      {model.cwd && <p className="mb-3 font-mono text-[11px] text-subtle">{model.cwd}</p>}
+      {model.cwd && <p className="mb-3 font-mono text-caption/[inherit] text-subtle">{model.cwd}</p>}
       <div className="flex flex-col gap-1.5">
         {model.choices.map((choice, i) => (
           <button
@@ -86,12 +89,12 @@ function Approval({ model, onReply }: { model: Extract<InteractionModel, { kind:
             <span className="w-4 text-xs opacity-60">{i + 1}</span>
             <span className="min-w-0">
               {choice.literal ? choice.label : t(`interaction.choice.${choice.label}` as MessageKey)}
-              {choice.detail && <span className="block truncate font-mono text-[11px] opacity-70" title={choice.detail}>{choice.detail}</span>}
+              {choice.detail && <span className="block truncate font-mono text-caption/[inherit] opacity-70" title={choice.detail}>{choice.detail}</span>}
             </span>
           </button>
         ))}
       </div>
-      <p className="mt-2 text-[11px] text-subtle">
+      <p className="mt-2 text-caption/[inherit] text-subtle">
         {t("interaction.keys")}
         {escape && ` · ${t(escape.label === "cancel" ? "interaction.escCancel" : "interaction.escDecline")}`}
       </p>
@@ -118,7 +121,8 @@ function Questions({ model, onReply }: { model: Extract<InteractionModel, { kind
     else setIndex(index + 1);
   };
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.nativeEvent.isComposing || (e.target as HTMLElement).tagName === "INPUT") return;
+    if (isImeComposing(e)) return;
+    if ((e.target as HTMLElement).tagName === "INPUT") return;
     const n = Number(e.key);
     if (n >= 1 && n <= options.length) {
       e.preventDefault();
@@ -135,7 +139,7 @@ function Questions({ model, onReply }: { model: Extract<InteractionModel, { kind
         {model.questions.length > 1 && <span className="ml-auto">{index + 1} / {model.questions.length}</span>}
         <ApprovalSource source="model" className={model.questions.length > 1 ? "ml-2" : "ml-auto"} />
       </div>
-      <p className="mb-3 text-sm whitespace-pre-wrap">{question.question}</p>
+      <p className="selectable mb-3 text-sm whitespace-pre-wrap">{question.question}</p>
       <div className="flex flex-col gap-1.5">
         {options.map((option, i) => (
           <button key={option.label} onClick={() => answer([option.label])} className="rounded-lg border border-border px-3 py-1.5 text-left hover:bg-surface-2">
@@ -162,7 +166,7 @@ function Questions({ model, onReply }: { model: Extract<InteractionModel, { kind
               placeholder={t("interaction.other")}
               className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-accent"
             />
-            <button type="submit" disabled={!other.trim()} className="rounded-lg bg-accent px-3 text-sm text-white disabled:opacity-40">
+            <button type="submit" disabled={!other.trim()} className={btn({ variant: "primary" })}>
               {last ? t("interaction.submit") : t("interaction.next")}
             </button>
           </form>
@@ -191,12 +195,12 @@ function Elicitation({ model, onReply }: { model: Extract<InteractionModel, { ki
     if (!blocked) onReply(elicitationReply("accept", formContent(fields, values)));
   };
   return (
-    <Card onKeyDown={(e) => e.key === "Escape" && onReply(elicitationReply("cancel"))}>
+    <Card onKeyDown={(e) => !isImeComposing(e) && (e.key === "Escape" && onReply(elicitationReply("cancel")))}>
       <div className="mb-1 flex items-center gap-2 text-xs text-subtle">
         <span className="min-w-0 flex-1">{t("interaction.title.elicitation", { server: p.serverName })}</span>
         <ApprovalSource source="mcp" />
       </div>
-      {message && <p className="mb-3 text-sm whitespace-pre-wrap">{message}</p>}
+      {message && <p className="selectable mb-3 text-sm whitespace-pre-wrap">{message}</p>}
       {url && (
         <a href={url} target="_blank" rel="noreferrer" className="mb-3 block truncate text-sm text-accent underline">
           {url}
@@ -251,21 +255,21 @@ function Elicitation({ model, onReply }: { model: Extract<InteractionModel, { ki
                 />
               )}
               {invalid && (
-                <span className="block text-[11px] text-danger">{limits ? t("interaction.form.invalidLimits", { limits }) : t("interaction.form.invalid")}</span>
+                <span className="block text-caption/[inherit] text-danger">{limits ? t("interaction.form.invalidLimits", { limits }) : t("interaction.form.invalid")}</span>
               )}
-              {f.description && <span className="text-[11px] text-subtle">{f.description}</span>}
+              {f.description && <span className="text-caption/[inherit] text-subtle">{f.description}</span>}
             </Wrapper>
           );
         })}
       </div>
       <div className="flex items-center gap-2">
-        <button onClick={accept} disabled={blocked} className="rounded-lg bg-accent px-3 py-1.5 text-sm text-white disabled:opacity-40">
+        <button onClick={accept} disabled={blocked} className={btn({ variant: "primary" })}>
           {t("interaction.choice.accept")}
         </button>
         <button onClick={() => onReply(elicitationReply("decline"))} className="rounded-lg border border-border px-3 py-1.5 text-sm">
           {t("interaction.choice.decline")}
         </button>
-        {Object.values(problems).includes("required") && <span className="text-[11px] text-subtle">{t("interaction.form.required")}</span>}
+        {Object.values(problems).includes("required") && <span className="text-caption/[inherit] text-subtle">{t("interaction.form.required")}</span>}
       </div>
     </Card>
   );
@@ -275,8 +279,11 @@ export function InteractionDock({
   pending,
   onReply,
   takeFocus = true,
+  runtime,
 }: {
   pending: PendingRequest[];
+  /** The agent's runtime: names whose sandbox asks (DSH's own approvals are not Codex's). */
+  runtime?: AgentRuntime;
   onReply: (request: PendingRequest, reply: { result: unknown } | { error: { code: number; message: string } }) => void;
   /** A new card takes the keyboard focus (default); the side agent view passes false. */
   takeFocus?: boolean;
@@ -289,8 +296,8 @@ export function InteractionDock({
   return (
     <TakeFocus.Provider value={takeFocus}>
     <div data-gutter-anchor="dock" className="side-col side-col-composer w-full px-4 pb-2">
-      {pending.length > 1 && <p className="mb-1 text-[11px] text-subtle">{t("pending.title", { count: pending.length })}</p>}
-      {model.kind === "approval" && <Approval key={String(first.id)} model={model} onReply={reply} />}
+      {pending.length > 1 && <p className="mb-1 text-caption/[inherit] text-subtle">{t("pending.title", { count: pending.length })}</p>}
+      {model.kind === "approval" && <Approval key={String(first.id)} model={model} runtime={runtime} onReply={reply} />}
       {model.kind === "questions" && <Questions key={String(first.id)} model={model} onReply={reply} />}
       {model.kind === "elicitation" && <Elicitation key={String(first.id)} model={model} onReply={reply} />}
       {model.kind === "unknown" && (

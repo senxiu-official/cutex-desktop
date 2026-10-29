@@ -93,7 +93,7 @@ function ScopeChips({ scope, always }: { scope: Scope; always: boolean }) {
 function HeaderE({ hint, scope }: { hint: string; scope: Scope }) {
   return (
     <div className="mb-5 space-y-1.5 border-b border-border/60 pb-3">
-      <p className="text-[13px] text-muted">{hint}</p>
+      <p className="text-ui/[inherit] text-muted">{hint}</p>
       <ScopeChips scope={scope} always={false} />
     </div>
   );
@@ -103,13 +103,13 @@ function HeaderE({ hint, scope }: { hint: string; scope: Scope }) {
 function HeaderF({ hint, scope }: { hint: string; scope: Scope }) {
   return (
     <div className="mb-5 space-y-1.5 border-b border-border/60 pb-3">
-      <p className="text-[13px] text-muted">{hint}</p>
+      <p className="text-ui/[inherit] text-muted">{hint}</p>
       <ScopeChips scope={scope} always />
     </div>
   );
 }
 
-const tag = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] whitespace-nowrap";
+const tag = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-caption/[inherit] whitespace-nowrap";
 const whereTag = (s: Scope) => (s.where === "local" ? <span className={`${tag} bg-surface-2 text-muted`}><Monitor size={11} />本机 · 桌面端</span> : <span className={`${tag} bg-accent/12 text-accent`}><Server size={11} />主机 {s.host} · cutex</span>);
 const agentTag = (s: Scope) => (s.agents ? <span className={`${tag} bg-warn/15 text-warn-text`}><Bot size={11} />影响智能体 · {s.agents}</span> : <span className={`${tag} bg-surface-2 text-subtle`}><Bot size={11} />不影响智能体</span>);
 
@@ -129,7 +129,7 @@ function InfoBtn({ text }: { text: string }) {
 function HeaderA({ hint, scope }: { hint: string; scope: Scope }) {
   return (
     <div className="mb-5 space-y-1.5 border-b border-border/60 pb-3">
-      <p className="text-[13px] text-muted">{hint}</p>
+      <p className="text-ui/[inherit] text-muted">{hint}</p>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-subtle">
         <span className="text-muted">存在</span>{whereTag(scope)}<InfoBtn text={scope.detail} />
         <span className="ml-3 text-muted">智能体</span>{scope.agents ? <span className={`${tag} bg-warn/15 text-warn-text`}>受影响 · {scope.agents}</span> : <span className={`${tag} bg-surface-2 text-subtle`}>不受影响</span>}
@@ -144,7 +144,7 @@ function HeaderB({ hint, scope }: { hint: string; scope: Scope }) {
   const line = scope.where === "local" ? "只影响这台电脑上的界面，智能体看不到" : `影响 ${scope.host} 上的智能体：${scope.agents}`;
   return (
     <div className="mb-5 space-y-1 border-b border-border/60 pb-3">
-      <p className="text-[13px] text-muted">{hint}</p>
+      <p className="text-ui/[inherit] text-muted">{hint}</p>
       <div className={`flex flex-wrap items-center gap-1.5 text-xs ${scope.agents ? "text-warn-text" : "text-subtle"}`}>
         <Icon size={13} />
         <span>{line}</span>
@@ -161,11 +161,11 @@ function HeaderC({ hint, scope }: { hint: string; scope: Scope }) {
   const sub = scope.where === "local" ? "存在桌面端 · 不影响智能体 · 立即生效" : `存在主机的 cutex · ${scope.agents} · 连到 ${scope.host} 的设备都一样`;
   return (
     <div className="mb-5 space-y-3">
-      <p className="text-[13px] text-muted">{hint}</p>
+      <p className="text-ui/[inherit] text-muted">{hint}</p>
       <div className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 ${scope.agents ? "border-warn/35 bg-warn/8" : "border-border bg-surface"}`}>
         <Icon size={16} className={`mt-0.5 shrink-0 ${scope.agents ? "text-warn-text" : "text-muted"}`} />
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1 text-[13px] font-medium">{title}<InfoBtn text={scope.detail} /></div>
+          <div className="flex flex-wrap items-center gap-1 text-ui/[inherit] font-medium">{title}<InfoBtn text={scope.detail} /></div>
           <div className="text-xs text-subtle">{sub}</div>
         </div>
       </div>
@@ -177,7 +177,7 @@ function HeaderC({ hint, scope }: { hint: string; scope: Scope }) {
 function HeaderD({ hint, scope }: { hint: string; scope: Scope }) {
   return (
     <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-border/60 pb-3">
-      <p className="min-w-0 flex-1 text-[13px] text-muted">{hint}</p>
+      <p className="min-w-0 flex-1 text-ui/[inherit] text-muted">{hint}</p>
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
         {whereTag(scope)}
         {agentTag(scope)}
@@ -204,19 +204,19 @@ function GeneralBody() {
   return (
     <>
       <Section title="语言">
-        <SettingRow label="界面语言">
+        <SettingRow agents="none" source="local" label="界面语言">
           <Select value={lang} options={[{ value: "zh-CN", label: "简体中文" }, { value: "zh-Hant-CN", label: "繁體中文" }, { value: "en", label: "English" }]} onChange={setLang} />
         </SettingRow>
-        <SettingRow label={<span className="inline-flex items-center gap-2">日期格式{soon}</span>} hint="时间线、用量和列表里的日期">
+        <SettingRow agents="none" source="local" label={<span className="inline-flex items-center gap-2">日期格式{soon}</span>} hint="时间线、用量和列表里的日期">
           <Select<string> disabled value="auto" options={[{ value: "auto", label: "跟随界面语言（2026-10-18）" }, { value: "dmy", label: "18/10/2026" }, { value: "mdy", label: "10/18/2026" }]} onChange={() => {}} />
         </SettingRow>
-        <SettingRow label={<span className="inline-flex items-center gap-2">数字格式{soon}</span>} hint="用量、额度和价格里的数字">
+        <SettingRow agents="none" source="local" label={<span className="inline-flex items-center gap-2">数字格式{soon}</span>} hint="用量、额度和价格里的数字">
           <Select<string> disabled value="auto" options={[{ value: "auto", label: "跟随界面语言（1,234.5）" }, { value: "eu", label: "1.234,5" }, { value: "space", label: "1 234,5" }]} onChange={() => {}} />
         </SettingRow>
       </Section>
       <TermsSection />
       <Section title="窗口">
-        <SettingRow label="关闭窗口时">
+        <SettingRow agents="none" source="local" label="关闭窗口时">
           <Segmented value={close} options={[{ value: "tray", label: "最小化到托盘" }, { value: "quit", label: "退出" }]} onChange={setClose} />
         </SettingRow>
       </Section>
@@ -249,7 +249,7 @@ function PreviewArea({ style, children, note, control }: { style: PreviewStyle; 
     if (label === "L1")
       return (
         <div className={`${band} pb-3`} style={dots}>
-          <div className="-mx-4 mb-3 flex items-center gap-2 border-b border-border/50 bg-win px-4 py-1.5 text-[11px] text-subtle">
+          <div className="-mx-4 mb-3 flex items-center gap-2 border-b border-border/50 bg-win px-4 py-1.5 text-caption/[inherit] text-subtle">
             <span className="inline-flex items-center gap-1 font-medium tracking-wider text-muted"><Eye size={12} aria-hidden />预览</span>
             <span>·</span>
             {live}
@@ -261,31 +261,31 @@ function PreviewArea({ style, children, note, control }: { style: PreviewStyle; 
     if (label === "L2")
       return (
         <div className={`${band} relative mt-5 pt-4 pb-3`} style={dots}>
-          <span className="absolute -top-2.5 left-3 inline-flex items-center gap-1.5 bg-surface px-1.5 text-[11px] text-muted">
+          <span className="absolute -top-2.5 left-3 inline-flex items-center gap-1.5 bg-surface px-1.5 text-caption/[inherit] text-muted">
             <Eye size={12} aria-hidden />
             <span className="font-medium tracking-wider">预览</span>
             {live}
           </span>
-          {control && <span className="absolute top-1.5 right-4 text-[11px] text-subtle">{control}</span>}
-          {note && <span className="absolute top-1.5 right-4 text-[11px] text-subtle">{note}</span>}
+          {control && <span className="absolute top-1.5 right-4 text-caption/[inherit] text-subtle">{control}</span>}
+          {note && <span className="absolute top-1.5 right-4 text-caption/[inherit] text-subtle">{note}</span>}
           <div className="pt-3">{sample}</div>
         </div>
       );
     return (
       <div className={`${band} flex gap-0 py-0`} style={dots}>
-        <div className="-ml-4 flex w-14 shrink-0 flex-col items-center justify-center gap-1 border-r border-border/50 bg-win py-3 text-[11px] text-muted">
+        <div className="-ml-4 flex w-14 shrink-0 flex-col items-center justify-center gap-1 border-r border-border/50 bg-win py-3 text-caption/[inherit] text-muted">
           <Eye size={13} aria-hidden />
           <span className="font-medium tracking-[0.3em] [writing-mode:vertical-rl]">预览</span>
         </div>
         <div className="min-w-0 flex-1 py-3 pl-4">
-          {(control || note) && <div className="mb-2 flex items-center text-[11px] text-subtle">{live}{tail}</div>}
+          {(control || note) && <div className="mb-2 flex items-center text-caption/[inherit] text-subtle">{live}{tail}</div>}
           {sample}
         </div>
       </div>
     );
   }
   const head = (
-    <div className="mb-2.5 flex items-center gap-2 text-[11px] text-subtle">
+    <div className="mb-2.5 flex items-center gap-2 text-caption/[inherit] text-subtle">
       <span className="inline-flex h-5 items-center gap-1 rounded border border-border bg-surface-2 px-1.5 font-medium tracking-wider text-muted">
         <Eye size={11} aria-hidden />
         预览
@@ -387,13 +387,13 @@ function TermsSample() {
   const pill = "inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs";
   return (
     // One line of equal items that just flows (owner: no columns, no groups); what does not fit wraps.
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-2.5 text-[13px]">
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2.5 text-ui/[inherit]">
       <span className={`${pill} border border-border bg-surface`}><span>＋ 新建<T id="agent">{w.agent.one}</T></span></span>
       <span className="text-xs text-muted">3 个<T id="agent">{w.agent.many}</T>在线</span>
       <span className="inline-flex items-center gap-1.5">
         <Avatar name="Eva" seed="Eva" size={20} />
         <span className="font-medium">Eva</span>
-        <span className="rounded bg-surface-2 px-1 text-[11px] text-muted"><T id="director">{w.director.one}</T></span>
+        <span className="rounded bg-surface-2 px-1 text-caption/[inherit] text-muted"><T id="director">{w.director.one}</T></span>
       </span>
       <span className="text-xs text-muted">2 个<T id="subagent">{w.subagent.many}</T>工作中</span>
       <span className="text-xs text-muted">汇报给<T id="parentagent">{w.parentagent.one}</T></span>
@@ -412,7 +412,7 @@ function TermRowsDemo() {
     <div>
       {TERM_IDS.map((id: TermId) => (
         <div key={id} className="border-b border-border/60 last:border-b-0" onMouseEnter={() => mark.setFocus(id)} onMouseLeave={() => mark.setFocus(null)} onFocusCapture={() => mark.setFocus(id)} onBlurCapture={() => mark.setFocus(null)}>
-        <SettingRow label={termLabel(locale, id)} reset={<ResetButton disabled={!overrides[locale]?.[id]?.one} onClick={() => resetTerm(locale, id)} />}>
+        <SettingRow agents="none" source="local" label={termLabel(locale, id)} reset={<ResetButton disabled={!overrides[locale]?.[id]?.one} onClick={() => resetTerm(locale, id)} />}>
           <TextField value={overrides[locale]?.[id]?.one ?? ""} placeholder={resolveTerms(overrides, locale)[id].one} maxLength={TERM_MAX} width="w-32" onCommit={(v) => setTerm(locale, id, "one", v)} />
         </SettingRow>
         </div>
@@ -437,12 +437,12 @@ function FontsCard({ style }: { style: PreviewStyle }) {
   return (
     <Section title="字体（同一个预览控件）" hint="外观页的字体预览换成同一个控件后的样子">
       <div>
-        <SettingRow label="界面字体"><Select value="a" options={[{ value: "a", label: "Segoe UI" }]} onChange={() => {}} /></SettingRow>
-        <SettingRow label="对话字体"><Select value="a" options={[{ value: "a", label: "跟随界面字体" }]} onChange={() => {}} /></SettingRow>
+        <SettingRow agents="none" source="local" label="界面字体"><Select value="a" options={[{ value: "a", label: "Segoe UI" }]} onChange={() => {}} /></SettingRow>
+        <SettingRow agents="none" source="local" label="对话字体"><Select value="a" options={[{ value: "a", label: "跟随界面字体" }]} onChange={() => {}} /></SettingRow>
       </div>
       <PreviewArea style={style} note="界面 · 对话 · 代码">
         <div className="flex flex-col gap-2">
-          <p className="text-[13px]">你好 Hello こんにちは 안녕하세요</p>
+          <p className="text-ui/[inherit]">你好 Hello こんにちは 안녕하세요</p>
           <p className="font-chat-context leading-relaxed">他说：“run job’s task。” She said, “中文。”</p>
           <p className="font-mono text-xs">const 中文 = "job’s"; // 0O 1lI</p>
         </div>
@@ -549,7 +549,7 @@ function BorderMark({ shape, size: s, outside }: { shape: MarkShape; size: numbe
     return <span className="absolute top-1/2 -translate-y-1/2 bg-accent" style={{ left: -17, width: d / 2 + 0.5, height: d, clipPath: "polygon(0 0, 100% 50%, 0 100%)" }} />;
   // inset: the diamond's centre moves inward so only `outside` of its width stays outside the border.
   const centre = shape === "inset" ? -16.5 + d / 2 - outside * d : -16.5;
-  return <span className="absolute top-1/2 -translate-y-1/2 rotate-45 rounded-[1px] bg-accent" style={{ width: s, height: s, left: centre - s / 2, boxShadow: halo }} />;
+  return <span className="absolute top-1/2 -translate-y-1/2 rotate-45 rounded-xs bg-accent" style={{ width: s, height: s, left: centre - s / 2, boxShadow: halo }} />;
 }
 
 function ResetDemo({ style, bar, size = 5, shape = "diamond", outside = 0.2 }: { style: ResetStyle; bar: BarHeight; size?: number; shape?: MarkShape; outside?: number }) {
@@ -563,7 +563,7 @@ function ResetDemo({ style, bar, size = 5, shape = "diamond", outside = 0.2 }: {
   const rows = DEMO_ROWS.filter((r) => !onlyChanged || changed(r));
   const nChanged = DEMO_ROWS.filter(changed).length;
   const resetBtn = (r: DemoRow, text = false) => (
-    <button type="button" title="恢复默认" onClick={() => reset(r)} className="inline-flex items-center gap-1 rounded px-1 text-[11px] text-subtle hover:bg-surface-2 hover:text-foreground">
+    <button type="button" title="恢复默认" onClick={() => reset(r)} className="inline-flex items-center gap-1 rounded px-1 text-caption/[inherit] text-subtle hover:bg-surface-2 hover:text-foreground">
       <RotateCcw size={12} />
       {text && "恢复默认"}
     </button>
@@ -705,19 +705,19 @@ function FontSample() {
   return (
     <PreviewBand note="界面 · 对话 · 代码">
       <div className="flex flex-col gap-1.5">
-        <p className="text-[13px]">Le Café de Cutex 的留言板上，写着各种欢迎：欢迎 · Hello · G'day · こんにちは。</p>
+        <p className="text-ui/[inherit]">Le Café de Cutex 的留言板上，写着各种欢迎：欢迎 · Hello · G'day · こんにちは。</p>
         <p className="font-chat-context leading-relaxed">“To be, or not to be.” 有人用另一种笔迹在下面答道。</p>
         <p className="font-mono text-xs">const xs = arr.map((v) =&gt; v * 2); // 0O 1lI</p>
       </div>
     </PreviewBand>
   );
 }
-const colHead = "text-[11px] text-subtle";
+const colHead = "text-caption/[inherit] text-subtle";
 
 function FontBand({ children, inline }: { children: ReactNode; inline?: boolean }) {
   return <PreviewBand inline={inline}>{children}</PreviewBand>;
 }
-const UI_SAMPLE = <p className="text-[13px]">Le Café de Cutex 的留言板上，写着各种欢迎：欢迎 · 歡迎 · Hello · G’day · Привет · Bonjour · こんにちは。</p>;
+const UI_SAMPLE = <p className="text-ui/[inherit]">Le Café de Cutex 的留言板上，写着各种欢迎：欢迎 · 歡迎 · Hello · G’day · Привет · Bonjour · こんにちは。</p>;
 const CHAT_SAMPLE = (
   <div className="font-chat-context space-y-0.5 leading-relaxed">
     <p>“To be, or not to be: that is the question.” Someone had scribbled it in a corner.</p>
@@ -732,20 +732,20 @@ function FontsVariant({ layout }: { layout: FontLayout }) {
     return (
       <Section title="字体" hint="只能用这台设备已安装的字体；未安装的会回退到默认字体。">
         <div>
-          <SettingRow label="界面 · 中文字体" hint="汉字，也用于日文假名、韩文（CJK）"><FontPick fonts={CJK_FONTS} /></SettingRow>
-          <SettingRow label="界面 · 西文字体" hint="拉丁等字母、数字和符号（Non-CJK）"><FontPick fonts={LATIN_FONTS} /></SettingRow>
+          <SettingRow agents="none" source="local" label="界面 · 中文字体" hint="汉字，也用于日文假名、韩文（CJK）"><FontPick fonts={CJK_FONTS} /></SettingRow>
+          <SettingRow agents="none" source="local" label="界面 · 西文字体" hint="拉丁等字母、数字和符号（Non-CJK）"><FontPick fonts={LATIN_FONTS} /></SettingRow>
         </div>
         <FontBand inline>{UI_SAMPLE}</FontBand>
         <div>
-          <SettingRow label="对话 · 中文字体"><FontPick fonts={CJK_FONTS} follow="跟随界面" /></SettingRow>
-          <SettingRow label="对话 · 西文字体"><FontPick fonts={LATIN_FONTS} follow="跟随界面" /></SettingRow>
-          <SettingRow label="对话 · 字号"><Px value={14} /></SettingRow>
+          <SettingRow agents="none" source="local" label="对话 · 中文字体"><FontPick fonts={CJK_FONTS} follow="跟随界面" /></SettingRow>
+          <SettingRow agents="none" source="local" label="对话 · 西文字体"><FontPick fonts={LATIN_FONTS} follow="跟随界面" /></SettingRow>
+          <SettingRow agents="none" source="local" label="对话 · 字号"><Px value={14} /></SettingRow>
         </div>
         <FontBand inline>{CHAT_SAMPLE}</FontBand>
         <div>
-          <SettingRow label="代码 · 中文字体" hint="暂时只能跟随界面"><FontPick fonts={[]} follow="跟随界面" /></SettingRow>
-          <SettingRow label="代码 · 西文字体"><FontPick fonts={MONO_FONTS} /></SettingRow>
-          <SettingRow label="代码 · 字号"><Px value={13} /></SettingRow>
+          <SettingRow agents="none" source="local" label="代码 · 中文字体" hint="暂时只能跟随界面"><FontPick fonts={[]} follow="跟随界面" /></SettingRow>
+          <SettingRow agents="none" source="local" label="代码 · 西文字体"><FontPick fonts={MONO_FONTS} /></SettingRow>
+          <SettingRow agents="none" source="local" label="代码 · 字号"><Px value={13} /></SettingRow>
         </div>
         <FontBand>{CODE_SAMPLE}</FontBand>
       </Section>
@@ -756,22 +756,22 @@ function FontsVariant({ layout }: { layout: FontLayout }) {
       <Section title="字体" hint="只能用这台设备已安装的字体；未安装的会回退到默认字体。">
         {group("界面", true)}
         <div>
-          <SettingRow label="西文" hint="拉丁等字母、数字和符号（Non-CJK）"><FontPick fonts={LATIN_FONTS} /></SettingRow>
-          <SettingRow label="中文" hint="汉字，也用于日文假名、韩文（CJK）"><FontPick fonts={CJK_FONTS} /></SettingRow>
+          <SettingRow agents="none" source="local" label="西文" hint="拉丁等字母、数字和符号（Non-CJK）"><FontPick fonts={LATIN_FONTS} /></SettingRow>
+          <SettingRow agents="none" source="local" label="中文" hint="汉字，也用于日文假名、韩文（CJK）"><FontPick fonts={CJK_FONTS} /></SettingRow>
         </div>
         <FontBand inline>{UI_SAMPLE}</FontBand>
         {group("对话正文")}
         <div>
-          <SettingRow label="西文"><FontPick fonts={LATIN_FONTS} follow="跟随界面" /></SettingRow>
-          <SettingRow label="中文"><FontPick fonts={CJK_FONTS} follow="跟随界面" /></SettingRow>
-          <SettingRow label="字号"><Px value={14} /></SettingRow>
+          <SettingRow agents="none" source="local" label="西文"><FontPick fonts={LATIN_FONTS} follow="跟随界面" /></SettingRow>
+          <SettingRow agents="none" source="local" label="中文"><FontPick fonts={CJK_FONTS} follow="跟随界面" /></SettingRow>
+          <SettingRow agents="none" source="local" label="字号"><Px value={14} /></SettingRow>
         </div>
         <FontBand inline>{CHAT_SAMPLE}</FontBand>
         {group("代码")}
         <div>
-          <SettingRow label="西文"><FontPick fonts={MONO_FONTS} /></SettingRow>
-          <SettingRow label="中文" hint="暂时只能跟随界面"><FontPick fonts={[]} follow="跟随界面" /></SettingRow>
-          <SettingRow label="字号"><Px value={13} /></SettingRow>
+          <SettingRow agents="none" source="local" label="西文"><FontPick fonts={MONO_FONTS} /></SettingRow>
+          <SettingRow agents="none" source="local" label="中文" hint="暂时只能跟随界面"><FontPick fonts={[]} follow="跟随界面" /></SettingRow>
+          <SettingRow agents="none" source="local" label="字号"><Px value={13} /></SettingRow>
         </div>
         <FontBand>{CODE_SAMPLE}</FontBand>
       </Section>
@@ -782,16 +782,16 @@ function FontsVariant({ layout }: { layout: FontLayout }) {
       <>
         <Section title="界面字体" hint="侧栏、菜单、设置等界面文字；只能用这台设备已安装的字体。">
           <div>
-            <SettingRow label="西文" hint="拉丁等字母、数字和符号（Non-CJK）"><FontPick fonts={LATIN_FONTS} /></SettingRow>
-            <SettingRow label="中文" hint="汉字，也用于日文假名、韩文（CJK）"><FontPick fonts={CJK_FONTS} /></SettingRow>
+            <SettingRow agents="none" source="local" label="西文" hint="拉丁等字母、数字和符号（Non-CJK）"><FontPick fonts={LATIN_FONTS} /></SettingRow>
+            <SettingRow agents="none" source="local" label="中文" hint="汉字，也用于日文假名、韩文（CJK）"><FontPick fonts={CJK_FONTS} /></SettingRow>
           </div>
-          <FontBand><p className="text-[13px]">Le Café de Cutex 的留言板上，写着各种欢迎：欢迎 · 歡迎 · Hello · G’day · Привет · Bonjour · こんにちは。</p></FontBand>
+          <FontBand><p className="text-ui/[inherit]">Le Café de Cutex 的留言板上，写着各种欢迎：欢迎 · 歡迎 · Hello · G’day · Привет · Bonjour · こんにちは。</p></FontBand>
         </Section>
         <Section title="对话字体" hint="消息和回复的正文；默认跟随界面。">
           <div>
-            <SettingRow label="西文"><FontPick fonts={LATIN_FONTS} follow="跟随界面" /></SettingRow>
-            <SettingRow label="中文"><FontPick fonts={CJK_FONTS} follow="跟随界面" /></SettingRow>
-            <SettingRow label="字号"><Px value={14} /></SettingRow>
+            <SettingRow agents="none" source="local" label="西文"><FontPick fonts={LATIN_FONTS} follow="跟随界面" /></SettingRow>
+            <SettingRow agents="none" source="local" label="中文"><FontPick fonts={CJK_FONTS} follow="跟随界面" /></SettingRow>
+            <SettingRow agents="none" source="local" label="字号"><Px value={14} /></SettingRow>
           </div>
           <FontBand>
             <div className="font-chat-context space-y-0.5 leading-relaxed">
@@ -803,9 +803,9 @@ function FontsVariant({ layout }: { layout: FontLayout }) {
         </Section>
         <Section title="代码字体" hint="代码块、命令、工具输出和终端。">
           <div>
-            <SettingRow label="西文"><FontPick fonts={MONO_FONTS} /></SettingRow>
-            <SettingRow label="中文" hint="暂时只能跟随界面"><FontPick fonts={[]} follow="跟随界面" /></SettingRow>
-            <SettingRow label="字号"><Px value={13} /></SettingRow>
+            <SettingRow agents="none" source="local" label="西文"><FontPick fonts={MONO_FONTS} /></SettingRow>
+            <SettingRow agents="none" source="local" label="中文" hint="暂时只能跟随界面"><FontPick fonts={[]} follow="跟随界面" /></SettingRow>
+            <SettingRow agents="none" source="local" label="字号"><Px value={13} /></SettingRow>
           </div>
           <FontBand><p className="font-mono text-xs">const xs = arr.map((v) =&gt; v * 2); // 0O 1lI {"{} [] != ==="} 中文注释</p></FontBand>
         </Section>
@@ -815,17 +815,17 @@ function FontsVariant({ layout }: { layout: FontLayout }) {
     return (
       <Section title="字体" hint="只能用这台设备已安装的字体；未安装的会回退到默认字体。">
         <div>
-          <SettingRow label="界面" hint="侧栏、菜单、设置等界面文字">
+          <SettingRow agents="none" source="local" label="界面" hint="侧栏、菜单、设置等界面文字">
             <FontPick fonts={LATIN_FONTS} width="w-32" />
             <FontPick fonts={CJK_FONTS} width="w-32" />
             <span className="w-[4.75rem]" />
           </SettingRow>
-          <SettingRow label="对话正文" hint="消息和回复正文；默认跟随界面">
+          <SettingRow agents="none" source="local" label="对话正文" hint="消息和回复正文；默认跟随界面">
             <FontPick fonts={LATIN_FONTS} follow="跟随界面" width="w-32" />
             <FontPick fonts={CJK_FONTS} follow="跟随界面" width="w-32" />
             <Px value={14} />
           </SettingRow>
-          <SettingRow label="代码" hint="代码块、命令、工具输出和终端">
+          <SettingRow agents="none" source="local" label="代码" hint="代码块、命令、工具输出和终端">
             <FontPick fonts={MONO_FONTS} width="w-32" />
             <span className="w-32" />
             <Px value={13} />
@@ -839,15 +839,15 @@ function FontsVariant({ layout }: { layout: FontLayout }) {
     return (
       <Section title="字体" hint="只能用这台设备已安装的字体；未安装的会回退到默认字体。">
         {group("界面")}
-        <SettingRow label="西文"><FontPick fonts={LATIN_FONTS} /></SettingRow>
-        <SettingRow label="中文" hint="代码里的中文也用它"><FontPick fonts={CJK_FONTS} /></SettingRow>
+        <SettingRow agents="none" source="local" label="西文"><FontPick fonts={LATIN_FONTS} /></SettingRow>
+        <SettingRow agents="none" source="local" label="中文" hint="代码里的中文也用它"><FontPick fonts={CJK_FONTS} /></SettingRow>
         {group("对话正文")}
-        <SettingRow label="西文"><FontPick fonts={LATIN_FONTS} follow="跟随界面" /></SettingRow>
-        <SettingRow label="中文"><FontPick fonts={CJK_FONTS} follow="跟随界面" /></SettingRow>
-        <SettingRow label="字号"><Px value={14} /></SettingRow>
+        <SettingRow agents="none" source="local" label="西文"><FontPick fonts={LATIN_FONTS} follow="跟随界面" /></SettingRow>
+        <SettingRow agents="none" source="local" label="中文"><FontPick fonts={CJK_FONTS} follow="跟随界面" /></SettingRow>
+        <SettingRow agents="none" source="local" label="字号"><Px value={14} /></SettingRow>
         {group("代码")}
-        <SettingRow label="字体"><FontPick fonts={MONO_FONTS} /></SettingRow>
-        <SettingRow label="字号"><Px value={13} /></SettingRow>
+        <SettingRow agents="none" source="local" label="字体"><FontPick fonts={MONO_FONTS} /></SettingRow>
+        <SettingRow agents="none" source="local" label="字号"><Px value={13} /></SettingRow>
         <FontSample />
       </Section>
     );
@@ -965,28 +965,28 @@ function MiniApp({ p }: { p: Palette }) {
     <figure className="m-0">
       <figcaption className="mb-1.5 text-sm font-medium text-foreground">{p.name}<span className="ml-2 text-xs font-normal text-subtle">{p.note}</span></figcaption>
       <div style={style} className="flex h-64 overflow-hidden rounded-xl border border-border bg-win text-foreground">
-        <div className="flex w-36 shrink-0 flex-col gap-1 p-2 text-[12px]">
+        <div className="flex w-36 shrink-0 flex-col gap-1 p-2 text-meta/[inherit]">
           <div className="rounded-md px-2 py-1 text-muted">＋ 新建智能体</div>
-          <div className="mt-1 px-2 text-[10px] text-subtle">cutex-desktop</div>
+          <div className="mt-1 px-2 text-caption/[inherit] text-subtle">cutex-desktop</div>
           {["Eva", "Mika", "Sora"].map((n, i) => (
             <div key={n} className={`flex items-center gap-1.5 rounded-md px-2 py-1 ${i === 0 ? "bg-surface-2" : ""}`}>
               <Avatar name={n} seed={n} size={16} />
               <span className={i === 0 ? "font-medium" : "text-muted"}>{n}</span>
-              {i === 1 && <span className="ml-auto rounded bg-warn/15 px-1 text-[10px] text-warn-text">需要你</span>}
+              {i === 1 && <span className="ml-auto rounded bg-warn/15 px-1 text-caption/[inherit] text-warn-text">需要你</span>}
             </div>
           ))}
         </div>
-        <div className="my-2 mr-2 flex min-w-0 flex-1 flex-col gap-2 rounded-lg bg-bg p-3 text-[12px]" style={{ background: "var(--bg)" }}>
+        <div className="my-2 mr-2 flex min-w-0 flex-1 flex-col gap-2 rounded-lg bg-bg p-3 text-meta/[inherit]" style={{ background: "var(--bg)" }}>
           <div className="self-end rounded-lg bg-bubble px-2.5 py-1.5">把设置页的配色也看一下</div>
           <div className="leading-relaxed">好的。浅色加了「暖白」，深色加了「暖灰」和「纯黑」。<span className="text-accent">查看对比 →</span></div>
           <div className="mt-auto rounded-lg border border-card-border bg-surface px-3 py-1">
             <div className="flex items-center justify-between border-b border-border/60 py-1.5">
               <span>主题</span>
-              <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">跟随系统</span>
+              <span className="rounded bg-surface-2 px-1.5 py-0.5 text-caption/[inherit] text-muted">跟随系统</span>
             </div>
             <div className="flex items-center justify-between py-1.5">
               <span className="text-muted">文字对比度</span>
-              <span className="text-[11px] text-subtle">标准</span>
+              <span className="text-caption/[inherit] text-subtle">标准</span>
             </div>
           </div>
         </div>
@@ -1060,10 +1060,10 @@ function FontPickTopic() {
       </p>
       <Page title="外观（字体）">
         <Section title="字体" hint="从这台设备已安装的字体里选；列表中标「未安装」的，会先用默认字体显示。">
-          <SettingRow label="界面 · 中文字体"><Pick fonts={CJK_LIST} defaultLabel="默认" /></SettingRow>
-          <SettingRow label="界面 · 西文字体"><Pick fonts={LATIN_LIST} defaultLabel="默认" /></SettingRow>
-          <SettingRow label="对话 · 西文字体"><Pick fonts={LATIN_LIST} defaultLabel="跟随界面" initial="Atkinson Hyperlegible" /></SettingRow>
-          <SettingRow label="代码 · 西文字体"><Pick fonts={MONO_LIST} defaultLabel="默认" /></SettingRow>
+          <SettingRow agents="none" source="local" label="界面 · 中文字体"><Pick fonts={CJK_LIST} defaultLabel="默认" /></SettingRow>
+          <SettingRow agents="none" source="local" label="界面 · 西文字体"><Pick fonts={LATIN_LIST} defaultLabel="默认" /></SettingRow>
+          <SettingRow agents="none" source="local" label="对话 · 西文字体"><Pick fonts={LATIN_LIST} defaultLabel="跟随界面" initial="Atkinson Hyperlegible" /></SettingRow>
+          <SettingRow agents="none" source="local" label="代码 · 西文字体"><Pick fonts={MONO_LIST} defaultLabel="默认" /></SettingRow>
         </Section>
       </Page>
     </>

@@ -1,0 +1,101 @@
+/* Rail look A (owner 2026-10-23, preview .claude/previews/preview-shelf-polish.html; was design 009's one card): an
+   expanded Shelf is no card itself (components/side/SideArea ShelfView) — its Shelf Rail is a full-height card and
+   each pane of the page is a card of its own, attached to the rail (square and borderless on that side, rounded
+   away from it), the standard gap between panes (lib/sideLayout SHELF_PANE_GAP) with the desktop showing in it, so
+   a pane never reads as laid over the one above it (owner 2026-10-23: a terminal under a web page looked like it
+   floated on it). Collapsed = one card narrowed to the rail (and the stand-alone rails of an empty Shelf / the other
+   workspace look the same).
+
+   Loaded before styles.css (components import first): the selectors here are more specific than styles.css's
+   (`:root[data-card-material="acrylic"]:not([data-edge-to-edge]) :where(.shell-card, …)` is (0,3,0)). */
+
+/* Collapsed: the rail's radius (as the sidebar's avatar rail). */
+.shelf-card[data-shelf-collapsed] {
+  border-radius: 12px;
+}
+.shelf-card[data-shelf-card] {
+  transition: border-radius var(--motion-medium) var(--ease-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+  .shelf-card[data-shelf-card] {
+    transition: none;
+  }
+}
+
+/* 「Rail 直角」 (design 009, the owner's idea to compare; dev flag lib/shelfCorners): the rail alone (collapsed,
+   or a stand-alone rail) has square corners; the expanded Shelf is a rounded card. */
+:root[data-shelf-corners="square"] .shelf-card[data-shelf-collapsed] {
+  border-radius: 0;
+}
+
+/* Expanded: the rail is a full-height card (its material: styles.css .shelf-rail-card), rounded on its outer side. */
+.shelf-card[data-shelf-card]:not([data-shelf-collapsed]) > [data-shelf-rail] {
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-xl);
+}
+.shelf-card[data-shelf-card="rail-left"]:not([data-shelf-collapsed]) > [data-shelf-rail] {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.shelf-card[data-shelf-card="rail-right"]:not([data-shelf-collapsed]) > [data-shelf-rail] {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+/* Each pane (and an empty page's launcher card) keeps its own .shell-card look, attached to the rail: no border and
+   square corners on the rail's side (the rail's border is the seam). */
+.shelf-card[data-shelf-card="rail-left"] [data-shelf-body] .shell-card {
+  border-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.shelf-card[data-shelf-card="rail-right"] [data-shelf-body] .shell-card {
+  border-right: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+/* No drop shadows inside the Shelf: the box clips them at its edges, and between two panes they filled the gap
+   with a dark band — the gap is to show the desktop. */
+.shelf-card[data-shelf-card] [data-shelf-body] .shell-card {
+  box-shadow: none;
+}
+/* Between two panes: the gap itself (the desktop shows), its handle the whole gap. */
+.shelf-card [data-side-gap] {
+  position: relative;
+  background: transparent;
+}
+
+/* A page of several panes is a capsule in the rail (design 038, owner 2026-10-23; prototype
+   .claude/previews/preview-shelf-page-groups.html §2/§4): its panes' icons stacked top to bottom in one rounded
+   frame. No grip mark — the frame and the gaps drag the whole page, an icon drags that pane. Hover on the frame:
+   a soft accent outline around it; on an icon: only that icon lights up. */
+.shelf-capsule {
+  box-shadow: 0 0 0 1px var(--color-border);
+  cursor: grab;
+}
+.shelf-capsule[data-shelf-page-on] {
+  box-shadow: var(--e1), 0 0 0 1px var(--color-border);
+}
+.shelf-capsule:hover:not(:has([data-shelf-pane]:hover)) {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--color-foreground);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.shelf-capsule [data-shelf-pane] {
+  cursor: grab;
+  transition:
+    background var(--motion-short) var(--ease-standard),
+    color var(--motion-short) var(--ease-standard),
+    box-shadow var(--motion-short) var(--ease-standard);
+}
+.shelf-capsule [data-shelf-pane]:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.shelf-capsule [data-shelf-pane][data-shelf-pane-focus] {
+  color: var(--accent);
+}
+:root[data-side-dragging] .shelf-capsule,
+:root[data-side-dragging] .shelf-capsule [data-shelf-pane] {
+  cursor: grabbing;
+}

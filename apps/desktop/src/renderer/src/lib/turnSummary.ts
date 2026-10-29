@@ -160,20 +160,24 @@ function prefixed(text: string, mark: "+" | "-"): string {
     .join("\n");
 }
 
+/**
+ * One change as a unified diff; `show` words the header paths. `ab` = git-style a/ b/ header prefixes
+ * (查看变更); without them the header names the path as is (a tool row's expanded diff).
+ */
+export function changeAsDiff(c: ChangeRecord, show: (path: string) => string = (p) => p, ab = true): string {
+  const a = ab ? "a/" : "";
+  const b = ab ? "b/" : "";
+  const n = contentLines(c.diff);
+  if (c.kind === "add") return `--- /dev/null\n+++ ${b}${show(c.path)}\n@@ -0,0 +1,${n} @@\n${prefixed(c.diff, "+")}`;
+  if (c.kind === "delete") return `--- ${a}${show(c.path)}\n+++ /dev/null\n@@ -1,${n} +0,0 @@\n${prefixed(c.diff, "-")}`;
+  const body = c.diff.replace(/\r?\n$/, "");
+  const header = /^(--- |diff )/.test(body) ? "" : `--- ${a}${show(c.path)}\n+++ ${b}${show(c.movePath ?? c.path)}\n`;
+  return `${header}${body}`;
+}
+
 /** One unified diff of everything the turn did to a file (side pane 查看变更); `show` words the header paths. */
 export function turnFileDiff(file: TurnFileChange, show: (path: string) => string = (p) => p): string {
-  const parts: string[] = [];
-  for (const c of file.changes) {
-    const n = contentLines(c.diff);
-    if (c.kind === "add") parts.push(`--- /dev/null\n+++ b/${show(c.path)}\n@@ -0,0 +1,${n} @@\n${prefixed(c.diff, "+")}`);
-    else if (c.kind === "delete") parts.push(`--- a/${show(c.path)}\n+++ /dev/null\n@@ -1,${n} +0,0 @@\n${prefixed(c.diff, "-")}`);
-    else {
-      const body = c.diff.replace(/\r?\n$/, "");
-      const header = /^(--- |diff )/.test(body) ? "" : `--- a/${show(c.path)}\n+++ b/${show(c.movePath ?? c.path)}\n`;
-      parts.push(`${header}${body}`);
-    }
-  }
-  return parts.join("\n");
+  return file.changes.map((c) => changeAsDiff(c, show)).join("\n");
 }
 
 // ---- links of the final reply ----

@@ -1,13 +1,14 @@
 // 全部 agent dialog for one sidebar group (a project or 独立 agent): opened from the sidebar's
 // 离线 divider / 还有 N 个 / the project header menu. The list itself is AgentList.
 import { useEffect, useMemo, useRef } from "react";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, Power, X } from "lucide-react";
 import { useI18n } from "../i18n";
 import { INDEPENDENT_GROUP, type AgentListTab } from "../lib/agentList";
 import { closeAgentList, openAgentList, useAgentListDialog } from "../lib/agentListDialog";
 import { openMenuFrom, useOverlayState, type MenuEntry } from "../lib/contextMenu";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { orderGroups } from "../lib/sidebar";
+import { openStopIdle, stopIdleAvailable } from "../lib/stopIdle";
 import { projectIcon, type ProjectIconChoice } from "../lib/projectIcons";
 import { useUiPrefs } from "../lib/prefs";
 import { useSidebarModel } from "../lib/sidebarView";
@@ -17,6 +18,7 @@ import { useHostScope } from "../lib/useHostScope";
 import { HostMark } from "./HostMark";
 import { ProjectBadge } from "./ProjectBadge";
 import { AgentList } from "./AgentList";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 interface GroupChoice {
   id: string;
@@ -35,6 +37,7 @@ function Badge({ g }: { g: GroupChoice }) {
 }
 
 function Dialog({ groupId, tab, hostId }: { groupId: string; tab: AgentListTab; hostId: string }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   // The dialog's own host (TargetHostContext below): its rows and offline counts.
   const model = useSidebarModel();
@@ -59,8 +62,8 @@ function Dialog({ groupId, tab, hostId }: { groupId: string; tab: AgentListTab; 
       e.stopPropagation();
       closeAgentList();
     };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    win.addEventListener("keydown", onKey, true);
+    return () => win.removeEventListener("keydown", onKey, true);
   }, []);
 
   // Per host of the scope (switcher order): every project (also one whose agents are all archived) in
@@ -113,7 +116,7 @@ function Dialog({ groupId, tab, hostId }: { groupId: string; tab: AgentListTab; 
       : groups.map(choice);
 
   return (
-    <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/30 pt-[7vh]" onMouseDown={(e) => e.target === e.currentTarget && closeAgentList()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[7vh]" onMouseDown={(e) => e.target === e.currentTarget && closeAgentList()}>
       <div role="dialog" aria-modal aria-label={t("agents.title")} className="flex h-[min(82vh,46rem)] w-[52rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         <AgentList
           groupId={groupId}
@@ -137,7 +140,19 @@ function Dialog({ groupId, tab, hostId }: { groupId: string; tab: AgentListTab; 
                 <ChevronDown size={14} className="shrink-0 text-subtle" />
               </button>
               {tabs}
-              <button title={t("agents.close")} onClick={closeAgentList} className="ml-auto shrink-0 rounded-md p-1 text-subtle hover:bg-surface-2 hover:text-foreground">
+              {stopIdleAvailable(hostId) && (
+                <button
+                  title={t("stopIdle.menuHint")}
+                  // The dialog itself, on the project in view (owner 2026-10-25: one dialog, scoped by where it opens).
+                  onClick={() => void openStopIdle(current.id === INDEPENDENT_GROUP ? { hostId, independent: true, label: current.name } : { hostId, projectId: current.id, label: current.name })}
+                  className="ml-auto flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-foreground"
+                  data-testid="agent-list-stop-idle"
+                >
+                  <Power size={13} />
+                  {t("stopIdle.button")}
+                </button>
+              )}
+              <button title={t("agents.close")} onClick={closeAgentList} className={`${stopIdleAvailable(hostId) ? "" : "ml-auto "}shrink-0 rounded-md p-1 text-subtle hover:bg-surface-2 hover:text-foreground`}>
                 <X size={16} />
               </button>
             </div>

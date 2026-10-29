@@ -1,13 +1,15 @@
-// Drag and drop on the right side, the pure part (lib/sideDrop.ts + the drop reducers in
-// lib/sideLayout.ts; RFC right-panel-rfc-20261009 §3.4, §3.7): every row of the §3.7 table as
-// resolveDrop (what the pointer is over → target) + applyDrop (target → layout).
-// v1.17 port (docs/desktop-modules.md §24): pages are tool columns (≤ 2), cards panes (≤ 3 per
-// column, ≤ 4 in all); a drop that would break a limit is refused. The pill rows stay as pure rules
-// (no pills are drawn since v1.17: every column is on screen); the world has two columns.
+// Drag and drop of panes, the pure part (lib/sideDrop.ts + the drop reducers in lib/sideLayout.ts and
+// lib/paneLayout.ts; docs/desktop-modules.md §24 step 4): what the pointer is over (a pane and its zone —
+// the outer 30 % on a side or the centre / header — a Shelf Rail's page button or ＋, or the work area's far
+// edge) → the target (resolveDrop) → the layout (applyToolDrop / applyWorkDrop). §24.12: Shelves ≤ 2 (one
+// per side), pages ≤ 9 each, ≤ 3 panes per page, ≤ 4 tool panes on screen; conversations one per column
+// (they reorder); a free edge = a new Shelf there, an edge with a Shelf = a new page of it; a Shelf that
+// does not allow mixing refuses another kind on a tab bar and offers a pane of its own below instead.
 import { describe, expect, it } from "vitest";
 import type { SideBinding, SidePlacement } from "../src/renderer/src/modules/slots";
 import type { ItemId } from "../src/renderer/src/modules/types";
-import { aloneOnPage, applyDrop, pillInsertion, pillPageOp, resolveDrop, type SideDrag, type SideHit, type SideDropTarget } from "../src/renderer/src/lib/sideDrop";
+import { applyToolDrop, applyWorkDrop, EDGE_ZONE, resolveDrop, zoneAt, type DropWorld, type DropZone, type SideDrag, type SideHit, type SideDropTarget } from "../src/renderer/src/lib/sideDrop";
+import { defaultLayout, openBeside, conversationPanes, paneBinding, type PaneLayout } from "../src/renderer/src/lib/paneLayout";
 import {
   applyOpen,
   closeInstances,
@@ -24,6 +26,14 @@ import {
   placeSpec,
   reorderCard,
   reorderPage,
+  addShelf,
+  setShelfOptions,
+  shelvesOf,
+  shelfOfPage,
+  shelfOnSide,
+  pagesOfShelf,
+  addShelfPage,
+  MAX_SHELF_PAGES,
   SINGLETON_KEY,
   splitInstanceTo,
   USER_GROUP,
@@ -63,9 +73,9 @@ function open(layout: SideLayout, kind: ItemId, o: { key?: string | null; bindin
 }
 
 /**
- * v1.17 (§24): two tool columns — 工作区 [files, changes, terminal(t1, t2)] (full: 3 panes) and 浏览器
- * [browser] (MAX_TOOL_PANES = 4 in all); the workspace column is focused. (v1.16 had a third page
- * 侧边对话 and the status card on the workspace page: a third column / a fifth pane do not exist any more.)
+ * §24.12: two Shelves on screen — the right one with the page 工作区 [files, changes, terminal(t1, t2)] (full:
+ * 3 panes), the left one with the page 浏览器 [browser] (MAX_TOOL_PANES = 4 on screen); the workspace page
+ * is focused. Both allow mixing (turned on: the step-4 rules below); `noMix` turns it off (every Shelf's default).
  */
 function world() {
   let l = emptyLayout();
@@ -77,9 +87,12 @@ function world() {
   l = t1.layout;
   const t2 = open(l, "terminal.pty", { binding: ws("w1"), key: "t2" });
   l = t2.layout;
-  const launcher = openLauncherPage(l);
-  const browser = open(launcher.layout, "browser.tab", { key: "b1", page: launcher.pageId! });
-  l = browser.layout;
+  l = setShelfOptions(l, shelvesOf(l)[0]!.id, { allowMixing: true });
+  // The browser's Shelf on the left: its page is a plain page (not one the owner made), it goes when emptied.
+  const made = addShelf(l, "left");
+  const launcher = { ...made.layout, pages: made.layout.pages.map((p) => (p.id === made.pageId ? (({ kept: _k, ...rest }) => ({ ...rest, groups: [], launcher: true }))(p) : p)) };
+  const browser = open(launcher, "browser.tab", { key: "b1", page: made.pageId! });
+  l = setShelfOptions(browser.layout, made.shelfId!, { allowMixing: true });
   const [work, web] = l.pages.map((p) => p.id) as [string, string];
   l = { ...l, activePage: work };
   const card = (id: string) => locate(l, id)!.card.id;
@@ -97,351 +110,247 @@ function roomy() {
   return { ...w, layout: { ...w.layout, ...closeInstances(w.layout, [w.inst.changes]) } };
 }
 
-/** One tool column: the world without the browser column (room for a second column). */
+/** The world with mixing off on both Shelves (new Shelves' default, §24.12). */
+function noMix() {
+  const w = world();
+  let l = w.layout;
+  for (const x of shelvesOf(l)) l = setShelfOptions(l, x.id, { allowMixing: false });
+  return { ...w, layout: l };
+}
+
+/** One Shelf: the world without the browser's (the left side is free). */
 function oneColumn() {
   const w = world();
   return { ...w, layout: closeInstances(w.layout, [w.inst.browser]) };
 }
 
 const kindsOn = (layout: SideLayout, pageId: string) => layout.pages.find((p) => p.id === pageId)!.cards.map((c) => c.kind);
-const cardIds = (layout: SideLayout, pageId: string) => layout.pages.find((p) => p.id === pageId)!.cards.map((c) => c.id);
+const pageKinds = (layout: SideLayout) => layout.pages.map((p) => p.cards.map((c) => c.kind));
 
-/** A pill hit starting at 0, 24 px per icon from 4 (the DOM probe's shape); the lane's (y) unless `axis`. */
-function pill(layout: SideLayout, pageId: string, axis: "x" | "y" = "y"): Extract<SideHit, { at: "pill" }> {
-  const cards = cardIds(layout, pageId);
-  return { at: "pill", pageId, axis, start: 0, size: 8 + 24 * cards.length, icons: cards.map((cardId, k) => ({ cardId, start: 4 + 24 * k, end: 28 + 24 * k })) };
-}
-const head = (cardId: string): SideHit => ({ at: "head", cardId, top: 100, height: 36 });
-const ARMED = { edgeArmed: true, outside: true };
+/** Two conversation columns (a1 | b2). */
+const twoConversations = (): PaneLayout => openBeside(defaultLayout({ sidebarOpen: true, sidebarWidth: 256, hostId: "local", sessionId: "a1" }), { hostId: "local", sessionId: "b2" }, 1);
+const worldOf = (side: SideLayout, roomForColumn = true): DropWorld => ({ side, work: twoConversations(), roomForColumn });
+const tool = (id: string, zone: DropZone | "head", half: "left" | "right" = "left"): SideHit => ({ at: "pane", area: "tools", id, zone, half });
+const conv = (id: string, zone: DropZone | "head", half: "left" | "right" = "left"): SideHit => ({ at: "pane", area: "work", id, zone, half });
 
-function drop(layout: SideLayout, drag: SideDrag, hit: SideHit, y = 0, opts = ARMED): { target: SideDropTarget | null; after: SideLayout } {
-  const target = resolveDrop(layout, drag, hit, y, opts);
-  return { target, after: target ? applyDrop(layout, drag, target, ++clock, orderOf) : layout };
+function drop(side: SideLayout, drag: SideDrag, hit: SideHit, room = true): { target: SideDropTarget | null; after: SideLayout } {
+  const target = resolveDrop(worldOf(side, room), drag, hit);
+  return { target, after: target ? applyToolDrop(side, drag, target, ++clock, orderOf) : side };
 }
 
-describe("card → another page's pill", () => {
-  it("inserts the card at the insertion line; the kind's override follows", () => {
-    const w = world();
-    const p = pill(w.layout, w.pages.web);
-    const { target, after } = drop(w.layout, { type: "card", cardId: w.cards.files }, p, 10);
-    expect(target).toMatchObject({ kind: "pill", pageId: w.pages.web, op: "insert", before: w.cards.browser, own: false });
-    expect(kindsOn(after, w.pages.web)).toEqual(["workspace.files", "browser.tab"]);
-    expect(after.overrides["workspace.files"]?.page).toBe(w.pages.web);
-    expect(after.activePage).toBe(w.pages.web);
-    // Below the last icon → the bottom.
-    const low = drop(w.layout, { type: "card", cardId: w.cards.files }, p, 30);
-    expect(low.target).toMatchObject({ op: "insert", before: null });
-    expect(kindsOn(low.after, w.pages.web)).toEqual(["browser.tab", "workspace.files"]);
-  });
-
-  it("joins a same-kind card there (tabs merged)", () => {
-    const w = roomy();
-    const moved = moveInstance(w.layout, w.inst.t2, { page: w.pages.web }, ++clock, orderOf);
-    const there = locate(moved, w.inst.t2)!.card.id;
-    const { target, after } = drop(moved, { type: "card", cardId: w.cards.terminal }, pill(moved, w.pages.web), 10);
-    expect(target).toEqual({ kind: "pill", pageId: w.pages.web, op: "join", cardId: there });
-    expect(locate(after, w.inst.t1)!.card.id).toBe(there);
-    expect(findCard(after, there)!.card.tabs).toEqual([w.inst.t2, w.inst.t1]);
-  });
-
-  it("v1.17: a column with 3 panes takes no other pane (refused)", () => {
-    const w = world();
-    const moved = moveCardTo(w.layout, w.cards.files, { page: w.pages.web, before: null }, ++clock, orderOf); // web: browser, files
-    const back = drop(moved, { type: "card", cardId: w.cards.browser }, pill(moved, w.pages.work), 10);
-    expect(back.target).toMatchObject({ kind: "pill", op: "insert" }); // work has 2 panes now: room
-    const full = drop(w.layout, { type: "card", cardId: w.cards.browser }, pill(w.layout, w.pages.work), 10);
-    expect(full.target).toEqual({ kind: "refuse" });
-    expect(full.after).toBe(w.layout);
+describe("zones of a pane (the outer 30 % on a side, else the centre)", () => {
+  const box = { left: 100, top: 100, width: 400, height: 300 };
+  it("the nearest side within the band wins; the middle is the centre", () => {
+    expect(EDGE_ZONE).toBe(0.3);
+    expect(zoneAt(box, 110, 250)).toBe("left");
+    expect(zoneAt(box, 490, 250)).toBe("right");
+    expect(zoneAt(box, 300, 110)).toBe("top");
+    expect(zoneAt(box, 300, 390)).toBe("bottom");
+    expect(zoneAt(box, 300, 250)).toBe("center");
+    // A corner: the nearer side.
+    expect(zoneAt(box, 105, 130)).toBe("left");
+    expect(zoneAt(box, 140, 104)).toBe("top");
+    // Just inside 30 % / just outside.
+    expect(zoneAt(box, 100 + 0.29 * 400, 250)).toBe("left");
+    expect(zoneAt(box, 100 + 0.31 * 400, 250)).toBe("center");
   });
 });
 
-describe("card → its own pill", () => {
-  it("reorders the page (no override)", () => {
+describe("a tool pane / tab onto another tool pane", () => {
+  it("header or centre: joins it as a tab, whatever the kind (step 4); the moved tab shows; override follows across columns", () => {
     const w = world();
-    const { target, after } = drop(w.layout, { type: "card", cardId: w.cards.terminal }, pill(w.layout, w.pages.work), 5);
-    expect(target).toMatchObject({ kind: "pill", op: "insert", before: w.cards.files, own: true });
-    expect(kindsOn(after, w.pages.work)).toEqual(["terminal.pty", "workspace.files", "workspace.changes"]);
-    expect(after.overrides).toEqual(w.layout.overrides);
-  });
-
-  it("its own spot is no target", () => {
-    const w = world();
-    const p = pill(w.layout, w.pages.work);
-    // Upper half of its own icon, or the lower half of the icon above it: before itself / after the previous one.
-    expect(resolveDrop(w.layout, { type: "card", cardId: w.cards.changes }, p, 30, ARMED)).toBeNull();
-    expect(resolveDrop(w.layout, { type: "card", cardId: w.cards.changes }, p, 50, ARMED)).toBeNull();
-  });
-});
-
-describe("card / tab → a new page (a new tool column)", () => {
-  for (const at of ["lane", "tail", "edge", "outside"] as const) {
-    it(`card via ${at}: a column of its own (group user:<page>); refused at ${MAX_PAGES} columns`, () => {
-      const w = oneColumn();
-      const { target, after } = drop(w.layout, { type: "card", cardId: w.cards.changes }, { at }, 0);
-      expect(target).toEqual({ kind: "new", via: at, unchanged: false });
-      expect(after.pages).toHaveLength(2);
-      const page = locate(after, w.inst.changes)!.page;
-      expect(page.groups).toEqual([`${USER_GROUP}${page.id}`]);
-      expect(page.cards.map((c) => c.kind)).toEqual(["workspace.changes"]);
-      expect(after.overrides["workspace.changes"]?.page).toBe(page.id);
-      const full = world();
-      expect(drop(full.layout, { type: "card", cardId: full.cards.changes }, { at }, 0).target).toEqual({ kind: "refuse" });
-    });
-  }
-
-  it("a tab via the lane / outside: only that instance moves (one more pane: refused at MAX_TOOL_PANES)", () => {
-    const w = oneColumn();
-    for (const at of ["lane", "outside"] as const) {
-      const { target, after } = drop(w.layout, { type: "tab", instanceId: w.inst.t2 }, { at });
-      expect(target).toEqual({ kind: "new", via: at, unchanged: false });
-      expect(locate(after, w.inst.t2)!.page.cards.map((c) => c.tabs)).toEqual([[w.inst.t2]]);
-      expect(locate(after, w.inst.t1)!.page.id).toBe(w.pages.work);
+    for (const zone of ["head", "center"] as const) {
+      const { target, after } = drop(w.layout, { type: "card", cardId: w.cards.browser }, tool(w.cards.files, zone));
+      expect(target).toEqual({ kind: "merge", cardId: w.cards.files });
+      const files = findCard(after, w.cards.files)!.card;
+      expect(files.tabs).toEqual([w.inst.files, w.inst.browser]);
+      expect(files.active).toBe(w.inst.browser);
+      expect(after.pages).toHaveLength(1);
+      expect(after.overrides["browser.tab"]?.page).toBe(w.pages.work);
     }
-    const full = world();
-    expect(drop(full.layout, { type: "tab", instanceId: full.inst.t2 }, { at: "outside" }).target).toEqual({ kind: "refuse" });
+    // One tab of a pane with several: only that tab moves.
+    const tab = drop(w.layout, { type: "tab", instanceId: w.inst.t2 }, tool(w.cards.browser, "center"));
+    expect(findCard(tab.after, w.cards.browser)!.card.tabs).toEqual([w.inst.browser, w.inst.t2]);
+    expect(findCard(tab.after, w.cards.terminal)!.card.tabs).toEqual([w.inst.t1]);
   });
 
-  it("a single-card page stays as it is (D67 ★), shown as unchanged", () => {
-    const w = world();
-    const drag: SideDrag = { type: "card", cardId: w.cards.browser };
-    expect(aloneOnPage(w.layout, drag)).toBe(true);
-    for (const at of ["lane", "edge", "outside"] as const) {
-      const { target, after } = drop(w.layout, drag, { at });
-      expect(target).toEqual({ kind: "new", via: at, unchanged: true });
-      expect(after).toBe(w.layout);
-    }
-    expect(drop(w.layout, { type: "tab", instanceId: w.inst.browser }, { at: "lane" }).target).toMatchObject({ unchanged: true });
-  });
-
-  it("the left-edge band counts only once armed (the card icon starts inside it)", () => {
-    const w = world();
-    expect(resolveDrop(w.layout, { type: "card", cardId: w.cards.files }, { at: "edge" }, 0, { edgeArmed: false, outside: true })).toBeNull();
-  });
-
-  it("no drop outside while maximised / full screen", () => {
-    const w = world();
-    const opts = { edgeArmed: true, outside: false };
-    expect(resolveDrop(w.layout, { type: "card", cardId: w.cards.files }, { at: "outside" }, 0, opts)).toBeNull();
-    expect(resolveDrop(w.layout, { type: "card", cardId: w.cards.files }, { at: "composer" }, 0, opts)).toBeNull();
-  });
-});
-
-describe("card / tab → the composer, nothing", () => {
-  it("is accepted and does nothing (later: quote into the message)", () => {
-    const w = world();
-    for (const drag of [{ type: "card", cardId: w.cards.files }, { type: "tab", instanceId: w.inst.t1 }] as SideDrag[]) {
-      const { target, after } = drop(w.layout, drag, { at: "composer" });
-      expect(target).toEqual({ kind: "noop", why: "composer" });
-      expect(after).toBe(w.layout);
-    }
-  });
-});
-
-describe("card → another card's header", () => {
-  it("same page: above / below by the half (no override)", () => {
-    const w = world();
-    const drag: SideDrag = { type: "card", cardId: w.cards.terminal };
-    const above = drop(w.layout, drag, head(w.cards.changes), 105);
-    expect(above.target).toEqual({ kind: "head", cardId: w.cards.changes, op: "above" });
-    expect(kindsOn(above.after, w.pages.work)).toEqual(["workspace.files", "terminal.pty", "workspace.changes"]);
-    const below = drop(w.layout, drag, head(w.cards.files), 130);
-    expect(below.target).toEqual({ kind: "head", cardId: w.cards.files, op: "below" });
-    expect(kindsOn(below.after, w.pages.work)).toEqual(["workspace.files", "terminal.pty", "workspace.changes"]);
-    expect(below.after.overrides).toEqual(w.layout.overrides);
-  });
-
-  it("a spot that changes nothing / its own header is no target", () => {
-    const w = world();
-    const drag: SideDrag = { type: "card", cardId: w.cards.files };
-    expect(resolveDrop(w.layout, drag, head(w.cards.changes), 105, ARMED)).toBeNull(); // above changes = where it is
-    expect(resolveDrop(w.layout, drag, head(w.cards.files), 105, ARMED)).toBeNull();
-  });
-
-  it("another page: moved there at that spot, override remembered", () => {
-    const w = world();
-    const { target, after } = drop(w.layout, { type: "card", cardId: w.cards.files }, head(w.cards.browser), 130);
-    expect(target).toEqual({ kind: "head", cardId: w.cards.browser, op: "below" });
-    expect(kindsOn(after, w.pages.web)).toEqual(["browser.tab", "workspace.files"]);
-    expect(after.overrides["workspace.files"]?.page).toBe(w.pages.web);
-  });
-});
-
-describe("page grip → another pill", () => {
-  it("middle = merge (panes appended — beyond 3 they become tabs of the third; overrides re-pointed)", () => {
-    const w = world();
-    const withOv = { ...w.layout, overrides: { "browser.tab": { page: w.pages.web, groups: ["browser"], at: 1 } } };
-    const p = pill(withOv, w.pages.work);
-    const { target, after } = drop(withOv, { type: "page", pageId: w.pages.web }, p, p.size / 2);
-    expect(target).toEqual({ kind: "pill", pageId: w.pages.work, op: "merge" });
-    expect(after.pages.map((x) => x.id)).toEqual([w.pages.work]);
-    expect(kindsOn(after, w.pages.work)).toEqual(["workspace.files", "workspace.changes", "terminal.pty"]);
-    expect(locate(after, w.inst.browser)!.card.id).toBe(w.cards.terminal);
-    expect(after.overrides["browser.tab"]?.page).toBe(w.pages.work);
-  });
-
-  it("top / bottom edge = reorder; a reorder that changes nothing is no target", () => {
-    const w = world();
-    const p = pill(w.layout, w.pages.work);
-    const before = drop(w.layout, { type: "page", pageId: w.pages.web }, p, 1);
-    expect(before.target).toEqual({ kind: "pill", pageId: w.pages.work, op: "before" });
-    expect(before.after.pages.map((x) => x.id)).toEqual([w.pages.web, w.pages.work]);
-    expect(before.after.overrides).toEqual(w.layout.overrides);
-    // web is already right after work: its place there changes nothing
-    expect(resolveDrop(w.layout, { type: "page", pageId: w.pages.web }, p, p.size - 1, ARMED)).toBeNull();
-    const q = pill(w.layout, w.pages.web);
-    expect(resolveDrop(w.layout, { type: "page", pageId: w.pages.work }, q, 1, ARMED)).toBeNull();
-    expect(drop(w.layout, { type: "page", pageId: w.pages.work }, q, q.size - 1).after.pages.map((x) => x.id)).toEqual([w.pages.web, w.pages.work]);
-  });
-
-  it("no new-page targets, no own pill, nothing outside", () => {
-    const w = world();
-    const drag: SideDrag = { type: "page", pageId: w.pages.web };
-    for (const hit of [{ at: "lane" }, { at: "tail" }, { at: "edge" }, { at: "outside" }, { at: "composer" }, head(w.cards.files), { at: "gap", pageId: w.pages.work, before: null }] as SideHit[]) {
-      expect(resolveDrop(w.layout, drag, hit, 0, ARMED)).toBeNull();
-    }
-    expect(resolveDrop(w.layout, drag, pill(w.layout, w.pages.web), 10, ARMED)).toBeNull();
-  });
-});
-
-describe("tab → a pill", () => {
-  it("a page without that kind: a new card at the insertion line; override follows", () => {
-    const w = roomy();
-    const { target, after } = drop(w.layout, { type: "tab", instanceId: w.inst.t2 }, pill(w.layout, w.pages.web), 5);
-    expect(target).toMatchObject({ kind: "pill", op: "insert", before: w.cards.browser });
-    expect(kindsOn(after, w.pages.web)).toEqual(["terminal.pty", "browser.tab"]);
-    expect(findCard(after, w.cards.terminal)!.card.tabs).toEqual([w.inst.t1]);
-    expect(after.overrides["terminal.pty"]?.page).toBe(w.pages.web);
-    // no room for one more pane (MAX_TOOL_PANES): refused
-    const full = world();
-    expect(drop(full.layout, { type: "tab", instanceId: full.inst.t2 }, pill(full.layout, full.pages.web), 5).target).toEqual({ kind: "refuse" });
-  });
-
-  it("a page with that kind: joins that card", () => {
-    const w = roomy();
-    const moved = moveInstance(w.layout, w.inst.t2, { page: w.pages.web }, ++clock, orderOf);
-    const there = locate(moved, w.inst.t2)!.card.id;
-    const { target, after } = drop(moved, { type: "tab", instanceId: w.inst.t1 }, pill(moved, w.pages.web), 5);
-    expect(target).toEqual({ kind: "pill", pageId: w.pages.web, op: "join", cardId: there });
-    expect(findCard(after, there)!.card.tabs).toEqual([w.inst.t2, w.inst.t1]);
-    expect(findCard(after, w.cards.terminal)).toBeNull();
-  });
-
-  it("its own pill with no other card of its kind: no target", () => {
-    const w = world();
-    expect(resolveDrop(w.layout, { type: "tab", instanceId: w.inst.t2 }, pill(w.layout, w.pages.work), 5, ARMED)).toBeNull();
-  });
-});
-
-describe("tab → a card header / tab row", () => {
-  it("same kind: moves into that card (cross page remembers)", () => {
-    const w = oneColumn();
-    const moved = moveInstance(w.layout, w.inst.t2, { newPage: true }, ++clock, orderOf);
-    const other = locate(moved, w.inst.t2)!.card.id;
-    const { target, after } = drop(moved, { type: "tab", instanceId: w.inst.t1 }, head(other), 110);
-    expect(target).toEqual({ kind: "head", cardId: other, op: "join" });
-    expect(findCard(after, other)!.card.tabs).toEqual([w.inst.t2, w.inst.t1]);
-    expect(after.overrides["terminal.pty"]?.page).toBe(locate(after, w.inst.t1)!.page.id);
-  });
-
-  it("another kind: refused (one kind per tab bar); its own card: nothing", () => {
-    const w = world();
-    const refuse = drop(w.layout, { type: "tab", instanceId: w.inst.t2 }, head(w.cards.files), 110);
-    expect(refuse.target).toEqual({ kind: "refuse" });
-    expect(refuse.after).toBe(w.layout);
-    expect(resolveDrop(w.layout, { type: "tab", instanceId: w.inst.t2 }, head(w.cards.terminal), 110, ARMED)).toBeNull();
-  });
-});
-
-describe("tab → the gap between two cards", () => {
-  it("same page: split into a new card of its kind there (no override); a full column refuses", () => {
-    const w = roomy();
-    const gap: SideHit = { at: "gap", pageId: w.pages.work, before: w.cards.files };
-    const { target, after } = drop(w.layout, { type: "tab", instanceId: w.inst.t2 }, gap);
-    expect(target).toEqual({ kind: "gap", pageId: w.pages.work, before: w.cards.files });
-    expect(kindsOn(after, w.pages.work)).toEqual(["terminal.pty", "workspace.files", "terminal.pty"]);
-    expect(locate(after, w.inst.t2)!.card.tabs).toEqual([w.inst.t2]);
-    expect(findCard(after, w.cards.terminal)!.card.tabs).toEqual([w.inst.t1]);
-    expect(after.overrides).toEqual(w.layout.overrides);
-    const full = world();
-    expect(drop(full.layout, { type: "tab", instanceId: full.inst.t2 }, { at: "gap", pageId: full.pages.work, before: full.cards.changes }).target).toEqual({ kind: "refuse" });
-  });
-
-  it("a single-tab card next to its own spot: no target; elsewhere it moves as a card", () => {
-    const w = world();
-    const drag: SideDrag = { type: "tab", instanceId: w.inst.changes };
-    expect(resolveDrop(w.layout, drag, { at: "gap", pageId: w.pages.work, before: w.cards.changes }, 0, ARMED)).toBeNull();
-    expect(resolveDrop(w.layout, drag, { at: "gap", pageId: w.pages.work, before: w.cards.terminal }, 0, ARMED)).toBeNull();
-    const { after } = drop(w.layout, drag, { at: "gap", pageId: w.pages.work, before: null });
-    expect(kindsOn(after, w.pages.work)).toEqual(["workspace.files", "terminal.pty", "workspace.changes"]);
-    expect(locate(after, w.inst.changes)!.card.id).toBe(w.cards.changes);
-  });
-
-  it("a card dropped into a gap: reorder (same page) or a move at that spot (a full column refuses)", () => {
-    const w = world();
-    const same = drop(w.layout, { type: "card", cardId: w.cards.terminal }, { at: "gap", pageId: w.pages.work, before: w.cards.files });
-    expect(kindsOn(same.after, w.pages.work)).toEqual(["terminal.pty", "workspace.files", "workspace.changes"]);
-    expect(drop(w.layout, { type: "card", cardId: w.cards.browser }, { at: "gap", pageId: w.pages.work, before: w.cards.changes }).target).toEqual({ kind: "refuse" });
+  it("top / bottom: splits that column there; a full column refuses; its own place is no target", () => {
     const r = roomy();
-    const cross = drop(r.layout, { type: "card", cardId: r.cards.browser }, { at: "gap", pageId: r.pages.work, before: r.cards.terminal });
-    expect(kindsOn(cross.after, r.pages.work)).toEqual(["workspace.files", "browser.tab", "terminal.pty"]);
-    expect(cross.after.pages).toHaveLength(1); // the browser column emptied
+    const below = drop(r.layout, { type: "card", cardId: r.cards.browser }, tool(r.cards.files, "bottom"));
+    expect(below.target).toEqual({ kind: "split", cardId: r.cards.files, side: "bottom" });
+    expect(kindsOn(below.after, r.pages.work)).toEqual(["workspace.files", "browser.tab", "terminal.pty"]);
+    const above = drop(r.layout, { type: "tab", instanceId: r.inst.t2 }, tool(r.cards.files, "top"));
+    expect(kindsOn(above.after, r.pages.work)).toEqual(["terminal.pty", "workspace.files", "terminal.pty"]);
+    // The workspace column of the full world has 3 panes.
+    const w = world();
+    expect(drop(w.layout, { type: "card", cardId: w.cards.browser }, tool(w.cards.files, "top")).target).toEqual({ kind: "refuse", why: "limit" });
+    // Own pane (a pane, or its only tab) / a reorder that changes nothing.
+    expect(drop(w.layout, { type: "card", cardId: w.cards.files }, tool(w.cards.files, "bottom")).target).toBeNull();
+    expect(drop(w.layout, { type: "tab", instanceId: w.inst.files }, tool(w.cards.files, "center")).target).toBeNull();
+    expect(drop(w.layout, { type: "card", cardId: w.cards.files }, tool(w.cards.changes, "top")).target).toBeNull();
+    // A reorder in its own column.
+    const re = drop(w.layout, { type: "card", cardId: w.cards.files }, tool(w.cards.changes, "bottom"));
+    expect(kindsOn(re.after, w.pages.work)).toEqual(["workspace.changes", "workspace.files", "terminal.pty"]);
+    // A tab of a pane with several splits out of it (top / bottom of its own pane).
+    const out = drop(r.layout, { type: "tab", instanceId: r.inst.t1 }, tool(r.cards.terminal, "bottom"));
+    expect(out.target).toEqual({ kind: "split", cardId: r.cards.terminal, side: "bottom" });
+    expect(kindsOn(out.after, r.pages.work)).toEqual(["workspace.files", "terminal.pty", "terminal.pty"]);
+  });
+
+  it("left / right of a tool pane: like its centre (a tab) — §24.12: no column beside it; new Shelves come from the work area's edges", () => {
+    const w = world();
+    for (const zone of ["left", "right"] as const) {
+      expect(drop(w.layout, { type: "card", cardId: w.cards.browser }, tool(w.cards.files, zone)).target).toEqual({ kind: "merge", cardId: w.cards.files });
+    }
+    expect(drop(w.layout, { type: "card", cardId: w.cards.files }, tool(w.cards.files, "left")).target).toBeNull();
+  });
+});
+
+describe("Shelves (§24.12): page buttons, ＋, mixing", () => {
+  it("a page button: into that page (a new pane), the page in view; a full page refuses; the drag's own page is no target", () => {
+    const w = world();
+    const r = roomy();
+    const into = drop(r.layout, { type: "card", cardId: r.cards.browser }, { at: "page", pageId: r.pages.work });
+    expect(into.target).toEqual({ kind: "page", pageId: r.pages.work });
+    // (a pane goes in at its declared order)
+    expect(kindsOn(into.after, r.pages.work)).toEqual(["workspace.files", "browser.tab", "terminal.pty"]);
+    expect(into.after.activePage).toBe(r.pages.work);
+    // a tab joins a pane of its kind there
+    const tab = drop(r.layout, { type: "tab", instanceId: r.inst.browser }, { at: "page", pageId: r.pages.work });
+    expect(tab.target).toEqual({ kind: "page", pageId: r.pages.work });
+    expect(drop(w.layout, { type: "card", cardId: w.cards.browser }, { at: "page", pageId: w.pages.work }).target).toEqual({ kind: "refuse", why: "pageFull" });
+    expect(drop(w.layout, { type: "card", cardId: w.cards.files }, { at: "page", pageId: w.pages.work }).target).toBeNull();
+    // a hidden page of the same Shelf (only its page in view is on screen)
+    const more = addShelfPage(w.layout, shelfOfPage(w.layout, w.pages.work)!.id);
+    const hidden = more.pageId!;
+    const back = { ...more.layout, shelves: more.layout.shelves!.map((x) => (x.active === hidden ? { ...x, active: w.pages.work } : x)), activePage: w.pages.work };
+    const toHidden = drop(back, { type: "card", cardId: w.cards.files }, { at: "page", pageId: hidden });
+    expect(toHidden.target).toEqual({ kind: "page", pageId: hidden });
+    expect(kindsOn(toHidden.after, hidden)).toEqual(["workspace.files"]);
+    expect(shelfOfPage(toHidden.after, hidden)!.active).toBe(hidden);
+  });
+
+  it("＋ in a rail: a new page (kept, at the end of the rail) holding it; refused at 9 pages; the only pane of a page onto its own Shelf's ＋: nothing", () => {
+    const w = world();
+    const right = shelfOfPage(w.layout, w.pages.work)!.id;
+    const { target, after } = drop(w.layout, { type: "tab", instanceId: w.inst.t2 }, { at: "newPage", shelfId: right });
+    expect(target).toEqual({ kind: "newPage", shelfId: right });
+    const pages = pagesOfShelf(after, right);
+    expect(pages).toHaveLength(2);
+    expect(pages[1]!.kept).toBe(true);
+    expect(pages[1]!.cards.map((c) => c.tabs)).toEqual([[w.inst.t2]]);
+    expect(after.activePage).toBe(pages[1]!.id);
+    const left = shelfOfPage(w.layout, w.pages.web)!.id;
+    expect(drop(w.layout, { type: "card", cardId: w.cards.browser }, { at: "newPage", shelfId: left }).target).toBeNull();
+    let full = w.layout;
+    while (pagesOfShelf(full, right).length < MAX_SHELF_PAGES) full = addShelfPage(full, right).layout;
+    expect(drop(full, { type: "card", cardId: w.cards.browser }, { at: "newPage", shelfId: right }).target).toEqual({ kind: "refuse", why: "limit" });
+  });
+
+  it("允许混排 off: another kind on a tab bar is refused and offered as a pane of its own below; a full page refuses it; the same kind still joins", () => {
+    const n = noMix();
+    // the workspace page is full: no pane of its own either
+    expect(drop(n.layout, { type: "card", cardId: n.cards.browser }, tool(n.cards.files, "head")).target).toEqual({ kind: "refuse", why: "mixing" });
+    const r = { ...n, layout: closeInstances(n.layout, [n.inst.changes]) };
+    const offered = drop(r.layout, { type: "card", cardId: r.cards.browser }, tool(r.cards.files, "head"));
+    expect(offered.target).toEqual({ kind: "split", cardId: r.cards.files, side: "bottom", unmixed: { kinds: ["workspace.files"] } });
+    expect(kindsOn(offered.after, r.pages.work)).toEqual(["workspace.files", "browser.tab", "terminal.pty"]);
+    expect(findCard(offered.after, r.cards.files)!.card.tabs).toEqual([r.inst.files]);
+    // the same kind still joins: a terminal tab split out first, then back onto the terminal pane
+    const split = drop(r.layout, { type: "tab", instanceId: r.inst.t2 }, tool(r.cards.files, "bottom")).after;
+    const back = drop(split, { type: "tab", instanceId: r.inst.t2 }, tool(r.cards.terminal, "head"));
+    expect(back.target).toEqual({ kind: "merge", cardId: r.cards.terminal });
+    // mixing on (the same world): the drop joins as a tab
+    const m = world();
+    expect(drop(m.layout, { type: "card", cardId: m.cards.browser }, tool(m.cards.files, "head")).target).toEqual({ kind: "merge", cardId: m.cards.files });
+  });
+});
+
+describe("the work area's far edges", () => {
+  it("a tool at a free edge: a new Shelf there (≤ 2; refused without the width for one); at an edge with a Shelf: a new page of it", () => {
+    const o = oneColumn();
+    const right = shelfOnSide(o.layout, "right")!.id;
+    const free = drop(o.layout, { type: "card", cardId: o.cards.files }, { at: "edge", side: "left" });
+    expect(free.target).toEqual({ kind: "edge", side: "left" });
+    const leftShelf = shelfOnSide(free.after, "left")!;
+    expect(leftShelf.options.allowMixing).toBe(false);
+    expect(pagesOfShelf(free.after, leftShelf.id).map((p) => p.cards.map((c) => c.kind))).toEqual([["workspace.files"]]);
+    expect(pagesOfShelf(free.after, right).map((p) => p.cards.map((c) => c.kind))).toEqual([["workspace.changes", "terminal.pty"]]);
+    const taken = drop(o.layout, { type: "card", cardId: o.cards.files }, { at: "edge", side: "right" });
+    expect(taken.target).toEqual({ kind: "newPage", shelfId: right });
+    expect(pagesOfShelf(taken.after, right)).toHaveLength(2);
+    expect(drop(o.layout, { type: "card", cardId: o.cards.files }, { at: "edge", side: "left" }, false).target).toEqual({ kind: "refuse", why: "limit" });
+    const w = world();
+    expect(drop(w.layout, { type: "card", cardId: w.cards.files }, { at: "edge", side: "left" }).target).toEqual({ kind: "newPage", shelfId: shelfOfPage(w.layout, w.pages.web)!.id });
+  });
+
+  it("a tool onto a conversation pane: refused (conversation columns hold conversations only)", () => {
+    const w = world();
+    expect(drop(w.layout, { type: "tab", instanceId: w.inst.t1 }, conv("main", "center")).target).toEqual({ kind: "refuse", why: "tools" });
+    expect(drop(w.layout, { type: "card", cardId: w.cards.files }, conv("main", "left")).target).toEqual({ kind: "refuse", why: "tools" });
+  });
+});
+
+describe("a conversation pane by its header", () => {
+  const work = twoConversations();
+  const [left, right] = conversationPanes(work) as [string, string];
+  const resolve = (hit: SideHit) => resolveDrop({ side: emptyLayout(), work, roomForColumn: true }, { type: "conversation", paneId: right }, hit);
+  const agents = (l: PaneLayout) => conversationPanes(l).map((id) => paneBinding(l, id)?.sessionId);
+
+  it("onto the other conversation: its left / right side (zone, else the pointer's half) — the two reorder", () => {
+    const target = resolve(conv(left, "left"));
+    expect(target).toEqual({ kind: "conversation", near: left, side: "left" });
+    expect(agents(applyWorkDrop(work, { type: "conversation", paneId: right }, target!))).toEqual(["b2", "a1"]);
+    expect(resolve(conv(left, "center", "left"))).toEqual({ kind: "conversation", near: left, side: "left" });
+    expect(resolve(conv(left, "top", "left"))).toEqual({ kind: "conversation", near: left, side: "left" });
+    // Right of the left one = where it is: nothing.
+    expect(resolve(conv(left, "right"))).toBeNull();
+    expect(resolve(conv(left, "head", "right"))).toBeNull();
+    expect(resolve(conv(right, "left"))).toBeNull();
+  });
+
+  it("the far left edge: the first column; the far right: the last (where it is: nothing); onto a tool pane: refused", () => {
+    const target = resolve({ at: "edge", side: "left" });
+    expect(target).toEqual({ kind: "edge", side: "left" });
+    expect(agents(applyWorkDrop(work, { type: "conversation", paneId: right }, target!))).toEqual(["b2", "a1"]);
+    expect(resolve({ at: "edge", side: "right" })).toBeNull();
+    const w = world();
+    expect(resolveDrop({ side: w.layout, work, roomForColumn: true }, { type: "conversation", paneId: right }, tool(w.cards.files, "center"))).toEqual({ kind: "refuse", why: "conversation" });
+    // A conversation drop never changes the tool area (and a tool drop never the work area).
+    expect(applyToolDrop(w.layout, { type: "conversation", paneId: right }, { kind: "edge", side: "left" }, 1, orderOf)).toBe(w.layout);
+    expect(applyWorkDrop(work, { type: "card", cardId: w.cards.files }, { kind: "edge", side: "right" })).toBe(work);
   });
 });
 
 describe("external handle (the left gutter's reference card)", () => {
-  it("pill = pin into that page; column / header / gap = the page in view; origin = nothing; layout unchanged", () => {
+  it("a tool pane / page button = pinned into that page; the work area / an edge = a new page; origin = nothing", () => {
     const w = world();
-    const drag: SideDrag = { type: "external" };
-    expect(resolveDrop(w.layout, drag, pill(w.layout, w.pages.web), 10, ARMED)).toEqual({ kind: "pill", pageId: w.pages.web, op: "pin" });
-    expect(resolveDrop(w.layout, drag, { at: "column", pageId: w.pages.work }, 0, ARMED)).toEqual({ kind: "column", pageId: w.pages.work });
-    expect(resolveDrop(w.layout, drag, head(w.cards.files), 110, ARMED)).toEqual({ kind: "column", pageId: w.pages.work });
-    expect(resolveDrop(w.layout, drag, { at: "gap", pageId: w.pages.work, before: null }, 0, ARMED)).toEqual({ kind: "column", pageId: w.pages.work });
-    expect(resolveDrop(w.layout, drag, { at: "origin" }, 0, ARMED)).toEqual({ kind: "noop", why: "origin" });
-    expect(resolveDrop(w.layout, drag, { at: "lane" }, 0, ARMED)).toEqual({ kind: "new", via: "lane", unchanged: false });
-    expect(resolveDrop(w.layout, drag, { at: "outside" }, 0, ARMED)).toEqual({ kind: "new", via: "outside", unchanged: false });
-    for (const t of [{ kind: "pill", pageId: w.pages.web, op: "pin" }, { kind: "new", via: "outside", unchanged: false }] as SideDropTarget[]) {
-      expect(applyDrop(w.layout, drag, t, ++clock, orderOf)).toBe(w.layout);
-    }
-    // Inside a card / tab drag, "origin" means nothing (only external handles have one).
-    expect(resolveDrop(w.layout, { type: "card", cardId: w.cards.files }, { at: "origin" }, 0, ARMED)).toBeNull();
-    // A column hit without a card / gap under the pointer takes only external drags.
-    expect(resolveDrop(w.layout, { type: "card", cardId: w.cards.files }, { at: "column", pageId: w.pages.work }, 0, ARMED)).toBeNull();
+    const o = oneColumn();
+    const ext: SideDrag = { type: "external", source: "peek" };
+    expect(resolveDrop(worldOf(w.layout), ext, tool(w.cards.files, "top"))).toEqual({ kind: "pin", pageId: w.pages.work });
+    expect(resolveDrop(worldOf(o.layout), ext, conv("main", "center"))).toEqual({ kind: "new" });
+    expect(resolveDrop(worldOf(o.layout), ext, { at: "edge", side: "right" })).toEqual({ kind: "new" });
+    expect(resolveDrop(worldOf(w.layout), ext, { at: "edge", side: "right" })).toEqual({ kind: "new" });
+    expect(resolveDrop(worldOf(w.layout), ext, { at: "page", pageId: w.pages.web })).toEqual({ kind: "pin", pageId: w.pages.web });
+    expect(resolveDrop(worldOf(w.layout), ext, { at: "origin" })).toEqual({ kind: "noop", why: "origin" });
+    expect(resolveDrop(worldOf(w.layout), ext, { at: "outside" })).toBeNull();
+    expect(applyToolDrop(w.layout, ext, { kind: "pin", pageId: w.pages.work }, 1, orderOf)).toBe(w.layout);
   });
 });
 
 describe("drop reducers", () => {
-  it("pillInsertion: between icon midpoints; empty pill = its middle", () => {
-    const hit = { start: 0, size: 56, icons: [{ cardId: "a", start: 4, end: 28 }, { cardId: "b", start: 28, end: 52 }] };
-    expect(pillInsertion(hit, 0)).toEqual({ before: "a", line: 3.5 });
-    expect(pillInsertion(hit, 20)).toEqual({ before: "b", line: 27.5 });
-    expect(pillInsertion(hit, 50)).toEqual({ before: null, line: 52.5 });
-    expect(pillInsertion({ start: 10, size: 30, icons: [] }, 0)).toEqual({ before: null, line: 25 });
-  });
-
-  it("pillInsertion in the tab row: the same rule along x (the line between two icons)", () => {
-    // Icons left → right at x 612…636 and 636…660 in a pill starting at 600 (grip on its left).
-    const hit = { start: 600, size: 68, icons: [{ cardId: "a", start: 612, end: 636 }, { cardId: "b", start: 636, end: 660 }] };
-    expect(pillInsertion(hit, 605)).toEqual({ before: "a", line: 611.5 });
-    expect(pillInsertion(hit, 640)).toEqual({ before: "b", line: 635.5 });
-    expect(pillInsertion(hit, 655)).toEqual({ before: null, line: 660.5 });
-  });
-
-  it("pillPageOp: leading / trailing 28 % reorder, the middle merges (either axis)", () => {
-    const hit = { start: 100, size: 100 };
-    expect(pillPageOp(hit, 110)).toBe("before");
-    expect(pillPageOp(hit, 150)).toBe("merge");
-    expect(pillPageOp(hit, 190)).toBe("after");
-    expect(pillPageOp({ start: 0, size: 0 }, 5)).toBe("merge");
-  });
-
   it("reorderCard / reorderPage return the same layout when nothing changes", () => {
     const w = world();
     expect(reorderCard(w.layout, w.cards.files, w.cards.changes)).toBe(w.layout);
     expect(reorderCard(w.layout, w.cards.terminal, null)).toBe(w.layout);
     expect(reorderCard(w.layout, w.cards.files, w.cards.browser)).toBe(w.layout); // another page's card
-    expect(reorderPage(w.layout, w.pages.work, w.pages.web, false)).toBe(w.layout);
     expect(reorderPage(w.layout, w.pages.web, w.pages.web, true)).toBe(w.layout);
-    expect(reorderPage(w.layout, w.pages.work, w.pages.web, true).pages.map((p) => p.id)).toEqual([w.pages.web, w.pages.work]);
+    // §24.12: pages of different Shelves never swap; in one Shelf's rail they do
+    expect(reorderPage(w.layout, w.pages.work, w.pages.web, true)).toBe(w.layout);
+    const right = shelfOfPage(w.layout, w.pages.work)!.id;
+    const more = addShelfPage(w.layout, right);
+    expect(reorderPage(more.layout, w.pages.work, more.pageId!, false)).toBe(more.layout);
+    expect(pagesOfShelf(reorderPage(more.layout, w.pages.work, more.pageId!, true), right).map((p) => p.id)).toEqual([more.pageId, w.pages.work]);
   });
 
   it("moveCardTo: own page = reorder, another page = at that spot, newPage = moveCard", () => {
@@ -478,25 +387,5 @@ describe("drop reducers", () => {
     const page = merged.pages.find((p) => p.id === made.pageId)!;
     expect(page.launcher).toBeUndefined();
     expect(page.cards.map((c) => c.kind)).toEqual(["workspace.files", "workspace.changes", "terminal.pty"]);
-  });
-});
-
-describe("the tab row (horizontal pills: the pointer's x)", () => {
-  it("card → another page's tab: insertion read along x, same reducers", () => {
-    const w = world();
-    const p = pill(w.layout, w.pages.web, "x");
-    expect(resolveDrop(w.layout, { type: "card", cardId: w.cards.files }, p, 10, ARMED)).toMatchObject({ op: "insert", before: w.cards.browser, line: 3.5 });
-    const right = drop(w.layout, { type: "card", cardId: w.cards.files }, p, 30);
-    expect(right.target).toMatchObject({ op: "insert", before: null, line: 28.5 });
-    expect(kindsOn(right.after, w.pages.web)).toEqual(["browser.tab", "workspace.files"]);
-  });
-
-  it("page grip → a tab: left / right edge reorder, middle merges", () => {
-    const w = world();
-    const p = pill(w.layout, w.pages.work, "x");
-    expect(resolveDrop(w.layout, { type: "page", pageId: w.pages.web }, p, 1, ARMED)).toEqual({ kind: "pill", pageId: w.pages.work, op: "before" });
-    expect(resolveDrop(w.layout, { type: "page", pageId: w.pages.web }, p, p.size / 2, ARMED)).toEqual({ kind: "pill", pageId: w.pages.work, op: "merge" });
-    // web is already after work: its trailing edge changes nothing
-    expect(resolveDrop(w.layout, { type: "page", pageId: w.pages.web }, p, p.size - 1, ARMED)).toBeNull();
   });
 });

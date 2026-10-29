@@ -28,7 +28,7 @@ describe("turn marks", () => {
   it("marks unseen turns, skips seen and interrupted ones", () => {
     let marks: TurnMarks = {};
     marks = applyTurnEnd(marks, "a", { turnId: "t1", status: "completed" }, 10, false);
-    expect(marks.a).toEqual({ at: 10, failed: false, turnId: "t1" });
+    expect(marks.a).toEqual({ at: 10, failed: false, turnId: "t1", count: 1 });
     marks = applyTurnEnd(marks, "b", { turnId: "t2", status: "failed" }, 11, false);
     expect(marks.b?.failed).toBe(true);
     const same = applyTurnEnd(marks, "c", { turnId: "t3", status: "interrupted" }, 12, false);

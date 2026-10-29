@@ -3,7 +3,7 @@
 // behaviour (API calls, state, notifications, attention count, host switch reset) through the real
 // store and sub-stores. Only the `transport` helpers below know the IPC event shapes, so the
 // multi-host change may adapt them but not the expectations.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import type { DaemonState, HostsState } from "../src/shared/ipc";
 import type { NotifyOccurrence } from "../src/renderer/src/lib/notifyEvents";
@@ -110,6 +110,23 @@ async function startConnected() {
   await settle();
 }
 
+// Warm the transform cache once: each beforeEach resets modules and re-imports the store, and the
+// first-ever load (~3 s) was billed to the first test's hook and timed out under the full suite's
+// load. Same stubs as beforeEach (the store reads them at evaluation), undone like afterEach.
+beforeAll(async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {}, removeItem: () => {} });
+  vi.stubGlobal("document", { hasFocus: () => false });
+  vi.stubGlobal("requestAnimationFrame", (cb: () => void) => setTimeout(cb, 0));
+  await import("../src/renderer/src/store");
+  await import("../src/renderer/src/lib/shell");
+  await import("../src/renderer/src/lib/turnUnread");
+  await import("../src/renderer/src/lib/ownerNotifyStore");
+  await import("../src/renderer/src/lib/notifyEvents");
+  vi.clearAllTimers();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+}, 60_000);
 beforeEach(async () => {
   vi.resetModules();
   vi.useFakeTimers();
@@ -259,7 +276,10 @@ describe("single host: switching the host", () => {
     expect(s.featuresKnown).toBe(false);
     expect(s.approvals).toBeNull();
     expect(s.services).toBeNull();
-    expect(s.view).toEqual({ kind: "page", page: "shell.settings", params: { tab: "hosts" } });
+    // The Settings Shelf stays open on the same tab across the switch (lib/settingsShelf); the view is the conversation.
+    expect(s.view).toEqual({ kind: "conversation" });
+    const { useSettingsShelf } = await import("../src/renderer/src/lib/settingsShelf");
+    expect(useSettingsShelf.getState()).toMatchObject({ open: true, params: { tab: "hosts" } });
     expect(shell.appAttention()).toBe(0);
     transport.daemon({ kind: "connecting", baseUrl: "ssh://remote" });
     transport.daemon({ kind: "connected", baseUrl: "fake://remote", hostId: "WORKSTATION" });

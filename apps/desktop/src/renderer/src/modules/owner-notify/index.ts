@@ -1,7 +1,10 @@
 // 主人通知 (cutex owner-messages). Step 1: its section in Settings → 通知.
 import { OWNER_NOTIFY_FEATURE } from "../../../../shared/ownerNotify";
-import { OwnerNotifyBlock } from "../../components/settings/AppSettings";
 import { defineModule } from "../slots";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const OwnerNotifyBlock = lazyPage(() => import("../../components/settings/AppSettings").then((m) => m.OwnerNotifyBlock));
 
 export default defineModule({
   id: "owner-notify",

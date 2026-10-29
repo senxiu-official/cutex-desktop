@@ -14,10 +14,11 @@ import { copyText } from "../../lib/menus";
 import { useTrackOverlay } from "../../lib/openOverlays";
 import { useOrderedProfiles } from "../../lib/profileOrder";
 import { useApp } from "../../store";
-import { Button, Select, SettingRow, TextInput } from "../../components/settings/Form";
+import { Button, Select, SettingRow, SettingsGroup, TextInput } from "../../components/settings/Form";
 import { cancelRotation, continueRotation, loadProjectRotation, pollRotation, startRotation, useProjectRotation } from "./rotationStore";
 import { HANDOFF_MINUTE_CHOICES, useHandoffMinutes } from "./rotationPrefs";
 import { minutesLabel, refusalText } from "./rotationView";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 const POLL_MS = 1500;
 
@@ -52,7 +53,7 @@ function stateTone(state: DirectorRotation["state"]): string {
 
 export function RotationStateBadge({ state }: { state: DirectorRotation["state"] }) {
   const { t } = useI18n();
-  return <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${stateTone(state)}`}>{t(`projects.rotation.state.${state}` as MessageKey)}</span>;
+  return <span className={`rounded px-1.5 py-0.5 text-caption/[inherit] font-medium ${stateTone(state)}`}>{t(`projects.rotation.state.${state}` as MessageKey)}</span>;
 }
 
 function StepIcon({ status }: { status: StepStatus }) {
@@ -248,10 +249,10 @@ function StartForm({ project, director, onStarted, onClose }: { project: Project
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
         <p className="mb-2 text-xs text-subtle">{t("projects.rotation.intro")}</p>
         <h3 className="mt-3 text-xs font-semibold text-muted">{t("projects.rotation.successor")}</h3>
-        <SettingRow label={t("projects.rotation.name")} hint={t("projects.rotation.nameHint")}>
+        <SettingRow agents="newAgents" source="host" label={t("projects.rotation.name")} hint={t("projects.rotation.nameHint")}>
           <TextInput width="w-56" value={name} onChange={setName} maxLength={128} />
         </SettingRow>
-        <SettingRow label={t("projects.rotation.profile")} hint={t("projects.rotation.profileHint")}>
+        <SettingRow agents="newAgents" source="host" label={t("projects.rotation.profile")} hint={t("projects.rotation.profileHint")}>
           <Select
             value={profile}
             options={profileOptions}
@@ -262,13 +263,14 @@ function StartForm({ project, director, onStarted, onClose }: { project: Project
             }}
           />
         </SettingRow>
-        <SettingRow label={t("projects.rotation.model")} hint={t("projects.rotation.modelHint")}>
+        <SettingRow agents="newAgents" source="host" label={t("projects.rotation.model")} hint={t("projects.rotation.modelHint")}>
           <TextInput width="w-56" mono value={model} onChange={setModel} placeholder={t("projects.rotation.modelPlaceholder")} />
         </SettingRow>
-        <SettingRow label={t("projects.rotation.cwd")} hint={t("projects.rotation.cwdHint")}>
+        <SettingRow agents="newAgents" source="host" label={t("projects.rotation.cwd")} hint={t("projects.rotation.cwdHint")}>
           <TextInput width="w-72" mono value={cwd} onChange={setCwd} />
         </SettingRow>
         <h3 className="mt-4 text-xs font-semibold text-muted">{t("projects.rotation.predecessor")}</h3>
+        <SettingsGroup agents="now" source="host">
         <div className="mt-1.5 space-y-1">
           {DISPOSITIONS.map((d) => (
             <label key={d} className={`flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 ${disposition === d ? "bg-surface-2" : "hover:bg-surface-2/60"}`}>
@@ -280,8 +282,9 @@ function StartForm({ project, director, onStarted, onClose }: { project: Project
             </label>
           ))}
         </div>
+        </SettingsGroup>
         <div className="mt-3">
-          <SettingRow label={t("projects.rotation.timeout")} hint={t("projects.rotation.timeoutHint")}>
+          <SettingRow agents="newAgents" source="host" label={t("projects.rotation.timeout")} hint={t("projects.rotation.timeoutHint")}>
             <Select value={String(minutes)} options={minuteOptions} onChange={(v) => setMinutes(Number(v))} />
           </SettingRow>
         </div>
@@ -303,6 +306,7 @@ function StartForm({ project, director, onStarted, onClose }: { project: Project
 
 /** The dialog for one project. `director` is the Director's session (null while the sidebar loads). */
 export function DirectorRotationDialog({ project, director, onClose }: { project: ProjectSummary; director: SessionResource | null; onClose(): void }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const rotation = useProjectRotation(project.project_id);
   const [shownId, setShownId] = useState<string | null>(null);
@@ -333,13 +337,13 @@ export function DirectorRotationDialog({ project, director, onClose }: { project
       e.stopPropagation();
       onClose();
     };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    win.addEventListener("keydown", onKey, true);
+    return () => win.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
   const name = shown?.predecessor.name ?? director?.displayName ?? project.director_cutex_session_id ?? "";
   return (
-    <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/30 pt-[8vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[8vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-modal aria-label={t("projects.rotation.title", { name })} className="flex max-h-[84vh] w-[38rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         <header className="flex items-center gap-2 border-b border-border px-5 py-3">
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{t("projects.rotation.title", { name })}</h2>

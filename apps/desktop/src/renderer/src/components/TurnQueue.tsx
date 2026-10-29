@@ -3,11 +3,17 @@
 // rows. A ~22px left rail labels each row (components/QueueRail); section names / status are the
 // rail's tooltip and the section's aria-label; section actions show on hover / focus at the end of
 // its first row.
-//   下个工具边界 (only while a turn runs; accent bar, each row its kind icon): what enters the running
+//   下个工具边界 (only while a turn runs; each row its kind icon — no side bar since design 040 step 9): what enters the running
 //     turn at its next tool boundary — the owner's inserts (↳ icon, 下一步), wakes past their wait (下一步),
-//     wakes still waiting for the turn end (a depleting ring). The drop target for "insert" (refused
-//     in a delegation's turn / without steering, the reason on a hint row while dragging).
-//   ⤓ 本回合结束后 (running: alarms) or ⚡ 马上开始 (idle: every ride-along item starts one turn).
+//     wakes still waiting for the turn end (a depleting ring). The 「插入当前回合」 drop target
+//     (lib/insertTarget) is no row: while an owner row is dragged, the card's 「接下来」 header line becomes
+//     it (an overlay portalled into QueuePanel's header, `slots.target`; owner 2026-10-23), taking a drop
+//     only after the drag stayed on it INSERT_DWELL_MS — a drop anywhere else only reorders (owner
+//     2026-10-21, accidental inserts). Refused in a delegation's turn / without steering: it says why.
+//     Waiting inserts say 「已插入 · 等下一个工具边界」; hovering one shows 打断并发送.
+//     With ≥ 2 queued owner messages 「全部合并插入」 (shared/queueMerge) sits at the right of the header line
+//     (`slots.actions`): all of them, in queue order, become ONE insert (delegations never merged).
+//   ⤓ 本回合结束后 (running: alarms) or 等待投递 (idle: the host may coalesce delegation results).
 //   Numbered turns: the number in the rail (the grip replaces it on hover; the only move control,
 //     Alt+↑ / Alt+↓ / Alt+End from the keyboard). Drop between turns = queue/move, never onto a
 //     delegation. A delegation's included tells are a `+N` chip.
@@ -21,23 +27,38 @@
 // localStorage). Ride-along rows: kind icon, sender + first line, timing words (components/AdmissionRows).
 // The card's header line (接下来 · N, 暂停委托, collapse) is QueuePanel's.
 // (待处理委托 — awaiting the owner's review — stays QueuePanel's extra section below.)
-import { useContext, useState, type DragEvent, type KeyboardEvent } from "react";
-import { ArrowDownToLine, ChevronDown, ChevronUp, CornerDownRight, GripVertical, Zap } from "lucide-react";
+import type { AgentRuntime } from "../lib/agentFeatures";
+import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
+import { ArrowDownToLine, ChevronDown, ChevronRight, Clock3, CornerDownRight, GripVertical } from "lucide-react";
 import type { AdmissionCurrentTurn, AdmissionNextStep, AdmissionRef, QueueItem } from "@cutex-desktop/protocol";
 import { useI18n } from "../i18n";
 import { atBoundary, beforeForSlot, canMoveTo, foldQueueRows, foldRow, insertRefusal, moveTargets, pausedFrom, rideAlongsFollowTurn, slotForGroup, turnStopped, type AdmissionRow } from "../lib/admissionOrder";
 import { formatElapsed } from "../lib/agentAttention";
 import type { OutboxEntry } from "../lib/outbox";
-import type { PendingSteer } from "../lib/pendingSteers";
-import { RailStripContext, type StripLabel } from "../lib/railStrip";
+import { steerDelivery, type PendingSteer } from "../lib/pendingSteers";
+import { refusesImageSteer, type ImageSteering } from "../lib/imageSteer";
+import type { StripLabel } from "../lib/railStrip";
+import { INSERT_DWELL_MS, insertTargetShown, insertTargetState, mergeInsertShown } from "../lib/insertTarget";
+import { mergeableOwnerItem } from "../../../shared/queueMerge";
 import { heldKeys, splitHeld } from "../lib/stopHold";
+import { immediateStartItems, STARTS_NOW_STUCK_MS, useWaitedIds } from "../lib/settledRideAlongs";
 import { taskTag } from "../lib/tasks";
 import { useNow } from "../lib/time";
 import { queueViewOf, setQueueView } from "../lib/queueView";
 import { queueItemText } from "../store";
-import { AskTurnRow, KindIcon, NextStepRow, TimingSlot, type RideAlongOrder } from "./AdmissionRows";
+import { AskTurnRow, KindIcon, NextStepRow, SteerDeliveryNote, TimingSlot, type RideAlongOrder } from "./AdmissionRows";
 import { META_YIELDS, QUEUE_ROW, ROW_ACTIONS, ROW_META, ROW_TEXT, rowText } from "../lib/queueRow";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 import { HoverActions, Rail, RailRow } from "./QueueRail";
+import { QueuedImages } from "./ImageThumbs";
+import { messageImages } from "../../../shared/input";
+import { DROP_TINT, dropTint } from "../lib/dropTint";
+import { formatAutoRetryWait } from "../lib/modelOverloadRetry";
+import { useModelOverloadRetry } from "../lib/modelOverloadRetryView";
+
+/** No candidates (a turn runs: nothing waits to start by itself). */
+const NONE: readonly AdmissionNextStep[] = [];
 
 /** The turn frame's data (QueuePanel `ordered`). */
 export interface OrderedQueue {
@@ -62,6 +83,8 @@ export interface OrderedQueue {
   onMove(item: QueueItem, before: AdmissionRef | null): void;
   /** Insert into the running turn (the 插入 path); undefined = this runtime cannot steer now. */
   onInsert?: (item: QueueItem) => void;
+  /** 「全部合并插入」: merge the queued owner messages (queue order) into one insert; undefined = not offered. */
+  onMergeInsert?: (items: QueueItem[]) => void;
   sessionId: string;
   /** Queue actions (暂停委托), shown in the card's header line (QueuePanel). */
   actions?: React.ReactNode;
@@ -86,7 +109,10 @@ export interface PausedDivider {
   onRestore(): void;
 }
 
-const TINY = "rounded px-1.5 py-0.5 text-[11px] focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none";
+/** The insert target's tints under 框线+底色 (lib/dropTint; the former accent-soft / danger-soft, made opaque). */
+const TARGET_ARMED_TINT = dropTint("var(--accent)", 12, "var(--surface)");
+const TARGET_REFUSED_TINT = dropTint("var(--danger)", 12, "var(--surface)");
+const TINY = "rounded-chip px-1.5 py-0.5 text-caption focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none";
 
 export function TurnQueue({
   ordered,
@@ -98,6 +124,11 @@ export function TurnQueue({
   heldIds,
   paused,
   itemRow,
+  hostId,
+  runtime = "codex",
+  imageSteering = null,
+  slots,
+  insertStatus,
 }: {
   ordered: OrderedQueue;
   /** The owner's steers not read yet (lib/pendingSteers). */
@@ -109,37 +140,79 @@ export function TurnQueue({
   heldIds: ReadonlySet<string>;
   paused: PausedDivider;
   itemRow(item: QueueItem, extra?: OwnerRowExtra): React.ReactNode;
+  /** The agent's host: an insert's image stored as a host path is read through it (components/ImageThumbs). */
+  hostId?: string;
+  /** The agent's runtime: a Claude steer with images is sent as the next turn (lib/pendingSteers steerDelivery). */
+  runtime?: AgentRuntime;
+  /** image-input-steering: the session's declared image steering (lib/imageSteer); null = unknown / older cutex. */
+  imageSteering?: ImageSteering | null;
+  insertStatus?: (clientId: string) => React.ReactNode;
+  /** QueuePanel's header line: `target` = the overlay the insert target is drawn into while dragging, `actions` = its
+   *  right end (「全部合并插入」). Missing = neither shows. */
+  slots?: { target: HTMLElement | null; actions: HTMLElement | null };
 }) {
   const { t } = useI18n();
-  const { turns, nextStep, running, currentTurn, mayPass, onMove, onInsert, sessionId } = ordered;
+  const userToggle = useUserLayoutToggle();
+  const { turns, nextStep, running, currentTurn, mayPass, onMove, onInsert, onMergeInsert, sessionId } = ordered;
+  const retryStatus = useModelOverloadRetry(sessionId, hostId);
+  const retry = retryStatus?.holdsAdmission ? retryStatus : null;
   const entries = turns.map((r) => r.entry);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dropSlot, setDropSlot] = useState<number | null>(null);
   const [overBoundary, setOverBoundary] = useState(false);
+  // The insert target takes a drop only after the drag stayed on it INSERT_DWELL_MS (lib/insertTarget).
+  const [armed, setArmed] = useState(false);
+  const dwell = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopDwell = () => {
+    if (dwell.current !== null) clearTimeout(dwell.current);
+    dwell.current = null;
+  };
+  useEffect(() => stopDwell, []);
   // 「还有 N 项」 expanded, per agent (the same component shows another agent's queue after a switch).
   const [expandedFor, setExpandedFor] = useState<{ id: string; v: boolean } | null>(null);
   const expanded = expandedFor?.id === sessionId ? expandedFor.v : !!queueViewOf(sessionId).expanded;
   const now = useNow(running && ordered.runningSince !== null);
   const setExpanded = (v: boolean) => {
-    setQueueView(sessionId, { expanded: v });
-    setExpandedFor({ id: sessionId, v });
+    userToggle(() => {
+      setQueueView(sessionId, { expanded: v });
+      setExpandedFor({ id: sessionId, v });
+    });
+  };
+  const leaveTarget = () => {
+    stopDwell();
+    setOverBoundary(false);
+    setArmed(false);
   };
   const endDrag = () => {
     setDragFrom(null);
     setDropSlot(null);
-    setOverBoundary(false);
+    leaveTarget();
   };
   const { free, held } = splitHeld(nextStep, { ridealongsHeld: ordered.ridealongsHeld });
-  const boundary = running ? free.filter(atBoundary) : [];
+  // The next-step ride-alongs are the frame's first card, running or idle: running they go at the next tool boundary
+  // (插话), idle they start now. Both ways always shown, never folded — so the panel keeps its height when the turn
+  // ends (owner 2026-10-24: the timeline above moved by a row then); only the number of items changes it.
+  const firstUp = free.filter(atBoundary);
+  const boundary = running ? firstUp : [];
+  const startsNow = running ? [] : firstUp;
   // Idle: ride-alongs that start by themselves arrive here only once settled (lib/settledRideAlongs,
   // filtered by QueuePanel so the card's visibility and count agree with these rows).
-  const afterTurn = running ? free.filter((i) => !atBoundary(i)) : free;
+  const afterTurn = free.filter((i) => !atBoundary(i));
+  // Ordinary inputs still waiting after a minute may be stuck. Answers may instead be in the host's
+  // result-coalescing window; admission has no quiet deadline, so age alone cannot mark those stuck.
+  const stuck = useWaitedIds(running ? NONE : immediateStartItems(free), STARTS_NOW_STUCK_MS);
   const resumeHint = t(paused.stopHold ? "paused.resumeHintStop" : "paused.resumeHint");
-  const refusal = insertRefusal(currentTurn, !!onInsert);
-  const refusalText = refusal ? t(refusal === "askTurn" ? "queue.turn.refuseAsk" : "queue.turn.refuseNoSteer") : "";
-  const dragging = dragFrom !== null && turns[dragFrom]?.kind === "owner";
+  const dragRow = dragFrom === null ? null : turns[dragFrom];
+  const refusal = insertRefusal(currentTurn, !!onInsert, dragRow?.kind === "owner" && refusesImageSteer(imageSteering, dragRow.item.input));
+  const refusalText = refusal ? t(refusal === "askTurn" ? "queue.turn.refuseAsk" : refusal === "noImages" ? "queue.turn.refuseImages" : "queue.turn.refuseNoSteer") : "";
+  const dragging = dragRow?.kind === "owner";
   const boundaryCount = waiting.length + sendingSteers.length + boundary.length;
-  const showBoundary = boundaryCount > 0 || (running && dragging);
+  const target = insertTargetShown(running, turns.some((r) => r.kind === "owner"), refusal, dragging);
+  const targetState = insertTargetState(overBoundary && dragging, armed, refusal);
+  const showBoundary = boundaryCount > 0;
+  // 「全部合并插入」: every queued owner message, in queue order (delegation turns are never merged).
+  const ownerMessages = turns.flatMap((r) => (r.kind === "owner" && mergeableOwnerItem(r.item) ? [r.item] : []));
+  const mergeShown = mergeInsertShown(running, ownerMessages.length, refusal, dragging, !!onMergeInsert);
   const pausedAt = pausedFrom(turns, heldIds);
   // After a ride-along-started turn the owner's next turn goes first, unless the owner yielded it.
   const ownerNext = rideAlongsFollowTurn(running, currentTurn, turns, heldIds);
@@ -147,7 +220,6 @@ export function TurnQueue({
   const order: RideAlongOrder | null = ownerNext === null ? null : ordered.ownerYielded ? { kind: "first", turn: ownerNext } : { kind: "follows", turn: ownerNext, onYield: ordered.onYield };
   const firstStoppedOwner = turns.findIndex((r) => r.kind === "owner" && turnStopped(r, heldIds));
 
-  const { enabled: strips } = useContext(RailStripContext);
   // Section labels (rail tooltip, aria-label and the hover strip).
   const boundaryLabel =
     currentTurn?.kind === "ask" && currentTurn.askId
@@ -156,10 +228,13 @@ export function TurnQueue({
         ? `${t("queue.turn.stripBoundary")} · ${t("queue.turn.runningFor", { time: formatElapsed(now - ordered.runningSince) })}`
         : t("queue.turn.stripBoundary");
   const afterLabel = follows ? t("queue.turn.followsHint", { n: follows }) : running ? t("queue.turn.afterTurnHint") : t("queue.turn.startsNowHint");
-  const afterStrip: StripLabel = follows ? { text: t("queue.turn.follows", { n: follows }), tone: "muted" } : running ? { text: t("queue.turn.afterTurn"), tone: "muted" } : { text: t("queue.turn.startsNow"), tone: "warn" };
+  // A status in words, not an action (owner 2026-10-23: the old warn-toned 「马上开始」 read as a button).
+  const afterStrip: StripLabel = follows
+    ? { text: t("queue.turn.follows", { n: follows }), tone: "muted" }
+    : running
+      ? { text: t("queue.turn.afterTurn"), tone: "muted" }
+      : { text: t("queue.turn.startsNow"), tone: "muted" };
   const queueLabel = t("queue.turn.queue", { n: turns.length });
-  // While dragging over a section its strip is the drop hint.
-  const boundaryHint: StripLabel | null = overBoundary && dragging ? (refusal ? { text: t(refusal === "askTurn" ? "queue.turn.dropRefuseAsk" : "queue.turn.dropRefuseNoSteer"), tone: "danger" } : { text: t("queue.turn.dropInsert"), tone: "accent" }) : null;
 
   const onKey = (item: QueueItem) => (e: KeyboardEvent<HTMLDivElement>) => {
     if (!e.altKey || e.target !== e.currentTarget || (e.key !== "ArrowUp" && e.key !== "ArrowDown" && e.key !== "End")) return;
@@ -169,13 +244,18 @@ export function TurnQueue({
     if (target) onMove(item, target.before);
   };
 
-  // The boundary section as a drop target: insert into the running turn.
-  const boundaryDrop = {
+  // The 「插入当前回合」 row as a drop target: insert into the running turn — only once the drag has
+  // stayed on it INSERT_DWELL_MS (before that it refuses the drop, so a quick pass never inserts).
+  const targetDrop = {
     onDragOver: (e: DragEvent<HTMLDivElement>) => {
       if (!dragging || !running) return;
-      if (!overBoundary) setOverBoundary(true);
+      if (!overBoundary) {
+        setOverBoundary(true);
+        stopDwell();
+        if (!refusal) dwell.current = setTimeout(() => setArmed(true), INSERT_DWELL_MS);
+      }
       if (dropSlot !== null) setDropSlot(null);
-      if (refusal) {
+      if (refusal || !armed) {
         e.dataTransfer.dropEffect = "none";
         return;
       }
@@ -183,12 +263,12 @@ export function TurnQueue({
       e.dataTransfer.dropEffect = "move";
     },
     onDragLeave: (e: DragEvent<HTMLDivElement>) => {
-      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOverBoundary(false);
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) leaveTarget();
     },
     onDrop: (e: DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       const row = dragFrom === null ? null : turns[dragFrom];
-      if (row?.kind === "owner" && !refusal && onInsert) onInsert(row.item);
+      if (row?.kind === "owner" && armed && !refusal && onInsert) onInsert(row.item);
       endDrag();
     },
   };
@@ -197,7 +277,7 @@ export function TurnQueue({
   const turnDrop = (index: number, kind: AdmissionRow["kind"]) => ({
     onDragOver: (e: DragEvent<HTMLDivElement>) => {
       if (dragFrom === null) return;
-      if (overBoundary) setOverBoundary(false);
+      if (overBoundary) leaveTarget();
       const r = e.currentTarget.getBoundingClientRect();
       const slot = slotForGroup(kind, index, r.height ? (e.clientY - r.top) / r.height : 0.5);
       if (slot === null || !canMoveTo(entries, dragFrom, slot, mayPass)) {
@@ -220,50 +300,55 @@ export function TurnQueue({
 
   // ---- boundary section rows (always shown fully) ----
   const boundaryList: React.ReactNode[] = [];
-  // The section's glyph only on its placeholder rows (drop hint / empty): its rows carry their own
-  // kind icon and the accent bar marks the section (no ↳ twice on one row).
-  const bRail = (glyph = false) => (
-    <Rail label={boundaryLabel} strip={{ text: boundaryLabel, tone: "accent" }} forced={boundaryList.length === 0 ? boundaryHint : null}>
-      {glyph && <CornerDownRight size={12} className="text-accent" />}
-    </Rail>
-  );
-  // Without strips the drop hint is a row of its own.
-  if (overBoundary && dragging && !strips)
-    boundaryList.push(
-      <RailRow key="hint" rail={bRail(true)}>
-        <span className={`min-w-0 flex-1 truncate pl-0.5 text-xs ${refusal ? "text-danger" : "text-accent"}`} title={refusalText || undefined} data-testid={refusal ? "boundary-refused" : "boundary-insert-here"}>
-          {refusal ? refusalText : t("queue.turn.insertHere")}
-        </span>
-      </RailRow>,
-    );
-  else if (boundaryCount === 0 && showBoundary)
-    boundaryList.push(
-      <RailRow key="empty" rail={bRail(true)}>
-        <span className="min-w-0 flex-1 truncate pl-0.5 text-xs text-subtle">{t("queue.turn.dropToInsert")}</span>
-      </RailRow>,
-    );
-  for (const p of waiting) {
-    const first = boundaryList.length === 0;
+  const bRail = () => <Rail label={boundaryLabel} strip={{ text: boundaryLabel, tone: "accent" }} />;
+  const targetText =
+    targetState === "refused" ? refusalText : targetState === "armed" ? t("queue.turn.insertTargetArmed") : targetState === "hold" ? t("queue.turn.insertTargetHold") : t("queue.turn.insertTargetIdle");
+  // The header line as the drop target (only while dragging): an overlay over 「接下来」, so nothing moves.
+  const targetOverlay = target ? (
+    <div
+      className={`flex h-full min-w-0 items-center gap-1.5 rounded-ctl border border-dashed bg-surface px-1.5 text-meta transition-colors motion-reduce:transition-none ${
+        targetState === "refused" ? `border-danger/60 text-danger ${DROP_TINT}` : targetState === "armed" ? `border-accent text-accent ${DROP_TINT}` : "border-accent/60 text-accent"
+      }`}
+      // 拖放落点预览: refused / armed tint only under 框线+底色 (lib/dropTint), over --surface so the header stays hidden.
+      style={targetState === "refused" ? TARGET_REFUSED_TINT : targetState === "armed" ? TARGET_ARMED_TINT : undefined}
+      title={targetState === "refused" ? refusalText : t("queue.turn.insertTargetHint")}
+      data-testid="insert-target"
+      data-state={targetState}
+      {...targetDrop}
+    >
+      <CornerDownRight size={12} className="shrink-0" />
+      <span className="min-w-0 flex-1 truncate" data-testid={targetState === "refused" ? "boundary-refused" : targetState === "armed" ? "boundary-insert-here" : undefined}>
+        {targetText}
+      </span>
+    </div>
+  ) : null;
+  const mergeButton = mergeShown ? (
+    <button
+      onClick={() => onMergeInsert?.(ownerMessages)}
+      title={t("queue.merge.hint", { n: ownerMessages.length })}
+      className={`${TINY} shrink-0 text-accent hover:bg-accent/10`}
+      data-testid="queue-merge-insert"
+    >
+      {t("queue.merge.action")}
+    </button>
+  ) : null;
+  // Each waiting insert says it is one; hovering any of them offers 打断并发送 (all of them, now).
+  for (const p of waiting)
     boundaryList.push(
       <RailRow key={p.id} rail={bRail()} testId="boundary-steer">
         <div className={QUEUE_ROW}>
-          <KindIcon icon={CornerDownRight} label={t("queue.turn.inserting")} />
+          {steerDelivery(p, runtime, imageSteering) === "nextTurn" ? <KindIcon icon={ArrowDownToLine} label={t("queue.meta.nextTurn")} /> : <KindIcon icon={CornerDownRight} label={t("queue.turn.inserting")} />}
           <span className={`${ROW_TEXT} text-foreground`}>{rowText(p.text)}</span>
-          {p.imageCount > 0 && <span className="shrink-0 text-[11px] text-subtle">{t("steer.images", { n: p.imageCount })}</span>}
-          <span className={`${ROW_META} text-subtle ${first ? META_YIELDS : ""}`} title={t("queue.deliverNextStep")} data-testid="steer-delivery-note">
-            {t("queue.meta.nextStep")}
+          <QueuedImages images={messageImages((p.extra ?? []) as { type: string }[])} total={p.imageCount} hostId={hostId} />
+          {insertStatus?.(p.id) ?? <SteerDeliveryNote steer={p} runtime={runtime} imageSteering={imageSteering} className={META_YIELDS} />}
+          <span className={ROW_ACTIONS}>
+            <button onClick={onInterruptSendSteers} title={t("steer.interruptSendHint")} className={`${TINY} text-danger hover:bg-danger/10`} data-testid="boundary-interrupt-send">
+              {t("steer.interruptSend")}
+            </button>
           </span>
-          {first && (
-            <span className={ROW_ACTIONS}>
-              <button onClick={onInterruptSendSteers} title={t("steer.interruptSendHint")} className={`${TINY} text-danger hover:bg-danger/10`} data-testid="boundary-interrupt-send">
-                {t("steer.interruptSend")}
-              </button>
-            </span>
-          )}
         </div>
       </RailRow>,
     );
-  }
   for (const e of sendingSteers)
     boundaryList.push(
       <RailRow key={e.id} rail={bRail()}>
@@ -273,22 +358,21 @@ export function TurnQueue({
   for (const item of boundary)
     boundaryList.push(
       <RailRow key={item.id} rail={bRail()}>
-        <NextStepRow item={item} running order={order} sessionId={sessionId} />
+        <NextStepRow item={item} running order={order} sessionId={sessionId} autoRetry={retry} />
       </RailRow>,
     );
 
+  // ---- after-turn / starts-now rows (idle: the next-step ones lead in their own card, like the boundary card) ----
+  const afterRow = (item: AdmissionNextStep, i: number) => (
+    <RailRow key={`after:${item.id}`} rail={<Rail label={afterLabel} strip={afterStrip}>{i === 0 && (running ? <ArrowDownToLine size={12} /> : <Clock3 size={12} className="text-subtle" />)}</Rail>} testId={running ? "group-after-turn" : "group-starts-now"}>
+      <NextStepRow item={item} running={running} order={order} sessionId={sessionId} autoRetry={retry} stuck={!retry && !running && stuck.has(item.id)} idleNote={running ? undefined : t("queue.turn.startsNow")} />
+    </RailRow>
+  );
+  const startsNowList = startsNow.map((item, i) => afterRow(item, i));
+
   // ---- queue rows (counted against the cap; the paused divider is not a row) ----
   const queueList: { node: React.ReactNode; counts: boolean }[] = [];
-  afterTurn.forEach((item, i) =>
-    queueList.push({
-      counts: true,
-      node: (
-        <RailRow key={`after:${item.id}`} rail={<Rail label={afterLabel} strip={afterStrip}>{i === 0 && (running ? <ArrowDownToLine size={12} /> : <Zap size={12} className="text-warn" />)}</Rail>} testId={running ? "group-after-turn" : "group-starts-now"}>
-          <NextStepRow item={item} running={running} order={order} sessionId={sessionId} idleNote={running || i > 0 ? undefined : t("queue.turn.startsNow")} />
-        </RailRow>
-      ),
-    }),
-  );
+  afterTurn.forEach((item, i) => queueList.push({ counts: true, node: afterRow(item, i + startsNow.length) }));
   // Held ride-alongs: their own group per reason, paused (no timing, no ring).
   for (const group of held) {
     const keys = heldKeys(group.reason);
@@ -386,7 +470,7 @@ export function TurnQueue({
           {row.kind === "owner" ? (
             itemRow(row.item, {
               // Only the first turn waits for nothing but the running one.
-              note: running && index === 0 && !heldIds.has(row.item.queueId) && row.entry.state !== "paused" ? t("queue.deliverAfterTurn") : undefined,
+              note: retry ? formatAutoRetryWait(t, retry, retry.phase === "pending" ? "queue.autoRetryOwnerOrder" : "queue.autoRetryWaiting") : running && index === 0 && !heldIds.has(row.item.queueId) && row.entry.state !== "paused" ? t("queue.deliverAfterTurn") : undefined,
               paused: heldIds.has(row.item.queueId) || row.entry.state === "paused",
               // Alt+↑ / Alt+↓ / Alt+End stay as an unadvertised keyboard path.
               rowProps: { tabIndex: 0, onKeyDown: onKey(row.item) },
@@ -420,8 +504,10 @@ export function TurnQueue({
     });
 
   const counted = queueList.filter((r) => r.counts).length;
-  const fold = foldQueueRows(boundaryList.length, counted, expanded || dragging);
-  const more = foldRow(boundaryList.length, counted, expanded, dragging);
+  // The leading card (boundary running, starts-now idle) is shown whole and counts toward the cap the same either way.
+  const leading = boundaryList.length + startsNowList.length;
+  const fold = foldQueueRows(leading, counted, expanded || dragging);
+  const more = foldRow(leading, counted, expanded, dragging);
   const shownRows: React.ReactNode[] = [];
   let used = 0;
   for (const r of queueList) {
@@ -430,27 +516,42 @@ export function TurnQueue({
     shownRows.push(r.node);
   }
 
-  if (!showBoundary && queueList.length === 0) return null;
+  const portals = (
+    <>
+      {slots?.target && targetOverlay && createPortal(targetOverlay, slots.target)}
+      {slots?.actions && mergeButton && createPortal(mergeButton, slots.actions)}
+    </>
+  );
+  const showLeading = showBoundary || startsNowList.length > 0;
+  if (!retry && !showLeading && queueList.length === 0) return portals;
   return (
     <div className="flex flex-col" data-queue-section="" data-testid="turn-frame">
+      {retry && <div role="status" className="border-b border-border/60 px-2 py-1 text-caption text-muted" data-testid="queue-auto-retry-wait">
+        <div>{formatAutoRetryWait(t, retry, "queue.autoRetryWaiting")}</div>
+        {retry.phase === "pending" && <div>{formatAutoRetryWait(t, retry, "queue.autoRetryOwnerOrder")}</div>}
+      </div>}
+      {portals}
       {showBoundary && (
         <div
           role="group"
           aria-label={boundaryLabel}
-          className={`relative transition-colors motion-reduce:transition-none ${overBoundary && dragging ? (refusal ? "bg-danger/5" : "bg-accent/5") : ""}`}
+          className="relative"
           data-testid="boundary-card"
-          {...boundaryDrop}
         >
-          <span className={`pointer-events-none absolute top-1 bottom-1 left-0.5 w-0.5 rounded ${overBoundary && dragging && refusal ? "bg-danger/70" : "bg-accent/70"}`} />
           {boundaryList}
         </div>
       )}
+      {startsNowList.length > 0 && (
+        <div role="group" aria-label={afterLabel} className="relative" data-testid="starts-now-card">
+          {startsNowList}
+        </div>
+      )}
       {queueList.length > 0 && (
-        <div role="group" aria-label={queueLabel} className={showBoundary ? "border-t border-border/60" : ""} data-testid="admission-queue">
+        <div role="group" aria-label={queueLabel} className={showLeading ? "border-t border-border/60" : ""} data-testid="admission-queue">
           {shownRows}
           {/* Not while everything shows anyway (expanded by a drag, or it all fits): no 「还有 0 项」. */}
           {more.show && (
-            <RailRow rail={<Rail>{expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</Rail>}>
+            <RailRow rail={<Rail>{expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</Rail>}>
               <button onClick={() => setExpanded(!expanded)} aria-expanded={expanded} className={`${TINY} text-muted hover:text-foreground`} data-testid="queue-more">
                 {expanded ? t("queue.turn.less") : t("queue.turn.moreItems", { n: more.hidden })}
               </button>

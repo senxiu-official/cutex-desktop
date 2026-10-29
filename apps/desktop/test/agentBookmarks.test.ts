@@ -1,6 +1,6 @@
 // Agent bookmarks merge into pin (owner decision 3, 2026-10-16): no 加书签 for agents (sidebar agent
 // menu, 收藏当前…); existing agent bookmarks stay listed under 全部书签; turn bookmarks stay per conversation.
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AppSlotEntry, RefActionItem } from "../src/renderer/src/modules/slots";
 import { agentRef, parseRef, turnRef } from "../src/renderer/src/lib/refs";
 import { refActionApplies } from "../src/renderer/src/lib/refActionApplies";
@@ -8,11 +8,9 @@ import { addBookmark, bookmarkable, EMPTY_BOOKMARKS, homeBookmarks, matchingBook
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), bridge: {}, onEvent: () => () => {} }));
 
-let bookmarkAction: RefActionItem;
-beforeAll(async () => {
-  const mod = (await import("../src/renderer/src/modules/bookmarks/index")).default;
-  bookmarkAction = mod.contributes!["ref.action"]![0]! as RefActionItem;
-});
+// Loaded while the file is collected (bridge mocked first — vi.mock is hoisted): in a beforeAll it ran into the 10 s
+// hook timeout under the full suite's load (the bookmarks module pulls in much of the renderer).
+const bookmarkAction = (await import("../src/renderer/src/modules/bookmarks/index")).default.contributes!["ref.action"]![0]! as RefActionItem;
 
 const entry = (item: Partial<RefActionItem>, mode: AppSlotEntry<"ref.action">["mode"] = "show") =>
   ({ moduleId: "m", mode, missing: [], waiting: false, item: { id: "x", icon: (() => null) as unknown as RefActionItem["icon"], titleKey: "bookmarks.add", run() {}, ...item } }) as unknown as AppSlotEntry<"ref.action">;

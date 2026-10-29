@@ -1,0 +1,38 @@
+// Desk windows (multi-window P1, components/DeskWindows; P6: the 多窗口 setting): zh-CN and en. Spread into the catalogs.
+export const zhCN = {
+  "desk.moveToWindow": "移到新窗口",
+  "desk.moveToWindowHint": "在另一个窗口里打开这个会话，可以放到另一块屏幕上；关掉那个窗口，会话回到这里的托盘。",
+  "desk.moveFailed": "没能打开新窗口（最多 4 个）。",
+  "desk.backToMain": "放回主窗口",
+  "desk.inOtherWindow": "这个对话在另一个窗口里",
+  "desk.empty": "这个窗口里没有对话。",
+  "desk.title": "桌子 {n}",
+  "desk.openIn": "在 桌子 {n} 打开",
+  "desk.openInMain": "在主窗口打开",
+  "desk.openInNew": "在新窗口打开",
+  "desk.openInHint": "一个{{agent}}只开一份：从现在的位置挪过去。",
+  "desk.jumpDesk": "{name} 开在 桌子 {n} 里：跳过去，不开第二份",
+  "desk.jumpMain": "{name} 开在主窗口里：跳过去，不开第二份",
+  "desk.setting": "多窗口",
+  "desk.settingHint": "会话可以移到单独的窗口，比如放到另一块屏幕上（会话 ⋯ → 移到新窗口）；关闭后菜单里不再有这些项，记住的窗口启动时也不再打开。每个打开的窗口都会持续更新实时回复；同时显示多个窗口会明显增加 CPU 占用，也可能让打字变卡。不用的窗口可以最小化或关闭。",
+  "desk.performanceHint": "每个打开的窗口都会持续更新实时回复；同时显示多个窗口会明显增加 CPU 占用，也可能让打字变卡。不用的窗口可以最小化或关闭。",
+} as const;
+
+export const en: Record<keyof typeof zhCN, string> = {
+  "desk.moveToWindow": "Move to new window",
+  "desk.moveToWindowHint": "Open this conversation in another window, for example on another display; close that window and the conversation comes back to the tray here.",
+  "desk.moveFailed": "Could not open a new window (at most 4).",
+  "desk.backToMain": "Back to main window",
+  "desk.inOtherWindow": "This conversation is in another window",
+  "desk.empty": "No conversation in this window.",
+  "desk.title": "Desk {n}",
+  "desk.openIn": "Open in desk {n}",
+  "desk.openInMain": "Open in main window",
+  "desk.openInNew": "Open in new window",
+  "desk.openInHint": "An {{agent}} is open once: it moves there from where it is now.",
+  "desk.jumpDesk": "{name} is open in desk {n}: goes there, no second copy",
+  "desk.jumpMain": "{name} is open in the main window: goes there, no second copy",
+  "desk.setting": "Multiple windows",
+  "desk.settingHint": "Move a conversation into its own window, for example on another display (conversation ⋯ → Move to new window); when off, those menu items go away and remembered windows don't reopen at start. Each open window keeps updating live replies. Several windows on screen use noticeably more CPU and can make typing laggy. Minimise or close windows you aren't using.",
+  "desk.performanceHint": "Each open window keeps updating live replies. Several windows on screen use noticeably more CPU and can make typing laggy. Minimise or close windows you aren't using.",
+};

@@ -2,6 +2,7 @@
 // with an optional Director and its directory in one `create_project` mutation; older cutex needs a
 // Director (an agent outside every project) and a separate `set_workspace_root`.
 import type { ProjectsResponse } from "@cutex-desktop/protocol";
+import { clipToWidth } from "./badgeWidth";
 import type { DesktopApi, SidebarSnapshot } from "../../../shared/ipc";
 
 /** cutex feature: projects exist without a Director (create_project / assign_director / clear_director). */
@@ -34,9 +35,9 @@ function nameHash(text: string): string {
   return h.toString(36);
 }
 
-/** Badge shown when the user typed none: the first two characters of the name. */
-export function autoBadge(name: string): string {
-  return name.trim().slice(0, 2).toUpperCase();
+/** Badge shown when the user typed none: the name's first characters, at most BADGE_MAX_WIDTH columns (one CJK character or two letters). */
+export function autoBadge(name: string, max = 2): string {
+  return clipToWidth(name.trim().toUpperCase(), max);
 }
 
 /** Agents that can become a Director: active, managed, and in no project. */

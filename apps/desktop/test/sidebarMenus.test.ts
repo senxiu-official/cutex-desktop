@@ -1,8 +1,15 @@
 // Sidebar project / agent menus: the project menu's items (open, create, bulk, display prefs, copy,
 // Director), 「在线空闲不收起」 as a host-keyed pref, and the agent menu's additions.
+import { translate } from "../src/renderer/src/i18n";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import { normalizeEntries, type MenuAction, type MenuEntry } from "../src/renderer/src/lib/contextMenu";
+
+function staticSubmenu(entries: MenuAction["submenu"]): MenuEntry[] {
+  expect(Array.isArray(entries)).toBe(true);
+  if (!Array.isArray(entries)) throw new Error("Expected a static submenu fixture");
+  return entries;
+}
 import type { AgentRow, ProjectGroup, SidebarGroup } from "../src/renderer/src/lib/sidebar";
 
 const projectMutation = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({}));
@@ -74,12 +81,16 @@ describe("project menu", () => {
       "menu.renameProject",
       "remark.menu",
       "projects.addMember…",
-      // Last, after a separator: 在主界面调整 (lead 2026-10-18).
+      // Last, after a separator: 在主界面调整 (lead 2026-10-18), then 侧栏设置… (design 006 v1).
       "|",
       "customize.sidebar.menu",
+      translate("settings.panel.menu.sidebar"),
+      // 「使用小指南」 (lib/panelGuides).
+      "|",
+      translate("onboarding.panel.menu"),
     ]);
     const open = find(projectMenu(group, "/w", false, null, t), "menu.openProjectPage")!;
-    expect(labels(open.submenu!)).toEqual(["projects.tab.overview", "projects.tab.agents", "projects.tab.tasks", "projects.tab.memory", "projects.tab.settings"]);
+    expect(labels(staticSubmenu(open.submenu))).toEqual(["projects.tab.overview", "projects.tab.agents", "projects.tab.tasks", "projects.tab.memory", "projects.tab.settings"]);
   });
 
   it("添加成员… / 更换主管… open the agent tab with its picker", async () => {
@@ -119,7 +130,7 @@ describe("project menu", () => {
     const prefs = await import("../src/renderer/src/lib/prefs");
     const { projectMenu } = await import("../src/renderer/src/lib/projectMenus");
     // One level down, under 侧栏显示 › (not a stray click on the main menu).
-    const item = () => find(find(projectMenu(group, null, false, null, t), "menu.sidebarDisplay")!.submenu!, "menu.idleUnfolded")!;
+    const item = () => find(staticSubmenu(find(projectMenu(group, null, false, null, t), "menu.sidebarDisplay")!.submenu), "menu.idleUnfolded")!;
     expect(find(projectMenu(group, null, false, null, t), "menu.idleUnfolded")).toBeUndefined();
     item().onSelect();
     expect(prefs.hostListKeys("idleUnfolded", ["local"])).toHaveLength(1);
@@ -223,6 +234,16 @@ describe("升级运行时 (claude-runtime-repin)", () => {
 });
 
 describe("agent menu additions", () => {
+  it("offers an explicit restart for changed Operator tools and warns about any active turn", async () => {
+    await seed();
+    const { useApp } = await import("../src/renderer/src/store");
+    const { agentMenu } = await import("../src/renderer/src/lib/menus");
+    const sidebar = useApp.getState().sidebar!;
+    useApp.setState({ sidebar: { ...sidebar, operatorRestartRequired: ["a"] } });
+    const action = find(agentMenu(session("a"), t, "local"), "projects.operatorRestartNow");
+    expect(action?.armed).toBe("projects.operatorRestartArmed");
+    expect(labels(agentMenu(session("a", { status: "offline" }), t, "local"))).not.toContain("projects.operatorRestartNow");
+  });
   it("copy submenu, open project, restart; fork only with session-fork", async () => {
     await seed();
     const { agentMenu } = await import("../src/renderer/src/lib/menus");
@@ -230,7 +251,7 @@ describe("agent menu additions", () => {
     expect(items).toEqual(expect.arrayContaining(["menu.openProject", "menu.copy", "menu.restart"]));
     expect(items).not.toContain("menu.forkAgent");
     expect(items).not.toContain("menu.markRead");
-    expect(labels(find(agentMenu(session("a"), t, "local"), "menu.copy")!.submenu!)).toEqual(["menu.copyName", "menu.copyCwd", "menu.copyId"]);
+    expect(labels(staticSubmenu(find(agentMenu(session("a"), t, "local"), "menu.copy")!.submenu))).toEqual(["menu.copyName", "menu.copyCwd", "menu.copyId"]);
     await seed(["session-fork"]);
     expect(labels(agentMenu(session("a"), t, "local"))).toContain("menu.forkAgent");
     // Offline: no restart.

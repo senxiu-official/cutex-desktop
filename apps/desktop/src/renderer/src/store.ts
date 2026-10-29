@@ -1,7 +1,21 @@
+import type { OwnerJoinDelegation } from "@cutex-desktop/protocol";
+import type { DesktopEvents } from "../../shared/ipc";
+import { mentionRichText, wireForSend } from "./lib/mentionWire";
+import { LIVE_DELTAS_FEATURE } from "@cutex-desktop/cutex-client";
+import { applyLiveDelta, invalidateLiveDeltas, fullTextItemTerminalOf } from "./lib/liveDeltas";
+import { dshOnlyLaunch } from "./lib/dshLaunch";
+import { forkCompletionNotice } from "./lib/forkProfile";
+import { AGENT_PAUSE_CHANGED, parseAgentPause } from "../../shared/agentPause";
+import { noteAgentPause } from "./lib/agentPause";
 import { composerDrafts, insertComposerDraft } from "./lib/composerDrafts";
+import { isFoldedConversation } from "./lib/foldedTest";
+import { selectionAware, shownInActiveWindow } from "./lib/windowScope";
+import { appHasFocus, appLookWindow } from "./lib/appFocus";
 import { traceSendStage, type SendTraceRecord } from "../../shared/sendTrace";
 import { create } from "zustand";
-import type { AdmissionRef, AsksPause, EventEnvelope, QueueAdmission, QueueItem, QueuePause, SubmitStrategy, UserInputSubmitResult } from "@cutex-desktop/protocol";
+import { eventMediaNotice } from "../../shared/mediaBlobs";
+import type { AdmissionRef, AsksPause, EventEnvelope, QueueAdmission, QueueItem, QueuePause, SessionResource, SubmitStrategy, UserInputSubmitResult } from "@cutex-desktop/protocol";
+import { snapshotWithHeld } from "./lib/pendingMetadata";
 import type { ApprovalsReviewer, CollaborationModeMask, ThreadGoalStatus } from "@cutex-desktop/protocol/codex/v2";
 import { LAUNCH_REVIEWER_FEATURE, reviewerForCreate, type PermissionMode } from "./lib/permissionModes";
 import { claudeOnlyLaunch, codexOnlyLaunch } from "./lib/newAgentClaude";
@@ -10,18 +24,27 @@ import type { ClaudeLaunchMode, LaunchOverrides } from "../../shared/launch";
 import { api, apiFor, bridge } from "./bridge";
 import { hostEpoch as connEpochOf, scopeHosts } from "../../shared/hosts";
 import { routeAgentHost } from "./lib/agentHostRoute";
-import { nextPreview, previewFromResource, type ActivityPreview } from "./lib/activity";
+import { activityTimes, nextPreview, plainPreview, previewFromResource, type ActivityPreview } from "./lib/activity";
+import { markReverted, previewOfKept } from "./lib/revertedPreview";
 import { emitNotify, retractNotify } from "./lib/notifyEvents";
 import { retractionOfApproval, retractionOfHostEvent, startLookRetract } from "./lib/notifyRetract";
 import { applyTurnEvent, endTurn, serverRequestEventOf, turnEventOf, turnOwnerOf, type TurnTriggerState } from "./lib/turnTriggers";
 import { markSeenOn, recordTurnEndOn, turnEndOf } from "./lib/turnUnread";
-import { agentFeaturesOf, lacks } from "./lib/agentFeatures";
+import { agentFeaturesOf, lacks, isAcpAgent } from "./lib/agentFeatures";
 import { applyApprovalChange, approvalChangeOf, approvalOfToolEvent, APPROVALS_FEATURE, APPROVALS_LIVE_FEATURE, noteApprovalState, sortApprovals, withoutApproval } from "./lib/approvals";
 import { parseUnsupported } from "../../shared/unsupported";
-import { QUEUE_STEER_FEATURE, queueSteerNotice } from "./lib/queueSteer";
+import { QUEUE_STEER_FEATURE, queueMergeNotice, queueSteerNotice, queueSteerRaw } from "./lib/queueSteer";
+import { beginQueueInsert, clearQueueInsert, dismissQueueInsert, finishQueueInsert, hasQueueInsertRequest, insertFeedbackOf, markQueueInsertDelivered, noteQueueInsertImageDelivery, queueInsertByToken, reconcileQueueInsert, setQueueInsertChecking, useQueueInsertFeedback } from "./lib/queueInsertFeedback";
+import { withoutDeliveredOwnerItems } from "./lib/ownerInputDelivery";
+import { OUTCOME_CHECK_DELAYS_MS, OUTCOME_EVENT_MIN_GAP_MS, OUTCOME_SLOW_POLLS_MS, rawErrorText, steerOutcome } from "./lib/steerOutcome";
+import { hasImageInput, imageDeliveryOf, imageSteerMode, refusesImageSteer } from "./lib/imageSteer";
+import { parseQueueSteerError } from "../../shared/queueSteer";
+import { mergedText, planQueueMerge } from "../../shared/queueMerge";
 import { QUOTA_NATIVE_FEATURE, QUOTA_UPDATED_EVENT, quotaEventProfiles } from "./lib/quota";
-import { newPendingSteer, recordedSteers, resolveChecked, settlePendingSteers, type PendingSteer, type SteerSettlement } from "./lib/pendingSteers";
-import { confirmOutbox, failOutbox, flushedOutboxEntry, flushOutbox, hasUnlandedTurn, markOutboxDispatched, markOutboxWaiting, newOutboxEntry, setOutboxStage, predictPlacement, pruneHidden, reconcileOutbox, removeOutbox, retryOutbox, sendErrorText, submitLandedPaused, updateOutbox, type OutboxEntry } from "./lib/outbox";
+import { newPendingSteer, recordedSteers, resolveChecked, settlePendingSteers, type PendingSteer, type SettleOptions, type SteerSettlement } from "./lib/pendingSteers";
+import { runtimeOf } from "./lib/agentList";
+import { loadPendingSteers, savePendingSteers } from "./lib/pendingSteerStore";
+import { hasClientId, confirmOutbox, failOutbox, flushedOutboxEntry, flushOutbox, hasUnlandedTurn, markOutboxDispatched, markOutboxWaiting, newOutboxEntry, setOutboxStage, predictPlacement, pruneHidden, reconcileOutbox, removeOutbox, retryOutbox, sendErrorText, submitLandedPaused, updateOutbox, type OutboxEntry } from "./lib/outbox";
 import { collaborationModeOf, seedThreadSettings } from "./lib/threadSettings";
 import { applyEvent, settleStaleTurns, contextUsageFromLatest, contextUsageOf, emptyTimeline, insertInteraction, isChildThreadEvent, isDockEvent, planFromLatest, planSnapshotOf, seedContextUsage, seedInteractions, seedPlan, timelineFromThreadRead, type ThreadSettingsView, type TimelineState } from "./lib/timeline";
 import { answeredRecord, elsewhereRecord, putRecord, recordsOf, requestTurnId, retainSessions, type InteractionRecord } from "./lib/interactionLog";
@@ -29,7 +52,7 @@ import { bootPlan, dismissPlan as dismissedPlan, restorePlan as restoredPlan, ne
 import { forgetFreshPlans, getCachedPlan, isPlanFresh, setCachedPlan } from "./lib/planCache";
 import type { LatestPlan, SessionHistory } from "@cutex-desktop/protocol";
 import { answerFailureOf } from "./lib/interactions";
-import { childStatusFromEvent } from "./lib/subagents";
+import { childStatusFromEvent, claudeTaskStatusFromEvent } from "./lib/subagents";
 import { interruptSendText, pausedSection, restorePlan } from "./lib/queuePause";
 import { OUTBOX_STUCK_MS, outboxLingerRecord } from "./lib/outboxDiagnostics";
 import { ADMISSION_ORDER_FEATURE, applyMove } from "./lib/admissionOrder";
@@ -41,7 +64,8 @@ import { isArchived, lifecycleFlip } from "./lib/archivedAgent";
 import { emptyPendingChat, hasDraftContent, pendingChatSteps, type PendingChatState, type PendingDraft } from "./lib/pendingChat";
 import { translate, type MessageKey } from "./i18n";
 import { beginRuntimeStart, failedStartStatus, offlineRuntime } from "./lib/runtimeStart";
-import { fireHostReset, fireHostSwitch } from "./lib/hostSwitch";
+import { captureHostAction, fireHostReset, fireHostSwitch } from "./lib/hostSwitch";
+import { componentEventOf } from "../../shared/components";
 import { noteHostAccess } from "./lib/hostAccess";
 import { hostFeatureSet, isOwnerFeatures, userAccessOf } from "../../shared/users";
 import { claimHostIds, claimList, dropLegacy, hostKey, keyFocus, projectList, registerHostKeyed, setKeyFocus, writeList } from "./lib/hostKeys";
@@ -54,10 +78,15 @@ import { noteCatalogNames } from "./lib/modelDisplay";
 import { MESSAGES_WAKE_METHOD } from "../../shared/ipc";
 import { cloneTimeline, historyPageSize, MAX_PAGE_TURNS, olderAfterPage, olderFromPage, prependHistory, INTERRUPT_STEER_CHECK_TURNS, STEER_CHECK_TURNS, type OlderHistory } from "./lib/historyPages";
 import { getUiPrefs, setUiPref } from "./lib/prefs";
+import { shareSidebar } from "./lib/sidebarShare";
 import { agentManagementToolCompleted, coalescedRefresh, sidebarRefreshesForMethod, type CoalescedRefresh } from "./lib/coalescedRefresh";
 import type { ItemId, PageParams } from "./modules/types";
 import type { CustomizeRegion } from "./lib/customize";
+import { openPageElsewhere, pageInShelfShown } from "./lib/pageOpener";
+import { closeSettingsShelf, openSettingsShelf, resetSettingsSubPage, setSettingsShelfMaximized, useSettingsShelf } from "./lib/settingsShelf";
 import { isViewOf, viewKey, viewKeyParts, type ViewKey } from "./lib/viewKey";
+import { FrameBatch, isStreamDelta } from "./lib/streamBatch";
+import { forgetAgentPicture } from "./lib/agentPicture";
 
 /** Notices of the move refusals cutex names (shared/queueMove). */
 const QUEUE_MOVE_NOTICES: Record<QueueMoveErrorKind, MessageKey> = {
@@ -75,6 +104,8 @@ export interface SessionView {
   timeline: TimelineState;
   /** cutex-held user input queue (survives window close, shared with the TUI). */
   queue: QueueItem[];
+  /** Positive queueId/clientId correlations retained while this view is loaded (not a second queue). */
+  deliveredOwnerQueueIds?: ReadonlySet<string>;
   /** cutex queue pause after a plain stop (queue-pause): nothing is auto-sent while set. */
   queuePause: QueuePause | null;
   /** cutex asks pause (asks-pause-v2): only an explicit owner 暂停委托 sets it; resume or the owner's next message clears it. */
@@ -83,6 +114,9 @@ export interface SessionView {
   admission?: QueueAdmission | null;
   /** Bumped on every mutation so React re-renders (timeline is mutated in place). */
   version: number;
+  /** The part of `version` that came from streamed text deltas only (lib/streamBatch): readers that
+   *  ignore reply / reasoning text (status items) follow `version - textVersion`. */
+  textVersion?: number;
   /** "offline": timeline came from stored history (runtime not running); re-bootstrapped on online. */
   /** "archived": a retired agent, read-only from GET /history (no bootstrap, no feed; lib/archivedAgent). */
   historySource: "live" | "offline" | "archived";
@@ -91,6 +125,8 @@ export interface SessionView {
   startErrorQueueIds?: string[];
   /** History pages: older turns still on the host (lib/historyPages); null = all loaded. */
   older: OlderHistory | null;
+  /** history-media-refs: replaced media payloads seen while loading this conversation. */
+  mediaRefs?: number;
 }
 
 /** An agent of a host: what per-agent actions, signals and notices address (panes step 2). */
@@ -116,13 +152,18 @@ export type ProjectTab = "overview" | "agents" | "tasks" | "memory" | "settings"
 export type ProfilePage = { kind: "profile"; name: string } | { kind: "new" };
 /**
  * What the main area shows (docs/desktop-modules.md §3.2): the selected agent's conversation, or a
- * `main.page` item (modules/<id>/) with its in-memory params. Settings is the shell's page
- * `shell.settings` (params: tab, profile, create).
+ * `main.page` item (modules/<id>/) with its in-memory params. Settings is not a view: it is the global
+ * Settings Shelf beside it (lib/settingsShelf, owner 2026-10-21); the shell's page `shell.settings`
+ * (params: tab, profile, create) opened with openPage lands there.
  */
 export type MainView = { kind: "conversation" } | { kind: "page"; page: ItemId; params: PageParams };
 export const SETTINGS_PAGE: ItemId = "shell.settings";
 /** The draft page of 新工作 (quick-chats module); newQuickChat opens it. */
 export const DRAFT_CHAT_PAGE: ItemId = "quick-chats.draft";
+/** 新建{{agent}} (agent-config module): like 新工作 it covers the conversation column, never a Shelf pane (design 038). */
+export const NEW_AGENT_PAGE: ItemId = "agent-config.newAgent";
+/** Pages that take the focused conversation column (design 038) whatever 页面打开位置 says. */
+export const isColumnPage = (page: string): boolean => page === DRAFT_CHAT_PAGE || page === NEW_AGENT_PAGE;
 /** The open page's id, or null in the conversation. */
 export const pageOf = (view: MainView): ItemId | null => (view.kind === "page" ? view.page : null);
 /** Settings → Profiles sub-page from the settings page params. */
@@ -139,6 +180,9 @@ export type SettingsTab =
   | "sides"
   | "composer"
   | "status"
+  // 面板 (design 006 v1; also sidebar / conversation / status / sides above)
+  | "tray"
+  | "desktop"
   | "notifications"
   // 连接
   | "me"
@@ -163,13 +207,16 @@ export type SettingsTab =
   | "nci"
   // 数据
   | "usage"
+  | "storage"
   | "archive"
   // 系统
   | "modules"
   | "shortcuts"
   | "backend"
   | "updates"
-  | "about";
+  | "about"
+  | "whats-new"
+  | "help";
 
 /**
  * What the app keeps of a connected host it does not show (multi-host RFC §6.2 / §10, P0: every
@@ -246,13 +293,19 @@ interface AppState {
    * (lib/agentHostRoute; a view opened on the wrong host moves to its own), else from the same host.
    */
   reloadSession(sessionId: string, hostId?: string): Promise<void>;
+  refreshAdmission(sessionId: string, hostId: string): Promise<void>;
   /**
    * `extra`: image / skill input items. Optimistic (lib/outbox): the message shows up at once where
    * it will land, marked as sending, and is replaced by cutex's item; sends of one agent go out in
    * order. Rejects on failure (the entry stays, failed). `keepFailed: false` drops it instead (the
    * new-chat draft keeps its own copy).
    */
-  submit(text: string, strategy: SubmitStrategy, extra?: ExtraInput[], opts?: { keepFailed?: boolean; sessionId?: string; hostId?: string }): Promise<UserInputSubmitResult | null>;
+  /*
+   * `steerImages` (image-input-steering, an explicit 插话 of a draft with images while a turn runs): when
+   * cutex queues it (its default for images), that queue item is steered at once (queueSendNow, same
+   * clientUserMessageId, never starting a turn); a refusal leaves it queued and says why.
+   */
+  submit(text: string, strategy: SubmitStrategy, extra?: ExtraInput[], opts?: { keepFailed?: boolean; sessionId?: string; hostId?: string; joinDelegation?: OwnerJoinDelegation; steerImages?: boolean }): Promise<UserInputSubmitResult | null>;
   /*
    * PER-AGENT STATE (panes step 2): every map below is keyed by view key `<host>\n<session id>`
    * (lib/viewKey `viewKey(hostId, sessionId)`), so the same session id on two hosts never shares sends,
@@ -310,11 +363,20 @@ interface AppState {
   notice: { text: string; tone: "info" | "error"; nonce: number; agent?: ViewKey } | null;
   notify(text: string, tone?: "info" | "error", agent?: AgentAddress): void;
   /** Where Settings should land (e.g. `/logout` → this profile's account section). */
-  settingsFocus: { profile?: string; anchor?: string } | null;
-  /** 在主界面调整 (components/CustomizeHost): the region whose panel is open, or null. */
-  customize: { region: CustomizeRegion } | null;
-  /** Opens the panel of `region` (= services.ui.customize; an open page closes first); open on it already: closes it. */
-  openCustomize(region: CustomizeRegion): void;
+  /** `kimiAccount`: the new-Profile form opens on that Kimi account (Kimi accounts → 用这个账户新建 Profile). */
+  settingsFocus: { profile?: string; anchor?: string; kimiAccount?: string } | null;
+  /**
+   * 在主界面调整 (components/CustomizeHost; owner 2026-10-21): the region of the real UI in edit state while
+   * the Settings Shelf shows its settings page (`page`) beside it, or null. `back`: the Settings Shelf
+   * before the edit started — finishing returns to it (closed again, maximised again, the page it was on).
+   */
+  customize: { region: CustomizeRegion; page?: SettingsTab; back: { open: boolean; maximized: boolean; params: PageParams } } | null;
+  /**
+   * Puts `region` into edit state (= services.ui.customize; an open page closes first) with the Settings
+   * Shelf on `page` beside it (un-maximised so the region is seen); already editing it: finishes.
+   */
+  openCustomize(region: CustomizeRegion, page?: SettingsTab): void;
+  /** Finishes the edit (完成 / Esc): back to how the Settings Shelf was before. */
   closeCustomize(): void;
   /** Answer a pending server request (approval / question / elicitation) of the selected agent. */
   respond(requestId: string | number, reply: ServerRequestReply, sessionId?: string, hostId?: string): Promise<void>;
@@ -332,13 +394,26 @@ interface AppState {
   /** `sessionId`: the agent whose queue row was clicked (default: the selected one, read at call time). */
   queueRemove(item: QueueItem, sessionId?: string, hostId?: string): Promise<void>;
   /** Remove from the queue and return its text so the composer can edit it. */
-  queueTakeForEdit(item: QueueItem, sessionId?: string, hostId?: string): Promise<string>;
+  /** 放回输入框编辑: the item's text, images and skills go into the agent's composer draft; the item leaves the queue. */
+  queueTakeForEdit(item: QueueItem, sessionId?: string, hostId?: string): Promise<void>;
   /**
    * "Steer" a queued item into the running turn (main: queuePromote): with queue-steer cutex's
    * atomic `queue/steer` (a refusal keeps it queued and throws a readable notice); older cutex:
    * CAS-remove + submit `auto` under the item's own clientUserMessageId/origin, so it can't be sent twice.
    */
-  queueSendNow(item: QueueItem, sessionId?: string, hostId?: string): Promise<void>;
+  queueSendNow(item: QueueItem, sessionId?: string, hostId?: string, joinDelegation?: OwnerJoinDelegation, options?: { ifIdle?: "fail" }): Promise<void>;
+  /**
+   * An unsure 插话 (its outcome unknown, the resync could not tell; lib/steerOutcome), the owner's choice:
+   * `resend` = 再发一次, a NEW message (new clientUserMessageId, strategy auto) unless cutex's queue still
+   * lists it; `delivered` = 已送达 (local); `forget` = 删除 the receipt (local). Never automatic.
+   */
+  queueInsertDecide(token: object, choice: "resend" | "delivered" | "forget", sessionId: string, hostId: string): Promise<void>;
+  /**
+   * 「全部合并插入」 (shared/queueMerge, main queueMergeInsert): the queued owner messages `items`
+   * (queue order; delegations never) merged into ONE insert under the first one's id. Optimistic like
+   * 插入; a refusal throws a readable notice (merged-but-unsent text stays ONE queued item).
+   */
+  queueMergeInsert(items: QueueItem[], sessionId?: string, hostId?: string, joinDelegation?: OwnerJoinDelegation): Promise<void>;
   /**
    * admission-order: move an owner queued item in front of `before` (null = to the end). Optimistic:
    * the panel shows the new order at once and goes back if cutex refuses; the error is a readable
@@ -375,7 +450,7 @@ interface AppState {
   /** Agents whose queue is transiently stopped by interrupt-and-send (not shown as paused). */
   queueHandoff: Record<ViewKey, boolean>;
   /** `focus.profile` (tab "profiles") opens that profile's detail page; `focus.create` the 添加 form. */
-  openSettings(tab?: SettingsTab, focus?: { profile?: string; anchor?: string; create?: boolean }): void;
+  openSettings(tab?: SettingsTab, focus?: { profile?: string; anchor?: string; create?: boolean; kimiAccount?: string }): void;
   /** Shows a `main.page` item (= services.ui.openPage, modules/app.ts). */
   openPage(page: ItemId, params?: PageParams): void;
   /** Back to the conversation. */
@@ -389,7 +464,7 @@ interface AppState {
    *  applies plan mode and the goal, then the messages typed meanwhile go out (lib/pendingChat). */
   pendingChat: PendingChatState | null;
   queuePendingChat(draft: PendingDraft): void;
-  setPendingChat(patch: { hostId?: string | null; profile?: string | null; launch?: LaunchOverrides; permissionMode?: PermissionMode | null; claude?: boolean; claudeModes?: ClaudeLaunchMode[] | null; plan?: boolean; goal?: string | null }): void;
+  setPendingChat(patch: { hostId?: string | null; profile?: string | null; launch?: LaunchOverrides; permissionMode?: PermissionMode | null; claude?: boolean; dsh?: boolean; claudeModes?: ClaudeLaunchMode[] | null; plan?: boolean; goal?: string | null }): void;
   /**
    * Fallback for hosts without launch-approvals-reviewer: set this reviewer on the new agent's
    * thread once it is live (applied when its view loads with a running native; lib/permissionModes).
@@ -404,11 +479,13 @@ interface AppState {
    * host (default: the host of its open view, else the focus host; menus of another host's rows pass it).
    */
   sessionAction(sessionId: string, method: SessionActionMethod, params?: Record<string, unknown>, hostId?: string): Promise<unknown>;
+  /** Replaces `fields` of agent `sessionId` in host `hostId`'s sidebar snapshot at once (optimistic metadata, lib/menus). */
+  patchSessionResource(sessionId: string, hostId: string, fields: Partial<SessionResource>): void;
   /**
    * Fork (session-fork): a new agent from this one's thread up to `afterTurnId` (null = latest),
-   * selected afterwards with a short notice. Non-destructive: no confirmation.
+   * selected afterwards with a short notice. The caller handles optional profile/cold-cache confirmation.
    */
-  forkSession(sessionId: string, afterTurnId: string | null, hostId?: string): Promise<void>;
+  forkSession(sessionId: string, afterTurnId: string | null, hostId?: string, profile?: string): Promise<void>;
   /**
    * Roll the thread back so the turn before `beforeTurnId` is the last (history, live). `rewindFiles`
    * (Claude agents with file rewind): also restore the files from Claude Code's checkpoint.
@@ -441,7 +518,8 @@ interface AppState {
   services: ServiceView[] | null;
   refreshServices(): Promise<void>;
   /** Revert the thread to before `turnId` (live, no restart) and put its text back in the composer. */
-  editAndResend(sessionId: string, turnId: string, text: string, hostId?: string): Promise<void>;
+  /** `extra`: the message's image / skill input items (shared/input messageInputItems), back as composer attachments. */
+  editAndResend(sessionId: string, turnId: string, text: string, hostId?: string, extra?: unknown[]): Promise<void>;
   /** Pending owner approvals (cutex owner-approvals), newest first; null until loaded / unsupported. */
   approvals: ApprovalRecord[] | null;
   /**
@@ -498,11 +576,14 @@ function newView(): SessionView {
     historySource: "live",
     startError: null,
     older: null,
+    mediaRefs: 0,
   };
 }
 
 /** Coalesced queue re-reads per agent (by view key). */
 const queueTimers = new Map<ViewKey, ReturnType<typeof setTimeout>>();
+/** The idle check of carried steers (lib/pendingSteers `recheckAt`), per agent (by view key). */
+const steerTimers = new Map<ViewKey, ReturnType<typeof setTimeout>>();
 /** Last collaboration mode seen per agent (AgentKey; lib/threadSettings: fills cutex's resume snapshot gap). */
 const lastCollabMode = new Map<string, NonNullable<ThreadSettingsView["collaborationMode"]>>();
 /** expectApprovalsReviewer: reviewer still to set on a new thread (hostKey → reviewer). */
@@ -520,6 +601,11 @@ function dropHostEntries(map: Map<string, unknown>, hostId: string): void {
 }
 /** Turns interrupted by "interrupt & send": their unread steers are re-sent, not restored. */
 const resendTurns = new Set<string>();
+/**
+ * 插话 requests with an unknown outcome being resolved (lib/steerOutcome), by their feedback token: the
+ * steer as sent (for the history match), the next slow poll and when it was last checked.
+ */
+const unknownInserts = new Map<object, { sessionId: string; host: string; probe: PendingSteer; queueId: string; slow: number; checkedAt: number; running?: boolean; timer?: ReturnType<typeof setTimeout> }>();
 /** Order stamps for outbox confirmations vs. queue lists (lib/outbox). */
 let outboxTick = 0;
 /** Per-agent chain of submits (by view key), so optimistic sends reach cutex in the order they were made. */
@@ -577,7 +663,8 @@ function snapshotIds(snapshot: SidebarSnapshot): Set<string> {
 }
 /** A sidebar snapshot as the app keeps it (archived defaults, untitled quick chats named). */
 function preparedSidebar(snapshot: SidebarSnapshot): SidebarSnapshot {
-  const sidebar = { ...snapshot, retired: snapshot.retired.map(withRetiredDefaults) };
+  // Note / badge writes still in flight stay drawn (lib/pendingMetadata).
+  const sidebar = snapshotWithHeld({ ...snapshot, retired: snapshot.retired.map(withRetiredDefaults) });
   for (const s of [...sidebar.active, ...sidebar.retired]) {
     const untitled = untitledChatName(s, translate("chat.untitled"));
     if (untitled) s.displayName = untitled;
@@ -600,7 +687,22 @@ let initialized = false;
 // Activity updates arrive per streamed delta across all agents; batch them per animation frame.
 let pendingActivity: Record<string, ActivityPreview> | null = null;
 
-export const useApp = create<AppState>((set, get) => {
+/**
+ * Where an open goes (multi-window P3, lib/windowRoute): true = it was handled elsewhere (the agent shows in another
+ * window's column, which took the focus), so this window's selection stays.
+ */
+let openRouter: ((hostId: string, sessionId: string) => boolean) | null = null;
+export function setOpenRouter(route: typeof openRouter): void {
+  openRouter = route;
+}
+/** Whether an open of this agent went to another window (lib/paneStore openAgentBeside asks too). */
+export function routedElsewhere(hostId: string, sessionId: string): boolean {
+  return !!openRouter?.(hostId, sessionId);
+}
+
+// Each app window sees its own selection through the hook (lib/windowScope, multi-window P3); getState / setState
+// are the active window's.
+export const useApp = selectionAware(create<AppState>((set, get) => {
   // A → B → A is still a different operation lifetime. Host IDs alone cannot fence it.
   let hostEpoch = 0;
   let pendingChatRun: object | null = null;
@@ -617,6 +719,44 @@ export const useApp = create<AppState>((set, get) => {
     return { host, current: () => epoch === hostEpoch && focus === focusHost() && (host === focus || (conn !== null && connEpochOf(get().hosts, host) === conn)) };
   };
   const focusHost = () => get().hosts?.active ?? "local";
+  // All capability reads share an ordering fence: a component event can supersede a
+  // connect/bootstrap read, including while that host moves between focus and slice.
+  const capabilityReads = new Map<string, object>();
+  const capabilityTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const beginCapabilitiesRead = (hostId: string) => {
+    const token = {};
+    capabilityReads.set(hostId, token);
+    const current = captureHostAction(hostId);
+    return () => current() && capabilityReads.get(hostId) === token;
+  };
+  const scheduleCapabilitiesReload = (hostId: string) => {
+    const current = beginCapabilitiesRead(hostId);
+    clearTimeout(capabilityTimers.get(hostId));
+    capabilityTimers.set(hostId, setTimeout(() => {
+      capabilityTimers.delete(hostId);
+      if (!current()) return;
+      void apiFor(hostId).capabilities().then((caps) => {
+        if (!current()) return;
+        const features = hostFeatureSet(caps);
+        if (hostId === focusHost()) {
+          if (get().daemon.kind !== "connected") return;
+          noteHostAccess(hostId, caps);
+          set({ features, featuresKnown: true });
+          // This read may have superseded the initial connect read: complete its
+          // owner-only bootstrap too, without reloading already-known lists on progress.
+          if (userAccessOf(caps).isOwner) {
+            if (get().services === null) void get().refreshServices();
+            if (get().approvals === null) void get().refreshApprovals();
+          }
+        } else {
+          const slice = get().byHost[hostId];
+          if (!slice || slice.daemon.kind !== "connected") return;
+          noteHostAccess(hostId, caps);
+          patchSlice(hostId, slice.epoch, { features, featuresKnown: true });
+        }
+      }, () => {});
+    }, 300));
+  };
   /** The host of an agent's view (the focus host unless it was opened from another host). */
   const hostOf = (sessionId: string) => sessionHostOf(sessionId, focusHost());
   /** An agent's view on `host` (default: `hostOf`). */
@@ -711,6 +851,33 @@ export const useApp = create<AppState>((set, get) => {
       const next = typeof patch === "function" ? patch(current) : patch;
       return { sessions: { ...state.sessions, [key]: { ...current, ...next } } };
     });
+
+  // Streamed text deltas re-render once per frame (lib/streamBatch): the timeline already holds them,
+  // only the version bump of their views waits; any other event of a view bumps it at once.
+  const streamBumps = new FrameBatch<ViewKey>((keys) =>
+    set((state) => {
+      let sessions: typeof state.sessions | null = null;
+      for (const key of keys) {
+        const current = state.sessions[key];
+        if (!current) continue;
+        sessions ??= { ...state.sessions };
+        sessions[key] = { ...current, version: current.version + 1, textVersion: (current.textVersion ?? 0) + 1 };
+      }
+      return sessions ? { sessions } : state;
+    }),
+  );
+
+  const liveSubBumps = new FrameBatch<ViewKey>(keys => set(state => {
+    let subTimelines: typeof state.subTimelines | null = null;
+    for (const key of keys) {
+      const { hostId, sessionId: threadId } = viewKeyParts(key);
+      const current = state.subTimelines[threadId];
+      if (!current || current.timeline.liveDeltas?.routeHost !== hostId) continue;
+      subTimelines ??= { ...state.subTimelines };
+      subTimelines[threadId] = { ...current, version: current.version + 1 };
+    }
+    return subTimelines ? { subTimelines } : state;
+  }));
 
   /** An agent on `hostId` held live by a pane (retainView). */
   const viewLive = (sessionId: string, hostId = hostOf(sessionId)) => !!get().views[viewKey(hostId, sessionId)];
@@ -846,7 +1013,15 @@ export const useApp = create<AppState>((set, get) => {
   const settleOutbox = (sessionId: string, queueTick: number | null, host: string) => {
     const view = viewOn(sessionId, host);
     if (!view) return;
-    setOutbox(sessionId, host, (list) => reconcileOutbox(list, view.timeline, view.queue, queueTick));
+    const known = insertFeedbackOf(host, sessionId)(useQueueInsertFeedback.getState()).map((feedback) => feedback.item);
+    const delivered = (id: string) => hasClientId(view.timeline, id) || [...view.queue, ...known].some((q) => q.clientUserMessageId === id && q.state === "delivered");
+    reconcileQueueInsert(host, sessionId, delivered);
+    const owner = withoutDeliveredOwnerItems(view.queue, view.admission ?? null, delivered, known, view.deliveredOwnerQueueIds);
+    if (owner.queue !== view.queue || owner.admission !== (view.admission ?? null) || (owner.deliveredOwnerQueueIds.size > 0 && owner.deliveredOwnerQueueIds !== view.deliveredOwnerQueueIds)) patchSession(sessionId, () => owner, host);
+    setOutbox(sessionId, host, (list) => {
+      const kept = list.filter((entry) => !delivered(entry.id));
+      return reconcileOutbox(kept.length === list.length ? list : kept, view.timeline, owner.queue, queueTick);
+    });
     const key = viewKey(host, sessionId);
     const hidden = get().queueHidden[key];
     if (queueTick !== null && hidden?.length) {
@@ -869,7 +1044,7 @@ export const useApp = create<AppState>((set, get) => {
   const placementFor = (sessionId: string, host: string, strategy: SubmitStrategy, offlineQueued: boolean) => {
     const view = viewOn(sessionId, host);
     const resource = sidebarOn(host)?.active.find((s) => s.cutexSessionId === sessionId);
-    const busy = !!view?.timeline.activeTurnId || hasUnlandedTurn(outboxOf(sessionId, host));
+    const busy = !!view?.timeline.activeTurnId || hasUnlandedTurn(outboxOf(sessionId, host)) || hasQueueInsertRequest(host, sessionId);
     return predictPlacement(strategy, busy, { offlineQueued, noSteer: lacks(agentFeaturesOf(resource), "turnSteer") });
   };
 
@@ -891,7 +1066,8 @@ export const useApp = create<AppState>((set, get) => {
       let answered = false;
       try {
         const result = await traceSendStage({ ...trace, stage: "ipc-submit" }, logSendTrace,
-          () => apiOn(host).submit(sessionId, entry.text, entry.strategy, entry.startIfOffline, { extra: entry.extra as ExtraInput[], clientUserMessageId: entry.id }));
+          // @-mentions go out as 「@Name」 (lib/mentionWire); the chip form stays in the outbox / draft.
+          () => apiOn(host).submit(sessionId, wireForSend(host, sessionId, entry.text), entry.strategy, entry.startIfOffline, { extra: entry.extra as ExtraInput[], clientUserMessageId: entry.id, joinDelegation: entry.strategy === "auto" ? entry.joinDelegation : undefined }));
         answered = true;
         // The request already left: acceptance may be unknown. Never make a new draft copy.
         if (!scope.current()) throw staleHost();
@@ -899,16 +1075,17 @@ export const useApp = create<AppState>((set, get) => {
         trackSteer(sessionId, host, result, entry.id, entry.text, entry.extra);
         settleOutbox(sessionId, null, host);
         if (result?.disposition === "queued") refreshQueue(sessionId, host);
+        if (result?.joinRefusal) notifyAgent(sessionId, host, queueSteerNotice(`queue_steer_refused:${result.joinRefusal}`, translate) ?? translate("queue.steer.joinChanged"), "error");
         // queue-idle-start: the item waits behind a stop's pause (older cutex: no `paused` field).
         if (submitLandedPaused(result)) notifyAgent(sessionId, host, translate("queue.addedToPaused"));
         return result;
       } catch (e) {
-        const message = sendErrorText(e, () => translate("outbox.capacityExceeded"), (code) => translate(`users.access.${code}`));
+        const message = sendErrorText(e, () => translate("outbox.capacityExceeded"), (code) => code === "owner_required" ? translate("queue.steer.ownerRequired") : translate(`users.access.${code}`));
         if (!scope.current()) {
           // The text must not vanish: keep it as a failed row of its own host (same id, see
           // orphanedSends); already back on that host (A → B → A) → show it now.
           if (keepFailed && !answered) {
-            stashOrphanedSend(host, sessionId, { ...entry, state: "failed", error: message, queueItem: undefined, confirmedTick: undefined });
+            stashOrphanedSend(host, sessionId, { ...entry, state: "failed", error: message, errorRaw: message === (e instanceof Error ? e.message : String(e)) || undefined, queueItem: undefined, confirmedTick: undefined });
             if ((get().hosts?.active ?? "local") === host) {
               const restored = takeOrphanedSends(host);
               set((state) => ({ outbox: mergeOrphans(state.outbox, restored) }));
@@ -916,7 +1093,9 @@ export const useApp = create<AppState>((set, get) => {
           }
           throw staleHost();
         }
-        setOutbox(sessionId, host, (list) => (keepFailed ? failOutbox(list, entry.id, message) : removeOutbox(list, entry.id)));
+        // No plain wording for it (a transport error, an unmapped cutex code): its own words go to 详情 only.
+        const raw = message === (e instanceof Error ? e.message : String(e));
+        setOutbox(sessionId, host, (list) => (keepFailed ? failOutbox(list, entry.id, raw ? rawErrorText(message) : message, raw) : removeOutbox(list, entry.id)));
         throw e;
       }
     };
@@ -932,17 +1111,63 @@ export const useApp = create<AppState>((set, get) => {
     const view = viewOn(sessionId, host);
     if (result?.disposition !== "steered" || !view) return;
     const images = (extra as { type?: string }[]).filter((x) => x.type === "image" || x.type === "localImage").length;
-    const pending = { ...newPendingSteer(view.timeline, clientUserMessageId, text, images, result.turnId ?? null), extra };
+    const imageDelivery = imageDeliveryOf(result);
+    const pending = { ...newPendingSteer(view.timeline, clientUserMessageId, text, images, result.turnId ?? null), extra, ...(imageDelivery ? { imageDelivery } : {}) };
     // The item may already have arrived while the request was in flight.
     const before = (steersOf(sessionId, host) ?? []).filter((p) => p.id !== clientUserMessageId);
-    settleSteers(sessionId, host, settlePendingSteers([...before, pending], view.timeline), null);
+    const steers = [...before, pending];
+    settleSteers(sessionId, host, settlePendingSteers(steers, view.timeline, steerOptions(sessionId, host)), null, steers);
+  };
+
+  /** How the agent's runtime treats a steer its turn did not read (lib/pendingSteers): a Claude adapter keeps it. */
+  const steerOptions = (sessionId: string, host: string): SettleOptions => {
+    const bar = sidebarOn(host);
+    const row = [...(bar?.active ?? []), ...(bar?.retired ?? [])].find((r) => r.cutexSessionId === sessionId);
+    return { carriesUnread: !!row && runtimeOf(row) === "claude", now: Date.now() / 1000 };
+  };
+
+  /** image-input-steering: what an explicit steer with images can do on this agent (lib/imageSteer; null = unknown / no feature). */
+  const imageSteeringOn = (sessionId: string, host: string) => imageSteerMode(featuresOn(host), sidebarOn(host)?.active.find((s) => s.cutexSessionId === sessionId));
+
+  /**
+   * An explicit 插话 of a draft with images that cutex queued (submit `steerImages`): steer that queue item
+   * now under the same clientUserMessageId, never starting a turn (a stop's pause is respected). Not
+   * queued (steered / started already), paused, refused to join, or gone (flushed meanwhile): nothing to do.
+   */
+  const steerQueuedDraft = async (sessionId: string, host: string, clientUserMessageId: string, result: UserInputSubmitResult | null) => {
+    if (result?.disposition !== "queued" || submitLandedPaused(result) || result.joinRefusal) return;
+    const answered = result.queue && typeof result.queue === "object" ? (result.queue as QueueItem) : undefined;
+    let item = answered?.queueId && answered.clientUserMessageId === clientUserMessageId && typeof answered.revision === "number" ? answered : undefined;
+    if (!item) {
+      const listed = await apiOn(host).queueList(sessionId).catch(() => null);
+      item = listed?.items.find((q) => q.clientUserMessageId === clientUserMessageId);
+    }
+    if (item) await get().queueSendNow(item, sessionId, host, undefined, { ifIdle: "fail" });
   };
 
   /** Apply a settlement; steers whose turn ended unrecorded are re-checked against the history. */
-  const settleSteers = (sessionId: string, host: string, settled: SteerSettlement, previous: PendingSteer[] | null) => {
+  const settleSteers = (sessionId: string, host: string, settled: SteerSettlement, previous: PendingSteer[] | null, input: readonly PendingSteer[] = previous ?? []) => {
     const key = viewKey(host, sessionId);
     if (settled.pending !== previous) set((state) => ({ pendingSteers: { ...state.pendingSteers, [key]: settled.pending } }));
+    // Steers that left as recorded (by clientId or by their text in the turn): a 「已插入当前回合」
+    // receipt for one turns 已送达 and leaves like any delivered one.
+    if (input.length) {
+      const kept = new Set([...settled.pending, ...settled.lost].map((p) => p.id));
+      const recorded = new Set(input.filter((p) => !kept.has(p.id)).map((p) => p.id));
+      if (recorded.size) reconcileQueueInsert(host, sessionId, (cid) => recorded.has(cid));
+    }
     if (settled.lost.length) void verifyLostSteers(sessionId, host, settled.lost);
+    // A carried steer of an idle Claude agent: settled again once its idle wait is over.
+    clearTimeout(steerTimers.get(key));
+    steerTimers.delete(key);
+    if (settled.recheckAt != null) {
+      steerTimers.set(key, setTimeout(() => {
+        steerTimers.delete(key);
+        const view = viewOn(sessionId, host);
+        const steers = steersOf(sessionId, host);
+        if (view && steers?.length) settleSteers(sessionId, host, settlePendingSteers(steers, view.timeline, steerOptions(sessionId, host)), steers);
+      }, Math.max(0, settled.recheckAt * 1000 - Date.now()) + 50));
+    }
   };
 
   /**
@@ -971,6 +1196,70 @@ export const useApp = create<AppState>((set, get) => {
     const undelivered = missing.length - resend.length;
     if (undelivered > 0) notifyAgent(sessionId, host, translate("steer.undeliveredNotice", { n: undelivered }), "error");
     if (resend.length) await sendMergedSteers(sessionId, host, resend);
+  };
+
+  const forgetUnknown = (token: object) => {
+    clearTimeout(unknownInserts.get(token)?.timer);
+    unknownInserts.delete(token);
+  };
+
+  /**
+   * A 插话 whose outcome cutex does not know (lib/steerOutcome): resync the session — cutex's queue list
+   * and the recorded history (thread/read via bootstrap, with the live timeline) — and settle it from
+   * that: landed → 已送达, still queued → a plain queued row again; neither → retried with backoff
+   * (OUTCOME_CHECK_DELAYS_MS), then the owner decides. Never resends anything.
+   */
+  const resolveUnknownInsert = async (token: object, attempt = 0): Promise<void> => {
+    const pending = unknownInserts.get(token);
+    if (!pending) return;
+    const { sessionId, host } = pending;
+    const stillUnknown = () => queueInsertByToken(host, sessionId, token)?.state === "unknown";
+    if (!stillUnknown()) return forgetUnknown(token);
+    pending.running = true;
+    pending.checkedAt = Date.now();
+    const scope = captureHost(host);
+    const [listed, boot] = await Promise.allSettled([apiOn(host).queueList(sessionId), apiOn(host).bootstrap(sessionId, STEER_CHECK_TURNS)]);
+    if (!scope.current() || unknownInserts.get(token) !== pending) return;
+    if (!stillUnknown()) return forgetUnknown(token);
+    const timelines: TimelineState[] = [];
+    const live = viewOn(sessionId, host)?.timeline;
+    if (live) timelines.push(live);
+    // An answer without a body counts as unread (null), never as "not there".
+    if (boot.status === "fulfilled" && boot.value?.native) timelines.push(timelineFromThreadRead(boot.value.native.result));
+    const queue = listed.status === "fulfilled" ? (listed.value?.items ?? null) : null;
+    const outcome = steerOutcome(pending.probe, { timelines, others: steersOf(sessionId, host) ?? [], queue, queueId: pending.queueId });
+    if (outcome === "landed") {
+      forgetUnknown(token);
+      reconcileQueueInsert(host, sessionId, (cid) => cid === pending.probe.id);
+      return;
+    }
+    if (outcome === "queued") {
+      forgetUnknown(token);
+      clearQueueInsert(host, sessionId, token);
+      refreshQueue(sessionId, host);
+      return;
+    }
+    const next = OUTCOME_CHECK_DELAYS_MS[attempt + 1];
+    if (next !== undefined) {
+      pending.timer = setTimeout(() => void resolveUnknownInsert(token, attempt + 1), next - OUTCOME_CHECK_DELAYS_MS[attempt]!);
+      return;
+    }
+    pending.running = false;
+    setQueueInsertChecking(host, sessionId, token, false);
+    // Still listening: a late event rechecks it (recheckUnknownInserts), and quiet polls cover a stalled event stream.
+    const poll = OUTCOME_SLOW_POLLS_MS[pending.slow++];
+    if (poll !== undefined) pending.timer = setTimeout(() => void resolveUnknownInsert(token, OUTCOME_CHECK_DELAYS_MS.length - 1), poll);
+  };
+
+  /** The session moved on (a turn ended, an input was submitted, a user message was recorded): its unsure 插话 are
+   *  checked once more, quietly — for as long as they are unsure (at most every OUTCOME_EVENT_MIN_GAP_MS). */
+  const recheckUnknownInserts = (sessionId: string, host: string) => {
+    for (const [token, pending] of unknownInserts) {
+      if (pending.sessionId !== sessionId || pending.host !== host || pending.running || Date.now() - pending.checkedAt < OUTCOME_EVENT_MIN_GAP_MS) continue;
+      pending.running = true;
+      clearTimeout(pending.timer);
+      pending.timer = setTimeout(() => void resolveUnknownInsert(token, OUTCOME_CHECK_DELAYS_MS.length - 1), 400);
+    }
   };
 
   /**
@@ -1030,13 +1319,13 @@ export const useApp = create<AppState>((set, get) => {
   const sendSteerAgain = async (sessionId: string, host: string, p: PendingSteer) => {
     const scope = captureHost(host);
     try {
-      const result = await apiOn(scope.host).submit(sessionId, p.text, "auto", false, { extra: (p.extra ?? []) as ExtraInput[], clientUserMessageId: p.id });
+      const result = await apiOn(scope.host).submit(sessionId, wireForSend(host, sessionId, p.text), "auto", false, { extra: (p.extra ?? []) as ExtraInput[], clientUserMessageId: p.id });
       if (!scope.current()) return;
       trackSteer(sessionId, host, result, p.id, p.text, p.extra ?? []);
     } catch (e) {
       if (!scope.current()) return;
       setSteers(sessionId, host, (list) => [...list.filter((x) => x.id !== p.id), { ...p, state: "undelivered" }]);
-      notifyAgent(sessionId, host, sendErrorText(e, () => translate("outbox.capacityExceeded"), (code) => translate(`users.access.${code}`)), "error");
+      notifyAgent(sessionId, host, sendErrorText(e, () => translate("outbox.capacityExceeded"), (code) => code === "owner_required" ? translate("queue.steer.ownerRequired") : translate(`users.access.${code}`)), "error");
     }
   };
 
@@ -1048,12 +1337,20 @@ export const useApp = create<AppState>((set, get) => {
     const resource = sidebarOn(host)?.active.find((r) => r.cutexSessionId === sessionId);
     if (!resource) throw new Error(`unknown session ${sessionId}`);
     const shown = viewOn(sessionId, host)?.timeline;
+    // ACP runtimes (DSH, Kimi) keep no file checkpoints: cutex refuses rewindFiles (rewind_files_unsupported), so it is never sent.
+    if (options?.rewindFiles !== undefined && isAcpAgent(agentFeaturesOf(resource))) options = {};
     const result = await apiOn(host).revertHistory(sessionId, beforeTurnId, resource.revision, options);
     if (options?.rewindFiles) notifyAgent(sessionId, host, translate(filesRewound(result) ? "reply.revertFilesDone" : "reply.revertFilesNot"), filesRewound(result) ? "info" : "error");
     // A kept 进程 of a reverted turn goes with it (cutex's latestPlan is trimmed the same way).
     const kept = getCachedPlan(host, sessionId);
     if (kept && shown && kept.threadId === shown.threadId && revertDropsPlan(kept.turnId, shown.turns.map((t) => t.id), beforeTurnId)) setCachedPlan(host, sessionId, null);
     after?.();
+    // The row's line drops the removed reply (cutex keeps it in the session's activity projection): lib/revertedPreview.
+    const live = host === focusHost() ? get().activity[sessionId] : undefined;
+    const hideUpTo = Math.max(live?.at ?? 0, ...activityTimes(resource));
+    const replacement = previewOfKept(shown, beforeTurnId, hideUpTo, plainPreview);
+    markReverted(sessionId, { hideUpTo, replacement });
+    if (host === focusHost()) set((state) => ({ activity: { ...state.activity, [sessionId]: replacement } }));
     await refreshHostSidebar(host);
     if (isSelected(sessionId, host) || viewLive(sessionId, host)) {
       await apiOn(host).unsubscribe(sessionId);
@@ -1102,6 +1399,7 @@ export const useApp = create<AppState>((set, get) => {
       startError: null,
       startErrorQueueIds: undefined,
       older,
+      mediaRefs: history?.mediaRefs ?? 0,
     }), scope.host);
   };
 
@@ -1149,6 +1447,12 @@ export const useApp = create<AppState>((set, get) => {
       // Seed live settings from the session resource; thread/settings/updated keeps them fresh.
       const sidebar = sidebarOn(scope.host);
       const resource = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((s) => s.cutexSessionId === sessionId);
+      // An agent its host's sidebar does not list yet (just created here or by another agent, its create event not seen
+      // on this feed): re-read it now, else its header, avatar and name wait for an unrelated event on that host.
+      if (!resource && sidebar) void refreshHostSidebar(scope.host);
+      const terminalSchema = boot.schema ?? (resource?.runtime.runtimeGeneration === boot.cutexState.runtime.runtimeGeneration ? resource?.native?.schema : null);
+      timeline.fullTextItemTerminal = fullTextItemTerminalOf(terminalSchema);
+      timeline.fullTextItemTerminalGeneration = boot.cutexState.runtime.runtimeGeneration;
       const agent = hostKey(scope.host, sessionId);
       timeline.settings = seedThreadSettings(resource?.runtime.threadSettings as ThreadSettingsView | null | undefined, lastCollabMode.get(agent));
       const seededMode = collaborationModeOf(timeline.settings);
@@ -1174,6 +1478,7 @@ export const useApp = create<AppState>((set, get) => {
         startError: null,
         startErrorQueueIds: undefined,
         older,
+        mediaRefs: boot.mediaRefs ?? history?.mediaRefs ?? 0,
       }), scope.host);
       if (!scope.current()) return;
       applyPendingReviewer(sessionId, agent, boot.native ? timeline : null, daemon);
@@ -1182,7 +1487,7 @@ export const useApp = create<AppState>((set, get) => {
       // feed was closed (only the open agent is subscribed), and no live event will settle them then.
       // The re-read history does: recorded → gone from 接下来; their turn ended without them → re-checked.
       const steers = steersOf(sessionId, scope.host);
-      if ((boot.native || history) && steers?.length) settleSteers(sessionId, scope.host, settlePendingSteers(steers, timeline), steers);
+      if ((boot.native || history) && steers?.length) settleSteers(sessionId, scope.host, settlePendingSteers(steers, timeline, steerOptions(sessionId, scope.host)), steers);
       // admission-order: the bootstrap has the owner queue only; the merged order comes from queue/list.
       if (featuresOn(scope.host).has(ADMISSION_ORDER_FEATURE)) refreshQueue(sessionId, scope.host);
       // Agent messages v2: pending incoming messages (待读留言) + the status of its sent ones (the
@@ -1225,6 +1530,8 @@ export const useApp = create<AppState>((set, get) => {
     pendingChatRun = null;
     for (const timer of queueTimers.values()) clearTimeout(timer);
     queueTimers.clear();
+    for (const timer of steerTimers.values()) clearTimeout(timer);
+    steerTimers.clear();
     lastCollabMode.clear(); // seen on the shown host's session streams only
     resendTurns.clear();
     sendChains.clear();
@@ -1246,9 +1553,10 @@ export const useApp = create<AppState>((set, get) => {
       sessions: {},
       views: {},
       activity: {},
-      // Settings stays open (on the same tab) across a host switch; any other page closes.
-      view: view.kind === "page" && view.page === SETTINGS_PAGE ? { kind: "page", page: SETTINGS_PAGE, params: { tab: view.params.tab } } : { kind: "conversation" },
-      pendingSteers: {},
+      // Any open page closes; the Settings Shelf stays open on the same tab (lib/settingsShelf, below).
+      view: view.kind === "page" && view.page !== SETTINGS_PAGE ? { kind: "conversation" } : view,
+      // Kept per (host, agent) (lib/pendingSteerStore): the new host's agents settle theirs on load.
+      pendingSteers: loadPendingSteers(),
       outbox: takeOrphanedSends(get().hosts?.active ?? "local"),
       queueHidden: {},
       backgroundItems: {},
@@ -1270,11 +1578,15 @@ export const useApp = create<AppState>((set, get) => {
       approvals: null,
       hostWaiting: {},
     }));
+    resetSettingsSubPage();
     retainSessions([]);
   };
 
   /** A host's connection was replaced or closed, or the host removed: what the app followed of it goes. */
   const resetHost = (hostId: string) => {
+    capabilityReads.delete(hostId);
+    clearTimeout(capabilityTimers.get(hostId));
+    capabilityTimers.delete(hostId);
     turnTriggers.delete(hostId);
     waitingByHost.delete(hostId);
     if (hostId === focusHost() && Object.keys(get().hostWaiting).length) set({ hostWaiting: {} });
@@ -1355,8 +1667,9 @@ export const useApp = create<AppState>((set, get) => {
   const onFocusConnected = () => {
     void get().refreshSidebar();
     const scope = captureHost();
+    const currentCapabilities = beginCapabilitiesRead(scope.host);
     api.capabilities().then((c) => {
-      if (!scope.current()) return;
+      if (!scope.current() || !currentCapabilities()) return;
       noteHostAccess(focusHost(), c);
       set({ features: hostFeatureSet(c), featuresKnown: true });
       // users: services and host approvals are owner-only (a non-owner connection gets 403).
@@ -1408,14 +1721,17 @@ export const useApp = create<AppState>((set, get) => {
     if (!sliceCurrent(hostId, epoch)) return;
     const daemon = apiFor(hostId);
     const currentRead = beginSidebarRead(hostId);
+    const currentCapabilities = beginCapabilitiesRead(hostId);
     try {
       const [caps, snapshot] = await Promise.all([daemon.capabilities(), daemon.sidebar()]);
       if (!sliceCurrent(hostId, epoch)) return;
-      noteHostAccess(hostId, caps);
       const features = hostFeatureSet(caps);
-      patchSlice(hostId, epoch, { features, featuresKnown: true });
+      if (currentCapabilities()) {
+        noteHostAccess(hostId, caps);
+        patchSlice(hostId, epoch, { features, featuresKnown: true });
+      }
       if (currentRead()) {
-        patchSlice(hostId, epoch, { sidebar: preparedSidebar(snapshot) });
+        patchSlice(hostId, epoch, { sidebar: shareSidebar(get().byHost[hostId]?.sidebar, preparedSidebar(snapshot)) });
         reconcileStartErrors(hostId, snapshot);
         reconcileStaleTurns(hostId, snapshot);
         claimHostIds(hostId, snapshotIds(snapshot));
@@ -1443,7 +1759,7 @@ export const useApp = create<AppState>((set, get) => {
     try {
       const snapshot = await apiFor(hostId).sidebar();
       if (!sliceCurrent(hostId, epoch) || !currentRead()) return;
-      patchSlice(hostId, epoch, { sidebar: preparedSidebar(snapshot) });
+      patchSlice(hostId, epoch, { sidebar: shareSidebar(get().byHost[hostId]?.sidebar, preparedSidebar(snapshot)) });
       reconcileStartErrors(hostId, snapshot);
       reconcileStaleTurns(hostId, snapshot);
       claimHostIds(hostId, snapshotIds(snapshot));
@@ -1645,13 +1961,35 @@ export const useApp = create<AppState>((set, get) => {
       }
     },
 
-    async forkSession(sessionId, afterTurnId, hostId) {
+    patchSessionResource(sessionId, hostId, fields) {
+      const patch = (sidebar: SidebarSnapshot | null): SidebarSnapshot | null => {
+        if (!sidebar) return sidebar;
+        const over = (list: SessionResource[]) => (list.some((r) => r.cutexSessionId === sessionId) ? list.map((r) => (r.cutexSessionId === sessionId ? { ...r, ...fields } : r)) : list);
+        const active = over(sidebar.active), retired = over(sidebar.retired);
+        return active === sidebar.active && retired === sidebar.retired ? sidebar : { ...sidebar, active, retired };
+      };
+      set((state) => {
+        if (hostId === focusOf(state)) {
+          const sidebar = patch(state.sidebar);
+          return sidebar === state.sidebar ? state : { sidebar };
+        }
+        const slice = state.byHost[hostId];
+        const sidebar = slice ? patch(slice.sidebar) : null;
+        return !slice || sidebar === slice.sidebar ? state : { byHost: { ...state.byHost, [hostId]: { ...slice, sidebar } } };
+      });
+    },
+
+    async forkSession(sessionId, afterTurnId, hostId, profile) {
       const host = hostId ?? hostOf(sessionId);
-      const { cutexSessionId } = await apiOn(host).forkSession(sessionId, { afterTurnId });
+      const scope = captureHost(host);
+      const result = await apiOn(host).forkSession(sessionId, { afterTurnId, ...(profile ? { profile } : {}) });
+      const { cutexSessionId } = result;
+      if (!scope.current()) return;
       await refreshHostSidebar(host);
+      if (!scope.current()) return;
       await get().select(cutexSessionId, host);
       const s = sidebarOn(host)?.active.find((r) => r.cutexSessionId === cutexSessionId);
-      notifyAgent(cutexSessionId, host, translate("fork.done", { name: s?.displayName ?? cutexSessionId }));
+      notifyAgent(cutexSessionId, host, forkCompletionNotice(result, s?.displayName ?? cutexSessionId, translate));
     },
 
     async revertTo(sessionId, beforeTurnId, options) {
@@ -1691,7 +2029,7 @@ export const useApp = create<AppState>((set, get) => {
         if (!current()) return;
         if (!page) return patchSession(sessionId, (v) => ({ older: v.older && { ...v.older, loading: false, cursor: null } }), host);
         const added = prependHistory(timeline, page.native.result);
-        patchSession(sessionId, (v) => ({ version: v.version + 1, older: olderAfterPage(v.older, page.page, added, cursor) }), host);
+        patchSession(sessionId, (v) => ({ version: v.version + 1, mediaRefs: (v.mediaRefs ?? 0) + (page.mediaRefs ?? 0), older: olderAfterPage(v.older, page.page, added, cursor) }), host);
       } catch (e) {
         if (current()) patchSession(sessionId, (v) => ({ older: v.older && { ...v.older, loading: false, error: e instanceof Error ? e.message : String(e) } }), host);
       }
@@ -1724,6 +2062,8 @@ export const useApp = create<AppState>((set, get) => {
         set({ selectedId: null, selectedHost: null });
       }
       await refreshHostSidebar(scope.host);
+      // Its device-local picture goes with it, unless another agent still wears it (lib/agentPicture).
+      forgetAgentPicture(resource?.avatar, (value) => pictureInUse(get(), value, sessionId));
       return result;
     },
 
@@ -1767,9 +2107,10 @@ export const useApp = create<AppState>((set, get) => {
         // keep the last list
       }
     },
-    async editAndResend(sessionId, turnId, text, hostId) {
+    async editAndResend(sessionId, turnId, text, hostId, extra) {
       const host = hostId ?? hostOf(sessionId);
-      await revertAndReload(sessionId, host, turnId, () => insertComposerDraft(host, sessionId, text, "replace"));
+      // Its images and skills come back too, as 放回输入框 does (lib/queuePause composerAttachments).
+      await revertAndReload(sessionId, host, turnId, () => insertComposerDraft(host, sessionId, text, "replace", extra));
     },
 
     subTimelines: {},
@@ -1796,22 +2137,37 @@ export const useApp = create<AppState>((set, get) => {
 
     openSettings(tab = "general", focus) {
       const sub = tab !== "profiles" ? {} : focus?.create ? { create: "1" } : focus?.profile ? { profile: focus.profile } : {};
-      // Settings replaces the main window (sidebar included): a 在主界面调整 panel closes.
-      set({ view: { kind: "page", page: SETTINGS_PAGE, params: { tab, ...sub } }, settingsFocus: focus ?? null, customize: null });
+      // The Settings Shelf (lib/settingsShelf) beside the conversation; the view stays. Another page than
+      // the one a live edit (在主界面调整) belongs to: the owner moved on, the edit ends where it is.
+      const editing = get().customize;
+      set({ settingsFocus: focus ?? null, ...(editing && editing.page !== tab ? { customize: null } : {}) });
+      openSettingsShelf({ tab, ...sub });
     },
 
     settingsFocus: null,
     customize: null,
-    openCustomize(region) {
-      if (get().customize?.region === region) return set({ customize: null });
-      // The panel adjusts the main window: back to it (the conversation), the region shown. Closing
-      // the panel does not hide the region again (lead 2026-10-18).
+    openCustomize(region, page) {
+      if (get().customize?.region === region) return get().closeCustomize();
+      // The edit happens in the real UI: back to it (the conversation), the region shown. Finishing does
+      // not hide the region again (lead 2026-10-18).
       if (get().view.kind !== "conversation") set({ view: { kind: "conversation" } });
       if (region === "sidebar" && !getUiPrefs().sidebarOpen) setUiPref("sidebarOpen", true);
-      set({ customize: { region } });
+      const shelf = useSettingsShelf.getState();
+      // Switching from one region to another keeps the first edit's way back.
+      const back = get().customize?.back ?? { open: shelf.open, maximized: shelf.maximized, params: shelf.params };
+      set({ customize: { region, ...(page ? { page } : {}), back } });
+      if (page && (!shelf.open || shelf.params.tab !== page)) openSettingsShelf({ tab: page });
+      // Maximised Settings would cover the region: beside it while editing.
+      setSettingsShelfMaximized(false);
     },
     closeCustomize() {
+      const editing = get().customize;
+      if (!editing) return;
       set({ customize: null });
+      // Finishing returns: the Settings Shelf as it was (closed again when the edit opened it).
+      if (!editing.back.open) return closeSettingsShelf();
+      if (useSettingsShelf.getState().params.tab !== editing.back.params.tab) openSettingsShelf(editing.back.params);
+      if (editing.back.maximized) setSettingsShelfMaximized(true);
     },
     uiSignal: null,
     signal(target, arg, agent) {
@@ -1826,7 +2182,8 @@ export const useApp = create<AppState>((set, get) => {
       set({ notice: { text, tone, nonce: Date.now() + Math.random(), ...to } });
     },
 
-    pendingSteers: {},
+    // Pending inserts survive a restart (lib/pendingSteerStore); each agent's load settles them.
+    pendingSteers: loadPendingSteers(),
     outbox: {},
     queueHidden: {},
     retrySend(sessionId, id, hostId) {
@@ -1950,6 +2307,11 @@ export const useApp = create<AppState>((set, get) => {
       return results.filter((r) => r.status === "fulfilled").length;
     },
     openPage(page, params = {}) {
+      // Settings is the Settings Shelf, not a page of the main area (owner 2026-10-21).
+      if (page === SETTINGS_PAGE) return void openSettingsShelf({ tab: params.tab ?? "general", ...params });
+      // Its own pane in the focused conversation's Shelf (页面打开位置, default); else over the conversation column.
+      // 新工作 / 新建{{agent}} always take the column (design 038).
+      if (!isColumnPage(page) && openPageElsewhere(page, params)) return;
       set({ view: { kind: "page", page, params } });
     },
 
@@ -1999,7 +2361,8 @@ export const useApp = create<AppState>((set, get) => {
       startJobSync(useApp);
       startRuntimePackageSync(useApp);
       // Opening an agent / the approvals page takes back their alerts (lib/notifyRetract).
-      startLookRetract(useApp);
+      // Every app window (multi-window P3): looking at an agent from a desk takes its alerts back too.
+      startLookRetract(useApp, appLookWindow());
       // Main sends hostsState before a new connection starts, so the reset lands first.
       bridge.on("hostsState", onHosts);
       const hostReady = api.hosts().then((hosts) => {
@@ -2016,11 +2379,18 @@ export const useApp = create<AppState>((set, get) => {
         if (daemon.kind === "connected") onFocusConnected();
       });
       bridge.on("hostEvent", ({ hostId, envelope }) => {
+        // Canonical resync supplies the complete request; never show an approval for partial arguments.
+        if (envelope.native?.kind === "serverRequest" && eventMediaNotice(envelope.native.message)) return;
         const state = get();
         const focus = hostId === (state.hosts?.active ?? "local");
         const slice = focus ? null : state.byHost[hostId];
         // A connection not followed (yet): its slice loads everything once it is.
         if (!focus && !slice) return;
+        // Optional runtime visibility must update even when no component card is mounted.
+        if (componentEventOf(envelope)) {
+          scheduleCapabilitiesReload(hostId);
+          return;
+        }
         const sidebar = focus ? state.sidebar : slice!.sidebar;
         const id = envelope.cutexSessionId;
         const bound = [...(sidebar?.active ?? [])].find((s) => s.cutexSessionId === id)?.native.threadId ?? null;
@@ -2036,6 +2406,13 @@ export const useApp = create<AppState>((set, get) => {
         // Agent-bus events of every agent of the shown host and of the open agent's host (both parties'
         // streams; merged idempotently; message ids are unique across hosts).
         if (focus || hostId === state.selectedHost) useAgentMessages.getState().apply(envelope);
+        if (envelope.cutex?.method === "cutex/agentBus/messageSettlementUpdated") {
+          const messageId = (envelope.cutex.params as { messageId?: string })?.messageId;
+          for (const [key, view] of Object.entries(get().sessions)) {
+            const parts = viewKeyParts(key);
+            if (parts.hostId === hostId && view.admission?.nextStep?.some((item) => item.id === messageId)) refreshQueue(parts.sessionId, hostId);
+          }
+        }
         const context = contextUsageOf(envelope);
         if (context) lastContext.set(hostKey(hostId, id), { ...context, threadId: context.threadId ?? bound });
         const native = envelope.native;
@@ -2105,13 +2482,18 @@ export const useApp = create<AppState>((set, get) => {
         }
         // Coalesce sidebar refreshes; any session/runtime/turn change may move rows.
         const m = envelope.cutex?.method ?? envelope.native?.message.method ?? "";
+        if (m === "cutex/modelOverloadRetry/changed" && featuresOn(hostId).has("model-overload-retry-visible")) {
+          const retrySession = envelope.cutex?.params?.cutexSessionId;
+          if (typeof retrySession === "string" && viewOn(retrySession, hostId)) refreshQueue(retrySession, hostId);
+        }
         // thread/name/updated: quick chats are named after the native thread title.
         // thread/settings/updated: load() seeds a re-selected agent's settings from the sidebar resource.
         // Plan/diff updates and delegation, runtime-package, service and owner-note events don't
         // move rows; their own views/stores handle them.
         // An Agent Management tool call (agent_create …) of an agent on this host: its new / moved
         // agents' own events may not reach this feed live (lib/coalescedRefresh).
-        if (sidebarRefreshesForMethod(m) || agentManagementToolCompleted(envelope)) {
+        if (sidebarRefreshesForMethod(m) || agentManagementToolCompleted(envelope) ||
+          (m === "cutex/modelOverloadRetry/changed" && featuresOn(hostId).has("model-overload-retry-visible"))) {
           if (focus) {
             sidebarRefresh ??= coalescedRefresh(() => void get().refreshSidebar(), { delayMs: 400, minIntervalMs: 2000 });
             sidebarRefresh.request();
@@ -2162,7 +2544,7 @@ export const useApp = create<AppState>((set, get) => {
               projectId: a.projectId !== undefined ? a.projectId : row ? (row.projectId ?? null) : undefined,
               title: titled(`${requester} · ${translate("notify.approval")}`),
               body: a.summary,
-              looking: focus && document.hasFocus() && pageOf(get().view) === "approvals.page",
+              looking: focus && appHasFocus() && (pageOf(get().view) === "approvals.page" || pageInShelfShown("approvals.page")),
               // A local agent's request: its conversation shows the decision card (BrowserClaimOverlay).
               onClick: () => (row ? void get().openAgent(a.requesterCutexSessionId, hostId) : openApprovalsOn(hostId)),
             });
@@ -2196,8 +2578,34 @@ export const useApp = create<AppState>((set, get) => {
       const shown = (hostId: string) => hostId === focusHost();
       /** A feed of an agent the store holds a view of on that host (views and per-agent state: host + id). */
       const ownView = (hostId: string, sessionId: string) => !!viewOn(sessionId, hostId);
-      bridge.on("sessionEvent", ({ hostId, sessionId, envelope }) => {
-        if (shown(hostId) || hostId === get().selectedHost) useAgentMessages.getState().apply(envelope);
+      bridge.on("sessionLiveReset", ({ hostId, epoch, sessionId }) => {
+        const current = connEpochOf(get().hosts, hostId);
+        if (current && current !== epoch) return;
+        const view = viewOn(sessionId, hostId);
+        if (!view || !featuresOn(hostId).has(LIVE_DELTAS_FEATURE)) return;
+        if (invalidateLiveDeltas(view.timeline)) streamBumps.add(viewKey(hostId, sessionId));
+        // Child views share this session's stream and the same connection lifetime.
+        for (const [threadId, sub] of Object.entries(get().subTimelines)) if (sub.timeline.liveDeltas?.sessionId === sessionId && sub.timeline.liveDeltas.routeHost === hostId && invalidateLiveDeltas(sub.timeline))
+          liveSubBumps.add(viewKey(hostId, threadId));
+      });
+      bridge.on("sessionLiveDelta", ({ hostId, epoch, sessionId, frame }) => {
+        const current = connEpochOf(get().hosts, hostId);
+        if ((current && current !== epoch) || frame.cutexSessionId !== sessionId || !featuresOn(hostId).has(LIVE_DELTAS_FEATURE)) return;
+        const view = viewOn(sessionId, hostId);
+        if (!view || view.runtimeGeneration !== frame.runtimeGeneration) return;
+        const subscriptionGap = frame.kind === "gap" && frame.gapScope === "subscription";
+        if ((subscriptionGap || view.timeline.threadId === frame.threadId) && applyLiveDelta(view.timeline, frame, view.runtimeGeneration))
+          streamBumps.add(viewKey(hostId, sessionId));
+        if (subscriptionGap || view.timeline.threadId !== frame.threadId) {
+          for (const [threadId, sub] of Object.entries(get().subTimelines)) {
+            if ((!subscriptionGap && threadId !== frame.threadId) || sub.timeline.liveDeltas?.sessionId !== sessionId || sub.timeline.liveDeltas.routeHost !== hostId) continue;
+            if (applyLiveDelta(sub.timeline, frame, view.runtimeGeneration)) liveSubBumps.add(viewKey(hostId, threadId));
+          }
+        }
+      });
+      const sessionEvent = ({ hostId, sessionId, envelope }: DesktopEvents["sessionEvent"]) => {
+        const partial = eventMediaNotice(envelope.native?.message) || eventMediaNotice(envelope.cutex?.params);
+        if (!partial && (shown(hostId) || hostId === get().selectedHost)) useAgentMessages.getState().apply(envelope);
         if (!ownView(hostId, sessionId)) return;
         const view = viewOn(sessionId, hostId);
         if (!view) return;
@@ -2207,7 +2615,11 @@ export const useApp = create<AppState>((set, get) => {
         // a current startup failure when replayed through this subscription.
         // A newer runtime generation: whatever turn still shows as running belonged to the replaced
         // runtime (a restart mid-turn) and was cut off.
-        if (currentRuntime && generation > view.runtimeGeneration && settleStaleTurns(view.timeline, null)) patchSession(sessionId, (v) => ({ version: v.version + 1 }), hostId);
+        if (currentRuntime && generation > view.runtimeGeneration) {
+          const settled = settleStaleTurns(view.timeline, null);
+          const clearRetry = featuresOn(hostId).has("model-overload-retry-visible");
+          if (settled || clearRetry) patchSession(sessionId, (v) => ({ version: v.version + 1, ...(clearRetry ? { admission: null } : {}) }), hostId);
+        }
         if (currentRuntime) view.runtimeGeneration = generation;
         // Subagent threads share the parent's stream. Their approvals (and serverRequest/resolved) still
         // go to the parent's dock (the user must answer them); everything else updates that subagent's
@@ -2217,9 +2629,16 @@ export const useApp = create<AppState>((set, get) => {
           const child = childStatusFromEvent(envelope);
           if (child) get().setSubAgentStatus(child.threadId, child.status, envelope.correlation.runtimeGeneration ?? view.runtimeGeneration);
           const sub = get().subTimelines[tid];
-          if (sub && applyEvent(sub.timeline, envelope)) set((state) => ({ subTimelines: { ...state.subTimelines, [tid]: { ...sub, version: sub.version + 1 } } }));
+          if (sub && applyEvent(sub.timeline, envelope, featuresOn(hostId).has(LIVE_DELTAS_FEATURE))) {
+            if (sub.timeline.liveDeltas) sub.timeline.liveDeltas.routeHost = hostId;
+            set((state) => ({ subTimelines: { ...state.subTimelines, [tid]: { ...sub, version: sub.version + 1 } } }));
+          }
           return;
         }
+        // A Claude background subagent outlives its turn: the parent's `claude/task/updated` (claude-r23)
+        // says it still runs, or how it ended.
+        const task = claudeTaskStatusFromEvent(envelope, view.timeline);
+        if (task) get().setSubAgentStatus(task.threadId, task.status, envelope.correlation.runtimeGeneration ?? view.runtimeGeneration);
         // A request this desktop saw pending, resolved without our reply in flight (respond removes
         // it from pending optimistically): answered on another device, or cancelled / timed out
         // server-side — the resolved event carries no reason. Keep a row saying what it was.
@@ -2228,20 +2647,43 @@ export const useApp = create<AppState>((set, get) => {
           const seen = requestId === undefined ? undefined : view.timeline.pending.get(String(requestId));
           if (seen) putInteraction(sessionId, elsewhereRecord(seen, requestTurnId(view.timeline, seen), Date.now() / 1000), hostId);
         }
-        if (applyEvent(view.timeline, envelope)) {
-          patchSession(sessionId, (v) => ({ version: v.version + 1 }), hostId);
+        if (applyEvent(view.timeline, envelope, featuresOn(hostId).has(LIVE_DELTAS_FEATURE))) {
+          if (view.timeline.liveDeltas) view.timeline.liveDeltas.routeHost = hostId;
+          const key = viewKey(hostId, sessionId);
+          if (isStreamDelta(envelope)) streamBumps.add(key);
+          else {
+            streamBumps.take(key);
+            patchSession(sessionId, (v) => ({ version: v.version + 1 }), hostId);
+          }
+          if (partial) return;
           const pending = steersOf(sessionId, hostId);
-          if (pending?.length) settleSteers(sessionId, hostId, settlePendingSteers(pending, view.timeline), pending);
-          if (outboxOf(sessionId, hostId)?.length) settleOutbox(sessionId, null, hostId);
+          if (pending?.length) settleSteers(sessionId, hostId, settlePendingSteers(pending, view.timeline, steerOptions(sessionId, hostId)), pending);
+          // Also settle persisted queue rows/insert errors when no optimistic outbox remains.
+          settleOutbox(sessionId, null, hostId);
+          const receiptItem = (envelope.native?.message.params as { item?: { type?: string } } | undefined)?.item;
+          if (receiptItem?.type === "userMessage") reconcileQueueInsert(hostId, sessionId, (id) => hasClientId(view.timeline, id));
           const mode = envelope.native?.message.method === "thread/settings/updated" ? collaborationModeOf(view.timeline.settings) : null;
           if (mode) lastCollabMode.set(hostKey(hostId, sessionId), mode);
         }
         const cm = envelope.cutex?.method;
+        if (cm === "cutex/modelOverloadRetry/changed" && featuresOn(hostId).has("model-overload-retry-visible")) {
+          refreshQueue(sessionId, hostId);
+          void refreshHostSidebar(hostId);
+        }
         // A queued message of this agent went to the native (the queue flush): it moves from its queue
         // row to a pending bubble at the timeline tail at once, until its userMessage lands (lib/outbox).
         if (cm === "cutex/userInput/submitted") {
           const params = envelope.cutex?.params as { clientUserMessageId?: string } | undefined;
           const id = params?.clientUserMessageId;
+          // image-input-steering: the steer's receipt (how its images went in), on its pending row and its 插话 receipt.
+          const imageDelivery = imageDeliveryOf(params);
+          if (id && imageDelivery) {
+            const steers = steersOf(sessionId, hostId);
+            if (steers?.some((p) => p.id === id && !p.imageDelivery)) {
+              set((state) => ({ pendingSteers: { ...state.pendingSteers, [viewKey(hostId, sessionId)]: steers.map((p) => (p.id === id ? { ...p, imageDelivery } : p)) } }));
+            }
+            noteQueueInsertImageDelivery(hostId, sessionId, id, imageDelivery);
+          }
           if (id && outboxOf(sessionId, hostId)?.some((e) => e.id === id)) {
             // Still our optimistic queued send (cutex flushed it before its queue row was ever listed):
             // it becomes the pending new-turn bubble in place, never shown nowhere.
@@ -2258,6 +2700,8 @@ export const useApp = create<AppState>((set, get) => {
         // …and say whose turn runs, and what rides along with it (turn groups).
         const nm = envelope.native?.message.method;
         if ((nm === "turn/started" || nm === "turn/completed") && featuresOn(hostId).has(ADMISSION_ORDER_FEATURE)) refreshQueue(sessionId, hostId);
+        const userItem = (nm === "item/started" || nm === "item/completed") && (envelope.native?.message.params as { item?: { type?: string } } | undefined)?.item?.type === "userMessage";
+        if (unknownInserts.size && (nm === "turn/completed" || userItem || cm?.startsWith("cutex/userInput/"))) recheckUnknownInserts(sessionId, hostId);
         if (cm === "cutex/userInput/startFailed") {
           const failed = envelope.cutex?.params as { error?: { message?: string }; queueIds?: string[] } | undefined;
           if (generation == null || currentRuntime)
@@ -2266,6 +2710,8 @@ export const useApp = create<AppState>((set, get) => {
           // event has no generation: ask the daemon whether the runtime and queue recovered.
           void refreshHostSidebar(hostId);
         }
+        // agent-pause (lib/agentPause): 暂停中… → 已暂停 → resumed, newer than the sidebar's resource.
+        if (cm === AGENT_PAUSE_CHANGED) noteAgentPause(hostId, sessionId, parseAgentPause((envelope.cutex?.params as { agentPause?: unknown } | undefined)?.agentPause));
         if (cm === "cutex/asks/pauseChanged") {
           const p = envelope.cutex?.params as { asksPaused?: AsksPause | null } | undefined;
           patchSession(sessionId, { asksPaused: p?.asksPaused ?? null }, hostId);
@@ -2276,6 +2722,22 @@ export const useApp = create<AppState>((set, get) => {
         }
         // History came from the offline reader: rebuild from the live runtime once it is up.
         if (cm === "cutex/runtime/online" && viewOn(sessionId, hostId)?.historySource === "offline") void load(sessionId, hostId);
+      };
+      bridge.on("sessionEvent", sessionEvent);
+      bridge.on("sessionFullText", payload => {
+        const { hostId, epoch, sessionId, envelope } = payload;
+        const current = connEpochOf(get().hosts, hostId);
+        const view = viewOn(sessionId, hostId);
+        if (!view || (current && current !== epoch) || envelope.correlation.runtimeGeneration !== view.runtimeGeneration) return;
+        const params = envelope.native?.message.params as { item?: { id?: string }; threadId?: string; turnId?: string } | undefined;
+        const timeline = params?.threadId && params.threadId !== view.timeline.threadId ? get().subTimelines[params.threadId]?.timeline : view.timeline;
+        if (!timeline || (timeline.liveDeltas?.routeHost && timeline.liveDeltas.routeHost !== hostId)) return;
+        const existing = params?.item?.id ? timeline.entries.get(params.item.id) : undefined;
+        if (!existing || (existing.kind !== "agent" && existing.kind !== "reasoning")) return;
+        const pending = existing.fullTextPending;
+        if (!pending || pending.streamId !== envelope.streamId || pending.sequence !== envelope.sequence || pending.eventId !== envelope.eventId ||
+            (params?.turnId && existing.turnId !== params.turnId)) return;
+        sessionEvent(payload);
       });
       // users: this connection's user or grant changed (the host feed ended with cutex/access/changed):
       // read its capabilities and lists again (the session feeds re-bootstrap on their own resync).
@@ -2314,8 +2776,9 @@ export const useApp = create<AppState>((set, get) => {
         if (!scope.current() || !currentRead()) return;
         const before = get().sidebar;
         // Archived agents come as cutex's reduced projection (see retiredSession.ts).
-        const sidebar = preparedSidebar(snapshot);
-        set((state) => ({ sidebar, activity: activityOf(sidebar, state.activity) }));
+        // Unchanged sessions keep their objects (lib/sidebarShare; perf §9): nothing re-renders for an identical refresh.
+        const sidebar = shareSidebar(before, preparedSidebar(snapshot));
+        if (sidebar !== before) set((state) => ({ sidebar, activity: activityOf(sidebar, state.activity) }));
         reconcileStartErrors(scope.host, sidebar);
         reconcileStaleTurns(scope.host, sidebar);
         // Legacy prefs naming these agents / projects are this host's (lib/hostKeys).
@@ -2343,12 +2806,23 @@ export const useApp = create<AppState>((set, get) => {
     },
 
     async openAgent(sessionId, hostId) {
+      // One copy per agent (multi-window P3): open in another window's column → that window and column take the focus.
+      if (openRouter?.(hostId, sessionId)) return;
       const hosts = get().hosts;
       if (!hosts || hostId === focusHost() || scopeHosts(hosts).includes(hostId)) return get().select(sessionId, hostId);
       await new Promise<void>((resolve) => {
         inAllDevices(() => void get().select(sessionId, hostId).then(resolve, resolve));
         setTimeout(resolve, 5000);
       });
+    },
+
+    async refreshAdmission(sessionId, hostId) {
+      const scope = captureHost(hostId);
+      const { items, pause, asksPaused, admission } = await apiOn(hostId).queueList(sessionId);
+      if (scope.current()) {
+        patchSession(sessionId, { queue: items, queuePause: pause ?? null, asksPaused: asksPaused ?? null, admission: admission ?? null }, hostId);
+        settleOutbox(sessionId, ++outboxTick, hostId);
+      }
     },
 
     async reloadSession(sessionId, hostId) {
@@ -2411,10 +2885,15 @@ export const useApp = create<AppState>((set, get) => {
       // Offline agent: cutex queues the message and starts the runtime (offline-submit).
       const resource = sidebar?.active.find((s) => s.cutexSessionId === id);
       const offline = resource ? resource.runtime.status !== "online" : false;
-      const startIfOffline = offline && featuresOn(host).has("offline-submit");
-      const entry = newOutboxEntry(viewOn(id, host)?.timeline ?? null, { id: crypto.randomUUID(), text, extra, strategy, startIfOffline, placement: placementFor(id, host, strategy, startIfOffline) });
+      const startIfOffline = !opts.joinDelegation && offline && featuresOn(host).has("offline-submit");
+      const entry = newOutboxEntry(viewOn(id, host)?.timeline ?? null, { id: crypto.randomUUID(), text, extra, strategy, startIfOffline, joinDelegation: opts.joinDelegation, placement: placementFor(id, host, strategy, startIfOffline) });
       setOutbox(id, host, (list) => [...list, entry]);
-      return dispatchSend(id, entry, opts.keepFailed ?? true, captureHost(host));
+      const sent = dispatchSend(id, entry, opts.keepFailed ?? true, captureHost(host));
+      if (!opts.steerImages) return sent;
+      return sent.then((result) => {
+        void steerQueuedDraft(id, host, entry.id, result).catch(() => {});
+        return result;
+      });
     },
 
     async respond(requestId, reply, sessionId, hostId) {
@@ -2554,39 +3033,155 @@ export const useApp = create<AppState>((set, get) => {
 
     async queueTakeForEdit(item, sessionId, hostId) {
       const agent = agentRef(sessionId, hostId);
-      // The text goes to the composer at once; the removal follows. If it fails (sent or changed
+      if (!agent) return;
+      const { id, host } = agent;
+      // As 放回输入框 (lib/queuePause): images and skills come back as composer attachments, the
+      // same input items (data URL / host path cutex already holds), so a resend sends them again.
+      const plan = restorePlan([], [item]);
+      if (plan.keep.length) {
+        notifyAgent(id, host, translate("paused.restoreKept", { n: plan.keep.length }), "error");
+        return;
+      }
+      // The content goes to the composer at once; the removal follows. If it fails (sent or changed
       // meanwhile) the row comes back and a notice says the draft is a copy.
-      if (agent)
-        void get()
-          .queueRemove(item, agent.id, agent.host)
-          .catch(() => notifyAgent(agent.id, agent.host, translate("queue.editFailed"), "error"));
-      return queueItemText(item);
+      insertComposerDraft(host, id, mentionRichText(host, id, plan.text), "append", plan.extra);
+      void get()
+        .queueRemove(item, id, host)
+        .catch(() => notifyAgent(id, host, translate("queue.editFailed"), "error"));
     },
 
-    async queueSendNow(item, sessionId, hostId) {
+    async queueSendNow(item, sessionId, hostId, joinDelegation, options) {
       const agent = agentRef(sessionId, hostId);
       if (!agent) return;
       const { id, host } = agent;
-      // Optimistic: the row moves to the steers section at once — or, idle, to the timeline as a new
-      // turn (立即发送) — (same clientUserMessageId), while main does list + CAS remove + submit.
+      // Keep the original row while management responds. Feedback is shared by host/session so
+      // another pane cannot issue the same insert while its outcome is unknown.
+      const token = beginQueueInsert(host, id, item);
+      if (!token) return;
+      const current = viewOn(id, host);
+      const delivered = (cid: string) => (item.state === "delivered" && cid === item.clientUserMessageId) || (!!current && hasClientId(current.timeline, cid));
+      reconcileQueueInsert(host, id, delivered);
+      if (queueInsertByToken(host, id, token)?.state === "delivered") { settleOutbox(id, null, host); return; }
+      // image-input-steering: a runtime that declares it cannot insert images refuses before any request
+      // (only while a turn runs: idle, 立即发送 starts a turn with the original image).
+      const imageSteering = imageSteeringOn(id, host);
+      const images = hasImageInput(item.input);
+      if (refusesImageSteer(imageSteering, item.input) && viewOn(id, host)?.timeline.activeTurnId) {
+        finishQueueInsert(host, id, token, "rejected", translate("queue.steer.imageUnsupported"));
+        return;
+      }
       const input = item.input as { type: string }[];
       const entry = newOutboxEntry(viewOn(id, host)?.timeline ?? null, { id: item.clientUserMessageId, text: queueItemText({ ...item, input: input.filter((x) => x.type === "text") }), extra: input.filter((x) => x.type !== "text"), strategy: "auto", placement: placementFor(id, host, "auto", false), promoted: true });
-      hideQueued(id, host, [item.queueId]);
-      setOutbox(id, host, (list) => [...list.filter((e) => e.id !== entry.id), entry]);
+      // The steer as sent, should cutex not know whether it landed (lib/steerOutcome: the history match).
+      const probe = newPendingSteer(viewOn(id, host)?.timeline ?? emptyTimeline(), item.clientUserMessageId, entry.text, input.filter((x) => x.type === "image" || x.type === "localImage").length, null);
+      // Unknown outcomes never claim that the item stayed queued, nor offer a resend at once: the
+      // desktop resyncs first (resolveUnknownInsert), 再发一次 only if that cannot tell.
+      const unknown = (detail: string) => {
+        finishQueueInsert(host, id, token, "unknown", undefined, undefined, undefined, { detail: detail || undefined, checking: true });
+        unknownInserts.set(token, { sessionId: id, host, probe, queueId: item.queueId, slow: 0, checkedAt: 0 });
+        void resolveUnknownInsert(token);
+      };
       try {
-        const promoted = await apiOn(host).queuePromote(id, item.queueId, item.revision, featuresOn(host).has(QUEUE_STEER_FEATURE));
+        const promoted = await apiOn(host).queuePromote(id, item.queueId, item.revision, featuresOn(host).has(QUEUE_STEER_FEATURE), joinDelegation, options?.ifIdle ? { ifIdle: options.ifIdle } : undefined);
         const text = queueItemText({ ...item, input: (promoted.input as { type: string }[]).filter((x) => x.type === "text") });
         const extra = (promoted.input as { type: string }[]).filter((x) => x.type !== "text");
-        setOutbox(id, host, (list) => confirmOutbox(list, entry.id, promoted.result, ++outboxTick));
+        if (promoted.result?.disposition === "started") {
+          setOutbox(id, host, (list) => confirmOutbox([...list.filter((e) => e.id !== entry.id), entry], entry.id, promoted.result, ++outboxTick));
+        }
+        if (promoted.result?.disposition !== "queued") hideQueued(id, host, [item.queueId]);
         trackSteer(id, host, promoted.result, promoted.clientUserMessageId, text, extra);
         settleOutbox(id, null, host);
+        const disposition = promoted.result?.disposition;
+        const state = disposition === "steered" ? "inserted" : disposition === "started" ? "started" : disposition === "queued" ? "queued" : disposition === "deduplicated" ? "changed" : null;
+        if (state) finishQueueInsert(host, id, token, state, undefined, promoted.clientUserMessageId, imageDeliveryOf(promoted.result));
+        else unknown(`disposition: ${String(disposition)}`);
+        // Its history row may have arrived while the request was in flight, under the id cutex sent.
+        const sent = viewOn(id, host);
+        if (sent) reconcileQueueInsert(host, id, (cid) => hasClientId(sent.timeline, cid));
       } catch (e) {
-        // Not promoted (changed / already sent / steer refused): the queue row is shown again as
-        // cutex lists it.
+        const message = e instanceof Error ? e.message : String(e);
+        const parsed = parseQueueSteerError(message);
+        // A draft steered after cutex queued it (`ifIdle` fail): the turn ended first, so it simply waits
+        // in the queue for its turn (cutex sends it, original image included), not a refusal.
+        if (options?.ifIdle === "fail" && parsed?.kind === "noActiveTurn") {
+          finishQueueInsert(host, id, token, "queued");
+          return;
+        }
+        // A transport failure (no cutex answer) or cutex's own outcome-unknown: resynced, never resent.
+        if (!parsed || parsed.kind === "outcomeUnknown") return unknown(parsed ? parsed.detail : rawErrorText(message));
+        const state = parsed.kind === "changed" ? "changed" : "rejected";
+        // The row says it plainly; a native refusal's own words go to its 详情 tooltip.
+        finishQueueInsert(host, id, token, state, state === "changed" ? undefined : queueSteerNotice(message, translate, { images, imageSteering }) ?? translate("queue.insert.rejected"), undefined, undefined, { detail: queueSteerRaw(message) || undefined });
+      } finally {
+        // History may have arrived before this attempt began or while a refusal was in flight.
+        // A proven delivery must never leave a stale "insert rejected / delegation busy" receipt.
+        settleOutbox(id, null, host);
+        refreshQueue(id, host);
+      }
+    },
+
+    async queueInsertDecide(token, choice, sessionId, hostId) {
+      const agent = agentRef(sessionId, hostId);
+      if (!agent) return;
+      const { id, host } = agent;
+      const feedback = queueInsertByToken(host, id, token);
+      if (feedback?.state !== "unknown") return;
+      if (choice === "delivered" || choice === "forget") {
+        forgetUnknown(token);
+        if (choice === "delivered") markQueueInsertDelivered(host, id, token);
+        // Hidden, not forgotten: the same message still cannot be 插话 again from this desktop by accident.
+        else dismissQueueInsert(host, id, token);
+        return;
+      }
+      // 再发一次: still listed in cutex's queue = it never went (a plain queued row again, no second copy);
+      // an unreadable queue sends nothing (it may still be there).
+      const scope = captureHost(host);
+      const listed = await apiOn(host).queueList(id).catch(() => null);
+      if (!scope.current() || queueInsertByToken(host, id, token)?.state !== "unknown") return;
+      if (!listed?.items) {
+        notifyAgent(id, host, translate("queue.insert.resendUnreadable"), "error");
+        return;
+      }
+      forgetUnknown(token);
+      clearQueueInsert(host, id, token);
+      if (listed.items.some((q) => q.clientUserMessageId === feedback.item.clientUserMessageId)) {
+        refreshQueue(id, host);
+        return;
+      }
+      // A NEW message (new clientUserMessageId): the first one's fate stays its own.
+      const input = feedback.item.input as { type: string }[];
+      const entry = newOutboxEntry(viewOn(id, host)?.timeline ?? null, { id: crypto.randomUUID(), text: mentionRichText(host, id, queueItemText({ ...feedback.item, input: input.filter((x) => x.type === "text") })), extra: input.filter((x) => x.type !== "text"), strategy: "auto", placement: placementFor(id, host, "auto", false) });
+      setOutbox(id, host, (list) => [...list, entry]);
+      await dispatchSend(id, entry, true, scope).catch(() => {});
+    },
+
+    async queueMergeInsert(items, sessionId, hostId, joinDelegation) {
+      const agent = agentRef(sessionId, hostId);
+      const plan = planQueueMerge(items);
+      if (!agent || !plan) return;
+      const { id, host } = agent;
+      const carrier = plan.items[0]!;
+      const ids = plan.items.map((i) => i.queueId);
+      // Optimistic: the merged rows leave the queue and one insert shows (the first item's id).
+      const extra = plan.input.filter((x) => (x as { type?: string }).type !== "text");
+      const entry = newOutboxEntry(viewOn(id, host)?.timeline ?? null, { id: carrier.clientUserMessageId, text: mergedText(plan.input), extra, strategy: "auto", placement: placementFor(id, host, "auto", false), promoted: true });
+      hideQueued(id, host, ids);
+      setOutbox(id, host, (list) => [...list.filter((e) => e.id !== entry.id), entry]);
+      try {
+        const merged = await apiOn(host).queueMergeInsert(id, plan.items.map((i) => ({ queueId: i.queueId, revision: i.revision })), featuresOn(host).has(QUEUE_STEER_FEATURE), joinDelegation);
+        const text = mergedText(merged.input);
+        const sent = merged.input.filter((x) => (x as { type?: string }).type !== "text");
+        setOutbox(id, host, (list) => confirmOutbox(list, entry.id, merged.result, ++outboxTick));
+        trackSteer(id, host, merged.result, merged.clientUserMessageId, text, sent);
+        settleOutbox(id, null, host);
+        // Items that changed meanwhile were left out: shown again (they are still queued).
+        if (merged.skipped.length) hideQueued(id, host, merged.skipped, true);
+        notifyAgent(id, host, translate("queue.merge.toast", { n: merged.merged.length }));
+        if (merged.skipped.length) notifyAgent(id, host, translate("queue.merge.skipped", { n: merged.skipped.length }));
+      } catch (e) {
         setOutbox(id, host, (list) => removeOutbox(list, entry.id));
-        hideQueued(id, host, [item.queueId], true);
-        const notice = queueSteerNotice(e instanceof Error ? e.message : String(e), translate);
-        throw notice === null ? e : new Error(notice);
+        hideQueued(id, host, ids, true);
+        throw new Error(queueMergeNotice(e instanceof Error ? e.message : String(e), translate, { images: hasImageInput(plan.input), imageSteering: imageSteeringOn(id, host) }));
       } finally {
         refreshQueue(id, host);
       }
@@ -2697,7 +3292,7 @@ export const useApp = create<AppState>((set, get) => {
           }
         }
         restore();
-        if (!unsent && entry?.state === "sending") setOutbox(id, host, (list) => (ours ? failOutbox(list, outboxId, staleHost().message) : removeOutbox(list, outboxId)));
+        if (!unsent && entry?.state === "sending") setOutbox(id, host, (list) => (ours ? failOutbox(list, outboxId, staleHost().message, true) : removeOutbox(list, outboxId)));
         set((state) => ({ queueHandoff: { ...state.queueHandoff, [key]: false } }));
         return false;
       };
@@ -2819,6 +3414,16 @@ export const useApp = create<AppState>((set, get) => {
       await apiOn(host).interrupt(id, view.timeline.threadId, turnId);
     },
   };
+}));
+
+// Pending inserts are kept across restarts (lib/pendingSteerStore).
+useApp.subscribe((s, prev) => {
+  if (s.pendingSteers !== prev.pendingSteers) savePendingSteers(s.pendingSteers);
+});
+
+// Closing the Settings Shelf ends a live edit (在主界面调整) where it is.
+useSettingsShelf.subscribe((s, prev) => {
+  if (prev.open && !s.open && useApp.getState().customize) useApp.setState({ customize: null });
 });
 
 /**
@@ -2827,9 +3432,13 @@ export const useApp = create<AppState>((set, get) => {
  * on screen (panes step 2: 「在看」 is a set) or its side page on screen (`views[…].visible`).
  */
 export function looksAt(s: Pick<AppState, "selectedId" | "selectedHost" | "hosts" | "view" | "views">, hostId: string, id: string): boolean {
-  if (!document.hasFocus() || s.view.kind !== "conversation") return false;
+  if (!appHasFocus() || s.view.kind !== "conversation") return false;
+  // Folded to its strip / 只看 Shelf (docs/design/002, owner 2026-10-22): not looked at, even when selected.
+  if (isFoldedConversation(hostId, id)) return false;
   if (s.selectedId === id && hostId === (s.selectedHost ?? s.hosts?.active ?? "local")) return true;
-  return !!s.views[viewKey(hostId, id)]?.visible;
+  const key = viewKey(hostId, id);
+  // On screen in the window the owner is in (multi-window P3), not only in another one.
+  return !!s.views[key]?.visible && shownInActiveWindow(key);
 }
 
 /** Interrupt + brief "interrupted" feedback (stop button, Esc in the composer). */
@@ -2880,6 +3489,21 @@ type HostReadSource = Pick<AppState, "hosts" | "sidebar" | "features" | "byHost"
 const focusOf = (s: Pick<AppState, "hosts">) => s.hosts?.active ?? "local";
 
 /** The sidebar snapshot of a host: the focus host's top-level one, else its slice's (null: not followed). */
+/**
+ * Whether any listed agent (any host, active or retired) other than `except` wears avatar `value`; true when a
+ * host's list is not loaded (unknown counts as in use: a picture is never removed on a guess).
+ */
+export function pictureInUse(s: AppState, value: string, except: string): boolean {
+  const hosts = s.hosts?.hosts.map((h) => h.id) ?? [];
+  const ids = hosts.length ? hosts : [focusOf(s)];
+  for (const hostId of ids) {
+    const sidebar = sidebarOf(s, hostId);
+    if (!sidebar) return true;
+    for (const row of [...sidebar.active, ...sidebar.retired]) if (row.cutexSessionId !== except && row.avatar?.kind === "icon" && row.avatar.value === value) return true;
+  }
+  return false;
+}
+
 export function sidebarOf(s: HostReadSource, hostId: string | null | undefined): SidebarSnapshot | null {
   if (!hostId || hostId === focusOf(s)) return s.sidebar;
   return s.byHost[hostId]?.sidebar ?? null;
@@ -3070,7 +3694,9 @@ async function createPendingChat(current: () => boolean, finish: () => void): Pr
         const { profile } = pending;
         // Claude profiles: model / effort and the Claude starting mode only (cutex refuses Codex fields).
         // Codex: 自动 = auto reviewer, in `launch` where cutex takes it, else set once the thread runs.
-        const reviewer = pending.claude
+        const reviewer = pending.dsh
+          ? { launch: dshOnlyLaunch(pending.launch), fallback: null }
+          : pending.claude
           ? { launch: claudeOnlyLaunch(pending.launch, pending.claudeModes ?? null), fallback: null }
           : reviewerForCreate(codexOnlyLaunch(pending.launch), pending.permissionMode ?? "custom", featuresOf(app, host).has(LAUNCH_REVIEWER_FEATURE));
         const launch = reviewer.launch ?? {};

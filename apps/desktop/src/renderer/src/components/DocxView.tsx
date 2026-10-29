@@ -24,7 +24,7 @@ export default function DocxView({ bytes }: { bytes: Uint8Array }) {
   if ("error" in out) return <p className="p-3 text-xs text-danger">{t("docPreview.failed", { error: out.error })}</p>;
   return (
     <div className="h-full min-h-0 overflow-auto">
-      <p className="mx-3 mt-2 rounded-md border border-border bg-surface-2 px-2 py-1 text-[11px] text-subtle">{t("docPreview.docxNote")}</p>
+      <p className="mx-3 mt-2 rounded-md border border-border bg-surface-2 px-2 py-1 text-caption/[inherit] text-subtle">{t("docPreview.docxNote")}</p>
       {out.html.trim() ? (
         // Sanitised by lib/docxHtml.ts (DOMPurify allowlist: no scripts, handlers, styles, ids, links or remote images).
         <div className="docx-preview px-4 py-3 text-sm" dangerouslySetInnerHTML={{ __html: out.html }} />

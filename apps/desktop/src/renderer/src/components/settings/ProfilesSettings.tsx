@@ -9,6 +9,7 @@
 // -delete) is gated per capability. Below the overview's list: the `settings.section` items of
 // page `profiles` (claude-accounts: Claude 账户); `openSettings("profiles", {anchor: <item id>})`
 // scrolls to one.
+import { linkedAppearanceUndoNow } from "../../lib/profileLinkAppearance";
 import type { DeleteProfileOptions } from "../../lib/profileRefs";
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { Plus } from "lucide-react";
@@ -20,22 +21,31 @@ import { openMenuAt, openMenuFrom, promptDialog, type MenuEntry } from "../../li
 import { isDefaultProfile, orderProfiles } from "../../lib/profileCards";
 import { applyProfileOrder, canMoveProfile, dropProfile, moveProfile, setProfileOrder, useProfileOrder, type ProfileMove } from "../../lib/profileOrder";
 import { copyName } from "../../lib/profileCreate";
-import { defaultModelEditable, PROFILE_FEATURES } from "../../lib/profileKind";
+import { defaultModelEditable, PROFILE_FEATURES, profileKind } from "../../lib/profileKind";
 import { defaultModelMenu } from "../../lib/profileDefaultModel";
 import { useModelName } from "../../lib/modelDisplay";
 import { cachedProfile, cachedProfileList, prefetchProfiles, rememberProfileList, updateCachedProfile } from "../../lib/profileSnapshot";
 import { QUOTA_UPDATED_EVENT, quotaEventPlanChanged } from "../../lib/quota";
 import { requestSettingsReveal } from "../../lib/settingsSearchView";
+import { profileSearchAnchor } from "../../lib/settingsProfileSearch";
+import { flashElement } from "../../lib/focusRequest";
 import { SettingsSections } from "../../modules/Outlet";
-import { profilePageOf, SETTINGS_PAGE, useApp } from "../../store";
-import { Button, Loading } from "./Form";
+import { profilePageOf, useApp } from "../../store";
+import { useSettingsShelf } from "../../lib/settingsShelf";
+import { Button, Loading, SettingsGroup } from "./Form";
 import { NewProfileForm } from "./NewProfileForm";
+import { NewProfileVariantsForm } from "./NewProfileVariantsForm";
+import { variantsOn } from "../../lib/profileVariants";
 import { noteNewAgentProfile, useKeptNewAgentDraft } from "../../lib/newAgentReturn";
 import { ProfileCard } from "./ProfileCard";
 import { ProfileEditor } from "./ProfileEditor";
 import { useTargetApi, useTargetFeatures, useTargetHostId, useTargetLoadQuota } from "../../lib/targetHost";
 import { useTransferTargets } from "../../lib/useTransferTargets";
 import { CopyProfileToHostDialog } from "./CopyProfileToHostDialog";
+import { ProfileAccountLinkDialog } from "./ProfileAccountLinkDialog";
+import { ProfileLinkSettings } from "./ProfileLinkSettings";
+import { accountLinkHostAllowed, captureAccountProfileRead } from "../../lib/profileAccountLinks";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 type ProfileList = { defaultProfile: string | null; profiles: ProfileItem[] };
 
@@ -72,8 +82,6 @@ function Card({ item, isDefault, menu, onOpen, onDelete, onModelMenu }: {
 }
 
 
-/** Sections of the profile editor that `openSettings("profiles", { profile, anchor })` scrolls to (`#profile-<anchor>`). */
-const PROFILE_ANCHORS: readonly string[] = ["account", "quota"];
 /** Settings → Profiles, with 「返回新建」 on top while a new-agent draft waits for this host. */
 export function ProfilesPage() {
   return (
@@ -102,6 +110,7 @@ function NewAgentReturnBar() {
 }
 
 function ProfilesBody() {
+  const win = useOwnerWindow();
   const api = useTargetApi();
   const targetHost = useTargetHostId();
   const { t } = useI18n();
@@ -109,46 +118,57 @@ function ProfilesBody() {
   const loadQuota = useTargetLoadQuota();
   const modelName = useModelName();
   const openSettings = useApp((s) => s.openSettings);
-  const settingsParams = useApp((s) => (s.view.kind === "page" && s.view.page === SETTINGS_PAGE ? s.view.params : null));
+  // The Settings Shelf's page params (lib/settingsShelf): the Profiles sub-page.
+  const settingsParams = useSettingsShelf((s) => (s.open ? s.params : null));
   const page = settingsParams ? profilePageOf(settingsParams) : undefined;
+  const selectedProfile = page?.kind === "profile" ? page.name : null;
   const focus = useApp((s) => s.settingsFocus);
+  const detailAnchor = profileSearchAnchor(focus?.anchor);
+  const [unavailableAnchor, setUnavailableAnchor] = useState<{ profile: string; anchor: string } | null>(null);
   const [list, setList] = useState<ProfileList | null | undefined>(() => cachedProfileList(targetHost) ?? undefined);
   /** Last lifecycle result, in the overview's toolbar row (fixed spot: never shifts the cards). */
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const [newPreset, setNewPreset] = useState<string | undefined>();
   /** Why cutex refused deleting a profile; shown in that profile's detail overview card. */
   const [refusal, setRefusal] = useState<{ profile: string; refusal: CutexRefusal } | null>(null);
   // Any other anchor is a card of the overview: a module section (`settings.section` item id, e.g. the
   // profile editor's 管理账户 → Claude 账户) — scroll to it and flash it once it renders.
   useEffect(() => {
-    if (!focus?.anchor || PROFILE_ANCHORS.includes(focus.anchor)) return;
+    if (!focus?.anchor || detailAnchor) return;
     requestSettingsReveal(focus.anchor);
     useApp.setState({ settingsFocus: null });
-  }, [focus]);
+  }, [focus, detailAnchor]);
   // `/logout` lands on this agent's profile with its account section in view; the identity menu's
   // 用量 ▸ rows on its 额度 section.
   useEffect(() => {
-    const anchor = focus?.anchor;
-    if (!anchor || !PROFILE_ANCHORS.includes(anchor)) return;
+    const anchor = detailAnchor;
+    // Keep the requested anchor until the owner has chosen a Profile on this host.
+    if (!anchor || !selectedProfile) return;
+    setUnavailableAnchor(null);
     let tries = 0;
     const timer = setInterval(() => {
-      const el = document.getElementById(`profile-${anchor}`);
-      if (!el && ++tries <= 20) return;
+      const el = win.document.getElementById(`profile-${anchor}`);
+      if (!el && ++tries <= 30) return;
       clearInterval(timer);
-      el?.scrollIntoView({ block: "start", behavior: "smooth" });
+      if (el) flashElement(el);
+      else setUnavailableAnchor({ profile: selectedProfile, anchor });
       // Consumed only now: clearing it earlier re-runs this effect and its cleanup stops the timer.
       useApp.setState({ settingsFocus: null });
     }, 100);
     return () => clearInterval(timer);
-  }, [focus]);
-  const refresh = () =>
-    api.listProfiles().then(
+  }, [focus, detailAnchor, selectedProfile, targetHost]);
+  const refresh = () => {
+    const current = captureAccountProfileRead(targetHost);
+    return api.listProfiles().then(
       (r) => {
-        rememberProfileList(r, targetHost);
+        if (!current()) return;
+        rememberProfileList(r, targetHost, current);
         if (r) prefetchProfiles(r.profiles, targetHost);
         setList(r);
       },
-      () => setList(null),
+      () => { if (current()) setList(null); },
     );
+  };
   useEffect(() => {
     void refresh();
   }, []);
@@ -175,7 +195,7 @@ function ProfilesBody() {
   /** Save a new order of every listed profile (deleted ones drop out); focus follows the moved card. */
   const saveOrder = (ids: string[], focusId?: string) => {
     setProfileOrder(targetHost, ids);
-    if (focusId) requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-profile-card="${CSS.escape(focusId)}"] [role="button"]`)?.focus());
+    if (focusId) win.requestAnimationFrame(() => win.document.querySelector<HTMLElement>(`[data-profile-card="${CSS.escape(focusId)}"] [role="button"]`)?.focus());
   };
   const move = (p: ProfileItem, how: ProfileMove, focus = false) => saveOrder(moveProfile(shownIds, p.id, how), focus ? p.id : undefined);
   const resetOrder = () => setProfileOrder(targetHost, []);
@@ -196,9 +216,10 @@ function ProfilesBody() {
   // 复制到其他主机 (profile-transfer): only while another connected host takes a copy.
   const transferTargets = useTransferTargets(targetHost);
   const [transferring, setTransferring] = useState<ProfileItem | null>(null);
+  const [linking, setLinking] = useState<{ profile: ProfileItem; unlink?: boolean } | null>(null);
   const fail = (e: unknown) => setNotice({ text: e instanceof Error ? e.message : String(e), error: true });
   const open = (name: string) => openSettings("profiles", { profile: name });
-  const toOverview = () => openSettings("profiles");
+  const toOverview = () => { setNewPreset(undefined); openSettings("profiles"); };
 
   const duplicate = async (p: ProfileItem) => {
     const name = await promptDialog(t("agent-config.profile.duplicateName"), copyName(p.name, names));
@@ -275,6 +296,13 @@ function ProfilesBody() {
     { label: t("agent-config.profile.makeDefault"), disabled: isDefault(p), onSelect: () => void api.patchSettings({ defaultProfile: p.name }).then(refresh, fail) },
     { label: t("agent-config.profile.duplicate"), disabled: !canDuplicate, hint: canDuplicate ? undefined : needsCutex, onSelect: () => void duplicate(p) },
     ...(transferTargets.length ? [{ label: t("agent-config.profile.transfer.menu"), onSelect: () => setTransferring(p) }] : []),
+    ...(features.has("profile-account-link") && accountLinkHostAllowed(targetHost) ? [
+      { label: t("settings.profile.link.mark"), onSelect: () => setLinking({ profile: p }) },
+      ...(p.link ? [{ label: t("settings.profile.link.unlink"), onSelect: () => setLinking({ profile: p, unlink: true }) }] : []),
+      ...(p.accountLinkState === "disabled" ? [{ label: t("settings.profile.link.restoreAuto"), onSelect: () => setLinking({ profile: p, unlink: true }) }] : []),
+      // 取消同步到 X: the undo of the last appearance sync, here for as long as it can be undone (not a row on the card).
+      ...((u) => (u ? [{ label: t("settings.profile.link.appearance.undoMenu", { hosts: u.hosts.join(", ") }), hint: t("settings.profile.link.appearance.undo"), onSelect: () => void u.run() }] : []))(linkedAppearanceUndoNow(targetHost, p)),
+    ] : []),
     {
       label: t("agent-config.profile.delete"),
       danger: true,
@@ -290,12 +318,34 @@ function ProfilesBody() {
   ];
   };
 
-  if (page?.kind === "new")
+  // Kimi accounts → 用这个账户新建 Profile: openSettings("profiles", { create: true, kimiAccount }).
+  const kimiPreselect = page?.kind === "new" && newPreset === undefined ? focus?.kimiAccount : undefined;
+  if (page?.kind === "new" && variantsOn(features))
     return (
-      <NewProfileForm
+      <NewProfileVariantsForm
+        key={newPreset ?? (kimiPreselect ? `kimi:${kimiPreselect}` : "default")}
+        initialPreset={newPreset}
+        initialKimiAccount={kimiPreselect}
         existing={names}
         onCancel={toOverview}
         onCreated={(detail) => {
+          setNewPreset(undefined);
+          setNotice({ text: t("agent-config.profiles.new.created", { name: detail.name }), error: false });
+          noteNewAgentProfile(targetHost, detail.id);
+          void refresh().then(() => open(detail.name));
+        }}
+      />
+    );
+  if (page?.kind === "new")
+    return (
+      <NewProfileForm
+        key={newPreset ?? "default"}
+        initialPreset={newPreset}
+        existing={names}
+        haveKinds={profiles ? new Set(profiles.map(profileKind)) : null}
+        onCancel={toOverview}
+        onCreated={(detail) => {
+          setNewPreset(undefined);
           setNotice({ text: t("agent-config.profiles.new.created", { name: detail.name }), error: false });
           noteNewAgentProfile(targetHost, detail.id);
           void refresh().then(() => open(detail.name));
@@ -308,19 +358,26 @@ function ProfilesBody() {
     const item = profiles?.find((p) => p.name === name || p.id === name) ?? null;
     if (item)
       return (
-        <ProfileEditor
-          key={item.name}
-          profile={item.name}
-          item={item}
-          isDefault={isDefault(item)}
-          refusal={refusal?.profile === item.name ? refusal.refusal : null}
-          onChanged={(renamed) => {
-            if (renamed) open(renamed);
-            void refresh();
-          }}
-          onDuplicate={() => void duplicate(item)}
-          onDelete={(options) => remove(item.name, options)}
-        />
+        <>
+          {unavailableAnchor?.profile === name && <div role="status" className="mb-4 rounded-md border border-edge p-3 text-sm text-muted">
+            <p className="mb-2">{t("settings.searchIa.profileUnavailable" as MessageKey)}</p>
+            <Button onClick={() => openSettings("profiles", { anchor: unavailableAnchor.anchor })}>{t("agent-config.profiles.backToList")}</Button>
+          </div>}
+          <ProfileEditor
+            key={item.name}
+            profile={item.name}
+            item={item}
+            isDefault={isDefault(item)}
+            refusal={refusal?.profile === item.name ? refusal.refusal : null}
+            onChanged={(renamed) => {
+              if (renamed) open(renamed);
+              void refresh();
+            }}
+            onDuplicate={() => void duplicate(item)}
+            onDelete={(options) => remove(item.name, options)}
+            onCreateProvider={canCreate ? (preset) => { setNewPreset(preset); openSettings("profiles", { create: true }); } : undefined}
+          />
+        </>
       );
     if (list === undefined) return <Loading rows={3} />;
     return (
@@ -333,22 +390,23 @@ function ProfilesBody() {
 
   return (
     <div>
+      {detailAnchor && <p role="status" className="mb-4 rounded-md border border-accent/40 bg-accent/10 px-4 py-3 text-sm">{t("settings.searchIa.pickProfile" as MessageKey)}</p>}
       <div className="mb-4 flex min-h-7 items-center gap-3">
         <p className={`min-w-0 flex-1 truncate text-xs ${notice?.error ? "text-danger" : "text-subtle"}`} title={notice?.text}>
           {notice?.text ?? (list === null ? t("agent-config.profiles.loadFailed") : "")}
         </p>
         {savedOrder.length > 0 && profiles && profiles.length > 1 && (
-          <Button title={t("profiles.order.resetHint")} onClick={resetOrder}>
+          <SettingsGroup agents="none" source="local"><Button title={t("profiles.order.resetHint")} onClick={resetOrder}>
             {t("profiles.order.reset")}
-          </Button>
+          </Button></SettingsGroup>
         )}
         {list !== null && (
-          <Button disabled={!canCreate} title={canCreate ? undefined : needsCutex} onClick={() => (setNotice(null), openSettings("profiles", { create: true }))}>
+          <SettingsGroup agents="newAgents" source="host"><Button disabled={!canCreate} title={canCreate ? undefined : needsCutex} onClick={() => (setNotice(null), setNewPreset(undefined), openSettings("profiles", { create: true }))}>
             <span className="flex items-center gap-1">
               <Plus size={13} />
               {t("agent-config.profiles.add")}
             </span>
-          </Button>
+          </Button></SettingsGroup>
         )}
       </div>
       {profiles?.length ? (
@@ -386,7 +444,7 @@ function ProfilesBody() {
                 item={p}
                 isDefault={isDefault(p)}
                 menu={cardMenu}
-                onOpen={() => open(p.name)}
+                onOpen={() => detailAnchor ? openSettings("profiles", { profile: p.name, anchor: detailAnchor }) : open(p.name)}
                 onDelete={() => remove(p.name)}
                 onModelMenu={defaultModelEditable(p, features) ? (el) => void modelMenu(p, el) : undefined}
               />
@@ -400,7 +458,11 @@ function ProfilesBody() {
       <div className="mt-6">
         <SettingsSections page="profiles" />
       </div>
+      <div className="mt-6">
+      {features.has("profile-account-link") && accountLinkHostAllowed(targetHost) && <ProfileLinkSettings />}
+      </div>
       {transferring && <CopyProfileToHostDialog item={transferring} sourceHostId={targetHost} onClose={() => setTransferring(null)} />}
+      {linking && <ProfileAccountLinkDialog hostId={targetHost} profile={linking.profile} unlink={linking.unlink} onClose={() => setLinking(null)} onChanged={() => void refresh()} />}
     </div>
   );
 }

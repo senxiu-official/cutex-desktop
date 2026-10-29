@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 // Onboarding (owner 2026-10-19): wording presets (lib/termPresets) and when the introduction / a version's
-// 新功能 open by themselves (lib/onboarding automaticView); the dialog's step order and the hidden Maid chip.
+// 新功能 open by themselves (lib/onboarding automaticView); the merged flow's step order (components/OnboardingFlow) and
+// the hidden Maid chip.
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const mountedRoots = new Set<ReturnType<typeof createRoot>>();
+afterEach(() => { act(() => { mountedRoots.forEach((root) => root.unmount()); mountedRoots.clear(); }); document.body.replaceChildren(); });
 
 const fx = vi.hoisted(() => ({ profiles: [] as unknown[] }));
 
@@ -33,7 +38,7 @@ globalThis.ResizeObserver ??= class {
 
 const { applyTermPreset, currentTermPreset, termPresets } = await import("../src/renderer/src/lib/termPresets");
 const { getTermOverrides, resolveTerms } = await import("../src/renderer/src/lib/terms");
-const { automaticView, closeOnboarding, getOnboarding, ONBOARDING_REVISION, openOnboarding, setTestEveryBuild, setWhatsNewEnabled, testView, useOnboardingView } = await import("../src/renderer/src/lib/onboarding");
+const { automaticView, closeOnboarding, getOnboarding, ONBOARDING_REVISION, openOnboarding, setTestEveryBuild, resetOnboardingForTest, setWhatsNewEnabled, testView, useOnboardingView } = await import("../src/renderer/src/lib/onboarding");
 const { OnboardingHost } = await import("../src/renderer/src/components/OnboardingDialog");
 
 describe("wording presets", () => {
@@ -133,40 +138,49 @@ describe("the testing switch (development builds)", () => {
 
 describe("the introduction dialog", () => {
   function openIntro() {
+    localStorage.removeItem("cutex-desktop.onboarding");
+    resetOnboardingForTest();
     const div = document.createElement("div");
     document.body.append(div);
-    const root = createRoot(div);
+    const root = createRoot(div); mountedRoots.add(root);
     act(() => root.render(h(OnboardingHost)));
     act(() => openOnboarding({ kind: "intro" }));
     const step = () => div.querySelector("[data-onboarding-step]")?.getAttribute("data-onboarding-step");
     const button = (label: string) => [...div.querySelectorAll("button")].find((b) => b.textContent === label);
     const toTerms = () => {
-      while (step() !== "terms") act(() => button("onboarding.next")!.click());
+      for (let i = 0; i < 16 && step() !== "terms"; i++) act(() => button("onboarding.next")!.click());
+      expect(step()).toBe("terms");
     };
-    return { div, step, button, toTerms, unmount: () => act(() => root.unmount()) };
+    // Every step to the end; 「几个选择」 waits for the 拟人头像 answer (先不用 here).
+    const walk = () => {
+      const seen = [step()];
+      while (button("onboarding.next")) {
+        const next = button("onboarding.next")!;
+        if (next.disabled) act(() => div.querySelector<HTMLElement>("[data-portrait-use=no]")!.click());
+        act(() => button("onboarding.next")!.click());
+        seen.push(step());
+      }
+      return seen;
+    };
+    return { div, step, button, toTerms, walk, unmount: () => { act(() => root.unmount()); mountedRoots.delete(root); } };
   }
 
-  it("language and appearance come first, then the session, project and wording steps, and the Profile step (none yet) last", () => {
-    const { step, button, unmount } = openIntro();
-    const seen = [step()];
-    while (button("onboarding.next")) {
-      act(() => button("onboarding.next")!.click());
-      seen.push(step());
-    }
-    expect(seen).toEqual(["language", "appearance", "intro", "project", "terms", "profile"]);
+  // One merged flow (owner 2026-10-24): setup cards (one decision group each; 拟人头像 starts on 用, so its theme card
+  // follows), 认识 Cutex (the basics and 0.2 as one part), then Profile.
+  const FULL = ["language", "intro", "theme", "zoom", "perf", "terms", "project", "window", "sidebar", "groups", "layout", "pages", "look", "portraitThemes"];
+
+  it("concepts precede their settings, with the missing Profile step last", () => {
+    const { walk, button, unmount } = openIntro();
+    expect(walk()).toEqual([...FULL, "profile"]);
     expect(button("onboarding.finish")).toBeTruthy();
     unmount();
   });
 
   it("without a missing Profile the Profile step is left out", () => {
     fx.profiles = [{ name: "work" }];
-    const { step, button, unmount } = openIntro();
-    const seen = [step()];
-    while (button("onboarding.next")) {
-      act(() => button("onboarding.next")!.click());
-      seen.push(step());
-    }
-    expect(seen).toEqual(["language", "appearance", "intro", "project", "terms"]);
+    const { walk, button, unmount } = openIntro();
+    expect(walk()).toEqual(FULL);
+    expect(button("onboarding.finish")).toBeTruthy();
     fx.profiles = [];
     unmount();
   });

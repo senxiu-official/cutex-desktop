@@ -1,0 +1,1455 @@
+{
+  "_note": "Real responses of cutex feat/profile-auto-pick @ 50bc494 (private debug daemon, two Claude subscription profiles with fixture quota snapshots), captured 2026-10-23 by claude_auto_pick_smoke.py. Paths scrubbed.",
+  "listNoneOptedIn": {
+    "request": "GET /v2/profiles",
+    "body": null,
+    "status": 200,
+    "response": {
+      "contractVersion": 2,
+      "defaultProfile": null,
+      "profiles": [
+        {
+          "agentTurnQuestions": "decide",
+          "agentUseRequiresApproval": false,
+          "allowSessionSwitch": false,
+          "appearance": {
+            "avatarThemes": null,
+            "color": null,
+            "effectiveColor": "#EE7B32",
+            "effectiveProviderCategory": "claude",
+            "introGreeting": null,
+            "providerCategory": "claude"
+          },
+          "authKind": "none",
+          "authPresent": false,
+          "autoPick": false,
+          "avatarEtag": null,
+          "baseUrl": null,
+          "browserTools": false,
+          "claudeAccount": "default",
+          "claudeAiConnectors": false,
+          "claudeAllowExec": true,
+          "claudeAllowWrite": true,
+          "claudeCompaction": null,
+          "claudeCompactionModels": null,
+          "claudeFileCheckpointing": true,
+          "claudeLaunchPermissionModes": [],
+          "claudeSettingSources": [
+            "project"
+          ],
+          "cliKind": "claude",
+          "delegationWait": false,
+          "effectiveProviderCategory": "claude",
+          "id": "57b08b6c-7607-40ee-8a61-6a25fbbfd5b7",
+          "imageHistoryTrim": null,
+          "introPortraitEtag": null,
+          "isDefault": false,
+          "lastUsedAt": null,
+          "model": "sonnet",
+          "modelAutoCompactTokenLimit": null,
+          "modelContextWindow": null,
+          "modelDisplayNames": {},
+          "modelProvider": null,
+          "modelReasoningEffort": null,
+          "modelReasoningSummary": null,
+          "name": "ClaudeHome",
+          "nativeSubagents": null,
+          "planLabel": null,
+          "planLabelSource": null,
+          "privateChatgptAuthFile": null,
+          "provider": "claude",
+          "providerFamily": "anthropic",
+          "providerFamilyLabel": "Anthropic (Claude)",
+          "proxy": {
+            "editable": true,
+            "effective": {
+              "mode": "system",
+              "source": null,
+              "url": null
+            },
+            "mode": "inherit",
+            "noProxy": null,
+            "url": null,
+            "urlHasCredentials": false
+          },
+          "quotaEnabled": false,
+          "searchTool": false,
+          "source": "official",
+          "toolSchemaCompat": null,
+          "updatePlanEnabled": null,
+          "webSearch": null
+        },
+        {
+          "agentTurnQuestions": "decide",
+          "agentUseRequiresApproval": false,
+          "allowSessionSwitch": false,
+          "appearance": {
+            "avatarThemes": null,
+            "color": null,
+            "effectiveColor": "#EE7B32",
+            "effectiveProviderCategory": "claude",
+            "introGreeting": null,
+            "providerCategory": "claude"
+          },
+          "authKind": "none",
+          "authPresent": false,
+          "autoPick": false,
+          "avatarEtag": null,
+          "baseUrl": null,
+          "browserTools": false,
+          "claudeAccount": "ca-4227qwptzq",
+          "claudeAiConnectors": false,
+          "claudeAllowExec": true,
+          "claudeAllowWrite": true,
+          "claudeCompaction": null,
+          "claudeCompactionModels": null,
+          "claudeFileCheckpointing": true,
+          "claudeLaunchPermissionModes": [],
+          "claudeSettingSources": [
+            "project"
+          ],
+          "cliKind": "claude",
+          "delegationWait": false,
+          "effectiveProviderCategory": "claude",
+          "id": "7f934db6-3525-4320-933d-9beeb708aa62",
+          "imageHistoryTrim": null,
+          "introPortraitEtag": null,
+          "isDefault": false,
+          "lastUsedAt": null,
+          "model": "sonnet",
+          "modelAutoCompactTokenLimit": null,
+          "modelContextWindow": null,
+          "modelDisplayNames": {},
+          "modelProvider": null,
+          "modelReasoningEffort": null,
+          "modelReasoningSummary": null,
+          "name": "ClaudeWork",
+          "nativeSubagents": null,
+          "planLabel": null,
+          "planLabelSource": null,
+          "privateChatgptAuthFile": null,
+          "provider": "claude",
+          "providerFamily": "anthropic",
+          "providerFamilyLabel": "Anthropic (Claude)",
+          "proxy": {
+            "editable": true,
+            "effective": {
+              "mode": "system",
+              "source": null,
+              "url": null
+            },
+            "mode": "inherit",
+            "noProxy": null,
+            "url": null,
+            "urlHasCredentials": false
+          },
+          "quotaEnabled": false,
+          "searchTool": false,
+          "source": "official",
+          "toolSchemaCompat": null,
+          "updatePlanEnabled": null,
+          "webSearch": null
+        }
+      ]
+    }
+  },
+  "previewNoneOptedIn": {
+    "request": "GET /v2/profile-auto-pick?provider=anthropic",
+    "body": null,
+    "status": 200,
+    "response": {
+      "available": true,
+      "contractVersion": 2,
+      "providers": [
+        {
+          "optedIn": 0,
+          "profilePick": null,
+          "profiles": 2,
+          "provider": "anthropic",
+          "providerLabel": "Anthropic (Claude)",
+          "refusal": {
+            "code": "no_auto_pick_candidate",
+            "detail": "no 'anthropic' profile can be picked automatically (ClaudeHome: not_opted_in, ClaudeWork: not_opted_in); turn on 「参与自动选择」 for one, or pass a profile name"
+          }
+        }
+      ],
+      "unavailableReason": null
+    }
+  },
+  "createNoneOptedIn": {
+    "request": "POST /v2/human/agents",
+    "body": {
+      "requestId": "c-none",
+      "name": "C0",
+      "profile": "auto:anthropic",
+      "start": false
+    },
+    "status": 409,
+    "response": {
+      "contractVersion": 2,
+      "error": {
+        "code": "no_auto_pick_candidate",
+        "details": {},
+        "diagnosticId": "5d0210b0-f531-437b-ab61-4fa9b8f9d211",
+        "message": "no 'anthropic' profile can be picked automatically (ClaudeHome: not_opted_in, ClaudeWork: not_opted_in); turn on 「参与自动选择」 for one, or pass a profile name",
+        "retryable": false,
+        "source": "cutex"
+      }
+    }
+  },
+  "patchOptIn": {
+    "request": "PATCH /v2/profiles/7f934db6-3525-4320-933d-9beeb708aa62",
+    "body": {
+      "autoPick": true
+    },
+    "status": 200,
+    "response": {
+      "appliesTo": "newRuntimes",
+      "changed": true,
+      "contractVersion": 2,
+      "profile": {
+        "agentTurnQuestions": "decide",
+        "agentUseRequiresApproval": false,
+        "allowSessionSwitch": false,
+        "appearance": {
+          "avatarThemes": null,
+          "color": null,
+          "effectiveColor": "#EE7B32",
+          "effectiveProviderCategory": "claude",
+          "introGreeting": null,
+          "providerCategory": "claude"
+        },
+        "authKind": "none",
+        "authPresent": false,
+        "autoPick": true,
+        "avatarEtag": null,
+        "baseUrl": null,
+        "browserTools": false,
+        "claudeAccount": "ca-4227qwptzq",
+        "claudeAiConnectors": false,
+        "claudeAllowExec": true,
+        "claudeAllowWrite": true,
+        "claudeCompaction": null,
+        "claudeCompactionModels": null,
+        "claudeFileCheckpointing": true,
+        "claudeLaunchPermissionModes": [],
+        "claudeSettingSources": [
+          "project"
+        ],
+        "cliKind": "claude",
+        "delegationWait": false,
+        "detail": {
+          "agentTurnQuestionsDefault": "decide",
+          "agentTurnQuestionsExplicit": null,
+          "agentTurnQuestionsOptions": [
+            "decide",
+            "wait"
+          ],
+          "allowSessionSwitchDefault": false,
+          "allowSessionSwitchExplicit": null,
+          "apiKeyPresent": false,
+          "avatarThemeOptions": [
+            "animals",
+            "sea",
+            "gems",
+            "plants",
+            "food",
+            "sky",
+            "birds",
+            "insects",
+            "fantasy",
+            "prehistoric",
+            "desserts",
+            "seasons",
+            "transport",
+            "music",
+            "cats"
+          ],
+          "catalogEditable": false,
+          "claudeAllowExecDefault": true,
+          "claudeAllowExecExplicit": null,
+          "claudeAllowWriteDefault": true,
+          "claudeAllowWriteExplicit": null,
+          "claudeBuiltinDefaultModel": "sonnet",
+          "claudeCompactionError": null,
+          "claudeCompactionModelsError": null,
+          "claudeFileCheckpointingDefault": true,
+          "claudeFileCheckpointingExplicit": null,
+          "claudeNewSessionModel": null,
+          "claudeProfileModel": "sonnet",
+          "claudeSettingSourcesDefault": [],
+          "claudeSettingSourcesExplicit": [
+            "project"
+          ],
+          "claudeSettingSourcesOptions": [
+            "project",
+            "user"
+          ],
+          "config": null,
+          "delegationWaitDefault": false,
+          "delegationWaitExplicit": null,
+          "editable": {
+            "agentTurnQuestions": true,
+            "agentUseRequiresApproval": true,
+            "allowSessionSwitch": true,
+            "apiKey": false,
+            "avatarThemes": true,
+            "browserTools": true,
+            "claudeAiConnectors": true,
+            "claudeCompaction": true,
+            "claudeCompactionModels": true,
+            "claudeDefaultModel": true,
+            "claudeFileCheckpointing": true,
+            "claudeSettingSources": true,
+            "claudeTools": true,
+            "color": true,
+            "delegationWait": true,
+            "forcedLoginMethod": false,
+            "imageHistoryTrim": false,
+            "introGreeting": true,
+            "model": false,
+            "modelAutoCompactTokenLimit": false,
+            "modelContextWindow": false,
+            "modelProvider": false,
+            "modelReasoningEffort": false,
+            "modelReasoningSummary": false,
+            "name": true,
+            "nativeSubagents": false,
+            "planLabel": true,
+            "privateChatgptAuthFile": false,
+            "providerCategory": true,
+            "providerEnvKey": false,
+            "providerOptions": false,
+            "searchTool": false,
+            "toolSchemaCompat": false,
+            "updatePlanEnabled": false,
+            "webSearch": false
+          },
+          "nativeSubagentsDefault": null,
+          "nativeSubagentsExplicit": null,
+          "planLabelManual": null,
+          "providerCategoryOptions": [
+            "kimi",
+            "glm",
+            "zai",
+            "claude",
+            "deepseek",
+            "codex",
+            "other"
+          ]
+        },
+        "effectiveProviderCategory": "claude",
+        "id": "7f934db6-3525-4320-933d-9beeb708aa62",
+        "imageHistoryTrim": null,
+        "introPortraitEtag": null,
+        "isDefault": false,
+        "lastUsedAt": null,
+        "model": "sonnet",
+        "modelAutoCompactTokenLimit": null,
+        "modelContextWindow": null,
+        "modelDisplayNames": {},
+        "modelProvider": null,
+        "modelReasoningEffort": null,
+        "modelReasoningSummary": null,
+        "name": "ClaudeWork",
+        "nativeSubagents": null,
+        "planLabel": null,
+        "planLabelSource": null,
+        "privateChatgptAuthFile": null,
+        "provider": "claude",
+        "providerFamily": "anthropic",
+        "providerFamilyLabel": "Anthropic (Claude)",
+        "proxy": {
+          "editable": true,
+          "effective": {
+            "mode": "system",
+            "source": null,
+            "url": null
+          },
+          "mode": "inherit",
+          "noProxy": null,
+          "url": null,
+          "urlHasCredentials": false
+        },
+        "quotaEnabled": false,
+        "searchTool": false,
+        "source": "official",
+        "toolSchemaCompat": null,
+        "updatePlanEnabled": null,
+        "webSearch": null
+      },
+      "renamed": null
+    }
+  },
+  "listOptedIn": {
+    "request": "GET /v2/profiles",
+    "body": null,
+    "status": 200,
+    "response": {
+      "contractVersion": 2,
+      "defaultProfile": null,
+      "profiles": [
+        {
+          "agentTurnQuestions": "decide",
+          "agentUseRequiresApproval": false,
+          "allowSessionSwitch": false,
+          "appearance": {
+            "avatarThemes": null,
+            "color": null,
+            "effectiveColor": "#EE7B32",
+            "effectiveProviderCategory": "claude",
+            "introGreeting": null,
+            "providerCategory": "claude"
+          },
+          "authKind": "none",
+          "authPresent": false,
+          "autoPick": true,
+          "avatarEtag": null,
+          "baseUrl": null,
+          "browserTools": false,
+          "claudeAccount": "default",
+          "claudeAiConnectors": false,
+          "claudeAllowExec": true,
+          "claudeAllowWrite": true,
+          "claudeCompaction": null,
+          "claudeCompactionModels": null,
+          "claudeFileCheckpointing": true,
+          "claudeLaunchPermissionModes": [],
+          "claudeSettingSources": [
+            "project"
+          ],
+          "cliKind": "claude",
+          "delegationWait": false,
+          "effectiveProviderCategory": "claude",
+          "id": "57b08b6c-7607-40ee-8a61-6a25fbbfd5b7",
+          "imageHistoryTrim": null,
+          "introPortraitEtag": null,
+          "isDefault": false,
+          "lastUsedAt": null,
+          "model": "sonnet",
+          "modelAutoCompactTokenLimit": null,
+          "modelContextWindow": null,
+          "modelDisplayNames": {},
+          "modelProvider": null,
+          "modelReasoningEffort": null,
+          "modelReasoningSummary": null,
+          "name": "ClaudeHome",
+          "nativeSubagents": null,
+          "planLabel": null,
+          "planLabelSource": null,
+          "privateChatgptAuthFile": null,
+          "provider": "claude",
+          "providerFamily": "anthropic",
+          "providerFamilyLabel": "Anthropic (Claude)",
+          "proxy": {
+            "editable": true,
+            "effective": {
+              "mode": "system",
+              "source": null,
+              "url": null
+            },
+            "mode": "inherit",
+            "noProxy": null,
+            "url": null,
+            "urlHasCredentials": false
+          },
+          "quotaEnabled": false,
+          "searchTool": false,
+          "source": "official",
+          "toolSchemaCompat": null,
+          "updatePlanEnabled": null,
+          "webSearch": null
+        },
+        {
+          "agentTurnQuestions": "decide",
+          "agentUseRequiresApproval": false,
+          "allowSessionSwitch": false,
+          "appearance": {
+            "avatarThemes": null,
+            "color": null,
+            "effectiveColor": "#EE7B32",
+            "effectiveProviderCategory": "claude",
+            "introGreeting": null,
+            "providerCategory": "claude"
+          },
+          "authKind": "none",
+          "authPresent": false,
+          "autoPick": true,
+          "avatarEtag": null,
+          "baseUrl": null,
+          "browserTools": false,
+          "claudeAccount": "ca-4227qwptzq",
+          "claudeAiConnectors": false,
+          "claudeAllowExec": true,
+          "claudeAllowWrite": true,
+          "claudeCompaction": null,
+          "claudeCompactionModels": null,
+          "claudeFileCheckpointing": true,
+          "claudeLaunchPermissionModes": [],
+          "claudeSettingSources": [
+            "project"
+          ],
+          "cliKind": "claude",
+          "delegationWait": false,
+          "effectiveProviderCategory": "claude",
+          "id": "7f934db6-3525-4320-933d-9beeb708aa62",
+          "imageHistoryTrim": null,
+          "introPortraitEtag": null,
+          "isDefault": false,
+          "lastUsedAt": null,
+          "model": "sonnet",
+          "modelAutoCompactTokenLimit": null,
+          "modelContextWindow": null,
+          "modelDisplayNames": {},
+          "modelProvider": null,
+          "modelReasoningEffort": null,
+          "modelReasoningSummary": null,
+          "name": "ClaudeWork",
+          "nativeSubagents": null,
+          "planLabel": null,
+          "planLabelSource": null,
+          "privateChatgptAuthFile": null,
+          "provider": "claude",
+          "providerFamily": "anthropic",
+          "providerFamilyLabel": "Anthropic (Claude)",
+          "proxy": {
+            "editable": true,
+            "effective": {
+              "mode": "system",
+              "source": null,
+              "url": null
+            },
+            "mode": "inherit",
+            "noProxy": null,
+            "url": null,
+            "urlHasCredentials": false
+          },
+          "quotaEnabled": false,
+          "searchTool": false,
+          "source": "official",
+          "toolSchemaCompat": null,
+          "updatePlanEnabled": null,
+          "webSearch": null
+        }
+      ]
+    }
+  },
+  "previewReady": {
+    "request": "GET /v2/profile-auto-pick?provider=anthropic",
+    "body": null,
+    "status": 200,
+    "response": {
+      "available": true,
+      "contractVersion": 2,
+      "providers": [
+        {
+          "optedIn": 2,
+          "profilePick": {
+            "at": "2026-10-22T23:11:34+00:00",
+            "candidates": [
+              {
+                "activeAgents": 0,
+                "bindingWindow": "5h",
+                "burnPerHour": 0.0,
+                "burnSource": "agents",
+                "hours": 17.9,
+                "profile": "ClaudeWork",
+                "profileId": "7f934db6-3525-4320-933d-9beeb708aa62",
+                "remainingPercent": 80.0,
+                "resetAt": 1792725093
+              },
+              {
+                "activeAgents": 0,
+                "bindingWindow": "5h",
+                "burnPerHour": 0.0,
+                "burnSource": "agents",
+                "hours": 2.1,
+                "profile": "ClaudeHome",
+                "profileId": "57b08b6c-7607-40ee-8a61-6a25fbbfd5b7",
+                "remainingPercent": 15.0,
+                "resetAt": 1792721493
+              }
+            ],
+            "effort": null,
+            "excluded": [],
+            "model": null,
+            "picked": "ClaudeWork",
+            "pickedId": "7f934db6-3525-4320-933d-9beeb708aa62",
+            "provider": "anthropic",
+            "reason": "ClaudeWork: 5h window 80% left, about 17.9 h to its limit (latest to hit a limit of 2 candidates)",
+            "requested": "auto:anthropic",
+            "rule": "latest_wall"
+          },
+          "profiles": 2,
+          "provider": "anthropic",
+          "providerLabel": "Anthropic (Claude)",
+          "refusal": null
+        }
+      ],
+      "unavailableReason": null
+    }
+  },
+  "previewAlias": {
+    "request": "GET /v2/profile-auto-pick?provider=claude",
+    "body": null,
+    "status": 200,
+    "response": {
+      "available": true,
+      "contractVersion": 2,
+      "providers": [
+        {
+          "optedIn": 2,
+          "profilePick": {
+            "at": "2026-10-22T23:11:34+00:00",
+            "candidates": [
+              {
+                "activeAgents": 0,
+                "bindingWindow": "5h",
+                "burnPerHour": 0.0,
+                "burnSource": "agents",
+                "hours": 17.9,
+                "profile": "ClaudeWork",
+                "profileId": "7f934db6-3525-4320-933d-9beeb708aa62",
+                "remainingPercent": 80.0,
+                "resetAt": 1792725093
+              },
+              {
+                "activeAgents": 0,
+                "bindingWindow": "5h",
+                "burnPerHour": 0.0,
+                "burnSource": "agents",
+                "hours": 2.1,
+                "profile": "ClaudeHome",
+                "profileId": "57b08b6c-7607-40ee-8a61-6a25fbbfd5b7",
+                "remainingPercent": 15.0,
+                "resetAt": 1792721493
+              }
+            ],
+            "effort": null,
+            "excluded": [],
+            "model": null,
+            "picked": "ClaudeWork",
+            "pickedId": "7f934db6-3525-4320-933d-9beeb708aa62",
+            "provider": "anthropic",
+            "reason": "ClaudeWork: 5h window 80% left, about 17.9 h to its limit (latest to hit a limit of 2 candidates)",
+            "requested": "auto:anthropic",
+            "rule": "latest_wall"
+          },
+          "profiles": 2,
+          "provider": "anthropic",
+          "providerLabel": "Anthropic (Claude)",
+          "refusal": null
+        }
+      ],
+      "unavailableReason": null
+    }
+  },
+  "previewOpusHigh": {
+    "request": "GET /v2/profile-auto-pick?provider=anthropic&model=opus&effort=high",
+    "body": null,
+    "status": 200,
+    "response": {
+      "available": true,
+      "contractVersion": 2,
+      "providers": [
+        {
+          "optedIn": 2,
+          "profilePick": {
+            "at": "2026-10-22T23:11:34+00:00",
+            "candidates": [
+              {
+                "activeAgents": 0,
+                "bindingWindow": "5h",
+                "burnPerHour": 0.0,
+                "burnSource": "agents",
+                "hours": 12.3,
+                "profile": "ClaudeWork",
+                "profileId": "7f934db6-3525-4320-933d-9beeb708aa62",
+                "remainingPercent": 80.0,
+                "resetAt": 1792725093
+              },
+              {
+                "activeAgents": 0,
+                "bindingWindow": "5h",
+                "burnPerHour": 0.0,
+                "burnSource": "agents",
+                "hours": 1.3,
+                "profile": "ClaudeHome",
+                "profileId": "57b08b6c-7607-40ee-8a61-6a25fbbfd5b7",
+                "remainingPercent": 15.0,
+                "resetAt": 1792721493
+              }
+            ],
+            "effort": "high",
+            "excluded": [],
+            "model": "opus",
+            "picked": "ClaudeWork",
+            "pickedId": "7f934db6-3525-4320-933d-9beeb708aa62",
+            "provider": "anthropic",
+            "reason": "ClaudeWork: 5h window 80% left, about 12.3 h to its limit (latest to hit a limit of 2 candidates)",
+            "requested": "auto:anthropic",
+            "rule": "latest_wall"
+          },
+          "profiles": 2,
+          "provider": "anthropic",
+          "providerLabel": "Anthropic (Claude)",
+          "refusal": null
+        }
+      ],
+      "unavailableReason": null
+    }
+  },
+  "createPicked": {
+    "request": "POST /v2/human/agents",
+    "body": {
+      "requestId": "c-pick-525f1a1c",
+      "name": "ClaudePicked",
+      "profile": "auto:anthropic",
+      "cwd": "C:\\Users\\owner\\private-home",
+      "start": false
+    },
+    "status": 200,
+    "response": {
+      "contractVersion": 2,
+      "cutexSessionId": "cutex.9a0bdce6-d537-456f-a350-e55290515461",
+      "profilePick": {
+        "at": "2026-10-22T23:11:34+00:00",
+        "candidates": [
+          {
+            "activeAgents": 0,
+            "bindingWindow": "5h",
+            "burnPerHour": 0.0,
+            "burnSource": "agents",
+            "hours": 17.9,
+            "profile": "ClaudeWork",
+            "profileId": "7f934db6-3525-4320-933d-9beeb708aa62",
+            "remainingPercent": 80.0,
+            "resetAt": 1792725093
+          },
+          {
+            "activeAgents": 0,
+            "bindingWindow": "5h",
+            "burnPerHour": 0.0,
+            "burnSource": "agents",
+            "hours": 2.1,
+            "profile": "ClaudeHome",
+            "profileId": "57b08b6c-7607-40ee-8a61-6a25fbbfd5b7",
+            "remainingPercent": 15.0,
+            "resetAt": 1792721493
+          }
+        ],
+        "effort": null,
+        "excluded": [],
+        "model": null,
+        "picked": "ClaudeWork",
+        "pickedId": "7f934db6-3525-4320-933d-9beeb708aa62",
+        "provider": "anthropic",
+        "reason": "ClaudeWork: 5h window 80% left, about 17.9 h to its limit (latest to hit a limit of 2 candidates)",
+        "requested": "auto:anthropic",
+        "rule": "latest_wall"
+      },
+      "requestId": "c-pick-525f1a1c",
+      "session": {
+        "activity": {
+          "lastConversationAt": null,
+          "lastFileChangeAt": null,
+          "lastOutputAt": null,
+          "lastOutputCompletedAt": null,
+          "lastTurnCompletedAt": null,
+          "lastTurnStartedAt": null,
+          "revision": 0,
+          "runtimeGeneration": null
+        },
+        "avatar": null,
+        "claudeAccount": {
+          "id": "ca-4227qwptzq",
+          "isDefault": false,
+          "kind": "subscription",
+          "label": "Work"
+        },
+        "configuredProfile": "ClaudeWork",
+        "contractVersion": 2,
+        "createdAt": "2026-10-22T23:11:34.634710800+00:00",
+        "cutexSessionId": "cutex.9a0bdce6-d537-456f-a350-e55290515461",
+        "cwd": "C:\\Users\\owner\\private-home",
+        "displayName": "ClaudePicked",
+        "displayNameOverride": null,
+        "effectiveNextLaunch": {
+          "model": "sonnet",
+          "profile": null,
+          "source": "claude_subscription"
+        },
+        "focus": {
+          "mobileMuted": false,
+          "owner": "none",
+          "revision": 1,
+          "source": null,
+          "updatedAt": "2026-10-22T23:11:34.672724700+00:00"
+        },
+        "formalAgentName": "ClaudePicked",
+        "groups": [
+          "project:dafe7043"
+        ],
+        "hostId": "host02",
+        "launchProfileSource": null,
+        "launchedProfile": null,
+        "lifecycle": "active",
+        "management": {
+          "cutexMethodRegistry": {
+            "capabilities": {
+              "sessionActivity": {
+                "changesSessionRevision": false,
+                "fields": [
+                  "runtimeGeneration",
+                  "lastOutputAt",
+                  "lastOutputCompletedAt",
+                  "lastTurnCompletedAt",
+                  "lastFileChangeAt",
+                  "lastTurnStartedAt",
+                  "lastConversationAt",
+                  "lastOutput",
+                  "lastToolCall"
+                ],
+                "source": "native_app_server_events",
+                "version": 3
+              },
+              "sessionArchive": {
+                "archiveQuery": "GET /v2/sessions?lifecycle=retired",
+                "archiveView": "GET /v2/sessions/{cutexSessionId}?lifecycle=retired",
+                "restoreMethod": "cutex/session/restore",
+                "restoreStartsRuntime": false,
+                "retireMethod": "cutex/session/retire",
+                "retireRequiresRuntimeFence": false,
+                "retireStopsRuntime": true,
+                "states": [
+                  "active",
+                  "retired"
+                ],
+                "version": 1
+              }
+            },
+            "indexSha256": "d574f95b9c8c3e4479935b031faf44fb558bf2a29a23d795f8f0a3a44228a18e",
+            "schemaSha256": "7c4f8d0f0da2422672d7fe784d91f474c9c14565e988f6ae7cff0411b5a6e837",
+            "version": 3
+          },
+          "eventStream": {
+            "earliest": {
+              "cursor": "c2:e26f8ed5-6162-468e-86ee-0a97554c7419",
+              "sequence": 1
+            },
+            "latest": {
+              "cursor": "c2:e26f8ed5-6162-468e-86ee-0a97554c7419",
+              "sequence": 1
+            },
+            "streamId": "d9fa460c-e437-4806-83ea-565bfee9db39"
+          },
+          "maxRequestBytes": 16777216,
+          "nativeRequestPolicy": {
+            "allowRulesSha256": "9ee2b0fedf7e84493537de38f348e78c2fd1f50ab06e9cd1dd7047c08297231b",
+            "sha256": "1ba93c7adaa753e7c2e489f0f23e67844e004eece0bc2b0fb3b056d800ae9eb5",
+            "version": 2
+          }
+        },
+        "native": {
+          "schema": {
+            "capabilities": {
+              "experimentalApi": true,
+              "features": null
+            },
+            "channel": "experimental",
+            "extensions": [
+              "claude-runtime-v1"
+            ],
+            "majorVersion": 1,
+            "protocol": "claude-app-server-subset",
+            "sha256": null,
+            "version": "0.3.0+cutex"
+          },
+          "threadId": "6f107764-12e4-404e-8941-ec6ef5e78d2f"
+        },
+        "note": null,
+        "profile": "ClaudeWork",
+        "registrationClass": "persistent",
+        "retiredAt": null,
+        "revision": 1,
+        "runtime": {
+          "activeTurnId": null,
+          "activeTurnObservedAt": null,
+          "appServerConnected": false,
+          "backend": "claude_subscription",
+          "claudeRuntime": {
+            "pendingRelease": null,
+            "release": "adapter"
+          },
+          "instructionSources": null,
+          "lastError": null,
+          "lastEventAt": null,
+          "pendingServerRequests": [],
+          "requiresVisibleTerminal": false,
+          "resumeSnapshotObservedAt": null,
+          "runtimeAgentId": null,
+          "runtimeGeneration": 0,
+          "runtimeWorkspaceRoots": null,
+          "status": "offline",
+          "threadSettings": null,
+          "threadSettingsComplete": false,
+          "threadSettingsObservedAt": null,
+          "threadSettingsSource": null,
+          "threadStatus": null,
+          "threadStatusObservedAt": null,
+          "tuiAttached": false
+        },
+        "runtimeDefaults": {
+          "approvalPolicy": null,
+          "backend": "claude_subscription",
+          "claudeAllowExec": true,
+          "claudeAllowWrite": true,
+          "cliArgs": [],
+          "groups": [
+            "project:dafe7043"
+          ],
+          "managedCwd": null,
+          "model": "sonnet",
+          "permissions": null,
+          "reasoningEffort": null,
+          "sandboxMode": null
+        },
+        "threadName": "ClaudePicked",
+        "updatedAt": "2026-10-22T23:11:34.634710800+00:00",
+        "visible": true
+      }
+    }
+  },
+  "createReplay": {
+    "request": "POST /v2/human/agents",
+    "body": {
+      "requestId": "c-pick-525f1a1c",
+      "name": "ClaudePicked",
+      "profile": "auto:anthropic",
+      "cwd": "C:\\Users\\owner\\private-home",
+      "start": false
+    },
+    "status": 200,
+    "response": {
+      "contractVersion": 2,
+      "cutexSessionId": "cutex.9a0bdce6-d537-456f-a350-e55290515461",
+      "profilePick": {
+        "at": "2026-10-22T23:11:34+00:00",
+        "candidates": [
+          {
+            "activeAgents": 0,
+            "bindingWindow": "5h",
+            "burnPerHour": 0.0,
+            "burnSource": "agents",
+            "hours": 17.9,
+            "profile": "ClaudeWork",
+            "profileId": "7f934db6-3525-4320-933d-9beeb708aa62",
+            "remainingPercent": 80.0,
+            "resetAt": 1792725093
+          },
+          {
+            "activeAgents": 0,
+            "bindingWindow": "5h",
+            "burnPerHour": 0.0,
+            "burnSource": "agents",
+            "hours": 2.1,
+            "profile": "ClaudeHome",
+            "profileId": "57b08b6c-7607-40ee-8a61-6a25fbbfd5b7",
+            "remainingPercent": 15.0,
+            "resetAt": 1792721493
+          }
+        ],
+        "effort": null,
+        "excluded": [],
+        "model": null,
+        "picked": "ClaudeWork",
+        "pickedId": "7f934db6-3525-4320-933d-9beeb708aa62",
+        "provider": "anthropic",
+        "reason": "ClaudeWork: 5h window 80% left, about 17.9 h to its limit (latest to hit a limit of 2 candidates)",
+        "requested": "auto:anthropic",
+        "rule": "latest_wall"
+      },
+      "requestId": "c-pick-525f1a1c",
+      "session": {
+        "activity": {
+          "lastConversationAt": null,
+          "lastFileChangeAt": null,
+          "lastOutputAt": null,
+          "lastOutputCompletedAt": null,
+          "lastTurnCompletedAt": null,
+          "lastTurnStartedAt": null,
+          "revision": 0,
+          "runtimeGeneration": null
+        },
+        "avatar": null,
+        "claudeAccount": {
+          "id": "ca-4227qwptzq",
+          "isDefault": false,
+          "kind": "subscription",
+          "label": "Work"
+        },
+        "configuredProfile": "ClaudeWork",
+        "contractVersion": 2,
+        "createdAt": "2026-10-22T23:11:34.634710800+00:00",
+        "cutexSessionId": "cutex.9a0bdce6-d537-456f-a350-e55290515461",
+        "cwd": "C:\\Users\\owner\\private-home",
+        "displayName": "ClaudePicked",
+        "displayNameOverride": null,
+        "effectiveNextLaunch": {
+          "model": "sonnet",
+          "profile": null,
+          "source": "claude_subscription"
+        },
+        "focus": {
+          "mobileMuted": false,
+          "owner": "none",
+          "revision": 1,
+          "source": null,
+          "updatedAt": "2026-10-22T23:11:34.672724700+00:00"
+        },
+        "formalAgentName": "ClaudePicked",
+        "groups": [
+          "project:dafe7043"
+        ],
+        "hostId": "host02",
+        "launchProfileSource": null,
+        "launchedProfile": null,
+        "lifecycle": "active",
+        "management": {
+          "cutexMethodRegistry": {
+            "capabilities": {
+              "sessionActivity": {
+                "changesSessionRevision": false,
+                "fields": [
+                  "runtimeGeneration",
+                  "lastOutputAt",
+                  "lastOutputCompletedAt",
+                  "lastTurnCompletedAt",
+                  "lastFileChangeAt",
+                  "lastTurnStartedAt",
+                  "lastConversationAt",
+                  "lastOutput",
+                  "lastToolCall"
+                ],
+                "source": "native_app_server_events",
+                "version": 3
+              },
+              "sessionArchive": {
+                "archiveQuery": "GET /v2/sessions?lifecycle=retired",
+                "archiveView": "GET /v2/sessions/{cutexSessionId}?lifecycle=retired",
+                "restoreMethod": "cutex/session/restore",
+                "restoreStartsRuntime": false,
+                "retireMethod": "cutex/session/retire",
+                "retireRequiresRuntimeFence": false,
+                "retireStopsRuntime": true,
+                "states": [
+                  "active",
+                  "retired"
+                ],
+                "version": 1
+              }
+            },
+            "indexSha256": "d574f95b9c8c3e4479935b031faf44fb558bf2a29a23d795f8f0a3a44228a18e",
+            "schemaSha256": "7c4f8d0f0da2422672d7fe784d91f474c9c14565e988f6ae7cff0411b5a6e837",
+            "version": 3
+          },
+          "eventStream": {
+            "earliest": {
+              "cursor": "c2:e26f8ed5-6162-468e-86ee-0a97554c7419",
+              "sequence": 1
+            },
+            "latest": {
+              "cursor": "c2:e26f8ed5-6162-468e-86ee-0a97554c7419",
+              "sequence": 1
+            },
+            "streamId": "d9fa460c-e437-4806-83ea-565bfee9db39"
+          },
+          "maxRequestBytes": 16777216,
+          "nativeRequestPolicy": {
+            "allowRulesSha256": "9ee2b0fedf7e84493537de38f348e78c2fd1f50ab06e9cd1dd7047c08297231b",
+            "sha256": "1ba93c7adaa753e7c2e489f0f23e67844e004eece0bc2b0fb3b056d800ae9eb5",
+            "version": 2
+          }
+        },
+        "native": {
+          "schema": {
+            "capabilities": {
+              "experimentalApi": true,
+              "features": null
+            },
+            "channel": "experimental",
+            "extensions": [
+              "claude-runtime-v1"
+            ],
+            "majorVersion": 1,
+            "protocol": "claude-app-server-subset",
+            "sha256": null,
+            "version": "0.3.0+cutex"
+          },
+          "threadId": "6f107764-12e4-404e-8941-ec6ef5e78d2f"
+        },
+        "note": null,
+        "profile": "ClaudeWork",
+        "registrationClass": "persistent",
+        "retiredAt": null,
+        "revision": 1,
+        "runtime": {
+          "activeTurnId": null,
+          "activeTurnObservedAt": null,
+          "appServerConnected": false,
+          "backend": "claude_subscription",
+          "claudeRuntime": {
+            "pendingRelease": null,
+            "release": "adapter"
+          },
+          "instructionSources": null,
+          "lastError": null,
+          "lastEventAt": null,
+          "pendingServerRequests": [],
+          "requiresVisibleTerminal": false,
+          "resumeSnapshotObservedAt": null,
+          "runtimeAgentId": null,
+          "runtimeGeneration": 0,
+          "runtimeWorkspaceRoots": null,
+          "status": "offline",
+          "threadSettings": null,
+          "threadSettingsComplete": false,
+          "threadSettingsObservedAt": null,
+          "threadSettingsSource": null,
+          "threadStatus": null,
+          "threadStatusObservedAt": null,
+          "tuiAttached": false
+        },
+        "runtimeDefaults": {
+          "approvalPolicy": null,
+          "backend": "claude_subscription",
+          "claudeAllowExec": true,
+          "claudeAllowWrite": true,
+          "cliArgs": [],
+          "groups": [
+            "project:dafe7043"
+          ],
+          "managedCwd": null,
+          "model": "sonnet",
+          "permissions": null,
+          "reasoningEffort": null,
+          "sandboxMode": null
+        },
+        "threadName": "ClaudePicked",
+        "updatedAt": "2026-10-22T23:11:34.634710800+00:00",
+        "visible": true
+      }
+    }
+  },
+  "createWithLaunch": {
+    "request": "POST /v2/human/agents",
+    "body": {
+      "requestId": "c-launch-4bdb9b11",
+      "name": "ClaudeLaunch",
+      "profile": "auto:anthropic",
+      "cwd": "C:\\Users\\owner\\private-home",
+      "start": false,
+      "launch": {
+        "model": "opus",
+        "reasoningEffort": "high"
+      }
+    },
+    "status": 200,
+    "response": {
+      "contractVersion": 2,
+      "cutexSessionId": "cutex.2796eb9c-7a03-4bb1-bbea-193c39e98f1c",
+      "profilePick": {
+        "at": "2026-10-22T23:11:34+00:00",
+        "candidates": [
+          {
+            "activeAgents": 1,
+            "bindingWindow": "5h",
+            "burnPerHour": 12.0,
+            "burnSource": "agents",
+            "hours": 3.3,
+            "profile": "ClaudeWork",
+            "profileId": "7f934db6-3525-4320-933d-9beeb708aa62",
+            "remainingPercent": 80.0,
+            "resetAt": 1792725093
+          },
+          {
+            "activeAgents": 0,
+            "bindingWindow": "5h",
+            "burnPerHour": 0.0,
+            "burnSource": "agents",
+            "hours": 1.3,
+            "profile": "ClaudeHome",
+            "profileId": "57b08b6c-7607-40ee-8a61-6a25fbbfd5b7",
+            "remainingPercent": 15.0,
+            "resetAt": 1792721493
+          }
+        ],
+        "effort": "high",
+        "excluded": [],
+        "model": "opus",
+        "picked": "ClaudeWork",
+        "pickedId": "7f934db6-3525-4320-933d-9beeb708aa62",
+        "provider": "anthropic",
+        "reason": "ClaudeWork: 5h window 80% left, about 3.3 h to its limit (latest to hit a limit of 2 candidates)",
+        "requested": "auto:anthropic",
+        "rule": "latest_wall"
+      },
+      "requestId": "c-launch-4bdb9b11",
+      "session": {
+        "activity": {
+          "lastConversationAt": null,
+          "lastFileChangeAt": null,
+          "lastOutputAt": null,
+          "lastOutputCompletedAt": null,
+          "lastTurnCompletedAt": null,
+          "lastTurnStartedAt": null,
+          "revision": 0,
+          "runtimeGeneration": null
+        },
+        "avatar": null,
+        "claudeAccount": {
+          "id": "ca-4227qwptzq",
+          "isDefault": false,
+          "kind": "subscription",
+          "label": "Work"
+        },
+        "configuredProfile": "ClaudeWork",
+        "contractVersion": 2,
+        "createdAt": "2026-10-22T23:11:34.726609200+00:00",
+        "cutexSessionId": "cutex.2796eb9c-7a03-4bb1-bbea-193c39e98f1c",
+        "cwd": "C:\\Users\\owner\\private-home",
+        "displayName": "ClaudeLaunch",
+        "displayNameOverride": null,
+        "effectiveNextLaunch": {
+          "model": "opus",
+          "profile": null,
+          "source": "claude_subscription"
+        },
+        "focus": {
+          "mobileMuted": false,
+          "owner": "none",
+          "revision": 1,
+          "source": null,
+          "updatedAt": "2026-10-22T23:11:34.761941300+00:00"
+        },
+        "formalAgentName": "ClaudeLaunch",
+        "groups": [
+          "project:dafe7043"
+        ],
+        "hostId": "host02",
+        "launchProfileSource": null,
+        "launchedProfile": null,
+        "lifecycle": "active",
+        "management": {
+          "cutexMethodRegistry": {
+            "capabilities": {
+              "sessionActivity": {
+                "changesSessionRevision": false,
+                "fields": [
+                  "runtimeGeneration",
+                  "lastOutputAt",
+                  "lastOutputCompletedAt",
+                  "lastTurnCompletedAt",
+                  "lastFileChangeAt",
+                  "lastTurnStartedAt",
+                  "lastConversationAt",
+                  "lastOutput",
+                  "lastToolCall"
+                ],
+                "source": "native_app_server_events",
+                "version": 3
+              },
+              "sessionArchive": {
+                "archiveQuery": "GET /v2/sessions?lifecycle=retired",
+                "archiveView": "GET /v2/sessions/{cutexSessionId}?lifecycle=retired",
+                "restoreMethod": "cutex/session/restore",
+                "restoreStartsRuntime": false,
+                "retireMethod": "cutex/session/retire",
+                "retireRequiresRuntimeFence": false,
+                "retireStopsRuntime": true,
+                "states": [
+                  "active",
+                  "retired"
+                ],
+                "version": 1
+              }
+            },
+            "indexSha256": "d574f95b9c8c3e4479935b031faf44fb558bf2a29a23d795f8f0a3a44228a18e",
+            "schemaSha256": "7c4f8d0f0da2422672d7fe784d91f474c9c14565e988f6ae7cff0411b5a6e837",
+            "version": 3
+          },
+          "eventStream": {
+            "earliest": {
+              "cursor": "c2:e26f8ed5-6162-468e-86ee-0a97554c7419",
+              "sequence": 1
+            },
+            "latest": {
+              "cursor": "c2:e26f8ed5-6162-468e-86ee-0a97554c7419",
+              "sequence": 1
+            },
+            "streamId": "d9fa460c-e437-4806-83ea-565bfee9db39"
+          },
+          "maxRequestBytes": 16777216,
+          "nativeRequestPolicy": {
+            "allowRulesSha256": "9ee2b0fedf7e84493537de38f348e78c2fd1f50ab06e9cd1dd7047c08297231b",
+            "sha256": "1ba93c7adaa753e7c2e489f0f23e67844e004eece0bc2b0fb3b056d800ae9eb5",
+            "version": 2
+          }
+        },
+        "native": {
+          "schema": {
+            "capabilities": {
+              "experimentalApi": true,
+              "features": null
+            },
+            "channel": "experimental",
+            "extensions": [
+              "claude-runtime-v1"
+            ],
+            "majorVersion": 1,
+            "protocol": "claude-app-server-subset",
+            "sha256": null,
+            "version": "0.3.0+cutex"
+          },
+          "threadId": "52f71198-f3ca-4ef4-b56a-15fab0264975"
+        },
+        "note": null,
+        "profile": "ClaudeWork",
+        "registrationClass": "persistent",
+        "retiredAt": null,
+        "revision": 1,
+        "runtime": {
+          "activeTurnId": null,
+          "activeTurnObservedAt": null,
+          "appServerConnected": false,
+          "backend": "claude_subscription",
+          "claudeRuntime": {
+            "pendingRelease": null,
+            "release": "adapter"
+          },
+          "instructionSources": null,
+          "lastError": null,
+          "lastEventAt": null,
+          "pendingServerRequests": [],
+          "requiresVisibleTerminal": false,
+          "resumeSnapshotObservedAt": null,
+          "runtimeAgentId": null,
+          "runtimeGeneration": 0,
+          "runtimeWorkspaceRoots": null,
+          "status": "offline",
+          "threadSettings": null,
+          "threadSettingsComplete": false,
+          "threadSettingsObservedAt": null,
+          "threadSettingsSource": null,
+          "threadStatus": null,
+          "threadStatusObservedAt": null,
+          "tuiAttached": false
+        },
+        "runtimeDefaults": {
+          "approvalPolicy": null,
+          "backend": "claude_subscription",
+          "claudeAllowExec": true,
+          "claudeAllowWrite": true,
+          "cliArgs": [],
+          "groups": [
+            "project:dafe7043"
+          ],
+          "managedCwd": null,
+          "model": "opus",
+          "permissions": null,
+          "reasoningEffort": "high",
+          "sandboxMode": null
+        },
+        "threadName": "ClaudeLaunch",
+        "updatedAt": "2026-10-22T23:11:34.726609200+00:00",
+        "visible": true
+      }
+    }
+  },
+  "previewStale": {
+    "request": "GET /v2/profile-auto-pick?provider=anthropic",
+    "body": null,
+    "status": 200,
+    "response": {
+      "available": true,
+      "contractVersion": 2,
+      "providers": [
+        {
+          "optedIn": 2,
+          "profilePick": null,
+          "profiles": 2,
+          "provider": "anthropic",
+          "providerLabel": "Anthropic (Claude)",
+          "refusal": {
+            "code": "no_auto_pick_candidate",
+            "detail": "no 'anthropic' profile can be picked automatically (ClaudeHome: quota_stale, ClaudeWork: quota_stale); turn on 「参与自动选择」 for one, or pass a profile name"
+          }
+        }
+      ],
+      "unavailableReason": null
+    }
+  },
+  "createStale": {
+    "request": "POST /v2/human/agents",
+    "body": {
+      "requestId": "c-stale",
+      "name": "C1",
+      "profile": "auto:anthropic",
+      "start": false
+    },
+    "status": 409,
+    "response": {
+      "contractVersion": 2,
+      "error": {
+        "code": "no_auto_pick_candidate",
+        "details": {},
+        "diagnosticId": "c7fa3880-9cad-4f11-9285-a799ecfb6610",
+        "message": "no 'anthropic' profile can be picked automatically (ClaudeHome: quota_stale, ClaudeWork: quota_stale); turn on 「参与自动选择」 for one, or pass a profile name",
+        "retryable": false,
+        "source": "cutex"
+      }
+    }
+  },
+  "createBareAuto": {
+    "request": "POST /v2/human/agents",
+    "body": {
+      "requestId": "c-bare",
+      "name": "C2",
+      "profile": "auto",
+      "start": false
+    },
+    "status": 400,
+    "response": {
+      "contractVersion": 2,
+      "error": {
+        "code": "provider_required",
+        "details": {},
+        "diagnosticId": "e8dd7842-b9df-444c-a56a-5f92db43b184",
+        "message": "'auto' needs a provider: pass profile \"auto:<provider>\" (with 「参与自动选择」 profiles: auto:anthropic)",
+        "retryable": false,
+        "source": "cutex"
+      }
+    }
+  },
+  "createUnknownProvider": {
+    "request": "POST /v2/human/agents",
+    "body": {
+      "requestId": "c-unk",
+      "name": "C3",
+      "profile": "auto:nowhere",
+      "start": false
+    },
+    "status": 400,
+    "response": {
+      "contractVersion": 2,
+      "error": {
+        "code": "unknown_provider",
+        "details": {},
+        "diagnosticId": "a34a7b5e-039a-4644-8f51-0e26c00ad0fe",
+        "message": "no profile on this host is from provider 'nowhere' (with 「参与自动选择」 profiles: auto:anthropic)",
+        "retryable": false,
+        "source": "cutex"
+      }
+    }
+  }
+}

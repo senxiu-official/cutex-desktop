@@ -17,7 +17,7 @@ function setup(window = win(), timeoutMs = 1000) {
     // Electron closes the box as cancelled (cancelId) when its signal aborts.
     options.signal?.addEventListener("abort", () => resolve({ response: options.cancelId, checkboxChecked: false }));
   }));
-  const prompt = createBrowserPermissionPrompt({ window, showMessageBox, locale: () => "en", closed: () => closed, timeoutMs,
+  const prompt = createBrowserPermissionPrompt({ window: () => window, showMessageBox, locale: () => "en", closed: () => closed, timeoutMs,
     notice: kind => { notices.push(kind); } });
   return { prompt, showMessageBox, shown, notices, window, close: () => { closed = true; } };
 }

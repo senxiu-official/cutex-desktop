@@ -8,6 +8,9 @@
 
 /* Design tokens (structure follows ZCode's @theme tokens; values are our own). */
 @theme {
+  /* Loading placeholders pulse three times (6 s), then rest (perf audit 2026-10-23 §4.3: a block that stays loading
+     kept the main thread drawing every frame). Same motion as animate-pulse. */
+  --animate-skeleton: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) 3;
   --color-background: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
@@ -23,6 +26,10 @@
   --color-warn: var(--warn);
   /* Small text in the warn / ok colour (≥ 4.5:1 on --bg and --win); --warn / --ok stay for fills, dots and icons. */
   --color-warn-text: var(--warn-text);
+  /* A solid red fill under white text (≥ 4.5:1 in both themes); --danger stays for text, icons and tints. */
+  --color-danger-solid: var(--danger-solid);
+  /* Small red text (≥ 4.5:1 on tinted rows too: #dc2626 measured 4.1–4.5:1 there); --danger stays for fills and icons. */
+  --color-danger-text: var(--danger-text);
   --color-ok: var(--ok);
   --color-ok-text: var(--ok-text);
   --color-danger: var(--danger);
@@ -33,7 +40,45 @@
   /* streamdown code-block chrome uses `sidebar`; unregistered, its toolbar border fell back to white. */
   --color-sidebar: var(--surface);
   --font-sans: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Code", "Consolas", "Microsoft YaHei Mono", monospace;
+  /* CJK after the Latin mono fonts: the same faces as --font-sans (lib/fontFaces buildFontPlan replaces both on
+     <html> with the owner's 外观 fonts, mono again ending in the UI's CJK list). */
+  --font-mono: "JetBrains Mono", "Cascadia Code", "Consolas", "PingFang SC", "Microsoft YaHei", monospace;
+  /* Tiny fixed-size glyphs (count digits, avatar badges): the default UI sans, never the owner's 外观 font
+     (that one overrides --font-sans on <html>), so 8–9 px digits stay crisp and even. Readable text uses --font-sans. */
+  --font-fixed: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  /* Visual language (docs/design/040 §1.3): semantic names for the tokens below, so components migrate to
+     `rounded-card` / `text-caption` / `shadow-e1` instead of `rounded-[14px]` / `text-[11px]` / hand-written shadows.
+     New names only: Tailwind's own rounded-md / text-xs / shadow-lg keep their values. */
+  --radius-chip: var(--r-sm);
+  --radius-ctl: var(--r-md);
+  --radius-inner: var(--r-lg);
+  --radius-card: var(--r-xl);
+  --radius-dialog: var(--r-2xl);
+  --text-caption: 11px;
+  --text-caption--line-height: 14px;
+  --text-caption--font-weight: 500;
+  --text-meta: 12px;
+  --text-meta--line-height: 16px;
+  --text-ui: 13px;
+  --text-ui--line-height: 18px;
+  --text-title: 15px;
+  --text-title--line-height: 20px;
+  --text-title--font-weight: 600;
+  --text-display: 20px;
+  --text-display--line-height: 26px;
+  --text-display--font-weight: 600;
+  --shadow-e1: var(--e1);
+  --shadow-e2: var(--e2);
+  --shadow-e3: var(--e3);
+  --color-selected: var(--selected);
+  --color-pressed: var(--pressed);
+  --color-accent-soft: var(--accent-soft);
+  --color-attention: var(--attention);
+  --color-attention-soft: var(--attention-soft);
+  --color-on-attention: var(--on-attention);
+  --color-on-accent: var(--on-accent);
+  --color-danger-soft: var(--danger-soft);
+  --color-ok-soft: var(--ok-soft);
 }
 
 :root {
@@ -51,13 +96,13 @@
   --warn: #d97706;
   --warn-text: #9a4a06;
   --danger: #dc2626;
+  --danger-solid: #dc2626;
+  --danger-text: #b91c1c;
   --ok: #10b981;
   --ok-text: #047857;
   --win: #f1f1f3;
   --hover: rgba(20, 20, 30, 0.06);
   --card-border: rgba(20, 20, 30, 0.07);
-  --card-shadow: 0 1px 2px rgba(20, 20, 30, 0.04), 0 6px 20px rgba(20, 20, 30, 0.045);
-  --shadow: 0 10px 30px rgba(15, 15, 20, 0.14), 0 2px 6px rgba(15, 15, 20, 0.06);
   color-scheme: light;
 }
 
@@ -105,13 +150,13 @@
     --warn: #f59e0b;
     --warn-text: #f59e0b;
     --danger: #f87171;
+    --danger-solid: #dc2626;
+    --danger-text: #f87171;
     --ok: #10b981;
     --ok-text: #34d399;
     --win: #0e0e0f;
     --hover: rgba(255, 255, 255, 0.06);
     --card-border: rgba(255, 255, 255, 0.06);
-    --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
-    --shadow: 0 12px 34px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
     color-scheme: dark;
   }
 }
@@ -130,13 +175,13 @@
   --warn: #f59e0b;
   --warn-text: #f59e0b;
   --danger: #f87171;
+  --danger-solid: #dc2626;
+  --danger-text: #f87171;
   --ok: #10b981;
   --ok-text: #34d399;
   --win: #0e0e0f;
   --hover: rgba(255, 255, 255, 0.06);
   --card-border: rgba(255, 255, 255, 0.06);
-  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
-  --shadow: 0 12px 34px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
   color-scheme: dark;
 }
 
@@ -276,6 +321,27 @@
 
 /* Text contrast (Settings → 通用 → 文字对比度): lifts muted / subtle text and the quiet card edge. Light first, then dark
    (OS dark without a forced light theme, or forced dark); later + more specific rules win. */
+/* #25 亚克力: secondary text (--fg-muted / --fg-subtle) over the see-through cards, per palette, darker (light)
+   or lighter (dark) just enough for WCAG AA at the lowest card opacity (70 %) over any desktop picture: muted
+   ≥ 5.2:1, subtle ≥ 4.6:1 (lib/workSurface worstAcrylicContrast; test/acrylicContrast.test.ts). Opaque cards and
+   the 高 / 最高 contrast settings keep their own colours. Order and selectors mirror the palette blocks above. */
+:root[data-card-material="acrylic"]:not([data-contrast]) { --fg-muted: #56575d; --fg-subtle: #5e5f65; }
+:root[data-card-material="acrylic"]:not([data-contrast])[data-light-palette="paper"] { --fg-muted: #58554c; --fg-subtle: #605d54; }
+:root[data-card-material="acrylic"]:not([data-contrast])[data-light-palette="mist"] { --fg-muted: #535459; --fg-subtle: #5b5c61; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-card-material="acrylic"]:not([data-contrast]) { --fg-muted: #a4a4aa; --fg-subtle: #8e8e95; }
+  :root:not([data-theme="light"])[data-dark-palette="smoke"][data-card-material="acrylic"]:not([data-contrast]) { --fg-muted: #a7a6a2; --fg-subtle: #979692; }
+  :root:not([data-theme="light"])[data-dark-palette="dusk"][data-card-material="acrylic"]:not([data-contrast]) { --fg-muted: #a8a6a1; --fg-subtle: #9c9a95; }
+  :root:not([data-theme="light"])[data-dark-palette="tea"][data-card-material="acrylic"]:not([data-contrast]) { --fg-muted: #aaa59a; --fg-subtle: #9f9a91; }
+  :root:not([data-theme="light"])[data-dark-palette="sandalwood"][data-card-material="acrylic"]:not([data-contrast]) { --fg-muted: #aaa29d; --fg-subtle: #9f9894; }
+  :root:not([data-theme="light"])[data-dark-palette="ink"][data-card-material="acrylic"]:not([data-contrast]) { --fg-muted: #a4a4aa; --fg-subtle: #86868d; }
+}
+:root[data-theme="dark"][data-card-material="acrylic"]:not([data-contrast]) { --fg-muted: #a4a4aa; --fg-subtle: #8e8e95; }
+:root[data-theme="dark"][data-dark-palette="smoke"][data-card-material="acrylic"]:not([data-contrast]) { --fg-muted: #a7a6a2; --fg-subtle: #979692; }
+:root[data-theme="dark"][data-dark-palette="dusk"][data-card-material="acrylic"]:not([data-contrast]) { --fg-muted: #a8a6a1; --fg-subtle: #9c9a95; }
+:root[data-theme="dark"][data-dark-palette="tea"][data-card-material="acrylic"]:not([data-contrast]) { --fg-muted: #aaa59a; --fg-subtle: #9f9a91; }
+:root[data-theme="dark"][data-dark-palette="sandalwood"][data-card-material="acrylic"]:not([data-contrast]) { --fg-muted: #aaa29d; --fg-subtle: #9f9894; }
+:root[data-theme="dark"][data-dark-palette="ink"][data-card-material="acrylic"]:not([data-contrast]) { --fg-muted: #a4a4aa; --fg-subtle: #86868d; }
 :root[data-contrast="high"] { --fg-muted: #4a4b50; --fg-subtle: #5a5b61; --card-border: rgba(20, 20, 30, 0.16); }
 :root[data-contrast="max"] { --fg-muted: #303135; --fg-subtle: #46474c; --card-border: rgba(20, 20, 30, 0.28); }
 @media (prefers-color-scheme: dark) {
@@ -284,6 +350,94 @@
 }
 :root[data-theme="dark"][data-contrast="high"] { --fg-muted: #bdbdc3; --fg-subtle: #9a9aa0; --card-border: rgba(255, 255, 255, 0.14); }
 :root[data-theme="dark"][data-contrast="max"] { --fg-muted: #d6d6db; --fg-subtle: #b4b4ba; --card-border: rgba(255, 255, 255, 0.26); }
+
+/* Visual language tokens (docs/design/040 §1; test/visualTokens.test.ts). Only added here: nothing uses them
+   until a component migrates (040 §5), so the look is unchanged. Colours derive from the palette variables
+   above, so every 浅色 / 深色配色, 亚克力 and 文字对比度 setting carries over without its own copy. */
+:root {
+  /* Spacing: a 4 px grid. */
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  /* Radii, nested ones concentric: inner radius = outer radius − the gap between them. */
+  --r-xs: 4px; /* count digits, kbd, inline code */
+  --r-sm: 6px; /* tags / badges, 24 px icon buttons */
+  --r-md: 8px; /* buttons, sidebar rows, menu items */
+  --r-lg: 12px; /* a card inside a card: composer, queue, code block, menus */
+  --r-xl: 16px; /* shell cards: sidebar, conversation, Shelf, tray, desktop widgets */
+  --r-2xl: 20px; /* dialogs, the launch page's big cards */
+  --r-full: 999px;
+  /* Type: six steps (font shorthand); weight sets the hierarchy. */
+  --t-caption: 500 11px/14px var(--font-sans);
+  --t-meta: 400 12px/16px var(--font-sans);
+  --t-body: 400 13px/18px var(--font-sans);
+  --t-chat: 400 var(--chat-font-size, 14px) / 1.6 var(--font-chat, var(--font-sans));
+  --t-title: 600 15px/20px var(--font-sans);
+  --t-display: 600 20px/26px var(--font-sans);
+  /* Control heights. */
+  --h-row: 32px;
+  --h-row-2: 44px;
+  --h-btn: 28px;
+  --h-btn-sm: 24px;
+  --h-tag: 18px;
+  --h-field: 30px;
+  /* Avatar sizes (round, docs/design/040 §3.1). */
+  --av-16: 16px;
+  --av-20: 20px;
+  --av-28: 28px;
+  --av-32: 32px;
+  --av-40: 40px;
+  --av-72: 72px;
+  /* Colour roles. */
+  --fg-disabled: color-mix(in oklab, var(--fg-subtle) 60%, transparent);
+  --pressed: color-mix(in oklab, var(--fg) 9%, transparent);
+  --accent-soft: color-mix(in oklab, var(--accent) 12%, transparent);
+  --selected: var(--accent-soft);
+  --on-accent: #ffffff;
+  /* 需要你: only as dots, numbers, thin edges and soft fills. */
+  --attention: var(--warn);
+  --attention-soft: color-mix(in oklab, var(--attention) 16%, transparent);
+  --on-attention: #1f1300;
+  --danger-soft: color-mix(in oklab, var(--danger) 12%, transparent);
+  --ok-soft: color-mix(in oklab, var(--ok) 14%, transparent);
+  /* Elevation: e1 shell cards, e2 floating (menus, hover cards, ⌘K, the status capsule), e3 dialogs; --hi = the
+     top-edge highlight dark cards use instead of a visible shadow. The old card / floating shadow variables are gone (040 §5
+     step 15): their uses are e1 / e2, and a card-border hairline beside them is transparent (the ring draws the edge). */
+  --e1: 0 0 0 1px var(--card-border), 0 1px 2px rgb(18 22 32 / 0.04), 0 8px 24px rgb(18 22 32 / 0.06);
+  --e2: 0 0 0 1px var(--card-border), 0 12px 32px rgb(18 22 32 / 0.16), 0 2px 6px rgb(18 22 32 / 0.06);
+  --e3: 0 24px 70px rgb(10 10 20 / 0.25), 0 2px 8px rgb(10 10 20 / 0.08);
+  --hi: inset 0 0 0 0 transparent;
+  /* Provider colours: only for 头像底色 = 按模型 (a 16 % avatar backdrop and its ring), never text or buttons. */
+  --prov-claude: #d97757;
+  --prov-openai: #10a37f;
+  --prov-gemini: #9b6cf0;
+  --prov-deepseek: #4d6bfe;
+  --prov-kimi: #3a3f4b;
+  --prov-glm: #1fa3b8;
+  --prov-other: #8b95a7;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --e1: 0 0 0 1px var(--card-border), 0 10px 28px rgb(0 0 0 / 0.35);
+    --e2: 0 0 0 1px rgb(255 255 255 / 0.09), 0 16px 40px rgb(0 0 0 / 0.55);
+    --e3: 0 24px 70px rgb(0 0 0 / 0.6);
+    --hi: inset 0 1px 0 rgb(255 255 255 / 0.06);
+    --prov-kimi: #c9ced8;
+  }
+}
+:root[data-theme="dark"] {
+  --e1: 0 0 0 1px var(--card-border), 0 10px 28px rgb(0 0 0 / 0.35);
+  --e2: 0 0 0 1px rgb(255 255 255 / 0.09), 0 16px 40px rgb(0 0 0 / 0.55);
+  --e3: 0 24px 70px rgb(0 0 0 / 0.6);
+  --hi: inset 0 1px 0 rgb(255 255 255 / 0.06);
+  --prov-kimi: #c9ced8;
+}
 
 /* Settings → 外观 (lib/appearance.ts sets the variables on <html>). */
 .markdown {
@@ -476,7 +630,7 @@
 }
 .project-block-tint [data-row-selected] {
   background: var(--project-selected);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--project-color) 30%, transparent), var(--card-shadow);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--project-color) 30%, transparent), var(--e1);
 }
 .project-block {
   position: relative;
@@ -528,7 +682,34 @@
   --color-sidebar: var(--surface);
   /* Long unbroken words / URLs / inline code wrap instead of running past the column
      (code blocks keep scrolling: their white-space is pre). */
-  overflow-wrap: break-word;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.message-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Constrain the code viewport, not the code's intrinsic line width. Long fences scroll locally. */
+.markdown :is([data-streamdown="code-block"], [data-streamdown="code-block-body"], pre),
+.message-body pre {
+  min-width: 0;
+  max-width: 100%;
+}
+.markdown pre,
+.message-body pre {
+  overflow-x: auto;
+}
+.markdown [data-streamdown="code-block-body"] pre span {
+  color: var(--sdm-c, inherit);
+}
+:root[data-theme="dark"] .markdown [data-streamdown="code-block-body"] pre span {
+  color: var(--shiki-dark, var(--sdm-c, inherit));
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .markdown [data-streamdown="code-block-body"] pre span {
+    color: var(--shiki-dark, var(--sdm-c, inherit));
+  }
 }
 .markdown [data-streamdown="inline-code"] {
   overflow-wrap: anywhere;
@@ -540,6 +721,16 @@
    timeline renders a window of recent turns anyway, so blocks are always laid out. */
 .markdown [data-streamdown="code-block"] {
   content-visibility: visible !important;
+}
+/* Long conversations (#19, lib/farRows): every row remembers its last real size; a row more than two
+   screen heights away is skipped by the browser (style, layout, paint) and keeps that size. */
+[data-timeline-root] > [data-tl-row] {
+  min-width: 0;
+  max-width: 100%;
+  contain-intrinsic-size: auto 120px;
+}
+[data-timeline-root] > [data-tl-row][data-tl-far] {
+  content-visibility: hidden;
 }
 /* Headings in chat (UI review #14): near the body size, semibold, with room above. h1 +2px / h2 +1px /
    h3–h6 = the body size (16 / 15 / 14 px at the default 14px chat font; `em` = the Markdown's own size,
@@ -588,7 +779,7 @@
 .markdown [data-streamdown="code-block-actions"],
 .markdown [data-streamdown="table-wrapper"] > :first-child {
   opacity: 0;
-  transition: opacity 120ms ease;
+  transition: opacity var(--motion-short) var(--ease-standard);
 }
 .markdown [data-streamdown="code-block-actions"] {
   gap: 2px;
@@ -676,12 +867,23 @@ body,
 }
 
 body {
+  user-select: none;
   margin: 0;
   background: var(--win);
   color: var(--fg);
   font-family: var(--font-sans);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Selection contract: app chrome is nonselectable by default; only prose, source/code values,
+   explicit copyable values and editors opt in. Do not opt mixed chrome/content containers in. */
+:is(.selectable, .select-text, .markdown, .textLayer, pre, code, [data-copy-value], input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]) {
+  user-select: text;
+}
+:is(button, [role="button"], [role="menuitem"], [data-chrome], [data-avatar], [data-avatar-status], [data-mention-avatar]),
+.markdown :is([data-streamdown="code-block-header"], [data-streamdown="code-block-actions"]) {
+  user-select: none;
 }
 
 /* Labels that sit on one centre line with icons (composer status row, avatar initials). The text box
@@ -692,6 +894,19 @@ body {
 @utility trim-cap {
   text-box: trim-both cap alphabetic;
   padding-block: 0.3em;
+}
+
+/* Composer settings row on a narrow pane (lib/toolbarFit): with the right group on its own row and still too
+   tight, the quota countdown text goes first (the ring's hover still says it), then the Profile name truncates
+   (its chip may shrink: the wrapper below its min-content, the button to the wrapper). */
+[data-toolbar-right][data-drop-reset] [data-quota-reset] {
+  display: none;
+}
+[data-toolbar-right][data-squeeze-name] div:has(> button [data-quota-name]) {
+  min-width: 0;
+}
+[data-toolbar-right][data-squeeze-name] button:has([data-quota-name]) {
+  max-width: 100%;
 }
 
 /* ── Overlay scrollbars (lib/overlayScrollbarManager.ts; owner 2026-10-10) ─────────────────────────
@@ -801,7 +1016,7 @@ body {
   }
 }
 .capsule-in {
-  animation: capsule-in 120ms ease-out;
+  animation: capsule-in var(--motion-short) var(--ease-standard);
 }
 @media (prefers-reduced-motion: reduce) {
   .capsule-in {
@@ -817,7 +1032,7 @@ body {
   }
 }
 .pending-status-in {
-  animation: pending-status-in 160ms ease-out 400ms both;
+  animation: pending-status-in var(--motion-short) var(--ease-standard) 400ms both;
 }
 @media (prefers-reduced-motion: reduce) {
   .pending-status-in {
@@ -876,6 +1091,23 @@ body {
   mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
   animation: agent-ring-spin 1.4s linear infinite;
 }
+/* The minor tile's running edge (components/Avatar, 仅重要智能体): the tile's outline in the accent colour, breathing. */
+.agent-ring-tile {
+  position: absolute;
+  inset: -2px;
+  border-radius: 6px;
+  pointer-events: none;
+  box-shadow: 0 0 0 1.5px var(--accent);
+  /* Keep the shadow raster fixed; composite only its opacity while breathing. */
+  opacity: 1;
+  will-change: opacity;
+  animation: agent-ring-tile-pulse 1.4s ease-in-out infinite;
+}
+@keyframes agent-ring-tile-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
 @keyframes agent-ring-spin {
   to {
     transform: rotate(360deg);
@@ -886,37 +1118,59 @@ body {
     animation: none;
     background: var(--accent);
   }
+  .agent-ring-tile {
+    animation: none;
+    will-change: auto;
+  }
 }
+
+/* ── Layers (owner 2026-10-23: menus / popovers / tooltips are always on top) ──────────────────────
+   z ≤ 39   panes (the Shelf instance layer is 39), 45 the Settings Shelf
+   47       drag shields (components/side/SideDndLayer, WorkspaceDndLayer: invisible, they own the cursor)
+   48       foretell outlines (components/foretell.css) and drop previews (zones, dashed boxes)
+   49       the drop labels and the dragged ghost
+   ≥ 50     menus, popovers, flyouts, palettes, dialogs, toasts — over every preview, never crossed by one
+   A popover inside a pane gets z-50 too (test/layerOrder.test.ts checks the files). */
 
 /* ── Shell cards and the right side (会话两侧 RFC §3.2, §3.8a) ─────────────────────────────── */
 /* A region of the window: the conversation / page card, each right-side card. */
 .shell-card {
   background: var(--bg);
-  border: 1px solid var(--card-border);
-  border-radius: 14px;
-  box-shadow: var(--card-shadow);
+  border: 1px solid transparent;
+  border-radius: var(--r-xl);
+  box-shadow: var(--e1);
 }
 /* The reading column (timeline, 需要你 strip, archived banner, runtime note, composer, dock). Centred
-   in the conversation card; with 右栏与对话 = 让位 (--side-shift = the right side's in-flow width) it is
-   centred as if the card also covered the right side, moves left only when the card's right
-   whitespace no longer absorbs the side, then narrows. --reading-w: none (full width) → margin 0. */
+   in its own conversation card / pane (owner 2026-10-21: no 让位 shift; two side-by-side conversations
+   each centre in their own pane). Narrower than the reading width → full width (its px-6 padding is
+   the small margin). --reading-w: none (full width) → margin 0. */
 .side-col {
   --col-w: var(--reading-w, 48rem);
   max-width: var(--col-w);
-  margin-left: max(0px, min(calc((100% + var(--side-shift, 0px) - var(--col-w)) / 2), calc(100% - var(--col-w))));
+  margin-left: max(0px, calc((100% - var(--col-w)) / 2));
   margin-right: auto;
 }
 .side-col-composer {
   --col-w: 48rem;
 }
-/* Page buttons: the grip on a pill's left edge shows its dots on hover. */
-.side-pill-grip i {
-  opacity: 0;
-  transition: opacity 0.12s;
+/* 需要你 in the status row (components/StatusBar, owner 2026-10-27): with nothing on the row's left (no 目标, no
+   owner notice) it takes that left part, one line with the right-side chips (委托 N ›) right above 「接下来」;
+   when the left shows something it is a line of its own above it, as before. Pure layout, no measuring. */
+[data-status-row] > [data-needs-you-strip] {
+  flex: 1 1 0%;
+  min-width: 0;
 }
-.side-pill-grip:hover i,
-.side-pill-grip:focus-visible i {
-  opacity: 0.6;
+[data-status-row] > [data-needs-you-strip] ~ [data-status-start]:empty {
+  display: none;
+}
+[data-status-row]:has(> [data-status-start]:not(:empty)) > [data-needs-you-strip] {
+  flex-basis: 100%;
+}
+/* The row keeps one height (owner 2026-10-27: 「需要你」's avatar chips arriving or resolving must not move the
+   input below): 1.5rem reserved whether it holds the strip's 20 px chips, the right-side chips or nothing at all,
+   so nothing that comes or goes on it changes the composer's place. */
+[data-status-row] {
+  min-height: 1.5rem;
 }
 @keyframes side-ping {
   0% {
@@ -940,14 +1194,143 @@ body {
 @keyframes side-flash {
   0%,
   30% {
-    box-shadow: 0 0 0 2px var(--accent), var(--card-shadow);
+    box-shadow: 0 0 0 2px var(--accent), var(--e1);
   }
   100% {
-    box-shadow: 0 0 0 2px transparent, var(--card-shadow);
+    box-shadow: 0 0 0 2px transparent, var(--e1);
   }
 }
 .side-flash {
   animation: side-flash 1.3s ease-out;
+}
+/* ── Panes step 4 (docs/desktop-modules.md §24): the tray, the fly gesture, maximise, drop zones ── */
+/* The tray of chips under the work area grows in with its first chip. */
+.pane-tray {
+  max-height: 0;
+  opacity: 0;
+  transition:
+    max-height var(--motion-medium) var(--ease-standard),
+    opacity var(--motion-medium) var(--ease-standard);
+}
+.pane-tray.pane-tray-open {
+  max-height: 56px;
+  opacity: 1;
+}
+@keyframes pane-chip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+.pane-chip {
+  animation: pane-chip-in var(--motion-long) var(--ease-standard);
+}
+/* The ghost that flies between a pane and its chip (lib/paneFly.ts). */
+.pane-fly {
+  position: fixed;
+  z-index: 60;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--bg);
+  border: 1px solid transparent;
+  box-shadow: var(--e2);
+}
+.pane-fly-head {
+  display: flex;
+  height: 36px;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A maximise / restore, a pane leaving or coming back: the panes ease into their new place. */
+@keyframes pane-in {
+  from {
+    opacity: 0.55;
+    transform: scale(0.985);
+  }
+}
+/* Tool panes: opacity only (their instances are drawn in the fixed layer, aligned to the measured cards). */
+@keyframes pane-fade {
+  from {
+    opacity: 0.4;
+  }
+}
+:root[data-pane-relayout] [data-conv-pane]:not([hidden]) {
+  animation: pane-in var(--motion-long) var(--ease-standard);
+}
+:root[data-pane-relayout] [data-side-card],
+:root[data-pane-relayout] [data-side-instance] {
+  animation: pane-fade var(--motion-long) var(--ease-standard);
+}
+/* 拖放落点预览 (Settings → 外观; lib/dropTint): every drop preview's tint. A preview carries .drop-tint and names its
+   tint in --drop-tint; only 框线+底色 paints it, 只要框线 (the default, or no attribute yet) keeps the outline alone. */
+:root[data-drop-preview="fill"] .drop-tint {
+  background: var(--drop-tint, color-mix(in srgb, var(--accent) 13%, transparent));
+}
+/* The zone a pane drop takes glides from one target to the next. */
+.pane-drop-zone {
+  transition:
+    left var(--motion-short) var(--ease-standard),
+    top var(--motion-short) var(--ease-standard),
+    width var(--motion-short) var(--ease-standard),
+    height var(--motion-short) var(--ease-standard),
+    border-radius var(--motion-short) var(--ease-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pane-tray,
+  .pane-drop-zone {
+    transition: none;
+  }
+  .pane-chip,
+  :root[data-pane-relayout] [data-conv-pane]:not([hidden]),
+  :root[data-pane-relayout] [data-side-card],
+  :root[data-pane-relayout] [data-side-instance] {
+    animation: none;
+  }
+}
+/* Two workspaces (§24.13, owner 2026-10-21): the focus outline moves visibly to the workspace that gets the
+   focus (a click in it, a page on its rail): the old one fades, the new one draws in from a wider ring. */
+.ws-col {
+  outline: 1.5px solid transparent;
+  outline-offset: 8px;
+  transition:
+    outline-color var(--motion-long) var(--ease-standard),
+    outline-offset var(--motion-long) var(--ease-standard);
+}
+.ws-col[data-ws-focused] {
+  outline-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+  animation: ws-focus-in var(--motion-long) var(--ease-standard);
+}
+@keyframes ws-focus-in {
+  0% {
+    outline-color: transparent;
+    outline-offset: 12px;
+    outline-width: 3px;
+  }
+  45% {
+    outline-color: var(--accent);
+    outline-offset: 2px;
+    outline-width: 3px;
+  }
+  100% {
+    outline-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    outline-offset: 2px;
+    outline-width: 1.5px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-col {
+    transition: none;
+  }
+  .ws-col[data-ws-focused] {
+    animation: none;
+  }
 }
 /* Dragging on the right side (lib/sideDnd.ts): the instance layer (a guest <webview>) never takes the
    drag's pointer events; no text selection on the way. */
@@ -964,7 +1347,7 @@ body {
   position: absolute;
   border-radius: 2px;
   background: transparent;
-  transition: background 0.12s;
+  transition: background var(--motion-short) var(--ease-standard);
 }
 .side-handle-v::after {
   left: calc(50% - 1px);
@@ -1070,4 +1453,356 @@ body {
   outline: 1px solid color-mix(in oklab, var(--color-accent) 40%, transparent);
   outline-offset: -1px;
   border-radius: 8px;
+}
+
+/* The left navigation as a card (owner 2026-10-21; components/Sidebar): the full sidebar has the
+   .shell-card look (radius, border, shadow), 8 px from the window's left edge and from the conversation
+   card (the work row has no left padding while the sidebar is docked); the popped-out sidebar (hidden,
+   owner 2026-10-28) is the same card over the content with a deeper edge. On a card the selected / active
+   entries can't be "a white card on the window" any more: a tint instead. */
+.sidebar-card {
+  margin-left: 8px;
+  margin-right: 8px;
+  background: var(--bg);
+  border: 1px solid transparent;
+  border-radius: var(--r-xl);
+  box-shadow: var(--e1);
+  --sidebar-active: color-mix(in srgb, var(--fg) 8%, var(--bg));
+}
+.sidebar-card :is([data-row-selected], [data-nav-active]) {
+  background-color: var(--sidebar-active);
+  box-shadow: none;
+}
+/* The hidden sidebar popped over the content (components/SidebarPeek): the same card, a deeper edge and a
+   short slide so it reads as appearing, not resizing anything under it. */
+.sidebar-card[data-sidebar-mode="pop"] {
+  box-shadow: var(--e2);
+  animation: sidebar-pop-in var(--motion-short) var(--ease-standard);
+}
+@keyframes sidebar-pop-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-card[data-sidebar-mode="pop"] {
+    animation: none;
+  }
+}
+
+/* ── Cards over the desktop background (owner 2026-10-21; lib/workSurface, docs/desktop-modules.md §25.4) ── */
+/* The desktop background (components/ChipTray DesktopBackground) is under the whole window; the window bar
+   over it gets a light frost so its controls read over any picture. */
+:root:not([data-edge-to-edge]) .window-desk ~ * [data-window-titlebar] {
+  background: color-mix(in srgb, var(--win) 52%, transparent);
+  backdrop-filter: blur(16px) saturate(1.2);
+}
+/* Keep the bar's light frost; only its control groups get a stronger backing over wallpaper.
+   Reuse the bar's existing blurred desktop rather than adding another backdrop-filter per group. */
+:root:not([data-edge-to-edge]) .window-desk ~ * .titlebar-capsule {
+  --titlebar-ink: color-mix(in srgb, var(--fg) 82%, transparent);
+  background: color-mix(in srgb, var(--win) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--titlebar-ink);
+}
+:root:not([data-edge-to-edge]) .window-desk ~ * .titlebar-capsule :is(button, .text-muted, .text-subtle):not([role="menu"] *) {
+  color: var(--titlebar-ink);
+}
+/* Every Shelf Rail (expanded or collapsed) is a card of its own in the card colour (owner 2026-10-21: rails are
+   never see-through; with 亚克力 they take the same material as the cards). */
+.shelf-rail-card {
+  background: var(--bg);
+}
+/* 卡片材质 → 亚克力: cards (sidebar, conversation columns, Shelf cards, rails) are the card colour at
+   --card-alpha over the desktop seen through --acrylic-filter (blur, then the backdrop's contrast squeezed
+   toward light / dark so the text keeps ≥ 7:1 / secondary ≥ 4.5:1 over any picture: test/deskGaps.test.tsx).
+   Menus and popovers keep their opaque colour. Edge to edge: nothing behind, opaque. */
+:root[data-card-material="acrylic"] {
+  --acrylic-filter: blur(30px) saturate(2.2) contrast(0.32) brightness(1.6);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-card-material="acrylic"]:not([data-theme="light"]) {
+    --acrylic-filter: blur(30px) saturate(2.2) contrast(0.32) brightness(0.45);
+  }
+}
+:root[data-card-material="acrylic"][data-theme="dark"] {
+  --acrylic-filter: blur(30px) saturate(2.2) contrast(0.32) brightness(0.45);
+}
+/* :where() keeps this rule at the root's specificity (0,3,0): it used to be :is(), whose
+   (since-removed) sidebar rail rule raised it to (0,5,0) = the empty main card's rule in tray.css
+   (no material over the desktop), and styles.css loads after tray.css (main.tsx imports App first), so the
+   empty placeholder in the middle got the acrylic blur (owner 2026-10-21; test/deskGaps.test.tsx). Every
+   rail (the Shelf Rails, the other workspace's) takes the
+   very same colour, --card-alpha and filter as the cards. */
+:root[data-card-material="acrylic"]:not([data-edge-to-edge]) :where(.shell-card, .sidebar-card, .shelf-rail-card) {
+  background: color-mix(in srgb, var(--bg) var(--card-alpha, 82%), transparent);
+  backdrop-filter: var(--acrylic-filter);
+}
+/* #14: the blur is drawn once (components/AcrylicFrost: the desktop again, filtered, clipped to the cards), so
+   the cards drop their own backdrop-filter — with it, any looping animation on screen redid the 30 px blur
+   every frame. Same look. */
+.titlebar-frost {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  isolation: isolate;
+  overflow: hidden;
+  pointer-events: none;
+  filter: blur(16px) saturate(1.2);
+}
+:root[data-titlebar-frost]:not([data-edge-to-edge]) .window-desk ~ * [data-window-titlebar] {
+  backdrop-filter: none;
+}
+.acrylic-frost {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  isolation: isolate;
+  overflow: hidden;
+  pointer-events: none;
+  filter: var(--acrylic-filter);
+}
+:root[data-acrylic-frost][data-card-material="acrylic"]:not([data-edge-to-edge]) :where(.shell-card, .sidebar-card, .shelf-rail-card) {
+  backdrop-filter: none;
+}
+/* 窗格铺满时占满整个窗口 (lib/workSurface edgeToEdge): no margins round the cards, no outer radii, no shadows;
+   the seams between the cards take the card colour, so the panes read as one surface edge to edge. */
+:root[data-edge-to-edge] [data-pane-host] {
+  padding: 0;
+  background: var(--bg);
+}
+:root[data-edge-to-edge] [data-pane-host] :is(.shell-card, .sidebar-card, .shelf-rail-card) {
+  border-radius: 0;
+  box-shadow: none;
+}
+:root[data-edge-to-edge] [data-pane-host] .sidebar-card {
+  margin-left: 0;
+  border-top-width: 0;
+  border-bottom-width: 0;
+  border-left-width: 0;
+}
+/* The single conversation column's edges (components/side/SideArea): in the gap beside the card. */
+.single-col-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 12;
+  width: 8px;
+  cursor: col-resize;
+  outline: none;
+}
+/* §24.16 maximise / full screen (lib/panelFull). The panels folded beside a maximised one (their rails, the
+   conversations' avatar strip, the other workspace's rail) fade in; the maximised box eases to its width with
+   the rest of the relayout (data-pane-relayout). Full screen: the window bar leaves the layout and is revealed
+   from the top edge (components/PanelFullscreen); a hint names the way back. Nothing moves with reduced motion. */
+@keyframes panel-fold-in {
+  from {
+    opacity: 0;
+    transform: scaleY(0.97);
+  }
+}
+@keyframes panel-max-in {
+  from {
+    opacity: 0.6;
+  }
+}
+[data-panel-max] .panel-fold {
+  animation: panel-fold-in var(--motion-medium) var(--ease-standard);
+}
+:root[data-pane-relayout] .panel-max {
+  animation: panel-max-in var(--motion-medium) var(--ease-standard);
+}
+.window-bar-reveal {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 46;
+  background: var(--win);
+  box-shadow: var(--e2);
+  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--motion-medium) var(--ease-standard),
+    opacity var(--motion-medium) var(--ease-standard);
+}
+.window-bar-reveal[data-window-bar-frame="revealed"] {
+  transform: none;
+  opacity: 1;
+  pointer-events: auto;
+}
+.window-bar-edge {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 6px;
+  z-index: 47;
+  app-region: no-drag;
+}
+@keyframes fullscreen-hint {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+  12%,
+  80% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 0);
+  }
+}
+.fullscreen-hint {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 48;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px 5px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 82%, transparent);
+  color: var(--bg);
+  font-size: 12px;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: fullscreen-hint 2.2s ease forwards;
+}
+.fullscreen-hint kbd {
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--bg) 35%, transparent);
+  padding: 0 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-panel-max] .panel-fold,
+  :root[data-pane-relayout] .panel-max {
+    animation: none;
+  }
+  .window-bar-reveal {
+    transition: none;
+  }
+  .fullscreen-hint {
+    animation: none;
+  }
+}
+
+/* Click-twice confirm (lib/armedConfirm, design 013): the armed button counts down along its bottom
+   edge for ARMED_TIMEOUT_MS (5 s); with reduced motion it shows the seconds left instead. */
+@property --armed-s {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 5;
+}
+.armed-countdown {
+  position: relative;
+  overflow: hidden;
+}
+.armed-countdown::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: rgb(255 255 255 / 0.8);
+  transform-origin: left;
+  pointer-events: none;
+  animation: armed-countdown 5s linear forwards;
+}
+@keyframes armed-countdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+@keyframes armed-seconds {
+  from { --armed-s: 5; }
+  to { --armed-s: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .armed-countdown::after {
+    position: static;
+    height: auto;
+    background: none;
+    transform: none;
+    counter-reset: armed-s var(--armed-s);
+    content: "\00a0(" counter(armed-s) ")";
+    font-variant-numeric: tabular-nums;
+    animation: armed-seconds 5s steps(5) forwards;
+  }
+}
+/* 「未开始：需要再点一次确认」 after an armed button disarmed by itself (showArmedExpired). */
+.armed-expired {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  max-width: min(22rem, calc(100vw - 16px));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-subtle);
+  padding: 2px 8px;
+  font-size: 12px;
+  opacity: 0.9;
+  transition: opacity var(--motion-long) var(--ease-standard);
+}
+.armed-expired-out {
+  opacity: 0;
+}
+
+/* 文件 explorer: a row shown by 在文件树中显示 flashes once (docs/design/019 §3). */
+.fx-flash {
+  animation: fx-flash 1.1s ease-out;
+}
+@keyframes fx-flash {
+  from {
+    background-color: color-mix(in oklab, var(--color-warn) 45%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fx-flash {
+    animation: none;
+  }
+}
+
+/* Sidebar layout B 「现在」 cards (components/SidebarNowAll, design 040 §4 B): they come and go with a height + opacity
+   transition (--motion-medium); a leaving card is kept for that long at its place. None under reduced motion. */
+@keyframes now-card-in {
+  from {
+    opacity: 0;
+    max-height: 0;
+    padding-block: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 72px;
+  }
+}
+@keyframes now-card-out {
+  from {
+    opacity: 1;
+    max-height: 72px;
+  }
+  to {
+    opacity: 0;
+    max-height: 0;
+    padding-block: 0;
+  }
+}
+.now-card {
+  overflow: hidden;
+  animation: now-card-in var(--motion-medium) var(--ease-standard);
+}
+.now-card[data-leaving] {
+  pointer-events: none;
+  animation: now-card-out var(--motion-medium) var(--ease-standard) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .now-card,
+  .now-card[data-leaving] {
+    animation: none;
+  }
 }

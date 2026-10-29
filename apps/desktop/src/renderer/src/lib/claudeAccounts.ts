@@ -18,6 +18,8 @@ import type { ProfileKind } from "./profileKind";
  * `openSettings("profiles", { anchor: CLAUDE_ACCOUNTS_SECTION })` scrolls to it.
  */
 export const CLAUDE_ACCOUNTS_SECTION = "claude-accounts.accounts";
+/** Opens the existing API-account form (empty Base URL means Anthropic). */
+export const CLAUDE_API_ACCOUNT_ADD_ANCHOR = "claude-accounts.add-api";
 
 /** subscription: loggedIn / needsLogin / error (the check failed) / unchecked; api: key stored or not. */
 export type AccountState = "loggedIn" | "needsLogin" | "error" | "unchecked" | "keyReady" | "keyMissing";

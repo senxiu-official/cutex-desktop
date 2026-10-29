@@ -11,6 +11,7 @@ import { artifactRef, parseArtifactRef, type ArtifactContent, type ArtifactDetai
 import { ARTIFACT_PAGE_MAX_BYTES, ARTIFACT_PAGE_PROMPT_BYTES } from "../../../../shared/frames";
 import { DocumentPreview } from "../../components/DocumentPreview";
 import { Markdown } from "../../components/Markdown";
+import { SideImage } from "../../components/SideImage";
 import { UnifiedDiff } from "../../components/UnifiedDiff";
 import { useI18n, type MessageKey } from "../../i18n";
 import { contextMenu } from "../../lib/contextMenu";
@@ -23,13 +24,13 @@ import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
 import { languageFor } from "../../lib/workspace";
 import { services } from "../app";
 import type { SideBodyProps, SideOpen } from "../slots";
-import { artifactMenu, copyArtifactLink, explainOpen, openDelegation, openVersion, useDelegationTitle } from "./actions";
+import { artifactMenu, explainOpen, openDelegation, openVersion, useDelegationTitle } from "./actions";
 import { attributionText, currentTab, diffGap, externalGone, fence, formatBytes, isOldVersion, jsonRecordOf, parseDelimited, previewKind, previousVersion, producerLabel, resolveVersion, sessionName, typePath, viewTabs, withTab, type ViewState, type ViewTab } from "./model";
 import { JsonRecord } from "./JsonRecord";
 import { PageFrame, type PageProblem } from "./PageFrame";
 import { TextPreview } from "./TextPreview";
 import { KIND_ICON } from "./refTarget";
-import { loadContent, loadDiff, useCachedDetail, useDetail } from "./store";
+import { loadContent, loadDiff, useDetail } from "./store";
 
 const CSV_ROWS = 300;
 const TEXT_BYTES = 256 * 1024;
@@ -39,7 +40,7 @@ const seconds = (iso: string) => (Date.parse(iso) || 0) / 1000;
 
 function Note({ tone = "muted", children }: { tone?: "muted" | "warn" | "danger"; children: ReactNode }) {
   const cls = tone === "warn" ? "border-warn/40 bg-warn/10 text-warn" : tone === "danger" ? "border-danger/40 bg-danger/10 text-danger" : "border-border bg-surface-2 text-subtle";
-  return <div className={`mx-2 my-1.5 rounded-md border px-2 py-1 text-[11px] leading-relaxed ${cls}`}>{children}</div>;
+  return <div className={`mx-2 my-1.5 rounded-md border px-2 py-1 text-caption/[inherit] leading-relaxed ${cls}`}>{children}</div>;
 }
 
 // ── preview ──────────────────────────────────────────────────────────────────────────────────────
@@ -48,7 +49,7 @@ function Table({ rows }: { rows: string[][] }) {
   const [head, ...body] = rows;
   return (
     <div className="overflow-auto px-2">
-      <table className="border-collapse text-[11.5px]">
+      <table className="border-collapse text-meta/[inherit]">
         {head && (
           <thead>
             <tr>
@@ -84,7 +85,7 @@ function PageToggle({ code, setCode, labels }: { code: boolean; setCode(code: bo
       role="radio"
       aria-checked={code === value}
       onClick={() => setCode(value)}
-      className={`rounded px-1.5 py-px text-[11px] ${code === value ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:bg-hover"}`}
+      className={`rounded px-1.5 py-px text-caption/[inherit] ${code === value ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:bg-hover"}`}
     >
       {label}
     </button>
@@ -187,7 +188,7 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
     return (
       <>
         {warnings}
-        {src ? <img src={src} alt={name} draggable={false} className="mx-auto my-2 block h-auto max-w-[calc(100%-1rem)] rounded-md border border-border bg-surface-2 object-contain" /> : <Note>{t("artifacts.imageTooLarge", { size })}</Note>}
+        {src ? <SideImage key={src} src={src} alt={name} hostId={hostId} className="mx-2 my-2" center imgClassName="block h-auto max-w-full rounded-md border border-border bg-surface-2 object-contain" /> : <Note>{t("artifacts.imageTooLarge", { size })}</Note>}
       </>
     );
   }
@@ -233,7 +234,7 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
-      <dt className="pt-0.5 text-[11px] whitespace-nowrap text-subtle">{label}</dt>
+      <dt className="pt-0.5 text-caption/[inherit] whitespace-nowrap text-subtle">{label}</dt>
       <dd className="min-w-0 text-xs break-words text-foreground">{children}</dd>
     </>
   );
@@ -270,8 +271,8 @@ function Source({ hostId, version }: { hostId: string; version: ArtifactVersion 
     <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 px-3 py-2">
       <Field label={t("artifacts.src.producer")}>
         <span className={p.kind === "auto" && p.attribution === "ambiguous" ? "text-warn" : ""}>{producerLabel(p, t)}</span>
-        {runtime && <span className="ml-1.5 text-[11px] text-subtle">{runtime}</span>}
-        {p.runtimeGeneration !== null && <span className="ml-1.5 text-[11px] text-subtle">gen {p.runtimeGeneration}</span>}
+        {runtime && <span className="ml-1.5 text-caption/[inherit] text-subtle">{runtime}</span>}
+        {p.runtimeGeneration !== null && <span className="ml-1.5 text-caption/[inherit] text-subtle">gen {p.runtimeGeneration}</span>}
       </Field>
       {p.sessionId && p.turnId && (
         <Field label={t("artifacts.src.turn")}>
@@ -307,7 +308,7 @@ function Source({ hostId, version }: { hostId: string; version: ArtifactVersion 
             <code className="font-mono" title={version.git.commit}>
               {version.git.commit.slice(0, 10)}
             </code>
-            <span className={`ml-1.5 text-[11px] ${version.git.dirty ? "text-warn-text" : "text-subtle"}`}>{t(version.git.dirty ? "artifacts.src.dirty" : "artifacts.src.clean")}</span>
+            <span className={`ml-1.5 text-caption/[inherit] ${version.git.dirty ? "text-warn-text" : "text-subtle"}`}>{t(version.git.dirty ? "artifacts.src.dirty" : "artifacts.src.clean")}</span>
           </span>
         ) : (
           <span className="text-subtle">{t("artifacts.src.noGit")}</span>
@@ -321,12 +322,12 @@ function Source({ hostId, version }: { hostId: string; version: ArtifactVersion 
           </button>
         </span>
       </Field>
-      <Field label={t("artifacts.src.sha")}>{version.sha256 ? <code className="font-mono break-all text-[11px]">{version.sha256}</code> : <span className="text-subtle">{t("artifacts.src.noSha")}</span>}</Field>
+      <Field label={t("artifacts.src.sha")}>{version.sha256 ? <code className="font-mono break-all text-caption/[inherit]">{version.sha256}</code> : <span className="text-subtle">{t("artifacts.src.noSha")}</span>}</Field>
       <Field label={t("artifacts.src.size")}>
-        {formatBytes(version.bytes)} · <code className="font-mono text-[11px]">{version.mediaType}</code>
+        {formatBytes(version.bytes)} · <code className="font-mono text-caption/[inherit]">{version.mediaType}</code>
       </Field>
       <Field label={t("artifacts.src.storage")}>{t(version.storage === "external" ? "artifacts.src.external" : "artifacts.src.blob")}</Field>
-      <Field label={t("artifacts.src.note")}>{version.note ? <span className="whitespace-pre-wrap">{version.note}</span> : <span className="text-subtle">{t("artifacts.src.none")}</span>}</Field>
+      <Field label={t("artifacts.src.note")}>{version.note ? <span className="selectable whitespace-pre-wrap">{version.note}</span> : <span className="text-subtle">{t("artifacts.src.none")}</span>}</Field>
       <Field label={t("artifacts.src.created")}>{formatAbsolute(seconds(version.createdAt))}</Field>
     </dl>
   );
@@ -355,8 +356,8 @@ function Compare({ hostId, detail, version, open }: { hostId: string; detail: Ar
   if (versions.length < 2) return <Note>{t("artifacts.cmp.onlyOne")}</Note>;
   const pick = (value: number, onChange: (n: number) => void, label: string) => (
     <label className="flex items-center gap-1">
-      <span className="text-[11px] text-subtle">{label}</span>
-      <select value={value} onChange={(e) => onChange(Number(e.target.value))} className="rounded-md border border-border bg-background px-1.5 py-0.5 text-[11px] outline-none focus:border-accent">
+      <span className="text-caption/[inherit] text-subtle">{label}</span>
+      <select value={value} onChange={(e) => onChange(Number(e.target.value))} className="rounded-md border border-border bg-background px-1.5 py-0.5 text-caption/[inherit] outline-none focus:border-accent">
         {versions.map((v) => (
           <option key={v.version} value={v.version}>
             v{v.version}
@@ -380,7 +381,7 @@ function Compare({ hostId, detail, version, open }: { hostId: string; detail: Ar
         {pick(from, setFrom, t("artifacts.cmp.from"))}
         {pick(to, setTo, t("artifacts.cmp.to"))}
         {text && (
-          <button onClick={openCard} className="ml-auto inline-flex items-center gap-1 text-[11px] text-accent hover:underline">
+          <button onClick={openCard} className="ml-auto inline-flex items-center gap-1 text-caption/[inherit] text-accent hover:underline">
             <ExternalLink size={11} />
             {t("artifacts.cmp.openCard")}
           </button>
@@ -438,7 +439,7 @@ export function ViewBody({ instance, hostId, setState, open }: SideBodyProps<Vie
   const pickVersion = (value: string) => openVersion(open, artifactRef(a.artifactId, value === "latest" ? "latest" : Number(value)), a.name);
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-2 py-1 text-xs" onContextMenu={contextMenu(() => artifactMenu(hostId, a, open))}>
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-2 py-1 text-xs" onContextMenu={contextMenu(() => artifactMenu(hostId, a, open, version ?? null))}>
         <Icon size={13} className="shrink-0 text-subtle" />
         <span className="min-w-0 flex-1 truncate font-medium" title={a.name}>
           {a.name}
@@ -453,7 +454,7 @@ export function ViewBody({ instance, hostId, setState, open }: SideBodyProps<Vie
           onChange={(e) => pickVersion(e.target.value)}
           aria-label={t("artifacts.versionPick")}
           title={parts.version === "latest" ? t("artifacts.followsLatest") : t("artifacts.pinnedHint")}
-          className="max-w-44 shrink-0 rounded-md border border-border bg-background px-1.5 py-0.5 text-[11px] outline-none focus:border-accent"
+          className="max-w-44 shrink-0 rounded-md border border-border bg-background px-1.5 py-0.5 text-caption/[inherit] outline-none focus:border-accent"
         >
           <option value="latest">{t("artifacts.latestOption", { n: a.latestVersion })}</option>
           {detail.versions.map((v) => (
@@ -464,7 +465,7 @@ export function ViewBody({ instance, hostId, setState, open }: SideBodyProps<Vie
         </select>
       </div>
       {isOldVersion(parts.version, a.latestVersion) && (
-        <div className="flex shrink-0 items-center gap-1.5 border-b border-warn/30 bg-warn/10 px-2 py-1 text-[11px] text-warn-text">
+        <div className="flex shrink-0 items-center gap-1.5 border-b border-warn/30 bg-warn/10 px-2 py-1 text-caption/[inherit] text-warn-text">
           <History size={12} className="shrink-0" />
           <span className="min-w-0 flex-1">{t("artifacts.oldBanner", { n: parts.version as number, latest: a.latestVersion })}</span>
           <button onClick={() => pickVersion("latest")} className="shrink-0 font-medium hover:underline">
@@ -488,12 +489,12 @@ export function ViewBody({ instance, hostId, setState, open }: SideBodyProps<Vie
                 aria-selected={selected === tab}
                 title={tab === "origin" ? t("artifacts.pane.originHint") : undefined}
                 onClick={() => setState(withTab(state, tab))}
-                className={`shrink-0 rounded-md px-2 py-0.5 text-[11.5px] whitespace-nowrap ${selected === tab ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:bg-hover"}`}
+                className={`shrink-0 rounded-md px-2 py-0.5 text-meta/[inherit] whitespace-nowrap ${selected === tab ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:bg-hover"}`}
               >
                 {t(TAB_LABEL[tab])}
               </button>
             ))}
-            <span className="ml-auto self-center truncate pl-2 text-[11px] text-subtle" title={producerLabel(version.producer, t)}>
+            <span className="ml-auto self-center truncate pl-2 text-caption/[inherit] text-subtle" title={producerLabel(version.producer, t)}>
               v{version.version} · {producerLabel(version.producer, t)}
             </span>
           </div>
@@ -512,22 +513,5 @@ export function ViewBody({ instance, hostId, setState, open }: SideBodyProps<Vie
         </>
       )}
     </div>
-  );
-}
-
-/** Card header button: the version's markdown link to the clipboard. */
-export function ViewActions({ instance, hostId }: SideBodyProps<ViewState>) {
-  const { t } = useI18n();
-  const parts = parseArtifactRef(instance.state.ref);
-  const detail = useCachedDetail(hostId, parts?.artifactId ?? null);
-  return (
-    <button
-      title={t("artifacts.copyLink")}
-      aria-label={t("artifacts.copyLink")}
-      onClick={() => copyArtifactLink(instance.state.ref, detail?.artifact.name ?? instance.state.name ?? instance.state.ref)}
-      className="flex h-6 w-6 items-center justify-center rounded-md text-subtle hover:bg-hover hover:text-foreground"
-    >
-      <Copy size={13} />
-    </button>
   );
 }

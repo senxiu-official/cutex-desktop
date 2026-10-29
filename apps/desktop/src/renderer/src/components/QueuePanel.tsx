@@ -18,24 +18,41 @@
 // 「接下来 · 排队 2 · 留言 1 · 委托 3」; a click on it expands (for this run), the chevron collapses.
 // Composer passes `autoCompact` only under the 「接下来」面板 setting 自动折叠; under ★ 始终展开 the card
 // collapses by the chevron alone (remembered per agent, lib/queueView).
-import { useRef, useState } from "react";
-import { ChevronDown, ChevronUp, CornerDownRight, Pencil, Trash2, UserRound, X } from "lucide-react";
+// Short pane (lib/shortPane, owner 2026-10-26 option B): where the card would leave the history under its minimum, it
+// folds to its header line and its list opens as an overlay above that line (over the history; Esc, a click elsewhere
+// or focus leaving closes it; a drag keeps it open until it ends). The owner's own collapse / expand wins (see there).
+import type { AgentRuntime } from "../lib/agentFeatures";
+import { mentionPlainText } from "../lib/mentionWire";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { ArrowDownToLine, ChevronDown, ChevronRight, ChevronUp, CornerDownRight, Info, Pencil, Trash2, UserRound, X } from "lucide-react";
+import { useShortPaneFold } from "../lib/shortPane";
 import type { QueueItem } from "@cutex-desktop/protocol";
 import { RailStripContext, useStripInside } from "../lib/railStrip";
 import { useI18n, type MessageKey } from "../i18n";
+import { useModelOverloadRetry } from "../lib/modelOverloadRetryView";
+import { openMenuAt } from "../lib/contextMenu";
+import { panelGuideItem } from "../lib/panelGuideMenu";
 import { ARMED_BUTTON, useArmed } from "../lib/armedConfirm";
 import { outboxStatusCopy, type OutboxEntry } from "../lib/outbox";
-import type { PendingSteer } from "../lib/pendingSteers";
-import type { PausedSection } from "../lib/queuePause";
+import { steerDelivery, type PendingSteer } from "../lib/pendingSteers";
+import type { ImageSteering } from "../lib/imageSteer";
+import { queuedRowText, type PausedSection } from "../lib/queuePause";
 import { queueViewOf, setQueueView } from "../lib/queueView";
 import { autoCompact as startsCompact, mergeChips, openedThisRun, queueChips, setOpenedThisRun, turnCounts, type QueueChip } from "../lib/queueChips";
-import { queueItemText } from "../store";
 import { META_YIELDS, QUEUE_ROW, ROW_ACTIONS, ROW_META, ROW_TEXT, rowText } from "../lib/queueRow";
-import { KindIcon } from "./AdmissionRows";
+import { KindIcon, SteerDeliveryNote } from "./AdmissionRows";
+import { QueuedImages } from "./ImageThumbs";
+import { messageImages } from "../../../shared/input";
 import { Rail, RailRow } from "./QueueRail";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 import { TurnQueue, type OrderedQueue, type OwnerRowExtra } from "./TurnQueue";
 import { useShownNextStep } from "../lib/settledRideAlongs";
 import type { AdmissionNextStep } from "@cutex-desktop/protocol";
+import { Tag, CountBadge } from "./Tag";
+import { btn } from "./Button";
+import { insertFeedbackOf, insertFinished, insertLocked, insertUnsure, useQueueInsertFeedback } from "../lib/queueInsertFeedback";
+import { QueueInsertStatus, QueueInsertUnsureHint } from "./QueueInsertStatus";
+import { isElement, isNode, ownerDocumentOf, ownerWindowOf, resizeObserverFor } from "../lib/ownerWindow";
 
 const NO_NEXT_STEP: AdmissionNextStep[] = [];
 
@@ -46,7 +63,7 @@ const SECTION = "flex flex-col gap-0.5 py-0.5";
 /** On the tray: every group after the first (`data-queue-section`) gets a hairline above it. */
 const SECTION_RULES = "[&>[data-queue-section]~[data-queue-section]]:border-t [&>[data-queue-section]~[data-queue-section]]:border-border/60";
 /** A group's heading: a small muted label (not a box), its actions at the end. */
-const HEADING = "flex h-6 min-w-0 items-center gap-1.5 pr-1 pl-0.5 text-[11px] text-subtle";
+const HEADING = "flex h-6 min-w-0 items-center gap-1.5 pr-1 pl-0.5 text-caption/[inherit] text-subtle";
 const ICON_BUTTON = "rounded-md p-1 text-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none disabled:opacity-30";
 const ICON_BUTTON_DANGER = "rounded-md p-1 text-muted hover:text-danger focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none";
 
@@ -83,21 +100,27 @@ export interface OutboxActions {
  * error with 重试 / 放回输入框 / 丢弃. Keyed by clientUserMessageId like the row that replaces it; the
  * same anatomy (kind icon · text · meta) as that row.
  */
-function OutboxRow({ entry, kind, actions }: { entry: OutboxEntry; kind: "steer" | "queue"; actions: OutboxActions }) {
+function OutboxRow({ entry, kind, actions, hostId }: { entry: OutboxEntry; kind: "steer" | "queue"; actions: OutboxActions; hostId?: string }) {
   const { t } = useI18n();
   const failed = entry.state === "failed";
   const status = outboxStatusCopy(entry);
   return (
     <div className={`${QUEUE_ROW} ${failed ? "bg-danger/5" : ""}`} data-testid={failed ? "outbox-failed" : "outbox-sending"}>
       <KindIcon icon={kind === "steer" ? CornerDownRight : UserRound} label={t(kind === "steer" ? "queue.turn.inserting" : "queue.delivery.owner")} />
-      <span className={`${ROW_TEXT} ${failed ? "text-foreground" : "text-muted"}`}>{rowText(entry.text)}</span>
-      {entry.imageCount > 0 && <span className="shrink-0 text-[11px] text-subtle">{t("steer.images", { n: entry.imageCount })}</span>}
+      <span className={`${ROW_TEXT} ${failed ? "text-foreground" : "text-muted"}`}>{rowText(mentionPlainText(entry.text))}</span>
+      <QueuedImages images={messageImages(entry.extra as { type: string }[])} hostId={hostId} />
       {failed ? (
         <>
-          <span className="max-w-[40%] shrink truncate text-[11px] text-danger" title={entry.error}>
+          {/* Plain words only; a raw transport / backend error is the 详情 tooltip. */}
+          <span className="max-w-[40%] shrink truncate text-caption/[inherit] text-danger-text" title={entry.error ? (entry.errorRaw ? `${t("queue.insert.details")}: ${entry.error}` : entry.error) : undefined} data-testid="outbox-failed-text">
             {t("outbox.failed")}
-            {entry.error ? ` · ${entry.error}` : ""}
+            {entry.error && !entry.errorRaw ? ` · ${entry.error}` : ""}
           </span>
+          {entry.error && entry.errorRaw && (
+            <span className="shrink-0 cursor-help rounded p-0.5 text-subtle" title={`${t("queue.insert.details")}: ${entry.error}`} aria-label={t("queue.insert.details")} data-testid="outbox-failed-detail">
+              <Info size={11} aria-hidden />
+            </span>
+          )}
           <button onClick={() => actions.onRetry(entry.id)} title={t("outbox.retryHint")} className="shrink-0 rounded-md bg-surface-2 px-2 py-0.5 text-xs hover:text-accent">
             {t("outbox.retry")}
           </button>
@@ -141,6 +164,9 @@ export function QueuePanel({
   stopHold = false,
   running = false,
   sessionId,
+  hostId,
+  runtime = "codex",
+  imageSteering = null,
   autoCompact,
 }: {
   steers: PendingSteer[];
@@ -185,15 +211,58 @@ export function QueuePanel({
   running?: boolean;
   /** The open agent (collapse remembered per agent); defaults to `ordered.sessionId`. */
   sessionId?: string;
+  /** The agent's host: a queued image stored as a host path is read through it (components/ImageThumbs). */
+  hostId?: string;
+  /** The agent's runtime: a Claude steer with images is sent as the next turn (lib/pendingSteers steerDelivery). */
+  runtime?: AgentRuntime;
+  /** image-input-steering: the session's declared image steering (lib/imageSteer imageSteerMode); null = unknown / older cutex. */
+  imageSteering?: ImageSteering | null;
   /** Start compact by the rule of lib/queueChips; `short` = the window is short. Omitted = never by itself. */
   autoCompact?: { short: boolean };
 }) {
   const { t } = useI18n();
+  const userToggle = useUserLayoutToggle();
   // Ride-alongs still settling (lib/settledRideAlongs) are left out of everything at once — rows,
   // count, chips and whether the card shows — so the card never flashes empty.
   const nextStep = useShownNextStep(orderedIn?.nextStep ?? NO_NEXT_STEP, orderedIn?.running ?? false, orderedIn);
   const ordered = orderedIn && nextStep !== orderedIn.nextStep ? { ...orderedIn, nextStep } : orderedIn;
+  const feedbackHost = hostId ?? "local";
+  const feedbackSession = sessionId ?? ordered?.sessionId ?? "";
+  const retryStatus = useModelOverloadRetry(feedbackSession, hostId);
+  const retry = retryStatus?.holdsAdmission ? retryStatus : null;
+  const insertFeedback = useQueueInsertFeedback(insertFeedbackOf(feedbackHost, feedbackSession));
+  const feedbackFor = (id: string) => insertFeedback.find((f) => f.item.clientUserMessageId === id);
+  const insertStatus = (id: string) => {
+    const feedback = feedbackFor(id);
+    return feedback && !feedback.hidden ? <QueueInsertStatus feedback={feedback} hostId={feedbackHost} sessionId={feedbackSession} inQueue={items.some((q) => q.clientUserMessageId === id)} /> : null;
+  };
+  // An SSE can remove the queue/steer row before its request returns (or before the owner sees
+  // its result). Retain only the operation receipt, not a synthetic queued item or admission turn.
+  const receipts = insertFeedback.filter((f) => !f.hidden && !items.some((q) => q.clientUserMessageId === f.item.clientUserMessageId) && !steers.some((p) => p.id === f.item.clientUserMessageId));
   const tray = useRef<HTMLDivElement>(null);
+  // The rows below the header shrink with the pane (min-h-0, the Composer / Conversation chain is a flex column) and
+  // scroll once they no longer fit: a row is never cut or covered by the input box. Only then a scroll box, so the
+  // rail strip may still stand outside the frame (lib/railStrip: a clipping ancestor moves it inside).
+  const body = useRef<HTMLDivElement>(null);
+  const [bodyScrolls, setBodyScrolls] = useState(false);
+  useLayoutEffect(() => {
+    const el = body.current;
+    if (!el) return;
+    const measure = () => {
+      setBodyScrolls(el.scrollHeight > el.clientHeight + 1);
+      // Folded, the list is out of flow: its size changing is no layout change the pane's observer would see.
+      if (tray.current?.hasAttribute("data-short-fold")) shortPane.store?.recheck();
+    };
+    measure();
+    const ro = resizeObserverFor(el, measure);
+    if (!ro) return;
+    ro.observe(el);
+    for (const child of el.children) ro.observe(child);
+    return () => ro.disconnect();
+  });
+  // The header line's slots for TurnQueue (the insert target overlay while dragging, 「全部合并插入」 at its right).
+  const [targetSlot, setTargetSlot] = useState<HTMLElement | null>(null);
+  const [actionSlot, setActionSlot] = useState<HTMLElement | null>(null);
   const stripInside = useStripInside(tray, stripEnabled && !!ordered);
   // 清空 is click-twice (lib/armedConfirm): the first click turns the paused section red and leaves only the clear button.
   const [clearArmed, setClearArmed] = useArmed(paused.count);
@@ -205,12 +274,68 @@ export function QueuePanel({
   const agent = sessionId ?? ordered?.sessionId;
   const [collapsedFor, setCollapsedFor] = useState<{ id: string | undefined; v: boolean } | null>(null);
   const userCollapsed = collapsedFor && collapsedFor.id === agent ? collapsedFor.v : !!queueViewOf(agent).collapsed;
+  // Short pane: `pin` = the owner expanded the card by hand. "armed" until the pane measured it once: still short →
+  // "held" (stays expanded in place, the auto-fold waits) until the pane has room again; not short → nothing to hold.
+  const shortPane = useShortPaneFold();
+  const [pin, setPin] = useState<"armed" | "held" | null>(null);
   const setCollapsed = (v: boolean) => {
-    setQueueView(agent, { collapsed: v });
-    setOpenedThisRun(agent, !v);
-    setCollapsedFor({ id: agent, v });
+    userToggle(() => {
+      setQueueView(agent, { collapsed: v });
+      setOpenedThisRun(agent, !v);
+      setCollapsedFor({ id: agent, v });
+      setPin(v || !shortPane.store ? null : "armed");
+    });
   };
-  if (rest.length === 0 && orderedCount === 0 && waiting.length === 0 && paused.count === 0 && sendingSteers.length === 0 && sendingQueue.length === 0 && !sections.some(filled)) return null;
+  useLayoutEffect(() => {
+    if (pin !== "armed") return;
+    shortPane.store?.recheck();
+    setPin(shortPane.store?.get() ? "held" : null);
+  }, [pin, shortPane.store]);
+  useLayoutEffect(() => {
+    if (!shortPane.fold && pin === "held") setPin(null);
+  }, [shortPane.fold, pin]);
+  // The overlay (open while folded) and a drag: the fold and the overlay stay as they were until the drag ends.
+  const [overlay, setOverlay] = useState(false);
+  const [drag, setDrag] = useState<{ folded: boolean } | null>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const overlayId = useId();
+  const closeOverlay = (refocus: boolean) => {
+    openOverlay(false);
+    if (refocus) toggle.current?.focus();
+  };
+  const openOverlay = (open: boolean) => {
+    userToggle(() => setOverlay(open));
+    // Opened: the list takes the focus (Tab goes on through its rows, then back to the input box).
+    if (open) ownerWindowOf(tray.current).requestAnimationFrame(() => body.current?.focus({ preventScroll: true }));
+  };
+  // Not folded any more (the pane got taller, the owner collapsed it): no overlay to come back to.
+  const foldedNow = shortPane.fold && !userCollapsed;
+  useEffect(() => {
+    if (!foldedNow && !drag) setOverlay(false);
+  }, [foldedNow, drag]);
+  // A click elsewhere closes it (not during a drag: a drag fires no pointerdown, its end is `drag`).
+  useEffect(() => {
+    if (!overlay || drag) return;
+    const down = (e: PointerEvent) => {
+      if (!isNode(e.target) || !tray.current?.contains(e.target)) closeOverlay(false);
+    };
+    const doc = ownerDocumentOf(tray.current);
+    doc.addEventListener("pointerdown", down, true);
+    return () => doc.removeEventListener("pointerdown", down, true);
+  }, [overlay, drag]);
+  // A drag ends even when its row went away (moved, sent): any dragend / drop in the document ends it here.
+  useEffect(() => {
+    if (!drag) return;
+    const end = () => setDrag(null);
+    const doc = ownerDocumentOf(tray.current);
+    doc.addEventListener("dragend", end, true);
+    doc.addEventListener("drop", end, true);
+    return () => {
+      doc.removeEventListener("dragend", end, true);
+      doc.removeEventListener("drop", end, true);
+    };
+  }, [drag]);
+  if (!(ordered && retry) && rest.length === 0 && orderedCount === 0 && waiting.length === 0 && paused.count === 0 && sendingSteers.length === 0 && sendingQueue.length === 0 && receipts.length === 0 && !sections.some(filled)) return null;
   // The header count: what reaches the agent next (the extra sections are not counted).
   const count = (ordered ? orderedCount : rest.length + (paused.count - paused.steers.length)) + waiting.length + paused.steers.length + sendingSteers.length + sendingQueue.length;
   const extras = sections.filter(filled);
@@ -228,23 +353,33 @@ export function QueuePanel({
   // Never compact for an unknown agent (the expand could not be remembered: the card would stay
   // compact) nor while a send failed (its error and 重试 / 放回 / 丢弃 must show).
   const failedSend = sendingSteers.some((e) => e.state === "failed") || sendingQueue.some((e) => e.state === "failed");
-  const compact = !!autoCompact && !!agent && !failedSend && !openedThisRun(agent) && startsCompact(chips, count + extras.length, autoCompact.short);
+  const compact = !!autoCompact && !!agent && !failedSend && !insertFeedback.some((f) => !f.hidden) && !openedThisRun(agent) && startsCompact(chips, count + extras.length, autoCompact.short);
   const collapsed = userCollapsed || compact;
+  const autoFold = drag ? drag.folded : shortPane.fold && !collapsed && !pin;
+  const overlayOpen = autoFold && overlay;
+  /** The header line only (collapsed by the owner / compact, or folded by the short pane). */
+  const folded = collapsed || autoFold;
   // 继续 in the header when the paused section (which has its own) is not shown, nor the stop's
   // 委托已随停止暂停 section (a stop hold: it carries 继续发送 for everything the stop held).
   const headerResume = !!ordered && paused.count > 0 && paused.steers.length === 0 && !stopHold;
   // Keyed by clientUserMessageId: an optimistic row and the cutex item that replaces it share the key.
-  const itemRow = (item: QueueItem, extra: OwnerRowExtra = {}) => (
+  const itemRow = (item: QueueItem, extra: OwnerRowExtra = {}) => {
+    const feedback = feedbackFor(item.clientUserMessageId);
+    const locked = !!feedback && (insertLocked(feedback.state) || insertFinished(feedback.state));
+    // Unsure and still listed (the resync could not read cutex): it can be deleted / edited, never 插话 again from here.
+    const held = locked && !(insertUnsure(feedback) && !feedback.hidden);
+    return (
     <div
       key={item.clientUserMessageId || item.queueId}
       {...extra.rowProps}
-      className={`${QUEUE_ROW} hover:bg-surface-2/60 ${extra.rowProps ? "focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none" : ""}`}
+      className={`${QUEUE_ROW} hover:bg-hover ${extra.rowProps ? "focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none" : ""}`}
       data-testid="queue-item"
     >
       {extra.grip}
       <KindIcon icon={UserRound} label={t("queue.delivery.owner")} />
-      <span className={`${ROW_TEXT} text-foreground`}>{rowText(queueItemText(item))}</span>
-      {extra.paused ? (
+      <QueuedImages images={messageImages(item.input as { type: string }[])} hostId={hostId} />
+      <span className={`${ROW_TEXT} text-foreground`}>{rowText(mentionPlainText(queuedRowText(item)))}</span>
+      {feedback && !feedback.hidden ? insertStatus(item.clientUserMessageId) : extra.paused ? (
         // The ❚❚ glyph is the section's (rail / divider); the row just says it.
         <span className={`${ROW_META} ${META_YIELDS} text-warn-text`} title={t("queue.state.paused")} data-testid="queue-item-paused">
           {t("queue.meta.held")}
@@ -261,7 +396,8 @@ export function QueuePanel({
         {onSendNow && (
           <button
             onClick={() => onSendNow(item)}
-            title={t(sendNowStartsTurn ? "queue.sendNowIdleHint" : "queue.sendNowHint")}
+            disabled={locked}
+            title={t(feedback?.hidden && feedback.state === "unknown" ? "queue.insert.unknown" : sendNowStartsTurn ? "queue.sendNowIdleHint" : "queue.sendNowHint")}
             className="rounded-md bg-surface-2 px-2 py-0.5 text-xs hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
             data-testid="queue-send-now"
           >
@@ -270,29 +406,30 @@ export function QueuePanel({
         )}
         <button
           onClick={() => onEdit(item)}
-          disabled={!canEdit}
+          disabled={!canEdit || held}
           title={canEdit ? t("queue.edit") : t("queue.editDraftConflict")}
           aria-label={canEdit ? t("queue.edit") : t("queue.editDraftConflict")}
           className={ICON_BUTTON}
         >
           <Pencil size={12} aria-hidden />
         </button>
-        <button onClick={() => onDelete(item)} title={t("queue.delete")} aria-label={t("queue.delete")} className={ICON_BUTTON_DANGER} data-testid="queue-delete">
+        <button onClick={() => onDelete(item)} disabled={held} title={t("queue.delete")} aria-label={t("queue.delete")} className={ICON_BUTTON_DANGER} data-testid="queue-delete">
           <Trash2 size={12} aria-hidden />
         </button>
       </span>
     </div>
   );
+  };
   // A steer the native has not read yet: the same anatomy, its delivery as meta. With the turn frame
   // (rail column) these rows sit on its grid: an empty rail cell first, the heading glyph in that column.
   const glyphCell = `flex ${ordered ? "-ml-0.5 w-[22px]" : "w-4"} shrink-0 items-center justify-center self-stretch`;
   const steerRow = (p: PendingSteer, meta: React.ReactNode, action?: React.ReactNode, testId?: string) => {
     const row = (
       <div key={p.id} className={QUEUE_ROW} data-testid={ordered ? undefined : testId}>
-        <KindIcon icon={CornerDownRight} label={t("queue.turn.inserting")} />
-        <span className={`${ROW_TEXT} text-muted`}>{rowText(p.text)}</span>
-        {p.imageCount > 0 && <span className="shrink-0 text-[11px] text-subtle">{t("steer.images", { n: p.imageCount })}</span>}
-        {meta}
+        {steerDelivery(p, runtime, imageSteering) === "nextTurn" ? <KindIcon icon={ArrowDownToLine} label={t("queue.meta.nextTurn")} /> : <KindIcon icon={CornerDownRight} label={t("queue.turn.inserting")} />}
+        <span className={`${ROW_TEXT} text-muted`}>{rowText(mentionPlainText(p.text))}</span>
+        <QueuedImages images={messageImages((p.extra ?? []) as { type: string }[])} total={p.imageCount} hostId={hostId} />
+        {insertStatus(p.id) ?? meta}
         {action && <span className={ROW_ACTIONS}>{action}</span>}
       </div>
     );
@@ -306,17 +443,56 @@ export function QueuePanel({
   };
   return (
     <RailStripContext.Provider value={{ enabled: stripEnabled && !!ordered, inside: stripInside }}>
-    <div ref={tray} className={`-mb-3 flex flex-col rounded-t-2xl border border-b-0 border-border bg-surface px-2 pt-1 pb-4 ${SECTION_RULES}`} data-testid="queue-tray" data-collapsed={collapsed || undefined}>
-      <div className="flex h-6 min-w-0 items-center gap-1.5 pr-0.5 pl-1.5 text-[11px] text-subtle" data-testid="queue-header" data-compact={compact || undefined}>
-        {collapsed && chips.length > 1 ? (
-          // Collapsed with several kinds: 「接下来 · 排队 2 · 留言 1 · 委托 3」, the whole label expands.
+    {/* Its own block right above the input box (Composer INPUT_IN_CARD, owner 2026-10-26): same width and edges, the
+        bottom edge is the input box's top border; it never wraps the input box. */}
+    <div
+      ref={tray}
+      className={`${autoFold ? "relative" : ""} flex min-h-0 flex-col rounded-t-inner border border-b-0 border-border bg-surface px-1 pt-0.5 pb-1`}
+      data-queue-tray=""
+      data-testid="queue-tray"
+      data-collapsed={collapsed || undefined}
+      data-auto-retry-explained={ordered && retry?.phase === "pending" && !collapsed && (!autoFold || overlayOpen) ? "" : undefined}
+      data-short-fold={autoFold || undefined}
+      data-overlay={overlayOpen || undefined}
+      // A drag keeps the fold as it was (folded: the overlay stays open) until it ends — a row never turns into or out
+      // of the overlay under the pointer.
+      onDragStartCapture={shortPane.store ? () => setDrag({ folded: autoFold }) : undefined}
+      onKeyDown={overlayOpen ? (e: ReactKeyboardEvent) => {
+        if (e.key !== "Escape" || drag) return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeOverlay(true);
+      } : undefined}
+      // Tab out of the card (or any other way the focus leaves it) closes the overlay.
+      onBlur={overlayOpen ? (e) => {
+        if (!drag && isNode(e.relatedTarget) && !e.currentTarget.contains(e.relatedTarget)) closeOverlay(false);
+      } : undefined}
+    >
+      <div
+        className="relative flex h-6 min-w-0 items-center gap-1.5 pr-0.5 pl-1.5 text-meta text-subtle"
+        data-testid="queue-header"
+        data-compact={compact || undefined}
+        // 「接下来」's own menu: the conversation guide at its 「接下来」 step (lib/panelGuides). Its buttons keep theirs.
+        onContextMenu={(e) => {
+          if (isElement(e.target) && e.target.closest("button:not([data-testid=queue-chips]), a, input")) return;
+          e.preventDefault();
+          openMenuAt(e.clientX, e.clientY, [panelGuideItem({ panel: "conversation", paneId: queuePaneId(e.currentTarget), sessionId: agent ?? null, step: 1 })]);
+        }}
+      >
+        {/* While an owner row is dragged, the line itself is the 「插入当前回合」 drop target (TurnQueue draws it here). */}
+        <span ref={setTargetSlot} className="pointer-events-none absolute inset-0 z-10 [&>*]:pointer-events-auto" data-insert-slot="" />
+        {folded && chips.length > 1 ? (
+          // Collapsed with several kinds: 「接下来 · 排队 2 · 留言 1 · 委托 3」, the whole label expands (folded by the
+          // short pane: opens the overlay).
           <button
-            onClick={() => setCollapsed(false)}
-            title={t("queue.header.expand")}
+            onClick={() => (autoFold ? openOverlay(!overlay) : setCollapsed(false))}
+            title={t(autoFold ? "queue.overlay.foldedHint" : "queue.header.expand")}
+            aria-expanded={autoFold ? overlayOpen : undefined}
+            aria-controls={autoFold ? overlayId : undefined}
             className="-ml-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-md px-1 text-left hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
             data-testid="queue-chips"
           >
-            <span className="shrink-0 font-medium text-muted">{t("queue.header.title")}</span>
+            <span className="shrink-0 font-semibold text-foreground">{t("queue.header.title")}</span>
             {chips.map((chip) => (
               <span key={chip.kind} className="flex shrink-0 items-center gap-1.5">
                 <span aria-hidden className="text-subtle">·</span>
@@ -326,24 +502,39 @@ export function QueuePanel({
           </button>
         ) : (
           <>
-            <span className="font-medium text-muted" title={t("queue.header.titleHint")}>
+            <span className="font-semibold text-foreground" title={t("queue.header.titleHint")}>
               {t("queue.header.title")}
             </span>
             {count > 0 && (
-              <span className="rounded-full bg-surface-2 px-1.5 text-[10px] leading-4 text-muted tabular-nums" data-testid="queue-count">
-                {count}
-              </span>
+              <CountBadge tone="neutral" count={count} data-testid="queue-count" />
             )}
-            {collapsed && chips.length === 1 && chips[0]!.warn && <ChipText chip={chips[0]!} />}
+            {folded && chips.length === 1 && chips[0]!.warn && <ChipText chip={chips[0]!} />}
             <span className="flex-1" />
           </>
         )}
-        {!collapsed && ordered?.actions}
+        <span ref={setActionSlot} className="flex items-center empty:hidden" data-merge-slot="" />
+        {!folded && ordered?.actions}
         {headerResume && (
           <button onClick={onResumePaused} title={t(stopHold ? "paused.resumeHintStop" : "paused.resumeHint")} className="rounded-md px-1.5 py-0.5 text-xs text-warn hover:bg-warn/10 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none" data-testid="queue-header-resume">
             {t("paused.resume")}
           </button>
         )}
+        {autoFold ? (
+          // Folded by the short pane: the chevron opens / closes the overlay (pointing up, where it opens).
+          <button
+            ref={toggle}
+            onClick={() => openOverlay(!overlay)}
+            aria-expanded={overlayOpen}
+            aria-controls={overlayId}
+            aria-label={t(overlayOpen ? "queue.overlay.close" : "queue.overlay.open")}
+            title={t(overlayOpen ? "queue.overlay.close" : "queue.overlay.foldedHint")}
+            className="rounded-md p-0.5 text-subtle hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+            data-testid="queue-collapse"
+            data-short-fold-toggle=""
+          >
+            {overlayOpen ? <ChevronDown size={14} aria-hidden /> : <ChevronUp size={14} aria-hidden />}
+          </button>
+        ) : (
         <button
           onClick={() => setCollapsed(!collapsed)}
           aria-expanded={!collapsed}
@@ -352,10 +543,21 @@ export function QueuePanel({
           className="rounded-md p-0.5 text-subtle hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
           data-testid="queue-collapse"
         >
-          {collapsed ? <ChevronDown size={14} aria-hidden /> : <ChevronUp size={14} aria-hidden />}
+          {collapsed ? <ChevronRight size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
         </button>
+        )}
       </div>
-      {!collapsed && (<>
+      {/* Folded by the short pane: the list is an overlay above the header line (absolute — opening it moves nothing),
+          kept mounted while closed (hidden: no focus, no screen reader) so a drag or a scroll position survives. */}
+      {!collapsed && (<div
+        ref={body}
+        id={overlayId}
+        {...(autoFold ? { role: "dialog", "aria-label": t("queue.header.title"), "aria-hidden": !overlayOpen || undefined, tabIndex: -1 } : {})}
+        className={`flex min-h-0 flex-col ${autoFold ? `absolute right-[-1px] bottom-full left-[-1px] z-20 max-h-[var(--short-pane-overlay-max,240px)] overflow-y-auto overscroll-contain rounded-t-inner border border-b-0 border-border bg-surface px-1 pt-1 shadow-lg outline-none ${overlayOpen ? "" : "pointer-events-none invisible"}` : ""} ${bodyScrolls ? `overflow-y-auto overscroll-contain ${autoFold ? "" : "pb-3.5 [mask-image:linear-gradient(to_bottom,black_calc(100%-14px),transparent)]"}` : ""} ${SECTION_RULES}`}
+        data-queue-body=""
+        data-scrolls={bodyScrolls || undefined}
+        data-testid={autoFold ? "queue-overlay" : undefined}
+      >
       {!ordered && (waiting.length > 0 || sendingSteers.length > 0) && (
         <div className={SECTION} data-queue-section="" data-testid="pending-steers">
           <div className={HEADING}>
@@ -374,13 +576,11 @@ export function QueuePanel({
           {waiting.map((p) =>
             steerRow(
               p,
-              <span className={`${ROW_META} text-subtle`} title={t("queue.deliverNextStep")} data-testid="steer-delivery-note">
-                {t("queue.meta.nextStep")}
-              </span>,
+              <SteerDeliveryNote steer={p} runtime={runtime} imageSteering={imageSteering} />,
             ),
           )}
           {sendingSteers.map((e) => (
-            <OutboxRow key={e.id} entry={e} kind="steer" actions={outbox} />
+            <OutboxRow key={e.id} entry={e} kind="steer" actions={outbox} hostId={hostId} />
           ))}
         </div>
       )}
@@ -394,7 +594,7 @@ export function QueuePanel({
               {clearArmed ? t("paused.clearAgain", { n: paused.count }) : (pausedHint ?? t("paused.title"))}
             </span>
             {!clearArmed && (<>
-            <button onClick={onResumePaused} title={t(stopHold ? "paused.resumeHintStop" : "paused.resumeHint")} className="rounded-md bg-surface-2 px-2 py-0.5 text-xs text-foreground hover:text-accent">
+            <button onClick={onResumePaused} title={t(stopHold ? "paused.resumeHintStop" : "paused.resumeHint")} className={btn({ size: "sm" })}>
               {t("paused.resume")}
             </button>
             <button onClick={onRestorePaused} title={t("paused.restoreHint")} className="rounded-md px-1.5 py-0.5 text-xs text-muted hover:text-foreground">
@@ -429,23 +629,38 @@ export function QueuePanel({
         <TurnQueue
           ordered={ordered}
           waiting={waiting}
+          insertStatus={insertStatus}
           sendingSteers={sendingSteers}
           sendingQueue={sendingQueue}
-          renderOutbox={(e, kind) => <OutboxRow key={e.id} entry={e} kind={kind} actions={outbox} />}
+          renderOutbox={(e, kind) => <OutboxRow key={e.id} entry={e} kind={kind} actions={outbox} hostId={hostId} />}
           onInterruptSendSteers={onInterruptSendSteers}
           heldIds={heldIds}
           paused={{ controls: paused.steers.length === 0, stopHold, onResume: onResumePaused, onRestore: onRestorePaused }}
           itemRow={itemRow}
+          hostId={hostId}
+          runtime={runtime}
+          imageSteering={imageSteering}
+          slots={{ target: targetSlot, actions: actionSlot }}
         />
       )}
       {(rest.length > 0 || (!ordered && sendingQueue.length > 0)) && (
         <div className={SECTION} data-queue-section="">
           {rest.map((item, i) => itemRow(item, running && i === 0 ? { note: t("queue.deliverAfterTurn") } : {}))}
           {sendingQueue.map((e) => (
-            <OutboxRow key={e.id} entry={e} kind="queue" actions={outbox} />
+            <OutboxRow key={e.id} entry={e} kind="queue" actions={outbox} hostId={hostId} />
           ))}
         </div>
       )}
+      {receipts.length > 0 && <div className={SECTION} data-queue-section="" data-testid="queue-insert-receipts">
+        {receipts.map((feedback) => <Fragment key={feedback.item.clientUserMessageId}>
+          <div className={QUEUE_ROW} data-testid="queue-insert-receipt">
+            <KindIcon icon={CornerDownRight} label={t("queue.sendNow")} />
+            <span className={`${ROW_TEXT} text-muted`}>{rowText(mentionPlainText(queuedRowText(feedback.item)))}</span>
+            {insertStatus(feedback.item.clientUserMessageId)}
+          </div>
+          {insertUnsure(feedback) && <QueueInsertUnsureHint feedback={feedback} />}
+        </Fragment>)}
+      </div>}
       {sections.map((section, i) =>
         filled(section) ? (
           // Inside the card: a hairline above, not a box in the box.
@@ -454,8 +669,17 @@ export function QueuePanel({
           </div>
         ) : null,
       )}
-      </>)}
+      </div>)}
     </div>
     </RailStripContext.Provider>
   );
+}
+
+/** The conversation pane a queue header is in: the nearest ancestor's conversation header id. */
+function queuePaneId(el: HTMLElement): string | null {
+  for (let p = el.parentElement; p && p !== el.ownerDocument.body; p = p.parentElement) {
+    const header = p.querySelector("[data-conv-header]");
+    if (header) return header.getAttribute("data-conv-header");
+  }
+  return null;
 }

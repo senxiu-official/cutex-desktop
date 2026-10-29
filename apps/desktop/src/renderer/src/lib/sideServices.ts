@@ -18,18 +18,44 @@ import { dedupeKeyOf, sideRegistry, sideViewNow, specFrom, type SideComponentEnt
 import { STATUS_COMPONENT_PREFIX } from "./sideKinds";
 import {
   applyOpen,
-  closeInstances,
+  chipHolding,
   DEFAULT_ORDER,
   instanceVisible,
   locate,
+  locateChip,
   pinInstance,
   place,
+  restoreCard,
   resolveBinding,
   revealInstance,
+  sameBinding,
+  type SideInstance,
   type SideLayout,
 } from "./sideLayout";
-import { bumpRevealed, closeInstancesIn, flashInstance, setMode, updateLayout, useSide } from "./sideLayoutStore";
+import {
+  adoptIntoConversation,
+  bumpRevealed,
+  closeInConversation,
+  closeInstancesAnywhere,
+  closeInstancesIn,
+  findInConversation,
+  flashInstance,
+  homeConversation,
+  instanceAnywhere,
+  liveConversation,
+  newInstanceIdFor,
+  setMode,
+  uncoverTools,
+  updateLayout,
+  useSide,
+  withLiveShelf,
+} from "./sideLayoutStore";
+import { translate } from "../i18n";
+import { ownerName } from "./hiddenPageNames";
+import { showShelfNotice } from "./shelves";
 import { scopeFor, scopeKey } from "./workspace";
+import { roomForColumn } from "./paneRoom";
+import { scopeHost } from "./paneFile";
 
 type Unavailable = Extract<SideOpenResult, { status: "unavailable" }>["reason"];
 
@@ -61,17 +87,21 @@ export function whyUnavailable(kind: ItemId): Unavailable {
   return "module-off";
 }
 
-/** The default binding of a component filled from the selected agent / its host. */
-function fillBinding(kind: SideBinding["kind"]): SideBinding | null {
+/** The conversation a pane-originated open fills default bindings from (design 017): its Shelf's, not the focused one. */
+type FillFrom = { hostId: string; sessionId: string };
+
+/** The default binding of a component filled from the selected agent / its host (or `from`: the source Shelf's conversation). */
+function fillBinding(kind: SideBinding["kind"], from?: FillFrom): SideBinding | null {
   const s = useApp.getState();
-  const hostId = viewHostId();
+  const hostId = from?.hostId ?? viewHostId();
+  const sessionId = from ? from.sessionId : s.selectedId;
   switch (kind) {
     case "follow":
       return { kind: "follow", hostId };
     case "agent":
-      return s.selectedId ? { kind: "agent", hostId, sessionId: s.selectedId } : null;
+      return sessionId ? { kind: "agent", hostId, sessionId } : null;
     case "workspace": {
-      const scope = scopeFor(selectedSidebar(s), s.selectedId);
+      const scope = scopeFor(from ? sidebarOf(s, hostId) : selectedSidebar(s), sessionId);
       return scope ? { kind: "workspace", hostId, key: scopeKey(scope) } : null;
     }
     case "host":
@@ -108,7 +138,7 @@ export function sideReleaseHold(hold: SideHoldLocator, opts: SideReleaseHoldOpti
 
 function staleScope(): boolean {
   const scope = useSide.getState().scope;
-  return scope !== null && scope !== `host:${activeHostId()}`;
+  return scope !== null && scopeHost(scope) !== activeHostId();
 }
 
 /** The conversation is on screen with its gutters measured and not covered by a maximised / full-screen side. */
@@ -135,8 +165,17 @@ export function sideOpenHeld(kind: ItemId, params: Json = null, opts: SideOpenHe
   return open(kind, params, { ...rest, target: "page", held: hostEpoch === undefined ? {} : { hostEpoch } }, null) as SideOpenHeldResult;
 }
 
+/**
+ * An open from inside another workspace's Shelf, run while that Shelf is the live layout (lib/shelfTarget,
+ * design 017): like sideOpen, default bindings filled from that Shelf's conversation; never a reference card
+ * (the left gutter is the focused conversation's).
+ */
+export function sideOpenAs(from: FillFrom, kind: ItemId, params: Json = null, opts: SideOpenOptions = {}): SideOpenResult {
+  return open(kind, params, { ...opts, ...(opts.target === "peek" ? { target: "page" as const } : {}), fillFrom: from }, null) as SideOpenResult;
+}
+
 /** open() and openHeld() (v1.10: `held` = background open + first hold, no reveal / focus). */
-type OpenOptions = SideOpenOptions & { held?: { hostEpoch?: string } };
+type OpenOptions = SideOpenOptions & { held?: { hostEpoch?: string }; fillFrom?: FillFrom };
 
 function open(kind: ItemId, params: Json, opts: OpenOptions, peek: PeekSetting | null, preference?: PeekSetting): SideOpenResult | SideOpenHeldResult {
   if (staleScope()) return { status: "stale" };
@@ -151,7 +190,7 @@ function open(kind: ItemId, params: Json, opts: OpenOptions, peek: PeekSetting |
     parsed = null;
   }
   if (parsed === null) return { status: "unavailable", reason: "bad-params" };
-  const binding = opts.binding ?? fillBinding(item.defaultBinding);
+  const binding = opts.binding ?? fillBinding(item.defaultBinding, opts.fillFrom);
   if (!binding) return { status: "unavailable", reason: "no-agent" };
   if (lacksFeature(entry, binding)) return { status: "unavailable", reason: "agent-feature" };
   if (opts.held) {
@@ -176,13 +215,26 @@ function open(kind: ItemId, params: Json, opts: OpenOptions, peek: PeekSetting |
     const shown = showPeek({ kind, binding, key, params: parsed, state, v: item.stateVersion ?? 1, hostId: viewHostId(), where, ...(preference === undefined ? {} : { preference }) }, !!opts.focus);
     return { status: "opened", instanceId: shown.id, where: "peek", pageId: null, reused: shown.reused };
   }
+  // An agent's own open for an agent not focused (owner 2026-10-23): that agent's own Shelf — the other workspace's
+  // live Shelf when it is on screen, else its stored one, there when that agent is opened. Never the focused
+  // conversation's, where it would not show.
+  const home = homeConversation(binding);
+  if (home) {
+    if (useSide.getState().peers[home]) return withLiveShelf(home, () => open(kind, params, opts, null, preference));
+    return openInto(home, kind, entry, parsed, binding, key, opts);
+  }
   // links-new-tab: link opens arrive with pin (lib/sideOpen.ts); the rest replace like 替换.
   // A held open never replaces a preview in place (it would drop another tab): it opens pinned.
   const transient = !!item.transient && !opts.pin && !opts.held && getUiPrefs().sidePreview !== "new-tab";
   const spec = specFrom(registry, kind)!;
   const { scope } = useSide.getState();
+  // Already open but collapsed to a chip (§24 step 4): it goes back to its place first, then reveals as usual.
+  const chipped = opts.held ? null : chipHolding(useSide.getState().layout, kind, key, binding);
+  if (chipped) updateLayout((l) => restoreCard(l, chipped.card.id, Date.now(), { roomForColumn: roomForColumn("tool") }));
   let layout = useSide.getState().layout;
-  const decide = () => place(layout, { kind, binding, key, transient, page: opts.page, activePage: layout.activePage, columnOpen: layout.open }, spec, (k) => specFrom(registry, k)?.order ?? DEFAULT_ORDER);
+  // minSize (§24 step 4): no new tool column the work area cannot fit — a tab instead.
+  const roomForNewColumn = roomForColumn("tool");
+  const decide = () => place(layout, { kind, binding, key, transient, page: opts.page, activePage: layout.activePage, columnOpen: layout.open, roomForColumn: roomForNewColumn }, spec, (k) => specFrom(registry, k)?.order ?? DEFAULT_ORDER);
   let decision = decide();
   // Replace guard (v1.11, §18.2): a transient tab whose closing would end something (its component's
   // closeConfirm warns) is not replaced — it is promoted to kept and the new item opens as its own transient tab.
@@ -206,6 +258,7 @@ function open(kind: ItemId, params: Json, opts: OpenOptions, peek: PeekSetting |
   }
   const background = !opts.held && !!opts.background;
   const reveal = opts.held || background ? false : (opts.reveal ?? true);
+  if (reveal) uncoverTools();
   let applied: ReturnType<typeof applyOpen> | null = null;
   updateLayout((current: SideLayout) => {
     applied = applyOpen(current, decision, { kind, binding, key, state, v: item.stateVersion ?? 1, pinned: !!opts.pin || (!!item.transient && !transient) }, Date.now(), { reveal, home: spec.home, keepActive: background });
@@ -232,14 +285,79 @@ function open(kind: ItemId, params: Json, opts: OpenOptions, peek: PeekSetting |
   return { status: "opened", instanceId: done.instanceId, where: "card", pageId: done.pageId, reused: done.reused };
 }
 
+/**
+ * open() into conversation `home`'s own Shelf, not on screen: its pane of that kind (the same item again: that tab),
+ * else a page of its own; a background tab, held like any held open. The owner hears of it (noticeAgentOpen).
+ */
+function openInto(home: string, kind: ItemId, entry: SideComponentEntry, parsed: Json, binding: SideBinding, key: string | null, opts: OpenOptions): SideOpenResult | SideOpenHeldResult {
+  const { scope } = useSide.getState();
+  if (!scope) return { status: "stale" };
+  const item = entry.item;
+  const found = key === null ? null : findInConversation(home, (inst) => inst.kind === kind && inst.key === key && sameBinding(inst.binding, binding));
+  let state: Json;
+  try {
+    state = item.init(parsed, found?.inst.state ?? null);
+  } catch {
+    return { status: "unavailable", reason: "bad-params" };
+  }
+  if (opts.held) {
+    const admitted = admitHold(useSideKeep.getState().holds, scope, found?.id ?? null, item.keepAlive, keepMountedLimit());
+    if (admitted !== "ok") return { status: "unavailable", reason: admitted };
+  }
+  const now = Date.now();
+  const id = found?.id ?? newInstanceIdFor(home);
+  const v = item.stateVersion ?? 1;
+  const inst: SideInstance = found ? { ...found.inst, state, v, lastActiveAt: now } : { kind, binding, key, state, v, pinned: true, lastActiveAt: now };
+  const pageId = adoptIntoConversation(home, id, inst, now);
+  if (pageId === null) return { status: "stale" };
+  if (opts.held) {
+    const hold = takeTicketHold(scope, id, inst, !found);
+    if (!hold) {
+      if (!found) closeInConversation(home, [id]);
+      return { status: "unavailable", reason: "hold-limit" };
+    }
+    noticeAgentOpen(home, binding, item.titleKey, id);
+    return { status: "opened", instanceId: id, pageId, reused: !!found, hold };
+  }
+  noticeAgentOpen(home, binding, item.titleKey, id);
+  return { status: "opened", instanceId: id, where: "card", pageId, reused: !!found };
+}
+
+/** When each conversation's last 「去看看」 notice was shown (one a minute per agent: an agent opening many tabs). */
+const noticedAt = new Map<string, number>();
+
+/**
+ * 「小侦探 打开了浏览器，放在它自己的 Shelf 里 · 去看看」: an agent's open went to its own Shelf, not on screen. 去看看 opens
+ * that agent and shows the tab there.
+ */
+function noticeAgentOpen(home: string, binding: SideBinding, titleKey: Parameters<typeof translate>[0], id: string): void {
+  if (binding.kind !== "agent") return;
+  const now = Date.now();
+  if (now - (noticedAt.get(home) ?? -Infinity) < 60_000) return;
+  noticedAt.set(home, now);
+  const { hostId, sessionId } = binding;
+  const name = ownerName(useApp.getState(), { hostId, sessionId });
+  showShelfNotice(translate("shelf.toast.agentOpened", { name, kind: translate(titleKey) }), {
+    label: translate("shelf.toast.goSee"),
+    run: () =>
+      void Promise.resolve(useApp.getState().select(sessionId, hostId)).then(() => {
+        if (liveConversation() === home) sideReveal({ instanceId: id });
+      }),
+  });
+}
+
 export function sideReveal(target: SideRevealTarget): SideRevealResult {
   if (staleScope()) return { status: "stale" };
   const { layout } = useSide.getState();
   if ("instanceId" in target) {
-    const at = locate(layout, target.instanceId);
+    // A collapsed pane (a chip) holding it comes back first (§24 step 4).
+    const chip = locateChip(layout, target.instanceId);
+    if (chip) updateLayout((l) => restoreCard(l, chip.card.id, Date.now(), { roomForColumn: roomForColumn("tool") }));
+    const at = locate(useSide.getState().layout, target.instanceId);
     if (!at) return { status: "unavailable", reason: "gone" };
     const kind = layout.instances[target.instanceId]!.kind;
     if (!sideRegistry().has(kind)) return { status: "unavailable", reason: whyUnavailable(kind) === "capability" ? "capability" : "module-off" };
+    uncoverTools();
     updateLayout((l) => revealInstance(l, target.instanceId, Date.now()));
     bumpRevealed(target.instanceId);
     flashInstance(target.instanceId);
@@ -275,7 +393,8 @@ export async function closeSideInstances(ids: readonly string[]): Promise<void> 
   const registry = sideRegistry();
   const closing: string[] = [];
   for (const id of ids) {
-    const inst = useSide.getState().layout.instances[id];
+    // The focused Shelf's, or one of the other workspace's live Shelf (§24.13: its tools close there).
+    const inst = instanceAnywhere(id);
     if (!inst) continue;
     const item = registry.get(inst.kind)?.item;
     let ok = true;
@@ -288,16 +407,15 @@ export async function closeSideInstances(ids: readonly string[]): Promise<void> 
     }
     if (ok) closing.push(id);
   }
-  updateLayout((layout) => closeInstances(layout, closing));
+  closeInstancesAnywhere(closing);
 }
 
 /** The one-line warnings of a bulk close (closeConfirm), for a single confirm. */
 export function closeWarnings(ids: readonly string[]): string[] {
   const registry = sideRegistry();
-  const { layout } = useSide.getState();
   const out: string[] = [];
   for (const id of ids) {
-    const inst = layout.instances[id];
+    const inst = instanceAnywhere(id);
     const item = inst && registry.get(inst.kind)?.item;
     if (!inst || !item?.closeConfirm) continue;
     try {

@@ -1,4 +1,7 @@
 export const zhCN = {
+  "profile-import.summary.loading": "正在读取…",
+  "profile-import.summary.error": "读取失败，展开后可重试",
+  "profile-import.summary.count": "{total} 个服务商 · {available} 个可导入",
   "profile-import.title": "从 CC Switch 导入",
   "profile-import.description": "设置 → Profile → 从 CC Switch 导入：把主机上 CC Switch 配置的 Claude Code / Codex 供应商导入为 Profile；CC Switch 只读不改",
   "profile-import.section": "从 CC Switch 导入",
@@ -20,33 +23,11 @@ export const zhCN = {
   "profile-import.created.one": "已导入 {n} 个 Profile：{names}",
   "profile-import.failed": "{n} 个没有导入：",
   "profile-import.failedRow": "{name}：{message}",
+  "profile-import.err.unsupportedVersion": "你的 CC Switch 比这台主机的 cutex 新，升级 cutex 后再导入",
+  "profile-import.err.unsupportedFormat": "读不懂这份 CC Switch 数据（格式不对）",
 };
 
 declare module "../i18nCatalog" {
   interface ModuleMessages extends Messages {}
 }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "profile-import.title": "Import from CC Switch",
-  "profile-import.description": "Settings → Profiles → Import from CC Switch: turn the Claude Code / Codex providers set up in CC Switch on the host into profiles; CC Switch is only read",
-  "profile-import.section": "Import from CC Switch",
-  "profile-import.sectionHint": "Turn the Claude Code and Codex providers set up in CC Switch on this host into profiles.",
-  "profile-import.notFound": "CC Switch was not found on this host",
-  "profile-import.error": "Could not read CC Switch: {message}",
-  "profile-import.empty": "CC Switch has no provider to import yet",
-  "profile-import.reload": "Read again",
-  "profile-import.app.claude": "Claude Code",
-  "profile-import.app.codex": "Codex",
-  "profile-import.current": "Current",
-  "profile-import.existing": "Existing profile: {name}",
-  "profile-import.noKey": "No API key, cannot be imported",
-  "profile-import.unsupported": "Not supported yet",
-  "profile-import.note": "Importing copies the API keys into cutex profiles; CC Switch is only read, never changed.",
-  "profile-import.import": "Import {n}",
-  "profile-import.importing": "Importing…",
-  "profile-import.created": "Imported {n} profiles: {names}",
-  "profile-import.created.one": "Imported {n} profile: {names}",
-  "profile-import.failed": "{n} not imported:",
-  "profile-import.failedRow": "{name}: {message}",
-};

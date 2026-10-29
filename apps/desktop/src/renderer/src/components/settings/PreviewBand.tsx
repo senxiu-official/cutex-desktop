@@ -20,7 +20,7 @@ export function PreviewBand({ note, control, label, inline, alone, collapsible, 
   const open = !collapsible || collapsible.open;
   return (
     <div data-settings-preview role="group" aria-label={label ?? t("settings.preview")} className={`-mx-4 bg-win px-4 pb-3 ${alone ? "-my-1 rounded-xl" : `-mt-px border-t border-border/70 ${inline ? "border-b" : "-mb-1 rounded-b-xl"}`}`} style={DOTS}>
-      <div className={`-mx-4 flex min-h-8 items-center gap-2 bg-win px-4 py-1.5 text-[11px] text-subtle ${open ? "mb-3 border-b border-border/50" : "-mb-3 rounded-b-xl"} ${alone ? "rounded-t-xl" : ""}`}>
+      <div className={`-mx-4 flex min-h-8 items-center gap-2 bg-win px-4 py-1.5 text-caption/[inherit] text-subtle ${open ? "mb-3 border-b border-border/50" : "-mb-3 rounded-b-xl"} ${alone ? "rounded-t-xl" : ""}`}>
         {collapsible ? (
           <button type="button" aria-expanded={open} onClick={collapsible.onToggle} className="inline-flex items-center gap-1.5 font-medium tracking-wider text-muted hover:text-foreground">
             <ChevronRight size={12} aria-hidden className={`transition-transform ${open ? "rotate-90" : ""}`} />

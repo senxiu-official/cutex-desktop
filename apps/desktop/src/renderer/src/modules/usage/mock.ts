@@ -90,14 +90,17 @@ async function ledger({ from, to, groupBy, source }: Parameters<DesktopApi["usag
     const ext = a.source ?? null;
     return !source || (source === "cutex" ? !ext : source === "external" ? !!ext : ext?.id === source);
   });
-  const rows = new Map<string, { key: Record<string, string>; turns: number; requests: number; input: number; cachedInput: number; cacheWriteInput: number; output: number; reasoningOutput: number; total: number; estimatedCost: number; pricedAs?: string[] }>();
+  const rows = new Map<string, { key: Record<string, string>; turns: number; requests: number; input: number; cachedInput: number; cacheWriteInput: number; output: number; reasoningOutput: number; total: number; estimatedCost: number; maxRequestInput: number; pricedAs?: string[] }>();
   const unpriced = new Map<string, { provider: string | null; model: string; requests: number; tokens: number; pricedAs?: string }>();
   const allPricedAs = new Set<string>();
   days.forEach((day, di) => {
     agents.forEach((a, ai) => {
       const seed = (di * 7 + ai * 13) % 11;
       if (seed < 3) return;
-      const input = seed * 41_000 + ai * 9_000;
+      // Wave-Director runs away (用量 「每步上下文」): many steps per turn, each carrying a ~320k context.
+      const heavy = a.agent === "wave";
+      const steps = heavy ? seed * 40 : seed * 4;
+      const input = heavy ? steps * 320_000 : seed * 41_000 + ai * 9_000;
       const output = Math.round(input * 0.12);
       const key: Record<string, string> = {};
       for (const g of groupBy) {
@@ -112,9 +115,10 @@ async function ledger({ from, to, groupBy, source }: Parameters<DesktopApi["usag
         }
       }
       const id = JSON.stringify(key);
-      const row = rows.get(id) ?? { key, turns: 0, requests: 0, input: 0, cachedInput: 0, cacheWriteInput: 0, output: 0, reasoningOutput: 0, total: 0, estimatedCost: 0 };
+      const row = rows.get(id) ?? { key, turns: 0, requests: 0, input: 0, cachedInput: 0, cacheWriteInput: 0, output: 0, reasoningOutput: 0, total: 0, estimatedCost: 0, maxRequestInput: 0 };
       row.turns += seed;
-      row.requests += seed * 4;
+      row.requests += steps;
+      row.maxRequestInput = Math.max(row.maxRequestInput, heavy ? 362_000 : Math.round((input / steps) * 1.5));
       row.input += input;
       row.cachedInput += Math.round(input * 0.6);
       row.output += output;
@@ -139,7 +143,7 @@ async function ledger({ from, to, groupBy, source }: Parameters<DesktopApi["usag
   const sum = (k: "turns" | "requests" | "input" | "cachedInput" | "cacheWriteInput" | "output" | "reasoningOutput" | "total" | "estimatedCost") => list.reduce((a, r) => a + r[k], 0);
   return {
     from, to, groupBy, currency: world.currency, pricing: pricing(world.currency), recordingSince: world.since ?? "2026-09-20T08:00:00Z", warnings: [],
-    totals: { turns: sum("turns"), requests: sum("requests"), input: sum("input"), cachedInput: sum("cachedInput"), cacheWriteInput: 0, output: sum("output"), reasoningOutput: sum("reasoningOutput"), total: sum("total"), estimatedCost: sum("estimatedCost"), apiEquivalentUsd: sum("estimatedCost") / world.factor, ...(allPricedAs.size ? { pricedAs: [...allPricedAs].sort() } : {}) },
+    totals: { turns: sum("turns"), requests: sum("requests"), input: sum("input"), cachedInput: sum("cachedInput"), cacheWriteInput: 0, output: sum("output"), reasoningOutput: sum("reasoningOutput"), total: sum("total"), estimatedCost: sum("estimatedCost"), maxRequestInput: Math.max(0, ...list.map((r) => r.maxRequestInput)), apiEquivalentUsd: sum("estimatedCost") / world.factor, ...(allPricedAs.size ? { pricedAs: [...allPricedAs].sort() } : {}) },
     rows: list,
     unpricedModels: [...unpriced.values()],
   } as never;

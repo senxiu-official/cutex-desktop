@@ -22,7 +22,7 @@ function scenario(): string {
 const INDEX_PACKS: NonNullable<ModulePacksView["index"]>["packs"] = [
   { id: "claude-science", version: "1.1.0", moduleApi: "^1.16", compat: "ok", size: 22746, title: { en: "Claude Science", "zh-CN": "Claude Science" } },
   { id: "claude-science", version: "1.0.1", moduleApi: "^1.16", compat: "ok", size: 22701, title: { en: "Claude Science", "zh-CN": "Claude Science" } },
-  { id: "claude-science", version: "2.0.0", moduleApi: "^1.20", compat: "needsNewerApp", size: 23950, title: { en: "Claude Science", "zh-CN": "Claude Science" } },
+  { id: "claude-science", version: "2.0.0", moduleApi: "^1.21", compat: "needsNewerApp", size: 23950, title: { en: "Claude Science", "zh-CN": "Claude Science" } },
   {
     id: "lab-notes",
     version: "0.3.0",

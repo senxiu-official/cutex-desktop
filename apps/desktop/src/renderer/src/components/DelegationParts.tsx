@@ -22,7 +22,13 @@ export function DelegationGlyph({ glyph, tone, size = 12 }: { glyph: StatusGlyph
       {glyph === "pulse" && <circle cx="8" cy="8" r="5" fill="currentColor" stroke="none" />}
       {glyph === "check" && <path d="m3.5 8.5 3 3 6-7" />}
       {glyph === "cross" && <path d="m4.5 4.5 7 7m0-7-7 7" />}
-      {glyph === "ring" && <circle cx="8" cy="8" r="5" strokeDasharray="3 2.2" />}
+      {/* Stopped (owner 2026-10-23: the dashed ring read as a spinner): a circle with a stop square, static. */}
+      {glyph === "ring" && (
+        <>
+          <circle cx="8" cy="8" r="5.5" />
+          <rect x="6" y="6" width="4" height="4" rx="0.5" fill="currentColor" stroke="none" />
+        </>
+      )}
     </svg>
   );
 }
@@ -45,14 +51,13 @@ export function DelegationStatusMark({ status, name, trailing, error, className 
   );
 }
 
-/** "#N" of a delegation; with `onJump` a link (to the card). */
+/** "#N" of a delegation; with `onJump` a link (to the card). Design 040 §2: accent text, not a chip. */
 export function DelegationTag({ askId, onJump }: { askId: string; onJump?: () => void }) {
   const tag = taskTag(askId);
-  const className = "shrink-0 rounded px-1 font-mono text-[11px] font-semibold";
-  const style = { color: tag.color, background: `${tag.color}1f` };
+  const className = "shrink-0 font-medium text-accent tabular-nums";
   if (!onJump)
     return (
-      <span className={className} style={style} title={askId}>
+      <span className={className} title={askId} data-delegation-tag="">
         {tag.label}
       </span>
     );
@@ -63,7 +68,7 @@ export function DelegationTag({ askId, onJump }: { askId: string; onJump?: () =>
       onClick={(e) => (e.stopPropagation(), onJump())}
       onKeyDown={(e) => e.key === "Enter" && (e.stopPropagation(), onJump())}
       className={`${className} cursor-pointer hover:underline`}
-      style={style}
+      data-delegation-tag=""
       title={askId}
     >
       {tag.label}
@@ -76,7 +81,7 @@ export function DelegationHops({ hops }: { hops: number | null | undefined }) {
   const { t } = useI18n();
   if (!hops || hops < 2) return null;
   return (
-    <span className="shrink-0 text-[10px] text-subtle tabular-nums" title={t("delegation.peer.hopsTitle", { n: hops })} data-testid="delegation-hops">
+    <span className="shrink-0 text-caption/[inherit] text-subtle tabular-nums" title={t("delegation.peer.hopsTitle", { n: hops })} data-testid="delegation-hops">
       {t("delegation.peer.hops", { n: hops })}
     </span>
   );

@@ -83,9 +83,10 @@ export function revealStatusItem(scope: RevealScope, itemId: string, intent: Rev
 
 /**
  * An agent's timeline for status items. The timeline is mutated in place, so this also subscribes
- * to its `version` (every change re-renders the caller).
+ * to its `version` — minus the bumps that only streamed reply / reasoning text (`textVersion`): no
+ * status item reads that text, so the capsule and the status row do not re-render per delta (#18).
  */
 export function useSessionTimeline(sessionId: string): TimelineState | null {
-  useConvView(sessionId, (v) => v?.version ?? 0);
+  useConvView(sessionId, (v) => (v ? v.version - (v.textVersion ?? 0) : 0));
   return useConvView(sessionId, (v) => v?.timeline ?? null);
 }

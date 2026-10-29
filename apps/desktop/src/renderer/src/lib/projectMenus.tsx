@@ -37,7 +37,8 @@ import { projectMuted, projectMuteSupported, toggleProjectMuted } from "./notifi
 import type { AgentRow, SidebarGroup } from "./sidebar";
 import { openAgentList } from "./agentListDialog";
 import { moveToSectionEntry } from "./sectionMenus";
-import { customizeSidebarItem } from "./customizeMenu";
+import { sidebarMenuTail } from "./customizeMenu";
+import { stopIdleAvailable, stopIdleMenuEntries } from "./stopIdle";
 import { markSeenOn, turnMarksOn } from "./turnUnread";
 import { runLimited, START_CONCURRENCY } from "./agentList";
 import { captureHostAction } from "./hostSwitch";
@@ -46,6 +47,7 @@ import { OPTIONAL_DIRECTOR_FEATURE } from "./projectCreate";
 import { rotationRunningOn } from "./rotationProbe";
 import { projectTabsNow } from "./projectTabsView";
 import { isOwnerFeatures } from "../../../shared/users";
+import { projectMenuExtras } from "./projectMenuExtras";
 
 type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
 const ICON = 14;
@@ -168,15 +170,22 @@ export function projectMenu(group: SidebarGroup, workspaceRoot: string | null, c
       icon: <Plus size={ICON} />,
       onSelect: () => app.openPage("agent-config.newAgent", project ? { project: group.id, host } : { host }),
     },
+    // Modules' rows for the project (lib/projectMenuExtras, e.g. 钉到托盘).
+    ...(project ? projectMenuExtras({ hostId: host, projectId: group.id, name }) : []),
     "separator",
     // ── bulk ──
     marked.length > 0 && { label: t("menu.markProjectRead", { count: marked.length }), icon: <MailCheck size={ICON} />, onSelect: () => marked.forEach((r) => markSeenOn(host, r.id)) },
-    owner && idle.length > 0 && {
-      label: t("menu.stopIdle", { count: idle.length }),
-      icon: <Power size={ICON} />,
-      confirm: t("menu.stopIdleConfirm", { project: name, count: idle.length }),
-      onSelect: () => void stopIdle(idle, name, host, t).catch(report),
-    },
+    // Design 031: cutex decides who is idle (stop-idle-agents); older cutex keeps the desktop's own list.
+    ...(stopIdleAvailable(host)
+      ? stopIdleMenuEntries(project ? { hostId: host, projectId: group.id, label: name } : { hostId: host, independent: true, label: name }, t, <Power size={ICON} />)
+      : [
+          owner && idle.length > 0 && {
+            label: t("menu.stopIdle", { count: idle.length }),
+            icon: <Power size={ICON} />,
+            confirm: t("menu.stopIdleConfirm", { project: name, count: idle.length }),
+            onSelect: () => void stopIdle(idle, name, host, t).catch(report),
+          },
+        ]),
     "separator",
     // ── display (this device) ──
     toggle && { label: collapsed ? t("menu.expand") : t("menu.collapse"), icon: collapsed ? <ChevronsUpDown size={ICON} /> : <ChevronsDownUp size={ICON} />, onSelect: toggle },
@@ -237,6 +246,6 @@ export function projectMenu(group: SidebarGroup, workspaceRoot: string | null, c
       onSelect: () => void clearProjectDirector(group.id, host, t),
     },
     "separator",
-    customizeSidebarItem(t),
+    ...sidebarMenuTail(t),
   ];
 }

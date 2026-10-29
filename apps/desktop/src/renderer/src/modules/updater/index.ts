@@ -1,9 +1,12 @@
 // Desktop updates: Settings → 更新与诊断, its own page in 系统 right above 关于 (owner 2026-10-10; was
 // a section of 通用). The nav dot shows when an update is ready.
 import { RefreshCw } from "lucide-react";
-import { UpdatesPage } from "../../components/settings/AppSettings";
 import { updateButtonVisible, useUpdateStatus } from "../../lib/update";
 import { defineModule } from "../slots";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const UpdatesPage = lazyPage(() => import("../../components/settings/AppSettings").then((m) => m.UpdatesPage));
 
 function useUpdateBadge() {
   return updateButtonVisible(useUpdateStatus()) ? { dot: true } : null;

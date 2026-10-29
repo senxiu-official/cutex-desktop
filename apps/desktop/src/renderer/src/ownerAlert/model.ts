@@ -1,5 +1,6 @@
 // Pure parts of the big alert page (strings, time label, chime) — unit-tested.
 import type { OwnerNotifyLevel } from "@cutex-desktop/protocol";
+import { isTraditionalLocale, localeFallbacks } from "../../../shared/locales";
 import type { OwnerAlertItem, OwnerAlertLocale } from "../../../shared/ownerAlert";
 
 export interface AlertStrings {
@@ -22,7 +23,8 @@ export interface AlertStrings {
   minutesAgo: string;
 }
 
-const STRINGS: Record<OwnerAlertLocale, AlertStrings> = {
+// Base locales; zh-Hant-TW / HK / MO resolve through alertStrings (the zh-Hant-CN text already uses Taiwan words).
+const STRINGS: Partial<Record<OwnerAlertLocale, AlertStrings>> & Record<"zh-CN" | "zh-Hant-CN" | "en", AlertStrings> = {
   "zh-CN": {
     title: "给你的消息",
     level: { info: "告知", attention: "需要你", urgent: "紧急" },
@@ -254,7 +256,8 @@ const STRINGS: Record<OwnerAlertLocale, AlertStrings> = {
 };
 
 export function alertStrings(locale: OwnerAlertLocale): AlertStrings {
-  return STRINGS[locale] ?? STRINGS["zh-CN"];
+  for (const l of localeFallbacks(locale)) if (STRINGS[l]) return STRINGS[l]!;
+  return isTraditionalLocale(locale) ? STRINGS["zh-Hant-CN"] : STRINGS["zh-CN"];
 }
 
 /** "刚刚" / "5 分钟前" within the hour, else the local time (HH:MM, with the date when not today). */

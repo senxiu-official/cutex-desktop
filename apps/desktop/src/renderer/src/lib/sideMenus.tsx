@@ -1,7 +1,8 @@
 // Right-side menus (docs/desktop-modules.md §18.7): tab, card and page menus, the title bar's ＋ and
 // the launcher lists. The menu way to every user override (移到页 / 移到新页面 / 拆到新卡片 / 合并到 /
-// 恢复默认位置 / 重置右栏布局) — drag and drop (P1b) runs the same reducers. Shell code: no feature names.
-import { ArrowDown, ArrowRight, ArrowUp, Bot, ChevronDown, Combine, Expand, Layers, Maximize2, Pencil, Pin, PinOff, Plus, RotateCcw, Split, X } from "lucide-react";
+// 恢复默认位置 / 重置 Shelf 布局) — drag and drop (P1b) runs the same reducers. Shell code: no feature names.
+import { cardCloseForetell, cardMoveForetell } from "./menuForetells";
+import { ArrowDown, ArrowRight, ArrowUp, Bot, ChevronDown, Columns2, Combine, Expand, Layers, Maximize2, Pencil, Pin, PinOff, Plus, RotateCcw, Split, X } from "lucide-react";
 import { translate } from "../i18n";
 import type { ItemId, Json } from "../modules/types";
 import type { SideComponentItem } from "../modules/slots";
@@ -33,23 +34,30 @@ import { newInstanceKey, newInstanceOpts, PLAIN_OPEN, type OpenModifiers } from 
 import { sideRegistry, sideViewNow, specFrom } from "./sideComponents";
 import {
   activateTab,
+  cardHolds,
   DEFAULT_ORDER,
   findCard,
   findPage,
   instanceVisible,
   lanePages,
   locate,
+  MAX_CARDS,
+  MAX_SHELF_PAGES,
   mergePages,
   moveCard,
   moveInstance,
   movePage,
+  moveToNewPage,
   pageInView,
+  pagesOfShelf,
   pinInstance,
   renamePage,
   resetLayout,
   restoreDefault,
   restoreKindDefault,
   setCollapsed,
+  shelfLanePages,
+  shelfOfPage,
   shownTab,
   splitInstance,
   switchPage,
@@ -58,7 +66,13 @@ import {
   type MoveTarget,
   type SidePage,
 } from "./sideLayout";
-import { setFocusedCard, setMode, updateLayout, useSide } from "./sideLayoutStore";
+import { liveConversation, setFocusedCard, setMode, updateLayout, useSide } from "./sideLayoutStore";
+import { canGrow, toggleGrow, useGrow } from "./panelGrow";
+
+const paneGrown = (cardId: string): boolean => {
+  const t = useGrow.getState().target;
+  return t?.kind === "shelf" && t.card === cardId;
+};
 import { agentHost, useApp } from "../store";
 import { entryGateNow } from "./hostGatingView";
 import { refActionEntries } from "./refActions";
@@ -92,6 +106,8 @@ export interface Launchable {
   pin: LauncherPinDefault;
   /** `instances: "multi"`: offers 「新…」 / Ctrl/⌘-click. */
   multi: boolean;
+  /** Optional module-declared section for the empty Shelf. */
+  category?: "content" | "tool";
   /** Status categories (`status:<id>`, §18.9) come after the tool kinds. */
   group: LauncherGroup;
 }
@@ -116,7 +132,8 @@ export function launchable(): Launchable[] {
     const params = safeParams(() => launcher.params());
     if (params === null) continue;
     const Icon = entry.item.icon;
-    out.push({ kind, label: translate(entry.item.titleKey), icon: <Icon size={ICON} />, Icon, params, order: launcher.order, pin: launcher.pin, multi: entry.item.instances === "multi", group: kind.startsWith(STATUS_COMPONENT_PREFIX) ? "status" : "tool" });
+    out.push({ kind, label: translate(entry.item.titleKey), icon: <Icon size={ICON} />, Icon, params, order: launcher.order, pin: launcher.pin, multi: entry.item.instances === "multi", category: launcher.category,
+      group: kind.startsWith(STATUS_COMPONENT_PREFIX) ? "status" : "tool" });
   }
   return sortLaunchers(out);
 }
@@ -206,7 +223,8 @@ export function pressLauncher(kind: ItemId, mods: OpenModifiers = PLAIN_OPEN): v
     page: page?.id ?? null,
     card: card ? { id: card.id, collapsed: card.collapsed } : null,
     elsewhere: card ? null : instanceElsewhere(page, kind),
-    setting: getUiPrefs().sideCurrentPageClick,
+    // 点击当前页图标 is no longer a setting (design 006 v1 Q5): the page in view stays (as the Rail, 10-22).
+    setting: "stay",
   });
   if (action.kind === "reveal") {
     // Maximised / full screen: the mode follows the page (as a page-button switch does).
@@ -315,14 +333,14 @@ export function launcherMenu(): MenuEntry[] {
     ...fresh.map((i) => ({ label: newLabel(i.label), icon: <Plus size={ICON} />, hint: newHint(), onSelect: () => pressLauncher(i.kind, NEW_SHOWN) })),
     { label: translate("side.agents"), icon: <Bot size={ICON} />, onSelect: () => {}, submenu: agentsSubmenu() },
     "separator",
-    { label: translate("side.newPage"), icon: <Layers size={ICON} />, hint: "Ctrl+Shift+N", onSelect: newPage },
+    { label: translate("side.newPage"), icon: <Layers size={ICON} />, hint: "Ctrl+Shift+N", onSelect: () => void newPage() },
     page && {
       label: translate("side.thisPage"),
       icon: <Layers size={ICON} />,
       onSelect: () => {},
       submenu: [
-        !emptyPage && { label: translate(pageMode === "maximised" ? "side.restore" : "side.maximise"), icon: <Maximize2 size={ICON} />, hint: "Ctrl+Shift+M", onSelect: () => toggleMode("maximised", null) },
-        !emptyPage && { label: translate(pageMode === "fullscreen" ? "side.restore" : "side.fullscreen"), icon: <Expand size={ICON} />, hint: "Shift+F11", onSelect: () => toggleMode("fullscreen", null) },
+        !emptyPage && { label: translate(pageMode === "maximised" ? "panel.exclusiveOff" : "panel.exclusive"), icon: <Maximize2 size={ICON} />, title: translate("panel.exclusiveHint"), onSelect: () => toggleMode("maximised", null) },
+        !emptyPage && { label: translate(pageMode === "fullscreen" ? "side.restore" : "side.fullscreen"), icon: <Expand size={ICON} />, hint: "F11", onSelect: () => toggleMode("fullscreen", null) },
         pin && { label: translate(pinnedFromFloatNow() ? "side.unpin" : "side.pin"), icon: <Pin size={ICON} />, onSelect: togglePin },
         "separator",
         ...pageMenu(page.id).slice(1),
@@ -439,12 +457,41 @@ export function cardMenu(cardId: string): MenuEntry[] {
       icon: <ChevronDown size={ICON} />,
       onSelect: () => updateLayout((l) => setCollapsed(l, cardId, !at.card.collapsed)),
     },
-    { label: translate(inMode("maximised") ? "side.restore" : "side.maximise"), icon: <Maximize2 size={ICON} />, hint: "Ctrl+Shift+M", onSelect: () => toggleMode("maximised", cardId) },
-    { label: translate(inMode("fullscreen") ? "side.restore" : "side.fullscreen"), icon: <Expand size={ICON} />, hint: "Shift+F11", onSelect: () => toggleMode("fullscreen", cardId) },
+    // 最大化 (rule 2): its Shelf takes every gap of the row, it fills its page; 独占: the former 最大化 (§24.16).
+    { label: translate(paneGrown(cardId) ? "side.restore" : "side.maximise"), icon: <Maximize2 size={ICON} />, hint: "Ctrl+Shift+M", disabled: !paneGrown(cardId) && !canGrow({ kind: "shelf", conv: liveConversation(), shelfId: at.page.shelf ?? "", card: cardId }), title: translate("panel.maxNoGap"), onSelect: () => void toggleGrow({ kind: "shelf", conv: liveConversation(), shelfId: at.page.shelf ?? "", card: cardId }) },
+    { label: translate(inMode("maximised") ? "panel.exclusiveOff" : "panel.exclusive"), icon: <Columns2 size={ICON} />, title: translate("panel.exclusiveHint"), onSelect: () => toggleMode("maximised", cardId) },
+    { label: translate(inMode("fullscreen") ? "side.restore" : "side.fullscreen"), icon: <Expand size={ICON} />, hint: "F11", onSelect: () => toggleMode("fullscreen", cardId) },
     // The shown tab's `ref.action` items (§19.8), as in its tab menu.
     ...shownRefActions(at.card),
     "separator",
-    { label: translate("side.closeCard"), icon: <X size={ICON} />, danger: true, armed: armedClose(cardCloseWarnings(cardId)), onSelect: () => closeCard(cardId) },
+    { label: translate("side.closeCard"), icon: <X size={ICON} />, danger: true, armed: armedClose(cardCloseWarnings(cardId)), foretell: () => cardCloseForetell(cardId), onSelect: () => closeCard(cardId) },
+  ];
+}
+
+/**
+ * #7 (owner 2026-10-21): a tool pane header's 「—」 — no tray any more: 移到另一页 ▸ (the other pages of its
+ * Shelf; 新的一页 when the pane does not have its page to itself, below MAX_SHELF_PAGES) and 关闭 (confirmed in
+ * place when closing would end something, like ×).
+ */
+export function paneDashMenu(cardId: string): MenuEntry[] {
+  const { layout } = useSide.getState();
+  const at = findCard(layout, cardId);
+  if (!at) return [];
+  const shelf = shelfOfPage(layout, at.page.id)?.id ?? null;
+  const others = shelf ? shelfLanePages(layout, shelf, sideViewNow()).filter((p) => p.id !== at.page.id) : [];
+  // A page with 3 panes and none of this kind would merge panes into tabs: not offered.
+  const full = (p: SidePage) => p.cards.length >= MAX_CARDS && !p.cards.some((c) => cardHolds(layout, c, at.card.kind));
+  const roomForPage = !!shelf && pagesOfShelf(layout, shelf).length < MAX_SHELF_PAGES;
+  const allowNew = roomForPage && (at.page.cards.length > 1 || !!at.page.kept);
+  const move: MenuEntry[] = [
+    ...others.map((p) => ({ label: pageLabel(p), icon: <Layers size={ICON} />, disabled: full(p), foretell: () => cardMoveForetell(cardId, pageLabel(p)), onSelect: () => updateLayout((l) => moveCard(l, cardId, { page: p.id }, Date.now(), orderOf)) })),
+    allowNew && others.length > 0 && "separator",
+    allowNew && { label: translate("pane.newPageItem"), icon: <Plus size={ICON} />, foretell: () => cardMoveForetell(cardId, null), onSelect: () => updateLayout((l) => moveToNewPage(l, { card: cardId }, shelf!, Date.now())) },
+  ];
+  return [
+    { label: translate("pane.moveToOtherPage"), icon: <ArrowRight size={ICON} />, disabled: !move.some(Boolean), onSelect: () => {}, submenu: move },
+    "separator",
+    { label: translate("side.close"), icon: <X size={ICON} />, danger: true, armed: armedClose(cardCloseWarnings(cardId)), onSelect: () => closeCard(cardId) },
   ];
 }
 
@@ -458,7 +505,7 @@ export function pageMenu(pageId: string): MenuEntry[] {
   const launcher = !page.cards.length;
   return [
     title(pageLabel(page)),
-    { label: translate("side.newPage"), icon: <Plus size={ICON} />, hint: "Ctrl+Shift+N", onSelect: newPage },
+    { label: translate("side.newPage"), icon: <Plus size={ICON} />, hint: "Ctrl+Shift+N", onSelect: () => void newPage() },
     "separator",
     !launcher && {
       label: translate("side.mergeInto"),
@@ -484,7 +531,7 @@ export function pageMenu(pageId: string): MenuEntry[] {
   ];
 }
 
-/** 重置右栏布局 (page menu, settings card): nothing is closed. */
+/** 重置 Shelf 布局 (page menu, settings card): nothing is closed. */
 export function resetSideLayout(): void {
   updateLayout((l) => resetLayout(l, specOf, Date.now()));
   // a notice, so a reset that changes little still says what it did

@@ -2,6 +2,7 @@ import type { CutexClient } from "@cutex-desktop/cutex-client";
 import type { BrowserAgentView, BrowserIdempotencyClearResult, BrowserImage, BrowserToolItem, BrowserTurnShot } from "../../shared/browser";
 import { browserScreenshotDimensions } from "./capture";
 import type { BrowserImageDecoder } from "./modelOutput";
+import { MAX_EVENT_MEDIA_BYTES, parseCutexBlobRef, parseMediaBlob } from "../../shared/mediaBlobs";
 import { BrowserRelayError, RELAY_CODES, type RelayErrorCode } from "./relayTypes";
 
 const ID = /^[A-Za-z0-9._:-]{1,200}$/;
@@ -15,7 +16,7 @@ function browserItem(item: Record<string, unknown>): boolean {
     && ((item.type === "mcpToolCall" && item.server === "cutex")
       || (item.type === "dynamicToolCall" && (item.namespace === "claude" || item.namespace === "cutex")));
 }
-export interface BrowserOwnerApiOptions { client: Pick<CutexClient, "fetchRaw" | "headers" | "url">; check(): void; decodeImage: BrowserImageDecoder }
+export interface BrowserOwnerApiOptions { client: Pick<CutexClient, "fetchRaw" | "headers" | "url"> & Partial<Pick<CutexClient, "eventBlob">>; check(): void; decodeImage: BrowserImageDecoder }
 /** Fixed owner surface; never accepts a renderer route, method, headers or filesystem path. */
 export function createBrowserOwnerApi(options: BrowserOwnerApiOptions) {
   async function request(route: string, max = 64 * 1024, patch?: Record<string, unknown>, method: "PATCH" | "POST" = "PATCH"): Promise<unknown> {
@@ -59,7 +60,22 @@ export function createBrowserOwnerApi(options: BrowserOwnerApiOptions) {
     } catch { throw invalid(); }
     return { mimeType: value.mimeType, data: value.data };
   }
-  function validateItem(item: Record<string, unknown>): void {
+  async function validateBlob(value: unknown, sessionId: string, mimeType?: unknown): Promise<void> {
+    const blob = parseMediaBlob(value), ref = blob && parseCutexBlobRef(blob.url);
+    if (!blob || !ref || ref.sessionId !== sessionId || !["image/png", "image/jpeg"].includes(blob.mime)
+      || (mimeType !== undefined && mimeType !== blob.mime) || blob.size > Math.min(MAX_EVENT_MEDIA_BYTES, 6 * 1024 * 1024)
+      || !options.client.eventBlob) throw invalid();
+    options.check();
+    let media;
+    try { media = await options.client.eventBlob(sessionId, ref.sha256, { mime: blob.mime, size: blob.size }); }
+    catch { options.check(); throw invalid(); }
+    options.check();
+    if (!media || !(media.bytes instanceof Uint8Array) || media.mime !== blob.mime || media.size !== blob.size || media.bytes.byteLength !== blob.size) throw invalid();
+    // Bounded main-only conversion reuses the existing framing/dimension/native decode checks.
+    // The original descriptor remains in the returned item; these bytes never enter renderer JSON.
+    validateImage({ mimeType: blob.mime, data: Buffer.from(media.bytes).toString("base64") });
+  }
+  async function validateItem(item: Record<string, unknown>, sessionId: string): Promise<void> {
     if (!browserItem(item) || item.truncated === true) throw invalid();
     const content = item.type === "mcpToolCall" ? (object(item.result) ? item.result.content : undefined) : item.contentItems;
     if (content !== undefined && content !== null) {
@@ -70,15 +86,23 @@ export function createBrowserOwnerApi(options: BrowserOwnerApiOptions) {
       }
     }
     let nodes = 0, images = 0;
-    function check(value: unknown, depth: number): void {
+    const blobs: { value: unknown; mimeType?: unknown }[] = [];
+    function check(value: unknown, depth: number, allowBlob = false): void {
       if (++nodes > 20_000 || depth > 24) throw invalid();
       if (Array.isArray(value)) { for (const child of value) check(child, depth + 1); }
       else if (object(value)) {
-        if (value.type === "imageNotLoaded") throw invalid();
+        if (value.type === "imageNotLoaded" || (value.type === "cutexBlob" && !allowBlob)) throw invalid();
+        let blobField: string | undefined;
         if (value.type === "image" || value.type === "inputImage") {
           if (++images > 1) throw invalid();
-          if (value.type === "image") validateImage(value);
-          else {
+          if (value.type === "image") {
+            if (object(value.data)) {
+              if (value.mimeType !== "image/png" && value.mimeType !== "image/jpeg") throw invalid();
+              blobs.push({ value: value.data, mimeType: value.mimeType }); blobField = "data";
+            } else validateImage(value);
+          } else if (object(value.imageUrl)) {
+            blobs.push({ value: value.imageUrl }); blobField = "imageUrl";
+          } else {
             // Claude dynamic items use a data URL; never fetch an external image or local path.
             if (typeof value.imageUrl !== "string" || value.imageUrl.length > 6 * 1024 * 1024 + 32) throw invalid();
             const match = /^data:(image\/(?:png|jpeg));base64,/.exec(value.imageUrl);
@@ -86,10 +110,11 @@ export function createBrowserOwnerApi(options: BrowserOwnerApiOptions) {
             validateImage({ mimeType: match[1], data: value.imageUrl.slice(match[0].length) });
           }
         }
-        for (const child of Object.values(value)) check(child, depth + 1);
+        for (const [key, child] of Object.entries(value)) check(child, depth + 1, key === blobField);
       }
     }
     check(item, 0);
+    for (const blob of blobs) await validateBlob(blob.value, sessionId, blob.mimeType);
   }
   const query = (fields: Record<string, string>) => { for (const value of Object.values(fields)) if (!ID.test(value)) throw new BrowserRelayError("invalid_request"); return new URLSearchParams(fields).toString(); };
   return {
@@ -143,7 +168,7 @@ export function createBrowserOwnerApi(options: BrowserOwnerApiOptions) {
       if (!object(value) || Object.keys(value).length !== 1 || !object(value.item) || value.item.id !== itemId
         || (value.item.turnId !== undefined && value.item.turnId !== turnId)) throw invalid();
       // Independently enforce the daemon's narrow identity and full-image boundary in main.
-      validateItem(value.item); options.check(); return { item: value.item };
+      await validateItem(value.item, sessionId); options.check(); return { item: value.item };
     },
   };
 }

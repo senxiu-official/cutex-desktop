@@ -1,107 +1,121 @@
-// What a drag on the right side shows (RFC right-panel-rfc-20261009 §3.7): a shield over the window
-// (cursor; nothing under it reacts or swallows events), the ghost that follows the pointer (a card /
-// tab = icon + name, a page = a small pill), the insertion line, the label beside the target, the
-// left-edge "新页" band, the lane's "新页" ghost, the outline of a column, and the overlay outside the
-// side. Fixed layers driven by lib/sideDnd; nothing here takes pointer events except the shield.
-import { Plus } from "lucide-react";
+// What a pane drag shows (docs/desktop-modules.md §24 step 4): a shield over the window (cursor; nothing
+// under it reacts or swallows events), the ghost that follows the pointer (icon + name), the zone the drop
+// takes — half of a pane, its header, a column, the work area's edge band — lit up with a label saying
+// what the drop does, and a label by the pointer when the drop is refused. Fixed layers driven by
+// lib/sideDnd; nothing here takes pointer events except the shield.
+// The zone is where the dragged pane lands after the drop and the dashed boxes where the panes it moves end up
+// (lib/dropForecast, owner 2026-10-23); 拖放落点预览 (Settings → 外观) draws the zone as an outline (default) or
+// an outline over a tint.
+import type { CSSProperties } from "react";
+import { MessageSquare } from "lucide-react";
 import { useI18n } from "../../i18n";
-import { useSideRegistry } from "../../lib/sideComponents";
 import { useSideDnd } from "../../lib/sideDnd";
-import { SideDropOutside } from "./SideDropOutside";
+import { useOverlayHoles } from "../../lib/overlayHoles";
+import { DROP_TINT, dropTint } from "../../lib/dropTint";
+import { useOwnerWindow } from "../../lib/ownerContext";
+import { OwnerLayer } from "../OwnerLayer";
 
-const LINE = "pointer-events-none fixed z-[72] rounded-sm bg-accent shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent)_25%,transparent)]";
-const NEW_CHIP = "flex items-center gap-1 rounded-full border-[1.5px] border-dashed border-accent bg-background px-2 py-0.5 text-[11px] font-medium whitespace-nowrap text-accent shadow-[var(--shadow)]";
+/** The refusing tab strip's tint (允许混排 off): red stripes, painted by .drop-tint only under 框线+底色. */
+const NOPE_STRIPES = { "--drop-tint": "repeating-linear-gradient(-45deg, color-mix(in srgb, var(--danger) 9%, transparent) 0 6px, transparent 6px 12px)" } as CSSProperties;
 
 function Ghost() {
+  const win = useOwnerWindow();
   const { t } = useI18n();
-  const registry = useSideRegistry();
   const ghost = useSideDnd((s) => s.ghost);
   const x = useSideDnd((s) => s.x);
   const y = useSideDnd((s) => s.y);
   if (!ghost) return null;
-  // Near the window's right edge the ghost goes to the pointer's left (the side sits there).
-  const style = x > window.innerWidth - 240 ? { left: x - 14, top: y + 12, transform: "translateX(-100%)" } : { left: x + 14, top: y + 12 };
-  if (ghost.shape === "page") {
-    return (
-      <div data-side-dnd className="pointer-events-none fixed z-[73] flex items-center gap-2 rounded-xl border border-border bg-background py-1 pr-2.5 pl-1 text-xs whitespace-nowrap text-foreground shadow-[0_4px_14px_rgba(0,0,0,.14)]" style={style}>
-        {/* A small pill like the page tab row's (icons side by side). */}
-        <span className="flex items-center gap-1 rounded-xl bg-surface-2 px-[5px] py-[3px] text-muted">
-          {ghost.kinds.map((kind, k) => {
-            const Icon = registry.get(kind)?.item.icon;
-            return Icon ? <Icon key={k} size={11} /> : null;
-          })}
-        </span>
-        <span className="max-w-56 truncate">{ghost.title}</span>
-        <span className="text-[10.5px] text-subtle">· {ghost.note}</span>
-      </div>
-    );
-  }
-  const Icon = ghost.icon;
+  // Near the window's right edge the ghost goes to the pointer's left.
+  const style = x > win.innerWidth - 240 ? { left: x - 14, top: y + 12, transform: "translateX(-100%) rotate(-1.5deg)" } : { left: x + 14, top: y + 12, transform: "rotate(-1.5deg)" };
+  const Icon = ghost.icon ?? (ghost.kind ? null : MessageSquare);
   return (
-    <div data-side-dnd className="pointer-events-none fixed z-[73] flex items-center gap-1.5 rounded-[10px] border border-border bg-background py-[5px] pr-2.5 pl-[7px] text-xs whitespace-nowrap text-foreground shadow-[0_4px_14px_rgba(0,0,0,.14)]" style={style}>
+    <div data-side-dnd data-pane-ghost className="pointer-events-none fixed z-[49] flex items-center gap-1.5 rounded-ctl border border-border bg-background py-[5px] pr-2.5 pl-[7px] text-xs font-medium whitespace-nowrap text-foreground shadow-e2" style={style}>
       {Icon && <Icon size={14} className="text-muted" />}
       <span className="max-w-56 truncate">{ghost.title}</span>
-      {ghost.count > 1 && <span className="text-[10.5px] text-subtle">{t("side.pill.count", { n: ghost.count })}</span>}
-      <span className="text-[10.5px] text-subtle">· {ghost.note}</span>
+      {ghost.count > 1 && <span className="text-caption/[inherit] font-normal text-subtle">{t("pane.chip.more", { n: ghost.count - 1 })}</span>}
+      <span className="text-caption/[inherit] font-normal text-subtle">· {ghost.note}</span>
     </div>
   );
 }
 
+/** In the window the drag runs in (a desk window's drag draws there, multi-window). */
 export function SideDndLayer() {
-  const { t } = useI18n();
+  const doc = useSideDnd((s) => s.doc);
+  return (
+    <OwnerLayer doc={doc}>
+      <SideDndView />
+    </OwnerLayer>
+  );
+}
+
+function SideDndView() {
   const drag = useSideDnd((s) => s.drag);
   const target = useSideDnd((s) => s.target);
   const fb = useSideDnd((s) => s.feedback);
+  const holes = useOverlayHoles(!!drag);
   if (!drag) return null;
   const cursor = target?.kind === "refuse" ? "not-allowed" : "grabbing";
+  const zone = fb.zone;
   return (
     <>
       {/* The shield: owns the cursor; elements under it (a guest page, resize handles) never see the drag. */}
-      <div data-side-dnd data-side-dnd-shield className="fixed inset-0 z-[70]" style={{ cursor }} />
-      {fb.outside && <SideDropOutside outside={fb.outside} />}
-      {fb.column && (
-        <div
-          data-side-dnd
-          className="pointer-events-none fixed z-[71] rounded-[14px] bg-[color-mix(in_srgb,var(--accent)_6%,transparent)] shadow-[inset_0_0_0_2px_color-mix(in_srgb,var(--accent)_55%,transparent)]"
-          style={{ left: fb.column.left, top: fb.column.top, width: fb.column.width, height: fb.column.height }}
-        />
-      )}
-      {fb.band && (
-        <div
-          data-side-dnd
-          className="pointer-events-none fixed z-[71] rounded-l-[14px] bg-[linear-gradient(90deg,color-mix(in_srgb,var(--accent)_16%,transparent),transparent)] shadow-[inset_2px_0_0_var(--accent)]"
-          style={{ left: fb.band.left, top: fb.band.top, width: fb.band.width, height: fb.band.height }}
-        >
-          <span className={`absolute left-1 -translate-y-1/2 ${NEW_CHIP}`} style={{ top: fb.band.chipY - fb.band.top }}>
-            <Plus size={11} />
-            {t("side.dnd.newPageShort")}
-          </span>
-        </div>
-      )}
-      {fb.laneGhost && (
-        <div
-          data-side-dnd
-          className="pointer-events-none fixed z-[72] flex h-[30px] w-[30px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-[1.5px] border-dashed border-accent bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg))] text-accent"
-          style={{ left: fb.laneGhost.x, top: fb.laneGhost.y }}
-          title={t("side.dnd.newPageShort")}
-        >
-          <Plus size={13} />
-        </div>
-      )}
-      {fb.line && <div data-side-dnd className={LINE} style={{ left: fb.line.left, top: fb.line.top, width: fb.line.width, height: fb.line.height }} />}
-      {fb.label && (
-        <div
-          data-side-dnd
-          data-side-dnd-label
-          className={`pointer-events-none fixed z-[72] -translate-y-1/2 rounded-[7px] px-2 py-[3px] text-[11.5px] whitespace-nowrap shadow-[var(--shadow)] ${
-            target?.kind === "refuse" ? "bg-danger text-white" : target?.kind === "noop" || (target?.kind === "new" && target.unchanged) ? "border border-border bg-background text-muted" : "bg-accent text-white"
-          } ${fb.label.side === "left" ? "-translate-x-full" : ""}`}
-          style={{ left: fb.label.x, top: fb.label.y }}
-        >
-          {fb.label.text}
-        </div>
-      )}
-      <Ghost />
+      <div data-side-dnd data-side-dnd-shield className="fixed inset-0 z-[47]" style={{ cursor }} />
+      {/* Under every menu / popover (styles.css 「Layers」; lib/overlayHoles: a hole where each open one is). */}
+      <div data-side-dnd aria-hidden className="pointer-events-none fixed inset-0 z-[48]" style={holes ? { clipPath: holes } : undefined}>
+        {zone && (
+          <div
+            data-side-dnd
+            data-pane-drop-zone={target?.kind}
+            data-pane-drop-tone={zone.tone}
+            className={`pane-drop-zone ${DROP_TINT} pointer-events-none fixed z-[48] flex items-center justify-center border-2 ${
+              zone.tone === "warn" ? "border-[color-mix(in_srgb,var(--warn,#d97706)_75%,transparent)]" : "border-[color-mix(in_srgb,var(--accent)_75%,transparent)]"
+            }`}
+            style={{ ...(zone.tone === "warn" ? dropTint("var(--warn,#d97706)", 12) : dropTint("var(--accent)", 13)), left: zone.left + (zone.float ? 0 : 4), top: zone.top + (zone.float ? 0 : 4), width: Math.max(0, zone.width - (zone.float ? 0 : 8)), height: Math.max(0, zone.height - (zone.float ? 0 : 8)), borderRadius: zone.round }}
+          >
+            <span
+              className={`max-w-[90%] truncate rounded-full px-2.5 py-[3px] text-xs whitespace-nowrap text-white shadow-e2 ${zone.tone === "warn" ? "bg-[var(--warn,#d97706)]" : "bg-accent"} ${zone.float ? "absolute top-1/2 max-w-none -translate-y-1/2" : ""}`}
+              style={zone.float === "left" ? { right: "calc(100% + 8px)" } : zone.float === "right" ? { left: "calc(100% + 8px)" } : undefined}
+            >
+              {zone.text}
+            </span>
+          </div>
+        )}
+        {/* The panes the drop moves or resizes: where each ends up, dashed, with its name. */}
+        {zone &&
+          !fb.morph &&
+          fb.ghosts?.filter((g) => !g.self).map((g, i) => (
+            <div
+              key={i}
+              data-side-dnd
+              data-pane-drop-ghost=""
+              className="pane-drop-zone pointer-events-none fixed z-[48] rounded-inner border-[1.5px] border-dashed border-[color-mix(in_srgb,var(--color-foreground)_35%,transparent)]"
+              style={{ left: g.left + 4, top: g.top + 4, width: Math.max(0, g.width - 8), height: Math.max(0, g.height - 8) }}
+            >
+              <span className="absolute top-1.5 left-1.5 max-w-[90%] truncate rounded-md bg-background/85 px-1.5 py-px text-caption/[inherit] text-muted shadow-e2">{g.text}</span>
+            </div>
+          ))}
+        {/* 允许混排 off (§24.12): the tab bar that does not take the dragged kind, striped. */}
+        {fb.nope && (
+          <div
+            data-side-dnd
+            data-pane-drop-nope=""
+            // Its line (the inset underline) always; its stripes are its tint: only under 框线+底色 (lib/dropTint).
+            className={`${DROP_TINT} pointer-events-none fixed z-[48] rounded-t-inner shadow-[inset_0_-2px_0_color-mix(in_srgb,var(--danger)_45%,transparent)]`}
+            style={{ ...NOPE_STRIPES, left: fb.nope.left, top: fb.nope.top, width: fb.nope.width, height: fb.nope.height }}
+          />
+        )}
+        {fb.label && (
+          <div
+            data-side-dnd
+            data-side-dnd-label
+            className={`pointer-events-none fixed z-[49] -translate-y-1/2 rounded-ctl px-2 py-[3px] text-meta/[inherit] whitespace-nowrap shadow-e2 ${fb.label.tone === "refuse" ? "bg-danger-solid text-white" : "border border-border bg-background text-muted"} ${fb.label.side === "left" ? "-translate-x-full" : ""}`}
+            style={{ left: fb.label.x, top: fb.label.y }}
+          >
+            {fb.label.text}
+          </div>
+        )}
+        <Ghost />
+      </div>
     </>
   );
 }

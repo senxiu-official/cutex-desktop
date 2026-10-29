@@ -17,6 +17,7 @@ vi.mock("react", async (original) => ({
 }));
 vi.mock("../src/renderer/src/store", () => ({ useApp: { getState: () => fake.state } }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock("../src/renderer/src/lib/userLayoutToggle", () => ({ useUserLayoutToggle: () => (update: () => void) => update() }));
 vi.mock("../src/renderer/src/lib/statusItemsView", () => ({ useStatusPlace: () => "off" }));
 vi.mock("../src/renderer/src/components/Markdown", () => ({ Markdown: () => null }));
 // Outside any conversation provider: the scope falls back to the global selection (lib/conversationScope).

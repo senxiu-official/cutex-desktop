@@ -34,6 +34,12 @@
 3. 只在 `apps/desktop/src/renderer/src/modules/<id>/` 里新建和修改文件。**唯一允许的目录外改动**：在 `modules/registry.ts` 里加两行（import + 列表里一项），以及测试快照的更新（见 §6）。
 4. 改完交付：分支名 + commit 列表 + 测试结果 + 预览截图 / 说明。由主线维护者审查后合入。
 
+### 浏览器截图与自动化测试
+
+- 启动无头 Chrome 前，先确认将用的调试端口没有监听者（Windows：`Get-NetTCPConnection -State Listen -LocalPort <端口>`；Linux：`ss -ltn`）。端口被占用就另选，不连接或关闭已有浏览器。
+- 每次测试用独立的浏览器 profile / user-data 目录；Playwright CLI 也用独立命名会话。
+- 清理时只关闭本次创建的浏览器进程。共用调试端口或 profile 会把别人的页面切走，不能拿来做并行截图。
+
 ## 2. 目录结构
 
 ```

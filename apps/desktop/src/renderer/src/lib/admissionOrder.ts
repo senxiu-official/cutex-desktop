@@ -62,6 +62,8 @@ export interface RideAlongView {
   kind: RideAlongKind;
   /** The sender (`from`), shown before the text; null = unknown / an alarm. */
   from: string | null;
+  /** The sender agent's cutexSessionId (cutex `fromCutexSessionId`) for its avatar; null = name only. */
+  fromId: string | null;
   /** The most specific text: cutex `preview`, else a non-generic `label`; null = nothing specific. */
   text: string | null;
   /** A non-generic label that says more than `text` (a control-type description): the row's tooltip. */
@@ -74,7 +76,7 @@ export interface RideAlongView {
  * the label unless it only repeats the kind (older cutex); the row then falls back to kind + sender +
  * when it was enqueued (never only a kind word).
  */
-export function rideAlongView(item: Pick<AdmissionNextStep, "deliveryKind" | "label" | "askId" | "from" | "fromHost" | "preview">): RideAlongView {
+export function rideAlongView(item: Pick<AdmissionNextStep, "deliveryKind" | "label" | "askId" | "from" | "fromHost" | "preview" | "fromCutexSessionId">): RideAlongView {
   const k = item.deliveryKind;
   const kind: RideAlongKind =
     k === "answer" ? "answer" : k === "question" ? "question" : k === "alarm" ? "alarm"
@@ -88,7 +90,10 @@ export function rideAlongView(item: Pick<AdmissionNextStep, "deliveryKind" | "la
   const label = rideAlongLabel(item);
   const preview = item.preview?.trim() || null;
   const text = preview ?? label;
-  return { kind, from: item.from?.trim() || null, text, note: label && label !== text ? label : null };
+  const from = item.from?.trim() || null;
+  // The sender's avatar needs both: a name to show and the agent it belongs to (never a cross-host sender).
+  const fromId = from && !item.fromHost?.trim() ? item.fromCutexSessionId?.trim() || null : null;
+  return { kind, from, fromId, text, note: label && label !== text ? label : null };
 }
 
 /** What a ride-along row shows of its delegation (cutex `askId`): the other party and the title. */
@@ -107,11 +112,17 @@ export function rideAlongAsk(item: Pick<AdmissionNextStep, "askId">, ask: Pick<A
   return { askId: ask.askId, party: ask.target === sessionId ? "requester" : "target", title: ask.title?.trim() || null };
 }
 
+/** A delegation that will never start a turn: closed (stopped / abandoned …) or cancelled / rejected. Unknown (null) = no. */
+export function askEnded(ask: Pick<AskSummary, "closed" | "execution"> | null | undefined): boolean {
+  return !!ask && (!!ask.closed || ask.execution === "cancelled" || ask.execution === "rejected");
+}
+
 /**
  * The turn groups. Owner entries whose queue item is not shown (removal / edit / 立即 in flight,
  * lib/outbox `visibleQueue`) are left out. An owner queue item the admission list does not have yet
  * (only a stale list) goes last: new items are admitted after every existing one. A `delivery` entry
- * of an older draft is read as a ride-along item.
+ * of an older draft is read as a ride-along item. A delegation its record already shows closed or
+ * cancelled (`askEnded`: cancelled by its requester while queued) is left out before cutex's list catches up.
  */
 export function turnGroups(admission: QueueAdmission, queue: readonly QueueItem[], asks: Readonly<Record<string, AskSummary>>): TurnGroups {
   const items = new Map(queue.map((q) => [q.queueId, q]));
@@ -124,7 +135,10 @@ export function turnGroups(admission: QueueAdmission, queue: readonly QueueItem[
       listed.add(entry.id);
       const item = items.get(entry.id);
       if (item) turns.push({ kind: "owner", key: item.clientUserMessageId || key, entry, item });
-    } else if (entry.kind === "ask") turns.push({ kind: "ask", key, entry, ask: asks[entry.id] ?? null });
+    } else if (entry.kind === "ask") {
+      const ask = asks[entry.id] ?? null;
+      if (!askEnded(ask)) turns.push({ kind: "ask", key, entry, ask });
+    }
     else nextStep.push({ id: entry.id, deliveryKind: entry.deliveryKind, label: entry.label ?? null, enqueuedAt: entry.enqueuedAt });
   }
   let position = admission.items.length;
@@ -161,12 +175,17 @@ export function rideAlongTiming(item: AdmissionNextStep, now: number): RideAlong
   return { kind: "waitInsert", secs: Math.ceil(ms / 1000), left };
 }
 
-/** Why the current turn takes no insert (null = it does): a delegation's turn, or a runtime without steering. */
-export type InsertRefusal = "askTurn" | "noSteer" | null;
+/**
+ * Why the current turn takes no insert (null = it does): a delegation's turn, a runtime without steering,
+ * or (`refusesImages`: image-input-steering `unsupported` and the dragged message has images) a runtime
+ * that cannot insert images into a running turn.
+ */
+export type InsertRefusal = "askTurn" | "noSteer" | "noImages" | null;
 
-export function insertRefusal(currentTurn: AdmissionCurrentTurn | null, canSteer: boolean): InsertRefusal {
+export function insertRefusal(currentTurn: AdmissionCurrentTurn | null, canSteer: boolean, refusesImages = false): InsertRefusal {
   if (currentTurn?.kind === "ask") return "askTurn";
-  return canSteer ? null : "noSteer";
+  if (!canSteer) return "noSteer";
+  return refusesImages ? "noImages" : null;
 }
 
 /**

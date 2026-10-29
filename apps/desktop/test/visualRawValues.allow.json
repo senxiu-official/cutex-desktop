@@ -1,0 +1,20 @@
+{
+  "_": "Justified raw text-[Npx] / rounded-[…] / shadow-[…] classes and literal style box-shadows in the renderer (design 040 step 15; test/visualRawValues.test.ts). Key = file (from src/renderer/src) + the exact class; count = how many times it appears there. Use the semantic classes (text-caption/meta/ui/title/display, rounded-chip/ctl/inner/card/dialog, shadow-e1/e2/e3, ring-*) for anything new; add an entry here only with a reason.",
+  "entries": [
+    { "file": "components/AgentPauseParts.tsx", "match": "text-[8px]", "count": 1, "reason": "❚❚ paused glyph of the agent-paused queue row: an icon size" },
+    { "file": "components/DelegationQueue.tsx", "match": "text-[8px]", "count": 2, "reason": "❚❚ / grip glyphs in a 16 px cell: icon sizes" },
+    { "file": "components/QueuePanel.tsx", "match": "text-[8px]", "count": 1, "reason": "glyph cell of a queue row: an icon size" },
+    { "file": "components/TurnQueue.tsx", "match": "text-[8px]", "count": 2, "reason": "❚❚ paused glyph of a queue row: an icon size" },
+    { "file": "components/side/TitleBarLaunchers.tsx", "match": "text-[9px]", "count": 2, "reason": "digits in the 14 px launcher badge (smaller than CountBadge's 16 px); moving it to CountBadge is a visible change for the owner to decide" },
+    { "file": "modules/home/Profile.tsx", "match": "text-[22px]", "count": 1, "reason": "desktop profile name: a display size of the home widgets (040 has no 22 px token; text-display is 20)" },
+    { "file": "modules/home/Tiles.tsx", "match": "text-[17px]", "count": 1, "reason": "desktop media tile title (no 17 px token; 15 / 20 would change the tile)" },
+    { "file": "components/settings/AboutDragon.tsx", "match": "rounded-[22%]", "count": 1, "reason": "app-icon squircle: a proportional radius, not a token" },
+    { "file": "components/SystemAvatar.tsx", "match": "rounded-[22%]", "count": 1, "reason": "app-icon squircle: a proportional radius, not a token" },
+    { "file": "components/settings/ProfilePictureCrop.tsx", "match": "shadow-[0_0_0_80px_#0004]", "count": 1, "reason": "the crop mask outside the circle (a spread, not an elevation)" },
+    { "file": "components/side/SideDndLayer.tsx", "match": "shadow-[inset_0_-2px_0_color-mix(in_srgb,var(--danger)_45%,transparent)]", "count": 1, "reason": "the refused-drop underline of a Shelf head (an indicator line, not an elevation)" },
+    { "file": "components/side/WorkspaceRail.tsx", "match": "shadow-[inset_0_0_0_999px_rgba(59,130,246,0.1)]", "count": 1, "reason": "drop-target tint over the rail card (an overlay, not an elevation)" },
+    { "file": "modules/home/Tiles.tsx", "match": "shadow-[0_3px_10px_rgba(0,0,0,0.15)]", "count": 1, "reason": "app-icon drop shadow on the desktop glass (artwork, not an elevation level)" },
+    { "file": "modules/home/Tiles.tsx", "match": "shadow-[0_8px_20px_rgba(0,0,0,0.28)]", "count": 1, "reason": "cover-art shadow of the media tile (artwork)" },
+    { "file": "modules/project-view/pin.tsx", "match": "shadow-[0_3px_10px_rgba(0,0,0,0.15)]", "count": 1, "reason": "app-icon drop shadow, the same as the desktop tiles' (artwork)" }
+  ]
+}

@@ -2,6 +2,7 @@
 // rows (projects), hairline rows. No cards. Fold state is remembered in ui prefs.
 import { Fragment, type MouseEvent, type ReactNode } from "react";
 import { toggleFolded, useUiPrefs } from "../lib/prefs";
+import { VirtualTableBody } from "./VirtualTableBody";
 
 export interface Column<T> {
   key: string;
@@ -27,6 +28,7 @@ export function DataTable<T>({
   hideHeader,
   onRowContextMenu,
   after,
+  virtualize = false,
 }: {
   columns: Column<T>[];
   groups: RowGroup<T>[];
@@ -36,9 +38,34 @@ export function DataTable<T>({
   onRowContextMenu?(e: MouseEvent, row: T): void;
   /** Extra full-width content under a row (e.g. service logs). */
   after?(row: T): ReactNode;
+  /** Opt in to measured rows in the nearest page scroller. */
+  virtualize?: boolean;
 }) {
   const folded = useUiPrefs().foldedGroups;
   const align = (c: Column<T>) => (c.align === "right" ? "text-right" : "text-left");
+  const groupRow = (g: RowGroup<T>, foldKey: string, isFolded: boolean) => (
+    <tr className="cursor-pointer select-none" onClick={() => toggleFolded(foldKey)}>
+      <td colSpan={columns.length} className="px-2 pt-4 pb-1 text-xs font-medium text-muted hover:text-foreground">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="w-2.5 text-caption/[inherit] text-subtle">{isFolded ? "▸" : "▾"}</span>
+          {g.label}
+          <span className="font-normal text-subtle">{g.rows.length}</span>
+        </span>
+      </td>
+    </tr>
+  );
+  const dataRow = (row: T) => (
+    <Fragment>
+      <tr className="group border-b border-border/60 hover:bg-surface-2/40" onContextMenu={onRowContextMenu ? (e) => onRowContextMenu(e, row) : undefined}>
+        {columns.map((c) => (
+          <td key={c.key} className={`h-9 overflow-hidden px-2 ${align(c)}`}>
+            {c.cell(row)}
+          </td>
+        ))}
+      </tr>
+      {after?.(row)}
+    </Fragment>
+  );
   return (
     <table className="w-full table-fixed border-collapse text-sm">
       <colgroup>
@@ -48,7 +75,7 @@ export function DataTable<T>({
       </colgroup>
       {!hideHeader && (
         <thead>
-          <tr className="border-b border-border text-[11px] text-subtle">
+          <tr className="border-b border-border text-caption/[inherit] text-subtle">
             {columns.map((c) => (
               <th key={c.key} className={`px-2 pb-1.5 font-normal ${align(c)}`}>
                 {c.header}
@@ -57,40 +84,32 @@ export function DataTable<T>({
           </tr>
         </thead>
       )}
-      <tbody>
+      {virtualize ? <VirtualTableBody columnCount={columns.length} items={groups.flatMap((g) => {
+        const foldKey = `${foldPrefix}:${g.key}`;
+        const isFolded = g.label !== null && folded.includes(foldKey);
+        return [
+          ...(g.label !== null ? [{ key: `group:${g.key}`, kind: "group" as const, render: () => groupRow(g, foldKey, isFolded) }] : []),
+          ...(!isFolded ? g.rows.map((row) => ({ key: `row:${g.key}:${rowKey(row)}`, kind: "row" as const, render: () => dataRow(row) })) : []),
+        ];
+      })} /> : <tbody>
         {groups.map((g) => {
           const foldKey = `${foldPrefix}:${g.key}`;
           const isFolded = g.label !== null && folded.includes(foldKey);
           return (
             <Fragment key={g.key}>
               {g.label !== null && (
-                <tr className="cursor-pointer select-none" onClick={() => toggleFolded(foldKey)}>
-                  <td colSpan={columns.length} className="px-2 pt-4 pb-1 text-xs font-medium text-muted hover:text-foreground">
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="w-2.5 text-[10px] text-subtle">{isFolded ? "▸" : "▾"}</span>
-                      {g.label}
-                      <span className="font-normal text-subtle">{g.rows.length}</span>
-                    </span>
-                  </td>
-                </tr>
+                groupRow(g, foldKey, isFolded)
               )}
               {!isFolded &&
                 g.rows.map((row) => (
                   <Fragment key={rowKey(row)}>
-                    <tr className="group border-b border-border/60 hover:bg-surface-2/40" onContextMenu={onRowContextMenu ? (e) => onRowContextMenu(e, row) : undefined}>
-                      {columns.map((c) => (
-                        <td key={c.key} className={`h-9 overflow-hidden px-2 ${align(c)}`}>
-                          {c.cell(row)}
-                        </td>
-                      ))}
-                    </tr>
-                    {after?.(row)}
+                    {dataRow(row)}
                   </Fragment>
                 ))}
             </Fragment>
           );
         })}
-      </tbody>
+      </tbody>}
     </table>
   );
 }

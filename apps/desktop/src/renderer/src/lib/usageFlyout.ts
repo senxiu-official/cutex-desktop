@@ -22,6 +22,11 @@ export interface UsageSnapshot extends UsageLayout {
 
 /** Placeholder gauges of a predicted row (most readers have two windows: 5h + 7d). */
 export const PREDICTED_GAUGES = 2;
+export const usageGaugeHeight = (count: number) => Math.max(1, count) * 18 + Math.max(0, count - 1) * 4;
+/** First-paint viewport. Refreshes may change values/rows, never this opening's outer geometry. */
+export function usageHeight(layout: UsageLayout): number {
+  return layout.rows.length ? layout.rows.reduce((n, name) => n + usageGaugeHeight(layout.counts[name] || 1) + 12, 0) + (layout.off.length ? 26 : 0) : 28;
+}
 
 const lastShown = new Map<string, UsageSnapshot>();
 onHostSwitch(() => lastShown.clear());

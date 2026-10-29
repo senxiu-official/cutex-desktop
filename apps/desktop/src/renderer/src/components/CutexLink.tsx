@@ -84,6 +84,7 @@ function Chip({ cref, view, children }: { cref: CutexRef; view: RefLinkView | nu
     <a
       role="link"
       tabIndex={0}
+      data-cutex-ref={cref.kind}
       title={view?.tooltip ?? cref.title}
       className={`cursor-pointer hover:underline ${TONE[view?.tone ?? "normal"]}`}
       onContextMenu={contextMenu(menuFor(cref, open, t))}
@@ -170,7 +171,7 @@ function RefThumbnail({ entry, cref, alt, fallback }: { entry: TargetEntry; cref
           className="block h-auto max-h-80 w-auto max-w-[min(100%,320px)] cursor-zoom-in rounded-md border border-border bg-surface-2 object-contain"
         />
       ) : (
-        <span aria-hidden className="block h-24 w-40 animate-pulse rounded-md border border-border bg-surface-2" />
+        <span aria-hidden className="block h-24 w-40 animate-skeleton rounded-md border border-border bg-surface-2" />
       )}
     </span>
   );

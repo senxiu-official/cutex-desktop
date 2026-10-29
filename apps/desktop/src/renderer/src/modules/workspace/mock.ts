@@ -16,7 +16,7 @@ const at = (rel: string) => `${ROOT}\\${rel.replace(/\//g, "\\")}`;
 
 type Kind = "file" | "dir";
 const tree: Record<string, [string, Kind][]> = {
-  "": [["apps", "dir"], ["docs", "dir"], ["AGENTS.md", "file"], ["PLAN.md", "file"], ["package.json", "file"]],
+  "": [["apps", "dir"], ["docs", "dir"], ["image-references", "dir"], ["AGENTS.md", "file"], ["PLAN.md", "file"], ["package.json", "file"]],
   docs: [["research", "dir"], ["DESIGN.md", "file"]],
   "docs/research": [["zcode-ui.md", "file"]],
   apps: [["desktop", "dir"]],
@@ -24,8 +24,25 @@ const tree: Record<string, [string, Kind][]> = {
   "apps/desktop/src": [["main", "dir"], ["renderer", "dir"]],
   "apps/desktop/src/main": [["daemon.ts", "file"], ["index.ts", "file"]],
   "apps/desktop/src/renderer": [["index.html", "file"]],
+  // A folder linked from Eva's message (dev/mockBridge.ts): it opens in the tree, not the preview.
+  "image-references": [["cafe-stile", "dir"]],
+  "image-references/cafe-stile": [["counter.png", "file"], ["notes.md", "file"]],
 };
 const sizes = new Map<string, number>();
+// The 文件 explorer (docs/design/019): dot folders (hidden by default), a git-ignored folder, a folder of
+// generated images (opens as thumbnails), single-folder chains (merged rows) and a big folder.
+tree[""]!.unshift([".github", "dir"], ["node_modules", "dir"]);
+tree[".github"] = [["workflows", "dir"]];
+tree[".github/workflows"] = [["ci.yml", "file"]];
+tree.node_modules = Array.from({ length: 2400 }, (_, i): [string, Kind] => [`pkg-${String(i).padStart(4, "0")}`, "dir"]);
+tree["apps/desktop"]!.push(["out", "dir"]);
+tree["apps/desktop/out"] = [["renders", "dir"]];
+tree["apps/desktop/out/renders"] = [...Array.from({ length: 10 }, (_, i): [string, Kind] => [`launch-hero-${String(i + 1).padStart(2, "0")}.png`, "file"]), ["tray-dock.svg", "file"], ["notes.md", "file"]];
+sizes.set("apps/desktop/out/renders/launch-hero-09.png", 4.6 * 1024 * 1024);
+tree["apps/desktop/src/renderer"] = [["src", "dir"], ["index.html", "file"]];
+tree["apps/desktop/src/renderer/src"] = [["lib", "dir"], ["App.tsx", "file"], ["store.ts", "file"]];
+tree["apps/desktop/src/renderer/src/lib"] = [["paneLayout.ts", "file"], ["sideOpen.ts", "file"], ["workspace.ts", "file"]];
+const IGNORED = (path: string) => path === "node_modules" || path.startsWith("node_modules/");
 
 const SAMPLE_PDF =
   "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwg" +
@@ -152,6 +169,28 @@ const FILES: Record<string, [string, number]> = {
   "renamed-text.pdf": ["", 0],
 };
 const MIME: Record<string, string> = { pdf: "application/pdf" };
+/** HTML samples (file view 预览 / 源码, owner 2026-10-24): name → [text, reported size]. A size over the text = a big file. */
+const HTML_DEMO = `<!doctype html><html><head><meta charset="utf-8"><title>Demo</title><style>
+body{font:14px system-ui,"Microsoft YaHei",sans-serif;margin:24px;color:#222;background:#fff}h1{font-size:20px}
+.card{display:inline-block;padding:10px 14px;border-radius:10px;background:#eef4ff;margin:4px}button{padding:4px 12px}
+@media (prefers-color-scheme:dark){body{background:#1b1b1d;color:#eee}.card{background:#26324a}}</style></head>
+<body><h1>预览示例页面</h1><p>这是一个自带样式和脚本的 HTML 文件，在文件预览里直接显示成网页。</p>
+<div class="card">卡片 A</div><div class="card">卡片 B</div><p><button id="b">点我</button> <span id="n">0</span> 次</p>
+<script>let n=0;document.getElementById("b").onclick=()=>{document.getElementById("n").textContent=String(++n)};</script></body></html>`;
+const HTML_ASSETS = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head>
+<body><h1>引用了旁边文件的页面</h1><p>下面这张图在 img/cover.png，预览里不会加载。</p><img src="img/cover.png" alt="cover" width="200">
+<p><a href="other.html">一个普通链接（不算）</a></p></body></html>`;
+const HTML_FILES: Record<string, [string, number]> = {
+  "page-demo.html": [HTML_DEMO, 0],
+  "page-with-assets.html": [HTML_ASSETS, 0],
+  "big-page.html": [HTML_DEMO, 7 * MIB],
+};
+function htmlBody(path: string, name: string, maxBytes = 2 * MIB): FsFile | null {
+  const entry = HTML_FILES[name];
+  if (!entry) return null;
+  const size = Math.max(entry[1], entry[0].length);
+  return { path, size, modifiedAt: new Date().toISOString(), encoding: "utf8", content: entry[0], truncated: size > maxBytes, mime: "text/html" };
+}
 
 function body(path: string, name: string, maxBytes = 2 * MIB): FsFile | null {
   const entry = FILES[name];
@@ -171,7 +210,8 @@ function body(path: string, name: string, maxBytes = 2 * MIB): FsFile | null {
 }
 
 tree[""]!.splice(2, 0, ["samples", "dir"]);
-tree.samples = Object.keys(FILES).map((name) => [name, "file"]);
+tree.samples = [...Object.keys(FILES), ...Object.keys(HTML_FILES)].map((name) => [name, "file"]);
+for (const [name, [text, size]] of Object.entries(HTML_FILES)) sizes.set(`samples/${name}`, Math.max(size, text.length));
 for (const [name, [b64, size]] of Object.entries(FILES)) sizes.set(`samples/${name}`, Math.max(size, Math.floor((b64.length * 3) / 4)));
 
 /** `?nonowner&broadroot`: cutex does not open a too-broad root to other users (403 on every read). */
@@ -199,19 +239,22 @@ let watchSeq = 0;
 export const mock: ModuleMock = {
   files: {
     read(path, maxBytes) {
+      // Like cutex fs/file on a folder.
+      if (Object.hasOwn(tree, path)) throw new Error("not_a_file: path is not a regular file");
       const match = /(?:^|[\\/])samples[\\/]([^\\/]+)$/.exec(path);
-      return match ? body(path, match[1]!, maxBytes) : null;
+      return match ? (htmlBody(path, match[1]!, maxBytes) ?? body(path, match[1]!, maxBytes)) : null;
     },
   },
   api: () => ({
     async fsDir(_scope, path): Promise<FsDir> {
       broadRootRefusal();
+      if (!Object.hasOwn(tree, path)) throw new Error("not_a_directory: path is not a directory");
       return {
         root: ROOT,
         path,
         entries: (tree[path] ?? []).map(([name, kind]) => {
           const full = path ? `${path}/${name}` : name;
-          return { name, path: full, kind, targetKind: null, size: kind === "file" ? (sizes.get(full) ?? 1200) : null, modifiedAt: "2026-10-16T08:00:00Z", ignored: false };
+          return { name, path: full, kind, targetKind: null, size: kind === "file" ? (sizes.get(full) ?? 1200) : null, modifiedAt: "2026-10-16T08:00:00Z", ignored: IGNORED(full) };
         }),
       };
     },

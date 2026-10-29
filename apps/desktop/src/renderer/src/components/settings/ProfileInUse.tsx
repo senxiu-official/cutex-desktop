@@ -13,9 +13,11 @@ import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { deleteAgentResult, SESSION_FEATURES } from "../../lib/menus";
 import { refusalText } from "../../lib/profileCreate";
 import { bulkArchivedRefs, canDetachArchived, PROFILE_DETACH_ARCHIVED_FEATURE, profileInUseCount, profileInUseMessage, profileRefs, type DeleteProfileOptions, type ProfileRef } from "../../lib/profileRefs";
+import { agentFeaturesOf, lacks } from "../../lib/agentFeatures";
 import { Avatar } from "../Avatar";
 import { ArmedRemove, Button, ListRow } from "./Form";
 import { useTargetFeatures, useTargetHostId, useTargetSelect, useTargetSidebar } from "../../lib/targetHost";
+import { Tag } from "../../components/Tag";
 
 const without = <V,>(record: Record<string, V>, key: string) => Object.fromEntries(Object.entries(record).filter(([k]) => k !== key));
 
@@ -39,7 +41,8 @@ export function ProfileInUse({ refusal, color, profile, onDeleteProfile }: { ref
   }
   if (!refusal.sessions) return <p className="text-danger">{refusalText(refusal, t)}</p>;
   const refs = profileRefs(refusal.sessions, sidebar, gone);
-  const bulk = bulkArchivedRefs(refs, canDelete);
+  const deletableRefs = refs.filter(ref => !lacks(agentFeaturesOf(ref.session), "threadDelete"));
+  const bulk = bulkArchivedRefs(deletableRefs, canDelete);
 
   const remove = async (ref: ProfileRef) => {
     setBusy((b) => new Set(b).add(ref.id));
@@ -74,7 +77,7 @@ export function ProfileInUse({ refusal, color, profile, onDeleteProfile }: { ref
     <div>
       <p className="mb-1 text-danger">{t(profileInUseMessage(refs, canDelete, canDetach), { n: profileInUseCount(refs, canDetach) })}</p>
       {refs.map((ref) => (
-        <RefRow key={ref.id} entry={ref} color={color} canDelete={canDelete} busy={busy.has(ref.id)} error={errors[ref.id]} onDelete={() => void remove(ref)} />
+        <RefRow key={ref.id} entry={ref} color={color} canDelete={canDelete && !lacks(agentFeaturesOf(ref.session), "threadDelete")} busy={busy.has(ref.id)} error={errors[ref.id]} onDelete={() => void remove(ref)} />
       ))}
       {(bulk.length > 0 || detach) && (
         <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
@@ -119,7 +122,7 @@ function RefRow({ entry, color, canDelete, busy, error, onDelete }: { entry: Pro
       title={
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate">{entry.name}</span>
-          <span className={`shrink-0 rounded px-1.5 text-[11px] leading-4 ${entry.archived ? "bg-surface-2 text-subtle" : "bg-accent/15 text-accent"}`}>{tag}</span>
+          <Tag tone={entry.archived ? "neutral" : "accent"}>{tag}</Tag>
         </span>
       }
       detail={entry.session ? undefined : t("settings.profile.refs.unlisted")}

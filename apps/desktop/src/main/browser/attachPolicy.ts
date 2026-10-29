@@ -63,7 +63,11 @@ export function evaluateBrowserAttach(input: BrowserAttachInput): BrowserAttachR
   Object.assign(prefs, { partition, contextIsolation: true, sandbox: true, webSecurity: true,
     nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false,
     webviewTag: false, plugins: false, allowRunningInsecureContent: false, disablePopups: true,
-    safeDialogs: true, navigateOnDragDrop: false, spellcheck: false });
+    safeDialogs: true, navigateOnDragDrop: false, spellcheck: false,
+    // Opaque guest (Electron's <webview> default is transparent): a page that paints no background shows its own
+    // colour-scheme canvas (white with black text, or the dark canvas it opted into), like a normal browser —
+    // never the app card behind it (dark app theme + light page = dark text on dark, seen on remote 2026-10-23).
+    transparent: false });
   // Electron consumes these after the hook; don't allow a token-bearing UA/referrer/preload.
   delete params.preload;
   delete params.webpreferences;

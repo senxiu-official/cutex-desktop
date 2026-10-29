@@ -7,6 +7,9 @@ import { useTargetApi } from "./targetHost";
 /** cutex `agent-harness` (r218): 指令 → 运行环境说明; the agent message templates are gone. */
 export const AGENT_HARNESS_FEATURE = "agent-harness";
 
+/** cutex `prompt-cache-key` (design 034): 新建默认 → 提示缓存, the shared Responses prompt cache key. */
+export const PROMPT_CACHE_KEY_FEATURE = "prompt-cache-key";
+
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }

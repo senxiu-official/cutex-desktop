@@ -6,8 +6,11 @@ import { Bell } from "lucide-react";
 import { NOTIFICATION_LEVELS_FEATURE } from "../../../../shared/notificationLevels";
 import { defineModule } from "../slots";
 import { bigAlertMethod, desktopMethod, soundMethod } from "./methods";
-import { NotificationsPage } from "./NotificationsPage";
 import { startNotifications } from "./runtime";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const NotificationsPage = lazyPage(() => import("./NotificationsPage").then((m) => m.NotificationsPage));
 
 const HOST = { capabilities: [NOTIFICATION_LEVELS_FEATURE] } as const;
 

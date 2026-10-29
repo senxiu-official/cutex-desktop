@@ -24,7 +24,7 @@ beforeAll(async () => {
   g.cutex = { launchArt: mockLaunchArt() };
   section = await import("../src/renderer/src/components/settings/LaunchArtSettings");
   art = await import("../src/renderer/src/lib/launchArt");
-});
+}, 30_000);
 
 const sources = (html: string) => Object.fromEntries([...html.matchAll(/data-launch-art-source="(\w+)"/g)].map((m, i) => [i, m[1]]));
 

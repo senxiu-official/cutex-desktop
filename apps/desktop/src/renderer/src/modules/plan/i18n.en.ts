@@ -1,0 +1,41 @@
+// English strings of ./i18n.ts, apart from the zh-CN source so they stay out of the entry chunk: they load with the
+// en catalog (i18n/index.tsx), only when the UI or a search needs English (0.2.0 beta perf audit, 2026-10-24).
+import type { zhCN } from "./i18n";
+
+export const en: Record<keyof typeof zhCN, string> = {
+  "plan.title": "Plan",
+  "plan.question": "Implement this plan?",
+  "plan.implement": "Implement",
+  "plan.implementHint": "Switch to Default mode and start coding",
+  "plan.stay": "Keep planning",
+  "plan.stayHint": "Stay in Plan mode and refine it",
+  "plan.defaultUnavailable": "Default mode unavailable",
+  "plan.claude.acceptEdits": "Yes, auto-accept edits",
+  "plan.claude.acceptEditsHint": "Leave Plan mode in Accept edits and start implementing",
+  "plan.claude.manual": "Yes, approve edits manually",
+  "plan.claude.manualHint": "Leave Plan mode in Ask first and start implementing",
+  "plan.claude.keep": "Yes, keep {mode}",
+  "plan.claude.keepHint": "Leave Plan mode, keep the previous permission mode and start implementing",
+  "plan.claude.keepPlanning": "No, keep planning…",
+  "plan.claude.feedbackPlaceholder": "Tell Claude what to change in the plan (optional)",
+  "plan.claude.feedbackCancel": "Cancel",
+  "plan.claude.feedbackSend": "Send feedback",
+  "plan.checklist": "Plan {done}/{total}",
+  "plan.updated": "Updated progress {done}/{total}",
+
+  "plan.moduleTitle": "Plan",
+  "plan.moduleDescription": "The model's progress list (update_plan) as a status category",
+  "plan.statusTitle": "Plan",
+  "plan.count": "Progress {done}/{total}",
+  "plan.fold.completed": "{n} completed",
+  "plan.fold.earlier": "{n} earlier",
+  "plan.fold.pending": "{n} pending",
+  "plan.fold.later": "{n} more",
+  "plan.cleared": "Cleared",
+  "plan.clearedEntry": "Cleared the progress list",
+  "plan.clearedHint": "The {{agent}} cleared its progress list; this is the previous one",
+  "plan.dismiss": "Hide progress",
+  "plan.dismissHint": "Hide until the {{agent}} posts a new progress list",
+  "plan.restore": "Show progress",
+  "plan.restoreHint": "Progress hidden ({done}/{total}); click to show it again",
+};

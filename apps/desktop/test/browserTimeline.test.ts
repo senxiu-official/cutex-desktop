@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RawItem } from "../src/renderer/src/lib/timeline";
-import { BROWSER_IMAGE_BASE64_LIMIT, BROWSER_TIMELINE_TOOLS, browserLoadedToolItem, browserTimelineDataImage,
+import { BROWSER_IMAGE_BASE64_LIMIT, BROWSER_TIMELINE_TOOLS, browserLoadedToolItem, browserShotStandalone, browserTimelineDataImage,
   browserTimelineEn, browserTimelineImage, browserTimelineZhCN, browserToolName, browserToolView, browserTurnShots,
 } from "../src/renderer/src/modules/browser/browserTimeline";
 
@@ -12,6 +12,16 @@ const mcp = (extra: Partial<RawItem> = {}): RawItem => ({ id: "item-1", type: "m
 const dynamic = (extra: Partial<RawItem> = {}): RawItem => ({ id: "item-1", type: "dynamicToolCall", namespace: "claude", tool: "browser_screenshot",
   status: "completed", arguments: JSON.stringify({ title: "Check the page" }), contentItems: [{ type: "inputImage", imageUrl: src }], ...extra });
 const lazy = () => mcp({ truncated: true, result: { content: [{ type: "imageNotLoaded", fullItemRequired: true, mimeType: "image/png" }] } });
+
+describe("a screenshot is its own row (owner 2026-10-24: no tall row folding into a work group line)", () => {
+  it("a call with a screenshot (shown or to load) is standalone; a running or picture-less call folds", () => {
+    expect(browserShotStandalone(mcp())).toBe(true);
+    expect(browserShotStandalone(dynamic())).toBe(true);
+    expect(browserShotStandalone(lazy())).toBe(true);
+    expect(browserShotStandalone(mcp({ status: "inProgress", result: null }))).toBe(false);
+    expect(browserShotStandalone(mcp({ tool: "browser_act", arguments: { title: "Click", action: { kind: "click" } }, result: { content: [] } }))).toBe(false);
+  });
+});
 
 describe("browser timeline safe summaries", () => {
   it("matches exactly the nine tools from supported runtime identities", () => {
@@ -58,8 +68,8 @@ describe("browser timeline safe summaries", () => {
 
 describe("browser tool screenshots", () => {
   it("preserves bounded actual MCP and dynamic images inline", () => {
-    expect(browserToolView(mcp())).toMatchObject({ image: src, imageState: "ready" });
-    expect(browserToolView(dynamic())).toMatchObject({ image: src, imageState: "ready" });
+    expect(browserToolView(mcp())).toMatchObject({ image: { kind: "url", url: src }, imageState: "ready" });
+    expect(browserToolView(dynamic())).toMatchObject({ image: { kind: "url", url: src }, imageState: "ready" });
     expect(browserTimelineDataImage(src)).toBe(src);
   });
   it("never requests external, local or SVG URLs", () => {
@@ -84,6 +94,40 @@ describe("browser tool screenshots", () => {
     expect(browserLoadedToolItem({ item: mcp() }, lazy())).toEqual(mcp());
     for (const item of [mcp({ id: "other" }), mcp({ tool: "browser_read" }), mcp({ server: "other" }), dynamic(), lazy(), mcp({ result: { content: [] } })])
       expect(browserLoadedToolItem({ item }, lazy())).toBeNull();
+  });
+  const hash = "a".repeat(64);
+  const blob = { type: "cutexBlob", blobId: hash, sha256: hash, mime: "image/png", size: 8 * 1024 * 1024, url: `cutex-blob:cutex.remote/${hash}` };
+  const referenced = (value: unknown = blob) => mcp({ result: { content: [{ type: "image", mimeType: "image/png", data: value }] } });
+  it("accepts authenticated MCP and dynamic screenshot references beyond the old inline budget", () => {
+    const expected = { image: { kind: "blob", blob }, imageState: "ready" };
+    expect(browserToolView(referenced())).toMatchObject(expected);
+    expect(browserToolView(dynamic({ contentItems: [{ type: "inputImage", imageUrl: blob }] }))).toMatchObject(expected);
+    expect(browserShotStandalone(referenced())).toBe(true);
+    expect(browserLoadedToolItem({ item: referenced() }, lazy())).toEqual(referenced());
+  });
+  it("retains complete references even when unrelated tool text was compacted", () => {
+    expect(browserToolView({ ...referenced(), truncated: true })).toMatchObject({ image: { kind: "blob", blob }, imageState: "ready" });
+  });
+  it("rejects forged, oversized, mismatched and non-browser media descriptors", () => {
+    for (const invalid of [
+      { ...blob, url: "https://example.invalid/image?token=private" }, { ...blob, url: `cutex-media:cutex.remote/${hash}` }, { ...blob, sha256: "b".repeat(64) },
+      { ...blob, size: 32 * 1024 * 1024 + 1 }, { ...blob, mime: "image/svg+xml" },
+      { ...blob, mime: "audio/wav" }, { ...blob, blobId: "../secret" },
+    ]) expect(browserToolView(referenced(invalid))).toMatchObject({ image: null, imageState: "invalid" });
+    expect(browserToolView(mcp({ result: { content: [{ type: "image", mimeType: "image/jpeg", data: blob }] } })))
+      .toMatchObject({ image: null, imageState: "invalid" });
+    expect(browserToolView(mcp({ result: { content: [image, { type: "inputImage", imageUrl: blob }] } })))
+      .toMatchObject({ image: null, imageState: "invalid" });
+  });
+  it("shows unavailable markers without echoing reasons or offering a futile full-item reload", () => {
+    const unavailable = { type: "imageNotLoaded", reason: "never-show-this-OTP", size: 99 };
+    for (const item of [referenced(unavailable), dynamic({ contentItems: [{ type: "inputImage", imageUrl: unavailable }] }), mcp({ result: { content: [unavailable] } })]) {
+      const view = browserToolView(item);
+      expect(view).toMatchObject({ image: { kind: "unavailable" }, imageState: "unavailable" });
+      expect(JSON.stringify(view)).not.toContain("never-show-this-OTP");
+      expect(browserShotStandalone(item)).toBe(true);
+      expect(browserLoadedToolItem({ item }, lazy())).toBeNull();
+    }
   });
 });
 

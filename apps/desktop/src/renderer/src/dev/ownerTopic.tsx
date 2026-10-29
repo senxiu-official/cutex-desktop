@@ -6,7 +6,7 @@ import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Copy, Monitor, Server, ShieldCheck } from "lucide-react";
 import { Button, Section, Segmented, SettingRow } from "../components/settings/Form";
 
-const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] whitespace-nowrap";
+const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-caption/[inherit] whitespace-nowrap";
 const T = {
   local: <span className={`${CHIP} bg-surface-2 text-muted`}><Monitor size={11} />本地桌面应用</span>,
   host: (picker: ReactNode) => <span className={`${CHIP} bg-accent/12 pr-0.5 text-accent`}><Server size={11} />cutex 后端 ·{picker}</span>,
@@ -42,7 +42,7 @@ const NOTES = [
 function Header({ hint, tags }: { hint?: string; tags: ReactNode }) {
   return (
     <div className="mb-4 space-y-1.5 border-b border-border/60 pb-3">
-      {hint && <p className="text-[13px] text-muted">{hint}</p>}
+      {hint && <p className="text-ui/[inherit] text-muted">{hint}</p>}
       <div className="flex min-h-6 flex-wrap items-center gap-1.5">{tags}</div>
     </div>
   );
@@ -66,7 +66,7 @@ function Rights({ h }: { h: MockHost }) {
 function MyIdentity() {
   return (
     <Section title="你的身份" hint="成为所有者时登记的就是这个身份。它只保存在这台电脑上。">
-      <SettingRow label="Sam" hint="个人身份密钥 · 9f3a 61c2 0b7e d415">
+      <SettingRow agents="none" source="local" label="Sam" hint="个人身份密钥 · 9f3a 61c2 0b7e d415">
         <Button onClick={() => {}}><span className="inline-flex items-center gap-1"><Copy size={12} />复制公钥</span></Button>
       </SettingRow>
     </Section>
@@ -79,7 +79,7 @@ function OverviewA({ open }: { open(h: HostId): void }) {
       <Header hint="每台主机只有一个所有者。所有者决定设备归谁，你在上面能做什么另算。" tags={<span className={`${CHIP} bg-accent/12 text-accent`}><Server size={11} />cutex 后端 · 每台主机</span>} />
       <MyIdentity />
       <Section title="各主机的所有者" hint="只能在那台主机本机更换所有者。">
-        <div className="-mx-4 grid grid-cols-[1.2fr_1fr_1.6fr_auto] items-center gap-x-3 border-b border-border/70 bg-win px-4 py-1.5 text-[11px] text-subtle">
+        <div className="-mx-4 grid grid-cols-[1.2fr_1fr_1.6fr_auto] items-center gap-x-3 border-b border-border/70 bg-win px-4 py-1.5 text-caption/[inherit] text-subtle">
           <span>主机</span>
           <span>所有者</span>
           <span>你的权限</span>
@@ -154,7 +154,7 @@ function HostB({ host, setHost }: { host: HostId; setHost(h: HostId): void }) {
               <div className="flex items-center gap-1.5 text-sm">
                 {h.owner.name}
                 {h.owner.you && T.you}
-                <span className="inline-flex items-center gap-0.5 text-[11px] text-ok-text"><ShieldCheck size={11} />已确认</span>
+                <span className="inline-flex items-center gap-0.5 text-caption/[inherit] text-ok-text"><ShieldCheck size={11} />已确认</span>
               </div>
               <div className="text-xs text-subtle">
                 <span className="font-mono">{h.owner.fp}</span> · {h.owner.source} · {h.owner.when}
@@ -169,7 +169,7 @@ function HostB({ host, setHost }: { host: HostId; setHost(h: HostId): void }) {
         )}
       </Section>
       <Section title="你的权限">
-        <SettingRow label={h.rights} hint={h.rights === "完全控制" ? `${h.via === "本机" ? "来自本机" : `来自 ${h.via.replace("SSH：", "SSH 登录 ")}`}；能登录这个系统账号就能完全控制它` : "由所有者授权；可以在「主机 → 用户」里看到具体授权"}>
+        <SettingRow agents="none" source="local" label={h.rights} hint={h.rights === "完全控制" ? `${h.via === "本机" ? "来自本机" : `来自 ${h.via.replace("SSH：", "SSH 登录 ")}`}；能登录这个系统账号就能完全控制它` : "由所有者授权；可以在「主机 → 用户」里看到具体授权"}>
           {h.via.startsWith("SSH") && !h.owner?.you && <Button onClick={() => {}}>改为以成员身份连接</Button>}
         </SettingRow>
       </Section>
@@ -199,10 +199,10 @@ function HostB({ host, setHost }: { host: HostId; setHost(h: HostId): void }) {
       <Section title="更换所有者" hint="把这台主机的所有者换成另一个本地身份。原所有者的完全控制权不变。">
         {local ? (
           <>
-            <SettingRow label="新所有者" hint="从有完全控制权的身份里选，或粘贴对方的公钥">
+            <SettingRow agents="none" source="local" label="新所有者" hint="从有完全控制权的身份里选，或粘贴对方的公钥">
               <span className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs text-muted">选择身份 <ChevronDown size={12} /></span>
             </SettingRow>
-            <SettingRow label="恢复为未确认" hint="下一个在本机认领的身份成为所有者">
+            <SettingRow agents="none" source="local" label="恢复为未确认" hint="下一个在本机认领的身份成为所有者">
               <Button onClick={() => {}}>恢复</Button>
             </SettingRow>
           </>
@@ -230,7 +230,7 @@ function RowsC() {
     <>
       <Section title="C1：设备页的行（所有者 + 你的权限）" hint="「我的设备」不写所有者（都是你），「我能访问的设备」写出所有者。">
         {HOSTS.filter((h) => h.owner?.you).map((h) => row(h, `${h.via} · 完全控制`))}
-        <div className="-mx-4 border-b border-border/70 bg-win px-4 py-1 text-[11px] text-subtle">我能访问的设备</div>
+        <div className="-mx-4 border-b border-border/70 bg-win px-4 py-1 text-caption/[inherit] text-subtle">我能访问的设备</div>
         {HOSTS.filter((h) => !h.owner?.you).map((h) => row(h, `${h.owner ? `所有者 ${h.owner.name}` : "所有者未确认"} · ${h.via} · ${h.rights}`))}
       </Section>
     </>
@@ -263,7 +263,7 @@ export function OwnerTopic() {
       </div>
       <div className="flex items-start rounded-xl border border-border bg-background">
         <nav className="sticky top-0 w-36 shrink-0 self-start border-r border-border/60 p-2">
-          <div className="px-2 pt-1 pb-1.5 text-[11px] text-subtle">连接</div>
+          <div className="px-2 pt-1 pb-1.5 text-caption/[inherit] text-subtle">连接</div>
           {NAV.map((n) => (
             <div key={n} className={`rounded-md px-2 py-1.5 text-sm ${(variant === "c" ? n === "设备" : n === "所有者") ? "bg-surface-2 font-medium text-foreground" : "text-muted"}`}>
               {n}

@@ -5,6 +5,7 @@ import { DEFAULT_CLAUDE_ACCOUNT } from "../../../shared/claudeAccounts";
 import type { CutexRefusal, ProfileCreateKind, ProfileCreateRequest, ProfileItem, ProfilePreset } from "../../../shared/ipc";
 import type { MessageKey } from "../i18n";
 import { createUrlFields, FALLBACK_PRESETS, presetById } from "./profilePresets";
+import { DSH_DEFAULT_MODEL } from "./dshModels";
 
 /** cutex capability: profiles carry `providerFamily`; mid-session switching stays within one family. */
 export const PROFILE_FAMILY_FEATURE = "profile-switch-family";
@@ -46,6 +47,7 @@ export function createRequestOf(form: ProfileCreateForm, existing: readonly stri
   const nameError = profileNameError(form.name, existing);
   if (nameError) return { error: nameError };
   const request: ProfileCreateRequest = { name: form.name.trim(), kind: form.kind };
+  if (form.kind === "dsh") request.options = { dsh: { model: DSH_DEFAULT_MODEL, apiKeyEnv: "DEEPSEEK_API_KEY" } };
   if (form.kind === "apiKey") {
     const fields = createUrlFields({ id: form.preset, preset: presetById(form.preset, presets) }, form.baseUrl);
     if ("error" in fields) return { error: fields.error };

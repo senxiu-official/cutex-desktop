@@ -39,6 +39,7 @@
 // or from Settings → 更新与诊断 (deleteOldReleases).
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { rotateUpdateLog, writeFileAtomic } from "./fileWrites";
 import { join } from "node:path";
 import { app } from "electron";
 import { cleanBinaryLeftovers, installBinaryRelease, LatestReleaseClient, ReleaseCheckError, type BinarySource } from "./binaryUpdate";
@@ -48,6 +49,7 @@ import { envHasProxy, gitProxyArgs, proxyEnv, type Transport } from "./updateTra
 import { effectiveUpdateCheckMinutes, GITHUB_API, GITHUB_WEB, githubRepoOf, isNewerVersion, parseVersion, releasePlatform, updateAssets, type LatestRelease } from "../shared/binaryUpdate";
 import type { UpdateStatus, UpdateStep } from "../shared/ipc";
 import { ReleaseMaintenance } from "./releaseMaintenance";
+import { localSourceCommit } from "./updateProvenance";
 import { bundlePackageJson, LAUNCHER_INSTALL_FILE, launcherSidecarRelease, MAC_BUNDLE, OLD_RELEASE_MAX_AGE_DAYS, MAC_RELEASE_SUFFIX } from "../shared/releases";
 import { backoffMinutes, buildSteps, builtChannel, CHANNEL_FILE, channelFileContent, checkoutPlan, corepackEntryIn, displayRemote, fetchArgs, fetchFailure, interruptedPullHeal, isKnownChannel, resolveInstallLayout, isOwnClone, isPathRemote, parsePorcelainZ, parsePullMarker, parseReleaseInfo, pathRemotePath, PULL_MARKER_FILE, pullFailureMessage, releaseName, resolveChannel, resolveSourceDir, sourceDirtyCheck, spawnPlan, tail, updateOffer, updateRef, type InstallLayout, type PullMarker, type ReleaseInfo } from "../shared/update";
 
@@ -101,6 +103,9 @@ export class Updater {
    * DNS is off for the rest of the run, transfers go through Node with Chromium's proxy decision
    * (updateNet.ts). `net.transport` / `net.updateNet`: replace the Chromium side (tests).
    */
+  /** Runs before every relaunch's `app.exit` (which skips before-quit); must settle quickly (main/index.ts: bounded). */
+  beforeExit: (() => Promise<void>) | null = null;
+
   constructor(
     private readonly emit: (status: UpdateStatus) => void,
     remote: string | null | ((channel: string) => string | null) = null,
@@ -128,7 +133,7 @@ export class Updater {
     if (!("reason" in info) && "reason" in layout && info.releasePage) {
       // A release package unpacked outside the releases layout (e.g. Cutex.app dragged to /Applications):
       // updates are downloaded by hand from its release page.
-      this.status = { state: "unsupported", code: "releasePackage", reason: layout.reason, releasePage: info.releasePage, ...(info.channel ? { channel: info.channel } : {}), current: { commit: info.commit, committedAt: info.committedAt }, latest: null };
+      this.status = { state: "unsupported", code: "releasePackage", reason: layout.reason, releasePage: info.releasePage, ...(info.channel ? { channel: info.channel } : {}), current: { commit: info.commit, committedAt: info.committedAt, ...(info.version ? { version: info.version } : {}) }, latest: null };
       return;
     }
     if ("reason" in info || "reason" in layout) {
@@ -140,7 +145,7 @@ export class Updater {
     this.maintenance = new ReleaseMaintenance(layout, (text) => this.log(text));
     this.channel = resolveChannel(readText(join(layout.baseDir, CHANNEL_FILE)), info.channel);
     const channel = this.channel;
-    const current = { commit: info.commit, committedAt: info.committedAt };
+    const current = { commit: info.commit, committedAt: info.committedAt, ...(info.version ? { version: info.version } : {}) };
     const sourceDir = resolveSourceDir(info.sourceDir, layout, WIN ? "\\" : "/", (dir) => existsSync(join(dir, ".git")));
     if (!sourceDir) {
       // Old-release maintenance above keeps running; only updating needs the checkout. A release package
@@ -188,7 +193,7 @@ export class Updater {
     if (!isKnownChannel(channel)) throw new Error(`unknown update channel: ${channel}`);
     if (this.status.state === "updating" || this.status.state === "ready") return this.state();
     if (channel !== this.channel) {
-      writeFileSync(join(layout.baseDir, CHANNEL_FILE), channelFileContent(channel));
+      writeFileAtomic(join(layout.baseDir, CHANNEL_FILE), channelFileContent(channel));
       this.log(`channel ${this.channel} -> ${channel}`);
       this.channel = channel;
     }
@@ -268,23 +273,30 @@ export class Updater {
       try {
         await this.git([...(await this.fetchProxyArgs()), ...fetchArgs(remote, channel)]);
       } catch (error) {
-        this.unreachable(error, before);
+        await this.unreachable(error, before);
         return this.state();
       }
       this.failures = 0;
       const head = (await this.git(["rev-parse", updateRef(remote, channel)])).trim();
+      // Exported packages have a different Git identity from their private source tree. Never
+      // classify an absent object as a genuine fork. The private mapping stays installation-local.
+      const source = localSourceCommit(this.layout!, info) ?? info.commit;
+      const comparable = await this.git(["cat-file", "-e", `${source}^{commit}`]).then(() => true, () => false);
       let latest: UpdateStatus["latest"] = null;
-      if (head !== info.commit) {
+      if (!comparable || head !== source) {
         // Ahead: the usual update. Not on main at all (a release packaged by hand from another branch,
         // owner 2026-10-14: it then reported "up to date" forever): offer main too. A running build
         // newer than main (main is its ancestor) is never "updated" backwards — unless the owner switched
         // to this channel (the build was made for another one): then its head is offered as the switch.
-        const ahead = await this.isAncestor(info.commit, head);
-        const offer = updateOffer(ahead, !ahead && (await this.isAncestor(head, info.commit)), builtChannel(info) !== channel);
+        const ahead = comparable && await this.isAncestor(source, head);
+        const offer = comparable ? updateOffer(ahead, !ahead && (await this.isAncestor(head, source)), builtChannel(info) !== channel) : "unknown";
         if (offer) {
           const [commit, committedAt, ...subject] = (await this.git(["log", "-1", "--format=%H%x09%cI%x09%s", head])).trim().split("\t");
-          const count = ahead ? Number((await this.git(["rev-list", "--count", `${info.commit}..${head}`])).trim()) || 1 : 0;
-          latest = { commit: commit!, committedAt: committedAt!, subject: subject.join("\t"), count, ...(offer === "offMain" ? { offMain: true } : offer === "switch" ? { switchChannel: true } : {}) };
+          const count = ahead ? Number((await this.git(["rev-list", "--count", `${source}..${head}`])).trim()) || 1 : 0;
+          latest = { commit: commit!, committedAt: committedAt!, subject: subject.join("\t"), count, sourceBuild: true,
+            sourceComparison: comparable ? (ahead ? "ahead" : offer === "offMain" ? "diverged" : "switch") : "unknown",
+            ...(!comparable && info.releasePage && info.version ? { installedReleaseVersion: info.version } : {}),
+            ...(offer === "offMain" ? { offMain: true } : offer === "switch" ? { switchChannel: true } : {}) };
         }
       }
       if (channel !== this.channel) return this.state(); // switched meanwhile: setChannel checks again
@@ -295,6 +307,7 @@ export class Updater {
       this.set({ state: before === "available" ? "available" : "idle", code: undefined, reason: undefined, retryable: undefined, checkedAt: new Date().toISOString() });
     } finally {
       this.busy = false;
+      this.origin = null;
     }
     return this.state();
   }
@@ -302,9 +315,10 @@ export class Updater {
   /**
    * The fetch failed: git missing → noGit (for good); a path remote that does not exist → for good;
    * anything else (network) → retryable, the background check backs off. An update already on offer
-   * stays on offer (the remote may be back by the time the owner clicks).
+   * stays on offer (the remote may be back by the time the owner clicks). Resolves once the state is worded: the
+   * check's promise holds the final status (it resolved while still "checking", the remote's state set afterwards).
    */
-  private unreachable(error: unknown, before: UpdateStatus["state"]): void {
+  private async unreachable(error: unknown, before: UpdateStatus["state"]): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     const checkedAt = new Date().toISOString();
     const kind = fetchFailure(message, (error as NodeJS.ErrnoException)?.code);
@@ -327,11 +341,10 @@ export class Updater {
       this.set({ state: "available", checkedAt });
       return;
     }
-    void this.remoteUrl().then((url) => {
-      const gone = url !== null && isPathRemote(url) && !existsSync(pathRemotePath(url));
-      this.set({ state: "unsupported", code: "remoteUnreachable", reason: gone ? "the update source is a path that does not exist on this machine" : tail(message, 2), retryable: gone ? undefined : true, checkedAt });
-      if (gone) this.schedule(this.minutes);
-    });
+    const url = await this.remoteUrl();
+    const gone = url !== null && isPathRemote(url) && !existsSync(pathRemotePath(url));
+    this.set({ state: "unsupported", code: "remoteUnreachable", reason: gone ? "the update source is a path that does not exist on this machine" : tail(message, 2), retryable: gone ? undefined : true, checkedAt });
+    if (gone) this.schedule(this.minutes);
   }
 
   /**
@@ -456,14 +469,22 @@ export class Updater {
     }
   }
 
+  /**
+   * origin's URL, read once for a check or update and shared by its steps (the source line, the proxy
+   * choice, the unreachable wording; the constructor's and setChannel's source line are read for the check
+   * that follows): one `git remote get-url` instead of up to four. Dropped when the check / update ends, so
+   * the next one sees an edited origin.
+   */
+  private origin: Promise<string | null> | null = null;
+
   /** The remote updates fetch from: the override, else origin's URL (null when unknown). */
-  private async remoteUrl(): Promise<string | null> {
-    if (this.remote) return this.remote;
-    try {
-      return (await this.git(["remote", "get-url", "origin"])).trim() || null;
-    } catch {
-      return null;
-    }
+  private remoteUrl(): Promise<string | null> {
+    if (this.remote) return Promise.resolve(this.remote);
+    this.origin ??= this.git(["remote", "get-url", "origin"]).then(
+      (out) => out.trim() || null,
+      () => null,
+    );
+    return this.origin;
   }
 
   async apply(): Promise<UpdateStatus> {
@@ -531,6 +552,7 @@ export class Updater {
       this.set({ state: "error", step, error: tail(message) });
     } finally {
       this.busy = false;
+      this.origin = null;
     }
     return this.state();
   }
@@ -540,7 +562,7 @@ export class Updater {
   }
 
   private writePullMarker(layout: InstallLayout, marker: PullMarker): void {
-    writeFileSync(this.pullMarkerPath(layout), JSON.stringify(marker));
+    writeFileAtomic(this.pullMarkerPath(layout), JSON.stringify(marker));
   }
 
   /**
@@ -605,13 +627,16 @@ export class Updater {
     this.switchCurrent(layout.currentLink, dest);
     const relaunchPath = this.relaunchPath(layout);
     this.set({ state: "ready" });
-    writeFileSync(this.pendingPath(), JSON.stringify({ from: layout.releaseDir, to: dest, at: new Date().toISOString() } satisfies PendingUpdate));
+    writeFileAtomic(this.pendingPath(), JSON.stringify({ from: layout.releaseDir, to: dest, at: new Date().toISOString() } satisfies PendingUpdate));
     this.log(`switched ${layout.currentLink} -> ${dest}; relaunching ${relaunchPath}`);
     // Relaunch from the link so the next update finds the same layout; exit skips close-to-tray.
     // Long enough to read 「更新完成，正在重启…」 (at 600 ms the owner took the relaunch for a crash).
+    const exitReport = this.runBeforeExit();
     setTimeout(() => {
-      app.relaunch({ execPath: relaunchPath, args: process.argv.slice(1) });
-      app.exit(0);
+      void exitReport.then(() => {
+        app.relaunch({ execPath: relaunchPath, args: process.argv.slice(1) });
+        app.exit(0);
+      });
     }, 2500);
   }
 
@@ -641,11 +666,23 @@ export class Updater {
         this.clearPending();
         return;
       }
-      app.relaunch({ execPath: this.relaunchPath(layout), args: process.argv.slice(1) });
-      app.exit(0);
+      const relaunchPath = this.relaunchPath(layout);
+      void this.runBeforeExit().then(() => {
+        app.relaunch({ execPath: relaunchPath, args: process.argv.slice(1) });
+        app.exit(0);
+      });
     };
     this.readyTimer = setTimeout(() => rollback("no UI after 25 s"), READY_TIMEOUT_MS);
     onRendererGone(() => rollback("renderer process gone"));
+  }
+
+  /** beforeExit, never rejecting. */
+  private runBeforeExit(): Promise<void> {
+    try {
+      return (this.beforeExit?.() ?? Promise.resolve()).catch(() => undefined);
+    } catch {
+      return Promise.resolve();
+    }
   }
 
   /** The renderer committed its first frame: a pending update is good; old releases are tidied up. */
@@ -809,7 +846,8 @@ export class Updater {
       child.stderr.on("data", (d: Buffer) => (err += d.toString()));
       child.on("error", (e) => reject(e));
       child.on("close", (code) => {
-        if (!quiet) this.log(out + err);
+        // A step that worked logs its tail; one that failed, everything (update.log rotates: rotateUpdateLog).
+        if (!quiet) this.log(code === 0 ? tail(out + err, 40) : out + err);
         if (code === 0) resolve(out);
         else reject(new Error(`${command} ${args.slice(0, 3).join(" ")} exited ${code}\n${tail(err || out)}`));
       });
@@ -818,7 +856,9 @@ export class Updater {
 
   private log(text: string): void {
     try {
-      appendFileSync(join(app.getPath("userData"), "update.log"), `[${new Date().toISOString()}] ${text}\n`);
+      const file = join(app.getPath("userData"), "update.log");
+      rotateUpdateLog(file);
+      appendFileSync(file, `[${new Date().toISOString()}] ${text}\n`);
     } catch {
       // logging is best effort
     }

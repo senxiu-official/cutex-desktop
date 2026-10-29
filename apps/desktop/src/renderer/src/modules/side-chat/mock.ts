@@ -1,5 +1,6 @@
 import type { SideChat, SideEvent } from "../../../../shared/sideChat";
 import type { ModuleMock } from "../../dev/mockTypes";
+import { sideMessage, sideMessageId, sideModel, sideReplyErrorMessage } from "../../../../shared/sideChatInput";
 
 /** Entirely separate from MockCore.nativeEvent: even preview Side must never change main history. */
 export const mock: ModuleMock = {
@@ -38,6 +39,7 @@ export const mock: ModuleMock = {
     };
     return {
       async sideOpen(sessionId, input = {}) {
+        const model = sideModel(input.model);
         core.unsupportedFor(sessionId, "sideChat");
         const old = [...chats.values()].find(c => c.sessionId === sessionId && c.status !== "closed");
         if (old) {
@@ -46,7 +48,7 @@ export const mock: ModuleMock = {
         const id = crypto.randomUUID(), now = new Date().toISOString();
         const chat: SideChat = { id, sessionId, threadId: `side-${id}`, anchorTurnId: input.anchorTurnId ?? null, runtimeGeneration: 1,
           lastTurnId: input.lastTurnId ?? null, forkedThroughTurnId: input.lastTurnId ?? "turn-2",
-          status: "ready", createdAt: now, updatedAt: now, activeTurnId: null, revision: 1, events: [], pendingRequests: [], truncated: false, model: input.model ?? "GPT · preview", effort: "medium" };
+          status: "ready", createdAt: now, updatedAt: now, activeTurnId: null, revision: 1, events: [], pendingRequests: [], truncated: false, model: model ?? "GPT · preview", effort: "medium" };
         chats.set(id, chat); return copy(chat);
       },
       async sideList(sessionId) { return { chats: structuredClone([...chats.values()].filter(c => c.sessionId === sessionId && c.status !== "closed")) }; },
@@ -61,6 +63,7 @@ export const mock: ModuleMock = {
         return copy(chat);
       },
       async sideSend(sessionId, chatId, input) {
+        sideMessage(input.text); sideMessageId(input.clientMessageId);
         const chat = get(sessionId, chatId), nonce = `${chatId}:${input.clientMessageId}`;
         const prior = messages.get(nonce); if (prior) return { ...copy(chat), turnId: prior };
         if (chat.status !== "ready") throw new Error("side_chat_busy");
@@ -83,7 +86,8 @@ export const mock: ModuleMock = {
         else changed(chat);
         return copy(chat);
       },
-      async sideRespond(sessionId, chatId, requestId, _reply) {
+      async sideRespond(sessionId, chatId, requestId, reply) {
+        if ("error" in reply) sideReplyErrorMessage(reply.error.message);
         const chat = get(sessionId, chatId);
         if (!chat.pendingRequests.some(r => r.id === requestId)) throw new Error("side_request_not_found");
         chat.pendingRequests = chat.pendingRequests.filter(r => r.id !== requestId); changed(chat);

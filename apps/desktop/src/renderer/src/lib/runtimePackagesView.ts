@@ -5,7 +5,10 @@ import { useTargetHostId, useTargetHostLabel } from "./targetHost";
 import { useHostData } from "./useHostScope";
 import { aboutAttention, RUNTIME_PACKAGES_FEATURE } from "./runtimePackages";
 import { useRuntimePackages, type HostRuntimePackages } from "./runtimePackageStore";
+import { combinedRuntimeCounts, outdatedClaudeRuntimeAgents } from "./claudeRuntimeBatch";
 import { useUpdateStatus } from "./update";
+
+const EMPTY_FEATURES: ReadonlySet<string> = new Set();
 
 /** The target host's runtime package state (lib/targetHost; else the focus host); null without the capability (or not connected). */
 export function useHostRuntimePackages(): HostRuntimePackages | null {
@@ -14,12 +17,21 @@ export function useHostRuntimePackages(): HostRuntimePackages | null {
   const enabled = data?.daemon.kind === "connected" && data.features.has(RUNTIME_PACKAGES_FEATURE);
   const host = useRuntimePackages((s) => s.byHost[hostId]);
   if (!enabled) return null;
-  return host ?? { view: null, error: null, loading: false, actionError: null, starting: false };
+  return host ?? { view: null, error: null, loading: false, actionError: null, starting: false, claudeBatch: null };
 }
 
-/** Outdated agents on the connected host (0 without the capability or before the first load). */
+/** Outdated Claude pins on the target host, derived from the same session list that drives the sidebar. */
+export function useOutdatedClaudeRuntimeAgents() {
+  const hostId = useTargetHostId();
+  const data = useHostData(hostId);
+  return outdatedClaudeRuntimeAgents(data?.features ?? EMPTY_FEATURES, data?.sidebar);
+}
+
+/** Outdated native bundles plus outdated Claude pins (0 before the required host snapshots load). */
 export function useOutdatedAgentCount(): number {
-  return useHostRuntimePackages()?.view?.agents.length ?? 0;
+  const host = useHostRuntimePackages();
+  const claude = useOutdatedClaudeRuntimeAgents();
+  return host ? combinedRuntimeCounts(host.view?.agents ?? [], claude).outdated : 0;
 }
 
 /** Red dot on 关于 (settings nav) and on the sidebar 设置 entry. */

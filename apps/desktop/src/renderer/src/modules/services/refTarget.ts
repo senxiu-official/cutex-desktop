@@ -3,7 +3,7 @@
 // the same path as 服务 page → 打开), path kept. The side only shows the open agent's host, so a link of
 // another host is unavailable; with the browser module off it falls back to the system browser like
 // the 服务 page does.
-import { Globe } from "lucide-react";
+import { Server } from "lucide-react";
 import { openInApp, openServiceExternal } from "../../lib/services";
 import { sideShowsHost } from "../../lib/sideServices";
 import type { CutexRef, RefLinkView, RefOpenResult } from "../slots";
@@ -41,5 +41,5 @@ export async function openServiceRef(ref: CutexRef, how: "auto" | "peek" | "page
 export function useServiceLink(ref: CutexRef): RefLinkView | null {
   const target = parseServiceRefKey(ref.key);
   if (!target) return { tone: "muted", tooltip: ref.key };
-  return { icon: Globe, tooltip: `${target.slug}${target.path === "/" ? "" : target.path}` };
+  return { icon: Server, tooltip: `${target.slug}${target.path === "/" ? "" : target.path}` };
 }

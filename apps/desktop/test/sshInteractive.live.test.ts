@@ -130,7 +130,7 @@ describe.skipIf(!enabled)("interactive ssh against a throwaway sshd", () => {
     const session = broker.session("t");
     const auto = autoAnswer(() => PASS);
     const views: TunnelView[] = [];
-    const tunnel = new SshTunnel({ target: target(), remotePort: httpPort, pids: new TunnelPidFile(join(dir, "pids.json")), onChange: (v) => views.push(v), askpass: session, extraArgs: extraArgs() });
+    const tunnel = new SshTunnel({ targets: [target()], remotePort: httpPort, pids: new TunnelPidFile(join(dir, "pids.json")), onChange: (v) => views.push(v), askpass: session, extraArgs: extraArgs() });
     tunnel.start();
     const up = async () => {
       for (let i = 0; i < 300; i++) {

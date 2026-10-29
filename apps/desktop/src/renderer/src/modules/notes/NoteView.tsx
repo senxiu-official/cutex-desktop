@@ -24,7 +24,7 @@ export function NoteView({ hostId, instance, setState, visible, where }: SideBod
   return <div className="min-h-0 flex-1 overflow-auto p-2.5">
     {result.note ? <NoteCard hostId={hostId} note={result.note} readOnly={where === "peek"} /> : <div className="space-y-2 text-xs text-subtle">
       <p>{noteErrorText(result.error, t) ?? t(result.loading ? "notes.loading" : "notes.missing")}</p>
-      {state.snippet && <p className="whitespace-pre-wrap break-words">{state.snippet}</p>}
+      {state.snippet && <p className="selectable whitespace-pre-wrap break-words">{state.snippet}</p>}
       <Button disabled={result.loading} onClick={() => void notesCache.refreshNote(hostId, state.noteId)}>{t("notes.refresh")}</Button>
     </div>}
   </div>;

@@ -67,8 +67,7 @@ export function notifyMenu(s: NotifyState, t: T, actions: { setAgent(level: Noti
     const label = s.projectMuted
       ? name === null ? t("notify.unmuteIndependent") : t("notify.unmuteProject", { name })
       : name === null ? t("notify.muteIndependent") : t("notify.muteProject", { name });
-    out.push({ label, icon: s.projectMuted ? actions.unmuteIcon : actions.muteIcon, onSelect: actions.toggleProject });
-    out.push({ label: t("notify.muteHint"), note: true, disabled: true, onSelect: () => {} });
+    out.push({ label, icon: s.projectMuted ? actions.unmuteIcon : actions.muteIcon, info: t("notify.muteHint"), onSelect: actions.toggleProject });
   }
   return out;
 }

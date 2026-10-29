@@ -6,14 +6,19 @@
 import { Network } from "lucide-react";
 import { PROXY_MODES_FEATURE } from "../../../../shared/proxy";
 import { defineModule } from "../slots";
-import { HostProxySection, ProxyPage, UpdateProxySection } from "./ProxySections";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const ProxyPage = lazyPage(() => import("./ProxySections").then((m) => m.ProxyPage));
+const UpdateProxySection = lazyPage(() => import("./ProxySections").then((m) => m.UpdateProxySection));
+const HostProxySection = lazyPage(() => import("./ProxySections").then((m) => m.HostProxySection));
 
 export default defineModule({
   id: "proxy",
   titleKey: "proxy.title",
   descriptionKey: "proxy.description",
   contributes: {
-    "settings.page": [{ id: "proxy.page", page: "proxy", group: "connection", order: 270, icon: Network, titleKey: "proxy.page", source: null, hintKey: "proxy.pageHint", Page: ProxyPage }],
+    "settings.page": [{ id: "proxy.page", page: "proxy", group: "connection", order: 270, icon: Network, titleKey: "proxy.page", source: null, hostPart: true, hintKey: "proxy.pageHint", Page: ProxyPage }],
     "settings.section": [
       { id: "proxy.update", page: "proxy", order: 100, titleKey: "proxy.update.title", keywords: ["proxy.mode.system", "proxy.mode.manual", "proxy.url"], Section: UpdateProxySection },
       { id: "proxy.host", page: "proxy", order: 200, requires: { capabilities: [PROXY_MODES_FEATURE] }, unavailable: "notice", titleKey: "proxy.host.title", keywords: ["proxy.noProxy", "proxy.mode.none"], Section: HostProxySection },

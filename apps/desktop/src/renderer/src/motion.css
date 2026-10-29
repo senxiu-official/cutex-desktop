@@ -1,0 +1,38 @@
+/* Motion tokens (owner 2026-10-22, checklist #24, docs/design/021-motion.md; lib/motion.ts mirrors them for the
+   JS-driven motions, test/motion.test.ts keeps both in step). Three durations and one curve for every shell
+   motion; reduced motion sets the durations to 0 (everything that uses a token is then instant). */
+:root {
+  /* Feedback and small things appearing: hover / press fades, a rail's name card, the foretell outline. */
+  --motion-short: 120ms;
+  /* A panel changing: a Shelf expanding / collapsing, 最大化 / 独占 / 全屏, the row sliding, the tray. */
+  --motion-medium: 200ms;
+  /* Something arriving or leaving the screen: a pane opening, a chip flying to the tray, the focus outline. */
+  --motion-long: 280ms;
+  /* The one curve: fast start, soft landing. */
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-short: 0ms;
+    --motion-medium: 0ms;
+    --motion-long: 0ms;
+  }
+}
+/* The first paint (and the frame after it) never animates: the window opens laid out (lib/motion startMotion). */
+:root[data-motion-hold] *,
+:root[data-motion-hold] *::before,
+:root[data-motion-hold] *::after {
+  transition-duration: 0s !important;
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+}
+/* A toast comes up from below (Shelf toast, agent toasts). */
+@keyframes motion-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.motion-toast-in {
+  animation: motion-toast-in var(--motion-medium) var(--ease-standard);
+}

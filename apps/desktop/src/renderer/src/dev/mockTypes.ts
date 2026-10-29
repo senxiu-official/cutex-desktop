@@ -15,6 +15,8 @@ export type MockEvents = Omit<DesktopEvents, keyof DaemonEvents> & DaemonEvents;
 export interface MockCore {
   /** `?legacy`: an older cutex without dev/mockFeatures.ts MOCK_NEW_FEATURES. */
   readonly legacy: boolean;
+  /** Canonical preview project/session records; never a second authority store. */
+  projectRecords(): import("../../../shared/ipc").SidebarSnapshot;
   /** A raw bridge event to the renderer's listeners (a host connection's event: of the shown host). */
   emit<K extends keyof MockEvents>(event: K, payload: MockEvents[K]): void;
   /** A cutex notification on each session's stream and on the host feed (like cutex's event store). */
@@ -111,5 +113,5 @@ export type MockAdmissionEntry = (Extract<import("@cutex-desktop/protocol").Admi
 export interface MockProfileRef {
   id: string;
   name: string;
-  cliKind: "codex" | "claude";
+  cliKind: "codex" | "claude" | "dsh" | "kimi";
 }

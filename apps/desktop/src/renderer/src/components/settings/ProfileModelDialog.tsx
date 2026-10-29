@@ -2,13 +2,14 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import type { CatalogModel, CatalogModelPatch, ProfileModelsView } from "../../../../shared/ipc";
-import { useI18n } from "../../i18n";
-import { entryNamePatch, modelDraft, modelNameTaken, modelVariantPatch, MODEL_EFFORTS } from "../../lib/profileModels";
+import { useI18n, type MessageKey } from "../../i18n";
+import { entryNamePatch, modelDraft, modelNameTaken, modelVariantPatch, isClaudeModelsView, MODEL_EFFORTS } from "../../lib/profileModels";
 import { updateProfileModelNames, useModelName } from "../../lib/modelDisplay";
 import { updateCachedProfile } from "../../lib/profileSnapshot";
 import { Button, IconButton, SettingRow, Select, TextInput, Toggle } from "./Form";
 import { CompactInput, WindowInput } from "./ProfileContextInputs";
 import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
+import { useOverlayRoot } from "../../lib/ownerContext";
 
 /**
  * Add / edit one model entry of a profile. `catalog`: the entry's catalog row is editable (context,
@@ -16,6 +17,7 @@ import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
  * With only `names`, the dialog edits just the entry's display name.
  */
 export function ProfileModelDialog({ model, profile, view, variant = false, catalog = true, names = false, onClose, onSaved }: { model: CatalogModel | null; profile: string; view: ProfileModelsView; variant?: boolean; catalog?: boolean; names?: boolean; onClose(): void; onSaved(v: ProfileModelsView): void }) {
+  const overlayRoot = useOverlayRoot();
   const api = useTargetApi();
   const targetHost = useTargetHostId();
   const { t } = useI18n();
@@ -23,7 +25,7 @@ export function ProfileModelDialog({ model, profile, view, variant = false, cata
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const [id, setId] = useState(variant ? "" : (model?.id ?? ""));
-  const [draft, setDraft] = useState<CatalogModelPatch>(() => ({ ...modelDraft(model), ...(variant ? { displayName: "" } : {}) }));
+  const [draft, setDraft] = useState<CatalogModelPatch>(() => ({ ...modelDraft(model), ...(!model && !isClaudeModelsView(view) ? { supportedReasoningEfforts: [], defaultReasoningEffort: null } : {}), ...(variant ? { displayName: "" } : {}) }));
   const [entryName, setEntryName] = useState(variant ? "" : (model?.entryDisplayName ?? ""));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,6 +42,8 @@ export function ProfileModelDialog({ model, profile, view, variant = false, cata
     return () => el.close();
   }, []);
   const efforts = draft.supportedReasoningEfforts ?? [];
+  const codex = !isClaudeModelsView(view);
+  const effortName = (id: string) => { const key = `composer.effort.${id}` as MessageKey; return t(key) === key ? id : t(key); };
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -86,61 +90,65 @@ export function ProfileModelDialog({ model, profile, view, variant = false, cata
             </IconButton>
           </span>
         </div>
+        {codex && <p className="mb-3 text-xs text-subtle">{t("settings.profileParity.modelEntryHint" as MessageKey)}</p>}
         <fieldset disabled={busy}>
-        {requestModel && <SettingRow label={t("agent-config.profile.baseModel")} hint={t("agent-config.profile.variantHint")}>
+        {requestModel && <SettingRow source="host" agents="none" label={t("agent-config.profile.baseModel")} info={t("agent-config.profile.variantHint")}>
           <span className="text-sm" title={requestModel}>{modelName(requestModel, requestRow?.displayName, profile)}</span>
         </SettingRow>}
-        {(creating || !requestModel) && <SettingRow label={t(variant ? "agent-config.profile.variantName" : "agent-config.profile.modelId")}>
+        {(creating || !requestModel) && <SettingRow source="host" agents={catalog && creating ? "next" : "none"} label={t(variant ? "agent-config.profile.variantName" : "agent-config.profile.modelId")}>
           <TextInput mono={!variant} value={id} disabled={!creating} maxLength={200} onChange={setId} placeholder={variant ? "Astra [400K]" : "glm-5"} autoFocus={creating} />
         </SettingRow>}
         {names ? (
-          <SettingRow label={t("agent-config.profile.displayName")} hint={t("agent-config.profile.entryNameHint")}>
+          <SettingRow source="host" agents="none" label={t("agent-config.profile.displayName")} hint={t("agent-config.profile.entryNameHint")}>
             <TextInput value={entryName} maxLength={80} onChange={setEntryName} placeholder={model?.displayName || model?.id || id || undefined} />
           </SettingRow>
-        ) : !variant && catalog && <SettingRow label={t("agent-config.profile.displayName")}>
+        ) : !variant && catalog && <SettingRow source="host" agents="none" label={t("agent-config.profile.displayName")}>
           <TextInput value={draft.displayName ?? ""} onChange={(v) => setDraft({ ...draft, displayName: v || null })} />
         </SettingRow>}
         {catalog && <>
-        <SettingRow label={t("agent-config.profile.contextWindow")} hint={t("agent-config.profile.contextWindowHint")}>
+        <SettingRow source="host" agents="next" label={t("agent-config.profile.contextWindow")} hint={t("agent-config.profile.contextWindowHint")}>
           <WindowInput value={draft.contextWindow ?? null} onChange={(v) => setDraft({ ...draft, contextWindow: v })} onValidityChange={(v) => setValid((s) => ({ ...s, context: v }))} allowInherit inheritLabel={t("agent-config.profile.unset")} />
         </SettingRow>
-        <SettingRow label={t("agent-config.profile.maxContextWindow")} hint={t("agent-config.profile.maxContextWindowHint")}>
+        <SettingRow source="host" agents="next" label={t("agent-config.profile.maxContextWindow")} hint={t("agent-config.profile.maxContextWindowHint")}>
           <WindowInput value={draft.maxContextWindow ?? null} onChange={(v) => setDraft({ ...draft, maxContextWindow: v })} onValidityChange={(v) => setValid((s) => ({ ...s, max: v }))} allowInherit inheritLabel={t("agent-config.profile.unset")} />
         </SettingRow>
-        <SettingRow label={t("agent-config.profile.autoCompact")}>
+        <SettingRow source="host" agents="next" label={t("agent-config.profile.autoCompact")}>
           <CompactInput value={draft.autoCompactTokenLimit ?? null} window={draft.contextWindow ?? draft.maxContextWindow ?? null} onChange={(v) => setDraft({ ...draft, autoCompactTokenLimit: v })} onValidityChange={(v) => setValid((s) => ({ ...s, compact: v }))} allowInherit />
         </SettingRow>
-        <SettingRow label={t("agent-config.profile.vision")}>
+        <SettingRow source="host" agents="next" label={t("agent-config.profile.vision")}>
           <Toggle
             checked={(draft.inputModalities ?? []).includes("image")}
             onChange={(v) => setDraft({ ...draft, inputModalities: v ? ["text", "image"] : ["text"] })}
           />
         </SettingRow>
-        <SettingRow label={t("agent-config.profile.efforts")} hint={t("agent-config.profile.effortsHint")}>
+        <SettingRow source="host" agents="next" label={t("agent-config.profile.efforts")} hint={t((codex ? "settings.profileParity.capabilityDeclaration" : "agent-config.profile.effortsHint") as MessageKey)}>
           <span className="flex max-w-72 flex-wrap justify-end gap-1">
             {MODEL_EFFORTS.map((e) => {
               const on = efforts.includes(e);
               return (
                 <button
                   key={e}
+                  title={e}
+                  aria-pressed={on}
                   onClick={() => {
                     const next = on ? efforts.filter((x) => x !== e) : MODEL_EFFORTS.filter((x) => x === e || efforts.includes(x));
                     setDraft({ ...draft, supportedReasoningEfforts: next, defaultReasoningEffort: next.includes(draft.defaultReasoningEffort ?? "") ? draft.defaultReasoningEffort : (next[0] ?? null) });
                   }}
                   className={`rounded-md border px-2 py-0.5 text-xs ${on ? "border-accent text-accent" : "border-border text-subtle"}`}
                 >
-                  {e}
+                  {codex ? effortName(e) : e}
                 </button>
               );
             })}
           </span>
         </SettingRow>
-        <SettingRow label={t("agent-config.profile.defaultEffort")}>
-          <Select value={draft.defaultReasoningEffort ?? ""} options={efforts.map((e) => ({ value: e, label: e }))} onChange={(v) => setDraft({ ...draft, defaultReasoningEffort: v })} />
+        <SettingRow source="host" agents="next" label={t("agent-config.profile.defaultEffort")} hint={codex ? t("settings.profileParity.entryEffortDefaultHint" as MessageKey) : undefined}>
+          <Select value={draft.defaultReasoningEffort ?? ""} options={[...(codex ? [{ value: "", label: t("settings.profileParity.runtimeEffortDefault" as MessageKey) }] : []), ...efforts.map((e) => ({ value: e, label: codex ? effortName(e) : e }))]} onChange={(v) => setDraft({ ...draft, defaultReasoningEffort: v || null })} />
         </SettingRow>
         </>}
+
         </fieldset>
-        {catalog ? <p className="mt-3 text-xs text-subtle">{t("agent-config.profile.appliesNext")}</p> : <p className="mt-3 text-xs text-subtle">{t("agent-config.profile.entryNameOnly")}</p>}
+        {!catalog && <p className="mt-3 text-xs text-subtle">{t("agent-config.profile.entryNameOnly")}</p>}
         {catalog && overridden && <p className="mt-2 text-xs text-warn">{t("agent-config.profile.variantOverridden")}</p>}
         {taken && <p className="mt-2 text-xs text-danger">{t("agent-config.profile.modelNameTaken")}</p>}
         {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
@@ -151,7 +159,7 @@ export function ProfileModelDialog({ model, profile, view, variant = false, cata
             <Button primary disabled={busy || !id.trim() || taken || !Object.values(valid).every(Boolean)} onClick={() => void save()}>{t("settings.save")}</Button>
           </div>
         </div>
-    </dialog>, document.body,
+    </dialog>, overlayRoot,
   );
 }
 

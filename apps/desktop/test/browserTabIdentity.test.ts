@@ -114,3 +114,45 @@ describe("main-only browser pool provenance",()=>{
     store.rollback("local",id); expect(store.agent("local",id)).toBe(false); expect(raw).toBe("[]");
   });
 });
+
+describe("a full agent list expires closed tabs (owner 2026-10-23)", () => {
+  const tab = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
+  const full = () => JSON.stringify(Array.from({ length: 4096 }, (_, n) => ["local", tab(n)])); // legacy: agent rows only
+
+  it("drops the oldest rows of closed tabs, keeps open ones, and turns strict so a dropped key stays isolated", () => {
+    let raw = full();
+    const storage = { read: () => raw, write: (content: string) => { raw = content; } };
+    const open = [{ hostId: "local", tabKey: tab(0) }, { hostId: "local", tabKey: tab(1) }];
+    const owner = "00000000-0000-4000-8000-00000000ffff";
+    const store = createBrowserTabIdentity(storage, { open: () => open });
+    store.registerOwner("local", owner);
+    expect(store.register("local", tab(5000))).toBe(true);
+    const file = JSON.parse(raw) as { version: number; strict: boolean; agent: [string, string][]; owner: [string, string][] };
+    expect(file.version).toBe(2);
+    expect(file.strict).toBe(true);
+    expect(file.agent.length).toBe(4096 - 512 + 1);
+    const rows = new Set(file.agent.map(([, k]) => k));
+    expect(rows.has(tab(0)) && rows.has(tab(1)) && rows.has(tab(5000))).toBe(true);
+    expect(rows.has(tab(2))).toBe(false); // the oldest closed one went
+    expect(file.owner.map(([, k]) => k)).toEqual([owner]);
+    const next = createBrowserTabIdentity(storage);
+    // A dropped key never becomes an owner tab: unknown in strict mode = isolated agent pool, proof required.
+    expect(next.owner("local", tab(2))).toBe(false);
+    expect(next.agent("local", tab(2))).toBe(true);
+    expect(next.unproven("local", tab(2))).toBe(true);
+    expect(next.agent("local", owner)).toBe(false);
+  });
+
+  it("still refuses when every row belongs to an open tab", () => {
+    const rows = Array.from({ length: 4096 }, (_, n) => ({ hostId: "local", tabKey: tab(n) }));
+    const store = createBrowserTabIdentity({ read: full, write: () => {} }, { open: () => rows });
+    expect(() => store.register("local", tab(5000))).toThrow("lease_limit");
+  });
+
+  it("a failed write keeps the old list and mode", () => {
+    const store = createBrowserTabIdentity({ read: full, write: () => { throw Error("disk"); } }, { open: () => [] });
+    expect(() => store.register("local", tab(5000))).toThrow("browser_identity_unavailable");
+    expect(store.agent("local", tab(2))).toBe(true);
+    expect(store.requiresProof()).toBe(false);
+  });
+});

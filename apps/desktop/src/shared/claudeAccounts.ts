@@ -2,12 +2,13 @@
 // `/v2/claude/accounts` (cutex `src/management/v2/claude_accounts_api.rs`, schema export
 // `claude-accounts.json`) and the request bodies the main process sends.
 //
-// The desktop never handles a Claude credential (docs/research/claude-multi-account.md decision 2):
-// there is no login over HTTP (the owner runs the account's `loginCommand` in a terminal on the host,
-// then the desktop asks cutex for the status), and the write-only `apiKey` field is never sent (an
-// API account's key is set with `cutex human claude account set <id> --api-key-stdin`). The
-// sanitizers below refuse a body that carries one, so a renderer bug cannot leak a key to cutex
-// through this bridge either.
+// Credentials (owner 2026-10-27, docs/design/042): there is still no login over HTTP (the owner runs the
+// account's `loginCommand` in a terminal on the host, then the desktop asks cutex for the status). An API
+// account's key may now be typed in the desktop: write-only, renderer → preload → main → cutex, in the
+// create body or `PATCH {apiKey}` only, never read back (items say `api.apiKeyPresent`), never logged,
+// stored or echoed in an error. The terminal path (`cutex human claude account set <id> --api-key-stdin`)
+// stays as the alternative. The sanitizers below rebuild every body from known fields, so a key cannot
+// leave through any other field (secret-named env entries are refused).
 import type { CutexRefusal, QuotaGauge } from "./ipc";
 
 /** cutex capability of `/v2/claude/accounts`. */
@@ -18,6 +19,8 @@ export const DEFAULT_CLAUDE_ACCOUNT = "default";
 export const CLAUDE_ACCOUNT_ID = /^(default|ca-[a-z0-9]{1,32})$/;
 /** cutex `MAX_LABEL_CHARS`. */
 export const MAX_CLAUDE_ACCOUNT_LABEL = 64;
+/** cutex `MAX_API_KEY_BYTES`. */
+export const MAX_CLAUDE_API_KEY_BYTES = 4096;
 /** How an API account's key reaches Claude Code: `x-api-key` or `Authorization: Bearer`. */
 export const CLAUDE_KEY_ENVS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] as const;
 export type ClaudeKeyEnv = (typeof CLAUDE_KEY_ENVS)[number];
@@ -98,7 +101,7 @@ export interface ClaudeAccountRemoved {
   keptHome: string | null;
 }
 
-/** `POST /v2/claude/accounts` as the desktop sends it: never `apiKey`. */
+/** `POST /v2/claude/accounts` as the desktop sends it. */
 export interface ClaudeAccountCreate {
   label: string;
   kind: ClaudeAccountKind;
@@ -106,6 +109,8 @@ export interface ClaudeAccountCreate {
   baseUrl?: string;
   keyEnv?: ClaudeKeyEnv;
   env?: Record<string, string>;
+  /** api only; write-only (cutex never returns it). */
+  apiKey?: string;
 }
 
 export type ClaudeAccountResult = { ok: true; account: ClaudeAccount } | { ok: false; error: CutexRefusal };
@@ -145,20 +150,39 @@ const ENV_KEY = /^[A-Z][A-Z0-9_]{0,63}$/;
 /** Names that carry a credential (cutex's allow-list refuses them too; MAX_THINKING_TOKENS etc. stay allowed). */
 const SECRET_ENV = /(^|_)(API_KEY|AUTH_TOKEN|OAUTH_TOKEN|ACCESS_TOKEN|SECRET|PASSWORD)(_|$)/;
 
+/** cutex's limit for a stored API key (src/profiles/settings_api.rs MAX_API_KEY_BYTES). */
+const MAX_API_KEY_BYTES = 4096;
+
+/** A write-only API key as cutex accepts it (1–4096 bytes, no whitespace or control characters), or an Error. */
+export function writeOnlyApiKey(value: unknown): string {
+  if (typeof value !== "string" || !value || new TextEncoder().encode(value).length > MAX_API_KEY_BYTES || /[\s\u0000-\u001f\u007f]/.test(value)) throw new Error("bad API key");
+  return value;
+}
+
 /**
- * `POST /v2/claude/accounts` from renderer input, or an Error. Only the fields the desktop may send;
- * an `apiKey` (or any secret-looking env entry) is refused outright. cutex validates everything again
- * (base URL form, the env allow-list) and answers 400 with the reason.
+ * A key cutex accepts (its `validate_api_key`: trimmed, 1–4096 bytes, no whitespace / control
+ * characters), or an Error. The error never contains the value.
+ */
+export function claudeApiKey(value: unknown): string {
+  if (typeof value !== "string") throw new Error("bad Claude API key");
+  const key = value.trim();
+  if (!key || new TextEncoder().encode(key).length > MAX_CLAUDE_API_KEY_BYTES || /[\s\u0000-\u001f\u007f-\u009f]/u.test(key)) throw new Error("bad Claude API key");
+  return key;
+}
+
+/**
+ * `POST /v2/claude/accounts` from renderer input, or an Error. Only the fields the desktop may send; a
+ * write-only `apiKey` only on an API account, and no secret-looking env entry. cutex validates everything
+ * again (base URL form, the env allow-list) and answers 400 with the reason.
  */
 export function claudeAccountCreateBody(input: unknown): ClaudeAccountCreate {
   const r = (input ?? {}) as Record<string, unknown>;
-  if ("apiKey" in r) throw new Error("the desktop never sends a Claude API key");
   const label = claudeAccountLabel(r.label);
   if (!label) throw new Error("bad Claude account label");
   const kind = r.kind ?? "subscription";
   if (kind !== "subscription" && kind !== "api") throw new Error("bad Claude account kind");
   if (kind === "subscription") {
-    if (r.baseUrl !== undefined || r.keyEnv !== undefined || r.env !== undefined) throw new Error("API settings on a subscription account");
+    if (r.baseUrl !== undefined || r.keyEnv !== undefined || r.env !== undefined || "apiKey" in r) throw new Error("API settings on a subscription account");
     return { label, kind };
   }
   const body: ClaudeAccountCreate = { label, kind };
@@ -182,7 +206,13 @@ export function claudeAccountCreateBody(input: unknown): ClaudeAccountCreate {
     }
     if (Object.keys(env).length) body.env = env;
   }
+  if ("apiKey" in r) body.apiKey = writeOnlyApiKey(r.apiKey);
   return body;
+}
+
+/** `PATCH /v2/claude/accounts/{id}` for 设置 / 替换 key: `{apiKey}` only (cutex cannot clear a key). */
+export function claudeAccountKeyBody(apiKey: unknown): { apiKey: string } {
+  return { apiKey: claudeApiKey(apiKey) };
 }
 
 /** `PATCH /v2/claude/accounts/{id}` for 重命名: `{label}` only. */

@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import type { HostsState, ExtraInput } from "../src/shared/ipc";
 import type { SessionView } from "../src/renderer/src/store";
 import { emptyTimeline } from "../src/renderer/src/lib/timeline";
@@ -155,6 +155,12 @@ function expectUntouched(previous: ReturnType<typeof sentinel>) {
   expect(mock.api.queueResume).not.toHaveBeenCalled();
   expect(mock.api.queueList).not.toHaveBeenCalled();
 }
+// Each test needs a fresh store (vi.resetModules() below), so the import stays in beforeEach; this warm-up loads the
+// graph once first, so its first transform is not billed to the first test (it neared 5 s under the full suite's load).
+beforeAll(async () => {
+  await import("../src/renderer/src/store");
+  await import("../src/renderer/src/lib/composerDrafts");
+}, 60_000);
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();

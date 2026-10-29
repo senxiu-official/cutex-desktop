@@ -11,6 +11,9 @@ import { APPROVAL_DECIDED_BY_FEATURE, APPROVALS_FEATURE, approvalDecisionTrace, 
 import { useHostAccess } from "./hostAccess";
 import { hostApi } from "./hostLists";
 import { hostData } from "./hostScope";
+export async function decideRoutingReviewOn(host: string, record: import("../../../shared/delegationUpgradePreview").UpgradeApprovalRead, decision: ApprovalDecision): Promise<void> {
+  return (await import("./routingReviews")).decideRoutingReviewOn(host, record, decision);
+}
 
 /**
  * One decision to `hostId`: the focus host's through the store (it drops the record from its list at
@@ -36,6 +39,8 @@ export interface AskReview {
   canDecide: boolean;
   /** The host has the 审批 page (owner-approvals in this connection's feature set). */
   approvalsPage: boolean;
+  loaded: boolean;
+  routingSupported: boolean;
 }
 
 /** Reloads asked for (host + askId), once per desktop run. */
@@ -47,12 +52,17 @@ const reloaded = new Set<string>();
  * record missing from a loaded list (an older cutex without approvals-live, or a list read before the
  * review was filed) reloads the host's list once.
  */
-export function useAskReview(hostId: string, askId: string, active: boolean): AskReview {
+export function useAskReview(hostId: string, askId: string, active: boolean, references: readonly string[] = []): AskReview {
   const access = useHostAccess(hostId);
   const features = useApp((s) => featuresOf(s, hostId));
   const list = useApp((s) => (active ? (hostData(s, hostId)?.approvals ?? null) : null));
   const refreshOn = useApp((s) => s.refreshApprovalsOn);
-  const record = useMemo(() => (active ? askReviewApproval(list, askId) : null), [active, list, askId]);
+  const ids = references.join("\n");
+  const record = useMemo(() => {
+    if (!active) return null;
+    const matching = ids ? list?.filter(record => ids.split("\n").includes(record.approvalId)) : list;
+    return askReviewApproval(matching, askId);
+  }, [active, list, askId, ids]);
   const canDecide = active && canDecideApprovals(features, access);
   const missing = canDecide && !record;
   useEffect(() => {
@@ -61,5 +71,5 @@ export function useAskReview(hostId: string, askId: string, active: boolean): As
     reloaded.add(key);
     void refreshOn(hostId);
   }, [missing, hostId, askId, refreshOn]);
-  return { record, canDecide, approvalsPage: features.has(APPROVALS_FEATURE) };
+  return { record, canDecide, approvalsPage: features.has(APPROVALS_FEATURE), loaded: list !== null, routingSupported: features.has("delegation-review-refs") };
 }

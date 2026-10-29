@@ -10,7 +10,7 @@ const { zhCN } = await import("../src/renderer/src/i18n/zh-CN");
 const { en } = await import("../src/renderer/src/i18n/en");
 const { cleanText, searchSettings } = await import("../src/renderer/src/lib/settingsSearch");
 const { settingsSearchDocs } = await import("../src/renderer/src/lib/settingsSearchView");
-const { isSettingsHostPage, settingsCardGate, settingsPageAccess, settingsSectionGate } = await import("../src/renderer/src/lib/settingsGate");
+const { isSettingsHostPage, settingsCardGate, settingsPageAccess, settingsPageHasHostPicker, settingsSectionGate } = await import("../src/renderer/src/lib/settingsGate");
 const { entryCapabilities } = await import("../src/renderer/src/lib/hostGating");
 const { USERS_FEATURE } = await import("../src/shared/users");
 const { PEERS_FEATURE } = await import("../src/shared/peers");
@@ -34,6 +34,18 @@ const host = (features: Iterable<string>) => ({ features: new Set(features), fea
 const OWNER = { isOwner: true, pending: false };
 const MEMBER = { isOwner: false, pending: false };
 const PENDING = { isOwner: false, pending: true };
+
+it("the page header picks a host only for host pages and pages with a host part", () => {
+  const pages = PAGES.filter((entry) => settingsPageHasHostPicker(entry.item)).map((entry) => entry.item.page).sort();
+  expect(pages).toEqual([
+    "access", "archive", "backend", "browser", "collab", "defaults", "hooks", "instructions", "mcp", "nci",
+    "notifications", "plugins", "profiles", "proxy", "runtime", "skills", "storage", "usage", "users",
+  ]);
+  for (const page of ["general", "appearance", "sidebar", "conversation", "sides", "status", "tray", "desktop", "me", "hosts", "modules", "shortcuts", "whats-new", "updates", "about", "help"]) {
+    expect(PAGES.some((entry) => entry.item.page === page), page).toBe(true);
+    expect(pages, page).not.toContain(page);
+  }
+});
 
 function docs(locale: "zh-CN" | "en", hostTarget: Omit<Target, "hostId">, appFeatures: Iterable<string> = MODERN) {
   const [cur, other] = locale === "en" ? [en, zhCN] : [zhCN, en];

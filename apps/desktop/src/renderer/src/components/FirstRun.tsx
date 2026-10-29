@@ -45,7 +45,7 @@ export function FirstRunPanel({ view, daemon }: { view: Exclude<FirstRunView, nu
         </div>
         {view === "notInstalled" && (
           <>
-            <p className="mb-3 text-muted">{t("firstRun.notInstalled.body")}</p>
+            <p className="mb-3 whitespace-pre-line text-muted">{t("firstRun.notInstalled.body")}</p>
             <ol className="mb-4 list-decimal space-y-1 pl-5 text-muted">
               <li>{t("firstRun.notInstalled.step1")}</li>
               <li>{t("firstRun.notInstalled.step2")}</li>
@@ -53,17 +53,17 @@ export function FirstRunPanel({ view, daemon }: { view: Exclude<FirstRunView, nu
             </ol>
           </>
         )}
-        {view === "notRunning" && <p className="mb-4 text-muted">{t("firstRun.notRunning.body", { url })}</p>}
-        {view === "empty" && !noProfiles && <p className="text-muted">{t("firstRun.empty.body")}</p>}
+        {view === "notRunning" && <p className="mb-4 whitespace-pre-line text-muted">{t("firstRun.notRunning.body", { url })}</p>}
+        {view === "empty" && !noProfiles && <p className="whitespace-pre-line text-muted">{t("firstRun.empty.body")}</p>}
         {view === "empty" && noProfiles && (
           <>
-            <p className="mb-4 text-muted">{t("firstRun.empty.noProfile")}</p>
+            <p className="mb-4 whitespace-pre-line text-muted">{t("firstRun.empty.noProfile")}</p>
             <Button primary onClick={() => openSettings("profiles", { create: true })}>{t("firstRun.empty.addProfile")}</Button>
           </>
         )}
         {view === "noHost" && (
           <>
-            <p className="mb-4 text-muted">{t("firstRun.noHost.body")}</p>
+            <p className="mb-4 whitespace-pre-line text-muted">{t("firstRun.noHost.body")}</p>
             <div className="flex flex-wrap items-center gap-2">
               <Button primary onClick={() => openSettings("hosts", { anchor: "addHost" })}>{t("firstRun.noHost.add")}</Button>
               {guide}

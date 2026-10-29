@@ -1,3 +1,4 @@
+import { isImeComposing } from "../lib/ime";
 // The reply box of an agent → owner message (owner-notify 回复): textarea, Ctrl+Enter / Esc, 取消 /
 // 发送. Shared by the timeline card (components/OwnerNotifyCard) and the open agent's 等你回复 row
 // above the composer (components/PendingOwnerNotes), so a reply from either place is the same
@@ -56,6 +57,7 @@ export function OwnerReplyBox({
         maxLength={OWNER_REPLY_MAX}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
+          if (isImeComposing(e)) return;
           if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             void send();
@@ -70,7 +72,7 @@ export function OwnerReplyBox({
         className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
       />
       <div className="mt-1 flex items-center justify-end gap-2">
-        <span className="mr-auto text-[11px] text-subtle">{t("ownerNotify.replyHint")}</span>
+        <span className="mr-auto text-caption/[inherit] text-subtle">{t("ownerNotify.replyHint")}</span>
         <button onClick={() => onClose(false)} className="rounded-lg px-3 py-1 text-sm text-muted hover:bg-surface-2 hover:text-foreground">
           {t("ownerNotify.cancel")}
         </button>

@@ -3,7 +3,12 @@
 // collapsed 「高级」 card at the page end with 消息总线 (agent bus on / port / token) and, with cutex
 // agent-bus-stuck-messages, 卡住的消息 (list + 丢弃 / 全部丢弃). Search finds both and opens the card.
 import { defineModule } from "../slots";
-import { ADVANCED_SECTION, AdvancedSection, DeliverySection } from "./BusSettings";
+import { ADVANCED_SECTION } from "./BusSettings";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const DeliverySection = lazyPage(() => import("./BusSettings").then((m) => m.DeliverySection));
+const AdvancedSection = lazyPage(() => import("./BusSettings").then((m) => m.AdvancedSection));
 
 export default defineModule({
   id: "agent-bus",

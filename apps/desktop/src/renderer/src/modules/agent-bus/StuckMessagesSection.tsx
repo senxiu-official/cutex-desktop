@@ -2,9 +2,11 @@
 // messages with who sent them to whom, how long they have waited and a preview, 丢弃 per row (click
 // twice) and 全部丢弃 (click twice, the button says how many). Discarding makes a message terminal in
 // cutex and withdraws it from the live queue; it is never redelivered.
+import { MessageSettlementControl } from "../../components/MessageSettlementControl";
+import { useTargetHostId } from "../../lib/targetHost";
 import { Loader2, X } from "lucide-react";
 import type { StuckBusMessage } from "../../../../shared/ipc";
-import { Button, EmptyState, ErrorNote, IconButton, ListRow, Loading, Notice, RefreshButton, Section, Select } from "../../components/settings/Form";
+import { Button, EmptyState, ErrorNote, IconButton, ListRow, Loading, Notice, RefreshButton, Section, Select, SettingsGroup } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { FIELD_W } from "../../lib/fieldWidths";
@@ -35,7 +37,8 @@ export function StuckMessagesSection() {
       hint={t("agent-bus.stuck.hint")}
       actions={
         <>
-          <Select value={String(s.minAge)} options={minAgeOptions} width={FIELD_W.short} label={t("agent-bus.stuck.minAge")} disabled={s.bulk !== null} onChange={(v) => s.setMinAge(Number(v))} />
+          {/* A view filter of the list (localStorage), not a setting. */}
+          <div role="search" className="contents"><Select value={String(s.minAge)} options={minAgeOptions} width={FIELD_W.short} label={t("agent-bus.stuck.minAge")} disabled={s.bulk !== null} onChange={(v) => s.setMinAge(Number(v))} /></div>
           {view && view.messages.length > 0 && <DiscardAllButton count={targets.length} progress={s.bulk} disabled={working && s.bulk === null} onDiscardAll={() => void s.discardEverything()} />}
           <RefreshButton disabled={s.loading || working} onClick={() => void s.refresh()} />
         </>
@@ -43,7 +46,11 @@ export function StuckMessagesSection() {
     >
       {s.error && <ErrorNote>{s.error}</ErrorNote>}
       {!view && !s.error && <Loading rows={2} />}
-      {view && <Body state={s} view={view} />}
+      {view && (
+        <SettingsGroup agents="now" source="host">
+          <Body state={s} view={view} />
+        </SettingsGroup>
+      )}
     </Section>
   );
 }
@@ -62,7 +69,7 @@ function Body({ state, view }: { state: StuckMessagesState; view: NonNullable<St
       ) : (
         <>
           {messages.map((m) => (
-            <MessageRow key={m.messageId} message={m} busy={state.busy.has(m.messageId)} disabled={working} onDiscard={() => void state.discardOne(m)} />
+            <MessageRow key={m.messageId} message={m} busy={state.busy.has(m.messageId)} disabled={working} onRefresh={state.refresh} onDiscard={() => void state.discardOne(m)} />
           ))}
           {(view.total > messages.length || protectedRows > 0) && (
             <div className="py-2">
@@ -111,13 +118,14 @@ function SummaryNotes({ state }: { state: StuckMessagesState }) {
   );
 }
 
-function MessageRow({ message: m, busy, disabled, onDiscard }: { message: StuckBusMessage; busy: boolean; disabled: boolean; onDiscard(): void }) {
+function MessageRow({ message: m, busy, disabled, onDiscard, onRefresh }: { message: StuckBusMessage; busy: boolean; disabled: boolean; onDiscard(): void; onRefresh(): Promise<void> }) {
+  const hostId = useTargetHostId();
   const { t } = useI18n();
   const sender = senderLabel(m);
   const from = !sender ? t("agent-bus.stuck.unknownParty") : "name" in sender ? sender.name : t(`agent-bus.stuck.sender.${sender.kind}` as MessageKey);
   const to = partyName(m.to) ?? t("agent-bus.stuck.unknownParty");
   const kind = knownKind(m.senderKind);
-  const stateLabel = (["pending", "stale_held", "live_only"] as const).includes(m.state as "pending") ? t(`agent-bus.stuck.state.${m.state}` as MessageKey) : m.state;
+  const stateLabel = m.settlement ? t(m.settlement.state === "closed" ? "agent-bus.settlement.closed" : "agent-bus.settlement.unknown") : (["pending", "stale_held", "live_only"] as const).includes(m.state as "pending") ? t(`agent-bus.stuck.state.${m.state}` as MessageKey) : m.state;
   const age = ageText(m.ageSecs, t);
   const detail = [stateLabel, kind ? t(`agent-bus.stuck.kind.${kind}` as MessageKey) : m.senderKind, age ? t("agent-bus.stuck.waited", { age }) : t("agent-bus.stuck.ageUnknown")].filter(Boolean).join(" · ");
   const ids = [m.from?.id && `${m.from.id}`, m.to?.id && `${m.to.id}`].filter(Boolean).join(" → ");
@@ -130,15 +138,16 @@ function MessageRow({ message: m, busy, disabled, onDiscard }: { message: StuckB
         </span>
       }
       detail={detail}
-      actions={<DiscardButton busy={busy} disabled={disabled} onDiscard={onDiscard} />}
+      actions={m.settlement ? undefined : <DiscardButton busy={busy} disabled={disabled} onDiscard={onDiscard} />}
       below={
         <div className="pt-0.5" title={reasonsTooltip(m)}>
           <p className="line-clamp-2 text-xs break-words text-muted" title={m.contentPreview || undefined}>
             {m.contentPreview.trim() || t("agent-bus.stuck.noContent")}
           </p>
+          <MessageSettlementControl hostId={hostId} messageId={m.messageId} settlement={m.settlement} sessionId={m.to?.id} onRefresh={onRefresh} />
           <ul className="mt-0.5">
             {stuckHints(m).map((hint) => (
-              <li key={hint.key} className={`text-[11px] ${hint.key === "protected" ? "text-warn-text" : "text-subtle"}`}>
+              <li key={hint.key} className={`text-caption/[inherit] ${hint.key === "protected" ? "text-warn-text" : "text-subtle"}`}>
                 {hintText(hint, t)}
               </li>
             ))}

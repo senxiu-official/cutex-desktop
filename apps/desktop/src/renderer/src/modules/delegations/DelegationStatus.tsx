@@ -7,14 +7,14 @@ import { ArrowLeftRight } from "lucide-react";
 import type { AskSummary } from "../../../../shared/ipc";
 import { DelegationStatusMark, DelegationTag } from "../../components/DelegationParts";
 import { FinishedFold } from "../../components/FinishedFold";
-import { StatusChip } from "../../components/StatusChip";
+import { StatusChip, StatusChipWords } from "../../components/StatusChip";
 import { useI18n, type Locale } from "../../i18n";
 import { ARMED_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { contextMenu } from "../../lib/contextMenu";
 import { delegationMenu, runDelegationCommand } from "../../lib/delegationMenu";
 import { useP2Access } from "../../lib/p2Access";
 import { attemptSeconds, delegationActions, delegationStatus, formatSpan, isDelegationRunning, isOwnerRequest, isUnfinished, requesterName, requesterSession, waitSeconds, type DelegationContext } from "../../lib/delegations";
-import { hasDelegationViews } from "../../lib/delegationStore";
+import { hasDelegationViews, resyncDelegations } from "../../lib/delegationStore";
 import { useAgentDelegations, useAgentHost, useAgentNames, useDelegationContext, useStatusWord } from "../../lib/delegationsView";
 import { formatWhen, useNow } from "../../lib/time";
 import { useApp } from "../../store";
@@ -24,8 +24,10 @@ import type { StatusBarProps } from "../slots";
 import { CAPSULE_LINE, CAPSULE_ROW, CAPSULE_ROW_ACTION, CAPSULE_ROW_MAIN, capsuleRowActions } from "../../lib/capsuleRows";
 import type { AgentDelegations } from "./useDelegationsStatus";
 import { openDelegationDetailHere } from "./refTarget";
+import { HiddenUndo } from "../../components/HiddenUndo";
+import { hiddenKey, useHiddenRows, visibleRows } from "../../lib/hiddenRows";
 
-/** Time after a row's status: run time while running, else how long it has waited. */
+/** Time after a row's status: run time while running, since it stopped when interrupted, else how long it has waited. */
 function rowTime(d: AskSummary, ctx: DelegationContext, now: number, locale?: Locale): string | null {
   if (locale && !isUnfinished(d)) {
     const at = d.closedAt ?? d.updatedAt;
@@ -35,6 +37,9 @@ function rowTime(d: AskSummary, ctx: DelegationContext, now: number, locale?: Lo
     const s = attemptSeconds(d.attempt, now);
     return s === null ? null : formatSpan(s);
   }
+  // Stopped (被主人停止, runtime restart): since it stopped, not since it was created (owner 2026-10-23).
+  const ended = d.execution === "interrupted" ? Date.parse(d.attempt?.endedAt ?? "") : NaN;
+  if (Number.isFinite(ended)) return formatSpan(Math.max(0, Math.floor((now - ended) / 1000)));
   return d.createdAt ? formatSpan(waitSeconds(d, now)) : null;
 }
 
@@ -67,8 +72,8 @@ function Row({ d, sessionId, mine }: { d: AskSummary; sessionId: string; mine: b
       >
         <DelegationTag askId={d.askId} />
         <span className="min-w-0 flex-1 truncate">{d.title}</span>
-        <span className={`max-w-[5rem] shrink-0 truncate text-[11px] text-subtle ${swap}`}>{other}</span>
-        <DelegationStatusMark status={delegationStatus(d, ctx)} name={d.targetName ?? nameOf(d.target)} trailing={rowTime(d, ctx, now, locale)} className={`max-w-[40%] shrink-0 text-[11px] tabular-nums ${swap}`} />
+        <span className={`max-w-[5rem] shrink-0 truncate text-caption/[inherit] text-subtle ${swap}`}>{other}</span>
+        <DelegationStatusMark status={delegationStatus(d, ctx)} name={d.targetName ?? nameOf(d.target)} trailing={rowTime(d, ctx, now, locale)} className={`max-w-[40%] shrink-0 text-caption/[inherit] tabular-nums ${swap}`} />
       </button>
       {can.stop && (
         <span className={capsuleRowActions(armed)}>
@@ -90,6 +95,14 @@ function Row({ d, sessionId, mine }: { d: AskSummary; sessionId: string; mine: b
 /** The two groups + the 已结束 fold (recent finished ones inline, then the page). */
 export function DelegationsBody({ sessionId, data }: { sessionId: string; data: AgentDelegations }) {
   const { t } = useI18n();
+  // 隐藏 (lib/hiddenRows): finished rows the owner cleared leave this list (this desktop only; the 委托 page keeps them).
+  const host = useAgentHost();
+  const hiddenKeys = useHiddenRows((s) => s.keys);
+  const last = useHiddenRows((s) => s.last);
+  const keyOf = (d: AskSummary) => hiddenKey("ask", host, d.askId);
+  const done = visibleRows(data.done, keyOf, hiddenKeys);
+  const finished = Math.max(0, data.finished - (data.done.length - done.length));
+  const scope = `asks:${host}`;
   const group = (key: "mine" | "toMe", rows: AskSummary[]) =>
     rows.length > 0 && (
       <div key={key}>
@@ -107,14 +120,20 @@ export function DelegationsBody({ sessionId, data }: { sessionId: string; data: 
     <div>
       {group("mine", data.mine)}
       {group("toMe", data.toMe)}
-      <FinishedFold label={t("delegations.closed", { n: data.finished })} viewAll={t("delegations.viewAll")} onViewAll={() => services.ui.openPage("delegations.page", { agent: sessionId })}>
-        {data.done.length > 0 && (
-          <ul>
-            {data.done.map((d) => (
-              <Row key={d.askId} d={d} sessionId={sessionId} mine={requesterSession(d.requester) === sessionId} />
-            ))}
-          </ul>
+      <FinishedFold label={t("delegations.closed", { n: finished })} viewAll={t("delegations.viewAll")} onViewAll={() => services.ui.openPage("delegations.page", { agent: sessionId })}>
+        {done.length > 0 && (
+          <>
+            <ul>
+              {done.map((d) => (
+                <Row key={d.askId} d={d} sessionId={sessionId} mine={requesterSession(d.requester) === sessionId} />
+              ))}
+            </ul>
+            <button onClick={() => useHiddenRows.getState().hide(done.map(keyOf), scope)} title={t("hide.finishedHint")} data-capsule-line="" className={`${CAPSULE_LINE} gap-1 pl-[1.625rem] hover:bg-hover hover:text-foreground`} data-testid="hide-finished">
+              {t("hide.finished", { n: done.length })}
+            </button>
+          </>
         )}
+        {last?.scope === scope && <HiddenUndo scope={scope} n={last.keys.length} />}
       </FinishedFold>
     </div>
   );
@@ -180,6 +199,12 @@ export function DelegationsStatusBar({ sessionId, inline }: StatusBarProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const data = useAgentDelegations(sessionId);
+  const host = useAgentHost();
+  // Opening re-reads the host's state: a close the event feed missed no longer shows as 待验收.
+  const onOpenChange = (v: boolean) => {
+    setOpen(v);
+    if (v) resyncDelegations(host, sessionId);
+  };
   const ctxOf = useDelegationContext();
   const n = data.mine.length + data.toMe.length;
   if (!inline || n === 0) return null;
@@ -187,16 +212,18 @@ export function DelegationsStatusBar({ sessionId, inline }: StatusBarProps) {
   return (
     <StatusChip
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={onOpenChange}
       className={running ? "text-accent" : "text-muted"}
+      title={t("delegations.count", { n })}
       label={
         <>
           <ArrowLeftRight size={13} />
-          {t("delegations.count", { n })}
+          {/* A narrow status row (lib/statusRow): icon + count. */}
+          <StatusChipWords full={t("delegations.count", { n })} short={n} />
         </>
       }
     >
-      <div className="flex h-6 items-center gap-1.5 px-2 text-[11px] text-subtle tabular-nums">
+      <div className="flex h-6 items-center gap-1.5 px-2 text-caption/[inherit] text-subtle tabular-nums">
         <DelegationsMeta data={data} />
       </div>
       <DelegationsBody sessionId={sessionId} data={data} />

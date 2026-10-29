@@ -1,3 +1,4 @@
+import { isImeComposing } from "../../lib/ime";
 // A gutter item's list as a popover (docs/desktop-modules.md §19.3): by its trigger, card look, not
 // modal. Closes on a click outside, Esc (it is an overlay of the Esc chain's row 1 — useTrackOverlay)
 // or when the Body calls close(); focus goes back to the trigger.
@@ -9,6 +10,7 @@ import type { GutterEntry } from "../../lib/gutterItems";
 import { gutterPopoverPosition } from "../../lib/gutterLayout";
 import { useTrackOverlay } from "../../lib/openOverlays";
 import { ItemBoundary } from "../../modules/Outlet";
+import { isElement, ownerWindowOf, resizeObserverFor } from "../../lib/ownerWindow";
 
 interface Props {
   entry: GutterEntry;
@@ -27,12 +29,13 @@ interface Props {
 }
 
 export function GutterPopover({ entry, hostId, sessionId, side, anchor, edge, top, width, direction = "up", close }: Props) {
+  const win = ownerWindowOf(anchor);
   const { t } = useI18n();
   const box = useRef<HTMLDivElement>(null);
   const measure = useCallback(() => {
     const r = anchor.getBoundingClientRect();
-    return { anchorTop: r.top, anchorBottom: r.bottom, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight };
-  }, [anchor]);
+    return { anchorTop: r.top, anchorBottom: r.bottom, viewportWidth: win.innerWidth, viewportHeight: win.innerHeight };
+  }, [anchor, win]);
   const [position, setPosition] = useState(measure);
   const place = useCallback(() => {
     const next = measure();
@@ -42,11 +45,11 @@ export function GutterPopover({ entry, hostId, sessionId, side, anchor, edge, to
   // A container resize can move a trigger without resizing the trigger or the window.
   useLayoutEffect(place);
   useLayoutEffect(() => {
-    const observer = new ResizeObserver(place);
-    observer.observe(anchor);
-    window.addEventListener("resize", place);
-    return () => { observer.disconnect(); window.removeEventListener("resize", place); };
-  }, [anchor, place]);
+    const observer = resizeObserverFor(anchor, place);
+    observer?.observe(anchor);
+    win.addEventListener("resize", place);
+    return () => { observer?.disconnect(); win.removeEventListener("resize", place); };
+  }, [anchor, place, win]);
   // Closing from inside (Esc, the Body picked a row) puts focus back on the trigger.
   const done = useCallback(() => {
     close();
@@ -57,23 +60,23 @@ export function GutterPopover({ entry, hostId, sessionId, side, anchor, edge, to
       const target = e.target as Node;
       if (box.current?.contains(target) || anchor.contains(target)) return;
       // A menu / dialog opened from the list (right-click) is not "outside".
-      if (target instanceof Element && target.closest('[role="menu"],[role="dialog"],[role="alertdialog"]')) return;
+      if (isElement(target) && target.closest('[role="menu"],[role="dialog"],[role="alertdialog"]')) return;
       close();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+      if (e.key !== "Escape" || e.defaultPrevented || isImeComposing(e)) return;
       // A menu opened from the list closes first.
-      if (overlayInDom()) return;
+      if (overlayInDom(win.document)) return;
       e.preventDefault();
       done();
     };
-    window.addEventListener("pointerdown", onPointer, true);
-    window.addEventListener("keydown", onKey);
+    win.addEventListener("pointerdown", onPointer, true);
+    win.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("pointerdown", onPointer, true);
-      window.removeEventListener("keydown", onKey);
+      win.removeEventListener("pointerdown", onPointer, true);
+      win.removeEventListener("keydown", onKey);
     };
-  }, [anchor, close, done]);
+  }, [anchor, close, done, win]);
   const Body = entry.item.Body;
   if (!Body) return null;
   const style = gutterPopoverPosition({ side, direction, edge, minTop: top, width, ...position });
@@ -93,6 +96,6 @@ export function GutterPopover({ entry, hostId, sessionId, side, anchor, edge, to
         </ItemBoundary>
       </div>
     </div>,
-    document.body,
+    win.document.body,
   );
 }

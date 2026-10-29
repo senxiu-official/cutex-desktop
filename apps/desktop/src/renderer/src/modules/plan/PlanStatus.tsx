@@ -14,13 +14,16 @@ import { useSessionTimeline } from "../../lib/statusItemsView";
 import { useApp } from "../../store";
 import { useConvViewHost } from "../../lib/conversationScope";
 import type { StatusBarProps } from "../slots";
+import { Tag } from "../../components/Tag";
+import { useUserLayoutToggle } from "../../lib/userLayoutToggle";
 
 /** "已完成 3 项" / "待处理 4 项": a disclosure whose rows open right below it (DESIGN §4.17). */
 function Fold({ label, open, onToggle, children }: { label: string; open: boolean; onToggle(): void; children: ReactNode }) {
+  const userToggle = useUserLayoutToggle();
   return (
     <>
       <li>
-        <button onClick={onToggle} aria-expanded={open} data-capsule-line="" className={`${CAPSULE_LINE} gap-2 hover:bg-hover hover:text-foreground`}>
+        <button onClick={() => userToggle(onToggle)} aria-expanded={open} data-capsule-line="" className={`${CAPSULE_LINE} gap-2 hover:bg-hover hover:text-foreground`}>
           <span className={CAPSULE_ROW_ICON}>{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
           {label}
         </button>
@@ -39,7 +42,7 @@ function PlanSteps({ steps }: { steps: PlanStep[] }) {
   const label = (group: "before" | "after", items: PlanStep[]) => t(`plan.fold.${foldKind(group, items)}` as MessageKey, { n: items.length });
   const rows = (items: PlanStep[], offset: number) => items.map((s, i) => <PlanStepRow key={offset + i} step={s} row className="rounded-lg px-2 py-1.5 leading-5" />);
   return (
-    <ul className="text-[13px]">
+    <ul className="text-ui/[inherit]">
       {w.before.length > 0 && (
         <Fold label={label("before", w.before)} open={showBefore} onToggle={() => setShowBefore(!showBefore)}>
           {rows(w.before, 0)}
@@ -65,9 +68,9 @@ function PlanTools({ sessionId, plan }: { sessionId: string; plan: PlanSnapshot 
   return (
     <>
       {plan.cleared && (
-        <span className="rounded bg-surface-2 px-1 text-[11px] text-subtle" title={t("plan.clearedHint")}>
+        <Tag title={t("plan.clearedHint")}>
           {t("plan.cleared")}
-        </span>
+        </Tag>
       )}
       <button
         onClick={() => useApp.getState().dismissPlan(sessionId, hostId)}
@@ -144,7 +147,7 @@ export function PlanStatusBar({ sessionId, inline }: StatusBarProps) {
         <>
           <ListChecks size={13} />
           {t("plan.count", { done, total })}
-          {plan.cleared && <span className="text-[11px]">· {t("plan.cleared")}</span>}
+          {plan.cleared && <span className="text-caption/[inherit]">· {t("plan.cleared")}</span>}
         </>
       }
     >

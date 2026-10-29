@@ -32,7 +32,7 @@ import {
 import { confirmDialog, contextMenu, openMenuFrom, type MenuEntry } from "../lib/contextMenu";
 import { agentMenu, ownedServicesNote, restoreArchived } from "../lib/menus";
 import { runningSince, showsRunningRing } from "../lib/agentAttention";
-import { AttentionContext, useAttention, useRowSignal } from "../lib/attentionView";
+import { AttentionContext, useAttention, useAttentionSource, useRowSignal } from "../lib/attentionView";
 import { lastSeen } from "../lib/offlineAgents";
 import { detachable } from "../lib/projectMembers";
 import { cachedProfileList, loadProfileList } from "../lib/profileSnapshot";
@@ -42,7 +42,12 @@ import { sidebarOf, useApp } from "../store";
 import { useTargetHostId, useTargetIsFocus, useTargetSelect } from "../lib/targetHost";
 import { Avatar } from "./Avatar";
 import { RunningTime, StatusAvatar, StatusPill } from "./AgentStatus";
+import { formatAutoRetryWait } from "../lib/modelOverloadRetry";
+import { useModelOverloadRetry } from "../lib/modelOverloadRetryView";
 import { realAgentName, realNameTip } from "../lib/agentAlias";
+import { Tag } from "./Tag";
+import { dataFlags, useSizeFlags, widthBelow } from "../lib/sizeFlags";
+import "./agentListLayout.css";
 
 /** `detach`: 移出项目 (project page only, `members`). */
 type Action = AgentListAction | "detach";
@@ -69,7 +74,8 @@ interface Progress {
 }
 
 const NO_ACTIVITY: Record<string, ActivityPreview> = {};
-const GRID = "grid grid-cols-[1rem_1.75rem_minmax(0,1fr)_minmax(0,9rem)_2.75rem_5.5rem] items-center gap-x-3";
+const GRID = "agent-list-grid grid grid-cols-[1rem_1.75rem_minmax(0,1fr)_minmax(0,9rem)_2.75rem_5.5rem] items-center gap-x-3";
+const LIST_SIZES = { narrow: widthBelow(40) };
 const BUTTON = "rounded-md px-3 py-1 text-xs disabled:opacity-40";
 const ACTION_LABEL: Record<Action, MessageKey> = {
   stop: "agents.stop",
@@ -131,7 +137,7 @@ function Checkbox({ state, disabled, title, onClick }: { state: "none" | "some" 
 
 function PreviewLine({ preview }: { preview: ActivityPreview | undefined }) {
   if (!preview?.text.trim()) return null;
-  const tone = preview.kind === "tool" ? "font-mono text-[11px]" : preview.kind === "received" ? "text-accent/70" : preview.kind === "retry" ? "text-warn" : "";
+  const tone = preview.kind === "tool" ? "font-mono text-caption/[inherit]" : preview.kind === "received" ? "text-accent/70" : preview.kind === "retry" ? "text-warn" : "";
   return <div className={`truncate text-xs text-subtle ${tone}`}>{preview.text}</div>;
 }
 
@@ -214,6 +220,7 @@ function Row({
   const note = session.note?.trim();
   const shown = live ?? row;
   const { signal, needs } = useRowSignal(shown);
+  const retry = useModelOverloadRetry(shown.id, shown.hostId);
   const since = online && signal === "running" ? runningSince(shown) : null;
   const flagged = signal === "needsYou" || signal === "done" || signal === "error";
   return (
@@ -246,12 +253,15 @@ function Row({
       )}
       <div className="min-w-0 leading-snug">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-[13px] font-medium" title={realNameTip(session) ? `${row.name}\n${t("info.realNameTip", { name: realAgentName(session) })}` : row.name}>
+          <span className="truncate text-ui/[inherit] font-medium" title={realNameTip(session) ? `${row.name}\n${t("info.realNameTip", { name: realAgentName(session) })}` : row.name}>
             {row.name}
           </span>
-          {realNameTip(session) && <span className="min-w-0 shrink truncate text-[11px] text-subtle">{realAgentName(session)}</span>}
-          {row.isDirector && <span className="shrink-0 rounded bg-surface-2 px-1 text-[9px] font-semibold text-muted">{t("sidebar.director")}</span>}
+          {realNameTip(session) && <span className="min-w-0 shrink truncate text-caption/[inherit] text-subtle">{realAgentName(session)}</span>}
+          {row.isDirector && <Tag>{t("sidebar.director")}</Tag>}
+          {row.isOperator && <Tag data-operator-tag="">{t("sidebar.operator")}</Tag>}
+          {row.operatorRestartRequired && <Tag data-operator-restart-required="" tone="attention">{t("sidebar.operatorRestartRequired")}</Tag>}
           {online && flagged && <StatusPill signal={signal} needs={needs} />}
+          {online && retry && signal !== "needsYou" && <span className="shrink-0 text-caption text-muted" data-testid="agent-list-auto-retry-wait">{formatAutoRetryWait(t, retry)}</span>}
         </div>
         {note && (
           <div className="truncate text-xs text-muted" title={note}>
@@ -265,13 +275,13 @@ function Row({
           {profile ?? "—"}
         </div>
         {model && (
-          <div className="truncate text-[11px] text-subtle" title={rawIdTitle(model, modelShown) ?? model}>
+          <div className="truncate text-caption/[inherit] text-subtle" title={rawIdTitle(model, modelShown) ?? model}>
             {modelShown}
           </div>
         )}
       </div>
-      <div className="text-right text-[11px] text-subtle tabular-nums">{since !== null ? <RunningTime since={since} className="text-[11px]" /> : relativeTime(last)}</div>
-      <div className="flex justify-end text-[11px]">
+      <div className="text-right text-caption/[inherit] text-subtle tabular-nums">{since !== null ? <RunningTime since={since} className="text-caption/[inherit]" /> : relativeTime(last)}</div>
+      <div className="flex justify-end text-caption/[inherit]">
         {progress ? (
           <StatusCell p={progress} live={live} />
         ) : (
@@ -334,6 +344,7 @@ export function AgentList({
 }) {
   const { t } = useI18n();
   const model = useSidebarModel();
+  const [sizeRef, sizeFlags] = useSizeFlags(LIST_SIZES);
   // The list's host: the target host (a dialog / project page of another host of the scope), else the focus host.
   const hostId = useTargetHostId();
   const own = useTargetIsFocus();
@@ -342,6 +353,7 @@ export function AgentList({
   const activity = own ? focusActivity : NO_ACTIVITY;
   // The sidebar's signals (需要你 / 完成 / 出错) for the 在线 rows; kept for the focus host only too.
   const attention = useAttention();
+  const attentionSource = useAttentionSource(own ? attention : null);
   const select = useTargetSelect();
   const [tab, setTab] = useState<AgentListTab>(() => initialTab ?? defaultAgentListTab(variant));
   const [query, setQuery] = useState("");
@@ -474,8 +486,8 @@ export function AgentList({
   const detachCount = members && tab !== "archived" ? detachable(chosen, members.directorId).length : 0;
 
   return (
-    <AttentionContext.Provider value={own ? attention : null}>
-    <div className={dialog ? "flex min-h-0 flex-1 flex-col" : "rounded-xl border border-border bg-surface"}>
+    <AttentionContext.Provider value={attentionSource}>
+    <div ref={sizeRef} {...dataFlags(sizeFlags)} className={`agent-list ${dialog ? "flex min-h-0 flex-1 flex-col" : "rounded-xl border border-border bg-surface"}`}>
       {renderHeader ? renderHeader(tabs) : <div className="px-4 pt-3">{tabs}</div>}
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
         <label className="flex min-w-40 flex-1 items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 focus-within:border-accent">
@@ -485,7 +497,7 @@ export function AgentList({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("agents.search")}
-            className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-subtle"
+            className="min-w-0 flex-1 bg-transparent text-ui/[inherit] outline-none placeholder:text-subtle"
           />
         </label>
         <select
@@ -501,8 +513,8 @@ export function AgentList({
         </select>
         <Pill<RuntimeFilter> value={runtime} onChange={setRuntime} options={(["all", "codex", "claude"] as const).map((r) => ({ value: r, label: t(`agents.runtime.${r}`) }))} />
       </div>
-      {tab === "archived" && !archived.scoped && <p className="border-b border-border bg-surface-2/40 px-4 py-1.5 text-[11px] text-subtle">{t("agents.archivedUnscoped")}</p>}
-      <div className={`${GRID} border-b border-border px-4 py-1 text-[10.5px] text-subtle`}>
+      {tab === "archived" && !archived.scoped && <p className="border-b border-border bg-surface-2/40 px-4 py-1.5 text-caption/[inherit] text-subtle">{t("agents.archivedUnscoped")}</p>}
+      <div className={`${GRID} border-b border-border px-4 py-1 text-caption/[inherit] text-subtle`}>
         <Checkbox state={all} disabled={selectableShown.length === 0} title={t("agents.selectAll")} onClick={() => setSelected(all === "all" ? new Set([...selected].filter((id) => !selectableShown.includes(id))) : new Set([...selected, ...selectableShown]))} />
         <span />
         <span>{t("agents.col.agent")}</span>

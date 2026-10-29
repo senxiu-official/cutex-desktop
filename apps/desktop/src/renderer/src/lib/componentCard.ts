@@ -17,10 +17,15 @@ import type { MessageKey } from "../i18n";
 export const KNOWN_COMPONENT_PLATFORMS: Readonly<Record<string, readonly HostPlatform[]>> = {
   "job-service": ["linux"],
   "claude-runtime": ["linux", "windows"],
+  "dsh-runtime": ["linux", "windows"],
+  "kimi-runtime": ["linux", "windows"],
 };
 
 /** The Claude runtime component (Claude agents need it on their host). */
 export const CLAUDE_RUNTIME_COMPONENT = "claude-runtime";
+export const DSH_RUNTIME_COMPONENT = "dsh-runtime";
+/** The Kimi Code runtime component (r266, docs/design/049). */
+export const KIMI_RUNTIME_COMPONENT = "kimi-runtime";
 /** The Job Service component (modules/jobs). */
 export const JOB_SERVICE_COMPONENT = "job-service";
 
@@ -178,6 +183,8 @@ export function componentCardState(input: ComponentCardInput): ComponentCardStat
 /** Card text of the components the desktop knows (i18n keyed by component name); others: the generic text. */
 const COMPONENT_TEXT: Readonly<Record<string, { name: MessageKey; what: MessageKey }>> = {
   "job-service": { name: "modules.component.job-service.name", what: "modules.component.job-service.what" },
+  "dsh-runtime": { name: "modules.component.dsh-runtime.name", what: "modules.component.dsh-runtime.what" },
+  "kimi-runtime": { name: "modules.component.kimi-runtime.name", what: "modules.component.kimi-runtime.what" },
   "claude-runtime": { name: "modules.component.claude-runtime.name", what: "modules.component.claude-runtime.what" },
 };
 

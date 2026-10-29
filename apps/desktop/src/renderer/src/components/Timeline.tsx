@@ -1,12 +1,15 @@
 // Timeline rendering shared by the conversation and the read-only sub-agent view: turn headers
 // (duration + time), work groups (§4.14), messages incl. compact agent-bus rows (§4.15), and the
 // running turn's live line at the end of the stream.
-import { createPortal } from "react-dom";
+import { MentionText } from "./MentionText";
+import { pathTextImages } from "../lib/pathTextImages";
+import { useStreamedEntry } from "../lib/streamRender";
+import { mentionRichText } from "../lib/mentionWire";
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Image as ImageIcon, SearchCheck } from "lucide-react";
+import { AlertTriangle, SearchCheck } from "lucide-react";
 import { LOOKUP_PAGES } from "../lib/turnFetch";
 import { Checklist, ChecklistEntry, PlanCard } from "./PlanCard";
-import type { MessageImage } from "../../../shared/input";
+import { messageInputItems } from "../../../shared/input";
 import { useI18n, type MessageKey } from "../i18n";
 import { contextMenu } from "../lib/contextMenu";
 import { messageMenu, SESSION_FEATURES } from "../lib/menus";
@@ -26,6 +29,8 @@ import { pendingTail, pendingUserEntry, sendRowKey, timelineRowKey, timelineTail
 import { PendingStatus } from "./PendingSends";
 import type { OlderHistory } from "../lib/historyPages";
 import { OlderHistoryRow } from "./OlderHistoryRow";
+import { MessageImages } from "./ImageThumbs";
+import { ItemMedia } from "./ItemMedia";
 import { reasoningPreview } from "../lib/reasoning";
 import { liveReasoning, turnActivity } from "../lib/turnActivity";
 import { nextProgressAt, silentGapSeconds, turnProgressMark } from "../lib/silentGap";
@@ -44,8 +49,9 @@ import { latestReplyIds, type FoldRole } from "../lib/messageFold";
 import { useMessageFold, type MessageFold } from "../lib/foldView";
 import { Foldable } from "./Foldable";
 import { useAgentMessage } from "../lib/agentMessageStore";
-import { activeDelegationAsk, askRowTurnOf, delegateEntryOf, handlerReplies } from "../lib/delegations";
+import { activeDelegationAsk, askRowTurnOf, delegateEntryOf, handlerReplies, type DelegationAskRow } from "../lib/delegations";
 import { clearFocusRequest, flashElement, useFocusRequest } from "../lib/focusRequest";
+import { drawRow } from "../lib/farRows";
 import { RepliedBadge } from "./DelegationRows";
 import { DelegationTag } from "./DelegationParts";
 import { OwnerNotifyCard } from "./OwnerNotifyCard";
@@ -61,18 +67,27 @@ import { TimelineViewContext, useTimelineContext, useTimelineView } from "../mod
 import { toolRendererFor } from "../lib/timelineRenderers";
 import { ScriptText } from "./ScriptText";
 import { turnErrorPlacement, turnInterruptedPlacement } from "../lib/turnErrors";
+import { foldAutomaticRetryRows, type AutomaticRetryLink } from "../lib/autoRetryRows";
+import { turnRefusedToolSchema } from "../lib/toolSchemaHint";
+import { ToolSchemaHint } from "./ToolSchemaHint";
 import { retryNoticeText } from "../lib/retryNotice";
 import { useActingUser } from "../lib/actingUsers";
 import { identityInitials } from "../lib/identity";
 import { useUserAvatar } from "../lib/userAvatars";
 import { Avatar } from "./Avatar";
 import { shownUserName } from "../../../shared/users";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
   return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+/** The live elapsed time's width: room for the longest text of its range (「59s」, 「9m 59s」, then 「59m 59s」 / 「9h 59m」). */
+function elapsedWidth(seconds: number): string {
+  return seconds < 60 ? "3ch" : seconds < 600 ? "6ch" : "7ch";
 }
 
 /** A turn's divider: "已工作 1m 30s" once it is over, the time on the right. While it runs the left
@@ -93,16 +108,20 @@ function TurnHeaderView({ turn }: { turn: TurnView }) {
   );
 }
 
-/** A failed turn's error, after its last row (lib/turnErrors). The input is not retried by the
- *  runtime: the owner sends it again (or a new instruction). */
-function TurnErrorRow({ turn }: { turn: TurnView }) {
+/** A failed turn's error, after its last row (lib/turnErrors). A typed daemon overload continuation
+ *  is linked here; other failures retain their usual owner-directed recovery. A refused tool schema adds the
+ *  工具参数严格模式 hint (components/ToolSchemaHint) inside the row, for as long as the error is shown. */
+function TurnErrorRow({ turn, retryText, hint, automaticRetry }: { turn: TurnView; retryText: string | null; hint: boolean; automaticRetry?: AutomaticRetryLink }) {
   const { t } = useI18n();
+  const { sessionId, hostId } = useTimelineContext();
   return (
     <div role="alert" className="my-2 flex items-start gap-1.5 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
       <AlertTriangle size={13} className="mt-0.5 shrink-0" />
       <div className="min-w-0">
         <div className="font-medium">{t("conversation.turnFailed")}</div>
-        <div className="whitespace-pre-wrap break-words text-muted">{turn.error}</div>
+        <div className="selectable whitespace-pre-wrap break-words text-muted">{turn.error}</div>
+        {automaticRetry && <div className="mt-1 text-muted" data-testid="overload-retried">{t("conversation.autoRetried", { attempt: automaticRetry.attempt, maxAttempts: automaticRetry.maxAttempts })}</div>}
+        {hint && turnRefusedToolSchema(turn) && <ToolSchemaHint hostId={hostId} sessionId={sessionId} retryText={retryText} />}
       </div>
     </div>
   );
@@ -150,7 +169,9 @@ function TurnTail({ timeline, sessionId }: { timeline: TimelineState; sessionId:
     <>
     <div className="mt-1.5 flex h-4 min-w-0 items-center gap-2 text-xs text-subtle">
       <BusyDots className="shrink-0" />
-      <span className="shrink-0 tabular-nums">{formatDuration(now / 1000 - turn.startedAt)}</span>
+      {/* A fixed width (tabular digits): 9s → 10s → 1m 0s no longer pushes the rest of the line sideways every few
+          seconds (flicker recorder 2026-10-26); it widens only at one minute and at ten. */}
+      <span className="shrink-0 tabular-nums" style={{ minWidth: elapsedWidth(now / 1000 - turn.startedAt) }}>{formatDuration(now / 1000 - turn.startedAt)}</span>
       <span className="shrink-0">·</span>
       {handling && (
         <>
@@ -209,41 +230,6 @@ function SentMessage({ entry, name, onContextMenu }: { entry: Extract<TimelineEn
   return <BusMessage direction="out" name={name} mode={entry.deliveryMode} text={entry.text} kind={record?.kind ?? entry.deliveryKind ?? null} downgraded={!!record?.downgraded} messageId={entry.messageId ?? null} recipientRuntime={recipient.runtime} onContextMenu={onContextMenu} />;
 }
 
-/** Image parts of a user message: thumbnails (click → full size); local paths as file chips. */
-function MessageImages({ images }: { images: MessageImage[] }) {
-  const [zoom, setZoom] = useState<string | null>(null);
-  useEffect(() => {
-    if (!zoom) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setZoom(null);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [zoom]);
-  return (
-    <div className="flex max-w-[75%] flex-wrap justify-end gap-1.5">
-      {images.map((img, i) =>
-        img.kind === "url" ? (
-          <button key={i} onClick={() => setZoom(img.url)} className="overflow-hidden rounded-xl border border-border">
-            <img src={img.url} alt="" className="max-h-40 max-w-60 object-cover" />
-          </button>
-        ) : (
-          <span key={i} className="flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2 py-1 text-xs text-muted" title={img.path}>
-            <ImageIcon size={12} />
-            {img.path.split(/[\\/]/).pop()}
-          </span>
-        ),
-      )}
-      {/* Portaled: inside the conversation column a `fixed` overlay is boxed by it, and the right side pane cut the image off. */}
-      {zoom &&
-        createPortal(
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-8" onClick={() => setZoom(null)} data-testid="message-image-zoom">
-            <img src={zoom} alt="" className="max-h-full max-w-full rounded-lg shadow-2xl" />
-          </div>,
-          document.body,
-        )}
-    </div>
-  );
-}
-
 /**
  * users: 「由 X 发送」 under a message a non-owner user sent (cutex routeAccepted `actingUser`), with the
  * name and picture that user set on their own desktop (users-self-profile) when the host has them.
@@ -256,8 +242,8 @@ function SentBy({ sessionId, clientId }: { sessionId: string; clientId: string |
   if (!user) return null;
   const name = shownUserName(user);
   return (
-    <div className="flex items-center gap-1 text-[11px] text-subtle" data-testid="sent-by" title={user.displayName && user.displayName !== user.name ? user.name : undefined}>
-      {(picture || user.avatarEtag) && <Avatar name={name} initial={identityInitials(name)} color="#868e96" picture={picture} size={14} />}
+    <div className="flex items-center gap-1 text-caption/[inherit] text-subtle" data-testid="sent-by" title={user.displayName && user.displayName !== user.name ? user.name : undefined}>
+      {(picture || user.avatarEtag) && <Avatar name={name} initial={identityInitials(name)} color="#868e96" picture={picture} size={16} />}
       <span>{t("users.sentBy", { name })}</span>
     </div>
   );
@@ -273,7 +259,7 @@ function sameFields<T extends object>(a: T | undefined, b: T | undefined): boole
 
 // Entries are replaced (never mutated) when they change, so a finished entry keeps its identity and
 // is skipped on re-render: long histories no longer re-reconcile on every event / clock tick.
-const MemoEntry = memo(Entry, (a, b) => a.entry === b.entry && a.pending === b.pending && a.nameOf === b.nameOf && a.sessionId === b.sessionId && a.readOnly === b.readOnly && a.actionable === b.actionable && a.dropped === b.dropped && a.foldRole === b.foldRole && sameFields(a.bar, b.bar) && a.changes?.signature === b.changes?.signature);
+const MemoEntry = memo(Entry, (a, b) => a.entry === b.entry && a.pending === b.pending && a.nameOf === b.nameOf && a.sessionId === b.sessionId && a.readOnly === b.readOnly && a.actionable === b.actionable && a.dropped === b.dropped && a.foldRole === b.foldRole && sameFields(a.bar, b.bar) && a.changes?.signature === b.changes?.signature && a.reply === b.reply);
 
 /**
  * A live agent reply: its code blocks may carry `timeline.codeBlockAction` items (§22), on the agent's host.
@@ -297,7 +283,13 @@ function foldAction(fold: MessageFold): { folded: boolean; toggle(): void } | nu
   return null;
 }
 
-function Entry({ entry, pending, nameOf, sessionId, readOnly, actionable, bar, dropped, foldRole, changes }: { entry: TimelineEntry; /** The user's send not in the thread yet (lib/outbox): the same row, dimmed, with its status line. */ pending?: OutboxEntry; nameOf: (id: string) => string; sessionId: string; readOnly: boolean; actionable: boolean; bar: ReplyBar | undefined; dropped: number; foldRole: FoldRole; /** The finished turn's file changes (turn summary; only with `bar`). */ changes?: TurnChanges }) {
+function Entry({ entry: initial, pending, nameOf, sessionId, readOnly, actionable, bar, dropped, foldRole, changes, reply }: { /** 已回复 (handler side): shown in the reply's action row (design 040 step 10). */ reply?: DelegationAskRow; entry: TimelineEntry; /** The user's send not in the thread yet (lib/outbox): the same row, dimmed, with its status line. */ pending?: OutboxEntry; nameOf: (id: string) => string; sessionId: string; readOnly: boolean; actionable: boolean; bar: ReplyBar | undefined; dropped: number; foldRole: FoldRole; /** The finished turn's file changes (turn summary; only with `bar`). */ changes?: TurnChanges }) {
+  const entry = useStreamedEntry(sessionId, initial);
+  const userDisplay = useMemo(() => {
+    if (entry.kind !== "user") return null;
+    const displayed = pathTextImages(entry.text);
+    return { text: displayed.text, images: [...(entry.images ?? []), ...displayed.images] };
+  }, [entry]);
   const { t } = useI18n();
   const fold = useMessageFold(sessionId, entry.id, foldRole);
   // Claude agents without history revert (features.historyRevert = false) get no edit & resend / revert.
@@ -306,33 +298,47 @@ function Entry({ entry, pending, nameOf, sessionId, readOnly, actionable, bar, d
   // A busy Claude agent refuses it (lib/structuralGate): disabled with the reason (the menu checks on open).
   const block = useStructuralBlock(sessionId, agent, "revert");
   // + the modules' `ref.action` items for the turn (§19.8) on the owner's / the agent's messages.
-  const menu = (kind: "user" | "agent" | "received" | "sent", text: string) =>
+  const menu = (kind: "user" | "agent" | "received" | "sent", text: string, extra?: unknown[]) =>
     contextMenu(() => [
-      ...messageMenu({ sessionId, hostId, kind, text, turnId: entry.turnId ?? null, nextTurnId: bar?.nextTurnId ?? null, laterTurns: bar?.laterTurns ?? 0, fold: kind === "user" || kind === "agent" ? foldAction(fold) : null }, t, canRevert),
+      ...messageMenu({ sessionId, hostId, kind, text, extra, turnId: entry.turnId ?? null, nextTurnId: bar?.nextTurnId ?? null, laterTurns: bar?.laterTurns ?? 0, fold: kind === "user" || kind === "agent" ? foldAction(fold) : null }, t, canRevert),
       ...(!readOnly && entry.turnId && (kind === "user" || kind === "agent") ? refActionEntries(turnRefNow(sessionId, entry.turnId, text), true) : []),
     ]);
   switch (entry.kind) {
     case "user": {
       // A pending send (lib/outbox) is this same row until the native userMessage replaces it under
-      // the same key: the bubble keeps its element, its dimming fades out, and the status line gives
-      // way to the action row of the same height — nothing remounts or jumps.
+      // the same key: the bubble keeps its element, its dimming fades out, and the status gives way to
+      // the action row — nothing remounts or jumps. Both live in one slot of one height (h-7) under the
+      // bubble; the status is laid over it (PendingStatus), so it never sizes the row (owner 2026-10-24:
+      // the row grew 4 px when 发送中… went). 「由 X 发送」 shares the slot too (it appears at the handoff).
       const failed = pending?.state === "failed";
+      // 编辑并重发 puts its images and skills back with the text (the data URL / host path cutex holds).
+      const { text, images } = userDisplay!;
+      const extra = images.length || entry.skills ? messageInputItems(images, entry.skills) : undefined;
       return (
         // The action row stands in for the bottom margin (always laid out, faded in on hover).
         <div className="group mt-3 flex flex-col items-end gap-1" data-testid={pending ? (failed ? "outbox-failed" : "outbox-sending") : undefined}>
           {/* A pending send carries its images too (lib/outbox pendingUserEntry): the same element at the handoff. */}
-          {entry.images && <MessageImages images={entry.images} />}
-          {entry.text && (
+          {!!images.length && <MessageImages images={images} hostId={hostId} messageId={entry.clientId ?? entry.id} pending={!!pending} />}
+          {text && (
             <div
-              onContextMenu={pending ? undefined : menu("user", entry.text)}
-              className={`max-w-[75%] rounded-2xl border bg-bubble px-4 py-2 text-[length:var(--chat-font-size,14px)] font-chat-context whitespace-pre-wrap transition-[opacity,border-color] duration-200 [font-family:var(--font-chat,var(--font-sans))] motion-reduce:transition-none ${failed ? "border-danger/60" : "border-border"} ${pending && !failed ? "opacity-80" : ""}`}
+              onContextMenu={pending ? undefined : menu("user", mentionRichText(hostId, sessionId, text), extra)}
+              className={`selectable message-body max-w-[75%] rounded-2xl border bg-bubble px-4 py-2 text-[length:var(--chat-font-size,14px)] font-chat-context whitespace-pre-wrap transition-[opacity,border-color] duration-200 [font-family:var(--font-chat,var(--font-sans))] motion-reduce:transition-none ${failed ? "border-danger/60" : "border-border"} ${pending && !failed ? "opacity-80" : ""}`}
               data-send-bubble=""
             >
-              <Foldable fold={fold} stickyLeft><ScriptText text={entry.text} /></Foldable>
+              <Foldable fold={fold} stickyLeft><MentionText text={text} hostId={hostId} sessionId={sessionId} /></Foldable>
             </div>
           )}
-          {pending ? null : <SentBy sessionId={sessionId} clientId={entry.clientId} />}
-          {pending ? <PendingStatus sessionId={sessionId} entry={pending} /> : entry.text && !readOnly ? <UserActions sessionId={sessionId} text={entry.text} turnId={entry.turnId ?? null} dropped={dropped} canRevert={canRevert} blocked={block ? structuralBlockText(block) : null} fold={fold} /> : <div className="h-2" />}
+          {pending || ((text || extra) && !readOnly) ? (
+            <div className="relative flex h-7 w-full items-center justify-end gap-2" data-user-slot="">
+              {!pending && <SentBy sessionId={sessionId} clientId={entry.clientId} />}
+              {pending ? <PendingStatus sessionId={sessionId} entry={pending} /> : <UserActions sessionId={sessionId} text={mentionRichText(hostId, sessionId, text)} extra={extra} turnId={entry.turnId ?? null} dropped={dropped} canRevert={canRevert} blocked={block ? structuralBlockText(block) : null} fold={fold} />}
+            </div>
+          ) : (
+            <>
+              <SentBy sessionId={sessionId} clientId={entry.clientId} />
+              <div className="h-2" />
+            </>
+          )}
         </div>
       );
     }
@@ -360,7 +366,7 @@ function Entry({ entry, pending, nameOf, sessionId, readOnly, actionable, bar, d
           </Foldable>
           {bar && !readOnly && <TurnSummary sessionId={sessionId} turnId={bar.turnId} text={bar.text} changes={changes} latest={bar.latest} />}
           {bar && !readOnly && <TurnAttachments sessionId={sessionId} turnId={bar.turnId} />}
-          {bar && <ReplyActions sessionId={sessionId} bar={bar} readOnly={readOnly} fold={fold} />}
+          {bar && <ReplyActions sessionId={sessionId} bar={bar} readOnly={readOnly} fold={fold} status={reply ? <RepliedBadge row={reply} inline /> : null} />}
         </div>
       );
     // Agent-to-agent messages stay left; only the user's own messages go right. A received input
@@ -382,9 +388,9 @@ function Entry({ entry, pending, nameOf, sessionId, readOnly, actionable, bar, d
       // Sub-agent views (readOnly) have no status capsule: keep the full list there.
       return readOnly ? <Checklist explanation={entry.explanation} steps={entry.steps} /> : <ChecklistEntry explanation={entry.explanation} steps={entry.steps} />;
     case "notice":
-      return <AutoReviewNotice review={entry.review} text={entry.text} />;
+      return entry.media ? <p role="status" className="my-1 text-xs text-subtle" data-media-notice>{entry.text}</p> : <AutoReviewNotice review={entry.review} text={entry.text} />;
     case "other":
-      return null;
+      return <ItemMedia item={entry.item} hostId={hostId} />;
   }
 }
 
@@ -394,7 +400,9 @@ function Entry({ entry, pending, nameOf, sessionId, readOnly, actionable, bar, d
  * sub-agent view (`readOnly`: no edit & resend, no reply affordances).
  */
 export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf, readOnly = false, ownerNotes = !readOnly, older = null, onLoadOlder, pendingSends = false, onRelease }: { timeline: TimelineState; entries: TimelineEntry[]; sessionId: string; nameOf: (id: string) => string; readOnly?: boolean; /** The agent's owner-notify cards (default: not in read-only views). The side agent view is read-only for row actions but keeps them: a card is where the owner answers the agent. */ ownerNotes?: boolean; /** History pages still on the host (lib/historyPages). */ older?: OlderHistory | null; onLoadOlder?: () => void; /** Show the user's sends not in the thread yet (lib/outbox placement "turn"): placed by timelineTail, never below the live line, keyed like the message that replaces them. */ pendingSends?: boolean; /** Let go of stick-to-bottom (a focus request scrolls up to a turn). */ onRelease?: () => void }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
+  const convHost = useConvHost();
   const conv = useConvScope();
   const { reasoningView, timelineTurns, timelineInteractions } = useUiPrefs();
   // Host, agent features and renderers once per timeline, shared by every row (TimelineViewContext).
@@ -410,14 +418,30 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
   // Pages fetched by scrolling to the top are shown at once (the window grows by them).
   const [limit, setLimit] = useState(timelineTurns);
   useEffect(() => setLimit(timelineTurns), [sessionId, timelineTurns]);
-  const { entries, hiddenTurns } = recentEntries(allEntries, timeline.turns, limit > 0 ? limit + (older?.added ?? 0) : limit);
-  const turnOf = new Map(timeline.turns.map((turn) => [turn.id, turn]));
-  const bars = replyBars(timeline.turns, entries);
+  // The derived lists below are O(entries) each: computed once per timeline change, not on every
+  // render (a sidebar refresh, the outbox, a pref). `allEntries` is a new array whenever the view's
+  // version moves (the turns are updated in place with it); the turn count / active turn cover a
+  // caller that keys its entries on less.
+  const shownTurns = limit > 0 ? limit + (older?.added ?? 0) : limit;
+  const turnCount = timeline.turns.length;
+  const activeTurn = timeline.activeTurnId;
+  const { entries: recent, hiddenTurns } = useMemo(() => recentEntries(allEntries, timeline.turns, shownTurns),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allEntries, timeline.turns, turnCount, activeTurn, shownTurns]);
+  const retryVisible = features.has("model-overload-retry-visible");
+  const { entries, retried, folded } = useMemo(() => foldAutomaticRetryRows(recent, timeline.turns, retryVisible),
+    [recent, timeline.turns, turnCount, activeTurn, retryVisible]);
+  const derived = useMemo(() => ({
+    turnOf: new Map(timeline.turns.map((turn) => [turn.id, turn])),
+    bars: replyBars(timeline.turns, entries),
+    latestReply: latestReplyIds(entries),
+    // Handler side: the final reply of a turn a delegation started gets the 已回复 badge.
+    replied: handlerReplies(entries, timeline.turns),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [entries, timeline.turns, turnCount, activeTurn]);
+  const { turnOf, bars, latestReply, replied } = derived;
   // Turn summary: each turn's completed fileChange items, merged per file.
   const turnChanges = useMemo(() => fileChangesByTurn(allEntries), [allEntries]);
-  const latestReply = latestReplyIds(entries);
-  // Handler side: the final reply of a turn a delegation started gets the 已回复 badge.
-  const replied = handlerReplies(entries, timeline.turns);
   // focusTurn / focusDelegation (lib/focusRequest): widen the window to the target, then scroll + flash.
   const request = useFocusRequest((s) => (!readOnly && s.request?.sessionId === sessionId ? s.request : null));
   const loading = useConvView(sessionId, (v) => v?.loading ?? false);
@@ -470,18 +494,20 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
         : request.askId
           ? `[data-ask-row="${CSS.escape(request.askId)}"]`
           : `[data-turn-id="${CSS.escape(turnId!)}"]`;
-    const frame = requestAnimationFrame(() => {
-      const el = document.querySelector(selector);
+    const frame = win.requestAnimationFrame(() => {
+      const el = win.document.querySelector(selector);
       clearFocusRequest(request.nonce);
       if (!el) return miss(request.askId ? "delegation.cardNotFound" : request.notificationId ? "ownerNotify.notLoaded" : "delegation.notLoaded");
       onRelease?.();
-      if (request.land) request.land(el);
-      else flashElement(el);
+      if (request.land) {
+        drawRow(el);
+        request.land(el);
+      } else flashElement(el);
       // An owner note: keyboard focus on its 回复 (else the card) so Enter / Space answers it.
       if (request.notificationId && !request.land) (el.querySelector<HTMLElement>("[data-note-reply]") ?? (el as HTMLElement)).focus?.({ preventScroll: true });
       request.onDone?.(true);
     });
-    return () => cancelAnimationFrame(frame);
+    return () => win.cancelAnimationFrame(frame);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request, loading, limit, allEntries, timeline.turns.length, notesById, older?.cursor, older?.loading, older?.error]);
   // Every turn's first rendered row carries its id (TurnHeader is not always rendered).
@@ -497,41 +523,53 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
   const headed = new Set<string>();
   // The latest proposed plan gets "implement" actions once its turn is over and nothing followed it
   // (TUI: the "Implement this plan?" prompt after a Plan-mode turn).
-  let actionablePlan: string | null = null;
-  if (!timeline.activeTurnId) {
+  const actionablePlan = useMemo(() => {
+    if (activeTurn) return null;
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i]!;
-      if (e.kind === "plan") {
-        actionablePlan = e.id;
-        break;
-      }
+      if (e.kind === "plan") return e.id;
       if (e.kind === "user" || e.kind === "received") break;
     }
-  }
-  const segments = segmentEntries(entries, { reasoning: reasoningView !== "hidden", interactions: timelineInteractions, standalone: (item) => !!toolRendererFor(item, tools)?.item.standalone?.(item) });
-  const placed = placeOwnerNotes(
-    notes,
-    segments.map((seg) => (seg.kind === "work" ? seg.turnId : seg.entry.turnId)),
-    timeline.turns,
-    { olderHistory: hiddenTurns > 0 || !!older?.cursor },
+    return null;
+  }, [entries, activeTurn]);
+  const reasoningShown = reasoningView !== "hidden";
+  const segments = useMemo(
+    () => segmentEntries(entries, { reasoning: reasoningShown, interactions: timelineInteractions, standalone: (item) => !!toolRendererFor(item, tools)?.item.standalone?.(item) }),
+    [entries, reasoningShown, timelineInteractions, tools],
   );
-  const turnErrors = turnErrorPlacement(segments.map((seg) => (seg.kind === "work" ? seg.turnId : seg.entry.turnId)), timeline.turns);
+  const olderHistory = hiddenTurns > 0 || !!older?.cursor;
   // timeline.turnAttachment (§19.3) inline items go at the end of a turn: inside a finished turn's last
   // reply (after its turn summary, before its action row), else after the turn's last rendered row.
   const segTurn = (seg: (typeof segments)[number]) => (seg.kind === "work" ? seg.turnId : seg.entry.turnId);
-  const lastSegOf = new Map<string, number>();
-  segments.forEach((seg, i) => {
-    const turnId = segTurn(seg);
-    if (turnId) lastSegOf.set(turnId, i);
-  });
-  const barTurns = new Set([...bars.values()].map((b) => b.turnId));
+  const placement = useMemo(() => {
+    const segTurns = segments.map(segTurn);
+    const lastSegOf = new Map<string, number>();
+    segTurns.forEach((turnId, i) => {
+      if (turnId) lastSegOf.set(turnId, i);
+    });
+    return {
+      placed: placeOwnerNotes(notes, segTurns, timeline.turns, { olderHistory }),
+      turnErrors: turnErrorPlacement(segTurns, timeline.turns),
+      turnStops: turnInterruptedPlacement(segTurns, timeline.turns),
+      lastSegOf,
+      barTurns: new Set([...bars.values()].map((b) => b.turnId)),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segments, notes, timeline.turns, turnCount, activeTurn, olderHistory, bars]);
+  const { placed, turnErrors, turnStops, lastSegOf, barTurns } = placement;
   const tailAttachments = (i: number) => {
     const turnId = segTurn(segments[i]!);
     return turnId && !readOnly && lastSegOf.get(turnId) === i && !barTurns.has(turnId) ? <TurnAttachments sessionId={sessionId} turnId={turnId} /> : null;
   };
-  const turnStops = turnInterruptedPlacement(segments.map(segTurn), timeline.turns);
+  const turnUserText = (turn: TurnView) => {
+    for (const id of turn.entryIds) {
+      const entry = timeline.entries.get(id);
+      if (entry?.kind === "user" && entry.text.trim()) return mentionRichText(convHost, sessionId, entry.text);
+    }
+    return null;
+  };
   const errorRows = (i: number) => [
-    ...(turnErrors.get(i)?.map((turn) => <TurnErrorRow key={`error-${turn.id}`} turn={turn} />) ?? []),
+    ...(turnErrors.get(i)?.map((turn) => <TurnErrorRow key={`error-${turn.id}`} turn={turn} hint={!readOnly} retryText={turnUserText(turn)} automaticRetry={retried.get(turn.id)} />) ?? []),
     ...(turnStops.get(i)?.map((turn) => <TurnInterruptedRow key={`stopped-${turn.id}`} />) ?? []),
   ];
   const noteCards = (list: readonly { notificationId: string }[] | undefined) => list?.map((r) => <OwnerNotifyCard key={r.notificationId} notificationId={r.notificationId} sessionId={sessionId} hostId={view.hostId} />);
@@ -570,7 +608,7 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
           const first = anchor(seg.turnId);
           return (
             <Fragment key={seg.id}>
-              <div data-turn-id={first}>
+              <div data-turn-id={first} data-tl-row="">
                 {first && !readOnly && <TurnMargin sessionId={sessionId} turnId={first} />}
                 {header && <TurnHeader turn={header} />}
                 <WorkGroup sessionId={sessionId} steps={seg.steps} open={seg.open} summary={seg.summary} />
@@ -589,16 +627,18 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
           header = turnOf.get(entry.turnId);
         }
         const reply = replied.get(entry.id);
+        // A final reply with its action row carries the 已回复 line in that row (design 040 step 10).
+        const inBar = entry.kind === "agent" && bars.has(entry.id);
         const first = anchor(entry.turnId);
         return (
           <Fragment key={rowKeyOf(entry)}>
-            <div data-turn-id={first}>
+            {!folded.has(entry.id) && <div data-turn-id={first} data-tl-row="">
               {/* timeline.turnAttachment (§19.3): margin boxes beside the turn's first line, inline ones at the turn's end. */}
               {first && !readOnly && <TurnMargin sessionId={sessionId} turnId={first} />}
               {header && <TurnHeader turn={header} />}
-              <MemoEntry entry={entry} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={entry.id === actionablePlan} bar={bars.get(entry.id)} dropped={entry.kind === "user" ? turnsFrom(timeline.turns, entry.turnId) : 0} foldRole={foldRoleOf(entry)} changes={bars.has(entry.id) ? turnChanges.get(entry.turnId ?? "") : undefined} />
-              {reply && <RepliedBadge row={reply} />}
-            </div>
+              <MemoEntry entry={entry} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={entry.id === actionablePlan} bar={bars.get(entry.id)} dropped={entry.kind === "user" ? turnsFrom(timeline.turns, entry.turnId) : 0} foldRole={foldRoleOf(entry)} changes={bars.has(entry.id) ? turnChanges.get(entry.turnId ?? "") : undefined} reply={inBar ? reply : undefined} />
+              {reply && !inBar && <RepliedBadge row={reply} />}
+            </div>}
             {tailAttachments(i)}
             {errorRows(i)}
             {noteCards(after)}
@@ -614,7 +654,7 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
             // Same element structure as a message segment above (Fragment > div > slots > MemoEntry).
             return [
               <Fragment key={key}>
-                <div data-turn-id={undefined}>
+                <div data-turn-id={undefined} data-tl-row="">
                   {false}
                   {undefined}
                   <MemoEntry entry={pendingUserEntry(p)} pending={p} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={false} bar={undefined} dropped={0} foldRole="user" />
@@ -630,3 +670,7 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
     </TimelineViewContext.Provider>
   );
 }
+
+// The conversation measures its overlays and its room while the Shelf opens; those state changes do
+// not describe the timeline. Stable callbacks keep this shallow compare intact for those passes.
+export const MemoTimelineBody = memo(TimelineBody);

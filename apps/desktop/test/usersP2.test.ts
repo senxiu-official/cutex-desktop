@@ -50,7 +50,7 @@ describe("non-owner image uploads", () => {
   const png = "data:image/png;base64,iVBORw0KGgo=";
   it("uploads picked files on a remote host, everything image-like for a non-owner", () => {
     expect(uploadKind({ type: "localImage", path: "/pics/a.png" }, { remote: true, restricted: false, picked })).toBe("path");
-    expect(uploadKind({ type: "image", url: png }, { remote: true, restricted: false, picked })).toBeNull();
+    expect(uploadKind({ type: "image", url: png }, { remote: true, restricted: false, picked })).toBe("data");
     expect(uploadKind({ type: "image", url: png }, { remote: false, restricted: true, picked })).toBe("data");
     expect(uploadKind({ type: "localImage", path: "/pics/a.png" }, { remote: false, restricted: true, picked })).toBe("path");
   });
@@ -61,7 +61,7 @@ describe("non-owner image uploads", () => {
   });
   it("reads only the image types cutex attachments take", () => {
     expect(dataUrlImage(png)).toEqual({ mime: "image/png", base64: "iVBORw0KGgo=" });
-    expect(dataUrlImage("data:image/bmp;base64,Qk0=")).toBeNull();
+    expect(dataUrlImage("data:image/bmp;base64,Qk0=")).toEqual({ mime: "image/bmp", base64: "Qk0=" });
     expect(dataUrlImage("https://example.com/a.png")).toBeNull();
   });
 });

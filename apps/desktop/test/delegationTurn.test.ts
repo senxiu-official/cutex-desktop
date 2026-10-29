@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AskDetail, AskSummary } from "../src/shared/ipc";
 import { ownerSteeredOf } from "../src/renderer/src/lib/delegations";
-import { currentDelegationTurn, delegationKeyAction, delegationSendChoices, delegationTurnSeconds, sendHowFor } from "../src/renderer/src/lib/delegationTurn";
+import { delegationJoinIntent, currentDelegationTurn, delegationKeyAction, delegationSendChoices, delegationTurnSeconds, sendHowFor } from "../src/renderer/src/lib/delegationTurn";
 import { emptyTimeline, type ExternalMessage, type TimelineEntry, type TimelineState } from "../src/renderer/src/lib/timeline";
 
 const NOW = Date.parse("2026-10-08T12:00:00Z");
@@ -86,7 +86,7 @@ describe("send choices", () => {
   it("offers join only when the agent can steer, queue first", () => {
     expect(delegationSendChoices(true)).toEqual(["queue", "join", "interrupt"]);
     expect(delegationSendChoices(false)).toEqual(["queue", "interrupt"]);
-    expect(["queue", "join", "interrupt"].map((c) => sendHowFor(c as never))).toEqual(["queue", "steer", "interruptSend"]);
+    expect(["queue", "join", "interrupt"].map((c) => sendHowFor(c as never))).toEqual(["queue", "join", "interruptSend"]);
   });
 });
 
@@ -99,5 +99,22 @@ describe("ownerSteeredOf", () => {
     expect(ownerSteeredOf(detail({ answer: { answerId: "a", metadata: null }, attempts: [{ n: 1 }] }))).toBe(false);
     expect(ownerSteeredOf(null)).toBe(false);
     expect(ownerSteeredOf(undefined)).toBe(false);
+  });
+});
+
+describe("explicit owner join identity", () => {
+  it("captures the native ASK attempt and turn, rather than a lagging record", () => {
+    const turn = currentDelegationTurn(running(), { "ask-3": record({ attempt: { n: 2 } }) }, ASKS)!;
+    const captured = delegationJoinIntent(turn, "t2", 7, new Set(["owner-join-delegation"]));
+    expect(delegationJoinIntent(turn, "t2", 7, ASKS)).toBeUndefined(); // r262: keep queue/interrupt, hide join
+    expect(captured).toEqual({ askId: "ask-3", attempt: 1, expectedTurnId: "t2", runtimeGeneration: 7 });
+    expect(delegationJoinIntent(turn, "t3", 8, new Set(["owner-join-delegation"]))).toMatchObject({ expectedTurnId: "t3", runtimeGeneration: 8 });
+    expect(captured).toMatchObject({ expectedTurnId: "t2", runtimeGeneration: 7 });
+  });
+  it("requires a known live turn and generation", () => {
+    const turn = currentDelegationTurn(running(), {}, ASKS)!;
+    expect(delegationJoinIntent(turn, null, 7, new Set(["owner-join-delegation"]))).toBeUndefined();
+    expect(delegationJoinIntent(turn, "t2", 0, new Set(["owner-join-delegation"]))).toBeUndefined();
+    expect(delegationJoinIntent(null, "t2", 7, new Set(["owner-join-delegation"]))).toBeUndefined();
   });
 });

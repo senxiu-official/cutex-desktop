@@ -10,8 +10,8 @@ export const CLAUDE_SETTING_SOURCES: readonly ClaudeSettingSource[] = ["project"
 
 /** The sources the draft / stored profile has now (unset = cutex's default, none). */
 export function profileSources(patch: ProfilePatch, detail: ProfileDetail): ClaudeSettingSource[] {
-  if (patch.claudeSettingSources !== undefined) return patch.claudeSettingSources ?? detail.detail.claudeSettingSourcesDefault ?? [];
-  return detail.claudeSettingSources ?? detail.detail.claudeSettingSourcesExplicit ?? detail.detail.claudeSettingSourcesDefault ?? [];
+  if (patch.claudeSettingSources !== undefined) return patch.claudeSettingSources ?? detail.detail?.claudeSettingSourcesDefault ?? [];
+  return detail.claudeSettingSources ?? detail.detail?.claudeSettingSourcesExplicit ?? detail.detail?.claudeSettingSourcesDefault ?? [];
 }
 
 /** The full list after turning one source on / off (stable order). */

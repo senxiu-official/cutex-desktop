@@ -14,7 +14,7 @@ import type { JobResult } from "../../../../shared/ipc";
 import { INBOUND_MAIL_FEATURE, NCI_HOST_KEYGEN_FEATURE, NCI_MAIL_ADDRESS_FEATURE, NCI_VERIFICATION_FEATURE, type InboundMailStatus, type NciHelper, type NciVerificationStatus } from "../../../../shared/remoteJobs";
 import { ComponentNotice } from "../../components/ComponentCard";
 import { MaskedText } from "../../components/MaskedText";
-import { ArmedRemove, Button, ErrorNote, Loading, Notice, Section, Select, SettingRow, TextArea, TextInput, Toggle } from "../../components/settings/Form";
+import { ArmedRemove, Button, ErrorNote, Loading, Notice, Section, Select, SettingRow, SettingsGroup, TextArea, TextInput, Toggle } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { copyText } from "../../lib/menus";
 import { authorizedKeysFor, hasNciKey, nciSteps, normalizeGadiHome, sshFingerprint, type NciStepId, type NciStepState } from "../../lib/nciSetup";
@@ -136,7 +136,7 @@ function StateBadge({ state }: { state: NciStepState }) {
   const tone =
     state === "done" ? "bg-ok/15 text-ok" : state === "todo" ? "bg-accent/15 text-accent" : state === "manual" ? "bg-warn/15 text-warn" : "bg-surface-2 text-subtle";
   return (
-    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${tone}`}>
+    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-caption/[inherit] font-medium ${tone}`}>
       {state === "done" ? <Check size={11} /> : <Circle size={9} />}
       {t(`nci.state.${state}` as MessageKey)}
     </span>
@@ -229,7 +229,7 @@ function KeyStep({ nci, state, keygen }: { nci: Status<NciVerificationStatus>; s
             text={status.publicKey}
           />
           {status.publicKeyFingerprint && (
-            <SettingRow label={t("nci.key.fingerprint")}>
+            <SettingRow readOnly label={t("nci.key.fingerprint")} agents="none" source="host">
               <MaskedText value={status.publicKeyFingerprint} className="font-mono text-xs text-muted" copy testId="nci-key-fingerprint" />
             </SettingRow>
           )}
@@ -238,7 +238,7 @@ function KeyStep({ nci, state, keygen }: { nci: Status<NciVerificationStatus>; s
       )}
       {nci.value !== undefined && !keygen && <Para>{t("nci.noKeygen")}</Para>}
       {status && keygen && (
-        <>
+        <SettingsGroup agents="now" source="host">
           {!has && <Para>{t("nci.key.advancedPointer")}</Para>}
           {confirming && <Para tone="warn">{t("nci.key.regenerateConfirm")}</Para>}
           <NoteLine note={note} />
@@ -264,7 +264,7 @@ function KeyStep({ nci, state, keygen }: { nci: Status<NciVerificationStatus>; s
               </>
             )}
           </div>
-        </>
+        </SettingsGroup>
       )}
     </Step>
   );
@@ -324,7 +324,7 @@ function GadiStep({ nci, state, keygen }: { nci: Status<NciVerificationStatus>; 
         <div className="border-b border-border py-2.5">
           <div className="text-sm">{t("nci.gadi.helper")}</div>
           <div className="text-xs text-subtle">{t("nci.gadi.helperHint", { path: helper?.installPath ?? "~/.cutex/nci-qstat-only.py" })}</div>
-          {helper && <div className="mt-1 font-mono text-[11px] break-all text-subtle select-text">{t("nci.gadi.helperSha", { sha: helper.sha256 })}</div>}
+          {helper && <div className="mt-1 font-mono text-caption/[inherit] break-all text-subtle select-text">{t("nci.gadi.helperSha", { sha: helper.sha256 })}</div>}
           <NoteLine note={note} />
           <div className="mt-2 flex items-center justify-end gap-2">
             <Button disabled={busy} onClick={() => void copyHelper()}>
@@ -336,13 +336,13 @@ function GadiStep({ nci, state, keygen }: { nci: Status<NciVerificationStatus>; 
           </div>
         </div>
       )}
-      <SettingRow label={t("nci.gadi.home")} hint={homeBad ? <span className="text-danger">{t("nci.gadi.homeInvalid")}</span> : t("nci.gadi.homeHint")}>
+      <SettingRow agents="none" source="local" label={t("nci.gadi.home")} hint={homeBad ? <span className="text-danger">{t("nci.gadi.homeInvalid")}</span> : t("nci.gadi.homeHint")}>
         <TextInput value={home} onChange={(v) => setHome(v.trim())} placeholder="/home/123/ab1234" mono width="w-56" label={t("nci.gadi.home")} />
       </SettingRow>
       {line ? (
         <BlockRow label={t("nci.gadi.line")} hint={t("nci.gadi.lineHint")} text={line} copyLabel={t("nci.gadi.lineCopy")} />
       ) : (
-        <SettingRow label={t("nci.gadi.line")} hint={t("nci.gadi.lineHint")}>
+        <SettingRow readOnly label={t("nci.gadi.line")} hint={t("nci.gadi.lineHint")} agents="none" source="local">
           <span className="text-xs text-subtle">{t(hasNciKey(status) ? "nci.gadi.lineNeedsHome" : "nci.gadi.lineNeedsKey")}</span>
         </SettingRow>
       )}
@@ -380,6 +380,7 @@ function HostKeysStep({ nci, state, draft, setDraft }: { nci: Status<NciVerifica
   const saved = status?.hostKeyFingerprints ?? [];
   return (
     <Step id="hostKeys" index={2} state={state} title={t("nci.hostKeys.title")} hint={t("nci.hostKeys.hint")}>
+      <SettingsGroup agents="now" source="host">
       <div className="border-b border-border py-2.5">
         <div className="text-sm">{t("nci.hostKeys.label")}</div>
         <div className="mt-1.5">
@@ -391,7 +392,7 @@ function HostKeysStep({ nci, state, draft, setDraft }: { nci: Status<NciVerifica
           <div className="mt-2 text-xs">
             <div className="text-subtle">{t("nci.hostKeys.fingerprints")}</div>
             {parsed.keys.map((k, i) => (
-              <div key={k} className="font-mono text-[11px] break-all text-muted select-text">
+              <div key={k} className="font-mono text-caption/[inherit] break-all text-muted select-text">
                 {k.split(" ")[0]} {prints[i] ?? "…"}
               </div>
             ))}
@@ -401,14 +402,15 @@ function HostKeysStep({ nci, state, draft, setDraft }: { nci: Status<NciVerifica
           <div className="mt-2 text-xs">
             <div className="text-subtle">{t("nci.hostKeys.saved")}</div>
             {saved.map((f, i) => (
-              <div key={i} className="font-mono text-[11px] break-all text-muted select-text">
+              <div key={i} className="font-mono text-caption/[inherit] break-all text-muted select-text">
                 {(status?.hostKeys?.[i] ?? "").split(" ")[0]} {f}
               </div>
             ))}
           </div>
         )}
       </div>
-      <SettingRow label={t("nci.hostKeys.confirm")} hint={t("nci.hostKeys.confirmHint")}>
+      </SettingsGroup>
+      <SettingRow label={t("nci.hostKeys.confirm")} hint={t("nci.hostKeys.confirmHint")} agents="now" source="host">
         <Toggle checked={draft.confirmed} onChange={(v) => setDraft({ ...draft, confirmed: v })} disabled={parsed.keys.length === 0} label={t("nci.hostKeys.confirm")} />
       </SettingRow>
     </Step>
@@ -453,7 +455,7 @@ function UsernameStep({ nci, state, draft, setDraft, verification }: { nci: Stat
   };
   return (
     <Step id="username" index={3} state={state} title={t("nci.username.title")} hint={t("nci.username.hint")}>
-      <SettingRow label={t("nci.username.label")} hint={usernameBad ? <span className="text-danger">{t("nci.username.invalid")}</span> : undefined}>
+      <SettingRow agents="now" source="host" label={t("nci.username.label")} hint={usernameBad ? <span className="text-danger">{t("nci.username.invalid")}</span> : undefined}>
         <TextInput value={draft.username} onChange={(v) => setDraft({ ...draft, username: v.trim() })} placeholder="ab1234" mono width="w-40" label={t("nci.username.label")} />
       </SettingRow>
       {verification && (
@@ -471,6 +473,7 @@ function UsernameStep({ nci, state, draft, setDraft, verification }: { nci: Stat
               {t("nci.advanced.title")}
             </button>
             {advanced && (
+              <SettingsGroup agents="now" source="host">
               <div className="mt-1">
                 <Para>{t("nci.advanced.hint")}</Para>
                 {!ready && <Para tone="warn">{t("nci.advanced.needsSteps")}</Para>}
@@ -480,6 +483,7 @@ function UsernameStep({ nci, state, draft, setDraft, verification }: { nci: Stat
                   </Button>
                 </div>
               </div>
+              </SettingsGroup>
             )}
           </div>
         </>
@@ -535,32 +539,32 @@ function MailStep({ mail, state, supportsAddress }: { mail: Status<InboundMailSt
       {mail.value === undefined && !mail.error && <Loading rows={3} />}
       {mail.value !== undefined && (
         <>
-          <SettingRow label={t("nci.mail.server")} hint={t("nci.mail.serverHint")}>
+          <SettingRow label={t("nci.mail.server")} hint={t("nci.mail.serverHint")} agents="now" source="host">
             <span className="flex items-center gap-1.5">
               <TextInput value={draft.server} onChange={(v) => set("server", v.trim())} placeholder="imap.gmail.com" mono width="w-48" label={t("nci.mail.server")} />
               <TextInput value={String(draft.port)} onChange={(v) => set("port", /^\d{0,5}$/.test(v) ? Number(v) : draft.port)} mono width="w-16" label={t("nci.mail.port")} />
             </span>
           </SettingRow>
-          <SettingRow label={t("nci.mail.username")} hint={t("nci.mail.usernameHint")}>
+          <SettingRow label={t("nci.mail.username")} info={t("nci.mail.usernameHint")} agents="now" source="host">
             <TextInput value={draft.username} onChange={(v) => set("username", v)} placeholder="nci-jobs@example.org" mono width="w-64" label={t("nci.mail.username")} />
           </SettingRow>
-          <SettingRow label={t("nci.mail.password")} hint={t(needsPassword ? "nci.mail.passwordHint" : "nci.mail.passwordKeep")}>
+          <SettingRow agents="now" source="host" label={t("nci.mail.password")} hint={t(needsPassword ? "nci.mail.passwordHint" : "nci.mail.passwordKeep")}>
             <TextInput type="password" value={draft.password} onChange={(v) => set("password", v)} placeholder={needsPassword ? t("nci.mail.passwordRequired") : t("nci.mail.passwordSaved")} width="w-64" label={t("nci.mail.password")} />
           </SettingRow>
-          <SettingRow label={t("nci.mail.address")} hint={addressBad ? <span className="text-danger">{t("nci.mail.addressInvalid")}</span> : t("nci.mail.addressHint")}>
+          <SettingRow agents="now" source="host" label={t("nci.mail.address")} hint={addressBad ? <span className="text-danger">{t("nci.mail.addressInvalid")}</span> : t("nci.mail.addressHint")}>
             <TextInput value={draft.address} onChange={(v) => set("address", v)} placeholder={validMailAddress(draft.username.trim()) ? draft.username.trim() : "nci-jobs@example.org"} mono width="w-64" label={t("nci.mail.address")} />
           </SettingRow>
-          <SettingRow label={t("nci.mail.mailbox")}>
+          <SettingRow label={t("nci.mail.mailbox")} agents="now" source="host">
             <TextInput value={draft.mailbox} onChange={(v) => set("mailbox", v)} mono width="w-32" label={t("nci.mail.mailbox")} />
           </SettingRow>
-          <SettingRow label={t("nci.mail.enabled")} hint={t("nci.mail.enabledHint")}>
+          <SettingRow label={t("nci.mail.enabled")} hint={t("nci.mail.enabledHint")} agents="now" source="host">
             <Toggle checked={draft.enabled} onChange={(v) => set("enabled", v)} label={t("nci.mail.enabled")} />
           </SettingRow>
-          <SettingRow label={t("nci.mail.nci")} hint={t("nci.mail.nciHint")}>
+          <SettingRow label={t("nci.mail.nci")} hint={t("nci.mail.nciHint")} agents="now" source="host">
             <Toggle checked={draft.sources.includes("nci")} onChange={(v) => set("sources", v ? ["nci"] : [])} label={t("nci.mail.nci")} />
           </SettingRow>
           {status?.configured && (
-            <SettingRow label={t("nci.mail.agentAddress")} hint={t("nci.mail.agentAddressHint")}>
+            <SettingRow readOnly label={t("nci.mail.agentAddress")} hint={t("nci.mail.agentAddressHint")} agents="now" source="host">
               {view.address ? (
                 <span className="font-mono text-xs text-muted select-text">{view.address}</span>
               ) : (
@@ -640,7 +644,9 @@ function EnableStep({ mail, nci, state, hasMail, verification }: { mail: Status<
   return (
     <Step id="enable" index={5} state={state} title={t("nci.enable.title")} hint={t("nci.enable.hint")}>
       {hasMail && (
-        <SettingRow
+        <SettingRow readOnly
+          agents="none"
+          source="host"
           label={t("nci.enable.mailStatus")}
           hint={
             m?.configured ? (
@@ -662,6 +668,8 @@ function EnableStep({ mail, nci, state, hasMail, verification }: { mail: Status<
       {verification ? (
         <>
           <SettingRow
+            agents="now"
+            source="host"
             label={t("nci.enable.verify")}
             hint={
               !s?.configured ? (
@@ -683,7 +691,7 @@ function EnableStep({ mail, nci, state, hasMail, verification }: { mail: Status<
             <Toggle checked={!!s?.enabled} disabled={!!busy || !s?.configured} onChange={(v) => void update("verify", { enabled: v })} label={t("nci.enable.verify")} />
           </SettingRow>
           {s?.configured && (
-            <SettingRow label={t("nci.enable.interval")} hint={t("nci.enable.intervalHint")}>
+            <SettingRow label={t("nci.enable.interval")} hint={t("nci.enable.intervalHint")} agents="now" source="host">
               <Select
                 value={String(s.pollIntervalSeconds ?? 21600)}
                 disabled={!!busy}
@@ -699,9 +707,11 @@ function EnableStep({ mail, nci, state, hasMail, verification }: { mail: Status<
       )}
       <NoteLine note={note} />
       {verification && (s?.configured || s?.pendingGeneratedKey) && (
+        <SettingsGroup agents="now" source="host">
         <div className="flex justify-end py-2">
           <ArmedRemove title={t("nci.enable.delete")} armedLabel={t("nci.enable.deleteConfirm")} disabled={!!busy} onRemove={() => void remove()} />
         </div>
+        </SettingsGroup>
       )}
     </Step>
   );

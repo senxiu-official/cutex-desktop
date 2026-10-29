@@ -1,4 +1,4 @@
-// Every module dictionary, spread into i18n/zh-CN.ts and en.ts. Keys carry the `<id>.` prefix
+// Every module dictionary, spread into i18n/zh-CN.ts (en: modules/i18nCatalogEn.ts, other locales: i18nCatalogLocales.ts). Keys carry the `<id>.` prefix
 // (the host's own strings: `modules.`); test/modules.test.ts checks prefixes, duplicates and that
 // every module directory was collected.
 //
@@ -21,19 +21,21 @@ type HostMessages = typeof host.zhCN;
 /** All module zh-CN dictionaries (merged into by every `modules/<id>/i18n.ts`). */
 export interface ModuleMessages extends HostMessages {}
 
-export interface ModuleDictionary {
-  zhCN: Record<string, string>;
-  en: Record<string, string>;
-}
+/**
+ * zh-Hant-CN entries shipped by modules themselves (`locales["zh-Hant-CN"]`): a module that ships them
+ * merges its key set here (`interface ModuleZhHantMessages extends Record<keyof typeof zhCN, string> {}`),
+ * so i18n/zh-Hant-CN.ts stays complete at compile time.
+ */
+export interface ModuleZhHantMessages {}
 
-const found = import.meta.glob<ModuleDictionary>("./*/i18n.ts", { eager: true });
+// zh-CN only: the modules' en strings (./<id>/i18n.en.ts → i18nCatalogEn) and other locales (./<id>/i18n.locales.ts →
+// i18nCatalogLocales) load with their lazy catalogs (i18n/index.tsx; 0.2.0 beta perf audit, 2026-10-24).
+const found = import.meta.glob<{ zhCN: Record<string, string> }>("./*/i18n.ts", { eager: true });
 
-/** Key prefix → dictionaries ("modules" = the host itself; otherwise the module directory name). */
-export const MODULE_DICTIONARIES: Record<string, ModuleDictionary> = {
-  modules: host,
-  ...Object.fromEntries(Object.entries(found).map(([file, dict]) => [file.split("/")[1]!, dict])),
+/** Key prefix → zh-CN dictionary ("modules" = the host itself; otherwise the module directory name). */
+export const MODULE_DICTIONARIES_ZH: Record<string, Record<string, string>> = {
+  modules: host.zhCN,
+  ...Object.fromEntries(Object.entries(found).map(([file, dict]) => [file.split("/")[1]!, dict.zhCN])),
 };
 
-const dictionaries = Object.values(MODULE_DICTIONARIES);
-export const modulesZhCN = Object.assign({}, ...dictionaries.map((d) => d.zhCN)) as ModuleMessages;
-export const modulesEn = Object.assign({}, ...dictionaries.map((d) => d.en)) as Record<keyof ModuleMessages, string>;
+export const modulesZhCN = Object.assign({}, ...Object.values(MODULE_DICTIONARIES_ZH)) as ModuleMessages;

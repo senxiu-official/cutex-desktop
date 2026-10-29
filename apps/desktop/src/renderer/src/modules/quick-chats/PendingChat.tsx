@@ -6,21 +6,23 @@
 // session (~1 s); messages typed meanwhile go out as soon as it exists. Multi-host (P1 step 2c): a
 // host picker (RFC ★ Q10 default, lib/useCreateHost) chooses where the chat is created; the profiles,
 // models, skills and quota under the input are that host's (TargetHostContext).
+import { isImeComposing } from "../../lib/ime";
+import { profileRuntimeAvailable } from "../../lib/profileKind";
+import { acpRuntimeAvailable, isAcpRuntime } from "../../lib/acpRuntimes";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { MessageSquarePlus, Target, X } from "lucide-react";
 import type { SkillMetadata, SkillsListResponse } from "@cutex-desktop/protocol/codex/v2";
 import type { ProfileItem, ProfileModelsView } from "../../../../shared/ipc";
 import type { DraftImage } from "../../../../shared/input";
 import { BUILTIN_THREAD_DEFAULTS, readNewThreadDefaults, type ClaudeLaunchMode, type LaunchOverrides, type LaunchPermissions } from "../../../../shared/launch";
-import { useI18n, type MessageKey } from "../../i18n";
-import { en } from "../../i18n/en";
+import { useEnglishCatalog, useI18n, type MessageKey } from "../../i18n";
 import { zhCN } from "../../i18n/zh-CN";
 import { appendToken } from "../../lib/composerTools";
 import { useImagePickBlocked } from "../../lib/remoteMode";
 import { onHostSwitch } from "../../lib/hostSwitch";
 import { imageFileToDataUrl } from "../../lib/images";
 import { draftOffersGoal, draftSlashCommands, pendingSettingLocked } from "../../lib/pendingChat";
-import { claudeLaunchModes, isClaudeProfile, shownClaudeMode } from "../../lib/newAgentClaude";
+import { claudeLaunchModes, shownClaudeMode } from "../../lib/newAgentClaude";
 import { LAUNCH_FOR_MODE, PERMISSION_MODES, permissionModeOfLaunch } from "../../lib/permissionModes";
 import { cachedProfile, cachedProfileList, loadProfileList } from "../../lib/profileSnapshot";
 import { useOrderedProfiles } from "../../lib/profileOrder";
@@ -29,7 +31,7 @@ import { boundSkills, paletteQuery, parseSlash, rankEntries, type PaletteEntry }
 import { composerKeyAction } from "../../lib/sendKeys";
 import { QUICK_CHAT_PROFILE_FEATURE } from "../../lib/profileCreate";
 import { featuresOf, hostApi, useApp } from "../../store";
-import { TargetHostContext } from "../../lib/targetHost";
+import { TargetHostContext, useTargetHostId } from "../../lib/targetHost";
 import { rememberCreateHost, useCreateHost, type CreateHost } from "../../lib/useCreateHost";
 import { HostPicker } from "../../components/HostPicker";
 import { ChipDivider, EffortPicker, ProfileQuota } from "../../components/Composer";
@@ -42,6 +44,11 @@ import { modelControlTitle, useModelName } from "../../lib/modelDisplay";
 import { ScriptText } from "../../components/ScriptText";
 import { LaunchAttachments, LaunchComposer, LaunchDock, LaunchIntro, LaunchPage } from "../../components/LaunchPage";
 import { profileProvider } from "../../lib/provider";
+import { draftRuntime, variantDefaultModel, variantModelRows, type DraftModelRow } from "../../lib/draftRuntime";
+import { variantEffort } from "../../lib/profileVariants";
+import { runtimeEfforts } from "../../lib/runtimeChoices";
+import { btn } from "../../components/Button";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 /** Same box as the bar's popover triggers, for chips that are locked after the first send (the text
  *  goes in a `trim-cap` span, like the triggers' labels, so it shares their centre line). */
@@ -65,6 +72,7 @@ type PaletteItem = PaletteEntry & { skill?: SkillMetadata };
 
 function DraftProfileList({ profiles, defaultProfile, current, locked, onPick, className = "border-b border-border pb-2" }: { profiles: ProfileItem[]; defaultProfile: string | null; current: string | null; locked: boolean; onPick(p: ProfileItem): void; className?: string }) {
   const { t } = useI18n();
+  const hostId = useTargetHostId();
   const modelName = useModelName();
   return (
     <div className={className}>
@@ -97,6 +105,7 @@ export function PendingChat() {
 }
 
 function PendingChatBody({ target }: { target: CreateHost }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const modelName = useModelName();
   const pending = useApp((s) => s.pendingChat);
@@ -124,6 +133,8 @@ function PendingChatBody({ target }: { target: CreateHost }) {
   const [profiles, setProfiles] = useState(() => cachedProfileList(hostId));
   /** In the owner's manual order (lib/profileOrder): the profile list and the portraits. */
   const ordered = useOrderedProfiles(profiles?.profiles, hostId);
+  const features = useApp((s) => featuresOf(s, hostId));
+  const available = useMemo(() => ordered?.filter((p) => profileRuntimeAvailable(p, features)) ?? null, [ordered, features]);
   const [quick, setQuick] = useState<LaunchPermissions>(BUILTIN_THREAD_DEFAULTS.quickChat);
   const quickProfileFeature = useApp((s) => featuresOf(s, hostId).has(QUICK_CHAT_PROFILE_FEATURE));
   /** `quickChatDefaultProfile` (quick-chat-default-profile): cutex uses it when no profile is passed. */
@@ -178,25 +189,34 @@ function PendingChatBody({ target }: { target: CreateHost }) {
   }, [notice]);
   const notify = (value: string) => setNotice({ text: value, nonce: Date.now() });
 
-  const models = catalog?.models ?? [];
-  const defaultModel = models.find((m) => m.isDefault)?.id ?? catalog?.selectedModel ?? item?.model ?? null;
+  // The runtime cutex starts the chat on: the Profile's default variant (a cute-codex Profile may default to DSH).
+  // A secondary default variant takes its model / effort from the variant, not the Profile's (Codex) catalog.
+  const runtimeOf = useMemo(() => draftRuntime(item, features), [item, features]);
+  const variant = runtimeOf.variant;
+  const variantRows = useMemo(() => (variant ? variantModelRows(variant) : null), [variant]);
+  const models: readonly DraftModelRow[] = variantRows ?? catalog?.models ?? [];
+  const defaultModel = variant ? variantDefaultModel(variant, models) : (models.find((m) => m.isDefault)?.id ?? catalog?.selectedModel ?? item?.model ?? null);
   const model = launch.model ?? defaultModel;
   const row = models.find((m) => m.id === model);
   const shownModel = modelName(model, row?.displayName, item?.id);
-  const effort = launch.reasoningEffort ?? (launch.model ? row?.defaultReasoningEffort : (item?.modelReasoningEffort ?? row?.defaultReasoningEffort)) ?? null;
+  const effort = launch.reasoningEffort ?? (variant ? (launch.model ? row?.defaultReasoningEffort : variantEffort(variant, model)) : launch.model ? row?.defaultReasoningEffort : (item?.modelReasoningEffort ?? row?.defaultReasoningEffort)) ?? null;
   const mode = permissionModeOfLaunch(launch.sandbox ?? quick.sandbox, launch.approvalPolicy ?? quick.approvalPolicy, launch.approvalsReviewer ?? quick.approvalsReviewer);
   // Claude profiles: Claude Code's own modes (same names as the composer); an older cutex shows the
   // profile's rules only (Codex presets would be refused for a Claude profile).
-  const claude = isClaudeProfile(item);
+  const claude = runtimeOf.claude;
+  // An ACP runtime (DSH, Kimi) as the Profile's default variant (quick chats take the default: cutex decides).
+  const dsh = runtimeOf.dsh;
+  const acpRuntime = runtimeOf.runtime && isAcpRuntime(runtimeOf.runtime) ? runtimeOf.runtime : isAcpRuntime(item?.cliKind) ? item.cliKind : null;
+  const runtimeBlocked = !pending?.sessionId && (!profileRuntimeAvailable(item, features) || (acpRuntime !== null && !acpRuntimeAvailable(acpRuntime, features)));
   const claudeModes = useMemo(() => claudeLaunchModes(item), [item]);
   const claudeMode = shownClaudeMode(launch.claudePermissionMode, claudeModes);
   // The store creates the session from this (自动's reviewer on an older cutex: lib/permissionModes;
   // a Claude profile's launch: lib/newAgentClaude).
   useEffect(() => {
     if (!pending || pending.sessionId) return;
-    const same = pending.permissionMode === mode && !!pending.claude === claude && JSON.stringify(pending.claudeModes ?? null) === JSON.stringify(claudeModes);
-    if (!same) update({ permissionMode: mode, claude, claudeModes });
-  }, [pending, mode, claude, claudeModes, update]);
+    const same = pending.permissionMode === mode && !!pending.dsh === dsh && !!pending.claude === claude && JSON.stringify(pending.claudeModes ?? null) === JSON.stringify(claudeModes);
+    if (!same) update({ permissionMode: mode, claude, claudeModes, dsh, ...(dsh ? { plan: false, goal: null } : {}) });
+  }, [pending, mode, claude, claudeModes, dsh, update]);
   const drafts = pending?.drafts ?? [];
   // Session-shaping choices lock with the first send; plan / goal until they were applied.
   const locked = creating || drafts.length > 0 || !!pending?.sessionId;
@@ -212,11 +232,12 @@ function PendingChatBody({ target }: { target: CreateHost }) {
     setGoalEdit(null);
     if (goal) update({ goal: null });
   }, [offersGoal, goalLocked, goal, update]);
-  const canImages = row ? row.inputModalities.includes("image") : true; // unknown model: let the native decide
+  // Unknown model: let the native decide — except DSH, which takes images only on a model cutex lists with them.
+  const canImages = dsh ? !!row?.inputModalities.includes("image") : (row ? row.inputModalities.includes("image") : true);
   const imagePickBlocked = useImagePickBlocked();
 
   const focusEnd = () =>
-    requestAnimationFrame(() => {
+    win.requestAnimationFrame(() => {
       const el = textarea.current;
       if (!el) return;
       el.focus();
@@ -242,15 +263,17 @@ function PendingChatBody({ target }: { target: CreateHost }) {
     if (paletteOpen && !allSkills) loadSkills();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paletteOpen, allSkills]);
+  // English keywords: the en catalog loads when the palette first opens (i18n); the list ranks again when it arrives.
+  const en = useEnglishCatalog(paletteOpen);
   const paletteItems = useMemo<PaletteItem[]>(() => {
     if (query === null) return [];
-    const commands: PaletteItem[] = draftSlashCommands(offersGoal).map((id) => {
+    const commands: PaletteItem[] = (dsh ? [] : draftSlashCommands(offersGoal)).map((id) => {
       const key = `chat.draft.cmd.${id}` as MessageKey;
-      return { key: `cmd:${id}`, kind: "command", name: id, description: t(key), keywords: [zhCN[key], en[key]] };
+      return { key: `cmd:${id}`, kind: "command", name: id, description: t(key), keywords: [zhCN[key], ...(en?.[key] ? [en[key]] : [])] };
     });
     const skills: PaletteItem[] = (allSkills ?? []).filter((s) => s.enabled).map((s) => ({ key: `skill:${s.path}`, kind: "skill", name: s.name, description: s.interface?.shortDescription ?? s.shortDescription ?? s.description, skill: s }));
     return rankEntries(query, [...commands, ...skills]);
-  }, [query, allSkills, t, offersGoal]);
+  }, [query, allSkills, t, offersGoal, en, dsh]);
   useEffect(() => setSelected(0), [query]);
 
   const pickSkill = (skill: SkillMetadata, how: "replace" | "append") => {
@@ -263,6 +286,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
 
   // ---------- plan / goal ----------
   const setPlan = (on: boolean) => {
+    if (dsh) return;
     if (planLocked) return notify(t("chat.draft.locked"));
     update({ plan: on });
   };
@@ -304,7 +328,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
     try {
       for (const p of await api.pickImages()) {
         if (p.error) notify(t(p.error === "tooLarge" ? "composer.image.tooLarge" : "composer.image.unreadable", { name: p.name }));
-        else setImages((prev) => [...prev, { id: `draft-img-${++imageSeq}`, name: p.name, preview: p.preview, source: { kind: "path", path: p.path } }]);
+        else setImages((prev) => [...prev, { id: `draft-img-${++imageSeq}`, name: p.name, preview: p.preview, pickedLocally: true, source: { kind: "path", path: p.path } }]);
       }
     } catch (e) {
       notify(e instanceof Error ? e.message : String(e));
@@ -327,11 +351,13 @@ function PendingChatBody({ target }: { target: CreateHost }) {
 
   // ---------- send ----------
   const send = () => {
+    if (runtimeBlocked) return;
     const trimmed = text.trim();
     if (!trimmed && images.length === 0) return;
     const command = images.length === 0 ? parseSlash(trimmed) : null;
     if (command) {
       if (command.id === "plan") {
+        if (dsh) return notify(t("slash.notice.agentUnsupported", { name: command.id }));
         if (planLocked) return notify(t("chat.draft.locked"));
         setText("");
         // Like the composer: `/plan text` sends the text in plan mode.
@@ -361,7 +387,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.nativeEvent.isComposing) return;
+    if (isImeComposing(e)) return;
     if (paletteOpen) {
       const n = paletteItems.length;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -394,11 +420,11 @@ function PendingChatBody({ target }: { target: CreateHost }) {
 
   const paletteRows: PaletteRow[] = paletteItems.map((x) => ({ key: x.key, label: `${x.kind === "skill" ? "$" : "/"}${x.name}`, description: x.description, tag: x.kind === "skill" ? t("slash.skillTag") : undefined }));
   const hasContent = !!text.trim() || images.length > 0;
-  const efforts = row?.supportedReasoningEfforts ?? [];
+  const efforts = row?.supportedReasoningEfforts ?? (variant ? [...(runtimeEfforts(variant.runtime) ?? [])] : []);
   /** The draft's profile choice: in the quota popover and on top of the profile / model chip's menu. */
   const profileList = (close: () => void) => (
     <DraftProfileList
-      profiles={ordered ?? []}
+      profiles={available ?? []}
       defaultProfile={defaultProfile}
       current={item?.id ?? null}
       locked={locked}
@@ -417,7 +443,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
   };
 
   return (
-    <LaunchPage intro={drafts.length === 0 ? <LaunchIntro showArtGreeting portraits={{ profileId: item?.id, profiles: ordered, selected: portraitSelected, disabled: locked, onSelect: (id) => { if (locked) return; setPortraitSelected(true); update({ profile: id, launch: keptMode(launch) }); } }} provider={item ? profileProvider(item) : undefined} icon={<MessageSquarePlus size={24} />} title={t("quick-chats.title")} hint={t("chat.draftHint")} /> : null}>
+    <LaunchPage intro={drafts.length === 0 ? <LaunchIntro showArtGreeting portraits={{ profileId: item?.id, profiles: available, selected: portraitSelected, disabled: locked, onSelect: (id) => { if (locked) return; setPortraitSelected(true); update({ profile: id, launch: keptMode(launch) }); } }} provider={item ? profileProvider(item) : undefined} icon={<MessageSquarePlus size={24} />} title={t("quick-chats.title")} hint={t("chat.draftHint")} /> : null}>
       <div className="relative min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-6 pt-4 pb-8">
           {drafts.map((d, i) => (
@@ -427,12 +453,12 @@ function PendingChatBody({ target }: { target: CreateHost }) {
                   <div className="flex flex-wrap justify-end gap-2 pb-1.5">
                     {d.images.map((img) => (
                       <div key={img.id} className="h-14 w-14 overflow-hidden rounded-lg border border-border bg-surface-2" title={img.name}>
-                        {img.preview ? <img src={img.preview} alt={img.name} className="h-full w-full object-cover" /> : <span className="flex h-full items-center justify-center text-[10px] text-subtle">{img.name}</span>}
+                        {img.preview ? <img src={img.preview} alt={img.name} className="h-full w-full object-cover" /> : <span className="flex h-full items-center justify-center text-caption/[inherit] text-subtle">{img.name}</span>}
                       </div>
                     ))}
                   </div>
                 )}
-                {d.text && <div className="font-chat-context whitespace-pre-wrap"><ScriptText text={d.text} /></div>}
+                {d.text && <div className="selectable font-chat-context whitespace-pre-wrap"><ScriptText text={d.text} /></div>}
               </div>
             </div>
           ))}
@@ -464,7 +490,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
                 value={goalEdit}
                 onChange={(e) => setGoalEdit(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.nativeEvent.isComposing) return;
+                  if (isImeComposing(e)) return;
                   if (e.key === "Enter") {
                     e.preventDefault();
                     saveGoal();
@@ -480,7 +506,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
               <button onClick={() => setGoalEdit(null)} className="rounded-md px-1.5 py-0.5 hover:bg-surface-2 hover:text-foreground">
                 {t("goal.cancel")}
               </button>
-              <button onClick={saveGoal} className="rounded-md bg-accent px-1.5 py-0.5 text-white">
+              <button onClick={saveGoal} className={btn({ variant: "primary" })}>
                 {t("goal.save")}
               </button>
             </>
@@ -512,9 +538,9 @@ function PendingChatBody({ target }: { target: CreateHost }) {
               onDragLeave: () => setDragOver(false),
               onDrop,
             }}
-            attachments={<LaunchAttachments images={images} onRemove={(id) => setImages((previous) => previous.filter((image) => image.id !== id))} />}
+            attachments={<LaunchAttachments images={images} hostId={hostId} onRemove={(id) => setImages((previous) => previous.filter((image) => image.id !== id))} />}
             textarea={{ ref: textarea, autoFocus: true, value: text, onChange: (e) => setText(e.target.value), onKeyDown, onPaste, placeholder: t("chat.preparingPlaceholder") }}
-            label={t("composer.send")} disabled={!hasContent} onSubmit={send} />
+            label={t("composer.send")} disabled={!hasContent || runtimeBlocked} onSubmit={send} />
         </div>
 
         <div className="launch-toolbar">
@@ -540,11 +566,11 @@ function PendingChatBody({ target }: { target: CreateHost }) {
             skillsError={skillsError}
             onLoadSkills={loadSkills}
             onInsertSkill={(s) => pickSkill(s, "append")}
-            plan={{ available: true, on: plan, disabledReason: planLocked ? t("chat.draft.locked") : null, set: setPlan }}
+            plan={{ available: !dsh, on: plan, disabledReason: planLocked ? t("chat.draft.locked") : null, set: setPlan }}
             goal={offersGoal ? { label: goal ?? t("composer.tools.goal.unset"), disabledReason: goalLocked ? t("chat.draft.locked") : null, onClick: openGoal } : undefined}
             onManage={(tab) => useApp.getState().openSettings(tab)}
           />
-          {claude && claudeModes && claudeMode ? (locked ? (
+          {dsh ? null : claude && claudeModes && claudeMode ? (locked ? (
             <span className={`${staticChip} whitespace-nowrap ${claudeMode === "bypassPermissions" ? "text-warn" : ""}`}>
               <span className="trim-cap">{t(`composer.claudeMode.${claudeMode}` as MessageKey)}</span>
             </span>
@@ -555,7 +581,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
               items={claudeModes.map((m) => ({ value: m, label: t(`composer.claudeMode.${m}` as MessageKey), description: t(`composer.claudeModeHint.${m}` as MessageKey) }))}
               selected={claudeMode}
               onSelect={(m) => update({ launch: { ...launch, claudePermissionMode: m } })}
-              footer={<p className="px-2.5 py-1.5 text-[11px] text-subtle">{t("composer.claudeLaunch.footer")}</p>}
+              footer={<p className="px-2.5 py-1.5 text-caption/[inherit] text-subtle">{t("composer.claudeLaunch.footer")}</p>}
             />
           )) : claude ? (
             <span className={`${staticChip} whitespace-nowrap text-muted`} title={t("composer.claudeLaunch.rulesHint")}>

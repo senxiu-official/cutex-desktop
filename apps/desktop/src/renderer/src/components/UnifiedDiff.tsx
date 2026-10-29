@@ -24,8 +24,8 @@ const GUTTER_BG = {
   ctx: "bg-background",
 } as const;
 const SPAN_BG = {
-  add: "rounded-[2px] bg-[color-mix(in_oklab,var(--ok)_30%,transparent)]",
-  del: "rounded-[2px] bg-[color-mix(in_oklab,var(--danger)_28%,transparent)]",
+  add: "rounded-xs bg-[color-mix(in_oklab,var(--ok)_30%,transparent)]",
+  del: "rounded-xs bg-[color-mix(in_oklab,var(--danger)_28%,transparent)]",
   ctx: "",
 } as const;
 const SIGN = { add: "+", del: "−", ctx: " " } as const;
@@ -43,7 +43,7 @@ function useCopied(): [boolean, (text: string) => void] {
 
 function Counts({ add, del }: { add: number; del: number }) {
   return (
-    <span className="shrink-0 font-mono text-[11px] tabular-nums">
+    <span className="shrink-0 font-mono text-caption/[inherit] tabular-nums">
       <span className="text-[var(--ok)]">+{add}</span> <span className="text-danger">−{del}</span>
     </span>
   );
@@ -54,7 +54,7 @@ function LineText({ line, wrap }: { line: DiffLine; wrap: boolean }) {
   const ws = wrap ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : "whitespace-pre";
   const s = line.span;
   return (
-    <span className={`min-w-0 flex-1 pr-3 ${ws}`}>
+    <span className={`selectable min-w-0 flex-1 pr-3 ${ws}`}>
       {s ? (
         <>
           {line.text.slice(0, s[0])}
@@ -92,13 +92,13 @@ function Row({ line, width, wrap }: { line: DiffLine; width: number; wrap: boole
 }
 
 function Separator({ children, onClick, title }: { children: React.ReactNode; onClick?: () => void; title?: string }) {
-  const cls = "sticky left-0 flex w-full items-center gap-1.5 bg-surface px-2 py-0.5 text-left font-sans text-[11px] text-subtle";
+  const cls = "sticky left-0 flex w-full items-center gap-1.5 bg-surface px-2 py-0.5 text-left font-sans text-caption/[inherit] text-subtle";
   return onClick ? (
     <button type="button" onClick={onClick} title={title} className={`${cls} hover:bg-surface-2 hover:text-foreground`}>
       {children}
     </button>
   ) : (
-    <div className={cls}>{children}</div>
+    <div className={cls} data-chrome="">{children}</div>
   );
 }
 
@@ -125,7 +125,7 @@ function FileBody({ file, wrap }: { file: DiffFile; wrap: boolean }) {
   if (file.binary) return <p className="px-3 py-2 font-sans text-xs text-subtle">{t("diffView.binary")}</p>;
   if (file.hunks.length === 0) return <p className="px-3 py-2 font-sans text-xs text-subtle">{t("diffView.noContent")}</p>;
   return (
-    <div className="overflow-x-auto">
+    <div className="selectable overflow-x-auto">
       <div className={`${wrap ? "w-full" : "w-max min-w-full"} py-0.5`}>
         {file.hunks.map((h, hi) => {
           const hidden = hiddenBefore(file, hi);
@@ -177,8 +177,8 @@ function FileBlock({ file, wrap }: { file: DiffFile; wrap: boolean }) {
         className={`sticky top-0 z-[2] flex w-full items-center gap-1.5 bg-surface px-2 py-1 text-left font-sans text-xs hover:bg-surface-2 ${collapsed ? "" : "border-b border-border/70"}`}
       >
         <Chevron size={13} className="shrink-0 text-subtle" />
-        {file.status !== "modified" && <span className={`shrink-0 rounded px-1 text-[10px] leading-4 ${STATUS_STYLE[file.status]}`}>{t(`diffView.status.${file.status}`)}</span>}
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground" dir="rtl" title={path}>
+        {file.status !== "modified" && <span className={`shrink-0 rounded px-1 text-caption/[inherit] leading-4 ${STATUS_STYLE[file.status]}`}>{t(`diffView.status.${file.status}`)}</span>}
+        <span className="selectable min-w-0 flex-1 truncate font-mono text-caption/[inherit] text-foreground" dir="rtl" title={path}>
           <bdi>{path}</bdi>
         </span>
         {file.hunks.length > 0 && <Counts add={file.additions} del={file.deletions} />}
@@ -191,7 +191,7 @@ function FileBlock({ file, wrap }: { file: DiffFile; wrap: boolean }) {
           </Separator>
         )
       ) : (
-        <div className="font-mono text-[11.5px] leading-[18px] [tab-size:4]">
+        <div className="font-mono text-meta/[inherit] leading-[18px] [tab-size:4]">
           <FileBody file={file} wrap={wrap} />
         </div>
       )}
@@ -220,7 +220,7 @@ export function UnifiedDiff({ text, className = "" }: { text: string; className?
         </button>
       </div>
       {files.length === 0 ? (
-        <pre className={`overflow-x-auto rounded-md border border-border/70 bg-background p-2 font-mono text-[11.5px] ${wrap ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : ""}`}>{text}</pre>
+        <pre className={`overflow-x-auto rounded-md border border-border/70 bg-background p-2 font-mono text-meta/[inherit] ${wrap ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : ""}`}>{text}</pre>
       ) : (
         files.map((f, i) => <FileBlock key={`${i}:${diffFilePath(f)}`} file={f} wrap={wrap} />)
       )}

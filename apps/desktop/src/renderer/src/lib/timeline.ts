@@ -1,10 +1,15 @@
+import { observeLiveDurable, type LiveTimelineState } from "./liveDeltas";
+import { readAcpContext, readDshContext, type DshContext } from "./dshContext";
+import { isForkSignatureRejection } from "./forkProfile";
+import { translate } from "../i18n";
+import { eventMediaNotice, mediaRecord } from "../../../shared/mediaBlobs";
 // Projects cute-codex thread history (thread/read) + live app-server notifications into a
 // renderable timeline. Pure and framework-free so it can be unit-tested.
 import type { ClaudeModelStatus } from "./observedModel";
 import { windowsSandboxSetupOutcomeOf, type WindowsSandboxSetupOutcome } from "../../../shared/windowsSandbox";
 import type { EventEnvelope, LatestPlan, LatestTokenUsage, PendingServerRequest } from "@cutex-desktop/protocol";
 import type { ApprovalsReviewer, GuardianApprovalReviewAction, GuardianApprovalReviewStatus, GuardianRiskLevel, GuardianUserAuthorization, ThreadGoal } from "@cutex-desktop/protocol/codex/v2";
-import { messageImages, type MessageImage } from "../../../shared/input";
+import { messageImages, messageSkills, type MessageImage, type MessageSkill } from "../../../shared/input";
 import { mergeRateLimits, type RateLimitsLike } from "./quota";
 import { nextPlan } from "./planState";
 import { agentMessageText, deliveryKindOf, type AgentEnvelope, type DeliveryKind } from "./agentMessages";
@@ -37,8 +42,8 @@ export interface ExternalMessage {
 }
 
 export type TimelineEntry =
-  | { kind: "user"; id: string; text: string; turnId: string; images?: MessageImage[]; /** clientUserMessageId cutex passed through (cute-codex userMessage.clientId). */ clientId?: string }
-  | { kind: "agent"; id: string; text: string; turnId: string; streaming: boolean }
+  | { kind: "user"; id: string; text: string; turnId: string; images?: MessageImage[]; /** Skills bound to it (编辑并重发 puts them back). */ skills?: MessageSkill[]; /** clientUserMessageId cutex passed through (cute-codex userMessage.clientId). */ clientId?: string }
+  | { kind: "agent"; id: string; text: string; turnId: string; streaming: boolean; liveIncomplete?: boolean; fullTextPending?: { streamId: string; sequence: number; eventId: string } }
   | { kind: "received"; id: string; turnId: string; message: ExternalMessage }
   | { kind: "sent"; id: string; turnId: string | null; to: string; deliveryMode: string; text: string; /** Bus message id (status lookup); absent on older entries. */ messageId?: string; /** note / wake as cutex reported it (agent-messages-v2). */ deliveryKind?: DeliveryKind }
   | { kind: "tool"; id: string; turnId: string; item: RawItem }
@@ -53,14 +58,14 @@ export type TimelineEntry =
    * summaries (`summary`), filled live by item/reasoning/* deltas. Times are when this desktop saw it
    * start / end (unix s; null from history, which carries none).
    */
-  | { kind: "reasoning"; id: string; turnId: string; summary: string[]; content: string[]; streaming: boolean; startedAt: number | null; completedAt: number | null }
+  | { kind: "reasoning"; id: string; turnId: string; summary: string[]; content: string[]; streaming: boolean; startedAt: number | null; completedAt: number | null; liveIncomplete?: boolean; fullTextPending?: { streamId: string; sequence: number; eventId: string } }
   /** A handled server request (question / approval / elicitation) kept as one row (lib/interactionLog). */
   | { kind: "interaction"; id: string; turnId: string; record: InteractionRecord }
   /**
    * Native's automatic approval reviewer outside a tool row: a review without a target item (network
    * access) or a `guardianWarning` no running review accounts for.
    */
-  | { kind: "notice"; id: string; turnId: string; review?: AutoReview; text?: string }
+  | { kind: "notice"; id: string; turnId: string; review?: AutoReview; text?: string; media?: true }
   | { kind: "other"; id: string; turnId: string; item: RawItem };
 
 /**
@@ -128,12 +133,19 @@ export interface TurnView {
   /** A failed turn's error (`turn.error`: message, then additionalDetails), shown after the turn
    *  (TurnErrorRow). Absent / null otherwise. */
   error?: string | null;
+  /** cutex's classification of that error (`turn.error.cutexCode`, r261: e.g. `tool_schema_rejected`); absent on
+   *  older cutex. */
+  errorCode?: string | null;
   /** Native is retrying the model request (`error` with willRetry): the latest attempt, shown under
    *  the running turn until the next output (delta / item) or the turn's end. */
   retry?: RetryNotice | null;
 }
 
 export interface TimelineState {
+  /** Non-durable text identity and offset checks, bounded to current starts. */
+  liveDeltas?: LiveTimelineState;
+  fullTextItemTerminal?: boolean;
+  fullTextItemTerminalGeneration?: number;
   threadId: string | null;
   turns: TurnView[];
   entries: Map<string, TimelineEntry>;
@@ -148,7 +160,7 @@ export interface TimelineState {
   /** Live thread settings (model, effort, approvalPolicy, sandboxPolicy, …). */
   settings: ThreadSettingsView | null;
   /** Context usage: last-turn input tokens vs model context window. */
-  contextUsage: { used: number; window: number | null } | null;
+  contextUsage: { used: number; window: number | null; dsh?: DshContext } | null;
   /** Account rate limits of this agent's app-server (sparse updates merged). */
   rateLimits: RateLimitsLike | null;
   /** When the last rate-limit update arrived (unix seconds; shown as "queried at"). */
@@ -249,9 +261,15 @@ export function seedInteractions(state: TimelineState, records: readonly Interac
 }
 
 /** Context usage carried by a native `thread/tokenUsage/updated` envelope (with its thread), else null. */
-export function contextUsageOf(envelope: EventEnvelope): { threadId: string | null; used: number; window: number | null } | null {
+export function contextUsageOf(envelope: EventEnvelope): { threadId: string | null; used: number; window: number | null; dsh?: DshContext } | null {
   const message = envelope.native?.message;
-  if (envelope.native?.kind === "serverRequest" || message?.method !== "thread/tokenUsage/updated") return null;
+  if (envelope.native?.kind === "serverRequest") return null;
+  if (message?.method === "dsh/contextUsage/updated" || message?.method === "kimi/contextUsage/updated") {
+    const params = message.params as Record<string, unknown> | undefined;
+    const dsh = readAcpContext(params);
+    return dsh ? { threadId: typeof params?.threadId === "string" ? params.threadId : null, used: dsh.used, window: dsh.size, dsh } : null;
+  }
+  if (message?.method !== "thread/tokenUsage/updated") return null;
   const params = (message.params ?? {}) as { threadId?: unknown; tokenUsage?: { last?: { inputTokens?: number }; modelContextWindow?: number | null } };
   if (!params.tokenUsage) return null;
   return {
@@ -265,7 +283,7 @@ export function contextUsageOf(envelope: EventEnvelope): { threadId: string | nu
  * cutex `latestTokenUsage` (bootstrap / offline history, recovered from the rollout) in the shape
  * of {@link contextUsageOf}, else null.
  */
-export function contextUsageFromLatest(latest: LatestTokenUsage | null | undefined): { threadId: string | null; used: number; window: number | null } | null {
+export function contextUsageFromLatest(latest: LatestTokenUsage | null | undefined): { threadId: string | null; used: number; window: number | null; dsh?: DshContext } | null {
   if (!latest || typeof latest.threadId !== "string" || !latest.tokenUsage) return null;
   return {
     threadId: latest.threadId,
@@ -279,9 +297,9 @@ export function contextUsageFromLatest(latest: LatestTokenUsage | null | undefin
  * has no token usage and the runtime only reports it at the end of a model request, so without this
  * the composer's context ring stays empty until the next turn. Returns true if seeded.
  */
-export function seedContextUsage(state: TimelineState, cached: { threadId: string | null; used: number; window: number | null } | null | undefined): boolean {
+export function seedContextUsage(state: TimelineState, cached: { threadId: string | null; used: number; window: number | null; dsh?: DshContext } | null | undefined): boolean {
   if (!cached || state.contextUsage || !state.threadId || cached.threadId !== state.threadId) return false;
-  state.contextUsage = { used: cached.used, window: cached.window };
+  state.contextUsage = { used: cached.used, window: cached.window, ...(cached.dsh ? { dsh: cached.dsh } : {}) };
   return true;
 }
 
@@ -327,7 +345,7 @@ export function parseExternalInput(item: RawItem): ExternalMessage | null {
 
 const IMAGE_PARTS = new Set(["image", "localImage"]);
 
-function userText(item: RawItem): string {
+export function userText(item: RawItem): string {
   const content = (item.content as { type: string; text?: string }[] | undefined) ?? [];
   return content
     .filter((part) => !IMAGE_PARTS.has(part.type) && part.type !== "skill" && part.type !== "mention")
@@ -364,11 +382,14 @@ function appendReasoning(state: TimelineState, itemId: string, turnId: string, f
 }
 
 export function entryFromItem(item: RawItem, turnId: string, streaming = false): TimelineEntry {
+  if (eventMediaNotice(item)) return { kind: "notice", id: item.id, turnId, media: true, text: translate("image.eventTruncated") };
   switch (item.type) {
     case "userMessage": {
-      const images = messageImages((item.content as { type: string }[] | undefined) ?? []);
+      const content = (item.content as { type: string }[] | undefined) ?? [];
+      const images = messageImages(content);
+      const skills = messageSkills(content);
       const clientId = typeof item.clientId === "string" && item.clientId ? item.clientId : undefined;
-      return { kind: "user", id: item.id, text: userText(item), turnId, ...(images.length ? { images } : {}), ...(clientId ? { clientId } : {}) };
+      return { kind: "user", id: item.id, text: userText(item), turnId, ...(images.length ? { images } : {}), ...(skills.length ? { skills } : {}), ...(clientId ? { clientId } : {}) };
     }
     case "agentMessage":
       return { kind: "agent", id: item.id, text: String(item.text ?? ""), turnId, streaming };
@@ -397,7 +418,12 @@ interface RawTurn {
   items?: RawItem[];
   startedAt?: number | null;
   completedAt?: number | null;
-  error?: { message?: unknown; additionalDetails?: unknown } | null;
+  error?: { message?: unknown; additionalDetails?: unknown; cutexCode?: unknown } | null;
+}
+
+/** cutex's code on a native turn error (`cutexCode`, r261), null when absent. */
+export function turnErrorCode(error: RawTurn["error"]): string | null {
+  return error && typeof error === "object" && typeof error.cutexCode === "string" && error.cutexCode ? error.cutexCode : null;
 }
 
 /** The text of a native `turn.error` (`TurnError`: message + optional additionalDetails); null when absent. */
@@ -407,6 +433,7 @@ export function turnErrorText(error: RawTurn["error"]): string | null {
     .filter((part): part is string => typeof part === "string")
     .map((part) => part.trim())
     .filter(Boolean);
+  if (parts.some(isForkSignatureRejection)) return translate("fork.error.signature");
   return parts.length ? [...new Set(parts)].join("\n") : null;
 }
 
@@ -416,7 +443,9 @@ export function turnErrorText(error: RawTurn["error"]): string | null {
  */
 export function timelineFromThreadRead(result: unknown, pending: readonly PendingServerRequest[] = [], opts: { runtimeLive?: boolean } = {}): TimelineState {
   const state = emptyTimeline();
-  const thread = (result as { thread?: { id?: string; turns?: RawTurn[] } } | null)?.thread;
+  const thread = (result as { thread?: { id?: string; turns?: RawTurn[]; dshContext?: unknown; kimiContext?: unknown } } | null)?.thread;
+  const dsh = readDshContext(thread?.dshContext ?? (result as { dshContext?: unknown } | null)?.dshContext) ?? readAcpContext(thread?.kimiContext ?? (result as { kimiContext?: unknown } | null)?.kimiContext);
+  if (dsh) state.contextUsage = { used: dsh.used, window: dsh.size, dsh };
   state.threadId = thread?.id ?? null;
   for (const turn of thread?.turns ?? []) {
     const view = ensureTurn(state, turn.id);
@@ -424,6 +453,7 @@ export function timelineFromThreadRead(result: unknown, pending: readonly Pendin
     view.startedAt = turn.startedAt ?? null;
     view.completedAt = turn.completedAt ?? null;
     view.error = turnErrorText(turn.error);
+    view.errorCode = turnErrorCode(turn.error);
     for (const item of turn.items ?? []) upsert(state, entryFromItem(item, turn.id));
     if (turn.status === "inProgress") state.activeTurnId = turn.id;
   }
@@ -541,7 +571,45 @@ function clearRetry(state: TimelineState, turnId: string | null | undefined): bo
   return true;
 }
 
-export function applyEvent(state: TimelineState, envelope: EventEnvelope): boolean {
+export function applyEvent(state: TimelineState, envelope: EventEnvelope, liveDeltas = false): boolean {
+  const nativeMessage = envelope.native?.message;
+  const completedItemId = (nativeMessage?.params as { item?: { id?: string } } | undefined)?.item?.id;
+  const prior = completedItemId ? state.entries.get(completedItemId) : undefined;
+  const pending = prior && (prior.kind === "agent" || prior.kind === "reasoning") ? prior.fullTextPending : undefined;
+  const observed = state.liveDeltas?.generation === envelope.correlation?.runtimeGeneration && completedItemId
+    ? state.liveDeltas?.items.get(completedItemId)?.observed === true : false;
+  const authoritativeLive = observed || (state.fullTextItemTerminal === true && state.fullTextItemTerminalGeneration === envelope.correlation?.runtimeGeneration) ||
+    !!pending && pending.streamId === envelope.streamId && pending.sequence === envelope.sequence && pending.eventId === envelope.eventId;
+  observeLiveDurable(state, envelope, liveDeltas);
+  const cutexParams = envelope.cutex?.params;
+  const fullTextPending = nativeMessage?.method === "item/completed" && ("_cutexFullText" in nativeMessage || (mediaRecord(nativeMessage.params) && "_cutexFullText" in nativeMessage.params));
+  const textParams = mediaRecord(nativeMessage?.params) ? nativeMessage.params : null;
+  const textItem = textParams && mediaRecord(textParams.item) ? textParams.item : null;
+  if (nativeMessage?.method === "item/completed" && (fullTextPending ||
+      (textItem && ["agentMessage", "reasoning"].includes(String(textItem.type)) && (eventMediaNotice(nativeMessage) || eventMediaNotice(textParams))))) {
+    const previous = typeof textItem?.id === "string" ? state.entries.get(textItem.id) : undefined;
+    const pending = { streamId: envelope.streamId, sequence: envelope.sequence, eventId: envelope.eventId };
+    if (previous?.kind === "agent" || previous?.kind === "reasoning")
+      state.entries.set(previous.id, { ...previous, streaming: false, liveIncomplete: true, fullTextPending: pending });
+    else if (textItem && typeof textItem.id === "string" && ["agentMessage", "reasoning"].includes(String(textItem.type))) {
+      const turnId = typeof textParams?.turnId === "string" ? textParams.turnId : envelope.correlation.turnId ?? "";
+      const placeholder = entryFromItem({ id: textItem.id, type: String(textItem.type), text: "", summary: [], content: [] }, turnId, false);
+      if (placeholder.kind === "agent" || placeholder.kind === "reasoning") upsert(state, { ...placeholder, liveIncomplete: true, fullTextPending: pending });
+    }
+    // The inline preview is not an authoritative item. Main hydrates it or reloads history.
+    return true;
+  }
+  const truncated = eventMediaNotice(nativeMessage) || eventMediaNotice(nativeMessage?.params) || eventMediaNotice(cutexParams);
+  if (truncated) {
+    const params = nativeMessage?.params ?? cutexParams;
+    const record = mediaRecord(params) ? params : {};
+    const turnId = typeof record.turnId === "string" ? record.turnId : mediaRecord(record.turn) && typeof record.turn.id === "string" ? record.turn.id
+      : state.activeTurnId ?? state.turns.at(-1)?.id ?? "media-notices";
+    if (turnId === "media-notices") ensureTurn(state, turnId).status = "completed";
+    upsert(state, { kind: "notice", id: `media-truncated:${envelope.streamId}:${envelope.eventId}`, turnId, media: true, text: translate("image.eventTruncated") });
+    // Keep trustworthy turn lifecycle metadata; never append partial deltas or execute a partial request.
+    if (!nativeMessage || !["turn/started", "turn/completed"].includes(nativeMessage.method)) return true;
+  }
   if (envelope.native) {
     const message = envelope.native.message;
     const params = (message.params ?? {}) as Record<string, unknown>;
@@ -567,6 +635,7 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
         view.completedAt = turn.completedAt ?? Date.now() / 1000;
         // A final `error` (willRetry false) may have set it already; turn/completed's own wins.
         view.error = turnErrorText(turn.error) ?? (turn.status === "failed" ? (view.error ?? null) : null);
+        view.errorCode = turnErrorCode(turn.error) ?? (turn.status === "failed" ? (view.errorCode ?? null) : null);
         view.retry = null;
         if (state.activeTurnId === turn.id) state.activeTurnId = null;
         stopStreaming(state, view);
@@ -575,7 +644,7 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
       case "item/started":
       case "item/completed": {
         const item = params.item as RawItem;
-        const turnId = String(params.turnId ?? state.activeTurnId ?? "");
+        const turnId = String(params.turnId ?? (authoritativeLive ? envelope.correlation.turnId : state.activeTurnId) ?? "");
         const started = message.method === "item/started";
         const next = entryFromItem(item, turnId, started);
         if (next.kind === "reasoning") {
@@ -585,12 +654,20 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
           const at = eventTime(envelope);
           upsert(state, {
             ...next,
-            summary: next.summary.some(Boolean) ? next.summary : (live?.summary ?? []),
-            content: next.content.some(Boolean) ? next.content : (live?.content ?? []),
+            ...(!started && authoritativeLive && (!Array.isArray(item.summary) || !Array.isArray(item.content)) ? { liveIncomplete: true } : {}),
+            summary: (!started && authoritativeLive && Array.isArray(item.summary)) || next.summary.some(Boolean) ? next.summary : (live?.summary ?? []),
+            content: (!started && authoritativeLive && Array.isArray(item.content)) || next.content.some(Boolean) ? next.content : (live?.content ?? []),
             startedAt: live?.startedAt ?? (started ? at : null),
             completedAt: started ? null : live?.startedAt != null ? at : null,
           });
           return true;
+        }
+        if (!started && authoritativeLive && next.kind === "agent" && typeof item.text !== "string") {
+          const previous = state.entries.get(item.id);
+          if (previous?.kind === "agent") {
+            upsert(state, { ...previous, streaming: false, liveIncomplete: true });
+            return true;
+          }
         }
         upsert(state, next);
         return true;
@@ -640,6 +717,7 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
         }
         view.retry = null;
         view.error = turnErrorText(params.error as RawTurn["error"]) ?? view.error ?? null;
+        view.errorCode = turnErrorCode(params.error as RawTurn["error"]) ?? view.errorCode ?? null;
         return true;
       }
       case "serverRequest/resolved": {
@@ -682,10 +760,13 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope): boole
         state.settings = (params.threadSettings as ThreadSettingsView) ?? state.settings;
         return true;
       }
+      case "dsh/contextUsage/updated":
+      case "kimi/contextUsage/updated":
       case "thread/tokenUsage/updated": {
         const usage = contextUsageOf(envelope);
         if (!usage) return false;
-        state.contextUsage = { used: usage.used, window: usage.window };
+        if (usage.threadId && state.threadId && usage.threadId !== state.threadId) return false;
+        state.contextUsage = { used: usage.used, window: usage.window, ...(usage.dsh ? { dsh: usage.dsh } : {}) };
         return true;
       }
       case "windowsSandbox/setupCompleted": {

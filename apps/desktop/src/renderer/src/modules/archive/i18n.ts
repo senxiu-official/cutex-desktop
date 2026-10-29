@@ -13,7 +13,7 @@ export const zhCN = {
   "archive.row.view": "查看历史",
   "archive.row.restore": "恢复",
   "archive.row.delete": "永久删除",
-  "archive.row.deleteArmed": "再点一次永久删除",
+  "archive.row.deleteArmed": "再左键点击一次永久删除",
   "archive.row.archivedAt": "归档于 {when}",
   "archive.row.projectArchived": "{project}（项目已归档）",
   "archive.banner.title": "已归档",
@@ -35,35 +35,3 @@ declare module "../i18nCatalog" {
   interface ModuleMessages extends Messages {}
 }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "archive.title": "Archive",
-  "archive.description": "The archive settings page: archived {{agents}} and archive behaviour",
-  // ---- settings (moved from the base catalog, 2026-10-09) ----
-  "archive.list": "Archived {{agents}}",
-  "archive.page": "Archive",
-  "archive.archiveEmpty": "No archived {{agents}}",
-  "archive.archiveHint": "Archived {{agents}} are always offline; view their history (read-only) or restore them",
-  "archive.deleteEmpty": "Delete empty {{agents}} / work instead of archiving",
-  "archive.deleteEmptyHint": "Ones without any turns are deleted rather than archived",
-  "archive.archiveHintDelete": "Archived {{agents}} are always offline; view their history (read-only), restore or delete them",
-  // ---- archived agent: list rows, banner, read-only history (2026-10-09) ----
-  "archive.row.view": "View history",
-  "archive.row.restore": "Restore",
-  "archive.row.delete": "Delete permanently",
-  "archive.row.deleteArmed": "Click again to delete",
-  "archive.row.archivedAt": "Archived {when}",
-  "archive.row.projectArchived": "{project} (project archived)",
-  "archive.banner.title": "Archived",
-  "archive.banner.body": "Read-only history. Restore it to send messages or start it.",
-  "archive.banner.projectArchived": "Its project “{project}” is archived too; restoring brings the project back first.",
-  "archive.banner.restore": "Restore",
-  "archive.banner.restoreWithProject": "Restore project and {{agent}}",
-  "archive.banner.restoreOnly": "Restore only the {{agent}}",
-  "archive.banner.restoring": "Restoring…",
-  "archive.restoreProjectConfirm": "Restoring {name} first restores its project “{project}”.",
-  "archive.restoreDirector": "Also restore the {{director}} {name}",
-  "archive.history.note": "Archived · saved history (read-only)",
-  "archive.history.empty": "No saved conversation.",
-  "archive.history.unsupported": "This cutex cannot read an archived {{agent}}'s history; restore it to view.",
-};

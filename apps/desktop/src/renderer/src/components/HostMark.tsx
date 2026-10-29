@@ -58,7 +58,7 @@ export function HostDot({ color, status = "online", size = 8, title }: { color: 
 export function HostMark({ host, dotOnly = false, className = "" }: { host: Pick<HostLook, "label" | "color" | "indicator">; dotOnly?: boolean; className?: string }) {
   if (dotOnly) return <HostDot color={host.color} status={host.indicator.status} title={host.label} />;
   return (
-    <span className={`inline-flex min-w-0 items-center gap-1 rounded px-1 text-[11px] text-muted ${className}`} title={host.label}>
+    <span className={`inline-flex min-w-0 items-center gap-1 rounded px-1 text-caption/[inherit] text-muted ${className}`} title={host.label}>
       <HostDot color={host.color} status={host.indicator.status} size={7} />
       <span className="truncate">{host.label}</span>
     </span>

@@ -11,7 +11,8 @@ import { browserCache, browserCacheKey, createBrowserCache } from "../src/render
 import { createGuestLifecycle } from "../src/renderer/src/modules/browser/guestLifecycle";
 import { browserActivation, createBrowserActivation } from "../src/renderer/src/modules/browser/activation";
 import { afterBrowserHostsDelivered, browserHostCurrent, browserHostEpoch, changedBrowserHosts } from "../src/renderer/src/modules/browser/hosts";
-import { zhCN, en } from "../src/renderer/src/modules/browser/i18n";
+import { zhCN } from "../src/renderer/src/modules/browser/i18n";
+import { en } from "../src/renderer/src/modules/browser/i18n.en";
 
 const fakes = vi.hoisted(() => {
   const listeners = new Set<(event: BrowserEvent) => void>();
@@ -23,7 +24,7 @@ const fakes = vi.hoisted(() => {
 vi.mock("../src/renderer/src/bridge", () => ({ bridge: fakes.bridge }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock("../src/renderer/src/modules/react", () => ({ useModulePref: (_id: string, _key: string, fallback: Json) => [fakes.pref ?? fallback, fakes.savePref] }));
-vi.mock("../src/renderer/src/lib/targetHost", () => ({ useTargetHostId: () => "local", useTargetFeatures: () => fakes.features }));
+vi.mock("../src/renderer/src/lib/targetHost", async (importOriginal) => ({ ...(await importOriginal<object>()), useTargetHostId: () => "local", useTargetFeatures: () => fakes.features }));
 // The page's 本设备 / 主机 parts (components/SettingsHostFrame, tested in settingsHostScope.test.tsx): plain wrappers here.
 vi.mock("../src/renderer/src/components/SettingsHostFrame", async () => {
   const { createElement: h } = await import("react");
@@ -41,7 +42,7 @@ vi.mock("../src/renderer/src/store", () => ({
   }),
 }));
 import browserModule from "../src/renderer/src/modules/browser";
-import { BrowserBody } from "../src/renderer/src/modules/browser/BrowserBody";
+import { BrowserActions, BrowserBody } from "../src/renderer/src/modules/browser/BrowserBody";
 import { BrowserControlBanner, BrowserControlHeader } from "../src/renderer/src/modules/browser/BrowserControls";
 import { BrowserSettings } from "../src/renderer/src/modules/browser/BrowserSettings";
 import { useBrowserControlSettings } from "../src/renderer/src/modules/browser/controlSettings";
@@ -182,6 +183,13 @@ describe("browser passive metadata cache", () => {
     expect(Object.isFrozen(cache.get("local", "instance-1"))).toBe(true);
     expect(browserCacheKey("a|b", "c") === browserCacheKey("a", "b|c")).toBe(false);
   });
+  it("keeps main's desktop-loopback marker without deriving it in the renderer", () => {
+    const cache = createBrowserCache();
+    cache.update(view({ url: "http://127.0.0.1:59273/", desktopLoopback: true }));
+    expect(cache.get("ssh-other", "instance-1")?.desktopLoopback).toBe(true);
+    cache.update(view({ url: "http://127.0.0.1:59273/", desktopLoopback: undefined, pageGeneration: 2 }));
+    expect(cache.get("ssh-other", "instance-1")?.desktopLoopback).toBeUndefined();
+  });
 
   it("keeps a tab's site-permission prompt state for display only, bounded", () => {
     const cache = createBrowserCache();
@@ -216,15 +224,47 @@ describe("browser passive metadata cache", () => {
 });
 
 describe("I2b explicit browser controls", () => {
-  it("keeps a do-not-sign-in banner for isolated tabs without any agent grant, including after navigation", () => {
+  it("offers desktop-loopback confirmation in owner tabs only, never agent-opened tabs", () => {
+    browserActivation.complete(browserActivation.begin());
+    browserCache.update(view({ pool: "agent", error: "remote_loopback" }));
+    const agent = renderToStaticMarkup(createElement(BrowserBody, props()));
+    expect(agent).toContain("data-browser-refusal=\"remote_loopback\"");
+    expect(agent).not.toContain("data-browser-refusal-fix=\"allowDesktopLoopback\"");
+    browserCache.update(view({ pool: "owner", error: "remote_loopback", pageGeneration: 2 }));
+    const owner = renderToStaticMarkup(createElement(BrowserBody, props()));
+    expect(owner).toContain("data-browser-refusal-fix=\"allowDesktopLoopback\"");
+    expect(owner).toContain("browser.refusal.openDesktopLoopback");
+  });
+  it("uses a quiet pool pill without a login alert, including after ordinary navigation", () => {
     browserCache.update(view({ pool: "agent", error: undefined }));
     const html = renderToStaticMarkup(createElement(BrowserBody, props()));
-    expect(html).toContain("data-browser-isolated-warning"); expect(html).toContain("browser.origins.doNotSignIn");
+    expect(html).toContain("data-browser-login-pool"); expect(html).not.toContain("data-browser-login-warning");
+    expect(html).not.toContain("browser.origins.doNotSignIn");
     browserCache.update(view({ pool: "agent", url: "http://localhost/next", pageGeneration: 2 }));
-    expect(renderToStaticMarkup(createElement(BrowserBody, props()))).toContain("browser.origins.doNotSignIn");
+    expect(renderToStaticMarkup(createElement(BrowserBody, props()))).not.toContain("data-browser-login-warning");
     browserCache.update(view({ pool: "owner", pageGeneration: 3 }));
-    expect(renderToStaticMarkup(createElement(BrowserBody, props()))).not.toContain("data-browser-isolated-warning");
-    expect(zhCN["browser.origins.doNotSignIn"]).toContain("不要在此登录"); expect(en["browser.origins.doNotSignIn"]).toContain("Do not sign in here");
+    expect(renderToStaticMarkup(createElement(BrowserBody, props()))).not.toContain("data-browser-login-pool");
+  });
+  it("shows login actions only for a ready agent tab after main reports current-origin input", () => {
+    browserActivation.complete(browserActivation.begin());
+    browserCache.update(view({ pool: "agent", loginOrigin: "http://localhost:8080" }));
+    const html = renderToStaticMarkup(createElement(BrowserBody, props()));
+    expect(html).toContain("data-browser-login-warning"); expect(html).toContain("browser.login.openOwner"); expect(html).toContain("browser.login.dismiss");
+    browserCache.update(view({ pool: "agent", url: "https://other.test/", loginOrigin: "http://localhost:8080", pageGeneration: 2 }));
+    expect(renderToStaticMarkup(createElement(BrowserBody, props()))).not.toContain("data-browser-login-warning");
+    browserCache.update(view({ pool: "agent", loginOrigin: null, pageGeneration: 3 }));
+    expect(renderToStaticMarkup(createElement(BrowserBody, props()))).not.toContain("data-browser-login-warning");
+    browserCache.update(view({ pool: "agent", loginOrigin: "http://localhost:8080", status: "closed", pageGeneration: 4 }));
+    expect(renderToStaticMarkup(createElement(BrowserBody, props()))).not.toContain("data-browser-login-warning");
+  });
+  it("shows the pane-header zoom chip only when main reports a level other than 100 %", () => {
+    browserCache.update(view({ zoom: 1.25, pageGeneration: 9 }));
+    const html = renderToStaticMarkup(createElement(BrowserActions, props({ where: "peek" })));
+    expect(html).toContain("data-browser-zoom");
+    expect(html).toContain("125%");
+    expect(html).toContain("browser.zoom.reset");
+    browserCache.update(view({ zoom: undefined, pageGeneration: 10 }));
+    expect(renderToStaticMarkup(createElement(BrowserActions, props({ where: "peek" })))).not.toContain("data-browser-zoom");
   });
   const controls = { hostId: "ssh-other", tabKey: "instance-1" };
   const granted = { grantee: "Agent", state: "granted", operating: false } as const;
@@ -238,6 +278,14 @@ describe("I2b explicit browser controls", () => {
     expect(renderToStaticMarkup(createElement(BrowserControlHeader, controls))).toContain("browser.owner.grant");
     expect(renderToStaticMarkup(createElement(BrowserControlBanner, controls))).toBe("");
     expect(fakes.browser.forHost).toHaveBeenCalledTimes(0);
+  });
+  it("explains why a desktop loopback page cannot be granted", () => {
+    enable();
+    browserCache.update(view({ desktopLoopback: true }));
+    const html = renderToStaticMarkup(createElement(BrowserControlHeader, controls));
+    expect(html).toContain("browser.desktopLoopback.noAgent");
+    expect(html).not.toContain("data-browser-agent-select");
+    expect(html).not.toContain("data-browser-grant-agent");
   });
 
   it("shows the login warning and revoke in both granted and paused UI; only paused offers resume", () => {

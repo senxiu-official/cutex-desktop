@@ -1,3 +1,4 @@
+import { isImeComposing } from "../../lib/ime";
 // Settings → 接入: 监听地址 + 配对设备 + CORS (cutex `listen-settings` / `device-pairing`,
 // docs/research/cutex-mobile-api.md §1, §2): which addresses the connected cutex's Management API
 // listens on, the browser CORS allow-list and one-time pairing codes (QR). Paired devices are managed in
@@ -32,12 +33,19 @@ import {
 } from "../../lib/remoteAccess";
 import { formatWhen, useClock, useNow } from "../../lib/time";
 import { useApp } from "../../store";
-import { AddButton, ArmedRemove, Button, EmptyState, ErrorNote, ListRow, Loading, Notice, RefreshButton, ResetButton, Section, Select, TextInput, TextLink } from "./Form";
+import { AddButton, ArmedRemove, Button, EmptyState, ErrorNote, ListRow, Loading, Notice, RefreshButton, ResetButton, Section, Select, TextInput, TextLink, SettingsGroup } from "./Form";
 import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
 import { OWNER_USER_ID, shownUserName, USERS_FEATURE, type UserRecord, accessRefusalOf, DEVICE_SCOPE_FEATURE, OWNER_DEVICE_NOTICE_FEATURE, type DeviceScope } from "../../../../shared/users";
 import { accessRefusalText, scopeOptions, useOwnerLocalLock } from "./OwnerDevices";
 import { useHostScope } from "../../lib/useHostScope";
 import { useHostData } from "../../lib/useHostScope";
+import { Tag } from "../../components/Tag";
+import { apiFor } from "../../bridge";
+import { promptDialog } from "../../lib/contextMenu";
+import { useSettingsRisk } from "../../lib/useSettingsRisk";
+import { addedSettingsTargets, confirmSettingsRisk, settingsRiskFingerprint, widenedListenTargets } from "../../lib/settingsRisk";
+import { settingsRiskText as riskText } from "../../lib/settingsRiskText";
+import { useTargetHostLabel } from "../../lib/targetHost";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /** Daemons (baseUrl · hostId) whose listen list changed since they started: "重启后生效" survives leaving the page. */
@@ -56,40 +64,77 @@ function useDaemonKey(): string | null {
 
 /** `/v2/settings` for these sections: load, reload, patch (keeps `restartRequired`). */
 function useListenSettings(key: string | null) {
-  const api = useTargetApi();
+  const hostId = useTargetHostId();
+  const gate = useSettingsRisk(key);
+  const epoch = useApp(s => s.hosts?.hosts.find(host => host.id === hostId)?.conn?.epoch);
+  const connection = settingsRiskFingerprint(useHostData(hostId)?.daemon);
   const [settings, setSettings] = useState<GlobalSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const writing = useRef(false), reads = useRef(0);
+  const requestOwner = useRef(0);
   const [restart, setRestart] = useState(false);
   const load = useCallback(() => {
+    const valid = gate.capture();
+    const request = ++reads.current;
     setError(null);
-    api.getSettings().then(setSettings, (e: unknown) => setError(errorText(e)));
-  }, []);
+    apiFor(hostId).getSettings().then(next => { if (valid() && request === reads.current) setSettings(next); }, (e: unknown) => { if (valid() && request === reads.current) setError(errorText(e)); });
+  }, [hostId, key, gate, epoch, connection]);
   useEffect(() => {
+    requestOwner.current += 1; reads.current += 1;
     setSettings(null);
+    setBusy(false); writing.current = false;
     setRestart(key !== null && restartPending.has(key));
-    if (!key) return;
+    if (!key) return () => { requestOwner.current += 1; reads.current += 1; };
     load();
     tokenListeners.add(load);
-    return () => void tokenListeners.delete(load);
+    return () => { requestOwner.current += 1; reads.current += 1; tokenListeners.delete(load); };
   }, [key, load]);
-  const patch = async (p: Partial<GlobalSettings>) => {
+  const patch = async (p: Partial<GlobalSettings>, guard?: { expected: GlobalSettings | null; valid(): boolean }) => {
+    if (writing.current || (guard && !guard.valid())) return false;
+    const valid = gate.capture();
+    const owner = ++requestOwner.current;
+    writing.current = true; reads.current += 1;
     setBusy(true);
     setError(null);
     try {
-      const next = await api.patchSettings(p);
+      if (guard) {
+        const current = await apiFor(hostId).getSettings();
+        if (!valid() || !guard.valid()) return false;
+        if (settingsRiskFingerprint(listenRiskState(current)) !== settingsRiskFingerprint(listenRiskState(guard.expected))) {
+          setSettings(current); setError(riskText("settingsRisk.changed")); return false;
+        }
+      }
+      if (!valid() || (guard && !guard.valid())) return false;
+      const next = await apiFor(hostId).patchSettings(p);
+      if (!valid()) return false;
       setSettings(next);
       if (needsRestart(next.restartRequired) && key) {
         restartPending.add(key);
         setRestart(true);
       }
+      return true;
     } catch (e) {
-      setError(errorText(e));
+      if (valid()) setError(errorText(e));
+      return false;
     } finally {
-      setBusy(false);
+      if (requestOwner.current === owner) { writing.current = false; setBusy(false); }
     }
   };
   return { settings, error, busy, restart, load, patch };
+}
+
+const listenRiskState = (settings: GlobalSettings | null) => {
+  const view = readListenSettings(settings);
+  return view && [view.list, settings?.managementListenDefault, view.error, view.cors, view.corsDefault];
+};
+
+async function applyRemoteRisk(_hostId: string, settings: GlobalSettings | null, change: Partial<GlobalSettings>, valid: () => boolean,
+  patch: (change: Partial<GlobalSettings>, guard?: { expected: GlobalSettings | null; valid(): boolean }) => Promise<boolean>, onError: (message: string | null) => void): Promise<boolean> {
+  if (!valid()) return false;
+  try {
+    return await patch(change, { expected: settings, valid });
+  } catch (error) { if (valid()) onError(String(error)); return false; }
 }
 
 const KIND_KEYS: Record<string, MessageKey> = {
@@ -105,7 +150,7 @@ function ListenRow({ row, active, canRemove, busy, onRemove }: { row: ListenEntr
   const dot = status === "active" ? "bg-ok" : status === "inactive" ? "bg-subtle/40" : "bg-accent/60";
   const warning = row.kind === "wildcard" ? t("remote.warn.wildcard") : row.warning;
   return (
-    <ListRow
+    <SettingsGroup agents="hostRestart" source="host"><ListRow
       leading={<span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />}
       title={<span className="font-mono text-xs">{entryAddress(row)}</span>}
       detail={
@@ -115,8 +160,8 @@ function ListenRow({ row, active, canRemove, busy, onRemove }: { row: ListenEntr
         </>
       }
       below={warning ? <p className="pb-0.5 pl-[18px] text-xs text-warn">{warning}</p> : undefined}
-      actions={canRemove ? <ArmedRemove title={t("remote.remove")} disabled={busy} onRemove={onRemove} /> : <span className="text-[11px] text-subtle" title={t("remote.keepLoopbackHint")}>{t("remote.required")}</span>}
-    />
+      actions={canRemove ? <ArmedRemove title={t("remote.remove")} disabled={busy} onRemove={onRemove} /> : <span className="text-caption/[inherit] text-subtle" title={t("remote.keepLoopbackHint")}>{t("remote.required")}</span>}
+    /></SettingsGroup>
   );
 }
 
@@ -127,18 +172,44 @@ export function RemoteAccessSection() {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const hostId = useTargetHostId(), host = useTargetHostLabel();
+  const inputScope = useRef({ draft, hostId }); inputScope.current = { draft, hostId };
+  const gate = useSettingsRisk([listenRiskState(settings), draft, adding]);
   if (!key) return null;
   const view = readListenSettings(settings);
   const list = view?.list ?? [];
   const anchors = view?.rows.filter((r) => r.kind === "loopback" || r.kind === "wildcard") ?? [];
   const hasTailscale = view?.rows.some((r) => r.kind === "tailscale") ?? false;
+  const changeListen = async (next: string[] | null) => {
+    if (busy || confirming || !view) return false;
+    const valid = gate.capture();
+    const defaultPort = view.rows.find(row => !/:\d+$/.test(row.entry)
+      || (!row.entry.startsWith("[") && row.entry.split(":").length > 2))?.port;
+    const widened = widenedListenTargets(view.error ? [] : list, next ?? settings?.managementListenDefault ?? ["127.0.0.1"], defaultPort);
+    if (widened.length) {
+      const target = host === "—" ? hostId : host;
+      setConfirming(true);
+      try {
+        const result = await confirmSettingsRisk(target, () => promptDialog(riskText("settingsRisk.listen"), "", {
+          placeholder: target, hint: riskText("settingsRisk.listenHint", { host, target, targets: widened.join(" · ") }),
+        }), valid);
+        if (result !== "confirmed") {
+          if (result !== "cancelled") setProblem(riskText(result === "changed" ? "settingsRisk.changed" : "settingsRisk.typeMismatch"));
+          return false;
+        }
+        return await applyRemoteRisk(hostId, settings, { managementListen: next }, valid, patch, setProblem);
+      } finally { setConfirming(false); }
+    }
+    return patch({ managementListen: next });
+  };
   const add = (input: string) => {
     const r = checkListenEntry(input, list);
     if (!r.ok) return setProblem(t(`remote.problem.${r.problem}` as MessageKey));
     setProblem(null);
-    void patch({ managementListen: [...list, r.entry] }).then(() => {
-      setDraft("");
-      setAdding(false);
+    const inputDraft = draft;
+    void changeListen([...list, r.entry]).then(ok => {
+      if (ok && inputScope.current.draft === inputDraft && inputScope.current.hostId === hostId) { setDraft(""); setAdding(false); }
     });
   };
   const remove = (row: ListenEntry) => void patch({ managementListen: list.filter((e) => e.trim() !== row.entry) });
@@ -149,12 +220,12 @@ export function RemoteAccessSection() {
       actions={
         <>
           <RefreshButton onClick={load} disabled={busy} />
-          <AddButton disabled={busy || !view || hasTailscale} title={hasTailscale ? t("remote.tailscaleExists") : undefined} onClick={() => add("tailscale")}>
+          <SettingsGroup agents="hostRestart" source="host"><AddButton disabled={busy || !view || hasTailscale} title={hasTailscale ? t("remote.tailscaleExists") : undefined} onClick={() => add("tailscale")}>
             {t("remote.addTailscale")}
-          </AddButton>
-          <AddButton disabled={busy || !view || adding} onClick={() => setAdding(true)}>
+          </AddButton></SettingsGroup>
+          <SettingsGroup agents="hostRestart" source="host"><AddButton disabled={busy || !view || adding} onClick={() => setAdding(true)}>
             {t("remote.addAddress")}
-          </AddButton>
+          </AddButton></SettingsGroup>
         </>
       }
     >
@@ -165,14 +236,14 @@ export function RemoteAccessSection() {
       {view?.error && (
         <div className="flex items-center gap-2">
           <ErrorNote>{t("remote.invalidStored", { error: view.error })}</ErrorNote>
-          <ResetButton title={t("remote.resetDefault")} onClick={() => void patch({ managementListen: null })} />
+          <ResetButton title={t("remote.resetDefault")} disabled={busy || confirming} onClick={() => void changeListen(null)} />
         </div>
       )}
       {view?.rows.map((row) => (
         <ListenRow key={row.entry} row={row} active={view.activeRemote} busy={busy} canRemove={!(anchors.length === 1 && anchors[0] === row)} onRemove={() => remove(row)} />
       ))}
       {adding && (
-        <div className="-mx-4 border-b border-border bg-surface-2/40 px-4 py-2.5">
+        <SettingsGroup agents="hostRestart" source="host"><div className="-mx-4 border-b border-border bg-surface-2/40 px-4 py-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <TextInput
               mono
@@ -182,6 +253,7 @@ export function RemoteAccessSection() {
               placeholder="100.64.0.7 · 192.0.2.20:24270 · [fd7a::1]"
               onChange={(v) => (setDraft(v), setProblem(null))}
               onKeyDown={(e) => {
+                if (isImeComposing(e)) return;
                 if (e.key === "Enter") add(draft);
                 if (e.key === "Escape") setAdding(false);
               }}
@@ -192,20 +264,21 @@ export function RemoteAccessSection() {
             <Button onClick={() => (setAdding(false), setProblem(null), setDraft(""))}>{t("dialog.cancel")}</Button>
           </div>
           <p className={`mt-1 text-xs ${problem ? "text-danger" : "text-subtle"}`}>{problem ?? t("remote.addHint")}</p>
-        </div>
+        </div></SettingsGroup>
       )}
       {view && (
         <div className="flex items-center gap-2 border-t border-border py-2 text-xs text-subtle first:border-t-0">
           <span>{t("remote.listeningNow")}</span>
           <span className="min-w-0 flex-1 truncate font-mono">{view.activeRemote.length ? view.activeRemote.join(" · ") : t("remote.loopbackOnly")}</span>
           {!view.isDefault && (
-            <button className="rounded text-accent hover:underline disabled:opacity-40" disabled={busy} onClick={() => void patch({ managementListen: null })}>
+            <SettingsGroup agents="hostRestart" source="host"><button className="rounded text-accent hover:underline disabled:opacity-40" disabled={busy || confirming} onClick={() => void changeListen(null)}>
               {t("remote.resetDefault")}
-            </button>
+            </button></SettingsGroup>
           )}
         </div>
       )}
       {error && <ErrorNote>{error}</ErrorNote>}
+      {!adding && problem && <ErrorNote>{problem}</ErrorNote>}
     </Section>
   );
 }
@@ -217,34 +290,58 @@ export function CorsSection() {
   const { settings, error, busy, patch } = useListenSettings(key);
   const [draft, setDraft] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const hostId = useTargetHostId(), host = useTargetHostLabel();
+  const inputScope = useRef({ draft, hostId }); inputScope.current = { draft, hostId };
+  const gate = useSettingsRisk([listenRiskState(settings), draft]);
   const view = readListenSettings(settings);
   if (!key || (settings && !view)) return null;
+  const changeCors = async (next: string[] | null) => {
+    if (!view || busy || confirming) return false;
+    const widened = addedSettingsTargets(view.cors, next ?? view.corsDefault);
+    if (!widened.length) return patch({ managementCorsOrigins: next });
+    const valid = gate.capture(), target = host === "—" ? hostId : host;
+    setConfirming(true);
+    try {
+      const result = await confirmSettingsRisk(target, () => promptDialog(riskText("settingsRisk.cors"), "", {
+        placeholder: target, hint: riskText("settingsRisk.corsHint", { host, target, targets: widened.join(" · ") }),
+      }), valid);
+      if (result !== "confirmed") {
+        if (result !== "cancelled") setProblem(riskText(result === "changed" ? "settingsRisk.changed" : "settingsRisk.typeMismatch"));
+        return false;
+      }
+      return await applyRemoteRisk(hostId, settings, { managementCorsOrigins: next }, valid, patch, setProblem);
+    } finally { setConfirming(false); }
+  };
   const add = () => {
     if (!view) return;
     const r = checkCorsOrigin(draft, view.cors);
     if (!r.ok) return setProblem(t(`remote.cors.problem.${r.problem}` as MessageKey));
     setProblem(null);
-    void patch({ managementCorsOrigins: [...view.cors, r.origin] }).then(() => setDraft(""));
+    const inputDraft = draft;
+    void changeCors([...view.cors, r.origin]).then(ok => {
+      if (ok && inputScope.current.draft === inputDraft && inputScope.current.hostId === hostId) setDraft("");
+    });
   };
   return (
     <Section
       title={t("remote.cors.title")}
       hint={t("remote.cors.hint")}
-      actions={view && !view.corsIsDefault ? <ResetButton title={t("remote.resetDefault")} disabled={busy} onClick={() => void patch({ managementCorsOrigins: null })} /> : undefined}
+      actions={view && !view.corsIsDefault ? <ResetButton title={t("remote.resetDefault")} disabled={busy || confirming} onClick={() => void changeCors(null)} /> : undefined}
     >
       {!settings && !error && <Loading rows={1} />}
       {view?.cors.length === 0 && <EmptyState>{t("remote.cors.empty")}</EmptyState>}
       {view?.cors.map((origin) => (
-        <ListRow
+        <SettingsGroup agents="access" source="host" key={origin}><ListRow
           key={origin}
           title={<span className="font-mono text-xs">{origin}</span>}
           detail={view.corsIsDefault ? t("remote.cors.default") : undefined}
           actions={<ArmedRemove title={t("remote.remove")} disabled={busy} onRemove={() => void patch({ managementCorsOrigins: view.cors.filter((o) => o !== origin) })} />}
-        />
+        /></SettingsGroup>
       ))}
       {view && (
         <div className="flex flex-wrap items-center gap-2 py-2.5">
-          <TextInput
+          <SettingsGroup agents="access" source="host"><TextInput
             mono
             width="w-72"
             label={t("remote.cors.add")}
@@ -252,12 +349,13 @@ export function CorsSection() {
             placeholder="https://app.example.com"
             onChange={(v) => (setDraft(v), setProblem(null))}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
               if (e.key === "Enter") add();
             }}
-          />
-          <Button disabled={busy || !draft.trim()} onClick={add}>
+          /></SettingsGroup>
+          <SettingsGroup agents="access" source="host"><Button disabled={busy || !draft.trim()} onClick={add}>
             {t("remote.cors.add")}
-          </Button>
+          </Button></SettingsGroup>
           {problem && <span className="text-xs text-danger">{problem}</span>}
         </div>
       )}
@@ -271,7 +369,7 @@ export function CorsSection() {
 function PairScope({ value, ownerDevice, onChange }: { value: DeviceScope; ownerDevice: boolean; onChange(scope: DeviceScope): void }) {
   const { t } = useI18n();
   return (
-    <div className="-mx-4 border-b border-border px-4 py-2.5" role="radiogroup" aria-label={t("ownerDev.scope")}>
+    <SettingsGroup agents="access" source="host"><div className="-mx-4 border-b border-border px-4 py-2.5" role="radiogroup" aria-label={t("ownerDev.scope")}>
       <div className="mb-1 text-sm">{t("ownerDev.scope")}</div>
       {scopeOptions(t, ownerDevice, true).map((o) => (
         <label key={o.value} className="flex cursor-pointer items-start gap-2 py-1 text-sm">
@@ -283,7 +381,7 @@ function PairScope({ value, ownerDevice, onChange }: { value: DeviceScope; owner
           </span>
         </label>
       ))}
-    </div>
+    </div></SettingsGroup>
   );
 }
 
@@ -353,9 +451,9 @@ function PairingCard({ code, onClose, onRenew, busy }: { code: PairingCodeView; 
             </p>
           )}
           <div className="flex gap-2 pt-1">
-            <Button primary={expired} disabled={busy} onClick={onRenew}>
+            <SettingsGroup agents="access" source="host"><Button primary={expired} disabled={busy} onClick={onRenew}>
               {t("remote.pair.renew")}
-            </Button>
+            </Button></SettingsGroup>
             <Button onClick={onClose}>{t("remote.pair.close")}</Button>
           </div>
         </div>
@@ -378,9 +476,9 @@ function TokenRow({ token, own, busy, onRevoke, rename }: { token: ClientTokenVi
   ].filter(Boolean);
   const Icon = device ? Smartphone : KeyRound;
   return (
-    <ListRow
+    <SettingsGroup agents="access" source="host"><ListRow
       leading={<Icon size={15} className={device ? "text-accent" : "text-subtle"} />}
-      title={<TokenTitle token={token} editing={rename.editing} onSave={rename.save} onCancel={rename.cancel} extra={own && <span className="shrink-0 rounded bg-accent/15 px-1.5 text-[10px] text-accent">{t("remote.token.own")}</span>} />}
+      title={<TokenTitle token={token} editing={rename.editing} onSave={rename.save} onCancel={rename.cancel} extra={own && <Tag tone="accent">{t("remote.token.own")}</Tag>} />}
       detail={parts.map((part, i) => (
         <Fragment key={i}>
           {i > 0 && " · "}
@@ -393,7 +491,7 @@ function TokenRow({ token, own, busy, onRevoke, rename }: { token: ClientTokenVi
           <ArmedRemove title={own ? t("remote.token.revokeOwn") : t("remote.token.revoke")} armedLabel={t("remote.token.revokeArmed")} disabled={busy} onRemove={onRevoke} />
         </>
       }
-    />
+    /></SettingsGroup>
   );
 }
 
@@ -513,11 +611,11 @@ export function PairingSection() {
         <PairingCard code={code} busy={busy} onRenew={() => void generate()} onClose={() => setCode(null)} />
       ) : (
         <div className="-mx-4 flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
-          <TextInput width="w-48" label={t("remote.pair.label")} value={label} maxLength={60} placeholder={t("remote.pair.labelPlaceholder")} onChange={setLabel} />
-          {users && users.length > 1 && <Select<string> width="w-36" label={t("users.pairFor")} value={forUser} options={users.map((u) => ({ value: u.id, label: u.isOwner ? `${shownUserName(u)} · ${t("host.info.owner")}` : shownUserName(u) }))} onChange={setForUser} />}
-          <Button primary disabled={busy || lock.locked} title={lock.hint ?? undefined} onClick={() => void generate()}>
+          <SettingsGroup agents="access" source="host"><TextInput width="w-48" label={t("remote.pair.label")} value={label} maxLength={60} placeholder={t("remote.pair.labelPlaceholder")} onChange={setLabel} /></SettingsGroup>
+          {users && users.length > 1 && <SettingsGroup agents="access" source="host"><Select<string> width="w-36" label={t("users.pairFor")} value={forUser} options={users.map((u) => ({ value: u.id, label: u.isOwner ? `${shownUserName(u)} · ${t("host.info.owner")}` : shownUserName(u) }))} onChange={setForUser} /></SettingsGroup>}
+          <SettingsGroup agents="access" source="host"><Button primary disabled={busy || lock.locked} title={lock.hint ?? undefined} onClick={() => void generate()}>
             {busy ? t("remote.pair.generating") : t("remote.pair.generate")}
-          </Button>
+          </Button></SettingsGroup>
           {paired && <span className="text-xs text-ok-text">{t("remote.pair.paired", { name: tokenName(paired, t) })}</span>}
           {lock.hint && <span className="flex basis-full items-center gap-1 text-xs text-subtle"><Lock size={12} />{lock.hint}</span>}
         </div>

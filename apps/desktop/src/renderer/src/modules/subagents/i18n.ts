@@ -24,6 +24,10 @@ export const zhCN = {
   "subagents.recent": "最近完成 · {n}",
   "subagents.recentTitle": "最近完成的{{subagent}}",
   "subagents.recent.background": "后台运行，没有过程记录",
+  "subagents.background": "后台",
+  "subagents.stop": "停止",
+  "subagents.stop.title": "停止后台{{subagent}}「{name}」（不影响当前回合）",
+  "subagents.stopAgain": "再次左键点击停止以确认",
   "subagents.recent.noTranscript": "没有保存这个{{subagent}}的过程记录",
   "subagents.outcome.completed": "完成",
   "subagents.outcome.failed": "失败",
@@ -35,35 +39,3 @@ declare module "../i18nCatalog" {
   interface ModuleMessages extends Messages {}
 }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "subagents.timeline.spawn": "Spawned",
-  "subagents.timeline.send": "Sent to",
-  "subagents.timeline.followup": "Follow-up to",
-  "subagents.timeline.wait": "Waiting for",
-  "subagents.timeline.interrupt": "Interrupted",
-  "subagents.timeline.close": "Closed",
-  "subagents.timeline.resume": "Resumed",
-  "subagents.timeline.list": "Listed {{subagents}}",
-  "subagents.timeline.other": "{{Subagent}} action",
-
-  "subagents.title": "{{Subagents}}",
-  "subagents.description": "Working {{subagents}}, shown in the status line and capsule",
-  "subagents.statusTitle": "{{Subagents}}",
-  "subagents.count": "{n} {{subagents}}",
-  "subagents.starting": "starting",
-  "subagents.working": "working",
-  "subagents.none": "No background terminals or {{subagents}} running",
-  "subagents.thread": "{{Subagent}} thread",
-  "subagents.claude.agent": "{{Subagent}}",
-  "subagents.claude.open": "Open this {{subagent}}'s transcript",
-  "subagents.claude.readOnly": "Read-only · a Claude foreground {{subagent}}'s messages and tool calls (outputs as previews)",
-  "subagents.claude.truncated": "Long transcript: later entries were not kept",
-  "subagents.recent": "Recently finished · {n}",
-  "subagents.recentTitle": "Recently finished {{subagents}}",
-  "subagents.recent.background": "Ran in the background: no transcript was kept",
-  "subagents.recent.noTranscript": "No transcript of this {{subagent}} was kept",
-  "subagents.outcome.completed": "done",
-  "subagents.outcome.failed": "failed",
-  "subagents.outcome.stopped": "stopped",
-};

@@ -6,16 +6,23 @@
 // An agent's reveal request (`service_register` reveal: true) → a card 「… 想给你看：… · 打开」 in its
 // conversation that opens the service in an owner browser tab (live.ts). `cutex:service/…` links in
 // chat open the same tab (ref.target kind `service`, refTarget.ts).
-import { Globe } from "lucide-react";
+// 「和它的智能体一起打开」 (lib/serviceLink, owner 2026-10-21): this module keeps the per-service choice in its
+// prefs on this device and opens those services in the owner's Shelf when its workspace opens.
+import { Server } from "lucide-react";
 import { SERVICES_PERSIST_APPROVAL_FEATURE } from "../../../../shared/servicesSettings";
 import { pageTitle } from "../react";
 import { defineModule } from "../slots";
-import { PersistApprovalSection } from "./PersistApprovalSection";
 import { ProjectServicesTab, ServicesPage } from "./ServicesPage";
 import { useProjectServicesSummary } from "./summary";
 import { startServiceReveals } from "./live";
 import { ServiceToasts } from "./Toasts";
 import { openServiceRef, SERVICE_REF_KIND, useServiceLink } from "./refTarget";
+import { initServiceWithAgent, startServiceWithAgent } from "../../lib/serviceLink";
+import type { Json } from "../types";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const PersistApprovalSection = lazyPage(() => import("./PersistApprovalSection").then((m) => m.PersistApprovalSection));
 
 export default defineModule({
   id: "services",
@@ -23,7 +30,7 @@ export default defineModule({
   descriptionKey: "services.description",
   requires: { capabilities: ["services"] },
   contributes: {
-    "nav.primary": [{ id: "services.nav", order: 400, icon: Globe, titleKey: "services.nav", target: { page: "services.page" } }],
+    "nav.primary": [{ id: "services.nav", order: 400, icon: Server, titleKey: "services.nav", target: { page: "services.page" } }],
     "main.page": [{ id: "services.page", Page: ServicesPage, useTitle: pageTitle("services.nav") }],
     "conversation.overlay": [{ id: "services.revealCards", order: 310, Overlay: ServiceToasts }],
     "project.tab": [{ id: "services.projectTab", tab: "services", order: 320, titleKey: "services.tab", Body: ProjectServicesTab, useSummary: useProjectServicesSummary }],
@@ -41,5 +48,13 @@ export default defineModule({
     // `cutex:service/<slug>[/path]` links in conversations → the in-app browser tab (refTarget.ts).
     "ref.target": [{ id: "services.ref", kind: SERVICE_REF_KIND, role: "content", open: openServiceRef, useLink: useServiceLink }],
   },
-  activate: (ctx) => startServiceReveals(ctx),
+  activate: (ctx) => {
+    startServiceReveals(ctx);
+    // 和它的智能体一起打开 (per service, this device; lib/serviceLink): the choice, and opening with the agent.
+    initServiceWithAgent(
+      () => (ctx.signal.aborted ? null : ctx.prefs.get("withAgent", null)),
+      (on) => !ctx.signal.aborted && ctx.prefs.set("withAgent", JSON.parse(JSON.stringify(on)) as Json),
+    );
+    startServiceWithAgent(ctx.signal);
+  },
 });

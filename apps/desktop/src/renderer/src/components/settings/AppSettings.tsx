@@ -1,23 +1,29 @@
+import { agentFeaturesOf, lacks } from "../../lib/agentFeatures";
 // Settings pages for this machine (group 「应用」): 通用 (+ 更新与诊断 from the updater module), 对话,
 // 左侧栏 (+ 会话两侧), 状态显示 — plus 归档 (数据) and 键盘快捷键, 关于 (系统: versions, licenses, the dragon). Desktop-local prefs live in localStorage
 // (lib/prefs, lib/appearance) or the main process (close behaviour, update interval).
 import { useEffect, useState } from "react";
 import type { CapabilitiesView, CloseBehavior, ShellState, UpdateStatus } from "../../../../shared/ipc";
 import { api, bridge } from "../../bridge";
-import { useI18n, type MessageKey } from "../../i18n";
-import { LANGUAGES } from "../../lib/languages";
+import { useI18n, type Locale, type MessageKey } from "../../i18n";
+import { LANGUAGES, isTraditionalLocale, traditionalRegionOf, traditionalLocale, traditionalLanguageLocale } from "../../lib/languages";
 import { ASKS_FEATURE } from "../../lib/delegations";
 import { hasLocalHost } from "../../lib/hosts";
 import { useGlobalSettings } from "../../lib/globalSettings";
 import { ADMISSION_ORDER_FEATURE, readOwnerMayPassAsks } from "../../lib/admissionOrder";
+import { IMAGE_INPUT_STEERING_FEATURE, imageBusyPatch, readImageBusyBehavior } from "../../lib/imageSteer";
+import type { ImageBusyBehavior } from "../../../../shared/ipc";
 import { setOwnerMayPassAsks } from "../../lib/admissionOrderView";
 import { FOLD_LINE_OPTIONS, migrateFoldLines } from "../../lib/messageFold";
 import { deleteAgentNow, SESSION_FEATURES } from "../../lib/menus";
 import { archivedProjectOf, projectOfArchived } from "../../lib/archivedAgent";
 import { restoreWithDirector } from "../../lib/projectArchive";
 import type { AgentRow } from "../../lib/sidebar";
-import { setUiPref, useUiPrefs } from "../../lib/prefs";
+import { PERF_MODES, setUiPref, useUiPrefs, type PerfMode } from "../../lib/prefs";
+import { setMultiWindow, useMultiWindow } from "../../lib/multiWindowPref";
 import { displayKey, shortcutsFor } from "../../lib/shortcuts";
+import { KeybindingsSection } from "./KeybindingsSection";
+import { GestureGuide } from "./GestureGuide";
 import { useSidebarModel } from "../../lib/sidebarView";
 import { useTargetFeatures, useTargetHostId, useTargetSelect, useTargetSidebar } from "../../lib/targetHost";
 import { packageLabel } from "../../lib/runtimePackages";
@@ -28,7 +34,10 @@ import { channelLabel, unsupportedHintKey, updateButtonVisible, updateSummary, u
 import { formatAbsolute, formatWhen } from "../../lib/time";
 import { BACKEND_UPGRADE_FEATURE } from "../../../../shared/backendUpgrade";
 import { useApp } from "../../store";
+import { confirmDialog } from "../../lib/contextMenu";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
+import { requestSettingsReveal } from "../../lib/settingsSearchView";
+import { useSettingsRisk } from "../../lib/useSettingsRisk";
 import { formatBytes } from "../../../../shared/releases";
 import { effectiveUpdateCheckMinutes, updateCheckChoices } from "../../../../shared/binaryUpdate";
 import { Avatar } from "../Avatar";
@@ -36,12 +45,13 @@ import { UpdateButton } from "../UpdateButton";
 import { AboutDragon } from "./AboutDragon";
 import { SidebarSettingsCards } from "./regions/SidebarSettings";
 import { OwnerNotifySection } from "./OwnerNotifySettings";
-import { ArmedRemove, Button, Details, useCompactSettings, EmptyState, ErrorNote, HintAction, LinkRow, ListRow, Section, Segmented, Select, SettingRow, TextLink, Toggle } from "./Form";
+import { ArmedRemove, Button, useCompactSettings, EmptyState, ErrorNote, HintAction, LinkRow, ListRow, Section, Segmented, Select, SettingRow, TextLink, Toggle, SettingsGroup } from "./Form";
 import { StatusPlaceTable } from "./StatusPlaceTable";
 import { TermsSection } from "./TermsSettings";
 import { SettingsSections } from "../../modules/Outlet";
 import { services } from "../../modules/app";
 import { useModuleEnabled, useModulePref } from "../../modules/react";
+import { Tag } from "../../components/Tag";
 
 function useCapabilities(): CapabilitiesView | null | undefined {
   const daemon = useApp((s) => s.daemon);
@@ -70,18 +80,27 @@ export function GeneralPage() {
   return (
     <>
       <Section id={settingsAnchorId("language")} title={t("shell.general.language")}>
-        <SettingRow label={t("shell.language")}>
-          <Select
-            value={locale}
+        <SettingRow agents="none" source="local" label={t("shell.language")}>
+          <Select<Locale>
+            value={isTraditionalLocale(locale) ? "zh-Hant-CN" : locale}
             options={[...LANGUAGES]}
-            onChange={setLocale}
+            onChange={(value) => setLocale(value === "zh-Hant-CN" ? traditionalLanguageLocale() : value)}
           />
         </SettingRow>
-        <PlannedSelectRow label={t("shell.dateFormat")} hint={t("shell.dateFormatHint")} options={[t("shell.format.followLanguage", { sample: "2026-10-18" }), "18/10/2026", "10/18/2026"]} />
-        <PlannedSelectRow label={t("shell.numberFormat")} hint={t("shell.numberFormatHint")} options={[t("shell.format.followLanguage", { sample: "1,234.5" }), "1.234,5", "1 234,5"]} />
+        {isTraditionalLocale(locale) && (
+          <SettingRow agents="none" source="local" label={t("shell.language.traditional.region" as MessageKey)}>
+            <Select
+              value={traditionalRegionOf(locale) ?? "CN"}
+              options={(["CN", "HK", "MO", "TW"] as const).map((region) => ({ value: region, label: t(`shell.language.traditional.${region}` as MessageKey) }))}
+              onChange={(region) => setLocale(traditionalLocale(region))}
+            />
+          </SettingRow>
+        )}
+        <p className="py-2 text-xs text-subtle">{t("settings.ia.formatNote")}</p>
       </Section>
       <TermsSection />
       <WindowSection />
+      <PerfSection />
       {/* 更新与诊断 (module updater). */}
       <SettingsSections page="general" />
     </>
@@ -89,27 +108,23 @@ export function GeneralPage() {
 }
 
 /**
- * A planned setting shown before it works (owner 2026-10-18: 日期 / 数字格式 as placeholders so the
- * feature has a place and options to build to): a disabled Select with a 「待实现」 tag, not stored.
+ * 性能 (owner 2026-10-23, lib/perfMode): 节省资源 (default) / 流畅优先; the hint says what the chosen one does. In front
+ * the window looks the same either way.
  */
-function PlannedSelectRow({ label, hint, options }: { label: string; hint: string; options: readonly string[] }) {
+function PerfSection() {
   const { t } = useI18n();
+  const mode = useUiPrefs().perfMode;
+  const labels: Record<PerfMode, MessageKey> = { save: "shell.perf.save", smooth: "shell.perf.smooth" };
   return (
-    <SettingRow
-      label={
-        <span className="inline-flex items-center gap-2">
-          {label}
-          <span className="inline-flex h-5 items-center rounded bg-surface-2 px-1.5 text-[11px] font-normal text-subtle">{t("shell.planned")}</span>
-        </span>
-      }
-      hint={hint}
-    >
-      <Select<string> disabled label={label} value="0" options={options.map((o, i) => ({ value: String(i), label: o }))} onChange={() => {}} />
-    </SettingRow>
+    <Section id={settingsAnchorId("performance")} title={t("shell.perf.title")}>
+      <SettingRow agents="none" source="local" label={t("shell.perf.mode")} hint={t(mode === "smooth" ? "shell.perf.smoothHint" : "shell.perf.saveHint")}>
+        <Segmented<PerfMode> label={t("shell.perf.mode")} value={mode} options={PERF_MODES.map((m) => ({ value: m, label: t(labels[m]) }))} onChange={(v) => setUiPref("perfMode", v)} />
+      </SettingRow>
+    </Section>
   );
 }
 
-/** 窗口: 关闭窗口时 (stored by the main process; the section is left out in the browser preview). */
+/** 窗口: 关闭窗口时 (stored by the main process), 多窗口 (this device's UI prefs); the section is left out without the shell bridge. */
 function WindowSection() {
   const { t } = useI18n();
   const [state] = useShellState();
@@ -118,6 +133,7 @@ function WindowSection() {
     <Section id={settingsAnchorId("window")} title={t("shell.general.window")}>
       <CloseBehaviorRow />
       <AllowRemoteCloseRow />
+      <MultiWindowRow />
     </Section>
   );
 }
@@ -129,7 +145,7 @@ function CloseBehaviorRow() {
   const [state, setState] = useShellState();
   if (!shell || !state) return null;
   return (
-    <SettingRow label={t("shell.closeWindow")} hint={!state.trayAvailable ? t("shell.closeWindow.noTray") : state.trayHostMissing && state.prefs.closeBehavior === "quit" ? t("shell.closeWindow.noTrayHost") : undefined}>
+    <SettingRow agents="none" source="local" label={t("shell.closeWindow")} hint={!state.trayAvailable ? t("shell.closeWindow.noTray") : state.trayHostMissing && state.prefs.closeBehavior === "quit" ? t("shell.closeWindow.noTrayHost") : undefined}>
       <Segmented<CloseBehavior>
         value={state.prefs.closeBehavior}
         options={[
@@ -156,7 +172,7 @@ function AllowRemoteCloseRow() {
   if (!shell?.setAllowRemoteClose || !state) return null;
   const allowed = state.prefs.allowRemoteClose !== false;
   return (
-    <SettingRow label={t("remoteClose.allow")} hint={t("remoteClose.allowHint")}>
+    <SettingRow agents="none" source="local" label={t("remoteClose.allow")} hint={t("remoteClose.allowHint")}>
       <Toggle
         checked={allowed}
         label={t("remoteClose.allow")}
@@ -165,6 +181,21 @@ function AllowRemoteCloseRow() {
           shell.setAllowRemoteClose!(next).then(setState, () => {});
         }}
       />
+    </SettingRow>
+  );
+}
+
+/**
+ * 多窗口 (multi-window P6; main-owned since 2026-10-27, mirrored by lib/multiWindowPref; default off): 移到新窗口 / 在 桌子 N 打开 / 在新窗口打开 and the remembered
+ * desks coming back at start. Only where this app can open desk windows (the Electron app; the preview with ?desks).
+ */
+export function MultiWindowRow() {
+  const { t } = useI18n();
+  const on = useMultiWindow();
+  if (!bridge.window?.desk) return null;
+  return (
+    <SettingRow agents="none" source="local" label={<span className="inline-flex items-center gap-2">{t("desk.setting")}<Tag>{t("creation.experimental")}</Tag></span>} hint={t("desk.settingHint")}>
+      <Toggle checked={on} label={t("desk.setting")} onChange={(v) => void setMultiWindow(bridge.shell, v).catch(() => {})} />
     </SettingRow>
   );
 }
@@ -180,7 +211,7 @@ function updateIntervalLabel(t: (key: MessageKey, vars?: Record<string, string |
 
 /**
  * 更新通道: 开发版 (main) / 正式版 (release) when this install can switch (writes `<base>/channel` and
- * checks again); a fixed channel is shown read-only under 详细信息 instead (UpdateDetails).
+ * checks again); a fixed channel is shown read-only alongside the build information (UpdateDetails).
  */
 function UpdateChannelRow({ status }: { status: UpdateStatus }) {
   const { t } = useI18n();
@@ -195,7 +226,7 @@ function UpdateChannelRow({ status }: { status: UpdateStatus }) {
     ...(channel === "main" || channel === "release" ? [] : [{ value: channel, label: channel }]),
   ];
   return (
-    <SettingRow label={t("updater.channel")} hint={t("updater.channelSwitchHint")}>
+    <SettingRow agents="none" source="local" label={t("updater.channel")} hint={t("updater.channelSwitchHint")}>
       <Segmented
         label={t("updater.channel")}
         value={channel}
@@ -244,23 +275,23 @@ function desktopVersionText(status: UpdateStatus | null): string | null {
   return status?.current?.version ?? (status?.current?.commit ? status.current.commit.slice(0, 7) : null);
 }
 
-/** 详细信息 of 更新与诊断: the exact build, a fixed channel, the update source, the last check, the Releases page. */
+/** Always-visible information for 更新与诊断: the exact build, a fixed channel, the update source, the last check, the Releases page. */
 function UpdateDetails({ status }: { status: UpdateStatus }) {
   const { t } = useI18n();
   const channel = status.channel ?? null;
   const checked = status.checkedAt ? Date.parse(status.checkedAt) : NaN;
   return (
-    <Details>
-      <SettingRow label={t("updater.details.build")}>
+    <>
+      <SettingRow readOnly agents="none" source="local" label={t("updater.details.build")}>
         <span className="font-mono text-xs text-muted tabular-nums select-text">{buildLabel(status.current) ?? "—"}</span>
       </SettingRow>
       {channel && !(status.canSwitchChannel && bridge.update?.setChannel) && (
-        <SettingRow label={t("updater.channel")} hint={t("updater.channelHint")}>
+        <SettingRow readOnly agents="none" source="local" label={t("updater.channel")} hint={t("updater.channelHint")}>
           <span className="text-xs text-muted">{channelLabel(t, channel)}</span>
         </SettingRow>
       )}
       {status.source && (
-        <SettingRow label={t("updater.source")} hint={t(status.binary ? "updater.sourceHint.binary" : "updater.sourceHint")}>
+        <SettingRow readOnly agents="none" source="local" label={t("updater.source")} hint={t(status.binary ? "updater.sourceHint.binary" : "updater.sourceHint")}>
           <span className="flex min-w-0 font-mono text-xs text-muted select-text" title={`${status.source} · ${channel ?? ""}`}>
             <span className="min-w-0 truncate">{status.source}</span>
             {channel && <span className="shrink-0 whitespace-pre"> · {channel}</span>}
@@ -268,25 +299,25 @@ function UpdateDetails({ status }: { status: UpdateStatus }) {
         </SettingRow>
       )}
       {Number.isFinite(checked) && (
-        <SettingRow label={t("updater.lastCheck")}>
+        <SettingRow readOnly agents="none" source="local" label={t("updater.lastCheck")}>
           <span className="text-xs text-muted tabular-nums">{formatAbsolute(Math.floor(checked / 1000))}</span>
         </SettingRow>
       )}
       {status.state === "unsupported" && status.reason && (
-        <SettingRow label={t("updater.reason")}>
+        <SettingRow readOnly agents="none" source="local" label={t("updater.reason")}>
           <span className="max-w-80 truncate font-mono text-xs text-subtle select-text" title={status.reason}>
             {status.reason}
           </span>
         </SettingRow>
       )}
       {status.releasePage && status.code !== "releasePackage" && (
-        <SettingRow label={t("updater.releasePage")} hint={t("updater.releasePageHint")}>
+        <SettingRow navigation agents="none" source="local" label={t("updater.releasePage")} info={t("updater.releasePageHint")}>
           <Button onClick={() => void api.openExternal(status.releasePage!)} title={status.releasePage}>
             {t("updater.releasePage.open")}
           </Button>
         </SettingRow>
       )}
-    </Details>
+    </>
   );
 }
 
@@ -297,36 +328,32 @@ function UpdateDetails({ status }: { status: UpdateStatus }) {
 function OldReleasesRow({ status }: { status: UpdateStatus }) {
   const { t } = useI18n();
   const update = bridge.update;
-  const [armed, setArmed] = useArmed();
   const [deleting, setDeleting] = useState(false);
   const old = status.oldReleases!;
   const busy = deleting || status.state === "updating" || status.state === "ready";
   return (
-    <SettingRow label={t("updater.oldReleases")} hint={t("updater.oldReleasesHint")}>
+    <SettingRow agents="none" source="local" label={t("updater.oldReleases")} hint={t("updater.oldReleasesHint")}>
       <span className="flex items-center gap-3">
         <span className="text-xs text-muted tabular-nums" title={old.dir}>
           {t("updater.oldReleases.summary", { n: old.count, size: formatBytes(old.bytes), days: old.autoDeleteDays })}
         </span>
-        {update?.deleteOldReleases &&
-          (armed && !busy ? (
-            <button
-              className={`${ARMED_FORM_BUTTON} shrink-0 whitespace-nowrap`}
-              onClick={() => {
-                setArmed(false);
+        {update?.deleteOldReleases && (
+          <Button
+            disabled={busy}
+            onClick={() =>
+              void confirmDialog(t("updater.oldReleases.confirmDialog", { n: old.count, size: formatBytes(old.bytes) }), true, { ok: t("updater.oldReleases.confirmOk", { n: old.count }), cancel: t("settings.cancel") }).then((yes) => {
+                if (!yes) return;
                 setDeleting(true);
                 update.deleteOldReleases!().then(
                   () => setDeleting(false),
                   () => setDeleting(false),
                 );
-              }}
-            >
-              {t("updater.oldReleases.confirm")}
-            </button>
-          ) : (
-            <Button onClick={() => setArmed(true)} disabled={busy}>
-              {t(deleting ? "updater.oldReleases.deleting" : "updater.oldReleases.delete")}
-            </Button>
-          ))}
+              })
+            }
+          >
+            {t(deleting ? "updater.oldReleases.deleting" : "updater.oldReleases.delete")}
+          </Button>
+        )}
       </span>
     </SettingRow>
   );
@@ -353,7 +380,7 @@ export function UpdatesPage() {
     <>
       <Section id={settingsAnchorId("updates")} title={t("updater.section.updates")}>
         {status && (
-          <SettingRow
+          <SettingRow readOnly={!updateButtonVisible(status)} agents="none" source="local"
             label={t("updater.updateCheck.current")}
             hint={
               <>
@@ -386,7 +413,7 @@ export function UpdatesPage() {
           </SettingRow>
         )}
         {supported && (
-          <SettingRow label={t("updater.updateCheck")} hint={t("updater.updateCheckHint")}>
+          <SettingRow agents="none" source="local" label={t("updater.updateCheck")} hint={t("updater.updateCheckHint")}>
             <Select
               // Binary installs check at most hourly (GitHub's unauthenticated API limit, main/updater.ts):
               // only offer what really happens, and show a stored shorter value as the hour it runs at.
@@ -401,21 +428,29 @@ export function UpdatesPage() {
         {status ? <UpdateDetails status={status} /> : <EmptyState>{t("updater.status.none")}</EmptyState>}
       </Section>
       <Section id={settingsAnchorId("diagnostics")} title={t("updater.section.diagnostics")}>
-        <SettingRow label={t("updater.errorLog")} hint={t("updater.errorLogHint")}>
+        <SettingRow navigation agents="none" source="local" label={t("updater.errorLog")} hint={t("updater.errorLogHint")}>
           <Button onClick={() => void shell.openLogs()}>{t("updater.errorLog.open")}</Button>
         </SettingRow>
       </Section>
+      {/* Modules' diagnostics (design 006 v1 Q7: 性能记录 from 关于). */}
+      <SettingsSections page="updates" />
     </>
   );
 }
 
 // ---- 对话 ----
 
+const CONVERSATION_INPUT_SECTIONS = ["shell.composer"] as const;
+const CONVERSATION_LAYOUT_SECTIONS = ["shell.convWidth", "shell.gutter", "shell.shelfOnly"] as const;
+const CONVERSATION_SIDE_SECTIONS = ["side-chat.settings", "side-chat.summarySettings"] as const;
+const CONVERSATION_PLACED_SECTIONS = [...CONVERSATION_INPUT_SECTIONS, ...CONVERSATION_LAYOUT_SECTIONS, ...CONVERSATION_SIDE_SECTIONS];
+
 export function ConversationPage() {
   const { t } = useI18n();
   const ui = useUiPrefs();
   // 在时间线里显示批注 is the notes module's pref, shown in 消息显示 while that module is on (owner 2026-10-19).
   const notesOn = useModuleEnabled("notes");
+  const sideChatOn = useModuleEnabled("side-chat");
   const [showNotes, setShowNotes] = useModulePref<boolean>("notes", "showTimeline", true);
   // 折叠长消息: one three-way choice over the foldLong / foldOlderReplies prefs (no pref of its own).
   const fold = !ui.foldLong ? "off" : ui.foldOlderReplies ? "all" : "mine";
@@ -425,12 +460,17 @@ export function ConversationPage() {
   };
   return (
     <>
+      <nav aria-label={t("settings.ia.conversationNav")} className="mb-4 flex flex-wrap gap-3">
+        {([ ["conv-messages", "settings.ia.messages"], ["conv-input", "settings.ia.input"], ["conv-layout", "settings.ia.layout"], ...(sideChatOn ? [["conv-side-chat", "settings.ia.sideChat"]] : []) ] as const).map(([anchor, label]) => <TextLink key={anchor} onClick={() => requestSettingsReveal(anchor)}>{t(label as MessageKey)}</TextLink>)}
+      </nav>
+      <div id={settingsAnchorId("conv-messages")}>
+      <h2 className="mb-3 text-title">{t("settings.ia.messages")}</h2>
       {/* 对话顶部 (moved from 侧栏与顶栏, owner 2026-10-18: settings grouped by screen region). */}
       <Section id={settingsAnchorId("titleBar")} title={t("shell.sidebar.titleBar")}>
-        <SettingRow label={t("appearance.titleTwoLines")} hint={t("appearance.titleTwoLinesHint")}>
+        <SettingRow agents="none" source="local" label={t("appearance.titleTwoLines")} info={t("appearance.titleTwoLinesHint")}>
           <Toggle checked={ui.titleTwoLines} onChange={(v) => setUiPref("titleTwoLines", v)} />
         </SettingRow>
-        <SettingRow label={t("appearance.runtimeButton")} hint={t("appearance.runtimeButtonHint")}>
+        <SettingRow agents="none" source="local" label={t("appearance.runtimeButton")} info={t("appearance.runtimeButtonHint")}>
           <Segmented
             value={ui.runtimeButton}
             options={(["all", "independent", "off"] as const).map((v) => ({ value: v, label: t(`appearance.runtimeButton.${v}` as MessageKey) }))}
@@ -440,14 +480,14 @@ export function ConversationPage() {
       </Section>
       {/* 消息显示 (owner 2026-10-19): by message kind, then the toggles. */}
       <Section id={settingsAnchorId("display")} title={t("conversation.display")}>
-        <SettingRow label={t("conversation.reasoningView")} hint={t("conversation.reasoningView.hint")}>
+        <SettingRow agents="none" source="local" label={t("conversation.reasoningView")} info={t("conversation.reasoningView.hint")}>
           <Segmented
             value={ui.reasoningView}
             options={(["expanded", "collapsed", "hidden"] as const).map((v) => ({ value: v, label: t(`conversation.reasoningView.${v}` as MessageKey) }))}
             onChange={(v) => setUiPref("reasoningView", v)}
           />
         </SettingRow>
-        <SettingRow label={t("conversation.agentMessages")} hint={t("conversation.agentMessages.hint")}>
+        <SettingRow agents="none" source="local" label={t("conversation.agentMessages")} info={t("conversation.agentMessages.hint")}>
           <Segmented
             value={ui.agentMessages}
             options={[
@@ -457,25 +497,25 @@ export function ConversationPage() {
             onChange={(v) => setUiPref("agentMessages", v)}
           />
         </SettingRow>
-        <SettingRow label={t("appearance.messageImages")} hint={t("appearance.messageImagesHint")}>
+        <SettingRow agents="none" source="local" label={t("appearance.messageImages")} info={t("appearance.messageImagesHint")}>
           <Segmented
             value={ui.messageImages}
             options={(["thumbnail", "link"] as const).map((v) => ({ value: v, label: t(`appearance.messageImages.${v}` as MessageKey) }))}
             onChange={(v) => setUiPref("messageImages", v)}
           />
         </SettingRow>
-        <SettingRow label={t("conversation.turnSummary")} hint={t("conversation.turnSummary.hint")}>
+        <SettingRow agents="none" source="local" label={t("conversation.turnSummary")} info={t("conversation.turnSummary.hint")}>
           <Segmented
             value={ui.turnSummary}
             options={(["collapsed", "latestExpanded", "off"] as const).map((v) => ({ value: v, label: t(`conversation.turnSummary.${v}` as MessageKey) }))}
             onChange={(v) => setUiPref("turnSummary", v)}
           />
         </SettingRow>
-        <SettingRow label={t("conversation.interactions")} hint={t("conversation.interactionsHint")}>
+        <SettingRow agents="none" source="local" label={t("conversation.interactions")} hint={t("conversation.interactionsHint")}>
           <Toggle checked={ui.timelineInteractions} onChange={(v) => setUiPref("timelineInteractions", v)} />
         </SettingRow>
         {notesOn && (
-          <SettingRow label={t("notes.showTimeline")} hint={t("notes.showTimelineHint")}>
+          <SettingRow agents="none" source="local" label={t("notes.showTimeline")} hint={t("notes.showTimelineHint")}>
             <Toggle
               checked={showNotes}
               onChange={(next) => {
@@ -488,28 +528,28 @@ export function ConversationPage() {
             />
           </SettingRow>
         )}
-        <SettingRow label={t("conversation.timelineIntro")} hint={t("conversation.timelineIntroHint")}>
+        <SettingRow agents="none" source="local" label={t("conversation.timelineIntro")} hint={t("conversation.timelineIntroHint")}>
           <Toggle checked={ui.timelineIntro} onChange={(v) => setUiPref("timelineIntro", v)} />
         </SettingRow>
       </Section>
 
       {/* 长对话和长消息 (owner 2026-10-18): how much of a long conversation loads, and folding long messages. */}
       <Section id={settingsAnchorId("fold")} title={t("conversation.longSection")}>
-        <SettingRow label={t("conversation.timelineTurns")} hint={t("conversation.timelineTurnsHint")}>
+        <SettingRow agents="none" source="local" label={t("conversation.timelineTurns")} info={t("conversation.timelineTurnsHint")}>
           <Select
             value={String(ui.timelineTurns)}
             options={[20, 30, 50, 100, 0].map((n) => ({ value: String(n), label: n === 0 ? t("conversation.timelineTurns.all") : t("conversation.timelineTurns.n", { n }) }))}
             onChange={(v) => setUiPref("timelineTurns", Number(v))}
           />
         </SettingRow>
-        <SettingRow label={t("appearance.foldLong")} hint={t("appearance.foldLongHint")}>
+        <SettingRow agents="none" source="local" label={t("appearance.foldLong")} info={t("appearance.foldLongHint")}>
           <Segmented
             value={fold}
             options={(["off", "mine", "all"] as const).map((v) => ({ value: v, label: t(`appearance.foldLong.${v}` as MessageKey) }))}
             onChange={setFold}
           />
         </SettingRow>
-        <SettingRow label={t("appearance.foldLines")} hint={t("appearance.foldLinesHint")}>
+        <SettingRow agents="none" source="local" label={t("appearance.foldLines")} info={t("appearance.foldLinesHint")}>
           <Segmented
             value={String(ui.foldLines)}
             disabled={!ui.foldLong}
@@ -519,8 +559,21 @@ export function ConversationPage() {
         </SettingRow>
       </Section>
 
-      {/* Module sections on this page (侧边对话, 记为批注). 输入框 moved to 输入区; 书签条 and 成果 to 右侧栏与留白 (owner 2026-10-18). */}
-      <SettingsSections page="conversation" />
+      {/* Unknown module contributions stay with messages instead of disappearing when grouped. */}
+      <SettingsSections page="conversation" except={CONVERSATION_PLACED_SECTIONS} />
+      </div>
+      <div id={settingsAnchorId("conv-input")}>
+        <h2 className="mb-3 text-title">{t("settings.ia.input")}</h2>
+        <SettingsSections page="conversation" only={CONVERSATION_INPUT_SECTIONS} />
+      </div>
+      <div id={settingsAnchorId("conv-layout")}>
+        <h2 className="mb-3 text-title">{t("settings.ia.layout")}</h2>
+        <SettingsSections page="conversation" only={CONVERSATION_LAYOUT_SECTIONS} />
+      </div>
+      {sideChatOn && <div id={settingsAnchorId("conv-side-chat")}>
+        <h2 className="mb-3 text-title">{t("settings.ia.sideChat")}</h2>
+        <SettingsSections page="conversation" only={CONVERSATION_SIDE_SECTIONS} />
+      </div>}
     </>
   );
 }
@@ -540,7 +593,7 @@ function OwnerMayPassAsksRow() {
     if (value !== undefined && onFocus) setOwnerMayPassAsks(value);
   }, [value, onFocus]);
   return (
-    <SettingRow label={t("queue.ownerMayPassAsks")} hint={error ?? t("queue.ownerMayPassAsksHint")}>
+    <SettingRow agents="now" source="host" label={t("queue.ownerMayPassAsks")} hint={error ?? t("queue.ownerMayPassAsksHint")}>
       <Toggle disabled={value === undefined} checked={value ?? true} onChange={(v) => void patch({ queue: { ownerMayPassAsks: v } })} />
     </SettingRow>
   );
@@ -558,6 +611,43 @@ export function QueueOrderSection() {
   );
 }
 
+/**
+ * cutex `imageInput.busyBehavior` (image-input-steering, r264; the connected host's cutex): what an ordinary
+ * send with images does while the agent works — queue (default: the original image goes out when the turn
+ * ends) or insert into the turn. Explicit 插话 / 排队 never read it.
+ */
+export function ImageBusyRow({ value, error, onChange }: { value: ImageBusyBehavior | undefined; error?: string | null; onChange(v: ImageBusyBehavior): void }) {
+  const { t } = useI18n();
+  return (
+    <SettingRow agents="now" source="host" label={t("queue.imageBusy")} hint={error ?? t(value === "steer" ? "queue.imageBusy.steerHint" : "queue.imageBusy.queueHint")}>
+      <Segmented
+        value={value ?? "queue"}
+        disabled={value === undefined}
+        options={(["queue", "steer"] as const).map((v) => ({ value: v, label: t(`queue.imageBusy.${v}` as MessageKey) }))}
+        onChange={onChange}
+      />
+    </SettingRow>
+  );
+}
+
+/** 协作 → 运行中的图片消息 (r264): next to 排队顺序; only on a host with image-input-steering. */
+export function ImageBusySection() {
+  const { t } = useI18n();
+  const supported = useTargetFeatures().has(IMAGE_INPUT_STEERING_FEATURE);
+  if (!supported) return null;
+  return (
+    <Section id={settingsAnchorId("imageBusy")} title={t("queue.imageBusy.section")} hint={t("queue.imageBusy.sectionHint")}>
+      <HostImageBusyRow />
+    </Section>
+  );
+}
+
+/** The row on the target host's `/v2/settings` (read once, PATCH `{imageInput: {busyBehavior}}`). */
+function HostImageBusyRow() {
+  const { settings, error, patch } = useGlobalSettings();
+  return <ImageBusyRow value={readImageBusyBehavior(settings)} error={error} onChange={(v) => void patch(imageBusyPatch(v))} />;
+}
+
 // ---- 输入区 ----
 
 /**
@@ -565,6 +655,7 @@ export function QueueOrderSection() {
  * what sits right above the input (「需要你」 strip, status row) and the 底栏 below it. Where status items
  * show and the capsule moved to their own page, 状态 (StatusPage; owner 2026-10-18: neither is the input).
  */
+/** 输入区: the 会话 page's input-area cards (design 006 v1: was its own page `composer`, now a section of 会话). */
 export function ComposerPage() {
   const { t } = useI18n();
   const ui = useUiPrefs();
@@ -572,12 +663,13 @@ export function ComposerPage() {
   const panel = useCompactSettings();
   const asks = useApp((s) => s.features.has(ASKS_FEATURE));
   const admissionOrder = useApp((s) => s.features.has(ADMISSION_ORDER_FEATURE));
+  const imageSteer = useApp((s) => s.features.has(IMAGE_INPUT_STEERING_FEATURE));
   const openSettings = useApp((s) => s.openSettings);
   return (
     <>
       <Section id={settingsAnchorId("send")} title={t("shell.composer.send")}>
         {/* Only what Enter does while the agent works (owner 2026-10-18); every key is on 键盘快捷键. One line either way, so nothing below moves. */}
-        <SettingRow
+        <SettingRow agents="none" source="local"
           label={t("settings.sendKeys")}
           hint={
             <>
@@ -597,13 +689,15 @@ export function ComposerPage() {
           />
         </SettingRow>
         {asks && (
-          <SettingRow label={t("conversation.delegationSteerKeys")} hint={t("conversation.delegationSteerKeysHint")}>
+          <SettingRow agents="none" source="local" label={t("conversation.delegationSteerKeys")} hint={t("conversation.delegationSteerKeysHint")}>
             <Toggle checked={ui.delegationSteerKeys} onChange={(v) => setUiPref("delegationSteerKeys", v)} />
           </SettingRow>
         )}
+        {/* 运行中的图片消息 is the host's (r264): on 协作 next to 排队顺序; here only a way there. */}
+        {imageSteer && !panel && <LinkRow agents="none" source="local" label={t("queue.imageBusy")} link={t("queue.imageBusy.link")} onClick={() => openSettings("collab", { anchor: "imageBusy" })} />}
       </Section>
       <Section id={settingsAnchorId("queuePanel")} title={t("queue.panelFold")}>
-        <SettingRow label={t("shell.composer.panelOpen")} hint={t(ui.queuePanelFold === "auto" ? "queue.panelFold.autoHint" : "queue.panelFold.openHint")}>
+        <SettingRow agents="none" source="local" label={t("shell.composer.panelOpen")} hint={t(ui.queuePanelFold === "auto" ? "queue.panelFold.autoHint" : "queue.panelFold.openHint")}>
           <Segmented
             value={ui.queuePanelFold}
             options={(["open", "auto"] as const).map((v) => ({ value: v, label: t(`queue.panelFold.${v}` as MessageKey) }))}
@@ -611,29 +705,25 @@ export function ComposerPage() {
           />
         </SettingRow>
         {admissionOrder && (
-          <SettingRow label={t("queue.sectionStrip")} hint={t("queue.sectionStripHint")}>
+          <SettingRow agents="none" source="local" label={t("queue.sectionStrip")} hint={t("queue.sectionStripHint")}>
             <Toggle checked={ui.queueSectionStrip} onChange={(v) => setUiPref("queueSectionStrip", v)} />
           </SettingRow>
         )}
         {/* 排队顺序 is the host's (owner 2026-10-19: on 协作, next to 消息投递); here only a way there. */}
-        {admissionOrder && !panel && <LinkRow label={t("queue.ownerMayPassAsks")} link={t("queue.orderLink")} onClick={() => openSettings("collab", { anchor: "queueOrder" })} />}
+        {admissionOrder && !panel && <LinkRow agents="none" source="local" label={t("queue.ownerMayPassAsks")} link={t("queue.orderLink")} onClick={() => openSettings("collab", { anchor: "queueOrder" })} />}
       </Section>
       {/* Names (owner 2026-10-18, N3): 状态行 right above the input, 底栏 below it; each section says where. */}
       <Section id={settingsAnchorId("aboveInput")} title={t("shell.status.aboveInput")} hint={t("shell.status.aboveInputHint")}>
-        <SettingRow label={t("appearance.needsYouStrip")} hint={t("appearance.needsYouStripHint")}>
+        <SettingRow agents="none" source="local" label={t("appearance.needsYouStrip")} hint={t("appearance.needsYouStripHint")}>
           <Toggle checked={ui.needsYouStrip} onChange={(v) => setUiPref("needsYouStrip", v)} />
         </SettingRow>
-        <LinkRow label={t("shell.composer.barItems")} hint={t("shell.composer.barItemsHint")} link={t("shell.composer.barItemsLink")} onClick={() => openSettings("status")} />
+        <LinkRow agents="none" source="local" label={t("shell.composer.barItems")} hint={t("shell.composer.barItemsHint")} link={t("shell.composer.barItemsLink")} onClick={() => openSettings("status")} />
       </Section>
       <Section id={settingsAnchorId("inputBar")} title={t("shell.composer.inputBar")} hint={t("shell.composer.inputBarHint")}>
-        <SettingRow label={t("shell.composer.quotaReset")}>
-          <Toggle checked={ui.quotaShowReset} onChange={(v) => setUiPref("quotaShowReset", v)} />
-        </SettingRow>
-        <SettingRow label={t("composer.profileAvatar")} hint={t("composer.profileAvatarHint")}>
+        <SettingRow agents="none" source="local" label={t("composer.profileAvatar")} info={t("composer.profileAvatarHint")}>
           <Toggle checked={ui.composerProfileAvatar} onChange={(v) => setUiPref("composerProfileAvatar", v)} />
         </SettingRow>
       </Section>
-      <SettingsSections page="composer" />
     </>
   );
 }
@@ -666,7 +756,7 @@ export function SidebarPage() {
 
 // ---- 键盘快捷键 ----
 
-/** Read-only key reference; the send-key scheme itself is set on 对话 → 输入框. */
+/** The rebindable window / pane keys (KeybindingsSection), then the fixed ones; the send-key scheme itself is set on 对话 → 输入框. */
 export function ShortcutsPage() {
   const { t } = useI18n();
   const ui = useUiPrefs();
@@ -675,12 +765,16 @@ export function ShortcutsPage() {
   return (
     <>
       <Section>
-        <LinkRow
+        <LinkRow agents="none" source="local"
           label={t("settings.sendKeys")}
           hint={t("shortcuts.readOnly")}
           link={t("shell.shortcuts.sendKeysLink", { scheme: t(ui.sendKeys === "cli" ? "settings.sendKeys.cli" : "settings.sendKeys.queueFirst") })}
-          onClick={() => openSettings("composer")}
+          onClick={() => openSettings("conversation", { anchor: "send" })}
         />
+      </Section>
+      <KeybindingsSection />
+      <Section id={settingsAnchorId("gestures")} title={t("gestures.title")}>
+        <GestureGuide />
       </Section>
       {shortcutsFor(ui.sendKeys).map((group) => (
         <Section key={group.id} id={settingsAnchorId(`shortcuts-${group.id}`)} title={t(group.title)}>
@@ -688,7 +782,7 @@ export function ShortcutsPage() {
             <div key={i} className="flex items-center gap-4 border-b border-border py-2 last:border-b-0">
               <span className="flex w-44 shrink-0 flex-wrap gap-1">
                 {s.keys.map((k) => (
-                  <kbd key={k} className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-foreground">
+                  <kbd key={k} className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-caption/[inherit] text-foreground">
                     {displayKey(k, mac)}
                   </kbd>
                 ))}
@@ -764,8 +858,8 @@ function ArchivedRow({ row, canDelete }: { row: AgentRow; canDelete: boolean }) 
     }
   };
   return (
-    <ListRow
-      leading={<Avatar name={row.name} color={row.color} avatar={session.avatar} seed={session.cutexSessionId} size={22} minor />}
+    <SettingsGroup agents="now" source="host"><ListRow
+      leading={<Avatar name={row.name} color={row.color} avatar={session.avatar} seed={session.cutexSessionId} size={20} minor />}
       title={row.name}
       detail={detail || undefined}
       actions={
@@ -774,26 +868,37 @@ function ArchivedRow({ row, canDelete }: { row: AgentRow; canDelete: boolean }) 
           <Button disabled={busy} onClick={() => void act(() => restoreWithDirector(session, t, hostId))} title={archivedProject ? t("archive.banner.projectArchived", { project: archivedProject.name }) : undefined}>
             {t("archive.row.restore")}
           </Button>
-          {canDelete && <ArmedRemove title={t("archive.row.delete")} armedLabel={t("archive.row.deleteArmed")} disabled={busy} onRemove={() => void act(() => deleteAgentNow(session, t, undefined, hostId))} />}
+          {canDelete && !lacks(agentFeaturesOf(session), "threadDelete") && <ArmedRemove title={t("archive.row.delete")} armedLabel={t("archive.row.deleteArmed")} disabled={busy} onRemove={() => void act(() => deleteAgentNow(session, t, undefined, hostId))} />}
         </>
       }
       below={error ? <p className="mt-1 text-xs text-danger">{error}</p> : undefined}
-    />
+    /></SettingsGroup>
   );
 }
 
 /** `archiveDeleteEmpty` (cutex session-delete-empty-on-archive; default on). */
-function ArchiveBehaviour() {
+export function ArchiveBehaviour() {
   const { t } = useI18n();
   const supported = useTargetFeatures().has(SESSION_FEATURES.deleteEmpty);
   const { settings, error, patch } = useGlobalSettings();
+  const hostId = useTargetHostId();
+  const host = useApp((s) => s.hosts?.hosts.find((h) => h.id === hostId)?.label) ?? hostId;
+  const enabled = settings?.archiveDeleteEmpty ?? true;
+  const [armed, setArmed] = useArmed(`${hostId}:${enabled}`);
+  const risk = useSettingsRisk([supported, enabled]);
+  const [pending, setPending] = useState<{ valid(): boolean } | null>(null);
   if (!supported) return null;
   return (
     <Section>
       {error && <ErrorNote>{error}</ErrorNote>}
-      <SettingRow label={t("archive.deleteEmpty")} hint={t("archive.deleteEmptyHint")}>
-        <Toggle disabled={!settings} checked={settings?.archiveDeleteEmpty ?? true} onChange={(v) => void patch({ archiveDeleteEmpty: v })} />
+      <SettingRow agents="now" source="host" label={t("archive.deleteEmpty")} hint={t("archive.deleteEmptyHint")}>
+        <Toggle disabled={!settings} checked={enabled} onChange={(v) => { if (v) { setPending({ valid: risk.capture() }); setArmed(true); } else { setArmed(false); setPending(null); void patch({ archiveDeleteEmpty: false }); } }} />
       </SettingRow>
+      {armed && !enabled && pending?.valid() && <div className="flex flex-wrap items-center gap-2 py-2">
+        <p className="w-full text-xs text-danger">{t("settings.ia.emptyConfirm", { host })}</p>
+        <SettingsGroup agents="now" source="host"><button type="button" className={ARMED_FORM_BUTTON} disabled={!settings} onClick={() => { if (!pending.valid()) return; setArmed(false); setPending(null); void patch({ archiveDeleteEmpty: true }); }}>{t("settings.ia.emptyEnable")}</button></SettingsGroup>
+        <Button onClick={() => { setArmed(false); setPending(null); }}>{t("settings.ia.emptyCancel")}</Button>
+      </div>}
     </Section>
   );
 }
@@ -826,7 +931,7 @@ export function AboutPage() {
   return (
     <>
       <Section>
-        <SettingRow
+        <SettingRow readOnly={!updateButtonVisible(status)} agents="none" source="local"
           label={t("shell.about.desktop")}
           hint={
             <>
@@ -839,12 +944,12 @@ export function AboutPage() {
           {updateButtonVisible(status) && <UpdateButton />}
           {bridge.shell && <TextLink onClick={() => openSettings("updates")}>{t("shell.about.updatesLink")}</TextLink>}
         </SettingRow>
-        <SettingRow label="cutex" hint={!connected ? t("shell.about.noHost") : hostLabel ? t("shell.about.cutexHintHost", { host: hostLabel }) : t("shell.about.cutexHint")}>
+        <SettingRow readOnly agents="none" source="host" label="cutex" hint={!connected ? t("shell.about.noHost") : hostLabel ? t("shell.about.cutexHintHost", { host: hostLabel }) : t("shell.about.cutexHint")}>
           <span className="font-mono text-sm tabular-nums select-text">{cutexShort ?? "—"}</span>
           {backendPage && connected && <TextLink onClick={() => openSettings("backend")}>{t("shell.about.backendLink")}</TextLink>}
         </SettingRow>
         {/* Versions and the agent upgrade live on Settings → 运行时; this row links there. */}
-        <SettingRow
+        <SettingRow readOnly agents="none" source="host"
           label={t("shell.about.native")}
           hint={outdated > 0 ? <span className="text-warn">{t("runtimePackages.dotHint", { n: outdated })}</span> : runtime ? t("shell.about.nativeSelected") : t("settings.pendingCutex", { api: "GET /v2/runtime-packages" })}
         >
@@ -853,19 +958,19 @@ export function AboutPage() {
           </span>
           <TextLink onClick={() => services.ui.openSettings("runtime")}>{t("shell.about.runtimeLinkText")}</TextLink>
         </SettingRow>
-        <Details>
-          <SettingRow label={t("shell.about.desktopBuild")} hint={t("shell.about.desktopBuildHint")}>
+        <>
+          <SettingRow readOnly agents="none" source="local" label={t("shell.about.desktopBuild")} info={t("shell.about.desktopBuildHint")}>
             <span className="font-mono text-xs text-muted tabular-nums select-text">{buildLabel(status?.current) ?? "—"}</span>
           </SettingRow>
-          <SettingRow label={t("shell.about.cutexBuild")}>
+          <SettingRow readOnly agents="none" source="host" label={t("shell.about.cutexBuild")}>
             <span className="font-mono text-xs text-muted select-text">{caps ? cutexBuildText(caps.cutexBuild, cutexText) : "—"}</span>
           </SettingRow>
           {selected?.nativeVersion && (
-            <SettingRow label={t("shell.about.nativeVersion")}>
+            <SettingRow readOnly agents="none" source="host" label={t("shell.about.nativeVersion")}>
               <span className="font-mono text-xs text-muted select-text">{selected.nativeVersion}</span>
             </SettingRow>
           )}
-        </Details>
+        </>
       </Section>
       {/* The about module: known issues, changelog, project (repositories, license, notices). */}
       <SettingsSections page="about" />

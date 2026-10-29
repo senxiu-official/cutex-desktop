@@ -37,8 +37,9 @@ export interface AppServerSchemaInfo {
   /**
    * `claude-app-server-subset`: a Claude agent (cutex Claude adapter) serving part of the Codex v2
    * surface; `capabilities.features` then lists it (false = unsupported, null = unknown).
+   * `dsh-acp-subset` / `kimi-acp-subset`: the DSH / Kimi Code ACP runtimes; structural actions require explicit feature support.
    */
-  protocol: "codex-app-server" | "claude-app-server-subset";
+  protocol: "codex-app-server" | "claude-app-server-subset" | "dsh-acp-subset" | "kimi-acp-subset";
   majorVersion: number;
   version: string;
   sha256: string;
@@ -48,6 +49,8 @@ export interface AppServerSchemaInfo {
 }
 
 export interface SessionRuntime {
+  continuationWakeKinds?: string[];
+  continuationChildKinds?: string[];
   backend: string;
   status: RuntimeStatus;
   appServerConnected: boolean;
@@ -80,6 +83,14 @@ export interface HostClaudeRuntime {
 }
 
 
+/** Full Profile style (profile-avatar-style); null means the desktop default. */
+export type AvatarStyle =
+  | { kind: "portrait"; portraitThemes: string[] }
+  | { kind: "emoji"; emojiThemes: string[] | null }
+  | { kind: "letter" };
+/** session-avatar-mode: absent/null retains legacy assignment behavior. */
+export type AvatarMode = "fixed" | "inherit" | null;
+
 /** Display-only avatar set via `cutex/session/metadata/update`. */
 export interface SessionAvatar {
   kind: "emoji" | "color" | "icon";
@@ -87,7 +98,71 @@ export interface SessionAvatar {
   /** Circle colour `#rrggbb` of an `emoji` / `icon` avatar (cutex capability `agent-avatar-color`; a `color` avatar keeps its colour in `value`). */
   color?: string;
 }
+export interface SessionBadge {
+  text: string;
+  tint?: "blue" | "green" | "amber" | "pink" | "violet";
+}
+/**
+ * Who created a session (cutex capability `session-created-by`, r258): fixed at create time; null = not known (sessions
+ * from before r258, restores, adopted native sessions). An agent creator names its own session and its role then.
+ */
+export type SessionCreatedBy = null | { kind: "owner" } | { kind: "system" } | { kind: "agent"; cutexSessionId: string; role?: "director" | "member" };
+
+/** `GET/PUT /v2/human/preferences/guides` (capability `guides.preferences`): the owner's guide choice, shared by their devices. */
+export interface GuidesPreferences {
+  schema: 1;
+  /** The guides version the owner chose 全部跳过 at (null: not skipped / reset). */
+  skippedThrough: string | null;
+  updatedAt: string | null;
+}
+
+/**
+ * cutex `profile-runtime-variants` (r265): what the session was created with — fixed forever (resume / restart never
+ * re-resolve the profile's default variant, runtime or credential source). No secret. Absent on older cutex and on
+ * sessions created before r265 (they run on their profile's primary variant).
+ */
+export interface SessionLaunchBinding {
+  profileId: string;
+  variantId: string;
+  runtime: "codex" | "claude" | "dsh" | "kimi";
+  credential: { source: "stored" | "env" | "chatgptLogin" | "claudeAccount" | "kimiAccount" | "none"; envName?: string | null; version?: number | null; /** r266 Kimi-kind profiles. */ kimiAccountId?: string | null };
+  model: string | null;
+  reasoningEffort: string | null;
+  runtimePackageVersion?: string | null;
+  boundAt?: string | null;
+}
+
+/** Daemon-owned retry wait; never inferred from a failed turn or elapsed time. */
+export interface AutoRetryWait {
+  attempt: number;
+  maxAttempts: number;
+  /** Current retry deadline; scheduledAt is the plan creation time. */
+  at?: string;
+  scheduledAt: string;
+  turnId: string;
+  planId: string;
+  phase: "pending" | "firing" | "binding" | "uncertain";
+  holdsAdmission: boolean;
+  runtimeGeneration?: number;
+  threadId?: string;
+}
+
 export interface SessionResource {
+  /** model-overload-retry-visible: current occurrence only; absent/null otherwise. */
+  autoRetry?: AutoRetryWait | null;
+  /** Additive r266 conversation activity / existing archive lifecycle projection. */
+  lastActivityAt?: string | null;
+  activitySource?: "conversation" | "unknown";
+  observedAt?: string;
+  busySince?: string | null;
+  activityStatus?: "busy" | "idle" | "offline" | "unknown";
+  idleThresholdSeconds?: number;
+  archiveKind?: "active" | "soft" | "permanent" | "unknown";
+  restorable?: boolean;
+  restoreBlockers?: string[];
+  /** Lifecycle candidates, never caller permissions. */
+  allowedActions?: ("archive" | "restore" | "permanentRetire" | "start" | "send")[];
+
   contractVersion: 2;
   cutexSessionId: string;
   revision: number;
@@ -100,6 +175,11 @@ export interface SessionResource {
   displayNameOverride?: string | null;
   note?: string | null;
   avatar?: SessionAvatar | null;
+  avatarMode?: AvatarMode;
+  /** cutex capability session-badge. */
+  badge?: SessionBadge | null;
+  /** cutex capability session-created-by; absent on older cutex. */
+  createdBy?: SessionCreatedBy;
   threadName: string | null;
   cwd: string | null;
   profile: string | null;
@@ -111,6 +191,8 @@ export interface SessionResource {
   visible: boolean;
   native: { threadId: string | null; schema: AppServerSchemaInfo | null };
   runtime: SessionRuntime;
+  /** cutex profile-runtime-variants; absent on older cutex / older sessions. */
+  launchBinding?: SessionLaunchBinding | null;
   runtimeDefaults: JsonObject | null;
   activity: JsonObject | null;
   focus: unknown;
@@ -202,6 +284,8 @@ export interface QueueListResult {
  * start one turn together. `revision` is the CAS token of `cutex/userInput/queue/move`.
  */
 export interface QueueAdmission {
+  /** model-overload-retry-visible: explains an actual retry admission hold. */
+  autoRetry?: AutoRetryWait | null;
   /** Changes on any snapshot change (ride-alongs, timing, current turn). */
   revision: number;
   /** Changes only when the numbered owner / ask order or membership changes: a move's CAS value.
@@ -262,6 +346,8 @@ export interface AdmissionNote {
  * start one turn together.
  */
 export interface AdmissionNextStep {
+  /** agent-bus-message-settlement-v1: server evidence, independent of transport receipts. */
+  settlement?: MessageSettlement;
   id: string;
   deliveryKind: AdmissionDeliveryKind | (string & {});
   /** A short label without the body. */
@@ -270,6 +356,8 @@ export interface AdmissionNextStep {
   timing?: "afterTurn" | "nextStep";
   /** ISO time a waiting wake switches to `nextStep`; null / absent = only at the turn end. */
   nextStepAt?: string | null;
+  /** admission-wait-reasons: actual idle batching deadline, or native receipt still pending. */
+  waitReason?: "resultCoalescing" | "nativeReceipt" | (string & {});
   /** stop-holds-ridealongs: held until released (absent = not held / older cutex). */
   held?: AdmissionHeld;
   /** The delegation an answer / question / delegation-status ride-along belongs to (absent = another
@@ -281,6 +369,10 @@ export interface AdmissionNextStep {
   from?: string | null;
   /** admission-ridealong-detail: the sending host's label of a cross-host tell (`from` = `name@host`). */
   fromHost?: string | null;
+  /** The sending agent's cutexSessionId on this host (a tell's sender, a local delegate), for its avatar; absent =
+   *  not an agent of this host (alarm, system service, cross-host tell) or a cutex that does not send it yet — the
+   *  row then shows the name only. Proposed for cutex (admission-ridealong-detail); desktop reads it when present. */
+  fromCutexSessionId?: string | null;
   /** admission-ridealong-detail: the first non-empty line of the message (≤ 80 chars, never more). */
   preview?: string | null;
 }
@@ -402,6 +494,8 @@ export interface SessionBootstrap {
   management: unknown;
   /** `{method: "thread/read", result}` when the runtime is connected. */
   native: { method: "thread/read"; result: unknown } | null;
+  /** history-media-refs: media payloads replaced by references in this page; absent on older cutex. */
+  mediaRefs?: number;
   /**
    * history-pages (`?turnLimit=`): `native` holds only the newest turns; older ones via
    * `GET /v2/sessions/{id}/history?cursor=<nextCursor>`. Null while offline; absent when not
@@ -703,6 +797,15 @@ export interface InputOrigin {
 
 export type SubmitStrategy = "auto" | "queue" | "interrupt";
 
+/** owner-join-delegation: one-shot consent bound to the exact running attempt. */
+export interface OwnerJoinDelegation {
+  askId: string;
+  attempt: number;
+  expectedTurnId: string;
+  runtimeGeneration: number;
+}
+export type OwnerJoinRefusal = "joinChanged" | "agentPaused" | "runtimeNoSteer" | "runtimeRefused" | "sessionOffline" | "turnConflict";
+
 export interface UserInputSubmitParams {
   clientUserMessageId: string;
   origin: InputOrigin;
@@ -710,6 +813,7 @@ export interface UserInputSubmitParams {
   /** cute-codex v2 UserInput[] */
   input: unknown[];
   expectedTurnId?: string;
+  joinDelegation?: OwnerJoinDelegation;
   /** offline-submit: when the runtime is offline, queue the input and start it. */
   startIfOffline?: boolean;
 }
@@ -730,11 +834,15 @@ export interface SessionHistory {
   source: "live" | "offline";
   native: { method: "thread/read"; result: unknown };
   page: HistoryPage;
+  /** history-media-refs: media payloads replaced by references in this page; absent on older cutex. */
+  mediaRefs?: number;
   /** As in the bootstrap (session-latest-plan); absent on older cutex. */
   cutexState?: { latestPlan?: LatestPlan | null; latestTokenUsage?: LatestTokenUsage | null };
 }
 
 export interface UserInputSubmitResult {
+  /** The explicit join was refused; the input is retained as ordinary queued input. */
+  joinRefusal?: OwnerJoinRefusal;
   disposition: "started" | "steered" | "queued" | "deduplicated";
   turnId?: string | null;
   queue?: unknown;
@@ -788,7 +896,44 @@ export interface ProjectsResponse {
 
 export type DeliveryMode = "after_turn" | "soon" | "passive" | "interrupt";
 
+/** Owner follow-up disposition. Closing never asserts successful delivery or processing. */
+export interface MessageSettlement {
+  state: "outcome_unknown" | "closed";
+  canClose: boolean;
+  evidenceToken: string;
+  evidence: {
+    runtime: string;
+    runtimeGeneration: number;
+    threadId: string;
+    actualTurnId: string;
+    terminalStatus: string;
+    observedAt: string;
+  };
+  closure: null | { actor: string; closedAt: string; reason: string; requestId: string };
+}
+
+export interface MessageSettlementCloseRequest {
+  messageId: string;
+  expectedEvidenceToken: string;
+  requestId: string;
+  reason: string;
+}
+
+export interface MessageSettlementCloseResponse {
+  messageId: string;
+  changed: boolean;
+  settlement: MessageSettlement;
+}
+
+export interface MessageSettlementUpdatedEvent {
+  messageId: string;
+  requestId: string;
+  /** null explicitly clears an unclosed observation; known owner closure remains durable. */
+  settlement: MessageSettlement | null;
+}
+
 export interface AgentBusMessageEvent {
+  settlement?: MessageSettlement;
   messageId: string;
   fromCutexSessionId: string | null;
   toCutexSessionId: string;

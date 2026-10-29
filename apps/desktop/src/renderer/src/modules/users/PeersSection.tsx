@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { Network } from "lucide-react";
 import type { UsersList } from "../../../../shared/users";
-import { EmptyState, ErrorNote, ListRow, Section, Select, TextLink } from "../../components/settings/Form";
+import { EmptyState, ErrorNote, ListRow, Section, Select, SettingsGroup, TextLink } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { useTargetApi } from "../../lib/targetHost";
@@ -37,7 +37,7 @@ export function PeersSection({ list, write, userId, onAll }: { list: UsersList; 
     >
       {error && <ErrorNote>{error}</ErrorNote>}
       {peers.length === 0 && <EmptyState>{t("users.noPeers")}</EmptyState>}
-      {peers.map((peer) => (
+      {peers.length > 0 && <SettingsGroup agents="access" source="host">{peers.map((peer) => (
         <ListRow
           key={peer.peerId}
           leading={<Network size={15} className="shrink-0 text-subtle" />}
@@ -45,7 +45,7 @@ export function PeersSection({ list, write, userId, onAll }: { list: UsersList; 
           detail={`${peer.hostId} · ${PEER_STATES.has(peer.status) ? t(`peers.state.${peer.status}` as MessageKey) : peer.status}`}
           actions={<Select<string> value={peer.userId} options={users} label={t("users.rebind")} width="w-36" onChange={(to) => void write(() => api.bindUserPeer(peer.peerId, to), setError)} />}
         />
-      ))}
+      ))}</SettingsGroup>}
     </Section>
   );
 }

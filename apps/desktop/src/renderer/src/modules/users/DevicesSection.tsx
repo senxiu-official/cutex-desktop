@@ -6,12 +6,13 @@
 // address, the user it belongs to (a select; 待分配 sends it back), 移除. A device that now uses another
 // person's identity says so (知道了 with `person-identity-ack`). A user filter (also set from a user's
 // counts), 配对设备 (Settings → 接入), and the 新设备先待分配 switch at the bottom.
+import { isImeComposing } from "../../lib/ime";
 import { useState } from "react";
 import { Fingerprint } from "lucide-react";
 import { accessRefusalOf, DEVICE_SCOPE_FEATURE, PERSON_IDENTITY_ACK_FEATURE, shownUserName, type DeviceScope, type UsersList, type UsersResult, type UserTokenRecord } from "../../../../shared/users";
 import { groupFingerprint } from "../../../../shared/personIdentity";
 import { MaskedText } from "../../components/MaskedText";
-import { ArmedRemove, Button, Checkbox, EmptyState, ErrorNote, ListRow, Section, Select, SettingRow, TextInput, TextLink, Toggle } from "../../components/settings/Form";
+import { ArmedRemove, Button, Checkbox, EmptyState, ErrorNote, ListRow, Section, Select, SettingRow, SettingsGroup, TextInput, TextLink, Toggle } from "../../components/settings/Form";
 import { accessRefusalText, DeviceScopeRow, scopeLabel, useOwnerLocalLock } from "../../components/settings/OwnerDevices";
 import { useOwnerNewDevices } from "../../lib/ownerDevices";
 import { useHostScope } from "../../lib/useHostScope";
@@ -24,6 +25,8 @@ import { createUserAndAssign, deviceRows, grantSummary, isUnassigned, newUserDef
 import { DEVICES_ANCHOR, nameIn, openPairing, PENDING, useOwnTokenId, useRename, useRevoke, userOptions, useT, type Write } from "./shared";
 import { changePersonKeys } from "./personKeyWrites";
 import { UserDot } from "./UserDot";
+import { Tag } from "../../components/Tag";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 /** A key's fingerprint (the host's, else computed here): masked by default (eye reveals, grouped by 4). */
 export function KeyPrint({ publicKey, known }: { publicKey: string; known?: string | null }) {
@@ -93,14 +96,15 @@ export function DevicesSection({ list, write, filter, onFilter }: { list: UsersL
       hint={t("users.devices.hint")}
       actions={
         <>
-          <Select<string> width="w-36" label={t("users.devices.filter")} value={filterValue} options={filterOptions} onChange={(v) => onFilter(v === "" ? { kind: "all" } : v === PENDING ? { kind: "pending" } : { kind: "user", userId: v })} />
+          {/* A view filter of the list, not a setting. */}
+          <div role="search" className="contents"><Select<string> width="w-36" label={t("users.devices.filter")} value={filterValue} options={filterOptions} onChange={(v) => onFilter(v === "" ? { kind: "all" } : v === PENDING ? { kind: "pending" } : { kind: "user", userId: v })} /></div>
           <Button onClick={openPairing}>{t("users.devices.pair")}</Button>
         </>
       }
     >
       {error && <ErrorNote>{error}</ErrorNote>}
       {rows.length === 0 && <EmptyState action={filter.kind === "all" ? <Button onClick={openPairing}>{t("users.devices.pair")}</Button> : undefined}>{t(filter.kind === "all" ? "users.noDevices" : "users.devices.noneFiltered")}</EmptyState>}
-      {rows.map((token) => {
+      {rows.length > 0 && <SettingsGroup agents="access" source="host">{rows.map((token) => {
         const unassigned = isUnassigned(token);
         const mine = token.tokenId === own;
         const removeTitle = mine ? t("remote.token.revokeOwn") : t("users.revokeHint");
@@ -117,10 +121,10 @@ export function DevicesSection({ list, write, filter, onFilter }: { list: UsersL
                 onCancel={() => rename.setEditing(null)}
                 extra={
                   <>
-                    {unassigned && <span className="shrink-0 rounded bg-warn/15 px-1.5 text-[11px] text-warn">{t("users.devices.pendingChip")}</span>}
+                    {unassigned && <Tag tone="attention">{t("users.devices.pendingChip")}</Tag>}
                     {mine && <ThisComputerBadge />}
-                    {withScope && token.scope && !unassigned && <span className="shrink-0 rounded border border-border px-1.5 text-[11px] text-muted" title={t("ownerDev.scope")}>{scopeLabel(t, token.scope, ownerOf(list, token.userId))}</span>}
-                    {fresh.has(token.tokenId) && <span className="shrink-0 rounded bg-warn/15 px-1.5 text-[11px] text-warn-text">{t("ownerDev.newChip")}</span>}
+                    {withScope && token.scope && !unassigned && <Tag title={t("ownerDev.scope")}>{scopeLabel(t, token.scope, ownerOf(list, token.userId))}</Tag>}
+                    {fresh.has(token.tokenId) && <Tag tone="attention">{t("ownerDev.newChip")}</Tag>}
                   </>
                 }
               />
@@ -132,7 +136,7 @@ export function DevicesSection({ list, write, filter, onFilter }: { list: UsersL
                   <PendingPerson list={list} token={token} remember={!forget.has(token.tokenId)} onRemember={(on) => setForget((f) => { const next = new Set(f); if (on) next.delete(token.tokenId); else next.add(token.tokenId); return next; })} />
                   {creating === token.tokenId && (
                     <div className="mt-2 ml-7 flex flex-wrap items-center gap-2" data-testid="pending-new-user">
-                      <TextInput value={newName} onChange={setNewName} label={t("users.pending.newUserName")} placeholder={t("users.addNamePlaceholder")} maxLength={USER_NAME_MAX} autoFocus onKeyDown={(e) => { if (e.key === "Enter") void createAndAssign(token); else if (e.key === "Escape") setCreating(null); }} />
+                      <TextInput value={newName} onChange={setNewName} label={t("users.pending.newUserName")} placeholder={t("users.addNamePlaceholder")} maxLength={USER_NAME_MAX} autoFocus onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === "Enter") void createAndAssign(token); else if (e.key === "Escape") setCreating(null); }} />
                       <Button primary disabled={busy || !newName.trim()} onClick={() => void createAndAssign(token)}>{t("users.pending.newUserSubmit")}</Button>
                       <Button onClick={() => setCreating(null)}>{t("users.pending.newUserCancel")}</Button>
                       <span className="basis-full text-xs text-subtle">{t("users.pending.newUserHint")}</span>
@@ -163,7 +167,7 @@ export function DevicesSection({ list, write, filter, onFilter }: { list: UsersL
             }
           />
         );
-      })}
+      })}</SettingsGroup>}
       <ApprovalSetting list={list} write={write} />
     </Section>
   );
@@ -176,6 +180,7 @@ function ownerOf(list: UsersList, userId: string | null): boolean {
 
 /** A device's detail: its projects follow its user's grant (read-only here), its scope narrows that. */
 function DeviceDetail({ list, token, own, onScope }: { list: UsersList; token: UserTokenRecord; own: boolean; onScope(scope: DeviceScope): void }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const tt = useT();
   const user = list.users.find((u) => u.id === token.userId);
@@ -183,10 +188,10 @@ function DeviceDetail({ list, token, own, onScope }: { list: UsersList; token: U
   const owner = !!user.isOwner;
   return (
     <div className="mt-2 ml-7 rounded-lg border border-border/70 px-3" data-testid="device-detail">
-      <SettingRow label={t("ownerDev.projects")} hint={t("ownerDev.projectsHint", { name: shownUserName(user) })}>
+      <SettingRow agents="access" source="host" label={t("ownerDev.projects")} info={t("ownerDev.projectsHint", { name: shownUserName(user) })}>
         <span className="flex items-center gap-2 text-xs text-muted">
           {owner ? t("users.ownerBadge") : grantSummary(user.grant, tt)}
-          <TextLink onClick={() => document.getElementById(settingsAnchorId("users-list"))?.scrollIntoView({ block: "start", behavior: "smooth" })}>{t("ownerDev.openUser", { name: shownUserName(user) })}</TextLink>
+          <TextLink onClick={() => win.document.getElementById(settingsAnchorId("users-list"))?.scrollIntoView({ block: "start", behavior: "smooth" })}>{t("ownerDev.openUser", { name: shownUserName(user) })}</TextLink>
         </span>
       </SettingRow>
       <DeviceScopeRow scope={token.scope} ownerDevice={owner} canSend={owner || !!user.grant?.send} own={own} onChange={onScope} />
@@ -206,7 +211,7 @@ function ApprovalSetting({ list, write }: { list: UsersList; write: Write }) {
   return (
     <div className="-mx-4 border-t border-border px-4">
       {error && <ErrorNote>{error}</ErrorNote>}
-      <SettingRow label={t("users.ownerRequiresApproval")} hint={locked ? lock.hint! : t("users.ownerRequiresApprovalHint")}>
+      <SettingRow agents="access" source="host" label={t("users.ownerRequiresApproval")} hint={locked ? lock.hint! : t("users.ownerRequiresApprovalHint")}>
         <Toggle
           checked={list.settings.ownerRequiresApproval}
           disabled={busy || locked}

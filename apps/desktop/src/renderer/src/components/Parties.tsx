@@ -14,7 +14,7 @@ import { isShortId, resolveId } from "../lib/shortIds";
 export function TaskTag({ taskId, assignmentId, title }: { taskId: string; assignmentId?: string; title?: string }) {
   const tag = taskTag(taskId);
   return (
-    <span className="shrink-0 rounded px-1 font-mono text-[11px] font-semibold" style={{ color: tag.color, background: `${tag.color}1f` }} title={title ?? `task ${taskId}${assignmentId ? `\nassignment ${assignmentId}` : ""}`}>
+    <span className="shrink-0 rounded px-1 text-caption/[inherit] font-semibold" style={{ color: tag.color, background: `${tag.color}1f` }} title={title ?? `task ${taskId}${assignmentId ? `\nassignment ${assignmentId}` : ""}`}>
       {tag.label}
     </span>
   );
@@ -24,8 +24,9 @@ export function TaskTag({ taskId, assignmentId, title }: { taskId: string; assig
  * An agent as [avatar] name; click / Enter opens it. A span with role=link, not a button: it often
  * sits inside a row's toggle button. `name` is the fallback when the agent is not in the sidebar.
  * A cutex service id (lib/systemSenders) shows as 委托系统 / Cutex 系统 with the logo, not a link.
+ * `realAvatar`: always the real avatar (a minor agent is otherwise a small dot, Avatar `minor`), e.g. 「已回复 [avatar] Lead」.
  */
-export function Who({ id: ref, name, size = 14, quiet = false }: { id: string | null; name: string | null; size?: number; quiet?: boolean }) {
+export function Who({ id: ref, name, size = 16, quiet = false, realAvatar = false }: { id: string | null; name: string | null; size?: number; quiet?: boolean; realAvatar?: boolean }) {
   // `ref` may be a short session id from agent-facing tool text (`cutex.…3f9a1c`): resolved
   // against the sidebar; unknown or ambiguous = shown as text, not a link (lib/shortIds).
   const conv = useConvScope();
@@ -45,7 +46,7 @@ export function Who({ id: ref, name, size = 14, quiet = false }: { id: string | 
   const system = session ? null : systemSender(id);
   if (system) {
     return (
-      <span className={`inline-flex min-w-0 shrink-0 items-center gap-1 ${quiet ? "" : "text-foreground"}`}>
+      <span className={`inline-flex min-w-0 max-w-full items-center gap-1 ${quiet ? "" : "text-foreground"}`}>
         <SystemAvatar kind={system} size={size} />
         <span className="truncate">{t(SYSTEM_SENDER_NAME[system])}</span>
       </span>
@@ -55,20 +56,21 @@ export function Who({ id: ref, name, size = 14, quiet = false }: { id: string | 
   if (!label) return null;
   if (!id)
     return (
-      <span className={`inline-flex min-w-0 shrink-0 items-center gap-1 ${quiet ? "" : "text-foreground"}`} title={ref ?? undefined}>
+      <span className={`inline-flex min-w-0 max-w-full items-center gap-1 ${quiet ? "" : "text-foreground"}`} title={[label, ref].filter(Boolean).join("\n")}>
         <Avatar name={label} size={size} />
         <span className="truncate">{label}</span>
       </span>
     );
   return (
     <span
+      title={[label, ref].filter(Boolean).join("\n")}
       role="link"
       tabIndex={0}
       onClick={(e) => (e.stopPropagation(), id && void select(id, host))}
       onKeyDown={(e) => e.key === "Enter" && (e.stopPropagation(), id && void select(id, host))}
-      className={`inline-flex min-w-0 shrink-0 cursor-pointer items-center gap-1 hover:underline ${quiet ? "" : "text-foreground"}`}
+      className={`inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 hover:underline ${quiet ? "" : "text-foreground"}`}
     >
-      <Avatar name={label} avatar={session?.avatar} seed={id} size={size} minor />
+      <Avatar name={label} avatar={session?.avatar} seed={id} size={size} minor={!realAvatar} />
       <span className="truncate">{label}</span>
     </span>
   );

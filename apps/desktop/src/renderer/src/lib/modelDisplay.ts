@@ -93,7 +93,10 @@ export function entryName(profile: string | null | undefined, id: string | null 
 /** The name to show: the entry name, else the catalog display name, else the id ("" when none). */
 export function modelLabel(id: string | null | undefined, displayName: string | null | undefined, entry?: string | null): string {
   const catalog = displayName?.trim();
-  if (id && catalog) noteCatalogNames([{ id, displayName: catalog }]);
+  // Only fill a gap while rendering: two lists naming one id differently (another profile's catalog
+  // beside a session's model list) would otherwise overwrite each other on every render and
+  // re-render each other forever (host02 2026-10-23: new-agent page froze on profile Ceobe).
+  if (id && catalog && !catalogNames.has(id.trim())) noteCatalogNames([{ id, displayName: catalog }]);
   return entry?.trim() || catalog || (id ? catalogNames.get(id) : undefined) || id || "";
 }
 
@@ -108,6 +111,11 @@ function snapshot(): ModelNameFn {
   // A new function identity per change, so memo deps of callers notice renames.
   if (labelFn.version !== version) labelFn = { version, fn: (id, displayName, profile) => modelName(id, displayName, profile) };
   return labelFn.fn;
+}
+
+/** Exported for tests: `useModelName` subscribes the same way. */
+export function subscribeModelNames(l: () => void): () => void {
+  return subscribe(l);
 }
 
 function subscribe(l: () => void): () => void {

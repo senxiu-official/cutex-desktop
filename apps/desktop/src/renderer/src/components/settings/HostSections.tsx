@@ -20,7 +20,8 @@ import { settingsAnchorId } from "../../lib/settingsNav";
 import { useHostScope } from "../../lib/useHostScope";
 import { useApp } from "../../store";
 import { connectResultText, ownerName, ProblemText, roleKey } from "./ConnectionSettings";
-import { Button, SettingRow, Section } from "./Form";
+import { Button, SettingRow, Section, SettingsGroup } from "./Form";
+import { Tag } from "../../components/Tag";
 
 const PLATFORM: Record<string, string> = { win32: "Windows", windows: "Windows", darwin: "macOS", macos: "macOS", linux: "Linux" };
 
@@ -48,36 +49,36 @@ export function HostInfoSection({ hostId }: { hostId: string }) {
   if (o.capability === false) action = <span className="text-xs text-subtle">{t("host.info.ownerOlder")}</span>;
   else if (o.canConfirmHere || (o.canSetHere && o.mine !== true))
     action = (
-      <Button disabled={busy} onClick={() => void confirm()}>
+      <SettingsGroup agents="access" source="host"><Button disabled={busy} onClick={() => void confirm()}>
         {busy ? t("host.own.confirming") : o.canConfirmHere ? t("host.own.confirm") : t("host.info.setMe")}
-      </Button>
+      </Button></SettingsGroup>
     );
   else if (o.mine !== true && o.capability === true) action = <span className="text-xs text-subtle">{t("host.info.changeWhere")}</span>;
   return (
-    <Section id={settingsAnchorId("hostInfo")} title={t("host.info.title")} hint={t("host.info.hint")} source="host">
-      <SettingRow
+    <Section id={settingsAnchorId("hostInfo")} title={t("host.info.title")} hint={t("host.info.hint")} >
+      <SettingRow readOnly agents="none" source="host"
         label={
           <span className="flex flex-wrap items-center gap-1.5">
             {t("host.info.owner")}
             <span className="text-muted">{owner ? ownerName(owner, t("host.own.someone")) : o.capability === false ? t("host.info.ownerUnknown") : t("host.info.ownerNone")}</span>
-            {o.mine === true && <span className="rounded bg-accent/15 px-1.5 text-[10px] text-accent">{t("host.info.you")}</span>}
+            {o.mine === true && <Tag tone="accent">{t("host.info.you")}</Tag>}
             {owner?.confirmed && (
-              <span className="inline-flex items-center gap-0.5 text-[11px] text-ok-text">
+              <span className="inline-flex items-center gap-0.5 text-caption/[inherit] text-ok-text">
                 <ShieldCheck size={11} />
                 {t("host.info.confirmed")}
               </span>
             )}
-            {owner && !owner.confirmed && <span className="text-[11px] text-warn-text">{t("host.info.unconfirmed")}</span>}
+            {owner && !owner.confirmed && <span className="text-caption/[inherit] text-warn-text">{t("host.info.unconfirmed")}</span>}
           </span>
         }
         hint={owner?.fingerprint ? <span className="font-mono">{owner.fingerprint.match(/.{1,4}/g)!.join(" ")}</span> : undefined}
       >
         {action}
       </SettingRow>
-      <SettingRow label={t("host.info.version")}>
+      <SettingRow readOnly agents="none" source="host" label={t("host.info.version")}>
         <span className="font-mono text-xs text-muted">{version ?? "—"}</span>
       </SettingRow>
-      <SettingRow label={t("host.info.system")}>
+      <SettingRow readOnly agents="none" source="host" label={t("host.info.system")}>
         <span className="text-xs text-muted">{system ?? "—"}</span>
       </SettingRow>
     </Section>
@@ -123,8 +124,8 @@ export function HostRightsSection({ hostId }: { hostId: string }) {
       ? pairedOwner ? t("host.rights.fullToken") : o.connection === "local" ? t("host.rights.fullLocal") : t("host.rights.full", { via })
       : t("host.rights.other", { via });
   return (
-    <Section id={settingsAnchorId("hostRights")} title={t("host.rights.title")} hint={t("host.rights.hint")} source="host">
-      <SettingRow label={narrowed ? scopeLabel(t, scope!, full) : role ? t(role as MessageKey) : t("host.rights.unknown")} hint={hint}>
+    <Section id={settingsAnchorId("hostRights")} title={t("host.rights.title")} hint={t("host.rights.hint")} >
+      <SettingRow readOnly={!(o.connection === "ssh" && paired)} agents="access" source="local" label={narrowed ? scopeLabel(t, scope!, full) : role ? t(role as MessageKey) : t("host.rights.unknown")} hint={hint}>
         <span className="flex flex-wrap justify-end gap-1.5">
           {o.connection === "ssh" && paired && (
             <Button disabled={busy} onClick={() => void switchTo()}>

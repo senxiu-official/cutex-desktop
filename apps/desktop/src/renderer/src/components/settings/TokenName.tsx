@@ -1,3 +1,4 @@
+import { isImeComposing } from "../../lib/ime";
 // A client / device token in a settings row (Settings → 用户 → 设备 / 你的设备, 接入 on older hosts): its icon,
 // detail line (platform · last used · masked address) and 这台电脑 badge, and its name:
 // the shown name (lib/deviceNames) with the raw label as its tooltip, and — on the owner's connection to
@@ -11,6 +12,7 @@ import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
 import { MaskedAddress } from "../MaskedAddress";
 import { CLIENT_TOKEN_NAME_MAX, clientTokenName, type NamedToken } from "../../lib/deviceNames";
 import { IconButton, TextInput } from "./Form";
+import { Tag } from "../../components/Tag";
 
 /** The row title: the name (tooltip: the label) and `extra` badges, or the rename field while editing. */
 export function TokenTitle({ token, editing, onSave, onCancel, extra }: { token: NamedToken; editing: boolean; onSave(name: string | null): Promise<boolean>; onCancel(): void; extra?: ReactNode }) {
@@ -51,6 +53,7 @@ function TokenNameField({ token, onSave, onCancel }: { token: NamedToken; onSave
         disabled={busy}
         autoFocus
         onKeyDown={(e) => {
+          if (isImeComposing(e)) return;
           if (e.key === "Enter") void save();
           else if (e.key === "Escape") {
             e.stopPropagation();
@@ -110,5 +113,5 @@ export function TokenIcon({ token }: { token: Pick<UserTokenRecord, "kind"> }) {
 /** The 这台电脑 badge. */
 export function ThisComputerBadge() {
   const { t } = useI18n();
-  return <span className="shrink-0 rounded bg-accent/15 px-1.5 text-[11px] text-accent">{t("users.person.thisDesktop")}</span>;
+  return <Tag tone="accent">{t("users.person.thisDesktop")}</Tag>;
 }

@@ -22,6 +22,14 @@ export const SIDE_CHAT_COMPONENT: ItemId = "side-chat.chat";
 export const SIDE_AGENT_COMPONENT: ItemId = "conversation.agent";
 export type SideAgentParams = { sessionId: string };
 
+/**
+ * Core (module `conversation`, ungated; §24.13 workspaces, owner 2026-10-21): a projection — another agent's
+ * live conversation as a pane in the focused conversation's Shelf (its timeline and composer; sends go to it).
+ * Params: that agent's host and session id. Its header's 「投影 · 在旁边打开」 makes it a workspace beside.
+ */
+export const PROJECTION_COMPONENT: ItemId = "conversation.projection";
+export type ProjectionParams = { hostId: string; sessionId: string };
+
 /** The title-bar toggle on an empty right side opens these (D28: one 工作区 page, 文件 / 改动). */
 export const DEFAULT_SIDE_COMPONENTS: readonly ItemId[] = [FILES_COMPONENT, CHANGES_COMPONENT];
 

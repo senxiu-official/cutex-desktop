@@ -11,6 +11,7 @@
 // letters, centred on the line box, so glyph and letter icons line up and the text column after the
 // icon never moves.
 import type { CSSProperties } from "react";
+import { clipToWidth, displayWidth } from "../lib/badgeWidth";
 import { useUiPrefs, type ProjectIconStyle } from "../lib/prefs";
 import { projectColor } from "../lib/sidebar";
 import { projectLucideIcon, type ProjectIconChoice } from "../lib/projectIcons";
@@ -41,14 +42,15 @@ export function ProjectBadge({ icon, badge, color, size = "md", className = "", 
   const tone = hex.toLowerCase() === "#ffffff" ? "var(--fg)" : hex;
   const Lucide = icon?.kind === "icon" ? projectLucideIcon(icon.value) : null;
   const emoji = icon?.kind === "emoji" ? icon.value : null;
-  // The tile holds two characters at most (custom text is 1–2; a daemon badge label may have up to 4).
-  const text = [...(icon?.kind === "text" ? icon.value : badge)].slice(0, 2).join("");
+  // Keep four display columns; wide labels grow horizontally without changing row height.
+  const text = clipToWidth(icon?.kind === "text" ? icon.value : badge, 4);
+  const boxWidth = !emoji && !Lucide && displayWidth(text) > 2 ? Math.ceil(displayWidth(text) * s.text * 0.65 + 6) : s.box;
   return (
     <span
       data-project-badge=""
       data-icon-style={line ? "line" : "tint"}
       className={`project-icon ${line ? "project-icon-line " : ""}flex shrink-0 items-center justify-center overflow-hidden ${className}`}
-      style={{ "--project-icon-color": tone, width: s.box, height: s.box, borderRadius: s.radius } as CSSProperties}
+      style={{ "--project-icon-color": tone, width: boxWidth, height: s.box, borderRadius: s.radius } as CSSProperties}
       aria-hidden
     >
       {emoji ? (

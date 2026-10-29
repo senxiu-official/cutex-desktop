@@ -109,8 +109,9 @@ export function useHostKey(): string {
 }
 
 /** The active host's picture for `profileId` (null = none; undefined id = none). */
-export function useProfileAvatar(profileId: string | null | undefined): string | null {
-  const host = useHostKey();
+export function useProfileAvatar(profileId: string | null | undefined, hostId?: string): string | null {
+  const active = useHostKey();
+  const host = hostId ?? active;
   useProfileLooksVersion();
   const synced = profileId ? syncingHostOf(host, profileId) : null;
   const remote = useProfileImage(synced, profileId, "avatar");

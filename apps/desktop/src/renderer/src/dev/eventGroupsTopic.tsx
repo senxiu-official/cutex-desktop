@@ -104,7 +104,7 @@ function Dropdowns({ rows, set }: { rows: Ev[]; set(id: string, lv: Lv): void })
   return (
     <>
       {rows.map((e) => (
-        <SettingRow key={e.id} label={<span className="relative">{e.changed && <Mark />}{NAME[e.id] ?? e.name}</span>}>
+        <SettingRow agents="none" source="local" key={e.id} label={<span className="relative">{e.changed && <Mark />}{NAME[e.id] ?? e.name}</span>}>
           <Select value={e.lv as string} onChange={(v) => set(e.id, v as Lv)} options={LV.map((x) => ({ value: x, label: x }))} />
         </SettingRow>
       ))}
@@ -116,17 +116,17 @@ function RadioTable({ groups, events, set }: { groups: { id: string; name: strin
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_repeat(4,4.25rem)] items-center py-2 text-sm">
       <span />
-      {LV.map((l) => <span key={l} className="pb-1 text-center text-[11px] text-subtle">{l}</span>)}
+      {LV.map((l) => <span key={l} className="pb-1 text-center text-caption/[inherit] text-subtle">{l}</span>)}
       {groups.map((g) => [
         <div key={g.id} className="col-span-5 mt-3 border-b border-border/60 pb-1">
-          <span className="text-[12px] font-medium text-foreground">{g.name}</span>
-          <span className="ml-2 text-[11px] text-subtle">{g.hint}</span>
+          <span className="text-meta/[inherit] font-medium text-foreground">{g.name}</span>
+          <span className="ml-2 text-caption/[inherit] text-subtle">{g.hint}</span>
         </div>,
         ...events.filter((e) => e.group === g.id).flatMap((e) => [
           <span key={e.id} className="relative py-1.5 pl-1">
             {e.changed && <Mark />}
             {NAME[e.id] ?? e.name}
-            {DESC[e.id] && <span className="block text-[11px] text-subtle">{DESC[e.id]}</span>}
+            {DESC[e.id] && <span className="block text-caption/[inherit] text-subtle">{DESC[e.id]}</span>}
           </span>,
           ...LV.map((l) => (
             <span key={e.id + l} className="flex justify-center py-1.5">
@@ -160,9 +160,9 @@ function BandTable({ events, set }: { events: Ev[]; set(id: string, lv: Lv): voi
       {GROUPS.map((g, i) => (
         <div key={g.id}>
           <div className={`-mx-4 flex min-h-8 items-center gap-2 border-y border-border/70 bg-win px-4 py-1.5 ${i === 0 ? "-mt-px rounded-t-xl border-t-0" : ""}`} style={DOTS}>
-            <span className="text-[12px] font-medium text-muted">{g.name}</span>
-            <span className="text-[11px] text-subtle">{g.hint}</span>
-            {g.mcp && <span className="ml-auto inline-flex h-5 items-center gap-1 rounded bg-surface-2 px-1.5 text-[11px] text-muted">MCP工具</span>}
+            <span className="text-meta/[inherit] font-medium text-muted">{g.name}</span>
+            <span className="text-caption/[inherit] text-subtle">{g.hint}</span>
+            {g.mcp && <span className="ml-auto inline-flex h-5 items-center gap-1 rounded bg-surface-2 px-1.5 text-caption/[inherit] text-muted">MCP工具</span>}
           </div>
           {events.filter((e) => e.group === g.id).map((e) => (
             <div key={e.id} className="relative flex items-center gap-3 border-b border-border/60 py-2.5 last:border-b-0">
@@ -187,12 +187,12 @@ function GroupCards({ events, set }: { events: Ev[]; set(id: string, lv: Lv): vo
         <Section key={g.id} title={g.name} hint={g.hint} sub tools={g.mcp ? [{ name: "owner_notify", desc: "智能体用它主动给你发消息，并为消息定一个通知等级。" }] : undefined}>
           <div className="grid grid-cols-[minmax(0,1fr)_repeat(4,4.25rem)] items-center py-2 text-sm">
             <span />
-            {LV.map((l) => <span key={l} className="pb-1 text-center text-[11px] text-subtle">{l}</span>)}
+            {LV.map((l) => <span key={l} className="pb-1 text-center text-caption/[inherit] text-subtle">{l}</span>)}
             {events.filter((e) => e.group === g.id).flatMap((e) => [
               <span key={e.id} className="relative border-t border-border/60 py-2 pl-1">
                 {e.changed && <Mark />}
                 {NAME[e.id] ?? e.name}
-                {DESC[e.id] && <span className="block text-[11px] text-subtle">{DESC[e.id]}</span>}
+                {DESC[e.id] && <span className="block text-caption/[inherit] text-subtle">{DESC[e.id]}</span>}
               </span>,
               ...LV.map((l) => (
                 <span key={e.id + l} className="flex justify-center self-stretch border-t border-border/60 py-2">
@@ -225,7 +225,7 @@ export function EventGroupsTopic() {
             <>
               <div className="mb-4 flex items-start gap-3 border-b border-border/60 pb-2">
                 <div className="min-w-0">
-                  <h2 className="text-[15px] font-semibold">事件分级</h2>
+                  <h2 className="text-title/[inherit] font-semibold">事件分级</h2>
                   <p className="text-xs text-subtle">调整不同事件的通知等级；一件事同时属于几类时，按最高的算。</p>
                 </div>
                 <span className="ml-auto inline-flex shrink-0 rounded-md border border-border p-0.5 text-xs"><span className="rounded px-2 py-0.5 text-muted">推荐</span><span className="rounded bg-surface-2 px-2 py-0.5">自定义</span></span>
@@ -239,7 +239,7 @@ export function EventGroupsTopic() {
             {view === "G0" &&
               MODULES.map((m) => (
                 <div key={m}>
-                  <div className="pt-3 pb-1 text-[11px] font-medium text-subtle">{m}</div>
+                  <div className="pt-3 pb-1 text-caption/[inherit] font-medium text-subtle">{m}</div>
                   <Dropdowns rows={events.filter((e) => e.module === m)} set={set} />
                 </div>
               ))}
@@ -247,8 +247,8 @@ export function EventGroupsTopic() {
               GROUPS.map((g) => (
                 <div key={g.id}>
                   <div className="pt-4 pb-1">
-                    <span className="text-[12px] font-medium text-foreground">{g.name}</span>
-                    <span className="ml-2 text-[11px] text-subtle">{g.hint}</span>
+                    <span className="text-meta/[inherit] font-medium text-foreground">{g.name}</span>
+                    <span className="ml-2 text-caption/[inherit] text-subtle">{g.hint}</span>
                   </div>
                   <Dropdowns rows={events.filter((e) => e.group === g.id)} set={set} />
                 </div>

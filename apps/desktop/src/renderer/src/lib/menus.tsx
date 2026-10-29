@@ -1,8 +1,14 @@
+import { requestFork } from "./requestFork";
+import { mentionPlainText } from "./mentionWire";
+import { agentPauseNow, agentPauseSupported, pauseAgent, resumeAgent } from "./agentPause";
+import { canRevealLocal, downloadFileAction, fileActions, performFilePathAction, revealFileLabel } from "./fileActions";
 // Menu item builders (DESIGN §4.12). Each surface — sidebar row, project header, message, tool
 // row, file link / tree / changes entry, side-pane tab — gets one builder shared by its
 // right-click menu and its hover "⋯" button.
 import {
   Archive,
+  CirclePause,
+  Play,
   ArchiveRestore,
   ArrowRightLeft,
   BatteryWarning,
@@ -14,6 +20,7 @@ import {
   FileText,
   FolderKanban,
   FolderOpen,
+  LocateFixed,
   GitFork,
   Hash,
   History,
@@ -36,8 +43,12 @@ import {
   CircleArrowUp,
   CircleDot,
   Smile,
+  AppWindow,
 } from "lucide-react";
-import type { SessionAvatar, SessionResource } from "@cutex-desktop/protocol";
+import { desksEnabled } from "./deskWindows";
+import { openInNewDesk, openInWindow, windowChoices } from "./deskActions";
+import { MAIN_WINDOW } from "./windowScope";
+import type { SessionBadge, SessionAvatar, SessionResource } from "@cutex-desktop/protocol";
 import { translate, type MessageKey } from "../i18n";
 import { agentHost, featuresOf, hostApi, pinnedOn, sidebarOf, useApp, viewHostOf, viewOf } from "../store";
 import type { FileRef } from "./workspace";
@@ -46,12 +57,14 @@ import { LOCAL_HOST_ID } from "../../../shared/hosts";
 import { agentInfoDialog, confirmDialog, noticeDialog, promptDialog, type MenuAction, type MenuEntry } from "./contextMenu";
 import { refActionEntries } from "./refActions";
 import { agentRef } from "./refs";
-import { AVATAR_COLOR_FEATURE, agentInfoPatch } from "./avatar";
+import { AVATAR_COLOR_FEATURE, agentInfoPatch, isHexColor } from "./avatar";
 import { realAgentName } from "./agentAlias";
-import { fieldsUnchanged, isRevisionConflict } from "./metadataRetry";
+import { writeMetadataRetrying } from "./metadataRetry";
+import { holdMetadata, releaseMetadata, serverView } from "./pendingMetadata";
 import { refusalText } from "./profileCreate";
-import { canRewindFiles, lacks } from "./agentFeatures";
+import { agentFeaturesOf, canRewindFiles, lacks } from "./agentFeatures";
 import { agentFeaturesFor } from "./agentFeaturesView";
+import { revertTexts } from "./runtimeWording";
 import type { StructuralOp } from "./structuralGate";
 import { structuralBlockFor, structuralBlockText, structuralErrorText } from "./structuralGateView";
 import { markSeenOn, turnMarksOn } from "./turnUnread";
@@ -61,7 +74,7 @@ import { captureHostAction } from "./hostSwitch";
 import { archivedProjectOf } from "./archivedAgent";
 // Cycle by design (projectArchive reuses retireAgent / restoreArchived); both only call each other at run time.
 import { restoreWithDirector } from "./projectArchive";
-import { openFile, openGitDiff, openSide } from "./sideOpen";
+import { openGitDiff, openPath, openSide, revealInTree } from "./sideOpen";
 import { FILES_COMPONENT } from "./sideKinds";
 import { OWNER_ROTATION_FEATURE } from "../../../shared/directorRotation";
 import type { MutationResult } from "../../../shared/ipc";
@@ -72,8 +85,9 @@ import { runtimeStartSince } from "./runtimeStart";
 import { repinApplies, repinMenuOffer, runRepinFlow } from "./claudeRepin";
 import { avatarSwitchOf, hiddenAvatar, shownAvatar } from "./avatarDefault";
 import { themedEmoji } from "./avatarThemes";
-import { agentThemesNow } from "./agentLook";
+import { agentIndex, agentThemesNow } from "./agentLook";
 import { getUiPrefs } from "./prefs";
+import { shownStyleAvatar } from "./avatarStyleAssign";
 
 type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
 const ICON = 14;
@@ -135,6 +149,7 @@ export async function deleteAgent(session: SessionResource, t: T, host = hostOfS
 
 /** Permanent delete without asking (the caller confirmed, e.g. a click-twice button). */
 export async function deleteAgentNow(session: SessionResource, t: T, expectedRevision = session.revision, host = hostOfSession(session)): Promise<boolean> {
+  if (lacks(agentFeaturesOf(session), "threadDelete")) return false;
   const result = await deleteAgentResult(session, t, expectedRevision, host);
   if (!result) return false;
   if (!result.ok) {
@@ -199,24 +214,59 @@ export async function renameAgent(session: SessionResource, t: T, name?: string 
   await updateMetadata(session, host, { displayName: next.trim() || null }, { displayNameOverride: session.displayNameOverride ?? null });
 }
 
+/** The session as the host has it now (the sidebar re-read; fields of a write in flight at cutex's values, lib/pendingMetadata). */
+async function rereadSession(id: string, host: string): Promise<SessionResource | null> {
+  await useApp.getState().refreshHostSidebar(host);
+  const sidebar = sidebarOf(useApp.getState(), host);
+  const row = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((r) => r.cutexSessionId === id);
+  return row ? serverView(row) : null;
+}
+
 /**
- * One metadata update fenced by the revision the dialog started from. A revision conflict caused by
- * something else (a turn, a status change) is retried once against the fresh session when the
- * fields being changed (`before`, resource field names) still hold what the dialog showed.
+ * A metadata write the owner sees at once (note, badge: owner 2026-10-27 「设置徽章、备注很慢」): the new values are
+ * drawn before cutex answers and kept over sidebar refreshes until the write settles (lib/pendingMetadata). On a
+ * failure cutex's values come back and the promise rejects (the caller says why). Resolves when cutex has it and the
+ * sidebar was read again (store sessionAction), like updateMetadata.
+ */
+async function updateMetadataNow(session: SessionResource, host: string, fields: Partial<SessionResource>): Promise<void> {
+  const id = session.cutexSessionId;
+  const app = useApp.getState();
+  const current = [...(sidebarOf(app, host)?.active ?? []), ...(sidebarOf(app, host)?.retired ?? [])].find((r) => r.cutexSessionId === id) ?? session;
+  const before = serverView(current) as unknown as Record<string, unknown>;
+  const token = holdMetadata(id, fields, serverView(current));
+  app.patchSessionResource(id, host, fields);
+  try {
+    await updateMetadata(session, host, fields, Object.fromEntries(Object.keys(fields).map((k) => [k, before[k] ?? null])));
+    releaseMetadata(id, token);
+  } catch (error) {
+    useApp.getState().patchSessionResource(id, host, releaseMetadata(id, token) as Partial<SessionResource>);
+    throw error;
+  }
+}
+
+/**
+ * One metadata update fenced by the revision the dialog started from. A conflict caused by something
+ * else (a turn or a status change moving the session revision, another writer winning cutex's store
+ * CAS) is retried against the fresh session while the fields being changed (`before`, resource field
+ * names) still hold what the dialog showed (lib/metadataRetry).
  */
 async function updateMetadata(session: SessionResource, host: string, patch: Record<string, unknown>, before: Record<string, unknown>): Promise<void> {
-  const app = useApp.getState();
   const id = session.cutexSessionId;
-  try {
-    await app.sessionAction(id, "cutex/session/metadata/update", { ...patch, expectedRevision: session.revision }, host);
-  } catch (error) {
-    if (!isRevisionConflict(error)) throw error;
-    await app.refreshHostSidebar(host);
-    const sidebar = sidebarOf(useApp.getState(), host);
-    const fresh = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((r) => r.cutexSessionId === id);
-    if (!fresh || !fieldsUnchanged(before, fresh as unknown as Record<string, unknown>)) throw new Error(translate("menu.metadataConflict"));
-    await app.sessionAction(id, "cutex/session/metadata/update", { ...patch, expectedRevision: fresh.revision }, host);
-  }
+  await writeMetadataRetrying<SessionResource>({
+    write: (fresh) => useApp.getState().sessionAction(id, "cutex/session/metadata/update", { ...patch, expectedRevision: (fresh ?? session).revision }, host),
+    reread: () => rereadSession(id, host),
+    before,
+    fenced: true,
+    changed: () => new Error(translate("menu.metadataConflict")),
+  });
+}
+
+/** Tray's small editor uses exactly the same field-level fence and conflict refresh as 编辑信息. */
+export async function updateAgentBadge(session: SessionResource, host: string, badge: SessionBadge | null): Promise<void> {
+  const features = featuresOf(useApp.getState(), host);
+  if (!features.has("session-badge") || !isOwnerFeatures(features)) throw new Error(translate("menu.metadataConflict"));
+  if (JSON.stringify(badge) === JSON.stringify(session.badge ?? null)) return;
+  await updateMetadataNow(session, host, { badge });
 }
 
 /** 编辑信息: 显示名 + avatar + note in one dialog, one metadata update with only what changed. */
@@ -226,17 +276,22 @@ async function editAgentInfo(session: SessionResource, host: string): Promise<vo
   const features = featuresOf(app, host);
   const style = sidebarOf(app, host)?.hostRows[session.cutexSessionId]?.profileStyle as { color?: unknown } | null | undefined;
   const editName = features.has("session-metadata");
-  const before = { avatar: session.avatar ?? null, note: session.note ?? null, ...(editName ? { displayName: session.displayNameOverride ?? null } : {}) };
-  const options = { realName: realAgentName(session), combineColor: features.has(AVATAR_COLOR_FEATURE), editName };
+  const before = { avatar: session.avatar ?? null, ...(features.has("session-avatar-mode") ? { avatarMode: session.avatarMode ?? null } : {}), note: session.note ?? null, ...(features.has("session-badge") ? { badge: session.badge ?? null } : {}), ...(editName ? { displayName: session.displayNameOverride ?? null } : {}) };
+  const options = { editAvatarMode: features.has("session-avatar-mode"), realName: realAgentName(session), combineColor: features.has(AVATAR_COLOR_FEATURE), editName, editBadge: features.has("session-badge") };
   const after = await agentInfoDialog(session.displayName, typeof style?.color === "string" ? style.color : null, session.cutexSessionId, before, options);
   if (!after || !current()) return;
-  const patch = agentInfoPatch(before, after);
-  if (Object.keys(patch).length) await updateMetadata(session, host, patch, { avatar: before.avatar, note: before.note, displayNameOverride: session.displayNameOverride ?? null });
+  const patch: Record<string, unknown> = agentInfoPatch(before, after);
+  if ("avatar" in patch && !("avatarMode" in patch) && features.has("session-avatar-mode")) patch.avatarMode = "fixed";
+  if (Object.keys(patch).length) {
+    const fields: Record<string, unknown> = {};
+    for (const field of Object.keys(patch)) fields[field === "displayName" ? "displayNameOverride" : field] = field === "displayName" ? session.displayNameOverride ?? null : before[field as keyof typeof before];
+    await updateMetadata(session, host, patch, fields);
+  }
 }
 
 /**
- * 显示头像 / 隐藏头像 (默认头像 = 仅重要智能体): the owner's explicit, synced choice — writes the theme's
- * default emoji as the agent's cutex avatar, or clears it back to the dot. Needs `session-metadata`
+ * 显示头像 / 隐藏头像 (默认头像 = 仅重要智能体): the owner's explicit, synced choice — writes the 拟人头像 of
+ * the enabled themes for its model family (else the theme's default emoji) as the agent's cutex avatar, or clears it back to the dot. Needs `session-metadata`
  * (the avatar field of cutex/session/metadata/update); Directors / pinned agents and pictures get none.
  */
 function avatarSwitchItem(session: SessionResource, t: T, host: string, features: ReadonlySet<string>, pinned: boolean): MenuAction | null {
@@ -246,7 +301,8 @@ function avatarSwitchItem(session: SessionResource, t: T, host: string, features
   const current = session.avatar ?? null;
   const which = avatarSwitchOf(getUiPrefs().agentAvatarDefault, { isDirector, pinned, avatar: current });
   if (!which) return null;
-  const avatar = which === "show" ? shownAvatar(themedEmoji(id, agentThemesNow(id)).glyph, current, features.has(AVATAR_COLOR_FEATURE)) : hiddenAvatar(current);
+  const base = (): SessionAvatar => shownStyleAvatar(id, host) ?? { kind: "emoji", value: themedEmoji(id, agentThemesNow(id)).glyph };
+  const avatar = which === "show" ? shownAvatar(base(), current, features.has(AVATAR_COLOR_FEATURE)) : hiddenAvatar(current);
   return {
     label: t(which === "show" ? "menu.showAvatar" : "menu.hideAvatar"),
     icon: which === "show" ? <Smile size={ICON} /> : <CircleDot size={ICON} />,
@@ -256,7 +312,43 @@ function avatarSwitchItem(session: SessionResource, t: T, host: string, features
 
 /** One avatar write through the same fenced metadata update as 编辑信息. */
 export async function setAgentAvatar(session: SessionResource, host: string, avatar: SessionAvatar | null): Promise<void> {
-  await updateMetadata(session, host, { avatar }, { avatar: session.avatar ?? null });
+  const capable = featuresOf(useApp.getState(), host).has("session-avatar-mode");
+  await updateMetadata(session, host, { avatar, ...(capable ? { avatarMode: "fixed" } : {}) }, { avatar: session.avatar ?? null, avatarMode: session.avatarMode ?? null });
+}
+
+/** Explicit dynamic follow: the backend clears any stored avatar atomically. */
+export async function followAgentProfile(session: SessionResource, host: string): Promise<void> {
+  const features = featuresOf(useApp.getState(), host);
+  if (!features.has("session-avatar-mode") || !isOwnerFeatures(features)) return;
+  await updateMetadata(session, host, { avatarMode: "inherit" }, { avatar: session.avatar ?? null, avatarMode: session.avatarMode ?? null });
+}
+
+function followAvatarItem(session: SessionResource, t: T, host: string, features: ReadonlySet<string>): MenuAction | null {
+  if (!features.has("session-avatar-mode") || session.avatarMode === "inherit") return null;
+  return { label: t("avatarStyle.followProfile" as MessageKey), icon: <Smile size={ICON} />, onSelect: guarded(() => followAgentProfile(session, host)) };
+}
+
+/** Replacing an own avatar is an explicit second choice in the same menu. */
+function resetAvatarItem(session: SessionResource, t: T, host: string, features: ReadonlySet<string>): MenuAction | null {
+  if (!features.has("session-metadata") || agentIndex(useApp.getState()).get(session.cutexSessionId)?.hostId !== host) return null;
+  const pick = () => {
+    const base = shownStyleAvatar(session.cutexSessionId, host);
+    const color = session.avatar?.kind === "color" ? session.avatar.value : session.avatar?.color;
+    return base && features.has(AVATAR_COLOR_FEATURE) && isHexColor(color) ? { ...base, color: color.toLowerCase() } : base;
+  };
+  const avatar = pick();
+  if (JSON.stringify(avatar) === JSON.stringify(session.avatar ?? null) && (!features.has("session-avatar-mode") || session.avatarMode === "fixed")) return null;
+  const apply = guarded(() => setAgentAvatar(session, host, pick()));
+  return { label: t("avatarStyle.reset" as MessageKey), icon: <Smile size={ICON} />, onSelect: session.avatar ? () => {} : apply,
+    ...(session.avatar ? { submenu: [{ label: t("avatarStyle.confirmReset" as MessageKey, { name: session.displayName }), hint: t("avatarStyle.resetOwnHint" as MessageKey), onSelect: apply }] } : {}) };
+}
+
+/** One note write (the tray's 「备注…」) through the same fenced metadata update as 编辑信息, drawn at once
+ *  (updateMetadataNow); null / blank clears it. */
+export async function setAgentNote(session: SessionResource, host: string, note: string | null): Promise<void> {
+  const next = note?.trim() || null;
+  if (next === (session.note ?? null)) return;
+  await updateMetadataNow(session, host, { note: next });
 }
 
 /** Archive with the same confirmation as the menu item (`/archive`); false when cancelled. */
@@ -365,10 +457,11 @@ function restartItem(session: SessionResource, t: T, host: string): MenuAction |
   if (session.lifecycle === "retired" || session.runtime.status !== "online") return null;
   const id = session.cutexSessionId;
   const busy = !!session.runtime.activeTurnId;
+  const operatorPending = sidebarOf(useApp.getState(), host)?.operatorRestartRequired?.includes(id) === true;
   return {
-    label: t("menu.restart"),
+    label: t(operatorPending ? "projects.operatorRestartNow" : "menu.restart"),
     icon: <RotateCw size={ICON} />,
-    armed: t(busy ? "menu.restartArmedBusy" : "menu.restartArmed"),
+    armed: t(operatorPending ? "projects.operatorRestartArmed" : busy ? "menu.restartArmedBusy" : "menu.restartArmed"),
     danger: busy,
     onSelect: guarded(async () => {
       const current = fenceOf(host);
@@ -426,6 +519,26 @@ function repinItem(session: SessionResource, t: T, host: string): MenuAction | n
  * host of its open view, else the focus host). Another host's agent gets the same actions, sent to
  * that host's daemon (multi-host P1).
  */
+/** 暂停{{agent}} / 继续{{agent}} (agent-pause): one row, worded apart from 暂停新委托 (header ⋯ and the agent menus). */
+export function agentPauseItem(hostId: string, sessionId: string, t: T): MenuAction {
+  const pause = agentPauseNow(hostId, sessionId);
+  return pause
+    ? { label: t("agentPause.resume"), title: t("agentPause.resumeHint"), icon: <Play size={ICON} />, onSelect: () => void resumeAgent(hostId, sessionId) }
+    : { label: t("agentPause.pause"), title: t("agentPause.pauseHint"), icon: <CirclePause size={ICON} />, onSelect: () => void pauseAgent(hostId, sessionId) };
+}
+
+/**
+ * Multi-window (P3; only with the 多窗口 setting on, P6): 「在主窗口打开」 / 「在 桌子 N 打开」 for every other window, 「在新窗口打开」.
+ * One copy per agent: it moves from where it is (lib/deskActions openInWindow).
+ */
+function windowEntries(host: string, id: string, t: T): MenuEntry[] {
+  if (!desksEnabled()) return [];
+  return [
+    ...windowChoices().map((w): MenuAction => ({ label: w.key === MAIN_WINDOW ? t("desk.openInMain") : t("desk.openIn", { n: w.n }), icon: <AppWindow size={ICON} />, title: t("desk.openInHint"), onSelect: () => openInWindow(w.key, host, id) })),
+    { label: t("desk.openInNew"), icon: <AppWindow size={ICON} />, title: t("desk.moveToWindowHint"), onSelect: () => void openInNewDesk(host, id) },
+  ];
+}
+
 export function agentMenu(session: SessionResource, t: T, hostId?: string): MenuEntry[] {
   const app = useApp.getState();
   const id = session.cutexSessionId;
@@ -435,7 +548,7 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
   const retired = session.lifecycle === "retired";
   const busy = !!session.runtime.activeTurnId;
   const pinned = (focus ? app.pinned : pinnedOn(host)).has(id);
-  const canDelete = features.has(SESSION_FEATURES.delete);
+  const canDelete = features.has(SESSION_FEATURES.delete) && !lacks(agentFeaturesOf(session), "threadDelete");
   // 暂停委托 / 继续委托 (asks-pause-v2): the explicit owner pause of new delegations to this agent (its
   // view on this host, keyed by host + id: panes step 2).
   const asksPaused = !!viewOf(app, host, id)?.asksPaused;
@@ -448,6 +561,8 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
     icon: <Hourglass size={ICON} />,
     onSelect: guarded(() => (stopOnly ? app.resumePaused(id, host) : asksPaused ? app.resumeAsks(id, host) : app.pauseAsks(id, host))),
   };
+  // 暂停智能体 / 继续智能体 (agent-pause, lib/agentPause): the whole agent, after its running turn; not 暂停新委托.
+  const pauseItem: MenuAction | false = !retired && agentPauseSupported(app, host) && agentPauseItem(host, id, t);
   // 轮换主管… (owner-rotation): the Director of an active project; the dialog lives on the project page,
   // whose rotation store follows the focus host only.
   const directs = !retired && focus && features.has(OWNER_ROTATION_FEATURE) ? sidebarOf(app, host)?.projects?.projects.find((p) => p.director_cutex_session_id === id) : undefined;
@@ -511,6 +626,7 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
       },
     },
     projectId && { label: t("menu.openProject"), icon: <FolderKanban size={ICON} />, onSelect: () => app.openPage("projects.page", { project: projectId, ...(focus ? {} : { host }) }) },
+    ...(retired ? [] : windowEntries(host, id, t)),
     {
       label: t("menu.copy"),
       icon: <Copy size={ICON} />,
@@ -529,15 +645,18 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
       onSelect: guarded(() => renameAgent(session, t, undefined, host)),
     },
     { label: t("menu.editInfo"), icon: <StickyNote size={ICON} />, onSelect: guarded(() => editAgentInfo(session, host)) },
+    !retired && followAvatarItem(session, t, host, features),
+    !retired && resetAvatarItem(session, t, host, features),
     !retired && avatarSwitchItem(session, t, host, features, pinned),
     canFork && {
       label: t("menu.forkAgent"),
       icon: <GitFork size={ICON} />,
       ...(block ? { disabled: true, hint: t("structural.busyHint"), title: structuralBlockText(block) } : {}),
-      onSelect: guarded(() => app.forkSession(id, null, host)),
+      onSelect: guarded(() => requestFork(id, null, host)),
     },
     !retired && claudeToolsItem(session, t, host),
     !retired && quotaContinueItem(session, t, host),
+    pauseItem,
     asksPauseItem,
     rotateItem,
     "separator",
@@ -562,6 +681,8 @@ export interface MessageMenuInput {
   hostId?: string;
   kind: "user" | "agent" | "received" | "sent";
   text: string;
+  /** A user message's image / skill input items (编辑并重发 puts them back). */
+  extra?: unknown[];
   turnId: string | null;
   /** Agent replies: the turn after this one ("回退到这里" reverts from it) and how many turns that drops. */
   nextTurnId?: string | null;
@@ -590,8 +711,10 @@ export function messageMenu(m: MessageMenuInput, t: T, canRevert: boolean): Menu
   };
   const blocked = blockedBy("revert");
   const forkBlocked = blockedBy("fork");
+  // DSH: conversation only, files are not restored (no checkpoints; rewindFiles is never offered).
+  const texts = revertTexts(agentFeaturesFor(m.sessionId, host).runtime);
   return [
-    { label: t("menu.copy"), icon: <Copy size={ICON} />, onSelect: () => copyText(m.text) },
+    { label: t("menu.copy"), icon: <Copy size={ICON} />, onSelect: () => copyText(mentionPlainText(m.text)) },
     { label: t("menu.quote"), icon: <MessageSquareQuote size={ICON} />, onSelect: () => app.insertIntoComposer(m.sessionId, quoteText(m.text), "append", undefined, host) },
     m.fold && { label: t(m.fold.folded ? "fold.unfold" : "fold.fold"), icon: m.fold.folded ? <ChevronsUpDown size={ICON} /> : <ChevronsDownUp size={ICON} />, onSelect: m.fold.toggle },
     m.kind === "user" && "separator",
@@ -600,18 +723,18 @@ export function messageMenu(m: MessageMenuInput, t: T, canRevert: boolean): Menu
       icon: <Undo2 size={ICON} />,
       hint: canRevert ? undefined : "·",
       disabled: !canRevert || !m.turnId,
-      confirm: t("menu.editResendConfirm"),
-      onSelect: guarded(() => app.editAndResend(m.sessionId, m.turnId!, m.text, host)),
+      confirm: t(texts.editResendConfirm),
+      onSelect: guarded(() => app.editAndResend(m.sessionId, m.turnId!, m.text, host, m.extra)),
       ...(canRevert ? blocked : {}),
     },
     m.kind === "agent" && "separator",
-    // Fork is non-destructive (a new agent): no confirmation. Revert rewrites this agent's history.
+    // Fork creates a new agent; requestFork confirms alternate-profile costs. Revert rewrites this agent's history.
     m.kind === "agent" && {
       label: t("menu.fork"),
       icon: <GitFork size={ICON} />,
       hint: canFork ? undefined : "·",
       disabled: !canFork || !m.turnId,
-      onSelect: guarded(() => app.forkSession(m.sessionId, m.turnId, host)),
+      onSelect: guarded(() => requestFork(m.sessionId, m.turnId, host)),
       ...(canFork ? forkBlocked : {}),
     },
     m.kind === "agent" &&
@@ -620,7 +743,7 @@ export function messageMenu(m: MessageMenuInput, t: T, canRevert: boolean): Menu
         label: t("reply.revert"),
         icon: <History size={ICON} />,
         danger: true,
-        confirm: t("menu.revertConfirm", { n: m.laterTurns ?? 0 }),
+        confirm: t(texts.revertConfirm, { n: m.laterTurns ?? 0 }),
         onSelect: guarded(() => app.revertTo(m.sessionId, m.nextTurnId!, { hostId: host })),
         ...blocked,
       },
@@ -645,22 +768,30 @@ export function toolMenu(item: { type: string; command?: unknown; aggregatedOutp
     item.type === "commandExecution" && { label: t("menu.copyCommand"), icon: <Copy size={ICON} />, onSelect: () => copyText(String(item.command ?? "")) },
     output && { label: t("menu.copyOutput"), icon: <ClipboardCopy size={ICON} />, onSelect: () => copyText(output) },
     files.length > 0 && "separator",
-    ...files.slice(0, 8).map((f) => ({ label: f.path, icon: <FileText size={ICON} />, onSelect: () => void openFile(f.path) })),
+    ...files.slice(0, 8).map((f) => ({ label: f.path, icon: <FileText size={ICON} />, onSelect: () => void openPath(f.path) })),
   ];
 }
 
 /** Workspace file (relative path) — file links, tool rows, file tree, changes list. */
-export function fileMenu(path: string, root: string | null, t: T, opts: { changed?: boolean; isDir?: boolean } = {}): MenuEntry[] {
+export function fileMenu(path: string, root: string | null, t: T, opts: { changed?: boolean; isDir?: boolean; inTree?: boolean; hostId?: string } = {}): MenuEntry[] {
   const app = useApp.getState();
+  const hostId = opts.hostId ?? agentHost(app);
+  const sourceHost = app.hosts?.hosts.find((host) => host.id === hostId);
+  const hostHint = sourceHost?.kind === "local" ? "" : ` · ${sourceHost?.label ?? hostId}`;
   const abs = root ? `${root.replace(/[\\/]+$/, "")}${root.includes("\\") ? "\\" : "/"}${root.includes("\\") ? path.replace(/\//g, "\\") : path}` : null;
   const sessionId = app.selectedId;
   return [
-    !opts.isDir && { label: t("menu.preview"), icon: <FileText size={ICON} />, onSelect: () => void openFile(path) },
+    !opts.isDir && { label: t("menu.preview"), icon: <FileText size={ICON} />, onSelect: () => void openPath(path) },
+    // 在文件树中显示 (docs/design/019 §3); the 文件 explorer's own rows leave it out (`inTree`).
+    !opts.inTree && { label: t("workspace.revealInTree"), icon: <LocateFixed size={ICON} />, hint: "Ctrl+Alt+R", onSelect: () => void revealInTree(path) },
     opts.changed && { label: t("menu.showDiff"), icon: <FileDiff size={ICON} />, onSelect: () => void openGitDiff(path) },
     "separator",
-    { label: t("menu.copyRelPath"), icon: <Copy size={ICON} />, onSelect: () => copyText(path) },
-    abs && { label: t("menu.copyAbsPath"), icon: <ClipboardCopy size={ICON} />, onSelect: () => copyText(abs) },
+    { label: `${t("menu.copyRelPath")}${hostHint}`, icon: <Copy size={ICON} />, onSelect: () => copyText(path) },
+    abs && { label: `${t("menu.copyAbsPath")}${hostHint}`, icon: <ClipboardCopy size={ICON} />, onSelect: () => copyText(abs) },
     sessionId && { label: t("menu.mention"), icon: <MessageSquareQuote size={ICON} />, onSelect: () => app.insertIntoComposer(sessionId, `\`${path}\` `, "append") },
+    // Local host only: a remote host's files are not on this machine. Reveal, never open (it could run it).
+    abs && canRevealLocal({ hostId, path: abs }) && { label: revealFileLabel(t), icon: <FolderOpen size={ICON} />, onSelect: guarded(() => performFilePathAction(hostId, abs, "reveal")) },
+    abs && downloadFileAction({ hostId, path: abs, isDir: opts.isDir }, t),
   ];
 }
 
@@ -669,17 +800,21 @@ export function fileMenu(path: string, root: string | null, t: T, opts: { change
  * root, `~` with an unknown home): the full path, copy, "show in folder" on the local host only,
  * and with `preview` (cutex fs-file-read, an absolute path) the side-pane preview by host path.
  */
-export function outsideFileMenu(ref: FileRef, full: string, remote: boolean, t: T, preview?: (() => void) | null): MenuEntry[] {
+export function outsideFileMenu(ref: FileRef, full: string, remote: boolean, t: T, preview?: (() => void) | null, hostId = agentHost(useApp.getState())): MenuEntry[] {
   const app = useApp.getState();
+  // Older callers supplied only the remote flag: a focus-host fallback must
+  // never reinterpret that remote path as a local one.
+  const sourceHostId = remote && hostId === LOCAL_HOST_ID ? "unknown-remote" : hostId;
+  const sourceHost = app.hosts?.hosts.find((host) => host.id === sourceHostId);
+  const hostHint = sourceHost?.kind === "local" ? "" : ` · ${sourceHost?.label ?? sourceHostId}`;
   const sessionId = app.selectedId;
   const path = ref.abs ?? ref.path;
   return [
     { label: full, hint: t(preview ? "menu.fileOutsideWorkspaceHost" : "menu.fileOutsideWorkspace"), note: true, disabled: true, onSelect: () => {} },
     "separator",
     preview && { label: t("menu.preview"), icon: <FileText size={ICON} />, onSelect: preview },
-    { label: t("menu.copyPath"), icon: <Copy size={ICON} />, onSelect: () => copyText(path) },
-    ref.line != null && { label: t("menu.copyPathLine"), icon: <ClipboardCopy size={ICON} />, onSelect: () => copyText(full) },
-    !remote && ref.abs && { label: t("menu.revealPath"), icon: <FolderOpen size={ICON} />, onSelect: guarded(() => apiFor(LOCAL_HOST_ID).revealPath(path)) },
+    ...fileActions({ hostId: sourceHostId, path }, t),
+    ref.line != null && { label: `${t("menu.copyPathLine")}${hostHint}`, icon: <ClipboardCopy size={ICON} />, onSelect: () => copyText(full) },
     sessionId && { label: t("menu.mention"), icon: <MessageSquareQuote size={ICON} />, onSelect: () => app.insertIntoComposer(sessionId, `\`${path}\` `, "append") },
   ];
 }

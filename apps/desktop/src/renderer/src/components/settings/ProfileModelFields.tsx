@@ -1,22 +1,21 @@
 // A profile's default model, reasoning effort, context window and auto-compact — the per-profile
 // config in cutex `/v2/profiles/{p}`, on the profile page's 模型 section (saved by its save bar;
 // Settings → 新建 only shows a read-only summary with a link here).
-import type { ProfileConfig, ProfileDetail, ProfileModelsView, ProfilePatch, ReasoningSummaryMode, WebSearchMode } from "../../../../shared/ipc";
+import { claudeCatalogChoices } from "../../lib/claudeModels";
+import type { ProfileConfig, ProfileDetail, ProfileModelsView, ProfilePatch, ReasoningSummaryMode } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
 import { formatWindow } from "../../lib/contextPresets";
 import { FIELD_W } from "../../lib/fieldWidths";
 import { fieldEditable, fieldOffered } from "../../lib/profileKind";
-import { SettingRow, Select, TextInput, Toggle } from "./Form";
+import { SettingRow, Select, TextInput } from "./Form";
 import { CompactInput, WindowInput } from "./ProfileContextInputs";
 import { useModelName } from "../../lib/modelDisplay";
 import { ModelName } from "../ModelName";
 import { claudeEffortLevels } from "../../lib/profileModels";
 
-const EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const SUMMARIES: ReasoningSummaryMode[] = ["auto", "detailed", "concise", "none"];
-const WEB_SEARCH: WebSearchMode[] = ["disabled", "cached", "live"];
 
-export function ProfileModelFields({ detail, models, cfg, set, searchTool }: { detail: ProfileDetail; models: ProfileModelsView | null; cfg: Partial<ProfileConfig>; set(p: ProfilePatch): void; /** The draft `searchTool` (profile-search-tool), else the stored one. */ searchTool?: boolean }) {
+export function ProfileModelFields({ detail, models, cfg, set }: { detail: ProfileDetail; models: ProfileModelsView | null; cfg: Partial<ProfileConfig>; set(p: ProfilePatch): void; }) {
   const { t } = useI18n();
   // Labels by this profile's entry names (lib/modelDisplay); values and the text input stay raw ids.
   const modelName = useModelName();
@@ -28,25 +27,27 @@ export function ProfileModelFields({ detail, models, cfg, set, searchTool }: { d
   const claudeDefaults = claude && fieldOffered(detail, "claudeDefaultModel");
   const modelEditable = claude ? claudeDefaults : fieldEditable(detail, "model");
   const effortEditable = claude ? claudeDefaults : fieldEditable(detail, "modelReasoningEffort");
-  const override = claudeDefaults ? (detail.detail.claudeNewSessionModel ?? null) : null;
+  const override = claudeDefaults ? (detail.detail?.claudeNewSessionModel ?? null) : null;
   const selected = list.find((m) => m.id === (model ?? models?.selectedModel));
+  // The default model left upstream (cutex unavailableModels): new agents on it would fail to start.
+  const gone = [model, models?.selectedModel].find((id) => id && models?.unavailableModels?.some((u) => u.id === id)) ?? null;
   const src = (s: string) => t(`agent-config.profile.source.${s}` as MessageKey);
   // Effort ids in the app language (the composer's 低 / 中 / 高 …); unknown ids stay raw.
   const effortName = (e: string) => {
     const key = `composer.effort.${e}` as MessageKey;
     return t(key) === key ? e : t(key);
   };
-  // Claude: only the levels the model offers (none for e.g. Haiku 4.5); Codex: the row's, else all.
-  const levels = claude ? claudeEffortLevels(selected) : selected?.supportedReasoningEfforts.length ? selected.supportedReasoningEfforts : EFFORTS;
+  // Empty/absent Codex metadata is not evidence that every reasoning level is supported.
+  const levels = claude ? claudeEffortLevels(selected) : selected?.supportedReasoningEfforts ?? [];
   const storedEffort = cfg.modelReasoningEffort ?? null;
   // "" = no stored effort: the model's own default (Claude: Claude Code picks it per model).
   const defaultLabel = selected?.defaultReasoningEffort
     ? t("agent-config.profile.effortDefaultIs", { effort: effortName(selected.defaultReasoningEffort) })
     : t("agent-config.profile.effortDefault");
-  const effective = (value: number | null, source: string) => (value ? <span className="text-xs text-subtle tabular-nums">{t("agent-config.profile.effectiveInline", { value: formatWindow(value), source: src(source) })}</span> : null);
+  const effective = (value: number | null, source: string) => (value ? <span className="text-xs text-subtle tabular-nums">{!claude && <span className="block">{t("settings.profileParity.savedEffective" as MessageKey)}</span>}{t("agent-config.profile.effectiveInline", { value: formatWindow(value), source: src(source) })}</span> : null);
   return (
     <>
-      <SettingRow label={t("agent-config.profile.model")} hint={claudeDefaults ? t(override ? "agent-config.profile.claudeModelOverrideHint" : "agent-config.profile.claudeModelHint", { model: override ? modelName(override, null, detail.id) : "" }) : undefined}>
+      <SettingRow source="host" agents="next" readOnly={!modelEditable} label={t("agent-config.profile.model")} hint={gone ? <span className="text-warn">{t("models.defaultGoneHint", { model: modelName(gone, null, detail.id) })}</span> : claudeDefaults ? t(override ? "agent-config.profile.claudeModelOverrideHint" : "agent-config.profile.claudeModelHint", { model: override ? modelName(override, null, detail.id) : "" }) : t("settings.profileParity.modelDefaultHint" as MessageKey)}>
         {!modelEditable ? (
           <ModelName id={model ?? detail.model} profile={detail.id} fallback="—" className="font-mono text-xs text-muted" />
         ) : list.length > 0 ? (
@@ -54,8 +55,11 @@ export function ProfileModelFields({ detail, models, cfg, set, searchTool }: { d
             width={FIELD_W.model}
             value={model ?? ""}
             options={[
-              ...(model ? [] : [{ value: "", label: "—" }]),
-              ...list.map((m) => ({ value: m.id, label: modelName(m.id, m.displayName, detail.id) })),
+              { value: "", label: claude ? "—" : t("settings.profileParity.runtimeModelDefault" as MessageKey) },
+              // Claude (docs/design/024-model-list.md): one choice per real model, aliases folded in.
+              ...(claude
+                ? claudeCatalogChoices(list, model, t).map((c) => ({ value: c.id, label: modelName(c.id, c.name, detail.id) }))
+                : list.map((m) => ({ value: m.id, label: modelName(m.id, m.displayName, detail.id) }))),
               // A configured model the list doesn't know (e.g. newer than the native cache) stays selectable.
               ...(model && !list.some((m) => m.id === model) ? [{ value: model, label: modelName(model, null, detail.id) }] : []),
             ]}
@@ -66,7 +70,7 @@ export function ProfileModelFields({ detail, models, cfg, set, searchTool }: { d
         )}
       </SettingRow>
       {effortEditable && (
-        <SettingRow label={t("agent-config.profile.effort")} hint={levels.length === 0 ? t("agent-config.profile.effortNone") : undefined}>
+        <SettingRow source="host" agents="next" label={t("agent-config.profile.effort")} hint={claude ? levels.length === 0 ? t("agent-config.profile.effortNone") : undefined : t((levels.length ? "settings.profileParity.effortInheritance" : selected?.effortSupportKnown === true ? "agent-config.profile.effortNone" : "settings.profileParity.effortUnknown") as MessageKey)}>
           <Select
             width={FIELD_W.model}
             value={storedEffort ?? ""}
@@ -83,7 +87,7 @@ export function ProfileModelFields({ detail, models, cfg, set, searchTool }: { d
       {/* GPT models default to no reasoning summaries; turning them on fills the timeline's 推理
           rows (DESIGN §4.14). Takes effect when the agent's native process next starts. */}
       {fieldOffered(detail, "modelReasoningSummary") && (
-        <SettingRow label={t("agent-config.profile.reasoningSummary")} hint={t("agent-config.profile.reasoningSummaryHint")}>
+        <SettingRow source="host" agents="next" label={t("agent-config.profile.reasoningSummary")} hint={t("agent-config.profile.reasoningSummaryHint")}>
           <Select
             width={FIELD_W.model}
             value={cfg.modelReasoningSummary ?? ""}
@@ -95,56 +99,15 @@ export function ProfileModelFields({ detail, models, cfg, set, searchTool }: { d
           />
         </SettingRow>
       )}
-      {/* Codex registers update_plan only with tools.update_plan.enabled; it feeds the capsule's 进程. */}
-      {fieldOffered(detail, "updatePlanEnabled") && (
-        <SettingRow label={<span title="update_plan">{t("agent-config.profile.updatePlan")}</span>} hint={t("agent-config.profile.updatePlanHint")}>
-          <Toggle checked={cfg.updatePlanEnabled === true} onChange={(v) => set({ updatePlanEnabled: v })} />
-        </SettingRow>
-      )}
-      {/* Codex's built-in web_search; some providers refuse it next to function calls (cutex preset gemini = off). */}
-      {fieldOffered(detail, "webSearch") && (
-        <SettingRow label={<span title="web_search">{t("agent-config.profile.webSearch")}</span>} hint={t("agent-config.profile.webSearchHint")}>
-          <Select
-            width={FIELD_W.model}
-            value={cfg.webSearch ?? ""}
-            options={[
-              { value: "", label: t("agent-config.profile.webSearch.default") },
-              // "indexed" only when already set (not offered otherwise).
-              ...[...WEB_SEARCH, ...(cfg.webSearch === "indexed" ? (["indexed"] as const) : [])].map((v) => ({ value: v, label: t(`agent-config.profile.webSearch.${v}` as MessageKey) })),
-            ]}
-            onChange={(v) => set({ webSearch: (v || null) as WebSearchMode | null })}
-          />
-        </SettingRow>
-      )}
-      {/* cutex profile-search-tool: the separate search-only `web_search` cutex tool, for providers
-          that refuse the built-in search next to function calls. Owner switch, default off. */}
-      {/* Turning it on also turns 内置网页搜索 off in the same draft (the tool exists for providers that
-          refuse the two together; owner 2026-10-15 switched only one and kept the 400). Generic, no
-          provider check; while both stay on, a line under the row offers to turn the built-in off. */}
-      {fieldOffered(detail, "searchTool") && (
-        <SettingRow label={<span title="web_search (cutex)">{t("agent-config.profile.searchTool")}</span>} hint={t("agent-config.profile.searchToolHint")}>
-          <Toggle
-            checked={searchTool ?? detail.searchTool ?? false}
-            onChange={(v) => set(v && fieldOffered(detail, "webSearch") && cfg.webSearch !== "disabled" ? { searchTool: true, webSearch: "disabled" } : { searchTool: v })}
-          />
-        </SettingRow>
-      )}
-      {fieldOffered(detail, "searchTool") && fieldOffered(detail, "webSearch") && (searchTool ?? detail.searchTool ?? false) && cfg.webSearch !== "disabled" && (
-        <p data-search-tool-conflict className="-mt-1 mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-warn">
-          {t("agent-config.profile.searchToolBuiltinOn")}
-          <button type="button" onClick={() => set({ webSearch: "disabled" })} className="rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-hover">
-            {t("agent-config.profile.searchToolBuiltinOff")}
-          </button>
-        </p>
-      )}
+      {!claude && <p className="mt-2 text-xs text-subtle">{t("settings.profileParity.limitsInheritance" as MessageKey)}</p>}
       {fieldEditable(detail, "modelContextWindow") && (
-        <SettingRow label={t("agent-config.profile.contextWindow")} hint={selected?.maxContextWindow ? t("agent-config.profile.maxHint", { max: formatWindow(selected.maxContextWindow) }) : t("agent-config.profile.contextProfileHint")}>
+        <SettingRow source="host" agents="next" label={t("agent-config.profile.contextWindow")} hint={selected?.maxContextWindow ? t("agent-config.profile.maxHint", { max: formatWindow(selected.maxContextWindow) }) : t("agent-config.profile.contextProfileHint")}>
           {selected && effective(selected.effective.contextWindow, selected.effective.contextWindowSource)}
           <WindowInput width={FIELD_W.model} value={cfg.modelContextWindow ?? null} onChange={(v) => set({ modelContextWindow: v })} allowInherit inheritLabel={t("agent-config.profile.fromModel")} />
         </SettingRow>
       )}
       {fieldEditable(detail, "modelAutoCompactTokenLimit") && (
-        <SettingRow label={t("agent-config.profile.autoCompact")}>
+        <SettingRow source="host" agents="next" label={t("agent-config.profile.autoCompact")}>
           {selected && effective(selected.effective.autoCompactTokenLimit, selected.effective.autoCompactTokenLimitSource)}
           <CompactInput width={FIELD_W.model} value={cfg.modelAutoCompactTokenLimit ?? null} window={cfg.modelContextWindow ?? selected?.effective.contextWindow ?? null} onChange={(v) => set({ modelAutoCompactTokenLimit: v })} allowInherit />
         </SettingRow>

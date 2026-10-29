@@ -34,7 +34,7 @@ export function TurnNotes({ hostId, sessionId, turnId }: TurnAttachmentProps) {
             onClick={(e) => open(e.currentTarget)}
             title={note.title || t("notes.untitled")}
             aria-haspopup="dialog"
-            className="flex h-[18px] max-w-56 min-w-0 items-center rounded-md border border-border bg-surface px-1.5 text-[11px] text-muted hover:bg-surface-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-accent"
+            className="flex h-[18px] max-w-56 min-w-0 items-center rounded-md border border-border bg-surface px-1.5 text-caption/[inherit] text-muted hover:bg-surface-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-accent"
           >
             <span className="truncate">{note.title || t("notes.untitled")}</span>
           </button>

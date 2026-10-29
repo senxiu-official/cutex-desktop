@@ -10,8 +10,10 @@ import { rename, writeFile } from "node:fs/promises";
 import { connect, createServer } from "node:net";
 import { join } from "node:path";
 import {
+  backoffMs,
   classifySshFailure,
   execArgs,
+  formatSshTarget,
   initialTunnel,
   tunnelArgs,
   tunnelReduce,
@@ -223,6 +225,11 @@ export class TunnelPidFile {
     this.save();
   }
 
+  /** Resolves once the writes begun so far have ended. */
+  saved(): Promise<void> {
+    return this.saving;
+  }
+
   private save(): void {
     const body = `${JSON.stringify({ pids: [...this.pids] })}\n`;
     const file = this.file;
@@ -233,6 +240,10 @@ export class TunnelPidFile {
       })
       .catch(() => {});
   }
+}
+
+export function isOurTunnelCommandLine(cmdline: string): boolean {
+  return /ssh/i.test(cmdline) && cmdline.includes("ExitOnForwardFailure=yes") && cmdline.includes("ServerAliveCountMax=3") && /-L\s+127\.0\.0\.1:\d+:127\.0\.0\.1:\d+/.test(cmdline);
 }
 
 function isOurTunnel(pid: number): boolean {
@@ -247,11 +258,11 @@ function isOurTunnel(pid: number): boolean {
   } catch {
     return false;
   }
-  return /ssh/i.test(cmdline) && cmdline.includes("ExitOnForwardFailure=yes") && cmdline.includes("ServerAliveCountMax=3") && /-L\s+127\.0\.0\.1:\d+:127\.0\.0\.1:\d+/.test(cmdline);
+  return isOurTunnelCommandLine(cmdline);
 }
 
 export interface SshTunnelOptions {
-  target: SshTarget;
+  targets: SshTarget[];
   remotePort: number;
   pids: TunnelPidFile;
   onChange(view: TunnelView): void;
@@ -274,6 +285,8 @@ export class SshTunnel {
   private stopped = true;
   private retryTimer: NodeJS.Timeout | null = null;
   private stderr = "";
+  private targetIndex = 0;
+  private rejected: SshErrorView | null = null;
 
   constructor(private readonly options: SshTunnelOptions) {}
 
@@ -284,6 +297,7 @@ export class SshTunnel {
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
+    this.targetIndex = 0;
     void this.attempt();
   }
 
@@ -292,8 +306,15 @@ export class SshTunnel {
     if (this.stopped || this.child) return;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
+    this.targetIndex = 0;
     this.options.askpass?.reset();
     void this.attempt();
+  }
+
+  rejectReady(error: SshErrorView): void {
+    if (!this.child || this.view.status !== "up") return;
+    this.rejected = error;
+    killTree(this.child);
   }
 
   stop(): void {
@@ -325,6 +346,8 @@ export class SshTunnel {
       return;
     }
     this.stderr = "";
+    this.rejected = null;
+    const target = this.options.targets[this.targetIndex]!;
     let ask: AskpassSpawn | null = null;
     if (this.options.askpass) {
       ask = await askpassSpawn(this.options);
@@ -335,7 +358,7 @@ export class SshTunnel {
     }
     let child: ChildProcess;
     try {
-      child = spawn(resolveSshBinary(), withExtra(tunnelArgs(this.options.target, port, this.options.remotePort, !!ask), this.options.extraArgs), {
+      child = spawn(resolveSshBinary(), withExtra(tunnelArgs(target, port, this.options.remotePort, !!ask), this.options.extraArgs), {
         stdio: ["ignore", "ignore", "pipe"],
         windowsHide: true,
         detached: process.platform !== "win32",
@@ -343,12 +366,13 @@ export class SshTunnel {
       });
     } catch (error) {
       ask?.done();
-      this.fail({ code: "noSsh", detail: String(error) });
+      this.advanceTarget(false);
+      this.fail({ code: "noSsh", detail: String(error) }, this.targetIndex !== 0);
       return;
     }
     this.child = child;
     this.options.pids.add(child.pid);
-    this.dispatch({ type: "spawn", localPort: port });
+    this.dispatch({ type: "spawn", localPort: port, target: formatSshTarget(target) });
     child.stderr!.on("data", (d: Buffer) => {
       this.stderr = (this.stderr + d.toString("utf8")).slice(-8192);
     });
@@ -361,7 +385,10 @@ export class SshTunnel {
       this.child = null;
       if (this.stopped) return;
       const err = spawnError as NodeJS.ErrnoException | null;
-      this.fail(err?.code === "ENOENT" ? { code: "noSsh", detail: err.message } : classifySshFailure(code, this.stderr, "tunnel"));
+      const rejected = this.rejected;
+      const hadMoreTargets = this.targetIndex < this.options.targets.length - 1;
+      this.advanceTarget(rejected === null && this.view.status === "up");
+      this.fail(rejected ?? (err?.code === "ENOENT" ? { code: "noSsh", detail: err.message } : classifySshFailure(code, this.stderr, "tunnel")), hadMoreTargets);
     });
     // Ready = ssh accepts on the local port (it binds only after authentication).
     const expired = deadline(this.options.readyTimeoutMs ?? 30_000, this.options.askpass);
@@ -379,13 +406,18 @@ export class SshTunnel {
     }
   }
 
-  private fail(error: SshErrorView): void {
+  private advanceTarget(connected: boolean): void {
+    this.targetIndex = connected ? 0 : (this.targetIndex + 1) % this.options.targets.length;
+  }
+
+  private fail(error: SshErrorView, tryNextTarget = false): void {
     this.dispatch({ type: "exit", error, now: Date.now() });
-    if (this.view.status === "retrying" && this.view.retryAt !== null) {
+    if (this.view.status === "retrying" || (this.view.status === "error" && tryNextTarget)) {
+      const retryAt = this.view.retryAt ?? Date.now() + backoffMs(this.view.attempt);
       this.retryTimer = setTimeout(() => {
         this.retryTimer = null;
         void this.attempt();
-      }, Math.max(0, this.view.retryAt - Date.now()));
+      }, Math.max(0, retryAt - Date.now()));
     }
   }
 }

@@ -13,7 +13,7 @@ const NOTES: Record<Layout, string> = {
   C: "C：位置标签（cutex 后端 · HOST）留在标题行，其余标签放第二行，说明在最后。",
 };
 
-const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] whitespace-nowrap";
+const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-caption/[inherit] whitespace-nowrap";
 const host = <span key="h" className={`${CHIP} bg-accent/12 text-accent`}><Server size={11} />cutex 后端 · <span className="size-1.5 rounded-full bg-ok" />HOST-A</span>;
 const agents = <span key="a" className={`${CHIP} bg-warn/15 text-warn-text`}><Bot size={11} />新启动的智能体</span>;
 const mcp = <span key="m" className={`${CHIP} bg-surface-2 text-muted`} title="MCP 工具 · owner_notify：智能体调用它主动给你发消息"><Wrench size={11} />MCP工具</span>;
@@ -57,7 +57,7 @@ function Card({ c, layout }: { c: CardSpec; layout: Layout }) {
         {layout === "C" && <><Tags tags={c.others} />{hint}</>}
       </div>
       <div className="rounded-xl border border-[var(--card-border,var(--border))] bg-surface px-4">
-        {c.rows.map(([l, h]) => <SettingRow key={l} label={l} hint={h}><Toggle checked onChange={() => {}} /></SettingRow>)}
+        {c.rows.map(([l, h]) => <SettingRow agents="none" source="local" key={l} label={l} hint={h}><Toggle checked onChange={() => {}} /></SettingRow>)}
       </div>
     </section>
   );

@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import type { OlderHistory } from "../lib/historyPages";
 import { BusyDots } from "./BusyDots";
+import { useOwnerWindow } from "../lib/ownerContext";
+import { ownerWindowOf } from "../lib/ownerWindow";
 
 /** Whether `el` is inside the visible part of its scrolling ancestor (else of the window). */
 function inScrollView(el: HTMLElement): boolean {
-  let box: { top: number; bottom: number } = { top: 0, bottom: window.innerHeight };
+  let box: { top: number; bottom: number } = { top: 0, bottom: ownerWindowOf(el).innerHeight };
   for (let p = el.parentElement; p; p = p.parentElement) {
     const overflow = getComputedStyle(p).overflowY;
     if (overflow === "auto" || overflow === "scroll") {
@@ -20,13 +22,14 @@ function inScrollView(el: HTMLElement): boolean {
 }
 
 export function OlderHistoryRow({ older, onLoad }: { older: OlderHistory; onLoad(): void }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const row = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   useEffect(() => {
     const el = row.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
-    const io = new IntersectionObserver(([entry]) => setVisible(!!entry?.isIntersecting));
+    const io = new win.IntersectionObserver(([entry]) => setVisible(!!entry?.isIntersecting));
     io.observe(el);
     return () => io.disconnect();
   }, []);

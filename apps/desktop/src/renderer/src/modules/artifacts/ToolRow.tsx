@@ -4,13 +4,15 @@
 import { FileBox, Loader2, X } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { contextMenu } from "../../lib/contextMenu";
+import { refActionEntries } from "../../lib/refActions";
 import { toolErrorText } from "../../lib/taskRows";
 import type { RawItem } from "../../lib/timeline";
 import { useConvHost } from "../../lib/conversationScope";
 import { services } from "../app";
-import { artifactCutexRef, copyArtifactLink, explainOpen } from "./actions";
+import { artifactCutexRef, explainOpen } from "./actions";
 import { publishCallOf } from "./model";
 import { useArtifactLink } from "./refTarget";
+import { Tag } from "../../components/Tag";
 
 function Published({ name, refKey, newVersion, version }: { name: string; refKey: string; newVersion: boolean | null; version: number | null }) {
   const { t } = useI18n();
@@ -27,7 +29,7 @@ function Published({ name, refKey, newVersion, version }: { name: string; refKey
         onContextMenu={contextMenu(() => [
           { label: t("gutter.openLeft"), onSelect: () => open("peek") },
           { label: t("gutter.openRight"), onSelect: () => open("page") },
-          { label: t("artifacts.copyLink"), onSelect: () => copyArtifactLink(refKey, name) },
+          ...refActionEntries(cref),
         ])}
         title={view?.tooltip ?? label}
         className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-surface px-2 py-1 text-xs hover:bg-hover"
@@ -35,8 +37,8 @@ function Published({ name, refKey, newVersion, version }: { name: string; refKey
         <Icon size={13} className="shrink-0 text-accent" />
         <span className="shrink-0 text-muted">{t("artifacts.tool.published")}</span>
         <span className="min-w-0 truncate font-medium text-foreground">{label}</span>
-        {newVersion === false && <span className="shrink-0 rounded bg-surface-2 px-1 text-[10.5px] text-subtle">{t("artifacts.tool.unchanged")}</span>}
-        {view?.badge && <span className={`shrink-0 rounded bg-surface-2 px-1 text-[10.5px] ${view.tone === "warn" ? "text-warn" : "text-subtle"}`}>{view.badge}</span>}
+        {newVersion === false && <Tag>{t("artifacts.tool.unchanged")}</Tag>}
+        {view?.badge && <span className={`shrink-0 rounded bg-surface-2 px-1 text-caption/[inherit] ${view.tone === "warn" ? "text-warn" : "text-subtle"}`}>{view.badge}</span>}
         <span className="shrink-0 text-accent">→</span>
       </button>
     </div>
@@ -63,7 +65,7 @@ export function PublishToolRow({ item }: { item: RawItem; sessionId: string }) {
         <span className="font-medium">{t("artifacts.tool.failed")}</span>
         {call.path && <code className="min-w-0 truncate font-mono text-subtle">{call.path}</code>}
       </div>
-      {error && <pre className="mt-0.5 ml-5 max-h-40 overflow-auto font-mono text-[11px] whitespace-pre-wrap text-danger opacity-80">{error}</pre>}
+      {error && <pre className="mt-0.5 ml-5 max-h-40 overflow-auto font-mono text-caption/[inherit] whitespace-pre-wrap text-danger opacity-80">{error}</pre>}
     </div>
   );
 }

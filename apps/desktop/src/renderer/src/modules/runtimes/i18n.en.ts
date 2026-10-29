@@ -1,0 +1,37 @@
+// English strings of ./i18n.ts, apart from the zh-CN source so they stay out of the entry chunk: they load with the
+// en catalog (i18n/index.tsx), only when the UI or a search needs English (0.2.0 beta perf audit, 2026-10-24).
+import type { zhCN } from "./i18n";
+
+export const en: Record<keyof typeof zhCN, string> = {
+  "runtimes.current": "New {{agents}} use",
+  "runtimes.noCurrent": "Not installed or no default selected",
+  "runtimes.unused": "{n} unused old versions can be cleaned up",
+  "runtimes.nativeDependency": "Standalone executable; no Python or Node required",
+  "runtimes.bundledPython": "Bundled Python (included since claude-r28)",
+  "runtimes.pythonUnknown": "Host-managed Python; this version reports no bundled dependency",
+  "runtimes.cli": "Claude CLI: {source} · {version}",
+  "runtimes.cliUnknown": "Host has not reported the Claude CLI source or version",
+  "runtimes.bundled": "Bundled",
+  "runtimes.system": "System",
+  "runtimes.dshUsage": "For {{agents}} using a DSH Profile (DeepSeek)",
+  "runtimes.dshProfile": "Settings → Profile → New → choose DSH as the type",
+  "runtimes.kimiUsage": "For Kimi variants of Kimi / Moonshot Profiles (and Profiles signed in with a Kimi account)",
+  "runtimes.kimiProfile": "Settings → Profile → New → choose Kimi Code or Moonshot as the provider and tick Kimi",
+  "runtimes.kimiDependency": "Kimi Code is a pinned version shipped with the component and never updates itself; it runs on the host's Node",
+  "runtimes.node": "Node ≥ {minimum} · current {version}",
+  "runtimes.nodeUnknown": "Node requirements and detection are reported by the host component",
+  "runtimes.title": "Installed runtimes",
+  "runtimes.description": "Runtime versions and the {{agents}} using each",
+  "runtimes.installed": "Installed runtimes",
+  "runtimes.hint": "Old versions no {{agent}} uses can be cleaned up on the host",
+  "runtimes.native": "Codex runtimes",
+  "runtimes.claude": "Claude runtimes",
+  "runtimes.none": "None",
+  "runtimes.selected": "current",
+  "runtimes.selectedHint": "New {{agents}} start on this version",
+  "runtimes.missing": "files deleted",
+  "runtimes.missingHint": "{{Agents}} are pinned to this version but its files are gone; repair them under Upgrade {{agents}}",
+  "runtimes.agents": "{n} {{agents}}",
+  "runtimes.noAgents": "no {{agents}}",
+  "runtimes.moreAgents": "{n} more",
+};

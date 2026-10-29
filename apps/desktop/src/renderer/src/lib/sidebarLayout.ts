@@ -24,6 +24,13 @@ export interface GroupLayout {
   mode: "full" | "collapsed";
   /** Full rows (Director, pins, agents that want the owner, the open agent unless it is online idle, …), in the group's order. */
   full: AgentRow[];
+  /** The `full` rows drawn big (IM row with the preview line; `bigRow`), in the group's order. */
+  big: AgentRow[];
+  /**
+   * The other `full` rows (recently active, finished, fresh, …): compact one-line rows, newest first;
+   * past RECENT_CAP they fold into 「最近活跃 +N」 (`capRecent`).
+   */
+  recent: AgentRow[];
   /** Running agents that need nothing: compact rows or the 运行中 avatar row (`prefs.running`). */
   running: AgentRow[];
   /** Online idle agents idle for IDLE_FOLD_AFTER_MS or longer, folded into 「N 个空闲」 (the open agent and finished turns not seen yet stay in here too; unconfirmed rows their snapshot put here). */
@@ -141,7 +148,38 @@ export function layoutGroup(group: SidebarGroup, ctx: LayoutContext, starred: bo
     }
   }
   full.sort(compareRows);
-  return { group, starred, full, running, idle, idleSelected, idleDone, offline, runningCount, needsYouCount, attentionCount, hasSelected, lastActivity };
+  const big: AgentRow[] = [];
+  const recent: AgentRow[] = [];
+  for (const row of full) (bigRow(row, ctx.signalOf(rowKey(row)) ?? agentSignal(row, undefined, undefined)) ? big : recent).push(row);
+  const lastOfRow = (r: AgentRow) => ctx.lastOf?.(r) ?? r.lastActivity;
+  recent.sort((a, b) => lastOfRow(b) - lastOfRow(a) || compareRows(a, b));
+  return { group, starred, full, big, recent, running, idle, idleSelected, idleDone, offline, runningCount, needsYouCount, attentionCount, hasSelected, lastActivity };
+}
+
+/**
+ * Which full rows get the big IM row (avatar, name, preview line): the Director, pinned agents, agents
+ * that need the owner or failed, and running ones (owner 2026-10-21, sidebar density). Every other
+ * full row (recently active, finished turn, fresh) is a compact one-line row.
+ */
+export function bigRow(row: Pick<AgentRow, "isDirector" | "pinned" | "status">, signal: AgentSignal): boolean {
+  return row.isDirector || row.pinned || signal === "needsYou" || signal === "error" || signal === "running" || row.status === "running";
+}
+
+/** Compact recently-active rows a group lists before the rest fold into 「最近活跃 +N」. */
+export const RECENT_CAP = 6;
+
+/**
+ * The group's compact recent rows split for 「最近活跃 +N」: the first `cap`, plus any later row `keep`
+ * holds (the open agent, a fresh one: opening never hides a row) shown; the rest hidden. Expanded or
+ * searching: every row shown.
+ */
+export function capRecent<T>(rows: readonly T[], opts: { cap?: number; expanded?: boolean; searching?: boolean; keep?(row: T): boolean } = {}): { shown: T[]; hidden: T[] } {
+  const cap = opts.cap ?? RECENT_CAP;
+  if (opts.expanded || opts.searching || rows.length <= cap) return { shown: [...rows], hidden: [] };
+  const shown: T[] = [];
+  const hidden: T[] = [];
+  rows.forEach((row, i) => (i < cap || opts.keep?.(row) ? shown : hidden).push(row));
+  return { shown, hidden };
 }
 
 function recentlyActive(last: number, now: number | undefined): boolean {

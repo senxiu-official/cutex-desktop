@@ -46,7 +46,8 @@ const stripExt = (p) => p.replace(/\.(?:tsx?|jsx?|mjs)$/, "").replace(/[\\/]inde
 export function readHostTable(file = PACK_HOST_FILE) {
   const text = readFileSync(file, "utf8");
   const imports = new Map();
-  for (const m of text.matchAll(/^import \* as (\w+) from "([^"]+)";$/gm)) imports.set(m[1], m[2]);
+  // \r?: a CRLF checkout (core.autocrlf on Windows) reads the same.
+  for (const m of text.matchAll(/^import \* as (\w+) from "([^"]+)";\r?$/gm)) imports.set(m[1], m[2]);
   const block = /PACK_HOST_MODULES[^=]*=\s*Object\.freeze\(\{([\s\S]*?)\}\)/.exec(text);
   if (!block) throw new Error(`${file}: no PACK_HOST_MODULES table`);
   const bare = new Set();
@@ -110,7 +111,10 @@ function hostPlugin({ id, moduleDir, table, cssFile, packJson, extraMessages }) 
       }
       const r = await this.resolve(source, importer, { ...options, skipSelf: true });
       if (!r || r.external) return r;
-      const file = r.id.split("?")[0];
+      // The bundler's ids use "/" on Windows (D:/…); the host table, RENDERER_SRC and moduleDir are path.resolve's
+      // (D:\…). Compared as they came, no app file matched its host entry and the guard below never fired: the app's
+      // own code was bundled into the pack (6 MB) instead of being read from the host.
+      const file = r.id.startsWith("\0") ? r.id.split("?")[0] : resolve(r.id.split("?")[0]);
       const spec = table.files.get(stripExt(file));
       if (spec) return HOST_PREFIX + spec;
       const from = importer.startsWith("\0") ? "the pack entry" : where(importer);
@@ -128,7 +132,10 @@ function hostPlugin({ id, moduleDir, table, cssFile, packJson, extraMessages }) 
         ];
         const i18n = ["i18n.ts", "i18n.tsx"].map((f) => join(moduleDir, f)).find(existsSync);
         if (i18n) {
-          lines.push(`import { zhCN as __zhCN, en as __en } from ${JSON.stringify(i18n)};`);
+          // en lives in i18n.en.ts (kept out of the app entry chunk, perf audit 2026-10-24); older layouts keep it in i18n.ts.
+          const enFile = join(moduleDir, "i18n.en.ts");
+          lines.push(`import { zhCN as __zhCN } from ${JSON.stringify(i18n)};`);
+          lines.push(`import { en as __en } from ${JSON.stringify(existsSync(enFile) ? enFile : i18n)};`);
           lines.push(`export const messages = { "zh-CN": __zhCN, en: __en, ...${JSON.stringify(extraMessages)} };`);
         } else {
           lines.push(`export const messages = ${JSON.stringify(extraMessages)};`);
@@ -289,8 +296,10 @@ export async function buildPack(id, outDir, opts = {}) {
       const out = {};
       const src = ["i18n.ts", "i18n.tsx"].map((f) => join(moduleDir, f)).find(existsSync);
       if (!src) return undefined;
-      const text = readFileSync(src, "utf8");
-      // zh-CN block first, then en (modules/<id>/i18n.ts: `export const zhCN = {…}` then `export const en … = {…}`).
+      const enFile = join(moduleDir, "i18n.en.ts");
+      const text = readFileSync(src, "utf8") + (existsSync(enFile) ? `
+${readFileSync(enFile, "utf8")}` : "");
+      // zh-CN block first, then en (modules/<id>/i18n.ts `export const zhCN = {…}`, then i18n.en.ts `export const en … = {…}`).
       const enAt = text.search(/^export const en\b/m);
       for (const [locale, part] of [["zh-CN", text.slice(0, enAt < 0 ? undefined : enAt)], ["en", enAt < 0 ? "" : text.slice(enAt)]]) {
         const m = new RegExp(`^\\s*"${id.replace(/-/g, "\\-")}\\.${key}":\\s*("(?:[^"\\\\]|\\\\.)*"),?\\s*$`, "m").exec(part);

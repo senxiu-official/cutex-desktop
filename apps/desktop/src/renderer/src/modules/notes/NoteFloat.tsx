@@ -1,3 +1,4 @@
+import { isImeComposing } from "../../lib/ime";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { StickyNote, X } from "lucide-react";
@@ -11,8 +12,11 @@ import { NoteCard } from "./NoteCard";
 import { NoteEditor } from "./NoteEditor";
 import { turnDraftKey, useNoteDrafts, useNotesQuery } from "./store";
 import { noteErrorText } from "./errors";
+import { isElement } from "../../lib/ownerWindow";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 function FloatingCard({ active }: { active: FloatState }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const box = useRef<HTMLDivElement>(null);
   const origin = useRef<HTMLSpanElement>(null);
@@ -33,24 +37,24 @@ function FloatingCard({ active }: { active: FloatState }) {
   }, [active.id, active.turnId]);
   const visible = !!position;
   useLayoutEffect(() => {
-    if (visible && !box.current?.contains(document.activeElement)) box.current?.focus({ preventScroll: true });
-  }, [visible]);
+    if (visible && !box.current?.contains(win.document.activeElement)) box.current?.focus({ preventScroll: true });
+  }, [visible, win]);
   useEffect(() => {
     const outside = (event: PointerEvent) => {
       const target = event.target as Node;
       if (box.current?.contains(target) || active.trigger?.contains(target)) return;
-      if (target instanceof Element && target.closest('[role="menu"],[role="listbox"],[role="dialog"],[role="alertdialog"]')) return;
+      if (isElement(target) && target.closest('[role="menu"],[role="listbox"],[role="dialog"],[role="alertdialog"]')) return;
       close(false);
     };
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented || event.repeat || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
-      if (document.querySelector('[role="menu"],[role="listbox"],[role="alertdialog"]')) return;
+      if (event.key !== "Escape" || event.defaultPrevented || event.repeat || isImeComposing(event) || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+      if (win.document.querySelector('[role="menu"],[role="listbox"],[role="alertdialog"]')) return;
       event.preventDefault(); close();
     };
-    window.addEventListener("pointerdown", outside, true);
-    window.addEventListener("keydown", escape);
-    return () => { window.removeEventListener("pointerdown", outside, true); window.removeEventListener("keydown", escape); };
-  }, [active]);
+    win.addEventListener("pointerdown", outside, true);
+    win.addEventListener("keydown", escape);
+    return () => { win.removeEventListener("pointerdown", outside, true); win.removeEventListener("keydown", escape); };
+  }, [active, win]);
   return <><span ref={origin} hidden aria-hidden="true" />{position && createPortal(<div ref={box} role="dialog" aria-modal="false" aria-label={t("notes.floating")} tabIndex={-1} data-note-float
     className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-card-border bg-background text-foreground shadow-2xl outline-none" style={position}>
     <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
@@ -64,8 +68,8 @@ function FloatingCard({ active }: { active: FloatState }) {
         {notes.map(note => <NoteCard key={note.id} hostId={active.hostId} note={note} onDismissEditor={() => close()} />)}
       </>}
     </div>
-    {position.maxHeight >= 260 && <p className="shrink-0 border-t border-border px-3 py-2 text-[11px] text-subtle">{t("notes.floatHint")}</p>}
-  </div>, document.body)}</>;
+    {position.maxHeight >= 260 && <p className="shrink-0 border-t border-border px-3 py-2 text-caption/[inherit] text-subtle">{t("notes.floatHint")}</p>}
+  </div>, win.document.body)}</>;
 }
 
 /** Existing conversation.overlay slot, but always zero reserved space. */

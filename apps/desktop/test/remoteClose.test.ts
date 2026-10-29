@@ -13,7 +13,9 @@ import {
   clientStateChangeOf,
   closeGate,
   closeRequestFor,
+  dropRelaunchLeftovers,
   presenceDelayMs,
+  QUIT_WATCHDOG_MS,
   presenceRetryable,
   RemoteCloseCountdown,
   REPORT_TIMEOUT_MS,
@@ -22,7 +24,7 @@ import {
   type OnlineClientView,
   type RemoteCloseView,
 } from "../src/shared/remoteClose";
-import { ClientPresenceService, loadInstallId } from "../src/main/clientPresence";
+import { ClientPresenceService, EXIT_REPORT_TIMEOUT_MS, loadInstallId } from "../src/main/clientPresence";
 import { parsePrefs } from "../src/shared/shell";
 
 const ME = "11111111-2222-4333-8444-555555555555";
@@ -41,10 +43,10 @@ describe("wire", () => {
   });
 
   it("presence reply: heartbeat clamped, default 60", () => {
-    expect(readClientPresenceReply({ instanceId: ME, heartbeatSeconds: 60 }, ME)).toEqual({ instanceId: ME, heartbeatSeconds: 60 });
+    expect(readClientPresenceReply({ instanceId: ME, heartbeatSeconds: 60 }, ME)).toEqual({ instanceId: ME, heartbeatSeconds: 60, state: "online", closeRequest: null });
     expect(readClientPresenceReply({ heartbeatSeconds: 1 }, ME).heartbeatSeconds).toBe(15);
     expect(readClientPresenceReply({ heartbeatSeconds: 99999 }, ME).heartbeatSeconds).toBe(600);
-    expect(readClientPresenceReply(null, ME)).toEqual({ instanceId: ME, heartbeatSeconds: 60 });
+    expect(readClientPresenceReply(null, ME)).toEqual({ instanceId: ME, heartbeatSeconds: 60, state: "online", closeRequest: null });
   });
 
   it("client list: tolerant rows, unknown state reads online, rows without id dropped", () => {
@@ -249,7 +251,8 @@ describe("ClientPresenceService", () => {
     svc.onHostEvent("local", closeReq(OTHER));
     expect(requested).toEqual([["local", expect.objectContaining({ instanceId: OTHER, graceSeconds: 15 })]]);
     setAllow(false);
-    svc.onHostEvent("local", closeReq(OTHER));
+    // A repeat of the same request is deduplicated; a new one (another `at`) is declined.
+    svc.onHostEvent("local", closeReq(OTHER, { at: "2026-10-19T10:05:00Z" }));
     await flush();
     expect(requested).toHaveLength(1);
     expect(host.calls).toEqual([{ kind: "closing", outcome: "cancelled", body: { instanceId: OTHER } }]);
@@ -268,17 +271,152 @@ describe("ClientPresenceService", () => {
   });
 });
 
+// ---------- client-presence-lifecycle (r264): closing exited, close requests from the presence reply ----------
+
+describe("ClientPresenceService lifecycle", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const LIFECYCLE = ["client-remote-close", "client-presence-lifecycle"];
+  const AT = "2026-10-26T03:00:00.000Z";
+  const pending = { requestedBy: { deviceName: "host-a", userId: "owner", local: false }, graceSeconds: 20, at: AT };
+
+  function lifecycleHost(features: string[]) {
+    const calls: string[] = [];
+    const state = { reply: {} as Record<string, unknown>, hang: false };
+    const client = {
+      clientPresence: vi.fn(async (body: Record<string, unknown>) => {
+        calls.push("presence");
+        return { instanceId: body.instanceId, heartbeatSeconds: 60, state: "online", closeRequest: null, ...state.reply };
+      }),
+      reportClientClosing: vi.fn((_instanceId: string, outcome: string) => {
+        calls.push(`closing ${outcome}`);
+        return state.hang ? new Promise<void>(() => {}) : Promise.resolve();
+      }),
+    };
+    return { calls, state, client, daemon: { capabilities: vi.fn(async () => ({ featureList: features })), activeClient: () => client } };
+  }
+
+  function setup(hostFeatures: Record<string, string[]>) {
+    const hosts = Object.fromEntries(Object.entries(hostFeatures).map(([id, f]) => [id, lifecycleHost(f)]));
+    const requested: [string, ClientCloseRequested][] = [];
+    let allow = true;
+    const svc = new ClientPresenceService({
+      daemonFor: (hostId) => (hosts[hostId]?.daemon as never) ?? null,
+      allowRemoteClose: () => allow,
+      identity: () => IDENTITY,
+      onCloseRequested: (hostId, r) => requested.push([hostId, r]),
+    });
+    for (const id of Object.keys(hosts)) svc.onDaemonState(id, { ...connected, hostId: id });
+    return { hosts, svc, requested, setAllow: (v: boolean) => (allow = v) };
+  }
+
+  it("a presence reply carrying closeRequest starts the countdown; the event and later beats do not double it", async () => {
+    const { hosts, svc, requested } = setup({ local: LIFECYCLE });
+    hosts.local!.state.reply = { state: "closeRequested", closeRequest: pending };
+    await flush();
+    expect(requested).toEqual([["local", { instanceId: OTHER, ...pending }]]);
+    // The event for the same request arrives late; the next heartbeat still reports it.
+    svc.onHostEvent("local", closeReq(OTHER, { at: AT, graceSeconds: 20 }));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(hosts.local!.calls.filter((c) => c === "presence")).toHaveLength(2);
+    expect(requested).toHaveLength(1);
+    // A new request (another `at`) is a new countdown request.
+    hosts.local!.state.reply = { state: "closeRequested", closeRequest: { ...pending, at: "2026-10-26T03:05:00.000Z" } };
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(requested).toHaveLength(2);
+  });
+
+  it("the event first, then the reply with the same request: handled once", async () => {
+    const { hosts, svc, requested } = setup({ local: LIFECYCLE });
+    await flush();
+    svc.onHostEvent("local", closeReq(OTHER, { at: AT }));
+    hosts.local!.state.reply = { state: "closeRequested", closeRequest: pending };
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(requested).toHaveLength(1);
+  });
+
+  it("a reply's close request while remote close is off: declined with cancelled, once", async () => {
+    const { hosts, requested, setAllow } = setup({ local: LIFECYCLE });
+    setAllow(false);
+    hosts.local!.state.reply = { state: "closeRequested", closeRequest: pending };
+    await flush();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(requested).toHaveLength(0);
+    expect(hosts.local!.calls.filter((c) => c.startsWith("closing"))).toEqual(["closing cancelled"]);
+  });
+
+  it("without the feature: no exited call and the quit is not held", async () => {
+    const { hosts, svc } = setup({ local: ["client-remote-close"] });
+    await flush();
+    const hold = vi.fn();
+    const quitAgain = vi.fn();
+    expect(svc.beforeQuit(hold, quitAgain)).toBe(false);
+    expect(hold).not.toHaveBeenCalled();
+    await svc.reportExited();
+    expect(hosts.local!.calls).toEqual(["presence"]);
+  });
+
+  it("with the feature: before-quit holds, sends exited once, then quits again; the second pass goes on", async () => {
+    const { hosts, svc } = setup({ local: LIFECYCLE });
+    await flush();
+    const hold = vi.fn();
+    const quitAgain = vi.fn();
+    expect(svc.beforeQuit(hold, quitAgain)).toBe(true);
+    expect(hold).toHaveBeenCalledTimes(1);
+    // Another quit while reporting: held too, no second round.
+    expect(svc.beforeQuit(hold, quitAgain)).toBe(true);
+    await flush();
+    expect(quitAgain).toHaveBeenCalledTimes(1);
+    expect(hosts.local!.client.reportClientClosing).toHaveBeenCalledTimes(1);
+    expect(hosts.local!.client.reportClientClosing).toHaveBeenCalledWith(OTHER, "exited", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(svc.beforeQuit(hold, quitAgain)).toBe(false);
+    // No heartbeat after exited (the host fences the id).
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(hosts.local!.calls.filter((c) => c === "presence")).toHaveLength(1);
+  });
+
+  it("hung hosts never hold the quit beyond the timeout; hosts are called in parallel; legacy hosts skipped", async () => {
+    const { hosts, svc } = setup({ a: LIFECYCLE, b: LIFECYCLE, old: ["client-remote-close"], none: [] });
+    await flush();
+    hosts.a!.state.hang = true;
+    hosts.b!.state.hang = true;
+    const quitAgain = vi.fn();
+    expect(svc.beforeQuit(() => {}, quitAgain)).toBe(true);
+    // Both calls are out before either settles.
+    expect(hosts.a!.calls.at(-1)).toBe("closing exited");
+    expect(hosts.b!.calls.at(-1)).toBe("closing exited");
+    expect(hosts.old!.client.reportClientClosing).not.toHaveBeenCalled();
+    expect(hosts.none!.client.reportClientClosing).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(EXIT_REPORT_TIMEOUT_MS - 1);
+    expect(quitAgain).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(quitAgain).toHaveBeenCalledTimes(1);
+    expect(EXIT_REPORT_TIMEOUT_MS).toBeLessThanOrEqual(800);
+  });
+
+  it("a host whose connection ended is not called", async () => {
+    const { hosts, svc } = setup({ a: LIFECYCLE, b: LIFECYCLE });
+    await flush();
+    svc.forgetHost("b");
+    await svc.reportExited();
+    expect(hosts.a!.client.reportClientClosing).toHaveBeenCalledTimes(1);
+    expect(hosts.b!.client.reportClientClosing).not.toHaveBeenCalled();
+  });
+});
+
 // ---------- the countdown ----------
 
 describe("RemoteCloseCountdown", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  function setup(report?: (hostId: string, instanceId: string, outcome: string) => Promise<void>) {
+  function setup(report?: (hostId: string, instanceId: string, outcome: string) => Promise<void>, forceQuit?: () => void) {
     const reports: string[] = [];
     const views: (RemoteCloseView | null)[] = [];
     const quit = vi.fn();
     const c = new RemoteCloseCountdown({
+      ...(forceQuit ? { forceQuit } : {}),
       now: () => Date.now(),
       setTimer: (run, ms) => setTimeout(run, ms),
       clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
@@ -301,6 +439,28 @@ describe("RemoteCloseCountdown", () => {
     expect(reports).toEqual([`local ${ME} closing`]);
     expect(quit).toHaveBeenCalledTimes(1);
     expect(views.at(-1)).toMatchObject({ closing: true });
+  });
+
+  it("a quit that does not end the app is forced after the watchdog (the dialog never stays at 正在关闭)", async () => {
+    const forceQuit = vi.fn();
+    const { c, quit } = setup(undefined, forceQuit);
+    c.request("local", req());
+    await c.answer("now");
+    expect(quit).toHaveBeenCalledTimes(1);
+    c.dispose(); // will-quit runs dispose(); the watchdog must survive it
+    await vi.advanceTimersByTimeAsync(QUIT_WATCHDOG_MS - 1);
+    expect(forceQuit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(forceQuit).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancel never arms the quit watchdog", async () => {
+    const forceQuit = vi.fn();
+    const { c } = setup(undefined, forceQuit);
+    c.request("local", req());
+    await c.answer("cancel");
+    await vi.advanceTimersByTimeAsync(QUIT_WATCHDOG_MS * 2);
+    expect(forceQuit).not.toHaveBeenCalled();
   });
 
   it("cancel: reports cancelled, never quits, view cleared", async () => {
@@ -421,5 +581,32 @@ describe("closeGate", () => {
     const rows = [row({ instanceId: "a" }), row({ instanceId: "b" })];
     expect(applyClientState(rows, { instanceId: "b", state: "closing" }).map((r) => r.state)).toEqual(["online", "closing"]);
     expect(applyClientState(rows, { instanceId: "zz", state: "closing" })).toBe(rows);
+    expect(applyClientState(rows, { instanceId: "b", state: "exited" }).map((r) => r.instanceId)).toEqual(["a"]);
+    expect(applyClientState(rows, { instanceId: "zz", state: "exited" })).toBe(rows);
+  });
+});
+
+describe("dropRelaunchLeftovers", () => {
+  const T = (min: number) => new Date(Date.UTC(2026, 9, 26, 2, min)).toISOString();
+  const launch = (instanceId: string, connected: number, seen: number, patch: Partial<OnlineClientView> = {}) =>
+    row({ instanceId, installId: "inst-remote", tokenId: "mct-t", deviceName: "remote", connectedSince: T(connected), lastSeen: T(seen), ...patch });
+
+  it("hides an older launch of the same install that stopped beating before the newest launch connected", () => {
+    const rows = [launch("old", 0, 9), launch("new", 10, 12)];
+    expect(dropRelaunchLeftovers(rows).map((r) => r.instanceId)).toEqual(["new"]);
+  });
+  it("keeps an older launch that still beats after the new one connected (a second running instance)", () => {
+    const rows = [launch("old", 0, 11), launch("new", 10, 12)];
+    expect(dropRelaunchLeftovers(rows)).toBe(rows);
+  });
+  it("keeps other installs and other credentials on the same device", () => {
+    const rows = [launch("old", 0, 9), launch("dev", 0, 9, { installId: "inst-dev" }), launch("other-token", 0, 9, { tokenId: "mct-x" }), launch("new", 10, 12)];
+    expect(dropRelaunchLeftovers(rows).map((r) => r.instanceId)).toEqual(["dev", "other-token", "new"]);
+  });
+  it("never hides this desktop's row or rows without both times", () => {
+    expect(dropRelaunchLeftovers([launch("self", 0, 9, { self: true }), launch("new", 10, 12)])).toHaveLength(2);
+    expect(dropRelaunchLeftovers([launch("a", 0, 9, { connectedSince: null }), launch("new", 10, 12)])).toHaveLength(2);
+    expect(dropRelaunchLeftovers([launch("a", 0, 9, { lastSeen: null }), launch("new", 10, 12)])).toHaveLength(2);
+    expect(dropRelaunchLeftovers([launch("a", 0, 9, { installId: "" }), launch("new", 10, 12, { installId: "" })])).toHaveLength(2);
   });
 });

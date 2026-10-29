@@ -1,4 +1,21 @@
 export const zhCN = {
+  "runtimes.current": "新{{agent}}使用",
+  "runtimes.noCurrent": "未安装或未设置默认版本",
+  "runtimes.unused": "{n} 个旧版本未使用，可清理",
+  "runtimes.nativeDependency": "独立可执行文件，无需 Python 或 Node",
+  "runtimes.bundledPython": "内置 Python（claude-r28 起随运行时提供）",
+  "runtimes.pythonUnknown": "Python 由主机管理；此版本未报告内置依赖",
+  "runtimes.cli": "Claude CLI：{source} · {version}",
+  "runtimes.cliUnknown": "主机未报告 Claude CLI 来源与版本",
+  "runtimes.bundled": "内置",
+  "runtimes.system": "系统",
+  "runtimes.dshUsage": "给 DSH Profile（DeepSeek）的{{agent}}使用",
+  "runtimes.dshProfile": "设置 → Profile → 新建 → 类型选 DSH",
+  "runtimes.kimiUsage": "给 Kimi / Moonshot Profile 的 Kimi 变体（以及 Kimi 账户登录的 Profile）使用",
+  "runtimes.kimiProfile": "设置 → Profile → 新建 → 服务商选 Kimi Code 或 Moonshot，勾选 Kimi",
+  "runtimes.kimiDependency": "Kimi Code 是随组件提供的固定版本，不会自动升级；它要用主机上的 Node",
+  "runtimes.node": "Node ≥ {minimum} · 当前 {version}",
+  "runtimes.nodeUnknown": "Node 版本要求与检测结果由主机组件提供",
   "runtimes.title": "已安装的运行时",
   "runtimes.description": "各运行时版本和用着它们的{{agent}}",
   "runtimes.installed": "已安装的运行时",
@@ -20,20 +37,3 @@ declare module "../i18nCatalog" {
   interface ModuleMessages extends Messages {}
 }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "runtimes.title": "Installed runtimes",
-  "runtimes.description": "Runtime versions and the {{agents}} using each",
-  "runtimes.installed": "Installed runtimes",
-  "runtimes.hint": "Old versions no {{agent}} uses can be cleaned up on the host",
-  "runtimes.native": "Codex runtimes",
-  "runtimes.claude": "Claude runtimes",
-  "runtimes.none": "None",
-  "runtimes.selected": "current",
-  "runtimes.selectedHint": "New {{agents}} start on this version",
-  "runtimes.missing": "files deleted",
-  "runtimes.missingHint": "{{Agents}} are pinned to this version but its files are gone; repair them under Upgrade {{agents}}",
-  "runtimes.agents": "{n} {{agents}}",
-  "runtimes.noAgents": "no {{agents}}",
-  "runtimes.moreAgents": "{n} more",
-};

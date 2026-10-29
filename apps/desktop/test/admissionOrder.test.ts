@@ -10,6 +10,9 @@ import { parseQueueMoveError, queueMoveErrorKind, queueMoveErrorMessage } from "
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";
 import { en } from "../src/renderer/src/i18n/en";
 import { viewKey } from "../src/renderer/src/lib/viewKey";
+// The store at the top (bridge mocked — vi.mock is hoisted), not inside the first store test: loading it there cost
+// that test up to 2.3 s alone and timed it out (5 s) under the full suite's load. Same single instance as before.
+import { useApp } from "../src/renderer/src/store";
 
 const api = vi.hoisted(() => ({
   queueMove: vi.fn(async (..._args: unknown[]): Promise<unknown> => ({})),
@@ -40,6 +43,17 @@ describe("turn groups", () => {
     expect(first.key).toBe("cm-A");
     const ask = turns[1]!;
     expect(ask.kind === "ask" && ask.ask?.askId).toBe("B");
+  });
+
+  it("a queued delegation its record shows cancelled / closed leaves at once, before cutex's list catches up (owner 2026-10-24, #83)", () => {
+    const items = [askItem("B", 1), askItem("C", 2), askItem("D", 3), askItem("E", 4)];
+    const asks = {
+      B: { ...summary("B", 1), execution: "cancelled", closed: "stopped" },
+      C: { ...summary("C", 2), execution: "queued", closed: "abandoned" },
+      D: { ...summary("D", 3), execution: "queued", closed: null },
+    } as Record<string, AskSummary>;
+    // E: no record loaded yet — cutex's list decides.
+    expect(turnGroups({ revision: 1, items }, [], asks).turns.map((r) => r.entry.id)).toEqual(["D", "E"]);
   });
 
   it("leaves out hidden owner turns, keeps unknown asks and their notes, appends owner items the list lacks", () => {
@@ -246,7 +260,6 @@ describe("store queueMove", () => {
   afterEach(() => vi.useRealTimers());
 
   async function seed() {
-    const { useApp } = await import("../src/renderer/src/store");
     useApp.setState({ selectedId: "s", features: new Set(["admission-order"]), sessions: { [viewKey("local", "s")]: { queue: [queued("A"), queued("c"), queued("e")], admission } as never } });
     return useApp;
   }
@@ -265,7 +278,6 @@ describe("store queueMove", () => {
   });
 
   it("sends the order revision (not the snapshot revision) as the move's CAS", async () => {
-    const { useApp } = await import("../src/renderer/src/store");
     useApp.setState({ selectedId: "s", features: new Set(["admission-order"]), sessions: { [viewKey("local", "s")]: { queue: [queued("A"), queued("c"), queued("e")], admission: { ...admission, revision: 40, orderRevision: 9 } } as never } });
     api.queueMove.mockResolvedValueOnce({});
     await useApp.getState().queueMove(queued("c"), { kind: "owner", id: "A" });
@@ -313,18 +325,25 @@ describe("rideAlongLabel", () => {
 
 describe("rideAlongView", () => {
   it("the most specific text: preview, else a non-generic label; the sender beside it", () => {
-    expect(rideAlongView({ deliveryKind: "tell", label: "please review", from: "Reviewer", preview: "please review" })).toEqual({ kind: "tell", from: "Reviewer", text: "please review", note: null });
-    expect(rideAlongView({ deliveryKind: "alarm", label: "stand-up", preview: "stand-up" })).toEqual({ kind: "alarm", from: null, text: "stand-up", note: null });
+    expect(rideAlongView({ deliveryKind: "tell", label: "please review", from: "Reviewer", preview: "please review" })).toEqual({ kind: "tell", from: "Reviewer", fromId: null, text: "please review", note: null });
+    expect(rideAlongView({ deliveryKind: "alarm", label: "stand-up", preview: "stand-up" })).toEqual({ kind: "alarm", from: null, fromId: null, text: "stand-up", note: null });
     // A control-type description stays as the tooltip next to the preview.
-    expect(rideAlongView({ deliveryKind: "bus", label: "Start message", from: "Agent Management System", preview: "set up the repo" })).toEqual({ kind: "bus", from: "Agent Management System", text: "set up the repo", note: "Start message" });
+    expect(rideAlongView({ deliveryKind: "bus", label: "Start message", from: "Agent Management System", preview: "set up the repo" })).toEqual({ kind: "bus", from: "Agent Management System", fromId: null, text: "set up the repo", note: "Start message" });
     expect(rideAlongView({ deliveryKind: "bus", label: "Job job-1 failed (exit 2)", preview: "Job job-1 failed (exit 2)", askId: "ask-1" }).kind).toBe("status");
   });
 
   it("a cross-host tell is a peer message; an older cutex's generic labels leave no text (the row falls back)", () => {
     expect(rideAlongView({ deliveryKind: "tell", label: "see the log", from: "worker@alpha", fromHost: "alpha", preview: "see the log" }).kind).toBe("peer");
-    expect(rideAlongView({ deliveryKind: "bus", label: "Bus delivery" })).toEqual({ kind: "bus", from: null, text: null, note: null });
+    expect(rideAlongView({ deliveryKind: "bus", label: "Bus delivery" })).toEqual({ kind: "bus", from: null, fromId: null, text: null, note: null });
     expect(rideAlongView({ deliveryKind: "tell", label: "Agent message" }).text).toBeNull();
-    expect(rideAlongView({ deliveryKind: "alarm", label: "Alarm", from: "  " })).toEqual({ kind: "alarm", from: null, text: null, note: null });
+    expect(rideAlongView({ deliveryKind: "alarm", label: "Alarm", from: "  " })).toEqual({ kind: "alarm", from: null, fromId: null, text: null, note: null });
+  });
+
+  it("the sender's agent id (cutex fromCutexSessionId) gives the row an avatar; never without a name or across hosts", () => {
+    expect(rideAlongView({ deliveryKind: "tell", label: "hi", from: "Mika", fromCutexSessionId: " mika ", preview: "hi" }).fromId).toBe("mika");
+    expect(rideAlongView({ deliveryKind: "tell", label: "hi", from: "Mika", preview: "hi" }).fromId).toBeNull();
+    expect(rideAlongView({ deliveryKind: "tell", label: "hi", from: "", fromCutexSessionId: "mika", preview: "hi" }).fromId).toBeNull();
+    expect(rideAlongView({ deliveryKind: "tell", label: "hi", from: "worker@alpha", fromHost: "alpha", fromCutexSessionId: "w", preview: "hi" }).fromId).toBeNull();
   });
 });
 

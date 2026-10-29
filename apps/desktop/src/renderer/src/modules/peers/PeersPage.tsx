@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { PEER_LABEL, PEERS_SETTINGS_RANGE, type PeerInvite, type PeersSettings, type PeerView } from "../../../../shared/peers";
 import { MaskedText } from "../../components/MaskedText";
-import { Button, EmptyState, ErrorNote, ListRow, Loading, Notice, NumberField, Section, SettingRow, TextInput, Toggle } from "../../components/settings/Form";
+import { Button, EmptyState, ErrorNote, ListRow, Loading, Notice, NumberField, Section, SettingRow, SettingsGroup, TextInput, Toggle } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { formatSpan } from "../../lib/delegations";
 import { settingsAnchorId } from "../../lib/settingsNav";
@@ -39,7 +39,7 @@ function GlobalSection() {
     setSaving(false);
   };
   const number = (key: keyof typeof PEERS_SETTINGS_RANGE, unit: "hours" | "secs" | null, hint?: MessageKey) => (
-    <SettingRow key={key} label={t(`peers.${key}` as MessageKey)} hint={hint ? t(hint) : undefined}>
+    <SettingRow key={key} agents="now" source="host" label={t(`peers.${key}` as MessageKey)} hint={hint ? t(hint) : undefined}>
       <NumberField value={value?.[key] ?? null} range={PEERS_SETTINGS_RANGE[key]} unit={unit ? t(`peers.unit.${unit}`) : undefined} disabled={readOnly || saving} label={t(`peers.${key}` as MessageKey)} onCommit={(v) => v !== null && void save({ [key]: v })} />
     </SettingRow>
   );
@@ -50,7 +50,7 @@ function GlobalSection() {
       {value === null && <Notice>{t("peers.unsupported")}</Notice>}
       {value && (
         <>
-          <SettingRow label={t("peers.enabled")} hint={lock.locked && !value.enabled ? lock.hint! : t("peers.enabledHint")}>
+          <SettingRow agents="access" source="host" label={t("peers.enabled")} hint={lock.locked && !value.enabled ? lock.hint! : t("peers.enabledHint")}>
             <Toggle checked={value.enabled} disabled={readOnly || saving || (lock.locked && !value.enabled)} label={t("peers.enabled")} onChange={(on) => void save({ enabled: on })} />
           </SettingRow>
           {number("outboxMaxAgeHours", "hours", "peers.outboxMaxAgeHoursHint")}
@@ -86,7 +86,7 @@ function InviteRow() {
   const left = invite ? Math.max(0, Math.floor((Date.parse(invite.expiresAt) - now) / 1000)) : 0;
   return (
     <div className="border-b border-border py-2.5" data-testid="peers-invite">
-      <SettingRow label={t("peers.invite")} hint={lock.hint ?? t("peers.inviteHint")}>
+      <SettingRow agents="access" source="host" label={t("peers.invite")} hint={lock.hint ?? t("peers.inviteHint")}>
         <TextInput value={label} onChange={setLabel} placeholder={t("peers.inviteLabelPlaceholder")} width="w-40" label={t("peers.inviteLabel")} disabled={readOnly || busy || lock.locked} />
         <Button primary onClick={() => void create()} disabled={readOnly || busy || badLabel || lock.locked}>
           {t("peers.inviteCreate")}
@@ -98,7 +98,7 @@ function InviteRow() {
         <div className="mb-1 rounded-lg bg-surface-2/60 px-3 py-2 text-xs">
           <div className="mb-2 flex items-center gap-2 border-b border-border pb-2">
             <span className="w-16 shrink-0 text-subtle">{t("peers.inviteLine")}</span>
-            <span className="min-w-0 flex-1 font-mono text-[11px] break-all select-all" data-testid="peers-invite-line">
+            <span className="min-w-0 flex-1 font-mono text-caption/[inherit] break-all select-all" data-testid="peers-invite-line">
               {inviteText(invite)}
             </span>
             <CopyInviteButton text={inviteText(invite)} disabled={left <= 0} />
@@ -115,15 +115,15 @@ function InviteRow() {
               {invite.urls.length === 0 && <p className="py-1 text-warn">{t("peers.inviteNoUrls")}</p>}
               {invite.urls.map((u) => (
                 <div key={u} className="flex items-center gap-1">
-                  <span className="min-w-0 font-mono text-[11px] break-all">{u}</span>
+                  <span className="min-w-0 font-mono text-caption/[inherit] break-all">{u}</span>
                   <CopyButton text={u} />
                 </div>
               ))}
             </div>
           </div>
           <div className="mt-1 flex items-center gap-2 text-subtle">
-            <span className="flex min-w-0 flex-1 items-center gap-1 truncate font-mono text-[11px]">
-              {invite.hostId} · <MaskedText value={invite.instanceId} keep={7} className="font-mono text-[11px]" testId="peers-invite-instance" />
+            <span className="flex min-w-0 flex-1 items-center gap-1 truncate font-mono text-caption/[inherit]">
+              {invite.hostId} · <MaskedText value={invite.instanceId} keep={7} className="font-mono text-caption/[inherit]" testId="peers-invite-instance" />
             </span>
             <Button onClick={() => setInvite(null)}>{t("peers.inviteDone")}</Button>
           </div>
@@ -165,7 +165,7 @@ function JoinRow({ onJoined }: { onJoined(peer: PeerView): void }) {
     onJoined(peer);
   };
   return (
-    <div className="py-2.5" data-testid="peers-join">
+    <SettingsGroup agents="access" source="host"><div className="py-2.5" data-testid="peers-join">
       <div className="text-sm">{t("peers.join")}</div>
       <div className="text-xs text-subtle">{lock.hint ?? t("peers.joinHint")}</div>
       <div className="mt-2 flex">
@@ -184,7 +184,7 @@ function JoinRow({ onJoined }: { onJoined(peer: PeerView): void }) {
           {target && (
             <p className="text-subtle">
               {t("peers.joinTarget", { host: target.host, port: target.port })}
-              {code.trim() && <span className="font-mono"> · {t("peers.joinCodeShape", { code: code.trim() })}</span>}
+              {code.trim() && <span> · {t("peers.joinCodeShape", { code: code.trim() })}</span>}
             </p>
           )}
           {target && !target.explicitPort && <p className="text-warn">{t("peers.joinNoPort", { port: target.port })}</p>}
@@ -193,7 +193,7 @@ function JoinRow({ onJoined }: { onJoined(peer: PeerView): void }) {
       )}
       {badLabel && <ErrorNote>{t("peers.badLabel")}</ErrorNote>}
       {error && <ErrorNote>{error}</ErrorNote>}
-    </div>
+    </div></SettingsGroup>
   );
 }
 
@@ -284,7 +284,7 @@ function PeerRow({ peer, owner, maxAgeHours, onOpen, onToggle, readOnly }: { pee
           </button>
         </>
       }
-      below={err ? <p className="truncate pb-0.5 pl-0 text-[11px] text-subtle" title={err.title}>{err.text}</p> : undefined}
+      below={err ? <p className="truncate pb-0.5 pl-0 text-caption/[inherit] text-subtle" title={err.title}>{err.text}</p> : undefined}
     />
   );
 }
@@ -343,9 +343,13 @@ export function PeersPage() {
         {peers.unsupported && <Notice>{t("peers.unsupported")}</Notice>}
         {!peers.list && !peers.unsupported && !peers.error && <Loading rows={2} />}
         {peers.list && peers.list.length === 0 && <EmptyState>{t("peers.none")}</EmptyState>}
-        {peers.list?.map((p) => (
-          <PeerRow key={p.id} peer={p} owner={owners.get(p.id)} maxAgeHours={settings.value?.outboxMaxAgeHours ?? null} readOnly={readOnly} onOpen={() => setOpen(p.id)} onToggle={(on) => void toggle(p, on)} />
-        ))}
+        {peers.list && peers.list.length > 0 && (
+          <SettingsGroup agents="access" source="host">
+            {peers.list.map((p) => (
+              <PeerRow key={p.id} peer={p} owner={owners.get(p.id)} maxAgeHours={settings.value?.outboxMaxAgeHours ?? null} readOnly={readOnly} onOpen={() => setOpen(p.id)} onToggle={(on) => void toggle(p, on)} />
+            ))}
+          </SettingsGroup>
+        )}
       </Section>
     </>
   );

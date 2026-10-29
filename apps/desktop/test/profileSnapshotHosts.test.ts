@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const list = (names: string[], defaultProfile: string) => ({ defaultProfile, profiles: names.map((name) => ({ id: name, name, model: null, modelDisplayNames: { m: `${name}-m` } })) });
 const focusApi = { listProfiles: vi.fn(async () => list(["deepseek", "gamma"], "deepseek")), getProfile: vi.fn(async (name: string) => ({ name, host: "local" })), profileModels: vi.fn(async () => null), quotaConfig: vi.fn(async () => null), profileAccount: vi.fn(async () => null) };
 const workstationApi = { listProfiles: vi.fn(async () => list(["gamma"], "gamma")), getProfile: vi.fn(async (name: string) => ({ name, host: "workstation" })), profileModels: vi.fn(async () => null), quotaConfig: vi.fn(async () => null), profileAccount: vi.fn(async () => null) };
-vi.mock("../src/renderer/src/bridge", () => ({ api: focusApi, apiFor: (hostId: string) => (hostId === "workstation" ? workstationApi : focusApi) }));
+const events = new Map<string, (event: never) => void>();
+vi.mock("../src/renderer/src/bridge", () => ({ api: focusApi, apiFor: (hostId: string) => (hostId === "workstation" ? workstationApi : focusApi), bridge: { on: (kind: string, listener: (event: never) => void) => { events.set(kind, listener); return () => {}; } } }));
 const setNames = vi.fn();
 vi.mock("../src/renderer/src/lib/modelDisplay", () => ({ setProfileModelNames: setNames, setProfileNamesLoader: () => {} }));
 
@@ -45,5 +46,28 @@ describe("profile snapshots per host", () => {
     expect(snap.cachedProfileList("workstation")).toBeNull();
     expect(snap.cachedProfile("gamma", "workstation")).toBeNull();
     expect(snap.cachedProfileList()).not.toBeNull();
+  });
+
+  it("a Profile appearance event refreshes that host's list and invalidates its cached editor snapshot", async () => {
+    await snap.loadProfileSnapshot({ id: "gamma", name: "gamma", model: null } as never, "workstation");
+    events.get("hostEvent")!({ hostId: "workstation", envelope: { cutex: { method: "cutex/profiles/changed", params: { profileId: "gamma", fields: ["avatarStyle"] } } } } as never);
+    await vi.waitFor(() => expect(workstationApi.listProfiles).toHaveBeenCalledTimes(1));
+    expect(snap.cachedProfile("gamma", "workstation")).toBeNull();
+    expect(focusApi.listProfiles).not.toHaveBeenCalled();
+  });
+
+  it("reconnect refreshes a known host's Profile styles after an event gap", async () => {
+    await snap.loadProfileList("workstation");
+    workstationApi.listProfiles.mockClear();
+    events.get("daemonState")!({ hostId: "workstation", state: { kind: "connected" } } as never);
+    await vi.waitFor(() => expect(workstationApi.listProfiles).toHaveBeenCalledTimes(1));
+    expect(focusApi.listProfiles).not.toHaveBeenCalled();
+  });
+
+  it("a host stream gap refreshes styles even while the connection remains live", async () => {
+    await snap.loadProfileList("workstation"); workstationApi.listProfiles.mockClear();
+    events.get("hostResync")!({ hostId: "workstation", reason: "cursor_expired" } as never);
+    await vi.waitFor(() => expect(workstationApi.listProfiles).toHaveBeenCalledTimes(1));
+    expect(focusApi.listProfiles).not.toHaveBeenCalled();
   });
 });

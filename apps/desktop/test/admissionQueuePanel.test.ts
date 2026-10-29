@@ -5,6 +5,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { AdmissionCurrentTurn, AdmissionItem, AdmissionNextStep, QueueItem } from "@cutex-desktop/protocol";
+const retryState = vi.hoisted(() => ({ wait: null as import("@cutex-desktop/protocol").AutoRetryWait | null }));
+vi.mock("../src/renderer/src/lib/modelOverloadRetryView", () => ({ useModelOverloadRetry: () => retryState.wait }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string, vars?: Record<string, unknown>) => (vars?.n !== undefined ? `${key}(${vars.n})` : key) }) }));
 vi.mock("../src/renderer/src/lib/contextMenu", () => ({ contextMenu: () => () => {}, openMenuFrom: vi.fn() }));
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), bridge: {}, onEvent: () => () => {} }));
@@ -23,12 +25,97 @@ const NEXT: AdmissionNextStep[] = [
   { id: "alarm", deliveryKind: "alarm", label: "check", enqueuedAt: at, timing: "afterTurn" },
 ];
 
-function render(opts: { items: AdmissionItem[]; queue: QueueItem[]; running: boolean; currentTurn?: AdmissionCurrentTurn | null; steers?: boolean; pausedIds?: string[]; nextStep?: AdmissionNextStep[]; strips?: boolean; ownerYielded?: boolean; onYield?: () => void }) {
+describe("overload retry queue waiting", () => {
+  it("keeps native receipt uncertainty ahead of the automatic retry label", () => {
+    retryState.wait = { attempt: 2, maxAttempts: 3, scheduledAt: at, turnId: "turn", planId: "plan", phase: "pending", holdsAdmission: true };
+    try {
+      const html = render({ items: [], queue: [], running: false, nextStep: [{ id: "receipt", deliveryKind: "bus", enqueuedAt: at, timing: "nextStep", waitReason: "nativeReceipt" }] });
+      expect(html).toContain('data-testid="timing-native-receipt"');
+      expect(html).not.toContain('data-testid="timing-auto-retry"');
+    } finally { retryState.wait = null; }
+  });
+  it("does not render a retry hold for a free queue while resource status still waits", () => {
+    retryState.wait = { attempt: 2, maxAttempts: 3, scheduledAt: at, turnId: "turn", planId: "plan", phase: "pending", holdsAdmission: false };
+    try {
+      const empty = render({ items: [], queue: [], running: false, nextStep: [] });
+      expect(empty).not.toContain('data-testid="queue-auto-retry-wait"');
+      const free = render({ items: [owner("one", 1)], queue: [queued("one")], running: false, nextStep: [NEXT[0]!] });
+      expect(free).not.toContain('data-testid="queue-auto-retry-wait"');
+      expect(free).not.toContain('data-testid="timing-auto-retry"');
+      expect(free).not.toContain("queue.autoRetryOwnerOrder");
+    } finally { retryState.wait = null; }
+  });
+  it.each(["firing", "binding", "uncertain"] as const)("does not promise pending-retry cancellation during %s", (phase) => {
+    retryState.wait = { attempt: 2, maxAttempts: 3, scheduledAt: at, turnId: "turn", planId: "plan", phase, holdsAdmission: true };
+    try {
+      const html = render({ items: [owner("one", 1)], queue: [queued("one")], running: false, nextStep: [NEXT[0]!] });
+      expect(html).toContain("queue.autoRetryWaiting");
+      expect(html).not.toContain("queue.autoRetryOwnerOrder");
+    } finally { retryState.wait = null; }
+  });
+  it("shows an explicit server wait even without queued messages", () => {
+    retryState.wait = { attempt: 1, maxAttempts: 3, scheduledAt: at, turnId: "turn", planId: "plan", phase: "pending", holdsAdmission: true };
+    try {
+      const html = render({ items: [], queue: [], running: false, nextStep: [] });
+      expect(html).toContain('data-testid="queue-auto-retry-wait"');
+      expect(html).toContain("queue.autoRetryOwnerOrder");
+    } finally { retryState.wait = null; }
+  });
+  it("preserves numbered owner admission order and uses a passive wait for ride-alongs", () => {
+    retryState.wait = { attempt: 2, maxAttempts: 3, scheduledAt: at, turnId: "turn", planId: "plan", phase: "pending", holdsAdmission: true };
+    try {
+      const html = render({ items: [owner("one", 1), owner("two", 2)], queue: [queued("one"), queued("two")], running: false, nextStep: [NEXT[0]!] });
+      expect(html.indexOf("msg-one")).toBeLessThan(html.indexOf("msg-two"));
+      expect(html).toContain('data-testid="timing-auto-retry"');
+      expect(html).not.toContain('data-testid="timing-starts-now"');
+    } finally { retryState.wait = null; }
+  });
+});
+
+describe("idle admission wait reasons", () => {
+  it("shows the host batching deadline instead of pretending to start immediately", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-26T00:00:00Z"));
+    try {
+      const html = render({ items: [], queue: [], running: false, nextStep: [{
+        id: "batched", deliveryKind: "answer", enqueuedAt: at, timing: "afterTurn",
+        waitReason: "resultCoalescing", nextStepAt: "2026-10-26T00:01:30Z",
+      }] });
+      expect(html).toContain('data-testid="timing-result-coalescing"');
+      expect(html).toContain("queue.turn.resultCoalescing(90)");
+      expect(html).not.toContain('data-testid="timing-starts-now"');
+    } finally { vi.useRealTimers(); }
+  });
+  it("shows pending native confirmation without inventing a countdown or marking delivery", () => {
+    const html = render({ items: [], queue: [], running: false, nextStep: [{
+      id: "old-task", deliveryKind: "bus", label: "Claude Task", enqueuedAt: at,
+      timing: "nextStep", waitReason: "nativeReceipt",
+    }] });
+    expect(html).toContain('data-testid="timing-native-receipt"');
+    expect(html).toContain("queue.turn.nativeReceiptHint");
+    expect(html).not.toContain('data-testid="timing-result-coalescing"');
+  });
+  it("does not count below zero and keeps older-host waits unchanged", () => {
+    const ready = render({ items: [], queue: [], running: false, nextStep: [{
+      id: "due", deliveryKind: "answer", enqueuedAt: at, timing: "afterTurn",
+      waitReason: "resultCoalescing", nextStepAt: at,
+    }] });
+    expect(ready).toContain("queue.turn.resultReady");
+    const legacy = render({ items: [], queue: [], running: false, nextStep: [{
+      id: "legacy", deliveryKind: "answer", enqueuedAt: at, timing: "afterTurn",
+    }] });
+    expect(legacy).toContain("queue.turn.startsNowHint");
+    expect(legacy).not.toContain('data-testid="timing-result-coalescing"');
+  });
+});
+
+function render(opts: { items: AdmissionItem[]; queue: QueueItem[]; running: boolean; currentTurn?: AdmissionCurrentTurn | null; steers?: boolean; pausedIds?: string[]; nextStep?: AdmissionNextStep[]; strips?: boolean; ownerYielded?: boolean; onYield?: () => void; runtime?: "codex" | "claude"; steerImages?: number }) {
   const { turns, nextStep } = turnGroups({ revision: 1, items: opts.items, nextStep: opts.nextStep ?? NEXT }, opts.queue, {});
   const held = opts.queue.filter((q) => opts.pausedIds?.includes(q.queueId));
   return renderToStaticMarkup(
     createElement(QueuePanel, {
-      steers: opts.steers ? [{ id: "s1", text: "steer-text", imageCount: 0, state: "pending" } as never] : [],
+      steers: opts.steers ? [{ id: "s1", text: "steer-text", imageCount: opts.steerImages ?? 0, state: "pending" } as never] : [],
+      runtime: opts.runtime,
       outbox: { onRetry() {}, onEdit() {}, onDiscard() {} },
       onInterruptSendSteers() {},
       onDismissSteer() {},
@@ -132,8 +219,45 @@ describe("turn cards", () => {
     expect(yielded).not.toContain("queue.turn.waitInsertFollows");
   });
 
+  it("running with an owner turn queued: no 「插入当前回合」 row (the header line becomes the target only during a drag, owner 2026-10-23)", () => {
+    const html = render({ items: [owner("A", 1)], queue: [queued("A")], running: true, nextStep: [] });
+    expect(html).not.toContain('data-testid="insert-target"');
+    expect(html).not.toContain('data-testid="boundary-card"');
+    // Waiting inserts still have their section, each with 打断并发送 on hover.
+    const two = render({ items: [owner("A", 1)], queue: [queued("A")], running: true, steers: true, nextStep: [] });
+    expect(two).toContain('data-testid="boundary-steer"');
+    // 3 rows all show.
+    const three = ["a", "b", "c"];
+    const all = render({ items: three.map((id, i) => owner(id, i + 1)), queue: three.map(queued), running: true, nextStep: [] });
+    expect(all.match(/data-testid="turn-group-owner"/g)).toHaveLength(3);
+  });
+
+  it("no insert target when idle, with only delegations queued, or when the insert is refused (until a drag shows why)", () => {
+    expect(render({ items: [owner("A", 1)], queue: [queued("A")], running: false, nextStep: [] })).not.toContain("insert-target");
+    const ask = { kind: "ask", id: "B", position: 1, enqueuedAt: at, state: "waiting" } as AdmissionItem;
+    expect(render({ items: [ask], queue: [], running: true, nextStep: [] })).not.toContain("insert-target");
+    expect(render({ items: [owner("A", 1)], queue: [queued("A")], running: true, currentTurn: { kind: "ask", askId: "ask-9" }, nextStep: [] })).not.toContain("insert-target");
+  });
+
   it("a running turn with nothing queued: no empty tray", () => {
     expect(render({ items: [], queue: [], running: true, nextStep: [] })).toBe("");
+  });
+
+  // Owner 2026-10-24: the panel kept the next-step items whole while running but folded them when the turn ended, so
+  // it got a row shorter and the timeline above moved. Same items = same rows, running or idle.
+  it("the same items show the same rows running and idle (folded): the next-step ones lead whole either way", () => {
+    const rows = (html: string) => html.split("relative flex min-h-6 min-w-0 items-center").length - 1;
+    const queue = [queued("A"), queued("c")];
+    const running = render({ items, queue, running: true });
+    const idle = render({ items, queue, running: false });
+    expect(running).toContain('data-testid="boundary-card"');
+    expect(idle).toContain('data-testid="starts-now-card"');
+    expect(rows(idle)).toBe(rows(running));
+    expect(idle.includes("border-t border-border/60")).toBe(running.includes("border-t border-border/60"));
+    // The same next-step items lead: the wake past its wait and the answer; the alarm (after the turn) is a queue row.
+    const lead = between(idle, 'data-testid="starts-now-card"', 'data-testid="admission-queue"');
+    for (const label of ["note", "result"]) expect(lead).toContain(label);
+    expect(lead).not.toContain("check");
   });
 
   it("idle: no boundary card; every ride-along item starts the next turn, without timing symbols", () => {
@@ -141,7 +265,9 @@ describe("turn cards", () => {
     expect(html).not.toContain('data-testid="boundary-card"');
     const group = between(html, 'data-testid="group-starts-now"', 'data-testid="turn-group-owner"');
     for (const label of ["note", "result", "check"]) expect(group).toContain(label);
-    expect(group).not.toContain('data-testid="timing-');
+    expect(group).not.toContain('data-testid="timing-wait"');
+    expect(group).not.toContain('data-testid="timing-next-step"');
+    expect(group).not.toContain('data-testid="timing-after-turn"');
   });
 
   it("idle: a ride-along enqueued just now waits before 马上开始 shows (no flash while its turn starts)", () => {
@@ -149,6 +275,40 @@ describe("turn cards", () => {
     const html = render({ items, queue: [queued("A"), queued("c")], running: false, nextStep: fresh });
     expect(html).not.toContain("wake up");
     expect(html).not.toContain('data-testid="group-starts-now"');
+  });
+
+  // Owner 2026-10-23: 「马上开始」 read as a button and stayed for a start message cutex never handed over.
+  it("idle: a ride-along that will start says so as a status (将自动开始), not in the warn tone", () => {
+    const recent = [{ id: "recent", deliveryKind: "tell", label: "recent note", enqueuedAt: new Date(Date.now() - 10_000).toISOString(), timing: "afterTurn" }] as AdmissionNextStep[];
+    const html = render({ items: [], queue: [], running: false, nextStep: recent });
+    expect(html).toContain("recent note");
+    expect(html).toContain("queue.turn.startsNow");
+    expect(html).not.toContain('data-testid="ride-along-not-started"');
+    expect(between(html, 'data-testid="group-starts-now"')).not.toContain("text-warn");
+  });
+
+    it("idle: coalescible answers keep a waiting label on every row beyond the ordinary stuck threshold", () => {
+      const nextStep = [80, 300].map((secs) => ({ id: `answer-${secs}`, deliveryKind: "answer", label: `result-${secs}`, enqueuedAt: new Date(Date.now() - secs * 1000).toISOString(), timing: "afterTurn" })) as AdmissionNextStep[];
+      const html = render({ items: [], queue: [], running: false, nextStep });
+      expect(html).not.toContain('data-testid="ride-along-not-started"');
+      expect(html.match(/data-testid="timing-starts-now"/g)).toHaveLength(2);
+      expect(html).toContain('title="queue.turn.startsNowHint" data-testid="timing-starts-now"');
+    });
+
+    it("idle: an old tell remains neutral; elapsed time does not imply a failed runtime", () => {
+    const old = [{ id: "start-msg", deliveryKind: "tell", label: "You are ui-widgets", enqueuedAt: new Date(Date.now() - 12 * 60_000).toISOString(), timing: "afterTurn" }] as AdmissionNextStep[];
+    const html = render({ items: [], queue: [], running: false, nextStep: old });
+    expect(html).toContain('title="queue.turn.startsNowHint" data-testid="timing-starts-now"');
+    expect(html).toContain("queue.turn.startsNow");
+    expect(html).not.toContain("queue.turn.notStarted");
+    expect(html).not.toContain("text-warn");
+  });
+
+  it("running: an old after-turn item is just 本回合结束后, never 没开始", () => {
+    const old = [{ id: "old", deliveryKind: "alarm", label: "old alarm", enqueuedAt: new Date(Date.now() - 12 * 60_000).toISOString(), timing: "afterTurn" }] as AdmissionNextStep[];
+    const html = render({ items: [], queue: [], running: true, nextStep: old });
+    expect(html).toContain("old alarm");
+    expect(html).not.toContain('data-testid="ride-along-not-started"');
   });
 
   it("paused: the divider (with 继续) goes before the first paused turn; no paused section without undelivered steers", () => {
@@ -195,12 +355,42 @@ describe("turn cards", () => {
   it("one row anatomy: owner inserts / sends carry a kind icon, no ↳ / ⏎ text glyphs, trimmed one-line text", () => {
     const html = expanded(() => render({ items: [owner("A", 1)], queue: [queued("A")], running: true, steers: true, nextStep: [] }));
     expect(html).not.toMatch(/[↳⏎]/);
-    // The steer: ↳ as its muted kind icon, 下一步 as its meta (the full sentence in the tooltip), no end symbol.
+    // The steer: ↳ as its muted kind icon, 「已插入 · 等下一个工具边界」 as its meta (the hint names
+    // 打断并发送, which its hover shows), no end symbol.
     const steer = between(html, 'data-testid="boundary-steer"', 'data-testid="admission-queue"');
     expect(steer).toContain('aria-label="queue.turn.inserting"');
-    expect(steer).toMatch(/title="queue.deliverNextStep" data-testid="steer-delivery-note">queue.meta.nextStep</);
+    expect(steer).toMatch(/title="queue.meta.insertedHint" data-testid="steer-delivery-note">queue.meta.inserted</);
+    expect(steer).toContain('data-testid="boundary-interrupt-send"');
     expect(steer).not.toContain('data-testid="timing-insert"');
     expect(html).toContain('aria-label="queue.delivery.owner"');
+  });
+
+  it("steer delivery label: a Claude steer with images says 下一回合发送 (never inserted); Claude text and Codex keep 已插入 (owner 2026-10-24)", () => {
+    const steerOf = (opts: { runtime?: "codex" | "claude"; steerImages?: number }) =>
+      between(expanded(() => render({ items: [owner("A", 1)], queue: [queued("A")], running: true, steers: true, nextStep: [], ...opts })), 'data-testid="boundary-steer"', 'data-testid="admission-queue"');
+    const claudeImage = steerOf({ runtime: "claude", steerImages: 1 });
+    expect(claudeImage).toMatch(/data-delivery="nextTurn" title="queue.meta.nextTurnHint" data-testid="steer-delivery-note">queue.meta.nextTurn</);
+    expect(claudeImage).toContain('aria-label="queue.meta.nextTurn"');
+    expect(claudeImage).not.toContain("queue.meta.inserted");
+    expect(claudeImage).not.toContain("queue.turn.inserting");
+    for (const opts of [{ runtime: "claude" as const }, { runtime: "codex" as const, steerImages: 2 }, {}]) {
+      const steer = steerOf(opts);
+      expect(steer).toMatch(/data-delivery="toolBoundary" title="queue.meta.insertedHint" data-testid="steer-delivery-note">queue.meta.inserted</);
+      expect(steer).toContain('aria-label="queue.turn.inserting"');
+    }
+  });
+
+  it("a sender cutex names by id (fromCutexSessionId) gets its 16 px avatar; without the id the row stays name-only", () => {
+    const rows: AdmissionNextStep[] = [
+      { id: "m", deliveryKind: "tell", label: "revision done", from: "Mika", fromCutexSessionId: "mika", preview: "revision done", enqueuedAt: at, timing: "afterTurn" },
+      { id: "r", deliveryKind: "tell", label: "please review", from: "Reviewer", preview: "please review", enqueuedAt: at, timing: "afterTurn" },
+    ];
+    const html = render({ items: [], queue: [], running: true, nextStep: rows });
+    const withId = html.match(/<span[^>]*data-testid="ride-along-from" data-from-id="mika">[\s\S]*?Mika<\/span><\/span><\/span>/)?.[0] ?? "";
+    expect(withId).toContain("data-avatar");
+    expect(withId).toMatch(/width:16px/);
+    expect(html).toMatch(/data-testid="ride-along-from"[^>]*>Reviewer</);
+    expect(html.match(/data-from-id=/g)).toHaveLength(1);
   });
 
   it("ride-along rows: sender + first line (admission-ridealong-detail), a peer icon, and never a lone kind word on an older cutex", () => {

@@ -10,9 +10,12 @@ import { ServerCog } from "lucide-react";
 import { BACKEND_UPGRADE_FEATURE } from "../../../../shared/backendUpgrade";
 import { useSettingsHost } from "../../lib/settingsHost";
 import { defineModule } from "../slots";
-import { BackendUpgradePage } from "./BackendUpgradePage";
 import { upgradeAttention } from "./model";
 import { startUpgradeSync, useHostUpgrade } from "./store";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const BackendUpgradePage = lazyPage(() => import("./BackendUpgradePage").then((m) => m.BackendUpgradePage));
 
 function useUpgradeBadge() {
   const hostId = useSettingsHost();

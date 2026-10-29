@@ -1,5 +1,6 @@
 // Settings → Profiles overview cards: order, problems (⚠) and the one-line summaries a card shows.
 // Pure helpers (no React) so they are unit-testable.
+import { ACP_RUNTIME_INFO, isAcpRuntime } from "./acpRuntimes";
 import type { ProfileDetail, ProfileItem, ProfilePreset, QuotaGauge } from "../../../shared/ipc";
 import { profileKind } from "./profileKind";
 import { FALLBACK_PRESETS, familyPreset, officialPresetOf, shortPresetLabel } from "./profilePresets";
@@ -44,9 +45,26 @@ export function modelLine(p: Pick<ProfileItem, "model" | "modelReasoningEffort">
  */
 export function profileKindLabel(p: Pick<ProfileItem, "cliKind" | "authKind" | "baseUrl" | "providerFamily">, custom: string, presets: readonly ProfilePreset[] = FALLBACK_PRESETS): string {
   const kind = profileKind(p);
-  if (kind !== "apiKey") return kind === "chatgpt" ? "ChatGPT" : "Claude";
+  if (kind !== "apiKey") return isAcpRuntime(kind) ? ACP_RUNTIME_INFO[kind].label : kind === "chatgpt" ? "ChatGPT" : "Claude";
   const preset = p.baseUrl?.trim() ? officialPresetOf(p.baseUrl, presets) : familyPreset(p.providerFamily, presets);
   return `API Key · ${preset ? shortPresetLabel(preset) : custom}`;
+}
+
+/**
+ * The profile header's plan and provider-family parts after the kind label, without repeating a name already
+ * shown: a DeepSeek API-key profile read 「API Key · DeepSeek · DeepSeek · DeepSeek」 (preset, default plan
+ * label, family). Case and spacing are ignored when comparing.
+ */
+export function headerExtras(kindLabel: string, plan: string | null, family: string | null): { plan: string | null; family: string | null } {
+  const norm = (v: string) => v.trim().replace(/\s+/g, " ").toLowerCase();
+  const seen = new Set(kindLabel.split("·").map(norm));
+  const keep = (v: string | null) => {
+    if (!v || !v.trim() || seen.has(norm(v))) return null;
+    seen.add(norm(v));
+    return v;
+  };
+  const keptPlan = keep(plan);
+  return { plan: keptPlan, family: keep(family) };
 }
 
 /** "256K" / "1M" for a context window (null = unknown). */

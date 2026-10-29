@@ -5,12 +5,13 @@ import { relayError, relayWireError } from "../src/main/browser/relayTypes";
 // 0.1.3 batch 1: one refusal per real cause, and loopback reachable by pages only per tab/origin.
 const local: BrowserNetworkHost = { kind: "local", serviceProxy: true, connectionPort: 24370 };
 function policy(options: { host?: BrowserNetworkHost; external?: "ready" | "off" | "unavailable"; admitted?: Record<number, string[]>; control?: number[];
-  lan?: Record<string, "ready" | "unavailable"> } = {}) {
+  lan?: Record<string, "ready" | "unavailable">; desktopLoopback?: boolean } = {}) {
   return createBrowserUrlPolicy({ getHost: () => options.host ?? local,
     external: () => options.external ?? "off",
     protectedEndpoint: url => (options.control ?? [24370, 24360]).includes(Number(url.port || 80)),
     admitted: (id, origin) => options.admitted?.[id]?.includes(origin) === true,
-    lan: (hostname, port) => options.lan?.[`${hostname}:${port}`] ?? "none" });
+    lan: (hostname, port) => options.lan?.[`${hostname}:${port}`] ?? "none",
+    desktopLoopback: () => options.desktopLoopback === true });
 }
 const page = (extra: Partial<BrowserRequestContext> = {}): BrowserRequestContext => ({ actor: "page", webContentsId: 7, ...extra });
 
@@ -41,6 +42,24 @@ describe("browser refusal reasons", () => {
     expect(ssh.refusal("http://localhost:3000/")).toBe("remote_loopback");
     expect(ssh.refusal("http://127.0.0.1:41000/")).toBe("protected_endpoint");
     expect(ssh.refusal("http://docs.svc.localhost:41000/")).toBeNull();
+  });
+  it("owner confirmation opens desktop loopback on SSH; agents and page navigation stay refused", () => {
+    const ssh = policy({ host: { kind: "ssh" }, control: [41000], desktopLoopback: true });
+    for (const url of ["http://localhost:3000/", "http://127.0.0.1:3000/", "http://[::1]:3000/"]) {
+      expect(ssh.refusal(url, { actor: "owner", allowDesktopLoopback: true })).toBeNull();
+      expect(ssh.refusal(url, { actor: "agent", allowDesktopLoopback: true })).toBe("remote_loopback");
+      expect(ssh.refusal(url, page({ resourceType: "mainFrame", initiatorOrigin: "https://evil.example" }))).toBe("private_address_blocked");
+    }
+    expect(ssh.refusal("http://127.0.0.1:41000/", { actor: "owner", allowDesktopLoopback: true })).toBe("protected_endpoint");
+  });
+  it("remembered SSH loopback is owner-only; switch off preserves the old refusal", () => {
+    const host = { kind: "ssh" } as const, url = "http://localhost:3000/";
+    expect(policy({ host, desktopLoopback: false }).refusal(url, { actor: "owner" })).toBe("remote_loopback");
+    const remembered = policy({ host, desktopLoopback: true });
+    expect(remembered.refusal(url, { actor: "owner" })).toBeNull();
+    expect(remembered.refusal(url, { actor: "agent" })).toBe("remote_loopback");
+    expect(remembered.refusal(url, page({ resourceType: "mainFrame", initiatorOrigin: "https://evil.example" }))).toBe("private_address_blocked");
+    expect(remembered.refusal(url, page({ resourceType: "mainFrame", initiatorOrigin: "http://localhost:3000" }))).toBe("private_address_blocked");
   });
   it("a host without browser-refusal-reasons receives the established wire code for every refusal", () => {
     for (const code of ["external_pages_off", "external_proxy_unavailable", "private_address_blocked", "reserved_address", "protected_endpoint", "remote_loopback"] as const) {

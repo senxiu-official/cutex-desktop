@@ -15,6 +15,7 @@ import { HOST_FILE_READ_FEATURE, rootFor, scopeFor } from "../lib/workspace";
 import { useApp } from "../store";
 import { convFeaturesOf, useConvScope, useConvSidebar } from "../lib/conversationScope";
 import { openTurnDiff } from "../lib/sideOpen";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 
 const NO_FILES: TurnFileChange[] = [];
 /** Link chips on the collapsed line; the rest count as +N. */
@@ -44,6 +45,7 @@ function HoverButton({ title, onClick, children }: { title: string; onClick(e: R
 
 export function TurnSummary({ sessionId, turnId, text, changes, latest }: { sessionId: string; turnId: string; /** The turn's final reply (links are picked from it). */ text: string; changes: TurnChanges | undefined; latest: boolean }) {
   const { t } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const { turnSummary: mode } = useUiPrefs();
   const files = changes?.files ?? NO_FILES;
   const sidebar = useConvSidebar();
@@ -60,7 +62,7 @@ export function TurnSummary({ sessionId, turnId, text, changes, latest }: { sess
   if (mode === "off" || (!files.length && !links.length)) return null;
   const chips = links.slice(0, CHIPS);
   const more = links.length - chips.length;
-  const toggle = () => setExpanded(!expanded);
+  const toggle = () => userToggle(() => setExpanded(!expanded));
   const typeLabel = (link: TurnLink) => {
     const { group, ext } = linkTypeOf(link);
     const word = t(`conversation.turnSummary.type.${group}` as MessageKey);
@@ -86,7 +88,7 @@ export function TurnSummary({ sessionId, turnId, text, changes, latest }: { sess
                 onAuxClick={(e) => e.button === 1 && actions.open(e.currentTarget, openModifiers(e))}
                 onContextMenu={contextMenu(actions.menu)}
                 title={link.target}
-                className="flex h-[18px] max-w-56 min-w-0 items-center gap-1 rounded-md border border-border bg-surface px-1.5 text-[11px] text-muted hover:bg-surface-2 hover:text-foreground"
+                className="flex h-[18px] max-w-56 min-w-0 items-center gap-1 rounded-md border border-border bg-surface px-1.5 text-caption/[inherit] text-muted hover:bg-surface-2 hover:text-foreground"
               >
                 <LinkIcon link={link} size={11} />
                 <span className="truncate">{linkName(link)}</span>
@@ -119,9 +121,9 @@ export function TurnSummary({ sessionId, turnId, text, changes, latest }: { sess
                 </span>
                 {dir && <span className="min-w-0 flex-1 truncate text-subtle" title={f.display}>{dir}</span>}
                 {!dir && <span className="flex-1" />}
-                {file.status === "added" && <span className="shrink-0 text-[11px] text-subtle">{t("conversation.turnSummary.added")}</span>}
-                {gone && <span className="shrink-0 text-[11px] text-subtle">{t("conversation.turnSummary.deleted")}</span>}
-                {from && <span className="max-w-40 shrink-0 truncate text-[11px] text-subtle" title={from}>{t("conversation.turnSummary.movedFrom", { from: from.split(/[\\/]/).pop() ?? from })}</span>}
+                {file.status === "added" && <span className="shrink-0 text-caption/[inherit] text-subtle">{t("conversation.turnSummary.added")}</span>}
+                {gone && <span className="shrink-0 text-caption/[inherit] text-subtle">{t("conversation.turnSummary.deleted")}</span>}
+                {from && <span className="max-w-40 shrink-0 truncate text-caption/[inherit] text-subtle" title={from}>{t("conversation.turnSummary.movedFrom", { from: from.split(/[\\/]/).pop() ?? from })}</span>}
                 <Counts added={file.added} deleted={file.deleted} />
                 <span className="flex w-10 shrink-0 justify-end gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
                   <HoverButton title={t("conversation.turnSummary.viewDiff")} onClick={() => void openTurnDiff({ sessionId, turnId, path: f.display, diff: turnFileDiff(file, (p) => fileActions(p).display) })}>
@@ -154,7 +156,7 @@ export function TurnSummary({ sessionId, turnId, text, changes, latest }: { sess
               </div>
             );
           })}
-          {files.length > 0 && <p className="px-2 pt-1 text-[11px] text-subtle">{t("conversation.turnSummary.footnote")}</p>}
+          {files.length > 0 && <p className="px-2 pt-1 text-caption/[inherit] text-subtle">{t("conversation.turnSummary.footnote")}</p>}
         </div>
       )}
     </div>

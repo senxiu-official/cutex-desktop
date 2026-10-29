@@ -5,7 +5,7 @@ import { Play } from "lucide-react";
 import { useRef, useState } from "react";
 import { ArmedHint } from "../../components/ArmedHint";
 import { useI18n } from "../../i18n";
-import { useArmed } from "../../lib/armedConfirm";
+import { ARMED_COUNTDOWN, useArmed } from "../../lib/armedConfirm";
 import type { CodeBlockActionProps } from "../slots";
 import { codeLines, runClick } from "./codeRun";
 import { runCode } from "./runCode";
@@ -35,7 +35,7 @@ export function RunCodeButton({ hostId, sessionId, code, incomplete }: CodeBlock
         disabled={incomplete || busy || lines === 0}
         title={armed ? undefined : tip}
         aria-label={armed ? t("terminal.runArmed", { n: lines }) : tip}
-        className={`${BTN} ${armed ? "bg-danger text-white" : "text-muted-foreground hover:text-foreground"}`}
+        className={`${BTN} ${armed ? `${ARMED_COUNTDOWN} bg-danger-solid text-white` : "text-muted-foreground hover:text-foreground"}`}
       >
         <Play aria-hidden size={14} />
       </button>

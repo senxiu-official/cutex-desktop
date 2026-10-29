@@ -1,4 +1,8 @@
 // Core fallback for all external messages, including unknown or unavailable module schemas.
+import type { AgentRuntime } from "../lib/agentFeatures";
+import { MessageSettlementControl } from "./MessageSettlementControl";
+import { useAgentMessage } from "../lib/agentMessageStore";
+import { useConvHost } from "../lib/conversationScope";
 import { useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronRight } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
@@ -11,6 +15,8 @@ import { SenderAvatar } from "./SystemAvatar";
 import { useWakeHint } from "../lib/wakeBusyWaitView";
 import { EnvelopeBadges, KindTag, SentStatus } from "./AgentMessageParts";
 import { ScriptText } from "./ScriptText";
+import { Tag } from "./Tag";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 
 /**
  * Agent-bus message. Compact (default): one line — the peer's avatar, ↙ 来自 / ↗ 发给 + name, delivery
@@ -20,8 +26,9 @@ import { ScriptText } from "./ScriptText";
  * what a wake does to a busy recipient on this host (cutex wake-busy-wait), by `recipientRuntime`
  * (the viewed agent for a received row, the addressee for a sent one).
  */
-export function BusMessage({ direction, name: rawName, mode, text: raw, onContextMenu, kind = null, downgraded = false, messageId = null, envelope = null, senderId = null, sourceKind = null, recipientRuntime = "codex" }: { direction: "in" | "out"; name: string; mode: string | null; text: string; onContextMenu: React.MouseEventHandler; kind?: DeliveryKind | null; downgraded?: boolean; messageId?: string | null; envelope?: AgentEnvelope | null; /** Received only: the sender id / source kind, so cutex services show as 委托系统 / Cutex 系统 (lib/systemSenders). */ senderId?: string | null; sourceKind?: string | null; /** The runtime of the agent the message went to (a Claude agent always waits for the turn end). */ recipientRuntime?: "codex" | "claude" }) {
+export function BusMessage({ direction, name: rawName, mode, text: raw, onContextMenu, kind = null, downgraded = false, messageId = null, envelope = null, senderId = null, sourceKind = null, recipientRuntime = "codex" }: { direction: "in" | "out"; name: string; mode: string | null; text: string; onContextMenu: React.MouseEventHandler; kind?: DeliveryKind | null; downgraded?: boolean; messageId?: string | null; envelope?: AgentEnvelope | null; /** Received only: the sender id / source kind, so cutex services show as 委托系统 / Cutex 系统 (lib/systemSenders). */ senderId?: string | null; sourceKind?: string | null; /** The runtime of the agent the message went to (a Claude agent always waits for the turn end). */ recipientRuntime?: AgentRuntime }) {
   const { t } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const conv = useConvScope();
   const v2 = useApp((s) => convFeaturesOf(conv, s).has(AGENT_MESSAGES_V2));
   // History from before v2: drop the exact default `[message from X] ` prefix (contract §6.6).
@@ -35,29 +42,35 @@ export function BusMessage({ direction, name: rawName, mode, text: raw, onContex
   const shownKind = kind ?? deliveryKindOf(null, mode);
   const wakeHint = useWakeHint(v2 && shownKind === "wake", recipientRuntime);
   return (
-    <div className="group/msg my-2" onContextMenu={onContextMenu}>
-      <button onClick={() => setOpen(!open)} className="flex w-full max-w-full items-center gap-1.5 rounded-md py-0.5 text-left text-xs text-muted hover:text-foreground">
+    <div className="group/msg my-2 min-w-0 max-w-full" onContextMenu={onContextMenu}>
+      <button onClick={() => userToggle(() => setOpen(!open))} className="flex w-full min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-md py-0.5 text-left text-xs text-muted hover:text-foreground">
         <Arrow size={13} className="shrink-0 text-subtle" />
         <span className="shrink-0">{t(incoming ? "conversation.from" : "conversation.to")}</span>
-        <SenderAvatar id={id} sourceKind={incoming ? sourceKind : null} name={name} size={18} />
-        <span className="shrink-0 font-medium text-foreground">{name}</span>
+        <SenderAvatar id={id} sourceKind={incoming ? sourceKind : null} name={name} size={20} />
+        <span data-testid="bus-message-name" className="min-w-0 max-w-[16em] shrink-0 truncate whitespace-nowrap font-medium text-foreground" title={name}>{name}</span>
         {v2 ? <KindTag kind={shownKind} downgraded={downgraded || !!envelope?.downgraded} wakeHint={wakeHint} /> : <DeliveryTag mode={mode} />}
         {v2 && envelope && <EnvelopeBadges envelope={envelope} reveal={open ? "" : "hidden group-hover/msg:inline group-focus-within/msg:inline"} />}
         {v2 && !incoming && messageId && <SentStatus messageId={messageId} />}
-        {!open && <span className="min-w-0 truncate text-subtle"><ScriptText text={text.replace(/\s+/g, " ")} /></span>}
+        {!open && <span data-testid="bus-message-preview" className="min-w-0 flex-1 truncate text-subtle"><ScriptText text={text.replace(/\s+/g, " ")} /></span>}
         {open ? <ChevronDown size={13} className="ml-auto shrink-0" /> : <ChevronRight size={13} className="ml-auto shrink-0" />}
       </button>
+      {messageId && <CardSettlement messageId={messageId} />}
       {open && (
-        <div className={`font-chat-context mt-1 ml-6 max-w-[75%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap ${incoming ? "bg-peer" : "border border-dashed border-border text-muted"}`}><ScriptText text={text} /></div>
+        <div className={`selectable message-body font-chat-context mt-1 ml-6 max-w-[75%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap ${incoming ? "bg-peer" : "border border-dashed border-border text-muted"}`}><ScriptText text={text} /></div>
       )}
     </div>
   );
+}
+
+function CardSettlement({ messageId }: { messageId: string }) {
+  const hostId = useConvHost();
+  const record = useAgentMessage(messageId);
+  return <MessageSettlementControl hostId={hostId} messageId={messageId} settlement={record?.settlement} sessionId={record?.to ?? record?.from ?? undefined} />;
 }
 
 function DeliveryTag({ mode }: { mode: string | null }) {
   const { t } = useI18n();
   if (!mode) return null;
   const key = `delivery.${mode}` as MessageKey;
-  return <span className="shrink-0 rounded bg-surface-2 px-1.5 py-px text-[10px] whitespace-nowrap text-muted">{t(key) === key ? mode : t(key)}</span>;
+  return <Tag>{t(key) === key ? mode : t(key)}</Tag>;
 }
-

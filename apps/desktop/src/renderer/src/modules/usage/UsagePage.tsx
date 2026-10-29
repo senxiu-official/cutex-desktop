@@ -14,14 +14,14 @@ import { AlertTriangle, ArrowRight, ArrowRightLeft, Info, X } from "lucide-react
 import type { ProfileItem, UsagePrices, UsageReport, UsageSourceFilter } from "../../../../shared/ipc";
 import { USAGE_SOURCES_FEATURE, type UsageSourcesView } from "../../../../shared/usageSources";
 import { useI18n, type MessageKey } from "../../i18n";
-import { AddButton, ArmedRemove, Button, ErrorNote, IconButton, Loading, PlannedCard, RefreshButton, Segmented, Select } from "../../components/settings/Form";
+import { AddButton, ArmedRemove, Button, ErrorNote, IconButton, Loading, PlannedCard, RefreshButton, Segmented, Select , SettingsGroup , SettingsEffectCard } from "../../components/settings/Form";
 import { knownProfileNames, useKnownProfiles } from "../../lib/settingsView";
 import { applyProfileOrder, profileOrderOf, useProfileOrder } from "../../lib/profileOrder";
 import { useUiPrefs } from "../../lib/prefs";
 import { formatBalance, gaugeName, latestObservedAt, observedClock, resetsIn, windowName, type QuotaGauge } from "../../lib/quota";
-import { formatTokens, isoDay, seriesName } from "../../lib/usage";
+import { formatTokens, isoDay } from "../../lib/usage";
 import { useModulePref } from "../react";
-import { buckets, buildSeries, change, CURRENCIES, listSep, remainingColor, remainingRatio, formatMoney, niceScale, OTHER, seriesColor, smoothPath, stack, TOKEN_TYPES, type ChartMode, type Metric, type Split } from "./chart";
+import { buckets, buildSeries, change, claudeFiveHourGauge, CURRENCIES, listSep, remainingColor, remainingRatio, formatMoney, niceScale, OTHER, seriesColor, smoothPath, stack, TOKEN_TYPES, DEFAULT_USAGE_SPLIT, type ChartMode, type Metric, type Split } from "./chart";
 import { modelProvider } from "../../lib/provider";
 import { withoutDeletedProfiles, type ProfileProviders } from "./provider";
 import { rawIdsTitle, withShownModels } from "./models";
@@ -37,12 +37,17 @@ import type { AllHostsChoice } from "../../lib/hostPick";
 import { useHostScope, useHostsData } from "../../lib/useHostScope";
 import { HostPicker } from "../../components/HostPicker";
 import { AllViewContext, loadHostsUsage, useAllView, useHostsProfileProviders, type AllView, type HostResult, type HostTarget } from "./allHosts";
-import { canonicalNames, mergeQuotas, mergeUsageReports, profileSignature, reportCurrency, type CurrencyNote, type MergedUnpriced } from "./merge";
+import { groupProfiles, identityProfile, usageSeriesName as seriesName } from "./accountIdentity";
+import { useProfileAccountLinks } from "../../lib/profileAccountLinks";
+import { canonicalNames, mergeQuotas, mergeUsageReports, reportCurrency, type CurrencyNote, type MergedUnpriced } from "./merge";
 import { UsageSources } from "./Sources";
 import { useApp } from "../../store";
 import { hostData } from "../../lib/hostScope";
 import { anyScanning, billingBySeries } from "./sourceHelpers";
 import { buildModelMap, manualNames, mapDrafts, mapProblems, mapSuggestions, MODEL_MAP_FEATURE, pricedAsByName, type MapDraft, type MapProblem } from "./modelMap";
+import { turnShape } from "./shape";
+import { Tag } from "../../components/Tag";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 const ID = "usage";
 const RANGES = [7, 30, 90] as const;
@@ -71,10 +76,14 @@ function GaugeLine({ g }: { g: QuotaGauge }) {
   const win = g.windowLabel?.match(/^(\d+)([hd])$/);
   // A caption with a fixed meaning (`month` → 本月) names the line instead of the reader label.
   const named = g.windowLabel && windowName(g.windowLabel) !== g.windowLabel ? windowName(g.windowLabel) : null;
-  const label = win ? t(win[2] === "h" ? "usage.window.hours" : "usage.window.days", { n: win[1]! }) : named ?? (g.kind === "balance" && g.label.length <= 3 ? t("usage.balance") : gaugeName(g));
+  const label = win ? t(win[2] === "h" ? "usage.window.hours" : "usage.window.days", { n: win[1]! }) : named ?? (g.kind === "balance" && !g.displayLabel && g.label.length <= 3 ? t("usage.balance") : gaugeName(g));
+  const claudeFiveHour = claudeFiveHourGauge(g);
   return (
     <div className={`grid grid-cols-[4.5rem_minmax(0,1fr)_4rem_minmax(0,8rem)] items-center gap-3 py-1 text-sm tabular-nums ${g.stale ? "opacity-60" : ""}`}>
-      <span className="truncate text-xs text-muted">{label}</span>
+      <span className="flex items-center gap-1 truncate text-xs text-muted" title={claudeFiveHour ? t("usage.claudeFiveHourHint") : undefined}>
+        <span className="truncate">{label}</span>
+        {claudeFiveHour && <Info size={11} className="shrink-0" />}
+      </span>
       {g.error ? (
         <span className="col-span-3 truncate text-xs text-danger" title={g.error}>
           {g.error}
@@ -100,7 +109,9 @@ function Quotas({ providers, settled }: { providers: ProfileProviders; settled: 
   // Agents (also archived ones) remember the profile they ran on; skip the ones deleted since.
   const known = useKnownProfiles();
   // In the owner's manual profile order (lib/profileOrder); without one, by name as before.
-  const order = useProfileOrder(useTargetHostId());
+  const hostId = useTargetHostId();
+  const hostLabel = useHostScope().host(hostId)?.label ?? hostId;
+  const order = useProfileOrder(hostId);
   const profiles = useMemo(() => (providers ? applyProfileOrder(known.flatMap((n) => providers.get(n) ?? []), order).map((p) => p.name) : known), [known, providers, order]);
   const quotas = useTargetQuotas();
   const loadQuota = useTargetLoadQuota();
@@ -118,10 +129,11 @@ function Quotas({ providers, settled }: { providers: ProfileProviders; settled: 
   if (waited || (settled && profiles.every((p) => quotas[p] !== undefined))) shown.current = true;
   const observed = latestObservedAt(profiles.flatMap((p) => quotas[p] ?? []));
   // Profiles with gauges first; the ones that report nothing collapse into one muted line.
-  const withGauges = profiles.filter((p) => (quotas[p] ?? []).length > 0);
-  const without = profiles.filter((p) => (quotas[p] ?? []).length === 0);
+  const cards = mergeQuotas(profiles.map((name) => ({ ...(providers?.get(name) ? identityProfile(hostId, hostLabel, providers.get(name)!) : { hostId, label: hostLabel, name, signature: null }), gauges: quotas[name] })));
+  const withGauges = cards.filter((card) => card.gauges.length > 0);
+  const without = cards.filter((card) => card.gauges.length === 0);
   return (
-    <section className="mb-8">
+    <SettingsEffectCard><section className="mb-8">
       <div className="mb-2 flex h-7 items-center gap-2">
         <h3 className="text-sm font-semibold">{t("usage.quotas")}</h3>
         {observed && <span className="text-xs text-subtle">{t("usage.updatedAt", { time: observedClock(observed) })}</span>}
@@ -131,29 +143,39 @@ function Quotas({ providers, settled }: { providers: ProfileProviders; settled: 
       </div>
       <div className={`${CARD} divide-y divide-border px-4`}>
         {!shown.current && <Loading rows={Math.min(Math.max(profiles.length, 2), 6)} />}
-        {shown.current && withGauges.map((p) => (
-          <div key={p} className="grid grid-cols-[8rem_minmax(0,1fr)] items-start gap-4 py-2.5">
-            <span className="flex min-w-0 items-center gap-2">
-              {providers?.get(p) ? <ProfileAvatar profile={providers.get(p)!} size={22} badge /> : <ProviderIcon provider={null} name={p} size={22} />}
-              <span className="truncate text-sm font-medium">{p}</span>
-            </span>
-            <div>
-              {(quotas[p] ?? []).map((g) => (
-                <GaugeLine key={g.id} g={g} />
-              ))}
+        {shown.current && withGauges.map((card) => {
+          const profile = providers?.get(card.fromName ?? card.members[0]!.name);
+          return (
+            <div key={card.key} className="grid grid-cols-[10rem_minmax(0,1fr)] items-start gap-4 py-2.5">
+              <span className="flex min-w-0 items-center gap-2">
+                {profile ? <ProfileAvatar profile={profile} size={22} badge /> : <ProviderIcon provider={null} name={card.name} size={22} />}
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium">{card.name}</span>
+                  <QuotaAccountNote hostId={hostId} profile={profile ?? card.members[0]!.name} />
+                  {card.accountKey && card.observedAt !== null && <span className="block text-caption/[inherit] text-subtle">{t("usage.link.observer" as MessageKey, { host: hostLabel, time: observedClock(card.observedAt) })}</span>}
+                </span>
+              </span>
+              <div>{card.gauges.map((g) => <GaugeLine key={g.id} g={g} />)}</div>
             </div>
-          </div>
-        ))}
-        {shown.current && without.length > 0 && <div className="py-2.5 text-xs text-subtle">{t("usage.noQuota", { names: without.join(listSep(locale)) })}</div>}
+          );
+        })}
+        {shown.current && without.length > 0 && <div className="py-2.5 text-xs text-subtle">{t("usage.noQuota", { names: without.map((card) => card.name).join(listSep(locale)) })}</div>}
       </div>
-    </section>
+    </section></SettingsEffectCard>
   );
 }
 
+/** Reads other hosts' profile metadata; quota polling stays on the selected host. */
+function QuotaAccountNote({ hostId, profile }: { hostId: string; profile: ProfileItem | string }) {
+  const { t, locale } = useI18n();
+  const { peers } = useProfileAccountLinks(hostId, profile);
+  const hosts = [...new Set(peers.filter((peer) => peer.connected).map((peer) => peer.hostName))];
+  return hosts.length > 0 ? <span className="block text-caption/[inherit] text-muted">{t("usage.link.alsoUsed" as MessageKey, { hosts: hosts.join(listSep(locale)) })}</span> : null;
+}
+
 /**
- * 「全部主机」 额度: one card per profile name. The same account on several hosts shows its freshest
- * observation (gauges are never added up) with 「来自 host」; another provider under the same name keeps
- * its own card (`name · host`).
+ * 「全部主机」 额度: one card per linked account, with legacy name/provider fallback.
+ * The freshest observation wins; gauges are never added up.
  */
 function AllQuotas({ view }: { view: AllView }) {
   const { t, locale } = useI18n();
@@ -163,13 +185,13 @@ function AllQuotas({ view }: { view: AllView }) {
   const quotas = useHostsQuotas(ids);
   useUiPrefs(); // each host's manual profile order (lib/profileOrder)
   const entries = useMemo(() => {
-    const out: { hostId: string; label: string; name: string; signature: string | null }[] = [];
+    const out: import("./merge").HostQuota[] = [];
     for (const x of view.targets) {
       const providers = view.providers?.get(x.hostId);
       // Every profile the host lists (like the 用量 flyout), in its manual order; without a list, the
       // profiles its agents ran on.
       const names = providers ? applyProfileOrder([...providers.values()], profileOrderOf(x.hostId)).map((p) => p.name) : knownProfileNames(data.find((d) => d.hostId === x.hostId)?.sidebar);
-      for (const name of names) out.push({ hostId: x.hostId, label: x.label, name, signature: profileSignature(providers?.get(name)) });
+      for (const name of names) { const profile = providers?.get(name); out.push({ ...(profile ? identityProfile(x.hostId, x.label, profile) : { hostId: x.hostId, label: x.label, name, signature: null }), gauges: undefined }); }
     }
     return out;
   }, [view.targets, view.providers, data]);
@@ -189,7 +211,7 @@ function AllQuotas({ view }: { view: AllView }) {
   const withGauges = cards.filter((c) => c.gauges.length > 0);
   const without = cards.filter((c) => c.gauges.length === 0);
   return (
-    <section className="mb-8">
+    <SettingsEffectCard><section className="mb-8">
       <div className="mb-2 flex h-7 items-center gap-2">
         <h3 className="text-sm font-semibold">{t("usage.quotas")}</h3>
         {observed && <span className="text-xs text-subtle">{t("usage.updatedAt", { time: observedClock(observed) })}</span>}
@@ -202,7 +224,7 @@ function AllQuotas({ view }: { view: AllView }) {
         {!shown.current && <Loading rows={Math.min(Math.max(cards.length, 2), 6)} />}
         {shown.current &&
           withGauges.map((c) => {
-            const profile = view.providers?.get(c.fromHostId ?? c.hostIds[0]!)?.get(c.name) ?? [...c.hostIds].map((h) => view.providers?.get(h)?.get(c.name)).find(Boolean);
+            const profile = view.providers?.get(c.fromHostId ?? c.hostIds[0]!)?.get(c.fromName ?? c.members[0]!.name) ?? c.members.map((member) => view.providers?.get(member.hostId)?.get(member.name)).find(Boolean);
             const others = c.hosts.filter((h) => h !== c.from);
             return (
               <div key={c.key} className="grid grid-cols-[10rem_minmax(0,1fr)] items-start gap-4 py-2.5">
@@ -212,9 +234,10 @@ function AllQuotas({ view }: { view: AllView }) {
                     <span className="block truncate text-sm font-medium" title={title(c)}>
                       {title(c)}
                     </span>
+                    {c.linkedHosts.length > 1 && <span className="block text-caption/[inherit] text-muted">{t("usage.link.sameAccount" as MessageKey, { hosts: c.linkedHosts.join(sep) })}</span>}
                     {c.from && (
-                      <span className="block truncate text-[11px] text-subtle" title={t("usage.all.quotaHosts", { hosts: c.hosts.join(sep) })}>
-                        {others.length ? t("usage.all.quotaFromAlso", { host: c.from, hosts: others.join(sep) }) : t("usage.all.quotaFrom", { host: c.from })}
+                      <span className="block truncate text-caption/[inherit] text-subtle" title={t("usage.all.quotaHosts", { hosts: c.hosts.join(sep) })}>
+                        {c.accountKey && c.observedAt !== null ? t("usage.link.observer" as MessageKey, { host: c.from, time: observedClock(c.observedAt) }) : others.length ? t("usage.all.quotaFromAlso", { host: c.from, hosts: others.join(sep) }) : t("usage.all.quotaFrom", { host: c.from })}
                       </span>
                     )}
                   </span>
@@ -229,15 +252,18 @@ function AllQuotas({ view }: { view: AllView }) {
           })}
         {shown.current && without.length > 0 && <div className="py-2.5 text-xs text-subtle">{t("usage.noQuota", { names: without.map(title).join(sep) })}</div>}
       </div>
-    </section>
+    </section></SettingsEffectCard>
   );
 }
 
 // ---------------------------------------------------------------- series labels / marks
 
+const ProfileSeriesLabels = createContext<ReadonlyMap<string, string> | null>(null);
+
 function useSeriesLabel(split: Split): (s: string) => string {
   const { t } = useI18n();
-  return (s) => (split === "total" ? t(`usage.type.${s}` as MessageKey) : s);
+  const labels = useContext(ProfileSeriesLabels);
+  return (s) => (split === "total" ? t(`usage.type.${s}` as MessageKey) : split === "profile" ? labels?.get(s) ?? s : s);
 }
 
 /** 「全部主机」: host label → host color (the 「主机」 split). */
@@ -277,7 +303,7 @@ function Stat({ label, value, sub, hint }: { label: ReactNode; value: string; su
         {hint && <Info size={11} />}
       </div>
       <div className="text-lg font-semibold tabular-nums">{value}</div>
-      {sub && <div className="text-[11px] text-subtle tabular-nums">{sub}</div>}
+      {sub && <div className="text-caption/[inherit] text-subtle tabular-nums">{sub}</div>}
     </div>
   );
 }
@@ -300,10 +326,11 @@ function Summary({ report, previous, range }: { report: UsageReport; previous: U
             </span>
           )}
         </div>
-        <div className="text-[11px] text-subtle tabular-nums">{t("usage.inOut", { i: formatTokens(tt.input), o: formatTokens(tt.output) })}</div>
+        <div className="text-caption/[inherit] text-subtle tabular-nums">{t("usage.inOut", { i: formatTokens(tt.input), o: formatTokens(tt.output) })}</div>
       </div>
       {cacheRate !== null && <Stat label={t("usage.cacheRate")} value={`${Math.round(cacheRate * 100)}%`} sub={t("usage.cachedTokens", { n: formatTokens(tt.cachedInput) })} />}
       <Stat label={t("usage.turns")} value={String(tt.turns)} sub={t("usage.perDay", { n: (tt.turns / range).toFixed(1) })} />
+      {tt.maxRequestInput !== undefined && <Stat label={t("usage.maxContext")} value={formatTokens(tt.maxRequestInput)} hint={t("usage.maxContextHint")} />}
       {apiValue && <Stat label={t("usage.apiValue")} value={apiValue} sub={t("usage.apiValueSub")} hint={t("usage.apiValueHint")} />}
     </div>
   );
@@ -312,12 +339,13 @@ function Summary({ report, previous, range }: { report: UsageReport; previous: U
 // ---------------------------------------------------------------- chart
 
 function useWidth<T extends HTMLElement>() {
+  const win = useOwnerWindow();
   const ref = useRef<T>(null);
   const [width, setWidth] = useState(0);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setWidth(e!.contentRect.width));
+    const ro = new win.ResizeObserver(([e]) => setWidth(e!.contentRect.width));
     ro.observe(el);
     setWidth(el.getBoundingClientRect().width);
     return () => ro.disconnect();
@@ -467,6 +495,9 @@ function Chart({ report, split, days, metric, mode, focus, onFocus, providers, m
 interface Row {
   name: string;
   turns?: number;
+  requests?: number;
+  /** The largest single request of the series (cutex `maxRequestInput`). */
+  maxRequestInput?: number;
   input?: number;
   output?: number;
   total: number;
@@ -485,11 +516,13 @@ function Breakdown({ report, split, metric, focus, onFocus, providers, modelIds 
         { name: "output", total: tt.output },
       ];
     }
-    const map = new Map<string, Row & { turns: number; input: number; output: number }>();
+    const map = new Map<string, Row & { turns: number; requests: number; input: number; output: number }>();
     for (const row of report.rows) {
       const name = seriesName(row.key, split);
-      const cur = map.get(name) ?? { name, turns: 0, input: 0, output: 0, total: 0 };
+      const cur = map.get(name) ?? { name, turns: 0, requests: 0, input: 0, output: 0, total: 0 };
       cur.turns += row.turns;
+      cur.requests += row.requests;
+      if (row.maxRequestInput !== undefined) cur.maxRequestInput = Math.max(cur.maxRequestInput ?? 0, row.maxRequestInput);
       cur.input += row.input;
       cur.output += row.output;
       cur.total += row.total;
@@ -503,13 +536,15 @@ function Breakdown({ report, split, metric, focus, onFocus, providers, modelIds 
   // Same colours as the chart: the chart's top names keep theirs, the rest share the "…" colour.
   const chartSeries = split === "total" ? [...TOKEN_TYPES] : rows.length > 6 ? [...rows.slice(0, 5).map((r) => r.name), OTHER] : rows.map((r) => r.name);
   const detail = split !== "total";
+  // 每步上下文 only where cutex reports the request count it needs (usage-turn-shape).
+  const stepContext = detail && report.totals.maxRequestInput !== undefined;
   // 来源: a subscription source's cost is what the same tokens would cost on the API, not spend.
   const billing = useMemo(() => (split === "source" ? billingBySeries(report) : null), [report, split]);
   // 模型: 「按 Y 计价」 on models the price table maps to another model (cutex usage-model-map).
   const pricedAs = useMemo(() => (split === "model" ? pricedAsByName(report.rows, (row) => seriesName(row.key, split)) : null), [report, split]);
   const modelName = useModelName();
   const hostColors = useContext(HostColors);
-  const th = "py-2 text-right font-normal";
+  const th = "whitespace-nowrap py-2 pl-3 text-right font-normal";
   return (
     <div className={`${CARD} mb-2 px-4 py-1`}>
       <table className="w-full text-sm">
@@ -518,6 +553,8 @@ function Breakdown({ report, split, metric, focus, onFocus, providers, modelIds 
             <th className="py-2 font-normal">{t(`usage.by.${split}` as MessageKey)}</th>
             <th className="w-[24%] py-2 font-normal">{t("usage.share")}</th>
             {detail && <th className={th}>{t("usage.turns")}</th>}
+            {detail && <th className={th} title={t("usage.perTurnHint")}>{t("usage.perTurn")}</th>}
+            {stepContext && <th className={th} title={t("usage.perStepHint")}>{t("usage.perStep")}</th>}
             {detail && <th className={th}>{t("usage.inputOutput")}</th>}
             <th className={th}>{t("usage.tokens")}</th>
             {detail && report.currency && <th className={th}>{t("usage.apiValue")}</th>}
@@ -527,6 +564,8 @@ function Breakdown({ report, split, metric, focus, onFocus, providers, modelIds 
           {rows.map((r) => {
             const share = (byCost ? (r.cost ?? 0) : r.total) / whole;
             const color = colorOf(split, providers, chartSeries, r.name, hostColors);
+            const shape = turnShape(r);
+            const heavyCls = shape.heavy ? "font-medium text-warn" : "text-muted";
             return (
               <tr key={r.name} onMouseEnter={() => onFocus(r.name)} onMouseLeave={() => onFocus(null)} className={`border-t border-border tabular-nums transition-opacity ${focus !== null && focus !== r.name ? "opacity-50" : ""}`}>
                 <td className="py-2">
@@ -534,14 +573,14 @@ function Breakdown({ report, split, metric, focus, onFocus, providers, modelIds 
                     <SeriesMark split={split} name={r.name} color={color} providers={providers} modelIds={modelIds} />
                     <span className="truncate" title={rawIdsTitle(modelIds, r.name)}>{label(r.name)}</span>
                     {pricedAs?.get(r.name) && (
-                      <span className="shrink-0 rounded bg-surface-2 px-1.5 py-px text-[11px] text-muted" title={t("usage.map.pricedAsHint", { to: pricedAs.get(r.name)!.join(", ") })}>
+                      <Tag title={t("usage.map.pricedAsHint", { to: pricedAs.get(r.name)!.join(", ") })}>
                         {t("usage.map.pricedAs", { to: pricedAs.get(r.name)!.map((id) => modelName(id)).join(listSep(locale)) })}
-                      </span>
+                      </Tag>
                     )}
                     {billing?.get(r.name) && (
-                      <span className="shrink-0 rounded bg-surface-2 px-1.5 py-px text-[11px] text-muted" title={billing.get(r.name) === "subscription" ? t("usage.sources.subscriptionHint") : undefined}>
+                      <Tag title={billing.get(r.name) === "subscription" ? t("usage.sources.subscriptionHint") : undefined}>
                         {t(billing.get(r.name) === "subscription" ? "usage.sources.tag.subscription" : "usage.sources.tag.api")}
-                      </span>
+                      </Tag>
                     )}
                   </span>
                 </td>
@@ -555,11 +594,25 @@ function Breakdown({ report, split, metric, focus, onFocus, providers, modelIds 
                 </td>
                 {detail && <td className="py-2 text-right text-muted">{r.turns}</td>}
                 {detail && (
-                  <td className="py-2 text-right text-muted">
+                  <td className={`whitespace-nowrap py-2 pl-3 text-right ${heavyCls}`} data-testid="usage-per-turn">
+                    {shape.perTurn !== null ? formatTokens(shape.perTurn) : "—"}
+                  </td>
+                )}
+                {stepContext && (
+                  <td
+                    className={`whitespace-nowrap py-2 pl-3 text-right ${heavyCls}`}
+                    data-testid="usage-per-step"
+                    title={shape.perStep !== null ? t("usage.perStepTitle", { steps: (shape.stepsPerTurn ?? 0).toFixed(1), peak: shape.peak !== null ? formatTokens(shape.peak) : "—" }) : undefined}
+                  >
+                    {shape.perStep !== null ? formatTokens(shape.perStep) : "—"}
+                  </td>
+                )}
+                {detail && (
+                  <td className="whitespace-nowrap py-2 pl-3 text-right text-muted">
                     {formatTokens(r.input ?? 0)} <span className="text-subtle">/</span> {formatTokens(r.output ?? 0)}
                   </td>
                 )}
-                <td className="py-2 text-right font-medium">{formatTokens(r.total)}</td>
+                <td className="py-2 pl-3 text-right font-medium">{formatTokens(r.total)}</td>
                 {detail && report.currency && <td className="py-2 text-right text-muted">{r.cost !== undefined ? formatMoney(r.cost, report.currency) : "—"}</td>}
               </tr>
             );
@@ -587,7 +640,7 @@ function Ledger({ providers, sources, refresh }: { providers: ProfileProviders; 
   const api = useTargetApi();
   const { t, locale } = useI18n();
   const [range, setRange] = useModulePref<number>(ID, "range", 7);
-  const [savedSplit, setSplit] = useModulePref<Split>(ID, "split", "total");
+  const [savedSplit, setSplit] = useModulePref<Split>(ID, "split", DEFAULT_USAGE_SPLIT);
   // 来源 split and the source filter only where cutex keeps extra usage sources (all hosts: any of them).
   const targetSources = useTargetFeatures().has(USAGE_SOURCES_FEATURE);
   const hasSources = view ? view.targets.some((x) => x.sources) : targetSources;
@@ -635,7 +688,7 @@ function Ledger({ providers, sources, refresh }: { providers: ProfileProviders; 
   const merge = useCallback(
     (parts: HostResult[], dropDeleted: boolean) => {
       if (!view) return null;
-      const ok = parts.filter((p): p is HostResult & { report: UsageReport } => !!p.report).map((p) => ({ ...p, report: dropDeleted ? withoutDeletedProfiles(p.report, view.providers?.get(p.hostId) ?? null) : p.report }));
+      const ok = parts.filter((p): p is HostResult & { report: UsageReport } => !!p.report).map((p) => ({ ...p, profiles: view.providers?.get(p.hostId), report: dropDeleted ? withoutDeletedProfiles(p.report, view.providers?.get(p.hostId) ?? null) : p.report }));
       if (!ok.length) return null;
       const primary = ok.find((p) => p.hostId === view.primary)?.report;
       return mergeUsageReports(ok, { currency: primary ? reportCurrency(primary) : undefined, canonical: view.canonical });
@@ -673,7 +726,17 @@ function Ledger({ providers, sources, refresh }: { providers: ProfileProviders; 
   // 模型: names from Settings → 通用 → 模型显示名; ids shown alike add up (display only).
   const modelName = useModelName();
   const named = useMemo(() => (report && split === "model" ? withShownModels(report, (id) => modelName(id)) : null), [report, split, modelName]);
-  const shown = useMemo(() => (report && split === "profile" && !view ? withoutDeletedProfiles(report, providers) : (named?.report ?? report)), [report, split, providers, named, view]);
+  const shown = useMemo(() => {
+    if (!report || split !== "profile" || view) return named?.report ?? report;
+    const current = withoutDeletedProfiles(report, providers);
+    return mergeUsageReports([{ hostId: host, label: host, report: current, profiles: providers }]).report;
+  }, [report, split, providers, named, view, host]);
+  const profileLabels = useMemo(() => new Map((shown?.rows ?? []).flatMap((row) => { const key = row.key as import("./merge").HostRowKey; return key.profileGroup && key.profile ? [[key.profileGroup, key.profile] as const] : []; })), [shown]);
+  const seriesProviders = useMemo<ProfileProviders>(() => {
+    if (!providers || view) return providers;
+    const entries = [...providers.values()].map((profile) => identityProfile(host, host, profile));
+    return new Map(groupProfiles(entries, false).map((group) => [group.id, providers.get(group.members[0]!.name)!]));
+  }, [providers, view, host]);
   const shownMetric: Metric = hasCost ? metric : "tokens";
   const canStack = !(split === "total" && shownMetric === "cost");
   const hostLabel = (id: string) => view?.targets.find((x) => x.hostId === id)?.label ?? id;
@@ -683,7 +746,7 @@ function Ledger({ providers, sources, refresh }: { providers: ProfileProviders; 
   };
 
   const chartControls = (
-    <>
+    <span role="toolbar" className="contents">
       {canStack && (
         <Segmented
           value={mode}
@@ -704,86 +767,88 @@ function Ledger({ providers, sources, refresh }: { providers: ProfileProviders; 
           onChange={setMetric}
         />
       )}
-    </>
+    </span>
   );
 
   return (
-    <section className="mb-6">
-      <div className="mb-3 flex min-h-7 flex-wrap items-center gap-2">
-        <h3 className="shrink-0 text-sm font-semibold">{t("usage.ledger")}</h3>
-        {/* Wraps under the title when the page is narrow (「全部主机」 adds a split). */}
-        <div className="ml-auto flex flex-wrap justify-end gap-2">
-          {hasSources && sourceOptions.length > 2 && <Select width="w-36" value={sourceFilter} options={sourceOptions} onChange={setSource} label={t("usage.sources.filter")} />}
-          <Segmented value={split} options={splits.map((s) => ({ value: s, label: t(`usage.by.${s}` as MessageKey) }))} onChange={setSplit} />
-          <Segmented value={String(range)} options={RANGES.map((r) => ({ value: String(r), label: t("usage.days", { n: r }) }))} onChange={(v) => setRange(Number(v))} />
-        </div>
-      </div>
-      {error && <ErrorNote>{error}</ErrorNote>}
-      {report === undefined && !error && (
-        <div className={`${CARD} px-4 py-1`}>
-          <Loading rows={3} />
-        </div>
-      )}
-      {report === null && !error && (
-        <div className={`${CARD} px-4 py-1`}>
-          <PlannedCard api="GET /v2/usage">{t("usage.unsupported")}</PlannedCard>
-        </div>
-      )}
-      {report && (
-        <>
-          <Summary report={report} previous={previous} range={range} />
-          {merged && merged.unconverted.length > 0 && <UnconvertedNote notes={merged.unconverted} currency={report.currency} />}
-          <Chart report={shown ?? report} split={split} days={days} metric={shownMetric} mode={canStack ? mode : "line"} focus={focus} onFocus={setFocus} providers={providers} modelIds={named?.ids ?? null} controls={chartControls} />
-          <Breakdown report={shown ?? report} split={split} metric={shownMetric} focus={focus} onFocus={setFocus} providers={providers} modelIds={named?.ids ?? null} />
-          {unpriced.length > 0 && (
-            <div className="mb-1.5 flex items-center gap-1.5 text-xs text-warn">
-              <AlertTriangle size={12} className="shrink-0" />
-              <span className="truncate" title={unpriced.join(listSep(locale))}>{t("usage.unpriced", { n: unpriced.length, names: unpriced.map((id) => (unpricedTo.has(id) ? `${modelName(id)} → ${modelName(unpricedTo.get(id)!)}` : modelName(id))).join(listSep(locale)) })}</span>
-              {view ? (
-                // Prices are set per host: one link per host that reported unpriced models.
-                [...unpricedHosts].map(([h, models]) => (
-                  <button key={h} className="shrink-0 underline underline-offset-2 hover:text-foreground" onClick={() => openPrices(h, models)}>
-                    {t("usage.all.setPricesOn", { host: hostLabel(h) })}
-                  </button>
-                ))
-              ) : (
-                <button className="shrink-0 underline underline-offset-2 hover:text-foreground" onClick={() => setEditing(unpriced)}>
-                  {t("usage.setPrices")}
-                </button>
-              )}
-            </div>
-          )}
-          <div className="flex items-center gap-3 text-xs text-subtle">
-            <span className="min-w-0 truncate">
-              {report.recordingSince ? t("usage.since", { date: report.recordingSince.slice(0, 10) }) : ""} {t("usage.apiValueNote")}
-              {report.pricing?.catalog && ` ${t("usage.catalog", { source: report.pricing.catalog.source, date: (report.pricing.catalog.fetchedAt ?? "—").slice(0, 10) })}`}
-            </span>
-            <span className="ml-auto flex shrink-0 items-center gap-2">
-              {view && <EditHostPicker view={view} />}
-              <button className="shrink-0 text-muted underline-offset-2 hover:text-foreground hover:underline" disabled={!prices} onClick={() => setEditing([])}>
-                {t("usage.editPrices")}
-              </button>
-            </span>
+    <ProfileSeriesLabels.Provider value={profileLabels}>
+      <SettingsEffectCard><section className="mb-6">
+        <div className="mb-3 flex min-h-7 flex-wrap items-center gap-2">
+          <h3 className="shrink-0 text-sm font-semibold">{t("usage.ledger")}</h3>
+          {/* Wraps under the title when the page is narrow (「全部主机」 adds a split). */}
+          <div role="toolbar" className="ml-auto flex flex-wrap justify-end gap-2">
+            {hasSources && sourceOptions.length > 2 && <Select width="w-36" value={sourceFilter} options={sourceOptions} onChange={setSource} label={t("usage.sources.filter")} />}
+            <Segmented value={split} options={splits.map((s) => ({ value: s, label: t(`usage.by.${s}` as MessageKey) }))} onChange={setSplit} />
+            <Segmented value={String(range)} options={RANGES.map((r) => ({ value: String(r), label: t("usage.days", { n: r }) }))} onChange={(v) => setRange(Number(v))} />
           </div>
-        </>
-      )}
-      {view && mainParts && <HostsNote view={view} parts={mainParts} converted={merged?.converted ?? []} currency={report?.currency} />}
-      {editing && prices && (
-        <PricesDialog
-          prices={prices}
-          host={view ? hostLabel(view.editHost) : undefined}
-          add={editing.filter((m) => !unpricedTo.has(m))}
-          usedModels={usedModels}
-          unpriced={view ? (unpricedHosts.get(view.editHost) ?? []) : unpriced}
-          canMap={canMap}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            setVersion((v) => v + 1);
-          }}
-        />
-      )}
-    </section>
+        </div>
+        {error && <ErrorNote>{error}</ErrorNote>}
+        {report === undefined && !error && (
+          <div className={`${CARD} px-4 py-1`}>
+            <Loading rows={3} />
+          </div>
+        )}
+        {report === null && !error && (
+          <div className={`${CARD} px-4 py-1`}>
+            <PlannedCard api="GET /v2/usage">{t("usage.unsupported")}</PlannedCard>
+          </div>
+        )}
+        {report && (
+          <>
+            <Summary report={report} previous={previous} range={range} />
+            {merged && merged.unconverted.length > 0 && <UnconvertedNote notes={merged.unconverted} currency={report.currency} />}
+            <Chart report={shown ?? report} split={split} days={days} metric={shownMetric} mode={canStack ? mode : "line"} focus={focus} onFocus={setFocus} providers={seriesProviders} modelIds={named?.ids ?? null} controls={chartControls} />
+            <Breakdown report={shown ?? report} split={split} metric={shownMetric} focus={focus} onFocus={setFocus} providers={seriesProviders} modelIds={named?.ids ?? null} />
+            {unpriced.length > 0 && (
+              <div className="mb-1.5 flex items-center gap-1.5 text-xs text-warn">
+                <AlertTriangle size={12} className="shrink-0" />
+                <span className="truncate" title={unpriced.join(listSep(locale))}>{t("usage.unpriced", { n: unpriced.length, names: unpriced.map((id) => (unpricedTo.has(id) ? `${modelName(id)} → ${modelName(unpricedTo.get(id)!)}` : modelName(id))).join(listSep(locale)) })}</span>
+                {view ? (
+                  // Prices are set per host: one link per host that reported unpriced models.
+                  [...unpricedHosts].map(([h, models]) => (
+                    <TargetHostContext.Provider value={h}><SettingsGroup navigation agents="none" source="host"><button key={h} className="shrink-0 underline underline-offset-2 hover:text-foreground" onClick={() => openPrices(h, models)}>
+                      {t("usage.all.setPricesOn", { host: hostLabel(h) })}
+                    </button></SettingsGroup></TargetHostContext.Provider>
+                  ))
+                ) : (
+                  <SettingsGroup navigation agents="none" source="host"><button className="shrink-0 underline underline-offset-2 hover:text-foreground" onClick={() => setEditing(unpriced)}>
+                    {t("usage.setPrices")}
+                  </button></SettingsGroup>
+                )}
+              </div>
+            )}
+            <div className="flex items-center gap-3 text-xs text-subtle">
+              <span className="min-w-0 truncate">
+                {report.recordingSince ? t("usage.since", { date: report.recordingSince.slice(0, 10) }) : ""} {t("usage.apiValueNote")}
+                {report.pricing?.catalog && ` ${t("usage.catalog", { source: report.pricing.catalog.source, date: (report.pricing.catalog.fetchedAt ?? "—").slice(0, 10) })}`}
+              </span>
+              <span className="ml-auto flex shrink-0 items-center gap-2">
+                {view && <EditHostPicker view={view} />}
+                <SettingsGroup navigation agents="none" source="host"><button className="shrink-0 text-muted underline-offset-2 hover:text-foreground hover:underline" disabled={!prices} onClick={() => setEditing([])}>
+                  {t("usage.editPrices")}
+                </button></SettingsGroup>
+              </span>
+            </div>
+          </>
+        )}
+        {view && mainParts && <HostsNote view={view} parts={mainParts} converted={merged?.converted ?? []} currency={report?.currency} />}
+        {editing && prices && (
+          <PricesDialog
+            prices={prices}
+            host={view ? hostLabel(view.editHost) : undefined}
+            add={editing.filter((m) => !unpricedTo.has(m))}
+            usedModels={usedModels}
+            unpriced={view ? (unpricedHosts.get(view.editHost) ?? []) : unpriced}
+            canMap={canMap}
+            onClose={() => setEditing(null)}
+            onSaved={() => {
+              setEditing(null);
+              setVersion((v) => v + 1);
+            }}
+          />
+        )}
+      </section></SettingsEffectCard>
+    </ProfileSeriesLabels.Provider>
   );
 }
 
@@ -841,6 +906,7 @@ const MAP_PROBLEM_KEY: Record<MapProblem, MessageKey> = {
 
 /** `host`: 「全部主机」 names the one host the table is saved on. */
 function PricesDialog({ prices, host, add, usedModels, unpriced, canMap, onClose, onSaved }: { prices: UsagePrices; host?: string; add: string[]; usedModels: string[]; unpriced: string[]; canMap: boolean; onClose(): void; onSaved(p: UsagePrices): void }) {
+  const win = useOwnerWindow();
   const api = useTargetApi();
   const { t } = useI18n();
   const modelName = useModelName();
@@ -866,8 +932,8 @@ function PricesDialog({ prices, host, add, usedModels, unpriced, canMap, onClose
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    win.addEventListener("keydown", onKey);
+    return () => win.removeEventListener("keydown", onKey);
   }, [onClose]);
   const set = (i: number, key: keyof PriceDraft, v: string) => setDraft(draft.map((r, j) => (j === i ? { ...r, [key]: v } : r)));
   // AUD / CNY / USD; a host already set to something else keeps showing it.
@@ -892,7 +958,7 @@ function PricesDialog({ prices, host, add, usedModels, unpriced, canMap, onClose
   const cols = "grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_5.5rem_4.5rem] items-center gap-2";
   const mapCols = "grid grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_4.5rem] items-center gap-2";
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40" onMouseDown={onClose}>
+    <SettingsGroup agents="none" source="host"><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onMouseDown={onClose}>
       <div className="flex max-h-[85vh] w-[640px] flex-col rounded-2xl border border-border bg-surface p-5 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
         <div className="mb-1 flex items-center">
           <h3 className="font-semibold">{host ? t("usage.all.pricesOn", { host }) : t("usage.prices")}</h3>
@@ -998,7 +1064,7 @@ function PricesDialog({ prices, host, add, usedModels, unpriced, canMap, onClose
           </Button>
         </div>
       </div>
-    </div>
+    </div></SettingsGroup>
   );
 }
 
@@ -1079,13 +1145,12 @@ function AllHostsUsage({ all }: { all: AllHostsChoice }) {
   const providers = useHostsProfileProviders(targets);
   // Profile names merge across hosts (trimmed, any case); the first host's spelling is shown.
   const canonical = useMemo(() => canonicalNames(targets.flatMap((x) => [...(providers?.get(x.hostId)?.keys() ?? [])])), [targets, providers]);
-  // name → profile for avatars / colours of merged series: the first host's profile of that name.
+  // Account identity → the first profile for avatars / colours of merged series.
   const merged = useMemo<ProfileProviders>(() => {
     if (!providers) return null;
-    const out = new Map<string, ProfileItem>();
-    for (const x of targets) for (const [name, p] of providers.get(x.hostId) ?? []) if (!out.has(canonical(name))) out.set(canonical(name), p);
-    return out;
-  }, [targets, providers, canonical]);
+    const entries = targets.flatMap((target) => [...(providers.get(target.hostId)?.values() ?? [])].map((profile) => identityProfile(target.hostId, target.label, profile)));
+    return new Map(groupProfiles(entries, false).map((group) => { const member = group.members[0]!; return [group.id, providers.get(member.hostId)!.get(member.name)!]; }));
+  }, [targets, providers]);
   const colors = useMemo(() => new Map(targets.map((x) => [x.label, x.color])), [targets]);
   const view = useMemo<AllView>(() => ({ targets, primary: settingsHost, excluded: all.excluded, providers, canonical, colors, editHost, setEditHost }), [targets, settingsHost, all.excluded, providers, canonical, colors, editHost]);
   return (

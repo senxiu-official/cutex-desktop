@@ -1,6 +1,9 @@
 import { Archive } from "lucide-react";
-import { ArchivePage } from "../../components/settings/AppSettings";
 import { defineModule } from "../slots";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const ArchivePage = lazyPage(() => import("../../components/settings/AppSettings").then((m) => m.ArchivePage));
 
 export default defineModule({
   id: "archive",

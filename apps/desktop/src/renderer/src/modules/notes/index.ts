@@ -21,7 +21,7 @@ export default defineModule({
     "side.component": [
       { id: LIST, titleKey: "notes.list", icon: NotebookPen, instances: "singleton", defaultBinding: "host", placement: { home: "chat", order: 200 }, parseParams: parseList,
         init: (params: ListState, previous: ListState | null) => ({ ...previous, ...params }), restore: (raw) => parseList(raw), useTab: useListTab, Body: NotesListCard,
-        launcher: { order: 300, params: (): Json => { const id = useApp.getState().selectedId; return id ? { sessionId: id, scope: "session" } : {}; } } },
+        launcher: { category: "content", order: 300, params: (): Json => { const id = useApp.getState().selectedId; return id ? { sessionId: id, scope: "session" } : {}; } } },
       { id: NOTE, titleKey: "notes.note", icon: StickyNote, instances: "multi", defaultBinding: "host", peekable: true, placement: { home: "chat", order: 210 },
         parseParams: parseNote, dedupeKey: (params: NoteState) => params.noteId, init: (params: NoteState, previous: NoteState | null) => ({ ...previous, ...params }), restore: (raw) => parseNote(raw),
         toRef: (state: NoteState) => ({ key: state.noteId, title: state.title ?? state.noteId, params: { noteId: state.noteId }, snippet: state.snippet }), fromRef: (params) => parseNote(params), useTab: useNoteTab, Body: NoteView, Actions: NoteActions },

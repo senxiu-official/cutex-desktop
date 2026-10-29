@@ -1,3 +1,4 @@
+import { isImeComposing } from "../lib/ime";
 // In-app folder browser for remote hosts (cutex `GET /v2/fs/dirs`, feature fs-dir-browse): the
 // native dialog would show this machine's disk, not the host's. Shown in the overlay dialog slot
 // (lib/contextMenu `folderDialog`). Fixed list height so navigating never resizes the dialog.
@@ -7,9 +8,11 @@ import type { DirBrowse } from "../../../shared/ipc";
 import { api, apiFor } from "../bridge";
 import { useI18n } from "../i18n";
 import { closeDialog } from "../lib/contextMenu";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 /** `hostId`: whose disk (null = the focus host). */
 export function FolderBrowser({ start, hostId, resolve }: { start: string | null; hostId: string | null; resolve(value: string | null): void }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const [dir, setDir] = useState<DirBrowse | null>(null);
   const [input, setInput] = useState(start ?? "");
@@ -50,10 +53,11 @@ export function FolderBrowser({ start, hostId, resolve }: { start: string | null
   useEffect(() => {
     go(start ?? undefined);
     const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return;
       if (e.key === "Escape") done(null);
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    win.document.addEventListener("keydown", onKey);
+    return () => win.document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -73,6 +77,7 @@ export function FolderBrowser({ start, hostId, resolve }: { start: string | null
           spellCheck={false}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
             if (e.key === "Enter") {
               e.preventDefault();
               go(input.trim() || undefined);
@@ -84,7 +89,7 @@ export function FolderBrowser({ start, hostId, resolve }: { start: string | null
       {dir && dir.roots.length > 1 && (
         <div className="flex flex-wrap gap-1">
           {dir.roots.map((root) => (
-            <button key={root} onClick={() => go(root)} className="flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-muted hover:text-foreground">
+            <button key={root} onClick={() => go(root)} className="flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-caption/[inherit] text-muted hover:text-foreground">
               <HardDrive size={11} />
               {root}
             </button>

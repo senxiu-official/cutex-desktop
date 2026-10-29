@@ -14,6 +14,7 @@
 // `units: true` also sets `--cqw` / `--cqh` (1 % of the content box, in px) on the element, so CSS
 // writes `calc(4 * var(--cqw, 1vw))` where it wrote `4cqw`. A flag only re-renders when it flips.
 import { useCallback, useMemo, useState } from "react";
+import { sharedResizeObserver } from "./resizeHub";
 
 /** An element's content box (what container queries and `cqw` / `cqh` measure), in px. */
 export interface Box {
@@ -85,7 +86,7 @@ export function useSizeFlags<K extends string>(
       };
       apply(contentBox(el));
       if (typeof ResizeObserver === "undefined") return undefined;
-      const ro = new ResizeObserver((entries) => {
+      const ro = sharedResizeObserver((entries) => {
         const entry = entries[entries.length - 1];
         if (entry) apply({ width: entry.contentRect.width, height: entry.contentRect.height });
       });

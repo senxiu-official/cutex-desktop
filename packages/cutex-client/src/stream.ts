@@ -45,7 +45,8 @@ export function openStream(
         touch();
         const headers = client.headers({ Accept: "text/event-stream" });
         if (lastId) headers["Last-Event-ID"] = lastId;
-        const response = await client.fetchRaw(client.url(path, options.query), { headers, signal: attempt.signal });
+        // This loop owns reconnect backoff; do not stack HTTP retries inside a stream attempt.
+        const response = await client.fetchRaw(client.url(path, options.query), { headers, signal: attempt.signal }, { retryable: false });
         if (!response.ok || !response.body) {
           const text = await response.text().catch(() => "");
           let body: unknown = text;

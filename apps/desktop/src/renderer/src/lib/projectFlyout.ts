@@ -4,6 +4,8 @@
 // beside the sidebar. An expanded project never shows one (its agents are already listed).
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useTrackOverlay } from "./openOverlays";
+import { isNode } from "./ownerWindow";
+import { useOwnerWindow } from "./ownerContext";
 
 /** Settings → 外观 → 侧栏 「悬停预览延迟」 (ms). */
 export const FLYOUT_DELAYS = [120, 300, 600] as const;
@@ -66,6 +68,7 @@ export interface ProjectFlyoutState {
  * = the row is collapsed at all (an expanded or dragged project closes any open flyout).
  */
 export function useProjectFlyout({ available, hoverEnabled, delay }: { available: boolean; hoverEnabled: boolean; delay: number }): ProjectFlyoutState {
+  const win = useOwnerWindow();
   const rowRef = useRef<HTMLDivElement | null>(null);
   const flyRef = useRef<HTMLDivElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -117,31 +120,31 @@ export function useProjectFlyout({ available, hoverEnabled, delay }: { available
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      const inside = flyRef.current?.contains(document.activeElement);
+      const inside = flyRef.current?.contains(win.document.activeElement);
       close();
       if (inside) rowRef.current?.querySelector("button")?.focus();
     };
     // The flyout is placed from the row's position when it opened: scrolling the sidebar closes it.
     const onScroll = (e: Event) => {
       // Only a scroll that moves the row (the sidebar list); a streaming conversation keeps it open.
-      if (e.target instanceof Node && rowRef.current && e.target.contains(rowRef.current)) close();
+      if (isNode(e.target) && rowRef.current && e.target.contains(rowRef.current)) close();
     };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", onScroll, true);
+    win.addEventListener("mousedown", onDown);
+    win.addEventListener("keydown", onKey);
+    win.addEventListener("scroll", onScroll, true);
     return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", onScroll, true);
+      win.removeEventListener("mousedown", onDown);
+      win.removeEventListener("keydown", onKey);
+      win.removeEventListener("scroll", onScroll, true);
     };
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, win]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!available) return;
     if (e.key === "ArrowRight") {
       e.preventDefault();
       setPinned(true);
-      requestAnimationFrame(() => flyRef.current?.querySelector<HTMLElement>("[data-flyout-list] > [role=button], [data-flyout-list] > button:not(:disabled)")?.focus());
+      win.requestAnimationFrame(() => flyRef.current?.querySelector<HTMLElement>("[data-flyout-list] > [role=button], [data-flyout-list] > button:not(:disabled)")?.focus());
     } else if (e.key === "ArrowLeft" && open) {
       e.preventDefault();
       close();

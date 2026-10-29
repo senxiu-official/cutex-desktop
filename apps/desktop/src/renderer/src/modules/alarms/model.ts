@@ -1,6 +1,6 @@
 // Pure helpers of the 闹钟 status category: which alarms an agent shows, time labels, who → whom.
 import type { AlarmView } from "../../../../shared/alarms";
-import type { AppLocale } from "../../../../shared/locales";
+import { isTraditionalLocale, localeFallbacks, type AppLocale } from "../../../../shared/locales";
 
 /** Sent / cancelled alarms stay in the fold this long after their time. */
 export const RECENT_MS = 24 * 3_600_000;
@@ -39,7 +39,8 @@ export function alarmsWorthShowing(data: AgentAlarms, now: number): boolean {
 const pad = (n: number) => String(n).padStart(2, "0");
 type Locale = AppLocale;
 
-const DAY_LABELS: Record<Locale, { tomorrow: string; yesterday: string }> = {
+// Base locales; regional Traditional Chinese resolves through dayLabels.
+const DAY_LABELS: Partial<Record<Locale, { tomorrow: string; yesterday: string }>> & Record<"zh-Hant-CN" | "en", { tomorrow: string; yesterday: string }> = {
   "zh-CN": { tomorrow: "明天", yesterday: "昨天" },
   "zh-Hant-CN": { tomorrow: "明天", yesterday: "昨天" },
   en: { tomorrow: "Tomorrow", yesterday: "Yesterday" },
@@ -54,6 +55,11 @@ const DAY_LABELS: Record<Locale, { tomorrow: string; yesterday: string }> = {
   "ko-KR": { tomorrow: "내일", yesterday: "어제" },
 };
 
+function dayLabels(locale: Locale): { tomorrow: string; yesterday: string } {
+  for (const l of localeFallbacks(locale)) if (DAY_LABELS[l]) return DAY_LABELS[l]!;
+  return isTraditionalLocale(locale) ? DAY_LABELS["zh-Hant-CN"] : DAY_LABELS.en;
+}
+
 /** "14:30" today, "明天 09:00" / "Tomorrow 09:00", "昨天 18:40", "10-14 09:00", "2027-01-02 09:00". */
 export function alarmClock(ms: number, now: number, locale: Locale): string {
   const d = new Date(ms);
@@ -61,7 +67,7 @@ export function alarmClock(ms: number, now: number, locale: Locale): string {
   const clock = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
   const day = 86_400_000;
-  const dayLabel = DAY_LABELS[locale];
+  const dayLabel = dayLabels(locale);
   if (ms >= dayStart && ms < dayStart + day) return clock;
   if (ms >= dayStart + day && ms < dayStart + 2 * day) return `${dayLabel.tomorrow} ${clock}`;
   if (ms >= dayStart - day && ms < dayStart) return `${dayLabel.yesterday} ${clock}`;

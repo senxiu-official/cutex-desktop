@@ -9,7 +9,7 @@ import { useState, type ReactNode } from "react";
 import { Blocks, Bot, Check, ChevronDown, KeyRound, Layers, Monitor, Server, Wrench } from "lucide-react";
 import { SettingRow, Toggle } from "../components/settings/Form";
 
-const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] whitespace-nowrap";
+const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-caption/[inherit] whitespace-nowrap";
 const T = {
   local: <span className={`${CHIP} bg-surface-2 text-muted`}><Monitor size={11} />本地桌面应用</span>,
   host: (h: string) => <span className={`${CHIP} bg-accent/12 text-accent`}><Server size={11} />cutex 后端 · {h}</span>,
@@ -38,7 +38,7 @@ function Picker({ host, setHost }: { host: string; setHost(h: string): void }) {
               <span className="size-1.5 rounded-full bg-ok" />{x}{x === host && <Check size={13} className="ml-auto text-accent" />}
             </button>
           ))}
-          <span className="block border-t border-border/60 px-2.5 pt-1.5 pb-1 text-[11px] text-subtle">整个设置里的主机设置都跟着换</span>
+          <span className="block border-t border-border/60 px-2.5 pt-1.5 pb-1 text-caption/[inherit] text-subtle">整个设置里的主机设置都跟着换</span>
         </span>
       )}
     </span>
@@ -68,7 +68,7 @@ function Page({ c, host, setHost }: { c: Case; host: string; setHost(h: string):
       <div className="mx-auto max-w-[680px] px-4 py-4">
         <div className="mb-4 space-y-1.5 border-b border-border/60 pb-3">
           <div className="flex min-h-5 items-start gap-3">
-            <p className="min-w-0 text-[13px] text-muted">{c.hint}</p>
+            <p className="min-w-0 text-ui/[inherit] text-muted">{c.hint}</p>
             {c.adjust && <button className="-my-1.5 ml-auto inline-flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-xs">在主界面调整</button>}
           </div>
           <div className="flex min-h-6 flex-wrap items-center gap-1.5">{c.tags}</div>
@@ -81,7 +81,7 @@ function Page({ c, host, setHost }: { c: Case; host: string; setHost(h: string):
               {k.hint && <p className="text-xs text-subtle">{k.hint}</p>}
               {k.tags.length > 0 && <div className="mt-1 flex flex-wrap gap-1.5">{k.tags}</div>}
             </div>
-            <div className="rounded-xl border border-border bg-surface px-4"><SettingRow label={k.row}><Toggle checked onChange={() => {}} /></SettingRow></div>
+            <div className="rounded-xl border border-border bg-surface px-4"><SettingRow agents="none" source="local" label={k.row}><Toggle checked onChange={() => {}} /></SettingRow></div>
           </section>
         ))}
       </div>

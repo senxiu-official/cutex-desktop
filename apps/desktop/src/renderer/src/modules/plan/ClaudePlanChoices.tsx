@@ -6,6 +6,7 @@
 // Mode and plan mode change in one thread/settings/update (lib/claudePermissionModes); the message
 // goes only when the native took the change (else a resumed native would just plan again).
 import { useState, type ReactNode } from "react";
+import { isImeComposing } from "../../lib/ime";
 import { useI18n, type MessageKey } from "../../i18n";
 import { agentFeaturesOf } from "../../lib/agentFeatures";
 import { planApprovalPatch, planKeepMode } from "../../lib/claudePermissionModes";
@@ -85,7 +86,7 @@ export function ClaudePlanChoices({ sessionId, current, onDecided }: { sessionId
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
                   e.preventDefault();
                   void keepPlanning();
                 } else if (e.key === "Escape") setFeedback(null);

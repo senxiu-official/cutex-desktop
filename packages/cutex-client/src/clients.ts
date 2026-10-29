@@ -4,6 +4,11 @@
 // reach cutex) and tolerant readers. Hand-written like users.ts until cutex exports its schemas.
 
 export const CLIENT_REMOTE_CLOSE_FEATURE = "client-remote-close";
+/**
+ * cutex r264: `closing {outcome: "exited"}` removes this instance at once, a new instance of the same
+ * install + credential replaces the old row, and `stateChanged` may carry `exited`.
+ */
+export const CLIENT_PRESENCE_LIFECYCLE_FEATURE = "client-presence-lifecycle";
 export const CLIENT_CLOSE_REQUESTED_EVENT = "cutex/client/closeRequested";
 export const CLIENT_STATE_CHANGED_EVENT = "cutex/client/stateChanged";
 /** What this app registers as (`appName`). */
@@ -17,7 +22,11 @@ export const DEFAULT_CLOSE_GRACE_SECONDS = 15;
 
 export type ClientState = "online" | "closeRequested" | "closing" | "cancelled";
 export const CLIENT_STATES: readonly ClientState[] = ["online", "closeRequested", "closing", "cancelled"];
-export type ClientClosingOutcome = "closing" | "cancelled";
+/** `exited` only with CLIENT_PRESENCE_LIFECYCLE_FEATURE. */
+export type ClientClosingOutcome = "closing" | "cancelled" | "exited";
+/** A `stateChanged` state: a row state, or `exited` (the instance is gone; lifecycle hosts only). */
+export type ClientStateChange = ClientState | "exited";
+export const CLIENT_STATE_CHANGES: readonly ClientStateChange[] = [...CLIENT_STATES, "exited"];
 
 /** `POST /v2/clients/presence` body (a repeat is the heartbeat). */
 export interface ClientPresence {
@@ -30,10 +39,21 @@ export interface ClientPresence {
   allowRemoteClose: boolean;
 }
 
+/** The open close request a presence reply carries while `state` is `closeRequested`. */
+export interface ClientPendingCloseRequest {
+  requestedBy: { deviceName: string | null; userId: string | null; local: boolean };
+  graceSeconds: number;
+  at: string;
+}
+
 /** `POST /v2/clients/presence` reply. */
 export interface ClientPresenceReply {
   instanceId: string;
   heartbeatSeconds: number;
+  /** This instance's state on the host (absent / unknown: online). */
+  state: ClientState;
+  /** The open close request (only while `state` is `closeRequested`): a client that missed the event still sees it. */
+  closeRequest: ClientPendingCloseRequest | null;
 }
 
 /** One `GET /v2/clients` row. */
@@ -67,7 +87,7 @@ export interface ClientCloseRequested {
 /** `cutex/client/stateChanged` params. */
 export interface ClientStateChanged {
   instanceId: string;
-  state: ClientState;
+  state: ClientStateChange;
 }
 
 const str = (v: unknown, max = 200): string | null => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
@@ -87,11 +107,29 @@ export function clientPresenceBody(p: ClientPresence): ClientPresence {
   };
 }
 
-/** A presence reply: heartbeat clamped to 15 s … 10 min (absent / garbled: 60 s). */
+/**
+ * A presence reply: heartbeat clamped to 15 s … 10 min (absent / garbled: 60 s); `closeRequest` only
+ * while `state` is `closeRequested` (older hosts send neither: online, null).
+ */
 export function readClientPresenceReply(raw: unknown, instanceId: string): ClientPresenceReply {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const hb = typeof r.heartbeatSeconds === "number" && Number.isFinite(r.heartbeatSeconds) ? Math.min(600, Math.max(15, Math.round(r.heartbeatSeconds))) : DEFAULT_HEARTBEAT_SECONDS;
-  return { instanceId: str(r.instanceId, 128) ?? instanceId, heartbeatSeconds: hb };
+  const state = readClientState(r.state);
+  return { instanceId: str(r.instanceId, 128) ?? instanceId, heartbeatSeconds: hb, state, closeRequest: state === "closeRequested" ? readPendingCloseRequest(r.closeRequest) : null };
+}
+
+function readRequestedBy(value: unknown): ClientPendingCloseRequest["requestedBy"] {
+  const by = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  return { deviceName: str(by.deviceName, 120), userId: str(by.userId, 128), local: by.local === true };
+}
+
+/** A presence reply's `closeRequest`; null when absent / malformed (without `at` it cannot be told apart from another request). */
+export function readPendingCloseRequest(value: unknown): ClientPendingCloseRequest | null {
+  if (!value || typeof value !== "object") return null;
+  const p = value as Record<string, unknown>;
+  const at = str(p.at, 64);
+  if (!at) return null;
+  return { requestedBy: readRequestedBy(p.requestedBy), graceSeconds: closeGraceSeconds(p.graceSeconds), at };
 }
 
 export function readClientState(value: unknown): ClientState {
@@ -139,20 +177,19 @@ export function readClientCloseRequested(params: unknown): ClientCloseRequested 
   const p = params as Record<string, unknown>;
   const instanceId = str(p.instanceId, 128);
   if (!instanceId) return null;
-  const by = (p.requestedBy && typeof p.requestedBy === "object" ? p.requestedBy : {}) as Record<string, unknown>;
   return {
     instanceId,
-    requestedBy: { deviceName: str(by.deviceName, 120), userId: str(by.userId, 128), local: by.local === true },
+    requestedBy: readRequestedBy(p.requestedBy),
     graceSeconds: closeGraceSeconds(p.graceSeconds),
     at: str(p.at, 64) ?? new Date().toISOString(),
   };
 }
 
-/** `cutex/client/stateChanged` params; null when malformed. */
+/** `cutex/client/stateChanged` params (`exited` included); null when malformed. */
 export function readClientStateChanged(params: unknown): ClientStateChanged | null {
   if (!params || typeof params !== "object") return null;
   const p = params as Record<string, unknown>;
   const instanceId = str(p.instanceId, 128);
-  if (!instanceId || !CLIENT_STATES.includes(p.state as ClientState)) return null;
-  return { instanceId, state: p.state as ClientState };
+  if (!instanceId || !CLIENT_STATE_CHANGES.includes(p.state as ClientStateChange)) return null;
+  return { instanceId, state: p.state as ClientStateChange };
 }

@@ -16,7 +16,7 @@ import { useApp } from "../../store";
 import { PageBody, PageToolbar } from "../../components/Page";
 import { ServiceLogs } from "../../components/ServiceLogs";
 import { StatusIcon } from "../../components/StatusIcon";
-import { AddButton, Button, EmptyState, ErrorNote, ListRow, Loading, Notice, Section, SettingRow, TextInput, Toggle } from "../../components/settings/Form";
+import { AddButton, Button, EmptyState, ErrorNote, ListRow, Loading, Notice, Section, SettingRow, SettingsGroup, TextInput, Toggle } from "../../components/settings/Form";
 import { useModulePref } from "../react";
 import { accountAction, addAccount, openAccount, removeAccount } from "./actions";
 import { accountsOf, DEFAULT_BASE, DEFAULT_BINARY, homeFor, idFromName, specProblems, type Account, type AccountSpec } from "./model";
@@ -107,7 +107,8 @@ export function ClaudeSciencePage() {
         ) : accounts.length === 0 ? (
           <EmptyState>{t("claude-science.empty")}</EmptyState>
         ) : (
-          accounts.map((a) => {
+          <SettingsGroup agents="none" source="host">
+          {accounts.map((a) => {
             const s = a.service;
             const running = s.health === "reachable" || s.health === "starting";
             const detail = [t("claude-science.port", { port: s.port }), a.home ?? t("claude-science.homeUnknown"), a.shareSsh ? t("claude-science.sshShared") : null].filter(Boolean).join(" · ");
@@ -121,7 +122,7 @@ export function ClaudeSciencePage() {
                     <span className="shrink-0 text-xs text-subtle">{stateLabel(a, t)}</span>
                   </span>
                 }
-                detail={<span className="font-mono text-[11px]">{detail}</span>}
+                detail={<span className="font-mono text-caption/[inherit]">{detail}</span>}
                 actions={
                   <>
                     <Button primary onClick={() => open(a)}>
@@ -151,7 +152,8 @@ export function ClaudeSciencePage() {
                 below={logs.has(a.id) ? <ServiceLogs slug={s.slug} hostId={hostId} className="mt-2 mb-1" /> : undefined}
               />
             );
-          })
+          })}
+          </SettingsGroup>
         )}
       </Section>
       )}
@@ -200,10 +202,10 @@ function AddAccountForm({ taken, onAdd, onCancel }: { taken: ReadonlySet<string>
 
   return (
     <Section title={t("claude-science.form.title")}>
-      <SettingRow label={t("claude-science.form.name")}>
+      <SettingRow label={t("claude-science.form.name")} agents="none" source="host">
         <TextInput value={name} onChange={setName} placeholder={t("claude-science.form.namePlaceholder")} maxLength={80} autoFocus label={t("claude-science.form.name")} />
       </SettingRow>
-      <SettingRow label={t("claude-science.form.id")} hint={t("claude-science.form.idHint")}>
+      <SettingRow label={t("claude-science.form.id")} hint={t("claude-science.form.idHint")} agents="none" source="host">
         <TextInput
           value={effectiveId}
           onChange={(v) => {
@@ -215,7 +217,7 @@ function AddAccountForm({ taken, onAdd, onCancel }: { taken: ReadonlySet<string>
           label={t("claude-science.form.id")}
         />
       </SettingRow>
-      <SettingRow label={t("claude-science.form.home")} hint={t("claude-science.form.homeHint")}>
+      <SettingRow label={t("claude-science.form.home")} hint={t("claude-science.form.homeHint")} agents="none" source="host">
         <TextInput
           value={effectiveHome}
           onChange={(v) => {
@@ -226,13 +228,13 @@ function AddAccountForm({ taken, onAdd, onCancel }: { taken: ReadonlySet<string>
           label={t("claude-science.form.home")}
         />
       </SettingRow>
-      <SettingRow label={t("claude-science.form.binary")}>
+      <SettingRow label={t("claude-science.form.binary")} agents="none" source="host">
         <TextInput value={binary} onChange={setBinary} mono label={t("claude-science.form.binary")} />
       </SettingRow>
-      <SettingRow label={t("claude-science.form.port")} hint={t("claude-science.form.portHint")}>
+      <SettingRow label={t("claude-science.form.port")} info={t("claude-science.form.portHint")} agents="none" source="host">
         <TextInput value={port} onChange={(v) => setPort(v.replace(/[^0-9]/g, ""))} mono width="w-24" maxLength={5} label={t("claude-science.form.port")} />
       </SettingRow>
-      <SettingRow label={t("claude-science.form.ssh")} hint={t("claude-science.form.sshHint")}>
+      <SettingRow label={t("claude-science.form.ssh")} hint={t("claude-science.form.sshHint")} agents="none" source="host">
         <Toggle checked={shareSsh} onChange={setShareSsh} label={t("claude-science.form.ssh")} />
       </SettingRow>
       {shown.map((p) => (

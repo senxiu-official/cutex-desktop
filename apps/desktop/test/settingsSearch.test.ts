@@ -161,6 +161,7 @@ describe("built-in search declarations", () => {
       for (const s of p.sections ?? []) {
         // Shortcut groups are rendered in a loop: settingsAnchorId(`shortcuts-${group.id}`).
         if (s.anchor.startsWith("shortcuts-")) expect(code).toContain("settingsAnchorId(`shortcuts-${group.id}`)");
+        else if (p.page === "profiles" && s.anchor.startsWith("profile-")) expect(code.includes(`id="${s.anchor}"`), `${p.page} › ${s.anchor}`).toBe(true);
         else expect(code, `${p.page} › ${s.anchor}`).toContain(`settingsAnchorId("${s.anchor}")`);
       }
     }

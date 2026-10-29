@@ -2,6 +2,7 @@
 // title lives in the title bar (breadcrumb), never repeated inside the page.
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { useSizeFlags, widthAtLeast } from "../lib/sizeFlags";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 /** Scrolling content column: same width and padding on Tasks, Services, Projects, Settings….
  *  Scrollbars are overlays (lib/overlayScrollbarManager.ts) and take no width, so content never
@@ -31,6 +32,7 @@ const BODY_FLAGS = { wide: widthAtLeast(73) };
  * lib/sizeFlags (no CSS size containers, see there).
  */
 export function PageBody({ children, scrollKey, aside }: { children: ReactNode; scrollKey?: string; aside?: ReactNode }) {
+  const win = useOwnerWindow();
   // A new `scrollKey` (another settings page / profile / host in the same column) starts at the top.
   const scroller = useRef<HTMLDivElement | null>(null);
   const [sizeRef, flags] = useSizeFlags(BODY_FLAGS);
@@ -55,15 +57,15 @@ export function PageBody({ children, scrollKey, aside }: { children: ReactNode; 
       const check = () => {
         const loading = !!scroller.current?.querySelector("[data-settings-loading]");
         calm = loading ? 0 : calm + 1;
-        if (calm < 2 && performance.now() - started < HOLD_MAX) return void requestAnimationFrame(check);
-        const el = anchor && document.getElementById(anchor.id);
+        if (calm < 2 && performance.now() - started < HOLD_MAX) return void win.requestAnimationFrame(check);
+        const el = anchor && win.document.getElementById(anchor.id);
         const now = scroller.current;
         if (el && now) now.scrollTop += el.getBoundingClientRect().top - anchor.top;
         cover.hidden = true;
         cover.replaceChildren();
       };
       // Wait for the switch to render first.
-      requestAnimationFrame(() => requestAnimationFrame(check));
+      win.requestAnimationFrame(() => win.requestAnimationFrame(check));
     };
     holdBody = take;
     return () => {
@@ -100,6 +102,6 @@ export function SubNav({ children }: { children: ReactNode }) {
   return <nav className="w-52 shrink-0 overflow-y-auto border-r border-border p-2">{children}</nav>;
 }
 
-export const SUBNAV_ITEM = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]";
+export const SUBNAV_ITEM = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui/[inherit]";
 export const SUBNAV_ON = "bg-surface-2 text-foreground";
 export const SUBNAV_OFF = "text-muted hover:bg-surface-2/60 hover:text-foreground";

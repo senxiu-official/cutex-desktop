@@ -58,3 +58,10 @@ describe("agentInfoPatch display name", () => {
     expect(agentInfoPatch({ avatar: null, note: null }, { avatar: null, note: null })).toEqual({});
   });
 });
+
+it("mode-only changes pin an empty letter or follow while keeping the avatar conflict domain atomic", () => {
+  expect(agentInfoPatch({ avatar: null, avatarMode: "inherit", note: null }, { avatar: null, avatarMode: "fixed", note: null })).toEqual({ avatar: null, avatarMode: "fixed" });
+  expect(agentInfoPatch({ avatar: null, avatarMode: "fixed", note: null }, { avatar: null, avatarMode: "inherit", note: null })).toEqual({ avatar: null, avatarMode: "inherit" });
+  expect(agentInfoPatch({ avatar: null, avatarMode: "inherit", note: null }, { avatar: { kind: "emoji", value: "E" }, avatarMode: "fixed", note: null })).toEqual({ avatar: { kind: "emoji", value: "E" }, avatarMode: "fixed" });
+  expect(agentInfoPatch({ avatar: null, avatarMode: "inherit", note: null }, { avatar: null, avatarMode: "inherit", note: "new note" })).toEqual({ note: "new note" });
+});

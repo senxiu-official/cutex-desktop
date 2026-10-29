@@ -7,10 +7,12 @@ import "@xterm/xterm/css/xterm.css";
 import { bridge } from "../../bridge";
 import { getAppearance, subscribeFontChanges, useAppearance } from "../../lib/appearance";
 import { noteFocused, showTerminal, terminalApi } from "./terminals";
-import { isTerminalReply, passThroughKey } from "./terminalState";
+import { isCursorReport, isTerminalReply, passThroughKey, pendingCursorRequest } from "./terminalState";
 import { concat, decodeBase64, TERMINAL_MIN_CONTRAST, terminalTheme, watchTheme } from "./xtermTheme";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 export function XtermView({ hostId, terminalId, instanceId, visible, revealed }: { hostId: string; terminalId: string; instanceId: string; visible: boolean; revealed: number }) {
+  const win = useOwnerWindow();
   const host = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const layoutRef = useRef<() => void>(() => {});
@@ -31,7 +33,7 @@ export function XtermView({ hostId, terminalId, instanceId, visible, revealed }:
     const fit = new FitAddon();
     termRef.current = term;
     term.loadAddon(fit);
-    // The app's shortcuts (Ctrl+`, Ctrl+Alt+B, Ctrl+Shift+1…9 / N / M, Shift+F11, F6) reach the window.
+    // The app's shortcuts (Ctrl+`, Ctrl+Alt+B, Ctrl+Shift+1…9 / N / M / D / F, Shift+F11, F6) reach the window; F11 alone stays the shell's.
     term.attachCustomKeyEventHandler((e) => !passThroughKey(e));
     term.open(el);
     // xterm.css paints the viewport black under the themed screen: a dark hairline around a light theme.
@@ -44,8 +46,11 @@ export function XtermView({ hostId, terminalId, instanceId, visible, revealed }:
     // Replays in flight. Replayed scrollback can hold the shell's old terminal queries (cursor position,
     // device attributes, colours); xterm answers them through onData, and those stale answers would reach
     // the live shell as input (PSReadLine rings the bell on Windows). While a replay is parsed, xterm's
-    // replies are dropped; keystrokes still go through.
+    // replies are dropped; keystrokes still go through — except the answer to a cursor position request
+    // the replay ends with (a new ConPTY waits for it before starting the shell, terminalState
+    // pendingCursorRequest; #34).
     let replaying = 0;
+    let cursorAnswers = 0;
     const offOut = bridge.on("terminalOutput", (e) => {
       if (e.terminalId !== terminalId || e.hostId !== hostId) return;
       // A replay starts over. ESC c (full reset) goes through the write queue, so output still queued
@@ -55,7 +60,9 @@ export function XtermView({ hostId, terminalId, instanceId, visible, revealed }:
         return;
       }
       replaying++;
-      term.write(concat("\x1bc", decodeBase64(e.data)), () => {
+      const bytes = decodeBase64(e.data);
+      if (pendingCursorRequest(bytes)) cursorAnswers = 1;
+      term.write(concat("\x1bc", bytes), () => {
         replaying--;
       });
     });
@@ -63,7 +70,10 @@ export function XtermView({ hostId, terminalId, instanceId, visible, revealed }:
       if (e.terminalId === terminalId && e.hostId === hostId) term.write(`\r\n\x1b[2m[exited${e.exitCode === null ? "" : ` ${e.exitCode}`}]\x1b[0m\r\n`);
     });
     const input = term.onData((data) => {
-      if (replaying > 0 && isTerminalReply(data)) return;
+      if (replaying > 0 && isTerminalReply(data)) {
+        if (!(cursorAnswers > 0 && isCursorReport(data))) return;
+        cursorAnswers = 0;
+      }
       void api.terminalInput(terminalId, data).catch(() => {});
     });
     const onFocus = () => noteFocused(instanceId);
@@ -86,7 +96,7 @@ export function XtermView({ hostId, terminalId, instanceId, visible, revealed }:
       term.options.fontFamily = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() || "Consolas, monospace";
       layout();
     });
-    const observer = new ResizeObserver(layout);
+    const observer = new win.ResizeObserver(layout);
     observer.observe(el);
     const offTheme = watchTheme(() => {
       term.options.theme = terminalTheme();
@@ -116,12 +126,12 @@ export function XtermView({ hostId, terminalId, instanceId, visible, revealed }:
   }, [monoFontSize]);
 
   useEffect(() => {
-    if (visible) requestAnimationFrame(() => layoutRef.current());
+    if (visible) win.requestAnimationFrame(() => layoutRef.current());
   }, [visible]);
 
   // services.side.reveal / a launcher with focus: the shell takes the keyboard.
   useEffect(() => {
-    if (revealed > 0) requestAnimationFrame(() => termRef.current?.focus());
+    if (revealed > 0) win.requestAnimationFrame(() => termRef.current?.focus());
   }, [revealed]);
 
   return <div ref={host} data-terminal-view className="h-full min-h-0 w-full flex-1 bg-background px-2 pt-1" />;

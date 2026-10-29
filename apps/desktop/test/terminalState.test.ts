@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { TerminalSummary } from "../src/shared/ipc";
 import {
   initTerminal,
+  isCursorReport,
   isTerminalReply,
+  pendingCursorRequest,
   missingTerminals,
   parseTerminalParams,
   passThroughKey,
@@ -110,5 +112,26 @@ describe("isTerminalReply", () => {
     for (const key of ["a", "ls\r", "\x1b[A", "\x1bOA", "\x1b[3~", "\x1b[1;5C", "\x1b", "\x7f", "\x1b[200~paste\x1b[201~"]) {
       expect(isTerminalReply(key)).toBe(false);
     }
+  });
+});
+
+describe("pendingCursorRequest (#34: a new ConPTY waits for the answer to its start-up CSI 6 n)", () => {
+  const bytes = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
+  it("a replay that ends with the unanswered request (control sequences after it only)", () => {
+    expect(pendingCursorRequest(bytes("\x1b[6n"))).toBe(true);
+    expect(pendingCursorRequest(bytes("\x1b[?9001h\x1b[?1004h\x1b[6n"))).toBe(true);
+    expect(pendingCursorRequest(bytes("\x1b[6n\x1b[?25l\x1b]0;C:\\WINDOWS\\pwsh.exe\x07\r\n"))).toBe(true);
+  });
+  it("not when the shell has written after it, or there is none", () => {
+    expect(pendingCursorRequest(bytes("\x1b[6n\x1b[2JPS C:\\Users\\me> "))).toBe(false);
+    expect(pendingCursorRequest(bytes("PS C:\\> ls\r\n"))).toBe(false);
+    expect(pendingCursorRequest(bytes(""))).toBe(false);
+    expect(pendingCursorRequest(bytes("\x1b[6n" + "\x1b[0m".repeat(1200)))).toBe(false);
+  });
+  it("the answer it lets through is a cursor report only", () => {
+    expect(isCursorReport("\x1b[1;1R")).toBe(true);
+    expect(isCursorReport("\x1b[12;80R")).toBe(true);
+    expect(isCursorReport("\x1b[?1;2c")).toBe(false);
+    expect(isCursorReport("\x1b[A")).toBe(false);
   });
 });

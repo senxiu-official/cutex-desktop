@@ -4,12 +4,13 @@
 // Per host (multi-host P1 step 2c): every function takes an optional `hostId` (default: the focus
 // host); Settings → Profiles of another host (lib/settingsHost) keeps its own entries.
 import type { ProfileAccountView, ProfileDetail, ProfileItem, ProfileModelsView, QuotaConfigView } from "../../../shared/ipc";
-import { api, apiFor } from "../bridge";
+import { api, apiFor, bridge } from "../bridge";
 import { focusHostId } from "./hostKeys";
 import { onHostReset, onHostSwitch } from "./hostSwitch";
 import { noteCatalogNames, setProfileModelNames, setProfileNamesLoader } from "./modelDisplay";
 import { profileKind } from "./profileKind";
 import { noteProfileLooks, setProfileLooksApi, setProfileLooksLoader } from "./profileLooks";
+import { accountProfilesForHost, captureAccountProfileRead, noteAccountProfiles } from "./profileAccountLinks";
 
 export interface ProfileSnapshot {
   detail: ProfileDetail;
@@ -57,10 +58,12 @@ export function cachedProfileList(hostId = focusHostId()): ProfileList | null {
   return lastLists.get(hostId) ?? null;
 }
 
-export function rememberProfileList(list: ProfileList | null, hostId = focusHostId()): void {
+export function rememberProfileList(list: ProfileList | null, hostId = focusHostId(), current: () => boolean = () => true): void {
+  if (!current()) return;
   lastLists.set(hostId, list);
   // Avatars (colour, 头像主题) of every host's agents read their Profile from here (lib/profileLooks).
   if (list) noteProfileLooks(hostId, list.profiles);
+  if (list) noteAccountProfiles(hostId, list.profiles);
   // Per-entry model display names (lib/modelDisplay) come with every profile list (the focus host's).
   if (list && hostId === focusHostId()) setProfileModelNames(list.profiles);
   const names = new Set(list?.profiles.map((p) => keyOf(hostId, p.name)) ?? []);
@@ -72,9 +75,17 @@ export function rememberProfileList(list: ProfileList | null, hostId = focusHost
 export function loadProfileList(hostId = focusHostId()): Promise<ProfileList | null> {
   let running = listInflight.get(hostId);
   if (!running) {
+    const current = captureAccountProfileRead(hostId);
     running = daemonOf(hostId)
       .listProfiles()
-      .then((r) => (rememberProfileList(r, hostId), r))
+      .then((r) => {
+        if (!current()) {
+          const profiles = accountProfilesForHost(hostId);
+          return profiles ? { defaultProfile: lastLists.get(hostId)?.defaultProfile ?? null, profiles: [...profiles] } : null;
+        }
+        rememberProfileList(r, hostId, current);
+        return r;
+      })
       .finally(() => listInflight.delete(hostId));
     listInflight.set(hostId, running);
   }
@@ -89,6 +100,27 @@ setProfileLooksLoader((hostId) => void loadProfileList(hostId).catch(() => {}));
 // read and written through that host's connection (lib/profileImages, lib/profileAvatar, lib/prefs).
 setProfileLooksApi((hostId) => daemonOf(hostId));
 
+// Host events carry only identity/field names. Read the canonical owner view again,
+// including after a concurrent list read, so inherited avatars follow the latest style.
+function refreshProfileAppearance(hostId: string): void {
+  void (listInflight.get(hostId) ?? Promise.resolve()).catch(() => {}).then(() => {
+    for (const key of [...cache.keys()]) if (key.startsWith(`${hostId}\n`)) cache.delete(key);
+    return loadProfileList(hostId);
+  }).catch(() => {});
+}
+if (typeof bridge.on === "function") {
+  bridge.on("hostEvent", ({ hostId, envelope }) => {
+    if (envelope.cutex?.method === "cutex/profiles/changed") refreshProfileAppearance(hostId);
+  });
+  // Host feeds resume from their live tail. A reconnect can have missed a style event.
+  bridge.on("daemonState", ({ hostId, state }) => {
+    if (state.kind === "connected" && lastLists.has(hostId)) refreshProfileAppearance(hostId);
+  });
+  bridge.on("hostResync", ({ hostId, reason }) => {
+    if (reason !== "access_changed" && lastLists.has(hostId)) refreshProfileAppearance(hostId);
+  });
+}
+
 /** Fetch detail + models (+ account / quota config by kind) in parallel; deduped per profile. */
 export function loadProfileSnapshot(item: ProfileItem, hostId = focusHostId()): Promise<ProfileSnapshot> {
   const name = item.name;
@@ -99,7 +131,7 @@ export function loadProfileSnapshot(item: ProfileItem, hostId = focusHostId()): 
   const api = daemonOf(hostId);
   const p = Promise.all([
     api.getProfile(name),
-    api.profileModels(name).catch(() => null),
+    kind === "dsh" || kind === "kimi" ? Promise.resolve(null) : api.profileModels(name).catch(() => null),
     kind === "chatgpt" ? api.profileAccount(name).catch(() => null) : Promise.resolve(null),
     kind === "apiKey" ? api.quotaConfig(name).catch(() => null) : Promise.resolve(null),
   ])

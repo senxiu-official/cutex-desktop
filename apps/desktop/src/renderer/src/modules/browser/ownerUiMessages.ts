@@ -2,7 +2,7 @@ export const browserOwnerUiZhCN = {
   "browser.owner.select": "选择此主机的{{agent}}", "browser.owner.loadAgents": "读取可授予的{{agent}}",
   "browser.owner.loadingAgents": "正在读取…", "browser.owner.noAgents": "此主机没有可接收控制的{{agent}}",
   "browser.owner.grant": "交给所选{{agent}}", "browser.owner.resume": "继续", "browser.owner.pause": "暂停{{agent}}", "browser.owner.revoke": "停止并撤销授予",
-  "browser.owner.granted": "已交给 {name}", "browser.owner.operating": "{name} 正在操作网页", "browser.owner.paused": "{name} 已暂停 · 点「继续」即恢复同一授权",
+  "browser.owner.granted": "已交给 {name}", "browser.owner.operating": "{name} 正在操作网页", "browser.owner.paused": "{name} 已暂停 · 左键点击「继续」即恢复同一授权",
   "browser.owner.pending": "正在为 {name} 准备控制", "browser.owner.loginOwner": "此标签沿用此主机上{{owner}}的网页登录态。",
   "browser.owner.loginAgent": "此标签使用此主机上独立的{{agent}}网页登录池，不沿用手动标签的登录态。",
   "browser.owner.confirmOwner": "将此标签交给 {name}？此标签沿用此主机上{{owner}}的网页登录态。对方可以读取页面、填写表单并操作网页，可能修改真实数据。仅在你信任这个{{agent}}时继续。",

@@ -4,7 +4,9 @@ import { createContext, useContext, useEffect, useState } from "react";
 import type { DaemonApi, UsageReport } from "../../../../shared/ipc";
 import type { AllHostsChoice } from "../../lib/hostPick";
 import { asCutexSource, emptyReport, hostQuery, type UsageQuery } from "./merge";
+import { captureHostAction } from "../../lib/hostSwitch";
 import type { ProfileProviders } from "./provider";
+import { accountProfilesForHost, noteAccountProfiles, subscribeAccountProfiles } from "../../lib/profileAccountLinks";
 
 /** One host of the merged view. */
 export interface HostTarget {
@@ -74,12 +76,25 @@ export function useHostsProfileProviders(targets: readonly HostTarget[]): Readon
   const key = targets.map((t) => t.hostId).join("\n");
   useEffect(() => {
     let live = true;
-    void Promise.all(targets.map((t) => t.api.listProfiles().then((r) => new Map((r?.profiles ?? []).map((p) => [p.name, p])), () => null))).then((lists) => {
-      if (live) setMap(new Map(targets.map((t, i) => [t.hostId, lists[i]!])));
-    });
-    return () => {
-      live = false;
+    const current = new Map(targets.map((t) => [t.hostId, captureHostAction(t.hostId)]));
+    const initial = new Map(targets.map((t) => [t.hostId, accountProfilesForHost(t.hostId)]));
+    const update = () => {
+      if (!live) return;
+      setMap(new Map(targets.map((t) => {
+        const profiles = accountProfilesForHost(t.hostId);
+        return [t.hostId, profiles ? new Map(profiles.map((p) => [p.name, p])) : null];
+      })));
     };
+    const unsubscribe = subscribeAccountProfiles(update);
+    setMap(undefined);
+    void Promise.all(targets.map(async (t) => {
+      try {
+        const result = await t.api.listProfiles();
+        if (!live || !current.get(t.hostId)?.()) return;
+        if (accountProfilesForHost(t.hostId) === initial.get(t.hostId) || accountProfilesForHost(t.hostId) === undefined) noteAccountProfiles(t.hostId, result?.profiles ?? []);
+      } catch { /* A failed host remains null; other hosts can still render. */ }
+    })).then(update);
+    return () => { live = false; unsubscribe(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` stands for the targets
   }, [key]);
   return map;

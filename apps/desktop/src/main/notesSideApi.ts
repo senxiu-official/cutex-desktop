@@ -2,7 +2,8 @@
 import { CutexApiError, type CutexClient } from "@cutex-desktop/cutex-client";
 import type { DaemonApi } from "../shared/ipc";
 import { NOTE_BODY_LIMIT, NOTE_TITLE_LIMIT, type NoteAnchor, type NoteScope } from "../shared/notes";
-import { SIDE_FORK_BLOCKED, SIDE_MESSAGE_LIMIT } from "../shared/sideChat";
+import { SIDE_FORK_BLOCKED } from "../shared/sideChat";
+import { sideMessage, sideMessageId, sideModel, sideReplyErrorMessage } from "../shared/sideChatInput";
 
 export function scopeId(value: unknown): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{1,200}$/.test(value) || value === "." || value === "..") throw new Error("invalid resource id");
@@ -15,11 +16,6 @@ function text(value: unknown, max: number, allowEmpty = false): string {
 function revision(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) throw new Error("invalid revision");
   return value;
-}
-function modelName(value: unknown): string {
-  const model = text(value, 200);
-  if (Buffer.byteLength(model, "utf8") > 200 || /[\u0000-\u001f\u007f]/.test(model)) throw new Error("invalid model");
-  return model;
 }
 function scope(value: NoteScope): NoteScope {
   if (value?.kind === "host") return { kind: "host" };
@@ -77,10 +73,11 @@ export function notesApi(client: CutexClient): Pick<DaemonApi, "notesList" | "no
 export function sideApi(client: CutexClient): Pick<DaemonApi, "sideOpen" | "sideList" | "sideRead" | "sideSend" | "sideInterrupt" | "sideRespond" | "sideClose"> {
   return {
     async sideOpen(sessionId, input = {}) {
+      const model = sideModel(input.model);
       try { return await client.request("POST", sidePath(sessionId), { body: {
         ...(input.anchorTurnId === undefined ? {} : { anchorTurnId: scopeId(input.anchorTurnId) }),
         ...(input.lastTurnId === undefined ? {} : { lastTurnId: scopeId(input.lastTurnId) }),
-        ...(input.model === undefined ? {} : { model: modelName(input.model) }),
+        ...(model === undefined ? {} : { model }),
       } }); } catch (error) {
         if (error instanceof CutexApiError && error.code === "side_chat_already_open") {
           const details = error.details as { chatId?: unknown; anchorTurnId?: unknown } | null;
@@ -106,10 +103,9 @@ export function sideApi(client: CutexClient): Pick<DaemonApi, "sideOpen" | "side
       return client.request("GET", sidePath(sessionId, chatId), { query: { afterRevision, waitMs } });
     },
     sideSend(sessionId, chatId, input) {
-      const message = text(input?.text, SIDE_MESSAGE_LIMIT);
-      if (Buffer.byteLength(message, "utf8") > 65_536) throw new Error("Side message exceeds 65536 UTF-8 bytes");
+      const message = sideMessage(input?.text);
       return client.request("POST", `${sidePath(sessionId, chatId)}/messages`, { body: {
-        text: message, clientMessageId: text(input?.clientMessageId, 128),
+        text: message, clientMessageId: sideMessageId(input?.clientMessageId),
       } });
     },
     sideInterrupt(sessionId, chatId) { return client.request("POST", `${sidePath(sessionId, chatId)}/interrupt`, { body: {} }); },
@@ -119,7 +115,7 @@ export function sideApi(client: CutexClient): Pick<DaemonApi, "sideOpen" | "side
       if ("error" in reply && (!reply.error || !Number.isSafeInteger(reply.error.code))) throw new Error("invalid error code");
       if (JSON.stringify(reply).length > 64_000) throw new Error("response too large");
       return client.request("POST", `${sidePath(sessionId, chatId)}/responses`, { body: {
-        requestId, ...("result" in reply ? { result: reply.result } : { error: { code: reply.error.code, message: text(reply.error.message, 1000) } }),
+        requestId, ...("result" in reply ? { result: reply.result } : { error: { code: reply.error.code, message: sideReplyErrorMessage(reply.error.message) } }),
       } });
     },
     sideClose(sessionId, chatId) { return client.request("DELETE", sidePath(sessionId, chatId)); },

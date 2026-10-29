@@ -7,7 +7,7 @@ import { useState, type ReactNode } from "react";
 import { ChevronDown, Copy, Laptop, Monitor, Plus, Server, ShieldCheck, Smartphone } from "lucide-react";
 import { Button, Section, Segmented, SettingRow, Toggle } from "../components/settings/Form";
 
-const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-[11px] whitespace-nowrap";
+const CHIP = "inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-caption/[inherit] whitespace-nowrap";
 const T = {
   local: <span className={`${CHIP} bg-surface-2 text-muted`}><Monitor size={11} />本地桌面应用</span>,
   mixed: <span className={`${CHIP} bg-surface-2 text-muted`}>混合设置</span>,
@@ -47,7 +47,7 @@ const NOTES = [
 function Header({ hint, tags }: { hint?: string; tags: ReactNode }) {
   return (
     <div className="mb-4 space-y-1.5 border-b border-border/60 pb-3">
-      {hint && <p className="text-[13px] text-muted">{hint}</p>}
+      {hint && <p className="text-ui/[inherit] text-muted">{hint}</p>}
       <div className="flex min-h-6 flex-wrap items-center gap-1.5">{tags}</div>
     </div>
   );
@@ -57,7 +57,7 @@ const Dot = ({ on }: { on: boolean }) => <span className={`size-1.5 shrink-0 rou
 const Avatar = ({ name, you }: { name: string; you?: boolean }) => (
   <span className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-medium ${you ? "bg-accent/20 text-accent" : "bg-surface-2 text-muted"}`}>{name.slice(0, 1)}</span>
 );
-const Band = ({ children }: { children: ReactNode }) => <div className="-mx-4 border-b border-border/70 bg-win px-4 py-1 text-[11px] text-subtle">{children}</div>;
+const Band = ({ children }: { children: ReactNode }) => <div className="-mx-4 border-b border-border/70 bg-win px-4 py-1 text-caption/[inherit] text-subtle">{children}</div>;
 const Tag = ({ children }: { children: ReactNode }) => <div className="mt-1 flex gap-1.5">{children}</div>;
 /** A card hint with the card's tag on its own line under it (混合设置 pages). */
 const Hint = ({ text, tag }: { text: string; tag: ReactNode }) => (
@@ -96,7 +96,7 @@ function MePage() {
     <>
       <Header hint="你的身份，以及你在各主机上的权限。" tags={T.mixed} />
       <Section title="你的身份" hint={<Hint text="身份密钥仅保存在本机。登记为主机的主人时使用此身份。" tag={T.local} />}>
-        <SettingRow label="Sam" hint={<span className="font-mono">9f3a 61c2 0b7e d415</span>}>
+        <SettingRow agents="none" source="local" label="Sam" hint={<span className="font-mono">9f3a 61c2 0b7e d415</span>}>
           <Button onClick={() => {}}><span className="inline-flex items-center gap-1"><Copy size={12} />复制公钥</span></Button>
         </SettingRow>
       </Section>
@@ -152,7 +152,7 @@ function HostList({ host, setHost, hint = "运行 cutex 的电脑。选择一台
 function HostInfoCard({ h }: { h: MockHost }) {
   return (
     <Section title="主机信息" hint={<Hint text="这台主机的主人、版本和地址。每台主机只有一个主人。" tag={HOST_TAG} />}>
-      <SettingRow
+      <SettingRow agents="none" source="local"
         label={
           <span className="flex items-center gap-2.5">
             主人
@@ -160,7 +160,7 @@ function HostInfoCard({ h }: { h: MockHost }) {
               <Avatar name={h.owner!.name} you={h.owner!.you} />
               {h.owner!.name}
               {h.owner!.you && T.you}
-              <span className="inline-flex items-center gap-0.5 text-[11px] text-ok-text"><ShieldCheck size={11} />已确认</span>
+              <span className="inline-flex items-center gap-0.5 text-caption/[inherit] text-ok-text"><ShieldCheck size={11} />已确认</span>
             </span>
           </span>
         }
@@ -168,9 +168,9 @@ function HostInfoCard({ h }: { h: MockHost }) {
       >
         {h.self || h.via.startsWith("SSH") ? <Button onClick={() => {}}>更换主人…</Button> : <span className="text-xs text-subtle">需通过 SSH 连接才能更换 <button type="button" className="ml-1 text-accent hover:underline">改用 SSH 连接…</button></span>}
       </SettingRow>
-      <SettingRow label="cutex 版本"><span className="font-mono text-xs text-muted">{h.online ? "r245 · 0.1.5" : "r240 · 0.1.4（上次连接时）"}</span></SettingRow>
-      <SettingRow label="系统"><span className="text-xs text-muted">{h.self ? "Windows 11" : "Linux · Ubuntu 24.04"}</span></SettingRow>
-      <SettingRow label="监听地址" hint="通过设备令牌连接时只读">
+      <SettingRow agents="none" source="local" label="cutex 版本"><span className="font-mono text-xs text-muted">{h.online ? "r245 · 0.1.5" : "r240 · 0.1.4（上次连接时）"}</span></SettingRow>
+      <SettingRow agents="none" source="local" label="系统"><span className="text-xs text-muted">{h.self ? "Windows 11" : "Linux · Ubuntu 24.04"}</span></SettingRow>
+      <SettingRow agents="none" source="local" label="监听地址" hint="通过设备令牌连接时只读">
         <span className="font-mono text-xs text-muted">127.0.0.1:24270 · Tailscale 100.64.0.7</span>
       </SettingRow>
     </Section>
@@ -181,7 +181,7 @@ function RightsCard({ h, goUsers }: { h: MockHost; goUsers?(): void }) {
   const ssh = h.via.startsWith("SSH");
   return (
     <Section title="你的权限" hint={<Hint text="你在这台主机上可以执行的操作。" tag={HOST_TAG} />}>
-      <SettingRow label={RIGHTS[h.rights]} hint={h.rights === "full" ? (h.via === "本机" ? "通过本机登录获得" : `通过 ${h.via} 获得；可登录该系统账号者均拥有完全控制`) : `由 ${h.owner?.name} 授予：全部项目 · 发消息`}>
+      <SettingRow agents="none" source="local" label={RIGHTS[h.rights]} hint={h.rights === "full" ? (h.via === "本机" ? "通过本机登录获得" : `通过 ${h.via} 获得；可登录该系统账号者均拥有完全控制`) : `由 ${h.owner?.name} 授予：全部项目 · 发消息`}>
         <span className="flex gap-1.5">
           {ssh && !h.owner?.you && <Button onClick={() => {}}>改为以成员身份连接</Button>}
           {goUsers && h.rights === "full" && <Button onClick={goUsers}>管理用户</Button>}
@@ -196,17 +196,17 @@ function ConnectionCard({ h }: { h: MockHost }) {
   const how = h.self ? "本机" : h.via === "设备令牌" ? "设备令牌" : h.via.replace("SSH 登录 ", "SSH：");
   return (
     <Section title="本地桌面应用连接" hint={<Hint text="这台电脑连接这台主机的方式。" tag={T.local} />}>
-      <SettingRow label={how} hint={h.self ? "直接连接本机的 cutex" : h.via === "设备令牌" ? "lab-gpu.tail-net:24270 · 使用配对时领取的令牌" : "经 SSH 隧道连接 127.0.0.1:24270"}>
+      <SettingRow agents="none" source="local" label={how} hint={h.self ? "直接连接本机的 cutex" : h.via === "设备令牌" ? "lab-gpu.tail-net:24270 · 使用配对时领取的令牌" : "经 SSH 隧道连接 127.0.0.1:24270"}>
         <span className="flex gap-1.5">
           <Button onClick={() => {}}>测试</Button>
           {!h.self && <Button onClick={() => {}}>编辑</Button>}
           <Button onClick={() => {}}>{h.online ? "断开" : "连接"}</Button>
         </span>
       </SettingRow>
-      <SettingRow label="状态">
+      <SettingRow agents="none" source="local" label="状态">
         <span className={`text-xs ${h.online ? "text-ok-text" : "text-subtle"}`}>{h.online ? "在线" : "未连接 · 上次连接：昨天 15:14"}</span>
       </SettingRow>
-      <SettingRow label="自动连接" hint="启动应用时连接这台主机">
+      <SettingRow agents="none" source="local" label="自动连接" hint="启动应用时连接这台主机">
         <Toggle checked={h.online} onChange={() => {}} />
       </SettingRow>
     </Section>
@@ -225,7 +225,7 @@ function ManageCards({ h, noUsers }: { h: MockHost; noUsers?: boolean }) {
         hint={<Hint text="与这台主机互联的其他 cutex 主机，可以互相委托任务。权限取决于绑定的用户，在「用户」中设置。" tag={HOST_TAG} />}
         actions={h.self || h.via.startsWith("SSH") ? <Button onClick={() => {}}><span className="inline-flex items-center gap-1"><Plus size={12} />添加互联主机</span></Button> : undefined}
       >
-        <SettingRow label={h.id === "host-b" ? "host-a" : "host-b"} hint="绑定用户：Sam · 上次委托：今天 16:40">
+        <SettingRow agents="none" source="local" label={h.id === "host-b" ? "host-a" : "host-b"} hint="绑定用户：Sam · 上次委托：今天 16:40">
           <span className="flex items-center gap-2 text-xs text-muted">接收委托<Toggle checked onChange={() => {}} /></span>
         </SettingRow>
         {!h.self && !h.via.startsWith("SSH") && <p className="py-2.5 text-xs text-subtle">通过设备令牌连接时无法添加互联主机。<button type="button" className="ml-1 text-accent hover:underline">改用 SSH 连接…</button></p>}
@@ -310,12 +310,12 @@ function UserDetail({ h, u, back }: { h: MockHost; u: MockUser; back(): void }) 
       </div>
       <Section title="权限" hint={u.root ? "本机和 SSH 登录使用此账号。" : "适用于该用户的登录设备和互联的主机。"}>
         {u.root ? (
-          <SettingRow label="完全控制" hint="可登录该系统账号者均拥有完全控制，无法在此修改">
+          <SettingRow agents="none" source="local" label="完全控制" hint="可登录该系统账号者均拥有完全控制，无法在此修改">
             <span className="text-xs text-subtle">只读</span>
           </SettingRow>
         ) : (
           <>
-            <SettingRow label="项目" hint="可访问的项目">
+            <SettingRow agents="none" source="local" label="项目" hint="可访问的项目">
               <Segmented value={all ? "all" : "some"} options={[{ value: "all" as const, label: "全部项目" }, { value: "some" as const, label: "选定项目" }]} onChange={(v) => setAll(v === "all")} />
             </SettingRow>
             {!all && (
@@ -327,10 +327,10 @@ function UserDetail({ h, u, back }: { h: MockHost; u: MockUser; back(): void }) 
                 ))}
               </div>
             )}
-            <SettingRow label="发消息" hint="在可访问的项目中与智能体对话">
+            <SettingRow agents="none" source="local" label="发消息" hint="在可访问的项目中与智能体对话">
               <Toggle checked={send} onChange={setSend} />
             </SettingRow>
-            <SettingRow label="委托任务" hint="向可访问项目中的智能体委托任务">
+            <SettingRow agents="none" source="local" label="委托任务" hint="向可访问项目中的智能体委托任务">
               <Toggle checked={delegate} onChange={setDelegate} />
             </SettingRow>
           </>
@@ -339,7 +339,7 @@ function UserDetail({ h, u, back }: { h: MockHost; u: MockUser; back(): void }) 
       <Section title="登录设备" hint="该用户在这台主机上配对的电脑和手机。">
         {u.devices.length === 0 && <p className="py-3 text-xs text-subtle">{u.you ? "你当前通过 SSH 以 root 账号连接，未使用此用户。改为以成员身份连接后，本机将显示在这里。" : "暂无登录设备"}</p>}
         {u.devices.map(([icon, name, self]) => (
-          <SettingRow key={name} label={<span className="inline-flex items-center gap-2">{icon}{name}{self && T.self}</span>}>
+          <SettingRow agents="none" source="local" key={name} label={<span className="inline-flex items-center gap-2">{icon}{name}{self && T.self}</span>}>
             <span className="flex gap-1.5">
               <Button onClick={() => {}}>重命名</Button>
               {!self && <Button onClick={() => {}}>吊销</Button>}
@@ -351,7 +351,7 @@ function UserDetail({ h, u, back }: { h: MockHost; u: MockUser; back(): void }) 
         <Section title="互联的主机" hint="以该用户的权限与这台主机互联的 cutex 主机。">
           {(u.peers ?? []).length === 0 && <p className="py-3 text-xs text-subtle">暂无</p>}
           {(u.peers ?? []).map((p) => (
-            <SettingRow key={p} label={p} hint="接收委托等设置位于「主机 → 主机互联」">
+            <SettingRow agents="none" source="local" key={p} label={p} hint="接收委托等设置位于「主机 → 主机互联」">
               <Button onClick={() => {}}>解除绑定</Button>
             </SettingRow>
           ))}
@@ -359,7 +359,7 @@ function UserDetail({ h, u, back }: { h: MockHost; u: MockUser; back(): void }) 
       )}
       {!u.root && !u.you && (
         <Section title="删除用户" hint="同时吊销其全部登录设备，并解除与其绑定的互联。">
-          <SettingRow label={`删除 ${u.name}`}>
+          <SettingRow agents="none" source="local" label={`删除 ${u.name}`}>
             <button type="button" className="rounded-md border border-danger/50 px-2.5 py-1 text-xs text-danger hover:bg-danger/10">删除…</button>
           </SettingRow>
         </Section>
@@ -380,10 +380,10 @@ function UsersPage({ host, setHost }: { host: HostId; setHost(h: HostId): void }
         {header}
         <Banner>{host} 的用户由 {h.owner?.name} 管理，此处仅显示你的用户。</Banner>
         <Section title="你的用户">
-          <SettingRow label="Sam" hint="按授权 · 全部项目 · 发消息">
+          <SettingRow agents="none" source="local" label="Sam" hint="按授权 · 全部项目 · 发消息">
             <span className="text-xs text-subtle">只读</span>
           </SettingRow>
-          <SettingRow label="登录设备" hint="host-a（此设备）">
+          <SettingRow agents="none" source="local" label="登录设备" hint="host-a（此设备）">
             <span className="text-xs text-subtle">只读</span>
           </SettingRow>
         </Section>
@@ -417,7 +417,7 @@ function UsersPage({ host, setHost }: { host: HostId; setHost(h: HostId): void }
             ))}
           </Section>
           <Section title="待分配设备" hint="已配对、尚未分配给用户的设备。新设备用配对码配对；通过设备令牌连接时无法生成。" actions={h.self || h.via.startsWith("SSH") ? <Button onClick={() => {}}><span className="inline-flex items-center gap-1"><Plus size={12} />生成配对码</span></Button> : undefined}>
-            <SettingRow label="Pixel 9" hint="配对于 10-19 17:02"><Button onClick={() => {}}>分配…</Button></SettingRow>
+            <SettingRow agents="none" source="local" label="Pixel 9" hint="配对于 10-19 17:02"><Button onClick={() => {}}>分配…</Button></SettingRow>
           </Section>
         </>
       )}
@@ -443,14 +443,14 @@ function HostListPage({ setHost, go }: { setHost(h: HostId): void; go(): void })
       <Header hint="本机连接的所有主机，以及适用于所有主机的桌面设置。" tags={T.local} />
       <HostList host={"" as HostId} setHost={(h) => (setHost(h), go())} hint="运行 cutex 的电脑。点击一台可打开其「主机」页。" />
       <Section title="分组" hint="在标题栏选择分组后，仅显示组内的主机。" actions={<Button onClick={() => {}}>新建分组</Button>}>
-        <SettingRow label="工作" hint="host-a · host-b"><Button onClick={() => {}}>编辑</Button></SettingRow>
+        <SettingRow agents="none" source="local" label="工作" hint="host-a · host-b"><Button onClick={() => {}}>编辑</Button></SettingRow>
       </Section>
       <Section title="视图">
-        <SettingRow label="启动时显示" hint="打开应用时显示的主机范围"><Segmented value={"last" as "last" | "local"} options={[{ value: "last", label: "上次的范围" }, { value: "local", label: "本机" }]} onChange={() => {}} /></SettingRow>
-        <SettingRow label="单台主机时也显示主机标记" hint="只显示一台主机时，列表中仍显示主机的颜色和名称"><Toggle checked={false} onChange={() => {}} /></SettingRow>
+        <SettingRow agents="none" source="local" label="启动时显示" hint="打开应用时显示的主机范围"><Segmented value={"last" as "last" | "local"} options={[{ value: "last", label: "上次的范围" }, { value: "local", label: "本机" }]} onChange={() => {}} /></SettingRow>
+        <SettingRow agents="none" source="local" label="单台主机时也显示主机标记" hint="只显示一台主机时，列表中仍显示主机的颜色和名称"><Toggle checked={false} onChange={() => {}} /></SettingRow>
       </Section>
       <Section title="诊断">
-        <SettingRow label="能力" hint="当前主机支持的功能">
+        <SettingRow agents="none" source="local" label="能力" hint="当前主机支持的功能">
           <Button onClick={() => {}}>显示列表（141）</Button>
         </SettingRow>
       </Section>
@@ -469,9 +469,9 @@ function HostPage({ variant, host, setHost, goUsers }: { variant: "a" | "b" | "c
       {variant === "d" ? null : variant !== "b" ? (
         <Section title="多台主机" hint="对所有主机生效的桌面设置。">
           <Tag>{T.local}</Tag>
-          <SettingRow label="分组" hint="工作 · 2 台"><Button onClick={() => {}}>编辑分组</Button></SettingRow>
-          <SettingRow label="启动时的视图"><Segmented value={"last" as "last" | "local"} options={[{ value: "last", label: "上次的范围" }, { value: "local", label: "本机" }]} onChange={() => {}} /></SettingRow>
-          <SettingRow label="诊断"><Button onClick={() => {}}>查看</Button></SettingRow>
+          <SettingRow agents="none" source="local" label="分组" hint="工作 · 2 台"><Button onClick={() => {}}>编辑分组</Button></SettingRow>
+          <SettingRow agents="none" source="local" label="启动时的视图"><Segmented value={"last" as "last" | "local"} options={[{ value: "last", label: "上次的范围" }, { value: "local", label: "本机" }]} onChange={() => {}} /></SettingRow>
+          <SettingRow agents="none" source="local" label="诊断"><Button onClick={() => {}}>查看</Button></SettingRow>
         </Section>
       ) : (
         <div className="rounded-xl border border-dashed border-border px-4 py-3 text-xs text-subtle">添加主机在页头选择器里；分组、启动时的视图、主机标记、诊断挪到「通用 → 多台主机」。</div>
@@ -499,11 +499,11 @@ export function HostPageTopic() {
       </div>
       <div className="flex items-start rounded-xl border border-border bg-background">
         <nav className="sticky top-0 w-36 shrink-0 self-start border-r border-border/60 p-2">
-          <div className="px-2 pt-1 pb-1.5 text-[11px] text-subtle">连接</div>
+          <div className="px-2 pt-1 pb-1.5 text-caption/[inherit] text-subtle">连接</div>
           {NAV.map((n) => (
             <button key={n} type="button" onClick={() => n !== "网络代理" && setPage(n)} className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm ${n === page ? "bg-surface-2 font-medium text-foreground" : n === "网络代理" ? "text-subtle" : "text-muted hover:text-foreground"}`}>
               {n}
-              {n === "网络代理" && <span className="text-[10px] text-subtle">不变</span>}
+              {n === "网络代理" && <span className="text-caption/[inherit] text-subtle">不变</span>}
             </button>
           ))}
         </nav>

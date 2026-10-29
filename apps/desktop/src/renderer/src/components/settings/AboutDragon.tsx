@@ -4,12 +4,14 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import cutexLogo from "../../assets/cutex-logo.png";
 import { DRAGON_BASE as BASE, dragonSize, setDragonSize } from "../../lib/aboutDragon";
+import { useOwnerWindow } from "../../lib/ownerContext";
 
 const GROWTH = 1.2;
 /** Room kept below the dragon so it never touches the window edge. */
 const MARGIN = 24;
 
 export function AboutDragon() {
+  const win = useOwnerWindow();
   const box = useRef<HTMLDivElement>(null);
   const img = useRef<HTMLImageElement>(null);
   const [size, setSize] = useState(dragonSize);
@@ -21,17 +23,17 @@ export function AboutDragon() {
     const el = box.current;
     const top = img.current?.getBoundingClientRect().top;
     if (!el || top === undefined) return Number.POSITIVE_INFINITY;
-    return Math.max(BASE, Math.min(el.getBoundingClientRect().width, window.innerHeight - top - MARGIN));
+    return Math.max(BASE, Math.min(el.getBoundingClientRect().width, win.innerHeight - top - MARGIN));
   };
   useLayoutEffect(() => {
     const measure = () => setMax(room());
     measure();
-    const observer = new ResizeObserver(measure);
+    const observer = new win.ResizeObserver(measure);
     if (box.current?.parentElement) observer.observe(box.current.parentElement);
-    window.addEventListener("resize", measure);
+    win.addEventListener("resize", measure);
     return () => {
       observer.disconnect();
-      window.removeEventListener("resize", measure);
+      win.removeEventListener("resize", measure);
     };
   }, []);
 
@@ -41,7 +43,7 @@ export function AboutDragon() {
     setMax(limit);
     const next = Math.min(Math.min(size, limit) * GROWTH, limit);
     setSize(next);
-    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (!win.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       img.current?.animate([{ rotate: "0deg" }, { rotate: "-7deg" }, { rotate: "5deg" }, { rotate: "-3deg" }, { rotate: "0deg" }], { duration: 450, easing: "ease-in-out" });
     }
     setDragonSize(next);

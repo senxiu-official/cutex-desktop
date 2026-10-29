@@ -8,12 +8,23 @@
 //   nothing is stuck; `?stuck=down`: the live bus cannot be read; `?stuck=fail`: discarding the ordinary
 //   message "m-a1" is refused (message_digest_mismatch).
 import { asStuckDiscarded, asStuckView } from "../../../../shared/agentBusStuck";
+import type { MessageSettlement, MessageSettlementCloseRequest } from "@cutex-desktop/protocol";
+import { MESSAGE_SETTLEMENT_EVENT, MESSAGE_SETTLEMENT_FEATURE } from "../../../../shared/messageSettlement";
 import type { ModuleMock } from "../../dev/mockTypes";
 
 const DEFAULT_SECS = 120;
 const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
 const startOff = params.has("wakeoff");
 const STUCK = params.get("stuck");
+
+// Preview-only facts stay inside this module mock; production code never imports fixtures.
+function settlementFixture(): MessageSettlement {
+  return {
+    state: "outcome_unknown", canClose: true, evidenceToken: "settlement-evidence-1",
+    evidence: { runtime: "claude", runtimeGeneration: 3, threadId: "settlement-thread", actualTurnId: "settlement-turn", terminalStatus: "interrupted", observedAt: new Date().toISOString() },
+    closure: null,
+  };
+}
 
 function wakeBusyWaitSecs(settings: Record<string, unknown>): number | null {
   const agentBus = settings.agentBus as { wakeBusyWaitSecs?: unknown } | undefined;
@@ -23,6 +34,7 @@ function wakeBusyWaitSecs(settings: Record<string, unknown>): number | null {
 }
 
 interface WireRow {
+  settlement?: MessageSettlement;
   messageId: string;
   state: string;
   durable: boolean;
@@ -73,9 +85,17 @@ let rows: WireRow[] =
         },
       ];
 
+const settlementRow: WireRow = {
+  messageId: "m-settlement", state: "inbox_accepted", durable: true, to: { id: "scratch", name: "Scratch" }, from: party("Mika"), waitedSecs: 8000,
+  senderKind: "cutex", nativeSubmissionPresent: true, reasons: [], contentPreview: "请检查迁移结果并回复。", settlement: settlementFixture(),
+};
+if (params.has("settlement")) rows.push(settlementRow);
+const closeRequests = new Map<string, { request: MessageSettlementCloseRequest; settlement: MessageSettlement }>();
+
 function wire(row: WireRow, nowSecs: number): Record<string, unknown> {
   return {
     messageId: row.messageId,
+    ...(row.settlement ? { settlement: row.settlement } : {}),
     state: row.state,
     durable: row.durable,
     to: row.to,
@@ -93,7 +113,10 @@ function wire(row: WireRow, nowSecs: number): Record<string, unknown> {
 }
 
 export const mock: ModuleMock = {
-  features: { new: ["wake-busy-wait", "agent-bus-stuck-messages"] },
+  features: { new: ["wake-busy-wait", "agent-bus-stuck-messages", MESSAGE_SETTLEMENT_FEATURE] },
+  cutexState: (sessionId) => ({
+    ...(params.has("settlement") && sessionId === "scratch" ? { agentBusMessages: rows.filter((r) => r.settlement).map((r) => ({ ...wire(r, Date.now() / 1000), fromCutexSessionId: "mika", toCutexSessionId: "scratch", body: r.contentPreview, deliveryKind: "wake" })) } : {}),
+  }),
   settings: (core) => ({
     agentBus: { wakeBusyWaitSecs: wakeBusyWaitSecs(core.settings) },
     agentBusDefault: { wakeBusyWaitSecs: DEFAULT_SECS },
@@ -104,7 +127,7 @@ export const mock: ModuleMock = {
       if (core.legacy) return null;
       await new Promise((r) => setTimeout(r, 250));
       const now = Math.floor(Date.now() / 1000);
-      const listed = rows.filter((r) => r.waitedSecs >= minAgeSecs).sort((a, b) => b.waitedSecs - a.waitedSecs);
+      const listed = rows.filter((r) => r.settlement?.state !== "closed" && r.waitedSecs >= minAgeSecs).sort((a, b) => b.waitedSecs - a.waitedSecs);
       return asStuckView(
         {
           messages: listed.map((r) => wire(r, now)),
@@ -115,6 +138,21 @@ export const mock: ModuleMock = {
         },
         minAgeSecs,
       );
+    },
+    async closeBusMessage(request) {
+      await new Promise((r) => setTimeout(r, 350));
+      const refuse = (status: number, code: string) => ({ ok: false as const, error: { status, code, message: code } });
+      const previous = closeRequests.get(request.requestId);
+      if (previous) return JSON.stringify(previous.request) === JSON.stringify(request)
+        ? { ok: true, result: { messageId: request.messageId, changed: false, settlement: previous.settlement } }
+        : refuse(409, "request_key_conflict");
+      const row = rows.find((r) => r.messageId === request.messageId);
+      if (!row?.settlement) return refuse(404, "message_not_found");
+      if (row.settlement.evidenceToken !== request.expectedEvidenceToken || !row.settlement.canClose) return refuse(409, "evidence_changed");
+      row.settlement = { ...row.settlement, state: "closed", canClose: false, closure: { actor: "owner", closedAt: new Date().toISOString(), reason: request.reason, requestId: request.requestId } };
+      closeRequests.set(request.requestId, { request: { ...request }, settlement: row.settlement });
+      core.emitCutex("scratch", MESSAGE_SETTLEMENT_EVENT, { messageId: row.messageId, requestId: request.requestId, settlement: row.settlement });
+      return { ok: true, result: { messageId: row.messageId, changed: true, settlement: row.settlement } };
     },
     async discardStuckBusMessage(request) {
       await new Promise((r) => setTimeout(r, 350));

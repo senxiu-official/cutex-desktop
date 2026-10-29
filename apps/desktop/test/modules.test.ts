@@ -11,7 +11,10 @@ const { MODULES } = await import("../src/renderer/src/modules/registry");
 const { createModuleHost } = await import("../src/renderer/src/modules/host");
 const { MODULE_ID_RE } = await import("../src/renderer/src/modules/types");
 const { SLOT_SPECS } = await import("../src/renderer/src/modules/slots");
-const { MODULE_DICTIONARIES } = await import("../src/renderer/src/modules/i18nCatalog");
+const { MODULE_DICTIONARIES_ZH } = await import("../src/renderer/src/modules/i18nCatalog");
+const { MODULE_DICTIONARIES_EN } = await import("../src/renderer/src/modules/i18nCatalogEn");
+// zh-CN (eager, i18n.ts) and en (lazy, i18n.en.ts) of each module, side by side.
+const MODULE_DICTIONARIES = Object.fromEntries(Object.entries(MODULE_DICTIONARIES_ZH).map(([prefix, zhCN]) => [prefix, { zhCN, en: MODULE_DICTIONARIES_EN[prefix] ?? {} }]));
 const { zhCN } = await import("../src/renderer/src/i18n/zh-CN");
 const { en } = await import("../src/renderer/src/i18n/en");
 const { MOCK_BASE_FEATURES, MOCK_NEW_FEATURES } = await import("../src/renderer/src/dev/mockFeatures");
@@ -48,9 +51,20 @@ async function gated(features: readonly string[] | null) {
 const MOCK_REMOTE = ["management-client-tokens", "session-attachments", "fs-dir-browse"];
 
 /** The side components' derived pane kinds (v1.17, §24.4): id, single / multi, binding (agent / workspace / follow → follow, host → host). */
-const SIDE_KINDS = ["artifacts.library single follow", "artifacts.view multi host", "bookmarks.list single host", "browser.tab multi host", "conversation.turnPeek multi host", "delegations.detail multi host", "diff.view multi follow", "notes.list single host", "notes.note multi host", "side-chat.chat single follow", "status:alarms.status single follow", "status:background-terminals.status single follow", "status:delegations.status single follow", "status:goal.status single follow", "status:jobs.status single follow", "status:plan.status single follow", "status:subagents.status single follow", "subagents.thread multi follow", "terminal.pty multi follow", "workspace.changes single follow", "workspace.files single follow", "workspace.preview multi follow"];
+const SIDE_KINDS = ["artifacts.library single follow", "artifacts.view multi host", "bookmarks.list single host", "browser.tab multi host", "conversation.projection multi follow", "conversation.turnPeek multi host", "delegations.detail multi host", "diff.view multi follow", "notes.list single host", "notes.note multi host", "remote-copies.list single host", "side-chat.chat single follow", "status:alarms.status single follow", "status:background-terminals.status single follow", "status:delegations.status single follow", "status:goal.status single follow", "status:jobs.status single follow", "status:plan.status single follow", "status:subagents.status single follow", "subagents.thread multi follow", "terminal.pty multi follow", "workspace.changes single follow", "workspace.files single follow", "workspace.preview multi follow"];
 /** The page kinds the mock install derives (`page:<main.page id>`, pages without an Aside). */
-const PAGE_KINDS = ["page:agent-config.newAgent", "page:approvals.page", "page:delegations.page", "page:jobs.page", "page:projects.page", "page:quick-chats.draft", "page:services.page"];
+/** v1.21: the page kinds as Shelf components: id, singleton, host, page group, title (the sidebar entry's), persist. */
+const PAGE_SIDE = [
+  "page:agent-config.newAgent singleton host page:agent-config.newAgent agent-config.newAgentNav false",
+  "page:approvals.page singleton host page:approvals.page approvals.nav false",
+  "page:delegations.page singleton host page:delegations.page delegations.nav false",
+  "page:delegations.treePage singleton host page:delegations.treePage pane.page false",
+  "page:jobs.page singleton host page:jobs.page jobs.nav false",
+  "page:projects.page singleton host page:projects.page projects.nav false",
+  "page:quick-chats.draft singleton host page:quick-chats.draft quick-chats.nav false",
+  "page:services.page singleton host page:services.page services.nav false",
+];
+const PAGE_KINDS = ["page:agent-config.newAgent", "page:approvals.page", "page:delegations.page", "page:delegations.treePage", "page:jobs.page", "page:projects.page", "page:quick-chats.draft", "page:services.page"];
 
 describe("module registry", () => {
   it("ids are valid and unique; dependencies exist and have no cycle; every module activates", async () => {
@@ -220,7 +234,7 @@ describe("module registry", () => {
   });
 
   it("the core modules are locked", () => {
-    expect(MODULES.filter((m) => m.required).map((m) => m.id)).toEqual(["shell", "conversation", "connection", "agent-config", "notifications", "about", "onboarding"]);
+    expect(MODULES.filter((m) => m.required).map((m) => m.id)).toEqual(["shell", "conversation", "connection", "agent-config", "notifications", "quick-switch", "perf-log", "about", "onboarding"]);
   });
 });
 
@@ -245,6 +259,7 @@ describe("module i18n", () => {
     const withI18n = dirs.filter((d) => statSync(join(MODULES_DIR, d)).isDirectory() && readdirSync(join(MODULES_DIR, d)).includes("i18n.ts"));
     expect(withI18n.sort()).toEqual(dirs.sort());
     expect(Object.keys(MODULE_DICTIONARIES).sort()).toEqual(["modules", ...dirs].sort());
+    expect(Object.keys(MODULE_DICTIONARIES_EN).sort()).toEqual(["modules", ...dirs].sort());
     for (const m of MODULES) expect(MODULE_DICTIONARIES[m.id], m.id).toBeTruthy();
     for (const d of dirs) {
       const code = readFileSync(join(MODULES_DIR, d, "i18n.ts"), "utf8");
@@ -296,8 +311,8 @@ describe("module import boundaries", () => {
     }
   });
 
-  it("the page / nav shell (App, Sidebar, PageTitle, PaneHost + its layout model, store, file, kinds and services) names no feature (迁完, §9 step 3; panes steps 1b, 2, 3)", () => {
-    for (const rel of ["App.tsx", "components/Sidebar.tsx", "components/PageTitle.tsx", "components/PaneHost.tsx", "lib/paneLayout.ts", "lib/paneStore.ts", "lib/paneFile.ts", "lib/paneKinds.tsx", "lib/paneServices.ts"]) {
+  it("the page / nav shell (App, Sidebar, PageTitle, PaneHost + its layout model, store, file, kinds and services; the tray and pane actions) names no feature (迁完, §9 step 3; panes steps 1b, 2, 3, 4, 5)", () => {
+    for (const rel of ["App.tsx", "components/Sidebar.tsx", "components/PageTitle.tsx", "components/TitleBar.tsx", "components/PaneHost.tsx", "components/ChipTray.tsx", "lib/paneLayout.ts", "lib/paneStore.ts", "lib/paneFile.ts", "lib/paneKinds.tsx", "lib/paneServices.ts", "lib/paneActions.ts", "lib/paneRoom.ts", "lib/paneKeys.ts", "lib/paneFly.ts", "lib/paneDesk.ts", "components/SidebarNav.tsx", "lib/navEntries.ts"]) {
       const code = readFileSync(join(SRC, rel), "utf8")
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
@@ -374,10 +389,10 @@ describe("module import boundaries", () => {
     }
   });
 
-  it("pane kinds (v1.17, §24): core.conversation, one per side component (same id), page:<id> per main.page without an Aside; no module contributes pane.kind yet", async () => {
+  it("pane kinds (v1.17, §24): core.conversation, one per side component (same id), page:<id> per main.page without an Aside (v1.21: a Shelf pane); v1.18: home.profile and project-view.view are the contributed pane.kinds", async () => {
     const { derivePaneKinds } = await import("../src/renderer/src/lib/paneKinds");
     const { host } = await gated([...MOCK_REMOTE, ...MOCK_BASE_FEATURES, ...MOCK_NEW_FEATURES]);
-    expect(host.snapshot("pane.kind")).toEqual([]);
+    expect(host.snapshot("pane.kind").map((e) => `${e.item.id} ${e.item.instances} ${e.item.binding} (${e.mode})`)).toEqual(["home.profile single none (show)", "project-view.view multi none (show)"]);
     expect(SLOT_SPECS["pane.kind"].unavailable).toBe("hide");
     const kinds = derivePaneKinds({ panes: host.snapshot("pane.kind"), side: host.snapshot("side.component"), status: host.snapshot("conversation.status"), pages: host.snapshot("main.page") });
     expect(kinds[0]).toMatchObject({ id: "core.conversation", source: "core", instances: "multi", binding: "agent", item: null });
@@ -390,6 +405,32 @@ describe("module import boundaries", () => {
     // 设置 (an Aside) stays a full-window page: no pane kind.
     expect(kinds.some((k) => k.id === "page:shell.settings")).toBe(false);
     expect(kinds.filter((k) => k.source === "page").map((k) => k.id).sort()).toEqual(PAGE_KINDS);
+    expect(kinds.filter((k) => k.source === "pane").map((k) => `${k.id} ${k.moduleId}`)).toEqual(["home.profile home", "project-view.view project-view"]);
+    // v1.21 (§24.4, owner 2026-10-21): every page kind opens as its own pane in a Shelf — the tool engine's component
+    // (singleton, bound to the focus host, its own page group), named and drawn with its sidebar entry's title / icon.
+    const { pageSideItems } = await import("../src/renderer/src/lib/paneKinds");
+    const side = pageSideItems(host.snapshot("main.page"), host.snapshot("nav.primary"));
+    expect(side.map((e) => `${e.item.id} ${e.item.instances} ${e.item.defaultBinding} ${e.item.placement.home} ${e.item.titleKey} ${e.item.persist}`).sort()).toEqual(PAGE_SIDE);
+  });
+
+  it("the desktop layer (v1.18, §25): one pane.desktop item (home); the shell draws it with no feature named (lib/paneDesk)", async () => {
+    const { host } = await gated([...MOCK_REMOTE, ...MOCK_BASE_FEATURES, ...MOCK_NEW_FEATURES]);
+    expect(host.snapshot("pane.desktop").map((e) => `${e.item.id} (${e.mode})`)).toEqual(["home.desktop (show)"]);
+    expect((await gated(null)).host.snapshot("pane.desktop").map((e) => e.mode)).toEqual(["show"]);
+    expect(SLOT_SPECS["pane.desktop"].unavailable).toBe("hide");
+    // The lead sidebar entry (桌面) and the pin action.
+    expect(host.snapshot("nav.primary").filter((e) => e.item.lead).map((e) => e.item.id)).toEqual(["home.nav"]);
+    expect(host.snapshot("ref.action").find((e) => e.item.id === "home.pin")?.item.kinds).toEqual(["agent", "service", "artifact", "artifacts.view", "browser.tab"]);
+  });
+
+  it("the window bar's search field (v1.19, §26): one window.search item (quick-switch); the window bar names no conversation item", async () => {
+    const { host } = await gated([...MOCK_REMOTE, ...MOCK_BASE_FEATURES, ...MOCK_NEW_FEATURES]);
+    expect(host.snapshot("window.search").map((e) => `${e.item.id} ${e.item.placeholderKey} (${e.mode})`)).toEqual(["quick-switch.search quick-switch.placeholder (show)"]);
+    expect((await gated(null)).host.snapshot("window.search").map((e) => e.mode)).toEqual(["show"]);
+    expect(SLOT_SPECS["window.search"].unavailable).toBe("hide");
+    // Owner 2026-10-21 (header split, variant A): the conversation's items live in each column's header.
+    const bar = readFileSync(join(SRC, "components/TitleBar.tsx"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    expect(bar.match(/\bAvatar\b|NotifyControl|ProjectChip|RuntimeButton|AgentServices|agentMenu|selectedSidebar|gitStatus|GitStatus|notificationLevel|starred|director/g)).toBeNull();
   });
 
   it("side components: ids unique next to the status categories' (status:<id>), placements valid", async () => {
@@ -410,7 +451,7 @@ describe("module import boundaries", () => {
         .snapshot("side.component")
         .map((e) => `${e.item.id} (${e.mode})`)
         .sort(),
-    ).toEqual(["artifacts.library (show)", "artifacts.view (show)", "bookmarks.list (show)", "browser.tab (show)", "conversation.turnPeek (show)", "delegations.detail (show)", "diff.view (show)", "notes.list (show)", "notes.note (show)", "side-chat.chat (show)", "subagents.thread (show)", "terminal.pty (show)", "workspace.changes (show)", "workspace.files (show)", "workspace.preview (show)"]);
+    ).toEqual(["artifacts.library (show)", "artifacts.view (show)", "bookmarks.list (show)", "browser.tab (show)", "conversation.projection (show)", "conversation.turnPeek (show)", "delegations.detail (show)", "diff.view (show)", "notes.list (show)", "notes.note (show)", "remote-copies.list (show)", "side-chat.chat (show)", "subagents.thread (show)", "terminal.pty (show)", "workspace.changes (show)", "workspace.files (show)", "workspace.preview (show)"]);
     // A referable component (toRef) needs an id refs accept as a kind (lowercase, §19.6).
     const referable = host.snapshot("side.component").filter((e) => e.item.toRef);
     expect(referable.length).toBeGreaterThan(0);
@@ -448,9 +489,11 @@ describe("module gating snapshot (mock featureLists)", () => {
     "shell.appearance",
     "shell.sidebar",
     "conversation.settings",
-    "shell.composer",
+    // 面板 (design 006 v1): 输入区 is a section of 会话 now; 托盘 and 桌面 are pages of their own.
     "shell.status",
     "shell.sides",
+    "shell.tray",
+    "shell.desktop",
     "notifications.settings",
     "shell.me",
     "connection.hosts",
@@ -474,6 +517,8 @@ describe("module gating snapshot (mock featureLists)", () => {
     "backend-upgrade.page",
     "updater.page",
     "shell.about",
+    "onboarding.newFeatures",
+    "onboarding.help",
   ];
   // 访问管理 (连接 restructure 2026-10-19) is the shell's; 用户 / 接入 / 互联 are its parts (users / remote-access /
   // peers sections), no pages of their own. NCI 远程作业 (module nci) is off by default.
@@ -484,8 +529,8 @@ describe("module gating snapshot (mock featureLists)", () => {
   const BASE_STATUS = ["goal.status", "plan.status", "background-terminals.status", "subagents.status"];
 
   // Sidebar entries (step 3), top list in order; the footer has ⚙ 设置.
-  const ALL_NAV = ["quick-chats.nav", "agent-config.newAgent", "projects.nav", "services.nav", "delegations.nav", "jobs.nav", "approvals.nav"];
-  const ALL_MAIN = ["shell.settings", "agent-config.newAgent", "delegations.page", "jobs.page", "quick-chats.draft", "projects.page", "services.page", "approvals.page"];
+  const ALL_NAV = ["home.nav", "quick-chats.nav", "agent-config.newAgent", "projects.nav", "project-view.nav", "services.nav", "delegations.nav", "jobs.nav", "approvals.nav"];
+  const ALL_MAIN = ["shell.settings", "agent-config.newAgent", "delegations.page", "delegations.treePage", "jobs.page", "quick-chats.draft", "projects.page", "services.page", "approvals.page"];
 
   it("new cutex: every sidebar entry and page", async () => {
     const { navTop, navFooter, mainPages } = await gated([...MOCK_REMOTE, ...MOCK_BASE_FEATURES, ...MOCK_NEW_FEATURES]);
@@ -497,9 +542,11 @@ describe("module gating snapshot (mock featureLists)", () => {
   it("?legacy: 新工作 / 委托 / 审批 greyed (never shift), 作业 hidden (host-specific); their pages gone", async () => {
     const { navTop, navFooter, mainPages } = await gated([...MOCK_REMOTE, ...MOCK_BASE_FEATURES]);
     expect(navTop).toEqual([
+      "home.nav",
       "quick-chats.nav (disable: human-create-session)",
       "agent-config.newAgent",
       "projects.nav",
+      "project-view.nav",
       "services.nav",
       "delegations.nav (disable: agent-asks)",
       "approvals.nav (disable: owner-approvals)",
@@ -511,9 +558,11 @@ describe("module gating snapshot (mock featureLists)", () => {
   it("before capabilities load: capability entries greyed and waiting, 作业 not shown yet", async () => {
     const { navTop, mainPages } = await gated(null);
     expect(navTop).toEqual([
+      "home.nav",
       "quick-chats.nav (disable, waiting: human-create-session)",
       "agent-config.newAgent (disable, waiting: human-create-agent)",
       "projects.nav",
+      "project-view.nav",
       "services.nav (disable, waiting: services)",
       "delegations.nav (disable, waiting: agent-asks)",
       "approvals.nav (disable, waiting: owner-approvals)",
@@ -549,18 +598,19 @@ describe("module gating snapshot (mock featureLists)", () => {
   it("new cutex: every page and section", async () => {
     const { pages, sections, status } = await gated([...MOCK_REMOTE, ...MOCK_BASE_FEATURES, ...MOCK_NEW_FEATURES]);
     // Claude 账户 is a section of Profile, not a page (owner 2026-10-10): the same pages as ?legacy.
-    expect(pages).toEqual(ALL_PAGES);
+    expect(pages).toEqual(ALL_PAGES.flatMap((p) => p === "archive.settings" ? [p, "storage.page"] : [p]));
     // 更新与诊断 on 通用; the capsule's own settings on 状态显示 (v1.2); 远程访问's three sections; Claude 账户 after the
     // Profile list (claude-accounts) and 从 CC Switch 导入 after it (profile-import); on 协作 轮换主管 (owner-rotation), 服务 (services-persistent-approval), 消息投递
     // and the 高级 card (消息总线 + 卡住的消息 with agent-bus-stuck-messages) last — page order is by `order`.
-    expect(sections).toEqual(["side-chat.settings", "side-chat.summarySettings", "status-capsule.settings", "bookmarks.settings", "artifacts.settings", "owner-notify.settings", "peers.access", "users.peers", "remote-access.listen", "remote-access.cors", "users.people", "users.devices", "remote-access.onlineDesktops", "remote-access.pairing", "proxy.update", "proxy.host", "claude-accounts.accounts", "profile-import.ccSwitch", "projects.rotation.settings", "services.persistApproval.settings", "agent-bus.delivery", "shell.queueOrder", "agent-bus.advanced", "runtime-packages.settings", "runtimes.installed", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
+    // Design 006 v1: 会话 takes 宽度 / 输入区 / 留白 / 书签条 / 只看 Shelf; 桌面 the home's card; 性能记录 is on 更新与诊断.
+    expect(sections).toEqual(["shell.convWidth", "shell.composer", "shell.gutter", "bookmarks.settings", "side-chat.settings", "side-chat.summarySettings", "shell.shelfOnly", "status-capsule.settings", "workspace.viewerSettings", "artifacts.settings", "artifacts.pageData", "remote-copies.settings", "home.desktopSettings", "owner-notify.settings", "peers.access", "users.peers", "remote-access.listen", "remote-access.cors", "users.people", "users.devices", "remote-access.onlineDesktops", "remote-access.pairing", "proxy.update", "proxy.host", "claude-accounts.accounts", "kimi-accounts.accounts", "profile-import.ccSwitch", "projects.rotation.settings", "approvals.rules.settings", "services.persistApproval.settings", "agent-bus.delivery", "shell.queueOrder", "shell.imageBusy", "agent-bus.advanced", "runtime-packages.settings", "runtimes.installed", "perf-log.section", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual([...BASE_STATUS, "delegations.status", "jobs.status", "alarms.status"]);
   });
 
   it("?legacy: same pages but 跨主机; owner-notify / runtime packages / CORS hidden; listen + pairing + installed runtimes say 需要升级; no 委托 / 作业", async () => {
     const { host, pages, sections, status } = await gated([...MOCK_REMOTE, ...MOCK_BASE_FEATURES]);
     expect(pages).toEqual(BASE_PAGES);
-    expect(sections).toEqual(["status-capsule.settings", "bookmarks.settings", "remote-access.listen (notice: listen-settings)", "remote-access.pairing (notice: device-pairing)", "proxy.update", "proxy.host (notice: proxy-modes)", "agent-bus.delivery", "shell.queueOrder", "agent-bus.advanced", "runtimes.installed (notice: runtimes-view)", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
+    expect(sections).toEqual(["shell.convWidth", "shell.composer", "shell.gutter", "bookmarks.settings", "shell.shelfOnly", "status-capsule.settings", "workspace.viewerSettings", "remote-copies.settings", "home.desktopSettings", "remote-access.listen (notice: listen-settings)", "remote-access.pairing (notice: device-pairing)", "proxy.update", "proxy.host (notice: proxy-modes)", "agent-bus.delivery", "shell.queueOrder", "shell.imageBusy", "agent-bus.advanced", "runtimes.installed (notice: runtimes-view)", "perf-log.section", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual(BASE_STATUS);
     expect(host.statuses().get("owner-notify")!.state).toEqual({ kind: "unavailable", missing: { capabilities: ["owner-messages"], modules: [], hostKind: false, waiting: false } });
     expect(host.statuses().get("runtime-packages")!.state.kind).toBe("unavailable");
@@ -572,7 +622,7 @@ describe("module gating snapshot (mock featureLists)", () => {
   it("before capabilities load: capability modules wait, notices are flagged waiting", async () => {
     const { host, pages, sections, status } = await gated(null);
     expect(pages).toEqual(BASE_PAGES);
-    expect(sections).toEqual(["status-capsule.settings", "bookmarks.settings", "remote-access.listen (notice, waiting: listen-settings)", "remote-access.pairing (notice, waiting: device-pairing)", "proxy.update", "proxy.host (notice, waiting: proxy-modes)", "agent-bus.delivery", "shell.queueOrder", "agent-bus.advanced", "runtimes.installed (notice, waiting: runtimes-view)", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
+    expect(sections).toEqual(["shell.convWidth", "shell.composer", "shell.gutter", "bookmarks.settings", "shell.shelfOnly", "status-capsule.settings", "workspace.viewerSettings", "remote-copies.settings", "home.desktopSettings", "remote-access.listen (notice, waiting: listen-settings)", "remote-access.pairing (notice, waiting: device-pairing)", "proxy.update", "proxy.host (notice, waiting: proxy-modes)", "agent-bus.delivery", "shell.queueOrder", "shell.imageBusy", "agent-bus.advanced", "runtimes.installed (notice, waiting: runtimes-view)", "perf-log.section", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual(BASE_STATUS);
     expect(host.statuses().get("owner-notify")!.state).toMatchObject({ kind: "unavailable", missing: { waiting: true } });
   });

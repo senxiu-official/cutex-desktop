@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { AdmissionNextStep } from "@cutex-desktop/protocol";
-import { settledIds, shownNextStep, STARTS_NOW_DELAY_MS } from "../src/renderer/src/lib/settledRideAlongs";
+import { immediateStartItems, settledIds, shownNextStep, STARTS_NOW_DELAY_MS } from "../src/renderer/src/lib/settledRideAlongs";
 
 const item = (id: string, enqueuedAt: string | undefined): AdmissionNextStep => ({ id, deliveryKind: "alarm", label: id, enqueuedAt, timing: "afterTurn" }) as AdmissionNextStep;
 
 describe("settled ride-alongs (one filter for the queue card's rows, count, chips and visibility)", () => {
+  it("does not diagnose coalescible answers as stuck from age alone", () => {
+    const answer = { ...item("result", "2026-10-25T00:00:00Z"), deliveryKind: "answer" };
+    const tell = { ...item("message", "2026-10-25T00:00:00Z"), deliveryKind: "tell" };
+    expect(immediateStartItems([answer, tell]).map((i) => i.id)).toEqual(["message"]);
+  });
   it("settles by enqueue time, else by first sight; reports the next settle", () => {
     const seen = new Map<string, number>();
     const now = 1_000_000;

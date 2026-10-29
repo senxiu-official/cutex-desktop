@@ -15,7 +15,7 @@ import { useOwnerLocalActions, useOwnerNewDevices } from "../../lib/ownerDevices
 import { formatWhen, useClock } from "../../lib/time";
 import { useHostScope } from "../../lib/useHostScope";
 import { useApp } from "../../store";
-import { ErrorNote, Segmented, SettingRow } from "./Form";
+import { ErrorNote, Segmented, SettingRow, SettingsGroup } from "./Form";
 
 type T = ReturnType<typeof useI18n>["t"];
 
@@ -63,7 +63,7 @@ export function scopeOptions(t: T, ownerDevice: boolean, canSend: boolean) {
 export function DeviceScopeRow({ scope, ownerDevice, canSend, own, disabled, onChange }: { scope: DeviceScope; ownerDevice: boolean; canSend: boolean; own: boolean; disabled?: boolean; onChange(scope: DeviceScope): void }) {
   const { t } = useI18n();
   return (
-    <SettingRow label={t("ownerDev.scope")} hint={own ? t("ownerDev.scope.ownHint") : t(ownerDevice ? "ownerDev.scope.ownerHint" : "ownerDev.scope.userHint")}>
+    <SettingRow agents="access" source="host" label={t("ownerDev.scope")} hint={own ? t("ownerDev.scope.ownHint") : t(ownerDevice ? "ownerDev.scope.ownerHint" : "ownerDev.scope.userHint")}>
       {own ? (
         <span className="text-xs text-subtle">{scopeLabel(t, scope, ownerDevice)}</span>
       ) : (
@@ -104,15 +104,15 @@ export function OwnerDevicesBanner({ hostId }: { hostId: string }) {
                 {t("ownerDev.notYou")}
               </span>
               {v.canRevoke && (
-                <button type="button" className="ml-1 text-danger hover:underline" onClick={() => void run(v.revoke(d.tokenId))}>
+                <SettingsGroup agents="access" source="host"><button type="button" className="ml-1 text-danger hover:underline" onClick={() => void run(v.revoke(d.tokenId))}>
                   {t("users.revoke")}
-                </button>
+                </button></SettingsGroup>
               )}
             </span>
             {v.canAck && (
-              <button type="button" title={t("ownerDev.ack")} aria-label={t("ownerDev.ack")} onClick={() => void run(v.ack(d.tokenId))} className="shrink-0 rounded p-1 text-muted hover:bg-surface-2 hover:text-foreground">
+              <SettingsGroup agents="none" source="host"><button type="button" title={t("ownerDev.ack")} aria-label={t("ownerDev.ack")} onClick={() => void run(v.ack(d.tokenId))} className="shrink-0 rounded p-1 text-muted hover:bg-surface-2 hover:text-foreground">
                 <X size={14} />
-              </button>
+              </button></SettingsGroup>
             )}
           </div>
         );

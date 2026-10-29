@@ -27,27 +27,3 @@ declare module "../i18nCatalog" {
   interface ModuleMessages extends Messages {}
 }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "connection.title": "Connection",
-  "connection.description": "Host list, host switching, startup host and diagnostics (Settings → Devices)",
-  // ---- settings (moved from the base catalog, 2026-10-09) ----
-  "connection.diagnostics": "Diagnostics",
-  "connection.page": "Hosts",
-  "connection.endpoint": "Endpoint",
-  "connection.version": "cutex version",
-  "connection.noCaps": "Older cutex (no /v2/capabilities)",
-  "connection.features": "Capabilities",
-  // ---- Device management (connection restructure 2026-10-19) ----
-  "connection.pageHint": "Every host this computer connects to, and desktop settings for all hosts.",
-  "connection.openHost": "See the connection and access of {host}",
-  "connection.mine": "My hosts",
-  "connection.mineHint": "Hosts whose {{owner}} is you.",
-  "connection.others": "Hosts I can access",
-  "connection.othersHint": "Hosts whose {{owner}} is someone else, including those where SSH gives you full control.",
-  "connection.othersNone": "None",
-  "connection.thisDevice": "This machine",
-  "connection.member": "You are a member",
-  "connection.add": "Add a host",
-  "connection.addHint": "Connect to a cutex host over SSH. Tokens stay on this computer (system encrypted storage).",
-};

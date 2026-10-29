@@ -2,6 +2,7 @@
 // 审批 page. 允许 / 本次运行内一直允许 = the exact owner-tab selection (main also remembers the origin
 // for this agent until restart, only after cutex consumed the claim); with no open tab, a local page
 // can be opened and handed over in one click. Main enforces everything; this only displays and sends.
+import { btn } from "../../components/Button";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Globe } from "lucide-react";
 import type { ApprovalRecord, ServiceView } from "../../../../shared/ipc";
@@ -19,7 +20,7 @@ import { BrowserClaimController, browserClaimApproval, browserClaimTabDisplay, t
 import { ApprovalSource } from "../../components/ApprovalSource";
 
 const BUTTON = "shrink-0 rounded-md border border-border px-2.5 py-1 text-xs text-foreground enabled:hover:bg-hover disabled:opacity-40";
-const PRIMARY = "shrink-0 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40";
+const PRIMARY = btn({ variant: "primary", size: "sm" });
 const DEFAULT_CONTROL_PREF: Json = { hiddenTarget: DEFAULT_BROWSER_CONTROL_SETTINGS.hiddenTarget,
   viewport: { ...DEFAULT_BROWSER_CONTROL_SETTINGS.viewport }, idleDetachSeconds: DEFAULT_BROWSER_CONTROL_SETTINGS.idleDetachSeconds };
 // The browser preview has no browser bridge: show the card with an inert sample tab.

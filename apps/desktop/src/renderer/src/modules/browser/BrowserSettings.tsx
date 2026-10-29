@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { DEFAULT_BROWSER_CONTROL_SETTINGS, type BrowserControlSettings, type BrowserExternalPagesView, type BrowserSitePermissionForget, type BrowserSitePermissionView } from "../../../../shared/browser";
-import { LinkRow, NumberField, ResetButton, Section, Select, SettingRow, Toggle } from "../../components/settings/Form";
+import { LinkRow, NumberField, ResetButton, Section, Select, SettingRow, SettingsGroup, Toggle } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
 import { browserError, browserErrorKey } from "./browserState";
 import { bridge } from "../../bridge";
@@ -10,6 +10,11 @@ import { BrowserHostSettings } from "./BrowserHostSettings";
 import { BrowserClaimSettings } from "./BrowserClaimSettings";
 import { useApp } from "../../store";
 import { SettingsDevicePart, SettingsHostPart } from "../../components/SettingsHostFrame";
+import { SettingsRiskConfirmation } from "../../components/settings/SettingsRiskConfirmation";
+import { useSettingsRisk } from "../../lib/useSettingsRisk";
+import { settingsRiskText as riskText } from "../../lib/settingsRiskText";
+import { settingsAnchorId } from "../../lib/settingsNav";
+import { BrowserDesktopLoopbackSettings } from "./BrowserDesktopLoopbackSettings";
 
 /** The host rows need the relay; a host without it shows 「需要升级 cutex」. */
 const HOST_PART_REQUIRES = ["browser-relay-v1"] as const;
@@ -31,8 +36,8 @@ function BrowserExternalPagesSettings() {
     catch (reason) { setError(browserError(reason)); }
     finally { setBusy(false); }
   }
-  return <Section title={t("browser.externalPages.title")} source="local">
-    <SettingRow label={t("browser.externalPages.label")} hint={t("browser.externalPages.hint")}>
+  return <Section title={t("browser.externalPages.title")} >
+    <SettingRow agents="now" source="local" label={t("browser.externalPages.label")} hint={t("browser.externalPages.hint")}>
       <span data-browser-external-pages>
         <Toggle checked={view?.stored ?? true} disabled={!bridge.browser || !view || busy} label={t("browser.externalPages.label")} onChange={value => void change(value)} />
       </span>
@@ -65,9 +70,9 @@ function BrowserSitePermissionSettings() {
     if (!sites.has(id)) sites.set(id, { pool: entry.pool, origin: entry.origin, items: [] });
     sites.get(id)!.items.push(entry);
   }
-  return <Section title={t("browser.sitePermissions.title")} hint={t("browser.sitePermissions.hint")} source="local"
+  return <Section id={settingsAnchorId("site-permissions")} title={t("browser.sitePermissions.title")} hint={t("browser.sitePermissions.hint")}
     actions={sites.size > 0 ? <button type="button" data-browser-site-permissions-forget-all disabled={busy} onClick={() => void forget("all")} className="rounded text-xs text-accent hover:underline disabled:opacity-40">{t("browser.sitePermissions.forgetAll")}</button> : undefined}>
-    <div data-browser-site-permissions className="flex flex-col gap-2">
+    <SettingsGroup agents="now" source="local"><div data-browser-site-permissions className="flex flex-col gap-2">
       {entries && sites.size === 0 && <p className="text-xs text-subtle">{t("browser.sitePermissions.empty")}</p>}
       {[...sites.values()].map(site => <div key={`${site.pool} ${site.origin}`} className="flex items-start justify-between gap-3 text-xs">
         <div className="min-w-0">
@@ -76,7 +81,7 @@ function BrowserSitePermissionSettings() {
         </div>
         <button type="button" disabled={busy} onClick={() => void forget({ pool: site.pool, origin: site.origin })} className="shrink-0 rounded-md border border-border px-2 py-1 disabled:opacity-40">{t("browser.sitePermissions.forget")}</button>
       </div>)}
-    </div>
+    </div></SettingsGroup>
     {error && <p role="alert" className="text-xs text-danger">{t("browser.actionFailed", { reason: t(browserErrorKey(error)) })}</p>}
   </Section>;
 }
@@ -86,9 +91,12 @@ export function BrowserSettings() {
   const [settings, setSettings] = useBrowserControlSettings();
   const [error, setError] = useState<string | null>(null);
   const enabled = useBrowserEnabled();
+  const gate = useSettingsRisk([settings, enabled], true);
+  const [resetApproval, setResetApproval] = useState<{ valid(): boolean } | null>(null);
   const [resetting, setResetting] = useState(false), [resetDone, setResetDone] = useState(false);
-  async function resetOrigins() {
-    if (!enabled || !bridge.browser || resetting) return;
+  async function resetOrigins(valid: () => boolean) {
+    if (!valid() || !enabled || !bridge.browser || resetting) return;
+    setResetApproval(null);
     setResetting(true); setResetDone(false); setError(null);
     try { await bridge.browser.resetOrigins(); setResetDone(true); }
     catch (reason) { setError(browserError(reason)); }
@@ -100,33 +108,41 @@ export function BrowserSettings() {
   }
   // Two parts (review 2026-10-15 UI-02): this computer's browser, then the Settings target host's
   // agent permissions (the host pages' picker; never the focus host in its place).
-  return <><SettingsDevicePart title={t("browser.part.device")} hint={t("browser.part.deviceHint")}><Section title={t("browser.settings")} hint={t("browser.owner.settingsHint")} source="local"
+  return <><SettingsDevicePart title={t("browser.part.device")} hint={t("browser.part.deviceHint")}><Section title={t("browser.settings")} hint={t("browser.owner.settingsHint")}
     actions={<ResetButton onClick={() => save(DEFAULT_BROWSER_CONTROL_SETTINGS)} title={t("browser.settingsReset")} />}>
-    <SettingRow label={t("browser.hiddenTarget")} hint={t("browser.hiddenTargetHint")} reset={<ResetButton disabled={settings.hiddenTarget === DEFAULT_BROWSER_CONTROL_SETTINGS.hiddenTarget} onClick={() => save({ ...settings, hiddenTarget: DEFAULT_BROWSER_CONTROL_SETTINGS.hiddenTarget })} />}>
+    <SettingRow agents="now" source="local" label={t("browser.hiddenTarget")} hint={t("browser.hiddenTargetHint")} reset={<ResetButton disabled={settings.hiddenTarget === DEFAULT_BROWSER_CONTROL_SETTINGS.hiddenTarget} onClick={() => save({ ...settings, hiddenTarget: DEFAULT_BROWSER_CONTROL_SETTINGS.hiddenTarget })} />}>
       <Select value={settings.hiddenTarget} label={t("browser.hiddenTarget")} options={[
         { value: "reveal", label: t("browser.hiddenReveal") }, { value: "reject", label: t("browser.hiddenReject") },
       ]} onChange={(hiddenTarget) => save({ ...settings, hiddenTarget })} />
     </SettingRow>
-    <SettingRow label={t("browser.viewportWidth")} hint={t("browser.viewportHint")}>
+    <SettingRow agents="now" source="local" label={t("browser.viewportWidth")} hint={t("browser.viewportHint")}>
       <NumberField value={settings.viewport.width} range={[320, 3840]} label={t("browser.viewportWidth")} unit="px"
         onCommit={(width) => save({ ...settings, viewport: { ...settings.viewport, width: width ?? 1280 } })} />
     </SettingRow>
-    <SettingRow label={t("browser.viewportHeight")}>
+    <SettingRow agents="now" source="local" label={t("browser.viewportHeight")}>
       <NumberField value={settings.viewport.height} range={[240, 2160]} label={t("browser.viewportHeight")} unit="px"
         onCommit={(height) => save({ ...settings, viewport: { ...settings.viewport, height: height ?? 720 } })} />
     </SettingRow>
-    <SettingRow label={t("browser.idleDetach")} hint={t("browser.idleDetachHint")}>
+    <SettingRow agents="now" source="local" label={t("browser.idleDetach")} hint={t("browser.idleDetachHint")}>
       <NumberField value={settings.idleDetachSeconds} range={[5, 600]} label={t("browser.idleDetach")} unit={t("browser.seconds")}
         onCommit={(idleDetachSeconds) => save({ ...settings, idleDetachSeconds: idleDetachSeconds ?? 30 })} />
     </SettingRow>
-    <SettingRow label={t("browser.origins.reset")} hint={t("browser.origins.resetHint")}>
-      <button type="button" data-browser-reset-origins disabled={!enabled || !bridge.browser || resetting} onClick={() => void resetOrigins()} className="rounded-md border border-border px-3 py-1.5 text-xs disabled:opacity-40">{t("browser.origins.reset")}</button>
-    </SettingRow>
+    <div id={settingsAnchorId("site-origins")}>
+      <SettingRow agents="none" source="local" label={t("browser.origins.reset")} hint={t("browser.origins.resetHint")}>
+        <button type="button" data-browser-reset-origins disabled={!enabled || !bridge.browser || resetting} onClick={() => {
+          gate.invalidate(); setResetApproval({ valid: gate.capture() }); setResetDone(false);
+        }} className="rounded-md border border-border px-3 py-1.5 text-xs disabled:opacity-40">{t("browser.origins.reset")}</button>
+      </SettingRow>
+      {resetApproval && <SettingsRiskConfirmation message={riskText("settingsRisk.origins")} valid={resetApproval.valid} busy={resetting}
+        confirmLabel={riskText("settingsRisk.originsConfirm")} onCancel={() => { gate.invalidate(); setResetApproval(null); }}
+        onConfirm={() => void resetOrigins(resetApproval.valid)} />}
+    </div>
     {resetDone && <p role="status" className="text-xs text-subtle">{t("browser.origins.resetDone")}</p>}
     {error && <p role="alert" className="text-xs text-danger">{t("browser.actionFailed", { reason: t(browserErrorKey(error)) })}</p>}
-    <LinkRow label={t("browser.hold.limit")} hint={t("browser.hold.hint")} link={t("browser.hold.link")}
+    <LinkRow agents="now" source="local" label={t("browser.hold.limit")} hint={t("browser.hold.hint")} link={t("browser.hold.link")}
       onClick={() => useApp.getState().openSettings("sides", { anchor: "sides" })} />
   </Section><BrowserExternalPagesSettings /><BrowserSitePermissionSettings /></SettingsDevicePart>
+  <SettingsHostPart title={t("browser.desktopLoopback.title")}><BrowserDesktopLoopbackSettings /></SettingsHostPart>
   <SettingsHostPart title={t("browser.part.host")} hint={t("browser.part.hostHint")} requires={HOST_PART_REQUIRES}>
     <BrowserHostSettings /><BrowserClaimSettings />
   </SettingsHostPart></>;

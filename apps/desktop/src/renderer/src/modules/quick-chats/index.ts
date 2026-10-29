@@ -1,4 +1,4 @@
-// 新工作 (cutex human-create-session): the sidebar entry (+ ▾ profile picker) and the draft page —
+// 新工作 (cutex human-create-session): the entry (right-click = the profile picker, lib/quickStartMenu) and the draft page —
 // nothing exists in cutex until the first message (store.pendingChat, lib/pendingChat.ts). Step 3.
 // The sidebar's 快速对话 list stays core (lib/sidebarView splits it by the same capability).
 import { MessageSquarePlus } from "lucide-react";
@@ -6,7 +6,7 @@ import { pageTitle } from "../react";
 import { defineModule } from "../slots";
 import { startQuickChat, useQuickChatLabel } from "./nav";
 import { PendingChat } from "./PendingChat";
-import { QuickChatMenu } from "./QuickChatMenu";
+import { openQuickStartMenu } from "../../lib/quickStartMenu";
 
 export default defineModule({
   id: "quick-chats",
@@ -23,7 +23,7 @@ export default defineModule({
         useTitleKey: useQuickChatLabel,
         target: { run: startQuickChat },
         activePages: ["quick-chats.draft"],
-        Menu: QuickChatMenu,
+        menu: { open: openQuickStartMenu, hintKey: "quick-chats.menuHint" },
       },
     ],
     "main.page": [{ id: "quick-chats.draft", Page: PendingChat, useTitle: pageTitle("quick-chats.title") }],

@@ -1,6 +1,7 @@
 // What a profile's account kind makes meaningful in Settings → Profiles, and where its model list
 // came from. Pure helpers (no React) so they are unit-testable.
 import type { ModelsSource, ProfileDetail, ProfileItem } from "../../../shared/ipc";
+import { acpRuntimeAvailable, isAcpRuntime, type AcpRuntime } from "./acpRuntimes";
 
 /**
  * Official-login profiles (ChatGPT login, Claude): quota comes from the official source that cutex
@@ -11,6 +12,11 @@ export function isOfficialLogin(p: KindFields): boolean {
 }
 
 type KindFields = Pick<ProfileItem, "cliKind" | "authKind"> & { providerFamily?: string | null };
+
+/** Availability of a new session on an ACP-kind Profile (DSH, Kimi); never use this to filter stored profiles or history. */
+export function profileRuntimeAvailable(p: Pick<ProfileItem, "cliKind"> | null | undefined, features: ReadonlySet<string>): boolean {
+  return !isAcpRuntime(p?.cliKind) || acpRuntimeAvailable(p.cliKind, features);
+}
 
 /** cutex derives `authKind` from the stored credentials, so a signed-out (or never signed-in)
  *  official profile reports "none"; its configured provider family still says it is a ChatGPT
@@ -79,9 +85,15 @@ export function defaultableState(pending: boolean | null | undefined, stored: bo
   return { checked: value ?? def, explicit: value !== null };
 }
 
-export type ProfileKind = "chatgpt" | "claude" | "apiKey";
+export type ProfileKind = "chatgpt" | "claude" | "apiKey" | AcpRuntime;
+
+/** A Profile whose own runtime is an ACP runtime (DSH, Kimi): none of the Codex-only rows apply. */
+export function isAcpKind(kind: ProfileKind): kind is AcpRuntime {
+  return isAcpRuntime(kind);
+}
 
 export function profileKind(p: KindFields): ProfileKind {
+  if (isAcpRuntime(p.cliKind)) return p.cliKind;
   if (p.cliKind === "claude" || p.authKind === "claude") return "claude";
   return p.authKind === "chatgpt" || signedOutChatGpt(p) ? "chatgpt" : "apiKey";
 }
@@ -96,12 +108,12 @@ export function sessionsUsingProfile<S extends { profile: string | null; effecti
 
 /** cutex `detail.editable[field]`: absent (older cutex) counts as editable. */
 export function fieldEditable(detail: ProfileDetail, field: string): boolean {
-  return detail.detail.editable?.[field] !== false;
+  return detail.detail?.editable?.[field] !== false;
 }
 
 /** For fields newer than the editability map itself: editable only when cutex says so explicitly. */
 export function fieldOffered(detail: ProfileDetail, field: string): boolean {
-  return detail.detail.editable?.[field] === true;
+  return detail.detail?.editable?.[field] === true;
 }
 
 /** Leading numeric x.y.z of a version string ("0.160.0-r47" → [0,160,0]); null if none. */
@@ -150,5 +162,6 @@ export function localDateTime(iso: string | null | undefined): string {
  * config's `model`), Claude profiles on a cutex with `claude-profile-default-model`.
  */
 export function defaultModelEditable(item: Pick<ProfileItem, "cliKind">, features: ReadonlySet<string>): boolean {
+  if (isAcpRuntime(item.cliKind)) return false;
   return item.cliKind === "claude" ? features.has(PROFILE_FEATURES.claudeDefaultModel) : true;
 }

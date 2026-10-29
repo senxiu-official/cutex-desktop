@@ -1,7 +1,7 @@
-// Claude accounts (cutex claude-accounts): the request bodies main sends (never a key), the quota
+// Claude accounts (cutex claude-accounts): the request bodies main sends (a key only write-only on API accounts), the quota
 // adapter, and the pure view helpers of Settings → Profile → Claude 账户 and its add flow.
 import { describe, expect, it } from "vitest";
-import { claudeAccountCreateBody, claudeAccountId, claudeAccountLabel, claudeAccountQuota, claudeAccountRenameBody, type ClaudeAccount } from "../src/shared/claudeAccounts";
+import { claudeAccountCreateBody, claudeAccountId, claudeAccountKeyBody, claudeAccountLabel, claudeAccountQuota, claudeAccountRenameBody, claudeApiKey, type ClaudeAccount } from "../src/shared/claudeAccounts";
 import { accountCreateRequest, accountsNeedingAttention, accountState, accountSummary, apiKeyCommand, baseUrlLabel, checkedAtSeconds, formatCost, guessKeyShell, needsTerminal, parseEnvLines, planLabel, quotaNote, refusalKey } from "../src/renderer/src/modules/claude-accounts/accountView";
 
 function account(over: Partial<ClaudeAccount>): ClaudeAccount {
@@ -44,9 +44,20 @@ describe("request bodies (main validates renderer input)", () => {
     expect(() => claudeAccountCreateBody({ label: "x", kind: "api", env: ["A=b"] })).toThrow("bad env");
   });
 
-  it("never carries a credential: apiKey and secret-named settings are refused", () => {
-    expect(() => claudeAccountCreateBody({ label: "x", kind: "api", apiKey: "sk-test-only" })).toThrow("never sends a Claude API key");
-    expect(() => claudeAccountCreateBody({ label: "x", kind: "api", apiKey: undefined })).toThrow("never sends");
+  it("a key only as a new API account's well-formed write-only apiKey; never secret-named settings", () => {
+    // 新建 Profile's inline Anthropic key (owner decision 4, 2026-10-28).
+    expect(claudeAccountCreateBody({ label: "x", kind: "api", apiKey: "sk-test-only" })).toEqual({ label: "x", kind: "api", apiKey: "sk-test-only" });
+    expect(() => claudeAccountCreateBody({ label: "x", kind: "api", apiKey: undefined })).toThrow("bad API key");
+    expect(() => claudeAccountCreateBody({ label: "x", kind: "api", apiKey: "" })).toThrow("bad API key");
+    expect(() => claudeAccountCreateBody({ label: "x", kind: "api", apiKey: "sk two" })).toThrow("bad API key");
+    expect(() => claudeAccountCreateBody({ label: "x", kind: "api", apiKey: "sk-\n" })).toThrow("bad API key");
+    expect(() => claudeAccountCreateBody({ label: "x", kind: "api", apiKey: "k".repeat(4097) })).toThrow("bad API key");
+    expect(() => claudeAccountCreateBody({ label: "x", kind: "subscription", apiKey: "sk-test-only" })).toThrow("subscription");
+    expect(() => claudeAccountCreateBody({ label: "x", apiKey: "sk-test-only" })).toThrow("subscription");
+    expect(claudeApiKey("k".repeat(4096))).toHaveLength(4096);
+    expect(claudeAccountKeyBody(" sk-new ")).toEqual({ apiKey: "sk-new" });
+    // The error never repeats the value.
+    expect(() => claudeAccountKeyBody("sk-secret value")).toThrow(/^bad Claude API key$/);
     for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "MY_SECRET", "DB_PASSWORD", "GITHUB_ACCESS_TOKEN"]) {
       expect(() => claudeAccountCreateBody({ label: "x", kind: "api", env: { [key]: "v" } }), key).toThrow("not allowed");
     }
@@ -149,6 +160,8 @@ describe("account view", () => {
     expect(accountCreateRequest("subscription", form)).toEqual({ request: { label: "Work", kind: "subscription" } });
     expect(accountCreateRequest("api", form)).toEqual({ request: { label: "Work", kind: "api", keyEnv: "ANTHROPIC_AUTH_TOKEN", baseUrl: "https://api.deepseek.com/anthropic", env: { ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro" } } });
     expect(accountCreateRequest("api", { ...form, baseUrl: "  ", envText: "" })).toEqual({ request: { label: "Work", kind: "api", keyEnv: "ANTHROPIC_AUTH_TOKEN" } });
+    expect(accountCreateRequest("api", { ...form, baseUrl: "", envText: "", apiKey: " sk-typed " })).toEqual({ request: { label: "Work", kind: "api", keyEnv: "ANTHROPIC_AUTH_TOKEN", apiKey: "sk-typed" } });
+    expect(accountCreateRequest("subscription", { ...form, apiKey: "sk-typed" })).toEqual({ request: { label: "Work", kind: "subscription" } });
     expect(accountCreateRequest("subscription", { ...form, label: "default" })).toEqual({ error: "badLabel" });
     expect(accountCreateRequest("api", { ...form, label: "  " })).toEqual({ error: "badLabel" });
     expect(accountCreateRequest("api", { ...form, envText: "lower=x" })).toEqual({ error: "envBad", lines: ["lower=x"] });

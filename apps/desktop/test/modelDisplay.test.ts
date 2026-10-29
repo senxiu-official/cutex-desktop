@@ -35,6 +35,25 @@ describe("modelLabel", () => {
     noteCatalogNames([{ id: "m-raw", displayName: "m-raw" }]);
     expect(modelLabel("m-raw", null)).toBe("m-raw");
   });
+
+  it("rendering two lists that name one id differently does not ping-pong (no emit loop)", async () => {
+    const listener = vi.fn();
+    const off = md.subscribeModelNames(listener);
+    expect(modelLabel("sonnet", "Sonnet 5.5")).toBe("Sonnet 5.5");
+    await Promise.resolve();
+    expect(listener).toHaveBeenCalledTimes(1);
+    // Another list's name for the same id is shown where passed, but no longer overwrites the
+    // remembered one while rendering, so nothing re-renders.
+    expect(modelLabel("sonnet", "Claude Sonnet")).toBe("Claude Sonnet");
+    expect(modelLabel("sonnet", "Sonnet 5.5")).toBe("Sonnet 5.5");
+    await Promise.resolve();
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(modelLabel("sonnet", null)).toBe("Sonnet 5.5");
+    // A loaded catalog may still update it.
+    noteCatalogNames([{ id: "sonnet", displayName: "Sonnet 6" }]);
+    expect(modelLabel("sonnet", null)).toBe("Sonnet 6");
+    off();
+  });
 });
 
 describe("profile entry names", () => {

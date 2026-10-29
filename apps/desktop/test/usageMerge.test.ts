@@ -1,7 +1,7 @@
 // 用量 「全部主机」: merging per-host ledgers and quotas (renderer modules/usage/merge.ts) and the
 // header picker's host choice (lib/hostPick allHostsChoice).
 import { describe, expect, it } from "vitest";
-import type { QuotaGauge, UsageReport } from "../src/shared/ipc";
+import type { ProfileItem, QuotaGauge, UsageReport } from "../src/shared/ipc";
 import { asCutexSource, canonicalNames, conversionRate, emptyReport, hostQuery, mergeQuotas, mergeUsageReports, profileKey, profileSignature, type HostQuota } from "../src/renderer/src/modules/usage/merge";
 import { buckets, buildSeries } from "../src/renderer/src/modules/usage/chart";
 import { allHostsChoice } from "../src/renderer/src/lib/hostPick";
@@ -173,5 +173,77 @@ describe("usage all hosts: the header choice", () => {
   it("is not offered with fewer than two such hosts", () => {
     expect(allHostsChoice(hosts.slice(0, 1), (id) => features[id] ?? null, "usage-ledger")).toBeNull();
     expect(allHostsChoice(hosts, (id) => (id === "local" ? features.local! : null), "usage-ledger")).toBeNull();
+  });
+});
+
+
+describe("usage linked accounts", () => {
+  const profile = (name: string, accountKey?: string, secretId = "1234abcd", id = name): ProfileItem => ({ id, name, cliKind: "codex", provider: "openai", ...(accountKey ? { link: { accountKey, secretId, basis: "chatgpt-user", source: "auto" } } : {}) } as ProfileItem);
+  const gauge = (observedAt: number, remainingPercent: number): QuotaGauge => ({ id: "window", label: "window", kind: "window", observedAt, remainingPercent, balance: null, resetAt: null, windowLabel: "5h", stale: false });
+  const quota = (hostId: string, name: string, accountKey?: string, secretId = "1234abcd", observedAt = 1): HostQuota => ({ hostId, label: hostId.toUpperCase(), name, accountKey, secretId, signature: "codex|openai|", gauges: [gauge(observedAt, 90 - observedAt)] });
+  const part = (hostId: string, p: ProfileItem | null, name = p?.name ?? "shared", total = 10) => ({ hostId, label: hostId.toUpperCase(), report: report("USD", [{ key: { day: "2026-10-14", profile: name, ...(p ? { profileId: p.id } : {}) }, ...amounts(total, 1) }]), profiles: p ? new Map([[p.name, p]]) : null });
+  const keyA = "aaaaaaaaaaaaaaaaaaaaaa", keyB = "bbbbbbbbbbbbbbbbbbbbbb";
+
+  it("merges different names for one account and selects the latest whole quota observation", () => {
+    const cards = mergeQuotas([quota("a", "work", keyA), quota("b", "personal", keyA, "1234abcd", 4)]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ name: "work", from: "B", fromHostId: "b", fromName: "personal", observedAt: 4, linkedHosts: ["A", "B"] });
+    expect(cards[0]!.gauges.map((g) => g.remainingPercent)).toEqual([86]);
+    const merged = mergeUsageReports([part("a", profile("work", keyA)), part("b", profile("personal", keyA), "personal", 20)]).report;
+    expect(merged.totals.total).toBe(30);
+    const days = buckets(["2026-10-14"]);
+    expect(buildSeries(merged, "profile", days, "tokens").values).toEqual([[30]]);
+    expect(buildSeries(merged, "host", days, "tokens")).toEqual({ series: ["B", "A"], values: [[20], [10]] });
+    expect(merged.rows.map((r) => r.key.profile)).toEqual(["work", "work"]);
+  });
+
+  it("separates the same name with conflicting known accounts or salts", () => {
+    for (const [key, salt] of [[keyB, "1234abcd"], [keyA, "9876abcd"]]) {
+      const cards = mergeQuotas([quota("a", "shared", keyA), quota("b", "shared", key, salt)]);
+      expect(cards).toHaveLength(2);
+      expect(cards.every((card) => card.split)).toBe(true);
+      const merged = mergeUsageReports([part("a", profile("shared", keyA)), part("b", profile("shared", key, salt))]).report;
+      expect(buildSeries(merged, "profile", buckets(["2026-10-14"]), "tokens").values).toEqual([[10], [10]]);
+    }
+  });
+
+  it("never lets a legacy name bridge two known accounts, regardless of input order", () => {
+    const entries = [quota("a", "shared", keyA), quota("b", "shared", keyB), quota("old", "shared")];
+    for (const order of [entries, [entries[2]!, entries[0]!, entries[1]!], [...entries].reverse()]) {
+      const cards = mergeQuotas(order);
+      expect(cards).toHaveLength(3);
+      expect(cards.every((card) => card.hostIds.length === 1)).toBe(true);
+    }
+    const merged = mergeUsageReports([part("old", null), part("a", profile("shared", keyA)), part("b", profile("shared", keyB))]).report;
+    expect(buildSeries(merged, "profile", buckets(["2026-10-14"]), "tokens").series).toHaveLength(3);
+  });
+
+  it("retains name fallback for old hosts when only one compatible linked account exists", () => {
+    const cards = mergeQuotas([quota("old", "SHARED"), quota("a", "shared", keyA)]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.linkedHosts).toEqual(["A"]);
+    const merged = mergeUsageReports([part("old", null), part("a", profile("shared", keyA))]).report;
+    expect(buildSeries(merged, "profile", buckets(["2026-10-14"]), "tokens").values).toEqual([[20]]);
+  });
+
+  it("does not inherit a replacement profile account when an old row has a different profile ID", () => {
+    const current = profile("shared", keyA, "1234abcd", "new-id");
+    const old = part("a", current);
+    old.report.rows[0]!.key.profileId = "old-id";
+    const merged = mergeUsageReports([old, part("b", profile("shared", keyA))]).report;
+    expect(buildSeries(merged, "profile", buckets(["2026-10-14"]), "tokens").series).toHaveLength(2);
+  });
+
+  it("keeps display-name collisions distinct in chart identities", () => {
+    const merged = mergeUsageReports([part("a", profile("same", keyA)), part("b", profile("same", keyB)), part("c", profile("same · A"))]).report;
+    expect(merged.rows.map((r) => r.key.profile)).toEqual(["same · A", "same · B", "same · A"]);
+    expect(buildSeries(merged, "profile", buckets(["2026-10-14"]), "tokens").series).toHaveLength(3);
+  });
+
+  it("keeps quota signature fallback and ledger name fallback different for legacy hosts", () => {
+    const cards = mergeQuotas([quota("a", "old"), { ...quota("b", "old"), signature: "claude|anthropic|" }]);
+    expect(cards).toHaveLength(2);
+    const merged = mergeUsageReports([part("a", profile("old")), part("b", { ...profile("old"), cliKind: "claude" } as ProfileItem)]).report;
+    expect(buildSeries(merged, "profile", buckets(["2026-10-14"]), "tokens").values).toEqual([[20]]);
   });
 });

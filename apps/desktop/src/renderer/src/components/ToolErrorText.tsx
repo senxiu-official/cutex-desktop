@@ -15,7 +15,7 @@ export function ToolErrorText({ text, className = "" }: { text: string; classNam
   }, [done]);
   return (
     <div className={`group relative ${className}`}>
-      <pre className="max-h-72 overflow-auto rounded-md bg-surface p-2 pr-8 font-mono text-[11px] whitespace-pre-wrap text-muted">{text}</pre>
+      <pre className="max-h-72 overflow-auto rounded-md bg-surface p-2 pr-8 font-mono text-caption/[inherit] whitespace-pre-wrap text-muted">{text}</pre>
       <button
         type="button"
         title={done ? t("reply.copied") : t("tool.copyError")}

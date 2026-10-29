@@ -4,7 +4,7 @@
 // authority it grants. 已处理 lists recent decisions. Live from `cutex/approvals/changed`.
 // Multi-host (RFC §9.2): the scope's connected hosts, merged by time; each card / row carries its host
 // (HostMark when the scope shows host marks) and decisions go to that host.
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import type { ApprovalRecord } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -18,6 +18,7 @@ import { Segmented } from "../../components/settings/Form";
 import { PendingCard, Requester, When, type Origin } from "./PendingApprovalCard";
 
 type Scope = "pending" | "decided";
+const RoutingInbox = lazy(() => import("./RoutingInbox").then(m => ({ default: m.RoutingInbox })));
 
 const STATE_TONE: Record<ApprovalRecord["state"], string> = { pending: "text-warn", approved: "text-ok-text", consumed: "text-ok-text", denied: "text-danger", expired: "text-subtle" };
 
@@ -35,6 +36,7 @@ function DecidedRow({ record, origin }: { record: ApprovalRecord; origin: Origin
           <When iso={record.decidedAt ?? record.createdAt} />
         </div>
         <Requester record={record} hostId={origin.hostId} sidebar={origin.sidebar} />
+        {record.autoDecision && record.matchedRuleId && <p className="mt-0.5 text-xs text-accent">{t("approvals.rules.autoDecided", { rule: record.matchedRuleId })}</p>}
         {record.note && <p className="mt-0.5 text-xs text-subtle">“{record.note}”</p>}
       </div>
     </div>
@@ -49,6 +51,7 @@ export function ApprovalsPage() {
   const hosts = useListHosts();
   const refresh = useApp((s) => s.refreshApprovals);
   const [scope, setScope] = useState<Scope>("pending");
+  const [routingCount, setRoutingCount] = useState(0);
 
   // Hosts whose cutex has owner approvals (RFC §9.1: the page shows when any host of the scope has it).
   const supported = useMemo(() => hosts.data.filter((d) => d.features.has(APPROVALS_FEATURE)), [hosts.data]);
@@ -90,7 +93,7 @@ export function ApprovalsPage() {
         <Segmented<Scope>
           value={scope}
           options={[
-            { value: "pending", label: t("approvals.scope.pending", { n: pending.length }) },
+            { value: "pending", label: t("approvals.scope.pending", { n: pending.length + routingCount }) },
             { value: "decided", label: t("approvals.scope.decided") },
           ]}
           onChange={setScope}
@@ -98,10 +101,11 @@ export function ApprovalsPage() {
       </PageToolbar>
       {hosts.multi && <MissingHosts hosts={hosts.missing} unsupported={unsupported} />}
       {error && <p className="mb-3 text-xs text-danger">{error}</p>}
+      {scope === "pending" && supported.some(host => host.features.has("delegation-review-refs")) && <Suspense fallback={<p className="text-xs text-subtle">…</p>}><RoutingInbox hosts={supported} onCount={setRoutingCount} /></Suspense>}
       {scope === "pending" ? (
         !pendingLoaded ? (
           <p className="py-8 text-center text-sm text-subtle">…</p>
-        ) : pending.length === 0 ? (
+        ) : pending.length === 0 ? (routingCount > 0 ? null :
           <div className="flex flex-col items-center gap-2 py-12 text-sm text-subtle">
             <ShieldCheck size={22} strokeWidth={1.5} />
             {t("approvals.empty")}

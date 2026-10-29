@@ -3,9 +3,14 @@
 // Settings → 关于 page (`settings.section` items; the version card on top stays the shell's). Static data
 // only, no daemon calls; required so the known issues and the changelog are always reachable.
 import { defineModule } from "../slots";
-import { AboutLinksSection, ChangelogSection, KnownIssuesSection } from "./AboutSections";
 import { provideReleases } from "../../lib/onboarding";
 import { BUNDLED_CHANGELOG } from "./changelog";
+import { lazyPage } from "../../lib/lazyPage";
+
+// Loaded on first open (lib/lazyPage).
+const KnownIssuesSection = lazyPage(() => import("./AboutSections").then((m) => m.KnownIssuesSection));
+const ChangelogSection = lazyPage(() => import("./AboutSections").then((m) => m.ChangelogSection));
+const AboutLinksSection = lazyPage(() => import("./AboutSections").then((m) => m.AboutLinksSection));
 
 // The onboarding's 新功能 dialog reads this desktop's releases from here (lib/onboarding).
 provideReleases(BUNDLED_CHANGELOG.releases);

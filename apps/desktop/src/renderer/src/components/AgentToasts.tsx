@@ -8,6 +8,7 @@ import { FileBox, Globe, X } from "lucide-react";
 import { useI18n } from "../i18n";
 import { dismissAgentToast, holdAgentToast, releaseAgentToast, useAgentToasts, type AgentToast } from "../lib/agentToasts";
 import { agentHost, useApp } from "../store";
+import { RefActionButtons } from "./RefActions";
 
 const STACK = "data-agent-toasts";
 
@@ -31,7 +32,7 @@ function Card({ toast }: { toast: AgentToast }) {
   return (
     <div
       role="status"
-      className="pointer-events-auto flex max-w-full min-w-0 items-start gap-2 rounded-lg border border-card-border bg-surface px-2.5 py-1.5 text-xs shadow-lg"
+      className="motion-toast-in pointer-events-auto flex max-w-full min-w-0 items-start gap-2 rounded-lg border border-card-border bg-surface px-2.5 py-1.5 text-xs shadow-lg"
       data-agent-toast={toast.icon}
       onPointerEnter={() => holdAgentToast(toast.id)}
       onPointerLeave={() => releaseAgentToast(toast.id)}
@@ -56,6 +57,8 @@ function Card({ toast }: { toast: AgentToast }) {
           {toast.action.label}
         </button>
       )}
+      {/* What the card is about (a service): the modules' `ref.action` items as icon buttons (e.g. pin it). */}
+      {toast.ref && <RefActionButtons kind={toast.ref.kind} build={() => toast.ref ?? null} />}
       <button onMouseDown={(e) => e.preventDefault()} onClick={() => dismissAgentToast(toast.id)} title={t("agentToast.dismiss")} aria-label={t("agentToast.dismiss")} className="shrink-0 rounded p-0.5 text-subtle hover:bg-hover hover:text-foreground">
         <X size={12} />
       </button>

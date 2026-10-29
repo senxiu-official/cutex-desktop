@@ -240,21 +240,27 @@ describe("Claude accounts (claude-accounts)", () => {
     expect(await client.claudeAccounts()).toEqual({ contractVersion: 2, accounts: [{ id: "default" }] });
     await client.createClaudeAccount({ label: "DeepSeek", kind: "api", baseUrl: "https://api.deepseek.com/anthropic" });
     await client.updateClaudeAccount("ca-work1", { label: "Work" });
+    await client.createClaudeAccount({ label: "Key", kind: "api", apiKey: "sk-test-only" });
+    await client.updateClaudeAccount("ca-work1", { apiKey: "sk-test-2" });
     await client.deleteClaudeAccount("ca-work1");
     await client.checkClaudeAccount("default");
     expect(calls.map((c) => [c.method, c.url, c.body === undefined || c.body === null ? null : JSON.parse(String(c.body))])).toEqual([
       ["GET", "http://h:1/v2/claude/accounts", null],
       ["POST", "http://h:1/v2/claude/accounts", { label: "DeepSeek", kind: "api", baseUrl: "https://api.deepseek.com/anthropic" }],
       ["PATCH", "http://h:1/v2/claude/accounts/ca-work1", { label: "Work" }],
+      ["POST", "http://h:1/v2/claude/accounts", { label: "Key", kind: "api", apiKey: "sk-test-only" }],
+      ["PATCH", "http://h:1/v2/claude/accounts/ca-work1", { apiKey: "sk-test-2" }],
       ["DELETE", "http://h:1/v2/claude/accounts/ca-work1", null],
       ["POST", "http://h:1/v2/claude/accounts/default/status", {}],
     ]);
     expect(await mockClient(() => [404, apiError("not_found")]).client.claudeAccounts()).toBeNull();
   });
 
-  it("never sends an API key or a malformed id; refusals throw with their code", async () => {
+  it("sends an API key only on an API account, never a malformed id; refusals throw with their code", async () => {
     const { client, calls } = mockClient();
-    await expect(client.createClaudeAccount({ label: "x", kind: "api", apiKey: "sk-test" } as never)).rejects.toThrow("apiKey");
+    await expect(client.createClaudeAccount({ label: "x", kind: "subscription", apiKey: "sk-test" })).rejects.toThrow("apiKey");
+    await expect(client.createClaudeAccount({ label: "x", kind: "api", apiKey: "" })).rejects.toThrow("apiKey");
+    await expect(client.updateClaudeAccount("ca-a", { apiKey: "" })).rejects.toThrow("bad apiKey");
     await expect(client.updateClaudeAccount("../x", { label: "x" })).rejects.toThrow("bad Claude account id");
     await expect(client.deleteClaudeAccount("CA-X")).rejects.toThrow("bad Claude account id");
     await expect(client.checkClaudeAccount("ca-a/login")).rejects.toThrow("bad Claude account id");
@@ -421,6 +427,49 @@ describe("compact history (compact-history)", () => {
     expect(new URL(calls[2]!.url).searchParams.get("compact")).toBe("1");
     expect(new URL(calls[2]!.url).searchParams.get("cursor")).toBe("c");
     expect(new URL(calls[3]!.url).searchParams.has("compact")).toBe(false);
+  });
+});
+
+describe("history media references (history-media-refs, design 025)", () => {
+  it("sends ?media=ref on bootstrap / history only when asked", async () => {
+    const { client, calls } = mockClient(() => [200, {}]);
+    await client.bootstrap("s1", { turnLimit: 30, mediaRefs: true });
+    await client.bootstrap("s1", { turnLimit: 30 });
+    await client.history("s1", { limit: 30, cursor: "c", mediaRefs: true });
+    await client.history("s1", { limit: 30 });
+    expect(new URL(calls[0]!.url).searchParams.get("media")).toBe("ref");
+    expect(new URL(calls[1]!.url).searchParams.has("media")).toBe(false);
+    expect(new URL(calls[2]!.url).searchParams.get("media")).toBe("ref");
+    expect(new URL(calls[3]!.url).searchParams.has("media")).toBe(false);
+  });
+
+  it("reads one media back as an image, null once the host dropped it", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const sha = "a".repeat(64);
+    const calls: string[] = [];
+    const fetch = (async (input: string | URL | Request) => {
+      calls.push(String(input));
+      return String(input).includes("/media/" + sha)
+        ? new Response(png, { status: 200, headers: { "Content-Type": "image/png" } })
+        : new Response(JSON.stringify({ error: { code: "media_not_found" } }), { status: 404 });
+    }) as typeof globalThis.fetch;
+    const client = new CutexClient({ baseUrl: "http://h:1", token: "tok" }, { fetch, clientId: "c" });
+    const media = await client.historyMedia("cutex.s1", sha);
+    expect(media?.contentType).toBe("image/png");
+    expect(atob(media!.data).length).toBe(png.length);
+    expect(calls[0]).toBe(`http://h:1/v2/sessions/cutex.s1/media/${sha}`);
+    expect(await client.historyMedia("cutex.s1", "b".repeat(64))).toBeNull();
+  });
+
+  it("a body too large for one string is a clear error, not V8's", async () => {
+    const fetch = (async () => {
+      const response = new Response("{}", { status: 200 });
+      Object.defineProperty(response, "text", { value: () => Promise.reject(new RangeError("Invalid string length")) });
+      return response;
+    }) as typeof globalThis.fetch;
+    const client = new CutexClient({ baseUrl: "http://h:1", token: "tok" }, { fetch, clientId: "c" });
+    await expect(client.bootstrap("s1", { turnLimit: 30 })).rejects.toMatchObject({ code: "response_too_large", name: "ResponseTooLargeError" });
+    await expect(client.bootstrap("s1")).rejects.toThrow(/too large to load/);
   });
 });
 

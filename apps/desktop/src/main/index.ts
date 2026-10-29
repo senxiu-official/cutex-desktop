@@ -1,7 +1,11 @@
-import { appWindows } from "./appWindows";
+import { guardStdio } from "./stdioGuard";
+import { appWindows, markOwnerWindow, ownerWindow } from "./appWindows";
+import { localFileAction, localFileOpenInfo } from "./localFiles";
+import { createRemoteCopies } from "./remoteCopiesIpc";
+import { initialCaption, isOverlayColor, isSymbolColor } from "../shared/windowChrome";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, session, shell, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, protocol, session, shell, webContents, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
 import { EVENT_CHANNEL, HOST_METHOD_NAMES, INVOKE_CHANNEL, SHELL_CHANNEL, TITLEBAR_HEIGHT, UPDATE_CHANNEL, WINDOW_CHANNEL, type DaemonApi, type DaemonEvents, type DesktopApi, type DesktopEvents, type HostApi, type InvokeMethod, type ShellRequest, type UpdateRequest, type WindowAction } from "../shared/ipc";
 import { isCloseBehavior, isShellLocale, isUpdateCheckMinutes } from "../shared/shell";
 import { CutexApiError } from "@cutex-desktop/cutex-client";
@@ -12,13 +16,20 @@ import { HostManager } from "./hosts";
 import { hasImplicitLocalHost, localCutexConfigured } from "./localHost";
 import { PersonIdentityService } from "./personIdentity";
 import { DesktopShell } from "./shell";
-import { initialWindowBounds, trackWindowState, loadWindowBackground, saveWindowBackground } from "./windowState";
+import { initialWindowBounds, settleRestoredBounds, trackWindowState, loadWindowBackground, saveWindowBackground } from "./windowState";
+import { setAppScheme } from "./appScheme";
 import { MIN_WINDOW_SIZE } from "../shared/windowBounds";
 import { Updater } from "./updater";
 import { handleKnownIssuesRequest, KnownIssuesSource } from "./knownIssues";
 import { KNOWN_ISSUES_CHANNEL, type KnownIssuesRequest } from "../shared/knownIssues";
 import { handleLaunchArtRequest, LaunchArtStore } from "./launchArt";
 import { LAUNCH_ART_CHANNEL, LAUNCH_ART_DIR, type LaunchArtRequest } from "../shared/launchArt";
+import { nativeImage } from "electron";
+import { randomUUID } from "node:crypto";
+import { DirectorAvatarStore, handleDirectorAvatarsRequest } from "./directorAvatars";
+import { DIRECTOR_AVATAR_DIR, DIRECTOR_AVATAR_PX, DIRECTOR_AVATARS_CHANNEL, type DirectorAvatarsRequest } from "../shared/directorAvatars";
+import { handlePortraitPacksRequest, PortraitPackStore } from "./portraitPacks";
+import { PORTRAIT_PACK_DIR, PORTRAIT_PACKS_CHANNEL, type PortraitPacksRequest } from "../shared/portraitPacks";
 import { resolveUpdateRemote } from "../shared/update";
 import { resolveQuickstart, type QuickstartTarget } from "../shared/quickstart";
 import { errorFields, logDir, logError } from "./errorLog";
@@ -31,7 +42,8 @@ import { createPluginNetworkLockdown, PLUGIN_WEBRTC_POLICY } from "./pluginNetwo
 import { PLUGINS_CHANNEL, type PluginRequest } from "../shared/plugins";
 import { FRAMES_CHANNEL, type FrameRequest } from "../shared/frames";
 import { createFrameDocumentStore, type FrameDocumentStore } from "@cutex-desktop/opaque-frame/documents";
-import { createArtifactPageService } from "./frames";
+import { createArtifactPageService, preparePlaced } from "./frames";
+import { createPageStorage, type PageStorage } from "./pageStorage";
 import { MODULE_API_VERSION } from "@cutex-desktop/plugin-sdk";
 import { ModulePackService, modulePackRequestAllowed, modulePackSource, PackError } from "./modulePacks";
 import { createUpdateNet } from "./updateNet";
@@ -40,15 +52,22 @@ import { parseReleaseInfo } from "../shared/update";
 
 import type { HostBinding } from "../shared/hosts";
 import { admitHostBinding } from "./hostFence";
-import { browserHostEvent, installBrowser, syncBrowserHosts } from "./browser/install";
+import { addBrowserWindow, browserAppZoom, browserEmbeddable, browserHostEvent, installBrowser, syncBrowserHosts } from "./browser/install";
 import { ClientPresenceService, presenceIdentity } from "./clientPresence";
 import { RemoteCloseCountdown, type RemoteCloseView } from "../shared/remoteClose";
+import { DeskShell } from "./deskShell";
+import { confirmParent, frameRequestAllowed } from "./deskWindows";
+
+// First: a console write to a closed pipe must never become the main-process error dialog (main/stdioGuard.ts).
+guardStdio([process.stdout, process.stderr]);
 
 let mainWindow: BrowserWindow | null = null;
 let pluginResources: ReturnType<typeof createPluginResourceService> | null = null;
 // One store for every opaque frame document (plugin pages and agent pages, §10.2): one scheme, one lease check.
 let frameDocuments: FrameDocumentStore | null = null;
 let artifactPages: ReturnType<typeof createArtifactPageService> | null = null;
+/** Channel A of agent pages (pageStorage.ts), in userData/artifact-pages. */
+let pageStorage: PageStorage | null = null;
 let pluginNetwork: ReturnType<typeof createPluginNetworkLockdown> | null = null;
 // Signed first-party module packs (main/modulePacks.ts, docs/desktop-modules.md §23).
 let modulePacks: ModulePackService | null = null;
@@ -80,6 +99,30 @@ const desktopShell = new DesktopShell(
   (command) => sendEvent("shellCommand", { command }),
 );
 
+// Desk windows (multi-window, main/deskShell.ts): drawn by the main window's renderer, admitted only by ticket.
+const desks = new DeskShell({
+  mainWindow: () => mainWindow,
+  // 多窗口 off (desktop-prefs.json): no new desk tickets and no admission; open desks stay until closed.
+  enabled: () => desktopShell.multiWindow,
+  icon: () => desktopShell.appIcon(),
+  background: () => loadWindowBackground() ?? (nativeTheme.shouldUseDarkColors ? "#0e0e0f" : "#f1f1f3"),
+  ownsFrameUrl: (url, place) => !!frameDocuments?.ownsUrl(url, place),
+  // A desk went: its agent pages / HTML files (leased to its webContents) go with it, channels and open confirm included.
+  releaseFrames: (place) => {
+    artifactPages?.releasePlace(place);
+    frameDocuments?.releaseOwner(place);
+  },
+  emit: (event) => sendEvent("deskWindow", event),
+  contextMenu: (win) => installEditMenu(win),
+  created: (win) => {
+    markOwnerWindow(win);
+    desktopShell.attachDesk(win);
+  },
+  // The in-app browser in desks (multi-window P5): the same per-window hardening as the main window's.
+  browser: { embeddable: browserEmbeddable, add: addBrowserWindow },
+});
+desktopShell.desks = desks;
+
 function sendEvent<K extends keyof DesktopEvents>(event: K, payload: DesktopEvents[K]): void {
   if (event === "hostsState" || event === "daemonState") syncBrowserHosts();
   // An SSH question (passphrase / password / host key) needs the window, also from the tray.
@@ -97,6 +140,8 @@ const updater = new Updater(
   { contained: () => pluginNetwork?.engaged() ?? false, proxy: () => desktopShell.updateProxyConfig() },
 );
 desktopShell.onPrefsChanged = (prefs) => updater.schedule(prefs.updateCheckMinutes);
+// A relaunch exits without before-quit: lifecycle hosts hear `closing exited` first (bounded, main/clientPresence.ts).
+updater.beforeExit = () => clientPresence?.reportExited() ?? Promise.resolve();
 desktopShell.onUpdateProxyChanged = () => updater.reconfigureProxy();
 
 /**
@@ -108,6 +153,7 @@ function createDaemon(hostId: string, epoch: string): DaemonService {
     const manager = hosts;
     if (!manager || manager.connection(hostId)?.daemon !== daemon) return;
     const tag = { hostId, epoch };
+    if (event === "accessChanged") manager.onAccessChanged(hostId, epoch);
     if (event === "daemonState") {
       const state = payload as DaemonEvents["daemonState"];
       manager.onDaemonState(hostId, epoch, state);
@@ -133,7 +179,7 @@ function createDaemon(hostId: string, epoch: string): DaemonService {
 const ownerAlerts = new OwnerAlerts({
   daemonFor: (hostId) => hosts?.connection(hostId)?.daemon ?? null,
   shell: desktopShell,
-  mainWindow: () => mainWindow,
+  ownerWindow: () => ownerWindow(mainWindow),
   openInApp: (hostId, agentId, notificationId) => sendEvent("ownerNotifyOpen", { hostId, agentId, notificationId }),
   openEvent: (key) => sendEvent("notifyClick", { key }),
 });
@@ -150,6 +196,11 @@ const remoteClose = new RemoteCloseCountdown({
   clearTimer: (handle) => clearTimeout(handle as NodeJS.Timeout),
   report: (hostId, instanceId, outcome) => clientPresence?.report(hostId, instanceId, outcome) ?? Promise.resolve(),
   quit: () => desktopShell.quit(),
+  // A quit held open (a will-quit flush that never settles, a native modal) must not leave the dialog at 正在关闭.
+  forceQuit: () => {
+    console.warn("[cutex-desktop] remote close: the quit did not finish; exiting");
+    app.exit(0);
+  },
   onChange: (view) => {
     sendEvent("remoteClose", { view });
     if (view && !view.closing) revealForRemoteClose();
@@ -178,10 +229,12 @@ const desktopNotifications = new DesktopNotifications(desktopShell, (key) => sen
 
 // Created after app ready (it needs userData / safeStorage).
 let hosts: HostManager | null = null;
+let remoteCopies: ReturnType<typeof createRemoteCopies> | null = null;
 /** P2 person identity (main/personIdentity.ts); kept so quitting can clear a copied identity key. */
 let identity: PersonIdentityService | null = null;
 
 const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
+  "profileLinkState", "syncProfileLinks", "resetProfileLinks",
   "hosts",
   "sshConfigHosts",
   "addSshHost",
@@ -211,6 +264,19 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "browseDirs",
   "approvals",
   "decideApproval",
+  "approvalRules",
+  "confirmApprovalRule",
+  "createApprovalRule",
+  "patchApprovalRule",
+  "deleteApprovalRule",
+  "approvalRuleAudit",
+  "storage",
+  "storageRefresh",
+  "storageItems",
+  "storageCleanupPreview",
+  "storageCleanupExecute",
+  "storageCleanupHistory",
+  "storageCleanupRun",
   "runtimePackages",
   "runtimePackageRun",
   "startRuntimePackageRun",
@@ -222,22 +288,44 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "continueDirectorRotation",
   "stuckBusMessages",
   "discardStuckBusMessage",
+  "delegationUpgradeSnapshot",
+  "delegationUpgradeAction",
+  "delegationUpgradeApproval",
+  "delegationRoutingApprovals",
+  "delegationUpgradeOperation",
+  "delegationRetirementReview",
+  "closeBusMessage",
   "runtimes",
   "claudeAccounts",
+  "addProfileVariant",
+  "patchProfileVariant",
+  "deleteProfileVariant",
   "createClaudeAccount",
   "renameClaudeAccount",
+  "setClaudeAccountKey",
   "deleteClaudeAccount",
   "checkClaudeAccount",
+  "kimiAccounts",
+  "createKimiAccount",
+  "renameKimiAccount",
+  "deleteKimiAccount",
+  "checkKimiAccount",
+  "logoutKimiAccount",
+  "startKimiLogin",
+  "kimiLogin",
+  "cancelKimiLogin",
   "profileQuotaDetail",
   "patchAgentSecurity",
   "sidebar",
   "bootstrap",
   "createAgent",
+  "abandonAgentCreate",
   "createHumanSession",
   "patchNewThreadDefaults",
   "services",
   "registerService",
   "patchService",
+  "serviceEligibleOwners",
   "deleteService",
   "serviceAction",
   "openService",
@@ -251,6 +339,9 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "notificationLevel",
   "setNotificationLevel",
   "history",
+  "historyMedia",
+  "eventBlob",
+  "imageAction",
   "subscribe",
   "notesList", "notesGet", "notesCreate", "notesUpdate", "notesDelete",
   "sideOpen", "sideList", "sideRead", "sideSend", "sideInterrupt", "sideRespond", "sideClose",
@@ -261,6 +352,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "updateThreadSettings",
   "compactThread",
   "profileQuota",
+  "profileResetCredits",
+  "consumeResetCredit",
   "createProfile",
   "profilePresets",
   "duplicateProfile",
@@ -276,6 +369,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "usage",
   "usagePrices",
   "putUsagePrices",
+  "guidesPreferences",
+  "putGuidesPreferences",
   "usageSources",
   "addUsageSource",
   "patchUsageSource",
@@ -308,7 +403,11 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "revealPath",
   "revertHistory",
   "forkSession",
+  "forkPreview",
   "deleteSession",
+  "projectRead",
+  "operatorAction",
+  "operatorRuntimeNotice",
   "projectMutation",
   "projectPresentation",
   "projectMemory",
@@ -333,6 +432,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "workflowRun",
   "workflowRunAction",
   "restoreCandidates",
+  "idleRuntimes",
+  "stopIdle",
   "dismissRestoreCandidates",
   "quotaAutoContinue",
   "setQuotaAutoContinue",
@@ -358,6 +459,13 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "usersMeDevices",
   "usersMeRemoveDevice",
   "userAvatar",
+  "userHome",
+  "putUserHome",
+  "homeCover",
+  "putHomeCover",
+  "deleteHomeCover",
+  "serviceTile",
+  "serviceTileImage",
   "putUserPersonKeys",
   "ackTokenPersonChange",
   "upgradeStatus",
@@ -395,6 +503,18 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "searchThread",
   "backgroundTerminals",
   "terminateBackgroundTerminal",
+  "stopClaudeTask",
+  "directorScopeCandidates",
+  "directorReviewContent",
+  "projectDirector",
+  "directorHandovers",
+  "directorStartReviews",
+  "decideDirectorItem",
+  "approveDirectorScope",
+  "projectEvents",
+  "projectBackground",
+  "watchProjectEvents",
+  "unwatchProjectEvents",
   "putUserInstructions",
   "userInstructions",
   "agentHarness",
@@ -426,6 +546,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "patchModel",
   "discoverModels",
   "profileModels",
+  "profileAutoPick",
   "patchProfile",
   "profileImage",
   "putProfileImage",
@@ -435,11 +556,14 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "queueUpdate",
   "queueRemove",
   "queuePromote",
+  "queueMergeInsert",
   "queueMove",
   "queueYield",
   "queueResume",
   "asksPause",
   "asksResume",
+  "agentPause",
+  "agentResume",
   "stopTurn",
   "respond",
   "threadGoal",
@@ -502,9 +626,20 @@ function quickstartTarget(): QuickstartTarget | null {
 ipcMain.handle(SHELL_CHANNEL, (event, request: ShellRequest) => {
   if (!isAppSender(event)) throw new Error("untrusted sender");
   switch (request?.op) {
+    case "remoteCopies":
+      if (!remoteCopies) throw new Error("starting up");
+      return remoteCopies.request(request.request);
+    case "filePathInfo":
+      if (Object.keys(request).some((key) => !["op", "hostId", "path"].includes(key))) throw new Error("unknown local file info field");
+      return localFileOpenInfo(request.hostId, request.path);
+    case "filePath":
+      if (Object.keys(request).some((key) => !["op", "hostId", "path", "action"].includes(key))) throw new Error("unknown local file request field");
+      return localFileAction(request.hostId, request.path, request.action, shell);
     case "setZoom":
       if (typeof request.factor !== "number" || !(request.factor >= 0.5 && request.factor <= 2.5)) throw new Error("bad zoom");
       event.sender.setZoomFactor(request.factor);
+      desks.setZoom(request.factor);
+      browserAppZoom(request.factor); // Guests follow their window; a remembered page zoom is re-applied on top.
       return;
     case "state":
       return { ...desktopShell.state(), quickstart: quickstartTarget() !== null };
@@ -535,6 +670,9 @@ ipcMain.handle(SHELL_CHANNEL, (event, request: ShellRequest) => {
     case "setAllowRemoteClose":
       if (typeof request.value !== "boolean") throw new Error("bad value");
       return desktopShell.setAllowRemoteClose(request.value);
+    case "setMultiWindow":
+    case "migrateMultiWindow":
+      return desktopShell.setMultiWindow(request.op === "setMultiWindow" ? "set" : "migrate", request.value);
     case "remoteClose":
       return remoteClose.view() satisfies RemoteCloseView | null;
     case "answerRemoteClose":
@@ -608,9 +746,35 @@ ipcMain.handle(LAUNCH_ART_CHANNEL, (event, request: LaunchArtRequest) => {
   launchArt ??= new LaunchArtStore(join(app.getPath("userData"), LAUNCH_ART_DIR));
   return handleLaunchArtRequest(launchArt, request, async () => {
     const options = { properties: ["openDirectory"] as "openDirectory"[] };
-    const picked = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+    // On the window the owner is using (a desk on another display included).
+    const parent = ownerWindow(mainWindow);
+    const picked = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
     return picked.canceled ? null : (picked.filePaths[0] ?? null);
   });
+});
+
+// 「Director 头像」: the personal portrait folder in userData (main/directorAvatars.ts), read here and
+// handed over as small PNG data URLs; the renderer never sees a path it could load.
+let directorAvatars: DirectorAvatarStore | null = null;
+ipcMain.handle(DIRECTOR_AVATARS_CHANNEL, (event, request: DirectorAvatarsRequest) => {
+  if (!isAppSender(event)) throw new Error("untrusted sender");
+  directorAvatars ??= new DirectorAvatarStore(join(app.getPath("userData"), DIRECTOR_AVATAR_DIR), (bytes) => {
+    const image = nativeImage.createFromBuffer(bytes);
+    if (image.isEmpty()) return null;
+    const { width, height } = image.getSize();
+    const scale = Math.min(1, DIRECTOR_AVATAR_PX / Math.min(width, height));
+    const resized = scale < 1 ? image.resize({ width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)), quality: "best" }) : image;
+    return resized.toPNG();
+  });
+  return handleDirectorAvatarsRequest(directorAvatars, request, (dir) => shell.openPath(dir));
+});
+
+// 拟人头像包: the owner's pack folder in userData (main/portraitPacks.ts); pictures go over as data URLs on request.
+let portraitPacks: PortraitPackStore | null = null;
+ipcMain.handle(PORTRAIT_PACKS_CHANNEL, (event, request: PortraitPacksRequest) => {
+  if (!isAppSender(event)) throw new Error("untrusted sender");
+  portraitPacks ??= new PortraitPackStore(join(app.getPath("userData"), PORTRAIT_PACK_DIR));
+  return handlePortraitPacksRequest(portraitPacks, request, (dir) => shell.openPath(dir));
 });
 
 ipcMain.handle(PLUGINS_CHANNEL, async (event, request: PluginRequest) => {
@@ -661,37 +825,83 @@ ipcMain.handle(FRAMES_CHANNEL, async (event, request: FrameRequest) => {
   if (!artifactPages) throw new Error("frames unavailable");
   if (!request || typeof request !== "object" || Array.isArray(request)) throw new Error("invalid frame request");
   switch (request.op) {
-    case "artifactPage": {
-      const { op: _op, ...input } = request;
-      return artifactPages.prepare(event.sender.id, input);
+    case "artifactPage":
+    case "filePage": {
+      // Optional deskId (multi-window P4): the document is leased to that desk's webContents only — a desk this
+      // window opened and that is still open; anything else is refused before anything is read.
+      return preparePlaced(artifactPages, desks.registry, event.sender.id, request);
     }
     case "release":
       if (Object.keys(request).length !== 2) throw new Error("invalid frame request");
       return artifactPages.release(event.sender.id, request.id);
+    case "page": {
+      if (Object.keys(request).length !== 3) throw new Error("invalid frame request");
+      return artifactPages.page(event.sender.id, request.id, request.call);
+    }
+    case "pageDataUsage":
+      if (Object.keys(request).length !== 1) throw new Error("invalid frame request");
+      return pageStorage!.usage();
+    case "pageDataClear": {
+      if (Object.keys(request).length !== 3) throw new Error("invalid frame request");
+      return pageStorage!.clear({ hostId: request.hostId, artifactId: request.artifactId });
+    }
     default:
       throw new Error("invalid frame request");
   }
 });
 
-ipcMain.handle(WINDOW_CHANNEL, (event, kind: "control" | "chrome" | "background", arg: unknown) => {
+ipcMain.handle(WINDOW_CHANNEL, (event, kind: "control" | "chrome" | "background" | "scheme" | "desk", arg: unknown) => {
   if (!isAppSender(event)) throw new Error("untrusted sender");
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) return;
+  const main = BrowserWindow.fromWebContents(event.sender);
+  if (!main) return;
+  if (kind === "desk") return deskRequest(event.sender.id, arg);
   if (kind === "control") {
-    const action = arg as WindowAction;
+    // A desk's own controls name it; main acts only on a desk this window opened and that is still open.
+    const named = arg !== null && typeof arg === "object" ? (arg as { action?: unknown; deskId?: unknown }) : null;
+    const win = named ? desks.resolve(event.sender.id, named.deskId) : main;
+    if (!win) throw new Error("unknown desk");
+    const action = (named ? named.action : arg) as WindowAction;
     if (action === "minimize") win.minimize();
     else if (action === "toggleMaximize") (win.isMaximized() ? win.unmaximize() : win.maximize());
     else if (action === "close") win.close();
+  } else if (kind === "scheme") {
+    // The app's light / dark: cutex's own browser pages follow it (main/appScheme, browser/pageScheme).
+    setAppScheme(arg);
   } else if (kind === "background") {
     if (typeof arg === "string" && /^#[0-9a-f]{6}$/i.test(arg)) {
-      win.setBackgroundColor(arg);
+      main.setBackgroundColor(arg);
+      desks.setBackground(arg);
       saveWindowBackground(arg);
     }
   } else if (kind === "chrome" && process.platform === "win32") {
     const { color, symbolColor } = arg as { color: string; symbolColor: string };
-    if (/^#[0-9a-f]{6}$/i.test(color) && /^#[0-9a-f]{6}$/i.test(symbolColor)) win.setTitleBarOverlay({ color, symbolColor, height: TITLEBAR_HEIGHT });
+    // The fill may be transparent (#rrggbbaa, docs/design/029); the symbols stay opaque (shared/windowChrome).
+    if (isOverlayColor(color) && isSymbolColor(symbolColor)) {
+      main.setTitleBarOverlay({ color, symbolColor, height: TITLEBAR_HEIGHT });
+      desks.setChrome({ color, symbolColor });
+    }
   }
 });
+
+/** WINDOW_CHANNEL desk ops from the main window's renderer (shared/ipc.ts DeskBridge). */
+function deskRequest(senderId: number, arg: unknown): unknown {
+  const request = arg !== null && typeof arg === "object" && !Array.isArray(arg) ? (arg as Record<string, unknown>) : {};
+  switch (request.op) {
+    case "ticket":
+      return desks.ticket(senderId, request.deskId);
+    case "focus":
+      if (request.deskId === null) {
+        desktopShell.show();
+        return true;
+      }
+      return desks.focus(senderId, request.deskId);
+    case "close":
+      desks.close(senderId, request.deskId);
+      return;
+    default:
+      throw new Error("unknown desk op");
+  }
+}
 
 /** The app window only: the big alert window has its own channel (main/ownerAlert.ts). */
 function isAppSender(event: IpcMainInvokeEvent): boolean {
@@ -719,10 +929,10 @@ function createWindow(): void {
     title: "Cutex",
     icon: desktopShell.appIcon(),
     autoHideMenuBar: true,
-    // Custom title bar (TitleBar.tsx). Windows keeps native caption buttons via the overlay
-    // (recolored by the renderer); macOS keeps traffic lights; Linux draws its own buttons.
+    // Custom title bar (TitleBar.tsx). Windows keeps native caption buttons via the overlay, its fill
+    // transparent so the window bar shows through (docs/design/029; the renderer sets the symbols' colour); macOS keeps traffic lights; Linux draws its own buttons.
     ...(process.platform === "win32"
-      ? { titleBarStyle: "hidden" as const, titleBarOverlay: { color: nativeTheme.shouldUseDarkColors ? "#1c1c1d" : "#f6f6f7", symbolColor: nativeTheme.shouldUseDarkColors ? "#e5e5e5" : "#333333", height: TITLEBAR_HEIGHT } }
+      ? { titleBarStyle: "hidden" as const, titleBarOverlay: { ...initialCaption(nativeTheme.shouldUseDarkColors), height: TITLEBAR_HEIGHT } }
       : process.platform === "darwin"
         ? { titleBarStyle: "hiddenInset" as const }
         : { frame: false }),
@@ -734,16 +944,23 @@ function createWindow(): void {
       nodeIntegration: false,
     },
   });
+  // Before tracking: the bounds Windows gave it are not quite the ones asked for (it grew on every start).
+  settleRestoredBounds(mainWindow, initial.bounds);
   installBrowser(mainWindow, () => hosts, isAppSender, sendEvent, () => desktopShell.locale);
   mainWindow.once("ready-to-show", () => {
     if (initial.maximized) mainWindow?.maximize();
     mainWindow?.show();
   });
   trackWindowState(mainWindow);
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+  const win = mainWindow;
+  win.webContents.setWindowOpenHandler((details) => {
+    // A desk window with main's one-use ticket (main/deskWindows.ts); nothing else opens.
+    const desk = desks.openResponse(win, details);
+    if (desk) return desk;
+    if (/^https?:\/\//.test(details.url)) void shell.openExternal(details.url);
     return { action: "deny" };
   });
+  win.webContents.on("did-create-window", (child, details) => void desks.adopt(win, child, details.frameName));
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!isAppUrl(url)) event.preventDefault();
   });
@@ -753,20 +970,43 @@ function createWindow(): void {
     if (event.isMainFrame ? !isAppUrl(event.url) : !frameDocuments?.ownsUrl(event.url, ownerId)) event.preventDefault();
   });
   // Drop all outstanding document leases on reload, renderer crash, or window disposal.
+  // Agent pages lose their channels with them (an open submit dialog closes as cancelled).
+  // The desks are drawn by this document: they go with it (a reload reopens the remembered ones).
+  const releaseFrames = () => {
+    desks.closeAll();
+    frameDocuments?.releaseOwner(ownerId);
+    artifactPages?.releaseOwner(ownerId);
+  };
   contents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) frameDocuments?.releaseOwner(ownerId);
+    if (isMainFrame && !isInPlace) releaseFrames();
   });
-  contents.on("render-process-gone", () => frameDocuments?.releaseOwner(ownerId));
-  contents.on("destroyed", () => frameDocuments?.releaseOwner(ownerId));
-  // Native menu for text inputs and selected text; everything else uses the renderer menus
-  // (which preventDefault, so this only fires where the renderer leaves it alone).
-  mainWindow.webContents.on("context-menu", (_event, params) => {
+  contents.on("render-process-gone", releaseFrames);
+  contents.on("destroyed", releaseFrames);
+  installEditMenu(mainWindow);
+  markOwnerWindow(mainWindow);
+  setWindowAppDetails(mainWindow);
+  desktopShell.attach(mainWindow);
+  mainWindow.on("closed", () => {
+    desks.closeAll();
+    mainWindow = null;
+  });
+
+  if (process.env.ELECTRON_RENDERER_URL) void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
+  else void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+}
+
+/**
+ * Native menu for text inputs and selected text; everything else uses the renderer menus (which
+ * preventDefault, so this only fires where the renderer leaves it alone). Main window and desks.
+ */
+function installEditMenu(win: BrowserWindow): void {
+  win.webContents.on("context-menu", (_event, params) => {
     const items: MenuItemConstructorOptions[] = [];
     const l = desktopShell.editLabels;
     if (params.isEditable) {
-      for (const word of params.dictionarySuggestions.slice(0, 5)) items.push({ label: word, click: () => mainWindow?.webContents.replaceMisspelling(word) });
+      for (const word of params.dictionarySuggestions.slice(0, 5)) items.push({ label: word, click: () => win.webContents.replaceMisspelling(word) });
       if (params.misspelledWord) {
-        items.push({ label: l.addToDictionary, click: () => mainWindow?.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord) });
+        items.push({ label: l.addToDictionary, click: () => win.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord) });
         items.push({ type: "separator" });
       }
       items.push(
@@ -781,14 +1021,8 @@ function createWindow(): void {
     } else if (params.selectionText.trim()) {
       items.push({ role: "copy", label: l.copy }, { role: "selectAll", label: l.selectAll });
     }
-    if (items.length) Menu.buildFromTemplate(items).popup({ window: mainWindow ?? undefined });
+    if (items.length && !win.isDestroyed()) Menu.buildFromTemplate(items).popup({ window: win });
   });
-  setWindowAppDetails(mainWindow);
-  desktopShell.attach(mainWindow);
-  mainWindow.on("closed", () => (mainWindow = null));
-
-  if (process.env.ELECTRON_RENDERER_URL) void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
-  else void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
 }
 
 /** The release page the packaged app records (package.json), for the module index's repository. */
@@ -816,13 +1050,51 @@ app.whenReady().then(async () => {
     devRendererUrl: process.env.ELECTRON_RENDERER_URL,
   });
   const network = pluginNetwork;
+  const pages = (pageStorage = createPageStorage({ root: join(app.getPath("userData"), "artifact-pages") }));
   artifactPages = createArtifactPageService({
     documents: frameDocuments,
+    // Multi-window P4: a page for a desk is leased only while that desk is still this renderer's and open.
+    placeOpen: (owner, place) => {
+      const desk = desks.registry.byContents(place);
+      return !!desk && desk.ownerId === owner && !desk.window.isDestroyed() && !desk.window.webContents.isDestroyed();
+    },
     contentReader: hostId => {
       const daemon = hosts?.connection(hostId)?.daemon;
       return daemon && daemon.currentState.kind === "connected" ? daemon : null;
     },
     ensureContained: () => network.ensure(),
+    // File pages read the file from that host (workspace route or fs-file-read), like the file view itself.
+    fileReader: hostId => {
+      const daemon = hosts?.connection(hostId)?.daemon;
+      return daemon && daemon.currentState.kind === "connected" ? daemon : null;
+    },
+    // The three page channels (docs/design/004-artifact-page-bridge.md): A storage in userData, B a native
+    // confirm before an owner message to the page's agent, C clipboard text.
+    page: {
+      storage: pages,
+      host: hostId => {
+        const daemon = hosts?.connection(hostId)?.daemon;
+        if (!daemon || daemon.currentState.kind !== "connected") return null;
+        return { artifactStoreGet: id => daemon.artifactStoreGet(id), submit: (sessionId, text) => daemon.submit(sessionId, text, "auto", true, { clientUserMessageId: randomUUID() }) };
+      },
+      confirm: async (owner, text, signal, place) => {
+        // The window the frame was prepared for (bound at prepare): the owner's own, or a desk it opened and that is still open.
+        const win = confirmParent(owner, place, desks.registry, (id) => {
+          const contents = webContents.fromId(id);
+          return contents && !contents.isDestroyed() ? BrowserWindow.fromWebContents(contents) : null;
+        });
+        if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized()) return null;
+        if (!win.isFocused()) win.flashFrame(true);
+        try {
+          const answer = await dialog.showMessageBox(win, { type: "question", title: text.title, message: text.message, detail: text.detail, buttons: [text.send, text.cancel], defaultId: 1, cancelId: 1, noLink: true, signal });
+          return !signal.aborted && answer.response === 0;
+        } finally {
+          if (!win.isDestroyed()) win.flashFrame(false);
+        }
+      },
+      writeClipboard: text => clipboard.writeText(text),
+      locale: () => desktopShell.locale,
+    },
   });
   protocol.handle(PLUGIN_SCHEME, request => frameDocuments!.respond(request));
   modulePacks = new ModulePackService({
@@ -842,17 +1114,20 @@ app.whenReady().then(async () => {
     if (request.url.startsWith(`${MODULE_PACK_SCHEME}:`)) {
       // Pack code is for the app window's own document: no plugin / agent-page frame, worker, fetch or other window.
       const main = mainWindow?.webContents;
-      callback({ cancel: !modulePackRequestAllowed(request, main ? { id: main.id, mainFrame: main.mainFrame } : null) });
+      // A desk mirrors the main document's pack <link> stylesheets (lib/deskDocument): its own main frame may
+      // load those, never a pack script (the desk runs no code of its own).
+      const desk = main && request.webContentsId !== undefined ? desks.registry.byContents(request.webContentsId) : null;
+      const deskFrame = desk && desk.ownerId === main?.id && !desk.window.isDestroyed() ? { id: desk.contentsId, mainFrame: desk.window.webContents.mainFrame } : null;
+      callback({ cancel: !(modulePackRequestAllowed(request, main ? { id: main.id, mainFrame: main.mainFrame } : null) || (request.resourceType === "stylesheet" && modulePackRequestAllowed(request, deskFrame))) });
       return;
     }
-    // A frame URL is not authority to fetch it from another window, the parent, or a worker.
-    callback({ cancel: request.resourceType !== "subFrame" || !mainWindow
-      || request.webContentsId !== mainWindow.webContents.id
-      || !frameDocuments!.ownsUrl(request.url, request.webContentsId) });
+    // The main window and its desks only (frame owner group), each only its own leases (main/deskWindows.ts).
+    callback({ cancel: !frameRequestAllowed(request, mainWindow?.webContents.id ?? null, desks.registry, (url, place) => frameDocuments!.ownsUrl(url, place)) });
   });
   // Deny everything except writing the clipboard (copy buttons); reading it stays denied.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => callback(permission === "clipboard-sanitized-write"));
   desktopShell.start();
+  desks.watchDisplays();
   ownerAlerts.start();
   updater.schedule(desktopShell.state().prefs.updateCheckMinutes);
   createWindow();
@@ -860,7 +1135,7 @@ app.whenReady().then(async () => {
   updater.watchLaunch((listener) => mainWindow?.webContents.on("render-process-gone", listener));
   // Dev: an isolated local cutex home / port (see AGENTS.md "Dev cutex daemon").
   // P2 person identity: the person key and its per-host claims (main/personIdentity.ts).
-  const personIdentity = new PersonIdentityService(join(app.getPath("userData"), "identity"), (view) => sendEvent("identityState", view), () => mainWindow, () => hosts?.claimTargets() ?? []);
+  const personIdentity = new PersonIdentityService(join(app.getPath("userData"), "identity"), (view) => sendEvent("identityState", view), () => ownerWindow(mainWindow), () => hosts?.claimTargets() ?? []);
   identity = personIdentity;
   const localProbe = { home: process.env.CUTEX_DESKTOP_HOME || undefined, baseUrl: process.env.CUTEX_MANAGEMENT_URL || undefined };
   clientPresence = new ClientPresenceService({
@@ -870,6 +1145,7 @@ app.whenReady().then(async () => {
     onCloseRequested: (hostId, request) => void remoteClose.request(hostId, request),
   });
   hosts = new HostManager(sendEvent, createDaemon, {
+    onProfileLinkState: (state) => sendEvent("profileLinkState", state),
     identity: personIdentity,
     ...localProbe,
     // macOS is front-end only: no implicit local host unless a local cutex is configured (main/localHost.ts).
@@ -884,6 +1160,7 @@ app.whenReady().then(async () => {
   // Dev only: sample big alerts without a daemon (screenshots).
   if (demoOwnerAlertRequested()) setTimeout(() => ownerAlerts.showDemo(), 1500);
   await hosts.start();
+  remoteCopies = createRemoteCopies(app.getPath("userData"), () => hosts, shell);
   app.on("activate", () => {
     if (appWindows().length === 0) createWindow();
     else desktopShell.show();
@@ -894,15 +1171,27 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
   if (!primaryInstance) return;
+  // Lifecycle hosts (cutex `client-presence-lifecycle`) first hear `closing exited` over the still-open
+  // connections: the first quit waits for it (at most EXIT_REPORT_TIMEOUT_MS, all hosts in parallel), then
+  // quits again; without such a host nothing waits. Tray quit, closing the last window and remote close
+  // all come through here; the updater's relaunch (app.exit) calls reportExited itself.
+  if (clientPresence?.beforeQuit(() => event.preventDefault(), () => app.quit())) return;
   // Synchronous kill: no ssh tunnel may outlive the app (every connection: tunnels, feeds, daemons).
   // "daemons" = this app's DaemonService connections (HTTP feeds); cutex itself keeps running.
   clientPresence?.stop();
+  remoteCopies?.dispose();
   hosts?.stop();
 });
 app.on("will-quit", (event) => {
   // A copied identity key still waiting for its clear: clear it first (the clipboard outlives the app), then quit again.
+  // An agent page's storage changes not written yet (pageStorage writes within 250 ms): first to disk, then quit again.
+  if (pageStorage?.pending()) {
+    event.preventDefault();
+    void pageStorage.flush().catch(() => undefined).finally(() => app.quit());
+    return;
+  }
   if (identity?.hasPendingKeyClears()) {
     event.preventDefault();
     void identity.clearCopiedKeysNow().finally(() => app.quit());

@@ -22,7 +22,7 @@ vi.mock("../src/renderer/src/lib/sideLayoutStore", () => ({
 const { sideOpen, sideOpenPeek } = await import("../src/renderer/src/lib/sideServices");
 
 function width(readingWidth: number, cardWidth = 1400) {
-  setGutterGeometry(gutterLayout({ cardWidth, readingWidth, shift: 0, sideCover: 0, columnPadding: 24, capsule: null, conversationVisible: true }), cardWidth);
+  setGutterGeometry(gutterLayout({ cardWidth, readingWidth, sideCover: 0, columnPadding: 24, capsule: null, conversationVisible: true }), cardWidth);
 }
 beforeEach(() => {
   vi.stubGlobal("document", { activeElement: null, body: {} });

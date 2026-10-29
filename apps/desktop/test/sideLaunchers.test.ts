@@ -226,11 +226,14 @@ describe("pressLauncher", () => {
     expect(useSide.getState().focusedCard).toBe("c1");
   });
 
-  it("with 点击当前页图标 = 收起侧栏 a visible card's launcher closes the column", () => {
+  it("a stored 点击当前页图标 = 收起侧栏 is no longer read (design 006 v1 Q5): a visible card's launcher keeps the column open", () => {
     env.prefs.sideCurrentPageClick = "collapse";
     useSide.setState({ layout: layoutWith("x.chat") });
+    vi.stubGlobal("document", { querySelector: () => null });
+    vi.stubGlobal("CSS", { escape: (s: string) => s });
     pressLauncher("x.chat");
-    expect(useSide.getState().layout.open).toBe(false);
+    vi.unstubAllGlobals();
+    expect(useSide.getState().layout.open).toBe(true);
   });
 
   it("column closed with the kind on its page → reopens on it", () => {
@@ -301,7 +304,7 @@ describe("launcher list and ＋ menu", () => {
     expect(env.prefs.sideLauncherPins).toEqual({ "x.chat": false });
   });
 
-  it("right-click on a launcher: 新… for multi kinds, then 从标题栏取消固定", () => {
+  it("right-click on a launcher: 新… for multi kinds, then 从启动器栏取消固定", () => {
     const rows = launcherContextMenu("x.term").filter((e): e is MenuAction => !!e && e !== "separator");
     expect(rows).toHaveLength(3); // title, 新…, unpin
     rows[2]!.onSelect();

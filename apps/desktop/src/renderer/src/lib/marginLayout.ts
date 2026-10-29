@@ -5,6 +5,7 @@
 // timelines have no attachments), so this is a single registry. Re-laid out when a box resizes or
 // the timeline's content does (turns above an anchor growing move it).
 import { marginStack } from "./marginStack";
+import { ownerWindowOf } from "./ownerWindow";
 
 interface Entry {
   side: "left" | "right";
@@ -14,7 +15,8 @@ interface Entry {
 
 const entries = new Map<string, Entry>();
 let frame = 0;
-let observer: ResizeObserver | null = null;
+/** One observer per window (a desk window's timeline is observed with its own, multi-window). */
+const observers = new Map<Window, ResizeObserver>();
 const roots = new Set<Element>();
 
 function apply(): void {
@@ -33,22 +35,25 @@ function apply(): void {
   }
 }
 
-function schedule(): void {
-  if (frame || typeof requestAnimationFrame === "undefined") return;
-  frame = requestAnimationFrame(apply);
+/** On the next frame of `view` (the window whose boxes changed). */
+function schedule(view: Window = window): void {
+  if (frame || typeof view.requestAnimationFrame === "undefined") return;
+  frame = view.requestAnimationFrame(apply);
 }
 
 /** A margin box beside its anchor; returns the unregister function. */
 export function registerMargin(id: string, side: "left" | "right", anchor: HTMLElement, box: HTMLElement): () => void {
   entries.set(id, { side, anchor, box });
-  if (!observer && typeof ResizeObserver !== "undefined") observer = new ResizeObserver(schedule);
+  const view = ownerWindowOf(box);
+  let observer = observers.get(view);
+  if (!observer && typeof ResizeObserver !== "undefined") observers.set(view, (observer = new view.ResizeObserver(() => schedule(view))));
   observer?.observe(box);
   const root = anchor.closest("[data-timeline-root]");
   if (root && !roots.has(root)) {
     roots.add(root);
     observer?.observe(root);
   }
-  schedule();
+  schedule(view);
   return () => {
     if (entries.get(id)?.box === box) entries.delete(id);
     observer?.unobserve(box);
@@ -58,6 +63,6 @@ export function registerMargin(id: string, side: "left" | "right", anchor: HTMLE
         roots.delete(r);
       }
     }
-    schedule();
+    schedule(view);
   };
 }

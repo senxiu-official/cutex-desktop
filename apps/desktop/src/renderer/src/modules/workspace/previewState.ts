@@ -1,9 +1,12 @@
 // The preview card's params / state (pure; tested): a workspace-relative path, or with `host` an
-// absolute path on the host. `source` = Markdown / SVG shown as source (a line anchor opens as source).
+// absolute path on the host. `source` = Markdown / SVG / HTML shown as source (a line anchor opens as source;
+// otherwise the owner's last choice for that kind of file, viewChoice.ts).
 import type { Json } from "../types";
+import { sourceChoice, viewKindOf } from "./viewChoice";
+import type { WorkspaceScope } from "../../../../shared/ipc";
 
-export type PreviewParams = { path: string; line: number | null; host: boolean };
-export type PreviewState = { path: string; line: number | null; host: boolean; source: boolean };
+export type PreviewParams = { path: string; line: number | null; host: boolean; scope?: { kind: "session" | "project"; id: string } };
+export type PreviewState = PreviewParams & { source: boolean };
 
 const MAX_PATH = 4000;
 
@@ -12,16 +15,19 @@ export function parsePreviewParams(raw: Json): PreviewParams | null {
   const path = raw.path;
   if (typeof path !== "string" || !path || path.length > MAX_PATH) return null;
   const line = typeof raw.line === "number" && Number.isInteger(raw.line) && raw.line > 0 ? raw.line : null;
-  return { path, line, host: raw.host === true };
+  const s = raw.scope;
+  const scope = s && typeof s === "object" && !Array.isArray(s) && (s.kind === "project" || s.kind === "session") && typeof s.id === "string" && s.id && s.id.length <= 160 ? { kind: s.kind, id: s.id } as WorkspaceScope : null;
+  if (s !== undefined && (!scope || raw.host === true)) return null;
+  return { path, line, host: raw.host === true, ...(scope ? { scope } : {}) };
 }
 
 export function previewKey(p: PreviewParams): string {
-  return `${p.host ? "host:" : "ws:"}${p.path}`;
+  return `${p.host ? "host:" : "ws:"}${p.scope ? `${p.scope.kind}:${p.scope.id}:` : ""}${p.path}`;
 }
 
-export function initPreview(p: PreviewParams, previous: PreviewState | null): PreviewState {
-  // Reopening the same file with a line anchor shows the source again (the line must be visible).
-  return { path: p.path, line: p.line, host: p.host, source: p.line ? true : (previous?.source ?? false) };
+export function initPreview(p: PreviewParams, _previous: PreviewState | null): PreviewState {
+  // A line anchor shows the source (the line must be visible); else the last 预览 / 源码 choice for this kind.
+  return { ...p, source: p.line ? true : sourceChoice(viewKindOf(p.path)) };
 }
 
 export function restorePreview(raw: Json, version: number): PreviewState | null {
@@ -31,7 +37,7 @@ export function restorePreview(raw: Json, version: number): PreviewState | null 
 }
 
 export function isSourceToggleable(path: string): boolean {
-  return /\.(md|markdown|mdx|svg)$/i.test(path);
+  return viewKindOf(path) !== null;
 }
 
 export function baseOf(path: string): string {

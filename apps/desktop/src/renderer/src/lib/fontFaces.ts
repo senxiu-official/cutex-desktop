@@ -13,9 +13,9 @@ export const FALLBACK_FONT_VARIABLES: FontVariables = {
 };
 
 const SANS_LATIN = ["Inter", "Segoe UI", "Noto Sans", "Liberation Sans", "Arial"];
+/** The only built-in CJK list: UI text and every monospace stack (code, diffs, terminal) share it. */
 const SANS_CJK = ["PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "SimSun"];
 const MONO_LATIN = ["JetBrains Mono", "Cascadia Code", "Consolas", "Liberation Mono", "DejaVu Sans Mono"];
-const MONO_CJK = ["Microsoft YaHei Mono", "Noto Sans Mono CJK SC", ...SANS_CJK];
 
 type LocalStyle = { weight: "400" | "700"; style: "normal" | "italic"; names: string[] };
 /** Actual full/PostScript face names, not a regular face relabelled as bold. */
@@ -76,6 +76,11 @@ function families(selected: string, defaults: readonly string[]): string[] {
   });
 }
 
+/** The UI's CJK families in order: the 外观 中文字体 choice, then the built-in list. */
+export function uiCjkFamilies(a: Pick<Appearance, "cjkFont">): string[] {
+  return families(a.cjkFont, SANS_CJK);
+}
+
 /** Each source, including fallbacks, is restricted. No chosen raw family leaks into a stack. */
 export function buildFontPlan(a: Appearance, generation: number): FontPlan {
   const faces: RoutedFace[] = [];
@@ -96,15 +101,16 @@ export function buildFontPlan(a: Appearance, generation: number): FontPlan {
     ...latin.map((family) => route(family, FONT_UNICODE_RANGES[context].latin)),
     ...cjk.map((family) => route(family, FONT_UNICODE_RANGES[context].cjk)), generic,
   ].join(", ");
-  const uiLatin = families(a.uiFont, SANS_LATIN), uiCjk = families(a.cjkFont, SANS_CJK);
+  const uiLatin = families(a.uiFont, SANS_LATIN), uiCjk = uiCjkFamilies(a);
   const chatLatin = families(a.chatFont || a.uiFont, SANS_LATIN), chatCjk = families(a.chatCjkFont || a.cjkFont, SANS_CJK);
   const sansLatin = stack(uiLatin, uiCjk, "latinContext", "system-ui, sans-serif");
   const sansCjk = stack(uiLatin, uiCjk, "cjkContext", "system-ui, sans-serif");
   const chatLatinStack = stack(chatLatin, chatCjk, "latinContext", "system-ui, sans-serif");
   const chatCjkStack = stack(chatLatin, chatCjk, "cjkContext", "system-ui, sans-serif");
-  // Code/terminal punctuation always stays on the mono side. An empty mono
-  // selection still tries Latin monospace before the range-limited CJK side.
-  const monoStack = stack(families(a.monoFont, MONO_LATIN), families(a.cjkFont, MONO_CJK), "latinContext", "monospace");
+  // Code/terminal punctuation stays on the Latin mono side. With no code CJK
+  // override, reuse the UI CJK families and aliases.
+  const monoCjk = a.monoCjkFont ? families(a.monoCjkFont, SANS_CJK) : uiCjk;
+  const monoStack = stack(families(a.monoFont, MONO_LATIN), monoCjk, "latinContext", "monospace");
   return {
     faces,
     variables: {
@@ -113,7 +119,7 @@ export function buildFontPlan(a: Appearance, generation: number): FontPlan {
       "--font-chat-latin": chatLatinStack, "--font-chat-cjk": chatCjkStack,
       "--font-mono": monoStack,
     },
-    requestedFamilies: [...new Set([a.uiFont, a.cjkFont, a.chatFont, a.chatCjkFont, a.monoFont].filter(Boolean))],
+    requestedFamilies: [...new Set([a.uiFont, a.cjkFont, a.chatFont, a.chatCjkFont, a.monoFont, a.monoCjkFont].filter(Boolean))],
   };
 }
 
@@ -145,7 +151,7 @@ export class FontRoutingController<F extends LoadableFont> {
   getStatus(): FontStatus { return this.status; }
 
   update(a: Appearance): Promise<void> {
-    const key = JSON.stringify([a.uiFont, a.cjkFont, a.chatFont || a.uiFont, a.chatCjkFont || a.cjkFont, a.monoFont]);
+    const key = JSON.stringify([a.uiFont, a.cjkFont, a.chatFont || a.uiFont, a.chatCjkFont || a.cjkFont, a.monoFont, a.monoCjkFont || a.cjkFont]);
     if (key === this.key) return this.pending;
     this.key = key;
     const generation = ++this.generation;

@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { componentEventOf, componentName, CutexClient, isComponentRefusalCode, isOperationRunning, readComponentsList, COMPONENTS_UPDATED_EVENT } from "../src/index";
+import { componentEventOf, componentName, CutexClient, isComponentRefusalCode, isOperationRunning, readComponentsList, readComponentClaudeCli, COMPONENTS_UPDATED_EVENT } from "../src/index";
+
+describe("optional Claude CLI choice", () => {
+  it("retains validated choice metadata through the component reader, defaulting to bundled without writes", () => {
+    const wire = { bundled: { version: "2.1.301" }, system: { version: "2.1.299" }, future: "ignored" };
+    expect(readComponentClaudeCli(wire)).toEqual({ selected: "bundled", bundled: { version: "2.1.301" }, system: { version: "2.1.299" } });
+    expect(readComponentsList({ components: [{ name: "claude-runtime", state: "ready", claudeCli: { ...wire, selected: "system" } }] }).components[0]?.claudeCli?.selected).toBe("system");
+    expect(readComponentsList({ components: [{ name: "claude-runtime", state: "needsUser", detail: { selected: { claudeCli: "C:/claude.exe" } } }] }).components[0]).not.toHaveProperty("claudeCli");
+  });
+  it("accepts an absent system install and unknown versions", () => {
+    expect(readComponentClaudeCli({ bundled: {}, system: null })).toEqual({ selected: "bundled", bundled: { version: null }, system: null });
+  });
+  it.each([undefined, null, "C:/claude.exe", [], {}, { bundled: {}, selected: "future" }, { bundled: {}, selected: "system", system: null }, { bundled: {}, system: true }, { bundled: { version: 28 } }, { bundled: { version: "secret\nheader" } }])("ignores malformed/legacy choice metadata %#", value => {
+    expect(readComponentClaudeCli(value)).toBeUndefined();
+  });
+});
 
 interface Call {
   method: string;

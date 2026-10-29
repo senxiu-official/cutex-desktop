@@ -1,3 +1,4 @@
+import { isImeComposing } from "../lib/ime";
 // PDF preview (lazy chunk: pdf.js + its worker load only when a PDF is opened; isolation notes in
 // lib/pdfjs.ts). Pages are placeholders until they scroll near the view; a page far out of view drops
 // its canvas and text layer again, so a long document keeps only a few pages in memory. Toolbar:
@@ -8,6 +9,7 @@ import { useI18n } from "../i18n";
 import { clampZoom, pageAt, parsePage, stepZoom } from "../lib/docPreview";
 import { openPdf, TextLayer, type PDFDocumentProxy, type RenderTask } from "../lib/pdfjs";
 import "./docPreview.css";
+import { useOwnerWindow } from "../lib/ownerContext";
 
 /** pdf.js page units (1/72 in) → CSS px (1/96 in), as pdf.js's own viewer scales. */
 const CSS_UNITS = 96 / 72;
@@ -18,6 +20,7 @@ type Size = { w: number; h: number };
 type Observe = (el: Element, onChange: (near: boolean) => void) => () => void;
 
 function PdfPage({ doc, n, scale, fallback, observe }: { doc: PDFDocumentProxy; n: number; scale: number; fallback: Size; observe: Observe }) {
+  const win = useOwnerWindow();
   const box = useRef<HTMLDivElement>(null);
   const canvasHolder = useRef<HTMLDivElement>(null);
   const textHolder = useRef<HTMLDivElement>(null);
@@ -36,7 +39,7 @@ function PdfPage({ doc, n, scale, fallback, observe }: { doc: PDFDocumentProxy; 
         const raw = page.getViewport({ scale: 1 });
         setSize({ w: raw.width, h: raw.height });
         const viewport = page.getViewport({ scale: scale * CSS_UNITS });
-        const dpr = Math.min(window.devicePixelRatio || 1, 3);
+        const dpr = Math.min(win.devicePixelRatio || 1, 3);
         canvas.width = Math.floor(viewport.width * dpr);
         canvas.height = Math.floor(viewport.height * dpr);
         canvas.style.width = `${Math.floor(viewport.width)}px`;
@@ -76,6 +79,7 @@ function PdfPage({ doc, n, scale, fallback, observe }: { doc: PDFDocumentProxy; 
 }
 
 export default function PdfViewer({ bytes, name }: { bytes: Uint8Array; name: string }) {
+  const win = useOwnerWindow();
   const { t } = useI18n();
   const scroller = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
@@ -115,7 +119,7 @@ export default function PdfViewer({ bytes, name }: { bytes: Uint8Array; name: st
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    const ro = new win.ResizeObserver(() => setWidth(el.clientWidth));
     ro.observe(el);
     setWidth(el.clientWidth);
     return () => ro.disconnect();
@@ -133,7 +137,7 @@ export default function PdfViewer({ bytes, name }: { bytes: Uint8Array; name: st
   useEffect(() => {
     const root = scroller.current;
     if (!root || !doc) return;
-    const obs = new IntersectionObserver((entries) => entries.forEach((e) => watchers.current.get(e.target)?.(e.isIntersecting)), { root, rootMargin: "200% 0px" });
+    const obs = new win.IntersectionObserver((entries) => entries.forEach((e) => watchers.current.get(e.target)?.(e.isIntersecting)), { root, rootMargin: "200% 0px" });
     watchers.current.forEach((_, el) => obs.observe(el));
     setIo(obs);
     return () => obs.disconnect();
@@ -171,7 +175,7 @@ export default function PdfViewer({ bytes, name }: { bytes: Uint8Array; name: st
   const zoomTo = (next: number | "fit") => {
     const keep = page;
     setZoom(next);
-    requestAnimationFrame(() => goTo(keep));
+    win.requestAnimationFrame(() => goTo(keep));
   };
 
   if (error) return <p className="p-3 text-xs text-danger">{error === "password" ? t("docPreview.password") : t("docPreview.failed", { error })}</p>;
@@ -191,6 +195,7 @@ export default function PdfViewer({ bytes, name }: { bytes: Uint8Array; name: st
           aria-label={t("docPreview.page")}
           onChange={(e) => setPageText(e.target.value)}
           onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
             if (e.key !== "Enter") return;
             const n = parsePage(pageText, count);
             if (n) goTo(n);

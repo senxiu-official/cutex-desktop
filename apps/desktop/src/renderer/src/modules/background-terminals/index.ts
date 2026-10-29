@@ -1,6 +1,6 @@
 // 后台终端 (the agent's background terminals, /ps): its status category. Codex agents only
 // (Claude: features.backgroundTerminals false).
-import { SquareTerminal } from "lucide-react";
+import { Terminal } from "lucide-react";
 import { defineModule } from "../slots";
 import { TerminalsBody, TerminalsMeta, TerminalsStatusBar } from "./TerminalsStatus";
 import { useTerminalsStatus } from "./useTerminalsStatus";
@@ -21,7 +21,7 @@ export default defineModule({
         Meta: TerminalsMeta,
         Body: TerminalsBody,
         Bar: TerminalsStatusBar,
-        icon: SquareTerminal,
+        icon: Terminal,
       },
     ],
   },

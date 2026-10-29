@@ -16,7 +16,7 @@ const SETS: Record<NameSet, { name: string; note: string; flow: boolean; methods
 const LV = ["紧急", "需要你", "告知", "记录"];
 
 function Flow() {
-  const pill = "rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted";
+  const pill = "rounded bg-surface-2 px-1.5 py-0.5 text-caption/[inherit] text-muted";
   return (
     <div className="mb-4 flex flex-wrap items-center gap-1.5 rounded-lg border border-border/60 px-3 py-2 text-xs text-muted">
       一件事 <ArrowRight size={12} /> <span className="text-foreground">① 定级</span> <ArrowRight size={12} />
@@ -30,9 +30,9 @@ function Grid() {
   return (
     <div className="grid grid-cols-[1fr_repeat(3,5rem)] gap-y-2 py-3 text-xs">
       <span />
-      {["桌面通知", "声音", "手机推送"].map((c) => <span key={c} className="text-center text-[11px] text-subtle">{c}</span>)}
+      {["桌面通知", "声音", "手机推送"].map((c) => <span key={c} className="text-center text-caption/[inherit] text-subtle">{c}</span>)}
       {[["紧急", 1, 1, 1], ["需要你", 1, 0, 1], ["告知", 1, 1, 0], ["记录", 0, 0, 0]].map(([k, ...c]) => [
-        <span key={String(k)} className="text-[13px]">{k}</span>,
+        <span key={String(k)} className="text-ui/[inherit]">{k}</span>,
         ...c.map((on, i) => <span key={String(k) + i} className="flex justify-center"><input type="checkbox" defaultChecked={!!on} /></span>),
       ])}
     </div>
@@ -58,13 +58,13 @@ export function NotifyNamesTopic() {
       <div className="my-4 flex flex-wrap gap-2">{(Object.keys(SETS) as NameSet[]).map((k) => <button key={k} onClick={() => setV(k)} className={btn(k === v)}>{SETS[k].name}</button>)}</div>
       <p className="mb-4 text-sm text-muted">{s.note}</p>
       <Page>
-        <div className="mb-3 border-b border-border/60 pb-2"><span className="text-[15px] font-semibold">主机的通知规则</span><p className="text-[13px] text-muted">存在所选主机的 cutex 后端里，连这台主机的每台设备都一样。</p></div>
+        <div className="mb-3 border-b border-border/60 pb-2"><span className="text-title/[inherit] font-semibold">主机的通知规则</span><p className="text-ui/[inherit] text-muted">存在所选主机的 cutex 后端里，连这台主机的每台设备都一样。</p></div>
         {s.flow && <Flow />}
         <Section title={s.methods[0]} hint={s.methods[1]}><Grid /></Section>
         <p className="mb-6 text-center text-xs text-subtle">（中间：新智能体的提醒、主人通知）</p>
         <Section title={s.levels[0]} hint={s.levels[1]}>
           {[["智能体说「紧急」", "紧急"], ["审批请求", "需要你"], ["主人回合完成", "记录"]].map(([e, l]) => (
-            <SettingRow key={e} label={e}><Select value={l!} onChange={() => {}} options={LV.map((x) => ({ value: x, label: x }))} /></SettingRow>
+            <SettingRow agents="none" source="local" key={e} label={e}><Select value={l!} onChange={() => {}} options={LV.map((x) => ({ value: x, label: x }))} /></SettingRow>
           ))}
           <p className="py-2 text-xs text-subtle">（示意：只画了 3 行）</p>
         </Section>

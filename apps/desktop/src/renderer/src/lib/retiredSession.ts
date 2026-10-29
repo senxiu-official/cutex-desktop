@@ -14,6 +14,7 @@ export function withRetiredDefaults(s: SessionResource): SessionResource {
     displayNameOverride: r.displayNameOverride ?? null,
     note: r.note ?? null,
     avatar: r.avatar ?? null,
+    avatarMode: r.avatarMode ?? null,
     configuredProfile: r.configuredProfile ?? r.profile ?? null,
     launchedProfile: r.launchedProfile ?? null,
     effectiveNextLaunch: r.effectiveNextLaunch ?? { profile: r.profile ?? null, source: "retired" },

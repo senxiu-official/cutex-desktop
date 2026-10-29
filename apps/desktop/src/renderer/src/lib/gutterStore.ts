@@ -1,6 +1,6 @@
 // The gutters' memory-only state (docs/desktop-modules.md §19.2–§19.3): the geometry the gutter host
 // measured last (null = no conversation gutter on screen: a page, settings, no agent), the right
-// side's frame as far as the gutters care (让位 shift, the part a float / drawer covers), the open
+// side's frame as far as the gutters care (the part a float / drawer covers), the open
 // gutter popover and docked lists the owner folded away for now. Nothing here is persisted; the
 // 够宽时常驻 choice is the `gutterDocked` UI pref.
 import { create } from "zustand";
@@ -11,7 +11,6 @@ export interface GutterStoreState {
   /** The conversation card's content width (overlay reference card width). */
   cardWidth: number;
   /** From the right side's frame (SideWorkArea). */
-  sideShift: number;
   sideCover: number;
   /** The gutter item whose popover is open (one at a time). */
   popover: string | null;
@@ -28,7 +27,6 @@ export interface GutterStoreState {
 export const useGutter = create<GutterStoreState>(() => ({
   geometry: null,
   cardWidth: 0,
-  sideShift: 0,
   sideCover: 0,
   popover: null,
   folded: [],
@@ -48,9 +46,8 @@ export function setGutterGeometry(geometry: GutterGeometry | null, cardWidth: nu
 }
 
 /** The right side's frame, as the gutters need it (published by the side's work area). */
-export function publishSideFrame(shift: number, cover: number): void {
-  const s = useGutter.getState();
-  if (s.sideShift !== shift || s.sideCover !== cover) useGutter.setState({ sideShift: shift, sideCover: cover });
+export function publishSideFrame(cover: number): void {
+  if (useGutter.getState().sideCover !== cover) useGutter.setState({ sideCover: cover });
 }
 
 export function setGutterPopover(id: string | null, trigger?: HTMLElement | null): void {

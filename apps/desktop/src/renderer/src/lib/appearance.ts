@@ -5,10 +5,12 @@ import { bridge } from "../bridge";
 
 import { appearanceVars, DEFAULT_APPEARANCE, parseAppearance, type Appearance } from "./appearanceModel";
 import { cssString, FALLBACK_FONT_VARIABLES, FontRoutingController, type FontStatus, type FontVariables } from "./fontFaces";
+import { APPEARANCE_KEY } from "./storedFonts";
+import { matchesCommand } from "./keybindings";
 
 export { DEFAULT_APPEARANCE, RANGES, type Appearance, type Density } from "./appearanceModel";
 
-const KEY = "cutex-desktop.appearance";
+const KEY = APPEARANCE_KEY;
 
 function load(): Appearance {
   try {
@@ -84,6 +86,10 @@ export function applyAppearance(a: Appearance = current): void {
   for (const [k, v] of Object.entries(appearanceVars(a, fontVariables))) root.style.setProperty(k, v);
   prepareFonts(a);
   root.dataset.density = a.density;
+  // 卡片材质 (styles.css: .shell-card / .sidebar-card / the rails under :root[data-card-material="acrylic"]).
+  root.dataset.cardMaterial = a.cardMaterial;
+  // 拖放落点预览: only :root[data-drop-preview="fill"] paints the drop previews' tint (lib/dropTint, styles.css).
+  root.dataset.dropPreview = a.dropPreview;
   const factor = a.zoom / 100;
   // Electron: real zoom (layout + hit testing). Browser preview: CSS zoom on <html>.
   if (bridge.shell?.setZoom) void bridge.shell.setZoom(factor).catch(() => {});
@@ -103,6 +109,45 @@ export function setAppearance(patch: Partial<Appearance>, persist = true): void 
   for (const l of listeners) l();
 }
 
+/**
+ * Pane widths while a resize handle is dragged: only the width's CSS variable on <html> moves (and the
+ * few readers of `useLiveWidth`); the stored appearance — every variable, fonts, the Electron zoom IPC,
+ * every `useAppearance` reader — changes once, on release (`commitLiveWidths`).
+ */
+export type LiveWidthKey = "sidebarWidth" | "sidePaneWidth";
+const LIVE_VARS: Record<LiveWidthKey, string> = { sidebarWidth: "--sidebar-w", sidePaneWidth: "--sidepane-w" };
+let live: Partial<Record<LiveWidthKey, number>> = {};
+
+export function previewWidth(field: LiveWidthKey, px: number): void {
+  if (live[field] === px) return;
+  live = { ...live, [field]: px };
+  document.documentElement.style.setProperty(LIVE_VARS[field], `${px}px`);
+  for (const l of listeners) l();
+}
+
+/** The drag ended: store what was shown live (nothing previewed: nothing happens). */
+export function commitLiveWidths(): void {
+  const patch = live;
+  if (!Object.keys(patch).length) return;
+  live = {};
+  setAppearance(patch, true);
+}
+
+export function getLiveWidth(field: LiveWidthKey): number {
+  return live[field] ?? current[field];
+}
+
+/** A width as shown now: the live drag's value, else the stored one. */
+export function useLiveWidth(field: LiveWidthKey): number {
+  return useSyncExternalStore(
+    (l) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    () => getLiveWidth(field),
+  );
+}
+
 export function useAppearance(): Appearance {
   return useSyncExternalStore(
     (l) => {
@@ -115,8 +160,7 @@ export function useAppearance(): Appearance {
 
 /** Ctrl/Cmd + = / - / 0: zoom in, out, reset (10% steps). True when handled. */
 export function zoomShortcut(e: KeyboardEvent): boolean {
-  if (!(e.ctrlKey || e.metaKey) || e.altKey) return false;
-  const step = e.key === "=" || e.key === "+" ? 10 : e.key === "-" || e.key === "_" ? -10 : e.key === "0" ? 0 : null;
+  const step = matchesCommand("zoomIn", e) ? 10 : matchesCommand("zoomOut", e) ? -10 : matchesCommand("zoomReset", e) ? 0 : null;
   if (step === null) return false;
   setAppearance({ zoom: step === 0 ? 100 : current.zoom + step });
   return true;

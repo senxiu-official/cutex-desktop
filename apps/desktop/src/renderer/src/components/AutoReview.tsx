@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Loader2, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import type { AutoReview } from "../lib/timeline";
+import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 
 const STATUS_KEY: Record<AutoReview["status"], MessageKey> = {
   inProgress: "autoReview.inProgress",
@@ -43,21 +44,22 @@ function actionText(review: AutoReview, t: ReturnType<typeof useI18n>["t"]): str
 /** The reviewer's verdict on one escalation: status, risk, and its reason (expandable). */
 export function AutoReviewLine({ review, standalone = false }: { review: AutoReview; standalone?: boolean }) {
   const { t } = useI18n();
+  const userToggle = useUserLayoutToggle();
   const [open, setOpen] = useState(false);
   const reason = review.rationale;
   const risk = review.riskLevel ? t(RISK_KEY[review.riskLevel]) : null;
   const subject = standalone ? actionText(review, t) : null;
   const tone = review.status === "denied" ? "text-danger" : review.status === "approved" ? "text-muted" : "text-subtle";
   return (
-    <div className={standalone ? "my-0.5 text-xs" : "mt-0.5 ml-5 text-[11px]"} title={t("autoReview.hint")}>
-      <button onClick={() => reason && setOpen(!open)} className={`flex max-w-full items-center gap-1 text-left ${reason ? "hover:text-foreground" : "cursor-default"}`}>
+    <div className={standalone ? "my-0.5 text-xs" : "mt-0.5 ml-5 text-caption/[inherit]"} title={t("autoReview.hint")}>
+      <button onClick={() => reason && userToggle(() => setOpen(!open))} className={`flex max-w-full items-center gap-1 text-left ${reason ? "hover:text-foreground" : "cursor-default"}`}>
         <ReviewIcon status={review.status} />
         <span className={`shrink-0 ${tone}`}>{t(STATUS_KEY[review.status])}</span>
         {risk && <span className="shrink-0 text-subtle">· {risk}</span>}
         {subject && <code className="min-w-0 truncate font-mono text-subtle">{subject}</code>}
         {reason && !open && review.status !== "approved" && <span className="min-w-0 truncate text-subtle">— {reason.replace(/\s+/g, " ")}</span>}
       </button>
-      {open && reason && <p className="mt-0.5 ml-4 whitespace-pre-wrap break-words text-subtle">{reason}</p>}
+      {open && reason && <p className="selectable mt-0.5 ml-4 whitespace-pre-wrap break-words text-subtle">{reason}</p>}
     </div>
   );
 }

@@ -180,3 +180,16 @@ describe("taskDeliveryRow", () => {
     expect(taskDeliveryRow(msg("cutex.bus-message.v1", {}))).toBeNull();
   });
 });
+
+describe("unfinished agent_create (design 028 (d))", () => {
+  const call = (outcome: Record<string, unknown>, tool = "agent_create") =>
+    ({ type: "mcpToolCall", id: "x", tool, status: "failed", result: { content: [{ type: "text", text: JSON.stringify({ schema: "cutex/agent-management/v1", action_id: "auto-own", outcome }) }] } }) as never;
+  it("names its own action when it stopped for the owner, or the one still holding the name", async () => {
+    const { unfinishedCreateAction } = await import("../src/renderer/src/lib/taskRows");
+    expect(unfinishedCreateAction(call({ status: "owner_action_required", failure: { code: "session_adopt_failed", detail: "x" } }))).toBe("auto-own");
+    expect(unfinishedCreateAction(call({ status: "no_write", code: "unresolved_agent_reservation", detail: "unresolved_agent_reservation: unfinished action 'auto-5ae2f952' still reserves the name w" }))).toBe("auto-5ae2f952");
+    expect(unfinishedCreateAction(call({ status: "no_write", code: "unsupported_profile", detail: "nope" }))).toBeNull();
+    expect(unfinishedCreateAction(call({ status: "owner_action_required" }, "agent_archive"))).toBeNull();
+  });
+});
+

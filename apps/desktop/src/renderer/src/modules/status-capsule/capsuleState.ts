@@ -4,6 +4,8 @@
 // the ui prefs (capsuleOpen, capsuleFoldedItems), so turning the module off keeps it.
 import { getUiPrefs, setUiPref } from "../../lib/prefs";
 import { toggleFoldedId } from "../../lib/statusItems";
+import { windowOfDocument } from "../../lib/ownerWindow";
+import { activeAppDocument } from "../../lib/appWindowSet";
 
 /** DOM id of a capsule section's header (scroll target). */
 export const capsuleSectionId = (itemId: string) => `capsule-${itemId}`;
@@ -33,10 +35,15 @@ export function revealInCapsule({ sessionId, itemId }: { sessionId: string; item
   setUiPref("capsuleOpen", true);
   const folded = getUiPrefs().capsuleFoldedItems;
   if (folded.includes(itemId)) setUiPref("capsuleFoldedItems", toggleFoldedId(folded, itemId));
-  if (typeof requestAnimationFrame === "function") {
-    requestAnimationFrame(() => {
+  // Nothing to scroll without frames (tests, SSR).
+  if (typeof requestAnimationFrame !== "function") return "opened";
+  // The capsule in the app window in front (a desk window's conversation, multi-window).
+  const doc = activeAppDocument();
+  const win = windowOfDocument(doc);
+  if (typeof win.requestAnimationFrame === "function") {
+    win.requestAnimationFrame(() => {
       // The view may have gone (agent switched, module turned off) by the next frame.
-      if (views.get(sessionId) === view) document.getElementById(capsuleSectionId(itemId))?.scrollIntoView({ block: "nearest" });
+      if (views.get(sessionId) === view) doc.getElementById(capsuleSectionId(itemId))?.scrollIntoView({ block: "nearest" });
     });
   }
   return "opened";

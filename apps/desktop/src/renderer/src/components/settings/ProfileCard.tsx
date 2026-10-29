@@ -19,7 +19,7 @@ import { ARMED_BUTTON, ARMED_FRAME } from "../../lib/armedConfirm";
 import { openMenuFrom } from "../../lib/contextMenu";
 import { useUiPrefs } from "../../lib/prefs";
 import { useModelName } from "../../lib/modelDisplay";
-import { contextLabel, profileKindLabel, profileProblems, profileRules } from "../../lib/profileCards";
+import { headerExtras, contextLabel, profileKindLabel, profileProblems, profileRules } from "../../lib/profileCards";
 import { cachedProfile } from "../../lib/profileSnapshot";
 import { useProfilePresets } from "../../lib/useProfilePresets";
 import { sessionsUsingProfile } from "../../lib/profileKind";
@@ -28,8 +28,12 @@ import { profileColor } from "../../lib/profileLook";
 import { dataFlags, useSizeFlags, widthAtLeast } from "../../lib/sizeFlags";
 import { Avatar } from "../Avatar";
 import { GaugeBar } from "../GaugeBar";
+import { SettingsGroup } from "./Form";
 import { ProfileAvatar } from "../ProfileAvatar";
 import { useTargetHostId, useTargetQuotas, useTargetSelect, useTargetSidebar } from "../../lib/targetHost";
+import { Tag } from "../../components/Tag";
+import { ProfileAccountBadge } from "../ProfileAccountBadge";
+import { ProfileLinkedAppearance } from "../ProfileLinkedAppearance";
 
 /** Agent pictures shown before the count. */
 const STACK = 4;
@@ -82,7 +86,9 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
   const presets = useProfilePresets();
   const problems = profileProblems(item, gauges);
   const agents = sessionsUsingProfile(sidebar?.active ?? [], item);
-  const kindLine = [profileKindLabel(item, t("agent-config.profile.preset.custom"), presets), item.planLabel].filter(Boolean).join(" · ");
+  const kindLabel = profileKindLabel(item, t("agent-config.profile.preset.custom"), presets);
+  // The plan label is shown only when it adds a name (a DeepSeek profile's default plan label is 「DeepSeek」 again).
+  const kindLine = [kindLabel, headerExtras(kindLabel, item.planLabel ?? null, null).plan].filter(Boolean).join(" · ");
   const modelName = useModelName();
   // The default model under its display name (Settings → 通用 → 模型显示名); the tooltip keeps the raw id.
   const modelShown = item.model ? modelName(item.model, null, item.id) : null;
@@ -109,8 +115,8 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
         <ProfileAvatar profile={item} size={44} badge />
         <div className="min-w-0 flex-1 group-data-[wide]/profile:max-w-52">
           <div className="flex h-6 items-center gap-2">
-            <span className="min-w-0 truncate text-[15px] font-semibold">{item.name}</span>
-            {isDefault && <span className="shrink-0 rounded-full bg-accent/15 px-2 text-[11px] leading-5 text-accent">{t("agent-config.profile.default")}</span>}
+            <span className="min-w-0 truncate text-title/[inherit] font-semibold">{item.name}</span>
+            {isDefault && <Tag tone="accent">{t("agent-config.profile.default")}</Tag>}
             {problems.map((p) => (
               <span key={p} className="shrink-0 truncate text-xs text-warn">⚠ {t(`agent-config.profile.problem.${p}` as MessageKey)}</span>
             ))}
@@ -120,11 +126,13 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
             {/* narrow card: no middle column, the model joins this line */}
             {model && <span className="group-data-[wide]/profile:hidden"> · {model}</span>}
           </div>
+          <ProfileAccountBadge hostId={targetHost} profile={item} />
         </div>
         {/* middle: what a new agent on this profile starts with */}
         <dl className="hidden min-w-0 flex-1 grid-cols-[2.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 border-l border-border pl-4 text-xs group-data-[wide]/profile:grid">
           <dt className="text-subtle">{t("settings.profile.card.model")}</dt>
           <dd className="min-w-0 truncate font-mono text-muted" title={onModelMenu ? undefined : modelTitle}>
+            <SettingsGroup agents={onModelMenu ? "next" : "none"} source="host" readOnly>
             {onModelMenu ? (
               <button
                 type="button"
@@ -139,6 +147,7 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
             ) : (
               model || "—"
             )}
+            </SettingsGroup>
           </dd>
           <dt className="text-subtle">{t("settings.profile.card.rules")}</dt>
           <dd className="truncate text-muted" title={rules.join(" · ")}>{rules.length ? rules.join(" · ") : "—"}</dd>
@@ -183,6 +192,7 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
         </span>
       </div>
       {/* Two gauges a row (Claude can have 5h / 7d / Opus 7d / credits: two rows). */}
+      <ProfileLinkedAppearance hostId={targetHost} profile={item} />
       <div className="grid min-h-10 grid-cols-1 content-center gap-x-8 gap-y-2 border-t border-border px-4 py-2.5 text-xs group-data-[md]/profile:grid-cols-2">
         {gauges === undefined ? null : gauges.length ? (
           gauges.map((g) => <CardGauge key={g.id} gauge={g} view={view} />)

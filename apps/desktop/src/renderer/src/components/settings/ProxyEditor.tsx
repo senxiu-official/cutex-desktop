@@ -8,6 +8,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { isProxyParseError, normalizeNoProxy, parseProxyUrl } from "../../../../shared/proxy";
 import { useI18n } from "../../i18n";
+import type { SettingsAgents, SettingsSource } from "../../lib/settingsNav";
 import { Button, ErrorNote, Segmented, SettingRow, TextInput } from "./Form";
 
 /** Last manual address per setting (memoryKey), this renderer's lifetime only (never persisted). */
@@ -28,6 +29,8 @@ export interface ProxyEditorSave<M extends string> {
 
 export function ProxyEditor<M extends string>({
   label,
+  agents,
+  source,
   hint,
   modes,
   mode,
@@ -41,6 +44,8 @@ export function ProxyEditor<M extends string>({
   onSave,
 }: {
   label: string;
+  agents: SettingsAgents;
+  source: SettingsSource;
   hint?: ReactNode;
   modes: readonly { value: M; label: string }[];
   /** The stored mode. */
@@ -115,7 +120,7 @@ export function ProxyEditor<M extends string>({
   const showManual = shown === manual;
   return (
     <>
-      <SettingRow
+      <SettingRow agents={agents} source={source}
         label={label}
         hint={
           <>
@@ -129,7 +134,7 @@ export function ProxyEditor<M extends string>({
       </SettingRow>
       {showManual && (
         <>
-          <SettingRow
+          <SettingRow agents={agents} source={source}
             label={t("proxy.url")}
             hint={
               <>
@@ -142,11 +147,11 @@ export function ProxyEditor<M extends string>({
             <TextInput value={draftUrl} onChange={setDraftUrl} placeholder={t("proxy.urlPlaceholder")} mono width="w-72" disabled={disabled || busy} label={t("proxy.url")} />
           </SettingRow>
           {noProxy !== undefined && (
-            <SettingRow label={t("proxy.noProxy")} hint={t("proxy.noProxyHint")}>
+            <SettingRow agents={agents} source={source} label={t("proxy.noProxy")} hint={t("proxy.noProxyHint")}>
               <TextInput value={draftBypass} onChange={setDraftBypass} placeholder={t("proxy.noProxyPlaceholder")} mono width="w-72" disabled={disabled || busy} label={t("proxy.noProxy")} />
             </SettingRow>
           )}
-          <SettingRow label="">
+          <SettingRow agents={agents} source={source} label="">
             <Button primary disabled={disabled || busy || !draftUrl.trim() || (mode === manual && !urlChanged && !bypassChanged)} onClick={saveManual}>
               {t("proxy.save")}
             </Button>

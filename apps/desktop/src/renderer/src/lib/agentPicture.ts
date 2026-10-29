@@ -87,3 +87,19 @@ export function saveAgentPicture(avatar: SessionAvatar, picture: string): void {
   if (!id || !validPicture(picture)) throw new Error("Invalid avatar picture");
   localStorage.setItem(KEY + id, picture);
 }
+
+/**
+ * Storage audit 2026-10-23: pictures of deleted agents are removed (they used to stay in localStorage for good,
+ * 128 KB each, in the quota the layouts need). Only when no listed agent still wears it: a fork can carry the same
+ * picture, and `inUse` answers true when it cannot tell (a host whose agent list is not loaded).
+ */
+export function forgetAgentPicture(avatar: SessionAvatar | null | undefined, inUse: (avatarValue: string) => boolean): boolean {
+  const id = pictureId(avatar);
+  if (!id || inUse(id)) return false;
+  try {
+    localStorage.removeItem(KEY + id);
+    return true;
+  } catch {
+    return false;
+  }
+}

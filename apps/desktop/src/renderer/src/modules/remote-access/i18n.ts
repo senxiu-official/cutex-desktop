@@ -8,8 +8,3 @@ declare module "../i18nCatalog" {
   interface ModuleMessages extends Messages {}
 }
 type Messages = typeof zhCN;
-
-export const en: Record<keyof typeof zhCN, string> = {
-  "remote-access.title": "Access",
-  "remote-access.description": "Settings → Access: listen addresses, CORS and device pairing",
-};

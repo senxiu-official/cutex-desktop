@@ -23,7 +23,7 @@ import { SettingsSections } from "../../modules/Outlet";
 import { HostPicker } from "../HostPicker";
 import { SettingsHostFrame } from "../SettingsHostFrame";
 import { HostConnectionSection, ownerName } from "./ConnectionSettings";
-import { EmptyState, PartSource, Section, useReportsHost } from "./Form";
+import { EmptyState, PartSource, Section } from "./Form";
 import { HostInfoSection, HostRightsSection } from "./HostSections";
 import { MeHereSection, OwnDevicesSection } from "./MeOnHost";
 import { OwnerDevicesBanner } from "./OwnerDevices";
@@ -41,10 +41,9 @@ function HostCards({ hostId, children }: { hostId: string; children: ReactNode }
   const target = useSettingsTarget();
   const picker = useHostTagPicker(hostId);
   // The 混合设置 header names (and picks) the host these cards show.
-  useReportsHost();
   return (
     <SettingsHostFrame key={hostId} target={target}>
-      <PartSource source="host" cards picker={picker}>
+      <PartSource   picker={picker}>
         {children}
       </PartSource>
     </SettingsHostFrame>
@@ -73,7 +72,7 @@ export function AccessPage() {
   const picker = useHostTagPicker(hostId);
   return (
     <>
-      <PartSource source="host" cards picker={picker}>
+      <PartSource   picker={picker}>
         <HostInfoSection hostId={hostId} />
         <HostRightsSection hostId={hostId} />
       </PartSource>

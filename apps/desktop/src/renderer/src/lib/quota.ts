@@ -39,6 +39,8 @@ export function mergeRateLimits(previous: RateLimitsLike | null, update: RateLim
 export const QUOTA_NATIVE_FEATURE = "profile-quota-native";
 /** cutex capability: cutex reads the Claude subscription usage for Claude profiles (gauges `claude-<n>`). */
 export const QUOTA_CLAUDE_FEATURE = "profile-quota-claude";
+/** cutex capability: a quota reader may carry a free-text `display_label` (Chinese ok; gauges report `displayLabel`). */
+export const QUOTA_DISPLAY_LABEL_FEATURE = "quota-display-label";
 /** Host event cutex emits when a profile's quota snapshot changes (only trusted with the capability). */
 export const QUOTA_UPDATED_EVENT = "cutex/profile/quota/updated";
 
@@ -202,12 +204,12 @@ export function usedRatio(g: QuotaGauge): number | null {
   return g.remainingPercent === null ? null : 1 - Math.min(100, Math.max(0, g.remainingPercent)) / 100;
 }
 
-type GaugeNaming = Pick<QuotaGauge, "label" | "windowLabel"> & { id?: string };
+type GaugeNaming = Pick<QuotaGauge, "label" | "windowLabel"> & { id?: string; displayLabel?: string | null };
 
 /** A gauge's own label in the app language: the native Codex credit balance (`codex-credits`, labelled
  *  "Credits" by cutex and by gaugesFromRateLimits) is localized; reader labels are user-chosen and stay. */
-export function gaugeName(g: Pick<QuotaGauge, "label"> & { id?: string }): string {
-  return g.id === "codex-credits" ? translate("quota.credits") : g.label;
+export function gaugeName(g: Pick<QuotaGauge, "label" | "displayLabel"> & { id?: string }): string {
+  return g.id === "codex-credits" ? translate("quota.credits") : g.displayLabel || g.label;
 }
 
 /** Window captions with a fixed meaning shown in the app language: `month` (the calendar-month quota a cutex
@@ -251,10 +253,55 @@ export function quotaLabelProblem(label: string, window: string | null | undefin
   return defaultQuotaLabel(window) ? null : "missing";
 }
 
-/** A quota reader as saved: the label trimmed, an empty one filled with `defaultQuotaLabel`. */
-export function withQuotaLabel<R extends { label: string; window_label?: string | null }>(reader: R): R {
+/** Terminal columns of a label: CJK / fullwidth characters count 2, the rest 1 (cutex `quota-display-label`). */
+export function labelColumns(text: string): number {
+  let cols = 0;
+  for (const ch of text) {
+    const c = ch.codePointAt(0)!;
+    const wide =
+      (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) || (c >= 0xf900 && c <= 0xfaff) ||
+      (c >= 0xfe30 && c <= 0xfe6f) || (c >= 0xff00 && c <= 0xff60) || (c >= 0xffe0 && c <= 0xffe6) || (c >= 0x20000 && c <= 0x3fffd);
+    cols += wide ? 2 : 1;
+  }
+  return cols;
+}
+
+/** cutex `quota-display-label`: 1–6 columns of printable text, CJK counting 2. */
+export function displayLabelValid(label: string): boolean {
+  const cols = labelColumns(label);
+  return cols >= 1 && cols <= 6 && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(label);
+}
+
+/** What the 标签 field shows: the display label when set, else the ASCII label. */
+export function quotaLabelText(reader: { label: string; display_label?: string | null }): string {
+  return reader.display_label || reader.label;
+}
+
+/** The reader after typing `text` into 标签. With the capability anything `displayLabelValid` is kept as the display
+ *  label (an ASCII-valid label stays a plain label); without it the text is the ASCII label as before. */
+export function withLabelText<R extends { label: string; display_label?: string | null }>(reader: R, text: string, displayLabels: boolean): R {
+  if (!displayLabels || quotaLabelValid(text.trim()) || !text.trim()) return { ...reader, label: text, display_label: null };
+  return { ...reader, display_label: text };
+}
+
+/** The 标签 field's problem; with `displayLabels` Chinese is fine inside the 6-column limit. */
+export function quotaLabelFieldProblem(reader: { label: string; display_label?: string | null; window_label?: string | null }, displayLabels: boolean): "bad" | "missing" | null {
+  const text = quotaLabelText(reader).trim();
+  if (displayLabels && text) return quotaLabelValid(text) || displayLabelValid(text) ? null : "bad";
+  return quotaLabelProblem(text, reader.window_label);
+}
+
+/** A quota reader as saved: the label trimmed, an empty one filled with `defaultQuotaLabel`. With `displayLabels`
+ *  the display label is sent too ("" clears it) and the ASCII label falls back to the window name, else "Q". */
+export function withQuotaLabel<R extends { label: string; window_label?: string | null; display_label?: string | null }>(reader: R, displayLabels = false): R {
   const label = reader.label.trim();
-  return { ...reader, label: label || defaultQuotaLabel(reader.window_label) };
+  if (!displayLabels) {
+    const { display_label: _drop, ...rest } = reader;
+    return { ...rest, label: label || defaultQuotaLabel(reader.window_label) } as R;
+  }
+  const display = reader.display_label?.trim() ?? "";
+  const ascii = quotaLabelValid(label) ? label : defaultQuotaLabel(reader.window_label) || (display ? "Q" : "");
+  return { ...reader, label: ascii, display_label: display };
 }
 
 /** Short label for a rolling window: 300 → "5h", 10080 → "7d". */
@@ -332,6 +379,123 @@ export function resetsInCompact(resetsAt: number | null, now = Date.now()): stri
   const h = Math.floor((mins % 1440) / 60);
   const m = mins % 60;
   return d ? `${d}d${h}h` : h ? `${h}h${m}m` : `${m}m`;
+}
+
+// ---- the composer row's rings (per-gauge choices + same-window merging, owner 2026-10-28) ----
+
+/** The owner's per-gauge choice, remembered by gauge name across all Profiles (UiPrefs.quotaGauges). */
+export interface GaugeChoice {
+  /** The ring shows in the composer row (absent = shown). */
+  ring?: boolean;
+  /** The reset countdown shows next to it (absent = UiPrefs.quotaResetDefault). */
+  reset?: boolean;
+}
+
+/** Window gauges whose resets are this close merge into one ring (the owner picked < 10 min). */
+export const MERGE_RESET_TOLERANCE_MS = 10 * 60_000;
+/** A hidden gauge this close to empty shows temporarily (red via remainingColor), then hides again. */
+export const GAUGE_EMERGENCY_REMAINING = 0.15;
+
+/** The key a gauge's choice is remembered under: its display name ("Claude 7d"), same across Profiles. */
+export function gaugeChoiceName(g: Pick<QuotaGauge, "id" | "label" | "windowLabel" | "displayLabel">): string {
+  return gaugeLabel(g);
+}
+
+/** Stored per-gauge choices (UiPrefs.quotaGauges): keep only sane name → partial choice entries. */
+export function migrateGaugeChoices(value: unknown): Record<string, GaugeChoice> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, GaugeChoice> = {};
+  for (const [name, choice] of Object.entries(value as Record<string, unknown>)) {
+    if (!name || name.length > 64 || !choice || typeof choice !== "object") continue;
+    const c = choice as { ring?: unknown; reset?: unknown };
+    const ring = typeof c.ring === "boolean" ? c.ring : undefined;
+    const reset = typeof c.reset === "boolean" ? c.reset : undefined;
+    if (ring !== undefined || reset !== undefined) out[name] = { ...(ring !== undefined && { ring }), ...(reset !== undefined && { reset }) };
+  }
+  return out;
+}
+
+/** One ring of the composer row: a single window gauge, several merged by a shared reset, or a balance. */
+export interface ComposerGauge {
+  /** The window gauges this ring stands for (2+ when same-reset gauges merged); a balance stands alone. */
+  members: QuotaGauge[];
+  /** The member the ring draws: the one closest to running out. */
+  draw: QuotaGauge;
+  /** The countdown's source: the earliest reset among the members. */
+  resetAt: number | null;
+  /** The countdown text shows next to this ring (any member's choice says yes). */
+  showReset: boolean;
+  /** A hidden gauge nearly running out forced this ring visible (it hides again once it recovers). */
+  emergency: boolean;
+  /** A balance gauge: rendered as its text, never merged, not switchable. */
+  balance: boolean;
+}
+
+/** True when a window gauge is so low it must not stay hidden (red, temporary; recovers at ≥ 15 %). */
+function emergencyShown(g: QuotaGauge): boolean {
+  const left = remainingRatio(g);
+  return left !== null && left < GAUGE_EMERGENCY_REMAINING;
+}
+
+/**
+ * The composer row's rings from a profile's gauges: per-gauge show choices (by name, the reset
+ * default seeding from the old global switch), hidden-but-nearly-empty gauges revealed temporarily,
+ * and — unless `merge` is off — window gauges whose resets sit within MERGE_RESET_TOLERANCE_MS of
+ * each other as ONE ring drawing the member closest to running out. Balances pass through as text.
+ */
+export function composerGauges(gauges: readonly QuotaGauge[], choices: Readonly<Record<string, GaugeChoice>>, resetDefault: boolean, merge: boolean, now = Date.now()): ComposerGauge[] {
+  const shown: QuotaGauge[] = [];
+  const emergency = new Set<string>();
+  for (const g of gauges) {
+    if (g.kind === "balance") continue;
+    const hidden = choices[gaugeChoiceName(g)]?.ring === false;
+    if (!hidden) shown.push(g);
+    // A hidden window gauge that is nearly empty comes back in red until it recovers (owner 2026-10-28).
+    else if (emergencyShown(g)) {
+      shown.push(g);
+      emergency.add(g.id);
+    }
+  }
+  // Cluster by reset time (transitive: A~B, B~C merges all three); no reset time, nothing to share.
+  const groups: QuotaGauge[][] = [];
+  for (const g of shown.sort((a, b) => (a.resetAt ?? Infinity) - (b.resetAt ?? Infinity))) {
+    const last = groups.at(-1);
+    const prev = last?.at(-1);
+    const near = g.resetAt !== null && prev?.resetAt != null && (g.resetAt - prev.resetAt) * 1000 <= MERGE_RESET_TOLERANCE_MS;
+    if (merge && near) last!.push(g);
+    else groups.push([g]);
+  }
+  // Emit in the gauges' own order, each ring where its first member appears.
+  const ringOf = new Map(gauges.map((g, i) => [g.id, i] as const));
+  const rings = groups.map((members): ComposerGauge => {
+    const draw = members.reduce((worst, m) => {
+      const a = remainingRatio(worst);
+      const b = remainingRatio(m);
+      if (a === null) return m;
+      if (b === null) return worst;
+      // Closest to running out: the least left; unknown percent loses to a known one.
+      return b < a ? m : worst;
+    });
+    const resetAt = members.reduce<number | null>((earliest, m) => (m.resetAt !== null && (earliest === null || m.resetAt < earliest) ? m.resetAt : earliest), null);
+    return {
+      members,
+      draw,
+      resetAt,
+      showReset: resetAt !== null && members.some((m) => choices[gaugeChoiceName(m)]?.reset ?? resetDefault),
+      emergency: members.some((m) => emergency.has(m.id)),
+      balance: false,
+    };
+  }).sort((a, b) => Math.min(...a.members.map((m) => ringOf.get(m.id) ?? 0)) - Math.min(...b.members.map((m) => ringOf.get(m.id) ?? 0)));
+  // Balances keep their place among the rings as plain text.
+  const out: ComposerGauge[] = [];
+  for (const g of gauges) {
+    if (g.kind === "balance") out.push({ members: [g], draw: g, resetAt: null, showReset: false, emergency: false, balance: true });
+    else {
+      const ring = rings.find((r) => r.members.some((m) => m.id === g.id));
+      if (ring && !out.includes(ring)) out.push(ring);
+    }
+  }
+  return out;
 }
 
 /** Credit balances arrive as long decimal strings ("62419.1846900000"): show them readably.
