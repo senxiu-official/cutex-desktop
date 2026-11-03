@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ownerJoinIntent } from "../src/shared/ownerJoin";
-import { newOutboxEntry } from "../src/renderer/src/lib/outbox";
+import { newOutboxEntry } from "../src/renderer/src/lib/legacyDelivery/outbox";
 
 describe("owner join IPC", () => {
   const join = { askId: "ask-a", attempt: 2, expectedTurnId: "turn-a", runtimeGeneration: 7 };

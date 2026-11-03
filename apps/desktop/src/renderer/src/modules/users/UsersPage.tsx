@@ -15,7 +15,7 @@ import { ChevronDown, ChevronRight, Fingerprint } from "lucide-react";
 import { PEERS_FEATURE } from "../../../../shared/peers";
 import { shownUserName, USERS_P2_ACCESS_FEATURE, type PersonKeyRecord, type UserGrant, type UserRecord, type UsersList } from "../../../../shared/users";
 import { ProjectColorPicker } from "../../components/ProjectColorPicker";
-import { AddButton, ArmedRemove, Button, Checkbox, ErrorNote, IconButton, ListRow, Loading, Notice, RefreshButton, Section, SettingRow, SettingsGroup, TextField, TextInput, Toggle } from "../../components/settings/Form";
+import { AddButton, ArmedRemove, Button, Checkbox, ErrorNote, FormFields, IconButton, ListRow, Loading, Notice, RefreshButton, Section, SettingRow, SettingsGroup, TextField, TextInput, Toggle } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { useTargetApi, useTargetFeatures, useTargetHostId, useTargetSidebar } from "../../lib/targetHost";
@@ -138,13 +138,13 @@ function UsersSection({ list, write, reload, onShowDevices, onShowPeers }: { lis
       }
     >
       {adding && (
-        <SettingsGroup agents="access" source="host"><div className="-mx-4 border-b border-border bg-surface-2/40 px-4 py-3" data-testid="users-add">
+        <FormFields><SettingsGroup agents="access" source="host"><div className="-mx-4 border-b border-border bg-surface-2/40 px-4 py-3" data-testid="users-add">
           <p className="mb-2 text-xs text-subtle">{t("users.addHint")}</p>
-          <div className="flex items-center gap-2">
-            <TextInput value={name} onChange={setName} placeholder={t("users.addNamePlaceholder")} label={t("users.addName")} maxLength={64} autoFocus onKeyDown={(e) => !isImeComposing(e) && e.key === "Enter" && void create()} />
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="min-w-0 max-w-full"><TextInput width="w-full max-w-full" value={name} onChange={setName} placeholder={t("users.addNamePlaceholder")} label={t("users.addName")} maxLength={64} autoFocus onKeyDown={(e) => !isImeComposing(e) && e.key === "Enter" && void create()} /></div>
             <Button primary disabled={busy || !name.trim()} onClick={() => void create()}>{t("users.addSubmit")}</Button>
           </div>
-        </div></SettingsGroup>
+        </div></SettingsGroup></FormFields>
       )}
       {error && <ErrorNote>{error}</ErrorNote>}
       {sortedUsers(list.users).map((user) => {

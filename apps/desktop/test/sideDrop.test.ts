@@ -67,7 +67,7 @@ let clock = 1000;
 function open(layout: SideLayout, kind: ItemId, o: { key?: string | null; binding?: SideBinding; page?: string } = {}) {
   const binding = o.binding ?? BINDING[kind] ?? { kind: "agent", hostId: "local", sessionId: "A" };
   const key = o.key === undefined ? SINGLETON_KEY : o.key;
-  const decision = place(layout, { kind, binding, key, transient: false, page: o.page, activePage: layout.activePage, columnOpen: layout.open }, SPECS[kind]!, orderOf);
+  const decision = place(layout, { kind, binding, key, transient: false, page: o.page ?? layout.pages.find(p => p.groups.includes(SPECS[kind]!.home))?.id, activePage: layout.activePage, columnOpen: layout.open }, SPECS[kind]!, orderOf);
   const applied = applyOpen(layout, decision, { kind, binding, key, state: null, v: 1, pinned: false }, ++clock, { reveal: true, home: SPECS[kind]!.home });
   return { layout: applied.layout, id: applied.instanceId };
 }

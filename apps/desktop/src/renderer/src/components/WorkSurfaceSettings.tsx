@@ -14,6 +14,9 @@ import { NumberField, ResetButton, Section, Segmented, SettingRow, Toggle } from
 import { TraySettingRows } from "./TraySettings";
 import { setForetellOn, useForetellOn } from "../lib/foretellPref";
 import { PAGE_SHELF_WIDTH } from "../lib/pageShelfWidth";
+import { DEFAULT_PORTRAIT, setOrientationSetting, setPortraitPrefs, useOrientationSetting, usePortrait, type OrientationSetting } from "../lib/portrait";
+import { useWindowKey } from "../lib/windowScope";
+import { keyVar } from "../lib/keybindings";
 
 /** 桌面亮度: 没有窗格时 / 有对话或页面打开时 / 窗格占满屏幕时. */
 const DESK_KEYS = ["deskEmpty", "deskOpen", "deskFull"] as const;
@@ -22,6 +25,57 @@ const DESK_KEYS = ["deskEmpty", "deskOpen", "deskFull"] as const;
 function setShelfRail(placement: "outer" | "inner"): void {
   setAppearance({ shelfRailPlacement: placement });
   setEveryShelfRail(placement);
+}
+
+/**
+ * 竖屏布局 (owner 2026-10-30, lib/portrait): auto / always landscape / always portrait for every window of this device,
+ * and — this window's own, like the divider's ⇅ and the Shelf's ⋯ — whether the conversation sits above its Shelf.
+ */
+function OrientationRows() {
+  const { t } = useI18n();
+  const key = useWindowKey();
+  const setting = useOrientationSetting((s) => s.setting);
+  const portrait = usePortrait((s) => s.orientation === "portrait");
+  const swapped = usePortrait((s) => s.prefs.swapped);
+  const split = usePortrait((s) => s.prefs.split);
+  const band = usePortrait((s) => s.prefs.band);
+  return (
+    <>
+      <SettingRow agents="none" source="local" label={t("orientation.setting")} hint={`${t("orientation.settingHint")} · ${t("orientation.sidebarNote", keyVar("sidebar"))} · ${t(portrait ? "orientation.nowPortrait" : "orientation.nowLandscape")}`} reset={<ResetButton disabled={setting === "auto"} onClick={() => setOrientationSetting("auto")} />}>
+        <span data-orientation-setting="" className="contents">
+          <Segmented<OrientationSetting>
+            label={t("orientation.setting")}
+            value={setting}
+            options={[
+              { value: "auto", label: t("orientation.auto") },
+              { value: "landscape", label: t("orientation.landscape") },
+              { value: "portrait", label: t("orientation.portrait") },
+            ]}
+            onChange={setOrientationSetting}
+          />
+        </span>
+      </SettingRow>
+      <SettingRow agents="none" source="local" label={t("orientation.position")} hint={t("orientation.positionHint")} reset={<ResetButton disabled={swapped === DEFAULT_PORTRAIT.swapped} onClick={() => setPortraitPrefs(key, { swapped: DEFAULT_PORTRAIT.swapped })} />}>
+        <span data-orientation-position="" className="contents">
+          <Segmented<"top" | "bottom">
+            label={t("orientation.position")}
+            value={swapped ? "bottom" : "top"}
+            options={[
+              { value: "top", label: t("orientation.top") },
+              { value: "bottom", label: t("orientation.bottom") },
+            ]}
+            onChange={(v) => setPortraitPrefs(key, { swapped: v === "bottom" })}
+          />
+        </span>
+      </SettingRow>
+      {/* P4: the dividers' heights / widths (this window, portrait only) — set by dragging them; reset here. */}
+      <SettingRow agents="none" source="local" label={t("orientation.split")} hint={t("orientation.splitHint")} reset={<ResetButton disabled={split === DEFAULT_PORTRAIT.split && band === undefined} onClick={() => setPortraitPrefs(key, { split: DEFAULT_PORTRAIT.split, band: undefined })} />}>
+        <span data-orientation-split="" className="text-body text-muted tabular-nums">
+          {t("orientation.splitValue", { pct: Math.round(split * 100) })}
+        </span>
+      </SettingRow>
+    </>
+  );
 }
 
 export function WorkSurfaceSection() {
@@ -50,6 +104,8 @@ export function WorkSurfaceSection() {
       <SettingRow agents="none" source="local" label={t("fillMode.title")} hint={t("fillMode.hint")}>
         <Toggle label={t("fillMode.title")} checked={a.fillMode} onChange={v => setAppearance({ fillMode: v })} />
       </SettingRow>
+      <OrientationRows />
+
       <SettingRow agents="none" source="local" label={t("workSurface.width")} hint={t("workSurface.widthRules")} reset={<ResetButton disabled={a.workspaceWidth === DEFAULT_APPEARANCE.workspaceWidth} onClick={() => setAppearance({ workspaceWidth: DEFAULT_APPEARANCE.workspaceWidth })} />}>
         <Segmented<WorkspaceWidthMode>
           label={t("workSurface.width")}

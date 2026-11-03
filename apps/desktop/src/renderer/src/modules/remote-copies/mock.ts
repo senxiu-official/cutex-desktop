@@ -10,6 +10,10 @@ const state: CopyState = { settings: { retentionDays: 7, largeFileBytes: 200 * 1
   example("preview-copy-1", "analysis.pdf", {}),
   example("preview-copy-2", "layout-reference.png", { kept: true, expiresAt: null, size: 482_000, received: 482_000 }),
   example("preview-copy-3", "last-week.csv", { status: "expired", downloadedAt: new Date(Date.now() - 9 * 86400000).toISOString(), expiresAt: new Date(Date.now() - 2 * 86400000).toISOString(), size: 22_140, received: 22_140 }),
+  // A second host, a project-scoped copy and a failed one, so the place filter and every sort key have something to do.
+  example("preview-copy-4", "fresh-run-figures-r5.3.zip", { source: { hostId: "ssh-ae3e47b1", hostLabel: "alpha", hostIdentity: "ALPHA", path: "/Users/alex/runs/fresh-run-figures-r5.3.zip" }, size: 48_211_004, received: 48_211_004, downloadedAt: new Date(Date.now() - 3600000).toISOString() }),
+  example("preview-copy-5", "ema_panel_cleaned.parquet", { source: { ...source, path: "/home/sam/demo/data/ema_panel_cleaned.parquet", scope: { kind: "project", id: "demo" } }, size: 8_432_190, received: 8_432_190, downloadedAt: new Date(Date.now() - 5 * 3600000).toISOString() }),
+  example("preview-copy-6", "train_log_epoch12.txt", { source: { hostId: "ssh-ae3e47b1", hostLabel: "alpha", hostIdentity: "ALPHA", path: "/Users/alex/runs/train_log_epoch12.txt" }, status: "failed", error: "connection reset while reading chunk 3", size: 1_204_331, received: 400_000, downloadedAt: null, createdAt: new Date(Date.now() - 26 * 3600000).toISOString(), expiresAt: null }),
 ] };
 export async function mockCopyRequest<T = CopyState>(request: CopyRequest): Promise<T> {
   let result: unknown;

@@ -6,7 +6,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import type { EventEnvelope, MessageSettlement } from "@cutex-desktop/protocol";
 import { MESSAGE_SETTLEMENT_EVENT } from "../../../shared/messageSettlement";
-import { AGENT_BUS_METHODS, applyMessageEvent, lastFinishedTurnStart, pendingMessagesFor, seedMessages, type AgentMessageRecord, type MessageMap } from "./agentMessages";
+import { AGENT_BUS_METHODS, applyMessageEvent, lastFinishedTurnStart, pendingMessagesFor, seedMessages, type AgentMessageRecord, type MessageMap } from "./legacyDelivery/agentMessages";
 
 export interface AgentMessagesState {
   byId: MessageMap;

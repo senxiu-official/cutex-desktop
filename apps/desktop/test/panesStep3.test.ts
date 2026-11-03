@@ -36,7 +36,7 @@ let clock = 100;
 
 function open(layout: SideLayout, kind: string, binding: SideBinding, key: string | null = SINGLETON_KEY, home = "workspace", state: unknown = null) {
   const input = { kind: kind as ItemId, binding, key, state: state as never, v: 1, pinned: false };
-  const decision = place(layout, { ...input, transient: false, activePage: layout.activePage, columnOpen: layout.open }, placeSpec({ home }));
+  const decision = place(layout, { ...input, transient: false, page: layout.activePage ?? undefined, activePage: layout.activePage, columnOpen: layout.open }, placeSpec({ home }));
   return applyOpen(layout, decision, input, ++clock, { reveal: true, home });
 }
 

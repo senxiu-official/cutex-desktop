@@ -17,6 +17,7 @@ import { relativeTo } from "./explorer/model";
 import { FileView } from "./FileView";
 import { isSourceToggleable, type PreviewState } from "./previewState";
 import { rememberSourceChoice, viewKindOf } from "./viewChoice";
+import { reconsiderFileRender } from "../../lib/largeRenderChoices";
 import { Tag } from "../../components/Tag";
 import { fileActions } from "../../lib/fileActions";
 import { openMenuFrom } from "../../lib/contextMenu";
@@ -138,6 +139,7 @@ function PathActions({ instance, setState }: SideBodyProps<PreviewState>) {
       {isSourceToggleable(path) && (
         <button
           onClick={() => {
+            if (source) reconsiderFileRender(hostId, host ? null : scope, path);
             rememberSourceChoice(viewKindOf(path), !source);
             setState({ ...instance.state, source: !source });
           }}

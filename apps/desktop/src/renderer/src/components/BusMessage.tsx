@@ -9,7 +9,7 @@ import { useI18n, type MessageKey } from "../i18n";
 import { useApp } from "../store";
 import { convFeaturesOf, useConvScope } from "../lib/conversationScope";
 import { useUiPrefs } from "../lib/prefs";
-import { AGENT_MESSAGES_V2, deliveryKindOf, stripLegacyPrefix, type AgentEnvelope, type DeliveryKind } from "../lib/agentMessages";
+import { AGENT_MESSAGES_V2, deliveryKindOf, stripLegacyPrefix, type AgentEnvelope, type DeliveryKind } from "../lib/legacyDelivery/agentMessages";
 import { senderLabel } from "../lib/systemSenders";
 import { SenderAvatar } from "./SystemAvatar";
 import { useWakeHint } from "../lib/wakeBusyWaitView";
@@ -26,7 +26,7 @@ import { useUserLayoutToggle } from "../lib/userLayoutToggle";
  * what a wake does to a busy recipient on this host (cutex wake-busy-wait), by `recipientRuntime`
  * (the viewed agent for a received row, the addressee for a sent one).
  */
-export function BusMessage({ direction, name: rawName, mode, text: raw, onContextMenu, kind = null, downgraded = false, messageId = null, envelope = null, senderId = null, sourceKind = null, recipientRuntime = "codex" }: { direction: "in" | "out"; name: string; mode: string | null; text: string; onContextMenu: React.MouseEventHandler; kind?: DeliveryKind | null; downgraded?: boolean; messageId?: string | null; envelope?: AgentEnvelope | null; /** Received only: the sender id / source kind, so cutex services show as 委托系统 / Cutex 系统 (lib/systemSenders). */ senderId?: string | null; sourceKind?: string | null; /** The runtime of the agent the message went to (a Claude agent always waits for the turn end). */ recipientRuntime?: AgentRuntime }) {
+export function BusMessage({ direction, name: rawName, mode, text: raw, onContextMenu, kind = null, downgraded = false, messageId = null, envelope = null, senderId = null, sourceKind = null, recipientId = null, recipientRuntime = "codex" }: { direction: "in" | "out"; name: string; mode: string | null; text: string; onContextMenu: React.MouseEventHandler; kind?: DeliveryKind | null; downgraded?: boolean; messageId?: string | null; envelope?: AgentEnvelope | null; /** Received only: the sender id / source kind, so cutex services show as 委托系统 / Cutex 系统 (lib/systemSenders). */ senderId?: string | null; sourceKind?: string | null; /** Sent only: the addressee's id, so 发给 shows its avatar (owner 2026-11-01: it drew a round letter on a fill). */ recipientId?: string | null; /** The runtime of the agent the message went to (a Claude agent always waits for the turn end). */ recipientRuntime?: AgentRuntime }) {
   const { t } = useI18n();
   const userToggle = useUserLayoutToggle();
   const conv = useConvScope();
@@ -36,7 +36,7 @@ export function BusMessage({ direction, name: rawName, mode, text: raw, onContex
   const { agentMessages } = useUiPrefs();
   const [open, setOpen] = useState(agentMessages === "full");
   const incoming = direction === "in";
-  const id = incoming ? senderId : null;
+  const id = incoming ? senderId : recipientId;
   const name = incoming ? senderLabel(t, id, sourceKind, rawName) : rawName;
   const Arrow = incoming ? ArrowDownLeft : ArrowUpRight;
   const shownKind = kind ?? deliveryKindOf(null, mode);
@@ -46,7 +46,7 @@ export function BusMessage({ direction, name: rawName, mode, text: raw, onContex
       <button onClick={() => userToggle(() => setOpen(!open))} className="flex w-full min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-md py-0.5 text-left text-xs text-muted hover:text-foreground">
         <Arrow size={13} className="shrink-0 text-subtle" />
         <span className="shrink-0">{t(incoming ? "conversation.from" : "conversation.to")}</span>
-        <SenderAvatar id={id} sourceKind={incoming ? sourceKind : null} name={name} size={20} />
+        <SenderAvatar id={id} sourceKind={incoming ? sourceKind : null} name={name} size={20} agent />
         <span data-testid="bus-message-name" className="min-w-0 max-w-[16em] shrink-0 truncate whitespace-nowrap font-medium text-foreground" title={name}>{name}</span>
         {v2 ? <KindTag kind={shownKind} downgraded={downgraded || !!envelope?.downgraded} wakeHint={wakeHint} /> : <DeliveryTag mode={mode} />}
         {v2 && envelope && <EnvelopeBadges envelope={envelope} reveal={open ? "" : "hidden group-hover/msg:inline group-focus-within/msg:inline"} />}

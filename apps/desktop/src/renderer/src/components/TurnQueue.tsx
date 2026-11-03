@@ -28,25 +28,28 @@
 // The card's header line (接下来 · N, 暂停委托, collapse) is QueuePanel's.
 // (待处理委托 — awaiting the owner's review — stays QueuePanel's extra section below.)
 import type { AgentRuntime } from "../lib/agentFeatures";
+import type { InputRecord } from "@cutex-desktop/protocol";
+import { LedgerAdmissionRow } from "./AdmissionRows";
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { ArrowDownToLine, ChevronDown, ChevronRight, Clock3, CornerDownRight, GripVertical } from "lucide-react";
 import type { AdmissionCurrentTurn, AdmissionNextStep, AdmissionRef, QueueItem } from "@cutex-desktop/protocol";
 import { useI18n } from "../i18n";
-import { atBoundary, beforeForSlot, canMoveTo, foldQueueRows, foldRow, insertRefusal, moveTargets, pausedFrom, rideAlongsFollowTurn, slotForGroup, turnStopped, type AdmissionRow } from "../lib/admissionOrder";
+import { atBoundary, beforeForSlot, canMoveTo, foldQueueRows, foldRow, insertRefusal, moveTargets, pausedFrom, rideAlongsFollowTurn, slotForGroup, turnStopped, type AdmissionRow } from "../lib/legacyDelivery/admissionOrder";
 import { formatElapsed } from "../lib/agentAttention";
-import type { OutboxEntry } from "../lib/outbox";
-import { steerDelivery, type PendingSteer } from "../lib/pendingSteers";
+import type { OutboxEntry } from "../lib/legacyDelivery/outbox";
+import { steerDelivery, type PendingSteer } from "../lib/legacyDelivery/pendingSteers";
 import { refusesImageSteer, type ImageSteering } from "../lib/imageSteer";
 import type { StripLabel } from "../lib/railStrip";
 import { INSERT_DWELL_MS, insertTargetShown, insertTargetState, mergeInsertShown } from "../lib/insertTarget";
 import { mergeableOwnerItem } from "../../../shared/queueMerge";
 import { heldKeys, splitHeld } from "../lib/stopHold";
-import { immediateStartItems, STARTS_NOW_STUCK_MS, useWaitedIds } from "../lib/settledRideAlongs";
+import { immediateStartItems, STARTS_NOW_STUCK_MS, useWaitedIds } from "../lib/legacyDelivery/settledRideAlongs";
 import { taskTag } from "../lib/tasks";
 import { useNow } from "../lib/time";
 import { queueViewOf, setQueueView } from "../lib/queueView";
-import { queueItemText } from "../store";
+import { queueItemText, useApp, viewOf } from "../store";
+import { ledgerOrderRef } from "../lib/admissionOrder";
 import { AskTurnRow, KindIcon, NextStepRow, SteerDeliveryNote, TimingSlot, type RideAlongOrder } from "./AdmissionRows";
 import { META_YIELDS, QUEUE_ROW, ROW_ACTIONS, ROW_META, ROW_TEXT, rowText } from "../lib/queueRow";
 import { useUserLayoutToggle } from "../lib/userLayoutToggle";
@@ -59,6 +62,49 @@ import { useModelOverloadRetry } from "../lib/modelOverloadRetryView";
 
 /** No candidates (a turn runs: nothing waits to start by itself). */
 const NONE: readonly AdmissionNextStep[] = [];
+
+/** Queue items supply content/actions, never membership or ordering. */
+export function LedgerTurnQueue({ records, sessionId, hostId, items, canEdit, onSendNow, onEdit, onDelete, sendNowStartsTurn }: {
+  records: readonly InputRecord[]; sessionId: string; hostId?: string; items: readonly QueueItem[];
+  canEdit: boolean; onSendNow?: (item: QueueItem) => void; onEdit: (item: QueueItem) => void; onDelete: (item: QueueItem) => void; sendNowStartsTurn?: boolean;
+}) {
+  const { t } = useI18n();
+  const byId = new Map(items.map(item => [item.clientUserMessageId, item]));
+  const admission = useApp(s => viewOf(s, hostId ?? "local", sessionId)?.admission);
+  const [dragged, setDragged] = useState<QueueItem | null>(null);
+  const move = (item: QueueItem, target: InputRecord | null) => {
+    const before = target ? ledgerOrderRef(target, items, admission) : null;
+    if (before === undefined) return;
+    void useApp.getState().queueMove(item, before, sessionId, hostId).catch(error => useApp.getState().notify(String(error), "error", { hostId: hostId ?? "local", sessionId }));
+  };
+  return <>{records.map(record => {
+    const item = record.kind === "owner" ? byId.get(record.inputId) : undefined;
+    const movable = !!item && !!admission && record.actions?.includes("edit");
+    return <LedgerAdmissionRow key={record.inputId} record={record} sessionId={sessionId} hostId={hostId} body={item ? queueItemText(item) : undefined}
+      media={item ? <QueuedImages images={messageImages(item.input as { type: string }[])} hostId={hostId} /> : undefined}
+      grip={movable ? <GripVertical size={12} className="shrink-0 cursor-grab text-subtle" aria-hidden /> : undefined}
+      rowProps={{
+        draggable: movable, tabIndex: movable ? 0 : undefined, title: movable ? t("queue.move.dragHint") : undefined,
+        onDragStart: item && movable ? e => { e.dataTransfer.setData("application/x-cutex-ledger-queue", item.clientUserMessageId); e.dataTransfer.effectAllowed = "move"; setDragged(item); } : undefined,
+        onDragEnd: () => setDragged(null),
+        onDragOver: e => { if (dragged && dragged.clientUserMessageId !== record.inputId && ledgerOrderRef(record, items, admission)) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; } },
+        onDrop: e => { if (dragged && dragged.clientUserMessageId !== record.inputId) { e.preventDefault(); move(dragged, record); setDragged(null); } },
+        onKeyDown: e => {
+          if (!movable || !item || !e.altKey || !["ArrowUp", "ArrowDown", "End"].includes(e.key)) return;
+          const index = records.indexOf(record);
+          const target = e.key === "End" ? null : e.key === "ArrowUp" ? records[index - 1] : records[index + 2] ?? null;
+          if (target === undefined) return;
+          e.preventDefault(); move(item, target);
+        },
+      }}>
+      {item && <>
+        {record.actions?.includes("sendNow") && onSendNow && <button type="button" className="h-5 rounded px-1 text-caption hover:bg-surface-2" onClick={() => onSendNow(item)}>{t(sendNowStartsTurn ? "queue.sendNowIdle" : "queue.sendNow")}</button>}
+        {record.actions?.includes("edit") && <button type="button" className="h-5 rounded px-1 text-caption hover:bg-surface-2" disabled={!canEdit} onClick={() => onEdit(item)}>{t("queue.edit")}</button>}
+        {record.actions?.includes("cancel") && <button type="button" className="h-5 rounded px-1 text-caption hover:bg-surface-2" onClick={() => onDelete(item)}>{t("queue.delete")}</button>}
+      </>}
+    </LedgerAdmissionRow>;
+  })}</>;
+}
 
 /** The turn frame's data (QueuePanel `ordered`). */
 export interface OrderedQueue {
@@ -129,6 +175,7 @@ export function TurnQueue({
   imageSteering = null,
   slots,
   insertStatus,
+  onRecheckSteer,
 }: {
   ordered: OrderedQueue;
   /** The owner's steers not read yet (lib/pendingSteers). */
@@ -147,6 +194,7 @@ export function TurnQueue({
   /** image-input-steering: the session's declared image steering (lib/imageSteer); null = unknown / older cutex. */
   imageSteering?: ImageSteering | null;
   insertStatus?: (clientId: string) => React.ReactNode;
+  onRecheckSteer?: (id: string) => void;
   /** QueuePanel's header line: `target` = the overlay the insert target is drawn into while dragging, `actions` = its
    *  right end (「全部合并插入」). Missing = neither shows. */
   slots?: { target: HTMLElement | null; actions: HTMLElement | null };
@@ -340,12 +388,12 @@ export function TurnQueue({
           {steerDelivery(p, runtime, imageSteering) === "nextTurn" ? <KindIcon icon={ArrowDownToLine} label={t("queue.meta.nextTurn")} /> : <KindIcon icon={CornerDownRight} label={t("queue.turn.inserting")} />}
           <span className={`${ROW_TEXT} text-foreground`}>{rowText(p.text)}</span>
           <QueuedImages images={messageImages((p.extra ?? []) as { type: string }[])} total={p.imageCount} hostId={hostId} />
-          {insertStatus?.(p.id) ?? <SteerDeliveryNote steer={p} runtime={runtime} imageSteering={imageSteering} className={META_YIELDS} />}
-          <span className={ROW_ACTIONS}>
+          {(p.state === "checking" ? null : insertStatus?.(p.id)) ?? <SteerDeliveryNote steer={p} runtime={runtime} imageSteering={imageSteering} className={META_YIELDS} onRecheck={onRecheckSteer && (() => onRecheckSteer(p.id))} />}
+          {p.state !== "checking" && <span className={`${ROW_ACTIONS} h-5 max-h-5`}>
             <button onClick={onInterruptSendSteers} title={t("steer.interruptSendHint")} className={`${TINY} text-danger hover:bg-danger/10`} data-testid="boundary-interrupt-send">
               {t("steer.interruptSend")}
             </button>
-          </span>
+          </span>}
         </div>
       </RailRow>,
     );

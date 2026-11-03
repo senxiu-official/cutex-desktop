@@ -8,7 +8,7 @@ import { useApp } from "../../store";
 /** An agent's avatar (its stored picture when the store knows it), drawn like the 委托 list's parties. */
 export function AgentAvatar({ id, name, size = 16 }: { id: string; name: string; size?: number }) {
   const avatar = useApp((s) => agentIndex(s).get(id)?.session.avatar ?? null);
-  return <Avatar name={name} avatar={avatar} seed={id} size={size} minor />;
+  return <Avatar name={name} avatar={avatar} seed={id} size={size} />;
 }
 
 /** An agent as [avatar] name; plain text (no link), `title` = name and host. */

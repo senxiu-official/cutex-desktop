@@ -1,3 +1,5 @@
+import { createMockInputLedger, inputLedgerMockEnabled, LEDGER_SCENES, type LedgerScene } from "./mockInputLedger";
+import { mockDebug } from "./mockDebug";
 import { IMAGE_HEAVY, IMAGE_HEAVY_SESSION, prepareImageHeavy, imageHeavyThread, imageHeavyResponse, imageHeavyMedia, imageHeavyFile } from "./devImageHeavy";
 import { OVERLOAD_RETRY_SCENE, OVERLOAD_RETRY_SESSION, overloadRetryResource, overloadRetryThread, overloadRetryAdmission } from "./mockOverloadRetry";
 import { installSteerPreflightMock } from "./mockSteerPreflight";
@@ -28,6 +30,7 @@ import { familyOfModel } from "../../../shared/portraitPacks";
 import type { ProfileTransferWarning } from "../../../shared/profileTransfer";
 import { classifySshPrompt, type SshPromptAnswer, type SshPromptView } from "../../../shared/sshPrompt";
 import { MOCK_BASE_FEATURES, MOCK_NEW_FEATURES, mockScenarioFeatures } from "./mockFeatures";
+import { mockProjectColor } from "./mockProjectColor";
 import { bindNewSession, variantApi, variantCreate, variantFields, variantPatch, VARIANTS_SCENE } from "./mockProfileVariants";
 import type { ResetCredit, ResetCreditsView } from "../../../shared/resetCredits";
 import { MODULE_MOCKS } from "./mockModules";
@@ -74,6 +77,13 @@ const MOCK_PRESETS: ProfilePreset[] = [
 const LIVE_DELTAS = typeof location !== "undefined" && mockScenarioFeatures(location.search).includes("live-text-deltas");
 /** `?legacy` in the preview URL: behave like a cutex without quick chats / new-thread defaults. */
 const LEGACY = typeof location !== "undefined" && new URLSearchParams(location.search).has("legacy");
+const INPUT_LEDGER = typeof location !== "undefined" && inputLedgerMockEnabled(location.search);
+const ledgerScene = typeof location !== "undefined" ? new URLSearchParams(location.search).get("ledgerScene") : null;
+const mockInputLedger = createMockInputLedger(LEDGER_SCENES.includes(ledgerScene as LedgerScene) ? ledgerScene as LedgerScene : "turn", emitCutex, Date.now, {
+  trace: typeof location !== "undefined" ? new URLSearchParams(location.search).get("ledgerTrace") ?? undefined : undefined,
+  line: typeof location !== "undefined" && new URLSearchParams(location.search).has("ledgerLine") ? Number(new URLSearchParams(location.search).get("ledgerLine")) : undefined,
+  sourceSessionId: typeof location !== "undefined" ? new URLSearchParams(location.search).get("ledgerSession") ?? undefined : undefined,
+});
 /** `?nofeat=claude-accounts,dsh-runtime`: a cutex without those capabilities (e.g. 新建 Profile on an older host). */
 const NO_FEATURES = new Set(typeof location === "undefined" ? [] : (new URLSearchParams(location.search).get("nofeat") ?? "").split(",").filter(Boolean));
 /** `?markLabel=CT副`: the demo-study project's badge label, in red (a wide label on its Director's avatar mark). */
@@ -803,6 +813,68 @@ function mentionSessions(): SessionResource[] {
   return [{ ...astra, formalAgentName: "astra-composer", displayNameOverride: "Astra", avatar: { kind: "emoji", value: "🦊" } }, { ...strip, formalAgentName: "next-strip-linger" }];
 }
 
+// Opt-in ?ownerrows (owner's sidebar 2026-11-01, avatar-two-letter): review-insert-opus and Wren running without an avatar of
+// their own, Pipit / Moth / review-insert-sol idle without one, ui-lead idle wearing a stored 拟人头像.
+const OWNER_ROWS_SCENE = typeof location !== "undefined" && new URLSearchParams(location.search).has("ownerrows");
+function ownerRowSessions(): SessionResource[] {
+  const lead = session("ui-lead", "ui-lead", { profile: "gamma", output: "两个字母的头像方案在收尾。", idle: 50 });
+  return [
+    session("review-insert-opus", "review-insert-opus", { profile: "claude", turn: "rio-t1", tool: "$ rg -n insertBefore src" }),
+    session("wren", "Wren", { profile: "gamma", turn: "wren-t1", tool: "$ pnpm -s typecheck" }),
+    session("pipit", "Pipit", { profile: "omega", output: "测试都过了。", idle: 45 }),
+    session("moth", "Moth", { profile: "GLM", output: "截图已存。", idle: 70 }),
+    session("review-insert-sol", "review-insert-sol", { profile: "gamma", output: "没有新问题。", idle: 95 }),
+    { ...lead, avatar: { kind: "icon", value: "portrait:kit-20261029/great-ming/gpt/02" } },
+  ];
+}
+
+// Opt-in ?inlinechips (owner 2026-11-01, avatar-inline-chips): project wuwa — its Director (GLM) created wuwa-db-scout and
+// wuwa-rotation-scout (sidebar: DS / RS tiles). Its thread has the owner's tool group: agent_create rows whose result carries no
+// receipt (the chip had only the name: a round 'W' on a fill), one still creating an agent not in the sidebar yet, a delegate
+// and a note by name; wuwa-rotation-scout asks a question (需要你).
+// Opt-in ?badgerow (owner 2026-11-01, avatar-badges): the owner's tray row whose project marks were hard to read — Directors
+// of WvLn (magenta), ctxH (cyan), ctxE (a custom teal), ROVE (a custom grey-beige) on portraits, an emoji Director and two
+// agents carrying the owner's badge (pink / violet tints).
+const BADGE_ROW_SCENE = typeof location !== "undefined" && new URLSearchParams(location.search).has("badgerow");
+const BADGE_ROW_AGENTS: [id: string, project: string | null][] = [["wvln-dir", "wvln"], ["ctxh-dir", "ctxh"], ["ctxe-dir", "ctxe"], ["rove-dir", "rove"], ["bnotes-dir", "bnotes"], ["badge-pink", null], ["badge-violet", null]];
+function badgeRowSessions(): SessionResource[] {
+  const pic = (s: SessionResource, ref: string): SessionResource => ({ ...s, avatar: { kind: "icon", value: `portrait:kit-20261029/${ref}` } });
+  return [
+    pic(session("wvln-dir", "WvLn-Director", { profile: "claude", output: "发布说明写好了。", idle: 4 }), "sunlit-shores/claude/02"),
+    pic(session("ctxh-dir", "ctxH-Director", { profile: "gamma", turn: "ctxh-t1", tool: "$ cargo test" }), "misty-city-cyberpunk/gpt/03"),
+    pic(session("ctxe-dir", "ctxE-Director", { profile: "gamma", output: "等你确认。", idle: 9 }), "great-ming/gpt/04"),
+    pic(session("rove-dir", "ROVE-Director", { profile: "GLM", output: "跑完了。", idle: 30 }), "great-ming/gpt/01"),
+    { ...session("bnotes-dir", "Notes-Director", { profile: "omega", idle: 60 }), avatar: { kind: "emoji", value: "🐙" } },
+    { ...pic(session("badge-pink", "Pink-Badge", { profile: "claude", idle: 12 }), "sunlit-shores/claude/01"), badge: { text: "HELP", tint: "pink" } } as SessionResource,
+    { ...session("badge-violet", "Violet-Badge", { profile: "gamma", idle: 15 }), badge: { text: "副总", tint: "violet" } } as SessionResource,
+  ];
+}
+const INLINE_CHIPS_SCENE = typeof location !== "undefined" && new URLSearchParams(location.search).has("inlinechips");
+const INLINE_CHIPS_AGENTS: [string, string][] = [["wuwa-director", "GLM"], ["wuwa-db-scout", "claude"], ["wuwa-rotation-scout", "omega"]];
+function inlineChipsThread(): MockThread {
+  const now = Math.floor(Date.now() / 1000);
+  const ok = { content: [{ type: "text", text: JSON.stringify({ ok: true }) }], structuredContent: null };
+  const mcp = (id: string, tool: string, args: Record<string, unknown>, status = "completed", result: unknown = ok) => ({ type: "mcpToolCall", id, server: "cutex", tool, status, durationMs: 900, arguments: args, result });
+  return {
+    thread: {
+      id: "thread-wuwa-director",
+      turns: [{
+        id: "wuwa-t1", status: "completed", startedAt: now - 300, completedAt: now - 120,
+        items: [
+          { type: "userMessage", id: "wu1", content: [{ type: "text", text: "建两个侦察员：一个查数据库，一个整理轮换。" }] },
+          { type: "agentMessage", id: "wa0", text: "好，我先建两个成员，再把任务分下去。" },
+          mcp("wc1", "agent_create", { name: "wuwa-db-scout", profile: "claude", task: "梳理 wuwa 的角色数据库字段" }),
+          mcp("wc2", "agent_create", { name: "wuwa-rotation-scout", task: "整理当前版本的轮换配队" }),
+          mcp("wc3", "agent_create", { name: "wuwa-echo-mapper", model: "claude-sonnet-5", task: "声骸主词条映射表" }, "inProgress", null),
+          mcp("wc4", "agent_delegate", { target: "wuwa-db-scout", title: "导出角色表", text: "把角色表导成 CSV" }),
+          mcp("wc5", "agent_tell", { to: "wuwa-rotation-scout", text: "轮换表先按 1.4 版本整理" }),
+          { type: "agentMessage", id: "wa1", text: "两个成员已经建好并收到任务；声骸映射的成员还在创建。" },
+        ],
+      }],
+    },
+  } as unknown as MockThread;
+}
+
 let snapshot: SidebarSnapshot = {
   active: [
     ...(OVERLOAD_RETRY_SCENE ? [session(OVERLOAD_RETRY_SESSION, "自动重试预览")] : []),
@@ -1479,6 +1551,15 @@ const MOCK_PENDING: Record<string, { message: { id: number; method: string; para
           questions: [
             {
               id: "q1", header: "Queue UI", question: "队列面板要支持拖拽排序吗？cutex 目前还没有 reorder 接口。", isOther: true, isSecret: false,
+              // Mika: rich multi-select + Other + an intentionally inert raw-HTML preview.
+              // ?legacy or ?nofeat=user-input-options-v1 keeps the base single-choice card.
+              cutexQuestionOptions: {
+                version: 1, question: "本次先完成哪些交互？可多选，也可以补充其他内容。", multiSelect: true,
+                options: [
+                  { label: "多选答案", description: "选好后统一提交", preview: "多选结果：[选项一, 选项二]" },
+                  { label: "保留草稿", description: "切换页面或刷新后继续填写", preview: '<div class="preview"><img src="https://example.invalid/preview.png" onerror="alert(1)">仅显示文字</div>' },
+                ],
+              },
               options: [
                 { label: "先不做", description: "等 cutex 加上 queue/reorder 再说" },
                 { label: "前端先做", description: "拖拽后用 remove + 重新提交模拟" },
@@ -1544,6 +1625,22 @@ const MOCK_PENDING: Record<string, { message: { id: number; method: string; para
 
 // ?mentions: at the end, so the index-based demo decorations below keep their agents.
 if (MENTION_SCENE) snapshot.active.push(...mentionSessions());
+if (OWNER_ROWS_SCENE) snapshot.active.push(...ownerRowSessions());
+if (INLINE_CHIPS_SCENE) {
+  snapshot.active.push(session("wuwa-director", "wuwa-director", { profile: "GLM", output: "两个成员已经建好并收到任务。", idle: 2 }),
+    session("wuwa-db-scout", "wuwa-db-scout", { profile: "claude", turn: "wds-t1", tool: "$ sqlite3 wuwa.db .schema" }),
+    session("wuwa-rotation-scout", "wuwa-rotation-scout", { profile: "omega", output: "要按哪个版本整理？", idle: 1 }));
+  snapshot.projects!.projects.push({ project_id: "wuwa", authority_epoch: 1, director_cutex_session_id: "wuwa-director", presentation: { display_name: "wuwa", badge_label: "WW", color: "yellow" }, active_member_count: 3, lifecycle: "active" } as never);
+  for (const [id] of INLINE_CHIPS_AGENTS) snapshot.hostRows[id] = hostRow(id, "wuwa");
+  MOCK_PENDING["wuwa-rotation-scout"] = [{ message: { id: 77, method: "item/tool/requestUserInput", params: { threadId: "thread-wuwa-rotation-scout", turnId: "t", itemId: "i", isBlocking: true, autoResolutionMs: null, questions: [{ id: "q1", header: "版本", question: "轮换表按 1.4 还是 2.0 整理？", isOther: true, isSecret: false, options: [{ label: "1.4", description: "当前版本" }, { label: "2.0", description: "下个版本" }] }] } } }];
+}
+
+if (BADGE_ROW_SCENE) {
+  snapshot.active.push(...badgeRowSessions());
+  const project = (id: string, label: string, color: string) => ({ project_id: id, authority_epoch: 1, director_cutex_session_id: `${id}-dir`, presentation: { display_name: id, badge_label: label, color }, active_member_count: 1, lifecycle: "active" }) as never;
+  snapshot.projects!.projects.push(project("wvln", "WvLn", "magenta"), project("ctxh", "ctxH", "cyan"), project("ctxe", "ctxE", "#3fa7a3"), project("rove", "ROVE", "#a89f8a"), project("bnotes", "笔记", "yellow"));
+  for (const [id, p] of BADGE_ROW_AGENTS) snapshot.hostRows[id] = hostRow(id, p);
+}
 
 /** Request ids answered in this preview: cutex would not re-send them on the next bootstrap. */
 const mockResolved = new Set<string>();
@@ -1590,6 +1687,7 @@ function mockThread(id: string): MockThread {
   if (IMAGE_HEAVY && id === IMAGE_HEAVY_SESSION && imageHeavyThread()) return { thread: imageHeavyThread()! };
   if (DSH_SCENE && id === "dsh-agent") return { thread: { id: "thread-dsh-agent", turns: dshTurns().filter((t, i, all) => { const cut = revertedFrom.get(id); const at = cut ? all.findIndex((x) => x.id === cut) : -1; return at < 0 || i < at; }), dshContext: { used: 24_000, size: 1_000_000, observedAt: "2026-10-25T01:00:00Z", source: "acp", billing: "unavailable" } } };
   if (MENTION_AGENTS_SCENE && id === "eva") return mentionAgentsThread();
+  if (INLINE_CHIPS_SCENE && id === "wuwa-director") return inlineChipsThread();
   if (MEDIA_BLOBS_SCENE && id === "eva" && mediaBlobsThread()) return { thread: mediaBlobsThread()! };
   if (IMAGE_SWITCH_SCENE && id === "eva" && imageSwitchThread()) return imageSwitchThread()!;
   const fork = forkedFrom.get(id);
@@ -1835,6 +1933,7 @@ const bootstrap =(id: string, turnLimit?: number): SessionBootstrap => ({
     agentBusMessages: inboxSnapshot(id),
     ...(LEGACY ? {} : { agentBusSentMessages: [] }),
     ...moduleCutexState(id),
+    ...(INPUT_LEDGER ? mockInputLedger.snapshot(id) : {}),
     ...((MEDIA_BLOBS_SCENE || IMAGE_SWITCH_SCENE || IMAGE_PATH_STEER_SCENE) && id === "eva" ? { ownerNotifications: [], agentBusMessages: [], agentBusSentMessages: [] } : {}),
     // scratch gets no live token report after opening; cutex recovers its usage from the rollout.
     latestTokenUsage: id === "scratch" ? MOCK_SCRATCH_TOKEN_USAGE : null,
@@ -2200,6 +2299,10 @@ const MOCK_NEXT_STEP: Record<string, MockNextStep[]> = LEGACY
         busItem({ id: "ns-s-alarm", deliveryKind: "alarm", body: "每小时同步笔记", enqueuedAt: agoIso(30), timing: "afterTurn" }),
       ],
     };
+// `?stuckreceipt`: demo-done (idle) has one accepted-but-never-read note — the only row of its 接下来, hideable locally.
+if (!LEGACY && typeof location !== "undefined" && new URLSearchParams(location.search).has("stuckreceipt")) {
+  MOCK_NEXT_STEP["demo-done"] = [busItem({ id: "ns-d-stuck", deliveryKind: "tell", from: "Mika", fromCutexSessionId: "mika", body: "Claude Task 已结束：迁移脚本跑完了，结果在 out/migrate.log", enqueuedAt: agoIso(900), timing: "nextStep", waitReason: "nativeReceipt" })];
+}
 /** agentBus.wakeBusyWaitSecs of the mock (agent-bus mock default). */
 const MOCK_WAKE_WAIT_SECS = 120;
 /**
@@ -3216,6 +3319,7 @@ export function installMockBridge(): void {
   // client-remote-close: the countdown main would run (`?remoteclose`: host-a asks this desktop to close).
   const remoteCloseShell = mockRemoteCloseShell({ state: shellState, emitView: (view) => emit("remoteClose", { view }), emitHost: (method, params) => core.emitHost(method, params) });
   const bridge: PreloadBridge = {
+    debug: mockDebug(MOCK_PLATFORM, event => emit("debug", event)),
     platform: MOCK_PLATFORM,
     // ?platform=darwin: the title bar keeps clear of the traffic lights (no real buttons in a browser).
     ...(MOCK_PLATFORM === "darwin" ? { window: { control: async () => {}, setChrome: async () => {}, nativeControls: "left" as const } } : {}),
@@ -3594,6 +3698,7 @@ export function installMockBridge(): void {
       },
       async unsubscribe() {},
       async submit(sessionId, text, strategy, _startIfOffline, options) {
+        if (INPUT_LEDGER) return mockInputLedger.submit(sessionId, text, strategy, options?.clientUserMessageId ?? crypto.randomUUID());
         emptyChats.delete(sessionId);
         // A message that is only queued (busy, strategy queue) releases no stop hold.
         if (!(asksPauses.get(sessionId)?.stopHold && busy.has(sessionId) && strategy === "queue")) setAsksPause(sessionId, false, "ownerMessage");
@@ -3671,7 +3776,9 @@ export function installMockBridge(): void {
         void playTurn(sessionId, text, extra, options?.clientUserMessageId);
         return { disposition: "started", turnId: currentTurn.get(sessionId) ?? null };
       },
+      ...mockInputLedger.api,
       async queueList(sessionId) {
+        if (INPUT_LEDGER) return mockInputLedger.queueSnapshot(sessionId);
         const pause = pauses.get(sessionId) ?? null;
         const items = (queues.get(sessionId) ?? []).map((q, i) => ({ ...q, position: i }));
         return { revision: seq, items, paused: !!pause, pause, asksPaused: asksPauses.get(sessionId) ?? null, ...(LEGACY ? {} : { admission: admissionOf(sessionId) }) };
@@ -3703,7 +3810,8 @@ export function installMockBridge(): void {
         return { admission };
       },
       async queueUpdate() {},
-      async queueRemove(sessionId, queueId) {
+      async queueRemove(sessionId, queueId, expectedRevision) {
+        if (INPUT_LEDGER) return mockInputLedger.remove(sessionId, queueId, expectedRevision);
         if (RAW_FAIL === "delete" && !quietRemove) throw new Error(`Error invoking remote method 'daemon:queueRemove': Error: queue_item_not_found: queue item ${queueId} was not found at the expected revision`);
         const rest = (queues.get(sessionId) ?? []).filter((q) => q.queueId !== queueId);
         queues.set(sessionId, rest);
@@ -3763,6 +3871,7 @@ export function installMockBridge(): void {
       },
       // `steer` (queue-steer) behaves the same here: the mock has no ask lease or steer-less runtime.
       async queuePromote(sessionId, queueId, _expectedRevision, steer, _join, options) {
+        if (INPUT_LEDGER) return mockInputLedger.promote(sessionId, queueId, _expectedRevision);
         const item = (queues.get(sessionId) ?? []).find((q) => q.queueId === queueId);
         if (!item) throw new Error("queue item changed or already sent");
         // With images it is in flight a moment (as an upload would be): 发送中 shows its thumbnails.
@@ -4366,6 +4475,7 @@ export function installMockBridge(): void {
         return { requestedModel: model, observedForRequestedModel: model, observedModels: [answered[model] ?? model], lastObservedModel: answered[model] ?? model };
       },
       async projectMutation(projectId, _expected, op) {
+        if ("presentation" in op && op.presentation) mockProjectColor(op.presentation.color, LEGACY);
         // project-optional-director. Preview failure paths: a project name containing "fail" is
         // refused; assigning an agent whose id contains "fail" as Director is refused.
         if (op.kind === "create_project") {
@@ -4461,8 +4571,9 @@ export function installMockBridge(): void {
         return {};
       },
       async projectPresentation(projectId, _expected, presentation) {
+        const color = mockProjectColor(presentation.color, LEGACY);
         const p = snapshot.projects?.projects.find((x) => x.project_id === projectId);
-        if (p) p.presentation = { ...p.presentation, ...presentation, revision: (p.presentation.revision ?? 0) + 1 };
+        if (p) p.presentation = { ...p.presentation, ...presentation, color, revision: (p.presentation.revision ?? 0) + 1 };
         snapshot = { ...snapshot };
         return {};
       },
@@ -4750,6 +4861,7 @@ export function installMockBridge(): void {
   // Signed module packs: the preview plays main's store; the pilot pack is really built + imported (dev/mockModulePacks.ts).
   bridge.modulePacks = mockModulePacks();
   window.cutex = bridge;
+  if (INPUT_LEDGER) { Object.assign(window, { __cutexMockInputLedger: mockInputLedger }); console.info(mockInputLedger.notice, mockInputLedger.scene); }
   void import("./mockCopies").then(m => m.startCopyPreview());
   if (MEDIA_BLOBS_SCENE) installDevMediaBlobs(core);
   if (IMAGE_SWITCH_SCENE) installDevImageSwitch(core);

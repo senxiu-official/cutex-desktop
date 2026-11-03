@@ -1,0 +1,456 @@
+{
+  "sourceRepository": "cutex",
+  "sourceSHA": "4af79b6ef2a88277ca9dcbff496d198bb5e89dbf",
+  "scope": "Product user-input submit and queue operations: queue_order dispatch, app_server_user_input submit/route/native-send, server dispatch/repository/error wrapper; shared request idempotency/session guards and owner access; automatic-start admission guards used by desktop input preflight. Generic HTTP/auth/JSON envelope failures and unrelated runtime/session mutations are outside this bounded operation contract.",
+  "verification": {
+    "command": "git -C <cutex-repository> show <sourceSHA>:<locations.path>",
+    "procedure": [
+      "Read product functions only; exclude #[cfg(test)] functions/modules and *_tests.rs. Do not grep status tables or tests as producers.",
+      "Trace queue_order::dispatch -> steer_queued_v2 -> steer_owner_input -> steer_failure; submit_v2 -> submit_v2_with_repository_and_image_settings -> route_submit_with_image_settings -> send_recorded -> send_user_input_native_request -> native_user_input_failure.",
+      "Follow prepare_native_input -> image_steering::claude_path_text -> image_line for dynamic reason values; all steer_unavailable producers are in app_server_user_input.rs, with constructor in queue_order.rs.",
+      "Follow server::dispatch_user_input_submit, queue_repository_error, invalid_user_input_error, persistence_user_input_error, post_operation_persistence_error and write_cutex_operation_error_traced; generic outcome_unknown errors become request_outcome_unknown with originalCode/originalDetails and resyncRequired.",
+      "Verify shared request guards in handle_cutex_request/access.rs and automatic_runtime_start_error separately; do not infer all session/runtime error variants are input errors."
+    ],
+    "excludedTestOnly": [
+      "refused",
+      "unknown",
+      "unaccepted",
+      "queued",
+      "wrong-method"
+    ],
+    "compatibilityOnlyReasons": [
+      "runtimeNotReady",
+      "ownerRequired"
+    ],
+    "note": "No upstream checkout is required by CI. Locations pin actual product producers; optional developer source verification below validates these anchors at sourceSHA.",
+    "optionalEnvironment": "CUTEX_CONTRACT_SOURCE_DIR=<cutex-repository> runs pinned git-source anchor and product reason/code extraction verification; unset in CI."
+  },
+  "cases": [
+    {
+      "code": "steer_unavailable",
+      "details": {
+        "reason": "agentPaused"
+      },
+      "expectedKind": "agentPaused",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 239,
+          "sourceLine": "if gate==cutex::asks::pause_admission::Gate::Paused {\"agentPaused\"}else{\"admissionBusy\"},"
+        }
+      ]
+    },
+    {
+      "code": "steer_unavailable",
+      "details": {
+        "reason": "admissionBusy"
+      },
+      "expectedKind": "hostBusy",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 239,
+          "sourceLine": "if gate==cutex::asks::pause_admission::Gate::Paused {\"agentPaused\"}else{\"admissionBusy\"},"
+        }
+      ]
+    },
+    {
+      "code": "steer_unavailable",
+      "details": {
+        "reason": "joinChanged"
+      },
+      "expectedKind": "joinChanged",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 272,
+          "sourceLine": "if !valid { return Err(cutex::management::v2::queue_order::steer_unavailable(\"joinChanged\")); }"
+        }
+      ]
+    },
+    {
+      "code": "steer_unavailable",
+      "details": {
+        "reason": "delegationTurn"
+      },
+      "expectedKind": "delegationTurn",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 275,
+          "sourceLine": "\"delegationTurn\","
+        }
+      ]
+    },
+    {
+      "code": "steer_unavailable",
+      "details": {
+        "reason": "runtimeNoSteer"
+      },
+      "expectedKind": "runtimeNoSteer",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 281,
+          "sourceLine": "\"runtimeNoSteer\","
+        }
+      ]
+    },
+    {
+      "code": "steer_unavailable",
+      "details": {
+        "reason": "noActiveTurn"
+      },
+      "expectedKind": "noActiveTurn",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 287,
+          "sourceLine": "\"noActiveTurn\","
+        }
+      ]
+    },
+    {
+      "code": "steer_unavailable",
+      "details": {
+        "reason": "runtimeRefused"
+      },
+      "expectedKind": "runtimeRefused",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 398,
+          "sourceLine": "let mut refused = cutex::management::v2::queue_order::steer_unavailable(\"runtimeRefused\");"
+        }
+      ]
+    },
+    {
+      "code": "steer_unavailable",
+      "details": {
+        "reason": "imagePathRequired"
+      },
+      "expectedKind": "imagePathRequired",
+      "locations": [
+        {
+          "path": "src/management/v2/user_input/image_steering.rs",
+          "line": 43,
+          "sourceLine": "Some(\"image\") => Err(\"imagePathRequired\"),"
+        }
+      ]
+    },
+    {
+      "code": "steer_unavailable",
+      "details": {
+        "reason": "imageUnavailable"
+      },
+      "expectedKind": "imageUnavailable",
+      "locations": [
+        {
+          "path": "src/management/v2/user_input/image_steering.rs",
+          "line": 50,
+          "sourceLine": "return Err(\"imageUnavailable\");"
+        }
+      ]
+    },
+    {
+      "code": "owner_required",
+      "details": {},
+      "expectedKind": "ownerRequired",
+      "locations": [
+        {
+          "path": "src/management/v2/access.rs",
+          "line": 417,
+          "sourceLine": "deny(stream, \"owner_required\", \"this route is the host owner's\", json!({}))"
+        }
+      ]
+    },
+    {
+      "code": "turn_conflict",
+      "details": {},
+      "expectedKind": "turnConflict",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 638,
+          "sourceLine": "code: \"turn_conflict\".to_string(),"
+        }
+      ]
+    },
+    {
+      "code": "session_offline",
+      "details": {},
+      "expectedKind": "sessionOffline",
+      "locations": [
+        {
+          "path": "src/management/v2/queue_order.rs",
+          "line": 252,
+          "sourceLine": "code: \"session_offline\".into(),"
+        }
+      ]
+    },
+    {
+      "code": "outcome_unknown",
+      "details": {},
+      "expectedKind": "outcomeUnknown",
+      "locations": [
+        {
+          "path": "src/management/v2/queue_order.rs",
+          "line": 154,
+          "sourceLine": "stage: \"native_request\".into(), code: \"outcome_unknown\".into(),"
+        }
+      ]
+    },
+    {
+      "code": "request_outcome_unknown",
+      "details": {},
+      "expectedKind": "outcomeUnknown",
+      "locations": [
+        {
+          "path": "src/management/v2/server.rs",
+          "line": 3255,
+          "sourceLine": "\"request_outcome_unknown\".to_string()"
+        }
+      ]
+    },
+    {
+      "code": "queue_input_already_submitted",
+      "details": {},
+      "expectedKind": "changed",
+      "locations": [
+        {
+          "path": "src/management/v2/server.rs",
+          "line": 4967,
+          "sourceLine": "code: \"queue_input_already_submitted\".to_string(),"
+        }
+      ]
+    },
+    {
+      "code": "revision_conflict",
+      "details": {},
+      "expectedKind": "changed",
+      "locations": [
+        {
+          "path": "src/management/v2/server.rs",
+          "line": 4976,
+          "sourceLine": "code: \"revision_conflict\".to_string(),"
+        }
+      ]
+    },
+    {
+      "code": "queue_item_not_found",
+      "details": {},
+      "expectedKind": "changed",
+      "locations": [
+        {
+          "path": "src/management/v2/server.rs",
+          "line": 5006,
+          "sourceLine": "code: \"queue_item_not_found\".to_string(),"
+        }
+      ]
+    },
+    {
+      "code": "passing_not_allowed",
+      "details": {},
+      "expectedKind": "passingNotAllowed",
+      "locations": [
+        {
+          "path": "src/management/v2/queue_order.rs",
+          "line": 230,
+          "sourceLine": "stage: \"queue\".into(), code: \"passing_not_allowed\".into(),"
+        }
+      ]
+    },
+    {
+      "code": "admission_item_not_found",
+      "details": {},
+      "expectedKind": "changed",
+      "locations": [
+        {
+          "path": "src/management/v2/queue_order.rs",
+          "line": 236,
+          "sourceLine": "stage: \"queue\".into(), code: \"admission_item_not_found\".into(),"
+        }
+      ]
+    },
+    {
+      "code": "internal_error",
+      "details": {},
+      "expectedKind": "internalError",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 70,
+          "sourceLine": ".map_err(|error| execution_error(\"route\", \"internal_error\", error, true, false))?;"
+        }
+      ]
+    },
+    {
+      "code": "archive_blocks_input",
+      "details": {},
+      "expectedKind": "archiveBlocksInput",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 81,
+          "sourceLine": ".map_err(|error| execution_error(\"route\", \"archive_blocks_input\", error, false, false))?;"
+        }
+      ]
+    },
+    {
+      "code": "event_persistence_unavailable",
+      "details": {},
+      "expectedKind": "persistenceUnavailable",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 84,
+          "sourceLine": "execution_error(\"route\", \"event_persistence_unavailable\", error, true, false)"
+        }
+      ]
+    },
+    {
+      "code": "app_server_unavailable",
+      "details": {},
+      "expectedKind": "runtimeNotReady",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 144,
+          "sourceLine": "execution_error_message(\"queue\", \"app_server_unavailable\","
+        }
+      ]
+    },
+    {
+      "code": "idempotency_conflict",
+      "details": {},
+      "expectedKind": "idempotencyConflict",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 462,
+          "sourceLine": "\"idempotency_conflict\","
+        }
+      ]
+    },
+    {
+      "code": "interrupt_timeout",
+      "details": {},
+      "expectedKind": "interruptTimeout",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 727,
+          "sourceLine": "|error| execution_error(\"interrupt\", \"interrupt_timeout\", error, true, true),"
+        }
+      ]
+    },
+    {
+      "code": "user_input_in_progress",
+      "details": {},
+      "expectedKind": "inputInProgress",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 985,
+          "sourceLine": "code: \"user_input_in_progress\".to_string(),"
+        }
+      ]
+    },
+    {
+      "code": "invalid_input",
+      "details": {},
+      "expectedKind": "invalidInput",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 1003,
+          "sourceLine": "execution_error_message(\"route\", \"invalid_input\", \"missing input array\", false, false))?;"
+        }
+      ]
+    },
+    {
+      "code": "native_request_failed",
+      "details": {},
+      "expectedKind": "nativeRequestFailed",
+      "locations": [
+        {
+          "path": "src/cli_app/app_server_user_input.rs",
+          "line": 1263,
+          "sourceLine": "\"native_request_failed\""
+        }
+      ]
+    },
+    {
+      "code": "invalid_request",
+      "details": {},
+      "expectedKind": "invalidRequest",
+      "locations": [
+        {
+          "path": "src/management/v2/server.rs",
+          "line": 4482,
+          "sourceLine": "code: \"invalid_request\".to_string(),"
+        }
+      ]
+    },
+    {
+      "code": "session_not_found",
+      "details": {},
+      "expectedKind": "sessionNotFound",
+      "locations": [
+        {
+          "path": "src/management/v2/server.rs",
+          "line": 2893,
+          "sourceLine": "\"session_not_found\","
+        }
+      ]
+    },
+    {
+      "code": "request_in_progress",
+      "details": {},
+      "expectedKind": "requestInProgress",
+      "locations": [
+        {
+          "path": "src/management/v2/server.rs",
+          "line": 2919,
+          "sourceLine": "\"request_in_progress\","
+        }
+      ]
+    },
+    {
+      "code": "idempotency_capacity_exceeded",
+      "details": {},
+      "expectedKind": "hostBusy",
+      "locations": [
+        {
+          "path": "src/management/v2/request_idempotency.rs",
+          "line": 174,
+          "sourceLine": "pub const CODE: &'static str = \"idempotency_capacity_exceeded\";"
+        }
+      ]
+    },
+    {
+      "code": "admission_deferred",
+      "details": {},
+      "expectedKind": "hostBusy",
+      "locations": [
+        {
+          "path": "src/cli_app/management_context.rs",
+          "line": 2361,
+          "sourceLine": "let code=if error.is::<cutex::asks::pause_admission::Deferred>() {Some(\"admission_deferred\")}"
+        }
+      ]
+    },
+    {
+      "code": "agent_paused",
+      "details": {},
+      "expectedKind": "agentPaused",
+      "locations": [
+        {
+          "path": "src/cli_app/management_context.rs",
+          "line": 2362,
+          "sourceLine": "else if error.is::<cutex::agent_management::AutomaticRuntimeStartPaused>() {Some(\"agent_paused\")}"
+        }
+      ]
+    }
+  ]
+}

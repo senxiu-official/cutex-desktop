@@ -89,6 +89,8 @@ export const zhCN = {
   "project-view.stream.offline": "未连接",
   "project-view.stream.allAgents": "全部{{agents}}",
   "project-view.stream.agentFilter": "只看一个{{agent}}",
+  "project-view.stream.includeOwnerTurns": "包括我发起的",
+  "project-view.stream.emptyAutonomous": "暂无其他动态。在“回合”中可包括你发起的回合。",
   "project-view.stream.new": "↑ {n} 条新动态",
   "project-view.stream.loading": "正在读取动态…",
   "project-view.stream.loadingMore": "正在读取更早的…",

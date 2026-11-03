@@ -18,7 +18,7 @@ import { summaryLine } from "../../lib/newProfileText";
 import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
 import { useProfilePresets } from "../../lib/useProfilePresets";
 import { InlineGuide } from "../InlineGuide";
-import { Button, Section, SettingRow, SettingsGroup, TextInput } from "./Form";
+import { Button, FormFields, Section, SettingRow, SettingsGroup, TextInput } from "./Form";
 import { AddressRow } from "./newProfile/AddressRow";
 import { AuthStep } from "./newProfile/AuthStep";
 import { NameStep, SummaryLine } from "./newProfile/NameStep";
@@ -110,7 +110,7 @@ export function NewProfileForm({ existing, haveKinds, onCreated, onCancel, initi
   const status = <p className="h-6 truncate pt-1 text-xs text-danger" title={error ?? undefined} data-new-profile-error="">{error}</p>;
 
   return (
-    <Section title={t("settings.profiles.new.title")} hint={t("newProfile.hint")}>
+    <FormFields><Section title={t("settings.profiles.new.title")} hint={t("newProfile.hint")}>
       {kind && kind !== "dsh" && haveKinds !== null && <InlineGuide key={kind} id={`inline.profile.${kind}`} done={haveKinds?.has(kind)} />}
       <StepTitle n={1}>{t("newProfile.step.provider")}</StepTitle>
       {!resolved ? (
@@ -172,6 +172,6 @@ export function NewProfileForm({ existing, haveKinds, onCreated, onCancel, initi
           <SummaryLine text={summaryLine(t, resolved, address)} saving={saving || unavailable} onCancel={onCancel} onCreate={() => void create()} cancelLabel={t("dialog.cancel")} />
         </>
       )}
-    </Section>
+    </Section></FormFields>
   );
 }

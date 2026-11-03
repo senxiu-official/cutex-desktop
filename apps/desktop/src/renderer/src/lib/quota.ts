@@ -419,7 +419,7 @@ export function migrateGaugeChoices(value: unknown): Record<string, GaugeChoice>
 export interface ComposerGauge {
   /** The window gauges this ring stands for (2+ when same-reset gauges merged); a balance stands alone. */
   members: QuotaGauge[];
-  /** The member the ring draws: the one closest to running out. */
+  /** Representative member (closest to running out); merged rings draw every member's arc. */
   draw: QuotaGauge;
   /** The countdown's source: the earliest reset among the members. */
   resetAt: number | null;
@@ -441,7 +441,7 @@ function emergencyShown(g: QuotaGauge): boolean {
  * The composer row's rings from a profile's gauges: per-gauge show choices (by name, the reset
  * default seeding from the old global switch), hidden-but-nearly-empty gauges revealed temporarily,
  * and — unless `merge` is off — window gauges whose resets sit within MERGE_RESET_TOLERANCE_MS of
- * each other as ONE ring drawing the member closest to running out. Balances pass through as text.
+ * each other as ONE position with a separate arc per member. Balances pass through as text.
  */
 export function composerGauges(gauges: readonly QuotaGauge[], choices: Readonly<Record<string, GaugeChoice>>, resetDefault: boolean, merge: boolean, now = Date.now()): ComposerGauge[] {
   const shown: QuotaGauge[] = [];

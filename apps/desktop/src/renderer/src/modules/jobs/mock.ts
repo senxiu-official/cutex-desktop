@@ -3,7 +3,7 @@
 // Linux hosts (Workstation); the mock pretends the host has a Job Service with every human operation.
 import type { JobListPage, JobOutputPage, JobResult, JobRow, JobServiceCapabilities, JobStream } from "../../../../shared/ipc";
 import type { DesktopApi } from "../../../../shared/ipc";
-import { COMPONENTS_FEATURE, readComponentOperation, readComponentsList, type ComponentStatus } from "../../../../shared/components";
+import { COMPONENT_INDEX_FEATURE, COMPONENTS_FEATURE, EXTERNAL_RUNTIME_ROOT_FEATURE, readComponentOperation, readComponentsList, type ComponentStatus } from "../../../../shared/components";
 import type { ModuleMock } from "../../dev/mockTypes";
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -170,21 +170,23 @@ const VERSIONS: Record<string, { old: string; next: string; size: number }> = {
   "claude-runtime": { old: "claude-r10", next: "claude-r11", size: 31_457_280 },
 };
 
-function mockComponent(name: string, mode: string) {
+function mockComponent(name: string, mode: string, windowsHost = false) {
   const v = VERSIONS[name]!;
   const STATES: Record<string, string> = { installing: "installing", needsUser: "needsUser", restartPending: "restartPending", degraded: "degraded", degradedWorking: "degraded", external: "external", notInManifest: "notInManifest" };
   const state = mode === "" || mode === "ready" || mode === "nocap" ? "ready" : (STATES[mode] ?? "missing");
-  const selected = state === "ready" ? v.old : mode === "restartPending" ? v.next : mode === "degradedWorking" ? v.old : null;
+  const indexed = INDEX_VERSIONS[name] && CINDEX ? INDEX_VERSIONS[name] : null;
+  // `?ext` on a needsUser adapter: the r3 adapter is the selected one whose dependencies fail (no r2 to fall back to).
+  const selected = EXT.length && EXT_FOR !== "candidate" && mode === "needsUser" && ADAPTER_NEXT[name] ? ADAPTER_NEXT[name]! : indexed && state === "ready" ? indexed[0]! : state === "ready" ? v.old : mode === "restartPending" ? v.next : mode === "degradedWorking" ? v.old : null;
   return {
     name,
-    ...(name === "dsh-runtime" ? { dsh: { version: "0.2.1-rc.3", node: { minimum: "24.9.0", version: QUERY.get("dshNode") === "missing" ? null : "24.9.0", ready: QUERY.get("dshNode") !== "missing" } } } : {}),
-    ...(name === "kimi-runtime" ? { kimi: { version: "2.3.3", node: { minimum: "22.19.0", version: QUERY.get("kimiNode") === "missing" ? null : "24.9.0", ready: QUERY.get("kimiNode") !== "missing" } } } : {}),
+    ...(name === "dsh-runtime" ? { dsh: { version: "0.2.1-rc.3", node: { minimum: "24.9.0", range: ">=24.9.0 <25", version: QUERY.get("dshNode") === "missing" ? null : "v24.21.0", ready: QUERY.get("dshNode") !== "missing" } } } : {}),
+    ...(name === "kimi-runtime" ? { kimi: { version: "2.3.3", node: { minimum: "24.9.0", range: ">=24.9.0 <25", version: QUERY.get("kimiNode") === "missing" ? null : "v24.21.0", ready: QUERY.get("kimiNode") !== "missing" } } } : {}),
     supported: mode !== "unsupported",
     state,
     selected,
     available: v.next,
     origin: selected ? "signed" : null,
-    versions: selected ? [{ version: selected, pinnedBy: 3, sizeBytes: v.size }] : [],
+    versions: indexed && selected ? indexed.map((version, i) => ({ version, pinnedBy: 3 - i, sizeBytes: v.size })) : selected ? [{ version: selected, pinnedBy: 3, sizeBytes: v.size }] : [],
     error: mode.startsWith("degraded") ? `${name} ${v.next}: did not answer within 10 s` : null,
     // Onboarding's needsUser fixture has a verified CLI, but is not signed in yet.
     steps: mode === "needsUser" ? (name === "claude-runtime" && QUERY.get("step") === "profile" ? STEPS[name]!.slice(1) : STEPS[name]!) : [],
@@ -192,12 +194,124 @@ function mockComponent(name: string, mode: string) {
       selected: QUERY.get("claudeCli") === "system" ? "system" : "bundled",
       bundled: { version: "2.1.301" }, system: QUERY.get("claudeCli") === "bundled" ? null : { version: "2.1.299" },
     } } : {}),
+    ...mockExternal(name, mode, windowsHost, selected),
+    ...mockIndex(name, selected),
   } as ComponentStatus;
 }
 
-function mockComponents(emitHost: (method: string, params: Record<string, unknown>) => void, settings?: Record<string, unknown>): Partial<DesktopApi> {
+/**
+ * r269 (contract frozen: shared/componentIndex.ts; the daemon side is not built yet, so this is a MOCK of it; `configure`
+ * is Moth's route). Gates: both capabilities are on unless `?nogate` (then nothing new shows).
+ * - `?ext=<code>[,<code>…]|all|none` adds those failed external-install checks to dsh-runtime / kimi-runtime (kimi_* codes
+ *   only on Kimi; `none`: no issues). Default: the selected r3 adapter is `needsUser` (`?dsh=needsUser&ext=…`).
+ *   `&extFor=candidate`: r3 is a staged candidate while r2 stays selected and ready (`?dsh=ready&ext=…&extFor=candidate`).
+ *   `&extFor=selected`: the selected adapter itself is ready and checked (`?dsh=ready&ext=none&extFor=selected`; add
+ *   `&extStored=1` for ready + stored: 恢复默认 inside the collapsed 路径设置).
+ *   `&extChecked=never`: `checkedAt: null` (unverified, never ready).
+ * - `?cindex=update|cutex|incompatible|yanked|yankedGone|yankedNoSafe|current|stale|staleNoCache|manifest|none` adds an `index`
+ *   to dsh / kimi / claude (`&cindexSource=privateKit|releaseManifest`); `&cindexCheck=fail`: 检查更新 fails (stale).
+ * 保存并检测 drops the checks the new paths fix; 重新检测 only refreshes the time; 更新 / 改用 / 用于新 agent install that
+ * version (outcome needsUser, not selected, while its dependencies are not ready). Operations end with a `result`.
+ * r270 (cutex component-external-ui-v1): `&extStored=1` adds `storedConfig` (a stored root, node / rg discovered) and
+ * `resolved` (configure keeps both up to date: changed fields only, null clears; `&extNoStore`: nothing stored); `&extDiag=1` gives every issue a compact
+ * `actual` plus `diagnostics` (a stack); `&srcOnly=1|<version>`: an empty install refuses with `component_source_only`
+ * (`<version>`: cutex suggests that explicit version). Fresh host (DSH card without the runtime): `?nofeat=dsh-runtime&cindex=update`.
+ * ae9cced9: `?component=source&cindex=update` is a kit base (managed + source-only) whose card offers 安装 {version};
+ * `dsh.node` / `kimi.node` carry a plain minimum + `range`, `external.nodeVersion` the observed version.
+ */
+const NO_GATE = QUERY.has("nogate");
+const EXT = (QUERY.get("ext") ?? "").split(",").filter(Boolean);
+const EXT_FOR = QUERY.get("extFor") ?? "";
+const EXT_NEVER = QUERY.get("extChecked") === "never";
+const CINDEX = QUERY.get("cindex") ?? "";
+const EXT_STORED = QUERY.has("extStored");
+const EXT_DIAG = QUERY.has("extDiag");
+const SRC_ONLY = QUERY.get("srcOnly");
+/** The adapter release that needs user-installed dependencies. */
+const ADAPTER_NEXT: Record<string, string> = { "dsh-runtime": "dsh-r3", "kimi-runtime": "kimi-r3" };
+/** The signed `cutex/external-runtime/v1` objects of the r3 adapters (as in cutex docs/contracts/component-index-v1.example.json). */
+const EXTERNAL_RUNTIME: Record<string, { rt: Record<string, unknown>; sha: string }> = {
+  "dsh-runtime": {
+    rt: { schema: "cutex/external-runtime/v1", name: "dsh-runtime", version: "dsh-r3", payload: "adapter-v1", externalRoot: { kind: "npm-prefix", packages: { "@deepseek-ai/dsh": "0.2.1-rc.3", "@deepseek-ai/dsh-session-format-catalog": "0.2.1-rc.3", ws: "8.22.0" }, cliEntry: "node_modules/@deepseek-ai/dsh/lib/bin.js", catalogEntry: "node_modules/@deepseek-ai/dsh-session-format-catalog/lib/index.js" }, node: { range: ">=24.9.0 <25", recommended: "24.21.0", features: ["node:sqlite"] }, checks: { rg: false, nodePty: false }, environment: { installRoot: "DSH_INSTALL_ROOT" } },
+    sha: "91c61f8240f09e9b964616e4794712e1fefae60b21c9c7fe887c88de70facc4f",
+  },
+  "kimi-runtime": {
+    rt: { schema: "cutex/external-runtime/v1", name: "kimi-runtime", version: "kimi-r3", payload: "adapter-v1", externalRoot: { kind: "npm-prefix", packages: { "@moonshot-ai/kimi-code": "2.3.3", ws: "8.22.0" }, cliEntry: "node_modules/@moonshot-ai/kimi-code/dist/main.mjs" }, node: { range: ">=24.9.0 <25", recommended: "24.21.0", features: ["node:sqlite"] }, checks: { rg: true, nodePty: true }, environment: { installRoot: "KIMI_INSTALL_ROOT" } },
+    sha: "d6a01e5acd1f9bdabfd382fb600f83bd9fad191782af47b3eeb39cf106e11262",
+  },
+};
+/** `?cindex`: the new-agent default, then older versions agents stay pinned to (3, 2, 1 agents); the index recommends the next one. */
+const INDEX_VERSIONS: Record<string, string[]> = { "dsh-runtime": ["dsh-r2", "dsh-r1"], "kimi-runtime": ["kimi-r2", "kimi-r1"], "claude-runtime": ["claude-r11", "claude-r10", "claude-r9"] };
+const EXT_ISSUES: Record<string, { expected: string | null; actual: string | null; path: (short: string) => string | null; steps?: string[] }> = {
+  external_root_missing: { expected: null, actual: "missing", path: (s) => `/home/alex/.local/share/cutex-external/${s}` },
+  external_root_invalid: { expected: "node_modules/@deepseek-ai/dsh/bin/dsh.mjs", actual: "missing", path: (s) => `/home/alex/.local/share/cutex-external/${s}/old` },
+  upstream_version_mismatch: { expected: "0.2.1-rc.3", actual: "0.2.0", path: (s) => `/home/alex/.local/share/cutex-external/${s}/0.2.0/node_modules/@deepseek-ai/dsh/package.json` },
+  node_missing: { expected: ">=24.9.0 <25", actual: null, path: () => null, steps: ["cutex looked on PATH=/usr/local/bin:/usr/bin:/bin (the service PATH)."] },
+  node_version_unsupported: { expected: ">=24.9.0 <25", actual: "22.11.0", path: () => "/usr/bin/node" },
+  kimi_pty_unavailable: { expected: "node-pty 1.1.0 (loads under the configured Node)", actual: "Error: Cannot find module ../build/Release/pty.node", path: () => "/home/alex/.local/share/cutex-external/kimi/2.3.3/node_modules/node-pty" },
+  kimi_rg_missing: { expected: "rg on PATH or --rg", actual: null, path: () => null },
+};
+const EXT_PACKAGES: Record<string, string[]> = {
+  "dsh-runtime": ["@deepseek-ai/dsh@0.2.1-rc.3", "@deepseek-ai/dsh-session-format-catalog@0.2.1-rc.3", "ws@8.22.0"],
+  "kimi-runtime": ["@moonshot-ai/kimi-code@2.3.3", "ws@8.22.0"],
+};
+const isoAgo = (s: number) => new Date(Date.now() - s * 1000).toISOString();
+/** The Linux mock path as it would read on the Windows mock host (HOST-A). */
+const hostPath = (p: string | null, windowsHost: boolean) => (p && windowsHost ? p.replace("/home/alex/.local/share/", "C:\\Users\\alex\\AppData\\Local\\").replace("/usr/bin/node", "C:\\Program Files\\nodejs\\node.exe").replace("/usr/bin/rg", "C:\\Users\\alex\\scoop\\shims\\rg.exe").replaceAll("/", "\\") : p);
+
+function mockExternal(name: string, mode: string, windowsHost: boolean, selected: string | null): Record<string, unknown> {
+  // A candidate next to a ready default, or (r270 fresh host) before anything is installed.
+  if (!EXT_PACKAGES[name] || !EXT.length || !(EXT_FOR === "candidate" ? ["ready", "missing"] : EXT_FOR === "selected" ? ["ready"] : ["needsUser"]).includes(mode)) return {};
+  const short = name === "dsh-runtime" ? "dsh" : "kimi";
+  const codes = (EXT.includes("all") ? Object.keys(EXT_ISSUES) : EXT).filter((c) => c !== "none" && (short === "kimi" || !c.startsWith("kimi_")));
+  const issues = codes.map((code) => {
+    const i = EXT_ISSUES[code];
+    if (!i) return { code, expected: null, actual: null, path: null, steps: ["cutex: a check this desktop does not know yet."] };
+    const kimiVersion = short === "kimi" && code === "upstream_version_mismatch";
+    const issue = { code, expected: kimiVersion ? "2.3.3" : i.expected, actual: kimiVersion ? "2.2.0" : i.actual, path: hostPath(i.path(short), windowsHost), steps: i.steps ?? [] };
+    if (!EXT_DIAG || !issue.actual) return issue;
+    const stack = ["Require stack:", `- ${hostPath(`/home/alex/.local/share/cutex-external/${short}/probe.cjs`, windowsHost)}`, "    at Module._resolveFilename (node:internal/modules/cjs/loader:1225:15)", "    at Module._load (node:internal/modules/cjs/loader:1051:27)", "    at Object.<anonymous> (probe.cjs:3:13) {", "  code: 'MODULE_NOT_FOUND'", "}"];
+    return { ...issue, diagnostics: [issue.actual, ...stack].join("\n") };
+  });
+  const root = codes.includes("external_root_missing") ? null : hostPath(`/home/alex/.local/share/cutex-external/${short}/${short === "dsh" ? "0.2.1-rc.3" : "2.3.3"}`, windowsHost);
+  const version = EXT_FOR === "candidate" ? ADAPTER_NEXT[name]! : (selected ?? ADAPTER_NEXT[name]!);
+  // r270: the owner stored a relative-looking root (kept exactly); cutex found node / rg itself.
+  const node = codes.some((c) => c.startsWith("node_")) ? null : hostPath("/usr/bin/node", windowsHost);
+  const rg = short === "kimi" && !codes.includes("kimi_rg_missing") ? hostPath("/usr/bin/rg", windowsHost) : null;
+  const stored = EXT_STORED ? { storedConfig: { externalRoot: root && !QUERY.has("extNoStore") ? hostPath(`/home/alex/.local/share/cutex-external/${short}/../${short}/${short === "dsh" ? "0.2.1-rc.3" : "2.3.3"}`, windowsHost) : null, node: null, rg: null }, resolved: { externalRoot: root, node, rg } } : {};
+  return { external: { version, root, node: EXT_STORED ? node : null, rg: EXT_STORED ? rg : null, packages: EXT_PACKAGES[name], nodeRange: ">=24.9.0 <25", nodeRecommended: "24.21.0", ...(EXT_NEVER || node === null ? {} : { nodeVersion: "v24.21.0" }), checkedAt: EXT_NEVER ? null : isoAgo(7 * 60), issues: EXT_NEVER ? [] : issues, ...stored } };
+}
+
+function mockIndex(name: string, selected: string | null): Record<string, unknown> {
+  if (!CINDEX || name === "job-service") return {};
+  const cur = selected ?? INDEX_VERSIONS[name]![0]!;
+  const prev = INDEX_VERSIONS[name]![1]!;
+  const next = name === "dsh-runtime" ? "dsh-r3" : name === "kimi-runtime" ? "kimi-r3" : "claude-r12";
+  const req = name === "dsh-runtime" ? { upstream: "@deepseek-ai/dsh@0.2.1-rc.3", node: ">=24.9.0 <25" } : name === "kimi-runtime" ? { upstream: "@moonshot-ai/kimi-code@2.3.3", node: ">=24.9.0 <25", rg: "any" } : {};
+  const yanked = CINDEX.startsWith("yanked");
+  const adapter = EXTERNAL_RUNTIME[name];
+  const bundled = { externalRuntime: null, externalRuntimeSha256: null };
+  const nextIncompatible = CINDEX === "cutex" ? "capability:external-runtime-root-v2" : CINDEX === "incompatible" ? "platform" : null;
+  const releases = [
+    // `yankedGone`: the withdrawn default is no longer in the document; cutex still says selectedYanked.
+    ...(CINDEX === "yankedGone" ? [] : [{ version: cur, yanked, yankReason: yanked ? "session resume loses tool results on Windows (#412)" : null, compatible: true, incompatibleReason: null, requirements: {}, ...bundled }]),
+    { version: next, yanked: false, yankReason: null, compatible: !nextIncompatible, incompatibleReason: nextIncompatible, requirements: req, ...(adapter ? { externalRuntime: adapter.rt, externalRuntimeSha256: adapter.sha } : bundled) },
+    { version: prev, yanked: false, yankReason: null, compatible: true, incompatibleReason: null, requirements: {}, ...bundled },
+  ];
+  const recommended = CINDEX === "current" || CINDEX === "stale" ? cur : CINDEX === "yanked" || CINDEX === "yankedGone" ? prev : CINDEX === "yankedNoSafe" || CINDEX === "none" ? null : next;
+  const stale = CINDEX === "stale" || CINDEX === "staleNoCache";
+  const signed = CINDEX !== "manifest" && CINDEX !== "staleNoCache";
+  return { index: {
+    source: CINDEX === "manifest" || CINDEX === "staleNoCache" ? "releaseManifest" : (QUERY.get("cindexSource") ?? "componentIndex"),
+    channel: signed ? "public-stable" : null, sequence: signed ? 14 : null, publishedAt: signed ? isoAgo(2 * 86400) : null,
+    fetchedAt: signed ? isoAgo(stale ? 3 * 86400 : 20 * 60) : null,
+    stale, staleReason: stale ? "offline: github.com unreachable" : null, recommended, selectedYanked: yanked, releases,
+  } };
+}
+
+function mockComponents(emitHost: (method: string, params: Record<string, unknown>) => void, settings?: Record<string, unknown>, windowsHost = false): Partial<DesktopApi> {
   const modes: Record<string, string> = { "job-service": COMPONENT_MODE, "claude-runtime": CLAUDE_MODE };
-  const items = [mockComponent("job-service", COMPONENT_MODE), mockComponent("claude-runtime", CLAUDE_MODE), ...(!QUERY.has("legacy") ? [mockComponent("dsh-runtime", QUERY.get("dsh") ?? "missing"), mockComponent("kimi-runtime", QUERY.get("kimi") ?? "missing")] : [])];
+  const items = [mockComponent("job-service", COMPONENT_MODE), mockComponent("claude-runtime", CLAUDE_MODE), ...(!QUERY.has("legacy") ? [mockComponent("dsh-runtime", QUERY.get("dsh") ?? "missing", windowsHost), mockComponent("kimi-runtime", QUERY.get("kimi") ?? "missing", windowsHost)] : [])];
   modes["dsh-runtime"] = QUERY.get("dsh") ?? "missing";
   modes["kimi-runtime"] = QUERY.get("kimi") ?? "missing";
   let operation: Record<string, unknown> | null = CLAUDE_MODE === "installing" ? { id: "cop-preview", name: "claude-runtime", action: "install", state: "running", step: "download", error: null } : null;
@@ -206,9 +320,19 @@ function mockComponents(emitHost: (method: string, params: Record<string, unknow
     installFrom: HOST_MODE === "source" ? "source-only" : HOST_MODE === "unmanaged" ? "none" : "release",
     components: items.map(item => item.claudeCli ? { ...item, claudeCli: { ...item.claudeCli, selected: settings?.claudeCli === "system" && item.claudeCli.system ? "system" : settings?.claudeCli === "bundled" ? "bundled" : item.claudeCli.selected } } : item),
     operation,
+    ...(NO_GATE ? {} : { indexOperation }),
   });
+  let indexOperation: Record<string, unknown> | null = null;
   const publish = (name: string, reason: "operation" | "state") =>
     emitHost("cutex/components/updated", { name, reason, state: items.find((c) => c.name === name)!.state, operation });
+  /** A terminal check / configure (instant in the mock): `done` + cutex's verdict, never a selection. */
+  const finish = (c: ComponentStatus, action: string) => {
+    const ext = c.external!;
+    const ready = ext.checkedAt !== null && ext.issues.length === 0;
+    operation = { id: `cop-${Date.now().toString(16)}`, name: c.name, action, state: "done", step: null, error: null, result: { outcome: ready ? "ready" : "needsUser", version: ext.version, selected: false } };
+    publish(c.name, "operation");
+    return { ok: true as const, value: readComponentOperation(structuredClone(operation)) };
+  };
   let failedReads = 0;
   return {
     async components() {
@@ -216,12 +340,21 @@ function mockComponents(emitHost: (method: string, params: Record<string, unknow
       if ((COMPONENT_MODE === "readError" || CLAUDE_MODE === "readError") && failedReads++ < 1) throw new Error("connect ECONNRESET");
       return readComponentsList(structuredClone(list()));
     },
-    async componentAction(name, action) {
+    async componentAction(name, action, opts) {
       await delay();
       const c = items.find((x) => x.name === name);
       if (!c) return { ok: false, error: { code: "component_unknown", message: `no component named \`${name}\``, status: 404 } };
+      if (action === "check") {
+        // cutex probed again (same issues in the mock): the time moves; an unverified adapter now has a verdict.
+        if (!c.external) return { ok: false, error: { code: "component_not_external", message: `${name} has no external dependencies`, status: 409 } };
+        c.external = { ...c.external, checkedAt: new Date().toISOString(), issues: EXT_NEVER && !EXT.includes("none") && !c.external.issues.length ? [{ code: "node_missing", expected: ">=24.9.0 <25", actual: null, path: null, steps: [] }] : c.external.issues };
+        return finish(c, "check");
+      }
       if (action === "remove") return { ok: false, error: { code: name === "job-service" ? "jobs_running" : "component_pinned", message: "refused by the mock", status: 409 } };
       if (modes[name] === "refused") return { ok: false, error: { code: "upgrade_blocked", message: "a backend upgrade or another component operation is running", status: 409, reason: "run_in_progress" } };
+      // r270: a source / debug build refuses the empty (manifest) install; cutex may name a verified version to request explicitly.
+      if (SRC_ONLY && action === "install" && !opts?.version)
+        return { ok: false, error: { code: "component_source_only", message: `this source build has no release manifest for ${name}; select an explicit verified version`, status: 409, ...(SRC_ONLY !== "1" ? { offeredVersion: SRC_ONLY } : {}) } };
       const id = `cop-${Date.now().toString(16)}`;
       const steps = ["download", "verify", "prepare", "select"];
       const v = VERSIONS[name]!;
@@ -236,20 +369,66 @@ function mockComponents(emitHost: (method: string, params: Record<string, unknow
             operation = { id, name, action, state: "failed", step, error };
             Object.assign(c, { state: "degraded", error });
           } else {
-            operation = { id, name, action, state: "done", step: null, error: null };
-            Object.assign(c, { state: "ready", selected: v.next, origin: "signed", versions: [{ version: v.next, pinnedBy: 0, sizeBytes: v.size }] });
+            const version = opts?.version ?? v.next;
+            const ext = c.external;
+            if (ext && ext.version === version && (ext.checkedAt === null || ext.issues.length) && c.selected) {
+              // Dependency-blocked adapter: verified and staged (`done`), but the working version stays the default.
+              operation = { id, name, action, state: "done", step: null, error: null, result: { outcome: "needsUser", version, selected: false } };
+              Object.assign(c, { state: "ready" });
+            } else {
+              operation = { id, name, action, state: "done", step: null, error: null, result: { outcome: "selected", version, selected: true } };
+              const pinned = c.versions.filter((x) => x.pinnedBy > 0 && x.version !== version);
+              Object.assign(c, { state: "ready", selected: version, origin: "signed", versions: [{ version, pinnedBy: 0, sizeBytes: v.size }, ...pinned] });
+              if (c.index) c.index = { ...c.index, selectedYanked: false };
+            }
           }
           publish(name, "operation");
         }, 1200 * (i + 1)),
       );
       return { ok: true, value: readComponentOperation(structuredClone(operation)) };
     },
+    // MOCK of the r269 owner action POST /v2/components/{name}/configure (Moth's route, not built yet).
+    async componentConfigure(name, req) {
+      await delay();
+      const c = items.find((x) => x.name === name);
+      if (!c?.external) return { ok: false, error: { code: "component_not_external", message: `${name} has no external dependencies`, status: 409 } };
+      const ext = { ...c.external, ...(req.externalRoot !== undefined ? { root: req.externalRoot } : {}), ...(req.node !== undefined ? { node: req.node } : {}), ...(req.rg !== undefined ? { rg: req.rg } : {}), checkedAt: new Date().toISOString() };
+      if (ext.storedConfig) {
+        // r270: absent keeps the stored override, null clears it (cutex discovers again; the mock "finds" nothing then).
+        const sc = { ...ext.storedConfig, ...req };
+        ext.storedConfig = sc;
+        ext.resolved = { externalRoot: sc.externalRoot, node: sc.node ?? c.external.resolved?.node ?? null, rg: sc.rg ?? c.external.resolved?.rg ?? null };
+        Object.assign(ext, { root: ext.resolved.externalRoot, node: ext.resolved.node, rg: ext.resolved.rg });
+      }
+      const fixed = (code: string) => (code.startsWith("external_root") || code === "upstream_version_mismatch" ? !!req.externalRoot : code.startsWith("node_") ? !!req.node : code === "kimi_rg_missing" ? !!req.rg : false);
+      ext.issues = ext.issues.filter((i) => !fixed(i.code));
+      c.external = ext;
+      // The selected adapter works once nothing fails; a candidate only becomes ready (selecting it is an install).
+      if (!ext.issues.length && c.state === "needsUser") Object.assign(c, { state: "ready", steps: [] });
+      return finish(c, "configure");
+    },
+    // MOCK of POST /v2/components/index/check: its own operation (`indexOperation`), then `cutex/components/indexUpdated`.
+    async componentIndexCheck() {
+      await delay();
+      if (indexOperation?.state === "running") return { ok: false, error: { code: "upgrade_blocked", message: "an index refresh is running", status: 409, reason: "run_in_progress" } };
+      const id = `cop-index-${Date.now().toString(16)}`;
+      indexOperation = { id, name: null, action: "indexCheck", state: "running", step: "download", error: null };
+      emitHost("cutex/components/indexUpdated", { channel: "public-stable", sequence: 14, stale: false, staleReason: null, operation: indexOperation });
+      setTimeout(() => {
+        const fail = QUERY.get("cindexCheck") === "fail";
+        indexOperation = { id, name: null, action: "indexCheck", state: fail ? "failed" : "done", step: null, error: fail ? "download: github.com unreachable" : null };
+        for (const c of items)
+          if (c.index) c.index = fail ? { ...c.index, stale: true, staleReason: "offline: github.com unreachable" } : { ...c.index, stale: false, staleReason: null, fetchedAt: new Date().toISOString() };
+        emitHost("cutex/components/indexUpdated", { channel: "public-stable", sequence: 14, stale: fail, staleReason: fail ? "offline: github.com unreachable" : null, operation: indexOperation });
+      }, 1500);
+      return { ok: true, value: readComponentOperation(structuredClone(indexOperation)) };
+    },
   };
 }
 
 export const mock: ModuleMock = {
-  api: (core) => ({ ...mockJobApi(byId), ...mockComponents((method, params) => core.emitHost(method, params), core.settings) }),
+  api: (core) => ({ ...mockJobApi(byId), ...mockComponents((method, params) => core.emitHost(method, params), core.settings, true) }),
   remote: (hostId, emitHost) => ({ ...mockJobApi(remoteJobsOf(hostId)), ...mockComponents(emitHost) }),
   // The NCI rows above are plain Job Service data; inbound mail / the Gadi check are modules/nci/mock.ts.
-  features: { new: ["job-external", ...(COMPONENT_MODE === "nocap" ? [] : [COMPONENTS_FEATURE])] },
+  features: { new: ["job-external", ...(COMPONENT_MODE === "nocap" ? [] : [COMPONENTS_FEATURE]), ...(NO_GATE ? [] : [COMPONENT_INDEX_FEATURE, EXTERNAL_RUNTIME_ROOT_FEATURE])] },
 };

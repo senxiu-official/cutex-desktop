@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { RUNTIME_RESTORE_FEATURE, type RestoreCandidates } from "../../../shared/runtimeRestore";
-import { api } from "../bridge";
+import { apiFor } from "../bridge";
 import { useI18n } from "../i18n";
 import { chosenCandidates, restoreSequentially, type RestoreOutcome } from "../lib/runtimeRestore";
 import { useTrackOverlay } from "../lib/openOverlays";
@@ -23,7 +23,12 @@ type RestoreState = NonNullable<ReturnType<typeof useRestoreState>>;
 function useRestoreState() {
   const { t } = useI18n();
   const supported = useApp((s) => s.features.has(RUNTIME_RESTORE_FEATURE));
-  const host = useApp((s) => s.hosts?.active);
+  const host = useApp((s) => s.hosts?.active ?? "local");
+  const context = useRef({ host, supported });
+  if (context.current.host !== host || context.current.supported !== supported) context.current = { host, supported };
+  const scope = context.current;
+  const mounted = useRef(false);
+  const current = () => mounted.current && context.current === scope;
   const sessionAction = useApp((s) => s.sessionAction);
   const [data, setData] = useState<RestoreCandidates | null>(null);
   const [choosing, setChoosing] = useState(false);
@@ -32,15 +37,18 @@ function useRestoreState() {
   const [failed, setFailed] = useState<RestoreOutcome[]>([]);
 
   const load = () =>
-    api
+    apiFor(host)
       .restoreCandidates()
-      .then((d) => setData(d))
-      .catch(() => setData(null));
+      .then((d) => { if (current()) setData(d); })
+      .catch(() => { if (current()) setData(null); });
   useEffect(() => {
+    mounted.current = true;
     setData(null);
     setChoosing(false);
     setFailed([]);
+    setProgress(null);
     if (supported) void load();
+    return () => { mounted.current = false; };
   }, [supported, host]); // eslint-disable-line react-hooks/exhaustive-deps -- reload per host
 
   const items = data?.items ?? [];
@@ -54,9 +62,10 @@ function useRestoreState() {
     setProgress({ done: 0, total: list.length });
     const outcomes = await restoreSequentially(
       list,
-      (id) => sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }),
-      (done, total) => setProgress({ done, total }),
+      (id) => sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, host),
+      (done, total) => { if (current()) setProgress({ done, total }); },
     );
+    if (!current()) return;
     setProgress(null);
     setFailed(outcomes.filter((o) => o.error !== null));
     await load();
@@ -64,7 +73,8 @@ function useRestoreState() {
   const dismiss = async () => {
     setFailed([]);
     setChoosing(false);
-    const r = await api.dismissRestoreCandidates().catch(() => null);
+    const r = await apiFor(host).dismissRestoreCandidates().catch(() => null);
+    if (!current()) return;
     if (r?.ok) setData(null);
     else void load();
   };

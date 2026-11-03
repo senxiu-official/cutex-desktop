@@ -53,7 +53,7 @@ afterEach(() => { service.stop(); vi.useRealTimers(); });
 
 it("opts into background scheduling and disposes the old connection", async () => {
   await open(); const old = f.clients[0];
-  expect(old.options).toEqual({ backgroundReads: true });
+    expect(old.options).toEqual({ backgroundReads: true, fetch: expect.any(Function) });
   await open(); expect(old.dispose).toHaveBeenCalledOnce();
 });
 

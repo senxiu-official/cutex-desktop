@@ -25,6 +25,7 @@ vi.mock("../src/renderer/src/modules/react", async (original) => ({ ...(await or
 vi.mock("../src/renderer/src/lib/profileSnapshot", async (original) => ({ ...(await original<object>()), cachedProfileList: () => fx.list, loadProfileList: async () => fx.list, cachedProfile: () => null }));
 
 const { useApp } = await import("../src/renderer/src/store");
+const originalSessionAction = useApp.getState().sessionAction;
 const { emptyPendingChat } = await import("../src/renderer/src/lib/pendingChat");
 const { draftRuntime, variantModelRows, variantDefaultModel } = await import("../src/renderer/src/lib/draftRuntime");
 const { PendingChat } = await import("../src/renderer/src/modules/quick-chats/PendingChat");
@@ -86,7 +87,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
-  useApp.setState({ pendingChat: null });
+  useApp.setState({ pendingChat: null, sessionAction: originalSessionAction });
 });
 const flush = async () => { for (let i = 0; i < 20; i++) await act(async () => { await Promise.resolve(); }); };
 
@@ -106,10 +107,14 @@ describe("quick chat on a cute-codex Profile whose default variant is DSH", () =
     expect(host.textContent).not.toContain("GPT Codex X");
 
     fx.createHumanSession.mockResolvedValue({ cutexSessionId: "new-dsh" });
-    useApp.setState({ pendingChat: { ...pending, drafts: [{ text: "hi", images: [], skills: [] }] }, select: vi.fn(async () => {}), submit: vi.fn(async () => null), refreshHostSidebar: vi.fn(async () => {}), setCollabMode: vi.fn(), setGoal: vi.fn() } as never);
+    const online = vi.fn(async () => ({ status: "online" }));
+    const submit = vi.fn(async () => null);
+    useApp.setState({ pendingChat: { ...pending, drafts: [{ text: "hi", images: [], skills: [] }] }, select: vi.fn(async () => {}), sessionAction: online, submit, refreshHostSidebar: vi.fn(async () => {}), setCollabMode: vi.fn(), setGoal: vi.fn() } as never);
     useApp.getState().retryPendingChat();
     await flush();
-    expect(fx.createHumanSession).toHaveBeenCalledExactlyOnceWith({ start: true, profile: "omega" });
+    expect(fx.createHumanSession).toHaveBeenCalledExactlyOnceWith({ start: false, profile: "omega" });
+    expect(online).toHaveBeenCalledExactlyOnceWith("new-dsh", "cutex/runtime/online", { openVisibleTerminal: false }, "local");
+    expect(submit).toHaveBeenCalledExactlyOnceWith("hi", "auto", [], { keepFailed: false, startIfOffline: false });
   });
 
   it("a Kimi default variant gets the ACP draft, and send waits for the kimi-runtime capability", async () => {

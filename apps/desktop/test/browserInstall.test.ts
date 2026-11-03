@@ -1,10 +1,13 @@
 import { EventEmitter } from "node:events";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import type { HostManager } from "../src/main/hosts";
 import type { BrowserEvent, BrowserRequest, BrowserTabMount, BrowserTabView } from "../src/shared/browser";
 import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS } from "../src/shared/browser";
 import { browserAppZoom, browserDisplayUrl, installBrowser, syncBrowserHosts } from "../src/main/browser/install";
+import { BrowserLeases } from "../src/main/browser/leases";
+import { InAppProvider } from "../src/main/browser/provider";
 
 // Exercise installBrowser's public IPC/event boundary, not private functions or an alternate adapter.
 const electron = vi.hoisted(() => ({
@@ -1083,7 +1086,7 @@ describe("installed controlled tabs, downloads and site permissions (0.1.3)", ()
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
     const { guest } = await f.mount("side-one", "http://localhost:26180/");
     const download = (contents: unknown, name = "report.csv") => {
-      const event = { preventDefault: vi.fn() }, item = { cancel: vi.fn(), getFilename: () => name, getURL: () => "http://localhost:26180/report.csv", setSaveDialogOptions: vi.fn() };
+      const event = { preventDefault: vi.fn() }, item = { cancel: vi.fn(), getFilename: () => name, getMimeType: () => "text/csv", getURL: () => "http://localhost:26180/report.csv", setSaveDialogOptions: vi.fn() };
       f.session.emit("will-download", event, item, contents);
       return { cancelled: event.preventDefault.mock.calls.length > 0 && item.cancel.mock.calls.length > 0, options: item.setSaveDialogOptions.mock.calls[0]?.[0] };
     };
@@ -1099,7 +1102,91 @@ describe("installed controlled tabs, downloads and site permissions (0.1.3)", ()
     guest.emit("before-mouse-event", {}, { type: "mouseDown" });
     const allowed = download(guest, "../..\\evil:name?.exe");
     expect(allowed.cancelled).toBe(false);
-    expect(allowed.options).toEqual({ title: "Save download", defaultPath: expect.stringMatching(/memory-only-user-data[\\/]_.._evil_name_.exe$/) });
+    expect(allowed.options).toEqual({ title: "Save download", defaultPath: expect.stringMatching(/memory-only-user-data[\\/]_.._evil_name_.exe$/),
+      filters: [{ name: "_.._evil_name_.exe", extensions: ["exe"] }] });
+  });
+  it.each([
+    { filename: "release.v1.2.ZIP", mime: "application/octet-stream", url: "http://localhost:26180/download", expected: "release.v1.2.ZIP", extension: "zip" },
+    { filename: "backup.tar.gz", mime: "application/gzip", url: "http://localhost:26180/download.zip", expected: "backup.tar.gz", extension: "gz" },
+    { filename: "report.final.pdf", mime: "application/zip", url: "http://localhost:26180/other.zip", expected: "report.final.pdf", extension: "pdf" },
+    { filename: "archive", mime: "application/zip", url: "http://localhost:26180/download", expected: "archive.zip", extension: "zip" },
+    { filename: "report", mime: "application/pdf", url: "http://localhost:26180/export.php", expected: "report.pdf", extension: "pdf" },
+    { filename: "picture", mime: "image/png", url: "http://localhost:26180/export.php", expected: "picture.png", extension: "png" },
+    { filename: "archive", mime: "application/gzip", url: "http://localhost:26180/backup.tar.gz", expected: "archive.tar.gz", extension: "gz" },
+    { filename: "archive", mime: "application/octet-stream", url: "http://localhost:26180/backup%2Etar%2Egz?name=wrong.zip", expected: "archive.tar.gz", extension: "gz" },
+    { filename: "download", mime: "application/x-unknown-download", url: "http://localhost:26180/download?filename=wrong.zip", expected: "download", extension: undefined },
+    { filename: "download", mime: "application/octet-stream", url: "http://localhost:26180/wrong.zip%2Fdownload", expected: "download", extension: undefined },
+    { filename: "download", mime: "application/octet-stream", url: "http://localhost:26180/%ZZ.zip", expected: "download", extension: undefined },
+    { filename: `${"a".repeat(230)}.tar.gz`, mime: "application/gzip", url: "http://localhost:26180/download", expected: `${"a".repeat(193)}.tar.gz`, extension: "gz" },
+  ])("downloads: native save options preserve $expected from Chromium / MIME / URL", async ({ filename, mime, url, expected, extension }) => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount();
+    guest.emit("before-mouse-event", {}, { type: "mouseDown" });
+    const event = { preventDefault: vi.fn() }, item = { cancel: vi.fn(), getFilename: () => filename, getMimeType: () => mime, getURL: () => url, setSaveDialogOptions: vi.fn() };
+    f.session.emit("will-download", event, item, guest);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(item.cancel).not.toHaveBeenCalled();
+    // macOS needs a suffix in FileFilter.extensions, without a leading dot or wildcard. Only
+    // the last suffix belongs in the filter; the complete compound suffix stays in defaultPath.
+    expect(item.setSaveDialogOptions).toHaveBeenCalledExactlyOnceWith({
+      title: "Save download", defaultPath: join("memory-only-user-data", expected),
+      filters: extension ? [{ name: expected, extensions: [extension] }] : undefined,
+    });
+    expect(basename(item.setSaveDialogOptions.mock.calls[0]![0].defaultPath).length).toBeLessThanOrEqual(200);
+  });
+  it("downloads: unattributed, disabled and revoked downloads never open a save dialog", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount();
+    const rejected = (contents: unknown) => {
+      const event = { preventDefault: vi.fn() }, item = { cancel: vi.fn(), getFilename: vi.fn(), setSaveDialogOptions: vi.fn() };
+      f.session.emit("will-download", event, item, contents);
+      expect(event.preventDefault).toHaveBeenCalledOnce();
+      expect(item.cancel).toHaveBeenCalledOnce();
+      expect(item.getFilename).not.toHaveBeenCalled();
+      expect(item.setSaveDialogOptions).not.toHaveBeenCalled();
+    };
+    rejected(undefined);
+    rejected(new ContentsMock(nextContentsId++, f.session));
+    await f.ipc({ op: "close", tabKey: "side-one" });
+    rejected(guest);
+    await f.ipc({ op: "setEnabled", enabled: false });
+    rejected(guest);
+  });
+  it("downloads: an agent's dispatched download keeps attribution, visibility and cancellation boundaries", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { reserved, guest } = await f.mount();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 11_000);
+    const lease = vi.spyOn(BrowserLeases.prototype, "forGuest").mockReturnValue({ leaseId: "lease-download", cutexSessionId: "agent-session",
+      target: { hostId: "local", deviceId: "test-device", guestId: reserved.guestId }, state: "active", title: "Fixture page", url: guest.url, origin: "owner", agentName: "Test Agent" });
+    const input = vi.spyOn(InAppProvider.prototype, "agentInput").mockReturnValue(true);
+    const control = vi.spyOn(InAppProvider.prototype, "controlView").mockReturnValue({ grantee: "Test Agent", state: "granted", operating: true });
+    cleanup.push(() => { control.mockRestore(); input.mockRestore(); lease.mockRestore(); clock.mockRestore(); });
+    const download = () => {
+      const event = { preventDefault: vi.fn() }, item = { cancel: vi.fn(), setSavePath: vi.fn(), getFilename: () => "archive", getMimeType: () => "application/zip",
+        getURL: () => "http://localhost:26180/download", setSaveDialogOptions: vi.fn() };
+      f.session.emit("will-download", event, item, guest);
+      expect(item.setSavePath).not.toHaveBeenCalled(); // The native save panel retains the save / cancel decision.
+      return { event, item };
+    };
+    const allowed = download();
+    expect(allowed.item.setSaveDialogOptions).toHaveBeenCalledExactlyOnceWith({
+      title: "Test Agent wants to download a file — choose where to save it, or cancel",
+      defaultPath: join("memory-only-user-data", "archive.zip"), filters: [{ name: "archive.zip", extensions: ["zip"] }],
+    });
+    expect(allowed.item.cancel).not.toHaveBeenCalled();
+    f.windowState.visible = false;
+    const hidden = download();
+    expect(hidden.event.preventDefault).toHaveBeenCalledOnce(); expect(hidden.item.cancel).toHaveBeenCalledOnce();
+    expect(hidden.item.setSaveDialogOptions).not.toHaveBeenCalled();
+    expect(f.events.at(-1)).toMatchObject({ kind: "blocked", blocked: "download-hidden" });
+    f.windowState.visible = true;
+    control.mockReturnValue({ grantee: "Test Agent", state: "paused", operating: false });
+    const paused = download();
+    expect(paused.item.cancel).toHaveBeenCalledOnce(); expect(paused.item.setSaveDialogOptions).not.toHaveBeenCalled();
+    control.mockReturnValue({ grantee: "Test Agent", state: "granted", operating: false });
+    input.mockReturnValue(false);
+    const unsolicited = download();
+    expect(unsolicited.item.cancel).toHaveBeenCalledOnce(); expect(unsolicited.item.setSaveDialogOptions).not.toHaveBeenCalled();
   });
   it("site permissions: the owner answers a native dialog; a ticked choice is remembered for that origin and can be forgotten", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });

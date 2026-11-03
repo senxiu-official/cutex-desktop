@@ -2,6 +2,7 @@
 // at the avatar's bottom-left, in the project's colour. The text is what the sidebar header's project icon shows:
 // the chosen text / emoji icon (prefs `projectIcons`), else the project's badge label, else the first characters of
 // its name (a CJK name: one character; Latin: two capitals). A Director of several projects, or of none: no mark.
+import { contrast } from "../../../shared/windowChrome";
 import { clipToWidth, displayWidth } from "./badgeWidth";
 import { graphemes } from "./graphemes";
 import type { ProjectIconChoice } from "./projectIcons";
@@ -98,21 +99,21 @@ export function projectMarkCrowded(size: number, text: string, dot: boolean): bo
   return dot && size < 36 && displayWidth(text) > 2;
 }
 
-/** The frosted-glass mark (owner 2026-10-23, preview-director-mark-v5 #8): the share of the project colour tinted into the
- *  glass; the text keeps the project's OKLCH hue with its lightness pinned per theme (a dark ink on light, a light one on
- *  dark) and its chroma capped, so yellow, magenta and grey read as well as blue (≥ 4.5:1 for every palette colour in
- *  both themes, test/projectMark.test.ts). */
-export const MARK_GLASS_TINT = 0.18;
-export const MARK_TEXT_L_LIGHT = 0.45;
-export const MARK_TEXT_L_DARK = 0.9;
-export const MARK_TEXT_CHROMA_MAX = 0.13;
 /** Corner radius (px) of the rectangular mark. */
 export const MARK_RADIUS = 3;
 
-/** CSS for the mark's text colour on the project colour `hex`: hue kept, lightness / chroma adjusted per theme (needs `color-scheme`, set on :root). */
-export function markTextColor(hex: string): string {
-  const adjust = (l: number) => `oklch(from ${hex} ${l} min(c, ${MARK_TEXT_CHROMA_MAX}) h)`;
-  return `light-dark(${adjust(MARK_TEXT_L_LIGHT)}, ${adjust(MARK_TEXT_L_DARK)})`;
+/** WCAG AA for the mark's 8.5–12 px text. */
+export const MARK_MIN_CONTRAST = 4.5;
+const MARK_INK_LIGHT = "#ffffff";
+const MARK_INK_DARK = "#000000";
+
+/** The mark's ink on its pill (owner 2026-11-01, avatar-badges): the pill is opaque and filled with the project colour
+ *  `hex` (lib/sidebar projectColor: a palette colour or any custom #rrggbb), so nothing behind it — portrait, emoji,
+ *  letter tile, either theme — reaches the text. White when it meets MARK_MIN_CONTRAST, else black: below white's
+ *  threshold (luminance > 0.183) black gives ≥ 4.66:1, so every sRGB colour gets ≥ 4.5:1 (test/projectMark.test.ts).
+ *  (The frosted glass it replaces let a light portrait through a 18 % tint, under ink tuned for the bare surface.) */
+export function markInk(hex: string): string {
+  return contrast(MARK_INK_LIGHT, hex) >= MARK_MIN_CONTRAST ? MARK_INK_LIGHT : MARK_INK_DARK;
 }
 
 /** What a mark is drawn from: its text and a project colour (a palette name or #hex, lib/sidebar projectColor). */

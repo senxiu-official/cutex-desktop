@@ -2,11 +2,11 @@
 // 消息投递 (cutex wake-busy-wait: how long a wake / delegation results for a busy agent wait for its
 // turn to end) sits with the other policy sections, and the plumbing — 消息总线 on / port / token
 // (restart needed) and, with cutex agent-bus-stuck-messages, 卡住的消息 — is in a collapsed 「高级」
-// card at the end of the page. Settings search still finds it: a reveal opens the card.
+// card at the end of the page, followed by 待清理 (stale delegations, stuck messages, hidden receipts;
+// CleanupSection). Settings search still finds it: a reveal opens the card.
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { GlobalSettings } from "../../../../shared/ipc";
-import { STUCK_MESSAGES_FEATURE } from "../../../../shared/agentBusStuck";
 import { ErrorNote, IconButton, Loading, Notice, NumberField, ResetButton, Section, SettingRow, Toggle } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
 import { useGlobalSettings } from "../../lib/globalSettings";
@@ -15,7 +15,8 @@ import { useOnSettingsReveal } from "../../lib/settingsSearchView";
 import { useTargetFeatures, useTargetIsFocus } from "../../lib/targetHost";
 import { DEFAULT_WAKE_BUSY_WAIT_SECS, readWakeBusyWait, WAKE_BUSY_WAIT_FEATURE, WAKE_BUSY_WAIT_RANGE } from "../../lib/wakeBusyWait";
 import { setWakeBusyWait } from "../../lib/wakeBusyWaitView";
-import { StuckMessagesSection } from "./StuckMessagesSection";
+import { CLEANUP_ANCHOR } from "../../lib/cleanupNav";
+import { CleanupSection } from "./CleanupSection";
 
 /** The `settings.section` item id of the 高级 card (its anchor, set by `<SettingsSections>`). */
 export const ADVANCED_SECTION = "agent-bus.advanced";
@@ -53,13 +54,13 @@ function WakeBusyWaitRow({ settings, patch }: { settings: GlobalSettings; patch(
   );
 }
 
-/** 高级 (page end): collapsed to one line; open = 消息总线 (on / port / token) + 卡住的消息. */
+/** 高级 (page end): collapsed to one line; open = 消息总线 (on / port / token) + 待清理. */
 export function AdvancedSection() {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const stuck = useTargetFeatures().has(STUCK_MESSAGES_FEATURE);
-  // Settings search lands here: open the card before it is flashed.
+  // Settings search lands here, and links to 待清理 (lib/cleanupNav): open the card before it is flashed.
   useOnSettingsReveal(ADVANCED_SECTION, () => setOpen(true));
+  useOnSettingsReveal(CLEANUP_ANCHOR, () => setOpen(true));
   const toggle = (
     <IconButton label={t(open ? "agent-bus.advancedCollapse" : "agent-bus.advancedExpand")} onClick={() => setOpen(!open)}>
       {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -84,11 +85,9 @@ export function AdvancedSection() {
       <div id={settingsAnchorId("agent-bus.settings")}>
         <BusSection />
       </div>
-      {stuck && (
-        <div id={settingsAnchorId("agent-bus.stuck")}>
-          <StuckMessagesSection />
-        </div>
-      )}
+      <div id={settingsAnchorId(CLEANUP_ANCHOR)}>
+        <CleanupSection />
+      </div>
     </div>
   );
 }

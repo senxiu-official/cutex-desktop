@@ -81,10 +81,10 @@ function CapabilityReviewActions({ d, host, variant }: { d: AskSummary; host: st
   const buttons = (
     <>
       <button type="button" disabled={!!busy} onClick={(e) => void run("approve", e)} title={t("delegation.review.approveHint")} className={`${base} whitespace-nowrap bg-accent font-medium text-white hover:opacity-90 disabled:opacity-50`} data-review="approve">
-        {t("approvals.approve")}
+        {t("delegation.review.approve")}
       </button>
       <button type="button" disabled={!!busy} onClick={(e) => void run("deny", e)} title={t("delegation.review.denyHint")} className={`${base} whitespace-nowrap border border-border text-muted hover:bg-surface-2 hover:text-danger disabled:opacity-50`} data-review="deny">
-        {t("approvals.deny")}
+        {t("delegation.review.deny")}
       </button>
     </>
   );

@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 vi.mock("electron", () => ({ BrowserWindow: {}, dialog: {}, shell: {}, clipboard: {}, nativeImage: {} }));
 vi.mock("../src/main/errorLog", () => ({ logError: vi.fn() }));
+vi.mock("../src/main/daemonFetch", () => ({ daemonFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init) }));
 import { DaemonService } from "../src/main/daemon";
 
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);

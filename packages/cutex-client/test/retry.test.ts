@@ -19,6 +19,15 @@ function setup(reply: (attempt: number) => Response | Promise<Response>, random 
 afterEach(() => vi.useRealTimers());
 
 describe("HTTP overload retries", () => {
+  it("does not replay a cached admission_busy refusal under the same wire request ID",async()=>{
+    const f=setup(()=>new Response(JSON.stringify({contractVersion:2,error:{code:"admission_busy",message:"busy",retryable:true,details:{reason:"hostBusy",retryAfterMs:1000}}}),{status:503}));
+    await expect(f.client.cutex("s1","cutex/runtime/online",{expectedRuntimeGeneration:7})).rejects.toMatchObject({code:"admission_busy"});
+    expect(f.calls).toHaveLength(1);expect(f.delays).toEqual([]);
+    await expect(f.client.cutex("s1","cutex/runtime/online",{expectedRuntimeGeneration:7})).rejects.toMatchObject({code:"admission_busy"});
+    const bodies=f.calls.map(call=>JSON.parse(call.body as string));
+    expect(bodies[0].params).toEqual(bodies[1].params);
+    expect(bodies[0].requestId).not.toBe(bodies[1].requestId);
+  });
   it("quietly retries GETs under the server delay, retaining query, headers and signal", async () => {
     const f = setup(n => n < 3 ? overload() : new Response('{"ok":true}'));
     const signal = new AbortController().signal;

@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { MARK_GLASS_TINT, MARK_TEXT_CHROMA_MAX, MARK_TEXT_L_DARK, MARK_TEXT_L_LIGHT, markTextColor, baseMark, distinctMarks, nameMark, projectMarkCrowded, projectMarkFont, projectMarkHeight, projectMarkText, PROJECT_MARK_MIN_AVATAR } from "../src/renderer/src/lib/projectMark";
+import { MARK_MIN_CONTRAST, markInk, baseMark, distinctMarks, nameMark, projectMarkCrowded, projectMarkFont, projectMarkHeight, projectMarkText, PROJECT_MARK_MIN_AVATAR } from "../src/renderer/src/lib/projectMark";
 
 vi.mock("../src/renderer/src/store", () => ({ useApp: () => null, pinnedOn: () => new Set() }));
 const { agentIndex } = await import("../src/renderer/src/lib/agentLook");
+const { projectColor } = await import("../src/renderer/src/lib/sidebar");
+const { PROJECT_PALETTE } = await import("../src/renderer/src/lib/projectCreate");
+const { BADGE_TINTS, badgeColor } = await import("../src/renderer/src/lib/sessionBadge");
+const { contrast } = await import("../src/shared/windowChrome");
 
 describe("project mark text", () => {
   it("the chosen text / emoji icon wins, else the project's own distinct mark", () => {
@@ -84,60 +88,38 @@ describe("a Director's project in the agent index", () => {
   });
 });
 
-describe("the glass mark's text stays readable (WCAG ≥ 4.5, both themes)", () => {
-  const PALETTE = ["#22b8cf", "#4c8dff", "#40c057", "#d6336c", "#fab005", "#fa5252", "#868e96"];
-  // Custom hex colours too: the extremes and a hue sweep.
-  const SWEEP = ["#ffffff", "#000000", "#ffff00", "#00ff00", "#ff00ff", "#00ffff", "#0000ff", "#ff0000", ...Array.from({ length: 12 }, (_, i) => `hsl(${i * 30} 80% 55%)`).map(hsl)];
-  function hsl(css: string): string {
-    const [h, s, l] = css.match(/[\d.]+/g)!.map(Number) as [number, number, number];
-    const a = (s / 100) * Math.min(l / 100, 1 - l / 100);
-    const f = (n: number) => Math.round(255 * (l / 100 - a * Math.max(-1, Math.min((n + h / 30) % 12 - 3, 9 - ((n + h / 30) % 12), 1))));
-    return "#" + [f(0), f(8), f(4)].map((v) => v.toString(16).padStart(2, "0")).join("");
-  }
-  const hx = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-  const mix = (a: number[], b: number[], pa: number) => a.map((v, i) => v * pa + b[i]! * (1 - pa));
-  const lin = (v: number) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
-  const gam = (v: number) => {
-    v = Math.max(0, Math.min(1, v));
-    return 255 * (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055);
-  };
-  function chromaHue(c: number[]): [number, number] {
-    const [r, g, b] = c.map(lin) as [number, number, number];
-    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
-    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
-    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-    const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
-    const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
-    return [Math.hypot(A, B), Math.atan2(B, A)];
-  }
-  function fromOklch(L: number, C: number, h: number): number[] {
-    const A = C * Math.cos(h);
-    const B = C * Math.sin(h);
-    const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
-    const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
-    const s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
-    return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s].map(gam);
-  }
-  const lum = (c: number[]) => 0.2126 * lin(c[0]!) + 0.7152 * lin(c[1]!) + 0.0722 * lin(c[2]!);
-  const ratio = (a: number[], b: number[]) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
-  // surface → the glass tray (46% of --bg) → the mark's glass (white ~14% + the project tint).
-  const themes = {
-    light: { surface: "#f0f1f4", bg: "#ffffff", L: MARK_TEXT_L_LIGHT },
-    dark: { surface: "#26272b", bg: "#161616", L: MARK_TEXT_L_DARK },
-  };
-  for (const [name, t] of Object.entries(themes)) {
+describe("the mark's ink stays readable (WCAG ≥ 4.5 on its opaque pill)", () => {
+  // The pill is filled with the project colour itself (components/Avatar ProjectMarkChip): nothing behind it — portrait,
+  // emoji, tile — and no theme value reaches the text, so the pill / ink pair alone decides, the same in light and dark.
+  const named = PROJECT_PALETTE.map((c) => projectColor(c));
+  const tints = BADGE_TINTS.map((t) => projectColor(badgeColor(t)));
+  const fallback = projectColor("no-such-colour");
+  // Custom #hex: the extremes, every 8-bit grey, the crossover band round luminance 0.18, and seeded random colours.
+  let seed = 20261101;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const hex = (r: number, g: number, b: number) => "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
+  const greys = Array.from({ length: 256 }, (_, v) => hex(v, v, v));
+  const random = Array.from({ length: 4000 }, () => hex(Math.floor(rand() * 256), Math.floor(rand() * 256), Math.floor(rand() * 256)));
+  const extremes = ["#ffffff", "#000000", "#ffff00", "#00ff00", "#ff00ff", "#00ffff", "#0000ff", "#ff0000", "#3fa7a3", "#a89f8a", "#f4a6b0"];
+  for (const [name, colours] of Object.entries({ palette: named, "badge tints": tints, "fallback grey": [fallback], "custom hex": [...extremes, ...greys, ...random] })) {
     it(name, () => {
-      for (const hex of [...PALETTE, ...SWEEP]) {
-        const c = hx(hex);
-        let bg = mix(hx(t.bg), hx(t.surface), 0.46);
-        bg = mix([255, 255, 255], bg, 0.14);
-        bg = mix(c, bg, MARK_GLASS_TINT);
-        const [C, h] = chromaHue(c);
-        expect(ratio(fromOklch(t.L, Math.min(C, MARK_TEXT_CHROMA_MAX), h), bg), `${name} ${hex}`).toBeGreaterThanOrEqual(4.5);
-      }
+      for (const c of colours) expect(contrast(markInk(c), c), `${name} ${c} ${markInk(c)}`).toBeGreaterThanOrEqual(MARK_MIN_CONTRAST);
     });
   }
-  it("the CSS the chip uses names both lightnesses and the chroma cap", () => {
-    expect(markTextColor("#fab005")).toBe("light-dark(oklch(from #fab005 0.45 min(c, 0.13) h), oklch(from #fab005 0.9 min(c, 0.13) h))");
+  it("custom colours run through projectColor first (a bad value is the grey)", () => {
+    expect(projectColor("#3FA7A3")).toBe("#3FA7A3");
+    expect(markInk(projectColor("teal"))).toBe(markInk(fallback));
+  });
+  it("white where it reads, else black; the owner's hard-to-read marks", () => {
+    expect(markInk(projectColor("magenta"))).toBe("#ffffff"); // WvLn
+    expect(markInk(projectColor("cyan"))).toBe("#000000"); // ctxH
+    expect(markInk("#3fa7a3")).toBe("#000000"); // ctxE (a custom teal)
+    expect(markInk("#000000")).toBe("#ffffff");
+    expect(markInk("#ffffff")).toBe("#000000");
+  });
+  it("the palette's worst case, for the record", () => {
+    const min = Math.min(...[...named, ...tints, fallback].map((c) => contrast(markInk(c), c)));
+    expect(min).toBeGreaterThanOrEqual(4.5);
+    console.info(`mark ink: min contrast over palette + badge tints + grey = ${min.toFixed(2)}`);
   });
 });

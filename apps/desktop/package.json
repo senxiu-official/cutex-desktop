@@ -1,7 +1,7 @@
 {
   "name": "@cutex-desktop/app",
   "productName": "Cutex",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "Apache-2.0",
   "homepage": "https://github.com/senxiu-official/cutex-desktop",
   "repository": "github:senxiu-official/cutex-desktop",
@@ -32,6 +32,7 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "streamdown": "^2.7.0",
+    "undici": "8.12.3",
     "zustand": "^5.0.15",
     "@cutex-desktop/plugin-sdk": "workspace:*",
     "@cutex-desktop/plugin-host": "workspace:*",

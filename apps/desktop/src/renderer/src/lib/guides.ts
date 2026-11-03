@@ -74,6 +74,9 @@ export const GUIDES: readonly Guide[] = [
   { id: "tip.delegation", kind: "tip", since: V02, title: "onboarding.guide.delegation.title", text: "onboarding.guide.delegation.text", anchor: "[data-delegation-card]", related: "tip.rideAlong" },
   { id: "tip.rideAlong", kind: "tip", since: V02, title: "onboarding.guide.rideAlong.title", text: "onboarding.guide.rideAlong.text", anchor: "[data-testid=queue-next-step][data-ask-id], [data-testid=timing-wait], [data-testid=timing-starts-now]", settings: "collab", related: "tip.delegation" },
   { id: "tip.shelf", kind: "tip", since: V02, title: "onboarding.guide.shelf.title", text: "onboarding.guide.shelf.text", anchor: "[data-side-tab-row]", when: (el) => (el.closest("[data-side-card]")?.querySelectorAll("[role=tab]").length ?? 0) >= 2 || el.ownerDocument.querySelectorAll("[data-shelf]:not([data-shelf-collapsed])").length >= 2 },
+  // Portrait (owner 2026-10-30, lib/portrait): the first time a window shows the stack — its divider (drag, double-click,
+  // ⇅) and where the sidebar went; the way back to landscape.
+  { id: "tip.portrait", kind: "tip", since: "0.2.3", title: "onboarding.guide.portrait.title", text: "onboarding.guide.portrait.text", anchor: "[data-portrait-divider]", settings: "appearance" },
   { id: "tip.tray", kind: "tip", since: V02, title: "onboarding.guide.tray.title", text: "onboarding.guide.tray.text", anchor: "[data-tray-item]", settings: "tray" },
   { id: "tip.service", kind: "tip", since: V02, title: "onboarding.guide.service.title", text: "onboarding.guide.service.text", anchor: "[data-cutex-ref=service], [data-service-link], [data-conv-item=network]" },
   { id: "tip.update", kind: "tip", since: V02, title: "onboarding.guide.update.title", text: "onboarding.guide.update.text", anchor: "[data-update-button], [data-host-switcher][data-hosts-version-differs]", settings: "updates" },

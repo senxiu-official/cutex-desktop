@@ -5,6 +5,7 @@
 // downloads, starts or touches files itself.
 import { Puzzle } from "lucide-react";
 import type { ReactNode } from "react";
+import { COMPONENT_SOURCE_ONLY, type ComponentRefusal } from "../../../shared/components";
 import { api } from "../bridge";
 import { useI18n } from "../i18n";
 import { componentGuideUrl, componentText, isBanner, refusalKey, type ComponentCardState } from "../lib/componentCard";
@@ -12,6 +13,7 @@ import { bypassUpdateCard, loadComponents, requestComponent } from "../lib/compo
 import { useComponentState } from "../lib/componentView";
 import { setSettingsHost } from "../lib/settingsHost";
 import { services } from "../modules/app";
+import { ComponentExternalGuide } from "./ComponentExternalGuide";
 import { PageBody } from "./Page";
 import { Button } from "./settings/Form";
 
@@ -68,8 +70,11 @@ function openBackendUpdates(hostId: string) {
   setSettingsHost(hostId);
 }
 
-/** One component card: what the component is, why it is not usable on this host, what to do. */
-export function ComponentCard({ name, hostId, state, refusal, variant = "page", afterRecheck }: { name: string; hostId: string; state: Exclude<ComponentCardState, { kind: "body" | "waiting" }>; refusal: { code: string; message: string } | null; variant?: "page" | "banner" | "compact"; afterRecheck?(): Promise<void> }) {
+/**
+ * One component card: what the component is, why it is not usable on this host, what to do. `offerAbove`: the index panel
+ * right above (Settings → 运行时) already offers the source-only explicit version: no second button for it here.
+ */
+export function ComponentCard({ name, hostId, state, refusal, variant = "page", afterRecheck, offerAbove = false }: { name: string; hostId: string; state: Exclude<ComponentCardState, { kind: "body" | "waiting" }>; refusal: ComponentRefusal | null; variant?: "page" | "banner" | "compact"; afterRecheck?(): Promise<void>; offerAbove?: boolean }) {
   const { t } = useI18n();
   const banner = variant !== "page";
   const { title, what } = componentText(name, t);
@@ -100,7 +105,12 @@ export function ComponentCard({ name, hostId, state, refusal, variant = "page", 
       actions = <Button onClick={() => void api.openExternal(componentGuideUrl(name))}>{t("modules.component.openGuide")}</Button>;
       break;
     case "sourceOnly":
-      text = t("modules.component.sourceOnly", vars);
+      // r270: an explicit verified version installs here too ({version}; the empty install is never sent); the CLI stays the other way.
+      text = state.version ? t("modules.component.sourceOnlyOffer", { ...vars, version: state.version }) : t("modules.component.sourceOnly", vars);
+      if (state.version && !offerAbove) {
+        const version = state.version;
+        actions = <Button primary onClick={() => void requestComponent(hostId, name, "install", { version })}>{t("modules.component.installVersion", { version })}</Button>;
+      }
       detail = (
         <div className="mt-2 flex items-center gap-2">
           <code className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-surface-2 px-2 py-1 font-mono text-xs whitespace-nowrap select-all">{state.command}</code>
@@ -123,6 +133,12 @@ export function ComponentCard({ name, hostId, state, refusal, variant = "page", 
       if (state.step) detail = <p className="mt-1 text-xs text-subtle">{t("modules.component.step", { step: state.step })}</p>;
       break;
     case "needsUser":
+      if (state.external) {
+        // r269: which user-installed dependency failed, with commands for the host; 重新检测 / paths live in the guide.
+        text = state.external.issues.length ? t("modules.component.external.needsUser", { ...vars, n: state.external.issues.length }) : t("modules.component.external.needsUserUnverified", vars);
+        detail = <ComponentExternalGuide name={name} hostId={hostId} external={state.external} component={title} compact={variant === "compact"} />;
+        break;
+      }
       text = state.steps.length ? t("modules.component.needsUser", vars) : t("modules.component.needsUserNoSteps", vars);
       if (state.steps.length)
         detail = (
@@ -140,7 +156,12 @@ export function ComponentCard({ name, hostId, state, refusal, variant = "page", 
     case "degraded":
       text = t(state.working ? "modules.component.degradedWorking" : "modules.component.degraded", vars);
       if (state.error) detail = <p className="mt-1 text-xs break-words text-warn">{t("modules.component.error", { error: state.error })}</p>;
-      actions = <Button onClick={() => void requestComponent(hostId, name, "install")}>{t("modules.retry")}</Button>;
+      // Source-only hosts refuse an empty install: retry the verified version explicitly, or not at all.
+      if (state.retryVersion === undefined) actions = <Button onClick={() => void requestComponent(hostId, name, "install")}>{t("modules.retry")}</Button>;
+      else if (state.retryVersion) {
+        const version = state.retryVersion;
+        actions = <Button onClick={() => void requestComponent(hostId, name, "install", { version })}>{t("modules.component.installVersion", { version })}</Button>;
+      }
       break;
     case "readError":
       text = t("modules.component.readError", { error: state.error });
@@ -161,7 +182,7 @@ export function ComponentCard({ name, hostId, state, refusal, variant = "page", 
           <div className={`${banner ? "" : "mt-3 "}${variant === "compact" ? "text-xs" : "text-sm"}`}>{text}</div>
           {variant === "compact" && <p className="mt-0.5 text-xs text-subtle">{what}</p>}
           {detail}
-          {refusal && <RefusalLine refusal={refusal} component={title} />}
+          {refusal && <RefusalLine refusal={refusal} component={title} hostId={hostId} name={name} />}
         </div>
         {actions && <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">{actions}</div>}
       </div>
@@ -169,13 +190,21 @@ export function ComponentCard({ name, hostId, state, refusal, variant = "page", 
   );
 }
 
-/** A refusal of install / remove: the friendly line of a known code (cutex's text on hover), else cutex's text. */
-function RefusalLine({ refusal, component }: { refusal: { code: string; message: string }; component: string }) {
+/**
+ * A refusal of install / remove: the friendly line of a known code (cutex's text on hover), else cutex's text. r270
+ * `component_source_only` with a verified version cutex suggests: say so and offer that explicit install (the owner's click
+ * sends `{version}`; the empty install is never retried with a guessed version).
+ */
+function RefusalLine({ refusal, component, hostId, name }: { refusal: ComponentRefusal; component: string; hostId: string; name: string }) {
   const { t } = useI18n();
   const key = refusalKey(refusal.code);
+  const offered = refusal.code === COMPONENT_SOURCE_ONLY ? (refusal.offeredVersion ?? null) : null;
   return (
-    <p className="mt-2 text-xs break-words text-warn" title={key ? `${refusal.code}: ${refusal.message}` : undefined}>
-      {key ? t(key, { component }) : t("modules.component.refused", { message: refusal.message, code: refusal.code })}
-    </p>
+    <div className="mt-2 flex flex-wrap items-center gap-2" data-component-refusal={refusal.code}>
+      <p className="min-w-0 flex-1 text-xs break-words text-warn" title={key ? `${refusal.code}: ${refusal.message}` : undefined}>
+        {offered ? t("modules.component.refusal.component_source_only_offer", { component, version: offered }) : key ? t(key, { component }) : t("modules.component.refused", { message: refusal.message, code: refusal.code })}
+      </p>
+      {offered && <Button onClick={() => void requestComponent(hostId, name, "install", { version: offered })}>{t("modules.component.installVersion", { version: offered })}</Button>}
+    </div>
   );
 }

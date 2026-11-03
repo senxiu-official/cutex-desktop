@@ -16,6 +16,7 @@ import { BACKEND_UPGRADE_FEATURE, UPGRADE_INSTALLED_NOTES_FEATURE, UPGRADE_RUN_N
 import type { MockCore, ModuleMock } from "../../dev/mockTypes";
 
 const MODE = typeof location !== "undefined" ? new URLSearchParams(location.search).get("upgrade") : null;
+const NATIVE_UNKNOWN = typeof location !== "undefined" && new URLSearchParams(location.search).get("nativeUnknown") === "1";
 const iso = (secondsAgo: number) => new Date(Date.now() - secondsAgo * 1000).toISOString();
 const clone = <T>(x: T): T => structuredClone(x);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -166,10 +167,11 @@ const HOST_INFO: HostServiceInfo = {
   serviceManager: { kind: "systemd", unit: "cutex-management-api.service", managedInstall: true },
   runtimes: {
     native: {
-      selected: "r53",
+      selected: NATIVE_UNKNOWN ? null : "r53",
+      selectedSha256Prefix: NATIVE_UNKNOWN ? "dddddddddddd" : null,
       latest: "r53",
       inUse: [
-        { release: "r53", version: "0.162.1-r53", agents: 9, selected: true, missing: false },
+        { release: NATIVE_UNKNOWN ? "dddddddddddd" : "r53", version: NATIVE_UNKNOWN ? null : "0.162.1-r53", agents: 9, selected: true, missing: false },
         { release: "r52", version: "0.162.1-r52", agents: 3, selected: false, missing: false },
       ],
     },

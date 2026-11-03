@@ -57,7 +57,8 @@ describe("Avatar with 拟人头像包", () => {
     draw({});
     expect(img()).toMatch(/^\/packs\/p\/avatars\/beach\/kimi-v[12]\.webp$/);
     expect(host.querySelector("img")?.classList.contains("object-contain")).toBe(true);
-    expect(host.querySelector("[data-avatar]")?.classList.contains("overflow-hidden")).toBe(false);
+    // Idle pack portraits wear the circle frame too (owner 2026-11-01, test/avatarIdleFrame).
+    expect(host.querySelector("[data-avatar]")?.classList.contains("overflow-hidden")).toBe(true);
     draw({ size: 20 });
     expect(img()).toMatch(/^\/packs\/p\/previews\/beach\/kimi-v[12]\.webp$/);
   });

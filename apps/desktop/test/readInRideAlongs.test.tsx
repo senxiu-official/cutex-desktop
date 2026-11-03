@@ -9,7 +9,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdmissionNextStep } from "@cutex-desktop/protocol";
 import { applyEvent, emptyTimeline, type TimelineState } from "../src/renderer/src/lib/timeline";
-import { READ_IN_GRACE_S, unreadNextStep, useUnreadNextStep } from "../src/renderer/src/lib/readInRideAlongs";
+import { READ_IN_GRACE_S, unreadNextStep, useUnreadNextStep } from "../src/renderer/src/lib/legacyDelivery/readInRideAlongs";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

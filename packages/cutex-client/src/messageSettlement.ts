@@ -1,4 +1,11 @@
-import type { MessageSettlementCloseRequest } from "@cutex-desktop/protocol";
+import type { MessageSettlement, MessageSettlementCloseRequest } from "@cutex-desktop/protocol";
+
+export const STALE_ACK_SETTLEMENT_FEATURE = "agent-bus-stale-ack-settlement-v1";
+export interface MessageSettlementEvidenceResponse { messageId: string; settlement: MessageSettlement | null }
+export function messageSettlementEvidenceBody(request: { messageId: string }): { messageId: string } {
+  if (!request || typeof request.messageId !== "string" || !request.messageId.trim() || new TextEncoder().encode(request.messageId).length > 512) throw new Error("bad settlement messageId");
+  return { messageId: request.messageId };
+}
 
 /** Rebuild the strict body at both trust boundaries; never generate or replace a request key. */
 export function messageSettlementCloseBody(request: MessageSettlementCloseRequest): MessageSettlementCloseRequest {

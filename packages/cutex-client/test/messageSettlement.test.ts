@@ -30,3 +30,29 @@ describe("message settlement HTTP contract", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("on-demand stale ACK evidence collector", () => {
+  function evidenceClient(fetch: typeof globalThis.fetch, feature = true, owner = true) {
+    return new CutexClient({ baseUrl: "http://fixture.invalid", token: "fixture-token" }, { fetch: ((input, init) => String(input).endsWith("/v2/capabilities")
+      ? Promise.resolve(Response.json({ featureList: feature ? ["agent-bus-stale-ack-settlement-v1"] : [], ...(owner ? {} : { user: { id: "reader", isOwner: false } }) })) : fetch(input, init)) as typeof globalThis.fetch, sleep: async () => {} });
+  }
+  it("uses the exact endpoint and strict ID-only body, returning null ineligibility unchanged", async () => {
+    const fetch = vi.fn().mockResolvedValue(Response.json({ messageId: "m1", settlement: null }));
+    expect(await evidenceClient(fetch).busMessageEvidence({ messageId: "m1", extra: true } as { messageId: string })).toEqual({ messageId: "m1", settlement: null });
+    expect(fetch).toHaveBeenCalledExactlyOnceWith("http://fixture.invalid/v2/agent-bus/stuck-messages/evidence", expect.objectContaining({ method: "POST", body: '{"messageId":"m1"}' }));
+  });
+  it.each([404, 503])("preserves %i without an automatic retry or close", async status => {
+    const fetch = vi.fn().mockImplementation(async () => Response.json({ error: { code: "evidence_unavailable", message: "Unavailable" } }, { status }));
+    await expect(evidenceClient(fetch).busMessageEvidence({ messageId: "m1" })).rejects.toMatchObject({ status });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it.each([[false, true], [true, false]])("requires the new capability and owner authorization (%s/%s)", async (feature, owner) => {
+    const fetch = vi.fn();
+    await expect(evidenceClient(fetch, feature, owner).busMessageEvidence({ messageId: "m1" })).rejects.toThrow();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each(["", " ", "x".repeat(513)])("rejects invalid IDs before any discovery or request", async messageId => {
+    const fetch = vi.fn(); await expect(evidenceClient(fetch).busMessageEvidence({ messageId })).rejects.toThrow("bad settlement messageId");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

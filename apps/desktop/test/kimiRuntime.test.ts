@@ -7,7 +7,7 @@ import { readComponentKimi } from "@cutex-desktop/cutex-client";
 import { agentFeaturesOf, changesSettingsLive, isAcpAgent, lacks, skillSource } from "../src/renderer/src/lib/agentFeatures";
 import { revertTexts } from "../src/renderer/src/lib/runtimeWording";
 import { approvalSourceKeys } from "../src/renderer/src/components/ApprovalSource";
-import { steerDelivery } from "../src/renderer/src/lib/pendingSteers";
+import { steerDelivery } from "../src/renderer/src/lib/legacyDelivery/pendingSteers";
 import { profileKind, profileRuntimeAvailable } from "../src/renderer/src/lib/profileKind";
 import { initialRuntimes, isKimiNative, newProfilePlan, plannedDefault, previewCompatibility, reasonKey, RUNTIME_LABEL } from "../src/renderer/src/lib/profileVariants";
 import { runtimeEfforts, runtimeModelChoices, variantCatalogModels, variantCatalogView } from "../src/renderer/src/lib/runtimeChoices";

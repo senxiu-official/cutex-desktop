@@ -57,7 +57,7 @@ export function DelegationTag({ askId, onJump }: { askId: string; onJump?: () =>
   const className = "shrink-0 font-medium text-accent tabular-nums";
   if (!onJump)
     return (
-      <span className={className} title={askId} data-delegation-tag="">
+      <span className={className} title={tag.label} data-delegation-tag="">
         {tag.label}
       </span>
     );
@@ -69,7 +69,7 @@ export function DelegationTag({ askId, onJump }: { askId: string; onJump?: () =>
       onKeyDown={(e) => e.key === "Enter" && (e.stopPropagation(), onJump())}
       className={`${className} cursor-pointer hover:underline`}
       data-delegation-tag=""
-      title={askId}
+      title={tag.label}
     >
       {tag.label}
     </span>

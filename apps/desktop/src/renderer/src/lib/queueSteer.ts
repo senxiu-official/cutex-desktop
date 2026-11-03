@@ -1,3 +1,4 @@
+import { useDebug } from "./debugState";
 // Queue tray 插入 / 立即发送 on cutex with queue-steer (r223): main uses the atomic
 // `cutex/userInput/queue/steer`; its refusals arrive as `queue_steer_refused:` messages.
 import { parseQueueSteerError, type QueueSteerErrorKind } from "../../../shared/queueSteer";
@@ -14,7 +15,22 @@ const KEYS: Record<QueueSteerErrorKind, MessageKey> = {
   runtimeNoSteer: "queue.steer.runtimeNoSteer",
   runtimeNotReady: "queue.steer.runtimeNotReady",
   runtimeRefused: "queue.steer.runtimeRefusedPlain",
+  hostBusy: "queue.steer.hostBusy",
+  unrecognized: "queue.steer.unrecognized",
+  passingNotAllowed: "queue.steer.passingNotAllowed",
+  internalError: "queue.steer.internalError",
+  archiveBlocksInput: "queue.steer.archiveBlocksInput",
+  persistenceUnavailable: "queue.steer.persistenceUnavailable",
+  idempotencyConflict: "queue.steer.idempotencyConflict",
+  interruptTimeout: "queue.steer.interruptTimeout",
+  inputInProgress: "queue.steer.inputInProgress",
+  invalidInput: "queue.steer.invalidInput",
+  nativeRequestFailed: "queue.steer.nativeRequestFailed",
+  invalidRequest: "queue.steer.invalidRequest",
+  sessionNotFound: "queue.steer.sessionNotFound",
+  requestInProgress: "queue.steer.requestInProgress",
   noActiveTurn: "queue.steer.noActiveTurn",
+  turnFinishing: "queue.steer.turnFinishing",
   imagePathRequired: "queue.steer.imagePathRequired",
   imageUnavailable: "queue.steer.imageUnavailable",
   turnConflict: "queue.steer.turnConflict",
@@ -76,6 +92,7 @@ const RAW_ERROR = /^Error invoking remote method |^[a-z][a-z0-9]*(?:_[a-z0-9]+)+
  */
 export function queueActionNotice(e: unknown, t: (key: MessageKey) => string): string {
   const message = e instanceof Error ? e.message : String(e);
+  if (useDebug.getState().state.enabled) return message;
   if (!RAW_ERROR.test(message)) return message;
   console.warn("queue action failed:", message);
   return t("queue.actionFailed");

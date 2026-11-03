@@ -231,6 +231,8 @@ export const itIT: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.shelf.text": "Trascina una scheda da un {{shelf}} all’altro, oppure in uno spazio vuoto per creare un nuovo {{shelf}}.\nQuando non entrano tutte, “⌄ N” elenca tutte le schede del {{shelf}}.",
   "onboarding.guide.tray.title": "Il vassoio",
   "onboarding.guide.tray.text": "Trascina un elemento oltre il separatore per fissarlo nel vassoio; riportalo indietro per rimuoverlo.\nCon un clic destro puoi aggiungere un distintivo o una nota.",
+  "onboarding.guide.portrait.title": "Layout verticale",
+  "onboarding.guide.portrait.text": "In una finestra alta la conversazione e la sua {{shelf}} si impilano in verticale. Trascina questo divisore per ridimensionarle, doppio clic per ripristinare; passa sopra con il puntatore e fai clic su ⇅ per scambiarle.\nLa barra laterale si nasconde sul bordo sinistro della finestra e compare quando il puntatore ci arriva. Per restare in orizzontale, cambia Impostazioni → Aspetto → Layout verticale.",
   "onboarding.guide.service.title": "Link ai servizi",
   "onboarding.guide.service.text": "Un servizio è una pagina o un’API eseguita da un {{agent}} sull’host; il link la apre nell’app.\nL’host elimina i servizi temporanei inattivi o scaduti, e il link smette di funzionare. Per conservarne uno, fissalo o rendilo permanente nella pagina Servizi. Da lì puoi anche fermarlo e riavviarlo.",
   "onboarding.guide.update.title": "Aggiornamenti",

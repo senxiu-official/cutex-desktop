@@ -214,6 +214,34 @@ function running(hostId: string, sessionId: string, turnId: string) {
 }
 
 describe("the same session id on two hosts (per-agent state keyed by host + id)", () => {
+  it("does not treat a failed refresh or a list returned for an old runtime generation as authoritative", async () => {
+    await twoHostsSameId();
+    await store.getState().select("same", "local");
+    await settle();
+    const key = viewKey("local", "same");
+    const generation = store.getState().sessions[key]!.runtimeGeneration ?? 0;
+    const rows = [{ id: "valid", model: "valid", displayName: "Valid", description: "" }];
+    mock.responses.set("local:listModels", () => rows);
+    await store.getState().loadModels(true, "same", "local");
+    expect(store.getState().modelsReady[key]).toBe(generation);
+    mock.responses.set("local:listModels", () => { throw new Error("offline"); });
+    await store.getState().loadModels(true, "same", "local");
+    expect(store.getState().models[key]).toEqual(rows);
+    expect(store.getState().modelsReady[key]).toBeNull();
+    let resolve!: (value: unknown) => void;
+    mock.responses.set("local:listModels", () => new Promise(r => { resolve = r; }));
+    const pending = store.getState().loadModels(true, "same", "local");
+    await settle();
+    store.setState(state => ({ sessions: { ...state.sessions, [key]: { ...state.sessions[key]!, runtimeGeneration: generation + 1 } } }));
+    resolve([{ id: "old", model: "old" }]);
+    await pending;
+    expect(store.getState().models[key]).toEqual(rows);
+    expect(store.getState().modelsReady[key]).not.toBe(generation + 1);
+    mock.responses.set("local:listModels", () => rows);
+    await store.getState().loadModels(true, "same", "local");
+    expect(store.getState().modelsReady[key]).toBe(generation + 1);
+  });
+
   it("both go live: the second host's same-id agent is no longer refused", async () => {
     await twoHostsSameId();
     await store.getState().select("same", "local");

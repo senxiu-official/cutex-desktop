@@ -15,6 +15,8 @@ interface Room {
   conversations: number;
   /** Tool columns on screen (0: the tool area is hidden). */
   tools: number;
+  /** Drawn as the portrait stack (lib/portrait): another conversation folds to a strip there — it always has room. */
+  stacked?: boolean;
 }
 
 const UNMEASURED: Room = { width: Number.POSITIVE_INFINITY, conversations: 1, tools: 0 };
@@ -42,11 +44,12 @@ export function columnsFit(width: number, conversations: number, tools: number):
 export function roomForColumn(kind: "tool" | "conversation" = "tool"): boolean {
   const room = roomNow();
   if (!Number.isFinite(room.width)) return true;
+  if (kind === "conversation" && room.stacked) return true;
   return kind === "tool" ? columnsFit(room.width, room.conversations, room.tools + 1) : columnsFit(room.width, room.conversations + 1, 0);
 }
 
 /** `n` conversation columns fit the work area at their minimum widths (the tool area gives way as the drawer). */
 export function roomForColumns(n: number): boolean {
   const room = roomNow();
-  return !Number.isFinite(room.width) || columnsFit(room.width, n, 0);
+  return !Number.isFinite(room.width) || !!room.stacked || columnsFit(room.width, n, 0);
 }

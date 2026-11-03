@@ -2,7 +2,7 @@
 // for more than OUTBOX_LINGER_MS — when it leaves, or while still visible after OUTBOX_STUCK_MS —
 // through the renderer's reported-record channel (errors.jsonl). Never the message text: only
 // states, placements, ages and whether its id / turn is in the timeline. Pure.
-import { hasClientId, untaggedCount, type OutboxEntry } from "./outbox";
+import { hasClientId, untaggedCount, type OutboxEntry } from "./legacyDelivery/outbox";
 import type { TimelineState } from "./timeline";
 
 export const OUTBOX_LINGER_MS = 3000;

@@ -9,7 +9,9 @@ const isPreviewMock = (id: string) => /[\\/]src[\\/]renderer[\\/]src[\\/](dev[\\
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: workspace })],
+    // Portable packages contain only out/: ship the fixed daemon HTTP parser in
+    // the main bundle rather than requiring an absent runtime node_modules.
+    plugins: [externalizeDepsPlugin({ exclude: [...workspace, "undici"] })],
     build: {
       rollupOptions: {
         input: resolve(__dirname, "src/main/index.ts"),

@@ -6,7 +6,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { api } from "../bridge";
 import { useApp } from "../store";
-import { ADMISSION_ORDER_FEATURE, readOwnerMayPassAsks } from "./admissionOrder";
+import { ADMISSION_ORDER_FEATURE, readOwnerMayPassAsks } from "./legacyDelivery/admissionOrder";
 
 const useStore = create<{ mayPass: boolean | undefined; loadedFor: ReadonlySet<string> | null }>(() => ({ mayPass: undefined, loadedFor: null }));
 

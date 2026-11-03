@@ -2,7 +2,7 @@
 // claim decision, the person key (node:crypto Ed25519, main/personKey.ts), the owner's person-key
 // helpers (users module) and Settings → 你 → 你能访问的主机 rows (lib/myAccess).
 import { createHash, createPublicKey, verify } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +20,7 @@ vi.mock("electron", () => ({
       return { response: electronFake.confirmResponse };
     },
     showOpenDialog: async () => ({ canceled: !electronFake.openPath, filePaths: electronFake.openPath ? [electronFake.openPath] : [] }),
-    showSaveDialog: async () => ({ canceled: !electronFake.savePath, filePath: electronFake.savePath || undefined }),
+    showSaveDialog: vi.fn(async (..._args: unknown[]) => ({ canceled: !electronFake.savePath, filePath: electronFake.savePath || undefined })),
   },
   clipboard: {
     writeText: async (text: string) => {
@@ -32,7 +32,7 @@ vi.mock("electron", () => ({
     },
   },
 }));
-import { clipboard } from "electron";
+import { clipboard, dialog } from "electron";
 import { encodePersonKeyString, generatePersonKey, loadOrCreatePersonKey, parsePersonKey, parsePersonKeyString, personFingerprint, PersonKeyStringError, serializePersonKey, signClaim } from "../src/main/personKey";
 import { personKeyOwners, tokenPerson, unknownKeysOf, withoutPersonKey, withPersonKey } from "../src/renderer/src/modules/users/model";
 import { claimTransitions, foldNames, hostIssue, myAccessRow, myDeviceLine } from "../src/renderer/src/lib/myAccess";
@@ -610,6 +610,42 @@ describe("a claim in flight when the key or name changes (main PersonIdentitySer
     release();
     await settle();
     expect(claims.map((c) => c.displayName)).toEqual(["A", "B"]);
+  });
+});
+
+describe("identity export native dialog", () => {
+  let dir: string;
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "cutex-export-dialog-"));
+    electronFake.savePath = "";
+    vi.mocked(dialog.showSaveDialog).mockClear();
+  });
+  afterEach(() => {
+    Object.defineProperty(process, "platform", platform);
+    electronFake.savePath = "";
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("offers a JSON default and undotted filter on macOS and writes exactly the selected path", async () => {
+    const service = new PersonIdentityService(join(dir, "identity"), () => {}, () => null, () => []);
+    Object.defineProperty(process, "platform", { ...platform, value: "darwin" });
+    const out = join(dir, "owner-choice");
+    electronFake.savePath = out;
+    expect(await service.exportIdentity("Export identity")).toEqual({ ok: true, path: out });
+    expect(dialog.showSaveDialog).toHaveBeenCalledWith({
+      title: "Export identity", defaultPath: `cutex-identity-${service.view().fingerprint}.json`,
+      filters: [{ name: "Cutex identity", extensions: ["json"] }],
+    });
+    expect(parsePersonKey(JSON.parse(readFileSync(out, "utf8"))).publicKey).toBe(service.view().publicKey);
+  });
+
+  it.each([{ canceled: true, filePath: "ignored.json" }, { canceled: false, filePath: "" }])("does not export an identity for an unusable selection: %j", async result => {
+    const service = new PersonIdentityService(join(dir, "identity"), () => {}, () => null, () => []);
+    vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce(result);
+    expect(await service.exportIdentity("Export identity")).toEqual({ ok: false, canceled: true });
+    expect(dialog.showSaveDialog).toHaveBeenCalledOnce();
+    expect(readdirSync(dir)).toEqual(["identity"]);
   });
 });
 

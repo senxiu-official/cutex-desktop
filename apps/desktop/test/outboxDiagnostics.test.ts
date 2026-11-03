@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyEvent, emptyTimeline, type TimelineState } from "../src/renderer/src/lib/timeline";
-import { confirmOutbox, markOutboxDispatched, newOutboxEntry, outboxStatusCopy, retryOutbox, setOutboxStage } from "../src/renderer/src/lib/outbox";
+import { confirmOutbox, markOutboxDispatched, newOutboxEntry, outboxStatusCopy, retryOutbox, setOutboxStage } from "../src/renderer/src/lib/legacyDelivery/outbox";
 import { OUTBOX_LINGER_MS, outboxLingerRecord } from "../src/renderer/src/lib/outboxDiagnostics";
 
 const native = (method: string, params: unknown) => ({ source: "app_server", native: { kind: "notification", message: { method, params } } }) as never;

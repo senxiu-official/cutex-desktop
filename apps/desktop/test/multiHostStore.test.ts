@@ -2,6 +2,8 @@
 // other auto-connect hosts stay connected. Their attention (approvals, owner notes, waiting agents)
 // and notifications keep working; switching the focus keeps both hosts' state; a host's reconnect or
 // disconnect resets only that host. Runs the real store and sub-stores against a per-host fake bridge.
+import { pendingTail, newOutboxEntry, confirmOutbox } from "../src/renderer/src/lib/legacyDelivery/outbox";
+import observedInsertEvents from "./fixtures/r271-insert-items.json";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import type { DaemonState, HostsState } from "../src/shared/ipc";
@@ -728,6 +730,283 @@ describe("runtime recovery after an offline-start conflict", () => {
     const mutations = mock.calls.filter((c) => c.method === "sessionAction");
     expect(mutations).toHaveLength(1);
     expect(mutations[0]?.args[2]).toMatchObject({ expectedRuntimeGeneration: 3 });
+  });
+});
+
+describe("r271 open view after a runtime upgrade: input progress is not interruption", () => {
+  const turnId = "68ecd547-0718-4f1f-8498-543a4366d1f8";
+  const threadId = "4e3bbf83-b32a-4ca1-b30d-7608ff6f2928";
+  const inputIds = ["7a522aeb-17b2-4538-8a3a-1ae61bfbac60", "53a8cbc1-df71-4b91-9c60-51bcf4b7b0f7", "f0796a9f-754d-4392-b2c9-a00df7811e6b"];
+  const view = () => store.getState().sessions[viewKey("local", "a1")]!;
+  const emit = (method: string, params: unknown, generation?: number) => fire("sessionEvent", {
+    hostId: "local", sessionId: "a1", envelope: envelope("a1", {
+      source: "app_server", correlation: generation === undefined ? {} : { runtimeGeneration: generation },
+      native: { kind: "notification", message: { method, params } },
+    } as Partial<EventEnvelope>),
+  });
+  const side = (generation: number, offline = false) => ({ ...sidebarOf([["a1", "Aria"]])(), active: [{
+    ...resource("a1", "Aria"), native: { threadId, schema: { protocol: "claude-app-server-subset" } },
+    runtime: { ...resource("a1", "Aria").runtime, backend: "claude", status: offline ? "offline" : "online", appServerConnected: !offline, runtimeGeneration: generation, activeTurnId: offline ? null : turnId },
+  }] });
+  async function open() {
+    mock.responses.set("local:sidebar", () => side(6));
+    mock.responses.set("bootstrap", () => ({ native: { result: { thread: { id: threadId, turns: [{ id: turnId, status: "inProgress", items: [] }] } } },
+      checkpoint: { streamId: "s", cursor: 0 }, cutexState: { runtime: { runtimeGeneration: 6 }, userInputQueue: [], pendingServerRequests: [], agentBusMessages: [], agentBusSentMessages: [], ownerNotifications: [] } }));
+    mock.responses.set("queueList", () => ({ items: [] }));
+    await start(); await store.getState().select("a1", "local"); await settle();
+    mock.calls.length = 0;
+  }
+  it("replays three registered/offered inputs then the terminal persisted burst without false loss or resending", async () => {
+    await open();
+    let next = 0;
+    vi.stubGlobal("crypto", { randomUUID: () => inputIds[next++]! });
+    mock.responses.set("submit", (_id, _text, _strategy, _offline, options) => ({ disposition: "steered", turnId, clientUserMessageId: (options as { clientUserMessageId: string }).clientUserMessageId }));
+    // A sidebar can observe the upgraded runtime before this still-open view.
+    mock.responses.set("local:sidebar", () => side(7));
+    for (const [index, id] of inputIds.entries()) {
+      await store.getState().submit(`insert ${index}`, "auto", [], { sessionId: "a1", hostId: "local" });
+      emit("claude/input/stageChanged", { threadId, turnId, clientId: id, messageId: `steer-${id}`, stage: "registered" });
+      await store.getState().refreshHostSidebar("local");
+      emit("claude/input/stageChanged", { threadId, turnId, clientId: id, messageId: `steer-${id}`, stage: "offered" });
+      await settle();
+      expect(view().timeline.activeTurnId).toBe(turnId);
+      expect(view().timeline.turns[0]?.status).toBe("inProgress");
+      expect(store.getState().pendingSteers[viewKey("local", "a1")]?.every(p => p.state === "waiting")).toBe(true);
+      expect(store.getState().notice?.tone).not.toBe("error");
+    }
+    expect(mock.calls.filter(c => c.method === "bootstrap")).toHaveLength(0);
+    for (const id of inputIds) emit("claude/input/stageChanged", { threadId, turnId, clientId: id, stage: "contextPersisted" }, 7);
+    expect(store.getState().pendingSteers[viewKey("local", "a1")] ?? []).toEqual([]);
+    emit("turn/completed", { threadId, turn: { id: turnId, status: "completed", error: null } }, 7);
+    await settle();
+    expect(view().timeline.turns[0]?.status).toBe("completed");
+    expect(store.getState().notice?.tone).not.toBe("error");
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(3);
+  });
+  it.each(["steered", "queued", "steered-untagged"] as const)("keeps an idle optimistic send in the timeline across a late %s acceptance", async disposition => {
+    await open();
+    view().timeline.activeTurnId = null;
+    view().timeline.turns[0]!.status = "completed";
+    const id = "idle-to-steer-race";
+    vi.stubGlobal("crypto", { randomUUID: () => id });
+    let answer!: (result: unknown) => void;
+    mock.responses.set("submit", () => new Promise(resolve => { answer = resolve; }));
+    const sending = store.getState().submit("owner racing background input", "auto", [], { sessionId: "a1", hostId: "local" });
+    for (let n = 0; n < 8; n++) await Promise.resolve();
+    const tail = () => pendingTail(store.getState().outbox[viewKey("local", "a1")], view().timeline);
+    expect(tail().map(e => e.id)).toEqual([id]);
+    emit("turn/started", { threadId, turn: { id: "background-turn", status: "inProgress", items: [] } });
+    if (disposition === "queued") fire("sessionEvent", { hostId: "local", sessionId: "a1", envelope: cutex("a1", "cutex/userInput/submitted", { clientUserMessageId: id, disposition: "started", turnId: "background-turn" }) });
+    answer({ disposition: disposition === "steered-untagged" ? "steered" : disposition, turnId: "background-turn", clientUserMessageId: id });
+    await sending;
+    expect(tail().map(e => e.id)).toEqual([id]);
+    emit("item/completed", { threadId, turnId: "background-turn", item: { id: "owner-item", type: "userMessage", ...(disposition === "steered-untagged" ? {} : { clientId: id }), content: [{ type: "text", text: "owner racing background input" }] } });
+    expect(tail()).toEqual([]);
+    expect(store.getState().pendingSteers[viewKey("local", "a1")] ?? []).toEqual([]);
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(1);
+  });
+  it("replays the exact recorded item/stage order with a synthetic stale generation", async () => {
+    await open();
+    mock.responses.set("local:sidebar", () => side(7));
+    for (const e of observedInsertEvents) {
+      const clientId = e.clientId;
+      if (e.stage === "registered" && clientId) {
+        store.setState({ pendingSteers: { [viewKey("local", "a1")]: [...(store.getState().pendingSteers[viewKey("local", "a1")] ?? []),
+          { id: clientId, text: "sanitized insert", imageCount: 0, turnId, baseline: 0, state: "waiting" }] } });
+        await store.getState().refreshHostSidebar("local");
+      }
+      const params = { threadId, turnId, ...(e.stage ? { clientId, stage: e.stage } : {}),
+        ...(e.item ? { item: { ...e.item, content: [] } } : {}), ...(e.turn ? { turn: e.turn } : {}) };
+      emit(e.method, params);
+      if (e.method !== "turn/completed") expect(view().timeline.activeTurnId).toBe(turnId);
+      if (e.item) expect(store.getState().pendingSteers[viewKey("local", "a1")]?.some(p => p.id === e.item?.clientId)).toBe(false);
+    }
+    await settle();
+    expect(view().timeline.turns[0]?.status).toBe("completed");
+    expect(store.getState().pendingSteers[viewKey("local", "a1")] ?? []).toEqual([]);
+    expect(store.getState().notice?.tone).not.toBe("error");
+    expect(mock.calls.filter(c => c.method === "bootstrap" || c.method === "submit")).toHaveLength(0);
+  });
+  it("a newer correlated generation is not a terminal, while confirmed offline still ends the old running turn", async () => {
+    await open();
+    emit("claude/input/stageChanged", { threadId, turnId, clientId: inputIds[0], stage: "registered" }, 7);
+    expect(view().runtimeGeneration).toBe(7);
+    expect(view().timeline.activeTurnId).toBe(turnId);
+    mock.responses.set("local:sidebar", () => side(6, true));
+    await store.getState().refreshHostSidebar("local");
+    expect(view().timeline.activeTurnId).toBe(turnId);
+    mock.responses.set("local:sidebar", () => side(7, true));
+    await store.getState().refreshHostSidebar("local");
+    expect(view().timeline.turns[0]?.status).toBe("interrupted");
+  });
+  it("a persisted receipt beating a negative history reply cannot resurrect loss or show an error", async () => {
+    await open();
+    const id = inputIds[0]!;
+    store.setState({ pendingSteers: { [viewKey("local", "a1")]: [{ id, text: "insert", imageCount: 0, turnId, baseline: 0, state: "waiting" }] } });
+    let reply!: (value: unknown) => void;
+    mock.responses.set("bootstrap", () => new Promise(resolve => { reply = resolve; }));
+    emit("turn/completed", { threadId, turn: { id: turnId, status: "interrupted" } }, 6);
+    for (let n = 0; n < 4; n++) await Promise.resolve();
+    expect(reply).toBeTypeOf("function");
+    emit("claude/input/stageChanged", { threadId, turnId, clientId: id, stage: "contextPersisted" }, 6);
+    reply({ native: { result: { thread: { id: threadId, turns: [{ id: turnId, status: "interrupted", items: [] }] } } } });
+    await settle();
+    expect(store.getState().pendingSteers[viewKey("local", "a1")] ?? []).toEqual([]);
+    expect(store.getState().notice?.tone).not.toBe("error");
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(0);
+  });
+  it.each([false, true])("releases the retained echo after terminal history verification (recorded=%s)", async recorded => {
+    await open();
+    const id = inputIds[0]!;
+    const entry = newOutboxEntry(view().timeline, { id, text: "unread insert", strategy: "auto", placement: "turn" });
+    const key = viewKey("local", "a1");
+    store.setState({ outbox: { [key]: confirmOutbox([entry], id, { disposition: "steered", turnId } as never, 1) },
+      pendingSteers: { [key]: [{ id, text: "unread insert", imageCount: 0, turnId, baseline: 0, state: "waiting" }] } });
+    mock.responses.set("bootstrap", () => ({ native: { result: { thread: { id: threadId, turns: [{ id: turnId, status: "interrupted", items: recorded ? [{ id: "history-only", type: "userMessage", clientId: id, content: [] }] : [] }] } } } }));
+    emit("turn/completed", { threadId, turn: { id: turnId, status: "interrupted" } }, 6);
+    await settle();
+    expect(store.getState().pendingSteers[key]?.[0]?.state).toBe(recorded ? undefined : "undelivered");
+    expect(pendingTail(store.getState().outbox[key], view().timeline)).toEqual([]);
+  });
+  it("hands retained timeline steers to the single merged echo before interrupt-and-send", async () => {
+    await open();
+    store.setState({ features: new Set([...store.getState().features, "queue-pause"]) });
+    const id = inputIds[0]!;
+    const entry = newOutboxEntry(view().timeline, { id, text: "unread insert", strategy: "auto", placement: "turn" });
+    const key = viewKey("local", "a1");
+    store.setState({ outbox: { [key]: confirmOutbox([entry], id, { disposition: "steered", turnId } as never, 1) },
+      pendingSteers: { [key]: [{ id, text: "unread insert", imageCount: 0, turnId, baseline: 0, state: "waiting" }] } });
+    let stopped!: (value: unknown) => void;
+    mock.responses.set("stopTurn", () => new Promise(resolve => { stopped = resolve; }));
+    mock.responses.set("submit", () => ({ disposition: "started", turnId: "merged-turn" }));
+    const merging = store.getState().interruptAndSend("new tail", [], "a1", "local");
+    for (let n = 0; n < 4; n++) await Promise.resolve();
+    const tail = pendingTail(store.getState().outbox[key], view().timeline);
+    expect(tail).toHaveLength(1);
+    expect(tail[0]?.id).not.toBe(id);
+    expect(tail[0]?.text).toContain("unread insert");
+    expect(tail[0]?.text).toContain("new tail");
+    stopped({ paused: false, alreadyPaused: false });
+    await merging;
+    expect(store.getState().outbox[key]?.some(e => e.id === id)).toBe(false);
+  });
+  it.each([null, {}, { native: { result: {} } }, { native: { result: { thread: { id: "other-thread", turns: [] } } } },
+    { native: { result: { thread: { id: threadId, turns: [{ id: "newer-page-only", status: "completed", items: [] }] } } } }])("missing or irrelevant history is not proof of a lost input: %j", async response => {
+    await open();
+    const key = viewKey("local", "a1");
+    store.setState({ pendingSteers: { [key]: [{ id: inputIds[0]!, text: "insert", imageCount: 0, turnId, baseline: 0, state: "waiting" }] } });
+    mock.responses.set("bootstrap", () => response);
+    emit("turn/completed", { threadId, turn: { id: turnId, status: "interrupted" } }, 6);
+    await settle();
+    expect(store.getState().pendingSteers[key]?.[0]).toMatchObject({ state: "checking", checkFailed: true });
+    expect(store.getState().notice?.tone).not.toBe("error");
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(0);
+  });
+  it("a failed history read can be explicitly checked again without resending", async () => {
+    await open();
+    const key = viewKey("local", "a1"), id = inputIds[0]!;
+    store.setState({ pendingSteers: { [key]: [{ id, text: "insert", imageCount: 0, turnId, baseline: 0, state: "waiting" }] } });
+    mock.responses.set("bootstrap", () => { throw new Error("temporary read failure"); });
+    emit("turn/completed", { threadId, turn: { id: turnId, status: "interrupted" } }, 6);
+    await settle();
+    expect(store.getState().pendingSteers[key]?.[0]).toMatchObject({ state: "checking", checkFailed: true });
+    mock.responses.set("bootstrap", () => ({ native: { result: { thread: { id: threadId, turns: [{ id: turnId, status: "interrupted", items: [{ id: "read-back", type: "userMessage", clientId: id, content: [] }] }] } } } }));
+    await store.getState().recheckSteer(id, "a1", "local");
+    expect(store.getState().pendingSteers[key] ?? []).toEqual([]);
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(0);
+  });
+  it("a hung history read exposes a check retry instead of hanging forever", async () => {
+    await open();
+    const key = viewKey("local", "a1");
+    store.setState({ pendingSteers: { [key]: [{ id: inputIds[0]!, text: "insert", imageCount: 0, turnId, baseline: 0, state: "waiting" }] } });
+    mock.responses.set("bootstrap", () => new Promise(() => {}));
+    emit("turn/completed", { threadId, turn: { id: turnId, status: "interrupted" } }, 6);
+    await settle();
+    expect(store.getState().pendingSteers[key]?.[0]).toMatchObject({ state: "checking", checkFailed: true });
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(0);
+  });
+  it("hands an uncertain retained timeline echo to the check-retry row atomically", async () => {
+    await open();
+    const key = viewKey("local", "a1"), id = inputIds[0]!;
+    const entry = newOutboxEntry(view().timeline, { id, text: "uncertain insert", strategy: "auto", placement: "turn" });
+    store.setState({ outbox: { [key]: confirmOutbox([entry], id, { disposition: "steered", turnId } as never, 1) },
+      pendingSteers: { [key]: [{ id, text: "uncertain insert", imageCount: 0, turnId, baseline: 0, state: "waiting" }] } });
+    const snapshots: { failed: boolean; echo: boolean }[] = [];
+    const stop = store.subscribe(state => snapshots.push({ failed: !!state.pendingSteers[key]?.[0]?.checkFailed, echo: pendingTail(state.outbox[key], view().timeline).length > 0 }));
+    try {
+      mock.responses.set("bootstrap", () => { throw new Error("read unavailable"); });
+      emit("turn/completed", { threadId, turn: { id: turnId, status: "interrupted" } }, 6);
+      await settle();
+      expect(store.getState().pendingSteers[key]?.[0]?.checkFailed).toBe(true);
+      expect(pendingTail(store.getState().outbox[key], view().timeline)).toEqual([]);
+      expect(snapshots.some(s => s.failed && s.echo)).toBe(false);
+    } finally { stop(); }
+  });
+  it("a live history snapshot cannot prove the input was dropped after an older terminal event", async () => {
+    await open();
+    const key = viewKey("local", "a1");
+    store.setState({ pendingSteers: { [key]: [{ id: inputIds[0]!, text: "insert", imageCount: 0, turnId, baseline: 0, state: "waiting" }] } });
+    mock.responses.set("bootstrap", () => ({ native: { result: { thread: { id: threadId, turns: [{ id: turnId, status: "inProgress", items: [] }] } } } }));
+    emit("turn/completed", { threadId, turn: { id: turnId, status: "interrupted" } }, 6);
+    await settle();
+    expect(store.getState().pendingSteers[key]?.[0]?.state).toBe("waiting");
+    expect(store.getState().notice?.tone).not.toBe("error");
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(0);
+  });
+  it("a timed-out check cannot overwrite a newer explicit recheck's positive evidence", async () => {
+    await open();
+    const key = viewKey("local", "a1"), id = inputIds[0]!;
+    store.setState({ pendingSteers: { [key]: [{ id, text: "insert", imageCount: 0, turnId, baseline: 0, state: "waiting" }] } });
+    let oldReply!: (value: unknown) => void;
+    mock.responses.set("bootstrap", () => new Promise(resolve => { oldReply = resolve; }));
+    emit("turn/completed", { threadId, turn: { id: turnId, status: "interrupted" } }, 6);
+    await settle();
+    expect(store.getState().pendingSteers[key]?.[0]?.checkFailed).toBe(true);
+    let newReply!: (value: unknown) => void;
+    mock.responses.set("bootstrap", () => new Promise(resolve => { newReply = resolve; }));
+    const checking = store.getState().recheckSteer(id, "a1", "local");
+    await store.getState().recheckSteer(id, "a1", "local");
+    const requests = mock.calls.filter(c => c.method === "bootstrap");
+    expect(requests).toHaveLength(2);
+    newReply({ native: { result: { thread: { id: threadId, turns: [{ id: turnId, status: "interrupted", items: [{ id: "recorded", type: "userMessage", clientId: id, content: [] }] }] } } } });
+    await checking;
+    oldReply({ native: { result: { thread: { id: threadId, turns: [{ id: turnId, status: "interrupted", items: [] }] } } } });
+    await settle();
+    expect(store.getState().pendingSteers[key] ?? []).toEqual([]);
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(0);
+  });
+  it.each([{ host: "local", session: "b2" }, { host: WORKSTATION, session: "a1" }])("legacy interrupt-and-send consent stays on its host/session when turn IDs collide: %j", async otherAgent => {
+    await open();
+    const { cloneTimeline } = await import("../src/renderer/src/lib/historyPages");
+    const other = cloneTimeline(view().timeline); other.threadId = "other-thread";
+    const a = viewKey("local", "a1"), b = viewKey(otherAgent.host, otherAgent.session);
+    store.setState(state => ({ sessions: { ...state.sessions, [b]: { ...view(), timeline: other } }, pendingSteers: {
+      [a]: [{ id: inputIds[0]!, text: "owner allowed resend", imageCount: 0, turnId, baseline: 0, state: "waiting" }],
+      [b]: [{ id: "other-input", text: "never authorized resend", imageCount: 0, turnId, baseline: 0, state: "waiting" }],
+    } }));
+    mock.responses.set("bootstrap", session => ({ native: { result: { thread: { id: session === "b2" ? "other-thread" : threadId,
+      turns: [{ id: turnId, status: "interrupted", items: [] }] } } } }));
+    if (otherAgent.host !== "local") mock.responses.set(`${otherAgent.host}:bootstrap`, () => ({ native: { result: { thread: { id: "other-thread", turns: [{ id: turnId, status: "interrupted", items: [] }] } } } }));
+    mock.responses.set("submit", (_session, _text, _strategy, options) => ({ disposition: "started", turnId: "retry-turn", clientUserMessageId: (options as { clientUserMessageId: string }).clientUserMessageId }));
+    await store.getState().interruptAndSendSteers("a1", "local");
+    fire("sessionEvent", { hostId: otherAgent.host, sessionId: otherAgent.session, envelope: envelope(otherAgent.session, { source: "app_server", correlation: { runtimeGeneration: 6 },
+      native: { kind: "notification", message: { method: "turn/completed", params: { threadId: "other-thread", turn: { id: turnId, status: "interrupted" } } } } } as Partial<EventEnvelope>) });
+    await settle();
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(0);
+    expect(store.getState().pendingSteers[b]?.[0]?.state).toBe("undelivered");
+    emit("turn/completed", { threadId, turn: { id: turnId, status: "interrupted" } }, 6);
+    await settle();
+    expect(mock.calls.filter(c => c.method === "submit").map(c => c.args[0])).toEqual(["a1"]);
+  });
+  it("unreadable history does not assert non-delivery or authorize a resend", async () => {
+    await open();
+    store.setState({ pendingSteers: { [viewKey("local", "a1")]: [{ id: inputIds[0]!, text: "insert", imageCount: 0, turnId, baseline: 0, state: "waiting" }] } });
+    mock.responses.set("bootstrap", () => { throw new Error("temporary read failure"); });
+    emit("turn/completed", { threadId, turn: { id: turnId, status: "interrupted" } }, 6);
+    await settle();
+    expect(store.getState().pendingSteers[viewKey("local", "a1")]?.[0]?.state).toBe("checking");
+    expect(store.getState().notice?.tone).not.toBe("error");
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(0);
   });
 });
 

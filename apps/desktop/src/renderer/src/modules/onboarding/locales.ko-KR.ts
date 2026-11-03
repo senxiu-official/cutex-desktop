@@ -231,6 +231,8 @@ export const koKR: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.shelf.text": "탭을 다른 {{shelf}}(으)로 끌어 옮길 수 있어요. 빈 곳으로 끌면 새로운 {{shelf}} 하나가 돼요.\n탭이 다 들어가지 않으면 「⌄ N」을 눌러 그 {{shelf}}의 모든 탭을 볼 수 있어요.",
   "onboarding.guide.tray.title": "트레이",
   "onboarding.guide.tray.text": "항목을 구분선 너머로 끌면 트레이에 고정하고, 다시 끌어오면 고정을 풀어요.\n항목을 마우스 오른쪽 버튼으로 클릭해 배지나 메모를 추가할 수 있어요.",
+  "onboarding.guide.portrait.title": "세로 레이아웃",
+  "onboarding.guide.portrait.text": "창이 세로로 길면 대화와 {{shelf}}가 위아래로 쌓입니다. 이 구분선을 끌어 높이를 조정하고, 두 번 클릭하면 기본값으로 돌아갑니다. 포인터를 올리고 ⇅를 누르면 위아래가 바뀝니다.\n사이드바는 창의 왼쪽 가장자리에 숨어 있다가 포인터가 닿으면 나타납니다. 항상 가로로 쓰려면 설정 → 외관 → 세로 레이아웃에서 바꾸세요.",
   "onboarding.guide.service.title": "서비스 링크",
   "onboarding.guide.service.text": "서비스는 {{agent}}이(가) 호스트에서 실행하는 웹 페이지나 API예요. 링크를 누르면 Cutex 안에서 열려요.\n임시 서비스는 쉬고 있거나 기한이 지나면 호스트가 회수해 링크를 사용할 수 없게 돼요.\n계속 쓰려면 「서비스」 페이지에서 고정하거나 영구 서비스로 바꾸세요. 정지와 재시작도 그곳에서 할 수 있어요.",
   "onboarding.guide.update.title": "업데이트",

@@ -431,7 +431,7 @@ describe("openRef beside for services / artifacts / pages (lib/workspaces)", { t
       await ws.openRef({ kind: "service", hostId: "local", key: "third" }, "replace");
       const l3 = side.useSide.getState().layout;
       const third = Object.keys(l3.instances).find((id) => l3.instances[id]!.key === "third")!;
-      expect(locate(l3, third)!.page.id).toBe(page1);
+      expect(locate(l3, third)!.page.id).toBe(at.page.id);
     } finally {
       stop();
     }

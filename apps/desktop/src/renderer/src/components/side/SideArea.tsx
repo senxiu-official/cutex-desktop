@@ -26,7 +26,7 @@ import { useSideRegistry, useSideView, type SideRegistry } from "../../lib/sideC
 import { drawerHeld, sideFrame, type SideFrame } from "../../lib/sideFrame";
 import { CARD_GAP, collapseShelf, type SideLayout, setNewShelfRailPlacement, columnsOnScreen, COLLAPSED_SHELF_WIDTH, frameMins, MIN_CONVERSATION, RAIL_WIDTH, railsOnScreen, shelfRow, setOpen, setShelfWidth, shelfLanePages, shelvesOf, shownCards, toolAreaShown, type ShelfOnScreen, type ShelfSide, type SideViewContext } from "../../lib/sideLayout";
 import { useColumnFollow, useShelfBoxMotion } from "../../lib/shelfMotion";
-import { conversationPanes, CONVERSATION_MIN_W, DEFAULT_MIN_SIZE, paneBinding } from "../../lib/paneLayout";
+import { conversationPanes, CONVERSATION_MIN_W, DEFAULT_MIN_SIZE, paneBinding, type PaneLayout } from "../../lib/paneLayout";
 import { usePanes } from "../../lib/paneStore";
 import { setPaneRoom } from "../../lib/paneRoom";
 import { useInWindow, useWindowKey } from "../../lib/windowScope";
@@ -34,9 +34,10 @@ import { collapseConvShelves, liveConversation, setNarrow, syncPeers, updateLayo
 import { restorePanels } from "../../lib/panelFull";
 import { focusConversationPane, resizePaneColumns } from "../../lib/paneStore";
 import { WorkspaceRail } from "./WorkspaceRail";
+import { ConvStrip as ConversationStrip } from "../ConvStrip";
 import { EmptyShelfLaunchers } from "./EmptyShelfLaunchers";
 import { dataFlags, useSizeFlags, widthBelow } from "../../lib/sizeFlags";
-import { commitShelfWidth } from "../../lib/shelves";
+import { commitShelfWidth, openShelfPage } from "../../lib/shelves";
 import { setRowHooks, setRowReserve, shelfEdgeDrag, setSideWorkWidth, setShelvesTaken, useSideWidthHandle, type WidthTarget } from "../../lib/sideResize";
 import { WS_CONVERSATION_MIN_W } from "../../lib/workspaces";
 import { FOLD_HYSTERESIS } from "../../lib/foldHysteresis";
@@ -58,6 +59,19 @@ import "./shelfCard.css";
 import "../../lib/shelfCorners";
 import { isElement } from "../../lib/ownerWindow";
 import { useOwnerWindow } from "../../lib/ownerContext";
+import { ArrowDownUp } from "lucide-react";
+import { BAND_SHELF_MIN, bandShelves, bandWeights, clampBand, clampSplit, RoomFoldedContext, stackColumns, stackRows, useSettingsShelfMaximized, DEFAULT_PORTRAIT, RailEdgeContext, setPortraitPrefs, SPLIT_STEP, SPLIT_STEP_BIG, STACK_CONVERSATION_MIN, STACK_GAP, STACK_RAIL_H, STACK_SHELF_MIN, swapPortrait, usePortrait, usePortraitOn, useRailEdge } from "../../lib/portrait";
+import { glideStack, noteStackLater, quietNextStackGlide, stopStackGlides } from "../../lib/portraitMotion";
+import "./portrait.css";
+
+/**
+ * Portrait (lib/portrait): while the row is drawn as a stack the landscape engine below still runs on every render, but it
+ * is handed a row this wide — always flow: no drawer, no fold, no column narrowing — so nothing of the landscape layout is
+ * written or folded meanwhile; its results are not drawn. Rotating back measures the real row in the flip's own commit.
+ */
+const PORTRAIT_ROW = 2400;
+/** The row before its first measure (the stand-in: whether it was measured while drawn as the portrait stack). */
+const UNMEASURED_ROW = { w: 0, stack: false };
 
 const EMPTY_SHELF_SIZES = { compact: widthBelow(17.5) };
 
@@ -124,11 +138,13 @@ function ShelfView({ entry, registry, ctx, resizable, currentWidth, collapsed = 
   const railFirst = collapsed ? side === "left" : (side === "left") === (shelf.options.railPlacement === "outer");
   const target: WidthTarget = { shelfId: shelf.id, side };
   const edge = resizable && !entry.only ? (side === "right" ? "left" : "right") : null;
+  // Portrait (lib/portrait): the rail across the Shelf's edge toward the conversation, the panes under (or over) it.
+  const across = useRailEdge();
   return (
     // Rail look A (owner 2026-10-23, shelfCard.css): expanded, the box is no card itself — the rail is a full-height
     // card and each pane its own rounded card attached to it, the standard gap between panes. Collapsed = one card,
     // the rail (as before).
-    <div data-shelf={shelf.id} data-shelf-side={shelf.side} data-shelf-at={side} data-shelf-collapsed={collapsed ? "" : undefined} data-shelf-card={railFirst ? "rail-left" : "rail-right"} className={`${collapsed ? "shell-card " : ""}shelf-card relative isolate flex min-h-0 min-w-0 flex-1 overflow-hidden ${railFirst ? "" : "flex-row-reverse"}`}>
+    <div data-shelf={shelf.id} data-shelf-side={shelf.side} data-shelf-at={side} data-shelf-collapsed={collapsed ? "" : undefined} data-shelf-card={across ? `rail-${across}` : railFirst ? "rail-left" : "rail-right"} className={`${collapsed ? "shell-card " : ""}shelf-card relative isolate flex min-h-0 min-w-0 flex-1 overflow-hidden ${across ? (across === "top" ? "flex-col" : "flex-col-reverse") : railFirst ? "" : "flex-row-reverse"}`}>
       <ShelfRail shelf={shelf} pages={pages} shown={page.id} collapsed={collapsed} at={side} ctx={ctx} owner={<LiveOwner shelfId={shelf.id} collapsed={collapsed || !layout.open} shared={!!page.shared} side={side} />} />
       {!collapsed && (
         <div className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col" data-shelf-body="" data-side-column={page.id} data-side-column-focused={page.id === layout.activePage ? "" : undefined}>
@@ -149,9 +165,10 @@ function foldedClick(e: { target: EventTarget | null }): void {
 
 /**
  * A Shelf / pane maximised or full screen (§24.16): the conversation card becomes a strip of its conversations'
- * avatars (they stay mounted underneath, hidden); a click on one puts everything back and focuses it.
+ * avatars (they stay mounted underneath, hidden); a click on one puts everything back and focuses it. `across`: the
+ * portrait stack's strip (lib/portrait), its avatars in a row.
  */
-function ConvStrip() {
+function ConvStrip({ across = false }: { across?: boolean }) {
   const { t } = useI18n();
   const key = usePanes((s) =>
     conversationPanes(s.layout)
@@ -164,7 +181,7 @@ function ConvStrip() {
   );
   const panes = key ? key.split("\n").map((x) => x.split("\u0000") as [string, string, string]) : [];
   return (
-    <nav data-conv-strip="" aria-label={t("panel.convStrip")} title={t("panel.convStrip")} className="panel-fold flex w-full flex-col items-center gap-1 py-1.5" onClick={(e) => e.target === e.currentTarget && restorePanels()}>
+    <nav data-conv-strip="" aria-label={t("panel.convStrip")} title={t("panel.convStrip")} className={across ? "panel-fold flex h-full w-full flex-row items-center gap-1 px-1.5" : "panel-fold flex w-full flex-col items-center gap-1 py-1.5"} onClick={(e) => e.target === e.currentTarget && restorePanels()}>
       {panes.map(([paneId, hostId, sessionId]) => (
         <span key={paneId} data-conv-strip-pane={paneId}>
           <RailOwner
@@ -181,16 +198,35 @@ function ConvStrip() {
   );
 }
 
+/** While a conversation is maximised: the other conversation column's pane, host and session ("" none). */
+function maxedOther(s: { layout: PaneLayout }): string {
+  const l = s.layout;
+  if (!l.max) return "";
+  const panes = conversationPanes(l);
+  const other = panes.find((id) => id !== l.max);
+  const b = other ? paneBinding(l, other) : null;
+  return other && b?.sessionId ? `${other}\u0000${b.hostId}\u0000${b.sessionId}` : "";
+}
+
+/**
+ * Portrait: the other workspace while a conversation is maximised (§24.16; landscape shows it as its rail) — a 40 px
+ * strip across the stack's top, its avatar and name (components/ConvStrip, as the strip of two workspaces without the
+ * room); a click focuses it, which puts the layout back.
+ */
+function PortraitOtherStrip() {
+  const key = usePanes(maxedOther);
+  if (!key) return null;
+  const [paneId, hostId, sessionId] = key.split("\u0000") as [string, string, string];
+  return (
+    <div data-portrait-part="strip" data-portrait-other={paneId} className="shell-card relative isolate flex shrink-0 overflow-hidden" style={{ height: STACK_RAIL_H, order: -1, marginBottom: STACK_GAP }}>
+      <ConversationStrip paneId={paneId} hostId={hostId} sessionId={sessionId} across />
+    </div>
+  );
+}
+
 /** The other workspace while a conversation is maximised / full screen (§24.16): its rail (avatar on top, even with an empty Shelf). */
 function OtherWorkspaceStrip({ at }: { at: ShelfSide }) {
-  const key = usePanes((s) => {
-    const l = s.layout;
-    if (!l.max) return "";
-    const panes = conversationPanes(l);
-    const other = panes.find((id) => id !== l.max);
-    const b = other ? paneBinding(l, other) : null;
-    return other && b?.sessionId ? `${other}\u0000${b.hostId}\u0000${b.sessionId}` : "";
-  });
+  const key = usePanes(maxedOther);
   const name = useApp((s) => {
     if (!key) return "";
     const [, hostId, sessionId] = key.split("\u0000") as [string, string, string];
@@ -374,6 +410,322 @@ function SideArea({ frame, areaWidth, covered, shelf, page, order, maxAt = "righ
         </span>
       )}
     </>
+  );
+}
+
+/**
+ * Portrait (lib/portrait): the stack's Shelf band — a workspace's Shelves side by side (left first; P3, owner 2026-10-30
+ * decision 11), the open ones with their Rail across the edge toward the conversation (RailEdgeContext), the others —
+ * collapsed, or without the room for both (lib/portrait bandShelves) — as their upright rail at their side; or the tool
+ * area's launchers. Its share of the stack's height (the divider sets it); no width handles. At the stack's top
+ * (swapped) it leaves no tray room under it. `share` null: a maximised / full-screen Shelf or pane (§24.16) — all of the
+ * stack but the conversations' strip. `place`: its grid cell (two workspaces side by side, each a column); `paneId`:
+ * the other workspace's column (its Shelves are a peer's, lib/shelfSourceContext); `split`: two workspaces.
+ */
+function PortraitShelf({ open, rails, roomFolded = [], share, swapped, maxed = false, place = null, paneId = null, split = false }: { open: readonly ShelfOnScreen[]; rails: readonly ShelfOnScreen[]; roomFolded?: readonly string[]; share: number | null; swapped: boolean; maxed?: boolean; place?: CSSProperties | null; paneId?: string | null; split?: boolean }) {
+  const { t } = useI18n();
+  const peer = useShelfPeer();
+  const sidePaneWidth = useLiveWidth("sidePaneWidth");
+  const bandShare = usePortrait((s) => s.prefs.band);
+  const bandRef = useRef<HTMLDivElement>(null);
+  const all = [...open, ...rails].sort((a, b) => (a.shelf.side === b.shelf.side ? 0 : a.shelf.side === "left" ? -1 : 1));
+  const both = open.length > 1;
+  // P4: left + right side by side — their weights from the handle between them (this window's portrait pref), else
+  // from their landscape widths.
+  const weights = both ? bandWeights(bandShare, [open.find((e) => e.shelf.side === "left")?.shelf.width ?? sidePaneWidth, open.find((e) => e.shelf.side === "right")?.shelf.width ?? sidePaneWidth]) : null;
+  const weightOf = (e: ShelfOnScreen) => (weights ? weights[e.shelf.side === "left" ? 0 : 1] : null);
+  return (
+    <div
+      ref={bandRef}
+      data-portrait-part="shelf"
+      data-panel-maxed={maxed ? "" : undefined}
+      className="relative flex min-h-0 min-w-0 flex-row gap-2"
+      style={place ?? { flex: share === null ? "1 1 0px" : `${share} 1 0px`, minHeight: share === null ? 0 : STACK_SHELF_MIN, order: swapped ? 0 : 2 }}
+      onPointerDownCapture={peer ? () => focusPeer(peer.key) : undefined}
+      onFocusCapture={peer ? () => focusPeer(peer.key) : undefined}
+    >
+      {open.length ? (
+        all.flatMap((e) =>
+          open.includes(e) ? (
+            [
+              both && e.shelf.side === "right" ? <PortraitBandHandle key="band-handle" band={bandRef} share={weights![0] / (weights![0] + weights![1])} /> : null,
+              <PortraitShelfBox key={e.shelf.id} entry={e} swapped={swapped} weight={weightOf(e)} paneId={paneId} sideBox={!split && e.shelf.side === "right"} />,
+            ]
+          ) : (
+            <PortraitBandRail key={e.shelf.id} entry={e} swapped={swapped} roomFolded={roomFolded.includes(e.shelf.id)} paneId={paneId} />
+          ),
+        )
+      ) : (
+        <div data-side-root data-side-box data-side-frame="portrait" data-customize-region="sides" className="relative flex min-h-0 min-w-0 flex-1 flex-col" style={{ marginBottom: swapped ? 0 : undefined }} aria-label={t("side.column")}>
+          <EmptyCard title={t("side.empty.title")} hint={t("side.empty.hint")} edge={null}>
+            <EmptyShelfLaunchers pageId={null} />
+          </EmptyCard>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Portrait: one open Shelf of the band. `weight`: its share beside the other one (its own width; each keeps
+ * BAND_SHELF_MIN); null: the band's whole width. Marked like its landscape box (the right one of a single workspace is
+ * the side box; the left one, and any beside two workspaces, a Shelf box; the other workspace's its `data-ws-shelf`).
+ */
+function PortraitShelfBox({ entry, swapped, weight, paneId, sideBox }: { entry: ShelfOnScreen; swapped: boolean; weight: number | null; paneId: string | null; sideBox: boolean }) {
+  const { t } = useI18n();
+  const registry = useSideRegistry();
+  const ctx = useSideView();
+  const box = useRef<HTMLDivElement>(null);
+  const side = entry.shelf.side;
+  return (
+    <div
+      ref={box}
+      data-side-root
+      data-side-box={sideBox ? "" : undefined}
+      data-shelf-box={sideBox ? undefined : side}
+      data-ws-shelf={paneId ?? undefined}
+      data-side-frame="portrait"
+      data-customize-region="sides"
+      className="relative flex min-h-0 min-w-0 flex-col"
+      style={{ flex: weight === null ? "1 1 0px" : `${weight} 1 0px`, minWidth: weight === null ? 0 : BAND_SHELF_MIN, marginBottom: swapped ? 0 : undefined }}
+      aria-label={t(side === "left" ? "shelf.left" : "side.column")}
+    >
+      <ShelfView entry={entry} registry={registry} ctx={ctx} resizable={false} currentWidth={() => box.current?.offsetWidth ?? 0} />
+    </div>
+  );
+}
+
+/**
+ * Portrait (P4): the 8 px gap between the band's left and right Shelf is their handle — a drag sets the left one's share
+ * of the two (live on the boxes' style, stored per window on release, portrait only: their landscape widths are never
+ * written; each keeps BAND_SHELF_MIN); a double-click goes back to their landscape widths' ratio; ← / → step it (Shift:
+ * bigger steps). `band`: the band's element (the two boxes are its open Shelves); `share`: the left one's share now.
+ */
+function PortraitBandHandle({ band, share }: { band: RefObject<HTMLDivElement | null>; share: number }) {
+  const { t } = useI18n();
+  const key = useWindowKey();
+  const [dragging, setDragging] = useState(false);
+  const drag = useRef<{ x: number; left: number; total: number; now: number } | null>(null);
+  const boxes = () => [...(band.current?.querySelectorAll<HTMLElement>(':scope > [data-side-frame="portrait"]') ?? [])];
+  const measure = () => {
+    const [l, r] = boxes();
+    const left = l?.getBoundingClientRect().width ?? 0;
+    return { left, total: left + (r?.getBoundingClientRect().width ?? 0) };
+  };
+  const show = (s: number) => {
+    const [l, r] = boxes();
+    if (l) l.style.flex = `${s} 1 0px`;
+    if (r) r.style.flex = `${Math.round((1 - s) * 1000) / 1000} 1 0px`;
+    slotsRelayout();
+  };
+  const end = () => {
+    const d = drag.current;
+    if (!d) return;
+    drag.current = null;
+    setDragging(false);
+    if (d.now === share) return;
+    quietNextStackGlide();
+    setPortraitPrefs(key, { band: d.now });
+  };
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t("orientation.bandDivider")}
+      aria-valuenow={Math.round(share * 100)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      tabIndex={0}
+      title={t("orientation.bandDividerHint")}
+      data-portrait-band-handle=""
+      data-dragging={dragging ? "" : undefined}
+      className="portrait-band-handle"
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        const m = measure();
+        drag.current = { x: e.clientX, left: m.left, total: m.total, now: share };
+        setDragging(true);
+      }}
+      onPointerMove={(e) => {
+        const d = drag.current;
+        if (!d || d.total <= 0) return;
+        d.now = clampBand((d.left + e.clientX - d.x) / d.total, d.total);
+        show(d.now);
+      }}
+      onPointerUp={end}
+      onLostPointerCapture={end}
+      onDoubleClick={() => setPortraitPrefs(key, { band: undefined })}
+      onKeyDown={(e) => {
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        e.preventDefault();
+        const d = (e.shiftKey ? SPLIT_STEP_BIG : SPLIT_STEP) * (e.key === "ArrowLeft" ? -1 : 1);
+        setPortraitPrefs(key, { band: clampBand(share + d, measure().total) });
+      }}
+    />
+  );
+}
+
+/**
+ * Portrait: a Shelf of the band shown as its upright rail at its side — collapsed (its own layout: the rail works as
+ * in landscape), or `roomFolded`: no room beside the other open one (a view only, its layout keeps it expanded) — a
+ * click on its avatar, a page or the rail shows it in the band instead (its page in focus; the other one folds).
+ */
+function PortraitBandRail({ entry, swapped, roomFolded, paneId }: { entry: ShelfOnScreen; swapped: boolean; roomFolded: boolean; paneId: string | null }) {
+  const { t } = useI18n();
+  const registry = useSideRegistry();
+  const ctx = useSideView();
+  return (
+    <RailEdgeContext.Provider value={null}>
+      <RoomFoldedContext.Provider value={roomFolded}>
+        <div
+          data-side-root
+          data-shelf-box={entry.shelf.side}
+          data-ws-shelf={paneId ?? undefined}
+          data-portrait-band-rail={roomFolded ? "room" : ""}
+          className="relative flex shrink-0"
+          style={{ width: RAIL_WIDTH, order: entry.shelf.side === "left" ? -1 : 1, marginBottom: swapped ? 0 : undefined }}
+          aria-label={t(entry.shelf.side === "left" ? "shelf.left" : "side.column")}
+          onClickCapture={roomFolded ? (e) => showRoomFolded(e, entry) : undefined}
+        >
+          <ShelfView entry={entry} registry={registry} ctx={ctx} resizable={false} currentWidth={() => 0} collapsed />
+        </div>
+      </RoomFoldedContext.Provider>
+    </RailEdgeContext.Provider>
+  );
+}
+
+/**
+ * A click on a rail folded for lack of room in the band (above): its page (or the one it shows) comes into focus, so
+ * the band shows that Shelf — never its collapse toggle (it is not collapsed). The ⋯ menu, ＋ and the rest keep theirs.
+ */
+function showRoomFolded(e: { target: EventTarget | null; stopPropagation(): void; preventDefault(): void }, entry: ShelfOnScreen): void {
+  const button = isElement(e.target) ? e.target.closest("button") : null;
+  if (button && !button.matches("[data-shelf-page], [data-shelf-avatar]")) return;
+  e.stopPropagation();
+  e.preventDefault();
+  openShelfPage(button?.getAttribute("data-shelf-page") || entry.page.id);
+}
+
+/**
+ * Portrait: a folded Shelf (or a closed tool area's Shelf, Shelf Rail 常驻) — its rail as a 40 px bar across the stack's end.
+ * `folded`: folded by a maximised conversation (§24.16) — a click on one of its buttons first puts everything back.
+ */
+function PortraitRail({ entry, swapped, folded = false }: { entry: ShelfOnScreen; swapped: boolean; folded?: boolean }) {
+  const { t } = useI18n();
+  const registry = useSideRegistry();
+  const ctx = useSideView();
+  return (
+    <div data-side-root data-shelf-box={entry.shelf.side} data-portrait-part="rail" data-panel-folded={folded ? "" : undefined} className="relative flex min-w-0 flex-1" style={{ height: STACK_RAIL_H, marginBottom: swapped ? 0 : undefined }} aria-label={t(entry.shelf.side === "left" ? "shelf.left" : "side.column")} onClickCapture={folded ? foldedClick : undefined}>
+      <ShelfView entry={entry} registry={registry} ctx={ctx} resizable={false} currentWidth={() => 0} collapsed />
+    </div>
+  );
+}
+
+/**
+ * Portrait: the 8 px gap between the conversation and its Shelf is the divider — a drag sets the conversation's share of
+ * the two (live on the parts' style, stored per window on release; both keep their minimum, a snap near the default);
+ * a double-click goes back to the default (58 %); ↑ / ↓ step it (Shift: bigger steps). Hovering it shows ⇅, which swaps
+ * the two (also in the Shelf's ⋯ menu and Settings → 外观). `place` (P3, two workspaces side by side): its column's cell
+ * of the stack's grid — the drag sets the rows of every column at once (portrait.css `--stack-rows`).
+ */
+function PortraitDivider({ row, split, swapped, place = null }: { row: RefObject<HTMLDivElement | null>; split: number; swapped: boolean; place?: CSSProperties | null }) {
+  const { t } = useI18n();
+  const key = useWindowKey();
+  const [dragging, setDragging] = useState(false);
+  const drag = useRef<{ y: number; conv: number; total: number; now: number } | null>(null);
+  const parts = () => {
+    const el = row.current;
+    return {
+      // One workspace: the conversation card; two (P2): the focused workspace's column (components/PaneHost).
+      conv: el?.querySelector<HTMLElement>(':scope > [data-portrait-part="conversation"], :scope > .contents > [data-pane-columns] > [data-portrait-part="conversation"]') ?? null,
+      shelf: el?.querySelector<HTMLElement>(':scope > [data-portrait-part="shelf"]') ?? null,
+    };
+  };
+  /** The two parts' heights together (the divider not counted). */
+  const total = () => {
+    if (place) return Math.max(0, (row.current?.clientHeight ?? 0) - STACK_GAP);
+    const { conv, shelf } = parts();
+    return (conv?.getBoundingClientRect().height ?? 0) + (shelf?.getBoundingClientRect().height ?? 0);
+  };
+  const show = (share: number) => {
+    if (place) {
+      // The grid's rows (React sets the variable again from the stored split after the release).
+      row.current?.style.setProperty("--stack-rows", stackRows(share, swapped));
+      slotsRelayout();
+      return;
+    }
+    const { conv, shelf } = parts();
+    // The card's own style; two workspaces: the focused column follows the stack's variable (portrait.css; React owns it
+    // there, so rotating back drops it — the one-workspace row is the landscape row's own element: nothing is left on it).
+    if (conv?.hasAttribute("data-conv-card")) conv.style.flex = `${share} 1 0px`;
+    else if (row.current?.hasAttribute("data-portrait-split")) row.current.style.setProperty("--stack-conv-flex", `${share} 1 0px`);
+    if (shelf) shelf.style.flex = `${Math.round((1 - share) * 1000) / 1000} 1 0px`;
+    // The Shelf panes' instances follow their slots in this frame (lib/sideSlots).
+    slotsRelayout();
+  };
+  const end = () => {
+    const d = drag.current;
+    if (!d) return;
+    drag.current = null;
+    setDragging(false);
+    if (d.now === split) return;
+    // The release stores what the drag already shows: no glide toward it (lib/portraitMotion).
+    quietNextStackGlide();
+    setPortraitPrefs(key, { split: d.now });
+  };
+  // ↑ moves the divider up: a smaller conversation on top, a bigger one below (swapped).
+  const step = (up: boolean, big: boolean) => {
+    const d = (big ? SPLIT_STEP_BIG : SPLIT_STEP) * (up === !swapped ? -1 : 1);
+    setPortraitPrefs(key, { split: clampSplit(split + d, total()) });
+  };
+  return (
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label={t("orientation.divider")}
+      aria-valuenow={Math.round(split * 100)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      tabIndex={0}
+      title={t("orientation.dividerHint")}
+      data-portrait-divider=""
+      data-dragging={dragging ? "" : undefined}
+      className="portrait-divider"
+      style={place ? { ...place, height: STACK_GAP } : { height: STACK_GAP, order: 1 }}
+      onPointerDown={(e) => {
+        if (e.button !== 0 || (isElement(e.target) && e.target.closest("[data-portrait-swap]"))) return;
+        e.preventDefault();
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        const { conv } = parts();
+        drag.current = { y: e.clientY, conv: place ? split * total() : (conv?.getBoundingClientRect().height ?? 0), total: total(), now: split };
+        setDragging(true);
+      }}
+      onPointerMove={(e) => {
+        const d = drag.current;
+        if (!d || d.total <= 0) return;
+        const dy = e.clientY - d.y;
+        d.now = clampSplit((d.conv + (swapped ? -dy : dy)) / d.total, d.total);
+        show(d.now);
+      }}
+      onPointerUp={end}
+      onLostPointerCapture={end}
+      onDoubleClick={(e) => {
+        if (isElement(e.target) && e.target.closest("[data-portrait-swap]")) return;
+        setPortraitPrefs(key, { split: DEFAULT_PORTRAIT.split });
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+        e.preventDefault();
+        step(e.key === "ArrowUp", e.shiftKey);
+      }}
+    >
+      <button type="button" data-portrait-swap="" className="portrait-swap" title={t("orientation.swapHint")} onClick={() => swapPortrait(key)}>
+        <ArrowDownUp size={12} />
+        {t(swapped ? "orientation.convOnTop" : "orientation.shelfOnTop")}
+      </button>
+    </div>
   );
 }
 
@@ -722,7 +1074,22 @@ function LegacySideWorkArea({ side, covered = false, split = null, desk = false,
     ref.current = el;
     if (el) setRowEl(el);
   }, []);
-  const [areaWidth, setAreaWidth] = useState(0);
+  // Portrait (lib/portrait): this window is portrait — the row is drawn as a stack (below), whatever it holds: one
+  // workspace, two (the other folds to a strip, P2), a maximised conversation / Shelf / pane (it fills the stack, P2).
+  const stack = usePortraitOn();
+  const portraitPrefs = usePortrait((s) => s.prefs);
+  // The row's width as last measured, and whether it was measured while drawn as the stack. The engine runs on the
+  // stand-in (PORTRAIT_ROW) while the stack shows — and for the one render after rotating back, before the real row is
+  // measured in that same commit (the measuring effect follows `stack`): no layout, effect or glide ever sees the
+  // stack's width as the landscape row's.
+  const [measuredRow, setMeasuredRow] = useState(UNMEASURED_ROW);
+  const standIn = (stack || measuredRow.stack) && measuredRow.w > 0;
+  const areaWidth = standIn ? PORTRAIT_ROW : measuredRow.w;
+  // What the last commit drew (the measure reads it: the box it measures is that layout's).
+  const stackDrawn = useRef(stack);
+  useLayoutEffect(() => {
+    stackDrawn.current = stack;
+  });
   // The row's left edge on screen: the sidebar's / Settings Shelf's edge dragged moves it (宽度规则 2).
   const [rowLeft, setRowLeft] = useState(0);
   const sessionRef = useRef<RowSession | null>(null);
@@ -732,7 +1099,8 @@ function LegacySideWorkArea({ side, covered = false, split = null, desk = false,
   // there — the whole gap is that card's handle (owner 2026-10-28: a press in the middle of the gap resized the
   // conversation, not the sidebar; like the Shelf seam below).
   const windowKey = useWindowKey();
-  const settingsLeft = useSettingsShelf((s) => s.open && s.win === windowKey && !s.maximized && s.side === "left");
+  const settingsMax = useSettingsShelfMaximized();
+  const settingsLeft = useSettingsShelf((s) => s.open && s.win === windowKey && s.side === "left") && !settingsMax;
   const settingsSlot = useSettingsShelfSlot((s) => !!s.left);
   const sidebarShown = useSidebarEdge((s) => s.shown);
   const sidebarEdge = sidebarShown || (settingsLeft && settingsSlot);
@@ -762,13 +1130,19 @@ function LegacySideWorkArea({ side, covered = false, split = null, desk = false,
       // A detached row (between the swap and this effect) reports 0: never take that for the area.
       if (!el.isConnected) return;
       const w = el.clientWidth;
+      // Drawn as the portrait stack: only noted (the stand-in holds); nothing of the landscape row is written from it.
+      const inStack = stackDrawn.current;
+      if (inStack) {
+        setMeasuredRow((p) => (p.w === w && p.stack ? p : { w, stack: true }));
+        return;
+      }
       // The row changed width by itself (the window resized, a panel beside it opened): a group a drag left off
       // centre keeps its relative place in the free space (no re-centring jump). A width being dragged keeps what
-      // it moved (the drag session).
+      // it moved (the drag session). Not from the stand-in's row (the render right after rotating back).
       const last = lastRef.current;
-      if (!resizing() && w !== measured.current) keepLeadShare(last && last.contentRow ? last.area - last.total : 0);
+      if (!resizing() && w !== measured.current && !last?.standIn) keepLeadShare(last && last.contentRow ? last.area - last.total : 0);
       measured.current = w;
-      setAreaWidth(w);
+      setMeasuredRow((p) => (p.w === w && !p.stack ? p : { w, stack: false }));
       setRowLeft(Math.round(el.getBoundingClientRect().left));
       setSideWorkWidth(w);
       noteColumns(el);
@@ -784,7 +1158,9 @@ function LegacySideWorkArea({ side, covered = false, split = null, desk = false,
       unobserve();
       off();
     };
-  }, [rowEl]);
+    // An orientation flip measures again in its own commit (before paint): the first landscape layout after the stack
+    // uses the real row, never a frame at the stack's width.
+  }, [rowEl, stack]);
   // 工作区宽度 as applied (智能: one workspace by content, two fill the window; lib/workspaceRow rowWidthMode).
   const widthMode = rowWidthMode(appearance.workspaceWidth, split ? 2 : 1);
   const byContent = widthMode === "content";
@@ -827,8 +1203,11 @@ function LegacySideWorkArea({ side, covered = false, split = null, desk = false,
   const held = useRef({ leftOut: false, narrow: false, forced: false });
   // The row's width changed since the last render (the window resized, the sidebar folded): nothing glides or
   // eases then — every panel takes its new place at once (owner 2026-10-21: panels flying on a window resize).
+  // Portrait: the stand-in counts as moved too — the boxes the stack did not draw come back (rotating back) in place,
+  // with no open / close motion (two boxes of one Shelf, the maximised conversation's folded rail and its hidden box,
+  // otherwise eased open again on that remount).
   const areaBefore = useRef(areaWidth);
-  const areaMoved = areaBefore.current !== areaWidth;
+  const areaMoved = areaBefore.current !== areaWidth || standIn;
   // §24 step 4 minSize: every conversation column and the right Shelf keep their minimum widths (the right
   // Shelf becomes the drawer before they squeeze).
   const emptyState = side && toolAreaShown(layout, ctx) && !shown.length && !rails.length;
@@ -849,7 +1228,10 @@ function LegacySideWorkArea({ side, covered = false, split = null, desk = false,
   const columns = (leftFits ? 1 : 0) + (right ? 1 : 0);
   // In this component's window (multi-window P3: a desk's work area is its own).
   const inMine = useInWindow();
-  useEffect(() => inMine(() => setPaneRoom({ width: areaWidth, conversations, tools: side && toolAreaShown(layout, ctx) ? Math.max(1, columns) : 0 })), [inMine, areaWidth, conversations, side, layout, ctx, columns]);
+  // The stand-in (portrait) is not the room a new column would get: the stack's real width is.
+  const roomWidth = standIn ? measuredRow.w : areaWidth;
+  // In the stack another conversation folds to a strip: it always has room (lib/paneRoom `stacked`).
+  useEffect(() => inMine(() => setPaneRoom({ width: roomWidth, conversations, tools: side && toolAreaShown(layout, ctx) ? Math.max(1, columns) : 0, ...(stack ? { stacked: true } : {}) })), [inMine, roomWidth, conversations, side, layout, ctx, columns, stack]);
   const mins = singleOnly ? { ...frameMins(conversations, 1, CONVERSATION_MIN_W, DEFAULT_MIN_SIZE.w + RAIL_WIDTH), conversation: STRIP_W } : frameMins(conversations, 1, CONVERSATION_MIN_W, DEFAULT_MIN_SIZE.w + RAIL_WIDTH);
   // What this row needs beside the Settings Shelf (owner 2026-10-24): one workspace with its right Shelf expanded = the
   // conversation and that Shelf at their minimums (+ what the left Shelf / rails take, + the drawer's fold slack, so a
@@ -1066,7 +1448,8 @@ function LegacySideWorkArea({ side, covered = false, split = null, desk = false,
 
   // 贴边显示 (owner 2026-10-21): its own switch, only while the panes fill the work area — 铺满窗口 / 智能 only set widths.
   const fills = row ? row.mode === "fill" || !row.fits : singleW === null;
-  const edge = edgeToEdge({ setting: appearance.edgeToEdge, deskOn: desk, narrowColumn: !fills });
+  // The portrait stack fills the work area (its parts span it).
+  const edge = edgeToEdge({ setting: appearance.edgeToEdge, deskOn: desk, narrowColumn: !fills && !stack });
   // Before paint: the margins go in the same frame as the layout that fills (a frame of the filling layout with the margins).
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -1122,7 +1505,8 @@ function LegacySideWorkArea({ side, covered = false, split = null, desk = false,
     ? `${convPaneIds.map((id, i) => `${id}=${baseRow ? rowGrowRoom({ row: baseRow, area: areaWidth, empties, shrinkTo, target: { ws: i, shelfId: null } }) : 0}`).join(",")}|${baseRow ? rowGrowRoom({ row: baseRow, area: areaWidth, empties, shrinkTo, target: { ws: focusedIdx, shelfId: "" } }) : 0}`
     : `${singleConv ?? ""}=${singleRoomConv}|${singleRoomShelf}`;
   useEffect(() => {
-    if (panelMax || desk || !side) return setGrowRoom({ conv: {}, shelf: 0 });
+    // Portrait: the stand-in row's gaps are no room (a stack has none; lib/paneActions toggleMaximize fills it instead).
+    if (panelMax || desk || !side || stack) return setGrowRoom({ conv: {}, shelf: 0 });
     const [convs, shelf] = roomSig.split("|");
     const conv: Record<string, number> = {};
     for (const part of (convs ?? "").split(",")) {
@@ -1130,7 +1514,7 @@ function LegacySideWorkArea({ side, covered = false, split = null, desk = false,
       if (at > 0) conv[part.slice(0, at)] = Number(part.slice(at + 1));
     }
     setGrowRoom({ conv, shelf: Number(shelf) || 0 });
-  }, [roomSig, panelMax, desk, side]);
+  }, [roomSig, panelMax, desk, side, stack]);
   const contentRow = row ? row.centred : byContent && singleW !== null && !panelMax;
   // A Shelf's edge dragged (推挤): where the group's left edge went — a left Shelf's outer edge moves it by what the
   // Shelf grew, a Shelf pushed at its minimum or a column pushed at its own takes it along when that is to the left.
@@ -1226,6 +1610,7 @@ function LegacySideWorkArea({ side, covered = false, split = null, desk = false,
   const lastRef = useRef<RowLast | null>(null);
   lastRef.current = {
     area: areaWidth,
+    standIn,
     rowLeft,
     split: splitRow,
     fillSplit,
@@ -1393,11 +1778,24 @@ function LegacySideWorkArea({ side, covered = false, split = null, desk = false,
     ? `s|${conversations}|${widthsKey}|${byContent ? "c" : "f"}|${lead}`
     : `${split ? "s" : "1"}|${single ?? ""}|${leftTaken}|${rightFlow}|${rightRail ? 1 : emptyRail ? 2 : 0}|${singleShown ?? "f"}|${growLeftPx}|${growRightPx}|${conversations}|${widthsKey}|${byContent ? "c" : "f"}|${lead}`;
   const card = useRef<HTMLDivElement>(null);
+  // Rotating back (lib/portrait): the stack styled the conversation card; where the landscape row gives it none (left +
+  // right Shelves filling the row) React only empties the attribute — no `style=""` is left on the landscape card. From
+  // the flip to the first measured landscape commit (the stand-in's render gives it a width first).
+  const fromStack = useRef(false);
+  useLayoutEffect(() => {
+    if (stack) fromStack.current = true;
+    if (stack || !fromStack.current) return;
+    if (card.current?.getAttribute("style") === "") card.current.removeAttribute("style");
+    if (!standIn) fromStack.current = false;
+  });
   // A Shelf's box easing open / shut beside the single column: the column's width eases with it (lib/shelfMotion
   // useColumnFollow) — a column switching to filling the row took, on the first frame, all the room the box had not yet.
-  useColumnFollow(card, ref, !splitRow && !!single && !panelMax && areaWidth > 0 ? (singleShown ?? Math.max(0, free)) : null, dragging.current || areaMoved || resizing());
-  // Only discrete changes glide: not a drag's steps, not the work area changing width (window, sidebar).
-  useLayoutEffect(() => glideColumns(ref.current, dragging.current || areaMoved), [glideKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useColumnFollow(card, ref, !standIn && !splitRow && !!single && !panelMax && areaWidth > 0 ? (singleShown ?? Math.max(0, free)) : null, dragging.current || areaMoved || resizing() || standIn);
+  // Only discrete changes glide: not a drag's steps, not the work area changing width (window, sidebar), not a row
+  // not measured yet (just mounted, `areaWidth` 0: 关闭最大化保持 swaps the fill row for this one) — a glide toward that
+  // first layout held the column at its unmeasured width, then snapped (unmaximize-jump 2026-10-30).
+  // Portrait: nothing glides on the stand-in (the stack's parts change height, not place); rotating back is a row change (still).
+  useLayoutEffect(() => glideColumns(ref.current, dragging.current || areaMoved || areaWidth <= 0 || standIn), [glideKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const forcedNow = !!row && row.workspaces.some((w) => w.shelves.some((x) => x.forced));
   const leftOutNow = !!left && !leftFits && !mode;
   useLayoutEffect(() => {
@@ -1411,6 +1809,243 @@ function LegacySideWorkArea({ side, covered = false, split = null, desk = false,
     () => (row ? { mode: row.mode, widths: row.workspaces.map((w) => w.width), railAt: row.workspaces.map((w) => w.railAt), shelfBetween: betweenId !== null } : null),
     [row?.workspaces.map((w) => `${w.width}${w.railAt}`).join(","), row?.mode, betweenId !== null], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // ── Portrait: what the stack (below) draws — computed here for the hooks before it.
+  const swapped = portraitPrefs.swapped;
+  const stackW = measuredRow.w;
+  // Two workspaces side by side in the stack (P3, design decision 9): room for both columns (lib/portrait stackColumns,
+  // its hysteresis from what the window shows now); a workspace folded to its strip / 只看 Shelf, or a maximised Shelf /
+  // pane, keeps the P2 stack (the other one a strip). Published in the window's store: components/PaneHost lays its
+  // conversations out from the same value (both read it; this layout effect corrects it before paint).
+  const columnsShown = usePortrait((s) => s.columns);
+  const columnsNow = stack && measuredRow.stack ? splitRow && stackColumns(stackW, columnsShown) && !stripWs.some(Boolean) && !onlyWs.some(Boolean) : columnsShown;
+  useLayoutEffect(() => {
+    if (usePortrait.of(windowKey).getState().columns !== columnsNow) usePortrait.of(windowKey).setState({ columns: columnsNow });
+  }, [columnsNow, windowKey]);
+  const sideBySide = stack && splitRow && !!row && columnsShown;
+  // A band's Shelves (lib/portrait bandShelves): left + right side by side while both have the room, else the one in
+  // focus and the other's rail. Each band's last answer is its hysteresis (by workspace).
+  const bandWas = useRef<Record<string, boolean>>({});
+  const bandNow: Record<string, boolean> = {};
+  const bandOf = (key: string, list: readonly ShelfOnScreen[], isOpen: (e: ShelfOnScreen) => boolean, active: string | null, width: number) => {
+    const shelves = list.map((e) => ({ id: e.shelf.id, side: e.shelf.side, expanded: isOpen(e), active: e.page.id === active }));
+    const out = bandShelves(width, shelves, bandWas.current[key] ?? false);
+    bandNow[key] = out.open.length > 1;
+    const pick = (ids: readonly string[]) => ids.flatMap((id) => list.filter((e) => e.shelf.id === id));
+    return { open: pick(out.open), rails: pick(out.rails), roomFolded: out.rails.filter((id) => shelves.some((s) => s.id === id && s.expanded)) };
+  };
+  // One workspace (or the focused one over the other's strip): its open Shelves and its collapsed ones' rails in the
+  // band; a maximised Shelf / pane alone (§24.16).
+  const oneBand = !stack || sideBySide ? null : toolMax ? { open: [maxEntry!], rails: [], roomFolded: [] } : covered || !side || !shown.length ? null : bandOf("", [...shown, ...rails], (e) => shown.includes(e), layout.activePage, stackW);
+  // A maximised conversation folds every Shelf to its rail (as in the landscape row, §24.16).
+  const railsShown = covered ? foldable : rails;
+  // Shelf Rail 常驻: nothing of the focused conversation's Shelf on screen — its empty rail as the bar (two workspaces too:
+  // the stack is the focused one's).
+  const emptyBar = always && side && !panelMax && !desk && !!selectedId && !shown.length && !rails.length && !emptyState;
+  // What sits below (or above) the conversation: its Shelves' band, the tool area's launchers, the folded Shelves' rails
+  // (one bar), the empty Shelf's rail (Shelf Rail 常驻), or nothing (the conversation takes the whole stack).
+  const part: "shelf" | "rail" | null = oneBand || (emptyState && !covered) ? "shelf" : railsShown.length || emptyBar ? "rail" : null;
+  // Split by the divider (a maximised Shelf / pane takes the stack: the conversations are its strip, no divider).
+  const divided = part === "shelf" && !toolMax;
+  const convShare = Math.round(portraitPrefs.split * 1000) / 1000;
+  const shelfShare = Math.round((1 - portraitPrefs.split) * 1000) / 1000;
+  // The conversation at the stack's bottom keeps the tray's room under it (components/tray.css); above a part, none.
+  const convLast = swapped || !part;
+  // Two workspaces side by side: each column's part under (or over) its conversation — its band (the peer's Shelves for
+  // the other workspace), its rails as one bar, its empty rail (Shelf Rail 常驻), or nothing.
+  const stackColW = Math.max(0, (stackW - STACK_GAP) / 2);
+  const colParts = sideBySide
+    ? [0, 1].map((idx) => {
+        const view = idx === focusedIdx ? layout : otherView;
+        const list = idx === focusedIdx ? focusedShelves : otherShelves;
+        if (!view) return null;
+        const isOpen = (e: ShelfOnScreen) => view.open && !e.shelf.collapsed;
+        if (list.some(isOpen)) return { kind: "shelf" as const, band: bandOf(ownerOf(idx), list, isOpen, view.activePage, stackColW) };
+        if (list.length) return { kind: "bar" as const, rails: list };
+        return emptyWs[idx] ? { kind: "empty" as const } : null;
+      })
+    : null;
+  useLayoutEffect(() => {
+    bandWas.current = bandNow;
+  });
+  // The split stack's own element's variables (portrait.css): two workspaces side by side — the grid's rows; the focused
+  // column over the other's strip — its flex / minimum / order. Written here and taken off again with nothing left
+  // behind (no `style=""` on the landscape row after rotating back; the divider's drag sets the flex / rows live).
+  const stackVars: Record<string, string> | null =
+    !stack || !splitRow || !row
+      ? null
+      : sideBySide
+        ? { "--stack-rows": colParts?.some((c) => c?.kind === "shelf") ? stackRows(portraitPrefs.split, swapped) : "minmax(0, 1fr)" }
+        : { "--stack-conv-flex": divided ? `${convShare} 1 0px` : "1 1 0px", "--stack-conv-min": divided ? `${STACK_CONVERSATION_MIN}px` : "0px", "--stack-conv-order": swapped ? "2" : "0" };
+  const stackVarsKey = stackVars ? JSON.stringify(stackVars) : null;
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !stackVars) return;
+    for (const [k, v] of Object.entries(stackVars)) el.style.setProperty(k, v);
+    return () => {
+      for (const k of Object.keys(stackVars)) el.style.removeProperty(k);
+      if (el.getAttribute("style") === "") el.removeAttribute("style");
+    };
+  }, [stackVarsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // P4 motion (lib/portraitMotion): the stack's parts glide on a discrete rearrangement — never on a drag's release
+  // (quietNextStackGlide), the stack changing width (a window resize), its first commit after a rotation (nothing
+  // remembered then), or reduced motion. Going landscape ends every glide in the flip's own commit and forgets the boxes.
+  const ids = (list: readonly ShelfOnScreen[] | undefined) => (list ?? []).map((e) => e.shelf.id).join(",");
+  const stackMotionKey = stack
+    ? [
+        swapped,
+        part,
+        divided,
+        convShare,
+        portraitPrefs.band ?? "",
+        sideBySide,
+        covered,
+        toolMax,
+        splitRow ? focusedIdx : -1,
+        stripWs.join(","),
+        ids(oneBand?.open),
+        ids(oneBand?.rails),
+        ids(railsShown),
+        (colParts ?? []).map((c) => (c ? `${c.kind}:${c.kind === "shelf" ? `${ids(c.band.open)}/${ids(c.band.rails)}` : ""}` : "-")).join(";"),
+      ].join("|")
+    : null;
+  const stackWas = useRef<{ w: number; stack: boolean }>({ w: 0, stack: false });
+  useLayoutEffect(() => {
+    const was = stackWas.current;
+    stackWas.current = { w: stackW, stack: stack && measuredRow.stack };
+    if (!stack) {
+      if (was.stack) stopStackGlides(ref.current);
+      return;
+    }
+    glideStack(ref.current, !was.stack || !measuredRow.stack || was.w !== stackW || dragging.current || resizing());
+  }, [stackMotionKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    if (!stack) return;
+    if (stackWas.current.w !== stackW || stackWas.current.stack !== measuredRow.stack) stackWas.current = { w: stackW, stack: measuredRow.stack };
+    noteStackLater(ref.current);
+  });
+  if (stack) {
+    // ── Portrait (lib/portrait, design .claude/previews/portrait): the row as a stack — the conversation, then (the
+    // divider between) its Shelves' band with their Rails across the edge toward the conversation, or swapped. The tree
+    // keeps the landscape row's shape down to the conversation (the row's div, slot 0, the card's div, its `contents`
+    // div; two workspaces: the split row's provider, div and `contents` div), so a rotation never remounts the
+    // conversations (timelines, composers, scroll positions). The parts are placed by `order` (a swap moves nothing in
+    // the tree). The Tray stays at the window's edge: only the stack's bottom part leaves its room.
+    // P2 (a view only — nothing of the landscape layout is written): a maximised / full-screen Shelf or pane fills the
+    // stack, the conversations a strip of their avatars across its end; a maximised conversation fills it, every Shelf
+    // its rail in one bar at the end, the other workspace a strip across the top; two workspaces without the room: the
+    // focused one is the stack, the other a strip across the top (components/PaneHost ConversationColumns; a click /
+    // keyboard focus on it switches). P3: left + right Shelves side by side in the band; two workspaces with the room
+    // side by side, each a column (a grid: its conversation over its own band; one row of dividers for both).
+    const gap = <div key="gap" aria-hidden className="shrink-0" style={{ height: STACK_GAP, order: 1 }} />;
+    const between = divided ? <PortraitDivider key="divider" row={ref} split={portraitPrefs.split} swapped={swapped} /> : part ? gap : null;
+    const end = (
+      <RailEdgeContext.Provider key="part" value={swapped ? "bottom" : "top"}>
+        {part === "shelf" ? (
+          <PortraitShelf open={oneBand?.open ?? []} rails={oneBand?.rails ?? []} roomFolded={oneBand?.roomFolded} share={toolMax ? null : shelfShare} swapped={swapped} maxed={toolMax} split={!!splitRow} />
+        ) : railsShown.length ? (
+          <div data-portrait-part="rails" className="flex shrink-0 gap-2" style={{ order: swapped ? 0 : 2 }}>
+            {railsShown.map((e) => (
+              <PortraitRail key={e.shelf.id} entry={e} swapped={swapped} folded={covered} />
+            ))}
+          </div>
+        ) : part === "rail" && selectedId ? (
+          <EmptyShelfRail hostId={selectedHost} sessionId={selectedId} at="right" order={swapped ? 0 : 2} />
+        ) : null}
+      </RailEdgeContext.Provider>
+    );
+    if (splitRow && row && colParts) {
+      // Two workspaces side by side (P3): the split row's tree as below; each column's conversation is placed by
+      // portrait.css (its column, its rows: data-portrait-c0 / c1), its divider and part here, in its cell.
+      const kinds = colParts.map((c) => (c ? (c.kind === "shelf" ? "shelf" : "bar") : "none"));
+      const cells = colParts.flatMap((c, idx) => {
+        if (!c) return [];
+        const mine = idx === focusedIdx;
+        const owner = ownerOf(idx);
+        const source = mine ? null : peerSource;
+        const paneId = mine ? null : (other?.paneId ?? null);
+        const cell = (rows: string, align?: "start" | "end"): CSSProperties => ({ gridColumn: idx + 1, gridRow: rows, ...(align ? { alignSelf: align } : {}) });
+        const barAt = cell(swapped ? "1" : "-2 / -1", swapped ? "start" : "end");
+        let body: ReactNode = null;
+        if (c.kind === "shelf") body = <PortraitShelf open={c.band.open} rails={c.band.rails} roomFolded={c.band.roomFolded} share={null} swapped={swapped} place={cell(swapped ? "1" : "3")} paneId={paneId} split />;
+        else if (c.kind === "bar")
+          body = (
+            <div data-portrait-part="rails" className="flex min-w-0 gap-2" style={barAt} onPointerDownCapture={source ? () => focusPeer(source.key) : undefined}>
+              {c.rails.map((e) => (
+                <PortraitRail key={e.shelf.id} entry={e} swapped={swapped} />
+              ))}
+            </div>
+          );
+        else {
+          const host = mine ? selectedHost : other?.hostId;
+          const session = mine ? selectedId : other?.sessionId;
+          if (host && session)
+            body = (
+              <div data-portrait-part="rails" className="flex min-w-0 flex-col" style={barAt}>
+                <EmptyShelfRail hostId={host} sessionId={session} at="right" paneId={paneId} focus={paneId ? () => focusConversationPane(paneId) : null} />
+              </div>
+            );
+        }
+        return [
+          c.kind === "shelf" ? <PortraitDivider key={`divider\u0000${owner}`} row={ref} split={portraitPrefs.split} swapped={swapped} place={cell("2")} /> : null,
+          <ShelfSourceContext.Provider key={`part\u0000${owner}`} value={source}>
+            <RailEdgeContext.Provider value={swapped ? "bottom" : "top"}>{body}</RailEdgeContext.Provider>
+          </ShelfSourceContext.Provider>,
+        ];
+      });
+      return (
+        <WsRowContext.Provider value={null}>
+          <div ref={attach} data-side-work data-portrait-stack="" data-portrait-split="" data-portrait-cols="" data-portrait-c0={kinds[0]} data-portrait-c1={kinds[1]} data-portrait-swapped={swapped ? "" : undefined} data-ws-area={measuredRow.w} className="relative grid min-h-0 min-w-0 flex-1">
+            {[]}
+            {cells}
+            <div className="contents" data-focus-region="main">
+              {children}
+            </div>
+            {null}
+          </div>
+        </WsRowContext.Provider>
+      );
+    }
+    if (splitRow && row) {
+      // Two workspaces: the split row's tree (no remount on rotation); the focused workspace's column is the stack's
+      // conversation part (its flex, minimum, order and tray room from the variables above, portrait.css), the other its strip.
+      return (
+        <WsRowContext.Provider value={null}>
+          <div ref={attach} data-side-work data-portrait-stack="" data-portrait-split="" data-portrait-swapped={swapped ? "" : undefined} data-portrait-conv-last={convLast ? "" : undefined} data-ws-area={measuredRow.w} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            {[]}
+            {[between, end]}
+            <div className="contents" data-focus-region="main">
+              {children}
+            </div>
+            {null}
+          </div>
+        </WsRowContext.Provider>
+      );
+    }
+    return (
+      <div ref={attach} data-side-work data-portrait-stack="" data-portrait-swapped={swapped ? "" : undefined} data-ws-area={measuredRow.w} data-panel-max={covered ? "conversation" : toolMax ? (mode?.card ? "pane" : "shelf") : undefined} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        {covered ? <PortraitOtherStrip /> : null}
+        <div
+          ref={card}
+          className="shell-card relative isolate flex min-h-0 min-w-0 overflow-hidden"
+          data-conv-card=""
+          data-focus-region="main"
+          data-portrait-part="conversation"
+          data-conv-folded={toolMax ? "" : undefined}
+          // (`width` in the landscape strip's place: rotating back writes the same declarations in the same order.)
+          style={toolMax ? { flex: "none", width: "auto", height: STACK_RAIL_H, order: swapped ? 2 : 0, marginBottom: convLast ? undefined : 0 } : { flex: divided ? `${convShare} 1 0px` : "1 1 0px", minHeight: divided ? STACK_CONVERSATION_MIN : undefined, order: swapped ? 2 : 0, marginBottom: convLast ? undefined : 0 }}
+        >
+          {null}
+          {/* A Shelf / pane maximised: the conversations stay mounted under the strip of their avatars. */}
+          <div className="contents" hidden={toolMax || undefined}>
+            {children}
+          </div>
+          {toolMax && <ConvStrip across />}
+        </div>
+        {between}
+        {end}
+      </div>
+    );
+  }
   if (splitRow && row) {
     // Both workspaces' Shelves, in workspace order (left first) whichever has the focus: each keyed by its
     // conversation + its Shelf's id (shelfBoxKey) under a source provider, so a focus switch — the other's Shelf becoming the live
@@ -1539,6 +2174,8 @@ interface RowSession {
 /** The last render's row, for the drag session and lib/sideResize's row hooks. */
 interface RowLast {
   area: number;
+  /** Laid out on the portrait stand-in (lib/portrait), not a measured landscape row. */
+  standIn: boolean;
   rowLeft: number;
   split: boolean;
   fillSplit: boolean;
@@ -1614,7 +2251,9 @@ export function SideWorkArea(props: Parameters<typeof LegacySideWorkArea>[0]) {
   const fill = useAppearance().fillMode;
   const mode = useSide(s => s.mode);
   const count = usePanes(s => conversationPanes(s.layout).length);
-  return fill && props.side && !props.covered && !mode && count > 0
+  // Portrait (lib/portrait): the stack already fills the window — 最大化保持 is landscape's (its value is kept, unused here).
+  const stack = usePortraitOn();
+  return fill && !stack && props.side && !props.covered && !mode && count > 0
     ? <FillWorkArea Shelf={ShelfView}>{props.children}</FillWorkArea>
     : <LegacySideWorkArea {...props} />;
 }

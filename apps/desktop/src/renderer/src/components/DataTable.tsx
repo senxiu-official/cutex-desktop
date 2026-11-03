@@ -1,6 +1,9 @@
 // The app's light list table (Tasks, Services): a quiet column header, optional foldable group
-// rows (projects), hairline rows. No cards. Fold state is remembered in ui prefs.
-import { Fragment, type MouseEvent, type ReactNode } from "react";
+// rows (projects), hairline rows. No cards. Fold state is remembered in ui prefs. Optional: sortable column
+// headers (`sort` + Column.sortable; the caller owns and persists the order) and per-row attributes (`rowProps`,
+// e.g. roving focus and keys for a keyboard-navigable list).
+import { Fragment, type HTMLAttributes, type MouseEvent, type ReactNode } from "react";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import { toggleFolded, useUiPrefs } from "../lib/prefs";
 import { VirtualTableBody } from "./VirtualTableBody";
 
@@ -10,7 +13,15 @@ export interface Column<T> {
   /** CSS width; omit for the flexible column. */
   width?: string;
   align?: "right";
+  /** The header sorts by this column when the table has `sort`. */
+  sortable?: boolean;
   cell(row: T): ReactNode;
+}
+
+export interface TableSort {
+  key: string;
+  desc: boolean;
+  onSort(key: string): void;
 }
 
 export interface RowGroup<T> {
@@ -29,6 +40,8 @@ export function DataTable<T>({
   onRowContextMenu,
   after,
   virtualize = false,
+  sort,
+  rowProps,
 }: {
   columns: Column<T>[];
   groups: RowGroup<T>[];
@@ -40,6 +53,10 @@ export function DataTable<T>({
   after?(row: T): ReactNode;
   /** Opt in to measured rows in the nearest page scroller. */
   virtualize?: boolean;
+  /** Clickable headers of the `sortable` columns (aria-sort on the sorted one). */
+  sort?: TableSort;
+  /** Extra attributes of a data row (`className` is added to the table's own). */
+  rowProps?(row: T): HTMLAttributes<HTMLTableRowElement> & Record<`data-${string}`, string | undefined>;
 }) {
   const folded = useUiPrefs().foldedGroups;
   const align = (c: Column<T>) => (c.align === "right" ? "text-right" : "text-left");
@@ -54,9 +71,11 @@ export function DataTable<T>({
       </td>
     </tr>
   );
-  const dataRow = (row: T) => (
+  const dataRow = (row: T) => {
+    const { className, ...extra } = rowProps?.(row) ?? {};
+    return (
     <Fragment>
-      <tr className="group border-b border-border/60 hover:bg-surface-2/40" onContextMenu={onRowContextMenu ? (e) => onRowContextMenu(e, row) : undefined}>
+      <tr {...extra} className={`group border-b border-border/60 hover:bg-surface-2/40 ${className ?? ""}`} onContextMenu={onRowContextMenu ? (e) => onRowContextMenu(e, row) : undefined}>
         {columns.map((c) => (
           <td key={c.key} className={`h-9 overflow-hidden px-2 ${align(c)}`}>
             {c.cell(row)}
@@ -65,7 +84,19 @@ export function DataTable<T>({
       </tr>
       {after?.(row)}
     </Fragment>
-  );
+    );
+  };
+  const header = (c: Column<T>) => {
+    if (!sort || !c.sortable) return c.header;
+    const on = sort.key === c.key;
+    const Arrow = sort.desc ? ArrowDown : ArrowUp;
+    return (
+      <button type="button" onClick={() => sort.onSort(c.key)} className={`inline-flex max-w-full items-center gap-0.5 rounded hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent ${c.align === "right" ? "flex-row-reverse" : ""} ${on ? "text-foreground" : ""}`}>
+        <span className="truncate">{c.header}</span>
+        {on && <Arrow size={11} className="shrink-0" aria-hidden />}
+      </button>
+    );
+  };
   return (
     <table className="w-full table-fixed border-collapse text-sm">
       <colgroup>
@@ -77,8 +108,8 @@ export function DataTable<T>({
         <thead>
           <tr className="border-b border-border text-caption/[inherit] text-subtle">
             {columns.map((c) => (
-              <th key={c.key} className={`px-2 pb-1.5 font-normal ${align(c)}`}>
-                {c.header}
+              <th key={c.key} aria-sort={sort && c.sortable ? (sort.key === c.key ? (sort.desc ? "descending" : "ascending") : "none") : undefined} className={`px-2 pb-1.5 font-normal ${align(c)} ${sort && c.sortable ? "overflow-hidden" : ""}`}>
+                {header(c)}
               </th>
             ))}
           </tr>

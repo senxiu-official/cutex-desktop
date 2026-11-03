@@ -209,6 +209,11 @@ export function useMenuOwner(): string | null {
   return useSyncExternalStore(subscribe, () => state.menu?.owner ?? null);
 }
 
+/** Whether any context / hover menu is open (with or without an owner). */
+export function useMenuOpen(): boolean {
+  return useSyncExternalStore(subscribe, () => state.menu != null);
+}
+
 export function closeMenu(): void {
   if (state.menu) set({ menu: null });
 }

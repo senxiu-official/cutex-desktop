@@ -1,6 +1,8 @@
+import { daemonFetch } from "./daemonFetch";
 import { readDelegationUpgrade, executeDelegationUpgrade, projectDelegationApproval } from "../shared/delegationUpgradeAdapter";
 import { SidebarReadCache, SidebarRefresh } from "./sidebarReadCache";
-import { retryableSteerPreflight, withSteerPreflightRetry } from "../shared/queueSteerRetry";
+import { retryableHostBusy, retryableSteerPreflight, withHostBusyRetry, withSteerPreflightRetry } from "../shared/queueSteerRetry";
+import { hostBusyActionWire } from "../shared/hostBusyAction";
 import { ownerJoinIntent } from "../shared/ownerJoin";
 import { fullTextReference, needsFullTextRepair, hydrateFullText } from "./liveFullText";
 import { OperatorRestartNotices, recordOperatorRuntimeNotice } from "./operatorRestart";
@@ -19,6 +21,7 @@ import type { StorageItemQuery } from "../shared/storage";
 import type { ApprovalRuleAuditPage, ApprovalRuleDraft, ApprovalRuleMutation, ApprovalRulesView } from "../shared/ipc";
 import { directorScopeCandidates, directorReviewContent, projectDirector, directorHandovers, directorStartReviews, decideDirectorItem, approveDirectorScope, type DirectorFence, type DirectorScope } from "@cutex-desktop/cutex-client";
 import { appWindows } from "./appWindows";
+import { downloadFilename, downloadFilters } from "../shared/downloadFilename";
 import { randomUUID } from "node:crypto";
 import type { HostProxyPatch } from "../shared/proxy";
 import { traceSendStage } from "../shared/sendTrace";
@@ -42,7 +45,9 @@ import { approvalClientFacts } from "../shared/approvalOrigin";
 import {
   CLIENT_INSTANCE_ID,
   messageSettlementCloseBody,
+  messageSettlementEvidenceBody,
   CutexApiError,
+  upgradeRefusalOf,
   CutexClient,
   CutexUnreachableError,
   EventFeed,
@@ -95,7 +100,7 @@ import { imageDeliveryOf } from "../shared/imageDelivery";
 import { mergeableOwnerItem, mergeQueueInputs, planQueueMerge, queueMergeErrorMessage, type QueueMergeResult } from "../shared/queueMerge";
 import type { RuntimesWire } from "../shared/runtimes";
 import type { HostServiceInfo, UpgradeApplyRequest, UpgradeResult, UpgradeRollbackRequest, UpgradeRollbackResult, UpgradeRun, UpgradeSettings, UpgradeSettingsPatch, UpgradeStaging, UpgradeStatus } from "../shared/backendUpgrade";
-import type { ComponentAction, ComponentResult, ComponentsList } from "../shared/components";
+import { COMPONENT_INDEX_CHECK_PATH, COMPONENT_NAME, componentConfigureBody, readComponentOperation, readComponentsList, sourceOnlyOffer, type ComponentAction, type ComponentRefusal, type ComponentConfigureRequest, type ComponentResult, type ComponentsList } from "../shared/components";
 import { consumeResultOf, resetCreditsViewOf, validIdempotencyKey, type ResetConsumeResult, type ResetCreditsView } from "../shared/resetCredits";
 import { effortFallbackOf, validActionId, type CreateAbandonResult } from "../shared/createAbandon";
 import { autoPickPreviewOf, autoPickQuery, profilePickOf } from "../shared/profileAutoPick";
@@ -131,7 +136,17 @@ import type { AgentSecurityPatch, ApprovalDecision, ApprovalDecisionOrigin, Appr
 /** What a queue-steer refusal carries after its kind: the native refusal, or an unknown outcome's raw answer (详情). */
 function steerErrorDetail(kind: QueueSteerErrorKind, error: CutexApiError): string {
   if (kind === "runtimeRefused") return queueSteerErrorDetail(error.details);
-  return kind === "outcomeUnknown" ? queueSteerRawDetail(error.message, error.details) : "";
+  return kind === "outcomeUnknown" || kind === "unrecognized" ? queueSteerRawDetail(error.message, error.details) : "";
+}
+
+/** Keep protocol reason codes in diagnostics; never log input or native error messages. */
+function logSteerFailure(method: string, sessionId: string, error: unknown, attempt?: number): void {
+  if (!(error instanceof CutexApiError)) return;
+  const details = error.details as { reason?: unknown; nativeError?: { code?: unknown }; resyncRequired?: unknown } | null | undefined;
+  const reason = typeof details?.reason === "string" ? details.reason : "none";
+  logError({ source: "queue-steer-preflight", method, sessionId, message: `${attempt ? "retrying a definite pre-send refusal" : "queue operation refused"} (${error.code}/${reason})`,
+    code: error.code, reason: details?.reason, nativeCode: details?.nativeError?.code, resyncRequired: details?.resyncRequired === true,
+    status: error.status, retryable: error.retryable, attempt });
 }
 
 /**
@@ -317,7 +332,7 @@ export class DaemonService implements DaemonApi {
     this.remote = options.remote;
     // A copy: `retarget` mutates it in place so feeds / handles follow a moved tunnel port.
     this.endpoint = { ...endpoint };
-    this.client = new CutexClient(this.endpoint, { backgroundReads: true });
+    this.client = new CutexClient(this.endpoint, { backgroundReads: true, fetch: daemonFetch });
     void this.connect();
   }
 
@@ -910,7 +925,8 @@ export class DaemonService implements DaemonApi {
       return { status: "copied" };
     }
     const win = BrowserWindow.getFocusedWindow() ?? appWindows()[0];
-    const options = { defaultPath: `image.${image.extension}`, filters: [{ name: image.mime, extensions: [image.extension] }] };
+    const defaultPath = downloadFilename("image", { extension: image.extension, mime: image.mime });
+    const options = { defaultPath, filters: downloadFilters(defaultPath, image.mime) };
     const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
     check();
     if (result.canceled || !result.filePath) return { status: "cancelled" };
@@ -928,7 +944,7 @@ export class DaemonService implements DaemonApi {
     }
   }
 
-  async subscribe(sessionId: string, from: { streamId: string; after: string | null }): Promise<void> {
+  async subscribe(sessionId: string, from: Parameters<DesktopApi["subscribe"]>[1]): Promise<void> {
     const client = this.requireClient();
     const attempt = ++this.sessionFeedAttempt;
     this.sessionFeedAttempts.set(sessionId, attempt);
@@ -943,6 +959,31 @@ export class DaemonService implements DaemonApi {
       finally { if (timer !== undefined) clearTimeout(timer); }
     }
     if (this.client !== client || this.sessionFeedAttempts.get(sessionId) !== attempt) return;
+    // A new bootstrap advances the subscription checkpoint. Recover outcomes of
+    // owner inputs that were held before it, without replaying native deltas into
+    // the already rebuilt thread and without submitting any input again.
+    if (from.ownerAdmissionReplay) {
+      this.sessionFeeds.get(sessionId)?.stop();
+      this.sessionFeeds.delete(sessionId);
+      const replay = from.ownerAdmissionReplay;
+      const ids = new Set(replay.ids);
+      let after = replay.after;
+      const signal = AbortSignal.timeout(10_000);
+      for (let pageCount = 0; ; pageCount++) {
+        if (pageCount >= 20) throw new Error("owner admission receipt recovery exceeded its read budget; reload to retry");
+        const page = await client.events({ cutexSessionId: sessionId, streamId: from.streamId, ...(after ? { after } : {}), limit: 1000 }, { signal });
+        if (this.client !== client || this.sessionFeedAttempts.get(sessionId) !== attempt) return;
+        for (const envelope of page.events) {
+          if (envelope.sequence > replay.throughSequence) break;
+          const id = (envelope.cutex?.params as { clientUserMessageId?: string } | undefined)?.clientUserMessageId;
+          if (id && ids.has(id) && /^cutex\/userInput\/(held|submitted|queued|failed)$/.test(envelope.cutex?.method ?? ""))
+            this.emit("sessionEvent", { sessionId, envelope: withoutLiveImages(envelope) });
+        }
+        if (!page.hasMore || page.events.some(event => event.sequence >= replay.throughSequence)) break;
+        if (!page.nextCursor || page.nextCursor === after) throw new Error("owner admission receipt recovery did not advance; reload to retry");
+        after = page.nextCursor;
+      }
+    }
     const liveDeltas = this.liveDeltasClient === client && this.liveDeltasSupported;
     let latestGeneration = -1;
     let liveGeneration = -1;
@@ -1007,11 +1048,28 @@ export class DaemonService implements DaemonApi {
     // An image-only message has no text item (cute-codex accepts any non-empty input list).
     const input = text.trim() || items.length === 0 ? [{ type: "text", text, text_elements: [] }, ...items] : items;
     const httpTrace = submitHttpTraceBuffer();
+    // Capabilities are populated by connection/bootstrap. Do not add a probe or
+    // opt an older host into a response its client cannot reconcile.
+    const caps = this.capabilitiesCache.peek();
+    const allowHeld = caps?.featureList?.some(feature => feature === "owner-admission-held-v1" || feature === "ownerAdmissionHeldV1") === true
+      || caps?.features?.ownerAdmissionHeldV1 === true;
     const hostTraffic = this.hostTraffic, sessionTraffic = this.sessionTraffic;
     const result = await traceSendStage({ ...trace, stage: "daemon-submit" }, (record) => logError({
       ...record, httpStages: httpTrace.snapshot(),
       hostSse: hostTraffic.snapshot(), sessionSse: sessionTraffic.snapshot(),
-    }), () => client.submitInput(sessionId, input, strategy, { startIfOffline: joinDelegation ? false : startIfOffline, clientUserMessageId, joinDelegation, onHttpTrace: httpTrace.observe }));
+    }), async () => {
+      try {
+        return await client.submitInput(sessionId, input, strategy, { startIfOffline: joinDelegation ? false : startIfOffline, clientUserMessageId, joinDelegation, ...(allowHeld ? { allowHeld: true } : {}), onHttpTrace: httpTrace.observe });
+      } catch (error) {
+        // Only a definite pre-execution refusal authorizes repeating an offline send.
+        const wire = startIfOffline && !joinDelegation ? hostBusyActionWire(error) : null;
+        if (wire) {
+          logSteerFailure("cutex/userInput/submit", sessionId, error);
+          throw new Error(wire);
+        }
+        throw error;
+      }
+    });
     this.assertInputScope(client, generation);
     return result;
   }
@@ -1188,6 +1246,8 @@ export class DaemonService implements DaemonApi {
       ? { ...raw!, featureList: [...(raw?.featureList ?? []), EVENT_MEDIA_BLOBS_FEATURE] } : raw;
     if (caps?.features?.liveTextDeltas === true && !caps.featureList?.includes(LIVE_DELTAS_FEATURE))
       caps = { ...caps, featureList: [...(caps.featureList ?? []), LIVE_DELTAS_FEATURE] };
+    if (caps?.features?.ownerAdmissionHeldV1 === true && !caps.featureList?.includes("owner-admission-held-v1"))
+      caps = { ...caps, featureList: [...(caps.featureList ?? []), "owner-admission-held-v1"] };
     if (this.client === client && access === this.accessRevision) {
       this.liveDeltasClient = caps === null ? null : client;
       this.liveDeltasSupported = caps?.featureList?.includes(LIVE_DELTAS_FEATURE) === true;
@@ -1779,6 +1839,16 @@ export class DaemonService implements DaemonApi {
     return client.permanentRetirementReview(request);
   }
 
+  async busMessageEvidence(request: { messageId: string }): Promise<import("../shared/ipc").MessageSettlementEvidenceResult> {
+    const body = messageSettlementEvidenceBody(request);
+    try {
+      return { ok: true, result: await this.requireClient().busMessageEvidence(body) };
+    } catch (error) {
+      if (error instanceof CutexApiError) return { ok: false, error: { code: error.code, message: error.message, status: error.status } };
+      throw error;
+    }
+  }
+
   async closeBusMessage(request: import("@cutex-desktop/protocol").MessageSettlementCloseRequest): Promise<import("../shared/ipc").MessageSettlementCloseResult> {
     const body = messageSettlementCloseBody(request);
     try {
@@ -2296,6 +2366,16 @@ export class DaemonService implements DaemonApi {
     if (method === "cutex/session/defaults/update") checkDefaultsPatch(params);
     const client = this.requireClient();
     try { return await client.cutex<unknown>(sessionId, method, params); }
+    catch (error) {
+      if (["cutex/session/delete", "cutex/runtime/online", "cutex/session/retire"].includes(method)) {
+        const wire = hostBusyActionWire(error);
+        if (wire) {
+          logSteerFailure(method, sessionId, error);
+          throw new Error(wire);
+        }
+      }
+      throw error;
+    }
     finally {
       if (this.client === client) this.invalidateSidebarEvent({ cutexSessionId: sessionId, cutex: { method, params } } as EventEnvelope);
     }
@@ -2949,12 +3029,54 @@ export class DaemonService implements DaemonApi {
   // ---------- optional components (cutex `components`, shared/components.ts) ----------
   // Owner only. The desktop only asks cutex to install / remove; cutex downloads, verifies, starts.
 
-  components(): Promise<ComponentsList | null> {
-    return this.requireClient().components();
+  /** `GET /v2/components` (null on a cutex without the route), read raw so the r269 `external` / `index` / `indexOperation` / `result` fields survive (shared/componentIndex.ts). */
+  async components(): Promise<ComponentsList | null> {
+    try {
+      return readComponentsList(await this.requireClient().request<unknown>("GET", "/v2/components"));
+    } catch (error) {
+      if (error instanceof CutexApiError && (error.status === 404 || error.status === 405)) return null;
+      throw error;
+    }
   }
 
-  componentAction(name: string, action: ComponentAction): Promise<ComponentResult> {
-    return this.requireClient().componentAction(name, action);
+  componentAction(name: string, action: ComponentAction, opts?: { version?: string }): Promise<ComponentResult> {
+    if (action === "remove" && !opts?.version) return this.requireClient().componentAction(name, action);
+    // An empty install (legacy manifest semantics) goes through componentCall too: the same POST {} as the client's, but the
+    // refusal keeps r270 `component_source_only` details (the explicit version cutex suggests; sourceOnlyOffer).
+    if (action === "install" && !opts?.version) return this.componentCall(`/v2/components/${this.componentName(name)}/install`, {});
+    if (action !== "install" && action !== "check") throw new Error("bad component action");
+    // r269 (shared/componentIndex.ts): install `{version}` from the effective verified offers; `check` re-runs the external-install probe.
+    return this.componentCall(`/v2/components/${this.componentName(name)}/${action}`, action === "install" && typeof opts?.version === "string" ? { version: opts.version } : {});
+  }
+
+  /** r269 owner action `POST /v2/components/{name}/configure` (Moth's route; shared/componentIndex.ts). */
+  componentConfigure(name: string, req: ComponentConfigureRequest): Promise<ComponentResult> {
+    return this.componentCall(`/v2/components/${this.componentName(name)}/configure`, componentConfigureBody(req));
+  }
+
+  /** r269 `POST /v2/components/index/check`: refresh the configured signed index (own operation slot; no selection change). */
+  componentIndexCheck(): Promise<ComponentResult> {
+    return this.componentCall(COMPONENT_INDEX_CHECK_PATH, {});
+  }
+
+  private componentName(name: string): string {
+    if (typeof name !== "string" || !COMPONENT_NAME.test(name)) throw new Error("bad component name");
+    return encodeURIComponent(name);
+  }
+
+  /** `POST` a component route → `{operation}` (with its r269 `result`); coded refusals as values (like the client's componentAction). */
+  private async componentCall(path: string, body: Record<string, unknown>): Promise<ComponentResult> {
+    try {
+      const r = await this.requireClient().request<{ operation?: unknown } | null>("POST", path, { body });
+      return { ok: true, value: readComponentOperation(r?.operation) };
+    } catch (error) {
+      if (!(error instanceof CutexApiError) || error.code.startsWith("http_")) throw error;
+      const message = error.message.startsWith(`${error.code}: `) ? error.message.slice(error.code.length + 2) : error.message;
+      const refusal: ComponentRefusal = upgradeRefusalOf(error.status, error.code, message, error.details);
+      const offered = sourceOnlyOffer(error.code, error.details);
+      if (offered) refusal.offeredVersion = offered;
+      return { ok: false, error: refusal };
+    }
   }
 
   // person-identity claim (main/personIdentity.ts only; not renderer IPC: signing stays in main).
@@ -3064,8 +3186,18 @@ export class DaemonService implements DaemonApi {
     await this.requireClient().native(sessionId, "thread/compact/start", { threadId });
   }
 
+  inputGet(sessionId: string, inputIds: readonly string[]) { return this.requireClient().inputGet(sessionId, inputIds); }
+  inputList(sessionId: string, query: import("@cutex-desktop/protocol").InputListParams = {}) { return this.requireClient().inputList(sessionId, query); }
+  inputInterruptSend(sessionId: string, params: import("@cutex-desktop/protocol").InputInterruptSendParams) { return this.requireClient().inputInterruptSend(sessionId, params); }
+  inputRetry(sessionId: string, inputId: string, expectedRev: number) { return this.requireClient().inputRetry(sessionId, inputId, expectedRev); }
+  queueMerge(sessionId: string, params: import("@cutex-desktop/protocol").UserInputQueueMergeParams) { return this.requireClient().queueMerge(sessionId, params); }
+  inputDismiss(sessionId: string, inputId: string, expectedRev: number) { return this.requireClient().inputDismiss(sessionId, inputId, expectedRev); }
+  inputLeaseRelease(sessionId: string, expectedLease: import("@cutex-desktop/protocol").InputLease) { return this.requireClient().inputLeaseRelease(sessionId, expectedLease); }
+
   queueList(sessionId: string) {
-    return this.requireClient().queueList(sessionId);
+    const client = this.requireClient(), generation = this.gen;
+    return withHostBusyRetry(() => client.queueList(sessionId), () => this.assertInputScope(client, generation),
+      (error, attempt) => logSteerFailure("queueList", sessionId, error, attempt));
   }
 
   async queueUpdate(sessionId: string, queueId: string, expectedRevision: number, text: string): Promise<void> {
@@ -3138,23 +3270,24 @@ export class DaemonService implements DaemonApi {
     if (joinDelegation && !steer) throw new Error("queue_steer_refused:joinChanged");
     const client = this.requireClient();
     const generation = this.gen;
-    const { items } = await client.queueList(sessionId);
-    const item = items.find((x) => x.queueId === queueId && x.revision === expectedRevision);
-    if (!item) throw new Error(steer ? queueSteerErrorMessage("changed") : "queue item changed or already sent");
     if (steer) {
       try {
-        const r = await withSteerPreflightRetry(() => client.queueSteer(sessionId, queueId, expectedRevision, { ifIdle: joinDelegation || options.ifIdle === "fail" ? "fail" : "start", ...(joinDelegation ? { joinDelegation } : {}) }), () => {
+        const send = () => client.queueSteer(sessionId, queueId, expectedRevision, { ifIdle: joinDelegation || options.ifIdle === "fail" ? "fail" as const : "start" as const, ...(joinDelegation ? { joinDelegation } : {}) });
+        const r = this.capabilitiesCache.peek()?.featureList?.some(feature => feature === "input-ledger-v1" || feature === "inputLedgerV1") ? await send() : await withSteerPreflightRetry(send, () => {
           this.assertInputScope(client, generation);
-          logError({ source: "queue-steer-preflight", method: "queuePromote", sessionId, message: "retrying a pre-send runtime capability refusal", attempt: 2 });
-        });
+        }, (error, attempt) => logSteerFailure("queuePromote", sessionId, error, attempt));
         const imageDelivery = imageDeliveryOf(r);
-        return { result: { disposition: r.disposition, turnId: r.turnId, ...(imageDelivery ? { imageDelivery } : {}) }, clientUserMessageId: r.clientUserMessageId, input: item.input };
+        return { result: { ...(r.input ? { input: r.input } : {}), disposition: r.disposition, turnId: r.turnId, ...(imageDelivery ? { imageDelivery } : {}) }, clientUserMessageId: r.clientUserMessageId };
       } catch (error) {
-        const kind = error instanceof CutexApiError ? retryableSteerPreflight(error) ? "runtimeNotReady" : queueSteerErrorKind(error.code, error.details) : null;
+        logSteerFailure("queuePromote", sessionId, error);
+        const kind = error instanceof CutexApiError ? retryableHostBusy(error) ? "hostBusy" : retryableSteerPreflight(error) ? "runtimeNotReady" : queueSteerErrorKind(error.code, error.details) : null;
         if (kind === null) throw error;
         throw new Error(queueSteerErrorMessage(kind, steerErrorDetail(kind, error as CutexApiError)));
       }
     }
+    const { items } = await withHostBusyRetry(() => client.queueList(sessionId), () => this.assertInputScope(client, generation), (error, attempt) => logSteerFailure("queuePromote", sessionId, error, attempt));
+    const item = items.find((x) => x.queueId === queueId && x.revision === expectedRevision);
+    if (!item) throw new Error("queue item changed or already sent");
     await client.queueRemove(sessionId, queueId, expectedRevision);
     const result = await client.submitInput(sessionId, item.input, "auto", { clientUserMessageId: item.clientUserMessageId, origin: item.origin });
     return { result, clientUserMessageId: item.clientUserMessageId, input: item.input };
@@ -3178,7 +3311,11 @@ export class DaemonService implements DaemonApi {
     if (joinDelegation && !steer) throw new Error("queue_steer_refused:joinChanged");
     const client = this.requireClient();
     const generation = this.gen;
-    const { items } = await client.queueList(sessionId);
+    const { items } = await withHostBusyRetry(() => client.queueList(sessionId), () => this.assertInputScope(client, generation), (error, attempt) => logSteerFailure("queueMergeInsert", sessionId, error, attempt)).catch(error => {
+      logSteerFailure("queueMergeInsert", sessionId, error);
+      if (retryableHostBusy(error)) throw new Error(queueSteerErrorMessage("hostBusy"));
+      throw error;
+    });
     const wanted = requested.map((r) => items.find((x) => x.queueId === r.queueId && x.revision === r.revision));
     if (wanted.some((x) => !x)) throw new Error(queueMergeErrorMessage("changed"));
     const plan = planQueueMerge(wanted as QueueItem[]);
@@ -3208,15 +3345,15 @@ export class DaemonService implements DaemonApi {
       try {
         const r = await withSteerPreflightRetry(() => client.queueSteer(sessionId, carrier.queueId, revision, { ifIdle: joinDelegation ? "fail" : "start", ...(joinDelegation ? { joinDelegation } : {}) }), () => {
           this.assertInputScope(client, generation);
-          logError({ source: "queue-steer-preflight", method: "queueMergeInsert", sessionId, message: "retrying a pre-send runtime capability refusal", attempt: 2 });
-        });
+        }, (error, attempt) => logSteerFailure("queueMergeInsert", sessionId, error, attempt));
         const imageDelivery = imageDeliveryOf(r);
         return done({ disposition: r.disposition, turnId: r.turnId, ...(imageDelivery ? { imageDelivery } : {}) });
       } catch (error) {
         this.assertInputScope(client, generation);
-        const kind = error instanceof CutexApiError ? retryableSteerPreflight(error) ? "runtimeNotReady" : queueSteerErrorKind(error.code, error.details) : null;
+        logSteerFailure("queueMergeInsert", sessionId, error);
+        const kind = error instanceof CutexApiError ? retryableHostBusy(error) ? "hostBusy" : retryableSteerPreflight(error) ? "runtimeNotReady" : queueSteerErrorKind(error.code, error.details) : null;
         // May have reached the native: never moved or re-sent from here.
-        if (kind === "outcomeUnknown" || kind === null) throw new Error(queueSteerErrorMessage("outcomeUnknown", kind ? steerErrorDetail(kind, error as CutexApiError) : error instanceof Error ? error.message : String(error)));
+        if (kind === "outcomeUnknown" || kind === "unrecognized" || kind === null) throw new Error(queueSteerErrorMessage("outcomeUnknown", kind ? steerErrorDetail(kind, error as CutexApiError) : error instanceof Error ? error.message : String(error)));
         await this.moveToFront(sessionId, carrier.queueId, () => this.assertInputScope(client, generation));
         const detail = kind ? queueSteerErrorMessage(kind, steerErrorDetail(kind, error as CutexApiError)) : error instanceof Error ? error.message : String(error);
         throw new Error(queueMergeErrorMessage("kept", detail));
@@ -3441,8 +3578,8 @@ export class DaemonService implements DaemonApi {
   // Export always goes to this machine's disk (also when the active host is remote).
   async saveMarkdown(defaultName: string, content: string): Promise<string | null> {
     const win = BrowserWindow.getFocusedWindow() ?? appWindows()[0];
-    const safe = defaultName.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "_").slice(0, 120) || "conversation.md";
-    const options = { defaultPath: safe.endsWith(".md") ? safe : `${safe}.md`, filters: [{ name: "Markdown", extensions: ["md"] }] };
+    const defaultPath = downloadFilename(defaultName || "conversation", { extension: "md", maxLength: 120 });
+    const options = { defaultPath, filters: downloadFilters(defaultPath, "Markdown") };
     const r = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
     if (r.canceled || !r.filePath) return null;
     await writeFile(r.filePath, content, "utf8");

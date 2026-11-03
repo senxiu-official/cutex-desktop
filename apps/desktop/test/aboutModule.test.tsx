@@ -125,7 +125,7 @@ describe("about module", () => {
 
   it("is a required module placing its sections on the shell's 关于 page", () => {
     expect(about.required).toBe(true);
-    expect(about.contributes?.["settings.section"]?.map((s) => s.page)).toEqual(["about", "about", "about"]);
-    expect(about.contributes?.["settings.section"]?.map((s) => s.id)).toEqual(["about.knownIssues", "about.changelog", "about.links"]);
+    expect(about.contributes?.["settings.section"]?.map((s) => s.page)).toEqual(["about", "about", "about", "about"]);
+    expect(about.contributes?.["settings.section"]?.map((s) => s.id)).toEqual(["about.debug", "about.knownIssues", "about.changelog", "about.links"]);
   });
 });

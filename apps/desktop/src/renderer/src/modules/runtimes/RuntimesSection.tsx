@@ -6,6 +6,7 @@ import { useTargetHostId } from "../../lib/targetHost";
 import { useComponentState } from "../../lib/componentView";
 import { CLAUDE_RUNTIME_COMPONENT } from "../../lib/componentCard";
 import { ComponentCard } from "../../components/ComponentCard";
+import { ComponentIndexPanel } from "../../components/ComponentIndexPanel";
 import { Tag } from "../../components/Tag";
 
 export function RuntimesSection() {
@@ -22,15 +23,16 @@ export function RuntimesSection() {
   const bundledPython = Number(/claude-r(\d+)/.exec(currentClaude ?? "")?.[1]) >= 28;
   const ready = (available: boolean) => <Tag tone={available ? "accent" : "attention"}>{t(available ? "dsh.ready" : "dsh.notReady")}</Tag>;
   return <>
-    <RuntimeGroup title="cute-codex" list={view?.native ?? []} status={view ? ready(view.native.some(r => r.selected && !r.missing)) : undefined} dependencies={<p>{t("runtimes.nativeDependency")}</p>}>
+    <RuntimeGroup kind="native" title="cute-codex" list={view?.native ?? []} status={view ? ready(view.native.some(r => r.selected && !r.missing)) : undefined} dependencies={<p>{t("runtimes.nativeDependency")}</p>}>
       {!view && (error ? <ErrorNote>{error}</ErrorNote> : <Loading rows={2} />)}
     </RuntimeGroup>
-    <RuntimeGroup title="Claude" list={view?.claude ?? []} status={view && state.kind === "body" ? ready(view.claude.some(r => r.selected && !r.missing)) : undefined} dependencies={<>
+    <RuntimeGroup kind="claude" title="Claude" list={view?.claude ?? []} status={view && state.kind === "body" ? ready(view.claude.some(r => r.selected && !r.missing)) : undefined} dependencies={<>
       <p>{t(bundledPython ? "runtimes.bundledPython" : "runtimes.pythonUnknown")}</p>
       <p>{cli ? t("runtimes.cli", { source: t(cli.selected === "bundled" ? "runtimes.bundled" : "runtimes.system"), version: cliVersion ?? "—" }) : t("runtimes.cliUnknown")}</p>
     </>}>
       {!view && (error ? <ErrorNote>{error}</ErrorNote> : <Loading rows={2} />)}
-      {state.kind !== "body" && state.kind !== "waiting" && <ComponentCard name={CLAUDE_RUNTIME_COMPONENT} hostId={hostId} state={state} refusal={entry.refusal?.name === CLAUDE_RUNTIME_COMPONENT ? entry.refusal.error : null} variant="compact" />}
+      <ComponentIndexPanel name={CLAUDE_RUNTIME_COMPONENT} hostId={hostId} component={component} entry={entry} title="Claude Code" />
+      {state.kind !== "body" && state.kind !== "waiting" && <ComponentCard name={CLAUDE_RUNTIME_COMPONENT} hostId={hostId} state={state} refusal={entry.refusal?.name === CLAUDE_RUNTIME_COMPONENT && entry.refusal.action !== "indexCheck" ? entry.refusal.error : null} variant="compact" offerAbove />}
     </RuntimeGroup>
   </>;
 }

@@ -18,6 +18,7 @@ const { I18nProvider } = await import("../src/renderer/src/i18n");
 const choice = await import("../src/renderer/src/modules/workspace/viewChoice");
 const { initPreview, isSourceToggleable } = await import("../src/renderer/src/modules/workspace/previewState");
 const { OPAQUE_FRAME_SANDBOX } = await import("@cutex-desktop/opaque-frame");
+const { largeRenderChoices, LARGE_RENDER_TTL_MS } = await import("../src/renderer/src/lib/largeRenderChoices");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -28,6 +29,7 @@ let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
   localStorage.clear();
+  largeRenderChoices.clear();
   choice.resetSourceChoiceCache();
   prepareFilePage.mockClear();
   fsRead.mockClear();
@@ -88,6 +90,45 @@ describe("HTML in the file view", () => {
     prepareFilePage.mockImplementationOnce(async () => ({ ok: true, frame: { id: "f2", url: "about:blank" }, externalRefs: 3 }));
     await render({ path: "D:/p/with-assets.html" });
     await vi.waitFor(() => expect(host.querySelector("[data-page-refs]")?.textContent).toContain("3"));
+  });
+
+  it("remembers both gate choices across remounts; changed content and TTL expiry ask again", async () => {
+    let bytes = 7 * 1024 * 1024, modifiedAt = "2026-11-03T00:00:00Z";
+    prepareFilePage.mockImplementation(async (input) => input.large
+      ? { ok: true, frame: { id: "f1", url: "about:blank" }, externalRefs: 0 }
+      : { ok: false, reason: "too-large", totalBytes: bytes, modifiedAt });
+    const remount = async (onSource = vi.fn()) => {
+      await act(async () => root.render(null));
+      await render({ onSource });
+    };
+    const gate = () => host.querySelector("[data-page-show-large]");
+    await render({ onSource: vi.fn() });
+    await vi.waitFor(() => expect(gate()).not.toBeNull());
+    await act(async () => (gate() as HTMLButtonElement).click());
+    await vi.waitFor(() => expect(host.querySelector("iframe")).not.toBeNull());
+    await remount();
+    await vi.waitFor(() => expect(host.querySelector("iframe")).not.toBeNull());
+    expect(gate()).toBeNull();
+    modifiedAt = "2026-11-03T01:00:00Z";
+    await remount();
+    await vi.waitFor(() => expect(gate()).not.toBeNull());
+    const source = vi.fn();
+    await render({ onSource: source });
+    await act(async () => (host.querySelector("[data-page-source]") as HTMLButtonElement).click());
+    source.mockClear();
+    await remount(source);
+    await vi.waitFor(() => expect(source).toHaveBeenCalledWith(true));
+    expect(gate()).toBeNull();
+    bytes++;
+    await remount();
+    await vi.waitFor(() => expect(gate()).not.toBeNull());
+    await act(async () => (gate() as HTMLButtonElement).click());
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + LARGE_RENDER_TTL_MS + 1);
+    try {
+      await remount();
+      await vi.waitFor(() => expect(gate()).not.toBeNull());
+    } finally { clock.mockRestore(); }
+    prepareFilePage.mockImplementation(async () => ({ ok: true, frame: { id: "f1", url: "about:blank" }, externalRefs: 0 }));
   });
 
   it("预览 / 源码 is remembered per kind of file; a line anchor still opens as source", () => {

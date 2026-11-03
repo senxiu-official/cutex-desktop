@@ -413,13 +413,15 @@
   --e2: 0 0 0 1px var(--card-border), 0 12px 32px rgb(18 22 32 / 0.16), 0 2px 6px rgb(18 22 32 / 0.06);
   --e3: 0 24px 70px rgb(10 10 20 / 0.25), 0 2px 8px rgb(10 10 20 / 0.08);
   --hi: inset 0 0 0 0 transparent;
-  /* Provider colours: only for 头像底色 = 按模型 (a 16 % avatar backdrop and its ring), never text or buttons. */
+  /* Provider colours: only for avatars (components/Avatar: the outline of every round face, and 头像底色 = 按模型's 16 %
+     backdrop), never text or buttons. Qwen: its logo's violet (no family of its own, lib/avatarThemes providerTint). */
   --prov-claude: #d97757;
   --prov-openai: #10a37f;
   --prov-gemini: #9b6cf0;
   --prov-deepseek: #4d6bfe;
   --prov-kimi: #3a3f4b;
   --prov-glm: #1fa3b8;
+  --prov-qwen: #6f69f7;
   --prov-other: #8b95a7;
 }
 @media (prefers-color-scheme: dark) {
@@ -442,6 +444,9 @@
 /* Settings → 外观 (lib/appearance.ts sets the variables on <html>). */
 .markdown {
   font-family: var(--font-chat, var(--font-sans));
+  /* Follow-bottom scroll offsets use device pixels. Matching the line-height grid prevents
+     fractional leading (14px * 1.625 at 125%) cycling the last line's raster position. */
+  line-height: round(nearest, 1.625em, var(--prose-pixel, 1px));
 }
 
 /* Conversation prose outside Markdown (bubbles, bus / collab messages, previews). Text without a

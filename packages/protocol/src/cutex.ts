@@ -263,6 +263,15 @@ export interface QueuePause {
   turnId: string | null;
 }
 
+/** owner-admission-state-v1: committed owner admission snapshot, independent of runtime gates. */
+export interface OwnerAdmission {
+  state: "idle" | "turn" | "finishing" | "held";
+  reason?: "hostBusy" | "stopHold" | "paused" | "delegationLease";
+  turnKind?: string;
+  heldCount?: number;
+  heldUntil?: string;
+}
+
 export interface QueueListResult {
   revision: number;
   items: QueueItem[];
@@ -273,6 +282,15 @@ export interface QueueListResult {
   asksPaused?: AsksPause | null;
   /** admission-order: every waiting turn-starting item of the session in admission order; absent on older cutex. */
   admission?: QueueAdmission;
+  ownerAdmission?: OwnerAdmission;
+  /** false: items/admission are the last committed snapshot while mutations are busy. */
+  admissionFresh?: boolean;
+  /** input-ledger-v1: the session's ledger head when `inputs` was read. */
+  stateRevision?: number;
+  ledgerEpoch?: string;
+  delivery?: SessionDelivery;
+  /** input-ledger-v1: the unsettled records with surface nextUp / pendingNotes (always fresh). */
+  inputs?: InputRecord[];
 }
 
 /**
@@ -307,6 +325,8 @@ export interface QueueAdmission {
    * the next ride-along-started turn end gives owner input no first opportunity. Absent = not yielded.
    */
   ownerYielded?: boolean;
+  /** input-ledger-v1: `admissionFresh: false` — use this snapshot for ordering only, not to decide which rows show. */
+  stale?: boolean;
 }
 
 /** Why a ride-along waits: the owner's stop hold, or an explicit 暂停委托 (ask results only). */
@@ -401,6 +421,8 @@ export interface QueueMoveParams {
 /** `cutex/userInput/queue/yield` (admission-owner-yield). */
 export interface QueueYieldResult {
   admission?: QueueAdmission;
+  /** input-ledger-v1. */
+  input?: InputRecord;
   [key: string]: unknown;
 }
 
@@ -461,6 +483,8 @@ export interface QueueSteerResult {
   turnId: string | null;
   clientUserMessageId: string;
   queueRevision: number;
+  /** input-ledger-v1: the steered item's record. */
+  input?: InputRecord;
 }
 
 /** `details.reason` of a `steer_unavailable` refusal. */
@@ -804,7 +828,7 @@ export interface OwnerJoinDelegation {
   expectedTurnId: string;
   runtimeGeneration: number;
 }
-export type OwnerJoinRefusal = "joinChanged" | "agentPaused" | "runtimeNoSteer" | "runtimeRefused" | "sessionOffline" | "turnConflict";
+export type OwnerJoinRefusal = "joinChanged" | "agentPaused" | "runtimeNoSteer" | "runtimeRefused" | "sessionOffline" | "turnConflict" | "turnFinishing";
 
 export interface UserInputSubmitParams {
   clientUserMessageId: string;
@@ -816,6 +840,8 @@ export interface UserInputSubmitParams {
   joinDelegation?: OwnerJoinDelegation;
   /** offline-submit: when the runtime is offline, queue the input and start it. */
   startIfOffline?: boolean;
+  /** Opt in only with owner-admission-held-v1; delivery then belongs to the daemon worker. */
+  allowHeld?: boolean;
 }
 
 /** One page of native turns: pages go newest first, turns within a page oldest first. */
@@ -843,7 +869,14 @@ export interface SessionHistory {
 export interface UserInputSubmitResult {
   /** The explicit join was refused; the input is retained as ordinary queued input. */
   joinRefusal?: OwnerJoinRefusal;
-  disposition: "started" | "steered" | "queued" | "deduplicated";
+  disposition: "started" | "steered" | "queued" | "deduplicated" | "held";
+  clientUserMessageId?: string;
+  heldBy?: "hostBusy";
+  heldSince?: string;
+  heldUntil?: string;
+  appServerAccepted?: boolean;
+  nativeRequestId?: string | null;
+  queuedReason?: "explicitQueue" | "paused" | "hostBusy" | "delegationLease" | "turnRunning" | "imageBusy" | "adapterQueued" | "ownerQueueAhead" | "joinRefused" | "turnFinishing";
   turnId?: string | null;
   queue?: unknown;
   /** offline-submit: the runtime is being started for this input. */
@@ -853,6 +886,8 @@ export interface UserInputSubmitResult {
    * flushed. Absent on older cutex (treat as unknown).
    */
   paused?: boolean;
+  /** input-ledger-v1: this submit's record (also on `deduplicated`: the existing one). */
+  input?: InputRecord;
 }
 
 // ---------- agent management (snake_case on the wire) ----------
@@ -989,4 +1024,351 @@ export interface NotificationAckResult {
   acknowledged: boolean;
   threadId: string;
   reminderId: string;
+}
+
+// ---------- input ledger (input-ledger-v1, cutex-desktop docs/design/054) ----------
+//
+// Mirrors cutex `src/management/v2/schema/cutex-methods-v2.json` `$defs` (inputKind … inputLedgerEventConditions)
+// and `schema/export/input-states.json`. Every value list is append only: a client shows an unknown value as its
+// code and reports it, never guesses (050 invariant 4). `reason` keeps a `(string & {})` escape so the desktop
+// survives codes a newer cutex appends; the other enums are exact.
+
+export const INPUT_LEDGER_FEATURE = "input-ledger-v1";
+export const INPUT_GET = "cutex/input/get";
+export const INPUT_LIST = "cutex/input/list";
+/** Schema only (C5): not served until cutex advertises `input-ledger-v1`. */
+export const INPUT_RETRY = "cutex/input/retry";
+/** Schema only (C5): not served until cutex advertises `input-ledger-v1`. */
+export const INPUT_DISMISS = "cutex/input/dismiss";
+export const INPUT_INTERRUPT_SEND = "cutex/input/interruptSend";
+/** Schema only (C4): not served until cutex advertises `input-ledger-v1`. */
+export const INPUT_LEASE_RELEASE = "cutex/input/lease/release";
+export const INPUT_STATE_CHANGED = "cutex/input/stateChanged";
+export const SESSION_DELIVERY_CHANGED = "cutex/session/deliveryChanged";
+/** `cutex/input/get` takes 1..100 ids. */
+export const INPUT_GET_MAX_IDS = 100;
+
+export const INPUT_KINDS = ["owner", "agentMessage", "peerMessage", "alarm", "systemNotice", "delegationRequest", "delegationResult", "delegationQuestion", "delegationStatus"] as const;
+export const INPUT_SENDER_KINDS = ["owner", "agent", "peer", "alarm", "jobService", "management", "claudeTask", "approval", "cutex"] as const;
+export const INPUT_STATES = ["received", "held", "waiting", "sending", "accepted", "inContext", "uncertain", "failed", "rejected", "discarded", "superseded"] as const;
+export const INPUT_TERMINAL_STATES = ["inContext", "failed", "rejected", "discarded", "superseded"] as const;
+/** Terminal states plus `uncertain`: cutex takes no further automatic action. */
+export const INPUT_SETTLED_STATES = ["inContext", "uncertain", "failed", "rejected", "discarded", "superseded"] as const;
+export const INPUT_HELD_REASONS = ["hostBusy"] as const;
+export const INPUT_SENDING_REASONS = ["interruptSend"] as const;
+export const INPUT_WAITING_REASONS = ["explicitQueue", "afterTurn", "nextStep", "passive", "turnRunning", "turnFinishing", "adapterQueued", "ownerQueueAhead", "rideAlongAhead", "delegationLease", "eventLease", "paused", "stopHold", "ownerPause", "agentOffline", "runtimeDisconnected", "hostBusy", "resultCoalescing", "autoRetry", "reviewPending", "targetBusy", "staleHeld", "nativeHeld", "nativeRetry", "returned", "ownerRetry"] as const;
+export const INPUT_UNCERTAIN_REASONS = ["turnInterrupted", "turnFailed", "runtimeLost", "receiptTimeout", "outcomeUnknown", "leaseReleased", "nativeConflict"] as const;
+export const INPUT_FAILED_REASONS = ["admission_timeout", "notDelivered", "runtimeRefused", "routeLost", "interrupt_timeout", "session_offline", "tooLarge"] as const;
+export const INPUT_REJECTED_REASONS = ["targetUnavailable", "quarantined", "provenance", "invalid", "askRejected", "peerRefused", "owner_required"] as const;
+export const INPUT_DISCARDED_REASONS = ["ownerRemoved", "ownerDiscarded", "settlementClosed", "askCancelled", "senderRevoked", "archived"] as const;
+export const INPUT_SUPERSEDED_REASONS = ["mergedInsert", "revised"] as const;
+/** `stalled.reason` (input-states.json `stalledReason`; the methods schema types it as a plain string). */
+export const INPUT_STALLED_REASONS = ["runtimeDisconnected", "noProgress", "leaseHeld", "hostBusy", "agentOffline"] as const;
+export const INPUT_SURFACES = ["timeline", "nextUp", "pendingNotes", "none"] as const;
+export const INPUT_STAGES = ["registered", "offered"] as const;
+export const INPUT_EVIDENCE = ["clientIdEcho", "turnStartInput", "contextPersisted", "externalInputPersisted", "a4Receipt", "historyRead", "claimedByWait", "readByTool"] as const;
+export const INPUT_ACTIONS = ["retry", "dismiss", "cancel", "sendNow", "edit", "releaseLease", "interruptSend"] as const;
+export const INPUT_STRATEGIES = ["auto", "queue", "interrupt"] as const;
+export const INPUT_DELIVERY_MODES = ["after_turn", "soon", "passive", "interrupt"] as const;
+export const INPUT_TIMINGS = ["afterTurn", "nextStep", "passive"] as const;
+export const SESSION_DELIVERY_STATES = ["offline", "starting", "disconnected", "idle", "turn", "finishing", "held"] as const;
+export const SESSION_DELIVERY_HELD_REASONS = ["hostBusy", "stopHold", "paused", "delegationLease", "eventLease"] as const;
+export const SESSION_TURN_KINDS = ["owner", "ask", "delivery", "unknown"] as const;
+export const INPUT_LEASE_HOLDERS = ["ask", "event", "owner"] as const;
+export const INPUT_LEASE_RECONCILE_STATES = ["waitingTurn", "checking", "stale"] as const;
+
+export type InputKind = (typeof INPUT_KINDS)[number];
+export type InputSenderKind = (typeof INPUT_SENDER_KINDS)[number];
+export type InputState = (typeof INPUT_STATES)[number];
+export type InputTerminalState = (typeof INPUT_TERMINAL_STATES)[number];
+export type InputSettledState = (typeof INPUT_SETTLED_STATES)[number];
+export type InputSendingReason = (typeof INPUT_SENDING_REASONS)[number];
+export type InputHeldReason = (typeof INPUT_HELD_REASONS)[number];
+export type InputWaitingReason = (typeof INPUT_WAITING_REASONS)[number];
+export type InputUncertainReason = (typeof INPUT_UNCERTAIN_REASONS)[number];
+export type InputFailedReason = (typeof INPUT_FAILED_REASONS)[number];
+export type InputRejectedReason = (typeof INPUT_REJECTED_REASONS)[number];
+export type InputDiscardedReason = (typeof INPUT_DISCARDED_REASONS)[number];
+export type InputSupersededReason = (typeof INPUT_SUPERSEDED_REASONS)[number];
+export type InputStalledReason = (typeof INPUT_STALLED_REASONS)[number];
+/** Schema `inputReason`: the union of the per-state reason codes. */
+export type InputReason =
+  | InputSendingReason | InputHeldReason | InputWaitingReason | InputUncertainReason | InputFailedReason
+  | InputRejectedReason | InputDiscardedReason | InputSupersededReason;
+export type InputSurface = (typeof INPUT_SURFACES)[number];
+export type InputStage = (typeof INPUT_STAGES)[number];
+export type InputEvidence = (typeof INPUT_EVIDENCE)[number];
+export type InputAction = (typeof INPUT_ACTIONS)[number];
+export type InputStrategy = (typeof INPUT_STRATEGIES)[number];
+export type InputDeliveryMode = (typeof INPUT_DELIVERY_MODES)[number];
+export type InputTiming = (typeof INPUT_TIMINGS)[number];
+export type SessionDeliveryState = (typeof SESSION_DELIVERY_STATES)[number];
+export type SessionDeliveryHeldReason = (typeof SESSION_DELIVERY_HELD_REASONS)[number];
+export type SessionTurnKind = (typeof SESSION_TURN_KINDS)[number];
+export type InputLeaseHolder = (typeof INPUT_LEASE_HOLDERS)[number];
+export type InputLeaseReconcileState = (typeof INPUT_LEASE_RECONCILE_STATES)[number];
+
+/** Reason union per state, for narrowing (`null`: the state carries no reason). */
+export interface InputReasonByState {
+  received: null;
+  held: InputHeldReason;
+  waiting: InputWaitingReason;
+  sending: InputSendingReason;
+  accepted: null;
+  inContext: null;
+  uncertain: InputUncertainReason;
+  failed: InputFailedReason;
+  rejected: InputRejectedReason;
+  discarded: InputDiscardedReason;
+  superseded: InputSupersededReason;
+}
+
+/** Per-state reason codes (input-states.json). A state absent here carries no reason. */
+export const INPUT_REASONS_BY_STATE: { readonly [S in InputState]?: readonly InputReasonByState[S][] } = {
+  sending: INPUT_SENDING_REASONS,
+  held: INPUT_HELD_REASONS,
+  waiting: INPUT_WAITING_REASONS,
+  uncertain: INPUT_UNCERTAIN_REASONS,
+  failed: INPUT_FAILED_REASONS,
+  rejected: INPUT_REJECTED_REASONS,
+  discarded: INPUT_DISCARDED_REASONS,
+  superseded: INPUT_SUPERSEDED_REASONS,
+};
+
+/** Settled (了结): terminal or `uncertain`; cutex does nothing more on its own. */
+export function isInputSettled(state: InputState): state is InputSettledState {
+  return (INPUT_SETTLED_STATES as readonly string[]).includes(state);
+}
+
+export function isInputTerminal(state: InputState): state is InputTerminalState {
+  return (INPUT_TERMINAL_STATES as readonly string[]).includes(state);
+}
+
+/** Whether `reason` is a code cutex documents for `state` (false: show the code and report it). */
+export function isKnownInputReason(state: InputState, reason: string | null): boolean {
+  const known = INPUT_REASONS_BY_STATE[state] as readonly string[] | undefined;
+  if (!known) return reason === null;
+  return reason === null || known.includes(reason);
+}
+
+/** Schema `inputSender`. */
+export interface InputSender {
+  kind: InputSenderKind;
+  id: string;
+  name: string;
+  host: string | null;
+  cutexSessionId: string | null;
+}
+
+/** Schema `inputIntent`. `strategy` only on owner messages; `timing` is required (never defaulted, #12). */
+export interface InputIntent {
+  strategy: InputStrategy | null;
+  deliveryMode: InputDeliveryMode | null;
+  timing: InputTiming;
+}
+
+/** nextUp order, taken from admission. */
+export interface InputOrder {
+  admissionKey: string;
+  position: number;
+}
+
+export interface InputRemote {
+  host: string;
+  peerId: string;
+  senderId: string;
+}
+
+/** cutex: the input is eligible but has not moved for `stallAfterSecs`. */
+export interface InputStalled {
+  reason: InputStalledReason | (string & {});
+  since: string;
+}
+
+export interface InputError {
+  code: string;
+  retryable: boolean;
+  details: Record<string, unknown>;
+}
+
+/**
+ * Schema `inputRecord` (054 §2.2). One record per input with a stable id (clientUserMessageId / messageId /
+ * deliveryId / askId). `preview` and `actions` are absent on the host stream. `details` (not in the design
+ * text): the per-reason details object (`nativeHeld` → `details.nativeReason`, …), `{}` when none.
+ */
+export interface InputRecord {
+  inputId: string;
+  cutexSessionId: string;
+  kind: InputKind;
+  sender: InputSender;
+  intent: InputIntent;
+  /** ≤ 80 chars. */
+  preview?: string;
+  createdAt: string;
+  state: InputState;
+  reason: InputReason | (string & {}) | null;
+  since: string;
+  deadline: string | null;
+  /** accepted only (Claude insert stage). */
+  stage: InputStage | null;
+  surface: InputSurface;
+  /** nextUp only. */
+  order: InputOrder | null;
+  turnId: string | null;
+  timelineItemId: string | null;
+  runtimeGeneration: number | null;
+  attempt: number;
+  supersededBy: string | null;
+  batchId: string | null;
+  askId: string | null;
+  remote: InputRemote | null;
+  stalled: InputStalled | null;
+  actions?: InputAction[];
+  error: InputError | null;
+  evidence: InputEvidence | null;
+  details: Record<string, unknown>;
+  /** The record's own monotonic version (1 on creation). */
+  rev: number;
+  /** The session `stateRevision` of this record's last change. */
+  stateRevision: number;
+  updatedAt: string;
+}
+
+export interface InputLeaseReconcile {
+  state: InputLeaseReconcileState;
+  lastCheckedAt?: string | null;
+  nextCheckAt?: string | null;
+  lastResult?: string | null;
+}
+
+/** Schema `inputLease` (054 §2.6). */
+export interface InputLease {
+  holder: InputLeaseHolder;
+  turnId: string | null;
+  since: string;
+  runtimeGeneration: number | null;
+  inputIds: string[];
+  reconcile: InputLeaseReconcile;
+}
+
+export interface SessionDeliveryTurn {
+  turnId: string;
+  kind: SessionTurnKind;
+  askId: string | null;
+  startedAt: string | null;
+  inputIds: string[];
+}
+
+/** Schema `sessionDelivery` (054 §2.6): replaces activeTurnId + ownerAdmission + currentTurn + turnState. */
+export interface SessionDelivery {
+  state: SessionDeliveryState;
+  /** held only. */
+  reason: SessionDeliveryHeldReason | null;
+  turn: SessionDeliveryTurn | null;
+  lease: InputLease | null;
+  runtimeConnected: boolean;
+  runtimeGeneration: number | null;
+  heldCount: number;
+  heldUntil: string | null;
+  stateRevision: number;
+  observedAt: string;
+}
+
+/** `cutex/input/get` params (the session travels in the request envelope). 1..100 ids. */
+export interface InputGetParams {
+  inputIds: string[];
+}
+
+/** `cutex/input/get` result: records in request order, unknown ids in `missing`. */
+export interface InputGetResult {
+  ledgerEpoch: string;
+  stateRevision: number;
+  records: InputRecord[];
+  missing: string[];
+}
+
+/** `cutex/input/list` params. With `sinceRevision`: records changed after it; without: unsettled + settled within `includeSettledSecs`. */
+export interface InputListParams {
+  sinceRevision?: number;
+  includeSettledSecs?: number;
+}
+
+export interface InputListResult {
+  ledgerEpoch: string;
+  stateRevision: number;
+  records: InputRecord[];
+  complete: boolean;
+  /** `sinceRevision` was compacted away (or is ahead of the head): read the full list instead. */
+  resyncRequired?: boolean;
+  delivery?: SessionDelivery;
+}
+
+/** Owner action on an existing input: daemon owns interrupt, receipt check and same-id delivery. */
+export interface InputInterruptSendParams {
+  inputId: string;
+  expectedRev: number;
+  expectedTurnId: string;
+  expectedRuntimeGeneration: number;
+}
+export interface InputInterruptSendResult {
+  ledgerEpoch: string;
+  stateRevision: number;
+  outcome: "interrupted" | "alreadyInContext" | "held" | "agentOffline";
+  interruptedTurnId: string | null;
+  record: InputRecord;
+}
+
+/** `cutex/input/retry`: failed / uncertain → waiting{ownerRetry}. */
+export interface InputRetryParams {
+  inputId: string;
+  expectedRev: number;
+}
+
+/** `cutex/input/dismiss`: single CAS or up to 100 CAS items; → discarded{ownerDiscarded}. */
+export type InputDismissParams = { inputId: string; expectedRev: number } | { items: { inputId: string; expectedRev: number }[] };
+export interface InputDismissResult {
+  ledgerEpoch: string;
+  stateRevision: number;
+  records: InputRecord[];
+  failed: { inputId: string; code: "input_not_found" | "revision_conflict" | "input_not_dismissible" | "dismiss_failed" | "event_persistence_unavailable"; message: string; currentRev: number | null }[];
+}
+/** Atomic queue CAS; revision is the queue revision, never the ledger head. */
+export interface UserInputQueueMergeParams {
+  items: { queueId: string; expectedRevision: number }[];
+  input?: unknown[];
+}
+export interface UserInputQueueMergeResult {
+  revision: number;
+  affectedQueueIds: string[];
+  item: QueueItem;
+  inputs: InputRecord[];
+}
+
+/** `cutex/input/lease/release` params. Only while `reconcile.state` is stale. */
+export interface InputLeaseReleaseParams {
+  expectedLease: InputLease;
+}
+
+/** `cutex/input/stateChanged` params (session and host streams). */
+export interface InputStateChangedEvent {
+  cutexSessionId: string;
+  ledgerEpoch: string;
+  stateRevision: number;
+  record: InputRecord;
+}
+
+/** `cutex/session/deliveryChanged` params. */
+export interface SessionDeliveryChangedEvent {
+  cutexSessionId: string;
+  ledgerEpoch: string;
+  stateRevision: number;
+  delivery: SessionDelivery;
+}
+
+/** `cutex/userInput/queue/remove` / `queue/flush` result (schema `queueMutationResult`). */
+export interface QueueMutationResult {
+  revision: number;
+  affectedQueueIds: string[];
+  /** input-ledger-v1: the record of this request's input. */
+  input?: InputRecord;
 }

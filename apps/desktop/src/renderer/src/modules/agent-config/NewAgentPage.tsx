@@ -21,6 +21,7 @@ import { effectiveDefaultEffort } from "../../../../shared/effortFallback";
 import { displayWidth, isBadgeLabelError, projectBadgeWidth } from "../../lib/badgeWidth";
 import { BadgeTextInput } from "../../components/BadgeTextInput";
 import { claudeCatalogChoices, claudeShortName, isClaudeCatalog } from "../../lib/claudeModels";
+import { unlistedModel } from "../../lib/models";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SessionAvatar } from "@cutex-desktop/protocol";
 import type { SkillMetadata, SkillsListResponse } from "@cutex-desktop/protocol/codex/v2";
@@ -61,16 +62,17 @@ import { runtimeEfforts, runtimeModelChoices, variantCatalogModels, variantCatal
 import { useComponentState } from "../../lib/componentView";
 import { claudeLaunchFromForm, claudeLaunchModes, effectiveProfile, HUMAN_AGENT_CLAUDE_FEATURE, isClaudeCreatorRefusal, isClaudeProfile, shownClaudeMode } from "../../lib/newAgentClaude";
 import { NewAgentStepError, NO_PROGRESS, runNewAgentSteps, type NewAgentProgress, type NewAgentStep } from "../../lib/newAgentSteps";
+import { isHostBusyActionPending } from "../../lib/hostBusyActions";
 import { ProjectColorPicker } from "../../components/ProjectColorPicker";
 import { ProjectBadge } from "../../components/ProjectBadge";
 import { shortenHome } from "../../lib/workspace";
-import { TargetHostContext, useFocusHostId, useTargetApi, useTargetFeatures, useTargetIsFocus, useTargetSidebar } from "../../lib/targetHost";
+import { TargetHostContext, useFocusHostId, useTargetApi, useTargetFeatures, useTargetSidebar } from "../../lib/targetHost";
 import { rememberCreateHost, useCreateHost, type CreateHost } from "../../lib/useCreateHost";
 import { draftFits, dropNewAgentDraft, keepNewAgentDraft, keptNewAgentDraft } from "../../lib/newAgentReturn";
 import { setSettingsHost } from "../../lib/settingsHost";
 import { HostPicker } from "../../components/HostPicker";
 import { useApp } from "../../store";
-import { bridge } from "../../bridge";
+import { apiFor, bridge } from "../../bridge";
 import type { PageParams } from "../slots";
 import { WritableRootsEditor } from "../../components/LaunchOptions";
 import { LaunchAttachments, LaunchComposer, LaunchDock, LaunchFieldsBox, LaunchIntro, LaunchPage } from "../../components/LaunchPage";
@@ -82,7 +84,7 @@ import { ComposerTools } from "../../components/ComposerTools";
 import { Menu, Popover } from "../../components/Menu";
 import { ModelPicker } from "../../components/ModelPicker";
 import { LAUNCH_FOR_MODE, LAUNCH_REVIEWER_FEATURE, PERMISSION_MODES, permissionModeOfLaunch, reviewerForCreate } from "../../lib/permissionModes";
-import { Button, Segmented, SettingRow, Select, TextInput, Toggle } from "../../components/settings/Form";
+import { Button, FormFields, Segmented, SettingRow, Select, TextInput, Toggle } from "../../components/settings/Form";
 import { useOwnerWindow } from "../../lib/ownerContext";
 
 const INDEPENDENT = "";
@@ -184,9 +186,9 @@ export function NewAgentPage({ params }: { params: PageParams }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.host, params.project]);
   return (
-    <TargetHostContext.Provider value={target.hostId}>
+    <TargetHostContext.Provider value={target.hostId}><FormFields>
       <NewAgentForm params={params} target={target} presetHost={preset} restored={restored?.hostId === target.hostId ? { ...(restored.form as NewAgentDraft), ...(restored.createdProfile ? { profile: restored.createdProfile, portraitSelected: true, launch: { ...(restored.form as NewAgentDraft).launch, model: "", reasoningEffort: "" } } : {}) } : null} />
-    </TargetHostContext.Provider>
+    </FormFields></TargetHostContext.Provider>
   );
 }
 
@@ -225,10 +227,8 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   const projectId = params.project ?? null;
   const { t } = useI18n();
   const api = useTargetApi();
-  const isFocus = useTargetIsFocus();
   const features = useTargetFeatures();
   const sidebar = useTargetSidebar();
-  const refreshSidebar = useApp((s) => s.refreshSidebar);
   const openAgent = useApp((s) => s.openAgent);
   const projects = sidebar?.projects?.projects ?? [];
   // Projects of the same name can live on several hosts (two 「Chores」): name the host in the picker
@@ -374,11 +374,13 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   // The variant owns the defaults (no Profile model fields): a secondary variant, or a Kimi-kind Profile's own kimi variant.
   const secondaryVariant = !!chosenVariant && (!chosenVariant.primary || chosenVariant.runtime === "kimi");
   const modelName = useModelName();
+  const [modelSignal, setModelSignal] = useState(0);
   const [catalogResult, setCatalogResult] = useState<{ host: string; profile: string; data: ProfileModelsView } | null>(null);
   const catalog = catalogResult?.host === hostId && catalogResult.profile === chosen?.id ? catalogResult.data : null;
   useEffect(() => {
     if (!chosen) return;
     let alive = true;
+    setCatalogResult(null);
     api.profileModels(chosen.id).then(
       (data) => { if (alive) setCatalogResult({ host: hostId, profile: chosen.id, data }); },
       () => { if (alive) setCatalogResult(null); },
@@ -501,7 +503,10 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   };
   const create = async () => {
     if (newProject && (projectBadgeComposing || displayWidth(projectBadge.trim()) > projectBadgeWidth(features))) return;
-    if (sending.current || imageLoadingRef.current || !online || claudeBlocked || runtimeBlocked || !name.trim() || imageError || missingWorkspace || (newProject && !projectName.trim())) return;
+    if (sending.current || imageLoadingRef.current || !online || claudeBlocked || runtimeBlocked || !name.trim() || imageError || modelUnavailable || missingWorkspace || (newProject && !projectName.trim())) return;
+    // useTargetApi may be the mutable focus proxy. Every step in this attempt must
+    // keep the form's original host even if the owner switches focus while awaiting IO.
+    const api = apiFor(hostId);
     sending.current = true;
     setBusy(true);
     setError(null);
@@ -522,10 +527,6 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
       if (newProject) {
         const display = projectName.trim();
         const listProjects = async () => {
-          if (isFocus) {
-            await refreshSidebar();
-            return useApp.getState().sidebar?.projects ?? null;
-          }
           const snapshot = await api.sidebar();
           void useApp.getState().refreshHostSidebar(hostId);
           return snapshot.projects;
@@ -534,8 +535,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
           { id: slugifyProjectId(display), presentation: { display_name: display, badge_label: projectBadge.trim() || autoBadge(display, projectBadgeWidth(features)), color: projectColorName }, workspaceRoot: cwd.trim() || null, director: null, createDirectory: features.has(CREATE_ROOT_FEATURE) });
         target = ensured.projectId;
         if (ensured.outcome === "created" && projectIconChoice) setProjectIcon(hostId, target, projectIconChoice);
-        if (isFocus) await refreshSidebar();
-        else await useApp.getState().refreshHostSidebar(hostId);
+        await useApp.getState().refreshHostSidebar(hostId);
         keepSteps.current = true;
         setProject(target);
         setProjectReady({ id: target, name: display, outcome: ensured.outcome });
@@ -546,7 +546,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
       // summary). A Director is created stopped and started only after the assignment, so its
       // runtime starts with the Director tools (cutex hands out the MCP tool list at start).
       const directorOf = target;
-      // The focus host refreshes the store's sidebar; another host is read directly (the Director CAS below) and its slice re-read.
+      // Read this host directly for Director CAS and refresh its store slice before starting.
       let fresh: SidebarSnapshot | null = null;
       const agent = await runNewAgentSteps(
         {
@@ -595,23 +595,21 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
               changed: () => new Error(t("menu.metadataConflict")),
             });
           },
-          refresh: isFocus
-            ? refreshSidebar
-            : async () => {
-                // The store's slice too: the agent opens right after, and its header / avatar read that slice (a not
-                // started agent sends no event that would refresh it).
-                [fresh] = await Promise.all([api.sidebar(), useApp.getState().refreshHostSidebar(hostId)]);
-              },
+          refresh: async () => {
+            // Refresh this exact host's store slice before its tracked online action needs the identity.
+            [fresh] = await Promise.all([api.sidebar(), useApp.getState().refreshHostSidebar(hostId)]);
+          },
           assignDirector: async (id) => {
             if (!directorOf) throw new Error("no project");
-            const summary = (isFocus ? useApp.getState().sidebar : fresh)?.projects?.projects.find((p) => p.project_id === directorOf);
+            const summary = fresh?.projects?.projects.find((p) => p.project_id === directorOf);
             await api.projectMutation(directorOf, { authorityEpoch: summary?.authority_epoch ?? 0, projectRevision: summary?.project_revision ?? 0 }, { kind: "assign_director", cutex_session_id: id });
           },
           start: async (id) => {
-            await api.sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false });
+            await useApp.getState().sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, hostId);
           },
           submit: async (id, text, extra) => {
-            await api.submit(id, text, "auto", true, { clientUserMessageId: messageId.current, extra });
+            // The tracked start already completed; a concurrent owner stop must not start it again.
+            await api.submit(id, text, "auto", false, { clientUserMessageId: messageId.current, extra });
           },
         },
         { start: start || hasTask, director: canDirect && asDirector && !!target, message: task, extra: firstInput.extra },
@@ -622,6 +620,9 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
       await openAgent(agent, hostId);
     } catch (e) {
       if (e instanceof NewAgentStepError && e.step !== "create") setFailedStep(e.step);
+      // The action row owns HostBusy feedback. Keep the identity and unfinished step so the
+      // page's explicit retry can continue; a runtime-only row retry never sends the first task.
+      if (isHostBusyActionPending(e instanceof NewAgentStepError ? e.cause : e)) return;
       const message = e instanceof Error ? e.message : String(e);
       // Profile auto-pick: no candidate any more (or the pick closed) — ask the preview again; the form falls back to a manual account.
       const pickRefused = isAutoPickRefusal(message);
@@ -665,6 +666,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goneDefault, defaultModel, launch.model, canLaunch, locked]);
   const model = launch.model || defaultModel;
+  const modelUnavailable = canLaunch && unlistedModel(models, model, secondaryVariant ? !!chosenVariant : !!catalog && !catalog.modelsUnavailableReason);
   const row = models.find((m) => m.id === model);
   // DSH: only a model cutex lists with image input (r265 DSH accepts images per model; nothing to ask before the agent exists).
   const canImages = dsh ? !!row?.inputModalities.includes("image") : (row ? row.inputModalities.includes("image") : true);
@@ -672,7 +674,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   const oversized = images.find((image) => image.bytes > imageLimit);
   const firstInput = draftSubmit({ text: task, images, skills: claude ? [] : pickedSkills });
   const imageError = images.length && !canImages ? t("composer.image.unsupported") : oversized ? t("composer.image.tooLarge", { name: oversized.name }) : firstInput.extra.length > 20 ? t("agent-config.newAgent.tooManyAttachments") : null;
-  const disabled = !online || claudeBlocked || runtimeBlocked || !name.trim() || busy || imageLoading || !!imageError || missingWorkspace || (newProject && (!projectName.trim() || projectBadgeComposing || displayWidth(projectBadge.trim()) > projectBadgeWidth(features)));
+  const disabled = !online || claudeBlocked || runtimeBlocked || !name.trim() || busy || imageLoading || !!imageError || modelUnavailable || missingWorkspace || (newProject && (!projectName.trim() || projectBadgeComposing || displayWidth(projectBadge.trim()) > projectBadgeWidth(features)));
   /** First thing the owner still has to fill in, shown in the composer. */
   const missing = !name.trim() ? t("agent-config.newAgent.needName") : missingWorkspace ? t(project && !newProject ? "agent-config.newAgent.projectNoRoot" : "agent-config.newAgent.needWorkspace") : null;
   const addImages = async (files?: File[]) => {
@@ -1013,6 +1015,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
                   className="min-w-0 w-full bg-transparent text-sm outline-none placeholder:text-subtle" />
               </label>
               <AgentAvatarPicker name={name} color={chosen ? profileColor(chosen) : null} value={avatar} picture={picture} director={canDirect && asDirector} family={chosen ? modelFamily(chosen) : null}
+                hint={{ hostId, projectId: project || null, model: chosen?.model ?? null, cliKind: chosen?.cliKind ?? null }}
                 onOpen={() => setPanel(null)} onChange={(value, nextPicture) => { if (!locked) { setAvatar(value); setPicture(nextPicture ?? null); } }} />
             </div>
           </fieldset>
@@ -1028,6 +1031,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
           status={<>
             {imageLoading && <div role="status" className="mb-1 flex items-center gap-1 text-xs text-subtle"><LoaderCircle size={12} className="animate-spin" />{t("common.loading")}</div>}
             {imageError && <p role="alert" className="mb-1 text-xs text-danger">{imageError}</p>}
+            {modelUnavailable && <p role="alert" className="mb-1 text-xs text-warn">{t("composer.model.unlisted")} <button type="button" className="underline underline-offset-2" onClick={() => { setPanel(null); setModelSignal(n => n + 1); }}>{t("composer.model.chooseAvailable")}</button></p>}
           </>}
           textarea={{
             ref: textareaRef, autoFocus: true, value: task, readOnly: locked,
@@ -1079,7 +1083,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
                 models={isClaudeCatalog(catalog)
                   ? claudeCatalogChoices(models, model, t).map((c) => ({ model: c.id, displayName: c.name, description: [c.id === defaultModel ? t("quick-chats.defaultProfile") : "", c.description].filter(Boolean).join(" · "), primary: c.primary }))
                   : models.map((m) => ({ model: m.id, displayName: m.displayName ?? m.id, description: m.id === defaultModel ? t("quick-chats.defaultProfile") : "" }))}
-                current={model} label={shownModel} trigger={<span className="trim-cap max-w-40 truncate">{shownModel}</span>}
+                current={model} label={shownModel} unavailable={modelUnavailable} openSignal={modelSignal} trigger={<span className="trim-cap max-w-40 truncate">{shownModel}</span>}
                 triggerTitle={modelControlTitle(t("composer.modelTitle"), model, shownModel)} onOpen={() => setPanel(null)}
                 note={goneDefault ? t("models.defaultGone", { model: goneDefault }) : undefined}
                 onSelect={(value) => patchLaunch({ model: value, reasoningEffort: "" })} />

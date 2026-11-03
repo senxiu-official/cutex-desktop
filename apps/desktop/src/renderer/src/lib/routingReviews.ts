@@ -72,11 +72,22 @@ export function useRoutingOperation(host: string, project: string) {
   return useSyncExternalStore(listener => unresolved.subscribe(listener), () => unresolved.get(scope) ?? null, () => null);
 }
 
+/** Serialize owner routing decisions and scoped one-use grant writes together. */
+export function beginRoutingWrite(host: string, project: string): boolean {
+  const scope = routingActionScope(host, project);
+  if (!permitted(host) || unresolved.has(scope) || writing.has(scope)) return false;
+  writing.add(scope);
+  return true;
+}
+
+export function endRoutingWrite(host: string, project: string): void {
+  writing.delete(routingActionScope(host, project));
+}
+
 /** The current full record authorizes the write; references and compact rows never provide CAS. */
 export async function decideRoutingReviewOn(host: string, shown: UpgradeApprovalRead, decision: ApprovalDecision): Promise<void> {
   const scope = routingActionScope(host, shown.projectId);
-  if (!permitted(host) || unresolved.has(scope) || writing.has(scope)) throw Error("routing_not_authorized");
-  writing.add(scope);
+  if (!beginRoutingWrite(host, shown.projectId)) throw Error("routing_not_authorized");
   const current = captureHostAction(host), access = authority(host);
   let action: Extract<UpgradeAction, { kind: "decision" }> | null = null;
   try {
@@ -94,7 +105,7 @@ export async function decideRoutingReviewOn(host: string, shown: UpgradeApproval
   } catch (error) {
     if (action && isUpgradePreconditionFailure(error)) unresolved.delete(scope, action.actionId);
     throw error;
-  } finally { writing.delete(scope); refreshRoutingReviews(); }
+  } finally { endRoutingWrite(host, shown.projectId); refreshRoutingReviews(); }
 }
 
 /** Read the original receipt only. Unknown/notFound never sends a new mutation or replaces its id. */

@@ -13,17 +13,17 @@ import type { SideBinding, SidePageCandidate, SidePlacement } from "../modules/s
 import type { ItemId, Json } from "../modules/types";
 import { MAX_ROWS, MAX_STORED_CHIPS, MAX_TOOL_COLUMNS, MAX_TOOL_PANES } from "./paneLayout";
 import { foldHeld } from "./foldHysteresis";
+import { MAX_SHELF_PAGES } from "./shelfLimits";
+export { MAX_SHELF_PAGES } from "./shelfLimits";
 
 /** Shelves on screen (§24.12: one per side of the conversation columns). */
 export const MAX_SHELVES = MAX_TOOL_COLUMNS;
-/** Pages per Shelf (its Shelf Rail; Alt+1…9). */
-export const MAX_SHELF_PAGES = 9;
 /** Pages in all (every Shelf full). */
 export const MAX_PAGES = MAX_SHELVES * MAX_SHELF_PAGES;
 /** Panes (former cards) per page; more → tabs of the bottom pane. */
 export const MAX_CARDS = MAX_ROWS;
 /** Pages a stored v1.16 side layout may have had (= a Shelf's pages). */
-export const LEGACY_MAX_PAGES = MAX_SHELF_PAGES;
+export const LEGACY_MAX_PAGES = 9;
 /** The Shelf Rail's width (page buttons; outer or inner edge of its Shelf). */
 export const RAIL_WIDTH = 40;
 /** The page icons a page can carry (lucide names the rail maps; absent = its first pane's kind icon). */
@@ -435,6 +435,8 @@ export interface SidePlaceRequest {
   key: string | null; // dedupe key (singleton → SINGLETON_KEY)
   transient: boolean;
   page?: string; // explicit target (opts.page)
+  /** The source's Shelf, without requesting a split on its page. */
+  shelf?: string;
   activePage: string | null;
   columnOpen: boolean;
   /** The work area fits another tool column at the panes' minimum width (step 4 minSize; default true): else no new column — a tab instead. */
@@ -484,7 +486,27 @@ export function place(input: SideLayout, req: SidePlaceRequest, spec: PlaceSpec,
       if (inst.kind === req.kind && !inst.pinned && sameBinding(inst.binding, req.binding) && placed(id)) return { op: "replace", instance: id };
     }
   }
-  // 3. the page
+  // Normal opens never split a populated page. Kind declarations and stored placement hints
+  // still decide the fallback at the sanity limit; an explicit page remains an intentional target.
+  if (!findPage(layout, req.page)) {
+    const holding = layout.pages.filter((p) => !p.shared && p.cards.some((c) => cardHolds(layout, c, req.kind)));
+    const samePage = holding.find((p) => p.id === req.activePage) ?? holding[0];
+    if (samePage) {
+      const card = freshestCard(layout, samePage.cards.filter((c) => cardHolds(layout, c, req.kind)))!;
+      return { op: "insert", page: { id: samePage.id }, card: { id: card.id }, via: "rule" };
+    }
+    const active = findPage(layout, req.activePage);
+    if (active && !active.shared && active.cards.length === 0) {
+      return { op: "insert", page: { id: active.id }, card: { new: { index: 0, share: spec.share } }, via: "rule" };
+    }
+    const shelf = findShelf(layout, req.shelf) ?? defaultShelf(layout);
+    const own = shelf ? pagesOfShelf(layout, shelf.id) : [];
+    if (!shelf || own.length < MAX_SHELF_PAGES) {
+      const index = own.length ? layout.pages.indexOf(own[own.length - 1]!) + 1 : layout.pages.length;
+      return { op: "insert", page: { new: { groups: [spec.home], index, ...(shelf ? { shelf: shelf.id } : {}) } }, card: { new: { index: 0, share: spec.share } }, via: "otherwise" };
+    }
+  }
+  // 3. explicit target, or the existing placement rules at the sanity limit
   let pick: PagePick | null = null;
   let via: InsertDecision["via"] = "rule";
   const explicit = findPage(layout, req.page);
@@ -534,7 +556,7 @@ export function place(input: SideLayout, req: SidePlaceRequest, spec: PlaceSpec,
     pick = page ? { id: page.id } : { new: [spec.home] };
   }
   if ("new" in pick) {
-    // A new page goes into the default Shelf (its rail has room for ≤ 9); without any Shelf, a new right Shelf.
+    // A new page goes into the default Shelf (its rail has room for ≤ 50); without any Shelf, a new right Shelf.
     const shelf = defaultShelf(layout);
     if (!shelf) return { op: "insert", page: { new: { groups: pick.new, index: layout.pages.length } }, card: { new: { index: 0, share: spec.share } }, via };
     const own = pagesOfShelf(layout, shelf.id);
@@ -554,7 +576,7 @@ export function place(input: SideLayout, req: SidePlaceRequest, spec: PlaceSpec,
   // 5. a full page (3 panes, or MAX_TOOL_PANES on screen): a pane of this kind on the other Shelf's page in
   // view, else on another page of this Shelf; else a new pane on the other Shelf's page in view if it has
   // room; else — a Shelf that allows mixing — a tab of this page's bottom pane, or — one that does not — a
-  // new page of this Shelf (§24.12; a Shelf with 9 pages: the bottom pane's tab after all).
+  // new page of this Shelf (§24.12; a Shelf with 50 pages: the bottom pane's tab after all).
   const shelf = findShelf(layout, page.shelf);
   const shown = pagesOnScreen(layout).filter((p) => p !== page);
   const ownOthers = shelf ? pagesOfShelf(layout, shelf.id).filter((p) => p !== page) : [];
@@ -652,7 +674,7 @@ function shelfEnd(d: SideLayout, shelfId: string): number {
  * Makes a draft's Shelves consistent (in place): at most one Shelf per side (≤ MAX_SHELVES); a page with no
  * (known) Shelf joins the right one — made when missing (the layout predates Shelves; in 单一 Shelf 模式 the
  * Shelf there is, whatever its side);
- * beyond 9 pages a Shelf's extra pages fold into its 9th; a Shelf without pages goes; each Shelf's page in
+ * beyond the sanity limit a Shelf's extra pages fold into its last; a Shelf without pages goes; each Shelf's page in
  * view exists (else its neighbour in `before`'s rail order, else its first page).
  */
 function fixShelves(d: SideLayout, before: Map<string, string[]>): void {
@@ -1059,7 +1081,9 @@ export function adoptInstance(input: SideLayout, id: string, inst: SideInstance,
     const full = d.pages.filter((p) => p.shelf === shelf.id).length >= MAX_SHELF_PAGES;
     // A full Shelf: a pane of its own on the Shelf's page in view instead of one more page.
     page = (full ? findPage(d, shelf.active) : null) ?? newPage(d, [inst.kind], d.pages.length, shelf.id);
-    card = addCard(d, page, inst.kind, page.cards.length, null);
+    card = full && !roomForCard(d, page) && page.cards.length
+      ? page.cards[page.cards.length - 1]!
+      : addCard(d, page, inst.kind, page.cards.length, null);
     if (!shelf.active) shelf.active = page.id;
     if (!d.activePage) d.activePage = page.id;
   }
@@ -1147,7 +1171,7 @@ export function moveInstance(layout: SideLayout, instanceId: string, target: Mov
   if (opts.card === from.card.id) return layout;
   // The only tab of the only card going to a new page: it would look exactly the same.
   if ("newPage" in target && from.page.cards.length === 1 && from.card.tabs.length === 1) return layout;
-  // No room for another page in its Shelf (§24.12: ≤ 9).
+  // No room for another page in its Shelf (§24.12: ≤ 50).
   const fromShelf = shelfOfPage(layout, from.page.id);
   if ("newPage" in target && fromShelf && pagesOfShelf(layout, fromShelf.id).length >= MAX_SHELF_PAGES) return layout;
   const d = draft(withShelves(layout));
@@ -1304,7 +1328,7 @@ export function moveCard(layout: SideLayout, cardId: string, target: MoveTarget 
   }
   if ("page" in target && target.page === src.page.id) return layout;
   if ("newPage" in target && src.page.cards.length < 2) return layout; // a single-card page: nothing would change
-  if ("newPage" in target && src.page.shelf && d.pages.filter((p) => p.shelf === src.page.shelf).length >= MAX_SHELF_PAGES) return layout; // its Shelf has 9 pages (§24.12)
+  if ("newPage" in target && src.page.shelf && d.pages.filter((p) => p.shelf === src.page.shelf).length >= MAX_SHELF_PAGES) return layout; // its Shelf is at the sanity page limit (§24.12)
   let page: SidePage;
   if ("newPage" in target) {
     page = newPage(d, [], src.page.shelf ? shelfEnd(d, src.page.shelf) : d.pages.length, src.page.shelf);
@@ -2303,7 +2327,7 @@ export function removeShelf(layout: SideLayout, shelfId: string): { layout: Side
 
 /**
  * 撤销 of a removed page / Shelf: its pages, panes and instances come back where they were (the Shelf on its
- * side, else the free side, else into the Shelf on its side — beyond 9 pages folded into the 9th).
+ * side, else the free side, else into the Shelf on its side — beyond the sanity limit folded into the last page).
  */
 export function restoreRemoved(input: SideLayout, removed: RemovedShelfPart): SideLayout {
   const d = draft(withShelves(input));
@@ -2804,7 +2828,7 @@ export function dropDeletedAgents(layout: SideLayout, hostId: string, exists: (s
  * moved out of the folded column). The column the fold kept stays where the old page was. Instances the
  * owner closed since are not brought back; when NONE of the backup's instances is in `current` (the scope
  * was never folded from it) every old page comes back whole with its instances (new ids). Pages beyond 9
- * fold into the 9th; the right Shelf keeps its options (one made here: mixing off, like every new Shelf). Pure.
+ * fold into the last page; the right Shelf keeps its options (one made here: mixing off, like every new Shelf). Pure.
  */
 export function restoreLegacyPages(current: SideLayout, legacy: SideLayout): SideLayout {
   const legacyPages = legacy.pages.filter((p) => p.cards.length);

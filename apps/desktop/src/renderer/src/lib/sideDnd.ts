@@ -577,6 +577,11 @@ function onMove(e: PointerEvent): void {
   schedule(e.clientX, e.clientY);
 }
 
+/** Rail edge scrolling moves drop targets under a stationary pointer. */
+function onDragScroll(): void {
+  if (running) schedule(running.at.x, running.at.y);
+}
+
 function onUp(e: PointerEvent): void {
   if (!running) return;
   e.preventDefault();
@@ -686,6 +691,7 @@ function finish(buttonUp = false): void {
   if (r.hover) clearTimeout(r.hover.timer);
   r.offLayout();
   view().removeEventListener("pointermove", onMove, true);
+  view().removeEventListener("scroll", onDragScroll, true);
   view().removeEventListener("pointerup", onUp, true);
   view().removeEventListener("pointercancel", onCancel, true);
   view().removeEventListener("blur", onBlur);
@@ -736,6 +742,7 @@ function begin(x: number, y: number): void {
   view().document.documentElement.dataset.sideDragging = drag.type;
   view().document.addEventListener("selectstart", preventSelect, true);
   view().addEventListener("pointermove", onMove, true);
+  view().addEventListener("scroll", onDragScroll, true);
   view().addEventListener("pointerup", onUp, true);
   view().addEventListener("pointercancel", onCancel, true);
   view().addEventListener("blur", onBlur);

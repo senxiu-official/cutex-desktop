@@ -3,7 +3,7 @@ import type { ProfileItem } from "../../../../shared/ipc";
 import { useI18n } from "../../i18n";
 import { accountLinkHostReady, useProfileAccountLinks } from "../../lib/profileAccountLinks";
 import { changeAccountLinks, newManualAccountLink, undoAccountLinks, type AccountLinkChange } from "../../lib/profileAccountLinkActions";
-import { Button, Checkbox, SettingsGroup } from "./Form";
+import { Button, Checkbox, FormFields, SettingsGroup } from "./Form";
 import { isHTMLElement } from "../../lib/ownerWindow";
 import { useOwnerDocument } from "../../lib/ownerContext";
 
@@ -59,10 +59,10 @@ export function ProfileAccountLinkDialog({ hostId, profile, unlink = false, onCl
     }}>
       <h2 id="profile-link-title" className="font-semibold">{t(restoringAuto ? "settings.profile.link.restoreAuto" : unlink ? "settings.profile.link.unlink" : "settings.profile.link.mark")}</h2>
       <p className="mt-2 text-xs text-muted">{t(restoringAuto ? "settings.profile.link.restoreAutoHint" : manualUnlink ? "settings.profile.link.manualUnlinkHint" : unlink ? "settings.profile.link.unlinkHint" : "settings.profile.link.hint", { name: profile.name })}</p>
-      {!unlink && !done && <SettingsGroup agents="none" source="host" allHosts><div className="my-4 max-h-64 space-y-2 overflow-auto">
+      {!unlink && !done && <FormFields><SettingsGroup agents="none" source="host" allHosts><div className="my-4 max-h-64 space-y-2 overflow-auto">
         {targets.map((ref) => <div key={keyOf(ref)} className="flex items-center gap-2 text-sm"><Checkbox label={`${ref.hostName} · ${ref.profile.name}`} checked={selected.includes(keyOf(ref))} disabled={busy} onChange={(checked) => { setSelected((old) => checked ? [...old, keyOf(ref)] : old.filter((key) => key !== keyOf(ref))); setArmed(false); }} /><span>{ref.hostName} · {ref.profile.name}</span></div>)}
         {!targets.length && <p className="text-xs text-subtle">{t(accountLinkHostReady(hostId) ? "settings.profile.link.noTargets" : "settings.profile.link.notReady")}</p>}
-      </div></SettingsGroup>}
+      </div></SettingsGroup></FormFields>}
       {message && <p role="status" className="mt-3 text-xs text-muted">{message}</p>}
       {armed && <p className="mt-3 text-xs text-warn">{t("settings.profile.link.confirmHint")}</p>}
       <div className="mt-5 flex justify-end gap-2">

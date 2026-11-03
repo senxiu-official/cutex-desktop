@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { CutexClient } from "@cutex-desktop/cutex-client";
+vi.mock("../src/main/daemonFetch", () => ({ daemonFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init) }));
 
 vi.mock("electron", () => ({ BrowserWindow: { getFocusedWindow: () => null, getAllWindows: () => [] }, dialog: {}, shell: {} }));
 vi.mock("@cutex-desktop/cutex-client", async original => ({

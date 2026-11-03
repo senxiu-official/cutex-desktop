@@ -9,15 +9,21 @@
 // cross-host tell, `remote`) shows its `name@host` sender with a small 另一台主机 tag; on cutex older than
 // 0.1.5 (no `remote`) the `ptell-` row's sender label gives both (lib/agentMessages peerSenderOf).
 import type { AgentRuntime } from "../lib/agentFeatures";
+import type { InputRecord } from "@cutex-desktop/protocol";
+import { LedgerAdmissionRow } from "./AdmissionRows";
+import { deliveryBusy } from "../lib/inputLedger/nextUp";
+import { usesInputLedger } from "../lib/deliveryMode";
+import { agentState, featuresOf } from "../store";
+import { pendingNoteRecords } from "../lib/inputLedger/selectors";
 import { MessageSettlementControl } from "./MessageSettlementControl";
 import { useState } from "react";
 import { CancelSendButton } from "./CancelSendButton";
 import { HiddenUndo } from "./HiddenUndo";
 import { matchCancelable, useCancelableSends, type CancelSend } from "../lib/cancelSend";
-import { hiddenKey, useHiddenRows, visibleRows } from "../lib/hiddenRows";
+import { hiddenKey, useHiddenRows, visibleRows } from "../lib/legacyDelivery/hiddenRows";
 import { ArrowDownLeft } from "lucide-react";
 import { useI18n } from "../i18n";
-import { peerSenderOf, wakeableNotes, type AgentMessageRecord } from "../lib/agentMessages";
+import { peerSenderOf, wakeableNotes, type AgentMessageRecord } from "../lib/legacyDelivery/agentMessages";
 import { useAgentMessages } from "../lib/agentMessageStore";
 import { useApp } from "../store";
 import { convNotify, convSidebarOf, useConvScope, useConvViewHost } from "../lib/conversationScope";
@@ -97,7 +103,7 @@ function MessageRow({ message, busy, label, cancel, ranSince, hostId }: { messag
 }
 
 /** `runtime`: the agent's runtime (lib/agentFeatures); Claude agents always wait for the turn end. */
-export function PendingMessagesSection({ sessionId, messages: all, busy, runtime = "codex", readSince = null }: { sessionId: string; messages: AgentMessageRecord[]; busy: boolean; runtime?: AgentRuntime; readSince?: number | null }) {
+function LegacyPendingMessagesSection({ sessionId, messages: all, busy, runtime = "codex", readSince = null }: { sessionId: string; messages: AgentMessageRecord[]; busy: boolean; runtime?: AgentRuntime; readSince?: number | null }) {
   const { t } = useI18n();
   const [waking, setWaking] = useState(false);
   const conv = useConvScope();
@@ -137,4 +143,37 @@ export function PendingMessagesSection({ sessionId, messages: all, busy, runtime
       {last?.scope === `notes:${hostId}` && <HiddenUndo scope={last.scope} n={last.keys.length} />}
     </div>
   );
+}
+
+export function PendingMessagesSection(props: React.ComponentProps<typeof LegacyPendingMessagesSection>) {
+  const hostId = useConvViewHost(props.sessionId);
+  const enabled = useApp(s => usesInputLedger([...featuresOf(s, hostId)]));
+  return enabled ? <LedgerPendingFromStore sessionId={props.sessionId} hostId={hostId} /> : <LegacyPendingMessagesSection {...props} />;
+}
+
+function LedgerPendingFromStore({ sessionId, hostId }: { sessionId: string; hostId: string }) {
+  const ledger = useApp(s => agentState(s.inputs, hostId, sessionId));
+  return <LedgerPendingMessagesSection sessionId={sessionId} hostId={hostId} records={ledger ? pendingNoteRecords(ledger) : []} />;
+}
+
+/** Bus records supply only the body; their old state/visibility/receipt fields are never read. */
+export function LedgerPendingMessagesSection({ records, sessionId, hostId }: { records: readonly InputRecord[]; sessionId: string; hostId: string }) {
+  const { t } = useI18n();
+  const byId = useAgentMessages(s => s.byId);
+  const delivery = useApp(s => agentState(s.inputs, hostId, sessionId)?.delivery);
+  const [waking, setWaking] = useState(false);
+  if (!records.length) return null;
+  const wake = async () => {
+    setWaking(true);
+    try { await useApp.getState().sessionAction(sessionId, MESSAGES_WAKE_METHOD, {}, hostId); }
+    catch (error) { useApp.getState().notify(String(error), "error", { hostId, sessionId }); }
+    finally { setWaking(false); }
+  };
+  return <div data-testid="pending-messages" data-queue-section="">
+    <div className="flex h-6 items-center gap-2 px-2 text-caption text-subtle">
+      <span className="flex-1">{t("agentMsg.pending.title", { n: records.length })}</span>
+      {delivery?.state === "idle" && !deliveryBusy(delivery) && <button type="button" className="h-5 rounded px-1 hover:bg-surface-2" disabled={waking} onClick={() => void wake()}>{t("agentMsg.wake")}</button>}
+    </div>
+    {records.map(record => <LedgerAdmissionRow key={record.inputId} record={record} sessionId={sessionId} hostId={hostId} body={byId[record.inputId]?.body} />)}
+  </div>;
 }

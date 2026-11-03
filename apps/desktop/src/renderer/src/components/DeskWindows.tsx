@@ -1,3 +1,4 @@
+import { DebugWindow, DebugErrors, DebugSaved } from "./DebugMode";
 // The desk windows' content (multi-window P1 + P3, lib/deskStore): each desk is drawn here, in this window's React
 // tree, through a portal into the desk document (lib/deskWindows). React listens for events on a portal's container
 // itself, so clicks and keys inside the desk reach the handlers as usual.
@@ -26,6 +27,7 @@ import { DesktopBackground, TrayFrame } from "./ChipTray";
 import { SideInstanceLayer } from "./side/SideInstanceLayer";
 import { SettingsShelf } from "./SettingsShelf";
 import { useSettingsShelf } from "../lib/settingsShelf";
+import { useSettingsShelfMaximized } from "../lib/portrait";
 import { useDeskSidebarWidth } from "../lib/windowSidebar";
 import { CaptionSpace, LinuxControls } from "./WindowControls";
 import { FullscreenHint } from "./PanelFullscreen";
@@ -41,7 +43,7 @@ export function DeskWindows() {
 function DeskFrame({ desk, n }: { desk: DeskRecord; n: number }) {
   return (
     <DeskContext.Provider value={desk.deskId}>
-      <OwnerDocumentContext.Provider value={desk.handle.root.ownerDocument}>{desk.content.kind === "probe" ? <DeskProbe desk={desk} /> : <DeskShell desk={desk} n={n} />}</OwnerDocumentContext.Provider>
+      <OwnerDocumentContext.Provider value={desk.handle.root.ownerDocument}><DebugWindow /><DebugErrors /><DebugSaved />{desk.content.kind === "probe" ? <DeskProbe desk={desk} /> : <DeskShell desk={desk} n={n} />}</OwnerDocumentContext.Provider>
     </DeskContext.Provider>
   );
 }
@@ -80,7 +82,8 @@ function DeskShell({ desk, n }: { desk: DeskRecord; n: number }) {
   const open = useOpenPage();
   const fullWindow = !!open?.entry?.item.Aside;
   // Settings opened here (lib/settingsShelf `win`): maximised, it covers this window's row.
-  const covered = useSettingsShelf((s) => s.open && s.maximized && s.win === desk.deskId);
+  const settingsMax = useSettingsShelfMaximized();
+  const covered = useSettingsShelf((s) => s.open && s.win === desk.deskId) && settingsMax;
   // Its own sidebar width (lib/windowSidebar; none set: the main window's).
   const sidebarWidth = useDeskSidebarWidth();
   // This window's selected agent's workspace (file links, git), as App does for the main window.

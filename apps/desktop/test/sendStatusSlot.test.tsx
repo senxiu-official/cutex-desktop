@@ -35,7 +35,7 @@ vi.mock("../src/renderer/src/components/Foldable", () => ({ Foldable: ({ childre
 
 const { TimelineBody } = await import("../src/renderer/src/components/Timeline");
 const { orderedEntries, timelineFromThreadRead } = await import("../src/renderer/src/lib/timeline");
-const { newOutboxEntry } = await import("../src/renderer/src/lib/outbox");
+const { newOutboxEntry } = await import("../src/renderer/src/lib/legacyDelivery/outbox");
 const { viewKey } = await import("../src/renderer/src/lib/viewKey");
 
 const SID = "s1";

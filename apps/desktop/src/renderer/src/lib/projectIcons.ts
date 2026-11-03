@@ -192,24 +192,6 @@ export const PROJECT_EMOJIS: ProjectEmoji[] = [
   { value: "🚩", keywords: ["旗", "flag", "标记"] },
 ];
 
-/** The picker's colour swatches (white / red / orange / yellow / green / blue / purple / pink), stored as cutex presentation colours. */
-export const PROJECT_ICON_COLORS = ["#ffffff", "#e5484d", "#f76b15", "#ffb224", "#30a46c", "#3e63dd", "#6e56cf", "#d6409f"] as const;
-
-/** cutex palette names (lib/sidebar projectColor) whose hue the swatch row also carries: a stored
- * name and its swatch are the same colour, so the swatch shows the selected ring for the name.
- * Cyan / magenta have no swatch twin — they get their own extra swatches writing the daemon token. */
-const SWATCH_OF_NAMED: Record<string, string> = { blue: "#3e63dd", green: "#30a46c", yellow: "#ffb224", red: "#e5484d" };
-
-/** The daemon palette names without a swatch twin, appended after PROJECT_ICON_COLORS. */
-export const PROJECT_NAMED_SWATCHES = ["cyan", "magenta"] as const;
-
-/** Whether presentation colour `current` is the swatch a button writes (`#RRGGBB`, or a
- * PROJECT_NAMED_SWATCHES token): direct match, or the named colour the swatch stands in for. */
-export function sameProjectColor(current: string, swatch: string): boolean {
-  const c = current.trim().toLowerCase();
-  return c === swatch.toLowerCase() || SWATCH_OF_NAMED[c] === swatch;
-}
-
 /** Longest value we store (emoji hold; cutex session avatars cap at 64). */
 export const PROJECT_ICON_MAX = 16;
 

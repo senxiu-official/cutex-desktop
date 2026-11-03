@@ -1,7 +1,7 @@
 // Small pieces of agent messages v2 (lib/agentMessages): the 留言 / 唤醒 tag, the sender's status
 // (dot + word: 未读 / 已读入 hh:mm / 失败, never colour alone) and the received envelope's facts.
 import { useI18n } from "../i18n";
-import type { AgentEnvelope, DeliveryKind } from "../lib/agentMessages";
+import type { AgentEnvelope, DeliveryKind } from "../lib/legacyDelivery/agentMessages";
 import { useAgentMessage } from "../lib/agentMessageStore";
 import { formatAbsolute } from "../lib/time";
 import { Tag } from "./Tag";

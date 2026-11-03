@@ -5,17 +5,19 @@ import { agentPictureOf } from "../lib/agentPicture";
 import { useDirectorAvatarUrl } from "../lib/directorAvatars";
 import { portraitFor, portraitRefOf, usePortraitImage, usePortraitPacks } from "../lib/portraitPacks";
 import { bundledEmoji, emojiTint, emojiUrl } from "../lib/agentEmoji";
-import { minorTileSize } from "../lib/avatarDefault";
+import { letterTileRadius, letterTileSize, letterTileText } from "../lib/avatarDefault";
+import { initialStem, twoLetterInitials } from "../lib/agentInitials";
 import { getAppAvatarStyle } from "../lib/avatarStyle";
 import { themedEmoji } from "../lib/avatarThemes";
 import { useAgentLook, useMinorDot, useProjectStyleWorn } from "../lib/agentLook";
+import { useHintLook, type AgentHint } from "../lib/agentHint";
 import { pickStyleAvatar } from "../lib/avatarStyleAssign";
 import { useStyleAssignmentPreview } from "../lib/avatarStylePreview";
 import { useUiPrefs } from "../lib/prefs";
 import { badgeBox, type AvatarBadgeTone, type AvatarStatus } from "../lib/avatarStatus";
 import { projectIcon } from "../lib/projectIcons";
 import { projectColor } from "../lib/sidebar";
-import { avatarCarriesMark, avatarMark, MARK_GLASS_TINT, MARK_RADIUS, markTextColor, projectMarkCrowded, projectMarkFont, projectMarkHeight, projectMarkText, type AvatarMark } from "../lib/projectMark";
+import { avatarCarriesMark, avatarMark, MARK_RADIUS, markInk, projectMarkCrowded, projectMarkFont, projectMarkHeight, projectMarkText, type AvatarMark } from "../lib/projectMark";
 import { badgeColor } from "../lib/sessionBadge";
 import { useI18n } from "../i18n";
 import { headwearBox, headwearFor, headwearSources, useSeasonalHeadwear, type HeadwearPicture } from "../lib/directorHeadwear";
@@ -28,20 +30,27 @@ import { headwearBox, headwearFor, headwearSources, useSeasonalHeadwear, type He
  * the default (Settings → 外观 → 默认头像): an emoji picked from `seed` (the agent's cutexSessionId)
  * within its Profile's 头像主题 (lib/avatarThemes, lib/agentLook), or the letter. Colour: the avatar's
  * own (a `color` avatar, or `color` on an emoji / picture) → `color` (callers pass the Profile colour)
- * → the agent's Profile colour (lib/agentLook) → stable hash colour; emoji sit on a soft tint of it,
- * letters on the full colour. Letter = `initial` (sidebar rows: lib/agentInitials) or the first char of
- * the name. No `seed` (the owner, unknown senders, an agent not created yet) = always the letter.
+ * → the agent's Profile colour (lib/agentLook) → stable hash colour; emoji sit on a soft tint of it.
+ * No `seed` and no `agent` (the owner, users) = always the letter: `initial` or the first char of the name, on the colour.
+ * An agent without a `seed` or with one the snapshots do not hold (`agent` hint; owner 2026-11-01) = its letter tile.
  * Missing / broken pictures fall back to the default.
  *
- * `minor`: a list row (sidebar, agent lists, pickers) — with 默认头像 = 仅重要智能体 an agent that is
- * not important (lib/avatarDefault isMinorAgent) shows only its minor mark — a small rounded tile in the Profile colour
- * with its initial (owner 2026-10-24; still called the dot in code) — in the same `size` box, so names stay aligned. Conversation headers, approval cards and toasts never pass it.
+ * An agent's letters (owner 2026-11-01): a rounded tile (lib/avatarDefault letterTileSize) with NO colour fill — a neutral
+ * surface with readable ink; the model shows only through the provider-colour frame — and two letters (lib/agentInitials:
+ * the agent's list initials from lib/agentLook, else `initial`, else the name's). With 默认头像 = 仅重要智能体 an agent that
+ * is not important (lib/avatarDefault isMinorAgent) shows this tile (still called the dot in code) instead of a default
+ * avatar, and does so in every place and state — sidebar rows big or small, Rail, tray, header, messages, strips, peers,
+ * pickers — so an agent's avatar is the same everywhere (rule A); with 默认头像 = 字母 every agent without one does.
  *
  * `status` (docs/design/040 §3.1, lib/avatarStatus): what the agent is doing, drawn here the same at every
  * site — the running ring, the corner badge (需要你 / ? / ! / unread; a dot under 24 px), the presence dot
  * (online green, unknown hollow) and grey when offline. The badge and dot cut into the avatar with a
  * 2 px edge in `--avatar-cut` (default the card background; a site on another surface sets it).
- * Pictures follow 头像底色 (UiPrefs.avatarTint): as they are with a hairline edge, or on the provider colour.
+ * The frame (owner 2026-11-01): every round face — picture, emoji, letter — is clipped to its circle with a 1 px outline in
+ * the agent's provider colour (lib/avatarThemes providerTint, `--prov-*`; a neutral hairline when the agent is unknown),
+ * idle and busy alike: the running ring sits outside it, so a status change never moves, resizes or re-crops the face.
+ * The letter tile keeps its shape and gets the same outline (stronger: it is the tile's only colour). 头像底色 (UiPrefs.avatarTint) only decides what is behind a
+ * picture: nothing (无) or a 16 % backdrop of the provider colour (按模型) — the outline is the same, never doubled.
  * `cutout` (the desktop's agent tiles, owner 2026-10-24: 「不要框，png 没背景」): a picture is drawn whole in the
  * box the caller sizes (size only picks the picture resolution) — not clipped to a circle, no edge, no tint, no
  * project mark — so a transparent portrait stands on what is
@@ -49,19 +58,24 @@ import { headwearBox, headwearFor, headwearSources, useSeasonalHeadwear, type He
  *
  * A Director (lib/agentLook `isDirector`) wears its headwear (Settings → 外观 → 主管头饰, lib/directorHeadwear) on
  * avatars of 28 px and more: over the face, sticking out above it; under the ring / badges. Not on a minor dot or a
- * cut-out portrait. Operator uses a separate O chip at the top-left, including minor tiles and cut-outs;
- * it does not change Director headwear or the project mark.
+ * cut-out portrait. An Operator carries no avatar marker (owner 2026-11-01: the O chip is gone); its role shows in
+ * text (header, menus) and, if 副主管也戴 is on, in its headwear.
  *
  * The owner's badge on an agent (cutex `badge`, lib/agentLook) is drawn as that mark too (owner 2026-10-27): bottom-left,
  * the same box and font rules, in the badge's tint; on a Director it replaces the project's text (lib/projectMark avatarMark).
  */
-export function Avatar({ name, color, avatar, avatarMode: draftMode, picture, size = 28, initial: given, seed, minor, status, cutout }: { name: string; color?: string | null; avatar?: SessionAvatar | null; avatarMode?: AvatarMode; picture?: string | null; size?: number; initial?: string | null; seed?: string | null; minor?: boolean; status?: AvatarStatus | null; cutout?: boolean }) {
+export function Avatar({ name, color, avatar, avatarMode: draftMode, picture, size = 28, initial: given, seed, status, cutout, agent }: { name: string; color?: string | null; avatar?: SessionAvatar | null; avatarMode?: AvatarMode; picture?: string | null; size?: number; initial?: string | null; seed?: string | null; status?: AvatarStatus | null; cutout?: boolean; /** An agent without a `seed` (or one the snapshots do not hold): what is known of it (lib/agentHint AgentHint). */ agent?: AgentHint | null }) {
   const { avatarTint, projectIcons, directorHeadwear, operatorHeadwear, seasonalHeadwear } = useUiPrefs();
   const festival = useSeasonalHeadwear(seasonalHeadwear);
   const look = useAgentLook(seed);
+  // An agent the snapshots do not hold (being created, another host, deleted; owner 2026-11-01): its letter tile with the
+  // initials the sidebar gives it and the model colour if the caller knows it (lib/agentHint useHintLook), never a picked
+  // emoji / portrait (its Profile and project are unknown) nor a person's round letter on a fill.
+  const unknownAgent = !look && (!!seed || agent != null);
+  const hinted = useHintLook(name, agent, unknownAgent);
   const mode = draftMode !== undefined ? draftMode : look?.avatarMode ?? null;
   const fixedLetter = draftMode !== undefined ? mode === "fixed" && !avatar : look?.fixedLetter ?? (mode === "fixed" && !avatar);
-  const style = fixedLetter ? { kind: "letter" as const } : look?.style ?? getAppAvatarStyle();
+  const style = fixedLetter || unknownAgent ? { kind: "letter" as const } : look?.style ?? getAppAvatarStyle();
   // Inheritance is draw-time intent: stale stored pictures and planned fixed assignments never win.
   if (mode === "inherit" || fixedLetter) { avatar = null; picture = null; }
   const preview = useStyleAssignmentPreview(seed);
@@ -75,60 +89,70 @@ export function Avatar({ name, color, avatar, avatarMode: draftMode, picture, si
   const worn = mode === "inherit" ? undefined : projectWorn;
   const fromPack = usePortraitImage(portraitFor(index, avatar ?? planned, seed, look?.family, style.kind === "portrait" ? style.portraitThemes : [], worn)?.picture, size);
   const stored = (picture !== undefined ? picture : agentPictureOf(avatar)) ?? portrait ?? (portraitRefOf(avatar) ? fromPack : null);
-  const dot = useMinorDot(seed, avatar, stored, minor);
+  const dot = useMinorDot(seed, avatar, stored);
   const [broken, setBroken] = useState<string | null>(null);
   // The themes' pick never turns a minor agent's dot into a face (仅重要智能体 still decides).
   const pictureUrl = stored ?? (dot ? null : fromPack);
   const shown = pictureUrl && pictureUrl !== broken ? pictureUrl : null;
   const packPicture = !!shown && shown === fromPack;
-  const initial = given || ([...name.trim()][0]?.toUpperCase() ?? "?");
+  // An agent's letters are its list initials wherever it is drawn (lib/agentLook), so a caller without the row agrees.
+  const initial = (seed ? look?.initial : null) || given || hinted?.initial || (seed ? twoLetterInitials(initialStem(name)) : ([...name.trim()][0]?.toUpperCase() ?? "?"));
   const base = avatarColor(avatar) ?? color ?? look?.color ?? hashColor(name);
   // A cut-out avatar without a picture: the round face at half the box (a 96 px circle would outweigh the portraits).
   if (cutout && !shown) size = Math.round(size / 2);
+  // The frame's outline (see above): the provider colour, softer under 24 px so a 16–20 px row avatar stays a hairline.
+  const tint = look ? (look.tint ?? look.family) : (hinted?.tint ?? null);
+  const prov = `var(--prov-${tint ?? "other"})`;
+  const edge = tint ? `color-mix(in oklab, ${prov} ${size < 24 ? 55 : 70}%, transparent)` : "color-mix(in oklab, var(--fg) 12%, transparent)";
+  const defaultAvatar = !dot && seed && style.kind === "emoji" ? pickStyleAvatar(style, index, look?.family ?? null, seed, worn) : null;
+  const glyph = dot || shown ? null : avatar?.kind === "emoji" ? avatar.value : planned?.kind === "emoji" ? planned.value : seed && style.kind !== "letter" ? (defaultAvatar?.value ?? themedEmoji(seed, look?.themes).glyph) : null;
+  // An agent with no face to show: its letter tile (see above); people (no seed, no `agent`) keep the round letter on their colour.
+  const tile = dot || ((!!seed || unknownAgent) && !shown && !glyph);
   let face;
   if (cutout && shown) {
     return (
       <div className="relative flex h-full w-full min-h-0 select-none items-end justify-center" data-avatar="cutout" aria-hidden>
         <img src={shown} alt="" draggable={false} className="max-h-full max-w-full object-contain" onError={() => setBroken(pictureUrl)} />
-        {look?.isOperator && <OperatorMarkChip size={size} />}
       </div>
     );
   }
-  if (dot) {
-    // 仅重要智能体's minor mark (owner 2026-10-24, option 甲): a small rounded tile in the Profile colour with the initial,
-    // so it never reads as the round host dot beside it. Running = the tile's edge lights up.
-    const d = minorTileSize(size);
+  if (tile) {
+    // The letter tile (owner 2026-10-24 option 甲: square, so it never reads as the round host dot beside it; 2026-11-01:
+    // no fill, two letters). Running = the tile's edge lights up.
+    const d = letterTileSize(size);
+    const radius = letterTileRadius(d);
+    const label = letterTileText(initial, d);
+    const frame = tint ? `color-mix(in oklab, ${prov} 85%, transparent)` : edge;
     face = (
-      <div className="flex shrink-0 items-center justify-center" style={{ width: size, height: size }} data-avatar="dot" aria-hidden>
+      <div className="flex shrink-0 items-center justify-center" style={{ width: size, height: size }} data-avatar={dot ? "dot" : "letter"} aria-hidden>
         <span
           data-minor-tile=""
-          className="relative flex items-center justify-center font-mono font-bold leading-none"
-          style={{ width: d, height: d, borderRadius: d >= 15 ? 4 : 3, fontSize: d >= 15 ? 9.5 : 8, background: `color-mix(in oklab, ${base} 20%, transparent)`, color: `color-mix(in oklab, ${base} 80%, var(--fg))` }}
+          className="relative flex items-center justify-center font-semibold leading-none whitespace-nowrap"
+          data-avatar-frame={tint}
+          style={{ width: d, height: d, borderRadius: radius, fontSize: label.fontSize, letterSpacing: label.letterSpacing, background: "var(--surface)", color: "color-mix(in oklab, var(--fg) 84%, var(--surface))", boxShadow: `inset 0 0 0 1px ${frame}` }}
         >
-          {[...initial][0]}
-          {status?.running && <span className="agent-ring-tile" aria-hidden />}
+          {label.text}
+          {status?.running && <span className="agent-ring-tile" style={{ borderRadius: radius + 2 }} aria-hidden />}
         </span>
       </div>
     );
   } else {
-    const defaultAvatar = seed && style.kind === "emoji" ? pickStyleAvatar(style, index, look?.family ?? null, seed, worn) : null;
-    const glyph = shown ? null : avatar?.kind === "emoji" ? avatar.value : planned?.kind === "emoji" ? planned.value : seed && style.kind !== "letter" ? (defaultAvatar?.value ?? themedEmoji(seed, look?.themes).glyph) : null;
     // 头像底色 = 按模型 puts a picture on its provider colour; otherwise the picture is as it is (no Profile colour behind it).
     const tinted = !!shown && avatarTint === "provider" && !!look;
-    const prov = `var(--prov-${look?.family ?? "other"})`;
     face = (
       <div
-        className={`relative flex shrink-0 select-none items-center justify-center font-semibold text-white ${packPicture ? "" : "overflow-hidden rounded-full"}`}
+        className="relative flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full font-semibold text-white"
         style={{ width: size, height: size, fontSize: size * 0.45, background: shown ? (tinted ? `color-mix(in oklab, ${prov} 16%, var(--bg))` : "transparent") : glyph ? emojiTint(base) : base }}
         data-avatar={shown ? "picture" : glyph ? "emoji" : "letter"}
-        data-avatar-tint={tinted ? (look?.family ?? "other") : undefined}
+        data-avatar-frame={tint}
+        data-avatar-tint={tinted ? tint : undefined}
         aria-hidden
       >
         {/* The box is reserved before the picture loads (`width`/`height` on top of the fixed px face div), so a
             loading portrait, its letter / emoji stand-in and a swap between them never move the row around it. */}
-        {shown ? <img src={shown} alt="" draggable={false} width={size} height={size} className={`h-full w-full ${packPicture ? "object-contain" : "rounded-full object-cover"}`} onError={() => setBroken(pictureUrl)} /> : glyph ? <EmojiGlyph glyph={glyph} size={Math.round(size * 0.64)} /> : initial}
-        {/* A picture's edge: a hairline so a pale picture doesn't melt into the card; the provider ring when tinted. */}
-        {shown && !packPicture && <span className="pointer-events-none absolute inset-0 rounded-full" style={{ boxShadow: `inset 0 0 0 1px ${tinted ? `color-mix(in oklab, ${prov} 40%, transparent)` : "color-mix(in oklab, var(--fg) 10%, transparent)"}` }} />}
+        {shown ? <img src={shown} alt="" draggable={false} width={size} height={size} className={`h-full w-full ${packPicture ? "object-contain" : "object-cover"}`} onError={() => setBroken(pictureUrl)} /> : glyph ? <EmojiGlyph glyph={glyph} size={Math.round(size * 0.64)} /> : initial}
+        {/* The frame's outline, over the picture so a pale one doesn't melt into the card. */}
+        <span data-avatar-edge="" className="pointer-events-none absolute inset-0 rounded-full" style={{ boxShadow: `inset 0 0 0 1px ${edge}` }} />
       </div>
     );
   }
@@ -140,9 +164,8 @@ export function Avatar({ name, color, avatar, avatarMode: draftMode, picture, si
   const mark = marked ? avatarMark(projectMark, look?.badge ? { text: look.badge.text, color: badgeColor(look.badge.tint) } : null) : null;
   const hat = dot || cutout || !look ? null : headwearFor(directorHeadwear, look, size, { operators: operatorHeadwear, seasonal: festival });
   if (hat) face = <HeadwearFrame size={size} style={hat}>{face}</HeadwearFrame>;
-  const operator = look?.isOperator === true;
-  if (!status || (!status.running && !status.badge && !status.presence)) return mark?.text || operator ? <AvatarMarkFrame size={size} mark={mark?.text ? mark : null} operator={operator}>{face}</AvatarMarkFrame> : face;
-  return <AvatarStatusFrame size={size} status={status} minorDot={!!dot} mark={mark?.text ? mark : null} operator={operator}>{face}</AvatarStatusFrame>;
+  if (!status || (!status.running && !status.badge && !status.presence)) return mark?.text ? <AvatarMarkFrame size={size} mark={mark}>{face}</AvatarMarkFrame> : face;
+  return <AvatarStatusFrame size={size} status={status} minorDot={tile} mark={mark?.text ? mark : null}>{face}</AvatarStatusFrame>;
 }
 
 const BADGE_TONE: Record<AvatarBadgeTone, { background: string; color: string }> = {
@@ -153,8 +176,9 @@ const BADGE_TONE: Record<AvatarBadgeTone, { background: string; color: string }>
 
 type DirectorMark = AvatarMark;
 
-/** The project mark chip (also the owner's badge, lib/projectMark avatarMark): a small frosted-glass rectangle tinted with the project colour, 1–4 columns in the project's hue
- *  at a per-theme lightness (readable on any surface); the blur sits under the text, never on it. */
+/** The project mark chip (also the owner's badge, lib/projectMark avatarMark): a small opaque rectangle in the project colour,
+ *  1–4 columns in white or black, whichever reads (lib/projectMark markInk, ≥ 4.5:1 over any portrait, either theme). A 1 px
+ *  cut in `--avatar-cut` (as the corner badge has) parts it from the face, so it reads as a label, not a second avatar. */
 function ProjectMarkChip({ size, mark, dot = false }: { size: number; mark: DirectorMark; dot?: boolean }) {
   const h = projectMarkHeight(size);
   const crowded = projectMarkCrowded(size, mark.text, dot);
@@ -172,44 +196,18 @@ function ProjectMarkChip({ size, mark, dot = false }: { size: number; mark: Dire
         minWidth: h,
         padding: crowded ? "0 1px" : font.sans ? "0 2px" : "0 4px",
         borderRadius: MARK_RADIUS,
-        background: `linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,.08)), color-mix(in oklab, ${hex} ${MARK_GLASS_TINT * 100}%, transparent)`,
-        backdropFilter: "blur(8px) saturate(1.4)",
-        color: markTextColor(hex),
+        background: hex,
+        color: markInk(hex),
         // The code font (Latin letters even-spaced at 9 px); text with a hanzi: the UI font, bigger (lib/projectMark).
         fontFamily: font.sans ? "var(--font-sans)" : "var(--font-mono), var(--font-sans)",
         letterSpacing: font.sans ? 0 : "0.02em",
         fontSize: font.size,
         lineHeight: 1,
-        boxShadow: "inset 0 0 0 0.5px color-mix(in srgb, var(--fg) 16%, transparent), 0 1px 3px rgba(0,0,0,.2)",
+        boxShadow: "0 0 0 1px var(--avatar-cut, var(--bg))",
       }}
     >
       {mark.text}
     </span>
-  );
-}
-
-/** A role badge rather than headwear: top-left leaves project/status/presence corners free. */
-function OperatorMarkChip({ size }: { size: number }) {
-  const { t } = useI18n();
-  const edge = size >= 64 ? 18 : size >= 40 ? 15 : size >= 24 ? 12 : 9;
-  return (
-    <span
-      data-operator-mark=""
-      title={t("sidebar.operator")}
-      aria-label={t("sidebar.operator")}
-      role="img"
-      className="pointer-events-none absolute z-10 flex items-center justify-center font-fixed font-bold"
-      style={{
-        left: -2, top: -2, width: edge, height: edge,
-        borderRadius: edge >= 12 ? 4 : 3,
-        fontSize: edge >= 15 ? 10 : edge >= 12 ? 8.5 : 7,
-        lineHeight: 1,
-        color: "var(--fg)",
-        background: "color-mix(in srgb, var(--surface) 88%, transparent)",
-        backdropFilter: "blur(8px)",
-        boxShadow: "inset 0 0 0 0.5px color-mix(in srgb, var(--fg) 24%, transparent), 0 0 0 1px var(--avatar-cut, var(--bg))",
-      }}
-    >O</span>
   );
 }
 
@@ -226,18 +224,17 @@ function HeadwearFrame({ size, style, children }: { size: number; style: Headwea
 }
 
 /** An avatar without a status layer that still carries the project mark. */
-function AvatarMarkFrame({ size, mark, operator, children }: { size: number; mark?: DirectorMark | null; operator?: boolean; children: ReactNode }) {
+function AvatarMarkFrame({ size, mark, children }: { size: number; mark?: DirectorMark | null; children: ReactNode }) {
   return (
     <span className="relative inline-flex shrink-0">
       {children}
       {mark && <ProjectMarkChip size={size} mark={mark} />}
-      {operator && <OperatorMarkChip size={size} />}
     </span>
   );
 }
 
 /** The status layer round an avatar (Avatar `status`): ring, corner badge, presence dot, offline grey. */
-function AvatarStatusFrame({ size, status, minorDot, mark, operator, children }: { size: number; status: AvatarStatus; minorDot: boolean; mark?: DirectorMark | null; operator?: boolean; children: ReactNode }) {
+function AvatarStatusFrame({ size, status, minorDot, mark, children }: { size: number; status: AvatarStatus; minorDot: boolean; mark?: DirectorMark | null; children: ReactNode }) {
   const { t } = useI18n();
   const { presence, badge } = status;
   const box = badgeBox(size);
@@ -276,7 +273,6 @@ function AvatarStatusFrame({ size, status, minorDot, mark, operator, children }:
         </span>
       )}
       {mark && <ProjectMarkChip size={size} mark={mark} dot={presence === "online" || presence === "unknown"} />}
-      {operator && <OperatorMarkChip size={size} />}
       {presence === "online" && (
         <span data-avatar-dot="online" aria-hidden className="pointer-events-none absolute -right-0.5 -bottom-0.5 rounded-full" style={{ width: dotSize, height: dotSize, background: "var(--ok)", boxShadow: "0 0 0 2px var(--avatar-cut, var(--bg))" }} />
       )}

@@ -4,7 +4,7 @@
 // that holds two or more of them, in the order sent, now records them all. Replays events through the real reducer.
 import { describe, expect, it } from "vitest";
 import { applyEvent, emptyTimeline, type TimelineState } from "../src/renderer/src/lib/timeline";
-import { newPendingSteer, recordedSteers, settlePendingSteers } from "../src/renderer/src/lib/pendingSteers";
+import { newPendingSteer, recordedSteers, settlePendingSteers } from "../src/renderer/src/lib/legacyDelivery/pendingSteers";
 
 const native = (method: string, params: Record<string, unknown>) => ({ native: { kind: "notification", message: { method, params: { threadId: "t", ...params } } } }) as never;
 const started = (s: TimelineState, id: string) => applyEvent(s, native("turn/started", { turn: { id, status: "inProgress", items: [], startedAt: 1 } }));
@@ -19,6 +19,25 @@ function busyTurn() {
 }
 
 describe("merged steers", () => {
+  it("does not use a merged row that predates the later insert as its delivery evidence", () => {
+    const s = busyTurn();
+    const first = newPendingSteer(s, "c-1", "alpha", 0, "T1");
+    user(s, "T1", "older-quote", "alpha beta");
+    const second = newPendingSteer(s, "c-2", "beta", 0, "T1");
+    expect(recordedSteers([first, second], s).has("c-2")).toBe(false);
+    user(s, "T1", "actual-merged", "alpha beta");
+    expect([...recordedSteers([first, second], s)]).toEqual(["c-1", "c-2"]);
+  });
+
+  it("allocates distinct untagged rows for identical inserts with different baselines", () => {
+    const s = busyTurn();
+    const first = newPendingSteer(s, "c-1", "same", 0, "T1");
+    user(s, "T1", "first-read", "same");
+    const second = newPendingSteer(s, "c-2", "same", 0, "T1");
+    user(s, "T1", "second-read", "same");
+    expect([...recordedSteers([first, second], s)]).toEqual(["c-1", "c-2"]);
+    expect(settlePendingSteers([first, second], s).pending).toEqual([]);
+  });
   it("one history message holding both inserts (no clientId) records both; the turn keeps running", () => {
     const s = busyTurn();
     const steers = [newPendingSteer(s, "c-1", "先别改图", 0, "T1"), newPendingSteer(s, "c-2", "表 2 也要更新", 0, "T1")];

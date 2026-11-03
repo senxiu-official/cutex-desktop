@@ -9,6 +9,7 @@ import { fileKind, isThumbnailPath } from "../../../lib/fileKinds";
 import { FILE_KIND_ICON } from "../../../lib/fileKindIcons";
 import { FileView } from "../FileView";
 import { rememberSourceChoice, useSourceChoice, viewKindOf } from "../viewChoice";
+import { reconsiderFileRender } from "../../../lib/largeRenderChoices";
 import { stickyAncestors, type EntryRow, type GitMark, type Row } from "./model";
 import { cachedThumb, loadThumb, THUMB_MAX_BYTES } from "./thumbs";
 import { Tag } from "../../../components/Tag";
@@ -410,7 +411,7 @@ export function InlinePreview({ api, hostId, scope, thumbKey, target, multi, chi
         ) : (
           <>
             {kind && (
-              <button className="shrink-0 rounded px-1.5 py-0.5 text-subtle hover:bg-hover hover:text-foreground" onClick={() => rememberSourceChoice(kind, !source)} data-source-toggle="" aria-pressed={source}>
+              <button className="shrink-0 rounded px-1.5 py-0.5 text-subtle hover:bg-hover hover:text-foreground" onClick={() => { if (source) reconsiderFileRender(hostId, scope, shown.path); rememberSourceChoice(kind, !source); }} data-source-toggle="" aria-pressed={source}>
                 {source ? t("workspace.showRendered") : t("workspace.showSource")}
               </button>
             )}

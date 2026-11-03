@@ -1,5 +1,6 @@
 import type { SessionResource } from "@cutex-desktop/protocol";
 import { describe, expect, it, vi } from "vitest";
+import { HostBusyActionExhausted } from "../src/renderer/src/lib/hostBusyActions";
 import type { RuntimePackageRun, SidebarSnapshot } from "../src/shared/ipc";
 import type { ClaudeRuntimeView } from "../src/shared/claudeRepin";
 import {
@@ -190,6 +191,37 @@ describe("Claude runtime batch", () => {
 });
 
 describe("combined runtime result", () => {
+  it.each(["success", "repinThrow", "repinRefused", "offlineThrow"])("continues after host busy on %s online/rollback without a generic online error", async mode => {
+    const calls: string[] = [];
+    const result = await runClaudeRuntimeBatch(
+      createClaudeRuntimeBatch([candidate("a"), candidate("b")], null),
+      {
+        claudeRuntime: async id => view(id),
+        repinClaudeRuntime: async id => {
+          if (id === "a" && mode === "repinThrow") throw new Error("actual repin failure");
+          if (id === "a" && mode === "repinRefused") return { ok: false, error: { code: "refused", message: "actual repin refusal" } };
+          return { ok: true, done: { result: { outcome: "deferred", reason: "next start", restartRequired: true, previous: "claude-r24", target: "claude-r25" }, runtime: view(id) } };
+        },
+        sessionAction: async (id, method) => {
+          calls.push(`${id}:${method}`);
+          if (id === "a" && method.endsWith("/offline") && mode === "offlineThrow") throw new Error("actual stop failure");
+          if (id === "a" && method.endsWith("/online")) throw new HostBusyActionExhausted();
+          return { status: method.endsWith("/online") ? "online" : "offline" };
+        },
+      },
+      () => {},
+    );
+    expect(calls).toEqual(["a:cutex/runtime/offline", "a:cutex/runtime/online", "b:cutex/runtime/offline", "b:cutex/runtime/online"]);
+    const [a, b] = result.run.items;
+    expect(a?.reason ?? "").not.toMatch(/back online failed|host_action_busy|admission_busy/);
+    expect(a?.backOnline).toBeNull();
+    expect(a?.state).toBe(mode === "success" ? "moved" : "failed");
+    expect(b).toMatchObject({ state: "moved", backOnline: true });
+    if (mode === "repinThrow") expect(a?.reason).toBe("actual repin failure");
+    if (mode === "repinRefused") expect(a?.reason).toBe("actual repin refusal");
+    if (mode === "offlineThrow") expect(a?.reason).toBe("actual stop failure");
+  });
+
   it("shows native and Claude items in one run and keeps the matching last run", () => {
     const claude = createClaudeRuntimeBatch([candidate("claude", { busy: true, busyReason: "activeTurn", activeTurnId: "t" })], "rpu-native", "2026-10-25T00:00:02Z");
     const native = nativeRun({ items: [{

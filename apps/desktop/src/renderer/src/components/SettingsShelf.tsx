@@ -40,6 +40,7 @@ import {
   settingsRowKeep,
   useSettingsRowNeed,
 } from "../lib/settingsShelf";
+import { usePortraitOn, useSettingsShelfMaximized } from "../lib/portrait";
 import { setReservedWidth } from "../lib/workspaces";
 import { keyResize, resizeDrag } from "../lib/columnGlide";
 import { rowGive } from "../lib/sideResize";
@@ -320,7 +321,9 @@ function OpenShelf({ row, inSlot }: { row: HTMLElement; inSlot: boolean }) {
   const params = useSettingsShelf((s) => s.params);
   const side = useSettingsShelf((s) => s.side);
   const stored = useSettingsShelf((s) => s.width);
-  const maximized = useSettingsShelf((s) => s.maximized);
+  // Portrait (lib/portrait, P2): always maximised there (no room beside the stack) — its own toggle is not offered.
+  const maximized = useSettingsShelfMaximized();
+  const portrait = usePortraitOn();
   const labels = useSettingsShelf((s) => s.railLabels);
   const docked = useSettingsShelfSlot((s) => !!s.left);
   const tab = settingsTab(params);
@@ -412,16 +415,18 @@ function OpenShelf({ row, inSlot }: { row: HTMLElement; inSlot: boolean }) {
             <ArrowLeftRight size={14} />
           </button>
         )}
-        <button
-          data-settings-maximize=""
-          title={t(maximized ? "settingsShelf.restore" : "settingsShelf.maximize")}
-          aria-label={t(maximized ? "settingsShelf.restore" : "settingsShelf.maximize")}
-          aria-pressed={maximized}
-          onClick={toggleSettingsShelfMaximized}
-          className={HEAD_BTN}
-        >
-          {maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-        </button>
+        {!portrait && (
+          <button
+            data-settings-maximize=""
+            title={t(maximized ? "settingsShelf.restore" : "settingsShelf.maximize")}
+            aria-label={t(maximized ? "settingsShelf.restore" : "settingsShelf.maximize")}
+            aria-pressed={maximized}
+            onClick={toggleSettingsShelfMaximized}
+            className={HEAD_BTN}
+          >
+            {maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
+        )}
         <button data-settings-close="" title={`${t("settings.close")} · Esc`} aria-label={t("settings.close")} onClick={closeSettingsShelf} className={HEAD_BTN}>
           <X size={15} />
         </button>
@@ -486,7 +491,7 @@ export function SettingsShelf() {
   const here = useWindowKey();
   const open = useSettingsShelf((s) => s.open && s.win === here);
   const side = useSettingsShelf((s) => s.side);
-  const maximized = useSettingsShelf((s) => s.maximized);
+  const maximized = useSettingsShelfMaximized();
   const slot = useSettingsShelfSlot((s) => s.left);
   const [anchor, setAnchor] = useState<HTMLDivElement | null>(null);
   const [node] = useState(() => {

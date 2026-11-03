@@ -1,3 +1,4 @@
+import { captureDebugError } from "../lib/debugState";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { bridge } from "../bridge";
 import { translate } from "../i18n";
@@ -21,6 +22,7 @@ export class ErrorBoundary extends Component<{ resetKey?: string; children: Reac
   componentDidCatch(error: Error, info: ErrorInfo) {
     // Caught errors never reach window "error": log them like an uncaught one.
     const stack = [error.stack, info.componentStack].filter(Boolean).join("\n");
+    captureDebugError({ message: error.message, stack }, "React.ErrorBoundary");
     void bridge.shell?.logError({ kind: "error", message: error.message, stack }).catch(() => {});
   }
 

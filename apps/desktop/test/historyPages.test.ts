@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cloneTimeline, historyPageSize, MAX_PAGE_TURNS, olderAfterPage, olderFromPage, prependHistory } from "../src/renderer/src/lib/historyPages";
 import { orderedEntries, seedPlan, timelineFromThreadRead } from "../src/renderer/src/lib/timeline";
-import { recordedSteers } from "../src/renderer/src/lib/pendingSteers";
+import { recordedSteers } from "../src/renderer/src/lib/legacyDelivery/pendingSteers";
 
 const turn = (n: number, extra: Record<string, unknown>[] = []) => ({
   id: `t${n}`,

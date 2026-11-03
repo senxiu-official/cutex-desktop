@@ -37,7 +37,7 @@ export const FILE_PAGE_MAX_BYTES = 10 * 1024 * 1024;
 export type FilePageRefusal = "not-found" | "host-offline" | "not-text" | "too-large";
 export type FilePageResult =
   | { ok: true; frame: FrameResource; /** references to files next to it / the network that the page cannot load (inline-only) */ externalRefs: number }
-  | { ok: false; reason: FilePageRefusal; totalBytes?: number };
+  | { ok: false; reason: FilePageRefusal; totalBytes?: number; /** Metadata of the same read, for a revision-specific size decision. */ modifiedAt?: string };
 export interface FrameResource {
   id: string;
   url: string;

@@ -1,9 +1,11 @@
+import { captureDebugError, useDebug } from "./lib/debugState";
 import type { DaemonApi, PreloadBridge } from "../../shared/ipc";
 import { installMockBridge } from "./dev/mockBridge";
 
 declare global {
   interface Window {
     cutex: PreloadBridge;
+    __cutexDebugFlush?: () => Promise<void>;
   }
 }
 
@@ -26,11 +28,19 @@ function cleaned<T extends object>(source: () => T): T {
       const target = source();
       const value = Reflect.get(target, key) as unknown;
       if (typeof value !== "function") return value;
-      return (...args: unknown[]) =>
-        Promise.resolve((value as (...a: unknown[]) => unknown).apply(target, args)).catch((error: unknown) => {
-          if (error instanceof Error && error.message.startsWith("Error invoking remote method")) error.message = cleanIpcMessage(error.message);
+      return (...args: unknown[]) => {
+        const result = Promise.resolve((value as (...a: unknown[]) => unknown).apply(target, args));
+        const observed = useDebug.getState().state.enabled ? result.then(value => {
+          const refusal = value && typeof value === "object" ? (value as { error?: unknown }).error : null;
+          if (refusal) captureDebugError(refusal, `api.${String(key)}`);
+          return value;
+        }) : result;
+        return observed.catch((error: unknown) => {
+          captureDebugError(error, `api.${String(key)}`);
+          if (!useDebug.getState().state.enabled && error instanceof Error && error.message.startsWith("Error invoking remote method")) error.message = cleanIpcMessage(error.message);
           throw error;
         });
+      };
     },
   });
 }

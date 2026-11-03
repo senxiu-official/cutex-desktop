@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdmissionItem, AdmissionNextStep, QueueAdmission, QueueItem } from "@cutex-desktop/protocol";
 import type { AskSummary } from "../src/shared/ipc";
-import { admittedAskIds, applyMove, askWithAdmissionPosition, atBoundary, beforeForSlot, canMoveTo, currentTurnOf, insertRefusal, moveTargets, pausedFrom, turnStopped, readOwnerMayPassAsks, rideAlongAsk, rideAlongLabel, rideAlongTiming, rideAlongView, foldQueueRows, foldRow, pendingSectionMessages, slotForGroup, turnGroups } from "../src/renderer/src/lib/admissionOrder";
+import { admittedAskIds, applyMove, askWithAdmissionPosition, atBoundary, beforeForSlot, canMoveTo, currentTurnOf, insertRefusal, moveTargets, pausedFrom, turnStopped, readOwnerMayPassAsks, rideAlongAsk, rideAlongLabel, rideAlongTiming, rideAlongView, foldQueueRows, foldRow, pendingSectionMessages, slotForGroup, turnGroups } from "../src/renderer/src/lib/legacyDelivery/admissionOrder";
 import { stripInside, STRIP_ROOM } from "../src/renderer/src/lib/railStrip";
 import { parseQueueMoveError, queueMoveErrorKind, queueMoveErrorMessage } from "../src/shared/queueMove";
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";

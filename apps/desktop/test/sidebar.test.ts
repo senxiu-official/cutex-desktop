@@ -116,7 +116,7 @@ describe("buildSidebar", () => {
       hostRows: Object.fromEntries(names.map((n) => [n, row(n, n === "solo-r3" ? null : "demo2026")])),
     });
     const all = groups.flatMap((g) => [...g.online, ...g.offline]);
-    expect(Object.fromEntries(all.map((r) => [r.name, r.initial]))).toEqual({ "proj-ceo-r1": "C", "proj-gpt-research-r1": "G", "proj-ops-r2": "O", "solo-r3": "S" });
+    expect(Object.fromEntries(all.map((r) => [r.name, r.initial]))).toEqual({ "proj-ceo-r1": "Ce", "proj-gpt-research-r1": "GR", "proj-ops-r2": "Op", "solo-r3": "So" });
   });
 
   it("splits quick chats into their own newest-first list only when enabled", () => {

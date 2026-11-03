@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.2.1 (2026-11-03)
+
+- Message delivery follows the host's message ledger on newer backends (r274 and later): sending, queued, delivered and uncertain states come straight from the host. Older backends keep working through the previous path.
+  在较新的后端（r274 起）上，消息投递状态直接来自主机的消息台账：发送中、排队、已送达、结果不明都以主机为准。旧后端继续走原来的方式，照常可用。
+
+- Shelf pages open by clearer rules, the Rail scrolls when it holds many pages, and the Rail fits more pages; the add-page button stays after the page list.
+  Shelf 页面的打开位置规则更清楚；Rail 页面多时可以滚动，也能放更多页面；添加页面按钮固定在页面列表之后。
+
+- Projects offer more colours, plus a custom colour.
+  项目颜色选项更多，也可以自定义颜色。
+
+- A session whose model is not on its profile's model list shows a warning, and new agents are checked before they are created.
+  会话使用的模型不在该 Profile 的模型清单里时会显示警告；新建智能体前也会先检查模型。
+
+- Interrupt and send on a pending message interrupts the current turn and sends that message once; pending-message actions are grouped in one menu.
+  对待发消息执行打断并发送时，会打断当前回合，并且只发送一次；待发消息操作集中到同一个菜单。
+
+- Fixes: conversation text no longer jitters at 125% and other fractional display scales; the quota and model panels no longer flash or close while the conversation scrolls; background terminals stay consistent between the chip and the Shelf; delegation rows are shown once; large pages use less memory; an agent's checkbox works across its whole selection column; flyouts no longer cover open menus.
+  修正：125% 等非整数显示缩放下正文不再抖动；会话滚动时额度和模型面板不再闪烁或自动关闭；后台终端在状态标签和 Shelf 中保持一致；委托记录只显示一次；大页面占用内存更少；点击智能体选择列任意位置都能勾选；浮出面板不再盖住已打开的菜单。
+
+- Old delivered messages no longer pile up at the bottom of a conversation; delegation status notices show their number and title.
+  旧的已送达消息不再堆在对话底部；委托状态通知用编号和标题显示。
+
+- Component setup distinguishes saved overrides from discovered paths and shows expandable diagnostics; an optional debug mode keeps bounded local diagnostics.
+  组件配置区分已保存的覆盖项和自动发现的路径，并提供可展开的诊断；可选的调试模式会在本机保留有容量限制的诊断信息。
+
+- Compatibility: the public backend is unchanged in this release. The desktop detects what each host supports and falls back automatically; this update does not install or upgrade the backend or change existing agents' pinned runtimes.
+  兼容性：本次公开版不更新后端。桌面会自动识别每台主机支持的功能并自动回退；此次更新不会安装或升级后端，也不会改变已有智能体固定的运行时。
+
+
 ## 0.2.0 "Beautiful World" (2026-10-29)
 
 - External-agent and project pickers support search and keyboard navigation; long menus scroll more steadily.

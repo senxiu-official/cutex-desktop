@@ -30,6 +30,14 @@ export const mock: ModuleMock = {
   api: () => ({
     async runtimes() {
       await new Promise((r) => setTimeout(r, 150));
+      // SHA-only selected native build, matching backend-upgrade's host summary.
+      if (new URLSearchParams(location.search).get("nativeUnknown") === "1") return {
+        ...structuredClone(VIEW),
+        native: [
+          { release: "dddddddddddd", version: null, sha256Prefix: "dddddddddddd", selected: true, agents: agents("Rei", "Ritsuko", "Maya") },
+          ...structuredClone(VIEW.native ?? []).map(r => ({ ...r, selected: false })),
+        ],
+      } satisfies RuntimesWire;
       if (new URLSearchParams(location.search).has("runtimeGroups")) return {
         hostId: "host-a",
         native: [

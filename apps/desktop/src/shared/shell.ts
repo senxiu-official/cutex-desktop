@@ -43,6 +43,7 @@ export function parsePrefs(raw: unknown): DesktopPrefs {
     ...(value.closeBehaviorChosen === true ? { closeBehaviorChosen: true } : {}),
     ...(value.trayNoticeShown === true ? { trayNoticeShown: true } : {}),
     ...(value.allowRemoteClose === false ? { allowRemoteClose: false } : {}),
+    ...(value.debugMode === true ? { debugMode: true } : {}),
     ...(value.multiWindow === true ? { multiWindow: true } : {}),
     ...(value.multiWindowMigrated === true ? { multiWindowMigrated: true } : {}),
     ...(parseUpdateRemote(value.updateRemote) ? { updateRemote: parseUpdateRemote(value.updateRemote)! } : {}),

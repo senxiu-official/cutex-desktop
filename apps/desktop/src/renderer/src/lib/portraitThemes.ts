@@ -44,8 +44,9 @@ function localName(n: PortraitName | undefined, locale: string): string | null {
 
 /**
  * A theme's representative face (owner 2026-10-29: one portrait per card, not one per family): the manifest's
- * `cover` (the shipped kit names gpt/01 in every theme, so cards compare the same character), else the first picture
- * of the first family in PORTRAIT_FAMILIES order (claude, openai, …), else its first picture.
+ * `cover` (the shipped kit picks one per theme, rotating through the families in theme order — claude, openai, gemini,
+ * deepseek, kimi, glm — so neighbouring cards show different characters, owner 2026-10-29), else the first picture of
+ * the first family in PORTRAIT_FAMILIES order (claude, openai, …), else its first picture.
  */
 export function themeCover(theme: PortraitTheme): PortraitPicture {
   return theme.pictures.find((p) => p.stem === theme.cover)

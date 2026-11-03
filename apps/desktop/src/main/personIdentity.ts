@@ -15,6 +15,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { downloadFilename, downloadFilters } from "../shared/downloadFilename";
 import { clipboard, dialog, type BrowserWindow } from "electron";
 import { CutexApiError } from "@cutex-desktop/cutex-client";
 import { CLAIM_RETRY_LATER, CLAIM_RETRY_ONCE, claimDecision, claimDisplayName, claimedView, type ClaimRecord, type HostClaimView, type IdentityChallenge, type IdentityClaimResult, type IdentityFileResult, type IdentityImportTexts, type IdentityKeyCopyResult, type PersonIdentityView } from "../shared/personIdentity";
@@ -212,7 +213,8 @@ export class PersonIdentityService {
     const key = this.key;
     if (!key) return { ok: false, error: this.keyError ?? "no identity" };
     const win = this.window();
-    const options = { title: clip(title, 200) || undefined, defaultPath: `cutex-identity-${key.fingerprint}.json`, filters: [{ name: "Cutex identity", extensions: ["json"] }] };
+    const defaultPath = downloadFilename(`cutex-identity-${key.fingerprint}`, { extension: "json" });
+    const options = { title: clip(title, 200) || undefined, defaultPath, filters: downloadFilters(defaultPath, "Cutex identity") };
     const picked = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
     if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
     try {

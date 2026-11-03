@@ -10,6 +10,7 @@ import { decideRoutingReviewOn } from "../lib/approvalDecision";
 import { ROUTING_REVIEW_FEATURE, checkRoutingOutcome, refreshRoutingReviews, useRoutingOperation, useRoutingReview } from "../lib/routingReviews";
 import { ArmedButton } from "./ArmedButton";
 import { runDelegationCommand } from "../lib/delegationMenu";
+import { DelegationReviewerGrant } from "./DelegationReviewerGrant";
 
 export function RoutingDecision({ record, host, dense = false, onDecision }: { record: UpgradeApprovalRead; host: string; dense?: boolean; onDecision?(decision: ApprovalDecision): void }) {
   const { t } = useI18n();
@@ -30,8 +31,8 @@ export function RoutingDecision({ record, host, dense = false, onDecision }: { r
     {record.state === "pending" && allowed && (['approve', 'deny'] as const).map(decision => record.allowedActions[decision] && <button key={decision} type="button" data-routing-decision={decision}
       disabled={busy || !!operation} title={t(decision === "approve" ? "delegation.routing.approveHint" : "delegation.routing.denyHint")}
       onClick={event => { event.stopPropagation(); void run(decision); }}
-      className={`rounded px-2 py-0.5 disabled:opacity-50 ${decision === "approve" ? "bg-accent text-white hover:opacity-90" : "border border-border text-muted hover:text-danger"}`}>{t(decision === "approve" ? "approvals.approve" : "approvals.deny")}</button>)}
-    {operation && <><span className="text-warn">{t("delegation.routing.unknown")}</span><button type="button" className="text-accent hover:underline" disabled={busy || !allowed} onClick={event => {
+      className={`rounded px-2 py-0.5 disabled:opacity-50 ${decision === "approve" ? "bg-accent text-white hover:opacity-90" : "border border-border text-muted hover:text-danger"}`}>{t(decision === "approve" ? "delegation.routing.approve" : "delegation.routing.deny")}</button>)}
+    {operation && (record.state !== "approved" || operation.kind !== "grant") && <><span className="text-warn">{t("delegation.routing.unknown")}</span><button type="button" className="text-accent hover:underline" disabled={busy || !allowed} onClick={event => {
       event.stopPropagation(); setBusy(true); void checkRoutingOutcome(host, record.projectId).catch(() => setError(t("delegation.routing.unknown"))).finally(() => setBusy(false));
     }}>{t("delegation.routing.check")}</button></>}
     {error && <span role="alert" className="text-danger">{error}</span>}
@@ -53,6 +54,7 @@ export function RoutingDelegationReview({ d, host, refValue, variant }: { d: Ask
       {(review.error || mismatched) && <button type="button" onClick={refreshRoutingReviews} className="ml-2 text-accent">{t("image.retry")}</button>}</span> : <>
       <RoutingDecision record={review.record} host={host} dense={variant === "row"} />
       {review.record.state === "approved" && <span className={variant === "row" ? "sr-only" : "text-warn"} title={t("delegation.routing.grantHint")}>{t("delegation.routing.waitingGrant")}</span>}
+      {review.record.state === "approved" && <DelegationReviewerGrant d={d} host={host} record={review.record} dense={variant === "row"} />}
     </>}
   </div>;
 }

@@ -3,6 +3,8 @@ import { CutexClient } from "@cutex-desktop/cutex-client";
 import { createBrowserOwnerApi } from "../src/main/browser/ownerApi";
 import type { BrowserImage } from "../src/main/browser/modelOutput";
 import { BrowserRelayError } from "../src/main/browser/relayTypes";
+import { createServer } from "node:net";
+import { daemonFetch } from "../src/main/daemonFetch";
 
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jvN8AAAAASUVORK5CYII=";
 const image = { type: "image", mimeType: "image/png", data: PNG };
@@ -121,6 +123,50 @@ describe("browser owner full-image validation", () => {
 });
 
 describe("browser owner bounded fixed-route transport", () => {
+  it("loads the actual turn-shot route after the TCP peer ends a backpressured JSON body", async () => {
+    const payload = JSON.stringify({ mimeType: "image/png", data: PNG, padding: "x".repeat(65536) });
+    let request = "";
+    const server = createServer(socket => socket.once("data", bytes => {
+      request = bytes.toString();
+      socket.setNoDelay(true);
+      socket.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n");
+      setTimeout(() => socket.end(payload), 30);
+    }));
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port } = server.address() as { port: number };
+      const client = new CutexClient({ baseUrl: `http://127.0.0.1:${port}`, token: "dummy-owner-token" }, {
+        fetch: async (input, init) => {
+          const response = await daemonFetch(input, init);
+          // Force the gap between headers and body consumption that makes the
+          // embedded parser's socket-end assertion reproducible.
+          await new Promise(resolve => setTimeout(resolve, 250));
+          return response;
+        },
+      });
+      const f = fixture();
+      const api = createBrowserOwnerApi({ client, check() {}, decodeImage: f.decodeImage });
+      await expect(api.turnShot("shot")).resolves.toEqual({ mimeType: "image/png", data: PNG });
+      expect(request).toContain("GET /v2/browser/turn-shots/shot HTTP/1.1");
+      expect(request.toLowerCase()).toContain("authorization: bearer dummy-owner-token");
+    } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+  });
+  it("releases body locks after success, refusal and stream failure", async () => {
+    for (const kind of ["success", "refusal", "failure"] as const) {
+      const cancel = vi.fn();
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (kind === "failure") controller.error(new Error("socket failed"));
+          else { controller.enqueue(new TextEncoder().encode(JSON.stringify({ mimeType: "image/png", data: PNG }))); controller.close(); }
+        }, cancel,
+      });
+      const response = new Response(body, { status: kind === "refusal" ? 403 : 200, headers: { "Content-Type": "application/json" } });
+      const f = fixture(); f.respond.mockReturnValue(response);
+      if (kind === "success") await expect(f.api.turnShot("shot")).resolves.toEqual({ mimeType: "image/png", data: PNG });
+      else await expect(f.api.turnShot("shot")).rejects.toBeInstanceOf(BrowserRelayError);
+      expect(response.body!.locked).toBe(false);
+    }
+  });
   it("exposes only fixed reads on the injected host, without general RPC or mutable request options", async () => {
     const f = fixture();
     expect(Object.keys(f.api).sort()).toEqual(["agents", "clearIdempotency", "profileTools", "settings", "toolItem", "turnShot", "turnShots"]);
@@ -201,6 +247,14 @@ describe("browser owner bounded fixed-route transport", () => {
     const read = f.api.toolItem("session", "turn", "item"), rejected = expect(read).rejects.toMatchObject({ code: "browser_unavailable" });
     await flush(); await vi.advanceTimersByTimeAsync(10_000); await rejected;
     expect(cancel).toHaveBeenCalledOnce(); expect(f.requests[0]!.init?.signal?.aborted).toBe(true); expect(f.fetch).toHaveBeenCalledOnce();
+  });
+  it("does not wait past the deadline for a transport's unfinished cancellation", async () => {
+    vi.useFakeTimers(); const f = fixture(), cancel = vi.fn(() => new Promise<void>(() => {}));
+    const response = new Response(new ReadableStream({ cancel }), { headers: { "Content-Type": "application/json" } });
+    f.respond.mockReturnValue(response);
+    const read = f.api.turnShot("shot"), rejected = expect(read).rejects.toMatchObject({ code: "browser_unavailable" });
+    await flush(); await vi.advanceTimersByTimeAsync(10_000); await rejected;
+    expect(cancel).toHaveBeenCalledOnce(); expect(response.body!.locked).toBe(false);
   });
   it("cancels a response arriving after timeout without reading or decoding it", async () => {
     vi.useFakeTimers(); const f = fixture(), pending = deferred<Response>(), cancel = vi.fn(); f.respond.mockReturnValue(pending.promise);

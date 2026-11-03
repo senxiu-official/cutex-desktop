@@ -4,10 +4,10 @@
 import { describe, expect, it } from "vitest";
 import type { QueueItem } from "@cutex-desktop/protocol";
 import { queueSteerErrorKind, queueSteerRawDetail, parseQueueSteerError, queueSteerErrorMessage } from "../src/shared/queueSteer";
-import { rawErrorText, steerOutcome } from "../src/renderer/src/lib/steerOutcome";
+import { rawErrorText, steerOutcome } from "../src/renderer/src/lib/legacyDelivery/steerOutcome";
 import { timelineFromThreadRead } from "../src/renderer/src/lib/timeline";
 import { emptyTimeline } from "../src/renderer/src/lib/timeline";
-import type { PendingSteer } from "../src/renderer/src/lib/pendingSteers";
+import type { PendingSteer } from "../src/renderer/src/lib/legacyDelivery/pendingSteers";
 import { queueActionNotice, queueSteerNotice } from "../src/renderer/src/lib/queueSteer";
 import { queueInsertLabel, type QueueInsertFeedback } from "../src/renderer/src/lib/queueInsertFeedback";
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";
@@ -23,9 +23,9 @@ describe("classification", () => {
     expect(queueSteerErrorKind("request_outcome_unknown", undefined)).toBe("outcomeUnknown");
     expect(queueSteerErrorKind("outcome_unknown", {})).toBe("outcomeUnknown");
     expect(queueSteerErrorKind("session_runtime_changed", { resyncRequired: true })).toBe("outcomeUnknown");
-    expect(queueSteerErrorKind("persistence_failed", { resyncRequired: false })).toBeNull();
-    // A known code keeps its own meaning.
-    expect(queueSteerErrorKind("turn_conflict", { resyncRequired: true })).toBe("turnConflict");
+    expect(queueSteerErrorKind("persistence_failed", { resyncRequired: false })).toBe("unrecognized");
+    // Explicit uncertainty takes precedence over even a known pre-send-looking code.
+    expect(queueSteerErrorKind("turn_conflict", { resyncRequired: true })).toBe("outcomeUnknown");
   });
 
   it("carries the backend's words (with the original code) for 详情, one line", () => {

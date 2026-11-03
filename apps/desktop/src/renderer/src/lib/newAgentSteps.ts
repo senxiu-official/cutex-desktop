@@ -1,4 +1,4 @@
-// New agent page sequencing (agent-config.newAgent): create → (Director) → start.
+// New agent page sequencing (agent-config.newAgent): create stopped → refresh → (Director) → start.
 // An agent's runtime reads its MCP tool list from cutex once, when it starts. A new agent that
 // becomes a project's Director must therefore be created stopped, made Director, and only then
 // started — started as a plain member it never sees the Director-only tools until a restart.
@@ -29,7 +29,7 @@ export interface NewAgentProgress {
 export const NO_PROGRESS: NewAgentProgress = { agent: null, directorAssigned: false };
 
 export interface NewAgentOps {
-  /** Creates the agent; `start` = cutex starts it right away. Returns its cutex session id. */
+  /** Creates a stopped identity. Starting is a separate, tracked owner action. */
   create(start: boolean): Promise<string>;
   /** Optional draft avatar, applied to the created session before opening it. */
   saveAppearance?(agent: string): Promise<void>;
@@ -60,7 +60,7 @@ export async function runNewAgentSteps(ops: NewAgentOps, plan: { start: boolean;
   let agent = p.agent;
   if (!agent) {
     try {
-      agent = await ops.create(start && !director);
+      agent = await ops.create(false);
     } catch (e) {
       throw new NewAgentStepError("create", e);
     }
@@ -84,7 +84,7 @@ export async function runNewAgentSteps(ops: NewAgentOps, plan: { start: boolean;
     update({ directorAssigned: true });
     await ops.refresh();
   }
-  if (director && start && !p.started) {
+  if (start && !p.started) {
     try {
       await ops.start(agent);
       update({ started: true });

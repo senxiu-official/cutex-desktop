@@ -16,6 +16,7 @@ vi.mock("@cutex-desktop/cutex-client", () => {
       queueRemove = vi.fn(async () => ({}));
       submitInput = vi.fn(async () => ({ disposition: "queued", queue: {} }));
       queueSteer = vi.fn(async () => ({ disposition: "steered", turnId: "t9", clientUserMessageId: "cm-1", queueRevision: 8 }));
+      cutex = vi.fn(async () => ({}));
       queueMove = vi.fn(async () => ({ revision: 18 }));
       constructor(public endpoint: unknown) { fixture.clients.push(this); }
       host() { return new Promise(() => {}); }
@@ -32,6 +33,7 @@ import { parseQueueSteerError, queueSteerErrorKind } from "../src/shared/queueSt
 import { QUEUE_STEER_FEATURE, queueSteerNotice, queueSteerRaw } from "../src/renderer/src/lib/queueSteer";
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";
 import { en } from "../src/renderer/src/i18n/en";
+import * as diagnostic from "../src/main/errorLog";
 
 let service: DaemonService;
 function connect() {
@@ -48,6 +50,53 @@ beforeEach(() => {
 afterEach(() => service.stop());
 
 describe("queuePromote with queue-steer", () => {
+  it("preserves a definite offline-send admission refusal across IPC without replaying in main", async () => {
+    const c=connect();
+    c.submitInput.mockRejectedValueOnce(new CutexApiError(503,"admission_busy","variable text",true,{reason:"hostBusy",retryAfterMs:1700}));
+    await expect(service.submit("s1","hi","auto",true,{clientUserMessageId:"fixed-owner-input"})).rejects.toThrow('host_action_busy:{"retryAfterMs":1700}');
+    expect(c.submitInput).toHaveBeenCalledOnce();
+    expect(c.submitInput.mock.calls[0]?.[3]).toMatchObject({startIfOffline:true,clientUserMessageId:"fixed-owner-input"});
+    const uncertain=new CutexApiError(503,"admission_busy","uncertain",true,{reason:"hostBusy",resyncRequired:true});
+    c.submitInput.mockRejectedValueOnce(uncertain);
+    await expect(service.submit("s1","hi","auto",true)).rejects.toBe(uncertain);
+  });
+  it.each(["cutex/session/delete","cutex/runtime/online","cutex/session/retire"] as const)("preserves admission_busy details across IPC for %s without mutating parameters", async method => {
+    const c=connect(),params={expectedRuntimeGeneration:7,expectedRevision:3};
+    c.cutex.mockRejectedValueOnce(new CutexApiError(503,"admission_busy","busy",true,{reason:"hostBusy",retryAfterMs:1000}));
+    await expect(service.sessionAction("s1",method,params)).rejects.toThrow('host_action_busy:{"retryAfterMs":1000}');
+    expect(c.cutex).toHaveBeenCalledOnce();expect(c.cutex).toHaveBeenCalledWith("s1",method,params);
+    const uncertain=new CutexApiError(503,"admission_busy","uncertain",true,{reason:"hostBusy",resyncRequired:true});
+    c.cutex.mockRejectedValueOnce(uncertain);
+    await expect(service.sessionAction("s1",method,params)).rejects.toBe(uncertain);
+  });
+  it.each(["constructor", "toString", "__proto__"])("flags inherited-looking error code %s instead of treating it as a mapped kind", code => {
+    expect(queueSteerErrorKind(code, {})).toBe("unrecognized");
+  });
+  it("keeps the action pending during host contention and logs the unmapped reason code", async () => {
+    vi.useFakeTimers();
+    const log = vi.spyOn(diagnostic, "logError").mockImplementation(() => {});
+    try {
+      const c = connect();
+      c.queueSteer.mockRejectedValueOnce(refusal("steer_unavailable", {reason:"admissionBusy"}));
+      let done = false;
+      const operation = service.queuePromote("s1","q1",2,true).then(r => {done=true;return r;});
+      await vi.advanceTimersByTimeAsync(299);expect(done).toBe(false);
+      expect(c.queueList).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledWith(expect.objectContaining({code:"steer_unavailable",reason:"admissionBusy",attempt:2}));
+      await vi.advanceTimersByTimeAsync(1);await expect(operation).resolves.toMatchObject({result:{disposition:"steered"}});
+      expect(c.queueSteer).toHaveBeenCalledTimes(2);
+    } finally {log.mockRestore();vi.useRealTimers();}
+  });
+  it("reports exhausted contention as hostBusy rather than a runtime refusal or unknown send", async () => {
+    vi.useFakeTimers();
+    try {
+      const c=connect();c.queueSteer.mockRejectedValue(refusal("steer_unavailable",{reason:"admissionBusy"}));
+      const result=expect(service.queuePromote("s1","q1",2,true)).rejects.toThrow("queue_steer_refused:hostBusy");
+      await vi.advanceTimersByTimeAsync(4100);await result;
+      expect(c.queueSteer).toHaveBeenCalledTimes(5);expect(c.queueList).not.toHaveBeenCalled();
+      expect(queueSteerNotice("queue_steer_refused:hostBusy",zh)).toContain("主机正忙");
+    } finally {vi.useRealTimers();}
+  });
   it("first click retries only the unsent capability gate with the same queue identity", async () => {
     const c = connect();
     c.queueSteer.mockRejectedValueOnce(refusal("steer_unavailable", { reason: "runtimeNoSteer" }));
@@ -111,7 +160,8 @@ describe("queuePromote with queue-steer", () => {
     expect(c.queueSteer).toHaveBeenCalledWith("s1", "q1", 2, { ifIdle: "start" });
     expect(c.queueRemove).not.toHaveBeenCalled();
     expect(c.submitInput).not.toHaveBeenCalled();
-    expect(r).toEqual({ result: { disposition: "steered", turnId: "t9" }, clientUserMessageId: "cm-1", input: [{ type: "text", text: "hi", text_elements: [] }] });
+    expect(r).toEqual({ result: { disposition: "steered", turnId: "t9" }, clientUserMessageId: "cm-1" });
+    expect(c.queueList).not.toHaveBeenCalled();
     c.queueSteer.mockResolvedValueOnce({ disposition: "started", turnId: "t10", clientUserMessageId: "cm-1", queueRevision: 8 });
     expect((await service.queuePromote("s1", "q1", 2, true)).result).toEqual({ disposition: "started", turnId: "t10" });
   });
@@ -144,8 +194,9 @@ describe("queuePromote with queue-steer", () => {
     }
     const other = refusal("persistence_failed");
     c.queueSteer.mockRejectedValueOnce(other);
-    await expect(service.queuePromote("s1", "q1", 2, true)).rejects.toBe(other);
-    // Changed before the steer: listed under another revision.
+    await expect(service.queuePromote("s1", "q1", 2, true)).rejects.toThrow("queue_steer_refused:unrecognized persistence_failed: kept");
+    // The atomic route validates the revision; no preliminary list decides it.
+    c.queueSteer.mockRejectedValueOnce(refusal("revision_conflict"));
     await expect(service.queuePromote("s1", "q1", 1, true)).rejects.toThrow("queue_steer_refused:changed");
     expect(c.queueRemove).not.toHaveBeenCalled();
   });
@@ -167,13 +218,23 @@ describe("queueMove (admission-order)", () => {
 });
 
 describe("queue-steer notices", () => {
+  it.each([
+    ["joinChanged", "joinChanged"], ["agentPaused", "agentPaused"],
+    ["admissionBusy", "hostBusy"], ["delegationTurn", "delegationTurn"],
+    ["runtimeNoSteer", "runtimeNoSteer"], ["runtimeRefused", "runtimeRefused"],
+    ["noActiveTurn", "noActiveTurn"], ["imagePathRequired", "imagePathRequired"],
+    ["imageUnavailable", "imageUnavailable"], ["turnFinishing", "turnFinishing"],
+  ])("050 §5 steer refusal %s has its own mapping (%s)", (reason, kind) => {
+    expect(queueSteerErrorKind("steer_unavailable", { reason })).toBe(kind);
+    expect(queueSteerNotice(`queue_steer_refused:${kind}`, zh)).toBeTruthy();
+  });
   it("classifies cutex codes; an unknown steer reason still counts as kept", () => {
     expect(QUEUE_STEER_FEATURE).toBe("queue-steer");
     expect(queueSteerErrorKind("steer_unavailable", { reason: "noActiveTurn" })).toBe("noActiveTurn");
-    expect(queueSteerErrorKind("steer_unavailable", { reason: "somethingNew" })).toBe("runtimeRefused");
+    expect(queueSteerErrorKind("steer_unavailable", { reason: "somethingNew" })).toBe("unrecognized");
     expect(queueSteerErrorKind("session_offline", {})).toBe("sessionOffline");
     expect(queueSteerErrorKind("queue_input_already_submitted", {})).toBe("changed");
-    expect(queueSteerErrorKind("persistence_failed", {})).toBeNull();
+    expect(queueSteerErrorKind("persistence_failed", {})).toBe("unrecognized");
   });
 
   it("reads the message after Electron's IPC wrapping and maps it to readable text", () => {

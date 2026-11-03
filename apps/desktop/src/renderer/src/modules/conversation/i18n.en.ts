@@ -3,6 +3,28 @@
 import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
+  "conversation.tools.memberRuntime": "Change member runtime",
+  "conversation.tools.memberRuntime.online": "Request member online",
+  "conversation.tools.memberRuntime.offline": "Request member offline",
+  "conversation.tools.memberRuntime.restart": "Request member restart",
+  "conversation.tools.taskStop": "Stop task",
+  "conversation.tools.artifactRead": "Read artifact",
+  "conversation.tools.actionStatus": "Check call status",
+  "conversation.tools.actionStatus.running": "Call processing",
+  "conversation.tools.actionStatus.completed": "Tool call completed",
+  "conversation.tools.actionStatus.failed": "Tool call failed",
+  "conversation.tools.actionStatus.awaitingApproval": "Call awaiting approval",
+  "conversation.tools.actionStatus.unknown": "Outcome unknown",
+  "conversation.tools.actionStatus.notFound": "Call record not found",
+  "conversation.tools.actionStatus.hint": "This is the tool call status, not completion of delegated work. An unknown outcome or missing record does not prove that the call did not execute.",
+
+  "conversation.tools.rawResult": "Full result",
+  "conversation.tools.read": "Read file",
+  "conversation.tools.search": "Search files",
+  "conversation.tools.tools": "Find tools",
+  "conversation.tools.agents": "List {{agent}}s",
+  "conversation.tools.agentCount": "{n} {{agent}}s returned",
+
   "conversation.title": "Conversation",
   "conversation.description": "Timeline and composer",
   // ---- settings (moved from the base catalog, 2026-10-09) ----

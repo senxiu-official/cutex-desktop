@@ -26,6 +26,24 @@ const running = () =>
 const command = (status: string) => ({ type: "commandExecution", id: "c1", command: "sleep 100", status });
 
 describe("terminalsRefreshKey", () => {
+  it("refreshes on a Claude shell lifecycle notice after the turn ends, without treating subagent notices as shells", () => {
+    const timeline = running();
+    const before = terminalsRefreshKey(timeline);
+    applyEvent(timeline, native("claude/task/updated", { threadId: "t", task: { taskType: "local_bash", taskId: "bash-1", status: "running" } }));
+    expect(terminalsRefreshKey(timeline)).not.toBe(before);
+    const shell = terminalsRefreshKey(timeline);
+    applyEvent(timeline, native("claude/task/updated", { threadId: "t", task: { taskType: "local_agent", taskId: "agent-1", status: "running" } }));
+    expect(terminalsRefreshKey(timeline)).toBe(shell);
+  });
+
+  it("keeps the adapter's command start timestamp when the command completes in the background", () => {
+    const timeline = running();
+    applyEvent(timeline, native("item/started", { threadId: "t", turnId: "u1", startedAtMs: 1793674623117, item: command("inProgress") }));
+    applyEvent(timeline, native("item/completed", { threadId: "t", turnId: "u1", item: command("completed") }));
+    const entry = timeline.entries.get("c1");
+    expect(entry?.kind === "tool" && entry.item.startedAtMs).toBe(1793674623117);
+  });
+
   it("ignores streamed text but changes when a command starts or completes", () => {
     const timeline = running();
     const idle = terminalsRefreshKey(timeline);

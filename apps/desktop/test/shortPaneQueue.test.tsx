@@ -31,7 +31,7 @@ vi.mock("../src/renderer/src/store", () => ({
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { QueuePanel } = await import("../src/renderer/src/components/QueuePanel");
-const { turnGroups } = await import("../src/renderer/src/lib/admissionOrder");
+const { turnGroups } = await import("../src/renderer/src/lib/legacyDelivery/admissionOrder");
 const { createShortPaneStore, ShortPaneContext } = await import("../src/renderer/src/lib/shortPane");
 const { resetQueueViewCache, setQueueView } = await import("../src/renderer/src/lib/queueView");
 

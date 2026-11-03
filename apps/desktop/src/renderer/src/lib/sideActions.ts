@@ -120,7 +120,8 @@ export function switchShelfPage(n: number, shelfId?: string): boolean {
     return false;
   }
   const shelf = findShelf(layout, shelfId) ?? focusedShelf(layout);
-  const page = shelf ? shelfLanePages(layout, shelf.id, ctx)[n - 1] : undefined;
+  const pages = shelf ? shelfLanePages(layout, shelf.id, ctx) : [];
+  const page = n === 9 ? pages.at(-1) : pages[n - 1];
   if (!page) return false;
   if (mode?.card) setMode({ kind: mode.kind, card: null });
   updateLayout((l) => switchPage(l, page.id));

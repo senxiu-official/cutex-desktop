@@ -12,7 +12,7 @@ import { ARMED_FRAME } from "../lib/armedConfirm";
 import { contextMenu, openMenuFrom } from "../lib/contextMenu";
 import { attemptSeconds, delegateCallOf, delegationActions, delegationStatus, formatSpan, peerPartyText, requesterSession, stopPending, waitSeconds, type DelegationStatus } from "../lib/delegations";
 import { delegationMenu, runDelegationCommand } from "../lib/delegationMenu";
-import { delegationApi, hasDelegationViews, loadDelegationDetail, useDelegations } from "../lib/delegationStore";
+import { delegationApi, hasDelegationViews, loadCardDelegation, loadDelegationDetail, useDelegations } from "../lib/delegationStore";
 import { hostKey } from "../lib/hostKeys";
 import { useAgentNames, useAgentProfile, useCardDelegation, useDelegationContext, useOwnerSteered, useResolvedAskId } from "../lib/delegationsView";
 import { OwnerSteeredBadge } from "./DelegationComposer";
@@ -22,7 +22,9 @@ import type { RawItem } from "../lib/timeline";
 import { useNow } from "../lib/time";
 import { featuresOf, useApp } from "../store";
 import { useConvHost } from "../lib/conversationScope";
-import { continueClock, useQuotaContinue } from "../lib/quotaContinue";
+import { continueClock } from "../lib/quotaContinue";
+import { gateClosed, gateClosedCause, useDelegationQuota } from "../lib/delegationHoldText";
+import { DelegationQuotaOutcome } from "./DelegationQuotaOutcome";
 import type { AskQuestion, AskSummary } from "../../../shared/ipc";
 import { DelegationHops, DelegationStatusMark, DelegationTag } from "./DelegationParts";
 import { PeerParty } from "./PeerParty";
@@ -162,6 +164,8 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
     <div className={`message-body ${layout === "card" ? "mt-1 ml-5 max-w-[85%]" : ""} rounded-xl border px-3 py-2 text-xs transition-colors ${armed ? ARMED_FRAME : "border-transparent bg-surface"}`}>
       {/* The side detail (opened from the 需要你 strip, a queue row, a list): the owner review on top. The card has it under its line. */}
       {layout === "side" && <DelegationReviewActions d={d} host={host} variant="side" />}
+      <GateClosedHint d={d} />
+      <DelegationQuotaOutcome d={d} host={host} />
       {brief && (
         <Section title={t("delegation.brief")}>
           <div className={`${layout === "card" ? "max-h-48 overflow-y-auto" : ""} text-ui/[inherit]`}>
@@ -264,7 +268,7 @@ export function DelegationCard({ item, sessionId }: { item: RawItem; sessionId: 
   const targetName = d.targetName ?? (d.target ? nameOf(d.target) : (call.targetName ?? ""));
   const held = !d.closed && !stopPending(d) && !!d.hold && (d.execution === "queued" || d.execution === "admitted");
   // Held: the word on the right says 排队中 / 受阻; the second line says what for.
-  const shown: DelegationStatus = held && status.key !== "question" ? { ...status, key: status.dangerText ? "blocked" : "queued", n: undefined } : status;
+  const shown: DelegationStatus = held && status.key !== "question" && !gateClosed(d) ? { ...status, key: status.dangerText ? "blocked" : "queued", n: undefined } : status;
   const time = statusTime(d, status, now);
   const tools = running && typeof d.attempt?.activity?.toolCalls === "number" ? t("delegation.tools", { n: d.attempt.activity.toolCalls }) : null;
   const line = running ? (activity ?? d.attempt?.activity?.line ?? null) : null;
@@ -283,7 +287,7 @@ export function DelegationCard({ item, sessionId }: { item: RawItem; sessionId: 
             delegation started and the history above jumped (owner 2026-10-24). The title stays on hover. */}
         {held && status.key !== "question" ? (
           <span data-delegation-hold="" className={`min-w-0 truncate ${status.dangerText ? "text-danger" : "text-subtle"}`} title={title}>
-            {status.key === "quota" && d.target ? <QuotaHoldLine host={host} target={d.target} waited={waited} /> : <DelegationHoldLine status={status} name={targetName} waited={waited} />}
+            {(status.key === "quota" || gateClosedCause(d) === "quota") && d.target ? <QuotaHoldLine host={host} d={d} waited={waited} /> : <DelegationHoldLine status={status} name={targetName} waited={waited} />}
           </span>
         ) : line ? (
           <span className="min-w-0 truncate text-subtle" title={title}>
@@ -297,6 +301,7 @@ export function DelegationCard({ item, sessionId }: { item: RawItem; sessionId: 
         )}
         <span className="ml-auto flex min-w-0 max-w-[45%] items-center gap-1.5 pl-2">
           <DelegationHops hops={d.hops} />
+          {!live && <span className="truncate text-subtle">{t("delegation.snapshot")}</span>}
           {ownerSteered && <OwnerSteeredBadge />}
           {live || d.revision >= 0 || status.key !== "queued" ? <DelegationStatusMark status={shown} name={targetName} trailing={time} error={d.attempt?.lastError ?? d.remote?.lastError} /> : null}
           {open ? <ChevronDown size={13} className="shrink-0" /> : <ChevronRight size={13} className="shrink-0" />}
@@ -304,22 +309,38 @@ export function DelegationCard({ item, sessionId }: { item: RawItem; sessionId: 
       </button>
       {/* Delegating to a wider target waits for the owner first (cutex pendingReview): decide it here. */}
       <DelegationReviewActions d={d} host={host} variant="card" />
+      {!open && <div className="ml-5"><GateClosedHint d={d} /><DelegationQuotaOutcome d={d} host={host} /></div>}
+      {open && !live && <button className="ml-5 text-xs text-muted hover:text-foreground" onClick={() => {
+        void loadCardDelegation(host, askId, sessionId, true);
+      }}>{t("chat.retry")}</button>}
       {open && <DelegationDetailBody d={d} brief={call.brief} here={sessionId} host={host} />}
     </div>
   );
 }
 
 /** blocked(quota): 额度用完 · 约 HH:MM 自动继续 — when the target's quota hold lifts and cutex redelivers it. */
-function QuotaHoldLine({ host, target, waited }: { host: string; target: string; waited: string | null }) {
+function QuotaHoldLine({ host, d, waited }: { host: string; d: AskSummary; waited: string | null }) {
   const { t, locale } = useI18n();
   const now = useNow(false);
-  const at = useQuotaContinue(host, target, true)?.pending?.at;
+  const at = useDelegationQuota(host, d)?.pending?.at;
   const clock = at ? continueClock(at, now, locale) : "";
   return (
     <>
       {clock ? t("delegation.status.quotaAt", { at: clock }) : t("delegation.status.quota")}
       {waited && <span className="text-subtle"> · {t("delegation.waited", { t: waited })}</span>}
     </>
+  );
+}
+
+function GateClosedHint({ d }: { d: AskSummary }) {
+  const { t } = useI18n();
+  if (!gateClosed(d) || stopPending(d)) return null;
+  const cause = gateClosedCause(d);
+  return (
+    <div className="mt-1 text-caption/[inherit] text-subtle" data-delegation-gate-hint="">
+      {t("delegation.gateClosedHint" as Parameters<typeof t>[0])}
+      {cause ? <> · {t((cause === "quota" ? "delegation.status.quota" : "delegation.gateClosedServerError") as Parameters<typeof t>[0])}</> : null}
+    </div>
   );
 }
 

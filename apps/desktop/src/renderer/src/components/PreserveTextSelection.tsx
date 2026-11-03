@@ -1,4 +1,4 @@
-import { Component, type ReactNode } from "react";
+import { Component, type CSSProperties, type ReactNode } from "react";
 import { captureTextSelection, restoreTextSelection, type TextSelectionSnapshot } from "../lib/textSelection";
 
 interface Props {
@@ -7,6 +7,7 @@ interface Props {
   revision: unknown;
   /** A span for inline prose, or the default div around a whole Markdown message. */
   as?: "div" | "span";
+  style?: CSSProperties;
 }
 
 // Reading the selection (getSelection / rangeCount / isCollapsed) makes the browser bring style up to
@@ -49,6 +50,6 @@ export class PreserveTextSelection extends Component<Props> {
 
   render() {
     const Tag = this.props.as ?? "div";
-    return <Tag ref={this.setRoot} style={{ display: "contents" }}>{this.props.children}</Tag>;
+    return <Tag ref={this.setRoot} style={{ ...this.props.style, display: "contents" }}>{this.props.children}</Tag>;
   }
 }

@@ -29,11 +29,14 @@ export function SystemAvatar({ kind, size = 28 }: { kind: SystemSender; size?: n
   );
 }
 
-/** A message sender's avatar: the system logo for cutex services (lib/systemSenders), else the agent's. */
-export function SenderAvatar({ id, sourceKind, name, avatar, size = 28 }: { id: string | null | undefined; sourceKind?: string | null; name: string; avatar?: SessionAvatar | null; size?: number }) {
+/**
+ * A message sender's avatar: the system logo for cutex services (lib/systemSenders), else the agent's. `agent`: the
+ * sender is an agent even without an id (bus messages), so it draws the agent letter tile, not a person's round letter.
+ */
+export function SenderAvatar({ id, sourceKind, name, avatar, size = 28, agent = false }: { id: string | null | undefined; sourceKind?: string | null; name: string; avatar?: SessionAvatar | null; size?: number; agent?: boolean }) {
   const system = systemSender(id, sourceKind);
   // The sender's own avatar when the caller has none (timeline messages carry only the id).
   const conv = useConvScope();
   const own = useApp((s) => (avatar === undefined && id && !system ? (rowsOf(s.sidebar, convSidebarOf(conv, s)).find((r) => r.cutexSessionId === id)?.avatar ?? null) : null));
-  return system ? <SystemAvatar kind={system} size={size} /> : <Avatar name={name} avatar={avatar ?? own} seed={id} size={size} />;
+  return system ? <SystemAvatar kind={system} size={size} /> : <Avatar name={name} avatar={avatar ?? own} seed={id} agent={agent ? {} : null} size={size} />;
 }

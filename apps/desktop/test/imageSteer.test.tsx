@@ -33,9 +33,9 @@ vi.mock("../src/renderer/src/i18n", async (importOriginal) => {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import { draftSteerPlan, hasImageInput, IMAGE_INPUT_STEERING_FEATURE, imageBusyPatch, imageDeliveryOf, imageSteeringOf, imageSteerMode, readImageBusyBehavior, refusesImageSteer } from "../src/renderer/src/lib/imageSteer";
-import { steerDelivery } from "../src/renderer/src/lib/pendingSteers";
+import { steerDelivery } from "../src/renderer/src/lib/legacyDelivery/pendingSteers";
 import { queueInsertLabel, type QueueInsertFeedback } from "../src/renderer/src/lib/queueInsertFeedback";
-import { insertRefusal } from "../src/renderer/src/lib/admissionOrder";
+import { insertRefusal } from "../src/renderer/src/lib/legacyDelivery/admissionOrder";
 import { SteerDeliveryNote } from "../src/renderer/src/components/AdmissionRows";
 import { ImageBusyRow, ImageBusySection } from "../src/renderer/src/components/settings/AppSettings";
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";

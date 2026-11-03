@@ -33,6 +33,7 @@ import { useBindingLabel, withKey } from "../lib/useKeybindings";
 import { appSchemeNow } from "../lib/theme";
 import { useOwnerWindow } from "../lib/ownerContext";
 import { useSidebarCollapsed, useSidebarPeek } from "../lib/windowSidebar";
+import { usePortrait } from "../lib/portrait";
 import { createPeekRest } from "../lib/sidebarPeek";
 import { useWindowKey } from "../lib/windowScope";
 import { IdentityChip } from "./IdentityMenu";
@@ -120,6 +121,10 @@ export function TitleBar() {
   // Collapsed = fully hidden with the left-edge pop-out (Ctrl/⌘+B; this window's own choice,
   // lib/windowSidebar useSidebarCollapsed). Hovering the logo pops it out without pinning it.
   const sidebarOpen = !useSidebarCollapsed();
+  // Portrait (lib/portrait): the sidebar is never in the flow; held shown over the stack it is what the logo toggles —
+  // its tooltip, icon and aria-expanded say so (the bar keeps its collapsed layout: nothing is docked).
+  const held = usePortrait((s) => s.orientation === "portrait" && s.prefs.sidebarShown);
+  const shown = sidebarOpen || held;
   const peek = useSidebarPeek.of(useWindowKey());
   const logoRest = useMemo(() => createPeekRest(() => peek.setState({ popped: true })), [peek]);
   // A full-window page (设置) brings its own nav (Aside): no sidebar toggle / host row; a close button.
@@ -155,18 +160,18 @@ export function TitleBar() {
             {/* The logo is the sidebar toggle; hover / keyboard focus shows the panel icon instead. */}
             <button
               onClick={toggleSidebarRail}
-              onMouseEnter={() => sidebarOpen || logoRest.enter()}
+              onMouseEnter={() => shown || logoRest.enter()}
               onMouseLeave={() => logoRest.leave()}
-              onFocus={() => sidebarOpen || logoRest.enter()}
+              onFocus={() => shown || logoRest.enter()}
               onBlur={() => logoRest.leave()}
-              title={withKey(t(sidebarOpen ? "titlebar.hideSidebar" : "titlebar.showSidebar"), sidebarKey)}
-              aria-label={t(sidebarOpen ? "titlebar.hideSidebar" : "titlebar.showSidebar")}
-              aria-expanded={sidebarOpen}
+              title={withKey(t(shown ? "titlebar.hideSidebar" : "titlebar.showSidebar"), sidebarKey)}
+              aria-label={t(shown ? "titlebar.hideSidebar" : "titlebar.showSidebar")}
+              aria-expanded={shown}
               className={`${ICON_BTN} group/logo relative shrink-0`}
             >
               <img src={cutexLogo} alt="" draggable={false} className="h-4 w-4 group-hover/logo:invisible group-focus-visible/logo:invisible" />
               <span className="invisible absolute inset-0 flex items-center justify-center group-hover/logo:visible group-focus-visible/logo:visible">
-                {sidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
+                {shown ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
               </span>
             </button>
             <HostSwitcher />

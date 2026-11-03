@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { busyHoldStep, busyShown, type BusyHold } from "../src/renderer/src/lib/busyHold";
+import { busyHoldStep, busyShown, type BusyHold } from "../src/renderer/src/lib/legacyDelivery/busyHold";
 
 const run = (steps: [busy: boolean, followUp: boolean][]): boolean[] => {
   let state: BusyHold = { busy: steps[0]![0], holding: false };

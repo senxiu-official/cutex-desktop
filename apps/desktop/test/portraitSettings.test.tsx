@@ -58,15 +58,25 @@ describe("lib/portraitThemes (the guide's API)", () => {
     const gptFirst = ["kimi", "gpt", "claude"].flatMap((model) => [1, 2].map((v) => ({ theme: "t", themeName: "T", model, avatarPath: `avatars/t/${model}-v${v}.webp` })));
     const pack = (extra: object) => packOf("q", parsePackManifest({ schemaVersion: 1, name: "q", entries: gptFirst, ...extra })!, "bundled", (path) => `/q/${path}`);
     expect(themeCover(pack({ themes: [{ id: "t", cover: "gpt-v2" }] }).themes[0]!).stem).toBe("gpt-v2");
-    // No cover: claude before openai / kimi whatever the manifest order, so cards across themes show the same character.
+    // No cover: claude before openai / kimi whatever the manifest order (a stable pick for packs without one).
     expect(themeCover(pack({}).themes[0]!).stem).toBe("claude-v1");
     const other = packOf("o", parsePackManifest({ schemaVersion: 1, name: "o", entries: [{ theme: "t", model: "mystery", avatarPath: "avatars/t/mystery-v1.webp" }] })!, "bundled", (path) => `/o/${path}`);
     expect(themeCover(other.themes[0]!).stem).toBe("mystery-v1");
   });
 
-  it("every shipped theme shows the same character (its cover), so the 20 cards compare", () => {
-    const covers = portraitThemesOf(BUNDLED_PORTRAIT_PACKS, "zh-CN").map((t) => t.cover.stem);
-    expect(covers.length).toBe(20);
-    expect(new Set(covers)).toEqual(new Set(["gpt/01"]));
+  it("shipped themes rotate their cover through the families in theme order (owner 2026-10-29), each an existing picture", () => {
+    const pack = BUNDLED_PORTRAIT_PACKS.find((p) => p.id === "kit-20261029")!;
+    const themes = portraitThemesOf(BUNDLED_PORTRAIT_PACKS, "zh-CN").filter((t) => t.pack === pack.id);
+    expect(themes.length).toBe(20);
+    // The manifest's own cover resolves (not the fallback) and is a picture of that theme.
+    for (const t of pack.themes) {
+      expect(t.cover).toBeTruthy();
+      expect(t.pictures.some((p) => p.stem === t.cover)).toBe(true);
+      expect(themeCover(t).stem).toBe(t.cover);
+    }
+    const families = themes.map((t) => t.cover.family);
+    expect(families.slice(0, 6)).toEqual(["claude", "openai", "gemini", "deepseek", "kimi", "glm"]);
+    families.forEach((f, i) => expect(f).toBe(families[i % 6]));
+    expect(new Set(themes.map((t) => t.cover.key)).size).toBe(20);
   });
 });

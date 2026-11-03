@@ -29,17 +29,19 @@ export interface ScrollSample {
  * that scroll event is handled before the ResizeObserver snapped to the grown bottom (the new turn's
  * header and live line), it looked exactly like the owner scrolling up: the reply then streamed
  * below the view (owner, 2026-10-23).
+ * `upward`: that input could move UP. A downward wheel/key at the bottom cannot explain browser
+ * anchoring moving the position upward when the oldest displayed turn is evicted (2026-10-30).
  */
-export function scrollFollow(stick: boolean, prev: { top: number; clientHeight: number } | null, now: ScrollSample, user = true): { stick: boolean; snap: boolean } {
+export function scrollFollow(stick: boolean, prev: { top: number; clientHeight: number } | null, now: ScrollSample, user = true, upward = user): { stick: boolean; snap: boolean } {
   const gap = now.scrollHeight - now.top - now.clientHeight;
   // The first small upward wheel step must release even inside the bottom threshold.
   // Otherwise streamed text / late row layout snaps it back before the next step.
   const moved = prev ? now.top - prev.top : 0;
-  if (user && prev && now.clientHeight === prev.clientHeight && moved < -1) return { stick: false, snap: false };
+  if (upward && prev && now.clientHeight === prev.clientHeight && moved < -1) return { stick: false, snap: false };
   // Once released, layout/clamping (or another event at the same position) cannot
   // reattach it. The owner must scroll down into the bottom zone.
   if (gap < STICK_THRESHOLD) return { stick: stick || (user && (!prev || moved > 1)), snap: false };
-  if (stick && (!user || !prev || now.clientHeight !== prev.clientHeight || now.top >= prev.top - 1)) return { stick: true, snap: true };
+  if (stick && (!upward || !prev || now.clientHeight !== prev.clientHeight || now.top >= prev.top - 1)) return { stick: true, snap: true };
   return { stick: false, snap: false };
 }
 
@@ -50,6 +52,8 @@ export interface ScrollIntentWatch {
   /** Whether a scroll of the scroller now may be the owner's own: within INTENT_WINDOW ms of a wheel /
    *  touch over it, a scroll key aimed at it, a press in it; or while a press in it / a thumb drag lasts. */
   user(): boolean;
+  /** Recent input could move UP. Downward wheel/key input cannot explain an upward layout adjustment. */
+  upward(): boolean;
   /** Forget the input so far (the owner sent: back to the bottom, whatever the wheel did before). */
   reset(): void;
   dispose(): void;
@@ -75,6 +79,7 @@ export function watchScrollIntent(scroller: HTMLElement, clock: () => number = (
   const win = doc.defaultView;
   let at = Number.NEGATIVE_INFINITY;
   let held = false;
+  let canMoveUp = true;
   const over = (t: EventTarget | null) => {
     if (!isNode(t)) return false;
     if (scroller.contains(t)) return true;
@@ -84,6 +89,9 @@ export function watchScrollIntent(scroller: HTMLElement, clock: () => number = (
   const onWheel = (e: Event) => {
     if (!over(e.target)) return;
     at = clock();
+    // Browser anchoring can move scrollTop up as an old turn leaves the window,
+    // even while a downward wheel at the bottom did not move the viewport at all.
+    canMoveUp = e.type !== "wheel" || (e as WheelEvent).deltaY < 0;
     // A wheel cancels a native smooth jump with scrollend before its scroll event.
     // Release first so the jump's completion callback cannot snap back down.
     const wheel = e as WheelEvent;
@@ -93,11 +101,15 @@ export function watchScrollIntent(scroller: HTMLElement, clock: () => number = (
     if (!scrollKey(e.key) || editable(e.target)) return;
     // The key scrolls the focused scroller, or the page's last clicked one when nothing has the focus.
     const focus = doc.activeElement;
-    if (!focus || focus === doc.body || focus === doc.documentElement || scroller.contains(focus)) at = clock();
+    if (!focus || focus === doc.body || focus === doc.documentElement || scroller.contains(focus)) {
+      at = clock();
+      canMoveUp = e.key === "ArrowUp" || e.key === "PageUp" || e.key === "Home" || (e.key === " " && e.shiftKey);
+    }
   };
   const onDown = (e: Event) => {
     if (!over(e.target)) return;
     held = true;
+    canMoveUp = true; // drag / selection autoscroll: preserve the existing movement-based rule
     at = clock();
   };
   const onUp = () => {
@@ -116,11 +128,15 @@ export function watchScrollIntent(scroller: HTMLElement, clock: () => number = (
     ["pointercancel", onUp],
   ] as const;
   for (const [type, fn] of listen) win?.addEventListener(type, fn as EventListener, capture);
+  const user = () => {
+    if (held || doc.querySelector(`${OVERLAY_LAYER} [data-dragging]`)) return true;
+    const now = clock();
+    return now >= at && now - at <= INTENT_WINDOW;
+  };
   return {
-    user() {
-      if (held || doc.querySelector(`${OVERLAY_LAYER} [data-dragging]`)) return true;
-      const now = clock();
-      return now >= at && now - at <= INTENT_WINDOW;
+    user,
+    upward() {
+      return user() && canMoveUp;
     },
     reset() {
       at = Number.NEGATIVE_INFINITY;

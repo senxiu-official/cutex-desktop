@@ -1,0 +1,88 @@
+{
+  "_source": "cutex fix/r270-component-contract ae9cced9, Linux contract HTTP smoke (linux-evidence/ae9cced9-http-evidence.json in .claude/reports/r270-component-contract-evidence-ae9cced9.zip): bodies with installation paths anonymized, test-only signatures",
+  "final": {
+    "managed": true,
+    "installFrom": "source-only",
+    "backendInstallRecord": false
+  },
+  "emptyInstallRefusal": {
+    "httpStatus": 409,
+    "errorCode": "component_source_only",
+    "details": {
+      "name": "dsh-runtime",
+      "offeredVersion": "dsh-r3",
+      "suggestedRequest": {
+        "version": "dsh-r3"
+      }
+    }
+  },
+  "dshNode": {
+    "minimum": "24.9.0",
+    "path": "/opt/component-fixtures/r270/node-v24.21.0-linux-x64/bin/node",
+    "range": ">=24.9.0 <25",
+    "ready": true,
+    "version": "v24.21.0"
+  },
+  "dshExternal": {
+    "checkedAt": "2026-10-29T15:49:43Z",
+    "issues": [],
+    "node": "/opt/component-fixtures/r270/node-v24.21.0-linux-x64/bin/node",
+    "nodeRange": ">=24.9.0 <25",
+    "nodeRecommended": "24.21.0",
+    "nodeVersion": "v24.21.0",
+    "packages": [
+      "@deepseek-ai/dsh@0.2.1-rc.3",
+      "@deepseek-ai/dsh-session-format-catalog@0.2.1-rc.3",
+      "ws@8.22.0"
+    ],
+    "resolved": {
+      "externalRoot": "/opt/component-fixtures/r270/dsh",
+      "node": "/opt/component-fixtures/r270/node-v24.21.0-linux-x64/bin/node",
+      "rg": null
+    },
+    "rg": null,
+    "root": "/opt/component-fixtures/r270/dsh",
+    "storedConfig": {
+      "externalRoot": null,
+      "node": null,
+      "rg": null
+    },
+    "version": "dsh-r3"
+  },
+  "missingSdkMetadata": {
+    "checkedAt": "2026-10-29T15:49:41Z",
+    "issues": [
+      {
+        "actual": "No such file or directory (os error 2)",
+        "code": "external_root_invalid",
+        "expected": "valid package.json for @deepseek-ai/dsh@0.2.1-rc.3",
+        "path": "/opt/component-fixtures/r270/http-ae9cced9/missing-sdk-metadata-dsh/node_modules/@deepseek-ai/dsh/package.json",
+        "steps": [
+          "Repair the missing, unreadable or invalid package metadata in this npm prefix, then check again."
+        ]
+      }
+    ],
+    "node": "/opt/component-fixtures/r270/node-v24.21.0-linux-x64/bin/node",
+    "nodeRange": ">=24.9.0 <25",
+    "nodeRecommended": "24.21.0",
+    "nodeVersion": "v24.21.0",
+    "packages": [
+      "@deepseek-ai/dsh@0.2.1-rc.3",
+      "@deepseek-ai/dsh-session-format-catalog@0.2.1-rc.3",
+      "ws@8.22.0"
+    ],
+    "resolved": {
+      "externalRoot": "/opt/component-fixtures/r270/http-ae9cced9/missing-sdk-metadata-dsh",
+      "node": "/opt/component-fixtures/r270/node-v24.21.0-linux-x64/bin/node",
+      "rg": null
+    },
+    "rg": null,
+    "root": "/opt/component-fixtures/r270/http-ae9cced9/missing-sdk-metadata-dsh",
+    "storedConfig": {
+      "externalRoot": "/opt/component-fixtures/r270/http-ae9cced9/missing-sdk-metadata-dsh",
+      "node": "/opt/component-fixtures/r270/node-v24.21.0-linux-x64/bin/../bin/node",
+      "rg": null
+    },
+    "version": "dsh-r3"
+  }
+}

@@ -1,4 +1,9 @@
 export const zhCN = {
+  "agent-bus.settlement.ineligible": "服务端当前不允许关闭此事项；可稍后重新读取。",
+  "agent-bus.settlement.ineligibleStatus": "服务器暂不允许关闭",
+  "agent-bus.settlement.readFailed": "状态暂不可用",
+  "agent-bus.settlement.unassignedTurn": "未分配入口回合",
+  "agent-bus.settlement.laterCompletedTurn": "同一线程后续已完成回合",
   "agent-bus.settlement.unknown": "结果不确定",
   "agent-bus.settlement.closed": "已关闭跟进",
   "agent-bus.settlement.close": "关闭卡住消息",
@@ -31,7 +36,7 @@ export const zhCN = {
   "agent-bus.delivery": "消息投递",
   "agent-bus.deliveryHint": "{{agent}}之间互发的消息",
   "agent-bus.advanced": "高级",
-  "agent-bus.advancedSummary": "消息总线的端口和令牌、卡住的消息",
+  "agent-bus.advancedSummary": "消息总线的端口和令牌、待清理（停滞的委托、卡住的消息、已隐藏的回执）",
   "agent-bus.advancedExpand": "展开高级设置",
   "agent-bus.advancedCollapse": "收起高级设置",
   // cutex wake-busy-wait (applies at once, no restart)
@@ -98,6 +103,28 @@ export const zhCN = {
   "agent-bus.stuck.error.message_digest_mismatch": "这条消息已经变了，刷新后再试",
   "agent-bus.stuck.error.message_protected": "作业 / 控制消息要在各自一行单独丢弃",
   "agent-bus.stuck.error.invalid_request": "cutex 拒绝了这个请求",
+  // ---- 待清理 (CleanupSection) ----
+  "agent-bus.cleanup.title": "待清理",
+  "agent-bus.cleanup.hint": "卡住或停滞、可以手动清理的东西。清理都由 cutex 执行，不会自动进行；已隐藏的回执只是这台桌面的显示。",
+  "agent-bus.cleanup.col.what": "内容",
+  "agent-bus.cleanup.col.who": "谁 → 谁",
+  "agent-bus.cleanup.col.age": "已等",
+  "agent-bus.cleanup.col.state": "状态",
+  "agent-bus.cleanup.col.action": "操作",
+  "agent-bus.cleanup.counting": "正在统计",
+  "agent-bus.cleanup.working": "处理中…",
+  "agent-bus.cleanup.refused": "被拒绝",
+  "agent-bus.cleanup.lastError": "上次错误：{error}",
+  "agent-bus.cleanup.previewOnly": "只显示前 200 个字：cutex 的列表不带全文",
+  "agent-bus.cleanup.discardProtectedArmed": "作业 / 控制消息：先确认对应的作业，再左键点击一次丢弃",
+  "agent-bus.cleanup.delegations": "停滞的委托",
+  "agent-bus.cleanup.delegations.empty": "没有停滞的委托（超过 {age} 没有变化）",
+  "agent-bus.cleanup.delegations.emptyAll": "没有停滞的委托",
+  "agent-bus.cleanup.receipts": "已隐藏的回执",
+  "agent-bus.cleanup.receipts.empty": "这台桌面没有在「接下来」里隐藏消息",
+  "agent-bus.cleanup.receipts.hidden": "已隐藏",
+  "agent-bus.cleanup.receipts.closable": "可在服务器关闭",
+  "agent-bus.cleanup.receipts.noText": "这台桌面没有这条消息的正文",
 } as const;
 
 // Adds these keys to MessageKey (modules/i18nCatalog.ts collects the dictionary itself).

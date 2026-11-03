@@ -1,4 +1,8 @@
+import { usesInputLedger } from "../lib/deliveryMode";
+import { agentState, featuresOf } from "../store";
+import { SessionDeliveryStatus } from "./PendingSends";
 import { setAppearance, useAppearance } from "../lib/appearance";
+import { usePortraitOn } from "../lib/portrait";
 // Each conversation keeps its own host/agent header. Line 1 has name, role, online and notifications
 // on the left; the right is reserved for pane controls. Line 2 has project · host · cwd · branch,
 // then the agent's services at the far right. Services become Globe/count at medium widths and a
@@ -337,7 +341,7 @@ function AgentActions({ paneId, session, hostId, info, folded, compactServices, 
   }
   return render({ rows, status: (
     <>
-      {session && info && <OnlineState session={session} hostId={hostId} info={info} compact={folded.includes("network")} />}
+      {session && info && <LedgerOnlineState session={session} hostId={hostId} info={info} compact={folded.includes("network")} />}
       {session && !folded.includes("mute") && !notify.hidden && (
         <button
           data-side-nodrag
@@ -461,7 +465,11 @@ function PaneControls({ paneId, hostId, sessionId, focused, maxed, rows, session
   const full = usePanelFull((s) => s.target?.area === "work" && s.target.id === paneId);
   const grown = useGrow((s) => s.target?.kind === "conv" && s.target.paneId === paneId);
   const room = useGrow((s) => s.room.conv[paneId] ?? 0);
-  const fill = useAppearance().fillMode;
+  // Portrait (lib/portrait): 最大化保持 is landscape's (the stack fills the window) — ⤢ is not offered there for it; as
+  // the way back from a maximised / full-screen column it stays (最大化 there fills the stack: lib/paneActions).
+  const portrait = usePortraitOn();
+  const fill = useAppearance().fillMode && !portrait;
+  const maxShown = !portrait || maxed || full;
   const noGap = !full && !maxed && !grown && room <= 0;
   const maxTip = full ? t("panel.exitFullscreen", { key: "Esc" }) : maxed ? t("panel.exclusiveOff") : noGap ? t("panel.maxNoGap") : t("panel.maxLongPress", { tip: t(grown ? "pane.restoreMax" : "pane.maximize", keyVar("paneMaximise")), ...keyVar("panelFullscreen") });
   const hold = useLongPress(() => toggleFullscreenPanel({ area: "work", id: paneId }));
@@ -512,9 +520,9 @@ function PaneControls({ paneId, hostId, sessionId, focused, maxed, rows, session
   return (
     <span data-pane-controls="row" className="flex h-6 shrink-0 items-center gap-0.5">
       {/* Design 040 step 7: 放大 and 关闭 show on hover / keyboard focus of the header (放大 stays while it is on). */}
-      <button data-side-nodrag data-pane-max="" data-pane-full={full ? "" : undefined} title={full || maxed ? maxTip : t(fill ? "fillMode.off" : "fillMode.title")} aria-label={full || maxed ? maxTip : t(fill ? "fillMode.off" : "fillMode.title")} aria-pressed={maxed || full || grown || fill} data-pane-grown={grown ? "" : undefined} {...withHandlers(hold, maxFh)} onClick={() => (maxed ? toggleExclusive({ area: "work", id: paneId }) : full ? toggleFullscreenPanel({ area: "work", id: paneId }) : setAppearance({ fillMode: !fill }))} className={`${CTRL_BTN} ${maxed || full || grown || fill ? "" : noGap ? ON_DEMAND_DIM : ON_DEMAND}`}>
+      {maxShown && <button data-side-nodrag data-pane-max="" data-pane-full={full ? "" : undefined} title={full || maxed ? maxTip : t(fill ? "fillMode.off" : "fillMode.title")} aria-label={full || maxed ? maxTip : t(fill ? "fillMode.off" : "fillMode.title")} aria-pressed={maxed || full || grown || fill} data-pane-grown={grown ? "" : undefined} {...withHandlers(hold, maxFh)} onClick={() => (maxed ? toggleExclusive({ area: "work", id: paneId }) : full ? toggleFullscreenPanel({ area: "work", id: paneId }) : setAppearance({ fillMode: !fill }))} className={`${CTRL_BTN} ${maxed || full || grown || fill ? "" : noGap ? ON_DEMAND_DIM : ON_DEMAND}`}>
         {maxed || full || grown || fill ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-      </button>
+      </button>}
       {/* 关闭 (owner 2026-10-21, §24.13): the pane closes, the agent keeps running in cutex; its workspace is remembered. */}
       <EffectButton effect={() => closeOf(paneId)} data-pane-collapse="" data-pane-close-keep="" title={closeTip} aria-label={closeTip} extra={ON_DEMAND}>
         <X size={14} />
@@ -561,6 +569,7 @@ export interface ConversationHeaderProps {
   closable: boolean;
   maxed: boolean;
   /** Next to other panes: ⤢ maximise is offered (alone, there is nothing to maximise over). */
+  /** Several panes share the column (no longer drawn: the accent under the focused header was dropped 2026-11-01). */
   framed: boolean;
 }
 
@@ -572,9 +581,17 @@ export interface ConversationHeaderProps {
  */
 export const ConversationHeader = memo(ConversationHeaderImpl);
 
-function ConversationHeaderImpl({ paneId, hostId, sessionId, focused, closable, maxed, framed }: ConversationHeaderProps) {
+function LedgerOnlineState(props: React.ComponentProps<typeof OnlineState>) {
+  const enabled = useApp(s => usesInputLedger([...featuresOf(s, props.hostId)]));
+  const delivery = useApp(s => enabled ? agentState(s.inputs, props.hostId, props.session.cutexSessionId)?.delivery ?? null : null);
+  return enabled ? <SessionDeliveryStatus delivery={delivery} sessionId={props.session.cutexSessionId} hostId={props.hostId} /> : <OnlineState {...props} />;
+}
+
+function ConversationHeaderImpl({ paneId, hostId, sessionId, focused, closable, maxed }: ConversationHeaderProps) {
   const { t } = useI18n();
   const retry = useModelOverloadRetry(sessionId, hostId);
+  const ledgerEnabled = useApp(s => usesInputLedger([...featuresOf(s, hostId)]));
+  const ledgerDelivery = useApp(s => ledgerEnabled && sessionId ? agentState(s.inputs, hostId, sessionId)?.delivery ?? null : null);
   const { titleTwoLines } = useUiPrefs();
   const info = useApp((s) => convHeaderInfoMemo(sidebarOf(s, hostId), sessionId));
   // Only the connection word it shows (perf §9): the whole view changes on every streamed delta, and the header
@@ -598,7 +615,7 @@ function ConversationHeaderImpl({ paneId, hostId, sessionId, focused, closable, 
   // Online / offline / running are the avatar's (design 040 §3.1): green dot, grey, the ring.
   const runtime = session?.runtime;
   const presence: AvatarPresence | null = runtime?.status === "online" ? "online" : runtime?.status === "offline" ? "offline" : null;
-  const avatarStatus = runtime ? { presence, running: presence === "online" && !!runtime.activeTurnId } : null;
+  const avatarStatus = ledgerEnabled ? { presence: ledgerDelivery?.state === "offline" || ledgerDelivery?.state === "disconnected" ? "offline" as const : ledgerDelivery?.runtimeConnected ? "online" as const : null, running: ledgerDelivery?.state === "turn" } : runtime ? { presence, running: presence === "online" && !!runtime.activeTurnId } : null;
   const renderHeader = ({ status = null, services = null, rows = [] }: Partial<HeaderActions> = {}) => (
     <div
       ref={ref}
@@ -615,7 +632,7 @@ function ConversationHeaderImpl({ paneId, hostId, sessionId, focused, closable, 
         e.preventDefault();
         openMenuAt(e.clientX, e.clientY, [replaceColumnEntry(paneId, hostId, t), ...panelGuideTail({ panel: "conversation", paneId, hostId, sessionId })]);
       }}
-      className={`group/phead flex shrink-0 items-center gap-2.5 border-b py-2 pr-2 pl-3 select-none ${sessionId ? "cursor-grab active:cursor-grabbing" : ""} ${focused && framed ? "border-accent/40" : "border-border"} ${focused ? "text-foreground" : "text-muted"}`}
+      className={`group/phead flex shrink-0 items-center gap-2.5 border-b py-2 pr-2 pl-3 select-none ${sessionId ? "cursor-grab active:cursor-grabbing" : ""} border-border ${focused ? "text-foreground" : "text-muted"}`}
     >
       {session && (
         // 会话头 (design 040 §3.1): 40 px, the biggest avatar in the conversation, with two lines; 28 px with one line so the

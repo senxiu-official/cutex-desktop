@@ -74,7 +74,7 @@ describe("file pages", () => {
       expect(f.order).toEqual([]);
     }
     const big = await fixture(file({ truncated: true, size: 7 * 1024 * 1024 })).service.prepareFile(3, { hostId: "local", path: "/p/a.html" });
-    expect(big).toEqual({ ok: false, reason: "too-large", totalBytes: 7 * 1024 * 1024 });
+    expect(big).toEqual({ ok: false, reason: "too-large", totalBytes: 7 * 1024 * 1024, modifiedAt: "2026-10-24T00:00:00Z" });
   });
 
   it("checks the request: only .html / .htm, known keys, a valid scope", () => {

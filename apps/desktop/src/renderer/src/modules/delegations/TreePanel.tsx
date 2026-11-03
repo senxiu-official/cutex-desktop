@@ -88,7 +88,7 @@ export function TreePanel({ snapshot, busy, onAction, continuation = false }: Up
         const cont = continuation ? node.continuation : null;
         const quiet = quietMinutes(node);
         const continuing = !!cont && cont.state !== "cancelled";
-        const status = node.closed ? t("delegations.upgrade.tree.closed") : cont && continuing ? t("delegations.upgrade.tree.continuing", { n: cont.roundNumber }) : t(`delegations.upgrade.tree.${node.execution}`);
+        const status = node.closed ? t("delegations.upgrade.tree.closed") : cont && continuing ? t("delegations.upgrade.tree.continuing", { n: cont.roundNumber }) : node.execution === "pendingReview" ? t("taskrow.outcome.approval") : t(`delegations.upgrade.tree.${node.execution}`);
         const look = nodeGlyph(node, continuing, cont?.state === "limited");
         const approval = node.routingApproval?.state === "pending" || node.routingApproval?.state === "stale" ? node.routingApproval.state : null;
         const open = !collapsed.has(key) && (all || depth < 2);

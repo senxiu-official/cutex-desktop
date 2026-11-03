@@ -12,7 +12,7 @@
         "zh-CN": "云想华裳",
         "en": "Cloud-Woven Silks"
       },
-      "cover": "gpt/01"
+      "cover": "claude/02"
     },
     {
       "id": "great-ming",
@@ -20,7 +20,7 @@
         "zh-CN": "日月山河",
         "en": "Great Ming"
       },
-      "cover": "gpt/01"
+      "cover": "gpt/02"
     },
     {
       "id": "tales-of-frills",
@@ -28,7 +28,7 @@
         "zh-CN": "裙裾物语",
         "en": "Tales of Frills"
       },
-      "cover": "gpt/01"
+      "cover": "gemini/03"
     },
     {
       "id": "ad-astra",
@@ -36,7 +36,7 @@
         "zh-CN": "穿越群星",
         "en": "Ad Astra"
       },
-      "cover": "gpt/01"
+      "cover": "deepseek/05"
     },
     {
       "id": "mountain-city-myriad-layers",
@@ -44,7 +44,7 @@
         "zh-CN": "山城万象",
         "en": "Mountain City"
       },
-      "cover": "gpt/01"
+      "cover": "kimi/02"
     },
     {
       "id": "snowy-owl-post",
@@ -52,7 +52,7 @@
         "zh-CN": "雪鸮来信",
         "en": "Snowy Owl Post"
       },
-      "cover": "gpt/01"
+      "cover": "glm/06"
     },
     {
       "id": "girls-night-in",
@@ -60,7 +60,7 @@
         "zh-CN": "少女夜话",
         "en": "Girls' Night In"
       },
-      "cover": "gpt/01"
+      "cover": "claude/02"
     },
     {
       "id": "misty-city-cyberpunk",
@@ -76,7 +76,7 @@
         "zh-CN": "银吟雪颂",
         "en": "Silver Snow"
       },
-      "cover": "gpt/01"
+      "cover": "gemini/02"
     },
     {
       "id": "mortal-world",
@@ -84,7 +84,7 @@
         "zh-CN": "人间烟火",
         "en": "Mortal World"
       },
-      "cover": "gpt/01"
+      "cover": "deepseek/02"
     },
     {
       "id": "metropolitan-muses",
@@ -92,7 +92,7 @@
         "zh-CN": "摩登丽影",
         "en": "Metropolitan Muses"
       },
-      "cover": "gpt/01"
+      "cover": "kimi/01"
     },
     {
       "id": "university-universalis",
@@ -100,7 +100,7 @@
         "zh-CN": "大学风云",
         "en": "University Life"
       },
-      "cover": "gpt/01"
+      "cover": "glm/03"
     },
     {
       "id": "uniform-revolution",
@@ -108,7 +108,7 @@
         "zh-CN": "制服革命",
         "en": "Uniform Revolution"
       },
-      "cover": "gpt/01"
+      "cover": "claude/02"
     },
     {
       "id": "sunlit-shores",
@@ -116,7 +116,7 @@
         "zh-CN": "晴海假日",
         "en": "Sunlit Shores"
       },
-      "cover": "gpt/01"
+      "cover": "gpt/03"
     },
     {
       "id": "southern-cross",
@@ -124,7 +124,7 @@
         "zh-CN": "南陆漫游",
         "en": "Southern Cross"
       },
-      "cover": "gpt/01"
+      "cover": "gemini/02"
     },
     {
       "id": "beyond-spotlight",
@@ -132,7 +132,7 @@
         "zh-CN": "星幕未央",
         "en": "Beyond the Spotlight"
       },
-      "cover": "gpt/01"
+      "cover": "deepseek/02"
     },
     {
       "id": "little-callings",
@@ -140,7 +140,7 @@
         "zh-CN": "百工奇想",
         "en": "Little Callings"
       },
-      "cover": "gpt/01"
+      "cover": "kimi/03"
     },
     {
       "id": "season-letters",
@@ -148,7 +148,7 @@
         "zh-CN": "四时花信",
         "en": "Season Letters"
       },
-      "cover": "gpt/01"
+      "cover": "glm/02"
     },
     {
       "id": "lanterns-after-dark",
@@ -156,7 +156,7 @@
         "zh-CN": "长夜巡灯",
         "en": "Lanterns After Dark"
       },
-      "cover": "gpt/01"
+      "cover": "claude/03"
     },
     {
       "id": "kindred-creatures",

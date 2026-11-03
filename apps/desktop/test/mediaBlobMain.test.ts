@@ -26,6 +26,7 @@ const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwA
 const sha = "a".repeat(64), bytes = new Uint8Array(Buffer.from(png, "base64")), expected = { mime: "image/png", size: bytes.length };
 const payload = () => ({ bytes, ...expected });
 let service: DaemonService;
+const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
 const switchTo = (host = "a", remote = true) => {
   service.useEndpoint({ baseUrl: `http://${host}.invalid`, token: "fixture" } as any, { remote });
   const client = fixture.clients.at(-1); client.historyMedia.mockResolvedValue(payload()); client.eventBlob.mockResolvedValue(payload()); return client;
@@ -37,7 +38,7 @@ beforeEach(() => {
   fixture.decode.mockReset().mockReturnValue({ isEmpty: () => false, toPNG: () => Buffer.from(png, "base64") });
   service = new DaemonService(() => {});
 });
-afterEach(() => service.stop());
+afterEach(() => { service.stop(); Object.defineProperty(process, "platform", originalPlatform); });
 
 it("uses distinct authenticated client methods and returns typed bytes without constructing data URLs", async () => {
   const client = switchTo();
@@ -143,6 +144,47 @@ it("saves original bytes only to the native dialog's selected path and handles c
   expect(fixture.write).toHaveBeenCalledWith("/fixture/image.png", bytes);
   expect(await service.imageAction({ kind: "media", sessionId: "cutex.s1", sha256: sha }, "save")).toEqual({ status: "cancelled" });
   expect(fixture.write).toHaveBeenCalledOnce();
+});
+
+it.each([
+  ["image/png", "png", bytes],
+  ["image/jpeg", "jpg", new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4])],
+  ["image/webp", "webp", new Uint8Array(Buffer.from("RIFF0000WEBP", "ascii"))],
+] as const)("offers a suffixed native image default and undotted %s filter", async (mime, extension, original) => {
+  Object.defineProperty(process, "platform", { ...originalPlatform, value: "darwin" });
+  const client = switchTo();
+  client.historyMedia.mockResolvedValue({ bytes: original, mime, size: original.length });
+  // A native panel may return the owner's bare name. Do not redirect that confirmed target.
+  fixture.save.mockResolvedValueOnce({ canceled: false, filePath: "/fixture/renamed" });
+  expect(await service.imageAction({ kind: "media", sessionId: "cutex.s1", sha256: sha }, "save")).toEqual({ status: "saved" });
+  expect(fixture.save).toHaveBeenCalledWith({ defaultPath: `image.${extension}`, filters: [{ name: mime, extensions: [extension] }] });
+  expect(fixture.write).toHaveBeenCalledExactlyOnceWith("/fixture/renamed", original);
+});
+
+it.each([{ canceled: true, filePath: "/fixture/ignored.png" }, { canceled: false }])("does not save images for an unusable native selection: %j", async result => {
+  switchTo(); fixture.save.mockResolvedValueOnce(result);
+  expect(await service.imageAction({ kind: "media", sessionId: "cutex.s1", sha256: sha }, "save")).toEqual({ status: "cancelled" });
+  expect(fixture.write).not.toHaveBeenCalled();
+});
+
+it.each(["report.MD", "report.md", `${"x".repeat(200)}.MD`, "", "a/b:report"])("offers a safe Markdown default for %s without losing or doubling its suffix", async name => {
+  Object.defineProperty(process, "platform", { ...originalPlatform, value: "darwin" });
+  fixture.save.mockResolvedValueOnce({ canceled: false, filePath: "/fixture/owner-choice" });
+  expect(await service.saveMarkdown(name, "# export")).toBe("/fixture/owner-choice");
+  const options = fixture.save.mock.calls[0]![0];
+  expect(options.defaultPath).toMatch(/\.md$/i);
+  expect(options.defaultPath).not.toMatch(/\.md\.md$/i);
+  expect(options.defaultPath.length).toBeLessThanOrEqual(120);
+  expect(options.defaultPath).not.toMatch(/[\\/:*?"<>|\u0000-\u001f]/);
+  expect(options.filters).toEqual([{ name: "Markdown", extensions: ["md"] }]);
+  if (name === "report.MD" || name === "report.md") expect(options.defaultPath).toMatch(/^report\.md$/i);
+  expect(fixture.write).toHaveBeenCalledExactlyOnceWith("/fixture/owner-choice", "# export", "utf8");
+});
+
+it.each([{ canceled: true, filePath: "/fixture/ignored.md" }, { canceled: false }])("does not write Markdown for an unusable native selection: %j", async result => {
+  fixture.save.mockResolvedValueOnce(result);
+  expect(await service.saveMarkdown("report", "# export")).toBeNull();
+  expect(fixture.write).not.toHaveBeenCalled();
 });
 
 it("rejects corrupt images and host changes while the save dialog is open", async () => {

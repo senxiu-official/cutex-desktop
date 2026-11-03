@@ -1,0 +1,101 @@
+[
+  {
+    "sourceLine": 3587,
+    "receivedAt": "2026-10-31T13:26:07.219825400+00:00",
+    "method": "turn/started",
+    "stage": null,
+    "clientId": null,
+    "turnId": "68ecd547-0718-4f1f-8498-543a4366d1f8",
+    "turnStatus": "inProgress"
+  },
+  {
+    "sourceLine": 3603,
+    "receivedAt": "2026-10-31T13:26:30.389750900+00:00",
+    "method": "claude/input/stageChanged",
+    "stage": "registered",
+    "clientId": "7a522aeb-17b2-4538-8a3a-1ae61bfbac60",
+    "turnId": "68ecd547-0718-4f1f-8498-543a4366d1f8",
+    "turnStatus": null
+  },
+  {
+    "sourceLine": 3608,
+    "receivedAt": "2026-10-31T13:26:31.553104700+00:00",
+    "method": "claude/input/stageChanged",
+    "stage": "offered",
+    "clientId": "7a522aeb-17b2-4538-8a3a-1ae61bfbac60",
+    "turnId": "68ecd547-0718-4f1f-8498-543a4366d1f8",
+    "turnStatus": null
+  },
+  {
+    "sourceLine": 3646,
+    "receivedAt": "2026-10-31T13:27:06.049647200+00:00",
+    "method": "claude/input/stageChanged",
+    "stage": "registered",
+    "clientId": "53a8cbc1-df71-4b91-9c60-51bcf4b7b0f7",
+    "turnId": "68ecd547-0718-4f1f-8498-543a4366d1f8",
+    "turnStatus": null
+  },
+  {
+    "sourceLine": 3653,
+    "receivedAt": "2026-10-31T13:27:09.014302400+00:00",
+    "method": "claude/input/stageChanged",
+    "stage": "offered",
+    "clientId": "53a8cbc1-df71-4b91-9c60-51bcf4b7b0f7",
+    "turnId": "68ecd547-0718-4f1f-8498-543a4366d1f8",
+    "turnStatus": null
+  },
+  {
+    "sourceLine": 3663,
+    "receivedAt": "2026-10-31T13:27:20.077155400+00:00",
+    "method": "claude/input/stageChanged",
+    "stage": "registered",
+    "clientId": "f0796a9f-754d-4392-b2c9-a00df7811e6b",
+    "turnId": "68ecd547-0718-4f1f-8498-543a4366d1f8",
+    "turnStatus": null
+  },
+  {
+    "sourceLine": 3670,
+    "receivedAt": "2026-10-31T13:27:22.981650800+00:00",
+    "method": "claude/input/stageChanged",
+    "stage": "offered",
+    "clientId": "f0796a9f-754d-4392-b2c9-a00df7811e6b",
+    "turnId": "68ecd547-0718-4f1f-8498-543a4366d1f8",
+    "turnStatus": null
+  },
+  {
+    "sourceLine": 3684,
+    "receivedAt": "2026-10-31T13:27:46.468853300+00:00",
+    "method": "claude/input/stageChanged",
+    "stage": "contextPersisted",
+    "clientId": "7a522aeb-17b2-4538-8a3a-1ae61bfbac60",
+    "turnId": "68ecd547-0718-4f1f-8498-543a4366d1f8",
+    "turnStatus": null
+  },
+  {
+    "sourceLine": 3685,
+    "receivedAt": "2026-10-31T13:27:46.469109500+00:00",
+    "method": "claude/input/stageChanged",
+    "stage": "contextPersisted",
+    "clientId": "53a8cbc1-df71-4b91-9c60-51bcf4b7b0f7",
+    "turnId": "68ecd547-0718-4f1f-8498-543a4366d1f8",
+    "turnStatus": null
+  },
+  {
+    "sourceLine": 3686,
+    "receivedAt": "2026-10-31T13:27:46.469291700+00:00",
+    "method": "claude/input/stageChanged",
+    "stage": "contextPersisted",
+    "clientId": "f0796a9f-754d-4392-b2c9-a00df7811e6b",
+    "turnId": "68ecd547-0718-4f1f-8498-543a4366d1f8",
+    "turnStatus": null
+  },
+  {
+    "sourceLine": 3687,
+    "receivedAt": "2026-10-31T13:27:46.470076600+00:00",
+    "method": "turn/completed",
+    "stage": null,
+    "clientId": null,
+    "turnId": "68ecd547-0718-4f1f-8498-543a4366d1f8",
+    "turnStatus": "completed"
+  }
+]

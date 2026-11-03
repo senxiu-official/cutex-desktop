@@ -1,3 +1,5 @@
+import { DEBUG_CHANNEL, debugEntries, type DebugRequest } from "../shared/debug";
+import { DebugMode } from "./debugMode";
 import { guardStdio } from "./stdioGuard";
 import { appWindows, markOwnerWindow, ownerWindow } from "./appWindows";
 import { localFileAction, localFileOpenInfo } from "./localFiles";
@@ -115,6 +117,7 @@ const desks = new DeskShell({
   emit: (event) => sendEvent("deskWindow", event),
   contextMenu: (win) => installEditMenu(win),
   created: (win) => {
+    debugMode.register(win);
     markOwnerWindow(win);
     desktopShell.attachDesk(win);
   },
@@ -139,6 +142,8 @@ const updater = new Updater(
   // Its proxy is this desktop's own update proxy (Settings → 网络代理: system / none / manual).
   { contained: () => pluginNetwork?.engaged() ?? false, proxy: () => desktopShell.updateProxyConfig() },
 );
+const debugMode = new DebugMode({ logs: logDir, emit: event => sendEvent("debug", event), platform: process.platform, version: () => app.getVersion(), flush: () => mainWindow?.webContents.executeJavaScript("window.__cutexDebugFlush?.()") ?? Promise.resolve() });
+
 desktopShell.onPrefsChanged = (prefs) => updater.schedule(prefs.updateCheckMinutes);
 // A relaunch exits without before-quit: lifecycle hosts hear `closing exited` first (bounded, main/clientPresence.ts).
 updater.beforeExit = () => clientPresence?.reportExited() ?? Promise.resolve();
@@ -295,6 +300,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "delegationUpgradeOperation",
   "delegationRetirementReview",
   "closeBusMessage",
+  "busMessageEvidence",
   "runtimes",
   "claudeAccounts",
   "addProfileVariant",
@@ -483,6 +489,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "clearOwnerPerson",
   "components",
   "componentAction",
+  "componentConfigure",
+  "componentIndexCheck",
   "askCommand",
   "jobs",
   "jobServiceCapabilities",
@@ -552,6 +560,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "putProfileImage",
   "getProfile",
   "listProfiles",
+  "inputGet", "inputList", "inputRetry", "inputInterruptSend", "inputDismiss", "inputLeaseRelease", "queueMerge",
   "queueList",
   "queueUpdate",
   "queueRemove",
@@ -607,6 +616,7 @@ ipcMain.handle(INVOKE_CHANNEL, async (event, method: InvokeMethod, args: unknown
     fence.check();
     return result;
   } catch (error) {
+    debugMode.recordError(error, `invoke.${method}`);
     logError({ source: "invoke", method, hostId: typeof expected?.hostId === "string" ? expected.hostId : undefined, sessionId: typeof args?.[0] === "string" ? args[0] : undefined, ...errorFields(error) });
     // A Claude agent without this Codex feature: a recognisable message for a friendly notice.
     const feature = error instanceof CutexApiError ? unsupportedFeatureOf(error.code, error.details) : null;
@@ -622,6 +632,29 @@ ipcMain.handle(INVOKE_CHANNEL, async (event, method: InvokeMethod, args: unknown
 function quickstartTarget(): QuickstartTarget | null {
   return resolveQuickstart({ sourceDir: updater.sourceDir(), releaseDir: updater.releaseDir(), appPath: app.getAppPath(), packaged: app.isPackaged }, existsSync, join);
 }
+
+ipcMain.on(DEBUG_CHANNEL, event => { event.returnValue = isAppSender(event) && desktopShell.state().prefs.debugMode === true; });
+
+ipcMain.handle(DEBUG_CHANNEL, async (event, request: DebugRequest) => {
+  if (!isAppSender(event)) throw new Error("untrusted sender");
+  if (!request || typeof request !== "object") throw new Error("invalid debug request");
+  const keys = request.op === "enable" ? ["op", "value"] : request.op === "report" ? ["op", "entries"] : ["op"];
+  if (Object.keys(request).some(key => !keys.includes(key))) throw new Error("unknown debug field");
+  switch (request.op) {
+    case "state": return debugMode.state();
+    case "enable":
+      if (typeof request.value !== "boolean") throw new Error("invalid debug switch");
+      desktopShell.setDebugMode(request.value);
+      return debugMode.setEnabled(request.value);
+    case "report":
+      if (debugMode.state().enabled) debugMode.report(debugEntries(request.entries));
+      return;
+    case "save": return debugMode.save();
+    case "reveal": { const path = debugMode.bundlePath(); if (path) shell.showItemInFolder(path); return; }
+    case "devtools": if (debugMode.state().enabled) event.sender.openDevTools({ mode: "detach" }); return;
+    default: throw new Error("unknown debug operation");
+  }
+});
 
 ipcMain.handle(SHELL_CHANNEL, (event, request: ShellRequest) => {
   if (!isAppSender(event)) throw new Error("untrusted sender");
@@ -953,6 +986,7 @@ function createWindow(): void {
   });
   trackWindowState(mainWindow);
   const win = mainWindow;
+  debugMode.register(win);
   win.webContents.setWindowOpenHandler((details) => {
     // A desk window with main's one-use ticket (main/deskWindows.ts); nothing else opens.
     const desk = desks.openResponse(win, details);
@@ -1042,6 +1076,7 @@ app.on("web-contents-created", (_event, contents) => contents.setWebRTCIPHandlin
 
 app.whenReady().then(async () => {
   if (!primaryInstance) return;
+  debugMode.setEnabled(desktopShell.state().prefs.debugMode === true);
   frameDocuments = createFrameDocumentStore({ scheme: PLUGIN_SCHEME, limitMessage: "Too many prepared frame documents" });
   pluginResources = createPluginResourceService(join(app.getPath("userData"), "plugins"), { documents: frameDocuments });
   pluginNetwork = createPluginNetworkLockdown({

@@ -26,41 +26,28 @@ afterEach(() => { act(() => root.unmount()); host.remove(); });
 const draw = (props: Record<string, unknown> = {}) => act(() => root.render(h(Avatar, { name: "Operator agent", seed: "s", size: 28, ...props } as never)));
 const mark = () => host.querySelector<HTMLElement>("[data-operator-mark]");
 
-it("hides the role when an older host has no projection or the avatar has no agent seed", () => {
-  fx.look.isOperator = undefined; draw(); expect(mark()).toBeNull();
-  fx.look.isOperator = true; draw({ seed: undefined }); expect(mark()).toBeNull();
-});
-
-it("keeps a light top-left O role badge on letters, emoji, pictures and cut-out portraits", () => {
+// Owner 2026-11-01: the Operator's O chip is deleted — no marker on its avatar in any form or size.
+it("draws no Operator marker on letters, emoji, pictures, cut-outs, minor tiles or framed avatars", () => {
   for (const theme of ["light", "dark"]) {
     document.documentElement.dataset.theme = theme;
     for (const props of [{}, { avatar: { kind: "emoji", value: "🐱" } }, { picture: "data:image/png;base64,AA==" }, { picture: "data:image/png;base64,AA==", cutout: true }]) {
       draw(props);
-      expect(mark()!.textContent).toBe("O");
-      expect(mark()!.getAttribute("aria-label")).toBe("sidebar.operator");
-      expect(mark()!.style.left).toBe("-2px"); expect(mark()!.style.top).toBe("-2px");
-      expect(mark()!.style.color).toBe("var(--fg)");
-      expect(mark()!.style.background).toContain("var(--surface)");
-      // 副主管也戴 (default on): the maid companion over the face; a cut-out portrait wears none.
+      expect(mark()).toBeNull();
+      expect(host.querySelector("[aria-label='sidebar.operator']")).toBeNull();
+      // 副主管也戴 (default on) is a separate setting and stays: the maid companion over the face; a cut-out wears none.
       expect(host.querySelector("[data-avatar-headwear]")?.getAttribute("data-avatar-headwear") ?? null).toBe("cutout" in props ? null : "operator-maid");
     }
   }
   delete document.documentElement.dataset.theme;
-});
-
-it("scales the badge down without replacing the minor 甲 tile or its running edge", () => {
   fx.minor = true;
   for (const size of [16, 20, 24, 28]) {
-    draw({ size, minor: true, initial: "甲", status: { running: true } });
+    draw({ size, initial: "甲", status: { running: true } });
     expect(host.querySelector("[data-minor-tile]")!.textContent).toBe("甲");
-    expect(host.querySelector(".agent-ring-tile")).not.toBeNull();
-    expect(parseFloat(mark()!.style.width)).toBeLessThan(size);
-    expect(mark()!.style.width).toBe(size < 24 ? "9px" : "12px");
-    expect(host.querySelectorAll("[data-operator-mark]")).toHaveLength(1);
+    expect(mark()).toBeNull();
   }
 });
 
-it("coexists with Director project marks, headwear, status badges and presence in separate corners", () => {
+it("leaves Director marks, headwear, status badges and presence as they were", () => {
   fx.look.isDirector = true; fx.look.project = { hostId: "local", id: "p", mark: "甲", color: "blue" };
   act(() => setUiPref("directorHeadwear", "maid"));
   draw({ size: 40, status: { running: true, badge: { tone: "attention", text: "2" }, presence: "online" } });
@@ -68,13 +55,5 @@ it("coexists with Director project marks, headwear, status badges and presence i
   expect(host.querySelector("[data-project-mark]")!.textContent).toBe("甲");
   expect(host.querySelector("[data-avatar-badge]")!.textContent).toBe("2");
   expect(host.querySelector("[data-avatar-dot='online']")).not.toBeNull();
-  expect(host.querySelectorAll("[data-operator-mark]")).toHaveLength(1);
-  expect(mark()!.closest("[data-avatar-status]")).not.toBeNull();
-});
-
-it("drops only the Operator badge when the role is removed", () => {
-  draw({ status: { badge: { tone: "accent", text: "1" } } }); expect(mark()).not.toBeNull();
-  fx.look.isOperator = false;
-  draw({ status: { badge: { tone: "accent", text: "1" } } });
-  expect(mark()).toBeNull(); expect(host.querySelector("[data-avatar-badge]")!.textContent).toBe("1");
+  expect(mark()).toBeNull();
 });

@@ -340,7 +340,13 @@ export interface HostRuntimeUse {
 
 /** `/v2/host` `runtimes` (owner only). */
 export interface HostRuntimes {
-  native: { selected: string | null; latest: string | null; inUse: HostRuntimeUse[] };
+  native: {
+    selected: string | null;
+    /** Actual selected binary's short SHA, including unregistered builds; absent on older peers. */
+    selectedSha256Prefix?: string | null;
+    latest: string | null;
+    inUse: HostRuntimeUse[];
+  };
   claude: { selected: string | null; inUse: HostRuntimeUse[] };
   unpinnedAgents: number;
 }
@@ -470,7 +476,7 @@ function readRuntimes(value: unknown): HostRuntimes | null {
   const claude = r.claude && typeof r.claude === "object" ? (r.claude as Record<string, unknown>) : null;
   if (!native || !claude) return null;
   return {
-    native: { selected: str(native.selected), latest: str(native.latest), inUse: readUses(native.inUse) },
+    native: { selected: str(native.selected), selectedSha256Prefix: str(native.selectedSha256Prefix), latest: str(native.latest), inUse: readUses(native.inUse) },
     claude: { selected: str(claude.selected), inUse: readUses(claude.inUse) },
     unpinnedAgents: typeof r.unpinnedAgents === "number" && r.unpinnedAgents >= 0 ? Math.floor(r.unpinnedAgents) : 0,
   };

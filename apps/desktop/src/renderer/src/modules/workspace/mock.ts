@@ -189,7 +189,7 @@ function htmlBody(path: string, name: string, maxBytes = 2 * MIB): FsFile | null
   const entry = HTML_FILES[name];
   if (!entry) return null;
   const size = Math.max(entry[1], entry[0].length);
-  return { path, size, modifiedAt: new Date().toISOString(), encoding: "utf8", content: entry[0], truncated: size > maxBytes, mime: "text/html" };
+  return { path, size, modifiedAt: "2026-11-03T00:00:00Z", encoding: "utf8", content: entry[0], truncated: size > maxBytes, mime: "text/html" };
 }
 
 function body(path: string, name: string, maxBytes = 2 * MIB): FsFile | null {

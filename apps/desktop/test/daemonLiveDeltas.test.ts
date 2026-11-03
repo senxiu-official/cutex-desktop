@@ -2,11 +2,11 @@ import { createHash } from "node:crypto";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const f = vi.hoisted(() => ({ feeds: [] as any[], capabilities: vi.fn(), blob: vi.fn() }));
+const f = vi.hoisted(() => ({ feeds: [] as any[], capabilities: vi.fn(), blob: vi.fn(), events: vi.fn() }));
 vi.mock("electron", () => ({ BrowserWindow: { getFocusedWindow: () => null, getAllWindows: () => [] }, dialog: {}, shell: {} }));
 vi.mock("@cutex-desktop/cutex-client", async importOriginal => ({
   ...await importOriginal<typeof import("@cutex-desktop/cutex-client")>(),
-  CutexClient: class { capabilities() { return f.capabilities(); } eventBlob(...args: unknown[]) { return f.blob(...args); } },
+  CutexClient: class { capabilities() { return f.capabilities(); } eventBlob(...args: unknown[]) { return f.blob(...args); } events(...args: unknown[]) { return f.events(...args); } },
   EventFeed: class {
     start = vi.fn(); stop = vi.fn();
     constructor(public client: unknown, public handlers: any, public options: any) { f.feeds.push(this); }
@@ -15,7 +15,7 @@ vi.mock("@cutex-desktop/cutex-client", async importOriginal => ({
 import { CutexClient } from "@cutex-desktop/cutex-client";
 import { DaemonService } from "../src/main/daemon";
 
-beforeEach(() => { f.feeds.length = 0; f.capabilities.mockReset(); f.blob.mockReset(); });
+beforeEach(() => { f.feeds.length = 0; f.capabilities.mockReset(); f.blob.mockReset(); f.events.mockReset(); });
 afterEach(() => vi.useRealTimers());
 const fixture = () => {
   const events: { event: string; payload: unknown }[] = [];
@@ -23,6 +23,26 @@ const fixture = () => {
   (daemon as any).client = new CutexClient({ baseUrl: "http://fake.invalid", token: null });
   return { daemon, events };
 };
+
+it("recovers only the held identities' missed admission receipts before the new feed, never native deltas", async () => {
+  const receipt = (sequence: number, method: string, id = "held-1") => ({ sequence, streamId: "durable", cursor: `c${sequence}`, correlation: {}, cutex: { method, params: { clientUserMessageId: id } } });
+  const timeout = receipt(12, "cutex/userInput/failed");
+  f.events.mockResolvedValueOnce({ events: [receipt(10, "cutex/userInput/held"), { sequence: 11, native: { message: { method: "item/agentMessage/delta" } } }], hasMore: true, nextCursor: "c11" });
+  f.events.mockResolvedValueOnce({ events: [timeout, receipt(13, "cutex/userInput/failed", "other-input"), receipt(15, "cutex/userInput/submitted")], hasMore: true, nextCursor: "c15" });
+  const { daemon, events } = fixture();
+  await daemon.subscribe("s", { streamId: "durable", after: "c14", ownerAdmissionReplay: { after: "c9", throughSequence: 14, ids: ["held-1"] } });
+  expect(events.filter(event => event.event === "sessionEvent").map(event => (event.payload as any).envelope.cutex.method)).toEqual(["cutex/userInput/held", "cutex/userInput/failed"]);
+  expect(f.events.mock.calls.map(call => call[0])).toEqual([{ cutexSessionId: "s", streamId: "durable", after: "c9", limit: 1000 }, { cutexSessionId: "s", streamId: "durable", after: "c11", limit: 1000 }]);
+  expect(f.feeds[0].options).toMatchObject({ streamId: "durable", after: "c14" });
+  expect(f.feeds[0].start).toHaveBeenCalledOnce();
+});
+
+it("surfaces a read-only recovery failure instead of starting beyond an unknown held outcome", async () => {
+  f.events.mockRejectedValue(new Error("replay unavailable"));
+  const { daemon } = fixture();
+  await expect(daemon.subscribe("s", { streamId: "durable", after: "c14", ownerAdmissionReplay: { after: "c9", throughSequence: 14, ids: ["held-1"] } })).rejects.toThrow("replay unavailable");
+  expect(f.feeds).toHaveLength(0);
+});
 
 it.each([
   [{ hostId: "old", featureList: [] }, false],

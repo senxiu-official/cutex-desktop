@@ -1,7 +1,8 @@
 // Core tool fallback: always available even when a specialized module is disabled.
 import { openModifiers } from "../lib/openModifiers";
-import { useState } from "react";
-import { Bot, ChevronDown, ChevronRight, CircleStop, FilePen, Globe, Loader2, ShieldAlert, ShieldX, SquareTerminal, Wrench, X } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, CircleQuestionMark, CircleStop, FilePen, Globe, Loader2, ShieldAlert, ShieldX, SquareTerminal, Wrench, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { contextMenu } from "../lib/contextMenu";
 import { toolMenu } from "../lib/menus";
@@ -10,7 +11,7 @@ import { approvalOutcome, diffCounts, isFailed, isRunning, toolDetail, toolLiven
 import { parseFileLink, rootFor, scopeFor } from "../lib/workspace";
 import { agentState, useApp, viewOf } from "../store";
 import { convSignal, useConvHost, useConvScope, useConvSession, useConvSidebar } from "../lib/conversationScope";
-import { toolErrorText } from "../lib/taskRows";
+import { toolErrorText, type TaskRowOutcome } from "../lib/taskRows";
 import { ToolErrorText } from "./ToolErrorText";
 import { openPath } from "../lib/sideOpen";
 import { useUserLayoutToggle } from "../lib/userLayoutToggle";
@@ -50,26 +51,29 @@ export interface ToolSafetyBlock {
   reason: string | null;
 }
 
-function ToolIcon({ item, liveness, blocked, approval }: { item: RawItem; liveness: ReturnType<typeof toolLiveness>; blocked: boolean; approval: ReturnType<typeof approvalOutcome> }) {
+function ToolIcon({ item, liveness, blocked, approval, icon, failed, uncertain }: { item: RawItem; liveness: ReturnType<typeof toolLiveness>; blocked: boolean; approval: ReturnType<typeof approvalOutcome>; icon?: LucideIcon; failed: boolean; uncertain: boolean }) {
   if (liveness === "background") return <SquareTerminal size={13} className="text-accent" />;
   if (liveness === "interrupted") return <CircleStop size={13} className="text-subtle" />;
   if (isRunning(item)) return <Loader2 size={13} className="animate-spin text-accent" />;
   if (blocked) return <ShieldAlert size={13} className="text-warn-text" />;
   if (approval === "required") return <ShieldAlert size={13} className="text-warn-text" />;
   if (approval === "denied") return <ShieldX size={13} className="text-subtle" />;
-  if (isFailed(item)) return <X size={13} className="text-danger" />;
-  const Icon = item.type === "commandExecution" ? SquareTerminal : item.type === "fileChange" ? FilePen : item.type === "collabAgentToolCall" ? Bot : item.type === "webSearch" ? Globe : Wrench;
+  if (uncertain) return <CircleQuestionMark size={13} className="text-warn-text" />;
+  if (failed) return <X size={13} className="text-danger" />;
+  const Icon = icon ?? (item.type === "commandExecution" ? SquareTerminal : item.type === "fileChange" ? FilePen : item.type === "collabAgentToolCall" ? Bot : item.type === "webSearch" ? Globe : Wrench);
   return <Icon size={13} className="text-subtle" />;
 }
 
-export function PlainToolRow({ item, safetyBlock = null }: { item: RawItem; safetyBlock?: ToolSafetyBlock | null }) {
+export interface ToolPresentation { kind: string; key: MessageKey; detail: string; icon: LucideIcon; details: ReactNode; outcome?: TaskRowOutcome | null }
+
+export function PlainToolRow({ item, safetyBlock = null, presentation }: { item: RawItem; safetyBlock?: ToolSafetyBlock | null; presentation?: ToolPresentation }) {
   const { t } = useI18n();
   const userToggle = useUserLayoutToggle();
   const conv = useConvScope();
   const [open, setOpen] = useState(false);
   const sidebar = useConvSidebar();
   const selectedId = useConvSession();
-  const { key, detail } = toolLabel(item);
+  const { key, detail } = presentation ?? toolLabel(item);
   const output = toolOutput(item);
   const scope = scopeFor(sidebar, selectedId);
   const root = scope ? rootFor(sidebar, scope) : null;
@@ -78,27 +82,31 @@ export function PlainToolRow({ item, safetyBlock = null }: { item: RawItem; safe
   const liveness = useToolLiveness(item);
   const running = liveness === "running";
   const blocked = safetyBlock !== null && !running;
-  const failed = !blocked && isFailed(item);
+  const outcome = !blocked && !running ? presentation?.outcome : null;
+  const uncertain = outcome?.kind === "uncertain";
+  const failed = !blocked && (isFailed(item) || outcome?.kind === "failed");
   // A gated cutex call that answered approval_required / approval_denied: not a failure. The row says
   // 需要审批 / 已拒绝; the approvals module's line under it carries the request (no raw refusal line).
-  const approval = blocked || running ? null : approvalOutcome(item);
+  const approval = blocked || running ? null : outcome?.kind === "approval" ? "required" : outcome?.kind === "declined" ? "denied" : approvalOutcome(item);
   // A failed MCP / dynamic tool call: its error text on a muted line, in full when expanded. A
   // safety-stopped call shows the check's reason there instead.
-  const error = blocked ? (safetyBlock.reason?.trim() || null) : failed && (item.type === "mcpToolCall" || item.type === "dynamicToolCall") ? toolErrorText(item) : null;
+  const error = blocked ? (safetyBlock.reason?.trim() || null) : (failed || uncertain) && (item.type === "mcpToolCall" || item.type === "dynamicToolCall") ? ([outcome?.code, outcome?.detail].filter(Boolean).join(": ") || toolErrorText(item)) : null;
   // One line from the first render to the last (owner 2026-10-24: a running Edit showed ~5 lines of its diff, then
   // collapsed to one when done — the rows above jumped). The live state is inline: the spinner, a file change's
   // +/- counts (the same once done), a running command's newest output line; the rest is one click away.
   const counts = diffCounts(item);
   const lastLine = running && item.type === "commandExecution" && output ? (output.trimEnd().split("\n").pop()?.trim() ?? "") || null : null;
   return (
-    <div className="my-0.5 min-w-0 max-w-full text-xs" data-tool-row={item.type} onContextMenu={contextMenu(() => toolMenu(item, linked, t))}>
+    <div className="my-0.5 min-w-0 max-w-full text-xs" data-tool-row={item.type} data-tool-view={presentation?.kind} onContextMenu={contextMenu(() => toolMenu(item, linked, t))}>
       {/* Failed (UI review #13): only the ✕ and 「失败」 are red; the rest of the row stays muted. */}
       <div className="flex min-w-0 max-w-full items-center gap-1.5 text-muted">
-        <button onClick={() => userToggle(() => setOpen(!open))} className="flex shrink-0 items-center gap-1.5 hover:text-foreground">
-          <ToolIcon item={item} liveness={liveness} blocked={blocked} approval={approval} />
+        <button aria-expanded={open} onClick={() => userToggle(() => setOpen(!open))} className="flex shrink-0 items-center gap-1.5 hover:text-foreground">
+          <ToolIcon item={item} liveness={liveness} blocked={blocked} approval={approval} icon={presentation?.icon} failed={failed} uncertain={uncertain} />
           <span className="font-medium">{t(key)}</span>
+          {presentation && (open ? <ChevronDown size={13} /> : <ChevronRight size={13} />)}
         </button>
         {failed && <span className="shrink-0 text-danger">· {t(item.status === "declined" ? "tool.declined" : "taskrow.outcome.failed")}</span>}
+        {uncertain && <span className="shrink-0 text-warn-text">· {t("taskrow.outcome.uncertain")}</span>}
         {approval === "required" && <span data-tool-approval="required" className="shrink-0 text-warn-text">· {t("tool.approvalRequired")}</span>}
         {approval === "denied" && <span data-tool-approval="denied" className="shrink-0 text-muted">· {t("tool.declined")}</span>}
         {blocked && <span data-tool-blocked className="shrink-0 text-muted">· {t("tool.safetyBlocked")}</span>}
@@ -143,7 +151,8 @@ export function PlainToolRow({ item, safetyBlock = null }: { item: RawItem; safe
       )}
       {/* Expanded, a safety-stopped call shows what the agent was told (the reason and the hint). */}
       {open && error && !blocked && <ToolErrorText text={error} className="mt-1 ml-5" />}
-      {open && (blocked || !(error && output)) && (
+      {open && presentation && !blocked && <div className="mt-1 ml-5 min-w-0">{presentation.details}</div>}
+      {open && (!presentation || blocked) && (blocked || !(error && output)) && (
         <pre className="mt-1 ml-5 max-h-72 overflow-auto rounded-md bg-surface p-2 font-mono text-caption/[inherit] whitespace-pre-wrap text-muted">{output ?? (approval ? toolErrorText(item) : null) ?? JSON.stringify(item, null, 2)}</pre>
       )}
     </div>

@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { SidebarGroup } from "../src/renderer/src/lib/sidebar";
 import { hostKey } from "../src/renderer/src/lib/hostKeys";
-import { cleanProjectIcon, groupIcon, migrateIcons, parseCustomIcon, projectIcon, projectLucideIcon, PROJECT_EMOJIS, PROJECT_ICON_COLORS, PROJECT_LUCIDE_ICONS, PROJECT_NAMED_SWATCHES, sameProjectColor, searchProjectEmoji, searchProjectIcons, withIcon } from "../src/renderer/src/lib/projectIcons";
+import { cleanProjectIcon, groupIcon, migrateIcons, parseCustomIcon, projectIcon, projectLucideIcon, PROJECT_EMOJIS, PROJECT_LUCIDE_ICONS, searchProjectEmoji, searchProjectIcons, withIcon } from "../src/renderer/src/lib/projectIcons";
 import { ProjectBadge } from "../src/renderer/src/components/ProjectBadge";
 
 describe("cleanProjectIcon", () => {
@@ -96,29 +96,8 @@ describe("catalog", () => {
     expect(projectLucideIcon("nope")).toBeNull();
   });
 
-  it("has unique emoji and the eight colours", () => {
+  it("has unique emoji", () => {
     expect(new Set(PROJECT_EMOJIS.map((e) => e.value)).size).toBe(PROJECT_EMOJIS.length);
-    expect(PROJECT_ICON_COLORS).toHaveLength(8);
-    expect(PROJECT_ICON_COLORS[0]).toBe("#ffffff");
-  });
-
-  it("sameProjectColor: a daemon palette name matches its twin swatch, cyan / magenta only their own", () => {
-    // Names whose hue the swatch row carries count as that swatch (selected ring on edit).
-    expect(sameProjectColor("red", "#e5484d")).toBe(true);
-    expect(sameProjectColor("blue", "#3e63dd")).toBe(true);
-    expect(sameProjectColor("green", "#30a46c")).toBe(true);
-    expect(sameProjectColor("yellow", "#ffb224")).toBe(true);
-    // Hex equality still works, including uppercase presentation values.
-    expect(sameProjectColor("#E5484D", "#e5484d")).toBe(true);
-    // No cross-matching: another hue's swatch, a same-hue hex that isn't the swatch, pink vs magenta.
-    expect(sameProjectColor("red", "#3e63dd")).toBe(false);
-    expect(sameProjectColor("#fa5252", "#e5484d")).toBe(false);
-    expect(sameProjectColor("magenta", "#d6409f")).toBe(false);
-    // The appended name swatches write daemon tokens and match only themselves.
-    expect(PROJECT_NAMED_SWATCHES).toEqual(["cyan", "magenta"]);
-    expect(sameProjectColor("cyan", "cyan")).toBe(true);
-    expect(sameProjectColor("magenta", "magenta")).toBe(true);
-    expect(sameProjectColor("cyan", "magenta")).toBe(false);
   });
 
   it("search matches zh / en keywords and icon ids, case-insensitively", () => {

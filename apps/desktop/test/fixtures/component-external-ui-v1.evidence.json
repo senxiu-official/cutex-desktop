@@ -1,0 +1,64 @@
+{
+  "_source": "cutex fix/r270-component-contract aa1d3463, contract HTTP smoke (r270-component-contract-evidence-aa1d3463.zip linux-evidence/aa1d3463-http-evidence.json, phases[].result.external), with installation paths anonymized",
+  "ready": {
+    "checkedAt": "2026-10-29T14:35:38Z",
+    "issues": [],
+    "node": "/opt/component-fixtures/r270/node-v24.21.0-linux-x64/bin/node",
+    "nodeRange": ">=24.9.0 <25",
+    "nodeRecommended": "24.21.0",
+    "packages": [
+      "@deepseek-ai/dsh@0.2.1-rc.3",
+      "@deepseek-ai/dsh-session-format-catalog@0.2.1-rc.3",
+      "ws@8.22.0"
+    ],
+    "resolved": {
+      "externalRoot": "/opt/component-fixtures/r270/dsh",
+      "node": "/opt/component-fixtures/r270/node-v24.21.0-linux-x64/bin/node",
+      "rg": null
+    },
+    "rg": null,
+    "root": "/opt/component-fixtures/r270/dsh",
+    "storedConfig": {
+      "externalRoot": "/opt/component-fixtures/r270/dsh/../dsh",
+      "node": "/opt/component-fixtures/r270/node-v24.21.0-linux-x64/bin/../bin/node",
+      "rg": null
+    },
+    "version": "dsh-r3"
+  },
+  "brokenWs": {
+    "checkedAt": "2026-10-29T14:35:40Z",
+    "issues": [
+      {
+        "actual": "MODULE_NOT_FOUND: Cannot find module '/opt/component-fixtures/r270/http-aa1d3463/broken-ws-diagnostic-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…",
+        "code": "external_root_invalid",
+        "diagnostics": "MODULE_NOT_FOUND: Cannot find module '/opt/component-fixtures/r270/http-aa1d3463/broken-ws-diagnostic-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/node_modules/ws/index.js'",
+        "expected": "Node-resolvable entry for ws",
+        "path": "/opt/component-fixtures/r270/http-aa1d3463/broken-ws-diagnostic-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/node_modules/ws",
+        "steps": [
+          "Repair or reinstall the exact package in this npm prefix so its main/exports and required CLI/catalog entry resolve to existing files, then check again."
+        ]
+      }
+    ],
+    "node": "/opt/component-fixtures/r270/node-v24.21.0-linux-x64/bin/node",
+    "nodeRange": ">=24.9.0 <25",
+    "nodeRecommended": "24.21.0",
+    "packages": [
+      "@deepseek-ai/dsh@0.2.1-rc.3",
+      "@deepseek-ai/dsh-session-format-catalog@0.2.1-rc.3",
+      "ws@8.22.0"
+    ],
+    "resolved": {
+      "externalRoot": "/opt/component-fixtures/r270/http-aa1d3463/broken-ws-diagnostic-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "node": "/opt/component-fixtures/r270/node-v24.21.0-linux-x64/bin/node",
+      "rg": null
+    },
+    "rg": null,
+    "root": "/opt/component-fixtures/r270/http-aa1d3463/broken-ws-diagnostic-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "storedConfig": {
+      "externalRoot": "/opt/component-fixtures/r270/http-aa1d3463/broken-ws-diagnostic-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "node": "/opt/component-fixtures/r270/node-v24.21.0-linux-x64/bin/../bin/node",
+      "rg": null
+    },
+    "version": "dsh-r3"
+  }
+}

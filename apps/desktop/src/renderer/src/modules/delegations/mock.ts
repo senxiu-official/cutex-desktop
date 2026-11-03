@@ -997,7 +997,7 @@ export function createUpgradeMock(hostId: string, options: UpgradeMockOptions = 
           id: "mock-grant-" + (state.revision + 1), projectId: state.projectId,
           rootDelegationRef: { ...root.ref }, requesterRef: { ...action.requesterRef },
           targetRefs: action.targetRefs.map(ref => ({ ...ref })), purpose: "review", maxUses: 1, usedCount: 0,
-          expiresAt: null, authorityEpoch: 1, revision: 1, revokedAt: null, allowedActions: { revoke: canRoute },
+          expiresAt: null, authorityEpoch: 1, policyRevision: state.policy.revision, revision: 1, revokedAt: null, allowedActions: { revoke: canRoute },
         });
         break;
       }

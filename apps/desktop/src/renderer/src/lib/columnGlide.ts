@@ -244,6 +244,18 @@ function rowGlide(shot: RowShot): void {
   noteWhenStill(shot.root, motions);
 }
 
+/** The columns' own glides (not the row slide, not a Shelf box's motion), by the row they run in. */
+const glides = new Map<Animation, HTMLElement>();
+
+/** Ends the column glides running in `root` (each column drawn at its laid-out box at once). */
+function stopGlides(root: HTMLElement): void {
+  for (const [motion, at] of [...glides]) {
+    if (at !== root && at.isConnected) continue;
+    glides.delete(motion);
+    if (motion.playState === "running" || motion.playState === "paused") motion.cancel();
+  }
+}
+
 /**
  * After a structural change: the columns that moved glide from their old box. `still`: the change came from a
  * width drag or a resize of the work area (the caller knows), so they only take their new place.
@@ -262,6 +274,11 @@ export function glideColumns(root: HTMLElement | null, still = false): void {
   // The row slide's own later renders (the maximised widths stored): it carries them; the boxes are taken once it is over.
   if (!still && slideRunning(root)) return;
   if (still) {
+    // A column glide still running holds the width it was aiming at — the row has just changed width under it, so
+    // that width is gone: it ends now and the columns take their new place in this frame (unmaximize-jump
+    // 2026-10-30: a glide toward the row's unmeasured first layout held the column at 860 px for its whole run,
+    // then snapped to its 768).
+    stopGlides(root);
     // Nothing moves: the boxes are only remembered — after this frame is painted, when reading them costs no
     // layout of its own (read here, in the commit's layout effect, every step of a window resize forced one:
     // perf re-run 2026-10-21 §7.3 N2).
@@ -284,7 +301,11 @@ export function glideColumns(root: HTMLElement | null, still = false): void {
     if (quiet || !before || r.width <= 0 || typeof el.animate !== "function") continue;
     const dx = before.left - r.left;
     if (Math.abs(dx) < 2 && Math.abs(before.width - r.width) < 2) continue;
-    el.animate([{ transform: `translateX(${Math.round(dx)}px)`, width: `${Math.round(before.width)}px` }, { transform: "none", width: `${Math.round(r.width)}px` }], { duration: SHELF_MOTION_MS, easing: EASE });
+    const motion = el.animate([{ transform: `translateX(${Math.round(dx)}px)`, width: `${Math.round(before.width)}px` }, { transform: "none", width: `${Math.round(r.width)}px` }], { duration: SHELF_MOTION_MS, easing: EASE });
+    if (motion) {
+      for (const [m] of glides) if (m.playState === "finished" || m.playState === "idle") glides.delete(m);
+      glides.set(motion, root);
+    }
     moved = true;
   }
   if (moved) slotsMotion();
@@ -302,6 +323,7 @@ export function resetColumnGlide(): void {
   keyTimer = null;
   keyCommit = null;
   last.clear();
+  glides.clear();
   resizeDrag(false);
   settleUntil = 0;
 }

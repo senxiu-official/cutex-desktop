@@ -1,3 +1,5 @@
+import { featuresOf, useApp } from "../../store";
+import { DebugErrorDetails } from "../../components/DebugErrorDetails";
 import { isImeComposing } from "../../lib/ime";
 import { useEffect, useMemo, useRef } from "react";
 import { ArrowUp, Loader2, StickyNote, Square } from "lucide-react";
@@ -29,6 +31,7 @@ function SideEntry({ entry }: { entry: TimelineEntry }) {
 /** Self-contained Body: no selectedId, no container chrome, transient drafts live in module store. */
 export function SideChatBody({ hostId: host, sessionId, chatId, revealed, visible }: { hostId: string; sessionId: string; chatId: string; revealed: number; visible: boolean }) {
   const { t } = useI18n();
+  const optionsV1 = useApp(s => featuresOf(s, host).has("user-input-options-v1"));
   const view = useSides(s => s.views[sideKey(host, chatId)]);
   const [prompt] = useModulePref("side-chat", "summaryPrompt", SUMMARY_PROMPT);
   const [anchorMode] = useModulePref("side-chat", "summaryAnchor", "start");
@@ -62,14 +65,14 @@ export function SideChatBody({ hostId: host, sessionId, chatId, revealed, visibl
         {entries.length === 0 && <p className="py-8 text-center text-sm text-subtle">{t("side-chat.empty")}</p>}
         {entries.map(entry => <SideEntry key={entry.id} entry={entry} />)}
         {busy && <div className="flex items-center gap-2 text-xs text-subtle"><Loader2 size={13} className="animate-spin" />{t("side-chat.running")}</div>}
-        {error && <div role="alert" data-error-source={view.error ? "request" : "runtime"} className="rounded-lg border border-danger/30 p-3 text-xs text-danger">{view.error ? sideErrorText(error, t) : t("side-chat.runtimeError", { message: sideErrorText(error, t) ?? error })}<button className="ml-3 underline" onClick={() => void loadSide(host, sessionId, chatId).catch(() => {})}>{t("side-chat.retry")}</button></div>}
+        {error && <div role="alert" data-error-source={view.error ? "request" : "runtime"} className="rounded-lg border border-danger/30 p-3 text-xs text-danger">{view.error ? sideErrorText(error, t) : t("side-chat.runtimeError", { message: sideErrorText(error, t) ?? error })}<button className="ml-3 underline" onClick={() => void loadSide(host, sessionId, chatId).catch(() => {})}>{t("side-chat.retry")}</button><DebugErrorDetails error={error} source={view.error ? "side-chat.request" : "side-chat.runtime"} /></div>}
         {chat.status === "stale" && <p className="text-sm text-muted">{t("side-chat.stale")}</p>}
         {chat.status === "closed" && <p className="text-sm text-muted">{t("side-chat.closed")}</p>}
         {summary?.status === "saved" && summary.noteId && <button className="self-start rounded-lg bg-accent/10 px-3 py-2 text-xs text-accent" onClick={() => void services.refs.open({ hostId: host, kind: "notes.note", key: summary.noteId!, title: summary.input?.title ?? t("side-chat.saved"), params: { noteId: summary.noteId! } })}>{t("side-chat.saved")} →</button>}
         {summary?.error && <p role="alert" className="text-xs text-danger">{summary.error === "no-summary" ? t("side-chat.noSummary") : summary.error === "note-too-long" ? t("side-chat.noteTooLong") : sideErrorText(summary.error, t)}</p>}
       </div>
     </div>
-    <InteractionDock pending={chat.pendingRequests.map(r => ({ ...r, params: r.params ?? {} }))} onReply={(request, reply) => void respondSide(host, chatId, request.id, reply)} />
+    <InteractionDock optionsV1={optionsV1} draftScope={{ hostId: host, sessionId: JSON.stringify([sessionId, "side-chat", chat.id]), runtimeGeneration: chat.runtimeGeneration }} pending={chat.pendingRequests.map(r => ({ ...r, params: r.params ?? {} }))} onReply={(request, reply) => void respondSide(host, chatId, request.id, reply)} />
     <div className="mx-auto w-full max-w-3xl shrink-0 space-y-2 px-4 pb-4">
       <div className="flex flex-wrap items-center gap-2">
         <button disabled={!notesActive || !canSummarize || !!view.pendingMessage || entries.length === 0} title={!notesActive ? t("side-chat.notesOff") : undefined} className={btn({ size: "sm" })} onClick={() => void summarizeSide(host, chatId, String(prompt), String(anchorMode))}>

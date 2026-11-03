@@ -117,6 +117,15 @@ export function modelFamily(p: { model?: string | null; cliKind?: string | null 
   return "other";
 }
 
+/** The provider colour (`--prov-<tint>`, styles.css) of an agent's avatar outline and of 头像底色 = 按模型: its model
+ *  family, and Qwen, which has no family of its own (its themes / portraits stay "other"'s) but a colour (its logo's). */
+export type ProviderTint = ModelFamily | "qwen";
+export function providerTint(p: { model?: string | null; cliKind?: string | null }): ProviderTint {
+  const family = modelFamily(p);
+  if (family !== "other") return family;
+  return /(^|[^a-z])(qwen|qwq)/.test((p.model ?? "").trim().toLowerCase().replace(/^.*\//, "")) ? "qwen" : "other";
+}
+
 // Gemini / Kimi / GLM have no emoji theme of their own: the whole set, as before they had a family.
 const FAMILY_THEME: Record<ModelFamily, AvatarThemeId | "all"> = { claude: "animals", openai: "gems", gemini: "all", deepseek: "sea", kimi: "all", glm: "all", other: "all" };
 

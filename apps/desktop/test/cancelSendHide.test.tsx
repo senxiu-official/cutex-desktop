@@ -15,7 +15,7 @@ vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), brid
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { cancelableTo, matchCancelable } = await import("../src/renderer/src/lib/cancelSend");
-const { hiddenKey, resetHiddenRowsForTest, useHiddenRows, visibleRows } = await import("../src/renderer/src/lib/hiddenRows");
+const { hiddenKey, resetHiddenRowsForTest, useHiddenRows, visibleRows } = await import("../src/renderer/src/lib/legacyDelivery/hiddenRows");
 const { CancelSendButton } = await import("../src/renderer/src/components/CancelSendButton");
 const { HiddenUndo } = await import("../src/renderer/src/components/HiddenUndo");
 

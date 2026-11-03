@@ -18,7 +18,7 @@ const ringIds = (rows: { draw: QuotaGauge; balance: boolean }[]) => rows.map((r)
 const { composerGauges, gaugeChoiceName, migrateGaugeChoices, MERGE_RESET_TOLERANCE_MS } = await import("../src/renderer/src/lib/quota");
 
 describe("composerGauges", () => {
-  it("merges windows that reset together into one ring drawing the one closest to running out; balances stay text", () => {
+  it("groups same-reset windows while retaining every member and a constrained representative; balances stay text", () => {
     const rows = composerGauges([...claude(), bal("credits", "62.4")], {}, true, true);
     expect(ringIds(rows)).toEqual(["claude-0", "claude-1", "bal:credits"]);
     const merged = rows[1]!;

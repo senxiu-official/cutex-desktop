@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Design 040 §3.1: components/Avatar draws an agent's status itself (running ring, corner badge, presence) and
-// pictures follow 头像底色 (none = a hairline edge, 按模型 = the provider colour), all round.
+// pictures follow 头像底色 (none = nothing behind, 按模型 = the provider colour), all round with the provider outline.
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -86,37 +86,40 @@ describe("Avatar status", () => {
     expect(q("[data-avatar-dot='online']")?.style.background).toBe("var(--ok)");
   });
 
-  it("a minor agent is a rounded tile with its initial (never a round dot); running lights the tile's edge", () => {
+  it("a minor agent is a rounded tile with two letters (never a round dot); running lights the tile's edge", () => {
     minorDot = true;
-    draw({ minor: true, size: 20 });
+    draw({ size: 20 });
     const tile = q("[data-avatar='dot'] [data-minor-tile]")!;
-    expect(tile.textContent).toBe("E");
-    expect(tile.style.width).toBe("15px");
-    expect(tile.style.borderRadius).toBe("4px");
+    expect(tile.textContent).toBe("Ev");
+    expect(tile.style.width).toBe("18px");
+    expect(tile.style.borderRadius).toBe("5px");
     expect(tile.className).not.toContain("rounded-full");
     expect(q("[data-minor-tile] .agent-ring-tile")).toBeNull();
-    draw({ minor: true, size: 20, status: { running: true } });
+    draw({ size: 20, status: { running: true } });
     expect(q("[data-minor-tile] .agent-ring-tile")).not.toBeNull();
     // Only the tile's edge: no round ring around the 20 px slot.
     expect(host.querySelectorAll(".agent-ring").length).toBe(0);
-    draw({ minor: true, size: 16, initial: "Mk" });
-    expect(q("[data-minor-tile]")!.style.width).toBe("12px");
-    // One character: a two-letter initial would not fit the small tile.
-    expect(q("[data-minor-tile]")!.textContent).toBe("M");
+    draw({ size: 16, initial: "Mk" });
+    expect(q("[data-minor-tile]")!.style.width).toBe("14px");
+    // Two letters down to the 16 px slot (owner 2026-11-01), at the 8 px floor.
+    expect(q("[data-minor-tile]")!.textContent).toBe("Mk");
+    expect(q("[data-minor-tile]")!.style.fontSize).toBe("8px");
   });
 });
 
-describe("an agent without an avatar (owner 2026-10-25)", () => {
-  // Sidebar row (minor), the Ctrl+B rail / tray, the conversation header, @ chip, delegation / queue chips (minor).
-  const SURFACES = [{ size: 20, minor: true }, { size: 20 }, { size: 38 }, { size: 28 }, { size: 16, minor: true }] as const;
+describe("an agent without an avatar (owner 2026-10-25; rule A 2026-11-01)", () => {
+  // Sidebar row, the Ctrl+B rail / tray, the conversation header, @ chip, delegation / queue chips.
+  const SURFACES = [{ size: 20 }, { size: 20, status: { running: true } }, { size: 38 }, { size: 28 }, { size: 16 }] as const;
   const emojiSrc = () => q("[data-avatar='emoji'] img")?.getAttribute("src") ?? null;
 
-  it("draws its fallback everywhere — the tile where the place allows it, else its own default emoji; never a picture", () => {
-    for (const surface of SURFACES) {
-      minorDot = "minor" in surface;
-      draw({ avatar: null, ...surface });
-      expect(q("[data-avatar]")?.dataset.avatar).toBe(minorDot ? "dot" : "emoji");
-      expect(q("[data-avatar] img[src^='data:image/png']")).toBeNull();
+  it("draws the same fallback everywhere — the tile on every surface when it is minor, else its own default emoji; never a picture", () => {
+    for (const minor of [true, false]) {
+      minorDot = minor;
+      for (const surface of SURFACES) {
+        draw({ avatar: null, ...surface });
+        expect(q("[data-avatar]")?.dataset.avatar).toBe(minor ? "dot" : "emoji");
+        expect(q("[data-avatar] img[src^='data:image/png']")).toBeNull();
+      }
     }
     // Its default emoji comes from its own seed, not from another agent.
     minorDot = false;
@@ -132,7 +135,7 @@ describe("an agent without an avatar (owner 2026-10-25)", () => {
     minorDot = false;
     draw({ avatar: { kind: "emoji", value: "🦊" }, size: 38 });
     const fox = emojiSrc();
-    for (const surface of SURFACES.filter((s) => !("minor" in s))) {
+    for (const surface of SURFACES) {
       draw({ avatar: { kind: "emoji", value: "🦊" }, ...surface });
       expect(emojiSrc()).toBe(fox);
     }
@@ -161,12 +164,12 @@ describe("Avatar pictures and 头像底色", () => {
     expect(q("[data-avatar='letter']")!.style.width).toBe("16px");
   });
 
-  it("default: no colour behind a picture, a hairline edge", () => {
+  it("default: no colour behind a picture, the provider outline", () => {
     draw({ picture: PIC });
     const face = q("[data-avatar='picture']")!;
     expect(face.style.background).toBe("transparent");
     expect(face.hasAttribute("data-avatar-tint")).toBe(false);
-    expect(face.querySelector<HTMLElement>("span")!.style.boxShadow).toContain("var(--fg) 10%");
+    expect(face.querySelector<HTMLElement>("[data-avatar-edge]")!.style.boxShadow).toContain("var(--prov-gemini)");
   });
 
   it("按模型: the provider colour behind it and as its ring", () => {
@@ -175,7 +178,12 @@ describe("Avatar pictures and 头像底色", () => {
     const face = q("[data-avatar='picture']")!;
     expect(face.getAttribute("data-avatar-tint")).toBe("gemini");
     expect(face.style.background).toContain("var(--prov-gemini) 16%");
-    expect(face.querySelector<HTMLElement>("span")!.style.boxShadow).toContain("var(--prov-gemini) 40%");
+    // The same single outline as 无: the backdrop is all 按模型 adds (no double ring).
+    const edges = face.querySelectorAll<HTMLElement>("[data-avatar-edge]");
+    expect(edges).toHaveLength(1);
+    act(() => setUiPref("avatarTint", "none"));
+    draw({ picture: PIC });
+    expect(q("[data-avatar='picture'] [data-avatar-edge]")!.style.boxShadow).toBe(edges[0]!.style.boxShadow);
   });
 
   it("按模型 leaves emoji / letter avatars on their Profile colour", () => {

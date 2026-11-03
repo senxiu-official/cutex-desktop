@@ -12,7 +12,7 @@ import { resetTerm, setTerm } from "../src/renderer/src/lib/terms";
 import { applyTermPreset } from "../src/renderer/src/lib/termPresets";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-it("updates an already mounted role label and avatar accessibility text when terms change", async () => {
+it("updates an already mounted role label when terms change; the avatar carries no Operator marker", async () => {
   localStorage.setItem("cutex-desktop.locale", "zh-CN");
   const div = document.createElement("div"); document.body.append(div);
   const root = createRoot(div);
@@ -20,13 +20,11 @@ it("updates an already mounted role label and avatar accessibility text when ter
   try {
     await act(async () => root.render(h(I18nProvider, null, h(Sample))));
     const label = () => div.querySelector("[data-role]")!.textContent;
-    const title = () => div.querySelector("[data-operator-mark]")!.getAttribute("title");
-    expect(label()).toBe("副主管"); expect(title()).toBe("副主管");
+    expect(label()).toBe("副主管"); expect(div.querySelector("[data-operator-mark]")).toBeNull();
     act(() => setTerm("zh-CN", "operator", "one", "副管家"));
-    expect(label()).toBe("副管家"); expect(title()).toBe("副管家");
-    expect(div.querySelector("[data-operator-mark]")!.getAttribute("aria-label")).toBe("副管家");
+    expect(label()).toBe("副管家");
     act(() => applyTermPreset("zh-CN", "maid"));
-    expect(label()).toBe("Deputy Maid"); expect(title()).toBe("Deputy Maid");
+    expect(label()).toBe("Deputy Maid");
   } finally {
     act(() => root.unmount()); div.remove(); applyTermPreset("zh-CN", "default"); resetTerm("zh-CN", "operator");
   }

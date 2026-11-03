@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AdmissionNextStep } from "@cutex-desktop/protocol";
-import { immediateStartItems, settledIds, shownNextStep, STARTS_NOW_DELAY_MS } from "../src/renderer/src/lib/settledRideAlongs";
+import { immediateStartItems, settledIds, shownNextStep, STARTS_NOW_DELAY_MS } from "../src/renderer/src/lib/legacyDelivery/settledRideAlongs";
 
 const item = (id: string, enqueuedAt: string | undefined): AdmissionNextStep => ({ id, deliveryKind: "alarm", label: id, enqueuedAt, timing: "afterTurn" }) as AdmissionNextStep;
 

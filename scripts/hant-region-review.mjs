@@ -29,6 +29,8 @@ export const reviewed = {
     keys: {
       "settings.group.app": "應用程式",
       "projects.root.apply": "套用",
+      "project-view.stream.includeOwnerTurns": "包含我發起的回合",
+      "project-view.stream.emptyAutonomous": "目前沒有其他動態。可在「回合」中包含你發起的回合。",
       "tray.seg.apps": "應用程式",
       "shortcuts.conflict.composer": "輸入框和文字方塊要用這個按鍵（傳送、換行、編輯）。",
       "shortcuts.conflict.reserved": "這是系統保留的按鍵，應用程式收不到或會誤觸。",

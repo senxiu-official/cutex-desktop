@@ -4,7 +4,7 @@
 // puts the profile section above the model list (ZCode-style merged chip).
 // Row names go through the model display-name rules (lib/modelDisplay); values stay the raw ids.
 import { useState, type ReactNode } from "react";
-import { ChevronRight, Pin, PinOff } from "lucide-react";
+import { AlertTriangle, ChevronRight, Pin, PinOff } from "lucide-react";
 import type { ModelOption } from "../../../shared/ipc";
 import { useI18n } from "../i18n";
 import { pinsFor, splitPinned, togglePinned, withPins } from "../lib/models";
@@ -18,7 +18,7 @@ import { useComposerHost } from "../lib/targetHost";
 type Item = Pick<ModelOption, "model" | "displayName" | "description"> & { primary?: boolean };
 
 /** `note`: a line under the title (e.g. the agent's runtime is offline: no model list to show yet). */
-export function ModelPicker({ profile, models, current, label, trigger, triggerTitle, header, note, onOpen, onSelect, openSignal }: { profile: string | null; models: Item[]; current: string | null; label: string; trigger?: ReactNode; triggerTitle?: string; header?: (close: () => void) => ReactNode; note?: string; onOpen(): void; onSelect(model: string): void; openSignal?: number }) {
+export function ModelPicker({ profile, models, current, label, trigger, triggerTitle, header, note, unavailable = false, onOpen, onSelect, openSignal }: { profile: string | null; models: Item[]; current: string | null; label: string; trigger?: ReactNode; triggerTitle?: string; header?: (close: () => void) => ReactNode; note?: string; unavailable?: boolean; onOpen(): void; onSelect(model: string): void; openSignal?: number }) {
   const { t } = useI18n();
   const modelName = useModelName();
   const key = profile ?? "";
@@ -69,8 +69,12 @@ export function ModelPicker({ profile, models, current, label, trigger, triggerT
         setMore(false);
         onOpen();
       }}
-      trigger={trigger ?? <span>{label}</span>}
-      triggerTitle={triggerTitle}
+      trigger={<span className={unavailable ? "inline-flex min-w-0 items-center gap-1 text-warn" : "contents"} data-model-unlisted={unavailable ? "" : undefined}>
+        {unavailable && <AlertTriangle size={12} className="shrink-0" />}{trigger ?? <span>{label}</span>}
+        {unavailable && <span className="sr-only">{t("composer.model.chooseAvailable")}</span>}
+      </span>}
+      triggerTitle={unavailable ? `${t("composer.model.unlisted")}\n${t("composer.model.chooseAvailable")}` : triggerTitle}
+      triggerLabel={unavailable ? t("composer.model.chooseAvailable") : undefined}
       onKey={(e, close) => {
         if (!/^[1-9]$/.test(e.key)) return false;
         const m = pinned[Number(e.key) - 1];
@@ -83,6 +87,10 @@ export function ModelPicker({ profile, models, current, label, trigger, triggerT
       {(close) => (
         <>
           {header?.(close)}
+          {unavailable && current && <div data-model-unavailable aria-disabled="true" className="mb-1 border-b border-border px-2.5 py-2 text-warn" title={t("composer.model.unlisted")}>
+            <span className="block break-all text-sm">{current}</span>
+            <span className="block text-xs">{t("composer.model.unavailable")}</span>
+          </div>}
           <div className="px-2.5 pt-1.5 pb-1 text-xs text-subtle">{t("composer.modelTitle")}</div>
           {pinned.map((m, i) => row(m, close, i))}
           {note && <p className="px-2.5 py-1.5 text-xs text-subtle" data-model-note="">{note}</p>}

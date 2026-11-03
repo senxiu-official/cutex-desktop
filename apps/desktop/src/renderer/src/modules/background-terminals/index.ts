@@ -1,5 +1,4 @@
-// 后台终端 (the agent's background terminals, /ps): its status category. Codex agents only
-// (Claude: features.backgroundTerminals false).
+// Background terminals (/ps) for runtimes advertising backgroundTerminals, including Claude shells.
 import { Terminal } from "lucide-react";
 import { defineModule } from "../slots";
 import { TerminalsBody, TerminalsMeta, TerminalsStatusBar } from "./TerminalsStatus";

@@ -105,3 +105,54 @@ it.each(cases)("renders %s without a boundary fallback and with the correct acco
     expect(observation!.querySelector("[data-effect-markers], [data-timing-presentation], [data-effect-scope-marker]")).toBeNull();
   }
 });
+
+it.each([false, undefined])("keeps the API-key credential separate from providerEnvKey (editable=%s)", async editable => {
+  const detail = fixture("api-key-account", "codex", "apiKey", "relay", {
+    config: { ...config, providerEnvKey: "R270_VIRTUAL_ENV" },
+    editable: editable === undefined ? {} : { providerEnvKey: editable },
+    apiKeyPresent: true,
+  });
+  env.snapshot = { detail, models: null, quota: null, account: null };
+  const patchProfile = vi.fn().mockResolvedValue(detail);
+  env.api.patchProfile = patchProfile;
+  await act(async () => root.render(h(ProfileEditor, {
+    profile: detail.name, item: detail as ProfileItem, isDefault: false, refusal: null,
+    onChanged: vi.fn(), onDuplicate: vi.fn(), onDelete: async () => {}, onCreateProvider: vi.fn(),
+  })));
+  const account = container.querySelector("#profile-account")!;
+  expect(account.textContent).not.toContain("providerEnvKey");
+  expect(account.textContent).not.toContain("R270_VIRTUAL_ENV");
+  expect([...container.querySelectorAll("input")].some(input => input.value === "R270_VIRTUAL_ENV")).toBe(false);
+  const key = account.querySelector<HTMLInputElement>('input[type="password"]')!;
+  expect(key).not.toBeNull();
+  expect(key.value).toBe("");
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(key, "virtual-r270-key");
+    key.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const save = [...container.querySelectorAll("button")].find(button => button.textContent === "settings.save");
+  expect(save).toBeDefined();
+  await act(async () => save!.click());
+  expect(patchProfile).toHaveBeenCalledExactlyOnceWith(detail.name, { apiKey: "virtual-r270-key" });
+  expect(key.value).toBe("");
+});
+
+it.each([
+  [{ providerOptions: false }, true],
+  [{ providerBaseUrl: false }, true],
+  [{ providerOptions: true, providerBaseUrl: true }, false],
+  [{}, false],
+] as const)("honors the daemon endpoint editability map %j, including older hosts", async (editable, disabled) => {
+  const detail = fixture("endpoint-account", "codex", "apiKey", "relay", {
+    config: { ...config, providerEnvKey: "R270_VIRTUAL_ENV" }, editable, apiKeyPresent: true,
+  });
+  env.snapshot = { detail, models: null, quota: null, account: null };
+  await act(async () => root.render(h(ProfileEditor, {
+    profile: detail.name, item: detail as ProfileItem, isDefault: false, refusal: null,
+    onChanged: vi.fn(), onDuplicate: vi.fn(), onDelete: async () => {}, onCreateProvider: vi.fn(),
+  })));
+  const endpoint = [...container.querySelectorAll("#profile-account input")]
+    .find(input => (input as HTMLInputElement).value === config.providerBaseUrl) as HTMLInputElement | undefined;
+  expect(endpoint).toBeDefined();
+  expect(endpoint!.disabled).toBe(disabled);
+});

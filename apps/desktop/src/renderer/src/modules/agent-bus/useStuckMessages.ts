@@ -1,32 +1,19 @@
-// State of the stuck-message list: loaded when the section opens, when the host or the age filter
-// changes, and after every discard (the list always shows what cutex says now). Mounted only while
-// the settings page is open, so nothing polls in the background.
+// State of the stuck-message list (待清理 → 卡住的消息): loaded when the section opens, when the host or
+// the age filter changes, and after every discard (the list always shows what cutex says now). Mounted
+// only while the settings page is open, so nothing polls in the background.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { StuckBusMessage, StuckBusView } from "../../../../shared/ipc";
 import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
 import { useHostData } from "../../lib/useHostScope";
 import { bridge } from "../../bridge";
 import { MESSAGE_SETTLEMENT_EVENT } from "../../../../shared/messageSettlement";
-import { bulkTargets, DEFAULT_MIN_AGE, discardAll, discardOutcome, discardRequest, emptySummary, failure, isMinAgeChoice, type BulkSummary } from "./stuck";
-
-const KEY = "cutex-desktop.stuckBusMinAge";
-
-function loadMinAge(): number {
-  try {
-    const stored: unknown = JSON.parse(localStorage.getItem(KEY) ?? "null");
-    return isMinAgeChoice(stored) ? stored : DEFAULT_MIN_AGE;
-  } catch {
-    return DEFAULT_MIN_AGE;
-  }
-}
+import { bulkTargets, discardAll, discardOutcome, discardRequest, emptySummary, failure, type BulkSummary } from "./stuck";
 
 export interface StuckMessagesState {
   view: StuckBusView | null;
   loading: boolean;
   /** Last load error. */
   error: string | null;
-  minAge: number;
-  setMinAge(secs: number): void;
   /** Ids being discarded one by one right now. */
   busy: ReadonlySet<string>;
   /** 全部丢弃 in progress. */
@@ -40,12 +27,12 @@ export interface StuckMessagesState {
   discardEverything(): Promise<void>;
 }
 
-export function useStuckMessages(): StuckMessagesState {
+/** `minAge`: the section's age filter (seconds; 0 = all). `enabled`: the host lists stuck messages. */
+export function useStuckMessages(minAge: number, enabled = true): StuckMessagesState {
   // The page's target host (Settings → a host page), not always the focus host.
   const hostId = useTargetHostId();
   const api = useTargetApi();
   const connected = useHostData(hostId)?.daemon.kind === "connected";
-  const [minAge, setMinAgeState] = useState(loadMinAge);
   const [view, setView] = useState<StuckBusView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +43,8 @@ export function useStuckMessages(): StuckMessagesState {
   const loadSeq = useRef(0);
   const scope = useRef({ hostId, minAge, api });
   scope.current = { hostId, minAge, api };
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -83,7 +72,7 @@ export function useStuckMessages(): StuckMessagesState {
   useEffect(() => {
     if (typeof bridge.on !== "function") return;
     return bridge.on("hostEvent", ({ hostId: changedHost, envelope }) => {
-      if (changedHost === scope.current.hostId && envelope.cutex?.method === MESSAGE_SETTLEMENT_EVENT) void refresh();
+      if (enabledRef.current && changedHost === scope.current.hostId && envelope.cutex?.method === MESSAGE_SETTLEMENT_EVENT) void refresh();
     });
   }, [refresh]);
 
@@ -98,20 +87,11 @@ export function useStuckMessages(): StuckMessagesState {
 
   // First load, a host switch, a reconnect, a new age filter.
   useEffect(() => {
-    if (connected) void refresh();
+    if (connected && enabled) void refresh();
     return () => {
       loadSeq.current += 1;
     };
-  }, [hostId, connected, minAge, refresh]);
-
-  const setMinAge = useCallback((secs: number) => {
-    setMinAgeState(secs);
-    try {
-      localStorage.setItem(KEY, JSON.stringify(secs));
-    } catch {
-      // not persisted
-    }
-  }, []);
+  }, [hostId, connected, minAge, enabled, refresh]);
 
   const discardOne = useCallback(
     async (message: StuckBusMessage) => {
@@ -160,5 +140,5 @@ export function useStuckMessages(): StuckMessagesState {
     await refresh();
   }, [view, refresh]);
 
-  return { view, loading, error, minAge, setMinAge, busy, bulk, summary, dismissSummary: () => setSummary(null), refresh, discardOne, discardEverything };
+  return { view, loading, error, busy, bulk, summary, dismissSummary: () => setSummary(null), refresh, discardOne, discardEverything };
 }

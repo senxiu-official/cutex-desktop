@@ -10,7 +10,7 @@ import { LANGUAGES, isTraditionalLocale, traditionalRegionOf, traditionalLocale,
 import { ASKS_FEATURE } from "../../lib/delegations";
 import { hasLocalHost } from "../../lib/hosts";
 import { useGlobalSettings } from "../../lib/globalSettings";
-import { ADMISSION_ORDER_FEATURE, readOwnerMayPassAsks } from "../../lib/admissionOrder";
+import { ADMISSION_ORDER_FEATURE, readOwnerMayPassAsks } from "../../lib/legacyDelivery/admissionOrder";
 import { IMAGE_INPUT_STEERING_FEATURE, imageBusyPatch, readImageBusyBehavior } from "../../lib/imageSteer";
 import type { ImageBusyBehavior } from "../../../../shared/ipc";
 import { setOwnerMayPassAsks } from "../../lib/admissionOrderView";
@@ -859,7 +859,7 @@ function ArchivedRow({ row, canDelete }: { row: AgentRow; canDelete: boolean }) 
   };
   return (
     <SettingsGroup agents="now" source="host"><ListRow
-      leading={<Avatar name={row.name} color={row.color} avatar={session.avatar} seed={session.cutexSessionId} size={20} minor />}
+      leading={<Avatar name={row.name} color={row.color} avatar={session.avatar} seed={session.cutexSessionId} size={20} />}
       title={row.name}
       detail={detail || undefined}
       actions={

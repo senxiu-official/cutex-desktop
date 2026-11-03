@@ -13,9 +13,9 @@ import { Tag, type TagTone } from "./Tag";
 /** An agent avatar with its status (docs/design/040 §3.1): maps a sidebar signal onto Avatar `status` — the
  *  running ring, grey when offline, the hollow dot while unknown. `running`: ring even when another signal wins
  *  (a running agent that also needs the owner). `badge`: the corner badge (lib/avatarStatus avatarBadge); sites
- *  that show the request elsewhere (a row's 需要你 pill) leave it out. `minor`: a list row (Avatar `minor`). */
-export function StatusAvatar({ name, initial, color, avatar, size, signal, running, seed, minor, badge }: { name: string; initial?: string; color?: string | null; avatar?: SessionAvatar | null; seed?: string | null; size: number; signal: AgentSignal; running?: boolean; minor?: boolean; badge?: AvatarBadge | null }) {
-  return <Avatar name={name} initial={initial} color={color} avatar={avatar} seed={seed} size={size} minor={minor} status={{ running: running ?? signal === "running", badge, presence: avatarPresence(signal) }} />;
+ *  that show the request elsewhere (a row's 需要你 pill) leave it out. */
+export function StatusAvatar({ name, initial, color, avatar, size, signal, running, seed, badge }: { name: string; initial?: string; color?: string | null; avatar?: SessionAvatar | null; seed?: string | null; size: number; signal: AgentSignal; running?: boolean; badge?: AvatarBadge | null }) {
+  return <Avatar name={name} initial={initial} color={color} avatar={avatar} seed={seed} size={size} status={{ running: running ?? signal === "running", badge, presence: avatarPresence(signal) }} />;
 }
 
 const ATTENTION: Record<"warn" | "danger", TagTone> = { warn: "attention", danger: "danger" };

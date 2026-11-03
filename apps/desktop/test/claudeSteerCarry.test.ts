@@ -6,7 +6,7 @@
 // offered a resend under a new id. Replays the adapter's event order through the real timeline reducer.
 import { describe, expect, it } from "vitest";
 import { applyEvent, emptyTimeline, type TimelineState } from "../src/renderer/src/lib/timeline";
-import { CARRIED_STEER_IDLE_S, newPendingSteer, settlePendingSteers, steerDelivery, type PendingSteer, type SettleOptions } from "../src/renderer/src/lib/pendingSteers";
+import { CARRIED_STEER_IDLE_S, newPendingSteer, settlePendingSteers, steerDelivery, type PendingSteer, type SettleOptions } from "../src/renderer/src/lib/legacyDelivery/pendingSteers";
 import { pausedSection } from "../src/renderer/src/lib/queuePause";
 
 const T0 = 1_792_800_000;

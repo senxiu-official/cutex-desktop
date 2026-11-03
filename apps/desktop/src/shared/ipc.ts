@@ -159,7 +159,7 @@ export interface QuotaConfigView {
 
 export interface CapabilitiesView {
   /** r260 non-durable text opt-in (normalized into featureList by main). */
-  features?: { liveTextDeltas?: boolean };
+  features?: { liveTextDeltas?: boolean; ownerAdmissionHeldV1?: boolean; ownerAdmissionStateV1?: boolean; ownerAdmissionBusyV1?: boolean };
   /** r258 native event media references (also advertised in featureList). */
   eventMediaBlobs?: boolean;
   /** Build identity (cutex r224+; absent on older cutex). */
@@ -1366,6 +1366,7 @@ export interface StuckBusParty {
 }
 
 export type MessageSettlementCloseResult = { ok: true; result: import("@cutex-desktop/protocol").MessageSettlementCloseResponse } | { ok: false; error: CutexRefusal & { status: number } };
+export type MessageSettlementEvidenceResult = { ok: true; result: import("@cutex-desktop/cutex-client").MessageSettlementEvidenceResponse } | { ok: false; error: CutexRefusal & { status: number } };
 
 /** One undelivered message: a durable `pending` / `stale_held` record, or an entry only the bus's in-memory queue still holds (`durable` false, state `live_only`). */
 export interface StuckBusMessage {
@@ -1575,7 +1576,7 @@ export interface DaemonApi extends StorageCleanupApi {
   /** Explicit owner image actions. Main chooses save paths and reads only authenticated session media. */
   imageAction(input: ImageActionInput, action: "copy" | "save"): Promise<ImageActionResult>;
   /** Start streaming events for a session from the bootstrap checkpoint. */
-  subscribe(sessionId: string, from: { streamId: string; after: string | null }): Promise<void>;
+  subscribe(sessionId: string, from: { streamId: string; after: string | null; ownerAdmissionReplay?: { after: string | null; throughSequence: number; ids: string[] } }): Promise<void>;
   unsubscribe(sessionId: string): Promise<void>;
   /**
    * `options.extra`: image / skill / mention input items sent after the text item (cute-codex
@@ -1776,6 +1777,8 @@ export interface DaemonApi extends StorageCleanupApi {
   delegationUpgradeOperation(actionId: string): Promise<import("./delegationUpgradePreview").UpgradeOperationLookup>;
   delegationRetirementReview(projectId: string, request: import("./delegationUpgradePreview").PermanentRetirementReviewRequest): Promise<import("./delegationUpgradePreview").PermanentRetirementReview>;
   closeBusMessage(request: import("@cutex-desktop/protocol").MessageSettlementCloseRequest): Promise<MessageSettlementCloseResult>;
+  /** New-cap owner discovery: collect current server evidence for this exact ID; never resends. */
+  busMessageEvidence(request: { messageId: string }): Promise<MessageSettlementEvidenceResult>;
   /** `GET /v2/agent-bus/stuck-messages?minAgeSecs=`; null on older daemons. */
   stuckBusMessages(minAgeSecs: number): Promise<StuckBusView | null>;
   /** `POST /v2/agent-bus/stuck-messages/discard` (the reason is fixed in main); 4xx (message_not_found, message_protected, message_not_discardable, …) come back as a refusal. */
@@ -2086,8 +2089,12 @@ export interface DaemonApi extends StorageCleanupApi {
   // Optional components (cutex `components`, shared/components.ts). Owner only; refusals as values.
   /** `GET /v2/components`; null on a cutex without the route. */
   components(): Promise<ComponentsList | null>;
-  /** `POST /v2/components/{name}/install|remove` (empty body) → 202 `{operation}`; progress via `cutex/components/updated`. */
-  componentAction(name: string, action: ComponentAction): Promise<ComponentResult>;
+  /** `POST /v2/components/{name}/install|remove|check` (empty body; install `{version}` on component-index hosts) → 202 `{operation}`; progress via `cutex/components/updated`. */
+  componentAction(name: string, action: ComponentAction, opts?: { version?: string }): Promise<ComponentResult>;
+  /** r269 owner action `POST /v2/components/{name}/configure` (external npm prefix / Node / rg; Moth's route, mocked until it lands); cutex re-runs the probe. */
+  componentConfigure(name: string, req: import("./components").ComponentConfigureRequest): Promise<ComponentResult>;
+  /** r269 `POST /v2/components/index/check` → 202 `{operation}` (GET's `indexOperation`; event `cutex/components/indexUpdated`). */
+  componentIndexCheck(): Promise<ComponentResult>;
   /**
    * Owner command on a delegation (`cutex/ask/stop|close|retry`), sent on the target agent's
    * session. Not via sessionAction: cutex rejects extra fields like expectedRevision.
@@ -2141,6 +2148,13 @@ export interface DaemonApi extends StorageCleanupApi {
   revealPath(path: string): Promise<void>;
   /** `cutex/session/profile/switch` (gated per profile; same native thread). */
   switchProfile(sessionId: string, profile: string, when: "now" | "afterTurn", expectedRevision: number): Promise<{ status: "switched" | "scheduled"; from: string; to: string }>;
+  inputGet(sessionId: string, inputIds: readonly string[]): Promise<import("@cutex-desktop/protocol").InputGetResult>;
+  inputList(sessionId: string, query?: import("@cutex-desktop/protocol").InputListParams): Promise<import("@cutex-desktop/protocol").InputListResult>;
+  inputInterruptSend(sessionId: string, params: import("@cutex-desktop/protocol").InputInterruptSendParams): Promise<import("@cutex-desktop/protocol").InputInterruptSendResult>;
+  inputRetry(sessionId: string, inputId: string, expectedRev: number): Promise<unknown>;
+  inputDismiss(sessionId: string, inputId: string, expectedRev: number): Promise<import("@cutex-desktop/protocol").InputDismissResult>;
+  queueMerge(sessionId: string, params: import("@cutex-desktop/protocol").UserInputQueueMergeParams): Promise<import("@cutex-desktop/protocol").UserInputQueueMergeResult>;
+  inputLeaseRelease(sessionId: string, expectedLease: import("@cutex-desktop/protocol").InputLease): Promise<unknown>;
   queueList(sessionId: string): Promise<QueueListResult>;
   /** queue-pause: resume a paused queue (cutex sends the next item when the thread is idle). */
   queueResume(sessionId: string): Promise<QueueResumeResult>;
@@ -2225,7 +2239,8 @@ export interface QueuePromoteResult {
   /** `imageDelivery`: the queue-steer receipt (image-input-steering), only when cutex sent one. */
   result: UserInputSubmitResult & { imageDelivery?: ImageDelivery };
   clientUserMessageId: string;
-  input: unknown[];
+  /** Legacy remove/submit returns its input. Atomic steer uses the renderer's CAS-matched item. */
+  input?: unknown[];
 }
 
 export interface SubmitOptions {
@@ -2475,6 +2490,7 @@ export interface HostTag {
 }
 
 export interface DesktopEvents {
+  debug: import("./debug").DebugEvent;
   profileLinkState: import("./profileLink").ProfileLinkState;
   browserEvent: HostTag & import("./browser").BrowserEvent;
   /** One host's connection state (every connected host, not only the focus host). */
@@ -2526,6 +2542,7 @@ export const EVENT_CHANNEL = "cutex-desktop:event";
 export type InvokeMethod = keyof DesktopApi;
 
 export interface PreloadBridge {
+  debug?: import("./debug").DebugBridge;
   browser?: import("./browser").BrowserBridge;
   /** Calls to the focus host (`HostsState.active`); host-list calls go to main. */
   api: DesktopApi;
@@ -2635,6 +2652,8 @@ export interface ShellTermsPref {
 }
 /** Desktop-local prefs the main process needs (stored by main in userData/desktop-prefs.json). */
 export interface DesktopPrefs {
+  /** Owner-enabled desktop diagnostics; absent is off. */
+  debugMode?: boolean;
   closeBehavior: CloseBehavior;
   /** True once the owner picked 关闭窗口时 (Settings or the first-close notice). Until then Linux may
    *  fall back to quitting (no StatusNotifier host) or asks once (shared/shell.ts closeAction). */

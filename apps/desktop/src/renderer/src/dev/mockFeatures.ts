@@ -20,6 +20,7 @@ const CORE_BASE_FEATURES: readonly string[] = [
 
 /** Newer cutex only (absent under `?legacy`). */
 const CORE_NEW_FEATURES: readonly string[] = [
+  "user-input-options-v1",
   "dsh-runtime",
   // r264 images in steers; `?noimagesteer` drops it (dev/mockBridge IMAGE_STEER).
   "image-input-steering",
@@ -114,7 +115,7 @@ export const MOCK_NEW_FEATURES: readonly string[] = [...CORE_NEW_FEATURES, ...MO
 export function mockScenarioFeatures(search: string): string[] {
   const q = new URLSearchParams(search);
   if (q.has("legacy")) return [];
-  if (q.has("overloadretry") && !q.has("no-retry-visible")) return ["model-overload-retry-visible"];
+  if (q.has("overloadretry") && !q.has("no-retry-visible")) return ["model-overload-retry-visible", ...(q.has("inputLedger") ? ["input-ledger-v1"] : [])];
   // ?variants: cutex profile-runtime-variants (r265; dev/mockProfileVariants.ts).
-  return [...(q.has("live-deltas") ? ["live-text-deltas"] : []), ...(q.has("variants") ? ["profile-runtime-variants"] : []), ...(q.has("relay") ? ["profile-relay-runtimes"] : [])];
+  return [...(q.has("inputLedger") ? ["input-ledger-v1"] : []), ...(q.has("live-deltas") ? ["live-text-deltas"] : []), ...(q.has("variants") ? ["profile-runtime-variants"] : []), ...(q.has("relay") ? ["profile-relay-runtimes"] : [])];
 }

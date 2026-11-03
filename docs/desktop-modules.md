@@ -77,7 +77,7 @@ v1.18（2026-10-20，窗格第 5 步；`docs/research/home-page-20261019.md`、`
 （A 档，`unavailable: "hide"`）：没有窗格在前面时外壳在工作区画第一个显示的条目；`NavItem` 加可选 `lead` / `useShown` / `useActive`（侧栏
 最上面的固定入口、按设置显示、自己的高亮）。第一个使用者：内置模块 `home`（桌面、个人页 `home.profile`、固定到主页）。只加不删。
 Shelf（2026-10-20，契约仍是 v1.18；`docs/research/canvas-principles-20261020.md` §6）：工具区改成 **Shelf**（§24.12）——会话两侧各最多一个，
-每个有自己的 **Shelf Rail**（≤ 9 页，一次显示一页）、宽度和选项（允许混排、Rail 外侧 / 内侧）；第 3 步去掉的右栏多页按这个形状回来。
+每个有自己的 **Shelf Rail**（保护上限 50 页，一次显示一页）、宽度和选项（允许混排、Rail 外侧 / 内侧）；第 3 步去掉的右栏多页按这个形状回来。
 模块看到的东西不变（`pane.kind`、`services.panes` / `services.side.open` 的 `page` 仍是页 id），所以不升版本。
 v1.21（2026-10-21，主人：「页面应该是自己的面板」）：`main.page`（项目、委托、服务、审批、作业、工作流…；带 `Aside` 的全窗口页除外）不再盖在
 会话上、挂在会话顶栏下面，而是作为**自己的窗格**开进聚焦对话的 Shelf（派生种类 `page:<id>` 交给工具引擎放置：自己的页组，按 Shelf 的混排
@@ -849,6 +849,7 @@ agent 页面（`artifacts.view` 的 `html` 预览，`text/html` / `application/x
   （`shared/frames.ts`，preload `bridge.frames`）；main（`main/frames.ts`）自己从那台主机的 `/v2/artifact-store/…/content` 取字节、
   在第一份文档之前跑 `pluginNetwork.ensure()`（WebRTC / 代理黑洞 / DoH，与插件相同），再放进共享 store。HTML 不经 renderer → main，
   token 不离开 main。外部文件已变、非 UTF-8 → 返回原因，视图改显示源代码。超过 4 MiB（`ARTIFACT_PAGE_PROMPT_BYTES`，一个内容窗口）的页面先在视图里问主人（常是内嵌音频 / 视频），主人点「显示页面」后请求带 `large: true`，main 按 4 MiB 窗口逐段读取（每段校验版本、sha256、总长和接续的 offset；cutex 在字符边界切窗口）再拼成文档，上限 256 MiB（`ARTIFACT_PAGE_MAX_BYTES`），超过仍显示源代码。
+- 大页面选择不依赖 Shelf 组件实例：当前桌面会话内记忆 24 小时（从选择时起算），按最近使用保留最多 500 条。成果以 host + 成果 ID + 版本 + 字节数 + sha256 为身份；文件 HTML 以 host + workspace scope + 路径 + 字节数 + 修改时间为身份，元数据来自 main 同一次受限读取。文件的「显示页面」和「看源码」都会记住；显式点击工具栏「预览」可重新考虑源码选择。内容身份变化或记忆过期后再询问，硬上限不变；切页导致卸载不丢选择。
 - 视图头上「页面 / 源代码」切换（`ViewState.code`）；页面自己跳走（链接、刷新）被 main 拦下，视图显示「已拦下 · 重新加载」。
 - 不需要审批：除下面三个口外它什么都碰不到。需要联网的东西是服务（`service_register`），由主人在自己的浏览器标签里打开。
 
@@ -1391,7 +1392,7 @@ interface NotifyDelivery { key: string; event: string; eventTitle: string; level
 |---|---|---|
 | 右侧区 | `components/side/SideArea.tsx` | 右栏（显示当前页；≥2 页时页按钮按「右栏布局」：★左边一道竖向页按钮，或顶部一行页标签）；右栏收起时可留一道 44 px 竖向页按钮；右栏宽 = `appearance.sidePaneWidth` |
 | 页按钮 | `SideLane.tsx`（竖向细栏：★竖条 + 标签页时右栏打开也在，顶部带页操作；右栏收起时）、`SideTabStrip.tsx`（仅标签页时右栏打开：顶部横向页标签条 + 页操作）、`lib/sidePills.ts` | 一页一颗药丸（§18.3） |
-| 页 | `SidePage` | 上下排列的卡片，带页组 `groups` 与可选名字；≤ 9 页 |
+| 页 | `SidePage` | 上下排列的卡片，带页组 `groups` 与可选名字；每 Shelf 保护上限 50 页 |
 | 卡片 | `SideCard.tsx` | **一种**组件的一个或多个实例；≤ 6 张 / 页（§18.4） |
 | 标签 | `SideInstance` | 一个打开的实例：绑定 + 可序列化 `state` |
 | 组件 | `SideComponentItem` | 模块贡献的种类（插槽 `side.component`，条目 id = 组件 id，`<模块 id>.<名字>`） |
@@ -1516,6 +1517,8 @@ v1.5：每种绑定都带 `hostId`（多主机下每个实例都属于一台主�
 的 `follow`（v1.4 写的）读取时补成布局所属主机（`sanitizeLayout(raw, hostId)`；`layouts["host:<id>"]` 的 id），只往前迁，不保留旧格式。
 
 ### 18.6 放置（`lib/sideLayout.ts` `place()`，纯函数）
+
+> 以下是最初声明语义；主人 2026-11-03 的默认开页规则覆盖该顺序，见 §24.12.2。`prefer`、覆盖和 `otherwise` 仅用于保护上限的退路；显式 page 仍是用户指定布局。
 
 ```ts
 interface SidePlacement { home: string; prefer?: SidePageCandidate[]; otherwise?: "new-page" | "active-page"; order?: number; share?: number }
@@ -1812,7 +1815,7 @@ interface SideHoldLocator { readonly scope: string; readonly instanceId: string;
 - 一次一张：下一次打开替换它；同一个引用再开 = 闪一下（不重开）；只在内存，重启没有。不是对话框（`role="complementary"`），
   不抢焦点（`focus` 选项除外），关闭时焦点回到打开前的位置。关闭：×、Esc（链第 3 行）、跳过去、在右侧打开、换主机；**换 agent 不关**。
 - 「在右侧打开」= 按组件的放置钉进右侧、带上卡片的 state，卡片关闭；⤢ / ⛶ = 同样钉进右侧后最大化 / 全屏那张卡片。
-  图标 / 标题是拖动手柄（§18.7）：拖到药丸或列 = 钉进那页，拖到「新页」落点 = 钉进新页（已有 9 页时按放置规则）；
+  图标 / 标题是拖动手柄（§18.7）：拖到药丸或列 = 钉进那页，拖到「新页」落点 = 钉进新页（到 50 页保护上限时按放置规则）；
   同一个引用已钉着 = 找回那个实例；不记覆盖。卡片自己与整片左留白（含列的内边距）= 原位置，不做事。拖动中卡片内容变淡，卡片本身不透明。
 - `services.side.open(kind, params, { target: "peek" })`：组件 `peekable` 时按 §19.5 决定去哪；不是 peekable 或放不下 = 右侧（`place()`），
   结果 `where: "peek" | "card"`。`services.side.closePeek()` 关掉它。
@@ -2422,10 +2425,7 @@ type PaneOpenResult = { status: "opened"; kind: string; paneId: string | null; i
 - `page:<id>`：= `services.ui.openPage`（v1.21：聚焦对话的 Shelf 里自己的窗格，`instanceId` / `paneId` = 那个窗格；占用会话 = 聚焦的对话窗格，`instanceId: null`）。
 - 工具种类：= `services.side.open(kind, params, { reveal: true, focus, background })`（§18.8）。`services.side.open` 保留，是工具种类的别名
   （外加上面的 `conversation.agent`）。
-- **工具放置**（`lib/sideLayout.ts` `place()`，§18.6 的顺序不变，「页」= 列）：复用 → 预览就地替换 → 选列（显式 → 覆盖 → `prefer` →
-  otherwise：`active-page` = 聚焦的列，缺省 = **最右一列**；一列都没有才新建一列；新列只来自覆盖、显式、菜单「移到新的一列」和拖放）→ 选窗格
-  （这一列有这种的窗格 → 加标签；还有空间 → 按 `order` 新开一个窗格；**这一列满了** → 别的列里这种的窗格 → 别的列还有空间 → 这一列最下面窗格的
-  标签，可以混种类）。
+- **工具放置**（主人 2026-11-03）：复用 → 预览就地替换 → 已有同种窗格的页加标签，否则填当前空页或新建 Shelf 页；不自动分屏。显式布局动作和 50 页保护上限的退路见 §24.12.2。
 - **限额**（`lib/paneLayout.ts` 常量）：屏幕上 ≤ 6 个窗格（`MAX_VISIBLE_PANES`）、每列 ≤ 3 个（`MAX_ROWS`）、对话 ≤ 2 列、工具列 ≤ 2 列
   （`MAX_TOOL_COLUMNS`）、工具窗格合计 ≤ 4（`MAX_TOOL_PANES` = 6 − 2 列对话）。所有改布局的操作之后 `fitLayout` 保证限额（多出来的窗格
   变成第三个窗格的标签）；拖放要超出限额时拒绝（拖动提示「放不下了」）。第 4 步：放回小片超出限额时，最久没用的窗格收成小片（LRU，
@@ -2489,10 +2489,10 @@ Esc、两个区域的小片存取、`lib/paneActions` 的显示桌面和托盘�
 ### 24.11 第 4 步：小片、最大化、拖放、键盘
 
 > **0.2 变更（2026-10-22，合并 feat/0.2-tray / feat/0.2-width；本节下文的小片 / LRU / 最大化描述已过时，以此为准）**：
-> - 「—」on a tool pane opens a menu: 移到另一页 ▸ (the other pages of its Shelf, plus 新的一页 when the pane isn't alone on its page, below 9 pages) and 关闭 (confirmed in place, like ×). Tool panes never go to the tray (#7, owner 2026-10-21). 托盘 = 钉住的 + 打开着的会话（docs/design/001）。
+> - 「—」on a tool pane opens a menu: 移到另一页 ▸ (the other pages of its Shelf, plus 新的一页 when the pane isn't alone on its page, below the 50-page sanity limit) and 关闭 (confirmed in place, like ×). Tool panes never go to the tray (#7, owner 2026-10-21). 托盘 = 钉住的 + 打开着的会话（docs/design/001）。
 > - 显示桌面（主人 2026-10-22 改定）：只显示桌面——侧栏卡片照常（平时显示就显示）、托盘按它的设置；**没有会话、窄条、Shelf、Shelf Rail**。会话整体收走（`emptyWork`）；Shelf 的布局不动（不再收成 Rail——Rail 常驻会把它们留在屏幕上），显示桌面期间工作区只是不画 Shelf（`components/PaneHost` `side` = `!desktopShown`）。再按一次 = 原样回来。〔原来：展开的 Shelf 收成 Rail，Rail 常驻时最右还剩一条 Rail。〕
 > - LRU / limits: no pane goes to the tray any more (remove "the least recently used pane goes to the tray"); 会话收起 = 原位窄条或最小化到托盘（docs/design/002）。
-> - Migration (no file version bump): stored tool chips go back into their Shelf once (`resolveChips`); one that cannot (its Shelf at 9 pages) is closed with one notice saying how many.
+> - Migration (no file version bump): stored tool chips go back into their Shelf once (`resolveChips`); one that cannot (its Shelf at the 50-page sanity limit) is closed with one notice saying how many.
 > - 最大化 = 规则 2（只吃空隙，`lib/panelGrow*`，docs/design/003）；原来的「最大化」改名「独占」，在 ⋯ 里（`toggleExclusive`，两个工作区时另一个收成窄条）；全屏不变。动作预告：`lib/foretell.ts` + `components/ForetellLayer.tsx`，效果与执行同源（`lib/workspaceEffects.ts`，docs/design/008）。
 
 外壳文件：`lib/paneActions.ts`（两个区域共用的动作：收起 / 放回 / 关小片、托盘 ≤ 8、最大化、显示桌面、窗格键、焦点窗格）、
@@ -2557,7 +2557,7 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
 ```
 
 - 引擎原来的「页」（第 3 步叫工具列）就是 Shelf 的页；Rail 顺序 = `pages` 里这个 Shelf 的页的顺序。每页 ≤ 3 个窗格（`MAX_CARDS`），每个 Shelf
-  ≤ 9 页（`MAX_SHELF_PAGES`，Alt+1…9）。没有 `shelves` 的布局（手写、旧存档）读的时候所有页归右边的 Shelf，**允许混排关**（`withShelves`
+  ≤ 50 页（`MAX_SHELF_PAGES`，Alt+1…9）。没有 `shelves` 的布局（手写、旧存档）读的时候所有页归右边的 Shelf，**允许混排关**（`withShelves`
   / `shelvesOf`，归一化有缓存；所有 reducer 先归一化）。`layout.activePage` = 聚焦的页（Alt+n、启动器、`active-page` 放置都看它所在的 Shelf）。
 - **限额**：每页 ≤ 3；屏幕上的工具窗格 ≤ `MAX_TOOL_PANES` = 4 只按**屏幕上的页**（每个展开的 Shelf 正在显示的页；收起的只有 Rail）算，只在加窗格时检查
   （`place`、拖放、小片放回的 LRU）；切页不合并任何东西（另一页可以各有 3 个）。旧的「合计 ≤ 4 就把最下面合并成标签」改成只保证每页 ≤ 3。
@@ -2571,16 +2571,14 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
   `cutex-desktop.side` 和它的备份），**已有用户关**（不管有没有两个 Shelf，行为不变）；每个范围存自己的选择（`tools.singleShelf`），没存过工具区
   的范围用文件里的缺省（`singleShelfDefault()`，§24.12.5）。
 
-#### 24.12.2 放置（`place()`，§24.5 的顺序，「列」读作「页」）
+#### 24.12.2 放置（主人 2026-11-03，`place()`）
 
-复用 → 预览就地替换 → 选页（显式 → 覆盖 → `prefer` → otherwise：`active-page` = 聚焦的页（没有 = 右 Shelf 正在显示的页）；
-**缺省 `new-page`**（所有页面种类 `page:<id>` 和没有声明的种类，设计 038，主人 2026-10-23）= 已经有这种窗格的页（它加标签、显示出来），
-否则默认 Shelf 的**新页**，整页高——不再悄悄把正在显示的页分成 1/2、1/3（以前 `otherwise` 被忽略，都进右 Shelf 正在显示的页）；没有任何 Shelf
-才新建右 Shelf）。覆盖指向的页没了、也没有同组的页 → 默认 Shelf 的新页（≤ 9，满了就是它正在显示的页）；一页不需要宽度，`roomForColumn`
-只在要建新 Shelf 时有意义。→ 选窗格：这一页有这种的窗格 → 加标签；还有空间 → 按 `order` 新窗格；**这一页满了** → 另一个 Shelf 正在显示的
-页或本 Shelf 别的页里有这种的窗格 → 它的标签；另一个 Shelf 正在显示的页有空间 → 那里新窗格；本 Shelf **允许混排** → 这一页最下面窗格的标签
-（今天的行为）；**不允许** → 本 Shelf 的新页（切到它）；9 页都满 → 最下面窗格的标签（最后的退路）。`reveal` 一个在收起的 Shelf 里的实例 = 把
-那个 Shelf 展开并切到那一页（切页 `setActivePage` 总是展开它所在的 Shelf）。
+普通打开（启动器、文件链接、页面、agent/tool 打开、peek 固定及窗格内打开）先复用同 kind/binding/key 的实例，临时预览仍在原位置替换。
+已有同种类窗格 → 切到它所在的页，多实例加到同一个窗格的标签行；没有同种类 → 填入当前空页，否则在目标 Shelf 末尾开新页。
+窗格内打开保留源工作区 / Shelf，不能借由隐式 page 参数把源页自动分屏。注册声明的 `prefer` / `otherwise` 与历史 override 都不能使普通打开自动堆叠。
+只有明确的拖放、移到 / 分屏菜单、显式 page 目标才能堆叠窗格。允许混排仍只控制异种标签是否可合入同一窗格，与默认开页策略无关。
+每个 Shelf 的正常使用不再受九页限制；保留 50 页的存储和布局保护上限。到达保护上限时沿用原放置退路（同种窗格、可用窗格、最下面窗格的标签），普通打开永不拒绝。
+`reveal` 一个收起 Shelf 中的实例会展开并切到它所在的页。没有任何 Shelf 时，普通打开创建右 Shelf。
 
 #### 24.12.3 外壳
 
@@ -2590,8 +2588,10 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
   宽度，方向键）。最大化 / 全屏时右框盖住整个工作区，显示那个窗格 / 页所在的 Shelf。
 - `components/side/ShelfRail.tsx`：Shelf 卡片的页签栏，在卡片的外侧（窗口边）或内侧（对话一侧）。页按钮 = 页的图标（**两个以上窗格的页 = 胶囊**：一个竖的圆角框里按上下顺序叠着每个窗格的图标，没有把手标记——框 / 空隙拖整页，
   图标拖那个窗格；悬停框 = 整个框描淡的强调色，悬停图标 = 只亮图标；点图标 = 显示那一页并聚焦、闪一下那个窗格；设计 038）（`page.icon`，否则第一个窗格种类的图标；
-  `lib/shelfIcons.ts`）+ 提示（页名 · Alt+n）；正在显示的页有底色和外缘的小竖条；需要你的数目、忙的点。然后 ＋（新页，≤ 9；新页带改名 /
+  `lib/shelfIcons.ts`）+ 提示（页名 · Alt+n）；正在显示的页有底色和外缘的小竖条；需要你的数目、忙的点。然后 ＋（新页，≤ 50；新页带改名 /
   图标浮层）、最下面收起按钮（收起 / 展开，提示「· Esc」）和 ⋯（Shelf 菜单）。点页按钮：别的页 = 切过去；**正在显示的页 = 什么都不做**（主人 2026-10-22：原来是收起，太容易误点；双击它也不收起——Rail 的双击 = 最大化只在空白处）。按住拖 = 拖整页（§24.12.4）。右键页按钮：重命名 / 换图标（同一个浮层：名字输入框 + 22 个图标 + 「自动」）/ 移到上面 / 移到下面 / 拆开「窗格」（右键的图标，否则聚焦的 / 最下面的窗格，成为紧挨着的下一页）/ 合并到上一页（合起来 ≤ 3 个窗格）/ 在所有对话中显示 / 删除这一页（设计 038）。
+- Rail 的页按钮列表在高度不足时独立纵向滚动（滚轮 / 触控板，无可见滚动条），上下边缘渐隐提示还有内容；头像 / 固定按钮保持固定，＋ 紧跟最后一个页按钮；仅当列表溢出时，＋ 留在滚动区域的底边，⋯ 始终固定在 Rail 底部。切换活动页自动滚入视野；拖动到列表边缘自动滚动。合组页的一整个胶囊只算一个列表项；竖屏横 Rail 使用相同的横向规则。
+- 空页选择器除了内容 / 工具 / 状态，还从标题栏「更多」同一份 `nav.primary` 注册表读取可进入 Shelf 的页面（页面组）；按主机能力隐藏不可用项，跳过纯动作和有 Aside 的全窗口页。已有状态入口不重复列出；选择后显式填入该空页。
 - ⋯ 菜单（`lib/shelfMenus.tsx`）：标题「右边的 {{shelf}} · n 页」；允许混排（开关，下面一行说明）；只用一个 {{shelf}}（开关，整个布局的，
   下面一行说明；有两个 Shelf 时说明「已有的两个都留着」）；{{shelf}} Rail 在外侧 / 内侧；**收起**（收起时这一项是「展开 {{shelf}}」）；
   移到左边 / 右边（那边有 Shelf 时不可用）；关闭 {{shelf}}（n 个窗格一起关，可撤销）。托盘里不再有 Shelf 小片。
@@ -2641,7 +2641,7 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
   点击被吞掉）。放在**页按钮 / 胶囊的中间**（上下各 25 % 以外）= **合并**：那一页在下面加上这一页的所有窗格，这一页消失（合起来超过 3 个窗格拒绝
   「放不下：一页最多 3 个窗格」；`mergePageInto`，目标 `mergePage`，设计 038）；放在**上 / 下 25 %** = 放到它前面 / 后面；放在 **＋** 上 = 那条 Rail 的最后。
   拖动中 ＋ 变成虚线框「新页」。胶囊里的**图标** = 拖那个窗格（`{ type: "card" }`，规则同下面的窗格拖动：放在别的页按钮上 = 进那一页，放在「新页」上 = 自己成一页）。同一个 Shelf = 只改 Rail 的顺序
-  （正在显示的不变）；**另一个 Shelf**（≤ 9 页，满了拒绝「没有空间」）= 整页连同窗格移过去并在那边显示，原来的 Shelf 没页了就消失
+  （正在显示的不变）；**另一个 Shelf**（≤ 50 页，满了拒绝「没有空间」）= 整页连同窗格移过去并在那边显示，原来的 Shelf 没页了就消失
   （`lib/sideLayout` `movePageTo`，`lib/sideDrop` `pageDropTarget` → 目标 `movePage`）。放回原位 = 什么都不做；窗格上、工作区边缘、另一个
   工作区的 Shelf 不接受（页只进 Rail；另一个工作区的页 id 是它自己的）。拖动中停在页按钮上**不**切页。反馈：要放的位置一条横线 +「移到这里」/
   「移到这个 {{shelf}}」。测试 `test/shelfPageDrag.test.tsx`。
@@ -2650,9 +2650,9 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
 - **允许混排关**：拖到别的种类的窗格头 / 正中被拒，改成「放在它下面的新窗格」（区域标成警示色，标签行打斜纹，标签写「不允许混排（这里是
   …）· 放成新窗格」；放下后提示「可在 {{shelf}} 选项里打开允许混排」）；这一页也满了 → 拒绝「不允许混排，这一页也已满」。同种类照常合并。
 - **页按钮**：停 0.4 s（`PAGE_HOVER_MS`）切到那一页（之后可以放进它的某个窗格）；放在按钮上 = 放进那一页（窗格按 `order` 进新窗格或同种窗格，
-  标签进同种窗格否则新窗格），那一页显示出来；满了拒绝「这一页已满（3 个窗格）」；自己的页 = 什么都不做。**＋** = 新的一页（`kept`），≤ 9。
+  标签进同种窗格否则新窗格），那一页显示出来；满了拒绝「这一页已满（3 个窗格）」；自己的页 = 什么都不做。**＋** = 新的一页（`kept`），≤ 50。
 - **工作区最左 / 最右缘**：那边没有 Shelf → 在那边新建 Shelf（不允许混排；≤ 2；放不下新 Shelf 的宽度就拒绝）；那边有 Shelf → 它的新页。
-  **只用一个 {{shelf}}** 开着、已经有 Shelf → 两边边缘都是那个 Shelf 的新页（标签「放到新的一页」，9 页满了拒绝）；不显示「新建 {{shelf}}」。
+  **只用一个 {{shelf}}** 开着、已经有 Shelf → 两边边缘都是那个 Shelf 的新页（标签「放到新的一页」，50 页满了拒绝）；不显示「新建 {{shelf}}」。
   对话窗格拖到边缘照旧是会话换位。外部把手（参考卡片）：窗格 / 页按钮 = 钉进那一页；别处 = 新页（聚焦的 Shelf）。
 
 #### 24.12.5 存储：布局 v2（`lib/paneLayout.ts`、`lib/paneFile.ts`）
@@ -2667,7 +2667,7 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
 ```
 
 - 工具区状态 `tools` 多一个可选的 `singleShelf: boolean`（只用一个 {{shelf}}；没有 = 关）。
-- 校验：≤ 2 个 Shelf，每边一个；每个 1–9 页，每页 0–3 行（0 只给 `kept` 页），行高合计 1；所有窗格只出现一次（屏幕上、某一页上或小片里）；
+- 校验：≤ 2 个 Shelf，每边一个；每个 1–50 页，每页 0–3 行（0 只给 `kept` 页），行高合计 1；所有窗格只出现一次（屏幕上、某一页上或小片里）；
   屏幕上 ≤ 6 个窗格只数工作列（隐藏的页不在屏幕上）。工具小片的 `home.column` 多 `shelf` / `side`（Shelf 没了按原来那边重建，放不下就进那边
   或右边 Shelf 的新页）。
 - **迁移**（`migrateSideOnce`，两个 store 第一次读之前都调，幂等）：
@@ -2687,7 +2687,7 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
 
 #### 24.12.6 键盘、术语、读接口
 
-- Alt+1…9 = 聚焦的 Shelf 的第 n 页（终端聚焦时也放行，`modules/terminal/terminalState.ts` `passThroughKey`）；Ctrl+Shift+1…9 = 所有 Rail
+- Alt+1…8 = 聚焦的 Shelf 的前八页；Alt+9 = 最后一页（浏览器惯例）（终端聚焦时也放行，`modules/terminal/terminalState.ts` `passThroughKey`）；Ctrl+Shift+1…9 = 所有 Rail
   合起来的第 n 个页按钮（左 Shelf 在前）；Ctrl+Shift+N = 聚焦的 Shelf 的新页。聚焦的 Shelf 收起时 Alt+n 把它展开到第 n 页；焦点在展开的
   Shelf 里按 Esc 收起它（§24.12.3）。
 - 术语 `shelf`（`lib/terms.ts`）：占位符 `{{shelf}}` / `{{Shelf}}` / `{{shelves}}`，所有语言缺省都是「Shelf」（复数同一个词），设置 → 术语里能改；
@@ -2700,11 +2700,11 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
 
 #### 24.12.7 测试
 
-`test/shelves.test.ts`（模型：页的增删改排、图标、9 页上限、删除和撤销、两个 Shelf、换边、关闭和撤销、收起到 Rail 和展开、宽度和选项存取、
+`test/shelves.test.ts`（模型：页的增删改排、图标、50 页保护上限、删除和撤销、两个 Shelf、换边、关闭和撤销、收起到 Rail 和展开、宽度和选项存取、
 混排开 / 关的放置；v2 存取、`migrateLayoutV1`、`restoreLegacyPages`、`migrateShelves` 与 v1.16 迁移；术语；`listShelfPages` / `openShelfPage` /
 Alt+n；Shelf 外壳文件不点名功能）、`test/sideDrop.test.ts`（页按钮、＋、混排关的拒绝和改成新窗格、边缘新建 Shelf / 新页）。场景测试的改动见
 `test/sideLayout.test.ts` 开头：场景在「允许混排开」的 Shelf 上跑（主人打开过的，第 4 步的行为）；「另开一列」改成第二个 Shelf；18 列上限改成
-9 页上限；sanitize 不再折页。`test/panesStep3.test.ts` / `panesStep4.test.ts` / `panesStep2Store.test.ts` / `paneLayout.test.ts` 改成 v2 形状。
+50 页保护上限；sanitize 不再折页。`test/panesStep3.test.ts` / `panesStep4.test.ts` / `panesStep2Store.test.ts` / `paneLayout.test.ts` 改成 v2 形状。
 主人决定（2026-10-20）的测试在 `test/shelves.test.ts`：「只用一个 Shelf」（`addShelf` / `moveToNewShelf` 不变、移到另一边照旧、边缘拖放 =
 现有 Shelf 的新页、两个 Shelf 时打开不合并、撤销 / 小片放回进现有 Shelf、`tools.singleShelf` 存取）、载入缺省（新安装开、v2 文件 / 只有
 v1.16 右栏的已有用户关、范围自己存的选择优先）、`migrateMixingOff`（v2 → v3 关掉允许混排、混放的窗格不动、只一次）。

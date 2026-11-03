@@ -1,6 +1,7 @@
 import type { zhCN } from "./i18n";
 
 const zhHantCN = {
+  "runtimes.unknownVersion": "未知版本",
   "runtimes.current": "新{{agent}}使用",
   "runtimes.noCurrent": "未安裝或未設置默認版本",
   "runtimes.unused": "{n} 個舊版本未使用，可清理",
@@ -17,6 +18,8 @@ const zhHantCN = {
   "runtimes.kimiProfile": "設置 → Profile → 新建 → 服務商選 Kimi Code 或 Moonshot，勾選 Kimi",
   "runtimes.kimiDependency": "Kimi Code 是隨組件提供的固定版本，不會自動升級；它要用主機上的 Node",
   "runtimes.node": "Node ≥ {minimum} · 當前 {version}",
+  "runtimes.nodeRange": "Node {range} · 當前 {version}",
+  "runtimes.nodeVersionUnknown": "未知",
   "runtimes.nodeUnknown": "Node 版本要求與檢測結果由主機組件提供",
 };
 export const locales: Record<string, Partial<Record<keyof typeof zhCN, string>>> = {

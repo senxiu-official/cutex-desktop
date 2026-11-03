@@ -13,7 +13,7 @@ vi.mock("../src/renderer/src/modules/app", () => ({
 import type { SessionResource } from "@cutex-desktop/protocol";
 import { forgetAgentPicture, newPictureAvatar } from "../src/renderer/src/lib/agentPicture";
 import { readConvShelf, writeConvShelf } from "../src/renderer/src/lib/paneFile";
-import { savePendingSteers } from "../src/renderer/src/lib/pendingSteerStore";
+import { savePendingSteers } from "../src/renderer/src/lib/legacyDelivery/pendingSteerStore";
 import { emptyLayout } from "../src/renderer/src/lib/sideLayout";
 import { resetConvShelves, startSideStore, switchConversation, useSide } from "../src/renderer/src/lib/sideLayoutStore";
 import { resetStorageFullNotice, setStorageFullNotifier } from "../src/renderer/src/lib/storageFull";

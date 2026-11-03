@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import { readComponentsList } from "../src/shared/components";
 import { RESTRICTED_FEATURE } from "../src/shared/users";
 import { componentBlocks, componentCardState, componentText, componentUsable, isBanner, refusalKey, sourceInstallCommand, type ComponentCardInput } from "../src/renderer/src/lib/componentCard";
+import { COMPONENT_REFUSAL_CODES as RESOLVED_CODES } from "@cutex-desktop/cutex-client";
+import { COMPONENT_REFUSAL_CODES as SOURCE_CODES } from "../../../packages/cutex-client/src/components";
+import { zhCN } from "../src/renderer/src/i18n/zh-CN";
+import { en } from "../src/renderer/src/i18n/en";
+
+const R269_REFUSALS = ["component_offer_changed", "component_yanked", "component_incompatible", "component_version_required", "component_identity_conflict"];
 
 const component = (over: Record<string, unknown> = {}) => ({ name: "job-service", supported: true, state: "missing", selected: null, available: "0.1.2", origin: null, versions: [], error: null, ...over });
 const list = (over: Record<string, unknown> = {}, c: Record<string, unknown> = {}) => readComponentsList({ managed: true, installFrom: "release", components: [component(c)], ...over });
@@ -60,7 +66,7 @@ describe("componentCardState", () => {
     expect(componentCardState(input({ list: list({ installFrom: "none" }) }))).toEqual({ kind: "unmanaged" });
     // A runtime set up by hand on that host (claude-runtime: /v2/runtimes names a selected one): usable.
     expect(componentCardState(input({ list: list({ managed: false }), handConfigured: true }))).toEqual({ kind: "body" });
-    expect(componentCardState(input({ list: list({ installFrom: "source-only" }) }))).toEqual({ kind: "sourceOnly", command: "cutex component install job-service --from-source <dir>" });
+    expect(componentCardState(input({ list: list({ installFrom: "source-only" }) }))).toEqual({ kind: "sourceOnly", command: "cutex component install job-service --from-source <dir>", version: null });
     expect(sourceInstallCommand("claude-runtime")).toBe("cutex component install claude-runtime --from-source <dir>");
   });
 
@@ -134,6 +140,19 @@ describe("componentBlocks / componentUsable / refusalKey", () => {
 
   it("every pinned refusal code has a friendly line", () => {
     for (const code of ["unmanaged_install", "component_unsupported_platform", "component_external", "upgrade_blocked", "component_pinned", "jobs_running"]) expect(refusalKey(code)).toBe(`modules.component.refusal.${code}`);
+    // r269's five 409s of an explicit-version install / index source (cutex component-index-v1 clarification 6).
+    for (const code of R269_REFUSALS) expect(refusalKey(code)).toBe(`modules.component.refusal.${code}`);
+  });
+  it("the r269 codes come from the package this worktree resolves (additive), with zh-CN + en wording", () => {
+    // The module specifier must resolve to this checkout's packages/cutex-client (not a junctioned copy of another one).
+    expect([...RESOLVED_CODES]).toEqual([...SOURCE_CODES]);
+    expect(RESOLVED_CODES.slice(0, 6)).toEqual(["unmanaged_install", "component_unsupported_platform", "component_external", "upgrade_blocked", "component_pinned", "jobs_running"]);
+    expect(RESOLVED_CODES.slice(6)).toEqual(R269_REFUSALS);
+    for (const code of R269_REFUSALS) {
+      const key = `modules.component.refusal.${code}` as keyof typeof zhCN;
+      expect(zhCN[key]).toContain("{component}");
+      expect(en[key as keyof typeof en]).toContain("{component}");
+    }
     expect(refusalKey("component_busy")).toBeNull();
   });
 });

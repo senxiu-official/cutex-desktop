@@ -214,10 +214,24 @@ export function settingsShelfLayout(stored: number, rowWidth: number, labels: bo
 /** Where the Shelf's left placement goes: the slot between the sidebar card and the work area (components/PaneHost). */
 export const useSettingsShelfSlot = windowStore(() => create<{ left: HTMLElement | null }>(() => ({ left: null })));
 
+/** Whether a window is portrait now (lib/portrait installs it: this module stays free of React). */
+let portraitOf: (win: WindowKey) => boolean = () => false;
+export function setSettingsPortraitHook(fn: (win: WindowKey) => boolean): void {
+  portraitOf = fn;
+}
+
+/**
+ * Drawn maximised now: the stored choice, or its window is portrait (lib/portrait, P2 — beside the stack there is no room
+ * for it; the stored choice is landscape's and stays as it is). lib/portrait useSettingsShelfMaximized is the hook.
+ */
+export function settingsShelfMaximizedNow(): boolean {
+  const s = useSettingsShelf.getState();
+  return s.maximized || portraitOf(s.win);
+}
+
 /** The Shelf is in front of everything (maximised): Esc closes it wherever the focus is; the conversation's Esc stands back. */
 export function settingsShelfCovers(): boolean {
-  const s = useSettingsShelf.getState();
-  return s.open && s.maximized;
+  return useSettingsShelf.getState().open && settingsShelfMaximizedNow();
 }
 
 /** The element is inside the Settings Shelf. */

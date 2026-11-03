@@ -25,6 +25,16 @@ const ENGLISH = {
   "little-callings": "Little Callings", "season-letters": "Season Letters",
   "lanterns-after-dark": "Lanterns After Dark", "kindred-creatures": "Kindred Creatures",
 };
+// Each theme's cover (the face on its card): one picture per theme, rotating claude, gpt, gemini, deepseek, kimi, glm in
+// theme order so neighbouring cards differ (owner 2026-10-29), picked by eye; a theme not listed falls back to gpt/01.
+const COVERS = {
+  "cloud-woven-silks": "claude/02", "great-ming": "gpt/02", "tales-of-frills": "gemini/03", "ad-astra": "deepseek/05",
+  "mountain-city-myriad-layers": "kimi/02", "snowy-owl-post": "glm/06", "girls-night-in": "claude/02",
+  "misty-city-cyberpunk": "gpt/01", "silver-snow-i": "gemini/02", "mortal-world": "deepseek/02",
+  "metropolitan-muses": "kimi/01", "university-universalis": "glm/03", "uniform-revolution": "claude/02",
+  "sunlit-shores": "gpt/03", "southern-cross": "gemini/02", "beyond-spotlight": "deepseek/02",
+  "little-callings": "kimi/03", "season-letters": "glm/02", "lanterns-after-dark": "claude/03", "kindred-creatures": "gpt/01",
+};
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 function need(condition, message) { if (!condition) throw new Error(message); }
 
@@ -160,7 +170,7 @@ export async function importKit(source, options = {}) {
   });
   const manifest = {
     schemaVersion: 1, name: { "zh-CN": "头像互动套装 20261029", en: "Avatar Interaction Kit 20261029" }, total: COUNT,
-    themes: normalized.themes.map(theme => ({ id: theme.id, name: { "zh-CN": theme.name, en: ENGLISH[theme.id] ?? theme.id }, cover: "gpt/01" })),
+    themes: normalized.themes.map(theme => ({ id: theme.id, name: { "zh-CN": theme.name, en: ENGLISH[theme.id] ?? theme.id }, cover: COVERS[theme.id] ?? "gpt/01" })),
     entries: normalized.entries.map(entry => ({ id: entry.id, theme: entry.themeId, themeName: normalized.themes.find(theme => theme.id === entry.themeId).name,
       model: entry.characterId, variant: entry.variant, avatarPath: `avatars/${entry.id}.webp`, previewPath: `previews/${entry.id}.webp`, reviewStatus: entry.reviewStatus })),
   };

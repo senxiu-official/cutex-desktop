@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AVATAR_EMOJI_SET, defaultEmoji, seedHash } from "../src/renderer/src/lib/agentEmoji";
 import { AVATAR_THEME_IDS, avatarThemesOf, defaultAvatarTheme, defaultAvatarThemes, isAvatarTheme, modelFamily, normalizeAvatarThemes, themedEmoji, themeEmoji, themePreview, themesEmoji } from "../src/renderer/src/lib/avatarThemes";
-import { AGENT_AVATAR_DEFAULT_REV, AGENT_AVATAR_DEFAULTS, DEFAULT_AGENT_AVATAR, avatarSwitchOf, drawsEmoji, hiddenAvatar, isMinorAgent, migrateAgentAvatarDefault, minorTileSize, shownAvatar } from "../src/renderer/src/lib/avatarDefault";
+import { AGENT_AVATAR_DEFAULT_REV, AGENT_AVATAR_DEFAULTS, DEFAULT_AGENT_AVATAR, avatarSwitchOf, drawsEmoji, hiddenAvatar, isMinorAgent, migrateAgentAvatarDefault, letterTileRadius, letterTileSize, letterTileText, shownAvatar } from "../src/renderer/src/lib/avatarDefault";
 
 describe("avatar themes", () => {
   it("every theme is a subset of the bundled set with at least 8 distinct emoji", () => {
@@ -259,10 +259,21 @@ describe("仅重要智能体: who gets the dot", () => {
     expect(isMinorAgent("important", { ...plain, avatar: { kind: "color", value: "#40c057" } })).toBe(true);
   });
 
-  it("the minor tile is 15 px in rows, 12 px in 16 px slots", () => {
-    expect(minorTileSize(28)).toBe(15);
-    expect(minorTileSize(20)).toBe(15);
-    expect(minorTileSize(16)).toBe(12);
+  it("the letter tile has the round face's area: 14 / 18 / 25 / 35 px in 16 / 20 / 28 / 40 px slots", () => {
+    expect([16, 20, 28, 40].map(letterTileSize)).toEqual([14, 18, 25, 35]);
+    expect([14, 18, 25, 35].map(letterTileRadius)).toEqual([4, 5, 7, 9]);
+  });
+
+  it("two letters stay two down to the 16 px slot, never under 8 px; capitals a little smaller; one letter bigger", () => {
+    for (const edge of [14, 18, 25, 35]) {
+      const pair = letterTileText("Pi", edge);
+      expect(pair.text).toBe("Pi");
+      expect(pair.fontSize).toBeGreaterThanOrEqual(8);
+      expect(letterTileText("RS", edge).fontSize).toBeLessThanOrEqual(pair.fontSize);
+      expect(letterTileText("研", edge).fontSize).toBeGreaterThan(pair.fontSize);
+    }
+    expect(letterTileText("Pi", 14).fontSize).toBe(8);
+    expect(letterTileText("Pi", 35).fontSize).toBe(17.5);
   });
 });
 

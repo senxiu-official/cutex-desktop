@@ -10,9 +10,9 @@ vi.mock("../src/renderer/src/lib/modelOverloadRetryView", () => ({ useModelOverl
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string, vars?: Record<string, unknown>) => (vars?.n !== undefined ? `${key}(${vars.n})` : key) }) }));
 vi.mock("../src/renderer/src/lib/contextMenu", () => ({ contextMenu: () => () => {}, openMenuFrom: vi.fn() }));
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), bridge: {}, onEvent: () => () => {} }));
-vi.mock("../src/renderer/src/store", () => ({ useApp: Object.assign(() => false, { getState: () => ({}) }), selectedFeatures: () => new Set(), agentHost: () => "local", queueItemText: (item: QueueItem) => (item.input as { text: string }[]).map((p) => p.text).join("") }));
+vi.mock("../src/renderer/src/store", () => ({ useApp: Object.assign((select: (state: unknown) => unknown) => select({ hosts: { active: "local" }, byHost: {}, sidebar: null, pinned: new Set() }), { getState: () => ({}) }), sidebarOf: () => null, featuresOf: () => new Set(), selectedFeatures: () => new Set(), agentHost: () => "local", queueItemText: (item: QueueItem) => (item.input as { text: string }[]).map((p) => p.text).join("") }));
 import { QueuePanel } from "../src/renderer/src/components/QueuePanel";
-import { turnGroups } from "../src/renderer/src/lib/admissionOrder";
+import { turnGroups } from "../src/renderer/src/lib/legacyDelivery/admissionOrder";
 import { setQueueView } from "../src/renderer/src/lib/queueView";
 
 const at = "2026-10-12T00:00:00Z";

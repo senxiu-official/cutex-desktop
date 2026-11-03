@@ -53,9 +53,11 @@ vi.mock("electron", () => ({
     getPath: () => "/isolated/host-actions"
   },
   ipcMain: {
+    on() {},
     handle: (channel: string, fn: (...args: unknown[]) => Promise<unknown>) => fake.handlers.set(channel, fn)
   },
   ipcRenderer: {
+    sendSync: () => false,
     on: (_channel: string, callback: typeof fake.event) => {
       fake.event = callback;
     },

@@ -92,6 +92,15 @@ export function reconcileQueueInsert(host: string, session: string, delivered: (
   useQueueInsertFeedback.setState((s) => ({ byView: { ...s.byView, [key]: (s.byView[key] ?? EMPTY).map((f) => tokens.has(f.token) ? { ...f, state: "delivered", reason: undefined, detail: undefined, checking: undefined, hidden: undefined } : f) } }));
   expireDelivered(key, tokens);
 }
+/** Interrupt-and-send replaces unread steers with one new message. Follow its delivery, not its acceptance. */
+export function linkQueueInsertDelivery(host: string, session: string, ids: ReadonlySet<string>, sentId: string) {
+  const key = viewKey(host, session);
+  useQueueInsertFeedback.setState((s) => {
+    const list = s.byView[key] ?? EMPTY;
+    const linked = list.map((f) => f.state !== "delivered" && (ids.has(f.item.clientUserMessageId) || (!!f.sentId && ids.has(f.sentId))) ? { ...f, sentId } : f);
+    return linked.every((f, i) => f === list[i]) ? s : { byView: { ...s.byView, [key]: linked } };
+  });
+}
 /** One request's feedback (by its token), if it is still shown or remembered. */
 export function queueInsertByToken(host: string, session: string, token: object): QueueInsertFeedback | undefined {
   return (useQueueInsertFeedback.getState().byView[viewKey(host, session)] ?? EMPTY).find((f) => f.token === token);

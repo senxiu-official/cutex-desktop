@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { ExtraInput } from "../../../shared/ipc";
 import { NewAgentStepError, NO_PROGRESS, runNewAgentSteps, type NewAgentOps, type NewAgentProgress } from "./newAgentSteps";
+import { HostBusyActionExhausted } from "./hostBusyActions";
 
-function harness(fail: { director?: number; start?: number; message?: number; appearance?: number } = {}) {
+function harness(fail: { director?: number; start?: number; startError?: unknown; message?: number; appearance?: number } = {}) {
   const calls: string[] = [];
   const messages: { text: string; extra: ExtraInput[] }[] = [];
   let directorFails = fail.director ?? 0;
@@ -23,7 +24,7 @@ function harness(fail: { director?: number; start?: number; message?: number; ap
     },
     start: async (id) => {
       calls.push(`start(${id})`);
-      if (startFails-- > 0) throw new Error("no creds");
+      if (startFails-- > 0) throw fail.startError ?? new Error("no creds");
     },
     submit: async (id, text, extra) => {
       calls.push(`message(${id},${text})`);
@@ -40,17 +41,47 @@ function harness(fail: { director?: number; start?: number; message?: number; ap
     runNewAgentSteps(ops, plan, progress, (p) => {
       progress = p;
     });
-  return { calls, messages, run, progress: () => progress };
+  return { calls, messages, ops, run, progress: () => progress };
 }
 
 describe("runNewAgentSteps", () => {
+  it.each([false, true])("keeps the identity and first task while a tracked start awaits retry (Director=%s)", async (director) => {
+    const pending = new HostBusyActionExhausted();
+    const h = harness({ start: 1, startError: pending });
+    const plan = { start: true, director, message: "first task" };
+    const error = await h.run(plan).catch((e) => e);
+    expect(error).toBeInstanceOf(NewAgentStepError);
+    expect(error.step).toBe("start");
+    expect(error.cause).toBe(pending);
+    expect(h.progress().agent).toBe("a1");
+    expect(h.progress().started).not.toBe(true);
+    expect(h.messages).toEqual([]);
+    expect(h.calls.filter((call) => call.startsWith("create"))).toEqual(["create(start=false)"]);
+    h.calls.length = 0;
+    await h.run({ ...plan, director: false });
+    expect(h.calls).toEqual(["refresh", "start(a1)", "message(a1,first task)"]);
+    await h.run(plan);
+    expect(h.messages).toHaveLength(1);
+  });
+
+  it("does not retry a failed creation automatically or start without a confirmed identity", async () => {
+    const h = harness();
+    h.ops.create = async (start) => {
+      h.calls.push(`create(start=${start})`);
+      throw new Error("creation outcome unknown");
+    };
+    await expect(h.run({ start: true, director: false, message: "first task" })).rejects.toMatchObject({ step: "create" });
+    expect(h.calls).toEqual(["create(start=false)"]);
+    expect(h.progress().agent).toBeNull();
+  });
+
   it("starts and sends an image-only first message, preserving the payload on retry", async () => {
     const h = harness({ message: 1 });
     const extra: ExtraInput[] = [{ type: "image", url: "data:image/png;base64,YWJj" }, { type: "localImage", path: "C:\\Pictures\\first.png" }];
     const plan = { start: false, director: false, message: "  ", extra };
     const error = await h.run(plan).catch((e) => e);
     expect(error.step).toBe("message");
-    expect(h.calls).toEqual(["create(start=true)", "refresh", "message(a1,)"]);
+    expect(h.calls).toEqual(["create(start=false)", "refresh", "start(a1)", "message(a1,)"]);
     expect(h.messages[0]).toEqual({ text: "", extra });
     h.calls.length = 0;
     await h.run(plan);
@@ -73,11 +104,11 @@ describe("runNewAgentSteps", () => {
     const plan = { start: true, director: false, message: "hello" };
     const err = await h.run(plan).catch((e) => e);
     expect(err.step).toBe("appearance");
-    expect(h.calls).toEqual(["create(start=true)", "appearance(a1)"]);
+    expect(h.calls).toEqual(["create(start=false)", "appearance(a1)"]);
     expect(h.progress().agent).toBe("a1");
     h.calls.length = 0;
     await h.run(plan);
-    expect(h.calls).toEqual(["appearance(a1)", "refresh", "message(a1,hello)"]);
+    expect(h.calls).toEqual(["appearance(a1)", "refresh", "start(a1)", "message(a1,hello)"]);
     h.calls.length = 0;
     await h.run(plan);
     expect(h.calls).toEqual(["refresh"]);
@@ -108,10 +139,11 @@ describe("runNewAgentSteps", () => {
     await h.run({ start: false, director: false, message: "  " });
     expect(h.calls).toEqual(["create(start=false)", "refresh"]);
   });
-  it("member: cutex starts it on create", async () => {
+  it("member: create stopped, refresh the identity, then use the tracked start step", async () => {
     const h = harness();
     expect(await h.run({ start: true, director: false })).toBe("a1");
-    expect(h.calls).toEqual(["create(start=true)", "refresh"]);
+    expect(h.calls).toEqual(["create(start=false)", "refresh", "start(a1)"]);
+    expect(h.progress().started).toBe(true);
   });
 
   it("Director: create stopped → assign → start", async () => {

@@ -1,3 +1,4 @@
+import { useDebug } from "../../lib/debugState";
 // Errors of the side-chat routes as shown: an older cutex without them (route_not_found / 404) reads
 // as the calm "needs a newer cutex" text, never the raw code. Launchers / turn actions already hide on
 // such a host (lib/hostGatingView.ts); this is the safety net.
@@ -44,6 +45,7 @@ const FORK_BLOCKED = new RegExp(`\\b${SIDE_FORK_BLOCKED}\\b(?::\\s*(busy|held)\\
 
 export function sideErrorText(error: string | null | undefined, t: (key: SideErrorKey) => string): string | null {
   if (!error) return null;
+  if (useDebug.getState().state.enabled) return error;
   const blocked = FORK_BLOCKED.exec(error);
   if (blocked) return t(blocked[1] === "held" ? "side-chat.forkHeld" : "side-chat.forkBusy");
   const code = CODE_TEXTS.find(([pattern]) => pattern.test(error));

@@ -13,6 +13,7 @@ const win = (id: string, label: string, remaining: number, resetAt: number): Quo
   ({ id, label: "Claude", kind: "window", remainingPercent: remaining, balance: null, resetAt, windowLabel: label, observedAt: Date.now() / 1000, stale: false }) as QuotaGauge;
 /** The mock claude profile: 5h, then 7d and Fable 7d resetting together. */
 let gauges: QuotaGauge[] = [win("claude-0", "5h", 88, at(3.72)), win("claude-1", "7d", 31, at(48)), win("claude-2", "Fable 7d", 79, at(48))];
+const { loadQuota } = vi.hoisted(() => ({ loadQuota: vi.fn(async () => {}) }));
 
 vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -24,7 +25,7 @@ vi.mock("../src/renderer/src/lib/targetHost", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useComposerHost: () => "focus",
   useHostQuotas: () => ({ claude: gauges }),
-  useHostLoadQuota: () => async () => {},
+  useHostLoadQuota: () => loadQuota,
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -41,6 +42,7 @@ const openPopover = async () => {
 };
 
 beforeEach(() => {
+  loadQuota.mockReset().mockResolvedValue(undefined);
   localStorage.clear();
   // The prefs module keeps its state from the previous test: reset the quota prefs through it.
   setUiPref("quotaGauges", {});
@@ -54,9 +56,66 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
+  vi.useRealTimers();
 });
 
 describe("composer quota popover", () => {
+  it("stays open across animation frames, quota polling/rerenders and timeline auto-scroll on the same trigger", async () => {
+    vi.useFakeTimers();
+    const timeline = document.createElement("div");
+    document.body.append(timeline);
+    try {
+      await render();
+      const trigger = host.querySelector("button");
+      await openPopover();
+      const popover = document.querySelector("[data-popover]");
+      expect(popover).not.toBeNull();
+      expect(popover!.querySelectorAll("[data-quota-ring-toggle]")).toHaveLength(3);
+      expect(loadQuota).toHaveBeenCalledExactlyOnceWith("claude");
+      const originalArc = chipRings()[0]!.querySelector("[stroke-dasharray]")!.getAttribute("stroke-dasharray");
+
+      const frame = vi.fn();
+      requestAnimationFrame(frame);
+      await act(async () => { await vi.advanceTimersByTimeAsync(32); });
+      expect(frame).toHaveBeenCalledOnce();
+      expect(document.querySelector("[data-popover]")).toBe(popover);
+
+      // A new quota snapshot arrives on the regular poll, without replacing the chip.
+      loadQuota.mockImplementationOnce(async () => {
+        gauges = [win("claude-0", "5h", 42, at(3.72)), ...gauges.slice(1)];
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      await render();
+      expect(loadQuota).toHaveBeenCalledTimes(2);
+      expect(chipRings()[0]!.querySelector("[stroke-dasharray]")!.getAttribute("stroke-dasharray")).not.toBe(originalArc);
+      expect(host.querySelector("button")).toBe(trigger);
+      expect(document.querySelector("[data-popover]")).toBe(popover);
+
+      // Timeline follow-output is programmatic and unrelated to the composer anchor.
+      await act(async () => {
+        timeline.scrollTop = 500;
+        timeline.dispatchEvent(new Event("scroll"));
+      });
+      expect(document.querySelector("[data-popover]")).toBe(popover);
+      await act(async () => { await vi.advanceTimersByTimeAsync(32); });
+      expect(document.querySelector("[data-popover]")).toBe(popover);
+      expect(host.querySelector("button")).toBe(trigger);
+    } finally { timeline.remove(); }
+  });
+
+  it.each(["outside click", "Escape"])("dismisses the actual quota popover on %s", async (action) => {
+    await render();
+    const trigger = host.querySelector("button");
+    await openPopover();
+    expect(document.querySelector("[data-quota-ring-toggle]")).not.toBeNull();
+    await act(async () => {
+      if (action === "outside click") document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      else document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(document.querySelector("[data-popover]")).toBeNull();
+    expect(host.querySelector("button")).toBe(trigger);
+  });
+
   it("merges same-reset windows into one ring; the hover lists both and their shared reset", async () => {
     await render();
     expect(chipRings().map((r) => r.dataset.quotaRing)).toEqual(["claude-0", "claude-1"]);
@@ -65,6 +124,23 @@ describe("composer quota popover", () => {
     expect(chipRings()[1]!.title).toContain("Claude · Fable 7d");
     expect(chipRings()[1]!.title).toContain("composer.quota.mergedResets");
     expect(countdowns()).toHaveLength(2);
+  });
+
+  it.each(["remaining", "used"] as const)("keeps both model values visible when 7d windows share the same reset (%s)", async (view) => {
+    setUiPref("quotaView", view);
+    const reset = at(106);
+    gauges = [win("claude-0", "5h", 92, at(1.93)), win("claude-1", "7d", 57, reset), win("claude-2", "Fable 7d", 100, reset)];
+    await render();
+    expect(chipRings()).toHaveLength(2);
+    const weekly = chipRings().find((ring) => ring.dataset.merged !== undefined)!;
+    const arcs = [...weekly.querySelectorAll<SVGCircleElement>("circle[stroke-dasharray]")];
+    expect(arcs).toHaveLength(2);
+    expect(new Set(arcs.map((arc) => arc.getAttribute("r"))).size).toBe(2);
+    const fills = arcs.map((arc) => Number(arc.getAttribute("stroke-dasharray")!.split(" ")[0]) / (2 * Math.PI * Number(arc.getAttribute("r"))));
+    expect(fills[0]).toBeCloseTo(view === "remaining" ? 0.57 : 0.43);
+    expect(fills[1]).toBeCloseTo(view === "remaining" ? 1 : 0);
+    expect(weekly.title).toContain("Claude · 7d");
+    expect(weekly.title).toContain("Claude · Fable 7d");
   });
 
   it("one row per gauge with its own ring / countdown switches; the old global switch is gone", async () => {

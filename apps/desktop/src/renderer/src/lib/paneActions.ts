@@ -13,7 +13,8 @@
 //                    (nothing on screen): the layout before
 // Shell code: names no feature.
 import { create } from "zustand";
-import { windowStore } from "./windowScope";
+import { currentWindow, windowStore } from "./windowScope";
+import { portraitOn } from "./portrait";
 import { translate } from "../i18n";
 import { sidebarOf, useApp } from "../store";
 import { confirmDialog, openMenuAt, openMenuFrom, type MenuEntry } from "./contextMenu";
@@ -243,6 +244,19 @@ export function toggleMaximize(ref: PaneRef | null = focusedPaneRef()): void {
     restorePanels();
     return;
   }
+  // Portrait (lib/portrait, P2): a stack has no gaps to grow into — 最大化 fills it (§24.16 maximised: a Shelf pane by its
+  // mode, a conversation by the layout's max; two workspaces are not folded for it), and again = back.
+  if (portraitOn(currentWindow())) {
+    if (ref.area === "tools") return toggleExclusive(ref);
+    endGrow();
+    if (useSide.getState().mode) setMode(null);
+    lastArea = "work";
+    setPaneLayout((l) => {
+      const next = toggleMaximized(l, ref.id);
+      return next.max ? focusPane(next, ref.id, Date.now()) : next;
+    });
+    return;
+  }
   const t = growTargetOf(ref);
   if (!t) return;
   if (ref.area === "work") lastArea = "work";
@@ -265,6 +279,11 @@ export function toggleExclusive(ref: PaneRef | null = focusedPaneRef()): void {
   if (ref.area === "work") {
     if (useSide.getState().mode) setMode(null);
     lastArea = "work";
+    // Portrait (P2): a conversation maximised there (the layout's max, toggleMaximize) comes back as it was — nothing folds.
+    if (usePanes.getState().layout.max && portraitOn(currentWindow())) {
+      setPaneLayout(clearMaximized);
+      return;
+    }
     // Two workspaces (docs/design/002): 独占 = the others fold to their strips; again = they come back.
     const panes = conversationPanes(usePanes.getState().layout);
     if (panes.length >= 2 && panes.includes(ref.id)) {

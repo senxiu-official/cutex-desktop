@@ -1,5 +1,6 @@
 export const zhCN = {
   "runtimes.current": "新{{agent}}使用",
+  "runtimes.unknownVersion": "未知版本",
   "runtimes.noCurrent": "未安装或未设置默认版本",
   "runtimes.unused": "{n} 个旧版本未使用，可清理",
   "runtimes.nativeDependency": "独立可执行文件，无需 Python 或 Node",
@@ -15,6 +16,8 @@ export const zhCN = {
   "runtimes.kimiProfile": "设置 → Profile → 新建 → 服务商选 Kimi Code 或 Moonshot，勾选 Kimi",
   "runtimes.kimiDependency": "Kimi Code 是随组件提供的固定版本，不会自动升级；它要用主机上的 Node",
   "runtimes.node": "Node ≥ {minimum} · 当前 {version}",
+  "runtimes.nodeRange": "Node {range} · 当前 {version}",
+  "runtimes.nodeVersionUnknown": "未知",
   "runtimes.nodeUnknown": "Node 版本要求与检测结果由主机组件提供",
   "runtimes.title": "已安装的运行时",
   "runtimes.description": "各运行时版本和用着它们的{{agent}}",

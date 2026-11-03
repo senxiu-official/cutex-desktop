@@ -10,13 +10,15 @@ import { useAppearance } from "./appearance";
 import { conversationPanes } from "./paneLayout";
 import { usePanes } from "./paneStore";
 import { useSettingsShelf } from "./settingsShelf";
+import { useSettingsShelfMaximized } from "./portrait";
 import { useSide } from "./sideLayoutStore";
 import { rowWidthMode } from "./workspaceRow";
 import { deskState, type DeskState } from "./workSurface";
 
 /** Marks <html data-desk-state> while mounted. `deskOn`: the desktop's content is on screen; `fullWindow`: a full-window page. */
 export function useDeskState(deskOn: boolean, fullWindow: boolean): DeskState {
-  const settingsMax = useSettingsShelf((s) => s.open && s.maximized);
+  const settingsOpen = useSettingsShelf((s) => s.open);
+  const settingsMax = useSettingsShelfMaximized() && settingsOpen;
   const paneMax = usePanes((s) => !!s.layout.max);
   const toolMode = useSide((s) => !!s.mode);
   const workspaces = usePanes((s) => conversationPanes(s.layout).length);

@@ -343,7 +343,7 @@ export async function pickerMenu(target: PinTarget, t: ReturnType<typeof useI18n
     : [];
   return [
     { label: t("home.picker.services"), icon: <Server size={14} />, submenu: svc.length ? svc : none, onSelect: () => {} },
-    { label: t("home.picker.agents"), icon: <Avatar name="A" size={16} />, submenu: agents.length ? agents : none, onSelect: () => {} },
+    { label: t("home.picker.agents"), icon: <Avatar name="A" agent={{}} size={16} />, submenu: agents.length ? agents : none, onSelect: () => {} },
     { label: t("home.picker.artifacts"), icon: <FileBox size={14} />, submenu: arts.length ? arts : none, onSelect: () => {} },
     ...pages,
   ];

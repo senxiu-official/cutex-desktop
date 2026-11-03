@@ -75,7 +75,27 @@ describe("Avatar: the owner's badge as the mark", () => {
     draw();
     expect(host.querySelectorAll("[data-project-mark]")).toHaveLength(1);
     expect(chip()!.textContent).toBe("主管");
-    expect(chip()!.style.color).toContain("rgb(250, 82, 82)"); // projectColor("red")
+    expect(chip()!.style.background).toContain("rgb(250, 82, 82)"); // projectColor("red")
+  });
+  it("an opaque pill in the project colour with black / white ink: no glass, no blur, nothing per theme", () => {
+    for (const [color, ink] of [["red", "rgb(0, 0, 0)"], ["magenta", "rgb(255, 255, 255)"], ["#3fa7a3", "rgb(0, 0, 0)"]] as const) {
+      fx.look.isDirector = true; fx.look.project = { hostId: "local", id: "p", mark: "WvLn", color }; fx.look.badge = null;
+      draw();
+      const c = chip()!;
+      expect(c.style.backgroundColor || c.style.background).not.toMatch(/gradient|color-mix|transparent/);
+      expect(c.style.color).toBe(ink);
+      expect(c.style.backdropFilter).toBe("");
+      expect(c.getAttribute("style")).not.toMatch(/light-dark|backdrop/);
+    }
+  });
+  it("box sizes are unchanged (no layout shift): place, height, padding per avatar size", () => {
+    fx.look.isDirector = true; fx.look.project = { hostId: "local", id: "p", mark: "ctxH", color: "cyan" }; fx.look.badge = null;
+    const box = () => { const c = chip()!.style; return [c.left, c.bottom, c.height, c.minWidth, c.padding, c.fontSize, c.borderRadius]; };
+    draw({ size: 28 }); expect(box()).toEqual(["-3px", "-2px", "12px", "12px", "0px 4px", "8.5px", "3px"]);
+    draw({ size: 32 }); expect(box()).toEqual(["-3px", "-2px", "13px", "13px", "0px 4px", "9px", "3px"]);
+    draw({ size: 40 }); expect(box()).toEqual(["-3px", "-2px", "13px", "13px", "0px 4px", "9px", "3px"]);
+    draw({ size: 48 }); expect(box()).toEqual(["-3px", "-2px", "14px", "14px", "0px 4px", "9.5px", "3px"]);
+    draw({ size: 28, status: { presence: "online" } }); expect(box()).toEqual(["-5px", "-2px", "12px", "12px", "0px 1px", "8.5px", "3px"]);
   });
   it("crowded rules apply with a presence dot (the same as a project mark)", () => {
     fx.look.badge = { text: "ABCD" };
@@ -86,7 +106,7 @@ describe("Avatar: the owner's badge as the mark", () => {
   it("not on small avatars, a minor tile or a cut-out portrait", () => {
     fx.look.badge = { text: "HELP" };
     draw({ size: 20 }); expect(chip()).toBeNull();
-    fx.minor = true; draw({ size: 32, minor: true }); expect(chip()).toBeNull();
+    fx.minor = true; draw({ size: 32 }); expect(chip()).toBeNull();
     fx.minor = false; draw({ size: 96, picture: "data:image/png;base64,AA==", cutout: true }); expect(chip()).toBeNull();
     draw({ size: 32 }); expect(chip()!.textContent).toBe("HELP");
   });

@@ -14,6 +14,44 @@ import type {
   ToolRequestUserInputResponse,
 } from "@cutex-desktop/protocol/codex/v2";
 
+/** Local projection only; generated protocol declarations remain unchanged. */
+export interface QuestionOptionsV1 {
+  version: 1;
+  question: string;
+  multiSelect: boolean;
+  options: { label: string; description: string; preview?: string }[];
+}
+export type InteractionQuestion = ToolRequestUserInputQuestion & { cutexQuestionOptions?: QuestionOptionsV1 };
+export const USER_INPUT_OPTIONS_FEATURE = "user-input-options-v1";
+/** Python str.strip / backend contract: Unicode whitespace plus the four information
+ * separators; BOM (FEFF) is content, unlike JavaScript String.trim(). */
+export const questionTrim = (text: string): string => text.replace(/^[\p{White_Space}\u001c-\u001f]+|[\p{White_Space}\u001c-\u001f]+$/gu, "");
+export const questionUtf8Size = (text: string): number => new TextEncoder().encode(text).length;
+
+/** Reject the entire extension on unknown fields, versions, types or ambiguous labels. */
+export function questionOptionsV1(value: unknown): QuestionOptionsV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  if (Object.keys(v).some(k => !["version", "question", "multiSelect", "options"].includes(k)) ||
+      v.version !== 1 || typeof v.question !== "string" || !questionTrim(v.question) || questionUtf8Size(v.question) > 65536 ||
+      typeof v.multiSelect !== "boolean" || !Array.isArray(v.options) || v.options.length < 2 || v.options.length > 4) return null;
+  const labels = new Set<string>();
+  for (const option of v.options) {
+    if (!option || typeof option !== "object" || Array.isArray(option)) return null;
+    const o = option as Record<string, unknown>;
+    if (Object.keys(o).some(k => !["label", "description", "preview"].includes(k)) ||
+        typeof o.label !== "string" || !questionTrim(o.label) || o.label !== questionTrim(o.label) || questionUtf8Size(o.label) > 65536 || labels.has(o.label) ||
+        typeof o.description !== "string" || questionUtf8Size(o.description) > 65536 || ("preview" in o && (typeof o.preview !== "string" || questionUtf8Size(o.preview) > 65536))) return null;
+    labels.add(o.label);
+  }
+  return v as unknown as QuestionOptionsV1;
+}
+export function interactionQuestion(base: ToolRequestUserInputQuestion, enabled: boolean): InteractionQuestion {
+  const extension = enabled ? questionOptionsV1((base as InteractionQuestion).cutexQuestionOptions) : null;
+  const { cutexQuestionOptions: _ignored, ...clean } = base as InteractionQuestion;
+  return extension ? { ...clean, question: extension.question, options: extension.options, cutexQuestionOptions: extension } : clean;
+}
+
 export interface PendingRequest {
   id: string | number;
   method: string;
@@ -46,7 +84,7 @@ export type InteractionModel =
       /** Index of the choice Esc picks: decline, else cancel; null = Esc does not answer (never an approving choice). */
       cancelIndex: number | null;
     }
-  | { kind: "questions"; request: PendingRequest; questions: ToolRequestUserInputQuestion[]; blocking: boolean }
+  | { kind: "questions"; request: PendingRequest; questions: InteractionQuestion[]; blocking: boolean }
   | { kind: "elicitation"; request: PendingRequest; params: McpServerElicitationRequestParams }
   | { kind: "unknown"; request: PendingRequest };
 
@@ -125,7 +163,7 @@ export function approvalKeyAction(
   return null;
 }
 
-export function toInteraction(request: PendingRequest): InteractionModel {
+export function toInteraction(request: PendingRequest, optionsV1 = false): InteractionModel {
   switch (request.method) {
     case "item/commandExecution/requestApproval": {
       const p = request.params as CommandExecutionRequestApprovalParams;
@@ -190,7 +228,7 @@ export function toInteraction(request: PendingRequest): InteractionModel {
     }
     case "item/tool/requestUserInput": {
       const p = request.params as ToolRequestUserInputParams;
-      return { kind: "questions", request, questions: p.questions, blocking: p.isBlocking };
+      return { kind: "questions", request, questions: p.questions.map(q => interactionQuestion(q, optionsV1)), blocking: p.isBlocking };
     }
     case "mcpServer/elicitation/request":
       return { kind: "elicitation", request, params: request.params as McpServerElicitationRequestParams };
@@ -201,9 +239,7 @@ export function toInteraction(request: PendingRequest): InteractionModel {
 
 /** Build the requestUserInput reply from per-question answers. */
 export function questionsReply(answers: Record<string, string[]>): ToolRequestUserInputResponse {
-  const out: ToolRequestUserInputResponse = { answers: {} };
-  for (const [id, values] of Object.entries(answers)) out.answers[id] = { answers: values };
-  return out;
+  return { answers: Object.fromEntries(Object.entries(answers).map(([id, values]) => [id, { answers: values }])) };
 }
 
 export function elicitationReply(action: McpServerElicitationRequestResponse["action"], content: unknown = null): McpServerElicitationRequestResponse {

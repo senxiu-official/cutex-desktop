@@ -22,6 +22,7 @@ import { viewKindOf } from "./viewChoice";
 import { useViewerRefresh } from "../../lib/useViewerRefresh";
 import { rootFor } from "../../lib/workspace";
 import { sidebarOf, useApp } from "../../store";
+import { fileRenderIdentity, largeRenderChoices } from "../../lib/largeRenderChoices";
 
 /**
  * Scroll the preview to `line` (1-based) of a rendered code block and highlight it. streamdown's
@@ -154,14 +155,17 @@ export function FileView({ api, hostId, scope, path, host, visible = true, line 
 function HtmlPage({ hostId, scope, path, onSource }: { hostId: string; scope: WorkspaceScope | null; path: string; onSource?(source: boolean): void }) {
   const { t } = useI18n();
   const [large, setLarge] = useState(false);
-  const [problem, setProblem] = useState<{ kind: FilePageProblem; bytes?: number } | null>(null);
+  const [problem, setProblem] = useState<{ kind: FilePageProblem; bytes?: number; identity: string | null } | null>(null);
   const [refs, setRefs] = useState(0);
   const [ready, setReady] = useState(false);
   const [navigated, setNavigated] = useState(false);
   const [mount, setMount] = useState(0);
   const name = path.split(/[\\/]/).pop() ?? path;
   const sourceButton = onSource && (
-    <button onClick={() => onSource(true)} data-page-source="" className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-hover">
+    <button onClick={() => {
+      if (problem?.identity) largeRenderChoices.set(problem.identity, "source");
+      onSource(true);
+    }} data-page-source="" className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-hover">
       {t("workspace.page.viewSource")}
     </button>
   );
@@ -183,6 +187,7 @@ function HtmlPage({ hostId, scope, path, onSource }: { hostId: string; scope: Wo
         <button
           data-page-show-large=""
           onClick={() => {
+            if (problem.identity) largeRenderChoices.set(problem.identity, "page");
             setProblem(null);
             setLarge(true);
           }}
@@ -223,7 +228,13 @@ function HtmlPage({ hostId, scope, path, onSource }: { hostId: string; scope: Wo
             title={t("workspace.page.title", { name })}
             large={large}
             mount={mount}
-            onProblem={(kind, bytes) => setProblem({ kind, ...(bytes != null ? { bytes } : {}) })}
+            onProblem={(kind, bytes, modifiedAt) => {
+              const identity = kind === "too-large" ? fileRenderIdentity(hostId, scope, path, bytes, modifiedAt) : null;
+              const choice = identity ? largeRenderChoices.get(identity) : undefined;
+              if (!large && choice === "page" && (bytes ?? Infinity) <= FILE_PAGE_MAX_BYTES) return setLarge(true);
+              if (!large && choice === "source" && onSource) return onSource(true);
+              setProblem({ kind, bytes, identity });
+            }}
             onReady={(n) => {
               setRefs(n);
               setReady(true);

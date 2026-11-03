@@ -6,6 +6,7 @@
 // cutex never returns one, and statuses are passed through only after dropping unexpected
 // credential-like keys.
 import { appWindows } from "./appWindows";
+import { downloadFilename, downloadFilters } from "../shared/downloadFilename";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { BrowserWindow, dialog } from "electron";
 import { CutexApiError, type CutexClient } from "@cutex-desktop/cutex-client";
@@ -172,7 +173,8 @@ export function remoteJobsApi(client: CutexClient): Pick<DaemonApi, "markExterna
       const helper = helperOf(r.value);
       if (!helper) return { ok: false, code: "invalid_reply", message: "unexpected helper reply" };
       const win = BrowserWindow.getFocusedWindow() ?? appWindows()[0];
-      const options = { defaultPath: helper.fileName, filters: [{ name: "Python", extensions: ["py"] }] };
+      const defaultPath = downloadFilename(helper.fileName, { extension: "py" });
+      const options = { defaultPath, filters: downloadFilters(defaultPath, "Python") };
       const picked = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
       if (picked.canceled || !picked.filePath) return { ok: false, code: "cancelled", message: "" };
       await writeFile(picked.filePath, helper.script, { encoding: "utf8", mode: 0o600 });

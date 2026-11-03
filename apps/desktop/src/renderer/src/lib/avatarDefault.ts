@@ -1,8 +1,8 @@
 // Settings → 外观 → 默认头像 (UI pref `agentAvatarDefault`): what an agent without its own picture /
 // emoji shows. "emoji" = a bundled emoji from its Profile's theme (lib/avatarThemes), "letter" = the
-// initial, "important" (★ owner 2026-10-18, 仅重要智能体) = the emoji for important agents and, in
-// list rows, a small Profile-coloured mark (the dot; drawn as an initial tile since 2026-10-24) for every other one, so a long sidebar is calmer and the
-// agents that matter stand out. Important = Director, pinned, or an avatar of its own; nothing depends
+// initial, "important" (★ owner 2026-10-18, 仅重要智能体) = the emoji for important agents and, in every place (rule A,
+// owner 2026-11-01; list rows only before), a letter tile for every other one (the dot in code; an initial tile since 2026-10-24,
+// two letters on no fill since 2026-11-01), so a long sidebar is calmer and the agents that matter stand out. Important = Director, pinned, or an avatar of its own; nothing depends
 // on which agent is open (owner 2026-10-18: avatars must not come and go while clicking around). The
 // owner decides per agent with 显示头像 / 隐藏头像 (agent menu), which writes / clears its cutex avatar
 // (the 拟人头像 / theme emoji it would show anyway), so the choice syncs across devices. Pure (no React).
@@ -42,7 +42,7 @@ export interface MinorFacts {
 }
 
 /**
- * 仅重要智能体: whether an agent shows the dot instead of an avatar. Directors, pinned agents and
+ * 仅重要智能体: whether an agent shows its letter tile (the dot) instead of an avatar — everywhere, not only in list rows. Directors, pinned agents and
  * agents with their own emoji / icon / picture keep the avatar; a colour-only avatar is no picture,
  * so that agent gets the dot (in its own colour). Selection plays no part. Other settings never show the dot.
  */
@@ -55,10 +55,27 @@ export function isMinorAgent(mode: AgentAvatarDefault, facts: MinorFacts): boole
 }
 
 /**
- * The minor mark's edge for an avatar slot of `size` px: a rounded tile with the agent's initial (owner 2026-10-24,
- * option 甲 — a round dot read as a second host dot), 15 px in 20 px rows, 12 px in 16 px slots.
+ * The letter tile's edge for an avatar slot of `size` px: a rounded square (owner 2026-10-24, option 甲 — a round dot
+ * read as a second host dot) with the agent's two letters, of the round face's area (0.88 × the box), so a tile beside a
+ * portrait weighs the same: 16 → 14, 20 → 18, 28 → 25, 40 → 35 px (2026-11-01; 15 / 12 px with one letter before).
  */
-export const minorTileSize = (size: number): number => (size >= 18 ? 15 : 12);
+export const letterTileSize = (size: number): number => Math.round(size * 0.88);
+
+/** The tile's corner radius: about a quarter of its edge (4 px at 14–18 px, 6 px at 25, 9 at 35). */
+export const letterTileRadius = (edge: number): number => Math.max(4, Math.round(edge * 0.26));
+
+/**
+ * The tile's letters and font size (px). Two letters read down to the 14 px tile of a 16 px slot (owner 2026-11-01): half
+ * the edge, never under 8 px, a little smaller for two capitals (RS, WM are wider than Pi, Mo) — at 8 px they are tightened
+ * instead; one letter / one hanzi: 0.6 of the edge.
+ */
+export function letterTileText(initial: string, edge: number): { text: string; fontSize: number; letterSpacing: string } {
+  const chars = [...initial];
+  if (chars.length < 2) return { text: initial, fontSize: Math.max(8, Math.round(edge * 0.6 * 2) / 2), letterSpacing: "0" };
+  const caps = chars.every((c) => c !== c.toLowerCase());
+  const size = Math.round(edge * (caps ? 0.46 : 0.5) * 2) / 2;
+  return { text: chars.slice(0, 2).join(""), fontSize: Math.max(8, size), letterSpacing: size < 8 ? "-0.06em" : "-0.02em" };
+}
 
 /**
  * The agent menu's avatar switch in 仅重要智能体 mode: "show" (显示头像) for an agent that shows the dot,

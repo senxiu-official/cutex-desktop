@@ -294,7 +294,9 @@ Q1 保留 90 天（**10-23 改为全部保留**，见实现计划 §2）；Q2 �
 }
 ```
 
-- 键总在（值可以是 `null`）；`durationMs`、`toolCalls`、`backfilled` 只在有时出现。
+- 键总在（值可以是 `null`）；`durationMs`、`toolCalls`、`backfilled`、`turnOrigin` 只在有时出现。
+- `turnOrigin?: "owner" | "external"`（2026-10-29）：由 daemon 根据启动回合的明确来源记录，不以回合中的插话、被动结果或标题猜测。`owner` 为主人明确发起；`external` 包括智能体/服务/自动化发起。缺失（旧主机、旧日志、来源无法确认）按未知处理，桌面保留显示。
+- 「动态」默认隐藏确认由主人发起的回合；选择「回合」筛选后可勾选「包括我发起的」，开关默认关并保存在本机。回到全部动态继续显示自主动态，保留此偏好供下次进入「回合」使用。只影响回合行，不隐藏审批、成果、委托等独立事件。没有 `project-events` 的旧主机仍使用原派生列表；支持事件但缺来源的新旧日志不推测发起者。
 - `backfilled: true`：主机第一次启动时从现存事件日志补回来的行，项目号是补的时候的成员关系。
 - `journal.gap`：这段时间的动态缺失（事件日志已轮转掉），显示一行提示即可。
 - 跳转：回合 → `cutexSessionId` + `parent.turnId`；委托 → `refs.askId`；成果 → `refs.artifactId`；审批 → `refs.approvalId`；作业 → `refs.jobId`；主人消息 → `refs.notificationId`。

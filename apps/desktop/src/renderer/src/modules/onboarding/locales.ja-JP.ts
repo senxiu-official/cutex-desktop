@@ -231,6 +231,8 @@ export const jaJP: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.shelf.text": "タブを別の{{shelf}}へドラッグできます。空白部分へドラッグすると、新しい{{shelf}}になります。\nタブが収まりきらないときは「⌄ N」で、その{{shelf}}のすべてのタブを表示できます。",
   "onboarding.guide.tray.title": "トレイ",
   "onboarding.guide.tray.text": "項目を区切り線の向こうへドラッグするとトレイに固定し、戻すと固定を解除します。\n項目を右クリックすると、バッジやメモを追加できます。",
+  "onboarding.guide.portrait.title": "縦向きレイアウト",
+  "onboarding.guide.portrait.text": "縦長のウィンドウでは、会話と{{shelf}}が上下に並びます。この区切り線をドラッグして高さを調整し、ダブルクリックで元に戻します。ポインターを置いて ⇅ をクリックすると上下が入れ替わります。\nサイドバーはウィンドウの左端に隠れていて、ポインターを近づけると現れます。常に横向きにするには、設定 → 外観 →「縦向きレイアウト」で変更します。",
   "onboarding.guide.service.title": "サービスへのリンク",
   "onboarding.guide.service.text": "サービスは、{{agent}}がホストで動かす Web ページや API です。リンクをクリックすると Cutex 内で開きます。\n一時サービスは待機時間や有効期限に応じてホストに回収され、リンクが使えなくなります。\n残したい場合は「サービス」で固定するか永続に変更してください。停止や再起動もそこで行えます。",
   "onboarding.guide.update.title": "更新",

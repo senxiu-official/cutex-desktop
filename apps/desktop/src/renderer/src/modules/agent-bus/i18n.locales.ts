@@ -1,5 +1,10 @@
 // Settlement strings: character conversion from the module zh-CN catalog.
 const zhHantCN = {
+  "agent-bus.settlement.ineligible": "服務端目前不允許關閉此事項；可稍後重新讀取。",
+  "agent-bus.settlement.ineligibleStatus": "服務器暫不允許關閉",
+  "agent-bus.settlement.readFailed": "狀態暫不可用",
+  "agent-bus.settlement.unassignedTurn": "未分配入口回合",
+  "agent-bus.settlement.laterCompletedTurn": "同一執行緒後續已完成回合",
   "agent-bus.settlement.unknown": "結果不確定",
   "agent-bus.settlement.closed": "已關閉跟進",
   "agent-bus.settlement.close": "關閉卡住訊息",

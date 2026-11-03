@@ -1,3 +1,7 @@
+import type { SessionDelivery } from "@cutex-desktop/protocol";
+import { DeliveryStatus } from "./DeliveryStatus";
+import type { LedgerOwnerOutbox } from "../lib/inputLedger/owner";
+import type { MessageKey } from "../i18n";
 // The status line under an optimistic new-turn send (lib/outbox, placement "turn"). The bubble itself
 // is the timeline's own user-message row (components/Timeline, Entry with `pending`), keyed by the
 // clientUserMessageId like the native userMessage that replaces it — one element whose props change
@@ -7,7 +11,7 @@
 // 重试 / 放回输入框 / 丢弃.
 import { useRef } from "react";
 import { useI18n } from "../i18n";
-import { outboxStatusCopy, type OutboxEntry } from "../lib/outbox";
+import { outboxStatusCopy, type OutboxEntry } from "../lib/legacyDelivery/outbox";
 import { nextProgressAt, silentGapSeconds, turnProgressMark } from "../lib/silentGap";
 import { turnActivity } from "../lib/turnActivity";
 import { useNow } from "../lib/time";
@@ -62,4 +66,19 @@ export function PendingStatus({ sessionId, entry }: { sessionId: string; entry: 
       {t(status.label, status.vars)}
     </div>
   );
+}
+
+export function SessionDeliveryStatus({ delivery, sessionId, hostId }: { delivery: SessionDelivery | null; sessionId: string; hostId?: string }) {
+  return delivery ? <DeliveryStatus delivery={delivery} sessionId={sessionId} hostId={hostId} leaseRecovery={false} /> : null;
+}
+
+export function LedgerPendingStatus({ entry, sessionId, hostId, readOnly = false }: { entry: LedgerOwnerOutbox; sessionId: string; hostId: string; readOnly?: boolean }) {
+  const { t } = useI18n();
+  return <span className={`${OVER} gap-2 text-caption text-subtle`} data-testid="ledger-outbox-status" title={entry.error}>
+    <span>{t((entry.phase === "sending" ? "inputLedger.record.sending" : entry.error === "input_not_found" ? "outbox.failed" : "inputLedger.unconfirmed") as MessageKey)}</span>
+    {!readOnly && entry.phase === "unconfirmed" && <>
+      <button onClick={() => void useApp.getState().retryLedgerOutbox(sessionId, entry.inputId, hostId).catch(error => useApp.getState().notify(String(error), "error"))}>{t("inputLedger.retry" as MessageKey)}</button>
+      <button onClick={() => useApp.getState().discardLedgerOutbox(sessionId, entry.inputId, hostId)}>{t("inputLedger.dismiss" as MessageKey)}</button>
+    </>}
+  </span>;
 }

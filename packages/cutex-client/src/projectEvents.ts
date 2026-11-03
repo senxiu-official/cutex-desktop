@@ -46,6 +46,8 @@ export interface ProjectEvent {
   durationMs?: number;
   toolCalls?: number;
   backfilled?: true;
+  /** Positive turn-start provenance from cutex. Absent on older hosts/journal rows: unknown. */
+  turnOrigin?: "owner" | "external";
 }
 
 export interface ProjectEventPage {

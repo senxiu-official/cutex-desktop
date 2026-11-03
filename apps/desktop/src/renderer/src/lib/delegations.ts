@@ -116,6 +116,7 @@ export type DelegationStatusKey =
   | "planMode"
   | "offline"
   | "blocked"
+  | "waitingResume"
   // blocked(quota): the target's usage limit is used up; cutex redelivers it after the reset
   | "quota"
   | "starting"
@@ -209,6 +210,8 @@ function holdStatus(hold: AskHold | null | undefined, queuePosition: number | nu
     case "blocked":
       if (hold.by === "quota") return s("quota");
       return hold.by === "runtimeDown" ? s("offline", { dangerText: true }) : s("blocked", { dangerText: true });
+    case "heldByRuntime":
+      return hold.native === "gate_closed" ? s("waitingResume") : s("blocked", { dangerText: true });
     case "waitingForInput":
       return { key: "question", tone: "warn", glyph: "pulse" };
     case "peerUnreachable":
@@ -218,7 +221,7 @@ function holdStatus(hold: AskHold | null | undefined, queuePosition: number | nu
     case "peerUnknown":
       return s("peerUnknown");
     default:
-      // heldByRuntime / runtimeUnsupported / profileSwitchPending / waitingForApproval: one word.
+      // runtimeUnsupported / profileSwitchPending / waitingForApproval: one word.
       return s("blocked", { dangerText: true });
   }
 }

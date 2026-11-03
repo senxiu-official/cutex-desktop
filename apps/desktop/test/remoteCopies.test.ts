@@ -47,6 +47,16 @@ afterEach(async () => {
   }
 })
 describe('owned remote copies', () => {
+  it('preserves ZIP/compound extensions while shortening a long remote filename', async () => {
+    for (const suffix of ['.zip', '.tar.gz']) {
+      const t = transport(new Uint8Array([1, 2])); t.meta.name = 'a'.repeat(190) + suffix
+      const m = manager({ root: await root(), transport: t.factory })
+      const { id, row } = await download(m)
+      expect(row.status).toBe('complete'); expect(row.name).toHaveLength(160)
+      expect(row.name.endsWith(suffix)).toBe(true)
+      expect(path.basename(await m.file(id))).toBe(row.name)
+    }
+  })
   it('streams >10 MiB exactly, hashes bytes, verifies final metadata and exposes no local paths', async () => {
     const bytes = Uint8Array.from({ length: 11 * 1024 * 1024 + 193 }, (_, i) => i % 251)
     const t = transport(bytes), m = manager({ root: await root(), transport: t.factory })

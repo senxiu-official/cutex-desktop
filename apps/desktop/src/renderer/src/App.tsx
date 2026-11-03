@@ -21,9 +21,11 @@ import { SideDndLayer } from "./components/side/SideDndLayer";
 import { WorkspaceDndLayer } from "./components/WorkspaceDndLayer";
 import { ColumnPickLayer } from "./components/ColumnPickLayer";
 import { ShelfToast } from "./components/side/ShelfToast";
+import { HostBusyActions } from "./components/HostBusyActions";
 import { SettingsShelf } from "./components/SettingsShelf";
 import { WidthTip } from "./components/WidthTip";
 import { useSettingsShelf } from "./lib/settingsShelf";
+import { useSettingsShelfMaximized } from "./lib/portrait";
 import { useFullscreen } from "./lib/panelFull";
 import { FullscreenHint, WindowBarFrame } from "./components/PanelFullscreen";
 import { LOCAL_HOST_ID } from "../../shared/hosts";
@@ -106,7 +108,9 @@ export function App() {
   // A panel in full screen (§24.16, lib/panelFull): only it stays — the Settings Shelf leaves, the window bar
   // is revealed at the top edge (components/PanelFullscreen), the sidebar and the tray step back by themselves.
   const full = useFullscreen();
-  const covered = useSettingsShelf((s) => s.open && s.maximized && s.win === MAIN_WINDOW) && !full;
+  // Maximised — or this window portrait (lib/portrait: it opens maximised there).
+  const settingsMax = useSettingsShelfMaximized();
+  const covered = useSettingsShelf((s) => s.open && s.win === MAIN_WINDOW) && settingsMax && !full;
   const { locale } = useI18n();
   useDesktopShell(locale);
   useTermsSync();
@@ -192,6 +196,7 @@ export function App() {
         <ColumnPickLayer />
         <ForetellLayer />
         <ShelfToast />
+        <HostBusyActions />
       </div>
     </WorkspaceContext.Provider>
   );

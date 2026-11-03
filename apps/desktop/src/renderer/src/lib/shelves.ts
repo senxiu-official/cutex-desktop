@@ -147,7 +147,7 @@ export function closePagePopover(): void {
   usePagePopover.setState({ pageId: null, fresh: false });
 }
 
-/** The rail's ＋: a new empty page at the end, in view, with its rename popover. Refused (a toast) at 9 pages. */
+/** The rail's ＋: a new empty page at the end, in view, with its rename popover. Refused (a toast) at 50 pages. */
 export function addPage(shelfId: string): string | null {
   let made: string | null = null;
   updateLayout((l) => {
@@ -207,7 +207,7 @@ export function mergePageUp(pageId: string): void {
   updateLayout((l) => mergePageInto(l, pageId, above));
 }
 
-/** 拆开 (design 038): a pane of a page with several becomes a page of its own right after it (≤ 9 pages, else a toast). */
+/** 拆开 (design 038): a pane of a page with several becomes a page of its own right after it (≤ 50 pages, else a toast). */
 export function splitPaneOut(cardId: string): void {
   const before = useSide.getState().layout;
   updateLayout((l) => splitCardOut(l, cardId, Date.now()));

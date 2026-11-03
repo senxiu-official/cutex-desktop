@@ -7,7 +7,7 @@ import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdmissionItem, QueueItem } from "@cutex-desktop/protocol";
-import type { PendingSteer } from "../src/renderer/src/lib/pendingSteers";
+import type { PendingSteer } from "../src/renderer/src/lib/legacyDelivery/pendingSteers";
 import { beginQueueInsert, DELIVERED_FEEDBACK_MS, dismissQueueInsert, finishQueueInsert, insertFeedbackOf, reconcileQueueInsert, setQueueInsertChecking, useQueueInsertFeedback } from "../src/renderer/src/lib/queueInsertFeedback";
 
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
@@ -33,7 +33,7 @@ vi.mock("../src/renderer/src/store", () => ({
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { QueuePanel } = await import("../src/renderer/src/components/QueuePanel");
-const { turnGroups } = await import("../src/renderer/src/lib/admissionOrder");
+const { turnGroups } = await import("../src/renderer/src/lib/legacyDelivery/admissionOrder");
 const { INSERT_DWELL_MS } = await import("../src/renderer/src/lib/insertTarget");
 
 const at = "2026-10-23T00:00:00Z";

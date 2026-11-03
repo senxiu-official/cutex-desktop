@@ -11,6 +11,7 @@ let detail: Record<string, unknown> = {};
 let session: Record<string, unknown> | undefined;
 let features = new Set(["profile-tool-schema-compat"]);
 const confirm = vi.fn(async () => true);
+let onlineError: unknown;
 vi.mock("../src/renderer/src/bridge", () => ({
   api: {},
   apiFor: (hostId: string) => ({
@@ -22,7 +23,10 @@ vi.mock("../src/renderer/src/bridge", () => ({
   cleanIpcMessage: (m: string) => m,
 }));
 const app = {
-  sessionAction: async (id: string, method: string) => { calls.push(`${method} ${id}`); },
+  sessionAction: vi.fn(async (id: string, method: string, _params?: unknown, _hostId?: string) => {
+    calls.push(`${method} ${id}`);
+    if (method === "cutex/runtime/online" && onlineError) throw onlineError;
+  }),
   submit: async (text: string, strategy: string, _extra: unknown, opts: { sessionId: string }) => { calls.push(`submit ${opts.sessionId} ${strategy} ${text}`); return null; },
   openSettings: (tab: string, focus: unknown) => { calls.push(`settings ${tab} ${JSON.stringify(focus)}`); },
 };
@@ -42,6 +46,7 @@ vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
 
 const { isToolSchemaRejection, turnRefusedToolSchema } = await import("../src/renderer/src/lib/toolSchemaHint");
 const { ToolSchemaHint } = await import("../src/renderer/src/components/ToolSchemaHint");
+const { HostBusyActionExhausted, HostBusyActionCancelled, HostBusyActionUncertain } = await import("../src/renderer/src/lib/hostBusyActions");
 const { applyEvent, emptyTimeline, timelineFromThreadRead } = await import("../src/renderer/src/lib/timeline");
 const applyNative = (state: ReturnType<typeof emptyTimeline>, message: { method: string; params: unknown }) =>
   applyEvent(state, { contractVersion: 2, eventId: "e", cursor: "c", streamId: "s", sequence: 1, receivedAt: "", cutexSessionId: "s1", hostId: "h1", source: "app_server", sensitivity: "owner", correlation: {}, native: { kind: "notification", message } } as never);
@@ -50,6 +55,8 @@ let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
   calls.length = 0;
+  onlineError = undefined;
+  app.sessionAction.mockClear();
   confirm.mockClear();
   detail = { name: "gem", toolSchemaCompat: null, detail: { editable: { toolSchemaCompat: true } } };
   session = { cutexSessionId: "s1", displayName: "Gem", profile: "gem", runtime: { status: "online", activeTurnId: null, runtimeGeneration: 4 } };
@@ -64,8 +71,8 @@ afterEach(() => {
   host.remove();
 });
 
-async function draw(retryText: string | null = "截图给我") {
-  await act(async () => { root.render(h(ToolSchemaHint, { hostId: "h1", sessionId: "s1", retryText })); });
+async function draw(retryText: string | null = "截图给我", hostId = "h1", sessionId = "s1") {
+  await act(async () => { root.render(h(ToolSchemaHint, { hostId, sessionId, retryText })); });
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 }
 const hint = () => host.querySelector("[data-tool-schema-hint]");
@@ -103,6 +110,76 @@ describe("recognising a refused tool schema", () => {
 });
 
 describe("the hint in the error row", () => {
+  it("still shows a real runtime failure, without sending the task", async () => {
+    onlineError = new Error("runtime failed to start");
+    await draw();
+    await click("enable");
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("runtime failed to start");
+    expect(calls.filter((call) => call.startsWith("submit"))).toEqual([]);
+  });
+
+  it("does not continue a late start into a message after switching agent/host", async () => {
+    let finish!: () => void;
+    app.sessionAction.mockImplementationOnce(async (id, method) => { calls.push(`${method} ${id}`); });
+    app.sessionAction.mockImplementationOnce(async (id, method) => {
+      calls.push(`${method} ${id}`);
+      await new Promise<void>((resolve) => { finish = resolve; });
+    });
+    await draw();
+    await click("enable");
+    await draw("different task", "h2", "s2");
+    await act(async () => { finish(); });
+    expect(calls.filter((call) => call.startsWith("submit"))).toEqual([]);
+    expect(action("enable").disabled).toBe(false);
+  });
+
+  it.each([
+    () => new HostBusyActionExhausted(),
+    () => new HostBusyActionCancelled(),
+    () => new HostBusyActionUncertain(new Error("transport")),
+  ])("leaves pending-start feedback with the action row and resumes only on an explicit click (%#)", async (pending) => {
+    onlineError = pending();
+    await draw("first task");
+    await click("enable");
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(host.querySelector("[data-tool-schema-hint-done]")).toBeNull();
+    expect(action("enable").textContent).toBe("hostAction.retry");
+    expect(calls.filter((call) => call.startsWith("submit"))).toEqual([]);
+    expect(app.sessionAction).toHaveBeenLastCalledWith("s1", "cutex/runtime/online", { openVisibleTerminal: false }, "h1");
+
+    // A runtime-only retry in the persistent action row does not continue the failed message.
+    onlineError = undefined;
+    await app.sessionAction("s1", "cutex/runtime/online", { openVisibleTerminal: false }, "h1");
+    expect(calls.filter((call) => call.startsWith("submit"))).toEqual([]);
+    session = { ...session, runtime: { status: "online", activeTurnId: null, runtimeGeneration: 5 } };
+    await draw("first task");
+    await click("enable");
+    expect(calls.filter((call) => call.startsWith("patch"))).toHaveLength(1);
+    expect(calls.filter((call) => call.startsWith("cutex/runtime/offline"))).toHaveLength(1);
+    expect(calls.filter((call) => call.startsWith("submit"))).toEqual(["submit s1 auto first task"]);
+    expect(host.querySelector("[data-tool-schema-hint-done]")?.textContent).toContain("toolSchemaHint.doneResent");
+  });
+
+  it("keeps the requested restart across an offline refresh when there is no text to resend", async () => {
+    onlineError = new HostBusyActionExhausted();
+    await draw(null);
+    await click("enable");
+    session = { ...session, runtime: { status: "offline", activeTurnId: null, runtimeGeneration: 5 } };
+    onlineError = undefined;
+    await draw(null);
+    await click("enable");
+    expect(calls.filter((call) => call.startsWith("cutex/runtime/online"))).toHaveLength(2);
+    expect(calls.filter((call) => call.startsWith("cutex/runtime/offline"))).toHaveLength(1);
+    expect(calls.filter((call) => call.startsWith("submit"))).toEqual([]);
+  });
+
+  it("does not dispatch duplicate workflows on two clicks before the first await settles", async () => {
+    await draw();
+    await act(async () => { action("enable").click(); action("enable").click(); });
+    expect(calls.filter((call) => call.startsWith("patch"))).toHaveLength(1);
+    expect(calls.filter((call) => call.startsWith("submit"))).toHaveLength(1);
+  });
+
   it("shows for a Profile with strict mode off and names the setting and the restart", async () => {
     await draw();
     expect(calls).toEqual(["get h1 gem"]);

@@ -85,7 +85,7 @@ export type SideHit =
   | { at: "origin" | "outside" | "none" };
 
 export type RefuseWhy =
-  /** No room: ≤ 3 panes per page, ≤ 4 tool panes on screen, ≤ 2 Shelves, ≤ 9 pages per Shelf. */
+  /** No room: ≤ 3 panes per page, ≤ 4 tool panes on screen, ≤ 2 Shelves, ≤ 50 pages per Shelf. */
   | "limit"
   /** That page has 3 panes already (a page button). */
   | "pageFull"
@@ -154,7 +154,7 @@ export function zoneAt(box: { left: number; top: number; width: number; height: 
 /**
  * A dragged page (a Shelf Rail page button, owner 2026-10-22): onto a page button's middle = merged into that page
  * (design 038, ≤ 3 panes together, else refused); its top / bottom quarter (or half, without a zone) = before / after
- * it; onto a rail's ＋ = at the end of that rail. Its own place = nothing; another Shelf with 9 pages = refused. A
+ * it; onto a rail's ＋ = at the end of that rail. Its own place = nothing; another Shelf with 50 pages = refused. A
  * page goes only into a rail (panes, the work area's edges: no target).
  */
 export function pageDropTarget(layout: SideLayout, pageId: string, hit: SideHit): SideDropTarget | null {
@@ -183,7 +183,7 @@ export function pageDropTarget(layout: SideLayout, pageId: string, hit: SideHit)
 /**
  * A page of `from` (the focused conversation's Shelf) dragged onto the other workspace's Shelf Rail `to` (audit
  * 2026-10-23 #1, design 038 §2): the same rules as on its own rail — a page button's middle = merged into it (≤ 3
- * panes together), its top / bottom quarter = before / after it, a rail's ＋ = at its end (≤ 9 pages). A shared page
+ * panes together), its top / bottom quarter = before / after it, a rail's ＋ = at its end (≤ 50 pages). A shared page
  * (in every Shelf already) or onto one: refused; `visible(id)` = that conversation sees the instance (else refused:
  * bound to this one). Ids in the target are `to`'s.
  */
@@ -289,7 +289,7 @@ function movedTabs(layout: SideLayout, drag: SideDrag, card: SideCard): { ids: s
   return { ids, kinds: [...new Set(ids.map((id) => layout.instances[id]?.kind ?? card.kind))] };
 }
 
-/** A new page of `shelfId` for the drag (≤ 9 pages), else refused. */
+/** A new page of `shelfId` for the drag (≤ 50 pages), else refused. */
 function newPageOf(layout: SideLayout, shelfId: string): SideDropTarget {
   return pagesOfShelf(layout, shelfId).length < MAX_SHELF_PAGES ? { kind: "newPage", shelfId } : { kind: "refuse", why: "limit" };
 }

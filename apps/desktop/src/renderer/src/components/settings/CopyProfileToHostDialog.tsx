@@ -17,7 +17,7 @@ import { setSettingsHost } from "../../lib/settingsHost";
 import { daemonApiOf, TargetHostContext } from "../../lib/targetHost";
 import { useHostScope } from "../../lib/useHostScope";
 import { useApp } from "../../store";
-import { Checkbox, SettingsGroup } from "./Form";
+import { Checkbox, FormFields, SettingsGroup } from "./Form";
 
 export function CopyProfileToHostDialog({ item, sourceHostId, onClose }: { item: ProfileItem; sourceHostId: string; onClose(): void }) {
   const { t } = useI18n();
@@ -128,7 +128,7 @@ export function CopyProfileToHostDialog({ item, sourceHostId, onClose }: { item:
             </div>
           </div>
         ) : (
-          <TargetHostContext.Provider value={target || null}><SettingsGroup agents="newAgents" source="host"><form
+          <TargetHostContext.Provider value={target || null}><FormFields><SettingsGroup agents="newAgents" source="host"><form
             className="flex flex-col gap-3"
             onSubmit={(e) => {
               e.preventDefault();
@@ -188,7 +188,7 @@ export function CopyProfileToHostDialog({ item, sourceHostId, onClose }: { item:
                 {busy ? t("agent-config.profile.transfer.copying") : t("agent-config.profile.transfer.copy")}
               </button>
             </div>
-          </form></SettingsGroup></TargetHostContext.Provider>
+          </form></SettingsGroup></FormFields></TargetHostContext.Provider>
         )}
       </div>
     </div>

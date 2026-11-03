@@ -21,7 +21,7 @@ vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
 
 vi.mock("../src/renderer/src/modules/artifacts/store", async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  loadContent: () => new Promise(() => {}),
+  loadContent: vi.fn(() => new Promise(() => {})),
   loadDiff: () => new Promise(() => {}),
 }));
 vi.mock("../src/renderer/src/modules/artifacts/PageFrame", () => ({ PageFrame: () => h("div", { "data-testid": "page-frame" }) }));
@@ -31,6 +31,8 @@ vi.mock("../src/renderer/src/components/DocumentPreview", () => ({ DocumentPrevi
 
 const { ViewBody } = await import("../src/renderer/src/modules/artifacts/View");
 const { useArtifactCache } = await import("../src/renderer/src/modules/artifacts/store");
+const { loadContent } = await import("../src/renderer/src/modules/artifacts/store");
+const { largeRenderChoices, LARGE_RENDER_TTL_MS } = await import("../src/renderer/src/lib/largeRenderChoices");
 
 const ID = "af-0123456789abcdef0123456789abcdef";
 const HOST = "local";
@@ -85,6 +87,33 @@ function renderView(name: string, mediaType: string, sourcePath: string): string
 const tabs = (html: string) => [...html.matchAll(/data-tab="([a-z]+)"/g)].map((m) => m[1]);
 
 describe("artifact view tabs with a generic stored media type", () => {
+  it("remounts an accepted large page without asking; a new version, changed bytes/hash and TTL expiry ask again", async () => {
+    largeRenderChoices.clear();
+    renderView("large.html", "text/html", "/w/large.html");
+    const initial = useArtifactCache.getState().details[`${HOST}|${ID}`]!;
+    let v = { ...initial.versions[0]!, bytes: 7 * 1024 * 1024 };
+    const update = () => act(() => useArtifactCache.setState({ details: { [`${HOST}|${ID}`]: { ...initial, artifact: { ...initial.artifact, latestVersion: v.version, latest: v }, versions: [v] } } }));
+    vi.mocked(loadContent).mockResolvedValue({ artifactId: ID, version: 1, encoding: "utf8", content: "<h1>large page source</h1>", totalBytes: v.bytes, truncated: true } as never);
+    update();
+    const host = document.createElement("div"), root = createRoot(host);
+    const props = { instance: { id: "t", state: { ref: `${ID}@latest`, pane: "preview" } }, hostId: HOST, setState: () => {}, open: () => {} };
+    const render = () => act(async () => root.render(h(ViewBody, props as never)));
+    const remount = async () => { await act(async () => root.render(null)); await render(); };
+    const gate = () => [...host.querySelectorAll("button")].find(b => b.textContent?.includes("artifacts.page.showLarge"));
+    const accept = async () => { await vi.waitFor(() => expect(gate()).toBeDefined()); await act(async () => gate()!.click()); expect(host.querySelector('[data-testid="page-frame"]')).not.toBeNull(); };
+    try {
+      await render(); await accept();
+      await remount();
+      expect(gate()).toBeUndefined();
+      expect(host.querySelector('[data-testid="page-frame"]')).not.toBeNull();
+      for (const patch of [{ version: 2 }, { bytes: v.bytes + 1 }, { sha256: "changed" }]) {
+        v = { ...v, ...patch }; update(); await accept();
+      }
+      const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + LARGE_RENDER_TTL_MS + 1);
+      try { await remount(); await vi.waitFor(() => expect(gate()).toBeDefined()); } finally { clock.mockRestore(); }
+    } finally { act(() => root.unmount()); vi.mocked(loadContent).mockImplementation(() => new Promise(() => {})); largeRenderChoices.clear(); }
+  });
+
   it("an HTML page stored as text/plain under a label name has 预览 · 源代码 · 出处 · 对比", () => {
     const html = renderView("round2-html-artifact", "text/plain", "C:\\work\\acc\\page.html");
     expect(tabs(html)).toEqual(["preview", "code", "origin", "compare"]);

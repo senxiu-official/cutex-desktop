@@ -28,6 +28,7 @@ import { applyAskEvent, ASKS_FEATURE, DELEGATION_VIEWS_FEATURE, mergeSummaries, 
 import { delegationRefresh } from "./delegationRefresh";
 import { focusHostId, hostKey, parseHostKey, type HostKey } from "./hostKeys";
 import { onEveryAppWindow } from "./appWindowSet";
+import { isShortId, parseIdRef, resolveId } from "./shortIds";
 
 export interface DelegationsState {
   /** Delegations by `hostKey(hostId, askId)`: open ones, those of agents opened, closed ones loaded. */
@@ -56,6 +57,8 @@ export const useDelegations = create<DelegationsState>((set) => ({
   reset: () => {
     sessionsLoaded.clear();
     detailInFlight.clear();
+    cardInFlight.clear();
+    cardLists.clear();
     closedRequest = null;
     closedRequested = null;
     connectionReady.clear();
@@ -107,7 +110,9 @@ function invalidateHost(hostId: string) {
 }
 /** `${hostId}\n${sessionId}` of agents whose delegations were loaded. */
 const sessionsLoaded = new Set<string>();
-const detailInFlight = new Map<HostKey, { promise: Promise<AskDetail | null> }>();
+const detailInFlight = new Map<HostKey, { promise: Promise<AskDetail | null>; minimumRevision?: number }>();
+const cardInFlight = new Map<string, Promise<void>>();
+const cardLists = new Map<string, { token: HostGeneration; promise: ReturnType<typeof readInGeneration<AskSummary[] | null>> }>();
 let closedRequested: string | null = null;
 let closedRequest: { hostId: string; promise: Promise<void> } | null = null;
 const connectionReady = new Map<string, boolean>();
@@ -350,6 +355,49 @@ export async function loadSessionDelegations(sessionId: string, force = false, h
   }
 }
 
+/** Resolve transcript abbreviations on their requester host before using the exact-id detail route. */
+export function loadCardDelegation(hostId: string, ref: string, sessionId: string, force = false): Promise<void> {
+  if (!supported(hostId)) return Promise.resolve();
+  const parsed = parseIdRef(ref);
+  const exact = parsed?.kind === "ask" && parsed.mode === "full" ? `ask-${parsed.hex}` : ref;
+  const load = force ? refreshDelegation : loadDelegationDetail;
+  if (!isShortId(ref)) return load(hostId, exact).then(() => {});
+  const key = `${hostId}\n${sessionId}\n${ref}`;
+  const pending = cardInFlight.get(key);
+  if (pending) return pending;
+  const owner = app;
+  const alive = () => app === owner && cardInFlight.get(key) === request && followed(hostId);
+  const request = (async () => {
+    // Start after registering the request so reset/disposal can retire it during the read.
+    await Promise.resolve();
+    while (alive()) {
+      const token = generation(hostId);
+      if (!ready(hostId)) { await token.changed; continue; }
+      const known = resolveId(ref, Object.keys(hostDelegations(useDelegations.getState().byKey, hostId)));
+      if (known) { await load(hostId, known); return; }
+      // Lists have no cursor. Request the supported maximum for this requester, never send a short
+      // id to GET /asks/{id} (its 404 would otherwise be cached as a deleted delegation).
+      const listKey = `${hostId}\n${sessionId}`;
+      let list = cardLists.get(listKey);
+      if (!list || list.token !== token) {
+        const request = { token, promise: readInGeneration(token, () => daemonOf(hostId).asks({ requester: sessionId, limit: 1000 })) };
+        cardLists.set(listKey, list = request);
+        void request.promise.finally(() => { if (cardLists.get(listKey) === request) cardLists.delete(listKey); });
+      }
+      const result = await list.promise;
+      if (!alive()) return;
+      if (!currentRead(hostId, token) || result.kind === "changed") continue;
+      if (result.kind !== "value" || !result.value) return;
+      mergeRows(hostId, result.value);
+      const id = resolveId(ref, Object.keys(hostDelegations(useDelegations.getState().byKey, hostId)));
+      if (id) await load(hostId, id);
+      return;
+    }
+  })().finally(() => { if (cardInFlight.get(key) === request) cardInFlight.delete(key); });
+  cardInFlight.set(key, request);
+  return request;
+}
+
 /** The overview remembers demand because an expanded bucket does not re-run a React effect on reconnect. */
 export function loadClosedDelegations(force = false): Promise<void> {
   const hostId = focus();
@@ -393,7 +441,7 @@ export function loadDelegationDetail(hostId: string, askId: string): Promise<Ask
   const revision = s.byKey[key]?.revision;
   if (key in s.details && (known === null || revision === undefined || (known?.revision ?? -Infinity) >= revision)) return Promise.resolve(known ?? null);
   const owner = app;
-  const request = { promise: Promise.resolve<AskDetail | null>(null) };
+  const request: { promise: Promise<AskDetail | null>; minimumRevision?: number } = { promise: Promise.resolve<AskDetail | null>(null) };
   detailInFlight.set(key, request);
   const alive = () => app === owner && detailInFlight.get(key) === request && followed(hostId);
   request.promise = (async () => {
@@ -405,12 +453,16 @@ export function loadDelegationDetail(hostId: string, askId: string): Promise<Ask
       if (!alive()) return null;
       if (!currentRead(hostId, token) || result.kind === "changed") continue;
       if (result.kind === "error") return null; // transient failures are not cached
+      if (result.value && (result.value.revision ?? -Infinity) < (request.minimumRevision ?? -Infinity)) continue;
       if ((useDelegations.getState().byKey[key]?.revision ?? -Infinity) > (revisionAtStart ?? -Infinity)) continue;
       // A newer record than the row (an event or the capped lists missed it) updates the row too, so
       // every view of it (the project card, the overview) agrees with the detail.
       useDelegations.setState(s => {
         const row = s.byKey[key];
-        const next = row && result.value ? withDetailState(row, result.value) : row;
+        const detail = result.value;
+        const fresh = detail?.askId === askId && typeof detail.revision === "number" && detail.execution
+          ? summaryFromRecord({ ...detail, answerId: detail.answerId ?? detail.answer?.answerId ?? null }) : null;
+        const next = row && detail ? withDetailState(row, detail) : fresh ?? row;
         return { details: { ...s.details, [key]: result.value }, ...(next !== row ? { byKey: { ...s.byKey, [key]: next! } } : {}) };
       });
       return result.value;
@@ -511,6 +563,19 @@ export function startDelegationSync(handle: AppHandle): () => void {
     // The event's host's records only (the other side of a peers delegation has its own).
     const patch = applyHostAskEvent(useDelegations.getState(), hostId, method, envelope.cutex?.params);
     if (patch) useDelegations.setState(s => ({ ...patch, ...(patch.byKey ? { details: freshDetails(s.details, patch.byKey) } : {}) }));
+    const params = envelope.cutex?.params as { askId?: unknown; revision?: unknown } | undefined;
+    const askId = params?.askId;
+    if (typeof askId === "string" && !isShortId(askId)
+      && ["cutex/ask/stateChanged", "cutex/ask/answered", "cutex/ask/closed"].includes(method)
+      && !useDelegations.getState().byKey[hostKey(hostId, askId)]) {
+      void refreshDelegation(hostId, askId);
+      // A second state event can arrive while an absent row's first GET is still in flight.
+      // Answer events have a separate revision counter, so only state/closed revisions fence it.
+      const pending = detailInFlight.get(hostKey(hostId, askId));
+      if (pending && method !== "cutex/ask/answered" && typeof params?.revision === "number") {
+        pending.minimumRevision = Math.max(pending.minimumRevision ?? -Infinity, params.revision);
+      }
+    }
     scheduleRefresh(hostId);
   });
   // The host feed restarted from its live tail: the events in between are lost, re-read the open list.

@@ -33,12 +33,14 @@ import {
   STREAM_GROUPS,
   stopCall,
   toggleGroup,
+  withoutOwnerTurns,
   type RowBadge,
   type RowTone,
   type RunningKind,
 } from "./stream";
 import { useProjectFeed, useRunningNow } from "./streamData";
 import { loadOlder, sendStop } from "./streamStore";
+import { setIncludeOwnerTurns, useActivityPrefs } from "./activityPrefs";
 
 type T = ReturnType<typeof useI18n>["t"];
 
@@ -300,7 +302,11 @@ export function ProjectStream({ data, state, setState, now }: { data: ProjectDat
   const { hostId, projectId } = data.target!;
   const kinds = queryKinds(state.evKinds, state.needsOnly);
   const { key, feed } = useProjectFeed(hostId, projectId, kinds, state.evAgent);
-  const rows = state.needsOnly ? attentionRows(feed.rows) : feed.rows;
+  const includeOwnerPreference = useActivityPrefs((s) => s.includeOwnerTurns);
+  const includeOwnerTurns = !state.needsOnly && state.evKinds.includes("turn") && includeOwnerPreference;
+  const activity = withoutOwnerTurns(feed.rows, includeOwnerTurns);
+  const rows = state.needsOnly ? attentionRows(activity) : activity;
+  const projectionKey = `${key}\nowner:${includeOwnerTurns}`;
   const scroller = useRef<HTMLDivElement>(null);
   const [seenSeq, setSeenSeq] = useState(-1);
   const [atTop, setAtTop] = useState(true);
@@ -312,7 +318,7 @@ export function ProjectStream({ data, state, setState, now }: { data: ProjectDat
   useEffect(() => {
     if (atTop) setSeenSeq(topSeq);
   }, [atTop, topSeq]);
-  useEffect(() => setSeenSeq(-1), [key]);
+  useEffect(() => setSeenSeq(-1), [projectionKey]);
   useEffect(() => {
     if (!feed.reloads) return;
     setReloadNote(true);
@@ -323,11 +329,11 @@ export function ProjectStream({ data, state, setState, now }: { data: ProjectDat
   useEffect(() => {
     const el = scroller.current;
     if (!el || feed.phase !== "ready" || !feed.hasMore || feed.loadingMore) return;
-    if (autoPages.current.key !== key) autoPages.current = { key, n: 0 };
+    if (autoPages.current.key !== projectionKey) autoPages.current = { key: projectionKey, n: 0 };
     if (el.scrollHeight - el.clientHeight > NEAR_BOTTOM || autoPages.current.n >= AUTO_PAGES) return;
     autoPages.current.n++;
     void loadOlder(key);
-  }, [key, feed.phase, feed.hasMore, feed.loadingMore, rows.length]);
+  }, [key, projectionKey, feed.phase, feed.hasMore, feed.loadingMore, rows.length]);
 
   const onScroll = () => {
     const el = scroller.current;
@@ -362,7 +368,7 @@ export function ProjectStream({ data, state, setState, now }: { data: ProjectDat
     body = <Centered icon={<RefreshCw size={16} className="text-subtle" />} text={feed.phase === "unavailable" ? t("project-view.stream.unavailable") : t("project-view.stream.error", { reason: feed.error ?? "" })} />;
   else if (!rows.length && !feed.hasMore)
     body = (
-      <Centered icon={<History size={16} className="text-subtle" />} text={t(filtered ? "project-view.stream.emptyFiltered" : "project-view.stream.empty")}>
+      <Centered icon={<History size={16} className="text-subtle" />} text={t(filtered ? "project-view.stream.emptyFiltered" : activity.length < feed.rows.length ? "project-view.stream.emptyAutonomous" : "project-view.stream.empty")}>
         {filtered && (
           <button type="button" onClick={() => setState({ ...state, evKinds: [], evAgent: null, needsOnly: false })} className="mt-0.5 rounded-md border border-border px-2 py-0.5 text-meta/[inherit] text-muted hover:bg-hover">
             {t("project-view.clearFilter")}
@@ -387,7 +393,7 @@ export function ProjectStream({ data, state, setState, now }: { data: ProjectDat
             t("project-view.stream.loadingMore")
           ) : feed.hasMore ? (
             // Several older pages held nothing this filter shows (cutex r252+ bounded scans): let the owner go on.
-            feed.stalled ? (
+            feed.stalled || autoPages.current.n >= AUTO_PAGES ? (
               <button type="button" onClick={() => void loadOlder(key)} className="rounded-md border border-border px-2 py-0.5 text-meta/[inherit] text-muted hover:bg-hover">
                 {t("project-view.stream.keepLooking")}
               </button>
@@ -421,6 +427,12 @@ export function ProjectStream({ data, state, setState, now }: { data: ProjectDat
           <ChevronDown size={11} className="shrink-0" />
         </Chip>
       </div>
+      {!state.needsOnly && state.evKinds.includes("turn") && (
+        <label className="mx-3 mb-1.5 flex w-fit cursor-pointer items-center gap-1.5 text-meta/[inherit] text-muted hover:text-foreground">
+          <input type="checkbox" className="h-3.5 w-3.5 accent-[var(--accent)]" checked={includeOwnerPreference} onChange={(event) => setIncludeOwnerTurns(event.target.checked)} data-testid="project-stream-include-owner" />
+          {t("project-view.stream.includeOwnerTurns")}
+        </label>
+      )}
       {reloadNote && <div className="mx-3 mb-1 rounded-lg border border-dashed border-border px-2 py-1 text-meta/[inherit] text-subtle">{t("project-view.stream.reloaded")}</div>}
       <div ref={scroller} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto pb-2" data-testid="project-stream-list">
         {fresh > 0 && (

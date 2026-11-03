@@ -24,7 +24,7 @@ vi.mock("../i18n", () => ({ useI18n: () => ({ t: (key: string, vars?: Record<str
 vi.mock("./targetHost", async original => ({ ...await original<object>(), useTargetApi: () => ({ createProfile: fx.createProfile, profileModels: fx.profileModels }), useTargetHostId: () => "dsh-host", useTargetFeatures: () => fx.features }));
 vi.mock("./profileSnapshot", async original => ({ ...await original<object>(), cachedProfileList: () => fx.profileList, loadProfileList: async () => fx.profileList }));
 vi.mock("./useProfilePresets", async () => { const { FALLBACK_PRESETS } = await import("./profilePresets"); return { useProfilePresets: () => FALLBACK_PRESETS }; });
-vi.mock("./componentView", () => ({ useComponentState: () => ({ state: fx.state, entry: { list: fx.list, refusal: null } }) }));
+vi.mock("./componentView", () => ({ useComponentState: () => ({ state: fx.state, entry: { list: fx.list, refusal: null } }), useHostComponents: () => ({ list: fx.list }) }));
 vi.mock("../components/ComponentCard", () => ({ ComponentNotice: ({ name }: { name: string }) => h("div", { "data-component": name }), ComponentCard: ({ name, state }: { name: string; state: { kind: string } }) => h("div", { "data-component": name }, state.kind) }));
 vi.mock("../components/settings/ProfileClaudeAccount", () => ({ NewClaudeAccountRow: () => null }));
 const { NewProfileForm } = await import("../components/settings/NewProfileForm");
@@ -181,17 +181,27 @@ it("preserves imported model and custom environment reference when changing or c
 it("creates a DSH quick chat without saved Codex permissions or post-create reviewer/plan/goal writes", async () => {
   fx.createHumanSession.mockResolvedValue({ cutexSessionId: "new-dsh" });
   const reviewer = vi.fn(), setCollabMode = vi.fn(), setGoal = vi.fn();
-  useApp.setState({
-    features: new Set(["launch-approvals-reviewer"]), creatingChat: false,
-    pendingChat: { ...emptyPendingChat("dsh-profile", "local"), dsh: true, permissionMode: "auto", plan: true, goal: "stale Codex goal", launch: { model: "deepseek-v4-flash", reasoningEffort: "high", sandbox: "danger-full-access", approvalPolicy: "never", networkAccess: true, writableRoots: ["/outside"], approvalsReviewer: "auto_review", claudePermissionMode: "bypassPermissions" }, drafts: [{ text: "hello", images: [], skills: [] }] },
-    select: vi.fn(async () => {}), submit: vi.fn(async () => null), refreshHostSidebar: vi.fn(async () => {}), expectApprovalsReviewer: reviewer, setCollabMode, setGoal,
-  });
-  useApp.getState().retryPendingChat();
-  for (let i = 0; i < 30; i++) await Promise.resolve();
-  expect(fx.createHumanSession).toHaveBeenCalledExactlyOnceWith({ start: true, profile: "dsh-profile", launch: { model: "deepseek-v4-flash", reasoningEffort: "high" } });
-  expect(reviewer).not.toHaveBeenCalled();
-  expect(setCollabMode).not.toHaveBeenCalled();
-  expect(setGoal).not.toHaveBeenCalled();
+  const originalSessionAction = useApp.getState().sessionAction;
+  const online = vi.fn(async () => ({ status: "online" })), submit = vi.fn(async () => null);
+  try {
+    useApp.setState({
+      features: new Set(["launch-approvals-reviewer"]), creatingChat: false,
+      pendingChat: { ...emptyPendingChat("dsh-profile", "local"), dsh: true, permissionMode: "auto", plan: true, goal: "stale Codex goal", launch: { model: "deepseek-v4-flash", reasoningEffort: "high", sandbox: "danger-full-access", approvalPolicy: "never", networkAccess: true, writableRoots: ["/outside"], approvalsReviewer: "auto_review", claudePermissionMode: "bypassPermissions" }, drafts: [{ text: "hello", images: [], skills: [] }] },
+      select: vi.fn(async () => {}), sessionAction: online, submit, refreshHostSidebar: vi.fn(async () => {}), expectApprovalsReviewer: reviewer, setCollabMode, setGoal,
+    });
+    useApp.getState().retryPendingChat();
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    expect(fx.createHumanSession).toHaveBeenCalledExactlyOnceWith({ start: false, profile: "dsh-profile", launch: { model: "deepseek-v4-flash", reasoningEffort: "high" } });
+    expect(online).toHaveBeenCalledExactlyOnceWith("new-dsh", "cutex/runtime/online", { openVisibleTerminal: false }, "local");
+    expect(submit).toHaveBeenCalledExactlyOnceWith("hello", "auto", [], { keepFailed: false, startIfOffline: false });
+    expect(fx.createHumanSession.mock.invocationCallOrder[0]).toBeLessThan(online.mock.invocationCallOrder[0]!);
+    expect(online.mock.invocationCallOrder[0]).toBeLessThan(submit.mock.invocationCallOrder[0]!);
+    expect(reviewer).not.toHaveBeenCalled();
+    expect(setCollabMode).not.toHaveBeenCalled();
+    expect(setGoal).not.toHaveBeenCalled();
+  } finally {
+    useApp.setState({ sessionAction: originalSessionAction });
+  }
 });
 
 it("hides DSH Profile switching even when an older host reports editable/allowed", async () => {

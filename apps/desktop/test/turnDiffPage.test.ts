@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { applyOpen, emptyLayout, locate, place, placeSpec, type SideLayout } from "../src/renderer/src/lib/sideLayout";
+import { MAX_SHELF_PAGES, applyOpen, emptyLayout, locate, place, placeSpec, type SideLayout } from "../src/renderer/src/lib/sideLayout";
 import { turnDiffPage } from "../src/renderer/src/lib/turnDiffPage";
 import { DIFF_COMPONENT, CHANGES_COMPONENT } from "../src/renderer/src/lib/sideKinds";
 import type { Json } from "../src/renderer/src/modules/types";
@@ -7,7 +7,7 @@ import type { Json } from "../src/renderer/src/modules/types";
 const binding = { kind: "agent" as const, hostId: "local", sessionId: "agent" };
 function open(layout: SideLayout, kind: typeof DIFF_COMPONENT | typeof CHANGES_COMPONENT, key: string, state: Json = null) {
   const spec = placeSpec(kind === DIFF_COMPONENT ? { home: "workspace", prefer: [{ containing: CHANGES_COMPONENT }, { group: "workspace" }], order: 400 } : { home: "workspace", order: 300 });
-  const decision = place(layout, { kind, binding, key, transient: false, columnOpen: layout.open, activePage: layout.activePage }, spec);
+  const decision = place(layout, { kind, binding, key, transient: false, page: (state as { source?: string } | null)?.source === "git" ? layout.pages.find(p => p.cards.some(c => c.kind === CHANGES_COMPONENT))?.id : undefined, columnOpen: layout.open, activePage: layout.activePage }, spec);
   return applyOpen(layout, decision, { kind, binding, key, state, v: 1, pinned: true }, 1, { reveal: true, home: spec.home });
 }
 function mixed() {
@@ -62,10 +62,10 @@ it("does not rewrite a stored user placement override when rescuing an already-o
   expect(locate(next, turn.instanceId)!.page.id).not.toBe(turn.pageId);
 });
 
-it("keeps the nine-page limit instead of dropping another page or exceeding it", () => {
+it("keeps the sanity page limit instead of dropping another page or exceeding it", () => {
   const { turn } = mixed();
   const page = turn.layout.pages[0]!;
-  const full = { ...turn.layout, pages: [...turn.layout.pages, ...Array.from({ length: 8 }, (_, i) => ({ ...page, id: `kept-${i}`, cards: [], kept: true }))] };
+  const full = { ...turn.layout, pages: [...turn.layout.pages, ...Array.from({ length: MAX_SHELF_PAGES - 1 }, (_, i) => ({ ...page, id: `kept-${i}`, cards: [], kept: true }))] };
   expect(turnDiffPage(full, turn.instanceId, 2)).toBe(full);
 });
 

@@ -47,7 +47,16 @@ export function createBrowserOwnerApi(options: BrowserOwnerApiOptions) {
     })(); void task.catch(() => {});
     try { return await Promise.race([task, new Promise<never>((_yes, no) => { timer = setTimeout(() => { abort.abort(); void reader?.cancel().catch(() => {}); no(new BrowserRelayError(patch === undefined ? "browser_unavailable" : "outcome_unknown")); }, 10_000); timer.unref?.(); })]); }
     catch (error) { if (error instanceof BrowserRelayError) throw error; throw new BrowserRelayError(patch === undefined ? "browser_unavailable" : "outcome_unknown"); }
-    finally { if (timer) clearTimeout(timer); abort.abort(); void reader?.cancel().catch(() => {}); }
+    finally {
+      if (timer) clearTimeout(timer);
+      abort.abort();
+      if (reader) {
+        // Initiate cancellation without extending the request deadline while an
+        // underlying transport finishes cancelling. Cancel closes pending reads.
+        try { void reader.cancel().catch(() => {}); } catch { /* Already closed. */ }
+        finally { reader.releaseLock(); }
+      }
+    }
   }
   function validateImage(value: unknown): BrowserImage {
     if (!object(value) || (value.mimeType !== "image/png" && value.mimeType !== "image/jpeg") || typeof value.data !== "string" || value.data.length > 6 * 1024 * 1024) throw invalid();

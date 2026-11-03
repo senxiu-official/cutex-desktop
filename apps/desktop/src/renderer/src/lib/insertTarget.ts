@@ -5,7 +5,7 @@
 // becomes the target (an overlay on that line: nothing moves, and it is away from the "move to the top"
 // slot), taking a drop only after the drag has stayed on it for INSERT_DWELL_MS. A drop anywhere else only
 // reorders. 「全部合并插入」 sits at the right of the header line. Pure.
-import type { InsertRefusal } from "./admissionOrder";
+import type { InsertRefusal } from "./legacyDelivery/admissionOrder";
 import { QUEUE_MERGE_MIN } from "../../../shared/queueMerge";
 
 /** How long a drag must stay on the insert target before a drop there inserts. */

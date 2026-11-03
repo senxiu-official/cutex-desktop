@@ -1,6 +1,7 @@
 import type { CutexClient } from "@cutex-desktop/cutex-client";
 import type { ArtifactContent, ArtifactDetail } from "../shared/artifactStore";
 import type { CopySource, TransferChunk, TransferMeta } from "../shared/remoteCopies";
+import { downloadFilename } from "../shared/downloadFilename";
 
 const MAX = 4 * 1024 * 1024;
 function integer(value: unknown): number {
@@ -29,7 +30,10 @@ export function remoteCopyTransport(client: CutexClient, source: CopySource, che
       const version = detail.versions.find(v => v.version === artifact.version && v.artifactId === artifact.id);
       // A pinned external version without a digest cannot prove that its moving source is that version.
       if (!version || !version.sha256 || !/^[a-f0-9]{64}$/.test(version.sha256)) throw new Error("pinned artifact bytes cannot be verified");
-      return transferMetadata({ path: `${artifact.id}@${artifact.version}`, name: detail.artifact.name.split(/[\\/]/).pop() || "artifact", size: version.bytes, modifiedAt: version.createdAt, revision: version.sha256, sha256: version.sha256, maxChunkBytes: MAX });
+      const name = downloadFilename(detail.artifact.name.split(/[\\/]/).pop() || "artifact", {
+        sourcePath: version.sourcePath, mime: version.mediaType,
+      });
+      return transferMetadata({ path: `${artifact.id}@${artifact.version}`, name, size: version.bytes, modifiedAt: version.createdAt, revision: version.sha256, sha256: version.sha256, maxChunkBytes: MAX });
     },
     async chunk(meta: TransferMeta, offset: number, maxBytes: number, signal: AbortSignal): Promise<TransferChunk> {
       signal = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);

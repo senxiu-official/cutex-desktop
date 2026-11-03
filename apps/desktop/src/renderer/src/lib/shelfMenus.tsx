@@ -4,7 +4,7 @@
 // 关闭 Shelf — undoable). Actions: lib/shelves. Shell code:
 // names no feature.
 import { shelfCloseForetell, shelfCollapseForetell, shelfGrowForetell, shelfMoveForetell } from "./menuForetells";
-import { ArrowDown, ArrowUp, Check, Columns2, Combine, Expand, LayoutTemplate, Maximize2, Minimize2, Minus, PanelLeft, PanelRight, Pencil, Pin, PinOff, Shapes, SquareSplitVertical, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowDownUp, ArrowUp, Check, Columns2, Combine, Expand, LayoutTemplate, Maximize2, Minimize2, Minus, PanelLeft, PanelRight, Pencil, Pin, PinOff, Shapes, SquareSplitVertical, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
 import { translate } from "../i18n";
 import type { MenuAction, MenuEntry } from "./contextMenu";
 import { cardName, pageLabel, toggleShelfMode } from "./sideActions";
@@ -17,6 +17,8 @@ import { closeShelf, collapseShelfNow, deletePage, expandShelfNow, editPage, mer
 import { setPageShared } from "./sideLayout";
 import { panelSettingsItem } from "./panelSettings";
 import { panelGuideTail } from "./panelGuideMenu";
+import { portraitOn, swapPortrait, usePortrait } from "./portrait";
+import { currentWindow } from "./windowScope";
 
 const ICON = 14;
 
@@ -84,6 +86,14 @@ export function pageMenu(pageId: string, cardId?: string | null): MenuEntry[] {
   ];
 }
 
+/** Portrait only: the swap of the stack's two parts, then a separator (landscape: nothing). */
+function portraitSwapEntry(): MenuEntry[] {
+  const key = currentWindow();
+  if (!portraitOn(key)) return [];
+  const swapped = usePortrait.of(key).getState().prefs.swapped;
+  return [{ label: translate(swapped ? "orientation.convOnTop" : "orientation.shelfOnTop"), icon: <ArrowDownUp size={ICON} />, title: translate("orientation.swapHint"), onSelect: () => swapPortrait(key) }, "separator"];
+}
+
 /** A Shelf's ⋯ (at the end of its rail). */
 export function shelfMenu(shelfId: string): MenuEntry[] {
   const { layout } = useSide.getState();
@@ -134,6 +144,8 @@ export function shelfMenu(shelfId: string): MenuEntry[] {
     { label: translate("shelf.railOuter"), icon: rail === "outer" ? <Check size={ICON} /> : <span className="inline-block w-[14px]" />, onSelect: () => setShelfOption(shelfId, { railPlacement: "outer" }) },
     { label: translate("shelf.railInner"), icon: rail === "inner" ? <Check size={ICON} /> : <span className="inline-block w-[14px]" />, onSelect: () => setShelfOption(shelfId, { railPlacement: "inner" }) },
     "separator",
+    // Portrait (lib/portrait): the conversation and its Shelf trade places (this window; also the divider's ⇅ and Settings).
+    ...portraitSwapEntry(),
     shelf.collapsed
       ? { label: translate("shelf.expandTip"), icon: <Maximize2 size={ICON} />, foretell: () => shelfCollapseForetell(shelf.side, true), onSelect: () => expandShelfNow(shelfId) }
       : { label: translate("shelf.collapseRail"), icon: <Minus size={ICON} />, title: translate("shelf.collapseTip"), foretell: () => shelfCollapseForetell(shelf.side, false), onSelect: () => collapseShelfNow(shelfId) },

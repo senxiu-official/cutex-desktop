@@ -13,7 +13,13 @@ export type QueueSteerErrorKind =
   | "runtimeNoSteer"
   | "runtimeNotReady"
   | "runtimeRefused"
+  | "hostBusy"
+  | "unrecognized"
+  | "passingNotAllowed" | "internalError" | "archiveBlocksInput" | "persistenceUnavailable"
+  | "idempotencyConflict" | "interruptTimeout" | "inputInProgress" | "invalidInput"
+  | "nativeRequestFailed" | "invalidRequest" | "sessionNotFound" | "requestInProgress"
   | "noActiveTurn"
+  | "turnFinishing"
   // image-input-steering (r264): a Claude image without a file path on the target host (URL / data
   // image), or its file there is missing / unreadable.
   | "imagePathRequired"
@@ -25,8 +31,25 @@ export type QueueSteerErrorKind =
   /** revision_conflict / queue_item_not_found / queue_input_already_submitted: sent or edited meanwhile. */
   | "changed";
 
-const REASONS = new Set<QueueSteerErrorKind>(["joinChanged", "agentPaused", "delegationTurn", "runtimeNoSteer", "runtimeNotReady", "runtimeRefused", "noActiveTurn", "imagePathRequired", "imageUnavailable"]);
+const REASONS = new Set<QueueSteerErrorKind>(["joinChanged", "agentPaused", "delegationTurn", "runtimeNoSteer", "runtimeNotReady", "runtimeRefused", "noActiveTurn", "turnFinishing", "imagePathRequired", "imageUnavailable", "hostBusy", "unrecognized"]);
 const CODES: Record<string, QueueSteerErrorKind> = {
+  admission_deferred: "hostBusy",
+  passing_not_allowed: "passingNotAllowed",
+  admission_item_not_found: "changed",
+  internal_error: "internalError",
+  archive_blocks_input: "archiveBlocksInput",
+  event_persistence_unavailable: "persistenceUnavailable",
+  app_server_unavailable: "runtimeNotReady",
+  idempotency_conflict: "idempotencyConflict",
+  interrupt_timeout: "interruptTimeout",
+  user_input_in_progress: "inputInProgress",
+  invalid_input: "invalidInput",
+  native_request_failed: "nativeRequestFailed",
+  invalid_request: "invalidRequest",
+  session_not_found: "sessionNotFound",
+  request_in_progress: "requestInProgress",
+  idempotency_capacity_exceeded: "hostBusy",
+  agent_paused: "agentPaused",
   owner_required: "ownerRequired",
   turn_conflict: "turnConflict",
   session_offline: "sessionOffline",
@@ -45,11 +68,13 @@ export function queueSteerErrorKind(code: string, details: unknown): QueueSteerE
     // An explicit resync requirement wins over a nominal pre-send refusal.
     if ((details as { resyncRequired?: unknown } | null | undefined)?.resyncRequired === true) return "outcomeUnknown";
     const reason = (details as { reason?: unknown } | null | undefined)?.reason;
-    // An unknown future reason still means "kept in the queue": the runtime refused it.
-    return typeof reason === "string" && REASONS.has(reason as QueueSteerErrorKind) ? (reason as QueueSteerErrorKind) : "runtimeRefused";
+    if (reason === "admissionBusy") return "hostBusy";
+    return typeof reason === "string" && REASONS.has(reason as QueueSteerErrorKind) ? (reason as QueueSteerErrorKind) : "unrecognized";
   }
+  if (code === "admission_busy" && (details as { reason?: unknown } | null | undefined)?.reason === "hostBusy"
+    && (details as { resyncRequired?: unknown } | null | undefined)?.resyncRequired !== true) return "hostBusy";
   // Any other answer that asks for a resync: whether it landed is not known here either.
-  return CODES[code] ?? ((details as { resyncRequired?: unknown } | null | undefined)?.resyncRequired === true ? "outcomeUnknown" : null);
+  return (details as { resyncRequired?: unknown } | null | undefined)?.resyncRequired === true ? "outcomeUnknown" : Object.hasOwn(CODES, code) ? CODES[code]! : "unrecognized";
 }
 
 /**

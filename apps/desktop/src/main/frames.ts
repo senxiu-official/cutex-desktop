@@ -246,12 +246,12 @@ export function createArtifactPageService(deps: ArtifactPageDeps) {
         return { ok: false, reason: "not-found" };
       }
       if (file.encoding !== "utf8") return { ok: false, reason: "not-text" };
-      if (file.truncated) return { ok: false, reason: "too-large", totalBytes: file.size };
+      if (file.truncated) return { ok: false, reason: "too-large", totalBytes: file.size, modifiedAt: file.modifiedAt };
       let document: ReturnType<typeof buildOfflinePageDocument>;
       try {
         document = buildOfflinePageDocument(file.content, FILE_PAGE_MAX_BYTES, { pageApi: false });
       } catch {
-        return { ok: false, reason: "too-large", totalBytes: file.size };
+        return { ok: false, reason: "too-large", totalBytes: file.size, modifiedAt: file.modifiedAt };
       }
       // No file page exists before Chromium networking is contained.
       await deps.ensureContained();

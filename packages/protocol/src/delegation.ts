@@ -31,7 +31,7 @@ export interface DelegationContinuation {
 }
 export interface DelegationTreeNode {
   kind: "delegation"; ref: DelegationRef; id: string; hostId: string; projectId: string | null; requester: DelegationParty; target: DelegationParty;
-  title: string; execution: "queued" | "running" | "answered" | "interrupted"; hold: string | null; review: string | null;
+  title: string; execution: "pendingReview" | "queued" | "running" | "answered" | "interrupted"; hold: string | null; review: string | null;
   parent: DelegationRef | null; parentState: "none" | "visible" | "redacted" | "unknown"; redactedParentRef: { placeholderId: string } | null;
   root: DelegationRef | null; rootState: "visible" | "redacted" | "unknown"; redactedRootRef: { placeholderId: string } | null;
   followUp: DelegationRef | null; followUpState: "none" | "visible" | "redacted" | "unknown"; redactedFollowUpRef: { placeholderId: string } | null;

@@ -13,11 +13,12 @@
 import { openModifiers, type OpenModifiers } from "../lib/openModifiers";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
-import { createContext, memo, useContext, useMemo, useRef, useState, type AnchorHTMLAttributes, type ComponentType, type HTMLAttributes, type ImgHTMLAttributes, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { createContext, memo, useContext, useMemo, useRef, useState, type AnchorHTMLAttributes, type ComponentType, type CSSProperties, type HTMLAttributes, type ImgHTMLAttributes, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { rehypeFontRuns } from "../lib/rehypeFontRuns";
 import { createHastCachePlugin } from "../lib/markdownCache";
 import { createBlockParser, withoutPartialFence } from "../lib/markdownBlocks";
 import { PreserveTextSelection } from "./PreserveTextSelection";
+import { useDevicePixelRatio } from "../lib/pixelRatio";
 import { Image as ImageIcon } from "lucide-react";
 import { defaultComponents, defaultRehypePlugins, Streamdown } from "streamdown";
 import type { FsFile } from "../../../shared/ipc";
@@ -354,6 +355,7 @@ const components = { a: MarkdownLink, img: MarkdownImage, code: MarkdownCode };
  */
 export const Markdown = memo(function Markdown({ text, streaming = false, compact = false, document = false, relativeFiles = true, uncappedCode = false }: { text: string; streaming?: boolean; /** 13px (reasoning text). */ compact?: boolean; document?: boolean; relativeFiles?: boolean; /** Code blocks grow to their full height (a whole file shown as one block; `document` implies it, and uncaps tables too); default: streamdown's 400px cap with an inner scroll. */ uncappedCode?: boolean }) {
   const translations = useStreamdownTranslations();
+  const dpr = useDevicePixelRatio();
   // Streaming: this message's own block split, re-splitting only its unsettled tail (lib/markdownBlocks).
   const [blocks] = useState(createBlockParser);
   // A message that streamed here keeps streamdown's block tree when it finishes: its static mode renders the
@@ -366,9 +368,9 @@ export const Markdown = memo(function Markdown({ text, streaming = false, compac
   const revision = useMemo(() => ({ text, streaming }), [text, streaming]);
   return (
     <RelativeFiles.Provider value={relativeFiles}>
-      <PreserveTextSelection revision={revision}>
+      <PreserveTextSelection revision={revision} style={{ "--prose-pixel": `${1 / dpr}px` } as CSSProperties}>
         <Streamdown
-          className={`markdown leading-relaxed ${document ? "markdown-document " : ""}${compact ? "text-[length:calc(var(--chat-font-size,14px)-1px)]" : "text-[length:var(--chat-font-size,14px)]"}`}
+          className={`markdown ${document ? "markdown-document " : ""}${compact ? "text-[length:calc(var(--chat-font-size,14px)-1px)]" : "text-[length:var(--chat-font-size,14px)]"}`}
           mode={blockMode ? "streaming" : "static"}
           isAnimating={streaming}
           parseIncompleteMarkdown={streaming}

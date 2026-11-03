@@ -1,7 +1,7 @@
 import type { HostSessionRow, ProjectSummary, SessionResource } from "@cutex-desktop/protocol";
 import type { SidebarSnapshot } from "../../../shared/ipc";
 import { hostKey, type HostKey } from "./hostKeys";
-import { initialOf, initialStem, projectInitials } from "./agentInitials";
+import { listInitials } from "./agentInitials";
 import { shortNames } from "./sidebarNames";
 
 /**
@@ -309,9 +309,10 @@ export function buildSidebar(snapshot: SidebarSnapshot, options: SidebarOptions 
     g.online.sort(compareRows);
     g.offline.sort(compareRows);
     const members = [...g.online, ...g.offline];
+    // Two letters, distinct in the group (lib/agentInitials listInitials, the same lists lib/agentLook draws from).
     // Independent agents share no project prefix: only their revision suffix is skipped.
-    const initials = g.kind === "project" ? projectInitials(members.map((r) => r.name), [g.id, g.name]) : null;
-    for (const r of members) r.initial = initials?.get(r.name) ?? initialOf(initialStem(r.name));
+    const initials = listInitials(members.map((r) => ({ key: r.id, name: r.name, order: r.session.createdAt })), g.kind === "project" ? [g.id, g.name] : [], g.kind === "project");
+    for (const r of members) r.initial = initials.get(r.id);
     // Independent agents share no project: their names stay whole.
     const short = g.kind === "project" ? shortNames(members.map((r) => r.name)) : null;
     for (const r of members) {

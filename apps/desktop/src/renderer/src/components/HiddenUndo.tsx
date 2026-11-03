@@ -1,6 +1,6 @@
 // 「已隐藏 N 条（只在这台桌面）· 撤销」: the line after a 隐藏 / 清除 (lib/hiddenRows); one batch is undone at a time.
 import { useI18n } from "../i18n";
-import { useHiddenRows } from "../lib/hiddenRows";
+import { useHiddenRows } from "../lib/legacyDelivery/hiddenRows";
 
 export function HiddenUndo({ n }: { scope: string; n: number }) {
   const { t } = useI18n();

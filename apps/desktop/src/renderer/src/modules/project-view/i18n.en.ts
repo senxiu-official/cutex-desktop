@@ -91,6 +91,8 @@ export const en: Record<keyof typeof zhCN, string> = {
   "project-view.stream.offline": "Not connected",
   "project-view.stream.allAgents": "All {{agents}}",
   "project-view.stream.agentFilter": "Show one {{agent}} only",
+  "project-view.stream.includeOwnerTurns": "Include turns I started",
+  "project-view.stream.emptyAutonomous": "No other activity yet. Choose Turns to include turns you started.",
   "project-view.stream.new": "↑ {n} new",
   "project-view.stream.loading": "Reading the activity…",
   "project-view.stream.loadingMore": "Reading older activity…",

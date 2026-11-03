@@ -21,7 +21,7 @@ import type { AdmissionHeld, AdmissionNextStep } from "@cutex-desktop/protocol";
 import type { AskSummary } from "../../../shared/ipc";
 import { useI18n, type MessageKey } from "../i18n";
 import { formatAutoRetryWait, type ModelOverloadRetryWait } from "../lib/modelOverloadRetry";
-import { askWithAdmissionPosition, rideAlongAsk, rideAlongTiming, rideAlongView, type AdmissionRow, type RideAlongAsk, type RideAlongKind } from "../lib/admissionOrder";
+import { askWithAdmissionPosition, rideAlongAsk, rideAlongTiming, rideAlongView, type AdmissionRow, type RideAlongAsk, type RideAlongKind } from "../lib/legacyDelivery/admissionOrder";
 import { contextMenu } from "../lib/contextMenu";
 import { delegationMenu } from "../lib/delegationMenu";
 import { isOwnerRequest, peerSideOf, requesterName, requesterSession } from "../lib/delegations";
@@ -29,9 +29,11 @@ import { hasDelegationViews, useDelegation } from "../lib/delegationStore";
 import { useAgentHost, useAgentNames } from "../lib/delegationsView";
 import { openDelegationDetail } from "../lib/delegationOpen";
 import { heldKeys } from "../lib/stopHold";
-import { steerDelivery, type PendingSteer } from "../lib/pendingSteers";
+import { steerDelivery, type PendingSteer } from "../lib/legacyDelivery/pendingSteers";
 import type { ImageSteering } from "../lib/imageSteer";
-import { QUEUE_ROW, ROW_META } from "../lib/queueRow";
+import { QUEUE_ROW, ROW_META, ROW_ACTIONS, rowText } from "../lib/queueRow";
+import type { InputRecord } from "@cutex-desktop/protocol";
+import { InputStatus } from "./InputStatus";
 import { formatWhen, useClock, useNow } from "../lib/time";
 import { useApp } from "../store";
 import { convFeaturesOf, useConvHost, useConvScope } from "../lib/conversationScope";
@@ -42,6 +44,7 @@ import { PeerParty } from "./PeerParty";
 import { Tag } from "./Tag";
 import { CancelSendButton } from "./CancelSendButton";
 import { matchCancelable, useCancelableSends } from "../lib/cancelSend";
+import { dismissReceipt, isDismissibleReceipt } from "../lib/legacyDelivery/busReceiptVisibility";
 
 const DELIVERY_ICONS: Record<RideAlongKind, typeof Mail> = { answer: CornerDownLeft, question: MessageCircleQuestion, status: Activity, alarm: AlarmClock, tell: MessageSquareText, peer: Globe, bus: Mail };
 const DELIVERY_KEYS: Record<RideAlongKind, MessageKey> = {
@@ -55,14 +58,43 @@ const DELIVERY_KEYS: Record<RideAlongKind, MessageKey> = {
 };
 const KNOWN_KINDS = new Set(["answer", "question", "alarm", "tell", "bus"]);
 
+/** Asks supply presentation (title/link) only; ledger records alone decide membership, status and actions.
+ * Never infer delivery state from ask execution, legacy settlement, timing or native receipts. */
+export function LedgerAdmissionRow({ record, sessionId, hostId, body, children, rowProps, grip, media }: { record: InputRecord; sessionId: string; hostId?: string; body?: string; children?: React.ReactNode; rowProps?: React.HTMLAttributes<HTMLDivElement>; grip?: React.ReactNode; media?: React.ReactNode }) {
+  const { t } = useI18n();
+  const viewHost = useConvHost();
+  const rowHost = hostId ?? viewHost;
+  const statusNotice = record.kind === "delegationStatus";
+  const ask = useDelegation(rowHost, statusNotice ? record.askId : null);
+  // Status previews contain internal event reference keys, not owner-facing prose.
+  const text = statusNotice ? ask?.title ?? t("inputLedger.statusNotification") : body ?? record.preview ?? record.inputId;
+  const askId = record.askId;
+  const openAsk = askId ? () => openDelegationDetail(rowHost, askId, { title: ask?.title }) : undefined;
+  return <div {...rowProps} className={`${QUEUE_ROW} min-h-6 max-h-6 shrink-0 overflow-hidden hover:bg-hover`} data-testid="ledger-queue-row" data-input-id={record.inputId} data-surface={record.surface}>
+    {grip}
+    {media}
+    <KindIcon icon={record.kind === "owner" ? CornerDownLeft : record.kind === "alarm" ? AlarmClock : Mail} label={t(record.kind === "owner" ? "queue.delivery.owner" : "queue.delivery.bus")} />
+    {record.kind !== "owner" && <span className="max-w-[25%] shrink truncate text-ui font-medium" title={record.sender.host ?? undefined}>{record.sender.name}</span>}
+    {statusNotice && askId && <DelegationTag askId={askId} onJump={openAsk} />}
+    {statusNotice && openAsk ? <button type="button" onClick={openAsk} className="min-w-0 flex-1 truncate text-left text-ui hover:text-accent hover:underline" title={text}>{rowText(text)}</button>
+      : <span className="min-w-0 flex-1 truncate text-ui" title={statusNotice ? text : body ?? record.preview}>{rowText(text)}</span>}
+    <InputStatus record={record} sessionId={sessionId} hostId={hostId} />
+    {children && <span className={`${ROW_ACTIONS} h-5 max-h-5`}>{children}</span>}
+  </div>;
+}
+
 /** A row's kind: a small muted icon, its word as the label (no text pill). */
 /**
  * A waiting steer's delivery note: 已插入 · 等下一个工具边界, or 下一回合发送 for a Claude steer with images that
  * is not inserted (lib/pendingSteers steerDelivery). An image-input-steering receipt (`imageDelivery`, cutex's
  * word only) names how the images went in: 已以文件路径插入 / 已直接插入图片.
  */
-export function SteerDeliveryNote({ steer, runtime, imageSteering, className = "" }: { steer: Pick<PendingSteer, "imageCount" | "extra" | "imageDelivery">; runtime: AgentRuntime; imageSteering?: ImageSteering | null; className?: string }) {
+export function SteerDeliveryNote({ steer, runtime, imageSteering, className = "", onRecheck }: { steer: Pick<PendingSteer, "imageCount" | "extra" | "imageDelivery" | "state" | "checkFailed">; runtime: AgentRuntime; imageSteering?: ImageSteering | null; className?: string; onRecheck?: () => void }) {
   const { t } = useI18n();
+  if (steer.state === "checking") return <span className="flex min-w-0 max-w-[45%] shrink items-center gap-1 text-caption text-subtle" data-testid="steer-check-status">
+    <span className="truncate" title={t(steer.checkFailed ? "queue.insert.unknown" : "queue.insert.checking")}>{t(steer.checkFailed ? "queue.insert.unknown" : "queue.insert.checking")}</span>
+    {steer.checkFailed && onRecheck && <button type="button" onClick={onRecheck} className="shrink-0 rounded px-1 hover:bg-surface-2 hover:text-foreground focus-visible:outline focus-visible:outline-accent" data-testid="steer-recheck">{t("steer.recheck")}</button>}
+  </span>;
   const nextTurn = steerDelivery(steer, runtime, imageSteering) === "nextTurn";
   const receipt = nextTurn ? null : steer.imageDelivery;
   const label = nextTurn ? "queue.meta.nextTurn" : receipt === "pathText" ? "queue.meta.insertedPath" : receipt === "nativeImage" ? "queue.meta.insertedImage" : "queue.meta.inserted";
@@ -260,12 +292,13 @@ export function NextStepRow({ item, running, held, order, sessionId, idleNote, s
   const d = useDelegation(host, item.askId);
   const info = sessionId ? rideAlongAsk(item, d, sessionId) : null;
   const tip = [view.from, view.text, view.note].filter(Boolean).join("\n") || undefined;
+  const dismissible = isDismissibleReceipt(item);
   // A message cutex has not handed over can still be withdrawn (lib/cancelSend).
-  const cancelable = useCancelableSends(host, sessionId ?? "", !!stuck && !!sessionId && !running && !held);
-  const cancelTarget = stuck && !running && !held ? matchCancelable(cancelable.list, { fromId: view.fromId, from: view.from, text: view.text }) : null;
+  const cancelable = useCancelableSends(host, sessionId ?? "", !dismissible && !!stuck && !!sessionId && !running && !held);
+  const cancelTarget = !dismissible && stuck && !running && !held ? matchCancelable(cancelable.list, { fromId: view.fromId, from: view.from, text: view.text }) : null;
   return (
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1" data-testid="queue-next-step" data-held={held} data-ask-id={info?.askId} data-kind={view.kind}>
-      <div className={`${QUEUE_ROW} text-ui text-muted ${held ? "opacity-60" : ""}`}>
+      <div className={`${QUEUE_ROW} min-h-6 max-h-6 shrink-0 text-ui text-muted ${held ? "opacity-60" : ""}`}>
         <KindIcon icon={Icon} label={kindWord} />
         {d && info && sessionId ? (
           <RideAlongAskParts d={d} info={info} sessionId={sessionId} />
@@ -274,11 +307,11 @@ export function NextStepRow({ item, running, held, order, sessionId, idleNote, s
             {view.from &&
               (view.fromId ? (
                 // Design 040 step 9: the sender as a 16 px avatar + name (a link to the agent), when cutex says who it is.
-                <span className="flex max-w-[16em] shrink-0 items-center overflow-hidden font-semibold" data-testid="ride-along-from" data-from-id={view.fromId}>
+                <span className="flex max-w-[min(16em,50%)] shrink-0 items-center overflow-hidden font-semibold" data-testid="ride-along-from" data-from-id={view.fromId}>
                   <Who id={view.fromId} name={view.from} size={16} realAvatar />
                 </span>
               ) : (
-                <span className="max-w-[16em] shrink-0 truncate whitespace-nowrap font-semibold text-foreground" title={view.from} data-testid="ride-along-from">
+                <span className="max-w-[min(16em,50%)] shrink-0 truncate whitespace-nowrap font-semibold text-foreground" title={view.from} data-testid="ride-along-from">
                   {view.from}
                 </span>
               ))}
@@ -299,17 +332,20 @@ export function NextStepRow({ item, running, held, order, sessionId, idleNote, s
         ) : running ? (
           <TimingSymbol item={item} order={order} />
         ) : item.waitReason === "resultCoalescing" || item.waitReason === "nativeReceipt" ? (
-          <><IdleWaitMeta item={item} />{cancelTarget && <CancelSendButton onCancel={() => cancelable.cancel(cancelTarget)} />}</>
+          <IdleWaitMeta item={item} />
         ) : idleNote || stuck ? (
           <span className={`${ROW_META} text-subtle`} title={t("queue.turn.startsNowHint")} data-testid="timing-starts-now">
             {idleNote ?? t("queue.turn.startsNow")}
-            {cancelTarget && <CancelSendButton onCancel={() => cancelable.cancel(cancelTarget)} />}
           </span>
         ) : (
           <TimingSlot />
         )}
+        <MessageSettlementControl hostId={host} messageId={item.id} settlement={item.settlement} sessionId={sessionId} discover={dismissible} compact retainActions={!!cancelTarget} actions={
+          dismissible && sessionId ? <button type="button" onClick={(event) => { event.stopPropagation(); dismissReceipt(host, sessionId, item); }} title={t("queue.receipt.hideHint")} aria-label={t("queue.receipt.hideHint")} className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs text-muted hover:bg-surface-2 hover:text-foreground focus-visible:outline focus-visible:outline-accent" data-testid="hide-native-receipt">
+            {t("queue.receipt.hide")}
+          </button> : cancelTarget ? <div className="px-1 py-1"><CancelSendButton onCancel={() => cancelable.cancel(cancelTarget)} /></div> : null
+        } />
       </div>
-      <MessageSettlementControl hostId={host} messageId={item.id} settlement={item.settlement} sessionId={sessionId} />
     </div>
   );
 }

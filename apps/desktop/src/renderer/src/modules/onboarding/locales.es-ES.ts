@@ -231,6 +231,8 @@ export const esES: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.shelf.text": "Arrastra pestañas de un {{shelf}} a otro o a un espacio vacío para crear un nuevo {{shelf}}.\nCuando no caben, «⌄ N» muestra todas las pestañas del {{shelf}}.",
   "onboarding.guide.tray.title": "La bandeja",
   "onboarding.guide.tray.text": "Arrastra un elemento al otro lado del separador para fijarlo en la bandeja; arrástralo de vuelta para soltarlo.\nHaz clic derecho para añadir una insignia o una nota.",
+  "onboarding.guide.portrait.title": "Diseño vertical",
+  "onboarding.guide.portrait.text": "En una ventana alta, la conversación y su {{shelf}} se apilan en vertical. Arrastra este separador para cambiar su altura y haz doble clic para restablecerla; pasa el puntero por encima y pulsa ⇅ para intercambiarlas.\nLa barra lateral se oculta en el borde izquierdo de la ventana y aparece cuando el puntero llega allí. Para seguir en horizontal, cambia Ajustes → Aspecto → Diseño vertical.",
   "onboarding.guide.service.title": "Enlaces de servicios",
   "onboarding.guide.service.text": "Un servicio es una página o una API que un {{agent}} ejecuta en el host; su enlace se abre en la aplicación.\nEl host retira los servicios temporales inactivos o caducados y el enlace deja de funcionar. Para conservar uno, fíjalo o hazlo persistente en la página Servicios. Allí también puedes detenerlo y reiniciarlo.",
   "onboarding.guide.update.title": "Actualizaciones",

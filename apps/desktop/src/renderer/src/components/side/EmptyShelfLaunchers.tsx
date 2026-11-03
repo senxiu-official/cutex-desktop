@@ -11,7 +11,7 @@ export function EmptyShelfLaunchers({ pageId }: { pageId: string | null }) {
   const { t } = useI18n();
   useSideRegistry();
   useEffect(() => void preloadOnIntent(), []);
-  const sections = shelfLauncherSections(launchable());
+  const sections = shelfLauncherSections(launchable(true));
   if (!sections.length) return <p className="text-xs text-subtle">{t("side.launcher.none")}</p>;
   return <div className="empty-shelf-launchers" data-empty-shelf-launchers>
     {sections.map(({ section, entries }) => <section key={section} aria-label={t(`side.launcher.${section}`)}>

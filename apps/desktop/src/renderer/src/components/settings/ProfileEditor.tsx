@@ -248,7 +248,7 @@ function Overview({ detail, livePlan, patch, set, picture, onPicture, isDefault,
           {agents.length === 0 && <span className="text-subtle">{t("settings.profile.inUseNone")}</span>}
           {agents.slice(0, SHOWN_AGENTS).map((a) => (
             <button key={a.cutexSessionId} onClick={() => void select(a.cutexSessionId)} className="flex max-w-40 items-center gap-1.5 rounded-full bg-surface-2 py-0.5 pr-2 pl-0.5 hover:text-accent">
-              <Avatar name={a.displayName} avatar={a.avatar} seed={a.cutexSessionId} color={color ?? detail.appearance.effectiveColor} size={20} minor />
+              <Avatar name={a.displayName} avatar={a.avatar} seed={a.cutexSessionId} color={color ?? detail.appearance.effectiveColor} size={20} />
               <span className="truncate">{a.displayName}</span>
             </button>
           ))}

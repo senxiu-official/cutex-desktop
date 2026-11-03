@@ -210,9 +210,9 @@ describe("main: one renderer's pages are capped across all its windows", () => {
 describe("main: no new channel", () => {
   const preload = readFileSync(join(__dirname, "../src/preload/index.ts"), "utf8");
   it("the frames bridge sends the same six ops on the one frames channel; page requests name no window", () => {
-    const ops = [...preload.matchAll(/ipcRenderer\.invoke\(FRAMES_CHANNEL, \{ op: "(\w+)"/g)].map((m) => m[1]).sort();
+    const ops = [...preload.matchAll(/(?<!\.)invoke\(FRAMES_CHANNEL, \{ op: "(\w+)"/g)].map((m) => m[1]).sort();
     expect(ops).toEqual(["artifactPage", "filePage", "page", "pageDataClear", "pageDataUsage", "release"]);
-    expect(preload).toMatch(/page: \(id, call\) => ipcRenderer\.invoke\(FRAMES_CHANNEL, \{ op: "page", id, call \} satisfies FrameRequest\)/);
+    expect(preload).toMatch(/page: \(id, call\) => (?<!\.)invoke\(FRAMES_CHANNEL, \{ op: "page", id, call \} satisfies FrameRequest\)/);
   });
 });
 

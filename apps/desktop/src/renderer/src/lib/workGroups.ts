@@ -116,6 +116,8 @@ export function isFailed(item: RawItem): boolean {
   if (approvalOutcome(item)) return false;
   const status = item.status as string | undefined;
   if (status === "failed" || status === "declined" || status === "errored") return true;
+  // These operation views also preserve refusals reported in completed MCP envelopes.
+  if (item.type === "mcpToolCall" && item.server === "cutex" && ["member_runtime", "artifact_read", "action_status"].includes(String(item.tool)) && taskRowOutcome(item)?.kind === "failed") return true;
   // cutex tools answer a refusal as a completed call with `ok: false`.
   if (taskToolRow(item) && taskRowOutcome(item)?.kind === "failed") return true;
   return item.type === "commandExecution" && typeof item.exitCode === "number" && item.exitCode !== 0 && status !== "inProgress";

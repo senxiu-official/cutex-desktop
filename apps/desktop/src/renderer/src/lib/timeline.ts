@@ -1,4 +1,5 @@
 import { observeLiveDurable, type LiveTimelineState } from "./liveDeltas";
+import { applySteerReceipt, type SteerReceipt } from "./legacyDelivery/steerReceipts";
 import { readAcpContext, readDshContext, type DshContext } from "./dshContext";
 import { isForkSignatureRejection } from "./forkProfile";
 import { translate } from "../i18n";
@@ -12,7 +13,7 @@ import type { ApprovalsReviewer, GuardianApprovalReviewAction, GuardianApprovalR
 import { messageImages, messageSkills, type MessageImage, type MessageSkill } from "../../../shared/input";
 import { mergeRateLimits, type RateLimitsLike } from "./quota";
 import { nextPlan } from "./planState";
-import { agentMessageText, deliveryKindOf, type AgentEnvelope, type DeliveryKind } from "./agentMessages";
+import { agentMessageText, deliveryKindOf, type AgentEnvelope, type DeliveryKind } from "./legacyDelivery/agentMessages";
 import type { InteractionRecord } from "./interactionLog";
 import { retryNoticeOf, type RetryNotice } from "./retryNotice";
 
@@ -142,6 +143,10 @@ export interface TurnView {
 }
 
 export interface TimelineState {
+  /** Shell lifecycle notices invalidate the shared background-terminal snapshot, including after a turn ends. */
+  backgroundTerminalsVersion?: number;
+  /** Native input progress, independent of delayed transcript persistence. */
+  steerReceipts?: Map<string, SteerReceipt>;
   /** Non-durable text identity and offset checks, bounded to current starts. */
   liveDeltas?: LiveTimelineState;
   fullTextItemTerminal?: boolean;
@@ -572,6 +577,7 @@ function clearRetry(state: TimelineState, turnId: string | null | undefined): bo
 }
 
 export function applyEvent(state: TimelineState, envelope: EventEnvelope, liveDeltas = false): boolean {
+  if (applySteerReceipt(state, envelope)) return true;
   const nativeMessage = envelope.native?.message;
   const completedItemId = (nativeMessage?.params as { item?: { id?: string } } | undefined)?.item?.id;
   const prior = completedItemId ? state.entries.get(completedItemId) : undefined;
@@ -619,6 +625,12 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope, liveDe
     }
     const retryCleared = message.method.startsWith("item/") && clearRetry(state, typeof params.turnId === "string" ? params.turnId : null);
     switch (message.method) {
+      case "claude/task/updated": {
+        const task = params.task as { taskType?: unknown } | undefined;
+        if (params.threadId !== state.threadId || !["local_bash", "local_shell", "bash"].includes(String(task?.taskType))) return false;
+        state.backgroundTerminalsVersion = (state.backgroundTerminalsVersion ?? 0) + 1;
+        return true;
+      }
       case "turn/started": {
         const turn = params.turn as RawTurn;
         settleStaleTurns(state, turn.id);
@@ -668,6 +680,11 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope, liveDe
             upsert(state, { ...previous, streaming: false, liveIncomplete: true });
             return true;
           }
+        }
+        if (next.kind === "tool") {
+          const previous = state.entries.get(item.id);
+          const at = typeof params.startedAtMs === "number" ? params.startedAtMs : previous?.kind === "tool" ? previous.item.startedAtMs : undefined;
+          if (typeof at === "number" && Number.isFinite(at) && at > 0) next.item = { ...next.item, startedAtMs: at };
         }
         upsert(state, next);
         return true;

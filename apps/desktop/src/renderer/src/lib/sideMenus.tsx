@@ -73,11 +73,13 @@ const paneGrown = (cardId: string): boolean => {
   const t = useGrow.getState().target;
   return t?.kind === "shelf" && t.card === cardId;
 };
-import { agentHost, useApp } from "../store";
+import { agentHost, isColumnPage, useApp } from "../store";
 import { entryGateNow } from "./hostGatingView";
 import { refActionEntries } from "./refActions";
 import { sidePageRef } from "./refs";
 import { instanceRef } from "./refServices";
+import { appModules } from "../modules/app";
+import { pageKind } from "./paneLayout";
 
 const activeHost = () => useApp.getState().hosts?.active ?? "local";
 
@@ -123,10 +125,11 @@ function safeParams(read: (() => Json | null) | undefined): Json | null {
 
 /** Components that can be opened from a launcher (＋ menus, launcher page, empty column), by launcher order.
  * A new instance binds to the selected agent's host: components whose capabilities it lacks are left out. */
-export function launchable(): Launchable[] {
+export function launchable(includePages = false): Launchable[] {
   const out: Launchable[] = [];
   const host = agentHost(useApp.getState());
-  for (const [kind, entry] of sideRegistry()) {
+  const registry = sideRegistry();
+  for (const [kind, entry] of registry) {
     const launcher = entry.item.launcher;
     if (!launcher || !entryGateNow(host, entry).ok) continue;
     const params = safeParams(() => launcher.params());
@@ -134,6 +137,19 @@ export function launchable(): Launchable[] {
     const Icon = entry.item.icon;
     out.push({ kind, label: translate(entry.item.titleKey), icon: <Icon size={ICON} />, Icon, params, order: launcher.order, pin: launcher.pin, multi: entry.item.instances === "multi", category: launcher.category,
       group: kind.startsWith(STATUS_COMPONENT_PREFIX) ? "status" : "tool" });
+  }
+  // The same nav registry as the title bar's More menu. Derived page components omit Aside pages;
+  // pure actions have no page target. Existing status launchers keep their single entry.
+  if (includePages) for (const nav of appModules().snapshot("nav.primary")) {
+    if (nav.mode !== "show" || (nav.item.area ?? "top") !== "top" || !("page" in nav.item.target)) continue;
+    if (isColumnPage(nav.item.target.page)) continue;
+    const kind = pageKind(nav.item.target.page) as ItemId;
+    const entry = registry.get(kind);
+    if (!entry || !entryGateNow(host, entry).ok || !entryGateNow(host, nav).ok) continue;
+    const label = nav.item.title ?? translate(nav.item.titleKey);
+    if (out.some((item) => item.kind === kind || (item.group === "status" && item.label === label && registry.get(item.kind)?.moduleId === nav.moduleId))) continue;
+    const Icon = nav.item.icon;
+    out.push({ kind, label, icon: <Icon size={ICON} />, Icon, params: Object.fromEntries(Object.entries(nav.item.target.params ?? {}).filter((pair): pair is [string, string] => pair[1] !== undefined)), order: nav.item.order ?? 500, pin: "never", multi: false, group: "page" });
   }
   return sortLaunchers(out);
 }
@@ -199,8 +215,8 @@ function cardOnPage(page: SidePage | null, kind: ItemId) {
 
 /**
  * A title-bar launcher (or its ＋ menu row) pressed (lib/sideLaunchers launcherClickAction): not on the
- * current page → open it there; there → the page-button icon rule; `mods.newInstance` (Ctrl/⌘ / middle
- * click, 「新…」; lib/openModifiers) → a new instance of a multi-instance kind on the current page, in the
+ * current page → the normal placement rule; there → the page-button icon rule; `mods.newInstance` (Ctrl/⌘ / middle
+ * click, 「新…」; lib/openModifiers) → a new tab of a multi-instance kind, in the
  * background unless `mods.focus` (Shift, or a menu row).
  */
 export function pressLauncher(kind: ItemId, mods: OpenModifiers = PLAIN_OPEN): void {

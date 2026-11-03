@@ -14,7 +14,7 @@ vi.mock("../src/renderer/src/store", () => ({ useApp: { getState: () => ({ hosts
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { TurnQueue } = await import("../src/renderer/src/components/TurnQueue");
-const { turnGroups } = await import("../src/renderer/src/lib/admissionOrder");
+const { turnGroups } = await import("../src/renderer/src/lib/legacyDelivery/admissionOrder");
 
 const at = "2026-10-21T00:00:00Z";
 const queued = (queueId: string): QueueItem => ({ queueId, clientUserMessageId: `cm-${queueId}`, origin: { kind: "other", clientId: "desktop" } as never, input: [{ type: "text", text: `msg-${queueId}` }], position: 0, revision: 1, state: "queued", createdAt: at, updatedAt: at });

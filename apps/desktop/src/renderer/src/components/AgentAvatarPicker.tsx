@@ -7,6 +7,7 @@ import { ChevronDown, Upload } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { AVATAR_PALETTE, AVATAR_VALUE_MAX, cleanAvatar, hashColor } from "../lib/avatar";
 import { Avatar } from "./Avatar";
+import type { AgentHint } from "../lib/agentHint";
 import { EmojiGrid } from "./EmojiGrid";
 import { DirectorAvatarGrid } from "./DirectorAvatarGrid";
 import { PortraitPackGrid } from "./PortraitPackGrid";
@@ -17,8 +18,10 @@ import { avatarSourceProblem, newPictureAvatar } from "../lib/agentPicture";
 import { Popover } from "./Menu";
 import { ProfilePictureCrop } from "./settings/ProfilePictureCrop";
 
-export function AgentAvatarPicker({ name, color, value, picture, director = false, family = null, onChange, onOpen }: {
+export function AgentAvatarPicker({ name, color, value, picture, director = false, family = null, hint = null, onChange, onOpen }: {
   name: string;
+  /** The new agent's host / project / model: without an avatar it shows the letter tile the sidebar will draw (components/Avatar `agent`). */
+  hint?: AgentHint | null;
   /** The agent is created as a Director: its portraits come first. */
   director?: boolean;
   /** The profile's model family (拟人 shows it first). */
@@ -57,7 +60,7 @@ export function AgentAvatarPicker({ name, color, value, picture, director = fals
     {cropFile && <ProfilePictureCrop file={cropFile} onCancel={() => setCropFile(null)}
       onConfirm={(next) => { onChange(newPictureAvatar(), next); setCropFile(null); }} />}
     <Popover align="right" width="w-72" onOpen={onOpen} triggerTitle={label}
-      trigger={<><Avatar name={name} color={color} avatar={value} picture={picture} size={20} /><span>{label}</span><ChevronDown size={11} /></>}>
+      trigger={<><Avatar name={name} color={color} avatar={value} picture={picture} agent={hint ?? {}} size={20} /><span>{label}</span><ChevronDown size={11} /></>}>
       {(close) => (
         <div className="space-y-3 p-2">
           <div className="flex items-center justify-between">
@@ -65,7 +68,7 @@ export function AgentAvatarPicker({ name, color, value, picture, director = fals
             <button type="button" aria-pressed={!value} onClick={() => onChange(null)} className="rounded-md px-2 py-1 text-xs hover:bg-surface-2">{t("avatarStyle.reset" as MessageKey)}</button>
           </div>
           <div className="flex items-center gap-3">
-            <Avatar name={name} color={color} avatar={value} picture={picture} size={40} />
+            <Avatar name={name} color={color} avatar={value} picture={picture} agent={hint ?? {}} size={40} />
             <button type="button" onClick={() => { close(); setFileError(null); fileInput.current?.click(); }}
               className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs hover:bg-surface-2">
               <Upload size={13} />{t(picture ? "info.avatar.replacePicture" : "info.avatar.upload")}

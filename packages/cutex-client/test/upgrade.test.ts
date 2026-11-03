@@ -135,3 +135,18 @@ describe("CutexClient upgrade routes", () => {
     expect(await client.upgradeRun("upg-0123456789ab")).toMatchObject({ ok: false, error: { code: "route_not_found", status: 404 } });
   });
 });
+
+describe("host native runtime SHA metadata", () => {
+  it.each([null, "0.160.0-r52.4"])("preserves selected SHA with selected=%s, independently of registry metadata", (selected) => {
+    const info = readHostServiceInfo({runtimes: {
+      native: {selected, selectedSha256Prefix: "abc123def456", latest: "0.160.0-r52.4"},
+      claude: {selected: "claude-r32", inUse: []},
+    }});
+    expect(info.runtimes?.native).toEqual({selected, selectedSha256Prefix: "abc123def456", latest: "0.160.0-r52.4", inUse: []});
+    expect(info.runtimes?.claude.selected).toBe("claude-r32");
+  });
+  it.each([undefined, null, 123, ""])("tolerates missing/null/malformed SHA metadata: %s", (sha) => {
+    const info = readHostServiceInfo({runtimes: {native: {selected: null, selectedSha256Prefix: sha}, claude: {}}});
+    expect(info.runtimes?.native).toEqual({selected: null, selectedSha256Prefix: null, latest: null, inUse: []});
+  });
+});

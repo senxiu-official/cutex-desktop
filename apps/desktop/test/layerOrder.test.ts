@@ -30,7 +30,7 @@ describe("the layer order", () => {
   it("every menu, popover, flyout, palette and dialog is at 50 or more", () => {
     const popovers: [string, RegExp][] = [
       ["components/Overlays.tsx", /role="menu"[\s\S]{0,80}?className="fixed z-50/],
-      ["components/Menu.tsx", /data-popover=""\s+className=\{`absolute bottom-full z-\[51\]/],
+      ["components/Menu.tsx", /data-popover=\{open \? "" : undefined\}\s+className=\{`absolute bottom-full z-\[51\]/],
       ["components/SlashPalette.tsx", /data-popover="" className="absolute [^"]*z-50/],
       ["components/ComposerPanels.tsx", /data-popover="" className=\{`absolute [^`]*z-50/],
       ["components/MenuFlyout.tsx", /data-flyout="" data-popover="" className="fixed z-\[52\]/],

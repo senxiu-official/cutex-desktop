@@ -11,6 +11,7 @@ const fx = vi.hoisted(() => ({
   asked: [] as { minIdleSecs: number; projectId?: string }[],
   stopped: [] as StopIdleRequest[],
   actions: [] as [string, string][],
+  start: null as null | ((id: string, host: string) => Promise<void>),
   toasts: [] as { text: string; undo?: () => void }[],
 }));
 vi.mock("../src/renderer/src/store", () => ({
@@ -20,7 +21,7 @@ vi.mock("../src/renderer/src/store", () => ({
     idleRuntimes: async (q: { minIdleSecs: number; projectId?: string }) => (fx.asked.push(q), fx.listing),
     stopIdle: async (body: StopIdleRequest) => (fx.stopped.push(body), { mode: body.mode, dryRun: false, results: body.sessionIds.map((id, i) => (i === 0 ? { cutexSessionId: id, result: "skipped", reasons: ["activeTurn"] } : { cutexSessionId: id, result: "stopped" })) }),
   }),
-  useApp: { getState: () => ({ hosts: { active: "local", hosts: [{ id: "local", label: "HOST-A" }] }, notify: () => {}, sessionAction: async (id: string, method: string) => void fx.actions.push([id, method]) }) },
+  useApp: { getState: () => ({ hosts: { active: "other", hosts: [{ id: "local", label: "HOST-A" }] }, notify: () => {}, sessionAction: async (id: string, method: string, _params: unknown, host: string) => { fx.actions.push([id, method]); await fx.start?.(id, host); } }) },
 }));
 vi.mock("../src/renderer/src/lib/shelves", () => ({ showShelfToast: (text: string, undo?: () => void) => void fx.toasts.push({ text, undo }) }));
 const lib = await import("../src/renderer/src/lib/stopIdle");
@@ -36,6 +37,7 @@ beforeEach(() => {
   fx.asked = [];
   fx.stopped = [];
   fx.actions = [];
+  fx.start = null;
   fx.toasts = [];
   fx.listing = { now: "", minIdleSecs: 1800, projectId: "p1", agents: [agent("a", "stoppable"), agent("b", "stoppable"), agent("c", "caution", ["awaitingDelegations"]), agent("d", "blocked", ["activeTurn"]), agent("e", "stoppable")] };
   fx.pinned = new Set(["e"]);
@@ -63,6 +65,25 @@ it("nothing idle: the row says so and stops nothing", async () => {
   const [direct] = rows({ hostId: "local", label: "HOST-A" });
   expect(await direct!.prepare!()).toEqual({ empty: "stopIdle.quickNone" });
   expect(fx.stopped).toEqual([]);
+});
+
+it("undo starts sequentially on the stopped host and continues when an individual start fails", async () => {
+  let release!: () => void;
+  const hosts: string[] = [];
+  fx.start = async (id, host) => {
+    hosts.push(host);
+    if (id === "b") {
+      await new Promise<void>(resolve => { release = resolve; });
+      throw new Error("start failed");
+    }
+  };
+  await lib.stopQuick({ hostId: "original", label: "Original" }, 1800, ["a", "b", "c"], t as never);
+  fx.toasts[0]!.undo!();
+  await vi.waitFor(() => expect(fx.actions).toEqual([["b", "cutex/runtime/online"]]));
+  release();
+  await vi.waitFor(() => expect(fx.actions).toEqual([["b", "cutex/runtime/online"], ["c", "cutex/runtime/online"]]));
+  await vi.waitFor(() => expect(fx.toasts.at(-1)?.text).toBe("stopIdle.undone(1)"));
+  expect(hosts).toEqual(["original", "original"]);
 });
 
 it("host entry: the same in-place row, no project filter; then 选择… (the dialog)", async () => {

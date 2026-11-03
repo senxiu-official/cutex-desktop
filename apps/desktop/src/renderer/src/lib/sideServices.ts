@@ -21,6 +21,7 @@ import {
   chipHolding,
   DEFAULT_ORDER,
   instanceVisible,
+  findPage,
   locate,
   locateChip,
   pinInstance,
@@ -147,7 +148,7 @@ function conversationShown(): boolean {
   return s.view.kind === "conversation" && !!s.selectedId && !useSide.getState().mode && useGutter.getState().geometry !== null;
 }
 
-export function sideOpen(kind: ItemId, params: Json = null, opts: SideOpenOptions = {}): SideOpenResult {
+export function sideOpen(kind: ItemId, params: Json = null, opts: SideOpenOptions & { sourcePage?: string } = {}): SideOpenResult {
   return open(kind, params, opts, opts.target === "peek" ? getUiPrefs().peekTarget : null) as SideOpenResult;
 }
 
@@ -170,12 +171,12 @@ export function sideOpenHeld(kind: ItemId, params: Json = null, opts: SideOpenHe
  * design 017): like sideOpen, default bindings filled from that Shelf's conversation; never a reference card
  * (the left gutter is the focused conversation's).
  */
-export function sideOpenAs(from: FillFrom, kind: ItemId, params: Json = null, opts: SideOpenOptions = {}): SideOpenResult {
+export function sideOpenAs(from: FillFrom, kind: ItemId, params: Json = null, opts: SideOpenOptions & { sourcePage?: string } = {}): SideOpenResult {
   return open(kind, params, { ...opts, ...(opts.target === "peek" ? { target: "page" as const } : {}), fillFrom: from }, null) as SideOpenResult;
 }
 
 /** open() and openHeld() (v1.10: `held` = background open + first hold, no reveal / focus). */
-type OpenOptions = SideOpenOptions & { held?: { hostEpoch?: string }; fillFrom?: FillFrom };
+type OpenOptions = SideOpenOptions & { sourcePage?: string; held?: { hostEpoch?: string }; fillFrom?: FillFrom };
 
 function open(kind: ItemId, params: Json, opts: OpenOptions, peek: PeekSetting | null, preference?: PeekSetting): SideOpenResult | SideOpenHeldResult {
   if (staleScope()) return { status: "stale" };
@@ -234,7 +235,7 @@ function open(kind: ItemId, params: Json, opts: OpenOptions, peek: PeekSetting |
   let layout = useSide.getState().layout;
   // minSize (§24 step 4): no new tool column the work area cannot fit — a tab instead.
   const roomForNewColumn = roomForColumn("tool");
-  const decide = () => place(layout, { kind, binding, key, transient, page: opts.page, activePage: layout.activePage, columnOpen: layout.open, roomForColumn: roomForNewColumn }, spec, (k) => specFrom(registry, k)?.order ?? DEFAULT_ORDER);
+  const decide = () => place(layout, { kind, binding, key, transient, page: opts.page, shelf: findPage(layout, opts.sourcePage)?.shelf, activePage: opts.sourcePage ?? layout.activePage, columnOpen: layout.open, roomForColumn: roomForNewColumn }, spec, (k) => specFrom(registry, k)?.order ?? DEFAULT_ORDER);
   let decision = decide();
   // Replace guard (v1.11, §18.2): a transient tab whose closing would end something (its component's
   // closeConfirm warns) is not replaced — it is promoted to kept and the new item opens as its own transient tab.

@@ -1,3 +1,4 @@
+import { questionDraftAnswer, questionAnswer, questionAnswers, questionDraftKey, questionSchemaIdentity, readQuestionDraft, writeQuestionDraft, type QuestionDraft, type QuestionDraftScope } from "../lib/questionDrafts";
 import type { AgentRuntime } from "../lib/agentFeatures";
 import { isImeComposing } from "../lib/ime";
 // Docked interaction card above the composer (pattern from ZCode's V4InteractionDialogs /
@@ -14,6 +15,7 @@ import {
   formLimits,
   formProblems,
   questionsReply,
+  questionTrim,
   toInteraction,
   type Choice,
   type FormValue,
@@ -102,23 +104,32 @@ function Approval({ model, runtime, onReply }: { model: Extract<InteractionModel
   );
 }
 
-function Questions({ model, onReply }: { model: Extract<InteractionModel, { kind: "questions" }>; onReply: (result: unknown) => void }) {
+function LegacyQuestions({ model, draftKey, onReply }: { model: Extract<InteractionModel, { kind: "questions" }>; draftKey: string | null; onReply: (result: unknown) => void }) {
   const { t } = useI18n();
   const takeFocus = useContext(TakeFocus);
-  const [index, setIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string[]>>({});
-  const [other, setOther] = useState("");
+  const [draft, setDraft] = useState(() => readQuestionDraft(draftKey, model.questions));
+  const index = draft.index;
   const question = model.questions[index];
   if (!question) return null;
+  const other = questionDraftAnswer(draft, question.id)?.text ?? "";
   const options = question.options ?? [];
   const last = index === model.questions.length - 1;
-
-  const answer = (values: string[]) => {
-    const next = { ...answers, [question.id]: values };
-    setAnswers(next);
-    setOther("");
-    if (last) onReply(questionsReply(next));
-    else setIndex(index + 1);
+  const save = (next: QuestionDraft) => {
+    writeQuestionDraft(draftKey, next, model.questions);
+    setDraft(next);
+  };
+  const setIndex = (index: number) => save({ ...draft, index });
+  const setOther = (text: string) => save({ ...draft, answers: { ...draft.answers, [question.id]: { selected: [], text } } });
+  const answer = (values: string[], freeText = false) => {
+    const label = values[0]!;
+    const next = { ...draft, answers: { ...draft.answers, [question.id]: !freeText && options.some(o => o.label === label) ? { selected: values, text: "" } : { selected: [], text: label } } };
+    if (last) {
+      save(next);
+      // A restored/corrupt draft must never send missing prior answers as [].
+      const answers = questionAnswers(model.questions, next);
+      if (!answers) return;
+      onReply(questionsReply(answers));
+    } else save({ ...next, index: index + 1 });
   };
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (isImeComposing(e)) return;
@@ -154,7 +165,7 @@ function Questions({ model, onReply }: { model: Extract<InteractionModel, { kind
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (other.trim()) answer([other.trim()]);
+              if (questionTrim(other)) answer([questionTrim(other)], true);
             }}
             className="flex gap-2"
           >
@@ -166,11 +177,109 @@ function Questions({ model, onReply }: { model: Extract<InteractionModel, { kind
               placeholder={t("interaction.other")}
               className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-accent"
             />
-            <button type="submit" disabled={!other.trim()} className={btn({ variant: "primary" })}>
+            <button type="submit" disabled={!questionTrim(other)} className={btn({ variant: "primary" })}>
               {last ? t("interaction.submit") : t("interaction.next")}
             </button>
           </form>
         )}
+      </div>
+    </Card>
+  );
+}
+
+
+function Questions({ model, draftKey, onReply }: { model: Extract<InteractionModel, { kind: "questions" }>; draftKey: string | null; onReply: (result: unknown) => void }) {
+  const { t } = useI18n();
+  const takeFocus = useContext(TakeFocus);
+  const [draft, setDraft] = useState(() => readQuestionDraft(draftKey, model.questions));
+  const question = model.questions[draft.index];
+  if (!question) return null;
+  const current = questionDraftAnswer(draft, question.id) ?? { selected: [], text: "" };
+  const options = question.options ?? [];
+  const enhanced = !!question.cutexQuestionOptions;
+  const multi = question.cutexQuestionOptions?.multiSelect === true;
+  const last = draft.index === model.questions.length - 1;
+  const values = questionAnswer(question, current);
+  const all = questionAnswers(model.questions, draft);
+  const valid = !!values && (!last || !!all);
+  const save = (next: QuestionDraft) => {
+    // Write synchronously in the input event: a reload/unmount cannot race an effect.
+    writeQuestionDraft(draftKey, next, model.questions);
+    setDraft(next);
+  };
+  const edit = (value: typeof current) => save({ ...draft, answers: { ...draft.answers, [question.id]: value } });
+  const advance = (next: QuestionDraft) => {
+    if (!questionAnswer(question, questionDraftAnswer(next, question.id) ?? current)) return;
+    if (last) {
+      const answers = questionAnswers(model.questions, next);
+      if (!answers) return;
+      save(next);
+      onReply(questionsReply(answers));
+    } else save({ ...next, index: draft.index + 1 });
+  };
+  const pick = (label: string) => {
+    if (!enhanced) {
+      advance({ ...draft, answers: { ...draft.answers, [question.id]: { selected: [label], text: "" } } });
+    } else edit({ selected: multi ? current.selected.includes(label) ? current.selected.filter(v => v !== label) : [...current.selected, label] : [label], text: multi ? current.text : "" });
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (isImeComposing(e) || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+    const target = e.target as HTMLElement;
+    if (target.closest("input,textarea,select,[contenteditable]:not([contenteditable=false])")) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const buttons = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("[data-question-option]")];
+      if (buttons.length) {
+        const index = buttons.indexOf(target as HTMLButtonElement);
+        const next = index < 0 ? (e.key === "ArrowDown" ? 0 : buttons.length - 1) : (index + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+        e.preventDefault(); buttons[next]!.focus();
+      }
+      return;
+    }
+    const n = Number(e.key);
+    if (/^[1-9]$/.test(e.key) && n <= options.length) {
+      e.preventDefault(); pick(options[n - 1]!.label);
+    } else if (e.key === "Escape" && draft.index > 0) {
+      e.preventDefault(); save({ ...draft, index: draft.index - 1 });
+    }
+  };
+  return (
+    <Card onKeyDown={onKeyDown}>
+      <div className="mb-1 flex items-center text-xs text-subtle">
+        <span className="font-semibold uppercase tracking-wide">{question.header}</span>
+        {model.questions.length > 1 && <span className="ml-auto">{draft.index + 1} / {model.questions.length}</span>}
+        <ApprovalSource source="model" className="ml-auto" />
+      </div>
+      <p className="selectable mb-3 text-sm whitespace-pre-wrap">{question.question}</p>
+      {multi && <p className="mb-2 text-xs text-muted">{t("interaction.multiSelect")}</p>}
+      <div className="flex flex-col gap-1.5">
+        {options.map((option, i) => (
+          <div key={option.label}>
+            <button data-question-option type="button" aria-pressed={enhanced ? current.selected.includes(option.label) : undefined} onClick={() => pick(option.label)} className={`w-full rounded-lg border px-3 py-1.5 text-left hover:bg-surface-2 ${enhanced && current.selected.includes(option.label) ? "border-accent bg-accent/10" : "border-border"}`}>
+              <div className="flex items-center gap-2 text-sm"><span className="w-4 text-xs opacity-60">{i + 1}</span>{option.label}</div>
+              {option.description && <div className="pl-6 text-xs text-muted">{option.description}</div>}
+            </button>
+            {question.cutexQuestionOptions?.options[i]?.preview && <details className="px-3 py-1 text-xs text-muted">
+              <summary className="cursor-pointer">{t("interaction.preview")}</summary>
+              <pre className="selectable max-h-64 overflow-auto whitespace-pre-wrap break-words">{question.cutexQuestionOptions.options[i]!.preview}</pre>
+            </details>}
+          </div>
+        ))}
+        <form onSubmit={e => { e.preventDefault(); advance(draft); }} onKeyDown={e => { if (isImeComposing(e) && e.key === "Enter") e.preventDefault(); }} className="space-y-2">
+          {(question.isOther || options.length === 0) && <input
+            aria-label={t("interaction.other")}
+            autoFocus={options.length === 0 && takeFocus}
+            type={question.isSecret ? "password" : "text"}
+            value={current.text}
+            onChange={e => edit({ selected: multi ? current.selected : [], text: e.target.value })}
+            placeholder={t("interaction.other")}
+            className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-accent"
+          />}
+          <div className="flex items-center gap-2">
+            {draft.index > 0 && <button type="button" onClick={() => save({ ...draft, index: draft.index - 1 })} className={btn({})}>{t("interaction.back")}</button>}
+            {(enhanced || question.isOther || options.length === 0) && <button type="submit" disabled={!valid} className={btn({ variant: "primary" })}>{last ? t("interaction.submit") : t("interaction.next")}</button>}
+            {enhanced && !valid && (current.selected.length > 0 || current.text.length > 0) && <span role="status" className="text-xs text-muted">{t("interaction.invalidAnswer")}</span>}
+          </div>
+        </form>
       </div>
     </Card>
   );
@@ -280,8 +389,12 @@ export function InteractionDock({
   onReply,
   takeFocus = true,
   runtime,
+  optionsV1 = false,
+  draftScope,
 }: {
   pending: PendingRequest[];
+  optionsV1?: boolean;
+  draftScope?: QuestionDraftScope;
   /** The agent's runtime: names whose sandbox asks (DSH's own approvals are not Codex's). */
   runtime?: AgentRuntime;
   onReply: (request: PendingRequest, reply: { result: unknown } | { error: { code: number; message: string } }) => void;
@@ -291,14 +404,18 @@ export function InteractionDock({
   const { t } = useI18n();
   const first = pending[0];
   if (!first) return null;
-  const model = toInteraction(first);
+  const model = toInteraction(first, optionsV1);
+  const draftKey = model.kind === "questions" ? questionDraftKey(draftScope, first, model.questions) : null;
+  const questionKey = model.kind === "questions" ? JSON.stringify([draftKey, first.id, questionSchemaIdentity(model.questions)]) : null;
   const reply = (result: unknown) => onReply(first, { result });
   return (
     <TakeFocus.Provider value={takeFocus}>
     <div data-gutter-anchor="dock" className="side-col side-col-composer w-full px-4 pb-2">
       {pending.length > 1 && <p className="mb-1 text-caption/[inherit] text-subtle">{t("pending.title", { count: pending.length })}</p>}
       {model.kind === "approval" && <Approval key={String(first.id)} model={model} runtime={runtime} onReply={reply} />}
-      {model.kind === "questions" && <Questions key={String(first.id)} model={model} onReply={reply} />}
+      {model.kind === "questions" && (model.questions.some(q => q.cutexQuestionOptions)
+        ? <Questions key={questionKey} draftKey={draftKey} model={model} onReply={reply} />
+        : <LegacyQuestions key={questionKey} draftKey={draftKey} model={model} onReply={reply} />)}
       {model.kind === "elicitation" && <Elicitation key={String(first.id)} model={model} onReply={reply} />}
       {model.kind === "unknown" && (
         <Card>

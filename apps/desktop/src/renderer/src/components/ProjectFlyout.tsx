@@ -5,7 +5,7 @@
 import { BellOff, Star, User } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../i18n";
-import { contextMenu } from "../lib/contextMenu";
+import { contextMenu, useMenuOpen } from "../lib/contextMenu";
 import { projectMenu } from "../lib/projectMenus";
 import { useProjectMuted } from "../lib/notificationLevelsStore";
 import { hoverOpensFlyout, isCollapsedRow, useFlyoutGate, useProjectFlyout, type ProjectFlyoutState } from "../lib/projectFlyout";
@@ -44,7 +44,10 @@ export function CollapsedProject({ layout }: { layout: GroupLayout }) {
   const prefs = useUiPrefs();
   const remark = groupRemark(prefs.projectRemarks, group, hosts?.focus ?? "local");
   const { dragging } = useFlyoutGate();
-  const fly = useProjectFlyout({ available: !dragging, hoverEnabled: hoverOpensFlyout({ collapsed: isCollapsedRow(layout, false), hoverPreview: prefs.projectHoverPreview, dragging }), delay: prefs.projectHoverDelay });
+  // A right-click / ⋯ menu wins over the hover preview: while a menu is open the hover flyout closes and doesn't
+  // reopen (a pinned flyout stays), so the preview never covers the menu.
+  const menuOpen = useMenuOpen();
+  const fly = useProjectFlyout({ available: !dragging, hoverEnabled: !menuOpen && hoverOpensFlyout({ collapsed: isCollapsedRow(layout, false), hoverPreview: prefs.projectHoverPreview, dragging }), delay: prefs.projectHoverDelay });
   const hint = t(prefs.projectHoverPreview ? "sidebar.flyoutPin" : "sidebar.flyoutPinClick");
   const block = projectBlockLook(prefs.projectSeparation, group.kind === "project" ? group.color : NEUTRAL_GROUP);
 

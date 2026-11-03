@@ -4,7 +4,7 @@
 // (for screenshots): `menu()` opens the right Shelf's ⋯, `dragMix()` starts a tab drag onto a pane of another
 // kind on a Shelf that does not allow mixing (the refusal + "as a new pane" offer), `drop()` / `cancel()`.
 import { openSide } from "../lib/sideOpen";
-import { addShelfPage, findCard, locate, moveToNewShelf, setShelfOptions, shelfOnSide, switchPage } from "../lib/sideLayout";
+import { addShelfPage, findCard, locate, moveToNewShelf, setShelfOptions, setSingleShelf, shelfOnSide, switchPage } from "../lib/sideLayout";
 import { updateLayout, useSide } from "../lib/sideLayoutStore";
 import { useApp } from "../store";
 import { launchable } from "../lib/sideMenus";
@@ -29,10 +29,12 @@ async function build(inner: boolean, agent: string | null): Promise<void> {
   await wait(150);
   // The left Shelf's tool: the side chat (else any other launchable tool the preview has).
   const pick = launchable().find((i) => i.kind === "side-chat.chat") ?? launchable().find((i) => !/workspace|browser/.test(i.kind));
-  const term = pick ? idOf(openSide(pick.kind, pick.params, { reveal: true })) : null;
+  // (A tool already open — the side chat restored with the agent — answers without an id: found by its kind then.)
+  const term = pick ? (idOf(openSide(pick.kind, pick.params, { reveal: true })) ?? Object.entries(useSide.getState().layout.instances).find(([, i]) => i.kind === pick.kind)?.[0] ?? null) : null;
   await wait(150);
   // The terminal goes to a left Shelf of its own; the left Shelf gets a second, named page.
-  if (term) updateLayout((l) => moveToNewShelf(l, { instance: term }, "left", Date.now()));
+  // (单一 Shelf 模式, the default for a fresh preview, allows no second Shelf: off for this scenario.)
+  if (term) updateLayout((l) => moveToNewShelf(setSingleShelf(l, false), { instance: term }, "left", Date.now()));
   await wait(100);
   const left = shelfOnSide(useSide.getState().layout, "left");
   if (left) {
@@ -92,6 +94,15 @@ export function installDevShelves(q: URLSearchParams): void {
     drop: () => pointer("pointerup", 0, 0, window, 0),
     card: (id: string) => findCard(useSide.getState().layout, id),
     snapshot: () => shelvesSnapshot(),
+    /** Moves the first tool of `kind` (else the active page's last pane) to a new left Shelf; the left Shelf's id or a reason. */
+    left: (kind?: string) => {
+      const l = useSide.getState().layout;
+      const inst = Object.entries(l.instances).find(([id, i]) => (!kind || i.kind === kind) && locate(l, id))?.[0];
+      if (!inst) return `no instance (${Object.keys(l.instances).length})`;
+      // (单一 Shelf 模式 allows no second Shelf.)
+      updateLayout((x) => moveToNewShelf(setSingleShelf(x, false), { instance: inst }, "left", Date.now()));
+      return shelfOnSide(useSide.getState().layout, "left")?.id ?? "not moved";
+    },
   };
   setTimeout(() => void build(inner, agent).then(() => ((window as unknown as { __shelvesReady: boolean }).__shelvesReady = true)), at);
 }

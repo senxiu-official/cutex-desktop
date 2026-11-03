@@ -14,7 +14,7 @@ import { isFailed, isRunning, toolDetail, type StepEntry, type WorkSummary } fro
 import { safetyNoteOfItem } from "../lib/ownerNotify";
 import { useHostOwnerNotes } from "../lib/ownerNotifyStore";
 import { useConvHost } from "../lib/conversationScope";
-import { useHeldBusy } from "../lib/busyHold";
+import { useHeldBusy } from "../lib/legacyDelivery/busyHold";
 import { Markdown } from "./Markdown";
 import { ToolOutlet } from "../modules/TimelineOutlet";
 import { useUserLayoutToggle } from "../lib/userLayoutToggle";

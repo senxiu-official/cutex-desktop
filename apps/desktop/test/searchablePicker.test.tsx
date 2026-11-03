@@ -146,7 +146,7 @@ describe("SearchableSelect", () => {
       expect(measure).toHaveBeenCalled();
       expect(input()).toBe(field);
       measure.mockClear();
-      act(() => document.body.dispatchEvent(new Event("scroll")));
+      act(() => document.body.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 100 })));
       expect(document.querySelector("[data-menu-search]")).toBeNull();
       expect(measure).not.toHaveBeenCalled();
     } finally { measure.mockRestore(); }

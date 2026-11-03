@@ -84,6 +84,14 @@ describe("delegationStatus", () => {
     expect(delegationStatus(ask({ execution: "queued", hold: { reason: "blocked", by: "runtimeDown" } })).key).toBe("offline");
   });
 
+  it("names a closed intake gate without guessing its cause, preserving other runtime holds", () => {
+    const gated = delegationStatus(ask({ execution: "queued", hold: { reason: "heldByRuntime", native: "gate_closed" } }));
+    expect(gated.key).toBe("waitingResume");
+    expect(gated.dangerText).toBeFalsy();
+    expect(delegationStatus(ask({ execution: "queued", hold: { reason: "heldByRuntime", native: "unsupported" } })).key).toBe("blocked");
+    expect(delegationStatus(ask({ execution: "answered", closed: "completed", hold: { reason: "heldByRuntime", native: "gate_closed" } })).key).toBe("answered");
+  });
+
   it("closed outcomes win over execution", () => {
     expect(delegationStatus(ask({ execution: "answered", closed: "abandoned" })).key).toBe("abandoned");
     expect(delegationStatus(ask({ execution: "failed" })).glyph).toBe("cross");

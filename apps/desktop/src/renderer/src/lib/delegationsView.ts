@@ -6,10 +6,10 @@ import { useApp } from "../store";
 import { convSidebarOf, useConvFeatures, useConvHost, useConvScope, useConvView } from "./conversationScope";
 import { useViewRows, viewRow } from "./viewHost";
 import { agentDelegations, ASKS_FEATURE, fallbackSummary, inferDelegations, needsYouCount, ownerSteeredOf, pendingForAgent, type ContextOf, type DelegateCall, type DelegationStatus } from "./delegations";
-import { loadDelegationDetail, useDelegation, useDelegations, useFocusDelegations, useHostRecords } from "./delegationStore";
+import { loadCardDelegation, loadDelegationDetail, useDelegation, useDelegations, useFocusDelegations, useHostRecords } from "./delegationStore";
 import { currentDelegationTurn, type DelegationTurn } from "./delegationTurn";
 import { hostKey } from "./hostKeys";
-import { findById, isShortId, resolveId, sameId } from "./shortIds";
+import { findById, isShortId, parseIdRef, resolveId, sameId } from "./shortIds";
 import { orderedEntries, type TimelineState } from "./timeline";
 
 /** The status word with `{name}` / `{n}` filled in. */
@@ -61,7 +61,12 @@ export const useAgentHost = (): string => useConvHost();
  * agent's transcript says (the call, later waits and closes). `live` false = transcript only.
  */
 export function useCardDelegation(askId: string, call: DelegateCall, sessionId: string): { d: AskSummary; live: boolean } {
-  const record = useDelegation(useAgentHost(), askId);
+  const host = useAgentHost();
+  const record = useDelegation(host, askId);
+  const enabled = useConvFeatures().has(ASKS_FEATURE);
+  useEffect(() => {
+    if (!record && enabled) void loadCardDelegation(host, askId, sessionId);
+  }, [host, askId, sessionId, record, enabled]);
   // Only scanned while there is no record (purged > 30 days, or before the first load).
   const version = useConvView(sessionId, (v) => (record ? 0 : (v?.version ?? 0)));
   const timeline = useConvView(sessionId, (v) => (record ? null : (v?.timeline ?? null)));
@@ -87,6 +92,8 @@ export function useCardDelegation(askId: string, call: DelegateCall, sessionId: 
 export function useResolvedAskId(ref: string, hostId?: string): string {
   const agentHostId = useAgentHost();
   const records = useHostRecords(hostId ?? agentHostId);
+  const parsed = parseIdRef(ref);
+  if (parsed?.kind === "ask" && parsed.mode === "full") return `ask-${parsed.hex}`;
   return records[ref] || !isShortId(ref) ? ref : (resolveId(ref, Object.keys(records)) ?? ref);
 }
 

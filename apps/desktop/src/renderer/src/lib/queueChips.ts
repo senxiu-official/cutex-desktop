@@ -6,7 +6,7 @@
 // Settings → 对话 → 输入框 「「接下来」面板」): ★ 始终展开 never compacts, 自动折叠 applies it.
 import { useCallback, useSyncExternalStore } from "react";
 import type { AdmissionNextStep } from "@cutex-desktop/protocol";
-import type { AdmissionRow } from "./admissionOrder";
+import type { AdmissionRow } from "./legacyDelivery/admissionOrder";
 import { useOwnerWindow } from "./ownerContext";
 
 export type QueueChipKind = "queued" | "inserting" | "paused" | "messages" | "delegations" | "alarms" | "asksPaused" | "agentPaused" | "quota";

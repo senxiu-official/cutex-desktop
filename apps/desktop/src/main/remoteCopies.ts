@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises'
 import { constants } from 'node:fs'
 import * as path from 'node:path'
 import type { CopySource, CopySettings, CopyState, RemoteCopy, TransferMeta, TransferChunk } from '../shared/remoteCopies'
+import { downloadFilename } from '../shared/downloadFilename'
 
 export type RemoteCopyManagerOptions = {
   /** The dedicated userData/remote-copies directory, never userData itself. */
@@ -27,10 +28,7 @@ function sourceValue(s: CopySource): CopySource {
     ...(s.artifact ? { artifact: { id: s.artifact.id, version: s.artifact.version } } : {}) }
 }
 function filename(name: string): string {
-  let n = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').slice(0, 160).replace(/[. ]+$/g, '')
-  if (!n || n === '.' || n === '..') n = 'download'
-  if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])[ .]*(?:\.|$)/i.test(n)) n = '_' + n
-  return n
+  return downloadFilename(name)
 }
 function metaValue(m: TransferMeta): TransferMeta {
   if (!m || typeof m.name !== 'string' || typeof m.path !== 'string' || typeof m.modifiedAt !== 'string' || typeof m.revision !== 'string' || !m.revision || !Number.isSafeInteger(m.size) || m.size < 0 || !Number.isSafeInteger(m.maxChunkBytes) || m.maxChunkBytes < 1 || m.maxChunkBytes > 4194304 || (m.sha256 !== undefined && !/^[a-f0-9]{64}$/i.test(m.sha256))) throw Error('Invalid transfer metadata')

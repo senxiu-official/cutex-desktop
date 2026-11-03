@@ -1,3 +1,4 @@
+import { predictedOwnerSurface, type LedgerOwnerOutbox } from "../lib/inputLedger/owner";
 // Docked above the composer (pattern from ZCode's ConversationQueuePanel): first the steers sent
 // into the running turn that the native has not read yet (lib/pendingSteers; read-only, in send
 // order, one "interrupt & send" for the group since the native reads them all at the same tool
@@ -22,8 +23,19 @@
 // folds to its header line and its list opens as an overlay above that line (over the history; Esc, a click elsewhere
 // or focus leaving closes it; a drag keeps it open until it ends). The owner's own collapse / expand wins (see there).
 import type { AgentRuntime } from "../lib/agentFeatures";
+import { agentState, featuresOf, useApp } from "../store";
+import { useConvHost } from "../lib/conversationScope";
+import { usesInputLedger } from "../lib/deliveryMode";
+import { planQueueMerge } from "../../../shared/queueMerge";
+import { queueActionNotice } from "../lib/queueSteer";
+import { clearableUncertain, ledgerQueue } from "../lib/inputLedger/nextUp";
+import { useNow } from "../lib/time";
+import { LedgerTurnQueue } from "./TurnQueue";
+import { LedgerPendingMessagesSection } from "./PendingMessagesSection";
+import { DeliveryStatus } from "./DeliveryStatus";
+import { showStandaloneDelivery } from "../lib/inputLedger/deliveryPresentation";
 import { mentionPlainText } from "../lib/mentionWire";
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Fragment, useEffect, useMemo, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ArrowDownToLine, ChevronDown, ChevronRight, ChevronUp, CornerDownRight, Info, Pencil, Trash2, UserRound, X } from "lucide-react";
 import { useShortPaneFold } from "../lib/shortPane";
 import type { QueueItem } from "@cutex-desktop/protocol";
@@ -33,8 +45,8 @@ import { useModelOverloadRetry } from "../lib/modelOverloadRetryView";
 import { openMenuAt } from "../lib/contextMenu";
 import { panelGuideItem } from "../lib/panelGuideMenu";
 import { ARMED_BUTTON, useArmed } from "../lib/armedConfirm";
-import { outboxStatusCopy, type OutboxEntry } from "../lib/outbox";
-import { steerDelivery, type PendingSteer } from "../lib/pendingSteers";
+import { outboxStatusCopy, type OutboxEntry } from "../lib/legacyDelivery/outbox";
+import { steerDelivery, type PendingSteer } from "../lib/legacyDelivery/pendingSteers";
 import type { ImageSteering } from "../lib/imageSteer";
 import { queuedRowText, type PausedSection } from "../lib/queuePause";
 import { queueViewOf, setQueueView } from "../lib/queueView";
@@ -46,7 +58,11 @@ import { messageImages } from "../../../shared/input";
 import { Rail, RailRow } from "./QueueRail";
 import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 import { TurnQueue, type OrderedQueue, type OwnerRowExtra } from "./TurnQueue";
-import { useShownNextStep } from "../lib/settledRideAlongs";
+import { useShownNextStep } from "../lib/legacyDelivery/settledRideAlongs";
+import { useUnsettledBusReceipts } from "../lib/legacyDelivery/consumedBusReceipts";
+import { useHiddenReceiptIds } from "../lib/legacyDelivery/busReceiptVisibility";
+import { openCleanup } from "../lib/cleanupNav";
+import { useRestoreClosedReceipts } from "../lib/legacyDelivery/hiddenReceiptClosure";
 import type { AdmissionNextStep } from "@cutex-desktop/protocol";
 import { Tag, CountBadge } from "./Tag";
 import { btn } from "./Button";
@@ -105,7 +121,7 @@ function OutboxRow({ entry, kind, actions, hostId }: { entry: OutboxEntry; kind:
   const failed = entry.state === "failed";
   const status = outboxStatusCopy(entry);
   return (
-    <div className={`${QUEUE_ROW} ${failed ? "bg-danger/5" : ""}`} data-testid={failed ? "outbox-failed" : "outbox-sending"}>
+    <div className={`${QUEUE_ROW} min-h-6 max-h-6 shrink-0 ${failed ? "bg-danger/5" : ""}`} data-testid={failed ? "outbox-failed" : "outbox-sending"}>
       <KindIcon icon={kind === "steer" ? CornerDownRight : UserRound} label={t(kind === "steer" ? "queue.turn.inserting" : "queue.delivery.owner")} />
       <span className={`${ROW_TEXT} ${failed ? "text-foreground" : "text-muted"}`}>{rowText(mentionPlainText(entry.text))}</span>
       <QueuedImages images={messageImages(entry.extra as { type: string }[])} hostId={hostId} />
@@ -140,13 +156,15 @@ function OutboxRow({ entry, kind, actions, hostId }: { entry: OutboxEntry; kind:
   );
 }
 
-export function QueuePanel({
+function LegacyQueuePanel({
   steers,
   sendingSteers = [],
   sendingQueue = [],
+  timelineSends = [],
   outbox,
   onInterruptSendSteers,
   onDismissSteer,
+  onRecheckSteer,
   paused,
   pausedHint,
   onResumePaused,
@@ -173,9 +191,12 @@ export function QueuePanel({
   /** Optimistic sends shown in the steers section / after the queue (lib/outbox). */
   sendingSteers?: OutboxEntry[];
   sendingQueue?: OutboxEntry[];
+  /** Owner inputs already represented by a timeline echo; feedback stays with that input. */
+  timelineSends?: readonly OutboxEntry[];
   outbox: OutboxActions;
   onInterruptSendSteers(): void;
   onDismissSteer(id: string): void;
+  onRecheckSteer?(id: string): void;
   /** Undelivered steers + queue items held by the cutex pause. */
   paused: PausedSection;
   /** Replaces the paused title while the user types (what Enter will do with the paused queue). */
@@ -191,6 +212,8 @@ export function QueuePanel({
    * idle — starts a new turn with it. Omitted while busy for agents without same-turn steering (Claude).
    */
   onSendNow?: (item: QueueItem) => void;
+  /** Ledger: atomically merge eligible owner items, then insert the retained item. */
+  onMergeInsert?: (items: QueueItem[]) => Promise<void>;
   /** The agent is idle: 立即发送 (a new turn) instead of 插入 (steer). */
   sendNowStartsTurn?: boolean;
   onEdit(item: QueueItem): void;
@@ -224,21 +247,29 @@ export function QueuePanel({
   const userToggle = useUserLayoutToggle();
   // Ride-alongs still settling (lib/settledRideAlongs) are left out of everything at once — rows,
   // count, chips and whether the card shows — so the card never flashes empty.
-  const nextStep = useShownNextStep(orderedIn?.nextStep ?? NO_NEXT_STEP, orderedIn?.running ?? false, orderedIn);
+  const receiptHost = hostId ?? "local";
+  const receiptSession = sessionId ?? orderedIn?.sessionId ?? "";
+  const hiddenReceipts = useHiddenReceiptIds(receiptHost, receiptSession);
+  // Hidden rows are never shown here (owner 2026-10-30: no 「已隐藏 N 条」 strip); one the server closed is un-hidden.
+  const hiddenRows = useMemo(() => [...hiddenReceipts].map((id) => ({ session: receiptSession, id })), [hiddenReceipts, receiptSession]);
+  useRestoreClosedReceipts(receiptHost, hiddenRows);
+  const unsettled = useUnsettledBusReceipts(receiptHost, receiptSession, orderedIn?.nextStep ?? NO_NEXT_STEP);
+  const nextStep = useShownNextStep(unsettled, orderedIn?.running ?? false, orderedIn);
   const ordered = orderedIn && nextStep !== orderedIn.nextStep ? { ...orderedIn, nextStep } : orderedIn;
   const feedbackHost = hostId ?? "local";
   const feedbackSession = sessionId ?? ordered?.sessionId ?? "";
   const retryStatus = useModelOverloadRetry(feedbackSession, hostId);
   const retry = retryStatus?.holdsAdmission ? retryStatus : null;
   const insertFeedback = useQueueInsertFeedback(insertFeedbackOf(feedbackHost, feedbackSession));
-  const feedbackFor = (id: string) => insertFeedback.find((f) => f.item.clientUserMessageId === id);
+  const matchesFeedback = (feedback: (typeof insertFeedback)[number], id: string) => feedback.item.clientUserMessageId === id || feedback.sentId === id;
+  const feedbackFor = (id: string) => insertFeedback.find((f) => matchesFeedback(f, id));
   const insertStatus = (id: string) => {
     const feedback = feedbackFor(id);
-    return feedback && !feedback.hidden ? <QueueInsertStatus feedback={feedback} hostId={feedbackHost} sessionId={feedbackSession} inQueue={items.some((q) => q.clientUserMessageId === id)} /> : null;
+    return feedback && !feedback.hidden ? <QueueInsertStatus feedback={feedback} hostId={feedbackHost} sessionId={feedbackSession} inQueue={items.some((q) => matchesFeedback(feedback, q.clientUserMessageId))} /> : null;
   };
   // An SSE can remove the queue/steer row before its request returns (or before the owner sees
   // its result). Retain only the operation receipt, not a synthetic queued item or admission turn.
-  const receipts = insertFeedback.filter((f) => !f.hidden && !items.some((q) => q.clientUserMessageId === f.item.clientUserMessageId) && !steers.some((p) => p.id === f.item.clientUserMessageId));
+  const receipts = insertFeedback.filter((f) => !f.hidden && !timelineSends.some(e => matchesFeedback(f, e.id)) && !items.some((q) => matchesFeedback(f, q.clientUserMessageId)) && !steers.some((p) => matchesFeedback(f, p.id)));
   const tray = useRef<HTMLDivElement>(null);
   // The rows below the header shrink with the pane (min-h-0, the Composer / Conversation chain is a flex column) and
   // scroll once they no longer fit: a row is never cut or covered by the input box. Only then a scroll box, so the
@@ -372,7 +403,7 @@ export function QueuePanel({
     <div
       key={item.clientUserMessageId || item.queueId}
       {...extra.rowProps}
-      className={`${QUEUE_ROW} hover:bg-hover ${extra.rowProps ? "focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none" : ""}`}
+      className={`${QUEUE_ROW} min-h-6 max-h-6 shrink-0 hover:bg-hover ${extra.rowProps ? "focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none" : ""}`}
       data-testid="queue-item"
     >
       {extra.grip}
@@ -392,7 +423,7 @@ export function QueuePanel({
         )
       )}
       {/* Row actions: on hover or keyboard focus only (Tab reaches them; the row's focus shows them too), in the meta's place. */}
-      <span className={ROW_ACTIONS} data-testid="queue-item-actions">
+      <span className={`${ROW_ACTIONS} h-5 max-h-5`} data-testid="queue-item-actions">
         {onSendNow && (
           <button
             onClick={() => onSendNow(item)}
@@ -429,8 +460,8 @@ export function QueuePanel({
         {steerDelivery(p, runtime, imageSteering) === "nextTurn" ? <KindIcon icon={ArrowDownToLine} label={t("queue.meta.nextTurn")} /> : <KindIcon icon={CornerDownRight} label={t("queue.turn.inserting")} />}
         <span className={`${ROW_TEXT} text-muted`}>{rowText(mentionPlainText(p.text))}</span>
         <QueuedImages images={messageImages((p.extra ?? []) as { type: string }[])} total={p.imageCount} hostId={hostId} />
-        {insertStatus(p.id) ?? meta}
-        {action && <span className={ROW_ACTIONS}>{action}</span>}
+        {p.state === "checking" ? meta : insertStatus(p.id) ?? meta}
+        {action && <span className={`${ROW_ACTIONS} h-5 max-h-5`}>{action}</span>}
       </div>
     );
     return ordered ? (
@@ -476,7 +507,11 @@ export function QueuePanel({
         onContextMenu={(e) => {
           if (isElement(e.target) && e.target.closest("button:not([data-testid=queue-chips]), a, input")) return;
           e.preventDefault();
-          openMenuAt(e.clientX, e.clientY, [panelGuideItem({ panel: "conversation", paneId: queuePaneId(e.currentTarget), sessionId: agent ?? null, step: 1 })]);
+          openMenuAt(e.clientX, e.clientY, [
+            panelGuideItem({ panel: "conversation", paneId: queuePaneId(e.currentTarget), sessionId: agent ?? null, step: 1 }),
+            // Hidden receipts are listed only in 待清理 (never as a row here); this is the way there.
+            hiddenReceipts.size > 0 && { label: t("queue.receipt.hiddenLink", { n: hiddenReceipts.size }), onSelect: () => openCleanup(receiptHost, "receipts") },
+          ]);
         }}
       >
         {/* While an owner row is dragged, the line itself is the 「插入当前回合」 drop target (TurnQueue draws it here). */}
@@ -567,7 +602,7 @@ export function QueuePanel({
             <span className="min-w-0 flex-1 truncate" title={t("steer.pendingHint")}>
               {t("steer.pending")}
             </span>
-            {waiting.length > 0 && (
+            {waiting.some(p => (p.state ?? "waiting") === "waiting") && (
               <button onClick={onInterruptSendSteers} title={t("steer.interruptSendHint")} className="rounded-md px-1.5 py-0.5 text-xs text-danger hover:bg-danger/10">
                 {t("steer.interruptSend")}
               </button>
@@ -576,7 +611,7 @@ export function QueuePanel({
           {waiting.map((p) =>
             steerRow(
               p,
-              <SteerDeliveryNote steer={p} runtime={runtime} imageSteering={imageSteering} />,
+              <SteerDeliveryNote steer={p} runtime={runtime} imageSteering={imageSteering} onRecheck={onRecheckSteer && (() => onRecheckSteer(p.id))} />,
             ),
           )}
           {sendingSteers.map((e) => (
@@ -630,6 +665,7 @@ export function QueuePanel({
           ordered={ordered}
           waiting={waiting}
           insertStatus={insertStatus}
+          onRecheckSteer={onRecheckSteer}
           sendingSteers={sendingSteers}
           sendingQueue={sendingQueue}
           renderOutbox={(e, kind) => <OutboxRow key={e.id} entry={e} kind={kind} actions={outbox} hostId={hostId} />}
@@ -682,4 +718,99 @@ function queuePaneId(el: HTMLElement): string | null {
     if (header) return header.getAttribute("data-conv-header");
   }
   return null;
+}
+
+/** Capability belongs to the conversation's host, independently of the focus host. */
+export function QueuePanel(props: React.ComponentProps<typeof LegacyQueuePanel>) {
+  const convHost = useConvHost();
+  const host = props.hostId ?? convHost;
+  const ledger = useApp(s => usesInputLedger([...featuresOf(s, host)]));
+  return ledger ? <LedgerQueuePanel key={`${host}\n${props.sessionId ?? props.ordered?.sessionId}`} {...props} hostId={host} /> : <LegacyQueuePanel {...props} />;
+}
+
+function LedgerQueuePanel(props: React.ComponentProps<typeof LegacyQueuePanel>) {
+  const { t } = useI18n();
+  const sessionId = props.sessionId ?? props.ordered?.sessionId ?? "";
+  const hostId = props.hostId ?? "local";
+  const ledger = useApp(s => agentState(s.inputs, hostId, sessionId));
+  const localOutbox = useApp(s => agentState(s.ledgerOutbox, hostId, sessionId));
+  const preResponse = useMemo(() => (localOutbox ?? []).filter(entry => !ledger?.records.has(entry.inputId) && predictedOwnerSurface(entry, ledger?.delivery) === "nextUp"), [localOutbox, ledger]);
+  const now = useNow(true);
+  const rows = useMemo(() => ledgerQueue(ledger, now), [ledger, now]);
+  const uncertain = useMemo(() => clearableUncertain(ledger), [ledger]);
+  const mergePlan = useMemo(() => {
+    const byId = new Map(props.items.map(item => [item.clientUserMessageId, item]));
+    const eligible = rows.nextUp.flatMap(record => {
+      const item = byId.get(record.inputId);
+      return record.kind === "owner" && record.state === "waiting" && record.reason === "explicitQueue"
+        && record.actions?.includes("sendNow") && record.actions.includes("cancel") && item?.state === "queued" ? [item] : [];
+    });
+    return planQueueMerge(eligible.slice(0, 20));
+  }, [rows.nextUp, props.items]);
+  const [merging, setMerging] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => !!queueViewOf(sessionId).collapsed);
+  const [overlay, setOverlay] = useState(false);
+  const shortPane = useShortPaneFold();
+  const frame = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!overlay) return;
+    const doc = frame.current?.ownerDocument;
+    const outside = (event: MouseEvent) => { if (isNode(event.target) && !frame.current?.contains(event.target)) setOverlay(false); };
+    doc?.addEventListener("pointerdown", outside);
+    return () => doc?.removeEventListener("pointerdown", outside);
+  }, [overlay]);
+  const uncertainIdentity = uncertain.map(record => `${record.inputId}:${record.rev}`).join("\n");
+  useEffect(() => { setArmed(false); }, [uncertainIdentity]);
+  const clean = async () => {
+    if (!armed) { setArmed(true); return; }
+    setClearing(true);
+    const results: PromiseSettledResult<unknown>[] = [];
+    // Large backlogs must not turn one cleanup gesture into hundreds of concurrent RPCs.
+    for (let i = 0; i < uncertain.length; i += 4) results.push(...await Promise.allSettled(uncertain.slice(i, i + 4).map(r => useApp.getState().dismissInput(sessionId, r.inputId, hostId))));
+    const failures = results.filter(r => r.status === "rejected");
+    if (failures.length) useApp.getState().notify(t("inputLedger.cleanupFailed", { n: failures.length }), "error", { hostId, sessionId });
+    setClearing(false); setArmed(false);
+  };
+  const sections = props.sections?.filter(filled) ?? [];
+  const count = rows.nextUp.length + rows.notes.length + preResponse.length;
+  const showDelivery = showStandaloneDelivery(ledger?.delivery) && (ledger?.delivery?.state === "held" || !!ledger?.delivery?.lease);
+  if (!count && !uncertain.length && !showDelivery && !sections.length) return null;
+  const folded = collapsed || shortPane.fold;
+  return <div ref={frame} className="relative flex min-h-0 flex-col rounded-t-inner border border-b-0 border-border bg-surface px-1 pt-0.5 pb-1" data-queue-tray="" data-testid="queue-tray" data-collapsed={folded || undefined} data-short-fold={shortPane.fold || undefined} onKeyDown={e => { if (e.key === "Escape") { setOverlay(false); setArmed(false); } }} onBlur={e => { if (isNode(e.relatedTarget) && !e.currentTarget.contains(e.relatedTarget)) setOverlay(false); }}>
+    <div className="flex h-6 min-w-0 items-center gap-1.5 px-1.5 text-meta text-subtle" data-testid="queue-header">
+      <span className="font-semibold text-foreground">{t("queue.header.title")}</span>
+      {count > 0 && <CountBadge tone="neutral" count={count} data-testid="queue-count" />}
+      <span className="flex-1" />
+      {mergePlan && props.onMergeInsert && props.onSendNow && <button type="button" disabled={merging} className="h-5 rounded px-1 text-caption hover:bg-surface-2 disabled:opacity-50" data-testid="queue-merge-insert" title={t("queue.merge.hint", { n: mergePlan.items.length })} onClick={() => {
+        setMerging(true);
+        void props.onMergeInsert!(mergePlan.items).catch(error => useApp.getState().notify(queueActionNotice(error, t), "error", { hostId, sessionId })).finally(() => setMerging(false));
+      }}>{t("queue.merge.action")}</button>}
+      {uncertain.length > 0 && <button type="button" disabled={clearing} onBlur={() => setArmed(false)} onClick={() => void clean()} className={`h-5 rounded px-1 text-caption ${armed ? "bg-danger/10 text-danger-text" : "hover:bg-surface-2"}`} data-testid="input-cleanup-all" title={t("inputLedger.cleanupHint")}>{t(armed ? "inputLedger.cleanupAgain" : "inputLedger.cleanup", { n: uncertain.length })}</button>}
+      <button type="button" className="h-5 rounded px-1 hover:bg-surface-2" aria-label={t(folded ? "queue.header.expand" : "queue.header.collapse")} aria-expanded={!folded || overlay} data-testid="queue-collapse" onClick={() => { if (shortPane.fold) setOverlay(!overlay); else { setCollapsed(!collapsed); setQueueView(sessionId, { collapsed: !collapsed }); } }}>{folded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
+    </div>
+    {(!collapsed || shortPane.fold) && <div className={`flex min-h-0 flex-col overflow-y-auto overscroll-contain ${SECTION_RULES} ${shortPane.fold ? `absolute bottom-full left-[-1px] right-[-1px] z-20 max-h-[var(--short-pane-overlay-max,240px)] rounded-t-inner border border-border bg-surface p-1 shadow-lg ${overlay ? "" : "pointer-events-none invisible"}` : ""}`} {...(shortPane.fold ? { role: "dialog", "aria-label": t("queue.header.title"), "aria-hidden": !overlay || undefined } : {})} data-queue-body="" data-testid={shortPane.fold ? "queue-overlay" : undefined}>
+      {showDelivery && ledger?.delivery && <div className={HEADING}><DeliveryStatus delivery={ledger.delivery} sessionId={sessionId} hostId={hostId} /></div>}
+      <LedgerTurnQueue records={rows.nextUp} items={props.items} sessionId={sessionId} hostId={hostId} canEdit={props.canEdit} onSendNow={props.onSendNow} sendNowStartsTurn={props.sendNowStartsTurn} onEdit={props.onEdit} onDelete={props.onDelete} />
+      {preResponse.map(entry => <LedgerOutboxRow key={entry.inputId} entry={entry} sessionId={sessionId} hostId={hostId} />)}
+      {rows.notes.length > 0 && <LedgerPendingMessagesSection records={rows.notes} sessionId={sessionId} hostId={hostId} />}
+      {sections.map((section, i) => <div key={i} className={SECTION} data-queue-section="">{section.node}</div>)}
+    </div>}
+  </div>;
+}
+
+/** Only O0 predicts placement; the first ledger record replaces this row by id. */
+function LedgerOutboxRow({ entry, sessionId, hostId }: { entry: LedgerOwnerOutbox; sessionId: string; hostId: string }) {
+  const { t } = useI18n();
+  return <div className={`${QUEUE_ROW} min-h-6 max-h-6 shrink-0 overflow-hidden`} data-testid="ledger-nextup-outbox" data-input-id={entry.inputId}>
+    <KindIcon icon={UserRound} label={t("queue.delivery.owner")} />
+    <span className={`${ROW_TEXT} text-muted`}>{rowText(mentionPlainText(entry.text))}</span>
+    <QueuedImages images={messageImages(entry.extra)} hostId={hostId} />
+    <span className="truncate text-caption text-subtle" title={entry.error}>{t(entry.phase === "sending" ? "inputLedger.record.sending" : entry.error === "input_not_found" ? "outbox.failed" : "inputLedger.unconfirmed")}</span>
+    {entry.phase === "unconfirmed" && <>
+      <button type="button" className="h-5 shrink-0 rounded px-1 text-caption hover:bg-surface-2" onClick={() => void useApp.getState().retryLedgerOutbox(sessionId, entry.inputId, hostId).catch(error => useApp.getState().notify(String(error), "error", { hostId, sessionId }))}>{t("inputLedger.retry")}</button>
+      <button type="button" className="h-5 shrink-0 rounded px-1 text-caption hover:bg-surface-2" onClick={() => useApp.getState().discardLedgerOutbox(sessionId, entry.inputId, hostId)}>{t("inputLedger.dismiss")}</button>
+    </>}
+  </div>;
 }

@@ -1,0 +1,91 @@
+{
+  "provenance": "Derived captured sample; timelineItemId filled with observed actual native item.id for r274.1 expected contract. Captured links were null. Only canonical identities and required shape retained; all prose, target identities and output bodies replaced with neutral short text.",
+  "cases": [
+    {
+      "label": "Event result",
+      "record": {
+        "inputId": "dlv-a4c134143b6c42f18dc7ae0c072fd8e4",
+        "kind": "delegationResult",
+        "state": "inContext",
+        "surface": "timeline",
+        "evidence": "turnStartInput",
+        "turnId": "364359f1-14d7-4c73-bc6d-0aef301e59c9",
+        "askId": "ask-ea49dc49d83542ab96a726ccc5c58cd2",
+        "batchId": "aev-708ca8f5a836433fba02e63d0d143be9",
+        "timelineItemId": "cutex-ask-event-d3e9fd6d1f3342c486466a7d4909ecef",
+        "preview": "Event ledger preview"
+      },
+      "native": {
+        "id": "cutex-ask-event-d3e9fd6d1f3342c486466a7d4909ecef",
+        "type": "functionCallOutput",
+        "name": "external_event",
+        "namespace": "external",
+        "truncated": true,
+        "output": "{\"source\":{\"kind\":\"service\",\"id\":\"cutex-asks\"},\"type\":\"notice\",\"text\":\"Event result body\"}",
+        "externalInputView": {
+          "schema": "cutex.delegation-results.v1",
+          "data": {
+            "items": [
+              {
+                "kind": "answer",
+                "askId": "ask-ea49dc49d83542ab96a726ccc5c58cd2",
+                "answerId": "ans-2194b6014ecf4213b711a9ae64ecf69a",
+                "revision": 1,
+                "status": "completed",
+                "target": {
+                  "id": "worker",
+                  "name": "Worker"
+                },
+                "title": "Event result",
+                "preview": "Event result excerpt"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "label": "Owner ridealong result",
+      "record": {
+        "inputId": "dlv-520557a404cd41f7ac5c994ccd3ecf1a",
+        "kind": "delegationResult",
+        "state": "inContext",
+        "surface": "timeline",
+        "evidence": "externalInputPersisted",
+        "turnId": "5639c983-cfb1-42db-9255-880cdd7ef5ba",
+        "askId": "ask-4ed06a06495c43bf9a95740848623843",
+        "batchId": "aev-2d23ed858f444755a23b58bd09e4d03b",
+        "timelineItemId": "cutex-ask-owner-508e64debc174e34b3b837ea89f42ea1",
+        "preview": "Owner ridealong ledger preview"
+      },
+      "native": {
+        "id": "cutex-ask-owner-508e64debc174e34b3b837ea89f42ea1",
+        "type": "functionCallOutput",
+        "name": "external_event",
+        "namespace": "external",
+        "truncated": true,
+        "output": "{\"source\":{\"kind\":\"service\",\"id\":\"cutex-asks\"},\"type\":\"notice\",\"text\":\"Owner ridealong result body\"}",
+        "externalInputView": {
+          "schema": "cutex.delegation-results.v1",
+          "data": {
+            "items": [
+              {
+                "kind": "answer",
+                "askId": "ask-4ed06a06495c43bf9a95740848623843",
+                "answerId": "ans-d6b1268f26b6428597439e5c68110028",
+                "revision": 1,
+                "status": "completed",
+                "target": {
+                  "id": "worker",
+                  "name": "Worker"
+                },
+                "title": "Owner ridealong result",
+                "preview": "Owner ridealong result excerpt"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

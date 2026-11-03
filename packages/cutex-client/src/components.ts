@@ -91,8 +91,12 @@ export function readComponentClaudeCli(value: unknown): ComponentClaudeCli | und
 }
 
 export type ComponentOperationState = "running" | "done" | "failed";
-/** Refusal codes of the install / remove routes (each has a friendly line on the card). */
-export const COMPONENT_REFUSAL_CODES = ["unmanaged_install", "component_unsupported_platform", "component_external", "upgrade_blocked", "component_pinned", "jobs_running"] as const;
+/**
+ * Refusal codes of the install / remove routes (each has a friendly line on the card). The last five are r269's 409s of an
+ * explicit-version install / index source (cutex docs/contracts/component-index-v1.md). Additive only; an unknown code still
+ * shows cutex's own text.
+ */
+export const COMPONENT_REFUSAL_CODES = ["unmanaged_install", "component_unsupported_platform", "component_external", "upgrade_blocked", "component_pinned", "jobs_running", "component_offer_changed", "component_yanked", "component_incompatible", "component_version_required", "component_identity_conflict"] as const;
 export type ComponentRefusalCode = (typeof COMPONENT_REFUSAL_CODES)[number];
 
 /** A component install / remove cutex runs (202 `{operation}`, list `operation`, event `operation`). */

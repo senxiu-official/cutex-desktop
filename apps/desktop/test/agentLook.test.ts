@@ -72,6 +72,9 @@ describe("lookOf", () => {
     // the Profile's own model still wins; no facts anywhere → other (no portrait pool, nothing borrowed)
     expect(lookOf(entry(session("a")), gpt, null).family).toBe("openai");
     expect(lookOf(entry(session("bare", { profile: null, configuredProfile: null, launchedProfile: null })), noModel, null).family).toBe("other");
+    // The outline colour follows the family, plus Qwen (no family: "other" for themes / portraits).
+    expect(lookOf(entry(session("a")), gpt, null).tint).toBe("openai");
+    expect(lookOf(entry(session("q", { effectiveNextLaunch: { profile: "omega", source: "session_configured", model: "qwen3-max" } })), noModel, null)).toMatchObject({ family: "other", tint: "qwen" });
     // A Claude runtime with no model string is claude by itself — the "Profile not loaded" test above covers it
     // (`claude_subscription` backend → animals); a Claude creator is never inherited through an OpenAI Profile.
   });

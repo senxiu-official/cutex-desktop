@@ -33,6 +33,8 @@ const { ProjectViewPanel } = await import("../src/renderer/src/modules/project-v
 const { emptyState } = await import("../src/renderer/src/modules/project-view/model");
 const S = await import("../src/renderer/src/modules/project-view/streamStore");
 const { useApp } = await import("../src/renderer/src/store");
+const { ProjectStream } = await import("../src/renderer/src/modules/project-view/ProjectStream");
+const { reloadActivityPrefs, useActivityPrefs, setIncludeOwnerTurns } = await import("../src/renderer/src/modules/project-view/activityPrefs");
 type ViewState = import("../src/renderer/src/modules/project-view/model").ViewState;
 
 const row = (seq: number, kind = "turn.completed", extra: Partial<ProjectEvent> = {}): ProjectEvent => ({
@@ -94,6 +96,7 @@ function project() {
 let root: Root;
 let host: HTMLDivElement;
 beforeEach(() => {
+  useActivityPrefs.setState({ includeOwnerTurns: false });
   S.resetProjectStreams();
   listeners.clear();
   queries = [];
@@ -155,6 +158,96 @@ describe("Project 「动态」", () => {
     expect(all("project-stream-row")[0]!.getAttribute("data-kind")).toBe("ask.created");
     expect(q("project-stream-live")!.getAttribute("data-live")).toBe("live");
     expect(q("project-stream-foot")!.textContent).toBe("project-view.stream.end");
+  });
+
+  it("hides confirmed owner turns by default, restores them only under Turns, and remembers the toggle", async () => {
+    useApp.setState({ features: new Set(["project-events"]) });
+    daemon.projectEvents!.mockResolvedValue({ ok: true, value: { projectId: "p1", streamId: "s1", cursor: "pe:20", earliestCursor: "pe:1", order: "newestFirst", hasMore: false, events: [row(15, "turn.completed", { turnOrigin: "owner" }), row(14, "turn.interrupted", { turnOrigin: "external" }), row(13, "turn.failed")] } });
+    await render();
+    expect(all("project-stream-row").map((r) => r.getAttribute("data-kind"))).toEqual(["turn.interrupted", "turn.failed"]);
+    expect(q("project-stream-include-owner")).toBeNull();
+    const turns = { ...emptyState(), hostId: "local", projectId: "p1", evKinds: ["turn" as const] };
+    await render(turns);
+    const checkbox = q("project-stream-include-owner") as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+    const reads = queries.length;
+    act(() => checkbox.click());
+    expect(checkbox.checked).toBe(true);
+    expect(all("project-stream-row")).toHaveLength(3);
+    expect(queries).toHaveLength(reads); // presentation preference does not restart the host watch
+    act(() => { useActivityPrefs.setState({ includeOwnerTurns: false }); reloadActivityPrefs(); });
+    expect(checkbox.checked).toBe(true);
+    await render(); // All activity stays about autonomous work; preference is retained for Turns.
+    expect(all("project-stream-row")).toHaveLength(2);
+    await render(turns);
+    expect((q("project-stream-include-owner") as HTMLInputElement).checked).toBe(true);
+    expect(all("project-stream-row")).toHaveLength(3);
+  });
+
+  it("hidden live owner rows do not inflate the new-activity pill; external rows still do", async () => {
+    useApp.setState({ features: new Set(["project-events"]) });
+    await render();
+    const scroller = q("project-stream-list")!;
+    scroller.scrollTop = 30;
+    act(() => scroller.dispatchEvent(new Event("scroll")));
+    const emit = (event: ProjectEvent) => act(() => (listeners.get("projectEvents") ?? []).forEach((f) => f({ hostId: "local", watchId: "w1", kind: "event", event } as never)));
+    emit(row(21, "turn.completed", { turnOrigin: "owner" }));
+    expect(q("project-stream-new")).toBeNull();
+    expect(all("project-stream-row")).toHaveLength(2);
+    emit(row(22, "turn.completed", { turnOrigin: "external" }));
+    expect(q("project-stream-new")?.textContent).toBe("project-view.stream.new:1");
+    expect(all("project-stream-row")).toHaveLength(3);
+  });
+
+  it("keeps remote and legacy unknown origins, while hiding a confirmed remote owner turn", async () => {
+    const hosts: string[] = [];
+    S.setStreamDaemon((id) => { hosts.push(id); return daemon as never; });
+    daemon.projectEvents!.mockResolvedValue({ ok: true, value: { projectId: "p1", streamId: "s1", cursor: "pe:20", earliestCursor: "pe:1", order: "newestFirst", hasMore: false, events: [row(15, "turn.completed", { turnOrigin: "owner" }), row(14, "turn.completed", { turnOrigin: "external" }), row(13)] } });
+    act(() => root.render(h(ProjectStream, { data: { ...project(), target: { hostId: "ssh-host-b", projectId: "p1" } } as never, state: emptyState(), setState() {}, now: Date.now() })));
+    await settle();
+    expect(hosts).toContain("ssh-host-b");
+    expect(all("project-stream-row")).toHaveLength(2);
+  });
+
+  it("explains an owner-only empty view instead of claiming the project never had activity", async () => {
+    useApp.setState({ features: new Set(["project-events"]) });
+    daemon.projectEvents!.mockResolvedValue({ ok: true, value: { projectId: "p1", streamId: "s1", cursor: "pe:20", earliestCursor: "pe:1", order: "newestFirst", hasMore: false, events: [row(15, "turn.completed", { turnOrigin: "owner" })] } });
+    await render();
+    expect(host.textContent).toContain("project-view.stream.emptyAutonomous");
+    expect(all("project-stream-row")).toHaveLength(0);
+  });
+
+  it("bounds auto paging through hidden owner-only pages and leaves a working continue button", async () => {
+    useApp.setState({ features: new Set(["project-events"]) });
+    let reads = 0;
+    daemon.projectEvents!.mockImplementation(async () => {
+      const seq = 200 - reads++;
+      return { ok: true, value: { projectId: "p1", streamId: "s1", cursor: "pe:200", earliestCursor: "pe:1", order: "newestFirst", hasMore: true, nextCursor: `pe:${seq - 1}`, events: [row(seq, "turn.completed", { turnOrigin: "owner" })] } };
+    });
+    await render();
+    for (let n = 0; n < 15; n++) await settle();
+    expect(reads).toBe(11);
+    const button = q("project-stream-foot")!.querySelector("button")!;
+    expect(button.textContent).toBe("project-view.stream.keepLooking");
+    act(() => button.click()); await settle();
+    expect(reads).toBe(12);
+  });
+
+  it("leaves continue available with one visible row followed by ten hidden pages", async () => {
+    useApp.setState({ features: new Set(["project-events"]) });
+    let reads = 0;
+    daemon.projectEvents!.mockImplementation(async () => {
+      const seq = 200 - reads++;
+      return { ok: true, value: { projectId: "p1", streamId: "s1", cursor: "pe:200", earliestCursor: "pe:1", order: "newestFirst", hasMore: true, nextCursor: `pe:${seq - 1}`, events: [row(seq, "turn.completed", { turnOrigin: reads === 1 ? "external" : "owner" })] } };
+    });
+    await render();
+    for (let n = 0; n < 15; n++) await settle();
+    expect(reads).toBe(11);
+    expect(all("project-stream-row")).toHaveLength(1);
+    const button = q("project-stream-foot")!.querySelector("button")!;
+    expect(button.textContent).toBe("project-view.stream.keepLooking");
+    act(() => button.click()); await settle();
+    expect(reads).toBe(12);
   });
 
   it("正在进行: open with few items; 停止 needs a second click; unknown items cannot be stopped", async () => {

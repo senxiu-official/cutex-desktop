@@ -6,7 +6,8 @@ import { installContentSelection } from "../lib/contentSelection";
 import "./ownerAlert.css";
 import { isAppLocale, matchAppLocale } from "../../../shared/locales";
 import type { OwnerAlertBridge, OwnerAlertItem, OwnerAlertLocale, OwnerAlertState } from "../../../shared/ownerAlert";
-import { hashColor } from "../lib/avatar";
+import { initialStem, twoLetterInitials } from "../lib/agentInitials";
+import { letterTileRadius, letterTileSize, letterTileText } from "../lib/avatarDefault";
 import { loadTheme } from "../lib/theme";
 import { followStoredFonts } from "../lib/storedFonts";
 import { alertStrings, chimeNotes, pickFirst, refsLine, timeLabel } from "./model";
@@ -72,8 +73,14 @@ function render(): void {
   card.append(el("div", "stripe"));
 
   const head = el("div", "head");
-  const avatar = el("div", "avatar", [...alert.agentName.trim()][0]?.toUpperCase() ?? "?");
-  avatar.style.background = hashColor(alert.agentName);
+  // The agent's letter tile as in the app (components/Avatar, owner 2026-11-01): two letters, no fill, a neutral frame —
+  // this window holds no sidebar, so no project prefix is skipped and the model colour is unknown.
+  const avatar = el("div", "avatar");
+  const edge = letterTileSize(40);
+  const label = letterTileText(twoLetterInitials(initialStem(alert.agentName)), edge);
+  const tile = el("span", "avatar-tile", label.text);
+  Object.assign(tile.style, { width: `${edge}px`, height: `${edge}px`, borderRadius: `${letterTileRadius(edge)}px`, fontSize: `${label.fontSize}px`, letterSpacing: label.letterSpacing });
+  avatar.append(tile);
   const who = el("div", "who");
   const nameRow = el("div", "name-row");
   nameRow.append(el("span", "name", alert.agentName), el("span", `badge badge-${alert.level}`, t.level[alert.level]));

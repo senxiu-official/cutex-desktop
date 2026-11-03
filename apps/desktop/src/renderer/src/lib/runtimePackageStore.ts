@@ -7,8 +7,8 @@
 // connected host (lib/settingsHost) loads that host's list too (`hostId` parameters; default = the
 // focus host) and follows its run events; the periodic refresh stays on the focus host.
 import { create } from "zustand";
-import type { CutexRefusal, HostsState, RuntimePackageRun, RuntimePackagesView, SidebarSnapshot } from "../../../shared/ipc";
-import { api, apiFor, bridge } from "../bridge";
+import type { CutexRefusal, HostsState, RuntimePackageRun, RuntimePackagesView, SessionActionMethod, SidebarSnapshot } from "../../../shared/ipc";
+import { apiFor, bridge } from "../bridge";
 import { createClaudeRuntimeBatch, outdatedClaudeRuntimeAgents, runClaudeRuntimeBatch, type ClaudeRuntimeBatch } from "./claudeRuntimeBatch";
 import { putClaudeRuntime } from "./claudeRepin";
 import { applyRunEvent, applyRunUpdate, asRunEvent, RUN_UPDATED_METHOD, RUNTIME_PACKAGES_FEATURE } from "./runtimePackages";
@@ -40,7 +40,12 @@ interface HostConn {
   sidebar: SidebarSnapshot | null;
 }
 interface AppHandle {
-  getState(): HostConn & { hosts: HostsState | null; byHost: Readonly<Record<string, HostConn>>; refreshHostSidebar(hostId: string): Promise<void> };
+  getState(): HostConn & {
+    hosts: HostsState | null;
+    byHost: Readonly<Record<string, HostConn>>;
+    refreshHostSidebar(hostId: string): Promise<void>;
+    sessionAction(sessionId: string, method: SessionActionMethod, params?: Record<string, unknown>, hostId?: string): Promise<unknown>;
+  };
   subscribe(listener: (state: { features: ReadonlySet<string>; daemon: { kind: string } }, prev: { features: ReadonlySet<string>; daemon: { kind: string } }) => void): () => void;
 }
 let app: AppHandle | null = null;
@@ -67,7 +72,8 @@ const supported = (hostId = activeHostId()) => {
   const c = connOf(hostId);
   return !!c && c.daemon.kind === "connected" && c.features.has(RUNTIME_PACKAGES_FEATURE);
 };
-const daemonOf = (hostId: string) => (hostId === activeHostId() ? api : apiFor(hostId));
+// Never retain the focus-host proxy across asynchronous batch work.
+const daemonOf = (hostId: string) => apiFor(hostId);
 
 function patchHost(hostId: string, patch: Partial<HostRuntimePackages> | ((h: HostRuntimePackages) => Partial<HostRuntimePackages>)): void {
   useRuntimePackages.setState((s) => {
@@ -190,7 +196,13 @@ export async function startRuntimePackageUpgrade(
       patchHost(hostId, { claudeBatch: initial });
       await runClaudeRuntimeBatch(
         initial,
-        daemonOf(hostId),
+        {
+          claudeRuntime: (id) => daemonOf(hostId).claudeRuntime(id),
+          repinClaudeRuntime: (id, target) => daemonOf(hostId).repinClaudeRuntime(id, target),
+          // The store captures generation/connection fences and owns hostBusy retries, feedback
+          // and manual Retry. Every per-agent dispatch keeps the batch's original host.
+          sessionAction: (id, method, params) => app!.getState().sessionAction(id, method, params, hostId),
+        },
         (claudeBatch) => patchHost(hostId, { claudeBatch }),
         (runtime) => putClaudeRuntime(hostId, runtime),
         async (sessionId) => {

@@ -7,6 +7,7 @@ import { getLiveWidth } from "./appearance";
 import { useDeskId } from "./deskContext";
 import { getUiPrefs, setSidebarRailWindowHook, useUiPrefs } from "./prefs";
 import { currentWindow, deskIdOf, windowStore } from "./windowScope";
+import { togglePortraitSidebar, usePortraitOn } from "./portrait";
 import { toggleAutoRail, useSidebarRail } from "./workspaces";
 
 export const DESK_SIDEBAR_KEY = "cutex-desktop.deskSidebar.v1";
@@ -90,7 +91,8 @@ export function toggleDeskSidebarRail(): boolean {
   return true;
 }
 
-setSidebarRailWindowHook(toggleDeskSidebarRail);
+// A portrait window first (lib/portrait: its overlay sidebar, a pref of its own), then a desk's own rail.
+setSidebarRailWindowHook(() => togglePortraitSidebar(currentWindow()) || toggleDeskSidebarRail());
 
 /**
  * This window's sidebar draws its width edge (expanded, not the avatar rail; components/Sidebar sets it while
@@ -110,5 +112,7 @@ export const useSidebarPeek = windowStore(() => create<{ popped: boolean }>(() =
 /** Whether this window's sidebar is collapsed (hidden) now: the window's own choice, two workspaces short of
  * width, or a pane in full screen (§24.13 / §24.16; lib/workspaces useSidebarRail). */
 export function useSidebarCollapsed(): boolean {
-  return useSidebarRail(useSidebarRailPref(), useDeskSidebarWidth() ?? undefined);
+  // Portrait (lib/portrait): the sidebar is never in the flow — hidden, or shown over the stack (components/SidebarPeek).
+  const portrait = usePortraitOn();
+  return useSidebarRail(useSidebarRailPref(), useDeskSidebarWidth() ?? undefined) || portrait;
 }

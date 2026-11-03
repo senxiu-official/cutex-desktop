@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { MAX_IMAGE_BYTES } from "../src/shared/ipc";
 import { dataUrlBytes, imageInputItems, messageImages, sanitizeExtraInput } from "../src/shared/input";
-import { newPendingSteer, reconcilePendingSteers } from "../src/renderer/src/lib/pendingSteers";
+import { newPendingSteer, reconcilePendingSteers } from "../src/renderer/src/lib/legacyDelivery/pendingSteers";
 import { applyEvent, emptyTimeline, entryFromItem, timelineFromThreadRead } from "../src/renderer/src/lib/timeline";
 import { lastAssistantText, timelineToMarkdown } from "../src/renderer/src/lib/transcript";
 

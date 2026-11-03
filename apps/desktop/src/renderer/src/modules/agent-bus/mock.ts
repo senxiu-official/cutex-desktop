@@ -9,7 +9,7 @@
 //   message "m-a1" is refused (message_digest_mismatch).
 import { asStuckDiscarded, asStuckView } from "../../../../shared/agentBusStuck";
 import type { MessageSettlement, MessageSettlementCloseRequest } from "@cutex-desktop/protocol";
-import { MESSAGE_SETTLEMENT_EVENT, MESSAGE_SETTLEMENT_FEATURE } from "../../../../shared/messageSettlement";
+import { MESSAGE_SETTLEMENT_EVENT, MESSAGE_SETTLEMENT_FEATURE, STALE_ACK_SETTLEMENT_FEATURE } from "../../../../shared/messageSettlement";
 import type { ModuleMock } from "../../dev/mockTypes";
 
 const DEFAULT_SECS = 120;
@@ -113,7 +113,7 @@ function wire(row: WireRow, nowSecs: number): Record<string, unknown> {
 }
 
 export const mock: ModuleMock = {
-  features: { new: ["wake-busy-wait", "agent-bus-stuck-messages", MESSAGE_SETTLEMENT_FEATURE] },
+  features: { new: ["wake-busy-wait", "agent-bus-stuck-messages", MESSAGE_SETTLEMENT_FEATURE, STALE_ACK_SETTLEMENT_FEATURE] },
   cutexState: (sessionId) => ({
     ...(params.has("settlement") && sessionId === "scratch" ? { agentBusMessages: rows.filter((r) => r.settlement).map((r) => ({ ...wire(r, Date.now() / 1000), fromCutexSessionId: "mika", toCutexSessionId: "scratch", body: r.contentPreview, deliveryKind: "wake" })) } : {}),
   }),
@@ -138,6 +138,11 @@ export const mock: ModuleMock = {
         },
         minAgeSecs,
       );
+    },
+    async busMessageEvidence({ messageId }) {
+      const row = rows.find(r => r.messageId === messageId);
+      return row ? { ok: true, result: { messageId, settlement: row.settlement ?? null } }
+        : { ok: false, error: { status: 404, code: "message_not_found", message: "Unknown message" } };
     },
     async closeBusMessage(request) {
       await new Promise((r) => setTimeout(r, 350));

@@ -5,7 +5,7 @@
 // 清空. Interrupt-and-send never pauses (cutex submit strategy `interrupt`, or a transient stop that
 // the store resumes right after sending). Pure helpers, unit-tested.
 import type { QueueItem, QueuePause } from "@cutex-desktop/protocol";
-import type { PendingSteer } from "./pendingSteers";
+import type { PendingSteer } from "./legacyDelivery/pendingSteers";
 
 /** Between merged messages (steers merged into one turn, texts put back into the composer). */
 export const MESSAGE_SEPARATOR = "\n\n";

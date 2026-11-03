@@ -1,0 +1,136 @@
+{
+  "schema": "cutex/components-index/v1",
+  "channel": "public-stable",
+  "sequence": 1,
+  "publishedAt": "2026-10-29T00:00:00Z",
+  "components": [
+    {
+      "name": "dsh-runtime",
+      "recommended": "dsh-r3",
+      "releases": [
+        {
+          "version": "dsh-r3",
+          "payload": "adapter-v1",
+          "compatible": {
+            "allCapabilities": [
+              "component-index-v1",
+              "external-runtime-root-v1",
+              "component-dsh-adapter-v1"
+            ]
+          },
+          "assetTag": "component-dsh-runtime-dsh-r3",
+          "platforms": {
+            "windows-x64": {
+              "name": "dsh-runtime-dsh-r3-windows-x64.tar.gz",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size": 1,
+              "signatureName": "dsh-runtime-dsh-r3-windows-x64.tar.gz.minisig"
+            },
+            "linux-x64": {
+              "name": "dsh-runtime-dsh-r3-linux-x64.tar.gz",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size": 1,
+              "signatureName": "dsh-runtime-dsh-r3-linux-x64.tar.gz.minisig"
+            }
+          },
+          "yanked": false,
+          "yankReason": null,
+          "externalRuntime": {
+            "schema": "cutex/external-runtime/v1",
+            "name": "dsh-runtime",
+            "version": "dsh-r3",
+            "payload": "adapter-v1",
+            "externalRoot": {
+              "kind": "npm-prefix",
+              "packages": {
+                "@deepseek-ai/dsh": "0.2.1-rc.3",
+                "@deepseek-ai/dsh-session-format-catalog": "0.2.1-rc.3",
+                "ws": "8.22.0"
+              },
+              "cliEntry": "node_modules/@deepseek-ai/dsh/lib/bin.js",
+              "catalogEntry": "node_modules/@deepseek-ai/dsh-session-format-catalog/lib/index.js"
+            },
+            "node": {
+              "range": ">=24.9.0 <25",
+              "recommended": "24.21.0",
+              "features": [
+                "node:sqlite"
+              ]
+            },
+            "checks": {
+              "rg": false,
+              "nodePty": false
+            },
+            "environment": {
+              "installRoot": "DSH_INSTALL_ROOT"
+            }
+          },
+          "externalRuntimeSha256": "91c61f8240f09e9b964616e4794712e1fefae60b21c9c7fe887c88de70facc4f"
+        }
+      ]
+    },
+    {
+      "name": "kimi-runtime",
+      "recommended": "kimi-r3",
+      "releases": [
+        {
+          "version": "kimi-r3",
+          "payload": "adapter-v1",
+          "compatible": {
+            "allCapabilities": [
+              "component-index-v1",
+              "external-runtime-root-v1",
+              "component-kimi-adapter-v1"
+            ]
+          },
+          "assetTag": "component-kimi-runtime-kimi-r3",
+          "platforms": {
+            "windows-x64": {
+              "name": "kimi-runtime-kimi-r3-windows-x64.tar.gz",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size": 1,
+              "signatureName": "kimi-runtime-kimi-r3-windows-x64.tar.gz.minisig"
+            },
+            "linux-x64": {
+              "name": "kimi-runtime-kimi-r3-linux-x64.tar.gz",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size": 1,
+              "signatureName": "kimi-runtime-kimi-r3-linux-x64.tar.gz.minisig"
+            }
+          },
+          "yanked": false,
+          "yankReason": null,
+          "externalRuntime": {
+            "schema": "cutex/external-runtime/v1",
+            "name": "kimi-runtime",
+            "version": "kimi-r3",
+            "payload": "adapter-v1",
+            "externalRoot": {
+              "kind": "npm-prefix",
+              "packages": {
+                "@moonshot-ai/kimi-code": "2.3.3",
+                "ws": "8.22.0"
+              },
+              "cliEntry": "node_modules/@moonshot-ai/kimi-code/dist/main.mjs"
+            },
+            "node": {
+              "range": ">=24.9.0 <25",
+              "recommended": "24.21.0",
+              "features": [
+                "node:sqlite"
+              ]
+            },
+            "checks": {
+              "rg": true,
+              "nodePty": true
+            },
+            "environment": {
+              "installRoot": "KIMI_INSTALL_ROOT"
+            }
+          },
+          "externalRuntimeSha256": "d6a01e5acd1f9bdabfd382fb600f83bd9fad191782af47b3eeb39cf106e11262"
+        }
+      ]
+    }
+  ]
+}

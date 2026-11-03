@@ -231,6 +231,8 @@ export const frFR: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.shelf.text": "Glissez les onglets d’un {{shelf}} vers un autre, ou vers un espace vide pour créer un nouveau {{shelf}}.\nQuand ils ne tiennent plus, « ⌄ N » affiche tous les onglets du {{shelf}}.",
   "onboarding.guide.tray.title": "La barre de raccourcis",
   "onboarding.guide.tray.text": "Glissez un élément au-delà du séparateur pour l’épingler dans la barre de raccourcis ; ramenez-le pour le désépingler.\nUn clic droit permet d’ajouter un badge ou une note.",
+  "onboarding.guide.portrait.title": "Disposition portrait",
+  "onboarding.guide.portrait.text": "Dans une fenêtre haute, la conversation et sa {{shelf}} s'empilent verticalement. Faites glisser ce séparateur pour les redimensionner, double-cliquez pour réinitialiser ; survolez-le et cliquez sur ⇅ pour les intervertir.\nLa barre latérale se cache au bord gauche de la fenêtre et apparaît quand le pointeur y arrive. Pour rester en paysage, modifiez Paramètres → Apparence → Disposition portrait.",
   "onboarding.guide.service.title": "Liens des services",
   "onboarding.guide.service.text": "Un service est une page ou une API qu’un {{agent}} fait tourner sur l’hôte ; son lien s’ouvre dans l’application.\nL’hôte récupère les services temporaires inactifs ou expirés et leur lien cesse de fonctionner. Pour en garder un, épinglez-le ou rendez-le persistant sur la page Services. Vous pouvez aussi l’y arrêter ou le redémarrer.",
   "onboarding.guide.update.title": "Mises à jour",

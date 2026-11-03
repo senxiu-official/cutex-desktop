@@ -36,10 +36,10 @@ vi.mock("../src/renderer/src/store", () => ({
 const { QueuePanel } = await import("../src/renderer/src/components/QueuePanel");
 const { TurnQueue } = await import("../src/renderer/src/components/TurnQueue");
 const { MessageImages } = await import("../src/renderer/src/components/ImageThumbs");
-const { newOutboxEntry } = await import("../src/renderer/src/lib/outbox");
+const { newOutboxEntry } = await import("../src/renderer/src/lib/legacyDelivery/outbox");
 const { entryFromItem } = await import("../src/renderer/src/lib/timeline");
 const { messageInputItems } = await import("../src/shared/input");
-type PendingSteer = import("../src/renderer/src/lib/pendingSteers").PendingSteer;
+type PendingSteer = import("../src/renderer/src/lib/legacyDelivery/pendingSteers").PendingSteer;
 
 const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 const PNG = `data:image/png;base64,${PNG_B64}`;

@@ -30,7 +30,7 @@ const deferred = <T,>() => {
 const event = () => mocks.listeners.get("hostEvent")!({ hostId: host, envelope: { cutex: { method: "cutex/ask/progress", params: {} } } });
 let stop: () => void;
 let state: ReturnType<typeof appState>;
-const appState = () => ({ hosts: undefined as HostsState | undefined, features: new Set([ASKS_FEATURE]), selectedId: null, selectedHost: null, byHost: { remote: { features: new Set([ASKS_FEATURE]) } }, notify() {} });
+const appState = () => ({ hosts: undefined as HostsState | undefined, features: new Set([ASKS_FEATURE]), selectedId: null as string | null, selectedHost: null as string | null, byHost: { remote: { features: new Set([ASKS_FEATURE]) } }, notify() {} });
 beforeEach(async () => {
   vi.useFakeTimers();
   vi.setSystemTime(1_000_000);
@@ -45,6 +45,111 @@ beforeEach(async () => {
 afterEach(() => { stop(); vi.useRealTimers(); });
 
 describe("delegation refresh load and lifecycle", () => {
+  const fullId = "ask-b036befd8dec42f4972f39575e38ffca";
+  const detail = (revision = 24) => ({ ...row(fullId, revision), targetCutexSessionId: "worker", attempts: [],
+    execution: "answered", hold: null, closed: "completed", answer: { answerId: "ans-final" } });
+
+  it("hydrates an absent card directly, even when capped lists omit the completed delegation", async () => {
+    mocks.ask.mockResolvedValue(detail());
+    await store.loadCardDelegation(host, fullId, "director");
+    expect(mocks.ask).toHaveBeenCalledWith(fullId);
+    expect(mocks.asks).not.toHaveBeenCalled();
+    expect(rows()[fullId]).toMatchObject({ execution: "answered", hold: null, closed: "completed", revision: 24, answerId: "ans-final" });
+  });
+
+  it("hydrates only the card's followed host when the same id exists on the focus host", async () => {
+    state.selectedId = "director";
+    state.selectedHost = "remote";
+    store.useDelegations.setState({ byKey: store.mergeHostRows({}, host, [row(fullId, 3)]) });
+    mocks.ask.mockResolvedValue(detail());
+    await store.loadCardDelegation("remote", fullId, "director");
+    expect(rows("remote")[fullId]).toMatchObject({ closed: "completed", revision: 24 });
+    expect(rows()[fullId]).toMatchObject({ closed: null, revision: 3 });
+  });
+
+  it("resolves a transcript abbreviation before the exact detail request, coalescing card loads", async () => {
+    const list = deferred<unknown[]>();
+    mocks.asks.mockReturnValueOnce(list.promise);
+    mocks.ask.mockResolvedValue(detail());
+    const first = store.loadCardDelegation(host, "delegation-b036be", "director");
+    expect(store.loadCardDelegation(host, "delegation-b036be", "director")).toBe(first);
+    list.resolve([row(fullId, 3)]);
+    await first;
+    expect(mocks.asks).toHaveBeenCalledWith({ requester: "director", limit: 1000 });
+    expect(mocks.ask.mock.calls).toEqual([[fullId]]);
+    expect(rows()[fullId]!.closed).toBe("completed");
+  });
+
+  it("never caches an unresolved or ambiguous short id as deleted, and allows a later retry", async () => {
+    await store.loadCardDelegation(host, "delegation-b036be", "director");
+    expect(mocks.ask).not.toHaveBeenCalled();
+    expect(store.useDelegations.getState().details).toEqual({});
+    mocks.asks.mockResolvedValue([row(fullId), row("ask-b036be00000000000000000000000000")]);
+    await store.loadCardDelegation(host, "delegation-b036be", "director");
+    expect(mocks.ask).not.toHaveBeenCalled();
+    expect(mocks.asks).toHaveBeenCalledTimes(2);
+  });
+
+  it("shares one requester list across different missing cards, then reads each exact delegation", async () => {
+    const otherId = "ask-c1234500000000000000000000000000";
+    const list = deferred<unknown[]>();
+    mocks.asks.mockReturnValueOnce(list.promise);
+    mocks.ask.mockImplementation(async id => ({ ...detail(), askId: id }));
+    const first = store.loadCardDelegation(host, "delegation-b036be", "director");
+    const second = store.loadCardDelegation(host, "delegation-c12345", "director");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.asks).toHaveBeenCalledTimes(1);
+    list.resolve([row(fullId), row(otherId)]);
+    await Promise.all([first, second]);
+    expect(mocks.ask.mock.calls.map(([id]) => id).sort()).toEqual([fullId, otherId].sort());
+    expect(rows()[otherId]!.closed).toBe("completed");
+  });
+
+  it("an unknown-row terminal event hydrates it; a newer event fences an older in-flight snapshot", async () => {
+    const old = deferred<unknown>();
+    mocks.ask.mockReturnValueOnce(old.promise).mockResolvedValue(detail());
+    const emit = (revision: number) => mocks.listeners.get("hostEvent")!({ hostId: host, envelope: { cutex: {
+      method: "cutex/ask/stateChanged", params: { askId: fullId, revision, execution: "answered", hold: null },
+    } } });
+    emit(5);
+    emit(24);
+    expect(mocks.ask).toHaveBeenCalledTimes(1);
+    old.resolve({ ...detail(3), execution: "queued", closed: null, hold: { reason: "heldByRuntime", native: "gate_closed" } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.ask).toHaveBeenCalledTimes(2);
+    expect(rows()[fullId]).toMatchObject({ revision: 24, execution: "answered", hold: null, closed: "completed" });
+  });
+
+  it("a later event retries a prior missing record instead of retaining a cached 404", async () => {
+    await store.loadDelegationDetail(host, fullId);
+    mocks.ask.mockResolvedValue(detail());
+    mocks.listeners.get("hostEvent")!({ hostId: host, envelope: { cutex: {
+      method: "cutex/ask/closed", params: { askId: fullId, revision: 24, closed: "completed" },
+    } } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rows()[fullId]!.closed).toBe("completed");
+  });
+
+  it("a manual card retry invalidates a cached missing detail", async () => {
+    await store.loadCardDelegation(host, fullId, "director");
+    mocks.ask.mockResolvedValue(detail());
+    await store.loadCardDelegation(host, fullId, "director", true);
+    expect(mocks.ask).toHaveBeenCalledTimes(2);
+    expect(rows()[fullId]!.closed).toBe("completed");
+  });
+
+  it("does not merge an old short-id resolution after resetting the host", async () => {
+    const list = deferred<unknown[]>();
+    mocks.asks.mockReturnValueOnce(list.promise);
+    const pending = store.loadCardDelegation(host, "delegation-b036be", "director");
+    await vi.advanceTimersByTimeAsync(0);
+    store.useDelegations.getState().reset();
+    list.resolve([row(fullId)]);
+    await pending;
+    expect(rows()).toEqual({});
+    expect(mocks.ask).not.toHaveBeenCalled();
+  });
+
   it.each([true, false])("settles a rejected helper run (immediate=%s) and permits a later request", async immediate => {
     const run = vi.fn<() => Promise<void>>().mockRejectedValueOnce(new Error("failed read")).mockResolvedValue(undefined);
     const refresh = delegationRefresh(run);

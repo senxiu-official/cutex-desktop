@@ -8,6 +8,7 @@ import { act, createElement as h, useContext } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("../src/renderer/src/modules/app", () => ({ appModules: () => ({ snapshot: () => [] }) }));
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), bridge: { on: () => () => {} }, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
   ...(await importOriginal<object>()),

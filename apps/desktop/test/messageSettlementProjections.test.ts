@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMessageEvent, seedMessages } from "../src/renderer/src/lib/agentMessages";
+import { applyMessageEvent, seedMessages } from "../src/renderer/src/lib/legacyDelivery/agentMessages";
 import { settlementFixture } from "../src/renderer/src/modules/agent-bus/settlementFixture";
 import { MESSAGE_SETTLEMENT_EVENT } from "../src/shared/messageSettlement";
 

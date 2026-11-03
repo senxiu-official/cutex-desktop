@@ -3,13 +3,15 @@
 // (each start spawns a native runtime; cutex serialises launches anyway) and per agent, so one
 // failure never hides the others.
 import type { RestoreCandidate } from "../../../shared/runtimeRestore";
-import { errorText } from "./agentMessages";
+import { errorText } from "./legacyDelivery/agentMessages";
+import { isHostBusyActionPending } from "./hostBusyActions";
 
 export interface RestoreOutcome {
   cutexSessionId: string;
   displayName: string;
-  /** null = online again. */
+  /** null = no local error; pending actions are owned by the global host feedback. */
   error: string | null;
+  pending?: boolean;
 }
 
 /** Start each agent in order; `start` is the ordinary `cutex/runtime/online`. */
@@ -21,12 +23,14 @@ export async function restoreSequentially(
   const outcomes: RestoreOutcome[] = [];
   for (const item of items) {
     let error: string | null = null;
+    let pending = false;
     try {
       await start(item.cutexSessionId);
     } catch (e) {
-      error = errorText(e instanceof Error ? e.message : e) ?? "failed";
+      if (isHostBusyActionPending(e)) pending = true;
+      else error = errorText(e instanceof Error ? e.message : e) ?? "failed";
     }
-    outcomes.push({ cutexSessionId: item.cutexSessionId, displayName: item.displayName, error });
+    outcomes.push({ cutexSessionId: item.cutexSessionId, displayName: item.displayName, error, ...(pending ? { pending } : {}) });
     onProgress?.(outcomes.length, items.length);
   }
   return outcomes;

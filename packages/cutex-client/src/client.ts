@@ -1,7 +1,22 @@
+import type { MobileProfile, ProfileQuota, MobileUsageReport, UsageDimension, MobileService, HumanSessionCreate, HumanAgentCreate } from "./mobileManagement";
 import { userAccessOf } from "./users";
 import { delegationControlRoute, delegationId, requireDelegationCapability } from "./delegation";
 import { DELEGATION_CAPABILITIES, type DelegationTreeQuery, type DelegationTreePage, type DelegationAttempts, type DelegationPolicy, type DelegationGrants, type DelegationApproval, type ProjectRunControl, type DelegationControlRequest, type DelegationOperationResult, type DelegationOperationLookup, type PermanentRetirementReviewRequest, type PermanentRetirementReview, type PermanentRetirementRequest, type AgentArchiveReceipt } from "@cutex-desktop/protocol";
+import { INPUT_DISMISS, INPUT_GET, INPUT_GET_MAX_IDS, INPUT_LEASE_RELEASE, INPUT_LIST, INPUT_RETRY, INPUT_INTERRUPT_SEND } from "@cutex-desktop/protocol";
 import type {
+  InputInterruptSendParams,
+  InputInterruptSendResult,
+  InputDismissParams,
+  InputDismissResult,
+  UserInputQueueMergeParams,
+  UserInputQueueMergeResult,
+  InputGetParams,
+  InputGetResult,
+  InputLease,
+  InputLeaseReleaseParams,
+  InputListParams,
+  InputListResult,
+  InputRetryParams,
   CutexRequestResult,
   EventPage,
   HostInfo,
@@ -28,7 +43,7 @@ import type {
   UserInputSubmitParams,
   UserInputSubmitResult,
 } from "@cutex-desktop/protocol";
-import { messageSettlementCloseBody } from "./messageSettlement";
+import { messageSettlementCloseBody, messageSettlementEvidenceBody, STALE_ACK_SETTLEMENT_FEATURE, type MessageSettlementEvidenceResponse } from "./messageSettlement";
 import type { MessageSettlementCloseRequest, MessageSettlementCloseResponse } from "@cutex-desktop/protocol";
 import type { DaemonEndpoint } from "./endpoint";
 import type { OperatorActionReceipt, OperatorActionRequest, OperatorProjectWorkspace } from "./operators";
@@ -338,6 +353,45 @@ export class CutexClient {
     return body as T;
   }
 
+  // Paired owner devices: reads accept read/chat/full; creation/open require full.
+  profiles(options: ReadOptions = {}): Promise<{ defaultProfile: string | null; profiles: MobileProfile[] }> {
+    return this.request("GET", "/v2/profiles", options);
+  }
+  profileQuota(id: string, options: ReadOptions = {}): Promise<ProfileQuota> {
+    return this.request("GET", `/v2/profiles/${encodeURIComponent(id)}/quota`, options);
+  }
+  usage(query: { from?: string; to?: string; groupBy?: UsageDimension[]; source?: string } = {}, options: ReadOptions = {}): Promise<MobileUsageReport> {
+    return this.request("GET", "/v2/usage", { ...options, query: { from: query.from, to: query.to, groupBy: query.groupBy?.join(","), source: query.source } });
+  }
+  profileQuotaConfig(id: string, options: ReadOptions = {}): Promise<JsonObject> {
+    return this.request("GET", `/v2/profiles/${encodeURIComponent(id)}/quota-config`, options);
+  }
+  usagePrices(options: ReadOptions = {}): Promise<JsonObject> {
+    return this.request("GET", "/v2/usage/prices", options);
+  }
+  usageSources(options: ReadOptions = {}): Promise<JsonObject> {
+    return this.request("GET", "/v2/usage/sources", options);
+  }
+  profilePresets(options: ReadOptions = {}): Promise<JsonObject> {
+    return this.request("GET", "/v2/profile-presets", options);
+  }
+  profileAutoPick(query: Record<string, string> = {}, options: ReadOptions = {}): Promise<JsonObject> {
+    return this.request("GET", "/v2/profile-auto-pick", { ...options, query });
+  }
+  services(options: ReadOptions = {}): Promise<{ hostId: string; services: MobileService[] }> {
+    return this.request("GET", "/v2/services", options);
+  }
+  openService(slug: string): Promise<{ slug: string; url: string; localUrl: string; health: string; service: MobileService }> {
+    return this.request("POST", `/v2/services/${encodeURIComponent(slug)}/open`);
+  }
+  /** Keep requestId on retry; never retry creation with a new identity after a transport failure. */
+  createHumanSession(body: HumanSessionCreate): Promise<{ cutexSessionId: string }> {
+    return this.request("POST", "/v2/human/sessions", { body });
+  }
+  createHumanAgent(body: HumanAgentCreate): Promise<{ cutexSessionId: string }> {
+    return this.request("POST", "/v2/human/agents", { body });
+  }
+
   // ---------- reads ----------
 
   host(options: { signal?: AbortSignal } = {}): Promise<HostInfo> {
@@ -461,6 +515,8 @@ export class CutexClient {
       clientUserMessageId?: string; expectedTurnId?: string; startIfOffline?: boolean; origin?: UserInputSubmitParams["origin"];
       /** Per-submit observer, not sent to the daemon. At most 3 metadata-only events per attempt. */
       onHttpTrace?: SubmitHttpTraceObserver;
+      /** Caller has checked owner-admission-held-v1 (or ownerAdmissionHeldV1). */
+      allowHeld?: boolean;
     } = {},
   ): Promise<UserInputSubmitResult> {
     const params: UserInputSubmitParams = {
@@ -474,6 +530,7 @@ export class CutexClient {
     if (extra.expectedTurnId) params.expectedTurnId = extra.expectedTurnId;
     if (extra.startIfOffline) params.startIfOffline = true;
     if (extra.joinDelegation) params.joinDelegation = extra.joinDelegation;
+    if (extra.allowHeld) params.allowHeld = true;
     // The same requestId on every attempt (the idempotency key); clientUserMessageId is fixed in params.
     const requestId = randomUUID();
     return this.retryWhenFull(async (attempt) => {
@@ -578,6 +635,55 @@ export class CutexClient {
   queueYield(sessionId: string): Promise<QueueYieldResult> {
     const requestId = randomUUID();
     return this.retryWhenFull(() => this.cutex(sessionId, "cutex/userInput/queue/yield", {}, { requestId }));
+  }
+
+  // ---------- input ledger (input-ledger-v1, docs/design/054) ----------
+
+  /** `cutex/input/get`: records by id (1..100), request order; unknown ids in `missing`. Takes no host-wide lock. */
+  inputGet(sessionId: string, inputIds: readonly string[]): Promise<InputGetResult> {
+    if (inputIds.length < 1 || inputIds.length > INPUT_GET_MAX_IDS) {
+      return Promise.reject(new RangeError(`cutex/input/get takes 1..${INPUT_GET_MAX_IDS} inputIds, got ${inputIds.length}`));
+    }
+    const params: InputGetParams = { inputIds: [...inputIds] };
+    return this.cutex(sessionId, INPUT_GET, params);
+  }
+
+  /**
+   * `cutex/input/list`: with `sinceRevision` the records changed after it (`resyncRequired` when compacted
+   * away → read without it); without, every unsettled record plus those settled in `includeSettledSecs`.
+   */
+  inputList(sessionId: string, query: InputListParams = {}): Promise<InputListResult> {
+    const params: InputListParams = {};
+    if (query.sinceRevision !== undefined) params.sinceRevision = query.sinceRevision;
+    if (query.includeSettledSecs !== undefined) params.includeSettledSecs = query.includeSettledSecs;
+    return this.cutex(sessionId, INPUT_LIST, params);
+  }
+
+  /** Server-offered owner action: interrupt and continue this existing input id, under CAS. */
+  inputInterruptSend(sessionId: string, params: InputInterruptSendParams): Promise<InputInterruptSendResult> {
+    return this.cutex(sessionId, INPUT_INTERRUPT_SEND, params);
+  }
+
+  inputRetry(sessionId: string, inputId: string, expectedRev: number): Promise<unknown> {
+    const params: InputRetryParams = { inputId, expectedRev };
+    return this.cutex(sessionId, INPUT_RETRY, params);
+  }
+
+  /** Durable uncertain / waiting dismissal; HTTP success can still contain per-input failures. */
+  inputDismiss(sessionId: string, inputId: string, expectedRev: number): Promise<InputDismissResult> {
+    const params: InputDismissParams = { inputId, expectedRev };
+    return this.cutex(sessionId, INPUT_DISMISS, params);
+  }
+
+  /** Release a stale lease (CAS on the whole lease as last read). */
+  inputLeaseRelease(sessionId: string, expectedLease: InputLease): Promise<unknown> {
+    const params: InputLeaseReleaseParams = { expectedLease };
+    return this.cutex(sessionId, INPUT_LEASE_RELEASE, params);
+  }
+
+  queueMerge(sessionId: string, params: UserInputQueueMergeParams): Promise<UserInputQueueMergeResult> {
+    if (params.items.length < 2 || params.items.length > 20) return Promise.reject(new RangeError("queue/merge takes 2..20 items"));
+    return this.cutex(sessionId, "cutex/userInput/queue/merge", params);
   }
 
   interrupt(sessionId: string, threadId: string, turnId: string): Promise<unknown> {
@@ -1030,6 +1136,14 @@ export class CutexClient {
   }
 
   /** agent-bus-message-settlement-v1. Read an uncertain write before an explicit same-key retry. */
+  async busMessageEvidence(request: { messageId: string }): Promise<MessageSettlementEvidenceResponse> {
+    const body = messageSettlementEvidenceBody(request);
+    const caps = await this.delegationCapabilities();
+    if (!caps?.featureList?.includes(STALE_ACK_SETTLEMENT_FEATURE)) throw new Error("stale ACK settlement unsupported");
+    if (!userAccessOf(caps).isOwner) throw new Error("owner settlement route required");
+    return this.request("POST", "/v2/agent-bus/stuck-messages/evidence", { body, retryable: false });
+  }
+
   async closeBusMessage(request: MessageSettlementCloseRequest): Promise<MessageSettlementCloseResponse> {
     const body = messageSettlementCloseBody(request);
     await this.delegationFeature(DELEGATION_CAPABILITIES.settlement);

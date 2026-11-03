@@ -1,3 +1,5 @@
+import "./lib/debugReact";
+import { DebugMode } from "./components/DebugMode";
 // First: the pane layout starts loading (IndexedDB) while the rest of the app loads.
 import { panesLoaded } from "./lib/paneDbBoot";
 import { StrictMode } from "react";
@@ -78,6 +80,7 @@ const render = () =>
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <I18nProvider>
+        <DebugMode />
         <ErrorBoundary>
           <App />
         </ErrorBoundary>

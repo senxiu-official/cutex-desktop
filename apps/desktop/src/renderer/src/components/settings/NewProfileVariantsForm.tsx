@@ -15,7 +15,7 @@ import { createRequestOf } from "../../lib/profileCreate";
 import { presetById } from "../../lib/profilePresets";
 import { initialRuntimes, newProfilePlan, plannedDefault, previewCompatibility, reasonKey, RUNTIME_LABEL, statusKey, variantStatus, type NewProfileDraft, type NewProfileProvider } from "../../lib/profileVariants";
 import { useProfilePresets } from "../../lib/useProfilePresets";
-import { Button, Checkbox, Details, Notice, Section, Select, SettingRow, SettingsGroup, TextInput, Toggle } from "./Form";
+import { Button, Checkbox, Details, FormFields, Notice, Section, Select, SettingRow, SettingsGroup, TextInput, Toggle } from "./Form";
 import { AddressRow } from "./newProfile/AddressRow";
 import { AuthStep } from "./newProfile/AuthStep";
 import { ProviderCards, ProviderHeader } from "./newProfile/ProviderCards";
@@ -213,7 +213,7 @@ export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialP
   // The first ticked runtime whose component this host still needs (its install entry below step 3).
   const needsInstall = (["dsh", "kimi", "claude"] as const).filter((r) => runtimes.includes(r) && rows.some((x) => x.runtime === r && x.status === "componentNotInstalled")).map((r) => (r === "dsh" ? DSH_RUNTIME_COMPONENT : r === "kimi" ? KIMI_RUNTIME_COMPONENT : CLAUDE_RUNTIME_COMPONENT))[0] ?? null;
   return (
-    <Section
+    <FormFields><Section
       title={t("settings.profiles.new.title")}
       hint={t("variants.new.hint")}
 
@@ -339,6 +339,6 @@ export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialP
         </div>
         </>}
       </div>
-    </Section>
+    </Section></FormFields>
   );
 }

@@ -18,6 +18,7 @@ import {
   runningSummary,
   stopCall,
   toggleGroup,
+  withoutOwnerTurns,
 } from "../src/renderer/src/modules/project-view/stream";
 
 const ev = (seq: number, kind: string, extra: Partial<ProjectEvent> = {}): ProjectEvent => ({
@@ -48,6 +49,18 @@ const item = (over: Partial<BackgroundItem> = {}): BackgroundItem => ({
   state: "running",
   stop: { kind: "native", cutexSessionId: "cutex.a", method: "claude/tasks/stop", params: { threadId: "th", taskId: "t1" } },
   ...over,
+});
+
+describe("owner-started turns", () => {
+  it("hides only confirmed owner turns, across completed/failed/interrupted, keeping external and unknown rows", () => {
+    const rows = [ev(8, "turn.completed", { turnOrigin: "owner" }), ev(7, "turn.failed", { turnOrigin: "owner" }), ev(6, "turn.interrupted", { turnOrigin: "owner" }), ev(5, "turn.completed", { turnOrigin: "external" }), ev(4, "turn.completed"), ev(3, "artifact.published", { turnOrigin: "owner" }), ev(2, "approval.requested"), ev(1, "job.finished")];
+    expect(withoutOwnerTurns(rows, false).map((r) => r.cursor)).toEqual(["pe:5", "pe:4", "pe:3", "pe:2", "pe:1"]);
+    expect(withoutOwnerTurns(rows, true)).toBe(rows);
+  });
+  it("never guesses owner from a local-controller title, agent name, remote id or source event method", () => {
+    const rows = [ev(2, "turn.completed", { agentName: "local-controller", title: "I started this", source: { method: "turn/completed", eventCursor: "remote-cursor" } }), ev(1, "turn.failed", { turnOrigin: "future-source" as never })];
+    expect(withoutOwnerTurns(rows, false)).toBe(rows);
+  });
 });
 
 describe("type chips and kinds=", () => {

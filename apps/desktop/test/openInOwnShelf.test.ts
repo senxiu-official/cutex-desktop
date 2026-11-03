@@ -181,7 +181,10 @@ describe("an open from a pane lands in that pane's Shelf", () => {
     const { tool } = aldenShelf();
     twoWorkspaces();
     const id = opened(sideOpenFrom({ instanceId: tool }, AGENT_TOOL as ItemId, {}, {}));
-    expect(useSide.getState().peers["local|alden"]!.own.instances[id!]!.binding).toEqual({ kind: "agent", hostId: "local", sessionId: "alden" });
+    const own = useSide.getState().peers["local|alden"]!.own;
+    expect(own.instances[id!]!.binding).toEqual({ kind: "agent", hostId: "local", sessionId: "alden" });
+    expect(locate(own, id!)!.page.id).not.toBe(locate(own, tool)!.page.id);
+    expect(locate(own, id!)!.page.shelf).toBe(locate(own, tool)!.page.shelf);
   });
 
   it("a web page's popup opens its new tab in the opener tab's Shelf (not the focused one); unknown opener → focused", () => {

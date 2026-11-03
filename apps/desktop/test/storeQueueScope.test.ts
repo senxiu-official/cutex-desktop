@@ -181,6 +181,366 @@ const queueItem = (queueId: string, clientUserMessageId: string, text: string) =
 const sessionEvent = (id: string, event: EventEnvelope, hostId = "local") => fire("sessionEvent", { hostId, sessionId: id, envelope: event });
 const draftsOf = async () => await import("../src/renderer/src/lib/composerDrafts");
 
+describe("owner-admission-held-v1 delivery", () => {
+  const key = viewKey("local", "a1");
+  const held = { disposition: "held", heldBy: "hostBusy", heldSince: "2026-11-01T00:00:00Z", heldUntil: "2026-11-01T00:01:00Z" };
+  const boot = () => ({ native: { method: "thread/read", result: { thread: { id: "thread-a1", turns: [] } } }, checkpoint: { streamId: "s", sequence: 0, cursor: "c0" }, cutexState: { runtime: { runtimeGeneration: 1 }, userInputQueue: [], pendingServerRequests: [], agentBusMessages: [], agentBusSentMessages: [], ownerNotifications: [] } });
+  const rows = () => store.getState().outbox[key] ?? [];
+  const event = (method: string, params: unknown) => sessionEvent("a1", cutex("a1", `cutex/userInput/${method}`, params));
+  const timeout = (id: string) => event("failed", { clientUserMessageId: id, stage: "admission", error: { source: "cutex", code: "admission_timeout", message: "host busy", retryable: true, details: { reason: "hostBusy" } } });
+  const begin = async () => {
+    mock.responses.set("capabilities", () => ({ featureList: [...FEATURES, "owner-admission-held-v1", "owner-admission-state-v1"] }));
+    mock.responses.set("bootstrap", boot);
+    mock.responses.set("queueList", () => ({ items: [], revision: 1 }));
+    mock.responses.set("submit", () => held);
+    await start(); await store.getState().select("a1"); await settle();
+  };
+  it("keeps a busy held input in one timeline row; stale admission snapshots and timers never resend", async () => {
+    await begin();
+    store.getState().sessions[key]!.timeline.activeTurnId = "running";
+    await store.getState().submit("owner input", "auto");
+    const [entry] = rows();
+    expect(entry).toMatchObject({ state: "held", placement: "turn", text: "owner input", heldBy: "hostBusy" });
+    expect(store.getState().pendingSteers[key] ?? []).toEqual([]);
+    mock.responses.set("queueList", () => ({ revision: 1, items: [], admissionFresh: false, ownerAdmission: { state: "held", reason: "hostBusy", heldCount: 1, heldUntil: held.heldUntil } }));
+    await store.getState().refreshAdmission("a1", "local");
+    expect(store.getState().sessions[key]).toMatchObject({ admissionFresh: false, ownerAdmission: { state: "held", reason: "hostBusy" } });
+    await vi.advanceTimersByTimeAsync(65_000);
+    expect(rows()).toEqual([entry]);
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(1);
+    // No cancellation contract exists: active held inputs cannot be edited or discarded as if unsent.
+    store.getState().editSend("a1", entry!.id, "local");
+    store.getState().discardSend("a1", entry!.id, "local");
+    expect(rows()).toEqual([entry]);
+  });
+  it("settles held → started → native echo, without a second queue row", async () => {
+    await begin(); await store.getState().submit("owner input", "auto");
+    const id = rows()[0]!.id;
+    event("submitted", { clientUserMessageId: id, disposition: "started", turnId: "t1" });
+    expect(rows()).toMatchObject([{ id, state: "confirmed", placement: "turn", turnId: "t1" }]);
+    sessionEvent("a1", envelope("a1", { source: "app_server", native: { kind: "notification", message: { method: "item/completed", params: { threadId: "thread-a1", turnId: "t1", item: { type: "userMessage", id: "u1", clientId: id, content: [{ type: "text", text: "owner input" }] } } } } } as Partial<EventEnvelope>));
+    expect(rows()).toEqual([]);
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(1);
+  });
+  it("a queue read begun before held admission cannot erase the later queued acknowledgement", async () => {
+    await begin(); await store.getState().submit("owner input", "auto");
+    const id = rows()[0]!.id;
+    let release!: (value: unknown) => void;
+    mock.responses.set("queueList", () => new Promise(resolve => { release = resolve; }));
+    const read = store.getState().refreshAdmission("a1", "local");
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    event("queued", queueItem("q1", id, "owner input"));
+    release({ revision: 1, items: [], admissionFresh: true }); await read;
+    expect(rows()).toMatchObject([{ id, state: "confirmed", placement: "queue" }]);
+  });
+  it("settles held → steered in the original row and tracks its persistence receipt", async () => {
+    await begin(); await store.getState().submit("owner input", "auto");
+    const id = rows()[0]!.id;
+    event("submitted", { clientUserMessageId: id, disposition: "steered", turnId: "t1" });
+    expect(rows()).toMatchObject([{ id, state: "confirmed", placement: "turn", acceptedAsSteer: true }]);
+    expect(store.getState().pendingSteers[key]).toMatchObject([{ id, turnId: "t1" }]);
+  });
+  it.each(["started", "queued", "timeout"])("does not regress %s when its event beats the held HTTP reply", async outcome => {
+    await begin();
+    let release!: (value: unknown) => void;
+    mock.responses.set("submit", () => new Promise(resolve => { release = resolve; }));
+    const pending = store.getState().submit("owner input", "auto");
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    const id = rows()[0]!.id;
+    event("held", { ...held, clientUserMessageId: id });
+    if (outcome === "timeout") timeout(id);
+    else if (outcome === "queued") event("queued", queueItem("q1", id, "owner input"));
+    else event("submitted", { clientUserMessageId: id, disposition: "started", turnId: "t1" });
+    release(held); await pending;
+    expect(rows()[0]?.state).toBe(outcome === "timeout" ? "failed" : "confirmed");
+    expect(rows()[0]?.placement).toBe(outcome === "queued" ? "queue" : "turn");
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(1);
+  });
+  it.each(["edit", "discard"])("timeout → owner %s does not resurrect on a late held acknowledgement", async action => {
+    await begin(); await store.getState().submit("owner input", "auto");
+    const id = rows()[0]!.id; timeout(id);
+    expect(rows()).toMatchObject([{ state: "failed", error: expect.stringContaining("没发出去") }]);
+    if (action === "edit") store.getState().editSend("a1", id, "local");
+    else store.getState().discardSend("a1", id, "local");
+    event("held", { ...held, clientUserMessageId: id });
+    expect(rows()).toEqual([]);
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(1);
+  });
+  it("timeout retry preserves identity and the owner's interrupt intent", async () => {
+    await begin(); await store.getState().submit("owner input", "interrupt");
+    const id = rows()[0]!.id; timeout(id);
+    store.getState().retrySend("a1", id, "local"); await settle();
+    const sends = mock.calls.filter(c => c.method === "submit");
+    expect(sends).toHaveLength(2);
+    expect(sends.map(c => c.args[2])).toEqual(["interrupt", "interrupt"]);
+    expect(sends.map(c => (c.args[4] as { clientUserMessageId: string }).clientUserMessageId)).toEqual([id, id]);
+    expect(rows()).toMatchObject([{ id, state: "held" }]);
+  });
+  it("reconnect/resync while held retains the row and consumes the later outcome", async () => {
+    await begin(); await store.getState().submit("owner input", "auto");
+    const id = rows()[0]!.id;
+    fire("sessionResync", { hostId: "local", sessionId: "a1", reason: "reconnect" }); await settle();
+    expect(rows()).toMatchObject([{ id, state: "held", placement: "turn" }]);
+    event("submitted", { clientUserMessageId: id, disposition: "started", turnId: "t2" });
+    expect(rows()).toMatchObject([{ id, state: "confirmed", turnId: "t2" }]);
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(1);
+  });
+  it("resync recovers an admission timeout that happened while disconnected", async () => {
+    await begin(); await store.getState().submit("owner input", "auto");
+    const id = rows()[0]!.id;
+    mock.responses.set("bootstrap", () => ({ ...boot(), checkpoint: { streamId: "s", sequence: 8, cursor: "c8" } }));
+    mock.responses.set("subscribe", (_session, from) => {
+      expect(from).toMatchObject({ streamId: "s", after: "c8", ownerAdmissionReplay: { after: "c0", throughSequence: 8, ids: [id] } });
+      timeout(id);
+    });
+    fire("sessionResync", { hostId: "local", sessionId: "a1", reason: "reconnect" }); await settle();
+    expect(rows()).toMatchObject([{ id, state: "failed", admissionFailed: true }]);
+    expect(mock.calls.filter(c => c.method === "submit")).toHaveLength(1);
+  });
+  it("pending-row interrupt-and-send with held admission issues the stop request even without a new draft", async () => {
+    await begin();
+    store.setState({ features: new Set([...store.getState().features, "queue-pause"]) });
+    store.getState().sessions[key]!.timeline.activeTurnId = "t1";
+    store.setState({ pendingSteers: { [key]: [{ id: "prior-steer", text: "pending input", baseline: 0, imageCount: 0, turnId: "t1", state: "waiting" }] } });
+    mock.responses.set("stopTurn", () => ({ paused: false, alreadyPaused: false, interruptedTurnId: "t1" }));
+    mock.responses.set("bootstrap", () => ({ ...boot(), native: { method: "thread/read", result: { thread: { id: "thread-a1", turns: [{ id: "t1", status: "interrupted", items: [] }] } } } }));
+    await store.getState().interruptAndSendSteers("a1", "local"); await settle();
+    expect(mock.calls.filter(call => call.method === "stopTurn")).toHaveLength(1);
+    expect(mock.calls.filter(call => call.method === "submit").map(call => call.args[1])).toEqual(["pending input"]);
+  });
+  it.each(["missing", "failed", "other-turn", "notLoaded", "summary", "other-thread"])("pending-row interrupt keeps originals on %s history, without resending", async history => {
+    await begin();
+    store.setState({ features: new Set([...store.getState().features, "queue-pause"]) });
+    store.getState().sessions[key]!.timeline.activeTurnId = "t1";
+    store.setState({ pendingSteers: { [key]: [{ id: "prior-steer", text: "pending input", baseline: 0, imageCount: 0, turnId: "t1", state: "waiting" }] } });
+    mock.responses.set("stopTurn", () => ({ paused: true, alreadyPaused: false, interruptedTurnId: "t1" }));
+    mock.responses.set("bootstrap", () => {
+      if (history === "failed") throw Error("read failed");
+      if (history === "missing") return {};
+      if (history === "other-turn") return boot();
+      return { ...boot(), native: { method: "thread/read", result: { thread: { id: history === "other-thread" ? "thread-other" : "thread-a1", turns: [{ id: "t1", status: "interrupted", items: [], itemsView: history === "other-thread" ? "full" : history }] } } } };
+    });
+    await store.getState().interruptAndSendSteers("a1", "local"); await settle();
+    expect(mock.calls.filter(call => ["submit", "queueResume"].includes(call.method))).toEqual([]);
+    expect(store.getState().pendingSteers[key]).toMatchObject([{ id: "prior-steer", state: "checking", checkFailed: true }]);
+    expect(rows()).toEqual([]);
+  });
+  it("pending-row interrupt excludes an already claimed native item from the replacement", async () => {
+    await begin();
+    store.setState({ features: new Set([...store.getState().features, "queue-pause"]) });
+    store.getState().sessions[key]!.timeline.activeTurnId = "t1";
+    store.setState({ pendingSteers: { [key]: ["claimed", "unread"].map(id => ({ id, text: id, baseline: 0, imageCount: 0, turnId: "t1", state: "waiting" as const })) } });
+    mock.responses.set("stopTurn", () => ({ paused: true, alreadyPaused: false, interruptedTurnId: "t1" }));
+    mock.responses.set("bootstrap", () => ({ ...boot(), native: { method: "thread/read", result: { thread: { id: "thread-a1", turns: [{ id: "t1", status: "interrupted", items: [{ type: "userMessage", id: "native-claimed", clientId: "claimed", content: [{ type: "text", text: "claimed" }] }] }] } } } }));
+    await store.getState().interruptAndSendSteers("a1", "local"); await settle();
+    expect(mock.calls.filter(call => call.method === "submit").map(call => call.args[1])).toEqual(["unread"]);
+    expect(mock.calls.filter(call => call.method === "queueResume")).toHaveLength(1);
+  });
+  it("does not resend if stop confirms a different turn", async () => {
+    await begin();
+    store.setState({ features: new Set([...store.getState().features, "queue-pause"]) });
+    store.getState().sessions[key]!.timeline.activeTurnId = "t1";
+    store.setState({ pendingSteers: { [key]: [{ id: "pending", text: "input", baseline: 0, imageCount: 0, turnId: "t1", state: "waiting" }] } });
+    mock.responses.set("stopTurn", () => ({ paused: true, alreadyPaused: false, interruptedTurnId: "newer-turn" }));
+    await expect(store.getState().interruptAndSendSteers("a1", "local")).rejects.toThrow();
+    expect(mock.calls.filter(call => call.method === "submit")).toEqual([]);
+    expect(store.getState().pendingSteers[key]).toMatchObject([{ id: "pending" }]);
+  });
+  it("interrupt-and-send leaves stop and pause transitions to the held worker", async () => {
+    await begin();
+    store.getState().sessions[key]!.timeline.activeTurnId = "t1";
+    store.setState({ pendingSteers: { [key]: [{ id: "prior-steer", text: "already accepted", baseline: 0, imageCount: 0, turnId: "t1", state: "waiting" }] } });
+    await store.getState().interruptAndSend("owner interrupt", [], "a1", "local"); await settle();
+    expect(rows()).toMatchObject([{ state: "held", strategy: "interrupt", text: "owner interrupt" }]);
+    expect(mock.calls.filter(c => c.method === "stopTurn" || c.method === "queueResume")).toEqual([]);
+    expect(store.getState().pendingSteers[key]).toMatchObject([{ id: "prior-steer" }]);
+  });
+});
+
+describe("owner lifecycle actions wait for admission without claiming success",()=>{
+  const busy=()=>Promise.reject(new Error('host_action_busy:{"retryAfterMs":1000}'));
+  it.each(["cutex/runtime/online","cutex/session/retire"] as const)("%s preserves the original fences and resource while busy",async method=>{
+    await start();await store.getState().select("a1");await settle();
+    const original=store.getState().sidebar!.active.find(r=>r.cutexSessionId==="a1")!;
+    let attempts=0;
+    mock.responses.set("sessionAction",()=>++attempts===1?busy():({status:method==="cutex/runtime/online"?"online":undefined}));
+    const action=store.getState().sessionAction("a1",method,{reason:"approved"},"local");
+    for(let i=0;i<20;i++)await Promise.resolve();
+    const state=await import("../src/renderer/src/lib/hostBusyActions");
+    expect(state.useHostBusyActions.getState().rows).toMatchObject([{kind:method==="cutex/runtime/online"?"runtimeStart":"archive",state:"retrying"}]);
+    expect(store.getState().sidebar!.active.find(r=>r.cutexSessionId==="a1")).toBe(original);
+    expect((await import("../src/renderer/src/lib/runtimeStart")).runtimeStartSince("local","a1")).toBeNull();
+    await vi.advanceTimersByTimeAsync(1000);await action;
+    const calls=mock.calls.filter(c=>c.method==="sessionAction");expect(calls).toHaveLength(2);
+    expect(calls[0]!.args).toEqual(calls[1]!.args);
+    expect(state.useHostBusyActions.getState().rows).toEqual([]);
+  });
+  it("delete retains the selected session through exhaustion, then the owner retries the same revision",async()=>{
+    await start();await store.getState().select("a1");await settle();
+    mock.responses.set("deleteSession",busy);
+    const state=await import("../src/renderer/src/lib/hostBusyActions");
+    const result=expect(store.getState().deleteSession("a1",3,"local")).rejects.toBeInstanceOf(state.HostBusyActionExhausted);
+    await vi.advanceTimersByTimeAsync(5200);await result;
+    expect(store.getState().selectedId).toBe("a1");expect(store.getState().sidebar!.active.some(r=>r.cutexSessionId==="a1")).toBe(true);
+    expect(state.useHostBusyActions.getState().rows).toMatchObject([{state:"exhausted"}]);
+    mock.responses.set("deleteSession",()=>({ok:true}));
+    state.useHostBusyActions.getState().rows[0]!.retry();await settle();
+    expect(store.getState().selectedId).toBeNull();
+    const calls=mock.calls.filter(c=>c.method==="deleteSession");expect(calls).toHaveLength(6);
+    expect(calls.every(c=>JSON.stringify(c.args)===JSON.stringify(["a1",3]))).toBe(true);
+    expect(state.useHostBusyActions.getState().rows).toEqual([]);
+  });
+});
+
+describe("offline send-start uses the same visible host-busy lifecycle", () => {
+  async function openOffline() {
+    mock.responses.set("capabilities", () => ({ featureList: [...FEATURES, "offline-submit"] }));
+    const side = sidebarOf([["a1", "Alpha"], ["b2", "Beta"]])();
+    side.active[0]!.runtime.status = "offline";
+    mock.responses.set("local:sidebar", () => side);
+    await start(); await store.getState().select("a1"); await settle();
+    mock.calls.length = 0;
+    return await import("../src/renderer/src/lib/hostBusyActions");
+  }
+  it("honours retryAfterMs and keeps the host, body and client identity through retry", async () => {
+    const state = await openOffline();
+    let attempt = 0;
+    mock.responses.set("submit", () => ++attempt === 1 ? Promise.reject(new Error('host_action_busy:{"retryAfterMs":1700}')) : { disposition: "started", turnId: "online-turn" });
+    const result = store.getState().submit("owner input", "auto", [], { sessionId: "a1", hostId: "local" });
+    for (let n=0;n<20;n++) await Promise.resolve();
+    expect(state.useHostBusyActions.getState().rows).toMatchObject([{ kind: "runtimeStart", state: "retrying" }]);
+    expect(store.getState().outbox[viewKey("local", "a1")]?.[0]?.state).toBe("sending");
+    await vi.advanceTimersByTimeAsync(1699);
+    expect(mock.calls.filter(c=>c.method==="submit")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1); await result;
+    const calls=mock.calls.filter(c=>c.method==="submit");
+    expect(calls).toHaveLength(2); expect(calls[0]).toEqual(calls[1]);
+    expect(calls[0]?.args[3]).toBe(true);
+    expect(state.useHostBusyActions.getState().rows).toEqual([]);
+    expect(store.getState().sessions[viewKey("local", "a1")]?.startError).toBeFalsy();
+  });
+  it("retains input on exhaustion and the dedicated retry completes the original send", async () => {
+    const state = await openOffline();
+    mock.responses.set("submit", () => Promise.reject(new Error('host_action_busy:{"retryAfterMs":1000}')));
+    const result = expect(store.getState().submit("keep this input", "auto", [], { sessionId: "a1", hostId: "local", keepFailed: false })).rejects.toBeInstanceOf(state.HostBusyActionExhausted);
+    await vi.advanceTimersByTimeAsync(7000); await result;
+    const pending=store.getState().outbox[viewKey("local", "a1")]?.[0];
+    expect(pending).toMatchObject({ text: "keep this input", state: "failed" });
+    expect(pending?.errorRaw).toBeFalsy();
+    expect(pending?.error).not.toMatch(/admission_busy|host_action_busy|runtime_mutation_failed/);
+    expect(state.useHostBusyActions.getState().rows).toMatchObject([{ state: "exhausted" }]);
+    mock.responses.set("submit", () => ({ disposition: "started", turnId: "online-turn" }));
+    state.useHostBusyActions.getState().rows[0]!.retry(); await settle();
+    const calls=mock.calls.filter(c=>c.method==="submit");
+    expect(calls).toHaveLength(6); expect(calls.every(c=>JSON.stringify(c)===JSON.stringify(calls[0]))).toBe(true);
+    expect(store.getState().outbox[viewKey("local", "a1")]?.[0]?.state).toBe("confirmed");
+    expect(state.useHostBusyActions.getState().rows).toEqual([]);
+  });
+  it.each(["discard", "edit"])("a pending start retry cannot send after the owner chooses %s", async action => {
+    const state=await openOffline();
+    mock.responses.set("submit", () => Promise.reject(new Error('host_action_busy:{"retryAfterMs":1000}')));
+    const result=expect(store.getState().submit("cancel this input","auto",[],{sessionId:"a1",hostId:"local"})).rejects.toBeInstanceOf(state.HostBusyActionExhausted);
+    await vi.advanceTimersByTimeAsync(7000);await result;
+    const entry=store.getState().outbox[viewKey("local","a1")]![0]!;
+    if(action==="edit") store.getState().editSend("a1",entry.id,"local");
+    else store.getState().discardSend("a1",entry.id,"local");
+    mock.responses.set("submit", () => ({disposition:"started",turnId:"must-not-start"}));
+    state.useHostBusyActions.getState().rows[0]!.retry();await settle();
+    expect(mock.calls.filter(c=>c.method==="submit")).toHaveLength(5);
+    expect(state.useHostBusyActions.getState().rows).toMatchObject([{state:"cancelled"}]);
+  });  it.each(["modern", "legacy"])("an accepted offline input retries only online after %s startFailed", async shape => {
+    const state = await openOffline();
+    mock.responses.set("sessionAction", () => ({ status: "online" }));
+    const queued=queueItem("q-durable", "owner-durable", "already queued");
+    mock.responses.set("queueList", () => ({ items: [queued] }));
+    vi.stubGlobal("crypto", { randomUUID: () => "owner-durable" });
+    mock.responses.set("submit", () => ({ disposition: "queued", queue: queued }));
+    await store.getState().submit("already queued", "auto", [], { sessionId: "a1", hostId: "local" });
+    mock.calls.length = 0;
+    const error=shape==="modern"
+      ? { code: "admission_busy", message: "variable diagnostic", retryable: true, details: { reason: "hostBusy", retryAfterMs: 1700 } }
+      : { code: "runtime_mutation_failed", message: "admission_busy: host_busy: the launch claim check waits for the host authority fence; retry shortly", retryable: true, details: { retryAfterMs: 1700 } };
+    sessionEvent("a1", cutex("a1", "cutex/userInput/startFailed", { error, queueIds: ["q-durable"] }));
+    for (let n=0;n<20;n++) await Promise.resolve();
+    expect(state.useHostBusyActions.getState().rows).toMatchObject([{ kind: "runtimeStart", state: "retrying" }]);
+    expect(store.getState().sessions[viewKey("local", "a1")]?.startError).toBeNull();
+    await vi.advanceTimersByTimeAsync(1699);
+    expect(mock.calls.filter(c=>c.method==="sessionAction")).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1); await settle();
+    const starts=mock.calls.filter(c=>c.method==="sessionAction");
+    expect(starts).toHaveLength(1);
+    expect(starts[0]?.args).toEqual(["a1", "cutex/runtime/online", { expectedRuntimeGeneration: 1, openVisibleTerminal: false }]);
+    expect(mock.calls.filter(c=>c.method==="submit")).toHaveLength(0);
+    expect(store.getState().sessions[viewKey("local", "a1")]?.queue).toEqual([queued]);
+  });
+  it.each([false, true])("a late start failure keeps the original send fence after an owner stop (viewAdvanced=%s)", async viewAdvanced => {
+    await openOffline();
+    const queued=queueItem("q-old", "old-consent", "old input");
+    vi.stubGlobal("crypto", { randomUUID: () => "old-consent" });
+    mock.responses.set("queueList", () => ({ items: [queued] }));
+    mock.responses.set("submit", () => ({ disposition: "queued", queue: queued }));
+    await store.getState().submit("old input", "auto", [], { sessionId: "a1", hostId: "local" });
+    store.getState().sidebar!.active.find(row=>row.cutexSessionId==="a1")!.runtime.runtimeGeneration=2;
+    if(viewAdvanced) store.getState().sessions[viewKey("local", "a1")]!.runtimeGeneration=2;
+    mock.calls.length=0;
+    mock.responses.set("sessionAction", () => { throw new Error("runtime_generation_conflict: owner stopped this launch"); });
+    sessionEvent("a1", cutex("a1", "cutex/userInput/startFailed", { queueIds:["q-old"], error:{code:"admission_busy",message:"busy",retryable:true,details:{reason:"hostBusy",retryAfterMs:1000}} }));
+    for(let n=0;n<20;n++) await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1000); await settle();
+    const calls=mock.calls.filter(c=>c.method==="sessionAction");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args[2]).toMatchObject({expectedRuntimeGeneration:1});
+    expect(mock.calls.filter(c=>c.method==="submit")).toHaveLength(0);
+  });
+  it("an unassociated start failure leaves manual start available without adopting a new fence", async () => {
+    const state=await openOffline();
+    mock.responses.set("queueList", () => ({items:[queueItem("other-q","other-client","other input")]}));
+    sessionEvent("a1", cutex("a1", "cutex/userInput/startFailed", { queueIds:["other-q"], error:{code:"admission_busy",message:"private diagnostic",retryable:true,details:{reason:"hostBusy",retryAfterMs:1000}} }));
+    await settle();
+    expect(mock.calls.filter(c=>c.method==="sessionAction" || c.method==="submit")).toHaveLength(0);
+    const error=store.getState().sessions[viewKey("local","a1")]?.startError;
+    expect(error).toBeTruthy();expect(error).not.toMatch(/private diagnostic|admission_busy|runtime_mutation_failed/);
+    expect(state.useHostBusyActions.getState().rows).toEqual([]);
+  });
+  it("a stopped quick chat does not implicitly launch again while continuing its first task", async () => {
+    await openOffline();
+    await store.getState().newQuickChat();
+    store.setState({pendingChat:{...store.getState().pendingChat!,sessionId:"a1",hostId:"local",applied:{runtime:true,plan:false,goal:false}}});
+    mock.responses.set("submit", () => {throw new Error("session_offline: stopped by owner");});
+    store.getState().queuePendingChat({text:"retained task",images:[],skills:[]});
+    await settle();
+    expect(mock.calls.filter(c=>c.method==="sessionAction")).toHaveLength(0);
+    const sends=mock.calls.filter(c=>c.method==="submit");expect(sends).toHaveLength(1);expect(sends[0]?.args[3]).toBe(false);
+    expect(store.getState().pendingChat?.drafts[0]?.text).toBe("retained task");
+  });  it("creates a quick-chat identity once, retries its separate online step, then sends once", async () => {
+    await start();
+    let created=false, online=false, attempts=0;
+    mock.responses.set("local:sidebar", () => ({ ...sidebarOf([["a1", "Alpha"]])(), active: [resource("a1", "Alpha"), ...(created ? [{ ...resource("quick", "Quick"), runtime: { ...resource("quick", "Quick").runtime, status: online ? "online" : "offline" } }] : [])] }));
+    mock.responses.set("createHumanSession", () => { created=true;return { cutexSessionId: "quick" }; });
+    mock.responses.set("sessionAction", () => {
+      if (++attempts===1) throw new Error('host_action_busy:{"retryAfterMs":1000}');
+      online=true; return { status: "online" };
+    });
+    mock.responses.set("submit", () => ({ disposition: "started", turnId: "quick-turn" }));
+    await store.getState().newQuickChat();
+    store.getState().queuePendingChat({ text: "first task", images: [], skills: [] });
+    for (let n=0;n<80;n++) await Promise.resolve();
+    expect(mock.calls.filter(c=>c.method==="createHumanSession")).toHaveLength(1);
+    expect(mock.calls.find(c=>c.method==="createHumanSession")?.args[0]).toMatchObject({ start: false });
+    expect(mock.calls.filter(c=>c.method==="submit")).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1000); await settle();
+    expect(mock.calls.filter(c=>c.method==="sessionAction")).toHaveLength(2);
+    expect(mock.calls.filter(c=>c.method==="createHumanSession")).toHaveLength(1);
+    expect(mock.calls.filter(c=>c.method==="submit")).toHaveLength(1);
+    expect(store.getState().pendingChat).toBeNull();
+  });  it("a native or unknown refusal is not retried as host contention", async () => {
+    const state = await openOffline();
+    mock.responses.set("submit", () => Promise.reject(new Error("native_request_failed: admission_busy: hostBusy")));
+    await expect(store.getState().submit("do not repeat", "auto", [], { sessionId: "a1", hostId: "local" })).rejects.toThrow("native_request_failed");
+    expect(mock.calls.filter(c=>c.method==="submit")).toHaveLength(1);
+    expect(state.useHostBusyActions.getState().rows).toEqual([]);
+  });
+});
 describe("message settlement refresh keeps server admission authoritative", () => {
   it("removes the closed item using a server re-read while preserving its messaging audit and ignoring a duplicate event", async () => {
     const { settlementFixture, settlementAdmissionFixture } = await import("../src/renderer/src/modules/agent-bus/settlementFixture");
@@ -213,7 +573,7 @@ describe("queue row actions act on the agent they were clicked for", () => {
     await settle();
     mock.calls.length = 0;
     const item = queueItem("q1", "cm-1", "hello");
-    mock.responses.set("queuePromote", () => ({ input: [{ type: "text", text: "hello" }], clientUserMessageId: "cm-1", result: { disposition: "steered", turnId: "t1" } }));
+    mock.responses.set("queuePromote", () => ({ clientUserMessageId: "cm-1", result: { disposition: "steered", turnId: "t1" } }));
     await store.getState().queueSendNow(item, "a1");
     await store.getState().queueRemove(queueItem("q2", "cm-2", "bye"), "a1");
     const calls = mock.calls.filter((c) => c.method === "queuePromote" || c.method === "queueRemove");
@@ -301,7 +661,7 @@ describe("cutex/userInput/submitted for a send still in the outbox", () => {
     await start();
     await store.getState().select("a1");
     await settle();
-    const { newOutboxEntry } = await import("../src/renderer/src/lib/outbox");
+    const { newOutboxEntry } = await import("../src/renderer/src/lib/legacyDelivery/outbox");
     store.setState({ outbox: { [viewKey("local", "a1")]: [newOutboxEntry(null, { id: "cm-q", text: "later", strategy: "queue", placement: "queue" })] } });
     sessionEvent("a1", cutex("a1", "cutex/userInput/submitted", { clientUserMessageId: "cm-q", input: [{ type: "text", text: "later" }], disposition: "started", turnId: "t9" }));
     expect(store.getState().outbox[viewKey("local", "a1")]).toMatchObject([{ id: "cm-q", placement: "turn", state: "confirmed", turnId: "t9", promoted: true }]);
@@ -353,6 +713,15 @@ describe("插话 outcome unknown (owner 2026-10-26): the desktop resyncs and dec
   });
   const userMessage = (id: string, text: string, clientId?: string) => ({ type: "userMessage", id, content: [{ type: "text", text }], ...(clientId ? { clientId } : {}) });
   const running = (items: unknown[] = []) => thread([{ id: "t1", status: "inProgress", items }]);
+  it("uses the CAS-matched queue input when atomic promote returns no input body", async () => {
+    await start();mock.responses.set("bootstrap",running());
+    await store.getState().select("a1");await settle();
+    const extra=[{type:"localImage",path:"/host/image.png"},{type:"skill",name:"review",path:"/host/skill"}];
+    const item={...(queueItem("q-body","cm-body","original text") as object),input:[{type:"text",text:"original text"},...extra]} as never;
+    mock.responses.set("queuePromote",()=>({clientUserMessageId:"cm-body",result:{disposition:"steered",turnId:"t1"}}));
+    await store.getState().queueSendNow(item,"a1","local");
+    expect(store.getState().pendingSteers[viewKey("local","a1")]).toMatchObject([{id:"cm-body",text:"original text",imageCount:1,extra}]);
+  });
   const feedback = async () => {
     const { useQueueInsertFeedback, insertFeedbackOf } = await import("../src/renderer/src/lib/queueInsertFeedback");
     return insertFeedbackOf("local", "a1")(useQueueInsertFeedback.getState());
@@ -576,6 +945,72 @@ describe("插入当前回合 (owner 2026-10-21): toast, and pending inserts surv
   const userMessage = (id: string, text: string, clientId?: string) => ({ type: "userMessage", id, content: [{ type: "text", text }], ...(clientId ? { clientId } : {}) });
   const steer = (id: string, text: string, turnId: string) => ({ id, text, turnId, baseline: 0, imageCount: 0, state: "waiting" as const });
   const KEY = "cutex-desktop.pendingSteers.v1";
+  const runtimeRow = (runtime: "claude" | "codex") => ({ ...resource("a1", "Alpha"), native: { threadId: "thread-a1", ...(runtime === "claude" ? { schema: { protocol: "claude-app-server-subset" } } : {}) } });
+  for (const runtime of ["claude", "codex"] as const) {
+    for (const retry of [false, true]) {
+      for (const early of [false, true]) {
+        for (const echo of [false, true]) {
+          it(`${runtime}: history ${early ? "before" : "after"} ${retry ? "first-click retry" : "normal insert"} reply, ${echo ? "id echo" : "text fallback"}, clears the delivered receipt`, async () => {
+            mock.responses.set("local:sidebar", () => ({ ...sidebarOf([["a1", "Alpha"]])(), active: [runtimeRow(runtime)] }));
+            await start();
+            mock.responses.set("bootstrap", boot([{ id: "t1", status: "inProgress", items: [] }]));
+            await store.getState().select("a1"); await settle();
+            const { withSteerPreflightRetry } = await import("../src/shared/queueSteerRetry");
+            const { CutexApiError } = await import("@cutex-desktop/cutex-client");
+            const record = () => sessionEvent("a1", envelope("a1", { source: "app_server", native: { kind: "notification", message: { method: "item/completed", params: { threadId: "thread-a1", turnId: "t1", item: userMessage("early-user", "现在可以不移除", echo ? "cm-native" : undefined) } } } } as Partial<EventEnvelope>));
+            let attempts = 0;
+            mock.responses.set("queuePromote", () => withSteerPreflightRetry(async () => {
+              if (retry && ++attempts === 1) throw new CutexApiError(409, "steer_unavailable", "kept", true, { reason: "runtimeNoSteer" });
+              if (early) record();
+              return { input: [{ type: "text", text: "现在可以不移除" }], clientUserMessageId: "cm-native", result: { disposition: "steered", turnId: "t1" } };
+            }, () => {}));
+            const sending = store.getState().queueSendNow(queueItem("q-early", "cm-owner", "现在可以不移除"), "a1");
+            if (retry) await vi.advanceTimersByTimeAsync(150);
+            await sending;
+            const { useQueueInsertFeedback, insertFeedbackOf, DELIVERED_FEEDBACK_MS } = await import("../src/renderer/src/lib/queueInsertFeedback");
+            if (!early) {
+              expect(insertFeedbackOf("local", "a1")(useQueueInsertFeedback.getState())).toMatchObject([{ state: "inserted" }]);
+              record();
+            }
+            expect(insertFeedbackOf("local", "a1")(useQueueInsertFeedback.getState())).toMatchObject([{ state: "delivered" }]);
+            expect(store.getState().pendingSteers[viewKey("local", "a1")] ?? []).toEqual([]);
+            await vi.advanceTimersByTimeAsync(DELIVERED_FEEDBACK_MS);
+            expect(insertFeedbackOf("local", "a1")(useQueueInsertFeedback.getState())).toEqual([]);
+          });
+        }
+      }
+    }
+    for (const delivery of ["echo", "text", "answered", "before-stop"] as const) {
+      it(`${runtime}: interrupt-and-send links the old insert receipt to actual delivery (${delivery})`, async () => {
+        mock.responses.set("capabilities", () => ({ featureList: [...FEATURES, "queue-pause"] }));
+        mock.responses.set("local:sidebar", () => ({ ...sidebarOf([["a1", "Alpha"]])(), active: [runtimeRow(runtime)] }));
+        await start();
+        mock.responses.set("bootstrap", boot([{ id: "t1", status: "inProgress", items: [] }]));
+        await store.getState().select("a1"); await settle();
+        mock.responses.set("queuePromote", () => ({ input: [{ type: "text", text: "insert" }], clientUserMessageId: "cm-insert", result: { disposition: "steered", turnId: "t1" } }));
+        await store.getState().queueSendNow(queueItem("q-insert", "cm-insert", "insert"), "a1");
+        if (delivery === "before-stop") mock.responses.set("bootstrap", boot([{ id: "t1", status: "interrupted", items: [userMessage("recorded-before-stop", "insert", "cm-insert")] }]));
+        mock.responses.set("stopTurn", () => ({ paused: true, alreadyPaused: false }));
+        let replacement = "";
+        mock.responses.set("submit", (_id, _text, _strategy, _offline, options) => {
+          replacement = (options as { clientUserMessageId: string }).clientUserMessageId;
+          return { disposition: "started", turnId: "t2" };
+        });
+        await store.getState().interruptAndSend("tail", [], "a1", "local");
+        const { useQueueInsertFeedback, insertFeedbackOf, DELIVERED_FEEDBACK_MS } = await import("../src/renderer/src/lib/queueInsertFeedback");
+        // An accepted replacement is not proof of consumption.
+        if (delivery !== "before-stop") {
+          expect(insertFeedbackOf("local", "a1")(useQueueInsertFeedback.getState())).toMatchObject([{ state: "inserted" }]);
+          if (delivery === "answered") sessionEvent("a1", envelope("a1", { source: "app_server", native: { kind: "notification", message: { method: "turn/completed", params: { threadId: "thread-a1", turn: { id: "t2", status: "completed", items: [{ type: "agentMessage", id: "answer", text: "已记下" }] } } } } } as Partial<EventEnvelope>));
+          else sessionEvent("a1", envelope("a1", { source: "app_server", native: { kind: "notification", message: { method: "item/completed", params: { threadId: "thread-a1", turnId: "t2", item: userMessage("replacement-user", "insert\n\ntail", delivery === "echo" ? replacement : undefined) } } } } as Partial<EventEnvelope>));
+        }
+        expect(insertFeedbackOf("local", "a1")(useQueueInsertFeedback.getState())).toMatchObject([{ state: "delivered" }]);
+        await vi.advanceTimersByTimeAsync(DELIVERED_FEEDBACK_MS);
+        expect(insertFeedbackOf("local", "a1")(useQueueInsertFeedback.getState())).toEqual([]);
+        expect(mock.calls.filter((c) => c.method === "submit")).toHaveLength(1);
+      });
+    }
+  }
   /** A fresh renderer over the same localStorage (the app restarted). */
   async function restart() {
     mock.listeners.clear();
@@ -730,7 +1165,9 @@ describe("插入当前回合 (owner 2026-10-21): toast, and pending inserts surv
     await settle();
     await settle();
     const after = store.getState().pendingSteers[viewKey("local", "a1")]!;
-    expect(after.map((p) => [p.id, p.state])).toEqual([["s-wait", "waiting"], ["s-old", "undelivered"]]);
+    expect(after.map((p) => [p.id, p.state])).toEqual([["s-wait", "waiting"], ["s-old", "checking"]]);
+    // A turn omitted by the loaded page is unread, not proof that it dropped input.
+    expect(after.find(p => p.id === "s-old")?.checkFailed).toBe(true);
     // The other host's inserts are kept for when that agent loads.
     expect(store.getState().pendingSteers[viewKey(WORKSTATION, "w1")]?.map((p) => p.id)).toEqual(["s-w"]);
 

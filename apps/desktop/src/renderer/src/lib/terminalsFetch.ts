@@ -17,12 +17,12 @@ export function terminalsRefreshKey(timeline: TimelineState | null): string {
   let done = 0;
   for (const id of last?.entryIds ?? []) {
     const entry = timeline.entries.get(id);
-    if (entry?.kind !== "tool" || entry.item.type !== "commandExecution") continue;
+    if (entry?.kind !== "tool" || !(entry.item.type === "commandExecution" || (entry.item.type === "dynamicToolCall" && entry.item.namespace === "claude" && entry.item.tool === "Bash"))) continue;
     commands += 1;
     const status = entry.item.status;
     if (status !== "inProgress" && status !== "running") done += 1;
   }
-  return `${timeline.threadId ?? ""}|${timeline.activeTurnId ?? ""}|${last?.id ?? ""}:${last?.status ?? ""}|${commands}:${done}`;
+  return `${timeline.threadId ?? ""}|${timeline.activeTurnId ?? ""}|${last?.id ?? ""}:${last?.status ?? ""}|${commands}:${done}|${timeline.backgroundTerminalsVersion ?? 0}`;
 }
 
 /**

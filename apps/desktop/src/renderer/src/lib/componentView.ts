@@ -76,7 +76,7 @@ export function useHostComponents(hostId: string, active = true): HostComponents
     void loadComponents(hostId);
     return release;
   }, [enabled, hostId]);
-  const busy = !!entry.pending || isOperationRunning(entry.list?.operation) || !!entry.list?.components.some((c) => c.state === "installing" || c.state === "restartPending");
+  const busy = !!entry.pending || isOperationRunning(entry.list?.operation) || isOperationRunning(entry.list?.indexOperation) || !!entry.list?.components.some((c) => c.state === "installing" || c.state === "restartPending");
   useEffect(() => {
     if (!enabled || !busy) return;
     const id = setInterval(() => {

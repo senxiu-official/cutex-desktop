@@ -22,6 +22,8 @@ export function Popover({
   disabled,
   triggerClassName,
   triggerLabel,
+  focusContent = false,
+  keepMounted = false,
 }: {
   trigger: ReactNode;
   children: (close: () => void) => ReactNode;
@@ -39,6 +41,10 @@ export function Popover({
   disabled?: boolean;
   triggerClassName?: string;
   triggerLabel?: string;
+  /** Focus a row action panel, retaining keyboard access to its confirmation form. */
+  focusContent?: boolean;
+  /** Retain an action's confirmation/pending state when its panel is dismissed. */
+  keepMounted?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -49,7 +55,7 @@ export function Popover({
   const close = () => setOpen(false);
   useTrackOverlay(open);
   const win = useOwnerWindow();
-  const doc = win.document;
+  const doc = win?.document;
   useLayoutEffect(() => {
     if (!open || !fitViewport) return;
     const fit = () => {
@@ -60,12 +66,20 @@ export function Popover({
       const top = Math.max(16, Math.min(anchor.top - box.height - 6, win.innerHeight - box.height - 16));
       setPosition((old) => old.left === left && old.top === top ? old : { left, top });
     };
+    // Scroll events are also emitted by timeline follow-output and browser
+    // anchoring. Only an ancestor can move this trigger; unrelated streams
+    // must neither dismiss the panel nor cause repeated layout measurements.
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      if (target === doc || target === event.currentTarget || (target && "nodeType" in target && (target as Node).contains(ref.current))) fit();
+    };
     fit(); win.addEventListener("resize", fit);
+    win.addEventListener("scroll", onScroll, true);
     const observer = resizeObserverFor(ref.current, fit);
     if (ref.current) observer?.observe(ref.current);
     if (panel.current) observer?.observe(panel.current);
-    return () => { win.removeEventListener("resize", fit); observer?.disconnect(); };
-  }, [open, fitViewport, width, align, win]);
+    return () => { win.removeEventListener("resize", fit); win.removeEventListener("scroll", onScroll, true); observer?.disconnect(); };
+  }, [open, fitViewport, width, align, win, doc]);
   useEffect(() => {
     if (!openSignal) return;
     onOpen?.();
@@ -84,22 +98,48 @@ export function Popover({
       if (e.key === "Escape") setOpen(false);
       else if (onKey?.(e, close)) e.preventDefault();
     };
-    const onScroll = (event: Event) => {
+    // Dismiss on the user's outside scroll gesture, never on a programmatic
+    // scroll (the same distinction as contextMenu.watchMenuDismiss).
+    const onUserScroll = (event: Event) => {
+      if (doc.querySelector("dialog[open]")) return;
       if (!menuLayerContains(layers, event.target)) setOpen(false);
     };
+    const scrollOptions = { capture: true, passive: true } as const;
     doc.addEventListener("mousedown", onDown);
     doc.addEventListener("keydown", onKeyDown);
-    win.addEventListener("scroll", onScroll, true);
+    doc.addEventListener("wheel", onUserScroll, scrollOptions);
+    doc.addEventListener("touchmove", onUserScroll, scrollOptions);
     return () => {
       doc.removeEventListener("mousedown", onDown);
       doc.removeEventListener("keydown", onKeyDown);
-      win.removeEventListener("scroll", onScroll, true);
+      doc.removeEventListener("wheel", onUserScroll, scrollOptions);
+      doc.removeEventListener("touchmove", onUserScroll, scrollOptions);
     };
   }, [open, onKey, doc, layers]);
-  const content = open ? <div
+  useEffect(() => {
+    if (!open || !focusContent) return;
+    const triggerButton = ref.current?.querySelector("button");
+    const focusable = () => Array.from(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), summary, [tabindex="0"]') ?? []);
+    focusable()[0]?.focus();
+    const onPanelKey = (event: KeyboardEvent) => {
+      if (isImeComposing(event) || event.key !== "Tab") return;
+      const items = focusable();
+      const first = items[0], last = items.at(-1);
+      if (event.shiftKey && doc.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && doc.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    const element = panel.current;
+    element?.addEventListener("keydown", onPanelKey);
+    return () => {
+      element?.removeEventListener("keydown", onPanelKey);
+      if (doc.activeElement === doc.body || element?.contains(doc.activeElement)) triggerButton?.focus();
+    };
+  }, [open, focusContent, doc]);
+  const content = open || keepMounted ? <div
     ref={panel}
+    hidden={!open}
     style={{ ...(height ? { height, maxHeight: "calc(100dvh - 9rem)" } : { maxHeight: "min(24rem, calc(100dvh - 32px))" }), ...(fitViewport ? { position: "fixed", ...position, right: "auto", bottom: "auto", maxWidth: "calc(100vw - 32px)", minWidth: "min(14rem, calc(100vw - 32px))" } : {}) }}
-    data-popover=""
+    data-popover={open ? "" : undefined}
     className={`absolute bottom-full z-[51] mb-1.5 max-h-96 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl ${width} ${align === "right" ? "right-0" : "left-0"}`}
   ><MenuLayersContext.Provider value={layers}>{children(close)}</MenuLayersContext.Provider></div> : null;
   return (
@@ -108,6 +148,7 @@ export function Popover({
         type="button"
         disabled={disabled}
         aria-label={triggerLabel}
+        aria-expanded={open}
         title={triggerTitle}
         onClick={() => {
           if (!open) onOpen?.();
@@ -117,7 +158,7 @@ export function Popover({
       >
         {trigger}
       </button>
-      {fitViewport && content ? createPortal(content, doc.body) : content}
+      {fitViewport && content && doc ? createPortal(content, doc.body) : content}
     </div>
   );
 }

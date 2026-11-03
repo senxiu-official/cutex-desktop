@@ -6,7 +6,7 @@ import { createElement as h } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentMessageRecord } from "../src/renderer/src/lib/agentMessages";
+import type { AgentMessageRecord } from "../src/renderer/src/lib/legacyDelivery/agentMessages";
 
 const fx = vi.hoisted(() => ({ actions: [] as [string, string][] }));
 

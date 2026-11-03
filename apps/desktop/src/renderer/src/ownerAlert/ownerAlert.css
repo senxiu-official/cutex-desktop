@@ -99,10 +99,18 @@ body {
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  color: #fff;
-  font-size: 18px;
-  font-weight: 700;
+}
+/* The agent letter tile (components/Avatar): no fill, readable ink, a neutral 1 px frame. */
+.avatar-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  color: color-mix(in oklab, var(--fg) 84%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--fg) 12%, transparent);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
 .who {
   min-width: 0;

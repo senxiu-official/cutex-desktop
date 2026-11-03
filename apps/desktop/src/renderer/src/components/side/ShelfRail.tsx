@@ -2,7 +2,7 @@ import { isImeComposing } from "../../lib/ime";
 // A Shelf's Shelf Rail (docs/desktop-modules.md §24.12; canvas principles §6; prototype
 // .claude/preview-shelves.html scenario A): a column of page buttons on the Shelf's outer edge (or inner,
 // per Shelf) — each the page's icon with its name as tooltip (Alt+n), the page in view marked — then ＋ (a
-// new page, ≤ 9) and, at the bottom, the collapse button and ⋯ (the Shelf's menu). A collapsed Shelf (owner
+// new page, ≤ 50) and, at the bottom, the collapse button and ⋯ (the Shelf's menu). A collapsed Shelf (owner
 // 2026-10-21; prototype .claude/preview-design-v1.html §3 a) is this rail only, on its own backdrop, no page
 // marked: a page button expands the Shelf to that page; the page in view of an expanded Shelf does nothing (owner
 // 2026-10-22) — the avatar at the top is the toggle (ShelfAvatar: click = 收起 / 展开, right-click = the Shelf's menu). Right-click a page button: 重命名 / 换图标 /
@@ -10,11 +10,14 @@ import { isImeComposing } from "../../lib/ime";
 // 0.4 s shows the page; data-shelf-page / data-shelf-add). The rename / icon popover opens beside a page.
 // Shelf Rail 常驻 (owner 2026-10-21, default on): a closed tool area's Shelves draw this rail as collapsed (a page
 // button opens it to that page); an empty Shelf draws EmptyShelfRail (the avatar + ＋ = the launchers).
+// Portrait (lib/portrait RailEdgeContext, owner 2026-10-30): the same rail drawn horizontally across its Shelf's edge toward
+// the conversation — the avatar, the page buttons in a row, ⋯ at the far end; the page in view marked on the edge toward
+// the panes. Landscape (no context) draws exactly as before.
 import { shelfAvatarMenu, shelfAvatarTip, shelfToggleEffect, type ShelfOwner } from "../../lib/shelfAvatar";
 import { useForetell, withHandlers } from "../../lib/foretell";
 import { focusPeer } from "../../lib/shelfSource";
 import { toggleShelfGrow } from "../../lib/panelGrow";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pin, Plus, X } from "lucide-react";
 import { useI18n } from "../../i18n";
@@ -41,12 +44,18 @@ import { addPage, closePagePopover, paneIconClick, railPageClickNow, renamePageT
 import { CountBadge } from "../../components/Tag";
 import { digitBindingLabel } from "../../lib/keybindings";
 import { SelectionMark } from "../SelectionMark";
+import { RoomFoldedContext, STACK_RAIL_H, useRailEdge } from "../../lib/portrait";
+import { shelfCollapseForetell } from "../../lib/menuForetells";
 import { isElement, isNode, ownerWindowOf } from "../../lib/ownerWindow";
+import { useRailScroll } from "../../lib/railScroll";
+
+/** The owner avatar's wrapper on a horizontal rail (portrait): the avatar, then a short vertical separator. */
+const OWNER_ACROSS = "mr-0.5 flex shrink-0 flex-row items-center gap-1 pl-0.5";
 
 const BTN = "relative flex size-[34px] shrink-0 items-center justify-center rounded-ctl text-muted transition-[background,color,transform] duration-(--motion-short) ease-(--ease-standard) hover:bg-hover hover:text-foreground";
 
 /** The rename / icon popover beside a page button. */
-function PagePopover({ page, index, anchor, toward }: { page: SidePage; index: number; anchor: HTMLElement; toward: "left" | "right" }) {
+function PagePopover({ page, index, anchor, toward }: { page: SidePage; index: number; anchor: HTMLElement; toward: "left" | "right" | "up" | "down" }) {
   const win = ownerWindowOf(anchor);
   const { t } = useI18n();
   const fresh = usePagePopover((s) => s.fresh);
@@ -58,8 +67,10 @@ function PagePopover({ page, index, anchor, toward }: { page: SidePage; index: n
     const r = anchor.getBoundingClientRect();
     const w = box.current?.offsetWidth ?? 248;
     const h = box.current?.offsetHeight ?? 200;
-    const left = toward === "left" ? r.left - w - 8 : r.right + 8;
-    setPos({ left: Math.max(8, Math.min(left, win.innerWidth - w - 8)), top: Math.max(8, Math.min(r.top - 6, win.innerHeight - h - 8)) });
+    // A horizontal rail (portrait): under the page button, or above it when the rail is at its Shelf's bottom.
+    const left = toward === "left" ? r.left - w - 8 : toward === "right" ? r.right + 8 : r.left - 6;
+    const top = toward === "down" ? r.bottom + 8 : toward === "up" ? r.top - h - 8 : r.top - 6;
+    setPos({ left: Math.max(8, Math.min(left, win.innerWidth - w - 8)), top: Math.max(8, Math.min(top, win.innerHeight - h - 8)) });
   }, [anchor, toward, win]);
   useEffect(() => {
     input.current?.focus();
@@ -142,10 +153,11 @@ export function shelfToggleIcon(side: ShelfSide, collapsed: boolean) {
  */
 export function RailOwner({ hostId, sessionId, onClick }: { hostId: string; sessionId: string | null; onClick?: () => void }) {
   const session = useConvSession(hostId, sessionId);
+  const across = useRailEdge() !== null;
   if (!session) return null;
   const avatar = <Avatar name={session.displayName} avatar={session.avatar} seed={session.cutexSessionId} size={20} />;
   return (
-    <span data-shelf-owner={session.cutexSessionId} title={session.displayName} className="mb-0.5 flex shrink-0 flex-col items-center gap-1 pt-0.5">
+    <span data-shelf-owner={session.cutexSessionId} title={session.displayName} className={across ? OWNER_ACROSS : "mb-0.5 flex shrink-0 flex-col items-center gap-1 pt-0.5"}>
       {onClick ? (
         <button type="button" onClick={onClick} aria-label={session.displayName} className="rounded-full">
           {avatar}
@@ -153,7 +165,7 @@ export function RailOwner({ hostId, sessionId, onClick }: { hostId: string; sess
       ) : (
         avatar
       )}
-      <span aria-hidden className="h-px w-5 bg-border" />
+      <span aria-hidden className={across ? "h-5 w-px bg-border" : "h-px w-5 bg-border"} />
     </span>
   );
 }
@@ -167,11 +179,15 @@ export function RailOwner({ hostId, sessionId, onClick }: { hostId: string; sess
 export function ShelfAvatar({ shelfId, owner, collapsed, side = "right", pinned = false, peerKey = null }: { shelfId: string; owner: { hostId: string; sessionId: string } | null; collapsed: boolean; side?: ShelfSide; /** The page in view is pinned (固定, `shared`): no single agent's Shelf. */ pinned?: boolean; peerKey?: string | null }) {
   const session = useConvSession(owner?.hostId ?? "", owner?.sessionId ?? null);
   const who: ShelfOwner | null = owner && session ? { hostId: owner.hostId, sessionId: owner.sessionId, name: session.displayName } : null;
-  const fh = useForetell(() => shelfToggleEffect(shelfId).foretell);
+  // Portrait (P4): a rail folded only for lack of room in the band — a click shows that Shelf (SideArea showRoomFolded),
+  // so it previews that, not 「收成 Rail」 (its layout keeps it expanded).
+  const roomFolded = useContext(RoomFoldedContext);
+  const fh = useForetell(() => (roomFolded ? shelfCollapseForetell(side, true) : shelfToggleEffect(shelfId).foretell));
   const tip = shelfAvatarTip(who, collapsed, !who && pinned);
   const Toggle = shelfToggleIcon(side, collapsed);
+  const across = useRailEdge() !== null;
   return (
-    <span data-shelf-owner={who?.sessionId ?? ""} className="mb-0.5 flex shrink-0 flex-col items-center gap-1 pt-0.5">
+    <span data-shelf-owner={who?.sessionId ?? ""} className={across ? OWNER_ACROSS : "mb-0.5 flex shrink-0 flex-col items-center gap-1 pt-0.5"}>
       <button
         type="button"
         data-shelf-avatar={shelfId}
@@ -198,7 +214,7 @@ export function ShelfAvatar({ shelfId, owner, collapsed, side = "right", pinned 
           <Toggle size={15} />
         )}
       </button>
-      <span aria-hidden className="h-px w-5 bg-border" />
+      <span aria-hidden className={across ? "h-5 w-px bg-border" : "h-px w-5 bg-border"} />
     </span>
   );
 }
@@ -226,7 +242,11 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
   const side = at ?? shelf.side;
   const atWindowEdge = shelf.options.railPlacement === "outer";
   const markRight = (side === "right") === atWindowEdge;
-  const toward: "left" | "right" = side === "right" ? "left" : "right";
+  // Portrait: across the Shelf's top (or bottom) edge; the page in view marked on the edge toward the panes.
+  const edge = useRailEdge();
+  const pageLane = useRef<HTMLDivElement>(null);
+  useRailScroll(pageLane, shown, pages.map(p => `${p.id}:${p.cards.length}`).join("|"), !!edge, dragging);
+  const toward: "left" | "right" | "up" | "down" = edge === "top" ? "down" : edge === "bottom" ? "up" : side === "right" ? "left" : "right";
   const kindIcon = (kind: string) => registry.get(kind as ItemId)?.item.icon ?? null;
   const popPage = popover ? findPage(useSide.getState().layout, popover) : null;
   const popIndex = popPage ? pages.findIndex((p) => p.id === popPage.id) + 1 : 0;
@@ -245,9 +265,12 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
         else toggleShelfGrow(shelf.id);
       }}
       // Collapsed it fills the Shelf's card; expanded it is a full-height card of its own (Rail look A, shelfCard.css).
-      className={`flex shrink-0 flex-col items-center gap-[3px] py-1 ${collapsed ? "min-w-0 flex-1" : "shelf-rail-card w-10"}`}
+      data-shelf-rail-edge={edge ?? undefined}
+      className={edge ? `flex shrink-0 flex-row items-center gap-[3px] px-1 ${collapsed ? "min-h-0 min-w-0 flex-1" : "shelf-rail-card h-10 min-w-0"}` : `flex min-h-0 max-h-full shrink-0 flex-col items-center gap-[3px] py-1 ${collapsed ? "min-w-0 flex-1" : "shelf-rail-card w-10"}`}
     >
       {owner}
+      <div ref={pageLane} data-shelf-rail-pages data-native-scrollbar
+        className={edge ? "shelf-rail-pages flex min-w-0 flex-[0_1_auto] items-center gap-[3px] overflow-x-auto overflow-y-hidden px-1" : "shelf-rail-pages flex min-h-0 w-full flex-[0_1_auto] flex-col items-center gap-[3px] overflow-x-hidden overflow-y-auto py-1"}>
       {pages.map((page, k) => {
         // Icon, name and tooltip: what opens (lib/sideLayout pageAsShown).
         const seen = ctx ? pageAsShown(layout, page, ctx) : page;
@@ -263,7 +286,7 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
         }
         const attention = page.cards.reduce((n, c) => n + c.tabs.reduce((m, id) => m + (tabInfo[id]?.attention ?? 0), 0), 0);
         const busy = !attention && page.cards.some((c) => c.tabs.some((id) => tabInfo[id]?.busy));
-        const pageKey = k < 9 ? digitBindingLabel("shelfPage", k + 1) : "";
+        const pageKey = k === pages.length - 1 ? digitBindingLabel("shelfPage", 9) : k < 8 ? digitBindingLabel("shelfPage", k + 1) : "";
         const keyTip = pageKey ? `${name}  ·  ${pageKey}` : name;
         // Owner 2026-10-23: where the page shows (a shared page: every workspace), and — on hover only — which of its
         // panes are empty for this agent (empty slots, components/side/EmptySlot) and whose things they hold.
@@ -306,7 +329,9 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
               data-shelf-capsule={multi ? "" : undefined}
               style={hot === page.id ? hotTint : undefined}
               className={
-                multi
+                multi && edge
+                  ? `shelf-capsule relative flex h-[30px] shrink-0 flex-row items-center gap-[3px] rounded-card px-1 text-muted transition-[background,color,box-shadow,transform] duration-(--motion-short) ease-(--ease-standard) ${on ? "bg-surface text-foreground" : ""} ${hot === page.id ? hotLook : ""}`
+                  : multi
                   ? `shelf-capsule relative flex w-[30px] shrink-0 flex-col items-center gap-[3px] rounded-card py-1 text-muted transition-[background,color,box-shadow,transform] duration-(--motion-short) ease-(--ease-standard) ${on ? "bg-surface text-foreground" : ""} ${hot === page.id ? hotLook : ""}`
                   : `${BTN} ${on ? "bg-surface text-foreground shadow-e1" : ""} ${hot === page.id ? hotLook : ""} ${on && focused === page.id ? "ring-1 ring-accent/30" : ""}`
               }
@@ -338,7 +363,11 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
               ) : (
                 <Icon size={17} />
               )}
-              <SelectionMark level={on ? "on" : "off"} className={`rounded-full ${markRight ? "-right-[3px]" : "-left-[3px]"}`} on="h-4 bg-foreground" dim="h-2 bg-foreground" />
+              {edge ? (
+                <SelectionMark horizontal level={on ? "on" : "off"} className={`rounded-full ${edge === "top" ? "-bottom-[3px]" : "-top-[3px]"}`} on="w-4 bg-foreground" dim="w-2 bg-foreground" />
+              ) : (
+                <SelectionMark level={on ? "on" : "off"} className={`rounded-full ${markRight ? "-right-[3px]" : "-left-[3px]"}`} on="h-4 bg-foreground" dim="h-2 bg-foreground" />
+              )}
               {attention > 0 && <CountBadge tone="danger" count={attention} max={9} className="absolute -top-1 -right-1" />}
               {busy && <span className="absolute right-1 bottom-1 size-1.5 animate-pulse rounded-full bg-ok" />}
               {/* Design 017: something arrived on this page while its Shelf stayed folded — a flash, then a dot until it is opened. */}
@@ -363,6 +392,7 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
           </div>
         );
       })}
+      </div>
       {all < MAX_SHELF_PAGES && (
         <button
           data-shelf-add={shelf.id}
@@ -371,14 +401,17 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
           onClick={() => addPage(shelf.id)}
           data-shelf-add-armed={dragging ? "" : undefined}
           style={hotAdd ? hotTint : undefined}
-          className={`mt-[3px] flex w-[30px] shrink-0 items-center justify-center rounded-ctl border-[1.5px] border-dashed text-subtle transition-[transform,height,border-color] hover:bg-hover hover:text-foreground ${dragging ? "h-10 border-accent/70 text-caption/[inherit] leading-tight text-accent" : "h-[30px] border-subtle/45"} ${hotAdd ? `border-accent ${hotLook}` : ""}`}
+          className={
+            edge
+              ? `ml-[3px] flex h-[30px] shrink-0 items-center justify-center rounded-ctl border-[1.5px] border-dashed text-subtle transition-[transform,width,border-color] hover:bg-hover hover:text-foreground ${dragging ? "border-accent/70 px-2 text-caption/[inherit] leading-tight text-accent" : "w-[30px] border-subtle/45"} ${hotAdd ? `border-accent ${hotLook}` : ""}`
+              : `mt-[3px] flex w-[30px] shrink-0 items-center justify-center rounded-ctl border-[1.5px] border-dashed text-subtle transition-[transform,height,border-color] hover:bg-hover hover:text-foreground ${dragging ? "h-10 border-accent/70 text-caption/[inherit] leading-tight text-accent" : "h-[30px] border-subtle/45"} ${hotAdd ? `border-accent ${hotLook}` : ""}`
+          }
         >
           {/* Design 038: while a page / pane is dragged the ＋ says what a drop there does. */}
           {dragging ? t("shelf.dnd.newPageSlot") : <Plus size={14} />}
         </button>
       )}
-      <span className="flex-1" />
-      <button data-shelf-menu={shelf.id} title={t("shelf.menu")} aria-label={t("shelf.menu")} onClick={(e) => openMenuFrom(e.currentTarget, shelfMenu(shelf.id))} className={BTN}>
+      <button data-shelf-menu={shelf.id} title={t("shelf.menu")} aria-label={t("shelf.menu")} onClick={(e) => openMenuFrom(e.currentTarget, shelfMenu(shelf.id))} className={`${BTN} ${edge ? "ml-auto" : "mt-auto"}`}>
         <MoreHorizontal size={16} />
       </button>
       {popPage && popIndex > 0 && buttons.current[popPage.id] && <PagePopover key={popPage.id} page={popPage} index={popIndex} anchor={buttons.current[popPage.id]!} toward={toward} />}
@@ -395,6 +428,26 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
 export function EmptyShelfRail({ hostId, sessionId, at, order, focus = null, paneId = null }: { hostId: string; sessionId: string; at: ShelfSide; order?: number; focus?: (() => void) | null; paneId?: string | null }) {
   const { t } = useI18n();
   const tip = t("convHeader.shelfLaunch");
+  const edge = useRailEdge();
+  // Portrait (lib/portrait): a 40 px bar across the stack's end; at the stack's top (swapped) it leaves no tray room under it.
+  if (edge)
+    return (
+      <div data-side-root data-shelf-box={at} data-shelf-rail-empty={at} data-ws-shelf={paneId ?? undefined} className="relative flex shrink-0" style={{ height: STACK_RAIL_H, order, marginBottom: edge === "bottom" ? 0 : undefined }}>
+        <nav aria-label={t("shelf.emptyRail")} data-shelf-card="" data-shelf-collapsed="" data-shelf-rail-edge={edge} className="shelf-card flex min-w-0 flex-1 flex-row items-center gap-[3px] shelf-rail-card rounded-xl border border-card-border px-1">
+          <RailOwner hostId={hostId} sessionId={sessionId} onClick={focus ?? undefined} />
+          <button
+            data-shelf-rail-launch=""
+            title={tip}
+            aria-label={tip}
+            aria-haspopup="menu"
+            onClick={(e) => openMenuFrom(e.currentTarget, [...shelfLauncherMenu(focus), ...panelGuideTail({ panel: "shelf", paneId, hostId, sessionId })])}
+            className="ml-[3px] flex size-[30px] shrink-0 items-center justify-center rounded-ctl border-[1.5px] border-dashed border-subtle/45 text-subtle hover:bg-hover hover:text-foreground"
+          >
+            <Plus size={14} />
+          </button>
+        </nav>
+      </div>
+    );
   return (
     <div data-side-root data-shelf-box={at} data-shelf-rail-empty={at} data-ws-shelf={paneId ?? undefined} className={`relative flex shrink-0 ${at === "left" ? "pr-2" : "justify-end pl-2"}`} style={{ width: COLLAPSED_SHELF_WIDTH, order }}>
       <nav aria-label={t("shelf.emptyRail")} data-shelf-card="" data-shelf-collapsed="" className="shelf-card flex w-10 shrink-0 flex-col items-center gap-[3px] shelf-rail-card rounded-xl border border-card-border py-1">

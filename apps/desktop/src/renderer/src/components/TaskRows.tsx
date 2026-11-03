@@ -10,14 +10,41 @@ import { isFailed, isRunning } from "../lib/workGroups";
 import type { RawItem } from "../lib/timeline";
 import { formatSpan } from "../lib/delegations";
 import { TaskTag, Who } from "./Parties";
+import { useApp } from "../store";
+import { convSessionOf, convSidebarOf, useConvScope } from "../lib/conversationScope";
+import { sessionProfileName } from "../lib/agentLook";
+import type { AgentHint } from "../lib/agentHint";
 import { ToolErrorText } from "./ToolErrorText";
 import { useUserLayoutToggle } from "../lib/userLayoutToggle";
+
+/**
+ * What is known of an agent an agent_create row creates (lib/taskRows counterpartHint): the call's project / Profile /
+ * model, else the creating agent's (cutex's defaults: its project, `profile` "Default: yours") — so the chip is the
+ * tile the sidebar will draw (owner 2026-11-01: wuwa-db-scout → DS in the model's colour, not a round W on a fill).
+ */
+function useCreateHint(task: TaskRowModel): AgentHint | null {
+  const conv = useConvScope();
+  const wanted = !!task.counterpartHint;
+  const projectId = useApp((s) => {
+    const id = wanted ? convSessionOf(conv, s) : null;
+    return id ? (convSidebarOf(conv, s)?.hostRows[id]?.projectId ?? null) : null;
+  });
+  const profile = useApp((s) => {
+    const id = wanted ? convSessionOf(conv, s) : null;
+    const snapshot = id ? convSidebarOf(conv, s) : null;
+    const session = snapshot ? [...snapshot.active, ...snapshot.retired].find((x) => x.cutexSessionId === id) : null;
+    return session ? sessionProfileName(session) : null;
+  });
+  const hint = task.counterpartHint;
+  return hint ? { projectId: hint.projectId ?? projectId, profile: hint.profile ?? profile, model: hint.model } : null;
+}
 
 /** The verb template with the counterpart spliced in at `{who}`. */
 function Sentence({ task }: { task: TaskRowModel }) {
   const { t } = useI18n();
+  const hint = useCreateHint(task);
   const [before, after = ""] = t(`taskrow.${task.verb}` as MessageKey).split("{who}");
-  const who = task.counterpartId || task.counterpartName ? <Who id={task.counterpartId} name={task.counterpartName} /> : null;
+  const who = task.counterpartId || task.counterpartName ? <Who id={task.counterpartId} name={task.counterpartName} hint={hint} /> : null;
   return (
     <>
       {before && <span className="shrink-0">{before.trim()}</span>}

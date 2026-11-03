@@ -230,7 +230,7 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
         const w = who(j.hostId, j.sessionId, j.agentName);
         return (
           <button onClick={() => openHostAgent(j.hostId, j.sessionId)} className="flex min-w-0 items-center gap-1 text-xs text-muted hover:text-foreground">
-            <Avatar name={w.name} avatar={w.avatar} seed={j.sessionId} size={16} minor />
+            <Avatar name={w.name} avatar={w.avatar} seed={j.sessionId} size={16} />
             <span className="truncate">{w.name}</span>
           </button>
         );

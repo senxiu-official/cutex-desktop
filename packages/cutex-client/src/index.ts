@@ -1,5 +1,6 @@
 // Browser-safe entry: no Node built-ins (enforced by test/browser-entry.test.ts and
 // tsconfig.browser.json). Node-only helpers (local discovery) live in `@cutex-desktop/cutex-client/node`.
+export * from "./mobileManagement";
 export * from "./director";
 export * from "./build";
 export * from "./client";

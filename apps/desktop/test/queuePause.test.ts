@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { QueueItem, QueuePause } from "@cutex-desktop/protocol";
-import type { PendingSteer } from "../src/renderer/src/lib/pendingSteers";
+import type { PendingSteer } from "../src/renderer/src/lib/legacyDelivery/pendingSteers";
 import { composerAttachments, interruptSendText, mergeMessageTexts, pausedSection, restorePlan } from "../src/renderer/src/lib/queuePause";
 
 const steer = (id: string, text: string, state: PendingSteer["state"], extra?: unknown[]): PendingSteer => ({ id, text, imageCount: 0, turnId: "t1", baseline: 0, state, extra });

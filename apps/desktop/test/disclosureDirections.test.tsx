@@ -22,7 +22,7 @@ vi.mock("../src/renderer/src/lib/resizeHub", () => ({ sharedResizeObserver: () =
 vi.mock("../src/renderer/src/lib/settingsSearchView", () => ({ useOnSettingsReveal: () => {} }));
 vi.mock("../src/renderer/src/lib/globalSettings", () => ({ useGlobalSettings: () => ({ settings: null }) }));
 vi.mock("../src/renderer/src/lib/targetHost", () => ({ useTargetFeatures: () => new Set(), useTargetHostId: () => "local", useTargetApi: () => ({}), useTargetIsFocus: () => true }));
-vi.mock("../src/renderer/src/modules/agent-bus/StuckMessagesSection", () => ({ StuckMessagesSection: () => null }));
+vi.mock("../src/renderer/src/modules/agent-bus/CleanupSection", () => ({ CleanupSection: () => null }));
 vi.mock("../src/renderer/src/modules/claude-accounts/useClaudeAccounts", () => ({ useClaudeAccounts: () => ({ list: [], loading: false, quotas: {} }) }));
 vi.mock("../src/renderer/src/modules/claude-accounts/hooks", () => ({ useAccountTitle: () => () => "Account", useRefusalText: () => () => "", errorText: String }));
 vi.mock("../src/renderer/src/modules/claude-accounts/AccountFlow", () => ({ AccountGuide: () => null, AddForm: () => null }));

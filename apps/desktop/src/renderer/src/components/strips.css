@@ -65,3 +65,14 @@
 .narrow-chip button:focus-visible {
   background: color-mix(in srgb, var(--warn) 18%, transparent);
 }
+
+/* Portrait (lib/portrait, P2): the other workspace's strip across the top of the stack — the avatar and the name in a row. */
+.conv-strip.conv-strip-across {
+  flex-direction: row;
+  justify-content: flex-start;
+  padding: 0 10px;
+}
+.conv-strip-across .conv-strip-name {
+  writing-mode: horizontal-tb;
+  min-width: 0;
+}

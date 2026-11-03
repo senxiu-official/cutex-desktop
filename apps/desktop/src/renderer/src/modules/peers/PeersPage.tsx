@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { PEER_LABEL, PEERS_SETTINGS_RANGE, type PeerInvite, type PeersSettings, type PeerView } from "../../../../shared/peers";
 import { MaskedText } from "../../components/MaskedText";
-import { Button, EmptyState, ErrorNote, ListRow, Loading, Notice, NumberField, Section, SettingRow, SettingsGroup, TextInput, Toggle } from "../../components/settings/Form";
+import { Button, EmptyState, ErrorNote, FormFields, ListRow, Loading, Notice, NumberField, Section, SettingRow, SettingsGroup, TextInput, Toggle } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { formatSpan } from "../../lib/delegations";
 import { settingsAnchorId } from "../../lib/settingsNav";
@@ -165,7 +165,7 @@ function JoinRow({ onJoined }: { onJoined(peer: PeerView): void }) {
     onJoined(peer);
   };
   return (
-    <SettingsGroup agents="access" source="host"><div className="py-2.5" data-testid="peers-join">
+    <FormFields><SettingsGroup agents="access" source="host"><div className="py-2.5" data-testid="peers-join">
       <div className="text-sm">{t("peers.join")}</div>
       <div className="text-xs text-subtle">{lock.hint ?? t("peers.joinHint")}</div>
       <div className="mt-2 flex">
@@ -193,7 +193,7 @@ function JoinRow({ onJoined }: { onJoined(peer: PeerView): void }) {
       )}
       {badLabel && <ErrorNote>{t("peers.badLabel")}</ErrorNote>}
       {error && <ErrorNote>{error}</ErrorNote>}
-    </div></SettingsGroup>
+    </div></SettingsGroup></FormFields>
   );
 }
 

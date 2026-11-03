@@ -183,6 +183,7 @@ describe("pending operations retain their host and run", () => {
     const pending = {
       ...emptyPendingChat(null),
       sessionId: "same",
+      applied: { runtime: true, plan: false, goal: false },
       drafts: [{ text: "retained draft", images: [], skills: [] }],
     };
     store.setState({
@@ -200,7 +201,7 @@ describe("pending operations retain their host and run", () => {
 
   it("a stale plan-mode switch during quick-chat creation stops quietly (no 'plan unavailable')", async () => {
     const { emptyPendingChat } = await import("../src/renderer/src/lib/pendingChat");
-    const pending = { ...emptyPendingChat(null), sessionId: "same", plan: true, drafts: [{ text: "A", images: [], skills: [] }] };
+    const pending = { ...emptyPendingChat(null), sessionId: "same", applied: { runtime: true, plan: false, goal: false }, plan: true, drafts: [{ text: "A", images: [], skills: [] }] };
     const submit = vi.fn(async () => null);
     store.setState({ pendingChat: pending, select: vi.fn(async () => {}), setCollabMode: vi.fn(async () => null), submit });
     store.getState().retryPendingChat();
@@ -477,6 +478,7 @@ describe("pending operations retain their host and run", () => {
     store.setState({
       select,
       submit,
+      sessionAction: vi.fn(async () => ({ status: "online" })),
       refreshSidebar
     });
     await store.getState().newQuickChat();
@@ -496,6 +498,8 @@ describe("pending operations retain their host and run", () => {
     });
     for (let i = 0; i < 20; i++) await Promise.resolve();
     expect(mock.api.createHumanSession).toHaveBeenCalledTimes(1);
+    expect(mock.api.createHumanSession.mock.calls[0]?.[0]).toMatchObject({ start: false });
+    expect(store.getState().sessionAction).toHaveBeenCalledWith("new", "cutex/runtime/online", { openVisibleTerminal: false }, "local");
     expect(select).toHaveBeenCalledWith("new", "local");
     expect(submit.mock.calls.map(x => x[0])).toEqual(["one", "two"]);
     expect(store.getState().pendingChat).toBeNull();

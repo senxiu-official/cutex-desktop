@@ -14,7 +14,7 @@ import { copyText } from "../../lib/menus";
 import { useTrackOverlay } from "../../lib/openOverlays";
 import { useOrderedProfiles } from "../../lib/profileOrder";
 import { useApp } from "../../store";
-import { Button, Select, SettingRow, SettingsGroup, TextInput } from "../../components/settings/Form";
+import { Button, FormFields, Select, SettingRow, SettingsGroup, TextInput } from "../../components/settings/Form";
 import { cancelRotation, continueRotation, loadProjectRotation, pollRotation, startRotation, useProjectRotation } from "./rotationStore";
 import { HANDOFF_MINUTE_CHOICES, useHandoffMinutes } from "./rotationPrefs";
 import { minutesLabel, refusalText } from "./rotationView";
@@ -359,7 +359,7 @@ export function DirectorRotationDialog({ project, director, onClose }: { project
             <Loader2 size={16} className="animate-spin" />
           </div>
         ) : director ? (
-          <StartForm project={project} director={director} onStarted={setShownId} onClose={onClose} />
+          <FormFields><StartForm project={project} director={director} onStarted={setShownId} onClose={onClose} /></FormFields>
         ) : (
           <p className="px-5 py-6 text-sm text-subtle">{t("projects.unavailable")}</p>
         )}

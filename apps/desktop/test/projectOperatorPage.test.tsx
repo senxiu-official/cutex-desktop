@@ -42,10 +42,10 @@ vi.mock("../src/renderer/src/components/DelegationList", () => ({ DelegationList
 vi.mock("../src/renderer/src/components/ProjectMemory", () => ({ ProjectMemoryList: () => null }));
 vi.mock("../src/renderer/src/components/ServiceLine", () => ({ ServiceLine: () => null }));
 vi.mock("../src/renderer/src/components/Page", () => ({ PageBody: ({ children }: { children: React.ReactNode }) => h("div", null, children), SubNav: ({ children }: { children: React.ReactNode }) => h("nav", null, children), SUBNAV_ITEM: "", SUBNAV_ON: "", SUBNAV_OFF: "" }));
-vi.mock("../src/renderer/src/components/settings/Form", () => ({ Button: () => null, SettingRow: () => null, Section: () => null, Select: () => null, TextInput: () => null }));
+vi.mock("../src/renderer/src/components/settings/Form", () => ({ SettingsGroup: ({ children }: any) => children, Button: () => null, SettingRow: ({ children }: any) => fx.state.colorTest ? children : null, Section: ({ children }: any) => fx.state.colorTest ? children : null, Select: () => null, TextInput: () => null }));
 vi.mock("../src/renderer/src/components/ProjectColorPicker", () => ({ ProjectColorPicker: () => null }));
 vi.mock("../src/renderer/src/components/ProjectBadge", () => ({ ProjectBadge: () => null }));
-vi.mock("../src/renderer/src/components/ProjectIconPicker", () => ({ ProjectIconPicker: () => null }));
+vi.mock("../src/renderer/src/components/ProjectIconPicker", () => ({ ProjectIconPicker: ({ color, onColor, disabled }: any) => fx.state.colorTest ? h("button", { "data-test-project-color": "", disabled, onClick: () => onColor("#A87956") }, color) : null }));
 vi.mock("../src/renderer/src/components/HostPicker", () => ({ HostPicker: () => null }));
 vi.mock("../src/renderer/src/components/HostMark", () => ({ HostMark: () => null }));
 vi.mock("../src/renderer/src/modules/Outlet", () => ({ ItemBoundary: ({ children }: { children: React.ReactNode }) => children }));
@@ -147,4 +147,22 @@ it("explains that an Operator must be revoked before becoming Director, without 
   await act(async () => { item.onSelect?.(); await Promise.resolve(); await Promise.resolve(); });
   expect(host.textContent).toContain("projects.operatorSuccessor");
   expect(fx.api.projectMutation).not.toHaveBeenCalled();
+});
+
+
+it("keeps the saved colour and reports legacy RGB rejection; applies only after success", async () => {
+  fx.state.colorTest = true;
+  fx.tabs.push({ tab: "settings", titleKey: "projects.tab.settings", entry: null });
+  fx.api.projectPresentation = vi.fn().mockRejectedValueOnce(new Error("unsupported_project_color")).mockResolvedValue({});
+  try {
+    await mount("settings");
+    const button = () => host.querySelector<HTMLButtonElement>("[data-test-project-color]")!;
+    expect(button().textContent).toBe("cyan");
+    await act(async () => button().click());
+    expect(button().textContent).toBe("cyan");
+    expect(host.textContent).toContain("unsupported_project_color");
+    await act(async () => button().click());
+    expect(button().textContent).toBe("#A87956");
+    expect(fx.api.projectPresentation).toHaveBeenLastCalledWith("p", { authorityEpoch: 1, presentationRevision: 0 }, { display_name: "Project", badge_label: "P", color: "#A87956" });
+  } finally { fx.tabs.pop(); }
 });

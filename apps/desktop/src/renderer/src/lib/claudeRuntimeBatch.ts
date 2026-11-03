@@ -13,6 +13,7 @@ import {
 } from "../../../shared/claudeRepin";
 import { isOwnerFeatures } from "../../../shared/users";
 import { runtimeOf } from "./agentList";
+import { isHostBusyActionPending } from "./hostBusyActions";
 
 export interface OutdatedClaudeRuntimeAgent {
   cutexSessionId: string;
@@ -37,6 +38,7 @@ export interface ClaudeRuntimeBatch {
 export interface ClaudeRuntimeBatchApi {
   claudeRuntime(sessionId: string): Promise<ClaudeRuntimeView>;
   repinClaudeRuntime(sessionId: string, target: string): Promise<ClaudeRepinResult>;
+  /** Must delegate to store.sessionAction bound to the batch's original host (not raw daemon IPC). */
   sessionAction(sessionId: string, method: "cutex/runtime/offline" | "cutex/runtime/online", params: Record<string, unknown>): Promise<unknown>;
 }
 
@@ -210,7 +212,7 @@ export async function runClaudeRuntimeBatch(
             try {
               await api.sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false, reason: "desktop runtime package run rollback" });
             } catch (onlineError) {
-              reason += `; back online failed: ${onlineError instanceof Error ? onlineError.message : String(onlineError)}`;
+              if (!isHostBusyActionPending(onlineError)) reason += `; back online failed: ${onlineError instanceof Error ? onlineError.message : String(onlineError)}`;
             }
             batch = replaceItem(batch, id, { state: "failed", step: null, code: "offlineFailed", reason });
           }
@@ -232,7 +234,7 @@ export async function runClaudeRuntimeBatch(
             try {
               await api.sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false, reason: "desktop runtime package run rollback" });
             } catch (onlineError) {
-              reason += `; back online failed: ${onlineError instanceof Error ? onlineError.message : String(onlineError)}`;
+              if (!isHostBusyActionPending(onlineError)) reason += `; back online failed: ${onlineError instanceof Error ? onlineError.message : String(onlineError)}`;
             }
           }
           batch = replaceItem(batch, id, { state: "failed", step: null, code: "claudeRepinFailed", reason });
@@ -246,7 +248,7 @@ export async function runClaudeRuntimeBatch(
             try {
               await api.sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false, reason: "desktop runtime package run rollback" });
             } catch (error) {
-              reason += `; back online failed: ${error instanceof Error ? error.message : String(error)}`;
+              if (!isHostBusyActionPending(error)) reason += `; back online failed: ${error instanceof Error ? error.message : String(error)}`;
             }
           }
           batch = replaceItem(batch, id, { state: "failed", step: null, code: result.error.code || "claudeRepinRefused", reason });
@@ -264,8 +266,8 @@ export async function runClaudeRuntimeBatch(
               backOnline = typeof status !== "string" || status === "online" || status === "starting";
               if (!backOnline) doneReason = [doneReason, `back online failed: ${status}`].filter(Boolean).join("; ");
             } catch (error) {
-              backOnline = false;
-              doneReason = [doneReason, `back online failed: ${error instanceof Error ? error.message : String(error)}`].filter(Boolean).join("; ");
+              backOnline = isHostBusyActionPending(error) ? null : false;
+              if (!isHostBusyActionPending(error)) doneReason = [doneReason, `back online failed: ${error instanceof Error ? error.message : String(error)}`].filter(Boolean).join("; ");
             }
           }
           if (done.outcome === "applied" || done.outcome === "deferred") {
@@ -287,7 +289,9 @@ export async function runClaudeRuntimeBatch(
         }
       }
     } catch (error) {
-      batch = replaceItem(batch, id, { state: "failed", step: null, code: "claudeRepinFailed", reason: error instanceof Error ? error.message : String(error) });
+      batch = replaceItem(batch, id, isHostBusyActionPending(error)
+        ? { state: "skipped", step: null, code: "hostBusy", reason: null, backOnline: null }
+        : { state: "failed", step: null, code: "claudeRepinFailed", reason: error instanceof Error ? error.message : String(error) });
     }
     batch = { ...batch, run: { ...batch.run, currentAgentId: null } };
     onUpdate(batch);

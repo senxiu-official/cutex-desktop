@@ -1,0 +1,181 @@
+/* Portrait (lib/portrait; components/side/SideArea's stack, owner 2026-10-30): the divider between the conversation and its
+   Shelf — the 8 px gap itself (the desktop shows in it), a short grip line in its middle that lights up on hover / focus /
+   drag, and ⇅ (swap) beside the grip on hover. Only these classes; nothing here restyles the landscape row. */
+.portrait-divider {
+  position: relative;
+  flex: none;
+  cursor: row-resize;
+  touch-action: none;
+  outline: none;
+}
+.portrait-divider::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  width: 36px;
+  height: 2px;
+  margin-left: -18px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+  transition:
+    background var(--motion-short) var(--ease-standard),
+    width var(--motion-short) var(--ease-standard),
+    margin-left var(--motion-short) var(--ease-standard);
+}
+.portrait-divider:hover::after,
+.portrait-divider:focus-visible::after,
+.portrait-divider[data-dragging]::after {
+  width: 56px;
+  margin-left: -28px;
+  background: var(--accent);
+}
+.portrait-swap {
+  position: absolute;
+  z-index: 30;
+  top: -9px;
+  left: calc(50% + 40px);
+  display: inline-flex;
+  height: 26px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--card-border);
+  border-radius: 13px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--e1);
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity var(--motion-short) var(--ease-standard);
+}
+.portrait-swap:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--card-border));
+}
+.portrait-divider:hover .portrait-swap,
+.portrait-divider:focus-within .portrait-swap,
+.portrait-divider[data-show-swap] .portrait-swap {
+  visibility: visible;
+  opacity: 1;
+}
+.portrait-divider[data-dragging] .portrait-swap {
+  visibility: hidden;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .portrait-divider::after,
+  .portrait-swap {
+    transition: none;
+  }
+}
+
+/* Two workspaces in the stack (P2; components/PaneHost ConversationColumns): the focused workspace's column is the stack's
+   conversation part — its flex, minimum and order from the stack's variables (SideArea sets them, the divider's drag
+   too) — and the other one's column a 40 px strip across the top. Only the stack's own attributes are matched. */
+[data-pane-host] [data-portrait-stack] section.ws-col[data-portrait-part="conversation"] {
+  flex: var(--stack-conv-flex, 1 1 0px);
+  min-height: var(--stack-conv-min, 0px);
+  order: var(--stack-conv-order, 0);
+}
+[data-pane-host] [data-portrait-stack]:not([data-portrait-conv-last], [data-portrait-cols]) section.ws-col[data-portrait-part="conversation"] {
+  margin-bottom: 0;
+}
+[data-pane-host] [data-portrait-stack] section.ws-col[data-portrait-part="strip"] {
+  flex: none;
+  height: 40px;
+  min-height: 0;
+  order: -1;
+  margin-bottom: 8px;
+}
+
+/* Two workspaces side by side in the stack (P3; components/side/SideArea, components/PaneHost data-portrait-col): a
+   grid — a column per workspace, its conversation over (or, swapped, under) its own Shelf band, one row of dividers;
+   the rows from the stack's variable (SideArea sets it, the divider's drag too). A column without a band
+   (data-portrait-c0 / c1: shelf | bar | none): its conversation spans every row, over its 40 px rails bar if it has
+   one (the bar, and the tray's room, under it). Only the stack's own attributes are matched. */
+[data-pane-host] [data-portrait-stack][data-portrait-cols] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: var(--stack-rows, minmax(0, 1fr));
+  column-gap: 8px;
+}
+[data-pane-host] [data-portrait-cols] section.ws-col[data-portrait-col] {
+  grid-row: 1 / -1;
+  min-height: 0;
+}
+[data-pane-host] [data-portrait-cols] section.ws-col[data-portrait-col="0"] {
+  grid-column: 1;
+}
+[data-pane-host] [data-portrait-cols] section.ws-col[data-portrait-col="1"] {
+  grid-column: 2;
+}
+[data-pane-host] [data-portrait-cols][data-portrait-c0="shelf"] section.ws-col[data-portrait-col="0"],
+[data-pane-host] [data-portrait-cols][data-portrait-c1="shelf"] section.ws-col[data-portrait-col="1"] {
+  grid-row: 1;
+}
+[data-pane-host] [data-portrait-cols][data-portrait-swapped][data-portrait-c0="shelf"] section.ws-col[data-portrait-col="0"],
+[data-pane-host] [data-portrait-cols][data-portrait-swapped][data-portrait-c1="shelf"] section.ws-col[data-portrait-col="1"] {
+  grid-row: 3;
+}
+/* Over its band: no tray room under it (the band's Shelves keep it). */
+[data-pane-host] [data-portrait-cols]:not([data-portrait-swapped])[data-portrait-c0="shelf"] section.ws-col[data-portrait-col="0"],
+[data-pane-host] [data-portrait-cols]:not([data-portrait-swapped])[data-portrait-c1="shelf"] section.ws-col[data-portrait-col="1"] {
+  margin-bottom: 0;
+}
+/* Over its rails bar: the bar's room (and the tray's under the bar). */
+[data-pane-host] [data-portrait-cols]:not([data-portrait-swapped])[data-portrait-c0="bar"] section.ws-col[data-portrait-col="0"],
+[data-pane-host] [data-portrait-cols]:not([data-portrait-swapped])[data-portrait-c1="bar"] section.ws-col[data-portrait-col="1"] {
+  margin-bottom: 48px;
+}
+[data-tray-room] [data-portrait-cols]:not([data-portrait-swapped])[data-portrait-c0="bar"] section.ws-col[data-portrait-col="0"],
+[data-tray-room] [data-portrait-cols]:not([data-portrait-swapped])[data-portrait-c1="bar"] section.ws-col[data-portrait-col="1"] {
+  margin-bottom: calc(var(--tray-room, 52px) + 48px);
+}
+/* Under its rails bar (swapped). */
+[data-pane-host] [data-portrait-cols][data-portrait-swapped][data-portrait-c0="bar"] section.ws-col[data-portrait-col="0"],
+[data-pane-host] [data-portrait-cols][data-portrait-swapped][data-portrait-c1="bar"] section.ws-col[data-portrait-col="1"] {
+  margin-top: 48px;
+}
+
+/* P4: the handle between the band's left and right Shelf (components/side/SideArea PortraitBandHandle) — the 8 px gap
+   itself (its negative margins cancel the band's two flex gaps around it), a short upright grip in its middle. */
+.portrait-band-handle {
+  position: relative;
+  flex: none;
+  align-self: stretch;
+  width: 8px;
+  margin: 0 -8px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.portrait-band-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 2px;
+  height: 36px;
+  margin-top: -18px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+  transition:
+    background var(--motion-short) var(--ease-standard),
+    height var(--motion-short) var(--ease-standard),
+    margin-top var(--motion-short) var(--ease-standard);
+}
+.portrait-band-handle:hover::after,
+.portrait-band-handle:focus-visible::after,
+.portrait-band-handle[data-dragging]::after {
+  height: 56px;
+  margin-top: -28px;
+  background: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .portrait-band-handle::after {
+    transition: none;
+  }
+}

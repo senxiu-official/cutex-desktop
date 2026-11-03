@@ -303,7 +303,7 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact: compa
       } ${unavailable ? "opacity-50 grayscale" : ""}`}
     >
       <AvatarCell min={twoLines ? IM_AVATAR : undefined}>
-        <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={avatar} minor={!twoLines} signal={signal} running={showsRunningRing(signal, row.session)} badge={twoLines ? avatarBadge(signal, needs, unreadCount(mark)) : undefined} />
+        <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={avatar} signal={signal} running={showsRunningRing(signal, row.session)} badge={twoLines ? avatarBadge(signal, needs, unreadCount(mark)) : undefined} />
       </AvatarCell>
       {twoLines ? (
         <div className="min-w-0 flex-1 leading-tight">
@@ -407,7 +407,7 @@ export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
     >
       <AvatarCell>
         <span className={`flex grayscale ${selected ? "" : "opacity-55 group-hover:opacity-90"}`}>
-          <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={20} minor signal="idle" />
+          <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={20} signal="idle" />
         </span>
       </AvatarCell>
       <div className="flex h-5 min-w-0 flex-1 items-center gap-1">

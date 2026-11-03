@@ -81,6 +81,11 @@ export interface TaskRowModel {
   /** The other party: assignee for Director actions, coordinator for deliveries. */
   counterpartId: string | null;
   counterpartName: string | null;
+  /**
+   * What the call says of a counterpart the sidebar may not hold yet (agent_create: the new agent's project, Profile and
+   * model), so its avatar is the tile the sidebar will draw (components/Parties Who `hint`).
+   */
+  counterpartHint?: { projectId: string | null; profile: string | null; model: string | null } | null;
   taskId: string | null;
   assignmentId: string | null;
   /** Title / summary / decision text shown after the tag. */
@@ -209,6 +214,13 @@ function row(verb: TaskVerb, who: { id: string | null; name: string | null }, te
   return { verb, counterpartId: who.id, counterpartName: who.name, taskId: null, assignmentId: null, text };
 }
 
+/** The new agent's project / Profile / model an agent_create call names (top level, or an older `spec`; the project also from its receipt). */
+function createHint(a: Record<string, unknown>, r: Record<string, unknown> | null): NonNullable<TaskRowModel["counterpartHint"]> {
+  const spec = obj(a.spec);
+  const receipt = obj(obj(r?.outcome)?.receipt);
+  return { projectId: str(a.project_id) ?? str(spec?.project_id) ?? str(receipt?.project_id), profile: str(a.profile) ?? str(spec?.profile), model: str(a.model) ?? str(spec?.model) };
+}
+
 /** Delegation, note, alarm and agent-lifecycle calls (new and old tool names). */
 function agentToolRow(item: RawItem, tool: string, a: Record<string, unknown>): TaskRowModel | null {
   const kind = AGENT_TOOL_VERB[tool];
@@ -281,13 +293,13 @@ function agentToolRow(item: RawItem, tool: string, a: Record<string, unknown>): 
       const task = str(a.task);
       const delegation = str(obj(created?.delegation)?.delegation);
       if (delegation && task) delegations.set(delegation, task);
-      return row(kind, { id: str(agent?.cutex_session_id) ?? str(r?.cutex_session_id), name }, task);
+      return { ...row(kind, { id: str(agent?.cutex_session_id) ?? str(r?.cutex_session_id), name }, task), counterpartHint: createHint(a, r) };
     }
     case "agentArchive":
       return row(kind, party(str(a.agent) ?? str(a.cutex_session_id) ?? str(a.target) ?? str(a.name)), null);
     case "management": {
       const op = str(a.operation);
-      if (op === "create") return row("agentCreate", { id: null, name: str(obj(a.spec)?.name) }, null);
+      if (op === "create") return { ...row("agentCreate", { id: null, name: str(obj(a.spec)?.name) }, null), counterpartHint: createHint(a, r) };
       if (op === "close") return row("agentArchive", party(str(a.cutex_session_id)), null);
       return null;
     }

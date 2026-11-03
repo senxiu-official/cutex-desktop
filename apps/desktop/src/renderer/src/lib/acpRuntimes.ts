@@ -3,6 +3,7 @@
 // declared, no Codex sandbox / approval presets, an optional host component, a capability that says the host can
 // start them — so the desktop branches on "ACP runtime" and reads the per-runtime facts from this one table.
 // Pure (no React, no store) so it is unit-tested.
+import { COMPONENT_INDEX_FEATURE } from "../../../shared/componentIndex";
 import type { MessageKey } from "../i18n";
 import { DSH_NOT_RECOMMENDED } from "./dshNotice";
 import { KIMI_NOT_RECOMMENDED } from "./kimiNotice";
@@ -53,10 +54,24 @@ export function acpRuntimeAvailable(runtime: AcpRuntime, features: ReadonlySet<s
   return features.has(ACP_RUNTIME_INFO[runtime].capability);
 }
 
-/** Settings → 运行时 shows the runtime's group: installed, or known to the host and installable there. */
-export function acpRuntimeShown(runtime: AcpRuntime, features: ReadonlySet<string>): boolean {
+/**
+ * Settings → 运行时 shows the runtime's group: installed, or known to the host and installable there. r270 (cutex
+ * component-external-ui-v1): also on a host with `component-index-v1` whose `GET /v2/components` lists the runtime's
+ * component (`components`: the names read, undefined while unread) — a fresh host finds DSH / Kimi there before it can start them.
+ */
+export function acpRuntimeShown(runtime: AcpRuntime, features: ReadonlySet<string>, components?: readonly string[]): boolean {
   const info = ACP_RUNTIME_INFO[runtime];
-  return features.has(info.capability) || (info.known !== null && features.has(info.known) && features.has("components"));
+  if (features.has(info.capability) || (info.known !== null && features.has(info.known) && features.has("components"))) return true;
+  return features.has(COMPONENT_INDEX_FEATURE) && !!components?.includes(info.component);
+}
+
+/**
+ * The group's way to a Profile of the runtime: only while the host can start it (its capability) or, as before, knows its
+ * Profiles (Kimi `kimi-runtime-profiles`). A card shown only for its component (r270, above) offers installation, not a start.
+ */
+export function acpRuntimeProfiles(runtime: AcpRuntime, features: ReadonlySet<string>): boolean {
+  const info = ACP_RUNTIME_INFO[runtime];
+  return features.has(info.capability) || (info.known !== null && features.has(info.known));
 }
 
 /** Whether the runtime still carries 「暂不建议使用」 (the per-runtime switch). */

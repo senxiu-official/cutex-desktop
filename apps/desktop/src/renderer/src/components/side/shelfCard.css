@@ -29,6 +29,9 @@
 }
 
 /* Expanded: the rail is a full-height card (its material: styles.css .shelf-rail-card), rounded on its outer side. */
+.shelf-rail-pages { scrollbar-width: none; }
+.shelf-rail-pages::-webkit-scrollbar { display: none; }
+
 .shelf-card[data-shelf-card]:not([data-shelf-collapsed]) > [data-shelf-rail] {
   border: 1px solid var(--card-border);
   border-radius: var(--r-xl);
@@ -51,6 +54,27 @@
 .shelf-card[data-shelf-card="rail-right"] [data-shelf-body] .shell-card {
   border-right: 0;
   border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+/* Portrait (lib/portrait, owner 2026-10-30): the rail is a full-width card across the Shelf's edge toward the conversation
+   (rail-top: the conversation above; rail-bottom: swapped), square toward the panes; the pane that touches it (the first /
+   the last of the page's stack, or the launchers' card) is attached to it the same way. */
+.shelf-card[data-shelf-card="rail-top"]:not([data-shelf-collapsed]) > [data-shelf-rail] {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.shelf-card[data-shelf-card="rail-bottom"]:not([data-shelf-collapsed]) > [data-shelf-rail] {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.shelf-card[data-shelf-card="rail-top"] [data-shelf-body] > :is(.shell-card, div > .contents:first-child > .shell-card) {
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.shelf-card[data-shelf-card="rail-bottom"] [data-shelf-body] > :is(.shell-card, div > .contents:last-child > .shell-card) {
+  border-bottom: 0;
+  border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
 /* No drop shadows inside the Shelf: the box clips them at its edges, and between two panes they filled the gap

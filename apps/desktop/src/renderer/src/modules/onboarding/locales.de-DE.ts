@@ -231,6 +231,8 @@ export const deDE: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.shelf.text": "Ziehe Tabs von einem {{shelf}} in einen anderen oder auf eine freie Stelle für einen neuen {{shelf}}.\nWenn der Platz nicht reicht, zeigt „⌄ N“ alle Tabs dieses {{shelf}}.",
   "onboarding.guide.tray.title": "Der Infobereich",
   "onboarding.guide.tray.text": "Ziehe einen Eintrag über die Trennlinie, um ihn anzuheften; ziehe ihn zurück, um ihn zu lösen.\nPer Rechtsklick kannst du ein Abzeichen oder eine Notiz hinzufügen.",
+  "onboarding.guide.portrait.title": "Hochformat-Layout",
+  "onboarding.guide.portrait.text": "In einem hohen Fenster stehen die Unterhaltung und ihre {{shelf}} übereinander. Ziehe diese Trennlinie, um die Höhen anzupassen, Doppelklick setzt zurück; fahre darüber und klicke ⇅, um sie zu tauschen.\nDie Seitenleiste versteckt sich am linken Fensterrand und erscheint, wenn der Zeiger dorthin kommt. Um im Querformat zu bleiben, ändere Einstellungen → Erscheinungsbild → Hochformat-Layout.",
   "onboarding.guide.service.title": "Dienstlinks",
   "onboarding.guide.service.text": "Ein Dienst ist eine Webseite oder API, die ein {{agent}} auf dem Host betreibt. Der Link öffnet sie in Cutex.\nTemporäre Dienste werden bei Inaktivität oder Ablauf vom Host entfernt; der Link funktioniert dann nicht mehr. Zum Behalten auf der Seite Dienste anheften oder dauerhaft machen. Dort kannst du auch stoppen und neu starten.",
   "onboarding.guide.update.title": "Aktualisierungen",

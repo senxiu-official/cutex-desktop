@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { canUseP2, hostFeatureSet, isOwnerFeatures, OWNER_ACCESS, RESTRICTED_FEATURE, USERS_P2_ACCESS_FEATURE, userAccessOf, type UsersList, type UsersResult } from "../src/shared/users";
 import { dataUrlImage, uploadKind } from "../src/shared/input";
 import { workspaceErrorText } from "../src/renderer/src/lib/workspace";
-import { sendErrorText } from "../src/renderer/src/lib/outbox";
+import { sendErrorText } from "../src/renderer/src/lib/legacyDelivery/outbox";
 import { createUserAndAssign, newUserDefaultName, rememberKeyFor, type CreateAndAssignApi } from "../src/renderer/src/modules/users/model";
 
 const member = (send: boolean) => ({ id: "u-1", name: "Alex", isOwner: false, pending: false, grant: { projects: ["alpha"], standaloneAgents: [], send } });

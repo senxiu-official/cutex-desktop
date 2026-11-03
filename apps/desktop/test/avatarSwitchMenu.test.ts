@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // 默认头像 = 仅重要智能体: the agent menu's 显示头像 / 隐藏头像 (owner 2026-10-18) — which agents get it,
 // the capability gate, and what it writes through cutex/session/metadata/update.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionAvatar, SessionResource } from "@cutex-desktop/protocol";
 import { normalizeEntries, type MenuAction, type MenuEntry } from "../src/renderer/src/lib/contextMenu";
 import { themedEmoji } from "../src/renderer/src/lib/avatarThemes";
@@ -45,6 +45,11 @@ const SWITCH = ["menu.showAvatar", "menu.hideAvatar"];
 const switchOf = (entries: MenuEntry[]) => labels(entries).filter((l) => SWITCH.includes(l));
 
 describe("agent menu: 显示头像 / 隐藏头像", () => {
+  // Cold-importing lib/menus + the store takes ~4–5 s here; load them once outside the per-test timeout.
+  beforeAll(async () => {
+    await import("../src/renderer/src/lib/menus");
+    await import("../src/renderer/src/store");
+  }, 60_000);
   beforeEach(() => sessionAction.mockClear());
 
   it("resetting an own picture requires the explicit submenu confirmation", async () => {

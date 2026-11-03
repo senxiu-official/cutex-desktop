@@ -82,9 +82,9 @@ function shelf() {
   let l = emptyLayout();
   const files = open(l, "workspace.files", FOLLOW);
   l = files.layout;
-  const changes = open(l, "workspace.changes", FOLLOW);
+  const changes = open(l, "workspace.changes", FOLLOW, SINGLETON_KEY, "workspace", l.activePage!);
   l = changes.layout;
-  const term = open(l, "terminal.pty", WS, "t1");
+  const term = open(l, "terminal.pty", WS, "t1", "workspace", l.activePage!);
   l = term.layout;
   const right = shelvesOf(l)[0]!;
   return { layout: l, shelf: right.id, page: l.pages[0]!.id, inst: { files: files.instanceId, changes: changes.instanceId, term: term.instanceId } };
@@ -769,6 +769,16 @@ describe("the read API (lib/shelves: the ⌘K switcher reads the pages)", () => 
     expect(shelves.switchShelfPage(2)).toBe(true);
     expect(store.useSide.getState().layout.activePage).toBe(list[2]!.pageId);
     expect(shelves.switchShelfPage(5)).toBe(false);
+    let many = store.useSide.getState().layout;
+    for (let n = 0; n < 18; n++) many = addShelfPage(many, s.shelf).layout;
+    store.useSide.setState({ layout: many });
+    const rail = shelfLanePages(many, s.shelf, ctx());
+    expect(shelves.switchShelfPage(9)).toBe(true);
+    expect(store.useSide.getState().layout.activePage).toBe(rail.at(-1)!.id);
+    expect(shelves.switchShelfPage(8)).toBe(true);
+    expect(store.useSide.getState().layout.activePage).toBe(rail[7]!.id);
+    expect(shelves.switchShelfPage(1)).toBe(true);
+    expect(store.useSide.getState().layout.activePage).toBe(rail[0]!.id);
     vi.doUnmock("../src/renderer/src/lib/sideComponents");
   });
 });

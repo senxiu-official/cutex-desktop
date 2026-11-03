@@ -1,4 +1,5 @@
 import { requestFork } from "./requestFork";
+import { isHostBusyActionPending } from "./hostBusyActions";
 import { mentionPlainText } from "./mentionWire";
 import { agentPauseNow, agentPauseSupported, pauseAgent, resumeAgent } from "./agentPause";
 import { canRevealLocal, downloadFileAction, fileActions, performFilePathAction, revealFileLabel } from "./fileActions";
@@ -97,6 +98,7 @@ export function copyText(text: string): void {
 }
 
 function reportError(error: unknown): void {
+  if (isHostBusyActionPending(error)) return; // the persistent action row owns its retry button
   const message = error instanceof Error ? error.message : String(error);
   // "Not available for this agent" is a notice, not a failure dialog.
   const feature = parseUnsupported(message);

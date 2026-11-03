@@ -3,6 +3,7 @@ import type { QueueItem } from "@cutex-desktop/protocol";
 import { applyEvent, emptyTimeline, timelineFromThreadRead } from "../src/renderer/src/lib/timeline";
 import {
   confirmOutbox,
+  consumedOutboxIds,
   failOutbox,
   flushedOutboxEntry,
   flushOutbox,
@@ -24,15 +25,45 @@ import {
   timelineTail,
   updateOutbox,
   visibleQueue,
+  visiblePendingSteers,
   type OutboxEntry,
-} from "../src/renderer/src/lib/outbox";
+} from "../src/renderer/src/lib/legacyDelivery/outbox";
 
 const native = (method: string, params: unknown) => ({ source: "app_server", native: { kind: "notification", message: { method, params } } }) as never;
+
+it("held is a host-busy receipt, never delivery or a queue confirmation", () => {
+  const timeline = emptyTimeline();
+  const entry = newOutboxEntry(timeline, { id: "held", text: "owner text", strategy: "auto", placement: "turn" });
+  const held = confirmOutbox([entry], "held", { disposition: "held", heldBy: "hostBusy" }, 1);
+  expect(outboxStatusCopy(held[0]!)).toEqual({ label: "outbox.held", hint: "outbox.heldHint" });
+  expect(reconcileOutbox(held, timeline, [], 100)).toBe(held);
+  expect(hasUnlandedTurn(held)).toBe(true);
+});
 const userItem = (id: string, text: string, turnId: string, clientId?: string) =>
   native("item/completed", { turnId, item: { type: "userMessage", id, ...(clientId ? { clientId } : {}), content: [{ type: "text", text, text_elements: [] }] } });
 const started = (turnId: string) => native("turn/started", { turn: { id: turnId, status: "inProgress" } });
 const completed = (turnId: string, status = "completed") => native("turn/completed", { turn: { id: turnId, status } });
 const idle = () => timelineFromThreadRead({ thread: { id: "th", turns: [{ id: "t0", status: "completed", items: [{ type: "userMessage", id: "u0", content: [{ type: "text", text: "hi" }] }] }] } });
+
+describe("replacement-send consumption for insert receipts", () => {
+  it.each(["interrupted", "failed", "inProgress"])("%s without history is not delivery", (status) => {
+    const timeline = emptyTimeline();
+    const entry = newOutboxEntry(timeline, { id: "replacement", text: "insert", strategy: "auto", placement: "turn" });
+    const confirmed = confirmOutbox([entry], entry.id, { disposition: "started", turnId: "t1" } as never, 1);
+    applyEvent(timeline, started("t1"));
+    if (status !== "inProgress") applyEvent(timeline, completed("t1", status));
+    expect(consumedOutboxIds(confirmed, timeline)).toEqual(new Set());
+  });
+  it("acceptance and old identical text do not settle a replacement; its own completed turn does", () => {
+    const timeline = idle();
+    const entry = newOutboxEntry(timeline, { id: "replacement", text: "hi", strategy: "auto", placement: "turn" });
+    const confirmed = confirmOutbox([entry], entry.id, { disposition: "started", turnId: "t1" } as never, 1);
+    expect(consumedOutboxIds(confirmed, timeline)).toEqual(new Set());
+    applyEvent(timeline, started("t1"));
+    applyEvent(timeline, completed("t1"));
+    expect(consumedOutboxIds(confirmed, timeline)).toEqual(new Set([entry.id]));
+  });
+});
 const qItem = (queueId: string, clientUserMessageId: string, text = "x"): QueueItem => ({
   queueId,
   clientUserMessageId,
@@ -45,6 +76,80 @@ const qItem = (queueId: string, clientUserMessageId: string, text = "x"): QueueI
   updatedAt: "",
 });
 const entry = (id: string, text: string, placement: OutboxEntry["placement"], tl = idle()) => newOutboxEntry(tl, { id, text, strategy: placement === "queue" ? "queue" : "auto", placement });
+
+describe("idle-send timeline placement across background admission", () => {
+  it("keeps a turn echo accepted as steered until its own exact item, ignoring the background turn's untagged user/terminal", () => {
+    const tl = idle();
+    let list = [entry("owner", "hello", "turn", tl)];
+    applyEvent(tl, started("background"));
+    applyEvent(tl, userItem("background-user", "hello", "background"));
+    list = confirmOutbox(list, "owner", { disposition: "steered", turnId: "background" }, 1);
+    expect(list[0]).toMatchObject({ placement: "turn", state: "confirmed", acceptedAsSteer: true, turnId: "background" });
+    const pending = [{ id: "owner", text: "hello", imageCount: 0, baseline: 0, turnId: "background" }];
+    expect(visiblePendingSteers(list, pending, tl)).toEqual([]);
+    expect(pendingTail(list, tl)).toHaveLength(1);
+    expect(consumedOutboxIds(list, tl).size).toBe(0);
+    expect(reconcileOutbox(list, tl, [qItem("echo", "owner")])).toBe(list);
+    applyEvent(tl, completed("background"));
+    expect(reconcileOutbox(list, tl, [])).toBe(list);
+    expect(consumedOutboxIds(list, tl).size).toBe(0);
+    applyEvent(tl, userItem("actual-owner", "hello", "background", "owner"));
+    expect(pendingTail(list, tl)).toEqual([]);
+    expect(visiblePendingSteers(list, pending, tl)).toEqual([]);
+    expect(timelineRowKey(tl.entries.get("actual-owner")!)).toBe(sendRowKey("owner"));
+    expect(reconcileOutbox(list, tl, [])).toEqual([]);
+  });
+
+  it("a positive contextPersisted receipt is delivered even when the background turn is interrupted", () => {
+    const tl = idle();
+    applyEvent(tl, started("background"));
+    const list = confirmOutbox([entry("owner", "hello", "turn", tl)], "owner", { disposition: "steered", turnId: "background" }, 1);
+    applyEvent(tl, native("claude/input/stageChanged", { threadId: "th", turnId: "background", clientId: "owner", stage: "offered" }));
+    applyEvent(tl, completed("background", "interrupted"));
+    expect(consumedOutboxIds(list, tl).size).toBe(0);
+    expect(reconcileOutbox(list, tl, [])).toBe(list);
+    applyEvent(tl, native("claude/input/stageChanged", { threadId: "th", turnId: "background", clientId: "owner", stage: "contextPersisted" }));
+    expect(consumedOutboxIds(list, tl)).toEqual(new Set(["owner"]));
+    expect(reconcileOutbox(list, tl, [])).toEqual([]);
+  });
+
+  it("started event confirms an originally turn echo before the stale queued IPC reply; replay is a no-op", () => {
+    const tl = idle();
+    const sending = [entry("owner", "hello", "turn", tl)];
+    const event = { clientUserMessageId: "owner", disposition: "started", turnId: "own-turn" };
+    const startedEcho = flushOutbox(sending, tl, event, 1, 100);
+    expect(startedEcho[0]).toMatchObject({ placement: "turn", state: "confirmed", promoted: true, confirmedTick: 1, confirmedAt: 100 });
+    expect(flushOutbox(startedEcho, tl, event, 2, 200)).toBe(startedEcho);
+    const list = confirmOutbox(startedEcho, "owner", { disposition: "queued", queue: qItem("q-owner", "owner") }, 3);
+    expect(list[0]).toBe(startedEcho[0]);
+    expect(pendingTail(list, tl)).toHaveLength(1);
+    expect(visibleQueue([qItem("q-owner", "owner")], [], list, tl)).toEqual([]);
+    applyEvent(tl, started("own-turn"));
+    applyEvent(tl, userItem("actual-owner", "hello", "own-turn", "owner"));
+    expect(pendingTail(list, tl)).toEqual([]);
+    expect(reconcileOutbox(list, tl, [])).toEqual([]);
+  });
+
+  it("initially busy steers still hand over to 接下来", () => {
+    const tl = idle();
+    const list = confirmOutbox([entry("owner", "hello", "steer", tl)], "owner", { disposition: "steered", turnId: "busy" }, 1);
+    const pending = [{ id: "owner", text: "hello", imageCount: 0, baseline: 0, turnId: "busy" }];
+    expect(list).toEqual([]);
+    expect(visiblePendingSteers(list, pending, tl)).toEqual(pending);
+  });
+
+  it("negative history settlement removes the retained echo and exposes the undelivered steer", () => {
+    const tl = idle();
+    const list = confirmOutbox([entry("owner", "hello", "turn", tl)], "owner", { disposition: "steered", turnId: "busy" }, 1);
+    const pending = [{ id: "owner", text: "hello", imageCount: 0, baseline: 0, turnId: "busy", state: "undelivered" as const }];
+    expect(visiblePendingSteers(list, pending, tl)).toEqual([]);
+    // Parent verifyLostSteers owns the negative-history proof and removal; the
+    // projection neither declares loss nor keeps its own copy of that echo.
+    const settledOutbox = list.filter(e => e.id !== "owner");
+    expect(visiblePendingSteers(settledOutbox, pending, tl)).toEqual(pending);
+    expect(pendingTail(settledOutbox, tl)).toEqual([]);
+  });
+});
 
 describe("outbox: placement", () => {
   it("predicts where a send ends up", () => {

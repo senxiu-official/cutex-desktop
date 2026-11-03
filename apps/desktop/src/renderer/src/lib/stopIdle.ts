@@ -8,7 +8,6 @@ import { create } from "zustand";
 import { BLOCKING_REASONS, STOP_IDLE_FEATURE, type IdleAgent, type IdleReason, type StopIdleItemResult, type StopIdleMode } from "../../../shared/stopIdle";
 import type { MessageKey } from "../i18n";
 import type { MenuAction, MenuEntry } from "./contextMenu";
-import { runLimited, START_CONCURRENCY } from "./agentList";
 import { isOwnerFeatures } from "../../../shared/users";
 import { featuresOf, hostApi, pinnedOn, useApp } from "../store";
 import { showShelfToast } from "./shelves";
@@ -208,14 +207,14 @@ export async function undoStopIdle(): Promise<void> {
 /** Online again, each by the owner's start; how many made it (the agent row shows the rest's own state). */
 async function bringBack(host: string, ids: readonly string[]): Promise<number> {
   let back = 0;
-  await runLimited([...ids], START_CONCURRENCY, async (id) => {
+  for (const id of ids) {
     try {
       await useApp.getState().sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, host);
       back++;
     } catch {
       // Counted by the caller.
     }
-  });
+  }
   return back;
 }
 

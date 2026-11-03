@@ -22,7 +22,7 @@ export function turnDiffPage(layout: SideLayout, instanceId: string, now: number
     if (next !== layout) next = { ...next, overrides: layout.overrides };
   }
   const at = locate(next, instanceId);
-  if (!at || !isTurnDiffPage(next, at.page)) return next; // Keep the existing nine-page Shelf limit.
+  if (!at || !isTurnDiffPage(next, at.page)) return next; // Keep the existing sanity Shelf limit.
   // Opening Changes/Files later must not add another pane to this turn-only page.
   if (at.page.groups.includes(TURN_DIFF_GROUP) && !at.page.groups.includes("workspace")) return next;
   return { ...next, pages: next.pages.map(page => page.id === at.page.id ? {

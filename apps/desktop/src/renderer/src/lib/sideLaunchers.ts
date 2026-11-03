@@ -33,7 +33,7 @@ export function withPin(pins: LauncherPins, kind: string, pin: LauncherPinDefaul
  * "tool": a component contributed as `side.component` (side chat, terminal, browser, notes …);
  * "status": a status category's derived component (`status:<id>`, §18.9) — listed after the tools.
  */
-export type LauncherGroup = "tool" | "status";
+export type LauncherGroup = "tool" | "status" | "page";
 
 export interface LauncherEntry {
   kind: string;
@@ -42,7 +42,7 @@ export interface LauncherEntry {
   group?: LauncherGroup;
 }
 
-const groupRank = (e: LauncherEntry) => (e.group === "status" ? 1 : 0);
+const groupRank = (e: LauncherEntry) => (e.group === "page" ? 2 : e.group === "status" ? 1 : 0);
 const byOrder = (a: LauncherEntry, b: LauncherEntry) => groupRank(a) - groupRank(b) || a.order - b.order || (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0);
 
 /** Tools before status categories, then by `launcher.order` (ties by id). */
@@ -95,12 +95,12 @@ export type LauncherClickAction =
  * click / 「新…」, multi only); on the current page → exactly the page-button icon rule (lib/sideLaneClick:
  * collapsed → expand, visible → focus / flash, with 点击当前页图标 = 收起侧栏 → close the column); on another
  * page → reveal that instance there (singleton or multi alike, lead 2026-10-12); nowhere → open it on the
- * current page (opening the column).
+ * a page chosen by the normal Shelf placement rule.
  */
 export function launcherClickAction(input: LauncherClickInput): LauncherClickAction {
   const { newInstance, multi, page, card, elsewhere } = input;
-  if (newInstance && multi) return { kind: "open", page, fresh: true };
-  if (!page || !card) return elsewhere ? { kind: "reveal", instanceId: elsewhere } : { kind: "open", page, fresh: false };
+  if (newInstance && multi) return { kind: "open", page: card ? page : null, fresh: true };
+  if (!page || !card) return elsewhere ? { kind: "reveal", instanceId: elsewhere } : { kind: "open", page: null, fresh: false };
   return laneClickAction({
     open: input.open,
     activePage: input.activePage,

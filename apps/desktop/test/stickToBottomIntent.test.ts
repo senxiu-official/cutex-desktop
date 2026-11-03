@@ -4,7 +4,7 @@
 // drag — never a scroll the layout caused (regression 2026-10-23: the reply streamed below the view).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { INTENT_WINDOW } from "../src/renderer/src/lib/overlayScrollbars";
-import { watchScrollIntent, type ScrollIntentWatch } from "../src/renderer/src/lib/stickToBottom";
+import { scrollFollow, watchScrollIntent, type ScrollIntentWatch } from "../src/renderer/src/lib/stickToBottom";
 
 describe("stick to bottom: the owner's scrolling input", () => {
   let now = 1000;
@@ -36,6 +36,41 @@ describe("stick to bottom: the owner's scrolling input", () => {
   const wheel = (target: Element) => target.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -120 }));
   const key = (target: Element, k: string) => target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: k }));
   const pointer = (target: Element, type: string) => target.dispatchEvent(new Event(type, { bubbles: true }));
+
+  it("a downward wheel at the bottom cannot turn a reply's browser anchoring into reading upward", () => {
+    row.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 120 }));
+    expect(watch.user()).toBe(true);
+    expect(watch.upward()).toBe(false);
+    // A new turn evicts the oldest rendered turn: anchoring moves up, not the owner.
+    expect(scrollFollow(true, { top: 17368, clientHeight: 286 }, { top: 16931, scrollHeight: 17418, clientHeight: 286 }, watch.user(), watch.upward())).toEqual({ stick: true, snap: true });
+    // Subsequent text/tool growth and an image's delayed layout still follow.
+    for (const height of [17474, 17713, 18009, 19000]) {
+      expect(scrollFollow(true, { top: 16931, clientHeight: 286 }, { top: 16931, scrollHeight: height, clientHeight: 286 }, watch.user(), watch.upward()).stick).toBe(true);
+    }
+    wheel(row);
+    expect(watch.upward()).toBe(true);
+    expect(scrollFollow(true, { top: 18400, clientHeight: 600 }, { top: 18390, scrollHeight: 19000, clientHeight: 600 }, watch.user(), watch.upward()).stick).toBe(false);
+    now += INTENT_WINDOW + 1;
+    expect(watch.upward()).toBe(false);
+    expect(scrollFollow(false, null, { top: 18390, scrollHeight: 19000, clientHeight: 600 }, watch.user(), watch.upward()).stick).toBe(false);
+  });
+
+  it("downward keys do not explain an upward layout shift; upward keys and Shift+Space do", () => {
+    row.focus();
+    for (const k of ["ArrowDown", "PageDown", "End", " "]) {
+      key(row, k);
+      expect(watch.user()).toBe(true);
+      expect(watch.upward()).toBe(false);
+    }
+    for (const k of ["ArrowUp", "PageUp", "Home"]) {
+      key(row, k);
+      expect(watch.upward()).toBe(true);
+    }
+    row.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: " ", shiftKey: true }));
+    expect(watch.upward()).toBe(true);
+    watch.reset();
+    expect(watch.upward()).toBe(false);
+  });
 
   it("nothing yet: a scroll is the layout's (a send, a turn starting, anchoring)", () => {
     expect(watch.user()).toBe(false);

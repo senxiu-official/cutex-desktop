@@ -1,6 +1,6 @@
 // `GET /v2/runtimes` (cutex capability `runtimes-view`): the runtimes installed on a host and which
 // agents pin each one. Shape as implemented in cutex r218 (`feat/profile-id-runtimes`, contractVersion 2;
-// extra fields cutex, unpinnedAgentCount, releaseDir, sha256Prefix, latest are not read yet). Every wire field the
+// extra fields cutex, unpinnedAgentCount, releaseDir, latest are not read yet). Every wire field the
 // desktop reads is in this file (`RuntimesWire` + `adaptRuntimes`) and the preview mock (modules/runtimes/mock.ts).
 
 /** cutex capability of `GET /v2/runtimes`. */
@@ -18,7 +18,9 @@ export interface RuntimesWireAgent {
 export interface RuntimesWireEntry {
   /** Short label: "r50" (native) / "claude-r5" (Claude). */
   release: string;
-  /** Full version, e.g. "0.160.0-r50"; absent for Claude runtimes. */
+  /** Short SHA of the runtime binary, including unregistered native builds. */
+  sha256Prefix?: string | null;
+  /** Full version, e.g. "0.160.0-r50"; absent for Claude and unregistered native runtimes. */
   version?: string | null;
   /** `<release dir>/<file>` (native) or the adapter directory name (Claude); never a full path. */
   path?: string | null;
@@ -49,6 +51,7 @@ export interface PinnedAgent {
 export interface InstalledRuntime {
   release: string;
   version: string | null;
+  sha256Prefix: string | null;
   path: string | null;
   selected: boolean;
   missing: boolean;
@@ -81,6 +84,7 @@ function adaptEntry(e: unknown): InstalledRuntime | null {
   return {
     release: w.release,
     version: typeof w.version === "string" ? w.version : null,
+    sha256Prefix: typeof w.sha256Prefix === "string" && w.sha256Prefix ? w.sha256Prefix : null,
     path: typeof w.path === "string" ? w.path : null,
     selected: w.selected === true,
     missing: w.missing === true,

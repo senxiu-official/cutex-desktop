@@ -31,6 +31,7 @@ import { PageFrame, type PageProblem } from "./PageFrame";
 import { TextPreview } from "./TextPreview";
 import { KIND_ICON } from "./refTarget";
 import { loadContent, loadDiff, useDetail } from "./store";
+import { artifactRenderIdentity, largeRenderChoices } from "../../lib/largeRenderChoices";
 
 const CSV_ROWS = 300;
 const TEXT_BYTES = 256 * 1024;
@@ -121,10 +122,13 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
   const [problem, setProblem] = useState<{ key: string; problem: PageProblem } | null>(null);
   const [rawJson, setRawJson] = useState(false);
   // A page over one content window (often embedded audio / video) is shown only after the owner asks.
-  const [largeOk, setLargeOk] = useState<string | null>(null);
+  const decisionKey = artifactRenderIdentity(hostId, version.artifactId, version.version, version.bytes, version.sha256);
+  const [decision, setDecision] = useState(() => ({ key: decisionKey, page: largeRenderChoices.get(decisionKey) === "page" }));
+  // A new revision gets its own decision; revisiting an old one checks its TTL again.
+  if (decision.key !== decisionKey) setDecision({ key: decisionKey, page: largeRenderChoices.get(decisionKey) === "page" });
   const pageProblem = problem?.key === key ? problem.problem : null;
   const asPage = kind === "html" && !code && !pageProblem;
-  const askLarge = asPage && version.bytes > ARTIFACT_PAGE_PROMPT_BYTES && largeOk !== key;
+  const askLarge = asPage && version.bytes > ARTIFACT_PAGE_PROMPT_BYTES && (version.bytes > ARTIFACT_PAGE_MAX_BYTES || decision.key !== decisionKey || !decision.page);
   useEffect(() => {
     if (kind === "binary" || (asPage && !askLarge)) return;
     let live = true;
@@ -171,7 +175,7 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
         <div className="m-2 flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-subtle">
           <span className="min-w-0 flex-1">{t(version.bytes > ARTIFACT_PAGE_MAX_BYTES ? "artifacts.page.overMax" : "artifacts.page.largePrompt", { size, max: formatBytes(ARTIFACT_PAGE_MAX_BYTES) })}</span>
           {version.bytes <= ARTIFACT_PAGE_MAX_BYTES && (
-            <button onClick={() => setLargeOk(key)} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-foreground hover:bg-hover">
+            <button onClick={() => { largeRenderChoices.set(decisionKey, "page"); setDecision({ key: decisionKey, page: true }); }} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-foreground hover:bg-hover">
               <Play size={12} />
               {t("artifacts.page.showLarge")}
             </button>

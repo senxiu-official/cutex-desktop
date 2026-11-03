@@ -8,6 +8,7 @@ import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS, type BrowserControlS
 import { browserClaimOrigin, type BrowserClaimAutoReason, type BrowserClaimTab } from "../../shared/browserClaim";
 import type { ApprovalRecord } from "../../shared/ipc";
 import type { HostBinding } from "../../shared/hosts";
+import { downloadFilename, downloadFilters } from "../../shared/downloadFilename";
 import type { DaemonService } from "../daemon";
 import { admitHostBinding, type HostFence } from "../hostFence";
 import type { HostManager } from "../hosts";
@@ -739,8 +740,26 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     if (!agent && !ownerGesture) { blockedNotice(record, "download"); return false; }
     // The agent's download needs the tab's own window on screen (a desk's for a tab drawn there, P5).
     if (agent && !windowVisible(windowOf(record.guestId))) { blockedNotice(record, "download-hidden"); return false; }
-    const name = item.getFilename().replace(/[\x00-\x1f\x7f<>:"/\\|?*]/g, "_").replace(/^\.+/, "").slice(0, 200) || "download";
-    item.setSaveDialogOptions({ title: browserDownloadDialogTitle(locale(), agent ? lease!.agentName : undefined), defaultPath: join(app.getPath("downloads"), name) });
+    // Chromium has already resolved Content-Disposition. Its genuine suffix wins over MIME / URL
+    // hints; only an extensionless filename needs a fallback from the URL's decoded final segment.
+    const filename = item.getFilename();
+    const hasExtension = !!downloadFilters(filename);
+    let sourcePath = filename;
+    const mime = hasExtension ? undefined : item.getMimeType();
+    if (!hasExtension) {
+      try {
+        const leaf = decodeURIComponent(new URL(item.getURL()).pathname.split("/").at(-1) ?? "");
+        // A decoded separator is not a filename; query strings and URL hostnames are never hints.
+        if (leaf && !/[\\/]/.test(leaf)) sourcePath = leaf;
+      } catch { /* Invalid URLs / escapes provide no filename hint. */ }
+      // A URL often names the endpoint (export.php), not the response body.
+      // Prefer a known payload MIME; retain compound URL suffixes only when compatible.
+      const mimeName = downloadFilename("download", { mime });
+      const mimeExtension = downloadFilters(mimeName)?.[0]?.extensions[0];
+      if (mimeExtension && downloadFilters(sourcePath)?.[0]?.extensions[0] !== mimeExtension) sourcePath = mimeName;
+    }
+    const name = downloadFilename(filename.replace(/^\.+/, ""), { sourcePath, mime, maxLength: 200 });
+    item.setSaveDialogOptions({ title: browserDownloadDialogTitle(locale(), agent ? lease!.agentName : undefined), defaultPath: join(app.getPath("downloads"), name), filters: downloadFilters(name, name) });
     return true;
   }
   /** One owner zoom step of a live guest (keyboard, wheel or the chip): remembered under the page's zoom key

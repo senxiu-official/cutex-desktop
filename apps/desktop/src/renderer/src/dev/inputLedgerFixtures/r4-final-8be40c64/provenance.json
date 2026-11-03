@@ -1,0 +1,14 @@
+{
+  "projection": "public-anonymized-derived",
+  "originalCaptures": false,
+  "notice": "Public derivative of reviewed backend E2E captures; private originals are not included.",
+  "originalJsonlCount": 58,
+  "publicManifestSha256": "3df886d14fcd4c5a0ba44b532b606aedcec977c91dd0a3d96870b4c1d47be6c2",
+  "sanitization": "Reviewed host aliases and owner-home prefix text replacement only; other JSONL bytes and shapes preserved.",
+  "aliasCounts": {
+    "public-host-c": 331
+  },
+  "replacementCount": 331,
+  "ownerHomePrefixReplacementCount": 20,
+  "evidenceScope": "Controlled-fake backend E2E; abridged native rows do not prove native body delivery or real-provider behavior."
+}

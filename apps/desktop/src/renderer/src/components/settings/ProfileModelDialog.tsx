@@ -6,7 +6,7 @@ import { useI18n, type MessageKey } from "../../i18n";
 import { entryNamePatch, modelDraft, modelNameTaken, modelVariantPatch, isClaudeModelsView, MODEL_EFFORTS } from "../../lib/profileModels";
 import { updateProfileModelNames, useModelName } from "../../lib/modelDisplay";
 import { updateCachedProfile } from "../../lib/profileSnapshot";
-import { Button, IconButton, SettingRow, Select, TextInput, Toggle } from "./Form";
+import { Button, FormFields, IconButton, SettingRow, Select, TextInput, Toggle } from "./Form";
 import { CompactInput, WindowInput } from "./ProfileContextInputs";
 import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
 import { useOverlayRoot } from "../../lib/ownerContext";
@@ -81,7 +81,7 @@ export function ProfileModelDialog({ model, profile, view, variant = false, cata
     }
   };
   return createPortal(
-    <dialog ref={dialog} aria-labelledby={titleId} onCancel={(e) => { e.preventDefault(); if (!busy) onClose(); }} className="fixed inset-0 m-auto max-h-[85vh] w-[580px] max-w-[95vw] overflow-y-auto rounded-2xl border border-border bg-surface p-5 text-foreground shadow-2xl backdrop:bg-black/40">
+    <FormFields><dialog ref={dialog} aria-labelledby={titleId} onCancel={(e) => { e.preventDefault(); if (!busy) onClose(); }} className="fixed inset-0 m-auto max-h-[85vh] w-[580px] max-w-[95vw] overflow-y-auto rounded-2xl border border-border bg-surface p-5 text-foreground shadow-2xl backdrop:bg-black/40">
         <div className="mb-3 flex items-center">
           <h3 id={titleId} className="font-semibold">{variant ? t("agent-config.profile.addVariant") : model ? t("agent-config.profile.editModel") : t("agent-config.profile.addModel")}</h3>
           <span className="ml-auto">
@@ -159,7 +159,7 @@ export function ProfileModelDialog({ model, profile, view, variant = false, cata
             <Button primary disabled={busy || !id.trim() || taken || !Object.values(valid).every(Boolean)} onClick={() => void save()}>{t("settings.save")}</Button>
           </div>
         </div>
-    </dialog>, overlayRoot,
+    </dialog></FormFields>, overlayRoot,
   );
 }
 

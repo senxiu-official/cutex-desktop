@@ -26,7 +26,7 @@ import { DelegationList } from "../../components/DelegationList";
 import { ProjectMemoryList } from "../../components/ProjectMemory";
 import { ServiceLine } from "../../components/ServiceLine";
 import { PageBody, SubNav, SUBNAV_ITEM, SUBNAV_OFF, SUBNAV_ON } from "../../components/Page";
-import { Button, SettingRow, SettingsGroup, Section, Select, TextInput } from "../../components/settings/Form";
+import { Button, FormFields, SettingRow, SettingsGroup, Section, Select, TextInput } from "../../components/settings/Form";
 import { ProjectColorPicker } from "../../components/ProjectColorPicker";
 import { ProjectBadge } from "../../components/ProjectBadge";
 import { ProjectIconPicker } from "../../components/ProjectIconPicker";
@@ -107,7 +107,7 @@ function NewProject() {
   const target = useCreateHost();
   return (
     <TargetHostContext.Provider value={target.hostId}>
-      <NewProjectForm key={target.hostId} target={target} />
+      <FormFields><NewProjectForm key={target.hostId} target={target} /></FormFields>
     </TargetHostContext.Provider>
   );
 }
@@ -115,7 +115,6 @@ function NewProject() {
 function NewProjectForm({ target }: { target: CreateHost }) {
   const { t } = useI18n();
   const api = useTargetApi();
-  const isFocus = useTargetIsFocus();
   const remote = useTargetIsRemote();
   const sidebar = useTargetSidebar();
   const refreshHostSidebar = useApp((s) => s.refreshHostSidebar);
@@ -124,7 +123,7 @@ function NewProjectForm({ target }: { target: CreateHost }) {
   // cutex creates a directory that doesn't exist yet (only with create_project, i.e. `optional`).
   const createRoot = optional && features.has(CREATE_ROOT_FEATURE);
   const hostId = target.hostId;
-  const hostLabel = target.look?.label ?? "";
+  const hostLabel = target.look?.label ?? hostId;
   const online = target.look?.indicator.status === "online";
   const [name, setName] = useState("");
   const [badge, setBadge] = useState("");
@@ -190,21 +189,21 @@ function NewProjectForm({ target }: { target: CreateHost }) {
           )}
         </div>
       )}
-      <Section title={t("projects.basics")} hint={t(optional ? "projects.newHintOptional" : "projects.newHint")} actions={<Button primary disabled={!ready} onClick={() => void create()}>{t("projects.create")}</Button>}>
+      <Section title={t("projects.basics")} hint={<>{t(optional ? "projects.newHintOptional" : "projects.newHint")}<span className="mt-1 block" data-form-host="">{t("hostPicker.opensOther", { host: hostLabel })}</span></>} actions={<Button primary disabled={!ready} onClick={() => void create()}>{t("projects.create")}</Button>}>
         {target.mode !== "none" && (
           <SettingRow
             agents="none"
             source="local"
             label={t("hostPicker.label")}
-            hint={!online ? <span className="text-warn">{t("hostPicker.unavailable", { host: hostLabel })}</span> : !isFocus ? t("hostPicker.opensOther", { host: hostLabel }) : undefined}
+            hint={!online ? <span className="text-warn">{t("hostPicker.unavailable", { host: hostLabel })}</span> : undefined}
           >
             <HostPicker value={hostId} onChange={target.setHostId} mode={target.mode} title={t("hostPicker.createTitle")} />
           </SettingRow>
         )}
         <SettingRow agents="none" source={["host", "local"]} label={t("projects.name")} info={t("projects.icon.hint")}>
-          <div className="flex items-center gap-2">
-            <ProjectIconPicker value={icon} onIcon={setIcon} badge={badgeText || "?"} color={color} onColor={setColor} />
-            <TextInput width="w-56" value={name} onChange={setName} />
+          <div className="flex w-full min-w-0 max-w-sm items-center gap-2" data-project-name-field="">
+            <span className="shrink-0"><ProjectIconPicker value={icon} onIcon={setIcon} badge={badgeText || "?"} color={color} onColor={setColor} /></span>
+            <div className="min-w-0 flex-1"><TextInput width="w-full" value={name} onChange={setName} label={t("projects.name")} /></div>
           </div>
         </SettingRow>
         <SettingRow agents="none" source="host" label={t("projects.badge")} info={t(features.has("project-badge-wide") ? "projects.badgeHintWide" : "projects.badgeHint")}>
@@ -214,8 +213,8 @@ function NewProjectForm({ target }: { target: CreateHost }) {
           <ProjectColorPicker value={color} onChange={setColor} />
         </SettingRow>
         <SettingRow agents="next" source="host" label={t("projects.directory")} hint={t(createRoot ? "projects.directoryCreateHint" : "projects.directoryNewHint")}>
-          <div className="flex items-center gap-1.5">
-            <TextInput width="w-72" mono value={dir} onChange={setDir} placeholder={remote ? "/home/me/project" : "D:\\path\\to\\project"} />
+          <div className="flex w-full min-w-0 max-w-xl flex-wrap items-center gap-1.5" data-project-directory-field="">
+            <div className="min-w-0 flex-1 basis-48"><TextInput width="w-full" mono value={dir} onChange={setDir} label={t("projects.directory")} placeholder={remote ? "/home/me/project" : "D:\\path\\to\\project"} /></div>
             <Button
               disabled={pickBlocked}
               onClick={() =>
@@ -301,6 +300,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
   const [badge, setBadge] = useState(project.presentation.badge_label);
   const [badgeComposing, setBadgeComposing] = useState(false);
   const [color, setColor] = useState(project.presentation.color);
+  const [colorSaving, setColorSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const allServices = useHostData(hostId)?.services;
   const projectServices = useMemo(() => (allServices ?? []).filter((s) => s.projectId === project.project_id), [allServices, project.project_id]);
@@ -536,8 +536,13 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
   // A colour from the icon picker applies at once (with the *saved* name / badge, so half-typed
   // form edits don't ride along); the rest of the form keeps its explicit 保存.
   const applyColor = (c: string) => {
-    setColor(c);
-    void run(() => api.projectPresentation(id, { authorityEpoch: project.authority_epoch, presentationRevision: project.presentation.revision ?? 0 }, { display_name: project.presentation.display_name, badge_label: project.presentation.badge_label, color: c }));
+    if (colorSaving) return;
+    setColorSaving(true);
+    // Retain the current colour until the host accepts it (older hosts may reject RGB).
+    void run(async () => {
+      await api.projectPresentation(id, { authorityEpoch: project.authority_epoch, presentationRevision: project.presentation.revision ?? 0 }, { display_name: project.presentation.display_name, badge_label: project.presentation.badge_label, color: c });
+      if (saved.current.id === id) setColor(c);
+    }).finally(() => setColorSaving(false));
   };
   const dirty = name !== project.presentation.display_name || badge !== project.presentation.badge_label || color !== project.presentation.color;
   const displayName = project.presentation.display_name;
@@ -749,7 +754,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
       >
         <SettingRow agents="none" source={["host", "local"]} label={t("projects.name")} info={t("projects.icon.hint")}>
           <div className="flex items-center gap-2">
-            <ProjectIconPicker hostId={hostId} projectId={id} badge={badge.trim() || name.trim().slice(0, 1) || project.presentation.display_name.slice(0, 1)} color={color} onColor={applyColor} />
+            <ProjectIconPicker hostId={hostId} projectId={id} badge={badge.trim() || name.trim().slice(0, 1) || project.presentation.display_name.slice(0, 1)} color={color} onColor={applyColor} disabled={colorSaving} />
             <TextInput width="w-56" value={name} onChange={setName} />
           </div>
         </SettingRow>

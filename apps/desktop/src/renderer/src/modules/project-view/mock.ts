@@ -12,6 +12,7 @@ import type { BackgroundItem, ProjectBackground, ProjectEvent, ProjectEventPage,
 import type { MockCore, ModuleMock } from "../../dev/mockTypes";
 
 const on = typeof location !== "undefined" && new URLSearchParams(location.search).has("projectview");
+const ownerActivityScene = on && new URLSearchParams(location.search).get("activity") === "owner";
 const PROJECT = "cutex-dev";
 // ?projectview&director=vacant exercises owner review while the seat is cleared.
 const directorVacant = typeof location !== "undefined" && new URLSearchParams(location.search).get("director") === "vacant";
@@ -248,6 +249,12 @@ function seedRows(): void {
     const at = now - (count - i) * 25 * 60_000 - (i % 3) * 60_000;
     if (i === 40) out.push(makeRow(++seq, at - 60_000, ["journal.gap", null, null, null]));
     out.push(makeRow(++seq, at, TEMPLATES[i % TEMPLATES.length]!));
+  }
+  if (ownerActivityScene) {
+    out.push(makeRow(++seq, now - 180_000, ["turn.completed", "pv-shm", "完成委托中的布局迁移检查", "检查完成，报告已发布。", { turnOrigin: "external", durationMs: 83_000, toolCalls: 12 }]));
+    out.push(makeRow(++seq, now - 120_000, ["turn.completed", "pv-dir", "整理项目说明", "项目说明已经更新。", { durationMs: 28_000, toolCalls: 4 }]));
+    out.push(makeRow(++seq, now - 60_000, ["turn.completed", "pv-dir", "这一版的布局有什么变化？", "布局变更已整理在对话中。", { turnOrigin: "owner", durationMs: 18_000, toolCalls: 2 }]));
+    out.push(makeRow(++seq, now - 30_000, ["artifact.published", "pv-shm", "布局迁移检查报告", "文档"]));
   }
   rows = out.reverse();
 }

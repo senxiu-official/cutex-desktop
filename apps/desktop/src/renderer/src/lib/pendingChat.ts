@@ -49,7 +49,7 @@ export interface PendingChatState {
   /** Set once cutex created the session: retries reuse it. */
   sessionId: string | null;
   /** Steps already applied to `sessionId`. */
-  applied: { plan: boolean; goal: boolean };
+  applied: { plan: boolean; goal: boolean; runtime?: boolean };
 }
 
 export type PendingChatStep =

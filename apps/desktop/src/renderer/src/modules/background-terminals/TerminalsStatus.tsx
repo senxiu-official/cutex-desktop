@@ -20,7 +20,7 @@ function formatRss(kb: number | null): string {
 
 /** One background terminal (lib/capsuleRows): command · CPU / memory; terminate (and the disabled
  *  输出) take the meta's place on hover / focus. Terminate is click-twice (lib/armedConfirm). */
-function TerminalRow({ term, onTerminate }: { term: BackgroundTerminal; onTerminate(): Promise<void> }) {
+function TerminalRow({ term, onTerminate, claude, startedAt }: { term: BackgroundTerminal; onTerminate(): Promise<void>; claude?: boolean; startedAt?: number }) {
   const { t } = useI18n();
   const [armed, setArmed] = useArmed();
   const usage = [term.cpuPercent !== null && `${term.cpuPercent.toFixed(0)}%`, formatRss(term.rssKb)].filter(Boolean).join(" · ");
@@ -30,10 +30,13 @@ function TerminalRow({ term, onTerminate }: { term: BackgroundTerminal; onTermin
       <span className={CAPSULE_ROW_ICON}>
         <SquareTerminal size={14} className={armed ? "text-danger" : ""} />
       </span>
-      <span className="min-w-0 flex-1 truncate font-mono text-meta/[inherit] text-foreground">{term.command}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-mono text-meta/[inherit] text-foreground">{term.command}</span>
+        {claude && <span className="block text-caption text-subtle">{t("background-terminals.running")} · {startedAt ? t("background-terminals.started", { time: new Date(startedAt).toLocaleString() }) : t("background-terminals.startedUnknown")}</span>}
+      </span>
       {armed ? <span className="shrink-0 text-caption/[inherit] text-danger">{t("background-terminals.terminateAgain")}</span> : usage && <span className={CAPSULE_ROW_META}>{usage}</span>}
       <span className={capsuleRowActions(armed)}>
-        {!armed && (
+        {!armed && !claude && (
           <button title={t("background-terminals.output")} disabled className={CAPSULE_ROW_ACTION}>
             {t("background-terminals.output")}
           </button>
@@ -56,6 +59,7 @@ function TerminalRow({ term, onTerminate }: { term: BackgroundTerminal; onTermin
 }
 
 function TerminalRows({ sessionId, data }: { sessionId: string; data: TerminalsData }) {
+  const { t } = useI18n();
   const { threadId, terminals, refresh } = data;
   const conv = useConvScope();
   const terminate = async (processId: string) => {
@@ -70,8 +74,9 @@ function TerminalRows({ sessionId, data }: { sessionId: string; data: TerminalsD
   return (
     <div>
       {terminals.map((term) => (
-        <TerminalRow key={term.processId} term={term} onTerminate={() => terminate(term.processId)} />
+        <TerminalRow key={term.processId} term={term} claude={data.claude} startedAt={data.startedAt?.[term.processId]} onTerminate={() => terminate(term.processId)} />
       ))}
+      {data.claude && terminals.length > 0 && <p className="px-2 py-2 text-xs text-subtle">{t("background-terminals.agentOutputOnly")}</p>}
     </div>
   );
 }

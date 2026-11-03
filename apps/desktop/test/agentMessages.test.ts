@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentMessageText, applyMessageEvent, deliveryKindOf, isLegacyPeerTell, lastFinishedTurnStart, peerSenderOf, pendingMessagesFor, seedMessages, splitEnvelopeText, stateOf, stripLegacyPrefix, wakeableNotes, type MessageMap } from "../src/renderer/src/lib/agentMessages";
+import { agentMessageText, applyMessageEvent, deliveryKindOf, isLegacyPeerTell, lastFinishedTurnStart, peerSenderOf, pendingMessagesFor, seedMessages, splitEnvelopeText, stateOf, stripLegacyPrefix, wakeableNotes, type MessageMap } from "../src/renderer/src/lib/legacyDelivery/agentMessages";
 import { parseExternalInput } from "../src/renderer/src/lib/timeline";
 
 const sent = { messageId: "m1", fromCutexSessionId: "a", toCutexSessionId: "b", deliveryMode: "passive", deliveryKind: "note", content: "hi", body: "hi", sender: { id: "a", name: "Alpha", runtime: "codex" }, recipient: { id: "b", name: "Beta", runtime: "claude" } };

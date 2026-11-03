@@ -55,6 +55,24 @@ beforeEach(() => {
 afterEach(() => service.stop());
 
 describe("attachment host routing through real DaemonService", () => {
+  it.each([
+    [{ featureList: [] }, false],
+    [{ featureList: ["owner-admission-held-v1"] }, true],
+    [{ featureList: ["ownerAdmissionHeldV1"] }, true],
+    [{ features: { ownerAdmissionHeldV1: true } }, true],
+  ])("negotiates held for sends and auto steers from this connection's capabilities: %j", async (caps, allowHeld) => {
+    const a = switchTo("a");
+    await (service as any).capabilitiesCache.read(() => Promise.resolve(caps));
+    a.submitInput.mockResolvedValue({ disposition: "held", heldBy: "hostBusy" });
+    const result = await service.submit("same-session", "owner text", "auto", false, { clientUserMessageId: "stable-message" });
+    expect(a.submitInput).toHaveBeenCalledOnce();
+    expect(a.submitInput.mock.calls[0][3]).toMatchObject({ clientUserMessageId: "stable-message" });
+    expect(a.submitInput.mock.calls[0][3].allowHeld).toBe(allowHeld ? true : undefined);
+    expect(result).toEqual({ disposition: "held", heldBy: "hostBusy" });
+    const b = switchTo("b");
+    await service.submit("same-session", "owner text", "auto");
+    expect(b.submitInput.mock.calls[0][3].allowHeld).toBeUndefined();
+  });
   it("keeps normal sequential uploads and submit on originating client", async () => {
     const a = switchTo("a");
     await pick(["/fixture/one.png", "/fixture/two.png"]);

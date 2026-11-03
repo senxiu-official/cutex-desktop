@@ -121,6 +121,9 @@ export async function fetchWithRetry(fetchOnce: typeof fetch, url: string, init:
     }
     // The input-submit path already owns this separate capacity policy and its tracing.
     if (!error || error.capacityExceeded || (response.status === 503 && !error.retryable) || (!read && !error.retryable)) return response;
+    // A definite admission rejection can be cached against this wire requestId. The owner
+    // operation must retry with unchanged consent/fences but a new wire ID, not replay this fetch.
+    if (error.code === "admission_busy" && (error.details as { reason?: unknown } | null)?.reason === "hostBusy") return response;
     const base = Math.max(100 * 2 ** (attempt - 1), delayHint(response, error));
     const jitter = Math.min(base * 0.2, 100) * Math.min(1, Math.max(0, (options.random ?? Math.random)()));
     const delay = Math.ceil(base + jitter);

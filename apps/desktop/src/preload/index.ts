@@ -1,3 +1,5 @@
+import { installDebugReactHook } from "../shared/debugReactHook";
+import { DEBUG_CHANNEL, debugError, type DebugRequest } from "../shared/debug";
 import { contextBridge, ipcRenderer } from "electron";
 import { browserBridge } from "./browser";
 import { PLUGINS_CHANNEL, type PluginRequest } from "../shared/plugins";
@@ -24,6 +26,19 @@ import {
   type ShellRequest,
   type UpdateRequest,
 } from "../shared/ipc";
+
+// A one-time main-owned flag, including reloads after changing the setting.
+let debugEnabled = ipcRenderer.sendSync(DEBUG_CHANNEL) === true;
+if (debugEnabled) contextBridge.executeInMainWorld({ func: installDebugReactHook });
+function invoke(channel: string, ...args: unknown[]): ReturnType<typeof ipcRenderer.invoke> {
+  const call = ipcRenderer.invoke(channel, ...args);
+  if (!debugEnabled || channel === DEBUG_CHANNEL) return call;
+  return call.catch((error: unknown) => {
+    const method = typeof args[0] === "string" ? args[0] : String((args[0] as { op?: string } | undefined)?.op ?? "request");
+    void ipcRenderer.invoke(DEBUG_CHANNEL, { op: "report", entries: [debugError(error, `${channel}.${method}`)] } satisfies DebugRequest).catch(() => {});
+    throw error;
+  });
+}
 
 const METHODS: InvokeMethod[] = [
   "hosts",
@@ -87,6 +102,7 @@ const METHODS: InvokeMethod[] = [
   "delegationUpgradeOperation",
   "delegationRetirementReview",
   "closeBusMessage",
+  "busMessageEvidence",
   "runtimes",
   "claudeAccounts",
   "addProfileVariant",
@@ -275,6 +291,8 @@ const METHODS: InvokeMethod[] = [
   "clearOwnerPerson",
   "components",
   "componentAction",
+  "componentConfigure",
+  "componentIndexCheck",
   "askCommand",
   "jobs",
   "jobServiceCapabilities",
@@ -344,6 +362,7 @@ const METHODS: InvokeMethod[] = [
   "putProfileImage",
   "getProfile",
   "listProfiles",
+  "inputGet", "inputList", "inputRetry", "inputInterruptSend", "inputDismiss", "inputLeaseRelease", "queueMerge",
   "queueList",
   "queueUpdate",
   "queueRemove",
@@ -439,7 +458,7 @@ const api = Object.fromEntries(
   METHODS.map((method) => [method, async (...args: unknown[]) => {
     const before = observation;
     if (HOST_METHOD_SET.has(method)) {
-      const result = await ipcRenderer.invoke(INVOKE_CHANNEL, method, args, null);
+      const result = await invoke(INVOKE_CHANNEL, method, args, null);
       if (method === "hosts") {
         // The explicit startup handshake also updates the renderer before authorizing its API.
         // A late handshake may not replace a newer event or implicitly authorize an old intent.
@@ -450,7 +469,7 @@ const api = Object.fromEntries(
     }
     // Daemon call on the focus host: main refuses it, or its reply, once the focus moved or that
     // host reconnected ("host switched", HostBinding.focus).
-    return ipcRenderer.invoke(INVOKE_CHANNEL, method, args, focusBinding());
+    return invoke(INVOKE_CHANNEL, method, args, focusBinding());
   }]),
 ) as unknown as DesktopApi;
 
@@ -461,7 +480,7 @@ function apiFor(hostId: string): DaemonApi {
   let hostApi = hostApis.get(hostId);
   if (!hostApi) {
     hostApi = Object.fromEntries(
-      DAEMON_METHODS.map((method) => [method, (...args: unknown[]) => ipcRenderer.invoke(INVOKE_CHANNEL, method, args, deliveringHosts ? null : (bindings.get(hostId) ?? null))]),
+      DAEMON_METHODS.map((method) => [method, (...args: unknown[]) => invoke(INVOKE_CHANNEL, method, args, deliveringHosts ? null : (bindings.get(hostId) ?? null))]),
     ) as unknown as DaemonApi;
     hostApis.set(hostId, hostApi);
   }
@@ -469,6 +488,7 @@ function apiFor(hostId: string): DaemonApi {
 }
 
 ipcRenderer.on(EVENT_CHANNEL, (_event, name: string, payload: unknown) => {
+  if (name === "debug" && payload && typeof payload === "object" && "state" in payload) debugEnabled = (payload as { state: { enabled?: boolean } }).state.enabled === true;
   if (name === "hostsState") return deliverHosts(payload as HostsState);
   // An event of a connection the renderer has not seen yet, or of one already replaced: dropped
   // (the matching hostsState starts that host over anyway).
@@ -482,45 +502,54 @@ ipcRenderer.on(EVENT_CHANNEL, (_event, name: string, payload: unknown) => {
 });
 
 const bridge: PreloadBridge = {
-  browser: browserBridge({ invoke: (channel, request, binding) => ipcRenderer.invoke(channel, request, binding), binding: hostId => deliveringHosts ? null : bindings.get(hostId) ?? null, subscribe: listener => bridge.on("browserEvent", listener) }),
+  debug: {
+    initiallyEnabled: debugEnabled,
+    state: () => invoke(DEBUG_CHANNEL, { op: "state" } satisfies DebugRequest),
+    enable: value => invoke(DEBUG_CHANNEL, { op: "enable", value } satisfies DebugRequest),
+    save: () => invoke(DEBUG_CHANNEL, { op: "save" } satisfies DebugRequest),
+    reveal: () => invoke(DEBUG_CHANNEL, { op: "reveal" } satisfies DebugRequest),
+    devtools: () => invoke(DEBUG_CHANNEL, { op: "devtools" } satisfies DebugRequest),
+    report: entries => invoke(DEBUG_CHANNEL, { op: "report", entries } satisfies DebugRequest),
+  },
+  browser: browserBridge({ invoke: (channel, request, binding) => invoke(channel, request, binding), binding: hostId => deliveringHosts ? null : bindings.get(hostId) ?? null, subscribe: listener => bridge.on("browserEvent", listener) }),
   api,
   apiFor,
   plugins: {
-    list: () => ipcRenderer.invoke(PLUGINS_CHANNEL, { op: "list" } satisfies PluginRequest),
-    prepare: (input) => ipcRenderer.invoke(PLUGINS_CHANNEL, { ...input, op: "prepare" } satisfies PluginRequest),
-    release: (id) => ipcRenderer.invoke(PLUGINS_CHANNEL, { op: "release", id } satisfies PluginRequest),
+    list: () => invoke(PLUGINS_CHANNEL, { op: "list" } satisfies PluginRequest),
+    prepare: (input) => invoke(PLUGINS_CHANNEL, { ...input, op: "prepare" } satisfies PluginRequest),
+    release: (id) => invoke(PLUGINS_CHANNEL, { op: "release", id } satisfies PluginRequest),
   },
   frames: {
-    prepareArtifactPage: (input, deskId) => ipcRenderer.invoke(FRAMES_CHANNEL, { op: "artifactPage", hostId: input.hostId, artifactId: input.artifactId, version: input.version, ...(input.large ? { large: true } : {}), ...(deskId === undefined ? {} : { deskId }) } satisfies FrameRequest),
-    prepareFilePage: (input, deskId) => ipcRenderer.invoke(FRAMES_CHANNEL, { op: "filePage", hostId: input.hostId, path: input.path, ...(input.scope ? { scope: { kind: input.scope.kind, id: input.scope.id } } : {}), ...(input.large ? { large: true } : {}), ...(deskId === undefined ? {} : { deskId }) } satisfies FrameRequest),
-    release: (id) => ipcRenderer.invoke(FRAMES_CHANNEL, { op: "release", id } satisfies FrameRequest),
-    page: (id, call) => ipcRenderer.invoke(FRAMES_CHANNEL, { op: "page", id, call } satisfies FrameRequest),
-    pageDataUsage: () => ipcRenderer.invoke(FRAMES_CHANNEL, { op: "pageDataUsage" } satisfies FrameRequest),
-    pageDataClear: (hostId, artifactId) => ipcRenderer.invoke(FRAMES_CHANNEL, { op: "pageDataClear", hostId, artifactId } satisfies FrameRequest),
+    prepareArtifactPage: (input, deskId) => invoke(FRAMES_CHANNEL, { op: "artifactPage", hostId: input.hostId, artifactId: input.artifactId, version: input.version, ...(input.large ? { large: true } : {}), ...(deskId === undefined ? {} : { deskId }) } satisfies FrameRequest),
+    prepareFilePage: (input, deskId) => invoke(FRAMES_CHANNEL, { op: "filePage", hostId: input.hostId, path: input.path, ...(input.scope ? { scope: { kind: input.scope.kind, id: input.scope.id } } : {}), ...(input.large ? { large: true } : {}), ...(deskId === undefined ? {} : { deskId }) } satisfies FrameRequest),
+    release: (id) => invoke(FRAMES_CHANNEL, { op: "release", id } satisfies FrameRequest),
+    page: (id, call) => invoke(FRAMES_CHANNEL, { op: "page", id, call } satisfies FrameRequest),
+    pageDataUsage: () => invoke(FRAMES_CHANNEL, { op: "pageDataUsage" } satisfies FrameRequest),
+    pageDataClear: (hostId, artifactId) => invoke(FRAMES_CHANNEL, { op: "pageDataClear", hostId, artifactId } satisfies FrameRequest),
   },
   modulePacks: {
-    state: () => ipcRenderer.invoke(MODULE_PACKS_CHANNEL, { op: "state" } satisfies ModulePacksRequest),
-    check: () => ipcRenderer.invoke(MODULE_PACKS_CHANNEL, { op: "check" } satisfies ModulePacksRequest),
-    install: (input) => ipcRenderer.invoke(MODULE_PACKS_CHANNEL, { op: "install", id: input.id, ...(input.version !== undefined ? { version: input.version } : {}), ...(input.allowOlder ? { allowOlder: true } : {}) } satisfies ModulePacksRequest),
-    remove: (input) => ipcRenderer.invoke(MODULE_PACKS_CHANNEL, { op: "remove", id: input.id } satisfies ModulePacksRequest),
+    state: () => invoke(MODULE_PACKS_CHANNEL, { op: "state" } satisfies ModulePacksRequest),
+    check: () => invoke(MODULE_PACKS_CHANNEL, { op: "check" } satisfies ModulePacksRequest),
+    install: (input) => invoke(MODULE_PACKS_CHANNEL, { op: "install", id: input.id, ...(input.version !== undefined ? { version: input.version } : {}), ...(input.allowOlder ? { allowOlder: true } : {}) } satisfies ModulePacksRequest),
+    remove: (input) => invoke(MODULE_PACKS_CHANNEL, { op: "remove", id: input.id } satisfies ModulePacksRequest),
     onState: (listener) => bridge.on("modulePacks", listener),
   },
   knownIssues: {
-    get: (refresh) => ipcRenderer.invoke(KNOWN_ISSUES_CHANNEL, { op: "get", refresh: refresh === true } satisfies KnownIssuesRequest),
+    get: (refresh) => invoke(KNOWN_ISSUES_CHANNEL, { op: "get", refresh: refresh === true } satisfies KnownIssuesRequest),
   },
   launchArt: {
-    state: () => ipcRenderer.invoke(LAUNCH_ART_CHANNEL, { op: "state" } satisfies LaunchArtRequest),
-    import: () => ipcRenderer.invoke(LAUNCH_ART_CHANNEL, { op: "import" } satisfies LaunchArtRequest),
-    clear: () => ipcRenderer.invoke(LAUNCH_ART_CHANNEL, { op: "clear" } satisfies LaunchArtRequest),
+    state: () => invoke(LAUNCH_ART_CHANNEL, { op: "state" } satisfies LaunchArtRequest),
+    import: () => invoke(LAUNCH_ART_CHANNEL, { op: "import" } satisfies LaunchArtRequest),
+    clear: () => invoke(LAUNCH_ART_CHANNEL, { op: "clear" } satisfies LaunchArtRequest),
   },
   directorAvatars: {
-    list: () => ipcRenderer.invoke(DIRECTOR_AVATARS_CHANNEL, { op: "list" } satisfies DirectorAvatarsRequest),
-    openFolder: () => ipcRenderer.invoke(DIRECTOR_AVATARS_CHANNEL, { op: "openFolder" } satisfies DirectorAvatarsRequest),
+    list: () => invoke(DIRECTOR_AVATARS_CHANNEL, { op: "list" } satisfies DirectorAvatarsRequest),
+    openFolder: () => invoke(DIRECTOR_AVATARS_CHANNEL, { op: "openFolder" } satisfies DirectorAvatarsRequest),
   },
   portraitPacks: {
-    list: () => ipcRenderer.invoke(PORTRAIT_PACKS_CHANNEL, { op: "list" } satisfies PortraitPacksRequest),
-    openFolder: () => ipcRenderer.invoke(PORTRAIT_PACKS_CHANNEL, { op: "openFolder" } satisfies PortraitPacksRequest),
-    image: (ref, kind) => ipcRenderer.invoke(PORTRAIT_PACKS_CHANNEL, { op: "image", pack: ref.pack, theme: ref.theme, stem: ref.stem, kind } satisfies PortraitPacksRequest),
+    list: () => invoke(PORTRAIT_PACKS_CHANNEL, { op: "list" } satisfies PortraitPacksRequest),
+    openFolder: () => invoke(PORTRAIT_PACKS_CHANNEL, { op: "openFolder" } satisfies PortraitPacksRequest),
+    image: (ref, kind) => invoke(PORTRAIT_PACKS_CHANNEL, { op: "image", pack: ref.pack, theme: ref.theme, stem: ref.stem, kind } satisfies PortraitPacksRequest),
   },
   on(event, listener) {
     const set = listeners.get(event) ?? new Set();
@@ -530,15 +559,15 @@ const bridge: PreloadBridge = {
   },
   platform: process.platform,
   window: {
-    control: (action, deskId) => ipcRenderer.invoke(WINDOW_CHANNEL, "control", deskId === undefined ? action : { action, deskId }),
+    control: (action, deskId) => invoke(WINDOW_CHANNEL, "control", deskId === undefined ? action : { action, deskId }),
     desk: {
-      ticket: (deskId) => ipcRenderer.invoke(WINDOW_CHANNEL, "desk", { op: "ticket", ...(deskId === undefined ? {} : { deskId }) }),
-      focus: (deskId) => ipcRenderer.invoke(WINDOW_CHANNEL, "desk", { op: "focus", deskId }),
-      close: (deskId) => ipcRenderer.invoke(WINDOW_CHANNEL, "desk", { op: "close", deskId }),
+      ticket: (deskId) => invoke(WINDOW_CHANNEL, "desk", { op: "ticket", ...(deskId === undefined ? {} : { deskId }) }),
+      focus: (deskId) => invoke(WINDOW_CHANNEL, "desk", { op: "focus", deskId }),
+      close: (deskId) => invoke(WINDOW_CHANNEL, "desk", { op: "close", deskId }),
     },
-    setChrome: (colors) => ipcRenderer.invoke(WINDOW_CHANNEL, "chrome", colors),
-    setBackground: (color) => ipcRenderer.invoke(WINDOW_CHANNEL, "background", color),
-    setScheme: (scheme) => ipcRenderer.invoke(WINDOW_CHANNEL, "scheme", scheme),
+    setChrome: (colors) => invoke(WINDOW_CHANNEL, "chrome", colors),
+    setBackground: (color) => invoke(WINDOW_CHANNEL, "background", color),
+    setScheme: (scheme) => invoke(WINDOW_CHANNEL, "scheme", scheme),
     nativeControls: process.platform === "win32" ? "right" : process.platform === "darwin" ? "left" : null,
   },
   shell: {
@@ -569,16 +598,16 @@ const bridge: PreloadBridge = {
     answerRemoteClose: (action) => shellInvoke({ op: "answerRemoteClose", action }),
   },
   update: {
-    state: () => ipcRenderer.invoke(UPDATE_CHANNEL, { op: "state" } satisfies UpdateRequest),
-    check: () => ipcRenderer.invoke(UPDATE_CHANNEL, { op: "check" } satisfies UpdateRequest),
-    apply: () => ipcRenderer.invoke(UPDATE_CHANNEL, { op: "apply" } satisfies UpdateRequest),
-    setChannel: (channel: string) => ipcRenderer.invoke(UPDATE_CHANNEL, { op: "setChannel", channel } satisfies UpdateRequest),
-    deleteOldReleases: () => ipcRenderer.invoke(UPDATE_CHANNEL, { op: "deleteOldReleases" } satisfies UpdateRequest),
+    state: () => invoke(UPDATE_CHANNEL, { op: "state" } satisfies UpdateRequest),
+    check: () => invoke(UPDATE_CHANNEL, { op: "check" } satisfies UpdateRequest),
+    apply: () => invoke(UPDATE_CHANNEL, { op: "apply" } satisfies UpdateRequest),
+    setChannel: (channel: string) => invoke(UPDATE_CHANNEL, { op: "setChannel", channel } satisfies UpdateRequest),
+    deleteOldReleases: () => invoke(UPDATE_CHANNEL, { op: "deleteOldReleases" } satisfies UpdateRequest),
   },
 };
 
 function shellInvoke<T>(request: ShellRequest): Promise<T> {
-  return ipcRenderer.invoke(SHELL_CHANNEL, request) as Promise<T>;
+  return invoke(SHELL_CHANNEL, request) as Promise<T>;
 }
 
 contextBridge.exposeInMainWorld("cutex", bridge);

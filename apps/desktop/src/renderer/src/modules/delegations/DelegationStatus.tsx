@@ -25,7 +25,7 @@ import { CAPSULE_LINE, CAPSULE_ROW, CAPSULE_ROW_ACTION, CAPSULE_ROW_MAIN, capsul
 import type { AgentDelegations } from "./useDelegationsStatus";
 import { openDelegationDetailHere } from "./refTarget";
 import { HiddenUndo } from "../../components/HiddenUndo";
-import { hiddenKey, useHiddenRows, visibleRows } from "../../lib/hiddenRows";
+import { hiddenKey, useHiddenRows, visibleRows } from "../../lib/legacyDelivery/hiddenRows";
 
 /** Time after a row's status: run time while running, since it stopped when interrupted, else how long it has waited. */
 function rowTime(d: AskSummary, ctx: DelegationContext, now: number, locale?: Locale): string | null {

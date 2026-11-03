@@ -2,7 +2,7 @@
 // agent's Profile has 工具参数严格模式 off (lib/toolSchemaHint). 「打开并重试」 turns it on for the Profile — a
 // 下次启动生效 setting, so an online agent is restarted (confirmed first while it works) — and sends the failed
 // turn's message again; 「去 Profile 设置」 opens the Profile; 「不再提示」 hides it for this Profile.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiFor } from "../bridge";
 import { useI18n } from "../i18n";
 import { sessionProfileName } from "../lib/agentLook";
@@ -12,9 +12,10 @@ import { fieldOffered } from "../lib/profileKind";
 import { updateCachedProfile } from "../lib/profileSnapshot";
 import { dismissToolSchemaHint, PROFILE_TOOL_SCHEMA_COMPAT_FEATURE, useToolSchemaHintDismissed } from "../lib/toolSchemaHint";
 import { viewRow } from "../lib/viewHost";
+import { isHostBusyActionPending } from "../lib/hostBusyActions";
 import { useApp } from "../store";
 
-type Phase = { kind: "idle" } | { kind: "working" } | { kind: "done"; resent: boolean } | { kind: "failed"; message: string };
+type Phase = { kind: "idle" } | { kind: "working" } | { kind: "pending" } | { kind: "done"; resent: boolean } | { kind: "failed"; message: string };
 
 export function ToolSchemaHint({ hostId, sessionId, retryText }: { hostId: string; sessionId: string; /** The failed turn's message (sent again), if it had one. */ retryText: string | null }) {
   const { t } = useI18n();
@@ -25,6 +26,12 @@ export function ToolSchemaHint({ hostId, sessionId, retryText }: { hostId: strin
   // The Profile as the host has it now: hidden while unknown, when strict mode is already on, or not offered.
   const [offered, setOffered] = useState<boolean | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  const scope = JSON.stringify([hostId, sessionId, profile]);
+  const progress = useRef({ scope, configured: false, stopped: false, started: false, resent: false, running: false, startRequired: false });
+  if (progress.current.scope !== scope) {
+    progress.current = { scope, configured: false, stopped: false, started: false, resent: false, running: false, startRequired: false };
+    setPhase({ kind: "idle" });
+  }
   const ask = supported && !!profile && !dismissed;
   useEffect(() => {
     if (!ask || !profile) return;
@@ -38,25 +45,48 @@ export function ToolSchemaHint({ hostId, sessionId, retryText }: { hostId: strin
   if (!ask || !profile || (!offered && phase.kind !== "done")) return null;
 
   const enable = async () => {
+    const steps = progress.current;
+    if (steps.running || phase.kind === "done") return;
+    steps.running = true;
     const busy = !!session?.runtime.activeTurnId;
     const online = session?.runtime.status === "online";
-    if (online && busy && !(await confirmDialog(t("toolSchemaHint.restartBusy", { name: session.displayName }), true))) return;
-    setPhase({ kind: "working" });
     try {
-      const detail = await apiFor(hostId).patchProfile(profile, { toolSchemaCompat: "strict" });
-      updateCachedProfile(profile, { detail }, hostId);
+      if (!steps.stopped && online && busy && !(await confirmDialog(t("toolSchemaHint.restartBusy", { name: session.displayName }), true))) return;
+      if (progress.current !== steps) return;
+      steps.startRequired ||= !!retryText || online;
+      setPhase({ kind: "working" });
+      if (!steps.configured) {
+        const detail = await apiFor(hostId).patchProfile(profile, { toolSchemaCompat: "strict" });
+        updateCachedProfile(profile, { detail }, hostId);
+        steps.configured = true;
+      }
+      if (progress.current !== steps) return;
       const app = useApp.getState();
       // 下次启动生效: restart the agent so it runs with the stricter tool schemas, then send the message again.
-      if (online) await app.sessionAction(sessionId, "cutex/runtime/offline", { expectedRuntimeGeneration: session.runtime.runtimeGeneration }, hostId);
-      if (retryText) {
-        await app.sessionAction(sessionId, "cutex/runtime/online", { openVisibleTerminal: false }, hostId);
-        await app.submit(retryText, "auto", undefined, { sessionId, hostId });
-      } else if (online) {
-        await app.sessionAction(sessionId, "cutex/runtime/online", { openVisibleTerminal: false }, hostId);
+      if (!steps.stopped) {
+        if (online) await app.sessionAction(sessionId, "cutex/runtime/offline", { expectedRuntimeGeneration: session.runtime.runtimeGeneration }, hostId);
+        steps.stopped = true;
       }
+      if (progress.current !== steps) return;
+      if (!steps.started && steps.startRequired) {
+        await app.sessionAction(sessionId, "cutex/runtime/online", { openVisibleTerminal: false }, hostId);
+        steps.started = true;
+      }
+      if (progress.current !== steps) return;
+      if (retryText && !steps.resent) {
+        await app.submit(retryText, "auto", undefined, { sessionId, hostId });
+        steps.resent = true;
+      }
+      if (progress.current !== steps) return;
       setPhase({ kind: "done", resent: !!retryText });
     } catch (reason) {
-      setPhase({ kind: "failed", message: reason instanceof Error ? reason.message : String(reason) });
+      if (progress.current !== steps) return;
+      // The persistent action row retries only online. It must never silently resend this
+      // message. An explicit click here resumes after the already-completed patch/stop steps.
+      if (isHostBusyActionPending(reason)) setPhase({ kind: "pending" });
+      else setPhase({ kind: "failed", message: reason instanceof Error ? reason.message : String(reason) });
+    } finally {
+      steps.running = false;
     }
   };
 
@@ -72,7 +102,7 @@ export function ToolSchemaHint({ hostId, sessionId, retryText }: { hostId: strin
           {phase.kind === "failed" && <div role="alert" className="mt-1 break-words text-danger">{phase.message}</div>}
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             <button type="button" data-tool-schema-hint-action="enable" disabled={phase.kind === "working"} onClick={() => void enable()} className={`${button} border-accent bg-accent text-accent-foreground`}>
-              {phase.kind === "working" ? t("toolSchemaHint.working") : t("toolSchemaHint.enable")}
+              {phase.kind === "working" ? t("toolSchemaHint.working") : phase.kind === "pending" ? t("hostAction.retry") : t("toolSchemaHint.enable")}
             </button>
             <button type="button" data-tool-schema-hint-action="settings" onClick={() => useApp.getState().openSettings("profiles", { profile })} className={`${button} border-border bg-surface hover:bg-hover`}>
               {t("toolSchemaHint.settings")}

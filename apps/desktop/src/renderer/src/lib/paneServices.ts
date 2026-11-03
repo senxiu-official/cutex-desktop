@@ -1,7 +1,7 @@
 // services.panes (docs/desktop-modules.md §24.5): one way to open any pane kind — a conversation (in the
 // focused pane, or beside it), a page (its own pane in the focused conversation's Shelf; 页面打开位置 =
 // 占用会话: over the focused conversation column, with its own page header) or a
-// tool kind (the tool area: the right-most column, ≤ 3 panes, then tabs; lib/sideServices). Also the
+// tool kind (the tool area: same-kind pane, else a new Shelf page; lib/sideServices). Also the
 // v1.17 alias of services.side.open for the v1.16 `conversation.agent` component (merged into
 // `core.conversation`: a conversation pane fixed to that agent). Shell code: names no feature.
 import type { PaneOpenOptions, PaneOpenResult, SideOpenOptions, SideOpenResult } from "../modules/slots";

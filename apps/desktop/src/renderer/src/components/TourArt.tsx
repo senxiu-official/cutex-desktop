@@ -153,8 +153,9 @@ const LOOK_ROWS: readonly { family: string; seed: string; letter: string; mark: 
 
 /**
  * The new look, in the style chosen earlier in the flow (owner 2026-10-24): with 拟人头像 on, the chosen themes' faces
- * (the fixed onboarding set); 极简风格: emoji or letters as 侧栏 → 默认头像 draws them. 头像底色 = 按模型 puts each
- * picture on its model colour with a ring, exactly like components/Avatar — so the choice on this card shows at once.
+ * (the fixed onboarding set); 极简风格: emoji or letters as 侧栏 → 默认头像 draws them. Every face has the thin outline in
+ * its model colour and 头像底色 = 按模型 puts a picture on a tint of it, exactly like components/Avatar — so the choice on
+ * this card shows at once.
  */
 export function LookArt() {
   const { portraitPacks, avatarTint, agentAvatarDefault } = useUiPrefs();
@@ -162,12 +163,13 @@ export function LookArt() {
   const face = (row: (typeof LOOK_ROWS)[number], i: number): ReactNode => {
     const url = faces.length ? faces[i % faces.length] : null;
     const color = prov(row.family);
+    const edge = <span className="tour-face-edge" style={{ boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${color} 70%, transparent)` }} />;
     if (url) {
       const tinted = avatarTint === "provider";
       return (
         <span className="tour-face" data-look-face="picture" data-look-tint={tinted ? row.family : undefined} style={{ background: tinted ? `color-mix(in oklab, ${color} 16%, var(--bg))` : "transparent" }}>
           <img src={url} alt="" draggable={false} />
-          <span className="tour-face-edge" style={{ boxShadow: `inset 0 0 0 ${tinted ? 2 : 1}px ${tinted ? `color-mix(in oklab, ${color} 60%, transparent)` : "color-mix(in oklab, var(--fg) 10%, transparent)"}` }} />
+          {edge}
         </span>
       );
     }
@@ -175,11 +177,13 @@ export function LookArt() {
       return (
         <span className="tour-face" data-look-face="emoji" style={{ background: emojiTint(color) }}>
           <EmojiGlyph glyph={themedEmoji(row.seed).glyph} size={20} />
+          {edge}
         </span>
       );
     return (
       <span className="tour-face" data-look-face="letter" style={{ background: color, color: "#fff" }}>
         {row.letter}
+        {edge}
       </span>
     );
   };

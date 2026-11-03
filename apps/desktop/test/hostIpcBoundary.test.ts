@@ -1,3 +1,4 @@
+import { DEBUG_CHANNEL } from "../src/shared/debug";
 /// <reference path="../src/main/env.d.ts" />
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -82,10 +83,12 @@ vi.mock("electron", () => ({
     getAppPath: () => fake.userData
   },
   ipcMain: {
+    on() {},
     handle: (channel: string, fn: (...args: unknown[]) => Promise<unknown>) => fake.handlers.set(channel, fn),
     removeHandler: (channel: string) => void fake.handlers.delete(channel)
   },
   ipcRenderer: {
+    sendSync: () => false,
     on: (_channel: string, callback: typeof fake.event) => {
       fake.event = callback;
     },
@@ -140,6 +143,7 @@ vi.mock("electron", () => ({
 }));
 vi.mock("@cutex-desktop/cutex-client", async () => ({
   messageSettlementCloseBody: (await import("../../../packages/cutex-client/src/messageSettlement")).messageSettlementCloseBody,
+  messageSettlementEvidenceBody: (await import("../../../packages/cutex-client/src/messageSettlement")).messageSettlementEvidenceBody,
   CutexClient: class {
     constructor(public endpoint: {
       baseUrl: string;
@@ -150,6 +154,10 @@ vi.mock("@cutex-desktop/cutex-client", async () => ({
     closeBusMessage(input: unknown) {
       fake.calls.push({ endpoint: this.endpoint.baseUrl, session: "settlement", input });
       return fake.reply ?? Promise.resolve({ messageId: "m1", changed: true, settlement: { state: "closed" } });
+    }
+    busMessageEvidence(input: unknown) {
+      fake.calls.push({ endpoint: this.endpoint.baseUrl, session: "evidence", input });
+      return Promise.resolve({ messageId: "m1", settlement: null });
     }
     submitInput(session: string, input: unknown) {
       fake.calls.push({
@@ -457,6 +465,17 @@ describe("multi-host P0: every connected host has its own binding", () => {
     expect(fake.calls).toHaveLength(1);
   });
 
+  it("routes on-demand evidence to its bound host and sends only the exact message ID", async () => {
+    fake.bridge!.on("hostsState", () => {});
+    connectBackground("ssh-t", "epoch-t");
+    await fake.bridge!.api.hosts();
+    const read = fake.bridge!.apiFor!("ssh-t").busMessageEvidence;
+    expect(await read({ messageId: "m1", extra: "ignored" } as { messageId: string })).toEqual({ ok: true, result: { messageId: "m1", settlement: null } });
+    expect(fake.calls).toEqual([{ endpoint: "fake://ssh-t", session: "evidence", input: { messageId: "m1" } }]);
+    await expect(read({ messageId: " " })).rejects.toThrow("bad settlement messageId");
+    expect(fake.calls).toHaveLength(1);
+  });
+
   it("a focus call is refused once the focus moved, even though the old focus host stays connected", async () => {
     fake.bridge!.on("hostsState", () => {});
     connectBackground("ssh-t", "epoch-t");
@@ -545,6 +564,7 @@ const senderCases = [
   }
 ];
 const channelCases = [
+  ...["state", "enable", "save", "reveal", "devtools", "report"].map(op => ({ name: `debug ${op}`, channel: DEBUG_CHANNEL, args: [{ op, ...(op === "enable" ? { value: true } : op === "report" ? { entries: [] } : {}) }] })),
   { name: "host API", channel: INVOKE_CHANNEL, args: ["hosts", [], null] },
   {
     name: "daemon API with a valid host binding",
@@ -572,6 +592,12 @@ describe("main IPC authority belongs to the app's exact top frame", () => {
     });
   });
 
+  it("debug mode refuses a caller-selected output/reveal path and remains off by default", async () => {
+    await expect(invokeAs(appEvent(), DEBUG_CHANNEL, { op: "state" })).resolves.toMatchObject({ enabled: false, frames: 0 });
+    await expect(invokeAs(appEvent(), DEBUG_CHANNEL, { op: "save", path: "/private" })).rejects.toThrow("unknown debug field");
+    await expect(invokeAs(appEvent(), DEBUG_CHANNEL, { op: "reveal", path: "/private" })).rejects.toThrow("unknown debug field");
+    await expect(invokeAs(appEvent(), DEBUG_CHANNEL, { op: "enable", value: "true" })).rejects.toThrow("invalid debug switch");
+  });
   it("keeps non-daemon interfaces available to the legitimate app frame", async () => {
     await expect(invokeAs(appEvent(), SHELL_CHANNEL, { op: "state" })).resolves.toMatchObject({ prefs: {} });
     await expect(invokeAs(appEvent(), UPDATE_CHANNEL, { op: "state" })).resolves.toEqual({ status: "idle" });

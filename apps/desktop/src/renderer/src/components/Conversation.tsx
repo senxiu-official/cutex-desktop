@@ -1,3 +1,5 @@
+import { usesInputLedger } from "../lib/deliveryMode";
+import { DebugErrorDetails } from "./DebugErrorDetails";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useConversationStructure } from "../lib/streamRender";
 import { StreamRenderProvider } from "./StreamRenderProvider";
@@ -223,7 +225,7 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
     const prev = lastScroll.current;
     lastScroll.current = { top: el.scrollTop, clientHeight: el.clientHeight };
     if (jumping.current) return;
-    const next = scrollFollow(stick.current, prev, { top: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }, intent.current?.user() ?? true);
+    const next = scrollFollow(stick.current, prev, { top: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }, intent.current?.user() ?? false, intent.current?.upward() ?? false);
     if (next.snap) {
       el.scrollTo({ top: el.scrollHeight });
       return;
@@ -378,6 +380,7 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   }, [selectedId]);
 
   const features = useConvFeatures();
+  const ledgerDelivery = useApp(s => usesInputLedger([...features]) && selectedId ? agentState(s.inputs, hostId, selectedId)?.delivery ?? null : null);
   const daemon = useApp((s) => s.daemon);
   const remote = useApp((s) => isRemote(s.hosts));
   const agentCount = useApp((s) => (s.sidebar ? s.sidebar.active.length + s.sidebar.retired.length : null));
@@ -432,7 +435,7 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
     return <div className="flex flex-1 items-center justify-center text-subtle">{t("conversation.empty")}</div>;
   }
   const name = session?.displayName ?? selectedId;
-  const busy = !!view?.timeline.activeTurnId;
+  const busy = usesInputLedger([...features]) ? ledgerDelivery?.state === "turn" : !!view?.timeline.activeTurnId;
   const runtimeStatus = session?.runtime.status;
   const canAutoStart = features.has("offline-submit");
   // cute-codex starts its app-server; DSH / Claude name their own runtime (D-8).
@@ -529,6 +532,8 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
       {view && view.timeline.pending.size > 0 && (
         <InteractionDock
           pending={[...view.timeline.pending.values()]}
+          optionsV1={features.has("user-input-options-v1")}
+          draftScope={{ hostId, sessionId: selectedId!, runtimeGeneration: view.runtimeGeneration }}
           // Only the focused conversation's card takes the keyboard (the other column must not steal it).
           takeFocus={paneFocused}
           runtime={agentRuntime}
@@ -602,6 +607,7 @@ function LoadError({ sessionId, hostId, error }: { sessionId: string; hostId: st
         {t("conversation.reload")}
       </button>
       {notFound && <span className="w-full text-xs text-subtle">{error}</span>}
+      <DebugErrorDetails error={error} source={`conversation.history:${hostId}:${sessionId}`} />
     </div>
   );
 }

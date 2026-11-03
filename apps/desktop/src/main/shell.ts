@@ -288,6 +288,12 @@ export class DesktopShell {
   /** Main wires this to the client presence (re-sent to every host at once). */
   onAllowRemoteCloseChanged: ((allowed: boolean) => void) | null = null;
 
+  setDebugMode(value: boolean): ShellState {
+    this.prefs = { ...this.prefs, debugMode: value };
+    this.save();
+    return this.state();
+  }
+
   setCloseBehavior(value: CloseBehavior): ShellState {
     this.prefs = { ...this.prefs, closeBehavior: value, closeBehaviorChosen: true };
     this.save();

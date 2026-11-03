@@ -118,7 +118,7 @@ function RefRow({ entry, color, canDelete, busy, error, onDelete }: { entry: Pro
   const tag = entry.archived ? t("settings.profile.refs.tagArchived") : t("settings.profile.refs.tagActive");
   return (
     <ListRow
-      leading={<Avatar name={entry.name} avatar={entry.session?.avatar} seed={entry.id} color={color} size={20} minor />}
+      leading={<Avatar name={entry.name} avatar={entry.session?.avatar} seed={entry.id} color={color} size={20} />}
       title={
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate">{entry.name}</span>

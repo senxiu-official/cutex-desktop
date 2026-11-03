@@ -5,9 +5,10 @@
 //
 // The desktop only *asks* cutex to install a component (POST /v2/components/{name}/install); it never
 // downloads, starts or touches files itself.
-import { COMPONENTS_FEATURE, isComponentRefusalCode, isOperationRunning, type ComponentsList, type ComponentStatus } from "../../../shared/components";
+import { COMPONENT_INDEX_FEATURE, COMPONENTS_FEATURE, DESKTOP_REFUSAL_CODES, EXTERNAL_RUNTIME_ROOT_FEATURE, externalReadiness, isComponentRefusalCode, isOperationRunning, type ComponentExternal, type ComponentsList, type ComponentStatus } from "../../../shared/components";
 import type { HostPlatform } from "../../../shared/hosts";
 import { isOwnerFeatures } from "../../../shared/users";
+import { componentIndexView } from "./componentExternal";
 import type { MessageKey } from "../i18n";
 
 /**
@@ -52,20 +53,30 @@ export type ComponentCardState =
   | { kind: "updateCutex"; bypass: boolean }
   /** A daemon set up by hand (no managed install): set the component up by hand too. */
   | { kind: "unmanaged" }
-  /** A source install: only the CLI can install it. */
-  | { kind: "sourceOnly"; command: string }
+  /**
+   * No legacy release-manifest install (`installFrom: "source-only"`): an empty install is refused (409). r270: a kit base is
+   * still managed, so `version` — the verified index offer — is installed explicitly (`{version}`); the CLI from-source
+   * command stays as the other way. null: no verified offer, the CLI only.
+   */
+  | { kind: "sourceOnly"; command: string; version: string | null }
   /** The running cutex release does not name this component: a backend update brings it. */
   | { kind: "notInManifest" }
   /** Not installed: the owner can ask cutex to install it. */
   | { kind: "missing"; version: string | null }
   /** cutex installs it now (progress from `cutex/components/updated`). */
   | { kind: "installing"; step: string | null }
-  /** Installed but the owner must do something (log in, install a CLI…). */
-  | { kind: "needsUser"; steps: string[] }
+  /**
+   * Installed but the owner must do something (log in, install a CLI…). `external` (r269, hosts with
+   * EXTERNAL_RUNTIME_ROOT_FEATURE only): the failed checks of an adapter whose upstream CLI the owner installs.
+   */
+  | { kind: "needsUser"; steps: string[]; external?: ComponentExternal }
   /** A new version is selected; the service restarts when no job runs. The old one still works: banner over the body. */
   | { kind: "restartPending"; version: string | null }
-  /** The last install / update failed. With `working` (a previous version stays selected) it is a banner over the body. */
-  | { kind: "degraded"; error: string | null; working: boolean }
+  /**
+   * The last install / update failed. With `working` (a previous version stays selected) it is a banner over the body.
+   * `retryVersion` (source-only hosts): retry installs that explicit version; null: no retry (an empty install is refused).
+   */
+  | { kind: "degraded"; error: string | null; working: boolean; retryVersion?: string | null }
   /** `GET /v2/components` failed (nothing read yet). */
   | { kind: "readError"; error: string }
   /** A state this desktop does not know (newer cutex). */
@@ -129,9 +140,9 @@ export function componentUsable(features: ReadonlySet<string>, list: ComponentsL
   return c.state === "degraded" && c.selected !== null;
 }
 
-/** The friendly line of a refusal code (null: unknown code, show cutex's message). */
+/** The friendly line of a refusal code (null: unknown code, show cutex's message). r270: also the desktop's own (component_source_only). */
 export function refusalKey(code: string): MessageKey | null {
-  return isComponentRefusalCode(code) ? (`modules.component.refusal.${code}` as MessageKey) : null;
+  return isComponentRefusalCode(code) || (DESKTOP_REFUSAL_CODES as readonly string[]).includes(code) ? (`modules.component.refusal.${code}` as MessageKey) : null;
 }
 
 /** Cards that leave the page body below them (the component still works). */
@@ -148,6 +159,16 @@ function running(list: ComponentsList, component: ComponentStatus): string | nul
   const op = list.operation;
   if (op && op.name === component.name && isOperationRunning(op)) return op.step;
   return component.state === "installing" ? null : false;
+}
+
+/**
+ * The version a source-only host can still install explicitly: the verified, compatible, non-withdrawn index recommendation
+ * (what `component_source_only` would suggest). null without the index gate or such an offer: never a guessed version.
+ */
+export function sourceOnlyVersion(features: ReadonlySet<string>, component: ComponentStatus): string | null {
+  if (!features.has(COMPONENT_INDEX_FEATURE)) return null;
+  const offer = componentIndexView(component)?.offer;
+  return offer?.kind === "adapterUpdate" ? offer.version : null;
 }
 
 export function componentCardState(input: ComponentCardInput): ComponentCardState {
@@ -169,11 +190,20 @@ export function componentCardState(input: ComponentCardInput): ComponentCardStat
   if (component.state === "ready" || component.state === "external") return { kind: "body" };
   const step = running(list, component);
   if (step !== false) return { kind: "installing", step };
-  if (component.state === "needsUser") return { kind: "needsUser", steps: component.steps };
+  if (component.state === "needsUser") {
+    // Failed checks, or never checked (`checkedAt: null` is unverified even without issues): the guide with 重新检测.
+    const external = features.has(EXTERNAL_RUNTIME_ROOT_FEATURE) && component.external && externalReadiness(component.external) !== "ready" ? component.external : undefined;
+    return external ? { kind: "needsUser", steps: component.steps, external } : { kind: "needsUser", steps: component.steps };
+  }
   if (component.state === "restartPending") return { kind: "restartPending", version: component.selected };
   if (!list.managed || list.installFrom === "none") return input.handConfigured ? { kind: "body" } : { kind: "unmanaged" };
-  if (list.installFrom === "source-only") return { kind: "sourceOnly", command: sourceInstallCommand(name) };
   if (input.pending) return { kind: "installing", step: null };
+  if (list.installFrom === "source-only") {
+    // r270: source-only only says there is no legacy manifest install; the verified index offer is still installable explicitly.
+    const version = sourceOnlyVersion(features, component);
+    if (component.state === "degraded" && component.selected !== null) return { kind: "degraded", error: component.error, working: true, retryVersion: version };
+    return { kind: "sourceOnly", command: sourceInstallCommand(name), version };
+  }
   if (component.state === "degraded") return { kind: "degraded", error: component.error, working: component.selected !== null };
   if (component.state === "notInManifest") return { kind: "notInManifest" };
   if (component.state === "missing") return { kind: "missing", version: component.available };

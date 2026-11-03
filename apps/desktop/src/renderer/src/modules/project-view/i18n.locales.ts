@@ -94,6 +94,8 @@ const zhHantCN: Record<keyof typeof zhCN, string> = {
   "project-view.stream.offline": "未連接",
   "project-view.stream.allAgents": "全部{{agents}}",
   "project-view.stream.agentFilter": "只看一個{{agent}}",
+  "project-view.stream.includeOwnerTurns": "包括我發起的",
+  "project-view.stream.emptyAutonomous": "暫無其他動態。在「回合」中可包括你發起的回合。",
   "project-view.stream.new": "↑ {n} 條新動態",
   "project-view.stream.loading": "正在讀取動態…",
   "project-view.stream.loadingMore": "正在讀取更早的…",
@@ -166,6 +168,8 @@ const zhHantCN: Record<keyof typeof zhCN, string> = {
 const enAU: Partial12 = { ...en };
 
 const ruRU: Partial12 = {
+  "project-view.stream.includeOwnerTurns": "Включать ходы, начатые мной",
+  "project-view.stream.emptyAutonomous": "Других событий пока нет. Выберите «Ходы», чтобы включить ходы, начатые вами.",
   "project-view.title": "Обзор проекта",
   "project-view.description": "Панель: чем занят каждый {{agent}} проекта, кто кому поручил задачу, фоновая работа и последние события. Открывается в {{shelf}}; также из ⌘K и меню проекта",
   "project-view.tabTitle": "Проект · {name}",
@@ -248,6 +252,8 @@ const ruRU: Partial12 = {
 };
 
 const frFR: Partial12 = {
+  "project-view.stream.includeOwnerTurns": "Inclure les tours que j’ai lancés",
+  "project-view.stream.emptyAutonomous": "Aucune autre activité pour le moment. Choisissez « Tours » pour inclure les tours que vous avez lancés.",
   "project-view.title": "Vue projet",
   "project-view.description": "Un volet qui montre ce que fait chaque {{agent}} d’un projet, qui a délégué à qui, le travail en arrière-plan et l’activité récente. S’ouvre dans un {{shelf}} ; aussi depuis ⌘K et le menu du projet",
   "project-view.tabTitle": "Projet · {name}",
@@ -330,6 +336,8 @@ const frFR: Partial12 = {
 };
 
 const esES: Partial12 = {
+  "project-view.stream.includeOwnerTurns": "Incluir los turnos que inicié",
+  "project-view.stream.emptyAutonomous": "Aún no hay otra actividad. Elige «Turnos» para incluir los turnos que iniciaste.",
   "project-view.title": "Vista de proyecto",
   "project-view.description": "Un panel con lo que hace cada {{agent}} de un proyecto, quién delegó en quién, el trabajo en segundo plano y la actividad reciente. Se abre en un {{shelf}}; también desde ⌘K y el menú del proyecto",
   "project-view.tabTitle": "Proyecto · {name}",
@@ -412,6 +420,8 @@ const esES: Partial12 = {
 };
 
 const ptBR: Partial12 = {
+  "project-view.stream.includeOwnerTurns": "Incluir turnos que iniciei",
+  "project-view.stream.emptyAutonomous": "Ainda não há outras atividades. Escolha «Turnos» para incluir os turnos que você iniciou.",
   "project-view.title": "Visão do projeto",
   "project-view.description": "Um painel com o que cada {{agent}} de um projeto está fazendo, quem delegou para quem, o trabalho em segundo plano e a atividade recente. Abre em um {{shelf}}; também pelo ⌘K e pelo menu do projeto",
   "project-view.tabTitle": "Projeto · {name}",
@@ -494,6 +504,8 @@ const ptBR: Partial12 = {
 };
 
 const itIT: Partial12 = {
+  "project-view.stream.includeOwnerTurns": "Includi i turni che ho avviato",
+  "project-view.stream.emptyAutonomous": "Non ci sono ancora altre attività. Scegli «Turni» per includere i turni che hai avviato.",
   "project-view.title": "Vista progetto",
   "project-view.description": "Un riquadro con quello che fa ogni {{agent}} di un progetto, chi ha delegato a chi, il lavoro in background e l’attività recente. Si apre in uno {{shelf}}; anche da ⌘K e dal menu del progetto",
   "project-view.tabTitle": "Progetto · {name}",
@@ -576,6 +588,8 @@ const itIT: Partial12 = {
 };
 
 const deDE: Partial12 = {
+  "project-view.stream.includeOwnerTurns": "Von mir gestartete Runden einbeziehen",
+  "project-view.stream.emptyAutonomous": "Noch keine weiteren Aktivitäten. Wähle „Runden“, um die von dir gestarteten Runden einzubeziehen.",
   "project-view.title": "Projektansicht",
   "project-view.description": "Ein Bereich, der zeigt, was jeder {{agent}} eines Projekts gerade tut, wer wem etwas delegiert hat, Hintergrundarbeit und die letzten Ereignisse. Öffnet sich in einem {{shelf}}; auch über ⌘K und das Projektmenü",
   "project-view.tabTitle": "Projekt · {name}",
@@ -658,6 +672,8 @@ const deDE: Partial12 = {
 };
 
 const jaJP: Partial12 = {
+  "project-view.stream.includeOwnerTurns": "自分が開始したターンを含める",
+  "project-view.stream.emptyAutonomous": "他のアクティビティはまだありません。「ターン」を選ぶと、自分が開始したターンを含められます。",
   "project-view.title": "プロジェクトビュー",
   "project-view.description": "プロジェクトの各{{agent}}が何をしているか、誰が誰に委任したか、バックグラウンドの作業と最近の動きを一覧するペイン。{{shelf}} で開きます。⌘K とプロジェクトメニューからも開けます",
   "project-view.tabTitle": "プロジェクト · {name}",
@@ -740,6 +756,8 @@ const jaJP: Partial12 = {
 };
 
 const koKR: Partial12 = {
+  "project-view.stream.includeOwnerTurns": "내가 시작한 턴 포함",
+  "project-view.stream.emptyAutonomous": "아직 다른 활동이 없습니다. 내가 시작한 턴을 포함하려면 «턴»을 선택하세요.",
   "project-view.title": "프로젝트 보기",
   "project-view.description": "프로젝트의 각 {{agent}}가 무엇을 하는지, 누가 누구에게 위임했는지, 백그라운드 작업과 최근 활동을 보여 주는 창. {{shelf}}에서 열리며 ⌘K와 프로젝트 메뉴에서도 열 수 있습니다",
   "project-view.tabTitle": "프로젝트 · {name}",

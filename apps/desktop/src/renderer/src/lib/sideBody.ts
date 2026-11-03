@@ -57,10 +57,9 @@ export function useSideBodyProps(id: string, inst: SideInstance, where: SidePlac
       where: "card" as const,
       revealed,
       close: () => (outOfScope ? void setSideHold(outOfScope, id, instRef.current, "hidden", false) : closeTab(id)),
-      // Design 012: lands in this pane's own Shelf (the other workspace's too), on its page.
+      // The source chooses its Shelf, not an implicit split on its populated page.
       open: (kind, params, opts) => {
-        const o = { ...(pageId ? { page: pageId } : {}), ...opts };
-        return outOfScope ? sideOpen(kind, params ?? null, o) : sideOpenFrom({ instanceId: id }, kind, params ?? null, o);
+        return outOfScope ? sideOpen(kind, params ?? null, opts) : sideOpenFrom({ instanceId: id }, kind, params ?? null, opts);
       },
       keepMounted: (hold: boolean) => setSideHold(scope, id, instRef.current, sideRegistry().get(inst.kind)?.item.keepAlive, hold),
       held,

@@ -19,7 +19,7 @@ import { ProfileModelFields } from "../src/renderer/src/components/settings/Prof
 import { ProfileModelDialog } from "../src/renderer/src/components/settings/ProfileModelDialog";
 import { ModelList } from "../src/renderer/src/components/settings/ProfileModels";
 import { OfficialQuotaSection, QuotaConfigSection } from "../src/renderer/src/components/settings/ProfileQuota";
-import { Section, SettingsPage } from "../src/renderer/src/components/settings/Form";
+import { Section, SettingsPage, SettingRow } from "../src/renderer/src/components/settings/Form";
 import { ProfileToolFields } from "../src/renderer/src/components/settings/ProfileToolFields";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -45,27 +45,37 @@ it("states uniform Profile model timing once at page level", () => {
   }
 });
 
-it("distinguishes runtime catalog fields from display names using existing chip popovers", () => {
+it("keeps catalog draft metadata but omits per-field settings badges in the model dialog", () => {
   act(() => root.render(h(ProfileModelDialog, { model, profile: "p", view, names: true, onSaved: vi.fn(), onClose: vi.fn() })));
   const dialog = document.querySelector("dialog")!;
   expect(headerChips(dialog)).toEqual([]);
   for (const name of ["contextWindow", "maxContextWindow", "autoCompact", "vision", "efforts", "defaultEffort"]) {
-    expect(chips(row(dialog, `agent-config.profile.${name}`))).toEqual(["settings.scope.agents.next"]);
+    expect(chips(row(dialog, `agent-config.profile.${name}`))).toEqual([]);
+    expect(row(dialog, `agent-config.profile.${name}`).getAttribute("data-effect-timing")).toBe("next");
   }
   const names = row(dialog, "agent-config.profile.displayName");
-  expect(chips(names)).toEqual(["settings.scope.agents.none"]);
-  const marker = [...names.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.getAttribute("aria-label") === "settings.scope.agents.none")!;
+  expect(chips(names)).toEqual([]);
+  expect(names.getAttribute("data-effect-timing")).toBe("none");
+  expect(dialog.querySelector("[data-effect-markers]")).toBeNull();
+  expect(dialog.textContent).not.toContain("agent-config.profile.appliesNext");
+});
+
+it("retains timing chip popovers inside a modal when it contains actual settings", () => {
+  act(() => root.render(h("dialog", { open: true }, h(SettingRow, { label: "Persistent setting", agents: "none", source: "host", children: "Value" }))));
+  const dialog = host.querySelector("dialog")!;
+  const marker = dialog.querySelector<HTMLButtonElement>('[data-settings-agents="none"]')!;
   act(() => marker.click());
   // Portaled into the modal <dialog> (the top layer), not the body, so it shows above the dialog.
   const note = document.getElementById(marker.getAttribute("aria-controls")!)!;
   expect(note.textContent).toContain("settings.scope.agents.none.body");
   expect(note.parentElement).toBe(dialog);
-  expect(dialog.textContent).not.toContain("agent-config.profile.appliesNext");
 });
 
 it("does not label a name-only catalog editor as changing runtime configuration", () => {
   act(() => root.render(h(ProfileModelDialog, { model, profile: "p", view, catalog: false, names: true, onSaved: vi.fn(), onClose: vi.fn() })));
-  expect(chips(document.querySelector("dialog")!)).toEqual(["settings.scope.agents.none", "settings.scope.agents.none"]);
+  const dialog = document.querySelector("dialog")!;
+  expect(chips(dialog)).toEqual([]);
+  expect(dialog.querySelectorAll('[data-form-field][data-effect-timing="none"]')).toHaveLength(2);
 });
 
 it("labels the catalog control once for runtime or display-only edits", () => {

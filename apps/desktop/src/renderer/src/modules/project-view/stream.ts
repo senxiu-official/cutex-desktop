@@ -43,6 +43,12 @@ export function toggleGroup(groups: readonly StreamGroup[], g: StreamGroup): Str
   return groups.includes(g) ? groups.filter((x) => x !== g) : STREAM_GROUPS.filter((x) => x === g || groups.includes(x));
 }
 
+/** Hide only a positively identified owner-started turn, never unknown/older-host rows or other events. */
+export function withoutOwnerTurns(rows: readonly ProjectEvent[], includeOwnerTurns: boolean): ProjectEvent[] {
+  const hide = (row: ProjectEvent) => row.kind.startsWith("turn.") && row.turnOrigin === "owner";
+  return includeOwnerTurns || !rows.some(hide) ? rows as ProjectEvent[] : rows.filter((row) => !hide(row));
+}
+
 /** One feed per project + filter (the store keys pages and live watches by it). */
 export function feedKey(hostId: string, projectId: string, kinds: readonly string[] | undefined, sessionId: string | null): string {
   return [hostId, projectId, kinds?.join(",") ?? "*", sessionId ?? "*"].join("\n");

@@ -8,6 +8,7 @@ import { BUNDLED_CHANGELOG } from "./changelog";
 import { lazyPage } from "../../lib/lazyPage";
 
 // Loaded on first open (lib/lazyPage).
+const DebugSection = lazyPage(() => import("./DebugSection").then(m => m.DebugSection));
 const KnownIssuesSection = lazyPage(() => import("./AboutSections").then((m) => m.KnownIssuesSection));
 const ChangelogSection = lazyPage(() => import("./AboutSections").then((m) => m.ChangelogSection));
 const AboutLinksSection = lazyPage(() => import("./AboutSections").then((m) => m.AboutLinksSection));
@@ -22,6 +23,7 @@ export default defineModule({
   required: true,
   contributes: {
     "settings.section": [
+      { id: "about.debug", page: "about", order: 50, titleKey: "debug.title", keywords: ["debug.title", "debug.recording"], Section: DebugSection },
       { id: "about.knownIssues", page: "about", order: 100, titleKey: "about.knownIssues", keywords: ["about.link.knownIssues"], Section: KnownIssuesSection },
       { id: "about.changelog", page: "about", order: 200, titleKey: "about.changelog", keywords: ["about.link.changelog", "about.changelog.keywords"], Section: ChangelogSection },
       { id: "about.links", page: "about", order: 300, titleKey: "about.links.section", keywords: ["about.license", "about.source", "about.star", "about.link.install", "about.thirdParty"], Section: AboutLinksSection },

@@ -3,11 +3,44 @@
 import { describe, expect, it, vi } from "vitest";
 import { chosenCandidates, restoreSequentially } from "../src/renderer/src/lib/runtimeRestore";
 import type { RestoreCandidate } from "../src/shared/runtimeRestore";
+import { CutexApiError } from "@cutex-desktop/cutex-client";
+import { HostBusyActionCancelled, HostBusyActionUncertain, runHostBusyAction, useHostBusyActions } from "../src/renderer/src/lib/hostBusyActions";
 
 const item = (id: string, name: string): RestoreCandidate => ({ cutexSessionId: id, displayName: name, lastOnlineAt: "2026-10-13T01:00:00Z" });
 const ITEMS = [item("cutex.a", "Eva"), item("cutex.b", "Rei"), item("cutex.c", "Mika")];
 
 describe("restoreSequentially", () => {
+  it("honours host busy backoff, continues after exhaustion, and leaves Retry to global feedback", async () => {
+    vi.useFakeTimers();
+    useHostBusyActions.setState({ rows: [] });
+    const calls: string[] = [];
+    const start = (id: string) => runHostBusyAction({ key: `restore-${id}`, hostId: "original", sessionId: id, name: id, kind: "runtimeStart", current: () => true, onError: vi.fn() }, async () => {
+      calls.push(id);
+      if (id === "cutex.a") throw new CutexApiError(503, "admission_busy", "private refusal body", true, { reason: "hostBusy", retryAfterMs: 1000 });
+    });
+    try {
+      const result = restoreSequentially(ITEMS, start);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(calls).toEqual(["cutex.a"]);
+      expect(useHostBusyActions.getState().rows[0]?.state).toBe("retrying");
+      await vi.advanceTimersByTimeAsync(5000);
+      const outcomes = await result;
+      expect(calls).toEqual(["cutex.a", "cutex.a", "cutex.a", "cutex.a", "cutex.a", "cutex.b", "cutex.c"]);
+      expect(outcomes[0]).toMatchObject({ error: null, pending: true });
+      expect(outcomes.filter(o => o.error !== null)).toEqual([]);
+      expect(useHostBusyActions.getState().rows[0]?.state).toBe("exhausted");
+    } finally {
+      useHostBusyActions.setState({ rows: [] });
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([new HostBusyActionCancelled(), new HostBusyActionUncertain(new Error("unknown"))])("does not duplicate global cancellation or uncertain feedback: %s", async error => {
+    const outcomes = await restoreSequentially(ITEMS, async id => { if (id === "cutex.a") throw error; });
+    expect(outcomes[0]).toMatchObject({ error: null, pending: true });
+    expect(outcomes).toHaveLength(3);
+  });
+
   it("starts one agent at a time in list order and reports each failure", async () => {
     let running = 0;
     const order: string[] = [];

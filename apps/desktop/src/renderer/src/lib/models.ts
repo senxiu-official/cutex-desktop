@@ -43,3 +43,8 @@ export function composerEfforts(models: readonly { model: string; id?: string; e
   if (!row) return { efforts: [], empty: "unlisted" };
   return { efforts: row.efforts, empty: row.efforts.length ? null : "none" };
 }
+
+/** Unknown, empty or stale lists cannot establish that a model is unavailable. */
+export function unlistedModel(models: readonly { model?: string; id?: string; requestModel?: string | null }[] | null | undefined, current: string | null | undefined, ready: boolean): boolean {
+  return !!(ready && models?.length && current && !models.some(m => m.model === current || m.id === current || m.requestModel === current));
+}

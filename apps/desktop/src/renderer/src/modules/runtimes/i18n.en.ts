@@ -4,6 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "runtimes.current": "New {{agents}} use",
+  "runtimes.unknownVersion": "Unknown version",
   "runtimes.noCurrent": "Not installed or no default selected",
   "runtimes.unused": "{n} unused old versions can be cleaned up",
   "runtimes.nativeDependency": "Standalone executable; no Python or Node required",
@@ -19,6 +20,8 @@ export const en: Record<keyof typeof zhCN, string> = {
   "runtimes.kimiProfile": "Settings → Profile → New → choose Kimi Code or Moonshot as the provider and tick Kimi",
   "runtimes.kimiDependency": "Kimi Code is a pinned version shipped with the component and never updates itself; it runs on the host's Node",
   "runtimes.node": "Node ≥ {minimum} · current {version}",
+  "runtimes.nodeRange": "Node {range} · current {version}",
+  "runtimes.nodeVersionUnknown": "unknown",
   "runtimes.nodeUnknown": "Node requirements and detection are reported by the host component",
   "runtimes.title": "Installed runtimes",
   "runtimes.description": "Runtime versions and the {{agents}} using each",

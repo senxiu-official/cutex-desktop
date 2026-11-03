@@ -11,6 +11,7 @@ import { UPGRADE_CHECK_INTERVAL_MAX, UPGRADE_PACKAGE_RUN_BATCH_MAX, UPGRADE_PACK
 import { readCutexBuild } from "@cutex-desktop/cutex-client";
 import { Button, EmptyState, ErrorNote, Loading, Notice, NumberField, Section, Segmented, Select, SettingRow, TextInput, Toggle } from "../../components/settings/Form";
 import { formatWhen } from "../../lib/time";
+import { nativeVersionText } from "../../lib/runtimeVersion";
 import { useI18n, type MessageKey } from "../../i18n";
 import { confirmDialog } from "../../lib/contextMenu";
 import { cutexBuildText, settingsAnchorId } from "../../lib/settingsNav";
@@ -111,6 +112,7 @@ function StatusSection({ status, info, onCheck, checking, checkError, installedN
   const sm = info?.serviceManager;
   const smKind = sm?.kind ?? status.serviceManager;
   const native = info?.runtimes?.native;
+  const nativeLabel = native ? native.selected || (native.selectedSha256Prefix ? nativeVersionText(null, native.selectedSha256Prefix, t("runtimes.unknownVersion")) : t("runtimes.noCurrent")) : null;
   const claude = info?.runtimes?.claude;
   const olderNative = native ? native.inUse.filter((u) => !u.selected).reduce((n, u) => n + u.agents, 0) : 0;
   const state = useStateLine(status);
@@ -143,7 +145,7 @@ function StatusSection({ status, info, onCheck, checking, checkError, installedN
       {native && (
         <SettingRow readOnly agents="none" source="host" label={t("backend-upgrade.status.runtimes")} hint={olderNative > 0 ? t("backend-upgrade.status.olderNative", { n: olderNative }) : info?.runtimes?.unpinnedAgents ? t("backend-upgrade.status.unpinned", { n: info.runtimes.unpinnedAgents }) : undefined}>
           <Value title={native.latest ? t("backend-upgrade.status.nativeLatest", { release: native.latest }) : null}>
-            {[native.selected, claude?.selected].filter(Boolean).join(" · ") || "—"}
+            {[nativeLabel, claude?.selected].filter(Boolean).join(" · ") || "—"}
           </Value>
         </SettingRow>
       )}

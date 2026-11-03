@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyEvent, timelineFromThreadRead } from "../src/renderer/src/lib/timeline";
-import { newPendingSteer, recordedSteers, resolveChecked, settlePendingSteers } from "../src/renderer/src/lib/pendingSteers";
+import { newPendingSteer, recordedSteers, resolveChecked, settlePendingSteers } from "../src/renderer/src/lib/legacyDelivery/pendingSteers";
 import { composerKeyAction, strategyFor, type ComposerKeyContext } from "../src/renderer/src/lib/sendKeys";
 import { collaborationModeOf, seedThreadSettings } from "../src/renderer/src/lib/threadSettings";
 import { toolLiveness } from "../src/renderer/src/lib/workGroups";

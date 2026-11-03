@@ -44,7 +44,7 @@ export interface UpgradeNode {
   parentId: string | null; rootId: string | null; followUpOf: string | null; parentAttemptId: string | null;
   lineageState: "verified" | "legacyUnknown"; redactedParent: boolean;
   requester: UpgradeTreeParty | null; target: UpgradeTreeParty; title: string;
-  execution: "running" | "queued" | "answered" | "interrupted";
+  execution: "pendingReview" | "running" | "queued" | "answered" | "interrupted";
   closed: string | null; lastActivityAt: string | null;
   resumeEvidence: { kind: "none" | "newAttempt" | "restartRecovery" | "unknown" };
   continuation: UpgradeContinuation | null; routingApproval: UpgradeApproval | UpgradeCompactApproval | null;
@@ -74,6 +74,8 @@ export interface UpgradeGrant {
   id: string; projectId: string;
   rootDelegationRef: DelegationRef; requesterRef: DelegationRef; targetRefs: DelegationRef[];
   purpose: "review"; maxUses: number; usedCount: number; expiresAt: string | null; authorityEpoch: number;
+  /** Canonical grant policy binding; older preview bridges may omit it. */
+  policyRevision?: number;
   revision: number; revokedAt: string | null; allowedActions: { revoke: boolean };
 }
 export interface UpgradePanelSnapshot {

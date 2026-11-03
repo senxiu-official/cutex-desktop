@@ -62,7 +62,7 @@ export const OWNER_ONLY_CAPABILITIES: readonly string[] = [
   "artifacts", "notes", "side-chat", "owner-messages", "owner-notify-delete", "notification-levels",
   "human-create-session", "human-create-agent", "peers-v2", "runtime-package-upgrade", "runtimes-view",
   "runtime-restore-candidates", "claude-accounts", "kimi-accounts", "owner-rotation", "project-optional-director",
-  "inbound-mail", "listen-settings", "device-pairing", "management-client-tokens", "agent-bus-stuck-messages", "agent-bus-message-settlement-v1",
+  "inbound-mail", "listen-settings", "device-pairing", "management-client-tokens", "agent-bus-stuck-messages", "agent-bus-message-settlement-v1", "agent-bus-stale-ack-settlement-v1",
   "session-fork", "session-fork-profile", "session-fork-preview", "session-delete", "session-delete-empty-on-archive", "session-history-revert",
   "asks-pause-v2", "claude-quota-auto-continue", "users", "workflows", "workflow-resume", "backend-upgrade",
   "client-token-rename", "components", "claude-safety-grants", "host-storage",

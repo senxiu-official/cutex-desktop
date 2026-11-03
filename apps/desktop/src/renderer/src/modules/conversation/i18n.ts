@@ -1,4 +1,26 @@
 export const zhCN = {
+  "conversation.tools.memberRuntime": "调整成员运行状态",
+  "conversation.tools.memberRuntime.online": "请求成员上线",
+  "conversation.tools.memberRuntime.offline": "请求成员下线",
+  "conversation.tools.memberRuntime.restart": "请求重启成员",
+  "conversation.tools.taskStop": "停止任务",
+  "conversation.tools.artifactRead": "读取成果",
+  "conversation.tools.actionStatus": "查看调用状态",
+  "conversation.tools.actionStatus.running": "调用处理中",
+  "conversation.tools.actionStatus.completed": "工具调用已完成",
+  "conversation.tools.actionStatus.failed": "工具调用失败",
+  "conversation.tools.actionStatus.awaitingApproval": "调用等待审批",
+  "conversation.tools.actionStatus.unknown": "结果未知",
+  "conversation.tools.actionStatus.notFound": "未找到调用记录",
+  "conversation.tools.actionStatus.hint": "这里显示工具调用的处理状态，不代表委托工作已经完成；结果未知或未找到记录，也不代表调用未执行。",
+
+  "conversation.tools.rawResult": "完整返回",
+  "conversation.tools.read": "读取文件",
+  "conversation.tools.search": "搜索文件",
+  "conversation.tools.tools": "查找工具",
+  "conversation.tools.agents": "列出{{agent}}",
+  "conversation.tools.agentCount": "返回 {n} 个{{agent}}",
+
   "conversation.title": "对话",
   "conversation.description": "时间线与输入框",
   // ---- settings (moved from the base catalog, 2026-10-09) ----

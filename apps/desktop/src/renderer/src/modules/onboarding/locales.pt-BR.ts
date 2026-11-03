@@ -231,6 +231,8 @@ export const ptBR: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.shelf.text": "Arraste abas de um {{shelf}} para outro ou para um espaço vazio para criar um novo {{shelf}}.\nQuando não couberem todas, “⌄ N” lista todas as abas do {{shelf}}.",
   "onboarding.guide.tray.title": "A bandeja",
   "onboarding.guide.tray.text": "Arraste um item além do separador para fixá-lo na bandeja; arraste de volta para desafixar.\nCom o botão direito, você pode adicionar um selo ou uma nota.",
+  "onboarding.guide.portrait.title": "Layout retrato",
+  "onboarding.guide.portrait.text": "Numa janela alta, a conversa e sua {{shelf}} ficam empilhadas. Arraste este divisor para mudar as alturas e clique duas vezes para redefinir; passe o ponteiro sobre ele e clique em ⇅ para trocá-las de lugar.\nA barra lateral fica escondida na borda esquerda da janela e aparece quando o ponteiro chega lá. Para continuar em paisagem, altere Configurações → Aparência → Layout retrato.",
   "onboarding.guide.service.title": "Links de serviços",
   "onboarding.guide.service.text": "Um serviço é uma página ou API que um {{agent}} executa no host; o link abre no aplicativo.\nServiços temporários são removidos pelo host quando ociosos ou expirados, e o link deixa de funcionar. Para manter um, fixe-o ou torne-o permanente na página Serviços. Você também pode parar e reiniciar por lá.",
   "onboarding.guide.update.title": "Atualizações",

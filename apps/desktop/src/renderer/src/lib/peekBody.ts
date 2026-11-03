@@ -72,6 +72,6 @@ export function peekToDrop(target: { page: string } | { newPage: true }): void {
   const before = useSide.getState().layout;
   const page = pageForDrop(target);
   const launched = useSide.getState().layout;
-  // 9 pages already (no new page): by the placement rules instead (never refused).
+  // At the sanity limit (no new page): by the placement rules instead (never refused).
   if (!pinPeek(page ? { page } : {})) updateLayout((l) => (l === launched ? before : l));
 }

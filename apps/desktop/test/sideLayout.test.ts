@@ -152,7 +152,10 @@ function decide(layout: SideLayout, kind: ItemId, o: OpenOpts = {}): SidePlaceDe
 function open(layout: SideLayout, kind: ItemId, o: OpenOpts = {}): { layout: SideLayout; id: string; decision: SidePlaceDecision } {
   const binding = o.binding ?? DEFAULT_BINDING[kind]?.() ?? agent("A");
   const key = o.key === undefined ? SINGLETON_KEY : o.key;
-  const decision = decide(layout, kind, o);
+  // Reducer fixtures deliberately arrange panes; normal opens use decide() directly.
+  const spec = SPECS[kind]!;
+  const target = spec.prefer.map(candidate => candidate === "active" ? (layout.open ? findPage(layout, layout.activePage) : null) : "group" in candidate ? layout.pages.find(p => p.groups.includes(candidate.group)) : layout.pages.find(p => p.cards.some(c => cardHolds(layout, c, candidate.containing)))).find(Boolean);
+  const decision = decide(layout, kind, { ...o, page: o.page ?? target?.id });
   const applied = applyOpen(layout, decision, { kind, binding, key, state: o.state ?? null, v: 1, pinned: !!o.pin }, ++clock, { reveal: o.reveal ?? true, home: SPECS[kind]!.home });
   // §24.12: the scenarios run on a Shelf that allows mixing (the owner turned it on: a full page takes
   // another kind as a tab of its bottom pane). No Shelf allows it by default (test/shelves.test.ts).
@@ -223,7 +226,7 @@ function assertNeverMixed(layout: SideLayout) {
 function assertLimits(layout: SideLayout) {
   expect(layout.pages.length).toBeLessThanOrEqual(MAX_PAGES);
   for (const page of layout.pages) expect(page.cards.length).toBeLessThanOrEqual(MAX_CARDS);
-  expect(layout.pages.reduce((n, p) => n + p.cards.length, 0)).toBeLessThanOrEqual(MAX_TOOL_PANES);
+  expect(columnsOnScreen(layout, ctx(), null).reduce((n, p) => n + p.page.cards.length, 0)).toBeLessThanOrEqual(MAX_TOOL_PANES);
 }
 
 function sizesSum(layout: SideLayout) {
@@ -260,7 +263,7 @@ describe("S0 (declared order, one column)", () => {
 describe("§4.4 scenarios (v1.17: one column, ≤ 3 panes, then tabs)", () => {
   it("1: a file link → a preview pane under 改动 (order 300) while there is room; full column → a tab of the bottom pane; the next unpinned preview replaces it in place", () => {
     const room = open(s1().layout, "workspace.preview", { key: "a.ts", transient: true });
-    expect(room.decision).toMatchObject({ op: "insert", via: "rule", card: { new: { index: 2 } } });
+    expect(room.decision).toMatchObject({ op: "insert", via: "explicit", card: { new: { index: 2 } } });
     expect(kinds(room.layout)).toEqual(["workspace.files", "workspace.changes", "workspace.preview"]);
     const { layout, t1 } = s0();
     const a = open(layout, "workspace.preview", { key: "a.ts", transient: true });
@@ -368,11 +371,12 @@ describe("§4.4 scenarios (v1.17: one column, ≤ 3 panes, then tabs)", () => {
     expect(moved.activePage).toBe(p4);
     const closed = closeInstances(moved, [files]);
     expect(findPage(closed, p4)).toBeNull();
-    const again = open(closed, "workspace.files");
-    expect(again.decision).toMatchObject({ via: "override", page: { new: { groups: [`user:${p4}`] } } });
+    const appliedAgain = applyOpen(closed, decide(closed, "workspace.files"), { kind: "workspace.files", binding: FOLLOW, key: SINGLETON_KEY, state: null, v: 1, pinned: false }, ++clock, { reveal: true, home: "workspace" });
+    const again = { layout: appliedAgain.layout, id: appliedAgain.instanceId, decision: decide(closed, "workspace.files") };
+    expect(again.decision).toMatchObject({ via: "otherwise", page: { new: { groups: ["workspace"] } } });
     const p5 = pageOf(again.layout, again.id);
     expect(p5).not.toBe(p4);
-    expect(again.layout.overrides["workspace.files"]!.page).toBe(p5);
+    expect(again.layout.overrides["workspace.files"]!.page).toBe(p4);
     const changes = again.layout.pages[0]!.cards[0]!.tabs[0]!;
     expect(again.layout.instances[changes]!.kind).toBe("workspace.changes");
   });
@@ -452,10 +456,10 @@ describe("§4.4 scenarios (v1.17: one column, ≤ 3 panes, then tabs)", () => {
     expect(r1.overrides).toEqual({});
     expect(Object.keys(r1.instances).sort()).toEqual(before);
     // design 038: the side chat replays onto a page of its own
-    expect(r1.pages.map((p) => p.groups)).toEqual([["workspace"], ["chat"]]);
+    expect(r1.pages).toHaveLength(5);
     expect(r1.pages.every((p) => p.name === undefined)).toBe(true);
-    expect(kinds(r1)).toEqual(["workspace.files", "workspace.changes", "terminal.pty"]);
-    expect(kinds(r1, 1)).toEqual(["side-chat.chat"]);
+    expect(r1.pages.every(p => p.cards.length === 1)).toBe(true);
+    expect(r1.pages.flatMap(p => p.cards.map(c => c.kind))).toEqual(["workspace.files", "workspace.changes", "terminal.pty", "status:jobs.tasks", "side-chat.chat"]);
     expect(cardOf(r1, base.t1).tabs.slice(0, 2)).toEqual([base.t1, base.t2]);
     expect(r1.instances[base.t1]!.lastActiveAt).toBe(l.instances[base.t1]!.lastActiveAt);
     sizesSum(r1).forEach((s) => expect(s).toBeCloseTo(1));
@@ -516,20 +520,10 @@ describe("place: reuse and transient", () => {
 });
 
 describe("place: column choice", () => {
-  it("override: its column → a column with one of its groups → a new column with its groups", () => {
+  it("stored overrides do not silently stack a normal open", () => {
     const { layout } = s1();
-    const b = inNewColumn(layout, "browser.tab", { key: "u1" });
-    const workPage = layout.pages[0]!.id;
-    const browserPage = pageOf(b.layout, b.id);
-    const ov = (page: string, groups: string[]) => ({ ...b.layout, overrides: { "workspace.preview": { page, groups, at: 1 } } });
-    expect(decide(ov(browserPage, ["x"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { id: browserPage } });
-    expect(decide(ov("p999", ["browser"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { id: browserPage } });
-    expect(decide(ov("p999", ["workspace", "browser"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { id: workPage } });
-    // §24.12: its page gone and no page of its groups → a new page of the right Shelf (the browser's
-    // Shelf is the left one here), at the end of its rail
-    const rightShelf = shelfOnSide(b.layout, "right")!.id;
-    expect(decide(ov("p999", ["user:p999"]), "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { new: { groups: ["user:p999"], shelf: rightShelf } } });
-    expect(decide({ ...layout, overrides: { "workspace.preview": { page: "p999", groups: ["user:p999"], at: 1 } } }, "workspace.preview", { key: "a" })).toMatchObject({ via: "override", page: { new: { groups: ["user:p999"] } } });
+    const l = { ...layout, overrides: { "workspace.preview": { page: layout.activePage!, groups: ["workspace"], at: 1 } } };
+    expect(decide(l, "workspace.preview", { key: "a" })).toMatchObject({ via: "otherwise", page: { new: { groups: ["workspace"] } } });
   });
 
   it("an explicit column wins over overrides and rules; an unknown explicit column is ignored", () => {
@@ -538,32 +532,25 @@ describe("place: column choice", () => {
     const browserPage = pageOf(b.layout, b.id);
     const l = { ...b.layout, overrides: { "workspace.preview": { page: layout.pages[0]!.id, groups: ["workspace"], at: 1 } } };
     expect(decide(l, "workspace.preview", { key: "a", page: browserPage })).toMatchObject({ via: "explicit", page: { id: browserPage } });
-    expect(decide(l, "workspace.preview", { key: "a", page: "p404" })).toMatchObject({ via: "override" });
+    expect(decide(l, "workspace.preview", { key: "a", page: "p404" })).toMatchObject({ via: "otherwise" });
   });
 
-  it("prefer is tried in order: diff.view goes to the column containing 改动, not the first workspace column", () => {
-    let l = emptyLayout();
-    l = open(l, "workspace.files").layout;
-    const ch = open(l, "workspace.changes", { page: undefined });
-    l = moveCard(ch.layout, cardOf(ch.layout, ch.id).id, { newPage: true }, ++clock, orderOf);
-    const changesPage = pageOf(l, ch.id);
-    l = { ...l, overrides: {} };
-    expect(decide(l, "diff.view", { key: "git:a" })).toMatchObject({ via: "rule", page: { id: changesPage } });
-    const noChanges = closeInstances(l, [ch.id]);
-    expect(decide(noChanges, "diff.view", { key: "git:a" })).toMatchObject({ via: "rule", page: { id: noChanges.pages[0]!.id } });
+  it("declared containing/group preferences do not split the current page", () => {
+    const { layout } = s1();
+    expect(decide(layout, "diff.view", { key: "git:a" })).toMatchObject({ via: "otherwise", page: { new: { groups: ["workspace"] } } });
   });
 
-  it("otherwise: new-page (default) = a page of its own, or the page already holding the kind; active-page: the focused page; a new page only without any", () => {
+  it("normal opens: a new page or an existing same-kind pane, regardless of otherwise hints", () => {
     const { layout } = s1();
     expect(decide(layout, "browser.tab", { key: "x" })).toMatchObject({ via: "otherwise", page: { new: { groups: ["browser"] } } });
-    expect(decide(layout, "notes.note", { key: "n1" })).toMatchObject({ via: "otherwise", page: { id: layout.activePage } });
+    expect(decide(layout, "notes.note", { key: "n1" })).toMatchObject({ via: "otherwise", page: { new: { groups: ["notes"] } } });
     const two = inNewColumn(layout, "side-chat.chat");
     const focusedLeft = { ...two.layout, activePage: two.layout.pages[0]!.id };
     expect(decide(focusedLeft, "browser.tab", { key: "x" })).toMatchObject({ via: "otherwise", page: { new: {} } });
-    expect(decide(focusedLeft, "notes.note", { key: "n1" })).toMatchObject({ via: "otherwise", page: { id: two.layout.pages[0]!.id } });
+    expect(decide(focusedLeft, "notes.note", { key: "n1" })).toMatchObject({ via: "otherwise", page: { new: { groups: ["notes"] } } });
     // a pane of the kind already open (on a page of another group): a tab there, not a new page
     const tab = open(layout, "browser.tab", { key: "x", page: layout.pages[0]!.id });
-    expect(decide(tab.layout, "browser.tab", { key: "y" })).toMatchObject({ via: "otherwise", page: { id: layout.pages[0]!.id }, card: { id: cardOf(tab.layout, tab.id).id } });
+    expect(decide(tab.layout, "browser.tab", { key: "y" })).toMatchObject({ via: "rule", page: { id: layout.pages[0]!.id }, card: { id: cardOf(tab.layout, tab.id).id } });
     expect(decide(emptyLayout(), "notes.note", { key: "n1" })).toMatchObject({ via: "otherwise", page: { new: { groups: ["notes"] } } });
   });
 
@@ -637,17 +624,17 @@ describe("place: pane choice and full columns", () => {
     const l = pagesLayout(1, MAX_CARDS);
     const made = openLauncherPage(l);
     const full = { ...made.layout, activePage: l.pages[0]!.id };
-    const d = decide(full, "notes.note", { key: "n" }); // otherwise active-page → column 1 (full)
+    const d = decide(full, "notes.note", { key: "n", page: full.activePage! }); // otherwise active-page → column 1 (full)
     expect(d).toMatchObject({ via: "limit", page: { id: made.pageId }, card: { new: {} } });
   });
 
   it("full column step 3: no room anywhere → a tab of the bottom pane (mixed kinds); a pane of the kind is still used first", () => {
     // A hand-made layout's Shelf does not allow mixing (owner 2026-10-20): a full page → a new page.
     const plain = pagesLayout(1, MAX_CARDS);
-    expect(decide(plain, "notes.note", { key: "n" })).toMatchObject({ via: "limit", page: { new: { groups: ["notes"] } } });
+    expect(decide(plain, "notes.note", { key: "n" })).toMatchObject({ via: "otherwise", page: { new: { groups: ["notes"] } } });
     let l = withShelves(plain);
     l = setShelfOptions(l, shelvesOf(l)[0]!.id, { allowMixing: true });
-    const n = open(l, "notes.note", { key: "n" });
+    const n = open(l, "notes.note", { key: "n", page: l.activePage! });
     expect(n.decision).toMatchObject({ via: "limit", page: { id: l.pages[0]!.id }, card: { id: l.pages[0]!.cards.at(-1)!.id } });
     expect(n.layout.pages[0]!.cards).toHaveLength(MAX_CARDS);
     expect(cardHolds(n.layout, n.layout.pages[0]!.cards.at(-1)!, "notes.note")).toBe(true);
@@ -720,8 +707,8 @@ describe("reducers", () => {
     expect(moved.pages).toHaveLength(2);
     const back = restoreDefault(moved, files, specOf, ++clock);
     expect(back.overrides["workspace.files"]).toBeUndefined();
-    expect(back.pages).toHaveLength(1);
-    expect(kinds(back)).toEqual(["workspace.files", "workspace.changes", "terminal.pty"]);
+    expect(back.pages).toHaveLength(2);
+    expect(locate(back, files)!.page.cards.map(c => c.kind)).toEqual(["workspace.files"]);
     expect(back.instances[files]).toEqual(moved.instances[files]);
   });
 
@@ -730,7 +717,7 @@ describe("reducers", () => {
     const moved = moveCard(layout, cardOf(layout, files).id, { newPage: true }, ++clock, orderOf);
     const back = restoreKindDefault(moved, "workspace.files", specOf, ++clock);
     expect(back.overrides["workspace.files"]).toBeUndefined();
-    expect(kinds(back)).toEqual(["workspace.files", "workspace.changes", "terminal.pty"]);
+    expect(locate(back, files)!.page.cards.map(c => c.kind)).toEqual(["workspace.files"]);
     const closed = closeInstances(moved, [files]);
     expect(closed.overrides["workspace.files"]).toBeDefined();
     const forgot = restoreKindDefault(closed, "workspace.files", specOf, ++clock);

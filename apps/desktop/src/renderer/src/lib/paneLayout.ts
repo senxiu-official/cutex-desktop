@@ -5,13 +5,14 @@
 //
 // Two areas: the WORK area (conversation panes, step 2: up to two columns side by side; a conversation
 // pane may also show a page — `page:<id>`, in memory only) and the TOOL area: the Shelves left / right of
-// the conversations (§24.12, layout v2: `shelves`, each with ≤ 9 pages of ≤ 3 panes; v1 stored tool columns
+// the conversations (§24.12, layout v2: `shelves`, each with ≤ 50 pages of ≤ 3 panes; v1 stored tool columns
 // `area: "tools"` instead — `migrateLayoutV1` turns them into the right Shelf's pages). The tool area is
 // kept by lib/sideLayout + lib/sideLayoutStore and stored here through `toolPartOf` / `toolRawOf`. Widths
 // of work columns are shares (a Shelf has its own width, else appearance.sidePaneWidth). lib/paneStore
 // keeps the work area (in step with the selection); lib/paneFile stores both per device. Like the rest
 // of the shell, this file names no feature: pane kinds are opaque ids.
 import type { SideLayout } from "./sideLayout";
+import { MAX_SHELF_PAGES } from "./shelfLimits";
 
 /** Layout JSON version (the persisted shape, §4 持久化; lib/paneStore). */
 export const PANE_LAYOUT_VERSION = 2;
@@ -308,12 +309,12 @@ function validShelf(x: unknown): x is PaneShelf {
 }
 
 /** Pages a stored Shelf may have (= lib/sideLayout MAX_SHELF_PAGES). */
-const MAX_SHELF_PAGES_STORED = 9;
+const MAX_SHELF_PAGES_STORED = MAX_SHELF_PAGES;
 
 /**
  * The layout if `raw` is a well-formed v2 one within the limits, else null: the version; ≥ 1 work column
  * whose widths sum to 1; 1–3 rows per column whose heights sum to 1; ≤ 6 work panes on screen; ≤ 2
- * Shelves, one per side, each with 1–9 pages of 0–3 rows (0 only for a page the owner made) whose heights
+ * Shelves, one per side, each with 1–50 pages of 0–3 rows (0 only for a page the owner made) whose heights
  * sum to 1; every pane named once (on screen, on a Shelf's page or as a chip) and existing; every pane's
  * tabs existing instances (each in one pane) with its active one among them; focus / max a work pane on
  * screen or null; ≤ 16 stored chips; the tool state well-formed when present. (v1 = `migrateLayoutV1` first.)

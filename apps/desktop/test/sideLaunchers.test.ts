@@ -117,8 +117,8 @@ describe("launcherClickAction", () => {
   const base: LauncherClickInput = { newInstance: false, multi: false, open: true, activePage: "p1", layered: false, page: "p1", card: null, elsewhere: null, setting: "stay" };
 
   it("not on the current page → open it there (column closed too)", () => {
-    expect(launcherClickAction(base)).toEqual({ kind: "open", page: "p1", fresh: false });
-    expect(launcherClickAction({ ...base, open: false })).toEqual({ kind: "open", page: "p1", fresh: false });
+    expect(launcherClickAction(base)).toEqual({ kind: "open", page: null, fresh: false });
+    expect(launcherClickAction({ ...base, open: false })).toEqual({ kind: "open", page: null, fresh: false });
     expect(launcherClickAction({ ...base, page: null, activePage: null })).toEqual({ kind: "open", page: null, fresh: false });
   });
 
@@ -139,7 +139,7 @@ describe("launcherClickAction", () => {
     expect(launcherClickAction({ ...base, open: false, page: null, activePage: null, elsewhere: "i7" })).toEqual({ kind: "reveal", instanceId: "i7" });
     expect(launcherClickAction({ ...base, card: { id: "c1", collapsed: false }, elsewhere: "i7" })).toEqual({ kind: "focus", cardId: "c1" });
     // Ctrl/⌘ still opens a new one on the current page
-    expect(launcherClickAction({ ...base, multi: true, newInstance: true, elsewhere: "i7" })).toEqual({ kind: "open", page: "p1", fresh: true });
+    expect(launcherClickAction({ ...base, multi: true, newInstance: true, elsewhere: "i7" })).toEqual({ kind: "open", page: null, fresh: true });
   });
 
   it("Ctrl/⌘ / middle click = a new instance, multi kinds only", () => {
@@ -211,7 +211,7 @@ beforeEach(() => {
 describe("pressLauncher", () => {
   it("kind not on the current page → opens it into that page with focus + reveal", () => {
     pressLauncher("x.chat");
-    expect(env.opened).toEqual([{ kind: "x.chat", params: {}, opts: { page: "p1", focus: true, reveal: true } }]);
+    expect(env.opened).toEqual([{ kind: "x.chat", params: {}, opts: { focus: true, reveal: true } }]);
   });
 
   it("kind on the page: collapsed → expands, visible → focus (no open)", () => {

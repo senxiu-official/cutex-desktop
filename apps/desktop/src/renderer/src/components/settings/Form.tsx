@@ -63,6 +63,13 @@ type MetadataReport = (id: string, value: RowMetadata | null) => void;
 const PageMetadataReportContext = createContext<MetadataReport | null>(null);
 const CardMetadataReportContext = createContext<readonly MetadataReport[]>([]);
 const EffectPlacementContext = createContext<{ timingStated: boolean; scopeStated: boolean; scopeBaseline?: Scope }>({ timingStated: false, scopeStated: false });
+const FormFieldsContext = createContext(false);
+
+/** One-shot drafts are form fields, not settings: no scope/effect badges or metadata summaries.
+ * Labels sit above their controls so creation forms and dialogs fit narrow panes too. */
+export function FormFields({ children }: { children: ReactNode }) {
+  return <FormFieldsContext value={true}>{children}</FormFieldsContext>;
+}
 
 function summarize(rows: ReadonlyMap<string, RowMetadata>) {
   const values = [...rows.values()];
@@ -90,13 +97,14 @@ function useMetadataRows() {
 }
 
 function useRowMetadata(value: RowMetadata | null) {
+  const form = useContext(FormFieldsContext);
   const id = useId();
   const page = useContext(PageMetadataReportContext);
   const card = useContext(CardMetadataReportContext);
   const targetHostId = useTargetHostId();
   const key = sourceKey(value?.source);
   const hostId = key && key !== "local" && !value?.allHosts ? targetHostId : undefined;
-  const active = value !== null && !value.navigation;
+  const active = !form && value !== null && !value.navigation;
   const agents = value?.agents, source = value?.source, allHosts = value?.allHosts, readOnly = value?.readOnly;
   useLayoutEffect(() => {
     const metadata = active ? { agents, source, allHosts, readOnly, hostId, sourceKey: key } : null;
@@ -261,12 +269,13 @@ function EffectScope({ scope, picker }: { scope: Scope; picker?: ReactNode }) {
   </span>;
 }
 function EffectMarkers({ agents, source, allHosts, readOnly, row = false }: RowMetadata & { row?: boolean }) {
+  const form = useContext(FormFieldsContext);
   const placement = useContext(EffectPlacementContext);
   const hostId = useTargetHostId();
   const scope = scopeOf({source, allHosts, hostId});
   const showScope = !!scope && !placement.scopeStated && scope !== placement.scopeBaseline;
   const showTiming = !!agents && !placement.timingStated;
-  if (readOnly || (!showScope && !showTiming)) return null;
+  if (form || readOnly || (!showScope && !showTiming)) return null;
   return <span className="relative z-10 col-span-full ml-1 inline-flex flex-wrap items-center gap-1 align-middle" data-effect-markers={row ? "row" : "card"}>
     {showScope && scope && <EffectScope scope={scope} />}
     {showTiming && agents && <AgentsChip agents={agents} presentation={row ? "row" : "header"} />}
@@ -582,6 +591,7 @@ export function InfoTip({ id, children }: { id?: string; children: ReactNode }) 
  * never moves. In a narrow card (< 28rem) the controls drop under the label, left-aligned.
  */
 export function SettingRow({ label, hint, info, children, reset, sample, agents, source, allHosts, readOnly, navigation }: SettingEffect & { label: ReactNode; hint?: ReactNode; info?: ReactNode; children?: ReactNode; reset?: ReactNode; sample?: ReactNode }) {
+  const form = useContext(FormFieldsContext);
   const id = useId();
   const hostId = useRowMetadata({ agents, source, allHosts, readOnly, navigation });
   const labelId = `${id}l`;
@@ -600,17 +610,18 @@ export function SettingRow({ label, hint, info, children, reset, sample, agents,
   return (
     <div
       data-setting-row=""
+      data-form-field={form ? "" : undefined}
       data-effect-timing={readOnly || navigation ? undefined : agents}
       data-effect-read-only={readOnly || undefined}
       data-effect-navigation={navigation || undefined}
       data-effect-source={sourceKey(source)} data-effect-host={hostId}
       data-effect-all-hosts={allHosts || undefined}
       data-modified={modified ? "" : undefined}
-      className={`group/row relative grid grid-cols-[minmax(9rem,1fr)_auto] gap-x-3 border-b border-border/60 last:border-b-0 group-data-[narrow]/card:grid-cols-[minmax(0,1fr)] ${compact ? "gap-y-1 py-2" : "gap-y-1.5 py-3"} ${sample ? "items-start" : "items-center"}`}
+      className={`group/row relative grid ${form ? "grid-cols-[minmax(0,1fr)]" : "grid-cols-[minmax(9rem,1fr)_auto] group-data-[narrow]/card:grid-cols-[minmax(0,1fr)]"} gap-x-3 border-b border-border/60 last:border-b-0 ${compact ? "gap-y-1 py-2" : "gap-y-1.5 py-3"} ${sample ? "items-start" : "items-center"}`}
     >
       <div className="relative min-w-0">
         {modified && <ModifiedMark compact={compact} />}
-        <div id={labelId} className="text-sm">
+        <div id={labelId} className={form ? "text-sm break-words" : "text-sm"}>
           {/* The restore button floats after the label: showing / hiding it never reflows the row. */}
           <span className="relative">
             {label}
@@ -627,7 +638,7 @@ export function SettingRow({ label, hint, info, children, reset, sample, agents,
         {sample}
       </div>
       <RowA11yContext value={{ labelId, hintId }}>
-        <div className="flex min-w-0 items-center justify-end gap-2 group-data-[narrow]/card:row-start-2 group-data-[narrow]/card:flex-wrap group-data-[narrow]/card:justify-start">
+        <div className={`flex min-w-0 items-center gap-2 ${form ? "w-full flex-wrap justify-start [&_input]:min-w-0 [&_input]:max-w-full [&_select]:max-w-full" : "justify-end group-data-[narrow]/card:row-start-2 group-data-[narrow]/card:flex-wrap group-data-[narrow]/card:justify-start"}`}>
           {children}
         </div>
       </RowA11yContext>

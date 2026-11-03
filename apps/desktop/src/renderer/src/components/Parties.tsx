@@ -7,6 +7,7 @@ import { rowsOf } from "../lib/viewHost";
 import { useI18n } from "../i18n";
 import { SYSTEM_SENDER_NAME, systemSender } from "../lib/systemSenders";
 import { Avatar } from "./Avatar";
+import type { AgentHint } from "../lib/agentHint";
 import { SystemAvatar } from "./SystemAvatar";
 import { isShortId, resolveId } from "../lib/shortIds";
 
@@ -24,21 +25,29 @@ export function TaskTag({ taskId, assignmentId, title }: { taskId: string; assig
  * An agent as [avatar] name; click / Enter opens it. A span with role=link, not a button: it often
  * sits inside a row's toggle button. `name` is the fallback when the agent is not in the sidebar.
  * A cutex service id (lib/systemSenders) shows as 委托系统 / Cutex 系统 with the logo, not a link.
- * `realAvatar`: always the real avatar (a minor agent is otherwise a small dot, Avatar `minor`), e.g. 「已回复 [avatar] Lead」.
+ * A bare name (agent_tell / agent_delegate by name) resolves to the one agent of that name on the conversation's host.
+ * An agent the sidebar does not hold (being created by an agent_create row, another host's, deleted) still draws its
+ * letter tile (components/Avatar `agent`): initials as the sidebar will give it, with `hint`'s project / model if known.
+ * `realAvatar`: no effect since 2026-11-01 — every place draws an agent's real avatar (components/Avatar, rule A); kept for its callers.
  */
-export function Who({ id: ref, name, size = 16, quiet = false, realAvatar = false }: { id: string | null; name: string | null; size?: number; quiet?: boolean; realAvatar?: boolean }) {
+export function Who({ id: ref, name, size = 16, quiet = false, realAvatar = false, hint }: { id: string | null; name: string | null; size?: number; quiet?: boolean; realAvatar?: boolean; hint?: AgentHint | null }) {
   // `ref` may be a short session id from agent-facing tool text (`cutex.…3f9a1c`): resolved
   // against the sidebar; unknown or ambiguous = shown as text, not a link (lib/shortIds).
   const conv = useConvScope();
   const session = useApp((s) => {
-    if (!ref) return undefined;
+    if (!ref && !name) return undefined;
     const all = rowsOf(s.sidebar, convSidebarOf(conv, s));
+    if (!ref) {
+      // A unique name is an agent reference too (lib/taskRows party).
+      const named = all.filter((x) => x.displayName === name);
+      return named.length === 1 ? named[0] : undefined;
+    }
     const exact = all.find((x) => x.cutexSessionId === ref);
     if (exact || !isShortId(ref)) return exact;
     const full = resolveId(ref, all.map((x) => x.cutexSessionId));
     return full ? all.find((x) => x.cutexSessionId === full) : undefined;
   });
-  const id = session?.cutexSessionId ?? (isShortId(ref) ? null : ref);
+  const id = session?.cutexSessionId ?? (!ref || isShortId(ref) ? null : ref);
   const select = useApp((s) => s.select);
   // Names are resolved from the conversation's host (lib/conversationScope): open them there too.
   const host = useConvHost();
@@ -54,10 +63,11 @@ export function Who({ id: ref, name, size = 16, quiet = false, realAvatar = fals
   }
   const label = session?.displayName ?? name ?? ref;
   if (!label) return null;
+  const agent = session ? null : { ...hint, hostId: hint?.hostId ?? host };
   if (!id)
     return (
       <span className={`inline-flex min-w-0 max-w-full items-center gap-1 ${quiet ? "" : "text-foreground"}`} title={[label, ref].filter(Boolean).join("\n")}>
-        <Avatar name={label} size={size} />
+        <Avatar name={label} agent={agent} size={size} />
         <span className="truncate">{label}</span>
       </span>
     );
@@ -70,7 +80,7 @@ export function Who({ id: ref, name, size = 16, quiet = false, realAvatar = fals
       onKeyDown={(e) => e.key === "Enter" && (e.stopPropagation(), id && void select(id, host))}
       className={`inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 hover:underline ${quiet ? "" : "text-foreground"}`}
     >
-      <Avatar name={label} avatar={session?.avatar} seed={id} size={size} minor={!realAvatar} />
+      <Avatar name={label} avatar={session?.avatar} seed={id} agent={agent} size={size} />
       <span className="truncate">{label}</span>
     </span>
   );

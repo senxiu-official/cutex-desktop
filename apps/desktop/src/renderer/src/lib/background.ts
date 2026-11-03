@@ -1,7 +1,6 @@
-// Background work of the selected agent (DESIGN §4.14): long-running terminals from cute-codex
+// Background work of the owning agent (DESIGN §4.14): long-running runtime terminals from
 // `thread/backgroundTerminals/list`, and sub-agents derived from collabAgentToolCall items.
-import { useEffect, useMemo, useState } from "react";
-import type { BackgroundTerminal } from "../../../shared/ipc";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { agentHost, hostApi, useApp, viewOf } from "../store";
 import { convViewHostOf, useConvScope, type ConversationScopeValue } from "./conversationScope";
 import { viewRow } from "./viewHost";
@@ -9,9 +8,10 @@ import { childStatusFromThreadRead, liveAtGeneration, subAgentMetaFromThreadRead
 import { recordSubAgentMeta, recordSubAgentSpan, useSubAgentMeta } from "./subagentMetaStore";
 import { subAgentSpanFromThreadRead } from "./finishedSubagents";
 import { lacks, opensClaudeSubagents } from "./agentFeatures";
-import { agentFeaturesFor } from "./agentFeaturesView";
+import { agentFeaturesFor, useAgentFeatures } from "./agentFeaturesView";
 import type { TimelineState } from "./timeline";
-import { RequestCoalescer, terminalsRefreshKey } from "./terminalsFetch";
+import { terminalsRefreshKey } from "./terminalsFetch";
+import { EMPTY_TERMINALS, terminalRows } from "./terminalRowsStore";
 
 export { activeSubAgents } from "./subagents";
 
@@ -82,34 +82,34 @@ export function useAgentOnline(sessionId: string | null): boolean {
 }
 
 /** Shared by the status capsule and the status bar (lib/terminalsFetch). */
-const terminalRequests = new RequestCoalescer<BackgroundTerminal[]>(2_000);
 
 /**
  * Background terminals of the agent's thread: re-read when a command starts / finishes or the turn
  * changes (`terminalsRefreshKey`, not on every streamed event), polled lightly while any run.
  */
 export function useBackgroundTerminals(sessionId: string | null, threadId: string | null, timeline: TimelineState | null) {
-  const [terminals, setTerminals] = useState<BackgroundTerminal[]>([]);
   const [tick, setTick] = useState(0);
   const refreshKey = terminalsRefreshKey(timeline);
   // The agent's host as seen from here (panes step 2: two conversations may show agents of two hosts).
   const scope = useConvScope();
   const hostId = useApp((s) => (sessionId ? hostIn(scope, s, sessionId) : null));
+  const generation = useAgentRuntimeGeneration(sessionId);
+  const features = useAgentFeatures(sessionId);
+  const enabled = !!sessionId && !!threadId && !!hostId && !lacks(features, "backgroundTerminals");
+  const key = enabled ? `${hostId}\n${sessionId}\n${threadId}\n${generation}` : null;
+  const terminals = useSyncExternalStore(
+    useCallback(listener => key ? terminalRows.subscribe(key, listener) : () => {}, [key]),
+    useCallback(() => key ? terminalRows.get(key) : EMPTY_TERMINALS, [key]),
+    () => EMPTY_TERMINALS,
+  );
   useEffect(() => {
-    // Claude agents have no background terminals (features.backgroundTerminals = false): don't poll.
-    if (!sessionId || !threadId || !hostId || lacks(agentFeaturesFor(sessionId, hostId), "backgroundTerminals")) return setTerminals([]);
+    if (!key || !sessionId || !threadId || !hostId) return;
     let cancelled = false;
     const timer = setTimeout(() => {
-      terminalRequests.get(`${hostId}\n${sessionId}\n${threadId}`, () => hostApi(hostId).backgroundTerminals(sessionId, threadId)).then(
+      void terminalRows.read(key, refreshKey, () => hostApi(hostId).backgroundTerminals(sessionId, threadId)).then(
         (list) => {
-          if (cancelled) return;
-          setTerminals(list);
+          if (cancelled || list === null) return;
           useApp.getState().setBackgroundItems(sessionId, list.map((x) => x.itemId), hostId);
-        },
-        () => {
-          if (cancelled) return;
-          setTerminals([]);
-          useApp.getState().setBackgroundItems(sessionId, [], hostId);
         },
       );
     }, 400);
@@ -117,7 +117,7 @@ export function useBackgroundTerminals(sessionId: string | null, threadId: strin
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [sessionId, threadId, hostId, refreshKey, tick]);
+  }, [sessionId, threadId, hostId, key, refreshKey, tick]);
   // Light polling only while something is running (CPU / memory figures change).
   useEffect(() => {
     if (terminals.length === 0) return;
@@ -126,7 +126,7 @@ export function useBackgroundTerminals(sessionId: string | null, threadId: strin
   }, [terminals.length]);
   const refresh = () => {
     // After a terminate: read again, not the shared result from just before it.
-    if (sessionId && threadId) terminalRequests.invalidate(`${sessionId}\n${threadId}`);
+    if (key) terminalRows.invalidate(key);
     setTick((n) => n + 1);
   };
   return { terminals, refresh };

@@ -1,3 +1,4 @@
+import { daemonFetch } from "./daemonFetch";
 // Host registry and connections (multi-host P0, docs/research/multi-host-rfc-20261009.md §4): one
 // `HostConnection` (daemon service + SSH tunnel + host feed) per connected host; the view scope picks
 // what the UI shows, and connected hosts outside it stay connected when they auto-connect (their
@@ -603,14 +604,14 @@ export class HostManager implements HostApi {
     }
     if (dev) {
       try {
-        return await this.probe(new CutexClient(this.devEndpoint(dev)), true);
+        return await this.probe(new CutexClient(this.devEndpoint(dev), { fetch: daemonFetch }), true);
       } catch (error) {
         return { ok: false, message: error instanceof Error ? error.message : String(error) };
       }
     }
     if (!host) {
       try {
-        return await this.probe(new CutexClient(await discoverLocalDaemon(this.local)), false);
+        return await this.probe(new CutexClient(await discoverLocalDaemon(this.local), { fetch: daemonFetch }), false);
       } catch (error) {
         return { ok: false, message: error instanceof Error ? error.message : String(error) };
       }
@@ -628,7 +629,7 @@ export class HostManager implements HostApi {
       let tunnel: { port: number; close(): void } | null = null;
       try {
         tunnel = await openTemporaryTunnel(target, host.remotePort, this.pids, undefined, { askpass: prompts });
-        const result = await this.probe(new CutexClient(this.endpoint(tunnel.port, token, { target: targetText })), true);
+        const result = await this.probe(new CutexClient(this.endpoint(tunnel.port, token, { target: targetText }), { fetch: daemonFetch }), true);
         const checked = this.checkTestIdentity(host, result, targetText);
         if (checked.ok) return checked;
         last = checked;
@@ -922,7 +923,7 @@ export class HostManager implements HostApi {
     const timer = setTimeout(() => controller.abort(), 10_000);
     let remote: { hostId: string };
     try {
-      remote = await new CutexClient(this.endpoint(port, token, { target })).host({ signal: controller.signal });
+      remote = await new CutexClient(this.endpoint(port, token, { target }), { fetch: daemonFetch }).host({ signal: controller.signal });
     } catch (error) {
       if (error instanceof CutexApiError && (error.status === 401 || error.status === 403)) activate();
       else reject({ code: "remoteDaemon", detail: `${target}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1001,7 +1002,7 @@ export class HostManager implements HostApi {
 
   /** What the "auto" pairing reads over the new member token: `/v2/host.owner`, the capability, this desktop's fingerprint. */
   private async ownerProbe(port: number, token: string, where: SshWhere): Promise<OwnerProbe> {
-    const client = new CutexClient(this.endpoint(port, token, where));
+    const client = new CutexClient(this.endpoint(port, token, where), { fetch: daemonFetch });
     const host = await client.request<unknown>("GET", "/v2/host");
     const caps = await client.request<CapabilitiesView>("GET", "/v2/capabilities").catch(() => null);
     const owner = readHostOwner(host);
@@ -1055,7 +1056,7 @@ export class HostManager implements HostApi {
 
   /** `DELETE /v2/client-tokens/{id}` with `token` through a tunnel at `port`. */
   private async deleteToken(port: number, token: string, host: SshWhere, tokenId: string): Promise<void> {
-    await new CutexClient(this.endpoint(port, token, host)).request("DELETE", `/v2/client-tokens/${encodeURIComponent(tokenId)}`);
+    await new CutexClient(this.endpoint(port, token, host), { fetch: daemonFetch }).request("DELETE", `/v2/client-tokens/${encodeURIComponent(tokenId)}`);
   }
 
   private async probe(client: CutexClient, remote: boolean): Promise<HostTestResult> {

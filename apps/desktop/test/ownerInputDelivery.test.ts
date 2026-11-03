@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { QueueAdmission, QueueItem } from "@cutex-desktop/protocol";
-import { withoutDeliveredOwnerItems } from "../src/renderer/src/lib/ownerInputDelivery";
+import { withoutDeliveredOwnerItems } from "../src/renderer/src/lib/legacyDelivery/ownerInputDelivery";
 
 describe("positive owner-input delivery precedence", () => {
   const input = (id: string, state = "queued") => ({ queueId: id, clientUserMessageId: `client-${id}`, state }) as QueueItem;

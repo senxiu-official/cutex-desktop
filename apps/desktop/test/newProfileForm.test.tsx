@@ -60,6 +60,16 @@ const type = (el: HTMLInputElement, value: string) =>
   });
 const create = () => act(async () => button("newProfile.create").click());
 
+it("keeps all provider/key/model/name steps free of settings badges", () => {
+  render();
+  pickCard("deepseek");
+  expect(host.querySelectorAll("[data-form-field]").length).toBeGreaterThan(3);
+  expect(q("[data-effect-markers]")).toBeNull();
+  expect(q("[data-settings-agents]")).toBeNull();
+  expect(input("newProfile.key.label")).not.toBeNull();
+  expect(input("newProfile.name.label")).not.toBeNull();
+});
+
 it("cards and login options follow the host's capabilities", () => {
   render();
   expect([...host.querySelectorAll("[data-provider-card]")].map((e) => e.getAttribute("data-provider-card"))).toEqual(["openai", "anthropic", "deepseek", "kimi", "glm", "gemini", "custom"]);

@@ -27,7 +27,7 @@ let clock = 100;
 
 function open(layout: SideLayout, kind: string, key: string | null = SINGLETON_KEY) {
   const input = { kind: kind as ItemId, binding: FOLLOW, key, state: null, v: 1, pinned: false };
-  const decision = place(layout, { ...input, transient: false, activePage: layout.activePage, columnOpen: layout.open }, placeSpec({ home: "workspace" }));
+  const decision = place(layout, { ...input, transient: false, page: layout.activePage ?? undefined, activePage: layout.activePage, columnOpen: layout.open }, placeSpec({ home: "workspace" }));
   return applyOpen(layout, decision, input, ++clock, { reveal: true, home: "workspace" });
 }
 

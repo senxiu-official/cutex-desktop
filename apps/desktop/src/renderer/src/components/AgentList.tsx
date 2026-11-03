@@ -1,6 +1,6 @@
 // 全部 agent: one group's online / offline / archived agents — search, sort, runtime filter,
 // multi-select (Shift = range) and bulk 停止 / 启动 / 归档 / 恢复 through the existing cutex mutations
-// (at most 3 at once, per-row progress). Online rows show the sidebar's running ring / pills / running
+// (starts sequentially; other actions at most 3 at once, per-row progress). Online rows show the sidebar's running ring / pills / running
 // time. Shared by the sidebar's 全部 agent dialog (opens on 离线) and the project page's Agent tab
 // (opens on 在线). Everything goes through the daemon, so a remote host works the same.
 // On the project page the list is also the member management (`members`): row menu entries for the
@@ -39,6 +39,7 @@ import { cachedProfileList, loadProfileList } from "../lib/profileSnapshot";
 import type { AgentRow } from "../lib/sidebar";
 import { relativeTime, useSidebarModel } from "../lib/sidebarView";
 import { sidebarOf, useApp } from "../store";
+import { isHostBusyActionPending } from "../lib/hostBusyActions";
 import { useTargetHostId, useTargetIsFocus, useTargetSelect } from "../lib/targetHost";
 import { Avatar } from "./Avatar";
 import { RunningTime, StatusAvatar, StatusPill } from "./AgentStatus";
@@ -61,7 +62,7 @@ export interface MemberControls {
   /** 移出项目 of one member (cutex detach_member); one at a time (the project revision fences each). */
   detach(id: string): Promise<void>;
 }
-type Phase = "queued" | "running" | "done" | "failed";
+type Phase = "queued" | "running" | "done" | "failed" | "hostBusy";
 
 /** A row acted on in this list: it stays where it was (frozen sort key) until the list closes. */
 interface Progress {
@@ -111,12 +112,24 @@ async function perform(action: Action, row: AgentRow, hostId: string): Promise<v
   if (action === "start" || action === "restoreStart") await app.sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, hostId);
 }
 
-function Checkbox({ state, disabled, title, onClick }: { state: "none" | "some" | "all"; disabled?: boolean; title?: string; onClick(e: MouseEvent): void }) {
+/**
+ * The row's selection checkbox. The whole first grid column (out to the row's left edge and full row height, via
+ * `hit` = negative margins matching the row padding) toggles it, so a click next to the box never opens the agent.
+ */
+function Checkbox({ state, disabled, title, onClick, hit = "-my-2 -ml-4" }: { state: "none" | "some" | "all"; disabled?: boolean; title?: string; onClick(e: MouseEvent): void; hit?: string }) {
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (ref.current) ref.current.indeterminate = state === "some";
   }, [state]);
   return (
+    <span
+      data-checkbox-hit
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!disabled && e.target === e.currentTarget) onClick(e);
+      }}
+      className={`${hit} flex items-center self-stretch pl-4 pr-3 ${disabled ? "cursor-default" : "cursor-pointer"}`}
+    >
     <input
       ref={ref}
       type="checkbox"
@@ -132,6 +145,7 @@ function Checkbox({ state, disabled, title, onClick }: { state: "none" | "some" 
       }}
       className="h-3.5 w-3.5 cursor-pointer accent-[var(--accent)] disabled:cursor-default disabled:opacity-30"
     />
+    </span>
   );
 }
 
@@ -144,6 +158,7 @@ function PreviewLine({ preview }: { preview: ActivityPreview | undefined }) {
 function StatusCell({ p, live }: { p: Progress | undefined; live: AgentRow | undefined }) {
   const { t } = useI18n();
   if (!p) return null;
+  if (p.phase === "hostBusy") return null; // The global host feedback owns this outcome and Retry.
   if (p.phase === "failed") {
     return (
       <span title={p.error} className="cursor-help text-danger">
@@ -247,9 +262,9 @@ function Row({
     >
       <Checkbox state={checked ? "all" : "none"} disabled={!selectable} onClick={onToggle} />
       {online ? (
-        <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={session.avatar} seed={session.cutexSessionId} size={28} minor signal={signal} running={showsRunningRing(signal, session)} />
+        <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={session.avatar} seed={session.cutexSessionId} size={28} signal={signal} running={showsRunningRing(signal, session)} />
       ) : (
-        <Avatar name={row.name} initial={row.initial} color={row.color} avatar={session.avatar} seed={session.cutexSessionId} size={28} minor />
+        <Avatar name={row.name} initial={row.initial} color={row.color} avatar={session.avatar} seed={session.cutexSessionId} size={28} />
       )}
       <div className="min-w-0 leading-snug">
         <div className="flex min-w-0 items-center gap-1.5">
@@ -391,7 +406,7 @@ export function AgentList({
 
   const selectable = (id: string) => {
     const p = progressOf(id);
-    return !p || p.phase === "failed";
+    return !p || p.phase === "failed" || p.phase === "hostBusy";
   };
   const order = rows.map((r) => r.id);
   const selectableShown = order.filter(selectable);
@@ -399,7 +414,7 @@ export function AgentList({
   const all = selectionState(selectableShown, selected);
   const mine = Object.values(progress).filter((p) => p.tab === tab);
   const busy = Object.values(progress).some((p) => p.phase === "queued" || p.phase === "running");
-  const done = mine.filter((p) => p.phase === "done" || p.phase === "failed").length;
+  const done = mine.filter((p) => p.phase !== "queued" && p.phase !== "running").length;
   const failed = mine.filter((p) => p.phase === "failed").length;
 
   const switchTab = (next: AgentListTab) => {
@@ -452,14 +467,14 @@ export function AgentList({
     anchor.current = null;
     const update = (id: string, patch: Partial<Progress>) => setProgress((prev) => (prev[id] ? { ...prev, [id]: { ...prev[id]!, ...patch } } : prev));
     // Detaches go one at a time: each is fenced by the project revision the one before advanced.
-    await runLimited(ids, action === "detach" ? 1 : START_CONCURRENCY, async (id) => {
+    await runLimited(ids, action === "detach" || starts ? 1 : START_CONCURRENCY, async (id) => {
       update(id, { phase: "running" });
       try {
         if (action === "detach") await members!.detach(id);
         else await perform(action, byId.get(id)!, hostId);
         update(id, { phase: "done", error: undefined });
       } catch (e) {
-        update(id, { phase: "failed", error: errorText(e) });
+        update(id, isHostBusyActionPending(e) ? { phase: "hostBusy", error: undefined } : { phase: "failed", error: errorText(e) });
       }
     });
   };
@@ -515,7 +530,7 @@ export function AgentList({
       </div>
       {tab === "archived" && !archived.scoped && <p className="border-b border-border bg-surface-2/40 px-4 py-1.5 text-caption/[inherit] text-subtle">{t("agents.archivedUnscoped")}</p>}
       <div className={`${GRID} border-b border-border px-4 py-1 text-caption/[inherit] text-subtle`}>
-        <Checkbox state={all} disabled={selectableShown.length === 0} title={t("agents.selectAll")} onClick={() => setSelected(all === "all" ? new Set([...selected].filter((id) => !selectableShown.includes(id))) : new Set([...selected, ...selectableShown]))} />
+        <Checkbox hit="-my-1 -ml-4" state={all} disabled={selectableShown.length === 0} title={t("agents.selectAll")} onClick={() => setSelected(all === "all" ? new Set([...selected].filter((id) => !selectableShown.includes(id))) : new Set([...selected, ...selectableShown]))} />
         <span />
         <span>{t("agents.col.agent")}</span>
         <span>{t("agents.col.profile")}</span>

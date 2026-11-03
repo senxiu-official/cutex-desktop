@@ -7,9 +7,10 @@
 > "The owner" is the project's maintainer. The current behaviour is in the code, `README.md`,
 > `docs/install/AGENT-INSTALL.md` and the cutex repository's `docs/`.
 
-Status: draft v0.1 (2026-10-06). Decisions below were agreed with the owner in conversation.
-Interface details marked _(pending verification)_ must be checked against `refs/cutex` and
-`upstream/cute-codex` HEAD before implementation.
+Status: living design record, started 2026-10-06; header and layout refreshed 2026-11-01. Decisions
+below were agreed with the owner in conversation; per-feature proposals since then are in
+`docs/design/`. Interface details marked _(pending verification)_ must be checked against the cutex
+and cute-codex sources (`upstream/cutex`, `upstream/cute-codex`) before implementation.
 
 ## 1. Goal
 
@@ -22,10 +23,12 @@ An **open-source "ChatGPT desktop / Codex app"** built on the owner's own stack:
   Agent Bus, projects / Director authority, delegations (asks), profiles, Management v2 API
   (the older task service was removed in cutex r219).
 
-Not a goal: replicating every feature of commercial harnesses. v1 ships only what the owner uses.
+Not a goal: replicating every feature of commercial harnesses. The app ships the features its
+maintainer actually uses.
 
-Users: the owner, on Windows and Linux. Remote hosts are not a phase-1 goal but the architecture
-must not preclude them.
+Users: the owner first, on Windows and Linux (macOS as a front end only); public releases since
+0.1.0 (2026-10-15). Several hosts, local and over SSH, can be connected at once, and several people
+can share a host as separate users.
 
 ## 2. Architecture
 
@@ -54,9 +57,9 @@ Daemon supervision: `cutex service install` sets it up. **Linux → systemd user
 persistent-runtime-host project is not used or required by Cutex. The desktop detects a missing daemon
 and shows diagnostics (on Windows it may start the logon task); it does not own the daemon's lifetime.
 
-Remote (later): each machine runs its own cutex daemon; desktop connects to several daemons
-(local direct, remote via SSH port-forward). Sidebar can then group by host. Requirement for v1:
-nothing in the client may assume "local" — all FS/terminal/diff access goes through daemon APIs.
+Remote hosts: each machine runs its own cutex daemon; the desktop connects to several daemons at once
+(local direct, remote via SSH port-forward) and the sidebar can group by host. Nothing in the client
+may assume "local" — all FS/terminal/diff access goes through daemon APIs.
 
 SSH hosts phase 1 (2026-10-07): one active daemon at a time. Pairing runs `cutex management
 client-token issue` over `ssh -o BatchMode=yes` once; the client token stays in main (safeStorage).
@@ -136,8 +139,8 @@ team. The cutex wire name `project` stays and now means exactly this; no "项目
 ## 4. UI
 
 Overall: left sidebar + right conversation, like every harness. Sidebar + settings ≈ cutex TUI;
-conversation pane ≈ a cutex-managed session. Special pages (project/agent management, task board)
-are separate views, later phases.
+conversation pane ≈ a cutex-managed session. Special pages (project/agent management, delegations, settings)
+are separate views.
 
 ### 4.1 Sidebar (IM-style, not a plain session list)
 
@@ -299,6 +302,20 @@ modal), one pending request at a time (queue), composer hidden but draft preserv
 ZCode's `ElicitationDialog` wizard. Sidebar shows ⚠ on the agent; OS notification.
 See `docs/research/zcode-ui.md`.
 
+Hosts advertising `user-input-options-v1` may attach a cutex-owned version1 question
+extension with original text, multiple-selection choices and text previews. The shared
+Claude/Codex question card reads it only when both capability and extension validate;
+older hosts retain the existing single-choice/text behavior. Generated Codex types stay
+unchanged. Multi-select uses explicit submit and can combine listed choices with one
+Other answer. Preview HTML is displayed as text, never executed.
+
+Question drafts survive reloads and failed submissions. Their identity includes the
+host, session, runtime generation, typed native request ID, native thread/turn/item
+and answer-relevant schema. Bounded storage keys are only indexes: full schema equality
+is checked before restoring. UI absence or a void reply is not terminal confirmation;
+older scopes remain inert rather than being time-evicted. The daemon owns pending
+questions and first-answer arbitration; no additional question bus or local auto-answer.
+
 Permission-mode audit and proposed alignment: `docs/research/permissions-gpt-20261011.md`.
 The current desktop's full / auto / read-only picker does not yet distinguish native manual review
 from automatic review. Permission profile, approval policy and reviewer must remain distinct, and
@@ -340,7 +357,7 @@ in the agent's header `⋯` → Agent settings (TUI Agent Inspector in GUI form)
 
 | Group | Page | Contents | Source |
 |---|---|---|---|
-| Basics | General | language, theme (system/light/dark), OS notification when an agent needs input / finishes, launch at login | desktop-local |
+| Basics | General | language, theme (system/light/dark), OS notification when an agent needs input / finishes, launch at login | language + theme (with contrast, palettes, terms): **follow the person** via their memory host (cutex `user-layout`, owner 2026-11-03; desktop-local when the host lacks it); notifications, launch at login: desktop-local |
 | | Shortcuts | view / customise keybindings (later) | desktop-local |
 | | Connection | current connection (status, tunnel, cutex version + capabilities, reconnect); hosts list (switch / test / edit / re-pair / click-twice remove), add SSH host, connect-on-launch (last used / local) | desktop (`userData/hosts.json`, safeStorage tokens) + `/v2/capabilities` |
 | Agents & models | Profiles | = ZCode "model providers" + Claude "account". Overview: one card per profile (colour, name, ★ default, kind · preset, ⚠ problems, agents in use, ⋯; model · effort + quota bars), default first; click → full-width detail page (breadcrumb 设置 › Profiles › name), sections: **Connection** (base URL, wire API `responses`/`chat`, API key write-only "set/replace", or ChatGPT/Claude login status; retries / stream idle timeout / websockets under "advanced"); **Models** (catalog from `/models` discovery with refresh; per model: context window, default ✓; add model by id; edit per-model context window); **Defaults** (model, reasoning effort, context window override, auto-compact token limit); **Quota readers**; **Behaviour** (allow mid-session switch, color). Fields map to cutex `CodexProfileConfigSnapshot` + `model_catalog_json` + `ModelCatalog` | cutex profile store |
@@ -545,7 +562,7 @@ merged into `TitleBar.tsx`:
 - Left (as wide as the sidebar when it is open): sidebar toggle (Ctrl+B, remembered per device) and
   the host switcher: connection dot, active host (local: daemon host id; SSH: its label + status
   while not online), and a menu with every host (local first), "Add SSH host…" and Connection
-  settings. Phase 1 (2026-10-07): one active host; choosing another reconnects the whole app.
+  settings. Phase 1 (2026-10-07) had one active host; since 2026-10-11 several hosts are connected at once.
 - Middle: the current agent's avatar and name, which opens the agent menu (§4.12; rename lives
   there), plus the note or cwd and the git chip (opens Changes). In Settings it shows the title.
 - Right: side-pane toggle, then the window controls. Windows uses `titleBarOverlay`, so the native
@@ -658,8 +675,9 @@ the top of the sidebar (Claude / ZCode pattern): **＋ New agent** (flow pending
 Hovering a project header shows ⚙, which opens that project.
 
 - **Projects page.** A project list on the left; the selected project's detail on the right:
-  - *Basics:* name, badge (≤4 characters), palette colour and project directory
+  - *Basics:* name, badge (≤4 characters), project colour and project directory
     (`set_workspace_root`).
+    Project colours (owner 2026-11-03): the six existing named colours remain first, followed by twelve curated RGB presets and a custom `#RRGGBB` field, shared by creation and icon editing. A host rejection is shown and retains the saved colour; colour support is decided by the host, without guessing from unrelated capability flags.
   - *Members:* the Director is marked, members can be added or removed (`add_member` /
     `detach_member`). Changing the Director stays disabled until the owner-initiated rotation lands.
   - *MCP (project layer):* read-only for now.
@@ -917,7 +935,8 @@ timeline renderers, and so on. The shell renders from a registry and has no per-
 order) is [`docs/desktop-modules.md`](desktop-modules.md).
 
 - **Built-in modules are trusted.** They live in this repo and are bundled in the main renderer.
-  The v1.1 contract is exported by `@cutex-desktop/plugin-sdk`; `plugin-host` implements one neutral
+  The contract (its version is `MODULE_API_VERSION` in `@cutex-desktop/plugin-sdk`) is exported by
+  that package; `plugin-host` implements one neutral
   lifecycle engine, while `modules/app.ts` supplies the app adapter and scoped UI services.
 - **External plugins run isolated.** The default-off `plugins` module maps validated local
   manifests to dynamic modules. Code runs only in opaque `sandbox="allow-scripts"` frames, with
@@ -1024,21 +1043,32 @@ Electron + React 19 + TypeScript + Vite + Tailwind 4 + shadcn/ui + Zustand; pnpm
 Node 24. Chosen to match ZCode so components can be ported. Tauri rejected: WebKitGTK on Linux,
 and UI components would need rewriting.
 
-## 6. Repo layout (planned)
+## 6. Repo layout
 
 ```
-apps/desktop/            Electron app (main / preload / renderer)
-  src/renderer/src/modules/   built-in modules: slot types, registry, one folder per module (§4.22)
-packages/protocol/       generated cute-codex v2 TS types + cutex Management v2 types
-packages/cutex-client/   Management v2 client: bootstrap → SSE with cursor resume → commands
-packages/ui/             components (some ported from ZCode, Apache NOTICE kept)
-docs/
-refs/                    read-only references (git-ignored)
+apps/desktop/                 Electron app (main / preload / renderer)
+  src/renderer/src/components/  shared UI components (some ported from ZCode, Apache NOTICE kept)
+  src/renderer/src/modules/     built-in modules: slot types, registry, one folder per module (§4.22)
+packages/protocol/            generated cute-codex v2 TS types + cutex Management v2 types
+packages/cutex-client/        Management v2 client: bootstrap → SSE with cursor resume → commands
+packages/plugin-sdk/          module contract (types, slots, MODULE_API_VERSION)
+packages/plugin-host/         neutral module lifecycle engine
+packages/plugin-sandbox/      external plugins in opaque frames
+packages/opaque-frame/        opaque frame shape, offline agent-page document, one-use document store
+packages/browser-protocol/    in-app browser protocol types
+packages/browser-cdp/         in-app browser CDP executor
+packages/service-plugin-host/ experimental service plugin controller (no app dependency)
+packages/cutex-mobile/        mobile client library (maintainers only, not published)
+services/                     maintainer tooling (browser lab, runtime-host; not published)
+examples/                     desktop plugin examples
+docs/                         design, install guide, module contract, known issues
+scripts/                      build, packaging, install and QA scripts
+refs/, upstream/              reference and working checkouts (git-ignored)
 ```
 
 ## 7. Integration surface (cutex Management v2)
 
-Verified at cutex a0d95b2 — full notes in `docs/research/cutex-management-v2.md`; cute-codex
+First verified at cutex a0d95b2 (2026-10-06) — full notes in `docs/research/cutex-management-v2.md`; cute-codex
 protocol notes in `docs/research/cute-codex-protocol.md`.
 
 - All HTTP/SSE from **Electron main** (no CORS; Bearer auth). Desktop uses the **root token**
@@ -1074,6 +1104,9 @@ protocol notes in `docs/research/cute-codex-protocol.md`.
   Delivery modes: `after_turn | soon | passive`.
 
 ### Gaps to add in cutex (confirmed)
+
+_Recorded 2026-10-06. As of 2026-11-01 most of these have shipped; 7, 8 and 23 (and the optional 10)
+are still open._
 
 1. Profile / global config CRUD, login, model discovery routes.
 2. Human "new agent in cwd with profile" route (`/v2/agent-management/actions` always 403;

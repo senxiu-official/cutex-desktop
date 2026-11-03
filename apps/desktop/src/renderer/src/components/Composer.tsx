@@ -1,3 +1,5 @@
+import { usesInputLedger } from "../lib/deliveryMode";
+import { deliveryBusy } from "../lib/inputLedger/nextUp";
 import { ConversationModelControls } from "./ConversationModelControls";
 import { ProfileSwitch } from "./ProfileSwitch";
 import { cachedProfileList, loadProfileList } from "../lib/profileSnapshot";
@@ -68,9 +70,9 @@ import { composerKeyAction, strategyFor } from "../lib/sendKeys";
 import { draftSteerPlan, hasImageInput, IMAGE_INPUT_STEERING_FEATURE, imageSteerMode } from "../lib/imageSteer";
 import { queueActionNotice } from "../lib/queueSteer";
 import { orderedEntries, type TimelineState } from "../lib/timeline";
-import { hasUnlandedTurn, outboxAt, visibleQueue } from "../lib/outbox";
+import { hasUnlandedTurn, outboxAt, visiblePendingSteers, visibleQueue } from "../lib/legacyDelivery/outbox";
 import { insertFeedbackOf, useQueueInsertFeedback } from "../lib/queueInsertFeedback";
-import { useHeldBusy } from "../lib/busyHold";
+import { useHeldBusy } from "../lib/legacyDelivery/busyHold";
 import { lastAssistantText, timelineToMarkdown } from "../lib/transcript";
 import { agentState, featuresOf, hostApi, interruptWithFeedback, queueItemText, sidebarOf, useApp, viewOf, type AgentAddress } from "../store";
 import { useConvFeatures, useConvHost, useConvScope } from "../lib/conversationScope";
@@ -96,14 +98,14 @@ import { QueuePanel } from "./QueuePanel";
 import { ImageThumb } from "./ImageThumbs";
 import { PendingMessagesSection } from "./PendingMessagesSection";
 import { usePendingMessages } from "../lib/agentMessageStore";
-import { lastFinishedTurnStart } from "../lib/agentMessages";
+import { lastFinishedTurnStart } from "../lib/legacyDelivery/agentMessages";
 import { AsksPausedSection, DelegationQueueSection, PauseAsksButton } from "./DelegationQueue";
 import { stopHeld } from "../lib/stopHold";
 import { APPROVAL_AUTO_RULES_FEATURE } from "../lib/approvals";
 import { approvalIdentityRole, declaredAgentCreate, declaredCutexTools } from "../lib/approvalRuleKinds";
 import { isQuickChat } from "../lib/sidebar";
-import { ADMISSION_ORDER_FEATURE, OWNER_YIELD_FEATURE, admittedAskIds, currentTurnOf, pendingSectionMessages, turnGroups } from "../lib/admissionOrder";
-import { useUnreadNextStep } from "../lib/readInRideAlongs";
+import { ADMISSION_ORDER_FEATURE, OWNER_YIELD_FEATURE, admittedAskIds, currentTurnOf, pendingSectionMessages, turnGroups } from "../lib/legacyDelivery/admissionOrder";
+import { useUnreadNextStep } from "../lib/legacyDelivery/readInRideAlongs";
 import { reloadOwnerMayPassAsks, useOwnerMayPassAsks } from "../lib/admissionOrderView";
 import { useHostRecords } from "../lib/delegationStore";
 import { useDelegationTurn, usePendingDelegations } from "../lib/delegationsView";
@@ -127,7 +129,7 @@ import { QuotaContinueSection } from "./QuotaContinueSection";
 import { queueAutoCompact, useShortWindow } from "../lib/queueChips";
 import { DelegationSendMenu, DelegationTurnHint, DelegationTurnOverlay } from "./DelegationComposer";
 import { SlashPalette, type PaletteRow } from "./SlashPalette";
-import { composerEfforts } from "../lib/models";
+import { unlistedModel, composerEfforts } from "../lib/models";
 import { claudePickerItems, claudeShortName } from "../lib/claudeModels";
 import { sharedResizeObserver } from "../lib/resizeHub";
 import { NoSteerSendHint } from "./NoSteerSendHint";
@@ -248,12 +250,16 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
           {rings.map((r) => {
             const g = r.draw;
             const fill = quotaFill(g, view);
+            const segments = r.members.flatMap((member) => {
+              const ratio = quotaFill(member, view);
+              return ratio === null ? [] : [{ id: member.id, ratio, label: [title(member), percentOf(member)].filter(Boolean).join(" · "), stale: member.stale }];
+            });
             return r.balance ? (
               <span key={g.id} className={`trim-cap text-subtle tabular-nums ${g.stale ? "opacity-60" : ""}`} title={g.balance ?? undefined}>{formatBalance(g.balance, true)}</span>
             ) : fill === null ? null : (
               // The ring's hover names the reset too: a narrow composer row hides the countdown text (lib/toolbarFit).
-              <span key={g.id} data-quota-ring={g.id} data-merged={r.members.length > 1 ? "" : undefined} className={`flex shrink-0 items-center gap-1 ${g.stale ? "opacity-50" : ""}`} title={ringTitle(r)}>
-                <Ring ratio={fill} view={view} />
+              <span key={g.id} data-quota-ring={g.id} data-merged={r.members.length > 1 ? "" : undefined} className={`flex shrink-0 items-center gap-1 ${g.stale && segments.length < 2 ? "opacity-50" : ""}`} title={ringTitle(r)}>
+                <Ring ratio={fill} view={view} segments={segments} />
                 {r.showReset && r.resetAt !== null && <span className="trim-cap text-subtle tabular-nums" data-quota-reset="">{resetsInCompact(r.resetAt)}</span>}
               </span>
             );
@@ -441,7 +447,7 @@ const NO_NEXT_STEP: AdmissionNextStep[] = [];
 
 export function Composer({
   name,
-  busy,
+  busy: legacyBusy,
   queue,
   timeline,
   timelineRev,
@@ -469,6 +475,7 @@ export function Composer({
   const queueSendNow = useApp((s) => s.queueSendNow);
   const pendingDelegations = usePendingDelegations(sessionId);
   const models = useApp((s) => agentState(s.models, hostId, sessionId));
+  const modelsReady = useApp((s) => agentState(s.modelsReady ?? {}, hostId, sessionId));
   const loadModels = useApp((s) => s.loadModels);
   const collabModes = useApp((s) => agentState(s.collabModes, hostId, sessionId));
   const loadCollabModes = useApp((s) => s.loadCollabModes);
@@ -477,6 +484,9 @@ export function Composer({
   const compact = useApp((s) => s.compact);
   // The conversation's host and its capabilities (lib/conversationScope).
   const features = useConvFeatures();
+  const ledgerMode = usesInputLedger([...features]);
+  const ledger = useApp(s => agentState(s.inputs, hostId, sessionId));
+  const busy = ledgerMode ? deliveryBusy(ledger?.delivery) : legacyBusy;
   const approvalRulesFeature = features.has(APPROVAL_AUTO_RULES_FEATURE);
   const runtimeGeneration = useApp((s) => viewOf(s, hostId, sessionId)?.runtimeGeneration ?? 0);
   const uiSignal = useApp((s) => s.uiSignal);
@@ -492,7 +502,7 @@ export function Composer({
   const { sendKeys, delegationSteerKeys, queueSectionStrip, queuePanelFold } = useUiPrefs();
   // The running turn handles a delegation (agent-asks): hint, guarded shortcuts, send menu.
   const runningDelegation = useDelegationTurn(timeline);
-  const delegation = busy ? runningDelegation : null;
+  const delegation = busy && (!ledgerMode || (ledger?.delivery?.turn?.kind === "ask" && ledger.delivery.turn.askId === runningDelegation?.askId)) ? runningDelegation : null;
   const guardKeys = { delegation: !!delegation, allowSteerKeys: delegationSteerKeys };
   const joinIntent = delegationJoinIntent(delegation, timeline?.activeTurnId, runtimeGeneration, features);
   const canJoin = features.has(OWNER_JOIN_FEATURE) && !!joinIntent;
@@ -507,20 +517,24 @@ export function Composer({
   const queueHidden = useApp((s) => agentState(s.queueHidden, hostId, sessionId));
   // The timeline's size stands in for its (mutated in place) entries: a flushed message landing hides its queue row.
   const entryCount = timeline?.entries.size ?? 0;
+  // Preserve an idle send's timeline placement when a background input starts
+  // a turn before its steered acceptance. Store still owns the pending lifecycle.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const shownQueue = useMemo(() => visibleQueue(queue, queueHidden, outbox, timeline), [queue, queueHidden, outbox, timeline, entryCount]);
+  const shownSteers = useMemo(() => ledgerMode ? [] : visiblePendingSteers(outbox, pendingSteers, timeline), [ledgerMode, outbox, pendingSteers, timeline, timelineRev, entryCount]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const shownQueue = useMemo(() => ledgerMode ? queue : visibleQueue(queue, queueHidden, outbox, timeline), [ledgerMode, queue, queueHidden, outbox, timeline, entryCount]);
   // A send that is starting a turn counts as busy: the next Enter queues behind it.
   const insertPending = useQueueInsertFeedback((s) => insertFeedbackOf(hostId, sessionId)(s).some((f) => f.state === "requesting"));
-  const sendBusy = busy || hasUnlandedTurn(outbox) || insertPending;
-  const paused = useMemo(() => pausedSection(pendingSteers ?? [], shownQueue, queuePause, queueHandoff), [pendingSteers, shownQueue, queuePause, queueHandoff]);
+  const sendBusy = ledgerMode ? busy : busy || hasUnlandedTurn(outbox) || insertPending;
+  const paused = useMemo(() => pausedSection(shownSteers, shownQueue, queuePause, queueHandoff), [shownSteers, shownQueue, queuePause, queueHandoff]);
   // admission-order: one list in the order cutex admits owner messages, delegations and deliveries.
   const admission = useApp((s) => (featuresOf(s, hostId).has(ADMISSION_ORDER_FEATURE) ? (viewOf(s, hostId, sessionId)?.admission ?? null) : null));
   // The open agent's host's records (a peers delegation has one per host).
   const askById = useHostRecords(hostId);
   const mayPass = useOwnerMayPassAsks(!!admission);
-  const groups = useMemo(() => (admission ? turnGroups(admission, shownQueue, askById) : null), [admission, shownQueue, askById]);
+  const groups = useMemo(() => (!ledgerMode && admission ? turnGroups(admission, shownQueue, askById) : null), [ledgerMode, admission, shownQueue, askById]);
   // Ride-alongs already in the timeline leave at once, before cutex's receipt (a Claude turn's comes at its end; lib/readInRideAlongs).
-  const nextStep = useUnreadNextStep(groups?.nextStep ?? NO_NEXT_STEP, timeline, timelineRev ?? entryCount);
+  const nextStep = useUnreadNextStep(groups?.nextStep ?? NO_NEXT_STEP, ledgerMode ? null : timeline, timelineRev ?? entryCount);
   const admittedAsks = useMemo(() => admittedAskIds(admission), [admission]);
   // Pending delegations the admission list does not have (e.g. awaiting the owner's review) keep their section.
   const otherDelegations = useMemo(() => (admission ? pendingDelegations.filter((d) => !admittedAsks.has(d.askId)) : pendingDelegations), [admission, pendingDelegations, admittedAsks]);
@@ -545,7 +559,8 @@ export function Composer({
   // placeholder then stay through the gap between turn/completed and the next turn/started (lib/busyHold).
   const lastTurn = timeline?.turns[timeline.turns.length - 1];
   const followUp = lastTurn?.status !== "interrupted" && (hasUnlandedTurn(outbox) || shownQueue.length > paused.items.length || (!asksPaused && !!groups?.turns.some((r) => r.kind === "ask")));
-  const busyLook = useHeldBusy(busy, followUp);
+  const legacyBusyLook = useHeldBusy(ledgerMode ? false : busy, ledgerMode ? false : followUp);
+  const busyLook = ledgerMode ? deliveryBusy(ledger?.delivery) : legacyBusyLook;
   const [caret, setCaret] = useState(0);
   const [sending, setSending] = useState(false);
   const [traceEnter] = useState(() => createComposerEnterTrace(sessionId,
@@ -611,7 +626,7 @@ export function Composer({
     if (!online || runtimeDown) return;
     void loadModels(false, sessionId, hostId);
     void loadCollabModes(sessionId, hostId);
-  }, [sessionId, online, runtimeDown, loadModels, loadCollabModes]);
+  }, [hostId, sessionId, runtimeGeneration, online, runtimeDown, loadModels, loadCollabModes]);
 
   // Notices from commands / store actions: visible for a few seconds — those about this agent, and
   // those about none in particular while this conversation has the focus (lib/uiSignal meantHere).
@@ -644,6 +659,7 @@ export function Composer({
   // The chat's live model (threadSettings). DSH: else the session's model default (cutex model_defaults, where a
   // change on the chat lands too) — never the creation value of its launch binding.
   const { model: currentModel, effort: currentEffort } = chatModelAndEffort(settings, session ? runtimeOf(session) : null, session?.runtimeDefaults);
+  const modelUnavailable = !runtimeDown && unlistedModel(models, currentModel, modelsReady === runtimeGeneration);
   const modelInfo = models?.find((m) => m.model === currentModel || m.id === currentModel);
   // Claude (docs/design/024-model-list.md): one row per real model, aliases folded in.
   const claudeList = !!session && runtimeOf(session) === "claude";
@@ -653,7 +669,7 @@ export function Composer({
   const { efforts, empty: effortsEmpty } = composerEfforts(models, currentModel);
   const fastFeature = useApp((s) => featuresOf(s, hostId).has(SESSION_FAST_MODE_FEATURE));
   const modelItems: (Pick<ModelOption, "model" | "displayName" | "description"> & { primary?: boolean })[] =
-    models ? (claudeList ? claudePickerItems(models, currentModel, t) : models) : currentModel ? [{ model: currentModel, displayName: currentModel, description: "" }] : [];
+    models ? (claudeList ? claudePickerItems(models, currentModel, t) : models) : [];
   // Claude agents (claude-runtime-features): hide what the adapter reports as unsupported.
   const agent = useMemo(() => agentFeaturesOf(session), [session]);
   const claudeAgent = !!session && runtimeOf(session) === "claude";
@@ -1239,9 +1255,10 @@ export function Composer({
           hostId={hostId}
           runtime={claudeRecipient ? "claude" : "codex"}
           imageSteering={imageSteering}
-          steers={pendingSteers ?? []}
+          steers={shownSteers}
           sendingSteers={outboxAt(outbox, "steer")}
           sendingQueue={outboxAt(outbox, "queue")}
+          timelineSends={outboxAt(outbox, "turn")}
           outbox={{
             onRetry: (id) => useApp.getState().retrySend(sessionId, id, hostId),
             onEdit: (id) => useApp.getState().editSend(sessionId, id, hostId),
@@ -1249,6 +1266,7 @@ export function Composer({
           }}
           onInterruptSendSteers={() => void interruptAndSendSteers()}
           onDismissSteer={(id) => useApp.getState().dismissSteer(id, sessionId, hostId)}
+          onRecheckSteer={(id) => void useApp.getState().recheckSteer(id, sessionId, hostId)}
           paused={paused}
           pausedHint={hasContent ? t(busy && sendKeys !== "cli" && paused.items.length > 0 ? "paused.composerHintQueue" : "paused.composerHint", { n: paused.count }) : null}
           onResumePaused={() => void pausedAction(() => useApp.getState().resumePaused(sessionId, hostId))}
@@ -1257,6 +1275,7 @@ export function Composer({
           items={shownQueue}
           canEdit={!text.trim()}
           onSendNow={cannotInsert && sendBusy ? undefined : (item) => void sendQueuedNow(item).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error"))}
+          onMergeInsert={ledgerMode && !(cannotInsert && sendBusy) ? (list) => mergeQueuedNow(list).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error")) : undefined}
           sendNowStartsTurn={!sendBusy}
           onDelete={(item) => void queueRemove(item, sessionId, hostId).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error"))}
           onEdit={(item) => void queueTakeForEdit(item, sessionId, hostId)}
@@ -1295,13 +1314,13 @@ export function Composer({
           sections={[
             // Slot 0: 待读留言 (agent messages v2). With admission-order the turn-starting ones are the turn
             // frame's ride-along items (admission.nextStep); passive notes (never there) stay here.
-            sectionMessages.length > 0 ? { node: <PendingMessagesSection sessionId={sessionId} messages={sectionMessages} busy={busy} runtime={agent.runtime} readSince={lastFinishedTurnStart(timeline?.turns)} />, chip: { kind: "messages", n: sectionMessages.length } } : null,
+            !ledgerMode && sectionMessages.length > 0 ? { node: <PendingMessagesSection sessionId={sessionId} messages={sectionMessages} busy={busy} runtime={agent.runtime} readSince={lastFinishedTurnStart(timeline?.turns)} />, chip: { kind: "messages", n: sectionMessages.length } } : null,
             // Slot 1: 待处理委托 (delegations; with admission-order only those the merged list does not have).
-            otherDelegations.length > 0 ? { node: <DelegationQueueSection rows={otherDelegations} sessionId={sessionId} pauseButton={!orderedAsks} railed={!!groups} />, chip: { kind: "delegations", n: otherDelegations.length } } : null,
+            !ledgerMode && otherDelegations.length > 0 ? { node: <DelegationQueueSection rows={otherDelegations} sessionId={sessionId} pauseButton={!orderedAsks} railed={!!groups} />, chip: { kind: "delegations", n: otherDelegations.length } } : null,
             // 智能体已暂停 · 继续 (agent-pause): before everything else that waits, since it holds all of it.
             agentPause ? { node: <AgentPausedSection hostId={hostId} sessionId={sessionId} railed={!!groups} />, chip: { kind: "agentPaused", warn: true } } : null,
             // Slot 2: 委托已暂停 · 继续 (asks-pause-v2).
-            showAsksPaused ? { node: <AsksPausedSection sessionId={sessionId} railed={!!groups} />, chip: { kind: "asksPaused", warn: true } } : null,
+            !ledgerMode && showAsksPaused ? { node: <AsksPausedSection sessionId={sessionId} railed={!!groups} />, chip: { kind: "asksPaused", warn: true } } : null,
             // Slot 3: 额度用完 · HH:MM 自动继续 · 取消 (claude-quota-auto-continue).
             quotaView?.pending ? { node: <QuotaContinueSection hostId={hostId} sessionId={sessionId} view={quotaView} />, chip: { kind: "quota", warn: true } } : null,
             // Slot 4: 额度用完 · 有 N 张重置券 · 用一张 (profile-reset-credits; confirm dialog first).
@@ -1542,7 +1561,7 @@ export function Composer({
           <ChipDivider />
           <ConversationModelControls runtime={agent.runtime} live={changesSettingsLive(agent)}
             model={{
-              profile, models: modelItems, current: currentModel,
+              profile, models: modelItems, current: currentModel, unavailable: modelUnavailable,
               label: modelShown || (runtimeDown ? "—" : "…"),
               trigger: <span className="flex min-w-0 items-center gap-1">
                 <span className="trim-cap max-w-40 truncate">{modelShown || (runtimeDown ? "—" : "…")}</span>

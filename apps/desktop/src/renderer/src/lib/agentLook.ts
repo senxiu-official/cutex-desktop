@@ -11,7 +11,8 @@ import { portraitKey, portraitRefOf } from "../../../shared/portraitPacks";
 import { featuresOf, pinnedOn, useApp } from "../store";
 import { distinctMarks } from "./projectMark";
 import { isMinorAgent } from "./avatarDefault";
-import { avatarThemesOf, modelFamily, type AvatarThemeId, type ModelFamily } from "./avatarThemes";
+import { listInitials } from "./agentInitials";
+import { avatarThemesOf, modelFamily, providerTint, type AvatarThemeId, type ModelFamily, type ProviderTint } from "./avatarThemes";
 import { avatarThemesOverride, useUiPrefs } from "./prefs";
 import { profileLookOf, useProfileLooksVersion, type ProfileLook } from "./profileLooks";
 import { profileColor } from "./profileLook";
@@ -26,6 +27,8 @@ interface Entry {
   pinned: boolean;
   /** The one project this agent directs (null: not a Director, or of several). */
   project?: DirectedProject | null;
+  /** Its two-letter initials, distinct in its list (initialsOf). */
+  initial?: string;
 }
 
 /** What the project mark (lib/projectMark) is made from. */
@@ -45,11 +48,36 @@ function addSnapshot(index: Index, hostId: string, snapshot: SidebarSnapshot | n
   if (!snapshot) return;
   const projects = snapshot.projects?.projects ?? [];
   const directors = new Set(projects.map((p) => p.director_cutex_session_id).filter((id): id is string => !!id));
+  const initials = initialsOf(snapshot);
   for (const session of [...snapshot.active, ...snapshot.retired]) {
     const id = session.cutexSessionId;
     if (index.has(id)) continue;
-    index.set(id, { hostId, session, row: snapshot.hostRows[id], isDirector: directors.has(id), isOperator: !directors.has(id) && !!snapshot.hostRows[id]?.projectId && snapshot.projectOperators?.[snapshot.hostRows[id]!.projectId!]?.includes(id) === true, pinned: pins.has(id), project: directedProject(projects, hostId, id) });
+    index.set(id, { hostId, session, row: snapshot.hostRows[id], isDirector: directors.has(id), isOperator: !directors.has(id) && !!snapshot.hostRows[id]?.projectId && snapshot.projectOperators?.[snapshot.hostRows[id]!.projectId!]?.includes(id) === true, pinned: pins.has(id), project: directedProject(projects, hostId, id), initial: initials.get(id) });
   }
+}
+
+/**
+ * Two-letter initials of a host's agents (lib/agentInitials listInitials) over the lists the sidebar shows (lib/sidebar):
+ * a project's agents (its slug / shared prefix skipped) and the independent ones, live and retired apart — so an agent
+ * has the same letters in every place, not only where a caller passes the row's `initial` (owner 2026-11-01).
+ */
+function initialsOf(snapshot: SidebarSnapshot): Map<string, string> {
+  const names = new Map((snapshot.projects?.projects ?? []).map((p) => [p.project_id, p.presentation?.display_name || p.project_id]));
+  const out = new Map<string, string>();
+  for (const sessions of [snapshot.active, snapshot.retired]) {
+    const lists = new Map<string, SessionResource[]>();
+    for (const s of sessions) {
+      const projectId = snapshot.hostRows[s.cutexSessionId]?.projectId ?? "";
+      const list = lists.get(projectId);
+      if (list) list.push(s);
+      else lists.set(projectId, [s]);
+    }
+    for (const [projectId, list] of lists) {
+      const items = list.map((s) => ({ key: s.cutexSessionId, name: s.displayName, order: s.createdAt }));
+      for (const [id, initial] of listInitials(items, projectId ? [projectId, names.get(projectId) ?? projectId] : [], !!projectId)) out.set(id, initial);
+    }
+  }
+  return out;
 }
 
 /** The single project `id` directs, or null (not a Director / several projects). */
@@ -158,10 +186,14 @@ export interface AgentLook {
   themes: AvatarThemeId[];
   /** The Profile's model family: the provider colour of 头像底色 = 按模型 (components/Avatar). */
   family: ModelFamily;
+  /** The provider colour of the avatar's outline (and 头像底色 = 按模型's backdrop): the family, or Qwen (lib/avatarThemes providerTint). */
+  tint?: ProviderTint;
   isDirector: boolean;
   isOperator?: boolean;
   pinned: boolean;
   project: DirectedProject | null;
+  /** Two-letter initials, distinct in the agent's list (lib/agentInitials listInitials): what its letter tile shows everywhere. */
+  initial?: string;
   /** The owner's badge on the agent (cutex `badge`; null where its host lacks session-badge): drawn as the avatar's
    *  mark (lib/projectMark avatarMark). */
   badge?: SessionBadge | null;
@@ -185,11 +217,13 @@ export function lookOf(entry: Entry, profile: ProfileLook | null, override: read
     color,
     themes: avatarThemesOf(facts, override),
     family: modelFamily(facts),
+    tint: providerTint(facts),
     isDirector: entry.isDirector,
     isOperator: entry.isOperator === true,
     pinned: entry.pinned,
     project: entry.project ?? null,
     badge: entry.session.badge ?? null,
+    ...(entry.initial ? { initial: entry.initial } : {}),
   };
 }
 
@@ -216,12 +250,14 @@ export function agentThemesNow(seed: string): AvatarThemeId[] | null {
 }
 
 /**
- * 默认头像 = 仅重要智能体 in a list row (`minor`: the caller's place allows the dot): whether agent
- * `seed` shows the Profile-coloured dot instead of its avatar. Unknown agents keep the avatar.
+ * 默认头像 = 仅重要智能体: whether agent `seed` shows its letter tile instead of a default avatar — in every place and
+ * state alike (owner 2026-11-01, rule A: the sidebar, Rail, tray, header, messages, strips, peers and pickers draw the
+ * same face; it used to be list rows only, so an idle small row showed the tile and a big row or the header a portrait).
+ * Unknown agents keep the avatar.
  */
-export function useMinorDot(seed: string | null | undefined, avatar: SessionAvatar | null | undefined, picture: string | null | undefined, minor: boolean | undefined): boolean {
+export function useMinorDot(seed: string | null | undefined, avatar: SessionAvatar | null | undefined, picture: string | null | undefined): boolean {
   const { agentAvatarDefault } = useUiPrefs();
-  const look = useAgentLook(minor && agentAvatarDefault === "important" ? seed : null);
-  if (!minor || !seed || !look) return false;
+  const look = useAgentLook(agentAvatarDefault === "important" ? seed : null);
+  if (!seed || !look) return false;
   return isMinorAgent(agentAvatarDefault, { isDirector: look.isDirector, pinned: look.pinned, avatar, picture });
 }

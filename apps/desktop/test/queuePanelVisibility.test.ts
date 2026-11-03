@@ -8,7 +8,7 @@ vi.mock("../src/renderer/src/lib/contextMenu", () => ({ contextMenu: () => () =>
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), bridge: {}, onEvent: () => () => {} }));
 vi.mock("../src/renderer/src/store", () => ({ useApp: Object.assign(() => false, { getState: () => ({}) }), selectedFeatures: () => new Set(), agentHost: () => "local", queueItemText: (item: QueueItem) => (item.input as { text: string }[]).map((p) => p.text).join("") }));
 import { QueuePanel } from "../src/renderer/src/components/QueuePanel";
-import { newOutboxEntry, failOutbox } from "../src/renderer/src/lib/outbox";
+import { newOutboxEntry, failOutbox } from "../src/renderer/src/lib/legacyDelivery/outbox";
 import { DEFAULT_QUEUE_PANEL_FOLD, migrateQueuePanelFold, queueAutoCompact } from "../src/renderer/src/lib/queueChips";
 import { resetQueueViewCache, setQueueView } from "../src/renderer/src/lib/queueView";
 

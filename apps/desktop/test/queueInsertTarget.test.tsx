@@ -15,7 +15,7 @@ vi.mock("../src/renderer/src/store", () => ({ useApp: { getState: () => ({ hosts
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { TurnQueue } = await import("../src/renderer/src/components/TurnQueue");
-const { turnGroups } = await import("../src/renderer/src/lib/admissionOrder");
+const { turnGroups } = await import("../src/renderer/src/lib/legacyDelivery/admissionOrder");
 const { INSERT_DWELL_MS, insertTargetShown, insertTargetState } = await import("../src/renderer/src/lib/insertTarget");
 
 const at = "2026-10-21T00:00:00Z";

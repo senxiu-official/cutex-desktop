@@ -14,7 +14,7 @@ import { isArchived } from "../../lib/archivedAgent";
 import { useComposerDraft } from "../../lib/composerDrafts";
 import { useHostAccess } from "../../lib/hostAccess";
 import { agentRetraction, retractNotify } from "../../lib/notifyEvents";
-import { hasUnlandedTurn, outboxAt, visibleQueue } from "../../lib/outbox";
+import { hasUnlandedTurn, outboxAt, visibleQueue } from "../../lib/legacyDelivery/outbox";
 import { pendingFollowKey, scrollFollow, turnFollowKey, watchScrollIntent, type ScrollIntentWatch } from "../../lib/stickToBottom";
 import { useKeepOnPrepend } from "../../lib/keepOnPrepend";
 import { pausedSection } from "../../lib/queuePause";
@@ -22,7 +22,7 @@ import { SIDE_AGENT_COMPONENT, type SideAgentParams } from "../../lib/sideKinds"
 import { stopHeld } from "../../lib/stopHold";
 import { orderedEntries } from "../../lib/timeline";
 import { markSeenOn } from "../../lib/turnUnread";
-import { agentHost, agentState, useApp, viewOf, type SessionView } from "../../store";
+import { agentHost, agentState, featuresOf, useApp, viewOf, type SessionView } from "../../store";
 import { useShownInWindow } from "../../lib/windowScope";
 import { viewKey } from "../../lib/viewKey";
 import { canSend } from "../../../../shared/users";
@@ -154,6 +154,7 @@ export function SideAgentConversation({ sessionId, hostId, name, resource }: { s
   const { t } = useI18n();
   const view = useApp((s) => viewOf(s, hostId, sessionId));
   const names = useNames(hostId);
+  const optionsV1 = useApp(s => featuresOf(s, hostId).has("user-input-options-v1"));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const entries = useMemo(() => (view ? orderedEntries(view.timeline) : []), [view?.version, view?.timeline]);
   const pendingSends = useApp((s) => pendingFollowKey(agentState(s.outbox, hostId, sessionId)));
@@ -233,7 +234,7 @@ export function SideAgentConversation({ sessionId, hostId, name, resource }: { s
           )}
         </div>
       </div>
-      {pending && <InteractionDock pending={pending} takeFocus={false} runtime={agentFeaturesOf(resource).runtime} onReply={(request, reply) => void useApp.getState().respond(request.id, reply, sessionId, hostId)} />}
+      {pending && <InteractionDock optionsV1={optionsV1} draftScope={{ hostId, sessionId, runtimeGeneration: view?.runtimeGeneration ?? 0 }} pending={pending} takeFocus={false} runtime={agentFeaturesOf(resource).runtime} onReply={(request, reply) => void useApp.getState().respond(request.id, reply, sessionId, hostId)} />}
       {archived ? (
         <p className="shrink-0 px-3 pb-2 text-xs text-subtle">{t("conversation.agent.archived")}</p>
       ) : !canSend(access) ? null : (

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { tmpdir } from "node:os";
 import type { CutexClient } from "@cutex-desktop/cutex-client";
 import { remoteCopyTransport, transferMetadata } from "../src/main/remoteCopyTransport";
+import { RemoteCopyManager } from "../src/main/remoteCopies";
 import type { CopySource, TransferMeta } from "../src/shared/remoteCopies";
 
 const source: CopySource = { hostId: "ssh-a", hostLabel: "A", hostIdentity: "host-a", path: "/work/中文.bin" };
@@ -13,6 +18,63 @@ function fake(reply: Response) {
   return { headers: vi.fn(() => ({ Authorization: "Bearer synthetic-only" })), url: vi.fn((path, query) => `http://private.invalid${path}?${new URLSearchParams(query)}`), fetchRaw: vi.fn(async () => reply), request: vi.fn(async () => meta) } as unknown as CutexClient;
 }
 describe("remote byte transport", () => {
+  it.each([
+    ["fresh-run-figures-r5.3", "/scp/figures.zip", "application/zip", "fresh-run-figures-r5.3.zip"],
+    ["fresh-run-figures-r5.3", "/scp/fresh-run-figures-r5.3", "application/zip", "fresh-run-figures-r5.3.zip"],
+    ["fresh-run-figures-r5.3.ZIP", "/scp/figures.zip", "application/zip", "fresh-run-figures-r5.3.ZIP"],
+    ["r5.3", "/scp/image.png", "image/png", "r5.3.png"],
+    ["v1.2", "D:\\work\\notes.md", "text/plain", "v1.2.md"],
+    ["v1.2", "/scp/files.tar.gz", "application/gzip", "v1.2.tar.gz"],
+  ])("uses the pinned payload extension, not display-name dots: %s", async (name, sourcePath, mediaType, expected) => {
+    const id = `af-${"1".repeat(32)}`, client = fake(response());
+    vi.mocked(client.request).mockResolvedValue({ artifact: { name }, versions: [
+      { artifactId: id, version: 1, sha256: meta.revision, bytes: 5, createdAt: meta.modifiedAt, sourcePath, mediaType },
+      { artifactId: id, version: 2, sha256: "b".repeat(64), bytes: 6, sourcePath: "/newer/report.pdf", mediaType: "application/pdf" },
+    ] });
+    const prepared = await remoteCopyTransport(client, { ...source, artifact: { id, version: 1 } }, () => {}).metadata(signal);
+    expect(prepared.name).toBe(expected);
+    expect(prepared.revision).toBe(meta.revision);
+  });
+
+  it("downloads a paired-host multi-file ZIP under its real extension on the local filesystem", async () => {
+    // Two figure SVGs, already bundled by the remote producer; desktop never re-zips the payload.
+    const bytes = Buffer.from("UEsDBBQAAAAIAH1eXV3E95GTMQAAACkAAAAMAAAAZmlndXJlLWEuc3ZnsikuS1eoyM3JK7ZVyigpKbDS1y8vL9crN9bLL0rXNzIwMNAvLktX0rcDAAAA//8DAFBLAwQUAAAACAB9Xl1dxPeRkzEAAAApAAAADAAAAGZpZ3VyZS1iLnN2Z7IpLktXqMjNySu2VcooKSmw0tcvLy/XKzfWyy9K1zcyMDDQLy5LV9K3AwAAAP//AwBQSwECFAAUAAAACAB9Xl1dxPeRkzEAAAApAAAADAAAAAAAAAAAAAAAAAAAAAAAZmlndXJlLWEuc3ZnUEsBAhQAFAAAAAgAfV5dXcT3kZMxAAAAKQAAAAwAAAAAAAAAAAAAAAAAWwAAAGZpZ3VyZS1iLnN2Z1BLBQYAAAAAAgACAHQAAAC2AAAAAAA=", "base64");
+    const sha = createHash("sha256").update(bytes).digest("hex");
+    const id = `af-${"2".repeat(32)}`;
+    const client = fake(response());
+    const calls: string[] = [];
+    vi.mocked(client.request).mockImplementation(async (_method, url) => {
+      calls.push(url);
+      return (url.endsWith("/content") ? {
+        version: 3, sha256: sha, externalChanged: false, encoding: "base64", content: bytes.toString("base64"),
+        offset: 0, totalBytes: bytes.length, truncated: false, mediaType: "application/zip",
+      } : { artifact: { name: "fresh-run-figures-r5.3" }, versions: [{
+        artifactId: id, version: 3, sha256: sha, bytes: bytes.length, createdAt: meta.modifiedAt,
+        sourcePath: "/scp/figures-r5.3.zip", mediaType: "application/zip",
+      }] }) as never;
+    });
+    const dir = await fs.mkdtemp(path.join(tmpdir(), "artifact-zip-download-"));
+    const artifactSource: CopySource = { ...source, path: "/scp/figures-r5.3.zip", artifact: { id, version: 3 } };
+    const manager = new RemoteCopyManager({ root: path.join(dir, "copies"), transport: async s => remoteCopyTransport(client, s, () => {}) });
+    try {
+      const inspected = await manager.inspect(artifactSource);
+      expect(inspected.name).toBe("fresh-run-figures-r5.3.zip");
+      const copy = await manager.start(artifactSource, { revision: sha, size: bytes.length });
+      for (let n = 0; n < 1000; n++) {
+        const row = (await manager.list()).copies.find(r => r.id === copy)!;
+        if (row.status !== "downloading") { expect(row.status).toBe("complete"); break; }
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+      const saved = await manager.file(copy);
+      expect(path.basename(saved)).toBe("fresh-run-figures-r5.3.zip");
+      expect(await fs.readFile(saved)).toEqual(bytes);
+      expect(calls).toContain(`/v2/artifact-store/${id}/versions/3/content`);
+    } finally {
+      await manager.dispose();
+      // This is the exact fresh mkdtemp directory owned by this test.
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
   it("preserves binary bytes, bound scopes and cancellation signal without credentials reaching the renderer", async () => {
     const client = fake(response()), check = vi.fn();
     const transport = remoteCopyTransport(client, { ...source, path: "中文.bin", scope: { kind: "project", id: "proj a" } }, check);

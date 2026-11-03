@@ -2,8 +2,8 @@
 // a re-check in flight is redone (checking → waiting), expired / malformed lists dropped, inline
 // images left out when the record grows too large, and missing storage tolerated.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PendingSteer } from "../src/renderer/src/lib/pendingSteers";
-import { loadPendingSteers, PENDING_STEERS_KEY, savePendingSteers } from "../src/renderer/src/lib/pendingSteerStore";
+import type { PendingSteer } from "../src/renderer/src/lib/legacyDelivery/pendingSteers";
+import { loadPendingSteers, PENDING_STEERS_KEY, savePendingSteers } from "../src/renderer/src/lib/legacyDelivery/pendingSteerStore";
 
 let storage: Map<string, string>;
 const steer = (id: string, state: PendingSteer["state"] = "waiting", extra?: unknown[]): PendingSteer => ({ id, text: `text ${id}`, imageCount: 0, turnId: "t1", baseline: 0, state, ...(extra ? { extra } : {}) });

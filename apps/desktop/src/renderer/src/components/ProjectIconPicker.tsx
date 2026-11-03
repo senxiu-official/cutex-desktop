@@ -1,6 +1,6 @@
 // The project icon picker (ChatGPT-style, opened from the badge left of the project name in
 // 项目设置): a popover with 表情符号 / 图标 / 自定义 tabs, a search box and the colour swatches
-// (eight hex swatches plus the daemon-only 青色 / 品红 names). The emoji / icon / custom text choice
+// (shared project presets and a custom RGB field). The emoji / icon / custom text choice
 // is written straight to the device-local pref (lib/projectIcons); the colour is applied through
 // `onColor` — cutex presentation.color, so it follows the project across devices.
 // Controlled (`onIcon`): the 新建项目 form, before the project exists — the choice stays in the form
@@ -8,9 +8,9 @@
 import { useEffect, useRef, useState } from "react";
 import { isImeComposing } from "../lib/ime";
 import { createPortal } from "react-dom";
-import { useI18n, type MessageKey } from "../i18n";
-import { parseCustomIcon, projectIcon, PROJECT_ICON_COLORS, PROJECT_NAMED_SWATCHES, sameProjectColor, searchProjectEmoji, searchProjectIcons, type ProjectIconChoice } from "../lib/projectIcons";
-import { projectColor } from "../lib/sidebar";
+import { useI18n } from "../i18n";
+import { parseCustomIcon, projectIcon, searchProjectEmoji, searchProjectIcons, type ProjectIconChoice } from "../lib/projectIcons";
+import { ProjectColorPicker } from "./ProjectColorPicker";
 import { setProjectIcon, useUiPrefs } from "../lib/prefs";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { ProjectBadge } from "./ProjectBadge";
@@ -19,7 +19,6 @@ import { isNode, ownerWindowOf } from "../lib/ownerWindow";
 
 const WIDTH = 288;
 const GRID_H = 200;
-const COLOR_NAMES = ["white", "red", "orange", "yellow", "green", "blue", "purple", "pink"] as const;
 
 type IconTarget =
   /** An existing project: the choice is its device-local pref. */
@@ -62,6 +61,7 @@ export function ProjectIconPicker({ badge, color, onColor, disabled, ...target }
             choose(icon);
             close();
           }}
+          disabled={disabled}
           onColor={onColor}
           onReset={() => {
             choose(null);
@@ -76,7 +76,7 @@ export function ProjectIconPicker({ badge, color, onColor, disabled, ...target }
 
 type Tab = "emoji" | "icon" | "custom";
 
-function PickerPanel({ anchor, badge, current, color, onPick, onColor, onReset, onClose }: { anchor: HTMLElement; badge: string; current: ProjectIconChoice | null; color: string; onPick(icon: ProjectIconChoice): void; onColor(c: string): void; onReset(): void; onClose(): void }) {
+function PickerPanel({ anchor, badge, current, color, onPick, onColor, onReset, onClose, disabled }: { disabled?: boolean; anchor: HTMLElement; badge: string; current: ProjectIconChoice | null; color: string; onPick(icon: ProjectIconChoice): void; onColor(c: string): void; onReset(): void; onClose(): void }) {
   const win = ownerWindowOf(anchor);
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>(current?.kind === "icon" ? "icon" : current?.kind === "text" ? "custom" : "emoji");
@@ -84,7 +84,9 @@ function PickerPanel({ anchor, badge, current, color, onPick, onColor, onReset, 
   const panel = useRef<HTMLDivElement>(null);
   // Below the badge, clamped into the window; rows low on the screen open upwards instead.
   const rect = anchor.getBoundingClientRect();
-  const style = win.innerHeight - rect.bottom - 8 > GRID_H + 150 ? { top: rect.bottom + 6 } : { bottom: win.innerHeight - rect.top + 6 };
+  const below = win.innerHeight - rect.bottom - 14;
+  const above = rect.top - 14;
+  const style = below >= above ? { top: rect.bottom + 6, maxHeight: Math.max(100, below) } : { bottom: win.innerHeight - rect.top + 6, maxHeight: Math.max(100, above) };
   const left = Math.max(8, Math.min(rect.left, win.innerWidth - WIDTH - 8));
   const emoji = tab === "emoji" ? searchProjectEmoji(query) : null;
   const icons = tab === "icon" ? searchProjectIcons(query) : null;
@@ -117,7 +119,7 @@ function PickerPanel({ anchor, badge, current, color, onPick, onColor, onReset, 
       role="dialog"
       aria-label={t("projects.icon.title")}
       style={{ left, width: WIDTH, ...style }}
-      className="fixed z-50 flex flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-xl"
+      className="fixed z-50 flex flex-col overflow-y-auto rounded-lg border border-border bg-surface shadow-xl"
     >
       {/* Tabs on their own row (never wrapped: a squeezed chip broke 表情符号 into 表情符/号);
        * the search box gets the full row below, so every locale fits the 288px panel. */}
@@ -171,31 +173,7 @@ function PickerPanel({ anchor, badge, current, color, onPick, onColor, onReset, 
         </div>
       )}
       <div className="flex flex-wrap items-center gap-1.5 border-t border-border px-2 py-1.5">
-        {PROJECT_ICON_COLORS.map((c, i) => (
-          <button
-            key={c}
-            type="button"
-            onClick={() => onColor(c)}
-            title={t(`projects.iconColor.${COLOR_NAMES[i]}` as MessageKey)}
-            aria-pressed={sameProjectColor(color, c)}
-            className={`h-5 w-5 rounded-full ${sameProjectColor(color, c) ? "ring-2 ring-foreground ring-offset-2 ring-offset-surface" : ""} ${c === "#ffffff" ? "ring-1 ring-black/10" : ""}`}
-            style={{ background: c }}
-          />
-        ))}
-        {/* The daemon palette names without a swatch twin, so 青色 / 品红 stay reachable in editing
-         * (they write the cutex token, not a hex); the other names are their twin swatch above. */}
-        <span className="mx-0.5 h-5 w-px bg-border" />
-        {PROJECT_NAMED_SWATCHES.map((name) => (
-          <button
-            key={name}
-            type="button"
-            onClick={() => onColor(name)}
-            title={t(`projects.iconColor.${name}` as MessageKey)}
-            aria-pressed={sameProjectColor(color, name)}
-            className={`h-5 w-5 rounded-full ${sameProjectColor(color, name) ? "ring-2 ring-foreground ring-offset-2 ring-offset-surface" : ""}`}
-            style={{ background: projectColor(name) }}
-          />
-        ))}
+        <ProjectColorPicker value={color} onChange={onColor} disabled={disabled} />
         {current && (
           <button type="button" onClick={onReset} title={t("projects.icon.resetTitle")} className="ml-auto rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-foreground">
             {t("projects.icon.reset")}

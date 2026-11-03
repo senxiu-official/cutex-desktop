@@ -23,6 +23,7 @@ import { SettingsShelfSlot } from "./SettingsShelf";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Sidebar } from "./Sidebar";
 import { useSidebarCollapsed } from "../lib/windowSidebar";
+import { usePortraitColumns, usePortraitOn, useWindowOrientation } from "../lib/portrait";
 import { SideWorkArea } from "./side/SideArea";
 import { WS_CONVERSATION_MIN_W } from "../lib/workspaces";
 import { useWsRow } from "../lib/workspaceRowView";
@@ -112,12 +113,13 @@ function TrayFeed({ hostId, sessionId }: { hostId: string; sessionId: string }) 
   return null;
 }
 
-function ConversationPaneImpl({ paneId, hostId, sessionId, focused, scope }: { paneId: string; hostId: string; sessionId: string | null; focused: boolean; scope: WorkspaceScope | null }) {
+function ConversationPaneImpl({ paneId, hostId, sessionId, focused, scope, stripped = false }: { paneId: string; hostId: string; sessionId: string | null; focused: boolean; scope: WorkspaceScope | null; stripped?: boolean }) {
   useRetainedView(hostId, sessionId);
   // On screen: every visible conversation counts as looked at (store looksAt; 「在看」 is a set).
   const live = useApp((s) => !!sessionId && !!s.views[viewKey(hostId, sessionId)]);
-  // Folded to its strip / 只看 Shelf (docs/design/002, owner 2026-10-22): mounted but not looked at.
-  const folded = useIsFolded(paneId);
+  // Folded to its strip / 只看 Shelf (docs/design/002, owner 2026-10-22), or the portrait stack's strip (`stripped`):
+  // mounted but not looked at.
+  const folded = useIsFolded(paneId) || stripped;
   useEffect(() => {
     if (!live || !sessionId || folded) return;
     useApp.getState().setViewVisible(hostId, sessionId, true);
@@ -154,6 +156,12 @@ function ConversationColumns({ layout, panes, scope, split = false, single = fal
   const onlyShelf = useShelfOnlyPanes();
   const strips = [...useStripPanes(), ...onlyShelf];
   const stripShown = split && strips.some((id) => panes.includes(id));
+  // Portrait (lib/portrait, P2): two workspaces in the stack (components/side/SideArea) — the focused one is its
+  // conversation part (flex / minimum / order / tray room from the stack's variables, portrait.css), the other a strip
+  // across the top: a view only (lib/convStrips is not written); a click or keyboard focus on it switches the focus.
+  const stacked = usePortraitOn() && split;
+  // P3: a stack wide enough for both — each workspace a column of its own (its conversation over its Shelves), no strip.
+  const columns = usePortraitColumns() && stacked;
   const singlePane = single && panes.length === 1 && !row?.fill;
   // §24.13 two workspaces: each conversation is a card of its own in the work row (SideWorkArea `split`),
   // ordered around the Shelves; SideWorkArea draws both workspaces' Shelves, both live (the focus never changes
@@ -170,7 +178,8 @@ function ConversationColumns({ layout, panes, scope, split = false, single = fal
         const hidden = !!max && max !== paneId;
         const width = split ? (row?.widths[i] ?? null) : null;
         // 只看 Shelf also with one workspace (framed beside its Shelf).
-        const strip = (split && strips.includes(paneId)) || onlyShelf.includes(paneId);
+        const across = stacked && !focused && !columns;
+        const strip = (split && strips.includes(paneId)) || onlyShelf.includes(paneId) || across;
         const sized = strip ? { flex: "none", width: width ?? STRIP_W, minWidth: 0 } : width !== null ? { flex: "0 1 auto", width, minWidth: 0 } : { flexGrow: max ? 1 : share, flexBasis: 0, minWidth: max ? undefined : split ? WS_CONVERSATION_MIN_W : `min(${CONVERSATION_MIN_W}px, ${Math.floor(100 / panes.length)}%)` };
         return (
           <Fragment key={paneId}>
@@ -178,6 +187,8 @@ function ConversationColumns({ layout, panes, scope, split = false, single = fal
               data-conv-pane={paneId}
               data-conv-single={singlePane ? paneId : undefined}
               data-conv-strip={strip ? paneId : undefined}
+              data-portrait-part={stacked ? (across ? "strip" : "conversation") : undefined}
+              data-portrait-col={columns ? i : undefined}
               data-pane-focused={focused ? "" : undefined}
               data-pane-maxed={max === paneId ? "" : undefined}
               aria-current={focused ? "true" : undefined}
@@ -185,16 +196,16 @@ function ConversationColumns({ layout, panes, scope, split = false, single = fal
               data-glide={split ? paneId : undefined}
               hidden={hidden || bodyHidden}
               data-ws-width={width ?? undefined}
-              style={singlePane ? undefined : { ...sized, ...(split ? { order: i * 3 + 2 } : {}) }}
-              className={`${singlePane ? "relative flex min-w-0 flex-1 flex-col" : `pane-column relative flex min-w-0 flex-col ${split ? `shell-card ws-col isolate overflow-hidden ${i > 0 && (!row?.fill || row.railAt[i] !== "left") ? "ml-2" : ""}` : i > 0 && !max ? "border-l border-border" : ""}`} ${dragged === paneId ? "opacity-40" : ""}`}
+              style={singlePane || stacked ? undefined : { ...sized, ...(split ? { order: i * 3 + 2 } : {}) }}
+              className={`${singlePane ? "relative flex min-w-0 flex-1 flex-col" : `pane-column relative flex min-w-0 flex-col ${split ? `shell-card ws-col isolate overflow-hidden ${i > 0 && !stacked && (!row?.fill || row.railAt[i] !== "left") ? "ml-2" : ""}` : i > 0 && !max ? "border-l border-border" : ""}`} ${dragged === paneId ? "opacity-40" : ""}`}
               onPointerDownCapture={(e) => !paneChrome(e.target) && focusConversationPane(paneId)}
               onFocusCapture={(e) => !paneChrome(e.target) && focusConversationPane(paneId)}
             >
               {/* By content each column has its own width (no shared split to drag). Two workspaces filling: the
                   explicit widths of the row (lib/workspaceRow fillWidths); a drag moves the two columns' elements
                   and stores the share on release (components/PaneResizer RowSplitter). */}
-              {strip && <ConvStrip paneId={paneId} hostId={binding.hostId} sessionId={binding.sessionId} />}
-              {i > 0 && leftCol && !max && !byContent && split && !stripShown && !row?.shelfBetween && <RowSplitter widths={row?.widths ?? []} onShare={(s) => resizePaneColumns(col - 1, s)} />}
+              {strip && <ConvStrip paneId={paneId} hostId={binding.hostId} sessionId={binding.sessionId} across={across || undefined} />}
+              {i > 0 && leftCol && !max && !byContent && split && !stacked && !stripShown && !row?.shelfBetween && <RowSplitter widths={row?.widths ?? []} onShare={(s) => resizePaneColumns(col - 1, s)} />}
               {i > 0 && leftCol && !max && !byContent && !split && <ColumnSplitter share={leftCol.w / (leftCol.w + share)} onShare={(s) => resizePaneColumns(col - 1, s)} preview={(s) => previewPaneColumns(col - 1, s)} />}
               {/* A page over the column (占用会话) has its own header, never the agent's (§24.4, §26). */}
               {strip ? null : page ? (
@@ -204,7 +215,7 @@ function ConversationColumns({ layout, panes, scope, split = false, single = fal
               )}
               <div className="relative flex min-h-0 flex-1" hidden={strip}>
                 <ColumnOutlet focused={focused} page={page}>
-                  <ConversationPane paneId={paneId} hostId={binding.hostId} sessionId={binding.sessionId} focused={focused} scope={focused ? scope : null} />
+                  <ConversationPane paneId={paneId} hostId={binding.hostId} sessionId={binding.sessionId} focused={focused} scope={focused ? scope : null} stripped={across || undefined} />
                 </ColumnOutlet>
               </div>
             </section>
@@ -268,6 +279,8 @@ function useRelayoutEase(key: string): void {
  * `scope`: the selected agent's workspace (the focused conversation's file links / git).
  */
 export function PaneHost({ fullWindow, scope }: { fullWindow: boolean; scope: WorkspaceScope | null }) {
+  // This window decides portrait / landscape from its own size (lib/portrait; a desk on a rotated monitor for itself).
+  useWindowOrientation();
   // Hidden (the fold / two workspaces §24.13 / a pane full screen §24.16): the sidebar stays mounted — its
   // hint line and hot zone (components/SidebarPeek) — but nothing of it is in the flow.
   const collapsed = useSidebarCollapsed();

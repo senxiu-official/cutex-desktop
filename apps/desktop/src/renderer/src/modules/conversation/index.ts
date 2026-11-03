@@ -5,6 +5,8 @@
 import { MessageSquareText, MessagesSquare, PanelRightOpen } from "lucide-react";
 import { projectInto } from "../../lib/workspaces";
 import { openAgentSide } from "../../lib/sideOpen";
+import { StandardToolRow } from "./StandardToolRow";
+import { standardToolRow } from "../../lib/standardToolRows";
 import { isAgentTaskTool } from "../../lib/taskRows";
 import { defineModule } from "../slots";
 import { AgentToolRow, AskReceivedRow, ResultsReceivedRow } from "./TimelineRows";
@@ -28,7 +30,9 @@ export default defineModule({
       { id: "conversation.delegationResults", order: 300, schemas: ["cutex.delegation-results.v1"], Row: ResultsReceivedRow },
     ],
     // After delegations.tool (100): a finished delegate call is the 委托 card when that module is on.
-    "timeline.tool": [{ id: "conversation.agentTools", order: 250, match: isAgentTaskTool, Row: AgentToolRow }],
+    "timeline.tool": [{ id: "conversation.agentTools", order: 250, match: isAgentTaskTool, Row: AgentToolRow },
+      // After approval/safety rows: their decisions stay visible through the ordinary fallback.
+      { id: "conversation.standardTools", order: 450, match: item => standardToolRow(item) !== null, Row: StandardToolRow }],
     // The turn reference (§19.4): ungated, like the timeline it reads. v1.17 (§24.4): another agent's
     // live conversation (`conversation.agent`, v1.16) is a conversation pane now — no side component.
     // §24.13 (owner 2026-10-21): a projection — another agent's live conversation in the focused conversation's Shelf.
