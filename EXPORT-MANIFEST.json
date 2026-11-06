@@ -24574,8 +24574,8 @@
     },
     {
       "path": "docs/desktop-modules.md",
-      "sha256": "67214c37a735c91b9155e72f1419a7d89045682689c89822ff5a9319ab8d7e2a",
-      "size": 399707
+      "sha256": "e135ca790f55f186f5b1ec70d146628ead52150c051b67514736a6239ea1b8a7",
+      "size": 363934
     },
     {
       "path": "docs/diagnostics/r259-image-submit.md",
