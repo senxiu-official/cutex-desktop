@@ -1,0 +1,83 @@
+name: Published desktop update e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_version:
+        description: "Published desktop version to install"
+        required: false
+        default: '0.2.1'
+        type: string
+      to_version:
+        description: "Published version currently offered by the release channel"
+        required: false
+        default: '0.2.2'
+        type: string
+      to_commit:
+        description: "Exact public product commit embedded in the target package"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: published-desktop-update-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: signed desktop update ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-22.04
+          - platform: windows-x64
+            runner: windows-2022
+          - platform: macos-arm64
+            runner: macos-14
+    steps:
+      - run: git config --global core.autocrlf false
+        shell: bash
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '24.21.0'
+      - name: Linux display and runtime libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q xvfb libgtk-3-0 libnss3 libgbm1 libasound2
+      - name: Signature verifier self-test
+        shell: bash
+        run: node .github/ci/public-update-e2e.mjs --self-test
+      - name: Actual signed desktop update
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FROM_VERSION: ${{ inputs.from_version }}
+          TO_VERSION: ${{ inputs.to_version }}
+          TO_COMMIT: ${{ inputs.to_commit }}
+          PUBLIC_UPDATE_WORK: ${{ runner.temp }}/desktop-public-update
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a node .github/ci/public-update-e2e.mjs
+          else
+            node .github/ci/public-update-e2e.mjs
+          fi
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: always()
+        with:
+          name: public-desktop-update-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/desktop-public-update/logs/
+            ${{ runner.temp }}/desktop-public-update/userData/update.log
+          if-no-files-found: ignore
+          retention-days: 14

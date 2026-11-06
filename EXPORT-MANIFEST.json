@@ -5,7 +5,7 @@
   "sourceCommit": null,
   "sourceCommitNote": "withheld: kept in the private export record next to the export directory",
   "license": "Apache-2.0",
-  "fileCount": 6063,
+  "fileCount": 6065,
   "files": [
     {
       "path": ".gitattributes",
@@ -28,6 +28,11 @@
       "size": 4720
     },
     {
+      "path": ".github/ci/public-update-e2e.mjs",
+      "sha256": "ca38c5c462860278d6e301e93ce66e087eda2cd8a83e4c84d40710c99bded768",
+      "size": 11459
+    },
+    {
       "path": ".github/ci/sign-and-upload.sh",
       "sha256": "f627eec11dfeeaf5c4a6e341b8e04ba771bc0f286bc66290991327a3d5a63413",
       "size": 31189
@@ -41,6 +46,11 @@
       "path": ".github/workflows/modules-release.yml",
       "sha256": "6879708decc0b0a2d61eb16bda581638dc175b0df5c4175c9794aabd4d59de1b",
       "size": 6777
+    },
+    {
+      "path": ".github/workflows/public-update-e2e.yml",
+      "sha256": "d3268ee5f3f0360a767f7d5981793c08ab3b7ed88cf49df0721f17f0cff6de1e",
+      "size": 2686
     },
     {
       "path": ".github/workflows/release.yml",
