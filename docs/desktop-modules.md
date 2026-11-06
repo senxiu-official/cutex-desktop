@@ -1,116 +1,6 @@
-# 桌面插槽与模块约定（v1.26）
+# 桌面模块契约（v1.26）
 
-> **公开仓库说明 / Public repository note.** 本文是维护者开发时的设计记录，保留原样。文中引用的内部笔记和工作副本
-> （`docs/research/…`、`docs/reviews/…`、`docs/handoff/…`、`TODO.md`、`PROGRESS.md`、`PLAN.md`、`upstream/…`、
-> `refs/…`、`.claude/…`）不随本仓库发布，只作历史记录，不是链接。文中的「主人」指项目维护者。This is a maintainers'
-> design record; the internal notes it cites are not published with this repository.
-
-迁移变更日志（2026-10-09，`gpt/merge-20261009`）：中立源码 SDK/host 替换宿主引擎，原 v1 插槽/生命周期/偏好保持；v1.1 新增动态 `addModules` / `removeModule`（§15），用于隔离外部插件。API 版本与声明快照随实现提交。
-
-设置导航第一批（2026-10-09，`feat/settings-batch1`，`docs/research/settings-design-review-20261009.md` §2）：设置组改为 `app` / `connection` / `agents` / `tools` / `data` / `system`（删 `capabilities` / `integrations` / `planned` 和 `plannedApi`）；页面 id 改名 `capsule` → `status`、`connection` → `hosts` + `remote`（`remote-access` 自己的页）、`security` → `collab`；删 `memory`（连同 `memory` 模块）和 `agentBus`（`agent-bus` 改为 `collab` 页末的分区）；`updater` 分区从 `about` 移到 `general`。不兼容旧深链名（主人规则：直接改名，调用处一并改）。
-
-v1.2（2026-10-09，`feat/contract-v12`）：状态胶囊变成可关闭的模块 `status-capsule`；新增状态展示位置（`conversation.statusSurface`，固定 `bar` / `capsule`）、实际位置解析（requested / effective）、窄接口 `reveal` 和受信任的 `conversation.overlay`（§16）。可选依赖与模块详情延后（§16.9）。
-
-v1.3（2026-10-09，`feat/notifications-p0`）：新插槽 `notify.method`（设备端通知方式，§17）；锁定的核心模块 `notifications` 执行主机的两张表（事件 → 等级、等级 → 通知方式，cutex `notification-levels`），拥有 设置 → 应用 → 通知。退役服务 `services.notify.os`（§7）。
-
-v1.4（2026-10-09，`feat/side-p0`；RFC `docs/research/right-panel-rfc-20261009.md`）：右侧区 `side.component`（§18，取代 B 档草案 `conversation.sidePane`；P0 落地外壳容器、`workspace` / `diff` 模块、`subagents.thread`、状态分类适配 `status:<id>`）；会话两侧与引用（§19：`conversation.gutter`、`timeline.turnAttachment`、`ref.action`、`ref.target` 已声明，宿主随 P1a 接入）；服务 `services.side` / `.timeline` / `.refs`；`StatusItem.icon` / `side`、`OverlayLayout.side`、`PageItem.refParams`。
-
-v1.5（2026-10-10，`feat/multi-host-p0`；RFC `docs/research/multi-host-rfc-20261009.md` §9.1、§12）：多主机 P0——宿主同时连着多台主机，
-界面一次显示一台（**焦点主机** = 范围里的那台）。宿主输入从一台主机变成 `HostsInput`（焦点 + 其他已连接主机 + 范围，`setHosts`）；
-模块级 `requires` 任一已连接主机满足即激活，新 `requires.focusHost` 只看焦点主机；条目按范围内的主机求值；新 `ctx.hosts`
-（已连接主机，可订阅，变化不重启）和 `services.daemonFor(hostId)`；`side.component` 的 `follow` 绑定带 `hostId`（§4、§6、§7、§18.5）。
-
-v1.6（2026-10-10，Claude 账户并入 Profile 页）：新插槽 `profile.fieldAction`（§20）——模块在 profile 编辑器和「添加 profile」表单里、
-它拥有的 profile 字段旁放一个动作（claude-accounts：Claude 账户选择旁的「+ 添加订阅」），动作把值放进草稿。Claude 账户不再是
-单独的设置页，而是 Profile 页列表后的 `settings.section`（页面 `profiles` 现在渲染 `<SettingsSections page="profiles" />`）。
-
-v1.7（2026-10-10，成果库 P0，`feat/artifacts`；设计 `docs/research/research-paradigm-design-20261010.md` §3.6）：Markdown 认
-`cutex:<种类>/<key>` 链接和图片（§19.6）：核心把它变成 `CutexRef { kind, key }` 交给 `refs.open`，只认这个形式、不点名模块。
-`ref.target` 条目加两个可选字段：`useLink`（链接 chip 的提示、徽标、图标）与 `thumbnail`（图片链接的缩略图字节）。新模块 `artifacts`
-（成果）是第一个提供者（种类 `artifact`）；新页组 `artifacts`（§18.6）。
-
-v1.8（2026-10-11）：`GutterItem.anchor`（§19.3）。
-
-v1.9（2026-10-11，`feat/keep-mounted`；内嵌浏览器 I3 前置，`docs/research/browser-inapp-i1-revision-reply-20261011.md` §2.3）：
-「保持挂载」钩子——`SideBodyProps.keepMounted(hold)` / `held`（§18.13）。`keepAlive: "hidden"` 的组件可以要求某个实例在持有
-活的东西（租约等）期间一直挂载：不参与离屏 LRU、绑定不可见或视图范围切到别的主机时仍挂载（隐藏）。离屏 LRU 的个数从常量变成设置
-`sideKeepHidden`（★4，1–12），持有上限是设置 `sideKeepMounted`（★4，1–8，与 LRU 分开计）。
-
-v1.10（2026-10-11，`feat/side-open-held`；内嵌浏览器 I3 硬停 `browser-inapp-i3-hard-stop-20261011.md` §2）：「后台打开并持有」——
-`services.side.openHeld(kind, params, opts?)` / `releaseHold(locator, opts?)`（§18.14）。一个调用里原子地建（或复用）卡片并拿到第一个持有，
-不显示、不聚焦、不切页 / 范围 / 选中 agent；Body 第一次渲染就是 `held: true`。拒绝时布局与持有都不变，返回类型化原因。
-
-v1.11（2026-10-12，`feat/titlebar-launchers`；主人决定 2026-10-12）：标题栏右侧变成右侧组件**种类**的启动栏（Chrome 侧面板固定模型）——
-[固定的启动器…] [＋] [右栏开关]。`side.component` 的 `launcher` 加可选 `pin?: "default" | "never"` 与 `newParams?()`，去掉 app 内部字段
-`button`（§18.2、§18.3）。原标题栏的页操作（钉住、⤢ ⛶ ⋯）移到页按钮那一道顶部（「收起侧栏」下面）和 ＋ → 本页。
-
-v1.12（2026-10-12，`feat/project-artifacts-services`；主人 2026-10-12「项目页面是不是也能添加成果库和服务？」，界面由 lead 定）：新插槽
-`project.tab`（§21）——模块给项目页加一个标签（成果库 = `artifacts`、服务 = `services`），可选给概览一句计数（「3 个成果 · 2 个服务」）。
-项目页与侧栏项目菜单「打开项目页面」只列项目所在主机支持的条目。
-v1.13（2026-10-13，`feat/timeline-intro`；主人需求：会话从头可见时显示「开场」——所用 profile 的立绘 + 开场白，
-像游戏角色登场）：新插槽 `timeline.intro`（A 档，`unavailable: "hide"`，§19.3）——会话开头真的在屏幕上
-（没有更早的历史要加载：`hiddenTurns === 0` 且没有更早一页的游标）时，在第一个回合之上显示的**开场**；
-每个会话最多显示一项，按 `order` 取第一个可用的。条目只拿只读信息（会话 id、主机、profile、显示名），
-不给 store 写权限。第一个贡献者是模块 `intro`（本机立绘 / 开场白存储 + provider 默认立绘回退）。
-v1.14（2026-10-15，`feat/codeblock-run`；主人 2026-10-09「shell 代码块旁加运行按钮」，TODO.md）：新插槽
-`timeline.codeBlockAction`（A 档，`unavailable: "hide"`，§22）——模块在 agent 回复里的围栏代码块工具条（复制 / 下载旁）
-放一个动作；宿主只给 `{ language, hostId, platform }` 让条目纯函数地决定接不接、再给代码文本。只在 agent 回复里、不在
-只读时间线（归档 / 子 agent 视图）里。第一个贡献者：`terminal` 的 ▶ 运行（`terminal.runCode`）。
-v1.15（2026-10-16，`feat/components-card`；可选组件规格 v2 §5，主人 2026-10-16 确认）：`ModuleRequires.component?: string`——
-模块页面需要的 cutex **可选组件**（`job-service`、`claude-runtime`）。模块照旧按能力激活；它的 `main.page` 在目标主机的组件
-不是 `ready` / `external` 时显示通用的组件卡片（安装 / 更新 cutex / 手动设置指南 / 源码命令 / 找主机主人 …），不显示页面主体（§12.1）。
-引擎不看这个字段。第一个使用者：`jobs`（`component: "job-service"`）。
-v1.16（2026-10-18，`feat/module-packs`；主人 2026-10-18「长痛不如短痛」）：可下载的第一方**模块包**（§23）——发布密钥签名的索引
-`modules.json`（GitHub release `modules-release`），main 下载、验签、验哈希、原子解包到 `userData/modules/<id>/<version>/`、每次启动复验，
-经特权 scheme `cutex-module://` 只送给主窗口主 frame；renderer 用宿主对象（`__CUTEX_MODULE_HOST__`，共享 React / zustand / app 文件）
-`import()` 入口，经 §15 的 `removeModule` / `addModules` 覆盖内置版本，失败退回内置。SDK 新增 `packs.ts`（`ModulePackEntry`、
-`ModulePackHost`、`MODULE_PACK_HOST_GLOBAL`、`moduleApiSatisfies` / `moduleApiVerdict`）。试点 `claude-science`。
-v1.17（2026-10-20，窗格第 3 步；设计 `docs/research/panes-20261019.md` §2、§7 第 3 行，主人 2026-10-20 的决定在其开头）：**窗格**（§24）——
-整个窗口是窗格的摆放：左边停靠智能体列表，工作区是对话窗格（≤ 2 列），右边是工具列（原右栏）。新插槽 `pane.kind`（A 档，
-`unavailable: "hide"`）；每个 `side.component` 派生同 id 的窗格种类，每个不带 `Aside` 的 `main.page` 派生 `page:<id>`；`core.conversation`
-是外壳自己的多实例种类，右栏 `conversation.agent` 并进它（固定在那个 agent 上的对话窗格）。右栏的页 → 卡片 → 标签变成工具列 → 窗格 →
-标签：去掉多页切换（所有工具列同时在屏幕上），工具进最右一列、往下分到 3 行、再多变成最下面窗格的标签。新服务
-`services.panes.open(kind, params, { beside?, focus?, background? })`，`services.side.open` 保留为它对工具种类的别名；`services.ui.openPage`
-在聚焦的对话窗格里打开页面。§18.5 的每 agent 一份视图废止（布局全局一份）。布局只存本机 `cutex-desktop.panes`，旧 `cutex-desktop.side`
-一次性迁过去并留备份键。只加不删：`side.component` / `main.page` / `services.side` 不变。
-v1.18（2026-10-20，窗格第 5 步；`docs/research/home-page-20261019.md`、`panes-20261019.md` §5）：**桌面底层**（§25）——新插槽 `pane.desktop`
-（A 档，`unavailable: "hide"`）：没有窗格在前面时外壳在工作区画第一个显示的条目；`NavItem` 加可选 `lead` / `useShown` / `useActive`（侧栏
-最上面的固定入口、按设置显示、自己的高亮）。第一个使用者：内置模块 `home`（桌面、个人页 `home.profile`、固定到主页）。只加不删。
-Shelf（2026-10-20，契约仍是 v1.18；`docs/research/canvas-principles-20261020.md` §6）：工具区改成 **Shelf**（§24.12）——会话两侧各最多一个，
-每个有自己的 **Shelf Rail**（保护上限 50 页，一次显示一页）、宽度和选项（允许混排、Rail 外侧 / 内侧）；第 3 步去掉的右栏多页按这个形状回来。
-模块看到的东西不变（`pane.kind`、`services.panes` / `services.side.open` 的 `page` 仍是页 id），所以不升版本。
-v1.21（2026-10-21，主人：「页面应该是自己的面板」）：`main.page`（项目、委托、服务、审批、作业、工作流…；带 `Aside` 的全窗口页除外）不再盖在
-会话上、挂在会话顶栏下面，而是作为**自己的窗格**开进聚焦对话的 Shelf（派生种类 `page:<id>` 交给工具引擎放置：自己的页组，按 Shelf 的混排
-规则新开一页或成为标签；窗格头 = 页面入口的图标 + 面包屑 + 放大 / 全屏 / ⋯ / ×），会话照旧显示对话。新设置 外观 → 窗口与卡片 →
-「页面打开位置」：{{shelf}}（缺省）/ 占用会话（页面暂时盖在会话上，带**页面自己的顶栏**，Esc / × 回到对话）。`services.ui.openPage`、
-`services.panes.open("page:<id>")`、侧栏入口、⌘K、链接 / 深链都跟着这个设置；会话顶栏不再有页面面包屑（§24.4、§26.4）。类型不变，语义变了，
-所以 `MODULE_API_VERSION` 1.20 → 1.21（声明快照只有版本常量）。
-v1.22（2026-10-22，主人：「平台，而不是产品」；设计 030 v2 + 032）：新插槽 **`desktop.widget`**（§27）——桌面上的每一块都是一个**小组件种类**的
-实例：模块声明大小（8 px 网格步长的最小 / 最大 / 缺省 / 快捷大小）、形状（卡片 / 圆 / 路径 / 无底板）、能不能放多个、缺省位置、每个实例的设置表
-（外壳画表单）、刷新节奏（共用的计时器）、**来源**（模块 / 服务 / 智能体）和组件；组件拿到大小、配色、设置、减少动态效果、整理中、时间、
-来源和 **`actions`**（外壳自己的打开智能体 / 页面 / 服务、确认后发给智能体）。桌面模块 `home` 把名片、时钟、需要你、用量、固定的磁贴都改成了
-小组件，新模块 `world-clock` 是第一个别的模块的小组件。只加不删，`MODULE_API_VERSION` 1.21 → 1.22（声明快照只有版本常量）。
-v1.23（2026-10-24，主人：「现在 grid 好像太细」→ 一格 96 px）：桌面改成**整格**的网格——一格 96 px、两格之间 16 px（`WIDGET_CELL` /
-`WIDGET_GAP`），外框只能是整格。种类可以用格子给大小（`size.cells`，可选）；只写了 1.22 步长的种类照常能用：每个大小换成最近的格数
-（`cellsOfSteps` / `cellSizesOf`，绝不拒绝）。组件多拿到 `cells: { w, h }`（`steps` 照旧 = px / 8）。存过的 1.22 摆放换算一次（见 §27.2）。
-只加不删，`MODULE_API_VERSION` 1.22 → 1.23（声明快照只有版本常量）。
-v1.24（2026-10-24，主人：「你现在的单个其实是占据 2x2」）：网格再细一半——**单位** 40 px、间距 16 px（`WIDGET_UNIT`），两个单位加一个间距正好
-是 1.23 的一格，所以 1.23 的大小和摆放**正好乘 2，什么都不动**。种类可以用 `size.units` 给大小；没写就把 `size.cells` 乘 2，再没有就按步长换算
-（`unitSizesOf` / `unitsOfSteps`，每边至少 2 个单位，绝不拒绝）。组件多拿到 `units: { w, h }`。整理时画**点阵**（四个单位相交处一个点，点一样大）。
-只加不删，`MODULE_API_VERSION` 1.23 → 1.24（声明快照只有版本常量）。
-v1.25（2026-10-24，空 Shelf 启动器）：app 层 `SideLauncher` 加可选 `category?: "content" | "tool"`，供空 Shelf 的内容／工具分组使用。
-分类只是展示元数据，不改变绑定、能力门控、启动参数、固定或打开行为；未声明的旧启动器按 `tool` 分组，状态启动器由外壳另行派生。没有新插槽，`SLOT_SPECS` 的默认值／placement 快照不变。
-只加不删，`MODULE_API_VERSION` 1.24 → 1.25；SDK 仍只承载中立合约，声明快照 `module-api-1.25.d.ts` 只有版本常量变化。
-
-v1.26（2026-10-29，来源文件操作子菜单）：app 层 `RefActionItem` 加可选 `submenu(ref)`，返回菜单项数组或它的 Promise。
-引用菜单将其作为正常的懒加载子菜单，悬停／→／Enter 时才解析；复用菜单的定位、滚动、可用性检查与危险操作确认。
-不在每个 chip 渲染时读取详情；关闭后的异步结果不能重开菜单。`run` 保留给独立图标按钮，旧条目行为不变。
-没有新插槽，默认值／placement 快照不变；`MODULE_API_VERSION` 1.25 → 1.26，SDK 声明快照只有版本常量变化。
-
-
-决定：主人，2026-10-09（总纲 `docs/DESIGN.md` §4.22）。读者：主线开发；GPT（按本文实现宿主包，见
-`docs/research/kutex-brief-for-gpt.md` §3 A；下称 brief）。本文是约定，改格式先改本文。行号 = 2026-10-09 `main`，
-路径相对 `apps/desktop/src/renderer/src/`，`components/` 下的文件省略这一层；`shared/` 指 `apps/desktop/src/shared/`。
+本文定义模块注册、插槽、生命周期、权限边界和宿主服务。契约版本与声明快照随实现维护；功能可用性由连接主机及运行时声明的能力决定。
 
 ## 1. 目的与范围
 
@@ -379,7 +269,7 @@ fallback 出现后压 300 ms）。常开的页（审批、委托、作业、项�
 只能用 `packHost` 里的文件，不走这条。`test/lazyPage.test.tsx` 检查每个模块的设置页 / 分区都是 `lazyPage`。`preloadLazyPages()` 在空闲时
 逐个预加载全部（设置 → 通用 → 性能 → 流畅优先，`lib/perfMode`）。
 
-**设置搜索**（2026-10-09，`feat/settings-search`）：设置导航顶部的搜索框（Ctrl+F，或焦点不在输入框时按 `/`；Esc 清空）。
+**设置搜索**（2026-10-09，）：设置导航顶部的搜索框（Ctrl+F，或焦点不在输入框时按 `/`；Esc 清空）。
 只索引**声明出来的文字**，不扫 DOM：页的 `titleKey` + `keywords`、页内卡片 `sections[]` 的 `titleKey` + `keywords`、
 `settings.section` 条目的 `titleKey` + `keywords`（没有 `titleKey` 的分区搜不到）。文字按当前界面语言**和另一种语言**（中文界面配英文、英文界面配中文）各解析一次
 （含 `{{agent}}` 等称呼，改了称呼就按新名字搜），不区分大小写；排序：完全相同 > 前缀 > 词首 > 子串 > 多个词分别命中 >
@@ -668,76 +558,13 @@ apps/desktop/src/renderer/src/dev/
   各插槽可见条目快照、received schema 不重复；featureList 与预览共用 `dev/mockFeatures.ts`）；`test/moduleMocks.test.ts`
   （glob 收齐 mock.ts、mock 的 import 边界、在 node 里装上 mock bridge 检查新 / `?legacy` 两种模式下模块数据合并正确）。
 
-## 9. 迁移顺序
+## 9. 模块边界与集成
 
-1. **设置（试点）**：宿主骨架（types / slots / host / react / Outlet / registry）+ `settings.page` / `settings.section` +
-   模块页 + 门控。`SETTINGS_GROUPS`、`PAGE_SOURCE`、`PAGE_HINT`、`PLANNED_API`、`ICONS` 变成条目字段，`Settings.tsx`
-   只剩组顺序和出口。设置重构本身已落地（815a125 基础组件、d7bfc62 导航树），试点只是把它改写成贡献。
-   **已落地（2026-10-09）**，但两处按「只动试点需要的」暂缓：设置页组件仍在 `components/settings/`（模块 index import
-   它们），原有 `settings.*` i18n key 未改成模块前缀（新 key 已带前缀）；搬组件 / 改 key 时再补齐「迁完」。
-   （key 已在 2026-10-09 基线前整理里改完，见第 3 步之后；组件仍在 `components/settings/`。）
-2. **状态胶囊**：`conversation.status` + 放置 prefs（迁移脚本）。
-   **已落地（2026-10-09）**：6 个模块 `goal`（`agentFeature: goals`）、`plan`、`background-terminals`（`agentFeature:
-   backgroundTerminals`）、`subagents`、`delegations`（`agent-asks`）、`jobs`（`job-service`），条目 `<id>.status`，order
-   100–600。`StatusCapsule` / `StatusBar` / `StatusPlaceTable` 只遍历 `useStatusItems`（测试扫描它们不含功能名）；
-   `BackgroundTasks` 拆成 后台终端 / 子 agent 两个 chip（原来合成一个「N 后台终端 · M 子代理」）；`/ps` 由后台终端接，
-   没有终端时转给子 agent（`signal("ps", "agents")`）。prefs：`ui.statusPlace` → `modules.place`，`ui.capsuleFolded` →
-   `ui.capsuleFoldedItems`（条目 id），脚本 `scripts/migrate-prefs-20261009-status.mjs`，说明
-   `docs/research/status-prefs-migration-20261009.md`。暂缓：(a) 时间线的清单条目（`PlanCard` `ChecklistEntry`）仍在
-   `components/`，按条目 id `plan.status` 读放置，随第 4 步搬进 `plan`；(b) `lib/delegationsView` / `jobsView` 的 hook
-   里仍有 `features.has`（委托页、作业页、队列也在用），随第 3 步；(c) `useStatus` 在胶囊组件里按序调用，hook 本身抛错
-   不在条目 ErrorBoundary 内（Meta / Body / 折叠行在）；(d) 关掉 `background-terminals` 时 `/ps` 没人接。
-3. **页面与导航**：`nav.primary` + `main.page`；`MainView` 改为 `conversation | page`，`openTasks` / `openJobs` 等换成
-   `services.ui.openPage`。
-   **已落地（2026-10-09）**：侧栏入口（order 100–700）`quick-chats.nav`（新工作，▾ 选 profile）、`agent-config.newAgent`、
-   `projects.nav`、`services.nav`、`delegations.nav`（⚠ N）、`jobs.nav`（`hide`）、`approvals.nav`（⚠ N），底栏
-   `shell.settings`（红点；有落后运行时直接开 运行时）。页面 `shell.settings`、`agent-config.newAgent`、`delegations.page`、
-   `jobs.page`、`quick-chats.draft`、`projects.page`、`services.page`、`approvals.page`、`task-service.task`（已删除）；页面组件搬进
-   各模块目录（`ProjectsPage`、`ServicesPage`、`ApprovalsPage`、`JobsPage`、`TaskDetailPage`（已删除）、`NewAgentPage`、`PendingChat`），
-   `TasksPage` 拆成 `delegations/DelegationsPage`。外壳：`App.tsx`（`MainOutlet` / `PageAsideOutlet`）、`Sidebar.tsx`（遍历
-   `nav.primary`）、新文件 `components/PageTitle.tsx`（面包屑）不含功能名，`test/modules.test.ts` 扫描；`TitleBar` 换页只看
-   「当前页有没有 Aside」。i18n：`projects.*` / `services.*` / `approvals.*` / `jobs.*` / `delegations.*` 整组从基础词典搬进
-   模块；`nav.*` 入口名、`newAgent.*` 改名进模块（`projects.nav`、`agent-config.newAgent.*`、`quick-chats.nav` 等）。prefs：
-   无（`MainView` / `PageParams` 只在内存，没有持久化的键改名，所以没有迁移脚本）。行为变化：没有 `agent-asks` 的 cutex 上
-   委托入口置灰（原来显示旧 Task Service 表；那些行曾留在项目页 委托 标签，现在该标签没有 `agent-asks` 时只显示一句提示），新工作入口置灰（原来隐藏），都按 §13.2。
-   暂缓：(a) 留在 `components/` 的共用件：`DelegationList`（项目页也用）、`TasksPage.tsx` 的 `TaskList`（已删除）、
-   `Settings.tsx`（shell 页的实现）；(b) 基础词典里仍有 `chat.*`（草稿页与 composer 共用）、`tasks.*`（`TaskList` 共用；现在只剩作业页用的 `tasks.noProject`）、
-   `settings.*`（第 1 步暂缓）、`nav.projectSettings`（侧栏项目组头，核心）；(c) `TitleBar` 其余部分（agent 的服务 chip；
-   终端开关 v1.11 起是 `terminal.pty` 的固定启动器，§18.3）属 B 档 `titlebar.*`，`App.tsx` 的 `JobOutputDialog` / `AgentListDialog` 属
-   `app.overlay`，侧栏底栏的 `UpdateButton` 仍是外壳；(d) 页面内部的能力检查（`ServicesPage` / `ApprovalsPage` 的
-   `supported`、`lib/delegationsView` / `jobsView`）未动；(e) 导航顺序 / 隐藏的主人覆盖（§13.4）未做；(f) 「插件」没有主页面，
-   它是 `codex-config.plugins` 设置页（第 1 步已迁）。
-   **基线前整理（2026-10-09，kutex-merge-plan §6 第 2、3 项）**：(1) `modules/i18nCatalog.ts` 改成 `import.meta.glob`
-   自动收集 + 声明合并（§8）；(2) 第 1 步暂缓的 `settings.*` key 中只被一个模块的代码用到的 493 个搬进该模块并改成 `<id>.`
-   前缀（`settings.profile.*` → `agent-config.profile.*`，`settings.ownerNotify.x` → `owner-notify.x`，
-   `settings.usage.by.*` → `usage.by.*` 等：首段与模块名相同就去掉，只剩模块名的页面标题 → `<id>.page`），46 个外壳 /
-   多模块共用的留在基础词典（设置框架的 `settings.title` / `group.*` / `source.*` / `back` /
-   `about.attention`，`save` / `cancel` / `reload` / `loading` / `saved` / `remove*` / `pendingCutex`，`StatusCapsule` 也用的
-   `capsuleCorner.*` / `capsuleEdge.*` / `capsuleSize.*`，对话页和快捷键页共用的 `sendKeys.*`，以及
-   `profiles.new.title`、`profile.familyHint`、`mcp.tools`）；(3) 每模块 `mock.ts`（§8）：`delegations`、`jobs`、
-   `owner-notify`、`runtime-packages`（原 `dev/mock*.ts`）、`codex-config`（原 `dev/mockPlugins.ts` + CODEX_HOME 配置请求 /
-   实验特性）、`services`、`approvals`、`usage`、`task-service`（已删除）、`goal`、`plan`、`background-terminals`、`subagents`、
-   `remote-access`（监听视图、配对、客户端 token）；(4) `timeline.received` / `timeline.tool` 预声明（§3.5）。行为不变
-   （预览新 / `?legacy` 两种模式逐页比对过）。仍在 `dev/mockBridge.ts` 核心里的模块数据：profiles / 额度
-   （`agent-config`，composer 等核心也用）、项目（`projects`，与侧栏快照绑在一起）、快速对话（`quick-chats`，写侧栏快照）、
-   更新器（`updater`，是 preload 的 `update` 命名空间，不是 api）、指令 / 协作 / 设置读写（`/v2/settings` 是核心
-   存储，`remote-access` 只贡献派生字段）、featureList 里已有模块的能力名（留在 `dev/mockFeatures.ts` 以保持
-   设置 → 主机 → 诊断 里显示的顺序；新模块写在自己的 `mock.ts`）。
-4. **时间线**：`timeline.received` + `timeline.tool`（插槽已预声明，§3.5）。
-5. 其余 B 档：碰到时迁，迁时把类型补进 §3.2。
+模块通过注册表和已声明插槽接入外壳。SDK 与 host 仅包含模块契约及生命周期，不引入 React、Electron、应用或 daemon 协议，也不提供第二套模块引擎。
 
-一个区域「迁完」= 对应外壳文件里没有功能名（`features.has`、`*_FEATURE`、功能 import）和按功能分支，只遍历
-`useSlot`；贡献都在 `modules/<id>/`，门控只走 `requires`；测试覆盖顺序和门控（两套 featureList）；i18n key 已迁入模块并带
-前缀（zh-CN / en 齐）；`?legacy` 预览看过（该隐藏的隐藏、该置灰的置灰）；prefs 改名有迁移说明 + 脚本；PROGRESS.md 记一笔。
+UI 模块通过窄服务访问宿主能力。权限由主进程及 daemon 校验，模块激活状态本身不授予浏览器、IPC 或主机访问权限。新增契约维护 API 版本、声明和插槽快照，宿主与模块按同一契约检查兼容性。
 
-### 第4步执行结果（稳定基线后，2026-10-09）
-
-`268a9e0` 已完成 received/tool 的通用出口和按模块贡献，任务、ASK/结果、委托工具与子agent行按原插槽门控。
-验收后（M2 / O6）：ASK / 结果收到行和 cutex agent 工具行改由核心 `conversation` 贡献、不门控；`delegations` 只贡献委托卡片（§3.5）。
-未知schema、能力缺失、模块关闭和渲染异常回退到核心原始内容；standalone/activity也由同一选择器决定。
-PlanCard/ChecklistEntry实现在plan模块，核心plan/checklist条目仍走唯一薄facade，未伪造成tool或发明新插槽。
-原先第2步暂缓(a)在此完成；第3步剩余共用组件、owner-notify插入与delegation turn-tail等B/C区未扩大迁移。
-`plugins.manage` 属于外部桌面插件，与 `codex-config.plugins` 设置不同。
+外部插件始终使用 §10 的不透明 frame；设置、模块页和成果页不另建执行引擎。模块能力要求、主机范围及生命周期按 §4–§7 求值。
 
 ## 10. 外部插件（v1.1 隔离接入，安装入口默认关闭）
 
@@ -821,10 +648,9 @@ PlanCard/ChecklistEntry实现在plan模块，核心plan/checklist条目仍走唯
 内部 frame 握手/MessagePort 包络包含每次装载的身份和 channel，用于拒绝重放或错误来源；guest 只得到 `sandboxBridge.call`，
 没有独立授予能力的 API。协议实现和 host lifetime 的安全回归随此接入提交。
 
-### 10.2 共享的不透明 frame 与 agent 页面（2026-10-13，`feat/agent-side-display`；不改契约版本）
+### 10.2 共享的不透明 frame 与 agent 页面
 
-主人 2026-10-13 同意复用外部插件的隔离 frame 显示 agent 的 HTML 成果（「同意你的复用之类的，你也可以抽出来，合理就行」；
-研究 `docs/research/agent-side-display-20261013.md` §3.2 A）。frame 本身抽成最小的源码包 `@cutex-desktop/opaque-frame`
+HTML 成果与外部插件共用不透明 frame。源码包 `@cutex-desktop/opaque-frame`
 （私有、无依赖、无 React / Electron / 协议 / bridge）：
 
 - `.`（renderer）：`applyOpaqueFrame` / `createOpaqueFrame`（`sandbox="allow-scripts"`、`referrerpolicy="no-referrer"`、
@@ -958,7 +784,7 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
 - 只有 `main.page` 走整页卡片。`jobs` 的状态项（胶囊、输入栏）和作业轮询另外跟随组件：`lib/componentCard` `componentUsable`
   （没有 `components` 能力 = 旧 cutex，照旧；`ready` / `external` / `restartPending` / 仍有选用版本的 `degraded` = 可用；列表未读 = 暂不可用），
   `lib/jobsView` `useJobsEnabled`、`lib/jobStore` 的 `supported()`、作业页的其他主机都看它——组件缺失时什么都不显示、不调用 Job Service。
-- 紧凑形式 `ComponentNotice`（2026-10-16，`feat/components-claude`）：用到组件但不是它的页面的地方——Claude 运行时（`claude-runtime`）出现在
+- 紧凑形式 `ComponentNotice`（2026-10-16，）：用到组件但不是它的页面的地方——Claude 运行时（`claude-runtime`）出现在
   设置 → Profile 的新建表单（类型选 Claude 时）、Claude Profile 详情顶部、Claude 账户分区顶部、新建智能体选了 Claude Profile 时。可用或主机说不清
   （没有 `components`）时不显示；其他状态同卡片的一行 + 同样的操作（安装、重新检查、指南、命令…）。只挡做不成的事：新建智能体在
   `componentBlocks`（missing / installing / needsUser / unmanaged / source-only / notInManifest / 不支持的平台 / 没有可用版本的 degraded）时禁用「创建」，
@@ -968,7 +794,7 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   拒绝码 `unmanaged_install`、`component_unsupported_platform`、`component_external`、`upgrade_blocked`、`component_pinned`、`jobs_running`
   各有一句中英文说明（`modules.component.refusal.<code>`），其余显示 cutex 原文。
 
-## 13. 已定的默认（2026-10-09，主人可改）
+## 13. 默认行为与可配置项
 
 1. 模块开关按设备存；能力按主机求值。
 2. 不可用的导航入口默认置灰（能力加载前后不跳动）；只在部分主机上有的（作业）隐藏。
@@ -978,7 +804,7 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
 6. 外部插件 v1 不能贡献时间线渲染器、composer、菜单。
 7. 主机或能力变化时全部模块重启（规则简单优先）。
 
-## 14. 变更记录
+## 14. 契约修订记录
 
 - 2026-10-09 v1：初版（第 1–3 步落地）。
 - 2026-10-09 基线前整理：模块 i18n 改为 `import.meta.glob` + 声明合并（§8）；模块的 `settings.*` key 迁进模块；
@@ -992,23 +818,23 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
 - 2026-10-09 验收修复（`docs/research/gpt-migration-acceptance-20261009.md`）：插件 frame 的 WebRTC / DNS 预取出网在 Electron
   层关闭（M1）；「桌面插件」开关暂不列出（O4）；外部模块「外部」标记（O5）；插件设置配额、`agents.open` 节流、父页面
   `frame-src` 与 scheme 特权收窄、`onBeforeRequest` 实测（§10.1）；模块 prefs 错误语义统一，§8 / §11 改为 adapter 描述。
-- 2026-10-09 v1.2（§16，`feat/contract-v12`）：`MODULE_API_VERSION` 1.1 → 1.2。状态胶囊抽成可关闭模块 `status-capsule`
+- 2026-10-09 v1.2（§16，）：`MODULE_API_VERSION` 1.1 → 1.2。状态胶囊抽成可关闭模块 `status-capsule`
   （默认启用）；新插槽 `conversation.statusSurface`（固定 `bar` = shell、`capsule` = status-capsule，每个 id 一个提供者，
   重复在登记前拒绝）和 `conversation.overlay`（受信任，只表达锚点 / 留白）；`StatusItem.supportedSurfaces`（可选）；
   `StatusBarProps.reveal`（`home` / `showInCapsule` 保留为适配字段）；布局、命令路由、计划清单折叠一律读实际位置。
   偏好存储不变（`bar | capsule | both | off`、胶囊几何键），无迁移脚本。可选依赖、模块详情 UI 延后。
-- 2026-10-15 设置目标主机与搜索门（`fix/settings-host-scope`、`fix/settings-search-newcomer`）：`SettingsPageItem` 加可选
+- 2026-10-15 设置目标主机与搜索门（、）：`SettingsPageItem` 加可选
   `hostPart`，`SettingsSearchSection` 加可选 `access` / `part`，`SettingsSectionItem` 加可选 `sections`（§3.2）；搜索与分区渲染共用
   `lib/settingsGate.ts`，按设置目标主机判断。只是 app 层插槽的可选字段，SDK / 引擎类型不变，`MODULE_API_VERSION` 不升。
-- 2026-10-15 用量「全部主机」（`feat/usage-all-hosts`）：`SettingsPageItem` 加可选 `allHosts`（§3.2），`HostPicker` 加「全部主机」行；
+- 2026-10-15 用量「全部主机」（）：`SettingsPageItem` 加可选 `allHosts`（§3.2），`HostPicker` 加「全部主机」行；
   只是 app 层插槽的可选字段，SDK / 引擎类型不变，`MODULE_API_VERSION` 不升。
-- 2026-10-09 设置搜索（§3.2「设置搜索」，`feat/settings-search`）：`SettingsPageItem` 加可选 `keywords` / `sections`
+- 2026-10-09 设置搜索（§3.2「设置搜索」，）：`SettingsPageItem` 加可选 `keywords` / `sections`
   （新类型 `SettingsSearchSection`），`SettingsSectionItem` 加可选 `keywords`；`lib/settingsNav.ts` 加 `settingsAnchorId`。
   只是 app 层插槽的可选字段，SDK / 引擎类型不变，旧条目照常工作，所以和第一批设置导航一样 `MODULE_API_VERSION` 仍是 1.2。
-- 2026-10-09 v1.3（§17，`feat/notifications-p0`）：`MODULE_API_VERSION` 1.2 → 1.3。新插槽 `notify.method`（`unavailable: "hide"`）；
+- 2026-10-09 v1.3（§17，）：`MODULE_API_VERSION` 1.2 → 1.3。新插槽 `notify.method`（`unavailable: "hide"`）；
   锁定核心模块 `notifications`；退役 `services.notify.os`（§3.1、§7）。声明快照 `module-api-1.3.d.ts`（SDK 类型除版本常量外不变）。
   本地开关 needsInput / turnCompleted 删除，`mutedProjects` 一次性迁到 cutex `projectOverrides`（不保留旧格式）。
-- 2026-10-09 v1.4（§18、§19，`feat/side-p0`）：`MODULE_API_VERSION` 1.3 → 1.4。新插槽 `side.component`（取代 B 档草案
+- 2026-10-09 v1.4（§18、§19，）：`MODULE_API_VERSION` 1.3 → 1.4。新插槽 `side.component`（取代 B 档草案
   `conversation.sidePane`）、`conversation.gutter`、`timeline.turnAttachment`、`ref.action`、`ref.target`（都是 `unavailable: "hide"`）；
   `services.side` / `.timeline` / `.refs`；`StatusItem.icon` / `side`、`OverlayLayout.side`、`PageItem.refParams`（可选字段）。
   P0 落地右侧区（外壳容器、页按钮、实例层、三种「右栏与对话」、设置卡片「会话两侧」）、`workspace` / `diff` 模块和 `subagents.thread`；
@@ -1019,12 +845,12 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   它的 `mock.ts` 和 `task-service.crumb`；共用的 `TaskList`（`components/TasksPage.tsx`）及 `DelegationList` 的旧任务回退 /
   「历史任务（旧）」折叠删除，没有 `agent-asks` 时紧凑模式不显示、完整列表显示 `delegations.unavailable`。只是撤下一个模块
   条目和 app 层组件，插槽形状、`ModuleDefinition`、SDK 类型都没变，所以 `MODULE_API_VERSION` 不变。
-- 2026-10-10 §19 宿主（P1a，`feat/side-p1a`）：`conversation.gutter`（按钮 / 弹出 / 常驻、进输入框工具行、躲胶囊）、参考卡片与核心组件
+- 2026-10-10 §19 宿主（P1a，）：`conversation.gutter`（按钮 / 弹出 / 常驻、进输入框工具行、躲胶囊）、参考卡片与核心组件
   `conversation.turnPeek`（RFC 的 `turn.peek`）、`peekTarget` 设置、`timeline.turnAttachment`（页边 / 内联）、`ref.action` 出口、
   `services.refs` 分发、`services.timeline.focusTurn`（翻页 ≤ 5、跨 agent、「回到」）、Esc 链。`modules/slots.ts` 的契约类型没变，
   `MODULE_API_VERSION` 仍是 1.4；只加了 app 层内部字段：`MenuAction.labelNode`、`FocusRequest.land` / `onDone`、`store.loadOlder` 的 `opts`
   （UI 偏好 `peekTarget` / `gutterDocked` 在 P0 已声明）。偏差与延后见 §19.12。
-- 2026-10-10 v1.5（多主机 P0，`feat/multi-host-p0`；RFC `docs/research/multi-host-rfc-20261009.md` §9.1、§12）：`MODULE_API_VERSION`
+- 2026-10-10 v1.5（多主机 P0，；RFC `docs/research/multi-host-rfc-20261009.md` §9.1、§12）：`MODULE_API_VERSION`
   1.4 → 1.5。SDK：`ModuleRequires.focusHost`、`ModuleHostsTarget` / `HostsInput`、`ModuleHostEntry`、`ModuleHostsContext`、
   `ModuleScope.hosts` / `ModuleContext.hosts`、`ModuleEngineOptions.hosts`（可选）、`ModuleHost.setHosts`。引擎：任一已连接主机
   激活、条目按范围求值、只有焦点主机变化才全部重启（§4、§6）。app 层：`ModuleServices.daemonFor`；`SideBinding` 的 `follow`
@@ -1037,7 +863,7 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   （SDK 类型除版本常量外不变）。`ProfileCreateRequest.claudeAccount`（`POST /v2/profiles` 已接受）让「添加 profile」也能选账户。
 - 2026-10-10 叠加滚动条（§8「滚动条」）：原生滚动条全局隐藏、外壳画叠加滑块，退出标记 `data-native-scrollbar`。只是外壳
   样式约定，插槽、`ModuleDefinition`、SDK 类型都没变，不动 `MODULE_API_VERSION`。
-- 2026-10-10 v1.7（§19.6，成果库 P0，`feat/artifacts`；wire 契约 `docs/research/artifacts-api-v1.md`）：`MODULE_API_VERSION` 1.6 → 1.7。
+- 2026-10-10 v1.7（§19.6，成果库 P0，；wire 契约 `docs/research/artifacts-api-v1.md`）：`MODULE_API_VERSION` 1.6 → 1.7。
   Markdown 认 `cutex:<种类>/<key>` 链接和图片（转义 `#cutex-ref:`，只对有 `ref.target` 的种类生效，核心不点名模块）；`RefTargetItem`
   加可选 `useLink(ref)`（chip 的提示 / 徽标 / 语气 / 图标）和 `thumbnail(ref, maxBytes)`（图片链接的缩略图）。新模块 `artifacts`
   （`requires.capabilities: ["artifacts"]`）：`artifacts.library`、`artifacts.view`（新页组 `artifacts`，§18.6）、`timeline.tool`
@@ -1048,15 +874,15 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   插槽形状、`ModuleDefinition`、SDK 类型都没变，所以 `MODULE_API_VERSION` 仍是 1.7，声明 / 插槽快照不动。`browser.tab` 本身随 I2 的 `browser` 模块落地。
 
 - 2026-10-11 v1.8（§19.3）：`GutterItem.anchor` 可选 `top | composer`，默认兼容输入框锚定。顶部入口在全宽/窄屏仍固定在会话顶角，容器负责下开浮层、状态胶囊/参考卡片/常驻列表避让。批注与书签从左侧入口进入，“全部”在列表内部；书签 v3 单独保存自动上下文与显式项目勾选。声明快照 `module-api-1.8.d.ts`（SDK 中立类型仅版本常量变化），app 插槽有编译期正反例。
-- 2026-10-11 v1.9（§18.13，`feat/keep-mounted`）：`MODULE_API_VERSION` 1.8 → 1.9。`SideBodyProps` 加 `keepMounted(hold): boolean` 与 `held`；
+- 2026-10-11 v1.9（§18.13，）：`MODULE_API_VERSION` 1.8 → 1.9。`SideBodyProps` 加 `keepMounted(hold): boolean` 与 `held`；
   实例层的 `KEEP_HIDDEN = 4` 常量改为设置 `sideKeepHidden`（★4，1–12），新设置 `sideKeepMounted`（★4，1–8）。`side.component` 条目形状、
   `ModuleDefinition`、SDK 类型除版本常量外不变。声明快照 `module-api-1.9.d.ts`；`test/moduleSdkContract.test.ts` 有正反例，
   `test/sideKeep.test.ts` 覆盖规则。
-- 2026-10-11 v1.10（§18.14，`feat/side-open-held`）：`MODULE_API_VERSION` 1.9 → 1.10。`services.side` 加 `openHeld` 与 `releaseHold`，
+- 2026-10-11 v1.10（§18.14，）：`MODULE_API_VERSION` 1.9 → 1.10。`services.side` 加 `openHeld` 与 `releaseHold`，
   新类型 `SideOpenHeldOptions` / `SideOpenHeldResult` / `SideOpenHeldRefusal` / `SideHoldLocator` / `SideReleaseHoldOptions`；`open()` 的选项与结果不变。
   `side.component` 条目形状、`SideBodyProps`、`ModuleDefinition`、SDK 类型除版本常量外不变。声明快照 `module-api-1.10.d.ts`；
   `test/moduleSdkContract.test.ts` 有正反例，`test/sideOpenHeld.test.ts` 覆盖语义。
-- 2026-10-12 v1.11（§18.2、§18.3，`feat/titlebar-launchers`；主人决定 2026-10-12）：`MODULE_API_VERSION` 1.10 → 1.11。`side.component` 的
+- 2026-10-12 v1.11（§18.2、§18.3，；）：`MODULE_API_VERSION` 1.10 → 1.11。`side.component` 的
   `launcher` 成为具名类型 `SideLauncher`：加可选 `pin?: "default" | "never"` 和 `newParams?(): Json | null`，删掉 app 内部的 `button?: boolean`
   （侧聊、终端改用 `pin: "default"`，浏览器也是 `pin: "default"`，模块默认关闭，启用后才出现）。标题栏右侧改为启动栏
   （`components/side/TitleBarLaunchers.tsx`，取代 `TitleBarPageActions.tsx`），页操作移到页按钮那一道顶部与 ＋ → 本页；新 UI 偏好 `sideLauncherPins`
@@ -1068,19 +894,19 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   `SideOpenOptions.background?`（v1.11，可选）。打开文件缺省改为「替换」（旧缺省一次性迁移，`sidePreviewRev`）。lead（同日）：保护预览标签里的工作——
   `SideBodyProps.keep()`（v1.11，必有成员；外壳提供，模块只调用）与替换守卫（§18.2 `transient`）；SDK 声明快照不变（`SideBodyProps` 属 app 层），
   `test/sideReplaceGuard.test.ts`。
-- 2026-10-12 v1.12（§21，`feat/project-artifacts-services`；主人 2026-10-12 要项目页也有成果库和服务，界面由 lead 定）：`MODULE_API_VERSION`
+- 2026-10-12 v1.12（§21，； 要项目页也有成果库和服务，界面由 lead 定）：`MODULE_API_VERSION`
   1.11 → 1.12。新插槽 `project.tab`（`unavailable: "hide"`，条目 `{ tab, order, titleKey, Body, useSummary? }`，Body 参数 `{ hostId, projectId }`）。
   项目页的五个核心标签变成插槽次序 100–500，模块标签按 `order` 插在中间（`lib/projectTabs.ts` `mergeProjectTabs`，纯函数）；只列项目所在主机
   有模块 / 条目能力的条目（`lib/projectTabsView.ts`，复用 `useHostEntryGate` / `entryGateNow`）；侧栏项目菜单「打开项目页面」的子菜单同一份。
   `artifacts` 贡献「成果库」（310，项目范围的库视图 = 侧栏卡片同一个 `LibraryPanel`，打开版本 = 右侧标签，绑定项目主机），`services` 贡献「服务」
   （320，服务页同一张表只取该项目的行）；两者都给概览计数。核心 `ProjectTab` 类型不变，页面参数 `tab` 现在也可以是模块的标签名。
   声明快照 `module-api-1.12.d.ts`（SDK 类型除版本常量外不变）；`test/moduleSdkContract.test.ts` 有正反例，`test/projectTabs.test.ts` 覆盖合并与两个过滤。
-- 2026-10-13（§10.2，`feat/agent-side-display`；主人同意复用插件 frame 显示 agent 的 HTML 成果）：frame 形状、离线页面文档和一次性文档
+- 2026-10-13（§10.2，；主人同意复用插件 frame 显示 agent 的 HTML 成果）：frame 形状、离线页面文档和一次性文档
   store 抽成 `@cutex-desktop/opaque-frame`，插件与 agent 页面共用 main 里同一个 store；`artifacts.view` 新预览类型 `html`；
   `artifacts` / `services` 各加一个 `conversation.overlay` 条目，`artifacts` 加一个 `settings.section`。只用现有插槽，插槽形状、
   `ModuleDefinition`、SDK 类型都没变，所以 `MODULE_API_VERSION` 不变，声明 / 插槽快照不动。顺带：设置 → 对话页之前没有渲染
   `page: "conversation"` 的模块分区（批注、侧聊、浏览器的设置都看不到），现在在页尾渲染。
-- 2026-10-13 v1.13（§19.3，`feat/timeline-intro`；主人需求：会话从头可见时显示「开场」，profile 立绘 + 开场白）：
+- 2026-10-13 v1.13（§19.3，；主人需求：会话从头可见时显示「开场」，profile 立绘 + 开场白）：
   `MODULE_API_VERSION` 1.12 → 1.13（合并 main 后由 1.12 改号：1.12 已给 `project.tab`）。新插槽 `timeline.intro`（`unavailable: "hide"`；条目 `{ id, order?, when?, render }`，
   props 只读：`sessionId` / `hostId` / `profileName` / `providerKind` / `agentName`）；出口在 `TimelineBody` 最上
   （`modules/TimelineIntro.tsx`，`memo` + 原始值 props：流式重渲染不波及开场），只在会话开头真的可见
@@ -1092,28 +918,28 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   （lib/launchArt，可选）→ 无」回退，开场白按「profile 自定义 → provider 问候语（lib/providerGreetings）」，
   占位符 `{{owner}}`（主人称呼）/ `{{name}}`（agent 显示名）。声明快照 `module-api-1.13.d.ts`（SDK 中立类型仅版本
   常量变化）；`test/timelineIntro.test.ts` 覆盖条件、选取、回退顺序、占位符与存储清洗。
-- 2026-10-14（§18.1、§18.3、§18.12，`feat/side-dual-lane`；主人 2026-10-14：要回竖条 + 横向标签的双栏，至少作为选项）：设置
+- 2026-10-14（§18.1、§18.3、§18.12，；：要回竖条 + 横向标签的双栏，至少作为选项）：设置
   「右栏布局」（UI 偏好 `sidePageBar`，★`"lane"` 竖条 + 标签页 / `"tabs"` 仅标签页）。竖条模式 = 2026-10-13 前的样子：`SideLane`
   在右栏打开时也在（顶部收起侧栏 + 页操作，收起时留位），没有 `SideTabStrip`；`sideFrame` 加输入 `pageBar`，打开的右栏另加 `LANE_EXTRA`
   （44 − 8 px 缝），卡片宽度两种模式相同。拖放、快捷键不变（细栏药丸 = y 轴）。外壳布局，不涉及插件契约：`MODULE_API_VERSION` 不变。
-- 2026-10-13（§18.1、§18.3、§18.12，`feat/side-tabstrip`；主人 2026-10-12 选方案 A）：右栏打开且 ≥ 2 页时，页按钮从对话与右栏之间 44 px
+- 2026-10-13（§18.1、§18.3、§18.12，； 选方案 A）：右栏打开且 ≥ 2 页时，页按钮从对话与右栏之间 44 px
   的竖向一道改成右栏顶部一行横向页标签条（`SideTabStrip.tsx`），页操作（钉住、⤢ ⛶ ⋯、收起侧栏）移到这一行最右端；竖向 `SideLane` 只在
   右栏收起时出现（「右栏收起时」= 保留），药丸位置设置只作用于它。`appearance.sidePaneWidth` 不再含那一道。拖放的药丸命中带轴
   （`lib/sideDrop.ts` `PillAxis`、`pillPageOp`），反馈在标签条上横向画。外壳布局，不涉及插件契约：`MODULE_API_VERSION` 不变，快照不动。
-- 2026-10-13（§18.6、§19.6，`feat/delegation-side-detail`；主人 2026-10-13：点委托看它的信息，不要跳回很早的时间线）：`delegations`
+- 2026-10-13（§18.6、§19.6，；：点委托看它的信息，不要跳回很早的时间线）：`delegations`
   模块加右侧组件 `delegations.detail`（`multi`、`transient`、`defaultBinding: "host"`，key = ask id；新页组 `delegations`）和 `ref.target`
-  种类 `delegation`（key = ask id，`hostId` = 记录所在主机；`open` 总是在右侧打开，主机总是引用的主机，从不换成选中 agent 的主机；2026-10-15 起（`fix/delegations-side-stale`）绑定到该主机上当前打开的 agent（`{kind:"agent"}`，没开 agent 时才绑主机），`stateVersion` 2 丢掉旧的主机绑定实例——主机绑定会让一个 agent 的委托详情出现在同主机每个 agent 旁边；
+  种类 `delegation`（key = ask id，`hostId` = 记录所在主机；`open` 总是在右侧打开，主机总是引用的主机，从不换成选中 agent 的主机；2026-10-15 起（）绑定到该主机上当前打开的 agent（`{kind:"agent"}`，没开 agent 时才绑主机），`stateVersion` 2 丢掉旧的主机绑定实例——主机绑定会让一个 agent 的委托详情出现在同主机每个 agent 旁边；
   `useLink` 给 `cutex:delegation/<id>` chip）。内容 = 时间线委托卡片展开后的同一块（`components/DelegationCard` `DelegationDetailBody`），
   上面一行 #tag 标题、委托方 → 承接方、模型、状态；标签标题「委托 #3 · 标题」。核心列表不点名模块，用 `lib/delegationOpen`
   `openDelegationDetail(host, askId)` = `refs.open({ kind: "delegation" }, { how: "page" })`，打不开（模块关着、cutex 没有委托、主机不在视图）
   时委托页退回原来的跳转。改成打开详情的点击：输入栏「委托 N」/ 胶囊里的行、委托页的标题、待处理委托与随行行的 #tag / 标题、ASK / 结果 /
   已回复行和给主人消息里的 #tag；「跳到委托卡片」留在右键 / ⋯ 菜单。时间线卡片自己仍是展开 / 收起。只用了已有插槽形状：`MODULE_API_VERSION`
   不变，快照不动。
-- 2026-10-13（`feat/remote-jobs-module`；主人：功能叫「NCI 远程作业」，不是通用的「远程作业」）：新内置模块 `nci`（默认关闭，§3.4），
+- 2026-10-13（；主人：功能叫「NCI 远程作业」，不是通用的「远程作业」）：新内置模块 `nci`（默认关闭，§3.4），
   拿走 `jobs` 的 设置 → 远程作业 页（改名 NCI 远程作业，页 id `remote-jobs` → `nci`，条目 `jobs.remoteSettings` → `nci.settings`），
   改成分步设置向导；作业页的 NCI 部分改为跟随 `nci` 是否启用。mock 拆分：收件邮箱 / Gadi 核对进 `modules/nci/mock.ts`（从未配置开始），
   `jobs/mock.ts` 只留作业数据。插槽形状和 SDK 未变，不升版本。
-- 2026-10-15 v1.14（§22，`feat/codeblock-run`；主人 2026-10-09，TODO.md「Run button on shell code blocks」）：`MODULE_API_VERSION`
+- 2026-10-15 v1.14（§22，；，TODO.md「Run button on shell code blocks」）：`MODULE_API_VERSION`
   1.13 → 1.14。新插槽 `timeline.codeBlockAction`（`unavailable: "hide"`；条目 `{ match(block), Action }`，`SessionItemBase`；
   `match` 收 `{ language, hostId, platform }`，`Action` 另收 `sessionId` / `code` / `incomplete`）。出口：`Markdown.tsx` 的
   `components.code`（→ `components/ReplyCodeBlock.tsx`）——只有 `CodeBlockScope`（`lib/codeBlockScope.ts`）给了范围的 Markdown（`Timeline.tsx` 的 agent 回复、非只读）
@@ -1121,12 +947,12 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   第一个贡献者 `terminal.runCode`（▶ 运行：按主机系统挑标签、多行两步确认、复用 / 新开工作区终端）。声明快照
   `module-api-1.14.d.ts`（SDK 中立类型仅版本常量变化）；`test/moduleSdkContract.test.ts` 有正反例，`test/modules.test.ts` 钉住插槽快照，
   `test/codeBlockRun.test.ts` 覆盖标签 / 主机匹配与单行 / 多行确认。
-- 2026-10-16 v1.15（§12.1，`feat/components-card`；可选组件规格 v2 §5）：`MODULE_API_VERSION` 1.14 → 1.15。`ModuleRequires` 加
+- 2026-10-16 v1.15（§12.1，；可选组件规格 v2 §5）：`MODULE_API_VERSION` 1.14 → 1.15。`ModuleRequires` 加
   `component?: string`（引擎不看它，只由 app 的 `MainOutlet` 用来显示组件卡片）。§12 修正：桌面端可以请求 cutex 安装组件，自己从不
   下载、启动或碰文件。新增 `GET /v2/components`、`POST /v2/components/{name}/install|remove`、事件 `cutex/components/updated` 的客户端；
   `components` 进 `OWNER_ONLY_CAPABILITIES`。`jobs` 用 `component: "job-service"`。声明快照 `module-api-1.15.d.ts`（只多了 `component` 与版本常量）；
   `test/moduleSdkContract.test.ts` 有编译探针，`test/componentCard.test.ts` / `test/componentStore.test.ts` / `packages/cutex-client/test/components.test.ts` 覆盖状态与客户端。
-- 2026-10-18 v1.16（§23，`feat/module-packs`）：`MODULE_API_VERSION` 1.15 → 1.16。SDK 加 `packs.ts`：`ModulePackEntry`（包入口的导出：
+- 2026-10-18 v1.16（§23，）：`MODULE_API_VERSION` 1.15 → 1.16。SDK 加 `packs.ts`：`ModulePackEntry`（包入口的导出：
   `moduleApi`、`module`、`messages`）、`ModulePackHost` / `MODULE_PACK_HOST_GLOBAL`（宿主对象）、`moduleApiSatisfies` / `moduleApiVerdict`
   （semver 范围对 `MODULE_API_VERSION` 求值）。插槽、`ModuleDefinition`、引擎都不变（`SLOT_SPECS` 快照不动）；包经 §15 的动态登记进入同一个宿主。
   声明快照 `module-api-1.16.d.ts`；测试：`test/modulePacks*.test.ts`（索引 / 签名 / 哈希 / 篡改 / 错误密钥 / 降级 / 中断解包 / 范围、协议、加载与回退、
@@ -1166,9 +992,9 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   对话相关的都进每个会话自己的两行顶栏（`components/ConversationHeader.tsx`，`lib/convHeader.ts`）。声明快照 `module-api-1.19.d.ts`
   （只有版本常量）；`test/moduleSdkContract.test.ts` 有 `window.search` 正反例并钉住 `SLOT_SPECS`；`test/modules.test.ts` 钉住
   `window.search` 快照、`TitleBar.tsx` 进外壳扫描；`test/convHeader.test.tsx`（每个窗格的顶栏项、窄时收进 ⋯ 的顺序、窗口顶栏内容）。
-- 2026-10-23（§19.8，设计 040 跟进，`fix/0.2-conv-followups`）：`RefActionItem` 加可选 `inline`（消息悬停浮条上总是图标；书签模块用它）。
+- 2026-10-23（§19.8，设计 040 跟进，）：`RefActionItem` 加可选 `inline`（消息悬停浮条上总是图标；书签模块用它）。
   只是 app 层插槽的可选字段，SDK / 引擎类型不变，旧条目照常工作（不写 = 进「⋯」），所以 `MODULE_API_VERSION` 不升、快照不动。
-- 2026-10-23（侧栏 v5，设计 040 §4.1，`feat/0.2-sidebar-v5`）：`nav.primary` 的顶部入口从侧栏搬到顶栏（主机选择器右边：分割线 + 平铺图标 + `CountBadge`，「⋯ 更多」= 原来的更多菜单；窄窗口只留第一个，其余收进一个带总数的 ⋯）。
+- 2026-10-23（侧栏 v5，设计 040 §4.1，）：`nav.primary` 的顶部入口从侧栏搬到顶栏（主机选择器右边：分割线 + 平铺图标 + `CountBadge`，「⋯ 更多」= 原来的更多菜单；窄窗口只留第一个，其余收进一个带总数的 ⋯）。
   `NavItem` 加可选 `menu`（右键菜单：快速启动的 profile 列表，新建智能体也用它），`Menu` 不再画。只是 app 层插槽的可选字段，旧条目照常工作，所以 `MODULE_API_VERSION` 不升、快照不动。
 - 2026-10-21 v1.20（§25.3，托盘，原则 §7）：`MODULE_API_VERSION` 1.19 → 1.20，只加不删。`PaneDesktopItem` 加 `Dock?` / `useDockCount?`，
   `PaneDesktopProps.reason` 多 `"covered"`、加 `tray?`，新类型 `PaneDockProps`。桌面成为整个工作区的底层，托盘是浮在桌面底部的程序坞
@@ -1195,7 +1021,7 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   的页面面包屑（全窗口页除外）删掉。声明快照 `module-api-1.21.d.ts`（只有版本常量）；`test/modules.test.ts` 钉住派生的 Shelf 组件表；
   `test/pagesOwnPane.test.tsx`。
 
-## 15. 动态模块登记（v1.1，稳定基线后迁移）
+## 15. 动态模块登记（v1.1）
 
 唯一引擎为 `@cutex-desktop/plugin-host`；共享类型来自 `@cutex-desktop/plugin-sdk`，`MODULE_API_VERSION = "1.25"`（v1.2 – v1.4、v1.6 – v1.14、v1.17、v1.18 只改 app 层插槽，见 §16 – §22、§24、§25、§18.3、§18.13、§18.14、§19.3、§19.6；
 SDK / 引擎的类型除版本常量外不变；v1.5 加多主机输入与 `ctx.hosts`，见 §4、§6；v1.15 加 `ModuleRequires.component`，引擎不看它，见 §12.1；v1.16 加模块包入口 / 宿主对象类型和 `moduleApi` 范围求值，见 §23）。
@@ -1344,7 +1170,7 @@ interface ResolvedPlacement {
 
 ## 17. 通知方式插槽 `notify.method`（v1.3）
 
-依据：`docs/research/notification-levels.md`（主人 2026-10-09 批准）。主机（cutex）存两张表：事件 → 等级
+依据：`docs/research/notification-levels.md`（ 批准）。主机（cutex）存两张表：事件 → 等级
 （urgent / needsYou / inform / record），等级 → 通知方式（矩阵）。**设备执行主机的表**：只能在本机把设备端方式关掉，不能加。
 
 ```ts
@@ -1384,7 +1210,7 @@ interface NotifyDelivery { key: string; event: string; eventTitle: string; level
 > 保持挂载与后台持有（§18.13、§18.14）。
 
 规范来源：RFC `docs/research/right-panel-rfc-20261009.md` §3–§5（设计理由、例子、风险都在那里）；本节是约定的摘要，
-改格式先改本节。P0 实现：`feat/side-p0`。
+改格式先改本节。P0 实现：。
 
 ### 18.1 术语、结构与外壳文件
 
@@ -1433,14 +1259,14 @@ interface NotifyDelivery { key: string; event: string; eventTitle: string; level
 - 页按钮：一页一颗药丸，一张卡片一个图标（≤ 5，否则 4 + 「+n」），每个图标自己的徽标，药丸左端是整页的拖动把手（竖排三个点，悬停显示）；
   最后一颗后面「+」= 新页面（启动页，没放东西就离开会被丢弃）。点别的页 = 打开右栏切过去（点图标 = 同时展开那张卡片）；点当前页
   （`lib/sideLaneClick.ts` 纯函数）：折叠卡片的图标 = 展开它，可见卡片的图标 = 聚焦并闪一下那张卡片，其余 ★不动（设置「点击当前页图标」=
-  收起侧栏时收起右栏，主人 2026-10-11；Ctrl+Shift+n 同一规则）。页按钮只在 ≥ 2 页时出现（只有一页时没有，收起靠标题栏开关）。放在哪里
+  收起侧栏时收起右栏，；Ctrl+Shift+n 同一规则）。页按钮只在 ≥ 2 页时出现（只有一页时没有，收起靠标题栏开关）。放在哪里
   按设置「右栏布局」（UI 偏好 `sidePageBar`，`lib/sideFrame.ts` 的 `lane` / `strip`）：
-  - ★**竖条 + 标签页**（`"lane"`，主人 2026-10-14 要回 2026-10-13 前的双栏样子）：右栏打开时也在对话与右栏之间留一道 44 px 竖向细栏
+  - ★**竖条 + 标签页**（`"lane"`， 要回 2026-10-13 前的双栏样子）：右栏打开时也在对话与右栏之间留一道 44 px 竖向细栏
     （`SideLane.tsx`，列出各页，当前页药丸实心）；没有页标签条，选中页的标签就是各卡片头上的横向标签行（§18.4）。细栏顶部依次是收起侧栏、
     钉住（悬浮时）、⤢ ⛶ ⋯（本页），只在鼠标停在细栏上或按钮有键盘焦点时显示；右栏收起时这些位置留空，药丸开合不跳。这道细栏顶替
     8 px 的缝：打开的右栏比存的宽度宽 36 px（`LANE_EXTRA`），卡片宽度与「仅标签页」相同。全屏 / 最大化 / 悬浮 / 抽屉里细栏都在盒子左边。
     右栏收起时同下。
-  - **仅标签页**（`"tabs"`，主人 2026-10-12 方案 A）：
+  - **仅标签页**（`"tabs"`， 方案 A）：
   - 右栏打开：右栏最上面一行横向**页标签条**（`SideTabStrip.tsx`，高 32 px，在第一张卡片之上、右栏外壳内，左右与卡片对齐，不另占宽度）。
     药丸里图标从左到右；页多放不下时这一行横向滚动（滚轮也可，滚动条隐藏），当前页滚进视野。全屏时在全屏标题行（§18.4）下面，
     最大化时在工作区顶部，悬浮 / 抽屉时在浮层里。
@@ -1450,7 +1276,7 @@ interface NotifyDelivery { key: string; event: string; eventTitle: string; level
   （`pillInsertion`），整页拖到药丸上按沿轴前 / 后 28 % 排序、中间合并（`pillPageOp`）。标签条上插入线竖着画在两个图标之间，整页排序线竖在
   两颗药丸之间，说明标签显示在标签条下方（避开拖动影子）；标签条空白处 / 「+」= 新页（拖动时「+」变成虚线「新页」目标，同前）。
   从标签条拖出的行为与从细栏拖出相同。
-- 标题栏右侧 = 启动栏（v1.11，`TitleBarLaunchers.tsx`，规则 `lib/sideLaunchers.ts` 纯函数，主人 2026-10-12）：[固定的启动器…] [＋] [右栏开关]。
+- 标题栏右侧 = 启动栏（v1.11，`TitleBarLaunchers.tsx`，规则 `lib/sideLaunchers.ts` 纯函数，）：[固定的启动器…] [＋] [右栏开关]。
   - 启动器 = 一种组件（不是一个实例）。缺省固定：`launcher.pin: "default"` 的组件——侧聊、终端，浏览器模块启用时的浏览器；模块停止 / 不可用 /
     `params()` 为 null 的种类不出现。顺序 = 先工具类（模块贡献的 `side.component`：侧聊、终端、浏览器、笔记、书签…），再状态分类
     （外壳派生的 `status:<id>`，§18.9：闹钟、委托、作业…；不加契约字段，按派生来源分组），各自按 `launcher.order`。固定是**按设备**的本地偏好（UI prefs `sideLauncherPins`：组件 id → 固定 / 取消，
@@ -1500,10 +1326,10 @@ interface NotifyDelivery { key: string; event: string; eventTitle: string; level
 | `{ kind: "host", hostId }` | 那台主机在当前范围 | 浏览器服务标签、参考卡片 |
 
 页的**形状**（页、卡片、顺序、比例）在一个视图范围内对所有 agent 相同，**内容**按绑定显示：没有可见标签的卡片隐藏；没有当前 agent
-可见卡片的页（别的 agent 的内容、只剩休眠实例）**不出现在页按钮里**（主人 2026-10-11，RFC §13 D27′，取代「变暗留在原位」）。
+可见卡片的页（别的 agent 的内容、只剩休眠实例）**不出现在页按钮里**（，RFC §13 D27′，取代「变暗留在原位」）。
 `host` / `workspace` / `follow` 绑定的页对它适用的每个 agent 都出现。这修掉了旧 `sidePane` 的串台。
 
-**v1.17 废止**（§24：布局全局一份，主人 2026-10-20）：下面这段「每 agent 一份视图」不再成立——工具列的开 / 关和聚焦的列对所有 agent
+**v1.17 废止**（§24：布局全局一份，）：下面这段「每 agent 一份视图」不再成立——工具列的开 / 关和聚焦的列对所有 agent
 都一样，切 agent 不换视图，只按绑定换内容（没有当前 agent 可见内容的列不上屏幕；当前 agent 的最后内容关掉时工具区收起，
 `closeIfEmptied` 照旧）；`layout.views` 不再读写，旧存档里的 `views` 只在迁移时用一次（§24.7）。原文留作记录：
 
@@ -1518,7 +1344,7 @@ v1.5：每种绑定都带 `hostId`（多主机下每个实例都属于一台主�
 
 ### 18.6 放置（`lib/sideLayout.ts` `place()`，纯函数）
 
-> 以下是最初声明语义；主人 2026-11-03 的默认开页规则覆盖该顺序，见 §24.12.2。`prefer`、覆盖和 `otherwise` 仅用于保护上限的退路；显式 page 仍是用户指定布局。
+> 以下是最初声明语义； 的默认开页规则覆盖该顺序，见 §24.12.2。`prefer`、覆盖和 `otherwise` 仅用于保护上限的退路；显式 page 仍是用户指定布局。
 
 ```ts
 interface SidePlacement { home: string; prefer?: SidePageCandidate[]; otherwise?: "new-page" | "active-page"; order?: number; share?: number }
@@ -1540,7 +1366,7 @@ type SidePageCandidate = { group: string } | { containing: ItemId } | "active";
 | `reference` | 参考卡片 / 书签（GPT，§19） |
 | `artifacts` | `artifacts.library`（成果库）、`artifacts.view`（成果预览，v1.7）；对比打开的 `diff.view` 落在同一页 |
 | `delegations` | `delegations.detail`（一个委托的详情，`ref.target` 种类 `delegation` 打开它，2026-10-13） |
-| `agents` | `conversation.agent`（另一个 agent 的实时对话，核心、不受门控；2026-10-18，`feat/side-agent-view`，`docs/research/side-agent-view-20261018.md`） |
+| `agents` | `conversation.agent`（另一个 agent 的实时对话，核心、不受门控；2026-10-18，，`docs/research/side-agent-view-20261018.md`） |
 
 ### 18.7 覆盖、菜单与重置
 
@@ -1571,13 +1397,13 @@ type SidePageCandidate = { group: string } | { containing: ItemId } | "active";
 - v1.7：`artifacts.library`（成果库，singleton，`workspace` 绑定）与 `artifacts.view`（成果预览，multi，transient，peekable，`host` 绑定，
   dedupeKey = 成果引用，固定版本和 `@latest` 是两个标签身份），页组 `artifacts`。
 
-- 2026-10-18（`feat/side-agent-view`，主人：想在右栏同时看两个 agent；设计记录 `docs/research/side-agent-view-20261018.md`）：核心组件
+- 2026-10-18（，主人：想在右栏同时看两个 agent；设计记录 `docs/research/side-agent-view-20261018.md`）：核心组件
   `conversation.agent`（`multi`，`host` 绑定，dedupeKey = session id，`keepAlive: "hidden"`，页组 `agents`）：另一个 agent 的时间线（行操作留在主区）、
   状态行、待回答的审批 / 提问（不抢焦点）、「接下来」与一个简单输入框（Enter 发送：运行中插入，不能插入的 agent 排队；停止）；头部「在主区打开」= 与主区的
   agent 互换。主区选中的正是它时，标签显示「已在主区打开 · 换回」。入口：agent 菜单「在侧边打开」（`conversation.openAgentSide`，`agent` 引用的
   `ref.action`）、侧栏 agent 行 Ctrl/⌘ 单击 / 中键单击 / Ctrl/⌘+Enter（`lib/sideOpen.ts` `openAgentSide`；别的主机的 agent 在主区打开）。store 从「只订阅选中的
   agent」改为 N 条会话流（`retainSideAgent` / `setSideAgentVisible`，`sideAgents`）；可见的侧边 agent 算「在看」（通知、回合结束标记）。不改契约，`MODULE_API_VERSION` 不变。
-- 「新开而不替换」全应用统一按浏览器习惯（v1.11，主人 2026-10-12，`lib/openModifiers.ts`）：**Ctrl/⌘ + 单击、中键单击** = 新开一个保留的（非预览）标签，
+- 「新开而不替换」全应用统一按浏览器习惯（v1.11，，`lib/openModifiers.ts`）：**Ctrl/⌘ + 单击、中键单击** = 新开一个保留的（非预览）标签，
   后台打开（`{ pin: true, background: true }`，当前标签留在视野里）；**Ctrl/⌘ + Shift + 单击** = 同样新开，但显示并聚焦；普通单击不变（复用 / 替换预览标签）。
   适用：Markdown 文件链接与图片、文件树（含搜索结果；聚焦的行上 Ctrl/⌘ + Enter = Ctrl/⌘ + 单击）、改动列表的 ↗、回合摘要的文件、工具行的文件、标题栏启动器（§18.3）。
   菜单项没有修饰键，照普通单击。例：a.md 开着，Ctrl+单击 b.md → b.md 成为第二个保留标签，a.md 留着且仍显示。
@@ -1711,7 +1537,7 @@ interface SideHoldLocator { readonly scope: string; readonly instanceId: string;
 
 ## 19. 会话两侧与引用（v1.4，宿主 P1a）
 
-规范来源：RFC §7（设计理由、例子）与 §10.2（P1a 范围）；本节是约定的摘要，改格式先改本节。P1a 实现：`feat/side-p1a`。
+规范来源：RFC §7（设计理由、例子）与 §10.2（P1a 范围）；本节是约定的摘要，改格式先改本节。P1a 实现：。
 类型在 v1.4 已声明（`modules/slots.ts`），P1a 只落地宿主，契约类型未变（§14）。cutex 还没有 C-T1 单轮读 / C-T2 轮序号（RFC §7.13），
 下面凡是「回落」都是没有它们时的做法。
 
@@ -1780,7 +1606,7 @@ interface SideHoldLocator { readonly scope: string; readonly instanceId: string;
   没有这样的回复（进行中、无回复）就在这一轮最后一行之后；宽 = 阅读列宽 − 48，按 8 px 向下取整（拖窗口时不必每一步都重画）。`TurnAttachmentProps.where` / `width` 告诉条目是哪种。
   （2026-10-15 起，原为「第一行下面」；宿主行为，契约版本不变。）
 - 批注（`notes.turn`）不写 `margin`：只在轮尾内联，样式同轮尾摘要（「批注 · [标题] · [标题] · +N」，点开浮窗）；
-  宽屏时不再飘到右侧留白（主人 2026-10-15）。`margin` 仍由书签（`bookmarks.ribbon`，左）、浏览器截图（`browser.turnShots`，右）与 `dev/devGutter.tsx` 使用。
+  宽屏时不再飘到右侧留白（）。`margin` 仍由书签（`bookmarks.ribbon`，左）、浏览器截图（`browser.turnShots`，右）与 `dev/devGutter.tsx` 使用。
 - 只放内容；对这一轮的动作走 `ref.action`（§19.8）。
 
 `timeline.intro`（v1.13，`TimelineIntroItem`，出口 `modules/TimelineIntro.tsx`）：
@@ -1966,7 +1792,7 @@ host-changed | bad-ref`）/ `stale`。`ref.target` 从不启动 / 重启任何�
 
 ## 20. profile 字段旁的模块动作 `profile.fieldAction`（v1.6）
 
-主人 2026-10-10：Claude 账户不要单独的设置页，放进 设置 → Profile；在 profile 那里能直接添加 Claude 订阅。账户列表本身是
+：Claude 账户不要单独的设置页，放进 设置 → Profile；在 profile 那里能直接添加 Claude 订阅。账户列表本身是
 `claude-accounts` 在页面 `profiles` 的 `settings.section`（`claude-accounts.accounts`，列表之后、不折叠）；本节是另一半：
 模块在 profile 编辑器和「添加 profile」表单里、它拥有的 profile 字段旁放一个动作。
 
@@ -1993,7 +1819,7 @@ export interface ProfileFieldActionProps {
 
 ## 21. 项目页标签 `project.tab`（v1.12）
 
-主人 2026-10-12：「项目页面是不是也能添加成果库和服务？」界面交给 lead。项目页（`modules/projects/ProjectsPage.tsx`）不 import
+：「项目页面是不是也能添加成果库和服务？」界面交给 lead。项目页（`modules/projects/ProjectsPage.tsx`）不 import
 别的模块（模块之间一律不互相 import），所以加一个插槽，由拥有数据的模块贡献标签。
 
 ```ts
@@ -2024,7 +1850,7 @@ export interface ProjectTabProps { hostId: string; projectId: string } // 项目
 
 ## 22. 代码块动作 `timeline.codeBlockAction`（v1.14）
 
-主人 2026-10-09（TODO.md）：agent 回复里的 shell 代码块旁加 ▶ 运行（像 Claude 桌面端），复用内置终端。代码块由 streamdown 渲染，
+（TODO.md）：agent 回复里的 shell 代码块旁加 ▶ 运行（像 Claude 桌面端），复用内置终端。代码块由 streamdown 渲染，
 复制 / 下载是它自带的；核心不点名终端模块，所以加一个插槽，模块往代码块工具条里放动作。
 
 ```ts
@@ -2066,7 +1892,7 @@ export interface CodeBlockActionProps extends CodeBlockMatch {
 
 ## 23. 可下载的第一方模块包（v1.16）
 
-主人 2026-10-18：可选的第一方桌面模块要能在 app 里下载，做成签名的模块包（「长痛不如短痛」，直接做真的，不做过渡方案）。
+：可选的第一方桌面模块要能在 app 里下载，做成签名的模块包（「长痛不如短痛」，直接做真的，不做过渡方案）。
 lead 定的边界：包是**第一方、可信**的 renderer 代码，信任等于 app 自己的打包；只接受发布密钥签名的包；第三方代码仍然只在
 不透明 frame 里（§10），本功能从不加载未签名或第三方代码；不另起模块引擎，经 §15 的动态登记进入同一个宿主。
 
@@ -2300,7 +2126,7 @@ export const messages: Record<string, Record<string, string>>; // 语言 → { "
 
 ## 24. 窗格（v1.17）
 
-设计与主人决定：`docs/research/panes-20261019.md`（§1 概念、§2 契约、§4 摆放、§7 第 3、4 行；开头是主人 2026-10-20 的回答：右栏多页去掉；
+设计与主人决定：`docs/research/panes-20261019.md`（§1 概念、§2 契约、§4 摆放、§7 第 3、4 行；开头是 的回答：右栏多页去掉；
 布局全局一份，窗格分「跟随对话」和「固定」；布局只存本机）。本节是约定；第 4 步（小片托盘、最大化、LRU 限额、`minSize`、拖放分割合并、
 键盘，§24.11）已经写进来。契约（`pane.kind`、`services.panes`）第 4 步没有变。**§24.12（Shelf，2026-10-20）取代下面说「工具列」的地方**：
 工具列变成 Shelf 的页，一个 Shelf 一次显示一页；§24.3 的布局 JSON 是 v1（工具列 `area: "tools"`），存储现在是 v2（§24.12.5）。
@@ -2394,11 +2220,11 @@ interface PaneKindItem<S extends Json, P extends Json> extends SessionItemBase {
 - 右栏的 `conversation.agent`（另一个 agent 的实时对话，2026-10-18）**并进 `core.conversation`**：它不再是 side 组件；agent 菜单「在侧边打开」、
   ＋ ▸ 智能体、`services.side.open("conversation.agent", { sessionId }, { binding: { kind: "host", hostId } })` 都打开一个固定在那个 agent 上的对话窗格
   （在聚焦对话的旁边；`background` = 不抢焦点）。
-- **页面是自己的窗格**（v1.21，主人 2026-10-21；取代 v1.17 的「盖在对话上」）：`services.ui.openPage(page, params)`（侧栏入口 `runNav`、
+- **页面是自己的窗格**（v1.21，；取代 v1.17 的「盖在对话上」）：`services.ui.openPage(page, params)`（侧栏入口 `runNav`、
   ⌘K 的页面结果 = `services.panes.open("page:<id>")`、链接 / 引用 / 深链、`lib/workspaces` `openRef` 的页面）先问 `lib/pageOpener`：
   设置 `appearance.pageOpen`（外观 → 窗口与卡片 →「页面打开位置」，本机）= `"shelf"`（缺省）时 `lib/paneServices` `openPageInShelf` 用
   `sideOpen("page:<id>", params, { reveal, focus })` 把它开进**聚焦对话的 Shelf**：`lib/sideComponents` 的组件表里每个不带 `Aside` 的页面
-  （`lib/paneKinds` `pageSideItems`）是一个 singleton、绑焦点主机（`host`）、页组 = 种类 id 的组件，所以按 §24.12.2 的放置**开在自己的页**、整页高（设计 038，主人 2026-10-23；
+  （`lib/paneKinds` `pageSideItems`）是一个 singleton、绑焦点主机（`host`）、页组 = 种类 id 的组件，所以按 §24.12.2 的放置**开在自己的页**、整页高（设计 038，；
   已经有这个页面的窗格 = 跳过去、换成新的 params；混排开关只影响「这一页满了」之后的退路），已经开着 = 换成新的 params、显示并闪一下。窗格头是普通的 Shelf 窗格头（`components/side/SideCard.tsx`）：图标和名字取
   打开这个页面的 `nav.primary` 条目（`target.page` 或 `activePages`；没有 = 通用图标、「页面」），标题 = `useTitle` 的面包屑连成一行
   （「项目 › profileCedar-agent」），放大（= 占满工作行的其余部分，§24.16）、全屏、⋯、×。正文 = `modules/Outlet` `PageContent`（模块的错误边界、
@@ -2425,7 +2251,7 @@ type PaneOpenResult = { status: "opened"; kind: string; paneId: string | null; i
 - `page:<id>`：= `services.ui.openPage`（v1.21：聚焦对话的 Shelf 里自己的窗格，`instanceId` / `paneId` = 那个窗格；占用会话 = 聚焦的对话窗格，`instanceId: null`）。
 - 工具种类：= `services.side.open(kind, params, { reveal: true, focus, background })`（§18.8）。`services.side.open` 保留，是工具种类的别名
   （外加上面的 `conversation.agent`）。
-- **工具放置**（主人 2026-11-03）：复用 → 预览就地替换 → 已有同种窗格的页加标签，否则填当前空页或新建 Shelf 页；不自动分屏。显式布局动作和 50 页保护上限的退路见 §24.12.2。
+- **工具放置**（）：复用 → 预览就地替换 → 已有同种窗格的页加标签，否则填当前空页或新建 Shelf 页；不自动分屏。显式布局动作和 50 页保护上限的退路见 §24.12.2。
 - **限额**（`lib/paneLayout.ts` 常量）：屏幕上 ≤ 6 个窗格（`MAX_VISIBLE_PANES`）、每列 ≤ 3 个（`MAX_ROWS`）、对话 ≤ 2 列、工具列 ≤ 2 列
   （`MAX_TOOL_COLUMNS`）、工具窗格合计 ≤ 4（`MAX_TOOL_PANES` = 6 − 2 列对话）。所有改布局的操作之后 `fitLayout` 保证限额（多出来的窗格
   变成第三个窗格的标签）；拖放要超出限额时拒绝（拖动提示「放不下了」）。第 4 步：放回小片超出限额时，最久没用的窗格收成小片（LRU，
@@ -2441,7 +2267,7 @@ localStorage `cutex-desktop.panes` = `{ v: 1, layouts: { "host:<焦点主机>": 
 写工具区（`prepareForSave`：不存 `persist: false`、超过 4 KiB 的 state、空的启动器列；每范围 ≤ 200 个实例、覆盖 ≤ 100 条，§18.11）。恢复时丢掉
 已删除 agent 的对话窗格和工具实例、`restore` 返回 null 的实例；最大化 / 全屏不恢复；「启动时恢复」关掉时只留覆盖。
 
-存放位置（E-G10，主人 2026-10-24 批准；`lib/paneDb.ts`）：上面这份文件放在 IndexedDB `cutex-desktop-panes`，一块一条记录（`meta`、每个范围的
+存放位置（E-G10， 批准；`lib/paneDb.ts`）：上面这份文件放在 IndexedDB `cutex-desktop-panes`，一块一条记录（`meta`、每个范围的
 布局、每个范围的默认布局 + 共享页、每个对话自己的 Shelf）。首次渲染前读进内存（`lib/paneDbBoot.ts`，整个读取一个 5 秒期限，超时 = 这次
 运行用 localStorage），之后读都是同步的；写只写变了的记录（100 ms 内合成一个事务，记录带时间 `t`，旧的不盖新的；删掉的留墓碑
 `{ t, del }`，有有效的戳时 7 天后清掉），其他窗口经 BroadcastChannel 马上收到。每个窗口没提交的写另记一份 localStorage 日志
@@ -2490,7 +2316,7 @@ Esc、两个区域的小片存取、`lib/paneActions` 的显示桌面和托盘�
 
 > **0.2 变更（2026-10-22，合并 feat/0.2-tray / feat/0.2-width；本节下文的小片 / LRU / 最大化描述已过时，以此为准）**：
 > - 「—」on a tool pane opens a menu: 移到另一页 ▸ (the other pages of its Shelf, plus 新的一页 when the pane isn't alone on its page, below the 50-page sanity limit) and 关闭 (confirmed in place, like ×). Tool panes never go to the tray (#7, owner 2026-10-21). 托盘 = 钉住的 + 打开着的会话（docs/design/001）。
-> - 显示桌面（主人 2026-10-22 改定）：只显示桌面——侧栏卡片照常（平时显示就显示）、托盘按它的设置；**没有会话、窄条、Shelf、Shelf Rail**。会话整体收走（`emptyWork`）；Shelf 的布局不动（不再收成 Rail——Rail 常驻会把它们留在屏幕上），显示桌面期间工作区只是不画 Shelf（`components/PaneHost` `side` = `!desktopShown`）。再按一次 = 原样回来。〔原来：展开的 Shelf 收成 Rail，Rail 常驻时最右还剩一条 Rail。〕
+> - 显示桌面（ 改定）：只显示桌面——侧栏卡片照常（平时显示就显示）、托盘按它的设置；**没有会话、窄条、Shelf、Shelf Rail**。会话整体收走（`emptyWork`）；Shelf 的布局不动（不再收成 Rail——Rail 常驻会把它们留在屏幕上），显示桌面期间工作区只是不画 Shelf（`components/PaneHost` `side` = `!desktopShown`）。再按一次 = 原样回来。〔原来：展开的 Shelf 收成 Rail，Rail 常驻时最右还剩一条 Rail。〕
 > - LRU / limits: no pane goes to the tray any more (remove "the least recently used pane goes to the tray"); 会话收起 = 原位窄条或最小化到托盘（docs/design/002）。
 > - Migration (no file version bump): stored tool chips go back into their Shelf once (`resolveChips`); one that cannot (its Shelf at the 50-page sanity limit) is closed with one notice saying how many.
 > - 最大化 = 规则 2（只吃空隙，`lib/panelGrow*`，docs/design/003）；原来的「最大化」改名「独占」，在 ⋯ 里（`toggleExclusive`，两个工作区时另一个收成窄条）；全屏不变。动作预告：`lib/foretell.ts` + `components/ForetellLayer.tsx`，效果与执行同源（`lib/workspaceEffects.ts`，docs/design/008）。
@@ -2526,13 +2352,13 @@ Esc、两个区域的小片存取、`lib/paneActions` 的显示桌面和托盘�
 
 主人方向与术语：`docs/research/canvas-principles-20261020.md` §6（Shelf、Shelf Rail、页、窗格、标签行、会话；每个 Shelf 自己的「允许混排」
 和 Rail 内外侧；第 3 步删掉的右栏多页按这个形状回来）；原型 `.claude/preview-shelves.html` A 组（默认、两个 Shelf、混排关 / 开、拖到页签、
-拖到边缘、Shelf 菜单、Rail 在内侧、Shelf 收起）；收起到 Rail（主人 2026-10-21）：`.claude/preview-design-v1.html` §3 方案 a（`#s3-a`、
+拖到边缘、Shelf 菜单、Rail 在内侧、Shelf 收起）；收起到 Rail（）：`.claude/preview-design-v1.html` §3 方案 a（`#s3-a`、
 `#s3-a+open`、「▶ 演示动画」）。
 
 **层次**：Shelf → 页（Shelf Rail 切换，一次显示一页）→ 窗格（一页里上下最多 3 个）→ 标签（标签行切换）。
 
-〔**2026-10-23 起改为「样子 A」**（主人选；`feat/0.2-shelf-look`）：展开的 Shelf 不再画成一张卡片。Rail 是一整条满高的卡片，朝外的一边圆角、贴窗格的一边方角；每个窗格是自己的卡片贴在 Rail 上（贴 Rail 的一边无边框、方角，朝外圆角），窗格之间是标准的 8 px 缝（`SHELF_PANE_GAP = CARD_GAP`，缝里看得见桌面，仍是拖高度的把手），Shelf 里的窗格不加阴影；每个窗格内容的外侧下角都画圆角（`SideInstanceLayer`）；亚克力按每个角分别裁。收起的 Shelf（只剩 Rail）不变。下面这段 10-21 的「一张卡片 / 1 px 线」说法作废，留作历史。拖放时真实窗格先挪到放下后的位置（`lib/dropMorph.ts`，只用 transform / clip-path；减少动态效果时只画虚线框）。〕
-**一张卡片**（设计 009，主人 2026-10-21 选 A）：Shelf Rail 是 **Shelf 的页签栏**，不是单独的一种面板。整个 Shelf 是一张卡片（`.shell-card`
+〔**2026-10-23 起改为「样子 A」**（主人选；）：展开的 Shelf 不再画成一张卡片。Rail 是一整条满高的卡片，朝外的一边圆角、贴窗格的一边方角；每个窗格是自己的卡片贴在 Rail 上（贴 Rail 的一边无边框、方角，朝外圆角），窗格之间是标准的 8 px 缝（`SHELF_PANE_GAP = CARD_GAP`，缝里看得见桌面，仍是拖高度的把手），Shelf 里的窗格不加阴影；每个窗格内容的外侧下角都画圆角（`SideInstanceLayer`）；亚克力按每个角分别裁。收起的 Shelf（只剩 Rail）不变。下面这段 10-21 的「一张卡片 / 1 px 线」说法作废，留作历史。拖放时真实窗格先挪到放下后的位置（`lib/dropMorph.ts`，只用 transform / clip-path；减少动态效果时只画虚线框）。〕
+**一张卡片**（设计 009， 选 A）：Shelf Rail 是 **Shelf 的页签栏**，不是单独的一种面板。整个 Shelf 是一张卡片（`.shell-card`
 的材质、圆角、细边、阴影只有一份；`components/side/SideArea` `ShelfView` 的 `.shelf-card`，样式 `components/side/shelfCard.css`）：Rail 在卡片里
 贴一边，和页之间一条细线（页这一栏朝 Rail 的 `border-l` / `border-r`），没有缝；页里的窗格不再各自是卡片（没有边框、圆角、阴影、自己的材质），
 上下两个窗格之间是 1 px 的线（`SidePageView` `PANE_LINE`，拖动的热区仍是 9 px；`cardHeights` 的 `gap` 参数），实例层只把卡片自己的那个角
@@ -2561,7 +2387,7 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
   / `shelvesOf`，归一化有缓存；所有 reducer 先归一化）。`layout.activePage` = 聚焦的页（Alt+n、启动器、`active-page` 放置都看它所在的 Shelf）。
 - **限额**：每页 ≤ 3；屏幕上的工具窗格 ≤ `MAX_TOOL_PANES` = 4 只按**屏幕上的页**（每个展开的 Shelf 正在显示的页；收起的只有 Rail）算，只在加窗格时检查
   （`place`、拖放、小片放回的 LRU）；切页不合并任何东西（另一页可以各有 3 个）。旧的「合计 ≤ 4 就把最下面合并成标签」改成只保证每页 ≤ 3。
-- **默认**（主人 2026-10-20）：**每个 Shelf 都不允许混排**（一个窗格的标签行只放一种东西；文件、网页、终端各成窗格），Rail 在外侧——
+- **默认**（）：**每个 Shelf 都不允许混排**（一个窗格的标签行只放一种东西；文件、网页、终端各成窗格），Rail 在外侧——
   从 v1.17 布局、v1.16 右栏、第 3 步备份迁来的右 Shelf 也一样（`defaultShelfOptions()` 不再有「旧布局开」的分支；之前的迁移把它设成开，
   存储 v3 一次性关掉，§24.12.5）。已经混放的窗格保持原样（不重新分组）；之后满页时放置开新页（§24.12.2），主人可以在 ⋯ 里打开。
 - **只用一个 {{shelf}}**（`singleShelf`，单一 Shelf 模式 = 以前的右栏）：开着时不会有第二个 Shelf——`shelfLimit(layout)` = 1（否则
@@ -2571,7 +2397,7 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
   `cutex-desktop.side` 和它的备份），**已有用户关**（不管有没有两个 Shelf，行为不变）；每个范围存自己的选择（`tools.singleShelf`），没存过工具区
   的范围用文件里的缺省（`singleShelfDefault()`，§24.12.5）。
 
-#### 24.12.2 放置（主人 2026-11-03，`place()`）
+#### 24.12.2 放置（，`place()`）
 
 普通打开（启动器、文件链接、页面、agent/tool 打开、peek 固定及窗格内打开）先复用同 kind/binding/key 的实例，临时预览仍在原位置替换。
 已有同种类窗格 → 切到它所在的页，多实例加到同一个窗格的标签行；没有同种类 → 填入当前空页，否则在目标 Shelf 末尾开新页。
@@ -2589,13 +2415,13 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
 - `components/side/ShelfRail.tsx`：Shelf 卡片的页签栏，在卡片的外侧（窗口边）或内侧（对话一侧）。页按钮 = 页的图标（**两个以上窗格的页 = 胶囊**：一个竖的圆角框里按上下顺序叠着每个窗格的图标，没有把手标记——框 / 空隙拖整页，
   图标拖那个窗格；悬停框 = 整个框描淡的强调色，悬停图标 = 只亮图标；点图标 = 显示那一页并聚焦、闪一下那个窗格；设计 038）（`page.icon`，否则第一个窗格种类的图标；
   `lib/shelfIcons.ts`）+ 提示（页名 · Alt+n）；正在显示的页有底色和外缘的小竖条；需要你的数目、忙的点。然后 ＋（新页，≤ 50；新页带改名 /
-  图标浮层）、最下面收起按钮（收起 / 展开，提示「· Esc」）和 ⋯（Shelf 菜单）。点页按钮：别的页 = 切过去；**正在显示的页 = 什么都不做**（主人 2026-10-22：原来是收起，太容易误点；双击它也不收起——Rail 的双击 = 最大化只在空白处）。按住拖 = 拖整页（§24.12.4）。右键页按钮：重命名 / 换图标（同一个浮层：名字输入框 + 22 个图标 + 「自动」）/ 移到上面 / 移到下面 / 拆开「窗格」（右键的图标，否则聚焦的 / 最下面的窗格，成为紧挨着的下一页）/ 合并到上一页（合起来 ≤ 3 个窗格）/ 在所有对话中显示 / 删除这一页（设计 038）。
+  图标浮层）、最下面收起按钮（收起 / 展开，提示「· Esc」）和 ⋯（Shelf 菜单）。点页按钮：别的页 = 切过去；**正在显示的页 = 什么都不做**（：原来是收起，太容易误点；双击它也不收起——Rail 的双击 = 最大化只在空白处）。按住拖 = 拖整页（§24.12.4）。右键页按钮：重命名 / 换图标（同一个浮层：名字输入框 + 22 个图标 + 「自动」）/ 移到上面 / 移到下面 / 拆开「窗格」（右键的图标，否则聚焦的 / 最下面的窗格，成为紧挨着的下一页）/ 合并到上一页（合起来 ≤ 3 个窗格）/ 在所有对话中显示 / 删除这一页（设计 038）。
 - Rail 的页按钮列表在高度不足时独立纵向滚动（滚轮 / 触控板，无可见滚动条），上下边缘渐隐提示还有内容；头像 / 固定按钮保持固定，＋ 紧跟最后一个页按钮；仅当列表溢出时，＋ 留在滚动区域的底边，⋯ 始终固定在 Rail 底部。切换活动页自动滚入视野；拖动到列表边缘自动滚动。合组页的一整个胶囊只算一个列表项；竖屏横 Rail 使用相同的横向规则。
 - 空页选择器除了内容 / 工具 / 状态，还从标题栏「更多」同一份 `nav.primary` 注册表读取可进入 Shelf 的页面（页面组）；按主机能力隐藏不可用项，跳过纯动作和有 Aside 的全窗口页。已有状态入口不重复列出；选择后显式填入该空页。
 - ⋯ 菜单（`lib/shelfMenus.tsx`）：标题「右边的 {{shelf}} · n 页」；允许混排（开关，下面一行说明）；只用一个 {{shelf}}（开关，整个布局的，
   下面一行说明；有两个 Shelf 时说明「已有的两个都留着」）；{{shelf}} Rail 在外侧 / 内侧；**收起**（收起时这一项是「展开 {{shelf}}」）；
   移到左边 / 右边（那边有 Shelf 时不可用）；关闭 {{shelf}}（n 个窗格一起关，可撤销）。托盘里不再有 Shelf 小片。
-- **收起到 Rail**（主人 2026-10-21；`collapseShelf` / `expandShelf` / `railPageClick` / `toggleShelfCollapsed` 在 `lib/sideLayout.ts`，
+- **收起到 Rail**（；`collapseShelf` / `expandShelf` / `railPageClick` / `toggleShelfCollapsed` 在 `lib/sideLayout.ts`，
   动作在 `lib/shelves.ts`）：收起的 Shelf 原地只剩它的 Rail——一条竖条（`COLLAPSED_SHELF_WIDTH` = Rail 40 + 缝 8），在 Shelf 的外侧
   （窗口边；Rail 选了内侧也一样），是收窄到 Rail 宽的 Shelf 卡片（设计 009），**不标**正在显示的页（没有页在屏幕上）；页图标、需要你的数目、忙的点照旧，＋、收起按钮
   （这时是展开）和 ⋯ 照旧。它的页、窗格、实例都留着；页不在屏幕上（不算进 4 个工具窗格），实例按 keepAlive 规则隐藏。会话拿到让出的宽度
@@ -2614,7 +2440,7 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
   〔2026-10-23 起（窗口审计 #6）：拖放造成的合并 / 拆开 / 移动 / 跨工作区移页也出同一个提示条和 7 秒「撤销」（`lib/dropUndo.ts`），放回拖放前的
   排法、实例状态不变；之后又动过布局或焦点换了对话就不撤，提示「之后又动过布局，没法撤销这一步」。一次只有一个提示条：新的拖放提示会让还没过期的
   删除页撤销提前生效。主人的风险分级：这些是低风险，一次过、只给撤销。〕
-- **{{shelf}} Rail 常驻**（主人 2026-10-21："the Shelf Rail could be always present — no need to hide it; make it configurable, shown by default"；设置 → 外观 → 窗口与卡片，`appearance.shelfRailAlways`，
+- **{{shelf}} Rail 常驻**（："the Shelf Rail could be always present — no need to hide it; make it configurable, shown by default"；设置 → 外观 → 窗口与卡片，`appearance.shelfRailAlways`，
   本机，**缺省开**）：开着时每个对话的 Shelf Rail 一直在它的位置上（Rail 内外侧、§24.15 并排时的位置照旧）：
   - **工具区关着**（`open: false`）：它的 Shelf 都画成 Rail（和收起的一样，不标正在显示的页；`workspaceShelves`，单个工作区也这样——并排时
     本来就这样，§24.15 (a)）。点页按钮 = 打开到那一页（`railPageClickNow` → `switchPage`，`open` 变真、Shelf 展开）；Rail 底部的收起 / 展开按钮
@@ -2636,7 +2462,7 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
 
 #### 24.12.4 拖放（`lib/sideDrop.ts` + `lib/sideDnd.ts`）
 
-- **拖页按钮 = 拖整页**（主人 2026-10-22 报「页按钮拖不动了」——Shelf 有 Rail 以来（741f5a34）页按钮就没有拖动把手，第 3 步的整页拖动在
+- **拖页按钮 = 拖整页**（ 报「页按钮拖不动了」——Shelf 有 Rail 以来（741f5a34）页按钮就没有拖动把手，第 3 步的整页拖动在
   bb63923b 删掉了；不是 0.2 的回退）：`SideDrag` `{ type: "page", pageId }`（`ShelfRail` 的页按钮用 `sideDragHandle`，短按仍是点击，放下后的
   点击被吞掉）。放在**页按钮 / 胶囊的中间**（上下各 25 % 以外）= **合并**：那一页在下面加上这一页的所有窗格，这一页消失（合起来超过 3 个窗格拒绝
   「放不下：一页最多 3 个窗格」；`mergePageInto`，目标 `mergePage`，设计 038）；放在**上 / 下 25 %** = 放到它前面 / 后面；放在 **＋** 上 = 那条 Rail 的最后。
@@ -2676,12 +2502,12 @@ interface SideLayout { …; shelves?: Shelf[]; singleShelf?: boolean }          
      然后如果有第 3 步的备份 `cutex-desktop.side.v1-backup`，它的旧页在每个范围里**按原样回来**（`restoreLegacyPages`：页名、组、窗格的
      种类 / 标签顺序 / 当前标签 / 高度 / 折叠；还在的实例——同 id、种类、去重键、绑定——从折成的那一列移回原来的页；之后被主人关掉的不复活；
      一个都对不上的范围 = 没从它折过，旧页连同实例整页加回来，换新 id）。备份键留着不删。刚从 v1.16 迁来的范围跳过这一步（页已经是页）。
-  3. 文件 `v: 2` → `v: 3`（只一次，`migrateMixingOff`，主人 2026-10-20）：每个已存 Shelf 的 `allowMixing` 改成 `false`，窗格、标签、实例都不动
+  3. 文件 `v: 2` → `v: 3`（只一次，`migrateMixingOff`，）：每个已存 Shelf 的 `allowMixing` 改成 `false`，窗格、标签、实例都不动
      （已经混放的窗格照旧）。741f5a34 的 v2 文件分不出「迁移设的开」和「主人自己打开的开」（这个选项当天才有，没有标记），所以全部关一次；
      从 v3 起所有迁移都写关，所以之后存着的「开」一定是主人设的，不需要另外的标记字段。同一步在文件上记 `singleShelf`：这次是新安装（第 1 步
      之前什么都没存）= `true`，否则 `false`——`singleShelfDefault()` 给没存过工具区的范围当缺省；存过的范围读自己的 `tools.singleShelf`（没有 = 关）。
      旧版本读到 `v: 3` 会当成读不了（和 v2 对更旧的版本一样）。
-  4. 文件 `v: 3` → `v: 4`（只一次，`migrateShelfRails`，主人 2026-10-21）：收起的 Shelf 不再是托盘里的小片，而是原地的 Rail——每个已存 Shelf
+  4. 文件 `v: 3` → `v: 4`（只一次，`migrateShelfRails`，）：收起的 Shelf 不再是托盘里的小片，而是原地的 Rail——每个已存 Shelf
      的 `chip`（进托盘的时间）换成 `collapsed: true`，页、窗格、实例都不动。读的时候 `chip` 也当收起（`sanitizeLayout`、`toolRawOf`），存的时候
      只写 `collapsed`。
 
@@ -2708,7 +2534,7 @@ Alt+n；Shelf 外壳文件不点名功能）、`test/sideDrop.test.ts`（页按�
 主人决定（2026-10-20）的测试在 `test/shelves.test.ts`：「只用一个 Shelf」（`addShelf` / `moveToNewShelf` 不变、移到另一边照旧、边缘拖放 =
 现有 Shelf 的新页、两个 Shelf 时打开不合并、撤销 / 小片放回进现有 Shelf、`tools.singleShelf` 存取）、载入缺省（新安装开、v2 文件 / 只有
 v1.16 右栏的已有用户关、范围自己存的选择优先）、`migrateMixingOff`（v2 → v3 关掉允许混排、混放的窗格不动、只一次）。
-收起到 Rail（主人 2026-10-21）也在 `test/shelves.test.ts`：收起 / 展开 / 切换（页不在屏幕上、`railsOnScreen` 给竖条、焦点移到另一个 Shelf、
+收起到 Rail（）也在 `test/shelves.test.ts`：收起 / 展开 / 切换（页不在屏幕上、`railsOnScreen` 给竖条、焦点移到另一个 Shelf、
 `reveal` 和 Alt+n 展开、`collapsed` 存取、v3 的 `chip` 读作收起）、点页按钮（收起时展开到那页、点正在显示的页不变、别的页切换）、Esc 链的
 「收起 Shelf」行、行宽（`shelfRow`：收起的 Shelf 只占 48 px、会话拿到其余的；`shelfMotionFrom` 只在收起 / 展开时动）、`migrateShelfRails`
 （v3 → v4，只一次；新安装直接到 v4）。
@@ -2720,7 +2546,7 @@ v1.16 右栏的已有用户关、范围自己存的选择优先）、`migrateMix
 
 ### 24.13 工作区、投影、按对话记的 Shelf（2026-10-21，契约不变）
 
-原则 `docs/research/canvas-principles-20261020.md` §7（主人 2026-10-21）；原型 `.claude/preview-workspaces.html`。推翻 §24.12 的「布局全局一份」。
+原则 `docs/research/canvas-principles-20261020.md` §7（）；原型 `.claude/preview-workspaces.html`。推翻 §24.12 的「布局全局一份」。
 
 - **工作区** = 一个会话 + 它自己的 Shelf。屏幕上 1–2 个工作区。外壳文件：`lib/workspaces.ts`（打开 / 拖放规则 / 几何，纯函数 +
   拖动的 DOM 部分）、`lib/convShelves.ts`（按对话的 Shelf，纯函数）、`lib/sideLayoutStore.ts`（`switchConversation`、`peers`、
@@ -2749,8 +2575,8 @@ v1.16 右栏的已有用户关、范围自己存的选择优先）、`migrateMix
      顶部「投影 · 在旁边打开」= `promoteProjection`（先在这个 Shelf 关掉投影，再并排打开 B）；卡片的 × 移除。B 已经作为工作区在屏幕上时
      投影只显示占位和「切过去」，不再挂第二份实时视图。agent 菜单的「投影到当前 {{shelf}}」（`conversation.projectAgent`）。
   2. **并排**（`openBesideAt`）：`[A | A 的 Shelf] [B | B 的 Shelf]`，两个会话各是一张卡片（`ConversationColumns` `split`），聚焦的有
-     描边（焦点换过去时描边从外圈收进来、旧的淡出，`styles.css` `.ws-col`）。**焦点不改布局**（主人 2026-10-21，§24.15「宽度规则」）：两个
-     工作区的 Shelf 都按各自对话记住的展开 / 收起和宽度画在行里，换焦点只移动描边。**两个 Shelf 都是实时的**（d2ab9da0，主人 2026-10-21）：
+     描边（焦点换过去时描边从外圈收进来、旧的淡出，`styles.css` `.ws-col`）。**焦点不改布局**（，§24.15「宽度规则」）：两个
+     工作区的 Shelf 都按各自对话记住的展开 / 收起和宽度画在行里，换焦点只移动描边。**两个 Shelf 都是实时的**（d2ab9da0，）：
      - 实时布局 `layout` 仍是聚焦对话的 Shelf；屏幕上另一个对话的 Shelf 是 `sideLayoutStore` 的 **`peers[convKey]`**（`PeerShelf`：它自己的
        页 / 窗格 / 实例 `own` + `ShelfMeta`，不含共享页），实例照样挂着。`syncPeers`（窗格布局变化时，工作行也调用）按屏幕上的对话增删 peer：
        已有的原样留着，新来的从内存 / 文件 / 默认布局取（和实时布局 id 冲突时改号）。换焦点（`switchConversation`）在**同一次** `setState`
@@ -2771,7 +2597,7 @@ v1.16 右栏的已有用户关、范围自己存的选择优先）、`migrateMix
        点一下 = 按下即聚焦）。
      - 行里两个工作区的 Shelf 盒子（`SideWorkArea` 的 `WsShelfBox`，各在 `ShelfSourceContext.Provider` 下）按工作区顺序排（左边的先），**键 =
        对话 + Shelf id**（`shelfBoxKey`），换焦点盒子、窗格、占位都不动；`lib/shelfMotion` 记住的宽度、拖动会话里各 Shelf 的起始宽度也按这个键。
-       （只按 Shelf id 时两个对话的 `s1` 撞键：React 留下旧盒子、画重一个、丢掉另一个——主人 2026-10-21「选中左边的对话，它的 Shelf Rail
+       （只按 Shelf id 时两个对话的 `s1` 撞键：React 留下旧盒子、画重一个、丢掉另一个——「选中左边的对话，它的 Shelf Rail
        不见了」，`test/twoLiveShelves.test.tsx`「two Shelves of the same id」。）拖宽中的 `liveWidth` 只属于实时布局的 Shelf（另一个工作区的
        Shelf 被拖时已经先聚焦了）。换焦点不让列滑动（`glideColumns` 的键里没有焦点；动画中读到的位置等动画结束再记一次）。
      空的 Shelf 不显示。几何、放在哪一边、按内容的宽度：§24.15（`lib/workspaceRow`，取代 `splitGeometry`）。
@@ -2792,7 +2618,7 @@ v1.16 右栏的已有用户关、范围自己存的选择优先）、`migrateMix
   { kind: "agent" | "service" | "artifact" | "page"; hostId; key; title? }`；非 agent 总是进 Shelf；没打开 = false）、
   `startWorkspaceDrag(ref, event, { onStart? })`、`isOnScreen(ref)`（agent 在某个工作区或投影在可见的页里；服务 / 成果 / 页在聚焦工作区的
   可见页里）。
-- **服务和智能体**（原则 §7，主人 2026-10-21；原型 `#service`；`lib/serviceLink.ts`、`lib/serviceLinkView.ts`、`components/ServiceLinks.tsx`、
+- **服务和智能体**（原则 §7，；原型 `#service`；`lib/serviceLink.ts`、`lib/serviceLinkView.ts`、`components/ServiceLinks.tsx`、
   `lib/trayPins.ts`）：服务窗格 = 应用内浏览器标签 `cutex:service/<slug>…`，主人 = `ServiceView.ownerCutexSessionId`。标签的 Actions 里有
   「打开 <主人>」（点 = 并排，▾ = 投影到这个 {{shelf}} / 替换，也能按 `startWorkspaceDrag` 拖出去）；服务没有主人、主人不在了、或就在主人自己的
   Shelf 里时不显示。会话顶栏「N 个服务」列出这个 agent 的服务（健康点）：「在 Shelf 中打开」= 放进**这个对话**的 Shelf 并关联（浏览器标签状态
@@ -2818,7 +2644,7 @@ v1.16 右栏的已有用户关、范围自己存的选择优先）、`migrateMix
 Shelf 里按下先聚焦；它的边缘拖宽只改它和它自己的列；跨 Shelf 拖动同一个实例过去不重挂、绑定的拒绝；两个对话的 Shelf 同 id 时每个盒子各一次、
 带 Rail、换焦点是同一个元素、没有重复键）。
 
-### 24.15 工作行按内容宽度、工作区的 Shelf Rail（主人 2026-10-21，契约不变）
+### 24.15 工作行按内容宽度、工作区的 Shelf Rail（，契约不变）
 
 主人报告（2026-10-21，真机两个工作区：hachimi-cutex-dev 聚焦、它的 Shelf 有一个浏览器页；cutex-waveline 的 Shelf 空）：(a) 聚焦的工作区
 一点 Shelf / Rail 都没有；(b) 空 Shelf 的 waveline 右边一条空白 Rail；(c) 聚焦 waveline 之后第一个工作区的 Shelf 收成 Rail 夹在两个对话
@@ -2843,7 +2669,7 @@ Shelf 里按下先聚焦；它的边缘拖宽只改它和它自己的列；跨 S
 - **Shelf Rail 在 Shelf 的外侧 / 内侧**也在设置里（同一节，`appearance.shelfRailPlacement`）：改了就改所有 Shelf——实时的、这次会话里别的对话
   留下的、存着的（`paneFile` `setStoredShelfRails`：默认布局、共享页、每个对话的）——和以后新建的（`setNewShelfRailPlacement`，
   `defaultShelfOptions`）；每个 Shelf 的 ⋯ 仍能单独改（`sideLayoutStore` `setEveryShelfRail`）。
-- **工作区宽度**（同一节，`appearance.workspaceWidth`）：**只管宽度**（主人 2026-10-21：铺满和贴边分开）。**智能**（缺省）= 一个工作区时按内容
+- **工作区宽度**（同一节，`appearance.workspaceWidth`）：**只管宽度**（：铺满和贴边分开）。**智能**（缺省）= 一个工作区时按内容
   （会话按缺省 / 拖出来的宽度，居中，四周露出桌面），两个工作区时铺满窗口。`rowWidthMode(mode, 工作区个数)` 把它解析成按内容 / 铺满，
   `workspaceRow` 的输出带 `mode`（实际用的），`WsRowContext.mode` 也是实际的；`SideWorkArea` 的 `data-ws-width` 是实际的、`data-ws-width-setting`
   是设置；`columnHandleShown` 决定两列之间有没有分隔把手（`components/PaneResizer` `RowSplitter`）。**铺满**（铺满窗口，或智能 + 两个工作区）：
@@ -2857,11 +2683,11 @@ Shelf 里按下先聚焦；它的边缘拖宽只改它和它自己的列；跨 S
   单个工作区：行 `justify-content: center`，主卡片宽 = `singleColumnWidth`（不再用 auto 边距，Shelf 跟着会话居中）。两个工作区：
   `SideWorkArea` 算 `workspaceRow`，经 `WsRowContext` 把每列宽度给 `PaneHost` 的 `ConversationColumns`。桌面亮度在窗格铺满时（铺满窗口，
   或智能 + 两个工作区）算「窗格占满屏幕」。一个 ↔ 两个工作区切换时会话照旧滑到新位置（`lib/columnGlide`，减少动态效果时不动）。
-- **贴边显示**（同一节，`appearance.edgeToEdge`，缺省关，主人 2026-10-21 从铺满窗口拆出来）：窗格铺满工作区时（铺满的行、或全宽的单个对话；
+- **贴边显示**（同一节，`appearance.edgeToEdge`，缺省关， 从铺满窗口拆出来）：窗格铺满工作区时（铺满的行、或全宽的单个对话；
   桌面内容不在屏幕上）`<html data-edge-to-edge>`：工作行没有边距、底色是卡片色，卡片没有圆角和阴影，侧栏贴左边，桌面背景隐藏
   （`lib/workSurface` `edgeToEdge`）；按内容露出桌面时不生效。迁移（`migrateEdgeToEdge`）：没有这个字段时，`fillWindow: true` 或存着的
   铺满窗口（2026-10-21 前它就是贴边）读成开，其余关；存过一次以后照选的。
-- **宽度规则**（主人 2026-10-21，原则 `canvas-principles-20261020.md` §8.1；纯函数在 `lib/workspaceRow`，拖动之间的记忆在 `lib/rowDrag`
+- **宽度规则**（，原则 `canvas-principles-20261020.md` §8.1；纯函数在 `lib/workspaceRow`，拖动之间的记忆在 `lib/rowDrag`
   （只在内存），胶水在 `SideWorkArea`）：
   1. **焦点不改布局**：每个工作区的 Shelf 按自己对话的状态画（上面「并排」）；换焦点时两边的展开 / 收起、宽度、位置都不变。
   2. **放不下只处理一次**：`shouldFoldShelves` 只在工作区从 1 个变 2 个、而且按两边存着的状态放不下（`fits` 为假）时为真：实时的 Shelf
@@ -2890,7 +2716,7 @@ Shelf 里按下先聚焦；它的边缘拖宽只改它和它自己的列；跨 S
   8. 拖动中不滑动（`lib/columnGlide`，原样）；只有离散的变化滑过去。
   9. **方向键 = 一次短的拖动**（`lib/columnGlide` `keyResize`）：Shelf 的边、侧栏的边、设置 Shelf 的内边、两列之间的把手按方向键时同样开一个
      拖动会话（规则 1：只改两边的两个面板，外边只拿 `rowGive` 给得出的），立即显示，停按 `KEY_RESIZE_MS` 160 ms 后像松手一样存一次。
-- **窗口大小变化时不乱飞**（主人 2026-10-21；无头 Chrome 在 mock 预览里 1920 → 1100 → 1920 每步 20 px、±10 px 来回、快速跳变量过）：
+- **窗口大小变化时不乱飞**（；无头 Chrome 在 mock 预览里 1920 → 1100 → 1920 每步 20 px、±10 px 来回、快速跳变量过）：
   工作行和实例层在同一帧里排好（`SideWorkArea`、`SettingsShelf` 的 ResizeObserver 用 `flushSync`；实例层在行的 layout effect 里
   `slotsRelayout` 同步重量，原来晚一帧——单个工作区 1100 → 1920 先画出铺满再画居中、页面落后窗格一帧）；行宽变化的那次渲染里 Shelf
   盒子不做宽度动画（`still`，`lib/shelfMotion`）、侧栏的自动隐藏不做宽度过渡（原来过渡带着整行逐帧移动，途中 Shelf 收起又展开）、
@@ -2919,11 +2745,11 @@ Shelf 里按下先聚焦；它的边缘拖宽只改它和它自己的列；跨 S
 主人决定（2026-10-21）：设置成为一个特殊的 Shelf。
 
 - **一个、全局**：不按对话记，最多一个；工作行的整个高度（`components/SettingsShelf.tsx`，状态 `lib/settingsShelf.ts`）。真实界面一直在旁边，改设置时直接看到效果。
-- **默认在左边，夹在侧栏卡片和工作区之间**（主人 2026-10-21：不在侧栏左边，窗口顶栏的主机 / 侧栏按钮组仍对着侧栏）：设置 Shelf 渲染进自己的一个
+- **默认在左边，夹在侧栏卡片和工作区之间**（：不在侧栏左边，窗口顶栏的主机 / 侧栏按钮组仍对着侧栏）：设置 Shelf 渲染进自己的一个
   节点（portal），节点放在 PaneHost 里侧栏卡片后面的插槽 `SettingsShelfSlot`（侧栏停靠时）；右边、没有停靠的侧栏、最大化时放在 App 工作行的锚点
   （右边 `order: 1`，左边 `order: −1`）。换边 / 最大化 / 侧栏收起只移动这个节点，不重新挂载。存储加版本 `v: 2`：没有版本的旧布局（以前的缺省「右」
   每次拖宽 / 最大化都会存下，分不出是不是主人选的）读入时一次性改到左边并写回（`parseSettingsShelfLayout`）；之后移到右边照常记住。
-- **一张卡片、正常宽度**（主人 2026-10-21：「设置给正常的宽度，不要缩太小；或者把设置的 Rail 并进去，不要拆出来」——两样都做）：
+- **一张卡片、正常宽度**（：「设置给正常的宽度，不要缩太小；或者把设置的 Rail 并进去，不要拆出来」——两样都做）：
   设置分类不再是旁边单独的 Rail 卡片，而是**设置卡片里的左栏**（像原来全窗口设置的左侧导航），整个设置 Shelf 只有一张 `.shell-card`。
   卡片顶栏横跨整张卡片：面包屑（`shell.settings` 页面条目的 `useTitle`）、搜索、⇄、⤢、×；下面左栏是分类导航，右边是**页** = 分类页
   （`components/Settings` `Settings`，各模块的 `settings.page` / `settings.section` 照旧）。左栏在卡片里一直在左边（设置 Shelf 在右边时也是）。
@@ -2932,7 +2758,7 @@ Shelf 里按下先聚焦；它的边缘拖宽只改它和它自己的列；跨 S
   方向键 ±24 = 一次短的拖动，同样只拿工作行给得出的，不低于 640）。画的时候给对话留 `SETTINGS_SHELF_ROW_KEEP` = 420 px：可分的宽度 = 工作行减去停靠的侧栏卡片、卡片四周的 8 px 间距和
   设置 Shelf 自己的 8 px 缝（`settingsShelfWidth` 纯函数；1440 px 窗口、256 px 侧栏时卡片 732、对话正好 420）。**窗口放不下两样**（可分宽度
   − 420 < 640）：设置卡片保持 640，旁边的对话拿剩下的、按它自己的窄规则收；**不自动最大化**（不在主人背后改状态，真实界面仍在旁边；
-  要整窗就按 ⤢）；工作行比 640 还窄时卡片就等于工作行。**会话的 Shelf 展开时**（主人 2026-10-24：设置 Shelf 很宽时展开 Rail，Shelf
+  要整窗就按 ⤢）；工作行比 640 还窄时卡片就等于工作行。**会话的 Shelf 展开时**（：设置 Shelf 很宽时展开 Rail，Shelf
   成了窄窗口抽屉、压在对话上）：工作行报出它要的宽度（`useSettingsRowNeed`：对话最窄 + Shelf 最窄 + 收起的回弹余量 48，左边 Shelf / Rail 另算），
   卡片让到这么多（不低于 640，`settingsRowKeep`），Shelf 在行里展开；卡片让到 640 也不够时卡片不动，Shelf 照旧是抽屉，这时旁边露出的
   对话变暗（`data-drawer-scrim`），点一下就收起抽屉。最大化（⤢）= 盖住整个工作行（原来的全窗口设置：带组名的宽导航
@@ -2963,7 +2789,7 @@ Shelf 里按下先聚焦；它的边缘拖宽只改它和它自己的列；跨 S
   最大化时宽导航在卡片外、左边插槽、旧布局移到左边、v2 小宽度一次性改成 760 并写回、Esc 链）、
   `test/customize.test.ts` / `test/customizeHost.test.ts`（调整的开始 / 完成 / 回到之前、完成条）、`test/pages.test.ts`、`test/singleHostSnapshot.test.ts`。
 
-### 24.16 最大化与全屏：每一种面板（主人 2026-10-21，契约不变）
+### 24.16 最大化与全屏：每一种面板（，契约不变）
 
 主人：「面板没有最大化 / 全屏吗？」（设计「怎么合理怎么来」）。取代 §24.11 里「对话窗格铺满工作区、工具区隐藏」和工具区的盖层式
 最大化 / 窗口内全屏（`FullTitleRow` 删除）。外壳文件：`lib/panelFull.ts`（全屏的状态、进 / 出、和两个仓库保持一致；纯函数
@@ -3004,7 +2830,7 @@ Shelf 里按下先聚焦；它的边缘拖宽只改它和它自己的列；跨 S
 
 ### 24.17 桌子窗口（多窗口 P0–P3.5、P6，2026-10-27，契约不变，设置「多窗口」默认关）
 
-主人 2026-10-27 批准「第二张桌子」：另一个应用窗口（可放到另一块屏幕），由**主窗口的渲染进程**画（同一个 store、每会话一条流、
+ 批准「第二张桌子」：另一个应用窗口（可放到另一块屏幕），由**主窗口的渲染进程**画（同一个 store、每会话一条流、
 一个发件箱），不是第二个渲染进程。研究与取舍：`.claude/previews/multi-window/proposal.md`。
 
 - **怎么开**：渲染端先向 main 要票（`WINDOW_CHANNEL` `desk` `ticket`，只有主窗口主框架能要，`isAppSender`），再
@@ -3227,7 +3053,7 @@ interface PaneDesktopItem extends SlotItemBase {        // unavailable "hide"
 - **统计**：每台已连接主机 `/v2/usage`（按天，366 天 = cutex 上限）相加，客户端算今天、本周（周一起）、连续天数、热力图（四分位，一种颜色由浅到深）。
 - 预览：`?desktop`、`?homeprofile`、`?homeedit`（`dev/devDesktop.ts`），`?nocover`、`?homeconflict`、`?legacy`（没有 `user-home`：存本机）。
 
-### 25.3 托盘与桌面底层（v1.20，原则 §7，主人 2026-10-21）
+### 25.3 托盘与桌面底层（v1.20，原则 §7，）
 
 ```ts
 interface PaneDesktopItem extends SlotItemBase {        // unavailable "hide"
@@ -3249,7 +3075,7 @@ interface PaneDockProps { placement: "desktop" | "overlay"; onUsed(): void }
 - 只加不删：v1.18 的条目照常工作（没有 `Dock` = 托盘只有收起的工具窗格；`reason` 多一个值）。声明快照 `module-api-1.20.d.ts`（只有版本常量）；
   `test/moduleSdkContract.test.ts` 有 `Dock` / `"covered"` 正反例；`test/tray.test.ts`、`test/trayStage.test.tsx`。
 
-### 25.4 卡片下面的桌面背景、卡片材质、单个对话的宽度（主人 2026-10-21，契约不变）
+### 25.4 卡片下面的桌面背景、卡片材质、单个对话的宽度（，契约不变）
 
 - **桌面背景永远是整个窗口的底层**：外壳（`components/ChipTray.tsx` `DesktopBackground`，挂在 `App.tsx` 根的第一个子元素，根是
   `isolate`，背景 `z-index: −1`，`inert`，不接指针）把第一个显示的 `pane.desktop` 条目以 `reason = "covered"`（只画背景：主页封面，
@@ -3285,7 +3111,7 @@ interface PaneDockProps { placement: "desktop" | "overlay"; onUsed(): void }
   在 `tray.css` 后面（`main.tsx` 先 import App），于是材质规则赢了。现在卡片列表放在 `:where(...)` 里（(0,3,0)），任何占位规则都压得过它
   （`test/deskGaps.test.tsx` 按应用里的顺序加载两份 CSS 回归）。
 
-### 25.6 桌面亮度（主人 2026-10-21，契约不变）
+### 25.6 桌面亮度（，契约不变）
 
 - 设置 → 外观 → 窗口与卡片 →「桌面亮度」三个滑块（0–100 %，本机 `appearance.deskEmpty` / `deskOpen` / `deskFull`，缺省 100 / 80 / 60）：
   **没有窗格时**（桌面内容在屏幕上）、**有对话或页面打开时**、**窗格占满屏幕时**（对话 / 工具窗格最大化或全屏、设置 Shelf 最大化、全窗口页面、
@@ -3294,7 +3120,7 @@ interface PaneDockProps { placement: "desktop" | "overlay"; onUsed(): void }
   `brightness()`，100 % 时为 `none`，低于 100 % 时内容里的毛玻璃卡片只模糊它自己层里的东西）。切换时 0.45 s 渐变，减少动态效果时立即切换。
 - 测试：`test/deskGaps.test.tsx`（字段与范围、状态规则、渲染时的标记、CSS）。
 
-### 25.5 托盘是停靠在边上的面板（主人 2026-10-21，契约不变）
+### 25.5 托盘是停靠在边上的面板（，契约不变）
 
 - 主人找不到、也点不到托盘收起后的细线。现在托盘是**窗口工作区（标题栏下面：工作行 + 设置 Shelf）边上的面板**：外壳
   `components/ChipTray.tsx` `TrayFrame`（`App.tsx` 包住工作行）在停靠的那条边给它**一条自己的带**（布局的一部分，工作行拿剩下的，
@@ -3305,7 +3131,7 @@ interface PaneDockProps { placement: "desktop" | "overlay"; onUsed(): void }
   （`"handle"`，整条带都能点；停一下 / 点它 / Ctrl/⌘+J → 浮到窗格上 `"overlay"`，带不变、窗格不动，用完收回，规则同 §25.3）。
   没有可放的东西、全窗口页面、设置 Shelf 最大化 = 没有托盘。规则：`lib/trayModel` `trayPlacement` / `trayBand` / `paneArea`。
   停在底部时（#36）是会话下面的卡片（`lib/trayRoom`）：**图标放不下不再退回底条**，后面的收进「… N」，点开是带名字的列表（`lib/trayFold`，
-  `ChipTray` `TrayOverflow`，设计 038，主人 2026-10-23：设置 Shelf 打开时底条把侧栏、Shelf、设置 Shelf 都压矮了）。两个会话中间夹着 Shelf、
+  `ChipTray` `TrayOverflow`，设计 038，：设置 Shelf 打开时底条把侧栏、Shelf、设置 Shelf 都压矮了）。两个会话中间夹着 Shelf、
   或会话窄得放不下「… N」（只看 Shelf 的窄条）时，卡片横跨会话**和它们的 Shelf**（`"wide"`：Shelf 也在底部让出位置），从不横跨侧栏和设置 Shelf；
   只有什么都放不下时才是底条。
 - **停靠在底部（缺省）/ 顶部 / 左侧 / 右侧**：左右是竖排（`aria-orientation`，↑↓ 移动）；左右时在侧栏卡片和 Shelf 外面、贴窗口边。
@@ -3319,7 +3145,7 @@ interface PaneDockProps { placement: "desktop" | "overlay"; onUsed(): void }
   不在里面、高度 = 带宽，换边 / 关常驻不重新挂载工作行；自动隐藏：把手是按钮、点击 / 停留 / Ctrl+J 浮出、Esc 收回、右键可开常驻；左右竖排、
   ↑↓；菜单停靠；拖把手的放置区、松开停靠、点击不开菜单、Esc 取消；本机存储读回）。
 
-## 26. 窗口顶栏与会话顶栏（v1.19，主人 2026-10-21 选「顶栏拆分 A」）
+## 26. 窗口顶栏与会话顶栏（v1.19， 选「顶栏拆分 A」）
 
 原型 `.claude/preview-design-v1.html` §1（`#s1-a`、`#s1-a+2col`）；原则 `docs/research/canvas-principles-20261020.md` §3。
 
@@ -3347,7 +3173,7 @@ interface WindowSearchItem extends SlotItemBase {      // unavailable "hide"
 
 - **每个**会话都有（单独一列、两列并排、旁边有工具窗格），各显示自己窗格的主机 + agent（`convHeaderInfo(sidebarOf(host), sessionId)`），
   不看选中项。第一行：头像、名字（点 = agent 菜单）、角色（{{director}}）、项目片 + 星标；右边 在线 / 离线（点 = 启动 / 停止运行时，停止点两次）、
-  通知（静音菜单）、互联（这个 agent 的服务数，点 = 服务列表），然后窗格自己的 **2×2 按钮块**（主人 2026-10-21，取代一排的 ⤢ / 「—」 / ⋯；
+  通知（静音菜单）、互联（这个 agent 的服务数，点 = 服务列表），然后窗格自己的 **2×2 按钮块**（，取代一排的 ⤢ / 「—」 / ⋯；
   `lib/convPaneControls.ts`）：上排 **{{Shelf}}**（这个对话的 Shelf：展开的 = 收成 Rail，收着的 = 展开；另一个工作区的 = 先聚焦它再展开；
   空的 = 「＋ 打开 {{shelf}}」启动器菜单，选的开进这个对话的 Shelf——「{{shelf}} Rail 常驻」关着时空的 Shelf 没有 Rail，开着（缺省）时还有一条空 Rail，§24.12.3）和 **放大**（最大化 / 还原，一个人时也可以；长按 = 全屏，§24.16）；
   下排 **关闭**（× 图标，提示「关闭窗格（{{agent}}继续运行）」= `closeWorkspace`；第一次关的时候提示「已关闭，可以从侧栏或托盘找回」，只一次，
@@ -3359,7 +3185,7 @@ interface WindowSearchItem extends SlotItemBase {      // unavailable "hide"
 - 整个顶栏是这一列的拖动把手，双击 = 最大化 / 还原（窗格第 4 步，§24.11；§24.16）；按钮都带 `data-side-nodrag`。⋯ 菜单第一项 = 全屏。
 - 输入框不变。外壳文件 `PaneHost.tsx` 只引用这个组件，仍不点名任何功能。
 
-### 26.4 页面的顶栏（v1.21，主人 2026-10-21：页面是自己的面板）
+### 26.4 页面的顶栏（v1.21，：页面是自己的面板）
 
 - 页面从不出现在会话顶栏下面。缺省（「页面打开位置」= {{shelf}}）它是聚焦对话 Shelf 里的一个窗格，顶栏 = Shelf 窗格头（页面入口的图标、
   面包屑连成的标题、放大 / 全屏 / ⋯ / 收起 / ×；§24.4）。
@@ -3372,7 +3198,7 @@ interface WindowSearchItem extends SlotItemBase {      // unavailable "hide"
 
 ## 27. 桌面小组件 `desktop.widget`（v1.22；v1.23 整格，设计 032）
 
-主人 2026-10-22：「平台，而不是产品」——桌面上的东西要有底层的模型、框架和接口，做几个例子，写好说明，让便宜的模型也能照着加。设计
+：「平台，而不是产品」——桌面上的东西要有底层的模型、框架和接口，做几个例子，写好说明，让便宜的模型也能照着加。设计
 `docs/design/032-desktop-widgets.md`（为什么这样定、来源、权限、版本）；写一个小组件的步骤 `docs/widget-authoring-guide.md`；模板
 `docs/widget-template/`。
 
@@ -3434,7 +3260,7 @@ interface DesktopWidgetProps {
 > 普通点 = 切换到那个工作区（不再替换列）；替换 = 拖放 / 列菜单「替换这一栏…」；Ctrl/⌘+点已满 = `ColumnPickLayer` 选一列。
 > `MAX_CONVERSATION_COLUMNS` → `maxConversationColumns()`（设置「允许 3 列」）。`trayPrefs.grouping` 删除。‹ / › 右键 = 小菜单；手势表在 设置 → 键盘快捷键（`lib/gestures.ts`）。
 
-## 28. 引导和提示（Guides，主人 2026-10-24）
+## 28. 引导和提示（Guides，）
 
 所有教人的东西——入门引导、锚定提示、表单里的说明面板——都登记在一张表里：`lib/guides.ts` 的 `GUIDES`。入门引导（`components/OnboardingDialog`）、提示（`components/FirstUseTips`）、面板（`components/InlineGuide`）和「设置 → 帮助」（`modules/onboarding/HelpPage`）都只读这张表。
 

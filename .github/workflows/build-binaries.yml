@@ -37,10 +37,10 @@ jobs:
           - platform: windows-x64
             runner: windows-2022
           - platform: macos-arm64
-            runner: macos-14
+            runner: macos-15
           # x64 Electron runtime packed on an arm64 runner (the app itself is JavaScript only).
           - platform: macos-x64
-            runner: macos-14
+            runner: macos-15
     defaults:
       run:
         shell: bash

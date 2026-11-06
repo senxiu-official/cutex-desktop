@@ -39,7 +39,7 @@
     },
     {
       "path": ".github/workflows/build-binaries.yml",
-      "sha256": "8bfaabea743cf7f85419ea6516a8dbed6b4731067627bb4abc4cbc200b96f27c",
+      "sha256": "faf3d19a1d749c49b3d5fbe5e7e8b499c8545d29ba4b9c4f1a08a55d277f721e",
       "size": 3854
     },
     {
@@ -49,7 +49,7 @@
     },
     {
       "path": ".github/workflows/public-update-e2e.yml",
-      "sha256": "d3268ee5f3f0360a767f7d5981793c08ab3b7ed88cf49df0721f17f0cff6de1e",
+      "sha256": "c56d522d5707288fce0a508541ced82273b0008ff5ccbf2cc4fb0e2f86fbcf18",
       "size": 2686
     },
     {
@@ -24274,8 +24274,8 @@
     },
     {
       "path": "docs/DESIGN.md",
-      "sha256": "8bc3359eeed06c307f2d5f1233e884ff401effb4457d9154f4b00768334a2927",
-      "size": 104729
+      "sha256": "75aab6e4b954e396f4d4d2417063e39999d61a2a75bfaff4eb642b1f5e5342ba",
+      "size": 8311
     },
     {
       "path": "docs/GLOSSARY.md",
@@ -24519,13 +24519,13 @@
     },
     {
       "path": "docs/design/047-cutex-auto-approval.md",
-      "sha256": "1a7ade8454ac8173d5cc3fe4c89f82c0707965373a85b124231b434d48d6d5ee",
-      "size": 16828
+      "sha256": "ca75a999bd900ae1dbb0756696e29c69c5e8a48fe04dcd78a4a0839a9037f857",
+      "size": 16722
     },
     {
       "path": "docs/design/048-profile-runtime-variants.md",
-      "sha256": "e7895e2d7ade1a973a6967928846cd31b6a8ff948ceb0768007afab8dbc752eb",
-      "size": 14374
+      "sha256": "1b7c47bb3ddc2a73eb10ba1116b0b95cdefee8cad424496223180e71c36f7c1a",
+      "size": 14338
     },
     {
       "path": "docs/design/049-kimi-runtime.md",
@@ -24574,8 +24574,8 @@
     },
     {
       "path": "docs/desktop-modules.md",
-      "sha256": "fc8a2afbaf7cc679350e449b9cfae7cb8c3f8a8d896d06ec1503486b90ef2cc2",
-      "size": 425925
+      "sha256": "67214c37a735c91b9155e72f1419a7d89045682689c89822ff5a9319ab8d7e2a",
+      "size": 399707
     },
     {
       "path": "docs/diagnostics/r259-image-submit.md",

@@ -39,7 +39,7 @@ jobs:
           - platform: windows-x64
             runner: windows-2022
           - platform: macos-arm64
-            runner: macos-14
+            runner: macos-15
     steps:
       - run: git config --global core.autocrlf false
         shell: bash
