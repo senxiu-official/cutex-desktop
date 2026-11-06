@@ -79,6 +79,7 @@ export default defineModule({
       {
         // Host-path previews need no workspace-fs (they need fs-file-read; the card says so when missing).
         id: PREVIEW,
+        tabRow: "always",
         titleKey: "workspace.preview",
         icon: FileText,
         instances: "multi",

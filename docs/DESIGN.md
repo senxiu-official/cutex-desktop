@@ -21,7 +21,7 @@ An **open-source "ChatGPT desktop / Codex app"** built on the owner's own stack:
   which normal harnesses do not support.
 - **cutex** — always-on daemon: persistent agent identities, managed app-server runtimes,
   Agent Bus, projects / Director authority, delegations (asks), profiles, Management v2 API
-  (the older task service was removed in cutex r219).
+  (the legacy Task Service has been removed).
 
 Not a goal: replicating every feature of commercial harnesses. The app ships the features its
 maintainer actually uses.
@@ -160,6 +160,14 @@ are separate views.
 
 Projects are the merged workspace+team concept (§3.1).
 
+Role chips stay on the name line and yield to the name in narrow rows. The existing per-language
+Terminology settings give Director and Operator an independent **sidebar label**: a preset's short
+form when known (Chief / Deputy for the Maid wording), otherwise the full term; an explicit empty
+label hides the chip. The tooltip retains the full term. Sidebar labels share the term override
+store, while other UI wording keeps the full term. A row's hover actions show only ⋯; open beside
+and pin/unpin are in that menu. The pin after a name is a non-interactive status mark.
+
+
 - Row (compact, 2 lines): small avatar (custom icon or profile color + initial) with status dot,
   display name, time; second line = **latest activity** like the TUI action panel — the latest
   tool action (`$ cmd`, `✎ file`, `⚙ server.tool`) or the beginning of the latest output message,
@@ -287,6 +295,24 @@ Registry, ranking and dispatch are pure (`lib/slashCommands.ts`, `SlashContext` 
 `/v2/sessions/{id}/fs/search`, not app-server `fuzzyFileSearch`, which cutex does not forward and
 which would bypass the daemon); picking inserts the relative path as plain text (quoted if it has
 spaces), exactly what the Codex TUI does — `mention` input items are for app / plugin mentions.
+`p@` at a word start opens the current conversation host's profile list (provider/runtime shown).
+Selecting a profile immediately opens its creation-time model catalog, including the profile's
+current default. Selecting a model then opens its daemon-reported reasoning-effort options
+(`supportedReasoningEfforts` from that catalog/variant); models with none skip the third step.
+The first effort entry is preselected Default (unspecified): Enter retains the profile/model text
+without an effort field. An explicit effort adds `effort: "high"` to both the chip and sent reference.
+No fallback effort list is invented. Typing filters every step; no match leaves the popup open
+and Enter/Tab cannot send the draft. Enter, Tab or click selects a row. Esc or Space in the model step discards its
+filter and keeps a profile-only reference; in the effort step it keeps the profile/model reference.
+`m@` uses the current agent profile's model catalog.
+These references share the @agent editor's atomic selection, clipboard and undo, with a distinct
+profile/model chip. The actual message always contains explicit, locale-independent plain text:
+`[profile: "Ada", model: "gpt-6-astra"]`, `[profile: "Ada"]` or
+`[model: "gpt-6-astra"]`; values are JSON strings so punctuation remains unambiguous. Explicit effort form:
+`[profile: "Ada", model: "gpt-6-astra", effort: "high"]` (also supported by model-only references).
+The timeline keeps that explicit text. This avoids interpreting a model/profile reference as an agent name
+(owner-approved 2026-11-04). Preview fixture: `?profilementions`.
+
 Not ported (TUI-only or unwanted): quit, clear, raw, tui, theme, pets, title, statusline, keymap,
 vim, voice, ide, app, worktree, import, daemon, debug-config, rollout, elevate-sandbox, delete,
 feedback, test-approval.
@@ -329,8 +355,8 @@ but the current adapter rejects busy changes. The proposal separates Claude mode
 sandbox presets, keeps the picker accessible during pending approvals, and requires asynchronous,
 generation-bound confirmation without blocking approval replies or stop. Not implemented yet.
 
-Cutex 主机自己的主人授权规则与 native 的自动 reviewer 是两层不同机制。已批准并在
-r258 分支实现的规则、风险确认、有效期、审计和兼容边界见
+Cutex 主机自己的主人授权规则与 native 的自动 reviewer 是两层不同机制。
+自动审批规则、风险确认、有效期、审计和兼容边界见
 [`docs/design/047-cutex-auto-approval.md`](design/047-cutex-auto-approval.md)：规则只由
 Management root 主人管理，桌面只在主机公布 `approval-auto-rules` 能力时显示入口。
 
@@ -376,6 +402,12 @@ in the agent's header `⋯` → Agent settings (TUI Agent Inspector in GUI form)
 | | Archive | retired agents (restore later) | `/v2/sessions?lifecycle=retired` |
 | | About | desktop / cutex / cute-codex versions, licenses (ZCode NOTICE) | — |
 
+**Official-app-only Codex bundles (owner 2026-11-03).** Plugin rows honor availability and
+unavailable-dependency facts supplied by app-server. Local bundled listings expose no host
+requirements, so a small compatibility fallback in `lib/codexPlugins.ts` identifies the bundles
+that require the official OpenAI app (research: `.claude/reports/codex-bundled-plugins.md`). These
+rows show unavailable with disabled, off switches, even if their stored enabled flag is true.
+The display projection preserves that stored config; portable plugins keep their normal controls.
 
 **DSH profiles (owner-approved integration, 2026-10-25).** Hosts declaring `dsh-runtime`
 offer a separate DSH profile kind and optional runtime component card. The daemon pins
@@ -388,14 +420,14 @@ shown separately from billing, which is marked unavailable. Unsupported Codex
 surfaces follow the per-session capability flags. Linux runtime acceptance and
 real-provider/native sandbox acceptance remain required before a release claim.
 
-**DSH on demand (owner decision, r262; r260/r261 unchanged).** The daemon advertises
+**DSH on demand.** The daemon advertises
 `dsh-runtime` only when its optional component is installed. Without it the desktop
 shows no DSH creation option, runtime settings card or installation prompt; initial
 installation uses the existing component CLI/API. Already-stored profiles, sessions,
 history and drafts remain user data. A removed component must not silently change a
 DSH draft into another provider. Component events refresh that host's capabilities
 without a desktop restart, with connection/response ordering fences. Remove unselects
-new sessions while existing sessions retain their pinned runtime. Standard r262 kits
+new sessions while existing sessions retain their pinned runtime. Standard release installs
 omit the DSH payload/Node preparation; explicit component installation owns them.
 
 **Context settings (owner priority).** Per profile: context window override + auto-compact token
@@ -507,6 +539,16 @@ computer control, account, design systems.
   est. cost, turns); daily stacked bars by profile (toggle: by model / by agent / by project);
   activity heatmap; table by agent/project; current quota gauges for all profiles with refresh.
 
+- Quota bars in the account usage flyout and Usage page share an absolute downward triangle
+  marking the even-pace remaining share: time until reset divided by the explicitly known
+  window duration (2026-11-03). It consumes no layout space, uses muted foreground in both
+  themes, and titles the expected remaining percentage. Missing reset/duration, calendar-month
+  labels and points/currency balances have no marker; durations are never inferred from names.
+
+- Usage quota cards show the profile name and quota observation host/time; omit multi-device
+  account hints in both single-host and all-host views (2026-11-04). Model-scoped windows retain
+  the model supplied in windowLabel, e.g. Fable · 7 天; the generic account label must not hide it.
+
 ### 4.11 MCP layering (decided 2026-10-06)
 
 An agent's MCP servers come from three layers, merged at launch; later layers win per server name:
@@ -531,6 +573,10 @@ on next launch; agent settings offer "restart to apply".
   actions (`lib/menus.tsx`). Renderer menus are custom (`lib/contextMenu.ts` + `Overlays.tsx`, with
   keyboard navigation); text inputs and selected text get Electron's native menu (Cut / Copy /
   Paste / spellcheck suggestions), because the renderer leaves those events alone.
+- **Anchored menu triggers toggle.** Clicking the same physical trigger again closes its menu;
+  pressing it by keyboard does the same. The trigger is inside for outside-mousedown dismissal,
+  so the click cannot close-then-reopen it. Another trigger replaces the current menu. Point
+  context menus explicitly open; an anchored right-click or explicit refresh can request replacement.
 - **Agent row / header:** Pin (local, per device) · Rename · Edit note
   (`cutex/session/metadata/update`) · Open files pane · Copy cwd / ID · Stop runtime
   (`cutex/runtime/offline`, confirmed, danger when a turn is active) · Archive / Restore
@@ -545,7 +591,7 @@ on next launch; agent settings offer "restart to apply".
   browser (main process, http(s) only) · Copy link.
 - **Edit & resend = revert without restart.** cute-codex `thread/revert` on a *loaded* thread
   interrupts any active turn, rewrites the store and reloads the thread in place, keeping
-  subscriptions (`thread_revert_interrupts_active_turn_and_keeps_thread_loaded`; already in r46).
+  subscriptions (`thread_revert_interrupts_active_turn_and_keeps_thread_loaded`; supported by matching native runtimes).
   The old TUI revert needed a restart only because cutex used an isolated stdio endpoint that
   refuses while a live writer exists. New cutex method `cutex/session/history/revert
   {beforeTurnId, expectedRevision}` backs up the rollout and sends `thread/revert` over the live
@@ -556,22 +602,39 @@ on next launch; agent settings offer "restart to apply".
 
 ### 4.13 App top bar (decided 2026-10-06)
 
-One row, like ZCode / Claude / ChatGPT. The native title bar and the old conversation header are
-merged into `TitleBar.tsx`:
+The 窗口顶栏 (`TitleBar.tsx`) is one row, separate from each 会话顶栏:
 
-- Left (as wide as the sidebar when it is open): sidebar toggle (Ctrl+B, remembered per device) and
-  the host switcher: connection dot, active host (local: daemon host id; SSH: its label + status
-  while not online), and a menu with every host (local first), "Add SSH host…" and Connection
-  settings. Phase 1 (2026-10-07) had one active host; since 2026-10-11 several hosts are connected at once.
-- Middle: the current agent's avatar and name, which opens the agent menu (§4.12; rename lives
-  there), plus the note or cwd and the git chip (opens Changes). In Settings it shows the title.
-- Right: side-pane toggle, then the window controls. Windows uses `titleBarOverlay`, so the native
+- Left: the logo doubles as the sidebar toggle (Ctrl+B); the host switcher selects the window's
+  scope (all devices, local or selected hosts). Pinned navigation entries and their overflow menu
+  follow it. When the sidebar is collapsed, its restore notice can appear here as a chip.
+- Middle: the quick switcher's search field (⌘K / Ctrl+K) for agents, services, artifacts and pages.
+  A full-window page also carries its breadcrumb here. Agent avatar, name, role and status belong
+  to the separate 会话顶栏, with project, host, path and branch below them (§4.12).
+- Right: the layout menu, pinned launchers and ＋ for more tools, and the Shelf switch. When the
+  sidebar is collapsed, an identity/settings chip appears at the far right. A full-window page
+  replaces the workspace actions with a close button. Windows uses `titleBarOverlay`, so the native
   caption buttons stay, recoloured to `--surface`/`--fg` whenever the theme changes. macOS uses
   `hiddenInset` traffic lights. Linux runs frameless with drawn min/max/close buttons and
   double-click to maximize.
 - The whole bar is a drag region; controls opt out with `[app-region:no-drag]`.
 
+The in-app **托盘 / tray** is the long avatar strip below the conversation; it can dock to any edge.
+It holds pinned and recently opened agents, pinned apps (services, artifacts and pages), the
+needs-you button, and the back action for the last replacement or minimisation. `ChipTray.tsx`
+provides the strip and `modules/home/Dock.tsx` supplies its items. The **系统托盘 / system tray** is
+the OS notification-area icon and its menu (`main/shell.ts`); Settings → 通用 → 关闭窗口时 and the
+first-close notice refer to that OS icon when they say “最小化到系统托盘”.
+
 ### 4.14 Folding tool steps and background tasks (decided 2026-10-06)
+
+**Tool-boundary pause.** cutex's optional `agentPause.at`, `toolGate` and oldest-first
+`held` calls describe the pause. `paused` can keep a native turn open: held calls render
+“已暂停 · 等待继续” in the existing working row, the sidebar keeps its busy ring but stops its
+animation, and the pause tooltip/queue identify the first held tool. The tooltip includes the
+subagent marker, total call count and localized relative waiting time. Resume uses the existing
+RPC and continues that turn. Missing fields preserve the old turn-end presentation. Tool-gate
+wording is shown only for daemon-reported support, with remembered UI knowledge fenced by the
+runtime generation; this does not grant or decide runtime capability.
 
 **Folding.** Each timeline item is either foldable or not.
 - Foldable: commands, file edits, MCP / dynamic tools, web search, sub-agent operations, image view,
@@ -588,8 +651,12 @@ merged into `TitleBar.tsx`:
   the newest 3 steps plus an expandable "N earlier steps" line. This also covers the tail of a
   finished or interrupted turn.
 - When a non-foldable item follows, the run folds to **one summary line**, e.g. "✓ 4 commands ·
-  edited 2 files · 1 tool call · 41s". With failures it shows a red ✗ and "N failed", and the failed
-  steps stay visible under the line.
+  edited 2 files · 1 tool call · 41s". The header follows the **last tool step** (owner 2026-11-03),
+  including mixed runs of commands, file edits and tool calls. A successful last step shows a green
+  ✓ and a subdued red "N failed" count for earlier failures; collapsed, their rows stay hidden.
+  A failed last step shows a red ✗ and keeps the failed rows visible below the collapsed header.
+  Expanded, each failed row retains its own failure mark and exit code. A running run keeps its
+  spinner; completed reasoning does not replace the last tool's result.
 - A run of a single item is never folded.
 - Expanding or collapsing by hand overrides the automatic state.
 - A running command shows its last 3 output lines inline.
@@ -607,6 +674,12 @@ reasoning's current paragraph, else the latest summary title). When the turn end
 in "已工作 1m 30s" on the same row, and the reply action bar takes the live line's space: no shift
 when the reply is the turn's last item (measured); a few px of margin difference when something
 follows it (e.g. an agent-bus send after the answer).
+
+On input-ledger hosts (2026-11-03), cutex's `delivery.state = turn` shows `••• 工作中`
+for every turn kind: owner, delegation, delivery/event and wake, on Codex and Claude alike.
+The Composer delegation strip retains requester, title, number and elapsed time alongside it.
+A retained lease or stale native tool row does not imply a running turn. Hosts without the ledger
+keep the activity/elapsed presentation above.
 
 **Background tasks.** Shown in the status capsule (§4.20) by default; with Settings → 通用 → 状态显示位置
 = 输入框上方, "N running tasks" sits above the composer (Claude's pattern) and expands into a list:
@@ -693,7 +766,7 @@ Hovering a project header shows ⚙, which opens that project.
     requester → target avatars (click to open the agent), the time and a ⋯ menu.
   - Data comes from `GET /v2/asks` (feature `agent-asks`); a host without it shows a short note.
     The older task list (`GET /v2/projects/{id}/tasks`) and task detail page went with the task
-    service in cutex r219; old transcripts still render its deliveries and tool rows.
+    service; old transcripts still render its deliveries and tool rows.
 
 ### 4.10 i18n / theming
 
@@ -747,8 +820,8 @@ i18n framework from day one, `zh-CN` + `en`. Dark/light via CSS variables (follo
 
 ### 4.20 Status capsule (decided 2026-10-07, revised same day)
 
-After ZCode's `ConversationStatusPanel`, restyled. Items 目标 / 进程 / 终端 / subagents / 委托 / 作业 are each placed
-in 输入栏 (the status row above the composer) / 胶囊 / 两者 / 不显示 (Settings → 状态胶囊, or the panel's …
+After ZCode's `ConversationStatusPanel`, restyled. Items 目标 / 计划 / 终端 / subagents / 委托 / 作业 are each placed
+in 状态行 (the status row above the composer) / 胶囊 / 两者 / 不显示 (Settings → 状态显示, or the panel's …
 menu for capsule membership); the capsule shows the ones placed in it that are present, and nothing
 at all when empty. It floats over the timeline (absolute; the timeline keeps its scroll; a
 column-anchored capsule gets a fixed content inset). Since 2026-10-09 each category is a
@@ -762,7 +835,7 @@ and the status row only iterate the slot, and a module turned off drops its cate
   menu as well as Settings.
 - **Collapsed**: one line per category in one capsule (a single line is a pill): 目标 = target mark
   (colour = status, shared with the status row: running accent with a breathing ring, done green,
-  paused amber, limited / blocked red) + objective + budget ring when a budget is set; 进程 = current
+  paused amber, limited / blocked red) + objective + budget ring when a budget is set; 计划 = current
   step (spinner while in progress) + done/total; 终端 = first command +N; subagents = first one's name
   + what it is doing +N; 委托 / 作业 = the first one + its state and time +N. No times for terminals /
   subagents (no reliable start time). A line opens
@@ -770,7 +843,7 @@ and the status row only iterate the slot, and a module turned off drops its cate
 - **Open**: w-80, max-h min(64dvh, 32rem), scrolls inside. No panel title: the first section header
   is the top line with … and collapse in the corner. 目标 header = time · budget ring · ⏸/▶ (✓ when
   done), a non-running state's word after the button so it never moves; body = objective. Editing
-  and clearing live in the status row. 进程 = the model's `update_plan` list (latest snapshot,
+  and clearing live in the status row. 计划 = the model's `update_plan` list (latest snapshot,
   model's order, focus window with 已完成 / 待处理 disclosures). Each header folds its section
   (chevron on hover, remembered); a folded header shows that section's collapsed line, quietly.
 - **Geometry**: collapsed lines and open headers share their inset (13px from the edge, first line
@@ -789,10 +862,10 @@ and the status row only iterate the slot, and a module turned off drops its cate
   filter, 进行中 / 排队 / 已结束, search, ⋯ menu.
 - **Keys**: Ctrl+. toggles; Esc (focus in the panel) collapses.
 - A plan update briefly highlights the collapsed capsule's border and never opens it; in the timeline
-  each turn's checklist is one line, "更新了进程 2/4", expanding to the list. Native history has no plan
-  snapshot (PROGRESS.md 2026-10-07): after a desktop restart 进程 stays empty until the next update.
+  each turn's checklist is one line, "更新了计划 2/4", expanding to the list. Native history has no plan
+  snapshot (PROGRESS.md 2026-10-07): after a desktop restart 计划 stays empty until the next update.
 - **Status-row popovers** open from their trigger and are only as wide as needed (goal card from the
-  left, 28rem; 进程 / background from the right), so their actions stay near the click.
+  left, 28rem; 计划 / background from the right), so their actions stay near the click.
 
 ### 4.21 Delegation card, status table and overview (documented 2026-10-10, as built)
 
@@ -1011,6 +1084,24 @@ order) is [`docs/desktop-modules.md`](desktop-modules.md).
   save dialog (owner gesture, or the active agent's own action with the window visible). Site
   permissions are granted per pool + origin by the owner in a native main dialog
   (`userData/browser-site-permissions.json`); device, capture and fullscreen access stay off.
+  **Agent viewport (2026-11-04).** Visible browser cards retain their native viewport, page zoom and
+  DPR during agent control: no fixed layout or page-fit emulation. Releasing control leaves the
+  layout unchanged. The configured viewport is a fallback for hidden/minimized read/find and
+  isolated offscreen carriers only; returning to a visible card clears that fallback. A changed
+  card size invalidates earlier refs, and resize during input/capture requires inspection again.
+  Model screenshots retain the real CSS viewport/capture rectangle; only image pixels are reduced
+  to the 1600 px long-edge output budget, within the existing bounded capture/decode limits.
+  **Agent cursor (owner selected preview C, 2026-11-04).** Main publishes only bounded action kind,
+  position and optional target rectangle for the current guest/page. The desktop draws the folded-base
+  triangle over the webview, with a short move-before-action, click pulse, typed-target ring and scroll
+  hint. No cursor element or overlay script enters the page. Coordinates use native guest zoom divided
+  by the embedding app zoom, not scrollbar-reduced viewport-width ratios. After movement, the executor
+  rechecks the target, visibility and authorization before input; real owner input during this interval
+  invalidates the attempt instead of being mistaken for an agent echo. Pause, release, owner activity,
+  hidden cards/documents, navigation and resize clear the visual. Reduced motion removes movement and
+  pulse animation. Settings → 浏览器 offers an app-frame-only, main-owned colour picker and reset
+  (`userData/browser-cursor.json`); the default is C's purple, with its lighter dark-theme shade and a
+  contrasting outline. Colours grant no browser authority and are not agent-writable.
 - **Gating.** A module declares `requires.capabilities` (`/v2/capabilities`, evaluated per active
   host), `requires.modules` and `requires.hostKinds`. If a requirement is missing, the module is
   unavailable and its items are hidden, or greyed where the slot says so.

@@ -5,7 +5,9 @@
 import type { OwnerNotification, OwnerNotifySettings } from "@cutex-desktop/protocol";
 import type { DesktopApi, OwnerNotifyResult } from "../../../../shared/ipc";
 import { isPending, isAlerting, sanitizeOwnerNotifyPatch } from "../../../../shared/ownerNotify";
-import type { ModuleMock } from "../../dev/mockTypes";
+import type { MockCore, ModuleMock } from "../../dev/mockTypes";
+
+const s10PagesScene = typeof location !== "undefined" && new URLSearchParams(location.search).has("s10pages");
 
 const iso = (secondsAgo: number) => new Date(Date.now() - secondsAgo * 1000).toISOString();
 
@@ -108,6 +110,7 @@ const mockOwnerNotes: OwnerNotification[] = [
   record({ notificationId: "ntf-m0", agentId: "mika", agentName: "Mika", createdAt: iso(5000), state: "answered", needsReply: true, closedAt: iso(4000), acknowledgedAt: iso(4500), reply: { text: "用 shadcn 的那个。", repliedAt: iso(4000), clientUserMessageId: "owner-notify-reply-ntf-m0" }, text: "按钮用 shadcn 的还是 ZCode 的样式？" }),
 ];
 
+
 const mockOwnerSettings: OwnerNotifySettings = {
   delivery: { info: ["desktop"], attention: ["desktop", "phone"], urgent: ["desktop", "phone", "bigAlert"] },
   deliveryDefault: { info: ["desktop"], attention: ["desktop", "phone"], urgent: ["desktop", "phone", "bigAlert"] },
@@ -124,7 +127,7 @@ const ownerNotesOf = (agentId: string) => structuredClone(mockOwnerNotes.filter(
 
 type Emit = (agentId: string, method: string, params: Record<string, unknown>) => void;
 
-function mockOwnerNotifyApi(emit: Emit, settingsView: () => unknown): Pick<DesktopApi, "ownerNotifications" | "ownerNotifyAction" | "patchOwnerNotify"> {
+function mockOwnerNotifyApi(emit: Emit, settingsView: () => unknown, pages: MockCore["ownerNotificationPages"]): Pick<DesktopApi, "ownerNotifications" | "ownerNotificationsPage" | "ownerNotifyAction" | "patchOwnerNotify"> {
   if (typeof location !== "undefined" && new URLSearchParams(location.search).has("ownerdemo")) {
     setTimeout(() => {
       const r = record({ notificationId: `ntf-live-${Date.now()}`, agentId: "mika", agentName: "Mika", level: "urgent", channels: ["desktop", "phone", "bigAlert"], needsReply: true, createdAt: new Date().toISOString(), text: "测试服务器磁盘只剩 2%，要我清理旧的构建产物吗？" });
@@ -133,9 +136,12 @@ function mockOwnerNotifyApi(emit: Emit, settingsView: () => unknown): Pick<Deskt
     }, 5000);
   }
   return {
+    async ownerNotificationsPage(query) {
+      return pages.page(pages.rows(), query, s10PagesScene);
+    },
     async ownerNotifications({ filter = "all", agentId, limit = 100 }) {
       return structuredClone(
-        mockOwnerNotes
+        (s10PagesScene ? pages.rows() : mockOwnerNotes)
           .filter((r) => (!agentId || r.agentId === agentId) && (filter === "all" || (filter === "pending" ? isPending(r) : isAlerting(r))))
           .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
           .slice(0, limit),
@@ -181,7 +187,10 @@ function mockOwnerNotifyApi(emit: Emit, settingsView: () => unknown): Pick<Deskt
 }
 
 export const mock: ModuleMock = {
-  api: (core) => mockOwnerNotifyApi((agentId, method, params) => core.emitCutex(agentId, method, params), () => core.settingsView()),
-  cutexState: (sessionId, core) => (core.legacy ? {} : { ownerNotifications: ownerNotesOf(sessionId) }),
+  api: (core) => {
+    core.ownerNotificationPages.register(mockOwnerNotes);
+    return mockOwnerNotifyApi((agentId, method, params) => core.emitCutex(agentId, method, params), () => core.settingsView(), core.ownerNotificationPages);
+  },
+  cutexState: (sessionId, core) => (core.legacy ? {} : { ownerNotifications: s10PagesScene ? core.ownerNotificationPages.page(mockOwnerNotes, { agentId: sessionId }).notifications : ownerNotesOf(sessionId) }),
   settings: () => ({ ownerNotify: structuredClone(mockOwnerSettings) }),
 };

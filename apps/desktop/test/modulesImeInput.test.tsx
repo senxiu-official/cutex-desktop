@@ -66,17 +66,18 @@ describe.each<Mode>(["native", "keyCode229", "which229", "tracked"])("module inp
       selected: "", onSelect: selected, onOpen: vi.fn(), disabled: false, loading: false, placeholder: "Pick",
     })));
     await act(async () => container.querySelector<HTMLButtonElement>("[data-browser-agent-select]")!.click());
-    const input = container.querySelector<HTMLInputElement>("[role=combobox]")!; input.focus(); start(input, mode);
+    expect(document.querySelector("[data-browser-agent-picker]")?.parentElement).toBe(document.body);
+    const input = document.querySelector<HTMLInputElement>("[role=combobox]")!; input.focus(); start(input, mode);
     const initial = input.getAttribute("aria-activedescendant");
     await act(async () => { keyboard(input, "ArrowDown", mode); keyboard(input, "Enter", mode); keyboard(input, "Escape", mode); });
     expect(selected).not.toHaveBeenCalled();
-    expect(container.querySelector("[role=combobox]")).toBe(input);
+    expect(document.querySelector("[role=combobox]")).toBe(input);
     expect(input.getAttribute("aria-activedescendant")).toBe(initial);
     end(input);
     await act(async () => keyboard(input, "ArrowDown"));
     await act(async () => keyboard(input, "Enter"));
     expect(selected).toHaveBeenCalledExactlyOnceWith("cutex.beta");
-    expect(container.querySelector("[role=combobox]")).toBeNull();
+    expect(document.querySelector("[role=combobox]")).toBeNull();
   });
   it("does not save or dismiss a note while confirming an IME candidate", async () => {
     const dismiss = vi.fn();

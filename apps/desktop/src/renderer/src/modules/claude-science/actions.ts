@@ -8,7 +8,7 @@ import { useApp } from "../../store";
 import type { AppModuleContext } from "../slots";
 import { registerRequest, slugOf, type AccountSpec } from "./model";
 
-const BROWSER_TAB = "browser.tab";
+const SERVICE_TAB = "browser.service";
 let context: AppModuleContext | null = null;
 
 /** Daemon calls of `hostId`: the focus host keeps `api`, others go through `apiFor`. */
@@ -26,7 +26,12 @@ export function openAccount(slug: string, hostId: string): boolean {
   const ctx = context;
   if (!ctx || ctx.signal.aborted) return false;
   try {
-    return ctx.services.side.open(BROWSER_TAB, { url: `cutex:service/${slug}/` }, { binding: { kind: "host", hostId }, reveal: true, focus: true }).status === "opened";
+    const params = { url: `cutex:service/${slug}/` };
+    const opts = { binding: { kind: "host" as const, hostId }, reveal: true, focus: true };
+    let result = ctx.services.side.open(SERVICE_TAB, params, opts);
+    // This independently delivered pack also runs on older desktops that have no service kind.
+    if (result.status === "unavailable" && result.reason === "unknown-kind") result = ctx.services.side.open("browser.tab", params, opts);
+    return result.status === "opened";
   } catch {
     return false;
   }

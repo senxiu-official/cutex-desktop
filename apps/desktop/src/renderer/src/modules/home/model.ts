@@ -191,7 +191,7 @@ const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const SERVICE_LINK = /^cutex:service\/([a-z0-9][a-z0-9-]{0,62})(?:\/|$)/;
 
 /** The ref kinds 固定到主页 applies to (the agent menu, a service, an artifact tab, a browser tab). */
-export const PIN_REF_KINDS = ["agent", "service", "artifact", "artifacts.view", "browser.tab"] as const;
+export const PIN_REF_KINDS = ["agent", "service", "artifact", "artifacts.view", "browser.tab", "browser.service"] as const;
 
 /** A referable thing → its pin (null: not pinnable). */
 export function pinOfRef(ref: CutexRef): HomePin | null {
@@ -209,7 +209,8 @@ export function pinOfRef(ref: CutexRef): HomePin | null {
       const key = ref.kind === "artifacts.view" ? (ref.params.ref ?? ref.key) : ref.key;
       return parseArtifactRef(key) ? base("artifact", key) : null;
     }
-    case "browser.tab": {
+    case "browser.tab":
+    case "browser.service": {
       const url = ref.params.url ?? ref.key;
       const service = SERVICE_LINK.exec(url);
       if (service) return base("service", service[1]!);

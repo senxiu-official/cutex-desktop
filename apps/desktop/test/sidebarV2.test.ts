@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import type { ApprovalRecord, AskSummary } from "../src/shared/ipc";
 import { agentSignal, attentionChips, formatElapsed, needsYouByAgent, runningSince, wantsOwner, type AgentSignal } from "../src/renderer/src/lib/agentAttention";
-import { applyTurnEnd, clearMark, pruneMarks, turnEndOf, type TurnMarks } from "../src/renderer/src/lib/turnUnread";
+import { applyTurnEnd, applyTurnStart, clearMark, pruneMarks, settleStartedTurns, turnEndOf, turnStartOf, type RunningTurn, type TurnMarks } from "../src/renderer/src/lib/turnUnread";
 import { layoutSidebar, showsPreview, type LayoutPrefs } from "../src/renderer/src/lib/sidebarLayout";
 import type { AgentRow, AgentStatus, ProjectGroup, SidebarGroup } from "../src/renderer/src/lib/sidebar";
 
@@ -35,6 +35,36 @@ describe("turn marks", () => {
     expect(same).toBe(marks);
     marks = applyTurnEnd(marks, "a", { turnId: "t4", status: "completed" }, 13, true);
     expect(marks.a).toBeUndefined();
+  });
+
+  it("failed, then a later turn started: no longer red, its unseen count stays; failed again: red again", () => {
+    expect(turnStartOf("turn/started", { turn: { id: "t2" } })).toBe("t2");
+    expect(turnStartOf("turn/started", {})).toBe("");
+    expect(turnStartOf("turn/completed", { turn: { id: "t2" } })).toBeNull();
+    let marks: TurnMarks = applyTurnEnd({}, "a", { turnId: "t1", status: "failed" }, 10, false);
+    expect(agentSignal(row("a"), undefined, marks.a)).toBe("error");
+    expect(applyTurnStart(marks, "a", "t1")).toBe(marks); // the failed turn's own (late) start
+    expect(applyTurnStart(marks, "b", "t9")).toBe(marks);
+    marks = applyTurnStart(marks, "a", "t2");
+    expect(marks.a).toEqual({ at: 10, failed: false, turnId: "t1", count: 1 });
+    expect(agentSignal(row("a"), undefined, marks.a)).toBe("done");
+    expect(applyTurnStart(marks, "a", "t3")).toBe(marks); // nothing red left: unchanged
+    marks = applyTurnEnd(marks, "a", { turnId: "t2", status: "failed" }, 20, false);
+    expect(marks.a).toEqual({ at: 20, failed: true, turnId: "t2", count: 2 });
+    expect(agentSignal(row("a"), undefined, marks.a)).toBe("error");
+    // A runtime in error stays marked whatever the turn marks say.
+    expect(agentSignal(row("a", "error"), undefined, applyTurnStart(marks, "a", "t3").a)).toBe("error");
+  });
+
+  it("failed then opened clears the mark; a failed mark restored after a restart settles once a later turn runs", () => {
+    const failed: TurnMarks = applyTurnEnd({}, "a", { turnId: "t1", status: "failed" }, Date.parse("2026-11-05T10:00:00Z"), false);
+    expect(clearMark(failed, "a").a).toBeUndefined();
+    const run = (activeTurnId: string | null, at: string | null): RunningTurn => ({ cutexSessionId: "a", runtime: { activeTurnId, activeTurnObservedAt: at } });
+    expect(settleStartedTurns(failed, [run("t2", "2026-11-05T10:05:00Z")]).a).toMatchObject({ failed: false, count: 1 });
+    // Not running, the failed turn itself, a snapshot older than the failure, no start time: unchanged.
+    for (const s of [run(null, null), run("t1", "2026-11-05T10:05:00Z"), run("t0", "2026-11-05T09:59:00Z"), run("t2", null)]) expect(settleStartedTurns(failed, [s])).toBe(failed);
+    const unknown: TurnMarks = { a: { at: 1, failed: true, turnId: null } };
+    expect(settleStartedTurns(unknown, [run("t2", "2026-11-05T10:05:00Z")])).toBe(unknown);
   });
 
   it("clears and prunes", () => {
@@ -97,76 +127,43 @@ describe("needs-you and signals", () => {
 });
 
 describe("sidebar layout", () => {
-  const prefs: LayoutPrefs = { grouping: "all", noOnline: "collapse", running: "avatars", foldIdle: true };
+  const prefs: LayoutPrefs = { grouping: "all", noOnline: "collapse", running: "avatars" };
   const signals = new Map<string, AgentSignal>([["run", "running"], ["done", "done"], ["need", "needsYou"], ["off", "offline"], ["idle", "idle"], ["dir", "idle"], ["sel", "idle"], ["offDone", "done"]]);
   const ctx = (over: Partial<Parameters<typeof layoutSidebar>[1]> = {}) => ({ signalOf: (id: string) => signals.get(id), selectedId: "sel", starred: new Set<string>(), prefs, ...over });
   const busy = project("busy", [row("dir", "idle", { director: true }), row("run", "running"), row("done"), row("need", "needsInput"), row("idle"), row("sel"), row("off", "offline"), row("offDone", "offline")]);
   const quiet = project("quiet", [row("q1", "offline", { last: 50 }), row("q2", "offline", { last: 70 })]);
 
-  it("splits a project's agents into full rows, running avatars, idle fold and offline", () => {
+  it("splits a project's agents into listed (big / running / recent) and the two folds", () => {
     const [l] = layoutSidebar([busy], ctx()).main;
     expect(l!.mode).toBe("full");
-    expect(l!.full.map((r) => r.id).sort()).toEqual(["dir", "need", "offDone"].sort());
-    expect(l!.full[0]!.id).toBe("dir");
+    expect(l!.big.map((r) => r.id)).toEqual(["dir", "need"]);
     expect(l!.running.map((r) => r.id)).toEqual(["run"]);
-    // The open agent, online idle, stays in the idle fold (marked there); so does a done one (✓).
-    expect(l!.idle.map((r) => r.id)).toEqual(["done", "idle", "sel"]);
-    expect(l!.idleSelected).toBe("sel");
-    expect(l!.idleDone).toEqual(["done"]);
+    // A finished turn not seen yet is 最近, online or offline; no clock: nothing else is recent by time.
+    expect(l!.recent.map((r) => r.id).sort()).toEqual(["done", "offDone"]);
+    expect(l!.idle.map((r) => r.id)).toEqual(["idle", "sel"]);
     expect(l!.offline.map((r) => r.id)).toEqual(["off"]);
-    expect(l).toMatchObject({ runningCount: 1, needsYouCount: 1, attentionCount: 3, hasSelected: true });
+    expect(l).toMatchObject({ runningCount: 1, needsYouCount: 1, attentionCount: 3, onlineCount: 6, hasSelected: true });
   });
 
-  it("opening an agent never moves it: running avatars, offline list and idle fold keep it", () => {
-    const [run] = layoutSidebar([busy], ctx({ selectedId: "run" })).main;
-    expect(run!.full.map((r) => r.id)).not.toContain("run");
-    expect(run!.running.map((r) => r.id)).toContain("run");
-    expect(run!.idleSelected).toBeNull();
-    const [off] = layoutSidebar([busy], ctx({ selectedId: "off" })).main;
-    expect(off!.full.map((r) => r.id)).not.toContain("off");
-    expect(off!.offline.map((r) => r.id)).toContain("off");
-    // The same rows in the same places as with nothing open.
+  it("opening an agent never moves it", () => {
     const [none] = layoutSidebar([busy], ctx({ selectedId: null })).main;
-    for (const l of [run!, off!]) for (const k of ["full", "running", "offline"] as const) expect(l[k].map((r) => r.id)).toEqual(none![k].map((r) => r.id));
-    const [idle] = layoutSidebar([busy], ctx({ selectedId: "idle" })).main;
-    expect(idle!.full.map((r) => r.id)).not.toContain("idle");
-    expect(idle).toMatchObject({ idleSelected: "idle", hasSelected: true });
-    // With the fold off the open agent is a full row like the others.
-    const [unfolded] = layoutSidebar([busy], ctx({ prefs: { ...prefs, foldIdle: false } })).main;
-    expect(unfolded!.full.map((r) => r.id)).toContain("sel");
-    expect(unfolded!.idleSelected).toBeNull();
+    for (const id of ["run", "off", "idle", "done"]) {
+      const [l] = layoutSidebar([busy], ctx({ selectedId: id })).main;
+      for (const k of ["big", "running", "recent", "idle", "offline"] as const) expect(l![k].map((r) => r.id)).toEqual(none![k].map((r) => r.id));
+    }
   });
 
-  it("「在线空闲不收起」 lists one project's idle agents individually", () => {
-    const other = project("other", [row("o1"), row("o2")]);
-    const l = layoutSidebar([busy, other], ctx({ idleUnfolded: new Set(["other"]) })).main;
-    expect(l[0]!.idle.map((r) => r.id)).toEqual(["done", "idle", "sel"]);
-    expect(l[1]!.idle).toEqual([]);
-    expect(l[1]!.full.map((r) => r.id).sort()).toEqual(["o1", "o2"]);
-    const [own] = layoutSidebar([busy], ctx({ idleUnfolded: new Set(["busy"]) })).main;
-    expect(own!.idle).toEqual([]);
-    expect(own!.full.map((r) => r.id)).toEqual(expect.arrayContaining(["done", "idle", "sel"]));
-    expect(own!.idleSelected).toBeNull();
+  it("a fresh agent (lib/freshAgents) is listed with the recent ones, never folded", () => {
+    const [l] = layoutSidebar([busy], ctx({ isFresh: (key: string) => key === "idle" || key === "off" })).main;
+    expect(l!.recent.map((r) => r.id)).toEqual(expect.arrayContaining(["idle", "off"]));
+    expect(l!.idle.map((r) => r.id)).toEqual(["sel"]);
+    expect(l!.offline).toEqual([]);
   });
 
-  it("a fresh agent (lib/freshAgents) stays a full row instead of folding into idle / running", () => {
-    const [l] = layoutSidebar([busy], ctx({ isFresh: (key: string) => key === "idle" || key === "run" || key === "off" })).main;
-    expect(l!.full.map((r) => r.id)).toEqual(expect.arrayContaining(["idle", "run"]));
-    expect(l!.idle.map((r) => r.id)).toEqual(["done", "sel"]);
+  it("运行中智能体 = 完整显示 draws running agents as big rows", () => {
+    const [l] = layoutSidebar([busy], ctx({ prefs: { ...prefs, running: "full" } })).main;
     expect(l!.running).toEqual([]);
-    // Offline stays in 离线 (nothing to show there yet).
-    expect(l!.offline.map((r) => r.id)).toEqual(["off"]);
-    // No longer fresh (opened / older than 30 min): folds again.
-    const [after] = layoutSidebar([busy], ctx({ isFresh: () => false })).main;
-    expect(after!.idle.map((r) => r.id)).toEqual(["done", "idle", "sel"]);
-  });
-
-  it("running full and idle unfolded put them in full rows", () => {
-    const [l] = layoutSidebar([busy], ctx({ prefs: { ...prefs, running: "full", foldIdle: false } })).main;
-    expect(l!.running).toEqual([]);
-    expect(l!.idle).toEqual([]);
-    expect(l!.full.map((r) => r.id)).toContain("run");
-    expect(l!.full.map((r) => r.id)).toContain("idle");
+    expect(l!.big.map((r) => r.id)).toContain("run");
   });
 
   it("collapses projects without online agents in 全部分组 unless set to expand / starred", () => {
@@ -191,7 +188,7 @@ describe("sidebar layout", () => {
   it("searching shows every match in full", () => {
     const l = layoutSidebar([busy, quiet], ctx({ searching: true, prefs: { ...prefs, grouping: "starred" } }));
     expect(l.others).toEqual([]);
-    expect(l.main.every((g) => g.mode === "full" && g.running.length === 0 && g.idle.length === 0)).toBe(true);
+    expect(l.main.every((g) => g.mode === "full" && g.running.length === 0 && g.idle.length === 0 && g.offline.length === 0)).toBe(true);
   });
 
   it("latest-message line per setting", () => {

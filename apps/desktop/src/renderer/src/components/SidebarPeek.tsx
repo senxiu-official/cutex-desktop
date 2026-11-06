@@ -78,6 +78,7 @@ export function SidebarPeek({ children }: { children: ReactNode }) {
       />
       {popped && (
         <aside
+          data-tip-beside=""
           data-sidebar-mode="pop"
           data-sidebar-pop=""
           data-sidebar-held={held ? "" : undefined}
@@ -107,13 +108,13 @@ export function SidebarPeek({ children }: { children: ReactNode }) {
           <div data-sidebar-pop-bar="" className="flex h-7 shrink-0 items-center justify-end gap-0.5 border-b border-border px-1.5">
             {/* Portrait: the sidebar never docks — 「固定」 is what holding it is; held, only × is left. */}
             {!held && (
-              <button onClick={() => { close(); toggleSidebarRail(); }} title={pinHint} aria-label={pinHint} data-sidebar-peek-pin=""
+              <button onClick={() => { close(); toggleSidebarRail(); }} data-tip={pinHint} aria-label={pinHint} data-sidebar-peek-pin=""
                 className="flex items-center gap-1 rounded px-1.5 py-0.5 text-caption text-muted hover:bg-surface-2 hover:text-foreground">
                 <Pin size={12} />
                 {t("sidebar.peek.pin")}
               </button>
             )}
-            <button onClick={close} title={`${t("sidebar.peek.close")} (Esc)`} aria-label={t("sidebar.peek.close")} data-sidebar-peek-close=""
+            <button onClick={close} data-tip={`${t("sidebar.peek.close")} (Esc)`} aria-label={t("sidebar.peek.close")} data-sidebar-peek-close=""
               className="flex items-center rounded p-1 text-muted hover:bg-surface-2 hover:text-foreground">
               <X size={13} />
             </button>

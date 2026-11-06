@@ -18,7 +18,7 @@ export default defineModule({
   titleKey: "proxy.title",
   descriptionKey: "proxy.description",
   contributes: {
-    "settings.page": [{ id: "proxy.page", page: "proxy", group: "connection", order: 270, icon: Network, titleKey: "proxy.page", source: null, hostPart: true, hintKey: "proxy.pageHint", Page: ProxyPage }],
+    "settings.page": [{ id: "proxy.page", page: "proxy", group: "connection", order: 270, icon: Network, titleKey: "proxy.page", source: null, hostPart: true, hintKey: "proxy.settingsPageHint", Page: ProxyPage }],
     "settings.section": [
       { id: "proxy.update", page: "proxy", order: 100, titleKey: "proxy.update.title", keywords: ["proxy.mode.system", "proxy.mode.manual", "proxy.url"], Section: UpdateProxySection },
       { id: "proxy.host", page: "proxy", order: 200, requires: { capabilities: [PROXY_MODES_FEATURE] }, unavailable: "notice", titleKey: "proxy.host.title", keywords: ["proxy.noProxy", "proxy.mode.none"], Section: HostProxySection },

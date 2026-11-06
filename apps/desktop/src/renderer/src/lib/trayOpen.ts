@@ -16,6 +16,7 @@
 // items join the main window's (`handOpenToMain`).
 import { create } from "zustand";
 import { sidebarOf, useApp } from "../store";
+import { listedIn } from "./archivedAgent";
 import { conversationPanes, paneBinding, type PaneLayout } from "./paneLayout";
 import { usePanes } from "./paneStore";
 import { currentWindow, inWindow, MAIN_WINDOW, windowStore, type WindowKey } from "./windowScope";
@@ -238,10 +239,7 @@ export function startTrayOpen(): () => void {
     for (const key of useTrayOpen.windows()) {
       inWindow(key, () => {
         const open = useTrayOpen.getState().open;
-        const kept = open.filter((o) => {
-          const sidebar = sidebarOf(s, o.hostId);
-          return !sidebar || [...sidebar.active, ...sidebar.retired].some((r) => r.cutexSessionId === o.sessionId);
-        });
+        const kept = open.filter((o) => listedIn(sidebarOf(s, o.hostId), o.sessionId) !== false);
         if (kept.length !== open.length) setOpen(kept);
       });
     }

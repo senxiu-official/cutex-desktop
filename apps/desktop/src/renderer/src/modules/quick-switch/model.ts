@@ -4,6 +4,7 @@
 // sidebar rows, the hosts' service lists, the artifact lists, the `nav.primary` pages and the Shelf pages
 // once per data change, and every keystroke only runs `rankItems` over that list (no network).
 import { isImeComposing } from "../../lib/ime";
+import { SERVICE_COMPONENT } from "../../lib/sideKinds";
 import { matchesCommand } from "../../lib/keybindings";
 import type { WorkspaceOpenMode, WorkspaceRef } from "../../lib/workspaces";
 import type { Icon } from "../slots";
@@ -414,7 +415,7 @@ export function planOpen(target: QsTarget, beside: boolean, showsHost: (hostId: 
       const external: OpenPlan = { via: "serviceExternal", hostId: target.hostId, slug: target.slug };
       if (!showsHost(target.hostId)) return external;
       // The owner browser tab (`cutex:service/<slug>/`, the services page's 打开); browser module off → the system browser.
-      return { via: "panes", kind: BROWSER_TAB, params: { url: `cutex:service/${target.slug}/` }, beside: false, fallback: external };
+      return { via: "panes", kind: SERVICE_COMPONENT, params: { url: `cutex:service/${target.slug}/` }, beside: false, fallback: external };
     }
     case "artifact": {
       const ref: OpenPlan = { via: "ref", ref: { hostId: target.hostId, kind: "artifact", key: target.ref, title: target.name.slice(0, 200), params: {} } };

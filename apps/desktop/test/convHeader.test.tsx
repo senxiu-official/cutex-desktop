@@ -228,7 +228,7 @@ describe("conversation headers (rendered)", () => {
     expect(online.dataset.onlineCompact).toBe("true");
     expect(online.textContent).toBe("");
     expect(online.getAttribute("aria-label")).toBeTruthy();
-    expect(online.getAttribute("title")).toBeTruthy();
+    expect(online.getAttribute("data-tip")).toBeTruthy();
     expect(online.closest("[data-conv-left]")).not.toBeNull();
     expect(el.querySelector('[data-conv-item="name"]')!.textContent).toContain("Hachimi");
     expect(el.querySelector('[data-conv-item="project"]')!.className).toContain("shrink-0");

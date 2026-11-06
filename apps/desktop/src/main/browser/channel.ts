@@ -1,4 +1,5 @@
-import { BROWSER_OWNER_INPUT_KINDS, isBrowserControlSettings, type BrowserOwnerInputKind, type BrowserRequest } from "../../shared/browser";
+import { isBrowserCursorColor } from "../../shared/browserCursor";
+import { BROWSER_OWNER_INPUT_KINDS, isBrowserControlSettings, isBrowserToolSurface, type BrowserOwnerInputKind, type BrowserRequest } from "../../shared/browser";
 import { browserLoginOrigin } from "./loginWarning";
 import { isBrowserClaimMode } from "../../shared/browserClaim";
 import type { HostBinding } from "../../shared/hosts";
@@ -10,6 +11,10 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
   if (value.op === "resetOrigins" || value.op === "reserveOwnerTab") {
     if (Object.keys(value).length !== 1) throw Error("invalid_browser_request");
     return { op: value.op };
+  }
+  if (value.op === "cursorColor") {
+    if (Object.keys(value).some(k => !["op", "color"].includes(k)) || (value.color !== undefined && value.color !== null && !isBrowserCursorColor(value.color))) throw Error("invalid_browser_request");
+    return value.color === undefined ? { op: "cursorColor" } : { op: "cursorColor", color: value.color as string | null };
   }
   if (value.op === "externalPages") {
     if (Object.keys(value).some(k => !["op", "enabled"].includes(k)) || (value.enabled !== undefined && typeof value.enabled !== "boolean")) throw Error("invalid_browser_request");
@@ -39,9 +44,9 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     return value.agentOpenApproval === undefined ? { op: "settings" } : { op: "settings", agentOpenApproval: value.agentOpenApproval };
   }
   if (value.op === "profileTools") {
-    if (Object.keys(value).some(k => !["op", "profile", "enabled"].includes(k)) || typeof value.profile !== "string" || !value.profile.trim() || value.profile.length > 200 || /[\x00-\x1f\x7f-\x9f/\\]/.test(value.profile) || [".", ".."].includes(value.profile)
-      || (value.enabled !== undefined && typeof value.enabled !== "boolean")) throw Error("invalid_browser_request");
-    return { op: "profileTools", profile: value.profile, ...(value.enabled !== undefined ? { enabled: value.enabled } : {}) };
+    if (Object.keys(value).some(k => !["op", "profile", "enabled", "surface"].includes(k)) || typeof value.profile !== "string" || !value.profile.trim() || value.profile.length > 200 || /[\x00-\x1f\x7f-\x9f/\\]/.test(value.profile) || [".", ".."].includes(value.profile)
+      || (value.enabled !== undefined && typeof value.enabled !== "boolean") || (value.surface !== undefined && !isBrowserToolSurface(value.surface))) throw Error("invalid_browser_request");
+    return { op: "profileTools", profile: value.profile, ...(value.enabled !== undefined ? { enabled: value.enabled } : {}), ...(value.surface !== undefined ? { surface: value.surface } : {}) };
   }
   if (value.op === "claimAllows" || value.op === "claimAudit") {
     if (Object.keys(value).length !== 1) throw Error("invalid_browser_request");
@@ -151,14 +156,19 @@ export function createBrowserChannel<E, D extends { readonly generation: number 
   /** Owner switch, host-independent and reachable while the module is off (it only narrows or
    * widens what a later browser tab may reach; main enforces it on every request). */
   externalPages?(enabled?: boolean): unknown;
+  cursorColor?(color?: string | null): unknown;
   /** Remembered site permissions (host-independent, owner UI only). */
   sitePermissions?(forget?: Extract<BrowserRequest, { op: "sitePermissions" }>["forget"]): unknown;
-  execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "sitePermissions" }>, hostId: string, fence?: HostFence<D>): Promise<unknown>;
+  execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "sitePermissions" | "cursorColor" }>, hostId: string, fence?: HostFence<D>): Promise<unknown>;
 }) {
   return async (event: E, raw: unknown, binding: HostBinding | null | undefined): Promise<unknown> => {
     if (!options.isAppSender(event)) throw new Error("untrusted_sender");
     const request = parseBrowserRequest(raw);
     if (request.op === "setEnabled") return options.setEnabled(request.enabled);
+    if (request.op === "cursorColor") {
+      if (!options.cursorColor) throw Error("unsupported_operation");
+      return options.cursorColor(request.color);
+    }
     if (request.op === "externalPages") {
       if (!options.externalPages) throw Error("unsupported_operation");
       return options.externalPages(request.enabled);
@@ -176,7 +186,10 @@ export function createBrowserChannel<E, D extends { readonly generation: number 
     if (!binding || typeof binding.hostId !== "string" || !binding.hostId || binding.hostId.length > 128 || binding.focus === true)
       throw new Error("invalid_browser_binding");
     const cleanup = request.op === "close" || request.op === "stop" || request.op === "ownerInput" || request.op === "releaseLease" || request.op === "openRefused" || (request.op === "holdReady" && !request.held);
-    const fence = cleanup ? undefined : admitHostBinding(options.getHosts, binding);
+    // Owner page lifetimes follow the host connection, not its agent daemon's restart counter.
+    const ownerPage = ["reserveOwnerTab", "navigate", "reload", "back", "forward"].includes(request.op)
+      || request.op === "open" && !request.identity?.agentOpened && !request.identity?.pendingOpen;
+    const fence = cleanup ? undefined : admitHostBinding(options.getHosts, binding, { daemonGeneration: !ownerPage });
     const result = await options.execute(request, binding.hostId, fence);
     fence?.check();
     return result;

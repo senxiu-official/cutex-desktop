@@ -37,7 +37,7 @@ const render = () => act(async () => root.render(h(ProfileQuota, { profile: "cla
 const chipRings = () => [...host.querySelectorAll<HTMLElement>("[data-quota-ring]")];
 const countdowns = () => [...host.querySelectorAll<HTMLElement>("[data-quota-reset]")];
 const openPopover = async () => {
-  const trigger = [...host.querySelectorAll<HTMLElement>("button")].find((b) => (b.title ?? "").includes("composer.quota.title"))!;
+  const trigger = [...host.querySelectorAll<HTMLElement>("button")].find((b) => (b.dataset.tip ?? "").includes("composer.quota.title"))!;
   await act(async () => void trigger.click());
 };
 
@@ -120,9 +120,9 @@ describe("composer quota popover", () => {
     await render();
     expect(chipRings().map((r) => r.dataset.quotaRing)).toEqual(["claude-0", "claude-1"]);
     expect(chipRings()[1]!.dataset.merged).toBe("");
-    expect(chipRings()[1]!.title).toContain("Claude · 7d");
-    expect(chipRings()[1]!.title).toContain("Claude · Fable 7d");
-    expect(chipRings()[1]!.title).toContain("composer.quota.mergedResets");
+    expect(chipRings()[1]!.dataset.tip).toContain("Claude · 7d");
+    expect(chipRings()[1]!.dataset.tip).toContain("Claude · Fable 7d");
+    expect(chipRings()[1]!.dataset.tip).toContain("composer.quota.mergedResets");
     expect(countdowns()).toHaveLength(2);
   });
 
@@ -139,8 +139,8 @@ describe("composer quota popover", () => {
     const fills = arcs.map((arc) => Number(arc.getAttribute("stroke-dasharray")!.split(" ")[0]) / (2 * Math.PI * Number(arc.getAttribute("r"))));
     expect(fills[0]).toBeCloseTo(view === "remaining" ? 0.57 : 0.43);
     expect(fills[1]).toBeCloseTo(view === "remaining" ? 1 : 0);
-    expect(weekly.title).toContain("Claude · 7d");
-    expect(weekly.title).toContain("Claude · Fable 7d");
+    expect(weekly.dataset.tip).toContain("Claude · 7d");
+    expect(weekly.dataset.tip).toContain("Claude · Fable 7d");
   });
 
   it("one row per gauge with its own ring / countdown switches; the old global switch is gone", async () => {
@@ -187,7 +187,7 @@ describe("composer quota popover", () => {
     await openPopover();
     const label = document.querySelector<HTMLElement>('[data-quota-label="claude-2"]')!;
     expect(label.textContent).toBe("Claude · Fable 7d");
-    expect(label.title).toBe("Claude · Fable 7d");
+    expect(label.dataset.tip).toBe("Claude · Fable 7d");
     expect(label.className).not.toMatch(/\btruncate\b/);
     expect(label.className).toMatch(/\bline-clamp-2\b/);
     const popover = label.closest<HTMLElement>("[data-popover]")!;

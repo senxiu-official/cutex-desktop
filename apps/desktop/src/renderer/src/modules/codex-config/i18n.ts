@@ -1,4 +1,7 @@
 export const zhCN = {
+  "codex-config.plugins.officialAppRequired": "需要 OpenAI 官方应用，cutex 下不可用",
+  "codex-config.plugins.unavailableBadge": "不可用",
+
   "codex-config.title": "Codex 配置",
   "codex-config.description": "Codex 插件、MCP 服务器、技能和钩子",
   // ---- settings (moved from the base catalog, 2026-10-09) ----

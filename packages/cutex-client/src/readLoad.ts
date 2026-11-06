@@ -87,7 +87,7 @@ export class ReadLoad {
 
 const BACKGROUND_METHODS = new Set([
   "cutex/session/get", "cutex/focus/get", "cutex/userInput/queue/list",
-  "thread/read", "thread/list", "thread/items/list", "thread/loaded/list", "thread/goal/get",
+  "thread/read", "thread/list", "thread/turns/list", "thread/items/list", "thread/loaded/list", "thread/goal/get",
   "thread/searchOccurrences", "thread/backgroundTerminals/list", "model/list", "config/read",
   "account/read", "account/rateLimits/read", "collaborationMode/list", "experimentalFeature/list",
   "skills/list", "mcpServerStatus/list", "windowsSandbox/readiness", "claude/model/status",

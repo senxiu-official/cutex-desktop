@@ -43,7 +43,7 @@ export function GuidesAsk({ version }: { version: string | null }) {
   const skip = useCallback(() => skipAllGuides(version), [version]);
   useOnboardingInteraction(box, skip);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/35 p-4">
       <div ref={box} tabIndex={-1} role="dialog" aria-modal aria-label={t("onboarding.guide.ask.title")} data-guides-ask="" className="w-[30rem] max-w-full rounded-2xl border border-border bg-surface p-6 shadow-2xl">
         <h2 className="text-display text-foreground">{t("onboarding.guide.ask.title")}</h2>
         <p className="mt-2 whitespace-pre-line text-ui text-muted">{t("onboarding.guide.ask.body")}</p>

@@ -254,7 +254,7 @@ describe("module: Ctrl+K and opens", () => {
     type("audio");
     press("Enter");
     await flush();
-    expect(ctx.services.panes.open).toHaveBeenLastCalledWith("browser.tab", { url: "cutex:service/audiobook/" }, { focus: true });
+    expect(ctx.services.panes.open).toHaveBeenLastCalledWith("browser.service", { url: "cutex:service/audiobook/" }, { focus: true });
 
     // Ctrl+Enter on a service: lib/workspaces openRef "beside" (a new Shelf page with one workspace, the other's Shelf with two).
     const panesCalls = ctx.services.panes.open.mock.calls.length;

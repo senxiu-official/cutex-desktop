@@ -26,7 +26,7 @@ import { useUserLayoutToggle } from "../lib/userLayoutToggle";
  * what a wake does to a busy recipient on this host (cutex wake-busy-wait), by `recipientRuntime`
  * (the viewed agent for a received row, the addressee for a sent one).
  */
-export function BusMessage({ direction, name: rawName, mode, text: raw, onContextMenu, kind = null, downgraded = false, messageId = null, envelope = null, senderId = null, sourceKind = null, recipientId = null, recipientRuntime = "codex" }: { direction: "in" | "out"; name: string; mode: string | null; text: string; onContextMenu: React.MouseEventHandler; kind?: DeliveryKind | null; downgraded?: boolean; messageId?: string | null; envelope?: AgentEnvelope | null; /** Received only: the sender id / source kind, so cutex services show as 委托系统 / Cutex 系统 (lib/systemSenders). */ senderId?: string | null; sourceKind?: string | null; /** Sent only: the addressee's id, so 发给 shows its avatar (owner 2026-11-01: it drew a round letter on a fill). */ recipientId?: string | null; /** The runtime of the agent the message went to (a Claude agent always waits for the turn end). */ recipientRuntime?: AgentRuntime }) {
+export function BusMessage({ direction, name: rawName, mode, text: raw, preview = null, onContextMenu, kind = null, downgraded = false, messageId = null, envelope = null, senderId = null, sourceKind = null, recipientId = null, recipientRuntime = "codex" }: { direction: "in" | "out"; name: string; mode: string | null; text: string; /** Sent only: the one-line text when it differs from the body (the agent's own words, lib/sentToolPairs); opened, the row shows the whole body. */ preview?: string | null; onContextMenu: React.MouseEventHandler; kind?: DeliveryKind | null; downgraded?: boolean; messageId?: string | null; envelope?: AgentEnvelope | null; /** Received only: the sender id / source kind, so cutex services show as 委托系统 / Cutex 系统 (lib/systemSenders). */ senderId?: string | null; sourceKind?: string | null; /** Sent only: the addressee's id, so 发给 shows its avatar (owner 2026-11-01: it drew a round letter on a fill). */ recipientId?: string | null; /** The runtime of the agent the message went to (a Claude agent always waits for the turn end). */ recipientRuntime?: AgentRuntime }) {
   const { t } = useI18n();
   const userToggle = useUserLayoutToggle();
   const conv = useConvScope();
@@ -51,7 +51,7 @@ export function BusMessage({ direction, name: rawName, mode, text: raw, onContex
         {v2 ? <KindTag kind={shownKind} downgraded={downgraded || !!envelope?.downgraded} wakeHint={wakeHint} /> : <DeliveryTag mode={mode} />}
         {v2 && envelope && <EnvelopeBadges envelope={envelope} reveal={open ? "" : "hidden group-hover/msg:inline group-focus-within/msg:inline"} />}
         {v2 && !incoming && messageId && <SentStatus messageId={messageId} />}
-        {!open && <span data-testid="bus-message-preview" className="min-w-0 flex-1 truncate text-subtle"><ScriptText text={text.replace(/\s+/g, " ")} /></span>}
+        {!open && <span data-testid="bus-message-preview" className="min-w-0 flex-1 truncate text-subtle"><ScriptText text={(preview ?? text).replace(/\s+/g, " ")} /></span>}
         {open ? <ChevronDown size={13} className="ml-auto shrink-0" /> : <ChevronRight size={13} className="ml-auto shrink-0" />}
       </button>
       {messageId && <CardSettlement messageId={messageId} />}

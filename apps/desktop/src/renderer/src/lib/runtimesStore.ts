@@ -1,6 +1,7 @@
 // Installed runtimes of the connected host (`GET /v2/runtimes`, cutex `runtimes-view`), keyed by
 // desktop host id so a late reply from the previous host stays out of the new one. Loaded only when
 // Settings → 运行时 opens and after a runtime package run finishes (pins changed); no polling.
+import { captureHostAction, onHostReset } from "./hostSwitch";
 import { create } from "zustand";
 import { adaptRuntimes, RUNTIMES_FEATURE, type RuntimesView } from "../../../shared/runtimes";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
@@ -21,6 +22,10 @@ const EMPTY: HostRuntimes = { view: null, error: null, loading: false };
 export const useRuntimesStore = create<{ byHost: Record<string, HostRuntimes> }>(() => ({ byHost: {} }));
 
 const inFlight = new Set<string>();
+onHostReset(host => {
+  inFlight.delete(host);
+  useRuntimesStore.setState(s => ({ byHost: Object.fromEntries(Object.entries(s.byHost).filter(([id]) => id !== host)) }));
+});
 
 function patch(hostId: string, next: Partial<HostRuntimes>): void {
   useRuntimesStore.setState((s) => ({ byHost: { ...s.byHost, [hostId]: { ...(s.byHost[hostId] ?? EMPTY), ...next } } }));
@@ -38,15 +43,16 @@ export async function refreshRuntimes(hostId?: string): Promise<void> {
 
 async function load(hostId: string, daemon: { runtimes(): ReturnType<typeof api.runtimes> }): Promise<void> {
   if (inFlight.has(hostId)) return;
+  const current = captureHostAction(hostId);
   inFlight.add(hostId);
   patch(hostId, { loading: true });
   try {
     const view = adaptRuntimes(await daemon.runtimes());
-    patch(hostId, { view, error: null, loading: false });
+    if (current()) patch(hostId, { view, error: null, loading: false });
   } catch (error) {
-    patch(hostId, { error: error instanceof Error ? error.message : String(error), loading: false });
+    if (current()) patch(hostId, { error: error instanceof Error ? error.message : String(error), loading: false });
   } finally {
-    inFlight.delete(hostId);
+    if (current()) inFlight.delete(hostId);
   }
 }
 

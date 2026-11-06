@@ -1,6 +1,6 @@
 // 暂停智能体 / 继续 (cutex agent-pause, shared/agentPause): what the sidebar row, the conversation header, the
 // agent menus and the composer show, and the two owner actions. Not 暂停新委托 (lib/asksPause: delegations only);
-// this one holds everything that would start a turn, after the running turn ends.
+// this one holds every later turn and, on supporting runtimes, the next tool call in the current turn.
 // The state is the session resource's `agentPause` (the sidebar snapshot). A pause / resume answer and the
 // `cutex/agent/pauseChanged` event are newer than that resource: they are kept here, for that resource object only —
 // the next snapshot of the session (lib/sidebarShare keeps unchanged ones) carries cutex's own value again.
@@ -9,7 +9,7 @@ import { create } from "zustand";
 import { AGENT_PAUSE_FEATURE, agentPauseOf, type AgentPause } from "../../../shared/agentPause";
 import { featuresOf, hostApi, sidebarOf, useApp } from "../store";
 
-type Entry = { pause: AgentPause | null; base: unknown };
+type Entry = { pause: AgentPause | null; base: unknown; toolGate?: boolean; generation?: number };
 export const useAgentPauses = create<{ byKey: Readonly<Record<string, Entry>> }>(() => ({ byKey: {} }));
 
 const keyOf = (hostId: string, sessionId: string) => `${hostId}\n${sessionId}`;
@@ -22,7 +22,12 @@ function resourceOf(app: App, hostId: string, sessionId: string): unknown {
 /** A newer state than the session resource (an answer, an event). */
 export function noteAgentPause(hostId: string, sessionId: string, pause: AgentPause | null): void {
   const base = resourceOf(useApp.getState(), hostId, sessionId);
-  useAgentPauses.setState((s) => ({ byKey: { ...s.byKey, [keyOf(hostId, sessionId)]: { pause, base } } }));
+  useAgentPauses.setState((s) => {
+    const prior = s.byKey[keyOf(hostId, sessionId)], generation = runtimeGeneration(base);
+    const toolGate = pause?.toolGate ?? agentPauseOf(base)?.toolGate
+      ?? (prior && (sameRuntime(base, prior)) ? prior.toolGate : undefined);
+    return { byKey: { ...s.byKey, [keyOf(hostId, sessionId)]: { pause, base, toolGate, generation } } };
+  });
 }
 
 /** The shown state from a resource and the kept newer one (pure; tests). */
@@ -32,6 +37,26 @@ export function shownAgentPause(resource: unknown, kept: Entry | undefined): Age
 
 export function agentPauseSupported(app: App, hostId: string | null | undefined): boolean {
   return !!hostId && featuresOf(app, hostId).has(AGENT_PAUSE_FEATURE);
+}
+
+function runtimeGeneration(resource: unknown): number | undefined {
+  const generation = (resource as { runtime?: { runtimeGeneration?: unknown } } | null)?.runtime?.runtimeGeneration;
+  return typeof generation === "number" && Number.isSafeInteger(generation) ? generation : undefined;
+}
+
+function sameRuntime(resource: unknown, kept: Entry): boolean {
+  const generation = runtimeGeneration(resource);
+  return generation !== undefined ? kept.generation === generation : kept.generation === undefined && kept.base === resource;
+}
+
+/** UI-only runtime knowledge reported by cutex; never carried across a runtime generation. */
+export function agentToolGateNow(hostId: string, sessionId: string): boolean {
+  const app = useApp.getState();
+  if (!agentPauseSupported(app, hostId)) return false;
+  const resource = resourceOf(app, hostId, sessionId), kept = useAgentPauses.getState().byKey[keyOf(hostId, sessionId)];
+  const pause = shownAgentPause(resource, kept);
+  if (pause?.toolGate !== undefined) return pause.toolGate;
+  return !!kept?.toolGate && sameRuntime(resource, kept);
 }
 
 /** The agent's pause now (outside React: menus). */
@@ -48,7 +73,7 @@ export function useAgentPauseSupported(hostId: string | null | undefined): boole
 /** The agent's pause (null: running, or the host lacks agent-pause). */
 export function useAgentPause(hostId: string | null | undefined, sessionId: string | null | undefined): AgentPause | null {
   const supported = useAgentPauseSupported(hostId);
-  const resource = useApp((s) => (hostId && sessionId ? resourceOf(s, hostId, sessionId) : undefined));
+  const resource = useApp((s) => (supported && hostId && sessionId ? resourceOf(s, hostId, sessionId) : undefined));
   const kept = useAgentPauses((s) => (hostId && sessionId ? s.byKey[keyOf(hostId, sessionId)] : undefined));
   return supported ? shownAgentPause(resource, kept) : null;
 }
@@ -65,7 +90,7 @@ async function act(hostId: string, sessionId: string, resume: boolean): Promise<
   }
 }
 
-/** 暂停智能体: its running turn may finish (暂停中…), then nothing new starts until 继续. */
+/** 暂停智能体: cutex chooses tool boundary or turn end; no later turn starts until 继续. */
 export function pauseAgent(hostId: string, sessionId: string): Promise<boolean> {
   return act(hostId, sessionId, false);
 }

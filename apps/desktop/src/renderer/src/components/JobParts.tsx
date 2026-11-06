@@ -108,7 +108,7 @@ function OutputDialog({ jobId, hostId }: { jobId: string; hostId: string | null 
   const status = job ? jobStatus(job) : null;
   const finished = status?.group === "done";
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[7vh]" onMouseDown={(e) => e.target === e.currentTarget && closeJobOutput()}>
+    <div className="fixed inset-0 z-[150] flex items-start justify-center bg-black/30 pt-[7vh]" onMouseDown={(e) => e.target === e.currentTarget && closeJobOutput()}>
       <div role="dialog" aria-modal aria-label={t("jobs.output.title")} className="flex h-[min(82vh,46rem)] w-[56rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         <div className="flex items-start gap-3 border-b border-border px-4 py-2.5">
           <div className="min-w-0 flex-1">

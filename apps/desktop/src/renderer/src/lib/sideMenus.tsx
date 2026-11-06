@@ -2,7 +2,8 @@
 // the launcher lists. The menu way to every user override (移到页 / 移到新页面 / 拆到新卡片 / 合并到 /
 // 恢复默认位置 / 重置 Shelf 布局) — drag and drop (P1b) runs the same reducers. Shell code: no feature names.
 import { cardCloseForetell, cardMoveForetell } from "./menuForetells";
-import { ArrowDown, ArrowRight, ArrowUp, Bot, ChevronDown, Columns2, Combine, Expand, Layers, Maximize2, Pencil, Pin, PinOff, Plus, RotateCcw, Split, X } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, Bot, ChevronDown, Columns2, Combine, Expand, Layers, LayoutDashboard, Maximize2, Pencil, Pin, PinOff, Plus, RotateCcw, Split, X } from "lucide-react";
+import { resetWindowLayout } from "./layoutReset";
 import { translate } from "../i18n";
 import type { ItemId, Json } from "../modules/types";
 import type { SideComponentItem } from "../modules/slots";
@@ -362,6 +363,9 @@ export function launcherMenu(): MenuEntry[] {
         ...pageMenu(page.id).slice(1),
       ],
     },
+    // 窗口布局 (owner 2026-11-05): moved here from its own title-bar button; it only ever held this one action.
+    "separator",
+    { label: translate("layout.reset"), icon: <LayoutDashboard size={ICON} />, info: translate("layout.resetHint"), onSelect: resetWindowLayout },
   ];
 }
 

@@ -1,5 +1,5 @@
 import type { ModuleServices, SideHoldLocator, SideOpenHeldRefusal } from "../slots";
-import { BROWSER_TAB, browserNavigationUrl, isBrowserTabKey } from "./browserState";
+import { browserKindForUrl, browserNavigationUrl, isBrowserTabKey } from "./browserState";
 
 export interface BrowserAgentOpenIntent {
   requestId: string; hostId: string; epoch: string; tabKey: string; cutexSessionId: string; url: string; remainingMs: number;
@@ -47,7 +47,7 @@ export function createBrowserAgentOpens(options: {
       // its cancellation event is lost; never race main's confirmation at the same tick.
       const deadline = now() + intent.remainingMs + 30_000;
       let opened: ReturnType<ModuleServices["side"]["openHeld"]>;
-      try { opened = options.side.openHeld(BROWSER_TAB, { url: intent.url, tabKey: intent.tabKey, pendingOpen: intent.requestId },
+      try { opened = options.side.openHeld(browserKindForUrl(intent.url), { url: intent.url, tabKey: intent.tabKey, pendingOpen: intent.requestId },
         { binding: { kind: "agent", hostId: intent.hostId, sessionId: intent.cutexSessionId }, hostEpoch: intent.epoch }); }
       catch { refuse(intent, "browser_disabled"); return; }
       if (opened.status !== "opened") { refuse(intent, browserOpenRefusal(opened.status === "stale" ? "stale" : opened.reason)); return; }

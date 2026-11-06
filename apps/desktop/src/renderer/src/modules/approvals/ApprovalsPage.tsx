@@ -9,7 +9,8 @@ import { ShieldCheck } from "lucide-react";
 import type { ApprovalRecord } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
 import { APPROVALS_FEATURE, sortApprovals } from "../../lib/approvals";
-import { hostApi, useListHosts, usePerHost } from "../../lib/hostLists";
+import { useListHosts } from "../../lib/hostLists";
+import { usePagedApprovalHistory } from "../../lib/usePagedApprovalHistory";
 import { mergeHostLists, type HostItem, type HostLook } from "../../lib/hostScope";
 import { useApp } from "../../store";
 import { MissingHosts, RowHost } from "../../components/HostListParts";
@@ -45,6 +46,7 @@ function DecidedRow({ record, origin }: { record: ApprovalRecord; origin: Origin
 
 const newestFirst = (at: (a: ApprovalRecord) => string | null | undefined) => (a: HostItem<ApprovalRecord>, b: HostItem<ApprovalRecord>) =>
   (Date.parse(at(b.item) ?? "") || 0) - (Date.parse(at(a.item) ?? "") || 0) || b.item.approvalId.localeCompare(a.item.approvalId);
+const NO_HISTORY_HOSTS: never[] = [];
 
 export function ApprovalsPage() {
   const { t } = useI18n();
@@ -69,15 +71,13 @@ export function ApprovalsPage() {
   const pendingLoaded = supported.some((d) => d.approvals !== null);
 
   // History, per host: re-read whenever a pending list changes (a decision moves a record there).
-  const historyIds = scope === "decided" ? supported.map((d) => d.hostId).join("\n") : "";
-  const historyHosts = useMemo(() => (historyIds ? historyIds.split("\n") : []), [historyIds]);
-  const history = usePerHost(historyHosts, (hostId) => hostApi(hostId).approvals("all"), pending.map((p) => p.key).join());
+  const historyHosts = scope === "decided" ? supported : NO_HISTORY_HOSTS;
+  const { pages: history, loadMore, reload } = usePagedApprovalHistory(historyHosts, hosts.focus);
   const decided = useMemo(
-    () => mergeHostLists(historyHosts.map((hostId) => ({ hostId, items: sortApprovals((history[hostId]?.value ?? []).filter((a) => a.state !== "pending")) })), (a) => a.approvalId, newestFirst((a) => a.decidedAt ?? a.createdAt)),
+    () => mergeHostLists(historyHosts.map(({ hostId }) => ({ hostId, items: sortApprovals((history[hostId]?.value ?? []).filter((a) => a.state !== "pending")) })), (a) => a.approvalId, newestFirst((a) => a.decidedAt ?? a.createdAt)),
     [history, historyHosts],
   );
-  const decidedLoaded = historyHosts.some((id) => history[id]?.value != null);
-  const error = historyHosts.map((id) => history[id]?.error).find((e) => !!e) ?? null;
+  const decidedLoaded = historyHosts.some(({ hostId }) => history[hostId]?.value != null);
 
   if (supported.length === 0 && hosts.missing.length === 0) {
     return (
@@ -100,7 +100,6 @@ export function ApprovalsPage() {
         />
       </PageToolbar>
       {hosts.multi && <MissingHosts hosts={hosts.missing} unsupported={unsupported} />}
-      {error && <p className="mb-3 text-xs text-danger">{error}</p>}
       {scope === "pending" && supported.some(host => host.features.has("delegation-review-refs")) && <Suspense fallback={<p className="text-xs text-subtle">…</p>}><RoutingInbox hosts={supported} onCount={setRoutingCount} /></Suspense>}
       {scope === "pending" ? (
         !pendingLoaded ? (
@@ -113,7 +112,7 @@ export function ApprovalsPage() {
         ) : (
           pending.map((a) => <PendingCard key={a.key} record={a.item} origin={origin(a.hostId)} />)
         )
-      ) : !decidedLoaded ? (
+      ) : !decidedLoaded && historyHosts.some(({ hostId }) => !history[hostId] || history[hostId]?.loading) ? (
         <p className="py-8 text-center text-sm text-subtle">…</p>
       ) : decided.length === 0 ? (
         <p className="py-8 text-center text-sm text-subtle">{t("approvals.noHistory")}</p>
@@ -124,6 +123,22 @@ export function ApprovalsPage() {
           ))}
         </div>
       )}
+      {scope === "decided" && <div className="pb-[var(--tray-room,52px)]">{historyHosts.map(({ hostId }) => {
+        const page = history[hostId];
+        return (
+          <div key={hostId} className="mt-3 flex flex-wrap items-center gap-3 text-xs" aria-busy={page?.loading}>
+            {hosts.multi && <span className="text-subtle">{hosts.look(hostId)?.label ?? hostId}</span>}
+            {page?.error && <span role="alert" className="text-danger">{page.error}</span>}
+            {(page?.nextCursor != null || page?.error) && (
+              <button className="text-accent hover:underline disabled:opacity-50" disabled={page.loading} onClick={() => void loadMore(hostId)}>
+                {page.loading ? t("common.loading") : page.error ? t("hostAction.retry") : t("delegation.loadMore")}
+              </button>
+            )}
+            <button className="text-subtle hover:underline" onClick={() => reload(hostId)}>{t("approvals.rules.refresh")}</button>
+            {page?.loading && page.nextCursor == null && !page.error && <span className="text-subtle">{t("common.loading")}</span>}
+          </div>
+        );
+      })}</div>}
     </PageBody>
   );
 }

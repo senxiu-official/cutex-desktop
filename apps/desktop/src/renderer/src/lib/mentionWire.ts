@@ -1,13 +1,15 @@
 // What an @-mention sends (owner 2026-10-26, replacing 10-25's 「@<formal name>」): the link itself, always with the full
 // id — `[@名字](cutex:agent/<id>)` on the conversation's host, `[@名字@remote](cutex:agent/<id>@remote)` for an agent on
-// another host (lib/agentMentions). The label is the agent's current display name; a mention whose id is not in
-// the current lists keeps the name it was written with. The agent and every desktop resolve it by the id.
+// another host (lib/agentMentions). The label is the agent's own name (lib/agentAlias realAgentName; owner 2026-11-05: the
+// agent reads its own name, not the owner's 显示名称, which the chips still show); a mention whose id is not in the current
+// lists keeps the name it was written with. The agent and every desktop resolve it by the id.
 // Messages sent 10-25 – 10-26 as 「@<formal name>」 still show chips from the locally kept draft (sent text → draft
 // text, per host + agent); old messages that carry the chip markup render as chips (components/MentionText).
 import { useSyncExternalStore } from "react";
 import { useApp } from "../store";
 import { agentIndex } from "./agentLook";
 import { agentMentionMarkdown, agentMentionTokens } from "./agentMentions";
+import { realAgentName } from "./agentAlias";
 
 type App = ReturnType<typeof useApp.getState>;
 
@@ -25,7 +27,7 @@ export function mentionWireText(text: string, hostId: string, _sessionId: string
     out += text.slice(cursor, token.start);
     cursor = token.end;
     const entry = index.get(token.id);
-    const name = entry?.session.displayName || entry?.session.formalAgentName || token.name;
+    const name = (entry && realAgentName(entry.session)) || token.name;
     const host = entry ? (entry.hostId === hostId ? null : hostLabel(entry.hostId)) : token.host;
     out += agentMentionMarkdown(name, token.id, host);
   }

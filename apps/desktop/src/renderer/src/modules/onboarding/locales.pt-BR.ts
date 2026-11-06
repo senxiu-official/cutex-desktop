@@ -220,7 +220,7 @@ export const ptBR: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.minorAgent.title": "O quadradinho com a inicial",
   "onboarding.guide.minorAgent.text": "Os {{Agents}} sem avatar próprio e não fixados aparecem como quadradinhos com a inicial.\nÉ o efeito de Configurações → Barra lateral esquerda → Linhas de {{Agent}} → Avatar padrão de {{agent}} = Apenas {{agents}} importantes.\nPara dar um avatar: clique com o botão direito na linha e escolha Mostrar avatar.",
   "onboarding.guide.project.title": "Um projeto e seu {{director}}",
-  "onboarding.guide.project.text": "Cada projeto tem um {{director}}: ele distribui o trabalho, cria {{agents}} e reúne os resultados.\nPara ver o quadro e a atividade, passe o mouse sobre o título do projeto e clique em Visão do projeto à direita.",
+  "onboarding.guide.project.text": "Cada projeto tem um {{director}}: ele distribui o trabalho, cria {{agents}} e reúne os resultados.\nPara ver a visão do projeto e a atividade, passe o mouse sobre o título do projeto e clique em Visão do projeto à direita.",
   "onboarding.guide.needsYou.title": "Precisa de você",
   "onboarding.guide.needsYou.text": "“Precisa de você” significa que um {{agent}} está esperando por você: uma pergunta, uma aprovação ou uma decisão. Ele pode ficar parado até você responder.\nAs pendências aparecem acima do campo de mensagem, no fim das linhas laterais e na bandeja; um clique leva até elas.",
   "onboarding.guide.delegation.title": "Delegações",

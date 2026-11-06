@@ -67,18 +67,16 @@ describe("项目颜色 pref (was 项目分隔)", () => {
   });
 
   it("无 or no colour: nothing but the agent indent", () => {
-    const none = { className: "", headerClassName: "", metaClassName: "", bodyClassName: "pl-4", rowClassName: "", gapClassName: "mb-1.5", foldedGapClassName: "", style: undefined };
+    const none = { className: "", headerClassName: "", metaClassName: "", bodyClassName: "pl-4", rowClassName: "", style: undefined };
     expect(projectBlockLook("none", "blue")).toEqual(none);
     expect(projectBlockLook("none", NEUTRAL_GROUP)).toEqual(none);
     for (const mode of PROJECT_SEPARATIONS) expect(projectBlockLook(mode, null)).toEqual(none);
   });
 
-  it("a folded group keeps a one-row project's pitch (no extra section gap)", () => {
-    // Starred projects never auto-collapse: folded, they must line up with the collapsed rows.
+  it("no mode carries its own gaps (they are one table: styles.css Roster spacing)", () => {
     for (const mode of PROJECT_SEPARATIONS) {
       const look = projectBlockLook(mode, "blue");
-      const rowGap = look.rowClassName.split(" ").filter((c) => c.startsWith("mb-")).join(" ");
-      expect(look.foldedGapClassName).toBe(rowGap);
+      for (const cls of [look.className, look.rowClassName, look.headerClassName]) expect(cls.split(" ").filter((c) => /^-?m[tby]?-/.test(c))).toEqual([]);
     }
   });
 

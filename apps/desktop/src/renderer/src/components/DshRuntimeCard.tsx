@@ -56,7 +56,7 @@ export function AcpRuntimeCard({ runtime, hostId }: { runtime: AcpRuntime; hostI
   const node = nodeRequirement(component, dsh?.node ?? kimi?.node);
   const nodeVersion = node?.version ?? t("runtimes.nodeVersionUnknown");
   const nodeLine = !node ? t("runtimes.nodeUnknown") : node.range ? t("runtimes.nodeRange", { range: formatNodeRange(node.range), version: nodeVersion }) : t("runtimes.node", { minimum: node.minimum!, version: nodeVersion });
-  return <RuntimeGroup kind="acp" title={info.label} list={list} currentVersion={component?.selected} status={ready ? <Tag tone={depsReady === false ? "attention" : "accent"}>{t(depsReady === false ? "dsh.notReady" : "dsh.ready")}</Tag> : undefined} dependencies={<>
+  return <RuntimeGroup hostId={hostId} kind={runtime} title={info.label} list={list} currentVersion={component?.selected} status={ready ? <Tag tone={depsReady === false ? "attention" : "accent"}>{t(depsReady === false ? "dsh.notReady" : "dsh.ready")}</Tag> : undefined} dependencies={<>
     {info.notRecommended && <p data-dsh-not-recommended="" data-runtime-not-recommended={runtime} className="text-warn">{t(text.notRecommended)}</p>}
     <p>{t(text.usage)}</p>
     {runtime === "dsh" && <>

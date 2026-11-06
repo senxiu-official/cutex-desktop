@@ -104,14 +104,14 @@ describe("filterOwnerChoices", () => {
   );
 
   it("without a query hides unnamed one-off chats, except the current owner", () => {
-    expect(ids(filterOwnerChoices(choices, ""))).toEqual(["alias-1", "eva", "chat-mine"]);
-    expect(ids(filterOwnerChoices(choices, "  "))).toEqual(["alias-1", "eva", "chat-mine"]);
+    expect(ids(filterOwnerChoices(choices, ""))).toEqual(["eva", "chat-mine", "alias-1"]);
+    expect(ids(filterOwnerChoices(choices, "  "))).toEqual(["eva", "chat-mine", "alias-1"]);
   });
 
   it("matches the shown name, the real name under an alias, or the session id (case-insensitive)", () => {
     expect(ids(filterOwnerChoices(choices, "小花"))).toEqual(["alias-1"]);
     expect(ids(filterOwnerChoices(choices, "EVA-AGENT"))).toEqual(["alias-1"]);
-    expect(ids(filterOwnerChoices(choices, "eva"))).toEqual(["alias-1", "eva"]); // the real name under an alias matches too
+    expect(ids(filterOwnerChoices(choices, "eva"))).toEqual(["eva", "alias-1"]); // the real name under an alias matches too
     expect(ids(filterOwnerChoices(choices, "other"))).toEqual(["chat-other"]);
   });
 

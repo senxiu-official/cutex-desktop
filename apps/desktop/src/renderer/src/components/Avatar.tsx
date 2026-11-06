@@ -132,7 +132,7 @@ export function Avatar({ name, color, avatar, avatarMode: draftMode, picture, si
           style={{ width: d, height: d, borderRadius: radius, fontSize: label.fontSize, letterSpacing: label.letterSpacing, background: "var(--surface)", color: "color-mix(in oklab, var(--fg) 84%, var(--surface))", boxShadow: `inset 0 0 0 1px ${frame}` }}
         >
           {label.text}
-          {status?.running && <span className="agent-ring-tile" style={{ borderRadius: radius + 2 }} aria-hidden />}
+          {status?.running && <span className="agent-ring-tile" style={{ borderRadius: radius + 2, animationPlayState: status.runningPaused ? "paused" : undefined }} data-running-paused={status.runningPaused ? "" : undefined} aria-hidden />}
         </span>
       </div>
     );
@@ -251,7 +251,7 @@ function AvatarStatusFrame({ size, status, minorDot, mark, children }: { size: n
       title={presence === "unknown" ? t("status.unknown") : undefined}
     >
       {children}
-      {status.running && !minorDot && <span className="agent-ring" aria-hidden />}
+      {status.running && !minorDot && <span className="agent-ring" style={{ animationPlayState: status.runningPaused ? "paused" : undefined }} data-running-paused={status.runningPaused ? "" : undefined} aria-hidden />}
       {badge && (
         <span
           data-avatar-badge={badge.tone}

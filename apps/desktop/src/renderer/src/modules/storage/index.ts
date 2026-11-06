@@ -9,6 +9,6 @@ export default defineModule({
   descriptionKey: "storage.description",
   contributes: {
     // Capability-gated navigation; the page itself also handles a legacy/deep-link fallback.
-    "settings.page": [{ id: "storage.page", requires: { capabilities: [STORAGE_FEATURE] }, page: "storage", group: "data", order: 300, icon: HardDrive, titleKey: "storage.title", source: "host",  hintKey: "storage.hint", keywords: ["storage.refresh", "storage.inventory"], Page: StoragePage }],
+    "settings.page": [{ id: "storage.page", requires: { capabilities: [STORAGE_FEATURE] }, page: "storage", group: "data", order: 300, icon: HardDrive, titleKey: "storage.title", source: "host",  hintKey: "settings.pageHint.storage", keywords: ["storage.refresh", "storage.inventory"], Page: StoragePage }],
   },
 });

@@ -4,27 +4,32 @@
 // same fixed column (AVATAR_COL), so names line up whatever the row shows; the status tail follows
 // lib/statusTail (attention pill / running dot / passive text) in a fixed-height line box.
 // Shared by the sidebar, the project flyout and the Projects page.
+import { useAgentPause } from "../lib/agentPause";
 import { AgentPauseTag } from "./AgentPauseParts";
-import { Columns2, MoreHorizontal, Pin } from "lucide-react";
+import { MoreHorizontal, Pin } from "lucide-react";
 import { memo, useContext, useMemo, useSyncExternalStore, type FocusEvent as ReactFocusEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useI18n } from "../i18n";
+import { resolveSidebarRoleLabel, useTermOverrides } from "../lib/terms";
 import { formatAutoRetryWait } from "../lib/modelOverloadRetry";
 import { useModelOverloadRetry } from "../lib/modelOverloadRetryView";
 import { AllRowsCompact } from "../lib/allRowsCompact";
-import { previewFromResource, previewLine, type ActivityPreview } from "../lib/activity";
+import { previewFromResource, previewLine, shortToolLine, type ActivityPreview } from "../lib/activity";
 import { getTurnMarks, subscribeTurnMarks, turnMarksOn, unreadCount, type TurnMark } from "../lib/turnUnread";
 import { AgentBadge } from "./AgentBadge";
+import { TurnErrorBadge } from "./TurnErrorSurface";
 import { avatarCarriesMark } from "../lib/projectMark";
 import { createdByOf, rowKey, sameAgentRow, shownName, type AgentRow } from "../lib/sidebar";
 import { useIsFreshAgent } from "../lib/freshAgents";
 import { useUiPrefs } from "../lib/prefs";
 import { relativeTime } from "../lib/sidebarView";
 import { lastSeen } from "../lib/offlineAgents";
-import { useApp } from "../store";
+import { featuresOf, useApp } from "../store";
+import { BackgroundBot } from "./BackgroundBot";
+import { BACKGROUND_WORK_FEATURE, showsBackgroundWork } from "../lib/agentBackgroundWork";
 import { startWorkspaceDrag } from "../lib/workspaces";
 import { openAgentPendingNotes } from "../lib/ownerNotify";
 import { focusOwnerNote, useHostOwnerNotes } from "../lib/ownerNotifyStore";
-import { newInstanceKey, openModifiers } from "../lib/openModifiers";
+import { openModifiers } from "../lib/openModifiers";
 import { usePanes } from "../lib/paneStore";
 import { useForetell, withHandlers } from "../lib/foretell";
 import { agentEffect } from "../lib/workspaceEffects";
@@ -65,7 +70,7 @@ function AvatarCell({ children, min }: { children: ReactNode; min?: number }) {
 function PinMark() {
   const { t } = useI18n();
   return (
-    <span className="flex shrink-0 text-subtle" title={t("sidebar.pinned")} data-row-pinned="">
+    <span className="flex shrink-0 text-subtle" data-tip={t("sidebar.pinned")} data-row-pinned="">
       <Pin size={10} className="rotate-45" aria-label={t("sidebar.pinned")} />
     </span>
   );
@@ -81,7 +86,8 @@ function Preview({ row, preview, running }: { row: AgentRow; preview: ActivityPr
   if (retry && row.status !== "unknown" && row.status !== "offline") return <span>{formatAutoRetryWait(t, retry)}</span>;
   const line = previewLine(preview, running);
   if (!line) return <span>{t(`status.${row.status}`)}</span>;
-  if (line.kind === "tool") return <span className="font-mono text-caption/[inherit]">{line.text}</span>;
+  // A command shows only its first word (design 060 §6: 「$ cargo」); the whole line in the tooltip.
+  if (line.kind === "tool") return <span className="font-mono text-caption/[inherit]" data-tip={line.text}>{shortToolLine(line.text)}</span>;
   if (line.kind === "input") return <span><span className="text-muted">{t("sidebar.previewYou")}</span><ScriptText text={line.text} /></span>;
   const tone = line.kind === "received" ? "text-accent/80" : line.kind === "retry" ? "text-warn" : "";
   return <span className={tone}><ScriptText text={line.text} /></span>;
@@ -126,7 +132,7 @@ function NoteJump({ agentId, hostId, children }: { agentId: string; hostId: stri
       data-row-note-jump=""
       // Counted as the chip slot by 状态标签 自动 (lib/useChipFit skips it among the line's children).
       data-fit-chip=""
-      title={t("ownerNotify.pending.jump")}
+      data-tip={t("ownerNotify.pending.jump")}
       onClick={(e) => {
         e.stopPropagation();
         focusOwnerNote(agentId, target.notificationId, hostId);
@@ -171,7 +177,7 @@ function useRowHost(row: AgentRow, withPreview = true) {
      * workspace beside (lib/workspaceEffects agentEffect — the same effect the hover foretells, 008).
      */
     open: (e?: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; button?: number }) => {
-      if (unavailable) return;
+      if (unavailable) { useApp.getState().notify(t("sidebar.hostRowOffline", { host: label })); return; }
       effect(!!e && openModifiers(e).newInstance).run();
     },
     /** The row's hover / keyboard-focus preview (Ctrl/⌘ held: the beside one). */
@@ -180,32 +186,6 @@ function useRowHost(row: AgentRow, withPreview = true) {
     offlineTitle: unavailable ? t("sidebar.hostRowOffline", { host: label }) : null,
   };
 }
-
-/**
- * A row's hover 「在旁边打开」 (panes step 2): the agent in a conversation pane beside the focused one. Memoized on the
- * agent (primitive props; its own effect and preview): a row re-rendering for a status tick does not redraw it.
- */
-const BesideButton = memo(function BesideButton({ hostId, id, title, size = 14 }: { hostId: string; id: string; title: string; size?: number }) {
-  const { t } = useI18n();
-  const effect = () => agentEffect({ hostId, key: id, title }, "beside");
-  const foretell = useForetell(() => effect().foretell);
-  return (
-    <button
-      {...foretell}
-      data-fit-skip=""
-      data-open-beside=""
-      title={t("pane.openBesideHint", { key: newInstanceKey() })}
-      aria-label={t("pane.openBeside")}
-      onClick={(e) => {
-        e.stopPropagation();
-        effect().run();
-      }}
-      className="hidden shrink-0 rounded px-0.5 text-subtle group-hover:block hover:bg-surface hover:text-foreground"
-    >
-      <Columns2 size={size} />
-    </button>
-  );
-});
 
 /** Same row content and variant (the memo of AgentRowButton). */
 const sameRowButton = (a: { row: AgentRow; compact?: boolean }, b: { row: AgentRow; compact?: boolean }) => !!a.compact === !!b.compact && sameAgentRow(a, b);
@@ -229,13 +209,18 @@ function useRowMark(row: AgentRow, host: string, own: boolean) {
  * 出错 pill, unread count); the running dot and time on the first line. 消息预览 off: one line.
  */
 export const AgentRowButton = memo(function AgentRowButton({ row, compact: compactRow = false }: { row: AgentRow; compact?: boolean }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const terms = useTermOverrides();
+  const director = resolveSidebarRoleLabel(terms, locale, "director"), operator = resolveSidebarRoleLabel(terms, locale, "operator");
   // Layout B 「全部」 (lib/allRowsCompact): every row compact, 20 px avatar.
   const allCompact = useContext(AllRowsCompact);
   const compact = compactRow || allCompact;
   const { selected, host, own, preview, look, unavailable, open, menu, offlineTitle, foretell } = useRowHost(row);
+  const pause = useAgentPause(host, row.session.cutexSessionId);
   const { rowPreview, statusChips } = useUiPrefs();
   const { signal, needs } = useRowSignal(row);
+  const backgroundSupported = useApp(s => featuresOf(s, host).has(BACKGROUND_WORK_FEATURE));
+  const background = !unavailable && showsBackgroundWork(row.session.runtime, signal, backgroundSupported);
   const mark = useRowMark(row, host, own);
   const last = Math.max(row.lastActivity, preview?.at ?? 0);
   const twoLines = !compact && showsPreview(row, rowPreview);
@@ -248,13 +233,13 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact: compa
   const avatar = twoLines ? IM_AVATAR : compact ? (rowPreview === "off" && !allCompact ? 16 : COMPACT_IM_AVATAR) : AVATAR_COL;
   const nameTags = (
     <>
-      {row.isDirector && <Tag>{t("sidebar.director")}</Tag>}
-      {row.isOperator && <Tag data-operator-tag="">{t("sidebar.operator")}</Tag>}
+      {row.isDirector && director && <Tag fit className="flex-1 max-w-max" data-tip={t("sidebar.director")} data-director-tag="">{director}</Tag>}
+      {row.isOperator && operator && <Tag fit className="flex-1 max-w-max" data-tip={t("sidebar.operator")} data-operator-tag="">{operator}</Tag>}
       <AgentPauseTag hostId={host} sessionId={row.session.cutexSessionId} />
-      {!twoLines && row.operatorRestartRequired && <Tag data-operator-restart-required="" tone="attention" title={t("sidebar.operatorRestartRequired")}>{t("sidebar.operatorRestartRequired")}</Tag>}
+      {!twoLines && row.operatorRestartRequired && <Tag fit className="flex-1 max-w-max" data-operator-restart-required="" tone="attention" data-tip={t("sidebar.operatorRestartRequired")}>{t("sidebar.operatorRestartRequired")}</Tag>}
       {row.pinned && <PinMark />}
       {fresh && (
-        <Tag tone="accent" title={t("sidebar.freshHint")} data-testid="agent-fresh">
+        <Tag tone="accent" data-tip={t("sidebar.freshHint")} data-testid="agent-fresh">
           {t("sidebar.fresh")}
         </Tag>
       )}
@@ -262,10 +247,9 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact: compa
   );
   const hoverActions = (
     <>
-      {!unavailable && <BesideButton hostId={host} id={row.id} title={row.name} />}
       <button
         data-fit-skip=""
-        title={t("menu.more")}
+        data-tip={t("menu.more")} aria-label={t("menu.more")}
         onClick={(e) => {
           e.stopPropagation();
           openMenuFrom(e.currentTarget, menu());
@@ -297,19 +281,20 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact: compa
       data-row-selected={selected ? "" : undefined}
       data-row-compact={compact ? "" : undefined}
       data-row-im={twoLines ? "" : undefined}
-      title={offlineTitle ?? (twoLines ? undefined : [labelOf(row), preview?.text, t("pane.openBesideHint", { key: newInstanceKey() })].filter(Boolean).join("\n"))}
+      data-tip={offlineTitle ?? (twoLines ? undefined : [labelOf(row), preview?.text].filter(Boolean).join("\n"))}
       className={`density-row group flex w-full cursor-default items-center rounded-md px-1.5 text-left ${twoLines ? "gap-2.5 rounded-lg py-1.5" : compact ? "gap-2 py-px" : "gap-2 py-[3px]"} ${
         selected ? "bg-selected" : "hover:bg-hover"
       } ${unavailable ? "opacity-50 grayscale" : ""}`}
     >
       <AvatarCell min={twoLines ? IM_AVATAR : undefined}>
-        <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={avatar} signal={signal} running={showsRunningRing(signal, row.session)} badge={twoLines ? avatarBadge(signal, needs, unreadCount(mark)) : undefined} />
+        <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={avatar} signal={signal} running={showsRunningRing(signal, row.session)} runningPaused={!!pause?.held?.length} badge={twoLines ? avatarBadge(signal, needs, unreadCount(mark)) : undefined} />
       </AvatarCell>
       {twoLines ? (
         <div className="min-w-0 flex-1 leading-tight">
           <div className="flex h-5 items-center gap-1">
             {look && <HostMark host={look} dotOnly />}
-            <span title={row.shortName ? labelOf(row) : undefined} className={`min-w-0 truncate text-ui/[inherit] ${flagged ? "font-semibold" : "font-medium"} ${signal === "offline" || signal === "unknown" ? "text-muted" : ""}`}><ScriptText text={shownName(row)} /></span>
+            <span data-tip={row.shortName ? labelOf(row) : undefined} className={`min-w-0 truncate text-ui/[inherit] ${flagged ? "font-semibold" : "font-medium"} ${signal === "offline" || signal === "unknown" ? "text-muted" : ""}`}><ScriptText text={shownName(row)} /></span>
+            <TurnErrorBadge session={row.session} hostId={host} />
             <AgentBadge badge={row.session.badge} hostId={row.hostId} onAvatar={avatarCarriesMark(avatar)} />
             {nameTags}
             <span className="ml-auto" />
@@ -322,6 +307,7 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact: compa
             <span data-row-preview="" data-fit-skip="" className="min-w-0 flex-1 truncate text-meta/[inherit] leading-4 text-subtle">
               <Preview row={row} preview={preview} running={signal === "running" || row.status === "running"} />
             </span>
+            {background && <BackgroundBot />}
             <RowBadge row={row} signal={signal} needs={needs} mark={mark} compact={chipFit.compact} fit={statusChips === "auto"} openHost={selected ? host : null} />
           </div>
         </div>
@@ -329,10 +315,12 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact: compa
         <div className="min-w-0 flex-1 leading-tight">
           <div ref={chipFit.lineRef} className="flex h-5 items-center gap-1">
             {look && <HostMark host={look} dotOnly />}
-            <span data-fit-name="" className={`truncate text-ui/[inherit] ${flagged ? "font-semibold" : signal === "offline" || signal === "unknown" ? "text-muted" : ""}`}><ScriptText text={shownName(row)} /></span>
             <AgentBadge badge={row.session.badge} hostId={row.hostId} onAvatar={avatarCarriesMark(avatar)} />
+            <span data-fit-name="" className={`min-w-0 truncate text-ui/[inherit] ${flagged ? "font-semibold" : signal === "offline" || signal === "unknown" ? "text-muted" : ""}`}><ScriptText text={shownName(row)} /></span>
+            <TurnErrorBadge session={row.session} hostId={host} />
             {nameTags}
             <span className="ml-auto" />
+            {background && <BackgroundBot />}
             <RowTail row={row} signal={signal} last={last} needs={needs} compact={chipFit.compact} fit={statusChips === "auto"} openHost={selected ? host : null} />
             {hoverActions}
           </div>
@@ -381,7 +369,9 @@ function RowBadge({ row, signal, needs, mark, compact, fit, openHost }: { row: A
 
 /** An offline agent as one compact dimmed line: small avatar, name, last activity; ⋯ / right-click = agent menu. */
 export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const terms = useTermOverrides();
+  const director = resolveSidebarRoleLabel(terms, locale, "director"), operator = resolveSidebarRoleLabel(terms, locale, "operator");
   const { selected, host, preview, look, unavailable, open, menu, offlineTitle, foretell } = useRowHost(row);
   const previewAt = preview?.at;
   return (
@@ -389,7 +379,7 @@ export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
       role="button"
       tabIndex={0}
       aria-disabled={unavailable || undefined}
-      title={offlineTitle ?? [labelOf(row), row.session.note, t("pane.openBesideHint", { key: newInstanceKey() })].filter(Boolean).join("\n")}
+      data-tip={offlineTitle ?? [labelOf(row), row.session.note].filter(Boolean).join("\n")}
       onClick={(e) => open(e)}
       onAuxClick={(e) => e.button === 1 && open(e)}
       onMouseDown={(e) => e.button === 1 && e.preventDefault()}
@@ -413,16 +403,17 @@ export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
       <div className="flex h-5 min-w-0 flex-1 items-center gap-1">
         {look && <HostMark host={look} dotOnly />}
         <AgentBadge badge={row.session.badge} hostId={row.hostId} />
-        <span className={`min-w-0 flex-1 truncate text-ui/[inherit] ${selected ? "text-foreground" : "text-muted group-hover:text-foreground"}`}><ScriptText text={shownName(row)} /></span>
-        {row.isDirector && <Tag>{t("sidebar.director")}</Tag>}
-        {row.isOperator && <Tag data-operator-tag="">{t("sidebar.operator")}</Tag>}
+        <span className={`min-w-0 truncate text-ui/[inherit] ${selected ? "text-foreground" : "text-muted group-hover:text-foreground"}`}><ScriptText text={shownName(row)} /></span>
+        <TurnErrorBadge session={row.session} hostId={host} />
+        {row.isDirector && director && <Tag fit className="flex-1 max-w-max" data-tip={t("sidebar.director")} data-director-tag="">{director}</Tag>}
+        {row.isOperator && operator && <Tag fit className="flex-1 max-w-max" data-tip={t("sidebar.operator")} data-operator-tag="">{operator}</Tag>}
         <AgentPauseTag hostId={host} sessionId={row.session.cutexSessionId} />
-        {row.operatorRestartRequired && <Tag data-operator-restart-required="" tone="attention">{t("sidebar.operatorRestartRequired")}</Tag>}
+        {row.operatorRestartRequired && <Tag fit className="flex-1 max-w-max" data-operator-restart-required="" tone="attention" data-tip={t("sidebar.operatorRestartRequired")}>{t("sidebar.operatorRestartRequired")}</Tag>}
         {row.pinned && <PinMark />}
+        <span className="ml-auto" />
         <PassiveText text={relativeTime(lastSeen(row, previewAt))} className="group-hover:hidden" />
-        {!unavailable && <BesideButton hostId={host} id={row.id} title={row.name} size={13} />}
         <button
-          title={t("menu.more")}
+          data-tip={t("menu.more")} aria-label={t("menu.more")}
           onClick={(e) => {
             e.stopPropagation();
             openMenuFrom(e.currentTarget, menu());

@@ -23,7 +23,8 @@ import { headerExtras, contextLabel, profileKindLabel, profileProblems, profileR
 import { cachedProfile } from "../../lib/profileSnapshot";
 import { useProfilePresets } from "../../lib/useProfilePresets";
 import { sessionsUsingProfile } from "../../lib/profileKind";
-import { formatBalance, gaugeShortLabel, quotaFill, quotaTextKey, resetsInCompact, type QuotaView } from "../../lib/quota";
+import { formatBalance, gaugeShortLabel, observedClock, quotaFill, quotaTextKey, resetsInCompact, type QuotaView } from "../../lib/quota";
+import { quotaAge, useCardQuota, type CardQuotaView, type LocalQuotaReason } from "../../lib/quotaPeer";
 import { profileColor } from "../../lib/profileLook";
 import { dataFlags, useSizeFlags, widthAtLeast } from "../../lib/sizeFlags";
 import { Avatar } from "../Avatar";
@@ -64,6 +65,29 @@ function CardGauge({ gauge: g, view }: { gauge: QuotaGauge; view: QuotaView }) {
   );
 }
 
+function localReasonText(t: ReturnType<typeof useI18n>["t"], reason: LocalQuotaReason): string {
+  switch (reason.kind) {
+    case "expiredLogin": return t("settings.profile.quota.local.expiredLogin");
+    case "error": return t("settings.profile.quota.local.error", { reason: reason.text });
+    case "stale": return reason.observedAt ? t("settings.profile.quota.local.stale", { time: observedClock(reason.observedAt) }) : t("settings.profile.quota.local.none");
+    case "pastReset": return t("settings.profile.quota.local.pastReset");
+    case "none": return t("settings.profile.quota.local.none");
+  }
+}
+
+/** Another host's reading of the same account: its host and age, and this host's own reason beside it. */
+function PeerQuotaLine({ quota }: { quota: CardQuotaView }) {
+  const { t } = useI18n();
+  if (!quota.peer) return null;
+  const age = quotaAge(quota.peer.observedAt, Date.now());
+  return (
+    <span data-quota-peer={quota.peer.hostId} className="col-span-full flex min-w-0 flex-wrap gap-x-3 text-subtle">
+      <span>{age && age !== "<1m" ? t("settings.profile.quota.peer", { host: quota.peer.hostName, age }) : t("settings.profile.quota.peerNow", { host: quota.peer.hostName })}</span>
+      {quota.localReason && <span data-quota-local-reason="" className="min-w-0 truncate text-warn" title={localReasonText(t, quota.localReason)}>{localReasonText(t, quota.localReason)}</span>}
+    </span>
+  );
+}
+
 export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, onConfirmDelete, onModelMenu }: {
   item: ProfileItem;
   isDefault: boolean;
@@ -78,13 +102,16 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
   onModelMenu?(el: HTMLElement): void;
 }) {
   const { t } = useI18n();
-  const gauges = useTargetQuotas()[item.name];
+  const localGauges = useTargetQuotas()[item.name];
   const targetHost = useTargetHostId();
+  // Display only: a peer host's reading when this host's is unusable; decisions keep localGauges.
+  const quota = useCardQuota(targetHost, item);
+  const gauges = quota.gauges;
   const sidebar = useTargetSidebar();
   const select = useTargetSelect();
   const view = useUiPrefs().quotaView;
   const presets = useProfilePresets();
-  const problems = profileProblems(item, gauges);
+  const problems = profileProblems(item, localGauges);
   const agents = sessionsUsingProfile(sidebar?.active ?? [], item);
   const kindLabel = profileKindLabel(item, t("agent-config.profile.preset.custom"), presets);
   // The plan label is shown only when it adds a name (a DeepSeek profile's default plan label is 「DeepSeek」 again).
@@ -194,6 +221,7 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
       {/* Two gauges a row (Claude can have 5h / 7d / Opus 7d / credits: two rows). */}
       <ProfileLinkedAppearance hostId={targetHost} profile={item} />
       <div className="grid min-h-10 grid-cols-1 content-center gap-x-8 gap-y-2 border-t border-border px-4 py-2.5 text-xs group-data-[md]/profile:grid-cols-2">
+        <PeerQuotaLine quota={quota} />
         {gauges === undefined ? null : gauges.length ? (
           gauges.map((g) => <CardGauge key={g.id} gauge={g} view={view} />)
         ) : (

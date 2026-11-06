@@ -1,5 +1,6 @@
 // React hooks for sidebar v2 status and the 需要你 strip (kept out of components/*.tsx for Fast Refresh).
 import { isFoldedConversation } from "./foldedTest";
+import { keyFocus } from "./hostKeys";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { MessageKey } from "../i18n";
 import { useApp } from "../store";
@@ -13,7 +14,7 @@ import { useOwnerNotify } from "./ownerNotifyStore";
 import { OWNER_NOTIFY_FEATURE } from "../../../shared/ownerNotify";
 import { pendingByAgent, type AgentRow } from "./sidebar";
 import { useSidebarModel } from "./sidebarView";
-import { getTurnMarks, markSeen, markSeenOn, pruneTurnMarks, subscribeTurnMarks, turnMarksOn, useTurnMarks, type TurnMarks } from "./turnUnread";
+import { getTurnMarks, markSeen, markSeenOn, pruneTurnMarks, settleStartedTurnsOn, subscribeTurnMarks, turnMarksOn, useTurnMarks, type TurnMarks } from "./turnUnread";
 import { onEveryAppWindow } from "./appWindowSet";
 
 export interface Attention {
@@ -134,13 +135,24 @@ export function useTurnMarkUpkeep(): void {
   // Not a render subscription (perf §9): App would re-render, with the whole tree under it, on every sidebar refresh.
   useEffect(() => {
     let last: ReturnType<typeof useApp.getState>["sidebar"] | undefined;
-    const prune = (sidebar: ReturnType<typeof useApp.getState>["sidebar"]) => {
+    const seen = new Map<string, unknown>();
+    const prune = (state: ReturnType<typeof useApp.getState>) => {
+      // Marks restored after a restart whose agent already runs a later turn (every host's snapshot).
+      for (const [hostId, slice] of Object.entries(state.byHost)) {
+        if (!slice.sidebar || seen.get(hostId) === slice.sidebar) continue;
+        seen.set(hostId, slice.sidebar);
+        settleStartedTurnsOn(hostId, slice.sidebar.active);
+      }
+      const sidebar = state.sidebar;
       if (sidebar === last) return;
       last = sidebar;
-      if (sidebar) pruneTurnMarks(new Set(sidebar.active.map((s) => s.cutexSessionId)));
+      if (sidebar) {
+        settleStartedTurnsOn(keyFocus(), sidebar.active);
+        pruneTurnMarks(new Set(sidebar.active.map((s) => s.cutexSessionId)));
+      }
     };
-    prune(useApp.getState().sidebar);
-    return useApp.subscribe((s) => prune(s.sidebar));
+    prune(useApp.getState());
+    return useApp.subscribe(prune);
   }, []);
 }
 

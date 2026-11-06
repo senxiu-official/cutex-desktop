@@ -35,7 +35,7 @@ const ICON = 14;
 function IconButton({ title, onClick, disabled, children, menu }: { title: string; onClick(): void; disabled?: boolean; children: ReactNode; /** Opens a menu at the button instead of `onClick`. */ menu?: (anchor: HTMLElement) => void }) {
   return (
     <button
-      title={title}
+      data-tip={title}
       aria-label={title}
       aria-haspopup={menu ? "menu" : undefined}
       disabled={disabled}

@@ -1,12 +1,82 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CutexClient } from "../src/client";
 import { finiteRead } from "../src/readLoad";
+import { createServer } from "node:http";
 
 const endpoint = { baseUrl: "http://daemon.test", token: null };
 const busy = (hint = 250, header?: string) => new Response(JSON.stringify({ error: { code: "heavy_read_capacity_exceeded", retryable: true, details: { retryAfterMs: hint } } }), { status: 503, headers: header ? { "Retry-After": header } : {} });
 afterEach(() => vi.useRealTimers());
 
 describe("per-host background read admission", () => {
+  it("carries native read priority over a real loopback HTTP connection", async () => {
+    const received: (string | string[] | undefined)[] = [];
+    const server = createServer((request, response) => {
+      received.push(request.headers["x-cutex-read-priority"]);
+      request.resume();
+      response.setHeader("Content-Type", "application/json");
+      response.end('{"data":[]}');
+    });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("missing loopback address");
+      const client = new CutexClient({ baseUrl: `http://127.0.0.1:${address.port}`, token: null });
+      for (const background of [true, false]) {
+        await client.request("POST", "/v2/sessions/a/app-server/requests", {
+          background, body: { native: { message: { method: "thread/turns/list", params: { limit: 10 } } } },
+        });
+      }
+      expect(received).toEqual(["background", undefined]);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
+  });
+
+  it.each([false, true])("marks explicit background reads independently of local admission (%s)", async backgroundReads => {
+    const fetch = vi.fn(async (_url: unknown, _init?: RequestInit) => new Response('{}'));
+    const client = new CutexClient({ ...endpoint, token: "test-token" }, { fetch, backgroundReads });
+    await client.sessions("active", { background: true });
+    const background = new Headers(fetch.mock.calls[0]![1]!.headers);
+    expect(background.get("X-Cutex-Read-Priority")).toBe("background");
+    expect(background.get("Authorization")).toBe("Bearer test-token");
+    await client.sessions("active");
+    expect(new Headers(fetch.mock.calls[1]![1]!.headers).has("X-Cutex-Read-Priority")).toBe(false);
+  });
+
+  it("does not mark mutations and clears stale caller markers on foreground reads", async () => {
+    const fetch = vi.fn(async (_url: unknown, _init?: RequestInit) => new Response('{}'));
+    const client = new CutexClient(endpoint, { fetch });
+    for (const method of ["GET", "POST"] as const) {
+      await client.fetchRaw(client.url("/v2/stop"), { method, headers: { "X-Cutex-Read-Priority": "background" } }, { background: method === "POST" });
+      expect(new Headers(fetch.mock.calls.at(-1)![1]!.headers).has("X-Cutex-Read-Priority")).toBe(false);
+    }
+  });
+
+  it("holds direct native turn-page slots through real body decoding while interrupts proceed", async () => {
+    const bodies: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const method = JSON.parse(init!.body as string).native.message.method;
+      return method === "turn/interrupt" ? new Response('{}') : new Response(new ReadableStream<Uint8Array>({ start(c) { bodies.push(c); } }));
+    });
+    const client = new CutexClient(endpoint, { fetch, backgroundReads: true });
+    const page = () => client.request<{ data: unknown[] }>("POST", "/v2/sessions/a/app-server/requests", {
+      background: true, body: { native: { message: { method: "thread/turns/list", params: { threadId: "t", limit: 10 } } } },
+    });
+    const one = page(); const two = page(); const third = page();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await client.request("POST", "/v2/sessions/a/app-server/requests", {
+      background: true, body: { native: { message: { method: "turn/interrupt" } } },
+    });
+    expect(fetch).toHaveBeenCalledTimes(3);
+    const bytes = new TextEncoder().encode(JSON.stringify({ data: Array.from({ length: 10 }, (_, id) => ({ id, text: "page body ".repeat(100) })) }));
+    bodies[0]!.enqueue(bytes); bodies[0]!.close();
+    expect((await one).data).toHaveLength(10);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
+    for (const body of bodies.slice(1)) { body.enqueue(bytes); body.close(); }
+    expect((await two).data).toHaveLength(10); expect((await third).data).toHaveLength(10);
+  });
+
   it("holds two slots until bodies finish; queued reads do not start on headers alone", async () => {
     const bodies: ReadableStreamDefaultController<Uint8Array>[] = [];
     const fetch = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({ start(c) { bodies.push(c); } })));

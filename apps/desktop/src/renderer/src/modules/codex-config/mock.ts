@@ -65,6 +65,15 @@ const installed = new Map<string, boolean>([
   ["commit.guard@team-tools", true],
 ]);
 
+// Preview the current bundled catalog with all five already enabled in the mock config.
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("bundledPlugins")) {
+  const bundled = markets.find(m => m.name === "openai-bundled")!;
+  for (const [name, displayName] of [["codex-app-tools", "Codex app tools"], ["computer-use", "Computer Use"], ["unified-computer-use", "Unified Computer Use"]] as const) {
+    bundled.plugins.push({ name, displayName, description: "OpenAI bundled plugin", skills: [], mcpServers: [], hooks: [], apps: [] });
+    installed.set(`${name}@openai-bundled`, true);
+  }
+}
+
 /** A plugin's hooks as codex keys them (`<pluginId>:<file>:<event>:<group>:<handler>`). */
 const snake = (s: string) => s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 function pluginHookKeys(m: MockMarket, p: MockPlugin) {

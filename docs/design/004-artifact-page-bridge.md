@@ -1,48 +1,5 @@
-# 004 成果页面开一个小口
+# Artifact page bridge
 
-状态：**已实现，待合并**（`feat/0.2-bridge`；10-21 主人：按推荐做；存储上限交给 Director 定）（清单 #39）。预览：`.claude/preview-artifact-bridge.html`（左右对比，可点）。
+Artifact HTML runs in an opaque sandbox without network access, credentials, Node or preload APIs. The application accepts exactly three fixed-schema channels: storage belonging to that artifact, submission to its agent after a native confirmation, and clipboard copy during a user gesture. Storage is limited to 5 MB per artifact with a 200 MB soft aggregate limit; stored data is not automatically evicted. Main validates the requesting frame instance and every operation. See the security contract in [Desktop modules](../desktop-modules.md).
 
-## 问题
-
-智能体做的交互页面（表单、小工具）在 Cutex 里运行在完全隔离的沙箱：没有来源、不能联网、不能和 app 通信。所以：
-- 记不住状态（不能用 localStorage，关掉 / 刷新就丢）；
-- 结果送不回智能体，只能手动复制粘贴，而复制在沙箱里也可能被拦。
-这是 AGENTS.md 里故意定的安全规则（防止页面碰凭据、调 cutex 接口、往外发数据）。
-
-## 三个口（都只在主进程处理，页面仍不能联网、拿不到凭据）
-
-- **A 页面自己的小存储**：每个成果一个独立空间（建议各版本共用，智能体改版后填到一半的不丢），上限约 1 MB；只能存取自己的。
-- **B 交回智能体**：页面发「提交」消息 → Cutex 自己的确认框（显示内容预览、发给谁）→ 主人点发送 → 作为一条普通消息送到做这个页面的智能体，标明来自哪个页面。页面没法替主人点。
-- **C 代为复制**：页面请求「复制这段」→ Cutex 复制并弹提示；只在用户点按钮时。
-
-## 仍然做不到
-
-联网（含本机端口）；读写别的页面 / 成果的数据；读文件、凭据、cutex 接口；不经确认给任何智能体发消息；悄悄改剪贴板。
-
-## 要定
-
-1. A / B / C 开哪几个（建议都开）。
-2. 存储按整个成果共用，还是每个版本单独（建议共用）。
-3. 存储上限（建议 1 MB）。
-4. B 发给谁：只发给做这个页面的智能体（建议），还是可以选。
-5. 要改 AGENTS.md：「页面不能和 app 通信」改成「只能通过这三种固定格式的消息，由主进程检查大小和格式」，并加测试证明页面拿不到别的东西。
-
-## 决定（2026-10-21）
-
-- A、B、C 都开；A 按**整个成果共用**（各版本同一份）；B 只发给**做这个页面的智能体**；AGENTS.md 按上面第 5 条改。
-- **存储上限（Director 定）**：每个成果 **5 MB**（和浏览器 localStorage 常见上限一致），不写死 1 MB：
-  - 1 MB 的坏处：画板、小游戏存档、带图片的笔记、长表单的历史很容易超过，页面会莫名其妙存不进；5 MB 对「表单 / 小工具」足够，又不会让一个页面吃掉大量磁盘。
-  - 满了不悄悄丢：写入返回明确的「存储已满」错误，页面可以自己提示；成果的 ⋯ 菜单有「清除这个页面的数据」。
-  - 所有成果合计软上限 200 MB：超过时新的写入被拒并在设置里提示，**不自动删**别的页面的数据（自动删 = 悄悄丢主人填的东西）。设置里列出各页面占用，可逐个清除。
-  - 上限做成主进程里的常量，以后要改只改一处；不开放给页面自己申请更多。
-
-## 实现时定下的细节（2026-10-21，bridge）
-
-- **发给谁**：做这个**版本**的智能体（版本记录里的 producer；自动捕获只认「唯一归属」的那种）。主人自己发布的、归属不明的页面点「发给智能体」会得到「不知道是哪个智能体」，页面应退回「复制结果」。
-- **确认框**：Cutex 自己的系统对话框，默认按钮是「取消」（防止误按回车）；显示页面名和版本、发给谁、内容前 1200 字（超出写总字数）。窗口隐藏 / 最小化时不弹也不发；5 分钟没答当作取消；页面关掉时对话框作废。
-- **发出去的样子**：一条普通的主人消息，开头一行「来自成果页面「名称」vN（af-…@N）：」，空一行接内容；页面交的是 JSON 时放在代码块里。用纯文字而不是链接，因为主人消息按原样显示。
-- **限流**：一个窗口同时只有一个确认框；同一个成果关掉确认框后 5 秒内不能再问，10 分钟内最多问 5 次。复制每个页面每 0.5 秒最多一次。
-- **大小**：一次提交最多 64 KB 文字，一次复制最多 1 MB；存储的一个键最多 256 个字符。
-- **「用户点按钮时」怎么判断**：app 在收到复制请求的那一刻检查：刚有过点击 / 按键（浏览器的「用户激活」，页面里的点击会传到 app），而且焦点正在这个页面上。页面脚本自己在后台调用复制会被拒绝（`no_gesture`），剪贴板不会变。
-- **设置的位置**：页面数据列在 设置 → 右侧栏与留白 → 「成果」下面的「页面数据」（成果的其他设置也在这里），可搜索「页面数据」。
-- **⋯ 菜单**：只有 HTML 页面类的成果才有「清除这个页面的数据」；没存过东西时提示「没有保存过数据」。
+See [Architecture](../DESIGN.md) and [Module contracts](../desktop-modules.md) for related interfaces.

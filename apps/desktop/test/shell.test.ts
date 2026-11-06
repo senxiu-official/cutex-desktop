@@ -41,7 +41,8 @@ describe("desktop shell logic", () => {
   });
 
   it("first-close notice text: locale, en fallback, custom terms", () => {
-    expect(trayNoticeText("zh-CN").keep).toBe("继续在托盘中运行");
+    expect(trayNoticeText("zh-CN").keep).toBe("继续在系统托盘中运行");
+    expect(trayNoticeText("en").keep).toBe("Keep running in the system tray");
     expect(trayNoticeText("de-DE")).toEqual(trayNoticeText("en"));
     expect(trayNoticeText("en-AU").quit).toBe("Quit when closing");
     const terms = { agent: { one: "Maid", many: "Maids" }, subagent: { one: "s", many: "ss" }, director: { one: "d", many: "dd" }, owner: { one: "o", many: "oo" } };

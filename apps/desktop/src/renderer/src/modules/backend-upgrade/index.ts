@@ -39,7 +39,7 @@ export default defineModule({
         titleKey: "backend-upgrade.page",
         source: "host",
         // Which cutex this is (the picked host's), next to the desktop's own 更新与诊断 (review UI-04).
-        hintKey: "backend-upgrade.pageHint",
+        hintKey: "settings.pageHint.backend",
         headerLink: { page: "updates", labelKey: "backend-upgrade.desktopLink" },
         requires: { capabilities: [BACKEND_UPGRADE_FEATURE] },
         useBadge: useUpgradeBadge,

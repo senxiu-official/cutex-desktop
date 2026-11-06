@@ -10,7 +10,6 @@ import {
   deriveActivity,
   filterActivity,
   groupMembers,
-  IDLE_FOLD_MS,
   initState,
   kindCounts,
   NO_LOAD,
@@ -25,6 +24,7 @@ import {
   type MemberInput,
   type MemberLoad,
 } from "../src/renderer/src/modules/project-view/model";
+import { RECENT_MS } from "../src/renderer/src/lib/rosterTiers";
 
 const NOW = Date.parse("2026-10-21T10:00:00Z");
 const min = (n: number) => NOW - n * 60_000;
@@ -71,32 +71,33 @@ describe("grouping and folding", () => {
     expect(tierOf(member("x", { lastActivity: min(300) }), load({ delegationsOut: 1 }), NOW)).toBe("recent");
     expect(tierOf(member("x", { lastActivity: min(300) }), load({ jobs: 1 }), NOW)).toBe("recent");
     expect(tierOf(member("x", { lastActivity: min(300) }), load({ subagents: 1 }), NOW)).toBe("recent");
-    // The fold boundary.
-    expect(tierOf(member("x", { lastActivity: NOW - IDLE_FOLD_MS + 1 }), NO_LOAD, NOW)).toBe("recent");
-    expect(tierOf(member("x", { lastActivity: NOW - IDLE_FOLD_MS }), NO_LOAD, NOW)).toBe("idle");
-    expect(tierOf(member("x", { signal: "offline", online: false, lastActivity: min(200) }), NO_LOAD, NOW)).toBe("idle");
+    // The fold boundary: the sidebar's 7 days (lib/rosterTiers RECENT_MS).
+    expect(tierOf(member("x", { lastActivity: NOW - RECENT_MS + 1 }), NO_LOAD, NOW)).toBe("recent");
+    expect(tierOf(member("x", { lastActivity: NOW - RECENT_MS }), NO_LOAD, NOW)).toBe("idle");
+    expect(tierOf(member("x", { signal: "offline", online: false, lastActivity: NOW - 8 * 24 * 60 * 60_000 }), NO_LOAD, NOW)).toBe("idle");
   });
 
-  it("the Director gets its own card (project summary first, else the director row); groups sort by newest activity", () => {
+  it("the Director gets its own card (project summary first, else the director row); groups sort like the sidebar (online first, then name)", () => {
     const members = [
       member("dir", { isDirector: true, signal: "running" }),
       member("r1", { signal: "running", lastActivity: min(3) }),
       member("r2", { signal: "running", lastActivity: min(1) }),
       member("n1", { signal: "error", lastActivity: min(4) }),
       member("n2", { signal: "needsYou", lastActivity: min(2) }),
-      member("i1", { lastActivity: min(90) }),
-      member("i2", { lastActivity: min(45), online: false, signal: "offline" }),
+      member("i1", { lastActivity: NOW - RECENT_MS - min(90) }),
+      member("i2", { lastActivity: NOW - RECENT_MS - min(45), online: false, signal: "offline" }),
       member("w", { lastActivity: min(12) }),
     ];
     const g = groupMembers(members, () => NO_LOAD, NOW);
     expect(g.director?.id).toBe("dir");
-    expect(g.needsYou.map((m) => m.id)).toEqual(["n2", "n1"]);
-    expect(g.running.map((m) => m.id)).toEqual(["r2", "r1"]);
+    expect(g.needsYou.map((m) => m.id)).toEqual(["n1", "n2"]);
+    expect(g.running.map((m) => m.id)).toEqual(["r1", "r2"]);
     expect(g.recent.map((m) => m.id)).toEqual(["w"]);
-    expect(g.idle.map((m) => m.id)).toEqual(["i2", "i1"]);
+    expect(g.idle.map((m) => m.id)).toEqual(["i1"]);
+    expect(g.offline.map((m) => m.id)).toEqual(["i2"]);
     // The summary's Director wins over a stale director flag.
     expect(groupMembers(members, () => NO_LOAD, NOW, { directorId: "w" }).director?.id).toBe("w");
-    expect(groupMembers(members, () => NO_LOAD, NOW, { directorId: "w" }).running.map((m) => m.id)).toEqual(["dir", "r2", "r1"]);
+    expect(groupMembers(members, () => NO_LOAD, NOW, { directorId: "w" }).running.map((m) => m.id)).toEqual(["dir", "r1", "r2"]);
     // No director at all.
     expect(groupMembers(members.slice(1), () => NO_LOAD, NOW).director).toBeNull();
   });
@@ -105,7 +106,7 @@ describe("grouping and folding", () => {
     const members = [member("a", { signal: "running" }), member("b", { signal: "needsYou" }), member("c", { lastActivity: min(500) })];
     const g = groupMembers(members, () => NO_LOAD, NOW, { needsOnly: true });
     expect(g.needsYou.map((m) => m.id)).toEqual(["b"]);
-    expect([...g.running, ...g.recent, ...g.idle]).toEqual([]);
+    expect([...g.running, ...g.recent, ...g.idle, ...g.offline]).toEqual([]);
   });
 
   it("counts: online, running and needs-you (errors included)", () => {
@@ -255,13 +256,13 @@ describe("pane params and state", () => {
   });
 
   it("init keeps the previous filters; restore drops what it does not know", () => {
-    const prev = { hostId: "h", projectId: "p", needsOnly: true, kinds: ["publish" as const], idleOpen: true, evKinds: ["turn" as const], evAgent: "cutex.a", runOpen: false };
+    const prev = { hostId: "h", projectId: "p", needsOnly: true, kinds: ["publish" as const], idleOpen: true, offlineOpen: false, evKinds: ["turn" as const], evAgent: "cutex.a", runOpen: false };
     expect(initState({ hostId: "h", projectId: "q" }, prev)).toEqual({ ...prev, projectId: "q" });
-    expect(initState({}, null)).toEqual({ hostId: null, projectId: null, needsOnly: false, kinds: [], idleOpen: false, evKinds: [], evAgent: null, runOpen: null });
-    expect(restoreState({ hostId: "h", projectId: "p", needsOnly: true, kinds: ["publish", "bogus", "publish"], idleOpen: 1 })).toEqual({ hostId: "h", projectId: "p", needsOnly: true, kinds: ["publish"], idleOpen: false, evKinds: [], evAgent: null, runOpen: null });
+    expect(initState({}, null)).toEqual({ hostId: null, projectId: null, needsOnly: false, kinds: [], idleOpen: false, offlineOpen: false, evKinds: [], evAgent: null, runOpen: null });
+    expect(restoreState({ hostId: "h", projectId: "p", needsOnly: true, kinds: ["publish", "bogus", "publish"], idleOpen: 1 })).toEqual({ hostId: "h", projectId: "p", needsOnly: true, kinds: ["publish"], idleOpen: false, offlineOpen: false, evKinds: [], evAgent: null, runOpen: null });
     expect(restoreState({ evKinds: ["ask", "nope", "ask"], evAgent: "cutex.b", runOpen: true })).toMatchObject({ evKinds: ["ask"], evAgent: "cutex.b", runOpen: true });
     expect(restoreState({ evAgent: 7, runOpen: "yes" })).toMatchObject({ evKinds: [], evAgent: null, runOpen: null });
-    expect(restoreState({ projectId: "p" })).toEqual({ hostId: null, projectId: null, needsOnly: false, kinds: [], idleOpen: false, evKinds: [], evAgent: null, runOpen: null });
+    expect(restoreState({ projectId: "p" })).toEqual({ hostId: null, projectId: null, needsOnly: false, kinds: [], idleOpen: false, offlineOpen: false, evKinds: [], evAgent: null, runOpen: null });
     expect(restoreState("x")).toBeNull();
   });
 

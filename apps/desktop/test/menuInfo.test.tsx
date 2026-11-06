@@ -71,3 +71,20 @@ it("the tooltip shows for the hovered row only, and moves with the arrows", () =
   act(() => void document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
   expect(document.querySelector("[data-menu-info-tip]")!.textContent).toBe("2 个窗格会一起关闭，可撤销");
 });
+
+it("a disabled row's reason is its ⓘ: shown on hover like any other, read as its description (owner 2026-11-05)", () => {
+  act(() => openMenuAt(10, 10, [
+    { label: "分叉为新智能体", disabled: true, title: "运行时不支持分叉", onSelect: () => {} },
+    { label: "复制", title: "复制名字", onSelect: () => {} },
+  ]));
+  const [fork, copy] = rows();
+  expect(fork!.querySelector("[data-menu-info]")).not.toBeNull();
+  expect(document.getElementById(fork!.getAttribute("aria-describedby")!)!.textContent).toBe("运行时不支持分叉");
+  expect(fork!.parentElement!.getAttribute("title")).toBeNull();
+  act(() => fork!.parentElement!.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+  expect(document.querySelector("[data-menu-info-tip]")!.textContent).toBe("运行时不支持分叉");
+  // An enabled row's title is the app tip (no native title in a menu).
+  expect(copy!.querySelector("[data-menu-info]")).toBeNull();
+  expect(copy!.parentElement!.getAttribute("data-tip")).toBe("复制名字");
+  expect(copy!.parentElement!.getAttribute("title")).toBeNull();
+});

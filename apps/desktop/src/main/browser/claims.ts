@@ -181,7 +181,7 @@ export class BrowserClaimCoordinator {
     const url = browserClaimOpenTarget(details.urlHint, owned);
     if (!url) throw new BrowserRelayError("external_pages_unavailable");
     const k = key(hostId, approvalId);
-    if (this.running.has(k)) throw new BrowserRelayError("busy");
+    if (this.running.has(k)) throw new BrowserRelayError("busy", undefined, undefined, { reason: "claim_running" });
     this.running.add(k);
     try {
       const tab = await this.deps.openTab(hostId, url, approval.requesterCutexSessionId);

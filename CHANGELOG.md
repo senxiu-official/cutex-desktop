@@ -1,9 +1,41 @@
 # Changelog
 
-## 0.2.1 (2026-11-03)
+## 0.2.2 "Beautiful World" (2026-11-06)
 
-- Message delivery follows the host's message ledger on newer backends (r274 and later): sending, queued, delivered and uncertain states come straight from the host. Older backends keep working through the previous path.
-  在较新的后端（r274 起）上，消息投递状态直接来自主机的消息台账：发送中、排队、已送达、结果不明都以主机为准。旧后端继续走原来的方式，照常可用。
+- Remote sidebars display agents progressively and show the last known list during startup synchronization. Archived agents load on demand; hosts outside the current view poll less frequently. A failed session read retains entries already loaded.
+  远程侧栏逐步显示智能体，启动同步期间显示上次列表。归档智能体按需加载，当前视图外的主机降低轮询频率；单个会话读取失败时保留已加载的条目。
+
+- Streaming Markdown aligns headings, code blocks, tables and list spacing to the device-pixel grid at fractional display scales.
+  非整数显示缩放下，流式 Markdown 的标题、代码块、表格和列表间距对齐设备像素网格。
+
+- Profile quota cards can show a fresh reading from a linked host when this host has no usable reading; an expired reset is shown as unknown.
+  本机没有可用读数时，Profile 额度卡可显示关联主机的新读数；已过期的重置时间显示为未知。
+
+- The sidebar groups online idle and offline agents separately, keeps active work visible, and lets you choose the name order. Independent agents and quick chats sit alongside project folders. System rows offer a dashed line or grey band; reordering waits until you leave the roster.
+  侧栏分别收起在线空闲与离线智能体，保留正在处理的工作，并可选择名字排序方式。独立智能体和快速会话与项目文件夹并列显示。系统行可选虚线或灰底条；列表等鼠标离开后再重排。
+
+- Type p@ or m@ to insert a profile or model reference. Choices include supported reasoning efforts; references remain explicit in sent messages.
+  输入 p@ 或 m@ 可插入 Profile 或模型引用，并选择支持的思考强度；发送后的消息保留明确的引用文字。
+
+- Rename agents without changing their identity; earlier names remain available for lookup on supported hosts.
+  支持的主机允许智能体改名，身份保持不变，原名仍可用于查找。
+
+- Browser tools share a persistent JavaScript session for inspecting pages and running steps. Browser errors include clearer diagnostics.
+  浏览器工具可在持久的 JavaScript 会话中查看网页和执行步骤；浏览器错误提供更清楚的诊断。
+
+- Waiting delegations show what they are waiting for. Message receipts, retry actions, failed-turn notices and runtime upgrade results are clearer.
+  等待中的委托显示正在等待的事件；消息回执、重试操作、失败回合提示和运行时升级结果更清楚。
+
+- Optional per-user layout memory follows your layout choices across supported hosts. Services can sleep after a chosen idle period and start again when opened through their service link.
+  可选的个人布局记忆可在支持的主机间同步布局选择。服务可在指定的空闲时间后休眠，并在通过服务链接打开时重新启动。
+
+- Compatibility: pair with cutex 0.2.1 for the new host features. The desktop detects older hosts automatically. Existing agents retain their runtime pins until you explicitly upgrade them.
+  兼容性：新主机功能需要 cutex 0.2.1；桌面会自动识别旧主机。已有智能体继续使用固定的运行时，直到你明确升级。
+
+## 0.2.1 "Beautiful World" (2026-11-03)
+
+- Message delivery follows the host's message ledger on newer backends (cutex 0.2.1 and later): sending, queued, delivered and uncertain states come straight from the host. Older backends keep working through the previous path.
+  在较新的后端（cutex 0.2.1 起）上，消息投递状态直接来自主机的消息台账：发送中、排队、已送达、结果不明都以主机为准。旧后端继续走原来的方式，照常可用。
 
 - Shelf pages open by clearer rules, the Rail scrolls when it holds many pages, and the Rail fits more pages; the add-page button stays after the page list.
   Shelf 页面的打开位置规则更清楚；Rail 页面多时可以滚动，也能放更多页面；添加页面按钮固定在页面列表之后。
@@ -53,7 +85,7 @@
 - Side chat explains rejected input and runtime errors, and keeps the draft editable.
   侧聊显示具体的输入或运行时错误，失败后草稿仍可编辑，不再只显示 invalid text。
 
-- Avatar theme cards show one portrait per card. Portraits are AI-generated, unpolished, and may change in later versions.
+- Avatar theme cards show one portrait per card. Portraits are AI-generated and may be revised in later versions.
   头像主题卡片每张显示一幅立绘。头像为 AI 生成，未精修，后续版本随时可能更换。
 
 **Conversation and workspace**
@@ -72,7 +104,7 @@
 
 **Portraits and experimental windows**
 
-- The new default avatar pack includes 20 themes and 720 portraits, with different portraits assigned within a project where possible. The images are AI-generated, unpolished, and may change in any later version; the package is about 50 MB larger.
+- The new default avatar pack includes 20 themes and 720 portraits, with different portraits assigned within a project where possible. The images are AI-generated and may be revised in later versions; the package is about 50 MB larger.
   新版默认头像包含二十套主题、七百二十张立绘，同一项目尽量分配不同头像。AI 生成，未精修，后续版本随时可能更换；安装包约增加五十兆。
 
 - Multi-window remains experimental and off by default. Extra windows can increase CPU usage; opening three or more windows shows a one-time notice.
@@ -80,13 +112,13 @@
 
 **Host capabilities and services**
 
-- On r267 hosts with the matching capabilities, use delegation routing approvals, remote file copies, project services, eligible service owners, Kimi accounts, DSH relay addresses and runtime variants. Older hosts keep their supported controls.
+- On hosts with the matching capabilities, use delegation routing approvals, remote file copies, project services, eligible service owners, Kimi accounts, DSH relay addresses and runtime variants. Older hosts keep their supported controls.
   搭配新版主机及对应能力，可使用委托路由审批、远程文件副本、项目服务、合适的服务负责人、账号管理、中转地址和运行时变体；这些入口需要后端升级至对应版本，旧主机继续显示它支持的功能。
 
 - DSH and Kimi are labelled experimental. Existing agents keep their pinned runtimes; this desktop package does not upgrade the daemon.
   两种新增提供商均标为实验功能；已有智能体继续使用固定的运行时，桌面安装包不会升级后端。
 
-- Automatic-retry waiting status requires cutex r268 and stays hidden on older hosts.
+- Automatic-retry waiting status appears only when the host advertises support.
   等待自动重试状态需要后端升级至下一版本；旧主机暂不显示。
 
 - Service and browser pages remember zoom; image menus offer viewing, copying and saving. Remote file copies support progress, cancellation and per-copy retention.
@@ -94,8 +126,8 @@
 
 **Delegations and message recovery**
 
-- On r266 hosts, review delegation approvals, pause a group, stop descendants, control continuation rounds and budgets, and close stuck agent messages with a recorded reason. Older hosts keep their supported controls.
-  搭配 r266 主机，可以复核委托审批、批量暂停、停止后续委托、管理续轮和额度，并带理由关闭卡住的智能体消息。旧主机继续显示它支持的入口。
+- On supported hosts, review delegation approvals, pause a group, stop descendants, control continuation rounds and budgets, and close stuck agent messages with a recorded reason. Older hosts keep their supported controls.
+  在支持这些能力的主机上，可以复核委托审批、批量暂停、停止后续委托、管理续轮和额度，并带理由关闭卡住的智能体消息。旧主机继续显示它支持的入口。
 
 - Abandoned or stopped delegations leave project cards after the confirmed state arrives; pending decisions refresh when the host reconnects or the window regains focus.
   放弃或停止委托后，项目卡片会按确认后的状态更新；主机重连或窗口重新获得焦点时，会重新核对待处理事项。
@@ -128,16 +160,16 @@
 - Background reads share bounded host queues and 503 cooldowns while foreground actions remain responsive. SSH hosts can try ordered addresses, with forwarding disabled and host identity checked.
   后台读取共用有上限的主机队列和 503 等待，前台操作仍可及时响应。SSH 主机可按顺序尝试多个地址，禁用转发，并核对主机身份。
 
-- Fix sending images to cutex r259 by uploading attachments before submitting the message.
-  修复向 cutex r259 发送图片失败的问题：先上传附件，再提交消息。
+- Fix image submission by uploading attachments before submitting the message.
+  修复图片发送失败的问题：先上传附件，再提交消息。
 
 **Upgrade and host support**
 
-- Cutex 0.2.0 “Beautiful World” brings the new workspace, Shelf and tray layout together with guided setup, clearer settings and better collaboration. Upgrade from 0.1.x without creating new agents or changing their pinned runtimes.
+- Cutex 0.2.0 “Beautiful World” adds workspace groups, Shelf and tray layouts, guided setup, reorganized settings and collaboration controls. Upgrade from 0.1.x without creating new agents or changing their pinned runtimes.
   本次更新把工作区、Shelf 和托盘的新布局，与入门引导、设置整理和协作改进放在一起。从旧版本升级时，无须重新创建智能体，也不会自动更换已有会话固定使用的运行时。
-- Use cutex r259 and claude-r28 for the complete release. Event-blob images, agent pause/resume and the Claude Code source choice require the corresponding r259 host capabilities. Update the desktop and each host separately.
-  完整功能搭配主机后端 r259 和运行时 claude-r28 使用。图片引用、智能体暂停与继续、Claude 来源选择，需要主机提供对应的新功能。桌面应用和各台主机需要分别更新。
-- Older r258 or r252 hosts remain usable. Supported conversations and tools stay available; pause controls and Claude source selection stay unavailable when the host does not advertise them. Existing inline images and older history-media references remain readable. An unavailable image shows a placeholder instead of failing the conversation.
+- Event-blob images, agent pause/resume and the Claude Code source choice require matching host and runtime capabilities. Update the desktop and each host separately.
+  图片引用、智能体暂停与继续、Claude 来源选择，需要主机和运行时声明相应能力。桌面应用和各台主机需要分别更新。
+- Older hosts remain usable. Supported conversations and tools stay available; pause controls and Claude source selection stay unavailable when the host does not advertise them. Existing inline images and older history-media references remain readable. An unavailable image shows a placeholder instead of failing the conversation.
   旧主机仍可连接，原有会话和工具继续按主机支持的功能使用。主机不支持时，不显示智能体暂停入口，也不能选择新的模型程序来源。旧版内嵌图片和历史图片仍可读取，暂时无法读取的图片显示占位提示，不会让整个会话打不开。
 
 **Workspaces and Shelf**
@@ -159,7 +191,7 @@
   项目可以显示主管和副主管、主管变更通知、待交接事项，以及需要复核的启动记录。入口按主机功能和你的权限显示，角色称呼仍可自定义。
 - Type @ in the composer to choose an agent or a file. Agent mentions appear as avatar chips, keep the exact agent identity when copied or pasted, and open that agent when clicked, including on another host.
   在输入框输入 @，可以选择智能体或文件。智能体会显示为头像标签，复制、粘贴后仍指向同一个成员；点击可以打开对应会话，也支持另一台主机上的成员。
-- Pause an agent to let its current turn finish before it stops starting new turns. Later messages, delegations and reminders wait until you resume it. This is separate from pausing new delegations, which leaves running delegations alone. Requires an r259 host.
+- Pause an agent to let its current turn finish before it stops starting new turns. Later messages, delegations and reminders wait until you resume it. This is separate from pausing new delegations, which leaves running delegations alone. Requires the matching host capability.
   暂停智能体时，它会先完成当前这一轮，再停止开始新的一轮。后续消息、委托和提醒排队等待，继续后再处理。这与「暂停新委托」不同，后者不会停止正在执行的委托；智能体暂停需要新版主机。
 - Character avatar themes can be mixed, while emoji and initials remain available. A one-time cleanup removes accidentally saved default emoji so those agents follow the chosen avatar style again. Director headwear includes crown and mianguan styles, with agent state still visible.
   拟人头像主题可以混用，也保留表情和首字头像。升级时会一次性清除以前误保存的默认表情，让这些智能体重新跟随所选头像风格。主管头饰新增王冠和冕旒，工作状态仍显示在头像上。
@@ -168,7 +200,7 @@
 
 - The composer and Next panel work together. Queue, steer and next-turn delivery are labelled more accurately, including Claude messages with images. Messages already read or cancelled leave the pending list without jumping the layout.
   输入框和「接下来」面板一起工作。排队、插入和下一轮发送的说明更准确，也能区分带图片的消息。已经读取或取消的消息会离开待处理列表，布局不会因此来回跳动。
-- Large event images use authenticated blob references on r259 instead of being copied repeatedly through the event stream. Lazy loading reserves the image’s space when its dimensions are known. Existing inline images remain supported.
+- Large event images use authenticated blob references on supporting hosts instead of being copied repeatedly through the event stream. Lazy loading reserves the image’s space when its dimensions are known. Existing inline images remain supported.
   新版主机把大图片作为经过授权的引用传递，减少事件中反复复制图片造成的内存和存储占用。延后加载时，会尽量按已知尺寸保留图片位置；旧的内嵌图片格式继续支持。
 - Enlarge images in the side pane, zoom or pan them, and copy the image itself. Editing queued messages keeps their image attachments. HTML files can be viewed as an offline page or as source.
   图片可以在侧边放大、缩放、移动，并复制图片本身。编辑排队消息时会保留图片附件；本地网页文件可以离线查看页面，也可以切换到源码。
@@ -181,7 +213,7 @@
   新建智能体时，可以先选择提供方，再获得配置推荐。支持分叉的智能体可以选择同一提供方的另一个配置，确认前会预览目标配置和提示缓存是否共用。
 - Recognise the same account on different hosts, link it manually when needed, undo a link, and choose whether linked Profiles share appearance. Quota and usage views explain their account grouping more clearly.
   可以识别不同主机上的同一个账号，必要时手动关联，并撤销关联。关联的配置可以选择是否共用外观；额度和用量页面也会更清楚地说明账号归组方式。
-- Claude setup shows runtime readiness. claude-r28 includes Python and Claude Code; with r259, choose the bundled Claude Code or a version detected on the host. Per-model context and auto-compaction settings include more presets. Existing agents keep their pinned runtime until you explicitly upgrade them.
+- Claude setup shows runtime readiness. Bundled components include Python and Claude Code; supporting hosts let you choose the bundled CLI or a detected system version. Per-model context and auto-compaction settings include more presets. Existing agents keep their pinned runtime until you explicitly upgrade them.
   引导会显示运行时是否就绪。新版 Claude 运行时随附解释器和模型程序；搭配新版主机，可以选择随附程序或主机上检测到的已安装版本。各模型的上下文和自动压缩设置增加了预设。已有智能体继续使用固定的运行时，直到你明确升级它们。
 
 **Services, approvals and storage**
@@ -737,7 +769,7 @@ Known issues: [docs/KNOWN-ISSUES.md](https://github.com/senxiu-official/cutex-de
 
 ## 0.1.3 "First Take" (2026-10-17)
 
-In-app browser you can actually work in, "Auto" decided by Codex's automatic reviewer, Windows
+In-app browser networking and shared-tab controls, "Auto" decided by Codex's automatic reviewer, Windows
 sandbox setup in one click, and copying a Profile to another host. Pairs with cutex 0.1.2 (several
 items need it; older hosts keep working without them).
 内置浏览器可以正常使用（HTTPS、局域网地址、和智能体共用标签、下载与网站权限）；「自动」改由 Codex 自动审批员决定；
@@ -797,7 +829,7 @@ Windows 沙箱一键设置；Profile 可复制到其他主机。配合 cutex 0.1
 - In-app browser: handing a tab to an agent now says why the grant ended instead of a bare
   "Control was revoked", e.g. the window or card is not visible (minimized, or on Windows fully covered
   by another window) or the host refused it. Agents only have `browser_*` tools when their profile has
-  "Browser tools" on, they were started after that, and their runtime's facade is cutex r228 or newer.
+  "Browser tools" on, they were started after that, and their runtime's facade advertises the browser tool contract.
   交给智能体失败时会显示具体原因（例如窗口不可见）。
 
 **Permissions and approvals**

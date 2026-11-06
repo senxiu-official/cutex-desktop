@@ -222,12 +222,17 @@ export interface CapturedPolicyDifference {
   expectedSurface: "nextUp";
 }
 
-/** Current owner rule versus captured C2 policy. Diagnostic only: NEVER rewrite captured surfaces. */
+/** Diagnose only with an explicit running-turn observation. Original captures
+ * without SessionDelivery cannot distinguish an idle busy host from a running
+ * turn (owner decision 2026-11-04). Never rewrite historical surfaces. */
 export function capturedPolicyDifferences(entries: readonly CapturedTraceEntry[]): CapturedPolicyDifference[] {
+  const deliveries = new Map<string, SessionDelivery>();
   return capturedOperations(entries).flatMap(operation => {
+    if (operation.type === "snapshot" && operation.snapshot.delivery) deliveries.set(operation.sessionId, operation.snapshot.delivery);
+    if (operation.type === "event" && operation.method === SESSION_DELIVERY_CHANGED) deliveries.set(operation.sessionId, operation.params.delivery as unknown as SessionDelivery);
     if (operation.type !== "event" || operation.entry.source !== "session" || operation.method !== INPUT_STATE_CHANGED) return [];
     const record = operation.params.record as unknown as InputRecord;
-    return record.kind === "owner" && record.state === "waiting" && record.reason === "hostBusy" && record.surface !== "nextUp"
+    return deliveries.get(operation.sessionId)?.turn != null && record.kind === "owner" && record.state === "waiting" && record.reason === "hostBusy" && record.surface !== "nextUp"
       ? [{ rule: "ownerHostBusySurface" as const, entry: operation.entry, record, expectedSurface: "nextUp" as const }] : [];
   });
 }

@@ -27,9 +27,10 @@ import { liveConversation, peekConvShelf, updateLayout, useConvShelfVersion, use
 import { sideReveal, sideShowsHost } from "./sideServices";
 import { showShelfToast } from "./shelves";
 import { trayPins, type TrayPinRef } from "./trayPins";
+import { SERVICE_COMPONENT } from "./sideKinds";
 
 /** The in-app browser tab (module `browser`, opened by id — never imported). */
-export const SERVICE_TAB = "browser.tab";
+export const SERVICE_TAB = SERVICE_COMPONENT;
 
 const SERVICE_URL = /^cutex:service\/([a-z0-9][a-z0-9-]{0,62})(?:[/?]|$)/;
 

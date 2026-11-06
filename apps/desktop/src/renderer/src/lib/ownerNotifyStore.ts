@@ -8,6 +8,7 @@
 // the focus host's (the host the app shows), `others` the rest (their count, notifications); a host's
 // records go when its connection is replaced or it is removed (lib/hostSwitch onHostReset).
 import { create } from "zustand";
+import { NOTIFICATION_PAGES_FEATURE } from "../../../shared/notificationPaging";
 import type { OwnerNotification } from "@cutex-desktop/protocol";
 import type { DaemonApi, OwnerNotifyAction, OwnerNotifyResult, SafetyCheckDecision, SafetyCheckResult } from "../../../shared/ipc";
 import { deletedIdOfEvent, isAlerting, isPending, isSystemNotice, mergeRecords, OWNER_NOTIFY_CREATED, OWNER_NOTIFY_FEATURE, previewText, recordOfEvent } from "../../../shared/ownerNotify";
@@ -26,6 +27,8 @@ export interface OwnerNotifyStore {
   byId: Records;
   /** The other connected hosts' records by host id (their attention count and notifications). */
   others: Readonly<Record<string, Records>>;
+  /** Bounded history state, scoped to the host connection and agent. */
+  history: Readonly<Record<string, OwnerNotificationHistoryState>>;
   reset(): void;
 }
 
@@ -35,16 +38,18 @@ interface HostNotes {
   /** Records the owner deleted (this host): later copies from lists / events are ignored. */
   deleted: Set<string>;
   refreshTimer: ReturnType<typeof setTimeout> | null;
+  pages: Map<string, HistoryRequest>;
 }
 const hosts = new Map<string, HostNotes>();
 
 export const useOwnerNotify = create<OwnerNotifyStore>((set) => ({
   byId: {},
   others: {},
+  history: {},
   reset: () => {
     for (const notes of hosts.values()) if (notes.refreshTimer) clearTimeout(notes.refreshTimer);
     hosts.clear();
-    set({ byId: {}, others: {} });
+    set({ byId: {}, others: {}, history: {} });
   },
 }));
 
@@ -81,7 +86,7 @@ const daemonOf = (hostId: string): DaemonApi => (isFocus(hostId) ? api : apiFor(
 function notesOf(hostId: string): HostNotes {
   let notes = hosts.get(hostId);
   if (!notes) {
-    notes = { byId: {}, notified: new Set(), deleted: new Set(), refreshTimer: null };
+    notes = { byId: {}, notified: new Set(), deleted: new Set(), refreshTimer: null, pages: new Map() };
     hosts.set(hostId, notes);
   }
   return notes;
@@ -103,6 +108,100 @@ function supported(hostId: string): boolean {
   const s = app?.getState();
   if (!s) return false;
   return isFocus(hostId) ? s.features.has(OWNER_NOTIFY_FEATURE) : !!s.byHost?.[hostId]?.features.has(OWNER_NOTIFY_FEATURE);
+}
+
+/** A missing entry means this view has not requested its first bounded page yet. */
+export interface OwnerNotificationHistoryState {
+  cursor: string | null;
+  loading: boolean;
+  error: string | null;
+}
+interface HistoryRequest {
+  state: OwnerNotificationHistoryState;
+  seen: Set<string>;
+  inflight?: Promise<void>;
+}
+export const ownerNotificationHistoryKey = (hostId: string, agentId: string): string => JSON.stringify([hostId, agentId]);
+
+function publishHistory(hostId: string, agentId: string, page: HistoryRequest): void {
+  useOwnerNotify.setState(s => ({ history: { ...s.history, [ownerNotificationHistoryKey(hostId, agentId)]: page.state } }));
+}
+
+function pagesSupported(hostId: string): boolean {
+  const s = app?.getState();
+  const features = isFocus(hostId) ? s?.features : s?.byHost?.[hostId]?.features;
+  return !!features?.has(NOTIFICATION_PAGES_FEATURE);
+}
+
+function cursorExpired(error: unknown): boolean {
+  const e = error as { status?: number; code?: string } | null;
+  if (typeof e?.status === "number" || typeof e?.code === "string") {
+    return (e.status === 400 && e.code === "invalid_cursor") || (e.status === 409 && e.code === "resync_required");
+  }
+  // Electron retains Error.message only. CutexApiError prefixes the daemon code in it;
+  // match that exact prefix, including the optional Electron wrapper, not arbitrary text.
+  return error instanceof Error && /^(?:Error invoking remote method '[^']+': )?(?:(?:CutexApi)?Error: )?(?:invalid_cursor|resync_required):/.test(error.message);
+}
+
+/** One explicit page per request, independent of native turn history. No automatic draining. */
+export function loadOwnerNotificationHistory(hostId: string, agentId: string): Promise<void> {
+  if (!supported(hostId) || !pagesSupported(hostId)) return Promise.resolve();
+  const notes = notesOf(hostId);
+  let page = notes.pages.get(agentId);
+  if (page?.inflight) return page.inflight;
+  if (page && !page.state.cursor && !page.state.error) return Promise.resolve();
+  if (!page) {
+    page = { state: { cursor: null, loading: false, error: null }, seen: new Set() };
+    notes.pages.set(agentId, page);
+  }
+  const request = page;
+  // Bind to this host, including retries after the focus host changes.
+  const daemon = apiFor(hostId);
+  const current = () => hosts.get(hostId) === notes && notes.pages.get(agentId) === request;
+  request.state = { ...request.state, loading: true, error: null };
+  // Install the promise before publishing (subscribers can reenter); errors remain visible for retry.
+  request.inflight = Promise.resolve().then(async () => {
+    let restarted = false;
+    try {
+      while (current()) {
+        const cursor = request.state.cursor;
+        try {
+          const before = notes.byId;
+          const result = await daemon.ownerNotificationsPage({ filter: "all", agentId, limit: 50, ...(cursor ? { cursor } : {}) });
+          if (!current()) return;
+          const next = result.nextCursor || null;
+          if (next && (next === cursor || request.seen.has(next))) {
+            request.seen.clear();
+            request.state = { cursor: null, loading: false, error: null };
+            throw new Error("Notification history cursor did not advance");
+          }
+          // Stable cache rows can be reconciled by this snapshot. Changes from live events,
+          // bootstrap or actions after the read began win; merge also checks deletion tombstones.
+          merge(hostId, result.notifications.filter(r => r.agentId === agentId &&
+            (!notes.byId[r.notificationId] || notes.byId[r.notificationId] === before[r.notificationId])));
+          if (cursor) request.seen.add(cursor);
+          request.state = { cursor: next, loading: false, error: null };
+          return;
+        } catch (error) {
+          if (!current()) return;
+          if (!restarted && cursorExpired(error)) {
+            restarted = true;
+            request.seen.clear();
+            request.state = { cursor: null, loading: true, error: null };
+            continue;
+          }
+          throw error;
+        }
+      }
+    } catch (error) {
+      if (current()) request.state = { ...request.state, loading: false, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      request.inflight = undefined;
+      if (current()) publishHistory(hostId, agentId, request);
+    }
+  });
+  publishHistory(hostId, agentId, request);
+  return request.inflight;
 }
 
 /**
@@ -156,15 +255,18 @@ export async function refreshPendingOwnerNotes(hostId = focusHost()): Promise<vo
   if (!supported(hostId)) return;
   const daemon = daemonOf(hostId);
   const notes = notesOf(hostId);
+  const before = notes.byId;
   try {
     const pending = await daemon.ownerNotifications({ filter: "pending", limit: 500 });
     if (hosts.get(hostId) !== notes) return; // that host's connection was replaced meanwhile
     const listed = new Set(pending.map((r) => r.notificationId));
-    const stale = Object.values(notes.byId).filter((r) => isPending(r) && !listed.has(r.notificationId));
-    merge(hostId, pending);
+    const stale = Object.values(notes.byId).filter((r) => before[r.notificationId] === r && isPending(r) && !listed.has(r.notificationId));
+    // Live/action/bootstrap records changed while this snapshot was read take precedence.
+    merge(hostId, pending.filter(r => notes.byId[r.notificationId] === before[r.notificationId]));
     for (const agentId of new Set(stale.map((r) => r.agentId))) {
+      const rereadBefore = notes.byId;
       void daemon.ownerNotifications({ filter: "all", agentId, limit: 50 }).then((records) => {
-        if (hosts.get(hostId) === notes) merge(hostId, records);
+        if (hosts.get(hostId) === notes) merge(hostId, records.filter(r => notes.byId[r.notificationId] === rereadBefore[r.notificationId]));
       }, () => {});
     }
   } catch {
@@ -200,7 +302,7 @@ export async function safetyCheckAct(record: Pick<OwnerNotification, "agentId" |
  * outside it); the focus host is not switched.
  */
 export function focusOwnerNote(agentId: string, notificationId: string, hostId = focusHost()): void {
-  useFocusRequest.setState({ request: { sessionId: agentId, notificationId, nonce: Date.now() + Math.random() } });
+  useFocusRequest.setState({ request: { sessionId: agentId, hostId, notificationId, nonce: Date.now() + Math.random() } });
   const s = app?.getState();
   if (!s) return;
   if (s.openAgent) void s.openAgent(agentId, hostId);
@@ -280,6 +382,7 @@ export function startOwnerNotifySync(handle: OwnerNotifyAppHandle): void {
     if (!notes) return;
     if (notes.refreshTimer) clearTimeout(notes.refreshTimer);
     hosts.delete(hostId);
+    useOwnerNotify.setState(s => ({ history: Object.fromEntries(Object.entries(s.history).filter(([key]) => JSON.parse(key)[0] !== hostId)) }));
     publish();
   });
   handle.subscribe((state, prev) => {

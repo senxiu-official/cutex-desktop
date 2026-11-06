@@ -13,6 +13,12 @@ export type MockEvents = Omit<DesktopEvents, keyof DaemonEvents> & DaemonEvents;
 
 /** What the core mock bridge offers a module mock. */
 export interface MockCore {
+  /** Shared preview-only notification fixtures; module mocks never import dev implementation. */
+  readonly ownerNotificationPages: {
+    register(rows: import("@cutex-desktop/protocol").OwnerNotification[]): void;
+    rows(): import("@cutex-desktop/protocol").OwnerNotification[];
+    page(rows: readonly import("@cutex-desktop/protocol").OwnerNotification[], query: { filter?: import("@cutex-desktop/protocol").OwnerNotifyFilter; agentId?: string; limit?: number; cursor?: string }, shortPages?: boolean): import("@cutex-desktop/protocol").OwnerNotificationList;
+  };
   /** `?legacy`: an older cutex without dev/mockFeatures.ts MOCK_NEW_FEATURES. */
   readonly legacy: boolean;
   /** Canonical preview project/session records; never a second authority store. */

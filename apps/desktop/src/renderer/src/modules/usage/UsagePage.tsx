@@ -11,7 +11,7 @@
 // 额外目录 are still edited on one host, picked in place (the edit host).
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, ArrowRight, ArrowRightLeft, Info, X } from "lucide-react";
-import type { ProfileItem, UsagePrices, UsageReport, UsageSourceFilter } from "../../../../shared/ipc";
+import type { UsagePrices, UsageReport, UsageSourceFilter } from "../../../../shared/ipc";
 import { USAGE_SOURCES_FEATURE, type UsageSourcesView } from "../../../../shared/usageSources";
 import { useI18n, type MessageKey } from "../../i18n";
 import { AddButton, ArmedRemove, Button, ErrorNote, IconButton, Loading, PlannedCard, RefreshButton, Segmented, Select , SettingsGroup , SettingsEffectCard } from "../../components/settings/Form";
@@ -21,13 +21,14 @@ import { useUiPrefs } from "../../lib/prefs";
 import { formatBalance, gaugeName, latestObservedAt, observedClock, resetsIn, windowName, type QuotaGauge } from "../../lib/quota";
 import { formatTokens, isoDay } from "../../lib/usage";
 import { useModulePref } from "../react";
-import { buckets, buildSeries, change, claudeFiveHourGauge, CURRENCIES, listSep, remainingColor, remainingRatio, formatMoney, niceScale, OTHER, seriesColor, smoothPath, stack, TOKEN_TYPES, DEFAULT_USAGE_SPLIT, type ChartMode, type Metric, type Split } from "./chart";
+import { buckets, buildSeries, change, claudeFiveHourGauge, CURRENCIES, listSep, remainingRatio, formatMoney, niceScale, OTHER, seriesColor, smoothPath, stack, TOKEN_TYPES, DEFAULT_USAGE_SPLIT, type ChartMode, type Metric, type Split } from "./chart";
 import { modelProvider } from "../../lib/provider";
 import { withoutDeletedProfiles, type ProfileProviders } from "./provider";
 import { rawIdsTitle, withShownModels } from "./models";
 import { useModelName } from "../../lib/modelDisplay";
 import { useCached } from "./useCached";
 import { useProfileProviders } from "./useProfileProviders";
+import { GaugeBar } from "../../components/GaugeBar";
 import { ProfileAvatar } from "../../components/ProfileAvatar";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { profileColor } from "../../lib/profileLook";
@@ -38,7 +39,6 @@ import { useHostScope, useHostsData } from "../../lib/useHostScope";
 import { HostPicker } from "../../components/HostPicker";
 import { AllViewContext, loadHostsUsage, useAllView, useHostsProfileProviders, type AllView, type HostResult, type HostTarget } from "./allHosts";
 import { groupProfiles, identityProfile, usageSeriesName as seriesName } from "./accountIdentity";
-import { useProfileAccountLinks } from "../../lib/profileAccountLinks";
 import { canonicalNames, mergeQuotas, mergeUsageReports, reportCurrency, type CurrencyNote, type MergedUnpriced } from "./merge";
 import { UsageSources } from "./Sources";
 import { useApp } from "../../store";
@@ -61,22 +61,14 @@ const CELL_INPUT = "w-full min-w-0 rounded-md border border-border bg-background
 
 // ---------------------------------------------------------------- quotas
 
-/** Owner: quota reads as what is left: a full bar = untouched, it shrinks (and warms) as it is used. */
-function RemainingBar({ ratio }: { ratio: number }) {
-  return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-2" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(ratio * 100)}>
-      <div className="h-full rounded-full" style={{ width: `${ratio * 100}%`, background: remainingColor(ratio) }} />
-    </div>
-  );
-}
-
 function GaugeLine({ g }: { g: QuotaGauge }) {
   const { t } = useI18n();
   const ratio = remainingRatio(g.remainingPercent);
-  const win = g.windowLabel?.match(/^(\d+)([hd])$/);
+  // Model-scoped windows already carry their real name in windowLabel (e.g. "Fable 7d").
+  const win = g.windowLabel?.match(/^(?:(.+?)\s+)?(\d+)([hd])$/);
   // A caption with a fixed meaning (`month` → 本月) names the line instead of the reader label.
   const named = g.windowLabel && windowName(g.windowLabel) !== g.windowLabel ? windowName(g.windowLabel) : null;
-  const label = win ? t(win[2] === "h" ? "usage.window.hours" : "usage.window.days", { n: win[1]! }) : named ?? (g.kind === "balance" && !g.displayLabel && g.label.length <= 3 ? t("usage.balance") : gaugeName(g));
+  const label = win ? [win[1], t(win[3] === "h" ? "usage.window.hours" : "usage.window.days", { n: win[2]! })].filter(Boolean).join(" · ") : named ?? (g.kind === "balance" && !g.displayLabel && g.label.length <= 3 ? t("usage.balance") : gaugeName(g));
   const claudeFiveHour = claudeFiveHourGauge(g);
   return (
     <div className={`grid grid-cols-[4.5rem_minmax(0,1fr)_4rem_minmax(0,8rem)] items-center gap-3 py-1 text-sm tabular-nums ${g.stale ? "opacity-60" : ""}`}>
@@ -92,7 +84,7 @@ function GaugeLine({ g }: { g: QuotaGauge }) {
         <span className="col-span-3 font-medium">{formatBalance(g.balance)}</span>
       ) : (
         <>
-          {ratio === null ? <span className="text-xs text-subtle">—</span> : <RemainingBar ratio={ratio} />}
+          {ratio === null ? <span className="text-xs text-subtle">—</span> : <GaugeBar ratio={ratio} view="remaining" gauge={g} />}
           <span className="text-right font-medium">{ratio === null ? "" : t("usage.remaining", { n: Math.round(ratio * 100) })}</span>
           <span className="truncate text-right text-xs text-subtle">{g.resetAt ? t("usage.resetsIn", { time: resetsIn(g.resetAt) }) : ""}</span>
         </>
@@ -151,7 +143,6 @@ function Quotas({ providers, settled }: { providers: ProfileProviders; settled: 
                 {profile ? <ProfileAvatar profile={profile} size={22} badge /> : <ProviderIcon provider={null} name={card.name} size={22} />}
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-medium">{card.name}</span>
-                  <QuotaAccountNote hostId={hostId} profile={profile ?? card.members[0]!.name} />
                   {card.accountKey && card.observedAt !== null && <span className="block text-caption/[inherit] text-subtle">{t("usage.link.observer" as MessageKey, { host: hostLabel, time: observedClock(card.observedAt) })}</span>}
                 </span>
               </span>
@@ -163,14 +154,6 @@ function Quotas({ providers, settled }: { providers: ProfileProviders; settled: 
       </div>
     </section></SettingsEffectCard>
   );
-}
-
-/** Reads other hosts' profile metadata; quota polling stays on the selected host. */
-function QuotaAccountNote({ hostId, profile }: { hostId: string; profile: ProfileItem | string }) {
-  const { t, locale } = useI18n();
-  const { peers } = useProfileAccountLinks(hostId, profile);
-  const hosts = [...new Set(peers.filter((peer) => peer.connected).map((peer) => peer.hostName))];
-  return hosts.length > 0 ? <span className="block text-caption/[inherit] text-muted">{t("usage.link.alsoUsed" as MessageKey, { hosts: hosts.join(listSep(locale)) })}</span> : null;
 }
 
 /**
@@ -234,7 +217,6 @@ function AllQuotas({ view }: { view: AllView }) {
                     <span className="block truncate text-sm font-medium" title={title(c)}>
                       {title(c)}
                     </span>
-                    {c.linkedHosts.length > 1 && <span className="block text-caption/[inherit] text-muted">{t("usage.link.sameAccount" as MessageKey, { hosts: c.linkedHosts.join(sep) })}</span>}
                     {c.from && (
                       <span className="block truncate text-caption/[inherit] text-subtle" title={t("usage.all.quotaHosts", { hosts: c.hosts.join(sep) })}>
                         {c.accountKey && c.observedAt !== null ? t("usage.link.observer" as MessageKey, { host: c.from, time: observedClock(c.observedAt) }) : others.length ? t("usage.all.quotaFromAlso", { host: c.from, hosts: others.join(sep) }) : t("usage.all.quotaFrom", { host: c.from })}
@@ -465,7 +447,7 @@ function Chart({ report, split, days, metric, mode, focus, onFocus, providers, m
         )}
         {hover !== null && (
           <div
-            className="pointer-events-none absolute top-1 min-w-40 rounded-lg border border-border bg-raised px-2.5 py-1.5 text-xs shadow-lg"
+            className="float pointer-events-none absolute top-1 min-w-40 px-2.5 py-1.5 text-xs"
             style={x(hover) > width / 2 ? { right: width - x(hover) + 10 } : { left: x(hover) + 10 }}
           >
             <div className="mb-1 font-medium tabular-nums">{bks[hover]!.days.length > 1 ? `${bks[hover]!.days[0]} – ${bks[hover]!.days.at(-1)!.slice(5)}` : bks[hover]!.label}</div>
@@ -958,7 +940,7 @@ function PricesDialog({ prices, host, add, usedModels, unpriced, canMap, onClose
   const cols = "grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_5.5rem_4.5rem] items-center gap-2";
   const mapCols = "grid grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_4.5rem] items-center gap-2";
   return (
-    <SettingsGroup agents="none" source="host"><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onMouseDown={onClose}>
+    <SettingsGroup agents="none" source="host"><div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/40" onMouseDown={onClose}>
       <div className="flex max-h-[85vh] w-[640px] flex-col rounded-2xl border border-border bg-surface p-5 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
         <div className="mb-1 flex items-center">
           <h3 className="font-semibold">{host ? t("usage.all.pricesOn", { host }) : t("usage.prices")}</h3>

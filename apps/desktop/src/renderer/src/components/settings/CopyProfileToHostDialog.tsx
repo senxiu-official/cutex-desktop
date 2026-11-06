@@ -92,7 +92,7 @@ export function CopyProfileToHostDialog({ item, sourceHostId, onClose }: { item:
     : t("agent-config.profile.transfer.none");
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black/30 pt-[14vh]" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
+    <div className="fixed inset-0 z-[151] flex items-start justify-center bg-black/30 pt-[14vh]" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
       <div
         role="dialog"
         aria-modal="true"

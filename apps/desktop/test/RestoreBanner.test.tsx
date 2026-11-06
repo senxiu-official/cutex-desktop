@@ -13,6 +13,7 @@ vi.mock("../src/renderer/src/lib/openOverlays", () => ({ useTrackOverlay: () => 
 vi.mock("../src/renderer/src/lib/ownerContext", () => ({ useOwnerWindow: () => window }));
 import { RestoreBanner } from "../src/renderer/src/components/RestoreBanner";
 import { HostBusyActionExhausted } from "../src/renderer/src/lib/hostBusyActions";
+import { useBackgroundOperations } from "../src/renderer/src/lib/backgroundOperations";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let div: HTMLDivElement;
@@ -21,6 +22,7 @@ const candidates = (ids: string[]) => ({ reason: "unclean_stop", items: ids.map(
 const click = async (key: string) => act(async () => { [...div.querySelectorAll("button")].find(button => button.textContent === key)!.click(); });
 
 beforeEach(async () => {
+  useBackgroundOperations.setState({operations:[]});
   vi.resetAllMocks();
   fx.host = "original";
   fx.restore.mockResolvedValue(candidates(["a", "b"]));
@@ -31,6 +33,17 @@ beforeEach(async () => {
   await act(async () => root.render(h(RestoreBanner)));
 });
 afterEach(() => { act(() => root.unmount()); div.remove(); });
+
+it("keeps restore progress and results after the initiating view unmounts", async () => {
+  let finish!: () => void;
+  fx.start.mockImplementationOnce(() => new Promise<void>(resolve => { finish=resolve; }));
+  await click("restore.all");
+  await act(async () => root.render(null));
+  expect(useBackgroundOperations.getState().operations[0]!.items.map(item=>item.state)).toEqual(["running","queued"]);
+  await act(async () => finish());
+  expect(fx.start.mock.calls.map(call=>[call[0],call[3]])).toEqual([["a","original"],["b","original"]]);
+  expect(useBackgroundOperations.getState().operations[0]!.items.map(item=>item.state)).toEqual(["done","done"]);
+});
 
 it("keeps host busy out of per-agent generic failures and continues the batch", async () => {
   fx.start.mockRejectedValueOnce(new HostBusyActionExhausted());

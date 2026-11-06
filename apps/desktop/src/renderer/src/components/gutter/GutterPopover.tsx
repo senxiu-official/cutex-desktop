@@ -87,7 +87,7 @@ export function GutterPopover({ entry, hostId, sessionId, side, anchor, edge, to
       data-gutter-popover={entry.item.id}
       role="group"
       aria-label={t(entry.item.titleKey)}
-      className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-border bg-surface text-sm shadow-xl"
+      className="float fixed z-[160] flex flex-col overflow-hidden text-sm"
       style={style}
     >
       <div className="min-h-0 flex-1 overflow-y-auto p-1">

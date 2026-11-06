@@ -216,7 +216,7 @@ export function FirstUseTips() {
   const link = "rounded-ctl text-meta text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent";
   return (
     <OwnerPortal doc={shown.anchor.ownerDocument}>
-    <div ref={box} role="note" aria-label={t(guide.title)} data-first-use-tip={guide.id} className="fixed z-50 w-80 max-w-[calc(100vw-16px)] rounded-inner border border-border bg-surface p-3 text-ui shadow-e2" style={position}>
+    <div ref={box} role="note" aria-label={t(guide.title)} data-first-use-tip={guide.id} className="float fixed z-[160] w-80 max-w-[calc(100vw-16px)] p-3 text-ui" style={position}>
       <div className="flex items-start gap-2">
         <p className="min-w-0 flex-1 font-medium text-foreground">{t(asking ? "onboarding.guide.ask.title" : guide.title)}</p>
         <button type="button" className="shrink-0 rounded-ctl p-1 text-muted hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent" aria-label={t("onboarding.tips.dismiss")} onClick={close}>

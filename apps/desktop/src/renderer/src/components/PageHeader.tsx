@@ -71,7 +71,7 @@ export function PageHeader({ paneId, page, focused, maxed, framed }: { paneId: s
         <button data-pane-close="" data-page-close="" title={closeTip} aria-label={closeTip} onClick={() => closeColumnPage(paneId)} className={CTRL_BTN}>
           <X size={14} />
         </button>
-        <button data-pane-more="" title={t("convHeader.more")} aria-label={t("convHeader.more")} aria-haspopup="menu" onClick={(e) => more(e.currentTarget)} className={CTRL_BTN}>
+        <button data-pane-more="" data-tip={t("convHeader.more")} aria-label={t("convHeader.more")} aria-haspopup="menu" onClick={(e) => more(e.currentTarget)} className={CTRL_BTN}>
           <MoreHorizontal size={14} />
         </button>
       </span>

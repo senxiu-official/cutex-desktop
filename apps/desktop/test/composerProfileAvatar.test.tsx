@@ -86,7 +86,7 @@ describe("composer profile chip avatar", () => {
     await render("Ceobe");
     expect(host.querySelector("[data-profile-account-link]")).toBeNull();
     expect(host.textContent).not.toContain("+host02");
-    const trigger = [...host.querySelectorAll<HTMLElement>("button")].find((b) => (b.title ?? "").includes("composer.quota.title"))!;
+    const trigger = [...host.querySelectorAll<HTMLElement>("button")].find((b) => (b.dataset.tip ?? "").includes("composer.quota.title"))!;
     await act(async () => trigger.click());
     expect(document.body.textContent).toContain("composer.quota.title");
     expect(document.querySelector("[data-profile-account-link]")).toBeNull();

@@ -22,7 +22,7 @@ export function GoalBudgetRing({ goal }: { goal: ThreadGoal }) {
   const { t } = useI18n();
   if (!goal.tokenBudget) return null;
   return (
-    <span className="flex shrink-0" title={t("goal.budgetRing", { used: formatGoalTokens(goal.tokensUsed), budget: formatGoalTokens(goal.tokenBudget) })}>
+    <span className="flex shrink-0" data-tip={t("goal.budgetRing", { used: formatGoalTokens(goal.tokensUsed), budget: formatGoalTokens(goal.tokenBudget) })} aria-label={t("goal.budgetRing", { used: formatGoalTokens(goal.tokensUsed), budget: formatGoalTokens(goal.tokenBudget) })} role="img">
       <Ring ratio={goal.tokensUsed / goal.tokenBudget} size={13} />
     </span>
   );
@@ -38,13 +38,13 @@ export function GoalMeta({ sessionId, data: goal }: { sessionId: string; data: T
       {/* The budget is the bar under the objective (GoalBody). */}
       <span>{formatGoalSeconds(goal.timeUsedSeconds)}</span>
       {active ? (
-        <button className={ICON_BUTTON} title={t("goal.pause")} aria-label={t("goal.pause")} onClick={() => void setGoal({ status: "paused" }, sessionId, hostId)}>
+        <button className={ICON_BUTTON} data-tip={t("goal.pause")} aria-label={t("goal.pause")} onClick={() => void setGoal({ status: "paused" }, sessionId, hostId)}>
           <Pause size={13} />
         </button>
       ) : goal.status === "complete" ? (
         <CircleCheck size={14} className="shrink-0 text-ok" aria-label={t("goal.status.complete")} />
       ) : (
-        <button className={ICON_BUTTON} title={t("goal.resume")} aria-label={t("goal.resume")} onClick={() => void setGoal({ status: "active" }, sessionId, hostId)}>
+        <button className={ICON_BUTTON} data-tip={t("goal.resume")} aria-label={t("goal.resume")} onClick={() => void setGoal({ status: "active" }, sessionId, hostId)}>
           <Play size={13} />
         </button>
       )}
@@ -58,7 +58,7 @@ export function GoalBody({ data: goal }: { sessionId: string; data: ThreadGoal }
   const { t } = useI18n();
   const budget = goal.tokenBudget ? goal.tokensUsed / goal.tokenBudget : null;
   return (
-    <div data-capsule-row="" className="min-w-0 px-2 py-1.5" title={goal.objective}>
+    <div data-capsule-row="" className="min-w-0 px-2 py-1.5" data-tip={goal.objective}>
       <div className="flex min-w-0 items-start gap-2">
         <span className={`${CAPSULE_ROW_ICON} h-5`}>
           <GoalMark status={goal.status} />
@@ -66,7 +66,7 @@ export function GoalBody({ data: goal }: { sessionId: string; data: ThreadGoal }
         <p className="line-clamp-2 min-w-0 flex-1 text-ui/[inherit] leading-5">{goal.objective}</p>
       </div>
       {budget !== null && (
-        <div className="mt-1.5 pl-5.5" title={t("goal.budgetRing", { used: formatGoalTokens(goal.tokensUsed), budget: formatGoalTokens(goal.tokenBudget!) })}>
+        <div className="mt-1.5 pl-5.5" data-tip={t("goal.budgetRing", { used: formatGoalTokens(goal.tokensUsed), budget: formatGoalTokens(goal.tokenBudget!) })}>
           <ProgressLine ratio={budget} tone={budget >= 1 ? "bg-danger" : "bg-accent"} />
         </div>
       )}

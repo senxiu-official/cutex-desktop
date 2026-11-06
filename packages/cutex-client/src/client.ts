@@ -1,9 +1,17 @@
+import { runtimePruneBody, type RuntimePrunePlan, type RuntimePruneResult } from "./runtimePrune";
 import type { MobileProfile, ProfileQuota, MobileUsageReport, UsageDimension, MobileService, HumanSessionCreate, HumanAgentCreate } from "./mobileManagement";
 import { userAccessOf } from "./users";
+import type { SessionPageQuery, SessionCatalogPage, SessionChangePage, SessionResync } from "./sessionDeltas";
+import { pageQuery, pageResponse, type PageQuery, type OwnerNotificationsPageQuery, type SafetyChecksPageQuery } from "./pagination";
+import type { ApprovalsPage, OwnerNotificationList, SafetyChecksPage } from "@cutex-desktop/protocol";
+export type { PageQuery, OwnerNotificationsPageQuery, SafetyChecksPageQuery } from "./pagination";
+export type { ApprovalsPage, OwnerNotificationList, SafetyChecksPage } from "@cutex-desktop/protocol";
 import { delegationControlRoute, delegationId, requireDelegationCapability } from "./delegation";
 import { DELEGATION_CAPABILITIES, type DelegationTreeQuery, type DelegationTreePage, type DelegationAttempts, type DelegationPolicy, type DelegationGrants, type DelegationApproval, type ProjectRunControl, type DelegationControlRequest, type DelegationOperationResult, type DelegationOperationLookup, type PermanentRetirementReviewRequest, type PermanentRetirementReview, type PermanentRetirementRequest, type AgentArchiveReceipt } from "@cutex-desktop/protocol";
-import { INPUT_DISMISS, INPUT_GET, INPUT_GET_MAX_IDS, INPUT_LEASE_RELEASE, INPUT_LIST, INPUT_RETRY, INPUT_INTERRUPT_SEND } from "@cutex-desktop/protocol";
+import { INPUT_HOLD, INPUT_DISMISS, INPUT_GET, INPUT_GET_MAX_IDS, INPUT_LEASE_RELEASE, INPUT_LIST, INPUT_RETRY, INPUT_INTERRUPT_SEND } from "@cutex-desktop/protocol";
 import type {
+  InputHoldParams,
+  InputHoldResult,
   InputInterruptSendParams,
   InputInterruptSendResult,
   InputDismissParams,
@@ -21,6 +29,7 @@ import type {
   EventPage,
   HostInfo,
   HostSessionPage,
+  HostSessionRow,
   NativeRequestResult,
   ProjectsResponse,
   AdmissionRef,
@@ -257,6 +266,16 @@ export class CutexClient {
     const load = this.readLoad;
     // Mutations keep their existing outcome policy; only background requests belong to this queue.
     const read = finiteRead(url, init);
+    // Scheduling is additive and independent of the optional local limiter.
+    // Do not forward a stale caller-supplied marker on foreground/mutations.
+    const headers = new Headers(init.headers);
+    if (read && options.background) {
+      headers.set("X-Cutex-Read-Priority", "background");
+      init = { ...init, headers };
+    } else if (headers.has("X-Cutex-Read-Priority")) {
+      headers.delete("X-Cutex-Read-Priority");
+      init = { ...init, headers };
+    }
     if (read && load) init = { ...init, signal: init.signal ? AbortSignal.any([init.signal, load.signal]) : load.signal };
     if (!load || !options.background) return fetchWithRetry(this.fetchImpl, url, init, { ...this.httpRetry, ...options });
     const streaming = subscriptionRead(url, init);
@@ -407,8 +426,17 @@ export class CutexClient {
     return this.request("GET", "/v2/sessions", { query: { lifecycle, ...(includeHidden ? { includeHidden: "true" } : {}) }, ...rest });
   }
 
-  session(id: string, lifecycle?: SessionLifecycle): Promise<SessionResource> {
-    return this.request("GET", `/v2/sessions/${encodeURIComponent(id)}`, { query: { lifecycle } });
+  session(id: string, lifecycle?: SessionLifecycle, options: ReadOptions = {}): Promise<SessionResource> {
+    return this.request("GET", `/v2/sessions/${encodeURIComponent(id)}`, { query: { lifecycle }, ...options });
+  }
+
+  /** session-deltas-v1; negotiate capability AND owner access before using. */
+  sessionPage(query: SessionPageQuery = {}, options: ReadOptions = {}): Promise<SessionCatalogPage | SessionResync> {
+    return this.request("GET", "/v2/sessions/page", { query: { ...query }, ...options });
+  }
+
+  sessionChanges(cursor: string, query: { limit?: number; maxBytes?: number } = {}, options: ReadOptions = {}): Promise<SessionChangePage | SessionResync> {
+    return this.request("GET", "/v2/sessions/changes", { query: { cursor, ...query }, ...options });
   }
 
   /**
@@ -432,6 +460,12 @@ export class CutexClient {
 
   hostSessions(query = "", cursor?: string, limit = 200, options: ReadOptions = {}): Promise<HostSessionPage> {
     return this.request("POST", "/v2/host/sessions", { body: { query, cursor, limit }, ...options });
+  }
+
+  /** session-deltas-host-v1 (owner): exact-ID projection, empty when absent/ineligible. */
+  async hostSession(id: string, options: ReadOptions = {}): Promise<HostSessionRow | null> {
+    const page = await this.request<HostSessionPage>("GET", `/v2/host/sessions/${encodeURIComponent(id)}`, options);
+    return page.data.find(row => row.id === id) ?? null;
   }
 
   projects(options: ReadOptions = {}): Promise<ProjectsResponse> {
@@ -664,6 +698,11 @@ export class CutexClient {
     return this.cutex(sessionId, INPUT_INTERRUPT_SEND, params);
   }
 
+  /** owner-carries-v1: daemon-owned per-notice hold under record CAS. */
+  inputHold(sessionId: string, params: InputHoldParams): Promise<InputHoldResult> {
+    return this.cutex(sessionId, INPUT_HOLD, params);
+  }
+
   inputRetry(sessionId: string, inputId: string, expectedRev: number): Promise<unknown> {
     const params: InputRetryParams = { inputId, expectedRev };
     return this.cutex(sessionId, INPUT_RETRY, params);
@@ -834,11 +873,56 @@ export class CutexClient {
 
   // ---------- owner approvals (owner-approvals) ----------
 
-  /** `GET /v2/approvals?state=`. Null when the daemon has no approvals route (404 / 405). */
+  /** Legacy complete-list API, preserved for existing callers. Hosts advertising
+   * owner-notify-approval-pages-v1 should be read with approvalsPage instead.
+   * Null when the daemon has no approvals route (404 / 405). */
   async approvals<T = JsonObject>(state: ApprovalState = "pending"): Promise<T[] | null> {
     try {
       const r = await this.request<{ approvals?: T[] }>("GET", "/v2/approvals", { query: { state: state === "all" ? "all" : "pending" } });
       return r.approvals ?? [];
+    } catch (error) {
+      if (isMissingRoute(error)) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * One bounded approvals page; caller gates owner-notify-approval-pages-v1. Null for 404 / 405.
+   * Follow nextCursor even on empty/short pages (256 KiB backend budget).
+   * Errors, including resync_required, propagate without a legacy full-list fallback.
+   */
+  async approvalsPage<T = JsonObject>(state: ApprovalState = "pending", query: PageQuery = {}): Promise<ApprovalsPage<T> | null> {
+    try {
+      const response = await this.request<Omit<ApprovalsPage<T>, "nextCursor"> & { nextCursor?: string | null }>("GET", "/v2/approvals", {
+        query: { state: state === "all" ? "all" : "pending", ...pageQuery(query) },
+      });
+      return pageResponse<ApprovalsPage<T>>(response);
+    } catch (error) {
+      if (isMissingRoute(error)) return null;
+      throw error;
+    }
+  }
+
+  /** One bounded notifications page; caller gates capability and follows nextCursor, including on short/empty pages. */
+  async ownerNotificationsPage(query: OwnerNotificationsPageQuery = {}): Promise<OwnerNotificationList | null> {
+    try {
+      const response = await this.request<OwnerNotificationList>("GET", "/v2/owner-notifications", {
+        query: { filter: query.filter ?? "all", agentId: query.agentId, ...pageQuery(query) },
+      });
+      return pageResponse<OwnerNotificationList>(response);
+    } catch (error) {
+      if (isMissingRoute(error)) return null;
+      throw error;
+    }
+  }
+
+  /** One bounded safety-check page (notification records); same cursor/error semantics as approvalsPage. */
+  async safetyChecksPage(query: SafetyChecksPageQuery = {}): Promise<SafetyChecksPage | null> {
+    try {
+      const response = await this.request<SafetyChecksPage>("GET", "/v2/safety-checks", {
+        query: { state: query.state ?? "open", agentId: query.agentId, ...pageQuery(query) },
+      });
+      return pageResponse<SafetyChecksPage>(response);
     } catch (error) {
       if (isMissingRoute(error)) return null;
       throw error;
@@ -1162,6 +1246,14 @@ export class CutexClient {
     }
   }
 
+  runtimePrunePlan(): Promise<RuntimePrunePlan> {
+    return this.request("GET", "/v2/runtimes/prune");
+  }
+
+  pruneRuntimes(ids: string[]): Promise<RuntimePruneResult> {
+    return this.request("POST", "/v2/runtimes/prune", { body: runtimePruneBody(ids), retryable: false });
+  }
+
   // ---------- Claude accounts (claude-accounts) ----------
   // No login over HTTP and no `apiKey` from here: the desktop never handles a Claude credential.
 
@@ -1408,6 +1500,19 @@ export class CutexClient {
   // ---------- home page (user-home) and service tiles (service-tiles) ----------
 
   /** `GET /v2/users/me/home`. Null on a cutex without the route (404 / 405). */
+  userLayout(): Promise<import("./userLayout").UserLayout> {
+    return this.request("GET", "/v2/users/me/layout");
+  }
+
+  putUserLayout(section: string, revision: number, data: Record<string, unknown> | null): Promise<import("./userLayout").LayoutWritten> {
+    if (!/^[a-z][a-z0-9-]{0,31}$/.test(section) || section === "pointer" || !Number.isSafeInteger(revision) || revision < 0) throw new Error("bad layout write");
+    return this.request("PUT", `/v2/users/me/layout/${section}`, { body: { revision, data } });
+  }
+
+  putLayoutPointer(pointer: import("./userLayout").MemoryHost): Promise<import("./userLayout").LayoutPointer> {
+    return this.request("PUT", "/v2/users/me/layout/pointer", { body: { memoryHost: pointer.instanceId, label: pointer.label } });
+  }
+
   async userHome(): Promise<HomeView | null> {
     try {
       return readHomeView(await this.request<unknown>("GET", "/v2/users/me/home"));

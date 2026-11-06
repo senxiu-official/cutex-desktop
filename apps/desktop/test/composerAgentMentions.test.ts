@@ -37,4 +37,12 @@ describe("agentMentionInsert", () => {
     expect(agentMentionInsert(agent, "local")).toBe("[@Far@remote](cutex:agent/cutex.ag-far@remote)");
     expect(agentMentionInsert(agent, "ws")).toBe("[@Far](cutex:agent/cutex.ag-far)");
   });
+  it("inserts the agent's own name, while the picker shows and matches the 显示名称 (owner 2026-11-05)", () => {
+    const aliased = session("cutex.ag-astra", "小星", "online", { displayNameOverride: "小星", formalAgentName: "astra-composer" });
+    const rows = agentMentionCandidates([host("local", [session("cutex.ag-self", "Self"), aliased], {})], "local", "cutex.ag-self", "小星");
+    expect(rows.map((r) => r.label)).toEqual(["小星"]);
+    expect(agentMentionCandidates([host("local", [aliased], {})], "local", "x", "astra-comp").map((r) => r.id)).toEqual(["cutex.ag-astra"]);
+    expect(agentMentionInsert(rows[0]!, "local")).toBe("[@astra-composer](cutex:agent/cutex.ag-astra)");
+    expect(agentMentionInsert(rows[0]!, "ws")).toBe("[@astra-composer@local](cutex:agent/cutex.ag-astra@local)");
+  });
 });

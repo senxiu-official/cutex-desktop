@@ -18,6 +18,8 @@ export type AvatarPresence = "online" | "offline" | "unknown";
 
 export interface AvatarStatus {
   running?: boolean;
+  /** Keep the live-turn ring visible but static while a tool is held. */
+  runningPaused?: boolean;
   badge?: AvatarBadge | null;
   presence?: AvatarPresence | null;
 }

@@ -34,6 +34,7 @@ export const reviewed = {
       "tray.seg.apps": "應用程式",
       "shortcuts.conflict.composer": "輸入框和文字方塊要用這個按鍵（傳送、換行、編輯）。",
       "shortcuts.conflict.reserved": "這是系統保留的按鍵，應用程式收不到或會誤觸。",
+      "turnError.refreshTokenReused": "並行更新衝突；下一則訊息會自動重試",
     },
   },
   HK: {

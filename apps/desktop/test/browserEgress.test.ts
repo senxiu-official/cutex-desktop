@@ -119,7 +119,7 @@ describe("N2 lifecycle and credential boundary", () => {
   it("base policy joins the same per-session queue between old cleanup and replacement N2", async () => {
     const old = fixture(), replacement = fixture(), pending = deferred<void>(); replacement.proxy.port = 26292;
     Object.assign(old.session, { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, setDevicePermissionHandler() {},
-      setCertificateVerifyProc() {}, on() {}, webRequest: { onBeforeRequest() {}, onHeadersReceived() {} } });
+      setCertificateVerifyProc() {}, on() {}, webRequest: { onBeforeRequest() {}, onHeadersReceived() {}, onCompleted() {}, onErrorOccurred() {} } });
     old.session.setProxy.mockImplementationOnce(() => pending.promise);
     const first = old.control.enableSession(old.target), failed = expect(first).rejects.toThrow();
     await vi.waitFor(() => expect(old.session.setProxy).toHaveBeenCalledOnce()); old.control.stop();

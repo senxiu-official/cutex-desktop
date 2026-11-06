@@ -60,7 +60,9 @@ export function SafetyBlockCard({ record: r, block, hostId }: { record: OwnerNot
 
   return (
     <div
+      tabIndex={-1}
       data-owner-note={r.notificationId}
+      data-owner-note-host={hostId}
       data-origin="system"
       data-safety-block={block.blockId}
       data-safety-state={state}
@@ -100,6 +102,7 @@ export function SafetyBlockCard({ record: r, block, hostId }: { record: OwnerNot
           <div className="mt-1 text-meta/[inherit] text-subtle">{t("safetyBlock.rule", { minutes })}</div>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <button
+              data-note-reply=""
               onClick={() => void decide("grant")}
               disabled={!!busy}
               className="flex items-center gap-1 rounded-lg bg-accent px-2.5 py-1 text-xs text-white hover:bg-accent/90 disabled:opacity-50"

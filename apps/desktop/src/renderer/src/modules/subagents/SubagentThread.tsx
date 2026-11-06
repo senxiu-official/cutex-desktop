@@ -11,7 +11,7 @@ import { openSubagentThread } from "../../lib/sideOpen";
 import { childStatusFromThreadRead, SubAgentContext, subAgentMetaFromThreadRead, subAgentName, subAgentTooltip } from "../../lib/subagents";
 import { recordSubAgentMeta, recordSubAgentSpan, useSubAgentMeta } from "../../lib/subagentMetaStore";
 import { subAgentSpanFromThreadRead } from "../../lib/finishedSubagents";
-import { orderedEntries, timelineFromThreadRead } from "../../lib/timeline";
+import { timelineFromThreadRead } from "../../lib/timeline";
 import { CLAUDE_SUBAGENT_TRANSCRIPTS_CAPABILITY } from "../../lib/agentFeatures";
 import { isClaudeTaskRef } from "../../lib/claudeTasks";
 import { sessionApi, selectedFeatures, useApp } from "../../store";
@@ -73,8 +73,6 @@ export function SubagentThreadBody({ instance, sessionId }: SideBodyProps<Thread
     return () => clearInterval(timer);
   }, [poll, running]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const entries = useMemo(() => (timeline ? orderedEntries(timeline) : []), [timeline, sub?.version]);
   const nameOf = (id: string) => agents.get(id)?.name ?? id;
   const meta = useSubAgentMeta();
   const status = info?.status ?? "running";
@@ -97,7 +95,7 @@ export function SubagentThreadBody({ instance, sessionId }: SideBodyProps<Thread
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-ui/[inherit]">
           {error && <p className="text-xs text-danger">{error}</p>}
           {!timeline && !error && <p className="text-xs text-subtle">…</p>}
-          {timeline && sessionId && <TimelineBody timeline={timeline} entries={entries} sessionId={sessionId} nameOf={nameOf} readOnly />}
+          {timeline && sessionId && <TimelineBody timeline={timeline} version={sub?.version} sessionId={sessionId} nameOf={nameOf} thread="subagent" readOnly />}
         </div>
       </div>
     </SubAgentContext.Provider>

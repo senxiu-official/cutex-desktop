@@ -51,6 +51,7 @@ export const OWNER_WINDOW_ALLOW: Record<string, Allowed> = {
   "lib/sideLayoutStore.ts": { reason: "saves on the main document's beforeunload (the renderer's lifetime)", uses: { winListener: 2 } },
   "lib/planCache.ts": { reason: "saves on the main document's pagehide (the renderer's lifetime)", uses: { winListener: 1 } },
   "lib/introAppearance.ts": { reason: "localStorage `storage` events (written by another renderer process) are one per renderer", uses: { winListener: 1 } },
+  "lib/turnErrorBanner.ts": { reason: "localStorage `storage` events (written by another renderer process) are one per renderer", uses: { winListener: 2 } },
   "lib/storedFonts.ts": { reason: "localStorage `storage` events (written by another renderer process) are one per renderer", uses: { winListener: 1 } },
   "lib/directorHeadwear.ts": { reason: "the seasonal headwear re-checks the date when the app (the main document) is shown again; one shared check for every avatar", uses: { docListener: 2 } },
   "lib/motion.ts": { reason: `start-up motion hold of the main document (two frames after its first paint); ${OS_PREFERENCE}`, uses: { raf: 2, matchMedia: 1 } },
@@ -63,6 +64,7 @@ export const OWNER_WINDOW_ALLOW: Record<string, Allowed> = {
   "modules/perf-log/screen.ts": { reason: "the perf log (Settings → 性能日志) samples the main window", uses: { query: 2 } },
   "modules/packs.ts": { reason: "signed module packs load their stylesheets into the main document (desks mirror them, lib/deskDocument)", uses: { query: 1 } },
   "modules/browser/thumbnails.ts": { reason: "dev-preview-only hook (dropped from production bundles): mock.ts dispatches it on the main window", uses: { winListener: 1 } },
+  "modules/browser/browserCache.ts": { reason: "dev-preview-only hook (dropped from production bundles): mock.ts (?browserChrome) dispatches a page state on the main window", uses: { winListener: 1 } },
 };
 
 /** Comments and string-free enough: block and line comments are dropped before matching. */

@@ -32,12 +32,12 @@ export function DeliveryStatus({ delivery, sessionId, hostId, askTitle, leaseRec
     catch (error) { useApp.getState().notify(String(error), "error", { hostId: hostId ?? "local", sessionId }); }
     finally { setPending(false); setArmed(false); }
   };
-  return <span className="inline-flex min-h-5 min-w-0 items-center gap-1 text-caption text-subtle" data-testid="delivery-status" data-state={delivery.state} title={delivery.lease ? label.leaseStale ? t("inputLedger.leaseStale") : label.kind === "label" ? t(`inputLedger.delivery.${label.id}` as MessageKey) : t("inputLedger.unknown") : undefined}>
+  return <span className="inline-flex min-h-5 min-w-0 items-center gap-1 text-caption text-subtle" data-testid="delivery-status" data-state={delivery.state} data-tip={delivery.lease ? label.leaseStale ? t("inputLedger.leaseStale") : label.kind === "label" ? t(`inputLedger.delivery.${label.id}` as MessageKey) : t("inputLedger.unknown") : undefined}>
     <span className="truncate">{label.kind === "unknown" ? label.code : t(`inputLedger.delivery.${label.id}` as MessageKey)}</span>
     {delivery.state === "turn" && delivery.turn?.kind === "ask" && askTitle && <span className="truncate" data-testid="delivery-ask">{askTitle}</span>}
     {Number.isFinite(heldUntil) && <span className="shrink-0 tabular-nums" data-testid="delivery-countdown">{t("queue.meta.countdown", { n: Math.max(0, Math.ceil((heldUntil - now) / 1000)) })}</span>}
     {Number.isFinite(leaseSince) && <span className="shrink-0 tabular-nums" data-testid="delivery-lease-elapsed">{t("inputLedger.leaseElapsed", { n: Math.max(0, Math.floor((now - leaseSince) / 60000)) })}</span>}
     {paused && <button type="button" className="h-5 shrink-0 rounded px-1 hover:bg-surface-2" disabled={pending} onClick={() => void resume()}>{t("paused.resume")}</button>}
-    {label.leaseStale && leaseRecovery && <><span className="text-warn-text">{t("inputLedger.leaseStale")}</span><button type="button" disabled={pending} className={`h-5 shrink-0 rounded px-1 ${armed ? "bg-danger/10 text-danger-text" : "hover:bg-surface-2"}`} onBlur={() => setArmed(false)} onClick={() => void release()} title={t("inputLedger.releaseHint")}>{t(armed ? "inputLedger.releaseAgain" : "inputLedger.release")}</button></>}
+    {label.leaseStale && leaseRecovery && <><span className="text-warn-text">{t("inputLedger.leaseStale")}</span><button type="button" disabled={pending} className={`h-5 shrink-0 rounded px-1 ${armed ? "bg-danger/10 text-danger-text" : "hover:bg-surface-2"}`} onBlur={() => setArmed(false)} onClick={() => void release()} data-tip={t("inputLedger.releaseHint")}>{t(armed ? "inputLedger.releaseAgain" : "inputLedger.release")}</button></>}
   </span>;
 }

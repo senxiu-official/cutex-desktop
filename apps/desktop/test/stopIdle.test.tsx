@@ -20,7 +20,7 @@ const fx = vi.hoisted(() => ({
 vi.mock("../src/renderer/src/store", () => ({
   featuresOf: () => fx.features,
   pinnedOn: () => fx.pinned,
-  sidebarOf: () => ({ projects: { projects: [{ project_id: "p1", presentation: { display_name: "Waveline" } }] } }),
+  sidebarOf: () => ({ active: [], projects: { projects: [{ project_id: "p1", presentation: { display_name: "Waveline" } }] } }),
   hostApi: () => ({
     idleRuntimes: vi.fn(async (q: { minIdleSecs: number; projectId?: string }) => (fx.idleCalls.push(q), fx.listing)),
     stopIdle: vi.fn(async (body: StopIdleRequest) => {
@@ -32,7 +32,7 @@ vi.mock("../src/renderer/src/store", () => ({
     getState: () => ({ hosts: { active: "local", hosts: [{ id: "local", label: "HOST-A" }] }, sessionAction: async (id: string, method: string) => void fx.actions.push([id, method]) }),
   }),
 }));
-vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (k: string, v?: Record<string, unknown>) => (v ? `${k}(${Object.values(v).join(",")})` : k) }) }));
+vi.mock("../src/renderer/src/i18n", () => ({ translate: (k:string)=>k, useI18n: () => ({ t: (k: string, v?: Record<string, unknown>) => (v ? `${k}(${Object.values(v).join(",")})` : k) }) }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const lib = await import("../src/renderer/src/lib/stopIdle");

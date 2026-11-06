@@ -153,7 +153,7 @@ export function OnboardingFlow({ mode, version, closeVersion = null, startAt }: 
   const label = mode === "whatsNew" ? t("onboarding.tour.label", { version }) : t("onboarding.dialogLabel");
   const Art = view.Art;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/35 p-4">
       <div
         ref={box}
         tabIndex={-1}

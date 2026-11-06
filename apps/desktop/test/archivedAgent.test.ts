@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectsResponse, ProjectSummary, SessionResource } from "@cutex-desktop/protocol";
-import { archivedProjectOf, isArchived, lifecycleFlip, projectOfArchived } from "../src/renderer/src/lib/archivedAgent";
+import { archivedProjectOf, isArchived, lifecycleFlip, listedIn, projectOfArchived } from "../src/renderer/src/lib/archivedAgent";
 
 const s = (id: string, extra: Record<string, unknown> = {}) => ({ cutexSessionId: id, lifecycle: "active", ...extra }) as unknown as SessionResource;
 const retired = (id: string, extra: Record<string, unknown> = {}) => s(id, { lifecycle: "retired", ...extra });
@@ -23,7 +23,22 @@ describe("isArchived", () => {
   });
 });
 
+describe("listedIn", () => {
+  it("is not known while the archived agents are not read, unless the agent is active", () => {
+    expect(listedIn(null, "a")).toBeNull();
+    expect(listedIn({ active: [s("a")], retired: [], archivedPending: { count: 3 } }, "a")).toBe(true);
+    expect(listedIn({ active: [s("a")], retired: [], archivedPending: { count: 3 } }, "x")).toBeNull();
+    expect(listedIn({ active: [s("a")], retired: [retired("r")] }, "r")).toBe(true);
+    expect(listedIn({ active: [s("a")], retired: [retired("r")] }, "x")).toBe(false);
+  });
+});
+
 describe("lifecycleFlip", () => {
+  it("reads an active agent gone from a list without archived agents as archived (reloading reads them)", () => {
+    expect(lifecycleFlip({ active: [s("a")], retired: [] }, { active: [], retired: [], archivedPending: { count: 1 } }, "a")).toBe("archived");
+    expect(lifecycleFlip({ active: [s("a")], retired: [] }, { active: [], retired: [] }, "a")).toBeNull();
+  });
+
   const before = { active: [s("a"), s("b")], retired: [retired("c")] };
   it("reports the selected agent being archived or restored", () => {
     expect(lifecycleFlip(before, { active: [s("b")], retired: [retired("c"), retired("a")] }, "a")).toBe("archived");

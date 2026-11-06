@@ -69,7 +69,7 @@ function Row({ alarm, hostId }: { alarm: AlarmView; hostId: string }) {
   return (
     <li data-capsule-row="" className="group/row rounded-lg hover:bg-hover">
       <div className="flex min-h-8 min-w-0 items-center gap-1 px-2 text-ui/[inherit]">
-        <button onClick={() => setOpen(!open)} aria-expanded={open} title={title} className={`${CAPSULE_ROW_MAIN} gap-1.5`}>
+        <button onClick={() => setOpen(!open)} aria-expanded={open} data-tip={title} className={`${CAPSULE_ROW_MAIN} gap-1.5`}>
           <span className={`shrink-0 font-medium tabular-nums ${scheduled ? "" : "text-subtle"}`}>{alarmClock(ms, now, locale)}</span>
           {alarm.lastError && <TriangleAlert size={12} className="shrink-0 text-warn" />}
           <span className={`min-w-0 flex-1 truncate ${scheduled ? "" : "text-subtle"} ${alarm.state === "cancelled" ? "line-through" : ""}`}>{alarm.messagePreview}</span>
@@ -82,7 +82,7 @@ function Row({ alarm, hostId }: { alarm: AlarmView; hostId: string }) {
                 {t("alarms.cancel")}
               </button>
             ) : (
-              <button onClick={() => setArmed(true)} title={t("alarms.cancelConfirm")} className={`${CAPSULE_ROW_ACTION} hover:text-danger`}>
+              <button onClick={() => setArmed(true)} data-tip={t("alarms.cancelConfirm")} className={`${CAPSULE_ROW_ACTION} hover:text-danger`}>
                 {t("alarms.cancel")}
               </button>
             )}

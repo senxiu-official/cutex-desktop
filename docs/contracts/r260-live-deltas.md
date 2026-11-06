@@ -1,7 +1,7 @@
-# r260 non-durable text delta contract (v1)
+# Non-durable text delta contract (v1)
 
 Status: implementation contract, 2026-10-25. Backend branch
-`feat/r260-lock-live-deltas`, base `release/r259` / `002f0cd`.
+Capability: `live-text-deltas`, with runtime `features.liveTextDeltas`.
 
 Director revision v2: **live-only is runtime-capability gated**. Only a strict
 boolean `AppServerSchema.capabilities.features.fullTextItemTerminal: true` enables
@@ -12,7 +12,7 @@ Missing/false/invalid capability keeps the old durable delta, diagnostic journal
 and takeover behavior. The host `live-text-deltas` feature advertises wire support,
 not support in every installed runtime. Old Codex cancellation/error/EOF paths
 lack authoritative item completion: that part is unfinished until the native
-terminal fix ships in the r260 kit. Claude enables the flag only after its
+terminal fix is part of the supported runtime contract. Claude enables the flag only after its
 terminal identity/mapping repair. Never synthesize authoritative full text from a
 partial Management observer stream.
 
@@ -165,7 +165,7 @@ repair incomplete terminal paths rather than keeping durable text deltas.
 
 ## SDK/desktop integration decisions (2026-10-25)
 
-Confirmed with r253-coalesce: use `live-text-deltas` plus `features.liveTextDeltas`,
+Validation note: use `live-text-deltas` plus `features.liveTextDeltas`,
 metadata boundaries retain offsets, null-anchor deltas are discarded, and item gaps
 invalidate every reasoning segment even when params is null. Subscription gaps
 invalidate all eligible in-progress items; the supplied item identity only identifies
@@ -178,7 +178,7 @@ keep their prior fallback unless the same-generation schema promises complete
 terminal items or the item actually received live traffic. Reconnect suppression
 only marks items that have used live traffic.
 
-Confirmed with r254-fix: `_cutexFullText` is on native.message, and contains the
+Validation note: `_cutexFullText` is on native.message, and contains the
 existing session-authorized JSON cutexBlob descriptor. SDK blob checks and desktop
 identity/MIME/size/UTF-8 checks precede replacement. Completed previews establish a
 fence immediately; the renderer accepts hydration only against the exact pending
@@ -196,7 +196,7 @@ not treated as a fresh live start.
 
 ## Review clarification: negative gap markers (2026-10-25)
 
-Confirmed with r253-coalesce: process `kind:gap` before checking anchor readiness.
+Validation note: process `kind:gap` before checking anchor readiness.
 A gap with a null anchor or the current stream's future anchor invalidates already
 verified temporary text immediately; it never advances any durable position. Reject
 foreign-stream gaps and keep host/session/runtime fences. Item gaps invalidate all

@@ -73,29 +73,29 @@ export default defineModule({
     ],
     "settings.page": [
       // 应用（本机）
-      { id: "shell.general", page: "general", group: "app", order: 100, icon: SlidersHorizontal, titleKey: "shell.general", source: "local",  hintKey: "shell.general.pageHint", Page: GeneralPage, ...GENERAL_SEARCH },
-      { id: "shell.appearance", page: "appearance", group: "app", order: 200, icon: Palette, titleKey: "shell.appearance", source: null, hintKey: "shell.appearance.pageHint", Page: AppearancePage, ...APPEARANCE_SEARCH },
+      { id: "shell.general", page: "general", group: "app", order: 100, icon: SlidersHorizontal, titleKey: "shell.general", source: "local",  hintKey: "settings.pageHint.general", Page: GeneralPage, ...GENERAL_SEARCH },
+      { id: "shell.appearance", page: "appearance", group: "app", order: 200, icon: Palette, titleKey: "shell.appearance", source: null, hintKey: "settings.pageHint.appearance", Page: AppearancePage, ...APPEARANCE_SEARCH },
       // By screen region, left to right (owner 2026-10-18): 左侧栏 · 对话 (conversation module, 300) · 输入区 · 状态 · 右侧栏与留白.
-      { id: "shell.sidebar", page: "sidebar", group: "app", order: 250, icon: PanelLeft, titleKey: "settings.panel.sidebar", source: "local",  hintKey: "shell.sidebar.pageHint", Page: SidebarPage, ...SIDEBAR_SEARCH },
-      { id: "shell.sides", page: "sides", group: "app", order: 450, icon: PanelRight, titleKey: "settings.panel.shelf", source: "local", hintKey: "shell.sides.pageHint", Page: SidesPage, ...SIDES_SEARCH },
-      { id: "shell.status", page: "status", group: "app", order: 400, icon: Activity, titleKey: "settings.panel.status", source: "local",  hintKey: "shell.status.pageHint", Page: StatusPage, ...STATUS_SEARCH },
+      { id: "shell.sidebar", page: "sidebar", group: "app", order: 250, icon: PanelLeft, titleKey: "settings.panel.sidebar", source: "local",  hintKey: "settings.pageHint.sidebar", Page: SidebarPage, ...SIDEBAR_SEARCH },
+      { id: "shell.sides", page: "sides", group: "app", order: 450, icon: PanelRight, titleKey: "settings.panel.shelf", source: "local", hintKey: "settings.pageHint.sides", Page: SidesPage, ...SIDES_SEARCH },
+      { id: "shell.status", page: "status", group: "app", order: 400, icon: Activity, titleKey: "settings.panel.status", source: "local",  hintKey: "settings.pageHint.status", Page: StatusPage, ...STATUS_SEARCH },
       // 面板 (design 006 v1): 托盘 and 桌面, whose rows were in 外观 → 窗口与卡片 (the nav shows the panel pages as their own group).
-      { id: "shell.tray", page: "tray", group: "app", order: 460, icon: PanelBottom, titleKey: "settings.panel.tray", source: "local",  hintKey: "settings.panel.trayHint", Page: TrayPage, keywords: ["pane.tray.persistent", "pane.tray.edge", "workspace.threeColumns"] },
-      { id: "shell.desktop", page: "desktop", group: "app", order: 470, icon: Monitor, titleKey: "settings.panel.desktop", source: "local",  hintKey: "settings.panel.desktopHint", Page: DesktopPage, keywords: ["workSurface.desk"] },
+      { id: "shell.tray", page: "tray", group: "app", order: 460, icon: PanelBottom, titleKey: "settings.panel.tray", source: "local",  hintKey: "settings.pageHint.tray", Page: TrayPage, keywords: ["pane.tray.persistent", "pane.tray.edge", "workspace.threeColumns"] },
+      { id: "shell.desktop", page: "desktop", group: "app", order: 470, icon: Monitor, titleKey: "settings.panel.desktop", source: "local",  hintKey: "settings.pageHint.desktop", Page: DesktopPage, keywords: ["workSurface.desk"] },
       // 连接 → 你 (local, every connection): 「你」 (name, picture, person identity) and the hosts you can
       // access with your role / permissions there (components/settings/MeSettings.tsx).
-      { id: "shell.me", page: "me", group: "connection", order: 50, icon: UserRound, titleKey: "me.title", source: "local", Page: MePage, ...ME_SEARCH },
+      { id: "shell.me", page: "me", group: "connection", order: 50, icon: UserRound, titleKey: "me.title", hintKey: "settings.pageHint.me", source: "local", Page: MePage, ...ME_SEARCH },
       // 连接 → 主机 (混合设置 on the Settings host): 主机信息, 你的权限, 本地桌面应用连接, 主机互联 (+ listen /
       // CORS); 连接 → 用户 (on the Settings host): users, login devices, pending devices, pairing code
       // (components/settings/AccessSettings.tsx). 接入 / 互联 fold into 主机 (lib/settingsNav settingsTab).
-      { id: "shell.access", page: "access", group: "connection", order: 200, icon: ShieldCheck, titleKey: "shell.access.title", source: null, hostPart: true, hintKey: "shell.access.pageHint", Page: AccessPage, ...ACCESS_SEARCH },
-      { id: "shell.users", page: "users", group: "connection", order: 210, icon: Users, titleKey: "shell.users.title", source: "host", hostPart: true, hintKey: "shell.users.pageHint", useBadge: useOwnerDevicesNavBadge, Page: UsersHostPage, ...USERS_SEARCH },
+      { id: "shell.access", page: "access", group: "connection", order: 200, icon: ShieldCheck, titleKey: "shell.access.title", source: null, hostPart: true, hintKey: "settings.pageHint.access", Page: AccessPage, ...ACCESS_SEARCH },
+      { id: "shell.users", page: "users", group: "connection", order: 210, icon: Users, titleKey: "shell.users.title", source: "host", hostPart: true, hintKey: "settings.pageHint.users", useBadge: useOwnerDevicesNavBadge, Page: UsersHostPage, ...USERS_SEARCH },
       // Agent: its sections 升级 agent (runtime-packages), 已安装的运行时 (runtimes); versions are on 后端更新 (header link).
-      { id: "shell.runtime", page: "runtime", group: "agents", order: 500, icon: Cpu, titleKey: "shell.runtime", source: "host", useBadge: useRuntimeBadge, Page: RuntimePage, headerLink: { page: "backend", labelKey: "shell.runtime.backendLink" } },
+      { id: "shell.runtime", page: "runtime", group: "agents", order: 500, icon: Cpu, titleKey: "shell.runtime", hintKey: "settings.pageHint.runtime", source: "host", useBadge: useRuntimeBadge, Page: RuntimePage, headerLink: { page: "backend", labelKey: "shell.runtime.backendLink" } },
       // 系统
-      { id: "shell.modules", page: "modules", group: "system", order: 100, icon: Blocks, titleKey: "modules.title", source: "local", hintKey: "modules.pageHint", Page: ModulesPage },
-      { id: "shell.shortcuts", page: "shortcuts", group: "system", order: 200, icon: Keyboard, titleKey: "shell.shortcuts", source: "local", hintKey: "shell.shortcuts.pageHint", Page: ShortcutsPage, ...SHORTCUTS_SEARCH },
-      { id: "shell.about", page: "about", group: "system", order: 300, icon: Info, titleKey: "shell.about", source: null, Page: AboutPage, ...ABOUT_SEARCH },
+      { id: "shell.modules", page: "modules", group: "system", order: 100, icon: Blocks, titleKey: "modules.title", source: "local", hintKey: "settings.pageHint.modules", Page: ModulesPage },
+      { id: "shell.shortcuts", page: "shortcuts", group: "system", order: 200, icon: Keyboard, titleKey: "shell.shortcuts", source: "local", hintKey: "settings.pageHint.shortcuts", Page: ShortcutsPage, ...SHORTCUTS_SEARCH },
+      { id: "shell.about", page: "about", group: "system", order: 300, icon: Info, titleKey: "shell.about", hintKey: "settings.pageHint.about", source: null, Page: AboutPage, ...ABOUT_SEARCH },
     ],
   },
 });

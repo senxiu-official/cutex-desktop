@@ -6,6 +6,8 @@
 // The app store starts the sync (store.ts init). Multi-host (P1 step 2c): Settings → 运行时 of another
 // connected host (lib/settingsHost) loads that host's list too (`hostId` parameters; default = the
 // focus host) and follows its run events; the periodic refresh stays on the focus host.
+import { beginRuntimeOperation, observeRuntimeOperations } from "./runtimeOperations";
+import { beginOperation, trackedOperationItem } from "./backgroundOperations";
 import { create } from "zustand";
 import type { CutexRefusal, HostsState, RuntimePackageRun, RuntimePackagesView, SessionActionMethod, SidebarSnapshot } from "../../../shared/ipc";
 import { apiFor, bridge } from "../bridge";
@@ -81,6 +83,7 @@ function patchHost(hostId: string, patch: Partial<HostRuntimePackages> | ((h: Ho
     const next = typeof patch === "function" ? patch(current) : patch;
     return { byHost: { ...s.byHost, [hostId]: { ...current, ...next } } };
   });
+  observeRuntimeOperations(hostId, useRuntimePackages.getState().byHost[hostId]?.view ?? null);
 }
 
 /** `GET /v2/runtime-packages` for a connected host (default: the focus host; no-op without the capability). */
@@ -130,23 +133,28 @@ async function fetchRun(hostId: string, runId: string): Promise<void> {
   }
 }
 
-async function runAction(hostId: string, call: () => Promise<{ ok: true; run: RuntimePackageRun } | { ok: false; error: CutexRefusal }>): Promise<void> {
+async function runAction(hostId: string, call: () => Promise<{ ok: true; run: RuntimePackageRun } | { ok: false; error: CutexRefusal }>, sourceRunId: string): Promise<void> {
   if (!supported(hostId)) return;
+  const receipt = beginRuntimeOperation(hostId, true,
+    id => revertRuntimePackageRun(sourceRunId, hostId, [id]), async () => {}, id => retryRuntimeOnline(hostId,id));
   // A click owns exactly one combined result. Drop a completed Claude batch from an older click
   // before the native run can publish its new active/last run.
   patchHost(hostId, { starting: true, actionError: null, claudeBatch: null });
   try {
     const r = await call();
     if (r.ok) {
+      receipt.native(r.run);
       patchHost(hostId, (h) => ({ starting: false, view: h.view ? applyRunUpdate(h.view, r.run).view : h.view }));
     } else {
+      receipt.failure(r.error.message);
       patchHost(hostId, { starting: false, actionError: r.error });
       // run_in_progress etc.: the list shows what is actually going on.
       void refreshRuntimePackages(hostId);
     }
   } catch (error) {
+    receipt.failure(error instanceof Error ? error.message : String(error));
     patchHost(hostId, { starting: false, actionError: { code: "error", message: error instanceof Error ? error.message : String(error) } });
-  }
+  } finally { receipt.finish(); }
 }
 
 /**
@@ -156,6 +164,8 @@ async function runAction(hostId: string, call: () => Promise<{ ok: true; run: Ru
  */
 export interface RuntimePackageUpgradeSelection {
   native: boolean;
+  /** An explicit retry of only these failed native agents. */
+  nativeAgentIds?: readonly string[];
   claude: readonly import("./claudeRuntimeBatch").OutdatedClaudeRuntimeAgent[];
 }
 
@@ -164,6 +174,11 @@ export async function startRuntimePackageUpgrade(
   confirmed?: RuntimePackageUpgradeSelection,
 ): Promise<void> {
   if (!supported(hostId) || !app) return;
+  let claudeForRetry = confirmed?.claude ?? [];
+  const receipt = beginRuntimeOperation(hostId, false,
+    id => startRuntimePackageUpgrade(hostId, {native:true,nativeAgentIds:[id],claude:[]}),
+    id => startRuntimePackageUpgrade(hostId, {native:false,claude:claudeForRetry.filter(agent => agent.cutexSessionId === id)}),
+    id => retryRuntimeOnline(hostId,id));
   // A click owns exactly one combined result. In particular, an older Claude-only batch must not
   // replace the last run after a later native-only upgrade finishes.
   patchHost(hostId, { starting: true, actionError: null, claudeBatch: null });
@@ -174,25 +189,30 @@ export async function startRuntimePackageUpgrade(
     // The confirmation owns the exact Claude set it showed: a refresh may only remove or newly
     // skip those agents, never add an agent the owner did not confirm.
     const claudeAgents = confirmed ? [...confirmed.claude] : currentClaude;
+    claudeForRetry = claudeAgents;
     const runNative = confirmed?.native ?? ((useRuntimePackages.getState().byHost[hostId]?.view?.agents.length ?? 0) > 0);
     let nativeRun: RuntimePackageRun | null = null;
 
     if (runNative) {
       try {
-        const result = await daemonOf(hostId).startRuntimePackageRun();
+        const result = await daemonOf(hostId).startRuntimePackageRun(confirmed?.nativeAgentIds ? [...confirmed.nativeAgentIds] : undefined);
         if (result.ok) {
           nativeRun = result.run;
+          receipt.native(result.run);
           patchHost(hostId, (h) => ({ view: h.view ? applyRunUpdate(h.view, result.run).view : h.view }));
         } else {
+          receipt.failure(result.error.message);
           patchHost(hostId, { actionError: result.error });
         }
       } catch (error) {
+        receipt.failure(error instanceof Error ? error.message : String(error));
         patchHost(hostId, { actionError: { code: "error", message: error instanceof Error ? error.message : String(error) } });
       }
     }
 
     if (claudeAgents.length > 0) {
       const initial = createClaudeRuntimeBatch(claudeAgents, nativeRun?.runId ?? null);
+      receipt.claude(initial.run);
       patchHost(hostId, { claudeBatch: initial });
       await runClaudeRuntimeBatch(
         initial,
@@ -203,7 +223,7 @@ export async function startRuntimePackageUpgrade(
           // and manual Retry. Every per-agent dispatch keeps the batch's original host.
           sessionAction: (id, method, params) => app!.getState().sessionAction(id, method, params, hostId),
         },
-        (claudeBatch) => patchHost(hostId, { claudeBatch }),
+        (claudeBatch) => { receipt.claude(claudeBatch.run); patchHost(hostId, { claudeBatch }); },
         (runtime) => putClaudeRuntime(hostId, runtime),
         async (sessionId) => {
           await app!.getState().refreshHostSidebar(hostId);
@@ -215,17 +235,25 @@ export async function startRuntimePackageUpgrade(
       patchHost(hostId, { actionError: { code: "nothing_to_upgrade", message: "no requested agent is outdated" } });
     }
   } catch (error) {
+    receipt.failure(error instanceof Error ? error.message : String(error));
     patchHost(hostId, { actionError: { code: "error", message: error instanceof Error ? error.message : String(error) } });
   } finally {
+    receipt.finish();
     patchHost(hostId, { starting: false });
     void refreshRuntimePackages(hostId);
     void app.getState().refreshHostSidebar(hostId);
   }
 }
 
+async function retryRuntimeOnline(hostId: string, id: string): Promise<void> {
+  if (!app) return;
+  const operationId=beginOperation(hostId,"operations.kind.start",[{key:id,name:connOf(hostId)?.sidebar?.active.find(row=>row.cutexSessionId===id)?.displayName??id}]);
+  await trackedOperationItem({operationId,key:id},()=>app!.getState().sessionAction(id,"cutex/runtime/online",{openVisibleTerminal:false},hostId));
+}
+
 /** 撤销这次升级: `POST /v2/runtime-packages/runs/{runId}/revert {}` (default: the focus host). */
-export function revertRuntimePackageRun(runId: string, hostId = activeHostId()): Promise<void> {
-  return runAction(hostId, () => daemonOf(hostId).revertRuntimePackageRun(runId));
+export function revertRuntimePackageRun(runId: string, hostId = activeHostId(), agentIds?: string[]): Promise<void> {
+  return runAction(hostId, () => daemonOf(hostId).revertRuntimePackageRun(runId, agentIds), runId);
 }
 
 /** Start the capability / event / periodic refresh (store.ts init). */

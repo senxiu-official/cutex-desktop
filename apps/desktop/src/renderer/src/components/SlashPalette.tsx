@@ -40,9 +40,9 @@ export function SlashPalette({
     list.current?.querySelector(`[data-index="${selected}"]`)?.scrollIntoView({ block: "nearest" });
   }, [selected]);
   return (
-    <div data-popover="" className="absolute right-0 bottom-full left-0 z-50 mb-1.5 rounded-xl border border-border bg-surface p-1 shadow-xl" onMouseDown={(e) => e.preventDefault()}>
+    <div data-popover="" className="float absolute right-0 bottom-full left-0 z-[160] mb-1.5 p-1" onMouseDown={(e) => e.preventDefault()}>
       <div className="px-2.5 pt-1.5 pb-1 text-xs text-subtle">{title}</div>
-      <div ref={list} id={listId} role="listbox" aria-label={title} className="max-h-64 overflow-y-auto">
+      <div ref={list} id={listId} role="listbox" aria-label={title} className="float-scroll max-h-64 overflow-y-auto">
         {rows.length === 0 && <p className="px-2.5 py-1.5 text-sm text-subtle">{empty}</p>}
         {rows.map((row, i) => (<Fragment key={row.key}>
           {row.group && row.group !== rows[i - 1]?.group && <div role="presentation" className="px-2.5 pt-2 pb-1 text-xs font-medium text-subtle">{row.group}</div>}

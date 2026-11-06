@@ -7,6 +7,7 @@ import type { EligibleServiceOwner } from "../../../shared/serviceOwners";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import type { ServiceView, SidebarSnapshot } from "../../../shared/ipc";
 import { realAgentName } from "./agentAlias";
+import { compareNames } from "./rosterOrder";
 
 /** Choice groups in display order: the service's project first, then everyone, offline folded last. */
 export type OwnerGroup = "project" | "all" | "offline";
@@ -25,7 +26,6 @@ export interface OwnerChoice {
   group: OwnerGroup;
 }
 
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 /** cutex's activity projection marks offline (additive r266); older cutex falls back to the runtime status. */
 const isOffline = (s: SessionResource): boolean => s.activityStatus === "offline" || s.runtime?.status === "offline";
@@ -76,7 +76,7 @@ export function eligibleOwnerChoices(service: Pick<ServiceView, "ownerCutexSessi
 
 function sortOwnerChoices(choices: OwnerChoice[]): OwnerChoice[] {
   const rank = (c: OwnerChoice) => (c.isDirector ? 0 : c.group === "project" ? 1 : 2);
-  return choices.sort((a, b) => rank(a) - rank(b) || collator.compare(a.name, b.name) || a.id.localeCompare(b.id));
+  return choices.sort((a, b) => rank(a) - rank(b) || compareNames(a.name, b.name) || a.id.localeCompare(b.id));
 }
 
 /** `query` filters by the shown name, the real name under an alias or the session id; it also unmasks unnamed one-off chats. */

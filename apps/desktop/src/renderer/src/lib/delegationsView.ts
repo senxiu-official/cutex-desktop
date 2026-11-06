@@ -5,7 +5,7 @@ import { useI18n, type MessageKey } from "../i18n";
 import { useApp } from "../store";
 import { convSidebarOf, useConvFeatures, useConvHost, useConvScope, useConvView } from "./conversationScope";
 import { useViewRows, viewRow } from "./viewHost";
-import { agentDelegations, ASKS_FEATURE, fallbackSummary, inferDelegations, needsYouCount, ownerSteeredOf, pendingForAgent, type ContextOf, type DelegateCall, type DelegationStatus } from "./delegations";
+import { agentDelegations, ASKS_FEATURE, awaitingDelegation, fallbackSummary, inferDelegations, needsYouCount, ownerSteeredOf, pendingForAgent, type ContextOf, type DelegateCall, type DelegationStatus } from "./delegations";
 import { loadCardDelegation, loadDelegationDetail, useDelegation, useDelegations, useFocusDelegations, useHostRecords } from "./delegationStore";
 import { currentDelegationTurn, type DelegationTurn } from "./delegationTurn";
 import { hostKey } from "./hostKeys";
@@ -153,4 +153,9 @@ export function useDelegationTurn(timeline: TimelineState | null): DelegationTur
   const features = useConvFeatures();
   const byId = useHostRecords(useAgentHost());
   return currentDelegationTurn(timeline, byId, features);
+}
+
+export function useAwaitingDelegation(sessionId: string): AskSummary | null {
+  const byId = useHostRecords(useAgentHost());
+  return useMemo(() => awaitingDelegation(byId, sessionId), [byId, sessionId]);
 }

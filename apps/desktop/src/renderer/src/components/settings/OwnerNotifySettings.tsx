@@ -6,6 +6,7 @@
 // still `legacy` (its legacy matrix is derived from them). Everywhere else the 等级 → 通知方式 table
 // decides and this card shows one line pointing there (cutex removed the legacy preset 2026-10-15).
 import { useState } from "react";
+import { useArchivedAgents } from "../../lib/useArchivedAgents";
 import { X } from "lucide-react";
 import { OWNER_NOTIFY_CHANNELS, OWNER_NOTIFY_LEVELS, type OwnerNotifyAgentOverride, type OwnerNotifyChannel, type OwnerNotifySettings, type OwnerNotifyToolAudience } from "@cutex-desktop/protocol";
 import type { GlobalSettings } from "../../../../shared/ipc";
@@ -16,6 +17,7 @@ import { useTargetApi, useTargetFeatures, useTargetSidebar } from "../../lib/tar
 import { LEGACY_PRESET, NOTIFICATION_LEVELS_FEATURE, NOTIFICATION_PRESETS_NO_LEGACY_FEATURE } from "../../../../shared/notificationLevels";
 import { useNotificationLevels } from "../../lib/notificationLevelsStore";
 import { settingsAnchorId } from "../../lib/settingsNav";
+import { compareNames } from "../../lib/rosterOrder";
 
 const AUDIENCES: OwnerNotifyToolAudience[] = ["ownerFacing", "everyone", "directors", "none"];
 /** cutex's default audience for owner_notify (docs/research/notification-levels.md §4.3). */
@@ -140,9 +142,10 @@ function DeliveryMatrix({ settings, note, onChange }: { settings: OwnerNotifySet
 export function Overrides({ overrides, onChange }: { overrides: Record<string, OwnerNotifyAgentOverride>; onChange(next: Record<string, OwnerNotifyAgentOverride>): void }) {
   const { t } = useI18n();
   const sidebar = useTargetSidebar();
+  useArchivedAgents();
   const agents = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])];
   const nameOf = (id: string) => agents.find((a) => a.cutexSessionId === id)?.displayName ?? id;
-  const free = (sidebar?.active ?? []).filter((a) => !(a.cutexSessionId in overrides)).sort((a, b) => a.displayName.localeCompare(b.displayName));
+  const free = (sidebar?.active ?? []).filter((a) => !(a.cutexSessionId in overrides)).sort((a, b) => compareNames(a.displayName, b.displayName) || a.cutexSessionId.localeCompare(b.cutexSessionId));
   const [pick, setPick] = useState("");
   const [mode, setMode] = useState<OwnerNotifyAgentOverride>("mute");
   const modes = (["mute", "force"] as const).map((v) => ({ value: v, label: t(`owner-notify.override.${v}`) }));

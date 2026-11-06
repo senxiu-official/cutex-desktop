@@ -45,11 +45,12 @@ export interface HomeStore {
   /** A cover write answered with the home view: take its revision / cover etag. */
   noteView(hostId: string, view: HomeView): void;
   entry(hostId: string): HomeEntry | undefined;
+  reproject(): void;
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export function createHomeStore(deps: { backend(hostId: string): HomeBackend | null; local: HomeLocal }): HomeStore {
+export function createHomeStore(deps: { backend(hostId: string): HomeBackend | null; local: HomeLocal; present?(doc: HomeDoc): HomeDoc }): HomeStore {
   const store = create<{ entries: Record<string, HomeEntry> }>(() => ({ entries: {} }));
   type Queued = { edit: Edit; done(ok: boolean): void; applied: boolean };
   const queues = new Map<string, { edits: Queued[]; running: boolean }>();
@@ -58,6 +59,7 @@ export function createHomeStore(deps: { backend(hostId: string): HomeBackend | n
   const get = (hostId: string) => store.getState().entries[hostId];
   const set = (hostId: string, patch: Partial<HomeEntry>) => {
     const before = get(hostId) ?? { hostId, status: "loading", source: "host", revision: 0, confirmed: {}, doc: {}, coverEtag: null, saving: false, error: null };
+    if (patch.confirmed && deps.present) patch = { ...patch, confirmed: deps.present(patch.confirmed) };
     const next = { ...before, ...patch };
     const queued = queues.get(hostId)?.edits ?? [];
     next.doc = queued.reduce((d, q) => (q.applied ? d : q.edit(d)), next.confirmed);
@@ -186,7 +188,7 @@ export function createHomeStore(deps: { backend(hostId: string): HomeBackend | n
     else set(hostId, { coverEtag: view.coverEtag });
   }
 
-  return { store, load, update, noteView, entry: get };
+  return { store, load, update, noteView, entry: get, reproject: () => { for (const [hostId, e] of Object.entries(store.getState().entries)) set(hostId, { confirmed: e.confirmed }); } };
 }
 
 // ── The module's instance (modules/home/index.ts activate) ───────────────────────────────────────

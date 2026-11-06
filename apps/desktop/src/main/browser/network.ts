@@ -178,6 +178,8 @@ export interface BrowserSessionOptions {
   onResponse?: (webContentsId: number, details: { url: string; statusCode: number; headers: Record<string, string[]>; resourceType: string }) => void;
   /** A refused main-frame request of an admitted guest (reason enum only; never the URL). */
   onRefused?: (webContentsId: number, reason: BrowserRefusal) => void;
+  /** Observation only: a guest's own XHR / fetch that the gate let through, and its end. */
+  onPageRequest?: (webContentsId: number, requestId: string, phase: "start" | "end") => void;
   /** Main's attribution of a download (owner / agent), or false to cancel it. Omitted = cancel
    * every download. An allowed download must still go through a save dialog (no setSavePath). */
   download?: (webContentsId: number | undefined, item: DownloadItem) => boolean;
@@ -262,11 +264,18 @@ export function installBrowserSessionPolicy(session: Session, options: BrowserSe
           const reason = options.policy.refusal(details.url, context);
           allow = reason === null;
           if (reason && details.resourceType === "mainFrame") try { options.onRefused?.(id!, reason); } catch { /* Reporting only. */ }
+          if (allow && details.resourceType === "xhr") try { options.onPageRequest?.(id!, String(details.id), "start"); } catch { /* Observation only. */ }
         }
       }
     } catch { /* Host removal, malformed metadata, adapter errors all deny. */ }
     callback({ cancel: !allow });
   });
+  // Observation only (no callback to hold): the end of a page request onBeforeRequest reported.
+  const ended = (details: { id: number; webContentsId?: number; resourceType: string }) => {
+    try { if (active && details.resourceType === "xhr" && typeof details.webContentsId === "number") options.onPageRequest?.(details.webContentsId, String(details.id), "end"); } catch { /* Observation only. */ }
+  };
+  session.webRequest.onCompleted({ urls: ["<all_urls>"] }, ended);
+  session.webRequest.onErrorOccurred({ urls: ["<all_urls>"] }, ended);
   session.webRequest.onHeadersReceived({ urls: ["<all_urls>"] }, (details, callback) => {
     callback({});
     try {

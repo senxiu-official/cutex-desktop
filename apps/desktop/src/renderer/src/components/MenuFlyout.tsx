@@ -3,12 +3,15 @@ import { createPortal } from "react-dom";
 import { useOwnerWindow } from "../lib/ownerContext";
 import { resizeObserverFor } from "../lib/ownerWindow";
 import { placeFlyout, samePlace, type FlyoutPlace } from "../lib/flyoutPlacement";
+import { FloatMore, useRowsBelow } from "./FloatMore";
 import { MenuLayersContext, useMenuLayer } from "../lib/menuLayers";
 
 /** Portalled to its own window so pane and parent-menu scrolling cannot clip a submenu. */
 export function MenuFlyout({ children, className = "min-w-40", align = "top" }: { children: ReactNode; className?: string; align?: "top" | "bottom" }) {
   const marker = useRef<HTMLSpanElement>(null);
   const panel = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const below = useRowsBelow(list);
   const win = useOwnerWindow();
   const group = useContext(MenuLayersContext);
   useMenuLayer(panel, group);
@@ -31,7 +34,7 @@ export function MenuFlyout({ children, className = "min-w-40", align = "top" }: 
     win.addEventListener("resize", update);
     return () => { observer?.disconnect(); win.removeEventListener("resize", update); };
   }, [win, align]);
-  return <><span ref={marker} hidden />{createPortal(<div ref={panel} data-flyout="" data-popover="" className="fixed z-[52]" style={{ paddingLeft: 4, maxWidth: "calc(100vw - 8px)", maxHeight: "calc(100dvh - 8px)" }}>
-    <div role="menu" className={`max-h-[calc(100dvh-8px)] max-w-[calc(100vw-12px)] overflow-y-auto rounded-xl border border-border bg-surface p-1 text-sm shadow-xl ${className}`} style={{ minWidth: "min(10rem, calc(100vw - 12px))", overflowWrap: "anywhere" }}>{children}</div>
+  return <><span ref={marker} hidden />{createPortal(<div ref={panel} data-flyout="" data-popover="" className="fixed z-[162]" style={{ paddingLeft: 4, maxWidth: "calc(100vw - 8px)", maxHeight: "calc(100dvh - 8px)" }}>
+    <div ref={list} role="menu" className={`float float-scroll max-h-[calc(100dvh-8px)] max-w-[calc(100vw-12px)] overflow-y-auto p-1 text-sm ${className}`} style={{ minWidth: "min(10rem, calc(100vw - 12px))", overflowWrap: "anywhere" }}>{children}<FloatMore n={below} list={list} /></div>
   </div>, win.document.body)}</>;
 }

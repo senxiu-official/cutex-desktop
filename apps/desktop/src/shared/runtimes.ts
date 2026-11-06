@@ -3,6 +3,8 @@
 // extra fields cutex, unpinnedAgentCount, releaseDir, latest are not read yet). Every wire field the
 // desktop reads is in this file (`RuntimesWire` + `adaptRuntimes`) and the preview mock (modules/runtimes/mock.ts).
 
+export { RUNTIME_PRUNE_FEATURE, type RuntimePruneKind, type RuntimePruneVersion, type RuntimePrunePlan, type RuntimePruneResult } from "@cutex-desktop/cutex-client";
+
 /** cutex capability of `GET /v2/runtimes`. */
 export const RUNTIMES_FEATURE = "runtimes-view";
 

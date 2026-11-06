@@ -1,13 +1,13 @@
 // Sidebar density for big projects (owner 2026-10-21: "DEMO", 51 agents all named demo-…): the group's
 // shared name prefix is dropped from the shown names (lib/sidebarNames), only the Director, pins,
 // needs-you / error and running agents get the big IM row (lib/sidebarLayout bigRow), the other full
-// rows are compact and capped at RECENT_CAP before 「最近活跃 +N」 (capRecent).
+// rows are compact; at most RECENT_CAP recently worked ones are listed (lib/rosterTiers placeRoster).
 import { describe, expect, it } from "vitest";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import type { SidebarSnapshot } from "../src/shared/ipc";
 import type { AgentSignal } from "../src/renderer/src/lib/agentAttention";
 import { groupNamePrefix, sharedNamePrefixes, shortNames, stripNamePrefix } from "../src/renderer/src/lib/sidebarNames";
-import { bigRow, capRecent, layoutGroup, RECENT_CAP, type LayoutPrefs } from "../src/renderer/src/lib/sidebarLayout";
+import { bigRow, layoutGroup, type LayoutPrefs } from "../src/renderer/src/lib/sidebarLayout";
 import { buildSidebar, shownName, type AgentRow, type AgentStatus, type ProjectGroup } from "../src/renderer/src/lib/sidebar";
 
 describe("the group's shared name prefix", () => {
@@ -103,7 +103,7 @@ function row(id: string, status: AgentStatus = "idle", over: { director?: boolea
   return { id, name: id, subtitle: "", status, isDirector: over.director ?? false, pinned: over.pinned ?? false, lastActivity: over.last ?? 0, profile: null, color: null, session: s };
 }
 const project = (rows: AgentRow[]): ProjectGroup => ({ kind: "project", id: "p", name: "p", badge: "", color: "blue", online: rows.filter((r) => r.status !== "offline"), offline: rows.filter((r) => r.status === "offline") });
-const prefs: LayoutPrefs = { grouping: "all", noOnline: "collapse", running: "compact", foldIdle: true };
+const prefs: LayoutPrefs = { grouping: "all", noOnline: "collapse", running: "compact" };
 const ids = (rows: readonly AgentRow[]) => rows.map((r) => r.id);
 
 describe("row style: big IM row vs compact", () => {
@@ -116,43 +116,20 @@ describe("row style: big IM row vs compact", () => {
     for (const signal of ["idle", "done", "offline", "unknown"] as AgentSignal[]) expect(bigRow(plain, signal)).toBe(false);
   });
 
-  it("layoutGroup splits the full rows: big in the group's order, recent compact rows newest first", () => {
-    const now = 10 * 60 * 60_000;
-    const rows = [row("dir", "idle", { director: true, last: now - 50 * 60_000 }), row("pin", "idle", { pinned: true, last: now - 40 * 60_000 }), row("ask", "needsInput"), row("bad", "error"), row("fin", "idle", { last: now - 20 * 60_000 }), row("a", "idle", { last: now - 5 * 60_000 }), row("b", "idle", { last: now - 1 * 60_000 }), row("old", "idle", { last: now - 3 * 60 * 60_000 }), row("run", "running")];
+  it("layoutGroup splits the rows: big 现在 in the group's order, 最近 compact rows newest first", () => {
+    const day = 24 * 60 * 60_000;
+    const now = 30 * day;
+    const rows = [row("dir", "idle", { director: true, last: now - 50 * 60_000 }), row("pin", "idle", { pinned: true, last: now - 40 * 60_000 }), row("ask", "needsInput"), row("bad", "error"), row("fin", "idle", { last: now - 20 * 60_000 }), row("a", "idle", { last: now - 5 * 60_000 }), row("b", "idle", { last: now - 1 * 60_000 }), row("old", "idle", { last: now - 9 * day }), row("run", "running")];
     const signals: Record<string, AgentSignal> = { ask: "needsYou", bad: "error", fin: "done", run: "running" };
     const l = layoutGroup(project(rows), { signalOf: (k) => signals[k], selectedId: null, starred: new Set(), prefs, now }, false);
     expect(ids(l.big)).toEqual(["dir", "pin", "ask", "bad"]);
-    expect(ids(l.recent)).toEqual(["b", "a", "fin"]);
-    expect(ids(l.full).sort()).toEqual([...ids(l.big), ...ids(l.recent)].sort());
-    // Running (compact mode) stays in its own rows; long idle folds.
+    // Drawn in the roster order (online first, then name), not by activity.
+    expect(ids(l.recent)).toEqual(["a", "b", "fin"]);
+    // Running (compact mode) stays in its own rows; not used for a week: 「在线空闲 +N」.
     expect(ids(l.running)).toEqual(["run"]);
     expect(ids(l.idle)).toEqual(["old"]);
     // 「完整显示」: running agents become full rows, and big ones.
     const full = layoutGroup(project(rows), { signalOf: (k) => signals[k], selectedId: null, starred: new Set(), prefs: { ...prefs, running: "full" }, now }, false);
     expect(ids(full.big)).toContain("run");
-  });
-});
-
-describe("「最近活跃 +N」: the compact recent rows capped per group", () => {
-  const rows = Array.from({ length: 10 }, (_, i) => `r${i}`);
-
-  it("the first RECENT_CAP (6) shown, the rest hidden", () => {
-    expect(RECENT_CAP).toBe(6);
-    const { shown, hidden } = capRecent(rows);
-    expect(shown).toEqual(rows.slice(0, 6));
-    expect(hidden).toEqual(rows.slice(6));
-  });
-
-  it("up to the cap nothing folds; expanded or searching shows every row", () => {
-    expect(capRecent(rows.slice(0, 6)).hidden).toEqual([]);
-    expect(capRecent(rows, { expanded: true })).toEqual({ shown: rows, hidden: [] });
-    expect(capRecent(rows, { searching: true })).toEqual({ shown: rows, hidden: [] });
-    expect(capRecent(rows, { cap: 2 }).shown).toEqual(["r0", "r1"]);
-  });
-
-  it("the open agent / a fresh one past the cap stays listed (in its place)", () => {
-    const { shown, hidden } = capRecent(rows, { keep: (r) => r === "r8" });
-    expect(shown).toEqual([...rows.slice(0, 6), "r8"]);
-    expect(hidden).toEqual(["r6", "r7", "r9"]);
   });
 });

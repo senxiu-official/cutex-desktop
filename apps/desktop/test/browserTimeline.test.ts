@@ -32,6 +32,40 @@ describe("browser timeline safe summaries", () => {
     for (const wrong of [mcp({ server: "other" }), dynamic({ namespace: "shell" }), mcp({ tool: "browser_evaluate" }), mcp({ type: "commandExecution" })])
       expect(browserToolView(wrong)).toBeNull();
   });
+  it("the one-tool surface (cutex design 059) shows each command as its own row, with the same safety", () => {
+    const command = (args: Record<string, unknown>, extra: Partial<RawItem> = {}) => mcp({ tool: "browser", arguments: args, result: { content: [] }, ...extra });
+    expect(browserToolName(command({ command: "open", args: { title: "Open", url: "https://example.com/" } }))).toBe("browser_open");
+    expect(browserToolName(command({ command: "docs" }))).toBe("browser_docs");
+    expect(browserToolName(command({ command: "status", args: { requestId: "browser-1" } }))).toBe("browser_status");
+    expect(browserToolName(dynamic({ tool: "browser", arguments: JSON.stringify({ command: "visit", args: { title: "Books" } }) }))).toBe("browser_visit");
+    for (const wrong of [{ command: "evaluate" }, { command: 1 }, {}]) expect(browserToolView(command(wrong))).toBeNull();
+    expect(browserToolView(command({ command: "read" }, { server: "other" }))).toBeNull();
+    const secret = "never-show-this-OTP";
+    const view = browserToolView(command({ command: "act", args: { title: `Fill ${secret}`, guestId: "g", action: { kind: "fill", ref: "r1", text: secret } } }));
+    expect(view?.summary).toBe("browser.timeline.fill");
+    expect(view?.title).not.toContain(secret);
+    expect(browserToolView(command({ command: "screenshot", args: { title: "Look", guestId: "g" } }, { result: { content: [image] } }))?.imageState).toBe("ready");
+    expect(browserToolView(command({ command: "visit", args: { title: "Books", guestId: "g" } }))?.summary).toBe("browser.timeline.visit");
+    const failed = browserToolView(command({ command: "read", args: { title: "Read", guestId: "g" } },
+      { result: { isError: true, content: [{ type: "text", text: JSON.stringify({ error: { code: "outcome_unknown", requestId: "browser-1" } }) }] } }));
+    expect(failed?.state).toBe("failed"); expect(failed?.errorCode).toBe("outcome_unknown");
+  });
+  it("browser scripts (cutex design 059) show the call title, never the code", () => {
+    const code = "await tab.fill('r1', 'never-show-this-OTP')";
+    const view = browserToolView(mcp({ tool: "browser_script", arguments: { title: "Sign in", code }, result: { content: [{ type: "text", text: JSON.stringify({ ok: true, output: "" }) }] } }));
+    expect(view?.summary).toBe("browser.timeline.script"); expect(view?.title).toBe("Sign in"); expect(view?.state).toBe("done");
+    expect(JSON.stringify(view)).not.toContain("never-show-this-OTP");
+    expect(browserToolView(mcp({ tool: "browser_script_reset", arguments: {}, result: { content: [] } }))?.summary).toBe("browser.timeline.script_reset");
+    const timedOut = browserToolView(mcp({ tool: "browser_script", arguments: { title: "Slow", code }, result: { isError: true,
+      content: [{ type: "text", text: JSON.stringify({ error: { code: "script_runtime_unavailable" } }) }] } }));
+    expect(timedOut?.state).toBe("failed"); expect(timedOut?.errorCode).toBe("script_runtime_unavailable");
+    const steps = browserToolView(mcp({ tool: "browser_script", arguments: { title: "Shop", code }, result: { content: [{ type: "text", text: JSON.stringify({ ok: true, output: "",
+      steps: [{ step: 1, command: "open", ok: true, requestId: "browser-x" }, { step: 2, command: "act", kind: "fill", ok: true }, { step: 3, command: "act", kind: "evaluate", ok: true },
+        { step: 4, command: "read", ok: false, error: "agent_paused" }, { step: 5, command: "script", ok: true }, { command: "<b>x</b>" }, "raw"] }) }] } }));
+    expect(steps?.steps).toEqual([{ summary: "browser.timeline.open", ok: true, errorCode: null }, { summary: "browser.timeline.fill", ok: true, errorCode: null },
+      { summary: "browser.timeline.act", ok: true, errorCode: null }, { summary: "browser.timeline.read", ok: false, errorCode: "agent_paused" }]);
+    expect(browserToolView(mcp({ tool: "browser_read", arguments: { title: "R" }, result: { content: [{ type: "text", text: JSON.stringify({ steps: [{ command: "open", ok: true }] }) }] } }))?.steps).toEqual([]);
+  });
   it("never projects fill text, argument JSON, raw errors or page text", () => {
     const secret = "never-show-this-OTP", title = `Fill ${secret}`;
     const view = browserToolView(mcp({ tool: "browser_act", arguments: { title, action: { kind: "fill", ref: "r1", text: secret } },

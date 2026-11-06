@@ -8,7 +8,7 @@ import { useState, type ReactNode } from "react";
 import { loadedCatalog, useEnglishCatalog, useI18n, type MessageKey } from "../../i18n";
 import { zhCN } from "../../i18n/zh-CN";
 import { PreviewMarkContext } from "../../lib/previewMark";
-import { DEFAULT_TERMS, resetTerm, resolveTerms, setTerm, splitTerms, subagentDefault, TERM_IDS, TERM_MAX, useTermOverrides, type TermId, type TermLocale } from "../../lib/terms";
+import { DEFAULT_TERMS, resetTerm, resolveTerms, resolveSidebarRoleLabel, sidebarRoleDefault, setSidebarRoleLabel, setTerm, splitTerms, subagentDefault, TERM_IDS, TERM_MAX, useTermOverrides, type TermId, type TermLocale } from "../../lib/terms";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { Avatar } from "../Avatar";
 import { ResetButton, Section, SettingRow, TextField, Toggle, SettingsGroup } from "./Form";
@@ -80,7 +80,9 @@ function Piece({ locale, k }: { locale: TermLocale; k: MessageKey }) {
 
 /** Pieces of the real UI (new-agent entry, counts, a director badge, a waiting chip) in one wrapping line. */
 function TermsSample({ locale }: { locale: TermLocale }) {
-  const terms = resolveTerms(useTermOverrides(), locale);
+  const overrides = useTermOverrides();
+  const terms = resolveTerms(overrides, locale);
+  const director = resolveSidebarRoleLabel(overrides, locale, "director"), operator = resolveSidebarRoleLabel(overrides, locale, "operator");
   const muted = (children: ReactNode) => <span className="text-xs text-muted">{children}</span>;
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-2.5 text-ui/[inherit]">
@@ -91,13 +93,13 @@ function TermsSample({ locale }: { locale: TermLocale }) {
       <span className="inline-flex items-center gap-1.5">
         <Avatar name="Eva" seed="Eva" size={20} />
         <span className="font-medium">Eva</span>
-        <Tag>
-          <PreviewTerm id="director">{terms.director.one}</PreviewTerm>
-        </Tag>
+        {director && <Tag title={terms.director.one}>
+          <PreviewTerm id="director">{director}</PreviewTerm>
+        </Tag>}
       </span>
       {muted(<Piece locale={locale} k="terms.sample.working" />)}
       {muted(<Piece locale={locale} k="terms.sample.reportsTo" />)}
-      <Tag><Piece locale={locale} k="sidebar.operator" /></Tag>
+      {operator && <Tag title={terms.operator.one}><PreviewTerm id="operator">{operator}</PreviewTerm></Tag>}
       <Tag tone="attention">
         <span><Piece locale={locale} k="terms.sample.waiting" /></span>
       </Tag>
@@ -121,10 +123,16 @@ function TermRow({ locale, id }: { locale: TermLocale; id: TermId }) {
       // the row never changes height). The derived sub word (子 + a renamed agent word) is the placeholder
       // itself; a hint appearing only then made the rows below jump (owner 2026-10-18).
       hint={plural ? t("terms.default", { value: `${defaults.one} / ${defaults.many}` }) : undefined}
-      reset={<ResetButton disabled={!saved.one && !saved.many} onClick={() => resetTerm(locale, id)} title={t("terms.reset")} />}
+      reset={<ResetButton disabled={!saved.one && !saved.many && saved.sidebar === undefined} onClick={() => resetTerm(locale, id)} title={t("terms.reset")} />}
     >
       <TextField value={saved.one ?? ""} placeholder={defaults.one} maxLength={TERM_MAX} width="w-32" label={plural ? t("terms.singular") : undefined} onCommit={(v) => setTerm(locale, id, "one", v)} />
       {plural && <TextField value={saved.many ?? ""} placeholder={resolved[id].many} maxLength={TERM_MAX} width="w-32" label={t("terms.plural")} onCommit={(v) => setTerm(locale, id, "many", v)} />}
+      {(id === "director" || id === "operator") && <div className="flex flex-col gap-1">
+        <span className="text-caption text-subtle">{t("terms.sidebarLabel")}</span>
+        <div className="flex items-start gap-1"><TextField value={saved.sidebar ?? sidebarRoleDefault(resolved, id)} placeholder={t("terms.sidebarHidden")} maxLength={TERM_MAX} width="w-32" label={t("terms.sidebarLabel")} onCommit={v => setSidebarRoleLabel(locale, id, v)} />
+        <ResetButton disabled={saved.sidebar === undefined} onClick={() => setSidebarRoleLabel(locale, id, null)} title={t("terms.reset")} /></div>
+        <span className="text-caption text-subtle">{t("terms.sidebarHidden")}</span>
+      </div>}
     </SettingRow>
   );
 }

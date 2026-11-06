@@ -340,6 +340,24 @@ describe("Current immutable ledger-off compatibility captures", () => {
 });
 
 describe("Current captured timeline bindings through D1 (controlled-fake evidence only)", () => {
+  it.each(["codex", "claude"])("S11 %s recorded passive-note surfaces select pendingNotes before receipt and exactly one timeline record after receipt", runtime => {
+    const entries = read(`s11-${runtime}.jsonl`);
+    const pending = entries.find(e => e.source === "session" && e.kind === "stateChanged" && (e.payload.record as InputRecord)?.kind === "agentMessage" && (e.payload.record as InputRecord).surface === "pendingNotes")!;
+    const consumed = entries.find(e => e.source === "session" && e.kind === "stateChanged" && (e.payload.record as InputRecord)?.kind === "agentMessage" && (e.payload.record as InputRecord).state === "inContext")!;
+    expect(pending).toBeDefined(); expect(consumed).toBeDefined();
+    for (const checkpoint of [pending, consumed]) {
+      // Captures start with events before the first epoch-authoritative snapshot. Test the
+      // recorded record's surface directly; do not invent a bootstrap for that earlier point.
+      const record = checkpoint.payload.record as InputRecord;
+      const session = { ...emptyInputLedgerSession(), records: new Map([[record.inputId, record]]) };
+      const inPending = pendingNoteRecords(session).filter(r => r.inputId === record.inputId);
+      const inTimeline = timelineRecords(session).filter(r => r.inputId === record.inputId);
+      expect(inPending).toHaveLength(checkpoint === pending ? 1 : 0);
+      expect(inTimeline).toHaveLength(checkpoint === pending ? 0 : 1);
+      if (checkpoint === consumed) expect(record.timelineItemId).toBe(record.inputId);
+    }
+  });
+
   it("contains actual non-null bindings in 42 of the 58 manifest-listed files", () => {
     expect(files.filter(file => operations(file).some(op => recordsOf(op).some(record => record.timelineItemId !== null)))).toHaveLength(42);
   });

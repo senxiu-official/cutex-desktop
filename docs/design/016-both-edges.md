@@ -1,23 +1,5 @@
-# 016 只有一边能拖的面板：两边都能拖
+# Resizable panel boundaries
 
-状态：**已实现，待合并**（10-22，feat/0.2-width）。清单 #38（主人：查）。
+A boundary can be resized when it separates adjacent panels or a panel from available space. The operation changes the two neighboring areas and leaves unrelated panels unchanged. Minimum widths bound the result. An outside window edge is not a second panel boundary.
 
-## 规则
-
-一条边挨着**另一个面板**或**露出桌面的空隙**，就可以拖；拖它只改这条边两边的两样东西（两个面板，或一个面板和空隙），其余不动（同 [007](007-drag-one-side.md)）。
-
-| 面板 | 原来能拖的边 | 新加的边 | 拖它改什么 |
-|---|---|---|---|
-| 单个会话 | 两边（对称） | — | 只动这一边（007） |
-| Shelf（按内容、挨着桌面空隙时） | 朝对话的那边 | **外侧边** | Shelf 和空隙；会话宽度不变、另一侧不动 |
-| 两个工作区按内容时的会话 | 无（只有 Shelf 的边） | **两列之间**（中间没有 Shelf / Rail 时）、**列的外侧边**（挨着桌面空隙时） | 两列之间 = 这两列；外侧边 = 这一列和空隙 |
-| 设置 {{shelf}}（在左边、挨着侧栏） | 内侧边 | 和侧栏之间的边（就是侧栏的边） | **侧栏和设置卡片**（设置不小于 640 px），工作区不动 |
-
-## 实现时定下的细节
-
-- 铺满时 Shelf 的外侧边挨着侧栏或窗口边：不加（侧栏的边已经有；窗口边没有邻居）。设置 Shelf 在右边时外侧是窗口边：不加。
-- 「永远偏右」时左工作区的 Shelf 外侧边挨着右边那一列：这次没加（少见的组合），以后需要再加。
-- Shelf 外侧边双击 = Shelf 回缺省宽度。侧栏边双击（设置在旁边时）= 侧栏和设置卡片都回缺省（规则 7）。
-- 两个工作区按内容时拖出来的列宽和以前一样只在内存里（`rowDrag.colW`），工作区开关时忘掉。
-- 最大化（003）期间这些新边不显示。
-- 代码：`components/side/SideArea.tsx`（`OuterEdge`、`WsColumnEdges`）、`lib/sideResize.ts`（`outer`）、`components/PaneResizer.tsx` + `lib/settingsShelf.ts`（侧栏 ↔ 设置）。
+See [Architecture](../DESIGN.md) and [Module contracts](../desktop-modules.md) for related interfaces.

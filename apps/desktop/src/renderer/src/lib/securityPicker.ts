@@ -1,6 +1,7 @@
 import type { ExternalAgentGrant, SidebarSnapshot } from "../../../shared/ipc";
 import { domainOptions, externalCandidates } from "./agentSecurity";
 import { parseHostKey } from "./hostKeys";
+import { compareNames } from "./rosterOrder";
 
 type Snapshot = Pick<SidebarSnapshot, "active" | "projects" | "hostRows"> | null | undefined;
 export interface SecurityPickerOption { value: string; label: string; group: string; searchText?: string }
@@ -20,13 +21,13 @@ export function grantPickerOptions(sidebar: Snapshot, projectId: string, grants:
   return externalCandidates(sidebar, projectId, grants)
     .sort((a, b) => Number(a.projectId === null) - Number(b.projectId === null)
       || (rank.get(a.projectId!) ?? projects.length) - (rank.get(b.projectId!) ?? projects.length)
-      || (a.projectId ?? "").localeCompare(b.projectId ?? "") || a.name.localeCompare(b.name))
+      || (a.projectId ?? "").localeCompare(b.projectId ?? "") || compareNames(a.name, b.name))
     .map(agent => ({ value: agent.id, label: agent.name, group: agent.projectName ?? independent, searchText: `${agent.name} ${agent.projectName ?? independent}` }));
 }
 
 export function linkPickerOptions(sidebar: Snapshot, projects: readonly string[], projectLabel: string, independent: string): SecurityPickerOption[] {
   const rank = new Map(projects.map((id, i) => [id, i]));
   return domainOptions(sidebar).sort((a, b) => Number(a.kind === "agent") - Number(b.kind === "agent")
-    || (a.kind === "project" && b.kind === "project" ? (rank.get(a.id) ?? projects.length) - (rank.get(b.id) ?? projects.length) : a.label.localeCompare(b.label)))
+    || (a.kind === "project" && b.kind === "project" ? (rank.get(a.id) ?? projects.length) - (rank.get(b.id) ?? projects.length) : compareNames(a.label, b.label)))
     .map(domain => ({ value: domain.key, label: domain.label, group: domain.kind === "project" ? projectLabel : independent }));
 }

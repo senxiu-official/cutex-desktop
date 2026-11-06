@@ -302,8 +302,13 @@ export async function runClaudeRuntimeBatch(
   return batch;
 }
 
+/** Presentation metadata only; the daemon run and its undo scope stay native-only. */
+export type DisplayedRuntimeRun = RuntimePackageRun & {
+  families?: { native: RuntimePackageRun["counts"]; claude: RuntimePackageRun["counts"] };
+};
+
 /** One visual run/result list for the native cutex run and this click's Claude repins. */
-export function combineRuntimeRuns(native: RuntimePackageRun | null | undefined, claude: ClaudeRuntimeBatch | null | undefined): RuntimePackageRun | null {
+export function combineRuntimeRuns(native: RuntimePackageRun | null | undefined, claude: ClaudeRuntimeBatch | null | undefined): DisplayedRuntimeRun | null {
   if (!native) return claude?.run ?? null;
   if (!claude || claude.nativeRunId !== native.runId) return native;
   const items = [...native.items, ...claude.run.items];
@@ -315,6 +320,7 @@ export function combineRuntimeRuns(native: RuntimePackageRun | null | undefined,
     startedAt: native.startedAt < claude.run.startedAt ? native.startedAt : claude.run.startedAt,
     finishedAt: running ? null : [native.finishedAt, claude.run.finishedAt].filter((value): value is string => !!value).sort().at(-1) ?? null,
     counts: runtimeRunCounts(items),
+    families: { native: native.counts, claude: claude.run.counts },
     currentAgentId: native.currentAgentId ?? claude.run.currentAgentId,
     items,
   };
@@ -323,7 +329,7 @@ export function combineRuntimeRuns(native: RuntimePackageRun | null | undefined,
 export function displayedRuntimeRuns(
   native: { activeRun: RuntimePackageRun | null; lastRun: RuntimePackageRun | null },
   claude: ClaudeRuntimeBatch | null | undefined,
-): { active: RuntimePackageRun | null; last: RuntimePackageRun | null } {
+): { active: DisplayedRuntimeRun | null; last: DisplayedRuntimeRun | null } {
   if (native.activeRun) return { active: combineRuntimeRuns(native.activeRun, claude), last: native.lastRun };
   if (claude?.run.state === "running") {
     const finishedNative = claude.nativeRunId === native.lastRun?.runId ? native.lastRun : null;

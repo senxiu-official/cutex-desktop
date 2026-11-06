@@ -4,6 +4,7 @@
 // manages. Shown in the Shelf project view and on the project page's 服务 tab; nothing on older hosts or
 // when there is nothing to claim. Its keys live in the services module's catalog like the service menu's.
 import { useMemo, useState } from "react";
+import { useArchivedAgents } from "../lib/useArchivedAgents";
 import { Globe } from "lucide-react";
 import { apiFor } from "../bridge";
 import { useI18n, type MessageKey } from "../i18n";
@@ -18,6 +19,7 @@ const IDLE = "border border-border text-muted hover:bg-hover hover:text-foregrou
 export function ServiceClaimStrip({ hostId, projectId, formerDirectors, className = "" }: { hostId: string; projectId: string; formerDirectors?: ReadonlySet<string>; className?: string }) {
   const { t } = useI18n();
   const data = useHostData(hostId);
+  useArchivedAgents(hostId);
   const supported = data?.features.has(SERVICES_PROJECT_SCOPE_FEATURE) ?? false;
   const candidates = useMemo(() => (supported ? claimCandidates(data?.services, projectId, data?.sidebar, formerDirectors) : []), [supported, data?.services, data?.sidebar, projectId, formerDirectors]);
   const [busy, setBusy] = useState(false);

@@ -58,6 +58,7 @@ import { useAppearance } from "../lib/appearance";
 import { AcrylicFrost, TitlebarFrost } from "./AcrylicFrost";
 import "./tray.css";
 import { keyVar } from "../lib/keybindings";
+import { InfoMark } from "./InfoMark";
 import { DROP_TINT } from "../lib/dropTint";
 import { isNode, ownerWindowOf, resizeObserverFor } from "../lib/ownerWindow";
 import { useOwnerWindow } from "../lib/ownerContext";
@@ -534,6 +535,8 @@ const ChipTray = memo(function ChipTray({ placement, edge, entry, dockCount, ext
       }}
     >
       <TrayGrip vertical={vertical} menu={frameMenu} />
+      {/* How the tray works by hand (design 040 §2.1: how-to text is not in the tips). */}
+      <InfoMark text={[t("pane.tray.grip"), t("pane.tray.emptyHint"), t("tray.besideTip", { key: navigator.platform?.startsWith("Mac") ? "⌘" : "Ctrl" })].join("\n")} className="hover-info self-center px-0.5" />
       {/* Nothing pinned yet: 「＋ 固定」 (the desktop's picker) and, with nothing else in it, how to pin. */}
       {Dock && dockCount === 0 && <TrayPinButton vertical={vertical} alone={extras === 0} />}
       {Dock && dockCount + extras > 0 && entry && (
@@ -551,7 +554,7 @@ const ChipTray = memo(function ChipTray({ placement, edge, entry, dockCount, ext
           hidden={n === 0}
           aria-haspopup="dialog"
           aria-expanded={overflowOpen}
-          title={t("tray.moreTitle", { n })}
+          data-tip={t("tray.moreTitle", { n })}
           aria-label={t("tray.moreTitle", { n })}
           className="tray-more"
           onClick={() => setOverflowOpen((o) => !o)}
@@ -636,7 +639,7 @@ function TrayPinButton({ vertical, alone }: { vertical: boolean; alone: boolean 
           type="button"
           data-tray-item=""
           data-tray-pin=""
-          title={wide ? t("pane.tray.pinTitle") : `${t("pane.tray.pinTitle")} · ${hint}`}
+          data-tip={t("pane.tray.pinTitle")}
           aria-label={t("pane.tray.pinTitle")}
           aria-haspopup="menu"
           className={wide ? "tray-pin tray-pin-wide" : "tray-item tray-pin"}
@@ -711,7 +714,7 @@ function TrayGrip({ vertical, menu }: { vertical: boolean; menu: MenuEntry[] }) 
     <button
       type="button"
       data-tray-grip=""
-      title={label}
+      data-tip={t("pane.tray.edge")}
       aria-label={label}
       aria-haspopup="menu"
       className="tray-grip"
@@ -755,7 +758,7 @@ function TrayHandle({ label, menu }: { label: string; menu: MenuEntry[] }) {
     <button
       type="button"
       data-tray-handle=""
-      title={label}
+      data-tip={label}
       aria-label={label}
       className="pane-tray-handle"
       onPointerEnter={enter}

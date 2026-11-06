@@ -2,6 +2,7 @@
 // lists back the right-click menu and the hover "⋯" buttons, so actions never diverge.
 import { useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { AgentInfo, AgentInfoOptions } from "./avatar";
+import type { FolderLookChoice } from "./folderLook";
 import type { Foretell } from "./foretell";
 import { captureHostAction, onHostSwitch } from "./hostSwitch";
 import { activeAppDocument } from "./appWindowSet";
@@ -75,6 +76,8 @@ interface MenuState {
   items: (MenuAction | "separator")[];
   /** `y` is the menu's bottom edge (opens upwards, e.g. from the sidebar footer). */
   above?: boolean;
+  /** Anchored menus treat the trigger as inside; its click toggles this exact menu. */
+  trigger?: HTMLElement;
   /** Who opened it (a trigger shows itself pressed while its menu is open). */
   owner?: string;
   minWidth?: number;
@@ -99,7 +102,9 @@ type Dialog =
   | { kind: "folder"; start: string | null; hostId: string | null; resolve(value: string | null): void }
   | { kind: "forkProfile"; sessionId: string; hostId: string; afterTurnId: string | null; resolve(value: null): void }
   /** 编辑信息: an agent's avatar + note (name / color only for the preview). */
-  | { kind: "agentInfo"; name: string; color: string | null; seed: string; initial: AgentInfo; options: AgentInfoOptions; resolve(value: AgentInfo | null): void };
+  | { kind: "agentInfo"; name: string; color: string | null; seed: string; initial: AgentInfo; options: AgentInfoOptions; resolve(value: AgentInfo | null): void }
+  /** 外观…: a sidebar folder's icon and colour (`look` null = automatic); null on cancel. */
+  | { kind: "folderLook"; id: string; name: string; initial: FolderLookChoice | undefined; resolve(value: { look: FolderLookChoice | null } | null): void };
 
 interface State {
   menu: MenuState | null;
@@ -187,21 +192,33 @@ export function contextMenu(build: () => MenuEntry[]) {
   };
 }
 
-/** Open below a "⋯" trigger button. */
-export function openMenuFrom(el: HTMLElement, entries: MenuEntry[], options: { owner?: string } = {}): void {
+/** A repeated activation of the same physical trigger closes its menu, including keyboard clicks. */
+function closeFromTrigger(el: HTMLElement, owner: string | undefined, toggle: boolean): boolean {
+  if (!toggle || state.menu?.trigger !== el || state.menu.owner !== owner) return false;
+  closeMenu();
+  return true;
+}
+
+/** Open below a "⋯" trigger; repeated activation toggles closed. `toggle: false` explicitly replaces it. */
+export function openMenuFrom(el: HTMLElement, entries: MenuEntry[], options: { owner?: string; toggle?: boolean } = {}): void {
+  const { toggle = true, ...placement } = options;
+  if (closeFromTrigger(el, placement.owner, toggle)) return;
   const r = el.getBoundingClientRect();
   const items = normalizeEntries(entries);
-  if (items.length) showMenu({ x: r.left, y: r.bottom + 4, items, ...options, doc: ownerDocumentOf(el) });
+  if (items.length) showMenu({ x: r.left, y: r.bottom + 4, items, ...placement, trigger: el, doc: ownerDocumentOf(el) });
 }
 
 /**
  * Open above a trigger (sidebar footer): left-aligned with it, at least as wide as `minWidth`;
- * `owner` lets the trigger read whether its menu is open (`useMenuOwner`).
+ * `owner` lets the trigger read whether its menu is open (`useMenuOwner`). Repeated activation
+ * toggles closed; `toggle: false` explicitly replaces an open menu.
  */
-export function openMenuAbove(el: HTMLElement, entries: MenuEntry[], options: { owner?: string; minWidth?: number } = {}): void {
+export function openMenuAbove(el: HTMLElement, entries: MenuEntry[], options: { owner?: string; minWidth?: number; toggle?: boolean } = {}): void {
+  const { toggle = true, ...placement } = options;
+  if (closeFromTrigger(el, placement.owner, toggle)) return;
   const r = el.getBoundingClientRect();
   const items = normalizeEntries(entries);
-  if (items.length) showMenu({ x: r.left, y: r.top - 4, items, above: true, ...options, doc: ownerDocumentOf(el) });
+  if (items.length) showMenu({ x: r.left, y: r.top - 4, items, above: true, ...placement, trigger: el, doc: ownerDocumentOf(el) });
 }
 
 /** The `owner` of the open menu (null: none open / opened without one). */
@@ -288,6 +305,11 @@ export function folderDialog(start?: string | null, hostId?: string): Promise<st
 /** Edit an agent's avatar and note; null on cancel. */
 export function agentInfoDialog(name: string, color: string | null, seed: string, initial: AgentInfo, options: AgentInfoOptions): Promise<AgentInfo | null> {
   return new Promise((resolve) => showDialog({ kind: "agentInfo", name, color, seed, initial, options, resolve }));
+}
+
+/** Choose a sidebar folder's icon and colour; null on cancel (`look` null: back to automatic). */
+export function folderLookDialog(id: string, name: string, initial: FolderLookChoice | undefined): Promise<{ look: FolderLookChoice | null } | null> {
+  return new Promise((resolve) => showDialog({ kind: "folderLook", id, name, initial, resolve }));
 }
 
 export function forkProfileDialog(sessionId: string, hostId: string, afterTurnId: string | null): Promise<void> {

@@ -8,10 +8,12 @@ vi.mock("@cutex-desktop/cutex-client", () => ({
     constructor(public endpoint: unknown) {}
     hostSessions = fixture.hostSessions;
     host() { return new Promise(() => {}); }
+    capabilities() { return Promise.resolve(null); }
     sessions() { return Promise.resolve({ sessions: [] }); }
     projects() { return Promise.resolve({ projects: [] }); }
   },
   CutexApiError: class extends Error {},
+  userAccessOf: () => ({ isOwner: true }),
   CutexUnreachableError: class extends Error {},
   EventFeed: class {},
   openStream: vi.fn(),

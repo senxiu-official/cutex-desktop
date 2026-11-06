@@ -33,7 +33,7 @@ describe("which refusals wait", () => {
     for (const code of ["upstream_unreachable", "service_unavailable", "service_stopped", "services_store_unavailable", "proxy_busy"]) expect(waitsForService("cutex:service/cutex-e-director-board/", code)).toBe(true);
   });
   it("not: a crash loop, a failed start, an unknown service, a web page, no refusal", () => {
-    for (const code of ["service_crash_looped", "service_start_failed", "service_not_found", "service_reclaimed"]) expect(waitsForService("cutex:service/board/", code)).toBe(false);
+    for (const code of ["service_crash_looped", "service_start_failed", "service_not_found", "service_reclaimed", "service_manually_stopped", "service_wake_failed", "service_start_timeout"]) expect(waitsForService("cutex:service/board/", code)).toBe(false);
     expect(waitsForService("https://example.com/", "upstream_unreachable")).toBe(false);
     expect(waitsForService("cutex:service/board/", null)).toBe(false);
   });

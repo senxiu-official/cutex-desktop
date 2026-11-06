@@ -35,7 +35,7 @@ afterEach(() => { act(() => root.unmount()); host.remove(); vi.restoreAllMocks()
 it("warns on an unavailable current value, lists it above the available rows and opens an actionable picker", () => {
   act(() => root.render(h(ModelPicker, { profile: "Gemini", models, current: "wrong-model", label: "wrong-model", unavailable: true, onOpen: opened, onSelect: selected })));
   const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="composer.model.chooseAvailable"]')!;
-  expect(trigger.title).toContain("composer.model.unlisted");
+  expect(trigger.dataset.tip).toContain("composer.model.unlisted");
   expect(trigger.querySelector("[data-model-unlisted]")!.className).toContain("text-warn");
   click(trigger);
   const missing = document.querySelector("[data-model-unavailable]")!;

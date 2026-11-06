@@ -1,18 +1,18 @@
 # Cutex 桌面端快速上手
 
 Cutex 桌面端是 **cutex** 的图形界面：智能体、会话、项目和模型账号都由 cutex（一个常驻后台服务）管理，
-桌面端只负责显示和操作。所以每台电脑都要 **先装 cutex，再装桌面端**，桌面端会自动连接本机的 cutex。
+桌面端只负责显示和操作。所以运行智能体的主机须安装 cutex；桌面端可连接本机服务或远程主机。macOS 仅运行桌面客户端。
 
 > 完整的安装步骤（cutex、cute-codex、后台服务和桌面端，英文）在
 > [`docs/install/AGENT-INSTALL.md`](https://github.com/senxiu-official/cutex-desktop/blob/release/docs/install/AGENT-INSTALL.md)。那份说明也写给编程助手（如 Claude Code、
-> Codex）照着执行：可以直接把它交给你的编程助手。本文只是桌面端的简要说明。
+> Codex）照着执行：可由编程助手执行。本文介绍桌面端的基本操作。
 
 支持 Windows（x64）和 Linux（x64）。macOS 只有桌面端：通过 SSH 连接你自己的一台运行 cutex 的 Linux /
 Windows 电脑。
 
 ## 1. 安装桌面端（便携版）
 
-两种装法，都不写注册表、不需要管理员权限：
+以下两种安装方式均不需要管理员权限：
 
 - **签名的发布包**（推荐，约 15 分钟，不用编译）：从
   [GitHub Releases](https://github.com/senxiu-official/cutex-desktop/releases) 下载对应平台的包
@@ -47,7 +47,7 @@ git clone --branch release https://github.com/senxiu-official/cutex-desktop.git 
 ## 2. 第一次启动
 
 1. **cutex 还没装**：主界面会显示「这台电脑上还没有 cutex」和安装步骤。按 AGENT-INSTALL.md 装好并启动
-   cutex 后，桌面端每隔几秒自动重试，连上就好，不用重启桌面端。
+   cutex 后，桌面端每隔几秒自动重试，连接成功后即可使用，无须重启桌面端。
 2. **cutex 装了但没运行**：显示「cutex 没有在运行」。启动 cutex 的 management 服务（AGENT-INSTALL.md 里有
    这一步）即可。
 3. **连上了**：左上角显示本机名和绿色圆点。先到 **设置 → Profile** 添加模型账号，然后点左侧

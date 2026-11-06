@@ -6,7 +6,7 @@ const expected = { guestId: "guest", pageGeneration: 1 };
 
 const positive = [
   { op: "agents" }, { op: "settings" }, { op: "settings", agentOpenApproval: "ask" },
-  { op: "profileTools", profile: "私有 profile", enabled: true },
+  { op: "profileTools", profile: "私有 profile", enabled: true }, { op: "profileTools", profile: "main", surface: "command" },
   { op: "grantAgent", tabKey: "tab", sessionId: "session", settings, expected },
   { op: "grantAgent", tabKey: "tab", sessionId: "session", settings, approvalId: "approval", expected },
   { op: "holdReady", tabKey: "tab", leaseId: "lease", held: true },
@@ -54,7 +54,7 @@ describe("I3 owner channel has no generic RPC or scope escalation", () => {
   it.each([
     { op: "settings", path: "/v2/config" }, { op: "settings", agentOpenApproval: true },
     { op: "profileTools", profile: "../../root", enabled: true }, { op: "profileTools", profile: ".", enabled: true },
-    { op: "profileTools", profile: "test", enabled: "true" }, { op: "profileTools", profile: "test", token: "not-accepted" },
+    { op: "profileTools", profile: "test", enabled: "true" }, { op: "profileTools", profile: "test", token: "not-accepted" }, { op: "profileTools", profile: "test", surface: "script-v9" },
     { op: "grantAgent", tabKey: "tab", sessionId: "session", settings, leaseId: "forged" },
     { op: "holdReady", tabKey: "tab", leaseId: "lease", held: 1 },
     { op: "turnShot", id: "../file" }, { op: "toolItem", sessionId: "session", turnId: "turn", itemId: "item", includeThread: true },

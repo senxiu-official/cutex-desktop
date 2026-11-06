@@ -213,3 +213,57 @@ export function runningStepOf(preview: ActivityPreview | null): string | null {
   const line = previewLine(preview, true);
   return line && (line.kind === "tool" || line.kind === "retry") ? line.text : null;
 }
+
+/** Shells whose `-c` / `-Command` / `/c` script is the command that matters (`bash -lc "cargo build"` → cargo). */
+const SHELLS = new Set(["bash", "sh", "zsh", "dash", "fish", "pwsh", "powershell", "cmd"]);
+
+/** One shell-like word of `s` from `i` (quotes stripped): [word, end]. */
+function word(s: string, i: number): [string, number] {
+  while (i < s.length && /\s/.test(s[i]!)) i++;
+  let out = "";
+  let quote: string | null = null;
+  for (; i < s.length; i++) {
+    const c = s[i]!;
+    if (quote) {
+      if (c === quote) quote = null;
+      else out += c;
+    } else if (c === '"' || c === "'") quote = c;
+    else if (/\s/.test(c)) break;
+    else out += c;
+  }
+  return [out, i];
+}
+
+const SCRIPT_FLAG = /^(-[a-z]*c|-command|\/c)$/i;
+
+const base = (w: string) => w.split(/[\\/]/).pop()!.replace(/\.exe$/i, "");
+
+/**
+ * The first word of a command line, for a running agent's sidebar row (design 060 §6: 「$ cargo」, the full
+ * line in the tooltip): no directory, no `.exe`; through a shell wrapper (`bash -lc "…"`, `pwsh -Command …`,
+ * `cmd /c …`) and leading `VAR=value` assignments. Null when there is no word.
+ */
+export function commandHead(command: string): string | null {
+  let rest = command;
+  for (let guard = 0; guard < 4; guard++) {
+    let [w, end] = word(rest, 0);
+    while (w === "&" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) [w, end] = word(rest, end);
+    if (!w) return null;
+    if (!SHELLS.has(base(w).toLowerCase())) return base(w);
+    // A shell: skip its options up to the script flag; the script's first word is the command.
+    let [opt, next] = word(rest, end);
+    while (opt && /^[-/]/.test(opt) && !SCRIPT_FLAG.test(opt)) [opt, next] = word(rest, next);
+    if (!opt || !SCRIPT_FLAG.test(opt)) return base(w);
+    const [script] = word(rest, next);
+    // A quoted script is one word: look inside it; else the command goes on after the flag.
+    rest = /\s/.test(script) ? script : rest.slice(next);
+  }
+  return null;
+}
+
+/** A tool line shortened for a row: a command (「$ …」) to its first word; other steps unchanged. */
+export function shortToolLine(text: string): string {
+  if (!text.startsWith("$ ")) return text;
+  const head = commandHead(text.slice(2));
+  return head ? `$ ${head}` : text;
+}

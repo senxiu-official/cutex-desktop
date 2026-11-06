@@ -68,8 +68,8 @@ export const DEFAULT_TERMS: Record<TermLocale, TermSet> = {
   "ko-KR": { agent: { one: "에이전트", many: "에이전트" }, subagent: { one: "하위 에이전트", many: "하위 에이전트" }, parentagent: { one: "상위 에이전트", many: "상위 에이전트" }, director: { one: "디렉터", many: "디렉터" }, operator: { one: "부디렉터", many: "부디렉터" }, owner: { one: "소유자", many: "소유자" }, shelf: SHELF },
 };
 
-/** Saved overrides only (an absent or empty form = the default). */
-export type TermOverrides = Partial<Record<TermLocale, Partial<Record<TermId, Partial<TermForms>>>>>;
+/** Saved forms: absent/empty = default. Role sidebar labels: absent = derived default, empty = hidden. */
+export type TermOverrides = Partial<Record<TermLocale, Partial<Record<TermId, Partial<TermForms> & { sidebar?: string }>>>>;
 
 /** Longest accepted term (a label, not a sentence). */
 export const TERM_MAX = 24;
@@ -98,6 +98,27 @@ export function resolveTerms(overrides: TermOverrides, locale: TermLocale): Term
     out[id] = { one, many };
   }
   return out;
+}
+
+/** Sidebar-only labels; full role terms continue to name the role everywhere else. */
+export type SidebarRole = "director" | "operator";
+const ROLE_SHORT_LABELS: Record<SidebarRole, Readonly<Record<string, string>>> = {
+  director: { "Chief Maid": "Chief" }, operator: { "Deputy Maid": "Deputy" },
+};
+export function sidebarRoleDefault(terms: TermSet, role: SidebarRole): string {
+  return ROLE_SHORT_LABELS[role][terms[role].one] ?? terms[role].one;
+}
+export function resolveSidebarRoleLabel(overrides: TermOverrides, locale: TermLocale, role: SidebarRole): string {
+  return overrides[locale]?.[role]?.sidebar ?? sidebarRoleDefault(resolveTerms(overrides, locale), role);
+}
+/** null restores automatic derivation; an empty string explicitly hides the chip. */
+export function setSidebarRoleLabel(locale: TermLocale, role: SidebarRole, value: string | null): void {
+  const forms = { ...current[locale]?.[role] };
+  if (value === null) delete forms.sidebar;
+  else forms.sidebar = value.trim().slice(0, TERM_MAX);
+  const byTerm = { ...current[locale], [role]: forms };
+  if (!forms.one && !forms.many && forms.sidebar === undefined) delete byTerm[role];
+  save({ ...current, [locale]: byTerm });
 }
 
 /** The sub-agent prefix per language: 「子」智能体 / "sub-" agent / sous-agent / サブエージェント … */
@@ -223,6 +244,10 @@ export function parseOverrides(raw: unknown): TermOverrides {
     for (const id of TERM_IDS) {
       const forms = (byTerm as Record<string, unknown>)[id];
       if (!forms || typeof forms !== "object") continue;
+      if (id === "director" || id === "operator") {
+        const sidebar = (forms as Record<string, unknown>).sidebar;
+        if (typeof sidebar === "string") ((out[locale] ??= {})[id] ??= {}).sidebar = sidebar.trim().slice(0, TERM_MAX);
+      }
       for (const f of ["one", "many"] as const) {
         const v = (forms as Record<string, unknown>)[f];
         if (typeof v === "string" && v.trim()) ((out[locale] ??= {})[id] ??= {})[f] = v.trim().slice(0, TERM_MAX);
@@ -245,15 +270,15 @@ function save(next: TermOverrides): void {
 /** Sets one form ("" = back to the default). */
 export function setTerm(locale: TermLocale, id: TermId, form: keyof TermForms, value: string): void {
   const v = value.trim().slice(0, TERM_MAX);
-  const forms: Partial<TermForms> = { ...current[locale]?.[id] };
+  const forms = { ...current[locale]?.[id] };
   if (v) forms[form] = v;
   else delete forms[form];
   const byTerm = { ...current[locale], [id]: forms };
-  if (!forms.one && !forms.many) delete byTerm[id];
+  if (!forms.one && !forms.many && forms.sidebar === undefined) delete byTerm[id];
   save({ ...current, [locale]: byTerm });
 }
 
-/** Clears both forms of a term in one language. */
+/** Clears the full forms and any sidebar label of a term in one language. */
 export function resetTerm(locale: TermLocale, id: TermId): void {
   const byTerm = { ...current[locale] };
   delete byTerm[id];

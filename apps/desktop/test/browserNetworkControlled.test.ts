@@ -65,7 +65,7 @@ function sessionMock() {
   const session = Object.assign(emitter, {
     setPermissionRequestHandler: (fn: any) => { handlers.request = fn; }, setPermissionCheckHandler: (fn: any) => { handlers.check = fn; },
     setDevicePermissionHandler: (fn: any) => { handlers.device = fn; }, setCertificateVerifyProc: () => {}, setProxy: vi.fn(async () => {}),
-    webRequest: { onBeforeRequest: () => {}, onHeadersReceived: () => {} } });
+    webRequest: { onBeforeRequest: () => {}, onHeadersReceived: () => {}, onCompleted: () => {}, onErrorOccurred: () => {} } });
   const download = (contents: { id: number } | undefined) => {
     const event = { preventDefault: vi.fn() }, item = { cancel: vi.fn() };
     emitter.emit("will-download", event, item, contents);

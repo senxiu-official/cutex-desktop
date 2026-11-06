@@ -14,8 +14,8 @@ import { Tag, type TagTone } from "./Tag";
  *  running ring, grey when offline, the hollow dot while unknown. `running`: ring even when another signal wins
  *  (a running agent that also needs the owner). `badge`: the corner badge (lib/avatarStatus avatarBadge); sites
  *  that show the request elsewhere (a row's 需要你 pill) leave it out. */
-export function StatusAvatar({ name, initial, color, avatar, size, signal, running, seed, badge }: { name: string; initial?: string; color?: string | null; avatar?: SessionAvatar | null; seed?: string | null; size: number; signal: AgentSignal; running?: boolean; badge?: AvatarBadge | null }) {
-  return <Avatar name={name} initial={initial} color={color} avatar={avatar} seed={seed} size={size} status={{ running: running ?? signal === "running", badge, presence: avatarPresence(signal) }} />;
+export function StatusAvatar({ name, initial, color, avatar, size, signal, running, runningPaused, seed, badge }: { name: string; initial?: string; color?: string | null; avatar?: SessionAvatar | null; seed?: string | null; size: number; signal: AgentSignal; running?: boolean; runningPaused?: boolean; badge?: AvatarBadge | null }) {
+  return <Avatar name={name} initial={initial} color={color} avatar={avatar} seed={seed} size={size} status={{ running: running ?? signal === "running", runningPaused, badge, presence: avatarPresence(signal) }} />;
 }
 
 const ATTENTION: Record<"warn" | "danger", TagTone> = { warn: "attention", danger: "danger" };
@@ -39,7 +39,7 @@ export function StatusPill({ signal, needs, className = "", compact = false, fit
   if (tail.tier === "attention" && tail.tone === "quiet") {
     const short = compact ? compactAttentionText(signal, needs) : null;
     pill = (
-      <span data-tail-tier="attention" data-tail-tone="quiet" title={short ? label : undefined} aria-label={short ? label : undefined} role={short ? "img" : undefined} className={`${TAIL_TEXT} gap-1 text-muted ${className}`}>
+      <span data-tail-tier="attention" data-tail-tone="quiet" data-tip={short ? label : undefined} aria-label={short ? label : undefined} role={short ? "img" : undefined} className={`${TAIL_TEXT} gap-1 text-muted ${className}`}>
         <span aria-hidden className="size-1.5 rounded-full bg-warn" />
         {short ?? label}
       </span>
@@ -56,7 +56,7 @@ export function StatusPill({ signal, needs, className = "", compact = false, fit
   } else if (tail.tier === "attention") {
     const short = compact ? compactAttentionText(signal, needs) : null;
     pill = (
-      <Tag tone={ATTENTION[tail.tone === "danger" ? "danger" : "warn"]} data-tail-tier="attention" data-tail-tone={tail.tone} title={short ? label : undefined} aria-label={short ? label : undefined} role={short ? "img" : undefined} className={`tabular-nums ${className}`}>
+      <Tag tone={ATTENTION[tail.tone === "danger" ? "danger" : "warn"]} data-tail-tier="attention" data-tail-tone={tail.tone} data-tip={short ? label : undefined} aria-label={short ? label : undefined} role={short ? "img" : undefined} className={`tabular-nums ${className}`}>
         {short ?? label}
       </Tag>
     );
@@ -84,7 +84,7 @@ export function RunningTime({ since, className = "", dot = false }: { since: num
   const now = useNow(young ? 1000 : 15_000);
   const text = formatElapsed(now - since);
   return (
-    <span data-tail-tier={dot ? "activity" : undefined} className={`${dot ? `${TAIL_TEXT} gap-1` : "shrink-0 text-caption/[inherit]"} text-muted tabular-nums ${className}`} title={t("agentStatus.runningFor", { time: text })}>
+    <span data-tail-tier={dot ? "activity" : undefined} className={`${dot ? `${TAIL_TEXT} gap-1` : "shrink-0 text-caption/[inherit]"} text-muted tabular-nums ${className}`} data-tip={t("agentStatus.runningFor", { time: text })}>
       {dot && <RunningDot />}
       {text}
     </span>
@@ -93,7 +93,7 @@ export function RunningTime({ since, className = "", dot = false }: { since: num
 
 /** The activity dot (pulses while running; reduced motion: still). */
 export function RunningDot({ title }: { title?: string }) {
-  return <span aria-hidden={title ? undefined : true} role={title ? "img" : undefined} aria-label={title} title={title} className="size-1.5 shrink-0 rounded-full bg-accent motion-safe:animate-pulse" />;
+  return <span aria-hidden={title ? undefined : true} role={title ? "img" : undefined} aria-label={title} data-tip={title} className="size-1.5 shrink-0 rounded-full bg-accent motion-safe:animate-pulse" />;
 }
 
 /** Passive tail text (last activity, 离线 …). */

@@ -70,6 +70,7 @@
   --shadow-e1: var(--e1);
   --shadow-e2: var(--e2);
   --shadow-e3: var(--e3);
+  --color-float: var(--float);
   --color-selected: var(--selected);
   --color-pressed: var(--pressed);
   --color-accent-soft: var(--accent-soft);
@@ -413,6 +414,13 @@
   --e2: 0 0 0 1px var(--card-border), 0 12px 32px rgb(18 22 32 / 0.16), 0 2px 6px rgb(18 22 32 / 0.06);
   --e3: 0 24px 70px rgb(10 10 20 / 0.25), 0 2px 8px rgb(10 10 20 / 0.08);
   --hi: inset 0 0 0 0 transparent;
+  /* Floating surfaces (040 §2.1, owner 2026-11-05): the one panel face (menus, popovers, pickers, flyouts, toasts) — one
+     step above the cards in both themes, opaque (no acrylic), edge from e2's ring only — and the one tooltip face
+     (inverted: dark chip in light, light-ish chip in dark). Dark values follow each dark palette (derived). */
+  --float: var(--raised);
+  --tip-bg: color-mix(in oklab, var(--fg) 90%, var(--bg));
+  --tip-fg: var(--bg);
+  --tip-shadow: 0 4px 14px rgb(18 22 32 / 0.18);
   /* Provider colours: only for avatars (components/Avatar: the outline of every round face, and 头像底色 = 按模型's 16 %
      backdrop), never text or buttons. Qwen: its logo's violet (no family of its own, lib/avatarThemes providerTint). */
   --prov-claude: #d97757;
@@ -430,6 +438,10 @@
     --e2: 0 0 0 1px rgb(255 255 255 / 0.09), 0 16px 40px rgb(0 0 0 / 0.55);
     --e3: 0 24px 70px rgb(0 0 0 / 0.6);
     --hi: inset 0 1px 0 rgb(255 255 255 / 0.06);
+    --float: color-mix(in oklab, var(--surface-2) 70%, var(--raised));
+    --tip-bg: var(--raised);
+    --tip-fg: var(--fg);
+    --tip-shadow: 0 4px 14px rgb(0 0 0 / 0.45);
     --prov-kimi: #c9ced8;
   }
 }
@@ -438,14 +450,20 @@
   --e2: 0 0 0 1px rgb(255 255 255 / 0.09), 0 16px 40px rgb(0 0 0 / 0.55);
   --e3: 0 24px 70px rgb(0 0 0 / 0.6);
   --hi: inset 0 1px 0 rgb(255 255 255 / 0.06);
+  --float: color-mix(in oklab, var(--surface-2) 70%, var(--raised));
+  --tip-bg: var(--raised);
+  --tip-fg: var(--fg);
+  --tip-shadow: 0 4px 14px rgb(0 0 0 / 0.45);
   --prov-kimi: #c9ced8;
 }
 
 /* Settings → 外观 (lib/appearance.ts sets the variables on <html>). */
 .markdown {
   font-family: var(--font-chat, var(--font-sans));
-  /* Follow-bottom scroll offsets use device pixels. Matching the line-height grid prevents
-     fractional leading (14px * 1.625 at 125%) cycling the last line's raster position. */
+}
+/* Only replies that stream here need the follow-bottom device-pixel grid. Static cards,
+   notifications and module-owned Markdown keep their existing line-height. */
+.markdown-streaming-prose {
   line-height: round(nearest, 1.625em, var(--prose-pixel, 1px));
 }
 
@@ -499,6 +517,15 @@
 .project-icon {
   background: color-mix(in oklab, var(--project-icon-color) var(--project-icon-tint), transparent);
   color: color-mix(in oklab, var(--project-icon-color) var(--project-icon-ink), var(--project-icon-ink-toward));
+}
+/* Folders (lib/folderLook, components/Sidebar FolderHeader; owner folders and 更早的项目): the name and icon in
+   the folder colour's ink (the project icon rule, so it passes in light and dark), the trailing line in the same
+   colour at a lower strength. */
+.folder-ink {
+  color: color-mix(in oklab, var(--folder-color) var(--project-icon-ink), var(--project-icon-ink-toward));
+}
+.folder-line {
+  background: color-mix(in oklab, var(--folder-color) 40%, transparent);
 }
 /* 线条 (项目图标样式 = line): the same ink, no tile. */
 .project-icon.project-icon-line {
@@ -823,6 +850,49 @@
 .markdown [data-streamdown="table-wrapper"] > .overflow-x-auto {
   border-color: var(--card-border);
 }
+/* The blocks that set their own vertical sizes go on the same grid: one value off it (a heading's
+   1.45 line height, a code line's 18.57px, a cell's 20px at 1.875) makes the followed bottom cycle
+   again, at integer ratios too. Same values as before, each rounded to a device pixel; a padding pair
+   rounds its top up and its bottom down, so their sum stays put when it is already on the grid.
+   After the .markdown block rules above (same specificity). Unlayered: wins over streamdown's Tailwind spacing (space-y-4, my-4, py-1, py-2). */
+:where(.markdown-streaming-prose > :not(:last-child)) {
+  margin-block-end: round(nearest, 1rem, var(--prose-pixel, 1px));
+}
+.markdown-streaming-prose:not(.markdown-document) :is(h1, h2, h3, h4, h5, h6)[data-streamdown^="heading-"] {
+  line-height: round(nearest, 1.45em, var(--prose-pixel, 1px));
+  margin-top: round(nearest, 1.6em, var(--prose-pixel, 1px));
+  margin-bottom: round(nearest, 0.35em, var(--prose-pixel, 1px));
+}
+.markdown-streaming-prose [data-streamdown="list-item"] {
+  padding-top: round(up, 0.25rem, var(--prose-pixel, 1px));
+  padding-bottom: round(down, 0.25rem, var(--prose-pixel, 1px));
+}
+.markdown-streaming-prose :is([data-streamdown="blockquote"], [data-streamdown="code-block"], [data-streamdown="table-wrapper"]) {
+  margin-block: round(nearest, 1rem, var(--prose-pixel, 1px));
+}
+.markdown-streaming-prose [data-streamdown="horizontal-rule"] {
+  margin-block: round(nearest, 1.5rem, var(--prose-pixel, 1px));
+}
+.markdown-streaming-prose [data-streamdown="code-block-header"] {
+  height: round(nearest, 32px, var(--prose-pixel, 1px));
+}
+.markdown-streaming-prose [data-streamdown="code-block-body"] {
+  padding-top: round(up, 12px, var(--prose-pixel, 1px));
+  padding-bottom: round(down, 12px, var(--prose-pixel, 1px));
+}
+/* Code and cells are text-sm: line height 1.25 / 0.875 of their own font size. */
+.markdown-streaming-prose [data-streamdown="code-block-body"],
+.markdown-streaming-prose [data-streamdown="code-block-body"] pre,
+.markdown-streaming-prose :is([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]) {
+  line-height: round(nearest, calc(1em * 1.25 / 0.875), var(--prose-pixel, 1px));
+}
+.markdown-streaming-prose [data-streamdown="code-block-body"] pre * {
+  line-height: inherit;
+}
+.markdown-streaming-prose :is([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]) {
+  padding-top: round(up, 0.5rem, var(--prose-pixel, 1px));
+  padding-bottom: round(down, 0.5rem, var(--prose-pixel, 1px));
+}
 /* Horizontal-scroll hint: the edge that has more content fades out. A scroll-driven animation moves
    the fade lengths with the scroll position; when the box does not overflow its timeline is inactive
    and both stay 0 (no mask). */
@@ -1134,8 +1204,136 @@ body {
    47       drag shields (components/side/SideDndLayer, WorkspaceDndLayer: invisible, they own the cursor)
    48       foretell outlines (components/foretell.css) and drop previews (zones, dashed boxes)
    49       the drop labels and the dragged ghost
-   ≥ 50     menus, popovers, flyouts, palettes, dialogs, toasts — over every preview, never crossed by one
-   A popover inside a pane gets z-50 too (test/layerOrder.test.ts checks the files). */
+   50       the tray's drop marks; 60 the pane-fly ghost; 70–71 column pick
+   Window-level surfaces (040 §2.1, owner 2026-11-05), over every preview, never crossed by one:
+   150…     dialogs (150; 151 SSH prompt / skills import / copy Profile; 152 remote close; 153 ⌘K; 154 layout migration)
+   160…     floats: menus, popovers, pickers, status-row and tray panels (161 a popover over a popover; 162 submenus)
+   170…     toasts (171 the debug error list)
+   180…     tooltips (lib/tips, menu ⓘ notes, the width readout; 181 the armed-confirm hints)
+   A popover inside a pane gets its band's z too (test/layerOrder.test.ts checks the files). */
+
+/* ── Floating surfaces (040 §2.1, owner 2026-11-05) ──────────────────────────────────────────────────────
+   `.float` = the one panel face: menus, submenus, popovers, pickers, status-row panels, the tray's panels, ⌘K, toasts.
+   --float background (one step above the cards; opaque, never acrylic), e2 only (its 1 px ring is the edge: no border),
+   12 px corners (rows inside are 8 px at a 4 px inset), a short fade-in from the anchor's side (none with reduced motion:
+   --motion-short is 0 there). `.float-scroll` on its scrolling part fades the edge that has more content. No border
+   rule here: floats carry no border class (test/visualRawValues), and a state frame (GoalCard 武装) may add one. */
+.float {
+  background: var(--float);
+  border-radius: var(--r-lg);
+  box-shadow: var(--e2);
+  animation: float-in var(--motion-short) var(--ease-standard);
+}
+@keyframes float-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--float-from, 2px));
+  }
+}
+.float[data-side="below"] {
+  --float-from: -2px;
+}
+.float[data-side="left"],
+.float[data-side="right"] {
+  --float-from: 0px;
+}
+/* `.float-scroll` on a float's scrolling part: a soft fade (in the float's colour) on each edge that has more
+   content past it, driven by the scroll position; nothing when it does not scroll. Sticky pseudo-elements, not a
+   mask: a mask would also cut the float's shadow. */
+.float-scroll::before,
+.float-scroll::after {
+  content: "";
+  position: sticky;
+  z-index: 1;
+  display: block;
+  height: 16px;
+  pointer-events: none;
+  opacity: 0;
+}
+.float-scroll::before {
+  top: 0;
+  margin-bottom: -16px;
+  background: linear-gradient(var(--fade-bg, var(--float)), transparent);
+}
+.float-scroll::after {
+  bottom: 0;
+  margin-top: -16px;
+  background: linear-gradient(transparent, var(--fade-bg, var(--float)));
+}
+@keyframes float-fade-top {
+  0% {
+    opacity: 0;
+  }
+  6%,
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes float-fade-bottom {
+  0%,
+  94% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@supports (animation-timeline: scroll()) {
+  .float-scroll::before {
+    animation: float-fade-top linear both;
+    animation-timeline: scroll(nearest);
+  }
+  .float-scroll::after {
+    animation: float-fade-bottom linear both;
+    animation-timeline: scroll(nearest);
+  }
+}
+/* An ⓘ in the chrome (tray, launchers, Rail, conversation header): how-to text that is not in the tips; shown while
+   its row is hovered, or when it has keyboard focus. */
+.hover-info {
+  opacity: 0;
+  transition: opacity var(--motion-short) var(--ease-standard);
+}
+:hover > .hover-info,
+:focus-within > .hover-info,
+.hover-info:focus-visible {
+  opacity: 1;
+}
+/* The one tooltip face (components/Tip: `data-tip` on any element). Never over the panel its own button opened. */
+.tip {
+  max-width: 20rem;
+  padding: 5px 9px;
+  border-radius: var(--r-md);
+  background: var(--tip-bg);
+  color: var(--tip-fg);
+  box-shadow: var(--tip-shadow);
+  font: var(--t-caption);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+  pointer-events: none;
+  animation: float-in var(--motion-short) var(--ease-standard);
+}
+/* The one toast (040 §2.1: a float): a row of text, then its actions and ×. Agent toasts, the Shelf toast, the desk
+   notice and the composer's notice line all wear it; an error leads with a danger icon, not a red box. */
+@layer components {
+  .float-toast {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 6px 6px 12px;
+    color: var(--fg);
+    font: var(--t-ui);
+    pointer-events: auto;
+  }
+  .float-toast > [data-toast-icon] {
+    flex-shrink: 0;
+    color: var(--accent);
+  }
+  .float-toast[data-tone="error"] > [data-toast-icon] {
+    color: var(--danger);
+  }
+}
 
 /* ── Shell cards and the right side (会话两侧 RFC §3.2, §3.8a) ─────────────────────────────── */
 /* A region of the window: the conversation / page card, each right-side card. */
@@ -1158,24 +1356,13 @@ body {
 .side-col-composer {
   --col-w: 48rem;
 }
-/* 需要你 in the status row (components/StatusBar, owner 2026-10-27): with nothing on the row's left (no 目标, no
-   owner notice) it takes that left part, one line with the right-side chips (委托 N ›) right above 「接下来」;
-   when the left shows something it is a line of its own above it, as before. Pure layout, no measuring. */
-[data-status-row] > [data-needs-you-strip] {
-  flex: 1 1 0%;
-  min-width: 0;
-}
-[data-status-row] > [data-needs-you-strip] ~ [data-status-start]:empty {
-  display: none;
-}
-[data-status-row]:has(> [data-status-start]:not(:empty)) > [data-needs-you-strip] {
-  flex-basis: 100%;
-}
-/* The row keeps one height (owner 2026-10-27: 「需要你」's avatar chips arriving or resolving must not move the
-   input below): 1.5rem reserved whether it holds the strip's 20 px chips, the right-side chips or nothing at all,
-   so nothing that comes or goes on it changes the composer's place. */
+/* The status row (components/StatusBar) is one 1.5rem line at least, whatever it holds; when narrow it wraps and then
+   keeps its tallest height at that width (lib/statusRow useStickyHeight), so the input under it does not move. */
 [data-status-row] {
   min-height: 1.5rem;
+}
+[data-status-row] > [data-status-start]:empty {
+  display: none;
 }
 @keyframes side-ping {
   0% {
@@ -1742,7 +1929,7 @@ body {
 /* 「未开始：需要再点一次确认」 after an armed button disarmed by itself (showArmedExpired). */
 .armed-expired {
   position: fixed;
-  z-index: 1000;
+  z-index: 181;
   pointer-events: none;
   max-width: min(22rem, calc(100vw - 16px));
   border: 1px solid var(--border);
@@ -1797,6 +1984,15 @@ body {
     padding-block: 0;
   }
 }
+@keyframes background-work-breathe {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+.background-work-bot { animation: background-work-breathe 2.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .background-work-bot { animation: none; }
+}
+
 .now-card {
   overflow: hidden;
   animation: now-card-in var(--motion-medium) var(--ease-standard);
@@ -1810,4 +2006,54 @@ body {
   .now-card[data-leaving] {
     animation: none;
   }
+}
+
+/* ── Roster spacing (design 060 §5.6, owner 2026-11-06: 「不同行之间的间距的规则定好」) ───────────────────────────
+   The only vertical gaps between the roster's rows. Every row block of the list says what it is with
+   `data-roster-kind` (folder = an owner folder, system = 独立智能体 / 快速会话 / top-level 更早的项目 / 其他项目 / a host
+   without rows, project = a project, open or one row, and 更早的项目 inside a folder) and `data-folded` when it is one
+   line; a folder's or 更早的项目's list of projects is `data-roster-body`. Inside a project or system row the agent rows
+   and the 「在线空闲 +N」/「离线 +N」 lines follow each other with no gap (their own heights carry the padding). Blocks set no
+   margins of their own; 项目颜色 (lib/projectSeparation) only changes the values below. */
+[data-sidebar-roster] {
+  --roster-gap-section: 12px; /* before a folder or system row, and after one, whatever comes next */
+  --roster-gap-project: 6px; /* after an open project */
+  --roster-gap-row: 0px; /* after a one-row (folded) project */
+  --roster-gap-child: 2px; /* a folder / 更早的项目 header → its first project */
+}
+[data-sidebar-roster][data-separation="header"] { --roster-gap-project: 4px; }
+[data-sidebar-roster]:is([data-separation="tint"], [data-separation="rail"]) { --roster-gap-project: 8px; --roster-gap-row: 2px; }
+[data-sidebar-roster] :where([data-roster-kind]) { margin-top: 0; margin-bottom: 0; }
+[data-sidebar-roster] :where([data-roster-kind]) + :where([data-roster-kind]) { margin-top: var(--roster-gap-project); }
+[data-sidebar-roster] :where([data-roster-kind][data-folded]) + :where([data-roster-kind]) { margin-top: var(--roster-gap-row); }
+[data-sidebar-roster] :where([data-roster-kind]) + :where([data-roster-kind="folder"], [data-roster-kind="system"]),
+[data-sidebar-roster] :where([data-roster-kind="folder"], [data-roster-kind="system"]) + :where([data-roster-kind]) { margin-top: var(--roster-gap-section); }
+[data-sidebar-roster] :where([data-roster-body]) { margin-top: var(--roster-gap-child); }
+
+/* ── 系统行样式 (Settings → 左侧栏, owner 2026-11-06; prefs systemRows) ─────────────────────────────────────────────
+   System rows ([data-system-row]: 独立智能体, 快速会话, top-level 更早的项目) vs the owner's folders (coloured icon and
+   name, thick coloured line). Grey icon and name in both styles; 「更早的项目」 inside a folder keeps the folder look.
+   虚线 (line): a thin grey dashed line where a folder has its thick coloured one.
+   灰底条 (band): the row on a grey band, no line. Selected (a folded row holding the open agent) takes the selected
+   rows' accent tint and hover goes a step darker, so neither looks like the band; the text there turns foreground. Every
+   text on the band is the muted ink or stronger (≥ 4.5:1 on the band in every theme; the subtle grey is not). */
+[data-system-row] .system-line { align-self: center; height: 0; }
+[data-system-row][data-folder-header] .folder-ink { color: var(--fg-muted); }
+[data-system-rows="line"] [data-system-row] .system-line { border-top: 1.5px dashed color-mix(in oklab, var(--fg-subtle) 55%, transparent); }
+[data-system-rows="band"] [data-system-row] {
+  background: var(--system-band);
+  color: var(--fg-muted);
+}
+[data-system-rows="band"] [data-system-row] :is(.text-subtle, .text-muted, [data-folder-name], [data-standalone-name]) { color: var(--fg-muted); }
+[data-system-rows="band"] [data-system-row] .text-warn { color: var(--warn-text); }
+[data-system-rows="band"] [data-system-row] .text-accent { color: var(--system-band-accent); }
+[data-system-rows="band"] [data-system-row]:hover { background: var(--system-band-hover); }
+[data-system-rows="band"] [data-system-row][data-highlight] { background: var(--selected); }
+[data-system-rows="band"] [data-system-row]:is(:hover, [data-highlight]) :is(.text-subtle, .text-muted, [data-folder-name], [data-standalone-name], .folder-ink),
+[data-system-rows="band"] [data-system-row]:is(:hover, [data-highlight]) { color: var(--fg); }
+[data-system-rows="band"] [data-system-row]:is(:hover, [data-highlight]) .text-warn { color: color-mix(in oklab, var(--warn-text) 75%, var(--fg)); }
+:root {
+  --system-band: var(--surface-2);
+  --system-band-hover: color-mix(in oklab, var(--surface-2) 93%, var(--fg));
+  --system-band-accent: color-mix(in oklab, var(--accent) 72%, var(--fg));
 }

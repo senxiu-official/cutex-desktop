@@ -59,7 +59,7 @@ function project(opts: { director?: boolean; others?: number; activity?: unknown
     hostColor: null,
     hostOffline: false,
     members,
-    grouped: { director, needsYou: [], running: [], recent, idle: [] },
+    grouped: { director, needsYou: [], running: [], recent, idle: [], offline: [] },
     counts: { total: members.length, online: members.length, running: 0, needsYou: 0 },
     totals: { delegations: 0, jobs: 0, subagents: 0 },
     activity: opts.activity ?? [],
@@ -68,7 +68,7 @@ function project(opts: { director?: boolean; others?: number; activity?: unknown
   };
 }
 
-const state: ViewState = { hostId: "local", projectId: "p1", needsOnly: false, kinds: [], idleOpen: false, evKinds: [], evAgent: null, runOpen: null };
+const state: ViewState = { hostId: "local", projectId: "p1", needsOnly: false, kinds: [], idleOpen: false, offlineOpen: false, evKinds: [], evAgent: null, runOpen: null };
 
 let root: Root;
 let host: HTMLDivElement;

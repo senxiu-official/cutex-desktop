@@ -17,6 +17,7 @@ const fx = vi.hoisted(() => ({
 vi.mock("../src/renderer/src/store", () => ({
   featuresOf: () => new Set(["stop-idle-agents"]),
   pinnedOn: () => fx.pinned,
+  sidebarOf: () => null,
   hostApi: () => ({
     idleRuntimes: async (q: { minIdleSecs: number; projectId?: string }) => (fx.asked.push(q), fx.listing),
     stopIdle: async (body: StopIdleRequest) => (fx.stopped.push(body), { mode: body.mode, dryRun: false, results: body.sessionIds.map((id, i) => (i === 0 ? { cutexSessionId: id, result: "skipped", reasons: ["activeTurn"] } : { cutexSessionId: id, result: "stopped" })) }),

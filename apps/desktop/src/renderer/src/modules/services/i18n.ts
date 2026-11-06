@@ -1,5 +1,14 @@
 // 服务 page + sidebar entry (step 3; keys moved here from the base catalog).
 export const zhCN = {
+  "services.idleStop": "空闲后休眠",
+  "services.idleStop.1h": "1 小时",
+  "services.idleStop.24h": "24 小时",
+  "services.idleStop.7d": "7 天",
+  "services.idleStop.forever": "永久",
+  "services.idleStop.hint": "经 cutex 转发的访问、活跃连接和查看租约会计入使用。健康检查、磁贴读取及直连端口不计入，也不会唤醒服务。仅通过直连端口访问或随时需要的后端，请选择永久。休眠保留注册和端口，下次经 cutex 访问时唤醒。",
+  "services.health.stoppedIdle": "已休眠",
+  "services.wake": "唤醒",
+  "services.idleWakeFailed": "上次启动失败，请唤醒重试",
   "services.temporary.confirm": "改为临时服务并移动？以后可能按主机的空闲或到期规则回收。",
   "services.temporary.confirmAction": "转为临时并移动",
   "services.title": "服务",

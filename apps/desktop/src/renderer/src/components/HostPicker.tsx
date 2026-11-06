@@ -72,7 +72,7 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
   );
   if (mode === "label" && chip)
     return (
-      <span title={title} className="inline-flex h-5 max-w-48 items-center gap-1 rounded-r bg-accent/12 pr-1.5 text-caption/[inherit] text-accent">
+      <span title={title} className="inline-flex h-[18px] max-w-48 items-center gap-1 rounded-r-chip bg-accent-soft pr-1.5 text-caption/[inherit] text-accent">
         {chipFace}
       </span>
     );
@@ -115,13 +115,13 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
     <div ref={ref} className="relative inline-flex" onKeyDown={onKey}>
       <button
         type="button"
-        title={title}
+        data-tip={title}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
         className={
           chip
-            ? `inline-flex h-5 max-w-48 items-center gap-1 rounded-r bg-accent/12 pr-1.5 text-caption/[inherit] text-accent hover:brightness-125 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${open ? "brightness-125" : ""}`
+            ? `inline-flex h-[18px] max-w-48 items-center gap-1 rounded-r-chip bg-accent-soft pr-1.5 text-caption/[inherit] text-accent hover:brightness-125 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${open ? "brightness-125" : ""}`
             : `inline-flex h-7 max-w-64 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-ui/[inherit] hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none ${open ? "bg-surface-2" : ""}`
         }
       >
@@ -142,7 +142,7 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
         <ChevronDown size={chip ? 11 : 13} className={`shrink-0 ${chip ? "" : "text-subtle"}`} />
       </button>
       {open && (
-        <div role="listbox" data-popover="" aria-label={title} className={`absolute ${up ? "bottom-full mb-1" : "top-full mt-1"} left-0 z-50 max-h-80 min-w-64 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl`}>
+        <div role="listbox" data-popover="" aria-label={title} className={`float absolute ${up ? "bottom-full mb-1" : "top-full mt-1"} left-0 z-[160] max-h-80 min-w-64 overflow-y-auto p-1 float-scroll`}>
           {all && (
             <button
               type="button"

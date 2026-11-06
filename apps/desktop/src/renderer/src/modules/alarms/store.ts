@@ -7,7 +7,8 @@ import { create } from "zustand";
 import { ALARMS_FEATURE, alarmChangeOf, type AlarmView } from "../../../../shared/alarms";
 import { bridge } from "../../bridge";
 import { useClock } from "../../lib/time";
-import { featuresOf, useApp, viewHostOf } from "../../store";
+import { featuresOf, useApp } from "../../store";
+import { useConvViewHost } from "../../lib/conversationScope";
 import { LOCAL_HOST_ID } from "../../../../shared/hosts";
 import { services } from "../app";
 import type { AppModuleContext } from "../slots";
@@ -33,25 +34,38 @@ const POLL_MS = 120_000;
 const keyOf = (hostId: string, sessionId: string) => `${hostId}|${sessionId}`;
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-const inflight = new Map<string, Promise<void>>();
+const daemonOf = (hostId: string) => {
+  const s = useApp.getState();
+  return hostId === (s.hosts?.active ?? LOCAL_HOST_ID) ? s.daemon : s.byHost[hostId]?.daemon;
+};
+const resyncRevisions = new Map<string, number>();
+const viewers = new Map<string, number>();
+const inflight = new Map<string, { connection: ReturnType<typeof daemonOf>; revision: number; promise: Promise<void> }>();
 
 export function loadAlarms(hostId: string, sessionId: string): Promise<void> {
   const key = keyOf(hostId, sessionId);
+  const connection = daemonOf(hostId);
+  const revision = resyncRevisions.get(hostId) ?? 0;
+  if (connection?.kind !== "connected") return Promise.resolve();
   const running = inflight.get(key);
-  if (running) return running;
-  const run = (async () => {
+  if (running?.connection === connection && running.revision === revision) return running.promise;
+  const current = () => daemonOf(hostId) === connection && (resyncRevisions.get(hostId) ?? 0) === revision;
+  const promise = Promise.resolve().then(async () => {
     try {
       const list = await services.daemonFor(hostId).alarms({ sessionId, state: "all", limit: LIMIT });
+      if (!current()) return;
       const entry: Entry = { alarms: list?.alarms ?? [], error: null, loaded: true };
       useAlarmCache.setState((s) => ({ byKey: { ...s.byKey, [key]: entry } }));
     } catch (e) {
+      if (!current()) return;
       useAlarmCache.setState((s) => ({ byKey: { ...s.byKey, [key]: { alarms: s.byKey[key]?.alarms ?? [], error: errorText(e), loaded: true } } }));
     } finally {
-      inflight.delete(key);
+      if (inflight.get(key) === request) inflight.delete(key);
     }
-  })();
-  inflight.set(key, run);
-  return run;
+  });
+  const request = { connection, revision, promise };
+  inflight.set(key, request);
+  return promise;
 }
 
 /** Patch one alarm into every cached list it belongs to (cancel answer, before the event arrives). */
@@ -90,17 +104,22 @@ export function startAlarmSync(ctx: AppModuleContext): void {
     if (!change) return;
     scheduleReload(keysTouched(Object.keys(useAlarmCache.getState().byKey), hostId, [change.ownerCutexSessionId, change.targetCutexSessionId]));
   });
+  // A fast SSE reconnect can keep daemon.kind connected. Changes during that gap
+  // need a new snapshot even when no alarms/changed event can be replayed.
+  const offResync = bridge.on("hostResync", ({ hostId }) => {
+    resyncRevisions.set(hostId, (resyncRevisions.get(hostId) ?? 0) + 1);
+    scheduleReload([...viewers.keys()].filter(key => key.startsWith(`${hostId}|`)));
+  });
   ctx.signal.addEventListener("abort", () => {
     off?.();
+    offResync?.();
     useAlarmCache.setState({ byKey: {} });
   });
 }
 
 /** The host of an open agent (an agent opened from another host in the scope keeps its own). */
 export function useAgentHost(sessionId: string): string {
-  const focus = useApp((s) => s.hosts?.active ?? LOCAL_HOST_ID);
-  // viewHostOf reads the store's view map; the focus dependency re-evaluates it on a host switch.
-  return useMemo(() => viewHostOf(sessionId), [sessionId, focus]); // eslint-disable-line react-hooks/exhaustive-deps
+  return useConvViewHost(sessionId);
 }
 
 /** That host runs a cutex with the alarms routes. */
@@ -115,17 +134,28 @@ export function useAlarmsSupported(hostId: string): boolean {
 export function useAgentAlarms(sessionId: string, active: boolean): AgentAlarms & { hostId: string; error: string | null; loaded: boolean } {
   const hostId = useAgentHost(sessionId);
   const enabled = useAlarmsSupported(hostId) && active;
+  const connected = useApp((s) => (hostId === (s.hosts?.active ?? LOCAL_HOST_ID) ? s.daemon : s.byHost[hostId]?.daemon)?.kind === "connected");
+  const epoch = useApp((s) => s.hosts?.hosts?.find(h => h.id === hostId)?.conn?.epoch);
   const key = keyOf(hostId, sessionId);
   const entry = useAlarmCache((s) => (enabled ? s.byKey[key] : undefined));
   const now = useClock();
   useEffect(() => {
     if (!enabled) return;
+    viewers.set(key, (viewers.get(key) ?? 0) + 1);
+    return () => {
+      const remaining = (viewers.get(key) ?? 1) - 1;
+      if (remaining) viewers.set(key, remaining);
+      else viewers.delete(key);
+    };
+  }, [enabled, key]);
+  useEffect(() => {
+    if (!enabled || !connected) return;
     void loadAlarms(hostId, sessionId);
     const id = setInterval(() => {
       if (!document.hidden) void loadAlarms(hostId, sessionId);
     }, POLL_MS);
     return () => clearInterval(id);
-  }, [enabled, hostId, sessionId]);
+  }, [enabled, connected, epoch, hostId, sessionId]);
   const data = useMemo(() => (entry ? agentAlarms(entry.alarms, now) : NO_ALARMS), [entry, now]);
   return { ...data, hostId, error: entry?.error ?? null, loaded: entry?.loaded ?? false };
 }

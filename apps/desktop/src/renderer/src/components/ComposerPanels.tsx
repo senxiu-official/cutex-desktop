@@ -31,11 +31,11 @@ function Panel({ title, onClose, actions, tall, children }: { title: string; onC
     };
   }, [onClose]);
   return (
-    <div ref={ref} data-popover="" className={`absolute right-0 bottom-full left-0 z-50 mb-1.5 ${tall ? "max-h-[60vh]" : "max-h-96"} overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl`}>
+    <div ref={ref} data-popover="" className={`float absolute right-0 bottom-full left-0 z-[160] mb-1.5 ${tall ? "max-h-[60vh]" : "max-h-96"} overflow-y-auto p-1 float-scroll`}>
       <div className="flex items-center gap-2 px-2.5 pt-1.5 pb-1 text-xs text-subtle">
         <span className="min-w-0 flex-1 truncate">{title}</span>
         {actions}
-        <button onClick={onClose} title={t("common.close")} className="rounded p-0.5 hover:text-foreground">
+        <button onClick={onClose} data-tip={t("common.close")} aria-label={t("common.close")} className="rounded p-0.5 hover:text-foreground">
           <X size={13} />
         </button>
       </div>
@@ -58,7 +58,7 @@ export function StatusPanel({ rows, onClose }: { rows: StatusRow[]; onClose(): v
         {rows.map((r) => (
           <div key={r.label} className="contents">
             <dt className="text-subtle">{r.label}</dt>
-            <dd className={`min-w-0 truncate ${r.tone === "warn" ? "text-warn" : r.tone === "accent" ? "text-accent" : ""}`} title={r.value}>
+            <dd className={`min-w-0 truncate ${r.tone === "warn" ? "text-warn" : r.tone === "accent" ? "text-accent" : ""}`} data-tip={r.value}>
               {r.value}
             </dd>
           </div>

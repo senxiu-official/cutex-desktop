@@ -65,7 +65,7 @@ export function ImageZoom({ src, onClose, onContextMenu, dimensions, onCopy, onS
     <div
       ref={pz.frameRef}
       {...pz.frameProps}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-8"
+      className="fixed inset-0 z-[150] flex items-center justify-center bg-black/70 p-8"
       onClick={() => !pz.view && !pz.dragged() && onClose()}
       onContextMenu={onContextMenu}
       data-testid="message-image-zoom"
@@ -239,14 +239,17 @@ export function ImageThumb({ image, hostId, title, className, imgClassName, fall
  * A user message's images (Timeline; a pending send's too): thumbnails, click → full size. A path is read
  * through the agent's host (cutex fs-file-read); a host without it, or a file it cannot read, keeps the
  * file chip (the name, the path on hover): an empty frame would say less.
+ * `sent`: this send's own bytes, shown until the host read of the uploaded copy lands. Kept once seen: the
+ * draft they come from is cleared as soon as the agent's copy lands.
  */
-export function MessageImages({ images, hostId, messageId, pending = false }: { images: MessageImage[]; hostId: string | null | undefined; messageId?: string; pending?: boolean }) {
+export function MessageImages({ images, hostId, messageId, pending = false, sent }: { images: MessageImage[]; hostId: string | null | undefined; messageId?: string; pending?: boolean; sent?: readonly MessageImage[] }) {
   const { t } = useI18n();
   const authority = useMediaAuthority(hostId);
   const scope = JSON.stringify([hostId, authority, messageId]);
-  const [preview, setPreview] = useState(() => ({ scope, images: pending ? images : [] }));
-  if (preview.scope !== scope || (pending && preview.images !== images)) {
-    setPreview({ scope, images: pending ? images : [] });
+  const seed = pending ? images : sent?.length ? sent : [];
+  const [preview, setPreview] = useState(() => ({ scope, images: seed }));
+  if (preview.scope !== scope || (pending && preview.images !== images) || (!preview.images.length && seed.length)) {
+    setPreview({ scope, images: seed });
   }
   // Only the matching optimistic send can supply a preview. Never borrow another
   // row's image, a previous host connection's bytes, or substitute for a failed read.
@@ -262,7 +265,7 @@ export function MessageImages({ images, hostId, messageId, pending = false }: { 
           loadingPreview={img.kind === "path" && previews[i]?.kind === "url" && previews[i].url.startsWith("data:image/") ? previews[i].url : undefined}
           className="rounded-xl border border-border"
           imgClassName="max-h-40 max-w-60 object-cover"
-          bounds={{ maxWidth: 240, maxHeight: 160 }}
+          bounds={{ maxWidth: 240, maxHeight: 160, contentBox: true }}
           fallback={
             img.kind === "path" && (
               <span className="flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2 py-1 text-xs text-muted" title={img.path} data-testid={pathText ? "path-text-image-unavailable" : "message-image-chip"}>

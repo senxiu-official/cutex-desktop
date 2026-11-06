@@ -94,3 +94,17 @@ describe("a safety-stopped tool row", () => {
     expect(en["work.safetyBlocked"]).toContain("{n}");
   });
 });
+
+it("only a failed final tool uses its safety-block marker", () => {
+  fx.notes = { "old-block": { notificationId: "old-block", agentId: "eva", createdAt: "2026-10-16T01:00:00.000Z", safetyBlock: { itemId: "call-1", reason: REASON, state: "blocked" } } };
+  for (const status of ["failed", "completed"]) {
+    const steps = [
+      { kind: "tool", id: "cmd", item: { type: "commandExecution", id: "cmd", status: "completed", exitCode: 0 } },
+      { kind: "tool", id: "call-1", item: { ...claudeCall, status } },
+    ] as never[];
+    const header = renderToStaticMarkup(h(WorkGroup, { steps, open: false, summary: summarize(steps), sessionId: "eva" })).split("</button>")[0]!;
+    expect(header).toContain(status === "failed" ? "lucide-shield-alert" : "lucide-check");
+    if (status === "completed") expect(header).not.toContain("lucide-shield-alert");
+  }
+  fx.notes = {};
+});

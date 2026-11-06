@@ -33,7 +33,7 @@ export function ArmedHint({ anchor, text }: { anchor: RefObject<HTMLElement | nu
       ref={bubble}
       role="status"
       style={{ position: "fixed", left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }}
-      className="pointer-events-none z-[1000] max-w-[min(22rem,calc(100vw-16px))] rounded-md border border-danger/50 bg-surface px-2 py-1 text-xs text-danger shadow-lg"
+      className="float pointer-events-none z-[181] max-w-[min(22rem,calc(100vw-16px))] px-2 py-1 text-xs text-danger"
     >
       {text}
     </div>,

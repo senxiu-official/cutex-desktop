@@ -2,7 +2,8 @@ import { isImeComposing } from "../lib/ime";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState,
   type ClipboardEvent, type HTMLAttributes, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import { agentMentionTokens, type AgentMentionToken } from "../lib/agentMentions";
+import { composerMentionTokens, type ComposerMentionToken } from "../lib/composerMentionTokens";
+import { ProfileMentionChip } from "./ProfileMentionChip";
 import { agentMentionEditorValue, atomicMentionSelection, readMentionSelection, writeMentionSelection,
   type MentionSelection } from "../lib/agentMentionEditor";
 import { AgentMentionChip } from "./AgentMentionChip";
@@ -23,13 +24,15 @@ export interface AgentMentionInputProps extends Omit<HTMLAttributes<HTMLDivEleme
   onKeyDown?(event: KeyboardEvent<HTMLElement>): void;
   onPaste?(event: ClipboardEvent<HTMLElement>): void;
   placeholder?: string;
+  /** The conversation's host: profile chips name their profile from this host's list. */
+  hostId?: string | null;
 }
 interface Snapshot extends MentionSelection { value: string }
-interface ChipPortal { host: HTMLElement; token: AgentMentionToken }
+interface ChipPortal { host: HTMLElement; token: ComposerMentionToken }
 
-/** Used only for drafts containing canonical agent links. The parent keeps ordinary drafts in a textarea. */
+/** Used for drafts containing canonical agent links or explicit profile/model references. The parent keeps ordinary drafts in a textarea. */
 export const AgentMentionInput = forwardRef<AgentMentionInputHandle, AgentMentionInputProps>(function AgentMentionInput(
-  { value, onChange, onSelect, onKeyDown, onPaste, placeholder, className, style, ...attributes }, ref,
+  { value, onChange, onSelect, onKeyDown, onPaste, placeholder, hostId, className, style, ...attributes }, ref,
 ) {
   const element = useRef<HTMLDivElement>(null);
   const current = useRef(value);
@@ -48,12 +51,13 @@ export const AgentMentionInput = forwardRef<AgentMentionInputHandle, AgentMentio
     const doc = root.ownerDocument, fragment = doc.createDocumentFragment();
     const chips: ChipPortal[] = [];
     let cursor = 0;
-    for (const token of agentMentionTokens(text)) {
+    for (const token of composerMentionTokens(text)) {
       fragment.append(doc.createTextNode(text.slice(cursor, token.start)));
       const host = doc.createElement("span");
       host.setAttribute("contenteditable", "false");
       host.setAttribute("data-agent-mention-raw", token.raw);
-      host.setAttribute("data-agent-mention-id", token.id);
+      if (token.kind === "agent") host.setAttribute("data-agent-mention-id", token.id);
+      else host.setAttribute("data-profile-mention-raw", token.raw);
       host.style.display = "inline-flex";
       host.style.height = "1em";
       host.style.lineHeight = "1";
@@ -159,7 +163,7 @@ export const AgentMentionInput = forwardRef<AgentMentionInputHandle, AgentMentio
       } else if (event.inputType === "deleteContentBackward" || event.inputType === "deleteContentForward") {
         const range = selection();
         const backward = event.inputType === "deleteContentBackward";
-        const token = agentMentionTokens(current.current).find(item => backward ? item.end === range.start : item.start === range.end);
+        const token = composerMentionTokens(current.current).find(item => backward ? item.end === range.start : item.start === range.end);
         if (range.start !== range.end || token) {
           event.preventDefault(); remember();
           const start = range.start === range.end && backward ? token!.start : range.start;
@@ -193,7 +197,16 @@ export const AgentMentionInput = forwardRef<AgentMentionInputHandle, AgentMentio
     }
     if (event.key === "Enter") { event.preventDefault(); replaceSelection("\n"); return; }
     const range = selection();
-    const tokens = agentMentionTokens(current.current);
+    const tokens = composerMentionTokens(current.current);
+    // Chromium replaces a deleted final separator after a noneditable atom with a filler BR.
+    // Commit this one-character deletion ourselves so it cannot become an unintended newline.
+    if (event.key === "Backspace" && range.start === range.end && current.current[range.start - 1] === " " &&
+      tokens.some(token => token.end === range.start - 1)) {
+      event.preventDefault(); remember();
+      const start = range.start - 1;
+      commit(current.current.slice(0, start) + current.current.slice(range.end), { start, end: start });
+      return;
+    }
     const previous = tokens.find(token => token.end === range.start);
     const next = tokens.find(token => token.start === range.end);
     if ((event.key === "Backspace" || event.key === "Delete") &&
@@ -248,6 +261,6 @@ export const AgentMentionInput = forwardRef<AgentMentionInputHandle, AgentMentio
     onCopy={event => { attributes.onCopy?.(event); if (!event.defaultPrevented) copy(event, false); }}
     onCut={event => { attributes.onCut?.(event); if (!event.defaultPrevented) copy(event, true); }}
     onDrop={event => { attributes.onDrop?.(event); event.preventDefault(); }}>
-    {portals.map(({ host, token }) => createPortal(<AgentMentionChip id={token.id} name={token.name} interactive={false} />, host, `${token.start}:${token.id}`))}
+    {portals.map(({ host, token }) => createPortal(token.kind === "agent" ? <AgentMentionChip id={token.id} name={token.name} interactive={false} /> : <ProfileMentionChip token={token} hostId={hostId} />, host, `${token.start}:${token.raw}`))}
   </div>;
 });

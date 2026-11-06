@@ -9,7 +9,7 @@ type Search = Pick<SettingsPageItem, "keywords" | "sections">;
 export const GENERAL_SEARCH: Search = {
   sections: [
     { anchor: "language", titleKey: "shell.general.language", keywords: ["shell.language", "shell.dateFormat", "shell.numberFormat"] },
-    { anchor: "terms", titleKey: "terms.title", keywords: ["terms.singular", "terms.plural"] },
+    { anchor: "terms", titleKey: "terms.title", keywords: ["terms.singular", "terms.plural", "terms.sidebarLabel", "terms.sidebarHidden"] },
     { anchor: "window", titleKey: "shell.general.window", keywords: ["shell.closeWindow", "shell.closeWindow.tray", "remoteClose.allow", "desk.setting"] },
     { anchor: "performance", titleKey: "shell.perf.title", keywords: ["shell.perf.mode", "shell.perf.save", "shell.perf.smooth", "shell.perf.keywords"] },
   ],
@@ -53,7 +53,7 @@ export const APPEARANCE_SEARCH: Search = {
       titleKey: "appearance.fonts",
       keywords: ["appearance.uiFont", "appearance.cjkFont", "appearance.chatFont", "appearance.chatCjkFont", "appearance.chatFontSize", "appearance.monoFont", "appearance.monoFontSize", "appearance.monoCjkFont"],
     },
-    { anchor: "layout", titleKey: "appearance.layout", keywords: ["appearance.zoom", "appearance.density"] },
+    { anchor: "layout", titleKey: "appearance.layout", keywords: ["appearance.zoom", "appearance.density", "appearance.nameGrouping", "appearance.nameReading"] },
     { anchor: "avatars", titleKey: "settings.ia.avatars" as MessageKey, keywords: ["appearance.agentAvatar", "appearance.avatarTint"] },
     // 窗口与卡片 (design 006 v1: what stays here is the whole window's; the panels' rows are on their 面板 pages).
     { anchor: "work-surface", titleKey: "workSurface.title", keywords: ["workSurface.material", "workSurface.width", "workSurface.edge", "foretell.setting", "workSurface.dropPreview", "orientation.setting", "orientation.position", "orientation.split"] },
@@ -65,10 +65,9 @@ export const APPEARANCE_SEARCH: Search = {
 
 export const SIDEBAR_SEARCH: Search = {
   sections: [
-    { anchor: "projects", titleKey: "appearance.sidebar.projects", keywords: ["appearance.projectGrouping", "appearance.noOnlineProjects", "appearance.sectionCollapsed", "appearance.projectOrderReset"] },
-    { anchor: "agentRows", titleKey: "appearance.sidebar.agentRows", keywords: ["appearance.sidebarLayout", "appearance.runningAgents", "appearance.statusChips", "appearance.rowPreview", "appearance.foldIdleAgents", "appearance.offlineAgents"] },
-    { anchor: "sidebarStyle", titleKey: "appearance.sidebar.style", keywords: ["appearance.projectIconStyle", "appearance.projectIconStyle.tint", "appearance.projectIconStyle.line", "appearance.projectSeparation", "appearance.sidebarWidth"] },
-    { anchor: "hoverPreview", titleKey: "appearance.sidebar.hoverPreview", keywords: ["appearance.projectHoverPreview", "appearance.projectHoverDelay"] },
+    { anchor: "projects", titleKey: "appearance.sidebar.projects", keywords: ["appearance.projectGrouping", "appearance.noOnlineProjects", "appearance.olderProjects", "appearance.sectionCollapsed", "appearance.projectOrderReset"] },
+    { anchor: "agentRows", titleKey: "appearance.sidebar.agentRows", keywords: ["appearance.sidebarLayout", "appearance.runningAgents", "appearance.statusChips", "appearance.rowPreview"] },
+    { anchor: "sidebarStyle", titleKey: "appearance.sidebar.style", keywords: ["appearance.projectIconStyle", "appearance.projectIconStyle.tint", "appearance.projectIconStyle.line", "appearance.projectSeparation", "appearance.systemRows", "appearance.systemRows.line", "appearance.systemRows.band", "appearance.sidebarWidth"] },
   ],
 };
 

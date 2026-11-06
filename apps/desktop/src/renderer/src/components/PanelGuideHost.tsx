@@ -236,7 +236,7 @@ export function PanelGuideHost() {
           data-panel-guide={def.id}
           data-panel-guide-step={current.id}
           data-panel-guide-trying=""
-          className="fixed z-50 flex items-center gap-2 rounded-inner border border-border bg-surface px-3 py-2 text-ui shadow-e2"
+          className="float fixed z-[160] flex items-center gap-2 px-3 py-2 text-ui"
           style={sheet ? position : { left: place.left, top: place.top }}
         >
           <Lightbulb size={14} className="shrink-0 text-accent" aria-hidden />
@@ -266,7 +266,7 @@ export function PanelGuideHost() {
         data-panel-guide={def.id}
         data-panel-guide-step={current.id}
         data-panel-guide-sheet={sheet ? "" : undefined}
-        className="fixed z-50 flex max-h-[min(420px,70dvh)] flex-col rounded-inner border border-border bg-surface text-ui shadow-e2 data-[panel-guide-sheet]:max-h-[min(60dvh,420px)]"
+        className="float fixed z-[160] flex max-h-[min(420px,70dvh)] flex-col text-ui data-[panel-guide-sheet]:max-h-[min(60dvh,420px)]"
         style={position}
       >
         <div className="flex shrink-0 items-center gap-2 px-3 pt-3">

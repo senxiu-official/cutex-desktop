@@ -13,6 +13,7 @@ export const SERVICES_ORGANIZE_FEATURE = "services-organize";
 export const SERVICES_LOGIN_LINK_FEATURE = "services-login-link";
 /** cutex r267: `ownerScope` session | project on services; the owner switches it with PATCH {ownerScope, projectId?}. */
 export const SERVICES_PROJECT_SCOPE_FEATURE = "services-project-scope";
+export const SERVICES_IDLE_PRESETS_FEATURE = "service-idle-presets-v1";
 export const DEFAULT_AGENT_PERSISTENT_APPROVAL: AgentPersistentApproval = "ask";
 
 export function isAgentPersistentApproval(v: unknown): v is AgentPersistentApproval {

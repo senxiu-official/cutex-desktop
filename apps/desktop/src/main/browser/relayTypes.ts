@@ -15,8 +15,31 @@ export class BrowserRelayError extends Error {
    * renderer, and the tab's error), e.g. cutex's service_reclaimed behind the relay's service_unavailable.
    * The relay only ever sends `code` (cutex maps unknown relay codes to invalid_result).
    */
-  constructor(readonly code: RelayErrorCode, readonly ownerCode?: string) { super(ownerCode ?? code); this.name = "BrowserRelayError"; }
+  constructor(readonly code: RelayErrorCode, readonly ownerCode?: string, readonly diagnosticCause?: "ledger_capacity" | "guest_already_mounted", readonly detail?: RelayErrorDetail) { super(ownerCode ?? code); this.name = "BrowserRelayError"; }
 }
+/**
+ * Mechanical detail of a failure for hosts with browser-error-detail-v1: the stage it failed in,
+ * the tab's display-redacted page, Chromium's net error and what was busy. Never raw messages.
+ */
+export interface RelayErrorDetail { stage?: string; url?: string; netError?: { code: number; name: string }; reason?: string }
+const WORD = /^[a-z][a-z0-9_.]{0,63}$/;
+/** A thrown error's detail: a BrowserRelayError's own, its diagnostic cause, or a `reason` a
+ * provider attached (`busyError`). Shape-checked: anything else is dropped. */
+export function relayErrorDetail(error: unknown): RelayErrorDetail | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  // A BrowserRelayError's own detail, a provider error's attached reason, or a plain detail object.
+  const raw: Record<string, unknown> = error instanceof BrowserRelayError ? { ...error.detail } : error instanceof Error ? {} : { ...error };
+  if (raw.reason === undefined) raw.reason = error instanceof BrowserRelayError && error.diagnosticCause ? error.diagnosticCause : "reason" in error ? error.reason : undefined;
+  const detail: RelayErrorDetail = {};
+  if (typeof raw.stage === "string" && WORD.test(raw.stage)) detail.stage = raw.stage;
+  if (typeof raw.reason === "string" && WORD.test(raw.reason)) detail.reason = raw.reason;
+  if (typeof raw.url === "string" && raw.url.length <= 2048 && /^https?:\/\//.test(raw.url)) detail.url = raw.url;
+  const net = raw.netError as { code?: unknown; name?: unknown } | undefined;
+  if (net && Number.isSafeInteger(net.code) && (net.code as number) < 0 && (net.code as number) > -1000 && typeof net.name === "string" && /^ERR_[A-Z0-9_]{1,60}$/.test(net.name)) detail.netError = { code: net.code as number, name: net.name };
+  return Object.keys(detail).length ? detail : undefined;
+}
+/** A busy refusal that says what is busy (a fixed reason word, never page text). */
+export function busyError<T extends Error>(error: T, reason: string): T & { reason: string } { return Object.assign(error, { reason }); }
 /** Main's precise admission refusals (network.ts BrowserRefusal minus invalid_url). A host that
  * advertises browser-refusal-reasons receives them as is; older hosts get the established
  * external_pages_unavailable (they map unknown codes to invalid_result). */
@@ -29,6 +52,12 @@ export const REFUSAL_REASONS_CAPABILITY = "browser-refusal-reasons";
 export const POPUP_GRANT_CAPABILITY = "browser-popup-grant";
 /** The host accepts the optional tab.act `scroll` outcome ({dx, dy, atEdge}). */
 export const SCROLL_OUTCOME_CAPABILITY = "browser-scroll-outcome";
+/** cutex design 059: the host accepts a tabs.open result with loadState (staged open). */
+export const OPEN_STAGES_CAPABILITY = "browser-open-stages-v1";
+/** The host reads a failed result's `error.detail` (stage, page, Chromium net error, busy reason). */
+export const ERROR_DETAIL_CAPABILITY = "browser-error-detail-v1";
+/** The host reads snapshot / find node `url` and tab.act `newTab`. */
+export const PAGE_LINKS_CAPABILITY = "browser-page-links-v1";
 export function isBrowserRefusalCode(code: unknown): code is BrowserRefusalCode { return typeof code === "string" && (BROWSER_REFUSAL_CODES as readonly string[]).includes(code); }
 /** The code a host may receive: precise refusals only where advertised. */
 export function relayWireError(code: RelayErrorCode, precise: boolean): RelayErrorCode { return !precise && isBrowserRefusalCode(code) ? "external_pages_unavailable" : code; }
@@ -62,7 +91,7 @@ export type RelayMessage = RelayCommand
   | (RelayBase & { kind: "cancel"; requestId: string; dispatchSeq: number; reason: string })
   | (RelayBase & { kind: "lease-revoked"; leaseId: string; reason: string });
 export type RelayState = "accepted" | "dispatched" | "running" | "succeeded" | "failed" | "cancelled" | "outcome_unknown";
-export interface RelayResult { dispatchSeq: number; target: RelayTarget; operationKind: BrowserOperation["kind"]; status: RelayState; metadataOnly?: true; result?: BrowserOperationResult; error?: { code: RelayErrorCode } }
+export interface RelayResult { dispatchSeq: number; target: RelayTarget; operationKind: BrowserOperation["kind"]; status: RelayState; metadataOnly?: true; result?: BrowserOperationResult; error?: { code: RelayErrorCode; detail?: RelayErrorDetail } }
 export interface RelayGrant { deviceId: string; guestId: string; cutexSessionId: string; title: string; url: string; source: { kind: "owner" } | { kind: "claim"; approvalId: string } | { kind: "agent-open"; requestId: string } | { kind: "popup"; openerLeaseId: string } }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function relayId(value: unknown): asserts value is string { if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{1,200}$/.test(value)) throw new BrowserRelayError("invalid_request"); }

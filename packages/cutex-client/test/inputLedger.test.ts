@@ -103,3 +103,13 @@ describe("input ledger methods (input-ledger-v1)", () => {
     await expect(client.inputList("s")).rejects.toMatchObject({ code: "method_not_found" });
   });
 });
+
+it.each([true, false])("inputHold forwards CAS with held=%s", async held => {
+  const result = { ledgerEpoch: "e", stateRevision: 11, record: { inputId: "notice", rev: 4, details: { ownerHold: held } } };
+  const { client, calls } = mockClient(() => [200, { cutex: { result } }]);
+  const params = { inputId: "notice", expectedRev: 3, held };
+  expect(await client.inputHold("cutex.s 1", params)).toEqual(result);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.url).toContain("cutex.s%201/cutex/requests");
+  expect(bodyOf(calls[0]!)).toMatchObject({ method: "cutex/input/hold", params });
+});

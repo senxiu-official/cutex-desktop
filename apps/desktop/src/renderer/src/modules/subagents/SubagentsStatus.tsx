@@ -34,7 +34,7 @@ function BackgroundSubAgentRow({ a, body, tip, onOpen, onStop }: { a: SubAgentIn
   const { t } = useI18n();
   const [armed, setArmed] = useArmed();
   return (
-    <div data-capsule-row="" data-background-subagent="" title={tip} className={`${CAPSULE_ROW} border transition-colors ${armed ? ARMED_FRAME : "border-transparent hover:bg-hover"}`}>
+    <div data-capsule-row="" data-background-subagent="" data-tip={tip} className={`${CAPSULE_ROW} border transition-colors ${armed ? ARMED_FRAME : "border-transparent hover:bg-hover"}`}>
       <button onClick={onOpen} className={CAPSULE_ROW_MAIN}>
         {body}
       </button>
@@ -46,7 +46,7 @@ function BackgroundSubAgentRow({ a, body, tip, onOpen, onStop }: { a: SubAgentIn
             setArmed(false);
             void onStop();
           }}
-          title={t("subagents.stop.title", { name: a.name })}
+          data-tip={t("subagents.stop.title", { name: a.name })}
           aria-label={t("subagents.stop")}
           className={armed ? `${ARMED_BUTTON} shrink-0` : `${CAPSULE_ROW_ACTION} hover:text-danger`}
         >
@@ -96,11 +96,11 @@ function SubAgentRows({ sessionId, agents }: { sessionId: string; agents: SubAge
           return <BackgroundSubAgentRow key={a.threadId} a={a} body={body} tip={subAgentTooltip(a.threadId, a)} onOpen={() => void openSubagentThread(a.threadId, sessionId)} onStop={() => stop(a.threadId)} />;
         // A Claude task of an adapter without transcripts: status only, nothing to open.
         return !canOpenSubAgent(a.threadId, features) ? (
-          <div key={a.threadId} data-capsule-row="" title={[t("sub.claudeTask"), tip].filter(Boolean).join("\n")} className={CAPSULE_ROW}>
+          <div key={a.threadId} data-capsule-row="" data-tip={[t("sub.claudeTask"), tip].filter(Boolean).join("\n")} className={CAPSULE_ROW}>
             {body}
           </div>
         ) : (
-          <button key={a.threadId} data-capsule-row="" title={subAgentTooltip(a.threadId, a)} onClick={() => void openSubagentThread(a.threadId, sessionId)} className={`${CAPSULE_ROW} w-full text-left hover:bg-hover`}>
+          <button key={a.threadId} data-capsule-row="" data-tip={subAgentTooltip(a.threadId, a)} onClick={() => void openSubagentThread(a.threadId, sessionId)} className={`${CAPSULE_ROW} w-full text-left hover:bg-hover`}>
             {body}
           </button>
         );
@@ -141,13 +141,13 @@ function FinishedRows({ sessionId, rows }: { sessionId: string; rows: FinishedSu
         const openable = !!a.threadId && !a.noTranscript && canOpenSubAgent(a.threadId, features);
         if (openable)
           return (
-            <button key={a.key} data-capsule-row="" data-finished-subagent="" title={[subAgentTooltip(a.threadId!), a.task].filter(Boolean).join("\n")} onClick={() => void openSubagentThread(a.threadId!, sessionId)} className={`${CAPSULE_ROW} w-full text-left hover:bg-hover`}>
+            <button key={a.key} data-capsule-row="" data-finished-subagent="" data-tip={[subAgentTooltip(a.threadId!), a.task].filter(Boolean).join("\n")} onClick={() => void openSubagentThread(a.threadId!, sessionId)} className={`${CAPSULE_ROW} w-full text-left hover:bg-hover`}>
               {body}
             </button>
           );
         const why = a.noTranscript ? t("subagents.recent.background") : a.threadId ? t("sub.claudeTask") : t("subagents.recent.noTranscript");
         return (
-          <div key={a.key} data-capsule-row="" data-finished-subagent="" title={[why, a.task].filter(Boolean).join("\n")} className={CAPSULE_ROW}>
+          <div key={a.key} data-capsule-row="" data-finished-subagent="" data-tip={[why, a.task].filter(Boolean).join("\n")} className={CAPSULE_ROW}>
             {body}
           </div>
         );

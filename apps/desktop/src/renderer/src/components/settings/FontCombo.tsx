@@ -79,7 +79,7 @@ export function FontCombo({ value, fonts, defaultLabel, installed, onChange, lab
       />
       <ChevronDown size={14} aria-hidden className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-subtle" />
       {open && (
-        <ul id={listId} role="listbox" data-popover="" className="absolute top-full right-0 left-0 z-50 mt-1 max-h-64 overflow-auto rounded-md border border-border bg-raised py-1 text-sm shadow-lg">
+        <ul id={listId} role="listbox" data-popover="" className="float absolute top-full right-0 left-0 z-[160] mt-1 max-h-64 overflow-auto p-1 text-sm float-scroll">
           {items.map((i, n) => (
             <li
               key={`${i.value}|${i.note ?? ""}`}

@@ -42,6 +42,16 @@ export function formatWhen(unixSeconds: number, now: number, locale: Locale): st
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/** A time to come (a deadline): "06:11" today, "11-07 06:11" this year, else "2027-01-02 06:11". */
+export function formatAt(unixSeconds: number, now: number): string {
+  const d = new Date(unixSeconds * 1000);
+  const today = new Date(now);
+  const clock = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (d.toDateString() === today.toDateString()) return clock;
+  if (d.getFullYear() === today.getFullYear()) return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${clock}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${clock}`;
+}
+
 /** Full local timestamp for tooltips: "2026-10-06 11:02:15". */
 export function formatAbsolute(unixSeconds: number): string {
   const d = new Date(unixSeconds * 1000);
@@ -67,13 +77,15 @@ setInterval(() => {
   for (const s of subscribers) s(clockNow);
 }, 30_000);
 
-export function useClock(): number {
+export function useClock(active = true): number {
   const [now, setNow] = useState(clockNow);
   useEffect(() => {
+    if (!active) return;
+    setNow(clockNow);
     subscribers.add(setNow);
     return () => {
       subscribers.delete(setNow);
     };
-  }, []);
+  }, [active]);
   return now;
 }

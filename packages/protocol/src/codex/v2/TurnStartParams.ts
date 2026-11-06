@@ -12,6 +12,7 @@ import type { AdditionalContextEntry } from "./AdditionalContextEntry";
 import type { ApprovalsReviewer } from "./ApprovalsReviewer";
 import type { AskForApproval } from "./AskForApproval";
 import type { CyberAccessProgram } from "./CyberAccessProgram";
+import type { ExternalInputEnvelope } from "./ExternalInputEnvelope";
 import type { SandboxPolicy } from "./SandboxPolicy";
 import type { TurnEnvironmentParams } from "./TurnEnvironmentParams";
 import type { TurnToolOutput } from "./TurnToolOutput";
@@ -23,6 +24,10 @@ export type TurnStartParams = { threadId: string,
  * Omitted/null preserves the list; [] clears it.
  */
 disabledPluginIds?: Array<string> | null, clientUserMessageId?: string | null, input: Array<UserInput>,
+/**
+ * Canonical external items consumed only with this owner input. Never pre-submit these.
+ */
+ownerCarries?: Array<ExternalInputEnvelope>,
 /**
  * Optional source classification for the caller that starts this turn.
  * Ignored when this request steers an already-active turn.
@@ -47,6 +52,7 @@ parentTurnId?: string | null,
 rootTurnId?: string | null, toolOutput?: TurnToolOutput | null,
 /**
  * Optional metadata to enrich Codex's ResponsesAPI turn metadata.
+ * Replaces unprotected client-provided entries when supplied; an empty map clears them.
  *
  * Entries are flattened into the JSON string sent as
  * `client_metadata["x-codex-turn-metadata"]` on ResponsesAPI HTTP and websocket requests.
@@ -55,6 +61,11 @@ rootTurnId?: string | null, toolOutput?: TurnToolOutput | null,
  * such as `session_id`, `thread_id`, `turn_id`, and `window_id` cannot be overridden.
  */
 responsesapiClientMetadata?: { [key in string]?: string } | null,
+/**
+ * Merge entries into the ResponsesAPI turn metadata without removing existing entries.
+ * Applied after `responsesapiClientMetadata` if both are provided; reserved keys remain protected.
+ */
+responsesapiClientMetadataPatch?: { [key in string]?: string } | null,
 /**
  * Optional client-provided context fragments keyed by an opaque source identifier.
  */

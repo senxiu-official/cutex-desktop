@@ -1,5 +1,6 @@
 // Pure desktop-shell logic (tray labels, close decision, prefs parsing) — used by the main process,
 // kept free of Electron imports so it is unit-testable.
+import { readMemoryHost } from "@cutex-desktop/cutex-client";
 import { parseUpdateProxyPref } from "./proxy";
 import type { CloseBehavior, DesktopPrefs, ShellLocale } from "./ipc";
 import type { ShellTermForms, ShellTerms, ShellTermsPref } from "./ipc";
@@ -35,6 +36,7 @@ export function parseTerms(value: unknown): ShellTermsPref | null {
 export function parsePrefs(raw: unknown): DesktopPrefs {
   const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {
+    ...(readMemoryHost(value.memoryHost) ? { memoryHost: readMemoryHost(value.memoryHost)! } : {}),
     closeBehavior: isCloseBehavior(value.closeBehavior) ? value.closeBehavior : DEFAULT_PREFS.closeBehavior,
     locale: isShellLocale(value.locale) ? value.locale : null,
     terms: parseTerms(value.terms),
@@ -307,15 +309,15 @@ export function trayNoticeText(locale: ShellLocale, terms?: ShellTermsPref | nul
     "zh-CN": {
       title: "Cutex",
       message: "Cutex 仍在系统托盘中运行",
-      detail: `关闭窗口后 Cutex 继续在后台运行，以便${words?.one ?? "智能体"}需要你时提醒你；从托盘图标的菜单可以重新打开或退出。\n\n如果在顶栏或系统托盘里看不到 Cutex 图标（例如 GNOME 未安装 AppIndicator 扩展），请选「关闭窗口时退出」。以后可在 设置 → 通用 → 关闭窗口时 修改`,
-      keep: "继续在托盘中运行",
+      detail: `关闭窗口后 Cutex 继续在后台运行，以便${words?.one ?? "智能体"}需要你时提醒你；从系统托盘图标的菜单可以重新打开或退出。\n\n如果在顶栏或系统托盘里看不到 Cutex 图标（例如 GNOME 未安装 AppIndicator 扩展），请选「关闭窗口时退出」。以后可在 设置 → 通用 → 关闭窗口时 修改`,
+      keep: "继续在系统托盘中运行",
       quit: "关闭窗口时退出",
     },
     "zh-Hant-CN": {
       title: "Cutex",
       message: "Cutex 仍在系統托盤中運行",
-      detail: `關閉窗口後 Cutex 繼續在後臺運行，以便${words?.one ?? "智能體"}需要你時提醒你；從托盤圖標的菜單可以重新打開或退出。\n\n如果在頂欄或系統托盤裏看不到 Cutex 圖標（例如 GNOME 未安裝 AppIndicator 擴展），請選「關閉窗口時退出」。以後可在 設置 → 通用 → 關閉窗口時 修改`,
-      keep: "繼續在托盤中運行",
+      detail: `關閉窗口後 Cutex 繼續在後臺運行，以便${words?.one ?? "智能體"}需要你時提醒你；從系統托盤圖標的菜單可以重新打開或退出。\n\n如果在頂欄或系統托盤裏看不到 Cutex 圖標（例如 GNOME 未安裝 AppIndicator 擴展），請選「關閉窗口時退出」。以後可在 設置 → 通用 → 關閉窗口時 修改`,
+      keep: "繼續在系統托盤中運行",
       quit: "關閉窗口時退出",
     },
     "zh-Hant-TW": {
@@ -328,8 +330,8 @@ export function trayNoticeText(locale: ShellLocale, terms?: ShellTermsPref | nul
     en: {
       title: "Cutex",
       message: "Cutex is still running in the system tray",
-      detail: `After the window closes, Cutex keeps running so ${words?.many ?? "agents"} can alert you; reopen or quit it from the tray icon's menu.\n\nIf you can't see a Cutex icon in the top bar or system tray (for example GNOME without the AppIndicator extension), choose \u201cQuit when closing\u201d. You can change this later in Settings \u2192 General \u2192 When closing the window.`,
-      keep: "Keep running in the tray",
+      detail: `After the window closes, Cutex keeps running so ${words?.many ?? "agents"} can alert you; reopen or quit it from the system tray icon's menu.\n\nIf you can't see a Cutex icon in the top bar or system tray (for example GNOME without the AppIndicator extension), choose \u201cQuit when closing\u201d. You can change this later in Settings \u2192 General \u2192 When closing the window.`,
+      keep: "Keep running in the system tray",
       quit: "Quit when closing",
     },
   };

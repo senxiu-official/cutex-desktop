@@ -18,6 +18,7 @@ import { graphemeCount } from "../../lib/graphemes";
 import { ARMED_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { FIELD_W } from "../../lib/fieldWidths";
 import { parseClamped, radioKeyTarget, RowA11yContext, useRowA11y } from "../../lib/formA11y";
+import { useLayoutView } from "../../lib/userLayoutView";
 import type { SettingsAgents, SettingsSource } from "../../lib/settingsNav";
 import { SETTINGS_EFFECT_EXEMPTIONS } from "../../lib/settingsEffectPolicy";
 import { useTargetHostId } from "../../lib/targetHost";
@@ -25,6 +26,7 @@ import { useApp } from "../../store";
 import { Tag } from "../../components/Tag";
 import { btn } from "../Button";
 import { AgentTimingIcon } from "./AgentTimingIcon";
+import { placeTip } from "../../lib/tips";
 import { useOwnerWindow } from "../../lib/ownerContext";
 import { ownerWindowOf } from "../../lib/ownerWindow";
 
@@ -36,8 +38,9 @@ export function SourceTag({ source }: { source: SettingsSource }) {
   const { t } = useI18n();
   const hostId = useTargetHostId();
   const host = useApp((s) => s.hosts?.hosts.find((h) => h.id === hostId)?.label) ?? "—";
-  const label = source === "local" ? t("settings.source.local") : t(source === "host" ? "settings.source.host" : "settings.source.codex", { host });
-  const title = source === "local" ? t("settings.source.localHint") : t(source === "host" ? "settings.source.hostHint" : "settings.source.codexHint", { host });
+  const memoryHost = useLayoutView(s => s.memoryHost?.label) ?? "—";
+  const label = source === "person" ? t("layoutMemory.scope", { host: memoryHost }) : source === "local" ? t("settings.source.local") : t(source === "host" ? "settings.source.host" : "settings.source.codex", { host });
+  const title = source === "person" ? t("layoutMemory.hint") : source === "local" ? t("settings.source.localHint") : t(source === "host" ? "settings.source.hostHint" : "settings.source.codexHint", { host });
   const tone = source === "local" ? "bg-surface-2 text-muted" : "bg-accent/12 text-accent";
   return (
     <span title={title} className={`inline-flex h-5 shrink-0 items-center rounded px-1.5 text-caption/[inherit] whitespace-nowrap ${tone}`}>
@@ -56,7 +59,7 @@ function sourceKey(source: SettingEffect["source"] | undefined): string | undefi
 }
 function scopeOf(row: RowMetadata): Scope | undefined {
   if (row.allHosts) return "allHosts";
-  return sourceKey(row.source)?.split("|").map(source => source === "local" ? "local" : `${source}:${row.hostId ?? ""}`).sort().join("|");
+  return sourceKey(row.source)?.split("|").map(source => source === "local" || source === "person" ? source : `${source}:${row.hostId ?? ""}`).sort().join("|");
 }
 
 type MetadataReport = (id: string, value: RowMetadata | null) => void;
@@ -101,6 +104,7 @@ function useRowMetadata(value: RowMetadata | null) {
   const id = useId();
   const page = useContext(PageMetadataReportContext);
   const card = useContext(CardMetadataReportContext);
+  const memoryHost = useLayoutView(s => s.memoryHost?.label);
   const targetHostId = useTargetHostId();
   const key = sourceKey(value?.source);
   const hostId = key && key !== "local" && !value?.allHosts ? targetHostId : undefined;
@@ -184,7 +188,7 @@ export function ScopeChip({ tone, icon, label, title, body, joined, timing }: { 
       </button>
       {visible && layer && createPortal(
         // React events bubble through the portal to the chip: hovering the popover keeps it open.
-        <span ref={pop} id={id} role="note" data-popover="" style={{ left: at?.left ?? 0, top: at?.top ?? 0, visibility: at ? "visible" : "hidden" }} className="fixed z-[60] w-72 rounded-lg border border-border bg-raised p-3 text-xs shadow-lg">
+        <span ref={pop} id={id} role="note" data-popover="" style={{ left: at?.left ?? 0, top: at?.top ?? 0, visibility: at ? "visible" : "hidden" }} className="float fixed z-[161] w-72 p-3 text-xs">
           <span className="mb-1 block font-medium text-foreground">{title}</span>
           <span className="block leading-relaxed text-muted">{body}</span>
         </span>,
@@ -202,10 +206,12 @@ export function ScopeChip({ tone, icon, label, title, body, joined, timing }: { 
  */
 function WhereChip({ source, short, except, shown, hostId: scopedHostId }: { source: SettingsSource | undefined; hostId?: string; short?: boolean; except?: boolean; /** On a 混合设置 header: the host the page's host cards show. */ shown?: boolean }) {
   const { t } = useI18n();
+  const memoryHost = useLayoutView(s => s.memoryHost?.label);
   const targetHostId = useTargetHostId();
   const hostId = scopedHostId ?? targetHostId;
   const host = useApp((s) => s.hosts?.hosts.find((h) => h.id === hostId)?.label) ?? "—";
   if (except) source = undefined;
+  if (source === "person") return <ScopeChip tone="plain" icon={<Monitor size={11} aria-hidden />} label={memoryHost ? t("layoutMemory.scope", { host: memoryHost }) : t("layoutMemory.local")} title={t("layoutMemory.title")} body={t("layoutMemory.hint")} />;
   if (source === "local") {
     // 「本地桌面应用」 (owner 2026-10-19: 「本机」 read oddly; it pairs with 「cutex 后端」). The same with or
     // without a local host in the list.
@@ -262,7 +268,7 @@ function EffectScope({ scope, picker }: { scope: Scope; picker?: ReactNode }) {
   }
   const [place, ...hostParts] = scope.split(":");
   const hostId = hostParts.join(":");
-  const source = place === "host" || place === "codex" ? place : scope === "local" ? "local" : undefined;
+  const source = place === "host" || place === "codex" ? place : scope === "local" ? "local" : scope === "person" ? "person" : undefined;
   return <span data-effect-scope-marker={scope} className="inline-flex items-center">
     {scope === "allHosts" ? <ScopeChip tone="host" icon={<Server size={11} aria-hidden />} label={t("hostPicker.allHosts")} title={t("hostPicker.allHosts")} body={t("hostPicker.allHosts")} /> : <WhereChip hostId={hostId || undefined} source={source} short={!!picker && !!source && source !== "local"} />}
     {picker}
@@ -283,12 +289,11 @@ function EffectMarkers({ agents, source, allHosts, readOnly, row = false }: RowM
 }
 
 /**
- * Page header: what the page is for (`hint`, one line) and the scope chips. The page name is in the
- * breadcrumb. `host`: the host picker of a host page (multi-host). `link`: a related page at the
+ * Shared page header: title, purpose and scope chips. `host`: the host picker of a host page (multi-host). `link`: a related page at the
  * header's end (the page item's `headerLink`, e.g. 运行时 → 后端更新). `back`: a way back above it all
  * (the page item's `backLink`, e.g. 主机 → ‹ 所有设备).
  */
-export function SettingsPage({ page, hint, host, link, back, children }: { page?: string; back?: ReactNode; hint?: ReactNode; host?: ReactNode; link?: ReactNode; children: ReactNode }) {
+export function SettingsPage({ page, title, hint, host, link, back, children }: { page?: string; title?: ReactNode; back?: ReactNode; hint?: ReactNode; host?: ReactNode; link?: ReactNode; children: ReactNode }) {
   const [rows, reportRows] = useMetadataRows();
   const summary = summarize(rows);
   const exemption = page ? SETTINGS_EFFECT_EXEMPTIONS[page] : undefined;
@@ -302,11 +307,15 @@ export function SettingsPage({ page, hint, host, link, back, children }: { page?
   return <>
     <div data-settings-header data-settings-page={page} data-effect-exemption={exemption ? page : undefined} className="mb-5 space-y-1.5 border-b border-border/60 pb-3">
       {back && <div className="-mt-1 flex h-5 items-center">{back}</div>}
-      {(hint || link) && <div className="flex min-h-5 items-start gap-3">{hint && <p className="min-w-0 text-ui/[inherit] text-muted">{hint}</p>}{link && <span className="-my-1.5 ml-auto flex shrink-0 items-center">{link}</span>}</div>}
-      <div data-settings-scope={summary.scope} className="flex min-h-6 flex-wrap items-center gap-1.5">
-        {headerScope && <EffectScope scope={headerScope} picker={host} />}
-        {!headerScope && host}
-        {summary.timing && <AgentsChip agents={summary.timing} />}
+      {title && <h1 className="text-base font-semibold text-foreground">{title}</h1>}
+      {hint && <p className="text-ui/[inherit] text-muted">{hint}</p>}
+      <div className="flex min-h-6 flex-wrap items-center gap-x-3 gap-y-1.5">
+        <div data-settings-scope={summary.scope} className="flex max-w-full flex-none flex-wrap items-center gap-1.5">
+          {headerScope && <EffectScope scope={headerScope} picker={host} />}
+          {!headerScope && host}
+          {summary.timing && <AgentsChip agents={summary.timing} />}
+        </div>
+        {link && <div data-settings-header-actions className="ml-auto flex min-w-0 max-w-full flex-[1_1_10rem] items-center justify-end">{link}</div>}
       </div>
     </div>
     <PageMetadataReportContext value={reportRows}><EffectPlacementContext value={placement}>{children}</EffectPlacementContext></PageMetadataReportContext>
@@ -536,11 +545,12 @@ const ModifiedContext = createContext<{ only: boolean; report(id: string, modifi
  */
 export function InfoTip({ id, children }: { id?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const [place, setPlace] = useState<{ below: boolean; shift: number }>({ below: false, shift: 0 });
+  const [place, setPlace] = useState<{ at: "above" | "side" | "outside" | "below"; shift: number; left?: number; top?: number }>({ at: "above", shift: 0 });
   const root = useRef<HTMLSpanElement>(null);
   const tip = useRef<HTMLSpanElement>(null);
-  // Beside its trigger and never over the row's own control (owner rule): above the label line, flipped below only when
-  // the scrolling area has no room above; anchored at the ⓘ and clamped to the card.
+  // Beside its trigger and never over the row's own control (owner rule): above the label line. With no room above: in a
+  // dialog (the first row of 编辑信息…) outside the dialog's edge, level with the ⓘ (like a tip in a float, lib/tips);
+  // elsewhere level with the ⓘ on its right when that fits the card; below only when nothing else does.
   useLayoutEffect(() => {
     const el = root.current;
     const bubble = tip.current;
@@ -548,20 +558,30 @@ export function InfoTip({ id, children }: { id?: string; children: ReactNode }) 
     const r = el.getBoundingClientRect();
     const h = bubble.offsetHeight + 6;
     let top = 0;
+    let scrollRight = Infinity;
     for (let p = el.parentElement; p; p = p.parentElement) {
       const o = getComputedStyle(p).overflowY;
       if (o === "auto" || o === "scroll") {
-        top = p.getBoundingClientRect().top;
+        const box = p.getBoundingClientRect();
+        top = box.top;
+        scrollRight = box.right - 4;
         break;
       }
     }
     const card = el.closest("[data-setting-row]")?.parentElement?.getBoundingClientRect();
     const w = bubble.offsetWidth;
-    const right = card ? card.right - 4 : ownerWindowOf(el).innerWidth - 8;
+    const win = ownerWindowOf(el);
+    const right = Math.min(card ? card.right - 4 : win.innerWidth - 8, scrollRight);
     const left = card ? card.left + 4 : 8;
     let shift = -Math.max(0, r.left + w - right);
     if (r.left + shift < left) shift = left - r.left;
-    setPlace({ below: r.top - h < top, shift });
+    const dialog = el.closest('dialog, [role="dialog"]');
+    if (r.top - h >= top) setPlace({ at: "above", shift });
+    else if (dialog) {
+      const at = placeTip(r, { width: w, height: bubble.offsetHeight }, { width: win.innerWidth, height: win.innerHeight }, { float: dialog.getBoundingClientRect() });
+      setPlace({ at: "outside", shift: 0, left: at.left, top: at.top });
+    } else if (r.right + 6 + w <= right) setPlace({ at: "side", shift: 0 });
+    else setPlace({ at: "below", shift });
   }, [open]);
   return (
     <span ref={root} className="relative ml-1 inline-flex align-middle" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}>
@@ -573,9 +593,9 @@ export function InfoTip({ id, children }: { id?: string; children: ReactNode }) 
         id={id}
         role="tooltip"
         data-setting-info-tip=""
-        data-placed={place.below ? "below" : "above"}
-        style={{ left: place.shift }}
-        className={`pointer-events-none absolute z-30 w-max max-w-64 rounded-inner bg-surface px-2.5 py-1.5 text-caption font-normal text-muted shadow-e2 ${place.below ? "top-full mt-1" : "bottom-full mb-1"} ${open ? "block" : "hidden"}`}
+        data-placed={place.at}
+        style={place.at === "outside" ? { position: "fixed", left: place.left, top: place.top } : place.at === "side" ? undefined : { left: place.shift }}
+        className={`tip pointer-events-none absolute z-[180] w-max ${place.at === "outside" ? "" : place.at === "side" ? "top-1/2 left-full ml-1.5 -translate-y-1/2" : place.at === "below" ? "top-full mt-1" : "bottom-full mb-1"} ${open ? "block" : "hidden"}`}
       >
         {children}
       </span>
@@ -677,9 +697,9 @@ function RestoreDefault({ onClick, title }: { onClick(): void; title?: string })
 /** A link-styled text button with a trailing →, e.g. a page header's related page. */
 export function TextLink({ children, onClick }: { children: ReactNode; onClick(): void }) {
   return (
-    <button type="button" onClick={onClick} className={`inline-flex items-center gap-1 rounded text-xs text-accent hover:underline ${FOCUS}`}>
-      {children}
-      <ArrowRight size={12} aria-hidden />
+    <button type="button" onClick={onClick} className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded text-xs text-accent hover:underline ${FOCUS}`}>
+      <span className="truncate">{children}</span>
+      <ArrowRight size={12} className="shrink-0" aria-hidden />
     </button>
   );
 }

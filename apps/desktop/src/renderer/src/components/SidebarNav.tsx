@@ -24,6 +24,7 @@ import type { AppSlotEntry, NavItem } from "../modules/slots";
 import { CountBadge } from "./Tag";
 import { ShowDesktopButton, useShowDesktopRow } from "./ShowDesktopButton";
 import { useOwnerDocument } from "../lib/ownerContext";
+import { InfoMark } from "./InfoMark";
 import { ownerWindowOf } from "../lib/ownerWindow";
 
 type Entry = AppSlotEntry<"nav.primary">;
@@ -51,9 +52,6 @@ export function badgeCount(badge: Badge): number | null {
 function setPinned(id: string, on: boolean) {
   setUiPref("navPins", withNavPin(getUiPrefs().navPins, id, on));
 }
-
-/** What Ctrl/⌘-click and middle click do on this entry, for its tooltip (window audit 2026-10-23): a page entry opens beside; a `run` entry has no alternate. */
-export const navAltHint = (item: NavItem, t: T): string | null => ("page" in item.target ? t("pane.openBesideHint", { key: newInstanceKey() }) : null);
 
 /** Middle-click = the alternate open (Ctrl/⌘-click's), like an agent row (window audit #4); also stops the autoscroll cursor. */
 export const middleOpen = (run: () => void) => ({
@@ -168,11 +166,11 @@ function FlatEntry({ entry, pinned, badge, btn }: { entry: Entry; pinned: boolea
   const n = badgeCount(badge);
   const tip = disabled
     ? [label, !entry.waiting && t("modules.needsCapability", { list: entry.missing.join(", ") })]
-    : [n ? t("titlebar.entries.waiting", { name: label, n }) : label, !n && (badge?.title ?? badge?.text), hint && t(hint), item.menu && t(item.menu.hintKey), navAltHint(item, t)];
+    : [n ? t("titlebar.entries.waiting", { name: label, n }) : label, !n && (badge?.title ?? badge?.text), hint && t(hint), item.menu && t(item.menu.hintKey)];
   return (
     <button
       disabled={disabled}
-      title={tip.filter(Boolean).join("\n")}
+      data-tip={tip.filter(Boolean).join("\n")}
       aria-label={n ? t("titlebar.entries.waiting", { name: label, n }) : label}
       onClick={(e) => runNav(item, openModifiers(e))}
       {...altOpen(item)}
@@ -209,7 +207,7 @@ function MoreButton({ entries, pinned, badges, attention, btn }: { entries: read
       aria-haspopup="menu"
       aria-expanded={open}
       aria-label={label}
-      title={attention ? `${label}\n${t("navMore.attention")}` : label}
+      data-tip={attention ? `${label}\n${t("navMore.attention")}` : label}
       data-titlebar-entry="more"
       className={`${btn} relative shrink-0 ${open ? "bg-surface-2 text-foreground" : ""}`}
     >
@@ -258,7 +256,7 @@ function FoldButton({ folded, extra, entries, pinned, badges, attention, btn }: 
       aria-haspopup="menu"
       aria-expanded={open}
       aria-label={total ? t("titlebar.entries.foldWaiting", { list: tip, n: total }) : tip}
-      title={tip}
+      data-tip={tip}
       data-titlebar-entry="fold"
       className={`${btn} relative shrink-0 ${open ? "bg-surface-2 text-foreground" : ""}`}
     >
@@ -301,6 +299,8 @@ export function TitleBarEntries({ btn }: { btn: string }) {
         </ItemBoundary>
       ))}
       {(!compact || !any) && <ShowDesktopButton className={btn} />}
+      {/* How to open a page beside the current one (design 040 §2.1: not in the tips). */}
+      {any && <InfoMark text={t("pane.openBesideHint", { key: newInstanceKey() })} className="hover-info px-0.5" />}
       {any &&
         (compact ? (
           <FoldButton folded={folded} extra={desktop} entries={entries} pinned={layout.pinned} badges={badges} attention={layout.moreAttention} btn={btn} />

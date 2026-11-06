@@ -76,7 +76,7 @@ export interface SidePage {
   groups: string[];
   /** User-given name; generated from the cards otherwise. */
   name?: string;
-  /** Top → bottom. Empty only for the launcher page while it is in view. */
+  /** Top → bottom. Empty for a launcher, owner-kept page or retained content preview. */
   cards: SideCard[];
   /** A page made by 新页面 that has not received a card yet (in memory only). */
   launcher?: boolean;
@@ -86,6 +86,8 @@ export interface SidePage {
   icon?: PageIcon;
   /** Made by the owner (the rail's ＋, a drop on ＋): stays, empty or not, until deleted. */
   kept?: boolean;
+  /** Kind retained after its last item closes; empty pages can be refilled by the same kind. */
+  emptyKind?: ItemId;
   /**
    * 在所有对话中显示 (canvas principles §7, owner 2026-10-21): a shared page — one instance of it, in every
    * conversation's Shelf (it moves with the focus; lib/convShelves). Absent = this conversation's own page.
@@ -495,8 +497,10 @@ export function place(input: SideLayout, req: SidePlaceRequest, spec: PlaceSpec,
       const card = freshestCard(layout, samePage.cards.filter((c) => cardHolds(layout, c, req.kind)))!;
       return { op: "insert", page: { id: samePage.id }, card: { id: card.id }, via: "rule" };
     }
+    const empty = layout.pages.find((p) => !p.shared && !p.cards.length && p.emptyKind === req.kind);
+    if (empty) return { op: "insert", page: { id: empty.id }, card: { new: { index: 0, share: spec.share } }, via: "rule" };
     const active = findPage(layout, req.activePage);
-    if (active && !active.shared && active.cards.length === 0) {
+    if (active && !active.shared && active.cards.length === 0 && !active.emptyKind) {
       return { op: "insert", page: { id: active.id }, card: { new: { index: 0, share: spec.share } }, via: "rule" };
     }
     const shelf = findShelf(layout, req.shelf) ?? defaultShelf(layout);
@@ -628,6 +632,7 @@ function normalise(cards: SideCard[]): void {
 }
 
 function addCard(d: SideLayout, page: SidePage, kind: ItemId, index: number, share: number | null): SideCard {
+  delete page.emptyKind;
   const n = page.cards.length;
   const card: SideCard = { id: nextId(d, "c"), kind, tabs: [], active: null, size: 1, collapsed: false };
   if (n) {
@@ -764,6 +769,7 @@ function cleanup(d: SideLayout): void {
   for (const page of d.pages) {
     const before = page.cards.length;
     page.cards = page.cards.filter((c) => c.tabs.length > 0);
+    if (page.cards.length) delete page.emptyKind;
     for (const c of page.cards) if (!c.active || !c.tabs.includes(c.active)) c.active = c.tabs[0] ?? null;
     for (const c of page.cards) rehome(d, c);
     if (page.cards.length !== before) normalise(page.cards);
@@ -781,7 +787,7 @@ function cleanup(d: SideLayout): void {
   const rails = new Map<string, string[]>();
   for (const p of d.pages) if (p.shelf) rails.set(p.shelf, [...(rails.get(p.shelf) ?? []), p.id]);
   const inView = (p: SidePage) => (d.shelves ?? []).some((x) => x.id === p.shelf && x.active === p.id) || (!p.shelf && p.id === d.activePage);
-  d.pages = d.pages.filter((p) => p.cards.length > 0 || p.kept || (p.launcher && inView(p)));
+  d.pages = d.pages.filter((p) => p.cards.length > 0 || p.kept || p.emptyKind || (p.launcher && inView(p)));
   fixShelves(d, rails);
   if (!findPage(d, d.activePage)) {
     const k = d.activePage ? order.indexOf(d.activePage) : -1;
@@ -821,7 +827,7 @@ function setActivePage(d: SideLayout, pageId: string | null): void {
     shelf.active = page.id;
     delete shelf.collapsed;
   }
-  if (old && old !== page && !old.cards.length && !old.kept) d.pages = d.pages.filter((p) => p !== old);
+  if (old && old !== page && !old.cards.length && !old.kept && !old.emptyKind) d.pages = d.pages.filter((p) => p !== old);
 }
 
 function touch(d: SideLayout, id: string, now: number): void {
@@ -1076,6 +1082,10 @@ export function adoptInstance(input: SideLayout, id: string, inst: SideInstance,
   d.instances[id] = inst;
   let page = d.pages.find((p) => !p.shared && p.cards.some((c) => c.kind === inst.kind && c.tabs.length > 0)) ?? null;
   let card = page?.cards.find((c) => c.kind === inst.kind && c.tabs.length > 0) ?? null;
+  if (!page) {
+    page = d.pages.find((p) => !p.shared && !p.cards.length && p.emptyKind === inst.kind) ?? null;
+    if (page) card = addCard(d, page, inst.kind, 0, null);
+  }
   if (!page || !card) {
     const shelf = (d.shelves ?? []).find((x) => x.side === "right") ?? d.shelves?.[0] ?? makeShelf(d, "right");
     const full = d.pages.filter((p) => p.shelf === shelf.id).length >= MAX_SHELF_PAGES;
@@ -1100,9 +1110,17 @@ export function adoptInstance(input: SideLayout, id: string, inst: SideInstance,
   return { layout: d, pageId: page.id };
 }
 
-export function closeInstances(layout: SideLayout, ids: readonly string[]): SideLayout {
+export function closeInstances(layout: SideLayout, ids: readonly string[], keepEmptyKinds: readonly string[] = []): SideLayout {
   if (!ids.length) return layout;
   const d = draft(layout);
+  const closing = new Set(ids);
+  for (const page of d.pages) {
+    const tabs = page.cards.flatMap((c) => c.tabs);
+    const kind = tabs.length ? d.instances[tabs[0]!]?.kind : null;
+    if (kind && keepEmptyKinds.includes(kind) && tabs.every((id) => closing.has(id) && d.instances[id]?.kind === kind)) {
+      page.emptyKind = kind;
+    }
+  }
   for (const id of ids) {
     detach(d, id);
     delete d.instances[id];
@@ -1953,7 +1971,7 @@ export function shelfLanePages(input: SideLayout, shelfId: string, ctx: SideView
   const shelf = findShelf(layout, shelfId);
   return layout.pages.filter((p) => {
     if (p.shelf !== shelfId) return false;
-    if (p.kept || p.shared) return true;
+    if (p.kept || p.shared || p.emptyKind) return true;
     const v = pageVisibility(layout, p, ctx);
     return v === "shown" || (v === "launcher" && p.id === shelf?.active);
   });
@@ -2621,6 +2639,7 @@ export function sanitizeLayout(raw: unknown, hostId = "local", opts: { legacy?: 
       if (typeof p.shelf === "string" && /^s\d+$/.test(p.shelf)) page.shelf = p.shelf;
       if (typeof p.icon === "string" && (PAGE_ICONS as readonly string[]).includes(p.icon)) page.icon = p.icon as PageIcon;
       if (p.kept === true) page.kept = true;
+      if (typeof p.emptyKind === "string" && ITEM_ID.test(p.emptyKind)) page.emptyKind = p.emptyKind as ItemId;
       if (p.shared === true) page.shared = true;
       if (Array.isArray(p.cards)) {
         for (const c of p.cards) {
@@ -2646,7 +2665,8 @@ export function sanitizeLayout(raw: unknown, hostId = "local", opts: { legacy?: 
         }
       }
       normalise(page.cards);
-      if (page.cards.length || page.kept) out.pages.push(page);
+      if (page.cards.length) delete page.emptyKind;
+      if (page.cards.length || page.kept || page.emptyKind) out.pages.push(page);
     }
   }
   // Shelves (§24.12): one per side; a page naming an unknown Shelf joins the right one (fixShelves).
@@ -2772,7 +2792,7 @@ export function prepareForSave(layout: SideLayout, opts: SaveOptions): SideLayou
   }
   const rails = new Map<string, string[]>();
   for (const p of d.pages) if (p.shelf) rails.set(p.shelf, [...(rails.get(p.shelf) ?? []), p.id]);
-  d.pages = d.pages.filter((p) => p.cards.length > 0 || p.kept);
+  d.pages = d.pages.filter((p) => p.cards.length > 0 || p.kept || p.emptyKind);
   if (d.chips) {
     d.chips = d.chips.filter((c) => c.card.tabs.length > 0);
     for (const c of d.chips) {

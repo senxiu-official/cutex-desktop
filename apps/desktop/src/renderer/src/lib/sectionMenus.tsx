@@ -1,11 +1,11 @@
 // Context-menu entries for sidebar project sections (lib/sidebarSections): the project menu's
 // 「移到分区 ›」 and the section header menu. Pure prefs edits, no daemon calls.
-import { ArrowDown, ArrowUp, Check, ChevronsDownUp, ChevronsUpDown, FolderInput, FolderMinus, FolderPlus, Pencil, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronsDownUp, ChevronsUpDown, FolderInput, FolderMinus, FolderPlus, Palette, Pencil, Trash2 } from "lucide-react";
 import type { MessageKey } from "../i18n";
-import { promptDialog, type MenuEntry } from "./contextMenu";
+import { folderLookDialog, promptDialog, type MenuEntry } from "./contextMenu";
 import { sidebarMenuTail } from "./customizeMenu";
 import { getUiPrefs, updateSections } from "./prefs";
-import { assignSection, createSection, deleteSection, moveSection, renameSection, sectionOf, setSectionCollapsed, type SidebarSection } from "./sidebarSections";
+import { assignSection, createSection, deleteSection, moveSection, renameSection, sectionOf, setSectionCollapsed, setSectionLook, type SidebarSection } from "./sidebarSections";
 
 type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
 const ICON = 14;
@@ -55,10 +55,18 @@ export function sectionMenu(section: SidebarSection, visible: readonly string[],
         if (name?.trim()) updateSections((list) => renameSection(list, section.id, name));
       },
     },
+    {
+      label: t("menu.sectionLook"),
+      icon: <Palette size={ICON} />,
+      onSelect: async () => {
+        const picked = await folderLookDialog(section.id, section.name, section.look);
+        if (picked) updateSections((list) => setSectionLook(list, section.id, picked.look));
+      },
+    },
     { label: t("menu.moveSectionUp"), icon: <ArrowUp size={ICON} />, disabled: at <= 0, onSelect: () => updateSections((list) => moveSection(list, section.id, -1, visible)) },
     { label: t("menu.moveSectionDown"), icon: <ArrowDown size={ICON} />, disabled: at < 0 || at >= visible.length - 1, onSelect: () => updateSections((list) => moveSection(list, section.id, 1, visible)) },
     "separator",
-    { label: t("menu.deleteSection"), icon: <Trash2 size={ICON} />, danger: true, onSelect: () => updateSections((list) => deleteSection(list, section.id)) },
+    { label: t("menu.deleteSection"), info: t("menu.deleteSectionHint"), icon: <Trash2 size={ICON} />, danger: true, onSelect: () => updateSections((list) => deleteSection(list, section.id)) },
     "separator",
     ...sidebarMenuTail(t),
   ];

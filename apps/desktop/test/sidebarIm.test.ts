@@ -102,9 +102,9 @@ describe("row signals: needs-you and the unread count", () => {
   it("an unchanged row keeps its signal; a needs-you or unread change reaches it", () => {
     const project: ProjectGroup = { kind: "project", id: "p", name: "p", badge: "", color: "blue", online: [row("eva", "running"), row("mika", "idle")], offline: [] };
     const signals = new Map<string, "running" | "needsYou" | "done">([["eva", "running"]]);
-    const ctx: LayoutContext = { signalOf: (k) => signals.get(k), selectedId: null, starred: new Set(), prefs: { grouping: "all", noOnline: "collapse", running: "full", foldIdle: false } };
+    const ctx: LayoutContext = { signalOf: (k) => signals.get(k), selectedId: null, starred: new Set(), prefs: { grouping: "all", noOnline: "collapse", running: "full" } };
     const before = layoutSidebar([project], ctx).main[0]!;
-    expect(before.full.map((r) => r.id)).toContain("eva");
+    expect(before.big.map((r) => r.id)).toContain("eva");
     signals.set("mika", "needsYou");
     expect(layoutSidebar([project], ctx).main[0]!.needsYouCount).toBe(1);
     // Unread: each unseen finished turn counts.

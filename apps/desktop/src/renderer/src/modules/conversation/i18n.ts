@@ -12,6 +12,10 @@ export const zhCN = {
   "conversation.tools.actionStatus.awaitingApproval": "调用等待审批",
   "conversation.tools.actionStatus.unknown": "结果未知",
   "conversation.tools.actionStatus.notFound": "未找到调用记录",
+  "conversation.tools.actionStatus.approval.approved": "审批已通过",
+  "conversation.tools.actionStatus.approval.denied": "审批被拒绝",
+  "conversation.tools.actionStatus.approval.expired": "审批已过期",
+  "conversation.tools.actionStatus.approval.decided": "审批已处理",
   "conversation.tools.actionStatus.hint": "这里显示工具调用的处理状态，不代表委托工作已经完成；结果未知或未找到记录，也不代表调用未执行。",
 
   "conversation.tools.rawResult": "完整返回",
@@ -85,7 +89,7 @@ export const zhCN = {
   "conversation.turnPeek.retry": "重试",
   // ---- the side agent view (conversation.agent, docs/research/side-agent-view-20261018.md) ----
   "conversation.agent": "{{agent}}",
-  "conversation.agent.openSide": "在侧边打开",
+  "conversation.agent.openSide": "并排打开",
   "conversation.agent.openMain": "在主区打开",
   "conversation.agent.openMainHint": "在主区打开这个{{agent}}，主区原来的{{agent}}换到这里",
   "conversation.agent.inMain": "{name} 已在主区打开",

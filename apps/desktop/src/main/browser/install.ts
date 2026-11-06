@@ -1,3 +1,5 @@
+import { createBrowserAudit } from "./audit";
+import { BrowserCursorPreferencesStore } from "./cursorPreferences";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { BrowserOperationResult } from "@cutex-desktop/browser-protocol";
 import { join } from "node:path";
@@ -34,7 +36,9 @@ import { BrowserServiceSession, browserServiceError, parseBrowserServiceUrl, ser
 import { emulateGuestScheme, wantedScheme, type GuestSchemeEmulation } from "./pageScheme";
 import { appScheme, onSchemeChange, osScheme } from "../appScheme";
 import { BrowserRelay, type RelayExecutionContext } from "./relay";
-import { BrowserRefusalError, BrowserRelayError, browserServiceRelayError, isBrowserRefusalCode, POPUP_GRANT_CAPABILITY, REFUSAL_REASONS_CAPABILITY, SCROLL_OUTCOME_CAPABILITY, relayError, relayWireError, RELAY_CAPABILITY, type RelayCommand } from "./relayTypes";
+import { AgentPopups } from "./agentPopups";
+import { relayErrorDetail, type RelayErrorDetail } from "./relayTypes";
+import { BrowserRefusalError, BrowserRelayError, browserServiceRelayError, isBrowserRefusalCode, ERROR_DETAIL_CAPABILITY, OPEN_STAGES_CAPABILITY, PAGE_LINKS_CAPABILITY, POPUP_GRANT_CAPABILITY, REFUSAL_REASONS_CAPABILITY, SCROLL_OUTCOME_CAPABILITY, relayError, relayWireError, RELAY_CAPABILITY, type RelayCommand } from "./relayTypes";
 import { BrowserLeases } from "./leases";
 import { loadBrowserDeviceId } from "./device";
 import { createBrowserTabIdentity, browserTabIdentityStorage } from "./tabIdentity";
@@ -61,7 +65,7 @@ const OWNER_DOWNLOAD_GESTURE_MS = 10_000;
  */
 type Handover = { to: "front" | "background"; url: string; leaseId?: string; settings?: BrowserControlSettings; paused: boolean; release(): void; timer?: ReturnType<typeof setTimeout> };
 const HANDOVER_TIMEOUT_MS = 15_000;
-type TabData = { url: string; title: string; loginOrigin?: string; confirmedOpen?: string; sitePermission?: BrowserSitePermissionPromptView; documentEpoch?: number; favicon?: string; error?: string; service?: BrowserServiceSession; navigation: number; authRetries: number; subresourceReticketAt?: number; zoom?: number; dispose?: () => void };
+type TabData = { url: string; title: string; loadFailure?: RelayErrorDetail; loginOrigin?: string; confirmedOpen?: string; sitePermission?: BrowserSitePermissionPromptView; documentEpoch?: number; favicon?: string; error?: string; service?: BrowserServiceSession; navigation: number; authRetries: number; subresourceReticketAt?: number; zoom?: number; dispose?: () => void };
 const AUTH_PATH = "/__cutex/auth";
 const SECRET = /(?:^|[-_])(?:access[-_]?token|refresh[-_]?token|id[-_]?token|token|auth|authorization|password|passwd|secret|signature|sig|jwt|bearer|otp|credential|api[-_]?key|key|code|ticket|session|sessionid)(?:$|[-_])/i;
 let previousWindow: (() => void) | undefined;
@@ -89,8 +93,17 @@ const claimAllows = new BrowserClaimSessionAllows();
 const loginWarningDismissals = new BrowserLoginWarningDismissals();
 const claimAudit = new BrowserClaimAudit();
 let claimPolicies: BrowserClaimPolicyStore | undefined;
+let cursorPreferences: BrowserCursorPreferencesStore | undefined;
+const cursorPreferencesStore = () => cursorPreferences ??= new BrowserCursorPreferencesStore(join(app.getPath("userData"), "browser-cursor.json"));
 const claimPolicyStore = () => claimPolicies ??= new BrowserClaimPolicyStore(join(app.getPath("userData"), "browser-claim-policy.json"));
 /** Keep one-use auth navigation and potentially credential-bearing metadata out of renderer/state. */
+/** Electron's loadURL rejection (code ERR_*, errno) as relay detail; the URL is display-redacted. */
+export function navigationFailure(error: unknown, stage: string, url: string): RelayErrorDetail {
+  const value = error && typeof error === "object" ? error as { code?: unknown; errno?: unknown } : {};
+  const display = browserDisplayUrl(url);
+  return { stage, ...(display !== "about:blank" ? { url: display } : {}),
+    ...(typeof value.code === "string" && Number.isSafeInteger(value.errno) ? { netError: { code: value.errno as number, name: value.code } } : {}) };
+}
 export function browserDisplayUrl(raw: string): string {
   if (raw === "about:blank") return raw;
   try {
@@ -155,6 +168,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
   // are off and dials them alone (with LAN DNS answers); the URL policy keeps other tabs away.
   const lanTargets = new BrowserLanTargets();
   const popupTargets = new Map<string, PopupTarget>();
+  const agentPopups = new AgentPopups();
   const ownerGestures = new Map<string, number>();
   const blockedNotices = new Map<string, number>();
   let sitePermissionStore: BrowserSitePermissionStore | undefined;
@@ -194,7 +208,8 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
   type HostRelay = { daemon: DaemonService; epoch: string; generation: number; relay?: BrowserRelay };
   const relays = new Map<string, HostRelay>();
   const relayRetryAfter = new Map<string, number>();
-  type PendingOpen = { command: RelayCommand; context: RelayExecutionContext; record: BrowserGuestRecord; confirmed?: boolean; cancelled?: boolean; ready(): void; reject(error: unknown): void };
+  let browserAudit: ReturnType<typeof createBrowserAudit> | undefined;
+  type PendingOpen = { command: RelayCommand; context: RelayExecutionContext; record: BrowserGuestRecord; confirmed?: boolean; cancelled?: boolean; ready(): void; committed?(): void; reject(error: unknown): void };
   const pendingOpens = new Map<string, PendingOpen>();
   const openKey = (hostId: string, requestId: string) => JSON.stringify([hostId, requestId]);
   const adapters = new Map<string, ReturnType<typeof createBrowserModelAdapter>>();
@@ -231,6 +246,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       if (!replaced) {
         const oldLease = leases.forGuest(record.guestId); if (oldLease) adapters.delete(oldLease.leaseId);
         leases.revokeGuest(record.guestId);
+        agentPopups.forget(record.guestId);
         const handover = handovers.get(record.guestId);
         if (handover) { handovers.delete(record.guestId); if (handover.timer) clearTimeout(handover.timer); handover.release(); }
       }
@@ -281,6 +297,11 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       const prepared = await prepareNavigation(record, url, false, guard);
       return { url: prepared.target, cancel: prepared.cancel };
     },
+    coordinateScale(guestId) {
+      const guest = registry.getWebContents(guestId), window = windowOf(guestId);
+      return guest && !guest.isDestroyed() && window && !window.isDestroyed()
+        ? guest.getZoomFactor() / window.webContents.getZoomFactor() : NaN;
+    },
     onChanged(guestId) { const record = registry.get(guestId); if (record) publish(record); },
     // A background carrier is its own widget: CDP key input reaches only that page, never the
     // app's composer, so it needs no app focus (and the app's focus is never touched).
@@ -323,7 +344,8 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       url: tab?.url ?? "about:blank", title: tab?.title ?? "", loading: alive ? guest.isLoading() : false,
       canGoBack: alive ? guest.navigationHistory.canGoBack() : false, canGoForward: alive ? guest.navigationHistory.canGoForward() : false,
       loginOrigin: record.pool === "agent" && tab?.loginOrigin && loginWarningDismissals.allows(record.hostId, tab.loginOrigin) ? tab.loginOrigin : null,
-      status: status ?? record.status, control: provider.controlView(record.guestId), pool: record.pool, lease: leaseView(record.guestId),
+      status: status ?? record.status, control: provider.controlView(record.guestId),
+      cursor: provider.cursorView(record.guestId) ? { ...provider.cursorView(record.guestId)!, color: cursorPreferencesStore().get().color } : undefined, pool: record.pool, lease: leaseView(record.guestId),
       ...(tab?.confirmedOpen ? { confirmedOpen: tab.confirmedOpen } : {}),
       ...(tab && networkHost(record.hostId)?.kind === "ssh" && desktopLoopbackUrl(tab.url) ? { desktopLoopback: true as const } : {}),
       ...(tab?.sitePermission ? { sitePermission: { ...tab.sitePermission, permissions: [...tab.sitePermission.permissions] } } : {}),
@@ -347,10 +369,22 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     for (const hostId of registry.hostIds()) {
       const conn = getHosts()?.connection(hostId);
       // Reachability is not identity: a health-check retry must not destroy a local page's DOM.
-      if (!conn || conn.daemon !== hostDaemons.get(hostId) || conn.routingEpoch !== hostEpochs.get(hostId) || hostGenerations.get(hostId) !== conn.daemon.generation) {
+      if (!conn || conn.daemon !== hostDaemons.get(hostId) || conn.routingEpoch !== hostEpochs.get(hostId)) {
         registry.removeHost(hostId); hostGenerations.delete(hostId); hostEpochs.delete(hostId); hostDaemons.delete(hostId); hostCapabilities.delete(hostId);
         capabilityRevisions.set(hostId, (capabilityRevisions.get(hostId) ?? 0) + 1); capabilityRecovery.delete(hostId); capabilityRetryAfter.delete(hostId);
-      } else if (conn.daemon.currentState.kind !== "connected") {
+      } else if (hostGenerations.get(hostId) !== conn.daemon.generation || conn.daemon.currentState.kind !== "connected") {
+        if (hostGenerations.get(hostId) !== conn.daemon.generation) {
+          hostGenerations.set(hostId, conn.daemon.generation);
+          for (const record of registry.list(hostId)) {
+            if (record.pool === "agent") registry.close(record.guestId);
+            else {
+              leases.revokeGuest(record.guestId); provider.release(record.guestId);
+              const tab = data.get(record.guestId);
+              tab?.service?.dispose(); if (tab) tab.service = undefined;
+              publish(record);
+            }
+          }
+        }
         hostCapabilities.delete(hostId);
         capabilityRevisions.set(hostId, (capabilityRevisions.get(hostId) ?? 0) + 1);
         capabilityRecovery.delete(hostId);
@@ -386,15 +420,26 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
         if (!hostCapabilities.get(host.id)?.has(RELAY_CAPABILITY)) throw new BrowserRelayError("browser_unavailable");
         const client = entry.daemon.activeClient(); if (!client) throw new BrowserRelayError("browser_unavailable");
         deviceId ??= loadBrowserDeviceId(app.getPath("userData"));
-        const relay = new BrowserRelay({ hostId: host.id, deviceId, client,
+        browserAudit ??= createBrowserAudit(join(app.getPath("userData"), "browser-audit.jsonl"));
+        const relay = new BrowserRelay({ onAudit: value => browserAudit?.write(value), hostId: host.id, deviceId, client,
           localLeases: () => leases.list(host.id),
           revokeLocal(id) { adapters.delete(id); leases.revoke(id, "stale_connection", false); },
           execute: (command, context) => executeRelay(command, context),
+          errorDetail: () => hostCapabilities.get(host.id)?.has(ERROR_DETAIL_CAPABILITY) === true,
         });
         entry.relay = relay; await relay.start();
         void scanClaims(host.id).catch(() => {});
       })().catch(() => { if (relays.get(host.id) === entry) { relays.delete(host.id); entry.relay?.dispose(); relayRetryAfter.set(host.id, Date.now() + 5000); } });
     }
+  }
+  /** A popup's grant runs once, as soon as its first navigation commits or fails: a slow or
+   * failed page is still the agent's tab to read, and the click result waits for this grant. */
+  function popupGrantOnce(record: BrowserGuestRecord, grant: PopupGrant | undefined, guest: WebContents): () => void {
+    if (!grant) return () => {};
+    let done = false;
+    const run = () => { if (done) return; done = true; guest.removeListener("did-navigate", run); void grantPopup(record, grant).catch(() => { /* the tab stays the owner's to hand over */ }); };
+    guest.once("did-navigate", run);
+    return run;
   }
   /** Grant a popup tab to the agent whose own click opened it, under its still-active opener lease. */
   async function grantPopup(record: BrowserGuestRecord, grant: PopupGrant): Promise<void> {
@@ -432,6 +477,9 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     try { return await executeRelayCommand(command, context); }
     catch (error) {
       const code = relayError(error);
+      // A read of a tab whose page failed to load: say how it failed (Chromium's code, stage, page).
+      const failure = command.target.guestId ? data.get(command.target.guestId)?.loadFailure : undefined;
+      if (code === "navigation_failed" && failure && !relayErrorDetail(error)?.netError) throw new BrowserRelayError(code, undefined, undefined, failure);
       if (!isBrowserRefusalCode(code)) throw error;
       throw new BrowserRelayError(relayWireError(code, hostCapabilities.get(command.target.hostId)?.has(REFUSAL_REASONS_CAPABILITY) === true));
     }
@@ -451,7 +499,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     if (!record || record.status !== "attached") throw new BrowserRelayError("target_closed");
     if (command.operation.kind === "tab.release") { leases.revoke(lease.leaseId, "lease_revoked"); adapters.delete(lease.leaseId); return { kind: "tab.release" }; }
     // The owner is moving this tab between background and front: nothing was dispatched; retry.
-    if (handovers.has(record.guestId)) throw new BrowserRelayError("busy");
+    if (handovers.has(record.guestId)) throw new BrowserRelayError("busy", undefined, undefined, { reason: "tab_moving" });
     if (!command.operation.kind.startsWith("tab.")) throw new BrowserRelayError("unsupported_operation");
     if (provider.controlView(record.guestId)?.state === "paused") throw new BrowserRelayError("owner_paused");
     if (command.purpose === "owner-turn-shot") {
@@ -464,7 +512,10 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       const leaseId = lease.leaseId;
       const hostId = record.hostId;
       adapter = createBrowserModelAdapter({ provider, decodeImage: bytes => nativeImage.createFromBuffer(bytes),
-        scrollOutcome: () => hostCapabilities.get(hostId)?.has(SCROLL_OUTCOME_CAPABILITY) === true, tabs: () => {
+        scrollOutcome: () => hostCapabilities.get(hostId)?.has(SCROLL_OUTCOME_CAPABILITY) === true,
+        pageLinks: () => hostCapabilities.get(hostId)?.has(PAGE_LINKS_CAPABILITY) === true,
+        linkUrl: raw => { const url = browserDisplayUrl(raw); return url === "about:blank" ? "" : url; },
+        openedTab: since => agentPopups.outcome(record.guestId, since), tabs: () => {
         const current = leases.forGuest(record.guestId), target = registry.get(record.guestId);
         if (!current || current.leaseId !== leaseId || current.state !== "active" || !target || target.status !== "attached") throw new BrowserRelayError("lease_revoked");
         return desktopLoopbackPage(target) ? [] : [publicSummary(target)];
@@ -495,27 +546,36 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     data.set(record.guestId, { url: displayUrl, title: "", navigation: 0, authRetries: 0 });
     let ready!: () => void, rejectMount!: (reason: unknown) => void, rejectTerminal!: (reason: unknown) => void;
     const mounted = new Promise<void>((yes, no) => { ready = yes; rejectMount = no; }); void mounted.catch(() => {});
+    // Staged open (cutex design 059): with a host that understands loadState, answer once the first
+    // navigation has committed instead of after the whole load; the page keeps loading under the lease.
+    const staged = hostCapabilities.get(hostId)?.has(OPEN_STAGES_CAPABILITY) === true;
+    let loaded = false, committed!: () => void;
+    const navigationCommitted = new Promise<void>(yes => { committed = yes; });
     const failure = new Promise<never>((_yes, no) => { rejectTerminal = no; }); void failure.catch(() => {});
     // The main deadline also bounds the grant/hold phase after mount has resolved.
     const reject = (reason: unknown) => { rejectMount(reason); rejectTerminal(reason); };
-    const key = openKey(hostId, command.requestId), pending: PendingOpen = { command, context, record, ready, reject }; pendingOpens.set(key, pending);
+    const key = openKey(hostId, command.requestId), pending: PendingOpen = { command, context, record, ready: () => { loaded = true; ready(); }, committed, reject }; pendingOpens.set(key, pending);
     const abort = () => reject(new BrowserRelayError("cancelled")); context.signal.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => reject(new BrowserRelayError("deadline_exceeded")), Math.max(1, context.remainingMs())); timer.unref?.();
     try {
       if (context.signal.aborted) throw new BrowserRelayError("cancelled");
       emit("browserEvent", { ...view(record, "pending"), epoch, kind: "agent-open", openIntent: { requestId: command.requestId, hostId, epoch, tabKey, cutexSessionId: command.cutexSessionId, url: displayUrl, remainingMs: Math.floor(context.remainingMs()) } });
-      await mounted;
+      context.stage?.("mount_wait");
+      await (staged ? Promise.race([mounted, navigationCommitted]) : mounted);
+      context.stage?.("grant_http");
       if (context.signal.aborted || peer !== relayFor(hostId) || !registry.getWebContents(record.guestId)) throw new BrowserRelayError("stale_connection");
-      const grant = leases.grant(peer, { deviceId: command.deviceId, guestId: record.guestId, cutexSessionId: command.cutexSessionId, title: command.title, url: publicSummary(registry.get(record.guestId)!).url, source: { kind: "agent-open", requestId: command.requestId } }, DEFAULT_BROWSER_CONTROL_SETTINGS);
+      const grant = leases.grant(peer, { deviceId: command.deviceId, guestId: record.guestId, cutexSessionId: command.cutexSessionId, title: command.title, url: publicSummary(registry.get(record.guestId)!).url, source: { kind: "agent-open", requestId: command.requestId } }, DEFAULT_BROWSER_CONTROL_SETTINGS, undefined, stage => context.stage?.(stage));
       const cancelGrant = () => leases.revokeGuest(record.guestId); context.signal.addEventListener("abort", cancelGrant, { once: true });
       try { await Promise.race([grant, failure]); } finally { context.signal.removeEventListener("abort", cancelGrant); }
       if (context.signal.aborted || context.remainingMs() <= 0) throw new BrowserRelayError("deadline_exceeded");
       const current = registry.get(record.guestId)!;
+      context.stage?.("open_confirm");
       pending.confirmed = true;
       data.get(record.guestId)!.confirmedOpen = command.requestId;
       emit("browserEvent", { ...view(current), epoch, kind: "agent-open-confirm", openRequestId: command.requestId });
-      return { kind: "tabs.open", tab: publicSummary(current) };
+      return { kind: "tabs.open", tab: publicSummary(current), ...(staged ? { loadState: loaded ? "loaded" as const : "loading" as const } : {}) };
     } catch (error) {
+      context.stage?.("cleanup");
       cancelPendingGuest(record.guestId); leases.revokeGuest(record.guestId); registry.close(record.guestId);
       // Only this command's new, unconfirmed provenance may be rolled back.
       // A failed cleanup retains a safe tombstone rather than crossing cookie pools.
@@ -710,7 +770,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     set.add(origin);
   }
   function currentFence(record: BrowserGuestRecord): HostFence<DaemonService> {
-    return admitHostBinding(getHosts, { hostId: record.hostId, epoch: record.epoch });
+    return admitHostBinding(getHosts, { hostId: record.hostId, epoch: record.epoch }, { daemonGeneration: record.pool === "agent" });
   }
   // A background carrier draws thumbnails while any app window (main or a desk, P5) is on screen.
   const anyWindowVisible = () => [...embedders.values()].some(entry => windowVisible(entry.window));
@@ -866,6 +926,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
             if (record.pool === "agent") tabIdentities().register(record.hostId, newTabKey);
             else tabIdentities().registerOwner(record.hostId, newTabKey);
             const now = Date.now();
+            if (agent) agentPopups.note(record.guestId, now);
             // The agent's own click in its leased tab: with a host that understands it, the new
             // tab is granted to the same agent under the opener's lease (cutex checks it is active).
             const opener = agent ? leases.forGuest(record.guestId) : undefined;
@@ -880,6 +941,8 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       }, reason => {
         const record = registry.getByWebContentsId(guest.id);
         const code = reason === "no_owner_gesture" ? input.rejection : reason;
+        // An agent-controlled tab's click result says the page's popup was blocked (fixed reason).
+        if (record && leases.forGuest(record.guestId)?.state === "active") agentPopups.blocked(record.guestId, code);
         if (record && !disposed && !owner.isDestroyed()) {
           emit("browserEvent", { ...view(record), epoch: record.epoch, kind: "diagnostic", popupDiscardReason: code });
           // A page opening windows on its own (no owner click) is blocked like Chromium's popup
@@ -911,7 +974,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     if (credentials) callback(credentials.username, credentials.password); else callback();
   };
   app.on("login", proxyLogin);
-  async function prepareHost(hostId: string, fence: HostFence<DaemonService>): Promise<void> {
+  async function prepareHost(hostId: string, fence: HostFence<DaemonService>, discover = true): Promise<void> {
     syncHosts(); fence.check();
     const conn = getHosts()?.connection(hostId);
     if (!conn) throw new BrowserRelayError("stale_connection");
@@ -919,7 +982,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     hostEpochs.set(hostId, conn.routingEpoch);
     hostDaemons.set(hostId, conn.daemon);
     hostGenerations.set(hostId, conn.daemon.generation);
-    if (conn.daemon.currentState.kind === "connected" && !hostCapabilities.has(hostId)) { learnBusPort(hostId, conn.daemon); await discoverCapabilities(hostId, fence); }
+    if (conn.daemon.currentState.kind === "connected" && !hostCapabilities.has(hostId)) { learnBusPort(hostId, conn.daemon); if (discover) await discoverCapabilities(hostId, fence); }
   }
   function discoverCapabilities(hostId: string, fence: HostFence<DaemonService>): Promise<void> {
     const existing = capabilityRecovery.get(hostId); if (existing) return existing;
@@ -992,6 +1055,12 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
         onRefused: (id, reason) => {
           const current = registry.getByWebContentsId(id);
           if (current) { provider.policyBlocked(current.guestId); fail(current, refusalError(reason).message); }
+        },
+        // Only tabs an agent controls: their click results watch for a page popup after a request.
+        onPageRequest: (id, requestId, phase) => {
+          const current = registry.getByWebContentsId(id);
+          if (!current || leases.forGuest(current.guestId)?.state !== "active") return;
+          if (phase === "start") agentPopups.requestStarted(current.guestId, requestId); else agentPopups.requestEnded(current.guestId, requestId);
         },
         onResponse: (id, response) => {
           const current = registry.getByWebContentsId(id), tab = current && data.get(current.guestId);
@@ -1066,7 +1135,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       checkIdentity();
       if (serviceTarget && !networkHost(record.hostId)?.serviceProxy) throw new BrowserRelayError("service_unavailable");
     };
-    tab.service?.dispose(); tab.service = undefined; tab.error = undefined; tab.favicon = undefined;
+    tab.service?.dispose(); tab.service = undefined; tab.error = undefined; tab.loadFailure = undefined; tab.favicon = undefined;
     let target = url;
     let preparedService: BrowserServiceSession | undefined;
     const cancel = () => {
@@ -1094,14 +1163,21 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     preparing = false;
     return { target, check, cancel, guest };
   }
-  async function navigate(record: BrowserGuestRecord, url: string, authenticationRetry = false, actor: BrowserActor = "owner", post?: BrowserPopupPost, allowDesktopLoopback = false): Promise<void> {
+  async function navigate(record: BrowserGuestRecord, url: string, authenticationRetry = false, actor: BrowserActor = "owner", post?: BrowserPopupPost, allowDesktopLoopback = false, stage = "navigation"): Promise<void> {
     const { target, check, guest } = await prepareNavigation(record, url, authenticationRetry, undefined, actor, allowDesktopLoopback);
     if (actor === "owner") ownerGestures.set(record.guestId, Date.now());
     // A popup's form body is replayed once, only to the exact target it was submitted to (a
     // service ticket rewrite never carries it).
     const options = post && target === url ? { postData: [{ type: "rawData" as const, bytes: post.data }], extraHeaders: `Content-Type: ${post.contentType}\n` } : undefined;
     // Navigation errors never echo the raw (possibly ticket-bearing) URL into renderer/logs.
-    try { check(); await guest.loadURL(target, options); check(); } catch { check(); throw new BrowserRelayError("navigation_failed"); }
+    try { check(); await guest.loadURL(target, options); check(); }
+    catch (error) {
+      check();
+      const detail = navigationFailure(error, stage, url);
+      const tab = data.get(record.guestId);
+      if (tab) tab.loadFailure = detail;
+      throw new BrowserRelayError("navigation_failed", undefined, undefined, detail);
+    }
   }
   /** A hand-over's new page starts with the tab's title / open correlation, fresh page state. */
   function freshTab(previous: TabData | undefined): TabData {
@@ -1136,7 +1212,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     if (record.pool !== "agent") throw new BrowserRelayError("permission_denied");
     if (!guest || guest.isDestroyed()) throw new BrowserRelayError("target_closed");
     if (handovers.has(record.guestId) || leases.view(record.guestId)?.state === "pending"
-      || [...pendingOpens.values()].some(p => p.record.guestId === record.guestId && !p.confirmed)) throw new BrowserRelayError("busy");
+      || [...pendingOpens.values()].some(p => p.record.guestId === record.guestId && !p.confirmed)) throw new BrowserRelayError("busy", undefined, undefined, { reason: "tab_opening" });
     const handover: Handover = { to, url: "about:blank", paused: false, release: () => {} };
     handovers.set(record.guestId, handover);
     publish(record);
@@ -1388,14 +1464,14 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     };
     guestDisposers.set(guest, tab.dispose);
   }
-  async function execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "sitePermissions" }>, hostId: string, fence?: HostFence<DaemonService>): Promise<unknown> {
+  async function execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "sitePermissions" | "cursorColor" }>, hostId: string, fence?: HostFence<DaemonService>): Promise<unknown> {
     if (!moduleEnabled || disposed) throw new BrowserRelayError("browser_disabled");
     const admittedLifecycle = lifecycle;
     const checkLifecycle = () => { if (!moduleEnabled || disposed || admittedLifecycle !== lifecycle) throw new BrowserRelayError("browser_disabled"); };
     syncHosts();
     if (request.op === "reserveOwnerTab") {
       if (!fence) throw new BrowserRelayError("stale_connection");
-      await prepareHost(hostId, fence); fence.check(); checkLifecycle();
+      await prepareHost(hostId, fence, false); fence.check(); checkLifecycle();
       const tabKey = randomUUID();
       tabIdentities().registerOwner(hostId, tabKey);
       registry.ensure(hostId, tabKey, "owner");
@@ -1410,7 +1486,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       if (request.op === "toolItem") return api.toolItem(request.sessionId, request.turnId, request.itemId);
       if (request.op === "settings") return api.settings(request.agentOpenApproval);
       if (request.op === "clearIdempotency") return api.clearIdempotency(request.cutexSessionId);
-      if (request.op === "profileTools") return api.profileTools(request.profile, request.enabled);
+      if (request.op === "profileTools") return api.profileTools(request.profile, request.enabled, request.surface);
       return api.agents();
     }
     if (request.op === "openRefused") {
@@ -1428,7 +1504,15 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       const record = registry.getByTab(hostId, request.tabKey);
       if (!record) { if (request.op === "releaseLease" || request.op === "pauseLease" || (request.op === "holdReady" && !request.held)) return; throw new BrowserRelayError("target_closed"); }
       // Authority-reducing and idempotent: only the exact current lease; the lease itself stays.
-      if (request.op === "pauseLease") { if (leases.forGuest(record.guestId)?.leaseId === request.leaseId) provider.ownerTakeover(record.guestId, "owner-pause"); return; }
+      if (request.op === "pauseLease") {
+        const lease = leases.forGuest(record.guestId);
+        if (lease?.leaseId !== request.leaseId) return;
+        provider.ownerTakeover(record.guestId, "owner-pause");
+        // Owner decision (cutex design 059): taking the page over stops that agent at once, like its
+        // Stop button (the turn ends; nothing is re-sent). Pages and the lease stay; Resume re-grants.
+        void Promise.resolve().then(() => daemonOf(hostId).stopTurn(lease.cutexSessionId)).catch(() => { /* host offline: its turn fence still refuses this page */ });
+        return;
+      }
       if (request.op === "holdReady") return leases.held(record.guestId, request.leaseId, request.held);
       if (request.op === "releaseLease") {
         const lease = leases.forGuest(record.guestId);
@@ -1540,14 +1624,17 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
         try { wireGuest(record, pending.guest); }
         catch { registry.close(record.guestId); throw new BrowserRelayError("invalid_request"); }
         const agentOpen = request.identity?.pendingOpen && pendingOpens.get(openKey(hostId, request.identity.pendingOpen));
-        void navigate(registry.get(record.guestId)!, reservation.url, false, reservation.actor, reservation.post, reservation.desktopLoopback === true).then(() => {
-          if (reservation.popupGrant) void grantPopup(record, reservation.popupGrant).catch(() => { /* the tab stays the owner's to hand over */ });
+        if (agentOpen && agentOpen.record.guestId === record.guestId) { agentOpen.context.stage?.("navigation"); pending.guest.once("did-navigate", () => agentOpen.committed?.()); }
+        const grant = popupGrantOnce(record, reservation.popupGrant, pending.guest);
+        void navigate(registry.get(record.guestId)!, reservation.url, false, reservation.actor, reservation.post, reservation.desktopLoopback === true, reservation.popupGrant ? "popup_load" : "navigation").then(() => {
+          grant();
           if (agentOpen && agentOpen.record.guestId === record.guestId) agentOpen.ready();
-        }).catch(error => { fail(record, browserServiceError(error)); if (agentOpen && agentOpen.record.guestId === record.guestId) agentOpen.reject(new BrowserRelayError(relayError(error))); })
+        }).catch(error => { fail(record, browserServiceError(error)); grant(); if (agentOpen && agentOpen.record.guestId === record.guestId) agentOpen.reject(new BrowserRelayError(relayError(error), undefined, undefined, relayErrorDetail(error))); })
           .finally(() => { if (replacing) void finishHandover(record.guestId, handover!); });
         return { guestId: record.guestId, tabKey: record.tabKey, partition: record.partition, pool: record.pool, src: request.receipt.src } satisfies BrowserTabMount;
       }
-      await prepareHost(hostId, fence);
+      if (request.identity?.pendingOpen) pendingOpens.get(openKey(hostId, request.identity.pendingOpen))?.context.stage?.("mount");
+      await prepareHost(hostId, fence, !!request.identity?.agentOpened || !!request.identity?.pendingOpen || !!parseBrowserServiceUrl(request.url, networkHost(hostId)?.connectionPort));
       const agentOpen = request.identity?.pendingOpen && pendingOpens.get(openKey(hostId, request.identity.pendingOpen));
       if (request.identity?.pendingOpen && (!agentOpen || agentOpen.record.hostId !== hostId || agentOpen.record.tabKey !== request.tabKey || agentOpen.context.signal.aborted)) throw new BrowserRelayError("stale_request");
       const known = registry.getByTab(hostId, request.tabKey);
@@ -1583,7 +1670,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
         if (background && isBackground(record.guestId)) return { guestId: record.guestId, tabKey: record.tabKey, partition: record.partition, pool: record.pool, src: "", carrier: "background" } satisfies BrowserTabMount;
         // The card wants the page in its webview again: hand it over (never splits a running action).
         if (!background && isBackground(record.guestId) && !request.identity?.pendingOpen) handover = await beginHandover(record, "front");
-        else throw new BrowserRelayError("busy");
+        else throw new BrowserRelayError("busy", undefined, "guest_already_mounted");
       }
       const target = handover?.url ?? url, targetActor: BrowserActor = handover ? "agent" : actor;
       if (!agentOrigin && canonical) {
@@ -1614,10 +1701,12 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
         try { wireGuest(record, carrier.guest); }
         catch { registry.close(record.guestId); throw new BrowserRelayError("invalid_request"); }
         publish(registry.get(record.guestId)!);
-        void navigate(registry.get(record.guestId)!, url, false, actor, fromPopup?.post, allowDesktopLoopback).then(() => {
-          if (fromPopup?.grant) void grantPopup(record, fromPopup.grant).catch(() => { /* the tab stays the owner's to hand over */ });
+        if (agentOpen && agentOpen.record.guestId === record.guestId) { agentOpen.context.stage?.("navigation"); carrier.guest.once("did-navigate", () => agentOpen.committed?.()); }
+        const grant = popupGrantOnce(record, fromPopup?.grant, carrier.guest);
+        void navigate(registry.get(record.guestId)!, url, false, actor, fromPopup?.post, allowDesktopLoopback, fromPopup?.grant ? "popup_load" : "navigation").then(() => {
+          grant();
           if (agentOpen && agentOpen.record.guestId === record.guestId) agentOpen.ready();
-        }).catch(error => { fail(record, browserServiceError(error)); if (agentOpen && agentOpen.record.guestId === record.guestId) agentOpen.reject(new BrowserRelayError(relayError(error))); });
+        }).catch(error => { fail(record, browserServiceError(error)); grant(); if (agentOpen && agentOpen.record.guestId === record.guestId) agentOpen.reject(new BrowserRelayError(relayError(error), undefined, undefined, relayErrorDetail(error))); });
         return { guestId: record.guestId, tabKey: record.tabKey, partition: record.partition, pool: record.pool,
           ...(recovery ? { recovery: "browser_identity_recovered" as const } : {}), src: "", carrier: "background" } satisfies BrowserTabMount;
       }
@@ -1650,7 +1739,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       await admitLan(record, raw, "owner"); fence?.check();
       checkTarget(hostId, raw, record.partition, "owner", hasDesktopLoopbackAdmission(record, raw), record.tabKey); fence?.check(); admit(record, raw);
       revokeDesktopLoopbackGrant(record, raw);
-      if (tab) { tab.navigation++; tab.authRetries = 0; tab.error = undefined; tab.favicon = undefined; }
+      if (tab) { tab.navigation++; tab.authRetries = 0; tab.error = undefined; tab.loadFailure = undefined; tab.favicon = undefined; }
       guest.reload();
       return;
     }
@@ -1673,7 +1762,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       catch (error) {
         if (request.op === "open" && request.identity?.pendingOpen) {
           const pending = pendingOpens.get(openKey(hostId, request.identity.pendingOpen));
-          if (pending?.record.tabKey === request.tabKey) pending.reject(new BrowserRelayError(relayError(error)));
+          if (pending?.record.tabKey === request.tabKey) pending.reject(new BrowserRelayError(relayError(error), undefined, error instanceof BrowserRelayError ? error.diagnosticCause : undefined));
         }
         throw error;
       }
@@ -1681,6 +1770,10 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       const store = sitePermissionsStore();
       if (forget) store.forget(forget);
       return store.list();
+    }, cursorColor(color) {
+      const store = cursorPreferencesStore();
+      if (color !== undefined) { store.set(color); for (const record of registry.list()) publish(record); }
+      return store.get();
     }, externalPages(enabled) {
       if (enabled === undefined) return externalPages().view();
       let view;

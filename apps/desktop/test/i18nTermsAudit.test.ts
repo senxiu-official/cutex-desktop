@@ -18,6 +18,18 @@ function prose(text: string): string {
 }
 
 describe("localization audit guards (2026-10-13)", () => {
+  it("keeps system tray, project view, jobs and plan labels distinct", () => {
+    expect(zhCN["shell.closeWindow.tray"]).toBe("最小化到系统托盘");
+    expect(zhHantCN["shell.closeWindow.tray"]).toBe("最小化到系統托盤");
+    expect(en["shell.closeWindow.tray"]).toBe("Minimize to system tray");
+    expect(zhCN["project-view.count.jobs"]).toBe("作业");
+    expect(zhCN["project-view.job"]).toBe("作业");
+    expect(zhCN["plan.statusTitle"]).toBe("计划");
+    expect(zhCN["shell.statusPlace.bar"]).toBe("状态行");
+    expect(zhCN["onboarding.guide.project.text"]).not.toContain("看板");
+    expect(en["onboarding.guide.project.text"]).toContain("Project view and activity");
+  });
+
   it("zh strings contain no control characters (placeholder-mangling guard)", () => {
     const bad = Object.entries(zhCN as Record<string, string>)
       .filter(([, v]) => /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(v))

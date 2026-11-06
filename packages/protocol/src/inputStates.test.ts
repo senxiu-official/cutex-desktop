@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import exported from "./__fixtures__/input-states.json";
 import {
-  INPUT_SENDING_REASONS, INPUT_ACTIONS, INPUT_DELIVERY_MODES, INPUT_DISCARDED_REASONS, INPUT_EVIDENCE, INPUT_FAILED_REASONS, INPUT_HELD_REASONS,
+  INPUT_CARRIED_REASONS, INPUT_SENDING_REASONS, INPUT_ACTIONS, INPUT_DELIVERY_MODES, INPUT_DISCARDED_REASONS, INPUT_EVIDENCE, INPUT_FAILED_REASONS, INPUT_HELD_REASONS,
   INPUT_KINDS, INPUT_LEASE_HOLDERS, INPUT_LEASE_RECONCILE_STATES, INPUT_REASONS_BY_STATE, INPUT_REJECTED_REASONS,
   INPUT_SENDER_KINDS, INPUT_SETTLED_STATES, INPUT_STAGES, INPUT_STALLED_REASONS, INPUT_STATES, INPUT_STRATEGIES,
   INPUT_SUPERSEDED_REASONS, INPUT_SURFACES, INPUT_TERMINAL_STATES, INPUT_TIMINGS, INPUT_UNCERTAIN_REASONS,
@@ -19,6 +19,7 @@ const constants: Record<string, readonly string[]> = {
   inputState: INPUT_STATES,
   terminalState: INPUT_TERMINAL_STATES,
   settledState: INPUT_SETTLED_STATES,
+  carriedReason: INPUT_CARRIED_REASONS,
   sendingReason: INPUT_SENDING_REASONS,
   heldReason: INPUT_HELD_REASONS,
   waitingReason: INPUT_WAITING_REASONS,
@@ -53,6 +54,7 @@ describe("input-states.json ↔ protocol constants", () => {
 
   it("maps every state with reasons to its export list", () => {
     const perState: Record<string, string> = {
+      accepted: "carriedReason", inContext: "carriedReason",
       sending: "sendingReason", held: "heldReason", waiting: "waitingReason", uncertain: "uncertainReason", failed: "failedReason",
       rejected: "rejectedReason", discarded: "discardedReason", superseded: "supersededReason",
     };

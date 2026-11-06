@@ -18,8 +18,8 @@ export default defineModule({
   required: true,
   contributes: {
     "settings.page": [
-      { id: "onboarding.newFeatures", page: "whats-new", group: "system", order: 450, icon: Sparkles, titleKey: "onboarding.features.title", hintKey: "onboarding.features.hint", source: "local", Page: NewFeaturesPage },
-      { id: "onboarding.help", page: "help", group: "system", order: 460, icon: LifeBuoy, titleKey: "onboarding.guide.help.title", hintKey: "onboarding.guide.help.hint", source: null, Page: HelpPage },
+      { id: "onboarding.newFeatures", page: "whats-new", group: "system", order: 450, icon: Sparkles, titleKey: "onboarding.features.title", hintKey: "settings.pageHint.whats-new", source: "local", Page: NewFeaturesPage },
+      { id: "onboarding.help", page: "help", group: "system", order: 460, icon: LifeBuoy, titleKey: "onboarding.guide.help.title", hintKey: "settings.pageHint.help", source: null, Page: HelpPage },
     ],
     "settings.section": [
       { id: "onboarding.section", page: "about", order: 50, titleKey: "onboarding.section", keywords: ["onboarding.whatsNewToggle", "onboarding.helpLink", "onboarding.replayWhatsNew"], Section: OnboardingSection },

@@ -3,11 +3,11 @@
 // batch; busy agents are skipped), live per-agent progress, the last run's summary and 撤销.
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
-import type { CutexRefusal, OutdatedRuntimeAgent, RuntimePackageRun, RuntimePackageRunItem, RuntimePackageSummary } from "../../../../shared/ipc";
+import type { CutexRefusal, OutdatedRuntimeAgent, RuntimePackageRunItem, RuntimePackageSummary } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
 import { confirmDialog } from "../../lib/contextMenu";
 import { agentPackages, agentRuntimeState, itemNote, itemOutcome, noteworthyItems, packageLabel, revertTarget } from "../../lib/runtimePackages";
-import { combinedRuntimeCounts, displayedRuntimeRuns, type OutdatedClaudeRuntimeAgent } from "../../lib/claudeRuntimeBatch";
+import { combinedRuntimeCounts, displayedRuntimeRuns, type DisplayedRuntimeRun, type OutdatedClaudeRuntimeAgent } from "../../lib/claudeRuntimeBatch";
 import { revertRuntimePackageRun, startRuntimePackageUpgrade } from "../../lib/runtimePackageStore";
 import { useActiveHostLabel, useHostRuntimePackages, useOutdatedClaudeRuntimeAgents } from "../../lib/runtimePackagesView";
 import { useTargetHostId } from "../../lib/targetHost";
@@ -50,7 +50,7 @@ function Body({ hostLabel, starting, claudeAgents }: { hostLabel: string; starti
   const view = host.view!;
   const [open, setOpen] = useState(false);
   const nativeOutdated = view.agents.length;
-  const targetParts = [nativeOutdated > 0 ? packageLabel(view.selected) : null, claudeAgents.length > 0 ? `${t("modules.component.claude-runtime.name")} ${claudeAgents[0]!.target}` : null].filter((part): part is string => !!part);
+  const targetParts = [nativeOutdated > 0 || claudeAgents.length === 0 ? packageLabel(view.selected) : null, claudeAgents.length > 0 ? `${t("modules.component.claude-runtime.name")} ${claudeAgents[0]!.target}` : null].filter((part): part is string => !!part);
   const target = targetParts.join(" · ") || t("runtimePackages.unknownTarget");
   const counts = combinedRuntimeCounts(view.agents, claudeAgents);
   const outdated = counts.outdated;
@@ -63,7 +63,7 @@ function Body({ hostLabel, starting, claudeAgents }: { hostLabel: string; starti
     ? t("runtimePackages.selectedError", { host: hostLabel, error: view.selectedError ?? "—" })
     : outdated > 0
       ? t("runtimePackages.outdated", { host: hostLabel, n: outdated, target })
-      : t("runtimePackages.current", { host: hostLabel, target });
+      : t(targetParts.length > 0 ? "runtimePackages.current" : "runtimePackages.currentNoTarget", { host: hostLabel, target });
   return (
     <>
       <div className={`-mx-4 flex items-center gap-3 px-4 py-2.5 ${outdated > 0 || run || view.lastRun ? "border-b border-border" : ""}`}>
@@ -153,7 +153,7 @@ function AgentRow({ agent, selected }: { agent: OutdatedRuntimeAgent; selected: 
 }
 
 /** A run: live (every item with its state) or finished (summary + what did not simply move + 撤销). */
-function RunBlock({ run, live }: { run: RuntimePackageRun; live: boolean }) {
+function RunBlock({ run, live }: { run: DisplayedRuntimeRun; live: boolean }) {
   const hostId = useTargetHostId();
   const { t, locale } = useI18n();
   const now = useClock();
@@ -199,6 +199,11 @@ function RunBlock({ run, live }: { run: RuntimePackageRun; live: boolean }) {
           </Button></SettingsGroup>
         )}
       </div>
+      {run.families && <p className="mt-1 text-xs text-muted">{t("runtimePackages.familyCounts", {
+        nativeMoved: run.families.native.moved, nativeTotal: run.families.native.total,
+        claudeMoved: run.families.claude.moved, claudeTotal: run.families.claude.total,
+      })}</p>}
+      {!live && revertable && run.families && <p className="mt-1 text-xs text-subtle">{t("runtimePackages.nativeRevertOnly")}</p>}
       {rows.length > 0 && (
         <ul className="pt-1">
           {rows.map((item) => (

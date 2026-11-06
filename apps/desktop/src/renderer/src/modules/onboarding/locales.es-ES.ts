@@ -220,7 +220,7 @@ export const esES: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.minorAgent.title": "El recuadro pequeño con una inicial",
   "onboarding.guide.minorAgent.text": "Los {{Agents}} sin avatar propio y sin fijar aparecen como un recuadro pequeño con su inicial.\nEs lo que hace Ajustes → Barra lateral izquierda → Filas de {{Agent}} → Avatar predeterminado de {{agent}} = Solo {{agents}} importantes.\nPara asignar uno, haz clic derecho en su fila y elige «Mostrar avatar».",
   "onboarding.guide.project.title": "Un proyecto y su {{director}}",
-  "onboarding.guide.project.text": "Cada proyecto tiene un {{director}}: reparte el trabajo, crea {{agents}} y recibe los resultados.\nPara abrir el tablero y el registro del proyecto, pasa el cursor sobre su título y pulsa «Vista del proyecto» a la derecha.",
+  "onboarding.guide.project.text": "Cada proyecto tiene un {{director}}: reparte el trabajo, crea {{agents}} y recibe los resultados.\nPara abrir la vista del proyecto y su actividad, pasa el cursor sobre su título y pulsa «Vista del proyecto» a la derecha.",
   "onboarding.guide.needsYou.title": "Te necesita",
   "onboarding.guide.needsYou.text": "«Te necesita» significa que un {{agent}} espera una respuesta tuya: una pregunta, una aprobación o una decisión. Puede seguir detenido hasta que respondas.\nEstos asuntos se reúnen encima del cuadro de escritura, al final de las filas de la barra lateral y en la bandeja; un clic te lleva a ellos.",
   "onboarding.guide.delegation.title": "Delegaciones",

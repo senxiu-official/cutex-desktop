@@ -116,10 +116,10 @@ describe("about module", () => {
     expect(sections.map((s) => s.split("\n")[0]!.trim())).toEqual(BUNDLED_KNOWN_ISSUES.issues.map((i) => en(i.title.en)));
     sections.forEach((section, n) => {
       const issue = BUNDLED_KNOWN_ISSUES.issues[n]!;
-      const planned = /^- Planned fix: (.+)$/m.exec(section)?.[1] ?? "";
+      const planned = /^- (?:Fix schedule|Fixed in): (.+)$/m.exec(section)?.[1] ?? "";
       if (issue.fixedIn) expect(planned, issue.id).toContain(issue.fixedIn);
       else expect(planned, issue.id).toMatch(/^not scheduled/);
-      expect(/^- Workaround: none/m.test(section), issue.id).toBe(!issue.workaround);
+      expect(/^- Workaround: none/im.test(section), issue.id).toBe(!issue.workaround);
     });
   });
 

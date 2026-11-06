@@ -1,8 +1,12 @@
+import { useAgentPause } from "../lib/agentPause";
+import { useAgentPauseHint } from "./AgentPauseParts";
 import { viewKey } from "../lib/viewKey";
 import type { InputRecord } from "@cutex-desktop/protocol";
-import { usesInputLedger } from "../lib/deliveryMode";
+import { usesInputLedger, usesOwnerCarries } from "../lib/deliveryMode";
 import { showStandaloneDelivery } from "../lib/inputLedger/deliveryPresentation";
 import { missingTimelineRecords, timelineRecordIndex, ownerRecordFor, ownerTimelineEntry, ownerOutboxTimelineEntry, predictedOwnerSurface, type LedgerOwnerOutbox } from "../lib/inputLedger/owner";
+import { carriedInputs, carriedReceivedRow } from "../lib/inputLedger/carries";
+import { CarriedInputRows } from "./CarriedInputRows";
 import { InputStatus } from "./InputStatus";
 import { featuresOf } from "../store";
 // Timeline rendering shared by the conversation and the read-only sub-agent view: turn headers
@@ -16,22 +20,24 @@ import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, SearchCheck } from "lucide-react";
 import { LOOKUP_PAGES } from "../lib/turnFetch";
 import { Checklist, ChecklistEntry, PlanCard } from "./PlanCard";
-import { messageInputItems } from "../../../shared/input";
+import { messageImages, messageInputItems, type MessageImage } from "../../../shared/input";
 import { useI18n, type MessageKey } from "../i18n";
 import { contextMenu } from "../lib/contextMenu";
 import { messageMenu, SESSION_FEATURES } from "../lib/menus";
 import { lacks } from "../lib/agentFeatures";
 import { useAgentFeatures } from "../lib/agentFeaturesView";
 import { structuralBlockText, useStructuralBlock } from "../lib/structuralGateView";
-import { replyBars, turnsFrom, type ReplyBar } from "../lib/replyActions";
+import { replyBars, type ReplyBar } from "../lib/replyActions";
 import { ReplyActions, UserActions } from "./MessageActions";
 import { TurnSummary } from "./TurnSummary";
 import { fileChangesByTurn, type TurnChanges } from "../lib/turnSummary";
 import { useUiPrefs } from "../lib/prefs";
 import { formatAbsolute, formatWhen, useClock, useNow } from "../lib/time";
-import type { TimelineEntry, TimelineState, TurnView } from "../lib/timeline";
+import { orderedEntries, type TimelineEntry, type TimelineState, type TurnView } from "../lib/timeline";
 import { segmentEntries } from "../lib/workGroups";
-import { recentEntries } from "../lib/timelineWindow";
+import { pairSentCalls } from "../lib/sentToolPairs";
+import { createTimelineWindow, recentEntries } from "../lib/timelineWindow";
+import { createTimelineIdentityEntries, createTimelineTurnIndex } from "../lib/timelineEntries";
 import { pendingTail, pendingUserEntry, sendRowKey, timelineRowKey, timelineTail, type OutboxEntry } from "../lib/legacyDelivery/outbox";
 import { LedgerPendingStatus, SessionDeliveryStatus, PendingStatus } from "./PendingSends";
 import type { OlderHistory } from "../lib/historyPages";
@@ -63,6 +69,7 @@ import { RepliedBadge } from "./DelegationRows";
 import { DelegationTag } from "./DelegationParts";
 import { OwnerNotifyCard } from "./OwnerNotifyCard";
 import { noteNeedsOlderHistory, noteTurnOf, placeOwnerNotes, recordsOf } from "../lib/ownerNotify";
+import { OwnerNotificationHistory } from "./OwnerNotificationHistory";
 import { useHostOwnerNotes } from "../lib/ownerNotifyStore";
 import { OWNER_NOTIFY_FEATURE } from "../../../shared/ownerNotify";
 import { ReceivedOutlet } from "../modules/TimelineOutlet";
@@ -84,6 +91,7 @@ import { useUserAvatar } from "../lib/userAvatars";
 import { Avatar } from "./Avatar";
 import { shownUserName } from "../../../shared/users";
 import { useOwnerWindow } from "../lib/ownerContext";
+import { useTurnStop } from "../lib/runtimeStops";
 
 function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
@@ -135,12 +143,17 @@ function TurnErrorRow({ turn, retryText, hint, automaticRetry }: { turn: TurnVie
 }
 
 /** An interrupted turn's end mark, after its last row (lib/turnErrors): a stop or a runtime restart
- *  cut it off, so its last reply may end mid-sentence. */
-function TurnInterruptedRow() {
+ *  cut it off, so its last reply may end mid-sentence. On hosts that say who asked for the stop
+ *  (lib/runtimeStops) it names them: an agent's command, the agent's own, the owner, the CLI. */
+function TurnInterruptedRow({ turn }: { turn: TurnView }) {
   const { t } = useI18n();
+  const { sessionId, hostId } = useTimelineContext();
+  const stop = useTurnStop(hostId, sessionId, turn);
   return (
-    <div data-testid="turn-interrupted" className="my-1 text-xs text-subtle">
-      {t("conversation.turnInterrupted")}
+    <div data-testid="turn-interrupted" data-stopped-by={stop?.by.kind} className="my-1 text-xs text-subtle">
+      {stop?.by.kind === "agent" ? t("conversation.turnStoppedBy.agent", { name: stop.by.name })
+        : stop ? t(`conversation.turnStoppedBy.${stop.by.kind}`)
+        : t("conversation.turnInterrupted")}
     </div>
   );
 }
@@ -154,14 +167,18 @@ const NO_ITEMS: string[] = [];
  * 16px tall: with the 12px margin under the message above it (its own 6px collapses into that), it
  * takes the space of the reply action bar that replaces it when the turn ends.
  */
-export function TurnTail({ timeline, sessionId }: { timeline: TimelineState; sessionId: string }) {
+export function TurnTail({ timeline, sessionId, thread = "agent" }: { timeline: TimelineState; sessionId: string; thread?: "agent" | "subagent" }) {
   const { t } = useI18n();
   const { reasoningView } = useUiPrefs();
   const { tools, hostId } = useTimelineContext();
+  const pause = useAgentPause(hostId, sessionId);
+  const pauseHint = useAgentPauseHint(hostId, pause);
   const background = useApp((s) => agentState(s.backgroundItems, hostId, sessionId) ?? NO_ITEMS);
-  const ledgerEnabled = useApp(s => usesInputLedger([...featuresOf(s, hostId)]));
+  // The session's delivery state is its own thread's; a sub-agent's live line follows the child timeline.
+  const ledgerEnabled = useApp(s => thread === "agent" && usesInputLedger([...featuresOf(s, hostId)]));
   const delivery = useApp(s => ledgerEnabled ? agentState(s.inputs, hostId, sessionId)?.delivery ?? null : null);
-  const turn = timeline.turns.find((x) => x.id === (ledgerEnabled ? delivery?.turn?.turnId : timeline.activeTurnId));
+  const turnId = ledgerEnabled ? delivery?.turn?.turnId : timeline.activeTurnId;
+  const turn = turnId ? timeline.turns.findLast((x) => x.id === turnId) : undefined;
   const now = useNow(!!turn);
   const activity = turnActivity(timeline, background, (item) => toolRendererFor(item, tools)?.item.activity?.(item) ?? null);
   // When the turn last showed progress (lib/silentGap): a mark change restarts the quiet clock.
@@ -169,11 +186,19 @@ export function TurnTail({ timeline, sessionId }: { timeline: TimelineState; ses
   progress.current = nextProgressAt(progress.current, turnProgressMark(timeline), now);
   // A retrying request says why it is quiet (RetryNoticeLine): no "still working" guess on top.
   const silent = turn?.retry ? null : silentGapSeconds(typeof activity === "string" ? activity : null, progress.current.at, now);
-  // The queue owns stale delegation-lease recovery; Composer owns the working line.
-  if (ledgerEnabled && !showStandaloneDelivery(delivery, false)) return null;
-  if (ledgerEnabled) return <div className="mt-1.5 flex h-4 items-center gap-2" data-testid="turn-working">
-    {delivery?.state === "turn" && <BusyDots />}<SessionDeliveryStatus delivery={delivery} sessionId={sessionId} hostId={hostId} />
+  // cutex's running signal covers every turn kind. Composer keeps the delegation details;
+  // a retained lease alone is not a running turn, and its recovery stays in the queue.
+  if (pause?.held?.length) return <div className="mt-1.5 flex h-4 min-w-0 items-center gap-2 text-caption text-warn-text" data-testid="turn-working" data-agent-tool-held="" title={pauseHint}>
+    <span className="shrink-0" aria-hidden>❚❚</span><span className="truncate">{t("agentPause.workingHeld")}</span>
   </div>;
+  if (ledgerEnabled) {
+    const running = delivery?.state === "turn";
+    if (!running && !showStandaloneDelivery(delivery, false)) return null;
+    return <div className="mt-1.5 flex h-4 items-center gap-2" data-testid="turn-working">
+      {running ? <><BusyDots /><span className="text-caption text-subtle">{t("turn.activity.working")}</span></>
+        : <SessionDeliveryStatus delivery={delivery} sessionId={sessionId} hostId={hostId} />}
+    </div>;
+  }
   if (!turn || !activity) return null;
   const waiting = activity === "approval" || activity === "question";
   const preview = activity === "reasoning" && reasoningView !== "expanded" ? reasoningPreview(liveReasoning(timeline)) : null;
@@ -241,7 +266,7 @@ function TurnTime({ startedAt, completedAt }: { startedAt: number; completedAt: 
 function SentMessage({ entry, name, onContextMenu }: { entry: Extract<TimelineEntry, { kind: "sent" }>; name: string; onContextMenu: React.MouseEventHandler }) {
   const record = useAgentMessage(entry.messageId ?? null);
   const recipient = useAgentFeatures(entry.to);
-  return <BusMessage direction="out" name={name} mode={entry.deliveryMode} text={entry.text} kind={record?.kind ?? entry.deliveryKind ?? null} downgraded={!!record?.downgraded} messageId={entry.messageId ?? null} recipientId={entry.to || null} recipientRuntime={recipient.runtime} onContextMenu={onContextMenu} />;
+  return <BusMessage direction="out" name={name} mode={entry.deliveryMode} text={entry.text} preview={entry.preview ?? null} kind={record?.kind ?? entry.deliveryKind ?? null} downgraded={!!record?.downgraded} messageId={entry.messageId ?? null} recipientId={entry.to || null} recipientRuntime={recipient.runtime} onContextMenu={onContextMenu} />;
 }
 
 /**
@@ -297,6 +322,11 @@ function foldAction(fold: MessageFold): { folded: boolean; toggle(): void } | nu
   return null;
 }
 
+function useSentImages(hostId: string, sessionId: string, id: string | null, ledger: boolean): MessageImage[] | undefined {
+  const extra = useApp((s) => (!id ? undefined : ledger ? agentState(s.ledgerOwnerDrafts, hostId, sessionId)?.[id]?.extra : agentState(s.outbox, hostId, sessionId)?.find((e) => e.id === id)?.extra));
+  return useMemo(() => (extra?.length ? messageImages(extra as { type: string }[]) : undefined), [extra]);
+}
+
 function Entry({ entry: initial, ledgerRecord, ledgerRecords, ledgerPending, pending, nameOf, sessionId, readOnly, actionable, bar, dropped, foldRole, changes, reply }: { /** 已回复 (handler side): shown in the reply's action row (design 040 step 10). */ reply?: DelegationAskRow; entry: TimelineEntry; ledgerRecord?: InputRecord; ledgerRecords?: readonly InputRecord[]; ledgerPending?: LedgerOwnerOutbox; /** The user's send not in the thread yet (lib/outbox): the same row, dimmed, with its status line. */ pending?: OutboxEntry; nameOf: (id: string) => string; sessionId: string; readOnly: boolean; actionable: boolean; bar: ReplyBar | undefined; dropped: number; foldRole: FoldRole; /** The finished turn's file changes (turn summary; only with `bar`). */ changes?: TurnChanges }) {
   const entry = useStreamedEntry(sessionId, initial);
   const userDisplay = useMemo(() => {
@@ -308,6 +338,9 @@ function Entry({ entry: initial, ledgerRecord, ledgerRecords, ledgerPending, pen
   const fold = useMessageFold(sessionId, entry.id, foldRole);
   // Claude agents without history revert (features.historyRevert = false) get no edit & resend / revert.
   const { agent, hostId } = useTimelineContext();
+  // A copy without clientId still matches through its ledger record.
+  const sendId = entry.kind === "user" ? ledgerRecord?.inputId ?? ledgerPending?.inputId ?? entry.clientId ?? null : null;
+  const sentImages = useSentImages(hostId, sessionId, sendId, !!(ledgerRecord || ledgerPending));
   const canRevert = useConvFeatures().has(SESSION_FEATURES.revert) && !readOnly && !lacks(agent, "historyRevert");
   // A busy Claude agent refuses it (lib/structuralGate): disabled with the reason (the menu checks on open).
   const block = useStructuralBlock(sessionId, agent, "revert");
@@ -332,7 +365,7 @@ function Entry({ entry: initial, ledgerRecord, ledgerRecords, ledgerPending, pen
         // The action row stands in for the bottom margin (always laid out, faded in on hover).
         <div className="group mt-3 flex flex-col items-end gap-1" data-testid={pending ? (failed ? "outbox-failed" : "outbox-sending") : undefined}>
           {/* A pending send carries its images too (lib/outbox pendingUserEntry): the same element at the handoff. */}
-          {!!images.length && <MessageImages images={images} hostId={hostId} messageId={entry.clientId ?? entry.id} pending={!!pending} />}
+          {!!images.length && <MessageImages images={images} hostId={hostId} messageId={sendId ?? entry.id} pending={!!pending} sent={sentImages} />}
           {text && (
             <div
               onContextMenu={pending || ledgerPending ? undefined : menu("user", mentionRichText(hostId, sessionId, text), extra)}
@@ -345,7 +378,7 @@ function Entry({ entry: initial, ledgerRecord, ledgerRecords, ledgerPending, pen
           {ledgerPending || (ledgerRecord && ledgerRecord.state !== "inContext") || pending || ((text || extra) && !readOnly) ? (
             <div className="relative flex h-7 w-full items-center justify-end gap-2" data-user-slot="">
               {!pending && <SentBy sessionId={sessionId} clientId={entry.clientId} />}
-              {ledgerPending ? <LedgerPendingStatus entry={ledgerPending} sessionId={sessionId} hostId={hostId} readOnly={readOnly} /> : ledgerRecord && ledgerRecord.state !== "inContext" ? <InputStatus record={ledgerRecord} sessionId={sessionId} hostId={hostId} readOnly={readOnly} /> : pending ? <PendingStatus sessionId={sessionId} entry={pending} /> : <UserActions sessionId={sessionId} text={mentionRichText(hostId, sessionId, text)} extra={extra} turnId={entry.turnId ?? null} dropped={dropped} canRevert={canRevert} blocked={block ? structuralBlockText(block) : null} fold={fold} />}
+              {ledgerPending ? <LedgerPendingStatus entry={ledgerPending} sessionId={sessionId} hostId={hostId} readOnly={readOnly} /> : ledgerRecord && ledgerRecord.state !== "inContext" ? <InputStatus record={ledgerRecord} sessionId={sessionId} hostId={hostId} readOnly={readOnly} timeline /> : pending ? <PendingStatus sessionId={sessionId} entry={pending} /> : <UserActions sessionId={sessionId} text={mentionRichText(hostId, sessionId, text)} extra={extra} turnId={entry.turnId ?? null} dropped={dropped} canRevert={canRevert} blocked={block ? structuralBlockText(block) : null} fold={fold} />}
             </div>
           ) : (
             <>
@@ -387,7 +420,7 @@ function Entry({ entry: initial, ledgerRecord, ledgerRecords, ledgerPending, pen
     // renders by its view schema (lib/receivedRows); whatever no branch claims is a bus message.
     case "received":
       return <><ReceivedOutlet message={entry.message} sessionId={sessionId} readOnly={readOnly}
-        fallback={<BusMessage direction="in" name={entry.message.senderName} senderId={entry.message.senderId} sourceKind={entry.message.sourceKind} mode={entry.message.deliveryMode} text={entry.message.text} kind={entry.message.envelope?.kind ?? null} envelope={entry.message.envelope ?? null} recipientRuntime={agent.runtime} onContextMenu={menu("received", entry.message.text)} />} />{(ledgerRecords ?? (ledgerRecord ? [ledgerRecord] : [])).map(record => <span key={record.inputId} title={record.preview ?? record.inputId}><InputStatus record={record} sessionId={sessionId} hostId={hostId} readOnly={readOnly} /></span>)}</>;
+        fallback={<BusMessage direction="in" name={entry.message.senderName} senderId={entry.message.senderId} sourceKind={entry.message.sourceKind} mode={entry.message.deliveryMode} text={entry.message.text} kind={entry.message.envelope?.kind ?? null} envelope={entry.message.envelope ?? null} recipientRuntime={agent.runtime} onContextMenu={menu("received", entry.message.text)} />} />{(ledgerRecords ?? (ledgerRecord ? [ledgerRecord] : [])).map(record => <span key={record.inputId} title={record.preview ?? record.inputId}><InputStatus record={record} sessionId={sessionId} hostId={hostId} readOnly={readOnly} timeline /></span>)}</>;
     case "sent":
       return <SentMessage entry={entry} name={nameOf(entry.to)} onContextMenu={menu("sent", entry.text)} />;
     case "tool":
@@ -413,7 +446,7 @@ function Entry({ entry: initial, ledgerRecord, ledgerRecords, ledgerPending, pen
  * Turns, work groups and messages of one thread. Shared by the conversation and the read-only
  * sub-agent view (`readOnly`: no edit & resend, no reply affordances).
  */
-export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf, readOnly = false, ownerNotes = !readOnly, older = null, onLoadOlder, pendingSends = false, onRelease }: { timeline: TimelineState; entries: TimelineEntry[]; sessionId: string; nameOf: (id: string) => string; readOnly?: boolean; /** The agent's owner-notify cards (default: not in read-only views). The side agent view is read-only for row actions but keeps them: a card is where the owner answers the agent. */ ownerNotes?: boolean; /** History pages still on the host (lib/historyPages). */ older?: OlderHistory | null; onLoadOlder?: () => void; /** Show the user's sends not in the thread yet (lib/outbox placement "turn"): placed by timelineTail, never below the live line, keyed like the message that replaces them. */ pendingSends?: boolean; /** Let go of stick-to-bottom (a focus request scrolls up to a turn). */ onRelease?: () => void }) {
+export function TimelineBody({ timeline, entries: suppliedEntries, version, sessionId, nameOf, thread = "agent", readOnly = false, ownerNotes = !readOnly, older = null, onLoadOlder, pendingSends = false, onRelease }: { timeline: TimelineState; entries?: TimelineEntry[]; version?: number; sessionId: string; nameOf: (id: string) => string; /** Whose thread `timeline` is. "subagent": a child thread shown under its parent's sessionId (host, runtime, tools); the session's own inputs (input ledger, owner sends, owner-notify cards, delivery turn) belong to the parent thread and are never projected into it. */ thread?: "agent" | "subagent"; readOnly?: boolean; /** The agent's owner-notify cards (default: not in read-only views). The side agent view is read-only for row actions but keeps them: a card is where the owner answers the agent. */ ownerNotes?: boolean; /** History pages still on the host (lib/historyPages). */ older?: OlderHistory | null; onLoadOlder?: () => void; /** Show the user's sends not in the thread yet (lib/outbox placement "turn"): placed by timelineTail, never below the live line, keyed like the message that replaces them. */ pendingSends?: boolean; /** Let go of stick-to-bottom (a focus request scrolls up to a turn). */ onRelease?: () => void }) {
   const win = useOwnerWindow();
   const { t } = useI18n();
   const convHost = useConvHost();
@@ -425,39 +458,53 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
   // owner-notify: the agent's messages to the owner, placed among its turns (not in sub-agent views;
   // the side agent view keeps them).
   const features = useConvFeatures();
-  const ownerNotify = ownerNotes && features.has(OWNER_NOTIFY_FEATURE);
+  const agentThread = thread === "agent";
+  const ownerNotify = agentThread && ownerNotes && features.has(OWNER_NOTIFY_FEATURE);
   const notesById = useHostOwnerNotes(view.hostId);
   const notes = useMemo(() => (ownerNotify ? recordsOf(notesById, sessionId) : []), [ownerNotify, notesById, sessionId]);
   // Long histories render only the latest turns (Settings → 通用 → 长对话); 显示更早 adds more.
   // Pages fetched by scrolling to the top are shown at once (the window grows by them).
   const [limit, setLimit] = useState(timelineTurns);
   useEffect(() => setLimit(timelineTurns), [sessionId, timelineTurns]);
-  // The derived lists below are O(entries) each: computed once per timeline change, not on every
-  // render (a sidebar refresh, the outbox, a pref). `allEntries` is a new array whenever the view's
-  // version moves (the turns are updated in place with it); the turn count / active turn cover a
-  // caller that keys its entries on less.
+  // Select turns before flattening; only changed visible turns need entry reads.
+  // The store mutates timeline in place, so callers supply their view revision.
   const shownTurns = limit > 0 ? limit + (older?.added ?? 0) : limit;
   const turnCount = timeline.turns.length;
   const activeTurn = timeline.activeTurnId;
-  const { entries: recent, hiddenTurns } = useMemo(() => recentEntries(allEntries, timeline.turns, shownTurns),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allEntries, timeline.turns, turnCount, activeTurn, shownTurns]);
+  const selectWindow = useMemo(() => createTimelineWindow(), [sessionId]);
+  const window = useMemo(() => selectWindow(timeline, shownTurns),
+    [selectWindow, timeline, version, suppliedEntries, turnCount, activeTurn, shownTurns]);
+  const { entries: recent, hiddenTurns } = useMemo(() => suppliedEntries
+    ? recentEntries(suppliedEntries, timeline.turns, shownTurns) : window,
+    [suppliedEntries, timeline.turns, shownTurns, window]);
+  const visibleTurns = window.turns;
+  const indexTurns = useMemo(() => createTimelineTurnIndex(), [sessionId]);
+  const loadedTurns = useMemo(() => indexTurns(timeline.turns), [indexTurns, timeline.turns, turnCount]);
   const retryVisible = features.has("model-overload-retry-visible");
-  const { entries, retried, folded } = useMemo(() => foldAutomaticRetryRows(recent, timeline.turns, retryVisible),
-    [recent, timeline.turns, turnCount, activeTurn, retryVisible]);
+  // A sent message and the tool call that sent it are one row (lib/sentToolPairs).
+  const { entries, retried, folded } = useMemo(() => foldAutomaticRetryRows(pairSentCalls(recent), visibleTurns, retryVisible),
+    [recent, visibleTurns, version, turnCount, activeTurn, retryVisible]);
   const derived = useMemo(() => ({
-    turnOf: new Map(timeline.turns.map((turn) => [turn.id, turn])),
-    bars: replyBars(timeline.turns, entries),
+    turnOf: new Map(visibleTurns.map((turn) => [turn.id, turn])),
+    bars: replyBars(visibleTurns, entries),
     latestReply: latestReplyIds(entries),
     // Handler side: the final reply of a turn a delegation started gets the 已回复 badge.
-    replied: handlerReplies(entries, timeline.turns),
+    replied: handlerReplies(entries, visibleTurns),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [entries, timeline.turns, turnCount, activeTurn]);
+  }), [entries, visibleTurns, version, turnCount, activeTurn]);
   const { turnOf, bars, latestReply, replied } = derived;
+  const droppedFrom = (turnId: string) => {
+    const index = visibleTurns.findIndex(turn => turn.id === turnId);
+    return index < 0 ? 0 : visibleTurns.length - index;
+  };
   // Turn summary: each turn's completed fileChange items, merged per file.
-  const turnChanges = useMemo(() => fileChangesByTurn(allEntries), [allEntries]);
+  const turnChanges = useMemo(() => fileChangesByTurn(recent), [recent]);
   // focusTurn / focusDelegation (lib/focusRequest): widen the window to the target, then scroll + flash.
-  const request = useFocusRequest((s) => (!readOnly && s.request?.sessionId === sessionId ? s.request : null));
+  const request = useFocusRequest((s) => (!readOnly && s.request?.sessionId === sessionId && (!s.request.hostId || s.request.hostId === view.hostId) ? s.request : null));
+  // A safety decision must not depend on a native history anchor. Reveal the same card here
+  // when its turn/DOM target cannot be reached; all decisions still go to the notice's host.
+  const [revealedSafety, setRevealedSafety] = useState<{ hostId: string; sessionId: string; notificationId: string } | null>(null);
+  const revealedSafetyId = revealedSafety?.hostId === view.hostId && revealedSafety.sessionId === sessionId ? revealedSafety.notificationId : null;
   const loading = useConvView(sessionId, (v) => v?.loading ?? false);
   // The session view's failed load gates the opening too (below); TimelineBody's own error row is Conversation's.
   const failed = useConvView(sessionId, (v) => !!v?.error);
@@ -465,23 +512,31 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
   const paged = useRef({ nonce: 0, pages: 0 });
   useEffect(() => {
     if (!request || loading) return;
+    const note = request.notificationId ? notesById[request.notificationId] : undefined;
+    const revealed = !!request.notificationId && request.notificationId === revealedSafetyId;
     const miss = (key: MessageKey) => {
+      if (note?.safetyBlock && !revealed) {
+        setRevealedSafety({ hostId: view.hostId, sessionId, notificationId: note.notificationId });
+        return; // the next render lands on the decision without another history read
+      }
       clearFocusRequest(request.nonce);
       if (request.onDone) request.onDone(false);
       else convNotify(conv, t(key));
     };
     let turnId = request.turnId ?? null;
-    const note = request.notificationId ? notesById[request.notificationId] : undefined;
     if (request.notificationId) turnId = note ? noteTurnOf(note, timeline.turns) : null;
     // A delegation: its card here (requester), else the turn its ASK row started (handler).
-    const card = request.askId ? delegateEntryOf(allEntries, request.askId) : null;
-    if (request.askId) turnId = card?.turnId ?? askRowTurnOf(allEntries, request.askId);
+    // Full history is expanded only for an explicit delegation focus lookup.
+    const lookupEntries = request.askId ? suppliedEntries ?? orderedEntries(timeline) : [];
+    const card = request.askId ? delegateEntryOf(lookupEntries, request.askId) : null;
+    if (request.askId) turnId = card?.turnId ?? askRowTurnOf(lookupEntries, request.askId);
     const index = turnId ? timeline.turns.findIndex((x) => x.id === turnId) : -1;
     // A message older than every loaded turn: page its turn in first while there is older history
     // (an open agent's pending notice from many turns ago, composer 等你回复 row); fully loaded, it sits
     // at the top (no turn to widen to).
     const noteOlder = !!note && noteNeedsOlderHistory(note, timeline.turns, !!older?.cursor && !older.error && !!onLoadOlder);
-    if (index < 0 && (!(request.notificationId && note) || noteOlder)) {
+    if (!revealed && note?.safetyBlock && noteOlder) return miss("ownerNotify.notLoaded");
+    if (!revealed && index < 0 && (!(request.notificationId && note) || noteOlder)) {
       // Not among the loaded turns: page older history in (≤ LOOKUP_PAGES per request, like 跳过去) and
       // look again once the page lands; a thread fully loaded (no cursor) or a failed page is a miss.
       if ((!request.notificationId || noteOlder) && older?.cursor && !older.error && onLoadOlder) {
@@ -495,14 +550,14 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
       }
       return miss(request.askId ? "delegation.cardNotFound" : request.notificationId ? "ownerNotify.notLoaded" : "delegation.notLoaded");
     }
-    const needed = index < 0 ? 0 : timeline.turns.length - index;
+    const needed = revealed || index < 0 ? 0 : timeline.turns.length - index;
     const shown = limit > 0 ? limit + (older?.added ?? 0) : Infinity;
     if (needed > shown) {
       setLimit(needed - (older?.added ?? 0));
       return; // runs again once the turn is rendered
     }
     const selector = request.notificationId
-      ? `[data-owner-note="${CSS.escape(request.notificationId)}"]`
+      ? `[data-owner-note="${CSS.escape(request.notificationId)}"][data-owner-note-host="${CSS.escape(view.hostId)}"]`
       : card
         ? `[data-ask-id="${CSS.escape(request.askId!)}"]`
         : request.askId
@@ -510,8 +565,8 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
           : `[data-turn-id="${CSS.escape(turnId!)}"]`;
     const frame = win.requestAnimationFrame(() => {
       const el = win.document.querySelector(selector);
-      clearFocusRequest(request.nonce);
       if (!el) return miss(request.askId ? "delegation.cardNotFound" : request.notificationId ? "ownerNotify.notLoaded" : "delegation.notLoaded");
+      clearFocusRequest(request.nonce);
       onRelease?.();
       if (request.land) {
         drawRow(el);
@@ -523,7 +578,7 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
     });
     return () => win.cancelAnimationFrame(frame);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request, loading, limit, allEntries, timeline.turns.length, notesById, older?.cursor, older?.loading, older?.error]);
+  }, [request, loading, limit, suppliedEntries, version, timeline.turns.length, notesById, older?.cursor, older?.loading, older?.error, revealedSafetyId]);
   // Every turn's first rendered row carries its id (TurnHeader is not always rendered).
   const anchored = new Set<string>();
   const anchor = (turnId: string | null | undefined): string | undefined => {
@@ -552,6 +607,13 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
     [entries, reasoningShown, timelineInteractions, tools],
   );
   const olderHistory = hiddenTurns > 0 || !!older?.cursor;
+  // An explicitly bound hidden note must not fall back to its creation time in the visible
+  // window. This metadata-only check changes on paging/window changes, not streamed text.
+  const notesForWindow = useMemo(() => {
+    if (!hiddenTurns || !notes.length) return notes;
+    const visible = new Set(window.turns.map(turn => turn.id));
+    return notes.filter(note => !note.turnId || visible.has(note.turnId) || !loadedTurns.has(note.turnId));
+  }, [loadedTurns, notes, timeline.turns, turnCount, hiddenTurns]);
   // timeline.turnAttachment (§19.3) inline items go at the end of a turn: inside a finished turn's last
   // reply (after its turn summary, before its action row), else after the turn's last rendered row.
   const segTurn = (seg: (typeof segments)[number]) => (seg.kind === "work" ? seg.turnId : seg.entry.turnId);
@@ -562,14 +624,14 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
       if (turnId) lastSegOf.set(turnId, i);
     });
     return {
-      placed: placeOwnerNotes(notes, segTurns, timeline.turns, { olderHistory }),
-      turnErrors: turnErrorPlacement(segTurns, timeline.turns),
-      turnStops: turnInterruptedPlacement(segTurns, timeline.turns),
+      placed: notes.length ? placeOwnerNotes(segTurns.length ? notesForWindow : notes, segTurns, visibleTurns, { olderHistory }) : { head: [], after: new Map() },
+      turnErrors: turnErrorPlacement(segTurns, visibleTurns),
+      turnStops: turnInterruptedPlacement(segTurns, visibleTurns),
       lastSegOf,
       barTurns: new Set([...bars.values()].map((b) => b.turnId)),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segments, notes, timeline.turns, turnCount, activeTurn, olderHistory, bars]);
+  }, [segments, notes, notesForWindow, visibleTurns, version, turnCount, activeTurn, olderHistory, bars]);
   const { placed, turnErrors, turnStops, lastSegOf, barTurns } = placement;
   const tailAttachments = (i: number) => {
     const turnId = segTurn(segments[i]!);
@@ -584,22 +646,65 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
   };
   const errorRows = (i: number) => [
     ...(turnErrors.get(i)?.map((turn) => <TurnErrorRow key={`error-${turn.id}`} turn={turn} hint={!readOnly} retryText={turnUserText(turn)} automaticRetry={retried.get(turn.id)} />) ?? []),
-    ...(turnStops.get(i)?.map((turn) => <TurnInterruptedRow key={`stopped-${turn.id}`} />) ?? []),
+    ...(turnStops.get(i)?.map((turn) => <TurnInterruptedRow key={`stopped-${turn.id}`} turn={turn} />) ?? []),
   ];
-  const noteCards = (list: readonly { notificationId: string }[] | undefined) => list?.map((r) => <OwnerNotifyCard key={r.notificationId} notificationId={r.notificationId} sessionId={sessionId} hostId={view.hostId} />);
+  const noteCards = (list: readonly { notificationId: string }[] | undefined) => list?.filter(r => r.notificationId !== revealedSafetyId).map((r) => <OwnerNotifyCard key={r.notificationId} notificationId={r.notificationId} sessionId={sessionId} hostId={view.hostId} />);
   // The user's pending sends: same row component and key (lib/outbox sendRowKey) as the timeline's
   // user message that replaces them, in the same flat list, so the handoff is a prop change.
-  const outbox = useApp((s) => (pendingSends ? agentState(s.outbox, view.hostId, sessionId) : undefined));
-  const ledgerEnabled = usesInputLedger([...features]);
+  const outbox = useApp((s) => (agentThread && pendingSends ? agentState(s.outbox, view.hostId, sessionId) : undefined));
+  const ledgerEnabled = agentThread && usesInputLedger([...features]);
   const ledger = useApp(s => ledgerEnabled ? agentState(s.inputs, view.hostId, sessionId) : undefined);
   const ownerDrafts = useApp(s => ledgerEnabled ? agentState(s.ledgerOwnerDrafts, view.hostId, sessionId) : undefined);
   const ledgerOutbox = useApp(s => ledgerEnabled ? agentState(s.ledgerOutbox, view.hostId, sessionId) : undefined);
   const ledgerIndex = useMemo(() => timelineRecordIndex(ledger?.records), [ledger?.records]);
-  const ledgerRows = ledgerEnabled ? missingTimelineRecords(ledger?.records, allEntries, ledgerIndex, { hasOlder: !!older?.cursor, turns: timeline.turns }) : [];
+  const identityEntries = useMemo(() => createTimelineIdentityEntries(), [sessionId]);
+  // Match native identities even in hidden history, without flattening it.
+  const ledgerEntries = useMemo(() => suppliedEntries ?? identityEntries(timeline, [
+    ...[...ledgerIndex.byInputId.values()].flatMap(record => [record.inputId, record.timelineItemId ?? ""]),
+    ...Object.keys(ownerDrafts ?? {}),
+    ...(ledgerOutbox ?? []).map(entry => entry.inputId),
+  ], loadedTurns), [identityEntries, suppliedEntries, timeline, version, ledgerIndex, ownerDrafts, ledgerOutbox, recent, loadedTurns]);
+  const ledgerRows = useMemo(() => ledgerEnabled ? missingTimelineRecords(ledger?.records, ledgerEntries, ledgerIndex, { hasOlder: !!older?.cursor, turns: timeline.turns, hasTurn: id => loadedTurns.has(id) }) : [],
+    [ledgerEnabled, ledger?.records, ledgerEntries, ledgerIndex, older?.cursor, timeline.turns, turnCount, loadedTurns]);
+  const carries = useMemo(() => {
+    const joined = carriedInputs(ledger?.records, usesOwnerCarries([...features]));
+    const visibleOwners = new Set(ledgerRows.filter(r => r.kind === "owner").map(r => r.inputId));
+    for (const seg of segments) if (seg.kind !== "work" && seg.entry.kind === "user" && !folded.has(seg.entry.id)) {
+      const owner = ownerRecordFor(ledger?.records, seg.entry, ledgerIndex);
+      if (owner) visibleOwners.add(owner.inputId);
+    }
+    const byOwner = new Map([...joined.byOwner].filter(([id]) => visibleOwners.has(id)));
+    return { byOwner, inputIds: new Set([...byOwner.values()].flatMap(rows => rows.map(r => r.inputId))) };
+  }, [ledger?.records, features, ledgerRows, segments, ledgerIndex, folded]);
+  const receivedEntries = useMemo(() => {
+    const native = new Map(ledgerEntries.filter(entry => carriedReceivedRow(entry, ledgerIndex, carries.inputIds)).map(entry => [entry.id, entry]));
+    const claimed = new Set<string>();
+    const byOwner = new Map<string, Map<string, TimelineEntry>>();
+    for (const [ownerId, children] of carries.byOwner) {
+      const entries = new Map<string, TimelineEntry>();
+      for (const child of children) {
+        const id = child.timelineItemId ?? child.inputId;
+        const entry = native.get(id);
+        if (entry && !claimed.has(id)) { entries.set(id, entry); claimed.add(id); }
+      }
+      byOwner.set(ownerId, entries);
+    }
+    return byOwner;
+  }, [ledgerEntries, ledgerIndex, carries]);
+  // A non-owner ledger record without a native row: sender, preview and its status.
+  const ledgerInputRow = (record: InputRecord) => <div className="my-2" data-input-id={record.inputId} data-carried-input-id={carries.inputIds.has(record.inputId) ? record.inputId : undefined}>
+    <div className="text-xs text-subtle">{record.sender?.name ?? record.kind}</div><div className="whitespace-pre-wrap text-sm">{record.preview}</div>
+    <InputStatus record={record} sessionId={sessionId} hostId={view.hostId} readOnly={readOnly} timeline />
+  </div>;
+  const carriedRows = (ownerId: string | undefined) => ownerId && carries.byOwner.has(ownerId)
+    ? <CarriedInputRows records={carries.byOwner.get(ownerId)!} received={receivedEntries.get(ownerId)!} renderRecord={ledgerInputRow} renderReceived={(entry, records) => <>
+      <MemoEntry entry={entry} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={false} bar={undefined} dropped={0} foldRole={foldRoleOf(entry)} />
+      {records.map(record => <span key={record.inputId} title={record.preview ?? record.inputId} data-carried-input-id={record.inputId}><InputStatus record={record} sessionId={sessionId} hostId={view.hostId} readOnly={readOnly} timeline /></span>)}
+    </>} /> : null;
   // Native items now own the full body/attachments. Do not keep a second unbounded history in local drafts.
   useEffect(() => {
     if (!ledgerEnabled || !ownerDrafts) return;
-    const joined = new Set(allEntries.flatMap(entry => {
+    const joined = new Set(ledgerEntries.flatMap(entry => {
       const record = ownerRecordFor(ledger?.records, entry, ledgerIndex);
       return [record?.inputId, entry.kind === "user" ? entry.clientId : undefined].filter((id): id is string => !!id && !!ownerDrafts[id]);
     }));
@@ -612,10 +717,10 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
       for (const id of joined) delete next[id];
       return { ledgerOwnerDrafts: { ...state.ledgerOwnerDrafts, [key]: next } };
     });
-  }, [ledgerEnabled, ownerDrafts, allEntries, ledger?.records, ledgerIndex, sessionId, view.hostId]);
-  const pendingRows = pendingSends && !ledgerEnabled ? pendingTail(outbox, timeline) : [];
+  }, [ledgerEnabled, ownerDrafts, ledgerEntries, ledger?.records, ledgerIndex, sessionId, view.hostId]);
+  const pendingRows = agentThread && pendingSends && !ledgerEnabled ? pendingTail(outbox, timeline) : [];
   const o0 = ledgerEnabled ? (ledgerOutbox ?? []).filter(entry => !ledger?.records.has(entry.inputId)) : [];
-  const nativeOwnerIds = new Set(allEntries.flatMap(entry => entry.kind === "user" ? [entry.id, entry.clientId ?? ""] : []));
+  const nativeOwnerIds = new Set(ledgerEntries.flatMap(entry => entry.kind === "user" ? [entry.id, entry.clientId ?? ""] : []));
   const pendingLedgerRows = o0.filter(entry => predictedOwnerSurface(entry, ledger?.delivery) === "timeline" && !nativeOwnerIds.has(entry.inputId));
   const usedKeys = new Set<string>();
   const rowKeyOf = (entry: TimelineEntry) => {
@@ -638,6 +743,8 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
         </button>
       )}
       {hiddenTurns === 0 && older?.cursor && onLoadOlder && <OlderHistoryRow older={older} onLoad={onLoadOlder} />}
+      {ownerNotify && <OwnerNotificationHistory hostId={view.hostId} agentId={sessionId} />}
+      {revealedSafetyId && <OwnerNotifyCard notificationId={revealedSafetyId} sessionId={sessionId} hostId={view.hostId} />}
       {noteCards(placed.head)}
       {[...segments.map((seg, i) => {
         const after = placed.after.get(i);
@@ -674,11 +781,12 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
         const first = anchor(entry.turnId);
         return (
           <Fragment key={rowKeyOf(entry)}>
-            {!folded.has(entry.id) && <div data-turn-id={first} data-tl-row="">
+            {!folded.has(entry.id) && !carriedReceivedRow(entry, ledgerIndex, carries.inputIds) && <div data-turn-id={first} data-tl-row="">
               {/* timeline.turnAttachment (§19.3): margin boxes beside the turn's first line, inline ones at the turn's end. */}
               {first && !readOnly && <TurnMargin sessionId={sessionId} turnId={first} />}
               {header && <TurnHeader turn={header} />}
-              <MemoEntry entry={entry} ledgerRecords={ledgerEnabled && entry.kind === "received" ? ledgerIndex.byItemId.get(entry.id) : undefined} ledgerRecord={ledgerEnabled ? ownerRecordFor(ledger?.records, entry, ledgerIndex) : undefined} ledgerPending={ledgerEnabled && entry.kind === "user" ? o0.find(item => item.inputId === entry.clientId || item.inputId === entry.id) : undefined} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={entry.id === actionablePlan} bar={bars.get(entry.id)} dropped={entry.kind === "user" ? turnsFrom(timeline.turns, entry.turnId) : 0} foldRole={foldRoleOf(entry)} changes={bars.has(entry.id) ? turnChanges.get(entry.turnId ?? "") : undefined} reply={inBar ? reply : undefined} />
+              <MemoEntry entry={entry} ledgerRecords={ledgerEnabled && entry.kind === "received" ? (carries.inputIds.size ? ledgerIndex.byItemId.get(entry.id)?.filter(record => !carries.inputIds.has(record.inputId)) : ledgerIndex.byItemId.get(entry.id)) : undefined} ledgerRecord={ledgerEnabled ? ownerRecordFor(ledger?.records, entry, ledgerIndex) : undefined} ledgerPending={ledgerEnabled && entry.kind === "user" ? o0.find(item => item.inputId === entry.clientId || item.inputId === entry.id) : undefined} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={entry.id === actionablePlan} bar={bars.get(entry.id)} dropped={entry.kind === "user" ? droppedFrom(entry.turnId) : 0} foldRole={foldRoleOf(entry)} changes={bars.has(entry.id) ? turnChanges.get(entry.turnId ?? "") : undefined} reply={inBar ? reply : undefined} />
+              {entry.kind === "user" && carriedRows(ownerRecordFor(ledger?.records, entry, ledgerIndex)?.inputId)}
               {reply && !inBar && <RepliedBadge row={reply} />}
             </div>}
             {tailAttachments(i)}
@@ -692,13 +800,10 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
         <MemoEntry entry={ownerOutboxTimelineEntry(entry)} ledgerPending={entry} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={false} bar={undefined} dropped={0} foldRole="user" />
         {undefined}
       </div></Fragment>),
-      ...ledgerRows.map(record => <Fragment key={sendRowKey(record.inputId)}><div data-turn-id={undefined} data-tl-row="">
+      ...ledgerRows.filter(record => !carries.inputIds.has(record.inputId)).map(record => <Fragment key={sendRowKey(record.inputId)}><div data-turn-id={undefined} data-tl-row="">
         {false}{undefined}
-        {record.kind === "owner" ? <MemoEntry entry={ownerTimelineEntry(record, ownerDrafts?.[record.inputId])} ledgerRecord={record} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={false} bar={undefined} dropped={0} foldRole="user" /> : <div className="my-2" data-input-id={record.inputId}>
-          <div className="text-xs text-subtle">{record.sender?.name ?? record.kind}</div><div className="whitespace-pre-wrap text-sm">{record.preview}</div>
-          <InputStatus record={record} sessionId={sessionId} hostId={view.hostId} readOnly={readOnly} />
-        </div>}
-        {undefined}
+        {record.kind === "owner" ? <MemoEntry entry={ownerTimelineEntry(record, ownerDrafts?.[record.inputId])} ledgerRecord={record} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={false} bar={undefined} dropped={0} foldRole="user" /> : ledgerInputRow(record)}
+        {record.kind === "owner" && carriedRows(record.inputId)}
       </div></Fragment>),
       ...timelineTail(ledgerEnabled ? ledger?.delivery?.turn?.turnId ?? null : timeline.activeTurnId, headed).flatMap((slot) => {
         if (slot === "pending")
@@ -720,7 +825,7 @@ export function TimelineBody({ timeline, entries: allEntries, sessionId, nameOf,
           });
         const active = turnOf.get(timeline.activeTurnId ?? "");
         if (slot === "header") return active ? [<TurnHeader key="header" turn={active} />] : [];
-        return [<TurnTail key="tail" timeline={timeline} sessionId={sessionId} />];
+        return [<TurnTail key="tail" timeline={timeline} sessionId={sessionId} thread={thread} />];
       })]}
 
     </TimelineViewContext.Provider>

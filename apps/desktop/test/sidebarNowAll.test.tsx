@@ -93,8 +93,8 @@ describe("wiring (source)", () => {
     expect(b).not.toMatch(/TopNav|TitleBarEntries/);
     expect(s).toMatch(/<AllRowsCompact\.Provider value=\{nowAll\}>/);
   });
-  it("the cards open where the need is handled, as the 需要你 strip does (one shared function)", () => {
+  it("the cards open where the need is handled, as the 需要你 list does (one shared function)", () => {
     expect(src("components/SidebarNowAll.tsx")).toMatch(/activateAttention\(card\.chip/);
-    expect(src("components/NeedsYouStrip.tsx")).toMatch(/activateAttention\(c, needs\.get\(c\.key\), hostOf\(c\)\)/);
+    expect(src("components/NeedsYou.tsx")).toContain("activateAttention(item.chip, item.need, item.host)");
   });
 });

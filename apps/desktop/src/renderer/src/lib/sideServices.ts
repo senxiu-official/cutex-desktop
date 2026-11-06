@@ -6,6 +6,7 @@ import { appModules } from "../modules/app";
 import type { SideBinding, SideHoldLocator, SideInstanceInfo, SideOpenHeldOptions, SideOpenHeldResult, SideOpenOptions, SideOpenResult, SideReleaseHoldOptions, SideRevealResult, SideRevealTarget } from "../modules/slots";
 import type { ItemId, Json } from "../modules/types";
 import { agentHost, selectedSidebar, sidebarOf, useApp } from "../store";
+import { listedIn } from "./archivedAgent";
 import { hostEpoch, scopeHosts } from "../../../shared/hosts";
 import { admitHold, holdScopeCheck, keepMountedLimit, releaseSideHold, takeTicketHold, useSideKeep, type HoldScopeInput } from "./sideKeep";
 import { PEEK_MIN } from "./gutterLayout";
@@ -16,6 +17,7 @@ import { getUiPrefs } from "./prefs";
 import { parseRef } from "./refs";
 import { dedupeKeyOf, sideRegistry, sideViewNow, specFrom, type SideComponentEntry } from "./sideComponents";
 import { STATUS_COMPONENT_PREFIX } from "./sideKinds";
+import { EMPTY_PREVIEW_LAUNCHERS } from "./emptyPreviewPages";
 import {
   applyOpen,
   chipHolding,
@@ -124,8 +126,7 @@ function holdScopeInput(binding: SideBinding, expectEpoch: string | undefined): 
   const inScope = hostId === activeHostId() || (s.hosts ? scopeHosts(s.hosts).includes(hostId) : false);
   let agentKnown: boolean | null = null;
   if (binding.kind === "agent") {
-    const sidebar = sidebarOf(s, hostId);
-    agentKnown = sidebar ? [...sidebar.active, ...sidebar.retired].some((r) => r.cutexSessionId === binding.sessionId) : null;
+    agentKnown = listedIn(sidebarOf(s, hostId), binding.sessionId);
   }
   return { known, inScope, agentKnown, epoch: hostEpoch(s.hosts, hostId), ...(expectEpoch === undefined ? {} : { expectEpoch }) };
 }
@@ -390,7 +391,7 @@ export function sideReveal(target: SideRevealTarget): SideRevealResult {
 }
 
 /** Closes instances through their components' onClose (false = keep). No confirm: callers ask first. */
-export async function closeSideInstances(ids: readonly string[]): Promise<void> {
+export async function closeSideInstances(ids: readonly string[], opts: { removePage?: boolean } = {}): Promise<void> {
   const registry = sideRegistry();
   const closing: string[] = [];
   for (const id of ids) {
@@ -408,7 +409,7 @@ export async function closeSideInstances(ids: readonly string[]): Promise<void> 
     }
     if (ok) closing.push(id);
   }
-  closeInstancesAnywhere(closing);
+  closeInstancesAnywhere(closing, opts.removePage ? [] : Object.keys(EMPTY_PREVIEW_LAUNCHERS));
 }
 
 /** The one-line warnings of a bulk close (closeConfirm), for a single confirm. */

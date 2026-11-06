@@ -23,7 +23,7 @@ export function TurnNotes({ hostId, sessionId, turnId }: TurnAttachmentProps) {
   const more = notes.length - CHIPS;
   return (
     <div className="mt-1.5 flex h-5 min-w-0 items-center gap-1.5 text-xs text-muted" data-turn-notes={turnId}>
-      <button onClick={(e) => open(e.currentTarget)} title={label} aria-label={label} aria-haspopup="dialog" className="flex shrink-0 items-center gap-1.5 hover:text-foreground focus-visible:outline-2 focus-visible:outline-accent">
+      <button onClick={(e) => open(e.currentTarget)} data-tip={label} aria-label={label} aria-haspopup="dialog" className="flex shrink-0 items-center gap-1.5 hover:text-foreground focus-visible:outline-2 focus-visible:outline-accent">
         <StickyNote size={13} className="text-accent" />
         <span>{t("notes.title")}</span>
       </button>
@@ -32,7 +32,7 @@ export function TurnNotes({ hostId, sessionId, turnId }: TurnAttachmentProps) {
           <span className="shrink-0 text-subtle">·</span>
           <button
             onClick={(e) => open(e.currentTarget)}
-            title={note.title || t("notes.untitled")}
+            data-tip={note.title || t("notes.untitled")}
             aria-haspopup="dialog"
             className="flex h-[18px] max-w-56 min-w-0 items-center rounded-md border border-border bg-surface px-1.5 text-caption/[inherit] text-muted hover:bg-surface-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-accent"
           >

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Menus / popovers / tooltips are always on top (owner 2026-10-23: the 「独占」 foretell outline crossed the open
 // Shelf ⋯ menu). The order (styles.css 「Layers」): panes ≤ 39 < Settings Shelf 45 < drag shields 47 < foretell / drop
-// previews 48 < drop labels / ghost 49 < every menu, popover, dialog ≥ 50 — and since a popover inside a pane can
+// previews 48 < drop labels / ghost 49 < dialogs 150 < menus / popovers 160 < toasts 170 < tooltips 180 — and since a popover inside a pane can
 // never rise above a window-level layer (its card's stacking context), the preview layers leave a hole where each
 // open popover is (lib/overlayHoles).
 import { describe, expect, it } from "vitest";
@@ -27,31 +27,55 @@ describe("the layer order", () => {
     }
   });
 
-  it("every menu, popover, flyout, palette and dialog is at 50 or more", () => {
-    const popovers: [string, RegExp][] = [
-      ["components/Overlays.tsx", /role="menu"[\s\S]{0,80}?className="fixed z-50/],
-      ["components/Menu.tsx", /data-popover=\{open \? "" : undefined\}\s+className=\{`absolute bottom-full z-\[51\]/],
-      ["components/SlashPalette.tsx", /data-popover="" className="absolute [^"]*z-50/],
-      ["components/ComposerPanels.tsx", /data-popover="" className=\{`absolute [^`]*z-50/],
-      ["components/MenuFlyout.tsx", /data-flyout="" data-popover="" className="fixed z-\[52\]/],
-      ["components/StatusChip.tsx", /data-popover="" className=\{`absolute [^`]*z-50/],
-      ["components/PendingOwnerNotes.tsx", /data-popover="" className="absolute [^"]*z-50/],
-      ["components/GoalBar.tsx", /popover className="absolute [^"]*z-50/],
-      ["components/HostPicker.tsx", /role="listbox" data-popover="" [^>]*z-50/],
-      ["components/settings/FontCombo.tsx", /role="listbox" data-popover="" className="absolute [^"]*z-50/],
-      ["components/settings/Form.tsx", /role="note" data-popover="" [^>]*className="fixed z-\[60\]/],
-      ["components/RestoreBanner.tsx", /role="dialog" [^>]*z-50/],
-      ["modules/status-capsule/StatusCapsule.tsx", /role="menu" className="absolute [^"]*z-50/],
-      ["components/ProjectFlyout.tsx", /className="fixed z-50/],
-      ["components/AgentListDialog.tsx", /fixed inset-0 z-50/],
-      ["components/JobParts.tsx", /fixed inset-0 z-50/],
-      ["modules/projects/MemberPicker.tsx", /fixed inset-0 z-50/],
-      ["modules/projects/DirectorRotationDialog.tsx", /fixed inset-0 z-50/],
-      ["modules/claude-accounts/AccountFlow.tsx", /fixed inset-0 z-50/],
-      ["modules/jobs/MarkExternalDialog.tsx", /fixed inset-0 z-50/],
-      ["modules/usage/UsagePage.tsx", /fixed inset-0 z-50/],
-    ];
-    for (const [p, re] of popovers) expect(src(p), p).toMatch(re);
+  // The window-level table (040 §2.1, owner 2026-11-05): dialogs 150… < floats 160… < toasts 170… < tooltips 180…,
+  // all over every preview layer (< 50).
+  const BAND = { dialog: [150, 159], float: [160, 169], toast: [170, 179], tip: [180, 189] } as const;
+  const surfaces: [string, RegExp, keyof typeof BAND][] = [
+    ["components/Overlays.tsx", /role="menu"[\s\S]{0,80}?className="float fixed z-\[(\d+)\]/, "float"],
+    ["components/Menu.tsx", /data-popover=\{open \? "" : undefined\}\s+className={`float float-scroll absolute bottom-full z-\[(\d+)\]/, "float"],
+    ["components/SlashPalette.tsx", /data-popover="" className="float absolute [^"]*z-\[(\d+)\]/, "float"],
+    ["components/ComposerPanels.tsx", /data-popover="" className={`float absolute [^`]*z-\[(\d+)\]/, "float"],
+    ["components/MenuFlyout.tsx", /data-flyout="" data-popover="" className="fixed z-\[(\d+)\]/, "float"],
+    ["components/StatusChip.tsx", /data-popover="" className={`float float-scroll absolute [^`]*z-\[(\d+)\]/, "float"],
+    ["components/PendingOwnerNotes.tsx", /data-popover="" className="float absolute [^"]*z-\[(\d+)\]/, "float"],
+    ["components/GoalBar.tsx", /popover idleBorder="border-transparent" className="float absolute [^"]*z-\[(\d+)\]/, "float"],
+    ["components/HostPicker.tsx", /role="listbox" data-popover="" [^>]*z-\[(\d+)\]/, "float"],
+    ["components/HostSwitcher.tsx", /role="menu" className="float float-scroll absolute [^"]*z-\[(\d+)\]/, "float"],
+    ["components/settings/FontCombo.tsx", /role="listbox" data-popover="" className="float absolute [^"]*z-\[(\d+)\]/, "float"],
+    ["components/settings/Form.tsx", /role="note" data-popover="" [^>]*className="float fixed z-\[(\d+)\]/, "float"],
+    ["components/RestoreBanner.tsx", /role="dialog" [^>]*z-\[(\d+)\]/, "float"],
+    ["modules/status-capsule/StatusCapsule.tsx", /role="menu" className="float absolute [^"]*z-\[(\d+)\]/, "float"],
+    ["components/AnchoredPanel.tsx", /className={`float fixed z-\[(\d+)\]/, "float"],
+    ["components/AgentListDialog.tsx", /fixed inset-0 z-\[(\d+)\]/, "dialog"],
+    ["components/JobParts.tsx", /fixed inset-0 z-\[(\d+)\]/, "dialog"],
+    ["modules/projects/MemberPicker.tsx", /fixed inset-0 z-\[(\d+)\]/, "dialog"],
+    ["modules/projects/DirectorRotationDialog.tsx", /fixed inset-0 z-\[(\d+)\]/, "dialog"],
+    ["modules/claude-accounts/AccountFlow.tsx", /fixed inset-0 z-\[(\d+)\]/, "dialog"],
+    ["modules/jobs/MarkExternalDialog.tsx", /fixed inset-0 z-\[(\d+)\]/, "dialog"],
+    ["modules/usage/UsagePage.tsx", /fixed inset-0 z-\[(\d+)\]/, "dialog"],
+    ["components/SshPromptDialog.tsx", /fixed inset-0 z-\[(\d+)\]/, "dialog"],
+    ["modules/quick-switch/Palette.tsx", /fixed inset-0 z-\[(\d+)\]/, "dialog"],
+    ["components/side/ShelfToast.tsx", /data-shelf-toast="" className="[^"]*z-\[(\d+)\]/, "toast"],
+    ["components/DeskPerformanceNotice.tsx", /data-desk-performance-notice="" className="[^"]*z-\[(\d+)\]/, "toast"],
+    ["components/WidthTip.tsx", /fixed z-\[(\d+)\]/, "tip"],
+    ["components/Overlays.tsx", /data-menu-info-tip="" [^>]*className="tip fixed z-\[(\d+)\]/, "tip"],
+  ];
+
+  it("dialogs 150 < floats 160 < toasts 170 < tooltips 180, every one over the preview layers", () => {
+    for (const [p, re, band] of surfaces) {
+      const m = re.exec(src(p));
+      expect(m, p).not.toBeNull();
+      const z = Number(m![1]);
+      expect(z, `${p} (${band})`).toBeGreaterThanOrEqual(BAND[band][0]);
+      expect(z, `${p} (${band})`).toBeLessThanOrEqual(BAND[band][1]);
+    }
+    expect(src("lib/tips.ts")).toContain('zIndex: "180"');
+  });
+
+  it("a submenu is over its menu, and a popover's own note over the popover", () => {
+    const z = (p: string, re: RegExp) => Number(re.exec(src(p))![1]);
+    expect(z("components/MenuFlyout.tsx", /className="fixed z-\[(\d+)\]/)).toBeGreaterThan(z("components/Overlays.tsx", /className="float fixed z-\[(\d+)\] min-w-48/));
+    expect(z("components/MenuFlyout.tsx", /className="fixed z-\[(\d+)\]/)).toBeGreaterThan(z("components/Menu.tsx", /absolute bottom-full z-\[(\d+)\]/));
   });
 
   it("each preview layer cuts a hole for the open popovers", () => {

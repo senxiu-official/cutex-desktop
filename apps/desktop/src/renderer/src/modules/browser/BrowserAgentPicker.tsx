@@ -1,9 +1,11 @@
-// Searchable agent picker in the browser card header (replaces a plain <select>): type to filter by
-// name / project, ↑ ↓ Enter Esc, the current conversation's agent and recent grants on top, the rest
-// grouped by project. Picking only selects (same as the old <select>); the hand button grants.
+// Searchable agent picker (replaces a plain <select>): type to filter by name / project, ↑ ↓ Enter Esc, the current
+// conversation's agent and recent grants on top, the rest grouped by project. Opening it reads the list; a failed read
+// shows its reason with 重试. `look: "grant"` is the Maid 行's 「交给 Maid ▾」: picking hands the tab over (the caller
+// asks for the grant confirmation first); the plain look only selects.
 import { isImeComposing } from "../../lib/ime";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Check, ChevronDown, Search } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Check, ChevronDown, Hand, Search } from "lucide-react";
 import type { BrowserAgentView } from "../../../../shared/browser";
 import { useI18n } from "../../i18n";
 import { useTrackOverlay } from "../../lib/openOverlays";
@@ -22,11 +24,16 @@ interface Props {
   disabled: boolean;
   loading: boolean;
   placeholder: string;
+  error?: string;
+  /** "grant": an accent-soft 「交给 Maid ▾」 trigger showing `label`; "select" (default): the chosen name or `placeholder`. */
+  look?: "select" | "grant";
+  label?: string;
+  title?: string;
 }
 
 const WIDTH = 288;
 
-export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen, disabled, loading, placeholder, compact = false }: Props & { compact?: boolean }) {
+export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen, disabled, loading, placeholder, error, look = "select", label, title }: Props) {
   const win = useOwnerWindow();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -54,7 +61,8 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
     if (!open) return;
     const rect = trigger.current?.getBoundingClientRect();
     if (!rect) return;
-    const left = Math.max(8, Math.min(rect.right - WIDTH, win.innerWidth - WIDTH - 8));
+    // Under the trigger, starting at its left edge (the Maid 行 keeps it at the row's start).
+    const left = Math.max(8, Math.min(rect.left, win.innerWidth - WIDTH - 8));
     const below = win.innerHeight - rect.bottom - 12;
     setPlace({ top: rect.bottom + 4, left, maxHeight: Math.max(160, Math.min(420, below)) });
   }, [open]);
@@ -97,15 +105,18 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
   const groupLabel = (kind: string, label: string | null) => kind === "top" ? t("browser.owner.pickerSuggested") : kind === "independent" ? t("browser.owner.pickerIndependent") : label;
   let index = 0;
   return <>
-    <button ref={trigger} type="button" data-browser-agent-select aria-label={t("browser.owner.select")} title={chosen?.name ?? t("browser.owner.select")}
+    <button ref={trigger} type="button" data-browser-agent-select={look} aria-label={look === "grant" ? label : t("browser.owner.select")} data-tip={title ?? chosen?.name ?? t("browser.owner.select")}
       aria-haspopup="listbox" aria-expanded={open} disabled={disabled} onClick={() => (open ? setOpen(false) : show())}
       onKeyDown={event => { if (!isImeComposing(event) && (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") && !open) { event.preventDefault(); show(); } }}
-      className={`flex ${compact ? "max-w-20" : "max-w-36"} min-w-0 items-center gap-1 rounded border border-border bg-background px-1.5 py-1 text-xs text-foreground enabled:hover:bg-hover disabled:opacity-40`}>
-      <span className={`truncate ${chosen ? "" : "text-subtle"}`}>{chosen?.name ?? placeholder}</span>
-      <ChevronDown size={11} className="shrink-0 text-subtle" />
+      className={look === "grant"
+        ? `flex h-6 min-w-0 shrink items-center gap-1 rounded-ctl px-2 text-meta font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 ${open ? "bg-accent text-on-accent" : "bg-accent-soft text-accent enabled:hover:bg-accent enabled:hover:text-on-accent"}`
+        : "flex max-w-36 min-w-0 items-center gap-1 rounded border border-border bg-background px-1.5 py-1 text-xs text-foreground enabled:hover:bg-hover disabled:opacity-40"}>
+      {look === "grant" && <Hand size={12} aria-hidden className="shrink-0" />}
+      <span className={`truncate ${chosen || look === "grant" ? "" : "text-subtle"}`}>{look === "grant" ? label : (chosen?.name ?? placeholder)}</span>
+      <ChevronDown size={11} className={`shrink-0 ${look === "grant" ? "" : "text-subtle"}`} />
     </button>
-    {open && place && (
-      <div ref={panel} data-browser-agent-picker className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-xl"
+    {open && place && createPortal(
+      <div ref={panel} data-browser-agent-picker className="float fixed z-[160] flex flex-col overflow-hidden"
         style={{ top: place.top, left: place.left, width: WIDTH, maxHeight: place.maxHeight }}>
         <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-2.5 py-1.5">
           <Search size={12} className="shrink-0 text-subtle" />
@@ -114,8 +125,11 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
             placeholder={t("browser.owner.pickerSearch")} aria-label={t("browser.owner.pickerSearch")}
             className="h-6 min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle" />
         </div>
-        <div ref={list} id="browser-agent-picker-list" role="listbox" aria-label={t("browser.owner.select")} className="min-h-0 flex-1 overflow-y-auto p-1">
-          {!flat.length && <p className="px-2.5 py-2 text-xs text-subtle">{t(agents.length ? "browser.owner.pickerNoMatch" : loading ? "browser.owner.loadingAgents" : "browser.owner.noAgents")}</p>}
+        <div ref={list} id="browser-agent-picker-list" role="listbox" aria-label={t("browser.owner.select")} className="float-scroll min-h-0 flex-1 overflow-y-auto p-1">
+          {error && <div role="alert" className="px-2.5 py-2 text-xs text-danger">
+            <p>{error}</p><button type="button" data-browser-agent-retry="" disabled={loading} className="mt-2 underline" onClick={onOpen}>{t("browser.refusal.retry")}</button>
+          </div>}
+          {!error && !flat.length && <p role="status" className="px-2.5 py-2 text-xs text-subtle">{t(agents.length ? "browser.owner.pickerNoMatch" : loading ? "browser.owner.loadingAgents" : "browser.owner.noAgents")}</p>}
           {groups.map(group => <div key={group.key} role="group" aria-label={groupLabel(group.kind, group.label) ?? undefined}>
             <div className="truncate px-2.5 pt-1.5 pb-0.5 text-caption/[inherit] text-subtle">{groupLabel(group.kind, group.label)}</div>
             {group.agents.map(agent => {
@@ -131,7 +145,7 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
             })}
           </div>)}
         </div>
-      </div>
+      </div>, win.document.body
     )}
   </>;
 }

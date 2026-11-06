@@ -3,13 +3,16 @@ import { ForkProfileDialog } from "./ForkProfileDialog";
 // Renders the global context menu and confirm / prompt dialogs (state in lib/contextMenu.ts).
 import { createContext, memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, Info } from "lucide-react";
+import { createPortal } from "react-dom";
 import { translate, useI18n } from "../i18n";
 import { ARMED_COUNTDOWN, ARMED_TIMEOUT_MS, showArmedExpired } from "../lib/armedConfirm";
 import { closeDialog, closeMenu, normalizeEntries, runAction, selectStep, useOverlayState, watchMenuDismiss, type DialogCheck, type MenuAction, type MenuToggle } from "../lib/contextMenu";
 import { foretellAfterDelay, setForetell } from "../lib/foretell";
 import { MenuFlyout } from "./MenuFlyout";
+import { floatAround, placeTip } from "../lib/tips";
 import { MenuLayersContext, findMenuLayerElement, menuFlyoutRows, menuLayerContains, useMenuLayer, useMenuLayers } from "../lib/menuLayers";
 import { AgentInfoDialog } from "./AgentInfoDialog";
+import { FolderLookDialog } from "./FolderLookDialog";
 import { StopIdleDialog } from "./StopIdleDialog";
 import { FolderBrowser } from "./FolderBrowser";
 import { OwnerLayer } from "./OwnerLayer";
@@ -22,7 +25,7 @@ interface Toggles {
 }
 const TogglesContext = createContext<Toggles | null>(null);
 
-function ContextMenuView({ x, y, items, above, minWidth }: { x: number; y: number; items: (MenuAction | "separator")[]; above?: boolean; minWidth?: number }) {
+function ContextMenuView({ x, y, items, above, minWidth, trigger }: { x: number; y: number; items: (MenuAction | "separator")[]; above?: boolean; minWidth?: number; trigger?: HTMLElement }) {
   const ref = useRef<HTMLDivElement>(null);
   const layers = useMenuLayers();
   useMenuLayer(ref, layers);
@@ -119,7 +122,7 @@ function ContextMenuView({ x, y, items, above, minWidth }: { x: number; y: numbe
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (!menuLayerContains(layers, e.target)) closeMenu();
+      if (!trigger?.contains(e.target as Node) && !menuLayerContains(layers, e.target)) closeMenu();
     };
     const onKey = (e: KeyboardEvent) => {
       if (isImeComposing(e)) return;
@@ -184,7 +187,7 @@ function ContextMenuView({ x, y, items, above, minWidth }: { x: number; y: numbe
       ref={ref}
       role="menu"
       onContextMenu={(e) => e.preventDefault()}
-      className="fixed z-50 min-w-48 rounded-xl border border-border bg-surface p-1 text-sm shadow-xl"
+      className="float fixed z-[160] min-w-48 p-1 text-sm"
       style={{ ...pos, minWidth }}
     >
       <MenuLayersContext.Provider value={layers}><TogglesContext.Provider value={toggles}>
@@ -261,20 +264,46 @@ function MenuItems({ items, active, setActive, armed, select, shown, flyoutClose
   );
 }
 
+/**
+ * A menu row's ⓘ note (design 040 §2.1): the one tip look, beside the menu — outside its edge, level with the row —
+ * so it never covers the rows below. In the owner window's body: the menu's fade-in transform would carry it along.
+ */
+function MenuInfoTip({ row: rowRef, children }: { row: { current: HTMLElement | null }; children: ReactNode }) {
+  const win = useOwnerWindow();
+  const tip = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState<{ left: number; top: number; side: string } | null>(null);
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    const box = tip.current?.getBoundingClientRect();
+    if (!row || !box) return;
+    const menu = floatAround(row)?.getBoundingClientRect() ?? null;
+    setAt(placeTip(row.getBoundingClientRect(), { width: box.width, height: box.height }, { width: win.innerWidth, height: win.innerHeight }, { float: menu }));
+  }, [rowRef, win, children]);
+  return createPortal(
+    <div ref={tip} role="tooltip" aria-hidden data-menu-info-tip="" data-side={at?.side} className="tip fixed z-[180] w-max" style={{ left: at?.left ?? -9999, top: at?.top ?? -9999 }}>
+      {children}
+    </div>,
+    win.document.body,
+  );
+}
+
 /** Only the old and new active rows change while moving through a long submenu. */
 const MenuRow = memo(function MenuRow({ item, i, base, active, flyoutClosed, setActive, armed, select, shown }: {
   item: MenuAction; i: number; base: string; active: boolean; flyoutClosed: boolean; setActive(i: number): void;
 } & Arming) {
+  const row = useRef<HTMLDivElement>(null);
+  // A disabled row's reason (`title`) is its ⓘ too (owner 2026-11-05: why 分叉 is grey), shown on hover like any ⓘ.
+  const info = item.info ?? (item.disabled ? item.title : undefined);
   return (
-    // The tooltip sits on the wrapper: a disabled button gets no hover.
-    <div className="relative" title={item.info ? undefined : item.title} onMouseEnter={() => setActive(i)}>
+    // The tip sits on the wrapper: a disabled button gets no hover. In a float, it goes outside the menu's edge.
+    <div ref={row} className="relative" data-tip={info ? undefined : item.title} onMouseEnter={() => setActive(i)}>
       <button
         role="menuitem"
         data-menu-index={i}
         aria-haspopup={item.submenu || item.flyout !== undefined ? "menu" : undefined}
         aria-expanded={item.submenu || item.flyout !== undefined ? active && !flyoutClosed : undefined}
         disabled={item.disabled}
-        aria-describedby={item.info ? `${base}-${i}` : undefined}
+        aria-describedby={info ? `${base}-${i}` : undefined}
         data-armed={armed === item || undefined}
         onClick={() => (item.submenu || item.flyout !== undefined ? setActive(i) : select(item))}
         className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left outline-none focus:bg-surface-2 disabled:opacity-40 ${
@@ -294,18 +323,16 @@ const MenuRow = memo(function MenuRow({ item, i, base, active, flyoutClosed, set
         ) : (
           <span className="min-w-0 flex-1 truncate">{item.labelNode ?? item.label}</span>
         )}
-        {item.info && armed !== item && <Info aria-hidden size={13} data-menu-info="" className={`shrink-0 ${active ? "text-muted" : "text-subtle"}`} />}
+        {info && armed !== item && <Info aria-hidden size={13} data-menu-info="" className={`shrink-0 ${active ? "text-muted" : "text-subtle"}`} />}
         {item.hint && armed !== item && <span className="text-xs text-subtle">{item.hint}</span>}
         {(item.submenu || item.flyout !== undefined) && <ChevronRight size={13} className="shrink-0 text-subtle" />}
         {item.toggle && <span aria-hidden className="w-6 shrink-0" />}
       </button>
-      {item.info && (
+      {info && (
         <>
-          <span id={`${base}-${i}`} className="sr-only">{item.info}</span>
-          {active && armed !== item && !item.disabled && (
-            <div role="tooltip" aria-hidden data-menu-info-tip="" className="pointer-events-none absolute top-full right-1.5 z-50 mt-0.5 w-max max-w-60 rounded-inner bg-surface px-2.5 py-1.5 text-caption text-muted shadow-e2">
-              {item.info}
-            </div>
+          <span id={`${base}-${i}`} className="sr-only">{info}</span>
+          {active && armed !== item && (
+            <MenuInfoTip row={row}>{info}</MenuInfoTip>
           )}
         </>
       )}
@@ -485,9 +512,9 @@ export function Overlays() {
       <StopIdleDialog />
       {dialog && (
         <OwnerLayer doc={dialogDoc}>
-        <div className={`fixed inset-0 z-50 flex items-start justify-center bg-black/30 ${dialog.kind === "folder" ? "pt-[10vh]" : dialog.kind === "agentInfo" ? "pt-[5vh]" : "pt-[20vh]"}`} onMouseDown={(e) => e.target === e.currentTarget && (dialog.kind === "confirm" ? dialog.resolve(false) : dialog.resolve(null), closeDialog())}>
+        <div className={`fixed inset-0 z-[150] flex items-start justify-center bg-black/30 ${dialog.kind === "folder" ? "pt-[10vh]" : dialog.kind === "agentInfo" ? "pt-[5vh]" : "pt-[20vh]"}`} onMouseDown={(e) => e.target === e.currentTarget && (dialog.kind === "confirm" ? dialog.resolve(false) : dialog.resolve(null), closeDialog())}>
           {/* role: Esc anywhere else stops the running turn unless a dialog is open (lib/escInterrupt). */}
-          <div role="dialog" aria-modal="true" className={`${dialog.kind === "folder" ? "w-[34rem] max-w-[calc(100vw-2rem)]" : dialog.kind === "forkProfile" ? "w-96 max-w-[calc(100vw-2rem)] max-h-[75vh] overflow-y-auto" : dialog.kind === "agentInfo" ? "w-96 max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto" : "w-96"} rounded-xl border border-border bg-surface p-4 shadow-2xl`}>
+          <div role="dialog" aria-modal="true" className={`${dialog.kind === "folder" ? "w-[34rem] max-w-[calc(100vw-2rem)]" : dialog.kind === "forkProfile" || dialog.kind === "folderLook" ? "w-96 max-w-[calc(100vw-2rem)] max-h-[75vh] overflow-y-auto" : dialog.kind === "agentInfo" ? "w-96 max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto" : "w-96"} rounded-xl border border-border bg-surface p-4 shadow-2xl`}>
             {dialog.kind === "confirm" ? (
               <ConfirmView {...dialog} />
             ) : dialog.kind === "folder" ? (
@@ -496,6 +523,8 @@ export function Overlays() {
               <ForkProfileDialog {...dialog} />
             ) : dialog.kind === "agentInfo" ? (
               <AgentInfoDialog {...dialog} />
+            ) : dialog.kind === "folderLook" ? (
+              <FolderLookDialog {...dialog} />
             ) : (
               <PromptView {...dialog} />
             )}

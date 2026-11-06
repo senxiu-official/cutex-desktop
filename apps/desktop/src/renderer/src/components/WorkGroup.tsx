@@ -1,7 +1,7 @@
 // Tool and reasoning steps and their folding (DESIGN §4.14): a work group is one summary line, open (nothing after it
 // yet) or closed — while it runs the line carries a spinner and the current step, so it never folds from several rows
 // to one when the next message arrives (owner 2026-10-24: rows above the newest jumped). Its steps are one click away;
-// failures stay visible under the line.
+// a failed final tool keeps failures visible under the line.
 import { memo, useEffect, useRef, useState } from "react";
 import { Brain, Check, ChevronDown, ChevronRight, Loader2, ShieldAlert, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
@@ -10,7 +10,7 @@ import { reasoningLastLine, reasoningText, type ReasoningEntry } from "../lib/re
 import { useNow } from "../lib/time";
 import { autoReviewOf, type RawItem } from "../lib/timeline";
 import { AutoReviewLine } from "./AutoReview";
-import { isFailed, isRunning, toolDetail, type StepEntry, type WorkSummary } from "../lib/workGroups";
+import { isFailed, toolDetail, workGroupOutcome, type StepEntry, type WorkSummary } from "../lib/workGroups";
 import { safetyNoteOfItem } from "../lib/ownerNotify";
 import { useHostOwnerNotes } from "../lib/ownerNotifyStore";
 import { useConvHost } from "../lib/conversationScope";
@@ -119,7 +119,8 @@ function WorkGroupView({ steps, open: openGroup, summary, sessionId }: { steps: 
   // Between two steps of a running turn (the group still open) it stays 「working」 for up to a second: the
   // done look (✓ · 1s) flashed for ~0.17 s before the next step started (flicker recorder 2026-10-26).
   const last = steps[steps.length - 1]!;
-  const live = useHeldBusy(openGroup && (last.kind === "tool" ? isRunning(last.item) : last.streaming), openGroup, STEP_GAP_HOLD_MS);
+  const outcome = workGroupOutcome(steps);
+  const live = useHeldBusy(openGroup && outcome.status === "running", openGroup, STEP_GAP_HOLD_MS);
   // A single step gains nothing from folding.
   if (steps.length === 1) return <StepRow sessionId={sessionId} step={steps[0]!} />;
   const open = expanded === true;
@@ -128,14 +129,16 @@ function WorkGroupView({ steps, open: openGroup, summary, sessionId }: { steps: 
   // Calls a safety check stopped (claude-safety-grants notice) are not failures: 已拦截, not red.
   const blocked = failedRows.filter((e) => e.kind === "tool" && safetyNoteOfItem(notes, sessionId, e.item.id)?.safetyBlock).length;
   const failedCount = Math.max(0, summary.failed - blocked);
+  const lastBlocked = outcome.status === "failed" && !!outcome.lastTool && !!safetyNoteOfItem(notes, sessionId, outcome.lastTool.item.id)?.safetyBlock;
+  const failed = outcome.status === "failed" && !lastBlocked;
   return (
     <div className="my-1 min-w-0 max-w-full">
       <button onClick={() => userToggle(() => setExpanded(!open))} className="my-0.5 flex min-w-0 max-w-full items-center gap-1.5 text-xs text-muted hover:text-foreground">
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        {live ? <Loader2 size={13} className="shrink-0 animate-spin text-accent" /> : failedCount ? <X size={13} className="text-danger" /> : blocked ? <ShieldAlert size={13} className="text-warn-text" /> : <Check size={13} className="text-ok" />}
+        {live ? <Loader2 size={13} className="shrink-0 animate-spin text-accent" /> : failed ? <X size={13} className="text-danger" /> : lastBlocked ? <ShieldAlert size={13} className="text-warn-text" /> : <Check size={13} className="text-ok" />}
         <span className="truncate">{summaryText(summary, t)}</span>
         {current && <span data-work-current="" className="min-w-0 truncate font-mono text-subtle">· {current}</span>}
-        {failedCount > 0 && <span className="shrink-0 text-danger">· {t("work.failed", { n: failedCount })}</span>}
+        {failedCount > 0 && <span className={`shrink-0 ${failed || live ? "text-danger" : "text-danger/70"}`}>· {t("work.failed", { n: failedCount })}</span>}
         {blocked > 0 && <span className="shrink-0 text-muted">· {t("work.safetyBlocked", { n: blocked })}</span>}
         {summary.durationMs !== null && !live && <span className="shrink-0 text-subtle">· {formatMs(summary.durationMs)}</span>}
       </button>
@@ -146,7 +149,7 @@ function WorkGroupView({ steps, open: openGroup, summary, sessionId }: { steps: 
           ))}
         </div>
       ) : (
-        failedRows.length > 0 && (
+        (live || outcome.status === "failed") && failedRows.length > 0 && (
           <div className={`ml-2 border-l pl-2.5 ${failedCount ? "border-danger/40" : "border-border"}`}>
             {failedRows.map((e) => (
               <StepRow sessionId={sessionId} key={e.id} step={e} />

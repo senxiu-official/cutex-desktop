@@ -25,10 +25,10 @@ export default defineModule({
     ],
     "main.page": [{ id: "agent-config.newAgent", Page: NewAgentPage, useTitle: pageTitle("agent-config.newAgent.title") }],
     "settings.page": [
-      { id: "agent-config.profiles", page: "profiles", group: "agents", order: 100, icon: Boxes, titleKey: "agent-config.profiles", source: "host", Page: ProfilesPage, ...PROFILES_SEARCH },
-      { id: "agent-config.defaults", page: "defaults", group: "agents", order: 200, icon: Sparkles, titleKey: "agent-config.defaults", source: "host", hintKey: "agent-config.defaults.pageHint", Page: DefaultsPage, ...DEFAULTS_SEARCH },
-      { id: "agent-config.instructions", page: "instructions", group: "agents", order: 300, icon: ScrollText, titleKey: "agent-config.instructions", source: "host", hintKey: "agent-config.instructions.pageHint", Page: InstructionsPage, ...INSTRUCTIONS_SEARCH },
-      { id: "agent-config.collab", page: "collab", group: "agents", order: 400, icon: Users, titleKey: "agent-config.collab", source: "host", Page: CollabPage, ...COLLAB_SEARCH },
+      { id: "agent-config.profiles", page: "profiles", group: "agents", order: 100, icon: Boxes, titleKey: "agent-config.profiles", hintKey: "settings.pageHint.profiles", source: "host", Page: ProfilesPage, ...PROFILES_SEARCH },
+      { id: "agent-config.defaults", page: "defaults", group: "agents", order: 200, icon: Sparkles, titleKey: "agent-config.defaults", source: "host", hintKey: "settings.pageHint.defaults", Page: DefaultsPage, ...DEFAULTS_SEARCH },
+      { id: "agent-config.instructions", page: "instructions", group: "agents", order: 300, icon: ScrollText, titleKey: "agent-config.instructions", source: "host", hintKey: "settings.pageHint.instructions", Page: InstructionsPage, ...INSTRUCTIONS_SEARCH },
+      { id: "agent-config.collab", page: "collab", group: "agents", order: 400, icon: Users, titleKey: "agent-config.collab", hintKey: "settings.pageHint.collab", source: "host", Page: CollabPage, ...COLLAB_SEARCH },
     ],
   },
 });

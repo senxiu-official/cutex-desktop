@@ -1,6 +1,7 @@
 // Pure logic of the 正在运行的智能体 widget: which rows count, in what order, how long they have run.
 import { runningSince } from "../../lib/agentAttention";
 import type { AgentRow } from "../../lib/sidebar";
+import { compareNames } from "../../lib/rosterOrder";
 
 export interface RunningAgent {
   row: AgentRow;
@@ -18,7 +19,7 @@ export function runningAgents(rows: readonly AgentRow[], focusHost: string, only
     if (onlyFocus && hostId !== focusHost) continue;
     out.push({ row, hostId, since: runningSince(row) });
   }
-  return out.sort((a, b) => (a.since ?? Infinity) - (b.since ?? Infinity) || a.row.name.localeCompare(b.row.name));
+  return out.sort((a, b) => (a.since ?? Infinity) - (b.since ?? Infinity) || compareNames(a.row.name, b.row.name));
 }
 
 /** Whole minutes a turn has run (never negative); null when its start is unknown. */

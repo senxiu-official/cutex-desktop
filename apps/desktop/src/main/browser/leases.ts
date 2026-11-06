@@ -1,3 +1,4 @@
+import type { BrowserAuditStage } from "./audit";
 import type { BrowserControlSettings, BrowserLeaseView } from "../../shared/browser";
 import { BrowserRelayError, relayError, type RelayErrorCode, type RelayGrant, type RelayLease } from "./relayTypes";
 
@@ -7,7 +8,7 @@ export interface BrowserLeasePeer {
   revokeLease(id: string): Promise<void>;
 }
 type Entry = { lease: RelayLease; peer: BrowserLeasePeer; settings: BrowserControlSettings; phase: "holding" | "activating" | "active";
-  timer?: ReturnType<typeof setTimeout>; resolve(): void; reject(error: unknown): void; done: Promise<void>; admissionCurrent(): boolean };
+  timer?: ReturnType<typeof setTimeout>; resolve(): void; reject(error: unknown): void; done: Promise<void>; admissionCurrent(): boolean; onStage?: (stage: BrowserAuditStage) => void };
 export interface BrowserLeasesOptions {
   /** Rechecks current registry guest and host identity; must not use selected host. */
   current(lease: RelayLease): boolean;
@@ -39,26 +40,27 @@ export class BrowserLeases {
     if (!this.current(entry) || entry.phase !== "active") throw new BrowserRelayError("lease_revoked");
     return { ...entry.lease, target: { ...entry.lease.target } };
   }
-  async grant(peer: BrowserLeasePeer, input: RelayGrant, settings: BrowserControlSettings, admissionCurrent = () => true): Promise<RelayLease> {
+  async grant(peer: BrowserLeasePeer, input: RelayGrant, settings: BrowserControlSettings, admissionCurrent = () => true, onStage?: (stage: BrowserAuditStage) => void): Promise<RelayLease> {
     if (!admissionCurrent()) throw new BrowserRelayError("stale_request");
     if (this.forGuest(input.guestId) || this.attempts.has(input.guestId)) throw new BrowserRelayError("lease_conflict");
     const attempt = Symbol(); this.attempts.set(input.guestId, attempt);
     let entry: Entry | undefined;
     try {
       const lease = await peer.grantLease(input);
+      onStage?.("hold_prepare");
       if (this.attempts.get(input.guestId) !== attempt || !this.options.current(lease) || !admissionCurrent()) {
         void peer.revokeLease(lease.leaseId).catch(() => {}); throw new BrowserRelayError("stale_connection");
       }
       let resolve!: () => void, reject!: (reason: unknown) => void;
       const done = new Promise<void>((yes, no) => { resolve = yes; reject = no; }); void done.catch(() => {});
-      entry = { lease, peer, settings: { ...settings, viewport: { ...settings.viewport } }, phase: "holding", done, resolve, reject, admissionCurrent };
+      entry = { lease, peer, settings: { ...settings, viewport: { ...settings.viewport } }, phase: "holding", done, resolve, reject, admissionCurrent, onStage };
       this.entries.set(lease.leaseId, entry);
       entry.timer = setTimeout(() => this.revoke(lease.leaseId, "lease_revoked"), this.options.timeoutMs ?? 9500); entry.timer.unref?.();
       this.options.changed(input.guestId);
       await done;
       if (!this.current(entry) || entry.phase !== "active") throw new BrowserRelayError("lease_revoked");
       return entry.lease;
-    } finally { if (this.attempts.get(input.guestId) === attempt) this.attempts.delete(input.guestId); }
+    } finally { if (entry) entry.onStage = undefined; if (this.attempts.get(input.guestId) === attempt) this.attempts.delete(input.guestId); }
   }
   async held(guestId: string, leaseId: string, held: boolean): Promise<void> {
     const entry = this.entries.get(leaseId);
@@ -68,11 +70,13 @@ export class BrowserLeases {
     entry.phase = "activating";
     try {
       if (!this.current(entry)) throw new BrowserRelayError("stale_connection");
+      entry.onStage?.("prepare");
       await this.options.prepare(entry.lease, entry.settings);
       if (!this.current(entry)) throw new BrowserRelayError("lease_revoked");
       // The peer may deliver a command before this HTTP reply. Inventory admits it to the
       // queue, but waitActive blocks execution until the final consent fence has passed.
       entry.lease = { ...entry.lease, state: "active" };
+      entry.onStage?.("activate_http");
       await entry.peer.activateLease(leaseId);
       if (!this.current(entry)) throw new BrowserRelayError("lease_revoked");
       entry.phase = "active"; if (entry.timer) clearTimeout(entry.timer); entry.timer = undefined;

@@ -1,7 +1,7 @@
 // Composer input items (cute-codex UserInput) shared by main (validation before forwarding) and
 // the renderer (building them). Pure, unit-tested.
 import { MAX_IMAGE_BYTES, type ExtraInput } from "./ipc";
-import { mediaRecord, mediaUnavailable, parseCutexMediaRef, parseCutexBlobRef, parseMediaBlob, type MediaBlobDescriptor } from "./mediaBlobs";
+import { mediaDimensions, mediaRecord, mediaUnavailable, parseCutexMediaRef, parseCutexBlobRef, parseMediaBlob, type MediaBlobDescriptor } from "./mediaBlobs";
 
 const DATA_IMAGE = /^data:image\/(png|jpeg|gif|webp|bmp);base64,[A-Za-z0-9+/]+=*$/;
 
@@ -42,7 +42,8 @@ export function imageInputItems(images: readonly DraftImage[]): ExtraInput[] {
 }
 
 /** User-message image parts for display: data URLs render, host paths are read through cutex (components/ImageThumbs). */
-export type MessageImage = { kind: "url"; url: string } | { kind: "path"; path: string; /** Display-only receipt encoded by cutex's fixed text marker. */ delivery?: "pathText" }
+export type MessageImage = { kind: "url"; url: string } | { kind: "path"; path: string; /** Display-only receipt encoded by cutex's fixed text marker. */ delivery?: "pathText";
+    /** Absent from older hosts. */ width?: number; height?: number }
   | { kind: "blob"; blob: MediaBlobDescriptor } | { kind: "unavailable"; mime?: string; size?: number; reason?: string };
 
 /** Decode a media value at an already-known image field; never mine arbitrary text for URLs. */
@@ -57,12 +58,12 @@ export function messageImage(value: unknown, mime?: unknown): MessageImage | nul
   return null;
 }
 
-export function messageImages(content: readonly { type: string; url?: unknown; path?: unknown }[]): MessageImage[] {
+export function messageImages(content: readonly { type: string; url?: unknown; path?: unknown; width?: unknown; height?: unknown }[]): MessageImage[] {
   const out: MessageImage[] = [];
   for (const part of content) {
     if (part.type === "image") { const image = messageImage(part.url); if (image) out.push(image); }
     else if (part.type === "imageNotLoaded" || part.type === "cutexBlob") { const image = messageImage(part); if (image) out.push(image); }
-    else if (part.type === "localImage" && typeof part.path === "string") out.push({ kind: "path", path: part.path });
+    else if (part.type === "localImage" && typeof part.path === "string") out.push({ kind: "path", path: part.path, ...mediaDimensions(part) });
   }
   return out;
 }

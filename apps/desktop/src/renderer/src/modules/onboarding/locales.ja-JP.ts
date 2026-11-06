@@ -220,7 +220,7 @@ export const jaJP: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.minorAgent.title": "頭文字の小さなタイル",
   "onboarding.guide.minorAgent.text": "専用アバターがなく、固定されてもいない{{agents}}は、一覧に頭文字の小さなタイルで表示されます。\n「設定 → 左サイドバー → {{agent}}の行 → {{agent}}のデフォルトアバター」で「重要な{{agents}}のみ」を選んだ場合の表示です。\nアバターを付けるには、行を右クリックして「アバターを表示」を選んでください。",
   "onboarding.guide.project.title": "プロジェクトと{{director}}",
-  "onboarding.guide.project.text": "一つのプロジェクトを一人の{{director}}が担当し、作業の割り当て、{{agents}}の作成、結果の取りまとめを行います。\nプロジェクトのボードと履歴を見るには、プロジェクト名にマウスを重ね、右側の「プロジェクトビュー」をクリックします。",
+  "onboarding.guide.project.text": "一つのプロジェクトを一人の{{director}}が担当し、作業の割り当て、{{agents}}の作成、結果の取りまとめを行います。\nプロジェクトビューと履歴を見るには、プロジェクト名にマウスを重ね、右側の「プロジェクトビュー」をクリックします。",
   "onboarding.guide.needsYou.title": "対応が必要",
   "onboarding.guide.needsYou.text": "「対応が必要」は{{agent}}が質問、承認、判断を待っている状態です。\nあなたが対応するまで、停止したままのこともあります。\n入力欄の上、サイドバー各行の端、トレイにまとまり、クリックすると移動できます。",
   "onboarding.guide.delegation.title": "委任",

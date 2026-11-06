@@ -110,7 +110,7 @@ describe("one pushpin on the divider", () => {
     expect(pins).toHaveLength(1);
     const pin = pins[0] as HTMLElement;
     expect(pin.querySelector(".tray-pushpin")).not.toBeNull();
-    expect(pin.title).toBe("tray.pin.tip");
+    expect(pin.dataset.tip).toBe("tray.pin.tip");
     expect(pin.tagName).not.toBe("BUTTON");
     // Inside the divider (positioned on it), not a flow item of the row.
     const sep = pin.parentElement!;

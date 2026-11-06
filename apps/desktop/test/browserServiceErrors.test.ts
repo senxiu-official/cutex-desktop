@@ -10,6 +10,9 @@ import { BrowserRelayError, browserServiceRelayError, relayError } from "../src/
 import { browserServiceError, subresourceReticketDue, SUBRESOURCE_RETICKET_INTERVAL_MS } from "../src/main/browser/services";
 
 const CASES: [string, string][] = [
+  ["service_manually_stopped", "browser.error.serviceManuallyStopped"],
+  ["service_wake_failed", "browser.error.serviceWakeFailed"],
+  ["service_start_timeout", "browser.error.serviceWakeFailed"],
   ["service_reclaimed", "browser.error.serviceReclaimed"],
   ["service_stopped", "browser.error.serviceStopped"],
   ["service_not_found", "browser.error.serviceNotFound"],

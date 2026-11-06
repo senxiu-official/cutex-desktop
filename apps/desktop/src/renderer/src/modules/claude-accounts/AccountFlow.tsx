@@ -370,7 +370,7 @@ function AddSubscriptionDialog({ onPicked, onClose }: { onPicked(id: string): vo
   }, [onClose, overlayOpen, win]);
   const title = t("claude-accounts.addSubscription");
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[10vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-[150] flex items-start justify-center bg-black/30 pt-[10vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-modal aria-label={title} className="flex max-h-[80vh] w-[34rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         <header className="flex items-center gap-2 border-b border-border px-5 py-3">
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</h2>

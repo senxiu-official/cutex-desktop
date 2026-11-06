@@ -6,18 +6,19 @@ import type { AskSummary } from "../src/shared/ipc";
 import type { InputRecord, QueueItem } from "@cutex-desktop/protocol";
 import { record, delivery, T0, iso } from "../src/renderer/src/lib/inputLedger/testkit";
 import { emptyInputLedgerSession } from "../src/renderer/src/lib/inputLedger/alignment";
-const calls = vi.hoisted(() => ({ retry: vi.fn(), dismiss: vi.fn(), release: vi.fn(), resume: vi.fn(), notify: vi.fn(), log: vi.fn(), open: vi.fn() }));
+const calls = vi.hoisted(() => ({ retry: vi.fn(), dismiss: vi.fn(), release: vi.fn(), resume: vi.fn(), notify: vi.fn(), log: vi.fn(), open: vi.fn(), sidebar: vi.fn() }));
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), bridge: { shell: { logError: calls.log } }, onEvent: () => () => {} }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ locale: "en", t: (key: string, vars?: Record<string, unknown>) => vars?.n === undefined ? key : key + "(" + vars.n + ")" }) }));
 vi.mock("../src/renderer/src/lib/delegationOpen", () => ({ openDelegationDetail: calls.open }));
 vi.mock("../src/renderer/src/lib/contextMenu", () => ({ contextMenu: () => () => {}, openMenuFrom: vi.fn(), openMenuAt: vi.fn() }));
+vi.mock("../src/renderer/src/components/Avatar", () => ({ Avatar: ({ name, seed, size, agent }: { name: string; seed: string; size: number; agent: unknown }) => h("span", { "data-agent-avatar": seed, "data-size": size, "data-agent": !!agent }, name) }));
 vi.mock("../src/renderer/src/store", async () => {
   const { create } = await import("zustand");
   const useApp = create(() => ({ inputs: {}, ledgerOutbox: {}, sessions: {}, byHost: {}, selectedId: null, hosts: { active: "old-focus" },
     retryInput: calls.retry, dismissInput: calls.dismiss, releaseInputLease: calls.release, resumePaused: calls.resume, notify: calls.notify }));
   return { useApp, agentState: (map: Record<string, unknown>, host: string, session: string) => map?.[host+"\n"+session],
     featuresOf: (_s: unknown, host: string) => new Set(host === "new-host" ? ["input-ledger-v1"] : []),
-    selectedFeatures: () => new Set(), agentHost: () => "old-focus", sidebarOf: () => null, viewOf: () => null,
+    selectedFeatures: () => new Set(), agentHost: () => "old-focus", sidebarOf: (s: unknown, host: string) => calls.sidebar(s, host) ?? null, viewOf: () => null,
     queueItemText: (item: QueueItem) => (item.input as { text?: string }[]).map(p => p.text ?? "").join("") };
 });
 vi.mock("../src/renderer/src/lib/legacyDelivery/consumedBusReceipts", () => ({ useUnsettledBusReceipts: () => { throw Error("legacy receipt inference"); } }));
@@ -138,6 +139,19 @@ describe("D4 ledger surfaces", () => {
     expect(el.textContent).toContain("inputLedger.dismiss");
     expect(el.querySelector("[data-delegation-tag]")).toBeNull();
   });
+  it("shows owner restart recovery actions in NextUp only as offered by cutex", async () => {
+    const owner = record("restart-owner", { kind: "owner", surface: "nextUp", state: "uncertain", reason: "runtimeLost", actions: ["retry", "dismiss"] });
+    seed([owner]); panel();
+    const row = el.querySelector<HTMLElement>('[data-input-id="restart-owner"]')!;
+    expect(row.dataset.surface).toBe("nextUp");
+    expect([...row.querySelectorAll("button")].map(b => b.textContent)).toEqual(["inputLedger.retry", "inputLedger.dismiss"]);
+    await click("inputLedger.retry"); await click("inputLedger.dismiss");
+    expect(calls.retry).toHaveBeenCalledExactlyOnceWith("cutex.s1", "restart-owner", "new-host");
+    expect(calls.dismiss).toHaveBeenCalledExactlyOnceWith("cutex.s1", "restart-owner", "new-host");
+    expect(useApp.getState().inputs[key]!.records.get("restart-owner")).toBe(owner);
+    seed([{ ...owner, actions: [] }]);
+    expect(el.querySelector('[data-input-id="restart-owner"]')!.querySelector("button")).toBeNull();
+  });
   it("reads bus body without using its delivered/dismissed state", () => {
     seed([record("note", { surface: "pendingNotes", kind: "agentMessage", state: "waiting", reason: "passive" })]);
     useAgentMessages.setState({ byId: { note: { messageId: "note", body: "full bus body", state: "delivered", to: "cutex.s1" } as never }, dismissed: new Set(["note"]) });
@@ -148,6 +162,31 @@ describe("D4 ledger surfaces", () => {
     await click("inputLedger.retry"); await click("inputLedger.dismiss");
     expect(calls.retry).toHaveBeenCalledWith("cutex.s1","a","new-host"); expect(calls.dismiss).toHaveBeenCalledWith("cutex.s1","a","new-host");
     expect(ids()).toEqual(["a"]);
+  });
+  it("restores shared agent avatars for pending local and peer notes while system senders keep their kind icon", () => {
+    const sender = { kind: "agent" as const, id: "worker", cutexSessionId: "worker", name: "Worker", host: null };
+    seed([record("local-note", { kind: "agentMessage", surface: "pendingNotes", state: "accepted", sender }),
+      record("peer-note", { kind: "peerMessage", surface: "pendingNotes", state: "accepted", sender: { ...sender, kind: "peer", id: "remote-worker", cutexSessionId: "remote-worker", host: "Remote" } }),
+      record("system-note", { kind: "systemNotice", surface: "pendingNotes", state: "waiting", reason: "passive", sender: { kind: "cutex", id: "cutex-service", name: "Cutex", cutexSessionId: null, host: null } })]);
+    panel();
+    expect(calls.sidebar).toHaveBeenCalledWith(expect.anything(), "new-host");
+    for (const id of ["local-note", "peer-note"]) {
+      const row = el.querySelector(`[data-testid="ledger-queue-row"][data-input-id="${id}"]`)!;
+      expect(row.querySelector('[data-agent-avatar][data-size="16"][data-agent="true"]')).not.toBeNull();
+      expect(row.querySelector("svg")).toBeNull();
+    }
+    const system = el.querySelector('[data-testid="ledger-queue-row"][data-input-id="system-note"]')!;
+    expect(system.querySelector("[data-agent-avatar]")).toBeNull();
+    expect(system.querySelector("svg")).not.toBeNull();
+  });
+
+  it("removes a pending note on the authoritative inContext/timeline update while its turn is still running", () => {
+    const note = record("note", { kind: "agentMessage", state: "accepted", surface: "pendingNotes" });
+    seed([note], delivery("turn", 3)); panel();
+    expect(ids()).toEqual(["note"]);
+    seed([{ ...note, state: "inContext", surface: "timeline", timelineItemId: "note", turnId: "still-running", rev: 4 }], delivery("turn", 4));
+    expect(ids()).toEqual([]);
+    expect(el.querySelector('[data-testid="pending-messages"]')).toBeNull();
   });
   it("bulk dismiss includes timeline uncertainty, respects offered actions, and preserves failed rows", async () => {
     calls.dismiss.mockImplementation((_s,id) => id === "a" ? Promise.reject(Error("failed")) : Promise.resolve());

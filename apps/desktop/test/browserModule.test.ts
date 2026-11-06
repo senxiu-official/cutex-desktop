@@ -42,8 +42,8 @@ vi.mock("../src/renderer/src/store", () => ({
   }),
 }));
 import browserModule from "../src/renderer/src/modules/browser";
-import { BrowserActions, BrowserBody } from "../src/renderer/src/modules/browser/BrowserBody";
-import { BrowserControlBanner, BrowserControlHeader } from "../src/renderer/src/modules/browser/BrowserControls";
+import { BrowserBody } from "../src/renderer/src/modules/browser/BrowserBody";
+import { BrowserMaidRow } from "../src/renderer/src/modules/browser/BrowserControls";
 import { BrowserSettings } from "../src/renderer/src/modules/browser/BrowserSettings";
 import { useBrowserControlSettings } from "../src/renderer/src/modules/browser/controlSettings";
 import { startBrowser } from "../src/renderer/src/modules/browser/runtime";
@@ -257,53 +257,81 @@ describe("I2b explicit browser controls", () => {
     browserCache.update(view({ pool: "agent", loginOrigin: "http://localhost:8080", status: "closed", pageGeneration: 4 }));
     expect(renderToStaticMarkup(createElement(BrowserBody, props()))).not.toContain("data-browser-login-warning");
   });
-  it("shows the pane-header zoom chip only when main reports a level other than 100 %", () => {
+  it("shows the 地址行 zoom chip only when main reports a level other than 100 %", () => {
     browserCache.update(view({ zoom: 1.25, pageGeneration: 9 }));
-    const html = renderToStaticMarkup(createElement(BrowserActions, props({ where: "peek" })));
+    const html = renderToStaticMarkup(createElement(BrowserBody, props({ where: "peek" })));
     expect(html).toContain("data-browser-zoom");
     expect(html).toContain("125%");
     expect(html).toContain("browser.zoom.reset");
     browserCache.update(view({ zoom: undefined, pageGeneration: 10 }));
-    expect(renderToStaticMarkup(createElement(BrowserActions, props({ where: "peek" })))).not.toContain("data-browser-zoom");
+    expect(renderToStaticMarkup(createElement(BrowserBody, props({ where: "peek" })))).not.toContain("data-browser-zoom");
+  });
+  it("draws the three rows in order: Maid 行 above the 地址行, the address bar with ↵ and a page ⋯ (copy / open outside live there)", () => {
+    browserCache.update(view());
+    const html = renderToStaticMarkup(createElement(BrowserBody, props()));
+    const maid = html.indexOf("data-browser-maid-row"), address = html.indexOf("data-browser-address-row");
+    expect(maid).toBeGreaterThan(-1);
+    expect(address).toBeGreaterThan(maid);
+    expect(html).toContain("data-browser-go");
+    expect(html).toContain("data-browser-page-menu");
+    expect(html).not.toContain("browser.external\"");
+    expect(html).not.toContain("browser.copy");
+    // No header Actions any more: the tab row carries only tabs, ＋ and the card's own buttons.
+    const card = browserModule.contributes!["side.component"]!;
+    expect(card.every(item => !("Actions" in item) || !item.Actions)).toBe(true);
   });
   const controls = { hostId: "ssh-other", tabKey: "instance-1" };
   const granted = { grantee: "Agent", state: "granted", operating: false } as const;
   function enable() { browserActivation.complete(browserActivation.begin()); }
 
-  it("offers product agent controls independently of the developer flag and reads without IPC", () => {
+  it("keeps the Maid 行 with 「由你操作 · 交给 Maid」 when nothing is granted, and reads without IPC", () => {
     browserCache.update(view({ control: granted }));
-    expect(renderToStaticMarkup(createElement(BrowserControlHeader, controls))).toContain("data-browser-agent-select");
-    expect(renderToStaticMarkup(createElement(BrowserControlBanner, controls))).toBe("");
+    expect(renderToStaticMarkup(createElement(BrowserMaidRow, controls))).toContain("data-browser-agent-select=\"grant\"");
     browserCache.update(view());
-    expect(renderToStaticMarkup(createElement(BrowserControlHeader, controls))).toContain("browser.owner.grant");
-    expect(renderToStaticMarkup(createElement(BrowserControlBanner, controls))).toBe("");
+    const html = renderToStaticMarkup(createElement(BrowserMaidRow, controls));
+    expect(html).toContain("browser.maid.byYou");
+    expect(html).toContain("browser.maid.handOver");
+    expect(html).not.toContain("data-browser-revoke");
+    // No reload arrow beside the picker: the list is read when it opens (重试 only after a failure).
+    expect(html).not.toContain("browser.owner.loadAgents");
     expect(fakes.browser.forHost).toHaveBeenCalledTimes(0);
+    // The row is there with no page at all (no height jump once one attaches).
+    browserCache.clear();
+    expect(renderToStaticMarkup(createElement(BrowserMaidRow, controls))).toContain("data-browser-maid-row");
   });
   it("explains why a desktop loopback page cannot be granted", () => {
     enable();
     browserCache.update(view({ desktopLoopback: true }));
-    const html = renderToStaticMarkup(createElement(BrowserControlHeader, controls));
+    const html = renderToStaticMarkup(createElement(BrowserMaidRow, controls));
     expect(html).toContain("browser.desktopLoopback.noAgent");
     expect(html).not.toContain("data-browser-agent-select");
-    expect(html).not.toContain("data-browser-grant-agent");
   });
 
-  it("shows the login warning and revoke in both granted and paused UI; only paused offers resume", () => {
+  it("keeps 收回 and the login note in view when granted and paused; 暂停 only while granted, 继续 only while paused", () => {
     enable();
     const lease = { leaseId: "lease-1", sessionId: "agent-1", agentName: "Test agent", state: "active", origin: "owner" } as const;
     browserCache.update(view({ control: granted, lease }));
-    const header = renderToStaticMarkup(createElement(BrowserControlHeader, controls));
-    const banner = renderToStaticMarkup(createElement(BrowserControlBanner, controls));
-    expect(header).toContain("browser.owner.revoke");
-    expect(banner).toContain("browser.owner.revoke");
-    expect(banner).toContain("browser.owner.loginOwner");
-    expect(banner).toContain("browser.owner.granted");
-    expect(banner.includes("browser.owner.resume")).toBe(false);
+    const live = renderToStaticMarkup(createElement(BrowserMaidRow, controls));
+    expect(live).toContain("data-browser-revoke");
+    expect(live).toContain("data-browser-pause");
+    expect(live).toContain("browser.maid.granted");
+    expect(live).toContain("browser.owner.loginOwner");
+    expect(live).toContain("browser.maid.ownerLogins");
+    expect(live.includes("data-browser-resume")).toBe(false);
+    expect(live).not.toContain("data-browser-auto-grant");
+    browserCache.update(view({ control: granted, lease: { ...lease, auto: "local" }, pageGeneration: 1 }));
+    expect(renderToStaticMarkup(createElement(BrowserMaidRow, controls))).toContain("data-browser-auto-grant=\"local\"");
     browserCache.update(view({ control: { ...granted, state: "paused" }, lease }));
-    const paused = renderToStaticMarkup(createElement(BrowserControlBanner, controls));
-    expect(paused).toContain("browser.owner.paused");
-    expect(paused).toContain("browser.owner.resume");
-    expect(paused).toContain("browser.owner.revoke");
+    const paused = renderToStaticMarkup(createElement(BrowserMaidRow, controls));
+    expect(paused).toContain("browser.maid.paused");
+    expect(paused).toContain("data-browser-resume");
+    expect(paused).toContain("data-browser-revoke");
+    expect(paused.includes("data-browser-pause")).toBe(false);
+    // An agent-pool tab: no 「沿用你的登录」 (the 地址行's pool pill says it), the separate-pool note behind ⓘ.
+    browserCache.update(view({ control: granted, lease, pool: "agent", pageGeneration: 2 }));
+    const agentPool = renderToStaticMarkup(createElement(BrowserMaidRow, controls));
+    expect(agentPool).toContain("browser.owner.loginAgent");
+    expect(agentPool).not.toContain("browser.maid.ownerLogins");
     expect(fakes.hostApi.grantAgent).toHaveBeenCalledTimes(0);
   });
 

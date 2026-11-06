@@ -48,7 +48,7 @@ export function ProfileAccountLinkDialog({ hostId, profile, unlink = false, onCl
     setBusy(false);
     onChanged();
   };
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => !busy && onClose()}>
+  return <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/30 p-4" onClick={() => !busy && onClose()}>
     <section ref={panel} role="dialog" aria-modal="true" aria-labelledby="profile-link-title" className="w-full max-w-md rounded-xl border border-border bg-surface p-5 shadow-e2" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
       if (event.key === "Escape" && !busy) { event.stopPropagation(); onClose(); }
       if (event.key !== "Tab") return;

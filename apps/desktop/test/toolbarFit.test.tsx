@@ -144,9 +144,9 @@ describe("composer settings row", () => {
     expect(row().className).not.toContain("flex-wrap");
     expect(host.querySelectorAll("[data-quota-reset]").length).toBe(2);
     // The countdown stays in the ring's hover whatever the step.
-    const rings = [...host.querySelectorAll<HTMLElement>("[data-quota-reset]")].map((e) => e.parentElement!.title);
+    const rings = [...host.querySelectorAll<HTMLElement>("[data-quota-reset]")].map((e) => e.parentElement!.dataset.tip ?? "");
     expect(rings.every((title) => title.includes("composer.quota.resets"))).toBe(true);
-    expect(host.querySelector<HTMLElement>("[data-quota-name]")!.title).toBe("claude");
+    expect(host.querySelector<HTMLElement>("[data-quota-name]")!.dataset.tip).toBe("claude");
 
     await resize(690);
     expect(row().dataset.toolbarStep).toBe("1");

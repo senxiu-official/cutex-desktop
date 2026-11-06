@@ -1,3 +1,4 @@
+import { BrowserCursorSettings } from "./BrowserCursorSettings";
 import { useEffect, useState } from "react";
 import { DEFAULT_BROWSER_CONTROL_SETTINGS, type BrowserControlSettings, type BrowserExternalPagesView, type BrowserSitePermissionForget, type BrowserSitePermissionView } from "../../../../shared/browser";
 import { LinkRow, NumberField, ResetButton, Section, Select, SettingRow, SettingsGroup, Toggle } from "../../components/settings/Form";
@@ -110,6 +111,7 @@ export function BrowserSettings() {
   // agent permissions (the host pages' picker; never the focus host in its place).
   return <><SettingsDevicePart title={t("browser.part.device")} hint={t("browser.part.deviceHint")}><Section title={t("browser.settings")} hint={t("browser.owner.settingsHint")}
     actions={<ResetButton onClick={() => save(DEFAULT_BROWSER_CONTROL_SETTINGS)} title={t("browser.settingsReset")} />}>
+    <BrowserCursorSettings />
     <SettingRow agents="now" source="local" label={t("browser.hiddenTarget")} hint={t("browser.hiddenTargetHint")} reset={<ResetButton disabled={settings.hiddenTarget === DEFAULT_BROWSER_CONTROL_SETTINGS.hiddenTarget} onClick={() => save({ ...settings, hiddenTarget: DEFAULT_BROWSER_CONTROL_SETTINGS.hiddenTarget })} />}>
       <Select value={settings.hiddenTarget} label={t("browser.hiddenTarget")} options={[
         { value: "reveal", label: t("browser.hiddenReveal") }, { value: "reject", label: t("browser.hiddenReject") },

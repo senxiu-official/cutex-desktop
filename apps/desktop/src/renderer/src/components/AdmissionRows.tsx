@@ -33,9 +33,12 @@ import { steerDelivery, type PendingSteer } from "../lib/legacyDelivery/pendingS
 import type { ImageSteering } from "../lib/imageSteer";
 import { QUEUE_ROW, ROW_META, ROW_ACTIONS, rowText } from "../lib/queueRow";
 import type { InputRecord } from "@cutex-desktop/protocol";
+import { InputHoldControl } from "./InputHoldControl";
 import { InputStatus } from "./InputStatus";
 import { formatWhen, useClock, useNow } from "../lib/time";
-import { useApp } from "../store";
+import { sidebarOf, useApp } from "../store";
+import { rowsOf } from "../lib/viewHost";
+import { SenderAvatar } from "./SystemAvatar";
 import { convFeaturesOf, useConvHost, useConvScope } from "../lib/conversationScope";
 import { DelegationTag } from "./DelegationParts";
 import { DelegationRow } from "./DelegationQueue";
@@ -64,6 +67,10 @@ export function LedgerAdmissionRow({ record, sessionId, hostId, body, children, 
   const { t } = useI18n();
   const viewHost = useConvHost();
   const rowHost = hostId ?? viewHost;
+  const agentSender = record.sender.kind === "agent" || record.sender.kind === "peer";
+  const senderId = record.sender.cutexSessionId ?? record.sender.id;
+  // Only this host owns local sender ids; unknown/peer senders get the shared agent fallback.
+  const senderAvatar = useApp(s => record.sender.kind === "agent" ? rowsOf(sidebarOf(s, rowHost)).find(r => r.cutexSessionId === senderId)?.avatar ?? null : null);
   const statusNotice = record.kind === "delegationStatus";
   const ask = useDelegation(rowHost, statusNotice ? record.askId : null);
   // Status previews contain internal event reference keys, not owner-facing prose.
@@ -73,11 +80,13 @@ export function LedgerAdmissionRow({ record, sessionId, hostId, body, children, 
   return <div {...rowProps} className={`${QUEUE_ROW} min-h-6 max-h-6 shrink-0 overflow-hidden hover:bg-hover`} data-testid="ledger-queue-row" data-input-id={record.inputId} data-surface={record.surface}>
     {grip}
     {media}
-    <KindIcon icon={record.kind === "owner" ? CornerDownLeft : record.kind === "alarm" ? AlarmClock : Mail} label={t(record.kind === "owner" ? "queue.delivery.owner" : "queue.delivery.bus")} />
+    {agentSender ? <SenderAvatar id={senderId} name={record.sender.name} avatar={senderAvatar} size={16} agent />
+      : <KindIcon icon={record.kind === "owner" ? CornerDownLeft : record.kind === "alarm" ? AlarmClock : Mail} label={t(record.kind === "owner" ? "queue.delivery.owner" : "queue.delivery.bus")} />}
     {record.kind !== "owner" && <span className="max-w-[25%] shrink truncate text-ui font-medium" title={record.sender.host ?? undefined}>{record.sender.name}</span>}
     {statusNotice && askId && <DelegationTag askId={askId} onJump={openAsk} />}
     {statusNotice && openAsk ? <button type="button" onClick={openAsk} className="min-w-0 flex-1 truncate text-left text-ui hover:text-accent hover:underline" title={text}>{rowText(text)}</button>
       : <span className="min-w-0 flex-1 truncate text-ui" title={statusNotice ? text : body ?? record.preview}>{rowText(text)}</span>}
+    <InputHoldControl record={record} sessionId={sessionId} hostId={hostId} />
     <InputStatus record={record} sessionId={sessionId} hostId={hostId} />
     {children && <span className={`${ROW_ACTIONS} h-5 max-h-5`}>{children}</span>}
   </div>;

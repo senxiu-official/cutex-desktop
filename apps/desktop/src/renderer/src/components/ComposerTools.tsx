@@ -40,7 +40,7 @@ function Row({ icon, label, hint, oneLine, right, chevron, active, disabled, onC
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm">{label}</span>
         {hint && (
-          <span className={`block text-xs text-subtle ${oneLine ? "truncate" : ""}`} title={oneLine ? hint : undefined}>
+          <span className={`block text-xs text-subtle ${oneLine ? "truncate" : ""}`} data-tip={oneLine ? hint : undefined}>
             {hint}
           </span>
         )}
@@ -324,7 +324,7 @@ export function ComposerTools({ canImages, imagePickBlocked, canFiles, filesDisa
                 <div key={s.path} className="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 hover:bg-surface-2">
                   <span className="min-w-0 flex-1">
                     <span className={`block truncate text-sm ${s.enabled ? "" : "text-muted"}`}>{s.interface?.displayName ?? s.name}</span>
-                    <span className="block truncate text-xs text-subtle" title={skillDesc(s)}>
+                    <span className="block truncate text-xs text-subtle" data-tip={skillDesc(s)}>
                       {s.scope}
                       {s.pluginId ? ` · ${s.pluginId}` : ""} · {skillDesc(s)}
                     </span>
@@ -372,7 +372,7 @@ export function ComposerTools({ canImages, imagePickBlocked, canFiles, filesDisa
                     <span className={`h-2 w-2 shrink-0 rounded-full bg-current ${TONE[st.tone]}`} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm">{s.name}</span>
-                      <span className="block truncate text-xs text-subtle" title={s.toolsError ?? undefined}>
+                      <span className="block truncate text-xs text-subtle" data-tip={s.toolsError ?? undefined}>
                         {s.toolsError ?? (st.tools > 0 ? t("settings.mcp.tools", { n: st.tools }) : (s.httpOrigin ?? ""))}
                       </span>
                     </span>

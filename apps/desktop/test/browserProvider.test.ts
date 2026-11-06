@@ -48,14 +48,14 @@ class DebuggerMock extends EventEmitter {
     return {};
   });
 }
-function fixture(extra: Partial<Pick<InAppProviderOptions, "prepareNavigation" | "keyboardFocused">> = {}) {
+function fixture(extra: Partial<Pick<InAppProviderOptions, "prepareNavigation" | "keyboardFocused" | "isolated" | "cursorMoveMs" | "coordinateScale">> = {}) {
   let generation = 0;
   const debug = new DebuggerMock();
   const guest = { isDestroyed: vi.fn(() => false), debugger: debug, focus: vi.fn() };
   const getGuest = vi.fn(() => guest as any);
   const ensureVisible = vi.fn(async () => ({ width: 640, height: 360 }));
   const allowUrl = vi.fn(() => true), onChanged = vi.fn();
-  const provider = new InAppProvider({ getGuest, ensureVisible, allowUrl, onChanged, nextPageGeneration: () => ++generation, ...extra });
+  const provider = new InAppProvider({ coordinateScale: () => .5, cursorMoveMs: 0, getGuest, ensureVisible, allowUrl, onChanged, nextPageGeneration: () => ++generation, ...extra });
   return { provider, guest, debug, getGuest, ensureVisible, allowUrl, onChanged };
 }
 async function until(predicate: () => boolean) {
@@ -122,9 +122,9 @@ describe("main-only in-app browser provider", () => {
     await expect(f.provider.grant(guestId)).rejects.toMatchObject({ code: "target_closed" });
     expect(f.debug.attach).not.toHaveBeenCalled();
   });
-  it("fits the configured DPR1 viewport and clears it before release detach without focusing", async () => {
+  it("keeps a visible card native and releases without focusing or re-laying out", async () => {
     const f = fixture(); await f.provider.grant(guestId);
-    expect(f.debug.sendCommand).toHaveBeenCalledWith("Emulation.setDeviceMetricsOverride", { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false, scale: .5 });
+    expect(f.debug.sendCommand.mock.calls.some(([method]) => method === "Emulation.setDeviceMetricsOverride")).toBe(false);
     expect(f.provider.controlView(guestId)).toEqual({ grantee: "Agent", state: "granted", operating: false });
     f.provider.release(guestId);
     expect(f.provider.hasGrant(guestId)).toBe(false);
@@ -208,7 +208,7 @@ describe("main-only in-app browser provider", () => {
     f.provider.dispose();
   });
   it("takeover during grant setup leaves a paused grant, not late authority", async () => {
-    const f = fixture(), metrics = deferred<unknown>();
+    const f = fixture({ isolated: () => true }), metrics = deferred<unknown>();
     f.debug.handler = method => method === "Emulation.setDeviceMetricsOverride" ? metrics.promise : undefined;
     const result = expect(f.provider.grant(guestId)).rejects.toMatchObject({ code: "permission_denied" });
     await until(() => f.debug.sendCommand.mock.calls.some(([method]) => method === "Emulation.setDeviceMetricsOverride"));
@@ -245,7 +245,7 @@ describe("main-only in-app browser provider", () => {
     await vi.advanceTimersByTimeAsync(1); expect(f.debug.attached).toBe(false); expect(f.provider.hasGrant(guestId)).toBe(true);
     await expect(f.provider.act(guestId, ref, "click")).rejects.toMatchObject({ code: "stale_ref" });
     expect(f.debug.attach).toHaveBeenCalledTimes(2);
-    expect(f.debug.sendCommand.mock.calls.filter(([method]) => method === "Emulation.setDeviceMetricsOverride")).toHaveLength(2);
+    expect(f.debug.sendCommand.mock.calls.filter(([method]) => method === "Emulation.setDeviceMetricsOverride")).toHaveLength(0);
     f.provider.dispose(); await vi.advanceTimersByTimeAsync(0);
   });
   it("never detaches a debugger owned by something else", async () => {
@@ -266,7 +266,7 @@ describe("main-only in-app browser provider", () => {
     const f = fixture(); await f.provider.grant(guestId);
     expect(await f.provider.screenshot(guestId)).toMatchObject({ width: 1280, height: 720, mimeType: "image/png",
       viewport: { width: 1280, height: 720 }, captureRect: { x: 0, y: 0, width: 1280, height: 720 },
-      imageScale: { x: 1, y: 1 }, displayScale: .5 });
+      imageScale: { x: 1, y: 1 }, displayScale: 1 });
     f.debug.handler = method => method === "Page.captureScreenshot" ? { data: "AAAA" } : undefined;
     await expect(f.provider.screenshot(guestId)).rejects.toMatchObject({ code: "transport_error" });
     f.provider.dispose();
@@ -302,10 +302,46 @@ describe("main-only in-app browser provider", () => {
     expect(f.debug.sendCommand).toHaveBeenCalledTimes(commands); expect(f.debug.detach).toHaveBeenCalledTimes(1);
     f.debug.handler = undefined; f.provider.dispose(); await vi.advanceTimersByTimeAsync(0);
   });
-  it("updates fit scale after resize and does not upscale large cards", async () => {
-    const f = fixture(); await f.provider.grant(guestId);
-    f.ensureVisible.mockResolvedValue({ width: 2560, height: 1440 }); await target(f);
+  it.each([{ width: 640, height: 360 }, { width: 2560, height: 1440 }, { width: 900.5, height: 600.25 }])("never fits or overrides a visible $width × $height card", async bounds => {
+    const f = fixture(); f.ensureVisible.mockResolvedValue(bounds);
+    await f.provider.grant(guestId); await target(f);
+    expect(f.debug.sendCommand.mock.calls.some(([method]) => method === "Emulation.setDeviceMetricsOverride")).toBe(false);
+    f.provider.dispose();
+  });
+  it.each([{ width: 0, height: 720 }, { width: Infinity, height: 720 }, { width: 1280, height: NaN }])("rejects unavailable bounds without attaching", async bounds => {
+    const f = fixture(); f.ensureVisible.mockResolvedValue(bounds);
+    await expect(f.provider.grant(guestId)).rejects.toMatchObject({ code: "target_hidden" });
+    expect(f.debug.attach).not.toHaveBeenCalled(); f.provider.dispose();
+  });
+  it("uses the configured fallback for hidden reads/finds and clears it when the card returns", async () => {
+    const f = fixture(); await f.provider.grant(guestId, { ...DEFAULT_BROWSER_CONTROL_SETTINGS, viewport: { width: 900, height: 600 } });
+    f.ensureVisible.mockRejectedValue(Object.assign(Error(), { code: "target_hidden" }));
+    await f.provider.snapshot(guestId); await f.provider.find(guestId, { role: "textbox" });
+    expect(f.debug.sendCommand).toHaveBeenCalledWith("Emulation.setDeviceMetricsOverride", { width: 900, height: 600, deviceScaleFactor: 1, mobile: false, scale: 1 });
+    expect(f.debug.sendCommand.mock.calls.filter(([method]) => method === "Emulation.setDeviceMetricsOverride")).toHaveLength(1);
+    f.ensureVisible.mockResolvedValue({ width: 1600, height: 1000 }); await target(f);
+    expect(f.debug.sendCommand).toHaveBeenCalledWith("Emulation.clearDeviceMetricsOverride");
+    expect(f.debug.sendCommand.mock.calls.filter(([method]) => method === "Emulation.setDeviceMetricsOverride")).toHaveLength(1);
+    f.provider.dispose();
+  });
+  it("uses the configured viewport for an isolated offscreen carrier", async () => {
+    const f = fixture({ isolated: () => true }); await f.provider.grant(guestId);
     expect(f.debug.sendCommand).toHaveBeenCalledWith("Emulation.setDeviceMetricsOverride", { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false, scale: 1 });
+    f.provider.dispose();
+  });
+  it("expires refs after a one-axis card resize without changing the page viewport", async () => {
+    const f = fixture(); await f.provider.grant(guestId); const ref = await target(f);
+    f.ensureVisible.mockResolvedValue({ width: 800, height: 360 });
+    await expect(f.provider.act(guestId, ref, "click")).rejects.toMatchObject({ code: "stale_ref" });
+    expect(f.debug.sendCommand.mock.calls.some(([method]) => method.startsWith("Input.") || method === "Emulation.setDeviceMetricsOverride")).toBe(false);
+    f.provider.dispose();
+  });
+  it("refuses a mid-action resize even when both old fit scales would have been 1", async () => {
+    const f = fixture(); f.ensureVisible.mockResolvedValue({ width: 2560, height: 1440 });
+    await f.provider.grant(guestId); const ref = await target(f);
+    f.ensureVisible.mockResolvedValueOnce({ width: 2560, height: 1440 }).mockResolvedValue({ width: 2560, height: 1400 });
+    await expect(f.provider.act(guestId, ref, "click")).rejects.toMatchObject({ code: "target_hidden" });
+    expect(f.debug.sendCommand.mock.calls.some(([method]) => method.startsWith("Input."))).toBe(false);
     f.provider.dispose();
   });
   it.each(["deadline", "abort"] as const)("bounds visibility preflight by caller %s and ignores its late result", async mode => {
@@ -387,5 +423,78 @@ describe("main-only in-app browser provider", () => {
     await expect(f.provider.snapshot(guestId)).rejects.toMatchObject({ code: "busy" });
     f.provider.dispose(); await result; pending.resolve(cdpFixture.ax);
     await expect(f.provider.grant(guestId)).rejects.toMatchObject({ code: "target_closed" });
+  });
+});
+
+
+describe("agent action cursor feedback", () => {
+  const rectPosition = { x: 70, y: 40, rect: { x: 20, y: 20, width: 100, height: 40 } };
+  function position(f: ReturnType<typeof fixture>, read: () => typeof rectPosition = () => rectPosition) {
+    f.debug.handler = (method, params) => method === "Runtime.callFunctionOn" && params.functionDeclaration?.includes("getBoundingClientRect") ? { result: { value: read() } } : undefined;
+  }
+  it.each(["click", "fill"] as const)("publishes only mapped geometry for %s before native input", async action => {
+    const f = fixture(); position(f); await f.provider.grant(guestId); const ref = await target(f);
+    const cues: unknown[] = [];
+    f.onChanged.mockImplementation(() => { const cue = f.provider.cursorView(guestId); if (cue) cues.push({ ...cue, inputs: f.debug.sendCommand.mock.calls.filter(([method]) => method.startsWith("Input.")).length }); });
+    await f.provider.act(guestId, ref, action, "private input value");
+    expect(cues).toContainEqual(expect.objectContaining({ kind: action === "fill" ? "type" : "click", phase: "move", x: 35, y: 20, viewport: { width: 640, height: 360 }, rect: { x: 10, y: 10, width: 50, height: 20 }, inputs: 0 }));
+    expect(cues).toContainEqual(expect.objectContaining({ phase: "dispatch", inputs: 0 }));
+    expect(JSON.stringify(cues)).not.toMatch(/private|backendNodeId|selector/);
+    f.provider.ownerActivity(guestId, "guest-pointer"); // let the agent echo grace expire first
+    f.provider.release(guestId); expect(f.provider.cursorView(guestId)).toBeUndefined();
+  });
+  it.each(["hover", "scroll"] as const)("publishes the %s target without page content", async kind => {
+    const f = fixture(); await f.provider.grant(guestId); const ref = await target(f);
+    f.debug.handler = (method, params) => {
+      if (method !== "Runtime.callFunctionOn") return;
+      const fn = params.functionDeclaration;
+      if (fn?.includes("getBoundingClientRect")) return { result: { value: rectPosition } };
+      if (fn?.includes("function(kind, x, y, direction)")) return { result: { objectId: "motion" } };
+      if (fn?.includes("return this.read()")) return { result: { value: { seen: true, moved: true, position: "stable", dx: 0, dy: 100, atEdge: false } } };
+    };
+    await f.provider.action(guestId, kind === "hover" ? { kind, ref } : { kind, ref, direction: "down", amount: 100 });
+    expect(f.provider.cursorView(guestId)).toMatchObject({ kind, phase: "dispatch", x: 35, y: 20 }); f.provider.dispose();
+  });
+  it("maps native zoom independently of viewport width reduced by a scrollbar", async () => {
+    const f = fixture({ coordinateScale: () => 1.25 }); position(f);
+    const previous = f.debug.handler;
+    f.debug.handler = (method, params) => method === "Page.getLayoutMetrics" ? { cssVisualViewport: { clientWidth: 496, clientHeight: 288, pageX: 0, pageY: 0 } } : previous?.(method, params);
+    await f.provider.grant(guestId); const ref = await target(f); await f.provider.act(guestId, ref, "click");
+    expect(f.provider.cursorView(guestId)).toMatchObject({ x: 87.5, y: 50, rect: { x: 25, y: 25, width: 125, height: 50 } }); f.provider.dispose();
+  });
+  it("owner takeover during movement hides the cue and dispatches nothing", async () => {
+    vi.useFakeTimers(); const f = fixture({ cursorMoveMs: 160 }); position(f); await f.provider.grant(guestId); const ref = await target(f);
+    const acting = f.provider.act(guestId, ref, "click"); const rejected = expect(acting).rejects.toMatchObject({ code: "cancelled" });
+    await until(() => f.provider.cursorView(guestId)?.phase === "move"); expect(f.provider.agentInput(guestId)).toBe(false);
+    f.provider.ownerTakeover(guestId, "pointerdown"); expect(f.provider.cursorView(guestId)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(200); await rejected;
+    expect(f.debug.sendCommand.mock.calls.some(([method]) => method.startsWith("Input."))).toBe(false); f.provider.dispose();
+  });
+  it("co-control owner activity during movement hides and invalidates without pausing the grant", async () => {
+    vi.useFakeTimers(); const f = fixture({ cursorMoveMs: 160 }); position(f); await f.provider.grant(guestId); const ref = await target(f);
+    const rejected = expect(f.provider.act(guestId, ref, "click")).rejects.toMatchObject({ code: "stale_ref" });
+    await until(() => f.provider.cursorView(guestId)?.phase === "move"); f.provider.ownerActivity(guestId, "guest-pointer");
+    expect(f.provider.cursorView(guestId)).toBeUndefined(); expect(f.provider.controlView(guestId)?.state).toBe("granted");
+    await vi.advanceTimersByTimeAsync(200); await rejected;
+    expect(f.debug.sendCommand.mock.calls.some(([method]) => method.startsWith("Input."))).toBe(false); f.provider.dispose();
+  });
+  it("finishes the owner-typing quiet wait before rechecking target coordinates", async () => {
+    vi.useFakeTimers(); const f = fixture({ cursorMoveMs: 160 }); let moved = false;
+    position(f, () => moved ? { ...rectPosition, x: 100 } : rectPosition);
+    await f.provider.grant(guestId); const ref = await target(f);
+    const rejected = expect(f.provider.act(guestId, ref, "click")).rejects.toMatchObject({ code: "not_actionable" });
+    await until(() => f.provider.cursorView(guestId)?.phase === "move"); f.provider.ownerActivity(undefined, "app-keyboard");
+    await vi.advanceTimersByTimeAsync(200); moved = true; await vi.advanceTimersByTimeAsync(1300); await rejected;
+    expect(f.debug.sendCommand.mock.calls.some(([method]) => method.startsWith("Input."))).toBe(false); f.provider.dispose();
+  });
+  it("rechecks target geometry after movement and refuses a moved target", async () => {
+    const f = fixture(); let reads = 0; position(f, () => ++reads === 1 ? rectPosition : { ...rectPosition, x: 100 });
+    await f.provider.grant(guestId); const ref = await target(f);
+    await expect(f.provider.act(guestId, ref, "click")).rejects.toMatchObject({ code: "not_actionable" });
+    expect(f.provider.cursorView(guestId)).toBeUndefined(); expect(f.debug.sendCommand.mock.calls.some(([method]) => method.startsWith("Input."))).toBe(false); f.provider.dispose();
+  });
+  it("never publishes an offscreen carrier cursor or waits for an invisible animation", async () => {
+    const f = fixture({ isolated: () => true, cursorMoveMs: 160 }); f.ensureVisible.mockResolvedValue({ width: 1280, height: 720 }); position(f); await f.provider.grant(guestId); const ref = await target(f);
+    await f.provider.act(guestId, ref, "click"); expect(f.provider.cursorView(guestId)).toBeUndefined(); f.provider.dispose();
   });
 });

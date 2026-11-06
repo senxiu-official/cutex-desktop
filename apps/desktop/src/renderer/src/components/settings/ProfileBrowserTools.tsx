@@ -8,31 +8,32 @@ import { browserActivation } from "../../../../shared/browser";
 import { browserOwnerErrorKey as browserErrorKey } from "../../../../shared/browser";
 import { useApp } from "../../store";
 import { Button, ResetButton, Section, Select, SettingRow, Toggle } from "./Form";
-import type { BrowserClaimPolicyView } from "../../../../shared/browser";
+import { BROWSER_TOOL_SURFACES, type BrowserClaimPolicyView, type BrowserToolSurface } from "../../../../shared/browser";
 import { BROWSER_CLAIM_MODES, DEFAULT_BROWSER_CLAIM_MODE, type BrowserClaimMode } from "../../../../shared/browserClaim";
 
 /** Immediate one-field save; does not join or overwrite the profile's other draft fields. */
 export function BrowserProfileTools({ profile }: { profile: string; name?: string }) {
   const { t } = useI18n(), hostId = useTargetHostId(), enabled = useSyncExternalStore(browserActivation.subscribe, browserActivation.get, browserActivation.get);
   const epoch = useApp(state => state.hosts ? hostEpoch(state.hosts, hostId) : null);
-  const supported = useTargetFeatures().has("browser-relay-v1");
+  const features = useTargetFeatures(), supported = features.has("browser-relay-v1"), surfaces = features.has("browser-tool-surface-v1"), scripts = features.has("browser-script-v1");
   const available = enabled && supported && !!epoch && !!bridge.browser;
   const [value, setValue] = useState<boolean | null>(null), [busy, setBusy] = useState(false), [failed, setFailed] = useState<ReturnType<typeof browserErrorKey> | null>(null);
+  const [surface, setSurface] = useState<BrowserToolSurface | null>(null);
   const generation = useRef(0);
   const current = () => { const hosts = useApp.getState().hosts; return !!hosts && hostEpoch(hosts, hostId) === epoch; };
-  async function request(next?: boolean) {
+  async function request(next?: boolean, nextSurface?: BrowserToolSurface) {
     if (!available || !bridge.browser) return;
     const token = ++generation.current; setBusy(true); setFailed(null);
     try {
       await new Promise<void>(resolve => queueMicrotask(resolve));
       if (token !== generation.current || !current()) return;
-      const result = await bridge.browser.forHost(hostId).profileTools(profile, next);
-      if (token === generation.current && current()) setValue(result.enabled);
-    } catch (reason) { if (token === generation.current) { setFailed(browserErrorKey(reason)); setValue(null); } }
+      const result = await bridge.browser.forHost(hostId).profileTools(profile, next, nextSurface);
+      if (token === generation.current && current()) { setValue(result.enabled); setSurface(result.surface ?? null); }
+    } catch (reason) { if (token === generation.current) { setFailed(browserErrorKey(reason)); setValue(null); setSurface(null); } }
     finally { if (token === generation.current) setBusy(false); }
   }
   useEffect(() => {
-    ++generation.current; setValue(null); setBusy(false); setFailed(null);
+    ++generation.current; setValue(null); setSurface(null); setBusy(false); setFailed(null);
     if (available) void request();
     return () => { ++generation.current; };
   }, [hostId, epoch, profile, available]);
@@ -40,14 +41,18 @@ export function BrowserProfileTools({ profile }: { profile: string; name?: strin
   if (!enabled) return <SettingRow source="local" agents="none" navigation label={t("browser.profile.tools")} hint={t("browser.profile.moduleOff")}>
     <Button onClick={() => useApp.getState().openSettings("modules")}>{t("modules.openModules")}</Button>
   </SettingRow>;
-  return <SettingRow source="host" agents="offNowOnNext" label={t("browser.profile.tools")} hint={<>
+  return <><SettingRow source="host" agents="offNowOnNext" label={t("browser.profile.tools")} hint={<>
     {t("browser.profile.hint")}
     {!available && <span className="block">{t("browser.host.unavailable")}</span>}
     {failed && <span role="alert" className="block text-danger">{t(failed)}</span>}
   </>}>
     <Toggle checked={value ?? false} onChange={next => { if (!busy && value !== null) void request(next); }}
       disabled={!available || busy || value === null} label={t("browser.profile.tools")} />
-  </SettingRow>;
+  </SettingRow>{surfaces && value === true && surface !== null && <SettingRow source="host" agents="offNowOnNext" label={t("browser.profile.surface")} hint={t("browser.profile.surfaceHint")}>
+    <Select value={surface} disabled={!available || busy} label={t("browser.profile.surface")}
+      options={BROWSER_TOOL_SURFACES.filter(option => option !== "script" || scripts || surface === "script").map(option => ({ value: option, label: t(`browser.profile.surface.${option}` as MessageKey) }))}
+      onChange={next => { if (!busy && next !== surface) void request(undefined, next); }} />
+  </SettingRow>}</>;
 }
 
 /**

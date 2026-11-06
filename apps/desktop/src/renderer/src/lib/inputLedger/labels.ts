@@ -141,6 +141,10 @@ export function inputLabelFor(key: InputLabelKey): InputLabel {
 
 /** A record's label. An accepted owner record with a turn is an insert (Codex steer). */
 export function inputLabel(record: InputRecord): InputLabel {
+  // Describe a timeline owner's host wait without inventing a turn to wait for.
+  if (record.kind === "owner" && record.surface === "timeline" && record.state === "waiting" && record.reason === "hostBusy") {
+    return { kind: "label", id: "held", reason: record.reason, stalled: record.stalled };
+  }
   const label = inputLabelFor({
     state: record.state,
     reason: record.reason,

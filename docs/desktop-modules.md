@@ -213,7 +213,7 @@ export interface SlotEntry<T extends SlotItemBase> {  // snapshot(slot) 的一�
 | A | `project.tab`（v1.12，§21） | `modules/projects/ProjectsPage.tsx`（标签栏、概览计数行），`lib/projectMenus.tsx`（打开项目页面） | artifacts 成果库、services 服务 |
 | A | `conversation.status` | `lib/statusItems.ts:5–12`，`StatusCapsule.tsx:45,270–453`，`StatusBar.tsx:57–77` | 目标、进程、终端、subagents、委托、作业 |
 | A | `nav.primary` | `SidebarNav.tsx`：顶栏主机选择器右边一组平铺图标（`TitleBarEntries`，侧栏 v5，设计 040 §4.1）；头像栏（侧栏收起）的图标（`TopNav rail`，v1.18 `lead` 条目在最上面） | 桌面（`lead`，v1.18）、快速对话、新建 agent、项目、服务、委托、作业、审批 |
-| A | `main.page` | `App.tsx:101–121`，`store.ts:84`（`MainView`），`TitleBar.tsx:136–200`（面包屑） | 设置、项目、委托、作业、审批、服务、草稿对话、新建 agent（任务详情页 r219 删除） |
+| A | `main.page` | `App.tsx:101–121`，`store.ts:84`（`MainView`），`TitleBar.tsx:136–200`（面包屑） | 设置、项目、委托、作业、审批、服务、草稿对话、新建 agent（任务详情页已删除） |
 | A | `timeline.received` | `lib/receivedRows.ts:16–24`，`Timeline.tsx:276–298` | task-service 任务（旧转录）、委托请求、委托结果；兜底 = agent 消息 |
 | A | `timeline.tool` | `WorkGroup.tsx:193–198`，`Timeline.tsx:301–303`，`lib/workGroups.ts:127` | subagents（collab）、旧 cutex 任务工具、委托卡片；兜底 = 普通工具行 |
 | B | `composer.plus` | `ComposerTools.tsx:108–370`（`PendingChat.tsx:495` 也用） | 图片、@文件、技能引用、进程、目标、记忆、技能、MCP |
@@ -438,7 +438,7 @@ fallback 出现后压 300 ms）。常开的页（审批、委托、作业、项�
 - 第 2 步（状态胶囊）加 6 个可关模块：`goal`、`plan`、`background-terminals`、`subagents`、`delegations`（`agent-asks`）、
   `jobs`（`job-service`），注册表里排在 `agent-config` 之后。`delegations` / `jobs` 第 3 步再接页面和导航。
 - 第 3 步（页面与导航）加 5 个可关模块：`quick-chats`（`human-create-session`）、`projects`、`services`（`services`）、
-  `approvals`（`owner-approvals`）、`task-service`（任务详情页，不门控；r219 删除该页，模块只留旧转录的时间线行），排在 `jobs` 之后；`agent-config` 加 新建 agent
+  `approvals`（`owner-approvals`）、`task-service`（任务详情页，不门控；已删除该页，模块只留旧转录的时间线行），排在 `jobs` 之后；`agent-config` 加 新建 agent
   （条目级 `human-create-agent`），`shell` 加 设置 页（Aside = 设置导航）和底栏 ⚙ 设置。
 
 ### 3.5 时间线插槽（第 4 步，已接入）
@@ -692,16 +692,16 @@ apps/desktop/src/renderer/src/dev/
    **已落地（2026-10-09）**：侧栏入口（order 100–700）`quick-chats.nav`（新工作，▾ 选 profile）、`agent-config.newAgent`、
    `projects.nav`、`services.nav`、`delegations.nav`（⚠ N）、`jobs.nav`（`hide`）、`approvals.nav`（⚠ N），底栏
    `shell.settings`（红点；有落后运行时直接开 运行时）。页面 `shell.settings`、`agent-config.newAgent`、`delegations.page`、
-   `jobs.page`、`quick-chats.draft`、`projects.page`、`services.page`、`approvals.page`、`task-service.task`（r219 删除）；页面组件搬进
-   各模块目录（`ProjectsPage`、`ServicesPage`、`ApprovalsPage`、`JobsPage`、`TaskDetailPage`（r219 删除）、`NewAgentPage`、`PendingChat`），
+   `jobs.page`、`quick-chats.draft`、`projects.page`、`services.page`、`approvals.page`、`task-service.task`（已删除）；页面组件搬进
+   各模块目录（`ProjectsPage`、`ServicesPage`、`ApprovalsPage`、`JobsPage`、`TaskDetailPage`（已删除）、`NewAgentPage`、`PendingChat`），
    `TasksPage` 拆成 `delegations/DelegationsPage`。外壳：`App.tsx`（`MainOutlet` / `PageAsideOutlet`）、`Sidebar.tsx`（遍历
    `nav.primary`）、新文件 `components/PageTitle.tsx`（面包屑）不含功能名，`test/modules.test.ts` 扫描；`TitleBar` 换页只看
    「当前页有没有 Aside」。i18n：`projects.*` / `services.*` / `approvals.*` / `jobs.*` / `delegations.*` 整组从基础词典搬进
    模块；`nav.*` 入口名、`newAgent.*` 改名进模块（`projects.nav`、`agent-config.newAgent.*`、`quick-chats.nav` 等）。prefs：
    无（`MainView` / `PageParams` 只在内存，没有持久化的键改名，所以没有迁移脚本）。行为变化：没有 `agent-asks` 的 cutex 上
-   委托入口置灰（原来显示旧 Task Service 表；那些行曾留在项目页 委托 标签，r219 起该标签没有 `agent-asks` 时只显示一句提示），新工作入口置灰（原来隐藏），都按 §13.2。
-   暂缓：(a) 留在 `components/` 的共用件：`DelegationList`（项目页也用）、`TasksPage.tsx` 的 `TaskList`（r219 删除）、
-   `Settings.tsx`（shell 页的实现）；(b) 基础词典里仍有 `chat.*`（草稿页与 composer 共用）、`tasks.*`（`TaskList` 共用；r219 只剩作业页用的 `tasks.noProject`）、
+   委托入口置灰（原来显示旧 Task Service 表；那些行曾留在项目页 委托 标签，现在该标签没有 `agent-asks` 时只显示一句提示），新工作入口置灰（原来隐藏），都按 §13.2。
+   暂缓：(a) 留在 `components/` 的共用件：`DelegationList`（项目页也用）、`TasksPage.tsx` 的 `TaskList`（已删除）、
+   `Settings.tsx`（shell 页的实现）；(b) 基础词典里仍有 `chat.*`（草稿页与 composer 共用）、`tasks.*`（`TaskList` 共用；现在只剩作业页用的 `tasks.noProject`）、
    `settings.*`（第 1 步暂缓）、`nav.projectSettings`（侧栏项目组头，核心）；(c) `TitleBar` 其余部分（agent 的服务 chip；
    终端开关 v1.11 起是 `terminal.pty` 的固定启动器，§18.3）属 B 档 `titlebar.*`，`App.tsx` 的 `JobOutputDialog` / `AgentListDialog` 属
    `app.overlay`，侧栏底栏的 `UpdateButton` 仍是外壳；(d) 页面内部的能力检查（`ServicesPage` / `ApprovalsPage` 的
@@ -716,7 +716,7 @@ apps/desktop/src/renderer/src/dev/
    `capsuleCorner.*` / `capsuleEdge.*` / `capsuleSize.*`，对话页和快捷键页共用的 `sendKeys.*`，以及
    `profiles.new.title`、`profile.familyHint`、`mcp.tools`）；(3) 每模块 `mock.ts`（§8）：`delegations`、`jobs`、
    `owner-notify`、`runtime-packages`（原 `dev/mock*.ts`）、`codex-config`（原 `dev/mockPlugins.ts` + CODEX_HOME 配置请求 /
-   实验特性）、`services`、`approvals`、`usage`、`task-service`（r219 删除）、`goal`、`plan`、`background-terminals`、`subagents`、
+   实验特性）、`services`、`approvals`、`usage`、`task-service`（已删除）、`goal`、`plan`、`background-terminals`、`subagents`、
    `remote-access`（监听视图、配对、客户端 token）；(4) `timeline.received` / `timeline.tool` 预声明（§3.5）。行为不变
    （预览新 / `?legacy` 两种模式逐页比对过）。仍在 `dev/mockBridge.ts` 核心里的模块数据：profiles / 额度
    （`agent-config`，composer 等核心也用）、项目（`projects`，与侧栏快照绑在一起）、快速对话（`quick-chats`，写侧栏快照）、
@@ -737,7 +737,7 @@ apps/desktop/src/renderer/src/dev/
 未知schema、能力缺失、模块关闭和渲染异常回退到核心原始内容；standalone/activity也由同一选择器决定。
 PlanCard/ChecklistEntry实现在plan模块，核心plan/checklist条目仍走唯一薄facade，未伪造成tool或发明新插槽。
 原先第2步暂缓(a)在此完成；第3步剩余共用组件、owner-notify插入与delegation turn-tail等B/C区未扩大迁移。
-本轮增加的plugins.manage属于外部桌面插件，与codex-config.plugins设置不同。
+`plugins.manage` 属于外部桌面插件，与 `codex-config.plugins` 设置不同。
 
 ## 10. 外部插件（v1.1 隔离接入，安装入口默认关闭）
 
@@ -1014,7 +1014,7 @@ placements, idle(), dispose() }`；`statuses()` / `snapshot()` 在内容
   P0 落地右侧区（外壳容器、页按钮、实例层、三种「右栏与对话」、设置卡片「会话两侧」）、`workspace` / `diff` 模块和 `subagents.thread`；
   §19 的宿主随 P1a。声明快照 `module-api-1.4.d.ts`（SDK 类型除版本常量外不变）。语义扩展（可持久化的组件实例、声明式放置、
   通用引用）已报主人（RFC §13 D1、D58）。
-- 2026-10-09 r219（cutex 删除 Task Service，`feat/r219-cleanup`）：`task-service` 模块只留旧转录的时间线行（`timeline.received`
+- 旧 Task Service 移除记录：`task-service` 模块只留旧转录的时间线行（`timeline.received`
   `task-service.received`、`timeline.tool` `task-service.tool`，不门控），删除 `main.page` 条目 `task-service.task`（任务详情页）、
   它的 `mock.ts` 和 `task-service.crumb`；共用的 `TaskList`（`components/TasksPage.tsx`）及 `DelegationList` 的旧任务回退 /
   「历史任务（旧）」折叠删除，没有 `agent-asks` 时紧凑模式不显示、完整列表显示 `delegations.unavailable`。只是撤下一个模块
@@ -1216,7 +1216,7 @@ SDK / 引擎的类型除版本常量外不变；v1.5 加多主机输入与 `ctx.
 - v1.1 实现提交包含 SDK `.d.ts` 输出快照、版本断言、`SLOT_SPECS` 键/默认值快照和包边界测试；不通过改旧断言隐藏回归。
 
 临时架构例外（lead 批准，2026-10-12）：`shared/browser.ts` 中的 **browser activation signal, to be replaced by a Module API activation query**
-供 browser、审批与设置读取模块激活状态；它只控制 UI 展示，不授予浏览器或 IPC 权限。后续由 lead 用 Module API 激活查询替换，本轮不扩展 Module API。
+供 browser、审批与设置读取模块激活状态；它只控制 UI 展示，不授予浏览器或 IPC 权限。模块激活状态查询不扩展模块的浏览器或 IPC 权限。
 `browserOwnerErrorKey` 等纯 helper 可以继续放在 `shared/`。
 
 ## 16. 状态展示位置与可关闭的胶囊（v1.2）
@@ -1369,7 +1369,7 @@ interface NotifyDelivery { key: string; event: string; eventTitle: string; level
   `notifications` 模块问主机 `POST /v2/notification-levels/evaluate`（失败时用已取到的表在本地算，`decideLocally`）→
   去掉本机关掉的 / 不可用的方式（`devicePlan`）→ 调条目 `deliver`。owner_notify 记录自带 cutex 的决定（`actions`），不再问。
 - 「需要你」/「侧栏标记」是固定的应用内列，P0 仍按原逻辑显示，不由插件提供。手机列由 cutex / 手机执行；外发列（webhook 等服务端方式）P1 以后。
-- 没有 `notification-levels` 能力的主机（r216 及更早）：只有「本设备」分区；需要输入 / 审批照旧发桌面通知，回合结束不再通知，项目静音不可用。
+- 没有 `notification-levels` 能力的主机（未声明这项能力）：只有「本设备」分区；需要输入 / 审批照旧发桌面通知，回合结束不再通知，项目静音不可用。
 - 外部插件不能贡献这个插槽（manifest `apiVersion: 1` 不变）。
 - 回退到 1.2：旧版读 localStorage `cutex-desktop.notify`，迁移成功后它已被删，所以旧版回到默认开关（需要输入开、回合结束关、无静音）；
   cutex 里的 `projectOverrides` 留着无害。
@@ -3101,6 +3101,13 @@ Shelf 里按下先聚焦；它的边缘拖宽只改它和它自己的列；跨 S
     特意挪过去的）；否则主窗口。输的窗口那一列关掉（只有一列 = 那列空着，智能体仍在侧栏和赢的窗口里；等着恢复选中它的 `restore` 作废）。
     运行时新开的桌子不去重（`moveToDesk` / `openInNewDesk` 自己挪走原处）。纯函数 `startWinner` / `startDuplicates`（`lib/windowRoute`）。
     测试：`test/panesStep2Store.test.ts`（存的是桌子 / 主窗口 / 没存时的三种结果、只有重开的桌子去重、纯规则含两张桌子）。
+- **浏览器代理视口（2026-11-04）**：可见卡片使用原生视口、页面缩放和 DPR，不固定布局或缩放页面；代理退出时不触发布局切换。
+  配置的 viewport 只供隐藏 / 最小化的 read/find 和离屏载体使用；回到可见卡片清除模拟。尺寸变化须重新检查，
+  截图按真实 CSS 视口记录，只缩小模型收到的图片（长边 ≤1600 px），保留已有捕获和解码上限。
+- **浏览器智能体光标（2026-11-04）**：`BrowserAgentCursor` 是 webview 上方、输入透明的桌面叠层，不向网页注入元素。
+  main 将当前 guest/page 的动作类型、坐标和可选矩形放进现有浏览器元数据事件，除此不增加网页内容；按 guest 与应用的原生缩放比换算。
+  移动后重新检查目标和权限，再执行动作；主人接管 / 输入、暂停、授权结束、隐藏、导航和尺寸变化清除反馈。减少动态效果不播放位移或脉冲动画。
+  设置 → 浏览器的颜色经 app-frame-only 通道由 main 校验、存储与重置；默认采用主人选定的 C 款折底三角紫色，不改变模块、网页或智能体权限。
 - **P5：应用内浏览器进桌子（2026-10-27，开关仍默认关）**。浏览器是 `<webview>`：它的嵌入者是创建这个元素的文档所在的 webContents
   （Electron 44 实测，隐藏窗口：主文档 `document.createElement` 再挂进桌子 = 嵌入者仍是主窗口，主窗口的钩子在管、但 main 不知道它画在桌子里；
   桌子文档自己创建 = 嵌入者是桌子，没有 `webviewTag` 时根本不挂）。所以：
@@ -3437,5 +3444,5 @@ interface DesktopWidgetProps {
 - 加一条提示：在 `GUIDES` 里加条目（`since` = 要发布的版本），在 `modules/onboarding/i18n.ts`、`i18n.en.ts`、`i18n/zh-Hant-CN.ts` 加 `guide.<名字>.title/text`；锚点没有稳定的 `data-*` 属性就在组件上加一个。只给行为出人意料、手势看不见、或当下就要知道后果的地方加；一次一条，小，靠着锚点，不挡操作。`test/guides.test.ts` 会检查文案和锚点都在。
 - 退役一条：设 `retireAfter` 为最后一个还要显示它的版本，不要删条目（删掉后帮助和测试里也就没有了它的历史）。确定没有用户还停在那些版本时再删。
 - 预览：`?tips`（提示随锚点出现）、`?tips=ask`（新设备，先问）、`?tip=<id>`（只看这一条，马上显示）、`?help`（打开帮助）、`?onboarding=ask`（新设备上的自动入门引导）。
-- 主机上的选择（cutex r258 `guides.preferences`）：`lib/guidesHost` 在启动时读主人的 `skippedThrough`。还没回答过「要看引导和提示吗？」的设备才采用它：版本 ≤ `skippedThrough` 的条目记为已看；全部覆盖就不再问、入门引导记为完成；只覆盖一部分则照常问，但「全部跳过」是预选按钮。问题最多等主机 3 秒。「全部跳过」写回当前引导版本（在用条目里最新的 `since`），「重置所有提示」写回 null。每条提示看没看过仍只记在本机。
-- 谁创建的（cutex r258 `session-created-by`）：侧栏行带 `data-created-by`（director / member / agent / owner / system；未知则没有）。`tip.directorCreated` 锚在主管自己建的那一行，并覆盖 `tip.minorAgent`；没有这项记录（旧 cutex、旧会话）时由 `tip.minorAgent` 解释小方块。预览：`?guidesSkipped=0.2.0`（主人在别的设备上全部跳过过）。
+- 主机上的选择（cutex `guides.preferences`）：`lib/guidesHost` 在启动时读主人的 `skippedThrough`。还没回答过「要看引导和提示吗？」的设备才采用它：版本 ≤ `skippedThrough` 的条目记为已看；全部覆盖就不再问、入门引导记为完成；只覆盖一部分则照常问，但「全部跳过」是预选按钮。问题最多等主机 3 秒。「全部跳过」写回当前引导版本（在用条目里最新的 `since`），「重置所有提示」写回 null。每条提示看没看过仍只记在本机。
+- 谁创建的（cutex `session-created-by`）：侧栏行带 `data-created-by`（director / member / agent / owner / system；未知则没有）。`tip.directorCreated` 锚在主管自己建的那一行，并覆盖 `tip.minorAgent`；没有这项记录（旧 cutex、旧会话）时由 `tip.minorAgent` 解释小方块。预览：`?guidesSkipped=0.2.0`（主人在别的设备上全部跳过过）。

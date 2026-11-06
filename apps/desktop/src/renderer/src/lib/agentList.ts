@@ -7,6 +7,7 @@ import { agentFeaturesOf, CLAUDE_PROTOCOL } from "./agentFeatures";
 import { compareRecent } from "./offlineAgents";
 import { agentMatches } from "./agentAlias";
 import type { AgentRow, SidebarGroup } from "./sidebar";
+import { byNameThenId } from "./rosterOrder";
 
 export type AgentListTab = "online" | "offline" | "archived";
 /** One bulk action of the list (cutex mutations: runtime offline / online, session retire / restore). */
@@ -89,7 +90,7 @@ export function filterSortAgents(rows: readonly AgentRow[], q: ListQuery, lastOf
       (q.runtime === "all" || runtimeOf(r.session) === q.runtime) &&
       agentMatches(r.session, r.name, needle),
   );
-  const byName = (a: AgentRow, b: AgentRow) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+  const byName = byNameThenId<AgentRow>((r) => r.name, (r) => r.id);
   if (q.sort === "name") return out.sort(byName);
   if (q.sort === "created") return out.sort((a, b) => created(b.session) - created(a.session) || byName(a, b));
   return out.sort(compareRecent(lastOf));

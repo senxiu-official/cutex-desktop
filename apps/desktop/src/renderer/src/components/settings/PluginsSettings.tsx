@@ -252,15 +252,16 @@ function PluginList({ rows, open, setOpen, onToggle, onChanged, onNotice, showMa
     <>
       {rows.map((r) => (
         <div key={r.id}>
-          <SettingRow agents="next" source="codex" label={r.displayName} hint={[showMarketplace ? r.id : r.name !== r.displayName ? r.name : null, r.description].filter(Boolean).join(" · ") || undefined}>
+          <SettingRow agents="next" source="codex" label={r.displayName} hint={[showMarketplace ? r.id : r.name !== r.displayName ? r.name : null, r.unavailable === "officialApp" ? t("codex-config.plugins.officialAppRequired") : r.description].filter(Boolean).join(" · ") || undefined}>
             {r.category && <Badge>{r.category}</Badge>}
-            {r.installed && !onToggle && <Badge tone="ok">{t("codex-config.plugins.installedBadge")}</Badge>}
-            {r.installed && onToggle && !r.enabled && <Badge>{t("codex-config.plugins.disabledBadge")}</Badge>}
+            {r.unavailable && <Badge>{t("codex-config.plugins.unavailableBadge")}</Badge>}
+            {r.installed && !onToggle && !r.unavailable && <Badge tone="ok">{t("codex-config.plugins.installedBadge")}</Badge>}
+            {r.installed && onToggle && !r.enabled && !r.unavailable && <Badge>{t("codex-config.plugins.disabledBadge")}</Badge>}
             <button aria-expanded={open === r.id} onClick={() => setOpen(open === r.id ? null : r.id)} className="flex items-center gap-0.5 rounded text-xs whitespace-nowrap text-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none">
               {open === r.id ? t("codex-config.plugins.hide") : t("codex-config.plugins.details")}
               {open === r.id ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             </button>
-            {onToggle && <Toggle label={r.displayName} checked={r.enabled} onChange={(v) => onToggle(r, v)} />}
+            {onToggle && <Toggle label={r.displayName} checked={r.enabled} disabled={!!r.unavailable} onChange={(v) => { if (!r.unavailable) onToggle(r, v); }} />}
           </SettingRow>
           {open === r.id && <PluginDetailPanel row={r} onChanged={onChanged} onNotice={onNotice} />}
         </div>
@@ -354,11 +355,13 @@ export function PluginsPage() {
       setBusy(false);
     }
   };
-  const toggle = (row: PluginRow, enabled: boolean) =>
+  const toggle = (row: PluginRow, enabled: boolean) => {
+    if (row.unavailable) return;
     void run(async () => {
       await api.codexRequest("config/value/write", { keyPath: pluginKeyPath(row.id), value: { enabled }, mergeStrategy: "upsert" });
       reload();
     });
+  };
   const upgrade = (marketplaceName: string | null) =>
     void run(async () => {
       const r = (await api.codexRequest("marketplace/upgrade", { marketplaceName })) as MarketplaceUpgradeResponse;

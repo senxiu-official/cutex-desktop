@@ -15,10 +15,15 @@ const TAG: Record<TagTone, string> = {
 
 type SpanProps = Omit<HTMLAttributes<HTMLSpanElement>, "children">;
 
-export function Tag({ tone = "neutral", className = "", children, ...rest }: SpanProps & { tone?: TagTone; children?: ReactNode }) {
+/**
+ * `fit`: the tag may shrink in a crowded flex line, ellipsizing its text down to about two letters; pass the full text
+ * as `title` with it. To give way to a neighbour first (a role label beside an agent name; owner 2026-11-04: the name
+ * wins) add `flex-1 max-w-max`: it then only takes the room left over, at most its own width.
+ */
+export function Tag({ tone = "neutral", fit = false, className = "", children, ...rest }: SpanProps & { tone?: TagTone; fit?: boolean; children?: ReactNode }) {
   return (
-    <span {...rest} data-tag={tone} className={`inline-flex h-[18px] shrink-0 items-center gap-1 rounded-chip px-1.5 text-caption leading-none font-medium whitespace-nowrap ${TAG[tone]} ${className}`}>
-      {children}
+    <span {...rest} data-tag={tone} data-tag-fit={fit ? "" : undefined} className={`inline-flex h-[18px] ${fit ? "min-w-[2.75em] shrink justify-center" : "shrink-0"} items-center gap-1 rounded-chip px-1.5 text-caption leading-none font-medium whitespace-nowrap ${TAG[tone]} ${className}`}>
+      {fit ? <span className="min-w-0 truncate">{children}</span> : children}
     </span>
   );
 }

@@ -10,6 +10,7 @@
 import type { AgentRow, SidebarGroup } from "./sidebar";
 import { runtimeOf, type RuntimeFilter } from "./agentList";
 import { agentMatches } from "./agentAlias";
+import { byNameThenId } from "./rosterOrder";
 
 export type MemberStatusFilter = "all" | "online" | "offline";
 /** 独立 = in no project (can join); elsewhere = in another project (cutex refuses until it leaves there). */
@@ -74,7 +75,7 @@ export function filterCandidates(list: readonly MemberCandidate[], q: MemberPick
     if (!needle) return true;
     return agentMatches(c.row.session, c.row.name, needle);
   });
-  const byName = (a: MemberCandidate, b: MemberCandidate) => a.row.name.localeCompare(b.row.name) || a.row.id.localeCompare(b.row.id);
+  const byName = byNameThenId<MemberCandidate>((c) => c.row.name, (c) => c.row.id);
   const pickFirst = (a: MemberCandidate, b: MemberCandidate) => Number(b.pickable) - Number(a.pickable);
   if (q.sort === "name") return out.sort((a, b) => pickFirst(a, b) || byName(a, b));
   return out.sort((a, b) => pickFirst(a, b) || lastOf(b.row) - lastOf(a.row) || byName(a, b));

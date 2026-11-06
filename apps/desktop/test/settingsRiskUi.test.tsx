@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fixture = vi.hoisted(() => ({ target: "A", menus: [] as any[], answer: null as ((value: string | null) => void) | null,
   enabled: true, control: { hiddenTarget: "reveal", viewport: { width: 1280, height: 720 }, idleDetachSeconds: 30 },
   apis: {} as Record<string, any>, frames: { pageDataUsage: vi.fn(), pageDataClear: vi.fn() },
-  browser: { resetOrigins: vi.fn(), externalPages: vi.fn(), sitePermissions: vi.fn() }, notice: vi.fn(), prompt: vi.fn(),
+  browser: { cursorColor: vi.fn(), resetOrigins: vi.fn(), externalPages: vi.fn(), sitePermissions: vi.fn() }, notice: vi.fn(), prompt: vi.fn(),
 }));
 vi.mock("../src/renderer/src/i18n", async () => {
   const { en } = await import("../src/renderer/src/lib/settingsRiskMessages");
@@ -113,6 +113,7 @@ beforeEach(() => {
   vi.clearAllMocks(); fixture.target = "A"; fixture.enabled = true; fixture.answer = null; fixture.menus = [];
   fixture.apis = { A: makeApi(), B: makeApi() };
   useApp.setState({ hosts: { active: "A", hosts: [{ id: "A", label: "Host A", conn: { epoch: "a-1" } }, { id: "B", label: "Host B", conn: { epoch: "b-1" } }] } } as never);
+  fixture.browser.cursorColor.mockResolvedValue({ color: "#7966db" });
   fixture.browser.externalPages.mockResolvedValue({ stored: true }); fixture.browser.sitePermissions.mockResolvedValue([]); fixture.browser.resetOrigins.mockResolvedValue(undefined);
   fixture.frames.pageDataUsage.mockResolvedValue({ items: [{ hostId: "A", artifactId: "page-1", name: "Budget", bytes: 2048, updatedAt: "one" }] });
   fixture.frames.pageDataClear.mockResolvedValue(undefined);

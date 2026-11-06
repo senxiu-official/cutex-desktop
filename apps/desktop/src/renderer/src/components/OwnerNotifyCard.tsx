@@ -105,6 +105,7 @@ function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; ses
   return (
     <div
       data-owner-note={r.notificationId}
+      data-owner-note-host={hostId}
       data-origin={system ? "system" : "agent"}
       data-note-look={card ? "card" : "row"}
       tabIndex={-1}

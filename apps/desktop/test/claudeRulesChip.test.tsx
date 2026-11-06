@@ -133,7 +133,7 @@ describe("ClaudeRulesChip", () => {
     const { div, unmount } = await mount({ rulesFeature: true });
     const chip = div.querySelector("[data-testid=claude-rules-chip]")!;
     expect(chip.textContent).toBe("composer.claude.rulesChip3");
-    expect(button(div)!.title).toContain("composer.claude.rulesChip: approvals.rules.chipPart(Claude,3)");
+    expect(button(div)!.dataset.tip).toContain("composer.claude.rulesChip: approvals.rules.chipPart(Claude,3)");
     expect(div.querySelector("[data-testid=claude-rules-tools-off]")).toBeNull();
     unmount();
     const narrow = await mount({ rulesFeature: true, iconOnly: true });
@@ -153,7 +153,7 @@ describe("ClaudeRulesChip", () => {
     fx.features = new Set();
     const { div, unmount } = await mount({ write: false, exec: true });
     expect(div.querySelector("[data-testid=claude-rules-tools-off]")).not.toBeNull();
-    expect(button(div)!.title).toContain("composer.claude.toolsOff(composer.claude.toolWrite)");
+    expect(button(div)!.dataset.tip).toContain("composer.claude.toolsOff(composer.claude.toolWrite)");
     unmount();
   });
 

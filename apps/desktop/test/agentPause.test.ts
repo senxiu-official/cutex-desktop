@@ -6,7 +6,7 @@ import { normalizeEntries, type MenuAction } from "../src/renderer/src/lib/conte
 // The store and the menus at the top (bridge mocked — vi.mock is hoisted), like asksPause.test.
 import { useApp } from "../src/renderer/src/store";
 import { agentMenu } from "../src/renderer/src/lib/menus";
-import { agentPauseNow, noteAgentPause, resumeAndSend, shownAgentPause, useAgentPauses } from "../src/renderer/src/lib/agentPause";
+import { agentToolGateNow, agentPauseNow, noteAgentPause, resumeAndSend, shownAgentPause, useAgentPauses } from "../src/renderer/src/lib/agentPause";
 
 const PAUSED: AgentPause = { cutexSessionId: "a", phase: "paused", requestedAt: "2026-10-25T01:00:00Z", pausedAt: "2026-10-25T01:00:05Z", by: "owner" };
 const api = vi.hoisted(() => ({
@@ -60,8 +60,8 @@ describe("agent menu", () => {
   it("暂停智能体 / 继续智能体 beside 暂停新委托, only with the capability", () => {
     seed(["agent-pause", "asks-pause-v2"]);
     expect(labels()).toContain("agentPause.pause");
-    expect(labels()).toContain("asksPause.pause");
-    expect(labels().indexOf("agentPause.pause")).toBeLessThan(labels().indexOf("asksPause.pause"));
+    expect(labels()).toContain("menu.asksPause");
+    expect(labels().indexOf("agentPause.pause")).toBeLessThan(labels().indexOf("menu.asksPause"));
     seed(["agent-pause", "asks-pause-v2"], PAUSED);
     expect(labels()).toContain("agentPause.resume");
     expect(labels()).not.toContain("agentPause.pause");
@@ -95,4 +95,25 @@ describe("继续并发送", () => {
     expect(send).not.toHaveBeenCalled();
     expect(agentPauseNow("local", "a")).toEqual(PAUSED);
   });
+});
+
+it("retains reported tool-gate knowledge for the same runtime only, including after resume", () => {
+ const resource = seed(["agent-pause"], PAUSED) as unknown as { runtime: { runtimeGeneration: number } };
+ resource.runtime = { runtimeGeneration: 1 };
+ noteAgentPause("local", "a", {...PAUSED,toolGate:true});
+ noteAgentPause("local", "a", null);
+ expect(agentToolGateNow("local", "a")).toBe(true);
+ const item=normalizeEntries(agentMenu(session,t as never,"local")).find(e=>e!=="separator"&&e.label==="agentPause.pause") as MenuAction;
+ expect(item.info).toBe("agentPause.pauseHintToolGate");
+ resource.runtime.runtimeGeneration = 2;
+ expect(agentToolGateNow("local", "a")).toBe(false);
+ resource.runtime.runtimeGeneration = 1;
+ useApp.setState({sidebar:{active:[{cutexSessionId:"a",runtime:{runtimeGeneration:1},agentPause:null}],hostRows:{}} as never});
+ expect(agentToolGateNow("local", "a")).toBe(true);
+ useApp.setState({sidebar:{active:[{cutexSessionId:"a",runtime:{runtimeGeneration:2},agentPause:null}],hostRows:{}} as never});
+ expect(agentToolGateNow("local", "a")).toBe(false);
+ seed(["agent-pause"], {...PAUSED,toolGate:false});
+ expect(agentToolGateNow("local", "a")).toBe(false);
+ seed([], {...PAUSED,toolGate:true});
+ expect(agentToolGateNow("local", "a")).toBe(false);
 });

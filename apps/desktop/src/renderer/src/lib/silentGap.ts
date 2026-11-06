@@ -18,7 +18,7 @@ type TimelineView = Pick<TimelineState, "activeTurnId" | "turns" | "entries">;
 export function turnProgressMark(timeline: TimelineView): string | null {
   const turnId = timeline.activeTurnId;
   if (!turnId) return null;
-  const ids = timeline.turns.find((t) => t.id === turnId)?.entryIds ?? [];
+  const ids = timeline.turns.findLast((t) => t.id === turnId)?.entryIds ?? [];
   const lastId = ids[ids.length - 1];
   const last = lastId === undefined ? undefined : timeline.entries.get(lastId);
   let detail = "";

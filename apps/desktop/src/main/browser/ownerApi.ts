@@ -1,5 +1,5 @@
 import type { CutexClient } from "@cutex-desktop/cutex-client";
-import type { BrowserAgentView, BrowserIdempotencyClearResult, BrowserImage, BrowserToolItem, BrowserTurnShot } from "../../shared/browser";
+import { isBrowserToolSurface, type BrowserAgentView, type BrowserIdempotencyClearResult, type BrowserImage, type BrowserProfileTools, type BrowserToolItem, type BrowserToolSurface, type BrowserTurnShot } from "../../shared/browser";
 import { browserScreenshotDimensions } from "./capture";
 import type { BrowserImageDecoder } from "./modelOutput";
 import { MAX_EVENT_MEDIA_BYTES, parseCutexBlobRef, parseMediaBlob } from "../../shared/mediaBlobs";
@@ -144,21 +144,23 @@ export function createBrowserOwnerApi(options: BrowserOwnerApiOptions) {
         || (value.scope !== "session" && value.scope !== "all") || typeof value.warning !== "string") throw invalid();
       return value as unknown as BrowserIdempotencyClearResult;
     },
-    async profileTools(profile: string, enabled?: boolean): Promise<{ enabled: boolean }> {
+    async profileTools(profile: string, enabled?: boolean, surface?: BrowserToolSurface): Promise<BrowserProfileTools> {
       if (typeof profile !== "string" || !profile.trim() || profile.length > 200 || profile === "." || profile === ".."
-        || /[/\\\u0000-\u001f\u007f-\u009f]/.test(profile) || (enabled !== undefined && typeof enabled !== "boolean")) throw new BrowserRelayError("invalid_request");
+        || /[/\\\u0000-\u001f\u007f-\u009f]/.test(profile) || (enabled !== undefined && typeof enabled !== "boolean")
+        || (surface !== undefined && !isBrowserToolSurface(surface))) throw new BrowserRelayError("invalid_request");
       let segment: string; try { segment = encodeURIComponent(profile); } catch { throw new BrowserRelayError("invalid_request"); }
-      const value = await request(`/v2/profiles/${segment}`, 64 * 1024, enabled === undefined ? undefined : { browserTools: enabled });
-      // GET and PATCH both return {contractVersion:2, profile:{browserTools,...}}.
+      const patch = { ...(enabled !== undefined ? { browserTools: enabled } : {}), ...(surface !== undefined ? { browserToolSurface: surface } : {}) };
+      const value = await request(`/v2/profiles/${segment}`, 64 * 1024, Object.keys(patch).length ? patch : undefined);
+      // GET and PATCH both return {contractVersion:2, profile:{browserTools,...}}; browserToolSurface on design-059 hosts.
       if (!object(value) || !object(value.profile) || typeof value.profile.browserTools !== "boolean") throw invalid();
-      return { enabled: value.profile.browserTools };
+      return { enabled: value.profile.browserTools, ...(isBrowserToolSurface(value.profile.browserToolSurface) ? { surface: value.profile.browserToolSurface } : {}) };
     },
     async agents(): Promise<BrowserAgentView[]> {
       const value = await request("/v2/browser/agents");
       if (!object(value) || !Array.isArray(value.items) || value.items.length > 1024) throw invalid();
-      return value.items.map(item => {
-        if (!object(item) || typeof item.sessionId !== "string" || !ID.test(item.sessionId) || typeof item.name !== "string" || item.name.length > 800 || /[\x00-\x1f\x7f]/.test(item.name)) throw invalid();
-        return { sessionId: item.sessionId, name: item.name };
+      return value.items.flatMap(item => {
+        if (!object(item) || typeof item.sessionId !== "string" || !ID.test(item.sessionId) || typeof item.name !== "string" || item.name.length > 800 || /[\x00-\x1f\x7f]/.test(item.name)) return [];
+        return [{ sessionId: item.sessionId, name: item.name }];
       });
     },
     async turnShots(sessionId: string, turnId: string): Promise<BrowserTurnShot[]> {

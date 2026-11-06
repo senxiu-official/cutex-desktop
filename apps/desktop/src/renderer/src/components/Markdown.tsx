@@ -370,7 +370,7 @@ export const Markdown = memo(function Markdown({ text, streaming = false, compac
     <RelativeFiles.Provider value={relativeFiles}>
       <PreserveTextSelection revision={revision} style={{ "--prose-pixel": `${1 / dpr}px` } as CSSProperties}>
         <Streamdown
-          className={`markdown ${document ? "markdown-document " : ""}${compact ? "text-[length:calc(var(--chat-font-size,14px)-1px)]" : "text-[length:var(--chat-font-size,14px)]"}`}
+          className={`markdown ${blockMode ? "markdown-streaming-prose " : "leading-relaxed "}${document ? "markdown-document " : ""}${compact ? "text-[length:calc(var(--chat-font-size,14px)-1px)]" : "text-[length:var(--chat-font-size,14px)]"}`}
           mode={blockMode ? "streaming" : "static"}
           isAnimating={streaming}
           parseIncompleteMarkdown={streaming}

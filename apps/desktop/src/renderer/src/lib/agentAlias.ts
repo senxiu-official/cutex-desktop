@@ -1,7 +1,9 @@
 // 显示名: cutex's `displayNameOverride` (set by `cutex/session/metadata/update` `displayName`, capability
 // `session-metadata`) is a display-only alias. `displayName` already resolves alias > real name, so lists
-// and labels show it; the real name (formal agent name, else the thread name / id) stays the identity for
-// the agent bus, delegations, mentions and the CLI, and search matches both.
+// and labels show it; the real name (formal agent name = 自己的名字, else the thread name / id) is what the
+// agent bus, delegations, mentions and the CLI use, and search matches both. The owner can change the own
+// name (formal-agent-name-rename-v1, lib/agentRename); it is read fresh from the session, never cached, and
+// an alias stays as the owner set it. The session ID is the identity and never changes.
 import type { SessionResource } from "@cutex-desktop/protocol";
 
 /** cutex SESSION_DISPLAY_NAME_MAX_CHARS. */
@@ -32,7 +34,7 @@ export function agentMatches(session: Named & Partial<Pick<SessionResource, "not
   );
 }
 
-/** Tooltip for an agent label: the real name under an alias (null without one). */
+/** Tooltip for an agent label: its current own name under an alias (null without one). */
 export function realNameTip(session: Named): string | null {
   return agentAlias(session) ? realAgentName(session) : null;
 }

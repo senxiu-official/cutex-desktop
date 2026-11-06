@@ -191,6 +191,18 @@ if (ROUTING_SCENE) {
   capability.reviewRefs = [capability.reviewRef];
   asks.push(...routingRows(capability));
 }
+// `?askawait`: remote #37 (2026-11-06) — the handler ended attempt 7 with delegation_await on one job (12 h timeout):
+// execution running, hold waitingForEvent, no lease, no turn; the attempt's start / end are the finished turn's.
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("askawait")) {
+  const job = "job_ce374c4941e4484dadb99b57ab9bbbcb", since = iso(5 * 3600), timeoutAt = new Date(Date.now() + 7 * 3600_000).toISOString();
+  asks.unshift(ask("ask-await", "Phase 2 on real phase-1 data (scVelo + BAMs ready)", ["scratch", "scratch"], "running", {
+    ago: 9 * 3600, requester: { kind: "agent", cutexSessionId: "widgets", cutex_session_id: "widgets", name: "ui-widgets" }, attempts: 7, revision: 357, holdSince: since,
+    attempt: { n: 7, state: "yielded", turnId: "scratch-t7", startedAt: iso(5 * 3600 + 86), endedAt: since, model: null, activity: { toolCalls: 14 } },
+    hold: { reason: "waitingForEvent", jobs: [job], until: "all", since, timeout_at: timeoutAt },
+    await: { attempt: 7, jobs: [job], until: "all", resume: "all", since, timeoutAt, note: "Run deliberately paused. Await explicit ui-widgets release." },
+    jobs: [{ jobId: job, source: "terminal", status: "running", exitCode: null, ok: null }],
+  }));
+}
 const byId = new Map(asks.map((a) => [a.askId, a]));
 
 const ANSWERS: Record<string, string> = {

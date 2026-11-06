@@ -5,6 +5,7 @@ import { CutexApiError } from "./errors";
 import { SseParser } from "./sse";
 import { ACCESS_CHANGED_EVENT } from "./users";
 import { LIVE_DELTA_EVENT, readLiveDeltaFrame, type LiveDeltaFrame } from "./liveDeltas";
+import { SESSION_STATUS_EVENT, readSessionStatusEnvelope } from "./sessionStatus";
 
 type LiveDeltaResetReason = "reconnect" | "stream_reset" | "buffer_overflow" | "anchor_timeout";
 
@@ -22,6 +23,8 @@ export interface EventFeedOptions extends FeedPosition {
   background?: boolean;
   /** Opt in to non-durable live text; never advances the durable cursor. */
   liveDeltas?: boolean;
+  /** Opt in to non-durable session status, independently of token/text traffic. */
+  sessionStatus?: boolean;
   /** Scope to one session (`cutexSessionId` filter). Omit for the host-wide stream. */
   cutexSessionId?: string;
   /** Skip the retained backlog and start at the live tail (for host-wide UI refresh feeds). */
@@ -36,6 +39,7 @@ export interface EventFeedOptions extends FeedPosition {
 }
 
 export interface EventFeedHandlers {
+  /** Durable events, plus opted-in session status envelopes. Status does not advance position. */
   event(envelope: EventEnvelope): void;
   liveDelta?(frame: LiveDeltaFrame): void;
   /**
@@ -234,6 +238,7 @@ export class EventFeed {
       streamId: this.streamId,
       cutexSessionId: this.options.cutexSessionId,
       liveDeltas: this.options.liveDeltas === true ? "true" : undefined,
+      sessionStatus: this.options.sessionStatus === true ? "true" : undefined,
     });
 
     try {
@@ -269,6 +274,15 @@ export class EventFeed {
         try {
           for (const message of parser.push(decoder.decode(value, { stream: true }))) {
             if (this.stopped) return;
+            if (message.event === SESSION_STATUS_EVENT) {
+              if (this.options.sessionStatus) {
+                const envelope = readSessionStatusEnvelope(message.data);
+                if (envelope && envelope.streamId === this.streamId &&
+                    (!this.options.cutexSessionId || envelope.cutexSessionId === this.options.cutexSessionId)) this.handlers.event(envelope);
+              }
+              // No advance(), event telemetry count or sticky SSE id on ephemeral traffic.
+              continue;
+            }
             if (message.event === LIVE_DELTA_EVENT) {
               // WHATWG SSE ids are sticky. Inherited (or explicit) ids on live traffic
               // must never reach advance(), Last-Event-ID, or durable telemetry counts.

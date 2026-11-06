@@ -1,15 +1,5 @@
-# 014 调宽度时显示数值
+# Resize feedback
 
-状态：**已实现，待合并**（10-22，feat/0.2-width）。清单 #5（主人：照做）。
+Resizing displays the affected panel width in pixels. Conversation widths can also show their percentage of the workspace row. Pointer resizing places feedback near the pointer; keyboard resizing places it near the focused edge. Feedback disappears after the interaction and does not alter the width calculation.
 
-## 规则
-
-- 拖一条宽度边、或聚焦它按方向键时，边旁边出现一个小提示：这个面板现在的宽度 **「560 px」**；会话再加上占工作区的百分比 **「815 px · 62%」**。
-- 跟着指针的高度走（方向键时在边的中间）；靠窗口右边时放到边的左侧。
-- 松手立刻消失；方向键停按约 0.9 秒后消失。
-
-## 实现时定下的细节
-
-- 显示的是被拖的那一个面板：侧栏边 = 侧栏宽度；Shelf 的边 = Shelf 宽度（不含 Rail）；设置 Shelf = 卡片宽度；两列之间 = 左边那列；单列的边 / 两工作区的列边 = 那一列。
-- 百分比按工作区那一行（侧栏、设置 Shelf 之外）的宽度算。
-- 代码：`lib/widthTip.ts`、`components/WidthTip.tsx`；各个把手（`PaneResizer`、`lib/sideResize`、`SettingsShelf`、`SideArea`）报给它。
+See [Architecture](../DESIGN.md) and [Module contracts](../desktop-modules.md) for related interfaces.

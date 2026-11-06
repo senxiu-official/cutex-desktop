@@ -1110,3 +1110,22 @@ describe("r260 mixed-host live frames", () => {
     expect(store.getState().sessions[key]!.timeline.entries.get("reply")).toMatchObject({ text: "newer authoritative item", streaming: false });
   });
 });
+
+describe("remote capabilities survive sidebar failures", () => {
+  it("publishes successful capabilities even when the initial sidebar request fails", async () => {
+    mock.responses.set(`${WORKSTATION}:capabilities`, () => ({ featureList: [...FEATURES, "alarms-api"] }));
+    mock.responses.set(`${WORKSTATION}:sidebar`, () => Promise.reject(new Error("temporary sidebar failure")));
+    await start();
+    expect(store.getState().byHost[WORKSTATION]!.featuresKnown).toBe(true);
+    expect(store.getState().byHost[WORKSTATION]!.features.has("alarms-api")).toBe(true);
+  });
+  it("refreshes the remote capability list after a daemon restart independently of its sidebar", async () => {
+    await start();
+    mock.responses.set(`${WORKSTATION}:capabilities`, () => ({ featureList: [...FEATURES, "alarms-api", "new-after-restart"] }));
+    mock.responses.set(`${WORKSTATION}:sidebar`, () => Promise.reject(new Error("sidebar not ready after restart")));
+    fire("daemonState", { hostId: WORKSTATION, epoch: `${WORKSTATION}-${epochs[WORKSTATION]}`, state: { kind: "disconnected" } });
+    fire("daemonState", { hostId: WORKSTATION, epoch: `${WORKSTATION}-${epochs[WORKSTATION]}`, state: connected(WORKSTATION) });
+    await settle();
+    expect(store.getState().byHost[WORKSTATION]!.features.has("new-after-restart")).toBe(true);
+  });
+});

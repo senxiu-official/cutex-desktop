@@ -1,7 +1,7 @@
 // Mock `GET /v2/runtimes` (cutex runtimes-view, shape assumed in shared/runtimes.ts) for the
 // renderer preview: the native releases the runtime-packages mock pins its outdated agents to
 // (r47 – r50) and the Claude runtimes. Not under `?legacy` (the section then says 需要升级 cutex).
-import { RUNTIMES_FEATURE, type RuntimesWire, type RuntimesWireAgent } from "../../../../shared/runtimes";
+import { RUNTIMES_FEATURE, RUNTIME_PRUNE_FEATURE, type RuntimePrunePlan, type RuntimePruneResult, type RuntimesWire, type RuntimesWireAgent } from "../../../../shared/runtimes";
 import type { ModuleMock } from "../../dev/mockTypes";
 
 const agents = (...names: string[]): RuntimesWireAgent[] => names.map((name) => ({ cutexSessionId: `cutex.${name.toLowerCase()}-7f3a`, name }));
@@ -26,9 +26,10 @@ const VIEW: RuntimesWire = {
 };
 
 export const mock: ModuleMock = {
-  features: { new: [RUNTIMES_FEATURE] },
-  api: () => ({
-    async runtimes() {
+  features: { new: [RUNTIMES_FEATURE, RUNTIME_PRUNE_FEATURE] },
+  api: () => {
+    const deleted = new Set<string>();
+    async function rawRuntimes() {
       await new Promise((r) => setTimeout(r, 150));
       // SHA-only selected native build, matching backend-upgrade's host summary.
       if (new URLSearchParams(location.search).get("nativeUnknown") === "1") return {
@@ -53,6 +54,42 @@ export const mock: ModuleMock = {
         ],
       } satisfies RuntimesWire;
       return structuredClone(VIEW);
-    },
-  }),
+    }
+    async function runtimePrunePlan(): Promise<RuntimePrunePlan> {
+      const view = await rawRuntimes();
+      const versions: RuntimePrunePlan["versions"] = [];
+      for (const kind of ["native", "claude"] as const) for (const entry of view[kind] ?? []) {
+        const blockedReasons = entry.selected ? ["selected"] : entry.missing ? ["unmanaged"] : (entry.agents?.length || entry.agentCount) ? ["pinned"] : entry.release === "claude-r27" ? ["rollback"] : entry.release === "r177" ? ["inspection_failed"] : [];
+        versions.push({ id: `opaque:${kind}:${entry.release}`, kind, release: entry.release, ...(entry.version ? { version: entry.version } : {}), bytes: kind === "native" ? 180_000_000 : 65_000_000, canPrune: blockedReasons.length === 0, blockedReasons });
+      }
+      // Discovered Claude directories need not appear in the session-pin view. Same release, two IDs.
+      versions.push(
+        { id: "opaque:claude:legacy-0", kind: "claude", release: "claude-r0", bytes: 32_000_000, canPrune: true, blockedReasons: [] },
+        { id: "opaque:claude:component-0", kind: "claude", release: "claude-r0", bytes: 64_000_000, canPrune: true, blockedReasons: [] },
+      );
+      for (const kind of ["dsh", "kimi"] as const) for (const n of [3, 2, 1]) versions.push({ id: `opaque:${kind}:${n}`, kind, release: `${kind}-r${n}`, bytes: 12_000_000, canPrune: n === 1, blockedReasons: n === 3 ? ["selected"] : n === 2 ? ["rollback"] : [] });
+      return { versions: versions.filter(v => !deleted.has(v.id)) };
+    }
+    return {
+      async runtimes() {
+        const view = await rawRuntimes();
+        for (const kind of ["native", "claude"] as const) view[kind] = view[kind]?.filter(v => !deleted.has(`opaque:${kind}:${v.release}`));
+        return view;
+      },
+      runtimePrunePlan,
+      async pruneRuntimes(ids): Promise<RuntimePruneResult> {
+        if (!ids.length || ids.length > 100) throw new Error("Expected 1–100 runtime IDs");
+        const plan = await runtimePrunePlan();
+        const results: RuntimePruneResult["results"] = ids.map(id => {
+          const version = plan.versions.find(v => v.id === id);
+          // The preview exercises authority changing between GET and POST, and partial I/O failure.
+          const reason = !version ? "not_found" : !version.canPrune ? version.blockedReasons[0] : version.release === "claude-r2" ? "pinned" : version.release === "claude-r1" ? "io_error" : null;
+          if (reason) return { id, status: reason === "io_error" ? "failed" : "refused", freedBytes: 0, reason };
+          deleted.add(id);
+          return { id, status: "deleted", freedBytes: version!.bytes };
+        });
+        return { freedBytes: results.reduce((n, r) => n + r.freedBytes, 0), results };
+      },
+    };
+  },
 };

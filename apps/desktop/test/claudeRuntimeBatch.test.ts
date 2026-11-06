@@ -232,6 +232,9 @@ describe("combined runtime result", () => {
     const combined = combineRuntimeRuns(native, claude)!;
     expect(combined.items.map((entry) => entry.cutexSessionId)).toEqual(["codex", "claude"]);
     expect(combined.counts).toEqual({ total: 2, pending: 0, moved: 1, skipped: 1, failed: 0 });
+    expect(combined.families).toEqual({ native: native.counts, claude: claude.run.counts });
+    expect(combineRuntimeRuns(native, { ...claude, nativeRunId: "another-run" })?.families).toBeUndefined();
+    expect(combineRuntimeRuns(null, claude)?.families).toBeUndefined();
     expect(displayedRuntimeRuns({ activeRun: null, lastRun: native }, claude).last?.items).toHaveLength(2);
     expect(displayedRuntimeRuns({ activeRun: { ...native, state: "running", finishedAt: null }, lastRun: null }, claude).active?.items).toHaveLength(2);
 

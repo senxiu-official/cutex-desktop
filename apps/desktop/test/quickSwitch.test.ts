@@ -266,7 +266,7 @@ describe("opening: in place vs beside per kind", () => {
 
   it("services: the owner browser tab (system browser when the browser module is off / another host)", () => {
     const plan = planOpen({ kind: "service", hostId: "local", slug: "audiobook" }, false, shows);
-    expect(plan).toEqual({ via: "panes", kind: "browser.tab", params: { url: "cutex:service/audiobook/" }, beside: false, fallback: { via: "serviceExternal", hostId: "local", slug: "audiobook" } });
+    expect(plan).toEqual({ via: "panes", kind: "browser.service", params: { url: "cutex:service/audiobook/" }, beside: false, fallback: { via: "serviceExternal", hostId: "local", slug: "audiobook" } });
     expect(planOpen({ kind: "service", hostId: "local", slug: "a" }, true, shows, "听书")).toEqual({ via: "workspace", ref: { kind: "service", hostId: "local", key: "a", title: "听书" }, mode: "beside" });
     expect(planOpen({ kind: "service", hostId: "ssh-b", slug: "a" }, false, shows)).toEqual({ via: "serviceExternal", hostId: "ssh-b", slug: "a" });
   });
@@ -390,6 +390,16 @@ describe("items", () => {
     const remote = items.find((i) => i.title === "remote")!;
     expect(remote).toMatchObject({ disabled: true, hostId: "ssh-x", subtitle: "quick-switch.noProject", target: { kind: "agent", hostId: "ssh-x", sessionId: "d" } });
     expect(items.map((i) => i.rank)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("agents: an owner-set 显示名称 is the title, the agent's own name still finds it", () => {
+    const aliased = row("x", "小星", { session: { cutexSessionId: "x", displayName: "小星", displayNameOverride: "小星", formalAgentName: "astra-composer" } as AgentRow["session"] });
+    const groups: SidebarGroup[] = [{ kind: "independent", id: "__independent__", hostId: "local", online: [aliased, row("y", "plain")], offline: [] }];
+    const items = agentItems({ groups, chats: [], signals: new Map(), stateOf: () => "live", focus: "local" }, t);
+    const item = items.find((i) => i.id === "agent:local:x")!;
+    expect(item.title).toBe("小星");
+    expect(matchItem("astra-comp", item)).not.toBeNull();
+    expect(items.find((i) => i.id === "agent:local:y")!.terms).toEqual(["y"]);
   });
 
   it("services: per host, running first; slug searchable", () => {

@@ -37,9 +37,9 @@ export interface SettingsPageItem extends SlotItemBase {
   page: SettingsTab; // stable deep-link name = openSettings(page); unique across modules
   group: SettingsGroupId; // the shell fixes the group order (lib/settingsNav.ts)
   icon: Icon;
-  titleKey: MessageKey; // nav label + breadcrumb
+  titleKey: MessageKey; // nav label, breadcrumb and shared page heading
   source: SettingsSource | null; // host/device page routing; effect scopes come only from row declarations
-  hintKey?: MessageKey; // what the page is for, one line above the scope chips
+  hintKey?: MessageKey; // page purpose and relevant scope; all built-in pages supply it
   /** @deprecated Type compatibility only; the renderer ignores it. Effects are required row data. */
   agents?: SettingsAgents;
   /** A live preview beside the page when the column is wide, after it when narrow (components/Page PageBody). */

@@ -6,7 +6,7 @@ export const FRAME_IDENTITY = `function(mainWindow) {
 
 export const INSPECT = `function(action) {
   if (!this.isConnected) return { error: 'stale_ref' };
-  if (this.nodeType !== 1) return { error: 'not_actionable' };
+  if (this.nodeType !== 1) return { error: 'not_actionable', reason: 'not_element' };
   if (this.ownerDocument.defaultView !== window) return { error: 'unsupported_frame' };
   if (this.tagName === 'IFRAME' || this.tagName === 'FRAME') return { error: 'unsupported_frame' };
   const style = getComputedStyle(this);
@@ -14,20 +14,23 @@ export const INSPECT = `function(action) {
   if (this.matches(':disabled') || this.closest('[inert]') || this.getAttribute('aria-disabled') === 'true' ||
       style.visibility !== 'visible' || style.display === 'none' || Number(style.opacity) === 0 ||
       this.getClientRects().length === 0 || rect.width <= 0 || rect.height <= 0)
-    return { error: 'not_actionable' };
+    return { error: 'not_actionable', reason: 'disabled_or_hidden' };
   const left = Math.max(0, rect.left), top = Math.max(0, rect.top);
   const right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom);
-  if (right <= left || bottom <= top) return { error: 'not_actionable' };
+  if (right <= left || bottom <= top) return { error: 'not_actionable', reason: 'outside_viewport' };
   const x = (left + right) / 2, y = (top + bottom) / 2;
-  const hit = this.ownerDocument.elementFromPoint(x, y);
-  if (!hit || !(hit === this || this.contains(hit))) return { error: 'not_actionable' };
+  // Hit-test in the element's own tree: the document retargets a point inside a shadow root
+  // (open or closed) to its host, which would make every web-component control look covered.
+  const root = this.getRootNode();
+  const hit = (typeof root.elementFromPoint === 'function' ? root : this.ownerDocument).elementFromPoint(x, y);
+  if (!hit || !(hit === this || this.contains(hit))) return { error: 'not_actionable', reason: 'covered' };
   if (action === 'fill') {
     const editable = this.tagName === 'TEXTAREA' || (this.tagName === 'INPUT' &&
       ['text','search','tel','url','password','email'].includes(this.type));
-    if (!editable || this.readOnly) return { error: 'not_actionable' };
+    if (!editable || this.readOnly) return { error: 'not_actionable', reason: 'not_editable' };
   }
-  if (action === 'select' && this.tagName !== 'SELECT') return { error: 'not_actionable' };
-  if ((action === 'check' || action === 'uncheck') && !(this.tagName === 'INPUT' && this.type === 'checkbox')) return { error: 'not_actionable' };
+  if (action === 'select' && this.tagName !== 'SELECT') return { error: 'not_actionable', reason: 'not_select' };
+  if ((action === 'check' || action === 'uncheck') && !(this.tagName === 'INPUT' && this.type === 'checkbox')) return { error: 'not_actionable', reason: 'not_checkbox' };
   return { x, y, checked: this.checked, rect: { x:left,y:top,width:right-left,height:bottom-top } };
 }`;
 
@@ -43,15 +46,18 @@ export const ARM_RECEIPT = `function(action, key) {
     if (action === 'press' && event.key !== key) return;
     receipt.seen = true;
   };
-  node.ownerDocument.addEventListener(type, listener, true);
+  // Listen in the element's own tree: above a shadow root (open or closed) the event's target
+  // is retargeted to the host, so a document listener would never see the element itself.
+  const root = node.getRootNode();
+  root.addEventListener(type, listener, true);
   receipt.read = () => ({ seen: receipt.seen, value: node.value, connected: node.isConnected });
-  receipt.cleanup = () => node.ownerDocument.removeEventListener(type, listener, true);
+  receipt.cleanup = () => root.removeEventListener(type, listener, true);
   return receipt;
 }`;
 
 export const SELECT_VALUE = `function() {
   if (!this.isConnected) return { error: 'stale_ref' };
-  if (this.ownerDocument.activeElement !== this) return { error: 'not_actionable' };
+  if (this.getRootNode().activeElement !== this) return { error: 'not_actionable', reason: 'not_focused' };
   // Email controls do not implement the text selection API. Choose the native
   // keyboard path BEFORE any attempt; never retry after a setter throws.
   if (this.tagName === 'INPUT' && this.type === 'email') return { keyboardSelect: true };
@@ -60,7 +66,7 @@ export const SELECT_VALUE = `function() {
 }`;
 
 export const CHECK_FOCUS = `function() {
-  return { focused: this.isConnected && this.ownerDocument.activeElement === this };
+  return { focused: this.isConnected && this.getRootNode().activeElement === this };
 }`;
 
 export const SCROLL_INTO_VIEW = `function() {
@@ -100,7 +106,8 @@ export const ARM_MOTION = `function(kind, x, y, direction) {
   const node=this, doc=this.ownerDocument||this.document, win=doc.defaultView;
   let seen=false; const type=kind==='hover'?'mousemove':'wheel';
   const listener=e=>{if(e.isTrusted&&(node===win||e.target===node||node.contains(e.target)))seen=true};
-  doc.addEventListener(type,listener,true);
+  const tree=node===win?doc:node.getRootNode();
+  tree.addEventListener(type,listener,true);
   const chain=[], starts=[], vertical=direction==='up'||direction==='down', forward=direction==='down'||direction==='right';
   if(kind==='scroll'){
     const root=doc.scrollingElement||doc.documentElement;
@@ -134,5 +141,5 @@ export const ARM_MOTION = `function(kind, x, y, direction) {
     const delta=vertical?dy:dx;
     return {seen,moved:index>=0&&(forward?delta>0:delta<0),position:i+':'+left+','+top,dx,dy,atEdge:forward?pos>=max-1:pos<=1};
   };
-  return {read,cleanup:()=>doc.removeEventListener(type,listener,true)};
+  return {read,cleanup:()=>tree.removeEventListener(type,listener,true)};
 }`;

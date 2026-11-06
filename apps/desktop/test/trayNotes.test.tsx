@@ -180,7 +180,7 @@ describe("HomeDock: notes on the items and 「备注…」", () => {
     expect(e.hasAttribute("data-has-note")).toBe(true);
     expect(e.querySelector("[data-tray-label]")!.textContent).toBe("盯 r253 部署包");
     expect(e.querySelector(".tray-note-full")!.textContent).toBe("盯 r253 部署包\n别碰运行中的服务");
-    expect(e.title).toContain("别碰运行中的服务");
+    expect(e.dataset.tip).toContain("别碰运行中的服务");
     expect(itemOf("Board").querySelector("[data-tray-label]")!.textContent).toBe("看板 · 只读");
     const x = itemOf("X");
     expect(x.hasAttribute("data-has-note")).toBe(false);

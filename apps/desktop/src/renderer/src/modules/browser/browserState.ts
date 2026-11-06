@@ -1,7 +1,11 @@
 // Small, credential-free state / references. URL policy and service tickets remain in main.
 import type { Json } from "../types";
+import { SERVICE_COMPONENT } from "../../lib/sideKinds";
 
 export const BROWSER_TAB = "browser.tab";
+export const SERVICE_TAB = SERVICE_COMPONENT;
+export const browserKindForUrl = (url: string) => url.startsWith("cutex:service/") ? SERVICE_TAB : BROWSER_TAB;
+export const isBrowserKind = (kind: string) => kind === BROWSER_TAB || kind === SERVICE_TAB;
 export const MAX_BROWSER_URL = 2000;
 export const MAX_BROWSER_INPUT = 8000;
 export type BrowserParams = { url: string; pendingOpen?: string; tabKey?: string; agentOpened?: true; ownerTab?: true; linked?: string };

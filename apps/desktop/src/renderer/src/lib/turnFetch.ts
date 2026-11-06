@@ -6,6 +6,7 @@
 // Pure (the page reader and the clock are injected); app wiring is lib/turnRefs.ts.
 import type { SessionHistory } from "@cutex-desktop/protocol";
 import { timelineFromThreadRead, type TimelineState, type TurnView } from "./timeline";
+import { TimelineEntries } from "./timelineEntries";
 
 /** ★ 5 pages of 200 = 1000 turns (§13). */
 export const LOOKUP_PAGES = 5;
@@ -51,7 +52,8 @@ export function singleTurn(source: TimelineState, turnId: string): { timeline: T
   const index = source.turns.findIndex((t) => t.id === turnId);
   if (index < 0) return null;
   const turn = source.turns[index]!;
-  const entries = new Map(turn.entryIds.flatMap((id) => (source.entries.has(id) ? [[id, source.entries.get(id)!] as const] : [])));
+  const items = turn.entryIds.flatMap((id) => (source.entries.has(id) ? [[id, source.entries.get(id)!] as const] : []));
+  const entries = source.entries instanceof TimelineEntries ? new TimelineEntries(items) : new Map(items);
   const timeline: TimelineState = {
     ...source,
     turns: [turn],

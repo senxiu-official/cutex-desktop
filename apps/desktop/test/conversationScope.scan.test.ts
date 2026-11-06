@@ -27,7 +27,7 @@ export const CONVERSATION_SUBTREE: readonly string[] = [
   "components/InteractionDock.tsx",
   "components/StatusBar.tsx",
   "components/PendingOwnerNotes.tsx",
-  "components/NeedsYouStrip.tsx",
+  "components/NeedsYou.tsx",
   "components/ArchivedBanner.tsx",
   "components/AccessNotices.tsx",
   "components/GoalBar.tsx",

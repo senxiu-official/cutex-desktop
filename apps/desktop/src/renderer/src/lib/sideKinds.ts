@@ -8,6 +8,7 @@ export const FILES_COMPONENT: ItemId = "workspace.files";
 export const CHANGES_COMPONENT: ItemId = "workspace.changes";
 export const PREVIEW_COMPONENT: ItemId = "workspace.preview";
 export const DIFF_COMPONENT: ItemId = "diff.view";
+export const SERVICE_COMPONENT: ItemId = "browser.service";
 export const SUBAGENT_THREAD_COMPONENT: ItemId = "subagents.thread";
 /**
  * Core (module `conversation`, ungated): one turn as a reference card (left gutter) or a right-side card.

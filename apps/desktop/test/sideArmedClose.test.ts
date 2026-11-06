@@ -3,7 +3,7 @@
 // the menu's `armed` rows in lib/contextMenu.ts + components/Overlays.tsx).
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SideBinding } from "../src/renderer/src/modules/slots";
-import { applyOpen, emptyLayout, place, placeSpec, type SideLayout } from "../src/renderer/src/lib/sideLayout";
+import { applyOpen, closeInstances, emptyLayout, place, placeSpec, type SideLayout } from "../src/renderer/src/lib/sideLayout";
 import { selectStep, type MenuAction, type MenuEntry } from "../src/renderer/src/lib/contextMenu";
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
@@ -14,10 +14,12 @@ vi.stubGlobal("navigator", { ...globalThis.navigator, language: "zh-CN" });
 
 const warnings = new Map<string, string>();
 const closed: string[][] = [];
+let closeEffect: (() => void) | null = null;
 vi.mock("../src/renderer/src/lib/sideServices", () => ({
   closeWarnings: (ids: readonly string[]) => ids.flatMap((id) => (warnings.has(id) ? [warnings.get(id)!] : [])),
   closeSideInstances: async (ids: readonly string[]) => {
     closed.push([...ids]);
+    closeEffect?.();
   },
   sideReveal: () => {},
 }));
@@ -47,6 +49,7 @@ function actions(entries: MenuEntry[]): MenuAction[] {
 
 let ids: string[] = [];
 beforeEach(() => {
+  closeEffect = null;
   warnings.clear();
   closed.length = 0;
   let l = emptyLayout();
@@ -76,6 +79,28 @@ describe("menu rows with an in-place confirm", () => {
 });
 
 describe("side close confirms in place", () => {
+  it("keeps the existing empty kept tool page after its contents close", async () => {
+    const l = useSide.getState().layout;
+    l.pages[0]!.kept = true;
+    const page = pageId();
+    closeEffect = () => useSide.setState({ layout: closeInstances(useSide.getState().layout, ids) });
+    closePage(page);
+    await Promise.resolve();
+    expect(useSide.getState().layout.pages).toHaveLength(1);
+    expect(useSide.getState().layout.pages[0]).toMatchObject({ id: page, kept: true, cards: [] });
+  });
+
+  it("explicitly removes a kept preview page after its contents close", async () => {
+    const l = useSide.getState().layout;
+    l.pages[0]!.kept = true;
+    l.pages[0]!.cards[0]!.kind = "workspace.preview";
+    for (const id of ids) l.instances[id]!.kind = "workspace.preview";
+    const page = pageId();
+    closeEffect = () => useSide.setState({ layout: closeInstances(useSide.getState().layout, ids) });
+    closePage(page);
+    await Promise.resolve();
+    expect(useSide.getState().layout.pages).toHaveLength(0);
+  });
   it("both terminals land in one card", () => {
     expect(useSide.getState().layout.pages[0]!.cards[0]!.tabs).toEqual(ids);
   });

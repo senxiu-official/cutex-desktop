@@ -8,6 +8,10 @@ import { browserErrorMessagesEn } from "./errorMessages";
 import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
+  "browser.service.title": "Service",
+  "browser.service.choose": "Choose a service",
+  "browser.service.hint": "Choose a registered service to open in this tab.",
+  "browser.service.noMatch": "No matching services.",
   "browser.login.poolLabel": "{{agent}} login environment",
   "browser.login.poolTitle": "Shared isolated {{agent}} login environment",
   "browser.login.poolHint": "This environment is separate from My tabs, but {{agents}} on this host share its logins. Do not sign in with personal accounts here.",
@@ -129,8 +133,8 @@ export const en: Record<keyof typeof zhCN, string> = {
   "browser.idleDetach": "Detach debugger after idle",
   "browser.idleDetachHint": "Default: 30 seconds. The next action reconnects; earlier page references become stale.",
   "browser.seconds": "seconds",
-  "browser.ownerCapture": "Use the page as usual: the {{agent}} waits while you type and reads the page again after you touch it. Choose Pause {{agent}} to stop it.",
-  "browser.ownerCaptureFailed": "Shared control isn't ready, so the {{agent}} can't operate this tab for now (you can still use it). Reopen the tab, or choose Stop and revoke grant.",
+  "browser.ownerCapture": "Use the page as usual: the {{agent}} waits while you type and reads the page again after you touch it. Choose Pause to stop it.",
+  "browser.ownerCaptureFailed": "Shared control isn't ready, so the {{agent}} can't operate this tab for now (you can still use it). Reopen the tab, or choose Take back.",
   "browser.idempotency.clear": "Clear pending browser records",
   "browser.idempotency.clearHint": "Clear browser idempotency records for one {{agent}} or all to recover from a saturated pending limit.",
   "browser.idempotency.target": "Clear scope",

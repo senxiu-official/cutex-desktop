@@ -447,6 +447,70 @@ describe("linked profile appearance", () => {
     expect(f.refs[1]!.profile.appearance.color).toBeNull();
     expect(f.refs[0]!.profile.appearance.color).toBe("#123456");
   });
+
+  const stored = (f: ReturnType<typeof fixture>) => JSON.parse(f.data.get(PROFILE_LINK_APPEARANCE_STORAGE)!).groups[IDENTITY];
+
+  it("clears a stale stored conflict once both hosts look the same, without writing and keeping paused", async () => {
+    // As seen live: first association while b had no avatar, a later choice left the group paused.
+    const f = fixture();
+    f.external(0, "avatar", PNG, "2031-01-01T00:00:00.000Z");
+    await f.engine().flush();
+    const saved = JSON.parse(f.data.get(PROFILE_LINK_APPEARANCE_STORAGE)!);
+    saved.groups[IDENTITY].paused = true;
+    f.data.set(PROFILE_LINK_APPEARANCE_STORAGE, JSON.stringify(saved));
+    expect(stored(f).conflict).toBe(true);
+    // b gets the same image from elsewhere; only its revision time differs.
+    f.external(1, "avatar", PNG, "2034-01-01T00:00:00.000Z");
+    const sync = f.engine();
+    expect(sync.view(IDENTITY).conflict).toBe(true);
+    await sync.flush();
+    expect(sync.view(IDENTITY).conflict).toBe(false);
+    expect(stored(f)).toMatchObject({ conflict: false, paused: true });
+    expect(JSON.parse(stored(f).members[JSON.stringify(["b", "profile-b"])].marks.avatar.value)).toBe(`image:${PNG}`);
+    expect(f.calls).toEqual([]);
+    // Still paused: a later edit on one host is not fanned out.
+    f.external(0, "color", "#123456", "2035-01-01T00:00:00.000Z"); await sync.flush();
+    expect(f.calls).toEqual([]);
+  });
+
+  it("keeps a stored conflict while the values really differ", async () => {
+    const f = fixture();
+    f.external(0, "avatar", PNG, "2031-01-01T00:00:00.000Z");
+    await f.engine().flush();
+    f.external(1, "avatar", PNG2, "2034-01-01T00:00:00.000Z");
+    const sync = f.engine(); await sync.flush();
+    expect(sync.view(IDENTITY).conflict).toBe(true);
+    expect(stored(f).conflict).toBe(true);
+    expect(f.calls).toEqual([]);
+  });
+
+  it("does not clear a conflict while a member is offline or not allowed", async () => {
+    for (const block of ["offline", "denied"] as const) {
+      const f = fixture();
+      f.external(0, "avatar", PNG, "2031-01-01T00:00:00.000Z");
+      await f.engine().flush();
+      f.external(1, "avatar", PNG, "2034-01-01T00:00:00.000Z");
+      if (block === "offline") f.refs[1]!.connected = false; else f.denied.add("b");
+      const sync = f.engine(); await sync.flush();
+      expect(sync.view(IDENTITY).conflict, block).toBe(true);
+      if (block === "offline") f.refs[1]!.connected = true; else f.denied.delete("b");
+      await sync.flush();
+      expect(sync.view(IDENTITY).conflict, block).toBe(false);
+      expect(f.calls).toEqual([]);
+    }
+  });
+
+  it("a group kept separate stays paused when its values are equal", async () => {
+    const f = fixture();
+    f.external(0, "color", "#123456", "2031-01-01T00:00:00.000Z");
+    const sync = f.engine(); await sync.flush();
+    sync.keepSeparate(IDENTITY);
+    f.external(1, "color", "#123456", "2032-01-01T00:00:00.000Z"); await sync.flush();
+    expect(stored(f)).toMatchObject({ conflict: false, paused: true });
+    f.external(0, "color", "#654321", "2033-01-01T00:00:00.000Z"); await sync.flush();
+    expect(f.calls).toEqual([]);
+    expect(sync.view(IDENTITY).conflict).toBe(false);
+  });
 });
 
 describe("linked profile avatarStyle (design 047)", () => {

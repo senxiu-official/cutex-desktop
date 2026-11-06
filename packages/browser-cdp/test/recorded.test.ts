@@ -40,7 +40,10 @@ describe('I1 recorded input results with an explicitly synthetic S1 world-routin
         authorize: () => {}, ensureVisible: () => {}, allowUrl: () => true,
       });
       const snapshot = await executor.read();
-      expect(snapshot.nodes).toHaveLength(16);
+      // Document order; a heading's / button's own label text and nameless wrappers are not repeated.
+      expect(snapshot.nodes.map(node => `${node.role}:${node.name}`)).toEqual(['RootWebArea:Cutex I1 fixture', 'heading:Cutex 内嵌浏览器实验',
+        'paragraph:', 'StaticText:独立 fixture · 不连接 Cutex daemon 或真实账户', 'LabelText:', 'StaticText:备注 ', 'textbox:备注',
+        'button:保存备注', 'button:替换输入框', 'status:', 'StaticText:尚未保存']);
       const textbox = snapshot.nodes.find(node => node.role === 'textbox' && node.name === '备注')!;
       expect(textbox).toBeDefined();
       const action = executor.act(textbox.ref, 'fill', 'Cutex I1 verified');

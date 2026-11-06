@@ -1,28 +1,33 @@
 import { SseParser, type CutexClient } from "@cutex-desktop/cutex-client";
 import type { BrowserOperationResult } from "@cutex-desktop/browser-protocol";
 import { BrowserRelayLedger, terminalRelayState, type RelayLedgerEntry } from "./ledger";
-import { boundedRelayJson, BrowserRelayError, parseRelayGrant, parseRelayLease, parseRelayMessage, parseRelayRegistration, relayError, relayId, RELAY_GENERATION_HEADER, RELAY_KEY_HEADER, RELAY_MAX_BYTES, RELAY_MAX_LEASES, validateRelayResult, type RelayBinding, type RelayCommand, type RelayErrorCode, type RelayGrant, type RelayLease, type RelayMessage, type RelayRegistration, type RelayResult, type RelayState } from "./relayTypes";
+import type { BrowserAuditEvent, BrowserAuditStage } from "./audit";
+import { boundedRelayJson, BrowserRelayError, parseRelayGrant, parseRelayLease, parseRelayMessage, parseRelayRegistration, relayError, relayErrorDetail, relayId, RELAY_GENERATION_HEADER, RELAY_KEY_HEADER, RELAY_MAX_BYTES, RELAY_MAX_LEASES, validateRelayResult, type RelayBinding, type RelayCommand, type RelayErrorCode, type RelayGrant, type RelayLease, type RelayMessage, type RelayRegistration, type RelayResult } from "./relayTypes";
 
 export interface RelayExecutionContext {
   readonly signal: AbortSignal;
   /** Recomputed from the fixed monotonic deadline; never copy it into persistent state. */
   readonly deadline: number;
   remainingMs(): number;
+  /** Local metadata only; never added to relay wire results. */
+  stage?(stage: BrowserAuditStage): void;
 }
 export interface BrowserRelayOptions {
   hostId: string; deviceId: string;
   client: Pick<CutexClient, "fetchRaw" | "headers" | "url">;
   execute(command: RelayCommand, context: RelayExecutionContext): Promise<BrowserOperationResult>;
+  /** The host reads a failed result's error.detail (browser-error-detail-v1). */
+  errorDetail?(): boolean;
   localLeases(): readonly RelayLease[];
   /** Must synchronously close local admission before any async provider cleanup. */
   revokeLocal(leaseId: string, reason: RelayErrorCode): void;
   onState?(value: { state: "connecting" | "online" | "offline"; code?: RelayErrorCode }): void;
-  onAudit?(value: { event: "state" | "lateResult" | "rejected"; requestId?: string; state?: RelayState; code?: RelayErrorCode }): void;
+  onAudit?(value: BrowserAuditEvent): void;
   monotonicNow?: () => number; wallNow?: () => number;
   reconnectDelayMs?: number; requestTimeoutMs?: number;
 }
 type Connection = { binding: RelayRegistration; ledger: BrowserRelayLedger; leases: Map<string, RelayLease>; abort: AbortController; reader?: ReadableStreamDefaultReader<Uint8Array>; online: boolean; lastEvent: number; ready: () => void; rejectReady: (error: unknown) => void; heartbeat?: ReturnType<typeof setTimeout> };
-type Job = { connection: Connection; command: RelayCommand; entry: RelayLedgerEntry; abort: AbortController; timer?: ReturnType<typeof setTimeout> };
+type Job = { connection: Connection; command: RelayCommand; entry: RelayLedgerEntry; abort: AbortController; started: number; stage: BrowserAuditStage; timer?: ReturnType<typeof setTimeout> };
 const sameTarget = (a: RelayLease["target"], b: RelayCommand["target"]) => a.hostId === b.hostId && a.deviceId === b.deviceId && a.guestId === b.guestId;
 
 /** One main-only client per trusted HostConnection. No renderer transport or credentials getter. */
@@ -67,8 +72,11 @@ export class BrowserRelay {
   async grantLease(input: RelayGrant): Promise<RelayLease> {
     const c = this.connected(), body = parseRelayGrant(input, c.binding.deviceId);
     if (c.leases.size >= RELAY_MAX_LEASES) throw new BrowserRelayError("lease_limit");
+    // A popup inherits its opener lease's origin (cutex grant_checked): an agent-opened list
+    // tab's popup is "agent" too. Any other grant is the agent's own open or the owner's.
+    const origin = body.source.kind === "agent-open" ? "agent" : body.source.kind === "popup" ? c.leases.get(body.source.openerLeaseId)?.origin : "owner";
     const result = parseRelayLease(await this.http("POST", "/v2/browser/leases/grant", body, c));
-    if (!this.current(c) || result.target.hostId !== c.binding.hostId || result.target.deviceId !== body.deviceId || result.target.guestId !== body.guestId || result.cutexSessionId !== body.cutexSessionId || result.state !== "pending" || result.origin !== (body.source.kind === "agent-open" ? "agent" : "owner")) throw new BrowserRelayError("stale_connection");
+    if (!this.current(c) || result.target.hostId !== c.binding.hostId || result.target.deviceId !== body.deviceId || result.target.guestId !== body.guestId || result.cutexSessionId !== body.cutexSessionId || result.state !== "pending" || !origin || result.origin !== origin) throw new BrowserRelayError("stale_connection");
     if (c.leases.has(result.leaseId) || c.leases.size >= RELAY_MAX_LEASES) throw new BrowserRelayError("lease_conflict");
     c.leases.set(result.leaseId, structuredClone(result)); return result;
   }
@@ -97,7 +105,7 @@ export class BrowserRelay {
     ++this.#epoch; this.#openingAbort?.abort(); this.#openingAbort = undefined; this.#opening = undefined;
     const c = this.#connection; this.#connection = undefined;
     if (c) { c.online = false; c.ledger.disconnect(); c.leases.clear(); c.abort.abort(); c.rejectReady(new BrowserRelayError(code)); if (c.heartbeat) clearTimeout(c.heartbeat); void c.reader?.cancel().catch(() => {}); }
-    for (const job of this.#jobs.values()) { job.connection.ledger.interrupt(job.entry, "stale_connection"); job.abort.abort(); if (job.timer) clearTimeout(job.timer); this.audit({ event: "state", requestId: job.entry.requestId, state: job.entry.state, ...(job.entry.error ? { code: job.entry.error } : {}) }); }
+    for (const job of this.#jobs.values()) { job.connection.ledger.interrupt(job.entry, "stale_connection"); job.abort.abort(); if (job.timer) clearTimeout(job.timer); this.audit({ event: "state", requestId: job.entry.requestId, state: job.entry.state, abortCause: job.entry.abortCause, stage: job.stage, elapsedMs: this.#mono() - job.started, ...(job.entry.error ? { code: job.entry.error } : {}) }); }
     this.#jobs.clear(); let leases: readonly RelayLease[] = []; try { leases = this.leases(); } catch { /* No authority is restored if inventory fails. */ }
     for (const lease of leases) this.revokeLocal(lease.leaseId, code); this.state("offline", code);
   }
@@ -193,15 +201,15 @@ export class BrowserRelay {
     try {
       const accepted = c.ledger.accept(command); entry = accepted.entry;
       if (accepted.duplicate || terminalRelayState(entry.state)) { const existing = this.#jobs.get(command.requestId); if (existing && terminalRelayState(entry.state)) { existing.abort.abort(); if (existing.timer) clearTimeout(existing.timer); this.#jobs.delete(command.requestId); } this.report(c, this.send(c, command, entry, undefined, accepted.duplicate)); return; }
-      if (this.#inflight >= 16) { c.ledger.complete(entry, "busy"); this.report(c, this.send(c, command, entry)); return; }
+      if (this.#inflight >= 16) { this.audit({ event: "rejected", requestId: command.requestId, code: "busy", cause: "relay_inflight_limit", inflight: this.#inflight, ledgerSize: c.ledger.size }); if (c.ledger.complete(entry, "busy")) entry.detail = { reason: "relay_inflight_limit" }; this.report(c, this.send(c, command, entry)); return; }
       const known = command.leaseId ? c.leases.get(command.leaseId) : undefined;
       if (command.operation.kind !== "tabs.open" && (!known || known.state !== "active" || known.cutexSessionId !== command.cutexSessionId || !sameTarget(known.target, command.target) || !this.leases().some(lease => lease.leaseId === command.leaseId && lease.state === "active" && lease.cutexSessionId === command.cutexSessionId && sameTarget(lease.target, command.target)))) { c.ledger.complete(entry, "lease_revoked"); this.report(c, this.send(c, command, entry)); return; }
-    } catch (error) { const code = relayError(error); this.audit({ event: "rejected", requestId: command.requestId, code }); if (code === "request_conflict") { this.failed(code); return; } if (entry) { c.ledger.complete(entry, code); this.report(c, this.send(c, command, entry)); } else this.report(c, this.rejected(c, command, code)); return; }
+    } catch (error) { const code = relayError(error); this.audit({ event: "rejected", requestId: command.requestId, code, ...(error instanceof BrowserRelayError && error.diagnosticCause ? { cause: error.diagnosticCause } : {}), inflight: this.#inflight, ledgerSize: c.ledger.size }); if (code === "request_conflict") { this.failed(code); return; } if (entry) { if (c.ledger.complete(entry, code)) entry.detail = relayErrorDetail(error); this.report(c, this.send(c, command, entry)); } else this.report(c, this.rejected(c, command, code)); return; }
     const acceptedEntry = entry;
-    const job: Job = { connection: c, command, entry: acceptedEntry, abort: new AbortController() }; this.#jobs.set(command.requestId, job);
+    const job: Job = { connection: c, command, entry: acceptedEntry, abort: new AbortController(), started: this.#mono(), stage: "execute" }; this.#jobs.set(command.requestId, job);
     if (!c.ledger.dispatch(acceptedEntry)) { this.#jobs.delete(command.requestId); this.report(c, this.send(c, command, acceptedEntry)); return; }
     job.timer = setTimeout(() => this.interrupt(job, "deadline_exceeded"), c.ledger.remaining(acceptedEntry)); job.timer.unref?.();
-    const self = this; const context: RelayExecutionContext = { signal: job.abort.signal, get deadline() { return self.#wall() + c.ledger.remaining(acceptedEntry); }, remainingMs: () => c.ledger.remaining(acceptedEntry) };
+    const self = this; const context: RelayExecutionContext = { signal: job.abort.signal, get deadline() { return self.#wall() + c.ledger.remaining(acceptedEntry); }, remainingMs: () => c.ledger.remaining(acceptedEntry), stage: stage => { if (stage !== "cleanup") job.stage = stage; this.audit({ event: "stage", requestId: command.requestId, stage, elapsedMs: this.#mono() - job.started }); } };
     c.ledger.running(acceptedEntry); this.audit({ event: "state", requestId: command.requestId, state: acceptedEntry.state });
     this.#inflight++;
     void (async () => {
@@ -209,24 +217,34 @@ export class BrowserRelay {
       try {
         if (!this.current(c) || job.abort.signal.aborted) throw new BrowserRelayError("stale_connection");
         const input = structuredClone(command);
-        executionStarted = true;
+        executionStarted = true; context.stage?.("execute");
         result = validateRelayResult(await this.#options.execute(input, context), command);
         boundedRelayJson({ dispatchSeq: command.dispatchSeq, target: command.target, operationKind: command.operation.kind, status: "succeeded", result });
         if (!c.ledger.complete(acceptedEntry)) { await this.late(job); return; }
       }
-      catch (error) { let code = relayError(error); if (executionStarted && acceptedEntry.write && ["cancelled", "deadline_exceeded", "stale_connection", "browser_unavailable", "invalid_result", "message_too_large"].includes(code)) code = "outcome_unknown"; if (!c.ledger.complete(acceptedEntry, code)) { await this.late(job); return; } }
+      catch (error) { let code = relayError(error); this.audit({ event: "rejected", requestId: command.requestId, code, stage: job.stage, elapsedMs: this.#mono() - job.started, ...(error instanceof BrowserRelayError && error.diagnosticCause ? { cause: error.diagnosticCause } : {}) }); const detail = { ...relayErrorDetail(error), ...(job.stage !== "execute" ? { stage: job.stage } : {}) }; if (executionStarted && acceptedEntry.write && ["cancelled", "deadline_exceeded", "stale_connection", "browser_unavailable", "invalid_result", "message_too_large"].includes(code)) { acceptedEntry.abortCause ??= code; code = "outcome_unknown"; } if (!c.ledger.complete(acceptedEntry, code)) { await this.late(job); return; } acceptedEntry.detail = relayErrorDetail(detail); }
       finally { this.#inflight--; if (job.timer) clearTimeout(job.timer); if (this.#jobs.get(command.requestId) === job) this.#jobs.delete(command.requestId); }
       await this.send(c, command, acceptedEntry, result);
     })().catch(error => { if (this.current(c)) this.failed(relayError(error)); });
   }
   private report(c: Connection, promise: Promise<void>): void { void promise.catch(error => { if (this.current(c)) this.failed(relayError(error)); }); }
   private async late(job: Job): Promise<void> { if (!job.abort.signal.aborted) { job.abort.abort(); await this.send(job.connection, job.command, job.entry); } this.audit({ event: "lateResult", requestId: job.command.requestId }); }
-  private interrupt(job: Job, code: "cancelled" | "deadline_exceeded" | "lease_revoked"): void { if (terminalRelayState(job.entry.state)) return; job.connection.ledger.interrupt(job.entry, code); job.abort.abort(); if (job.timer) clearTimeout(job.timer); if (this.#jobs.get(job.entry.requestId) === job) this.#jobs.delete(job.entry.requestId); void this.send(job.connection, job.command, job.entry).catch(error => { if (this.current(job.connection)) this.failed(relayError(error)); }); }
+  private interrupt(job: Job, code: "cancelled" | "deadline_exceeded" | "lease_revoked"): void { if (terminalRelayState(job.entry.state)) return; this.audit({ event: "state", requestId: job.command.requestId, abortCause: code, stage: job.stage, elapsedMs: this.#mono() - job.started }); job.connection.ledger.interrupt(job.entry, code); job.abort.abort(); if (job.timer) clearTimeout(job.timer); if (this.#jobs.get(job.entry.requestId) === job) this.#jobs.delete(job.entry.requestId); void this.send(job.connection, job.command, job.entry).catch(error => { if (this.current(job.connection)) this.failed(relayError(error)); }); }
   private async rejected(c: Connection, command: RelayCommand, code: RelayErrorCode): Promise<void> { await this.postResult(c, command, { dispatchSeq: command.dispatchSeq, target: command.target, operationKind: command.operation.kind, status: "failed", error: { code } }); }
   private async send(c: Connection, command: RelayCommand, entry: RelayLedgerEntry, result?: BrowserOperationResult, duplicate = false): Promise<void> {
-    const body: RelayResult = { dispatchSeq: command.dispatchSeq, target: command.target, operationKind: command.operation.kind, status: entry.state, ...(duplicate && terminalRelayState(entry.state) ? { metadataOnly: true as const } : {}), ...(entry.error ? { error: { code: entry.error } } : {}), ...(entry.state === "succeeded" && result ? { result } : {}) };
-    this.audit({ event: "state", requestId: command.requestId, state: entry.state, ...(entry.error ? { code: entry.error } : {}) }); await this.postResult(c, command, body);
+    const body: RelayResult = { dispatchSeq: command.dispatchSeq, target: command.target, operationKind: command.operation.kind, status: entry.state, ...(duplicate && terminalRelayState(entry.state) ? { metadataOnly: true as const } : {}), ...(entry.error ? { error: { code: entry.error, ...(entry.detail && this.#options.errorDetail?.() ? { detail: entry.detail } : {}) } } : {}), ...(entry.state === "succeeded" && result ? { result } : {}) };
+    this.audit({ event: "state", requestId: command.requestId, state: entry.state, ...(entry.error ? { code: entry.error } : {}), ...(entry.abortCause ? { abortCause: entry.abortCause } : {}) }); await this.postResult(c, command, body);
   }
-  private async postResult(c: Connection, command: RelayCommand, body: RelayResult): Promise<void> { if (!this.current(c)) return; boundedRelayJson(body); const reply = await this.http("POST", `/v2/browser/devices/${encodeURIComponent(c.binding.deviceId)}/commands/${encodeURIComponent(command.requestId)}/result`, body, c);
-    if (!reply || typeof reply !== "object" || Object.keys(reply).sort().join() !== "accepted,late" || !("accepted" in reply) || reply.accepted !== true || !("late" in reply) || typeof reply.late !== "boolean") throw new BrowserRelayError("invalid_result"); if (reply.late) this.audit({ event: "lateResult", requestId: command.requestId }); }
+  private async postResult(c: Connection, command: RelayCommand, body: RelayResult): Promise<void> {
+    if (!this.current(c)) return;
+    boundedRelayJson(body);
+    const started = this.#mono();
+    let code: RelayErrorCode | undefined;
+    try {
+      const reply = await this.http("POST", `/v2/browser/devices/${encodeURIComponent(c.binding.deviceId)}/commands/${encodeURIComponent(command.requestId)}/result`, body, c);
+      if (!reply || typeof reply !== "object" || Object.keys(reply).sort().join() !== "accepted,late" || !("accepted" in reply) || reply.accepted !== true || !("late" in reply) || typeof reply.late !== "boolean") throw new BrowserRelayError("invalid_result");
+      if (reply.late) this.audit({ event: "lateResult", requestId: command.requestId });
+    } catch (error) { code = relayError(error); throw error; }
+    finally { this.audit({ event: "stage", requestId: command.requestId, stage: "result_http", elapsedMs: this.#mono() - started, ...(code ? { code } : {}) }); }
+  }
 }

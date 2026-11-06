@@ -51,6 +51,16 @@ const item: RawItem = { id: "delegate-1", type: "mcpToolCall", server: "cutex", 
 const card = () => renderToStaticMarkup(createElement(DelegationCard, { item, sessionId: "lead" }));
 
 describe.each(["zh-CN", "en"])("delegation presentation (%s)", (locale) => {
+  it.each([true, false])("labels an owner-route interruption without claiming the target is offline (%s)", (offline) => {
+    state.locale = locale;
+    state.offline = offline;
+    state.record = ask({ execution: "interrupted", review: null, attempt: { n: 1, state: "interrupted", interruptReason: "ownerStopped" } });
+    const text = card();
+    expect(text).toContain(t("delegation.status.ownerStopped"));
+    expect(text).toContain(locale === "en" ? "host upgrade" : "主机升级");
+    expect(text).not.toContain(t("delegation.status.runtimeRestart"));
+  });
+
   beforeEach(() => { state.locale = locale; state.offline = true; });
   it("renders pending abandon consistently in the header, row and card", () => {
     state.record = ask();

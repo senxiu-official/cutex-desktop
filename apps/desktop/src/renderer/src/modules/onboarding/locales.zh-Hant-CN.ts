@@ -221,7 +221,7 @@ export const zhHantCN: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.minorAgent.title": "兩個字母的方塊",
   "onboarding.guide.minorAgent.text": "沒有自己的頭像、也沒有置頂的{{agents}}，在列表、對話和各處都顯示成兩個字母的方塊。\n「設置 → 側欄 → {{agent}}行 → {{agent}}默認頭像」選「僅重要{{agents}}」時就是這樣。\n想給它頭像：右鍵點擊這一行，選「顯示頭像」。",
   "onboarding.guide.project.title": "項目和它的{{director}}",
-  "onboarding.guide.project.text": "一個項目由一個{{director}}負責：它分派工作、創建{{agents}}，結果都彙總到它這裏。\n看項目的看板和動態：把鼠標移到項目標題上，左鍵點擊右邊的「項目視圖」。",
+  "onboarding.guide.project.text": "一個項目由一個{{director}}負責：它分派工作、創建{{agents}}，結果都彙總到它這裏。\n看項目視圖和動態：把鼠標移到項目標題上，左鍵點擊右邊的「項目視圖」。",
   "onboarding.guide.needsYou.title": "需要你",
   "onboarding.guide.needsYou.text": "「需要你」表示有{{agent}}在等你：一個問題、一次審批或一個決定。\n你處理之前，它可能一直停着。\n這些事彙總在輸入框上方、側欄每行末尾和托盤裏，左鍵點擊一下就能過去。",
   "onboarding.guide.delegation.title": "委託",

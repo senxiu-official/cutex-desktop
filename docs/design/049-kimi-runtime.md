@@ -1,8 +1,7 @@
 # 049 Kimi Code 运行时、Kimi 账户（桌面）
 
-状态：**桌面已实现（feat/r266-kimi-desktop，未合并）**。cutex 一侧：K2 的 Profile / 账户契约见 cutex
-`docs/development/r266-kimi-profiles.md`；K1 的运行时（`kimi-runtime` 组件、`kimi-acp-subset` 协议）在
-`feat/r266-kimi-runtime`。建在 [048](048-profile-runtime-variants.md)（运行时变体）之上。
+可用性以主机与运行时声明的能力为准；发布说明仅使用公开版本号。
+Kimi 通过导出的 Management v2 与 ACP 子集契约接入。运行时变体见 [048](048-profile-runtime-variants.md)。
 
 ## 一句话
 
@@ -28,7 +27,7 @@ Kimi Code 是 DSH 之后的第二个 ACP 运行时。桌面不再为每个运行
 - `kimi-accounts`（K2）：Kimi 账户这一节。没有就不显示。
 - `kimi-runtime`（K1，装好组件后才有）：可以新建 Kimi 智能体。
 - 设置 → 运行时的 Kimi 组：有 `kimi-runtime`，**或者**有 `kimi-runtime-profiles` + `components`（cutex 认识 Kimi、
-  能装组件但还没装）时显示，好让主人在这里装。DSH 保持 r265 的规则（装好才显示）。
+  能装组件但还没装）时显示，好让主人在这里装。DSH 仍只在组件已安装时显示。
 - 会话里的动作看这个会话自己的 `native.schema.capabilities.features`：插话（`turnSteer`）、分叉、回退、删除、
   旁聊要**明确为 true** 才给；图片要 `imageInput: true` 且不是 `textInputOnly`；`threadSettingsUpdate` 决定模型 /
   推理强度能否在会话中改。K1 当前声明 `turnSteer:false`，所以回合中输入的消息排到下一回合，提示和 DSH 一样。
@@ -79,7 +78,7 @@ Kimi Code 是 DSH 之后的第二个 ACP 运行时。桌面不再为每个运行
 - **额度**：Kimi 账户的额度这次不做（K2 契约 §10 说以后再加），Profile 卡片上显示「没有额度信息」。
 - **预览**：`?variants&kimi=ready`（已安装）、`?variants`（未安装）、`?kimiLogin=hold|pending|fail`、
   `?kimiNode=missing`。Mock 在 `modules/kimi-accounts/mock.ts`、`modules/jobs/mock.ts`、`dev/mockProfileVariants.ts`。
-- **合并到 r265b 时（集成）**：r265 R2 的三处 QA 修正对所有 ACP 运行时都成立。快速对话跟随 Profile 的默认变体，
+- **共享 ACP 行为**：以下规则适用于所有 ACP 运行时。快速对话跟随 Profile 的默认变体，
   默认变体是 kimi 时和 DSH 一样不带 Codex 权限 / 模型选项；主机没有 `kimi-runtime` 时发送按钮不可用。变体编辑里的
   模型列表用 cutex 给的目录并显示目录里的名字；DSH 没选时显示目录默认，Kimi 没选时仍是「Kimi 默认」一项。
 

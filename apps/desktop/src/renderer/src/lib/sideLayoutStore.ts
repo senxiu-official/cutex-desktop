@@ -272,13 +272,13 @@ export function updatePeerView(key: string, fn: (view: SideLayout) => SideLayout
 }
 
 /** Closes instances wherever they are (the live layout, a peer's Shelf), without their components' onClose. */
-export function closeInstancesAnywhere(ids: readonly string[]): void {
+export function closeInstancesAnywhere(ids: readonly string[], keepEmptyKinds: readonly string[] = []): void {
   const s = useSide.getState();
   const live = ids.filter((id) => s.layout.instances[id]);
-  if (live.length) updateLayout((layout) => closeInstances(layout, live));
+  if (live.length) updateLayout((layout) => closeInstances(layout, live, keepEmptyKinds));
   for (const [key, peer] of Object.entries(useSide.getState().peers)) {
     const mine = ids.filter((id) => peer.own.instances[id] && !live.includes(id));
-    if (mine.length) remember(key, closeInstances(peer.own, mine), peer.meta);
+    if (mine.length) remember(key, closeInstances(peer.own, mine, keepEmptyKinds), peer.meta);
   }
 }
 

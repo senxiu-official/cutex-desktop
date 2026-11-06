@@ -67,3 +67,15 @@ it("the mixed-timing chip never reads like the mixed-scope chip in any catalog",
     expect(short).not.toMatch(/混合|mixed/i);
   }
 });
+
+it("the shared header keeps the title, purpose and scope before the related-page action", () => {
+  act(() => root.render(h(SettingsPage, { page: "runtime", title: "Runtime", hint: "Manage installed runtimes.", host: picker,
+    link: h("button", { type: "button" }, "Updates"), children: h(SettingRow, { label: "A", agents: "now", source: "host" }) })));
+  const pageHeader = host.querySelector("[data-settings-header]")!;
+  expect(pageHeader.querySelector("h1")?.textContent).toBe("Runtime");
+  expect(pageHeader.querySelector("p")?.textContent).toBe("Manage installed runtimes.");
+  const actions = pageHeader.querySelector("[data-settings-header-actions]")!;
+  expect(header().parentElement).toBe(actions.parentElement);
+  expect(header().nextElementSibling).toBe(actions);
+  expect(actions.textContent).toBe("Updates");
+});

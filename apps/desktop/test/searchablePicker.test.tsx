@@ -177,7 +177,7 @@ describe("SearchableSelect", () => {
       value: "alice", options, onChange: picked, placeholder: "搜索成员", emptyLabel: "没有结果", label: "连接目标", triggerText: "选择目标",
     })));
     expect(host.querySelector("button")!.textContent).toBe("Alice");
-    expect(host.querySelector("button")!.title).toBe("Alice");
+    expect(host.querySelector("button")!.dataset.tip).toBe("Alice");
   });
   function select(disabled = false) {
     act(() => root.render(h(SearchableSelect, { value: "alice", options, onChange: picked, placeholder: "搜索", emptyLabel: "没有结果", label: "选择成员", disabled })));

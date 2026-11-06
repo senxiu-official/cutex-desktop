@@ -4,6 +4,7 @@
 import { translate } from "../i18n";
 import { closeSideInstances, closeWarnings } from "./sideServices";
 import { sideViewNow, sideRegistry } from "./sideComponents";
+import { EMPTY_PREVIEW_LAUNCHERS } from "./emptyPreviewPages";
 import {
   cardInstances,
   dropEmptyPage,
@@ -234,6 +235,10 @@ export function cardName(card: SideCard): string {
 }
 
 export function pageLabel(page: SidePage): string {
+  if (!page.name && !page.cards.length && page.emptyKind) {
+    const entry = sideRegistry().get(page.emptyKind);
+    if (entry) return translate(entry.item.titleKey);
+  }
   return pageName(page, cardName, translate("side.launcherName"));
 }
 
@@ -288,7 +293,10 @@ export function closePage(pageId: string): void {
     return;
   }
   const ids = pageTargets(pageId);
-  if (ids.length) void closeSideInstances(ids);
+  const preview = ids.length > 0 && ids.every((id) => !!EMPTY_PREVIEW_LAUNCHERS[s.layout.instances[id]?.kind ?? ""]);
+  if (ids.length) void closeSideInstances(ids, { removePage: true }).then(() => {
+    if (preview) updateLayout((l) => dropEmptyPage(l, pageId));
+  });
 }
 
 /** 关闭其他 (confirmed in place by the caller when `otherTabsCloseWarnings` is non-empty). */

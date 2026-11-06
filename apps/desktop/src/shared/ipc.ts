@@ -1,5 +1,6 @@
 import type { SessionForkRequest, SessionForkResult, SessionForkPreview, SessionForkPreviewRequest } from "./sessionFork";
 import type { AskReviewFields } from "./delegationReviews";
+import type { ApprovalPage, OwnerStorePageQuery } from "./notificationPaging";
 // IPC contract between Electron main and the renderer. The renderer never sees the cutex token
 // and never talks to the daemon directly; everything goes through these calls.
 import type { AgentPauseResult } from "./agentPause";
@@ -27,6 +28,7 @@ import type {
   UserInputSubmitResult,
   OwnerJoinDelegation,
   OwnerNotification,
+  OwnerNotificationList,
   OwnerNotifyFilter,
   OwnerNotifySettings,
   OwnerNotifySettingsPatch,
@@ -38,7 +40,7 @@ import type { CollaborationModeMask, ReviewTarget, ThreadGoal, ThreadGoalStatus 
 import type { AddSshHostRequest, DirBrowse, HostAppearancePatch, HostGroupDraft, HostResult, HostsState, HostStartOn, HostTestResult, SshHostPatch, ViewScope } from "./hosts";
 import type { LaunchOverrides, NewThreadDefaults, NewThreadDefaultsPatch } from "./launch";
 import type { DeviceOff, NotificationDecision, NotificationEvaluateRequest, NotificationLevelsPatch, NotificationLevelsView } from "./notificationLevels";
-import type { RuntimesWire } from "./runtimes";
+import type { RuntimePrunePlan, RuntimePruneResult, RuntimesWire } from "./runtimes";
 import type { UpdateUnsupportedCode } from "./update";
 import type { Note, NoteCreate, NotesQuery, NotesResult, NoteUpdate } from "./notes";
 import type { SideChat, SideMessageInput, SideOpenInput, SideOpenResult, SideReply } from "./sideChat";
@@ -70,7 +72,7 @@ export type LocalDaemonSetup = "notInstalled" | "notRunning";
 export type DaemonState =
   | { kind: "connecting"; baseUrl: string }
   /** `platform`: cutex `/v2/host.platform` (absent in older fixtures). */
-  | { kind: "connected"; baseUrl: string; hostId: string; platform?: string }
+  | { kind: "connected"; baseUrl: string; hostId: string; platform?: string; instanceId?: string }
   /** `setup` (this machine only): no cutex config / token here = cutex is not installed yet (first
    *  run), else installed but its management service is not running. Absent for remote hosts. */
   | { kind: "unreachable"; baseUrl: string; message: string; setup?: LocalDaemonSetup }
@@ -93,6 +95,15 @@ export interface SidebarSnapshot {
    * deleted by it (storage audit 2026-10-23: stored Shelves were pruned against such a list).
    */
   partial?: true;
+  /**
+   * The archived agents are not read yet (`retired` is empty, `partial` is set): they are read on demand
+   * (`sidebarLoadArchived`). `count` comes from the catalog's ID pages; null on older cutex.
+   */
+  archivedPending?: { count: number | null };
+  /** A peek during the host's first read (`sidebarPeek`): active agents read so far of all. */
+  loading?: { loaded: number; total: number };
+  /** Renderer only: the host's list kept from an earlier run (lib/sidebarCache), shown until its own list is read. */
+  cached?: true;
 }
 
 
@@ -159,7 +170,7 @@ export interface QuotaConfigView {
 
 export interface CapabilitiesView {
   /** r260 non-durable text opt-in (normalized into featureList by main). */
-  features?: { liveTextDeltas?: boolean; ownerAdmissionHeldV1?: boolean; ownerAdmissionStateV1?: boolean; ownerAdmissionBusyV1?: boolean };
+  features?: { runtimePruneV1?: boolean; liveTextDeltas?: boolean; ownerAdmissionHeldV1?: boolean; ownerAdmissionStateV1?: boolean; ownerAdmissionBusyV1?: boolean; formalAgentNameRenameV1?: boolean };
   /** r258 native event media references (also advertised in featureList). */
   eventMediaBlobs?: boolean;
   /** Build identity (cutex r224+; absent on older cutex). */
@@ -1559,6 +1570,10 @@ export interface DaemonApi extends StorageCleanupApi {
   /** `GET /v2/fs/dirs` (fs-dir-browse): the in-app folder browser on a remote host; null on older cutex. */
   browseDirs(path?: string): Promise<DirBrowse | null>;
   sidebar(): Promise<SidebarSnapshot>;
+  /** Archived agents are read from now on; `sidebarChanged` follows when a read is needed. */
+  sidebarLoadArchived(): Promise<void>;
+  /** During the host's first sidebar read: the agents read so far; null otherwise. */
+  sidebarPeek(): Promise<SidebarSnapshot | null>;
   /** `turnLimit` (history-pages): newest turns only + `historyPage`; ignored by older cutex. */
   bootstrap(sessionId: string, turnLimit?: number): Promise<SessionBootstrap>;
   /**
@@ -1678,6 +1693,10 @@ export interface DaemonApi extends StorageCleanupApi {
   abandonAgentCreate(actionId: string, dryRun: boolean): Promise<CreateAbandonResult>;
   /** `POST /v2/human/sessions` (human-create-session): quick chat; without cwd cutex makes a scratch dir. */
   createHumanSession(request: { cwd?: string; profile?: string; variantId?: string; displayName?: string; start: boolean; launch?: LaunchOverrides }): Promise<{ cutexSessionId: string }>;
+  /** `POST /v2/human/agents/{id}/rename` (formal-agent-name-rename-v1): the agent's own name; refusals and transport errors come back as `ok: false`. */
+  renameFormalAgent(cutexSessionId: string, request: import("./agentRename").FormalRenameRequest): Promise<import("./agentRename").FormalRenameResult>;
+  /** `GET /v2/human/agents/{id}/name-history`: permanent rename log, newest first. */
+  formalNameHistory(cutexSessionId: string, before: number | null): Promise<import("./agentRename").NameHistoryPage>;
   /** Per-native-thread attention level (cutex /v2/notifications/session; the TUI's Alt+N). */
   notificationLevel(threadId: string): Promise<NotificationLevel>;
   setNotificationLevel(threadId: string, level: NotificationLevel): Promise<NotificationLevel>;
@@ -1742,6 +1761,8 @@ export interface DaemonApi extends StorageCleanupApi {
   patchAgentSecurity(patch: AgentSecurityPatch): Promise<GlobalSettings>;
   /** `GET /v2/approvals?state=` (feature owner-approvals); null when the daemon predates it. */
   approvals(state: "pending" | "all"): Promise<ApprovalRecord[] | null>;
+  /** S10: one bounded page; older hosts keep their original list behavior. */
+  approvalsPage(state: "pending" | "all", query?: OwnerStorePageQuery): Promise<ApprovalPage<ApprovalRecord> | null>;
   /** `POST /v2/approvals/{id}/approve|deny`; `approval_not_found` / `approval_not_pending` come back as a refusal. */
   decideApproval(approvalId: string, decision: ApprovalDecision, note?: string, origin?: ApprovalDecisionOrigin): Promise<ApprovalDecisionResult>;
   /** Root-only design 047 API. Null on older daemons; callers must capability-gate every use. */
@@ -1755,10 +1776,10 @@ export interface DaemonApi extends StorageCleanupApi {
   runtimePackages(): Promise<RuntimePackagesView | null>;
   /** `GET /v2/runtime-packages/runs/{runId}`; null when unknown or the daemon predates it. */
   runtimePackageRun(runId: string): Promise<RuntimePackageRun | null>;
-  /** `POST /v2/runtime-packages/runs {all: true}` (busy agents are skipped by cutex); 4xx (run_in_progress, …) come back as a refusal. */
-  startRuntimePackageRun(): Promise<RuntimePackageRunResult>;
+  /** `POST /v2/runtime-packages/runs {all: true}` (or the explicitly retried agentIds) (busy agents are skipped by cutex); 4xx (run_in_progress, …) come back as a refusal. */
+  startRuntimePackageRun(agentIds?: string[]): Promise<RuntimePackageRunResult>;
   /** `POST /v2/runtime-packages/runs/{runId}/revert {}` (all moved items); 4xx come back as a refusal. */
-  revertRuntimePackageRun(runId: string): Promise<RuntimePackageRunResult>;
+  revertRuntimePackageRun(runId: string, agentIds?: string[]): Promise<RuntimePackageRunResult>;
   /** `GET /v2/director-rotations?projectId=` newest first (feature owner-rotation, root); null when the daemon predates it. */
   directorRotations(projectId: string): Promise<DirectorRotation[] | null>;
   /** `GET /v2/director-rotations/{id}`; null when unknown or the daemon predates it. */
@@ -1785,6 +1806,8 @@ export interface DaemonApi extends StorageCleanupApi {
   discardStuckBusMessage(request: StuckBusDiscardRequest): Promise<StuckBusDiscardResult>;
   /** `GET /v2/runtimes` (feature runtimes-view) as cutex sends it (shared/runtimes.ts adapts it); null when the daemon predates it. */
   runtimes(): Promise<RuntimesWire | null>;
+  runtimePrunePlan(): Promise<RuntimePrunePlan>;
+  pruneRuntimes(ids: string[]): Promise<RuntimePruneResult>;
   /** `GET /v2/claude/accounts` (feature claude-accounts); null when the daemon predates it. */
   claudeAccounts(): Promise<ClaudeAccountList | null>;
   /** `POST /v2/claude/accounts` (validated in main; an API account may carry the write-only `apiKey`); 4xx come back as a refusal. */
@@ -2043,6 +2066,9 @@ export interface DaemonApi extends StorageCleanupApi {
   ackTokenPersonChange(tokenId: string): Promise<UsersResult<import("./users").TokenPersonAckResult>>;
   // Home page (cutex `user-home`, shared/home.ts): the caller's own settings + cover; refusals as values.
   /** `GET /v2/users/me/home`; null on a cutex without the route. */
+  userLayout(): Promise<HomeResult<import("@cutex-desktop/cutex-client").UserLayout>>;
+  putUserLayout(section: string, revision: number, data: Record<string, unknown> | null): Promise<HomeResult<import("@cutex-desktop/cutex-client").LayoutWritten>>;
+  putLayoutPointer(pointer: import("@cutex-desktop/cutex-client").MemoryHost): Promise<HomeResult<import("@cutex-desktop/cutex-client").LayoutPointer>>;
   userHome(): Promise<HomeResult<import("./home").HomeView | null>>;
   /** `PUT /v2/users/me/home`; `home_revision_conflict` carries the host's current revision. */
   putUserHome(revision: number, home: import("./home").HomeDoc | null): Promise<HomeResult<import("./home").HomeView>>;
@@ -2151,6 +2177,7 @@ export interface DaemonApi extends StorageCleanupApi {
   inputGet(sessionId: string, inputIds: readonly string[]): Promise<import("@cutex-desktop/protocol").InputGetResult>;
   inputList(sessionId: string, query?: import("@cutex-desktop/protocol").InputListParams): Promise<import("@cutex-desktop/protocol").InputListResult>;
   inputInterruptSend(sessionId: string, params: import("@cutex-desktop/protocol").InputInterruptSendParams): Promise<import("@cutex-desktop/protocol").InputInterruptSendResult>;
+  inputHold(sessionId: string, params: import("@cutex-desktop/protocol").InputHoldParams): Promise<import("@cutex-desktop/protocol").InputHoldResult>;
   inputRetry(sessionId: string, inputId: string, expectedRev: number): Promise<unknown>;
   inputDismiss(sessionId: string, inputId: string, expectedRev: number): Promise<import("@cutex-desktop/protocol").InputDismissResult>;
   queueMerge(sessionId: string, params: import("@cutex-desktop/protocol").UserInputQueueMergeParams): Promise<import("@cutex-desktop/protocol").UserInputQueueMergeResult>;
@@ -2213,6 +2240,8 @@ export interface DaemonApi extends StorageCleanupApi {
   // ---------- owner notify (capability owner-notify) ----------
   /** `GET /v2/owner-notifications` (newest first); [] on a cutex without the route. */
   ownerNotifications(query: { filter?: OwnerNotifyFilter; agentId?: string; limit?: number }): Promise<OwnerNotification[]>;
+  /** S10: notification and safety-notice history, with an opaque continuation. */
+  ownerNotificationsPage(query: { filter?: OwnerNotifyFilter; agentId?: string; limit?: number; cursor?: string }): Promise<OwnerNotificationList>;
   /** `cutex/ownerNotify/ack|reply|dismiss|delete` on the sender's session (`text` only for reply; delete needs owner-notify-delete). */
   ownerNotifyAction(agentId: string, action: OwnerNotifyAction, notificationId: string, text?: string): Promise<OwnerNotifyResult>;
   /** `PATCH /v2/settings {ownerNotify}` (only the writable fields are forwarded). */
@@ -2308,6 +2337,7 @@ export interface ProfileAccountView {
 }
 
 /** cutex services registry entry (agent-started web services; Bridgeboard replacement). */
+export type ServiceIdlePreset = "1h" | "24h" | "7d" | "forever";
 export interface ServiceView {
   slug: string;
   displayName: string;
@@ -2330,7 +2360,13 @@ export interface ServiceView {
   updatedAt?: string;
   lastSeenAt: string | null;
   lastProbeAt?: string | null;
-  health: "reachable" | "unreachable" | "starting" | "stopped";
+  health: "reachable" | "unreachable" | "starting" | "stopped" | "stoppedIdle";
+  /** service-idle-presets-v1; old registrations report forever. */
+  idleStopPreset?: ServiceIdlePreset;
+  stoppedIdle?: boolean;
+  stoppedIdleAt?: string | null;
+  idleWakeFailedAt?: string | null;
+  idleStopAt?: string | null;
   url: string;
   localUrl: string;
   command?: string | string[] | null;
@@ -2365,6 +2401,7 @@ export interface ServiceView {
 }
 
 export interface ServicePatch {
+  idleStopPreset?: ServiceIdlePreset;
   displayName?: string;
   port?: number;
   path?: string | null;
@@ -2385,6 +2422,7 @@ export interface ServicePatch {
 
 /** `POST /v2/services` body (owner). */
 export type ServiceRegisterRequest = {
+  idleStopPreset?: ServiceIdlePreset;
   slug: string;
   displayName?: string;
   port?: number;
@@ -2466,6 +2504,10 @@ export interface DaemonEvents {
   hostEvent: EventEnvelope;
   /** The host feed restarted without replaying the missed events. */
   hostResync: { reason: string };
+  /** The host's sidebar changed after the last read handed out (changes arrived during it): read it again. */
+  sidebarChanged: { reason: string };
+  /** The host's first sidebar read progresses (`sidebarPeek` shows the rows so far). */
+  sidebarProgress: { loaded: number; total: number };
   sessionEvent: { sessionId: string; envelope: EventEnvelope };
   sessionLiveDelta: { sessionId: string; frame: import("@cutex-desktop/cutex-client").LiveDeltaFrame };
   sessionLiveReset: { sessionId: string };
@@ -2500,6 +2542,8 @@ export interface DesktopEvents {
   /** Host-wide event of one host (its session events, approvals, owner notes …). */
   hostEvent: HostTag & { envelope: EventEnvelope };
   hostResync: HostTag & DaemonEvents["hostResync"];
+  sidebarChanged: HostTag & DaemonEvents["sidebarChanged"];
+  sidebarProgress: HostTag & DaemonEvents["sidebarProgress"];
   sessionEvent: HostTag & DaemonEvents["sessionEvent"];
   sessionLiveDelta: HostTag & DaemonEvents["sessionLiveDelta"];
   sessionLiveReset: HostTag & DaemonEvents["sessionLiveReset"];
@@ -2534,7 +2578,7 @@ export interface DesktopEvents {
 export type HostTaggedEvent = { [K in keyof DesktopEvents]: DesktopEvents[K] extends HostTag ? K : never }[keyof DesktopEvents];
 
 /** Events that carry a `HostTag` (preload drops the ones of a replaced connection). */
-export const HOST_TAGGED_EVENTS = ["daemonState", "hostEvent", "hostResync", "sessionEvent", "sessionLiveDelta", "sessionLiveReset", "sessionFullText", "sessionResync", "sessionStatus", "workspaceChanged", "terminalOutput", "terminalExit", "accessChanged", "browserEvent", "projectEvents"] as const satisfies readonly HostTaggedEvent[];
+export const HOST_TAGGED_EVENTS = ["daemonState", "hostEvent", "hostResync", "sidebarChanged", "sidebarProgress", "sessionEvent", "sessionLiveDelta", "sessionLiveReset", "sessionFullText", "sessionResync", "sessionStatus", "workspaceChanged", "terminalOutput", "terminalExit", "accessChanged", "browserEvent", "projectEvents"] as const satisfies readonly HostTaggedEvent[];
 
 export const INVOKE_CHANNEL = "cutex-desktop:invoke";
 export const EVENT_CHANNEL = "cutex-desktop:event";
@@ -2652,6 +2696,7 @@ export interface ShellTermsPref {
 }
 /** Desktop-local prefs the main process needs (stored by main in userData/desktop-prefs.json). */
 export interface DesktopPrefs {
+  memoryHost?: import("@cutex-desktop/cutex-client").MemoryHost;
   /** Owner-enabled desktop diagnostics; absent is off. */
   debugMode?: boolean;
   closeBehavior: CloseBehavior;
@@ -2749,6 +2794,7 @@ export type ShellRequest =
   | { op: "eventAlert"; alert: ShellEventAlert }
   | { op: "retractAlerts"; retract: ShellRetract }
   | { op: "setAllowRemoteClose"; value: boolean }
+  | { op: "setMemoryHost"; value: import("@cutex-desktop/cutex-client").MemoryHost }
   | { op: "setMultiWindow"; value: boolean }
   | { op: "migrateMultiWindow"; value: boolean }
   | { op: "remoteClose" }
@@ -2792,6 +2838,7 @@ export interface ShellBridge {
   /** Settings → 通用 → 允许远程关闭这个桌面: stored by main, re-sent to every host's presence at once. */
   setAllowRemoteClose?(value: boolean): Promise<ShellState>;
   /** Settings → 通用 → 窗口 → 多窗口: the owner's switch, stored by main (which refuses desk tickets while off). */
+  setMemoryHost?(value: import("@cutex-desktop/cutex-client").MemoryHost): Promise<ShellState>;
   setMultiWindow?(value: boolean): Promise<ShellState>;
   /** The renderer's old 多窗口 value (P6 pref / P1–P3.5 flag): main adopts it at most once (shared/shell.ts multiWindowChange). */
   migrateMultiWindow?(value: boolean): Promise<ShellState>;
@@ -2930,6 +2977,9 @@ export type AskHold =
   | { reason: "blocked"; by: string }
   | { reason: "waitingForApproval" }
   | { reason: "waitingForInput" }
+  // The handler ended its turn with delegation_await (execution stays running, no lease, no turn). cutex serializes
+  // these fields as written in Rust (`timeout_at`); the row's `await` has the same wait in camelCase.
+  | { reason: "waitingForEvent"; jobs?: string[]; until?: "all" | "any"; since?: string; timeout_at?: string | null }
   | { reason: "profileSwitchPending" }
   | { reason: "runtimeUnsupported"; missing?: string }
   // peers-v2: an outgoing mirror whose peer cannot be reached / changed identity / speaks another
@@ -2999,6 +3049,28 @@ export interface AskAttemptView {
   stopRequested?: boolean;
 }
 
+/** The handler's current delegation_await (`AskSummary.await`, cutex delegation-await). */
+export interface AskAwaitView {
+  attempt?: number;
+  jobs?: string[];
+  until?: "all" | "any";
+  resume?: "all" | "each";
+  since?: string;
+  timeoutAt?: string | null;
+  /** The handler's own note on what it waits for. */
+  note?: string | null;
+}
+
+/** A job bound to the delegation (`AskSummary.jobs`). */
+export interface AskJobView {
+  jobId: string;
+  source?: string | null;
+  /** "running" until it ends. */
+  status?: string;
+  exitCode?: number | null;
+  ok?: boolean | null;
+}
+
 /** `GET /v2/asks` row. Fields after `revision` come with cutex `delegation-views` (absent before). */
 export interface AskSummary extends AskReviewFields {
   askId: string;
@@ -3037,6 +3109,9 @@ export interface AskSummary extends AskReviewFields {
   lateAnswer?: AskLateAnswer | null;
   /** An incoming ask whose result could not be sent back to the requesting host. */
   resultUndeliverable?: boolean;
+  // ---------- delegation-await ----------
+  await?: AskAwaitView | null;
+  jobs?: AskJobView[] | null;
 }
 
 export interface AskFilter {

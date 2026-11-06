@@ -1,3 +1,5 @@
+import { UserLayoutMigration } from "./components/UserLayoutMemory";
+import { startUserLayout } from "./lib/userLayoutSync";
 import { useEffect, useMemo } from "react";
 import { PaneHost } from "./components/PaneHost";
 import { DesktopBackground, TrayFrame } from "./components/ChipTray";
@@ -10,6 +12,7 @@ import { Overlays } from "./components/Overlays";
 import { SshPromptDialog } from "./components/SshPromptDialog";
 import { RemoteCloseDialog } from "./components/RemoteCloseDialog";
 import { FirstUseTips } from "./components/FirstUseTips";
+import { TipHost } from "./components/Tip";
 import { PanelGuideHost } from "./components/PanelGuideHost";
 import { OnboardingHost } from "./components/OnboardingDialog";
 import { AgentListDialog } from "./components/AgentListDialog";
@@ -21,7 +24,6 @@ import { SideDndLayer } from "./components/side/SideDndLayer";
 import { WorkspaceDndLayer } from "./components/WorkspaceDndLayer";
 import { ColumnPickLayer } from "./components/ColumnPickLayer";
 import { ShelfToast } from "./components/side/ShelfToast";
-import { HostBusyActions } from "./components/HostBusyActions";
 import { SettingsShelf } from "./components/SettingsShelf";
 import { WidthTip } from "./components/WidthTip";
 import { useSettingsShelf } from "./lib/settingsShelf";
@@ -122,6 +124,7 @@ export function App() {
   const focusHost = useApp((s) => s.hosts?.active);
   const selected = useMemo(() => ({ hostId: workspaceHost, api: hostApi(workspaceHost), scope, ...workspace }), [workspaceHost, focusHost, scope, workspace]); // eslint-disable-line react-hooks/exhaustive-deps -- hostApi follows the focus
   useEffect(() => init(), [init]);
+  useEffect(() => startUserLayout(), []);
   // The right side (components/side): its layout store follows the host / agent / modules.
   useEffect(() => startSideStore((listener) => appModules().subscribe(listener)), []);
   // The conversation panes (lib/paneStore): the layout follows the selection, persisted per device.
@@ -166,11 +169,13 @@ export function App() {
           <AgentListDialog />
           <JobOutputDialog />
           <Overlays />
+          <UserLayoutMigration />
           <SshPromptDialog />
           <RemoteCloseDialog />
           <DeskWindows />
           <OnboardingHost />
           <FirstUseTips />
+          <TipHost />
           <PanelGuideHost />
           {/* The work row as panes (components/PaneHost): the agent list, the conversation pane(s) / page
               and the right side; each conversation pane has its own ConversationScope. Beside it the
@@ -196,7 +201,6 @@ export function App() {
         <ColumnPickLayer />
         <ForetellLayer />
         <ShelfToast />
-        <HostBusyActions />
       </div>
     </WorkspaceContext.Provider>
   );

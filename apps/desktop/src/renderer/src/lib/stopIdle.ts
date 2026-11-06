@@ -6,11 +6,12 @@
 import type { ReactNode } from "react";
 import { create } from "zustand";
 import { BLOCKING_REASONS, STOP_IDLE_FEATURE, type IdleAgent, type IdleReason, type StopIdleItemResult, type StopIdleMode } from "../../../shared/stopIdle";
-import type { MessageKey } from "../i18n";
+import { translate, type MessageKey } from "../i18n";
 import type { MenuAction, MenuEntry } from "./contextMenu";
 import { isOwnerFeatures } from "../../../shared/users";
-import { featuresOf, hostApi, pinnedOn, useApp } from "../store";
+import { featuresOf, hostApi, pinnedOn, sidebarOf, useApp } from "../store";
 import { showShelfToast } from "./shelves";
+import { beginOperation, trackedOperationItem, updateOperationItem } from "./backgroundOperations";
 
 type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
@@ -188,10 +189,31 @@ export async function confirmStopIdle(): Promise<void> {
   const ids = s.rows.map((row) => row.cutexSessionId).filter((id) => s.selected.has(id));
   useStopIdle.setState({ phase: "stopping" });
   try {
-    const result = await hostApi(s.scope.hostId).stopIdle({ requestId: crypto.randomUUID(), sessionIds: ids, minIdleSecs: 0, mode: s.mode });
+    const result = await trackedStopIdle(s.scope.hostId, ids, 0, s.mode, new Map(s.rows.map(row => [row.cutexSessionId, row.name ?? row.cutexSessionId])));
     useStopIdle.setState({ phase: "done", results: result.results });
   } catch (error) {
     useStopIdle.setState({ phase: "error", error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+/** Mirror cutex's returned per-agent outcomes; do not decide eligibility here. */
+async function trackedStopIdle(host: string, ids: readonly string[], minIdleSecs: number, mode: StopIdleMode, names = new Map<string,string>()) {
+  const operationId = beginOperation(host, "operations.kind.stopIdle", ids.map(id => ({key:id, name:names.get(id) ?? sidebarOf(useApp.getState(),host)?.active.find(row => row.cutexSessionId===id)?.displayName ?? id})));
+  for (const id of ids) updateOperationItem({operationId,key:id}, {state:"running"});
+  try {
+    const result = await hostApi(host).stopIdle({requestId:crypto.randomUUID(),sessionIds:[...ids],minIdleSecs,mode});
+    for (const id of ids) {
+      const item = result.results.find(row => row.cutexSessionId === id);
+      updateOperationItem({operationId,key:id}, {
+        state: !item ? "uncertain" : item.result === "failed" ? "failed" : item.result === "skipped" ? "skipped" : "done",
+        detail: item?.error ?? item?.reasons?.map(reason => translate(`stopIdle.reason.${reason}` as MessageKey)).join(" · "),
+        retry: item?.result === "failed" ? () => trackedStopIdle(host,[id],minIdleSecs,mode,names) : undefined,
+      });
+    }
+    return result;
+  } catch (error) {
+    for (const id of ids) updateOperationItem({operationId,key:id}, {state:"uncertain",detail:error instanceof Error?error.message:String(error)});
+    throw error;
   }
 }
 
@@ -206,10 +228,11 @@ export async function undoStopIdle(): Promise<void> {
 
 /** Online again, each by the owner's start; how many made it (the agent row shows the rest's own state). */
 async function bringBack(host: string, ids: readonly string[]): Promise<number> {
+  const operationId = beginOperation(host, "operations.kind.undoStopIdle", ids.map(id => ({key:id, name: sidebarOf(useApp.getState(),host)?.active.find(row => row.cutexSessionId===id)?.displayName ?? id})));
   let back = 0;
   for (const id of ids) {
     try {
-      await useApp.getState().sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, host);
+      await trackedOperationItem({operationId, key:id}, () => useApp.getState().sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, host));
       back++;
     } catch {
       // Counted by the caller.
@@ -231,7 +254,7 @@ export async function quickIdleIds(scope: StopIdleScope, secs: number): Promise<
 export async function stopQuick(scope: StopIdleScope, secs: number, ids: readonly string[], t: T): Promise<void> {
   const notify = (text: string) => useApp.getState().notify(text, "error");
   try {
-    const result = await hostApi(scope.hostId).stopIdle({ requestId: crypto.randomUUID(), sessionIds: [...ids], minIdleSecs: secs, mode: "wakeable" });
+    const result = await trackedStopIdle(scope.hostId, ids, secs, "wakeable");
     const stopped = result.results.filter((r) => r.result === "stopped").map((r) => r.cutexSessionId);
     const skipped = result.results.filter((r) => r.result === "skipped").length;
     const failed = result.results.filter((r) => r.result === "failed");

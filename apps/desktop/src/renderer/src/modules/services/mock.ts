@@ -7,7 +7,7 @@
 // projectId (转为项目服务 picks the project). PATCH {ownerScope, projectId} validates like cutex.
 import { SERVICES_ELIGIBLE_OWNERS_FEATURE, type EligibleServiceOwner } from "../../../../shared/serviceOwners";
 import type { ModuleMock } from "../../dev/mockTypes";
-import { SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, SERVICES_PERSIST_APPROVAL_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, servicesSettingsPatch } from "../../../../shared/servicesSettings";
+import { SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, SERVICES_PERSIST_APPROVAL_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, SERVICES_IDLE_PRESETS_FEATURE, servicesSettingsPatch } from "../../../../shared/servicesSettings";
 import type { ServicesSettings, ServicesSettingsPatch } from "../../../../shared/ipc";
 
 const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
@@ -31,6 +31,8 @@ function settingsStore(initial: ServicesSettings, legacy: () => boolean) {
 
 function patchedService(service: MockService, patch: Parameters<NonNullable<import("../../../../shared/ipc").DesktopApi["patchService"]>>[1], settings: ServicesSettings): MockService {
   const next = { ...service, ...patch } as MockService;
+  if (patch.idleStopPreset !== undefined && (next.runtime !== "managed" || next.lifetime !== "persistent" || !["1h", "24h", "7d", "forever"].includes(patch.idleStopPreset))) throw new Error("invalid_request: idleStopPreset requires a persistent managed service");
+  if (patch.lifetime === "persistent" && service.lifetime !== "persistent" && next.runtime === "managed" && patch.idleStopPreset === undefined) next.idleStopPreset = "24h";
   // cutex: a project service needs a projectId (409 project_scope_unavailable); unknown scopes are a 400.
   if (patch.ownerScope !== undefined && patch.ownerScope !== "session" && patch.ownerScope !== "project") throw new Error("invalid_request: ownerScope must be session or project");
   if (next.ownerScope === "project" && !next.projectId) throw new Error("project_scope_unavailable: a project service needs a projectId");
@@ -64,6 +66,10 @@ let mockServices: MockService[] = [
   mockService("cutex-e-director-board", "Director Board", 24304, "managed", "reachable", "eva", null, { lifetime: "persistent", purpose: "foreground" }),
 ];
 // Repeatable conversation-header review: the Director owns thirteen synthetic services.
+if (params.has("idle") && !params.has("legacy") && !params.has("oldidle")) {
+  mockServices.push(mockService("idle-preview", "Sleeping preview", 24358, "managed", "stoppedIdle", "eva", "desktop", { lifetime: "persistent", purpose: "foreground", idleStopPreset: "1h", stoppedIdle: true, stoppedIdleAt: iso(3600), idleStopAt: null, lastTrafficAt: iso(7200), stopped: false }));
+  mockServices.push(mockService("idle-scheduled", "Scheduled preview", 24359, "managed", "reachable", "eva", "desktop", { lifetime: "persistent", purpose: "foreground", idleStopPreset: "24h", idleStopAt: iso(-86370) }));
+}
 if (params.get("ws") === "header") {
   mockServices.push(...Array.from({ length: 12 }, (_, i) =>
     mockService(`header-review-${i + 1}`, `Header review ${i + 1}`, 24500 + i, "external", i === 11 ? "starting" : "reachable", "eva", "desktop")));
@@ -213,7 +219,7 @@ function remoteServiceApi(hostId: string, emitHost: (method: string, params: Rec
 }
 export const mock: ModuleMock = {
   remote: remoteServiceApi,
-  features: { new: [SERVICES_PERSIST_APPROVAL_FEATURE, SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, "service-tiles", SERVICES_ELIGIBLE_OWNERS_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE] },
+  features: { new: [SERVICES_PERSIST_APPROVAL_FEATURE, SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, "service-tiles", SERVICES_ELIGIBLE_OWNERS_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, ...(params.has("oldidle") ? [] : [SERVICES_IDLE_PRESETS_FEATURE])] },
   api: (core) => serviceApi(core, settingsStore({ portRangeStart: 24400, portRangeEnd: 24999, agentPersistentApproval: params.has("persistoff") ? "off" : "ask", ephemeralIdleMinutes: 120, ephemeralTtlHours: 24 }, () => core.legacy)),
   // service_register with reveal: true by demo-writer (owner of demo-notebook) ~16 s after start
   // (?revealAt=<s>): a card 「demo-writer 想给你看：Demo Notebook · 打开」 in its conversation (live.ts).
@@ -260,6 +266,7 @@ function serviceApi(core: Parameters<NonNullable<ModuleMock["api"]>>[0], setting
         command: request.command ?? null,
         envKeys: Object.keys(request.env ?? {}),
         lifetime: request.lifetime ?? "persistent",
+        ...(managed && (request.lifetime ?? "persistent") === "persistent" ? { idleStopPreset: request.idleStopPreset ?? "24h" } : {}),
         purpose: (request.lifetime ?? "persistent") === "persistent" ? (request.purpose ?? null) : null,
         proxyHostHeader: request.proxyHostHeader ?? "preserve",
         ...(request.loginLinkCommand ? { loginLinkCommand: request.loginLinkCommand } : {}),
@@ -268,6 +275,7 @@ function serviceApi(core: Parameters<NonNullable<ModuleMock["api"]>>[0], setting
       return s;
     },
     async patchService(slug, patch) {
+      if ((core.legacy || params.has("oldidle")) && patch.idleStopPreset !== undefined) throw new Error("400 invalid_request: unknown field idleStopPreset");
       if (params.has("serviceFieldsLegacy") && (patch.sortOrder !== undefined || patch.groupName !== undefined)) throw new Error("400 invalid_request: unknown field `sortOrder`");
       mockServices = mockServices.map((s) => (s.slug === slug ? patchedService(s, patch, settings.view()) : s));
       const s = mockServices.find((x) => x.slug === slug)!;
@@ -279,7 +287,7 @@ function serviceApi(core: Parameters<NonNullable<ModuleMock["api"]>>[0], setting
       core.emit("hostEvent", { cutex: { method: "cutex/services/changed", params: { reason: "removed", slug } } } as never);
     },
     async serviceAction(slug, action) {
-      mockServices = mockServices.map((s) => s.slug === slug ? ({ ...s, ...(action === "archive" ? { archived: true, hidden: true, health: "stopped" } : action === "restore" ? { archived: false, hidden: false } : { health: action === "stop" ? "stopped" : "reachable" }) } as typeof s) : s);
+      mockServices = mockServices.map((s) => s.slug === slug ? ({ ...s, ...(action === "archive" ? { archived: true, hidden: true, health: "stopped", stopped: true, stoppedIdle: false, stoppedIdleAt: null, idleWakeFailedAt: null } : action === "restore" ? { archived: false, hidden: false } : { health: action === "stop" ? "stopped" : "reachable", stopped: action === "stop", stoppedIdle: false, stoppedIdleAt: null, idleWakeFailedAt: null }) } as typeof s) : s);
       const s = mockServices.find((x) => x.slug === slug)!;
       core.emit("hostEvent", { cutex: { method: "cutex/services/changed", params: { reason: action === "stop" ? "stopped" : "started", slug, service: s } } } as never);
       return s;

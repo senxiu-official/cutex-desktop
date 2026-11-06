@@ -29,7 +29,7 @@ export default defineModule({
         icon: Bell,
         titleKey: "notifications.page",
         source: null,
-        hintKey: "notifications.pageHint",
+        hintKey: "settings.pageHint.notifications",
         Page: NotificationsPage,
         // The host part (SettingsHostPart) holds every card but 本设备's and the settings.section items.
         hostPart: true,

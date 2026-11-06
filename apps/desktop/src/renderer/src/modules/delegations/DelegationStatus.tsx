@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { ArrowLeftRight } from "lucide-react";
 import type { AskSummary } from "../../../../shared/ipc";
-import { DelegationStatusMark, DelegationTag } from "../../components/DelegationParts";
+import { DelegationStatusMark, DelegationTag, useWaitText } from "../../components/DelegationParts";
 import { FinishedFold } from "../../components/FinishedFold";
 import { StatusChip, StatusChipWords } from "../../components/StatusChip";
 import { useI18n, type Locale } from "../../i18n";
@@ -67,7 +67,7 @@ function Row({ d, sessionId, mine }: { d: AskSummary; sessionId: string; mine: b
       <button
         onClick={show}
         onContextMenu={contextMenu(() => delegationMenu(d, t, nameOf, { host, views }))}
-        title={[d.title, other].filter(Boolean).join("\n")}
+        data-tip={[d.title, other].filter(Boolean).join("\n")}
         className={`${CAPSULE_ROW_MAIN} gap-1.5`}
       >
         <DelegationTag askId={d.askId} />
@@ -82,7 +82,7 @@ function Row({ d, sessionId, mine }: { d: AskSummary; sessionId: string; mine: b
               {t("delegation.stop")}
             </button>
           ) : (
-            <button onClick={() => setArmed(true)} title={t("delegation.stopConfirm")} className={`${CAPSULE_ROW_ACTION} hover:text-danger`}>
+            <button onClick={() => setArmed(true)} data-tip={t("delegation.stopConfirm")} className={`${CAPSULE_ROW_ACTION} hover:text-danger`}>
               {t("delegation.stop")}
             </button>
           )}
@@ -128,7 +128,7 @@ export function DelegationsBody({ sessionId, data }: { sessionId: string; data: 
                 <Row key={d.askId} d={d} sessionId={sessionId} mine={requesterSession(d.requester) === sessionId} />
               ))}
             </ul>
-            <button onClick={() => useHiddenRows.getState().hide(done.map(keyOf), scope)} title={t("hide.finishedHint")} data-capsule-line="" className={`${CAPSULE_LINE} gap-1 pl-[1.625rem] hover:bg-hover hover:text-foreground`} data-testid="hide-finished">
+            <button onClick={() => useHiddenRows.getState().hide(done.map(keyOf), scope)} data-tip={t("hide.finishedHint")} data-capsule-line="" className={`${CAPSULE_LINE} gap-1 pl-[1.625rem] hover:bg-hover hover:text-foreground`} data-testid="hide-finished">
               {t("hide.finished", { n: done.length })}
             </button>
           </>
@@ -165,18 +165,21 @@ export function DelegationLine({ data }: { data: AgentDelegations }) {
   const { t } = useI18n();
   const nameOf = useAgentNames();
   const word = useStatusWord();
+  const waitText = useWaitText();
   const ctxOf = useDelegationContext();
   const [first] = data.mine;
   const now = useNow(!!first);
   if (first) {
     const name = first.targetName ?? nameOf(first.target);
     const ctx = ctxOf(first);
-    const time = rowTime(first, ctx, now);
+    const status = delegationStatus(first, ctx);
+    // delegation_await: what it waits for, never a run time.
+    const time = status.wait ? waitText(status.wait) : rowTime(first, ctx, now);
     return (
       <>
         <span className="text-subtle">{t("delegations.statusTitle")} ·</span> <span className="font-medium">{name}</span>{" "}
         <span className="text-subtle">
-          {word(delegationStatus(first, ctx), name)}
+          {word(status, name)}
           {time && ` ${time}`}
         </span>
       </>

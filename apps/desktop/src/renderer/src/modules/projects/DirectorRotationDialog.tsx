@@ -343,7 +343,7 @@ export function DirectorRotationDialog({ project, director, onClose }: { project
 
   const name = shown?.predecessor.name ?? director?.displayName ?? project.director_cutex_session_id ?? "";
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[8vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-[150] flex items-start justify-center bg-black/30 pt-[8vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-modal aria-label={t("projects.rotation.title", { name })} className="flex max-h-[84vh] w-[38rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         <header className="flex items-center gap-2 border-b border-border px-5 py-3">
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{t("projects.rotation.title", { name })}</h2>

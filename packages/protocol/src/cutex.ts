@@ -22,6 +22,8 @@ export interface CutexErrorBody {
 // ---------- host ----------
 
 export interface HostInfo {
+  /** Stable per-cutex-home identity (r224+). */
+  instanceId?: string;
   hostId: string;
   schema: "cutex/host/v1";
   platform: string;
@@ -49,6 +51,8 @@ export interface AppServerSchemaInfo {
 }
 
 export interface SessionRuntime {
+  /** In-memory runtime work, gated by `session-background-work` (r276+). */
+  backgroundWork?: SessionBackgroundWork | null;
   continuationWakeKinds?: string[];
   continuationChildKinds?: string[];
   backend: string;
@@ -69,6 +73,14 @@ export interface SessionRuntime {
    * repin waiting for the next fresh runtime start. Absent on other sessions and on older cutex.
    */
   claudeRuntime?: SessionClaudeRuntime;
+}
+
+export interface SessionBackgroundWork {
+  running: boolean;
+  subagents?: number;
+  shells?: number;
+  terminals?: number;
+  complete?: boolean;
 }
 
 export interface SessionClaudeRuntime {
@@ -649,6 +661,19 @@ export interface SafetyBlock {
 export type OwnerNotifyFilter = "pending" | "alerting" | "all";
 export interface OwnerNotificationList {
   notifications: OwnerNotification[];
+  nextCursor?: string;
+}
+
+/** One bounded `GET /v2/approvals?limit=&cursor=` page. */
+export interface ApprovalsPage<T = JsonObject> {
+  approvals: T[];
+  nextCursor?: string;
+}
+
+/** Safety checks are owner notification records carrying a safety block. */
+export interface SafetyChecksPage {
+  blocks: OwnerNotification[];
+  nextCursor?: string;
 }
 
 /** Params of `cutex/ownerNotify/created` / `cutex/ownerNotify/updated`. */
@@ -1034,12 +1059,15 @@ export interface NotificationAckResult {
 // survives codes a newer cutex appends; the other enums are exact.
 
 export const INPUT_LEDGER_FEATURE = "input-ledger-v1";
+export const OWNER_IDLE_BUSY_TIMELINE_FEATURE = "owner-idle-busy-timeline-v1";
+export const OWNER_CARRIES_FEATURE = "owner-carries-v1";
 export const INPUT_GET = "cutex/input/get";
 export const INPUT_LIST = "cutex/input/list";
 /** Schema only (C5): not served until cutex advertises `input-ledger-v1`. */
 export const INPUT_RETRY = "cutex/input/retry";
 /** Schema only (C5): not served until cutex advertises `input-ledger-v1`. */
 export const INPUT_DISMISS = "cutex/input/dismiss";
+export const INPUT_HOLD = "cutex/input/hold";
 export const INPUT_INTERRUPT_SEND = "cutex/input/interruptSend";
 /** Schema only (C4): not served until cutex advertises `input-ledger-v1`. */
 export const INPUT_LEASE_RELEASE = "cutex/input/lease/release";
@@ -1056,6 +1084,7 @@ export const INPUT_TERMINAL_STATES = ["inContext", "failed", "rejected", "discar
 export const INPUT_SETTLED_STATES = ["inContext", "uncertain", "failed", "rejected", "discarded", "superseded"] as const;
 export const INPUT_HELD_REASONS = ["hostBusy"] as const;
 export const INPUT_SENDING_REASONS = ["interruptSend"] as const;
+export const INPUT_CARRIED_REASONS = ["carriedByOwner"] as const;
 export const INPUT_WAITING_REASONS = ["explicitQueue", "afterTurn", "nextStep", "passive", "turnRunning", "turnFinishing", "adapterQueued", "ownerQueueAhead", "rideAlongAhead", "delegationLease", "eventLease", "paused", "stopHold", "ownerPause", "agentOffline", "runtimeDisconnected", "hostBusy", "resultCoalescing", "autoRetry", "reviewPending", "targetBusy", "staleHeld", "nativeHeld", "nativeRetry", "returned", "ownerRetry"] as const;
 export const INPUT_UNCERTAIN_REASONS = ["turnInterrupted", "turnFailed", "runtimeLost", "receiptTimeout", "outcomeUnknown", "leaseReleased", "nativeConflict"] as const;
 export const INPUT_FAILED_REASONS = ["admission_timeout", "notDelivered", "runtimeRefused", "routeLost", "interrupt_timeout", "session_offline", "tooLarge"] as const;
@@ -1067,7 +1096,7 @@ export const INPUT_STALLED_REASONS = ["runtimeDisconnected", "noProgress", "leas
 export const INPUT_SURFACES = ["timeline", "nextUp", "pendingNotes", "none"] as const;
 export const INPUT_STAGES = ["registered", "offered"] as const;
 export const INPUT_EVIDENCE = ["clientIdEcho", "turnStartInput", "contextPersisted", "externalInputPersisted", "a4Receipt", "historyRead", "claimedByWait", "readByTool"] as const;
-export const INPUT_ACTIONS = ["retry", "dismiss", "cancel", "sendNow", "edit", "releaseLease", "interruptSend"] as const;
+export const INPUT_ACTIONS = ["retry", "dismiss", "cancel", "sendNow", "edit", "releaseLease", "interruptSend", "hold", "releaseHold"] as const;
 export const INPUT_STRATEGIES = ["auto", "queue", "interrupt"] as const;
 export const INPUT_DELIVERY_MODES = ["after_turn", "soon", "passive", "interrupt"] as const;
 export const INPUT_TIMINGS = ["afterTurn", "nextStep", "passive"] as const;
@@ -1093,7 +1122,7 @@ export type InputSupersededReason = (typeof INPUT_SUPERSEDED_REASONS)[number];
 export type InputStalledReason = (typeof INPUT_STALLED_REASONS)[number];
 /** Schema `inputReason`: the union of the per-state reason codes. */
 export type InputReason =
-  | InputSendingReason | InputHeldReason | InputWaitingReason | InputUncertainReason | InputFailedReason
+  | (typeof INPUT_CARRIED_REASONS)[number] | InputSendingReason | InputHeldReason | InputWaitingReason | InputUncertainReason | InputFailedReason
   | InputRejectedReason | InputDiscardedReason | InputSupersededReason;
 export type InputSurface = (typeof INPUT_SURFACES)[number];
 export type InputStage = (typeof INPUT_STAGES)[number];
@@ -1114,8 +1143,8 @@ export interface InputReasonByState {
   held: InputHeldReason;
   waiting: InputWaitingReason;
   sending: InputSendingReason;
-  accepted: null;
-  inContext: null;
+  accepted: (typeof INPUT_CARRIED_REASONS)[number] | null;
+  inContext: (typeof INPUT_CARRIED_REASONS)[number] | null;
   uncertain: InputUncertainReason;
   failed: InputFailedReason;
   rejected: InputRejectedReason;
@@ -1125,6 +1154,8 @@ export interface InputReasonByState {
 
 /** Per-state reason codes (input-states.json). A state absent here carries no reason. */
 export const INPUT_REASONS_BY_STATE: { readonly [S in InputState]?: readonly InputReasonByState[S][] } = {
+  accepted: INPUT_CARRIED_REASONS,
+  inContext: INPUT_CARRIED_REASONS,
   sending: INPUT_SENDING_REASONS,
   held: INPUT_HELD_REASONS,
   waiting: INPUT_WAITING_REASONS,
@@ -1220,6 +1251,8 @@ export interface InputRecord {
   attempt: number;
   supersededBy: string | null;
   batchId: string | null;
+  /** 057: inputs bundled with this owner message; absent on older hosts. */
+  carries?: string[];
   askId: string | null;
   remote: InputRemote | null;
   stalled: InputStalled | null;
@@ -1232,6 +1265,18 @@ export interface InputRecord {
   /** The session `stateRevision` of this record's last change. */
   stateRevision: number;
   updatedAt: string;
+}
+
+export interface InputHoldParams {
+  inputId: string;
+  expectedRev: number;
+  held: boolean;
+}
+
+export interface InputHoldResult {
+  ledgerEpoch: string;
+  stateRevision: number;
+  record: InputRecord;
 }
 
 export interface InputLeaseReconcile {

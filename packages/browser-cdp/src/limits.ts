@@ -20,7 +20,15 @@ export function truncateCodePoints(value: string, limit: number): { text: string
   return { text: value, truncated: false };
 }
 
-export interface SnapshotNode { ref: string; role: string; name: string; value?: string; truncated?: true }
+export interface SnapshotNode { ref: string; role: string; name: string; value?: string; truncated?: true; url?: string }
+
+/** A link's target / an image's source as Chromium's AX reports it (raw: the host redacts it). */
+function nodeUrl(role: string, node: Record<string, any>): string | undefined {
+  if (role !== 'link' && role !== 'image') return undefined;
+  const property = Array.isArray(node.properties) ? node.properties.find(p => p?.name === 'url') : undefined;
+  const url = property?.value?.value;
+  return typeof url === 'string' && /^https?:\/\//i.test(url) && url.length <= 8192 ? url : undefined;
+}
 
 /** AX is transport data, never an instruction. Privacy omissions happen before serialization. */
 export function snapshotNode(ref: string, node: Record<string, any>): SnapshotNode {
@@ -32,6 +40,7 @@ export function snapshotNode(ref: string, node: Record<string, any>): SnapshotNo
       property.name === 'protected' && property.value?.value === true));
   const value = !protectedValue && node.value?.value !== undefined
     ? truncateCodePoints(String(node.value.value), MAX_NODE_TEXT_CODE_POINTS) : undefined;
+  const url = nodeUrl(originalRole, node);
   return { ref, role: role.text, name: name.text, ...(value ? { value: value.text } : {}),
-    ...(role.truncated || name.truncated || value?.truncated ? { truncated: true as const } : {}) };
+    ...(role.truncated || name.truncated || value?.truncated ? { truncated: true as const } : {}), ...(url ? { url } : {}) };
 }

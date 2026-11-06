@@ -409,11 +409,12 @@ export function Settings({ params }: { params: PageParams }) {
             <SettingsPage
               key={hostPage ? `${tab}|${allHosts.on ? "*" : hostId}` : tab}
               page={tab}
+              title={t(item.titleKey)}
               hint={item.hintKey ? t(item.hintKey) : undefined}
               back={back ? <BackLink onClick={() => openSettings(back.page)}>{t(back.labelKey)}</BackLink> : undefined}
               link={
                 linked || customize ? (
-                  <span className="flex items-center gap-3">
+                  <span className="flex min-w-0 max-w-full items-center gap-3">
                     {linked && <TextLink onClick={() => openSettings(linked.page)}>{t(linked.labelKey)}</TextLink>}
                     {customize && <CustomizeButton region={customize} page={tab} />}
                   </span>

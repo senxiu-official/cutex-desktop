@@ -161,7 +161,7 @@ function TabRow({ tabs, shown, label, transient, tabInfo, newTab, cardId }: { ta
               { owner: `tabs:${cardId}` },
             )
           }
-          title={t("side.moreTabs", { n: hidden.length })}
+          data-tip={t("side.moreTabs", { n: hidden.length })}
           aria-label={t("side.moreTabs", { n: hidden.length })}
           aria-haspopup="menu"
           className="flex h-6 shrink-0 items-center gap-0.5 rounded-md px-1.5 text-xs text-muted hover:bg-hover hover:text-foreground"
@@ -377,7 +377,7 @@ export function SideCardView({
             <ChevronDown size={13} className={`transition-transform ${folded ? "-rotate-90" : ""}`} />
           </button>
         )}
-        <button data-side-nodrag data-pane-dash="" onClick={(e) => openMenuFrom(e.currentTarget, paneDashMenu(card.id))} title={t("pane.dash")} aria-label={t("pane.dash")} aria-haspopup="menu" className={ICON_BTN}>
+        <button data-side-nodrag data-pane-dash="" onClick={(e) => openMenuFrom(e.currentTarget, paneDashMenu(card.id))} data-tip={t("pane.dash")} aria-label={t("pane.dash")} aria-haspopup="menu" className={ICON_BTN}>
           <Minus size={13} />
         </button>
         {closeArmed ? (

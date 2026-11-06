@@ -6,6 +6,7 @@
 // `settings.section` items targeting "collab": policy (轮换主管, 服务审批, 消息投递) first, the
 // agent-bus module's collapsed 「高级」 card (消息总线, 卡住的消息) last.
 import { useRef, useState } from "react";
+import { useArchivedAgents } from "../../lib/useArchivedAgents";
 import { ArrowLeftRight, FolderKanban, User } from "lucide-react";
 import type { AgentSecurity, AgentSecurityPatch, DomainKey } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -282,6 +283,7 @@ function BoundarySections() {
   const grantsSupported = useTargetFeatures().has(EXTERNAL_GRANTS_FEATURE);
   const { security, error, saving, patch } = useAgentSecurity(boundary);
   const hostId = useTargetHostId(), hostLabel = useTargetHostLabel();
+  useArchivedAgents(hostId);
   const gate = useSettingsRisk(security);
   const [riskError, setRiskError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);

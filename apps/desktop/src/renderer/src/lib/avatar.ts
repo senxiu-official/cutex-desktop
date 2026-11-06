@@ -69,6 +69,8 @@ export function agentInfoPatch(before: AgentInfo, after: AgentInfo): Partial<Age
 export interface AgentInfoOptions {
   /** The agent's real name (placeholder of 显示名, shown under it). */
   realName: string;
+  /** The agent's own (formal) name, null without one: the 显示名称 hint says which case it is. */
+  ownName?: string | null;
   /** `agent-avatar-color`: 表情 / 图片 and 颜色 combine. */
   combineColor: boolean;
   /** `session-metadata` displayName: the 显示名 field. */
@@ -76,4 +78,7 @@ export interface AgentInfoOptions {
   editBadge?: boolean;
   /** session-avatar-mode: fixed choices and draw-time Profile following. */
   editAvatarMode?: boolean;
+  /** formal-agent-name-rename-v1 (owner, agent with an own name): the 自己的名字 block (components/AgentOwnName). */
+  /** `archived`: the 已归档 tag (owner 2026-11-05: an archived agent can be renamed, it stays archived). */
+  rename?: { host: string; sessionId: string; revision: number; archived?: boolean } | null;
 }

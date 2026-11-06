@@ -152,3 +152,49 @@ describe("ledger bubble handoff", () => {
     await act(async () => root.unmount()); host.remove();
   });
 });
+
+
+describe("057 carried inputs", () => {
+  it("hydrates both endpoints before dedup and keeps bodies outside owner text", async () => {
+    const { root, show, host } = setup();
+    const owner = record(CLIENT, { kind: "owner", turnId: "t1", timelineItemId: "native-1", carries: ["notice", "result"], state: "inContext" });
+    const notice = record("notice", { kind: "systemNotice", turnId: "t1", timelineItemId: "received-1", reason: "carriedByOwner", state: "inContext", preview: "notice preview" });
+    const result = record("result", { kind: "delegationResult", turnId: "t1", reason: "carriedByOwner", state: "accepted", preview: "result body" });
+    const timeline = native(CLIENT);
+    const received = { kind: "received", id: "received-1", turnId: "t1", message: { text: "native notice body", senderId: "worker", senderName: "Worker", sourceKind: "agent", deliveryMode: "wake" } } as any;
+    timeline.entries.set(received.id, received); timeline.turns[0]!.entryIds.push(received.id);
+    fx.state.features = new Set(["input-ledger-v1", "owner-carries-v1"]);
+    fx.state.inputs = { [key]: ledger([notice, result]) };
+    await show(timeline);
+    expect(host.querySelectorAll("[data-carried-input-id]")).toHaveLength(0);
+    expect(host.textContent).toContain("native notice body"); expect(host.textContent).toContain("result body");
+    fx.state.inputs = { [key]: ledger([owner, notice, result]) };
+    await show(timeline);
+    expect(host.querySelectorAll("[data-carried-input-id]")).toHaveLength(2);
+    expect(host.querySelector('[data-testid="owner-carried-inputs"]')).toBeNull();
+    // 已接收 / 已进入上下文 draw nothing on the timeline; the preview-only record still shows.
+    for (const id of ["notice", "result"]) expect(host.querySelector(`[data-testid="input-status"][data-input-id="${id}"]`)?.className).toBe("sr-only");
+    expect(host.querySelector('[data-carried-input-id="result"]')?.textContent).toContain("result body");
+    expect(host.querySelector("[data-send-bubble]")?.textContent).toBe(TEXT);
+    expect(host.textContent?.split("native notice body")).toHaveLength(2);
+    expect(host.textContent?.split("result body")).toHaveLength(2);
+    expect(host.textContent).not.toContain("notice preview");
+    fx.state.inputs = { [key]: ledger([{ ...owner, carries: [] }, notice, result]) };
+    await show(timeline);
+    expect(host.querySelectorAll("[data-carried-input-id]")).toHaveLength(0);
+    expect(host.textContent).toContain("native notice body");
+    await act(async () => root.unmount()); host.remove();
+  });
+  it.each([{ features: ["input-ledger-v1"] }, { features: ["owner-carries-v1"] }, { features: [] }])("requires both capabilities %j", async ({ features }) => {
+    const { root, show, host } = setup();
+    fx.state.features = new Set(features);
+    fx.state.inputs = { [key]: ledger([
+      record(CLIENT, { kind: "owner", turnId: "t1", timelineItemId: "native-1", carries: ["notice"] }),
+      record("notice", { kind: "systemNotice", turnId: "t1", reason: "carriedByOwner", preview: "standalone notice" }),
+    ]) };
+    await show(native(CLIENT));
+    expect(host.querySelectorAll("[data-carried-input-id]")).toHaveLength(0);
+    if (features.includes("input-ledger-v1")) expect(host.textContent).toContain("standalone notice");
+    await act(async () => root.unmount()); host.remove();
+  });
+});

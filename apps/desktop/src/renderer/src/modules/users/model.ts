@@ -5,6 +5,7 @@ import type { SidebarSnapshot } from "../../../../shared/ipc";
 import { clientTokenName } from "../../lib/deviceNames";
 export { selfKeyUnknown, withPersonKey } from "../../lib/personKeys";
 import { shownUserName, type PersonKeyInput, type UserTokenRecord, type UserGrant, type UserRecord, type UsersList, type UsersRefusal, type UsersResult } from "../../../../shared/users";
+import { byNameThenId, compareNames } from "../../lib/rosterOrder";
 
 export const EMPTY_GRANT: UserGrant = { projects: [], standaloneAgents: [], send: false };
 
@@ -22,7 +23,7 @@ export function grantChoices(sidebar: SidebarSnapshot | null): { projects: Grant
   const standalone = (sidebar?.active ?? [])
     .filter((s: SessionResource) => !rows[s.cutexSessionId]?.projectId)
     .map((s) => ({ id: s.cutexSessionId, name: s.displayName || s.cutexSessionId }));
-  const byName = (a: GrantChoice, b: GrantChoice) => a.name.localeCompare(b.name);
+  const byName = byNameThenId<GrantChoice>((c) => c.name, (c) => c.id);
   return { projects: projects.sort(byName), standalone: standalone.sort(byName) };
 }
 
@@ -142,7 +143,7 @@ export function deviceRows<T extends Pick<UserTokenRecord, "tokenId" | "pending"
 
 /** Owner first, then by the name shown (their own display name, else the owner's label). */
 export function sortedUsers(users: readonly UserRecord[]): UserRecord[] {
-  return [...users].sort((a, b) => (a.isOwner !== b.isOwner ? (a.isOwner ? -1 : 1) : shownUserName(a).localeCompare(shownUserName(b))));
+  return [...users].sort((a, b) => (a.isOwner !== b.isOwner ? (a.isOwner ? -1 : 1) : compareNames(shownUserName(a), shownUserName(b))));
 }
 
 /**

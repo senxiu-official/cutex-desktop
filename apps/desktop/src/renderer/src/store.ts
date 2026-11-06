@@ -1,6 +1,8 @@
-import { usesInputLedger } from "./lib/deliveryMode";
+import { BACKGROUND_WORK_METHOD, BackgroundWorkProjection, backgroundWorkChange } from "../../shared/backgroundWork";
+import { usesInputLedger, usesOwnerCarries } from "./lib/deliveryMode";
 import { applyInputLedgerNotification, applyInputLedgerSnapshot, bootstrapSnapshot, emptyInputLedgerSession, inputGetSnapshot, inputListSnapshot, inputLedgerReconnected, inputLedgerStreamReset, queueListSnapshot, type InputLedgerSession, type InputLedgerStep, type InputLedgerFetch, type InputLedgerSnapshot } from "./lib/inputLedger/alignment";
 import type { InputRecord } from "@cutex-desktop/protocol";
+import { OWNER_IDLE_BUSY_TIMELINE_FEATURE } from "@cutex-desktop/protocol";
 import { predictedOwnerSurface, type LedgerOwnerOutbox } from "./lib/inputLedger/owner";
 import { acknowledgeLedgerOutbox, loadLedgerOutbox, persistLedgerOutbox } from "./lib/inputLedger/outbox";
 import { migrateLegacyDelivery } from "./lib/inputLedger/migration";
@@ -19,6 +21,7 @@ import { isFoldedConversation } from "./lib/foldedTest";
 import { selectionAware, shownInActiveWindow } from "./lib/windowScope";
 import { appHasFocus, appLookWindow } from "./lib/appFocus";
 import { traceSendStage, type SendTraceRecord } from "../../shared/sendTrace";
+import { layoutStore } from "./lib/userLayout";
 import { create } from "zustand";
 import { eventMediaNotice } from "../../shared/mediaBlobs";
 import type { AdmissionRef, AsksPause, EventEnvelope, QueueAdmission, QueueItem, QueuePause, SessionResource, SubmitStrategy, UserInputSubmitResult } from "@cutex-desktop/protocol";
@@ -36,7 +39,7 @@ import { markReverted, previewOfKept } from "./lib/revertedPreview";
 import { emitNotify, retractNotify } from "./lib/notifyEvents";
 import { retractionOfApproval, retractionOfHostEvent, startLookRetract } from "./lib/notifyRetract";
 import { applyTurnEvent, endTurn, serverRequestEventOf, turnEventOf, turnOwnerOf, type TurnTriggerState } from "./lib/turnTriggers";
-import { markSeenOn, recordTurnEndOn, turnEndOf } from "./lib/turnUnread";
+import { markSeenOn, recordTurnEndOn, recordTurnStartOn, turnEndOf, turnStartOf } from "./lib/turnUnread";
 import { agentFeaturesOf, lacks, isAcpAgent } from "./lib/agentFeatures";
 import { applyApprovalChange, approvalChangeOf, approvalOfToolEvent, APPROVALS_FEATURE, APPROVALS_LIVE_FEATURE, noteApprovalState, sortApprovals, withoutApproval } from "./lib/approvals";
 import { parseUnsupported } from "../../shared/unsupported";
@@ -59,7 +62,7 @@ import { bootPlan, dismissPlan as dismissedPlan, restorePlan as restoredPlan, ne
 import { forgetFreshPlans, getCachedPlan, isPlanFresh, setCachedPlan } from "./lib/planCache";
 import type { LatestPlan, SessionHistory } from "@cutex-desktop/protocol";
 import { answerFailureOf } from "./lib/interactions";
-import { childStatusFromEvent, claudeTaskStatusFromEvent } from "./lib/subagents";
+import { childStatusFromEvent, claudeTaskStatusFromEvent, forgetSubAgents, subAgentsOf } from "./lib/subagents";
 import { interruptSendText, pausedSection, restorePlan } from "./lib/queuePause";
 import { OUTBOX_STUCK_MS, outboxLingerRecord } from "./lib/outboxDiagnostics";
 import { ADMISSION_ORDER_FEATURE, applyMove } from "./lib/legacyDelivery/admissionOrder";
@@ -67,7 +70,8 @@ import { stopHeld } from "./lib/stopHold";
 import { parseQueueMoveError, type QueueMoveErrorKind } from "../../shared/queueMove";
 import { SIDEBAR_GROUP_IDS, untitledChatName } from "./lib/sidebar";
 import { withRetiredDefaults } from "./lib/retiredSession";
-import { isArchived, lifecycleFlip } from "./lib/archivedAgent";
+import { isArchived, lifecycleFlip, listedIn } from "./lib/archivedAgent";
+import { cachedSidebar, dropCachedSidebar, keepCachedSidebars, saveSidebar } from "./lib/sidebarCache";
 import { emptyPendingChat, hasDraftContent, pendingChatSteps, type PendingChatState, type PendingDraft } from "./lib/pendingChat";
 import { translate, type MessageKey } from "./i18n";
 import { beginRuntimeStart, failedStartStatus, offlineRuntime } from "./lib/runtimeStart";
@@ -77,6 +81,7 @@ import { noteHostAccess } from "./lib/hostAccess";
 import { hostFeatureSet, isOwnerFeatures, userAccessOf } from "../../shared/users";
 import { claimHostIds, claimList, dropLegacy, hostKey, keyFocus, projectList, registerHostKeyed, setKeyFocus, writeList } from "./lib/hostKeys";
 import { startDelegationSync, useDelegations } from "./lib/delegationStore";
+import { recordRuntimeStop } from "./lib/runtimeStops";
 import { startJobSync, useJobs } from "./lib/jobStore";
 import { startRuntimePackageSync } from "./lib/runtimePackageStore";
 import { hostBusyActionError } from "../../shared/hostBusyAction";
@@ -334,6 +339,7 @@ interface AppState {
   discardLedgerOutbox(sessionId: string, inputId: string, host?: string): void;
   refreshInputs(sessionId: string, host?: string): Promise<void>;
   interruptSendInput(sessionId: string, inputId: string, host?: string): Promise<void>;
+  holdInput(sessionId: string, inputId: string, held: boolean, host?: string): Promise<void>;
   retryInput(sessionId: string, inputId: string, host?: string): Promise<void>;
   dismissInput(sessionId: string, inputId: string, host?: string): Promise<void>;
   releaseInputLease(sessionId: string, host?: string): Promise<void>;
@@ -543,6 +549,11 @@ interface AppState {
   /** cutex services registry (null until loaded / unsupported); patched live from host events. */
   services: ServiceView[] | null;
   refreshServices(): Promise<void>;
+  /**
+   * Reads the archived agents of `hostId` (default: every host whose list lacks them) and resolves once its list
+   * has them (or after 20 s). They are read on demand: the archive list, the agent pages, an archived agent opened.
+   */
+  ensureArchived(hostId?: string): Promise<void>;
   /** Revert the thread to before `turnId` (live, no restart) and put its text back in the composer. */
   /** `extra`: the message's image / skill input items (shared/input messageInputItems), back as composer attachments. */
   editAndResend(sessionId: string, turnId: string, text: string, hostId?: string, extra?: unknown[]): Promise<void>;
@@ -813,10 +824,23 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     return [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((r) => r.cutexSessionId === sessionId);
   };
   /** Whether a host's sidebar snapshot lists an agent (active or archived); null = no snapshot of it. */
-  const listsAgent = (hostId: string, sessionId: string): boolean | null => {
-    const sidebar = sidebarOn(hostId);
-    return sidebar ? [...sidebar.active, ...sidebar.retired].some((r) => r.cutexSessionId === sessionId) : null;
+  const listsAgent = (hostId: string, sessionId: string): boolean | null => listedIn(sidebarOn(hostId), sessionId);
+  /** Puts a not-yet-whole list (a peek, a kept one) on `hostId`, the shown host's or a slice's. */
+  const showSidebar = (hostId: string, sidebar: SidebarSnapshot) => {
+    if (hostId === focusHost()) set((state) => ({ sidebar, activity: activityOf(sidebar, state.activity) }));
+    else { const epoch = get().byHost[hostId]?.epoch; if (epoch) patchSlice(hostId, epoch, { sidebar }); }
   };
+  /** The host's list kept from an earlier run, once its capabilities confirm who the connection is, before its own list. */
+  const showCached = async (hostId: string, capabilities: Parameters<typeof cachedSidebar>[1], current: () => boolean) => {
+    const kept = await cachedSidebar(hostId, capabilities);
+    if (!current()) return;
+    // Its whole list came before who it is was known: keep that one now.
+    const shown = sidebarOn(hostId);
+    if (shown) return saveSidebar(hostId, shown);
+    if (!kept) return;
+    showSidebar(hostId, preparedSidebar(backgroundWorkOn(hostId).project(kept)));
+  };
+  const archivedAsked = new Map<string, Promise<void>>();
   /** The host to open an agent on (lib/agentHostRoute): `preferred` unless only another host of the scope lists it. */
   const agentHostFor = (sessionId: string, preferred: string, tieBreak?: string): string => {
     const hosts = get().hosts;
@@ -824,6 +848,17 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
   };
   /** Re-read the sidebar of a host (the focus host's, or a followed host's slice). */
   const refreshHostSidebar = (hostId: string) => (hostId === focusHost() ? get().refreshSidebar() : refreshSliceSidebar(hostId));
+  // Per-host event overlays survive focus changes, and end with a connection or feed gap.
+  const backgroundWorkByHost = new Map<string, BackgroundWorkProjection>();
+  const backgroundWorkOn = (host: string) => {
+    let projection = backgroundWorkByHost.get(host);
+    if (!projection) backgroundWorkByHost.set(host, (projection = new BackgroundWorkProjection()));
+    return projection;
+  };
+  const resetBackgroundWork = (host: string) => {
+    backgroundWorkByHost.delete(host);
+    sidebarReads.delete(host);
+  };
   // Sidebar requests can overlap during reconnect and runtime events. A late, older reply must
   // not put an already-online agent back into the offline group.
   const sidebarReads = new Map<string, { issued: number; applied: number }>();
@@ -833,7 +868,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     const state = reads;
     const read = ++state.issued;
     return () => {
-      if (read < state.applied) return false;
+      if (sidebarReads.get(host) !== state || read < state.applied) return false;
       // Accept progress while a newer read is pending (or fails), even on a slow host.
       state.applied = read;
       return true;
@@ -956,6 +991,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     if (!viewLive(sessionId, hostId)) return;
     const key = viewKey(hostId, sessionId);
     set((state) => ({ views: withoutKey(state.views, key) }));
+    pruneLedgers();
     // Still the main area's agent: its feed stays.
     if (isSelected(sessionId, hostId)) return;
     void apiOn(hostId).unsubscribe(sessionId).catch(() => {});
@@ -983,39 +1019,122 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
   };
 
   const ledgerOn = (host: string) => usesInputLedger([...featuresOn(host)]);
-  const ledgerSession = (id: string, host: string) => get().inputs[viewKey(host, id)] ?? emptyInputLedgerSession();
+  // Only opened sessions own bodies. A fresh incarnation gets a distinct generation so an old
+  // request cannot repopulate an evicted session (or overwrite its replacement).
+  let ledgerGeneration = 0;
+  const ledgerEmpty = new Map<ViewKey, InputLedgerSession>();
+  const ledgerSession = (id: string, host: string) => {
+    const key = viewKey(host, id);
+    const held = get().inputs[key];
+    if (held) { ledgerGeneration = Math.max(ledgerGeneration, held.generation); return held; }
+    let empty = ledgerEmpty.get(key);
+    if (!empty) ledgerEmpty.set(key, empty = { ...emptyInputLedgerSession(), generation: ++ledgerGeneration });
+    return empty;
+  };
+  const ledgerVisible = (id: string, host: string) =>
+    (isSelected(id, host) && get().view.kind === "conversation") || !!get().views[viewKey(host, id)]?.visible;
+  const ledgerPins = new Map<ViewKey, number>();
+  const ledgerIdle = new Map<ViewKey, true>();
+  const ledgerDirty = new Set<ViewKey>();
+  const ledgerWanted = (id: string, host: string) => ledgerVisible(id, host) ||
+    !!ledgerPins.get(viewKey(host, id)) || !!get().ledgerOutbox[viewKey(host, id)]?.length;
+  const pruneLedgers = () => {
+    const state = get();
+    for (const key of new Set([...Object.keys(state.inputs), ...ledgerEmpty.keys()])) {
+      const { hostId, sessionId } = viewKeyParts(key);
+      if (ledgerWanted(sessionId, hostId)) ledgerIdle.delete(key);
+      else if (!ledgerIdle.has(key)) ledgerIdle.set(key, true);
+    }
+    let records = [...ledgerIdle.keys()].reduce((n, key) => n + (state.inputs[key]?.records.size ?? 0), 0);
+    const removed: ViewKey[] = [];
+    for (const key of ledgerIdle.keys()) {
+      if (ledgerIdle.size <= 4 && records <= 4096) break;
+      records -= state.inputs[key]?.records.size ?? 0;
+      ledgerGeneration = Math.max(ledgerGeneration, state.inputs[key]?.generation ?? 0);
+      ledgerIdle.delete(key); ledgerDirty.delete(key); ledgerEmpty.delete(key);
+      removed.push(key);
+    }
+    if (removed.length) set(s => ({ inputs: withoutKeys(s.inputs, removed),
+      ledgerOutbox: withoutKeys(s.ledgerOutbox, removed.filter(key => !s.ledgerOutbox[key]?.length)) }));
+  };
+  const pinLedger = (id: string, host: string) => {
+    const key = viewKey(host, id);
+    ledgerPins.set(key, (ledgerPins.get(key) ?? 0) + 1);
+    return () => {
+      const left = (ledgerPins.get(key) ?? 1) - 1;
+      if (left) ledgerPins.set(key, left); else ledgerPins.delete(key);
+      pruneLedgers();
+    };
+  };
   const ledgerReads = new Map<string, Promise<void>>();
   const ledgerInterrupts = new Map<string, Promise<void>>();
   const applyLedger = (id: string, host: string, step: InputLedgerStep) => {
     const key = viewKey(host, id);
     for (const entry of get().ledgerOutbox[key] ?? []) if (step.session.records.has(entry.inputId)) acknowledgeLedgerOutbox(host, id, entry.inputId);
     set(state => ({ inputs: { ...state.inputs, [key]: step.session },
-      ledgerOutbox: { ...state.ledgerOutbox, [key]: (state.ledgerOutbox[key] ?? []).filter(item => !step.session.records.has(item.inputId)) } }));
+      ...(state.ledgerOutbox[key]?.length ? { ledgerOutbox: { ...state.ledgerOutbox,
+        [key]: state.ledgerOutbox[key].filter(item => !step.session.records.has(item.inputId)) } } : {}) }));
     for (const fetch of step.fetches) void readLedger(id, host, fetch).catch(error => captureDebugError(error, "renderer.inputLedger"));
+    ledgerEmpty.delete(key);
+    pruneLedgers();
   };
   const readLedger = (id: string, host: string, fetch: InputLedgerFetch): Promise<void> => {
     const key = JSON.stringify([host, id, fetch.generation, fetch.params]);
     const pending = ledgerReads.get(key);
     if (pending) return pending;
     const current = captureHostAction(host);
+    const release = pinLedger(id, host);
     const request = apiOn(host).inputList(id, fetch.params).then(result => {
       ledgerReads.delete(key);
       if (current() && ledgerOn(host)) applyLedger(id, host, applyInputLedgerSnapshot(ledgerSession(id, host), inputListSnapshot(result, fetch.params, fetch.generation)));
-    }).finally(() => { if (ledgerReads.get(key) === request) ledgerReads.delete(key); });
+    }).finally(() => { if (ledgerReads.get(key) === request) ledgerReads.delete(key); release(); });
     ledgerReads.set(key, request);
     return request;
   };
   const mergeLedgerSnapshot = (id: string, host: string, snapshot: InputLedgerSnapshot | null) => {
-    if (snapshot && ledgerOn(host)) applyLedger(id, host, applyInputLedgerSnapshot(ledgerSession(id, host), snapshot));
+    if (snapshot && ledgerOn(host)) {
+      applyLedger(id, host, applyInputLedgerSnapshot(ledgerSession(id, host), snapshot));
+      if (snapshot.coverage.kind === "full" && snapshot.ledgerEpoch === ledgerSession(id, host).epoch &&
+          !snapshot.resyncRequired && snapshot.stateRevision >= ledgerSession(id, host).rev)
+        ledgerDirty.delete(viewKey(host, id));
+    }
   };
-  const getLedgerInput = async (id: string, host: string, inputId: string) => {
+  const ledgerPointReads = new Map<string, Promise<void>>();
+  const getLedgerInput = (id: string, host: string, inputId: string): Promise<void> => {
     const current = captureHostAction(host);
     const generation = ledgerSession(id, host).generation;
-    const result = await apiOn(host).inputGet(id, [inputId]);
-    if (current()) {
-      mergeLedgerSnapshot(id, host, inputGetSnapshot(result, generation));
-      if (result.missing.includes(inputId)) set(state => ({ ledgerOutbox: { ...state.ledgerOutbox,
-        [viewKey(host, id)]: (state.ledgerOutbox[viewKey(host, id)] ?? []).map(item => item.inputId === inputId ? { ...item, phase: "unconfirmed", error: "input_not_found" } : item) } }));
+    const held = ledgerSession(id, host).records.get(inputId);
+    const key = JSON.stringify([host, id, inputId, generation, held?.rev]);
+    const pending = ledgerPointReads.get(key);
+    if (pending) return pending;
+    const release = pinLedger(id, host);
+    const request = (async () => {
+      const result = await apiOn(host).inputGet(id, [inputId]);
+      if (current()) {
+        mergeLedgerSnapshot(id, host, inputGetSnapshot(result, generation));
+        if (result.missing.includes(inputId)) set(state => ({ ledgerOutbox: { ...state.ledgerOutbox,
+          [viewKey(host, id)]: (state.ledgerOutbox[viewKey(host, id)] ?? []).map(item => item.inputId === inputId ? { ...item, phase: "unconfirmed", error: "input_not_found" } : item) } }));
+      }
+    })().finally(() => { if (ledgerPointReads.get(key) === request) ledgerPointReads.delete(key); release(); });
+    ledgerPointReads.set(key, request);
+    return request;
+  };
+  const ledgerEvent = (id: string, host: string, method: string, params: unknown, trimmed = false) => {
+    if (method !== "cutex/stream/reset" && method !== "cutex/input/stateChanged" && method !== "cutex/session/deliveryChanged") return;
+    const key = viewKey(host, id);
+    if (!ledgerWanted(id, host)) {
+      // Unopened sessions have no ledger cache. Their counts/alerts continue through the host
+      // sidebar and waiting projections below; a retained idle cache is refreshed on its next open.
+      if (get().inputs[key]) ledgerDirty.add(key);
+      return;
+    }
+    if (method === "cutex/stream/reset") applyLedger(id, host, inputLedgerStreamReset(ledgerSession(id, host)));
+    else if (method === "cutex/input/stateChanged" || method === "cutex/session/deliveryChanged") {
+      applyLedger(id, host, applyInputLedgerNotification(ledgerSession(id, host), method, params));
+      const record = (params as { record?: InputRecord }).record;
+      const held = record && ledgerSession(id, host).records.get(record.inputId);
+      if (trimmed && record && held && held.rev === record.rev && (!held.actions || held.preview === undefined))
+        void getLedgerInput(id, host, record.inputId).catch(error => captureDebugError(error, "renderer.inputLedger.hostGet"));
     }
   };
   const mergeLedgerReply = async (id: string, host: string, input?: InputRecord, generation?: number) => {
@@ -1070,7 +1189,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         const existing = new Map((get().ledgerOutbox[key] ?? []).map(item => [item.inputId, item]));
         const shown = drafts.map(draft => {
           const kept = existing.get(draft.inputId) ?? draft;
-          return kept.predictedSurface ? kept : { ...kept, predictedSurface: predictedOwnerSurface(kept, ledgerSession(id, host).delivery) };
+          return kept.predictedSurface ? kept : { ...kept, predictedSurface: predictedOwnerSurface(kept, ledgerSession(id, host).delivery, featuresOn(host).has(OWNER_IDLE_BUSY_TIMELINE_FEATURE)) };
         });
         for (const draft of shown) if (!ledgerSession(id, host).records.has(draft.inputId)) persistLedgerOutbox(draft);
         set(state => {
@@ -1744,6 +1863,11 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       // History pages: only the newest turns (a cutex without history-pages ignores turnLimit and
       // sends every turn, without historyPage); older ones as the user scrolls up (loadOlder).
       const pageSize = historyPageSize(getUiPrefs().timelineTurns);
+      // Not active while the archived agents are not read: read them, then it is known which source shows it.
+      if (listedIn(sidebarOn(scope.host), sessionId) === null && sidebarOn(scope.host)) {
+        await get().ensureArchived(scope.host);
+        if (!scope.current()) return;
+      }
       if (isArchived(sidebarOn(scope.host)?.retired.find((s) => s.cutexSessionId === sessionId))) return await loadArchived(sessionId, pageSize, scope);
       const ledgerGeneration = ledgerSession(sessionId, scope.host).generation;
       const boot = await daemon.bootstrap(sessionId, pageSize);
@@ -1783,6 +1907,10 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       // This run's handled-interaction rows go back into the rebuilt timeline (in-memory only:
       // cutex keeps no handled server requests — lib/interactionLog).
       seedInteractions(timeline, recordsOf(viewKey(scope.host, sessionId)));
+      // Its sub-agents' statuses heard on an earlier feed may be stale (lib/subagents forgetSubAgents):
+      // this timeline and one settle read per active child decide again (lib/background useSettleSubAgents).
+      const forgotten = forgetSubAgents(get().subAgentLive, get().subAgentLiveGen, subAgentsOf(timeline).keys());
+      if (forgotten) set({ subAgentLive: forgotten.live, subAgentLiveGen: forgotten.seenAt });
       patchSession(sessionId, (v) => ({
         loading: false,
         error: null,
@@ -1913,12 +2041,14 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       approvals: null,
       hostWaiting: {},
     }));
+    pruneLedgers();
     resetSettingsSubPage();
     retainSessions([]);
   };
 
   /** A host's connection was replaced or closed, or the host removed: what the app followed of it goes. */
   const resetHost = (hostId: string) => {
+    resetBackgroundWork(hostId);
     capabilityReads.delete(hostId);
     clearTimeout(capabilityTimers.get(hostId));
     capabilityTimers.delete(hostId);
@@ -1957,6 +2087,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       views: withoutKeys(state.views, live),
       ...(selected ? { selectedId: null, selectedHost: null } : {}),
     }));
+    pruneLedgers();
     retainSessions(Object.keys(get().sessions));
   };
 
@@ -2006,6 +2137,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     api.capabilities().then((c) => {
       if (!scope.current() || !currentCapabilities()) return;
       noteHostAccess(focusHost(), c);
+      void showCached(scope.host, c, scope.current);
       set({ features: hostFeatureSet(c), featuresKnown: true });
       // users: services and host approvals are owner-only (a non-owner connection gets 403).
       if (!userAccessOf(c).isOwner) return;
@@ -2058,19 +2190,28 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     const currentRead = beginSidebarRead(hostId);
     const currentCapabilities = beginCapabilitiesRead(hostId);
     try {
-      const [caps, snapshot] = await Promise.all([daemon.capabilities(), daemon.sidebar()]);
-      if (!sliceCurrent(hostId, epoch)) return;
-      const features = hostFeatureSet(caps);
-      if (currentCapabilities()) {
-        noteHostAccess(hostId, caps);
-        patchSlice(hostId, epoch, { features, featuresKnown: true });
-      }
-      if (currentRead()) {
-        patchSlice(hostId, epoch, { sidebar: shareSidebar(get().byHost[hostId]?.sidebar, preparedSidebar(snapshot)) });
+      // Capabilities and the catalog have independent lifetimes. A sidebar that is unavailable
+      // during reconnect must not discard a successful capabilities reply (or the reverse).
+      const capabilities = daemon.capabilities().then(caps => {
+        if (!sliceCurrent(hostId, epoch)) return null;
+        const features = hostFeatureSet(caps);
+        if (currentCapabilities()) {
+          noteHostAccess(hostId, caps);
+          patchSlice(hostId, epoch, { features, featuresKnown: true });
+          void showCached(hostId, caps, () => sliceCurrent(hostId, epoch));
+        }
+        return features;
+      }, () => null);
+      const sidebar = daemon.sidebar().then(snapshot => {
+        if (!sliceCurrent(hostId, epoch) || !currentRead()) return;
+        patchSlice(hostId, epoch, { sidebar: shareSidebar(get().byHost[hostId]?.sidebar, preparedSidebar(backgroundWorkOn(hostId).project(snapshot))) });
+        saveSidebar(hostId, snapshot);
         reconcileStartErrors(hostId, snapshot);
         reconcileStaleTurns(hostId, snapshot);
         claimHostIds(hostId, snapshotIds(snapshot));
-      }
+      }, () => {});
+      const [features] = await Promise.all([capabilities, sidebar]);
+      if (!sliceCurrent(hostId, epoch) || !features) return;
       // users: owner notes, host approvals and services are owner-only.
       if (!isOwnerFeatures(features)) return;
       void refreshPendingOwnerNotes(hostId);
@@ -2094,7 +2235,8 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     try {
       const snapshot = await apiFor(hostId).sidebar();
       if (!sliceCurrent(hostId, epoch) || !currentRead()) return;
-      patchSlice(hostId, epoch, { sidebar: shareSidebar(get().byHost[hostId]?.sidebar, preparedSidebar(snapshot)) });
+      patchSlice(hostId, epoch, { sidebar: shareSidebar(get().byHost[hostId]?.sidebar, preparedSidebar(backgroundWorkOn(hostId).project(snapshot))) });
+      saveSidebar(hostId, snapshot);
       reconcileStartErrors(hostId, snapshot);
       reconcileStaleTurns(hostId, snapshot);
       claimHostIds(hostId, snapshotIds(snapshot));
@@ -2107,7 +2249,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     if (!sliceCurrent(hostId, epoch)) return;
     patchSlice(hostId, epoch, { daemon });
     // Its host feed restarts from the live tail on reconnect: updates in the gap are unknown.
-    if (daemon.kind !== "connected") forgetFreshPlans(hostId);
+    if (daemon.kind !== "connected") { forgetFreshPlans(hostId); resetBackgroundWork(hostId); }
     else void loadSlice(hostId, epoch);
   };
 
@@ -2235,6 +2377,9 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       const key = viewKey(hostId, sessionId);
       const entry = get().views[key];
       if (entry && entry.visible !== visible) set((state) => ({ views: { ...state.views, [key]: { ...entry, visible } } }));
+      if (visible && (ledgerDirty.has(key) || (!get().inputs[key] && !ledgerEmpty.has(key))))
+        void get().refreshInputs(sessionId, hostId).catch(error => captureDebugError(error, "renderer.inputLedger.visible"));
+      pruneLedgers();
     },
     pinned: loadPinned(),
     activity: {},
@@ -2403,6 +2548,27 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       return result;
     },
     services: null,
+    ensureArchived(hostId) {
+      const s = get();
+      const hosts = hostId ? [hostId] : [focusHost(), ...Object.keys(s.byHost)];
+      return Promise.all(hosts.map((host) => {
+        if (!sidebarOn(host)?.archivedPending) return undefined;
+        const asked = archivedAsked.get(host);
+        if (asked) return asked;
+        const done = (async () => {
+          await apiOn(host).sidebarLoadArchived().catch(() => undefined);
+          await new Promise<void>((resolve) => {
+            const finish = () => { clearTimeout(timer); off(); resolve(); };
+            const timer = setTimeout(finish, 20_000);
+            const off = useApp.subscribe((now) => { if (!sidebarOf(now, host)?.archivedPending) finish(); });
+            if (!sidebarOn(host)?.archivedPending) finish();
+          });
+        })().finally(() => archivedAsked.delete(host));
+        archivedAsked.set(host, done);
+        return done;
+      })).then(() => undefined);
+    },
+
     async refreshServices() {
       if (!get().features.has("services")) return;
       try {
@@ -2501,7 +2667,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       // Explicit owner retry still first reads by id. Existing records use cutex's revision-fenced action.
       await getLedgerInput(sessionId, host, inputId);
       if (ledgerSession(sessionId, host).records.has(inputId)) return get().retryInput(sessionId, inputId, host);
-      const retry: LedgerOwnerOutbox = { ...entry, phase: "sending", error: undefined, predictedSurface: predictedOwnerSurface({ strategy: entry.strategy }, ledgerSession(sessionId, host).delivery) };
+      const retry: LedgerOwnerOutbox = { ...entry, phase: "sending", error: undefined, predictedSurface: predictedOwnerSurface({ strategy: entry.strategy }, ledgerSession(sessionId, host).delivery, featuresOn(host).has(OWNER_IDLE_BUSY_TIMELINE_FEATURE)) };
       set(state => ({ ledgerOutbox: { ...state.ledgerOutbox, [key]: (state.ledgerOutbox[key] ?? []).map(item => item.inputId === inputId ? retry : item) } }));
       await sendLedgerOwner(retry);
     },
@@ -2514,7 +2680,11 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       const host = hostId ?? hostOf(sessionId);
       if (!ledgerOn(host)) return;
       const session = ledgerSession(sessionId, host);
-      await readLedger(sessionId, host, { method: "cutex/input/list", params: session.epoch ? { sinceRevision: session.rev } : {}, generation: session.generation, reason: "reconnect" });
+      const key = viewKey(host, sessionId);
+      const dirty = ledgerDirty.delete(key);
+      try {
+        await readLedger(sessionId, host, { method: "cutex/input/list", params: session.epoch && !dirty ? { sinceRevision: session.rev } : {}, generation: session.generation, reason: "reconnect" });
+      } catch (error) { if (dirty && get().inputs[key]) ledgerDirty.add(key); throw error; }
     },
     async interruptSendInput(sessionId, inputId, hostId) {
       const host = hostId ?? hostOf(sessionId);
@@ -2530,6 +2700,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       const pending = ledgerInterrupts.get(key);
       if (pending) return pending;
       const current = captureHostAction(host);
+      const release = pinLedger(sessionId, host);
       const run = (async () => {
         try {
           await apiOn(host).inputInterruptSend(sessionId, { inputId, expectedRev: record.rev, expectedTurnId, expectedRuntimeGeneration });
@@ -2539,34 +2710,54 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
           throw error;
         }
         if (current()) await getLedgerInput(sessionId, host, inputId);
-      })().finally(() => { if (ledgerInterrupts.get(key) === run) ledgerInterrupts.delete(key); });
+      })().finally(() => { if (ledgerInterrupts.get(key) === run) ledgerInterrupts.delete(key); release(); });
       ledgerInterrupts.set(key, run);
       await run;
+    },
+    async holdInput(sessionId, inputId, held, hostId) {
+      const host = hostId ?? hostOf(sessionId);
+      const session = ledgerSession(sessionId, host);
+      const current = captureHostAction(host);
+      const record = session.records.get(inputId);
+      if (!usesOwnerCarries([...featuresOn(host)]) || !record || record.surface !== "nextUp"
+        || record.kind === "owner" || record.kind === "delegationRequest"
+        || !record.actions?.includes(held ? "hold" : "releaseHold")) return;
+      const release = pinLedger(sessionId, host);
+      try {
+        const result = await apiOn(host).inputHold(sessionId, { inputId, expectedRev: record.rev, held });
+        if (current() && ledgerSession(sessionId, host).generation === session.generation) mergeLedgerSnapshot(sessionId, host, {
+          ledgerEpoch: result.ledgerEpoch, stateRevision: result.stateRevision, records: [result.record],
+          coverage: { kind: "partial" }, generation: session.generation,
+        });
+      } finally { try { if (current()) await getLedgerInput(sessionId, host, inputId); } finally { release(); } }
     },
     async retryInput(sessionId, inputId, hostId) {
       const host = hostId ?? hostOf(sessionId);
       const record = ledgerSession(sessionId, host).records.get(inputId);
       if (!ledgerOn(host) || !record?.actions?.includes("retry")) return;
+      const release = pinLedger(sessionId, host);
       try { await apiOn(host).inputRetry(sessionId, inputId, record.rev); }
-      finally { await getLedgerInput(sessionId, host, inputId); }
+      finally { try { await getLedgerInput(sessionId, host, inputId); } finally { release(); } }
     },
     async dismissInput(sessionId, inputId, hostId) {
       const host = hostId ?? hostOf(sessionId);
       const record = ledgerSession(sessionId, host).records.get(inputId);
       if (!ledgerOn(host) || !record?.actions?.includes("dismiss")) return;
+      const release = pinLedger(sessionId, host);
       try {
         const result = await apiOn(host).inputDismiss(sessionId, inputId, record.rev);
         const failed = result.failed?.find(item => item.inputId === inputId);
         if (failed) throw new Error(`${failed.code}: ${failed.message}`);
       }
-      finally { await getLedgerInput(sessionId, host, inputId); }
+      finally { try { await getLedgerInput(sessionId, host, inputId); } finally { release(); } }
     },
     async releaseInputLease(sessionId, hostId) {
       const host = hostId ?? hostOf(sessionId);
       const lease = ledgerSession(sessionId, host).delivery?.lease;
       if (!ledgerOn(host) || !lease || lease.reconcile.state !== "stale") return;
+      const release = pinLedger(sessionId, host);
       try { await apiOn(host).inputLeaseRelease(sessionId, lease); }
-      finally { await get().refreshInputs(sessionId, host); }
+      finally { try { await get().refreshInputs(sessionId, host); } finally { release(); } }
     },
     outbox: {},
     queueHidden: {},
@@ -2704,6 +2895,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       // 新工作 / 新建{{agent}} always take the column (design 038).
       if (!isColumnPage(page) && openPageElsewhere(page, params)) return;
       set({ view: { kind: "page", page, params } });
+      pruneLedgers();
     },
 
     creatingChat: false,
@@ -2741,6 +2933,11 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     },
     closePage() {
       set({ view: { kind: "conversation" } });
+      const id = get().selectedId;
+      const host = get().selectedHost ?? focusHost();
+      if (id && (ledgerDirty.has(viewKey(host, id)) || !get().inputs[viewKey(host, id)]))
+        void get().refreshInputs(id, host).catch(error => captureDebugError(error, "renderer.inputLedger.visible"));
+      pruneLedgers();
     },
 
     init() {
@@ -2766,10 +2963,10 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         if (current && current !== epoch) return;
         set({ daemon });
         // The host feed restarts from the live tail on reconnect: updates in the gap are unknown.
-        if (daemon.kind !== "connected") forgetFreshPlans(hostId);
+        if (daemon.kind !== "connected") { forgetFreshPlans(hostId); resetBackgroundWork(hostId); }
         if (daemon.kind === "connected") onFocusConnected();
       });
-      bridge.on("hostEvent", ({ hostId, envelope }) => {
+      bridge.on("hostEvent", ({ hostId, epoch, envelope }) => {
         // Canonical resync supplies the complete request; never show an approval for partial arguments.
         if (envelope.native?.kind === "serverRequest" && eventMediaNotice(envelope.native.message)) return;
         const state = get();
@@ -2783,17 +2980,28 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
           return;
         }
         const sidebar = focus ? state.sidebar : slice!.sidebar;
+        if (envelope.cutex) recordRuntimeStop(hostId, envelope, featuresOn(hostId));
+        if (envelope.cutex?.method === BACKGROUND_WORK_METHOD) {
+          const currentEpoch = connEpochOf(state.hosts, hostId);
+          if (currentEpoch && currentEpoch !== epoch) return;
+          const daemon = focus ? state.daemon : slice!.daemon;
+          if (daemon.kind !== "connected") return;
+          const change = backgroundWorkChange(envelope.cutex.params);
+          if (!change) return;
+          const projection = backgroundWorkOn(hostId);
+          if (sidebar) projection.project(sidebar); // Seed the runtime generation fence.
+          projection.record(change);
+          const next = sidebar ? projection.project(sidebar) : null;
+          if (next !== sidebar) {
+            if (focus) set({ sidebar: next });
+            else patchSlice(hostId, slice!.epoch, { sidebar: next });
+          }
+          return;
+        }
         const id = envelope.cutexSessionId;
         if (ledgerOn(hostId) && envelope.cutex) {
           const method = envelope.cutex.method;
-          if (method === "cutex/stream/reset") applyLedger(id, hostId, inputLedgerStreamReset(ledgerSession(id, hostId)));
-          else if (method === "cutex/input/stateChanged") {
-            const record = (envelope.cutex.params as { record?: InputRecord }).record;
-            // Even a trimmed host projection carries epoch/revision authority. Fence old mutation
-            // replies synchronously; the point read only fills the omitted display fields.
-            applyLedger(id, hostId, applyInputLedgerNotification(ledgerSession(id, hostId), method, envelope.cutex.params));
-            if (record && (!record.actions || record.preview === undefined)) void getLedgerInput(id, hostId, record.inputId).catch(error => captureDebugError(error, "renderer.inputLedger.hostGet"));
-          } else if (method === "cutex/session/deliveryChanged") applyLedger(id, hostId, applyInputLedgerNotification(ledgerSession(id, hostId), method, envelope.cutex.params));
+          ledgerEvent(id, hostId, method, envelope.cutex.params, true);
         }
         const bound = [...(sidebar?.active ?? [])].find((s) => s.cutexSessionId === id)?.native.threadId ?? null;
         // A native request answered (here or elsewhere; subagents' too): its alert goes.
@@ -2827,6 +3035,9 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         // Seen while it ended: the mark goes now. Otherwise the host's tables decide (`mark` method of
         // the turn event's level, below; a host without notification levels marks every turn end).
         if (turnEnd && looking) recordTurnEndOn(hostId, id, turnEnd, true);
+        // A later turn started: a failed mark no longer asks for a look (its unseen count stays).
+        const turnStart = native && native.kind !== "serverRequest" ? turnStartOf(native.message.method, native.message.params) : null;
+        if (turnStart !== null) recordTurnStartOn(hostId, id, turnStart);
         // Waiting agents of every host (the shown host counts its open timelines; the slices these).
         if (trackWaiting(hostId, envelope, !!turnEnd)) {
           if (focus) set({ hostWaiting: waitingMethods(hostId) });
@@ -3010,9 +3221,9 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         if (!partial && (shown(hostId) || hostId === get().selectedHost)) useAgentMessages.getState().apply(envelope);
         if (ledgerOn(hostId) && envelope.cutex) {
           const method = envelope.cutex.method;
-          if (method === "cutex/stream/reset") applyLedger(sessionId, hostId, inputLedgerStreamReset(ledgerSession(sessionId, hostId)));
-          else if (method === "cutex/input/stateChanged" || method === "cutex/session/deliveryChanged") applyLedger(sessionId, hostId, applyInputLedgerNotification(ledgerSession(sessionId, hostId), method, envelope.cutex.params));
+          ledgerEvent(sessionId, hostId, method, envelope.cutex.params);
         }
+        if (envelope.cutex) recordRuntimeStop(hostId, envelope, featuresOn(hostId));
         if (!ownView(hostId, sessionId)) return;
         const view = viewOn(sessionId, hostId);
         if (!view) return;
@@ -3205,12 +3416,54 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       });
       // users: this connection's user or grant changed (the host feed ended with cutex/access/changed):
       // read its capabilities and lists again (the session feeds re-bootstrap on their own resync).
+      bridge.on("hostResync", ({ hostId, epoch, reason }) => {
+        const current = connEpochOf(get().hosts, hostId);
+        if (current && current !== epoch) return;
+        // Main emits accessChanged first; do not invalidate that recovery's new read.
+        if (reason === "access_changed") return;
+        resetBackgroundWork(hostId);
+        void refreshHostSidebar(hostId);
+      });
+      // Every configured host's kept list only (lib/sidebarCache): a removed host's goes.
+      let cacheHosts = "";
+      useApp.subscribe((s) => {
+        const ids = s.hosts?.hosts?.map((h) => h.id) ?? null;
+        if (!ids?.length || ids.join() === cacheHosts) return;
+        cacheHosts = ids.join();
+        void keepCachedSidebars(ids);
+      });
+      // A host's first read: show the agents read so far (main sidebarPeek), never over a whole list.
+      const peekedAt = new Map<string, number>();
+      const peekSidebar = async (hostId: string) => {
+        const scope = captureHost(hostId);
+        const snapshot = await apiOn(hostId).sidebarPeek().catch(() => null);
+        if (!snapshot || !scope.current()) return;
+        const shown = sidebarOn(hostId);
+        if (shown && !shown.loading) return;
+        showSidebar(hostId, shareSidebar(shown, preparedSidebar(backgroundWorkOn(hostId).project(snapshot))));
+      };
+      bridge.on("sidebarProgress", ({ hostId, epoch, loaded, total }) => {
+        const current = connEpochOf(get().hosts, hostId);
+        if (current && current !== epoch) return;
+        const shown = sidebarOn(hostId);
+        if (shown?.cached) return showSidebar(hostId, { ...shown, loading: { loaded, total } });
+        if (shown && !shown.loading) return;
+        if (loaded < total && Date.now() - (peekedAt.get(hostId) ?? 0) < 1000) return;
+        peekedAt.set(hostId, Date.now());
+        void peekSidebar(hostId);
+      });
+      bridge.on("sidebarChanged", ({ hostId, epoch }) => {
+        const current = connEpochOf(get().hosts, hostId);
+        if (current && current !== epoch) return;
+        void refreshHostSidebar(hostId);
+      });
       bridge.on("accessChanged", ({ hostId, epoch }) => {
+        void dropCachedSidebar(hostId);
         const hosts = get().hosts;
         if (hostId === (hosts?.active ?? "local")) {
           const current = connEpochOf(hosts, hostId);
-          if (!current || current === epoch) onFocusConnected();
-        } else if (sliceCurrent(hostId, epoch)) void loadSlice(hostId, epoch);
+          if (!current || current === epoch) { resetBackgroundWork(hostId); onFocusConnected(); }
+        } else if (sliceCurrent(hostId, epoch)) { resetBackgroundWork(hostId); void loadSlice(hostId, epoch); }
       });
       bridge.on("sessionStatus", ({ hostId, sessionId, status }) => {
         if (ownView(hostId, sessionId)) {
@@ -3245,8 +3498,9 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         const before = get().sidebar;
         // Archived agents come as cutex's reduced projection (see retiredSession.ts).
         // Unchanged sessions keep their objects (lib/sidebarShare; perf §9): nothing re-renders for an identical refresh.
-        const sidebar = shareSidebar(before, preparedSidebar(snapshot));
+        const sidebar = shareSidebar(before, preparedSidebar(backgroundWorkOn(scope.host).project(snapshot)));
         if (sidebar !== before) set((state) => ({ sidebar, activity: activityOf(sidebar, state.activity) }));
+        saveSidebar(scope.host, sidebar);
         reconcileStartErrors(scope.host, sidebar);
         reconcileStaleTurns(scope.host, sidebar);
         // Legacy prefs naming these agents / projects are this host's (lib/hostKeys).
@@ -3318,7 +3572,10 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       const host = agentHostFor(sessionId, hostId ?? (previous === sessionId ? previousHost : focusHost()), previousHost);
       set({ view: { kind: "conversation" } });
       markSeenOn(host, sessionId);
-      if (previous === sessionId && previousHost === host) return;
+      if (previous === sessionId && previousHost === host) {
+        if (ledgerDirty.has(viewKey(host, sessionId)) || !get().inputs[viewKey(host, sessionId)]) await get().refreshInputs(sessionId, host);
+        return;
+      }
       const key = viewKey(host, sessionId);
       // Coming back to a recently viewed agent: show its cached timeline at once and refresh it in
       // the background (load replaces it from a fresh bootstrap) instead of "loading history".
@@ -3340,6 +3597,8 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         // Quota gauges are per profile name of one host.
         return { selectedId: sessionId, selectedHost: host, sessions, ...(host !== previousHost ? { quotas: {} } : {}), ...(Object.keys(restored).length ? { outbox: mergeOrphans(state.outbox, restored) } : {}) };
       });
+      ledgerIdle.delete(key);
+      pruneLedgers();
       // Interaction rows live exactly as long as the cached timeline views (lib/interactionLog).
       retainSessions(viewKeys());
       // The previous agent's feed closes unless another pane still shows it.
@@ -3356,7 +3615,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       if (isArchived(sidebar?.retired.find((s) => s.cutexSessionId === id))) return null;
       if (ledgerOn(host)) {
         const key = viewKey(host, id);
-        const entry: LedgerOwnerOutbox = { inputId: crypto.randomUUID(), sessionId: id, hostId: host, text, extra, strategy, predictedSurface: predictedOwnerSurface({ strategy }, ledgerSession(id, host).delivery), ...(opts.joinDelegation ? { joinDelegation: opts.joinDelegation } : {}), createdAt: new Date().toISOString(), phase: "sending" };
+        const entry: LedgerOwnerOutbox = { inputId: crypto.randomUUID(), sessionId: id, hostId: host, text, extra, strategy, predictedSurface: predictedOwnerSurface({ strategy }, ledgerSession(id, host).delivery, featuresOn(host).has(OWNER_IDLE_BUSY_TIMELINE_FEATURE)), ...(opts.joinDelegation ? { joinDelegation: opts.joinDelegation } : {}), createdAt: new Date().toISOString(), phase: "sending" };
         set(state => ({ ledgerOutbox: { ...state.ledgerOutbox, [key]: [...(state.ledgerOutbox[key] ?? []), entry] }, ledgerOwnerDrafts: { ...state.ledgerOwnerDrafts, [key]: { ...state.ledgerOwnerDrafts[key], [entry.inputId]: entry } } }));
         return sendLedgerOwner(entry, opts.joinDelegation);
       }
@@ -3548,13 +3807,14 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       if (ledgerOn(host)) {
         const current = captureHostAction(host);
         const generation = ledgerSession(id, host).generation;
+        const release = pinLedger(id, host);
         try {
           const result = await apiOn(host).queuePromote(id, item.queueId, item.revision, true, joinDelegation, options?.ifIdle ? { ifIdle: options.ifIdle } : undefined);
           if (current()) await mergeLedgerReply(id, host, result.result.input, generation);
         } catch (error) {
           if (current()) await getLedgerInput(id, host, item.clientUserMessageId).catch(() => {});
           throw error;
-        } finally { refreshQueue(id, host); }
+        } finally { refreshQueue(id, host); release(); }
         return;
       }
       // Keep the original row while management responds. Feedback is shared by host/session so
@@ -3668,6 +3928,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       if (ledgerOn(host)) {
         const current = captureHostAction(host);
         const initial = ledgerSession(id, host);
+        const release = pinLedger(id, host);
         try {
           const merged = await apiOn(host).queueMerge(id, { items: plan.items.slice(0, 20).map(item => ({ queueId: item.queueId, expectedRevision: item.revision })) });
           if (!current()) return;
@@ -3693,7 +3954,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
           // A lost merge reply cannot authorize another merge or insert. Reconcile only.
           if (current()) await Promise.all(plan.items.map(item => getLedgerInput(id, host, item.clientUserMessageId).catch(() => {})));
           throw error;
-        } finally { refreshQueue(id, host); }
+        } finally { refreshQueue(id, host); release(); }
         return;
       }
       const carrier = plan.items[0]!;
@@ -4043,7 +4304,14 @@ export async function interruptWithFeedback(t: (key: "composer.interrupted" | "c
 // Pins are a per-device view preference (DESIGN §4.12), not cutex state. Stored per host (host keys,
 // lib/hostKeys; legacy bare ids until a host claims them); `pinned` is the shown host's.
 const PIN_KEY = "cutex-desktop.pinned";
-function storedPins(): string[] {
+export function localPinnedKeys(): string[] { return readLocalPins(); }
+export function refreshLayoutPins(): void {
+  const pinned = loadPinned();
+  const prev = useApp.getState().pinned;
+  if (pinned.size !== prev.size || [...pinned].some(p => !prev.has(p))) useApp.setState({ pinned });
+}
+function storedPins(): string[] { return layoutStore()?.local()?.pinned ?? readLocalPins(); }
+function readLocalPins(): string[] {
   try {
     const raw = localStorage.getItem(PIN_KEY);
     const list = raw ? (JSON.parse(raw) as unknown) : [];
@@ -4053,6 +4321,8 @@ function storedPins(): string[] {
   }
 }
 function storePins(list: readonly string[]): void {
+  const layout = layoutStore(); const local = layout?.local();
+  if (local) layout?.edit(local, { ...local, pinned: [...list] });
   try {
     localStorage.setItem(PIN_KEY, JSON.stringify(list));
   } catch {

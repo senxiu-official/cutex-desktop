@@ -4,6 +4,7 @@ import { applyTerms, getTermOverrides, resolveTerms, useTermOverrides, type Term
 import { isAppLocale, localeFallbacks, matchAppLocale, type AppLocale } from "../../../shared/locales";
 import { rememberTraditionalLocale } from "../lib/languages";
 import { zhCN } from "./zh-CN";
+import { setUiLocale } from "../lib/uiLocale";
 
 export type Locale = AppLocale;
 export type MessageKey = keyof typeof zhCN;
@@ -182,8 +183,9 @@ export const startLocaleReady: Promise<void> = loadLocale(initialLocale).catch((
 // Current locale for code outside React (store normalizers); kept in sync by the provider. Always a
 // loaded locale (zh-CN until a lazy start-up locale has arrived).
 let activeLocale: Locale = isLoaded(initialLocale) ? initialLocale : "zh-CN";
+setUiLocale(activeLocale);
 void startLocaleReady.then(() => {
-  if (isLoaded(initialLocale) && activeLocale === "zh-CN") activeLocale = initialLocale;
+  if (isLoaded(initialLocale) && activeLocale === "zh-CN") setUiLocale((activeLocale = initialLocale));
 });
 /** The UI locale for code outside React (e.g. picking a registry text). */
 export function currentLocale(): Locale {
@@ -209,7 +211,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const [loadedLocale, setLocaleState] = useState<Locale | null>(() => (isLoaded(startLocale) ? startLocale : null));
   const locale = loadedLocale ?? "zh-CN";
   useEffect(() => { if (loadedLocale) rememberTraditionalLocale(loadedLocale); }, [loadedLocale]);
-  if (loadedLocale) activeLocale = loadedLocale;
+  if (loadedLocale) setUiLocale((activeLocale = loadedLocale));
   // The latest requested locale: a slower earlier switch must not win over a later one.
   const requested = useRef<Locale | null>(null);
   useEffect(() => {

@@ -60,7 +60,7 @@ export const OWNER_ONLY_CAPABILITIES: readonly string[] = [
   "terminal", "workspace-fs", "fs-dir-browse", "fs-file-read", "session-attachments",
   "owner-approvals", "services", "services-persistent-approval", "services-login-link", "job-service", "alarms-api",
   "artifacts", "notes", "side-chat", "owner-messages", "owner-notify-delete", "notification-levels",
-  "human-create-session", "human-create-agent", "peers-v2", "runtime-package-upgrade", "runtimes-view",
+  "human-create-session", "human-create-agent", "peers-v2", "runtime-package-upgrade", "runtimes-view", "runtime-prune-v1",
   "runtime-restore-candidates", "claude-accounts", "kimi-accounts", "owner-rotation", "project-optional-director",
   "inbound-mail", "listen-settings", "device-pairing", "management-client-tokens", "agent-bus-stuck-messages", "agent-bus-message-settlement-v1", "agent-bus-stale-ack-settlement-v1",
   "session-fork", "session-fork-profile", "session-fork-preview", "session-delete", "session-delete-empty-on-archive", "session-history-revert",

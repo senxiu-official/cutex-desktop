@@ -1,4 +1,26 @@
 export const zhCN = {
+  "mention.effortsFor": "推理强度 · {model}",
+  "mention.defaultEffort": "默认（不指定）",
+  "mention.noEfforts": "没有匹配的推理强度",
+  "mention.effortFooter": "↑ ↓ 选择 · Tab / Enter 插入 · Esc / 空格保持默认",
+
+  "mention.profiles": "提及 Profile",
+  "mention.modelsFor": "提及模型 · {profile}",
+  "mention.noProfiles": "没有匹配的 Profile",
+  "mention.noModels": "没有匹配的模型",
+  "mention.modelFooter": "↑ ↓ 选择 · Tab / Enter 插入模型 · Esc / 空格仅提及 Profile",
+  "mention.modelOnlyFooter": "↑ ↓ 选择 · Tab / Enter 插入模型 · Esc 关闭",
+  "mention.profileDefault": "Profile 默认模型",
+  "mention.defaultModel": "默认",
+  "mention.loadProfilesFailed": "无法读取 Profile 列表",
+  "mention.loadModelsFailed": "无法读取模型列表；可按 Esc 或空格仅提及 Profile",
+  "mention.profileGroup": "Profile",
+  "mention.groupMore": "{group} · 前 {shown} 个，共 {total} 个",
+  "mention.profileMention": "提及 Profile {name}",
+  "mention.unknownProfile": "未知 Profile",
+  "mention.profileChip": "Profile {name}",
+  "mention.noCurrentProfile": "当前{{agent}}没有可用的 Profile",
+
   "composer.mention.copy": "复制提及",
   "mention.menuTitle": "提及",
   "mention.agents": "{{agents}}",
@@ -13,6 +35,28 @@ export const zhCN = {
   "mention.empty": "输入名字或文件名以搜索",
 } as const;
 export const en: Record<keyof typeof zhCN, string> = {
+  "mention.effortsFor": "Reasoning effort · {model}",
+  "mention.defaultEffort": "Default (unspecified)",
+  "mention.noEfforts": "No matching reasoning efforts",
+  "mention.effortFooter": "↑ ↓ select · Tab / Enter insert · Esc / Space keep default",
+
+  "mention.profiles": "Mention a profile",
+  "mention.modelsFor": "Mention a model · {profile}",
+  "mention.noProfiles": "No matching profiles",
+  "mention.noModels": "No matching models",
+  "mention.modelFooter": "↑ ↓ select · Tab / Enter insert model · Esc / Space keep profile only",
+  "mention.modelOnlyFooter": "↑ ↓ select · Tab / Enter insert model · Esc close",
+  "mention.profileDefault": "Profile default model",
+  "mention.defaultModel": "Default",
+  "mention.loadProfilesFailed": "Could not load profiles",
+  "mention.loadModelsFailed": "Could not load models; Esc or Space keeps the profile only",
+  "mention.profileGroup": "Profiles",
+  "mention.groupMore": "{group} · {shown} of {total}",
+  "mention.profileMention": "Mention profile {name}",
+  "mention.unknownProfile": "unknown profile",
+  "mention.profileChip": "Profile {name}",
+  "mention.noCurrentProfile": "No profile is available for this {{agent}}",
+
   "composer.mention.copy": "Copy mention",
   "mention.menuTitle": "Mention",
   "mention.agents": "{{Agents}}",
@@ -27,4 +71,4 @@ export const en: Record<keyof typeof zhCN, string> = {
   "mention.empty": "Type a name or file name to search",
 };
 
-export const zhHant = { ...zhCN, "composer.mention.copy": "複製提及", "mention.sameProject": "同項目", "mention.online": "在線", "mention.offline": "離線", "mention.unknown": "狀態未知", "mention.agentOpen": "左鍵點擊打開{{agent}} {name}", "mention.footer": "↑ ↓ 選擇 · Tab / Enter 插入 · Esc 關閉", "mention.inputLabel": "消息輸入", "mention.empty": "輸入名字或文件名以搜索" };
+export const zhHant = { ...zhCN, "mention.profileGroup": "Profile", "mention.groupMore": "{group} · 前 {shown} 個，共 {total} 個", "mention.profileMention": "提及 Profile {name}", "mention.unknownProfile": "未知 Profile", "mention.profileChip": "Profile {name}", "mention.effortsFor": "推理強度 · {model}", "mention.defaultEffort": "預設（不指定）", "mention.noEfforts": "沒有匹配的推理強度", "mention.effortFooter": "↑ ↓ 選擇 · Tab / Enter 插入 · Esc / 空格保持預設", "mention.profiles": "提及 Profile", "mention.modelsFor": "提及模型 · {profile}", "mention.noProfiles": "沒有匹配的 Profile", "mention.noModels": "沒有匹配的模型", "mention.modelFooter": "↑ ↓ 選擇 · Tab / Enter 插入模型 · Esc / 空格僅提及 Profile", "mention.modelOnlyFooter": "↑ ↓ 選擇 · Tab / Enter 插入模型 · Esc 關閉", "mention.profileDefault": "Profile 預設模型", "mention.defaultModel": "預設", "mention.loadProfilesFailed": "無法讀取 Profile 清單", "mention.loadModelsFailed": "無法讀取模型清單；可按 Esc 或空格僅提及 Profile", "mention.noCurrentProfile": "目前{{agent}}沒有可用的 Profile", "composer.mention.copy": "複製提及", "mention.sameProject": "同項目", "mention.online": "在線", "mention.offline": "離線", "mention.unknown": "狀態未知", "mention.agentOpen": "左鍵點擊打開{{agent}} {name}", "mention.footer": "↑ ↓ 選擇 · Tab / Enter 插入 · Esc 關閉", "mention.inputLabel": "消息輸入", "mention.empty": "輸入名字或文件名以搜索" };

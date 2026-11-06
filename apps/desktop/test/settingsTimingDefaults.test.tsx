@@ -152,7 +152,7 @@ it("the row explanation sits above the next row's markers (portaled) and stays o
   const note = () => document.getElementById(button.getAttribute("aria-controls")!);
   act(() => button.click());
   expect(note()!.parentElement).toBe(document.body);
-  expect(note()!.className).toContain("fixed z-[60]");
+  expect(note()!.className).toContain("fixed z-[161]");
   // A click inside the (portaled) popover keeps it open.
   act(() => void note()!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
   expect(note()).not.toBeNull();

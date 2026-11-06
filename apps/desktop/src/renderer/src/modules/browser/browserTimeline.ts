@@ -7,7 +7,10 @@ import type { MessageImage } from "../../../../shared/input";
 import { parseMediaBlob } from "../../../../shared/mediaBlobs";
 
 export const BROWSER_TIMELINE_TOOLS = ["browser_list", "browser_read", "browser_find", "browser_act", "browser_navigate",
-  "browser_screenshot", "browser_release", "browser_open", "browser_claim"] as const;
+  "browser_screenshot", "browser_release", "browser_open", "browser_claim", "browser_visit", "browser_docs", "browser_status",
+  "browser_script", "browser_script_reset"] as const;
+/** The one-tool surface (cutex design 059): `browser` with {command, args}; each command shows as its own row kind. */
+const BROWSER_COMMAND_TOOL = "browser";
 export type BrowserTimelineTool = typeof BROWSER_TIMELINE_TOOLS[number];
 export const BROWSER_IMAGE_BASE64_LIMIT = 6 * 1024 * 1024;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -17,6 +20,8 @@ export const browserTimelineZhCN = {
   "browser.timeline.list": "列出已授予的标签", "browser.timeline.read": "读取网页结构", "browser.timeline.find": "查找网页元素",
   "browser.timeline.act": "网页操作", "browser.timeline.navigate": "导航网页", "browser.timeline.screenshot": "网页截图",
   "browser.timeline.release": "交回网页控制", "browser.timeline.open": "打开网页", "browser.timeline.claim": "申请网页控制",
+  "browser.timeline.visit": "依次访问网页", "browser.timeline.docs": "查看浏览器工具说明", "browser.timeline.status": "查询浏览器请求结果",
+  "browser.timeline.script": "运行浏览器脚本", "browser.timeline.script_reset": "清空浏览器脚本变量",
   "browser.timeline.click": "左键点击元素", "browser.timeline.fill": "填写字段（内容不展示）", "browser.timeline.press": "按键",
   "browser.timeline.scroll": "滚动网页", "browser.timeline.scrollIntoView": "显示目标元素", "browser.timeline.select": "选择选项",
   "browser.timeline.check": "勾选", "browser.timeline.uncheck": "取消勾选", "browser.timeline.hover": "悬停元素",
@@ -35,6 +40,8 @@ export const browserTimelineEn: Record<keyof typeof browserTimelineZhCN, string>
   "browser.timeline.list": "List granted tabs", "browser.timeline.read": "Read page structure", "browser.timeline.find": "Find page elements",
   "browser.timeline.act": "Page action", "browser.timeline.navigate": "Navigate page", "browser.timeline.screenshot": "Page screenshot",
   "browser.timeline.release": "Release page control", "browser.timeline.open": "Open page", "browser.timeline.claim": "Request page control",
+  "browser.timeline.visit": "Visit pages", "browser.timeline.docs": "Read browser tool docs", "browser.timeline.status": "Check a browser request",
+  "browser.timeline.script": "Run browser script", "browser.timeline.script_reset": "Reset browser script variables",
   "browser.timeline.click": "Click element", "browser.timeline.fill": "Fill field (value hidden)", "browser.timeline.press": "Press key",
   "browser.timeline.scroll": "Scroll page", "browser.timeline.scrollIntoView": "Show target element", "browser.timeline.select": "Select option",
   "browser.timeline.check": "Check", "browser.timeline.uncheck": "Uncheck", "browser.timeline.hover": "Hover element",
@@ -65,15 +72,25 @@ export function browserTimelineRefusalKey(code: string | null): BrowserTimelineK
 }
 
 export function browserToolName(item: RawItem): BrowserTimelineTool | null {
-  if (!tool(item.tool)) return null;
-  if (item.type === "mcpToolCall" && item.server === "cutex") return item.tool;
-  // The API runtime emits dynamic tools with namespace=claude; subscription emits MCP.
-  if (item.type === "dynamicToolCall" && (item.namespace === "claude" || item.namespace === "cutex")) return item.tool;
-  return null;
+  const cutex = item.type === "mcpToolCall" && item.server === "cutex"
+    // The API runtime emits dynamic tools with namespace=claude; subscription emits MCP.
+    || item.type === "dynamicToolCall" && (item.namespace === "claude" || item.namespace === "cutex");
+  if (!cutex) return null;
+  if (item.tool === BROWSER_COMMAND_TOOL) {
+    const command = rawArguments(item).command, name = typeof command === "string" ? `browser_${command}` : null;
+    return tool(name) ? name : null;
+  }
+  return tool(item.tool) ? item.tool : null;
 }
 export const isBrowserTool = (item: RawItem): boolean => browserToolName(item) !== null;
 
+/** The call's own arguments; for `browser`, its command's args. */
 function argumentsOf(item: RawItem): Record<string, unknown> {
+  const raw = rawArguments(item);
+  if (item.tool !== BROWSER_COMMAND_TOOL) return raw;
+  return object(raw.args) ? raw.args : {};
+}
+function rawArguments(item: RawItem): Record<string, unknown> {
   if (object(item.arguments)) return item.arguments;
   if (typeof item.arguments === "string" && item.arguments.length <= 256 * 1024) {
     try { const parsed: unknown = JSON.parse(item.arguments); if (object(parsed)) return parsed; } catch { /* no raw fallback */ }
@@ -109,15 +126,35 @@ function screenshotReference(raw: unknown, mime?: unknown): MessageImage | null 
 
 const ACTIONS = new Set(["click", "fill", "press", "scroll", "scrollIntoView", "select", "check", "uncheck", "hover", "wait", "back", "forward", "reload", "dialog"]);
 const ERRORS = new Set(["invalid_request", "unsupported_operation", "permission_denied", "browser_disabled", "browser_unavailable",
-  "target_closed", "target_hidden", "owner_paused", "lease_revoked", "lease_ended_desktop_restarted", "stale_connection", "stale_request", "stale_ref", "deadline_exceeded",
+  "target_closed", "target_hidden", "owner_paused", "lease_revoked", "lease_ended_desktop_restarted", "lease_ended_turn_end", "stale_connection", "stale_request", "stale_ref", "deadline_exceeded",
   "cancelled", "outcome_unknown", "request_conflict", "request_result_not_retained", "approval_required", "approval_denied", "lease_limit",
   "lease_conflict", "busy", "idempotency_capacity_exceeded", "scope_unsupported", "scope_invalid", "external_pages_unavailable", "service_proxy_required", "message_too_large", "invalid_result",
-  "unsupported_provider", "navigation_failed", "service_unavailable", "service_auth_failed", "browser_identity_unavailable"]);
+  "unsupported_provider", "navigation_failed", "service_unavailable", "service_auth_failed", "browser_identity_unavailable",
+  "script_runtime_unavailable", "script_running", "script_timeout", "kernel_lost", "agent_paused", "turn_ended", "step_limit"]);
 export interface BrowserToolView {
   tool: BrowserTimelineTool; title: string; summary: BrowserTimelineKey; state: "running" | "done" | "failed";
   errorCode: string | null; image: MessageImage | null; imageState: "none" | "ready" | "not-loaded" | "unavailable" | "invalid";
   /** The call stopped for the owner (approval_required) or the owner declined it: not shown as a failure. */
   approval: "required" | "denied" | null;
+  /** browser_script: each browser step it ran (from its result), one row each. */
+  steps: BrowserStepView[];
+}
+export interface BrowserStepView { summary: BrowserTimelineKey; ok: boolean; errorCode: string | null }
+const MAX_SCRIPT_STEPS = 64;
+
+/** A script result's `steps`: command (and act kind) only; anything unknown is dropped, never shown raw. */
+function scriptSteps(value: unknown): BrowserStepView[] {
+  if (!Array.isArray(value)) return [];
+  const steps: BrowserStepView[] = [];
+  for (const step of value.slice(0, MAX_SCRIPT_STEPS)) {
+    if (!object(step) || typeof step.command !== "string") continue;
+    const name = `browser_${step.command}`;
+    if (!tool(name) || name === "browser_script" || name === "browser_script_reset") continue;
+    const suffix = name === "browser_act" && typeof step.kind === "string" && ACTIONS.has(step.kind) ? step.kind : name.slice("browser_".length);
+    const errorCode = typeof step.error === "string" && ERRORS.has(step.error) ? step.error : null;
+    steps.push({ summary: `browser.timeline.${suffix}` as BrowserTimelineKey, ok: step.ok === true, errorCode });
+  }
+  return steps;
 }
 
 export function browserToolView(item: RawItem): BrowserToolView | null {
@@ -132,7 +169,7 @@ export function browserToolView(item: RawItem): BrowserToolView | null {
   const result = object(item.result) ? item.result : {};
   const blocks = item.type === "mcpToolCall" ? result.content : item.contentItems;
   let image: MessageImage | null = null, imageState: BrowserToolView["imageState"] = "none", errorCode: string | null = null;
-  let imageCount = 0;
+  let imageCount = 0, steps: BrowserStepView[] = [];
   if (Array.isArray(blocks) && blocks.length <= 8) for (const block of blocks) {
     if (!object(block)) continue;
     if (block.type === "imageNotLoaded") {
@@ -152,6 +189,7 @@ export function browserToolView(item: RawItem): BrowserToolView | null {
         const value: unknown = JSON.parse(block.text);
         const error = object(value) && object(value.error) ? value.error : null;
         if (typeof error?.code === "string" && ERRORS.has(error.code)) errorCode = error.code;
+        if (name === "browser_script" && object(value) && steps.length === 0) steps = scriptSteps(value.steps);
       } catch { /* Page text is not diagnostic output. */ }
     }
   }
@@ -161,7 +199,7 @@ export function browserToolView(item: RawItem): BrowserToolView | null {
   const running = item.status === "inProgress" || item.status === "running";
   const failed = item.success === false || result.isError === true || item.error != null || ["failed", "errored", "declined"].includes(String(item.status)) || errorCode !== null;
   const approval = running ? null : errorCode === "approval_required" ? "required" : errorCode === "approval_denied" ? "denied" : approvalOutcome(item);
-  return { tool: name, title, summary, state: running ? "running" : failed ? "failed" : "done", errorCode, image, imageState, approval };
+  return { tool: name, title, summary, state: running ? "running" : failed ? "failed" : "done", errorCode, image, imageState, approval, steps };
 }
 
 /** A late full-item response must never replace another item's row. */

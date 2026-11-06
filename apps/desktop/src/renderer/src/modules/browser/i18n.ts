@@ -4,6 +4,10 @@ import { browserOwnerUiZhCN } from "./ownerUiMessages";
 import { browserHostSettingsZhCN } from "./hostSettingsMessages";
 import { browserErrorMessagesZhCN } from "./errorMessages";
 export const zhCN = {
+  "browser.service.title": "服务",
+  "browser.service.choose": "选择服务",
+  "browser.service.hint": "选择一个已登记的服务，在这个标签中打开。",
+  "browser.service.noMatch": "没有匹配的服务。",
   "browser.login.poolLabel": "{{agent}}登录环境",
   "browser.login.poolTitle": "{{agent}}共用的独立登录环境",
   "browser.login.poolHint": "此环境与“我的标签页”分开，但同一主机的{{agent}}会共用这里的登录状态。请勿登录个人账号。",
@@ -125,8 +129,8 @@ export const zhCN = {
   "browser.idleDetach": "空闲后断开调试连接",
   "browser.idleDetachHint": "默认 30 秒。下次操作会重新连接；此前的页面引用随之失效",
   "browser.seconds": "秒",
-  "browser.ownerCapture": "你可以照常左键点击、滚动和输入：你打字时{{agent}}会稍等，你动过页面后它会先重新读取。要它停手请左键点击「暂停{{agent}}」。",
-  "browser.ownerCaptureFailed": "协同控制没能就绪，{{agent}}暂时不能操作这个标签（你仍可正常使用）。请重新打开标签，或左键点击「停止并撤销授予」。",
+  "browser.ownerCapture": "你可以照常左键点击、滚动和输入：你打字时{{agent}}会稍等，你动过页面后它会先重新读取。要它停手请左键点击「暂停」。",
+  "browser.ownerCaptureFailed": "协同控制没能就绪，{{agent}}暂时不能操作这个标签（你仍可正常使用）。请重新打开标签，或左键点击「收回」。",
   "browser.idempotency.clear": "清除浏览器未决记录",
   "browser.idempotency.clearHint": "按一个{{agent}}或全部清除浏览器幂等记录，用于解除已卡满的未决上限",
   "browser.idempotency.target": "清理范围",

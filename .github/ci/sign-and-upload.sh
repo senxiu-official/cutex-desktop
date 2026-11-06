@@ -481,7 +481,9 @@ finish_release "$tag" true "$out"/*
 if [ "$project" = cutex ]; then
   cutex_files=("$out"/manifest.json "$out"/manifest.json.minisig "$out"/cutex-*.tar.gz "$out"/cutex-*.tar.gz.minisig
     "$dir/capabilities/capabilities.json" "$dir/capabilities/capabilities.json.minisig")
-  ensure_release "cutex-$label" "cutex $label (backend update files)" "Signed files for cutex's in-app backend updates. To install by hand, use the $tag release."
+  series_name=""
+  case "$label" in 0.2.*) series_name=" Beautiful World" ;; 0.1.*) series_name=" First Take" ;; esac
+  ensure_release "cutex-$label" "cutex $label$series_name (backend update files)" "Signed files for cutex's in-app backend updates. To install by hand, use the $tag release."
   do_gh release upload "cutex-$label" -R "$repo" --clobber "${cutex_files[@]}"
   finish_release "cutex-$label" false "${cutex_files[@]}"
   if [ -n "$native_version" ]; then

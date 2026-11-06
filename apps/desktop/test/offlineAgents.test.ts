@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import { archivedOf, defaultAgentListTab, filterSortAgents, modelOf, rangeIds, runLimited, runtimeOf, selectionState, selectRange, tabActions, tabRows } from "../src/renderer/src/lib/agentList";
-import { lastSeen, migrateOfflineLimit, offlineSlice } from "../src/renderer/src/lib/offlineAgents";
+import { lastSeen } from "../src/renderer/src/lib/offlineAgents";
 import type { AgentRow } from "../src/renderer/src/lib/sidebar";
 
 function row(id: string, lastActivity: number, over: { name?: string; note?: string; pinned?: boolean; createdAt?: string; session?: Partial<SessionResource> } = {}): AgentRow {
@@ -22,37 +22,7 @@ function row(id: string, lastActivity: number, over: { name?: string; note?: str
   return { id, name: over.name ?? id, subtitle: "", status: "offline", isDirector: false, pinned: over.pinned ?? false, lastActivity, profile: "omega", color: null, session };
 }
 
-describe("offline limit pref", () => {
-  it("migrates the old display modes", () => {
-    expect(migrateOfflineLimit("list")).toBe("all");
-    expect(migrateOfflineLimit("avatars")).toBe(5);
-    expect(migrateOfflineLimit("folded")).toBe(5);
-    expect(migrateOfflineLimit(undefined)).toBe(5);
-    expect(migrateOfflineLimit(7)).toBe(5);
-  });
-  it("keeps valid limits", () => {
-    for (const v of [0, 3, 5, 10, "all"] as const) expect(migrateOfflineLimit(v)).toBe(v);
-  });
-});
-
-describe("offlineSlice", () => {
-  const rows = [row("a", 10), row("b", 50), row("c", 30), row("d", 40), row("e", 20)];
-  const last = (r: AgentRow) => r.lastActivity;
-  it("lists the newest K first and counts the rest", () => {
-    const { shown, hidden } = offlineSlice(rows, 3, last);
-    expect(shown.map((r) => r.id)).toEqual(["b", "d", "c"]);
-    expect(hidden).toBe(2);
-  });
-  it("keeps a pinned / open row beyond K, in recency order", () => {
-    const { shown, hidden } = offlineSlice(rows, 3, last, { keep: (r) => r.id === "a" });
-    expect(shown.map((r) => r.id)).toEqual(["b", "d", "c", "a"]);
-    expect(hidden).toBe(1);
-  });
-  it("lists nothing at 0 and everything for all / while searching", () => {
-    expect(offlineSlice(rows, 0, last)).toEqual({ shown: [], hidden: 5 });
-    expect(offlineSlice(rows, "all", last).hidden).toBe(0);
-    expect(offlineSlice(rows, 3, last, { searching: true }).shown).toHaveLength(5);
-  });
+describe("lastSeen", () => {
   it("uses a newer activity preview as last seen", () => {
     expect(lastSeen(row("x", 100), 250)).toBe(250);
     expect(lastSeen(row("x", 100))).toBe(100);

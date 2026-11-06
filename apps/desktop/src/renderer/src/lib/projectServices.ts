@@ -75,6 +75,8 @@ export function claimCandidates(
     if (service.projectId !== projectId || serviceScope(service) !== "session" || service.archived) continue;
     const id = service.ownerCutexSessionId;
     if (id && id === director) continue;
+    // Not active while the archived agents are not read yet: archived or gone is not known.
+    if (id && sidebar.archivedPending && !active.has(id)) continue;
     const reason: ClaimReason | null = !id
       ? "noRegistrant"
       : retired.has(id)

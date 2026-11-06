@@ -19,6 +19,7 @@ export type PluginRow = {
   installed: boolean;
   enabled: boolean;
   installable: boolean;
+  unavailable: "officialApp" | "backend" | null;
   source: string;
 };
 
@@ -51,26 +52,40 @@ export function isInstallable(summary: Pick<PluginSummary, "installed" | "instal
   return !summary.installed && summary.installPolicy !== "NOT_AVAILABLE" && (summary.availability ?? "AVAILABLE") === "AVAILABLE";
 }
 
+// Local bundled summaries always report AVAILABLE and expose no host/dependency requirements.
+// Keep this fallback limited to the researched OpenAI bundles; see .claude/reports/codex-bundled-plugins.md.
+const OFFICIAL_APP_BUNDLES = new Set(["browser", "codex-app-tools", "computer-use", "unified-computer-use", "visualize"]);
+
+export function pluginUnavailableReason(summary: Pick<PluginSummary, "name" | "availability" | "disabledReason">, marketplace: string): PluginRow["unavailable"] {
+  // Remote availability/dependency refusals are authoritative; they do not identify an OpenAI host.
+  if ((summary.availability ?? "AVAILABLE") !== "AVAILABLE" || summary.disabledReason) return "backend";
+  return marketplace === "openai-bundled" && OFFICIAL_APP_BUNDLES.has(summary.name) ? "officialApp" : null;
+}
+
 /** Flatten plugin/list into rows (marketplace order kept, plugins by display name). */
 export function pluginRows(list: Pick<PluginListResponse, "marketplaces"> | null | undefined): PluginRow[] {
   const rows: PluginRow[] = [];
   for (const m of list?.marketplaces ?? []) {
-    const plugins = m.plugins.map((p): PluginRow => ({
-      id: p.id,
-      name: p.name,
-      displayName: p.interface?.displayName || p.name,
-      marketplace: m.name,
-      marketplaceDisplay: m.interface?.displayName || m.name,
-      marketplacePath: m.path ?? null,
-      description: p.interface?.shortDescription ?? null,
-      category: p.interface?.category ?? null,
-      developer: p.interface?.developerName ?? null,
-      keywords: p.keywords ?? [],
-      installed: p.installed,
-      enabled: p.enabled,
-      installable: isInstallable(p),
-      source: sourceLabel(p.source),
-    }));
+    const plugins = m.plugins.map((p): PluginRow => {
+      const unavailable = pluginUnavailableReason(p, m.name);
+      return {
+        id: p.id,
+        name: p.name,
+        displayName: p.interface?.displayName || p.name,
+        marketplace: m.name,
+        marketplaceDisplay: m.interface?.displayName || m.name,
+        marketplacePath: m.path ?? null,
+        description: p.interface?.shortDescription ?? null,
+        category: p.interface?.category ?? null,
+        developer: p.interface?.developerName ?? null,
+        keywords: p.keywords ?? [],
+        installed: p.installed,
+        enabled: !unavailable && p.enabled,
+        installable: !unavailable && isInstallable(p),
+        unavailable,
+        source: sourceLabel(p.source),
+      };
+    });
     plugins.sort((a, b) => a.displayName.localeCompare(b.displayName));
     rows.push(...plugins);
   }

@@ -13,7 +13,7 @@ import { isImeComposing } from "../../lib/ime";
 // Portrait (lib/portrait RailEdgeContext, owner 2026-10-30): the same rail drawn horizontally across its Shelf's edge toward
 // the conversation — the avatar, the page buttons in a row, ⋯ at the far end; the page in view marked on the edge toward
 // the panes. Landscape (no context) draws exactly as before.
-import { shelfAvatarMenu, shelfAvatarTip, shelfToggleEffect, type ShelfOwner } from "../../lib/shelfAvatar";
+import { shelfAvatarHowTo, shelfAvatarMenu, shelfAvatarTip, shelfToggleEffect, type ShelfOwner } from "../../lib/shelfAvatar";
 import { useForetell, withHandlers } from "../../lib/foretell";
 import { focusPeer } from "../../lib/shelfSource";
 import { toggleShelfGrow } from "../../lib/panelGrow";
@@ -47,6 +47,7 @@ import { SelectionMark } from "../SelectionMark";
 import { RoomFoldedContext, STACK_RAIL_H, useRailEdge } from "../../lib/portrait";
 import { shelfCollapseForetell } from "../../lib/menuForetells";
 import { isElement, isNode, ownerWindowOf } from "../../lib/ownerWindow";
+import { InfoMark } from "../InfoMark";
 import { useRailScroll } from "../../lib/railScroll";
 
 /** The owner avatar's wrapper on a horizontal rail (portrait): the avatar, then a short vertical separator. */
@@ -93,7 +94,7 @@ function PagePopover({ page, index, anchor, toward }: { page: SidePage; index: n
       role="dialog"
       aria-label={t("shelf.page.popoverTitle", { n: index })}
       data-shelf-popover={page.id}
-      className="fixed z-[60] w-[248px] rounded-xl border border-border bg-background p-2.5 shadow-e2"
+      className="float fixed z-[161] w-[248px] p-2.5"
       style={pos ?? { left: -9999, top: 0 }}
     >
       <div className="mb-1.5 flex items-center text-xs font-medium text-muted">
@@ -120,7 +121,7 @@ function PagePopover({ page, index, anchor, toward }: { page: SidePage; index: n
         <button
           role="radio"
           aria-checked={!page.icon}
-          title={t("shelf.page.iconAuto")}
+          data-tip={t("shelf.page.iconAuto")}
           onClick={() => setPageIconTo(page.id, null)}
           className={`flex size-[26px] items-center justify-center rounded-md text-caption/[inherit] text-subtle hover:bg-hover ${!page.icon ? "bg-accent/15 text-accent ring-1 ring-accent/50" : ""}`}
         >
@@ -157,7 +158,7 @@ export function RailOwner({ hostId, sessionId, onClick }: { hostId: string; sess
   if (!session) return null;
   const avatar = <Avatar name={session.displayName} avatar={session.avatar} seed={session.cutexSessionId} size={20} />;
   return (
-    <span data-shelf-owner={session.cutexSessionId} title={session.displayName} className={across ? OWNER_ACROSS : "mb-0.5 flex shrink-0 flex-col items-center gap-1 pt-0.5"}>
+    <span data-shelf-owner={session.cutexSessionId} data-tip={session.displayName} className={across ? OWNER_ACROSS : "mb-0.5 flex shrink-0 flex-col items-center gap-1 pt-0.5"}>
       {onClick ? (
         <button type="button" onClick={onClick} aria-label={session.displayName} className="rounded-full">
           {avatar}
@@ -183,7 +184,7 @@ export function ShelfAvatar({ shelfId, owner, collapsed, side = "right", pinned 
   // so it previews that, not 「收成 Rail」 (its layout keeps it expanded).
   const roomFolded = useContext(RoomFoldedContext);
   const fh = useForetell(() => (roomFolded ? shelfCollapseForetell(side, true) : shelfToggleEffect(shelfId).foretell));
-  const tip = shelfAvatarTip(who, collapsed, !who && pinned);
+  const tip = shelfAvatarTip(who, !who && pinned);
   const Toggle = shelfToggleIcon(side, collapsed);
   const across = useRailEdge() !== null;
   return (
@@ -192,7 +193,7 @@ export function ShelfAvatar({ shelfId, owner, collapsed, side = "right", pinned 
         type="button"
         data-shelf-avatar={shelfId}
         data-side-nodrag
-        title={tip}
+        data-tip={tip}
         aria-label={tip}
         aria-expanded={!collapsed}
         {...withHandlers({ onPointerDown: () => peerKey && focusPeer(peerKey) }, fh)}
@@ -299,7 +300,7 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
         // the panes the page draws for this agent (empty slots included).
         const cards = ctx ? shownCards(layout, page, ctx) : page.cards.filter((c) => c.tabs.length > 0);
         const multi = cards.length > 1;
-        const tip = [keyTip, scopeTip, emptyTip, multi ? t("shelf.page.capsuleTip") : null].filter(Boolean).join("\n");
+        const tip = [keyTip, scopeTip, emptyTip].filter(Boolean).join("\n");
         return (
           // The page button and its pin (a sibling: no button inside a button).
           <div key={page.id} className="group/page relative flex shrink-0">
@@ -311,7 +312,7 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
               data-shelf-page-on={on ? "" : undefined}
               data-shelf-page-news={news[page.id] !== undefined ? "" : undefined}
               data-shelf-page-pinned={page.shared ? "" : undefined}
-              title={dragging ? undefined : tip}
+              data-tip={dragging ? undefined : tip}
               aria-label={name}
               aria-current={on ? "page" : undefined}
               // Owner 2026-10-22: a page button drags its page (reorder in this rail, or to the other Shelf's rail); a
@@ -350,8 +351,7 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
                       key={card.id}
                       data-shelf-pane={card.id}
                       data-shelf-pane-focus={on && focusedCard === card.id ? "" : undefined}
-                      title={dragging ? undefined : `${pane}
-  ${t("shelf.page.capsuleTip")}`}
+                      data-tip={dragging ? undefined : pane}
                       // The icon is the pane's own handle: it claims the press before the capsule (lib/sideDnd).
                       {...sideDragHandle(() => ({ type: "card", cardId: card.id }))}
                       className="flex size-6 items-center justify-center rounded-full"
@@ -381,7 +381,7 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
                 data-shelf-page-pin={page.id}
                 data-shelf-page-shared={page.shared ? "" : undefined}
                 aria-pressed={!!page.shared}
-                title={t(page.shared ? "shelf.page.unpin" : "shelf.page.pin")}
+                data-tip={t(page.shared ? "shelf.page.unpin" : "shelf.page.pin")}
                 aria-label={`${name}: ${t(page.shared ? "shelf.page.unpin" : "shelf.page.pin")}`}
                 onClick={() => togglePagePin(page.id)}
                 className={`absolute -bottom-0.5 -left-0.5 flex size-3.5 items-center justify-center rounded-full bg-background text-subtle ring-1 ring-border transition-opacity duration-(--motion-short) hover:text-foreground focus-visible:opacity-100 ${page.shared ? "opacity-100" : "opacity-0 group-hover/page:opacity-100"}`}
@@ -396,7 +396,7 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
       {all < MAX_SHELF_PAGES && (
         <button
           data-shelf-add={shelf.id}
-          title={t("shelf.addPage")}
+          data-tip={t("shelf.addPage")}
           aria-label={t("shelf.addPage")}
           onClick={() => addPage(shelf.id)}
           data-shelf-add-armed={dragging ? "" : undefined}
@@ -411,9 +411,11 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
           {dragging ? t("shelf.dnd.newPageSlot") : <Plus size={14} />}
         </button>
       )}
-      <button data-shelf-menu={shelf.id} title={t("shelf.menu")} aria-label={t("shelf.menu")} onClick={(e) => openMenuFrom(e.currentTarget, shelfMenu(shelf.id))} className={`${BTN} ${edge ? "ml-auto" : "mt-auto"}`}>
+      <button data-shelf-menu={shelf.id} data-tip={t("shelf.menu")} aria-label={t("shelf.menu")} onClick={(e) => openMenuFrom(e.currentTarget, shelfMenu(shelf.id))} className={`${BTN} ${edge ? "ml-auto" : "mt-auto"}`}>
         <MoreHorizontal size={16} />
       </button>
+      {/* How pages and panes move (design 040 §2.1: not in the tips). */}
+      <InfoMark text={[shelfAvatarHowTo(collapsed), t("shelf.page.capsuleTip")].join("\n")} className={`hover-info ${edge ? "px-0.5" : "py-0.5"}`} />
       {popPage && popIndex > 0 && buttons.current[popPage.id] && <PagePopover key={popPage.id} page={popPage} index={popIndex} anchor={buttons.current[popPage.id]!} toward={toward} />}
     </nav>
   );
@@ -437,7 +439,7 @@ export function EmptyShelfRail({ hostId, sessionId, at, order, focus = null, pan
           <RailOwner hostId={hostId} sessionId={sessionId} onClick={focus ?? undefined} />
           <button
             data-shelf-rail-launch=""
-            title={tip}
+            data-tip={tip}
             aria-label={tip}
             aria-haspopup="menu"
             onClick={(e) => openMenuFrom(e.currentTarget, [...shelfLauncherMenu(focus), ...panelGuideTail({ panel: "shelf", paneId, hostId, sessionId })])}
@@ -454,7 +456,7 @@ export function EmptyShelfRail({ hostId, sessionId, at, order, focus = null, pan
         <RailOwner hostId={hostId} sessionId={sessionId} onClick={focus ?? undefined} />
         <button
           data-shelf-rail-launch=""
-          title={tip}
+          data-tip={tip}
           aria-label={tip}
           aria-haspopup="menu"
           onClick={(e) => openMenuFrom(e.currentTarget, [...shelfLauncherMenu(focus), ...panelGuideTail({ panel: "shelf", paneId, hostId, sessionId })])}

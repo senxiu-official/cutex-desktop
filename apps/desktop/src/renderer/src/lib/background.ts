@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { agentHost, hostApi, useApp, viewOf } from "../store";
 import { convViewHostOf, useConvScope, type ConversationScopeValue } from "./conversationScope";
 import { viewRow } from "./viewHost";
-import { childStatusFromThreadRead, liveAtGeneration, subAgentMetaFromThreadRead, subAgentsOf, takeSubAgentReads, type SubAgentLive, type SubAgentReadLog } from "./subagents";
+import { childStatusFromThreadRead, liveAtGeneration, subAgentMetaFromThreadRead, subAgentsOf, takeSubAgentReads, timelineLoad, type SubAgentLive, type SubAgentReadLog } from "./subagents";
 import { recordSubAgentMeta, recordSubAgentSpan, useSubAgentMeta } from "./subagentMetaStore";
 import { subAgentSpanFromThreadRead } from "./finishedSubagents";
 import { lacks, opensClaudeSubagents } from "./agentFeatures";
@@ -60,7 +60,7 @@ export function useSettleSubAgents(sessionId: string | null, timeline: TimelineS
   useEffect(() => {
     if (!sessionId || !online || !hostId) return;
     const claudeReads = opensClaudeSubagents(agentFeaturesFor(sessionId, hostId));
-    for (const { threadId, settle } of takeSubAgentReads(sessionId, subAgentsOf(timeline).values(), live, meta, subAgentReads, Date.now(), generation, claudeReads)) {
+    for (const { threadId, settle } of takeSubAgentReads(sessionId, subAgentsOf(timeline).values(), live, meta, subAgentReads, Date.now(), generation, claudeReads, timelineLoad(timeline))) {
       hostApi(hostId).subAgentThread(sessionId, threadId, settle ? undefined : { includeTurns: false }).then(
         (result) => {
           recordSubAgentMeta(threadId, subAgentMetaFromThreadRead(result));

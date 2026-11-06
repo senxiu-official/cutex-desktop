@@ -6,7 +6,9 @@ import { Archive, ArchiveRestore } from "lucide-react";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import { useI18n } from "../i18n";
 import { archivedProjectOf } from "../lib/archivedAgent";
-import { restoreArchived } from "../lib/menus";
+import { editAgentInfo, restoreArchived } from "../lib/menus";
+import { RestoreNameError, sessionOf } from "../lib/agentRename";
+import { btn } from "./Button";
 import { restoreWithDirector } from "../lib/projectArchive";
 import { useApp } from "../store";
 import { convSidebarOf, useConvScope } from "../lib/conversationScope";
@@ -18,14 +20,18 @@ export function ArchivedBanner({ session }: { session: SessionResource }) {
   const project = archivedProjectOf(session, projects);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Its own name is someone else's now: say so and offer 改名… (it can be renamed while archived).
+  const [nameBlocked, setNameBlocked] = useState<RestoreNameError | null>(null);
   const restore = async (withProject: boolean) => {
     setBusy(true);
     setError(null);
+    setNameBlocked(null);
     try {
       // With its project: also offers 「同时恢复主管」 when that project's Director is archived too.
       if (withProject) await restoreWithDirector(session, t);
       else await restoreArchived(session, false);
     } catch (e) {
+      if (e instanceof RestoreNameError && e.block.renameRequired !== false) setNameBlocked(e);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -39,7 +45,12 @@ export function ArchivedBanner({ session }: { session: SessionResource }) {
           <div className="font-medium">{t("archive.banner.title")}</div>
           <div className="text-xs text-subtle">{t("archive.banner.body")}</div>
           {project && <div className="mt-1 text-xs text-warn">{t("archive.banner.projectArchived", { project: project.name })}</div>}
-          {error && <div className="mt-1 text-xs text-danger">{error}</div>}
+          {error && <div className="mt-1 text-xs text-danger" role="alert">{error}</div>}
+          {nameBlocked && (
+            <button type="button" data-testid="archived-banner-rename" onClick={() => { setNameBlocked(null); setError(null); void editAgentInfo(sessionOf(nameBlocked.host, session.cutexSessionId) ?? session, nameBlocked.host); }} className={`mt-1.5 ${btn({ size: "sm" })}`}>
+              {t("rename.restoreRename")}
+            </button>
+          )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <button

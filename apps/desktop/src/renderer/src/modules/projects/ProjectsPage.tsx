@@ -2,6 +2,7 @@
 // Director, project-layer MCP, memory, tasks. Membership and Director changes live only here, on the
 // agent tab (the list + MemberPicker); 设置 only links to it.
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useArchivedAgents } from "../../lib/useArchivedAgents";
 import { displayWidth, isBadgeLabelError, projectBadgeWidth } from "../../lib/badgeWidth";
 import { BadgeTextInput } from "../../components/BadgeTextInput";
 import { Archive, ArrowRightLeft, Crown, FolderOpen, Pencil, Plus, Shield, StickyNote, UserMinus, Users, UserX } from "lucide-react";
@@ -824,6 +825,7 @@ export function ProjectsPage({ params }: { params: PageParams }) {
   const { t } = useI18n();
   const scope = useHostScope();
   const hostId = params.host ?? scope.focus;
+  useArchivedAgents(hostId);
   const hostsState = useApp((s) => s.hosts);
   const sidebar = useApp((s) => s.sidebar);
   const byHost = useApp((s) => s.byHost);

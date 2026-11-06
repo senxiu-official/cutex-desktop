@@ -312,6 +312,25 @@ export function windowLabel(mins: number | null): string {
   return `${mins}m`;
 }
 
+/** Fixed window lengths explicitly carried by windowLabel, including model-scoped "Fable 7d".
+ * Calendar months and arbitrary reader labels have no known duration and stay unknown. */
+export function quotaWindowSeconds(label: string | null | undefined): number | null {
+  const window = label?.trim().toLowerCase();
+  if (!window) return null;
+  if (/(?:^|\s)week$/.test(window)) return 7 * 86400;
+  const match = /(?:^|\s)(\d+(?:\.\d+)?)\s*([mhdw])$/.exec(window);
+  if (!match) return null;
+  const seconds = Number(match[1]) * ({ m: 60, h: 3600, d: 86400, w: 7 * 86400 }[match[2]!] ?? 0);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
+/** Even-paced remaining share (0..1), using only the gauge's reset and explicit window. */
+export function quotaEvenPaceRemaining(g: Pick<QuotaGauge, "kind" | "resetAt" | "windowLabel" | "error">, now = Date.now()): number | null {
+  if (g.kind !== "window" || g.error || g.resetAt === null || !Number.isFinite(g.resetAt) || !Number.isFinite(now)) return null;
+  const seconds = quotaWindowSeconds(g.windowLabel);
+  return seconds === null ? null : Math.min(1, Math.max(0, (g.resetAt - now / 1000) / seconds));
+}
+
 /** "3h 4m" until a unix-seconds reset time. */
 export function resetsIn(resetsAt: number | null, now = Date.now()): string {
   if (!resetsAt) return "";
@@ -369,6 +388,35 @@ export function fillColor(fill: number, view: QuotaView = "used"): string {
 /** i18n key for "剩 62%" / "已用 38%". */
 export function quotaTextKey(view: QuotaView): "composer.quota.left" | "composer.quota.used" {
   return view === "remaining" ? "composer.quota.left" : "composer.quota.used";
+}
+
+/** A window gauge whose reset time has passed: its percentage belongs to the previous window. */
+export function quotaPastReset(g: Pick<QuotaGauge, "kind" | "resetAt">, now = Date.now()): boolean {
+  return g.kind === "window" && g.resetAt !== null && Number.isFinite(g.resetAt) && g.resetAt * 1000 <= now;
+}
+
+/**
+ * The one place a past reset turns a gauge unknown (no percentage, no countdown) until it is read
+ * again; callers re-evaluate it as time passes (nextQuotaReset), not only on fetch.
+ */
+export function quotaGaugeNow(g: QuotaGauge, now = Date.now()): QuotaGauge {
+  return quotaPastReset(g, now) ? { ...g, remainingPercent: null, resetAt: null } : g;
+}
+
+/** A reading worth showing as current: some gauge read without error, not stale and not past its reset. */
+export function quotaUsable(gauges: readonly QuotaGauge[] | undefined, now = Date.now()): boolean {
+  return !!gauges?.some((g) => !g.error && !g.stale && (g.kind === "balance" ? g.balance !== null : g.remainingPercent !== null && !quotaPastReset(g, now)));
+}
+
+/** The earliest reset still ahead (unix ms), so a view can re-render when that gauge turns unknown. */
+export function nextQuotaReset(gauges: readonly QuotaGauge[], now = Date.now()): number | null {
+  let best: number | null = null;
+  for (const g of gauges) {
+    if (g.kind !== "window" || g.resetAt === null || !Number.isFinite(g.resetAt)) continue;
+    const at = g.resetAt * 1000;
+    if (at > now && (best === null || at < best)) best = at;
+  }
+  return best;
 }
 
 /** Compact countdown for the composer row: "1d18h", "2h17m", "45m". */

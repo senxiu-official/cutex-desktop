@@ -22,8 +22,8 @@ export function ShelfToast() {
   }, [here, win]);
   if (!toast) return null;
   return (
-    <div role="status" data-shelf-toast="" className="pointer-events-none fixed inset-x-0 bottom-14 z-[66] flex justify-center">
-      <div key={toast.id} className="motion-toast-in pointer-events-auto flex max-w-[min(34rem,calc(100vw-2rem))] items-center gap-2 rounded-xl border border-border bg-background py-1.5 pr-1.5 pl-3.5 text-ui/[inherit] shadow-e2">
+    <div role="status" data-shelf-toast="" className="pointer-events-none fixed inset-x-0 bottom-14 z-[170] flex justify-center">
+      <div key={toast.id} className="float float-toast max-w-[min(34rem,calc(100vw-2rem))]">
         <span className="min-w-0 flex-1 truncate" title={toast.text}>
           {toast.text}
         </span>

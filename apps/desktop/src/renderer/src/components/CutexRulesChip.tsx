@@ -255,7 +255,7 @@ export const CutexRulesPanel = memo(function CutexRulesPanel({ hostId, api, sess
     const isAsking = asking?.kind === kind;
     return (
       <li key={kind} data-rule-kind={kind} data-on={on ? "" : undefined} className={`rounded-inner px-2 py-1.5 ${on ? "bg-surface-2/60" : "hover:bg-surface-2/40"}`}>
-        <div className="flex items-center gap-2.5" title={kindHint(t, kind)}>
+        <div className="flex items-center gap-2.5" data-tip={kindHint(t, kind)}>
           <KindTile kind={kind} />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5 text-meta">
@@ -269,7 +269,7 @@ export const CutexRulesPanel = memo(function CutexRulesPanel({ hostId, api, sess
             role="switch"
             aria-checked={on}
             aria-label={`${kindLabel(t, kind)}: ${switchTitle}`}
-            title={switchTitle}
+            data-tip={switchTitle}
             disabled={disabled}
             onClick={() => flip(kind)}
             data-rule-switch={kind}
@@ -315,7 +315,7 @@ export const CutexRulesPanel = memo(function CutexRulesPanel({ hostId, api, sess
         </label>
       )}
       {anyDynamic && (
-        <label className="flex cursor-pointer items-center gap-1.5 text-caption text-muted" title={t(includeHighDynamic ? "approvals.rules.dynamicHighHint" : "approvals.rules.dynamicHint")}>
+        <label className="flex cursor-pointer items-center gap-1.5 text-caption text-muted" data-tip={t(includeHighDynamic ? "approvals.rules.dynamicHighHint" : "approvals.rules.dynamicHint")}>
           <input type="checkbox" checked={includeHighDynamic} disabled={busy} onChange={(event) => setIncludeHighDynamic(event.target.checked)} className="accent-accent" />
           {t("approvals.rules.dynamicHighShort")}
         </label>

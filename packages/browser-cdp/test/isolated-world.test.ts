@@ -25,7 +25,7 @@ const BOOTSTRAP = `
     matches() { return false; }, closest() { return null; }, getAttribute() { return null; },
     getBoundingClientRect() { return {left:10,top:10,right:110,bottom:40,width:100,height:30}; },
     getClientRects() { return [this.getBoundingClientRect()]; },
-    contains(node) { return node === this; },
+    contains(node) { return node === this; }, getRootNode() { return document; },
     setSelectionRange(start,end) { __dom.selection=[start,end]; }
   };
   globalThis.deliver = (type,key,trusted) => {

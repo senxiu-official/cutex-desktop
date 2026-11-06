@@ -47,7 +47,9 @@ export function HostDot({ color, status = "online", size = 8, title }: { color: 
   const ring = status === "error" ? "ring-2 ring-danger" : status === "connecting" || status === "retrying" ? "ring-2 ring-warn animate-pulse" : "";
   return (
     <span
-      title={title}
+      data-tip={title}
+      role={title ? "img" : undefined}
+      aria-label={title}
       className={`inline-block shrink-0 rounded-full ${ring}`}
       style={{ width: size, height: size, background: hollow ? "transparent" : color, boxShadow: hollow ? `inset 0 0 0 1.5px ${color}` : undefined }}
     />
@@ -58,7 +60,7 @@ export function HostDot({ color, status = "online", size = 8, title }: { color: 
 export function HostMark({ host, dotOnly = false, className = "" }: { host: Pick<HostLook, "label" | "color" | "indicator">; dotOnly?: boolean; className?: string }) {
   if (dotOnly) return <HostDot color={host.color} status={host.indicator.status} title={host.label} />;
   return (
-    <span className={`inline-flex min-w-0 items-center gap-1 rounded px-1 text-caption/[inherit] text-muted ${className}`} title={host.label}>
+    <span className={`inline-flex min-w-0 items-center gap-1 rounded px-1 text-caption/[inherit] text-muted ${className}`} data-tip={host.label}>
       <HostDot color={host.color} status={host.indicator.status} size={7} />
       <span className="truncate">{host.label}</span>
     </span>

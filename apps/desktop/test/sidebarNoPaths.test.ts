@@ -8,12 +8,13 @@ import { describe, expect, it } from "vitest";
 const src = (file: string) => readFileSync(new URL(`../src/renderer/src/components/${file}`, import.meta.url), "utf8");
 
 describe("sidebar project paths", () => {
-  it("Sidebar and the project flyout render no directory line", () => {
-    for (const file of ["Sidebar.tsx", "ProjectFlyout.tsx"]) expect(src(file)).not.toMatch(/shortenHome/);
+  it("Sidebar renders no directory line", () => {
+    expect(src("Sidebar.tsx")).not.toMatch(/shortenHome/);
   });
 
   it("the directory stays in tooltips", () => {
-    expect(src("Sidebar.tsx")).toMatch(/title=\{\[t\(open \? "fold\.collapse" : "fold\.unfold"\), root\]/);
-    expect(src("ProjectFlyout.tsx")).toMatch(/title=\{root \?\? undefined\}/);
+    expect(src("Sidebar.tsx")).toMatch(/data-tip=\{\[t\(open \? "fold\.collapse" : "fold\.unfold"\), root\]/);
+    // A one-row project: remark, directory and the action in its tooltip.
+    expect(src("Sidebar.tsx")).toMatch(/data-tip=\{\[remark && t\("remark\.withText", \{ text: remark \}\), root, t\("fold\.unfold"\)\]/);
   });
 });

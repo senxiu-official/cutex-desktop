@@ -268,6 +268,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "daemonState",
   "browseDirs",
   "approvals",
+  "approvalsPage",
   "decideApproval",
   "approvalRules",
   "confirmApprovalRule",
@@ -302,6 +303,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "closeBusMessage",
   "busMessageEvidence",
   "runtimes",
+  "runtimePrunePlan",
+  "pruneRuntimes",
   "claudeAccounts",
   "addProfileVariant",
   "patchProfileVariant",
@@ -323,10 +326,14 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "profileQuotaDetail",
   "patchAgentSecurity",
   "sidebar",
+  "sidebarLoadArchived",
+  "sidebarPeek",
   "bootstrap",
   "createAgent",
   "abandonAgentCreate",
   "createHumanSession",
+  "renameFormalAgent",
+  "formalNameHistory",
   "patchNewThreadDefaults",
   "services",
   "registerService",
@@ -465,6 +472,9 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "usersMeDevices",
   "usersMeRemoveDevice",
   "userAvatar",
+  "userLayout",
+  "putUserLayout",
+  "putLayoutPointer",
   "userHome",
   "putUserHome",
   "homeCover",
@@ -560,7 +570,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "putProfileImage",
   "getProfile",
   "listProfiles",
-  "inputGet", "inputList", "inputRetry", "inputInterruptSend", "inputDismiss", "inputLeaseRelease", "queueMerge",
+  "inputGet", "inputList", "inputHold", "inputRetry", "inputInterruptSend", "inputDismiss", "inputLeaseRelease", "queueMerge",
   "queueList",
   "queueUpdate",
   "queueRemove",
@@ -587,6 +597,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "saveMarkdown",
   "pickImages",
   "ownerNotifications",
+  "ownerNotificationsPage",
   "ownerNotifyAction",
   "safetyCheckDecide",
   "patchOwnerNotify",
@@ -703,6 +714,8 @@ ipcMain.handle(SHELL_CHANNEL, (event, request: ShellRequest) => {
     case "setAllowRemoteClose":
       if (typeof request.value !== "boolean") throw new Error("bad value");
       return desktopShell.setAllowRemoteClose(request.value);
+    case "setMemoryHost":
+      return desktopShell.setMemoryHost(request.value);
     case "setMultiWindow":
     case "migrateMultiWindow":
       return desktopShell.setMultiWindow(request.op === "setMultiWindow" ? "set" : "migrate", request.value);

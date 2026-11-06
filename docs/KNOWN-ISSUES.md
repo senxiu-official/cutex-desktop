@@ -1,57 +1,55 @@
 # Known issues
 
-Known issues in the current public release: **desktop v0.2.0** with **cutex v0.2.0**. The app shows
-the same list under Settings → About → Known issues from [known-issues.json](known-issues.json)
-(schema in `apps/desktop/src/shared/knownIssues.ts`): its built-in copy, and the copy on the `release`
-branch, which it fetches — so a docs push to `release` updates the list in installed apps. Change this
-file and the JSON together (same entries, order, titles and planned fixes; a test checks them).
+Applies to **Cutex Desktop 0.2.2 — Beautiful World** with **cutex 0.2.1 — Beautiful World**,
+unless an entry specifies an older host version. Update the desktop and each host separately.
 
-Each entry: what you see, a workaround if there is one, and the version that is planned to fix it.
-Three entries below apply only to hosts still on cutex 0.1.x; a host on cutex v0.2.0 is not affected,
-and the app hides them for such a host (`appliesTo` in the JSON). If a host still runs 0.1.x, update
-it in Settings → Host backend updates.
+The application displays these entries in Settings → About → Known issues. Three Windows entries
+apply only to older cutex hosts; they are hidden when the connected host is outside the stated
+version range. No release date is assigned to limitations without a fixed version.
 
-## Phone push / pairing a phone
+## Phone pairing and push notifications unavailable
 
-There is no public phone app yet, so phone push notifications and pairing a phone are not
-available.
+A public mobile app is not available. Phone pairing and mobile push notifications are unavailable.
 
-- Workaround: none.
-- Planned fix: not scheduled.
+- Workaround: None available.
+- Fix schedule: not scheduled.
 
-## Windows (cutex 0.1.1 hosts): plain commands ask for approval in Auto mode
+## Windows: Auto mode requires command approval on cutex 0.1.1
 
-Only on hosts still running cutex 0.1.1, which cannot set up the Windows sandbox.
+When an agent on a Windows host has no Windows sandbox set up, the native runtime cannot confine commands, so it requests approval for every command. From cutex 0.1.2 the permission menu says the sandbox is not ready and provides sandbox setup (no administrator rights); a cutex 0.1.1 host has no such setup.
 
-- Workaround: update that host (Settings → Host backend updates).
-- Planned fix: cutex 0.1.2 (with desktop 0.1.3).
+- Affected host versions: `<0.1.2`.
+- Workaround: Update that host to cutex 0.1.2 (Settings → Host backend updates); or use Full access for now, or set up the sandbox on that host with cute-codex's /setup-default-sandbox.
+- Fixed in: cutex 0.1.2.
 
-## Windows (cutex 0.1.1 hosts): a saved API-key Profile cannot start agents
+## Windows: API-key Profiles cannot create agents on cutex 0.1.1
 
-Only on hosts still running cutex 0.1.1 ("object DACL is not service-private" when creating an agent).
+On Windows, after an API-key Profile's settings are saved, creating an agent fails with “object DACL is not service-private”: cutex wrote the credential file with only inherited permissions, and the launch check requires its own private permissions.
 
-- Workaround: update that host (Settings → Host backend updates); it repairs the file by itself.
-- Planned fix: cutex 0.1.2.
+- Affected host versions: `<0.1.2`.
+- Workaround: Update that host to cutex 0.1.2 (Settings → Host backend updates); it repairs the file permissions automatically. Until then, in PowerShell, run on the auth.json named in the error: icacls "<path from the error>" /inheritance:r /grant:r "$env:USERNAME`:F" (changes permissions only, not the contents).
+- Fixed in: cutex 0.1.2.
 
-## Windows (hosts before cutex 0.1.3): after the sandbox is set up, commands fail with Store PowerShell
+## Windows: sandbox commands fail with Store PowerShell before cutex 0.1.3
 
-Only on hosts still running cutex 0.1.2 or older whose PowerShell is the Microsoft Store version.
+On a Windows host where PowerShell is the Microsoft Store version, after “Set up sandbox (no administrator)” every command an agent runs fails with exit -1: the restricted sandbox process cannot start a Store app. cutex 0.1.3 brings the native runtime cute-codex 0.160.0-r52.3, which uses an installed PowerShell or Windows PowerShell instead.
 
-- Workaround: update that host (Settings → Host backend updates), then restart the agent.
-- Planned fix: cutex 0.1.3 (native runtime cute-codex 0.160.0-r52.3).
+- Affected host versions: `<0.1.3`.
+- Workaround: Update that host to cutex 0.1.3 (Settings → Host backend updates), then restart the agent (idle agents move to the new runtime by themselves). Until then, install PowerShell on that host with winget (winget install Microsoft.PowerShell) or the MSI installer, then restart the agent; or leave the sandbox unset for now.
+- Fixed in: cutex 0.1.3.
 
-## Job Service and NCI remote jobs need a Linux host
+## Job Service and NCI remote jobs require Linux
 
-The Job Service component, and with it the Jobs page and NCI remote jobs, runs only on Linux cutex
-hosts. See [docs/install/ANU.md](install/ANU.md) for NCI.
+The Job Service component (needed by the Jobs page and NCI remote jobs) runs only on Linux cutex hosts.
 
-- Workaround: run these from a Linux host.
-- Planned fix: not scheduled.
+- Workaround: Run these from a Linux host.
+- Fix schedule: not scheduled.
 
-## macOS: front end only
+## macOS provides the desktop client only
 
-On macOS the app is a front end only: cutex itself runs on another machine (Linux or Windows) that
-you connect to over SSH.
+The macOS package provides the desktop client. Run cutex on a Windows or Linux host and connect through SSH.
 
-- Workaround: run cutex on a Linux or Windows machine and add it as a host.
-- Planned fix: not scheduled.
+- Workaround: Run cutex on a Linux or Windows machine and add it as a host.
+- Fix schedule: not scheduled.
+
+For NCI setup, see [NCI remote jobs](install/ANU.md).

@@ -13,6 +13,12 @@ export const MAX_MODEL_SNAPSHOT_BYTES = 64 * 1024;
 export const MAX_MODEL_SCREENSHOT_DIMENSION = 1600;
 export const DEFAULT_FIND_LIMIT = 20;
 export const MAX_FIND_RESULTS = 100;
+/** Why main did not open the tab a page tried to open after the agent's click. late_page_popup:
+ * the page opened it after the click's input window (e.g. from script after a network request);
+ * rate_limited: more than one per second; address_not_allowed: the address is not allowed for
+ * page navigation; form_post: a form POST into a new tab; invalid_url; unavailable. */
+export const BROWSER_POPUP_BLOCK_REASONS = ['late_page_popup', 'rate_limited', 'address_not_allowed', 'form_post', 'invalid_url', 'unavailable'] as const;
+export type BrowserPopupBlockReason = typeof BROWSER_POPUP_BLOCK_REASONS[number];
 export const MAX_FIND_TEXT_CODE_POINTS = 1024;
 export const DEFAULT_SCROLL_AMOUNT = 500;
 export const MAX_SCROLL_AMOUNT = 4096;
@@ -104,6 +110,8 @@ export interface BrowserPageNode {
   ref: string; role: string; name: string; value?: string;
   /** Present only when a role/name/value was shortened to satisfy a protocol limit. */
   truncated?: true;
+  /** A link's target or an image's source (display-redacted; browser-page-links-v1 hosts only). */
+  url?: string;
 }
 export interface BrowserSnapshot {
   pageGeneration: number;
@@ -136,13 +144,17 @@ export type BrowserOperationResult =
   | ({ kind: 'tab.find' } & BrowserSnapshot)
   /** `scroll` (wheel scroll only, sent only to a host advertising browser-scroll-outcome): CSS px
    * the scrolled container moved and whether it is at the edge in the requested direction. */
-  | { kind: 'tab.act'; pageGeneration: number; scroll?: { dx: number; dy: number; atEdge: boolean } }
+  | { kind: 'tab.act'; pageGeneration: number; scroll?: { dx: number; dy: number; atEdge: boolean };
+    /** The click opened a new tab (main grants it under the opener lease), or main blocked the
+     * page's attempt to open one (browser-page-links-v1). */
+    newTab?: true | { blocked: BrowserPopupBlockReason } }
   | { kind: 'tab.navigate'; pageGeneration: number; url: string }
   | ({ kind: 'tab.screenshot' } & BrowserScreenshotResult)
   | { kind: 'tab.release' }
   | { kind: 'tabs.list'; tabs: BrowserTabSummary[] }
   /** Selection/creation acknowledgement only. Cutex, not a provider, issues leaseId. */
-  | { kind: 'tabs.open' | 'tabs.claim'; tab: BrowserTabSummary };
+  | { kind: 'tabs.open'; tab: BrowserTabSummary; loadState?: 'loading' | 'loaded' }
+  | { kind: 'tabs.claim'; tab: BrowserTabSummary };
 
 export interface BrowserMessageRoute {
   protocolVersion: 1;

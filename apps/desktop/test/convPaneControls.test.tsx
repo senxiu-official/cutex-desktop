@@ -120,9 +120,9 @@ describe("the pane controls (variant A)", () => {
     // The Shelf's own toggle icon (a panel, owner 2026-10-25), not the layers icon an empty page used to share.
     expect(q('[data-pane-shelf] svg.lucide-panel-right-open, [data-pane-shelf] svg.lucide-panel-right-close')).not.toBeNull();
     expect(q('[data-pane-shelf] svg.lucide-layers')).toBeNull();
-    expect(q("[data-pane-collapse]")!.getAttribute("title")).toBe("convHeader.close");
+    expect(q("[data-pane-collapse]")!.getAttribute("data-tip")).toBe("convHeader.close");
     // One workspace: 「—」 = into the tray, back to the desktop; no 「‹ / ›」 (nothing to fold beside).
-    expect(q("[data-pane-minimize]")!.getAttribute("title")).toBe("strip.minimizeLast");
+    expect(q("[data-pane-minimize]")!.getAttribute("data-tip")).toBe("strip.minimizeLast");
     expect(q("[data-pane-strip]")).toBeNull();
     // Nothing folded: no dot on ⋯.
     expect(q("[data-conv-folded-dot]")).toBeNull();
@@ -139,7 +139,7 @@ describe("the pane controls (variant A)", () => {
     const strip = q("[data-pane-strip]")!;
     expect(strip.dataset.paneStrip).toBe("left");
     expect(strip.querySelector("svg.lucide-chevron-left")).not.toBeNull();
-    expect(q("[data-pane-minimize]")!.getAttribute("title")).toBe("strip.minimize");
+    expect(q("[data-pane-minimize]")!.getAttribute("data-tip")).toBe("strip.minimize");
     const { useForetellStore } = await import("../src/renderer/src/lib/foretell");
     act(() => strip.dispatchEvent(new PointerEvent("pointerover", { bubbles: true })));
     act(() => vi.advanceTimersByTime(200));

@@ -21,7 +21,7 @@ function useTip(): { shown: boolean; tip: string; name: string } {
 export function ShowDesktopButton({ className }: { className: string }) {
   const { shown, tip } = useTip();
   return (
-    <button onClick={showDesktop} title={tip} aria-label={tip} aria-pressed={shown} data-show-desktop="" data-titlebar-entry="show-desktop" className={`${className} relative shrink-0 ${shown ? "bg-surface-2 text-foreground" : ""}`}>
+    <button onClick={showDesktop} data-tip={tip} aria-label={tip} aria-pressed={shown} data-show-desktop="" data-titlebar-entry="show-desktop" className={`${className} relative shrink-0 ${shown ? "bg-surface-2 text-foreground" : ""}`}>
       <Monitor size={16} />
     </button>
   );

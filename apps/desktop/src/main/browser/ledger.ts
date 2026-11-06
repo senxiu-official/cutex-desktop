@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { hasSideEffects } from "@cutex-desktop/browser-protocol";
-import { BrowserRelayError, type RelayCommand, type RelayErrorCode, type RelayState } from "./relayTypes";
+import { BrowserRelayError, type RelayCommand, type RelayErrorCode, type RelayErrorDetail, type RelayState } from "./relayTypes";
 
-export interface RelayLedgerEntry { readonly requestId: string; readonly dispatchSeq: number; readonly deadlineMono: number; readonly write: boolean; readonly fingerprint: string; state: RelayState; error?: RelayErrorCode; lateResults: number }
+export interface RelayLedgerEntry { readonly requestId: string; readonly dispatchSeq: number; readonly deadlineMono: number; readonly write: boolean; readonly fingerprint: string; state: RelayState; error?: RelayErrorCode; detail?: RelayErrorDetail; abortCause?: RelayErrorCode; lateResults: number }
 export const terminalRelayState = (state: RelayState): boolean => !["accepted", "dispatched", "running"].includes(state);
 function canonical(value: unknown): unknown { if (Array.isArray(value)) return value.map(canonical); if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical((value as Record<string, unknown>)[key])])); return value; }
 /** Small metadata only: never retains page contents, filled values, titles or image bodies. */
@@ -25,7 +25,7 @@ export class BrowserRelayLedger {
     // Even a capacity rejection consumes this dispatch sequence. A later retry may
     // not become executable merely because another entry has since completed.
     this.highestSeq = command.dispatchSeq;
-    if (this.entries.size >= this.capacity) { const evictable = [...this.entries.values()].find(entry => terminalRelayState(entry.state)); if (!evictable) throw new BrowserRelayError("busy"); this.entries.delete(evictable.requestId); this.watermark = Math.max(this.watermark, evictable.dispatchSeq); }
+    if (this.entries.size >= this.capacity) { const evictable = [...this.entries.values()].find(entry => terminalRelayState(entry.state)); if (!evictable) throw new BrowserRelayError("busy", undefined, "ledger_capacity"); this.entries.delete(evictable.requestId); this.watermark = Math.max(this.watermark, evictable.dispatchSeq); }
     const entry: RelayLedgerEntry = { requestId: command.requestId, dispatchSeq: command.dispatchSeq, deadlineMono: this.monotonicNow() + command.remainingMs, write: hasSideEffects(command.operation), fingerprint, state: "accepted", lateResults: 0 };
     this.entries.set(entry.requestId, entry); if (command.remainingMs <= 250) { entry.state = "failed"; entry.error = "deadline_exceeded"; }
     return { entry, duplicate: false };
@@ -36,6 +36,7 @@ export class BrowserRelayLedger {
   expire(entry: RelayLedgerEntry): void { if (!terminalRelayState(entry.state) && this.remaining(entry) <= 0) this.interrupt(entry, "deadline_exceeded"); }
   interrupt(entry: RelayLedgerEntry, code: "cancelled" | "stale_connection" | "deadline_exceeded" | "lease_revoked"): void {
     if (terminalRelayState(entry.state)) return;
+    entry.abortCause = code;
     if (entry.state !== "accepted" && entry.write) { entry.state = "outcome_unknown"; entry.error = "outcome_unknown"; }
     else { entry.state = entry.state === "accepted" && code === "cancelled" ? "cancelled" : "failed"; entry.error = code; }
   }

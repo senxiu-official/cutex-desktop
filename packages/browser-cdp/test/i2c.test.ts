@@ -4,10 +4,23 @@ import { ProtocolError, MAX_SNAPSHOT_NODES } from '@cutex-desktop/browser-protoc
 import type { BrowserAction } from '@cutex-desktop/browser-protocol';
 import { BrowserCdpExecutor } from '../src/index.js';
 import type { CdpTransport, CdpEvent, ExecutorOptions } from '../src/index.js';
-import { SELECT_VALUE, SELECT_OPTIONS, ARM_MOTION } from '../src/page-functions.js';
+import { SELECT_VALUE, SELECT_OPTIONS, ARM_MOTION, INSPECT, ARM_RECEIPT } from '../src/page-functions.js';
 import { imageDimensions } from '../src/image.js';
 
 type Json = Record<string, any>;
+// INSPECT on a link inside a (closed) shadow root: the document's hit test answers with the
+// shadow host, the shadow root's own hit test with the link. Covered still means covered.
+function inspectInShadow(rootHit: 'self' | 'other') {
+  const host = { tagName: 'ORDER-ROW' };
+  const node: Json = { isConnected: true, nodeType: 1, tagName: 'A', matches: () => false, closest: () => null, getAttribute: () => null,
+    getClientRects: () => [1], getBoundingClientRect: () => ({ left: 10, top: 10, right: 90, bottom: 30, width: 80, height: 20 }),
+    contains: (other: unknown) => other === node };
+  const win: Json = { innerWidth: 1280, innerHeight: 720, getComputedStyle: () => ({ visibility: 'visible', display: 'inline', opacity: '1' }) };
+  node.ownerDocument = { defaultView: win, elementFromPoint: () => host };
+  node.getRootNode = () => ({ elementFromPoint: () => (rootHit === 'self' ? node : { tagName: 'DIV' }) });
+  win.window = win;
+  return runInNewContext(`(${INSPECT}).call(node, 'click')`, { node, ...win });
+}
 const png = (width = 800, height = 400) => {
   const bytes = Buffer.alloc(33); Buffer.from('89504e470d0a1a0a', 'hex').copy(bytes); bytes.writeUInt32BE(13, 8); bytes.write('IHDR', 12);
   bytes.writeUInt32BE(width, 16); bytes.writeUInt32BE(height, 20); return bytes.toString('base64');
@@ -217,8 +230,8 @@ describe('I2c Z1 actions and S2 email', () => {
     await executor.action({ kind: 'fill', ref: await getRef(executor), text: 'dummy@example.invalid' });
     expect(transport.input().map(call => call.params.type ?? call.method)).toEqual(['keyDown', 'keyUp', 'Input.insertText']);
     expect(transport.input()[0]?.params).toMatchObject({ modifiers: 2, code: 'KeyA' });
-    expect(runInNewContext(`(${SELECT_VALUE}).call(node)`, { node: { isConnected: true, tagName: 'INPUT', type: 'email', ownerDocument: { get activeElement() { return this.node; }, node: undefined } } })).toMatchObject({ error: 'not_actionable' });
-    const node: Json = { isConnected: true, tagName: 'INPUT', type: 'email', setSelectionRange() { throw Error('must not call'); } }; node.ownerDocument = { activeElement: node };
+    expect(runInNewContext(`(${SELECT_VALUE}).call(node)`, { node: { isConnected: true, tagName: 'INPUT', type: 'email', getRootNode() { return this.ownerDocument; }, ownerDocument: { get activeElement() { return this.node; }, node: undefined } } })).toMatchObject({ error: 'not_actionable' });
+    const node: Json = { isConnected: true, tagName: 'INPUT', type: 'email', setSelectionRange() { throw Error('must not call'); } }; node.ownerDocument = { activeElement: node }; node.getRootNode = () => node.ownerDocument;
     expect(runInNewContext(`(${SELECT_VALUE}).call(node)`, { node })).toMatchObject({ keyboardSelect: true });
   });
   it('a non-email selection API failure is unknown, not a keyboard retry', async () => {
@@ -312,5 +325,21 @@ describe('I2c one-shot dialog policy and screenshot metadata', () => {
     transport.handler = method => method === 'Page.captureScreenshot' ? { data: jpeg } : undefined;
     await expect(executor.screenshot({ format: 'jpeg', quality: 0 })).resolves.toMatchObject({ mimeType: 'image/jpeg', imageScale: { x: 0.05, y: 0.05 } });
     expect(transport.calls.filter(call => call.method === 'Page.captureScreenshot').map(call => call.params.quality)).toEqual([0]);
+  });
+});
+
+describe('INSPECT hit test', () => {
+  it('hit-tests in the element\'s own shadow root, and names why an element is refused', () => {
+    expect(inspectInShadow('self')).toMatchObject({ x: 50, y: 20 });
+    expect(inspectInShadow('other')).toEqual({ error: 'not_actionable', reason: 'covered' });
+  });
+  it("arms the click receipt in the element's own tree, where a shadow element is the event target", () => {
+    const listeners: Array<(e: unknown) => void> = [];
+    const shadow = { addEventListener: (_t: string, l: (e: unknown) => void) => listeners.push(l), removeEventListener: () => {} };
+    const node: Json = { isConnected: true, contains: (other: unknown) => other === node, getRootNode: () => shadow,
+      ownerDocument: { addEventListener() { throw Error('document listener sees the retargeted host'); } } };
+    const receipt = runInNewContext(`(${ARM_RECEIPT}).call(node, 'click', '')`, { node });
+    listeners.forEach(l => l({ isTrusted: true, target: node }));
+    expect(receipt.read()).toMatchObject({ seen: true });
   });
 });

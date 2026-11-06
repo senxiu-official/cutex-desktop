@@ -43,7 +43,7 @@ describe("motion tokens", () => {
   it("shell CSS has no ad-hoc transition / animation durations (loops, countdowns and signals excepted)", () => {
     // Loops and timed signals are not transitions between layouts: they keep their own timing.
     // fx-flash: the 文件 explorer's 在文件树中显示 signal (docs/design/019), like side-flash.
-    const allowed = [/text-shimmer/, /agent-ring-spin/, /agent-ring-tile-pulse/, /side-ping/, /side-flash/, /fx-flash/, /fullscreen-hint/, /armed-countdown/, /armed-seconds/, /tray-breathe/, /THUMB\./, /linear 0s/, /scroll-edge-fade/, /pending-status-in var\(--motion-short\) var\(--ease-standard\) 400ms/];
+    const allowed = [/text-shimmer/, /agent-ring-spin/, /agent-ring-tile-pulse/, /background-work-breathe/, /side-ping/, /side-flash/, /fx-flash/, /fullscreen-hint/, /armed-countdown/, /armed-seconds/, /tray-breathe/, /THUMB\./, /linear 0s/, /scroll-edge-fade/, /pending-status-in var\(--motion-short\) var\(--ease-standard\) 400ms/];
     const files = ["styles.css", "components/tray.css", "components/foretell.css", "components/strips.css", "components/side/shelfCard.css"];
     const bad: string[] = [];
     for (const f of files) {

@@ -6,6 +6,7 @@ import { isImeComposing } from "../lib/ime";
 import { useEffect, useRef, type ReactNode } from "react";
 import { ChevronRight, ChevronDown } from "lucide-react";
 import { useTrackOverlay } from "../lib/openOverlays";
+import { FloatMore, useRowsBelow } from "./FloatMore";
 import { useOwnerWindow } from "../lib/ownerContext";
 
 /** "+2" after a status line that stands for more than one item. */
@@ -50,6 +51,8 @@ export function StatusChip({
 }) {
   const win = useOwnerWindow();
   const root = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const below = useRowsBelow(list);
   const change = useRef(onOpenChange);
   change.current = onOpenChange;
   useTrackOverlay(open);
@@ -67,11 +70,11 @@ export function StatusChip({
   }, [open]);
   return (
     <div ref={root} className="shrink-0">
-      <button onClick={() => onOpenChange(!open)} title={title} aria-expanded={open} className={`flex items-center gap-1 py-1 text-xs tabular-nums hover:text-foreground ${className}`}>
+      <button onClick={() => onOpenChange(!open)} data-tip={title} aria-expanded={open} className={`flex items-center gap-1 py-1 text-xs tabular-nums hover:text-foreground ${className}`}>
         {label}
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
       </button>
-      {open && <div data-popover="" className={`absolute bottom-full z-50 max-h-80 max-w-[calc(100%-3rem)] overflow-y-auto rounded-xl border border-border bg-surface p-1.5 shadow-xl ${panelClassName}`}>{children}</div>}
+      {open && <div ref={list} data-popover="" className={`float float-scroll absolute bottom-full z-[160] max-h-80 max-w-[calc(100%-3rem)] overflow-y-auto p-1.5 ${panelClassName}`}>{children}<FloatMore n={below} list={list} /></div>}
     </div>
   );
 }

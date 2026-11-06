@@ -7,6 +7,8 @@ import type { AgentSignal } from "../../lib/agentAttention";
 import { delegationBucket, requesterName, requesterSession } from "../../lib/delegations";
 import { isStreamGroup, type StreamGroup } from "./stream";
 import { share } from "../../lib/structuralShare";
+import { placeRoster, rosterTier } from "../../lib/rosterTiers";
+import { compareRoster } from "../../lib/rosterOrder";
 
 // ── State ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -40,13 +42,16 @@ export interface ViewState {
   projectId: string | null;
   needsOnly: boolean;
   kinds: ActivityKind[];
+  /** 「在线空闲 +N」 expanded. */
   idleOpen: boolean;
+  /** 「离线 +N」 expanded. */
+  offlineOpen: boolean;
   evKinds: StreamGroup[];
   evAgent: string | null;
   runOpen: boolean | null;
 }
 
-export const emptyState = (): ViewState => ({ hostId: null, projectId: null, needsOnly: false, kinds: [], idleOpen: false, evKinds: [], evAgent: null, runOpen: null });
+export const emptyState = (): ViewState => ({ hostId: null, projectId: null, needsOnly: false, kinds: [], idleOpen: false, offlineOpen: false, evKinds: [], evAgent: null, runOpen: null });
 
 const isKind = (k: unknown): k is ActivityKind => typeof k === "string" && (ACTIVITY_KINDS as readonly string[]).includes(k);
 
@@ -80,6 +85,7 @@ export function restoreState(raw: unknown): ViewState | null {
     needsOnly: r.needsOnly === true,
     kinds: Array.isArray(r.kinds) ? [...new Set(r.kinds.filter(isKind))] : [],
     idleOpen: r.idleOpen === true,
+    offlineOpen: r.offlineOpen === true,
     evKinds: Array.isArray(r.evKinds) ? [...new Set(r.evKinds.filter(isStreamGroup))] : [],
     evAgent: typeof r.evAgent === "string" && r.evAgent.length <= 200 ? r.evAgent : null,
     runOpen: typeof r.runOpen === "boolean" ? r.runOpen : null,
@@ -87,9 +93,6 @@ export function restoreState(raw: unknown): ViewState | null {
 }
 
 // ── Agents: grouping and folding ──────────────────────────────────────────────────────────────────
-
-/** Agents idle longer than this (and with nothing open) fold into 「空闲 N 个」. */
-export const IDLE_FOLD_MS = 30 * 60_000;
 
 export interface MemberInput {
   /** Session id. */
@@ -117,46 +120,44 @@ const loadTotal = (l: MemberLoad) => l.delegationsIn + l.delegationsOut + l.jobs
 export type Tier = "needsYou" | "running" | "recent" | "idle";
 
 /**
- * needsYou: waits for the owner, or its last turn failed (errors count as needs-you). running: a turn
- * runs. recent: online or offline but active within IDLE_FOLD_MS, a turn just finished, or something
- * open (delegations, jobs, terminals, sub-agents). idle: the rest — folded.
+ * The sidebar's tier (lib/rosterTiers rosterTier, the same 7-day window): its first tier splits into needsYou
+ * (waits for the owner, or failed) and running; recent = worked lately; idle = not listed. Online or offline
+ * does not matter here (placeRoster folds by it). The Director has its own card (groupMembers), not a tier.
  */
 export function tierOf(m: MemberInput, load: MemberLoad, now: number): Tier {
-  if (m.signal === "needsYou" || m.signal === "error") return "needsYou";
-  if (m.signal === "running") return "running";
-  if (m.signal === "done" || loadTotal(load) > 0) return "recent";
-  return now - m.lastActivity < IDLE_FOLD_MS ? "recent" : "idle";
+  const tier = rosterTier({ signal: m.signal, busy: loadTotal(load) > 0, lastActivity: m.lastActivity }, now);
+  if (tier === "now") return m.signal === "needsYou" || m.signal === "error" ? "needsYou" : "running";
+  return tier === "recent" ? "recent" : "idle";
 }
 
 export interface Grouped<M extends MemberInput> {
   director: M | null;
   needsYou: M[];
   running: M[];
+  /** Recently worked: at most RECENT_CAP, the newest (lib/rosterTiers placeRoster). */
   recent: M[];
-  /** Folded into 「空闲 N 个」 (always listed; the view decides whether to show them). */
+  /** 「在线空闲 +N」: online members not listed (past the cap too). */
   idle: M[];
+  /** 「离线 +N」: offline members not listed. */
+  offline: M[];
 }
 
-const byActivity = <M extends MemberInput>(a: M, b: M) => b.lastActivity - a.lastActivity || a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+/** The sidebar's order (lib/rosterOrder): online before offline, then name (the name order setting), then id. */
+const byRoster = compareRoster<MemberInput>((m) => m.online);
 
 /**
- * The Director goes to its own card (first director row; `directorId` from the project summary wins);
- * the others by tier, newest activity first. `needsOnly` keeps only the needs-you group.
+ * The sidebar's rule (lib/rosterTiers placeRoster, design 060 §5): the Director goes to its own card (first
+ * director row; `directorId` from the project summary wins); listed without labels: needs-you / error,
+ * running, then at most RECENT_CAP recently worked; everyone else folds into idle (online) or offline. Each
+ * list in the sidebar's order (online first, then name). `needsOnly` keeps only the needs-you group.
  */
 export function groupMembers<M extends MemberInput>(members: readonly M[], loadOf: (id: string) => MemberLoad, now: number, opts: { directorId?: string | null; needsOnly?: boolean } = {}): Grouped<M> {
   const director = (opts.directorId ? members.find((m) => m.id === opts.directorId) : undefined) ?? members.find((m) => m.isDirector) ?? null;
-  const out: Grouped<M> = { director, needsYou: [], running: [], recent: [], idle: [] };
-  for (const m of members) {
-    if (m === director) continue;
-    const tier = tierOf(m, loadOf(m.id), now);
-    if (opts.needsOnly && tier !== "needsYou") continue;
-    out[tier].push(m);
-  }
-  out.needsYou.sort(byActivity);
-  out.running.sort(byActivity);
-  out.recent.sort(byActivity);
-  out.idle.sort(byActivity);
-  return out;
+  const tiers = new Map<M, Tier>();
+  for (const m of members) if (m !== director) tiers.set(m, tierOf(m, loadOf(m.id), now));
+  const others = [...tiers.keys()].filter((m) => !opts.needsOnly || tiers.get(m) === "needsYou");
+  const placed = placeRoster<M>(others, (m) => { const tier = tiers.get(m)!; return tier === "needsYou" || tier === "running" ? "now" : tier === "recent" ? "recent" : "rest"; }, { online: (m) => m.online, lastOf: (m) => m.lastActivity, order: byRoster as (a: M, b: M) => number });
+  return { director, needsYou: placed.now.filter((m) => tiers.get(m) === "needsYou"), running: placed.now.filter((m) => tiers.get(m) === "running"), recent: placed.recent, idle: placed.idle, offline: placed.offline };
 }
 
 export interface Counts {

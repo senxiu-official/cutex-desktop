@@ -1,3 +1,4 @@
+import { BackgroundOperations } from "../../components/BackgroundOperations";
 import { AgentBadgeEditor } from "../../components/AgentBadgeEditor";
 import { featuresOf as hostFeatures } from "../../store";
 import { isOwnerFeatures } from "../../../../shared/users";
@@ -20,8 +21,8 @@ import { isOwnerFeatures } from "../../../../shared/users";
 import { useShelfOnlyPanes } from "../../lib/shelfOnly";
 import { trayLeaveForetell } from "../../lib/menuForetells";
 import { useEffect, useMemo, type ReactNode } from "react";
-import { ArrowLeft, Bell, Check, FileBox, Server, LayoutDashboard, Link2, X } from "lucide-react";
-import { CountBadge } from "../../components/Tag";
+import { ArrowLeft, Check, FileBox, Server, LayoutDashboard, Link2, X } from "lucide-react";
+import { TrayNeedsYou } from "../../components/NeedsYou";
 import { parsePagePinKey, type HomeDoc, type HomePin } from "../../../../shared/home";
 import { usePagePinKind, type PagePinKind } from "../../lib/pagePins";
 import { translate, useI18n, type MessageKey } from "../../i18n";
@@ -53,7 +54,7 @@ import { useHomeSource, useServiceView } from "./hooks";
 import { isOnDesk, pinId, pinsOf, withPin, withPinAt, withPinBefore, withPinMoved, withoutDeskIcon, withoutPin } from "./model";
 import { withIconOnDesk } from "./deskDrop";
 import { openFailedText, openPinAs, serviceOutOfView, showOpenFailed } from "./open";
-import { agentEntryId, trayNeeds, type TrayMark } from "./trayOrder";
+import { agentEntryId, type TrayMark } from "./trayOrder";
 import { allEntries, groupPin, trayEntries, withGroupPin, type TrayEntry } from "./trayEntries";
 import { nextAfterClose } from "./trayNext";
 import { AGENT_NOTE_MAX, APP_NOTE_MAX, noteLine, noteText, openNoteEdit, pinNote, withPinNote } from "./trayNotes";
@@ -62,7 +63,6 @@ import { setAgentNote } from "../../lib/menus";
 
 const ICON = 32;
 
-const besideKey = (): string => (typeof navigator !== "undefined" && navigator.platform?.startsWith("Mac") ? "⌘" : "Ctrl");
 
 /** Web / service / artifact / page icons sit on one neutral square (design 040 §2): the colour is the avatars'. */
 function Glyph({ children }: { children: ReactNode }) {
@@ -144,7 +144,7 @@ function Pushpin() {
 function DividerPin() {
   const { t } = useI18n();
   return (
-    <span className="tray-divpin" data-tray-pin-edge="" title={t("tray.pin.tip")}>
+    <span className="tray-divpin" tabIndex={0} data-tray-pin-edge="" data-tip={t("tray.pin.tip")} aria-label={t("tray.pin.tip")} role="img">
       <Pushpin />
     </span>
   );
@@ -169,7 +169,6 @@ ${full}` : label;
     if (f) {
       if (round && f.tone === "replace") lines.push(t("tray.switchTo", { name }));
       lines.push(f.text);
-      if (round && f.tone !== "replace" && f.tone !== "beside") lines.push(t("tray.besideTip", { key: besideKey() }));
     }
     return lines.join("\n");
   };
@@ -198,7 +197,7 @@ ${full}` : label;
         data-capsule={capsule ? "" : undefined}
         data-on-screen={mark === "on" || mark === "strip" ? "" : undefined}
         data-has-note={line ? "" : undefined}
-        title={title}
+        data-tip={title}
         aria-label={label}
         {...handlers}
         onClick={(e) => open(e.ctrlKey || e.metaKey, memberOf(e.target))}
@@ -663,34 +662,8 @@ function BackButton() {
   const back = useTrayOpen((s) => s.back.length > 0);
   if (!back) return null;
   return (
-    <button type="button" data-tray-item="" data-tray-back="" className="tray-item tray-back" title={t("tray.backTitle")} aria-label={t("tray.backTitle")} onClick={() => void goBackOne()}>
+    <button type="button" data-tray-item="" data-tray-back="" className="tray-item tray-back" data-tip={t("tray.backTitle")} aria-label={t("tray.backTitle")} onClick={() => void goBackOne()}>
       <ArrowLeft size={16} aria-hidden />
-    </button>
-  );
-}
-
-function NeedsButton({ total, first, onUsed }: { total: number; first: MemberView | null; onUsed(): void }) {
-  const { t } = useI18n();
-  const eff = (beside: boolean) => (first ? agentEffect({ hostId: first.agent.hostId, key: first.agent.sessionId, title: first.name }, beside ? "beside" : "replace") : null);
-  const fh = useForetell((m) => eff(m.beside)?.foretell ?? null, { disabled: !first });
-  if (!first || total <= 0) return null;
-  const title = t("tray.needsYouTitle", { name: first.name });
-  return (
-    <button
-      type="button"
-      data-tray-item=""
-      data-tray-needs=""
-      className="tray-needs"
-      title={title}
-      aria-label={`${t("tray.needsYou", { n: total })} · ${title}`}
-      {...fh}
-      onClick={(e) => {
-        eff(e.ctrlKey || e.metaKey)?.run();
-        onUsed();
-      }}
-    >
-      <Bell size={16} strokeWidth={1.75} aria-hidden />
-      <CountBadge count={total} className="absolute -top-1 -right-1" />
     </button>
   );
 }
@@ -745,8 +718,6 @@ export function HomeDock({ onUsed }: PaneDockProps) {
   const pinnedViews = entries.pinned.map(viewOf);
   const pinnedOrder = pinnedViews.map((v) => v.entry.id);
   const recentViews = entries.recent.map(viewOf);
-  const memberViews = [...pinnedViews, ...recentViews].flatMap((v) => v.members);
-  const needs = trayNeeds(memberViews, (m) => (m.signal === "needsYou" ? Math.max(1, m.needs) : m.needs));
   void allEntries;
 
   const apps = pins.filter((p) => p.kind !== "agent").map((pin) => <AppOf key={pinId(pin)} pin={pin} onUsed={onUsed} />);
@@ -776,7 +747,8 @@ export function HomeDock({ onUsed }: PaneDockProps) {
       <TrayDropMarks />
       <TrayNoteEditor />
       <BackButton />
-      <NeedsButton total={needs.total} first={needs.first} onUsed={onUsed} />
+      <BackgroundOperations />
+      <TrayNeedsYou onUsed={onUsed} />
     </>
   );
 }

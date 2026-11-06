@@ -11,6 +11,12 @@ function fixture() {
 }
 afterEach(() => vi.useRealTimers());
 describe("browser v1.10 background opens", () => {
+  it("puts an agent's service URL in the service kind with its original hold provenance", () => {
+    const f = fixture();
+    f.opens.open(intent({ url: "cutex:service/report/" }));
+    expect(f.side.openHeld).toHaveBeenCalledWith("browser.service", expect.objectContaining({ url: "cutex:service/report/", pendingOpen: "call-1" }), expect.objectContaining({ hostEpoch: "epoch-a" }));
+    f.opens.dispose();
+  });
   it("same-pool owner popup state preserves only main-correlated provenance, with no lease or pending open", () => {
     const params = parseBrowserParams({ url: "http://localhost/?token=secret", tabKey: intent().tabKey, agentOpened: true });
     expect(params).toEqual({ url: "http://localhost/", tabKey: intent().tabKey, agentOpened: true });

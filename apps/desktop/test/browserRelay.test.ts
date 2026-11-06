@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CutexClient } from "@cutex-desktop/cutex-client";
 import { BrowserRelay, type RelayExecutionContext } from "../src/main/browser/relay";
-import { parseRelayMessage, parseRelayRegistration, relayError, RELAY_MAX_BYTES, type RelayCommand, type RelayLease } from "../src/main/browser/relayTypes";
+import { BrowserRelayError, parseRelayMessage, parseRelayRegistration, relayError, RELAY_MAX_BYTES, type RelayCommand, type RelayLease } from "../src/main/browser/relayTypes";
 const key = "a".repeat(64), generation = "00000000-0000-4000-8000-000000000001";
 const binding = { hostId: "host", deviceId: "device", providerId: "browser" as const, executor: "inApp" as const, connectionGeneration: generation };
 const lease = (): RelayLease => ({ leaseId: "lease", cutexSessionId: "session", target: { hostId: "host", deviceId: "device", guestId: "guest" }, state: "active", title: "Dummy", url: "http://localhost/", origin: "owner", agentName: "Fixture" });
@@ -14,7 +14,7 @@ const grant = () => ({ deviceId: "device", guestId: "guest", cutexSessionId: "se
 const activePending = (): RelayLease => ({ ...lease(), leaseId: "pending" });
 const instances: BrowserRelay[] = [];
 afterEach(() => { for (const instance of instances.splice(0)) instance.stop(); vi.useRealTimers(); });
-function fixture(options: { execute?: (command: RelayCommand, context: RelayExecutionContext) => Promise<any>; inventory?: RelayLease[]; first?: unknown; streamType?: string; response?: (route: string, body: any, count: number) => Response | Promise<Response> | undefined; requestTimeoutMs?: number } = {}) {
+function fixture(options: { execute?: (command: RelayCommand, context: RelayExecutionContext) => Promise<any>; inventory?: RelayLease[]; first?: unknown; streamType?: string; response?: (route: string, body: any, count: number) => Response | Promise<Response> | undefined; requestTimeoutMs?: number; errorDetail?: boolean } = {}) {
   let controller: ReadableStreamDefaultController<Uint8Array>, regCount = 0, mono = 0, wall = 100_000;
   let leases = [lease()]; const requests: { route: string; headers: Headers; body: any }[] = [], states: unknown[] = [], audits: unknown[] = [];
   const execute = vi.fn(options.execute ?? (async () => ({ kind: "tab.act", pageGeneration: 1 })));
@@ -35,10 +35,40 @@ function fixture(options: { execute?: (command: RelayCommand, context: RelayExec
   });
   const client = new CutexClient({ baseUrl: "http://relay-fixture.test", token: "PRIVATE_CREDENTIAL" }, { fetch });
   const revokeLocal = vi.fn((id: string) => { leases = leases.filter(value => value.leaseId !== id); });
-  const relay = new BrowserRelay({ hostId: "host", deviceId: "device", client, execute, localLeases: () => leases, revokeLocal, onState: value => states.push(value), onAudit: value => audits.push(value), monotonicNow: () => mono, wallNow: () => wall, reconnectDelayMs: 10, requestTimeoutMs: options.requestTimeoutMs }); instances.push(relay);
+  const relay = new BrowserRelay({ hostId: "host", deviceId: "device", client, execute, localLeases: () => leases, revokeLocal, onState: value => states.push(value), onAudit: value => audits.push(value), monotonicNow: () => mono, wallNow: () => wall, reconnectDelayMs: 10, requestTimeoutMs: options.requestTimeoutMs, errorDetail: () => options.errorDetail === true }); instances.push(relay);
   return { relay, execute, requests, states, audits, revokeLocal, client, setMono: (v: number) => { mono = v; }, setWall: (v: number) => { wall = v; }, setLeases: (v: RelayLease[]) => { leases = v; }, send: (value: unknown) => controller.enqueue(new TextEncoder().encode(envelope(value))), raw: (value: string) => controller.enqueue(new TextEncoder().encode(value)), disconnect: () => controller.close(), results: () => requests.filter(r => r.route.endsWith("/result")).map(r => r.body) };
 }
 describe("strict relay wire", () => {
+  it("audits the execution stage and original deadline without adding wire fields", async () => {
+    const f = fixture({ execute: async (_c, ctx) => { f.setMono(25); ctx.stage?.("grant_http"); throw new BrowserRelayError("deadline_exceeded"); } });
+    await f.relay.start(); f.send(command()); await flush();
+    expect(f.audits).toContainEqual(expect.objectContaining({ event: "stage", stage: "grant_http", elapsedMs: 25 }));
+    expect(f.audits).toContainEqual(expect.objectContaining({ state: "outcome_unknown", abortCause: "deadline_exceeded" }));
+    expect(f.results().at(-1)).toEqual({ dispatchSeq: 1, target: command().target, operationKind: "tab.act", status: "outcome_unknown", error: { code: "outcome_unknown" } });
+  });
+  it("names the inflight busy branch with counts", async () => {
+    const f = fixture({ execute: async () => new Promise(() => {}) }); await f.relay.start();
+    for (let i = 1; i <= 17; i++) { f.send(command({ requestId: `r${i}`, dispatchSeq: i })); await flush(); }
+    expect(f.audits).toContainEqual(expect.objectContaining({ requestId: "r17", code: "busy", cause: "relay_inflight_limit", inflight: 16 }));
+    expect(f.execute).toHaveBeenCalledTimes(16);
+  });
+  it("sends a failure's detail (stage, page, net error, busy reason) only to a host that reads it", async () => {
+    for (const errorDetail of [true, false]) {
+      const detail = { url: "http://127.0.0.1:9/trade/detail?id=5", netError: { code: -102, name: "ERR_CONNECTION_REFUSED" } };
+      const f = fixture({ errorDetail, execute: async (_command, context) => { context.stage?.("navigation"); throw new BrowserRelayError("navigation_failed", undefined, undefined, detail); } });
+      await f.relay.start(); f.send(command({ operation: { kind: "tab.navigate", url: "http://127.0.0.1:9/trade/detail?id=5" } })); await flush();
+      expect(f.results().at(-1).error).toEqual(errorDetail ? { code: "navigation_failed", detail: { ...detail, stage: "navigation" } } : { code: "navigation_failed" });
+      const busy = fixture({ errorDetail, execute: async () => { throw new BrowserRelayError("busy", undefined, "ledger_capacity"); } });
+      await busy.relay.start(); busy.send(command()); await flush();
+      expect(busy.results().at(-1).error).toEqual(errorDetail ? { code: "busy", detail: { reason: "ledger_capacity" } } : { code: "busy" });
+    }
+  });
+  it.each(["ledger_capacity", "guest_already_mounted"] as const)("preserves exact busy cause %s without changing the wire code", async cause => {
+    const f = fixture({ execute: async () => { throw new BrowserRelayError("busy", undefined, cause); } });
+    await f.relay.start(); f.send(command()); await flush();
+    expect(f.audits).toContainEqual(expect.objectContaining({ code: "busy", cause }));
+    expect(f.results().at(-1)).toMatchObject({ status: "failed", error: { code: "busy" } });
+  });
   it("accepts only the strict wait URL shape for cutex:service and retains its original encoding", () => {
     const input=command({operation:{kind:"tab.act",action:{kind:"wait",condition:{kind:"url",url:"cutex:service/docs/a%252Fb%3Fq%3Da%2526b"}}}});
     expect(parseRelayMessage(input,binding)).toEqual(input);
@@ -93,6 +123,18 @@ describe("injected per-host relay", () => {
   it("old generation, extra key field and event cursor never execute", async () => { for (const raw of [`event: browser_relay\ndata: ${JSON.stringify({ ...command(), connectionGeneration: "old" })}\n\n`, `event: browser_relay\ndata: ${JSON.stringify({ ...command(), connectionKey: key })}\n\n`, `id: old-cursor\nevent: browser_relay\ndata: ${JSON.stringify(command())}\n\n`]) { const f = fixture(); await f.relay.start(); f.raw(raw); await flush(); expect(f.execute).not.toHaveBeenCalled(); expect(f.relay.online).toBe(false); f.relay.stop(); } });
   it("session/lease target mismatch is rejected before provider", async () => { const f = fixture(); await f.relay.start(); f.send(command({ cutexSessionId: "other" })); await flush(); expect(f.execute).not.toHaveBeenCalled(); expect(f.results().at(-1)).toMatchObject({ status: "failed", error: { code: "lease_revoked" } }); });
   it("result kind mismatch after write is unknown and raw exception never escapes", async () => { const f = fixture({ execute: async () => ({ kind: "tab.release" }) }); await f.relay.start(); f.send(command()); await flush(); expect(f.results().at(-1)).toMatchObject({ status: "outcome_unknown", error: { code: "outcome_unknown" } }); expect(JSON.stringify(f.audits)).not.toContain("PRIVATE_TITLE"); });
+  it("a popup grant carries its opener lease's origin: an agent-opened tab's popup is agent-origin", async () => {
+    const origins: Record<string, string> = { opener: "agent", popup: "agent", ownerPopup: "owner" };
+    let next = "opener";
+    const f = fixture({ response: route => route.endsWith("/grant") ? json({ ...lease(), target: { ...lease().target, guestId: next === "opener" ? "list" : "detail" }, state: "pending", leaseId: next, origin: origins[next] }) : undefined });
+    await f.relay.start();
+    await f.relay.grantLease({ ...grant(), guestId: "list", source: { kind: "agent-open", requestId: "open" } });
+    next = "popup";
+    await expect(f.relay.grantLease({ ...grant(), guestId: "detail", source: { kind: "popup", openerLeaseId: "opener" } })).resolves.toMatchObject({ leaseId: "popup", origin: "agent" });
+    next = "ownerPopup";
+    await expect(f.relay.grantLease({ ...grant(), guestId: "detail", source: { kind: "popup", openerLeaseId: "opener" } })).rejects.toMatchObject({ code: "stale_connection" });
+    await expect(f.relay.grantLease({ ...grant(), guestId: "detail", source: { kind: "popup", openerLeaseId: "unknown" } })).rejects.toMatchObject({ code: "stale_connection" });
+  });
   it("grant and activation return exact pending/active lease; revoke closes locally first", async () => { const f = fixture(); await f.relay.start(); expect(await f.relay.grantLease({ deviceId: "device", guestId: "guest", cutexSessionId: "session", title: "Dummy", url: "http://localhost/", source: { kind: "owner" } })).toMatchObject({ leaseId: "pending", state: "pending" }); expect(await f.relay.activateLease("pending")).toMatchObject({ state: "active" }); await f.relay.revokeLease("lease"); expect(f.revokeLocal).toHaveBeenCalledWith("lease", "lease_revoked"); for (const request of f.requests.filter(x => x.route.includes("/leases/"))) expect(request.headers.get("X-Cutex-Browser-Key")).toBe(key); });
   it("pending lease refuses commands until activate is in flight, then accepts a command preceding its HTTP reply", async () => {
     const ack = deferred<Response>(), f = fixture({ response: route => route.endsWith("/activate") ? ack.promise : undefined }); await f.relay.start(); await f.relay.grantLease(grant()); f.setLeases([lease(), activePending()]);

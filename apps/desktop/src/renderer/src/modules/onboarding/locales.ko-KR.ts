@@ -220,7 +220,7 @@ export const koKR: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.minorAgent.title": "첫 글자가 있는 작은 타일",
   "onboarding.guide.minorAgent.text": "자기 아바타가 없고 고정하지 않은 {{agents}}은(는) 목록에 첫 글자가 있는 작은 타일로 표시돼요.\n「설정 → 왼쪽 사이드바 → {{agent}} 행 → 기본 {{agent}} 아바타」에서 「중요한 {{agents}}만」을 고르면 이렇게 보여요.\n아바타를 주려면 행을 마우스 오른쪽 버튼으로 클릭하고 「아바타 표시」를 고르세요.",
   "onboarding.guide.project.title": "프로젝트와 {{director}}",
-  "onboarding.guide.project.text": "프로젝트마다 {{director}} 하나가 작업을 나누고 {{agents}}을(를) 만들며 결과를 모아요.\n프로젝트 보드와 활동을 보려면 프로젝트 제목 위에 마우스를 올린 뒤 오른쪽의 「프로젝트 보기」를 누르세요.",
+  "onboarding.guide.project.text": "프로젝트마다 {{director}} 하나가 작업을 나누고 {{agents}}을(를) 만들며 결과를 모아요.\n프로젝트 보기와 활동을 보려면 프로젝트 제목 위에 마우스를 올린 뒤 오른쪽의 「프로젝트 보기」를 누르세요.",
   "onboarding.guide.needsYou.title": "주의 필요",
   "onboarding.guide.needsYou.text": "「주의 필요」는 {{agent}}이(가) 질문, 승인, 결정을 기다린다는 뜻이에요.\n답하기 전까지 계속 멈춰 있을 수 있어요.\n입력 영역 위, 사이드바 각 행의 끝, 트레이에 모이며 한 번 누르면 해당 위치로 이동해요.",
   "onboarding.guide.delegation.title": "위임",

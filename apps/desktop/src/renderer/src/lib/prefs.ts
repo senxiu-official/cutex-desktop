@@ -1,11 +1,14 @@
 // Desktop-local UI preferences (localStorage), shared between components via useSyncExternalStore.
+import { layoutStore } from "./userLayout";
+import type { SidebarLocal } from "./userLayoutModel";
 import { migrateNavPins } from "./navPins";
 import { DEFAULT_PORTRAIT_THEMES, isPortraitThemeKey, migratePortraitThemes } from "../../../shared/portraitDefaults";
 import { useSyncExternalStore } from "react";
 import type { SendKeyPreset } from "./sendKeys";
 import type { CreateHostDefault } from "./hostPick";
 import { DEFAULT_CAPSULE_CORNER, DEFAULT_CAPSULE_EDGE, migrateCapsuleAnchor, type CapsuleCorner, type CapsuleEdge } from "./capsuleLayout";
-import { DEFAULT_OFFLINE_LIMIT, migrateOfflineLimit, type OfflineLimit } from "./offlineAgents";
+import { DEFAULT_OLDER_PROJECTS_AFTER, migrateOlderProjectsAfter, type OlderProjectsAfter } from "./rosterTiers";
+import { NAME_GROUPINGS, NAME_READINGS, type NameGrouping, type NameReading } from "@cutex-desktop/cutex-client/nameOrder";
 import { DEFAULT_FOLD_LINES, migrateFoldLines, type FoldLines } from "./messageFold";
 import { DEFAULT_REASONING_VIEW, migrateReasoningView, REASONING_VIEW_REV, type ReasoningView } from "./reasoningView";
 import type { TurnSummaryMode } from "./turnSummary";
@@ -14,7 +17,6 @@ import { migrateSections, type SectionCollapsedShows, type SidebarSection } from
 import { migrateRemarks, withRemark } from "./projectRemarks";
 import { migrateIcons, withIcon, type ProjectIconChoice } from "./projectIcons";
 import { clampDockPref, DOCK_WIDTH_DEFAULT } from "./gutterDock";
-import { DEFAULT_FLYOUT_DELAY, migrateFlyoutDelay, type FlyoutDelay } from "./projectFlyout";
 import { DEFAULT_PROJECT_SEPARATION, migrateProjectSeparation, PROJECT_SEPARATION_REV, type ProjectSeparation } from "./projectSeparation";
 import { DEFAULT_STATUS_CHIPS, migrateStatusChips, type StatusChips } from "./statusChips";
 import { claimList, dropLegacy, hostKey, keyFocus, onKeyFocus, parseHostKey, projectList, registerHostKeyed, writeList } from "./hostKeys";
@@ -31,6 +33,8 @@ import { migrateImageHistoryHintDone } from "./imageHistoryHint";
 import { migrateMultiWindow, takeLegacyDesksFlag } from "./multiWindowPref";
 
 export type ProjectIconStyle = "tint" | "line";
+/** 系统行样式: a grey dashed line or a grey band (UiPrefs.systemRows). */
+export type SystemRowStyle = "line" | "band";
 export type { AgentAvatarDefault };
 
 /** 头像底色 (UiPrefs.avatarTint). */
@@ -108,11 +112,18 @@ export interface UiPrefs {
   /** Profile order set on Settings → Profiles (lib/profileOrder; profile ids, per host); empty = cutex's
    *  order. Listed profiles come first everywhere profiles are picked, the rest keep cutex's order. */
   profileOrder: string[];
-  /** Offline agents listed under a sidebar group (most recent first); the rest via 全部 agent. */
-  offlineAgents: OfflineLimit;
-  /** Sidebar groups (project id / "__independent__") whose offline list is expanded; the others
-   *  show only the 离线 N header (plus the open agent). Collapsed by default. */
-  offlineOpen: string[];
+  /** Sidebar groups (project id / "__independent__") whose 「在线空闲 +N」 fold is expanded (design 060 §5;
+   *  was 「其余 N 个」, before that the old 离线 / 在线空闲 folds), and 「更早的项目」 folders that are open.
+   *  Collapsed by default. */
+  restOpen: string[];
+  /** Sidebar groups whose 「离线 +N」 fold is expanded. Collapsed by default. */
+  offlineFoldOpen: string[];
+  /** Projects quiet for this many days fold into 「更早的项目」 at the bottom (lib/rosterTiers; "off" = never). */
+  olderProjectsAfter: OlderProjectsAfter;
+  /** How names are listed (design 060 §5.1, lib/rosterOrder): by first letter or by script; null = the UI language's default. */
+  nameGrouping: NameGrouping | null;
+  /** How Han names are read when sorting: Chinese, Korean or Japanese; null = the UI language's default. */
+  nameReading: NameReading | null;
   /** Conversation header 启动 / 停止运行时 button: every conversation, independent agents only, or none. */
   runtimeButton: "all" | "independent" | "off";
   /** Long-message folding (lib/messageFold): the user's own messages taller than `foldLines`
@@ -124,21 +135,12 @@ export interface UiPrefs {
   /** Sidebar v2 (lib/sidebarLayout): 全部分组 (projects without online agents fold to one row) or
    *  星标展开 (starred projects in full, every other one row under 其他项目). */
   projectGrouping: ProjectGrouping;
-  /** 全部分组: projects with no online agent fold to one row with a hover flyout, or stay expanded. */
+  /** 全部分组: projects with no online agent fold to one row (a click expands it), or stay expanded. */
   noOnlineProjects: NoOnlineProjects;
   /** Running agents that need nothing: compact rows (★), full rows, or one 运行中 row of avatars (lib/runningAgentsPref). */
   runningAgents: RunningAgents;
   /** Which `runningAgents` default was saved under (lib/runningAgentsPref migration). */
   runningAgentsRev: number;
-  /** Online idle agents fold into 「N 个空闲」. */
-  foldIdleAgents: boolean;
-  /** Sidebar groups whose 在线空闲 fold is expanded. */
-  idleOpen: string[];
-  /** Sidebar groups whose 「最近活跃 +N」 fold (compact recent rows past the cap) is expanded. */
-  recentOpen: string[];
-  /** Projects (sidebar group ids) set to 「在线空闲不收起」: their idle agents are listed one by one
-   *  even with `foldIdleAgents` on (project right-click menu). */
-  idleUnfolded: string[];
   /** Sidebar groups the owner folded by their header (project ids, "__independent__", "__other__", "__chats__"). */
   foldedProjects: string[];
   /** Starred projects (sidebar group ids, incl. "__independent__"): on top, never collapsed. */
@@ -158,17 +160,18 @@ export interface UiPrefs {
   projectIcons: Record<string, ProjectIconChoice>;
   /** A folded section lists nothing but its header summary, or still the projects that need you. */
   sectionCollapsedShows: SectionCollapsedShows;
-  /** Hovering any collapsed project row (folded by the user or auto-collapsed) previews its agents in
-   *  a flyout (lib/projectFlyout); off: an auto-collapsed row opens it on click only. */
-  projectHoverPreview: boolean;
-  /** Pointer rest time before that preview opens (ms). */
-  projectHoverDelay: FlyoutDelay;
   /** 项目颜色: where a project's colour shows besides its icon (lib/projectSeparation). */
   projectSeparation: ProjectSeparation;
   /** Migration marker for the projectSeparation default change (lib/projectSeparation PROJECT_SEPARATION_REV). */
   projectSeparationRev: number;
   /** 项目图标样式 (Settings → 左侧栏): a soft tint tile, or the glyph / letters alone in the same box (components/ProjectBadge). */
   projectIconStyle: ProjectIconStyle;
+  /**
+   * 系统行样式 (Settings → 左侧栏, owner 2026-11-06): how the sidebar's automatic rows — 独立智能体, 快速会话 and
+   * the top-level 「更早的项目」 — set themselves apart from the owner's folders: a grey dashed line (line) or a
+   * grey band (band). Folders and 「更早的项目」 inside a folder are not affected.
+   */
+  systemRows: SystemRowStyle;
   /** 状态标签: agent rows' status chips as text, icon only, or automatic by row width (lib/statusChips). */
   statusChips: StatusChips;
   /** 「需要你」 chips above the composer (done / needs-you / error agents of every project). */
@@ -275,14 +278,14 @@ export type { RunningAgents };
 
 const KEY = "cutex-desktop.ui";
 const ROW_PREVIEW_REV = 1;
-const BASE_DEFAULTS: Omit<UiPrefs, "imageHistoryHintDone"> = { deskPerformanceHintDone: false, viewerAutoRefresh: true, quotaGauges: {}, quotaResetDefault: true, quotaMerge: true, composerProfileAvatar: true, quotaView: DEFAULT_QUOTA_VIEW, sidebarOpen: true, sidebarRail: false, agentMessages: "compact", foldedGroups: [], modelPins: {}, lastAgentCwd: "", remoteAgentCwd: {}, sendKeys: "queueFirst", delegationSteerKeys: false, capsuleCorner: DEFAULT_CAPSULE_CORNER, capsuleEdge: DEFAULT_CAPSULE_EDGE, reasoningView: DEFAULT_REASONING_VIEW, reasoningViewRev: REASONING_VIEW_REV, capsuleOpen: false, capsuleFoldedItems: [], timelineTurns: 30, timelineInteractions: true, timelineIntro: true, capsuleAlways: false, projectOrder: [], profileOrder: [], offlineAgents: DEFAULT_OFFLINE_LIMIT, offlineOpen: [],runtimeButton: "all", foldLong: true, foldLines: DEFAULT_FOLD_LINES, foldOlderReplies: false, projectGrouping: "all", noOnlineProjects: "collapse", runningAgents: DEFAULT_RUNNING_AGENTS, runningAgentsRev: RUNNING_AGENTS_REV, foldIdleAgents: true, idleOpen: [], recentOpen: [], idleUnfolded: [], foldedProjects: [], starredProjects: [], sidebarSections: [], projectRemarks: {}, projectDirectors: {}, projectIcons: {}, sectionCollapsedShows: "summary", projectHoverPreview: true, projectHoverDelay: DEFAULT_FLYOUT_DELAY, projectSeparation: DEFAULT_PROJECT_SEPARATION, projectSeparationRev: PROJECT_SEPARATION_REV, projectIconStyle: "tint", statusChips: DEFAULT_STATUS_CHIPS, needsYouStrip: true, titleTwoLines: true, rowPreview: "all", rowPreviewRev: ROW_PREVIEW_REV, agentAvatarDefault: "important", agentAvatarDefaultRev: AGENT_AVATAR_DEFAULT_REV, avatarTint: "none", directorHeadwear: DEFAULT_DIRECTOR_HEADWEAR, operatorHeadwear: true, seasonalHeadwear: true, portraitPacks: [...DEFAULT_PORTRAIT_THEMES], avatarThemes: {}, messageImages: "thumbnail", turnSummary: "collapsed", sideMode: "push", sideNarrow: "overlay", sidePreview: DEFAULT_SIDE_PREVIEW, sidePreviewRev: SIDE_PREVIEW_REV, sideRestore: true, sideKeepHidden: 4, sideKeepMounted: 4, sideLauncherPins: {}, sidebarLayout: "roster", sidebarNowHeight: NOW_HEIGHT.def, navPins: null, peekTarget: "auto", gutterDocked: [], sideHomes: {}, gutterDockWidth: DOCK_WIDTH_DEFAULT, hostMarksSingle: false, hostMarkLocal: false, queueSectionStrip: true, queuePanelFold: DEFAULT_QUEUE_PANEL_FOLD, lastCreateHost: "", createHostDefault: "local", perfMode: "save" };
+const BASE_DEFAULTS: Omit<UiPrefs, "imageHistoryHintDone"> = { deskPerformanceHintDone: false, viewerAutoRefresh: true, quotaGauges: {}, quotaResetDefault: true, quotaMerge: true, composerProfileAvatar: true, quotaView: DEFAULT_QUOTA_VIEW, sidebarOpen: true, sidebarRail: false, agentMessages: "compact", foldedGroups: [], modelPins: {}, lastAgentCwd: "", remoteAgentCwd: {}, sendKeys: "queueFirst", delegationSteerKeys: false, capsuleCorner: DEFAULT_CAPSULE_CORNER, capsuleEdge: DEFAULT_CAPSULE_EDGE, reasoningView: DEFAULT_REASONING_VIEW, reasoningViewRev: REASONING_VIEW_REV, capsuleOpen: false, capsuleFoldedItems: [], timelineTurns: 30, timelineInteractions: true, timelineIntro: true, capsuleAlways: false, projectOrder: [], profileOrder: [], restOpen: [], olderProjectsAfter: DEFAULT_OLDER_PROJECTS_AFTER, nameGrouping: null, nameReading: null,runtimeButton: "all", foldLong: true, foldLines: DEFAULT_FOLD_LINES, foldOlderReplies: false, projectGrouping: "all", noOnlineProjects: "collapse", runningAgents: DEFAULT_RUNNING_AGENTS, runningAgentsRev: RUNNING_AGENTS_REV, offlineFoldOpen: [], foldedProjects: [], starredProjects: [], sidebarSections: [], projectRemarks: {}, projectDirectors: {}, projectIcons: {}, sectionCollapsedShows: "summary", projectSeparation: DEFAULT_PROJECT_SEPARATION, projectSeparationRev: PROJECT_SEPARATION_REV, projectIconStyle: "tint", systemRows: "line", statusChips: DEFAULT_STATUS_CHIPS, needsYouStrip: true, titleTwoLines: true, rowPreview: "all", rowPreviewRev: ROW_PREVIEW_REV, agentAvatarDefault: "important", agentAvatarDefaultRev: AGENT_AVATAR_DEFAULT_REV, avatarTint: "none", directorHeadwear: DEFAULT_DIRECTOR_HEADWEAR, operatorHeadwear: true, seasonalHeadwear: true, portraitPacks: [...DEFAULT_PORTRAIT_THEMES], avatarThemes: {}, messageImages: "thumbnail", turnSummary: "collapsed", sideMode: "push", sideNarrow: "overlay", sidePreview: DEFAULT_SIDE_PREVIEW, sidePreviewRev: SIDE_PREVIEW_REV, sideRestore: true, sideKeepHidden: 4, sideKeepMounted: 4, sideLauncherPins: {}, sidebarLayout: "roster", sidebarNowHeight: NOW_HEIGHT.def, navPins: null, peekTarget: "auto", gutterDocked: [], sideHomes: {}, gutterDockWidth: DOCK_WIDTH_DEFAULT, hostMarksSingle: false, hostMarkLocal: false, queueSectionStrip: true, queuePanelFold: DEFAULT_QUEUE_PANEL_FOLD, lastCreateHost: "", createHostDefault: "local", perfMode: "save" };
 const DEFAULTS: UiPrefs = { ...BASE_DEFAULTS, imageHistoryHintDone: [] };
 const listeners = new Set<() => void>();
 /**
  * Lists of agent / project / group ids: stored under host keys (lib/hostKeys), shown as the focus
  * host's bare ids. `foldedGroups` entries are `<table>:<group>` (claimed by any id segment).
  */
-const HOST_LISTS = ["projectOrder", "profileOrder", "offlineOpen", "idleOpen", "recentOpen", "idleUnfolded", "foldedProjects", "starredProjects", "foldedGroups"] as const;
+const HOST_LISTS = ["projectOrder", "profileOrder", "restOpen", "offlineFoldOpen", "foldedProjects", "starredProjects", "foldedGroups"] as const;
 export type HostList = (typeof HOST_LISTS)[number];
 const isHostList = (key: keyof UiPrefs): key is HostList => (HOST_LISTS as readonly string[]).includes(key);
 // 多窗口 moved to main (desktop-prefs.json; lib/multiWindowPref): the renderer's old value — the P6 pref stored here, or
@@ -313,9 +316,19 @@ function project(prefs: UiPrefs): UiPrefs {
   return out;
 }
 
+function effective(): UiPrefs { return { ...stored, ...layoutStore()?.local() }; }
+export function getLocalLayoutPrefs() { return { sidebarSections: stored.sidebarSections, starredProjects: stored.starredProjects, projectOrder: stored.projectOrder, foldedProjects: stored.foldedProjects, navPins: stored.navPins }; }
+export function refreshLayoutPrefs(): void {
+  current = project(effective());
+  for (const l of listeners) l();
+}
 function persist(next: UiPrefs): void {
+  const layout = layoutStore();
+  const before = effective();
+  const pins = layout?.local()?.pinned ?? [];
+  layout?.edit({ ...before, pinned: pins }, { ...before, ...Object.fromEntries(Object.keys(next).filter(k => JSON.stringify(next[k as keyof UiPrefs]) !== JSON.stringify(stored[k as keyof UiPrefs])).map(k => [k, next[k as keyof UiPrefs]])), pinned: pins } as SidebarLocal);
   stored = next;
-  current = project(stored);
+  current = project(effective());
   try {
     localStorage.setItem(KEY, JSON.stringify(stored));
   } catch {
@@ -339,7 +352,7 @@ registerHostKeyed({
   dropLegacy: () => rewriteLists((list) => dropLegacy(list)),
 });
 onKeyFocus(() => {
-  current = project(stored);
+  current = project(effective());
   for (const l of listeners) l();
 });
 
@@ -393,15 +406,28 @@ export function toggleSidebarRail(): void {
   setUiPref("sidebarRail", !prefs.sidebarRail);
 }
 
-/** Stored prefs no longer read (design 006 v1 Q5: the step-3 right column's options); load() leaves them out. */
-export const DROPPED_PREFS = ["sidePageBar", "sidePillAnchor", "sideLaneWhenHidden", "sideCurrentPageClick"] as const;
+/** Stored prefs no longer read (design 006 v1 Q5: the step-3 right column's options; design 060: the project hover flyout, the 「最近 +N」 fold); load() leaves them out. */
+export const DROPPED_PREFS = ["sidePageBar", "sidePillAnchor", "sideLaneWhenHidden", "sideCurrentPageClick", "projectHoverPreview", "projectHoverDelay", "recentOpen"] as const;
+
+/** The sidebar's folds before design 060 B (离线 N, N 个空闲, 在线空闲不收起); load() turns them into `restOpen`. */
+export const ROSTER_V1_PREFS = ["offlineAgents", "offlineOpen", "foldIdleAgents", "idleOpen", "idleUnfolded"] as const;
+
+/**
+ * `restOpen` from the stored prefs: kept when present; else the groups whose 离线 list was expanded or that
+ * were set to 「在线空闲不收起」 (the owner wanted those agents listed) start with 「其余」 expanded.
+ */
+export function migrateRestOpen(stored: Record<string, unknown>): string[] {
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  if (Array.isArray(stored.restOpen)) return list(stored.restOpen);
+  return [...new Set([...list(stored.offlineOpen), ...list(stored.idleUnfolded)])];
+}
 
 function load(): UiPrefs {
   try {
-    const stored = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<UiPrefs> & { capsuleAnchor?: unknown; projectHeaderTint?: unknown; multiWindow?: unknown; quotaShowReset?: unknown } & Partial<Record<(typeof DROPPED_PREFS)[number], unknown>>;
+    const stored = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<UiPrefs> & { capsuleAnchor?: unknown; projectHeaderTint?: unknown; multiWindow?: unknown; quotaShowReset?: unknown } & Partial<Record<(typeof DROPPED_PREFS)[number] | (typeof ROSTER_V1_PREFS)[number], unknown>>;
     // projectHeaderTint (项目标题着色, removed 2026-10-18) only feeds the projectSeparation migration. The
     // DROPPED_PREFS are left out (design 006 v1 Q5). multiWindow moved to main (readLegacyMultiWindow).
-    const { capsuleAnchor, projectHeaderTint, sidePageBar: _a, sidePillAnchor: _b, sideLaneWhenHidden: _c, sideCurrentPageClick: _d, multiWindow: _mw, quotaShowReset: _oldResetSwitch, ...rest } = stored;
+    const { capsuleAnchor, projectHeaderTint, sidePageBar: _a, sidePillAnchor: _b, sideLaneWhenHidden: _c, sideCurrentPageClick: _d, projectHoverPreview: _hp, projectHoverDelay: _hd, recentOpen: _ro, multiWindow: _mw, quotaShowReset: _oldResetSwitch, offlineAgents: _oa, offlineOpen: _oo, foldIdleAgents: _fi, idleOpen: _io, idleUnfolded: _iu, ...rest } = stored;
     const anchor = stored.capsuleCorner ? null : migrateCapsuleAnchor(capsuleAnchor);
     return {
       ...DEFAULTS,
@@ -413,7 +439,10 @@ function load(): UiPrefs {
       quotaGauges: migrateGaugeChoices(stored.quotaGauges),
       quotaResetDefault: typeof stored.quotaResetDefault === "boolean" ? stored.quotaResetDefault : stored.quotaShowReset !== false,
       quotaMerge: stored.quotaMerge !== false,
-      offlineAgents: migrateOfflineLimit(stored.offlineAgents),
+      restOpen: migrateRestOpen(stored as Record<string, unknown>),
+      olderProjectsAfter: migrateOlderProjectsAfter(stored.olderProjectsAfter),
+      nameGrouping: (NAME_GROUPINGS as readonly unknown[]).includes(stored.nameGrouping) ? (stored.nameGrouping as NameGrouping) : null,
+      nameReading: (NAME_READINGS as readonly unknown[]).includes(stored.nameReading) ? (stored.nameReading as NameReading) : null,
       foldLines: migrateFoldLines(stored.foldLines),
       reasoningView: migrateReasoningView(stored.reasoningView, stored.reasoningViewRev),
       reasoningViewRev: REASONING_VIEW_REV,
@@ -425,12 +454,11 @@ function load(): UiPrefs {
       viewerAutoRefresh: stored.viewerAutoRefresh !== false,
       timelineIntro: stored.timelineIntro !== false,
       timelineInteractions: stored.timelineInteractions !== false,
-      projectHoverPreview: stored.projectHoverPreview !== false,
-      projectHoverDelay: migrateFlyoutDelay(stored.projectHoverDelay),
       gutterDockWidth: clampDockPref(stored.gutterDockWidth),
       projectSeparation: migrateProjectSeparation(stored.projectSeparation, stored.projectSeparationRev, projectHeaderTint),
       projectSeparationRev: PROJECT_SEPARATION_REV,
       projectIconStyle: stored.projectIconStyle === "line" ? "line" : "tint",
+      systemRows: stored.systemRows === "band" ? "band" : "line",
       statusChips: migrateStatusChips(stored.statusChips),
       sideLauncherPins: migrateLauncherPins(stored.sideLauncherPins),
       sideHomes: migrateSideHomes(stored.sideHomes),
@@ -465,7 +493,7 @@ function load(): UiPrefs {
 
 export function setUiPref<K extends keyof UiPrefs>(key: K, value: UiPrefs[K]): void {
   // Host-scoped id lists: the value is the focus host's list (what getUiPrefs shows).
-  persist({ ...stored, [key]: isHostList(key) ? writeList(stored[key], value as string[], keyFocus()) : value });
+  persist({ ...effective(), [key]: isHostList(key) ? writeList(effective()[key], value as string[], keyFocus()) : value });
 }
 
 /** The default of a pref (a settings row's 恢复默认 and 「改过」 mark). */
@@ -498,9 +526,9 @@ export function toggleFolded(key: string): void {
 }
 
 /** Adds / removes `id` in a string-list pref of `hostId` (default: the focus host). */
-function toggleIn(key: "idleOpen" | "recentOpen" | "idleUnfolded" | "foldedProjects" | "starredProjects" | "offlineOpen", id: string, hostId = keyFocus()): void {
-  const list = projectList(stored[key], hostId);
-  persist({ ...stored, [key]: writeList(stored[key], list.includes(id) ? list.filter((k) => k !== id) : [...list, id], hostId) });
+function toggleIn(key: "offlineFoldOpen" | "restOpen" | "foldedProjects" | "starredProjects", id: string, hostId = keyFocus()): void {
+  const list = projectList(effective()[key], hostId);
+  persist({ ...effective(), [key]: writeList(effective()[key], list.includes(id) ? list.filter((k) => k !== id) : [...list, id], hostId) });
 }
 
 /**
@@ -509,7 +537,7 @@ function toggleIn(key: "idleOpen" | "recentOpen" | "idleUnfolded" | "foldedProje
  */
 export function hostListKeys(key: HostList, hostIds: readonly string[]): string[] {
   const out: string[] = [];
-  for (const entry of stored[key]) {
+  for (const entry of effective()[key]) {
     const parsed = parseHostKey(entry);
     if (parsed) {
       if (hostIds.includes(parsed[0])) out.push(entry);
@@ -520,11 +548,11 @@ export function hostListKeys(key: HostList, hostIds: readonly string[]): string[
 
 /** Replace the entries of `hostIds` in a host-keyed list pref with `keys` (host keys, in order); other hosts' stay. */
 export function setHostListKeys(key: HostList, hostIds: readonly string[], keys: readonly string[]): void {
-  const others = stored[key].filter((entry) => {
+  const others = effective()[key].filter((entry) => {
     const parsed = parseHostKey(entry);
     return parsed ? !hostIds.includes(parsed[0]) : !keys.some((k) => parseHostKey(k)?.[1] === entry);
   });
-  persist({ ...stored, [key]: [...others, ...keys] });
+  persist({ ...effective(), [key]: [...others, ...keys] });
 }
 
 /** Folds / unfolds a sidebar group by its header (`foldedProjects`); `hostId`: the group's host. */
@@ -532,24 +560,14 @@ export function toggleProjectFolded(groupId: string, hostId?: string): void {
   toggleIn("foldedProjects", groupId, hostId);
 }
 
-/** Expands / collapses a sidebar group's offline list (`offlineOpen`); `hostId`: the group's host. */
-export function toggleOfflineOpen(groupId: string, hostId?: string): void {
-  toggleIn("offlineOpen", groupId, hostId);
+/** Expands / collapses a sidebar group's 「在线空闲 +N」 fold (`restOpen`); `hostId`: the group's host. */
+export function toggleRestOpen(groupId: string, hostId?: string): void {
+  toggleIn("restOpen", groupId, hostId);
 }
 
-/** Expands / collapses a sidebar group's 在线空闲 fold (`idleOpen`); `hostId`: the group's host. */
-export function toggleIdleOpen(groupId: string, hostId?: string): void {
-  toggleIn("idleOpen", groupId, hostId);
-}
-
-/** Expands / collapses a sidebar group's 「最近活跃 +N」 fold (`recentOpen`); `hostId`: the group's host. */
-export function toggleRecentOpen(groupId: string, hostId?: string): void {
-  toggleIn("recentOpen", groupId, hostId);
-}
-
-/** 「在线空闲不收起」 on / off for a project (sidebar group id); `hostId`: the project's host. */
-export function toggleIdleUnfolded(groupId: string, hostId?: string): void {
-  toggleIn("idleUnfolded", groupId, hostId);
+/** Expands / collapses a sidebar group's 「离线 +N」 fold (`offlineFoldOpen`); `hostId`: the group's host. */
+export function toggleOfflineFoldOpen(groupId: string, hostId?: string): void {
+  toggleIn("offlineFoldOpen", groupId, hostId);
 }
 
 /** Stars / unstars a project (sidebar group id); `hostId`: the project's host. */
@@ -559,7 +577,7 @@ export function toggleStarred(groupId: string, hostId?: string): void {
 
 /** Rewrites the sidebar sections (lib/sidebarSections helpers take the current list, return the next). */
 export function updateSections(update: (sections: readonly SidebarSection[]) => SidebarSection[]): void {
-  persist({ ...stored, sidebarSections: update(stored.sidebarSections) });
+  persist({ ...effective(), sidebarSections: update(effective().sidebarSections) });
 }
 
 /** Host keys with known themes only; a single id (before the multi-select) becomes `[id]`, "all" every theme. */

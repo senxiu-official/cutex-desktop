@@ -164,9 +164,30 @@ export interface DelegationStatus {
   host?: string;
   /** The word itself in danger colour (offline / blocked) while the glyph stays quiet. */
   dangerText?: boolean;
+  /** `waitingForEvent`: what the handler waits for (delegation_await), shown instead of a run time. */
+  wait?: DelegationWait;
 }
 
-export type StatusInput = Pick<AskSummary, "execution"> & Partial<Pick<AskSummary, "hold" | "review" | "closed" | "queuePosition" | "attempt" | "remote">>;
+/** A handler's delegation_await as the status shows it. */
+export interface DelegationWait {
+  /** Awaited jobs still running (all awaited ones when their states are unknown); null without job ids. */
+  jobs: number | null;
+  /** When the wait times out (ISO); null without a timeout. */
+  timeoutAt: string | null;
+  /** The handler's own note. */
+  note: string | null;
+}
+
+/** The wait of a delegation held `waitingForEvent`: the row's `await`, else the hold's own fields. */
+export function delegationWait(d: Pick<StatusInput, "hold" | "await" | "jobs">): DelegationWait {
+  const hold = d.hold?.reason === "waitingForEvent" ? d.hold : null;
+  const ids = d.await?.jobs ?? hold?.jobs ?? null;
+  const known = new Map((d.jobs ?? []).map(job => [job.jobId, job.status]));
+  const open = ids ? ids.filter(id => !known.has(id) || known.get(id) === "running").length : null;
+  return { jobs: ids && ids.length ? open : null, timeoutAt: d.await?.timeoutAt ?? hold?.timeout_at ?? null, note: d.await?.note?.trim() || null };
+}
+
+export type StatusInput = Pick<AskSummary, "execution"> & Partial<Pick<AskSummary, "hold" | "review" | "closed" | "queuePosition" | "attempt" | "remote" | "await" | "jobs">>;
 
 /**
  * What the desktop knows besides the ask record: the target agent's runtime (sidebar). cutex keeps
@@ -214,6 +235,8 @@ function holdStatus(hold: AskHold | null | undefined, queuePosition: number | nu
       return hold.native === "gate_closed" ? s("waitingResume") : s("blocked", { dangerText: true });
     case "waitingForInput":
       return { key: "question", tone: "warn", glyph: "pulse" };
+    case "waitingForEvent":
+      return s("waitingForEvent");
     case "peerUnreachable":
     case "peerIdentityChanged":
     case "peerVersionMismatch":
@@ -275,6 +298,9 @@ export function delegationStatus(d: StatusInput, ctx: DelegationContext = {}): D
       return d.hold ? holdStatus(d.hold, d.queuePosition) : { key: "starting", tone: "muted", glyph: "hollow" };
     case "running":
       if (d.hold?.reason === "waitingForInput") return { key: "question", tone: "warn", glyph: "pulse" };
+      // delegation_await: the handler ended its turn and waits for its jobs or the timeout. Nothing runs, online or
+      // not (no lease, no turn); the attempt's start / end belong to the turn that set the wait.
+      if (d.hold?.reason === "waitingForEvent") return { key: "waitingForEvent", tone: "muted", glyph: "hollow", wait: delegationWait(d) };
       // Nothing runs while the target is offline; cutex owns reconciliation / stop settlement.
       return ctx.targetOffline ? { key: "offline", tone: "muted", glyph: "hollow", dangerText: true } : { key: "running", tone: "accent", glyph: "pulse" };
     case "answered":
@@ -869,4 +895,17 @@ export function askRowTurnOf(entries: Iterable<TimelineEntry>, askId: string): s
     if (e.kind === "received" && e.turnId && delegationAskRow(e.message)?.askId === askId) turn = e.turnId;
   }
   return turn;
+}
+
+/**
+ * The open delegation this agent (`sessionId`, the handler) waits on after ending its turn with delegation_await
+ * (hold waitingForEvent): no turn, no lease, so the session's delivery is idle. The latest one when several wait.
+ */
+export function awaitingDelegation(byId: Record<string, AskSummary>, sessionId: string): AskSummary | null {
+  let best: AskSummary | null = null;
+  for (const d of Object.values(byId)) {
+    if (d.target !== sessionId || d.closed || d.execution !== "running" || d.hold?.reason !== "waitingForEvent") continue;
+    if (!best || Date.parse(d.updatedAt) > Date.parse(best.updatedAt)) best = d;
+  }
+  return best;
 }

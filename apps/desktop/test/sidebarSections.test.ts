@@ -35,7 +35,7 @@ const ctx = (signals: Record<string, AgentSignal> = {}, searching = false): Layo
   signalOf: (k) => signals[k],
   selectedId: null,
   starred: new Set(),
-  prefs: { grouping: "all", noOnline: "collapse", running: "avatars", foldIdle: true },
+  prefs: { grouping: "all", noOnline: "collapse", running: "avatars" },
   searching,
 });
 
@@ -124,6 +124,15 @@ describe("section prefs", () => {
         storage.set("cutex-desktop.ui", JSON.stringify(stored === undefined ? {} : { projectIconStyle: stored }));
         const prefs = await import("../src/renderer/src/lib/prefs");
         expect(prefs.getUiPrefs().projectIconStyle).toBe(want);
+      }
+    });
+
+    it("系统行样式: 虚线 (line) by default, 灰底条 (band) kept, anything else back to line", async () => {
+      for (const [stored, want] of [[undefined, "line"], ["band", "band"], ["line", "line"], ["dots", "line"]] as const) {
+        vi.resetModules();
+        storage.set("cutex-desktop.ui", JSON.stringify(stored === undefined ? {} : { systemRows: stored }));
+        const prefs = await import("../src/renderer/src/lib/prefs");
+        expect(prefs.getUiPrefs().systemRows).toBe(want);
       }
     });
 

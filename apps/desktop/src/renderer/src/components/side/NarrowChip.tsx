@@ -62,7 +62,7 @@ export function NarrowChip({ box, entry, instanceId, pageId, name }: { box: RefO
   return (
     <div data-narrow-chip={instanceId} className="narrow-chip">
       <span className="shrink-0">{t("strip.narrow")}</span>
-      <button type="button" data-side-nodrag title={tip} aria-label={tip} {...fh} onClick={() => effect().run()}>
+      <button type="button" data-side-nodrag data-tip={tip} aria-label={tip} {...fh} onClick={() => effect().run()}>
         {t("strip.makeRoom", { name: target.name })}
       </button>
     </div>

@@ -1,3 +1,4 @@
+import type { BrowserCursorView, BrowserCursorPreferences } from "./browserCursor";
 import type { HostTag, HostTaggedEvent, HOST_TAGGED_EVENTS } from "./ipc";
 import type { BrowserClaimAutoReason, BrowserClaimMode } from "./browserClaim";
 
@@ -21,6 +22,7 @@ export const DEFAULT_BROWSER_EXTERNAL_PAGES = true;
 
 export interface BrowserControlSettings {
   hiddenTarget: "reveal" | "reject";
+  /** Layout fallback for hidden/minimized reads and isolated offscreen carriers; visible cards stay native. */
   viewport: { width: number; height: number };
   idleDetachSeconds: number;
 }
@@ -96,6 +98,8 @@ export interface BrowserTabView {
   /** Main-applied page zoom of this tab, relative to the app's own zoom; absent = 100 %. */
   zoom?: number;
   control?: BrowserControlView;
+  /** Main-owned, bounded visual feedback for this guest/page only. */
+  cursor?: BrowserCursorView;
   lease?: BrowserLeaseView;
   pool?: "owner" | "agent";
   /** Main-confirmed desktop loopback page in an SSH host's tab (not the remote host). */
@@ -145,6 +149,7 @@ export type BrowserRequest =
   | { op: "setEnabled"; enabled: boolean }
   | { op: "resetOrigins" }
   | { op: "externalPages"; enabled?: boolean }
+  | { op: "cursorColor"; color?: string | null }
   | { op: "desktopLoopback"; enabled?: boolean }
   | { op: "desktopLoopbackChallenge"; tabKey: string; url: string }
   | { op: "sitePermissions"; forget?: BrowserSitePermissionForget }
@@ -155,7 +160,7 @@ export type BrowserRequest =
   | { op: "toolItem"; sessionId: string; turnId: string; itemId: string }
   | { op: "agents" }
   | { op: "settings"; agentOpenApproval?: "off" | "ask" }
-  | { op: "profileTools"; profile: string; enabled?: boolean }
+  | { op: "profileTools"; profile: string; enabled?: boolean; surface?: BrowserToolSurface }
   | { op: "grantAgent"; tabKey: string; sessionId: string; settings: BrowserControlSettings; approvalId?: string; expected: BrowserGrantTarget; remember?: true }
   | { op: "claimOpen"; approvalId: string; settings: BrowserControlSettings }
   | { op: "claimPolicy"; profile: string; mode?: BrowserClaimMode | null }
@@ -191,7 +196,8 @@ export interface HostBrowserBridge {
   /** The nonce main minted with this exact tab + origin's remote_loopback refusal. */
   desktopLoopbackChallenge(tabKey: string, url: string): Promise<{ nonce: string }>;
   clearIdempotency(cutexSessionId?: string): Promise<BrowserIdempotencyClearResult>;
-  profileTools(profile: string, enabled?: boolean): Promise<{ enabled: boolean }>;
+  /** surface: cutex design 059 tool surface; returned only by hosts with browser-tool-surface-v1. */
+  profileTools(profile: string, enabled?: boolean, surface?: BrowserToolSurface): Promise<BrowserProfileTools>;
   /** remember (claims only): after the grant, main allows this agent the tab's origin until app restart. */
   grantAgent(tabKey: string, sessionId: string, settings: BrowserControlSettings, approvalId: string | undefined, expected: BrowserGrantTarget, options?: { remember?: boolean }): Promise<void>;
   /** Owner click: main opens the claim's own local urlHint (or the agent's service) in an owner tab and grants it. */
@@ -231,6 +237,7 @@ export interface BrowserBridge {
   resetOrigins(): Promise<void>;
   /** Owner switch 「允许浏览外部网页」: read (no argument) or set. Host-independent. */
   externalPages(enabled?: boolean): Promise<BrowserExternalPagesView>;
+  cursorColor(color?: string | null): Promise<BrowserCursorPreferences>;
   /** Remembered per-origin site permissions; forget one origin (all its permissions) or all. */
   sitePermissions(forget?: BrowserSitePermissionForget): Promise<BrowserSitePermissionView[]>;
   forHost(hostId: string): HostBrowserBridge;
@@ -238,7 +245,7 @@ export interface BrowserBridge {
 }
 
 /** Fixed UI keys only; no page/daemon message is ever an owner-facing fallback. */
-export type BrowserOwnerErrorKey = "browser.error.invalid" | "browser.error.unsupported" | "browser.error.permission" | "browser.error.loopbackOnly" | "browser.error.disabled" | "browser.error.unavailable" | "browser.error.revoked" | "browser.error.desktopRestarted" | "browser.error.hidden" | "browser.error.paused" | "browser.error.scope" | "browser.error.stale" | "browser.error.deadline" | "browser.error.cancelled" | "browser.error.unknownOutcome" | "browser.error.conflict" | "browser.error.notRetained" | "browser.error.approvalRequired" | "browser.error.approvalDenied" | "browser.error.leaseLimit" | "browser.error.busy" | "browser.error.capacity" | "browser.error.tooLarge" | "browser.error.identityUnavailable" | "browser.error.identityRecovered" | "browser.error.serviceUnavailable" | "browser.error.serviceReclaimed" | "browser.error.serviceStopped" | "browser.error.serviceNotFound" | "browser.error.serviceStartFailed" | "browser.error.serviceCrashLooped" | "browser.error.serviceChanged" | "browser.error.upstreamUnreachable" | "browser.error.staticNotFound" | "browser.externalUnavailable" | "browser.refusal.externalOff" | "browser.refusal.proxyUnavailable" | "browser.refusal.privateAddress" | "browser.refusal.reservedAddress" | "browser.refusal.protectedEndpoint" | "browser.refusal.remoteLoopback" | "browser.serviceProxyRequired" | "browser.noHost" | "browser.unavailable" | "browser.navigationFailed" | "browser.serviceAuthFailed" | "browser.invalidReceipt" | "browser.error.unknown";
+export type BrowserOwnerErrorKey = "browser.error.invalid" | "browser.error.unsupported" | "browser.error.permission" | "browser.error.loopbackOnly" | "browser.error.disabled" | "browser.error.unavailable" | "browser.error.revoked" | "browser.error.desktopRestarted" | "browser.error.hidden" | "browser.error.paused" | "browser.error.scope" | "browser.error.stale" | "browser.error.deadline" | "browser.error.cancelled" | "browser.error.unknownOutcome" | "browser.error.conflict" | "browser.error.notRetained" | "browser.error.approvalRequired" | "browser.error.approvalDenied" | "browser.error.leaseLimit" | "browser.error.busy" | "browser.error.capacity" | "browser.error.tooLarge" | "browser.error.identityUnavailable" | "browser.error.identityRecovered" | "browser.error.serviceUnavailable" | "browser.error.serviceReclaimed" | "browser.error.serviceStopped" | "browser.error.serviceManuallyStopped" | "browser.error.serviceWakeFailed" | "browser.error.serviceNotFound" | "browser.error.serviceStartFailed" | "browser.error.serviceCrashLooped" | "browser.error.serviceChanged" | "browser.error.upstreamUnreachable" | "browser.error.staticNotFound" | "browser.externalUnavailable" | "browser.refusal.externalOff" | "browser.refusal.proxyUnavailable" | "browser.refusal.privateAddress" | "browser.refusal.reservedAddress" | "browser.refusal.protectedEndpoint" | "browser.refusal.remoteLoopback" | "browser.serviceProxyRequired" | "browser.noHost" | "browser.unavailable" | "browser.navigationFailed" | "browser.serviceAuthFailed" | "browser.invalidReceipt" | "browser.error.unknown";
 /** The one owner action that actually fixes a refusal (none: explain only). */
 export type BrowserRefusalAction = "enableExternal" | "allowDesktopLoopback" | "retry" | "reload" | null;
 /**
@@ -260,15 +267,15 @@ export function browserOwnerErrorKey(error: unknown): BrowserOwnerErrorKey {
     case "permission_denied": case "untrusted_sender": return "browser.error.permission";
     case "loopback_only": return "browser.error.loopbackOnly";
     case "browser_disabled": case "module_disabled": return "browser.error.disabled";
-    case "browser_unavailable": case "transport_error": return "browser.error.unavailable";
-    case "lease_revoked": case "lease_expired": case "browser_session_revoked": return "browser.error.revoked";
+    case "browser_unavailable": case "transport_error": case "script_runtime_unavailable": case "kernel_lost": return "browser.error.unavailable";
+    case "lease_revoked": case "lease_expired": case "browser_session_revoked": case "lease_ended_turn_end": return "browser.error.revoked";
     case "lease_ended_desktop_restarted": return "browser.error.desktopRestarted";
     case "target_hidden": return "browser.error.hidden";
-    case "owner_paused": return "browser.error.paused";
+    case "owner_paused": case "agent_paused": return "browser.error.paused";
     case "scope_invalid": case "scope_unsupported": return "browser.error.scope";
     case "stale_connection": case "stale_request": case "stale_ref": case "host switched": return "browser.error.stale";
-    case "deadline_exceeded": return "browser.error.deadline";
-    case "cancelled": return "browser.error.cancelled";
+    case "deadline_exceeded": case "script_timeout": return "browser.error.deadline";
+    case "cancelled": case "turn_ended": return "browser.error.cancelled";
     case "outcome_unknown": return "browser.error.unknownOutcome";
     case "request_conflict": case "request_id_conflict": case "lease_conflict": return "browser.error.conflict";
     case "request_result_not_retained": return "browser.error.notRetained";
@@ -284,6 +291,8 @@ export function browserOwnerErrorKey(error: unknown): BrowserOwnerErrorKey {
     case "service_unavailable": case "services_store_unavailable": case "services_supervisor_unavailable": case "proxy_busy": return "browser.error.serviceUnavailable";
     case "service_reclaimed": return "browser.error.serviceReclaimed";
     case "service_stopped": return "browser.error.serviceStopped";
+    case "service_manually_stopped": return "browser.error.serviceManuallyStopped";
+    case "service_wake_failed": case "service_start_timeout": return "browser.error.serviceWakeFailed";
     case "service_not_found": return "browser.error.serviceNotFound";
     case "service_start_failed": case "cwd_not_found": case "port_in_use": case "no_free_port": return "browser.error.serviceStartFailed";
     case "service_crash_looped": case "crash_looped": return "browser.error.serviceCrashLooped";
@@ -335,3 +344,9 @@ export function createBrowserActivation() {
 }
 
 export const browserActivation = createBrowserActivation();
+
+/** cutex design 059 profile `browserToolSurface`: auto = the one `browser` tool where the runtime carries it. */
+export const BROWSER_TOOL_SURFACES = ["auto", "command", "script", "legacy"] as const;
+export type BrowserToolSurface = typeof BROWSER_TOOL_SURFACES[number];
+export const isBrowserToolSurface = (value: unknown): value is BrowserToolSurface => BROWSER_TOOL_SURFACES.some(surface => surface === value);
+export interface BrowserProfileTools { enabled: boolean; surface?: BrowserToolSurface }

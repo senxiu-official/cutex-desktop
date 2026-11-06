@@ -1,0 +1,31 @@
+import { beforeEach, expect, it, vi } from "vitest";
+import type { RuntimePackageRun, RuntimePackagesView } from "../src/shared/ipc";
+import { beginRuntimeOperation, observeRuntimeOperations } from "../src/renderer/src/lib/runtimeOperations";
+import { useBackgroundOperations } from "../src/renderer/src/lib/backgroundOperations";
+const run=(runId:string,states:string[]):RuntimePackageRun=>({runId,state:states.some(s=>s==="pending"||s==="running")?"running":"completed",items:states.map((state,i)=>({cutexSessionId:`agent-${i}`,name:`Agent ${i}`,state,reason:state==="failed"?"refused":null}))} as RuntimePackageRun);
+const view=(activeRun:RuntimePackageRun):RuntimePackagesView=>({activeRun,lastRun:null} as RuntimePackagesView);
+beforeEach(()=>useBackgroundOperations.setState({operations:[]}));
+it("observes only desktop-started native runs, stays running after the start dialog closes, and binds per-agent retry",async()=>{
+  observeRuntimeOperations("remote",view(run("elsewhere",["running"])));
+  expect(useBackgroundOperations.getState().operations).toEqual([]);
+  const retry=vi.fn(async()=>{}),receipt=beginRuntimeOperation("remote",false,retry,vi.fn(),vi.fn());
+  receipt.native(run("ours",["done","running"]));receipt.finish();
+  expect(useBackgroundOperations.getState().operations[0]!.items[1]!.state).toBe("running");
+  observeRuntimeOperations("local",view(run("ours",["moved","failed"])));
+  expect(useBackgroundOperations.getState().operations[0]!.unreadFailure).toBe(false);
+  observeRuntimeOperations("remote",view(run("ours",["moved","failed"])));
+  const op=useBackgroundOperations.getState().operations[0]!;
+  expect(op.items.map(i=>i.state)).toEqual(["done","failed"]);expect(op.unreadFailure).toBe(true);
+  await op.items[1]!.retry!();expect(retry).toHaveBeenCalledWith("agent-1");
+});
+it("combines native and Claude results while keeping separate retry calls and online recovery",async()=>{
+  const native=vi.fn(),claude=vi.fn(),online=vi.fn();
+  const receipt=beginRuntimeOperation("mixed",false,native,claude,online);
+  receipt.native(run("native",["failed"]));
+  const c=run("claude",["moved"]);c.items[0]!.cutexSessionId="claude-agent";c.items[0]!.wasOnline=true;c.items[0]!.backOnline=false;
+  receipt.claude(c);receipt.finish();
+  const op=useBackgroundOperations.getState().operations[0]!;
+  expect(op.items).toHaveLength(2);
+  await op.items[0]!.retry!();await op.items[1]!.retry!();
+  expect(native).toHaveBeenCalledWith("agent-0");expect(online).toHaveBeenCalledWith("claude-agent");expect(claude).not.toHaveBeenCalled();
+});

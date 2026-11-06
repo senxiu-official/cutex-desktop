@@ -51,6 +51,8 @@ export function parsePagePinKey(key: string): { pageId: string; arg: string } | 
 }
 
 export interface HomePin {
+  /** Stable cutex instance identity. Takes precedence over the device-local legacy hostId. */
+  host?: string;
   hostId: string;
   kind: HomePinKind;
   key: string;

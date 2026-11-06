@@ -209,7 +209,7 @@ function OpenStopIdleDialog() {
   const nameOf = (id: string) => s.rows.find((row) => row.cutexSessionId === id)?.name ?? id;
   const busy = s.phase === "stopping";
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[10vh]" onMouseDown={(e) => e.target === e.currentTarget && !busy && closeStopIdle()}>
+    <div className="fixed inset-0 z-[150] flex items-start justify-center bg-black/30 pt-[10vh]" onMouseDown={(e) => e.target === e.currentTarget && !busy && closeStopIdle()}>
       <div role="dialog" aria-modal="true" aria-label={t("stopIdle.title")} className="flex max-h-[80vh] w-[36rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border border-border bg-surface p-4 shadow-2xl" data-testid="stop-idle-dialog">
         <div className="flex items-center gap-2">
           <Power size={15} className="shrink-0 text-muted" />

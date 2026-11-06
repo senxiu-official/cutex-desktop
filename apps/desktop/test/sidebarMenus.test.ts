@@ -13,7 +13,7 @@ function staticSubmenu(entries: MenuAction["submenu"]): MenuEntry[] {
 import type { AgentRow, ProjectGroup, SidebarGroup } from "../src/renderer/src/lib/sidebar";
 
 const projectMutation = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({}));
-vi.mock("../src/renderer/src/bridge", () => ({ api: { projectMutation: (...args: unknown[]) => projectMutation(...args) }, onEvent: () => () => {} }));
+vi.mock("../src/renderer/src/bridge", () => ({ api: { projectMutation: (...args: unknown[]) => projectMutation(...args) }, onEvent: () => () => {}, bridge: { on: () => () => {} }, cleanIpcMessage: (m: string) => m }));
 
 const t = ((key: string, vars?: Record<string, string | number>) => (vars ? `${key}(${Object.values(vars).join(",")})` : key)) as never;
 
@@ -74,7 +74,6 @@ describe("project menu", () => {
       "|",
       "menu.collapse",
       "menu.star",
-      "menu.sidebarDisplay",
       "menu.moveToSection",
       "|",
       "menu.copy",
@@ -125,21 +124,10 @@ describe("project menu", () => {
     expect(find(projectMenu(group, null, false, null, t), "menu.markProjectRead")).toBeUndefined();
   });
 
-  it("「在线空闲不收起」 toggles a host-keyed pref; hidden while the global fold is off", async () => {
+  it("no 「在线空闲不收起」 any more (design 060 B: 其余 is folded per group in the sidebar)", async () => {
     await seed();
-    const prefs = await import("../src/renderer/src/lib/prefs");
     const { projectMenu } = await import("../src/renderer/src/lib/projectMenus");
-    // One level down, under 侧栏显示 › (not a stray click on the main menu).
-    const item = () => find(staticSubmenu(find(projectMenu(group, null, false, null, t), "menu.sidebarDisplay")!.submenu), "menu.idleUnfolded")!;
-    expect(find(projectMenu(group, null, false, null, t), "menu.idleUnfolded")).toBeUndefined();
-    item().onSelect();
-    expect(prefs.hostListKeys("idleUnfolded", ["local"])).toHaveLength(1);
-    expect(prefs.getUiPrefs().idleUnfolded).toEqual(["p1"]);
-    item().onSelect();
-    expect(prefs.getUiPrefs().idleUnfolded).toEqual([]);
-    prefs.setUiPref("foldIdleAgents", false);
     expect(find(projectMenu(group, null, false, null, t), "menu.sidebarDisplay")).toBeUndefined();
-    prefs.setUiPref("foldIdleAgents", true);
   });
 
   it("independent agents: no project-only items", async () => {
@@ -234,6 +222,34 @@ describe("升级运行时 (claude-runtime-repin)", () => {
 });
 
 describe("agent menu additions", () => {
+  it("keeps pin/unpin reachable for live and offline agents; no second 在旁边打开 next to the module's 并排打开", async () => {
+    const app = await seed();
+    const { agentMenu } = await import("../src/renderer/src/lib/menus");
+    for (const status of ["online", "offline"]) {
+      const entries = agentMenu(session("a", { status }), t, "local");
+      expect(find(entries, "pane.openBeside")).toBeUndefined();
+      expect(find(entries, "menu.pin")).toBeDefined();
+    }
+    app.setState({ pinned: new Set(["a"]) });
+    expect(find(agentMenu(session("a"), t, "local"), "menu.unpin")).toBeDefined();
+    app.setState({ pinned: new Set() });
+  });
+
+  it("并排打开 (the conversation module's agent ref action) routes through the existing beside effect", async () => {
+    await seed();
+    const effects = await import("../src/renderer/src/lib/workspaceEffects");
+    const { default: conversation } = await import("../src/renderer/src/modules/conversation/index");
+    const action = (conversation.contributes?.["ref.action"] ?? []).find((a) => a.id === "conversation.openAgentSide")!;
+    expect(action.titleKey).toBe("conversation.agent.openSide");
+    const run = vi.fn();
+    const effect = vi.spyOn(effects, "agentEffect").mockReturnValue({ run } as never);
+    try {
+      await action.run({ hostId: "local", kind: "agent", key: "a", title: "A", params: { sessionId: "a" } });
+      expect(effect).toHaveBeenLastCalledWith({ hostId: "local", key: "a", title: "A" }, "beside");
+      expect(run).toHaveBeenCalledTimes(1);
+    } finally { effect.mockRestore(); }
+    // A cold import of the whole conversation module.
+  }, 30_000);
   it("offers an explicit restart for changed Operator tools and warns about any active turn", async () => {
     await seed();
     const { useApp } = await import("../src/renderer/src/store");
@@ -248,7 +264,8 @@ describe("agent menu additions", () => {
     await seed();
     const { agentMenu } = await import("../src/renderer/src/lib/menus");
     const items = labels(agentMenu(session("a"), t, "local"));
-    expect(items).toEqual(expect.arrayContaining(["menu.openProject", "menu.copy", "menu.restart"]));
+    expect(items).toEqual(expect.arrayContaining(["menu.open", "menu.copy", "menu.restart"]));
+    expect(labels(staticSubmenu(find(agentMenu(session("a"), t, "local"), "menu.open")!.submenu))).toEqual(["menu.openFiles", "menu.openProject"]);
     expect(items).not.toContain("menu.forkAgent");
     expect(items).not.toContain("menu.markRead");
     expect(labels(staticSubmenu(find(agentMenu(session("a"), t, "local"), "menu.copy")!.submenu))).toEqual(["menu.copyName", "menu.copyCwd", "menu.copyId"]);
@@ -266,14 +283,65 @@ describe("agent menu additions", () => {
     const groups = labels(agentMenu(session("a"), t, "local")).join(" ").split(" | ").map((g) => g.split(" "));
     expect(groups).toEqual([
       ["menu.pin", "menu.markRead"],
-      ["menu.openFiles", "menu.openProject", "menu.copy"],
-      ["menu.rename", "menu.editInfo", "menu.forkAgent"],
+      ["menu.open", "menu.copy"],
+      ["menu.editInfo", "menu.forkAgent"],
       ["menu.stop", "menu.restart"],
       ["menu.archive"],
     ]);
     // No bookmark entry for an agent (pin instead).
     expect(groups.flat().some((l) => l.startsWith("bookmarks."))).toBe(false);
     find(agentMenu(session("a"), t, "local"), "menu.markRead")!.onSelect();
+  });
+
+  it("编辑信息… holds the display name (显示名称 folded in); /rename keeps its own dialog texts", async () => {
+    await seed();
+    const dialogs = await import("../src/renderer/src/lib/contextMenu");
+    const info = vi.spyOn(dialogs, "agentInfoDialog").mockResolvedValue(null);
+    const prompt = vi.spyOn(dialogs, "promptDialog").mockResolvedValue(null);
+    const { agentMenu, renameAgent } = await import("../src/renderer/src/lib/menus");
+    try {
+      const named = { ...session("a"), displayName: "Shown", displayNameOverride: "Shown", formalAgentName: "formal-a" } as SessionResource;
+      const menu = agentMenu(named, t, "local");
+      expect(find(menu, "menu.displayName")).toBeUndefined();
+      expect(find(menu, "menu.rename")).toBeUndefined();
+      await find(menu, "menu.editInfo")!.onSelect();
+      await vi.waitFor(() => expect(info).toHaveBeenCalled());
+      expect((info.mock.calls.at(-1) as unknown[])[4]).toMatchObject({ realName: "formal-a", ownName: "formal-a" });
+      // /rename without a value: the same words, now as the prompt's hint.
+      await renameAgent(named, t, undefined, "local");
+      expect(prompt).toHaveBeenLastCalledWith("menu.displayName", "Shown", { placeholder: "formal-a", hint: "menu.displayNameHint(formal-a)" });
+      await renameAgent(session("b"), t, undefined, "local");
+      expect(prompt).toHaveBeenLastCalledWith("menu.displayName", "B", { placeholder: undefined, hint: "menu.displayNameHintNoFormal" });
+    } finally { info.mockRestore(); prompt.mockRestore(); }
+  });
+
+  it("设置 › holds the Claude tool switches (flat, under a note); 分叉… only when a Profile is chosen first", async () => {
+    await seed(["session-fork"]);
+    const { agentMenu } = await import("../src/renderer/src/lib/menus");
+    const claude = { ...session("a"), runtimeDefaults: { claudeAllowWrite: false, claudeAllowExec: true } } as unknown as SessionResource;
+    const menu = agentMenu(claude, t, "local");
+    expect(find(menu, "menu.claudeTools")).toBeUndefined();
+    const inside = staticSubmenu(find(menu, "menu.agentSettings")!.submenu).filter((e): e is MenuAction => !!e && e !== "separator");
+    expect(inside.map((e) => [e.label, e.hint ?? null, !!e.note])).toEqual([["menu.claudeTools", null, true], ["menu.claudeWrite", "menu.off", false], ["menu.claudeExec", "menu.on", false]]);
+    expect(inside.some((e) => e.submenu)).toBe(false);
+    // Not a Claude agent: nothing to hold, no 设置 row.
+    expect(find(agentMenu(session("a"), t, "local"), "menu.agentSettings")).toBeUndefined();
+    expect(find(agentMenu(session("a"), t, "local"), "menu.forkAgent")).toBeDefined();
+    await seed(["session-fork", "session-fork-profile"]);
+    expect(find(agentMenu(session("a"), t, "local"), "menu.forkAgent…")).toBeDefined();
+  });
+
+  it("暂停 / 只停收新委托 are worded apart and grouped away from view and runtime rows", async () => {
+    await seed(["asks-pause-v2", "agent-pause"]);
+    const { agentMenu } = await import("../src/renderer/src/lib/menus");
+    const groups = labels(agentMenu(session("a"), t, "local")).join(" ").split(" | ").map((g) => g.split(" "));
+    const pause = groups.find((g) => g.includes("menu.asksPause"))!;
+    expect(pause).toEqual(["agentPause.pause", "menu.asksPause"]);
+    // Notes live in the info mark, never in the label or a hover title.
+    const row = find(agentMenu(session("a"), t, "local"), "menu.asksPause")!;
+    expect([row.info, row.title]).toEqual(["menu.asksPauseHint", undefined]);
+    const pauseRow = find(agentMenu(session("a"), t, "local"), "agentPause.pause")!;
+    expect([pauseRow.info, pauseRow.title]).toEqual(["agentPause.pauseHint", undefined]);
   });
 
   it("标为已读 with a turn mark", async () => {

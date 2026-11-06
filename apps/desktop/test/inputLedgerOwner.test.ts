@@ -22,7 +22,7 @@ beforeEach(async () => {
   vi.stubGlobal("document", { hasFocus: () => false });
   mock.calls.length = 0; mock.responses.clear();
   app = (await import("../src/renderer/src/store")).useApp;
-  app.setState({ features: new Set(["input-ledger-v1"]), selectedId: "cutex.s1", selectedHost: "local", inputs: { [key]: seed() }, ledgerOutbox: {}, ledgerOwnerDrafts: {}, outbox: {}, pendingSteers: {} });
+  app.setState({ features: new Set(["input-ledger-v1", "owner-idle-busy-timeline-v1"]), selectedId: "cutex.s1", selectedHost: "local", inputs: { [key]: seed() }, ledgerOutbox: {}, ledgerOwnerDrafts: {}, outbox: {}, pendingSteers: {} });
   mock.responses.set("inputDismiss", () => ({ ledgerEpoch: "e", stateRevision: 1, records: [], failed: [] }));
   mock.responses.set("inputList", () => ({ ledgerEpoch: "e", stateRevision: 1, records: [], delivery: delivery("idle", 1), complete: true }));
 }, 60_000);
@@ -66,6 +66,22 @@ describe("D3 owner ledger integration", () => {
     await submitted;
     expect(app.getState().ledgerOutbox[key]).toEqual([]);
     expect(app.getState().inputs[key]?.records.get(first.inputId)?.surface).toBe("timeline");
+  });
+  it.each([false, true].flatMap(fixed => [false, true].flatMap(carries => [false, true].map(running => ({ fixed, carries, running })))))("hostBusy prediction keeps its surface with 057: %j", async ({ fixed, carries, running }) => {
+    const surface = fixed && !running ? "timeline" : "nextUp";
+    const turn = running ? { turnId: "t1", kind: "owner" as const, askId: null, startedAt: null, inputIds: [] } : null;
+    app.setState({ features: new Set(["input-ledger-v1", ...(fixed ? ["owner-idle-busy-timeline-v1"] : []), ...(carries ? ["owner-carries-v1"] : [])]), inputs: { [key]: { ...seed([]), delivery: delivery("held", 1, { reason: "hostBusy", turn }) } } });
+    let finish!: (result: any) => void;
+    mock.responses.set("submit", () => new Promise(resolve => { finish = resolve; }));
+    const submitted = app.getState().submit("old host", "auto");
+    const first = app.getState().ledgerOutbox[key]![0]!;
+    expect(first.predictedSurface).toBe(surface);
+    await Promise.resolve();
+    finish({ disposition: "held", input: record(first.inputId, { state: "held", reason: "hostBusy", stateRevision: 2, surface }) });
+    await submitted;
+    expect(app.getState().ledgerOutbox[key]).toEqual([]);
+    expect(app.getState().inputs[key]?.records.get(first.inputId)?.surface).toBe(surface);
+    expect(mock.calls.filter(call => call.method === "submit")).toHaveLength(1);
   });
   it("only an explicit owner retry recomputes the O0 prediction from current delivery", async () => {
     app.setState({ inputs: { [key]: { ...seed([]), delivery: delivery("offline", 1) } } });
@@ -273,10 +289,10 @@ describe("D3 surface projection", () => {
   it.each(["offline", "starting"] as const)("%s O0 appears only in nextUp", state => {
     expect(predictedOwnerSurface({ strategy: "auto" }, delivery(state, 1))).toBe("nextUp");
   });
-  it("queue and held owner messages predict nextUp", () => {
+  it("queue and paused predict nextUp; idle hostBusy predicts timeline", () => {
     expect(predictedOwnerSurface({ strategy: "queue" }, delivery("turn", 1))).toBe("nextUp");
     expect(predictedOwnerSurface({ strategy: "auto" }, delivery("held", 1, { reason: "paused" }))).toBe("nextUp");
-    expect(predictedOwnerSurface({ strategy: "auto" }, delivery("held", 1, { reason: "hostBusy" }))).toBe("nextUp");
+    expect(predictedOwnerSurface({ strategy: "auto" }, delivery("held", 1, { reason: "hostBusy" }), true)).toBe("timeline");
   });
   it("joins identical text only by id, and includes non-owner timeline records", () => {
     const owner = record("owner", { preview: "same text" });
@@ -293,5 +309,32 @@ describe("D3 surface projection", () => {
     expect(missingTimelineRecords(records, [item])).toEqual([]);
     // Rendering the native item never changes the authoritative accepted state.
     expect(records.get("bus-id")?.state).toBe("accepted");
+  });
+});
+
+describe("057 per-notice hold", () => {
+  it.each([true, false])("uses current CAS and authoritative response for held=%s", async held => {
+    const before = record("notice", { kind: "systemNotice", surface: "nextUp", rev: 7, state: "waiting", actions: [held ? "hold" : "releaseHold"], details: { ownerHold: !held } });
+    const after = { ...before, rev: 8, stateRevision: 2, details: { ownerHold: held }, reason: held ? "ownerPause" : "afterTurn", actions: [held ? "releaseHold" : "hold"] } as typeof before;
+    app.setState({ features: new Set(["input-ledger-v1", "owner-carries-v1"]), inputs: { [key]: seed([before]) } });
+    mock.responses.set("inputHold", () => ({ ledgerEpoch: "e", stateRevision: 2, record: after }));
+    mock.responses.set("inputGet", () => ({ ledgerEpoch: "e", stateRevision: 2, records: [after], missing: [] }));
+    await app.getState().holdInput("cutex.s1", "notice", held, "local");
+    expect(mock.calls.find(c => c.method === "inputHold")?.args).toEqual(["cutex.s1", { inputId: "notice", expectedRev: 7, held }]);
+    expect(app.getState().inputs[key]!.records.get("notice")).toEqual(after);
+  });
+  it("refuses old hosts, absent action, owner and delegation request", async () => {
+    for (const kind of ["systemNotice", "owner", "delegationRequest"] as const) {
+      const input = record("notice", { kind, surface: "nextUp", actions: ["hold"] });
+      app.setState({ features: new Set(["input-ledger-v1"]), inputs: { [key]: seed([input]) } });
+      await app.getState().holdInput("cutex.s1", "notice", true, "local");
+      if (kind !== "systemNotice") {
+        app.setState({ features: new Set(["input-ledger-v1", "owner-carries-v1"]) });
+        await app.getState().holdInput("cutex.s1", "notice", true, "local");
+      }
+    }
+    app.setState({ inputs: { [key]: seed([record("notice", { kind: "systemNotice", reason: "ownerPause", surface: "nextUp", actions: [] })]) } });
+    await app.getState().holdInput("cutex.s1", "notice", false, "local");
+    expect(mock.calls.some(c => c.method === "inputHold")).toBe(false);
   });
 });

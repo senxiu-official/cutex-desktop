@@ -13,12 +13,9 @@ import {
   FolderKanban,
   Hash,
   MailCheck,
-  PanelLeft,
   Pencil,
   Plus,
   Power,
-  Square,
-  SquareCheck,
   Star,
   StarOff,
   StickyNote,
@@ -30,7 +27,7 @@ import {
 import type { MessageKey } from "../i18n";
 import { featuresOf, hostApi, sidebarOf, useApp } from "../store";
 import { promptDialog, type MenuEntry } from "./contextMenu";
-import { getUiPrefs, hostListKeys, setProjectRemark, toggleIdleUnfolded, toggleStarred } from "./prefs";
+import { getUiPrefs, hostListKeys, setProjectRemark, toggleStarred } from "./prefs";
 import { REMARK_MAX } from "./projectRemarks";
 import { hostKey } from "./hostKeys";
 import { projectMuted, projectMuteSupported, toggleProjectMuted } from "./notificationLevelsStore";
@@ -142,7 +139,6 @@ export function projectMenu(group: SidebarGroup, workspaceRoot: string | null, c
   const project = group.kind === "project";
   const name = project ? group.name : t("sidebar.independent");
   const starred = hostListKeys("starredProjects", [host]).includes(hostKey(host, group.id));
-  const unfolded = hostListKeys("idleUnfolded", [host]).includes(hostKey(host, group.id));
   const muted = projectMuted(group.id);
   const sidebar = sidebarOf(app, host);
   const summary = project ? sidebar?.projects?.projects.find((p) => p.project_id === group.id) : undefined;
@@ -189,15 +185,7 @@ export function projectMenu(group: SidebarGroup, workspaceRoot: string | null, c
     "separator",
     // ── display (this device) ──
     toggle && { label: collapsed ? t("menu.expand") : t("menu.collapse"), icon: collapsed ? <ChevronsUpDown size={ICON} /> : <ChevronsDownUp size={ICON} />, onSelect: toggle },
-    { label: starred ? t("menu.unstar") : t("menu.star"), icon: starred ? <StarOff size={ICON} /> : <Star size={ICON} />, onSelect: () => toggleStarred(group.id, host) },
-    // Only meaningful while 收起在线空闲 is on (Settings → 外观 → 侧栏). One level down (侧栏显示 ›), so
-    // a stray click on the main menu never unfolds the project's idle agents.
-    getUiPrefs().foldIdleAgents && {
-      label: t("menu.sidebarDisplay"),
-      icon: <PanelLeft size={ICON} />,
-      onSelect: () => {},
-      submenu: [{ label: t("menu.idleUnfolded"), icon: unfolded ? <SquareCheck size={ICON} /> : <Square size={ICON} />, title: t("menu.idleUnfoldedHint"), onSelect: () => toggleIdleUnfolded(group.id, host) }],
-    },
+    { label: starred ? t("menu.unstar") : t("menu.star"), info: starred ? undefined : t("menu.starHint"), icon: starred ? <StarOff size={ICON} /> : <Star size={ICON} />, onSelect: () => toggleStarred(group.id, host) },
     // Sidebar sections (pure UI): keyed by host + project, so each host's entry moves on its own.
     project && moveToSectionEntry(hostKey(host, group.id), t),
     // The notification mute is the focus host's setting only (notificationLevelsStore).
@@ -218,7 +206,7 @@ export function projectMenu(group: SidebarGroup, workspaceRoot: string | null, c
     // ── edit ── (membership and the Director: the project page's agent tab; workspace root: 项目设置)
     owner && summary && { label: t("menu.renameProject"), icon: <Pencil size={ICON} />, onSelect: () => void renameProject(group.id, host, t).catch(report) },
     // Device-local (prefs `projectRemarks`): needs no project summary from the daemon.
-    project && { label: t("remark.menu"), icon: <StickyNote size={ICON} />, title: t("remark.tooltip"), onSelect: () => void editProjectRemark(group.id, host, name, t) },
+    project && { label: t("remark.menu"), icon: <StickyNote size={ICON} />, info: t("remark.tooltip"), onSelect: () => void editProjectRemark(group.id, host, name, t) },
     // 添加成员… / 指定·更换主管…: the project page's agent tab with its picker open (param pick).
     owner && summary && { label: `${t("projects.addMember")}…`, icon: <UserPlus size={ICON} />, onSelect: () => openProjectPage(group.id, host, { tab: "agents", pick: "add" }) },
     owner && summary && (director ? features.has(OWNER_ROTATION_FEATURE) : !directorId && features.has(OPTIONAL_DIRECTOR_FEATURE)) && {

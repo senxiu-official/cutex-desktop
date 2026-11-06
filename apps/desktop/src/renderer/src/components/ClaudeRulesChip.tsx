@@ -128,7 +128,7 @@ export function RulesChip({
               <span className="block truncate text-ui font-semibold">{t("approvals.rules.title", { name })}</span>
               <span className="block truncate text-caption text-subtle">{t(shown === "claude" ? "approvals.rules.subtitleClaude" : "approvals.rules.subtitle")}</span>
             </span>
-            {cutex && <span className="shrink-0 text-subtle" title={t("approvals.rules.explainer")} aria-label={t("approvals.rules.explainer")}><CircleHelp size={14} aria-hidden /></span>}
+            {cutex && <span className="shrink-0 text-subtle" data-tip={t("approvals.rules.explainer")} aria-label={t("approvals.rules.explainer")}><CircleHelp size={14} aria-hidden /></span>}
           </div>
           {tabs && (
             <div role="tablist" className="mb-2 flex rounded-full bg-surface-2 p-0.5" data-rules-tabs="">
@@ -225,7 +225,7 @@ export function ClaudeAllowRules({ sessionId, hostId = "local", onView }: { sess
 
   return (
     <div className="mt-1.5" data-testid="claude-allow-rules">
-      <div className="mb-0.5 text-subtle" title={t("composer.claude.rulesHint")}>
+      <div className="mb-0.5 text-subtle" data-tip={t("composer.claude.rulesHint")}>
         {t("composer.claude.rulesTitle")}
         {view && view.allow.length > 0 && <span className="ml-1 tabular-nums">· {view.allow.length}</span>}
       </div>
@@ -239,12 +239,12 @@ export function ClaudeAllowRules({ sessionId, hostId = "local", onView }: { sess
             <ul className="max-h-36 overflow-auto">
               {view.allow.map((rule) => (
                 <li key={rule} className="group flex items-center gap-1 py-0.5">
-                  <span className="min-w-0 flex-1 truncate font-mono text-caption/[inherit] text-foreground" title={rule}>{rule}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-caption/[inherit] text-foreground" data-tip={rule}>{rule}</span>
                   <button
                     onClick={() => void save(view.allow.filter((r) => r !== rule))}
                     disabled={saving}
                     aria-label={t("composer.claude.ruleRemove", { rule })}
-                    title={t("composer.claude.ruleRemove", { rule })}
+                    data-tip={t("composer.claude.ruleRemove", { rule })}
                     className="rounded p-0.5 text-subtle hover:bg-surface-2 hover:text-danger disabled:opacity-50"
                   >
                     <X size={12} aria-hidden />
@@ -268,11 +268,11 @@ export function ClaudeAllowRules({ sessionId, hostId = "local", onView }: { sess
               disabled={saving}
               className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 font-mono text-caption/[inherit] outline-none focus:border-accent"
             />
-            <button onClick={add} disabled={saving || !draft.trim()} title={t("composer.claude.ruleAdd")} aria-label={t("composer.claude.ruleAdd")} className="rounded p-0.5 text-subtle hover:bg-surface-2 hover:text-foreground disabled:opacity-50">
+            <button onClick={add} disabled={saving || !draft.trim()} data-tip={t("composer.claude.ruleAdd")} aria-label={t("composer.claude.ruleAdd")} className="rounded p-0.5 text-subtle hover:bg-surface-2 hover:text-foreground disabled:opacity-50">
               <Plus size={13} aria-hidden />
             </button>
           </div>
-          <p className="mt-1 truncate text-caption/[inherit] text-subtle" title={view.workspace}>{t("composer.claude.rulesScope", { workspace: view.workspace })}</p>
+          <p className="mt-1 truncate text-caption/[inherit] text-subtle" data-tip={view.workspace}>{t("composer.claude.rulesScope", { workspace: view.workspace })}</p>
         </>
       )}
       {note && (

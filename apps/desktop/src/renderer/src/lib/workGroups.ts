@@ -139,6 +139,14 @@ export function toolLiveness(item: RawItem, turnRunning: boolean, backgroundItem
   return backgroundItemIds.includes(item.id) ? "background" : "interrupted";
 }
 
+/** The last tool determines the result; a live tail (including reasoning) still means working. */
+export function workGroupOutcome(steps: readonly StepEntry[]): { status: "running" | "failed" | "completed"; lastTool: ToolEntry | undefined } {
+  const last = steps.at(-1);
+  const lastTool = steps.findLast((step): step is ToolEntry => step.kind === "tool");
+  const running = last?.kind === "tool" ? isRunning(last.item) : last?.streaming ?? false;
+  return { status: running ? "running" : lastTool && isFailed(lastTool.item) ? "failed" : "completed", lastTool };
+}
+
 export function summarize(steps: StepEntry[]): WorkSummary {
   const files = new Set<string>();
   const s: WorkSummary = { commands: 0, files: 0, tools: 0, agents: 0, failed: 0, durationMs: null, reasoning: 0 };

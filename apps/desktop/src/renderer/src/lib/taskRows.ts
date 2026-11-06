@@ -170,6 +170,7 @@ function obj(value: unknown): Record<string, unknown> | null {
 }
 
 /** The tool's JSON result object (structuredContent, else the single text block), if any. */
+export function toolResultObject(item: RawItem): Record<string, unknown> | null { return result(item); }
 function result(item: RawItem): Record<string, unknown> | null {
   const r = obj(item.result);
   if (!r) return null;

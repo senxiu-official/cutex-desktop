@@ -135,13 +135,14 @@ describe("托盘常驻 on, nothing pinned: the band is there", () => {
     expect(q("[data-tray-pin]")).not.toBeNull();
   });
 
-  it("docked left / right: just the ＋ (no label, no hint line), the hint on hover", () => {
+  it("docked left / right: just the ＋ (no label, no hint line), the hint in the tray's ⓘ (040 §2.1)", () => {
     setTrayPrefs({ edge: "left" });
     render(panes);
     expect(q("[data-tray-band]")!.style.width).toBe(`${TRAY_BAND_PX}px`);
     const pin = q("[data-tray-pin]")!;
     expect(pin.textContent).toBe("");
-    expect(pin.title).toContain("pane.tray.emptyHint");
+    expect(pin.dataset.tip).toBe("pane.tray.pinTitle");
+    expect(q("[data-info-mark]")!.dataset.tip).toContain("pane.tray.emptyHint");
     expect(pin.getAttribute("aria-label")).toBe("pane.tray.pinTitle");
     expect(q("[data-tray-hint]")).toBeNull();
   });

@@ -1,5 +1,5 @@
 export const zhCN = {
-  "status-capsule.moduleTitle": "状态胶囊",
+  "status-capsule.moduleTitle": "状态胶囊（旧版，已冻结）",
   "status-capsule.description": "对话区上方的悬浮状态胶囊。关闭后，放在胶囊里的状态不再常驻显示（状态行、目标、作业等照常），胶囊的位置和大小会保留",
   "status-capsule.title": "状态胶囊",
   "status-capsule.collapse": "收起为胶囊",
@@ -8,7 +8,7 @@ export const zhCN = {
   "status-capsule.more": "胶囊位置、大小与内容",
   "status-capsule.items": "在胶囊里显示",
   "status-capsule.shortcut": "{key} 展开 / 收起",
-  "status-capsule.section": "胶囊",
+  "status-capsule.section": "胶囊（旧版，已冻结）",
   "status-capsule.always": "始终显示胶囊",
   "status-capsule.always.hint": "没有内容时也显示",
   "status-capsule.corner": "位置",

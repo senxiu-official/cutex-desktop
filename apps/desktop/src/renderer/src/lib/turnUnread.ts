@@ -47,6 +47,47 @@ export function applyTurnEnd(marks: TurnMarks, id: string, end: TurnEnd, at: num
   return { ...marks, [id]: { at, failed: end.status === "failed", turnId: end.turnId, count: unreadCount(marks[id]) + 1 } };
 }
 
+/** The turn id of a native `turn/started` notification's params ("" when it has none); null otherwise. */
+export function turnStartOf(method: string | undefined, params: unknown): string | null {
+  if (method !== "turn/started") return null;
+  const id = (params as { turn?: { id?: unknown } } | null)?.turn?.id;
+  return typeof id === "string" ? id : "";
+}
+
+/**
+ * A later turn of `id` started (owner decision 2026-11-05): a failed mark only asks for a look until the
+ * agent moved on, so it turns into a plain unseen-turn mark (count unchanged). A later failure marks it again.
+ */
+export function applyTurnStart(marks: TurnMarks, id: string, turnId: string): TurnMarks {
+  const mark = marks[id];
+  if (!mark?.failed || (turnId && turnId === mark.turnId)) return marks;
+  return { ...marks, [id]: { ...mark, failed: false } };
+}
+
+/** What a running session tells about a mark, e.g. one restored from storage after a restart. */
+export interface RunningTurn {
+  cutexSessionId: string;
+  runtime: { activeTurnId: string | null; activeTurnObservedAt: string | null };
+}
+
+/**
+ * Failed marks of agents now running a later turn (seen in a snapshot, not as an event: the app was closed
+ * when it started). Only when the snapshot says the turn started after the failure: an older snapshot never
+ * clears a fresh failure; a mark without a turn id is left alone.
+ */
+export function settleStartedTurns(marks: TurnMarks, sessions: readonly RunningTurn[]): TurnMarks {
+  let next = marks;
+  for (const session of sessions) {
+    const mark = next[session.cutexSessionId];
+    const active = session.runtime.activeTurnId;
+    if (!mark?.failed || !mark.turnId || !active || active === mark.turnId) continue;
+    const observed = session.runtime.activeTurnObservedAt ? Date.parse(session.runtime.activeTurnObservedAt) : NaN;
+    if (!(observed > mark.at)) continue;
+    next = applyTurnStart(next, session.cutexSessionId, active);
+  }
+  return next;
+}
+
 /** Without `id`'s mark (the same object when there is none). */
 export function clearMark(marks: TurnMarks, id: string): TurnMarks {
   if (!(id in marks)) return marks;
@@ -152,6 +193,16 @@ export function recordTurnEnd(id: string, end: TurnEnd, viewing: boolean, at = D
 export function recordTurnEndOn(hostId: string, id: string, end: TurnEnd, viewing: boolean, at = Date.now()): void {
   if (!viewing && end.status === "interrupted") return; // marks stay as they were
   updateHost(hostId, (marks) => applyTurnEnd(marks, id, end, at, viewing), [id]);
+}
+
+/** A turn of `hostId`'s agent `id` started. */
+export function recordTurnStartOn(hostId: string, id: string, turnId: string): void {
+  updateHost(hostId, (marks) => applyTurnStart(marks, id, turnId), [id]);
+}
+
+/** `hostId`'s agents in a sidebar snapshot: failed marks of those already running a later turn settle. */
+export function settleStartedTurnsOn(hostId: string, sessions: readonly RunningTurn[]): void {
+  updateHost(hostId, (marks) => settleStartedTurns(marks, sessions));
 }
 
 /** The owner opened / is looking at the focus host's agent. */

@@ -1,3 +1,4 @@
+// LEGACY(status-capsule): frozen (owner 2026-11-05). Kept on with its defaults and placements; no new work here.
 // Portions adapted from ZCode packages/ui/src/v4/ConversationStatusPanel.tsx
 // (https://github.com/zai-org/ZCode), Copyright 2026 Z.AI Co., Ltd, licensed under the Apache
 // License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0); see /NOTICE.
@@ -206,7 +207,7 @@ function PlacementMenu({ items, onClose }: { items: readonly PlacedStatus[]; onC
   const set = <K extends keyof UiPrefs>(key: K, value: UiPrefs[K]) => setUiPref(key, value);
   const label = "px-1 pt-1 pb-0.5 text-caption/[inherit] text-subtle";
   return (
-    <div ref={root} role="menu" className="absolute top-8 right-1 z-50 w-52 rounded-xl border border-border bg-surface p-1.5 shadow-lg">
+    <div ref={root} role="menu" className="float absolute top-8 right-1 z-[160] w-52 p-1.5">
       <div className={label}>{t("status-capsule.corner")}</div>
       <div className="grid grid-cols-2 gap-0.5">
         {CAPSULE_CORNERS.map((c) => (

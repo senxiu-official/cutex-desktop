@@ -1,7 +1,7 @@
 import { requestFork } from "./requestFork";
 import { isHostBusyActionPending } from "./hostBusyActions";
 import { mentionPlainText } from "./mentionWire";
-import { agentPauseNow, agentPauseSupported, pauseAgent, resumeAgent } from "./agentPause";
+import { agentToolGateNow, agentPauseNow, agentPauseSupported, pauseAgent, resumeAgent } from "./agentPause";
 import { canRevealLocal, downloadFileAction, fileActions, performFilePathAction, revealFileLabel } from "./fileActions";
 // Menu item builders (DESIGN §4.12). Each surface — sidebar row, project header, message, tool
 // row, file link / tree / changes entry, side-pane tab — gets one builder shared by its
@@ -40,9 +40,11 @@ import {
   Type,
   Undo2,
   X,
+  ExternalLink,
   FileClock,
   CircleArrowUp,
   CircleDot,
+  SlidersHorizontal,
   Smile,
   AppWindow,
 } from "lucide-react";
@@ -60,6 +62,7 @@ import { refActionEntries } from "./refActions";
 import { agentRef } from "./refs";
 import { AVATAR_COLOR_FEATURE, agentInfoPatch, isHexColor } from "./avatar";
 import { realAgentName } from "./agentAlias";
+import { canRenameFormal, restoreError, RestoreNameError, sessionOf } from "./agentRename";
 import { writeMetadataRetrying } from "./metadataRetry";
 import { holdMetadata, releaseMetadata, serverView } from "./pendingMetadata";
 import { refusalText } from "./profileCreate";
@@ -78,6 +81,7 @@ import { restoreWithDirector } from "./projectArchive";
 import { openGitDiff, openPath, openSide, revealInTree } from "./sideOpen";
 import { FILES_COMPONENT } from "./sideKinds";
 import { OWNER_ROTATION_FEATURE } from "../../../shared/directorRotation";
+import { FORK_PROFILE_FEATURE } from "../../../shared/sessionFork";
 import type { MutationResult } from "../../../shared/ipc";
 import { asksPauseKind } from "./stopHold";
 import { loadQuotaContinue, quotaContinueNow, setQuotaContinue } from "./quotaContinue";
@@ -196,7 +200,22 @@ export async function restoreArchived(session: SessionResource, withProject = tr
     await pending;
   }
   if (!current()) return;
-  await app.sessionAction(session.cutexSessionId, "cutex/session/restore", undefined, host);
+  try {
+    await app.sessionAction(session.cutexSessionId, "cutex/session/restore", undefined, host);
+  } catch (error) {
+    throw restoreError(error, host, session);
+  }
+}
+
+/**
+ * Restore refused because its own name is taken / reserved now: say so and offer 改名… (编辑信息…, where an
+ * archived agent can be renamed in place); it stays archived until the owner restores it again. Other errors pass.
+ */
+export async function offerRenameAfterRestore(error: unknown, t: T): Promise<void> {
+  if (!(error instanceof RestoreNameError)) throw error;
+  if (error.block.renameRequired === false) { await noticeDialog(error.message); return; }
+  const fresh = sessionOf(error.host, error.session.cutexSessionId) ?? error.session;
+  if (await confirmDialog(error.message, false, { ok: t("rename.restoreRename"), cancel: t("dialog.cancel") })) await editAgentInfo(fresh, error.host);
 }
 
 /** Archiving an agent that owns services: name them so the owner can reassign later. */
@@ -208,10 +227,16 @@ export function ownedServicesNote(id: string, t: T, host: string): string {
   return t("menu.archiveOwnsServices", { n: owned.length, names: owned.map((s) => s.displayName || s.slug).join("、") });
 }
 
-/** Rename (menu + `/rename`): `name` given → set it directly, else ask. Empty = back to the default. */
+/**
+ * 显示名称… (menu + `/rename`): `name` given → set it directly, else ask. Empty = back to the default.
+ * Only displayNameOverride changes: cutex lists and addresses an agent by its formal name (agent_list, short ids,
+ * bus headers fall back to the override only when there is no formal name), so the dialog says which case this is.
+ */
 export async function renameAgent(session: SessionResource, t: T, name?: string | null, host = hostOfSession(session)): Promise<void> {
   const current = fenceOf(host);
-  const next = name ?? (await promptDialog(t("menu.rename"), session.displayNameOverride ?? session.displayName, { placeholder: session.formalAgentName ?? undefined }));
+  const formal = session.formalAgentName?.trim() || null;
+  const hint = formal ? t("menu.displayNameHint", { name: formal }) : t("menu.displayNameHintNoFormal");
+  const next = name ?? (await promptDialog(t("menu.displayName"), session.displayNameOverride ?? session.displayName, { placeholder: formal ?? undefined, hint }));
   if (next === null || !current()) return;
   await updateMetadata(session, host, { displayName: next.trim() || null }, { displayNameOverride: session.displayNameOverride ?? null });
 }
@@ -272,14 +297,15 @@ export async function updateAgentBadge(session: SessionResource, host: string, b
 }
 
 /** 编辑信息: 显示名 + avatar + note in one dialog, one metadata update with only what changed. */
-async function editAgentInfo(session: SessionResource, host: string): Promise<void> {
+export async function editAgentInfo(session: SessionResource, host: string): Promise<void> {
   const current = fenceOf(host);
   const app = useApp.getState();
   const features = featuresOf(app, host);
   const style = sidebarOf(app, host)?.hostRows[session.cutexSessionId]?.profileStyle as { color?: unknown } | null | undefined;
   const editName = features.has("session-metadata");
   const before = { avatar: session.avatar ?? null, ...(features.has("session-avatar-mode") ? { avatarMode: session.avatarMode ?? null } : {}), note: session.note ?? null, ...(features.has("session-badge") ? { badge: session.badge ?? null } : {}), ...(editName ? { displayName: session.displayNameOverride ?? null } : {}) };
-  const options = { editAvatarMode: features.has("session-avatar-mode"), realName: realAgentName(session), combineColor: features.has(AVATAR_COLOR_FEATURE), editName, editBadge: features.has("session-badge") };
+  const options = { editAvatarMode: features.has("session-avatar-mode"), realName: realAgentName(session), ownName: session.formalAgentName?.trim() || null, combineColor: features.has(AVATAR_COLOR_FEATURE), editName, editBadge: features.has("session-badge"),
+    rename: canRenameFormal(features, session) ? { host, sessionId: session.cutexSessionId, revision: session.revision, archived: session.lifecycle === "retired" } : null };
   const after = await agentInfoDialog(session.displayName, typeof style?.color === "string" ? style.color : null, session.cutexSessionId, before, options);
   if (!after || !current()) return;
   const patch: Record<string, unknown> = agentInfoPatch(before, after);
@@ -345,6 +371,13 @@ function resetAvatarItem(session: SessionResource, t: T, host: string, features:
     ...(session.avatar ? { submenu: [{ label: t("avatarStyle.confirmReset" as MessageKey, { name: session.displayName }), hint: t("avatarStyle.resetOwnHint" as MessageKey), onSelect: apply }] } : {}) };
 }
 
+/** 头像 › (owner 2026-11-05): 跟着 Profile 变, 重置为当前风格 (its confirm stays one level down), 显示 / 隐藏头像; null when none applies. */
+function avatarItem(session: SessionResource, t: T, host: string, features: ReadonlySet<string>, pinned: boolean): MenuAction | null {
+  const rows = [followAvatarItem(session, t, host, features), resetAvatarItem(session, t, host, features), avatarSwitchItem(session, t, host, features, pinned)].filter((r): r is MenuAction => !!r);
+  if (!rows.length) return null;
+  return { label: t("menu.avatar"), icon: <Smile size={ICON} />, onSelect: () => {}, submenu: rows };
+}
+
 /** One note write (the tray's 「备注…」) through the same fenced metadata update as 编辑信息, drawn at once
  *  (updateMetadataNow); null / blank clears it. */
 export async function setAgentNote(session: SessionResource, host: string, note: string | null): Promise<void> {
@@ -388,20 +421,35 @@ async function toggleClaudeTool(session: SessionResource, key: ClaudeTool, t: T,
   await app.sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, host);
 }
 
-function claudeToolsItem(session: SessionResource, t: T, host: string): MenuEntry {
+/** Claude 工具: its two switches, flattened into 设置 › under a 「Claude 工具」 note (no third menu level); [] when not a Claude agent. */
+function claudeToolRows(session: SessionResource, t: T, host: string): MenuAction[] {
   const write = claudeTool(session, "claudeAllowWrite");
   const exec = claudeTool(session, "claudeAllowExec");
-  if (write === null || exec === null) return null;
+  if (write === null || exec === null) return [];
   const state = (on: boolean) => (on ? t("menu.on") : t("menu.off"));
-  return {
-    label: t("menu.claudeTools"),
-    icon: <Wrench size={ICON} />,
-    onSelect: () => {},
-    submenu: [
-      { label: t("menu.claudeWrite"), hint: state(write), onSelect: guarded(() => toggleClaudeTool(session, "claudeAllowWrite", t, host)) },
-      { label: t("menu.claudeExec"), hint: state(exec), onSelect: guarded(() => toggleClaudeTool(session, "claudeAllowExec", t, host)) },
-    ],
-  };
+  return [
+    { label: t("menu.claudeTools"), note: true, disabled: true, onSelect: () => {} },
+    { label: t("menu.claudeWrite"), icon: <Wrench size={ICON} />, hint: state(write), onSelect: guarded(() => toggleClaudeTool(session, "claudeAllowWrite", t, host)) },
+    { label: t("menu.claudeExec"), icon: <Wrench size={ICON} />, hint: state(exec), onSelect: guarded(() => toggleClaudeTool(session, "claudeAllowExec", t, host)) },
+  ];
+}
+
+/**
+ * 设置 › (owner 2026-11-05): the agent's own switches. A single row stays at the top level (no one-row submenu); the
+ * Claude tool switches only come with their note, so they always go one level down.
+ */
+function settingsEntries(session: SessionResource, t: T, host: string): MenuEntry[] {
+  const claude = claudeToolRows(session, t, host);
+  const quota = quotaContinueItem(session, t, host);
+  if (!claude.length) return quota ? [quota] : [];
+  return [{ label: t("menu.agentSettings"), icon: <SlidersHorizontal size={ICON} />, onSelect: () => {}, submenu: quota ? [...claude, "separator", quota] : claude }];
+}
+
+/** 打开 › (owner 2026-11-05): 打开文件面板, 打开所在项目 and the window rows; one row alone stays at the top level. */
+function openEntries(rows: (MenuAction | false | null | undefined | "")[], t: T): MenuEntry[] {
+  const shown = rows.filter((r): r is MenuAction => !!r);
+  if (shown.length <= 1) return shown;
+  return [{ label: t("menu.open"), icon: <ExternalLink size={ICON} />, onSelect: () => {}, submenu: shown }];
 }
 
 /**
@@ -418,7 +466,7 @@ function quotaContinueItem(session: SessionResource, t: T, host: string): MenuEn
     label: t("quotaContinue.menu"),
     icon: <BatteryWarning size={ICON} />,
     hint: view.enabled ? t("menu.on") : t("menu.off"),
-    title: t("quotaContinue.menuHint"),
+    info: t("quotaContinue.menuHint"),
     onSelect: guarded(async () => {
       await loadQuotaContinue(host, id);
       const current = quotaContinueNow(host, session) ?? view;
@@ -525,8 +573,8 @@ function repinItem(session: SessionResource, t: T, host: string): MenuAction | n
 export function agentPauseItem(hostId: string, sessionId: string, t: T): MenuAction {
   const pause = agentPauseNow(hostId, sessionId);
   return pause
-    ? { label: t("agentPause.resume"), title: t("agentPause.resumeHint"), icon: <Play size={ICON} />, onSelect: () => void resumeAgent(hostId, sessionId) }
-    : { label: t("agentPause.pause"), title: t("agentPause.pauseHint"), icon: <CirclePause size={ICON} />, onSelect: () => void pauseAgent(hostId, sessionId) };
+    ? { label: t("agentPause.resume"), info: t("agentPause.resumeHint"), icon: <Play size={ICON} />, onSelect: () => void resumeAgent(hostId, sessionId) }
+    : { label: t("agentPause.pause"), info: t(agentToolGateNow(hostId, sessionId) ? "agentPause.pauseHintToolGate" : "agentPause.pauseHint"), icon: <CirclePause size={ICON} />, onSelect: () => void pauseAgent(hostId, sessionId) };
 }
 
 /**
@@ -536,8 +584,8 @@ export function agentPauseItem(hostId: string, sessionId: string, t: T): MenuAct
 function windowEntries(host: string, id: string, t: T): MenuEntry[] {
   if (!desksEnabled()) return [];
   return [
-    ...windowChoices().map((w): MenuAction => ({ label: w.key === MAIN_WINDOW ? t("desk.openInMain") : t("desk.openIn", { n: w.n }), icon: <AppWindow size={ICON} />, title: t("desk.openInHint"), onSelect: () => openInWindow(w.key, host, id) })),
-    { label: t("desk.openInNew"), icon: <AppWindow size={ICON} />, title: t("desk.moveToWindowHint"), onSelect: () => void openInNewDesk(host, id) },
+    ...windowChoices().map((w): MenuAction => ({ label: w.key === MAIN_WINDOW ? t("desk.openInMain") : t("desk.openIn", { n: w.n }), icon: <AppWindow size={ICON} />, info: t("desk.openInHint"), onSelect: () => openInWindow(w.key, host, id) })),
+    { label: t("desk.openInNew"), icon: <AppWindow size={ICON} />, info: t("desk.moveToWindowHint"), onSelect: () => void openInNewDesk(host, id) },
   ];
 }
 
@@ -559,7 +607,8 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
   // A closed runtime gate (runtime-gate-pause): 恢复输入 = asks resume (reopens the gate).
   const gate = asksPauseKind(viewOf(app, host, id)?.asksPaused) === "gate";
   const asksPauseItem: MenuAction | false = !retired && features.has("asks-pause-v2") && {
-    label: t(stopOnly ? "paused.resume" : gate ? "asksPause.gateResumeMenu" : asksPaused ? "asksPause.resume" : "asksPause.pause"),
+    label: t(stopOnly ? "paused.resume" : gate ? "asksPause.gateResumeMenu" : asksPaused ? "menu.asksResume" : "menu.asksPause"),
+    info: t(stopOnly ? "paused.resumeHintStop" : gate ? "asksPause.gateResumeHint" : asksPaused ? "menu.asksPauseHint" : "menu.asksPauseHint"),
     icon: <Hourglass size={ICON} />,
     onSelect: guarded(() => (stopOnly ? app.resumePaused(id, host) : asksPaused ? app.resumeAsks(id, host) : app.pauseAsks(id, host))),
   };
@@ -595,6 +644,7 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
     return [
       !retired && { label: pinned ? t("menu.unpin") : t("menu.pin"), icon: pinned ? <PinOff size={ICON} /> : <Pin size={ICON} />, onSelect: () => app.togglePin(id, host) },
       unread && { label: t("menu.markRead"), icon: <MailCheck size={ICON} />, onSelect: () => markSeenOn(host, id) },
+      // One row here (打开所在项目): stays at the top level (openEntries' one-row rule).
       projectId && { label: t("menu.openProject"), icon: <FolderKanban size={ICON} />, onSelect: () => app.openPage("projects.page", { project: projectId, ...(focus ? {} : { host }) }) },
       {
         label: t("menu.copy"),
@@ -608,9 +658,10 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
       ...refActionEntries(agentRef(host, id, session.displayName), true),
     ];
   }
-  // Grouped (owner 2026-10-16): this device's view (置顶, 标为已读, module ref actions) · open / copy ·
-  // change the agent · its runtime (停止 / 重启) · archive / delete. Runtime and danger rows sit in
-  // their own groups, so a stray click near a view action never arms 停止运行时.
+  // Grouped (owner 2026-10-16, cleaned 2026-11-05): this device's view (置顶, 标为已读, the modules' ref actions:
+  // 并排打开, 投影, 钉到托盘) · open / copy, with the project's actions · who it is (显示名称, 编辑信息, 头像 ›, 分叉) ·
+  // its switches · pause · its runtime · archive / delete. Pause, runtime and danger rows sit in their own groups,
+  // so a stray click near a view action never arms 停止运行时.
   return [
     // ── view (this device only) ──
     !retired && { label: pinned ? t("menu.unpin") : t("menu.pin"), icon: pinned ? <PinOff size={ICON} /> : <Pin size={ICON} />, onSelect: () => app.togglePin(id, host) },
@@ -618,17 +669,20 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
     // The modules' `ref.action` items for the agent (§19.8).
     ...refActionEntries(agentRef(host, id, session.displayName)),
     "separator",
-    // ── open / copy ──
-    !retired && {
-      label: t("menu.openFiles"),
-      icon: <FolderOpen size={ICON} />,
-      onSelect: async () => {
-        await app.openAgent(id, host);
-        openSide(FILES_COMPONENT, {}, { focus: true });
+    // ── open › (files, project, windows) · 轮换主管… where a Director finds it · copy ──
+    ...openEntries([
+      !retired && {
+        label: t("menu.openFiles"),
+        icon: <FolderOpen size={ICON} />,
+        onSelect: async () => {
+          await app.openAgent(id, host);
+          openSide(FILES_COMPONENT, {}, { focus: true });
+        },
       },
-    },
-    projectId && { label: t("menu.openProject"), icon: <FolderKanban size={ICON} />, onSelect: () => app.openPage("projects.page", { project: projectId, ...(focus ? {} : { host }) }) },
-    ...(retired ? [] : windowEntries(host, id, t)),
+      projectId && { label: t("menu.openProject"), icon: <FolderKanban size={ICON} />, onSelect: () => app.openPage("projects.page", { project: projectId, ...(focus ? {} : { host }) }) },
+      ...(retired ? [] : (windowEntries(host, id, t) as MenuAction[])),
+    ], t),
+    rotateItem,
     {
       label: t("menu.copy"),
       icon: <Copy size={ICON} />,
@@ -640,27 +694,23 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
       ],
     },
     "separator",
-    // ── change the agent ──
-    {
-      label: t("menu.rename"),
-      icon: <Pencil size={ICON} />,
-      onSelect: guarded(() => renameAgent(session, t, undefined, host)),
-    },
-    { label: t("menu.editInfo"), icon: <StickyNote size={ICON} />, onSelect: guarded(() => editAgentInfo(session, host)) },
-    !retired && followAvatarItem(session, t, host, features),
-    !retired && resetAvatarItem(session, t, host, features),
-    !retired && avatarSwitchItem(session, t, host, features, pinned),
+    // ── who it is (one-off actions): 编辑信息… holds the display name (first field), avatar, badge and note ──
+    { label: t("menu.editInfo"), icon: <Pencil size={ICON} />, onSelect: guarded(() => editAgentInfo(session, host)) },
+    !retired && avatarItem(session, t, host, features, pinned),
     canFork && {
-      label: t("menu.forkAgent"),
+      // Ellipsis rule (docs/GLOSSARY.md): … only when a dialog asks for a choice first, here the Profile.
+      label: t("menu.forkAgent") + (features.has(FORK_PROFILE_FEATURE) ? "…" : ""),
       icon: <GitFork size={ICON} />,
       ...(block ? { disabled: true, hint: t("structural.busyHint"), title: structuralBlockText(block) } : {}),
       onSelect: guarded(() => requestFork(id, null, host)),
     },
-    !retired && claudeToolsItem(session, t, host),
-    !retired && quotaContinueItem(session, t, host),
+    "separator",
+    // ── its switches (on / off) ──
+    ...(retired ? [] : settingsEntries(session, t, host)),
+    "separator",
+    // ── pause (the whole agent, or only new delegations) ──
     pauseItem,
     asksPauseItem,
-    rotateItem,
     "separator",
     // ── runtime ──
     runtimeItem(session, t, host),
@@ -668,7 +718,7 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
     repinItem(session, t, host),
     "separator",
     // ── archive / delete ──
-    retired && { label: t("menu.restore"), icon: <ArchiveRestore size={ICON} />, onSelect: guarded(() => restoreWithDirector(session, t, host)) },
+    retired && { label: t("menu.restore"), icon: <ArchiveRestore size={ICON} />, onSelect: guarded(() => restoreWithDirector(session, t, host).catch((e: unknown) => offerRenameAfterRestore(e, t))) },
     retired && canDelete && deleteItem,
     // 归档 stays a plain, clickable row; 删除… sits one level down under 更多 › (a row with "›" reads
     // as a pure submenu, so it never doubles as an action).

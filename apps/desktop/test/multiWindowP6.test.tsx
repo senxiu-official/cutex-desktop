@@ -131,7 +131,8 @@ describe("the 多窗口 setting (lib/multiWindowPref)", () => {
 });
 
 describe("window menu items follow the setting (lib/menus)", () => {
-  const labels = () => normalizeEntries(agentMenu(session, t as never, "local")).map((e) => (e === "separator" ? "|" : (e as MenuAction).label));
+  // The window rows sit in 打开 › (2026-11-05) once there is more than one open row.
+  const labels = () => normalizeEntries(agentMenu(session, t as never, "local")).flatMap((e) => (e === "separator" ? ["|"] : (e as MenuAction).label === "menu.open" ? normalizeEntries((e as MenuAction).submenu as never).map((s) => (s === "separator" ? "|" : (s as MenuAction).label)) : [(e as MenuAction).label]));
   beforeEach(() => {
     const resource = { cutexSessionId: "a", displayName: "A", lifecycle: "active", revision: 1 };
     useApp.setState({ features: new Set(), sidebar: { active: [resource], hostRows: {} } as never });

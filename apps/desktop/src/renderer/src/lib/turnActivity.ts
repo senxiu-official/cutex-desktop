@@ -58,7 +58,7 @@ export function liveReasoning(timeline: TimelineView): ReasoningEntry | null {
 
 /** The active turn's entries, newest first. */
 function* trailing(timeline: TimelineView) {
-  const ids = timeline.turns.find((t) => t.id === timeline.activeTurnId)?.entryIds ?? [];
+  const ids = timeline.turns.findLast((t) => t.id === timeline.activeTurnId)?.entryIds ?? [];
   for (let i = ids.length - 1; i >= 0; i--) {
     const entry = timeline.entries.get(ids[i]!);
     if (entry) yield entry;

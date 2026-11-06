@@ -42,13 +42,16 @@ export class SidebarRefresh<T> {
     return { value: await load(), revision };
   }
 
-  read(load: () => Promise<T>): Promise<T> {
+  /**
+   * `onStale`: changes arrived while this read ran. Its result is still returned at once (a busy host
+   * must not keep the list from showing); the caller asks for the follow-up read.
+   */
+  read(load: () => Promise<T>, onStale?: () => void): Promise<T> {
     if (this.pending) return this.pending;
     const pending = (async () => {
       const first = await this.run(load);
-      // Sustained ordinary changes must not starve the UI. The caller separately fences
-      // connection/access changes; another event/tick can refresh the second snapshot.
-      return first.revision === this.revision ? first.value : (await this.run(load)).value;
+      if (first.revision !== this.revision) onStale?.();
+      return first.value;
     })().finally(() => { if (this.pending === pending) this.pending = undefined; });
     this.pending = pending;
     return pending;

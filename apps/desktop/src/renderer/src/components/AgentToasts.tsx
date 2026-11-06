@@ -32,7 +32,7 @@ function Card({ toast }: { toast: AgentToast }) {
   return (
     <div
       role="status"
-      className="motion-toast-in pointer-events-auto flex max-w-full min-w-0 items-start gap-2 rounded-lg border border-card-border bg-surface px-2.5 py-1.5 text-xs shadow-lg"
+      className="float float-toast max-w-full items-start py-1.5 pr-1.5 pl-2.5"
       data-agent-toast={toast.icon}
       onPointerEnter={() => holdAgentToast(toast.id)}
       onPointerLeave={() => releaseAgentToast(toast.id)}
@@ -41,7 +41,7 @@ function Card({ toast }: { toast: AgentToast }) {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) releaseAgentToast(toast.id);
       }}
     >
-      <Icon size={13} className="mt-0.5 shrink-0 text-accent" />
+      <Icon size={13} data-toast-icon="" className="mt-0.5" />
       <span className="line-clamp-3 min-w-0 flex-1 leading-[18px] [overflow-wrap:anywhere] text-foreground" title={toast.text}>
         {toast.text}
       </span>

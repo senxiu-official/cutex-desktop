@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { agentMentionMarkdown } from "../src/renderer/src/lib/agentMentions";
 
-const mocks = vi.hoisted(() => ({ state: { entries: new Map() } as { entries: Map<string, any>; openAgent?: (...args: unknown[]) => void }, open: vi.fn(), copy: vi.fn(), menu: vi.fn() }));
+const mocks = vi.hoisted(() => ({ state: { entries: new Map(), sidebar: null, byHost: {} } as { entries: Map<string, any>; openAgent?: (...args: unknown[]) => void; ensureArchived?: () => Promise<void>; sidebar: unknown; byHost: Record<string, any> }, open: vi.fn(), copy: vi.fn(), menu: vi.fn() }));
 vi.mock("../src/renderer/src/store", () => ({ useApp: Object.assign((select: (state: typeof mocks.state) => unknown) => select(mocks.state), { getState: () => mocks.state }) }));
 vi.mock("../src/renderer/src/lib/agentLook", () => ({ agentIndex: (state: typeof mocks.state) => state.entries }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
@@ -20,7 +20,7 @@ let host: HTMLDivElement, root: Root;
 beforeEach(() => {
   vi.clearAllMocks();
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  mocks.state = { entries: new Map([[id, { hostId: "other-host", session: { displayName: "Current name", formalAgentName: "Original", runtime: { status: "online" }, avatar: { type: "emoji", value: "🦊" } } }]]), openAgent: mocks.open };
+  mocks.state = { entries: new Map([[id, { hostId: "other-host", session: { displayName: "Current name", formalAgentName: "Original", runtime: { status: "online" }, avatar: { type: "emoji", value: "🦊" } } }]]), openAgent: mocks.open, sidebar: null, byHost: {} };
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); document.getSelection()?.removeAllRanges(); });
@@ -35,6 +35,25 @@ function copySelection(range: Range, target: HTMLElement = host) {
 }
 
 describe("AgentMentionChip rendering and gestures", () => {
+  it("opens an agent not listed while a host's archived agents are not read, reading them first", async () => {
+    const entry = mocks.state.entries.get(id);
+    mocks.state.entries = new Map();
+    mocks.state.byHost = { "other-host": { sidebar: { active: [], retired: [], archivedPending: { count: 2 } } } };
+    mocks.state.ensureArchived = vi.fn(async () => { mocks.state.entries = new Map([[id, entry]]); });
+    draw();
+    expect(host.textContent).toBe("@Old name");
+    await act(async () => (host.querySelector('[role="link"]') as HTMLElement).click());
+    expect(mocks.state.ensureArchived).toHaveBeenCalledOnce();
+    expect(mocks.open).toHaveBeenCalledWith(id, "other-host");
+  });
+
+  it("stays plain text for an unknown agent once every archived agent is read", () => {
+    mocks.state.entries = new Map();
+    draw();
+    expect(host.querySelector('[role="link"]')).toBeNull();
+  });
+
+
   it("uses current names, avatar and status, and opens the exact host", () => {
     draw();
     expect(host.textContent).toBe("@Current name");
@@ -46,6 +65,17 @@ describe("AgentMentionChip rendering and gestures", () => {
     expect(mocks.open).toHaveBeenCalledTimes(2);
     expect(host.querySelector("a[href]")).toBeNull();
   });
+  it("the name clips only sideways: its 1em box cuts no @ or descender, a long name still ends in an ellipsis", () => {
+    // jsdom has no layout: in the browser `truncate` (overflow: hidden) on this 1em box cut 1.5 px off j / g / y and
+    // the @ at 14 px (owner 2026-11-06, @dev-jasmine). The chip keeps its 1em height, so the line box stays the same.
+    draw();
+    const name = host.querySelector<HTMLElement>("[data-agent-mention-name]")!.className.split(/\s+/);
+    expect(name).toEqual(expect.arrayContaining(["min-w-0", "overflow-x-clip", "overflow-y-visible", "text-ellipsis", "whitespace-nowrap"]));
+    expect(name).not.toContain("truncate");
+    expect(name.some(c => /^overflow-(hidden|y-hidden|y-clip)$/.test(c))).toBe(false);
+    expect(host.querySelector<HTMLElement>("[data-agent-mention]")!.className.split(/\s+/)).toEqual(expect.arrayContaining(["h-[1em]", "leading-none"]));
+  });
+
   it("rechecks the host on click and does not navigate after removal", () => {
     draw();
     mocks.state.entries = new Map([[id, { ...mocks.state.entries.get(id), hostId: "new-host" }]]);

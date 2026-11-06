@@ -68,7 +68,7 @@ let clock = 100;
 function putService(slug: string, linked?: string): string {
   let id = "";
   side.updateLayout((l) => {
-    const input = { kind: "browser.tab" as ItemId, binding: { kind: "host" as const, hostId: "local" }, key: null, state: { url: `cutex:service/${slug}/`, title: slug, tabKey: "k", ...(linked ? { linked } : {}) } as never, v: 1, pinned: true };
+    const input = { kind: "browser.service" as ItemId, binding: { kind: "host" as const, hostId: "local" }, key: null, state: { url: `cutex:service/${slug}/`, title: slug, tabKey: "k", ...(linked ? { linked } : {}) } as never, v: 1, pinned: true };
     const decision = place(l, { ...input, transient: false, activePage: l.activePage, columnOpen: l.open }, placeSpec({ home: "browser" }));
     const applied = applyOpen(l, decision, input, ++clock, { reveal: true, home: "browser" });
     id = applied.instanceId;
@@ -79,6 +79,11 @@ function putService(slug: string, linked?: string): string {
 }
 
 describe("pure rules", () => {
+  it("leaves legacy service browser tabs in place and opens future service views separately", () => {
+    const old = { instances: { old: { kind: "browser.tab", binding: { kind: "host", hostId: "local" }, state: { url: "cutex:service/tingshu/" } } } } as unknown as SideLayout;
+    expect(servicePanes(old, "local", "tingshu")).toEqual([]);
+    expect(old.instances.old!.kind).toBe("browser.tab");
+  });
   it("a service tab's address → its slug (anything else: none)", () => {
     expect(serviceSlugOf("cutex:service/tingshu/")).toBe("tingshu");
     expect(serviceSlugOf("cutex:service/tingshu/player?ch=12")).toBe("tingshu");
@@ -114,9 +119,9 @@ describe("pure rules", () => {
   it("servicePanes finds a service's tabs (host + slug) with their link; withServiceLink sets / removes it in place", () => {
     const layout = {
       instances: {
-        a: { kind: "browser.tab", binding: { kind: "host", hostId: "local" }, key: null, state: { url: "cutex:service/tingshu/", linked: "reader" }, v: 1, pinned: true, lastActiveAt: 1 },
-        b: { kind: "browser.tab", binding: { kind: "host", hostId: "other" }, key: null, state: { url: "cutex:service/tingshu/" }, v: 1, pinned: true, lastActiveAt: 1 },
-        c: { kind: "browser.tab", binding: { kind: "host", hostId: "local" }, key: null, state: { url: "https://x.dev/" }, v: 1, pinned: true, lastActiveAt: 1 },
+        a: { kind: "browser.service", binding: { kind: "host", hostId: "local" }, key: null, state: { url: "cutex:service/tingshu/", linked: "reader" }, v: 1, pinned: true, lastActiveAt: 1 },
+        b: { kind: "browser.service", binding: { kind: "host", hostId: "other" }, key: null, state: { url: "cutex:service/tingshu/" }, v: 1, pinned: true, lastActiveAt: 1 },
+        c: { kind: "browser.service", binding: { kind: "host", hostId: "local" }, key: null, state: { url: "https://x.dev/" }, v: 1, pinned: true, lastActiveAt: 1 },
       },
     } as unknown as SideLayout;
     expect(servicePanes(layout, "local", "tingshu")).toEqual([{ id: "a", linked: "reader" }]);
@@ -134,7 +139,7 @@ describe("pure rules", () => {
     expect(servicesToOpen(SERVICES, on, empty, "local", "reader")).toEqual(["tingshu"]);
     expect(servicesToOpen(SERVICES, {}, empty, "local", "reader")).toEqual([]);
     expect(servicesToOpen(SERVICES, on, empty, "local", "director")).toEqual([]);
-    const there = { instances: { a: { kind: "browser.tab", binding: { kind: "host", hostId: "local" }, state: { url: "cutex:service/tingshu/" } } } } as unknown as SideLayout;
+    const there = { instances: { a: { kind: "browser.service", binding: { kind: "host", hostId: "local" }, state: { url: "cutex:service/tingshu/" } } } } as unknown as SideLayout;
     expect(servicesToOpen(SERVICES, on, there, "local", "reader")).toEqual([]);
   });
 });
@@ -191,7 +196,7 @@ describe("断开 and opening into this conversation's Shelf", () => {
     const panes = servicePanes(side.useSide.getState().layout, "local", "tingshu");
     expect(panes).toHaveLength(1);
     if (!before) {
-      expect(sideOpen).toHaveBeenCalledWith("browser.tab", { url: "cutex:service/tingshu/", linked: "reader" }, expect.objectContaining({ binding: { kind: "host", hostId: "local" } }));
+      expect(sideOpen).toHaveBeenCalledWith("browser.service", { url: "cutex:service/tingshu/", linked: "reader" }, expect.objectContaining({ binding: { kind: "host", hostId: "local" } }));
       expect(panes[0]!.linked).toBe("reader");
     }
     sideOpen.mockClear();
@@ -259,7 +264,7 @@ describe("断开 and opening into this conversation's Shelf", () => {
       useApp.setState({ selectedId: "reader" });
       await new Promise((r) => setTimeout(r, 5));
       expect(sideOpen).toHaveBeenCalledTimes(1);
-      expect(sideOpen).toHaveBeenCalledWith("browser.tab", { url: "cutex:service/lab/", linked: "reader" }, expect.objectContaining({ focus: false }));
+      expect(sideOpen).toHaveBeenCalledWith("browser.service", { url: "cutex:service/lab/", linked: "reader" }, expect.objectContaining({ focus: false }));
       // already there: not again
       useApp.setState({ selectedId: "director" });
       await new Promise((r) => setTimeout(r, 5));
@@ -339,13 +344,24 @@ describe("the service pane's 「打开 <owner>」", () => {
     expect(container.querySelector("[data-service-link]")).toBeNull();
   });
 
-  it("a linked pane: the agent's avatar badge + 断开 (no 「打开」)", async () => {
+  it("a linked pane: 「关联 <agent> ▾」 with its avatar; 断开 is in its menu (no 「打开」)", async () => {
     useApp.setState({ selectedId: "reader" });
-    await render(h(ServicePaneLink, { hostId: "local", instanceId: "x", url: "cutex:service/tingshu/", linked: "reader" }));
+    const { useOverlayState } = await import("../src/renderer/src/lib/contextMenu");
+    let menu: ReturnType<typeof useOverlayState>["menu"] = null;
+    function Probe() {
+      menu = useOverlayState().menu;
+      return null;
+    }
+    await render([h(ServicePaneLink, { key: "l", hostId: "local", instanceId: "x", url: "cutex:service/tingshu/", linked: "reader" }), h(Probe, { key: "p" })]);
     expect(container.querySelector("[data-service-link]")?.getAttribute("data-service-linked")).toBe("reader");
-    expect(container.querySelector("[data-service-link-badge] [data-avatar], [data-service-link-badge] *")).not.toBeNull();
-    expect(container.querySelector("[data-service-unlink]")).not.toBeNull();
+    const badge = container.querySelector<HTMLButtonElement>("[data-service-link-badge]")!;
+    expect(badge.querySelector("[data-avatar], *")).not.toBeNull();
+    expect(badge.textContent).toContain("Linked to reader");
     expect(container.querySelector("[data-service-open-owner]")).toBeNull();
+    act(() => badge.click());
+    const items = (menu as unknown as { items: ({ label: string; info?: string } | "separator")[] }).items.filter((i): i is { label: string; info?: string } => i !== "separator");
+    expect(items.map((i) => i.label)).toEqual(["Unlink"]);
+    expect(items[0]!.info).toMatch(/reader/);
   });
 });
 
@@ -377,7 +393,7 @@ describe("the conversation header's 「N 个服务」", () => {
     const b = pop.querySelector<HTMLButtonElement>('[data-agent-service="board"] [data-agent-service-open]')!;
     expect(b.getAttribute("data-agent-service-open")).toBe("open");
     act(() => b.click());
-    expect(sideOpen).toHaveBeenCalledWith("browser.tab", { url: "cutex:service/board/", linked: "director" }, expect.anything());
+    expect(sideOpen).toHaveBeenCalledWith("browser.service", { url: "cutex:service/board/", linked: "director" }, expect.anything());
     expect(servicePanes(side.useSide.getState().layout, "local", "board")[0]?.linked).toBe("director");
     useApp.setState({ services: SERVICES });
   });

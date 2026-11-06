@@ -20,10 +20,11 @@ export interface LedgerOwnerOutbox {
 }
 
 /** The only permitted prediction: decision 8 overrides 054's older offline paragraph. */
-export function predictedOwnerSurface(entry: Pick<LedgerOwnerOutbox, "strategy" | "predictedSurface">, delivery: SessionDelivery | null | undefined): "timeline" | "nextUp" {
+export function predictedOwnerSurface(entry: Pick<LedgerOwnerOutbox, "strategy" | "predictedSurface">, delivery: SessionDelivery | null | undefined, idleBusyTimeline = false): "timeline" | "nextUp" {
   if (entry.predictedSurface) return entry.predictedSurface;
   return entry.strategy === "queue" || delivery?.state === "offline" || delivery?.state === "starting"
-    || (delivery?.state === "held" && (delivery.reason === "paused" || delivery.reason === "stopHold" || delivery.reason === "hostBusy")) ? "nextUp" : "timeline";
+    || (delivery?.state === "held" && (delivery.reason === "paused" || delivery.reason === "stopHold"
+      || (delivery.reason === "hostBusy" && (!idleBusyTimeline || delivery.turn != null)))) ? "nextUp" : "timeline";
 }
 
 export function ownerTimelineEntry(record: InputRecord, outbox?: LedgerOwnerOutbox): Extract<TimelineEntry, { kind: "user" }> {
@@ -86,6 +87,8 @@ export function ownerRecordFor(records: ReadonlyMap<string, InputRecord> | undef
 }
 
 export interface TimelineHistoryWindow {
+  /** Incremental loaded-turn membership supplied by native Timeline views. */
+  hasTurn?: (turnId: string) => boolean;
   hasOlder: boolean;
   turns: readonly Pick<TurnView, "id" | "startedAt">[];
 }
@@ -103,11 +106,12 @@ export function missingTimelineRecords(records: ReadonlyMap<string, InputRecord>
     if (record) joined.add(record.inputId);
   }
   const oldestStart = history?.hasOlder ? history.turns[0]?.startedAt : null;
-  const loadedTurns = oldestStart != null ? new Set(history!.turns.map(turn => turn.id)) : null;
+  const loadedTurns = oldestStart != null && !history?.hasTurn ? new Set(history!.turns.map(turn => turn.id)) : null;
+  const hasTurn = history?.hasTurn ?? (loadedTurns ? (id: string) => loadedTurns.has(id) : null);
   return [...index.byInputId.values()].filter(record => !joined.has(record.inputId))
-    .filter(record => !(loadedTurns && Number.isFinite(oldestStart)
+    .filter(record => !(hasTurn && oldestStart != null && Number.isFinite(oldestStart)
       && record.state === "inContext" && record.timelineItemId && record.turnId
-      && !loadedTurns.has(record.turnId) && Date.parse(record.since) < oldestStart! * 1000))
+      && !hasTurn(record.turnId) && Date.parse(record.since) < oldestStart! * 1000))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.inputId.localeCompare(b.inputId));
 }
 

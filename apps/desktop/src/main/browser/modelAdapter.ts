@@ -3,6 +3,7 @@ import type { OperationOptions } from "@cutex-desktop/browser-cdp";
 import type { InAppProvider } from "./provider";
 import { modelScreenshot, modelSnapshot, type BrowserImageDecoder } from "./modelOutput";
 import { parseBrowserServiceUrl } from "./services";
+import type { AgentPopupOutcome } from "./agentPopups";
 
 export interface BrowserModelAdapterOptions {
   provider: Pick<InAppProvider, "hasGrant" | "controlView" | "snapshot" | "find" | "action" | "navigate" | "screenshot" | "release">;
@@ -12,6 +13,12 @@ export interface BrowserModelAdapterOptions {
   /** True when the host reads the optional tab.act `scroll` outcome (browser-scroll-outcome);
    * an older host rejects the unknown field, so it must not be sent there. */
   scrollOutcome?: () => boolean;
+  /** browser-page-links-v1 hosts: link / image urls (through `linkUrl`, "" = drop) and the
+   * click's `newTab`. Older hosts reject both fields, so they never see them. */
+  pageLinks?: () => boolean;
+  linkUrl?: (raw: string) => string;
+  /** Resolves true when main admitted a popup of this tab as the agent's own since `since`. */
+  openedTab?: (since: number) => Promise<AgentPopupOutcome | undefined>;
 }
 /** Decode the sanitized CutexRef key once; never expose an auth/tunnel URL or invent a port. */
 export function publicBrowserServiceUrl(displayUrl: string, connectionPort: number | undefined): string {
@@ -89,7 +96,12 @@ export function createBrowserModelAdapter(options: BrowserModelAdapterOptions) {
             // Include the operation discriminator in the final budget too: the bridge must
             // not reject a boundary-sized result after this whitelist has been published.
             const current = owned(guestId);
-            const output = modelSnapshot({ kind: operation.kind, ...value }, current.url);
+            const links = options.pageLinks?.() === true;
+            const nodes = value.nodes.map(({ url, ...node }) => {
+              const kept = links && url ? options.linkUrl?.(url) ?? "" : "";
+              return kept ? { ...node, url: kept } : node;
+            });
+            const output = modelSnapshot({ kind: operation.kind, ...value, nodes }, current.url);
             if (snapshots.get(guestId) !== state) throw new ProtocolError("stale_ref", "A newer snapshot attempt superseded this result");
             // Registry navigation and executor ref invalidation are independent clocks.
             // Preserve the executor generation in the wire result; cache the registry clock
@@ -101,9 +113,16 @@ export function createBrowserModelAdapter(options: BrowserModelAdapterOptions) {
         case "tab.act": {
           if ("ref" in operation.action && operation.action.ref !== undefined) requireReturnedRef(guestId, operation.action.ref);
           if (["back", "forward", "reload", "wait"].includes(operation.action.kind)) snapshots.delete(guestId);
+          const since = Date.now();
           const value = await provider.action(guestId, operation.action, control);
+          // A click / key press may open a tab (target=_blank, window.open): say so, so the
+          // agent looks for it instead of re-reading an unchanged opener.
+          // A page popup main blocked is said too (fixed reason), so the agent does not wait for a tab.
+          const popup = options.pageLinks?.() === true && ["click", "press"].includes(operation.action.kind)
+            ? await options.openedTab?.(since) : undefined;
+          const newTab = popup && "opened" in popup ? true as const : popup ? { blocked: popup.blocked } : undefined;
           return { kind: operation.kind, pageGeneration: value.pageGeneration,
-            ...(value.scroll && options.scrollOutcome?.() ? { scroll: value.scroll } : {}) };
+            ...(value.scroll && options.scrollOutcome?.() ? { scroll: value.scroll } : {}), ...(newTab ? { newTab } : {}) };
         }
         case "tab.navigate": {
           snapshots.delete(guestId);

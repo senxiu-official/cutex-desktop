@@ -56,4 +56,29 @@ describe("no raw text sizes / radii / shadows in the renderer (design 040 step 1
     const users = [...files(SRC), ...files(SRC, /\.css$/)].filter((p) => /var\(--card-shadow\)|var\(--shadow[,)]/.test(readFileSync(p, "utf8"))).map((p) => relative(SRC, p));
     expect(users).toEqual([]);
   });
+  // 040 §2.1: floats (menus, popovers, pickers, toasts) are `.float` — one surface, e2 only, no hard border, 12 px.
+  // A panel marked as a float (menu / listbox / tooltip role, data-popover, .float) may not carry the old border,
+  // corner or Tailwind shadow; any other positioned layer (`z-…`) may not carry a Tailwind shadow. Exceptions:
+  // the Shelf peek card's drag lift (a lifted card, not a float).
+  it("floating panels use .float, not Tailwind shadows / borders / mixed corners", () => {
+    const EXEMPT = new Set(["components/gutter/PeekCard.tsx"]);
+    const FLOAT = /\bfloat\b|data-popover|role="(?:menu|listbox|tooltip)"/;
+    const SHADOW = /(?<![\w-])shadow-(?:lg|xl|2xl)(?![\w-])/;
+    const BAD = /(?<![\w-])(?:shadow-(?:lg|xl|2xl)|border-border|border-card-border|rounded-(?:md|lg|xl|2xl))(?![\w-])/;
+    const bad: string[] = [];
+    for (const path of files(SRC)) {
+      const rel = relative(SRC, path).replace(/\\/g, "/");
+      if (rel.startsWith("dev/") || EXEMPT.has(rel)) continue;
+      const lines = readFileSync(path, "utf8").split("\n");
+      lines.forEach((line, i) => {
+        const cls = line.match(/className=(?:"([^"]*)"|\{`([^`]*)`)/);
+        const text = cls?.[1] ?? cls?.[2] ?? "";
+        if (!cls || !/(?:^|\s)(?:fixed|absolute|float)(?:\s|$)/.test(text)) return;
+        const isFloat = FLOAT.test(lines.slice(Math.max(0, i - 3), i + 1).join(" "));
+        const hit = isFloat ? text.match(BAD) : /(?:^|\s)z-/.test(text) ? text.match(SHADOW) : null;
+        if (hit) bad.push(`${rel}:${i + 1} ${hit[0]}`);
+      });
+    }
+    expect(bad, "use the .float class (styles.css, 040 §2.1)").toEqual([]);
+  });
 });

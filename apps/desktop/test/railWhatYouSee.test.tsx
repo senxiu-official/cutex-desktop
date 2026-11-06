@@ -122,7 +122,7 @@ describe("1. a page made by placement: the capsule is what opens", () => {
     expect(button.hasAttribute("data-shelf-capsule")).toBe(false);
     expect([...button.querySelectorAll("[data-icon]")].map((e) => e.getAttribute("data-icon"))).toEqual(["browser"]);
     expect(button.getAttribute("aria-label")).toBe(pageLabel(seen));
-    const tip = button.getAttribute("title")!;
+    const tip = button.getAttribute("data-tip")!;
     expect(tip).not.toContain("partlyEmpty");
     expect(tip).not.toContain("hiddenTip");
     expect(tip).not.toContain(pageLabel(page));
@@ -139,7 +139,7 @@ describe("2. a page the owner made or pinned: the empty slot shows and counts", 
     expect(button.hasAttribute("data-shelf-capsule")).toBe(true);
     expect([...button.querySelectorAll("[data-icon]")].map((e) => e.getAttribute("data-icon")).sort()).toEqual(["browser", "files"]);
     // 「有 1 个窗格对这个…是空的」 / "1 pane(s) empty for this …" (lib/hiddenPageNames emptySlotsTip).
-    expect(button.getAttribute("title")).toMatch(/empty|空的/);
+    expect(button.getAttribute("data-tip")).toMatch(/empty|空的/);
   });
 
   it("an icon the owner chose wins over the panes'", () => {
@@ -257,7 +257,7 @@ describe("5. a pinned page keeps its kind icon; the Shelf top-left shows the pin
     const b = renderAvatar(true);
     expect(b.querySelector("[data-shelf-avatar-pinned]")).not.toBeNull();
     expect(b.querySelector(".lucide-panel-right-close")).toBeNull();
-    expect(b.title).toContain("Pinned page");
+    expect(b.dataset.tip).toContain("Pinned page");
   });
 
   it("not pinned and no agent: the Shelf toggle icon; an agent: its avatar", () => {

@@ -37,7 +37,7 @@ function Frame({ label, onClose, children, footer }: { label: string; onClose():
     return () => win.removeEventListener("keydown", onKey, true);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35">
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/35">
       <div role="dialog" aria-modal aria-label={label} data-onboarding="" className="flex h-[26rem] max-h-[86vh] w-[36rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         <div className="flex justify-end px-3 pt-3">
           <button title={t("onboarding.close")} onClick={onClose} className="rounded-md p-1 text-subtle hover:bg-surface-2 hover:text-foreground">

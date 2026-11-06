@@ -3,6 +3,7 @@ import type { SidebarSnapshot } from "../../../shared/ipc";
 import { hostKey, type HostKey } from "./hostKeys";
 import { listInitials } from "./agentInitials";
 import { shortNames } from "./sidebarNames";
+import { compareNames } from "./rosterOrder";
 
 /**
  * `unknown`: not confirmed yet — the row comes from a stale snapshot (host / app reconnecting, its first
@@ -199,7 +200,7 @@ export function agentStatus(session: SessionResource, needsInput: boolean): Agen
  * dot and the second line instead.
  */
 export function compareRows(a: AgentRow, b: AgentRow): number {
-  return Number(b.isDirector) - Number(a.isDirector) || Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name);
+  return Number(b.isDirector) - Number(a.isDirector) || Number(b.pinned) - Number(a.pinned) || compareNames(a.name, b.name);
 }
 
 function timestamp(value: string | null | undefined): number {
@@ -329,7 +330,7 @@ export function buildSidebar(snapshot: SidebarSnapshot, options: SidebarOptions 
 
 /** Projects with live agents first, then by name. */
 export function compareProjects(a: SidebarGroup, b: SidebarGroup): number {
-  return b.online.length - a.online.length || (a as ProjectGroup).name.localeCompare((b as ProjectGroup).name);
+  return b.online.length - a.online.length || compareNames((a as ProjectGroup).name, (b as ProjectGroup).name);
 }
 
 /** Apply the owner's dragged project order: listed projects first in that order, the rest keep the

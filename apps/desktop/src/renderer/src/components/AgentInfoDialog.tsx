@@ -1,4 +1,5 @@
-import { badgeDraft, validBadgeText } from "../lib/sessionBadge";
+import { badgeColor, badgeDraft, validBadgeText } from "../lib/sessionBadge";
+import { BadgeTintPicker } from "./BadgeTintPicker";
 // 编辑信息: 显示名, avatar and note in one dialog; all are cutex session metadata
 // (`cutex/session/metadata/update`), saved by the caller. 显示名 = cutex `displayNameOverride`, display
 // only (lib/agentAlias): the real name stays what the agent is addressed by. Avatar tabs: 默认 = null
@@ -32,10 +33,11 @@ import { EmojiGrid } from "./EmojiGrid";
 import { DirectorAvatarGrid } from "./DirectorAvatarGrid";
 import { PortraitPackGrid } from "./PortraitPackGrid";
 import { avatarTabs, initialAvatarTab, isGalleryAvatar, type AvatarTab } from "../lib/directorAvatars";
-import { Segmented } from "./settings/Form";
+import { InfoTip, Segmented } from "./settings/Form";
 import { ProfilePictureCrop } from "./settings/ProfilePictureCrop";
 import { btn } from "./Button";
 import { useOwnerDocument } from "../lib/ownerContext";
+import { AgentOwnName } from "./AgentOwnName";
 
 type Kind = AvatarTab | "inherit";
 /** What sits inside the circle (combined mode; 颜色 is not a face there). */
@@ -53,7 +55,10 @@ export function AgentInfoDialog({ name, color, seed, initial, options, resolve }
   const [resetStyle, setResetStyle] = useState(false);
   const theme = look?.themes;
   const isDirector = !!look?.isDirector;
-  const { combineColor, editName, realName } = options;
+  const { combineColor, editName, rename } = options;
+  // 自己的名字 renamed in this dialog: the 显示名称 hint and placeholder follow (displayNameOverride stays).
+  const [ownName, setOwnName] = useState(options.ownName ?? null);
+  const realName = ownName && ownName !== options.ownName && options.realName === options.ownName ? ownName : options.realName;
   const start = options.editAvatarMode && initial.avatarMode === "inherit" ? null : initial.avatar;
   const [avatarMode, setAvatarMode] = useState<AvatarMode>(initial.avatarMode ?? null);
   const fixed = () => { if (options.editAvatarMode) setAvatarMode("fixed"); };
@@ -138,24 +143,26 @@ export function AgentInfoDialog({ name, color, seed, initial, options, resolve }
             setCropFile(null);
           }} />
       )}
-      <div className="mb-3 text-sm font-medium">{t("menu.editInfo")}</div>
+      <div className="mb-3 text-sm font-medium">{t("menu.editInfo").replace(/…$/, "")}</div>
       {editName ? (
         <div className="mb-3">
-          <label className="mb-1.5 block text-xs text-muted" htmlFor="agent-info-alias">{t("info.displayName")}</label>
+          {/* 显示名称 (owner 2026-11-05: folded in from the menu; first field, focused): what it changes sits behind the ⓘ. */}
+          <div className="mb-1.5 flex items-center gap-1">
+            <label className="text-xs text-muted" htmlFor="agent-info-alias">{t("info.displayName")}</label>
+            <InfoTip id="agent-info-alias-hint">{ownName ? t("menu.displayNameHint", { name: ownName }) : t("menu.displayNameHintNoFormal")}</InfoTip>
+          </div>
           <input id="agent-info-alias" autoFocus value={alias} maxLength={DISPLAY_NAME_MAX} placeholder={realName} onChange={(e) => setAlias(e.target.value)} className={FIELD} />
-          <p className="mt-1 break-words text-caption/[inherit] text-subtle">{t("info.displayNameHint", { name: realName })}</p>
         </div>
       ) : (
         <p className="mb-3 text-caption/[inherit] text-subtle">{t("info.displayNameUnsupported")}</p>
       )}
+      {rename && (ownName || rename.archived) && <AgentOwnName host={rename.host} sessionId={rename.sessionId} revision={rename.revision} archived={rename.archived} ownName={ownName ?? ""} onRenamed={setOwnName} />}
       {options.editBadge && <div className="mb-3 space-y-1.5">
         <label htmlFor="agent-info-badge" className="block text-xs text-muted">{t("info.badge")}</label>
-        <div className="grid grid-cols-[minmax(0,1fr)_6rem_auto] items-start gap-2">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3">
           <BadgeTextInput id="agent-info-badge" value={badgeText} onChange={setBadgeText} onCompositionChange={setBadgeComposing} className={FIELD} placeholder={t("info.badgePlaceholder")} />
-          <select aria-label={t("info.badgeTint")} value={badgeTint} onChange={(e) => setBadgeTint(e.target.value as typeof badgeTint)} className={FIELD}>
-            {(["blue", "green", "amber", "pink", "violet"] as const).map((c) => <option key={c} value={c}>{t(`info.badgeTint.${c}`)}</option>)}
-          </select>
-          {badge && <ProjectBadge badge={badge.text} color={{blue:"blue",green:"green",amber:"yellow",pink:"magenta",violet:"#8b5cf6"}[badgeTint]} />}
+          <BadgeTintPicker value={badgeTint} onChange={setBadgeTint} />
+          {badge && <ProjectBadge badge={badge.text} color={badgeColor(badgeTint)} />}
         </div>
         <p className="text-caption/[inherit] text-subtle">{t("info.badgeHint")}</p>
       </div>}

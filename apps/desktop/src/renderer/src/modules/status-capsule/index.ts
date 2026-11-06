@@ -1,3 +1,4 @@
+// LEGACY(status-capsule): frozen optional surface; retain its settings, default and placements.
 // Status capsule (contract 1.2, docs/desktop-modules.md §16): the floating capsule over the
 // conversation, as a module the owner can turn off. Provides the "capsule" status surface, mounts
 // through the `conversation.overlay` slot and owns its geometry settings (a section on the shell's

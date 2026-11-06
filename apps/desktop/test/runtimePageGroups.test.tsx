@@ -16,6 +16,9 @@ vi.mock("../src/renderer/src/components/ComponentCard", () => ({ ComponentCard: 
 vi.mock("../src/renderer/src/lib/componentView", () => ({ useComponentState: (_host: string, name: string) => ({ state: { kind: fx.components[name]?.state === "missing" ? "missing" : "body" }, entry: { list: { components: Object.values(fx.components) } } }), useHostComponents: () => ({ list: { components: Object.values(fx.components) } }) }));
 vi.mock("../src/renderer/src/lib/runtimesStore", () => ({ useHostRuntimes: () => ({ view: fx.view, error: null }) }));
 vi.mock("../src/renderer/src/lib/targetHost", () => ({ useTargetHostId: () => "remote-host", useTargetFeatures: () => fx.features }));
+// These presentation/legacy fixtures have no connected host snapshot or runtime-prune-v1.
+// Keep cleanup unavailable without turning the narrow getState-only app stub into a live store.
+vi.mock("../src/renderer/src/lib/useHostScope", () => ({ useHostData: () => null }));
 vi.mock("../src/renderer/src/store", () => ({ useApp: { getState: () => ({ openSettings: fx.open }) } }));
 vi.mock("../src/renderer/src/lib/settingsHost", () => ({ setSettingsHost: fx.host }));
 import { RuntimeGroup } from "../src/renderer/src/components/RuntimeVersions";
@@ -29,6 +32,7 @@ afterEach(async () => {await act(async()=>root.unmount());node.remove();});
 it("keeps current and pinned/missing releases visible and folds only unused old versions", async () => {
   await act(async()=>root.render(h(RuntimeGroup,{kind:"native",title:"cute-codex",list:fx.view.native})));
   const details=node.querySelector("details")!;expect(details.open).toBe(false);expect(details.textContent).toContain("1 个旧版本未使用，可清理");expect(details.textContent).toContain("未知版本");expect(details.textContent).not.toContain("r260");expect(details.textContent).not.toContain("文件已删除");
+  expect(node.querySelector("[data-runtime-cleanup]")).toBeNull();
   expect(node.textContent).toContain("0.160.0-r52.4");expect(node.querySelector("strong")!.className).not.toContain("truncate");
   await act(async()=>{details.open=true;});expect(details.open).toBe(true);
 });

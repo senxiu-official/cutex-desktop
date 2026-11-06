@@ -10,7 +10,7 @@ describe("claim-open in the renderer", () => {
     const releaseHold = vi.fn(), timers: (() => void)[] = [];
     expect(openClaimTab({ openHeld, releaseHold }, "local", "epoch", { tabKey: key, url: "cutex:service/yemao/", sessionId: "reader" }, () => undefined,
       ((fn: () => void) => { timers.push(fn); return 0; }) as never)).toBe(true);
-    expect(openHeld.mock.calls[0]).toEqual(["browser.tab", { url: "cutex:service/yemao/", tabKey: key, ownerTab: true }, { binding: { kind: "agent", hostId: "local", sessionId: "reader" }, hostEpoch: "epoch" }]);
+    expect(openHeld.mock.calls[0]).toEqual(["browser.service", { url: "cutex:service/yemao/", tabKey: key, ownerTab: true }, { binding: { kind: "agent", hostId: "local", sessionId: "reader" }, hostEpoch: "epoch" }]);
     expect(openHeld.mock.calls[1]![2]).toEqual({ binding: { kind: "host", hostId: "local" }, hostEpoch: "epoch" });
     timers[0]!(); expect(releaseHold).toHaveBeenCalledWith(hold);
   });

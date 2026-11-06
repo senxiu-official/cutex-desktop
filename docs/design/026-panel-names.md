@@ -1,16 +1,5 @@
-# 026 面板的名字
+# Panel terminology
 
-状态：**已实现（侧栏保持「侧栏」，主人 10-22 同意）**（10-22 主人：「对话列我不是很喜欢，用『会话』……至少不能叫『列』——毕竟它也是面板」）。
+A conversation displays one agent thread. The Shelf contains pages, panes and tabs; the Rail selects Shelf pages. The sidebar lists agents and project navigation. The tray provides pinned and recent workspaces. Use [the glossary](../GLOSSARY.md) for the complete terminology.
 
-## 规则
-
-- 面板的名字**不带「列 / 栏」这种排版词**以外的含义时，优先用它是什么，而不是它摆在哪。
-- **会话**（原「对话列」）：一个智能体的对话面板（时间线 + 输入区）。英文 Conversation。「两个会话并排」「会话收成窄条」。
-- **侧栏**：仍指窗口**左侧**那张卡片（智能体列表 + 桌面 / 新建 / 委托 / 审批等入口）；它是面板，可以收成窄栏。名字待主人确认：保持「侧栏」，或改「智能体列表」（只描述了一半内容，不推荐）/「导航」。
-- 其他名字不变：工作区、Shelf（Rail 是 Shelf 的页签栏）、托盘、桌面、设置 Shelf、窄条、只看 Shelf、窗口顶栏、会话顶栏（原「对话顶栏」，随「会话」改）。
-
-## 范围
-
-- 界面文字（zh-CN / zh-Hant-CN / en：Conversation column → Conversation）、设置页标题、动作预告句子、提示条。
-- 现行文档：canvas-principles §6 / §8 表、`docs/design/` 里仍在用的方案、`desktop-modules.md` 的说明文字。历史记录（PROGRESS、research 旧文、已发布的 CHANGELOG 条目）不改。
-- 代码标识符（`conversation column` 等变量名）不改，只改用户看得见的文字。
+See [Architecture](../DESIGN.md) and [Module contracts](../desktop-modules.md) for related interfaces.

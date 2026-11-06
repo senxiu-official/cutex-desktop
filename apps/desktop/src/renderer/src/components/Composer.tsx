@@ -18,7 +18,7 @@ import { useAgentPause } from "../lib/agentPause";
 import { mentionText, parseDraggedPaths, WORKSPACE_PATHS_MIME } from "../lib/workspaceDrag";
 import { DROP_TINT, dropTint } from "../lib/dropTint";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useId, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowUp, Clock, Eye, EyeOff, Square, X } from "lucide-react";
+import { ArrowUp, CircleAlert, Clock, Eye, EyeOff, Info, Square, X } from "lucide-react";
 import type { AdmissionNextStep, QueueItem } from "@cutex-desktop/protocol";
 import type { SkillMetadata, SkillsListResponse } from "@cutex-desktop/protocol/codex/v2";
 import type { ExtraInput, ModelOption, ProfileItem } from "../../../shared/ipc";
@@ -33,7 +33,9 @@ import { senderLabel } from "../lib/systemSenders";
 import { useComposerDraft } from "../lib/composerDrafts";
 import { candidateIndex, composerCandidateKey, mentionPathsFor, startMentionSearch, type MentionResults } from "../lib/composerMentions";
 import { agentMentionCandidates, agentMentionInsert } from "../lib/composerAgentMentions";
-import { agentMentionTokens } from "../lib/agentMentions";
+import { composerMentionTokens } from "../lib/composerMentionTokens";
+import { atAgentRows, useProfileMentions } from "../lib/useProfileMentions";
+import { useNameOrderKey } from "../lib/rosterOrder";
 import { Avatar } from "./Avatar";
 import { AgentMentionInput, type AgentMentionInputHandle } from "./AgentMentionInput";
 import { createComposerEnterTrace, type EnterDecision } from "../lib/composerEnterTrace";
@@ -108,7 +110,7 @@ import { ADMISSION_ORDER_FEATURE, OWNER_YIELD_FEATURE, admittedAskIds, currentTu
 import { useUnreadNextStep } from "../lib/legacyDelivery/readInRideAlongs";
 import { reloadOwnerMayPassAsks, useOwnerMayPassAsks } from "../lib/admissionOrderView";
 import { useHostRecords } from "../lib/delegationStore";
-import { useDelegationTurn, usePendingDelegations } from "../lib/delegationsView";
+import { useAwaitingDelegation, useDelegationTurn, usePendingDelegations } from "../lib/delegationsView";
 import { delegationJoinIntent, OWNER_JOIN_FEATURE, delegationKeyAction, delegationSendChoices, queueSendNowMode, sendHowFor } from "../lib/delegationTurn";
 import { confirmDialog, contextMenu } from "../lib/contextMenu";
 import { fileActions } from "../lib/fileActions";
@@ -127,7 +129,7 @@ import { runtimeOf } from "../lib/agentList";
 import { chatModelAndEffort } from "../lib/dshModels";
 import { QuotaContinueSection } from "./QuotaContinueSection";
 import { queueAutoCompact, useShortWindow } from "../lib/queueChips";
-import { DelegationSendMenu, DelegationTurnHint, DelegationTurnOverlay } from "./DelegationComposer";
+import { DelegationAwaitLine, DelegationSendMenu, DelegationTurnHint, DelegationTurnOverlay } from "./DelegationComposer";
 import { SlashPalette, type PaletteRow } from "./SlashPalette";
 import { unlistedModel, composerEfforts } from "../lib/models";
 import { claudePickerItems, claudeShortName } from "../lib/claudeModels";
@@ -241,7 +243,7 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
       trigger={
         <span className="flex min-w-0 items-center gap-2">
           {item && prefs.composerProfileAvatar && <ProfileAvatar profile={item} size={18} host={quotaHost} />}
-          <span className="trim-cap max-w-28 truncate" data-quota-name="" title={profile ?? undefined}>{profile ?? t("composer.quota.noProfile")}</span>
+          <span className="trim-cap max-w-28 truncate" data-quota-name="" data-tip={profile ?? undefined}>{profile ?? t("composer.quota.noProfile")}</span>
           {!visible && (
             <span className="opacity-40">
               <Ring ratio={0} />
@@ -255,10 +257,10 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
               return ratio === null ? [] : [{ id: member.id, ratio, label: [title(member), percentOf(member)].filter(Boolean).join(" · "), stale: member.stale }];
             });
             return r.balance ? (
-              <span key={g.id} className={`trim-cap text-subtle tabular-nums ${g.stale ? "opacity-60" : ""}`} title={g.balance ?? undefined}>{formatBalance(g.balance, true)}</span>
+              <span key={g.id} className={`trim-cap text-subtle tabular-nums ${g.stale ? "opacity-60" : ""}`} data-tip={g.balance ?? undefined}>{formatBalance(g.balance, true)}</span>
             ) : fill === null ? null : (
               // The ring's hover names the reset too: a narrow composer row hides the countdown text (lib/toolbarFit).
-              <span key={g.id} data-quota-ring={g.id} data-merged={r.members.length > 1 ? "" : undefined} className={`flex shrink-0 items-center gap-1 ${g.stale && segments.length < 2 ? "opacity-50" : ""}`} title={ringTitle(r)}>
+              <span key={g.id} data-quota-ring={g.id} data-merged={r.members.length > 1 ? "" : undefined} className={`flex shrink-0 items-center gap-1 ${g.stale && segments.length < 2 ? "opacity-50" : ""}`} data-tip={ringTitle(r)} aria-label={ringTitle(r)} role="img">
                 <Ring ratio={fill} view={view} segments={segments} />
                 {r.showReset && r.resetAt !== null && <span className="trim-cap text-subtle tabular-nums" data-quota-reset="">{resetsInCompact(r.resetAt)}</span>}
               </span>
@@ -275,7 +277,7 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
             <span className="flex items-center gap-2">
               {profile}
               {profile && (
-                <button title={t("composer.quota.refresh")} onClick={() => void loadQuota(profile, true)} className="hover:text-foreground">
+                <button data-tip={t("composer.quota.refresh")} aria-label={t("composer.quota.refresh")} onClick={() => void loadQuota(profile, true)} className="hover:text-foreground">
                   ↻
                 </button>
               )}
@@ -290,7 +292,7 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
                 const fill = quotaFill(g, view);
                 const percent = quotaPercent(g, view);
                 return (
-                  <div key={g.id} className={`col-span-4 grid grid-cols-subgrid items-baseline gap-y-1.5 ${g.stale ? "opacity-60" : ""}`} title={g.observedAt ? t("composer.quota.observedAt", { at: observedClock(g.observedAt) }) : undefined}>
+                  <div key={g.id} className={`col-span-4 grid grid-cols-subgrid items-baseline gap-y-1.5 ${g.stale ? "opacity-60" : ""}`} data-tip={g.observedAt ? t("composer.quota.observedAt", { at: observedClock(g.observedAt) }) : undefined}>
                     {/* The row's two choices (owner 2026-10-28): this gauge's ring and its countdown. A hidden row stays listed, dimmed. */}
                     {g.kind === "balance" ? (
                       <span aria-hidden />
@@ -300,7 +302,7 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
                           type="button"
                           data-quota-ring-toggle={g.id}
                           aria-pressed={choiceOf(g)?.ring !== false}
-                          title={t("composer.quota.ring")}
+                          data-tip={t("composer.quota.ring")} aria-label={t("composer.quota.ring")}
                           onClick={() => toggleChoice(g, "ring")}
                           className={`rounded p-0.5 hover:bg-surface-2 ${choiceOf(g)?.ring === false ? "text-subtle opacity-60" : "text-muted"}`}
                         >
@@ -310,7 +312,7 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
                           type="button"
                           data-quota-reset-toggle={g.id}
                           aria-pressed={choiceOf(g)?.reset ?? prefs.quotaResetDefault}
-                          title={t("composer.quota.reset")}
+                          data-tip={t("composer.quota.reset")} aria-label={t("composer.quota.reset")}
                           onClick={() => toggleChoice(g, "reset")}
                           className={`rounded p-0.5 hover:bg-surface-2 ${(choiceOf(g)?.reset ?? prefs.quotaResetDefault) ? "text-muted" : "text-subtle opacity-60"}`}
                         >
@@ -319,13 +321,13 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
                       </span>
                     )}
                     {/* The whole name; past the popover's max width it wraps (two lines at most, the title has the rest). */}
-                    <span data-quota-label={g.id} title={title(g)} className={`line-clamp-2 min-w-0 text-sm break-words ${choiceOf(g)?.ring === false && g.kind !== "balance" ? "opacity-55" : ""}`}>
+                    <span data-quota-label={g.id} data-tip={title(g)} className={`line-clamp-2 min-w-0 text-sm break-words ${choiceOf(g)?.ring === false && g.kind !== "balance" ? "opacity-55" : ""}`}>
                       {title(g)}
-                      {g.stale && <span className="ml-1 text-xs text-warn" title={t("composer.quota.stale")}>~</span>}
+                      {g.stale && <span className="ml-1 text-xs text-warn" data-tip={t("composer.quota.stale")}>~</span>}
                     </span>
                     <span className="text-right text-xs whitespace-nowrap text-subtle tabular-nums">{g.resetAt ? t("composer.quota.resets", { in: resetsIn(g.resetAt) }) : ""}</span>
                     {g.kind === "balance" ? (
-                      <span className="text-right text-xs font-medium whitespace-nowrap tabular-nums" title={g.balance ?? undefined}>{formatBalance(g.balance)}</span>
+                      <span className="text-right text-xs font-medium whitespace-nowrap tabular-nums" data-tip={g.balance ?? undefined}>{formatBalance(g.balance)}</span>
                     ) : (
                       <span className="text-right text-xs font-medium whitespace-nowrap tabular-nums">{percent === null ? "—" : t(quotaTextKey(view), { percent })}</span>
                     )}
@@ -398,7 +400,7 @@ function ContextMeter({ usage, onCompact, billingUnavailable = false, canCompact
           </div>
           {ratio !== null ? <Bar ratio={ratio} /> : <p className="text-xs text-subtle">{usage ? t("composer.context.noWindow") : t("composer.context.none")}</p>}
           {billingUnavailable && <p className="text-xs text-subtle">{t("dsh.billingUnavailable")}</p>}
-          {usage?.dsh && <p className="text-xs text-subtle" title={usage.dsh.observedAt}>{t("dsh.contextObserved", { at: new Date(usage.dsh.observedAt).toLocaleString() })}</p>}
+          {usage?.dsh && <p className="text-xs text-subtle" data-tip={usage.dsh.observedAt}>{t("dsh.contextObserved", { at: new Date(usage.dsh.observedAt).toLocaleString() })}</p>}
           <div className="flex items-center justify-between">
             <span className="text-xs text-subtle">{ratio !== null && ratio > 0.85 ? t("composer.context.soon") : ""}</span>
             {canCompact && <button
@@ -502,6 +504,8 @@ export function Composer({
   const { sendKeys, delegationSteerKeys, queueSectionStrip, queuePanelFold } = useUiPrefs();
   // The running turn handles a delegation (agent-asks): hint, guarded shortcuts, send menu.
   const runningDelegation = useDelegationTurn(timeline);
+  // Idle on purpose: the handler ended its turn with delegation_await (say so, never a plain idle or working look).
+  const awaitingAsk = useAwaitingDelegation(sessionId);
   const delegation = busy && (!ledgerMode || (ledger?.delivery?.turn?.kind === "ask" && ledger.delivery.turn.askId === runningDelegation?.askId)) ? runningDelegation : null;
   const guardKeys = { delegation: !!delegation, allowSteerKeys: delegationSteerKeys };
   const joinIntent = delegationJoinIntent(delegation, timeline?.activeTurnId, runtimeGeneration, features);
@@ -561,6 +565,7 @@ export function Composer({
   const followUp = lastTurn?.status !== "interrupted" && (hasUnlandedTurn(outbox) || shownQueue.length > paused.items.length || (!asksPaused && !!groups?.turns.some((r) => r.kind === "ask")));
   const legacyBusyLook = useHeldBusy(ledgerMode ? false : busy, ledgerMode ? false : followUp);
   const busyLook = ledgerMode ? deliveryBusy(ledger?.delivery) : legacyBusyLook;
+  const awaiting = !busyLook && !delegation ? awaitingAsk : null;
   const [caret, setCaret] = useState(0);
   const [sending, setSending] = useState(false);
   const [traceEnter] = useState(() => createComposerEnterTrace(sessionId,
@@ -582,9 +587,9 @@ export function Composer({
   const [dragOver, setDragOver] = useState(false);
   const textarea = useRef<HTMLTextAreaElement | AgentMentionInputHandle>(null);
   const [richInput, setRichInput] = useState(false);
-  const hasAgentMentions = useMemo(() => agentMentionTokens(text).length > 0, [text]);
-  const useRichInput = richInput || hasAgentMentions;
-  useEffect(() => { if (hasAgentMentions) setRichInput(true); }, [hasAgentMentions]);
+  const hasMentionAtoms = useMemo(() => composerMentionTokens(text).length > 0, [text]);
+  const useRichInput = richInput || hasMentionAtoms;
+  useEffect(() => { if (hasMentionAtoms) setRichInput(true); }, [hasMentionAtoms]);
   useEffect(() => setRichInput(false), [sessionId, hostId]);
   // The input grows with its wrapped text (not only its line breaks) up to max-h-60, then scrolls:
   // counting "\n" alone left long wrapped paragraphs scrolling inside a short box (owner 2026-10-18).
@@ -783,12 +788,29 @@ export function Composer({
     return rankEntries(query, [...commandEntries(t, features, agent, busy, enCatalog), ...skillItems]);
   }, [query, skills, t, features, agent, busy, noSkills, enCatalog]);
 
+  const profileMentionFocus = useRef<number | null>(null);
   const mention = mentionAt(text, caret);
-  const mentionOpen = !!mention && !paletteOpen && mentionDismissed !== mention.start;
+  const profileMention = useProfileMentions({
+    // A plain `@` also lists this host's profiles (a group after the agents); `p@` / `m@` stay the narrow shortcuts.
+    at: mention && !paletteOpen && mentionDismissed !== mention.start ? mention : null,
+    text, caret, hostId, sessionId, currentProfile: profile ?? null,
+    runtime: session ? runtimeOf(session) : null, features, enabled: !paletteOpen,
+    onChange: (value, at) => { setText(value); setCaret(at); },
+    focusAt: at => { profileMentionFocus.current = at; },
+  });
+  useLayoutEffect(() => {
+    const at = profileMentionFocus.current;
+    if (at === null) return;
+    profileMentionFocus.current = null;
+    textarea.current?.focus();
+    textarea.current?.setSelectionRange(at, at);
+  }, [text, useRichInput]);
+  const mentionOpen = !!mention && !paletteOpen && !profileMention.open && mentionDismissed !== mention.start;
   const mentionSidebar = useApp(s => s.sidebar);
   const mentionByHost = useApp(s => s.byHost);
   const mentionHosts = useApp(s => s.hosts);
   const mentionDaemon = useApp(s => s.daemon);
+  const mentionNameOrder = useNameOrderKey();
   const mentionAgents = useMemo(() => {
     if (!mentionOpen) return [];
     const focus = mentionHosts?.active ?? "local";
@@ -797,7 +819,7 @@ export function Composer({
       connected: (id === focus ? mentionDaemon : mentionByHost?.[id]?.daemon)?.kind === "connected",
       sidebar: id === focus ? mentionSidebar : mentionByHost?.[id]?.sidebar ?? null,
     })), hostId, sessionId, mention?.query ?? "");
-  }, [mentionOpen, mention?.query, mentionSidebar, mentionByHost, mentionHosts, mentionDaemon, hostId, sessionId]);
+  }, [mentionOpen, mention?.query, mentionSidebar, mentionByHost, mentionHosts, mentionDaemon, hostId, sessionId, mentionNameOrder]);
   useEffect(() => {
     setMentionResults(null);
     if (!mentionOpen || !mention?.query || !features.has("workspace-fs")) return;
@@ -806,11 +828,17 @@ export function Composer({
       setMentionResults);
   }, [mentionOpen, mention?.query, sessionId, hostId, features]);
   const mentionPaths = mentionPathsFor(mentionResults, mentionOpen ? mention?.query ?? null : null);
-  const popupCount = paletteOpen ? paletteItems.length : mentionOpen ? mentionAgents.length + mentionPaths.length : 0;
+  // With a profile group, each group shows at most AT_GROUP_ROWS rows, so a long agent list never pushes the profiles
+  // out of the panel; without one (no profiles on this host) the agents list is exactly as before.
+  const mentionProfiles = mentionOpen ? profileMention.atRows : [];
+  const agentGroup = atAgentRows(mentionAgents, mentionProfiles.length);
+  const shownAgents = agentGroup.shown;
+  const mentionPopupOpen = mentionOpen || profileMention.open;
+  const popupCount = paletteOpen ? paletteItems.length : profileMention.open ? profileMention.rows.length : mentionOpen ? shownAgents.length + mentionProfiles.length + mentionPaths.length : 0;
   const selectedCandidate = candidateIndex(selected, popupCount) ?? 0;
   // Reset on a changed list, not on an unrelated sidebar refresh returning equivalent entries.
-  const candidateListKey = JSON.stringify(paletteOpen ? paletteItems.map((item) => item.key) : [...mentionAgents.map(agent => agent.id), ...mentionPaths]);
-  useEffect(() => setSelected(0), [query, mention?.query, candidateListKey]);
+  const candidateListKey = JSON.stringify(paletteOpen ? paletteItems.map((item) => item.key) : profileMention.open ? profileMention.rows.map(row => row.key) : [...shownAgents.map(agent => agent.id), ...mentionProfiles.map(row => row.key), ...mentionPaths]);
+  useEffect(() => setSelected(0), [query, mention?.query, profileMention.query, candidateListKey]);
 
   // ---------- slash dispatch ----------
   const ctx: SlashContext = {
@@ -927,8 +955,13 @@ export function Composer({
 
   const pickMention = (index: number) => {
     if (!mention) return;
-    const agent = mentionAgents[index];
-    const path = mentionPaths[index - mentionAgents.length];
+    const agent = shownAgents[index];
+    if (!agent && index < shownAgents.length + mentionProfiles.length) {
+      // A profile row: the same model / effort cascade as `p@` (lib/useProfileMentions).
+      profileMention.pickAt(index - shownAgents.length);
+      return;
+    }
+    const path = mentionPaths[index - shownAgents.length - mentionProfiles.length];
     if (!agent && !path) return;
     const next = agent ? (() => {
       const inserted = agentMentionInsert(agent, hostId);
@@ -1083,7 +1116,7 @@ export function Composer({
       await run(command.id, command.args);
       return;
     }
-    const draft = text;
+    const draft = profileMention.sendText();
     // A message sent after a jump: 回到 goes away (§19.7).
     noteSent(sessionId);
     // The timeline goes to the bottom and follows the new bubble / queue entry (lib/stickToBottom).
@@ -1132,7 +1165,17 @@ export function Composer({
     };
     const candidate = composerCandidateKey({ key: e.key, shift: e.shiftKey, isComposing: isImeComposing(e) }, popupCount, selected);
     if (candidate === "composing") { report("ime-confirm"); return; }
-    if (popupCount > 0 || paletteOpen || mentionOpen) {
+    if (profileMention.open && (e.key === "Escape" || (profileMention.cascade && e.key === " "))) {
+      e.preventDefault();
+      profileMention.exit(e.key === " ");
+      return;
+    }
+    if (profileMention.open && popupCount === 0 && (e.key === "Enter" || e.key === "Tab")) {
+      e.preventDefault();
+      report("mention-pick");
+      return;
+    }
+    if (popupCount > 0 || paletteOpen || mentionPopupOpen) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         if (popupCount > 0) setSelected((i) => ((candidateIndex(i, popupCount) ?? 0) + (e.key === "ArrowDown" ? 1 : popupCount - 1)) % popupCount);
@@ -1142,6 +1185,7 @@ export function Composer({
         e.preventDefault();
         report(paletteOpen ? "palette-pick" : "mention-pick");
         if (paletteOpen) pickPalette(candidate.index, e.key === "Tab");
+        else if (profileMention.open) profileMention.pick(candidate.index);
         else pickMention(candidate.index);
         return;
       }
@@ -1176,11 +1220,17 @@ export function Composer({
     disabled: !!item.disabledReason,
     tag: item.kind === "skill" ? t("slash.skillTag") : undefined,
   }));
-  const mentionRows: PaletteRow[] = [...mentionAgents.map(agent => ({
-    key: `agent:${agent.id}`, label: agent.label, group: t("mention.agents"),
+  const agentGroupLabel = agentGroup.cut ? t("mention.groupMore", { group: t("mention.agents"), shown: shownAgents.length, total: agentGroup.total }) : t("mention.agents");
+  const profileGroup = profileMention.atTotal > mentionProfiles.length ? t("mention.groupMore", { group: t("mention.profileGroup"), shown: mentionProfiles.length, total: profileMention.atTotal }) : t("mention.profileGroup");
+  const mentionRows: PaletteRow[] = [...shownAgents.map(agent => ({
+    key: `agent:${agent.id}`, label: agent.label, group: agentGroupLabel,
     description: `${agent.sameProject ? t("mention.sameProject") + " · " : ""}${t(`mention.${agent.presence}`)}`,
     ariaLabel: t("mention.agentMention", { name: agent.label }) + ` · ${t(`mention.${agent.presence}`)}`,
     icon: <Avatar name={agent.name} seed={agent.id} avatar={agent.session.avatar} size={20} status={{presence:agent.presence}} />,
+  })), ...mentionProfiles.map(row => ({
+    key: row.key, label: row.label, description: row.description, group: profileGroup,
+    ariaLabel: t("mention.profileMention", { name: row.label }),
+    icon: <ProfileAvatar profile={row.profile} size={20} host={hostId} />,
   })), ...mentionPaths.map((p) => {
     const slash = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
     return { key: `file:${p}`, group: t("mention.title"), label: slash >= 0 ? p.slice(slash + 1) : p, description: slash >= 0 ? p.slice(0, slash) : undefined };
@@ -1233,6 +1283,11 @@ export function Composer({
             onPick={(i) => pickPalette(i)}
           />
         )}
+        {profileMention.open && <SlashPalette
+          title={profileMention.title} listId={mentionListId} rows={profileMention.rows}
+          selected={selectedCandidate} empty={profileMention.empty} footer={profileMention.footer}
+          onHover={setSelected} onPick={profileMention.pick}
+        />}
         {mentionOpen && (
           <SlashPalette
             title={t("mention.menuTitle")}
@@ -1344,7 +1399,7 @@ export function Composer({
           {images.length > 0 && (
             <div className="flex flex-wrap gap-2 pt-1 pb-1.5">
               {images.map((img) => (
-                <div key={img.id} className="group relative h-14 w-14 overflow-hidden rounded-lg border border-border bg-surface-2" title={img.name}
+                <div key={img.id} className="group relative h-14 w-14 overflow-hidden rounded-lg border border-border bg-surface-2" data-tip={img.name}
                   onContextMenuCapture={img.source.kind === "path" ? contextMenu(() => fileActions({ hostId: img.pickedLocally ? LOCAL_HOST_ID : hostId, path: img.source.kind === "path" ? img.source.path : "", knownLocal: img.pickedLocally }, t)) : undefined}>
                   {/* Click → full size, as for a sent image; a restored host path is read through cutex. */}
                   <ImageThumb
@@ -1357,7 +1412,7 @@ export function Composer({
                   />
                   <button
                     onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))}
-                    title={t("composer.image.remove")}
+                    data-tip={t("composer.image.remove")} aria-label={t("composer.image.remove")}
                     className="absolute top-0.5 right-0.5 rounded-full bg-black/60 p-0.5 text-white opacity-0 group-hover:opacity-100"
                   >
                     <X size={10} />
@@ -1367,6 +1422,7 @@ export function Composer({
             </div>
           )}
           {delegation && <DelegationTurnHint turn={delegation} draft={hasContent} />}
+          {awaiting && hasContent && <DelegationAwaitLine d={awaiting} draft />}
           {overloadRetry?.phase === "pending" && <div role="status" className="pb-1.5 text-caption text-muted group-has-[[data-auto-retry-explained]]/inputcard:hidden" data-testid="composer-auto-retry-owner-order">
             {formatAutoRetryWait(t, overloadRetry, "queue.autoRetryOwnerOrder")}
           </div>}
@@ -1374,42 +1430,43 @@ export function Composer({
           {noSteerHintShown({ busy: busyLook, noSteer, hasContent, delegation: !!delegation, paused: !!agentPause }) && <NoSteerSendHint />}
           <div className="relative flex items-end gap-2">
             {delegation && !hasContent && <DelegationTurnOverlay turn={delegation} />}
+            {awaiting && !hasContent && <DelegationAwaitLine d={awaiting} draft={false} />}
             {useRichInput ? <AgentMentionInput
               data-composer-input
               ref={textarea as React.Ref<AgentMentionInputHandle>}
               value={text}
-              onChange={(value, nextCaret) => { setText(value); setCaret(nextCaret); }}
+              hostId={hostId}
+              onChange={profileMention.change}
               onSelect={setCaret}
               onKeyDown={onKeyDown}
               onPaste={onPaste}
               aria-label={t("mention.inputLabel")}
-              role={mentionOpen ? "combobox" : "textbox"}
-              aria-autocomplete={mentionOpen ? "list" : undefined}
-              aria-expanded={mentionOpen ? true : undefined}
-              aria-controls={mentionOpen ? mentionListId : undefined}
-              aria-activedescendant={mentionOpen && popupCount > 0 ? `${mentionListId}-${selectedCandidate}` : undefined}
-              placeholder={delegation ? "" : busyLook ? t(busyPlaceholderKey(noSteer)) : t("composer.placeholder", { name })}
+              role={mentionPopupOpen ? "combobox" : "textbox"}
+              aria-autocomplete={mentionPopupOpen ? "list" : undefined}
+              aria-expanded={mentionPopupOpen ? true : undefined}
+              aria-controls={mentionPopupOpen ? mentionListId : undefined}
+              aria-activedescendant={mentionPopupOpen && popupCount > 0 ? `${mentionListId}-${selectedCandidate}` : undefined}
+              placeholder={delegation || awaiting ? "" : busyLook ? t(busyPlaceholderKey(noSteer)) : t("composer.placeholder", { name })}
               // Two lines + padding: exactly the textarea's rows={2} box, so the swap on the first @ does not jump (owner 2026-10-25).
               className="max-h-[min(15rem,var(--composer-input-max,15rem))] min-h-[calc(2lh+0.5rem)] min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words bg-transparent py-1 pr-2.5 outline-none"
             /> : <textarea
               data-composer-input
               aria-label={t("mention.inputLabel")}
-              role={mentionOpen ? "combobox" : undefined}
-              aria-autocomplete={mentionOpen ? "list" : undefined}
-              aria-expanded={mentionOpen ? true : undefined}
-              aria-controls={mentionOpen ? mentionListId : undefined}
-              aria-activedescendant={mentionOpen && popupCount > 0 ? `${mentionListId}-${selectedCandidate}` : undefined}
+              role={mentionPopupOpen ? "combobox" : undefined}
+              aria-autocomplete={mentionPopupOpen ? "list" : undefined}
+              aria-expanded={mentionPopupOpen ? true : undefined}
+              aria-controls={mentionPopupOpen ? mentionListId : undefined}
+              aria-activedescendant={mentionPopupOpen && popupCount > 0 ? `${mentionListId}-${selectedCandidate}` : undefined}
               ref={textarea as React.Ref<HTMLTextAreaElement>}
               value={text}
               onChange={(e) => {
-                setText(e.target.value);
-                setCaret(e.target.selectionStart);
+                profileMention.change(e.target.value, e.target.selectionStart);
               }}
               onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
               onKeyDown={onKeyDown}
               onPaste={onPaste}
               rows={2}
-              placeholder={delegation ? "" : busyLook ? t(busyPlaceholderKey(noSteer)) : t("composer.placeholder", { name })}
+              placeholder={delegation || awaiting ? "" : busyLook ? t(busyPlaceholderKey(noSteer)) : t("composer.placeholder", { name })}
               className="max-h-[min(15rem,var(--composer-input-max,15rem))] flex-1 resize-none bg-transparent py-1 pr-2.5 outline-none placeholder:text-subtle"
             />}
             {/* Stop: a fixed round slot, empty while idle, so a turn starting or ending never changes the input's
@@ -1420,7 +1477,7 @@ export function Composer({
                   onClick={() => void interruptWithFeedback(t, sessionId, hostId)}
                   // Held through a turn boundary (no turn to stop for a moment): inert, looks the same.
                   disabled={!busy}
-                  title={t("composer.stopHint")}
+                  data-tip={t("composer.stopHint")}
                   aria-label={t("composer.stop")}
                   className="flex size-7 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-40"
                 >
@@ -1440,7 +1497,7 @@ export function Composer({
             <button
               onClick={() => void send(busy && sendKeys === "cli" ? (delegation && !delegationSteerKeys ? "queue" : "steer") : "send")}
               disabled={!hasContent || sending}
-              title={`${delegation ? t("delegationTurn.choice.queue") : busy ? (sendKeys === "cli" && !noSteer ? t("composer.steerSend") : t("composer.queueSend")) : t("composer.send")} · Enter`}
+              data-tip={`${delegation ? t("delegationTurn.choice.queue") : busy ? (sendKeys === "cli" && !noSteer ? t("composer.steerSend") : t("composer.queueSend")) : t("composer.send")} · Enter`}
               aria-label={delegation ? t("delegationTurn.choice.queue") : busy ? (sendKeys === "cli" && !noSteer ? t("composer.steerSend") : t("composer.queueSend")) : t("composer.send")}
               className="mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-colors hover:bg-accent/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:bg-surface-2 disabled:text-subtle"
             >
@@ -1549,7 +1606,7 @@ export function Composer({
         {!isAcpAgent(agent) && collabMode === "plan" && (
           <button
             onClick={() => void setPlan(false)}
-            title={t("composer.tools.planOff")}
+            data-tip={t("composer.tools.planOff")}
             className="ml-0.5 flex items-center gap-1 rounded-md bg-accent/15 px-1.5 py-0.5 text-xs text-accent hover:bg-accent/25"
           >
             {t("composer.collab.plan")}
@@ -1587,9 +1644,11 @@ export function Composer({
           conversation controls nor change the input's geometry when they appear or disappear. */}
       <div className="flex h-5 min-w-0 items-center justify-end" data-testid="composer-notice-slot">
         {shownNotice && meantHere(shownNotice.agent, here, focused) && (
-          <div role="status" title={shownNotice.text}
-            className={`flex max-w-full min-w-0 items-center rounded border border-border bg-surface px-2 text-xs ${shownNotice.tone === "error" ? "text-danger" : "text-muted"}`}
+          // The one toast face (040 §2.1), sized to the reserved line: an error leads with a danger icon, not a red box.
+          <div role="status" data-tip={shownNotice.text} data-tone={shownNotice.tone === "error" ? "error" : undefined}
+            className="float float-toast h-5 max-w-full gap-1.5 py-0 pr-2 pl-1.5 text-xs"
             data-testid="composer-notice">
+            {shownNotice.tone === "error" ? <CircleAlert size={12} aria-hidden data-toast-icon="" /> : <Info size={12} aria-hidden data-toast-icon="" />}
             <span className="min-w-0 truncate">{shownNotice.text}</span>
           </div>
         )}

@@ -7,6 +7,10 @@ import type { OwnerNotification, SafetyBlock } from "@cutex-desktop/protocol";
 import type { SafetyCheckResult } from "../../../../shared/ipc";
 import type { ModuleMock } from "../../dev/mockTypes";
 
+const s10PagesScene = typeof location !== "undefined" && new URLSearchParams(location.search).has("s10pages");
+// A loaded turn with no rendered rows reproduces a DOM lookup miss during a running turn.
+const focusScene = typeof location !== "undefined" && (new URLSearchParams(location.search).has("safetyfocus") || location.pathname === "/safety-focus");
+
 const AGENT = "ifm-plot";
 const THREAD = "thread-ifm-plot";
 const HINT =
@@ -81,6 +85,17 @@ function notice(s: Stop, b: SafetyBlock): OwnerNotification {
 }
 
 const notes: OwnerNotification[] = [notice(STOPS[0]!, block(STOPS[0]!, "dismissed", 5300)), notice(STOPS[1]!, block(STOPS[1]!, "used", 2400)), notice(STOPS[2]!, block(STOPS[2]!, "blocked"))];
+if (focusScene) {
+  notes[2]!.turnId = "ifm-plot-empty";
+  notes[2]!.createdAt = at(1);
+}
+
+if (s10PagesScene) {
+  for (let i = 4; i <= 7; i++) {
+    const stop = { ...STOPS[0]!, block: `sb-mock-${i}`, ago: 7200 + i * 600 };
+    notes.push(notice(stop, block(stop, "dismissed", stop.ago - 60)));
+  }
+}
 
 const declined = (s: Stop) => ({
   type: "commandExecution",
@@ -127,8 +142,9 @@ function plotThread() {
             { type: "agentMessage", id: "ifm-plot-a3", text: "已经删掉了 200 个 tmp 目录，省出 3.1 GB。" },
           ],
         },
+        ...(focusScene ? [{ id: "ifm-plot-empty", status: "completed", startedAt: sec(2), completedAt: sec(2), items: [] }] : []),
         {
-          id: c.turn, status: "completed", startedAt: sec(c.ago + 40), completedAt: sec(c.ago - 15),
+          id: c.turn, status: focusScene ? "inProgress" : "completed", startedAt: sec(c.ago + 40), completedAt: focusScene ? null : sec(c.ago - 15),
           items: [
             { type: "userMessage", id: "ifm-plot-u4", content: [{ type: "text", text: "开始重跑 bootstrap。" }] },
             declined(c),
@@ -143,7 +159,7 @@ function plotThread() {
 export const mock: ModuleMock = {
   features: { new: ["claude-safety-grants"] },
   thread: (sessionId) => (sessionId === AGENT ? plotThread() : null),
-  cutexState: (sessionId, core) => (core.legacy || sessionId !== AGENT ? {} : { ownerNotifications: structuredClone(notes) }),
+  cutexState: (sessionId, core) => (core.legacy || sessionId !== AGENT ? {} : { ownerNotifications: s10PagesScene ? core.ownerNotificationPages.page(notes, { agentId: sessionId }).notifications : structuredClone(notes) }),
   start(core) {
     if (core.legacy) return;
     // The waiting one as a live event: 需要你 without opening the agent.
@@ -151,7 +167,9 @@ export const mock: ModuleMock = {
       for (const n of notes) if (n.safetyBlock?.state === "blocked") core.emitCutex(AGENT, "cutex/ownerNotify/created", { notification: structuredClone(n) });
     }, 1200);
   },
-  api: (core) => ({
+  api: (core) => {
+    core.ownerNotificationPages.register(notes);
+    return {
     async safetyCheckDecide(agentId, blockId, decision): Promise<SafetyCheckResult> {
       const n = notes.find((x) => x.agentId === agentId && x.safetyBlock?.blockId === blockId);
       if (!n?.safetyBlock) return { ok: false, error: { code: "safety_block_not_found", message: "no such safety block" } };
@@ -163,5 +181,6 @@ export const mock: ModuleMock = {
       console.info(`[mock] cutex/safetyCheck/${decision}`, blockId, decision === "grant" ? `→ 主人已批准一次：${n.safetyBlock.command}（30 分钟内有效，仅此一次）` : "");
       return { ok: true, notification: structuredClone(n), submitError: null };
     },
-  }),
+    };
+  },
 };

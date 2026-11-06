@@ -237,7 +237,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.minorAgent.title": "The two-letter tile",
   "onboarding.guide.minorAgent.text": "{{Agents}} without an avatar of their own that are not pinned show as a tile with two letters of their name, in lists, conversations and everywhere else.\nThat is what Settings → Sidebar → {{Agent}} rows → Default {{agent}} avatar = Important {{agents}} only does.\nTo give one an avatar: right-click its row and choose Show avatar.",
   "onboarding.guide.project.title": "A project and its {{director}}",
-  "onboarding.guide.project.text": "A project is led by one {{director}}: it hands out work, creates {{agents}} and gets the results back.\nThe project’s board and log: hover the project title and click Project view on the right.",
+  "onboarding.guide.project.text": "A project is led by one {{director}}: it hands out work, creates {{agents}} and gets the results back.\nProject view and activity: hover the project title and click Project view on the right.",
   "onboarding.guide.needsYou.title": "Needs you",
   "onboarding.guide.needsYou.text": "“Needs you” means an {{agent}} is waiting for you: a question, an approval or a decision. It may stay stopped until you answer.\nThey collect above the composer, at the end of sidebar rows and in the tray; one click takes you there.",
   "onboarding.guide.delegation.title": "Delegations",

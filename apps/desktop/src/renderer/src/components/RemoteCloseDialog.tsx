@@ -17,7 +17,7 @@ export function RemoteCloseDialog() {
   const device = view.deviceName ?? host;
   const button = "rounded-md px-3 py-1 text-sm disabled:opacity-50";
   return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/30 pt-[18vh]" data-testid="remote-close-dialog">
+    <div className="fixed inset-0 z-[152] flex items-start justify-center bg-black/30 pt-[18vh]" data-testid="remote-close-dialog">
       <div
         role="alertdialog"
         aria-modal="true"

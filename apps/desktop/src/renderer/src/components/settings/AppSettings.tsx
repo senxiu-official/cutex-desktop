@@ -1,3 +1,4 @@
+import { UserLayoutSettings } from "../UserLayoutMemory";
 import { agentFeaturesOf, lacks } from "../../lib/agentFeatures";
 // Settings pages for this machine (group 「应用」): 通用 (+ 更新与诊断 from the updater module), 对话,
 // 左侧栏 (+ 会话两侧), 状态显示 — plus 归档 (数据) and 键盘快捷键, 关于 (系统: versions, licenses, the dragon). Desktop-local prefs live in localStorage
@@ -751,7 +752,7 @@ export function StatusPage() {
 
 export function SidebarPage() {
   // The cards are shared with the 调整左侧栏 panel (regions/SidebarSettings).
-  return <SidebarSettingsCards />;
+  return <><UserLayoutSettings /><SidebarSettingsCards /></>;
 }
 
 // ---- 键盘快捷键 ----

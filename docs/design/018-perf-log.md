@@ -1,32 +1,5 @@
-# 018 性能记录
+# Performance diagnostics
 
-状态：**已实现，待合并**（10-22，feat/0.2-perf）。清单 #27（主人：「做，默认开」）。
+Optional performance diagnostics record bounded local measurements for investigating rendering and interaction delays. Collection must avoid credentials and message contents where they are not needed. Diagnostic data is separate from host business state. A measurement describes its scenario and scope; it is not a general performance guarantee.
 
-## 问题
-
-主人在真机上偶尔觉得「卡了一下」，事后很难复现，也说不清当时开着什么、在做什么。要有一个记录：卡顿时自动记一条，事后按时间查（「22:40 卡了一下」），能导出给开发看。
-
-## 规则
-
-1. **什么时候记**：界面卡住超过 **100 毫秒** 就记一条。「卡住」= 一帧（或一个任务）在主线程上超过 100 ms，用浏览器自己的长帧报告（`long-animation-frame`；旧内核退回 `longtask`）。相隔不到 1 秒的连续长帧算同一次卡顿，合成一条（记帧数、总时长、最长一帧）。
-2. **记什么**（每条）：
-   - 时间（开始时刻）、最长一帧多少毫秒、合并了几帧、其中样式和布局用了多少毫秒；
-   - **最耗时的代码**：浏览器给出的前 5 段脚本——谁触发的（点击处理、定时器、`requestAnimationFrame`、ResizeObserver 回调、Promise……）、函数名、文件和位置、各自耗时和其中强制布局的时间。正式版代码是压缩过的：函数名是短名，按「文件:位置」用同一版本的 source map 能还原；
-   - **你刚做了什么**：卡顿前最后一次点击 / 按键 / 滚轮，多久之前，点在什么上（按钮名、标签名，或元素的标记）。**不记打的字**：没按 Ctrl / Alt / ⌘ 的字符键一律记成「typing」；点在输入框里只记是哪个框（它的提示文字），不记内容；
-   - **屏幕上开着什么**：主视图（对话 / 哪个页面）、屏幕上的对话（智能体名）、几个工作区、屏幕上的工具窗格（按种类）、桌面是否露出、聚焦对话的时间线有几轮几项、页面元素数、窗口大小、窗口是否在后台、卡片材质。
-3. **存在哪**：只存在这台电脑上（渲染进程的 IndexedDB），**不发到任何地方**。环形：最多 **500 条**，每条最多约 10 KB（超了先丢排在后面的脚本，再截短长字符串），所以总共不超过约 **5 MB**；满了丢最旧的。
-4. **默认开**；设置 → 关于 → 性能记录 里可以关（只是这台电脑）。关掉后不再观察、不再监听，已有的记录留着，可以清空。
-5. **不卡的时候几乎不花资源**：浏览器只在长于 50 ms 的帧上回调；平时只有三个被动的捕获监听（指针按下、按键、滚轮）记下最后一次操作（几次字段赋值）。不逐帧运行任何东西；「屏幕上开着什么」只在写一条记录时读一次。写入在卡顿结束 1 秒后批量做。
-6. **怎么看**：设置 → 关于 → 性能记录。
-   - 时间：15 分钟 / 1 小时 / 今天 / 全部 / **指定时间**（选一个时刻，看它前后 10 分钟——「22:40 卡了一下」就选 22:40）；
-   - 列表最新在上，每条一行：时间、毫秒数（≥ 200 橙、≥ 300 红）、最后的操作、最耗时的那段代码；点开看全部（屏幕、代码列表）；
-   - 「复制 JSON」「保存 JSON」导出当前时间段的全部记录（不只列表里显示的前 200 条）；「清空」删掉全部。
-
-## 实现时定下的细节（10-22）
-
-- 模块 `perf-log`（`modules/perf-log/`），和「关于」一样是必需模块（不能在模块列表里关），开关在它自己的设置段里；启动时加载即开始记录，所以启动时的卡顿也会记。
-- 开关存在 `localStorage["cutex-desktop.perfLog"]`（`off` = 关），数据库 `cutex-desktop-perf-log`。
-- 正式版 React 没有 Profiler 计时，所以「哪个组件慢」只能靠脚本归属（触发者 + 文件位置）；开发版里函数名是完整的。
-- 只看主线程：纯 GPU / 合成器那边的掉帧（主线程不忙）不会记。
-- 导出格式：`{ kind: "cutex-desktop.perf-log", version: 1, exportedAt, userAgent, entries: [...] }`，每条带 ISO 时间。
-- 开销（测量见 `docs/research/perf-baseline-20261020.md` §10）：开 / 关两档在同一台机器上跑同样的场景，差别在测量噪声以内。
+See [Architecture](../DESIGN.md) and [Module contracts](../desktop-modules.md) for related interfaces.

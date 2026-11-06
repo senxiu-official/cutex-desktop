@@ -1,4 +1,4 @@
-import { agentMentionTokens } from "./agentMentions";
+import { composerMentionTokens } from "./composerMentionTokens";
 
 export interface MentionSelection { start: number; end: number }
 interface Point { node: Node; offset: number }
@@ -50,7 +50,7 @@ export function atomicMentionSelection(value: string, start: number, end = start
   start = Math.max(0, Math.min(value.length, Number.isFinite(start) ? Math.trunc(start) : 0));
   end = Math.max(start, Math.min(value.length, Number.isFinite(end) ? Math.trunc(end) : start));
   const collapsed = start === end;
-  for (const token of agentMentionTokens(value)) {
+  for (const token of composerMentionTokens(value)) {
     if (collapsed && start > token.start && start < token.end) return { start: token.end, end: token.end };
     if (!collapsed && start > token.start && start < token.end) start = token.start;
     if (!collapsed && end > token.start && end < token.end) end = token.end;

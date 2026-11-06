@@ -59,7 +59,7 @@ export function DebugErrors() {
   const { t } = useI18n();
   const enabled = useDebug(s => s.state.enabled), errors = useDebug(s => s.errors);
   if (!enabled || !errors.length) return null;
-  return <div className="fixed right-4 bottom-16 z-[99] flex max-h-[50vh] w-[min(36rem,calc(100vw-2rem))] flex-col gap-2 overflow-auto" data-debug-errors>
+  return <div className="fixed right-4 bottom-16 z-[171] flex max-h-[50vh] w-[min(36rem,calc(100vw-2rem))] flex-col gap-2 overflow-auto" data-debug-errors>
     {errors.map((error, i) => <div key={`${error.time}-${i}`} role="alert" className="rounded-lg border border-danger/40 bg-background p-3 text-xs shadow-e2">
       <div className="mb-2 flex gap-3"><strong className="flex-1">{t("debug.rawError")}</strong><button className="text-accent" onClick={() => void win.navigator.clipboard.writeText(debugErrorText(error)).then(() => setCopied(error.time), e => captureDebugError(e, "debug.copy"))}>{t(copied === error.time ? "reply.copied" : "debug.copyError")}</button><button aria-label={t("common.close")} onClick={() => useDebug.setState(s => ({ errors: s.errors.filter(e => e !== error) }))}>×</button></div>
       <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all text-danger">{debugErrorText(error)}</pre>
@@ -75,7 +75,7 @@ export function DebugSaved() {
   useEffect(() => setCopied(false), [state.lastBundle]);
   if (!state.enabled || !state.lastBundle || state.lastBundle === dismissed) return null;
   const path = state.lastBundle;
-  return <div role="status" data-debug-saved-toast className="fixed bottom-4 left-1/2 z-[98] w-[min(40rem,calc(100vw-2rem))] -translate-x-1/2 rounded-lg border border-border bg-background p-3 text-xs shadow-e2">
+  return <div role="status" data-debug-saved-toast className="float fixed bottom-4 left-1/2 z-[170] w-[min(40rem,calc(100vw-2rem))] -translate-x-1/2 p-3 text-xs">
     <div className="flex gap-3"><strong className="flex-1">{t("debug.saved")}</strong><button aria-label={t("common.close")} onClick={() => setDismissed(path)}>×</button></div>
     <pre className="my-2 max-h-20 overflow-auto whitespace-pre-wrap break-all">{path}</pre>
     <div className="flex gap-4 text-accent"><button onClick={() => void win.navigator.clipboard.writeText(path).then(() => setCopied(true), e => captureDebugError(e, "debug.copyPath"))}>{t(copied ? "reply.copied" : "debug.copyPath")}</button><button onClick={() => void bridge.debug?.reveal().catch(e => captureDebugError(e, "debug.reveal"))}>{t(bridge.platform === "darwin" ? "debug.finder" : bridge.platform === "win32" ? "debug.explorer" : "debug.reveal")}</button></div>

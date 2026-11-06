@@ -1,35 +1,5 @@
-# 029 Windows 右上角的窗口按钮（— □ ×）
+# Windows caption controls
 
-状态：**已实现，待合并**（10-22，feat/0.2-caption）。来源：主人在 host02 上的截图——右上角三个按钮那一块是实心的深色方块（#1c1c1d），
-窗口顶栏其余部分是透明的、透出桌面背景，看起来像坏了。
+The Windows title bar exposes minimize, maximize/restore and close controls consistent with window state. Interactive caption regions remain separate from draggable regions. Hover and focus states retain sufficient contrast in light and dark themes. Close behavior follows the explicit tray or quit preference.
 
-## 规则
-
-- 三个按钮仍是 Windows 自己画的（贴靠布局、悬停、关闭的红色都是系统的），**底色永远透明**：顶栏在那个位置显示什么（桌面背景上的
-  一层窗口色磨砂、或者贴边显示时的窗口色），按钮后面就是什么，和顶栏其余部分一模一样。
-- 按钮上的符号用当前主题的文字颜色（和顶栏上应用自己的图标读在同一块底上）；万一和窗口色太接近（对比度不到 3:1），换成近黑或近白里更清楚的一个。
-- 打开窗口的第一刻（页面还没报主题之前）也是透明底，符号按系统深浅色。
-
-## 实现时定下的细节
-
-- **查证**：Electron 44（本项目用 44.5.1）在 Windows 上支持透明的 `titleBarOverlay.color`（`#00000000` / `rgba()`）：
-  electron#51017（44.0.0 修了「设成 rgba(0,0,0,0) 时退回系统默认底色」）；electron#48568（修了透明底时悬停色是浅灰、不跟主题的问题：
-  悬停 / 按下的颜色改为来自主题，而不是由底色推算）。所以选**方案 1：透明底 + 只同步符号颜色**，不用自己画按钮（自己画要重做贴靠布局
-  菜单、键盘、无障碍，风险大）。
-- main 只接受 `#rrggbb` / `#rrggbbaa` 的底色、`#rrggbb` 的符号颜色，其他一律忽略（`shared/windowChrome`）。
-- 不额外画衬底：顶栏本身已经有一层窗口色磨砂（styles.css `[data-window-titlebar]`），试过再加一层会让右上角比顶栏其余部分深一块。
-- **没改**：系统主题和应用主题不一致时（例如系统浅色、应用深色），悬停色跟的是 Windows / Electron 的主题，可能偏浅；如果真机上看着不对，
-  下一步是把 `nativeTheme.themeSource` 跟应用的明确主题走（会顺带影响系统菜单和内嵌网页的深浅色，所以这次没做）。
-- 预览：`?caption` 用一个替身画出按钮的位置和颜色（真正的按钮只在 Windows 的 Electron 里有）。代码 `shared/windowChrome.ts`、
-  `main/index.ts`（初始和 IPC 校验）、`components/TitleBar.tsx`（发送颜色）。测试 `test/windowChrome.test.ts`。
-
-## 主人在 host02 上验收（更新桌面后）
-
-1. **桌面模式**（显示桌面，按钮后面是壁纸）：右上角没有方块，三个按钮的底和顶栏其余部分一样（同一层磨砂），符号清楚。
-2. **卡片材质**：外观 → 卡片材质 切「不透明」和「亚克力」各看一次，同上。
-3. **浅色 / 深色**：外观里切主题，符号颜色跟着变（深色主题浅色符号，浅色主题深色符号），切换后不出现方块。
-4. **最大化 / 还原**：双击顶栏或按 □，两种状态下右上角都没有方块，按钮高度和顶栏一致。
-5. **悬停**：— 和 □ 悬停时有一层浅灰 / 深灰，看得出来；× 悬停是红底白符号。按下时再深一点。
-6. **贴边显示**开着并铺满时：右上角和顶栏同色。
-7. 把 □ 悬停一会儿，Windows 11 的贴靠布局菜单照常出现。
-8. 如果第 5 条在「系统浅色 + 应用深色」（或反过来）时悬停色看不清，告诉我们（见上面「没改」）。
+See [Architecture](../DESIGN.md) and [Module contracts](../desktop-modules.md) for related interfaces.

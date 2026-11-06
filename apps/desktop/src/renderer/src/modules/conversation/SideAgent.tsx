@@ -20,7 +20,6 @@ import { useKeepOnPrepend } from "../../lib/keepOnPrepend";
 import { pausedSection } from "../../lib/queuePause";
 import { SIDE_AGENT_COMPONENT, type SideAgentParams } from "../../lib/sideKinds";
 import { stopHeld } from "../../lib/stopHold";
-import { orderedEntries } from "../../lib/timeline";
 import { markSeenOn } from "../../lib/turnUnread";
 import { agentHost, agentState, featuresOf, useApp, viewOf, type SessionView } from "../../store";
 import { useShownInWindow } from "../../lib/windowScope";
@@ -155,8 +154,6 @@ export function SideAgentConversation({ sessionId, hostId, name, resource }: { s
   const view = useApp((s) => viewOf(s, hostId, sessionId));
   const names = useNames(hostId);
   const optionsV1 = useApp(s => featuresOf(s, hostId).has("user-input-options-v1"));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const entries = useMemo(() => (view ? orderedEntries(view.timeline) : []), [view?.version, view?.timeline]);
   const pendingSends = useApp((s) => pendingFollowKey(agentState(s.outbox, hostId, sessionId)));
   // Stick to the bottom while the owner is there: only their own scrolling up lets go, not the layout
   // moving the position (lib/stickToBottom scrollFollow / watchScrollIntent).
@@ -188,7 +185,7 @@ export function SideAgentConversation({ sessionId, hostId, name, resource }: { s
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [entries, pendingSends, view?.loading, turnKey]);
+  }, [view?.version, pendingSends, view?.loading, turnKey]);
   // Older turns paged in at the top (scrolling up to 加载更早): stay on the turn being read instead of
   // landing on the thread's first turns.
   useKeepOnPrepend(scroller, sessionId, view?.timeline.turns[0]?.id ?? null, stick);
@@ -222,7 +219,7 @@ export function SideAgentConversation({ sessionId, hostId, name, resource }: { s
           {view && (
             <TimelineBody
               timeline={view.timeline}
-              entries={entries}
+              version={view.version}
               sessionId={sessionId}
               nameOf={names}
               readOnly

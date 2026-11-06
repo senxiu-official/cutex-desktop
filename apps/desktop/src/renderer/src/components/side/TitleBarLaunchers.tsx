@@ -21,6 +21,7 @@ import { toggleSideColumn } from "../../lib/sideOpen";
 import { newInstanceKey, openModifiers, PLAIN_OPEN } from "../../lib/openModifiers";
 import { attentionText, kindBadges, pillContent } from "../../lib/sidePills";
 import { keyVar } from "../../lib/keybindings";
+import { InfoMark } from "../InfoMark";
 
 /** A launcher's badges: red count (attention), else the unread dot; busy = a green pulse. */
 function Badges({ attention, unread, busy }: { attention: number; unread: boolean; busy: boolean }) {
@@ -39,12 +40,10 @@ function Badges({ attention, unread, busy }: { attention: number; unread: boolea
 const BTN = "[app-region:no-drag] relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-foreground";
 
 function Launcher({ item, inView }: { item: Launchable; inView: boolean }) {
-  const { t } = useI18n();
   const layout = useSide((s) => s.layout);
   const tabInfo = useSide((s) => s.tabInfo);
   const ctx = useSideView();
   const badges = kindBadges(layout, item.kind, ctx, (id) => tabInfo[id]);
-  const tip = item.multi ? t("side.launcherTipMulti", { name: item.label, key: newInstanceKey() }) : item.label;
   const press = (e: MouseEvent) => pressLauncher(item.kind, item.multi ? openModifiers(e) : PLAIN_OPEN);
   const Icon = item.Icon;
   return (
@@ -59,7 +58,7 @@ function Launcher({ item, inView }: { item: Launchable; inView: boolean }) {
         if (e.button === 1) e.preventDefault(); // no autoscroll
       }}
       onContextMenu={contextMenu(() => launcherContextMenu(item.kind))}
-      title={tip}
+      data-tip={item.label}
       aria-label={item.label}
       aria-pressed={inView}
       data-side-launcher={item.kind}
@@ -93,18 +92,23 @@ export function TitleBarLaunchers() {
   }
 
   const plusTip = hidden ? t("side.launcherMenuMore", { n: hidden }) : t("side.launcherMenu");
+  // What a modifier / middle click on a launcher that can open several does (design 040 §2.1: not in the tips).
+  const multiInfo = shown.filter((item) => item.multi).map((item) => t("side.launcherTipMulti", { name: item.label, key: newInstanceKey() })).join("\n");
   return (
     <>
+      <span className="flex shrink-0 items-center">
       <span ref={strip} data-side-launchers onPointerEnter={() => void preloadOnIntent()} className="flex shrink-0 items-center gap-0.5">
         {shown.map((item) => (
           <Launcher key={item.kind} item={item} inView={inView.has(item.kind)} />
         ))}
       </span>
-      <button onClick={(e) => openMenuFrom(e.currentTarget, launcherMenu())} onPointerEnter={() => void preloadOnIntent()} title={plusTip} aria-label={plusTip} aria-haspopup="menu" data-side-launcher-menu className={BTN}>
+      {multiInfo && <InfoMark text={multiInfo} className="hover-info px-0.5" />}
+      </span>
+      <button onClick={(e) => openMenuFrom(e.currentTarget, launcherMenu())} onPointerEnter={() => void preloadOnIntent()} data-tip={plusTip} aria-label={plusTip} aria-haspopup="menu" data-side-launcher-menu className={BTN}>
         <Plus size={16} />
         {hidden > 0 && <span className="absolute top-1 right-1 h-[5px] w-[5px] rounded-full bg-subtle" />}
       </button>
-      <button onClick={toggleSideColumn} title={t("side.toggleHint", keyVar("sideToggle"))} aria-label={t("side.toggle")} aria-pressed={layout.open} className={`${BTN} ${layout.open ? "bg-hover text-foreground" : ""}`}>
+      <button onClick={toggleSideColumn} data-tip={t("side.toggleHint", keyVar("sideToggle"))} aria-label={t("side.toggle")} aria-pressed={layout.open} className={`${BTN} ${layout.open ? "bg-hover text-foreground" : ""}`}>
         {layout.open ? <PanelRightClose size={16} /> : <PanelRight size={16} />}
         {badge &&
           (badge.attention ? (

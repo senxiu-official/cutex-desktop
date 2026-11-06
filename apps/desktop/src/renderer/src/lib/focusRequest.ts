@@ -9,6 +9,8 @@ import { drawRow } from "./farRows";
 
 export interface FocusRequest {
   sessionId: string;
+  /** When supplied, only this host may consume the request. */
+  hostId?: string;
   turnId?: string;
   askId?: string;
   /** An owner-notify message card (lib/ownerNotifyStore focusOwnerNote). */

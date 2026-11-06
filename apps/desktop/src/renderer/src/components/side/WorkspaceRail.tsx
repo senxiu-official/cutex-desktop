@@ -40,7 +40,7 @@ export function WorkspaceRail({ paneId, hostId, sessionId, name, order, at = "ri
     <div data-ws-shelf={paneId} data-ws-rail="" data-ws-rail-at={at} data-ws-strip={always ? "" : undefined} className={`${always ? "panel-fold " : ""}relative flex shrink-0 ${at === "left" ? "pr-2" : "justify-end pl-2"}`} style={{ width: COLLAPSED_SHELF_WIDTH, order }}>
       <nav
         aria-label={tip}
-        title={tip}
+        data-tip={tip}
         onClick={(e) => e.target === e.currentTarget && focus()}
         data-shelf-card=""
         data-shelf-collapsed=""
@@ -59,7 +59,7 @@ export function WorkspaceRail({ paneId, hostId, sessionId, name, order, at = "ri
             <button
               key={page.id}
               data-ws-rail-page={page.id}
-              title={t("ws.railPage", { page: label, name })}
+              data-tip={t("ws.railPage", { page: label, name })}
               aria-label={label}
               onClick={() => {
                 focus();

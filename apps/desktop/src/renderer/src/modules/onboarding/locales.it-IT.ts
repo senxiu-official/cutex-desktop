@@ -220,7 +220,7 @@ export const itIT: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.minorAgent.title": "Il riquadro con l’iniziale",
   "onboarding.guide.minorAgent.text": "Gli {{Agents}} senza un proprio avatar e non fissati appaiono come piccoli riquadri con l’iniziale.\nÈ l’effetto di Impostazioni → Barra laterale sinistra → Righe per ogni {{Agent}} → Avatar predefinito per {{agent}} = Solo {{agents}} importanti.\nPer assegnarne uno: clic destro sulla riga e scegli Mostra avatar.",
   "onboarding.guide.project.title": "Un progetto e il suo {{director}}",
-  "onboarding.guide.project.text": "Ogni progetto è guidato da un {{director}}: distribuisce il lavoro, crea {{agents}} e raccoglie i risultati.\nPer la bacheca e le attività del progetto, passa sul titolo e fai clic su Vista del progetto a destra.",
+  "onboarding.guide.project.text": "Ogni progetto è guidato da un {{director}}: distribuisce il lavoro, crea {{agents}} e raccoglie i risultati.\nPer la vista e le attività del progetto, passa sul titolo e fai clic su Vista del progetto a destra.",
   "onboarding.guide.needsYou.title": "Serve il tuo intervento",
   "onboarding.guide.needsYou.text": "“Serve il tuo intervento” significa che un {{agent}} ti aspetta: per una domanda, un’approvazione o una decisione. Potrebbe restare fermo finché non rispondi.\nLe richieste si raccolgono sopra il campo di scrittura, in fondo alle righe laterali e nel vassoio; un clic ti porta lì.",
   "onboarding.guide.delegation.title": "Deleghe",

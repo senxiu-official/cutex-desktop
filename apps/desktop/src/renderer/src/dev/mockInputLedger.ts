@@ -178,7 +178,7 @@ export function createMockInputLedger(scene: LedgerScene = "turn", emit: Emit = 
     async inputRetry(id: string, inputId: string, rev: number) {
       const r = cas(id, inputId, rev);
       if (!r.actions?.includes("retry")) throw new Error("input_retry_refused");
-      return put(id, inputId, { state: "waiting", reason: "ownerRetry", surface: "nextUp", attempt: r.attempt + 1, stage: null, actions: ["dismiss"], since: iso() });
+      return put(id, inputId, { state: "waiting", reason: "ownerRetry", surface: r.kind === "owner" && r.state === "failed" && r.surface === "timeline" && r.turnId === null ? "timeline" : "nextUp", attempt: r.attempt + 1, stage: null, actions: ["dismiss"], since: iso() });
     },
     async inputLeaseRelease(id: string, lease: InputLease) {
       const s = get(id);
@@ -208,7 +208,8 @@ export function createMockInputLedger(scene: LedgerScene = "turn", emit: Emit = 
     const offline = s.delivery.state === "offline" || s.delivery.state === "starting";
     const queued = strategy === "queue" || offline;
     const held = !queued && s.delivery.state === "held";
-    const input = put(id, inputId, { preview: text.slice(0, 80), intent: { strategy, deliveryMode: null, timing: "afterTurn" }, state: queued ? "waiting" : held ? "held" : "accepted", reason: offline ? "agentOffline" : queued ? "explicitQueue" : held ? "hostBusy" : null, surface: queued || held ? "nextUp" : "timeline", order: queued ? { admissionKey: inputId, position: s.records.size } : null, deadline: queued || held ? null : new Date(clock() + 60000).toISOString(), actions: strategy === "queue" ? ["cancel", "sendNow", "edit"] : queued ? ["dismiss"] : [] });
+    const heldNextUp = held && (s.delivery.reason !== "hostBusy" || s.delivery.turn !== null);
+    const input = put(id, inputId, { preview: text.slice(0, 80), intent: { strategy, deliveryMode: null, timing: "afterTurn" }, state: queued ? "waiting" : held ? "held" : "accepted", reason: offline ? "agentOffline" : queued ? "explicitQueue" : held ? "hostBusy" : null, surface: queued || heldNextUp ? "nextUp" : "timeline", order: queued ? { admissionKey: inputId, position: s.records.size } : null, deadline: queued || held ? null : new Date(clock() + 60000).toISOString(), actions: strategy === "queue" ? ["cancel", "sendNow", "edit"] : queued ? ["dismiss"] : [] });
     if (strategy === "queue") s.items.push({ queueId: `synthetic-${inputId}`, clientUserMessageId: inputId, origin: { kind: "other", clientId: "preview-simulation" }, input: [{ type: "text", text }], position: s.items.length, revision: 1, state: "queued", createdAt: iso(), updatedAt: iso() });
     if (offline) setDelivery(id, "starting");
     return { disposition: queued ? "queued" as const : held ? "held" as const : s.delivery.state === "turn" ? "steered" as const : "started" as const, turnId: s.delivery.turn?.turnId ?? null, input };

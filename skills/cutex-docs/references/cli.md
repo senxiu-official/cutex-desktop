@@ -54,7 +54,7 @@
 - 启动请求超时不等于启动失败：先查返回的 action ID，避免重复 start。缺少依赖已解决且用户要继续原操作时，`cutex human action ACTION_ID --resume` 恢复原动作。
 - `cutex human doctor --fix` 预览修复；`--fix --yes` 才应用支持的修复。先读 findings 与计划，不承诺所有告警都能自动修复。
 - `human recover`、`bus-messages discard`、强制停止和 Director 轮换都有额外后果，不列为通用修复。需要时先查本版帮助和对应故障证据。
-- `cutex human tasks ...` 和 `--cancel-tasks` 已在 r219 移除；不要用旧文档里的 Task Service 操作代替当前工作流或委托。
+- `cutex human tasks ...` 和 `--cancel-tasks` 已移除；不要用旧文档里的 Task Service 操作代替当前工作流或委托。
 - `cutex --quick` 是旧式 CLI 启动入口，不等于桌面的快速启动。managed agent 优先走这里核实过的 New / Start / Attach 流程。
 
 ## 核对依据

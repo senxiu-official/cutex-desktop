@@ -69,7 +69,7 @@ export function PendingOwnerNotes({ sessionId, hostId }: { sessionId: string; ho
           data-pending-more=""
           aria-haspopup="menu"
           aria-label={t("ownerNotify.pending.more", { n: notes.length - 1 })}
-          title={t("ownerNotify.pending.more", { n: notes.length - 1 })}
+          data-tip={t("ownerNotify.pending.more", { n: notes.length - 1 })}
           onClick={(e) => openMenuAbove(e.currentTarget, others, { minWidth: 280 })}
           className="shrink-0 rounded-full border border-border px-1.5 text-caption/[inherit] text-muted tabular-nums hover:bg-hover hover:text-foreground"
         >
@@ -88,7 +88,7 @@ export function PendingOwnerNotes({ sessionId, hostId }: { sessionId: string; ho
         </button>
       )}
       {replying && (
-        <div data-pending-reply-panel="" data-popover="" className="absolute bottom-full left-6 z-50 mb-1 w-[34rem] max-w-[calc(100%-3rem)] rounded-xl border border-border bg-surface p-2.5 text-sm shadow-xl">
+        <div data-pending-reply-panel="" data-popover="" className="float absolute bottom-full left-6 z-[160] mb-1 w-[34rem] max-w-[calc(100%-3rem)] p-2.5 text-sm">
           <div className="mb-1 flex items-center gap-1.5 text-xs">
             <span className="font-medium text-foreground">{labelOf(replying)}</span>
             <span className="text-subtle">· {ageOf(replying)}</span>

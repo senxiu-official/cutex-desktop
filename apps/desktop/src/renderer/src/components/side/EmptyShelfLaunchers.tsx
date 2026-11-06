@@ -7,11 +7,11 @@ import { launch, launchable } from "../../lib/sideMenus";
 import "./emptyShelf.css";
 
 /** A Shelf's own launch target is retained even when another workspace takes focus. */
-export function EmptyShelfLaunchers({ pageId }: { pageId: string | null }) {
+export function EmptyShelfLaunchers({ pageId, kinds }: { pageId: string | null; kinds?: readonly string[] }) {
   const { t } = useI18n();
   useSideRegistry();
   useEffect(() => void preloadOnIntent(), []);
-  const sections = shelfLauncherSections(launchable(true));
+  const sections = shelfLauncherSections(launchable(true).filter((item) => !kinds || kinds.includes(item.kind)));
   if (!sections.length) return <p className="text-xs text-subtle">{t("side.launcher.none")}</p>;
   return <div className="empty-shelf-launchers" data-empty-shelf-launchers>
     {sections.map(({ section, entries }) => <section key={section} aria-label={t(`side.launcher.${section}`)}>

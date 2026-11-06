@@ -13,7 +13,7 @@ import { findInstanceAnywhere, instanceOwner, useSide, withLiveShelf } from "../
 import { currentWindow, inWindow } from "../../lib/windowScope";
 import { pressInstance } from "../../lib/shelfSource";
 import { opensElsewhere, sideOpenFrom } from "../../lib/shelfTarget";
-import { BROWSER_TAB, browserNavigationUrl, isBrowserTabKey } from "./browserState";
+import { BROWSER_TAB, SERVICE_TAB, browserNavigationUrl, isBrowserKind, isBrowserTabKey } from "./browserState";
 
 type PopupEvent = Pick<BrowserEvent, "hostId" | "tabKey" | "pool" | "newTabUrl" | "newTabKey">;
 
@@ -21,7 +21,7 @@ type PopupEvent = Pick<BrowserEvent, "hostId" | "tabKey" | "pool" | "newTabUrl" 
 export function browserTabInstance(hostId: string, tabKey: string, bound = false): string | null {
   return findInstanceAnywhere((inst) => {
     const st = inst.state;
-    return inst.kind === BROWSER_TAB && inst.binding.hostId === hostId && !!st && typeof st === "object" && !Array.isArray(st) && st.tabKey === tabKey
+    return isBrowserKind(inst.kind) && inst.binding.hostId === hostId && !!st && typeof st === "object" && !Array.isArray(st) && st.tabKey === tabKey
       && (!bound || inst.binding.kind === "host" || inst.binding.kind === "agent");
   });
 }
@@ -54,7 +54,7 @@ export function pressBrowserTab(event: Pick<BrowserEvent, "hostId" | "tabKey">):
  */
 export function revealBrowserTab(event: Pick<BrowserEvent, "hostId" | "tabKey">, side: { list(kind: string): readonly SideInstanceInfo<Json>[]; reveal(target: SideRevealTarget): SideRevealResult }): SideRevealResult | null {
   // list() is the focused Shelf (the current scope).
-  const here = side.list(BROWSER_TAB).find((instance) => instance.state && typeof instance.state === "object" && !Array.isArray(instance.state) && instance.state.tabKey === event.tabKey
+  const here = [...side.list(BROWSER_TAB), ...side.list(SERVICE_TAB)].find((instance) => instance.state && typeof instance.state === "object" && !Array.isArray(instance.state) && instance.state.tabKey === event.tabKey
     && (instance.binding.kind === "host" || instance.binding.kind === "agent") && instance.binding.hostId === event.hostId);
   if (here) return side.reveal({ instanceId: here.id });
   const id = event.tabKey ? browserTabInstance(event.hostId, event.tabKey, true) : null;

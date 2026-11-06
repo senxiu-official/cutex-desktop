@@ -23,6 +23,12 @@ export interface CdpTransport {
   onDetach(callback: (reason?: string) => void): () => void;
 }
 export type ExecutorOperation = 'read' | 'find' | BrowserAction['kind'] | 'navigate' | 'screenshot';
+/** Optional main-process visual sink. Never contains refs, text, values or page objects. */
+export interface ActionFeedback {
+  kind: 'click' | 'hover' | 'type' | 'scroll'; phase: 'move' | 'dispatch';
+  x: number; y: number; viewport: { width: number; height: number };
+  rect?: { x: number; y: number; width: number; height: number };
+}
 export interface ExecutorOptions {
   /** Guest registry allocator, persistent across executor replacement/LRU reload/regrant. */
   nextPageGeneration(): number;
@@ -34,6 +40,9 @@ export interface ExecutorOptions {
   focusTarget?(): void | Promise<void>;
   /** Host owns navigation/redirect interception too; this only checks operation boundaries. */
   allowUrl(url: string): boolean | Promise<boolean>;
+  /** False means this target has no visible feedback surface (e.g. an offscreen carrier). */
+  canShowAction?(): boolean;
+  onAction?(feedback: ActionFeedback): boolean | void | Promise<boolean | void>;
   now?: () => number;
   snapshotTtlMs?: number;
   defaultTimeoutMs?: number;
@@ -112,6 +121,23 @@ export class BrowserCdpExecutor {
     const parsed = parseBrowserFindQuery(query);
     return this.run('find', options, ctx => this.snapshotFor(ctx, parsed));
   }
+  /** The http(s) source of an <img> (a lazy image's real one while src is a placeholder). */
+  private async imageSource(ctx: Active, backendNodeId: number): Promise<string | undefined> {
+    let described: Json;
+    try { described = await this.send(ctx, 'DOM.describeNode', { backendNodeId, depth: 0 }) as Json; }
+    catch (cause) { if (knownError(cause)?.code !== 'transport_error' || this.closed) throw cause; this.check(ctx); return undefined; }
+    this.samePage(ctx);
+    const attributes = described.node?.attributes;
+    if (String(described.node?.nodeName ?? '').toUpperCase() !== 'IMG' || !Array.isArray(attributes)) return undefined;
+    const attrs = new Map<string, string>();
+    for (let i = 0; i + 1 < attributes.length; i += 2) if (typeof attributes[i] === 'string' && typeof attributes[i + 1] === 'string') attrs.set(attributes[i].toLowerCase(), attributes[i + 1]);
+    for (const name of ['src', 'data-src', 'data-original', 'data-ks-lazyload', 'data-lazy-src']) {
+      const raw = attrs.get(name)?.trim();
+      if (!raw) continue;
+      try { const url = new URL(raw, this.currentUrl); if ((url.protocol === 'http:' || url.protocol === 'https:') && url.href.length <= 8192) return url.href; } catch { /* next candidate */ }
+    }
+    return undefined;
+  }
   private async snapshotFor(ctx: Active, query?: BrowserFindQuery): Promise<BrowserSnapshot> {
       // A failed new snapshot also invalidates the previous one: never silently reuse refs.
       this.refs.clear();
@@ -127,11 +153,33 @@ export class BrowserCdpExecutor {
       // Reserve the longer boolean spelling (false) and the full serialized metadata, including URL.
       let byteLength = serializedBytes(snapshot);
       if (byteLength > MAX_SNAPSHOT_BYTES) throw error('message_too_large', 'Snapshot metadata exceeds the output budget');
-      let inspected = 0;
-      for (const original of result.nodes) {
+      let inspected = 0, images = 0;
+      // Nearest element of each AX node (itself, or its closest element ancestor) and that
+      // element's accessible name: a text ref acts on its element, and a link's own label
+      // text is not repeated after it.
+      const element = new Map<string, { backendNodeId: number; name: string }>();
+      for (const original of documentOrder(result.nodes)) {
         let node = original;
+        const parent = node.parentId === undefined ? undefined : element.get(String(node.parentId));
+        const axRole = String(node.role?.value ?? '');
+        const text = axRole === 'StaticText' || axRole === 'InlineTextBox' || axRole === 'LineBreak';
+        if (Number.isInteger(node.backendDOMNodeId) && !text) element.set(String(node.nodeId), { backendNodeId: node.backendDOMNodeId, name: node.ignored ? '' : String(node.name?.value ?? '') });
+        else if (parent) element.set(String(node.nodeId), parent);
+        // An <img alt=""> is AX-ignored (emptyAlt), yet its source is often the product picture.
+        if (!query && node.ignored && Number.isInteger(node.backendDOMNodeId) && Array.isArray(node.ignoredReasons)
+          && node.ignoredReasons.some((reason: Json) => reason?.name === 'emptyAlt') && images++ < 256) {
+          const source = await this.imageSource(ctx, node.backendDOMNodeId);
+          if (!source) continue;
+          node = { ...node, ignored: false, role: { value: 'image' }, name: { value: '' }, value: undefined, properties: [{ name: 'url', value: { value: source } }] };
+        }
         if (node.ignored || !Number.isInteger(node.backendDOMNodeId)) continue;
         if (query && !matchesQuery(node, query)) continue; // Filter original AX before ANY output truncation.
+        // A read lists what a person sees: nameless wrappers and a link's repeated label say
+        // nothing and only spend the budget (their text stays, in document order).
+        const label = String(node.name?.value ?? '').trim();
+        const wrapper = node.role?.value === 'generic' || node.role?.value === 'none';
+        if (!query && node.value?.value === undefined && (!label && (text || wrapper)
+          || text && parent && parent.name.trim() === label)) continue;
         if (nodes.length >= (query?.limit ?? (query ? DEFAULT_FIND_LIMIT : MAX_SNAPSHOT_NODES))) { snapshot.truncated = true; break; }
         // AX roles do not establish privacy: <input list> is a combobox, number
         // inputs are spinbuttons, and custom controls may report other roles.
@@ -170,7 +218,8 @@ export class BrowserCdpExecutor {
         byteLength += addition;
         if (outputNode.truncated) snapshot.truncated = true;
         this.refs.set(ref, {
-          backendNodeId: node.backendDOMNodeId, generation: this.generation,
+          // Text is not an element: its ref acts on (and shoots) the element that holds it.
+          backendNodeId: text && parent ? parent.backendNodeId : node.backendDOMNodeId, generation: this.generation,
           expiresAt: this.now() + (this.options.snapshotTtlMs ?? 30_000), frameId,
           unsupported: frameId !== this.rootFrame || /iframe/i.test(role),
         });
@@ -208,10 +257,13 @@ export class BrowserCdpExecutor {
       let scroll: ScrollOutcome | undefined;
       const work = async (objectId: string): Promise<DispatchResult> => {
         if (input.kind === 'scrollIntoView') {
+          const position = await this.viewport(ctx);
+          await this.actionFeedback(ctx, 'scroll', position, () => this.viewport(ctx));
           this.pageResult(await this.call(ctx, objectId, SCROLL_INTO_VIEW, [], true));
           this.pageResult(await this.call(ctx, objectId, INSPECT, ['hover']));
         } else if (input.kind === 'select') {
-          this.pageResult(await this.call(ctx, objectId, INSPECT, ['select']));
+          const position = await this.call(ctx, objectId, INSPECT, ['select']); this.pageResult(position);
+          await this.actionFeedback(ctx, 'click', position, () => this.call(ctx, objectId, INSPECT, ['select']));
           this.pageResult(await this.call(ctx, objectId, SELECT_OPTIONS, [input.by, input.values, false]));
           const result = await this.call(ctx, objectId, SELECT_OPTIONS, [input.by, input.values, true], true); this.pageResult(result);
           if (!Array.isArray(result.values) || !Array.isArray(result.expected) || JSON.stringify([...result.values].sort()) !== JSON.stringify([...result.expected].sort()))
@@ -220,6 +272,9 @@ export class BrowserCdpExecutor {
           const position: Json = input.kind === 'scroll' && !input.ref ? await this.viewport(ctx)
             : await this.call(ctx, objectId, INSPECT, [input.kind]);
           this.pageResult(position);
+          if (input.kind !== 'check' && input.kind !== 'uncheck' || position.checked !== (input.kind === 'check'))
+            await this.actionFeedback(ctx, input.kind === 'hover' ? 'hover' : input.kind === 'scroll' ? 'scroll' : 'click', position,
+              () => input.kind === 'scroll' && !input.ref ? this.viewport(ctx) : this.call(ctx, objectId, INSPECT, [input.kind]));
           if (input.kind === 'check' || input.kind === 'uncheck') {
             const desired = input.kind === 'check';
             if (position.checked !== desired) {
@@ -316,6 +371,8 @@ export class BrowserCdpExecutor {
         const position = await this.call(ctx, objectId, INSPECT, [action]);
         this.pageResult(position);
         this.samePage(ctx);
+        await this.actionFeedback(ctx, action === 'click' ? 'click' : 'type', position,
+          () => this.call(ctx, objectId!, INSPECT, [action]));
         const receipt = await this.send(ctx, 'Runtime.callFunctionOn', {
           objectId, functionDeclaration: ARM_RECEIPT,
           arguments: [{ value: action }, { value: key?.key ?? '' }], returnByValue: false,
@@ -611,6 +668,21 @@ export class BrowserCdpExecutor {
       await this.wait(ctx, new Promise<void>(resolve => setTimeout(resolve, MOTION_POLL_MS)));
     }
   }
+  private async actionFeedback(ctx: Active, kind: ActionFeedback['kind'], position: Json, verify: () => Promise<Json>): Promise<void> {
+    if (!this.options.onAction || this.options.canShowAction?.() === false) return;
+    const viewport = await this.viewport(ctx);
+    if (!Number.isFinite(position.x) || !Number.isFinite(position.y) || position.x < 0 || position.y < 0 || position.x > viewport.width || position.y > viewport.height) return;
+    const rect = position.rect && validRect(position.rect) ? { x: position.rect.x, y: position.rect.y, width: position.rect.width, height: position.rect.height } : undefined;
+    const feedback: ActionFeedback = { kind, phase: 'move', x: position.x, y: position.y, viewport: { width: viewport.width, height: viewport.height }, ...(rect ? { rect } : {}) };
+    const shown = await this.wait(ctx, this.options.onAction(feedback));
+    if (shown === false) return;
+    const current = await verify(); this.pageResult(current); this.samePage(ctx);
+    if (!Number.isFinite(current.x) || !Number.isFinite(current.y) || Math.abs(current.x - position.x) > .5 || Math.abs(current.y - position.y) > .5
+      || rect && (!current.rect || Math.abs(current.rect.width - rect.width) > .5 || Math.abs(current.rect.height - rect.height) > .5))
+      throw error('not_actionable', 'Target moved during visual feedback; inspect again before acting');
+    await this.wait(ctx, this.options.ensureVisible()); this.samePage(ctx);
+    await this.wait(ctx, this.options.onAction({ ...feedback, phase: 'dispatch' }));
+  }
   private async viewport(ctx: Active): Promise<{ width: number; height: number; x: number; y: number; pageX: number; pageY: number }> {
     const metrics = await this.send(ctx, 'Page.getLayoutMetrics') as Json;
     const view = metrics.cssVisualViewport;
@@ -672,7 +744,8 @@ export class BrowserCdpExecutor {
   }
   private pageResult(result: Json): void {
     if (result.error === 'stale_ref' || result.error === 'unsupported_frame' || result.error === 'not_actionable')
-      throw error(result.error, 'Element precondition failed');
+      throw Object.assign(error(result.error, 'Element precondition failed'),
+        typeof result.reason === 'string' ? { reason: result.reason } : result.error === 'not_actionable' ? { reason: 'not_actionable' } : {});
   }
   private async call(ctx: Active, objectId: string, functionDeclaration: string, args: unknown[] = [], sideEffect = false): Promise<Json> {
     const reply = await this.send(ctx, 'Runtime.callFunctionOn', { objectId, functionDeclaration,
@@ -775,7 +848,7 @@ export class BrowserCdpExecutor {
     if (this.generationFailure) throw this.generationFailure;
     if (this.closed) throw error('target_closed', 'Executor is closed');
     if (this.stopped) throw error('cancelled', 'Executor was stopped');
-    if (this.active) throw error('busy', 'One command per guest is allowed');
+    if (this.active) throw Object.assign(error('busy', 'One command per guest is allowed'), { reason: 'page_command_running' });
     const remaining = (options.deadline ?? (this.now() + (this.options.defaultTimeoutMs ?? 10_000))) - this.now();
     if (!Number.isFinite(remaining) || remaining <= 0) throw error('deadline_exceeded', 'Command deadline expired');
     if (options.signal?.aborted) throw error('cancelled', 'Command cancelled before dispatch');
@@ -812,6 +885,30 @@ export class BrowserCdpExecutor {
 }
 
 type KeySpec = { key: string; code: string; windowsVirtualKeyCode: number; text?: string; modifiers?: number };
+/** Chromium's getFullAXTree order is not document order (a page's text nodes come after its
+ * elements), so a flat cut-off list loses whole fields. Pre-order walk by childIds; nodes
+ * outside the tree keep Chromium's order at the end. Without node ids, keep the input. */
+export function documentOrder(nodes: Json[]): Json[] {
+  if (!nodes.every(node => node && (typeof node.nodeId === 'string' || typeof node.nodeId === 'number'))) return nodes;
+  const byId = new Map<string, Json>(nodes.map(node => [String(node.nodeId), node]));
+  const out: Json[] = [], seen = new Set<string>();
+  const visit = (root: Json) => {
+    const stack = [root];
+    while (stack.length) {
+      const node = stack.pop()!, id = String(node.nodeId);
+      if (seen.has(id)) continue;
+      seen.add(id); out.push(node);
+      const children = Array.isArray(node.childIds) ? node.childIds : [];
+      for (let i = children.length - 1; i >= 0; i--) {
+        const child = byId.get(String(children[i]));
+        if (child && !seen.has(String(child.nodeId))) stack.push(child);
+      }
+    }
+  };
+  for (const node of nodes) if (node.parentId === undefined || !byId.has(String(node.parentId))) visit(node);
+  for (const node of nodes) if (!seen.has(String(node.nodeId))) visit(node);
+  return out;
+}
 function matchesQuery(node: Json, query: BrowserFindQuery): boolean {
   const match = (actual: string, expected: string) => query.exact ? actual === expected : actual.toLowerCase().includes(expected.toLowerCase());
   const name = String(node.name?.value ?? '');

@@ -4,6 +4,7 @@
 // domains, grant a project one external agent (`agent-external-grants`), or switch the host back to
 // host-wide visibility. Pure helpers (the settings hook is in agentSecurityView.ts).
 import type { DomainKey, ExternalAgentGrant, SidebarSnapshot } from "../../../shared/ipc";
+import { compareNames } from "./rosterOrder";
 
 export const BOUNDARY_FEATURE = "agent-project-boundary";
 export const EXTERNAL_GRANTS_FEATURE = "agent-external-grants";
@@ -80,7 +81,7 @@ export function externalCandidates(sidebar: Snapshot, projectId: string, grants:
       const p = pid ? sidebar?.projects?.projects.find((x) => x.project_id === pid) : undefined;
       return { id: s.cutexSessionId, name: s.displayName, projectId: pid, projectName: pid ? (p?.presentation.display_name ?? pid) : null };
     })
-    .sort((a, b) => Number(a.projectId !== null) - Number(b.projectId !== null) || a.name.localeCompare(b.name));
+    .sort((a, b) => Number(a.projectId !== null) - Number(b.projectId !== null) || compareNames(a.name, b.name));
 }
 
 /**

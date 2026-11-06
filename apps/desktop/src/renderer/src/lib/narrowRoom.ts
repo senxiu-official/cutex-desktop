@@ -3,14 +3,14 @@
 // the other workspace to its strip and take its width (lib/workspaceEffects makeRoomEffect; never by itself:
 // the layout changes only when the owner acts). components/side/NarrowChip draws it. Pure; tested in
 // test/convStrips.test.ts.
-import { DIFF_COMPONENT, PREVIEW_COMPONENT } from "./sideKinds";
+import { DIFF_COMPONENT, PREVIEW_COMPONENT, SERVICE_COMPONENT } from "./sideKinds";
 import { PAGE_KIND_PREFIX } from "./paneLayout";
 
 /** Below this width (px of the pane) a preview is 「太窄」 (or its kind's declared minimum, when wider). */
 export const COMFORT_WIDTH = 560;
 
 /** The panes that are previews (documents to read): a page, and these well-known kinds. */
-const PREVIEW_KINDS: readonly string[] = ["artifacts.view", "browser.tab", PREVIEW_COMPONENT, DIFF_COMPONENT];
+const PREVIEW_KINDS: readonly string[] = ["artifacts.view", "browser.tab", SERVICE_COMPONENT, PREVIEW_COMPONENT, DIFF_COMPONENT];
 
 /** The width a pane of `kind` reads comfortably at (null: not a preview — no chip). `minW`: its declared minimum. */
 export function comfortWidth(kind: string, minW?: number | null): number | null {

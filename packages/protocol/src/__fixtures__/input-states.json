@@ -20,7 +20,7 @@
     "surface": { "enum": ["timeline", "nextUp", "pendingNotes", "none"] },
     "stage": { "enum": ["registered", "offered"] },
     "evidence": { "enum": ["clientIdEcho", "turnStartInput", "contextPersisted", "externalInputPersisted", "a4Receipt", "historyRead", "claimedByWait", "readByTool"] },
-    "action": { "enum": ["retry", "dismiss", "cancel", "sendNow", "edit", "releaseLease", "interruptSend"] },
+    "action": { "enum": ["retry", "dismiss", "cancel", "sendNow", "edit", "releaseLease", "interruptSend", "hold", "releaseHold"] },
     "strategy": { "enum": ["auto", "queue", "interrupt"] },
     "deliveryMode": { "enum": ["after_turn", "soon", "passive", "interrupt"] },
     "timing": { "enum": ["afterTurn", "nextStep", "passive"] },
@@ -29,6 +29,7 @@
     "sessionTurnKind": { "enum": ["owner", "ask", "delivery", "unknown"] },
     "leaseHolder": { "enum": ["ask", "event", "owner"] },
     "leaseReconcileState": { "enum": ["waitingTurn", "checking", "stale"] },
+    "carriedReason": { "enum": ["carriedByOwner"] },
     "sendingReason": { "description": "Optional: sending carries no reason, except interruptSend (cutex/input/interruptSend interrupts the running turn to send the input first; r274).", "enum": ["interruptSend"] }
   }
 }

@@ -121,7 +121,7 @@ export function IdentityButton() {
   return (
     <button
       ref={ref}
-      title={title}
+      data-tip={title}
       aria-label={`${t("identity.menu")}: ${title}`}
       aria-haspopup="menu"
       aria-expanded={open}
@@ -163,7 +163,7 @@ export function IdentityChip() {
   return (
     <button
       data-titlebar-identity=""
-      title={title}
+      data-tip={title}
       aria-label={`${t("identity.menu")}: ${title}`}
       aria-haspopup="menu"
       aria-expanded={open}

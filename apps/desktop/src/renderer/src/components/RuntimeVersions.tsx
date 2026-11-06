@@ -1,3 +1,9 @@
+import { RuntimeCleanup } from "./RuntimeCleanup";
+import { useTargetHostId } from "../lib/targetHost";
+import { useHostData } from "../lib/useHostScope";
+import { useRuntimePruneStore } from "../lib/runtimePruneStore";
+import { mergeRuntimePruneVersions } from "../lib/runtimePruneView";
+import { RUNTIME_PRUNE_FEATURE } from "../../../shared/runtimes";
 import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { InstalledRuntime } from "../../../shared/runtimes";
@@ -7,8 +13,15 @@ import { Tag } from "./Tag";
 import { nativeVersionText } from "../lib/runtimeVersion";
 
 /** Shared presentation only; host stores supply all runtime state. */
-export function RuntimeGroup({ kind, title, list, currentVersion, status, dependencies, children }: { kind: "native" | "claude" | "acp"; title: string; list: readonly InstalledRuntime[]; currentVersion?: string | null; status?: ReactNode; dependencies?: ReactNode; children?: ReactNode }) {
+export function RuntimeGroup({ hostId: suppliedHost, kind, title, list, currentVersion, status, dependencies, children }: { hostId?: string; kind: "native" | "claude" | "dsh" | "kimi" | "acp"; title: string; list: readonly InstalledRuntime[]; currentVersion?: string | null; status?: ReactNode; dependencies?: ReactNode; children?: ReactNode }) {
   const { t } = useI18n();
+  const targetHost = useTargetHostId();
+  const hostId = suppliedHost ?? targetHost;
+  const data = useHostData(hostId);
+  const plan = useRuntimePruneStore(s => s.byHost[hostId]?.plan);
+  const pruneEnabled = kind !== "acp" && data?.daemon.kind === "connected" && data.features.has(RUNTIME_PRUNE_FEATURE);
+  if (pruneEnabled)
+    list = mergeRuntimePruneVersions(list, plan?.versions.filter(v => v.kind === kind) ?? []);
   const current = list.find(r => r.selected);
   const version = current && kind === "native"
     ? nativeVersionText(current.version, current.sha256Prefix, t("runtimes.unknownVersion"))
@@ -23,7 +36,8 @@ export function RuntimeGroup({ kind, title, list, currentVersion, status, depend
       </div>
       {dependencies && <div className="space-y-1 text-xs leading-relaxed text-subtle">{dependencies}</div>}
       {visible.length > 0 && <ul className="divide-y divide-border/60">{visible.map(r => <RuntimeRow key={`${r.release}:${r.sha256Prefix ?? ""}`} runtime={r} native={kind === "native"} />)}</ul>}
-      {unused.length > 0 && <details className="border-t border-border/60 pt-2" data-unused-runtimes=""><summary className="cursor-pointer text-xs text-muted hover:text-foreground">{t("runtimes.unused", { n: unused.length })}</summary><ul className="mt-2 divide-y divide-border/60">{unused.map(r => <RuntimeRow key={`${r.release}:${r.sha256Prefix ?? ""}`} runtime={r} native={kind === "native"} />)}</ul></details>}
+      {unused.length > 0 && <details className="border-t border-border/60 pt-2" data-unused-runtimes=""><summary className="cursor-pointer text-xs text-muted hover:text-foreground">{t(pruneEnabled ? "runtimes.unreferenced" : "runtimes.unused", { n: unused.length })}</summary><ul className="mt-2 divide-y divide-border/60">{unused.map(r => <RuntimeRow key={`${r.release}:${r.sha256Prefix ?? ""}`} runtime={r} native={kind === "native"} />)}</ul></details>}
+      {kind !== "acp" && <RuntimeCleanup key={`${hostId}:${kind}`} hostId={hostId} kind={kind} />}
       {children}
     </div>
   </Section>;

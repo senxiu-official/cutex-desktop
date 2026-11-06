@@ -1,4 +1,3 @@
-<!-- Keep in sync with README.zh-CN.md: same headings, same order, change both in the same commit. -->
 <p align="center">
   <img src="apps/desktop/resources/icons/icon-256.png" width="120" alt="Cutex logo">
 </p>
@@ -6,8 +5,7 @@
 <h1 align="center">Cutex Desktop</h1>
 
 <p align="center">
-  A desktop home for long-running coding agents: Codex and Claude agents that keep working on your
-  own machines, and work together.
+  A desktop client for persistent coding agents on local and remote hosts.
 </p>
 
 <p align="center">
@@ -26,9 +24,8 @@
   <img alt="Platforms: Windows, Linux, macOS" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey">
 </p>
 
-<!-- hero screenshot: docs/images/hero-light.png / hero-dark.png (pending) -->
 
-## What is Cutex Desktop
+## Overview
 
 Cutex Desktop is the desktop app for [cutex](https://github.com/senxiu-official/cutex), a daemon that
 runs coding agents on your own machines. Each agent is a persistent session on
@@ -36,9 +33,9 @@ runs coding agents on your own machines. Each agent is a persistent session on
 All state lives in cutex and the app is only a client, so agents keep working, and talking to each
 other, while the app is closed.
 
-## Highlights
+## Features
 
-**Agents that work together**
+**Agent collaboration**
 - **Persistent agents** grouped into projects, each with its own name, avatar and history.
 - **Delegations**: agents hand tasks to each other and wait for the results; the Delegations page
   shows who asked whom for what, and you can review, pause or stop them.
@@ -47,7 +44,7 @@ other, while the app is closed.
 - **Queue, steer or interrupt** a turn; alarms wake an agent later; side chats, notes and bookmarks
   on any message; fork an agent or revert it to an earlier turn.
 
-**Your machines**
+**Local and remote hosts**
 - **Local and remote hosts**: add a machine over SSH (the app opens the tunnel and pairs by itself),
   switch between hosts or show all of them at once.
 - **Files, diffs and terminals** go through the daemon, so a remote host works like the local one;
@@ -66,14 +63,14 @@ other, while the app is closed.
 - **Quota and cost**: plan quota where the provider reports it, and token usage and cost across all
   hosts, merged by Profile.
 
-**Private by design**
+**Privacy and isolation**
 - **No account and no telemetry.** API keys and tokens stay in the daemon and the app's main process.
 - **Sandboxed plugins**: third-party code runs only in isolated frames with no network, and plugins
   are off by default. See [SECURITY.md](SECURITY.md).
 
 ## Download
 
-Current public release: **v0.2.0**. Downloads are on the
+Current public release: **v0.2.2 — Beautiful World**. The 0.2 series uses the name Beautiful World. Downloads are on the
 [latest release page](https://github.com/senxiu-official/cutex-desktop/releases/latest).
 
 | Platform | Package | What runs there |
@@ -90,8 +87,8 @@ certificate, so Windows SmartScreen and macOS Gatekeeper warn on the first start
 ## Quick start
 
 1. **Install cutex and the desktop.** Follow [docs/install/AGENT-INSTALL.md](docs/install/AGENT-INSTALL.md)
-   (about 15 minutes, no compiler). It is written so that a coding agent such as Claude Code or Codex
-   can follow it end to end: the simplest way is to hand it to yours.
+   (signed binaries; no compiler required). The guide includes commands suitable for manual or
+   agent-assisted installation.
 2. **Open the app.** It finds the local cutex by itself. On macOS, or for another machine, use
    **Add SSH host…** in the host menu at the top left.
 3. **Add a Profile** in Settings → Profiles (a ChatGPT or Claude login, or an API key).
@@ -113,19 +110,17 @@ Hosts are updated separately, in Settings → Host backend updates. A short tour
 - [Module contract](docs/desktop-modules.md), [writing a module](docs/module-dev-guide.md) and
   [plugin examples](examples/README.md)
 
-## Project status
+## Platform support
 
-Cutex Desktop is young: its author uses it every day, but few others do yet, so expect rough edges,
-especially on macOS and in the less-used modules. Remote access assumes your own network (SSH or a
-private tailnet you trust). Check the [known issues](docs/KNOWN-ISSUES.md) before reporting a problem.
+Windows and Linux support both the desktop and cutex host services. macOS supports the desktop
+client connected to a Windows or Linux host. Remote connections use SSH or a trusted private
+network. Platform and component limitations are listed in [known issues](docs/KNOWN-ISSUES.md).
 
 ## Contributing and support
 
 Bug reports and translation fixes are welcome as
 [GitHub issues](https://github.com/senxiu-official/cutex-desktop/issues). To build from source or
-change the code, see [CONTRIBUTING.md](CONTRIBUTING.md). Please report security problems privately,
-as described in [SECURITY.md](SECURITY.md). If the project is useful to you, a star on GitHub helps
-others find it.
+change the code, see [CONTRIBUTING.md](CONTRIBUTING.md). Report security problems privately as described in [SECURITY.md](SECURITY.md).
 
 ## Related projects
 

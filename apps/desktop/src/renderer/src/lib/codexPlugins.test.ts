@@ -145,3 +145,30 @@ describe("codexPlugins", () => {
     expect(isInstallable({ installed: false, installPolicy: "INSTALLED_BY_DEFAULT", availability: "AVAILABLE" })).toBe(true);
   });
 });
+
+describe("cutex plugin availability", () => {
+  const list = (market: string, plugins: PluginSummary[]) => ({ marketplaces: [{ name: market, plugins, path: null, interface: null }] });
+  it("projects the five researched bundles off without changing their native enabled config", () => {
+    const names = ["browser", "codex-app-tools", "computer-use", "unified-computer-use", "visualize"];
+    const input = list("openai-bundled", names.map(name => plugin(name, "openai-bundled", { installed: true, enabled: true })));
+    const original = JSON.stringify(input);
+    const rows = pluginRows(input);
+    expect(rows).toHaveLength(5);
+    expect(rows.every(row => row.unavailable === "officialApp" && !row.enabled && !row.installable)).toBe(true);
+    expect(JSON.stringify(input)).toBe(original);
+    expect(input.marketplaces[0]!.plugins.every(plugin => plugin.enabled)).toBe(true);
+  });
+  it("does not block matching names in other markets or unrelated bundled plugins", () => {
+    expect(pluginRows(list("team", [plugin("browser", "team", { installed: true, enabled: true })]))[0]).toMatchObject({ unavailable: null, enabled: true });
+    expect(pluginRows(list("openai-bundled", [plugin("portable", "openai-bundled", { installed: true, enabled: true })]))[0]).toMatchObject({ unavailable: null, enabled: true });
+  });
+  it("honors native availability and dependency refusals without calling them OpenAI app requirements", () => {
+    for (const metadata of [{ availability: "DISABLED_BY_ADMIN" as const }, { disabledReason: "required_app_unavailable" as const }, { disabledReason: "plan_not_eligible" as const }]) {
+      const rows = pluginRows(list("team", [plugin("portable", "team", { installed: true, enabled: true, ...metadata })]));
+      expect(rows[0]).toMatchObject({ unavailable: "backend", enabled: false, installable: false });
+    }
+  });
+  it("does not turn an install-only policy into a restriction on already installed plugins", () => {
+    expect(pluginRows(list("team", [plugin("portable", "team", { installed: true, enabled: true, installPolicy: "NOT_AVAILABLE" })]))[0]).toMatchObject({ unavailable: null, enabled: true, installable: false });
+  });
+});

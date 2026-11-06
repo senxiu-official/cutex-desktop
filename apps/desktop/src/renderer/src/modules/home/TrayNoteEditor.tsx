@@ -111,7 +111,7 @@ function Editor({ edit }: { edit: NoteEdit }) {
         className="block w-full resize-none rounded-md border border-border bg-surface px-2 py-1.5 text-meta text-foreground outline-none focus:border-accent"
       />
       <div className="mt-1.5 flex items-center gap-2 text-caption text-subtle">
-        <span className="min-w-0 flex-1 truncate" title={t("tray.note.keys")}>
+        <span className="min-w-0 flex-1 truncate" data-tip={t("tray.note.keys")}>
           {t("tray.note.firstLine")} · <span data-note-count="">{text.length} / {edit.max}</span>
         </span>
         {(edit.initial || text) && (

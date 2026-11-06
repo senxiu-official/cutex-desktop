@@ -2,7 +2,7 @@ import {
   BROWSER_ERROR_CODES, MAX_MESSAGE_BYTES, MAX_SCREENSHOT_BASE64_LENGTH, MAX_SNAPSHOT_NODES,
   MAX_NODE_TEXT_CODE_POINTS, MAX_ROLE_CODE_POINTS, MAX_FILL_TEXT_CODE_POINTS,
   MAX_FIND_RESULTS, MAX_FIND_TEXT_CODE_POINTS, MAX_SCROLL_AMOUNT, MAX_SELECT_VALUES,
-  MAX_SELECT_TEXT_CODE_POINTS, MAX_DIALOG_TEXT_CODE_POINTS,
+  MAX_SELECT_TEXT_CODE_POINTS, MAX_DIALOG_TEXT_CODE_POINTS, BROWSER_POPUP_BLOCK_REASONS,
 } from './types';
 
 /** Deliberately small JSON Schema vocabulary; mirrored in schema/browser-v1.schema.json. */
@@ -76,8 +76,9 @@ export const browserRequestSchema: Schema = { oneOf: [
   object({ ...requestContext, operation: { oneOf: [list, open] } }, ['turnId']),
   object({ ...requestContext, guestId: identifier, tabRef: identifier, operation: claim }, ['turnId', 'tabRef']),
 ] };
+// url: a link's target / an image's source (browser-page-links-v1 hosts only).
 const pageNode = object({ ref: identifier, role: text(MAX_ROLE_CODE_POINTS), name: text(MAX_NODE_TEXT_CODE_POINTS),
-  value: text(MAX_NODE_TEXT_CODE_POINTS), truncated: literal(true) }, ['value', 'truncated']);
+  value: text(MAX_NODE_TEXT_CODE_POINTS), truncated: literal(true), url }, ['value', 'truncated', 'url']);
 const tabSummary = object({ guestId: identifier, url, title: text(4096), pageGeneration: generation, tabRef: identifier }, ['tabRef']);
 const snapshotFields = { pageGeneration: generation, snapshotId: generation, url,
   nodes: { type: 'array', items: pageNode, maxItems: MAX_SNAPSHOT_NODES } as Schema, truncated: { type: 'boolean' } as Schema };
@@ -94,14 +95,19 @@ export const browserScreenshotMetadataSchema: Schema = object(screenshotMetadata
 const results: Schema[] = [
   object({ kind: literal('tab.snapshot'), ...snapshotFields }),
   object({ kind: literal('tab.find'), ...snapshotFields, nodes: { type: 'array', items: pageNode, maxItems: MAX_FIND_RESULTS } }),
+  // newTab (browser-page-links-v1 hosts only): the click opened a new tab, or main blocked the
+  // page's attempt to open one (a fixed reason, never page data).
   object({ kind: literal('tab.act'), pageGeneration: generation, scroll: object({
-    dx: integer(-Number.MAX_SAFE_INTEGER), dy: integer(-Number.MAX_SAFE_INTEGER), atEdge: { type: 'boolean' } }) }, ['scroll']),
+    dx: integer(-Number.MAX_SAFE_INTEGER), dy: integer(-Number.MAX_SAFE_INTEGER), atEdge: { type: 'boolean' } }),
+    newTab: { oneOf: [literal(true), object({ blocked: { enum: [...BROWSER_POPUP_BLOCK_REASONS] } })] } }, ['scroll', 'newTab']),
   object({ kind: literal('tab.navigate'), pageGeneration: generation, url }),
   object(screenshotFields),
   object({ ...screenshotFields, ...screenshotMetadataFields }),
   object({ kind: literal('tab.release') }),
   object({ kind: literal('tabs.list'), tabs: { type: 'array', items: tabSummary, maxItems: 256 } }),
-  object({ kind: { enum: ['tabs.open', 'tabs.claim'] }, tab: tabSummary }),
+  // loadState: staged open (cutex design 059); sent only to hosts with browser-open-stages-v1.
+  object({ kind: literal('tabs.open'), tab: tabSummary, loadState: { enum: ['loading', 'loaded'] } }, ['loadState']),
+  object({ kind: literal('tabs.claim'), tab: tabSummary }),
 ];
 export const browserOperationResultSchema: Schema = { oneOf: results };
 export const browserResultSchema: Schema = { oneOf: [

@@ -1,8 +1,10 @@
+import { BROWSER_CURSOR_MOVE_MS, browserCursorView, DEFAULT_BROWSER_CURSOR_COLOR, type BrowserCursorCue } from "../../shared/browserCursor";
 import type { WebContents } from "electron";
 import { BrowserCdpExecutor, type BrowserSnapshot, type CdpTransport, type DispatchResult, type ExecutorOperation, type OperationOptions } from "@cutex-desktop/browser-cdp";
 import { ProtocolError, type BrowserAction, type BrowserFindQuery, type BrowserScreenshotMetadata } from "@cutex-desktop/browser-protocol";
 import { DEFAULT_BROWSER_CONTROL_SETTINGS, isBrowserControlSettings, type BrowserControlSettings, type BrowserControlView, type BrowserOwnerInputKind } from "../../shared/browser";
 import { browserScreenshotDimensions } from "./capture";
+import { busyError } from "./relayTypes";
 import type { BrowserViewportBounds } from "./visibility";
 
 export type BrowserProviderGuest = Pick<WebContents, "isDestroyed" | "debugger">;
@@ -45,6 +47,10 @@ export interface InAppProviderOptions {
   /** Right after the provider attached: a new CDP session, without the page-scheme emulation (pageScheme.ts) — send it again. */
   afterAttach?(guestId: string): void;
   afterDetach?(guestId: string): void;
+  /** Main/test-only; renderer and agents cannot alter action timing. */
+  cursorMoveMs?: number;
+  /** Native guest zoom / embedding app zoom, independent of scrollbar-reduced CSS viewport width. */
+  coordinateScale?(guestId: string): number;
   now?(): number;
 }
 /** Owner keyboard input this recent counts as "typing": agent writes wait for the quiet. */
@@ -56,7 +62,7 @@ const READ_OPERATIONS: ReadonlySet<ExecutorOperation> = new Set(["read", "find",
 /** Reads that run without a visible card (minimized / hidden window). Screenshots still need it. */
 const BACKGROUND_READS: ReadonlySet<ExecutorOperation> = new Set(["read", "find"]);
 const KEYBOARD_OPERATIONS: ReadonlySet<ExecutorOperation> = new Set(["fill", "press"]);
-type Binding = { alive: boolean; retiring: boolean; scale: number; executor?: BrowserCdpExecutor; cleanup: (() => void)[] };
+type Binding = { alive: boolean; retiring: boolean; bounds: BrowserViewportBounds; emulated: boolean; executor?: BrowserCdpExecutor; cleanup: (() => void)[] };
 type Entry = {
   id: string; guest: BrowserProviderGuest; settings: BrowserControlSettings; state: "granted" | "paused";
   grantee: string;
@@ -67,6 +73,9 @@ type Entry = {
    * and the end of the agent's own dispatch window (input before then is the agent's). */
   typingAt: number; agentInputUntil: number; acting: boolean;
   operation?: BrowserProviderOperationOptions;
+  cue?: BrowserCursorCue;
+  cueSequence?: number;
+  ownerInputVersion?: number;
   idle?: ReturnType<typeof setTimeout>; linger?: ReturnType<typeof setTimeout>;
 };
 const denied = () => new ProtocolError("permission_denied", "Browser control is not granted or is paused");
@@ -115,6 +124,10 @@ export class InAppProvider {
     const entry = this.entries.get(guestId);
     return entry ? { grantee: entry.grantee, state: entry.state, operating: entry.operating } : undefined;
   }
+  cursorView(guestId: string): BrowserCursorCue | undefined {
+    const entry = this.entries.get(guestId);
+    return entry?.state === "granted" && entry.binding?.alive && !entry.binding.emulated ? entry.cue : undefined;
+  }
   hasGrant(guestId: string): boolean { return this.entries.has(guestId); }
 
   /** Explicit owner re-grant is the only resume path. Old debugger cleanup is serialized first. */
@@ -162,7 +175,10 @@ export class InAppProvider {
       if (kind === "app-keyboard" && this.options.isolated?.(entry.id)) continue;
       const agentEcho = kind !== "app-keyboard" && (entry.acting || now <= entry.agentInputUntil);
       if (kind !== "guest-pointer" && !agentEcho) entry.typingAt = now;
-      if (kind !== "app-keyboard" && !agentEcho) entry.binding?.executor?.expireRefs();
+      if (kind !== "app-keyboard" && !agentEcho) {
+        entry.ownerInputVersion = (entry.ownerInputVersion ?? 0) + 1;
+        entry.cue = undefined; entry.binding?.executor?.expireRefs(); this.changed(entry);
+      }
     }
   }
   /** Input arriving now is the agent's own dispatch (during it or within its short echo window). */
@@ -217,7 +233,7 @@ export class InAppProvider {
     const release = () => { if (!released) { released = true; entry.draining = Math.max(0, entry.draining - 1); } };
     try {
       while (entry.busy && this.entries.get(guestId) === entry) {
-        if (Date.now() >= deadline) throw new ProtocolError("busy", "The agent's current browser action did not finish in time; try again shortly");
+        if (Date.now() >= deadline) throw busyError(new ProtocolError("busy", "The agent's current browser action did not finish in time; try again shortly"), "previous_action_running");
         await new Promise<void>(resolve => { const timer = setTimeout(resolve, 20); timer.unref?.(); });
       }
       return release;
@@ -276,7 +292,7 @@ export class InAppProvider {
       const binding = this.entries.get(guestId)?.binding;
       if (!binding?.alive || binding.executor !== executor) throw closed();
       const size = browserScreenshotDimensions(result.mimeType, result.data);
-      return { ...result, ...size, displayScale: binding.scale,
+      return { ...result, ...size, displayScale: 1,
         imageScale: { x: size.width / result.captureRect.width, y: size.height / result.captureRect.height } };
     });
   }
@@ -286,7 +302,7 @@ export class InAppProvider {
       const wait = entry.typingAt + BROWSER_OWNER_TYPING_QUIET_MS - this.now();
       if (wait <= 0) return;
       if (control.deadline !== undefined && this.now() + wait >= control.deadline)
-        throw new ProtocolError("busy", "The owner is typing in the app; try this action again shortly");
+        throw busyError(new ProtocolError("busy", "The owner is typing in the app; try this action again shortly"), "owner_typing");
       await waitOperation(new Promise<void>(resolve => { const timer = setTimeout(resolve, Math.min(wait, 100)); timer.unref?.(); }), control);
       this.authorize(entry);
     }
@@ -308,37 +324,50 @@ export class InAppProvider {
     checkOperation(operation);
     const visibleSettings = operation.hiddenTarget === "reject" ? { ...entry.settings, hiddenTarget: "reject" as const } : entry.settings;
     let bounds: BrowserViewportBounds | undefined;
+    let emulated = this.options.isolated?.(entry.id) === true;
     try { bounds = await waitOperation(this.options.ensureVisible(entry.id, background ? { ...visibleSettings, hiddenTarget: "reject" } : visibleSettings, operation), operation); }
     catch (error) {
       // A minimized / hidden window still answers read and find (DOM only, no input, no reveal).
       if (!background || (error as { code?: unknown })?.code !== "target_hidden") throw error;
       this.authorize(entry);
       checkOperation(operation);
-      if (entry.binding?.alive && entry.binding.executor) return entry.binding.executor;
-      bounds = { width: entry.settings.viewport.width, height: entry.settings.viewport.height };
+      // Covered by an app overlay / clipped / not ready, but laid out: read at the page's own
+      // size. Only a truly hidden page gets the fixed emulated viewport (at DPR 1), which on a
+      // visible card would show the owner a rescaled, blurry page.
+      const layout = (error as { layout?: BrowserViewportBounds }).layout;
+      if (layout) bounds = { ...layout };
+      else { emulated = true; bounds = { ...entry.settings.viewport }; }
     }
     this.authorize(entry);
     checkOperation(operation);
-    const scale = this.fitScale(entry, bounds!);
+    if (emulated) bounds = { ...entry.settings.viewport };
+    this.checkBounds(bounds!);
     if (entry.binding?.alive && entry.binding.executor) {
       const binding = entry.binding;
-      if (binding.scale !== scale) {
+      const resized = bounds!.width !== binding.bounds.width || bounds!.height !== binding.bounds.height;
+      const changedMode = binding.emulated !== emulated;
+      if (changedMode || emulated && resized) {
         try {
-          await waitOperation(bounded(entry.guest.debugger.sendCommand("Emulation.setDeviceMetricsOverride", this.metrics(entry, scale))), operation);
+          const command = emulated
+            ? entry.guest.debugger.sendCommand("Emulation.setDeviceMetricsOverride", this.metrics(bounds!))
+            : entry.guest.debugger.sendCommand("Emulation.clearDeviceMetricsOverride");
+          await waitOperation(bounded(command), operation);
           this.authorize(entry);
           checkOperation(operation);
           if (!binding.alive || entry.binding !== binding) throw closed();
-          binding.scale = scale;
         } catch (error) { if (entry.binding === binding) this.detach(entry); throw error; }
       }
+      if (changedMode || resized) { entry.cue = undefined; binding.executor!.expireRefs(); this.changed(entry); }
+      binding.bounds = { ...bounds! };
+      binding.emulated = emulated;
       return binding.executor!;
     }
     const debug = entry.guest.debugger;
     try { this.options.beforeAttach?.(entry.id); } catch { /* The attach below decides. */ }
-    if (debug.isAttached()) throw new ProtocolError("tab_busy", "A different debugger already controls this guest");
-    try { debug.attach("1.3"); } catch { throw new ProtocolError("tab_busy", "Could not attach the browser debugger"); }
+    if (debug.isAttached()) throw busyError(new ProtocolError("tab_busy", "A different debugger already controls this guest"), "debugger_attached");
+    try { debug.attach("1.3"); } catch { throw busyError(new ProtocolError("tab_busy", "Could not attach the browser debugger"), "debugger_attach_failed"); }
     try { this.options.afterAttach?.(entry.id); } catch { /* Observers cannot block the binding. */ }
-    const binding: Binding = { alive: true, retiring: false, scale, cleanup: [] };
+    const binding: Binding = { alive: true, retiring: false, bounds: { ...bounds! }, emulated, cleanup: [] };
     entry.binding = binding;
     const transport: CdpTransport = {
       send: (method, params) => {
@@ -372,20 +401,62 @@ export class InAppProvider {
     binding.cleanup.push(() => debug.removeListener("detach", detached));
     try {
       binding.executor = new BrowserCdpExecutor(transport, {
-        nextPageGeneration: () => this.options.nextPageGeneration(entry.id),
+        nextPageGeneration: () => { const hadCue = !!entry.cue; entry.cue = undefined; const generation = this.options.nextPageGeneration(entry.id); if (hadCue && entry.state === "granted" && entry.binding === binding && binding.alive) this.changed(entry); return generation; },
         authorize: () => this.authorize(entry),
         ensureVisible: async () => {
           this.authorize(entry);
           const settings = entry.operation?.hiddenTarget === "reject" ? { ...entry.settings, hiddenTarget: "reject" as const } : entry.settings;
           const current = await this.options.ensureVisible(entry.id, settings, entry.operation);
           this.authorize(entry);
-          if (this.fitScale(entry, current) !== binding.scale)
+          this.checkBounds(current);
+          if (current.width !== binding.bounds.width || current.height !== binding.bounds.height)
             throw new ProtocolError("target_hidden", "Browser card resized during operation; inspect again before acting");
+        },
+        canShowAction: () => binding.alive && entry.binding === binding && !binding.emulated,
+        onAction: async feedback => {
+          this.authorize(entry); checkOperation(entry.operation ?? {});
+          if (!binding.alive || entry.binding !== binding) throw closed();
+          if (binding.emulated) return false;
+          const scale = this.options.coordinateScale?.(entry.id) ?? 1;
+          if (!Number.isFinite(scale) || scale <= 0 || scale > 10) return false;
+          const sx = scale, sy = scale;
+          const candidate = browserCursorView({ sequence: (entry.cueSequence ?? 0) + 1, kind: feedback.kind, phase: feedback.phase,
+            x: feedback.x * sx, y: feedback.y * sy, viewport: { ...binding.bounds }, color: DEFAULT_BROWSER_CURSOR_COLOR,
+            ...(feedback.rect ? { rect: { x: feedback.rect.x * sx, y: feedback.rect.y * sy, width: feedback.rect.width * sx, height: feedback.rect.height * sy } } : {}) });
+          if (!candidate) return false;
+          const ownerInputVersion = entry.ownerInputVersion ?? 0;
+          if (feedback.phase === "move") entry.acting = false; // real owner input during the animation is never an agent echo
+          if (feedback.phase === "dispatch") {
+            if (this.ownerTyping(entry.id)) throw busyError(new ProtocolError("busy", "Owner started typing before dispatch; inspect again"), "owner_typing");
+            if (feedback.kind === "type" && this.options.keyboardFocused && !await waitOperation(this.options.keyboardFocused(entry.id), entry.operation ?? {}))
+              throw new ProtocolError("unsupported_operation", "Keyboard focus changed before input; inspect again");
+            this.authorize(entry); checkOperation(entry.operation ?? {});
+            if (!binding.alive || entry.binding !== binding) throw closed();
+            if (this.ownerTyping(entry.id)) throw busyError(new ProtocolError("busy", "Owner started typing before dispatch; inspect again"), "owner_typing");
+            entry.acting = true;
+          }
+          const { color: _color, ...cue } = candidate;
+          entry.cueSequence = cue.sequence; entry.cue = cue; this.changed(entry);
+          if (feedback.phase === "move") {
+            const ms = this.options.cursorMoveMs ?? BROWSER_CURSOR_MOVE_MS;
+            if (ms > 0) await waitOperation(new Promise<void>(resolve => { const timer = setTimeout(resolve, Math.min(ms, 300)); timer.unref?.(); }), entry.operation ?? {});
+            this.authorize(entry); checkOperation(entry.operation ?? {});
+            if (!binding.alive || entry.binding !== binding) throw closed();
+            if ((entry.ownerInputVersion ?? 0) !== ownerInputVersion) throw new ProtocolError("stale_ref", "Owner used the page during feedback; inspect again");
+            // All long waits finish before the executor re-inspects the target geometry.
+            await this.ownerQuiet(entry, entry.operation ?? {});
+            this.authorize(entry); checkOperation(entry.operation ?? {});
+            if (!binding.alive || entry.binding !== binding) throw closed();
+            if ((entry.ownerInputVersion ?? 0) !== ownerInputVersion) throw new ProtocolError("stale_ref", "Owner used the page during feedback; inspect again");
+          }
+          return true;
         },
         allowUrl: url => this.options.allowUrl(entry.id, url),
         // Deliberately no focusTarget: control never focuses the guest or native window.
       });
-      await waitOperation(bounded(transport.send("Emulation.setDeviceMetricsOverride", this.metrics(entry, scale))), operation);
+      // Visible cards keep their native viewport, zoom and DPR. Only hidden/offscreen targets
+      // need a fallback layout; image budgets are applied to screenshot pixels, never to the page.
+      if (emulated) await waitOperation(bounded(transport.send("Emulation.setDeviceMetricsOverride", this.metrics(bounds!))), operation);
       this.authorize(entry);
       checkOperation(operation);
       if (!binding.alive || entry.binding !== binding) throw closed();
@@ -393,16 +464,15 @@ export class InAppProvider {
     } catch (error) { if (entry.binding === binding) this.detach(entry); throw error; }
   }
   private afterDetach(entry: Entry): void { try { this.options.afterDetach?.(entry.id); } catch { /* Observers cannot restore authority. */ } }
-  private fitScale(entry: Entry, bounds: BrowserViewportBounds): number {
+  private checkBounds(bounds: BrowserViewportBounds): void {
     if (!bounds || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) || bounds.width < 1 || bounds.height < 1)
       throw new ProtocolError("target_hidden", "Browser card bounds are unavailable");
-    return Math.min(1, bounds.width / entry.settings.viewport.width, bounds.height / entry.settings.viewport.height);
   }
-  private metrics(entry: Entry, scale: number): Record<string, unknown> {
-    return { width: entry.settings.viewport.width, height: entry.settings.viewport.height,
-      deviceScaleFactor: 1, mobile: false, scale };
+  private metrics(bounds: BrowserViewportBounds): Record<string, unknown> {
+    return { width: bounds.width, height: bounds.height, deviceScaleFactor: 1, mobile: false, scale: 1 };
   }
   private detach(entry: Entry): void {
+    entry.cue = undefined;
     const binding = entry.binding;
     if (!binding) return;
     entry.binding = undefined;
@@ -441,8 +511,8 @@ export class InAppProvider {
     this.authorize(entry);
     const control = { ...options, deadline: options?.deadline ?? Date.now() + 10_000 };
     checkOperation(control);
-    if (entry.busy) throw new ProtocolError("busy", "One operation per guest is allowed");
-    if (entry.draining > 0) throw new ProtocolError("busy", "This tab is moving between background and front; try again shortly");
+    if (entry.busy) throw busyError(new ProtocolError("busy", "One operation per guest is allowed"), "tab_operation_running");
+    if (entry.draining > 0) throw busyError(new ProtocolError("busy", "This tab is moving between background and front; try again shortly"), "tab_moving");
     entry.busy = true;
     entry.operation = control;
     this.clearTimers(entry);
@@ -482,6 +552,7 @@ export class InAppProvider {
       if (operation === "navigate" && entry.blocked !== blocked) throw denied();
       return result;
     } catch (error) {
+      if (write) { entry.cue = undefined; this.changed(entry); }
       // Only a host-proven navigation denial maps S6. Click/fill may already have changed data.
       if (operation === "navigate" && entry.blocked !== blocked) throw denied();
       throw error;

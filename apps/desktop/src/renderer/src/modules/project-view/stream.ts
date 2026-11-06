@@ -4,6 +4,7 @@
 // row's words and where a click goes. The running-now list (正在进行) too: counts, open-by-default,
 // elapsed time and the stop request of an item.
 import type { BackgroundAgent, BackgroundItem, ProjectBackground, ProjectEvent } from "../../../../shared/projectEvents";
+import { compareNames } from "../../lib/rosterOrder";
 
 // ── Type chips ────────────────────────────────────────────────────────────────────────────────────
 
@@ -284,7 +285,7 @@ export function runningSummary(bg: ProjectBackground | null): RunningSummary {
     for (const i of items) byKind[runningKind(i)]++;
     agents.push({ ...a, items });
   }
-  agents.sort((x, y) => y.items.length - x.items.length || (x.agentName ?? x.cutexSessionId).localeCompare(y.agentName ?? y.cutexSessionId));
+  agents.sort((x, y) => y.items.length - x.items.length || compareNames(x.agentName ?? x.cutexSessionId, y.agentName ?? y.cutexSessionId));
   return { total: byKind.subagent + byKind.background + byKind.job, byKind, agents };
 }
 

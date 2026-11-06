@@ -74,6 +74,13 @@ function ToolRow({ item, sessionId, hostId, epoch }: { item: RawItem; sessionId:
       {approval && <span className="shrink-0">· {t(approval === "required" ? "tool.approvalRequired" : "tool.declined")}</span>}
     </div>
     {model.errorCode && <p className={`ml-5 text-caption/[inherit] ${approval ? "text-subtle" : "text-danger"}`}>{t(browserTimelineRefusalKey(model.errorCode) ?? browserErrorKey(model.errorCode))}</p>}
+    {model.steps.length > 0 && <ol className="ml-5 mt-0.5 space-y-0.5" data-browser-script-steps>
+      {model.steps.map((step, index) => <li key={index} className={`flex min-w-0 items-center gap-1.5 ${step.ok ? "text-subtle" : "text-danger"}`}>
+        {step.ok ? <Globe size={11} className="shrink-0" /> : <X size={11} className="shrink-0" />}
+        <span className="min-w-0 truncate">{t(step.summary)}</span>
+        {step.errorCode && <span className="min-w-0 truncate">· {t(browserTimelineRefusalKey(step.errorCode) ?? browserErrorKey(step.errorCode))}</span>}
+      </li>)}
+    </ol>}
     {model.image && <ToolScreenshot image={model.image} hostId={hostId} />}
     {model.imageState === "not-loaded" && !failed && <button type="button" onClick={() => void load()}
       disabled={loading || !turnId || !epoch} className="mt-1 flex items-center gap-1 text-accent enabled:hover:underline disabled:text-subtle">

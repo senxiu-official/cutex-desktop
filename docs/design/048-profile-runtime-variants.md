@@ -1,10 +1,6 @@
 # 048 Profile 的运行时变体与 Profile 自己的 key（桌面）
 
-状态：**桌面已实现（feat/r265-dsh-desktop，未合并）**；cutex 一侧由 r265 C3 做，契约见 cutex
-`docs/development/r265-profile-variants.md`。主人 2026-10-27 的决定见 r265 brief。
-
-编号说明：`042-profile-link-desktop.md` 已占用 042（未进索引）；本文件按 r265 brief 的要求也用 042，
-合并时如需改号，只改文件名和本页引用即可（031 也有过两份）。
+主机和运行时按声明的能力提供这些功能；已有智能体保留创建时的变体。
 
 ## 一句话
 
@@ -105,58 +101,58 @@ DSH 没有回合中插话。DSH 智能体正在跑一个回合时：
   （key 由 cutex 保存，或用高级里的环境变量）；Claude / ChatGPT 照旧。
 - **默认变体**：DSH 还「暂不建议使用」，所以同时勾两个时默认是 cute-codex，桌面不自动改成 DSH。
 - **删除 key** 只对 DSH Profile 保存的 key 提供（cutex 不支持清除 Codex Profile 的 key）。
-- **DSH 模型**（r265 D2 改）：列表以 cutex 的回答为准——已有对话用 DSH 自己的 `model/list`，DSH Profile 用
+- **DSH 模型**：列表以 cutex 的回答为准——已有对话用 DSH 自己的 `model/list`，DSH Profile 用
   `GET /v2/profiles/{p}/models`；都拿不到时（新建 Profile、cute-codex Profile 上的 DSH 变体、旧主机、读取失败）
   才用 DSH 0.2.1-rc.3 通过 cutex 报出的名字 deepseek-flash（默认）/ deepseek-v4-pro，只写在 `lib/dshModels.ts` 一处。
   已保存的旧名字（如 deepseek-v4-flash）留在列表里，不会被悄悄换掉。没选模型时发 DSH 的默认 deepseek-flash；
   桌面主进程不再自己补模型名（不发 = cutex 的默认）。
-- **已有 DSH 对话改模型 / 推理强度**（r265 D2）：cutex r265 起 DSH 对话可以随时改（`thread/settings/update`，
+- **已有 DSH 对话改模型 / 推理强度**：主机支持时，DSH 对话可以改（`thread/settings/update`，
   正在跑的回合不变，下一回合起生效）。输入框的模型和推理强度按钮对 DSH 和其他运行时一样可用——条件是这个对话的
-  运行时说能改：`threadSettingsUpdate`（cutex 以后若明确给出），没有这个字段时看 r265 的能力表（`textInputOnly: false`，
+  运行时说能改：`threadSettingsUpdate`（cutex 以后若明确给出），没有这个字段时看运行时的能力表（`textInputOnly: false`，
   和这项改动同一批发出）；旧的 DSH 运行时照旧只显示、不能改。显示的模型是对话当前的（`threadSettings`，
   DSH 退回会话的模型默认值 `model_defaults`），不是创建时的值。
-- **DSH 分叉 / 回退 / 删除**（r265 D2）：照会话的 `threadFork` / `threadRevert` / `threadDelete` 显示（cutex 说了算，
+- **DSH 分叉 / 回退 / 删除**：照会话的 `threadFork` / `threadRevert` / `threadDelete` 显示（cutex 说了算，
   会话固定在没有 session-ops 的旧运行时上时没有分叉 / 回退）。DSH 的回退和「编辑并重发」写明「DSH 只回退对话，
   文件不会恢复」；DSH 没有文件检查点，「回退到这里（含文件）」永远不出现，回退请求也不会带 `rewindFiles`。
-- **DSH 图片**（r265 D2）：运行时说能收图（`imageInput: true` 且不是 `textInputOnly`），并且当前模型的列表写了
+- **DSH 图片**：运行时说能收图（`imageInput: true` 且不是 `textInputOnly`），并且当前模型的列表写了
   图片输入（deepseek-flash 可以，deepseek-v4-pro 不行）时才能附图；否则照旧提示「这个模型不接受图片」。
   智能体还不存在时（新建智能体、快速对话），DSH 只在 cutex 列出的模型写了图片输入时可以附图，不认识的模型当作只收文字。
 - **「暂不建议使用」**：由 `lib/dshNotice.ts` 的 `DSH_NOT_RECOMMENDED` 一个开关控制（运行时卡片、两种新建 Profile 表单、
   变体行，以及同时勾两个时的默认变体）。主人决定去掉时只改这一处：标签全部消失，新 Profile 同时勾两个时默认 DSH。
 - **快速对话**不加变体选择：用 Profile 的默认变体（cutex 决定）。
 - 头部标签只给非 cute-codex 的运行时；Claude 智能体只在有绑定记录时显示。
-- （r265 D3）DSH 智能体的审批卡片来源标签写「DSH 沙箱」（不是「Codex 沙箱」）；Claude 智能体暂时不变。
-- （r265 D3）新建智能体选 DSH 变体、变体没设推理强度时，「推理」显示模型在 cutex 目录里的默认值（DSH 为「高」），
+- DSH 智能体的审批卡片来源标签写「DSH 沙箱」（不是「Codex 沙箱」）；Claude 智能体暂时不变。
+- 新建智能体选 DSH 变体、变体没设推理强度时，「推理」显示模型在 cutex 目录里的默认值（DSH 为「高」），
   不再写「待指定」；只是显示，不额外发送。
-- （r265 D3）Profile 头部 / 卡片里与服务商预设同名的套餐标签、服务商家族不再重复显示。
-- （r265 D4）「计费数据不可用」只看运行时 / 会话的功能表：明确写 `billingUsage: false` 才出现在上下文弹窗里；
-  `true`（cutex r265 起就这样报）或没写都不显示。会话上下文里的 `dshContext.billing: "unavailable"` 只是说那个
+- Profile 头部 / 卡片里与服务商预设同名的套餐标签、服务商家族不再重复显示。
+- 「计费数据不可用」只看运行时 / 会话的功能表：明确写 `billingUsage: false` 才出现在上下文弹窗里；
+  `true`或没写都不显示。会话上下文里的 `dshContext.billing: "unavailable"` 只是说那个
   上下文占用数字本身不含计费，不决定这句提示；上下文占用照常显示。Profile 表单里的 DSH 推理强度一行不再带这句
   （那里没有运行时的回答）。
-- （r265 D4）离线一行：cute-codex 照旧「发送消息会自动启动 app-server」；DSH / Claude 智能体写「发送消息会自动启动 DSH /
+- 离线一行：cute-codex 照旧「发送消息会自动启动 app-server」；DSH / Claude 智能体写「发送消息会自动启动 DSH /
   Claude」。
-- （r265 D4）回退之后，侧栏这一行显示留下来的最后一条消息，不再显示被移除的回复（所有运行时都一样）。cutex 的会话
+- 回退之后，侧栏这一行显示留下来的最后一条消息，不再显示被移除的回复（所有运行时都一样）。cutex 的会话
   `activity` 还记着被移除的回复，桌面记下「回退前看到的最新时间」，早于它的那条不再显示（存本机，重启后仍有效）；
   回退之后的新回复照常显示。
-- （r265 D6）新建 / 删除文件的工具行按整份内容计数并显示成增删行（「修改文件 notes.txt +1 −0」，展开是 `+one`），
+- 新建 / 删除文件的工具行按整份内容计数并显示成增删行（「修改文件 notes.txt +1 −0」，展开是 `+one`），
   不再是「+0 −0」；和轮尾「改了 N 个文件」同一套算法。所有运行时都一样。
-- （r265 D6）DSH 智能体输入框底栏的推理强度：没有实时设置时（例如分叉后第一条消息才启动运行时）用会话的默认值
+- DSH 智能体输入框底栏的推理强度：没有实时设置时（例如分叉后第一条消息才启动运行时）用会话的默认值
   （cutex `runtimeDefaults.reasoningEffort`），和模型的做法一样；不再一直显示「…」。
-- （r265 D6）Profile 页头部在窄的设置面板里：「设为默认 / ⋯」换到名字下面一行，名字不再被截成「ds-fina」。
-- （r265 R2，QA 2026-10-27）新建只用 DSH 的 Profile、选了「把 key 存在这里」但没填：照样明确发 `credential: stored`
+- Profile 页头部在窄的设置面板里：「设为默认 / ⋯」换到名字下面一行，名字不再被截成「ds-fina」。
+- 新建只用 DSH 的 Profile、选了「把 key 存在这里」但没填：照样明确发 `credential: stored`
   （Profile 先没有 key，启动时说缺 key），不再落到读 `DEEPSEEK_API_KEY`；什么都不发的旧建法保留原样。
-- （r265 R2）快速对话不发 `variantId`，cutex 用 Profile 的默认变体开；所以草稿的控件和默认值跟默认变体走：默认变体是
+- 快速对话不发 `variantId`，cutex 用 Profile 的默认变体开；所以草稿的控件和默认值跟默认变体走：默认变体是
   DSH 时不显示 Codex 权限，模型/推理来自这个变体（cutex 给的 `runtimeVariants[].models`，没有时才用 DSH 自己的名字）。
-- （r265 R2）变体编辑里 DSH 变体的模型下拉用 cutex 给这个变体的模型目录（显示名、目录默认）；已存的旧模型名保留为一项。
+- 变体编辑里 DSH 变体的模型下拉用 cutex 给这个变体的模型目录（显示名、目录默认）；已存的旧模型名保留为一项。
 
 ## 与 cutex 契约的出入（交给 C3 / C1）
 
-- （r265 D2）DSH Profile 的 `/models`（`src/profiles/dsh.rs::models`）还是 cutex 自己的 `deepseek-v4-flash` + Profile 的模型、
+- DSH Profile 的 `/models`（`src/profiles/dsh.rs::models`）还是 cutex 自己的 `deepseek-v4-flash` + Profile 的模型、
   只写文字输入；它应当和 DSH 的 `model/list` 一致（deepseek-flash 带图片、deepseek-v4-pro），默认模型也应是 deepseek-flash。
   桌面照 cutex 的回答显示，所以在 cutex 改之前，DSH Profile 页上只看到 cutex 给的那几个名字。
-- （r265 D2）建议 C1 在 DSH 能力表里加 `threadSettingsUpdate: true`（additive），桌面就不用从 `textInputOnly` 推断。
+- DSH 能力表可声明 `threadSettingsUpdate: true`（additive），桌面就不用从 `textInputOnly` 推断。
 
-- （r265 D4）cutex 回退（`cutex/session/history/revert`）后没有修剪会话的 `activity.lastOutput` / `lastToolCall`，
+- cutex 回退（`cutex/session/history/revert`）后没有修剪会话的 `activity.lastOutput` / `lastToolCall`，
   被移除的回复仍是侧栏的「最新消息」。建议回退时按留下的轮次重算（或清空）这两项；桌面的补救在 cutex 改了之后也无害。
 - 缺一个「创建前」的兼容表（见上）。建议 additive：`GET /v2/profile-presets` 每项加 `runtimeCompatibility`（按官方地址算）。
 - `variant_in_use` 的 `details.sessions` 是 id 字符串数组；桌面已兼容（显示 id，无名字）。

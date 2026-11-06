@@ -10,6 +10,7 @@
 // source event arrived for a while (state unchanged), no output / cancel (they run on Gadi), and
 // 手动标记结果… in the row menu when the job's host has job-external (MarkExternalDialog).
 import { useEffect, useMemo, useState } from "react";
+import { useArchivedAgents } from "../../lib/useArchivedAgents";
 import type { SidebarSnapshot } from "../../../../shared/ipc";
 import { MoreHorizontal } from "lucide-react";
 import { useModuleEnabled } from "../react";
@@ -284,6 +285,7 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
 /** The 作业 page `jobs.page` (params `agent` / `scope` preset the filters: the capsule's 查看全部). */
 export function JobsPage({ params }: { params: PageParams }) {
   const agent = params.agent;
+  useArchivedAgents();
   const scope = params.scope === "active" || params.scope === "queued" || params.scope === "done" ? params.scope : undefined;
   return (
     <PageBody>

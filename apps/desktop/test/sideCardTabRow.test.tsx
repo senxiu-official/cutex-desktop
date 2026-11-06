@@ -79,6 +79,12 @@ beforeEach(() => {
 });
 
 describe("side card tab row", () => {
+  it("gives a single preview a closeable tab without a new-tab launcher", () => {
+    const el = render(item({ tabRow: "always", launcher: undefined }), ["i1"]);
+    expect(el.querySelectorAll("[role=tablist] [role=tab]")).toHaveLength(1);
+    expect(el.querySelector('[role=tab] button[aria-label="side.close"]')).not.toBeNull();
+    expect(el.querySelector("[data-side-new-tab]")).toBeNull();
+  });
   it("shows a one-tab row and a ＋ for a tabRow: always kind", () => {
     const el = render(item({ tabRow: "always" }), ["i1"]);
     expect(el.querySelectorAll("[role=tablist] [role=tab]")).toHaveLength(1);

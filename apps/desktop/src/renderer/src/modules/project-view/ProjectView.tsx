@@ -265,24 +265,38 @@ function DirectorCard({ m, data, now }: { m: Member; data: ProjectData; now: num
   );
 }
 
-function GroupHead({ label, n, tone }: { label: string; n: number; tone: string }) {
+/**
+ * 「› 在线空闲 +N」 / 「› 离线 +N」: the members not listed (lib/rosterTiers placeRoster), the sidebar's two folds;
+ * folded, the first few avatars. Open state in the view state (`idleOpen` / `offlineOpen`).
+ */
+function MemberFold({ kind, list, open, onToggle, data, now }: { kind: "idle" | "offline"; list: Member[]; open: boolean; onToggle(): void; data: ProjectData; now: number }) {
+  const { t } = useI18n();
+  if (list.length === 0) return null;
   return (
-    <div className={`sticky top-0 z-[1] flex items-center gap-1.5 bg-background px-3 pt-2.5 pb-1 text-meta/[inherit] font-semibold ${tone}`}>
-      {label}
-      <span className="font-normal text-subtle">{n}</span>
-    </div>
+    <section data-member-fold={kind}>
+      <button type="button" onClick={onToggle} className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-meta/[inherit] text-muted hover:bg-hover" aria-expanded={open}>
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        {t(kind === "idle" ? "project-view.idleFold" : "project-view.offlineFold", { n: list.length })}
+        {!open && (
+          <span className="ml-1 flex -space-x-1.5">
+            {list.slice(0, 6).map((m) => (
+              <Avatar key={m.id} name={m.name} initial={m.row.initial} color={m.row.color} avatar={m.row.session.avatar} seed={m.row.session.cutexSessionId} size={16} />
+            ))}
+          </span>
+        )}
+      </button>
+      {open && list.map((m) => <MemberRow key={m.id} m={m} data={data} now={now} folded />)}
+    </section>
   );
 }
 
 function Agents({ data, state, setState, now }: { data: ProjectData; state: ViewState; setState(s: ViewState): void; now: number }) {
   const { t } = useI18n();
   const g = data.grouped;
-  const groups: [MessageKey, Member[], string][] = [
-    ["project-view.group.needs", g.needsYou, "text-warn-text"],
-    ["project-view.group.running", g.running, "text-ok-text"],
-    ["project-view.group.recent", g.recent, "text-subtle"],
-  ];
-  const others = g.needsYou.length + g.running.length + g.recent.length + g.idle.length;
+  // Listed without segment labels (design 060 §5, the sidebar's rule): needs-you / error, running, recently
+  // worked; each card's pill says which.
+  const listed = [...g.needsYou, ...g.running, ...g.recent];
+  const others = listed.length + g.idle.length + g.offline.length;
   // Sized to its content inside the upper scroll region (UPPER_CLASS): with one or two agents the
   // activity below takes the rest instead of leaving a gap (owner 2026-10-21).
   return (
@@ -298,36 +312,18 @@ function Agents({ data, state, setState, now }: { data: ProjectData; state: View
           <span className="min-w-0">{t(state.needsOnly ? "project-view.noNeeds" : g.director ? "project-view.onlyDirector" : "project-view.noAgents")}</span>
         </div>
       )}
-      {groups.map(([key, list, tone]) =>
-        list.length ? (
-          <section key={key}>
-            <GroupHead label={t(key)} n={list.length} tone={tone} />
-            {list.map((m) => (
-              <MemberRow key={m.id} m={m} data={data} now={now} />
-            ))}
-          </section>
-        ) : null,
-      )}
-      {g.idle.length > 0 && (
-        <section className="border-t border-border">
-          <button
-            type="button"
-            onClick={() => setState({ ...state, idleOpen: !state.idleOpen })}
-            className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-meta/[inherit] text-muted hover:bg-hover"
-            aria-expanded={state.idleOpen}
-          >
-            {state.idleOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            {state.idleOpen ? t("project-view.idleHide") : t("project-view.idle", { n: g.idle.length })}
-            {!state.idleOpen && (
-              <span className="ml-1 flex -space-x-1.5">
-                {g.idle.slice(0, 6).map((m) => (
-                  <Avatar key={m.id} name={m.name} initial={m.row.initial} color={m.row.color} avatar={m.row.session.avatar} seed={m.row.session.cutexSessionId} size={16} />
-                ))}
-              </span>
-            )}
-          </button>
-          {state.idleOpen && g.idle.map((m) => <MemberRow key={m.id} m={m} data={data} now={now} folded />)}
+      {listed.length > 0 && (
+        <section className="pt-1.5">
+          {listed.map((m) => (
+            <MemberRow key={m.id} m={m} data={data} now={now} />
+          ))}
         </section>
+      )}
+      {g.idle.length + g.offline.length > 0 && (
+        <div className="border-t border-border">
+          <MemberFold kind="idle" list={g.idle} open={state.idleOpen} onToggle={() => setState({ ...state, idleOpen: !state.idleOpen })} data={data} now={now} />
+          <MemberFold kind="offline" list={g.offline} open={state.offlineOpen} onToggle={() => setState({ ...state, offlineOpen: !state.offlineOpen })} data={data} now={now} />
+        </div>
       )}
     </div>
   );

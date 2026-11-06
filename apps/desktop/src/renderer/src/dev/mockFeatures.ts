@@ -3,6 +3,7 @@
 // module adds its capability names in its own modules/<id>/mock.ts `features` (appended here), not
 // in these lists.
 import { MODULE_MOCKS } from "./mockModules";
+import { OWNER_IDLE_BUSY_TIMELINE_FEATURE } from "@cutex-desktop/protocol";
 
 /** Every mock cutex reports these. */
 const CORE_BASE_FEATURES: readonly string[] = [
@@ -20,6 +21,8 @@ const CORE_BASE_FEATURES: readonly string[] = [
 
 /** Newer cutex only (absent under `?legacy`). */
 const CORE_NEW_FEATURES: readonly string[] = [
+  "session-background-work",
+  "user-layout",
   "user-input-options-v1",
   "dsh-runtime",
   // r264 images in steers; `?noimagesteer` drops it (dev/mockBridge IMAGE_STEER).
@@ -115,7 +118,9 @@ export const MOCK_NEW_FEATURES: readonly string[] = [...CORE_NEW_FEATURES, ...MO
 export function mockScenarioFeatures(search: string): string[] {
   const q = new URLSearchParams(search);
   if (q.has("legacy")) return [];
-  if (q.has("overloadretry") && !q.has("no-retry-visible")) return ["model-overload-retry-visible", ...(q.has("inputLedger") ? ["input-ledger-v1"] : [])];
-  // ?variants: cutex profile-runtime-variants (r265; dev/mockProfileVariants.ts).
-  return [...(q.has("inputLedger") ? ["input-ledger-v1"] : []), ...(q.has("live-deltas") ? ["live-text-deltas"] : []), ...(q.has("variants") ? ["profile-runtime-variants"] : []), ...(q.has("relay") ? ["profile-relay-runtimes"] : [])];
+  const ledgerFeatures = q.has("inputLedger") ? ["input-ledger-v1", OWNER_IDLE_BUSY_TIMELINE_FEATURE] : [];
+  if (q.has("overloadretry") && !q.has("no-retry-visible")) return ["model-overload-retry-visible", ...ledgerFeatures];
+  // ?turnerror: cutex turn-error-surface (dev/mockTurnError.ts). ?variants: cutex profile-runtime-variants (r265; dev/mockProfileVariants.ts).
+  // ?rename: cutex formal-agent-name-rename-v1 (dev/mockAgentRename.ts); without it the host lacks it, as today.
+  return [...(q.has("rename") ? ["formal-agent-name-rename-v1"] : []), ...(q.has("turnerror") && !q.has("no-turn-error-surface") ? ["turn-error-surface"] : []), ...ledgerFeatures, ...(q.has("live-deltas") ? ["live-text-deltas"] : []), ...(q.has("variants") ? ["profile-runtime-variants"] : []), ...(q.has("relay") ? ["profile-relay-runtimes"] : [])];
 }

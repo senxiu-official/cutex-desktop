@@ -1,3 +1,4 @@
+import { browserCursorView } from "../../../../shared/browserCursor";
 // Passive, host-scoped metadata only. Reading a tab never opens a guest or starts a poll.
 import { BROWSER_ZOOM_BOUNDS, type BrowserTabView } from "../../../../shared/browser";
 import { browserError, browserTitle, MAX_BROWSER_INPUT, safeBrowserFavicon, safeBrowserUrl } from "./browserState";
@@ -32,6 +33,7 @@ export function createBrowserCache() {
         sitePermission: view.sitePermission && ["waiting", "hidden", "timeout"].includes(view.sitePermission.state) && typeof view.sitePermission.origin === "string"
           ? Object.freeze({ state: view.sitePermission.state, origin: browserTitle(view.sitePermission.origin), permissions: view.sitePermission.permissions.slice(0, 4) })
           : undefined,
+        cursor: browserCursorView(view.cursor),
         control: view.control ? Object.freeze({ grantee: view.control.grantee, state: view.control.state, operating: view.control.operating }) : undefined,
         carrier: view.carrier === "background" ? "background" : undefined,
         handover: view.handover === true ? true : undefined,
@@ -51,3 +53,6 @@ export function createBrowserCache() {
 }
 
 export const browserCache = createBrowserCache();
+// Dev preview only (dropped from production bundles): mock.ts (`?browserChrome`) supplies a page state for a card.
+if (import.meta.env.DEV && typeof window !== "undefined")
+  window.addEventListener("cutex-preview-browser-view", (event) => { browserCache.update((event as CustomEvent<BrowserTabView>).detail); });

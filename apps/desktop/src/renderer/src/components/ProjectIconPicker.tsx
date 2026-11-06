@@ -44,7 +44,7 @@ export function ProjectIconPicker({ badge, color, onColor, disabled, ...target }
         data-project-icon-picker=""
         disabled={disabled}
         onClick={() => setOpen(!open)}
-        title={t("projects.icon.title")}
+        data-tip={t("projects.icon.title")} aria-label={t("projects.icon.title")}
         aria-haspopup="dialog"
         aria-expanded={open}
         className="rounded-md p-0.5 hover:bg-surface-2"
@@ -119,7 +119,7 @@ function PickerPanel({ anchor, badge, current, color, onPick, onColor, onReset, 
       role="dialog"
       aria-label={t("projects.icon.title")}
       style={{ left, width: WIDTH, ...style }}
-      className="fixed z-50 flex flex-col overflow-y-auto rounded-lg border border-border bg-surface shadow-xl"
+      className="float fixed z-[160] flex flex-col overflow-y-auto"
     >
       {/* Tabs on their own row (never wrapped: a squeezed chip broke 表情符号 into 表情符/号);
        * the search box gets the full row below, so every locale fits the 288px panel. */}

@@ -1,24 +1,5 @@
-# 007 拖一边只动这一边
+# Resize one edge
 
-状态：**已实现，待合并**（10-22，feat/0.2-width；定于 10-21 主人：「拖动一侧，两侧都会跟着变——不会」= 不该这样）。清单 #38 的一部分。
+Dragging a panel edge changes that edge and the adjacent panel or gap. The opposite edge does not move solely to maintain centering. Keyboard resizing follows the same rule. Resetting an edge restores the applicable default width; opening or closing workspaces may recalculate placement.
 
-## 问题
-
-现行宽度规则第 4 条有个例外：**只有一个会话时，拖它一边，两边对称移动**（中心不动，为了保持居中）。主人觉得是「偶尔两侧都跟着变」，不符合直觉：拖哪边就该只动哪边。
-
-## 决定
-
-- 去掉这个例外：任何时候拖一条边，只有这条边跟着指针走，另一边不动（同第 3 条「只改它两边的两个面板」）。
-- 拖完后会话偏离中心就保持偏离（第 4 条「松手后不跳回居中」照旧）；只有工作区打开 / 关闭、换宽度设置、双击边时才重新居中。
-- 方向键（第 9 条）同样只动这一边。
-- 双击一条边：回到缺省宽度并重新居中（第 7 条的单列情况）。
-
-## 一起看的（#38）
-
-很多面板只有一条边能拖（会话、Shelf、设置 Shelf）。两侧都能拖时也按本规则：拖哪边动哪边，只改相邻的面板。
-
-## 实现时定下的细节（10-22）
-
-- 单个会话的两条边：拖哪条只动哪条（`oneEdgeWidth` 取代 `centredWidth`），停在旁边 Shelf 的边上；缩到最小宽度后（10-23 起，[031](031-edge-push.md)）被推着走、吃另一侧的空桌面，空桌面用完才停；松手存宽度和位置（偏离中心保留，`rowDrag.lead`）。方向键一次 16 px（Shift ×4），规则同拖动。双击 = 默认宽度并重新居中。
-- 两侧都能拖的其他面板（#38，见 [016](016-both-edges.md)）同样只动这一边。
-- 拖动时边旁边显示宽度（#5，见 [014](014-width-feedback.md)）。
+See [Architecture](../DESIGN.md) and [Module contracts](../desktop-modules.md) for related interfaces.

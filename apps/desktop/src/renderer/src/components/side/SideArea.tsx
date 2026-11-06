@@ -36,6 +36,7 @@ import { focusConversationPane, resizePaneColumns } from "../../lib/paneStore";
 import { WorkspaceRail } from "./WorkspaceRail";
 import { ConvStrip as ConversationStrip } from "../ConvStrip";
 import { EmptyShelfLaunchers } from "./EmptyShelfLaunchers";
+import { EMPTY_PREVIEW_LAUNCHERS } from "../../lib/emptyPreviewPages";
 import { dataFlags, useSizeFlags, widthBelow } from "../../lib/sizeFlags";
 import { commitShelfWidth, openShelfPage } from "../../lib/shelves";
 import { setRowHooks, setRowReserve, shelfEdgeDrag, setSideWorkWidth, setShelvesTaken, useSideWidthHandle, type WidthTarget } from "../../lib/sideResize";
@@ -103,9 +104,11 @@ function ShelfPage({ entry, registry, ctx, edge, currentWidth, target }: { entry
   let cards = shownCards(layout, page, ctx);
   if (only) cards = cards.filter((c) => c.id === only);
   if (!cards.length) {
+    const launcher = !page.cards.length && page.emptyKind ? EMPTY_PREVIEW_LAUNCHERS[page.emptyKind] : undefined;
+    const title = launcher && page.emptyKind ? registry.get(page.emptyKind)?.item.titleKey : undefined;
     return (
-      <EmptyCard title={t(page.cards.length ? "shelf.page.nothingHere" : "shelf.page.empty")} hint={t("shelf.page.emptyHint")} edge={null}>
-        <EmptyShelfLaunchers pageId={page.id} />
+      <EmptyCard title={t(title ?? (page.cards.length ? "shelf.page.nothingHere" : "shelf.page.empty"))} hint={t(launcher ? "shelf.page.previewEmpty" : "shelf.page.emptyHint")} edge={null}>
+        <EmptyShelfLaunchers pageId={launcher ? null : page.id} kinds={launcher ? [launcher] : undefined} />
       </EmptyCard>
     );
   }

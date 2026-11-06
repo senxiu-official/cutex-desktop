@@ -1,4 +1,5 @@
-import { BROWSER_CHANNEL, type BrowserBridge, type BrowserEvent, type BrowserRequest, type BrowserTabMount, type BrowserTabView, type BrowserTurnShot, type BrowserImage, type BrowserToolItem, type BrowserAgentView, type BrowserHostSettings, type BrowserIdempotencyClearResult, type BrowserClaimPolicyView, type BrowserClaimAllowView, type BrowserClaimAuditView, type BrowserExternalPagesView, type BrowserSitePermissionView } from "../shared/browser";
+import type { BrowserCursorPreferences } from "../shared/browserCursor";
+import { BROWSER_CHANNEL, type BrowserBridge, type BrowserEvent, type BrowserRequest, type BrowserTabMount, type BrowserTabView, type BrowserTurnShot, type BrowserImage, type BrowserToolItem, type BrowserAgentView, type BrowserHostSettings, type BrowserIdempotencyClearResult, type BrowserClaimPolicyView, type BrowserClaimAllowView, type BrowserClaimAuditView, type BrowserExternalPagesView, type BrowserSitePermissionView, type BrowserProfileTools } from "../shared/browser";
 import type { HostBinding } from "../shared/hosts";
 
 export interface BrowserPreloadOptions {
@@ -12,6 +13,7 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
     setEnabled: enabled => options.invoke(BROWSER_CHANNEL, { op: "setEnabled", enabled }, null) as Promise<void>,
     resetOrigins: () => options.invoke(BROWSER_CHANNEL, { op: "resetOrigins" }, null) as Promise<void>,
     externalPages: enabled => options.invoke(BROWSER_CHANNEL, enabled === undefined ? { op: "externalPages" } : { op: "externalPages", enabled }, null) as Promise<BrowserExternalPagesView>,
+    cursorColor: color => options.invoke(BROWSER_CHANNEL, color === undefined ? { op: "cursorColor" } : { op: "cursorColor", color }, null) as Promise<BrowserCursorPreferences>,
     sitePermissions: forget => options.invoke(BROWSER_CHANNEL, forget === undefined ? { op: "sitePermissions" } : { op: "sitePermissions", forget }, null) as Promise<BrowserSitePermissionView[]>,
     forHost(hostId) {
       const call = (request: BrowserRequest) => {
@@ -34,7 +36,7 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
         desktopLoopback: enabled => call({ op: "desktopLoopback", ...(enabled !== undefined ? { enabled } : {}) }) as Promise<{ enabled: boolean }>,
         desktopLoopbackChallenge: (tabKey, url) => call({ op: "desktopLoopbackChallenge", tabKey, url }) as Promise<{ nonce: string }>,
         clearIdempotency: cutexSessionId => call({ op: "clearIdempotency", ...(cutexSessionId ? { cutexSessionId } : {}) }) as Promise<BrowserIdempotencyClearResult>,
-        profileTools: (profile, enabled) => call({ op: "profileTools", profile, ...(enabled !== undefined ? { enabled } : {}) }) as Promise<{ enabled: boolean }>,
+        profileTools: (profile, enabled, surface) => call({ op: "profileTools", profile, ...(enabled !== undefined ? { enabled } : {}), ...(surface !== undefined ? { surface } : {}) }) as Promise<BrowserProfileTools>,
         grantAgent: (tabKey, sessionId, settings, approvalId, expected, options) => call({ op: "grantAgent", tabKey, sessionId, settings, expected, ...(approvalId ? { approvalId } : {}), ...(approvalId && options?.remember ? { remember: true as const } : {}) }) as Promise<void>,
         claimOpen: (approvalId, settings) => call({ op: "claimOpen", approvalId, settings }) as Promise<void>,
         claimPolicy: (profile, mode) => call({ op: "claimPolicy", profile, ...(mode !== undefined ? { mode } : {}) }) as Promise<BrowserClaimPolicyView>,

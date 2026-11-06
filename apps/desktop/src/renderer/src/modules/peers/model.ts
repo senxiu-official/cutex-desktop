@@ -9,6 +9,7 @@ import type { AskDetail, SidebarSnapshot } from "../../../../shared/ipc";
 import type { PeerError, PeerExport, PeerPatch, PeerPolicy, PeerState, PeerView } from "../../../../shared/peers";
 import { isQuickChat } from "../../lib/sidebar";
 import { singleLine } from "../../lib/peerText";
+import { compareNames } from "../../lib/rosterOrder";
 
 // ---------- state ----------
 
@@ -141,14 +142,14 @@ export function exportChoices(sidebar: Pick<SidebarSnapshot, "active" | "hostRow
   const projects: ExportChoice[] = (sidebar?.projects?.projects ?? [])
     .filter((p) => p.lifecycle !== "archived")
     .map((p) => ({ item: { project: p.project_id }, name: p.presentation.display_name || p.project_id, members: p.active_member_count, color: p.presentation.color }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => compareNames(a.name, b.name));
   const agents: ExportChoice[] = (sidebar?.active ?? [])
     .filter((s: SessionResource) => {
       const row = sidebar?.hostRows[s.cutexSessionId];
       return !row?.projectId && !isQuickChat(s, row);
     })
     .map((s) => ({ item: { agent: s.cutexSessionId }, name: s.displayName, members: null }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => compareNames(a.name, b.name));
   const known = [...projects, ...agents].map((c) => c.item);
   const unknown = current.filter((e) => !("all" in e) && !known.some((k) => sameExport(k, e)));
   return { projects, agents, unknown };

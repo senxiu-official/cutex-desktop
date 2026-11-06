@@ -3,6 +3,7 @@
 // the rest grouped by project (独立 last). Pure except the per-viewer recent-grant memory, which is
 // a localStorage convenience only (main re-checks every grant).
 import type { BrowserAgentView } from "../../../../shared/browser";
+import { byNameThenId } from "../../lib/rosterOrder";
 
 export interface PickerAgent extends BrowserAgentView {
   projectId: string | null;
@@ -34,7 +35,7 @@ export function pickerGroups(agents: readonly PickerAgent[], options: { query?: 
   const top = new Set(topIds);
   const projects = new Map<string, PickerGroup>();
   const independent: PickerAgent[] = [];
-  const byName = (a: PickerAgent, b: PickerAgent) => a.name.localeCompare(b.name);
+  const byName = byNameThenId<PickerAgent>((a) => a.name, (a) => a.sessionId);
   for (const agent of shown) {
     if (top.has(agent.sessionId)) continue;
     if (!agent.projectId) { independent.push(agent); continue; }
@@ -42,7 +43,7 @@ export function pickerGroups(agents: readonly PickerAgent[], options: { query?: 
     if (!group) projects.set(agent.projectId, group = { key: `project:${agent.projectId}`, kind: "project", label: agent.projectName || agent.projectId, agents: [] });
     group.agents.push(agent);
   }
-  for (const group of [...projects.values()].sort((a, b) => a.label!.localeCompare(b.label!))) groups.push({ ...group, agents: group.agents.sort(byName) });
+  for (const group of [...projects.values()].sort(byNameThenId((g) => g.label!, (g) => g.key))) groups.push({ ...group, agents: group.agents.sort(byName) });
   if (independent.length) groups.push({ key: "independent", kind: "independent", label: null, agents: independent.sort(byName) });
   return groups;
 }

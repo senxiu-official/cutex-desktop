@@ -10,9 +10,7 @@
 // Windows keeps native caption buttons (titleBarOverlay, recolored to the theme); macOS keeps the
 // traffic lights; Linux gets drawn buttons.
 import { useEffect, useMemo } from "react";
-import { LayoutDashboard, PanelLeft, PanelLeftClose, RotateCcw, Search, X } from "lucide-react";
-import { openMenuFrom } from "../lib/contextMenu";
-import { resetWindowLayout } from "../lib/layoutReset";
+import { PanelLeft, PanelLeftClose, Search, X } from "lucide-react";
 import { bridge } from "../bridge";
 import { captionColors } from "../../../shared/windowChrome";
 import { useI18n } from "../i18n";
@@ -86,7 +84,7 @@ function SearchField({ entry }: { entry: AppSlotEntry<"window.search"> }) {
   return (
     <button
       onClick={() => item.open()}
-      title={keys ? `${text} (${keys})` : text}
+      data-tip={keys ? `${text} (${keys})` : text}
       aria-label={text}
       data-window-bar="search"
       className={`${NO_DRAG} titlebar-capsule flex h-7 w-[340px] max-w-full min-w-[120px] shrink items-center gap-2 rounded-ctl bg-surface-2 pr-2 pl-2.5 text-ui/[inherit] text-subtle hover:bg-[color-mix(in_srgb,var(--fg)_9%,var(--surface-2))]`}
@@ -94,23 +92,6 @@ function SearchField({ entry }: { entry: AppSlotEntry<"window.search"> }) {
       <Search size={14} className="shrink-0" />
       <span className="min-w-0 flex-1 truncate text-left">{text}</span>
       {keys && <kbd className="shrink-0 rounded border border-border px-1 font-mono text-caption/[inherit] leading-[15px] text-subtle">{keys}</kbd>}
-    </button>
-  );
-}
-
-/** 窗口布局 (checklist #4): the window's layout menu — 恢复默认布局 (undoable once, lib/layoutReset). */
-function LayoutMenuButton() {
-  const { t } = useI18n();
-  return (
-    <button
-      data-window-layout=""
-      title={t("layout.menu")}
-      aria-label={t("layout.menu")}
-      aria-haspopup="menu"
-      onClick={(e) => openMenuFrom(e.currentTarget, [{ label: t("layout.reset"), icon: <RotateCcw size={14} />, title: t("layout.resetHint"), onSelect: resetWindowLayout }], { owner: "window-layout" })}
-      className={ICON_BTN}
-    >
-      <LayoutDashboard size={16} />
     </button>
   );
 }
@@ -164,7 +145,7 @@ export function TitleBar() {
               onMouseLeave={() => logoRest.leave()}
               onFocus={() => shown || logoRest.enter()}
               onBlur={() => logoRest.leave()}
-              title={withKey(t(shown ? "titlebar.hideSidebar" : "titlebar.showSidebar"), sidebarKey)}
+              data-tip={withKey(t(shown ? "titlebar.hideSidebar" : "titlebar.showSidebar"), sidebarKey)}
               aria-label={t(shown ? "titlebar.hideSidebar" : "titlebar.showSidebar")}
               aria-expanded={shown}
               className={`${ICON_BTN} group/logo relative shrink-0`}
@@ -195,10 +176,9 @@ export function TitleBar() {
       </div>
       <div data-window-bar="actions" className="flex shrink-0 items-center gap-0.5 pr-2">
         <div className="titlebar-capsule flex h-8 items-center gap-0.5 px-1">
-          {!fullWindow && <LayoutMenuButton />}
           {!fullWindow && <TitleBarLaunchers />}
           {fullWindow && (
-            <button onClick={closePage} title={t("settings.close")} className={ICON_BTN}>
+            <button onClick={closePage} data-tip={t("settings.close")} aria-label={t("settings.close")} className={ICON_BTN}>
               <X size={16} />
             </button>
           )}

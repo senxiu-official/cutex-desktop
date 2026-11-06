@@ -89,6 +89,29 @@ describe("relay internal model adapter", () => {
         .toEqual(supported ? { kind: "tab.act", pageGeneration: 2, scroll } : { kind: "tab.act", pageGeneration: 2 });
     }
   });
+  it("lists link / image urls (redacted) and a click's new tab only to a host that reads them", async () => {
+    for (const supported of [true, false]) {
+      const f = fixture();
+      f.snapshot.nodes = [{ ref: "private-ref", role: "link", name: "订单详情", url: "https://trade.example.com/detail?id=5&token=x" },
+        { ref: "img-ref", role: "image", name: "", url: "https://img.example.com/a.jpg" }, { ref: "bad", role: "link", name: "x", url: "https://e.com/__cutex/auth" }];
+      const linkUrl = (raw: string) => raw.includes("__cutex") ? "" : raw.replace(/[?&]token=[^&]*/, "");
+      const openedTab = vi.fn(async () => ({ opened: true as const }));
+      const adapter = createBrowserModelAdapter({ provider: f.provider, tabs: f.tabs, decodeImage: vi.fn(), pageLinks: () => supported, linkUrl, openedTab });
+      const read = await adapter.execute(f.tab.guestId, { kind: "tab.snapshot" }, {}) as { nodes: { url?: string }[] };
+      expect(read.nodes.map(node => node.url)).toEqual(supported
+        ? ["https://trade.example.com/detail?id=5", "https://img.example.com/a.jpg", undefined] : [undefined, undefined, undefined]);
+      expect(await adapter.execute(f.tab.guestId, { kind: "tab.act", action: { kind: "click", ref: "private-ref" } }, {}))
+        .toEqual(supported ? { kind: "tab.act", pageGeneration: 2, newTab: true } : { kind: "tab.act", pageGeneration: 2 });
+      expect(openedTab).toHaveBeenCalledTimes(supported ? 1 : 0);
+      openedTab.mockResolvedValueOnce({ blocked: "late_page_popup" } as never);
+      expect(await adapter.execute(f.tab.guestId, { kind: "tab.act", action: { kind: "click", ref: "private-ref" } }, {}))
+        .toEqual(supported ? { kind: "tab.act", pageGeneration: 2, newTab: { blocked: "late_page_popup" } } : { kind: "tab.act", pageGeneration: 2 });
+      expect(openedTab).toHaveBeenCalledTimes(supported ? 2 : 0);
+      // Only input that can open a tab asks.
+      await adapter.execute(f.tab.guestId, { kind: "tab.act", action: { kind: "scroll", direction: "down", amount: 100 } }, {});
+      expect(openedTab).toHaveBeenCalledTimes(supported ? 2 : 0);
+    }
+  });
   it("forwards strict action objects once and never grants or resumes", async () => {
     const f = fixture(), action = { kind: "check" as const, ref: "private-ref" };
     await f.adapter.execute(f.tab.guestId, { kind: "tab.snapshot" }, {});

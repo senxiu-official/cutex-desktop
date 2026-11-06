@@ -27,6 +27,7 @@ export interface HostFence<D> {
 export function admitHostBinding<D extends { readonly generation: number }>(
   getHosts: () => FenceHosts<D> | null | undefined,
   expected: HostBinding | null | undefined,
+  options: { daemonGeneration?: boolean } = {},
 ): HostFence<D> {
   const conn = expected && typeof expected.hostId === "string" ? getHosts()?.connection(expected.hostId) : undefined;
   const focusCall = expected?.focus === true;
@@ -38,7 +39,7 @@ export function admitHostBinding<D extends { readonly generation: number }>(
   return {
     daemon,
     check() {
-      if (daemon.generation !== generation || getHosts()?.connection(expected.hostId)?.daemon !== daemon || !stillFocus())
+      if ((options.daemonGeneration !== false && daemon.generation !== generation) || getHosts()?.connection(expected.hostId)?.daemon !== daemon || getHosts()?.connection(expected.hostId)?.routingEpoch !== expected.epoch || !stillFocus())
         throw new Error("host switched");
     },
   };

@@ -106,8 +106,12 @@ export function shelfAvatarMenu(shelfId: string, owner: ShelfOwner | null): Menu
   return out;
 }
 
-/** The avatar's tooltip: 「X 的 Shelf · 点击收起/展开 · 右键更多」 (a pinned page in view: 「固定页：… · …」; no owner: 「Shelf · …」). */
-export function shelfAvatarTip(owner: ShelfOwner | null, collapsed: boolean, pinned = false): string {
-  const whose = owner ? t("shelfAvatar.whose", { name: owner.name }) : pinned ? t("shelf.page.pinnedTip") : t("shelfAvatar.neutral");
-  return `${whose} · ${t(collapsed ? "shelfAvatar.clickExpand" : "shelfAvatar.clickCollapse")} · ${t("shelfAvatar.more")}`;
+/** The avatar's tooltip: whose Shelf it is (a pinned page in view: 「固定页：…」; no owner: 「Shelf」). */
+export function shelfAvatarTip(owner: ShelfOwner | null, pinned = false): string {
+  return owner ? t("shelfAvatar.whose", { name: owner.name }) : pinned ? t("shelf.page.pinnedTip") : t("shelfAvatar.neutral");
+}
+
+/** What a click and a right-click on the Rail's avatar do (the Rail's ⓘ, design 040 §2.1: not in the tip). */
+export function shelfAvatarHowTo(collapsed: boolean): string {
+  return `${t("shelfAvatar.neutral")}: ${t(collapsed ? "shelfAvatar.clickExpand" : "shelfAvatar.clickCollapse")} · ${t("shelfAvatar.more")}`;
 }

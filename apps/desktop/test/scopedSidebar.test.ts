@@ -146,16 +146,15 @@ describe("unconfirmed (unknown) status", () => {
     expect(showsRunningRing("idle", row!.session)).toBe(true);
   });
 
-  it("layout: unknown rows stay where their snapshot put them (「N 个空闲」 / running / 离线), never unfolding a fold", () => {
+  it("layout: unknown rows stay where their snapshot put them (running stays in 现在), never unfolding a fold", () => {
     const last = snapshot([["a", null], ["b", null, { activeTurnId: "t1" }], ["c", null, { status: "offline" }]], []);
     const group = mergeHostSidebars([{ hostId: "h", snapshot: last, statusUnknown: true }]).groups[0]!;
-    const ctx: LayoutContext = { signalOf: () => undefined, selectedId: null, starred: new Set(), prefs: { grouping: "all", noOnline: "collapse", running: "compact", foldIdle: true } as LayoutContext["prefs"] };
+    const ctx: LayoutContext = { signalOf: () => undefined, selectedId: null, starred: new Set(), prefs: { grouping: "all", noOnline: "collapse", running: "compact" } };
     const layout = layoutGroup(group, ctx, false);
-    expect(layout.full).toEqual([]);
-    expect(layout.idle.map((r) => r.id)).toEqual(["a"]);
+    expect(layout.big).toEqual([]);
     expect(layout.running.map((r) => r.id)).toEqual(["b"]);
     // Not counted as running until confirmed.
     expect(layout.runningCount).toBe(0);
-    expect(layout.offline.map((r) => r.id)).toEqual(["c"]);
+    expect([...layout.idle, ...layout.offline].map((r) => r.id)).toEqual(["a", "c"]);
   });
 });

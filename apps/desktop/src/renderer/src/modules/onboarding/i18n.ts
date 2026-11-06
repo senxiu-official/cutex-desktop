@@ -236,7 +236,7 @@ export const zhCN = {
   "onboarding.guide.minorAgent.title": "两个字母的方块",
   "onboarding.guide.minorAgent.text": "没有自己的头像、也没有置顶的{{agents}}，在列表、对话和各处都显示成两个字母的方块。\n「设置 → 侧栏 → {{agent}}行 → {{agent}}默认头像」选「仅重要{{agents}}」时就是这样。\n想给它头像：右键点击这一行，选「显示头像」。",
   "onboarding.guide.project.title": "项目和它的{{director}}",
-  "onboarding.guide.project.text": "一个项目由一个{{director}}负责：它分派工作、创建{{agents}}，结果都汇总到它这里。\n看项目的看板和动态：把鼠标移到项目标题上，左键点击右边的「项目视图」。",
+  "onboarding.guide.project.text": "一个项目由一个{{director}}负责：它分派工作、创建{{agents}}，结果都汇总到它这里。\n看项目视图和动态：把鼠标移到项目标题上，左键点击右边的「项目视图」。",
   "onboarding.guide.needsYou.title": "需要你",
   "onboarding.guide.needsYou.text": "「需要你」表示有{{agent}}在等你：一个问题、一次审批或一个决定。\n你处理之前，它可能一直停着。\n这些事汇总在输入框上方、侧栏每行末尾和托盘里，左键点击一下就能过去。",
   "onboarding.guide.delegation.title": "委托",

@@ -44,7 +44,7 @@ export function RefMoreButton({ kind, build }: { kind: string; build(): CutexRef
   if (!shown) return null;
   return (
     <button
-      title={t("gutter.more")}
+      data-tip={t("gutter.more")}
       aria-label={t("gutter.more")}
       aria-haspopup="menu"
       onClick={(e) => openMenuFrom(e.currentTarget, refActionEntries(build()))}

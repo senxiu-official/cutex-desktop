@@ -1,5 +1,6 @@
 // Browser-preview data for owner approvals (approvals page, live request after 15 s; dev/mockTypes.ts).
 import type { MockCore, ModuleMock } from "../../dev/mockTypes";
+import { NOTIFICATION_PAGES_FEATURE } from "../../../../shared/notificationPaging";
 
 const iso = (secondsAgo: number) => new Date(Date.now() - secondsAgo * 1000).toISOString();
 type MockApproval = import("../../../../shared/ipc").ApprovalRecord;
@@ -218,8 +219,24 @@ function figuresThread() {
   };
 }
 
+// Opt-in history fixture: enough decisions to cross two 100-row UI boundaries, without
+// changing the pending inbox or the default preview scene.
+const pagedFixture: MockApproval[] = Array.from({ length: 225 }, (_, i) => ({
+  approvalId: `apr-s10-${String(i).padStart(4, "0")}`, kind: "managed_service", reason: "outside_caller_envelope",
+  requesterCutexSessionId: FIG_AGENT, requesterName: "ifm-ema-figures", projectId: "ifm-ema",
+  summary: `History fixture ${i + 1}`, requestSha256: "s10-fixture", state: i % 2 ? "denied" : "consumed",
+  createdAt: iso(1000 + i * 2), decidedAt: iso(999 + i * 2), details: null,
+}));
+function approvalRows(state: "pending" | "all"): MockApproval[] {
+  const query = new URLSearchParams(typeof location !== "undefined" ? location.search : "");
+  const routingScene = query.has("routingReviews");
+  const rows = query.has("s10pages") && state === "all" ? [...mockApprovals, ...pagedFixture] : mockApprovals;
+  return structuredClone(rows.filter(a => (!routingScene || a.details?.askId === "ask-review") && (state === "all" || a.state === "pending"))
+    .map(a => routingScene ? { ...a, summary: a.summary.replace("Alden", "Kai"), details: { ...a.details, target: "kai", targetName: "Kai" } } : a));
+}
+
 export const mock: ModuleMock = {
-  features: { new: ["approvals-live", "approval-decision-notice", "approval-wait", "approval-auto-rules"] },
+  features: { new: ["approvals-live", "approval-decision-notice", "approval-wait", "approval-auto-rules", NOTIFICATION_PAGES_FEATURE] },
   thread: (sessionId) => (sessionId === FIG_AGENT ? figuresThread() : null),
   api: (core) => ({
     async approvalRules() {
@@ -276,8 +293,18 @@ export const mock: ModuleMock = {
     },
     async approvals(state) {
       if (core.legacy) return null;
-      const routingScene = typeof location !== "undefined" && new URLSearchParams(location.search).has("routingReviews");
-      return structuredClone(mockApprovals.filter((a) => (!routingScene || a.details?.askId === "ask-review") && (state === "all" || a.state === "pending")).map(a => routingScene ? { ...a, summary: a.summary.replace("Alden", "Kai"), details: { ...a.details, target: "kai", targetName: "Kai" } } : a));
+      return approvalRows(state);
+    },
+    async approvalsPage(state, query = {}) {
+      if (core.legacy) return null;
+      const prefix = `mock-approvals-${state}-`;
+      if (query.cursor && !query.cursor.startsWith(prefix)) throw new Error("409 resync_required");
+      const offset = query.cursor ? Number(query.cursor.slice(prefix.length)) : 0;
+      if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("400 invalid_cursor");
+      const limit = Math.max(1, Math.min(500, query.limit ?? 100));
+      const rows = approvalRows(state);
+      const approvals = rows.slice(offset, offset + limit);
+      return { approvals, nextCursor: offset + approvals.length < rows.length ? `${prefix}${offset + approvals.length}` : null };
     },
     async decideApproval(approvalId, decision, note) {
       const a = mockApprovals.find((x) => x.approvalId === approvalId);

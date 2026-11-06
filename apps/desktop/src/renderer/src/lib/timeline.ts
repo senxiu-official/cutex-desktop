@@ -1,4 +1,5 @@
 import { observeLiveDurable, type LiveTimelineState } from "./liveDeltas";
+import { TimelineEntries } from "./timelineEntries";
 import { applySteerReceipt, type SteerReceipt } from "./legacyDelivery/steerReceipts";
 import { readAcpContext, readDshContext, type DshContext } from "./dshContext";
 import { isForkSignatureRejection } from "./forkProfile";
@@ -46,7 +47,7 @@ export type TimelineEntry =
   | { kind: "user"; id: string; text: string; turnId: string; images?: MessageImage[]; /** Skills bound to it (编辑并重发 puts them back). */ skills?: MessageSkill[]; /** clientUserMessageId cutex passed through (cute-codex userMessage.clientId). */ clientId?: string }
   | { kind: "agent"; id: string; text: string; turnId: string; streaming: boolean; liveIncomplete?: boolean; fullTextPending?: { streamId: string; sequence: number; eventId: string } }
   | { kind: "received"; id: string; turnId: string; message: ExternalMessage }
-  | { kind: "sent"; id: string; turnId: string | null; to: string; deliveryMode: string; text: string; /** Bus message id (status lookup); absent on older entries. */ messageId?: string; /** note / wake as cutex reported it (agent-messages-v2). */ deliveryKind?: DeliveryKind }
+  | { kind: "sent"; id: string; turnId: string | null; to: string; deliveryMode: string; text: string; /** Bus message id (status lookup); absent on older entries. */ messageId?: string; /** note / wake as cutex reported it (agent-messages-v2). */ deliveryKind?: DeliveryKind; /** The text the agent wrote, when the call that sent it is known (lib/sentToolPairs); `text` is the whole body. */ preview?: string }
   | { kind: "tool"; id: string; turnId: string; item: RawItem }
   /** `/review`: enteredReviewMode (what is reviewed) / exitedReviewMode (the review text). */
   | { kind: "review"; id: string; turnId: string; phase: "entered" | "exited"; text: string }
@@ -204,7 +205,7 @@ export interface ThreadSettingsView {
 }
 
 export function emptyTimeline(): TimelineState {
-  return { threadId: null, turns: [], entries: new Map(), pending: new Map(), answering: new Set(), activeTurnId: null, settings: null, contextUsage: null, rateLimits: null, rateLimitsObservedAt: null, goal: null, plan: null };
+  return { threadId: null, turns: [], entries: new TimelineEntries(), pending: new Map(), answering: new Set(), activeTurnId: null, settings: null, contextUsage: null, rateLimits: null, rateLimitsObservedAt: null, goal: null, plan: null };
 }
 
 /** The `update_plan` snapshot carried by a native `turn/plan/updated` envelope, else null. */

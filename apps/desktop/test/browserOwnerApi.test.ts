@@ -31,6 +31,17 @@ function fixture(body: unknown = { item: mcp() }) {
 }
 afterEach(() => vi.useRealTimers());
 
+it("one malformed picker row does not hide the other online agents", async () => {
+  const f = fixture({ items: [
+    { sessionId: "cutex.valid", name: "Valid" },
+    { sessionId: "cutex.bad", name: "bad\u0000name" },
+    { sessionId: "cutex.other", name: "Other" },
+  ] });
+  await expect(f.api.agents()).resolves.toEqual([
+    { sessionId: "cutex.valid", name: "Valid" }, { sessionId: "cutex.other", name: "Other" },
+  ]);
+});
+
 describe("browser owner exact-item identity", () => {
   it("accepts only the frozen nine tools from actual MCP/dynamic runtime identities", async () => {
     for (const tool of names) for (const item of [mcp({ tool }), dynamic({ tool }), dynamic({ tool, namespace: "cutex" })]) {
@@ -307,6 +318,13 @@ describe("browser owner narrow settings mutations", () => {
     f.respond.mockImplementation(() => json({ profile: { browserTools: false } }));
     expect(await f.api.profileTools("profile-id", false)).toEqual({ enabled: false });
     expect(JSON.parse(String(f.requests[2]!.init?.body))).toEqual({ browserTools: false });
+    // cutex design 059: the tool surface is sent alone and read back only when the host reports a known value.
+    f.respond.mockImplementation(() => json({ profile: { browserTools: true, browserToolSurface: "legacy" } }));
+    expect(await f.api.profileTools("profile-id", undefined, "legacy")).toEqual({ enabled: true, surface: "legacy" });
+    expect(JSON.parse(String(f.requests[3]!.init?.body))).toEqual({ browserToolSurface: "legacy" });
+    f.respond.mockImplementation(() => json({ profile: { browserTools: true, browserToolSurface: "script-v9" } }));
+    expect(await f.api.profileTools("profile-id")).toEqual({ enabled: true });
+    await expect(f.api.profileTools("profile-id", undefined, "evaluate" as "auto")).rejects.toMatchObject({ code: "invalid_request" });
   });
   it("rejects untyped settings, profile path escapes and broad mutation objects before I/O", async () => {
     const f = fixture();

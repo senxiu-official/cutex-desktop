@@ -109,6 +109,7 @@ vi.mock("@cutex-desktop/cutex-client", () => ({
     host() {
       return new Promise(() => {});
     }
+    capabilities() { return Promise.resolve(null); }
     sessions() {
       return Promise.resolve({
         sessions: []
@@ -135,6 +136,7 @@ vi.mock("@cutex-desktop/cutex-client", () => ({
     }
   },
   CutexApiError: class extends Error {},
+  userAccessOf: () => ({ isOwner: true }),
   CutexUnreachableError: class extends Error {},
   EventFeed: class {},
   openStream() {
@@ -473,7 +475,7 @@ describe("route-scoped actual menu/store/preload/main actions", () => {
       claudeAllowWrite: false,
       claudeAllowExec: true
     };
-    const entry = menus.agentMenu(agent, key => key).find(item => item && typeof item === "object" && item.label === "menu.claudeTools");
+    const entry = menus.agentMenu(agent, key => key).find(item => item && typeof item === "object" && item.label === "menu.agentSettings");
     if (!entry || typeof entry !== "object") throw Error("missing tools action");
     const action = staticSubmenu(entry.submenu).find(item => item && typeof item === "object" && item.label === "menu.claudeWrite");
     if (!action || typeof action !== "object") throw Error("missing write action");

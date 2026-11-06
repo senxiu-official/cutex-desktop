@@ -91,6 +91,8 @@ class SessionMock extends EventEmitter {
   webRequest = {
     onBeforeRequest: (_filter: unknown, fn: SessionMock["before"]) => { this.before = fn; },
     onHeadersReceived: vi.fn(),
+    onCompleted: vi.fn(),
+    onErrorOccurred: vi.fn(),
   };
   denied(webContentsId: number, url = "http://localhost:26180/"): boolean {
     const result: { cancel?: boolean }[] = [];

@@ -30,7 +30,7 @@ export default defineModule({
         icon: Mailbox,
         titleKey: "nci.page",
         source: "host",
-        hintKey: "nci.pageHint",
+        hintKey: "settings.pageHint.nci",
         requires: { capabilities: [INBOUND_MAIL_FEATURE] },
         Page: NciSettings,
         keywords: ["nci.key.title", "nci.gadi.title", "nci.hostKeys.title", "nci.username.title", "nci.mail.title", "nci.enable.title"],

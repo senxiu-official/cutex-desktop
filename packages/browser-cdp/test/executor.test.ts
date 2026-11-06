@@ -80,6 +80,39 @@ describe('transport-injected browser executor', () => {
     expect(result.nodes[1]).toMatchObject({ name: 'Message', role: 'textbox', value: 'before' });
     expect(result.pageGeneration).toBeGreaterThan(0);
   });
+  // Owner report 2026-11-06: product fields visible on screen were missing from the read.
+  // Chromium returns elements before all text, so a budget cut dropped the text first.
+  it('reads in document order, lists link / image urls and acts on the element holding a text', async () => {
+    const { executor, transport } = setup();
+    const node = (nodeId: string, parentId: string | undefined, role: string, name: string, childIds: string[] = [], extra: Json = {}) =>
+      ({ nodeId, ...(parentId ? { parentId } : {}), role: { value: role }, name: { value: name }, childIds, backendDOMNodeId: Number(nodeId), ...extra });
+    // Chromium order: root, row wrappers, link, then every StaticText last.
+    const nodes = [
+      node('1', undefined, 'RootWebArea', 'Orders', ['2']),
+      node('2', '1', 'generic', '', ['3', '4', '5', '6', '7']),
+      node('4', '2', 'link', 'Item 1', ['10'], { properties: [{ name: 'url', value: { value: 'https://shop.example/item?id=1' } }] }),
+      { nodeId: '5', parentId: '2', role: { value: 'none' }, name: { value: '' }, childIds: [], backendDOMNodeId: 5, ignored: true, ignoredReasons: [{ name: 'emptyAlt' }] },
+      node('7', '2', 'generic', '', ['12']),
+      node('3', '2', 'StaticText', 'Order 123'),
+      node('10', '4', 'StaticText', 'Item 1'),
+      node('6', '2', 'StaticText', 'Colour: red'),
+      node('12', '7', 'StaticText', 'Red'),
+    ];
+    transport.handler = (method, params) => {
+      if (method === 'Accessibility.getFullAXTree') return { nodes };
+      if (method === 'DOM.describeNode' && params.backendNodeId === 5) return { node: { nodeName: 'IMG', attributes: ['src', 'data:image/gif;base64,R0', 'data-src', '/img/red.jpg'] } };
+      return undefined;
+    };
+    const read = await executor.read();
+    expect(read.nodes.map(n => `${n.role}:${n.name}${n.url ? ` ${n.url}` : ''}`)).toEqual(['RootWebArea:Orders', 'StaticText:Order 123',
+      'link:Item 1 https://shop.example/item?id=1', 'image: http://127.0.0.1:25399/img/red.jpg', 'StaticText:Colour: red', 'StaticText:Red']);
+    // "Red" sits in a nameless wrapper (a site's SKU option): clicking its text clicks that element.
+    await executor.act(read.nodes.at(-1)!.ref, 'click');
+    expect(transport.calls.filter(c => c.method === 'DOM.resolveNode').map(c => c.params.backendNodeId)).toContain(7);
+    // find still matches every node, wrappers and repeated labels included.
+    const found = await executor.find({ text: 'Item 1' });
+    expect(found.nodes.map(n => n.role)).toEqual(['link', 'StaticText']);
+  });
   it('new snapshots invalidate old refs even on the same document', async () => {
     const { executor, transport } = setup();
     const old = await ref(executor);
@@ -271,8 +304,8 @@ describe('transport-injected browser executor', () => {
   it('does not dispatch against an occluded/disabled/noneditable target', async () => {
     const { executor, transport } = setup();
     const target = await ref(executor);
-    transport.position = { error: 'not_actionable' };
-    await expect(executor.act(target, 'fill', 'new')).rejects.toMatchObject({ code: 'not_actionable' });
+    transport.position = { error: 'not_actionable', reason: 'covered' };
+    await expect(executor.act(target, 'fill', 'new')).rejects.toMatchObject({ code: 'not_actionable', reason: 'covered' });
     expect(transport.inputCalls()).toHaveLength(0);
   });
   it('host hidden preflight returns target_hidden without input or focus commands', async () => {

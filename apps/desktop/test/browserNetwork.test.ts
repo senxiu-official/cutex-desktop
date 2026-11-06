@@ -6,19 +6,20 @@ import { BROWSER_LOCAL_PROXY, createBrowserUrlPolicy, createBrowserWindowOpenHan
 
 function sessionMock() {
   const emitter = new EventEmitter();
-  let request: any, check: any, device: any, cert: any, before: any, headers: any;
+  let request: any, check: any, device: any, cert: any, before: any, headers: any, ended: any;
   const proxy = vi.fn(async () => {});
   const session = Object.assign(emitter, { setPermissionRequestHandler: (fn: any) => { request = fn; },
     setPermissionCheckHandler: (fn: any) => { check = fn; }, setDevicePermissionHandler: (fn: any) => { device = fn; },
     setCertificateVerifyProc: (fn: any) => { cert = fn; }, setProxy: proxy,
-    webRequest: { onBeforeRequest: (_filter: any, fn: any) => { before = fn; }, onHeadersReceived: (_filter: any, fn: any) => { headers = fn; } } });
+    webRequest: { onBeforeRequest: (_filter: any, fn: any) => { before = fn; }, onHeadersReceived: (_filter: any, fn: any) => { headers = fn; }, onCompleted: (_filter: any, fn: any) => { ended = fn; }, onErrorOccurred: (_filter: any, fn: any) => { ended = fn; } } });
   return { session: session as unknown as Session, proxy, emitter,
     permission() { const callback = vi.fn(); request(null, "media", callback); return callback.mock.calls[0]?.[0]; },
     check: () => check(), device: () => device(),
     cert(errorCode: number, verificationResult: string) { const callback = vi.fn(); cert({ errorCode, verificationResult }, callback); return callback.mock.calls[0]?.[0]; },
-    request(url: string, resourceType = "mainFrame", webContentsId = 7) {
-      const callback = vi.fn(); before({ url, resourceType, webContentsId }, callback); return callback.mock.calls[0]?.[0];
+    request(url: string, resourceType = "mainFrame", webContentsId = 7, id = 1, initiatorOrigin?: string) {
+      const callback = vi.fn(); before({ id, url, resourceType, webContentsId, ...(initiatorOrigin ? { initiatorOrigin } : {}) }, callback); return callback.mock.calls[0]?.[0];
     },
+    end: (details: any) => ended(details),
     response(details: any) { const callback = vi.fn(); headers(details, callback); return callback; },
   };
 }
@@ -165,6 +166,15 @@ describe("browser dedicated session hardening", () => {
     revokeBrowserSessionPolicy(mock.session);
     expect(mock.request("http://localhost:26111/", "mainFrame", 8)).toEqual({ cancel: true });
     replacementControl.dispose();
+  });
+  it("reports only a known guest's allowed XHR / fetch start and end (observation for popup reporting)", async () => {
+    const mock = sessionMock(), onPageRequest = vi.fn();
+    await installBrowserSessionPolicy(mock.session, { ...options(), onPageRequest });
+    expect(mock.request("http://localhost:26111/api", "xhr", 7, 41, "http://localhost:26111")).toEqual({ cancel: false });
+    mock.end({ id: 41, webContentsId: 7, resourceType: "xhr" });
+    mock.request("http://localhost:26111/", "mainFrame", 7, 42); mock.request("http://localhost:26111/a.png", "image", 7, 43, "http://localhost:26111");
+    mock.request("https://example.com/api", "xhr", 7, 44); mock.end({ id: 45, webContentsId: 7, resourceType: "image" });
+    expect(onPageRequest.mock.calls).toEqual([[7, "41", "start"], [7, "41", "end"]]);
   });
   it("observes main-frame response for current guest only with normalized copied headers", async () => {
     const mock = sessionMock(), onResponse = vi.fn();

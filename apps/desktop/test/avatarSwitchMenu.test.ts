@@ -39,7 +39,9 @@ async function seed(opts: { portraits?: string[]; features?: string[]; mode?: "e
   });
 }
 
-const actions = (entries: MenuEntry[]) => normalizeEntries(entries).filter((e): e is MenuAction => e !== "separator");
+// The avatar rows sit under 头像 › (2026-11-05): flattened here, the grouping has its own test.
+const rows = (entries: MenuEntry[]) => normalizeEntries(entries).filter((e): e is MenuAction => e !== "separator");
+const actions = (entries: MenuEntry[]) => rows(entries).flatMap((e) => (e.label === "menu.avatar" ? rows(e.submenu as MenuEntry[]) : [e]));
 const labels = (entries: MenuEntry[]) => actions(entries).map((e) => e.label);
 const SWITCH = ["menu.showAvatar", "menu.hideAvatar"];
 const switchOf = (entries: MenuEntry[]) => labels(entries).filter((l) => SWITCH.includes(l));
@@ -51,6 +53,22 @@ describe("agent menu: 显示头像 / 隐藏头像", () => {
     await import("../src/renderer/src/store");
   }, 60_000);
   beforeEach(() => sessionAction.mockClear());
+
+  it("the avatar rows sit in one 头像 › submenu (owner 2026-11-05), none at the top level", async () => {
+    const { agentMenu } = await import("../src/renderer/src/lib/menus");
+    const own = session("own-sub", { kind: "icon", value: "desktop-picture:mine" });
+    await seed({ sessions: [own], mode: "emoji", features: ["session-metadata", "session-avatar-mode"] });
+    const top = rows(agentMenu(own, t, "local"));
+    const AVATAR_ROWS = ["avatarStyle.followProfile", "avatarStyle.reset", ...SWITCH];
+    expect(top.filter((e) => AVATAR_ROWS.includes(e.label))).toEqual([]);
+    const avatar = top.filter((e) => e.label === "menu.avatar");
+    expect(avatar).toHaveLength(1);
+    const inside = rows(avatar[0]!.submenu as MenuEntry[]).map((e) => e.label);
+    expect(inside.slice(0, 2)).toEqual(["avatarStyle.followProfile", "avatarStyle.reset"]);
+    // Without the metadata capability nothing applies: no empty 头像 row.
+    await seed({ sessions: [own], mode: "emoji", features: [] });
+    expect(rows(agentMenu(own, t, "local")).some((e) => e.label === "menu.avatar")).toBe(false);
+  });
 
   it("resetting an own picture requires the explicit submenu confirmation", async () => {
     const { agentMenu } = await import("../src/renderer/src/lib/menus");

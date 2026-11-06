@@ -60,6 +60,7 @@ export default defineModule({
       },
       {
         id: VIEW,
+        tabRow: "always",
         titleKey: "artifacts.view",
         icon: FileBox,
         instances: "multi",

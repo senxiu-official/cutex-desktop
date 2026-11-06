@@ -12,6 +12,7 @@ import { userInfo } from "node:os";
 import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, powerMonitor, safeStorage, Tray, type NativeImage } from "electron";
 import { chromiumProxyRules, isProxyParseError, parseProxyUrl, type UpdateProxyRequest } from "../shared/proxy";
 import type { UpdateProxyConfig } from "./updateNet";
+import { readMemoryHost } from "@cutex-desktop/cutex-client";
 import type { CloseBehavior, DesktopPrefs, ShellCommand, ShellLocale, ShellState } from "../shared/ipc";
 import { parseDeviceOff, type DeviceOff } from "../shared/notificationLevels";
 import { attentionCount, closeAction, editMenuLabels, effectiveCloseBehavior, multiWindowChange, openMultiWindowMigration, overlayDescription, parseNameHasOwner, parsePrefs, parseTerms, resolveLocale, trayMenuLabels, trayNoticeText, trayTooltip, type TrayHost } from "../shared/shell";
@@ -287,6 +288,14 @@ export class DesktopShell {
 
   /** Main wires this to the client presence (re-sent to every host at once). */
   onAllowRemoteCloseChanged: ((allowed: boolean) => void) | null = null;
+
+  setMemoryHost(value: unknown): ShellState {
+    const memoryHost = readMemoryHost(value);
+    if (!memoryHost) throw new Error("bad memory host");
+    this.prefs = { ...this.prefs, memoryHost };
+    this.save();
+    return this.state();
+  }
 
   setDebugMode(value: boolean): ShellState {
     this.prefs = { ...this.prefs, debugMode: value };

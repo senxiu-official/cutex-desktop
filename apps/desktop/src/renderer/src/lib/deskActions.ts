@@ -4,6 +4,7 @@
 // layout (lib/paneStore), so these move an agent between windows — one copy per agent (lib/windowRoute).
 import { bridge } from "../bridge";
 import { sidebarOf, useApp } from "../store";
+import { listedIn } from "./archivedAgent";
 import { DESKS_STORAGE_KEY, openDesk, parseStoredDesks, useDesks, type DeskContent } from "./deskStore";
 import { addConversationChip, bindPane, closeChip, conversationPanes, focusedConversation, paneBinding, type PaneAgent, type PaneLayout } from "./paneLayout";
 import { closeConversationPane, livePaneBinding, openAgentBeside, setPaneLayout, usePanes } from "./paneStore";
@@ -153,9 +154,7 @@ export function dedupeAtStart(lastActive: WindowKey | null): AgentPlace[] {
 
 /** Whether the app's agent list for `hostId` has this agent (null: not known yet). */
 export function agentListed(hostId: string, sessionId: string): boolean | null {
-  const sidebar = sidebarOf(useApp.getState(), hostId);
-  if (!sidebar) return null;
-  return [...sidebar.active, ...sidebar.retired].some((r) => r.cutexSessionId === sessionId);
+  return listedIn(sidebarOf(useApp.getState(), hostId), sessionId);
 }
 
 /** The windows an agent can be sent to from window `here`, for menus: the main window, then the desks (桌子 2, 3 …). */

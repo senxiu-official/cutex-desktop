@@ -7,6 +7,7 @@ import { clearAgentToasts, pushAgentToast } from "../../lib/agentToasts";
 import { hostData } from "../../lib/hostScope";
 import { openServiceExternal } from "../../lib/services";
 import { sideShowsHost } from "../../lib/sideServices";
+import { SERVICE_COMPONENT } from "../../lib/sideKinds";
 import { useApp } from "../../store";
 import type { AppModuleContext } from "../slots";
 import { SERVICE_REF_KIND } from "./refTarget";
@@ -14,7 +15,7 @@ import { parseServiceReveal, revealIsLive, serviceLink, type ServiceReveal } fro
 
 export const TOAST_OWNER = "services";
 /** The owner browser tab (module `browser`, §18.8: opened by id, never imported). */
-const BROWSER_TAB = "browser.tab";
+const BROWSER_TAB = SERVICE_COMPONENT;
 /** A reveal waits in its agent's conversation this long (the owner may be elsewhere). */
 const REVEAL_CARD_MS = 30 * 60_000;
 

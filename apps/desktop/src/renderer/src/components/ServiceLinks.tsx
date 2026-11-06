@@ -1,7 +1,7 @@
 // Services ↔ their agents in the UI (lib/serviceLink; canvas principles §7, owner 2026-10-21; prototype
 // .claude/preview-workspaces.html #service):
-//   ServicePaneLink   — in a service pane's header: 「打开 <owner>」 (click = side by side, ▾ = 投影到这个 Shelf /
-//                       替换, draggable like the tray) or, on a pane linked to its agent, that agent's avatar + 断开.
+//   ServicePaneLink   — in a browser card's Maid 行: 「打开 <owner>」 (click = side by side, ▾ = 投影到这个 Shelf /
+//                       替换, draggable like the tray) or, on a pane linked to its agent, 「关联 <agent> ▾」 (断开 in its menu).
 //   AgentServices     — the conversation header's 「N 个服务」: the agent's services (health dot), each 在 Shelf
 //                       中打开 (this conversation's Shelf, linked) or 已在 Shelf · 定位, and 和它的智能体一起打开.
 //                       Never past the window (lib/servicesPopover): the list scrolls under a fixed header; many
@@ -27,7 +27,7 @@ const TACT = "flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-meta/[
 
 const healthDot = (h: ServiceView["health"]) => (h === "reachable" ? "bg-ok" : h === "starting" ? "bg-warn" : h === "unreachable" ? "bg-danger" : "bg-subtle/50");
 
-/** In a service pane's header (the browser tab's actions): the link to its agent, or 「打开 <owner>」. */
+/** In a browser card's Maid 行 (a service tab): the link to its agent, or 「打开 <owner>」. */
 export function ServicePaneLink({ hostId, instanceId, url, linked }: { hostId: string | null; instanceId: string; url: string; linked: string | null }) {
   const { t } = useI18n();
   const slug = serviceSlugOf(url);
@@ -48,14 +48,24 @@ export function ServicePaneLink({ hostId, instanceId, url, linked }: { hostId: s
   if (look.kind === "linked") {
     const agent = sidebar?.active.find((r) => r.cutexSessionId === look.sessionId) ?? sidebar?.retired.find((r) => r.cutexSessionId === look.sessionId);
     const who = agent?.displayName ?? look.sessionId;
+    // 「关联 <agent> ▾」 (browser card Maid 行, owner plan A 2026-11-05): 断开 lives in its menu, apart from the control grant.
     return (
-      <span className="flex shrink-0 items-center gap-0.5" data-service-link="linked" data-service-linked={look.sessionId}>
-        <span className="flex size-5 items-center justify-center" title={t("svcLink.linkedTip", { name: who })} aria-label={t("svcLink.linkedTip", { name: who })} data-service-link-badge="">
-          {agent ? <Avatar name={agent.displayName} avatar={agent.avatar} seed={agent.cutexSessionId} size={16} /> : <Link2 size={13} className="text-subtle" />}
-        </span>
-        <button data-service-unlink="" className={TACT} title={t("svcLink.unlinkTip", { name: who })} onClick={() => void unlinkServicePane(instanceId, hostId, slug, name)}>
-          <Unlink size={12} />
-          {t("svcLink.unlink")}
+      <span className="flex min-w-0 shrink items-center" data-service-link="linked" data-service-linked={look.sessionId}>
+        <button
+          data-service-link-badge=""
+          className="flex h-6 min-w-0 shrink items-center gap-1 rounded-md px-1.5 text-meta/[inherit] text-muted hover:bg-hover hover:text-foreground"
+          data-tip={t("svcLink.linkedTip", { name: who })}
+          aria-label={t("svcLink.linkedMenu", { name: who })}
+          aria-haspopup="menu"
+          onClick={(e) =>
+            openMenuFrom(e.currentTarget, [
+              { label: t("svcLink.unlink"), icon: <Unlink size={14} />, info: t("svcLink.unlinkTip", { name: who }), onSelect: () => void unlinkServicePane(instanceId, hostId, slug, name) },
+            ])
+          }
+        >
+          {agent ? <Avatar name={agent.displayName} avatar={agent.avatar} seed={agent.cutexSessionId} size={16} /> : <Link2 size={13} className="shrink-0 text-subtle" />}
+          <span className="min-w-0 truncate">{t("svcLink.linked", { name: who })}</span>
+          <ChevronDown size={12} className="shrink-0" />
         </button>
       </span>
     );
@@ -87,7 +97,7 @@ export function ServicePaneLink({ hostId, instanceId, url, linked }: { hostId: s
         <Avatar name={agent.displayName} avatar={agent.avatar} seed={agent.cutexSessionId} size={16} />
         <span className="max-w-28 truncate">{t("svcLink.openOwner", { name: agent.displayName })}</span>
       </button>
-      <button data-service-owner-menu="" className={`${TACT} rounded-l-none px-0.5`} title={t("svcLink.ownerMenu", { name: agent.displayName })} aria-label={t("svcLink.ownerMenu", { name: agent.displayName })} aria-haspopup="menu" onClick={(e) => menu(e.currentTarget)}>
+      <button data-service-owner-menu="" className={`${TACT} rounded-l-none px-0.5`} data-tip={t("svcLink.ownerMenu", { name: agent.displayName })} aria-label={t("svcLink.ownerMenu", { name: agent.displayName })} aria-haspopup="menu" onClick={(e) => menu(e.currentTarget)}>
         <ChevronDown size={12} />
       </button>
     </span>
@@ -169,7 +179,7 @@ export function AgentServicesView({ paneId, hostId, sessionId, agentName, compac
         data-side-nodrag
         data-conv-item="network"
         onClick={() => setOpen(!open)}
-        title={`${label} · ${t("svcLink.countTip")}`}
+        data-tip={`${label} · ${t("svcLink.countTip")}`}
         aria-label={label}
         data-services-compact={compact || undefined}
         aria-haspopup="dialog"
@@ -192,7 +202,7 @@ export function AgentServicesView({ paneId, hostId, sessionId, agentName, compac
             data-services-page={shown.pages > 1 ? `${shown.page + 1}/${shown.pages}` : undefined}
             data-side-nodrag
             style={style}
-            className="fixed z-50 flex flex-col rounded-xl border border-border bg-background p-2 text-xs shadow-xl"
+            className="float fixed z-[160] flex flex-col p-2 text-xs"
           >
             <div className="flex shrink-0 items-center gap-1.5 px-1.5 pt-0.5 text-ui/[inherit] font-semibold text-foreground">
               <Server size={13} />

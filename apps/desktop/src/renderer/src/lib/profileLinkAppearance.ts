@@ -332,6 +332,26 @@ export class ProfileLinkAppearanceSync {
     this.notice(identity, "pending", records.map((r) => r.member.hostName));
     this.kick();
   }
+  /**
+   * A conflict is a stored flag; once every member is observed now and all look the same (e.g. the
+   * other host caught up after first association), there is nothing left to choose: clear it and take
+   * the observed values as the baseline. Never writes and leaves `paused` as it is. Any member not
+   * observed now (offline, not allowed) keeps the conflict, since it could still differ.
+   */
+  private settleConflict(identity: string, group: Group, current: readonly LinkedProfileRef[], observed: Map<string, Marks>) {
+    const live = new Set(current.filter((r) => r.connected && this.transport.allowed(r.hostId)).map((r) => memberKey(r)));
+    const keys = Object.keys(group.members);
+    if (keys.length < 2 || !keys.every((key) => live.has(key) && observed.has(key))) return;
+    const marks = keys.map((key) => observed.get(key)!);
+    if (!marks.every((a) => marks.every((b) => sameLooks(a, b)))) return;
+    for (const key of keys) for (const field of LOOK_FIELDS) {
+      const mark = observed.get(key)![field];
+      if (field !== "avatarStyle" || knownStyle(mark)) group.members[key]!.marks[field] = mark;
+    }
+    group.conflict = false;
+    if (this.notices.get(identity)?.kind === "newerChange") this.notices.delete(identity);
+    this.changed();
+  }
   kick = () => { this.again = true; if (!this.running) this.flight = this.run(); };
   async flush(): Promise<void> { this.kick(); await this.flight; }
   private cancelledReceipt(job: Job, target: Target, member: Member, field: LookField, previous: LookValue, next: ProfileItem) {
@@ -379,6 +399,7 @@ export class ProfileLinkAppearanceSync {
           const current = refs.filter((r) => accountLinkIdentity(r.profile) === identity);
           const observed = new Map(current.map((ref) => [memberKey(ref), this.marksOf(ref)]));
           const group = this.ensureGroup(identity, current);
+          if (group.conflict && !this.state.jobs.some((j) => j.group === identity)) this.settleConflict(identity, group, current, observed);
           if (group.conflict || group.paused || this.state.jobs.some((j) => j.group === identity)) continue;
           // A style baseline unknown (older host, or saved before this field) is adopted from the first
           // capable observation; members that then disagree need the owner's choice, as on first association.

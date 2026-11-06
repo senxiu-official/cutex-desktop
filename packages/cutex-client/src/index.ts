@@ -11,12 +11,15 @@ export * from "./endpoint";
 export * from "./errors";
 export * from "./feed";
 export * from "./home";
+export * from "./userLayout";
 export * from "./liveDeltas";
 export * from "./operators";
 export * from "./projectEvents";
 export * from "./sse";
 export * from "./stream";
 export * from "./summary";
+export * from "./sessionDeltas";
+export * from "./runtimePrune";
 export * from "./users";
 export * from "./upgrade";
 

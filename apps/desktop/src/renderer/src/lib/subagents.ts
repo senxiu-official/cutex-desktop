@@ -221,6 +221,33 @@ export function liveAtGeneration(live: SubAgentLive, seenAt: SubAgentLiveGen, ge
   return out ?? live;
 }
 
+/**
+ * `live` / `seenAt` without the given sub-agents (null: none of them had a status). A child's own
+ * events reach the desktop only on its parent's feed, and only an open agent's feed is subscribed: a
+ * status heard before that feed closed can be stale (a child seen working finished while the owner
+ * looked at another agent, so its `turn/completed` never arrived). The re-read parent timeline and one
+ * settle read decide again (`takeSubAgentReads`).
+ */
+export function forgetSubAgents(live: SubAgentLive, seenAt: SubAgentLiveGen, threadIds: Iterable<string>): { live: SubAgentLive; seenAt: SubAgentLiveGen } | null {
+  let nextLive: Record<string, string> | null = null;
+  let nextSeen: Record<string, number> | null = null;
+  for (const id of threadIds) {
+    if (id in live) delete (nextLive ??= { ...live })[id];
+    if (id in seenAt) delete (nextSeen ??= { ...seenAt })[id];
+  }
+  return nextLive || nextSeen ? { live: nextLive ?? live, seenAt: nextSeen ?? seenAt } : null;
+}
+
+const loads = new WeakMap<object, number>();
+let lastLoad = 0;
+/** One number per loaded timeline object (each load builds a new one): settle reads go once per load. */
+export function timelineLoad(timeline: TimelineState | null): number {
+  if (!timeline) return 0;
+  let n = loads.get(timeline);
+  if (n === undefined) loads.set(timeline, (n = ++lastLoad));
+  return n;
+}
+
 /** Active subagents (name, task, latest message) from the parent's timeline. The timeline only has
  *  each subagent's last recorded state, so a parent that went offline mid-run would show them as
  *  running forever: none are active unless the parent is online. */
@@ -244,16 +271,17 @@ export interface SubAgentReadLog {
 /**
  * The child-thread reads due now, recorded in `log`. `settle`: a full read (turns) for a sub-agent
  * that still looks active with no child-thread status yet, once per parent runtime `generation` (a
- * restarted runtime has its own answer) — it settles the status and names it too.
+ * restarted runtime has its own answer) and per loaded timeline `load` (a re-opened agent forgot the
+ * statuses heard on its earlier feed: `forgetSubAgents`) — it settles the status and names it too.
  * Otherwise a light read (no turns) for one whose nickname is unknown (not in `meta`). A Claude
  * task is read only when the adapter keeps transcripts (`claudeReads`, lib/claudeTasks); else never.
  */
-export function takeSubAgentReads(sessionId: string, agents: Iterable<SubAgentInfo>, live: SubAgentLive, meta: SubAgentMetaMap, log: SubAgentReadLog, now: number, generation = 0, claudeReads = false): { threadId: string; settle: boolean }[] {
+export function takeSubAgentReads(sessionId: string, agents: Iterable<SubAgentInfo>, live: SubAgentLive, meta: SubAgentMetaMap, log: SubAgentReadLog, now: number, generation = 0, claudeReads = false, load = 0): { threadId: string; settle: boolean }[] {
   const due: { threadId: string; settle: boolean }[] = [];
   for (const agent of agents) {
     if (isClaudeTaskRef(agent.threadId) && !claudeReads) continue;
     const key = `${sessionId}:${agent.threadId}`;
-    const settleKey = `${key}@${generation}`;
+    const settleKey = `${key}@${generation}#${load}`;
     const settle = ACTIVE_SUBAGENT.has(agent.status) && !live[agent.threadId] && !log.settle.has(settleKey);
     const asked = log.name.get(key);
     const name = !meta[agent.threadId] && (!asked || (asked.tries < NAME_READ_TRIES && now - asked.at >= NAME_READ_RETRY_MS));

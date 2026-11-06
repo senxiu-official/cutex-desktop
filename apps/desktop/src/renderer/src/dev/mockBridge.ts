@@ -1,7 +1,10 @@
+import { mockLayoutInstance, mockUserLayoutApi, prepareMockLayout } from "./mockUserLayout";
+import { mockNotificationPage, mockNotificationRows, registerMockOwnerNotes } from "./mockNotificationPages";
 import { createMockInputLedger, inputLedgerMockEnabled, LEDGER_SCENES, type LedgerScene } from "./mockInputLedger";
 import { mockDebug } from "./mockDebug";
 import { IMAGE_HEAVY, IMAGE_HEAVY_SESSION, prepareImageHeavy, imageHeavyThread, imageHeavyResponse, imageHeavyMedia, imageHeavyFile } from "./devImageHeavy";
 import { OVERLOAD_RETRY_SCENE, OVERLOAD_RETRY_SESSION, overloadRetryResource, overloadRetryThread, overloadRetryAdmission } from "./mockOverloadRetry";
+import { TURN_ERROR_SCENE, TURN_ERROR_SESSIONS, turnErrorResource, turnErrorThread } from "./mockTurnError";
 import { installSteerPreflightMock } from "./mockSteerPreflight";
 // Browser-preview bridge: lets the renderer run in a plain browser (vite dev server) with canned
 // data, for UI work without Electron or a daemon. Never used inside Electron (preload sets
@@ -30,6 +33,7 @@ import { familyOfModel } from "../../../shared/portraitPacks";
 import type { ProfileTransferWarning } from "../../../shared/profileTransfer";
 import { classifySshPrompt, type SshPromptAnswer, type SshPromptView } from "../../../shared/sshPrompt";
 import { MOCK_BASE_FEATURES, MOCK_NEW_FEATURES, mockScenarioFeatures } from "./mockFeatures";
+import { mockNameHistory, mockRename, mockRestoreRefusal, seedMockNames } from "./mockAgentRename";
 import { mockProjectColor } from "./mockProjectColor";
 import { bindNewSession, variantApi, variantCreate, variantFields, variantPatch, VARIANTS_SCENE } from "./mockProfileVariants";
 import type { ResetCredit, ResetCreditsView } from "../../../shared/resetCredits";
@@ -77,6 +81,11 @@ const MOCK_PRESETS: ProfilePreset[] = [
 const LIVE_DELTAS = typeof location !== "undefined" && mockScenarioFeatures(location.search).includes("live-text-deltas");
 /** `?legacy` in the preview URL: behave like a cutex without quick chats / new-thread defaults. */
 const LEGACY = typeof location !== "undefined" && new URLSearchParams(location.search).has("legacy");
+/** `?tellRevision`: Eva's demo sends come from agent_tell calls, one a delegation revision (lib/sentToolPairs). */
+const TELL_REVISION_SCENE = typeof location !== "undefined" && new URLSearchParams(location.search).has("tellRevision");
+const TELL_NO_ID = typeof location !== "undefined" && new URLSearchParams(location.search).has("tellNoId");
+/** `&tellGap=<ms>`: how long a call stays running after its bus event (default 0.7 s; longer to look at the gap). */
+const TELL_GAP_MS = (typeof location !== "undefined" && Number(new URLSearchParams(location.search).get("tellGap"))) || 700;
 const INPUT_LEDGER = typeof location !== "undefined" && inputLedgerMockEnabled(location.search);
 const ledgerScene = typeof location !== "undefined" ? new URLSearchParams(location.search).get("ledgerScene") : null;
 const mockInputLedger = createMockInputLedger(LEDGER_SCENES.includes(ledgerScene as LedgerScene) ? ledgerScene as LedgerScene : "turn", emitCutex, Date.now, {
@@ -500,11 +509,15 @@ const mockLookFields = (name: string) =>
     : { avatarEtag: mockLooks[name]?.avatar?.etag ?? null, introPortraitEtag: mockLooks[name]?.intro?.etag ?? null };
 const mockLookAppearance = (name: string) => (LEGACY ? {} : { avatarThemes: mockLooks[name]?.avatarThemes ?? null, avatarStyle: null, introGreeting: mockLooks[name]?.introGreeting ?? null });
 
+// ?profilementions: real hosts give profiles UUIDs (the chip must show the name, not the ID). Requests by ID map back.
+const MOCK_PROFILE_IDS: Record<string, string> = typeof location !== "undefined" && new URLSearchParams(location.search).has("profilementions")
+  ? { Ada: "54138256-6444-4908-8106-c6e96d7f9ee0", relay: "9b1d3c40-2f7e-4c61-a0d8-5e6f7a8b9c0d" } : {};
+const mockProfileName = (ref: string) => Object.keys(MOCK_PROFILE_IDS).find(name => MOCK_PROFILE_IDS[name] === ref) ?? ref;
 const mockProfileItem = (name: string, hostId = "local") => {
   const p = mockProfiles[name]!;
   const c = p.config as Record<string, string | number | null>;
   return {
-    id: name, name, ...(p.options ? { options: p.options } : {}), ...mockLinkFields(name, hostId), cliKind: p.cliKind ?? "codex", source: null, provider: (c.modelProvider as string) ?? null, model: (c.model as string) ?? (p.cliKind === "claude" ? "sonnet" : null), modelProvider: (c.modelProvider as string) ?? null,
+    id: MOCK_PROFILE_IDS[name] ?? name, name, ...(p.options ? { options: p.options } : {}), ...mockLinkFields(name, hostId), cliKind: p.cliKind ?? "codex", source: null, provider: (c.modelProvider as string) ?? null, model: (c.model as string) ?? (p.cliKind === "claude" ? "sonnet" : null), modelProvider: (c.modelProvider as string) ?? null,
     baseUrl: (c.providerBaseUrl as string) ?? null, modelReasoningEffort: (c.modelReasoningEffort as string) ?? null,
     modelContextWindow: (c.modelContextWindow as number) ?? null, modelAutoCompactTokenLimit: (c.modelAutoCompactTokenLimit as number) ?? null,
     authPresent: p.authKind === "apiKey" ? p.apiKeyPresent : p.authKind === "chatgpt", authKind: p.authKind, ...mockPlanLabel(p), isDefault: name === mockSettings.defaultProfile,
@@ -573,7 +586,8 @@ const mockProfileDetail = (name: string, hostId = "local") => {
   if (claude && !LEGACY) (agentEditable as Record<string, boolean>).claudeDefaultModel = true;
   return { ...mockProfileItem(name, hostId), ...(!Object.prototype.hasOwnProperty.call(mockLinkFields(name, hostId), "accountLinkState") ? {} : { accountLink: mockAccountLinks.get(`${hostId}/${name}`) ?? null }), model: (p.config.model as string) ?? (claude ? "sonnet" : null), detail: { ...claudeModel, config, apiKeyPresent: p.apiKeyPresent, allowSessionSwitchExplicit: p.allowSwitch, allowSessionSwitchDefault: p.authKind === "apiKey", catalogEditable: p.authKind === "apiKey" || (!LEGACY && !claude), editable: { ...editable, ...agentEditable, ...summaryEditable }, ...agentOptions } } as never;
 };
-const mockModelsView = (name: string) => {
+const mockModelsView = (ref: string) => {
+  const name = mockProfileName(ref);
   const p = mockProfiles[name]!;
   const profileWindow = (p.config.modelContextWindow as number | null) ?? null;
   const profileCompact = (p.config.modelAutoCompactTokenLimit as number | null) ?? null;
@@ -691,6 +705,9 @@ function session(id: string, name: string, over: { status?: string; turn?: strin
     native: { threadId: `thread-${id}`, schema: null },
     runtime: {
       backend: "managed",
+      ...(typeof location !== "undefined" && new URLSearchParams(location.search).has("backgroundwork")
+        && ["pipit", "moth", "review-insert-opus", "review-insert-sol", "ui-lead"].includes(id)
+        ? { backgroundWork: { running: id !== "ui-lead", subagents: id === "pipit" ? 1 : 0, shells: id === "moth" ? 1 : 0, terminals: id.startsWith("review-insert-") ? 1 : 0, complete: true } } : {}),
       status: over.status ?? "online",
       appServerConnected: (over.status ?? "online") === "online",
       runtimeGeneration: 3,
@@ -796,6 +813,12 @@ function dshSession(): SessionResource {
   } }, runtime: { ...base.runtime, backend: "dsh", threadSettings: MOCK_SETTINGS.dsh! } };
 }
 // r266 (?variants): a Kimi-kind Profile signed in with the Kimi account "Work" (modules/kimi-accounts/mock.ts).
+// Composer profile/model mentions: deterministic data, no credentials or provider requests.
+const PROFILE_MENTION_SCENE = typeof location !== "undefined" && new URLSearchParams(location.search).has("profilementions");
+if (PROFILE_MENTION_SCENE) {
+  mockProfiles.Ada = { name: "Ada", authKind: "chatgpt", apiKeyPresent: false, color: "#7966db", allowSwitch: null,
+    config: { model: "gpt-6.1-sol" }, models: [mockModel("gpt-6.1-sol", 400_000), mockModel("gpt-6-astra", 400_000, { supportedReasoningEfforts: ["low", "high", "max"], defaultReasoningEffort: "high" }), mockModel("gpt-6-luna", 400_000, { supportedReasoningEfforts: [], defaultReasoningEffort: null })] };
+}
 if (VARIANTS_SCENE) mockProfiles["kimi-work"] = { name: "kimi-work", cliKind: "kimi", kimiAccount: "ka-work7k2m9q", authKind: "none", apiKeyPresent: false, color: "#1f1f1f", allowSwitch: null, config: {}, models: [] };
 if (DSH_SCENE) mockProfiles.dsh = { name: "dsh", cliKind: "dsh", authKind: "none", apiKeyPresent: false, color: null, allowSwitch: null, options: { dsh: { model: "deepseek-flash", reasoningEffort: "high", apiKeyEnv: "DEEPSEEK_API_KEY" } }, config: { model: "deepseek-flash", modelReasoningEffort: "high" },
   models: [mockModel("deepseek-flash", 1_000_000, { inputModalities: ["text", "image"], supportedReasoningEfforts: ["off", "low", "high", "max"] }), mockModel("deepseek-v4-pro", 1_000_000, { supportedReasoningEfforts: ["off", "low", "high", "max"] })] };
@@ -806,11 +829,16 @@ if (DSH_SCENE) mockProfiles.dsh = { name: "dsh", cliKind: "dsh", authKind: "none
 const MENTION_SCENE = typeof location !== "undefined" && new URLSearchParams(location.search).has("mentions");
 const MENTION_ASTRA = "cutex.ag-astra";
 const MENTION_STRIP = "cutex.41194d0d-0000-4000-8000-000000000001";
+// The owner's clipped names (2026-11-06): an @ and a j / y descender at the chip's edges.
+const MENTION_JASMINE = "cutex.41194d0d-0000-4000-8000-000000000002";
+const MENTION_VELOCITY = "cutex.41194d0d-0000-4000-8000-000000000003";
 function mentionSessions(): SessionResource[] {
   const astra = session(MENTION_ASTRA, "Astra", { profile: "pro", output: "在看 composer 的提及芯片。", idle: 4 });
   const strip = session(MENTION_STRIP, "next-strip-linger", { profile: "pro", output: "strip 的停留时间调好了。", idle: 30 });
+  const jasmine = session(MENTION_JASMINE, "dev-jasmine", { profile: "pro", output: "跑完了。", idle: 2 });
+  const velocity = session(MENTION_VELOCITY, "chief-velocity", { profile: "pro", output: "收到。", idle: 50 });
   // Astra: a display name over its formal name (the wire uses the formal one: lib/mentionWire).
-  return [{ ...astra, formalAgentName: "astra-composer", displayNameOverride: "Astra", avatar: { kind: "emoji", value: "🦊" } }, { ...strip, formalAgentName: "next-strip-linger" }];
+  return [{ ...astra, formalAgentName: "astra-composer", displayNameOverride: "Astra", avatar: { kind: "emoji", value: "🦊" } }, { ...strip, formalAgentName: "next-strip-linger" }, { ...jasmine, formalAgentName: "dev-jasmine" }, { ...velocity, formalAgentName: "chief-velocity" }];
 }
 
 // Opt-in ?ownerrows (owner's sidebar 2026-11-01, avatar-two-letter): review-insert-opus and Wren running without an avatar of
@@ -878,6 +906,7 @@ function inlineChipsThread(): MockThread {
 let snapshot: SidebarSnapshot = {
   active: [
     ...(OVERLOAD_RETRY_SCENE ? [session(OVERLOAD_RETRY_SESSION, "自动重试预览")] : []),
+    ...(TURN_ERROR_SCENE ? [turnErrorResource(session(TURN_ERROR_SESSIONS[0], "刷新冲突", { profile: "gamma", idle: 2 })), turnErrorResource(session(TURN_ERROR_SESSIONS[1], "连接失败", { idle: 2 }))] : []),
     ...(DSH_SCENE ? [dshSession()] : []),
     // Idle 5 minutes (just finished): a full row; Lead, idle 2 hours, folds into 「N 个空闲」.
     // A Profile the host's profile list does not carry (another host's, or not loaded): the composer chip still shows a face.
@@ -949,6 +978,8 @@ let snapshot: SidebarSnapshot = {
     "chat-trip": { ...hostRow("chat-trip", null), kind: "Session" },
   },
 };
+// ?rename: the agents get their own names and a seeded rename history (dev/mockAgentRename.ts).
+if (typeof location !== "undefined" && mockScenarioFeatures(location.search).includes("formal-agent-name-rename-v1")) seedMockNames(snapshot);
 
 /**
  * Many offline agents (全部 agent list / compact sidebar rows): mostly AUTO_… and a… names, so the
@@ -1080,6 +1111,44 @@ if (BIG_PROJECT) {
   recent.forEach((name, i) => projectSessions.push([session(`demo-recent-${i}`, name, { output: said[i], idle: 2 + i * 2, cwd }), "scp"]));
   for (let i = 0; i < 33; i++) projectSessions.push([session(`demo-idle-${i}`, `demo-shard-worker-${String(i + 1).padStart(2, "0")}`, { output: "Shard finished.", idle: 60 + i * 37, cwd }), "scp"]);
 }
+// `?rosterscale` (design 060 §8): the roster at the owner's real scale (screenshot 2026-11-05): desk-app with
+// 44 members (7 online: a running Director, 2 running, 4 idle; 37 offline over 3 weeks), companion with 5 online
+// and 37 offline, two mid-size projects, and 12 small projects last used 1–24 days ago (some fold into
+// 「更早的项目」). With `&perf`, `window.__cutexMockPerf.churn(5, 30, "rs-")` sends live events to them (§8: 5 per second).
+const ROSTER_SCALE = typeof location !== "undefined" && new URLSearchParams(location.search).has("rosterscale");
+// `&idlers`: six of desk-app's long-quiet members are online (「在线空闲 +N」 next to 「离线 +N」; design 060 §5.5).
+const ROSTER_IDLERS = ROSTER_SCALE && new URLSearchParams(location.search).has("idlers");
+const rosterScaleProjects: { id: string; name: string; badge: string; color: string; director: string | null; members: number }[] = [];
+if (ROSTER_SCALE) {
+  const DAY_MIN = 24 * 60;
+  const words = ["runtime", "browser", "chrome", "page", "wording", "upgrade", "study", "integrator", "review", "mobile", "repin", "overnight", "ui", "persona", "trim", "controls", "frame", "research", "deploy", "kit", "ledger", "quota", "shelf", "tray", "roster", "perf", "probe", "glossary", "store", "migration", "bridge", "notes", "search", "alarm", "queue", "steer", "image", "voice"];
+  const nameOf = (prefix: string, i: number) => `${prefix}-${words[(i * 7) % words.length]}${i % 3 ? `-${words[(i * 13 + 5) % words.length]}` : ""}-${i}`;
+  const said = ["Merged to main and pushed.", "Tests green, 9580 passed.", "Waiting for the kit check on the remote host.", "Draft is in docs/design, ready for a look.", "Screenshots attached in the artifact.", "Rebased on main, no conflicts."];
+  const add = (project: string, id: string, name: string, over: Parameters<typeof session>[2]) => projectSessions.push([session(id, name, { cwd: `/srv/${project}`, ...over }), project]);
+  const big = (project: string, name: string, badge: string, color: string, online: { running: number; idle: number }, offline: number, offlineSpanDays: number) => {
+    const director = `rs-${project}-dir`;
+    rosterScaleProjects.push({ id: project, name, badge, color, director, members: 1 + online.running + online.idle + offline });
+    add(project, director, `${project}-Alice`, { turn: `rs-${project}-t0`, tool: "$ bash -lc \"cargo build --release -p cutex\"" });
+    for (let i = 0; i < online.running; i++) add(project, `rs-${project}-run-${i}`, nameOf(project, i), { turn: `rs-${project}-rt${i}`, tool: i % 2 ? "$ pnpm exec vitest run --maxWorkers=4" : "$ export PATH=/d/Programs/nodejs-24.21.0:$PATH && node scripts/check.mjs" });
+    for (let i = 0; i < online.idle; i++) add(project, `rs-${project}-idle-${i}`, nameOf(project, 10 + i), { output: said[(i + 2) % said.length], idle: 3 + i * 11 });
+    for (let i = 0; i < offline; i++) {
+      // Spread over `offlineSpanDays`, newest first: the first ones yesterday, the last ones weeks ago.
+      const ago = Math.round(60 + (i / Math.max(1, offline - 1)) ** 1.6 * offlineSpanDays * DAY_MIN);
+      const idler = ROSTER_IDLERS && project === "desk-app" && i >= offline - 6;
+      add(project, `rs-${project}-off-${i}`, nameOf(project, 20 + i), { ...(idler ? {} : { status: "offline" as const }), output: said[i % said.length], idle: ago });
+    }
+  };
+  big("desk-app", "desk-app", "DA", "magenta", { running: 2, idle: 4 }, 37, 21);
+  big("companion", "companion", "CO", "cyan", { running: 1, idle: 3 }, 37, 40);
+  big("kits", "release-kits", "RK", "yellow", { running: 0, idle: 2 }, 9, 12);
+  big("wl-app", "wl-app", "WA", "blue", { running: 0, idle: 0 }, 11, 6);
+  // Small projects with only offline agents, last used 1–24 days ago (the screenshot's one-row projects).
+  const small: [string, string, number][] = [["notes-web", "#a7c7e7", 1], ["image-lab", "#f4a6b0", 2], ["voice-proto", "#b8e6a0", 4], ["alarm-svc", "#ffd38a", 5], ["steer-ui", "#c9b6ff", 6], ["ledger", "#8fe0d6", 8], ["quota-gauge", "#ffb199", 9], ["store-sync", "#d6d6a0", 11], ["search-ix", "#9fd3ff", 13], ["queue-lab", "#f2a7c3", 16], ["bridge-old", "#b8e6a0", 20], ["persona-trim", "#ffd38a", 24]];
+  small.forEach(([id, color, days], k) => {
+    rosterScaleProjects.push({ id, name: id, badge: id.slice(0, 2).toUpperCase(), color, director: null, members: 1 + (k % 3) });
+    for (let i = 0; i <= k % 3; i++) add(id, `rs-${id}-${i}`, nameOf(id, i), { status: "offline", output: said[(k + i) % said.length], idle: days * DAY_MIN + i * 300 });
+  });
+}
 snapshot = {
   ...snapshot,
   active: [...snapshot.active, ...projectSessions.map(([s]) => s)],
@@ -1097,6 +1166,7 @@ snapshot = {
       { project_id: "demo-cs", authority_epoch: 1, director_cutex_session_id: null, presentation: { display_name: "DEMO-CS", badge_label: "CS", color: "#f4a6b0" }, active_member_count: 1, lifecycle: "active" },
       { project_id: "vcc-2026", authority_epoch: 1, director_cutex_session_id: null, presentation: { display_name: "VCC-2026", badge_label: "VC", color: "#a89f8a" }, active_member_count: 1, lifecycle: "active" },
       ...(BIG_PROJECT ? [{ project_id: "scp", workspace_root: "/srv/scp", authority_epoch: 1, director_cutex_session_id: "demo-dir", presentation: { display_name: "DEMO", badge_label: "SC", color: "magenta" }, active_member_count: 51, lifecycle: "active" as const }] : []),
+      ...rosterScaleProjects.map((x) => ({ project_id: x.id, workspace_root: `/srv/${x.id}`, authority_epoch: 1, director_cutex_session_id: x.director, presentation: { display_name: x.name, badge_label: x.badge, color: x.color }, active_member_count: x.members, lifecycle: "active" as const })),
     ],
   },
   hostRows: { ...snapshot.hostRows, ...Object.fromEntries(projectSessions.map(([s, p]) => [s.cutexSessionId, hostRow(s.cutexSessionId, p)])) },
@@ -1461,7 +1531,7 @@ const kaiRead = {
         startedAt: Date.now() / 1000 - 600,
         completedAt: Date.now() / 1000 - 560,
         items: [
-          { type: "userMessage", id: "ku1", content: [{ type: "text", text: MENTION_SCENE ? String.raw`请 [@Astra](cutex:agent/cutex.ag-astra) 和 [@next-strip-linger](cutex:agent/cutex.41194d0d-0000-4000-8000-000000000001) 一起看一下 structuralGate 现在怎么处理忙碌的 Claude agent。` : "看一下 structuralGate 现在怎么处理忙碌的 Claude agent。" }] },
+          { type: "userMessage", id: "ku1", content: [{ type: "text", text: MENTION_SCENE ? String.raw`请 [@Astra](cutex:agent/cutex.ag-astra) 和 [@next-strip-linger](cutex:agent/cutex.41194d0d-0000-4000-8000-000000000001) 一起看一下 structuralGate 现在怎么处理忙碌的 Claude agent。另外让 [@dev-jasmine](cutex:agent/${MENTION_JASMINE}) 跑一遍测试，结果发给 [@chief-velocity](cutex:agent/${MENTION_VELOCITY})。` : "看一下 structuralGate 现在怎么处理忙碌的 Claude agent。" }] },
           { type: "agentMessage", id: "ka1", text: "忙时分叉和回退都灰掉；claude-r21 起分叉可以从实时记录里做，回退仍要等这一轮结束。" },
         ],
       },
@@ -1470,7 +1540,7 @@ const kaiRead = {
         status: "inProgress",
         startedAt: Date.now() / 1000 - 40,
         items: [
-          { type: "userMessage", id: "ku2", content: [{ type: "text", text: "跑一下相关的 vitest。" }] },
+          { type: "userMessage", id: "ku2", content: [{ type: "text", text: PROFILE_MENTION_SCENE ? String.raw`跑一下相关的 vitest，用 [profile: "54138256-6444-4908-8106-c6e96d7f9ee0", model: "gpt-6-astra", effort: "high"] 开一个；之前那个 [profile: "0f3c9a2e-7d41-4b8e-9c3a-6e2f1d0b5a77"] 已经删了。` : "跑一下相关的 vitest。" }] },
           { type: "commandExecution", id: "kc2", command: "npx vitest run test/structuralGate.test.ts", status: "inProgress", aggregatedOutput: "" },
         ],
       },
@@ -1626,6 +1696,10 @@ const MOCK_PENDING: Record<string, { message: { id: number; method: string; para
 // ?mentions: at the end, so the index-based demo decorations below keep their agents.
 if (MENTION_SCENE) snapshot.active.push(...mentionSessions());
 if (OWNER_ROWS_SCENE) snapshot.active.push(...ownerRowSessions());
+// Focused sidebar review: busy + background, three idle kinds, and completed work.
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("backgroundwork")) {
+  snapshot = { ...snapshot, active: ownerRowSessions(), retired: [], projects: { ...snapshot.projects!, projects: [] }, hostRows: {} };
+}
 if (INLINE_CHIPS_SCENE) {
   snapshot.active.push(session("wuwa-director", "wuwa-director", { profile: "GLM", output: "两个成员已经建好并收到任务。", idle: 2 }),
     session("wuwa-db-scout", "wuwa-db-scout", { profile: "claude", turn: "wds-t1", tool: "$ sqlite3 wuwa.db .schema" }),
@@ -1683,6 +1757,7 @@ function dshTurns() {
 type MockThread = { thread: { id: string; turns: { id: string }[]; dshContext?: import("../lib/dshContext").DshContext } };
 function mockThread(id: string): MockThread {
   if (OVERLOAD_RETRY_SCENE && id === OVERLOAD_RETRY_SESSION) return overloadRetryThread();
+  if (TURN_ERROR_SCENE && (TURN_ERROR_SESSIONS as readonly string[]).includes(id)) return turnErrorThread(id);
   if (IMAGE_PATH_STEER_SCENE && (id === "eva" || id === "widgets")) return imagePathSteerThread(id);
   if (IMAGE_HEAVY && id === IMAGE_HEAVY_SESSION && imageHeavyThread()) return { thread: imageHeavyThread()! };
   if (DSH_SCENE && id === "dsh-agent") return { thread: { id: "thread-dsh-agent", turns: dshTurns().filter((t, i, all) => { const cut = revertedFrom.get(id); const at = cut ? all.findIndex((x) => x.id === cut) : -1; return at < 0 || i < at; }), dshContext: { used: 24_000, size: 1_000_000, observedAt: "2026-10-25T01:00:00Z", source: "acp", billing: "unavailable" } } };
@@ -2343,6 +2418,18 @@ if (!LEGACY && !NO_AGENT_PAUSE && typeof location !== "undefined" && new URLSear
     pauseAgentMock("helper");
   }, 0);
 }
+// r276 tool-boundary scene: Eva retains her open turn; helper has no gate and waits for turn end.
+if (!LEGACY && !NO_AGENT_PAUSE && typeof location !== "undefined" && new URLSearchParams(location.search).has("toolpause")) {
+  setTimeout(() => {
+    const since = new Date(Date.now() - 30_000).toISOString();
+    const eva = snapshot.active.find(s => s.cutexSessionId === "eva");
+    if (eva) eva.runtime = { ...eva.runtime, activeTurnId: "turn-4", activeTurnObservedAt: since };
+    setAgentPause("eva", { cutexSessionId: "eva", phase: "paused", requestedAt: since, pausedAt: since, by: "owner", at: "toolBoundary", toolGate: true,
+      held: [{ callId: "toolu_mock", tool: "Bash", turnId: "turn-4", since }] });
+    if (!busy.has("helper")) busy.add("helper");
+    setAgentPause("helper", { cutexSessionId: "helper", phase: "pausing", requestedAt: since, by: "owner", at: "turnEnd", toolGate: false, held: [] });
+  }, 0);
+}
 const ownerKey = (sessionId: string, q: QueueItem) => ownerKeys.get(`${sessionId}|${q.queueId}`) ?? Date.parse(q.createdAt);
 type KeyedEntry = (import("./mockTypes").MockAdmissionEntry | { kind: "owner"; id: string; key: number; enqueuedAt: string; state: "waiting" | "paused" }) & { key: number };
 function admissionEntries(sessionId: string): KeyedEntry[] {
@@ -2714,9 +2801,9 @@ if (OLD_SERVICES && !FRESH && !NO_LOCAL) mockHosts = { ...mockHosts, scope: { ki
 const mockFallbackFocus = () => (mockHosts.hosts.some((h) => h.id === "local") ? "local" : (mockHosts.hosts[0]?.id ?? "local"));
 const mockSwitchTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const mockConn = (id: string): HostConnView | undefined => mockHosts.hosts.find((h) => h.id === id)?.conn;
-const mockDaemonOf = (id: string): MockDaemon => mockConn(id)?.daemon ?? { kind: "connecting", baseUrl: "" };
+const mockDaemonOf = (id: string): MockDaemon => { const d = mockConn(id)?.daemon ?? { kind: "connecting" as const, baseUrl: "" }; return d.kind === "connected" ? { ...d, instanceId: mockLayoutInstance(id) } : d; };
 const mockRemote = () => mockHosts.active !== "local";
-const mockHostsOut = (): MockHosts => structuredClone({ ...mockHosts, tunnel: mockConn(mockHosts.active)?.tunnel ?? null });
+const mockHostsOut = (): MockHosts => structuredClone({ ...mockHosts, hosts: mockHosts.hosts.map(h => ({ ...h, ...(h.conn ? { conn: { ...h.conn, daemon: h.conn.daemon.kind === "connected" ? { ...h.conn.daemon, instanceId: mockLayoutInstance(h.id) } : h.conn.daemon } } : {}) })), tunnel: mockConn(mockHosts.active)?.tunnel ?? null });
 const patchMockHost = (id: string, patch: (h: MockHosts["hosts"][number]) => Partial<MockHosts["hosts"][number]>) => {
   mockHosts = { ...mockHosts, hosts: mockHosts.hosts.map((h) => (h.id === id ? { ...h, ...patch(h) } : h)) };
 };
@@ -2875,6 +2962,13 @@ function remoteApi(hostId: string, rootApi: DesktopApi): Partial<DesktopApi> {
     async approvals(state) {
       return structuredClone(remoteApprovals.filter((a) => state === "all" || a.state === "pending"));
     },
+    async approvalsPage(state, { limit = 100, cursor } = {}) {
+      const rows = remoteApprovals.filter((a) => state === "all" || a.state === "pending");
+      const offset = cursor ? Number(cursor.replace("remote-approvals-", "")) : 0;
+      const size = typeof location !== "undefined" && new URLSearchParams(location.search).has("s10pages") ? Math.min(limit, 3) : limit;
+      const approvals = structuredClone(rows.slice(offset, offset + size));
+      return { approvals, ...(offset + approvals.length < rows.length ? { nextCursor: `remote-approvals-${offset + approvals.length}` } : {}) };
+    },
     async decideApproval(approvalId, decision, note) {
       const a = remoteApprovals.find((x) => x.approvalId === approvalId);
       if (!a || a.state !== "pending") return { ok: false, error: { code: a ? "approval_not_pending" : "approval_not_found", message: "mock" } };
@@ -2885,6 +2979,14 @@ function remoteApi(hostId: string, rootApi: DesktopApi): Partial<DesktopApi> {
     async ownerNotifications({ filter = "all", agentId }) {
       const pending = (r: MockOwnerNote) => r.state === "open" || r.state === "acknowledged";
       return structuredClone(remoteNotes.filter((r) => (!agentId || r.agentId === agentId) && (filter === "all" || pending(r))));
+    },
+    async ownerNotificationsPage({ filter = "all", agentId, limit = 100, cursor }) {
+      const pending = (r: MockOwnerNote) => r.state === "open" || r.state === "acknowledged";
+      const rows = remoteNotes.filter((r) => (!agentId || r.agentId === agentId) && (filter === "all" || (filter === "pending" ? pending(r) : r.state === "open")));
+      const offset = cursor ? Number(cursor.replace("remote-notes-", "")) : 0;
+      const size = typeof location !== "undefined" && new URLSearchParams(location.search).has("s10pages") ? Math.min(limit, 3) : limit;
+      const notifications = structuredClone(rows.slice(offset, offset + size));
+      return { notifications, ...(offset + notifications.length < rows.length ? { nextCursor: `remote-notes-${offset + notifications.length}` } : {}) };
     },
     async ownerNotifyAction(agentId, action, notificationId, text) {
       const r = remoteNotes.find((x) => x.notificationId === notificationId && x.agentId === agentId);
@@ -2907,6 +3009,7 @@ function mockApiFor(api: DesktopApi, hostId: string): DesktopApi {
   if (hostId === mockHosts.active) return api;
   const emitRemote = (method: string, params: Record<string, unknown>) => emitOn(hostId, "hostEvent", hostEnvelope(hostId, "cutex.host", method, params));
   const own: Partial<DesktopApi> = {
+    ...mockUserLayoutApi(hostId, (section, revision) => emitRemote("cutex/users/me/layoutChanged", { docKey: "owner", section, revision })),
     ...(hostId === "local" ? {} : Object.assign({}, ...MODULE_MOCKS.map(({ mock }) => mock.remote?.(hostId, emitRemote) ?? {}))),
     ...(hostId === "local" ? {} : remoteApi(hostId, api)),
     ...(hostId === WORKSTATION ? {
@@ -2941,6 +3044,8 @@ function mockApiFor(api: DesktopApi, hostId: string): DesktopApi {
       // A copy, like the IPC reply: the renderer keeps unchanged sessions' previous objects (lib/sidebarShare).
       return structuredClone(hostId === "local" ? moduleSidebar({ ...snapshot, retired: snapshot.retired.map(retiredProjection) }) : remoteSnapshot());
     },
+    // The mock lists its archived agents from the start (no archivedPending).
+    async sidebarLoadArchived() {},
     async subscribe(sessionId, from) {
       await api.subscribe(sessionId, from);
       mockViewHosts.set(sessionId, hostId);
@@ -3005,13 +3110,13 @@ function mockAvatarMetadata(session: SessionResource, params: Record<string, unk
 
 /** cutex's archive-only projection (`?lifecycle=retired`): a subset of the active resource. */
 function retiredProjection(s: SessionResource): SessionResource {
-  const { contractVersion, cutexSessionId, revision, lifecycle, retiredAt, hostId, displayName, threadName, cwd, profile, groups, registrationClass, runtimeDefaults, activity, createdAt, updatedAt } = s;
+  const { contractVersion, cutexSessionId, revision, lifecycle, retiredAt, hostId, displayName, formalAgentName, threadName, cwd, profile, groups, registrationClass, runtimeDefaults, activity, createdAt, updatedAt } = s;
   const runtime = { backend: s.runtime.backend, status: "offline", runtimeGeneration: s.runtime.runtimeGeneration, runtimeAgentId: null };
   // cutex annotates archived sessions with their project (projectId / projectName; null = none).
   const projectId = snapshot.hostRows[cutexSessionId]?.projectId ?? null;
   const known = [...(snapshot.projects?.projects ?? []), ...(snapshot.projects?.archived_projects ?? [])];
   const project = LEGACY ? {} : { projectId, projectName: known.find((p) => p.project_id === projectId)?.presentation.display_name ?? null };
-  return { contractVersion, cutexSessionId, revision, lifecycle, retiredAt, hostId, displayName, threadName, cwd, profile, groups, registrationClass, avatar: s.avatar ?? null, avatarMode: s.avatarMode ?? null, native: { threadId: s.native.threadId }, runtime, runtimeDefaults, activity, createdAt, updatedAt, ...project } as unknown as SessionResource;
+  return { contractVersion, cutexSessionId, revision, lifecycle, retiredAt, hostId, displayName, formalAgentName, threadName, cwd, profile, groups, registrationClass, avatar: s.avatar ?? null, avatarMode: s.avatarMode ?? null, native: { threadId: s.native.threadId }, runtime, runtimeDefaults, activity, createdAt, updatedAt, ...project } as unknown as SessionResource;
 }
 function remoteSnapshot(): SidebarSnapshot {
   const keep = new Set(["wave", "scratch", "chat-trip"]);
@@ -3070,6 +3175,7 @@ if (IMAGE_STEER) {
   currentTurn.set("kai", "kai-t2");
 }
 const core: MockCore = {
+  ownerNotificationPages: { register: registerMockOwnerNotes, rows: mockNotificationRows, page: mockNotificationPage },
   legacy: LEGACY,
   projectRecords: () => snapshot,
   emit,
@@ -3292,6 +3398,7 @@ export function installMockBridge(): void {
   if (/[?&]ws=/.test(location.search)) void import("./devWorkspaces").then((m) => m.installDevWorkspaces(new URLSearchParams(location.search)));
   // Identity menu: the OS account name is the owner's default name (`?longname`: a very long one).
   let multiWindowMigration = true;
+  prepareMockLayout();
   const shellState: ShellState = { prefs: { closeBehavior: "tray", locale: null, updateCheckMinutes: 10, notifyOff: { desktop: false, sound: false, bigAlert: false } }, trayAvailable: true, osUserName: LONG_NAME ? "maximilian-alexander-wolfeschlegelsteinhausen" : "sam", quickstart: true };
   // Self-update: an update is waiting (?update=none hides it, ?update=fail makes the build fail).
   const updateMode = new URLSearchParams(location.search).get("update");
@@ -3329,6 +3436,7 @@ export function installMockBridge(): void {
     // ?desks: desk windows as browser popups (dev/mockDesks; turn on Settings → 通用 → 窗口 → 多窗口 — mock main keeps it per page load).
     ...(typeof location !== "undefined" && new URLSearchParams(location.search).has("desks") ? { window: { control: async () => {}, setChrome: async () => {}, nativeControls: null, desk: mockDeskBridge((event) => emit("deskWindow", event)) } } : {}),
     shell: {
+      async setMemoryHost(value) { shellState.prefs.memoryHost = value; return structuredClone(shellState); },
       remoteCopies: (request) => import("../modules/remote-copies/mock").then(m => m.mockCopyRequest(request)),
       async filePathInfo() { return { canOpen: true }; },
       async filePath(hostId, path, action) { console.info("[mock local file]", hostId, action, path); },
@@ -3434,6 +3542,7 @@ export function installMockBridge(): void {
       return () => set.delete(listener as Listener);
     },
     api: withModuleApis({
+      ...mockUserLayoutApi(mockHosts.active, (section, revision) => emitOn(mockHosts.active, "hostEvent", hostEnvelope(mockHosts.active, "cutex.host", "cutex/users/me/layoutChanged", { docKey: "owner", section, revision }))),
       async profileLinkState() { return mockProfileLinkSyncState(); },
       async syncProfileLinks() { return mockProfileLinkSyncState(); },
       async resetProfileLinks() { mockLinkSecretId = mockLinkSecretId === "1f9a04c2" ? "2f9a04c2" : "1f9a04c2"; return mockProfileLinkSyncState(); },
@@ -3609,6 +3718,7 @@ export function installMockBridge(): void {
       async sidebar() {
         return structuredClone(mockRemote() ? remoteSnapshot() : moduleSidebar({ ...snapshot, retired: snapshot.retired.map(retiredProjection) }));
       },
+      async sidebarLoadArchived() {},
       async bootstrap(id, turnLimit) {
         if (MEDIA_BLOBS_SCENE && id === "eva") await prepareMediaBlobs();
         // Like cutex: bootstrap only knows active sessions (archived ones read GET /history).
@@ -3680,8 +3790,27 @@ export function installMockBridge(): void {
           const toRei: MockInboxMessage = { messageId: "m-demo-rei", from: "eva", fromName: "Eva", to: "rei", kind: "note", body: "迁移脚本的日志我挪到 logs/archive 了。", queuedAt: new Date().toISOString() };
           setTimeout(() => {
             // Shown in Eva's running turn (the sent row needs an active turn).
-            mockSend(toMika, "Mika");
-            mockSend(toRei, "Rei");
+            if (!TELL_REVISION_SCENE) {
+              mockSend(toMika, "Mika");
+              mockSend(toRei, "Rei");
+              return;
+            }
+            // `?tellRevision`: as cutex writes them, each send is an agent_tell call (started, then the bus fact, then
+            // completed ~0.7 s later with a result naming the same messageId, fix/tell-result-message-id), one a delegation revision.
+            // `&tellNoId`: results without messageId, as hosts before that release send them (both rows stay); `&tellGap=<ms>`.
+            const tell = (id: string, args: Record<string, unknown>, m: MockInboxMessage, toName: string, extra: Record<string, unknown> = {}) => {
+              const item = { type: "mcpToolCall", id, server: "cutex", tool: "agent_tell", arguments: args, status: "inProgress", error: null, result: null };
+              nativeEvent("eva", "item/started", { threadId: "thread-eva", turnId: "turn-4", item });
+              mockSend(m, toName);
+              const result = { ok: true, deliveryKind: "note", name: toName, recipientState: "busy", to: m.to, ...(TELL_NO_ID ? {} : { messageId: m.messageId }), detail: `Sent as a note. ${toName} is busy: it reads the note at its next step; no new turn starts.`, ...extra };
+              setTimeout(() => nativeEvent("eva", "item/completed", { threadId: "thread-eva", turnId: "turn-4", item: { ...item, status: "completed", result: { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: null } } }), TELL_GAP_MS);
+            };
+            tell("tell-mika", { to: "mika", text: toMika.body }, toMika, "Mika");
+            tell("tell-rei", { to: "rei", text: toRei.body }, toRei, "Rei");
+            const revisionText = "Owner adds: 立即发送也要带 expectedRevision，旧的 flush 调用一起改掉。";
+            const revision: MockInboxMessage = { messageId: "m-demo-rev", from: "eva", fromName: "Eva", to: "mika", kind: "note", queuedAt: new Date().toISOString(),
+              body: `[delegation delegation-7c4c5c · revision v2] from Eva\n${revisionText}\n(Confirm you applied it: delegation_progress(delegation="delegation-7c4c5c", ack="v2", text="…").)` };
+            tell("tell-mika-rev", { delegation: "delegation-7c4c5c", text: revisionText }, revision, "Mika", { delegation: "delegation-7c4c5c", revision: { id: "v2", level: "sent", supersedes: null } });
           }, 600);
           setTimeout(() => emitBus(["eva", "rei"], "cutex/agentBus/messageFailed", { messageId: "m-demo-rei", fromCutexSessionId: "eva", toCutexSessionId: "rei", error: { code: "recipient_quarantined", message: "Rei 的 runtime 已停用，消息被隔离（mock）" }, failedAt: new Date().toISOString() }), 3000);
           setTimeout(() => mockDelivered(toMika, "turn-mika-live"), 5600);
@@ -4136,6 +4265,12 @@ export function installMockBridge(): void {
         }
         return { ...settingsView(), restartRequired: [] };
       },
+      async renameFormalAgent(id, request) {
+        return mockRename(snapshot, id, request);
+      },
+      async formalNameHistory(id, before) {
+        return mockNameHistory(snapshot, id, before);
+      },
       async createAgent(request) {
         if (request.launch) console.info("[mock] POST /v2/human/agents launch", request.launch);
         // profile-auto-pick: "auto:<family>" picks among the family's opted-in profiles (bare "auto" refused).
@@ -4433,6 +4568,8 @@ export function installMockBridge(): void {
           return { deleted: true };
         } else if (method === "cutex/session/retire" || method === "cutex/session/restore") {
           const retire = method === "cutex/session/retire";
+          const nameBlocked = retire ? null : mockRestoreRefusal(snapshot, id);
+          if (nameBlocked) throw new Error(nameBlocked);
           s.lifecycle = retire ? "retired" : "active";
           snapshot = { ...snapshot, active: retire ? snapshot.active.filter((x) => x !== s) : [...snapshot.active, s], retired: retire ? [...snapshot.retired, s] : snapshot.retired.filter((x) => x !== s) };
         } else if (method === "cutex/session/defaults/update") {

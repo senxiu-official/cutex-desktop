@@ -56,7 +56,7 @@ function FloatingCard({ active }: { active: FloatState }) {
     return () => { win.removeEventListener("pointerdown", outside, true); win.removeEventListener("keydown", escape); };
   }, [active, win]);
   return <><span ref={origin} hidden aria-hidden="true" />{position && createPortal(<div ref={box} role="dialog" aria-modal="false" aria-label={t("notes.floating")} tabIndex={-1} data-note-float
-    className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-card-border bg-background text-foreground shadow-2xl outline-none" style={position}>
+    className="float fixed z-[160] flex flex-col overflow-hidden text-foreground outline-none" style={position}>
     <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
       <StickyNote size={15} className="text-accent" /><span className="min-w-0 flex-1 truncate text-sm font-medium">{t(active.editing && draft ? "notes.new" : "notes.title")}</span>
       <button title={t("notes.closeFloat")} aria-label={t("notes.closeFloat")} onClick={() => close()} className="rounded p-1 text-subtle hover:bg-hover hover:text-foreground"><X size={15} /></button>

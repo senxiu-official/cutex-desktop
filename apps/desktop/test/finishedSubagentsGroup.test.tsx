@@ -46,7 +46,7 @@ describe("最近完成 group", () => {
     // reference do not.
     expect(html.match(/<button[^>]*data-finished-subagent/g)).toHaveLength(2);
     expect(html).toContain("subagents.recent.background");
-    expect(html).toContain('title="claude:s:task:d');
+    expect(html).toContain('data-tip="claude:s:task:d');
     expect(html).toContain("subagents.background</span>");
     expect(html).toContain("1m · subagents.outcome.stopped");
     expect(html).toContain("subagents.recent.noTranscript");

@@ -84,7 +84,7 @@ function project() {
     hostColor: null,
     hostOffline: false,
     members: [],
-    grouped: { director: null, needsYou: [], running: [], recent: [], idle: [] },
+    grouped: { director: null, needsYou: [], running: [], recent: [], idle: [], offline: [] },
     counts: { total: 0, online: 0, running: 0, needsYou: 0 },
     totals: { delegations: 0, jobs: 0, subagents: 0 },
     activity: [],

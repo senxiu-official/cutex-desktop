@@ -1,5 +1,6 @@
 import { usesInputLedger } from "../lib/deliveryMode";
 import { agentState, featuresOf } from "../store";
+import { TurnErrorBanner } from "./TurnErrorSurface";
 import { SessionDeliveryStatus } from "./PendingSends";
 import { setAppearance, useAppearance } from "../lib/appearance";
 import { usePortraitOn } from "../lib/portrait";
@@ -72,6 +73,7 @@ import { useAgentServiceList } from "../lib/serviceLinkView";
 import { Tag } from "./Tag";
 import { RuntimeTag } from "./RuntimeTag";
 import { bindingLabel, keyVar } from "../lib/keybindings";
+import { InfoMark } from "./InfoMark";
 import { isElement } from "../lib/ownerWindow";
 
 /** Quiet pass: a control in its default state shows on hover / keyboard focus of the header. */
@@ -179,7 +181,7 @@ function OnlineState({ session, hostId, info, compact = false }: { session: Sess
         data-conv-item="online"
         data-online-compact={compact || undefined}
         onClick={click}
-        title={armed ? undefined : tip}
+        data-tip={armed ? undefined : tip}
         aria-label={armed && item.armed ? item.armed : tip}
         disabled={item.disabled}
         // Online and idle: shows on hover / focus of the header (the avatar's dot says 在线); offline, starting or armed: always.
@@ -210,7 +212,7 @@ function ProjectChip({ project, hostId }: { project: NonNullable<ConvHeaderInfo[
         <button
           data-side-nodrag
           onClick={() => appServices.ui.openPage("projects.page", { project: projectId, ...hostPageParam(hostId) })}
-          title={t("titlebar.openProject", { name })}
+          data-tip={t("titlebar.openProject", { name })}
           className="flex min-w-0 items-center gap-1 rounded-chip px-0.5 hover:bg-hover hover:text-foreground"
         >
           {presentation && <ProjectBadge icon={projectIcon(prefs.projectIcons, hostId, projectId)} badge={presentation.badge_label || name.slice(0, 1)} color={presentation.color} />}
@@ -220,7 +222,7 @@ function ProjectChip({ project, hostId }: { project: NonNullable<ConvHeaderInfo[
         </button>
       ) : (
         // Independent agents: a quiet badge, not a link (no project page).
-        <Tag title={t("titlebar.independentTip")} className="mx-0.5">
+        <Tag data-tip={t("titlebar.independentTip")} className="mx-0.5">
           {name}
         </Tag>
       )}
@@ -228,7 +230,7 @@ function ProjectChip({ project, hostId }: { project: NonNullable<ConvHeaderInfo[
         data-side-nodrag
         data-conv-item="star"
         onClick={() => toggleStarred(groupId, hostId)}
-        title={t(projectId ? (starred ? "titlebar.unstar" : "titlebar.star") : starred ? "titlebar.unstarIndependent" : "titlebar.starIndependent")}
+        data-tip={t(projectId ? (starred ? "titlebar.unstar" : "titlebar.star") : starred ? "titlebar.unstarIndependent" : "titlebar.starIndependent")} aria-label={t(projectId ? (starred ? "titlebar.unstar" : "titlebar.star") : starred ? "titlebar.unstarIndependent" : "titlebar.starIndependent")}
         aria-pressed={starred}
         // Unstarred: takes no room until the header is hovered / focused (like the branch's +/−), so line 2 has no gap.
         className={`shrink-0 rounded-chip p-0.5 hover:bg-hover ${starred ? "text-warn" : "hidden text-subtle hover:text-foreground group-hover/phead:inline-flex group-focus-within/phead:inline-flex"}`}
@@ -260,7 +262,7 @@ function LocationLine({ hostId, sessionId, cwd, note, project, services }: { hos
   if (project) parts.push(project);
   if (host)
     parts.push(
-      <span key="host" data-conv-item="host" className="flex max-w-32 shrink-0 items-center gap-1" title={t("titlebar.hostTip", { host: host.label })}>
+      <span key="host" data-conv-item="host" className="flex max-w-32 shrink-0 items-center gap-1" data-tip={t("titlebar.hostTip", { host: host.label })}>
         <HostDot color={host.color} status={host.indicator.status} size={6} />
         <span className="truncate">{host.label}</span>
       </span>,
@@ -268,13 +270,13 @@ function LocationLine({ hostId, sessionId, cwd, note, project, services }: { hos
   if (cwd)
     parts.push(
       // Long paths keep their tail (rtl ellipsis), like the sidebar's project directory.
-      <span key="cwd" data-conv-item="cwd" className="min-w-0 shrink-[10] truncate font-mono" style={{ direction: "rtl", textAlign: "left" }} title={note ? `${cwd}\n${note}` : cwd}>
+      <span key="cwd" data-conv-item="cwd" className="min-w-0 shrink-[10] truncate font-mono" style={{ direction: "rtl", textAlign: "left" }} data-tip={note ? `${cwd}\n${note}` : cwd}>
         <bdi>{shortenHome(cwd)}</bdi>
       </span>,
     );
   if (git?.isRepo)
     parts.push(
-      <button key="branch" data-side-nodrag data-conv-item="branch" onClick={() => void openChanges()} title={t("pane.changes")} className="flex min-w-0 shrink-[8] items-center gap-1.5 rounded-chip px-0.5 hover:bg-hover hover:text-foreground">
+      <button key="branch" data-side-nodrag data-conv-item="branch" onClick={() => void openChanges()} data-tip={t("pane.changes")} className="flex min-w-0 shrink-[8] items-center gap-1.5 rounded-chip px-0.5 hover:bg-hover hover:text-foreground">
         <span className="flex min-w-0 items-center gap-0.5">
           <GitBranch size={11} className="shrink-0" />
           <span className="truncate">{git.branch ?? "HEAD"}</span>
@@ -347,7 +349,7 @@ function AgentActions({ paneId, session, hostId, info, folded, compactServices, 
           data-side-nodrag
           data-conv-item="mute"
           onClick={(e) => openMenuFrom(e.currentTarget, notify.menu())}
-          title={bellTip}
+          data-tip={bellTip}
           aria-label={bellTip}
           aria-haspopup="menu"
           className={`${ctrlBtn(look === "important" ? "text-warn" : "text-muted")} ${look === "on" ? HOVER_ONLY : ""}`}
@@ -422,7 +424,7 @@ function StripButton({ paneId, leftSide, title, hostId, sessionId, shelf, others
     <button
       data-side-nodrag
       data-pane-strip={leftSide ? "left" : "right"}
-      title={title}
+      data-tip={title}
       aria-label={title}
       {...withHandlers(hold, fh)}
       onClick={() => stripEffect(paneId).run()}
@@ -471,7 +473,9 @@ function PaneControls({ paneId, hostId, sessionId, focused, maxed, rows, session
   const fill = useAppearance().fillMode && !portrait;
   const maxShown = !portrait || maxed || full;
   const noGap = !full && !maxed && !grown && room <= 0;
-  const maxTip = full ? t("panel.exitFullscreen", { key: "Esc" }) : maxed ? t("panel.exclusiveOff") : noGap ? t("panel.maxNoGap") : t("panel.maxLongPress", { tip: t(grown ? "pane.restoreMax" : "pane.maximize", keyVar("paneMaximise")), ...keyVar("panelFullscreen") });
+  const maxTip = full ? t("panel.exitFullscreen", { key: "Esc" }) : maxed ? t("panel.exclusiveOff") : noGap ? t("panel.maxNoGap") : grown ? t("pane.restoreMax", keyVar("paneMaximise")) : t("side.maximise");
+  // The long-press and right-click gestures of these buttons (design 040 §2.1: how-to text is not in the tips).
+  const howTo = [maxShown && !full && !maxed && !noGap ? t("panel.maxLongPress", { tip: t("pane.maximize", keyVar("paneMaximise")), ...keyVar("panelFullscreen") }) : null, stripOk ? `${stripTip}: ${t("shelfOnly.altHint")}` : null].filter(Boolean).join("\n");
   const hold = useLongPress(() => toggleFullscreenPanel({ area: "work", id: paneId }));
   const closeTip = t("convHeader.close");
   const moreTip = rows.length ? t("convHeader.overflow", { items: rows.map((r) => r.label).join(" · ") }) : t("convHeader.more");
@@ -519,18 +523,19 @@ function PaneControls({ paneId, hostId, sessionId, focused, maxed, rows, session
   };
   return (
     <span data-pane-controls="row" className="flex h-6 shrink-0 items-center gap-0.5">
+      {howTo && <InfoMark text={howTo} className="hover-info px-0.5" />}
       {/* Design 040 step 7: 放大 and 关闭 show on hover / keyboard focus of the header (放大 stays while it is on). */}
-      {maxShown && <button data-side-nodrag data-pane-max="" data-pane-full={full ? "" : undefined} title={full || maxed ? maxTip : t(fill ? "fillMode.off" : "fillMode.title")} aria-label={full || maxed ? maxTip : t(fill ? "fillMode.off" : "fillMode.title")} aria-pressed={maxed || full || grown || fill} data-pane-grown={grown ? "" : undefined} {...withHandlers(hold, maxFh)} onClick={() => (maxed ? toggleExclusive({ area: "work", id: paneId }) : full ? toggleFullscreenPanel({ area: "work", id: paneId }) : setAppearance({ fillMode: !fill }))} className={`${CTRL_BTN} ${maxed || full || grown || fill ? "" : noGap ? ON_DEMAND_DIM : ON_DEMAND}`}>
+      {maxShown && <button data-side-nodrag data-pane-max="" data-pane-full={full ? "" : undefined} data-tip={full || maxed ? maxTip : t(fill ? "fillMode.off" : "fillMode.title")} aria-label={full || maxed ? maxTip : t(fill ? "fillMode.off" : "fillMode.title")} aria-pressed={maxed || full || grown || fill} data-pane-grown={grown ? "" : undefined} {...withHandlers(hold, maxFh)} onClick={() => (maxed ? toggleExclusive({ area: "work", id: paneId }) : full ? toggleFullscreenPanel({ area: "work", id: paneId }) : setAppearance({ fillMode: !fill }))} className={`${CTRL_BTN} ${maxed || full || grown || fill ? "" : noGap ? ON_DEMAND_DIM : ON_DEMAND}`}>
         {maxed || full || grown || fill ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
       </button>}
       {/* 关闭 (owner 2026-10-21, §24.13): the pane closes, the agent keeps running in cutex; its workspace is remembered. */}
-      <EffectButton effect={() => closeOf(paneId)} data-pane-collapse="" data-pane-close-keep="" title={closeTip} aria-label={closeTip} extra={ON_DEMAND}>
+      <EffectButton effect={() => closeOf(paneId)} data-pane-collapse="" data-pane-close-keep="" data-tip={closeTip} aria-label={closeTip} extra={ON_DEMAND}>
         <X size={14} />
       </EffectButton>
       <button
         data-side-nodrag
         data-pane-shelf={shelf}
-        title={shelfTip}
+        data-tip={shelfTip}
         aria-label={shelfTip}
         aria-pressed={shelf === "expanded"}
         aria-haspopup={shelf === "empty" ? "menu" : undefined}
@@ -546,12 +551,12 @@ function PaneControls({ paneId, hostId, sessionId, focused, maxed, rows, session
         )}
       </button>
       {stripOk && (
-        <StripButton paneId={paneId} leftSide={leftSide} title={`${stripTip} · ${t("shelfOnly.altHint")}`} hostId={hostId} sessionId={sessionId} shelf={shelf} othersStripped={othersStripped} />
+        <StripButton paneId={paneId} leftSide={leftSide} title={stripTip} hostId={hostId} sessionId={sessionId} shelf={shelf} othersStripped={othersStripped} />
       )}
-      <EffectButton effect={() => minimizeEffect(paneId)} data-pane-minimize="" title={minTip} aria-label={minTip}>
+      <EffectButton effect={() => minimizeEffect(paneId)} data-pane-minimize="" data-tip={minTip} aria-label={minTip}>
         <Minus size={14} />
       </EffectButton>
-      <button data-side-nodrag data-pane-more="" data-conv-overflow={rows.length ? rows.map((r) => r.item).join(" ") : undefined} title={moreTip} aria-label={moreTip} aria-haspopup="menu" onClick={(e) => more(e.currentTarget)} className={CTRL_BTN}>
+      <button data-side-nodrag data-pane-more="" data-conv-overflow={rows.length ? rows.map((r) => r.item).join(" ") : undefined} data-tip={moreTip} aria-label={moreTip} aria-haspopup="menu" onClick={(e) => more(e.currentTarget)} className={CTRL_BTN}>
         <MoreHorizontal size={14} />
         {/* Something is folded into ⋯ (a narrow column). */}
         {rows.length > 0 && <span aria-hidden data-conv-folded-dot="" className="absolute top-[3px] right-[3px] size-[5px] rounded-full bg-accent" />}
@@ -637,7 +642,7 @@ function ConversationHeaderImpl({ paneId, hostId, sessionId, focused, closable, 
       {session && (
         // 会话头 (design 040 §3.1): 40 px, the biggest avatar in the conversation, with two lines; 28 px with one line so the
         // header stays compact (owner 2026-10-23, 「会话顶栏显示两行」 off).
-        <button data-side-nodrag data-conv-avatar="" onClick={menu} className="shrink-0 rounded-full" title={t("menu.more")} aria-label={t("menu.more")}>
+        <button data-side-nodrag data-conv-avatar="" onClick={menu} className="shrink-0 rounded-full" data-tip={t("menu.more")} aria-label={t("menu.more")}>
           <Avatar name={session.displayName} avatar={session.avatar} seed={session.cutexSessionId} size={twoLines ? 40 : 28} status={avatarStatus} />
         </button>
       )}
@@ -657,7 +662,7 @@ function ConversationHeaderImpl({ paneId, hostId, sessionId, focused, closable, 
               data-conv-item="name"
               onClick={menu}
               className="flex min-w-0 shrink items-center gap-1 rounded-ctl px-0.5 hover:bg-hover"
-              title={realNameTip(session) ? `${session.displayName}\n${t("info.realNameTip", { name: realAgentName(session) })}` : session.displayName}
+              data-tip={realNameTip(session) ? `${session.displayName}\n${t("info.realNameTip", { name: realAgentName(session) })}` : session.displayName}
             >
               <span className="truncate text-title">
                 <ScriptText text={session.displayName} />
@@ -689,7 +694,13 @@ function ConversationHeaderImpl({ paneId, hostId, sessionId, focused, closable, 
       </div>
     </div>
   );
-  return <AgentActions paneId={paneId} session={session ?? null} hostId={hostId} info={info} folded={folded} compactServices={headerLayout.compactServices} render={renderHeader} />;
+  return (
+    <>
+      <AgentActions paneId={paneId} session={session ?? null} hostId={hostId} info={info} folded={folded} compactServices={headerLayout.compactServices} render={renderHeader} />
+      {/* Turn-error surface (cutex turn-error-surface): the last turn failed — what, 查看, 重新登录 when it repeats. */}
+      {session && <TurnErrorBanner session={session} hostId={hostId} />}
+    </>
+  );
 }
 
 // convHeaderInfo builds a new object per call; a store selector must return the same one while its inputs

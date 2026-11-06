@@ -124,3 +124,30 @@ describe("Claude interleaved turn, adapter wire events → timeline → work gro
     expect(reasoningText).toEqual(["English thought 1", "English thought 2"]);
   });
 });
+
+describe("workGroupOutcome", () => {
+  const cmd = (id: string, status: string, exitCode: number) => tool(id, { type: "commandExecution", status, exitCode }) as import("../src/renderer/src/lib/workGroups").ToolEntry;
+  it("uses a later success after failures and ignores completed reasoning for the result", async () => {
+    const { workGroupOutcome, summarize } = await import("../src/renderer/src/lib/workGroups");
+    const steps: import("../src/renderer/src/lib/workGroups").StepEntry[] = [cmd("bad", "completed", 1), cmd("good", "completed", 0), { kind: "reasoning", id: "r", turnId: "t1", summary: ["done"], content: [], streaming: false, startedAt: null, completedAt: null }];
+    expect(workGroupOutcome(steps).status).toBe("completed");
+    expect(workGroupOutcome(steps).lastTool?.id).toBe("good");
+    expect(summarize(steps).failed).toBe(1);
+  });
+  it("uses the last edit or tool call in a mixed group", async () => {
+    const { workGroupOutcome } = await import("../src/renderer/src/lib/workGroups");
+    const goodEdit = tool("edit", { type: "fileChange", status: "completed", changes: [] }) as import("../src/renderer/src/lib/workGroups").ToolEntry;
+    const badTool = tool("call", { type: "dynamicToolCall", status: "failed", tool: "lookup" }) as import("../src/renderer/src/lib/workGroups").ToolEntry;
+    expect(workGroupOutcome([cmd("bad", "failed", 1), goodEdit]).status).toBe("completed");
+    expect(workGroupOutcome([cmd("good", "completed", 0), goodEdit, badTool]).status).toBe("failed");
+  });
+  it("keeps running ahead of historical failures", async () => {
+    const { workGroupOutcome } = await import("../src/renderer/src/lib/workGroups");
+    expect(workGroupOutcome([cmd("bad", "failed", 1), cmd("live", "inProgress", 1)]).status).toBe("running");
+  });
+  it("uses the sole command's result", async () => {
+    const { workGroupOutcome } = await import("../src/renderer/src/lib/workGroups");
+    expect(workGroupOutcome([cmd("good", "completed", 0)]).status).toBe("completed");
+    expect(workGroupOutcome([cmd("bad", "failed", 1)]).status).toBe("failed");
+  });
+});

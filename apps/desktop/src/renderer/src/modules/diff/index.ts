@@ -15,6 +15,7 @@ export default defineModule({
     "side.component": [
       {
         id: "diff.view",
+        tabRow: "always",
         titleKey: "diff.view",
         icon: FileDiff,
         instances: "multi",

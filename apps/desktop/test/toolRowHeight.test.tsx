@@ -95,12 +95,44 @@ describe("a work group is one summary line open or closed", () => {
     expect(lines(g)).toHaveLength(1);
   });
 
-  it("a failed step stays visible under the line, open or closed alike", () => {
+  it("a failed last step stays visible under the line, open or closed alike", () => {
     const failed = { ...command("failed", "boom"), exitCode: 1 } as RawItem;
-    const steps = [tool(edit("completed"), 1), tool(failed, 2), tool(edit("completed"), 3)];
+    const steps = [tool(edit("completed"), 1), tool(edit("completed"), 3), tool(failed, 2)];
     const open = group(steps, true);
     const closed = group(steps, false);
     expect(open.querySelectorAll("[data-tool-row]")).toHaveLength(1);
     expect(lines(open)).toEqual(lines(closed));
+  });
+});
+
+describe("the work group header follows its last tool", () => {
+  const step = (id: string, status: string, exitCode: number): ToolEntry => ({ kind: "tool", id, turnId: "t1", item: { id, type: "commandExecution", command: id, status, exitCode } } as ToolEntry);
+  const render = (steps: StepEntry[], open = false) => dom(renderToStaticMarkup(createElement(WorkGroup, { steps, open, summary: summarize(steps), sessionId: "s1" })));
+  it("a recovered group has a green check and subdued failure count, with no collapsed failures", () => {
+    const el = render([step("failed", "failed", 1), step("fixed", "completed", 0)]);
+    const header = el.querySelector("button")!;
+    expect(header.querySelector(".lucide-check.text-ok")).not.toBeNull();
+    expect(header.querySelector(".lucide-x")).toBeNull();
+    expect(header.textContent).toContain('work.failed:{"n":1}');
+    expect(header.querySelector('[class*="text-danger/70"]')).not.toBeNull();
+    expect(el.querySelectorAll("[data-tool-row]")).toHaveLength(0);
+  });
+  it("failure last keeps the red header and failed row with its exit code", () => {
+    const el = render([step("ok", "completed", 0), step("failed", "failed", 2)]);
+    expect(el.querySelector("button .lucide-x.text-danger")).not.toBeNull();
+    expect(el.querySelectorAll("[data-tool-row]")).toHaveLength(1);
+    expect(el.textContent).toContain("exit 2");
+  });
+  it("a running tail retains the spinner and earlier failed rows", () => {
+    const el = render([step("failed", "failed", 1), step("running", "inProgress", 0)], true);
+    expect(el.querySelector("button .animate-spin")).not.toBeNull();
+    expect(el.querySelectorAll("[data-tool-row]")).toHaveLength(1);
+  });
+  it("a single step keeps its own status and exit code without a group summary", () => {
+    const bad = render([step("only", "failed", 3)]), good = render([step("only", "completed", 0)]);
+    expect(bad.textContent).toContain("exit 3");
+    expect(bad.textContent).not.toContain("work.commands");
+    expect(good.outerHTML).toBe(row(step("only", "completed", 0).item).outerHTML);
+    expect(good.textContent).not.toContain("work.commands");
   });
 });

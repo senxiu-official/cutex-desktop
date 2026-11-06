@@ -6,6 +6,16 @@ import { zhCN } from "../src/renderer/src/i18n/zh-CN";
 import { en } from "../src/renderer/src/i18n/en";
 import { enAU } from "../src/renderer/src/i18n/en-AU";
 import { zhHantCN } from "../src/renderer/src/i18n/zh-Hant-CN";
+import { zhHantTW } from "../src/renderer/src/i18n/zh-Hant-TW";
+import { zhHantHK } from "../src/renderer/src/i18n/zh-Hant-HK";
+import { deDE } from "../src/renderer/src/i18n/de-DE";
+import { esES } from "../src/renderer/src/i18n/es-ES";
+import { frFR } from "../src/renderer/src/i18n/fr-FR";
+import { itIT } from "../src/renderer/src/i18n/it-IT";
+import { jaJP } from "../src/renderer/src/i18n/ja-JP";
+import { koKR } from "../src/renderer/src/i18n/ko-KR";
+import { ptBR } from "../src/renderer/src/i18n/pt-BR";
+import { ruRU } from "../src/renderer/src/i18n/ru-RU";
 
 async function install(): Promise<PreloadBridge> {
   vi.resetModules();
@@ -41,11 +51,13 @@ describe("profile searchTool", () => {
     await expect(api.patchProfile("claude", { searchTool: true })).rejects.toThrow("Codex API-key profiles only");
   });
 
-  it("has its strings in every locale (no tool id in the hint; the id is the label's tooltip)", () => {
-    for (const catalog of [zhCN, en, enAU, zhHantCN]) {
+  it("has localized hints without the removed per-agent hourly quota (the tool id stays in the label's tooltip)", () => {
+    for (const catalog of [zhCN, en, enAU, zhHantCN, zhHantTW, { ...zhHantTW, ...zhHantHK }, deDE, esES, frFR, itIT, jaJP, koKR, ptBR, ruRU]) {
       expect(catalog["agent-config.profile.searchTool"]).toBeTruthy();
       expect(catalog["agent-config.profile.searchToolHint"]).toBeTruthy();
       expect(catalog["agent-config.profile.searchToolHint"]).not.toContain("web_search");
+      expect(catalog["agent-config.profile.searchToolHint"]).not.toContain("20");
+      expect(catalog["agent-config.profile.searchToolHint"]).not.toContain("{{agent}}");
     }
     expect(zhCN["agent-config.profile.searchToolHint"]).toContain("网页搜索");
     // New keys go right after app.name, so later features push these two down: only their adjacency is fixed.

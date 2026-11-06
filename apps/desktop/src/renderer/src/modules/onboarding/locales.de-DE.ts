@@ -220,7 +220,7 @@ export const deDE: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.minorAgent.title": "Die kleine Kachel mit Initiale",
   "onboarding.guide.minorAgent.text": "{{Agents}} ohne eigenen Avatar, die nicht angeheftet sind, erscheinen als kleine Kachel mit Initiale.\nDafür steht Einstellungen → Seitenleiste → {{Agent}}-Zeilen → Standard-{{agent}}-Avatar = Nur wichtige {{agents}}.\nFür einen Avatar: Rechtsklick auf die Zeile → Avatar anzeigen.",
   "onboarding.guide.project.title": "Ein Projekt und sein {{director}}",
-  "onboarding.guide.project.text": "Ein {{director}} leitet das Projekt: Er verteilt die Arbeit, erstellt {{agents}} und bekommt ihre Ergebnisse.\nFür Projektboard und Aktivität: Maus über den Projekttitel bewegen und rechts auf Projektansicht klicken.",
+  "onboarding.guide.project.text": "Ein {{director}} leitet das Projekt: Er verteilt die Arbeit, erstellt {{agents}} und bekommt ihre Ergebnisse.\nFür Projektansicht und Aktivität: Maus über den Projekttitel bewegen und rechts auf Projektansicht klicken.",
   "onboarding.guide.needsYou.title": "Braucht dich",
   "onboarding.guide.needsYou.text": "Braucht dich heißt: Ein {{agent}} wartet auf dich, etwa auf eine Antwort, eine Freigabe oder eine Entscheidung. Bis dahin kann die Arbeit stillstehen.\nDiese Anliegen findest du über dem Eingabefeld, am Ende der Seitenleistenzeilen und im Infobereich. Ein Klick führt dich hin.",
   "onboarding.guide.delegation.title": "Delegierungen",

@@ -47,7 +47,7 @@ function Row({ job, sessionId }: { job: JobRow; sessionId: string }) {
       <button
         onClick={(e) => (ops.output && hasLocalOutput(job) ? openJobOutput(job.jobId) : contextMenu(menu)(e))}
         onContextMenu={contextMenu(menu)}
-        title={`${title}\n${job.jobId}${nciOn && job.remoteId ? `\n${job.remoteId}` : ""}${job.cwd ? `\n${job.cwd}` : ""}`}
+        data-tip={`${title}\n${job.jobId}${nciOn && job.remoteId ? `\n${job.remoteId}` : ""}${job.cwd ? `\n${job.cwd}` : ""}`}
         className={CAPSULE_ROW_MAIN}
       >
         <span className={`min-w-0 flex-1 truncate ${job.command ? "font-mono text-meta/[inherit]" : ""}`}>{title}</span>
@@ -60,7 +60,7 @@ function Row({ job, sessionId }: { job: JobRow; sessionId: string }) {
               {t("jobs.cancel")}
             </button>
           ) : (
-            <button onClick={() => setArmed(true)} title={t("jobs.cancelConfirm")} className={`${CAPSULE_ROW_ACTION} hover:text-danger`}>
+            <button onClick={() => setArmed(true)} data-tip={t("jobs.cancelConfirm")} className={`${CAPSULE_ROW_ACTION} hover:text-danger`}>
               {t("jobs.cancel")}
             </button>
           )}

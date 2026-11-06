@@ -26,7 +26,7 @@ function TerminalRow({ term, onTerminate, claude, startedAt }: { term: Backgroun
   const usage = [term.cpuPercent !== null && `${term.cpuPercent.toFixed(0)}%`, formatRss(term.rssKb)].filter(Boolean).join(" · ");
   const where = [term.cwd, term.osPid !== null && `pid ${term.osPid}`].filter(Boolean).join(" · ");
   return (
-    <div data-capsule-row="" title={`${term.command}\n${where}`} className={`${CAPSULE_ROW} border transition-colors ${armed ? ARMED_FRAME : "border-transparent hover:bg-hover"}`}>
+    <div data-capsule-row="" data-tip={`${term.command}\n${where}`} className={`${CAPSULE_ROW} border transition-colors ${armed ? ARMED_FRAME : "border-transparent hover:bg-hover"}`}>
       <span className={CAPSULE_ROW_ICON}>
         <SquareTerminal size={14} className={armed ? "text-danger" : ""} />
       </span>
@@ -37,7 +37,7 @@ function TerminalRow({ term, onTerminate, claude, startedAt }: { term: Backgroun
       {armed ? <span className="shrink-0 text-caption/[inherit] text-danger">{t("background-terminals.terminateAgain")}</span> : usage && <span className={CAPSULE_ROW_META}>{usage}</span>}
       <span className={capsuleRowActions(armed)}>
         {!armed && !claude && (
-          <button title={t("background-terminals.output")} disabled className={CAPSULE_ROW_ACTION}>
+          <button data-tip={t("background-terminals.output")} disabled className={CAPSULE_ROW_ACTION}>
             {t("background-terminals.output")}
           </button>
         )}
@@ -47,7 +47,7 @@ function TerminalRow({ term, onTerminate, claude, startedAt }: { term: Backgroun
             setArmed(false);
             void onTerminate();
           }}
-          title={t("background-terminals.terminate")}
+          data-tip={t("background-terminals.terminate")}
           aria-label={t("background-terminals.terminate")}
           className={armed ? `${ARMED_BUTTON} shrink-0` : `${CAPSULE_ROW_ACTION} hover:text-danger`}
         >

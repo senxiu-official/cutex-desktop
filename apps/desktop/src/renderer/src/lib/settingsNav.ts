@@ -7,7 +7,7 @@ import { cutexBuildChannelTag, cutexBuildLabel, type CutexBuild } from "@cutex-d
 import type { SettingsTab } from "../store"; // type only (erased)
 
 /** Where a setting lives; host/codex resolve to its actual target host. */
-export type SettingsSource = "local" | "host" | "codex";
+export type SettingsSource = "local" | "host" | "codex" | "person";
 
 /**
  * Whether agents feel a declared setting (summarized mechanically at page/card/row):

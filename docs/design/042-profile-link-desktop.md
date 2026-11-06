@@ -1,6 +1,6 @@
 # 042 — Desktop profile account links
 
-Implemented against cutex `profile-account-link` (backend branch `feat/r256-profile-link`). The wire contract is exported as `profile-link.json` by Management v2.
+Availability follows the capabilities advertised by the host and runtime; deployment plans are not a public version contract.
 
 ## Identity and admission
 

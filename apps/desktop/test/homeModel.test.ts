@@ -62,6 +62,7 @@ describe("pins", () => {
     expect(pinOfRef({ hostId: "local", kind: "artifacts.view", key: ref, title: "清单", params: { ref } })).toMatchObject({ kind: "artifact", key: ref });
     expect(pinOfRef({ hostId: "local", kind: "artifact", key: "nope@1", title: "", params: {} })).toBeNull();
     expect(pinOfRef({ hostId: "ssh-ws", kind: "browser.tab", key: "cutex:service/audiobook/", title: "听书", params: { url: "cutex:service/audiobook/" } })).toMatchObject({ hostId: "ssh-ws", kind: "service", key: "audiobook" });
+    expect(pinOfRef({ hostId: "ssh-ws", kind: "browser.service", key: "cutex:service/audiobook/", title: "听书", params: { url: "cutex:service/audiobook/" } })).toMatchObject({ hostId: "ssh-ws", kind: "service", key: "audiobook" });
     expect(pinOfRef({ hostId: "local", kind: "browser.tab", key: "https://example.com/a", title: "Ex", params: { url: "https://example.com/a" } })).toMatchObject({ kind: "url", key: "https://example.com/a" });
     expect(pinOfRef({ hostId: "local", kind: "browser.tab", key: "about:blank", title: "", params: { url: "about:blank" } })).toBeNull();
     expect(pinOfRef({ hostId: "local", kind: "turn", key: "t1", title: "", params: {} })).toBeNull();

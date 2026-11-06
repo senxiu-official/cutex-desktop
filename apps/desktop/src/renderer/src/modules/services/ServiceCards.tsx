@@ -98,7 +98,7 @@ function CompactServiceCard({ row, ownerName, ownerTitle, stale, tileEnabled, ca
   }, [row.hostId, row.item.slug, row.item.archived, tileEnabled]);
   const service = row.item;
   const title = tile?.title || service.displayName || service.slug;
-  const health = t(`services.health.${service.health}` as MessageKey);
+  const health = t(`services.health.${service.health}` as MessageKey) + (service.health === "stoppedIdle" && service.stoppedIdleAt ? ` · ${new Date(service.stoppedIdleAt).toLocaleString()}` : "");
   const open = () => !stale && !service.archived && void openService(service, row.hostId).catch((reason: unknown) => error(reason instanceof Error ? reason.message : String(reason)));
   return (
     <div
@@ -123,7 +123,7 @@ function CompactServiceCard({ row, ownerName, ownerTitle, stale, tileEnabled, ca
         {service.starred ? <Star size={12} className="shrink-0 fill-current text-warn-text" /> : null}
         {tile?.badge ? <span className="max-w-20 truncate rounded bg-accent/10 px-1 py-0.5 text-caption/[inherit] text-accent">{tile.badge}</span> : null}
       </div>
-      <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-3.5 text-caption/[inherit] text-subtle"><span className="truncate">{health}</span><span aria-hidden="true">·</span><span className="truncate" title={ownerTitle} data-service-scope={ownerTitle ? "project" : undefined}>{ownerName}</span></div>
+      <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-3.5 text-caption/[inherit] text-subtle"><span className="truncate" title={health}>{health}</span><span aria-hidden="true">·</span><span className="truncate" title={ownerTitle} data-service-scope={ownerTitle ? "project" : undefined}>{ownerName}</span></div>
     </div>
   );
 }

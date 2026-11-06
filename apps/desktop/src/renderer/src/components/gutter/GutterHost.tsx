@@ -225,7 +225,7 @@ function GutterSide({ side, items, geometry, box, hostId, sessionId, layer, onSt
               <button
                 data-gutter-top-compact=""
                 onClick={() => setMenu((m) => !m)}
-                title={topItems.map((e) => t(e.item.titleKey)).join(" · ")}
+                data-tip={topItems.map((e) => t(e.item.titleKey)).join(" · ")}
                 aria-label={topItems.map((e) => t(e.item.titleKey)).join(" · ")}
                 aria-expanded={menuShown}
                 aria-haspopup="true"

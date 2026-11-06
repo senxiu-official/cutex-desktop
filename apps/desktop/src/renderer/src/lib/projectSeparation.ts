@@ -46,20 +46,16 @@ export interface ProjectBlockLook {
   metaClassName: string;
   /** Classes for the agent rows' container (the 8px extra indent, plus the mode's own). */
   bodyClassName: string;
-  /** Classes for a one-row (collapsed) project's wrapper. */
-  rowClassName: string;
-  /** Gap below the section. */
-  gapClassName: string;
   /**
-   * Gap below a folded section: the same as a one-row (collapsed) project's own margin, so a folded
-   * group — e.g. a starred project, which never auto-collapses — and a collapsed row share one pitch.
+   * Classes for a one-row (collapsed) project's wrapper. The gaps between rows are not here: they are one table for
+   * every mode (styles.css 「Roster spacing」, design 060 §5.6); a mode only sets its gap values there.
    */
-  foldedGapClassName: string;
+  rowClassName: string;
   /** `--project-color` for the CSS rules; undefined without any separation. */
   style: CSSProperties | undefined;
 }
 
-const NO_BLOCK: ProjectBlockLook = { className: "", headerClassName: "", metaClassName: "", bodyClassName: "pl-4", rowClassName: "", gapClassName: "mb-1.5", foldedGapClassName: "", style: undefined };
+const NO_BLOCK: ProjectBlockLook = { className: "", headerClassName: "", metaClassName: "", bodyClassName: "pl-4", rowClassName: "", style: undefined };
 
 /**
  * 独立智能体 / 工作 (not projects): the same header treatment in a neutral theme colour, so they read
@@ -84,8 +80,6 @@ export function projectBlockLook(separation: ProjectSeparation, color: string | 
         metaClassName: "project-band-body project-band-meta",
         bodyClassName: "project-band-body project-band-rows",
         rowClassName: "project-band project-band-row",
-        gapClassName: "mb-1",
-        foldedGapClassName: "",
         style,
       };
     case "iconLine":
@@ -95,8 +89,6 @@ export function projectBlockLook(separation: ProjectSeparation, color: string | 
         metaClassName: "project-lead-body project-lead-meta",
         bodyClassName: "project-lead-body project-lead-rows",
         rowClassName: "project-lead project-lead-row",
-        gapClassName: "mb-1.5",
-        foldedGapClassName: "",
         style,
       };
     case "tint":
@@ -105,9 +97,7 @@ export function projectBlockLook(separation: ProjectSeparation, color: string | 
         headerClassName: "project-block-header",
         metaClassName: "",
         bodyClassName: "pr-0.5 pl-4",
-        rowClassName: "mb-0.5 project-block project-block-tint project-block-row",
-        gapClassName: "mb-2",
-        foldedGapClassName: "mb-0.5",
+        rowClassName: "project-block project-block-tint project-block-row",
         style,
       };
     case "rail":
@@ -116,9 +106,7 @@ export function projectBlockLook(separation: ProjectSeparation, color: string | 
         headerClassName: "",
         metaClassName: "",
         bodyClassName: "pl-4",
-        rowClassName: "mb-0.5 project-block project-block-rail project-block-row",
-        gapClassName: "mb-2",
-        foldedGapClassName: "mb-0.5",
+        rowClassName: "project-block project-block-rail project-block-row",
         style,
       };
   }

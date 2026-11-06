@@ -5,6 +5,7 @@ import { cloneLiveDeltas } from "./liveDeltas";
 // prepended to the live timeline. Without the capability cutex sends every turn (no paging). Pure.
 import type { HistoryPage } from "@cutex-desktop/protocol";
 import { timelineFromThreadRead, type TimelineState } from "./timeline";
+import { TimelineEntries } from "./timelineEntries";
 
 /** Paging state of a session view; null when the whole history is loaded (or cannot be paged). */
 export interface OlderHistory {
@@ -69,5 +70,5 @@ export function prependHistory(state: TimelineState, result: unknown): number {
 
 /** A copy of `state` (turns / entries; the copy can be extended without touching the view). */
 export function cloneTimeline(state: TimelineState): TimelineState {
-  return { ...state, ...(state.liveDeltas ? { liveDeltas: cloneLiveDeltas(state.liveDeltas) } : {}), turns: state.turns.map((t) => ({ ...t, entryIds: [...t.entryIds] })), entries: new Map(state.entries), pending: new Map(state.pending), answering: new Set(state.answering) };
+  return { ...state, ...(state.liveDeltas ? { liveDeltas: cloneLiveDeltas(state.liveDeltas) } : {}), turns: state.turns.map((t) => ({ ...t, entryIds: [...t.entryIds] })), entries: state.entries instanceof TimelineEntries ? new TimelineEntries(state.entries) : new Map(state.entries), pending: new Map(state.pending), answering: new Set(state.answering) };
 }

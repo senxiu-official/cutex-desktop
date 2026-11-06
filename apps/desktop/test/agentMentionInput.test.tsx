@@ -3,12 +3,16 @@ import { act, createElement as h, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentMentionInput, type AgentMentionInputHandle, type AgentMentionInputProps } from "../src/renderer/src/components/AgentMentionInput";
+import { profileMentionText } from "../src/renderer/src/lib/profileMentions";
 import { agentMentionMarkdown } from "../src/renderer/src/lib/agentMentions";
 import { agentMentionEditorValue, atomicMentionSelection } from "../src/renderer/src/lib/agentMentionEditor";
 
 vi.mock("../src/renderer/src/components/AgentMentionChip", () => ({
   AgentMentionChip: ({ name }: { name: string }) => h("span", null, "@" + name),
 }));
+// Profile chips name their profile from the host's list (lib/profileMentionLabel): none here, the reference shows as is.
+vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock("../src/renderer/src/lib/profileSnapshot", () => ({ cachedProfileList: () => null, loadProfileList: async () => null }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const id = "cutex.01234567-89ab-cdef-0123-456789abcdef";
 const token = agentMentionMarkdown("A [review]", id);
@@ -39,6 +43,27 @@ function clipboard(element: HTMLElement, type: string, plain = "", html = "") {
 }
 
 describe("agent mention composer editor", () => {
+  it("deletes an atom's trailing separator without creating a browser filler newline", () => {
+    const profile = profileMentionText("Ada", "gpt-6-astra", "high");
+    const element = render(profile + " "); select(profile.length + 1);
+    key(element, "Backspace"); expect(ref.current!.value).toBe(profile);
+    key(element, "Backspace"); expect(ref.current!.value).toBe("");
+  });
+
+  it("mixes profile/model atoms with agent chips and preserves explicit text through copy, deletion and undo", () => {
+    const profile = profileMentionText("Ada", "gpt-6-astra", "high");
+    const element = render(token + " " + profile);
+    expect(element.querySelectorAll("[data-agent-mention-raw]")).toHaveLength(2);
+    expect(element.querySelector("[data-profile-mention-chip]")?.textContent).toContain("Ada · gpt-6-astra");
+    select(token.length + 1, token.length + 1 + profile.length);
+    expect(clipboard(element, "copy").data.setData).toHaveBeenCalledWith("text/plain", profile);
+    select(token.length + 1 + profile.length);
+    key(element, "Backspace");
+    expect(ref.current!.value).toBe(token + " ");
+    key(element, "z", { ctrlKey: true });
+    expect(ref.current!.value).toBe(token + " " + profile);
+  });
+
   it("renders atomic chips while its handle and caret use escaped Markdown offsets", () => {
     const text = "Hi " + token + " done";
     const element = render(text);

@@ -220,7 +220,7 @@ export const frFR: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.minorAgent.title": "La petite tuile avec une initiale",
   "onboarding.guide.minorAgent.text": "Les {{Agents}} sans avatar propre et non épinglés apparaissent sous forme de petite tuile avec une initiale.\nC’est l’effet de Paramètres → Barre latérale gauche → Lignes des {{Agent}} → Avatar par défaut du {{agent}} = {{agents}} importants uniquement.\nPour en attribuer un, faites un clic droit sur la ligne et choisissez « Afficher l’avatar ».",
   "onboarding.guide.project.title": "Un projet et son {{director}}",
-  "onboarding.guide.project.text": "Un projet est mené par un {{director}} : il répartit le travail, crée des {{agents}} et récupère les résultats.\nPour ouvrir le tableau et le journal du projet, survolez son titre puis cliquez sur « Vue du projet » à droite.",
+  "onboarding.guide.project.text": "Un projet est mené par un {{director}} : il répartit le travail, crée des {{agents}} et récupère les résultats.\nPour ouvrir la vue du projet et son activité, survolez son titre puis cliquez sur « Vue du projet » à droite.",
   "onboarding.guide.needsYou.title": "Besoin de vous",
   "onboarding.guide.needsYou.text": "« Besoin de vous » signifie qu’un {{agent}} vous attend : une question, une approbation ou une décision. Il peut rester arrêté tant que vous n’avez pas répondu.\nCes éléments se retrouvent au-dessus de la zone de saisie, à la fin des lignes de la barre latérale et dans la barre de raccourcis ; un clic vous y mène.",
   "onboarding.guide.delegation.title": "Délégations",

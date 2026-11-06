@@ -9,6 +9,7 @@ vi.mock("../src/renderer/src/lib/shelves", () => ({ showShelfToast: mocks.notify
 vi.mock("../src/renderer/src/lib/menus", () => ({ updateAgentBadge: mocks.save }));
 vi.mock("../src/renderer/src/lib/contextMenu", () => ({ closeMenu: mocks.close }));
 vi.mock("../src/renderer/src/lib/hostSwitch", () => ({ captureHostAction: () => () => mocks.current }));
+vi.mock("../src/renderer/src/lib/sidebar", () => ({ projectColor: (c: string) => c }));
 import { AgentBadgeEditor } from "../src/renderer/src/components/AgentBadgeEditor";
 import { badgeDraft, validBadgeText } from "../src/renderer/src/lib/sessionBadge";
 import { installImeGuards } from "../src/renderer/src/lib/ime";
@@ -54,6 +55,10 @@ describe("tray badge editor", () => {
     await submit(); expect(mocks.save).not.toHaveBeenCalled();
     text("ABCD");
     await submit(); expect(mocks.save).toHaveBeenCalledWith(session, "remote", { text: "ABCD", tint: "pink" }); expect(mocks.close).toHaveBeenCalledOnce();
+  });
+  it("saves the tint picked from the swatches", async () => {
+    act(() => host.querySelector<HTMLButtonElement>('[role="radio"][data-tint="violet"]')!.click());
+    await submit(); expect(mocks.save).toHaveBeenCalledWith(session, "remote", { text: "挂件", tint: "violet" });
   });
   it("clear writes null immediately through the same versioned writer", async () => {
     await act(async () => button("info.badgeClear").click()); expect(mocks.save).toHaveBeenCalledWith(session, "remote", null); expect(mocks.close).toHaveBeenCalledOnce();

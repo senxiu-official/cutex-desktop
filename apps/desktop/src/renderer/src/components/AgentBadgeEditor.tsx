@@ -3,7 +3,8 @@ import type { SessionBadge, SessionResource } from "@cutex-desktop/protocol";
 import { useI18n } from "../i18n";
 import { isImeComposing } from "../lib/ime";
 import { BadgeTextInput } from "./BadgeTextInput";
-import { BADGE_TINTS, badgeDraft, validBadgeText } from "../lib/sessionBadge";
+import { badgeDraft, validBadgeText } from "../lib/sessionBadge";
+import { BadgeTintPicker } from "./BadgeTintPicker";
 import { captureHostAction } from "../lib/hostSwitch";
 import { closeMenu } from "../lib/contextMenu";
 import { updateAgentBadge } from "../lib/menus";
@@ -32,9 +33,7 @@ export function AgentBadgeEditor({ session, hostId }: { session: SessionResource
     onKeyDown={(e) => { e.stopPropagation(); if (composing || isImeComposing(e)) return; if (e.key === "Escape") { e.preventDefault(); closeMenu(); } }}>
     <label className="block text-xs text-muted">{t("info.badge")}<BadgeTextInput autoFocus aria-label={t("info.badge")} value={text} placeholder={t("info.badgePlaceholder")} onCompositionChange={setComposing}
       onChange={setText} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent" /></label>
-    <label className="block text-xs text-muted">{t("info.badgeTint")}<select aria-label={t("info.badgeTint")} value={tint} onChange={(e) => setTint(e.target.value as typeof tint)} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm">
-      {BADGE_TINTS.map((c) => <option key={c} value={c}>{t(`info.badgeTint.${c}`)}</option>)}
-    </select></label>
+    <div className="text-xs text-muted">{t("info.badgeTint")}<BadgeTintPicker value={tint} onChange={setTint} className="mt-1.5 px-0.5" /></div>
     <p className="text-xs text-subtle">{t("info.badgeHint")}</p>
     <div className="flex justify-end gap-1"><Button disabled={!session.badge && !text} onClick={() => save(null)}>{t("info.badgeClear")}</Button><Button type="submit" variant="primary" disabled={!valid}>{t("settings.save")}</Button></div>
   </form>;

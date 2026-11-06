@@ -116,7 +116,7 @@ function Dialog({ groupId, tab, hostId }: { groupId: string; tab: AgentListTab; 
       : groups.map(choice);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[7vh]" onMouseDown={(e) => e.target === e.currentTarget && closeAgentList()}>
+    <div className="fixed inset-0 z-[150] flex items-start justify-center bg-black/30 pt-[7vh]" onMouseDown={(e) => e.target === e.currentTarget && closeAgentList()}>
       <div role="dialog" aria-modal aria-label={t("agents.title")} className="flex h-[min(82vh,46rem)] w-[52rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         <AgentList
           groupId={groupId}

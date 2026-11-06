@@ -18,6 +18,7 @@ import { useApp } from "../store";
 import { HostDot, HostPlatformIcon } from "./HostMark";
 import { ScriptText } from "./ScriptText";
 import { Tag } from "./Tag";
+import { FloatMore, useRowsBelow } from "./FloatMore";
 import { useOwnerWindow } from "../lib/ownerContext";
 
 const NO_DRAG = "[app-region:no-drag]";
@@ -42,6 +43,8 @@ export function HostSwitcher() {
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const below = useRowsBelow(list, ":scope > [role=menuitem]");
   useTrackOverlay(open);
 
   const versionText = { dev: t("cutexBuild.dev"), legacy: t("cutexBuild.legacy") };
@@ -107,19 +110,19 @@ export function HostSwitcher() {
           <>
             <HostPlatformIcon platform={h.platform} className="text-muted" />
             <HostDot color={h.color} status={h.indicator.status} />
-            <span className="min-w-0 flex-1 truncate" title={hostTip(h)}>
+            <span className="min-w-0 flex-1 truncate" data-tip={hostTip(h)}>
               <ScriptText text={h.label} />
               {h.local && <span className="text-subtle"> · {t("titlebar.local")}</span>}
             </span>
             {statusText(h) && <span className={`shrink-0 text-xs ${h.indicator.status === "error" ? "text-danger" : h.indicator.status === "disconnected" || h.indicator.status === "offline" ? "text-subtle" : "text-warn"}`}>{statusText(h)}</span>}
             {h.version && (
-              <Tag tone={outliers.has(h.id) ? "attention" : "neutral"} title={outliers.has(h.id) ? t("hostSwitcher.versionDiffers") : hostVersionTitle(h.build, versionText)} className="font-mono">
+              <Tag tone={outliers.has(h.id) ? "attention" : "neutral"} data-tip={outliers.has(h.id) ? t("hostSwitcher.versionDiffers") : hostVersionTitle(h.build, versionText)} className="font-mono">
                 {h.version}
               </Tag>
             )}
             {tick(sameScope(scope.scope, singleHostScope(h.id)))}
             <button
-              title={h.connected ? t("hostSwitcher.disconnect") : t("hostSwitcher.connect")}
+              data-tip={h.connected ? t("hostSwitcher.disconnect") : t("hostSwitcher.connect")} aria-label={h.connected ? t("hostSwitcher.disconnect") : t("hostSwitcher.connect")}
               aria-pressed={h.connected}
               onClick={(e) => {
                 e.stopPropagation();
@@ -269,7 +272,7 @@ export function HostSwitcher() {
   return (
     <div ref={ref} className={`${NO_DRAG} relative min-w-0`}>
       <button
-        title={buttonTip}
+        data-tip={buttonTip}
         data-host-switcher=""
         data-hosts-remote={scope.hosts.some((h) => !h.local) ? "" : undefined}
         data-hosts-version-differs={outliers.size ? "" : undefined}
@@ -282,7 +285,7 @@ export function HostSwitcher() {
         <ChevronDown size={12} className="shrink-0" />
       </button>
       {open && (
-        <div role="menu" className="absolute top-full left-0 z-50 mt-1 max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl">
+        <div ref={list} role="menu" className="float float-scroll absolute top-full left-0 z-[160] mt-1 max-h-[70vh] w-80 overflow-y-auto p-1">
           {renderRow(rows[0]!, 0)}
           {groups.length > 0 && (
             <>
@@ -296,6 +299,7 @@ export function HostSwitcher() {
           {rows.slice(hostStart, footStart).map((r, i) => renderRow(r, hostStart + i))}
           <div className="my-1 border-t border-border" />
           {rows.slice(footStart).map((r, i) => renderRow(r, footStart + i))}
+          <FloatMore n={below} list={list} />
         </div>
       )}
     </div>

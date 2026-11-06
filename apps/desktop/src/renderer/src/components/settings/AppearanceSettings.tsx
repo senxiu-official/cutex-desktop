@@ -16,6 +16,8 @@ import { WorkSurfaceSection } from "../WorkSurfaceSettings";
 import { AvatarSettings } from "./AvatarSettings";
 import { DIRECTOR_HEADWEARS, DEFAULT_DIRECTOR_HEADWEAR, headwearSources, type DirectorHeadwear } from "../../lib/directorHeadwear";
 import { radioKeyTarget, useRowA11y } from "../../lib/formA11y";
+import { NAME_GROUPINGS, NAME_READINGS, nameComparer } from "@cutex-desktop/cutex-client/nameOrder";
+import { nameOrderOf } from "../../lib/rosterOrder";
 
 const LATIN = ["Inter", "IBM Plex Sans", "Segoe UI", "Source Sans 3", "Noto Sans", "Source Serif 4", "Lora", "Georgia"];
 const CJK = ["Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "LXGW WenKai", "Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif SC", "KingHwa_OldSong"];
@@ -128,6 +130,7 @@ export function AppearancePage() {
             onChange={(v) => setAppearance({ density: v })}
           />
         </SettingRow>
+        <NameOrderRows />
       </Section>
 
       <AvatarSettings />
@@ -197,5 +200,37 @@ function HeadwearPicker({ value, onChange }: { value: DirectorHeadwear; onChange
         );
       })}
     </div>
+  );
+}
+
+/** A fixed mixed list shown in the current name order under the two rows (design 060 §5.1). */
+const NAME_SAMPLE = ["Zoe", "张三", "agent10", "Alice", "李四", "agent2", "김민수", "田中", "山田", "Bob", "1号"];
+
+/**
+ * 名字排序 / 汉字读法 (design 060 §5.1, lib/rosterOrder): how names are listed everywhere. Each follows the
+ * UI language until picked; 恢复默认 goes back to following it.
+ */
+function NameOrderRows() {
+  const { t, locale } = useI18n();
+  const ui = useUiPrefs();
+  const order = nameOrderOf(locale, ui);
+  const sample = [...NAME_SAMPLE].sort(nameComparer(order, locale)).join(" · ");
+  return (
+    <>
+      <SettingRow agents="none" source="local" label={t("appearance.nameGrouping")} hint={t("appearance.nameGroupingHint")} reset={<ResetButton disabled={ui.nameGrouping === null} onClick={() => setUiPref("nameGrouping", null)} />}>
+        <Segmented
+          value={order.grouping}
+          options={NAME_GROUPINGS.map((v) => ({ value: v, label: t(`appearance.nameGrouping.${v}` as MessageKey), title: t(`appearance.nameGrouping.${v}.tip` as MessageKey) }))}
+          onChange={(v) => setUiPref("nameGrouping", v)}
+        />
+      </SettingRow>
+      <SettingRow agents="none" source="local" label={t("appearance.nameReading")} hint={t("appearance.nameReadingHint")} sample={<span data-name-order-sample="">{t("appearance.nameOrderSample", { names: sample })}</span>} reset={<ResetButton disabled={ui.nameReading === null} onClick={() => setUiPref("nameReading", null)} />}>
+        <Segmented
+          value={order.reading}
+          options={NAME_READINGS.map((v) => ({ value: v, label: t(`appearance.nameReading.${v}` as MessageKey) }))}
+          onChange={(v) => setUiPref("nameReading", v)}
+        />
+      </SettingRow>
+    </>
   );
 }

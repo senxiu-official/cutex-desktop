@@ -2,15 +2,18 @@
 // at once (main/daemon.ts connect → kickSessionFeeds), also when the state was already "connected".
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ feeds: [] as any[], host: null as null | ((options: { signal: AbortSignal }) => Promise<unknown>), sessions: null as null | ((options: { signal: AbortSignal }) => Promise<unknown>) }));
+const fixture = vi.hoisted(() => ({ feeds: [] as any[], capabilities: null as null | (()=>Promise<unknown>), host: null as null | ((options: { signal: AbortSignal }) => Promise<unknown>), sessions: null as null | ((options: { signal: AbortSignal }) => Promise<unknown>) }));
 vi.mock("electron", () => ({
   BrowserWindow: { getFocusedWindow: () => null, getAllWindows: () => [] },
   dialog: {},
   shell: {},
 }));
 vi.mock("@cutex-desktop/cutex-client", () => ({
+  userAccessOf: () => ({ isOwner: true, pending: false }),
+  LIVE_DELTAS_FEATURE: "live-text-deltas",
   CutexClient: class {
     constructor(public endpoint: unknown) {}
+    capabilities() { return fixture.capabilities!(); }
     host(options: { signal: AbortSignal }) { return fixture.host!(options); }
     sessions(_lifecycle: unknown, options: { signal: AbortSignal }) { return fixture.sessions!(options); }
   },
@@ -32,6 +35,7 @@ const sessionFeeds = () => fixture.feeds.filter((f) => f.options?.cutexSessionId
 let service: DaemonService;
 beforeEach(() => {
   fixture.feeds.length = 0;
+  fixture.capabilities = async () => ({featureList: []});
   fixture.sessions = () => Promise.resolve({ sessions: [], management: null });
   vi.useFakeTimers();
   service = new DaemonService(() => {});
@@ -160,4 +164,17 @@ describe("session feeds after a reconnect", () => {
     service.retarget("http://b.invalid");
     expect(feed.reconnectNow).toHaveBeenCalledTimes(1);
   });
+});
+
+it("refreshes capabilities when SSE reconnects after an upgrade without a disconnected daemon state",async()=>{
+ fixture.host=async()=>({hostId:"remote"});
+ fixture.capabilities=async()=>({featureList:["alarms-api"]});
+ service.useEndpoint({baseUrl:"http://private.invalid",token:"test"} as any,{remote:true});await settle();
+ const feed=fixture.feeds.find(f=>!f.options.cutexSessionId)!;
+ feed.handlers.status("live");
+ expect((await service.capabilities())?.featureList).toEqual(["alarms-api"]);
+ fixture.capabilities=async()=>({featureList:["alarms-api","after-upgrade"]});
+ feed.handlers.status("retrying",new Error("stream reconnect"));feed.handlers.status("live");
+ expect(service.currentState.kind).toBe("connected");
+ expect((await service.capabilities())?.featureList).toContain("after-upgrade");
 });

@@ -1,18 +1,20 @@
+import { BrowserAgentCursor } from "./BrowserAgentCursor";
 import { isImeComposing } from "../../lib/ime";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Copy, ExternalLink, EyeOff, Globe, LoaderCircle, Monitor, MoreHorizontal, RotateCw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CornerDownLeft, Globe, LoaderCircle, Monitor, MoreHorizontal, RotateCw, X } from "lucide-react";
 import { openMenuFrom } from "../../lib/contextMenu";
-import { usePaneHeaderCompact } from "../../lib/paneHeader";
+import { browserPageMenu } from "./pageMenu";
+import { dataFlags, useSizeFlags, widthBelow } from "../../lib/sizeFlags";
 import { bridge } from "../../bridge";
 import { useI18n } from "../../i18n";
 import type { SideBodyProps } from "../slots";
-import { browserAddressUrl, browserError, browserErrorKey, browserExternalUrl, INVALID_ADDRESS, MAX_BROWSER_INPUT, NOT_WEB_ADDRESS, safeBrowserUrl, type BrowserState } from "./browserState";
+import { browserAddressUrl, browserError, browserErrorKey, INVALID_ADDRESS, MAX_BROWSER_INPUT, NOT_WEB_ADDRESS, safeBrowserUrl, type BrowserState } from "./browserState";
 import { guestLifecycle } from "./guestLifecycle";
 import { useBrowserEnabled, useBrowserView } from "./tabs";
 import { browserSitePermissionList } from "./sitePermissionText";
 import { afterBrowserHostsDelivered, browserHostCurrent, useBrowserHostEpoch } from "./hosts";
 import { browserActivation } from "./activation";
-import { BrowserControlBanner, BrowserControlHeader } from "./BrowserControls";
+import { BrowserMaidRow } from "./BrowserControls";
 import { BrowserOwnerCapture } from "./BrowserOwnerCapture";
 import { createBrowserHold } from "./hold";
 import { reserveNewOwnerTab } from "./newOwnerTab";
@@ -20,6 +22,7 @@ import { browserRefusalAction } from "../../../../shared/browser";
 import { BrowserBackgroundView } from "./BrowserBackgroundView";
 import { BROWSER_PREVIEW_BACKGROUND } from "./thumbnails";
 import { ServicePaneLink } from "../../components/ServiceLinks";
+import { serviceSlugOf } from "../../lib/serviceLink";
 import { btn } from "../../components/Button";
 import { BrowserLoginPoolPill, BrowserLoginWarning } from "./BrowserLoginHint";
 import { browserLoginOrigin, openOwnerLoginCopy } from "./loginHint";
@@ -29,6 +32,8 @@ import { BROWSER_TAB } from "./browserState";
 import { useServiceStartWait, waitsForService } from "./serviceStartWait";
 
 const BUTTON = "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-subtle enabled:hover:bg-hover enabled:hover:text-foreground disabled:opacity-35";
+/** A narrow 地址行 keeps back, reload, the address and ⋯; 前进 moves into ⋯ (analysis widths: below 640 px). */
+const ADDRESS_FLAGS = { narrow: widthBelow(40) };
 interface BrowserWebview extends HTMLElement { getWebContentsId(): number }
 
 export function BrowserBody(props: SideBodyProps<BrowserState>) {
@@ -53,10 +58,17 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   const [address, setAddress] = useState(view?.url ?? instance.state.url);
   const editing = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+  useEffect(() => { setError(null); setDismissedError(null); }, [hostId, epoch, tabKey, view?.pageGeneration]);
   const [mountFailed, setMountFailed] = useState(false);
   const [retry, setRetry] = useState(0);
   const [working, setWorking] = useState(false);
   const [captureFailed, setCaptureFailed] = useState(false);
+  const [addressRow, addressFlags] = useSizeFlags(ADDRESS_FLAGS);
+  // The ⋯ menu's outcome (地址已复制 / why it failed), cleared after a moment; the row keeps its height.
+  const [pageMessage, setPageMessage] = useState<{ text: string; failed: boolean } | null>(null);
+  useEffect(() => { if (!pageMessage) return; const timer = setTimeout(() => setPageMessage(null), 2500); return () => clearTimeout(timer); }, [pageMessage]);
+  const ownerRecovery = useRef(false);
   // A refused front hand-over remounts the background view; its reason survives that remount.
   const carriedError = useRef<string | null>(null);
   const preview = !bridge.browser && import.meta.env.DEV;
@@ -86,6 +98,10 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   useEffect(() => { hold.current?.update(view?.lease?.leaseId, props.held); }, [view?.lease?.leaseId, props.held, hostId, epoch, tabKey, enabled]);
 
   useEffect(() => { if (!granted) setCaptureFailed(false); }, [granted]);
+  // Preview only (`?browserChrome`, mock.ts): the mock gives this tab an attached page in that control state.
+  useEffect(() => {
+    if (preview && hostId) window.dispatchEvent(new CustomEvent("cutex-preview-browser-tab", { detail: { hostId, tabKey, url: instance.state.url } }));
+  }, [preview, hostId, tabKey]);
 
   useEffect(() => {
     if (!editing.current) setAddress(currentUrl);
@@ -113,6 +129,16 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
     const api = bridge.browser.forHost(hostId);
     const mountFailure = (reason: unknown) => {
       const state = latest.current.instance.state;
+      const code = browserError(reason);
+      if (!state.agentOpened && ["stale_connection", "stale_request", "host switched", "target_closed"].includes(code)) {
+        if (!ownerRecovery.current) {
+          ownerRecovery.current = true;
+          setError(null); setRetry(value => value + 1);
+          return;
+        }
+        setMountFailed(true); setError("target_closed");
+        return;
+      }
       // A refused front hand-over (e.g. the agent's action ran too long): main still carries the
       // page in the background. Show it there again with the reason, never close it.
       if (state.agentOpened && state.front && !state.pendingOpen) {
@@ -198,15 +224,24 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
     });
   }
 
-  async function run(action: () => Promise<void>): Promise<void> {
+  async function run(action: () => Promise<void>, recoverUrl?: string): Promise<void> {
     if (!browserActivation.get() || !browserHostCurrent(hostId, epoch)) return;
     setWorking(true);
     setError(null);
+    setDismissedError(null);
     try {
       await afterBrowserHostsDelivered();
       if (!browserActivation.get() || !browserHostCurrent(hostId, epoch)) return;
       await action();
-    } catch (reason) { if (browserHostCurrent(hostId, epoch)) setError(browserError(reason)); }
+    } catch (reason) {
+      if (browserHostCurrent(hostId, epoch)) {
+        const code = browserError(reason);
+        if (recoverUrl && !latest.current.instance.state.agentOpened && ["stale_connection", "stale_request", "host switched", "target_closed"].includes(code)) {
+          requestedUrl.current = recoverUrl; ownerRecovery.current = true;
+          setError(null); setRetry(value => value + 1);
+        } else setError(code);
+      }
+    }
     finally { if (browserHostCurrent(hostId, epoch)) setWorking(false); }
   }
 
@@ -216,6 +251,7 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
     const typed = browserAddressUrl(address);
     if ("error" in typed) { setError(typed.error); return; }
     const url = typed.url;
+    ownerRecovery.current = false;
     if (!hostId || !epoch || !bridge.browser) return;
     submitted.current = url;
     if (recoverable) {
@@ -226,7 +262,7 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
       return;
     }
     if (!ready) return;
-    void run(() => bridge.browser!.forHost(hostId).navigate(tabKey, url));
+    void run(() => bridge.browser!.forHost(hostId).navigate(tabKey, url), url);
     editing.current = false;
   }
 
@@ -253,11 +289,13 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
 
   function reload(): void {
     if (!hostAvailable) return;
+    ownerRecovery.current = false;
     if (recoverable) { setError(null); setRetry((value) => value + 1); }
-    else if (hostId && bridge.browser) void run(() => bridge.browser!.forHost(hostId).reload(tabKey));
+    else if (hostId && bridge.browser) void run(() => bridge.browser!.forHost(hostId).reload(tabKey), currentUrl);
   }
 
-  const reason = error ?? view?.error;
+  const rawReason = error ?? view?.error;
+  const reason = rawReason === dismissedError ? null : rawReason;
   const reasonKey = reason ? browserErrorKey(reason) : null;
   const candidateFix = reason && (ready || (recoverable && reason === "remote_loopback")) ? browserRefusalAction(reason) : null;
   const fix = candidateFix === "allowDesktopLoopback" && agentPool ? null : candidateFix;
@@ -282,28 +320,53 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
     if (!hostId || !bridge.browser || !loginOrigin || !loginCurrent() || browserCache.get(hostId, tabKey)?.loginOrigin !== loginOrigin) throw Error("stale_browser");
     await bridge.browser.forHost(hostId).dismissLoginWarning(tabKey, loginOrigin);
   }
+  function back(): void { if (hostId) void run(() => bridge.browser!.forHost(hostId).back(tabKey)); }
+  function forward(): void { if (hostId) void run(() => bridge.browser!.forHost(hostId).forward(tabKey)); }
+  function resetZoom(): void { if (hostId && bridge.browser) void bridge.browser.forHost(hostId).setZoom(tabKey, "reset"); }
+  async function pageAction(work: () => Promise<void>, copied = false): Promise<void> {
+    setPageMessage(null);
+    try { await work(); if (copied) setPageMessage({ text: t("browser.copied"), failed: false }); }
+    catch (reason) { setPageMessage({ text: t("browser.actionFailed", { reason: t(browserErrorKey(reason)) }), failed: true }); }
+  }
+  const pageMenu = () => browserPageMenu({ url: currentUrl, narrow: addressFlags.narrow, canGoForward: !!view?.canGoForward, ready, working,
+    toBackground: ready && view?.pool === "agent" && !background ? { busy: !!view.handover } : null, zoom: view?.zoom }, {
+    forward, resetZoom, toBackground,
+    copy: () => void pageAction(() => navigator.clipboard.writeText(currentUrl), true),
+    openExternal: url => void pageAction(() => bridge.api.openExternal(url)),
+  }, t);
   return (
     <div className={`flex h-full min-h-0 flex-col bg-background${view?.control?.operating ? " ring-2 ring-inset ring-accent" : ""}`} data-browser-card data-browser-operating={view?.control?.operating || undefined} data-browser-granted={granted || undefined}
       data-browser-pool={view?.pool} data-browser-lease-state={view?.lease?.state} data-browser-session={view?.lease?.sessionId} data-browser-held={props.held || undefined}>
-      <form className="flex shrink-0 items-center gap-0.5 border-b border-border p-1.5" onSubmit={(event) => { event.preventDefault(); if (!isImeComposing(event)) navigate(); }}>
-        <button type="button" className={BUTTON} title={t("browser.back")} aria-label={t("browser.back")} disabled={!ready || !view?.canGoBack || working} onClick={() => hostId && void run(() => bridge.browser!.forHost(hostId).back(tabKey))}><ArrowLeft size={14} /></button>
-        <button type="button" className={BUTTON} title={t("browser.forward")} aria-label={t("browser.forward")} disabled={!ready || !view?.canGoForward || working} onClick={() => hostId && void run(() => bridge.browser!.forHost(hostId).forward(tabKey))}><ArrowRight size={14} /></button>
+      {/* Maid 行: the service's agent (a service tab in a card) and who controls the page; always there, one height. */}
+      <BrowserMaidRow hostId={hostId} tabKey={tabKey} link={props.where === "card" && serviceSlugOf(currentUrl) ? <ServicePaneLink hostId={hostId} instanceId={instance.id} url={currentUrl} linked={instance.state.linked ?? null} /> : undefined} />
+      {/* 地址行: back · forward · reload | address (favicon, Enter or ↵ submits) | badges · ⋯ (copy, open outside, …). */}
+      <form ref={addressRow} {...dataFlags(addressFlags)} data-browser-address-row="" className="flex h-10 shrink-0 items-center gap-0.5 border-b border-border px-1.5" onSubmit={(event) => { event.preventDefault(); if (!isImeComposing(event)) navigate(); }}>
+        <button type="button" className={BUTTON} title={t("browser.back")} aria-label={t("browser.back")} disabled={!ready || !view?.canGoBack || working} onClick={back}><ArrowLeft size={14} /></button>
+        {!addressFlags.narrow && <button type="button" className={BUTTON} title={t("browser.forward")} aria-label={t("browser.forward")} disabled={!ready || !view?.canGoForward || working} onClick={forward}><ArrowRight size={14} /></button>}
         {view?.loading ? (
           <button type="button" className={BUTTON} title={t("browser.stop")} aria-label={t("browser.stop")} disabled={!ready} onClick={() => hostId && void run(() => bridge.browser!.forHost(hostId).stop(tabKey))}><X size={14} /></button>
         ) : (
           <button type="button" className={BUTTON} title={t("browser.reload")} aria-label={t("browser.reload")} disabled={!hostAvailable || (!ready && !recoverable) || working} onClick={reload}><RotateCw size={14} /></button>
         )}
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-subtle" aria-hidden="true">
-          {view?.loading ? <LoaderCircle size={13} className="animate-spin" /> : view?.favicon ? <img src={view.favicon} alt="" width={14} height={14} referrerPolicy="no-referrer" /> : <Globe size={13} />}
-        </span>
-        <input value={address} onChange={(event) => setAddress(event.target.value)} onFocus={() => { editing.current = true; }} onBlur={() => { editing.current = false; }} aria-label={t("browser.address")} spellCheck={false} autoComplete="off" autoCapitalize="off" maxLength={MAX_BROWSER_INPUT} disabled={!hostAvailable || !bridge.browser} className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-subtle disabled:opacity-60" />
-        {view?.desktopLoopback && <span data-browser-desktop-loopback-badge title={t("browser.desktopLoopback.badgeHint")} className="flex h-6 shrink-0 items-center gap-1 rounded-md border border-border bg-muted px-1.5 text-caption text-muted"><Monitor size={11} aria-hidden="true" />{t("browser.desktopLoopback.badge")}</span>}
-        <button type="submit" disabled={!hostAvailable || (!ready && !recoverable) || working || preview} className="h-7 shrink-0 rounded-md px-2 text-xs text-muted enabled:hover:bg-hover disabled:opacity-35">{t("browser.go")}</button>
-        {agentPool && <BrowserLoginPoolPill key={loginScope} disabled={!ready || working} openOwner={openOwner} />}
-        {ready && view?.pool === "agent" && !background && <button type="button" className={BUTTON} data-browser-to-background title={t("browser.background.send")} aria-label={t("browser.background.send")}
-          disabled={working || !!view.handover} onClick={toBackground}><EyeOff size={14} /></button>}
+        <div className={`ml-0.5 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-ctl border border-border bg-background pr-0.5 pl-2 focus-within:border-subtle ${!hostAvailable || !bridge.browser ? "opacity-60" : ""}`}>
+          <span className="flex size-4 shrink-0 items-center justify-center text-subtle" aria-hidden="true">
+            {view?.loading ? <LoaderCircle size={13} className="animate-spin" /> : view?.favicon ? <img src={view.favicon} alt="" width={14} height={14} referrerPolicy="no-referrer" /> : <Globe size={13} />}
+          </span>
+          <input value={address} onChange={(event) => setAddress(event.target.value)} onFocus={() => { editing.current = true; }} onBlur={() => { editing.current = false; }} aria-label={t("browser.address")} spellCheck={false} autoComplete="off" autoCapitalize="off" maxLength={MAX_BROWSER_INPUT} disabled={!hostAvailable || !bridge.browser} className="h-full min-w-0 flex-1 bg-transparent text-meta text-foreground outline-none" />
+          {view?.desktopLoopback && <span data-browser-desktop-loopback-badge title={t("browser.desktopLoopback.badgeHint")} className="flex h-5 shrink-0 items-center gap-1 rounded-chip bg-surface-2 px-1.5 text-caption text-muted"><Monitor size={11} aria-hidden="true" />{t("browser.desktopLoopback.badge")}</span>}
+          {/* Enter submits; the arrow is the same for a pointer / touch. */}
+          <button type="submit" data-browser-go="" title={t("browser.go")} aria-label={t("browser.go")} disabled={!hostAvailable || (!ready && !recoverable) || working || preview}
+            className="flex size-6 shrink-0 items-center justify-center rounded-md text-subtle enabled:hover:bg-hover enabled:hover:text-foreground disabled:opacity-35"><CornerDownLeft size={13} /></button>
+        </div>
+        {agentPool && <span className="ml-1 flex min-w-0 shrink items-center"><BrowserLoginPoolPill key={loginScope} disabled={!ready || working} openOwner={openOwner} /></span>}
+        {/* Main's page zoom for this tab; click resets it (the page's own Ctrl+wheel / = / − / 0 stay in the guest). */}
+        {view?.zoom && view.zoom !== 1 && (
+          <button type="button" data-browser-zoom="" className="ml-1 flex h-6 shrink-0 items-center rounded-chip bg-surface-2 px-1.5 text-caption text-muted hover:bg-hover hover:text-foreground"
+            title={t("browser.zoom.reset")} aria-label={t("browser.zoom.reset")} onClick={resetZoom}>{Math.round(view.zoom * 100)}%</button>
+        )}
+        {pageMessage && <span role={pageMessage.failed ? "alert" : "status"} className={`ml-1 max-w-40 min-w-0 truncate text-meta ${pageMessage.failed ? "text-danger" : "text-subtle"}`} title={pageMessage.text}>{pageMessage.text}</span>}
+        <button type="button" data-browser-page-menu="" className={BUTTON} data-tip={t("browser.page.menu")} aria-label={t("browser.page.menu")} aria-haspopup="menu" onClick={(event) => openMenuFrom(event.currentTarget, pageMenu())}><MoreHorizontal size={14} /></button>
       </form>
-      <BrowserControlBanner hostId={hostId} tabKey={tabKey} />
       {loginOrigin && <BrowserLoginWarning key={loginScope} disabled={!ready || working} openOwner={openOwner} dismiss={dismissLogin} />}
       {view?.sitePermission && <p role={view.sitePermission.state === "waiting" ? "status" : "alert"} data-browser-site-permission={view.sitePermission.state}
         className={`shrink-0 border-b border-border px-3 py-2 text-xs ${view.sitePermission.state === "waiting" ? "text-foreground" : "text-warn"}`}>
@@ -318,10 +381,13 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
         <span className="min-w-0 flex-1 break-words">{addressKey ? t(addressKey) : serviceWait.state === "timedOut" ? t("browser.serviceWait.timedOut") : t("browser.blocked", { reason: t(reasonKey!) })}{fixNote && <span className="ml-1 text-subtle">{t(fixNote)}</span>}</span>
         {fix && <button type="button" data-browser-refusal-fix={fix} disabled={working} className={`${btn()} shrink-0`}
           onClick={() => { serviceWait.restart(); fixRefusal(fix); }}>{t(fix === "enableExternal" ? "browser.refusal.enableExternal" : fix === "allowDesktopLoopback" ? "browser.refusal.openDesktopLoopback" : fix === "reload" ? "browser.reload" : "browser.refusal.retry")}</button>}
+        <button type="button" className={BUTTON} aria-label={t("common.close")} title={t("common.close")}
+          onClick={() => { setDismissedError(reason); setError(null); }}><X size={14} /></button>
       </div>}
       {!safeBrowserUrl(currentUrl) && <p role="status" className="shrink-0 border-b border-border px-3 py-1 text-xs text-subtle">{t("browser.longUrl")}</p>}
       <div className="relative min-h-0 flex-1">
         <div ref={host} data-browser-viewport className="absolute inset-0" style={{ visibility: !hostAvailable || crashed || invalidated ? "hidden" : "visible" }} />
+        <BrowserAgentCursor key={`${view?.guestId ?? "none"}:${view?.pageGeneration ?? 0}`} cue={view?.cursor} granted={!!granted && view?.control?.state === "granted"} visible={props.visible && !background && hostAvailable && !crashed && !invalidated} viewport={host} />
         {background && hostId && <BrowserBackgroundView hostId={hostId} tabKey={tabKey} title={view?.title || currentUrl} handover={!!view?.handover}
           operating={!!view?.control?.operating} agentName={view?.lease?.agentName} onFront={toFront} />}
         {granted && !background && hostId && view && <BrowserOwnerCapture key={view.guestId} hostId={hostId} tabKey={tabKey} guestId={view.guestId} viewport={host}
@@ -337,51 +403,6 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
         )}
       </div>
       {hostAvailable && (view?.loading || (!view && !preview && !error && bridge.browser)) && <p role="status" className="shrink-0 border-t border-border px-3 py-1 text-xs text-subtle">{t(view?.loading ? "browser.loading" : "browser.starting")}</p>}
-    </div>
-  );
-}
-
-export function BrowserActions({ hostId, instance, where }: SideBodyProps<BrowserState>) {
-  const { t } = useI18n();
-  // The pane header is short of room for the tab titles (lib/paneHeader): 外部打开 / 复制 go into a ⋯, the agent picker narrows.
-  const compact = usePaneHeaderCompact();
-  const view = useBrowserView(hostId, instance.state.tabKey);
-  const url = view?.url ?? instance.state.url;
-  const external = browserExternalUrl(url);
-  const [message, setMessage] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  async function action(work: () => Promise<void>, copied = false): Promise<void> {
-    setMessage(null);
-    setFailed(false);
-    try { await work(); if (copied) setMessage(t("browser.copied")); }
-    catch (reason) { setFailed(true); setMessage(t("browser.actionFailed", { reason: t(browserErrorKey(reason)) })); }
-  }
-  return (
-    <div className="flex items-center gap-0.5">
-      {/* A service tab: its agent (「打开 <owner>」, or the link + 断开; lib/serviceLink). Not on a reference card. */}
-      {where === "card" && <ServicePaneLink hostId={hostId} instanceId={instance.id} url={url} linked={instance.state.linked ?? null} />}
-      <BrowserControlHeader hostId={hostId} tabKey={instance.state.tabKey} compact={compact} />
-      {/* Main's page zoom for this tab; click resets it (the page's own Ctrl+wheel / = / − / 0 stay in the guest). */}
-      {view?.zoom && view.zoom !== 1 && (
-        <button type="button" data-browser-zoom="" className="flex h-6 shrink-0 items-center rounded-md border border-border bg-muted px-1.5 text-caption text-muted enabled:hover:bg-hover enabled:hover:text-foreground"
-          title={t("browser.zoom.reset")} aria-label={t("browser.zoom.reset")}
-          onClick={() => { if (hostId && bridge.browser) void bridge.browser.forHost(hostId).setZoom(instance.state.tabKey, "reset"); }}>
-          {Math.round(view.zoom * 100)}%
-        </button>
-      )}
-      {message && <span role={failed ? "alert" : "status"} className={`${compact ? "max-w-16" : "max-w-40"} truncate text-xs text-subtle`} title={message}>{message}</span>}
-      {compact ? (
-        <button data-browser-more="" className={BUTTON} title={t("browser.more")} aria-label={t("browser.more")} aria-haspopup="menu"
-          onClick={(e) => openMenuFrom(e.currentTarget, [
-            { label: t("browser.external"), icon: <ExternalLink size={14} />, disabled: !external, onSelect: () => { if (external) void action(() => bridge.api.openExternal(external)); } },
-            { label: t("browser.copy"), icon: <Copy size={14} />, onSelect: () => void action(() => navigator.clipboard.writeText(url), true) },
-          ])}><MoreHorizontal size={13} /></button>
-      ) : (
-        <>
-          <button className={BUTTON} title={t("browser.external")} aria-label={t("browser.external")} disabled={!external} onClick={() => external && void action(() => bridge.api.openExternal(external))}><ExternalLink size={13} /></button>
-          <button className={BUTTON} title={t("browser.copy")} aria-label={t("browser.copy")} onClick={() => void action(() => navigator.clipboard.writeText(url), true)}><Copy size={13} /></button>
-        </>
-      )}
     </div>
   );
 }

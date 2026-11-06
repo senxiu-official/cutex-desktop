@@ -1,7 +1,7 @@
 // Task rows (DESIGN §4.18): one mechanical line per cutex task action or delivery —
 // 📋 verb [avatar] counterpart #N title. Own actions fold with other tools; deliveries don't.
 import { useState } from "react";
-import { ChevronDown, ChevronRight, CircleQuestionMark, ClipboardList, Hourglass, Loader2, ShieldX, X } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleQuestionMark, ClipboardList, Hourglass, Loader2, ShieldCheck, ShieldX, X } from "lucide-react";
 import type { MessageKey } from "../i18n";
 import { useI18n } from "../i18n";
 import { toolErrorText, unfinishedCreateAction, type TaskRowModel, type TaskRowOutcome } from "../lib/taskRows";
@@ -11,7 +11,8 @@ import type { RawItem } from "../lib/timeline";
 import { formatSpan } from "../lib/delegations";
 import { TaskTag, Who } from "./Parties";
 import { useApp } from "../store";
-import { convSessionOf, convSidebarOf, useConvScope } from "../lib/conversationScope";
+import { convSessionOf, convSidebarOf, useConvHost, useConvScope } from "../lib/conversationScope";
+import { approvalSubject, liveOutcome, useLiveApproval, type ShownOutcome, type ShownOutcomeKind } from "../lib/liveApproval";
 import { sessionProfileName } from "../lib/agentLook";
 import type { AgentHint } from "../lib/agentHint";
 import { ToolErrorText } from "./ToolErrorText";
@@ -60,15 +61,17 @@ function Tag({ task }: { task: TaskRowModel }) {
 }
 
 // The outcome word only (UI review #13): the reason after it stays muted, the row text too.
-const OUTCOME_TONE: Record<TaskRowOutcome["kind"], string> = { failed: "text-danger", uncertain: "text-warn-text", approval: "text-warn-text", declined: "text-muted" };
+// approved / expired / decided: what became of a call that waited for the owner (lib/liveApproval).
+const OUTCOME_TONE: Record<ShownOutcomeKind, string> = { failed: "text-danger", uncertain: "text-warn-text", approval: "text-warn-text", declined: "text-muted", approved: "text-ok-text", expired: "text-subtle", decided: "text-subtle" };
 
-function RowIcon({ running, outcome }: { running: boolean; outcome: TaskRowOutcome | null }) {
+function RowIcon({ running, outcome }: { running: boolean; outcome: ShownOutcome | null }) {
   if (running) return <Loader2 size={13} className="shrink-0 animate-spin text-accent" />;
   // Same failed marker as other tool rows (WorkGroup ToolIcon).
   if (outcome?.kind === "failed") return <X size={13} className="shrink-0 text-danger" />;
   if (outcome?.kind === "uncertain") return <CircleQuestionMark size={13} className="shrink-0 text-warn" />;
   if (outcome?.kind === "approval") return <Hourglass size={13} className="shrink-0 text-warn" />;
   if (outcome?.kind === "declined") return <ShieldX size={13} className="shrink-0 text-subtle" />;
+  if (outcome?.kind === "approved") return <ShieldCheck size={13} className="shrink-0 text-ok-text" />;
   return <ClipboardList size={13} className="shrink-0 text-subtle" />;
 }
 
@@ -77,7 +80,10 @@ export function TaskToolRow({ item, task }: { item: RawItem; task: TaskRowModel 
   const userToggle = useUserLayoutToggle();
   const [open, setOpen] = useState(false);
   const running = isRunning(item);
-  const outcome = running ? null : (task.outcome ?? (isFailed(item) ? { kind: "failed" as const, code: null, detail: null } : null));
+  const replied: TaskRowOutcome | null = running ? null : (task.outcome ?? (isFailed(item) ? { kind: "failed" as const, code: null, detail: null } : null));
+  // A call that waited for the owner (delegation review, profile approval) follows the host's lists, not the first reply.
+  const live = useLiveApproval(useConvHost(), replied?.kind === "approval" ? approvalSubject(item) : null);
+  const outcome = liveOutcome(replied, live);
   // The refusal reason ("code: detail") replaces the text on the collapsed line; expanding shows both.
   const reason = outcome ? [outcome.code, outcome.detail].filter(Boolean).join(": ") || null : null;
   // What the call returned, in full, when it says more than the reason (e.g. a Management envelope).

@@ -52,12 +52,12 @@ describe("asks pause (asks-pause-v2)", () => {
   it("agent menu offers 暂停委托 / 继续委托 only with the capability", async () => {
     const labels = () => normalizeEntries(agentMenu(session, t as never)).map((e) => (e === "separator" ? "|" : (e as MenuAction).label));
     await seed(["asks-pause-v2"]);
-    expect(labels()).toContain("asksPause.pause");
+    expect(labels()).toContain("menu.asksPause");
     await seed(["asks-pause-v2"], PAUSE);
-    expect(labels()).toContain("asksPause.resume");
-    expect(labels()).not.toContain("asksPause.pause");
+    expect(labels()).toContain("menu.asksResume");
+    expect(labels()).not.toContain("menu.asksPause");
     await seed([]);
-    expect(labels().some((l) => l.startsWith("asksPause."))).toBe(false);
+    expect(labels().some((l) => l.startsWith("menu.asks"))).toBe(false);
   });
 });
 

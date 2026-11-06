@@ -111,7 +111,7 @@ describe("wide window bar", () => {
     right("agent-config.newAgent");
     right("quick-chats.nav");
     expect(data.opened).toEqual(["new:agent-config.newAgent", "quick:quick-chats.nav"]);
-    expect(q('[data-titlebar-entry="agent-config.newAgent"]')!.title).toContain("agent-config.newAgentMenuHint");
+    expect(q('[data-titlebar-entry="agent-config.newAgent"]')!.getAttribute("data-tip")).toContain("agent-config.newAgentMenuHint");
     right("approvals.nav");
     expect(data.menus.at(-1)!.labels).toEqual(["navMore.unpin"]);
   });

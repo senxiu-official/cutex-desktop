@@ -8,6 +8,7 @@ import { PlainToolRow } from "../../components/PlainToolRow";
 import { ItemMedia } from "../../components/ItemMedia";
 import { useConvHost } from "../../lib/conversationScope";
 import { useI18n } from "../../i18n";
+import { approvalSubject, useLiveApproval } from "../../lib/liveApproval";
 import { TimelineRowFallback } from "../TimelineRowFallback";
 
 const statusKeys = { busy: "status.running", idle: "status.idle", offline: "status.offline", error: "status.error" } as const;
@@ -37,9 +38,15 @@ export function StandardToolRow({ item }: { item: RawItem; sessionId: string }) 
   const hostId = useConvHost();
   const { t } = useI18n();
   const model = standardToolRow(item);
+  // An action_status answer "awaiting approval" says what the owner decided since (lib/liveApproval), so repeated
+  // checks don't stack rows that still read 调用等待审批 after the approval.
+  const waiting = model?.kind === "actionStatus" && model.state === "awaitingApproval";
+  const live = useLiveApproval(hostId, waiting ? approvalSubject(item) : null);
   if (!model) return <TimelineRowFallback />;
+  const decided = waiting && live !== null && live !== "pending";
   const detail = model.kind === "agents" && model.agentCount !== null ? [t("conversation.tools.agentCount", { n: model.agentCount }), model.summary].filter(Boolean).join(" · ") : model.summary;
   const key = model.kind === "memberRuntime" && model.operation ? `conversation.tools.memberRuntime.${model.operation}` as const : `conversation.tools.${model.kind}` as const;
-  const summary = [detail, model.state ? t(`conversation.tools.actionStatus.${model.state}`) : null].filter(Boolean).join(" · ");
-  return <><PlainToolRow item={item} presentation={{ kind: model.kind, key, detail: summary, outcome: model.outcome, icon: icons[model.kind], details: <Details item={item} model={model} /> }} /><ItemMedia item={item} hostId={hostId} /></>;
+  const state = decided ? t(`conversation.tools.actionStatus.approval.${live}`) : model.state ? t(`conversation.tools.actionStatus.${model.state}`) : null;
+  const summary = [detail, state].filter(Boolean).join(" · ");
+  return <><PlainToolRow item={item} presentation={{ kind: model.kind, key, detail: summary, outcome: decided ? null : model.outcome, icon: icons[model.kind], details: <Details item={item} model={model} /> }} /><ItemMedia item={item} hostId={hostId} /></>;
 }

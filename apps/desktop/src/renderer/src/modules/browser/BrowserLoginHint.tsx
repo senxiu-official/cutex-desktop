@@ -68,7 +68,7 @@ export function BrowserLoginPoolPill({ disabled, openOwner }: Pick<Props, "disab
     </button>
     {open && createPortal(<div ref={panel} id={id} role="dialog" aria-modal="false" aria-label={t("browser.login.poolTitle")} tabIndex={-1}
       data-popover="" data-browser-login-explanation style={place}
-      className="fixed z-50 max-h-[calc(100vh-16px)] w-72 max-w-[calc(100vw-16px)] overflow-y-auto rounded-xl border border-border bg-surface p-3 text-xs text-muted shadow-xl outline-none">
+      className="float fixed z-[160] max-h-[calc(100vh-16px)] w-72 max-w-[calc(100vw-16px)] overflow-y-auto p-3 text-xs text-muted outline-none">
       <p className="mb-1 font-medium text-foreground">{t("browser.login.poolTitle")}</p>
       <p className="mb-3 leading-relaxed">{t("browser.login.poolHint")}</p>
       <button type="button" className={btn()} disabled={disabled || pending} onClick={() => void openInOwner()}>{t("browser.login.openOwner")}</button>

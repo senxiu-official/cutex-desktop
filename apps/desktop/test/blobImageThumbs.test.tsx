@@ -39,7 +39,7 @@ it("reserves the identical aspect-ratio box before bytes load and in the lightbo
   await render(sized);
   const placeholder = host.querySelector<HTMLElement>('[data-image-box="reserved"]')!;
   expect(placeholder.style.aspectRatio).toBe("1200 / 800");
-  expect(placeholder.style.width).toBe("min(100%, 480px)");
+  expect(placeholder.style.width).toBe("480px");
   const reserved = placeholder.getAttribute("style");
   await act(async () => { seen([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver); });
   expect(env.read).toHaveBeenCalledWith("remote", "cutex.session", hash, { mime: "image/png", size: 3 });

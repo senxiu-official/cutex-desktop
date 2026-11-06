@@ -125,7 +125,7 @@ export function GaugeRow({ gauge: g, view }: { gauge: QuotaGauge; view: QuotaVie
         <span className="min-w-0 flex-1 truncate text-muted">{formatBalance(g.balance, true)}</span>
       ) : (
         <>
-          <GaugeBar ratio={fill ?? 0} view={view} className="h-1 min-w-0 flex-1" />
+          <GaugeBar ratio={fill ?? 0} view={view} gauge={g} className="h-1 min-w-0 flex-1" />
           <span className="w-9 shrink-0 text-right text-muted">{fill === null ? "—" : `${quotaPercent(g, view)}%`}</span>
         </>
       )}

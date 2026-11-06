@@ -6,6 +6,7 @@
 // On the project page the list is also the member management (`members`): row menu entries for the
 // Director seat / 移出项目 and a bulk 移出项目 (the page supplies the cutex mutations).
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useArchivedAgents } from "../lib/useArchivedAgents";
 import { Loader2, MoreHorizontal, Search } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import type { ActivityPreview } from "../lib/activity";
@@ -39,6 +40,7 @@ import { cachedProfileList, loadProfileList } from "../lib/profileSnapshot";
 import type { AgentRow } from "../lib/sidebar";
 import { relativeTime, useSidebarModel } from "../lib/sidebarView";
 import { sidebarOf, useApp } from "../store";
+import { beginOperation, trackedOperationItem } from "../lib/backgroundOperations";
 import { isHostBusyActionPending } from "../lib/hostBusyActions";
 import { useTargetHostId, useTargetIsFocus, useTargetSelect } from "../lib/targetHost";
 import { Avatar } from "./Avatar";
@@ -78,6 +80,9 @@ const NO_ACTIVITY: Record<string, ActivityPreview> = {};
 const GRID = "agent-list-grid grid grid-cols-[1rem_1.75rem_minmax(0,1fr)_minmax(0,9rem)_2.75rem_5.5rem] items-center gap-x-3";
 const LIST_SIZES = { narrow: widthBelow(40) };
 const BUTTON = "rounded-md px-3 py-1 text-xs disabled:opacity-40";
+/** Its title in the tray's 后台操作 list (lib/backgroundOperations): batch start / stop / restore-and-start. */
+const OPERATION_KIND = { start: "operations.kind.start", stop: "operations.kind.stop", restoreStart: "operations.kind.restoreStart" } as const satisfies Partial<Record<Action, MessageKey>>;
+
 const ACTION_LABEL: Record<Action, MessageKey> = {
   stop: "agents.stop",
   start: "agents.start",
@@ -358,6 +363,7 @@ export function AgentList({
   members?: MemberControls;
 }) {
   const { t } = useI18n();
+  useArchivedAgents();
   const model = useSidebarModel();
   const [sizeRef, sizeFlags] = useSizeFlags(LIST_SIZES);
   // The list's host: the target host (a dialog / project page of another host of the scope), else the focus host.
@@ -466,11 +472,14 @@ export function AgentList({
     setSelected(new Set());
     anchor.current = null;
     const update = (id: string, patch: Partial<Progress>) => setProgress((prev) => (prev[id] ? { ...prev, [id]: { ...prev[id]!, ...patch } } : prev));
+    const operationId = action === "start" || action === "stop" || action === "restoreStart"
+      ? beginOperation(hostId, OPERATION_KIND[action], ids.map(id => ({key: id, name: byId.get(id)!.name}))) : null;
     // Detaches go one at a time: each is fenced by the project revision the one before advanced.
     await runLimited(ids, action === "detach" || starts ? 1 : START_CONCURRENCY, async (id) => {
       update(id, { phase: "running" });
       try {
         if (action === "detach") await members!.detach(id);
+        else if (operationId) await trackedOperationItem({operationId, key: id}, () => perform(action, byId.get(id)!, hostId));
         else await perform(action, byId.get(id)!, hostId);
         update(id, { phase: "done", error: undefined });
       } catch (e) {

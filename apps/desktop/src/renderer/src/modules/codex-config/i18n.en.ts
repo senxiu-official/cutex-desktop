@@ -3,6 +3,9 @@
 import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
+  "codex-config.plugins.officialAppRequired": "Requires the official OpenAI app; not available in cutex",
+  "codex-config.plugins.unavailableBadge": "Unavailable",
+
   "codex-config.title": "Codex config",
   "codex-config.description": "Codex plugins, MCP servers, skills and hooks",
   // ---- settings (moved from the base catalog, 2026-10-09) ----

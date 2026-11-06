@@ -1,4 +1,3 @@
-<!-- 与 README.md 保持同步：标题相同、顺序相同，两份在同一个提交里修改。 -->
 <p align="center">
   <img src="apps/desktop/resources/icons/icon-256.png" width="120" alt="Cutex 图标">
 </p>
@@ -6,7 +5,7 @@
 <h1 align="center">Cutex 桌面端</h1>
 
 <p align="center">
-  长时间运行的编程智能体在桌面上的家：Codex 和 Claude 智能体在你自己的电脑上持续工作，并且互相协作。
+  用于管理本机与远程主机上持久编程智能体的桌面客户端。
 </p>
 
 <p align="center">
@@ -25,24 +24,23 @@
   <img alt="平台：Windows、Linux、macOS" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey">
 </p>
 
-<!-- hero screenshot: docs/images/hero-light.png / hero-dark.png (pending) -->
 
-## Cutex 桌面端是什么
+## 概述
 
 Cutex 桌面端是 [cutex](https://github.com/senxiu-official/cutex) 的桌面应用。cutex 是在你自己的电脑上运行编程智能体的
 后台服务。每个智能体都是一个持久的会话，运行在 [cute-codex](https://github.com/senxiu-official/cute-codex)（OpenAI Codex
 的分支）或 Claude Code 上。所有状态都在 cutex 里，桌面端只是客户端，所以关掉应用后，智能体照样工作，也照样互相沟通。
 
-## 亮点
+## 功能
 
-**互相协作的智能体**
+**智能体协作**
 - **持久的智能体**按项目分组，各有自己的名字、头像和历史。
 - **委托**：智能体之间互相分派任务并等待结果；「委托」页显示谁让谁做了什么，你可以审核、暂停或停止。
 - **提问和审批**直接出现在对话里；主机主人可以设置有范围、会过期的自动审批规则。
 - 每一轮都可以**排队、引导或打断**；闹钟稍后叫醒智能体；任何消息都能开侧聊、加批注和书签；可以分叉智能体，
   或回退到之前的某一轮。
 
-**你的电脑**
+**本机与远程主机**
 - **本机和远程主机**：通过 SSH 添加另一台电脑（桌面端自动建隧道、自动配对），可以切换主机，也可以同时显示所有主机。
 - **文件、改动对比和终端**都经过后台服务，远程主机和本机用法一样；远程文件可以复制到这台电脑上。
 - **共用主机**：多人可以作为不同用户共用一台主机，各自管理自己的设备。
@@ -57,13 +55,13 @@ Cutex 桌面端是 [cutex](https://github.com/senxiu-official/cutex) 的桌面�
 - **Profile** 支持 ChatGPT、Claude 和 OpenAI 兼容接口；每个智能体用一个，随时可以换。可以从 CC Switch 导入 Profile。
 - **额度和费用**：服务商提供的套餐额度会直接显示；所有主机的 token 用量和费用按 Profile 合并统计。
 
-**隐私优先**
-- **不用账号，不收集任何数据。** API 密钥和令牌只在后台服务和应用主进程里。
+**隐私与隔离**
+- **无须注册 Cutex 账号，不发送遥测数据。** API 密钥和令牌只在后台服务和应用主进程里。
 - **插件在沙盒里运行**：第三方代码只在隔离的框架里运行，不能联网，插件默认关闭。见 [SECURITY.md](SECURITY.md)。
 
 ## 下载
 
-当前公开版本：**v0.2.0**。下载见[最新发布页](https://github.com/senxiu-official/cutex-desktop/releases/latest)。
+当前公开版本：**v0.2.2 — Beautiful World**。0.2 系列统一使用 Beautiful World 名称。下载见[最新发布页](https://github.com/senxiu-official/cutex-desktop/releases/latest)。
 
 | 平台 | 安装包 | 运行什么 |
 |---|---|---|
@@ -77,8 +75,8 @@ Cutex 桌面端是 [cutex](https://github.com/senxiu-official/cutex) 的桌面�
 
 ## 快速开始
 
-1. **安装 cutex 和桌面端。** 按 [docs/install/AGENT-INSTALL.md](docs/install/AGENT-INSTALL.md) 操作（约 15 分钟，不用编译）。
-   这份指南写得让 Claude Code、Codex 这样的编程助手也能从头照做：最省事的办法是直接交给你的编程助手。
+1. **安装 cutex 和桌面端。** 按 [docs/install/AGENT-INSTALL.md](docs/install/AGENT-INSTALL.md) 操作（使用签名二进制，无须编译）。
+   指南包含完整命令，可手动执行或交由编程助手执行。
 2. **打开应用。** 它会自己找到本机的 cutex。在 macOS 上，或者要连另一台电脑，用左上角主机菜单里的
    **「添加 SSH 主机…」**。
 3. **添加 Profile**：设置 → Profile（ChatGPT 或 Claude 账号登录，或者 API key）。
@@ -97,10 +95,10 @@ Cutex 桌面端是 [cutex](https://github.com/senxiu-official/cutex) 的桌面�
 - [架构和产品决策](docs/DESIGN.md)
 - [模块接口](docs/desktop-modules.md)、[如何写一个模块](docs/module-dev-guide.md)和[插件示例](examples/README.md)
 
-## 项目状态
+## 平台支持
 
-Cutex 桌面端还很年轻：作者每天都在用，但其他用户还不多，难免有粗糙的地方，尤其是 macOS 和不常用的模块。
-远程访问默认在你自己的网络里（SSH 或你信任的私有 tailnet）。报告问题前请先看[已知问题](docs/KNOWN-ISSUES.md)。
+Windows 和 Linux 支持桌面端及 cutex 主机服务。macOS 提供桌面客户端，连接运行 cutex 的 Windows 或 Linux 主机。
+远程连接使用 SSH 或可信的私有网络。平台与组件限制见[已知问题](docs/KNOWN-ISSUES.md)。
 
 ## 参与和支持
 

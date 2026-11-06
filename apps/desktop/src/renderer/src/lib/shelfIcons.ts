@@ -39,8 +39,8 @@ export const EMPTY_PAGE_ICON: Icon = SquareDashed;
  * the empty page's. A pinned page (固定, `shared`) keeps it — the Rail and the Shelf's top-left add a pin corner
  * (owner 2026-10-25).
  */
-export function pageIcon(page: Pick<SidePage, "icon" | "cards">, kindIcon: (kind: string) => Icon | null): Icon {
+export function pageIcon(page: Pick<SidePage, "icon" | "cards" | "emptyKind">, kindIcon: (kind: string) => Icon | null): Icon {
   if (page.icon) return PAGE_ICON_COMPONENTS[page.icon];
   const first = page.cards[0];
-  return (first ? kindIcon(first.kind) : null) ?? EMPTY_PAGE_ICON;
+  return (first ? kindIcon(first.kind) : page.emptyKind ? kindIcon(page.emptyKind) : null) ?? EMPTY_PAGE_ICON;
 }

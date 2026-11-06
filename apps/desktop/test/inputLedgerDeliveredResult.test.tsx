@@ -198,3 +198,45 @@ describe("captured delivered delegation results (r274.1 expected link contract)"
     expect(host.querySelectorAll('[data-tl-row]')).toHaveLength(2);
   });
 });
+
+
+describe("057 coalesced carried results", () => {
+  it("renders one shared native result view, preserves every input status, and keeps structured expansion reachable", async () => {
+    const sample = structuredClone(captured.cases[0]!) as Sample;
+    const fullBody = "Shared coalesced full result body";
+    sample.native.output = JSON.stringify({ source: { kind: "service", id: "cutex-asks" }, type: "notice", text: fullBody });
+    const secondItem = { ...sample.native.externalInputView.data.items[0]!, askId: "ask-second", title: "Second result", preview: "Second result excerpt" };
+    sample.native.externalInputView.data.items.push(secondItem);
+    const first = records([sample])[0]!;
+    const second = { ...first, inputId: "dlv-second", state: "accepted" as const, stage: "offered" as const, askId: secondItem.askId, preview: "Second individual ledger preview" };
+    const owner = record("carrying-owner", { cutexSessionId: first.cutexSessionId, kind: "owner", state: "inContext", turnId: first.turnId, timelineItemId: "owner-native", carries: [first.inputId, second.inputId] });
+    const carried = [first, second].map(r => ({ ...r, reason: "carriedByOwner" }));
+    fx.state.features = new Set(["input-ledger-v1", "owner-carries-v1"]);
+    fx.state.inputs = { [key]: applyInputLedgerSnapshot(emptyInputLedgerSession(), {
+      ledgerEpoch: "e", stateRevision: 1, records: [owner, ...carried], delivery: delivery("idle", 1), coverage: { kind: "full" },
+    }).session };
+    const timeline = timelineFromThreadRead({ thread: { id: "thread-s1", turns: [{ id: first.turnId, status: "completed", items: [
+      { type: "userMessage", id: "owner-native", clientId: owner.inputId, content: [{ type: "text", text: "Owner text only" }] }, sample.native,
+    ] }] } } as never);
+    await act(async () => root.render(h(TimelineBody, { timeline, entries: orderedEntries(timeline), sessionId: SID, nameOf: (id: string) => id })));
+    expect(host.querySelectorAll(`[data-carried-native-id="${sample.native.id}"]`)).toHaveLength(1);
+    // Ordinary rows (owner 2026-11-05): no card box, no heading.
+    expect(host.querySelector('[data-testid="owner-carried-inputs"]')).toBeNull();
+    expect(host.textContent).not.toContain("inputLedger.carried");
+    for (const child of carried) {
+      const group = host.querySelector(`[data-carried-input-id="${child.inputId}"]`);
+      expect(group?.querySelector('[data-testid="input-status"]')?.getAttribute("data-state")).toBe(child.state);
+      expect(group?.textContent).toContain(child.state === "inContext" ? "inputLedger.record.inContext" : "inputLedger.record.offered");
+      expect(host.querySelectorAll(`[data-testid="input-status"][data-input-id="${child.inputId}"]`)).toHaveLength(1);
+    }
+    const resultButtons = [...host.querySelectorAll<HTMLButtonElement>("button")].filter(button => button.textContent?.includes("delegation.resultFrom"));
+    expect(resultButtons).toHaveLength(2);
+    await act(async () => resultButtons[0]!.click());
+    expect(host.textContent?.split(fullBody)).toHaveLength(2);
+    expect(host.querySelector("[data-send-bubble]")?.textContent).toBe("Owner text only");
+    expect(host.textContent).toContain("Second result");
+    // The other result line controls the same shared rich body, rather than a second copy.
+    await act(async () => resultButtons[1]!.click());
+    expect(host.textContent).not.toContain(fullBody);
+  });
+});

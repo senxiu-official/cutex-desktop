@@ -73,15 +73,19 @@ describe("main-owned browser visibility gate", () => {
     f.document.querySelectorAll = () => [f.guest, f.guest];
     expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toBe(false);
   });
+  // Not dispatchable, yet laid out at its own size: `covered` carries that size so a read keeps
+  // the page's native viewport instead of emulating one (which blurred a visible card).
   it.each(["hidden", "inert"] as const)("checks ancestor %s", key => {
-    const f = dom(); f.ancestor[key] = true; expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toBe(false);
+    const f = dom(); f.ancestor[key] = true; expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toEqual({ covered: { width: 640, height: 360 } });
   });
   it.each([["display", "none"], ["visibility", "hidden"], ["opacity", "0"], ["pointerEvents", "none"], ["contentVisibility", "hidden"]])("checks ancestor style %s=%s", (key, value) => {
     const f = dom(); (f.style as Record<string, string>)[key!] = value!;
-    expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toBe(false);
+    expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toEqual({ covered: { width: 640, height: 360 } });
   });
   it("refuses covered, detached, offscreen or wrong-identity elements", () => {
-    for (const mutate of [(f: ReturnType<typeof dom>) => { f.document.elementFromPoint = () => ({} as any); },
+    const f = dom(); f.document.elementFromPoint = () => ({} as any);
+    expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toEqual({ covered: { width: 640, height: 360 } });
+    for (const mutate of [
       (f: ReturnType<typeof dom>) => { f.guest.isConnected = false; },
       (f: ReturnType<typeof dom>) => { f.rect.right = 1100; },
       (f: ReturnType<typeof dom>) => { f.guest.getAttribute = () => "different"; }]) {
@@ -112,7 +116,7 @@ describe("main-owned browser visibility gate", () => {
     if (reason === "hidden") f.capture.hidden = true;
     if (reason === "inert") f.capture.inert = true;
     if (reason === "transparent") f.markerStyle.opacity = "0";
-    if (reason === "shell-overlay") { f.document.elementFromPoint = () => ({}); expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toBe(false); return; }
+    if (reason === "shell-overlay") { f.document.elementFromPoint = () => ({}); expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toEqual({ covered: { width: 640, height: 360 } }); return; }
     expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toEqual({ capturePending: true });
   });
   it.each(["missing", "not-ready", "not-granted"])("never returns actionable bounds when capture is %s", reason => {
@@ -125,7 +129,16 @@ describe("main-owned browser visibility gate", () => {
   it("one covered sample (app menu, dialog, the old shield) denies dispatch", () => {
     const f = dom(); let hits = 0;
     f.document.elementFromPoint = () => ++hits === 5 ? f.capture : f.guest;
-    expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toBe(false);
+    expect(runInNewContext(browserVisibilityScript(guestId), f.context)).toEqual({ covered: { width: 640, height: 360 } });
+  });
+  it("a covered card refuses as hidden and says its laid-out size; a hidden window does not", async () => {
+    const f = fixture();
+    f.inspect.mockResolvedValue({ covered: { width: 640, height: 360 } } as any);
+    await expect(ensureBrowserVisible({ ...f.options, hiddenTarget: "reject" })).rejects.toMatchObject({ code: "target_hidden", layout: { width: 640, height: 360 } });
+    f.window.isMinimized.mockReturnValue(true);
+    const error = await ensureBrowserVisible({ ...f.options, hiddenTarget: "reject" }).catch(value => value);
+    expect(error).toMatchObject({ code: "target_hidden" });
+    expect(error.layout).toBeUndefined();
   });
   it("waits for visible capture readiness in reject mode without revealing or retrying an action", async () => {
     vi.useFakeTimers(); const f = fixture(); f.inspect.mockResolvedValueOnce({ capturePending: true } as any);

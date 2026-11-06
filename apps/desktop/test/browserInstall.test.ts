@@ -5,7 +5,7 @@ import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import type { HostManager } from "../src/main/hosts";
 import type { BrowserEvent, BrowserRequest, BrowserTabMount, BrowserTabView } from "../src/shared/browser";
 import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS } from "../src/shared/browser";
-import { browserAppZoom, browserDisplayUrl, installBrowser, syncBrowserHosts } from "../src/main/browser/install";
+import { browserAppZoom, browserDisplayUrl, installBrowser, navigationFailure, syncBrowserHosts } from "../src/main/browser/install";
 import { BrowserLeases } from "../src/main/browser/leases";
 import { InAppProvider } from "../src/main/browser/provider";
 
@@ -87,7 +87,10 @@ class SessionMock extends EventEmitter {
   webRequest = {
     onBeforeRequest: (_filter: unknown, fn: SessionMock["before"]) => { this.before = fn; },
     onHeadersReceived: (_filter: unknown, fn: SessionMock["headers"]) => { this.headers = fn; },
+    onCompleted: (_filter: unknown, fn: SessionMock["ended"]) => { this.ended = fn; },
+    onErrorOccurred: (_filter: unknown, fn: SessionMock["ended"]) => { this.ended = fn; },
   };
+  ended?: (details: any) => void;
   /** initiator: Electron's initiatorOrigin. Default = a same-origin subresource / browser-started main frame. */
   denied(webContentsId: number, url = "http://localhost:26180/", resourceType = "mainFrame", initiator: string | null = resourceType === "mainFrame" ? null : sameOrigin(url)): boolean {
     const result: { cancel?: boolean }[] = [];
@@ -219,6 +222,32 @@ beforeEach(() => {
 afterEach(() => { for (const dispose of cleanup.splice(0).reverse()) dispose(); vi.unstubAllEnvs(); });
 
 describe("main browser display URL redaction", () => {
+  it("owner pages survive daemon generations and still navigate in the same guest", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount();
+    f.daemon.generation++;
+    syncBrowserHosts();
+    expect(guest.dead).toBe(false);
+    await f.ipc({ op: "navigate", tabKey: "side-one", url: "http://localhost:26180/after-reconnect" });
+    expect(guest.url).toBe("http://localhost:26180/after-reconnect");
+  });
+  it("owner navigation finishing across a daemon reconnect stays a known success", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount();
+    const pending = deferred<void>();
+    guest.loadURL = async url => { guest.url = url; await pending.promise; };
+    const navigation = f.ipc({ op: "navigate", tabKey: "side-one", url: "http://localhost:26180/loading" });
+    await until(() => guest.url.endsWith("/loading"));
+    f.daemon.generation++; syncBrowserHosts(); pending.resolve();
+    await expect(navigation).resolves.toBeUndefined();
+    expect(guest.dead).toBe(false);
+  });
+  it("opening an owner web page does not wait for a daemon capability query", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    f.daemon.capabilities.mockImplementation(() => new Promise(() => {}));
+    const { guest } = await f.mount();
+    expect(guest.url).toBe("http://localhost:26180/");
+  });
   it("retains unrelated query keys rather than matching secret words as substrings", () => {
     expect(browserDisplayUrl("http://localhost/report?zipcode=2000&author=owner&decode=yes&sessionize=none#section"))
       .toBe("http://localhost/report?zipcode=2000&author=owner&decode=yes&sessionize=none");
@@ -429,11 +458,11 @@ describe("installed browser owner IPC / Electron boundary", () => {
     // real cache-invalidating disconnect rather than depending on an extra tab re-fetch.
     f.daemon.currentState = { kind: "unreachable" }; syncBrowserHosts();
     f.daemon.currentState = { kind: "connected" }; syncBrowserHosts();
-    const pending = f.reserve("pending"); await until(() => f.daemon.capabilities.mock.calls.length === 2);
+    const pending = f.reserve("pending", "cutex:service/docs/"); await until(() => f.daemon.capabilities.mock.calls.length === 2);
     f.daemon.currentState = { kind: "unreachable" }; syncBrowserHosts();
     f.daemon.capabilities.mockResolvedValue({ featureList: [] });
     f.daemon.currentState = { kind: "connected" }; syncBrowserHosts();
-    old.resolve({ featureList: ["services-proxy"] }); await pending;
+    old.resolve({ featureList: ["services-proxy"] }); await expect(pending).rejects.toThrow("service_proxy_required");
     await expect(f.ipc({ op: "navigate", tabKey: "side-one", url: "cutex:service/report/" })).rejects.toThrow("service_proxy_required");
     expect(f.daemon.capabilities).toHaveBeenCalledTimes(3); expect(f.request).not.toHaveBeenCalled();
   });
@@ -660,7 +689,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     expect(f.session.denied(replacement.guest.id)).toBe(false);
     expect(f.session.denied(guest.id)).toBe(true);
   });
-  it.each(["removed", "epoch", "daemon-identity", "generation"] as const)("main host sync immediately retires guests and tickets when the host is %s", async reason => {
+  it.each(["removed", "epoch", "daemon-identity"] as const)("main host sync immediately retires guests and tickets when the host is %s", async reason => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
     const { reserved, guest } = await f.mount();
     const pending = await f.reserve("waiting");
@@ -668,8 +697,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     const eventCount = f.events.length;
     if (reason === "removed") f.conns.delete("local");
     else if (reason === "epoch") f.conns.set("local", { ...original, routingEpoch: "epoch-b" });
-    else if (reason === "daemon-identity") f.conns.set("local", { ...original, daemon: { ...original.daemon } });
-    else f.daemon.generation++;
+    else f.conns.set("local", { ...original, daemon: { ...original.daemon } });
     syncBrowserHosts();
     // No await, timer advance, request or IPC between the state change/hook and these assertions.
     expect(guest.dead).toBe(true);
@@ -697,7 +725,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     expect(current.guest.dead).toBe(false); // The hook must no longer read the previous HostManager.
     first.owner.close(); // Late disposal of the old window must not clear the new hook.
     second.daemon.generation++; syncBrowserHosts();
-    expect(current.guest.dead).toBe(true);
+    expect(current.guest.dead).toBe(false);
     second.owner.close();
     expect(() => syncBrowserHosts()).not.toThrow();
   });
@@ -1292,5 +1320,15 @@ describe("installed controlled tabs, downloads and site permissions (0.1.3)", ()
     expect(guest.copyImageAt).toHaveBeenCalledWith(10, 20);
     (template[2] as { click: () => void }).click(); // 另存为…
     expect(guest.downloadURL).toHaveBeenCalledWith("http://localhost:26180/pic.png");
+  });
+});
+
+// Owner report 2026-11-06: 「网页未能打开」 reached the agent as a bare navigation_failed.
+describe("navigation failure detail", () => {
+  it("keeps Chromium's code, the stage and the display-redacted page", () => {
+    const error = Object.assign(new Error("ERR_CONNECTION_REFUSED (-102) loading 'http://127.0.0.1:9/x?token=secret'"), { code: "ERR_CONNECTION_REFUSED", errno: -102 });
+    expect(navigationFailure(error, "popup_load", "http://127.0.0.1:9/trade/detail?id=5&token=secret#x"))
+      .toEqual({ stage: "popup_load", url: "http://127.0.0.1:9/trade/detail?id=5", netError: { code: -102, name: "ERR_CONNECTION_REFUSED" } });
+    expect(navigationFailure(new Error("boom"), "navigation", "http://127.0.0.1/__cutex/auth?ticket=x")).toEqual({ stage: "navigation" });
   });
 });

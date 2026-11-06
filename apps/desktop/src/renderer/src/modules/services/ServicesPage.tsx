@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { isImeComposing } from "../../lib/ime";
 import { MoreHorizontal, Star } from "lucide-react";
 import type { ServicePatch, ServiceView, SidebarSnapshot } from "../../../../shared/ipc";
-import { SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE } from "../../../../shared/servicesSettings";
+import { SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, SERVICES_IDLE_PRESETS_FEATURE } from "../../../../shared/servicesSettings";
 import { useI18n, type MessageKey } from "../../i18n";
 import { apiFor } from "../../bridge";
 import { contextMenu, openMenuFrom } from "../../lib/contextMenu";
@@ -191,6 +191,7 @@ function ServicesTable({ project }: { project?: { hostId: string; projectId: str
   const count = (sc: HealthScope) => all.filter((r) => inVisibility(r.item, supportsOrganize ? visibility : "active") && inHealth(r.item, sc) && inScope(r.item, supportsScope ? scopeFilter : "all")).length;
   const organizable = (row: Row) => served.some((host) => host.hostId === row.hostId && host.features.has(SERVICES_ORGANIZE_FEATURE));
   const tileEnabled = (row: Row) => served.some((host) => host.hostId === row.hostId && host.features.has("service-tiles"));
+  const idleEnabled = (row: Row) => served.some((host) => host.hostId === row.hostId && host.features.has(SERVICES_IDLE_PRESETS_FEATURE));
   const ttlEnabled = (row: Row) => served.some((host) => host.hostId === row.hostId && host.features.has(SERVICES_EPHEMERAL_TTL_FEATURE));
 
   const bulk = async (kind: "hide" | "show" | "archive" | "restore") => {
@@ -212,6 +213,7 @@ function ServicesTable({ project }: { project?: { hostId: string; projectId: str
     { key: "owner", header: t("table.owner"), width: "10rem", cell: (r) => { const p = projectOf(r); if (p) return <span data-service-scope="project" title={scopeTitle(r)} className="flex min-w-0 items-center gap-1 text-xs text-muted"><ProjectBadge badge={p.badge || p.name.slice(0, 1)} color={p.color} size="sm" /><span className="truncate">{t("services.ownerScope.project", { project: p.name })}</span></span>; const owner = ownerOf(r); return owner ? <button onClick={() => openHostAgent(r.hostId, owner.row.cutexSessionId)} className="flex min-w-0 items-center gap-1 text-xs text-muted hover:text-foreground"><Avatar name={owner.row.displayName} avatar={owner.row.avatar} seed={owner.row.cutexSessionId} size={16} /><span className="truncate">{owner.row.displayName}</span></button> : <span className="text-xs text-subtle">—</span>; } },
     { key: "url", header: t("services.url"), width: "13rem", cell: (r) => <span className="block truncate font-mono text-caption/[inherit] text-subtle" title={r.item.url}>{r.item.url}</span> },
     { key: "port", header: t("table.port"), width: "4rem", align: "right", cell: (r) => <span className="font-mono text-caption/[inherit] text-subtle">{r.item.port ? `:${r.item.port}` : "—"}</span> },
+    ...(served.some((host) => host.features.has(SERVICES_IDLE_PRESETS_FEATURE)) ? [{ key: "idleStop", header: t("services.idleStop"), width: "11rem", cell: (r: Row) => idleEnabled(r) && r.item.runtime === "managed" && r.item.lifetime === "persistent" ? <span title={t("services.idleStop.hint")} className="text-xs text-muted"><span>{t(`services.idleStop.${r.item.idleStopPreset ?? "forever"}`)}</span>{(r.item.stoppedIdleAt ?? r.item.idleStopAt) && <span className="block text-caption text-subtle">{new Date((r.item.stoppedIdleAt ?? r.item.idleStopAt)!).toLocaleString()}</span>}{r.item.idleWakeFailedAt && <span className="block text-caption text-warn-text">{t("services.idleWakeFailed")}</span>}</span> : <span>—</span> }] : []),
     { key: "traffic", header: t("services.lastTraffic"), width: "8rem", cell: (r) => <span className="text-caption/[inherit] text-subtle">{r.item.lastTrafficAt ? new Date(r.item.lastTrafficAt).toLocaleString() : "—"}</span> },
     { key: "menu", header: "", width: "2rem", cell: (r) => <button disabled={stale(r)} onClick={(e) => openMenuFrom(e.currentTarget, menu(r))} className="rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-foreground"><MoreHorizontal size={14} /></button> },
   ];

@@ -1,56 +1,5 @@
-# 009 Shelf 和 Shelf Rail 合成一个控件
+# Shelf and Rail structure
 
-状态：**10-23 被「样子 A」取代**（主人选：Rail 一整条，窗格各自成卡贴在 Rail 上，8 px 缝；见 desktop-modules §24 Shelf「一张卡片」段首的说明）。之前：**已实现**（10-21，分支 feat/0.2-shelfcard；圆角样式待主人比较截图后定）。原：**已定：A 连成一张卡片**（10-21）。原：**待定**（10-21 主人：「Shelf Rail 和 Shelf 之间的边距可能要调整——现在看起来像独立的东西——也许直接连在一起？甚至称为同一个控件（参考旧的设置）」）。
+The Rail is the navigation strip for a Shelf. Pages contain panes and panes contain tabs. Shelf and Rail placement, persistent visibility and card appearance follow the application layout settings. The current component contract is defined in [Desktop modules](../desktop-modules.md); historical alternative layouts are not separate supported interfaces.
 
-## 问题
-
-Shelf 展开时，Rail 是旁边单独一张卡片，中间有和其他卡片一样的缝，看起来像两样不相干的东西。
-
-## 做法
-
-- **A 连成一张卡片**（推荐）：Rail 成为 Shelf 卡片的一部分（像 10-21 改过的设置 Shelf：导航在卡片里的左栏），中间只有一条细分隔线，不再有缝；收起时只剩 Rail 这一条（就是同一张卡片变窄）。
-- B 只缩小缝：保留两张卡片，缝从 6 px 减到 2 px。省事，但仍是两张卡。
-
-## 建议的规则（A）
-
-- 术语上 Rail 是 Shelf 的一部分（「Shelf 的页签栏」），不再单独当一个面板种类讲。
-- 收起 = 卡片收窄到 Rail 宽（48 px），展开 = 从 Rail 那边长出来；动画是同一张卡片变宽。
-- Rail 在内侧 / 外侧的设置保留（管页签栏贴卡片哪一边）。
-- 卡片材质、圆角、阴影只有一份。
-
-## 决定（10-21）
-
-- 用 A。主人补充的想法（做出来再看好不好看）：**Rail 部分不带圆角，展开的 Shelf 部分带圆角**——收起时只剩一条直边的 Rail，展开后整张卡片是圆角卡片。实现时两种（全圆角 / Rail 直角）都做成可切换的，截图给主人比。
-
-## 实现时定下的细节（10-21）
-
-- **整个 Shelf 一张卡片**：Rail 和页都在同一张卡片里；Rail 和页之间一条细线（和设置 Shelf 的导航那条一样淡），没有缝。
-- **页里上下几个窗格也不再各是一张卡片**：「材质、圆角、阴影只有一份」，所以窗格去掉自己的边框和阴影，上下之间只有一条 1 px 的细线
-  （原来是 8 px 的缝；拖这条线改高度照旧，能拖的范围仍是 9 px 高）。
-- **收起**：同一张卡片收窄到 Rail 宽，圆角 12 px（和侧栏收成头像窄栏时一样）；展开时卡片从 Rail 那边变宽（动画沿用原来的 220 ms）。
-  空 Shelf 的 Rail、另一个工作区的 Rail 也按「收起的 Shelf 卡片」画。
-- **Rail 在内侧 / 外侧**照旧，只是管页签栏贴卡片的哪一边。
-- **「Rail 直角」**按本文件「决定」那句理解：只剩 Rail（收起、空 Shelf、另一个工作区的）时四角直角；展开后整张卡片是圆角卡片（所以两种样式
-  展开时一模一样）。做成开发开关（不进设置页，避免改共用的外观设置）：预览加 `?shelfcorners=square`；应用里开发者工具执行
-  `localStorage.setItem("cutex-desktop.shelfCorners", "square")` 后重新载入（`round` 或删掉 = 圆角）。
-- **缺省圆角**：窗口里其他卡片（侧栏、侧栏的头像窄栏、会话、设置 Shelf）都是圆角，并且卡片四周都有缝露出桌面；一条直角的竖条浮在缝中间，
-  看起来像没画完或者画错了，和旁边圆角的侧栏窄栏也不一致。直角只有在「贴边显示」时才自然，而贴边显示本来就把所有卡片变成直角。
-- 截图（`/home/ema/cutex-dev/shots/0.2-shelfcard/`）：`{1ws,2ws}-{round,square}-{light,dark}-{expanded,collapsed}.jpg`。
-
-## 实现时定下的细节（10-22，主人）
-
-- **点正在显示的页按钮不再收起 Shelf**（主人：太容易误点）：什么都不做，双击也不收起。收起只走明确的控制：Rail 底部的收起按钮、⋯ →「收起」、
-  会话顶栏的 Shelf 按钮、焦点在 Shelf 里按 Esc。点别的页照旧切过去；收起时点一页照旧展开到那一页。
-- **页按钮可以拖**（主人报「拖不动了」；查下来不是 0.2 改坏的：Shelf 有 Rail 起页按钮就没有拖动）：按住拖 = 拖整页。放到同一条 Rail 的别的
-  按钮上 = 调顺序；放到另一个 Shelf 的按钮或 ＋ 上 = 整页搬过去并在那边显示。规则见 `docs/desktop-modules.md` §24.12.4。
-- **Rail 顶上的头像 = 这个 Shelf 的开关**（10-22 主人）：头像是拥有这个 Shelf 的会话的智能体（另一个工作区的 Shelf = 那边的会话）；显示的是
-  共享页（在所有对话中显示）或没有所属智能体的 Shelf 时，换成中性的面板图标，行为一样。
-  - **单击** = 收起成 Rail / 展开（预告：灰「收成 Rail」/ 蓝「展开 Shelf」）。点正在显示的页仍然什么都不做——头像就是明确的开关。
-  - **右键** = 菜单：收起 / 展开 · 只看 Shelf（会话在屏幕上、它的 Shelf 是现在活动的那个时）· 移到另一边 · 最大化（展开时）· 打开它的会话
-    （那个会话不在屏幕上时，和侧栏点它一样）· 关闭 Shelf · ⚙ Shelf 设置…。每一行悬停 / 方向键移过去都有动作预告，和执行用的是同一个函数
-    （`lib/shelfAvatar.tsx`、`lib/menuForetells.ts`、`lib/workspaceEffects.ts`）。
-  - **提示**：「X 的 Shelf · 点击收起 / 点击展开 · 右键更多」（没有所属智能体：「Shelf · …」）。
-  - 另一个工作区的 Shelf：按下头像时先让那个工作区成为焦点（它的 Shelf 变成活动的），然后单击 / 右键作用在它上面。
-  - Rail 底部原来的收起按钮和 ⋯ 保留。
-- **显示桌面**（10-22 主人报：显示桌面后最右还剩一条 Shelf Rail）：显示桌面只显示桌面，不画任何 Shelf / Rail；Shelf 的布局不动，再按一次原样
-  回来（`docs/desktop-modules.md` §24.11 0.2 变更）。
+See [Architecture](../DESIGN.md) and [Module contracts](../desktop-modules.md) for related interfaces.

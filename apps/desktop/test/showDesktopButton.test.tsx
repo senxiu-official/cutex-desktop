@@ -44,12 +44,12 @@ describe("显示桌面", () => {
   it("press: the desktop shows (pressed, 「再按放回」); press again: the layout comes back", () => {
     render();
     expect(btn().getAttribute("aria-pressed")).toBe("false");
-    expect(btn().title).toBe('pane.desktop:{"key":"Ctrl+Shift+D"}');
+    expect(btn().dataset.tip).toBe('pane.desktop:{"key":"Ctrl+Shift+D"}');
     act(() => btn().click());
     render();
     expect(fx.toggles).toBe(1);
     expect(btn().getAttribute("aria-pressed")).toBe("true");
-    expect(btn().title).toBe('pane.desktopBack:{"key":"Ctrl+Shift+D"}');
+    expect(btn().dataset.tip).toBe('pane.desktopBack:{"key":"Ctrl+Shift+D"}');
     act(() => btn().click());
     render();
     expect(fx.toggles).toBe(2);
@@ -60,7 +60,7 @@ describe("显示桌面", () => {
     render();
     expect(btn().tagName).toBe("BUTTON");
     expect(btn().tabIndex).toBe(0);
-    expect(btn().getAttribute("aria-label")).toBe(btn().title);
+    expect(btn().getAttribute("aria-label")).toBe(btn().dataset.tip);
     expect(btn().dataset.titlebarEntry).toBe("show-desktop");
   });
 
@@ -80,7 +80,7 @@ describe("显示桌面", () => {
 describe("wiring (source)", () => {
   const src = (rel: string) => readFileSync(`src/renderer/src/${rel}`, "utf8");
   it("the left group has it, the right-hand group and the tray do not", () => {
-    expect(src("components/SidebarNav.tsx")).toMatch(/<ShowDesktopButton className=\{btn\} \/>\}\s*\{any &&/);
+    expect(src("components/SidebarNav.tsx")).toMatch(/<ShowDesktopButton className=\{btn\} \/>\}[\s\S]*?\{any &&/);
     expect(src("components/TitleBar.tsx")).not.toContain("<ShowDesktopButton");
     expect(src("components/ChipTray.tsx")).not.toContain("<ShowDesktopButton");
   });

@@ -1,47 +1,5 @@
-# 057 排队的提示随主人消息一起送（草案）
+# Notices carried with user messages
 
-状态：**草案，等主人审阅**（2026-11-03 起草，Alice）。目标版本 r275，r274 发布之后开始。不改 r274。
+On hosts advertising `owner-carries-v1` and `input-ledger-v1`, eligible notices can be delivered with a user message in the same submission. Their canonical identities remain separate from user text. Notices held by the user stay held until explicitly released. A notice that arrives later follows the normal next-step or next-turn path. Native delivery receipts determine consumption; RPC acceptance alone does not imply that context was persisted. Uncertain attempts retain their reservations until an explicit recovery path resolves them.
 
-## 1. 问题
-
-主人报告（2026-11-03）：
-
-1. 一个 Claude 智能体有子智能体在跑，主人按 Esc 想发消息。
-2. 子智能体被停掉，cutex 生成「后台子智能体已停止」的 Claude Task 提示。智能体此时处于 Esc 暂停，提示就停在「接下来」。
-3. 主人发出消息。暂停解除，主人的消息先走，开始一个新回合。
-4. 提示没有跟着走，而是排在「这一轮的下一个工具步骤插入」，最多等 120 秒（桌面上的读秒，`AdmissionRows.tsx` `waitInsert`）。到时还没有工具步骤，就等这一轮结束后单独再送一轮。
-
-主人的期望：提示应该**跟着这条消息一起出去**。
-
-原因：054 主人决定 1（主人消息和可送的 ride-along 撞上时，主人先走，ride-along 改到下一回合）只决定了先后，没有考虑「一起送」。当时要解决的是主人消息被 ride-along 拖慢（最多先等 30 秒，再加一整个回合，054 §决定 1）。
-
-## 2. 提议（每条附推荐，待主人确认）
-
-| # | 问题 | 推荐 |
-|---|---|---|
-| 1 | 哪些东西附带 | 「接下来」里此刻已可送的系统提示（Claude Task、闹钟、作业结束），加上发给该智能体的留言和委托结果（一般的 ride-along） |
-| 2 | 先后与显示 | 主人的话在前，附带项在后，同一次提交。时间线上主人气泡照常，下方挂「随这条消息送达：…」小卡片，不混进气泡正文 |
-| 3 | 智能体正忙时主人插话 | 同样附带，同一步插入 |
-| 4 | 主人消息发出后才到的提示 | 维持现状：下一个工具步骤插入，否则回合结束后送。读秒只出现在这种情况 |
-| 5 | 主人没发消息、智能体空闲 | 不变：提示自己唤醒智能体 |
-| 6 | Esc 暂停后 | 暂停期间提示留在「接下来」，不唤醒；主人发消息即解除暂停并一起带走；主人只点「继续」则按第 5 条 |
-| 7 | 主人不想带某条 | 「接下来」每条提示有「这条先别送」；默认全带 |
-| 8 | 时间 | r275 |
-
-## 3. 契约影响（054 / r274 台账）
-
-- 主人消息的 `InputRecord` 增加 `carries: [inputId…]`。被附带的记录走 `accepted` → `inContext`，其 `turnId` 与主人消息相同，`reason = carriedByOwner`（新原因码，schema 只追加）。
-- 表面规则不变：每条记录只在一个地方。附带项从 `nextUp` 一步搬到时间线（作为主人气泡下的卡片），不会两处同时出现。
-- 054 决定 1 改写为：主人先走，**可送的 ride-along 随主人消息同一次提交**；主人消息之后才可送的，按现有规则。
-- Claude：附带内容按现有 ExternalInput / bus 文本格式拼在主人文本之后，每项保留发送方和类型标头。Codex：同一次 `turn/start` 的多段输入。具体格式在实现前由运行时负责人确认。
-- 旧桌面（无 `input-ledger-v1` 或无新能力 `owner-carries-v1`）：cutex 仍然附带，旧桌面会把附带项看成「已送达的留言」。实现时要核对，避免重复显示。
-
-## 4. 实现前要先查清（只读研究）
-
-1. 这次 120 秒读秒的确切路径：Esc 暂停 → 主人提交 → 提示的 admission 状态（`rideAlongAhead` / `waitInsert` / `nextStepAt` 从哪来）。
-2. Claude 运行时的「后台任务通知回合」（`BUSY_DELIVERY.md` 的 autonomous 窗口）和附带提交怎么配合，不能让 Claude Code 自己那一轮的文字漏进主人回合。
-3. 委托结果附带后，委托状态（delivered / inContext）是否按台账正确收尾。
-
-## 5. 测试
-
-新增 054 §5 风格的场景：S27 Esc 暂停 + 子智能体停止 + 主人发消息 → 提示与主人消息同一 `turnId`，零读秒；S28 忙时插话附带；S29 主人消息发出后才到的提示仍按 `waitInsert`；S30 「这条先别送」。
+See [Architecture](../DESIGN.md) and [Module contracts](../desktop-modules.md) for related interfaces.

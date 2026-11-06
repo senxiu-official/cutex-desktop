@@ -11,6 +11,6 @@ export default defineModule({
   titleKey: "usage.title",
   descriptionKey: "usage.description",
   contributes: {
-    "settings.page": [{ id: "usage.settings", page: "usage", group: "data", order: 100, icon: BarChart3, titleKey: "usage.page", source: "host", allHosts: { capability: "usage-ledger" }, Page: UsagePage, keywords: ["usage.quotas", "usage.ledger", "usage.prices", "usage.apiValue", "usage.cacheRate", "usage.map.title", "usage.map.add", "usage.sources.title", "usage.sources.hint"] }],
+    "settings.page": [{ id: "usage.settings", page: "usage", group: "data", order: 100, icon: BarChart3, titleKey: "usage.page", hintKey: "settings.pageHint.usage", source: "host", allHosts: { capability: "usage-ledger" }, Page: UsagePage, keywords: ["usage.quotas", "usage.ledger", "usage.prices", "usage.apiValue", "usage.cacheRate", "usage.map.title", "usage.map.add", "usage.sources.title", "usage.sources.hint"] }],
   },
 });

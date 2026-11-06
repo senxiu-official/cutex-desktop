@@ -746,6 +746,8 @@ export class HostManager implements HostApi {
   }
 
   private publish(): void {
+    const shown = new Set([this.focus(), ...this.scopeIds()]);
+    for (const [id, conn] of this.conns) conn.daemon.setInView?.(shown.has(id));
     this.emit("hostsState", this.state());
   }
 

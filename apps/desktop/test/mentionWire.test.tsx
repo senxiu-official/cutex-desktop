@@ -65,6 +65,18 @@ describe("the wire text", () => {
     mocks.state.entries.get(ASTRA).session.displayName = "Astra Prime";
     expect(mentionWireText(chip("Astra", ASTRA), "local", ME)).toBe(`[@Astra Prime](cutex:agent/${ASTRA})`);
   });
+  it("an owner-set 显示名称 never goes out: the agent gets its own name (owner 2026-11-05)", () => {
+    Object.assign(mocks.state.entries.get(ASTRA).session, { displayName: "小星", displayNameOverride: "小星" });
+    expect(mentionWireText(chip("小星", ASTRA), "local", ME)).toBe(`[@astra-composer](cutex:agent/${ASTRA})`);
+    Object.assign(mocks.state.entries.get(FAR).session, { displayName: "远方", displayNameOverride: "远方" });
+    expect(mentionWireText(chip("远方", FAR), "local", ME)).toBe(`[@far-agent@workstation](cutex:agent/${FAR}@workstation)`);
+    // The owner still reads the 显示名称 on the chip of a sent message; a copy carries the own name like the wire.
+    act(() => root.render(h(MentionText, { text: `[@astra-composer](cutex:agent/${ASTRA}) 看看`, hostId: "local", sessionId: ME })));
+    expect(div.querySelector("[data-agent-mention-name]")?.textContent).toBe("@小星");
+    expect(div.querySelector<HTMLElement>("[data-agent-mention]")?.dataset.agentMentionWire).toBe(`[@astra-composer](cutex:agent/${ASTRA})`);
+    // Not in the current lists: the name it was written with.
+    expect(mentionWireText(chip("Gone", "cutex.ag-gone"), "local", ME)).toBe("[@Gone](cutex:agent/cutex.ag-gone)");
+  });
   it("another host: [@name@host](cutex:agent/<id>@host); from that host itself, no suffix", () => {
     expect(mentionWireText(chip("Far", FAR), "local", ME)).toBe(`[@Far@workstation](cutex:agent/${FAR}@workstation)`);
     expect(mentionWireText(chip("Far", FAR), "ws", ME)).toBe(`[@Far](cutex:agent/${FAR})`);

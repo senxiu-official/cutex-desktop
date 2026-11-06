@@ -4,11 +4,23 @@ import {HOST_BUSY_ACTION_CONTRACT,hostBusyActionError,hostBusyActionWire} from "
 import {hostBusyRetryDelay} from "../src/shared/queueSteerRetry";
 import {HostBusyActionCancelled,HostBusyActionExhausted,HostBusyActionUncertain,runHostBusyAction,useHostBusyActions} from "../src/renderer/src/lib/hostBusyActions";
 import {INVOKE_CHANNEL} from "../src/shared/ipc";
+import {beginOperation,operationItem,trackedOperationItem,useBackgroundOperations} from "../src/renderer/src/lib/backgroundOperations";
 
 const busy=()=>new CutexApiError(503,"admission_busy","busy",true,{reason:"hostBusy",retryAfterMs:1000});
 const options=()=>({key:crypto.randomUUID(),hostId:"local",sessionId:"s1",name:"Alpha",kind:"delete" as const,current:()=>true,onError:vi.fn()});
-beforeEach(()=>{vi.useFakeTimers();useHostBusyActions.setState({rows:[]});});
+beforeEach(()=>{vi.useFakeTimers();useHostBusyActions.setState({rows:[]});useBackgroundOperations.setState({operations:[]});});
 afterEach(()=>vi.useRealTimers());
+it("keeps host-busy feedback in its batch receipt and retries only the original captured call",async()=>{
+  const operationId=beginOperation("local","restore.all",[{key:"s1",name:"Alpha"}]);
+  const run=vi.fn().mockRejectedValue(busy()),opts=options();
+  const task=expect(trackedOperationItem({operationId,key:"s1"},()=>runHostBusyAction(opts,run))).rejects.toBeInstanceOf(HostBusyActionExhausted);
+  await vi.advanceTimersByTimeAsync(5200);await task;
+  expect(useBackgroundOperations.getState().operations).toHaveLength(1);
+  expect(operationItem({operationId,key:"s1"})).toMatchObject({state:"failed",busyOwned:true});
+  run.mockResolvedValue("accepted");operationItem({operationId,key:"s1"})!.retry!();await vi.advanceTimersByTimeAsync(0);
+  expect(operationItem({operationId,key:"s1"})).toMatchObject({state:"done",retry:undefined});
+  expect(run).toHaveBeenCalledTimes(6);
+});
 it.each(HOST_BUSY_ACTION_CONTRACT)("recognizes $route/$operation in its wire family",entry=>{
   // r271.1 2507559d: both route families wrap error; only session RPCs carry requestId.
   const shape={source:"cutex",code:"admission_busy",message:"variable diagnostic text",retryable:true,details:{reason:"hostBusy",retryAfterMs:1000},diagnosticId:"test-diagnostic"};

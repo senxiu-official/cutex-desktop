@@ -1,4 +1,5 @@
 // Transient UI state for an owner operation refused before execution. Business state stays in cutex.
+import { activeOperationItem, beginOperation, updateOperationItem, type OperationTarget } from "./backgroundOperations";
 import { create } from "zustand";
 import { translate } from "../i18n";
 import { withHostBusyRetry } from "../../../shared/queueSteerRetry";
@@ -31,28 +32,33 @@ export const isHostBusyActionPending = (error: unknown) => error instanceof Host
 export function runHostBusyAction<T>(options: Omit<HostBusyAction, "state" | "retry"> & { current(): boolean; onError(error: unknown): void; onRetryResult?(result: T): void }, run: () => Promise<T>): Promise<T> {
   const previous = active.get(options.key);
   if (previous) return previous as Promise<T>;
+  let target: OperationTarget | null = activeOperationItem(options.hostId, options.sessionId);
   const launch = (manualRetry = false): Promise<T> => {
     const inFlight = active.get(options.key);
     if (inFlight) return inFlight as Promise<T>;
     let cancelledBeforeDispatch = false;
-    const show = (state: HostBusyAction["state"], detail?: string) => useHostBusyActions.setState(s => ({ rows: [
-      ...s.rows.filter(row => row.key !== options.key),
-      { ...options, state, detail, retry: () => { if (active.has(options.key)) return; void launch(true).then(result => { if (options.current()) options.onRetryResult?.(result); }).catch(error => { if (!isHostBusyActionPending(error) && options.current()) options.onError(error); }); } },
-    ] }));
+    const retry = () => { if (active.has(options.key)) return; void launch(true).then(result => { if (options.current()) options.onRetryResult?.(result); }).catch(error => { if (!isHostBusyActionPending(error) && options.current()) options.onError(error); }); };
+    const show = (state: HostBusyAction["state"], detail?: string) => {
+      useHostBusyActions.setState(s => ({ rows: [...s.rows.filter(row => row.key !== options.key), { ...options, state, detail, retry }] }));
+      target ??= { operationId: beginOperation(options.hostId, options.kind === "delete" ? "operations.kind.hostDelete" : options.kind === "archive" ? "operations.kind.hostArchive" : "operations.kind.hostStart", [{ key: options.sessionId, name: options.name }]), key: options.sessionId };
+      updateOperationItem(target, { state: state === "retrying" ? "running" : state === "exhausted" ? "failed" : state,
+        detail: detail ?? translate(state === "retrying" ? "hostAction.retrying" : state === "cancelled" ? "hostAction.cancelled" : state === "uncertain" ? "hostAction.uncertain" : "hostAction.exhausted"),
+        retry: state === "exhausted" ? retry : undefined, busyOwned: true });
+    };
     if (manualRetry) show("retrying"); else remove(options.key);
     const check = () => { if (!options.current()) { cancelledBeforeDispatch = true; throw new HostBusyActionCancelled(); } };
     const operation = withHostBusyRetry(async () => {
       check();
       try { return await run(); }
       catch (error) { throw hostBusyActionError(error) ?? error; }
-    }, check, () => { check(); show("retrying"); }).then(result => { remove(options.key); return result; }, error => {
+    }, check, () => { check(); show("retrying"); }).then(result => { remove(options.key); if (target) updateOperationItem(target, { state: "done", detail: undefined, retry: undefined }); return result; }, error => {
       if (!options.current()) {
         if (cancelledBeforeDispatch || hostBusyActionError(error)) { show("cancelled"); throw new HostBusyActionCancelled(); }
         show("uncertain", error instanceof Error ? error.message : String(error));
         throw new HostBusyActionUncertain(error);
       }
       if (hostBusyActionError(error) && options.current()) { show("exhausted"); throw new HostBusyActionExhausted(); }
-      remove(options.key); throw error;
+      remove(options.key); if (target) updateOperationItem(target, { state: "failed", detail: error instanceof Error ? error.message : String(error), retry: undefined, busyOwned: false }); throw error;
     }).finally(() => { if (active.get(options.key) === operation) active.delete(options.key); });
     active.set(options.key, operation);
     return operation;

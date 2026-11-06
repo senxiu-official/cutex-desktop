@@ -1,5 +1,7 @@
 // Owner-facing text only; unknown codes never fall back to raw daemon/page messages.
 export const browserErrorMessagesZhCN = {
+  "browser.error.serviceManuallyStopped": "这个服务已被手动停止。请到「服务」页选择「启动」；重新加载不会启动它。",
+  "browser.error.serviceWakeFailed": "服务未能完成唤醒。请到「服务」页查看日志，再选择「唤醒」重试；不会自动重试启动。",
   "browser.origins.doNotSignIn": "你正在{{agent}}共用的登录环境中输入登录信息，请勿使用个人账号。",
   "browser.origins.reset": "重置来源记录",
   "browser.origins.resetHint": "归档损坏的来源记录并开始新记录。不会清除登录信息或改变现有标签的登录环境；无法确认来源的旧标签继续隔离",
@@ -42,6 +44,8 @@ export const browserErrorMessagesZhCN = {
   "browser.error.staticNotFound": "这个地址下没有文件。",
 } as const;
 export const browserErrorMessagesEn: Record<keyof typeof browserErrorMessagesZhCN, string> = {
+  "browser.error.serviceManuallyStopped": "This service was manually stopped. Choose Start on the Services page; reloading will not start it.",
+  "browser.error.serviceWakeFailed": "The service could not finish waking. Check its logs on the Services page, then choose Wake to retry. Startup will not retry automatically.",
   "browser.origins.doNotSignIn": "You are entering login information in the shared {{agent}} environment. Do not use personal accounts here.",
   "browser.origins.reset": "Reset provenance records",
   "browser.origins.resetHint": "Archive corrupt provenance and start fresh. This does not clear logins or change existing tabs' login environments. Old tabs with unproven origins stay isolated.",

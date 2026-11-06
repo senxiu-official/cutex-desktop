@@ -157,6 +157,12 @@ const REMOTE_QUOTA: Record<string, QuotaGauge[]> = {
     quotaGauge("codex-secondary", "5h", { windowLabel: "5h", remainingPercent: 88, resetAt: Date.now() / 1000 + 2 * 3600, observedAt: Date.now() / 1000 - 40 }),
   ],
   relay: [quotaGauge("primary", "Balance", { kind: "balance", balance: "A$42.10" })],
+  // Same Claude account as the local `claude` with ?profilelink: the profile card's peer reading.
+  claude: [
+    quotaGauge("claude-0", "Claude", { windowLabel: "5h", remainingPercent: 93, resetAt: Date.now() / 1000 + 4.4 * 3600, observedAt: Date.now() / 1000 - 180 }),
+    quotaGauge("claude-1", "Claude", { windowLabel: "7d", remainingPercent: 16, resetAt: Date.now() / 1000 + 1.2 * 3600, observedAt: Date.now() / 1000 - 180 }),
+    quotaGauge("claude-2", "Claude", { windowLabel: "Fable 7d", displayLabel: null, remainingPercent: 100, resetAt: Date.now() / 1000 + 1.2 * 3600, observedAt: Date.now() / 1000 - 180 }),
+  ],
 };
 
 export const mock: ModuleMock = {

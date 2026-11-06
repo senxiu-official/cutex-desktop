@@ -232,7 +232,7 @@ export function GoalBar({ goal, inline, reveal }: { goal: ThreadGoal | null; inl
   if (!goal) return null;
   // Opens from its trigger (left of the status row) and only as wide as it needs, so its actions stay
   // near where the click was; the plan / background popovers do the same from the right.
-  const card = open && <GoalCard goal={goal} request={request} popover className="absolute bottom-full left-6 z-50 w-[28rem] max-w-[calc(100%-3rem)] rounded-xl bg-surface p-2.5 text-sm shadow-xl" />;
+  const card = open && <GoalCard goal={goal} request={request} popover idleBorder="border-transparent" className="float absolute bottom-full left-6 z-[160] w-[28rem] max-w-[calc(100%-3rem)] p-2.5 text-sm" />;
   if (!inline) return card ? <div ref={root}>{card}</div> : null;
   const active = goal.status === "active";
   return (

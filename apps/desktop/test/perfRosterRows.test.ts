@@ -29,10 +29,9 @@ describe("row parts that do not follow a status tick (source)", () => {
   const rows = readFileSync(join(SRC, "components/AgentRows.tsx"), "utf8");
   const badge = readFileSync(join(SRC, "components/AgentBadge.tsx"), "utf8");
   const sidebar = readFileSync(join(SRC, "components/Sidebar.tsx"), "utf8");
-  it("AgentBadge and BesideButton are memo components; BesideButton takes only primitives", () => {
+  it("keeps AgentBadge memoized and removes the hover open-beside component", () => {
     expect(badge).toMatch(/export const AgentBadge = memo\(function AgentBadge\(/);
-    expect(rows).toMatch(/const BesideButton = memo\(function BesideButton\(\{ hostId, id, title, size = 14 \}: \{ hostId: string; id: string; title: string; size\?: number \}\)/);
-    for (const use of rows.matchAll(/<BesideButton ([^/]*)\/>/g)) expect(use[1]).not.toMatch(/=\{\(|onOpen|foretell/);
+    expect(rows).not.toMatch(/BesideButton|data-open-beside/);
   });
   it("the offline section reads its own rows' activity", () => {
     expect(sidebar).toMatch(/activityTimesFor\(activityTimesOf\(s\.activity\), ids\)/);

@@ -27,7 +27,7 @@ export default defineModule({
         titleKey: "updater.general.updates",
         source: "local",
         // This desktop's updates, not a host's cutex (that is 主机后端更新; review UI-04).
-        hintKey: "updater.pageHint",
+        hintKey: "settings.pageHint.updates",
         headerLink: { page: "backend", labelKey: "updater.backendLink" },
         useBadge: useUpdateBadge,
         Page: UpdatesPage,

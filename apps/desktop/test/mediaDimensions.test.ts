@@ -13,10 +13,10 @@ it.each([{ width: 640 }, { width: 0, height: 320 }, { width: -1, height: 320 }, 
   expect(parseMediaBlob({ ...blob, ...dimensions })).toEqual(blob);
 });
 it("caps portrait, landscape and small boxes without upscaling or changing their ratio", () => {
-  expect(imageBox({ width: 640, height: 320 })).toMatchObject({ width: "min(100%, 640px)", aspectRatio: "640 / 320" });
-  expect(imageBox({ width: 320, height: 640 })).toMatchObject({ width: "min(100%, 160px)", aspectRatio: "320 / 640" });
-  expect(imageBox({ width: 640, height: 320 }, { maxWidth: 240, maxHeight: 160 })).toMatchObject({ width: "min(100%, 240px)" });
-  expect(imageBox({ width: 32, height: 16 })).toMatchObject({ width: "min(100%, 32px)" });
+  expect(imageBox({ width: 640, height: 320 })).toMatchObject({ width: "640px", aspectRatio: "640 / 320" });
+  expect(imageBox({ width: 320, height: 640 })).toMatchObject({ width: "160px", aspectRatio: "320 / 640" });
+  expect(imageBox({ width: 640, height: 320 }, { maxWidth: 240, maxHeight: 160 })).toMatchObject({ width: "240px" });
+  expect(imageBox({ width: 32, height: 16 })).toMatchObject({ width: "32px" });
   expect(imageBox(undefined)).toBeUndefined();
   expect(zoomImageBox(undefined)).toBeUndefined();
 });

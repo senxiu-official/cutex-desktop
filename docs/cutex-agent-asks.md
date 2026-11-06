@@ -53,7 +53,7 @@ subagents comes from a handful of mechanisms, and none of them depends on being 
 | Work vs note | `followup_task` (starts a turn if idle, otherwise mailbox) vs `send_message` (no turn) | A single `send` for both. |
 | Ownership | A tree with canonical task names (`/root/task1/task_3`); the parent interrupts and closes children | Flat groups; only the Director manages agents. |
 | One step | `spawn_agent(task_name, message, model?, reasoning_effort?, fork_turns)` | A Director-only create, then a separate send. |
-| Context | `fork_turns` none / all | Session fork (same provider only; added in r196). |
+| Context | `fork_turns` none / all | Session fork (same provider only). |
 | Approvals | At spawn, a child copies the parent's live approval policy, sandbox and `approvals_reviewer`. Approvals go to the user or to the Guardian, never to the parent. | All cutex tools were auto-approved (S2); TS §7 adds server-side owner gates. |
 
 Goal: give persistent, cross-provider, owner-interactable cutex agents the same ergonomics, and
@@ -345,7 +345,7 @@ own owner-queue flush (Fable C1, Astra F1). cutex therefore owns admission.
   ask. 「加入此委托」 steers it into the ask's turn as **shared task input**: the desktop says that
   text may be returned to the requester, and the answer is marked `ownerSteered: true`. (Setting,
   default "queue".)
-  *r263:* capability `owner-join-delegation` carries explicit `joinDelegation`
+  The capability `owner-join-delegation` carries explicit `joinDelegation`
   `{askId, attempt, expectedTurnId, runtimeGeneration}` on `userInput/submit`
   (`auto`) or atomic `queue/steer`. The daemon verifies that exact running attempt
   and lease and pins the native connection to that generation. It never turns a
@@ -359,7 +359,7 @@ own owner-queue flush (Fable C1, Astra F1). cutex therefore owns admission.
   (`403 owner_required`). This is a permission denial before admission: a direct
   submit stays as a failed outbox row, not an accepted queued message; a queued
   insertion shows rejected, while a merge preserves its merged queued text. The
-  desktop translates this refusal. Without the capability (r262), it hides join
+  desktop translates this refusal. Without the capability, it hides join
   and delegation insertion controls and retains ordinary queue/interrupt choices.
 - **`ifBusy`:** `"queue"` (default, decision 7) or `"fail"` (returns `busy` at once, so the
   requester can pick another agent).

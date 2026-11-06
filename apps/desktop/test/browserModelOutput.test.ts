@@ -31,6 +31,17 @@ describe("browser model output budgets", () => {
     expect(Buffer.byteLength(JSON.stringify({ content: [{ type: "text", text: JSON.stringify({ kind: "tab.snapshot", ...value }) }] }))).toBeLessThan(64 * 1024);
     expect(value.truncated).toBe(true);
   });
+  it.each([{ width: 2560, height: 1440 }, { width: 3840, height: 2160 }])("shrinks native $width × $height screenshots, preserving the real CSS viewport", size => {
+    const source: ProviderScreenshot = { mimeType: "image/png", data: png(size.width, size.height).toString("base64"), ...size,
+      pageGeneration: 1, viewport: { width: 1920, height: 1080 }, captureRect: { x: 0, y: 0, width: 1920, height: 1080 },
+      imageScale: { x: size.width / 1920, y: size.height / 1080 }, displayScale: 1 };
+    const small: BrowserImage = { isEmpty: () => false, getSize: () => ({ width: 1600, height: 900 }), resize: vi.fn(), toPNG: () => png(1600, 900), toJPEG: vi.fn() };
+    const image = { ...small, getSize: () => size, resize: vi.fn(() => small) };
+    const result = modelScreenshot(source, () => image);
+    expect(result).toMatchObject({ width: 1600, height: 900, viewport: source.viewport, captureRect: source.captureRect, displayScale: 1, imageScale: { x: 1600 / 1920, y: 900 / 1080 } });
+    expect(image.resize).toHaveBeenCalledExactlyOnceWith({ width: 1600, height: 900, quality: "best" });
+    expect(source.width).toBe(size.width);
+  });
   it("decodes once, scales once and reports actual image/CSS ratio separately from displayScale", () => {
     const source: ProviderScreenshot = { mimeType: "image/png", data: png(2400, 1800).toString("base64"), width: 2400, height: 1800,
       pageGeneration: 5, viewport: { width: 1200, height: 900 }, captureRect: { x: 0, y: 0, width: 1200, height: 900 },

@@ -1,9 +1,9 @@
-// Sidebar pins / folds (owner decisions 2026-10-16, .local/sidebar-investigation/REPORT.md): a pinned
-// agent is always a full row, pinned quick chats sort first, collapsed groups keep their pins listed.
+// Sidebar pins / folds (owner decisions 2026-10-16, .local/sidebar-investigation/REPORT.md; design 060 B): a
+// pinned agent is always a big 现在 row, pinned quick chats sort first, collapsed groups keep their pins listed.
 import { describe, expect, it } from "vitest";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import type { AgentSignal } from "../src/renderer/src/lib/agentAttention";
-import { foldLabel, layoutGroup, layoutSidebar, pinnedRows, type LayoutPrefs } from "../src/renderer/src/lib/sidebarLayout";
+import { layoutGroup, layoutSidebar, pinnedRows, type LayoutPrefs } from "../src/renderer/src/lib/sidebarLayout";
 import { compareChats, compareRows, SIDEBAR_GROUP_IDS, type AgentRow, type AgentStatus, type ProjectGroup } from "../src/renderer/src/lib/sidebar";
 
 function row(id: string, status: AgentStatus = "idle", over: { director?: boolean; pinned?: boolean; last?: number; snapshot?: "online" | "offline"; turn?: string | null } = {}): AgentRow {
@@ -23,7 +23,7 @@ function project(id: string, rows: AgentRow[]): ProjectGroup {
   return { kind: "project", id, name: id, badge: "", color: "blue", online: rows.filter((r) => !off(r)), offline: rows.filter(off) };
 }
 
-const prefs: LayoutPrefs = { grouping: "all", noOnline: "collapse", running: "avatars", foldIdle: true };
+const prefs: LayoutPrefs = { grouping: "all", noOnline: "collapse", running: "avatars" };
 const ctx = (signals: Record<string, AgentSignal> = {}, over: Partial<Parameters<typeof layoutSidebar>[1]> = {}) => ({
   signalOf: (id: string) => signals[id],
   selectedId: null,
@@ -34,51 +34,51 @@ const ctx = (signals: Record<string, AgentSignal> = {}, over: Partial<Parameters
 const ids = (rows: readonly AgentRow[]) => rows.map((r) => r.id);
 
 describe("pinned agents (decision 1)", () => {
-  it("a pinned online idle agent is a full row, not in 「N 个空闲」", () => {
+  it("a pinned idle agent is a big listed row, not folded", () => {
     const l = layoutGroup(project("p", [row("a"), row("pin", "idle", { pinned: true }), row("b")]), ctx(), false);
-    expect(ids(l.full)).toEqual(["pin"]);
+    expect(ids(l.big)).toEqual(["pin"]);
     expect(ids(l.idle)).toEqual(["a", "b"]);
   });
 
-  it("a pinned running agent is a full row in compact / avatar mode", () => {
+  it("a pinned running agent is a big row in compact / avatar mode", () => {
     for (const running of ["avatars", "compact"] as const) {
       const l = layoutGroup(project("p", [row("run", "running"), row("pinRun", "running", { pinned: true })]), ctx({ run: "running", pinRun: "running" }, { prefs: { ...prefs, running } }), false);
-      expect(ids(l.full)).toEqual(["pinRun"]);
+      expect(ids(l.big)).toEqual(["pinRun"]);
       expect(ids(l.running)).toEqual(["run"]);
     }
   });
 
-  it("a pinned offline agent is a full row, not in 离线 N", () => {
+  it("a pinned offline agent is a big row, not folded", () => {
     const l = layoutGroup(project("p", [row("off", "offline"), row("pinOff", "offline", { pinned: true })]), ctx(), false);
-    expect(ids(l.full)).toEqual(["pinOff"]);
+    expect(ids(l.big)).toEqual(["pinOff"]);
     expect(ids(l.offline)).toEqual(["off"]);
   });
 
-  it("full rows sort Director > pinned > name", () => {
+  it("big rows sort Director > pinned > online > name", () => {
     const l = layoutGroup(project("p", [row("zed", "needsInput"), row("pinB", "idle", { pinned: true }), row("dir", "idle", { director: true }), row("pinA", "offline", { pinned: true })]), ctx({ zed: "needsYou" }), false);
-    expect(ids(l.full)).toEqual(["dir", "pinA", "pinB", "zed"]);
+    expect(ids(l.big)).toEqual(["dir", "pinB", "pinA", "zed"]);
     expect([row("b"), row("a", "idle", { pinned: true })].sort(compareRows).map((r) => r.id)).toEqual(["a", "b"]);
   });
 
-  it("a collapsed (quiet) project keeps its pins in `full` for the row under it", () => {
+  it("a collapsed (quiet) project keeps its pins in `big` for the row under it", () => {
     const quiet = project("quiet", [row("q1", "offline"), row("qPin", "offline", { pinned: true })]);
     const [l] = layoutSidebar([quiet], ctx()).main;
     expect(l!.mode).toBe("collapsed");
-    expect(ids(pinnedRows(l!.full))).toEqual(["qPin"]);
+    expect(ids(pinnedRows(l!.big))).toEqual(["qPin"]);
     // Others: nothing pinned, nothing listed under the one row.
     const [plain] = layoutSidebar([project("plain", [row("x", "offline")])], ctx()).main;
-    expect(pinnedRows(plain!.full)).toEqual([]);
+    expect(pinnedRows(plain!.big)).toEqual([]);
   });
 
   it("星标展开: an unstarred project under 其他项目 keeps its pins too", () => {
     const l = layoutSidebar([project("p", [row("a"), row("pin", "idle", { pinned: true })])], ctx({}, { prefs: { ...prefs, grouping: "starred" } }));
     expect(l.others[0]!.mode).toBe("collapsed");
-    expect(ids(pinnedRows(l.others[0]!.full))).toEqual(["pin"]);
+    expect(ids(pinnedRows(l.others[0]!.big))).toEqual(["pin"]);
   });
 
-  it("a pinned agent stays a full row while its host loads (unconfirmed)", () => {
+  it("a pinned agent stays a big row while its host loads (unconfirmed)", () => {
     const l = layoutGroup(project("p", [row("u", "unknown"), row("uPin", "unknown", { pinned: true })]), ctx(), false);
-    expect(ids(l.full)).toEqual(["uPin"]);
+    expect(ids(l.big)).toEqual(["uPin"]);
     expect(ids(l.idle)).toEqual(["u"]);
   });
 
@@ -88,48 +88,33 @@ describe("pinned agents (decision 1)", () => {
   });
 });
 
-describe("collapsed means collapsed (decision 2)", () => {
+describe("reconnects never move rows (decision 2)", () => {
   it("unconfirmed rows (host loading) stay where their snapshot put them", () => {
     const g = project("p", [row("idle", "unknown"), row("busy", "unknown", { turn: "t9" }), row("gone", "unknown", { snapshot: "offline" }), row("ok")]);
     const l = layoutGroup(g, ctx(), false);
+    // Online (by snapshot) folds into 在线空闲, offline into 离线, each by name.
     expect(ids(l.idle)).toEqual(["idle", "ok"]);
-    expect(ids(l.running)).toEqual(["busy"]);
     expect(ids(l.offline)).toEqual(["gone"]);
-    expect(l.full).toEqual([]);
+    // Last seen running: stays in 现在 (not counted as running, not online until confirmed).
+    expect(ids(l.running)).toEqual(["busy"]);
+    expect(l.big).toEqual([]);
     expect(l.runningCount).toBe(0);
-    // An unconfirmed row its snapshot shows as erroring has no fold to sit in: a full row.
-    const err = { ...row("err", "unknown"), session: { ...row("err").session, runtime: { status: "error", activeTurnId: null } } } as AgentRow;
-    expect(ids(layoutGroup(project("p", [err]), ctx(), false).full)).toEqual(["err"]);
+    expect(l.onlineCount).toBe(1);
   });
 
-  it("a done idle agent stays in the fold with a ✓ (idleDone); needs-you / error still leave it", () => {
+  it("a done agent is 最近; needs-you / error are big 现在 rows", () => {
     const g = project("p", [row("a"), row("d1"), row("d2"), row("need", "needsInput"), row("bad")]);
     const l = layoutGroup(g, ctx({ d1: "done", d2: "done", need: "needsYou", bad: "error" }), false);
-    expect(ids(l.idle)).toEqual(["a", "d1", "d2"]);
-    expect(l.idleDone).toEqual(["d1", "d2"]);
-    expect(ids(l.full)).toEqual(["bad", "need"]);
+    expect(ids(l.recent)).toEqual(["d1", "d2"]);
+    expect(ids(l.big)).toEqual(["bad", "need"]);
+    expect(ids(l.idle)).toEqual(["a"]);
     // Still counted for the section / project summaries (and listed by the 需要你 strip).
     expect(l.attentionCount).toBe(4);
   });
 
-  it("with idle folding off (globally or 「在线空闲不收起」) a done agent is a full row", () => {
-    const g = project("p", [row("a"), row("d", "idle")]);
-    expect(ids(layoutGroup(g, ctx({ d: "done" }, { prefs: { ...prefs, foldIdle: false } }), false).full)).toEqual(["a", "d"]);
-    const l = layoutGroup(g, ctx({ d: "done" }, { idleUnfolded: new Set(["p"]) }), false);
-    expect(l.idleDone).toEqual([]);
-    expect(ids(l.full)).toEqual(["a", "d"]);
-  });
-
-  it("a done agent that is running / offline is not in the idle fold", () => {
+  it("a done offline agent is 最近 too", () => {
     const l = layoutGroup(project("p", [row("off", "offline")]), ctx({ off: "done" }), false);
-    expect(ids(l.full)).toEqual(["off"]);
-    expect(l.idleDone).toEqual([]);
-  });
-
-  it("fold header counts: 「3 个空闲 · 2 完成」, only done 「2 完成」", () => {
-    expect(foldLabel(5, 2)).toEqual({ idle: 3, done: 2 });
-    expect(foldLabel(2, 2)).toEqual({ idle: 0, done: 2 });
-    expect(foldLabel(4, 0)).toEqual({ idle: 4, done: 0 });
+    expect(ids(l.recent)).toEqual(["off"]);
   });
 
   it("the sidebar's own group ids are claimable (not dropped as unclaimed legacy entries)", () => {

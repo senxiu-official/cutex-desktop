@@ -9,6 +9,7 @@ import { delegationBucket } from "./delegations";
 import { ownerNeedReason } from "./ownerNotify";
 import { rowKey, type AgentRow } from "./sidebar";
 import type { TurnMark, TurnMarks } from "./turnUnread";
+import { compareNames } from "./rosterOrder";
 
 /**
  * Why an agent needs the owner: `confirm` a pending approval of a command / file change (native
@@ -152,7 +153,7 @@ export function attentionChips(rows: readonly AgentRow[], signals: ReadonlyMap<s
       at: markOf(row)?.at ?? 0,
     });
   }
-  return chips.sort((a, b) => CHIP_RANK[a.signal] - CHIP_RANK[b.signal] || b.at - a.at || a.name.localeCompare(b.name));
+  return chips.sort((a, b) => CHIP_RANK[a.signal] - CHIP_RANK[b.signal] || b.at - a.at || compareNames(a.name, b.name));
 }
 
 /** When the running turn started (ms; cutex `activeTurnObservedAt`), else null. */

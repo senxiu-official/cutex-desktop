@@ -138,6 +138,7 @@ export interface PaneTools {
 
 /** A Shelf's page as stored (v2): its panes top → bottom (none: an empty page the owner made). */
 export interface PaneShelfPage {
+  emptyKind?: string;
   id: string;
   groups: string[];
   name?: string;
@@ -1090,7 +1091,7 @@ const engineId = (id: string) => (id.startsWith(TOOL_ID_PREFIX) ? id.slice(TOOL_
  * stores (`toolRawOf` reads it back; lib/sideLayout `sanitizeLayout` validates it).
  */
 export function toolPartOf(side: SideLayout): ToolPart {
-  const pages = side.pages.filter((p) => p.cards.length > 0 || p.kept);
+  const pages = side.pages.filter((p) => p.cards.length > 0 || p.kept || p.emptyKind);
   const panes: Record<string, Pane> = {};
   const instances: Record<string, PaneInstance> = {};
   const putInstance = (t: string) => {
@@ -1109,6 +1110,7 @@ export function toolPartOf(side: SideLayout): ToolPart {
       ...(page.name ? { name: page.name } : {}),
       ...(page.icon ? { icon: page.icon } : {}),
       ...(page.kept ? { kept: true } : {}),
+      ...(page.emptyKind ? { emptyKind: page.emptyKind } : {}),
       ...(page.shared ? { shared: true } : {}),
       rows: page.cards.map((c) => ({ pane: toolId(c.id), h: c.size })),
     };
@@ -1164,6 +1166,7 @@ export function toolRawOf(part: ToolPart): unknown {
       ...(c.name ? { name: c.name } : {}),
       ...(c.icon ? { icon: c.icon } : {}),
       ...(c.kept ? { kept: true } : {}),
+      ...(c.emptyKind ? { emptyKind: c.emptyKind } : {}),
       ...(c.shared === true ? { shared: true } : {}),
       cards: c.rows.map((r) => {
         const pane = part.panes[r.pane];

@@ -15,6 +15,13 @@ export interface BrowserVisibilityOptions {
 }
 export interface BrowserViewportBounds { width: number; height: number }
 const hidden = () => new ProtocolError("target_hidden", "Browser target must be visible in an already-visible window");
+const hiddenError = hidden;
+function viewportSize(value: unknown): BrowserViewportBounds | undefined {
+  const size = value as Partial<BrowserViewportBounds> | null;
+  return size && typeof size === "object" && typeof size.width === "number" && typeof size.height === "number"
+    && Number.isFinite(size.width) && Number.isFinite(size.height) && size.width >= 1 && size.height >= 1
+    && size.width <= 16_384 && size.height <= 16_384 ? { width: size.width, height: size.height } : undefined;
+}
 function checkOperation(options: BrowserVisibilityOptions): void {
   if (options.signal?.aborted) throw new ProtocolError("cancelled", "Visibility check was cancelled");
   if (options.deadline !== undefined && (!Number.isFinite(options.deadline) || Date.now() >= options.deadline))
@@ -35,6 +42,10 @@ export function browserVisibilityScript(guestId: string): string {
     if (![rect.left,rect.top,rect.right,rect.bottom,rect.width,rect.height].every(Number.isFinite)
       || rect.width < 1 || rect.height < 1 || rect.left < -1 || rect.top < -1
       || rect.right > innerWidth + 1 || rect.bottom > innerHeight + 1) return false;
+    // From here on the page is laid out at its own size: if it is covered or not ready, a
+    // read can still use that size (no emulated viewport, which would blur a visible page).
+    const covered = { covered: { width: rect.width, height: rect.height } };
+    const shown = (() => {
     let node = guest;
     for (let depth = 0; node && depth < 128; depth++, node = node.parentElement) {
       const style = getComputedStyle(node);
@@ -77,6 +88,8 @@ export function browserVisibilityScript(guestId: string): string {
     // Only provider control uses this gate. A bare visible guest is not safe to dispatch
     // into: publication/render/listener installation may still be in flight after grant.
     return shielded ? {width:rect.width, height:rect.height} : {capturePending:true};
+    })();
+    return shown === false ? covered : shown;
   })()`;
 }
 function windowVisible(window: VisibilityWindow): boolean {
@@ -101,7 +114,11 @@ async function bounded<T>(promise: Promise<T>, timeout: number, options: Browser
 export async function ensureBrowserVisible(options: BrowserVisibilityOptions): Promise<BrowserViewportBounds> {
   const { window } = options;
   const code = browserVisibilityScript(options.guestId);
+  // The card's own laid-out size while it is covered / clipped / not yet ready (not hidden).
+  let layout: BrowserViewportBounds | undefined;
+  const hidden = () => layout ? Object.assign(hiddenError(), { layout }) : hiddenError();
   const inspect = async () => {
+    layout = undefined;
     checkOperation(options);
     if (!windowVisible(window)) throw hidden();
     let result: unknown;
@@ -110,6 +127,7 @@ export async function ensureBrowserVisible(options: BrowserVisibilityOptions): P
     checkOperation(options);
     if (!windowVisible(window)) throw hidden();
     if (result && typeof result === "object" && "capturePending" in result && result.capturePending === true) return "capture-pending" as const;
+    if (result && typeof result === "object" && "covered" in result) { layout = viewportSize(result.covered); return undefined; }
     const size = result as Partial<BrowserViewportBounds> | null;
     return size && typeof size.width === "number" && typeof size.height === "number"
       && Number.isFinite(size.width) && Number.isFinite(size.height) && size.width >= 1 && size.height >= 1

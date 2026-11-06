@@ -12,7 +12,7 @@ export function SshPromptDialog() {
   const first = prompts[0];
   if (!first) return null;
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black/30 pt-[18vh]">
+    <div className="fixed inset-0 z-[151] flex items-start justify-center bg-black/30 pt-[18vh]">
       {/* role: Esc anywhere else stops the running turn unless a dialog is open (lib/escInterrupt). */}
       <div role="dialog" aria-modal="true" className="w-[28rem] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-surface p-4 shadow-2xl">
         <PromptBody key={first.id} prompt={first} more={prompts.length - 1} />

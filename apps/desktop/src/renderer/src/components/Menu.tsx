@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { useOwnerWindow } from "../lib/ownerContext";
 import { resizeObserverFor } from "../lib/ownerWindow";
+import { FloatMore, useRowsBelow } from "./FloatMore";
 import { MenuLayersContext, menuLayerContains, useMenuLayer, useMenuLayers } from "../lib/menuLayers";
 
 /** Upward-opening popover anchored to a small trigger button (composer settings row). Stacks above
@@ -49,6 +50,7 @@ export function Popover({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
+  const below = useRowsBelow(panel);
   const [position, setPosition] = useState({ left: 0, top: 0 });
   const layers = useMenuLayers();
   useMenuLayer(panel, layers, open);
@@ -140,8 +142,8 @@ export function Popover({
     hidden={!open}
     style={{ ...(height ? { height, maxHeight: "calc(100dvh - 9rem)" } : { maxHeight: "min(24rem, calc(100dvh - 32px))" }), ...(fitViewport ? { position: "fixed", ...position, right: "auto", bottom: "auto", maxWidth: "calc(100vw - 32px)", minWidth: "min(14rem, calc(100vw - 32px))" } : {}) }}
     data-popover={open ? "" : undefined}
-    className={`absolute bottom-full z-[51] mb-1.5 max-h-96 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl ${width} ${align === "right" ? "right-0" : "left-0"}`}
-  ><MenuLayersContext.Provider value={layers}>{children(close)}</MenuLayersContext.Provider></div> : null;
+    className={`float float-scroll absolute bottom-full z-[161] mb-1.5 max-h-96 overflow-y-auto p-1 ${width} ${align === "right" ? "right-0" : "left-0"}`}
+  ><MenuLayersContext.Provider value={layers}>{children(close)}</MenuLayersContext.Provider><FloatMore n={below} list={panel} /></div> : null;
   return (
     <div ref={ref} className="relative">
       <button
@@ -149,7 +151,7 @@ export function Popover({
         disabled={disabled}
         aria-label={triggerLabel}
         aria-expanded={open}
-        title={triggerTitle}
+        data-tip={triggerTitle}
         onClick={() => {
           if (!open) onOpen?.();
           setOpen(!open);
@@ -216,7 +218,7 @@ export function Menu<T>({
             <button
               key={String(item.value)}
               disabled={item.disabled}
-              title={item.title}
+              data-tip={item.title}
               onClick={() => pick(item, close)}
               className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-transparent"
             >

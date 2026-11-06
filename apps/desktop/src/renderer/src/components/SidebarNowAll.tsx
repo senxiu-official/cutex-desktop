@@ -81,7 +81,7 @@ function NowCardView({ card, row, attention, since, leaving, own, onActivate }: 
             {name}
           </button>
           {card.column && <Tag data-now-column={card.column}>{t(card.column === "left" ? "sidebar.now.left" : "sidebar.now.right")}</Tag>}
-          {since !== null && <span className="ml-auto shrink-0 text-caption text-subtle tabular-nums" title={t("sidebar.now.waiting")}>{formatElapsed(now - since)}</span>}
+          {since !== null && <span className="ml-auto shrink-0 text-caption text-subtle tabular-nums" data-tip={t("sidebar.now.waiting")}>{formatElapsed(now - since)}</span>}
         </div>
         <div className="flex min-w-0 items-center gap-1.5">
           <span className={`min-w-0 flex-1 truncate text-meta ${card.chip ? "text-foreground" : "text-muted"}`}>{line || (card.open ? t("sidebar.now.open") : "")}</span>
@@ -189,7 +189,7 @@ export function NowSplitter({ height, onLive }: { height: number; onLive(px: num
       aria-valuemin={NOW_HEIGHT.min}
       aria-valuemax={NOW_HEIGHT.max}
       tabIndex={0}
-      title={t("sidebar.nowResize")}
+      data-tip={t("sidebar.nowResize")}
       data-now-splitter=""
       onKeyDown={(e) => {
         if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;

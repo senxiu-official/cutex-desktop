@@ -24,6 +24,7 @@
 import { create } from "zustand";
 import { currentWindow, inWindow, isActiveWindow, keepSelection, keptSelection, MAIN_WINDOW, windowStore, type WindowKey, type WindowSelection } from "./windowScope";
 import { agentHost, routedElsewhere, sidebarOf, useApp } from "../store";
+import { listedIn } from "./archivedAgent";
 import type { ItemId, PageParams } from "../modules/types";
 import { migrateSideOnce, PANES_STORAGE_KEY, readPanesFile, writeWork } from "./paneFile";
 import { roomForColumn, roomForColumns } from "./paneRoom";
@@ -77,8 +78,7 @@ const save = (scope: string, layout: PaneLayout): void => writeWork(scope, layou
 
 /** Whether `hostId`'s agent list has this agent (active or archived); null: that host's list is not known. */
 function listed(s: AppNow, hostId: string, sessionId: string): boolean | null {
-  const sidebar = sidebarOf(s, hostId);
-  return sidebar ? [...sidebar.active, ...sidebar.retired].some((r) => r.cutexSessionId === sessionId) : null;
+  return listedIn(sidebarOf(s, hostId), sessionId);
 }
 
 const setLayout = (layout: PaneLayout) => {

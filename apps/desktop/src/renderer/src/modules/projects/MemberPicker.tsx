@@ -287,7 +287,7 @@ export function MemberPicker({
   const noMembers = mode === "director" && all.length === 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[7vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-[150] flex items-start justify-center bg-black/30 pt-[7vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-modal aria-label={title} className="flex h-[min(80vh,42rem)] w-[50rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         <header className="flex items-center gap-3 border-b border-border px-4 py-2.5">
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</h2>

@@ -51,7 +51,7 @@ async function gated(features: readonly string[] | null) {
 const MOCK_REMOTE = ["management-client-tokens", "session-attachments", "fs-dir-browse"];
 
 /** The side components' derived pane kinds (v1.17, §24.4): id, single / multi, binding (agent / workspace / follow → follow, host → host). */
-const SIDE_KINDS = ["artifacts.library single follow", "artifacts.view multi host", "bookmarks.list single host", "browser.tab multi host", "conversation.projection multi follow", "conversation.turnPeek multi host", "delegations.detail multi host", "diff.view multi follow", "notes.list single host", "notes.note multi host", "remote-copies.list single host", "side-chat.chat single follow", "status:alarms.status single follow", "status:background-terminals.status single follow", "status:delegations.status single follow", "status:goal.status single follow", "status:jobs.status single follow", "status:plan.status single follow", "status:subagents.status single follow", "subagents.thread multi follow", "terminal.pty multi follow", "workspace.changes single follow", "workspace.files single follow", "workspace.preview multi follow"];
+const SIDE_KINDS = ["artifacts.library single follow", "artifacts.view multi host", "bookmarks.list single host", "browser.service multi host", "browser.tab multi host", "conversation.projection multi follow", "conversation.turnPeek multi host", "delegations.detail multi host", "diff.view multi follow", "notes.list single host", "notes.note multi host", "remote-copies.list single host", "side-chat.chat single follow", "status:alarms.status single follow", "status:background-terminals.status single follow", "status:delegations.status single follow", "status:goal.status single follow", "status:jobs.status single follow", "status:plan.status single follow", "status:subagents.status single follow", "subagents.thread multi follow", "terminal.pty multi follow", "workspace.changes single follow", "workspace.files single follow", "workspace.preview multi follow"];
 /** The page kinds the mock install derives (`page:<main.page id>`, pages without an Aside). */
 /** v1.21: the page kinds as Shelf components: id, singleton, host, page group, title (the sidebar entry's), persist. */
 const PAGE_SIDE = [
@@ -441,7 +441,7 @@ describe("module import boundaries", () => {
     expect(SLOT_SPECS["pane.desktop"].unavailable).toBe("hide");
     // The lead sidebar entry (桌面) and the pin action.
     expect(host.snapshot("nav.primary").filter((e) => e.item.lead).map((e) => e.item.id)).toEqual(["home.nav"]);
-    expect(host.snapshot("ref.action").find((e) => e.item.id === "home.pin")?.item.kinds).toEqual(["agent", "service", "artifact", "artifacts.view", "browser.tab"]);
+    expect(host.snapshot("ref.action").find((e) => e.item.id === "home.pin")?.item.kinds).toEqual(["agent", "service", "artifact", "artifacts.view", "browser.tab", "browser.service"]);
   });
 
   it("the window bar's search field (v1.19, §26): one window.search item (quick-switch); the window bar names no conversation item", async () => {
@@ -472,7 +472,7 @@ describe("module import boundaries", () => {
         .snapshot("side.component")
         .map((e) => `${e.item.id} (${e.mode})`)
         .sort(),
-    ).toEqual(["artifacts.library (show)", "artifacts.view (show)", "bookmarks.list (show)", "browser.tab (show)", "conversation.projection (show)", "conversation.turnPeek (show)", "delegations.detail (show)", "diff.view (show)", "notes.list (show)", "notes.note (show)", "remote-copies.list (show)", "side-chat.chat (show)", "subagents.thread (show)", "terminal.pty (show)", "workspace.changes (show)", "workspace.files (show)", "workspace.preview (show)"]);
+    ).toEqual(["artifacts.library (show)", "artifacts.view (show)", "bookmarks.list (show)", "browser.service (show)", "browser.tab (show)", "conversation.projection (show)", "conversation.turnPeek (show)", "delegations.detail (show)", "diff.view (show)", "notes.list (show)", "notes.note (show)", "remote-copies.list (show)", "side-chat.chat (show)", "subagents.thread (show)", "terminal.pty (show)", "workspace.changes (show)", "workspace.files (show)", "workspace.preview (show)"]);
     // A referable component (toRef) needs an id refs accept as a kind (lowercase, §19.6).
     const referable = host.snapshot("side.component").filter((e) => e.item.toRef);
     expect(referable.length).toBeGreaterThan(0);

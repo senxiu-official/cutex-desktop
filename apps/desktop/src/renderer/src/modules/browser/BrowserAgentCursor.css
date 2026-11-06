@@ -1,0 +1,11 @@
+.browser-agent-cursor-overlay{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden;contain:layout paint}
+.browser-agent-cursor-pointer{position:absolute;top:0;left:0;width:24px;height:24px;pointer-events:none;transition:transform 120ms cubic-bezier(.2,.7,.22,1);filter:drop-shadow(0 1px 2px #0005)}
+.browser-agent-cursor-pointer>svg{display:block;overflow:visible}
+.browser-agent-click-pulse{position:absolute;left:-15px;top:-15px;width:32px;height:32px;border:2px solid var(--agent-cursor-outline);box-shadow:0 0 0 1px var(--agent-cursor-color);border-radius:50%;opacity:0;animation:browser-agent-click 400ms ease-out}
+.browser-agent-focus-ring{position:absolute;border:2px solid var(--agent-cursor-color);outline:1px solid var(--agent-cursor-outline);outline-offset:0;border-radius:7px;box-shadow:0 0 0 3px color-mix(in srgb,var(--agent-cursor-color) 22%,transparent);pointer-events:none}
+.browser-agent-scroll-hint{position:absolute;left:23px;top:0;filter:drop-shadow(0 0 1px var(--agent-cursor-outline))}
+@keyframes browser-agent-click{from{opacity:.8;transform:scale(.5)}to{opacity:0;transform:scale(1.45)}}
+@media(prefers-reduced-motion:reduce){.browser-agent-cursor-pointer{transition:none}.browser-agent-click-pulse{animation:none;opacity:.8;transform:none}}
+
+[data-theme="dark"] .browser-agent-cursor-overlay[data-default-color]{--agent-cursor-color:#ae9bff!important;--agent-cursor-outline:#1a2030!important}
+@media(prefers-color-scheme:dark){html:not([data-theme="light"]) .browser-agent-cursor-overlay[data-default-color]{--agent-cursor-color:#ae9bff!important;--agent-cursor-outline:#1a2030!important}}

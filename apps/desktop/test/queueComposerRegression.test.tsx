@@ -190,7 +190,7 @@ describe("insert feedback belongs to its message row", () => {
     expect(rowOf("A").querySelector('[data-testid="queue-insert-resend"]')).not.toBeNull();
     expect(rowOf("A").querySelector('[data-testid="queue-insert-delivered"]')).not.toBeNull();
     expect(rowOf("A").querySelector('[data-testid="queue-insert-forget"]')).toBeNull();
-    expect(rowOf("A").querySelector('[data-testid="queue-insert-detail"]')!.getAttribute("title")).toContain("request timed out");
+    expect(rowOf("A").querySelector('[data-testid="queue-insert-detail"]')!.getAttribute("data-tip")).toContain("request timed out");
     expect((rowOf("A").querySelector('[data-testid="queue-send-now"]') as HTMLButtonElement).disabled).toBe(true);
     expect((rowOf("A").querySelector('[data-testid="queue-delete"]') as HTMLButtonElement).disabled).toBe(false);
     expect(beginQueueInsert("local", "feedback", queued("A"))).toBeNull();
@@ -214,7 +214,7 @@ describe("insert feedback belongs to its message row", () => {
     const hint = q('[data-testid="queue-insert-unsure-hint"]');
     expect(hint.textContent).toContain("queue.insert.unsureHint");
     const toggle = q('[data-testid="queue-insert-details-toggle"]');
-    expect(toggle.getAttribute("title")).toBe(raw);
+    expect(toggle.getAttribute("data-tip")).toBe(raw);
     act(() => toggle.click());
     expect(q('[data-testid="queue-insert-raw"]').textContent).toBe(raw);
   });
@@ -224,7 +224,7 @@ describe("insert feedback belongs to its message row", () => {
     act(() => { const token = beginQueueInsert("local", "feedback", queued("A"))!; finishQueueInsert("local", "feedback", token, "rejected", "queue.steer.runtimeRefusedPlain", undefined, undefined, { detail: "cannot steer a review turn" }); });
     const receipt = q('[data-testid="queue-insert-receipt"]');
     expect(receipt.textContent).not.toContain("cannot steer");
-    expect(q('[data-testid="queue-insert-detail"]').getAttribute("title")).toContain("cannot steer a review turn");
+    expect(q('[data-testid="queue-insert-detail"]').getAttribute("data-tip")).toContain("cannot steer a review turn");
   });
 
   it("positive history evidence resolves an unknown result and a late request error cannot overwrite it", () => {

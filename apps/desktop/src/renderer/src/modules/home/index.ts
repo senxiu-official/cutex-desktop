@@ -7,6 +7,8 @@
 // Modules pin their own pages through lib/trayPins (kind `page`, `<pageId>:<argument>`; only where the source
 // host has `user-home-page-pins` or the list lives on this device) and draw / open them via lib/pagePins.
 import { Monitor, Pin, UserRound } from "lucide-react";
+import { readPortableHome, writePortableHome } from "./portable";
+import { useLayoutView } from "../../lib/userLayoutSync";
 import { USER_HOME_FEATURE, type HomeDoc, type HomePin } from "../../../../shared/home";
 import { hostData } from "../../lib/hostScope";
 import { revealDesktop, useDesktopRestorable, useDesktopShown } from "../../lib/paneActions";
@@ -59,7 +61,8 @@ function usePinState(ref: Parameters<typeof pinOfRef>[0]) {
   const pin = pinOfRef(ref);
   const doc = useHomeSource().entry?.doc ?? null;
   if (!pin) return { disabledReason: translate("home.picker.none") };
-  return isPinned(doc, pin) ? { active: true, titleKey: "home.unpin" as const } : null;
+  // Pinned: the same 「钉到托盘」 with a ✓ (a click unpins) — not 「取消固定」, which read like 取消置顶 in the agent menu (2026-11-05).
+  return isPinned(doc, pin) ? { active: true } : null;
 }
 
 export default defineModule({
@@ -100,11 +103,27 @@ export default defineModule({
     );
     setHomeStore(
       createHomeStore({
+        present: doc => readPortableHome(doc, useLayoutView.getState().hosts),
         backend: (hostId) => {
           const f = hostData(useApp.getState(), hostId);
           if (!f || f.daemon.kind !== "connected" || !f.featuresKnown || !f.features.has(USER_HOME_FEATURE)) return null;
           const api = services.daemonFor(hostId);
-          return { get: () => api.userHome(), put: (revision, home) => api.putUserHome(revision, home) };
+          return {
+            get: async () => {
+              const r = await api.userHome();
+              if (!r.ok || !r.value?.home) return r;
+              const hosts = useLayoutView.getState().hosts;
+              const migrated = writePortableHome(readPortableHome(r.value.home, hosts), hosts);
+              if (JSON.stringify(migrated) !== JSON.stringify(r.value.home)) {
+                const saved = await api.putUserHome(r.value.revision, migrated);
+                if (saved.ok) return saved;
+                // A concurrent edit wins this read. Existing home-store retry handles later writes.
+                if (saved.error.code === "home_revision_conflict") return api.userHome();
+              }
+              return r;
+            },
+            put: (revision, home) => api.putUserHome(revision, home && writePortableHome(home, useLayoutView.getState().hosts)),
+          };
         },
         local: {
           read: () => {
@@ -112,10 +131,14 @@ export default defineModule({
             const raw = ctx.prefs.get(LOCAL, null);
             return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as HomeDoc) : null;
           },
-          write: (doc) => ctx.prefs.set(LOCAL, JSON.parse(JSON.stringify(doc)) as Json),
+          write: (doc) => ctx.prefs.set(LOCAL, JSON.parse(JSON.stringify(writePortableHome(doc, useLayoutView.getState().hosts))) as Json),
         },
       }),
     );
+    const offPortable = useLayoutView.subscribe((next, previous) => {
+      if (next.hosts !== previous.hosts) homeStore().reproject();
+    });
+    ctx.signal.addEventListener("abort", offPortable, { once: true });
     // The shell's handle on the shared pin list (lib/trayPins: 断开 on a linked service pane pins the service;
     // a module's page, e.g. a project's overview, as kind `page`).
     const pinOf = (r: TrayPinRef): HomePin => ({ hostId: r.hostId, kind: r.kind, key: r.key, ...(r.title ? { title: r.title.slice(0, 200) } : {}) });

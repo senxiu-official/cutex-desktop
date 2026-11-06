@@ -15,6 +15,21 @@ import type { ProjectsResponse, SessionResource } from "@cutex-desktop/protocol"
 interface Lifecycles {
   active: readonly SessionResource[];
   retired: readonly SessionResource[];
+  /** The archived agents are not read yet (shared/ipc SidebarSnapshot). */
+  archivedPending?: unknown;
+  /** A peek at a first read still in progress, or a list kept from an earlier run: active agents may be missing too. */
+  loading?: unknown;
+  cached?: unknown;
+}
+
+/**
+ * Whether the list has this agent (active or archived). null: not known — no list, or not active while the
+ * host's archived agents are not read yet (they are read on demand), so nothing may be judged gone by it.
+ */
+export function listedIn(lists: Lifecycles | null | undefined, id: string): boolean | null {
+  if (!lists) return null;
+  if (lists.active.some((s) => s.cutexSessionId === id) || lists.retired.some((s) => s.cutexSessionId === id)) return true;
+  return lists.archivedPending || lists.loading || lists.cached ? null : false;
 }
 
 export function isArchived(session: Pick<SessionResource, "lifecycle"> | null | undefined): boolean {
@@ -29,6 +44,8 @@ export function lifecycleFlip(before: Lifecycles | null | undefined, after: Life
   if (!id || !before) return null;
   const was = before.retired.some((s) => s.cutexSessionId === id) ? "retired" : before.active.some((s) => s.cutexSessionId === id) ? "active" : null;
   const now = after.retired.some((s) => s.cutexSessionId === id) ? "retired" : after.active.some((s) => s.cutexSessionId === id) ? "active" : null;
+  // Gone from the active list while the archived agents are not read: archived (or deleted); reloading it reads them.
+  if (was === "active" && !now && after.archivedPending) return "archived";
   if (!was || !now || was === now) return null;
   return now === "retired" ? "archived" : "restored";
 }

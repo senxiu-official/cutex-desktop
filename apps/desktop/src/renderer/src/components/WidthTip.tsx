@@ -27,7 +27,7 @@ function Tip({ tip }: { tip: WidthTipState }) {
       data-width-tip=""
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed z-[90] rounded-md border border-border bg-surface px-2 py-0.5 text-meta/[inherit] font-medium whitespace-nowrap text-foreground tabular-nums shadow-e2"
+      className="pointer-events-none fixed z-[180] rounded-md border border-border bg-surface px-2 py-0.5 text-meta/[inherit] font-medium whitespace-nowrap text-foreground tabular-nums shadow-e2"
       style={{ top: tip.y - 12, left: right ? undefined : tip.x + 10, right: right ? win.innerWidth - tip.x + 10 : undefined }}
     >
       {text}

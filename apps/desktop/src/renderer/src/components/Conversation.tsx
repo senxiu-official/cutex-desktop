@@ -10,7 +10,6 @@ import { useI18n } from "../i18n";
 import { SubAgentContext, subAgentsOf } from "../lib/subagents";
 import { useSubAgentMeta } from "../lib/subagentMetaStore";
 import { useAgentOnline, useSettleSubAgents, useSubAgentLive } from "../lib/background";
-import { orderedEntries } from "../lib/timeline";
 import { useAgentFeatures } from "../lib/agentFeaturesView";
 import { offlineAutoStartNote } from "../lib/runtimeWording";
 import { agentState, useApp } from "../store";
@@ -18,7 +17,6 @@ import { useConvFeatures, useConvHost, useConvScope, useConvSession, useConvSide
 import { Composer } from "./Composer";
 import { InteractionDock } from "./InteractionDock";
 import { StatusBar } from "./StatusBar";
-import { NeedsYouStrip } from "./NeedsYouStrip";
 import { BusyDots } from "./BusyDots";
 import { edgeOverlay, withReservation } from "../lib/overlayLayout";
 import { ConversationDockContext } from "../lib/conversationDock";
@@ -58,7 +56,6 @@ import { useOwnerWindow } from "../lib/ownerContext";
 // place) through `timelineRev` (lib/timelineShape): text deltas do not move it.
 const MemoComposer = memo(Composer);
 const MemoStatusBar = memo(StatusBar);
-const MemoNeedsYouStrip = memo(NeedsYouStrip);
 const MemoGutterHost = memo(GutterHost);
 const MemoOverlays = memo(ConversationOverlays);
 const NO_QUEUE: never[] = [];
@@ -100,8 +97,6 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   }, [namePairs]);
   const showImageHistoryHint = !!selectedId && !!view && !view.loading && !view.error && imageHeavyHistory(view.mediaRefs) && !imageHistoryHintDone.includes(selectedId);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const entries = useMemo(() => (view ? orderedEntries(view.timeline) : []), [view?.version, view?.timeline]);
   // The owner's pending sends (outbox, not timeline entries): followed like new entries.
   const pendingSends = useApp((s) => (selectedId ? pendingFollowKey(agentState(s.outbox, hostId, selectedId)) : ""));
   const loadOlderFor = useCallback(() => {
@@ -300,10 +295,10 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
       return;
     }
     const prev = followed.current;
-    followed.current = { session: selectedId, rows: entries.length, loading: view?.loading, sends: pendingSends, turns: turnKey };
-    if (prev && prev.session === selectedId && prev.rows === entries.length && prev.loading === view?.loading && prev.sends === pendingSends && prev.turns === turnKey) return;
+    followed.current = { session: selectedId, rows: (view?.timeline.entries.size ?? 0), loading: view?.loading, sends: pendingSends, turns: turnKey };
+    if (prev && prev.session === selectedId && prev.rows === (view?.timeline.entries.size ?? 0) && prev.loading === view?.loading && prev.sends === pendingSends && prev.turns === turnKey) return;
     if (stick.current) el?.scrollTo({ top: el.scrollHeight });
-  }, [entries, view?.loading, pendingSends, turnKey]);
+  }, [view?.version, view?.loading, pendingSends, turnKey]);
   // The owner sent from the composer: back to the bottom (even from a little above it) and follow
   // the new bubble / queue entry and the reply.
   useEffect(() => {
@@ -496,7 +491,7 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
               </button>
             </div>
           )}
-          {view && <StreamRenderProvider hostId={hostId} sessionId={selectedId}><MemoTimelineBody timeline={view.timeline} entries={entries} sessionId={selectedId} nameOf={nameOf} older={view.older} onLoadOlder={loadOlderFor} pendingSends onRelease={release} /></StreamRenderProvider>}
+          {view && <StreamRenderProvider hostId={hostId} sessionId={selectedId}><MemoTimelineBody timeline={view.timeline} version={view.version} sessionId={selectedId} nameOf={nameOf} older={view.older} onLoadOlder={loadOlderFor} pendingSends onRelease={release} /></StreamRenderProvider>}
         </div>
         {/* The room kept under the rows so the history only moves up (keepRowsUp; sized from the observer, not by React). */}
         <div ref={spacer} aria-hidden data-timeline-slack="" />
@@ -524,9 +519,6 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
       <MemoOverlays key={selectedId} sessionId={selectedId} onReserve={reserve} />
       </div>
 
-      {/* 需要你: other agents that want the owner (sidebar v2; Settings → 外观 → 侧栏). In the status row while the composer
-          shows (one line with its right-side chips when its left is empty, owner 2026-10-27); here while it is hidden. */}
-      {!composerShown && <MemoNeedsYouStrip sessionId={selectedId} />}
       {/* The dock (lib/conversationDock): cards that ask the owner to act (browser claim), in flow above the composer. */}
       <div ref={setDock} data-conversation-dock className="flex flex-col empty:hidden" />
       {view && view.timeline.pending.size > 0 && (
@@ -557,7 +549,7 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
           </p>
         )}
         {/* Status row: the items placed above the input (Settings → 通用); also where goal editing happens. */}
-        <MemoStatusBar key={selectedId} sessionId={selectedId} needsYou={composerShown} />
+        <MemoStatusBar key={selectedId} sessionId={selectedId} />
         <MemoComposer
           key={composerDraftKey(hostId, selectedId)}
           name={name}

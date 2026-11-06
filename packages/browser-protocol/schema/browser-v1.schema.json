@@ -996,6 +996,13 @@
                           },
                           "truncated": {
                             "const": true
+                          },
+                          "url": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 8192,
+                            "format": "browser-url",
+                            "pattern": "^(https?://[^\\s]+|about:blank)$"
                           }
                         },
                         "required": [
@@ -1072,6 +1079,13 @@
                           },
                           "truncated": {
                             "const": true
+                          },
+                          "url": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 8192,
+                            "format": "browser-url",
+                            "pattern": "^(https?://[^\\s]+|about:blank)$"
                           }
                         },
                         "required": [
@@ -1131,6 +1145,32 @@
                         "atEdge"
                       ],
                       "additionalProperties": false
+                    },
+                    "newTab": {
+                      "oneOf": [
+                        {
+                          "const": true
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "blocked": {
+                              "enum": [
+                                "late_page_popup",
+                                "rate_limited",
+                                "address_not_allowed",
+                                "form_post",
+                                "invalid_url",
+                                "unavailable"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "blocked"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
                     }
                   },
                   "required": [
@@ -1410,10 +1450,67 @@
                   "type": "object",
                   "properties": {
                     "kind": {
+                      "const": "tabs.open"
+                    },
+                    "tab": {
+                      "type": "object",
+                      "properties": {
+                        "guestId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "url": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 8192,
+                          "format": "browser-url",
+                          "pattern": "^(https?://[^\\s]+|about:blank)$"
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 0,
+                          "maxLength": 4096
+                        },
+                        "pageGeneration": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "tabRef": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        }
+                      },
+                      "required": [
+                        "guestId",
+                        "url",
+                        "title",
+                        "pageGeneration"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "loadState": {
                       "enum": [
-                        "tabs.open",
-                        "tabs.claim"
+                        "loading",
+                        "loaded"
                       ]
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "tab"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "tabs.claim"
                     },
                     "tab": {
                       "type": "object",

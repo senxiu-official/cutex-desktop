@@ -2,14 +2,14 @@
 // 在主界面调整 panel (components/CustomizeHost, compact). One set of rows, so the two never disagree.
 // No preview of the sidebar in Settings (owner 2026-10-18): a UI region is previewed only in the main
 // window (docs/research/rfc-in-place-settings-20261018.md).
+import { useLayoutView } from "../../../lib/userLayoutView";
 import { useApp } from "../../../store";
 import { useI18n, type MessageKey } from "../../../i18n";
-import { migrateOfflineLimit, OFFLINE_LIMITS } from "../../../lib/offlineAgents";
+import { migrateOlderProjectsAfter, OLDER_PROJECTS_AFTER } from "../../../lib/rosterTiers";
 import { PROJECT_SEPARATIONS } from "../../../lib/projectSeparation";
 import { STATUS_CHIPS } from "../../../lib/statusChips";
-import { SIDEBAR_LAYOUTS, setUiPref, uiPrefDefault, useUiPrefs, type ProjectIconStyle, type UiPrefs } from "../../../lib/prefs";
+import { SIDEBAR_LAYOUTS, setUiPref, uiPrefDefault, useUiPrefs, type ProjectIconStyle, type SystemRowStyle, type UiPrefs } from "../../../lib/prefs";
 import { RUNNING_AGENTS } from "../../../lib/runningAgentsPref";
-import { FLYOUT_DELAYS, migrateFlyoutDelay } from "../../../lib/projectFlyout";
 import { settingsAnchorId } from "../../../lib/settingsNav";
 import { AppearanceNumberRow } from "../AppearanceRows";
 import { Button, ResetButton, Section, Segmented, Select, SettingRow, Toggle, TextLink, SettingsGroup } from "../Form";
@@ -29,6 +29,7 @@ function useTip() {
 }
 
 export function SidebarProjectsCard() {
+  const personal = useLayoutView(s => !!s.memoryHost && s.status !== "unsupported");
   const { t } = useI18n();
   const tip = useTip();
   const ui = useUiPrefs();
@@ -37,7 +38,7 @@ export function SidebarProjectsCard() {
       id={settingsAnchorId("projects")}
       title={t("appearance.sidebar.projects")}
       actions={
-        <SettingsGroup agents="none" source="local"><Button title={t("appearance.projectOrderHint")} disabled={ui.projectOrder.length === 0} onClick={() => setUiPref("projectOrder", [])}>
+        <SettingsGroup agents="none" source={personal ? "person" : "local"}><Button title={t("appearance.projectOrderHint")} disabled={ui.projectOrder.length === 0} onClick={() => setUiPref("projectOrder", [])}>
           {t("appearance.projectOrderReset")}
         </Button></SettingsGroup>
       }
@@ -56,6 +57,14 @@ export function SidebarProjectsCard() {
           disabled={ui.projectGrouping !== "all"}
           options={(["collapse", "expand"] as const).map((v) => ({ value: v, label: t(`appearance.noOnlineProjects.${v}` as MessageKey) }))}
           onChange={(v) => setUiPref("noOnlineProjects", v)}
+        />
+      </SettingRow>
+      <SettingRow agents="none" source="local" label={t("appearance.olderProjects")} hint={t("appearance.olderProjectsHint")} reset={prefReset(ui, "olderProjectsAfter")}>
+        <Segmented
+          value={String(ui.olderProjectsAfter)}
+          disabled={ui.projectGrouping !== "all"}
+          options={OLDER_PROJECTS_AFTER.map((v) => ({ value: String(v), label: t(`appearance.olderProjects.${v}` as MessageKey) }))}
+          onChange={(v) => setUiPref("olderProjectsAfter", migrateOlderProjectsAfter(v === "off" ? v : Number(v)))}
         />
       </SettingRow>
       <SettingRow agents="none" source="local" label={t("appearance.sectionCollapsed")} hint={t("appearance.sectionCollapsedHint")} reset={prefReset(ui, "sectionCollapsedShows")}>
@@ -100,17 +109,7 @@ export function SidebarAgentRowsCard() {
           onChange={(v) => setUiPref("rowPreview", v)}
         />
       </SettingRow>
-      <SettingRow agents="none" source="local" label={t("appearance.foldIdleAgents")} hint={t("appearance.foldIdleAgentsHint")} reset={prefReset(ui, "foldIdleAgents")}>
-        <Toggle checked={ui.foldIdleAgents} onChange={(v) => setUiPref("foldIdleAgents", v)} />
-      </SettingRow>
       <TextLink onClick={() => useApp.getState().openSettings("appearance", { anchor: "avatars" })}>{t("settings.ia.avatarLink")}</TextLink>
-      <SettingRow agents="none" source="local" label={t("appearance.offlineAgents")} info={t("appearance.offlineAgentsHint")} reset={prefReset(ui, "offlineAgents")}>
-        <Segmented
-          value={String(ui.offlineAgents)}
-          options={OFFLINE_LIMITS.map((v) => ({ value: String(v), label: t(`appearance.offlineAgents.${v}` as MessageKey) }))}
-          onChange={(v) => setUiPref("offlineAgents", migrateOfflineLimit(v === "all" ? v : Number(v)))}
-        />
-      </SettingRow>
     </Section>
   );
 }
@@ -137,28 +136,16 @@ export function SidebarStyleCard() {
           onChange={(v) => setUiPref("projectSeparation", v)}
         />
       </SettingRow>
-      <AppearanceNumberRow field="sidebarWidth" label="appearance.sidebarWidth" hint="appearance.sidebarWidthHint" unit="px" step={4} />
-    </Section>
-  );
-}
-
-export function SidebarHoverCard() {
-  const { t } = useI18n();
-  const ui = useUiPrefs();
-  return (
-    <Section id={settingsAnchorId("hoverPreview")} title={t("appearance.sidebar.hoverPreview")}>
-      <SettingRow agents="none" source="local" label={t("appearance.projectHoverPreview")} info={t("appearance.projectHoverPreviewHint")} reset={prefReset(ui, "projectHoverPreview")}>
-        <Toggle checked={ui.projectHoverPreview} onChange={(v) => setUiPref("projectHoverPreview", v)} />
-      </SettingRow>
-      {/* Always there, disabled while preview is off: a row that appears would move the page. */}
-      <SettingRow agents="none" source="local" label={t("appearance.projectHoverDelay")} reset={prefReset(ui, "projectHoverDelay")}>
+      {/* 系统行样式 (owner 2026-11-06): 独立智能体 / 快速会话 / top-level 更早的项目 vs the owner's folders. */}
+      <SettingRow agents="none" source="local" label={t("appearance.systemRows")} hint={t("appearance.systemRowsHint")} reset={prefReset(ui, "systemRows")}>
         <Segmented
-          value={String(ui.projectHoverDelay)}
-          disabled={!ui.projectHoverPreview}
-          options={FLYOUT_DELAYS.map((v) => ({ value: String(v), label: t(`appearance.projectHoverDelay.${v}` as MessageKey) }))}
-          onChange={(v) => setUiPref("projectHoverDelay", migrateFlyoutDelay(Number(v)))}
+          label={t("appearance.systemRows")}
+          value={ui.systemRows}
+          options={(["line", "band"] as SystemRowStyle[]).map((v) => ({ value: v, label: t(`appearance.systemRows.${v}` as MessageKey) }))}
+          onChange={(v) => setUiPref("systemRows", v)}
         />
       </SettingRow>
+      <AppearanceNumberRow field="sidebarWidth" label="appearance.sidebarWidth" hint="appearance.sidebarWidthHint" unit="px" step={4} />
     </Section>
   );
 }
@@ -170,7 +157,6 @@ export function SidebarSettingsCards() {
       <SidebarProjectsCard />
       <SidebarAgentRowsCard />
       <SidebarStyleCard />
-      <SidebarHoverCard />
     </>
   );
 }

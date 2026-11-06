@@ -1,13 +1,17 @@
 import { daemonFetch } from "./daemonFetch";
+import { collectOwnerPages, ownerPageQuery } from "./ownerStorePages";
+import { NOTIFICATION_PAGES_FEATURE, type ApprovalPage, type OwnerStorePageQuery } from "../shared/notificationPaging";
+import { BACKGROUND_WORK_METHOD, BackgroundWorkProjection, backgroundWorkChange } from "../shared/backgroundWork";
 import { readDelegationUpgrade, executeDelegationUpgrade, projectDelegationApproval } from "../shared/delegationUpgradeAdapter";
 import { SidebarReadCache, SidebarRefresh } from "./sidebarReadCache";
+import { SessionDeltaCatalog } from "./sessionDeltaCatalog";
 import { retryableHostBusy, retryableSteerPreflight, withHostBusyRetry, withSteerPreflightRetry } from "../shared/queueSteerRetry";
 import { hostBusyActionWire } from "../shared/hostBusyAction";
 import { ownerJoinIntent } from "../shared/ownerJoin";
 import { fullTextReference, needsFullTextRepair, hydrateFullText } from "./liveFullText";
 import { OperatorRestartNotices, recordOperatorRuntimeNotice } from "./operatorRestart";
 import { AGENT_PAUSE_METHOD, AGENT_RESUME_METHOD, type AgentPauseResult } from "../shared/agentPause";
-import type { EventEnvelope } from "@cutex-desktop/protocol";
+import type { EventEnvelope, SessionResource } from "@cutex-desktop/protocol";
 import { readProjectOperators } from "./projectOperators";
 import { forkPreview, forkRequestParams, forkResult } from "./sessionFork";
 import { localFileAction } from "./localFiles";
@@ -23,6 +27,7 @@ import { directorScopeCandidates, directorReviewContent, projectDirector, direct
 import { appWindows } from "./appWindows";
 import { downloadFilename, downloadFilters } from "../shared/downloadFilename";
 import { randomUUID } from "node:crypto";
+import { FORMAL_RENAME_FEATURE, FORMAL_RENAME_FLAG, holderIds, restoreNameWire, nameHistoryPath, validRenameRequest, validRenameTarget, type FormalRenameRequest, type FormalRenameResult, type NameHistoryEvent, type NameHistoryPage } from "../shared/agentRename";
 import type { HostProxyPatch } from "../shared/proxy";
 import { traceSendStage } from "../shared/sendTrace";
 import { fastTierOf } from "../shared/fastMode";
@@ -235,7 +240,15 @@ const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const CONNECTION_READ_TIMEOUT_MS = 15_000;
 /** Workspace watch: no message or keepalive (cutex: every 15 s) for this long = reconnect. */
 const WATCH_IDLE_TIMEOUT_MS = 45_000;
+/** Durable-change polling of a host not shown (DaemonService.setInView); shown hosts every 5 s. */
+const OFF_VIEW_POLL_MS = 30_000;
 const IMAGE_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp" };
+
+/** Runtime-package runs for named agents (a retry of failed ones): a short list of session ids from the renderer, or none (= all). */
+function checkAgentIds(agentIds: unknown): asserts agentIds is string[] | undefined {
+  if (agentIds === undefined) return;
+  if (!Array.isArray(agentIds) || agentIds.length === 0 || agentIds.length > 500 || !agentIds.every((id) => typeof id === "string" && /^[A-Za-z0-9._:-]{1,200}$/.test(id))) throw new Error("bad agent ids");
+}
 
 /**
  * Owns the connection to the active cutex daemon: the host-wide event feed (sidebar refresh) and
@@ -263,8 +276,18 @@ export class DaemonService implements DaemonApi {
   sideInterrupt(sessionId: string, chatId: string) { return sideApi(this.requireClient()).sideInterrupt(sessionId, chatId); }
   sideRespond(sessionId: string, chatId: string, requestId: string | number, reply: SideReply) { return sideApi(this.requireClient()).sideRespond(sessionId, chatId, requestId, reply); }
   sideClose(sessionId: string, chatId: string) { return sideApi(this.requireClient()).sideClose(sessionId, chatId); }
+  private backgroundWork = new BackgroundWorkProjection();
+  /** Authority events seen during a list read, released as soon as that read settles. */
+  private approvalReads = new Set<{ client: CutexClient; changes: Map<string, ApprovalRecord> }>();
   private sidebarRefresh = new SidebarRefresh<SidebarSnapshot>(2000);
   private retiredCache = new SidebarReadCache<SessionList>();
+  private sessionDeltas: SessionDeltaCatalog | undefined;
+  private sessionDeltaPoll: ReturnType<typeof setInterval> | undefined;
+  /** The host is shown (focus or in the view scope); off view its catalog is polled every 30 s, not 5 s. */
+  private inView = true;
+  private polledAt = 0;
+  private pollNow: (() => void) | undefined;
+  private sessionDeltaProjectsVersion = -1;
   private projectsCache = new SidebarReadCache<ProjectsResponse>();
   private operatorsCache = new SidebarReadCache<Awaited<ReturnType<typeof readProjectOperators>>>();
   private capabilitiesCache = new SidebarReadCache<CapabilitiesView | null>();
@@ -309,6 +332,8 @@ export class DaemonService implements DaemonApi {
   private restricted = false;
   /** This connection refused `/v2/sessions?includeHidden=true` (older cutex or a non-root token). */
   private hiddenRefused = false;
+  /** Archived agents are read only once something needs them (the archive list, search, an archived agent opened). */
+  private archivedWanted = false;
   /** Local files the user picked in the image chooser (only these may be uploaded to a remote). */
   private pickedImages = new Set<string>();
 
@@ -392,6 +417,7 @@ export class DaemonService implements DaemonApi {
   }
 
   private teardown(): void {
+    this.resetSessionDeltas();
     this.client?.dispose?.();
     this.mediaResyncSeen.clear();
     this.mediaResyncPending.clear();
@@ -400,6 +426,7 @@ export class DaemonService implements DaemonApi {
     this.gen++;
     this.accessRevision++;
     this.capabilitiesRevision++;
+    this.backgroundWork = new BackgroundWorkProjection();
     this.sidebarRefresh = new SidebarRefresh<SidebarSnapshot>(2000);
     this.retiredCache = new SidebarReadCache<SessionList>();
     this.projectsCache = new SidebarReadCache<ProjectsResponse>();
@@ -433,6 +460,11 @@ export class DaemonService implements DaemonApi {
   }
 
   private setState(state: DaemonState): void {
+    if (state.kind !== "connected") {
+      this.backgroundWork = new BackgroundWorkProjection();
+      this.retiredCache = new SidebarReadCache<SessionList>();
+      this.sidebarRefresh = new SidebarRefresh<SidebarSnapshot>(2000);
+    }
     this.state = state;
     this.emit("daemonState", state);
   }
@@ -513,7 +545,7 @@ export class DaemonService implements DaemonApi {
       const host = await client.host({ signal: controller.signal });
       clearTimeout(timer);
       if (!current()) return;
-      if (!wasConnected) this.setState({ kind: "connected", baseUrl, hostId: host.hostId, ...(typeof host.platform === "string" ? { platform: host.platform } : {}) });
+      if (!wasConnected) this.setState({ kind: "connected", baseUrl, hostId: host.hostId, ...(host.instanceId ? { instanceId: host.instanceId } : {}), ...(typeof host.platform === "string" ? { platform: host.platform } : {}) });
       // The daemon answers again (e.g. the SSH tunnel came back): session feeds waiting out their
       // backoff (up to 15 s) reconnect now instead of leaving the open agent stale.
       if (!wasConnected) {
@@ -563,10 +595,14 @@ export class DaemonService implements DaemonApi {
     // sidebar feed does not replay the retained backlog. Falls back to fast-forward paging.
     let position: { streamId?: string; after?: string } = {};
     try {
-      const list = await client.sessions("active", { signal: controller.signal, background: true });
-      const stream = (list.management as { eventStream?: { streamId?: string; latest?: { cursor?: string } | null } } | null)
-        ?.eventStream;
-      if (stream?.streamId) position = { streamId: stream.streamId, after: stream.latest?.cursor ?? undefined };
+      // Capable owner hosts recover their catalog through its own durable cursor.
+      // Do not fetch a whole session list solely to discover the SSE tail.
+      const caps = await this.readCapabilities(client, { signal: controller.signal }).catch(() => null);
+      if (!this.supportsSessionDeltas(caps)) {
+        const list = await client.sessions("active", { signal: controller.signal, background: true });
+        const stream = (list.management as { eventStream?: { streamId?: string; latest?: { cursor?: string } | null } } | null)?.eventStream;
+        if (stream?.streamId) position = { streamId: stream.streamId, after: stream.latest?.cursor ?? undefined };
+      }
     } catch {
       // fall through to fromLatest paging
     } finally {
@@ -576,6 +612,10 @@ export class DaemonService implements DaemonApi {
     // A slower tail read from a previous connection/reset must never start an orphan feed.
     if (!current()) return;
     let refused = false;
+    // The initial sidebar read can precede the SSE subscription. A first live
+    // handshake closes that gap just like a reconnect of non-replayable status.
+    let statusGap = true;
+    let statusWasLive = false;
     const feed = new EventFeed(
       client,
       {
@@ -583,8 +623,11 @@ export class DaemonService implements DaemonApi {
         traffic: (sample) => { if (current()) this.hostTraffic.add(sample); },
         resync: (reason, detail) => {
           if (!current()) return;
+          this.backgroundWork = new BackgroundWorkProjection();
+          this.sidebarRefresh = new SidebarRefresh<SidebarSnapshot>(2000);
           // users: the token's user / grant changed — the renderer re-reads the capabilities and lists.
-          this.invalidateSidebarParts();
+          this.invalidateSidebarParts(false);
+          this.sessionDeltas?.invalidateActive();
           this.invalidateCapabilities();
           if (reason === "access_changed") {
             this.invalidateAccess();
@@ -596,6 +639,22 @@ export class DaemonService implements DaemonApi {
         },
         status: (status, error) => {
           if (!current()) return;
+          if (status === "retrying" || (status === "connecting" && statusWasLive)) statusGap = true;
+          if (status === "live") statusWasLive = true;
+          if (status === "live" && statusGap) {
+            statusGap = false;
+            // The process behind a surviving SSH endpoint may have been upgraded. The
+            // renderer's resync must read its new capabilities rather than our old cache.
+            this.invalidateCapabilities();
+            // Ephemeral status cannot be replayed from the durable cursor. Recover once
+            // per reconnect; events arriving during that snapshot still overlay its rows.
+            this.backgroundWork = new BackgroundWorkProjection();
+            this.sidebarRefresh = new SidebarRefresh<SidebarSnapshot>(2000);
+            this.invalidateSidebarParts(false);
+            // Status events before this moment were not streamed: only rows read before it are read again.
+            this.sessionDeltas?.invalidateActive(Date.now());
+            this.emit("hostResync", { reason: "session_status_reconnected" });
+          }
           // A later HTTP answer/live stream cancels a not-yet-started transport probe.
           if ((status === "live" || error instanceof CutexApiError) && this.state.kind === "connected" && this.retryTimer) {
             clearTimeout(this.retryTimer);
@@ -624,7 +683,7 @@ export class DaemonService implements DaemonApi {
           }
         },
       },
-      { ...position, fromLatest: position.streamId === undefined, background: true },
+      { ...position, fromLatest: position.streamId === undefined, background: true, sessionStatus: true },
     );
     this.hostFeed = feed;
     feed.start();
@@ -752,17 +811,76 @@ export class DaemonService implements DaemonApi {
 
   sidebar(): Promise<SidebarSnapshot> {
     const client = this.requireClient(), generation = this.gen;
+    const backgroundWork = this.backgroundWork;
     return this.sidebarRefresh.read(async () => {
       this.assertInputScope(client, generation);
       const access = this.accessRevision;
       const snapshot = await this.readSidebar(client);
       this.assertInputScope(client, generation);
       if (access !== this.accessRevision) throw new Error("access changed");
-      return snapshot;
-    });
+      // A feed (re)connect meanwhile: the renderer reads again, and that read joins the catalog read in
+      // flight, which re-reads only the rows read before the gap (invalidateActive).
+      if (backgroundWork !== this.backgroundWork) throw new Error("sidebar event scope changed");
+      return backgroundWork.project(snapshot);
+    }, () => setTimeout(() => { if (this.client === client) this.emit("sidebarChanged", { reason: "changed_during_read" }); }, 0));
   }
 
-  private invalidateSidebarParts(): void {
+  /**
+   * Whether this host is shown. Off view its catalog is polled every 30 s (its event feed still wakes it); shown
+   * again, it is polled at once, so switching back finds it current.
+   */
+  setInView(inView: boolean): void {
+    if (this.inView === inView) return;
+    this.inView = inView;
+    if (inView) this.pollNow?.(); else this.polledAt = Date.now();
+  }
+
+  /** At most every 400 ms (and the last one): the renderer peeks at the rows read so far. */
+  private progressAt = 0;
+  private progressTimer: ReturnType<typeof setTimeout> | undefined;
+  private sidebarProgress(catalog: SessionDeltaCatalog, loaded: number, total: number): void {
+    const send = () => {
+      this.progressTimer = undefined;
+      if (this.sessionDeltas !== catalog) return;
+      this.progressAt = Date.now();
+      this.emit("sidebarProgress", { loaded, total });
+    };
+    if (this.progressTimer) clearTimeout(this.progressTimer);
+    const wait = this.progressAt + 400 - Date.now();
+    if (wait <= 0 || loaded === total) send();
+    else this.progressTimer = setTimeout(send, wait);
+  }
+
+  /**
+   * While a host's first sidebar read runs: the active agents read so far (`loading`, `partial`), shown before
+   * the rest arrives. null when no such read runs (the next `sidebar()` is the whole list).
+   */
+  async sidebarPeek(): Promise<SidebarSnapshot | null> {
+    const peek = this.sessionDeltas?.peek();
+    if (!peek) return null;
+    // The projects to group the rows by come meanwhile (one read; the whole read reads them again after).
+    const client = this.client;
+    if (client && !this.projectsCache.peek()) void this.projectsCache.read(() => client.projects({ background: true })).catch(() => undefined);
+    const snapshot: SidebarSnapshot = {
+      active: peek.active, retired: peek.retired, hostRows: peek.hostRows, projects: this.projectsCache.peek() ?? null,
+      ...(peek.claudeRuntime ? { claudeRuntime: peek.claudeRuntime } : {}),
+      partial: true, archivedPending: { count: peek.archivedPending ?? 0 }, loading: peek.loading!,
+    };
+    return this.backgroundWork.project(snapshot);
+  }
+
+  /** Reads the archived agents from now on (one list read); the renderer is told to read the sidebar again. */
+  async sidebarLoadArchived(): Promise<void> {
+    const client = this.requireClient();
+    const wanted = this.archivedWanted;
+    this.archivedWanted = true;
+    if (!(this.sessionDeltas?.wantArchived() ?? !wanted)) return;
+    this.sidebarRefresh.invalidate();
+    setTimeout(() => { if (this.client === client) this.emit("sidebarChanged", { reason: "archived_wanted" }); }, 0);
+  }
+
+  private invalidateSidebarParts(resources = true): void {
+    if (resources) this.sessionDeltas?.invalidate();
     this.sidebarRefresh.invalidate();
     this.retiredCache = new SidebarReadCache<SessionList>();
     this.projectsCache = new SidebarReadCache<ProjectsResponse>();
@@ -770,7 +888,10 @@ export class DaemonService implements DaemonApi {
   }
 
   private invalidateAccess(): void {
+    this.resetSessionDeltas();
     this.accessRevision++;
+    this.backgroundWork = new BackgroundWorkProjection();
+    this.sidebarRefresh = new SidebarRefresh<SidebarSnapshot>(2000);
     this.invalidateSidebarParts();
     this.invalidateCapabilities();
     this.hiddenRefused = false;
@@ -786,18 +907,39 @@ export class DaemonService implements DaemonApi {
 
   private invalidateSidebarEvent(envelope: EventEnvelope): void {
     const method = envelope.cutex?.method ?? "";
-    if (method.startsWith("cutex/users/") || method.startsWith("cutex/access/")) this.invalidateAccess();
+    if (method === "cutex/approvals/changed") {
+      const record = (envelope.cutex?.params as { approval?: ApprovalRecord } | undefined)?.approval;
+      if (record && typeof record.approvalId === "string" && typeof record.state === "string") this.noteApprovalDuringRead(record);
+    }
+    // Counts patch projections; they must not invalidate a whole-list read in flight.
+    if (method === BACKGROUND_WORK_METHOD) {
+      const change = backgroundWorkChange(envelope.cutex?.params);
+      if (change) this.backgroundWork.record(change);
+      return;
+    }
+    // Only what changes who this connection is or may see. Per-user preferences (cutex/users/me/…, e.g. the
+    // layout pointer this desktop writes) and owner-device notices never restart the host's catalog.
+    if (method === "cutex/users/changed" || method === "cutex/access/changed") this.invalidateAccess();
     else if (method.startsWith("cutex/components/") || method.startsWith("cutex/features/") ||
         method.startsWith("cutex/featureFlags/") || method.startsWith("cutex/settings/") || method.startsWith("cutex/capabilities/"))
       this.invalidateCapabilities();
     const native = envelope.native?.message.method ?? "";
+    const params = envelope.cutex?.params as { cutexSessionId?: string } | undefined;
+    const id = params?.cutexSessionId ?? envelope.cutexSessionId;
+    if (method.startsWith("cutex/project/") || method.startsWith("cutex/projects/") || method.startsWith("cutex/agentManagement/"))
+      this.sessionDeltas?.invalidate(); // Project membership/presentation is a separate authority.
+    else if ((id && method && method !== "cutex/sessions/changed") || (method.startsWith("cutex/session/") && !method.includes("history/")) || method.startsWith("cutex/activity/") || method.startsWith("cutex/runtime/") ||
+        native.startsWith("turn/") || native.startsWith("thread/status") || native === "thread/name/updated" || native === "thread/settings/updated")
+      this.sessionDeltas?.invalidate(id);
+    else if (method.startsWith("cutex/components/") || method.startsWith("cutex/settings/") || method.startsWith("cutex/profiles/"))
+      this.sessionDeltas?.invalidateActive();
     if (method || native.startsWith("turn/") || native.startsWith("thread/status") || native === "thread/name/updated" || native === "thread/settings/updated")
       this.sidebarRefresh.invalidate();
     if (method.startsWith("cutex/project/") || method.startsWith("cutex/projects/") ||
-        method.startsWith("cutex/agentManagement/") || method === "cutex/sessions/changed") {
+        method.startsWith("cutex/agentManagement/") || (method === "cutex/sessions/changed" && !this.sessionDeltas)) {
       this.invalidateSidebarParts();
     } else if (method.startsWith("cutex/session/") && !method.includes("history/")) {
-      if (/retire|restore|delete|created|fork/.test(method)) this.invalidateSidebarParts();
+      if (/retire|restore|delete|created|fork/.test(method) && !this.sessionDeltas) this.invalidateSidebarParts();
       else {
         const params = envelope.cutex?.params as { cutexSessionId?: string } | undefined;
         const id = params?.cutexSessionId ?? envelope.cutexSessionId;
@@ -812,17 +954,32 @@ export class DaemonService implements DaemonApi {
 
   private async readSidebar(client: CutexClient): Promise<SidebarSnapshot> {
     // Capture before awaiting: an old host must never fill a new host's caches.
-    const retiredCache = this.retiredCache, projectsCache = this.projectsCache, operatorsCache = this.operatorsCache;
+    const retiredCache = this.retiredCache;
+    const cachedCaps = this.capabilitiesCache.peek();
+    const caps = cachedCaps === undefined ? await this.readCapabilities(client) : cachedCaps;
+    const catalog = this.supportsSessionDeltas(caps) ? this.sessionDeltaCatalog(client) : undefined;
+    if (!catalog && this.sessionDeltas) this.resetSessionDeltas();
+    const catalogValue = catalog ? await catalog.read() : undefined;
+    if (catalog) {
+      if (this.sessionDeltas !== catalog) throw new Error("session catalog scope changed");
+      if (catalog.membershipVersion !== this.sessionDeltaProjectsVersion) {
+        this.projectsCache.invalidate(); this.operatorsCache.invalidate();
+        this.sessionDeltaProjectsVersion = catalog.membershipVersion;
+      }
+    }
+    const projectsCache = this.projectsCache, operatorsCache = this.operatorsCache;
     const [active, retired, projects, hostRows] = await Promise.all([
-      this.activeSessions(client),
-      retiredCache.read(() => client.sessions("retired", { background: true })).catch(() => ({ sessions: [], failed: true as const })),
+      catalogValue ? { sessions: catalogValue.active, claudeRuntime: catalogValue.claudeRuntime } : this.activeSessions(client),
+      catalogValue ? { sessions: catalogValue.retired }
+        : !this.archivedWanted ? { sessions: [], pending: true as const }
+        : retiredCache.read(() => client.sessions("retired", { background: true })).catch(() => ({ sessions: [], failed: true as const })),
       projectsCache.read(() => client.projects({ background: true })).catch((error: unknown): ProjectsResponse | null => {
         if (error instanceof CutexApiError) return null;
         throw error;
       }),
       // users: `/v2/host/sessions` is owner-only; another user's rows (name, project) come from its
       // filtered summary instead, so the sidebar still groups its agents by project.
-      this.allHostRows(client).catch((error: unknown) => (error instanceof CutexApiError && error.status === 403 ? this.summaryHostRows(client) : {})),
+      catalogValue ? catalogValue.hostRows : this.allHostRows(client).catch((error: unknown) => (error instanceof CutexApiError && error.status === 403 ? this.summaryHostRows(client) : {})),
     ]);
     // session-claude-runtime: the release for new Claude sessions, read with the agents' pins.
     const projectOperators = projects ? await operatorsCache.read(async () => {
@@ -833,8 +990,59 @@ export class DaemonService implements DaemonApi {
       return roster;
     }) : undefined;
     const claudeRuntime = active.claudeRuntime;
-    const partial = ("failed" in retired && retired.failed) || this.hiddenRefused;
-    return { active: active.sessions, retired: retired.sessions, projects, hostRows, operatorRestartRequired: this.operatorRestartNotices.current(active.sessions), ...(projectOperators ? { projectOperators } : {}), ...(claudeRuntime ? { claudeRuntime } : {}), ...(partial ? { partial: true as const } : {}) };
+    const archivedPending = catalogValue ? catalogValue.archivedPending === undefined ? undefined : { count: catalogValue.archivedPending }
+      : "pending" in retired ? { count: null } : undefined;
+    const partial = ("failed" in retired && retired.failed) || !!archivedPending || (!catalog && this.hiddenRefused);
+    return { active: active.sessions, retired: retired.sessions, projects, hostRows, operatorRestartRequired: this.operatorRestartNotices.current(active.sessions), ...(projectOperators ? { projectOperators } : {}), ...(claudeRuntime ? { claudeRuntime } : {}), ...(partial ? { partial: true as const } : {}), ...(archivedPending ? { archivedPending } : {}) };
+  }
+
+  private supportsSessionDeltas(caps: CapabilitiesView | null): boolean {
+    return caps?.featureList?.includes("session-deltas-v1") === true && caps.featureList.includes("session-deltas-host-v1") && userAccessOf(caps).isOwner;
+  }
+
+  private resetSessionDeltas(): void {
+    this.sessionDeltas?.dispose(); this.sessionDeltas = undefined;
+    this.sessionDeltaProjectsVersion = -1;
+    if (this.sessionDeltaPoll) clearInterval(this.sessionDeltaPoll);
+    this.sessionDeltaPoll = undefined;
+  }
+
+  private sessionDeltaCatalog(client: CutexClient): SessionDeltaCatalog {
+    if (client !== this.client) throw new Error("session catalog host changed");
+    if (this.sessionDeltas) return this.sessionDeltas;
+    const options = { background: true };
+    const catalog = new SessionDeltaCatalog({
+      page: (lifecycle, cursor) => client.sessionPage({ lifecycle, cursor, limit: 200, maxBytes: 262144 }, options),
+      changes: cursor => client.sessionChanges(cursor, { limit: 1000, maxBytes: 65536 }, options),
+      session: async (id, lifecycle) => {
+        for (const kind of [lifecycle, lifecycle === "active" ? "retired" : "active"] as const) {
+          try { return await client.session(id, kind, options); }
+          catch (error) { if (!(error instanceof CutexApiError && error.status === 404)) throw error; }
+        }
+        return null;
+      },
+      hostRow: id => client.hostSession(id, options),
+      retired: async () => (await client.sessions("retired", options)).sessions,
+    }, (loaded, total) => this.sidebarProgress(catalog, loaded, total));
+    if (this.archivedWanted) catalog.wantArchived();
+    this.sessionDeltas = catalog;
+    // Other-process and previous-build writes do not publish in-process wake hints.
+    // Poll the bounded durable transport too, without forcing catalog snapshots on SSE gaps.
+    let polling = false;
+    const poll = (force = false) => {
+      if (polling || this.sessionDeltas !== catalog || this.state.kind !== "connected" || !this.supportsSessionDeltas(this.capabilitiesCache.peek() ?? null)) return;
+      if (!force && !this.inView && Date.now() - this.polledAt < OFF_VIEW_POLL_MS) return;
+      polling = true; this.polledAt = Date.now();
+      const revision = catalog.version;
+      void catalog.read().then(() => {
+        if (this.sessionDeltas === catalog && catalog.version !== revision)
+          this.emit("hostResync", { reason: "session_catalog_changed" });
+      }).catch(() => { /* Keep the cursor; a later hint/poll retries transient failures. */ }).finally(() => { polling = false; });
+    };
+    this.pollNow = () => poll(true);
+    this.sessionDeltaPoll = setInterval(poll, 5000);
+    this.sessionDeltaPoll.unref?.();
+    return catalog;
   }
 
   /** Host rows of the agents a non-owner user sees (`GET /v2/summary`, filtered by cutex); {} on any error. */
@@ -1244,14 +1452,19 @@ export class DaemonService implements DaemonApi {
     const blobs = raw?.eventMediaBlobs === true || raw?.featureList?.some(feature => feature === EVENT_MEDIA_BLOBS_FEATURE || feature === "eventMediaBlobs");
     let caps = blobs && !raw?.featureList?.includes(EVENT_MEDIA_BLOBS_FEATURE)
       ? { ...raw!, featureList: [...(raw?.featureList ?? []), EVENT_MEDIA_BLOBS_FEATURE] } : raw;
+    if (caps?.features?.runtimePruneV1 === true && !caps.featureList?.includes("runtime-prune-v1"))
+      caps = { ...caps, featureList: [...(caps.featureList ?? []), "runtime-prune-v1"] };
     if (caps?.features?.liveTextDeltas === true && !caps.featureList?.includes(LIVE_DELTAS_FEATURE))
       caps = { ...caps, featureList: [...(caps.featureList ?? []), LIVE_DELTAS_FEATURE] };
     if (caps?.features?.ownerAdmissionHeldV1 === true && !caps.featureList?.includes("owner-admission-held-v1"))
       caps = { ...caps, featureList: [...(caps.featureList ?? []), "owner-admission-held-v1"] };
+    if (caps?.features?.[FORMAL_RENAME_FLAG] === true && !caps.featureList?.includes(FORMAL_RENAME_FEATURE))
+      caps = { ...caps, featureList: [...(caps.featureList ?? []), FORMAL_RENAME_FEATURE] };
     if (this.client === client && access === this.accessRevision) {
       this.liveDeltasClient = caps === null ? null : client;
       this.liveDeltasSupported = caps?.featureList?.includes(LIVE_DELTAS_FEATURE) === true;
       this.restricted = !userAccessOf(caps).isOwner;
+      if (this.sessionDeltas && !this.supportsSessionDeltas(caps)) this.resetSessionDeltas();
       this.mediaRefsClient = caps?.featureList?.some(feature => feature === HISTORY_MEDIA_REFS || feature === EVENT_MEDIA_BLOBS_FEATURE || feature === "eventMediaBlobs") || caps?.eventMediaBlobs === true ? client : null;
     }
     return caps;
@@ -1516,6 +1729,32 @@ export class DaemonService implements DaemonApi {
     return this.skillArchiveCall(`/v2/codex/skills/archive/${encodeURIComponent(archiveId)}/restore`, {});
   }
 
+  // ---------- 自己的名字 (formal-agent-name-rename-v1) ----------
+
+  async renameFormalAgent(id: string, request: FormalRenameRequest): Promise<FormalRenameResult> {
+    if (!validRenameTarget(id) || !validRenameRequest(request)) throw new Error("bad rename request");
+    const body = { requestId: request.requestId, expectedRevision: request.expectedRevision, name: request.name };
+    try {
+      const r = await this.requireClient().request<{ event: NameHistoryEvent; replayed?: boolean; session?: SessionResource | null }>("POST", `/v2/human/agents/${encodeURIComponent(id)}/rename`, { body });
+      return { ok: true, event: r.event, replayed: r.replayed === true, session: r.session ?? null };
+    } catch (error) {
+      if (error instanceof CutexApiError) {
+        const message = error.message.startsWith(`${error.code}: `) ? error.message.slice(error.code.length + 2) : error.message;
+        const holders = holderIds(error.details);
+        // 503 persistence_unavailable / admission_busy made no rename: the same request may go again.
+        return { ok: false, error: { code: error.code, message, retrySame: error.status >= 500, ...(holders ? { holderSessionIds: holders } : {}) } };
+      }
+      // No answer: it may have been renamed. Only the exact same request may be replayed.
+      return { ok: false, error: { code: "transport", message: error instanceof Error ? error.message : String(error), retrySame: true } };
+    }
+  }
+
+  async formalNameHistory(id: string, before: number | null): Promise<NameHistoryPage> {
+    if (!validRenameTarget(id) || (before !== null && !(Number.isSafeInteger(before) && before > 0))) throw new Error("bad name history request");
+    const r = await this.requireClient().request<{ events?: NameHistoryEvent[]; next?: number | null }>("GET", nameHistoryPath(id, before));
+    return { events: Array.isArray(r.events) ? r.events : [], next: typeof r.next === "number" ? r.next : null };
+  }
+
   // ---------- profiles / settings (cutex settings routes) ----------
 
   private profilePath(profile: string, rest = ""): string {
@@ -1719,8 +1958,56 @@ export class DaemonService implements DaemonApi {
     return this.requireClient().request<GlobalSettings>("PATCH", "/v2/settings", { body: { agentSecurity: body } });
   }
 
-  approvals(state: "pending" | "all"): Promise<ApprovalRecord[] | null> {
-    return this.requireClient().approvals<ApprovalRecord>(state);
+  private async ownerPagesContext() {
+    const client = this.requireClient(), generation = this.gen, access = this.accessRevision;
+    const caps = await this.readCapabilities(client);
+    const verify = () => {
+      this.assertInputScope(client, generation);
+      if (access !== this.accessRevision) throw new Error("access changed");
+    };
+    verify();
+    return { client, verify, paged: caps?.featureList?.includes(NOTIFICATION_PAGES_FEATURE) === true };
+  }
+
+  private noteApprovalDuringRead(record: ApprovalRecord, client = this.client): void {
+    for (const read of this.approvalReads) if (read.client === client) read.changes.set(record.approvalId, record);
+  }
+
+  async approvals(state: "pending" | "all"): Promise<ApprovalRecord[] | null> {
+    const { client, verify, paged } = await this.ownerPagesContext();
+    const read = { client, changes: new Map<string, ApprovalRecord>() };
+    this.approvalReads.add(read);
+    try {
+      const records = paged ? await collectOwnerPages(async (cursor, limit) => {
+        const page = await client.approvalsPage<ApprovalRecord>(state, { limit, cursor });
+        verify();
+        return page ? { items: page.approvals, nextCursor: page.nextCursor } : null;
+      }) : await client.approvals<ApprovalRecord>(state);
+      verify();
+      if (records === null || read.changes.size === 0) return records;
+      const rows = new Map(records.map(record => [record.approvalId, record]));
+      for (const record of read.changes.values()) {
+        if (state === "pending" && record.state !== "pending") rows.delete(record.approvalId);
+        else rows.set(record.approvalId, record);
+      }
+      return [...rows.values()].sort((a, b) => (Date.parse(b.createdAt) - Date.parse(a.createdAt)) || 0);
+    } finally {
+      this.approvalReads.delete(read);
+    }
+  }
+
+  async approvalsPage(state: "pending" | "all", query: OwnerStorePageQuery = {}): Promise<ApprovalPage<ApprovalRecord> | null> {
+    const { client, verify, paged } = await this.ownerPagesContext();
+    const request = ownerPageQuery(query);
+    if (!paged) {
+      if (request.cursor) throw new Error("owner-store pages unavailable");
+      const records = await client.approvals<ApprovalRecord>(state);
+      verify();
+      return records === null ? null : { approvals: records };
+    }
+    const page = await client.approvalsPage<ApprovalRecord>(state, request);
+    verify();
+    return page;
   }
 
   async decideApproval(approvalId: string, decision: ApprovalDecision, note?: string, origin?: ApprovalDecisionOrigin): Promise<ApprovalDecisionResult> {
@@ -1728,7 +2015,9 @@ export class DaemonService implements DaemonApi {
     // approval-decided-by: the renderer passes an origin only to a cutex that has it (older ones refuse `client`).
     const facts = approvalClientFacts(origin, app.getVersion(), hostname());
     try {
-      return { ok: true, approval: await client.decideApproval<ApprovalRecord>(approvalId, decision, note, facts) };
+      const approval = await client.decideApproval<ApprovalRecord>(approvalId, decision, note, facts);
+      this.noteApprovalDuringRead(approval, client);
+      return { ok: true, approval };
     } catch (error) {
       const refusal = refusalOf(error);
       if (refusal) return { ok: false, error: refusal };
@@ -1779,13 +2068,15 @@ export class DaemonService implements DaemonApi {
     return this.requireClient().runtimePackageRun<RuntimePackageRun>(runId);
   }
 
-  async startRuntimePackageRun(): Promise<RuntimePackageRunResult> {
-    return this.runtimePackageRunCall(() => this.requireClient().startRuntimePackageRun<RuntimePackageRun>({ all: true }));
+  async startRuntimePackageRun(agentIds?: string[]): Promise<RuntimePackageRunResult> {
+    checkAgentIds(agentIds);
+    return this.runtimePackageRunCall(() => this.requireClient().startRuntimePackageRun<RuntimePackageRun>(agentIds === undefined ? { all: true } : { agentIds: [...agentIds] }));
   }
 
-  async revertRuntimePackageRun(runId: string): Promise<RuntimePackageRunResult> {
+  async revertRuntimePackageRun(runId: string, agentIds?: string[]): Promise<RuntimePackageRunResult> {
     if (typeof runId !== "string" || !/^rpu-[A-Za-z0-9-]{1,80}$/.test(runId)) throw new Error("bad run id");
-    return this.runtimePackageRunCall(() => this.requireClient().revertRuntimePackageRun<RuntimePackageRun>(runId));
+    checkAgentIds(agentIds);
+    return this.runtimePackageRunCall(() => this.requireClient().revertRuntimePackageRun<RuntimePackageRun>(runId, agentIds));
   }
 
   directorRotations(projectId: string): Promise<DirectorRotation[] | null> {
@@ -1885,6 +2176,10 @@ export class DaemonService implements DaemonApi {
       throw error;
     }
   }
+
+  runtimePrunePlan() { return this.requireClient().runtimePrunePlan(); }
+
+  pruneRuntimes(ids: string[]) { return this.requireClient().pruneRuntimes(ids); }
 
   runtimes(): Promise<RuntimesWire | null> {
     return this.requireClient().runtimes<RuntimesWire>();
@@ -2367,6 +2662,9 @@ export class DaemonService implements DaemonApi {
     const client = this.requireClient();
     try { return await client.cutex<unknown>(sessionId, method, params); }
     catch (error) {
+      // Restore refused because its own name is someone else's now: the renderer offers 改名 (shared/agentRename).
+      const nameBlocked = method === "cutex/session/restore" ? restoreNameWire(error) : null;
+      if (nameBlocked) throw new Error(nameBlocked);
       if (["cutex/session/delete", "cutex/runtime/online", "cutex/session/retire"].includes(method)) {
         const wire = hostBusyActionWire(error);
         if (wire) {
@@ -3107,6 +3405,10 @@ export class DaemonService implements DaemonApi {
     }
   }
 
+  userLayout() { return this.homeCall(() => this.requireClient().userLayout()); }
+  putUserLayout(section: string, revision: number, data: Record<string, unknown> | null) { return this.homeCall(() => this.requireClient().putUserLayout(section, revision, data)); }
+  putLayoutPointer(pointer: import("@cutex-desktop/cutex-client").MemoryHost) { return this.homeCall(() => this.requireClient().putLayoutPointer(pointer)); }
+
   userHome(): Promise<HomeResult<HomeView | null>> {
     return this.homeCall(() => this.requireClient().userHome());
   }
@@ -3189,6 +3491,7 @@ export class DaemonService implements DaemonApi {
   inputGet(sessionId: string, inputIds: readonly string[]) { return this.requireClient().inputGet(sessionId, inputIds); }
   inputList(sessionId: string, query: import("@cutex-desktop/protocol").InputListParams = {}) { return this.requireClient().inputList(sessionId, query); }
   inputInterruptSend(sessionId: string, params: import("@cutex-desktop/protocol").InputInterruptSendParams) { return this.requireClient().inputInterruptSend(sessionId, params); }
+  inputHold(sessionId: string, params: import("@cutex-desktop/protocol").InputHoldParams) { return this.requireClient().inputHold(sessionId, params); }
   inputRetry(sessionId: string, inputId: string, expectedRev: number) { return this.requireClient().inputRetry(sessionId, inputId, expectedRev); }
   queueMerge(sessionId: string, params: import("@cutex-desktop/protocol").UserInputQueueMergeParams) { return this.requireClient().queueMerge(sessionId, params); }
   inputDismiss(sessionId: string, inputId: string, expectedRev: number) { return this.requireClient().inputDismiss(sessionId, inputId, expectedRev); }
@@ -3496,13 +3799,36 @@ export class DaemonService implements DaemonApi {
     const filter = query?.filter === "pending" || query?.filter === "alerting" || query?.filter === "all" ? query.filter : undefined;
     const agentId = typeof query?.agentId === "string" && query.agentId.length <= 200 ? query.agentId : undefined;
     const limit = typeof query?.limit === "number" && Number.isFinite(query.limit) ? Math.max(1, Math.min(500, Math.floor(query.limit))) : undefined;
+    const { client, verify, paged } = await this.ownerPagesContext();
+    if (paged) {
+      return await collectOwnerPages(async (cursor, pageLimit) => {
+        const page = await client.ownerNotificationsPage({ filter, agentId, limit: pageLimit, cursor });
+        verify();
+        return page ? { items: page.notifications.map(asRecord).filter((n): n is OwnerNotification => n !== null), nextCursor: page.nextCursor } : null;
+      }, limit ?? 100) ?? [];
+    }
     try {
-      const r = await this.requireClient().request<OwnerNotificationList>("GET", "/v2/owner-notifications", { query: { filter, agentId, limit } });
+      const r = await client.request<OwnerNotificationList>("GET", "/v2/owner-notifications", { query: { filter, agentId, limit } });
+      verify();
       return (Array.isArray(r?.notifications) ? r.notifications : []).map(asRecord).filter((n): n is OwnerNotification => n !== null);
     } catch (error) {
       if (error instanceof CutexApiError && (error.status === 404 || error.status === 405) && !error.code.startsWith("notification")) return [];
       throw error;
     }
+  }
+
+  async ownerNotificationsPage(query: { filter?: OwnerNotifyFilter; agentId?: string; limit?: number; cursor?: string }): Promise<OwnerNotificationList> {
+    const { client, verify, paged } = await this.ownerPagesContext();
+    const request = ownerPageQuery(query);
+    if (!paged) {
+      if (request.cursor) throw new Error("owner-store pages unavailable");
+      return { notifications: await this.ownerNotifications(query) };
+    }
+    const filter = query?.filter === "pending" || query?.filter === "alerting" || query?.filter === "all" ? query.filter : undefined;
+    const agentId = typeof query?.agentId === "string" && query.agentId.length <= 200 ? query.agentId : undefined;
+    const page = await client.ownerNotificationsPage({ ...request, filter, agentId });
+    verify();
+    return { notifications: (page?.notifications ?? []).map(asRecord).filter((n): n is OwnerNotification => n !== null), ...(page?.nextCursor ? { nextCursor: page.nextCursor } : {}) };
   }
 
   async ownerNotifyAction(agentId: string, action: OwnerNotifyAction, notificationId: string, text?: string): Promise<OwnerNotifyResult> {

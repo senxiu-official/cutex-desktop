@@ -24,7 +24,6 @@ export function installDevOperator(q: URLSearchParams, core: MockCore): void {
     await app.refreshHostSidebar(host);
     skipGuides();
     setUiPref("runningAgents", "compact");
-    setUiPref("foldIdleAgents", false);
     if (view === "sidebar") await useApp.getState().select(id, host);
     else services.ui.openPage("projects.page", { project: "desktop", tab: view === "agents" || view === "menu" ? "agents" : "overview" });
     await wait(300);

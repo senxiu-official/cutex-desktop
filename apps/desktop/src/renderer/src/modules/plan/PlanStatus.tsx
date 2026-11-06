@@ -68,13 +68,13 @@ function PlanTools({ sessionId, plan }: { sessionId: string; plan: PlanSnapshot 
   return (
     <>
       {plan.cleared && (
-        <Tag title={t("plan.clearedHint")}>
+        <Tag data-tip={t("plan.clearedHint")}>
           {t("plan.cleared")}
         </Tag>
       )}
       <button
         onClick={() => useApp.getState().dismissPlan(sessionId, hostId)}
-        title={t("plan.dismissHint")}
+        data-tip={t("plan.dismissHint")}
         aria-label={t("plan.dismiss")}
         className="flex size-5 items-center justify-center rounded text-subtle hover:bg-surface-2 hover:text-foreground"
       >
@@ -127,7 +127,7 @@ export function PlanStatusBar({ sessionId, inline }: StatusBarProps) {
     return (
       <button
         onClick={() => useApp.getState().restorePlan(sessionId, hostId)}
-        title={t("plan.restoreHint", { done, total })}
+        data-tip={t("plan.restoreHint", { done, total })}
         aria-label={t("plan.restore")}
         className="flex items-center gap-1 rounded px-1 text-xs text-subtle opacity-60 hover:bg-surface-2 hover:text-foreground hover:opacity-100"
       >

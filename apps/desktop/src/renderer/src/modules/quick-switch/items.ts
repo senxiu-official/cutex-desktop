@@ -11,6 +11,7 @@ import type { Icon, NavItem } from "../slots";
 import type { QsBadge, QsItem } from "./model";
 import type { ShelfPageInfo } from "./shelfPages";
 import { bindingLabel } from "../../lib/keybindings";
+import { realAgentName } from "../../lib/agentAlias";
 import { withKey } from "../../lib/useKeybindings";
 
 export type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
@@ -56,12 +57,14 @@ export function agentItems(src: AgentSource, t: T): QsItem[] {
     const key = row.key ?? row.id;
     const signal = src.signals.get(key);
     const offlineHost = src.stateOf(hostId) === "offline";
+    // Under an owner-set 显示名称 the agent's own name finds it too (as in the sidebar filter, lib/agentAlias).
+    const own = row.session.cutexSessionId ? realAgentName(row.session) : row.name;
     const item: QsItem = {
       id: `agent:${hostId}:${row.id}`,
       kind: "agent",
       title: row.name,
       subtitle: group ?? t("quick-switch.noProject"),
-      terms: [row.id, ...(row.profile ? [row.profile] : []), ...(row.subtitle ? [row.subtitle] : [])],
+      terms: [row.id, ...(own && own !== row.name ? [own] : []), ...(row.profile ? [row.profile] : []), ...(row.subtitle ? [row.subtitle] : [])],
       hostId,
       rank: 0,
       ...(offlineHost ? { disabled: true } : {}),

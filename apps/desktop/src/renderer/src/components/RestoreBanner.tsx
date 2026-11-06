@@ -10,6 +10,7 @@ import { RotateCcw } from "lucide-react";
 import { RUNTIME_RESTORE_FEATURE, type RestoreCandidates } from "../../../shared/runtimeRestore";
 import { apiFor } from "../bridge";
 import { useI18n } from "../i18n";
+import { beginOperation, trackedOperationItem } from "../lib/backgroundOperations";
 import { chosenCandidates, restoreSequentially, type RestoreOutcome } from "../lib/runtimeRestore";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { useApp } from "../store";
@@ -60,9 +61,10 @@ function useRestoreState() {
     setChoosing(false);
     setFailed([]);
     setProgress({ done: 0, total: list.length });
+    const operationId = beginOperation(host, "operations.kind.restore", list.map(item => ({key: item.cutexSessionId, name: item.displayName})));
     const outcomes = await restoreSequentially(
       list,
-      (id) => sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, host),
+      (id) => trackedOperationItem({operationId, key:id}, () => sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, host)),
       (done, total) => { if (current()) setProgress({ done, total }); },
     );
     if (!current()) return;
@@ -110,7 +112,7 @@ function RestoreCard({ state: s, className }: { state: RestoreState; className: 
       {s.choosing && !s.busy && (
         <div className="mt-1.5 flex flex-col gap-0.5 pl-5">
           {s.items.map((item) => (
-            <label key={item.cutexSessionId} className="flex min-w-0 cursor-pointer items-center gap-1.5" title={t("restore.lastOnline", { at: new Date(item.lastOnlineAt).toLocaleString() })}>
+            <label key={item.cutexSessionId} className="flex min-w-0 cursor-pointer items-center gap-1.5" data-tip={t("restore.lastOnline", { at: new Date(item.lastOnlineAt).toLocaleString() })}>
               <input type="checkbox" checked={s.chosen.has(item.cutexSessionId)} onChange={() => s.toggle(item.cutexSessionId)} />
               <span className="truncate">{item.displayName}</span>
             </label>
@@ -120,7 +122,7 @@ function RestoreCard({ state: s, className }: { state: RestoreState; className: 
       {s.failed.length > 0 && !s.busy && (
         <ul className="mt-1.5 space-y-0.5 pl-5 text-danger">
           {s.failed.map((f) => (
-            <li key={f.cutexSessionId} className="truncate" title={f.error ?? undefined}>
+            <li key={f.cutexSessionId} className="truncate" data-tip={f.error ?? undefined}>
               {t("restore.failedOne", { name: f.displayName, error: f.error ?? "" })}
             </li>
           ))}
@@ -188,7 +190,7 @@ export function RestoreChip() {
     <div ref={ref} className="relative shrink-0 [app-region:no-drag]">
       <button
         onClick={() => setOpen(!open)}
-        title={state.message}
+        data-tip={state.message}
         aria-label={state.message}
         aria-expanded={shown}
         aria-haspopup="dialog"
@@ -198,7 +200,7 @@ export function RestoreChip() {
         {t("restore.chip", { count })}
       </button>
       {shown && (
-        <div role="dialog" aria-label={state.message} className="absolute top-full left-0 z-50 mt-1 w-72 rounded-xl border border-border bg-surface p-2.5 shadow-xl">
+        <div role="dialog" aria-label={state.message} className="float absolute top-full left-0 z-[160] mt-1 w-72 p-2.5">
           <RestoreCard state={state} className="" />
         </div>
       )}

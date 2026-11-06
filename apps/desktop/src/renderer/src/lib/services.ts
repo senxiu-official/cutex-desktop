@@ -3,7 +3,7 @@
 import type { ProjectSummary } from "@cutex-desktop/protocol";
 import type { ServicePatch, ServiceView, SidebarSnapshot } from "../../../shared/ipc";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
-import { SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE } from "../../../shared/servicesSettings";
+import { SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, SERVICES_IDLE_PRESETS_FEATURE } from "../../../shared/servicesSettings";
 import { api, apiFor } from "../bridge";
 import type { MessageKey } from "../i18n";
 import { services } from "../modules/app";
@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 import { hostData } from "./hostScope";
 import { copyText } from "./menus";
 import { sideShowsHost } from "./sideServices";
+import { SERVICE_COMPONENT } from "./sideKinds";
 import { refActionEntries } from "./refActions";
 import { claimProjectChoices, scopePatch, serviceMayManage, serviceScope } from "./projectServices";
 
@@ -38,7 +39,7 @@ export function openInApp(slug: string, hostId: string, path: string): boolean {
   if (!sideShowsHost(hostId)) return false;
   try {
     const url = `cutex:service/${slug}${path.startsWith("/") ? path : `/${path}`}`;
-    return services.side.open("browser.tab", { url }, { binding: { kind: "host", hostId }, reveal: true, focus: true }).status === "opened";
+    return services.side.open(SERVICE_COMPONENT, { url }, { binding: { kind: "host", hostId }, reveal: true, focus: true }).status === "opened";
   } catch {
     return false;
   }
@@ -64,6 +65,7 @@ export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, 
   const supportsTtl = hostData(useApp.getState(), hostId ?? focusId())?.features.has(SERVICES_EPHEMERAL_TTL_FEATURE) ?? false;
   const supportsOrganize = hostData(useApp.getState(), hostId ?? focusId())?.features.has(SERVICES_ORGANIZE_FEATURE) ?? false;
   const host = hostData(useApp.getState(), hostId ?? focusId());
+  const supportsIdle = host?.features.has(SERVICES_IDLE_PRESETS_FEATURE) === true;
   // An agent view says whether it may manage the service (`youMayManage`); the owner's list leaves it out (manages all).
   const manage = serviceMayManage(s);
   const scopeRows = manage && !s.archived && (host?.features.has(SERVICES_PROJECT_SCOPE_FEATURE) ?? false) ? serviceScopeEntries(s, t, host?.sidebar, (patch) => run(() => api.patchService(s.slug, patch))) : [];
@@ -79,9 +81,17 @@ export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, 
     ...scopeRows,
     supervised && manage && !s.archived && "separator",
     supervised && manage && !s.archived && running && { label: t("services.stop"), onSelect: () => run(() => api.serviceAction(s.slug, "stop")) },
-    supervised && manage && !s.archived && !running && { label: t("services.start"), onSelect: () => run(() => api.serviceAction(s.slug, "start")) },
+    supervised && manage && !s.archived && !running && { label: t(supportsIdle && s.health === "stoppedIdle" ? "services.wake" : "services.start"), onSelect: () => run(() => api.serviceAction(s.slug, "start")) },
     supervised && manage && !s.archived && running && { label: t("services.restart"), onSelect: () => run(() => api.serviceAction(s.slug, "restart")) },
     supervised && !s.archived && toggleLogs && { label: t("services.logs"), onSelect: toggleLogs },
+    supportsIdle && supervised && manage && !s.archived && s.lifetime === "persistent" && {
+      label: t("services.idleStop"), onSelect: () => {},
+      submenu: (["1h", "24h", "7d", "forever"] as const).map(preset => ({
+        label: `${(s.idleStopPreset ?? "forever") === preset ? "✓ " : ""}${t(`services.idleStop.${preset}`)}`,
+        info: t("services.idleStop.hint"),
+        onSelect: () => run(() => api.patchService(s.slug, { idleStopPreset: preset })),
+      })),
+    },
     supportsTtl && manage && s.lifetime === "ephemeral" && "separator",
     supportsTtl &&
       manage &&

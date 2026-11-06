@@ -1,10 +1,10 @@
 # Optional Claude Code choice in onboarding
 
-Confirmed by the director on 2026-10-25 and assigned to backend owner r256-kits.
+The host and selected runtime must both advertise this optional extension.
 Desktop supports the following optional `GET /v2/components` extension on the
-`claude-runtime` component. r258 / claude-r27 do not report this extension; their
-card and `needsUser` instructions remain unchanged. The upcoming backend must
-implement this wire contract to enable the feature without another desktop change.
+`claude-runtime` component. Hosts and components that do not advertise it retain
+their existing card and `needsUser` instructions. Supporting hosts implement this
+wire contract to enable the feature without a separate desktop change.
 
 ```json
 {

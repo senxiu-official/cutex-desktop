@@ -114,7 +114,7 @@ class SessionMock extends EventEmitter {
   setDevicePermissionHandler = vi.fn();
   setCertificateVerifyProc = vi.fn();
   headers?: (details: any, done: (value: unknown) => void) => void;
-  webRequest = { onBeforeRequest: vi.fn(), onHeadersReceived: vi.fn((_filter: unknown, callback: SessionMock["headers"]) => { this.headers = callback; }) };
+  webRequest = { onBeforeRequest: vi.fn(), onHeadersReceived: vi.fn((_filter: unknown, callback: SessionMock["headers"]) => { this.headers = callback; }), onCompleted: vi.fn(), onErrorOccurred: vi.fn() };
   response(guest: ContentsMock, url: string, statusCode: number, responseHeaders: Record<string, string[]>) {
     this.headers?.({ webContentsId: guest.id, resourceType: "mainFrame", url, statusCode, responseHeaders }, () => {});
   }
@@ -167,7 +167,7 @@ function fixture(hostIds = ["local"], relayCapability = true, kinds: Record<stri
     mocks.sessions.set(`persist:browser-agent-${id}`, new SessionMock());
     const request = vi.fn(async (_method: string, _path: string, _options?: unknown): Promise<unknown> => { throw Error("Unexpected daemon HTTP: mocked relay transport must own these calls"); });
     const client = { endpoint: { baseUrl: `http://127.0.0.1:${26111 + index}` }, request };
-    const connection = { routingEpoch: `epoch-${id}`, daemon: { generation: 1, currentState: { kind: "connected" }, activeClient: () => client,
+    const connection = { routingEpoch: `epoch-${id}`, daemon: { generation: 1, currentState: { kind: "connected" }, activeClient: () => client, stopTurn: vi.fn(async () => ({})),
       capabilities: vi.fn(async () => ({ featureList: relayCapability ? ["browser-relay-v1"] : [] })) } };
     return [id, connection] as const;
   }));
@@ -212,7 +212,7 @@ function command(peer: RelayStub, operation: RelayCommand["operation"], override
 }
 function context() {
   const controller = new AbortController(), deadline = Date.now() + 30_000;
-  const value: RelayExecutionContext = { signal: controller.signal, deadline, remainingMs: () => Math.max(0, deadline - Date.now()) };
+  const value: RelayExecutionContext = { signal: controller.signal, deadline, remainingMs: () => Math.max(0, deadline - Date.now()), stage: vi.fn() };
   return { controller, value };
 }
 async function pendingOwnerGrant(f: ReturnType<typeof fixture>, tabKey = "owner-one", hostId = "local") {
@@ -429,8 +429,9 @@ describe("installed I3 per-host relay lifetime", () => {
     expect(f.events.filter(event => event.guestId === first.reserved.guestId).at(-1)?.control).toBeUndefined();
     expect(first.guest.debugger.isAttached()).toBe(false);
     expect(unaffected.dispose).not.toHaveBeenCalled(); expect(second.guest.dead).toBe(false);
-    // Health loss revokes authority but preserves the owner's DOM; identity loss closes it.
-    expect(first.guest.dead).toBe(change !== "disconnect");
+    // Daemon health/generation revokes agent authority but preserves the owner's DOM.
+    // A different host connection still retires the old page.
+    expect(first.guest.dead).toBe(change !== "disconnect" && change !== "generation");
   });
 });
 
@@ -499,12 +500,15 @@ describe("installed I3 owner two-phase grants and IPC identity", () => {
     expect(f.peer().revokeLease).not.toHaveBeenCalled();
   });
 
-  it("0.1.3: explicit pause keeps the lease; one-click resume continues the same lease; revoke is separate", async () => {
+  it("0.1.3: explicit pause keeps the lease; one-click resume continues the same lease; revoke is separate; pause stops the agent's turn (059)", async () => {
     const f = fixture(); await f.enable(); const { guest } = await f.mount(), pending = await pendingOwnerGrant(f);
     await f.ipc({ op: "holdReady", tabKey: "owner-one", leaseId: pending.leaseId, held: true }); await pending.grant;
     await f.ipc({ op: "pauseLease", tabKey: "owner-one", leaseId: "someone-else" });
     expect((await f.list())[0]?.control?.state).toBe("granted");
+    const stopTurn = (f.connections.get("local")!.daemon as unknown as { stopTurn: Mock }).stopTurn;
+    expect(stopTurn).not.toHaveBeenCalled();
     await f.ipc({ op: "pauseLease", tabKey: "owner-one", leaseId: pending.leaseId }); await flush();
+    expect(stopTurn).toHaveBeenCalledExactlyOnceWith("session-one");
     const paused = (await f.list())[0]!;
     expect(paused.control?.state).toBe("paused"); expect(paused.lease?.leaseId).toBe(pending.leaseId);
     expect(guest.debugger.isAttached()).toBe(false); expect(f.peer().revokeLease).not.toHaveBeenCalled();
@@ -513,6 +517,7 @@ describe("installed I3 owner two-phase grants and IPC identity", () => {
     expect(resumed.control?.state).toBe("granted"); expect(resumed.lease?.leaseId).toBe(pending.leaseId);
     expect(f.peer().activateLease).toHaveBeenCalledOnce();
     await f.ipc({ op: "pauseLease", tabKey: "missing", leaseId: pending.leaseId }); // idempotent no-op
+    expect(stopTurn).toHaveBeenCalledOnce();
   });
   it("requires pending lease then exact holdReady before provider preparation and activation", async () => {
     const f = fixture(); await f.enable(); const { guest } = await f.mount(), pending = await pendingOwnerGrant(f), peer = f.peer();
@@ -812,12 +817,40 @@ describe("installed I3 held background agent-open", () => {
     expect(f.events.some(event => event.kind === "agent-open-confirm")).toBe(false);
     await f.ipc({ op: "holdReady", tabKey: intent.tabKey, leaseId: pending.lease!.leaseId, held: true });
     await expect(open.result).resolves.toMatchObject({ kind: "tabs.open", tab: { guestId: reserved.guestId, url: intent.url } });
+    expect((open.ctx.value.stage as Mock).mock.calls.map(([stage]) => stage)).toEqual([
+      "mount_wait", "mount", "navigation", "grant_http", "hold_prepare", "prepare", "activate_http", "open_confirm",
+    ]);
     expect(f.events.filter(event => event.kind === "agent-open-confirm").map(event => event.openRequestId)).toEqual([intent.requestId]);
     expect(f.events.some(event => event.kind === "reveal")).toBe(false); expect(f.owner.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
     expect(guest.debugger.attach).not.toHaveBeenCalled(); expect(guest.debugger.sendCommand).not.toHaveBeenCalled();
     expect((await f.list())[0]?.control?.state).toBe("granted"); expect((await f.list())[0]?.lease?.state).toBe("active");
     expect(JSON.stringify(f.events)).not.toContain("private");
     await expect(f.ipc(receipt)).rejects.toMatchObject({ code: "invalid_request" }); // Receipt is one-use.
+  });
+  it("staged open (browser-open-stages-v1): answers loading once the first navigation commits; legacy hosts get no loadState", async () => {
+    for (const staged of [true, false]) {
+      const f = fixture();
+      f.connections.get("local")!.daemon.capabilities.mockResolvedValue({ featureList: ["browser-relay-v1", ...(staged ? ["browser-open-stages-v1"] : [])] });
+      await f.enable(); const open = await pendingAgentOpen(f), intent = open.intent;
+      const identity = { pendingOpen: intent.requestId, agentOpened: true as const };
+      const reserved = await f.ipc({ op: "open", tabKey: intent.tabKey, url: intent.url, identity }) as BrowserTabMount;
+      const guest = f.attach(reserved);
+      // The response commits but the load never finishes.
+      let finish!: () => void;
+      vi.spyOn(guest, "loadURL").mockImplementation(async url => { guest.loads.push(url); guest.url = url; guest.emit("did-navigate", {}, url); await new Promise<void>(yes => { finish = yes; }); });
+      await f.ipc({ op: "open", tabKey: intent.tabKey, url: intent.url, identity, receipt: { src: reserved.src, webContentsId: guest.id } });
+      if (!staged) {
+        await flush(); expect(open.peer.grantLease).not.toHaveBeenCalled(); finish();
+      }
+      await until(() => open.peer.grantLease.mock.calls.length === 1);
+      const pending = (await f.list())[0]!;
+      await f.ipc({ op: "holdReady", tabKey: intent.tabKey, leaseId: pending.lease!.leaseId, held: true });
+      const result = await open.result as { kind: string; loadState?: string };
+      expect(result).toMatchObject({ kind: "tabs.open", tab: { guestId: reserved.guestId } });
+      if (staged) { expect(result.loadState).toBe("loading"); finish(); }
+      else expect(result).not.toHaveProperty("loadState");
+      expect((await f.list())[0]?.lease?.state).toBe("active");
+    }
   });
   it.each(["scope_invalid", "scope_unsupported"] as const)("renderer %s refusal preserves its typed result and closes the pending guest", async code => {
     const f = fixture(); await f.enable(); const open = await pendingAgentOpen(f);

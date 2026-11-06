@@ -222,8 +222,8 @@ export function Palette({
 
   let at = -1;
   return (
-    <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black/20 pt-[92px]" onMouseDown={(e) => e.target === e.currentTarget && onClose()} data-quick-switch-backdrop="">
-      <div role="dialog" aria-modal aria-label={t("quick-switch.label")} className="flex max-h-[calc(100vh-130px)] w-[640px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-transparent bg-surface shadow-e2">
+    <div className="fixed inset-0 z-[153] flex items-start justify-center bg-black/20 pt-[92px]" onMouseDown={(e) => e.target === e.currentTarget && onClose()} data-quick-switch-backdrop="">
+      <div role="dialog" aria-modal aria-label={t("quick-switch.label")} className="float flex max-h-[calc(100vh-130px)] w-[640px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden">
         <div className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border pr-3.5 pl-4">
           <Search size={18} className="shrink-0 text-subtle" />
           <input

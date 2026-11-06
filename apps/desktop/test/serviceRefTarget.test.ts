@@ -49,7 +49,7 @@ describe("open a service link", () => {
     sideOpen.mockReturnValue({ status: "opened" });
     const r = await openServiceRef(refOf("cutex:service/web/docs/index.html"), "auto");
     expect(r).toEqual({ status: "opened", where: "card" });
-    expect(sideOpen).toHaveBeenCalledWith("browser.tab", { url: "cutex:service/web/docs/index.html" }, expect.objectContaining({ binding: { kind: "host", hostId: "local" } }));
+    expect(sideOpen).toHaveBeenCalledWith("browser.service", { url: "cutex:service/web/docs/index.html" }, expect.objectContaining({ binding: { kind: "host", hostId: "local" } }));
     expect(openExternal).not.toHaveBeenCalled();
   });
   it("another host's link is unavailable (the side shows the open agent's host only)", async () => {

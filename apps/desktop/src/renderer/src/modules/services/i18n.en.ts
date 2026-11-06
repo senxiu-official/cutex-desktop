@@ -3,6 +3,15 @@
 import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
+  "services.idleStop": "Sleep when idle",
+  "services.idleStop.1h": "1 hour",
+  "services.idleStop.24h": "24 hours",
+  "services.idleStop.7d": "7 days",
+  "services.idleStop.forever": "Forever",
+  "services.idleStop.hint": "Proxy traffic, active connections and viewing leases count as use. Health checks, tile fetches and direct-port traffic do not count or wake a service. Choose Forever for direct-port-only services or backends needed at any time. Sleep keeps the registration and port; the next proxy visit wakes it.",
+  "services.health.stoppedIdle": "Sleeping",
+  "services.wake": "Wake",
+  "services.idleWakeFailed": "Last startup failed; wake to retry",
   "services.temporary.confirm": "Make this service temporary and move it? The host may reclaim it under its idle or expiry rules.",
   "services.temporary.confirmAction": "Make temporary and move",
   "services.title": "Services",

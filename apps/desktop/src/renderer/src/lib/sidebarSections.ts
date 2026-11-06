@@ -4,6 +4,7 @@
 // of a same-named project is placed on its own in 所有设备 / group scopes. Sections are global
 // (every scope sees the same list); a section without a member visible in the scope is hidden.
 // Projects in no section render where they always did; sections follow below, in their order.
+import { readFolderLookChoice, type FolderLookChoice } from "./folderLook";
 import { hostKey, parseHostKey } from "./hostKeys";
 import type { SidebarGroup } from "./sidebar";
 import type { GroupLayout } from "./sidebarLayout";
@@ -16,6 +17,8 @@ export interface SidebarSection {
   collapsed: boolean;
   /** Project host keys, in the order they were added (display follows the sidebar's project order). */
   members: string[];
+  /** The owner's icon / colour (menu 外观…, lib/folderLook); left out = automatic. */
+  look?: FolderLookChoice;
 }
 
 /** 分区收起时: header summary only, or also the projects that want the owner / hold the open agent. */
@@ -40,7 +43,8 @@ export function migrateSections(value: unknown): SidebarSection[] {
     // A project sits in at most one section (the first one listing it wins).
     const members = (Array.isArray(s.members) ? s.members : []).filter((m): m is string => typeof m === "string" && parseHostKey(m) !== null && !taken.has(m));
     for (const m of members) taken.add(m);
-    out.push({ id: s.id, name: s.name, collapsed: s.collapsed === true, members: [...new Set(members)] });
+    const look = readFolderLookChoice(s.look);
+    out.push({ id: s.id, name: s.name, collapsed: s.collapsed === true, members: [...new Set(members)], ...(look && { look }) });
   }
   return out;
 }
@@ -85,6 +89,16 @@ export function deleteSection(sections: readonly SidebarSection[], id: string): 
 
 export function setSectionCollapsed(sections: readonly SidebarSection[], id: string, collapsed: boolean): SidebarSection[] {
   return sections.map((s) => (s.id === id && s.collapsed !== collapsed ? { ...s, collapsed } : s));
+}
+
+/** The section's look set to `look` (null or nothing chosen: back to automatic). */
+export function setSectionLook(sections: readonly SidebarSection[], id: string, look: FolderLookChoice | null): SidebarSection[] {
+  const next = readFolderLookChoice(look);
+  return sections.map((s) => {
+    if (s.id !== id) return s;
+    const { look: _old, ...rest } = s;
+    return next ? { ...rest, look: next } : rest;
+  });
 }
 
 /**

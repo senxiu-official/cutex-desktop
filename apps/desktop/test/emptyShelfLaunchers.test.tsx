@@ -57,3 +57,15 @@ it("renders the existing empty availability message without empty group headings
   expect(host.textContent).toBe("side.launcher.none");
   expect(host.querySelector("section")).toBeNull();
 });
+
+it("limits a retained preview page to its source launcher", () => {
+  const Icon = () => <svg />;
+  state.items = [
+    { kind: "workspace.files", label: "Files", Icon, params: {} },
+    { kind: "browser.tab", label: "Browser", Icon, params: {} },
+  ];
+  act(() => root.render(<EmptyShelfLaunchers pageId={null} kinds={["workspace.files"]} />));
+  expect([...host.querySelectorAll("button")].map(b => b.textContent)).toEqual(["Files"]);
+  act(() => host.querySelector<HTMLButtonElement>("button")!.click());
+  expect(state.launch).toHaveBeenCalledWith("workspace.files", {}, null);
+});

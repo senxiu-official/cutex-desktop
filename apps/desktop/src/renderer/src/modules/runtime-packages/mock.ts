@@ -129,10 +129,10 @@ function play(run: RuntimePackageRun, emit: Emit, plan: (it: RuntimePackageRunIt
   setTimeout(tick, STEP_MS);
 }
 
-function startUpgrade(emit: Emit): RuntimePackageRunResult {
+function startUpgrade(emit: Emit, agentIds?: string[]): RuntimePackageRunResult {
   if (activeRun) return refusal("run_in_progress", `run ${activeRun.runId} is in progress`);
   if (agents.length === 0) return refusal("nothing_to_upgrade", "no requested agent is outdated");
-  const run = newRun("upgrade", agents.map(item), null);
+  const run = newRun("upgrade", agents.filter(agent => !agentIds || agentIds.includes(agent.cutexSessionId)).map(item), null);
   activeRun = run;
   const byId = new Map(agents.map((a) => [a.cutexSessionId, a]));
   play(run, emit, (it) => {
@@ -182,13 +182,13 @@ function startUpgrade(emit: Emit): RuntimePackageRunResult {
   return { ok: true, run: structuredClone(run) };
 }
 
-function startRevert(runId: string, emit: Emit): RuntimePackageRunResult {
+function startRevert(runId: string, emit: Emit, agentIds?: string[]): RuntimePackageRunResult {
   if (activeRun) return refusal("run_in_progress", `run ${activeRun.runId} is in progress`);
   const target = runs.find((r) => r.runId === runId);
   if (!target) return refusal("run_not_found", `no run ${runId}`);
   if (target.kind !== "upgrade") return refusal("invalid_request", "a revert run cannot be reverted");
   const left = new Set(notReverted(target));
-  const moved = target.items.filter((i) => left.has(i.cutexSessionId));
+  const moved = target.items.filter((i) => left.has(i.cutexSessionId) && (!agentIds || agentIds.includes(i.cutexSessionId)));
   if (moved.length === 0 && target.revertedBy.length) return refusal("already_reverted", "every matching moved agent was already reverted");
   if (moved.length === 0) return refusal("nothing_to_revert", "no moved item to revert");
   const run = newRun("revert", moved.map((m) => ({ ...item(movedAgents.get(m.cutexSessionId)!), name: m.name })), runId);
@@ -239,13 +239,13 @@ function mockRuntimePackageApi(emit: Emit) {
       const run = activeRun?.runId === runId ? activeRun : runs.find((r) => r.runId === runId);
       return run ? structuredClone(run) : null;
     },
-    async startRuntimePackageRun(): Promise<RuntimePackageRunResult> {
+    async startRuntimePackageRun(agentIds?: string[]): Promise<RuntimePackageRunResult> {
       await delay();
-      return startUpgrade(emit);
+      return startUpgrade(emit, agentIds);
     },
-    async revertRuntimePackageRun(runId: string): Promise<RuntimePackageRunResult> {
+    async revertRuntimePackageRun(runId: string, agentIds?: string[]): Promise<RuntimePackageRunResult> {
       await delay();
-      return startRevert(runId, emit);
+      return startRevert(runId, emit, agentIds);
     },
   };
 }
